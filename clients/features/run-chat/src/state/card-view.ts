@@ -3,7 +3,8 @@
  * what it will do or did, and which controls it offers. Pure over the card machine's snapshot, so
  * every state the card can be in has its words in one place.
  */
-import type {DeliveryState} from './delivery.js';
+import {roleName} from '@vibesys/contracts';
+import {type DeliveryState, deliveryEnded} from './delivery.js';
 import {draftProblem, modeLabel, type SteerDraft, targetLabel} from './steer.js';
 import {inForce, type SteerCardContext} from './steer-card.js';
 
@@ -62,8 +63,8 @@ function deliveryStatus(delivery: DeliveryState, standing: boolean): CardStatus 
 /** To and When in the words the card's controls use. */
 export function steerSummary(draft: SteerDraft): string {
   const {target} = draft;
-  const to =
-    target.kind === 'run' ? targetLabel('run') : `${targetLabel(target.kind)} ${target.id ?? ''}`;
+  const named = target.kind === 'role' ? roleName(target.id ?? '') : (target.id ?? '');
+  const to = target.kind === 'run' ? targetLabel('run') : `${targetLabel(target.kind)} ${named}`;
   return `${to.trim()} · ${modeLabel(draft.mode)}`;
 }
 
@@ -78,7 +79,8 @@ export function cardView(context: SteerCardContext, value: CardValue): CardView 
   if (value === 'sending')
     return {...base, phase: 'sending', status: {label: 'Sending', tone: 'neutral'}};
   const sub = value.sent;
-  if (sub === 'withdrawing' || sub === 'withdrawRequested') {
+  const ended = deliveryEnded(context.delivery);
+  if ((sub === 'withdrawing' || sub === 'withdrawRequested') && !ended) {
     return {...base, phase: 'withdrawing', status: {label: 'Withdrawing', tone: 'warn'}};
   }
   return {

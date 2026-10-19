@@ -33,6 +33,7 @@ import {
   type UsageMethods,
   type WindowsMethods,
 } from './fake-bridge.js';
+import {installFakeChat} from './fake-chat.js';
 import {type FixtureServerMethods, installFakeFixtureServer} from './fake-fixture-server.js';
 import {type FakeHistorySeed, installFakeHistory} from './fake-history.js';
 import {FAKE_OFFER} from './fake-offer.js';
@@ -216,6 +217,8 @@ export function fixtureScripts(fixture: RunFixture, options: OpenOptions = {}): 
       },
     }),
   ];
+  const last = Math.max(0, ...fixture.events.map(each => each.sequence ?? 0));
+  scripts.push(script(installFakeChat, {runId: fixture.runId, firstSequence: last + 1}));
   if (options.historyServing !== undefined) {
     scripts.push(script(installFakeHistory, {...options.historyServing, events: fixture.events}));
   }

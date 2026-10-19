@@ -15,6 +15,7 @@ import {
 import type {JSX} from 'react';
 import {
   type ChatPanelView,
+  choiceLabel,
   modelOptions,
   type PanelItem,
   providerOptions,
@@ -63,6 +64,9 @@ function Picker(props: Pick<ChatPanelView, 'panel' | 'dispatch'>): JSX.Element |
 function Header(props: ChatPanelView): JSX.Element {
   const {threads, shown, dispatch} = props;
   const current = threads.find(entry => entry.id === shown);
+  const {catalogue} = props.panel;
+  const harness =
+    catalogue.kind === 'listed' ? choiceLabel(catalogue.offers, current ?? null) : null;
   return (
     <Stack gap="space-2">
       <Row justify="between" gap="space-3">
@@ -89,13 +93,14 @@ function Header(props: ChatPanelView): JSX.Element {
             text="New chat"
             press={() => dispatch({type: 'new-chat'})}
           />
+          <Button variant="quiet" size="sm" text="Close" press={() => dispatch({type: 'close'})} />
         </Row>
       </Row>
       {shown === null ? (
         <Picker panel={props.panel} dispatch={dispatch} />
       ) : (
         <Text variant="small" tone="muted">
-          {[current?.title, current?.harness].filter(Boolean).join(' · ')}
+          {[current?.title, harness].filter(Boolean).join(' · ')}
         </Text>
       )}
     </Stack>

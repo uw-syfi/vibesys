@@ -1931,10 +1931,12 @@ button.vs-stage-head {
 }
 
 .vs-dock {
+  position: relative;
   display: flex;
   height: 100%;
   min-height: 0;
   min-width: 0;
+  container-type: inline-size;
 }
 .vs-dock-main {
   flex: 1 1 auto;
@@ -1950,4 +1952,20 @@ button.vs-stage-head {
   padding: var(--space-4);
   border-left: var(--hairline) solid var(--line);
   background: var(--panel);
+}
+/* Too narrow for the screen and the panel side by side: the panel lies over the screen's right
+   edge, which keeps all its content and its width. */
+@container (max-width: 760px) {
+  .vs-dock-side {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: min(100%, var(--pane-outline));
+    box-shadow: var(--elevation-overlay);
+  }
+  /* What it covers is put away, not drawn under it: it keeps its place and its state. */
+  .vs-dock:has(> .vs-dock-side) > .vs-dock-main {
+    visibility: hidden;
+  }
 }

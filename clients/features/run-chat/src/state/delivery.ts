@@ -5,6 +5,7 @@
  *
  * `deliveriesOf` is the one place the server's steer delivery steps become delivery events.
  */
+import {roleName} from '@vibesys/contracts';
 import type {CoreState, SteerDeliveryFact} from '@vibesys/run-state';
 
 /** What the server says happened to a control, each carrying the control's id. */
@@ -104,7 +105,7 @@ function deliveryOfFact(fact: SteerDeliveryFact, ideaOf: IdeaOf): ControlDeliver
         event: {
           kind: 'delivered',
           idea: fact.attemptId === null ? null : (ideaOf(fact.attemptId) ?? null),
-          where: fact.role ?? fact.attemptId,
+          where: fact.role === null ? fact.attemptId : roleName(fact.role),
         },
       };
     case 'dropped':

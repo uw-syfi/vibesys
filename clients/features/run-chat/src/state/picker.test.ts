@@ -60,7 +60,7 @@ describe('picker', () => {
 
   test('the chosen pair is named as the catalogue names it', () => {
     expect(choiceLabel(OFFERS, {provider: 'claude', model: 'opus'})).toBe('Claude Code Opus');
-    expect(choiceLabel(OFFERS, {provider: 'x', model: 'y'})).toBe('x y');
-    expect(choiceLabel(OFFERS, null)).toBe('');
+    expect(choiceLabel(OFFERS, {provider: 'x', model: 'y'})).toBeNull();
+    expect(choiceLabel(OFFERS, null)).toBeNull();
   });
 });

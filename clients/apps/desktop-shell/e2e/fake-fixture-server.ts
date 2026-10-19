@@ -28,6 +28,11 @@ export interface FixtureServerSeed {
   readonly overview: unknown;
 }
 
+/** The hook another installer sets on `fakeHost` to answer requests this server does not. */
+interface FakeHostAnswers {
+  answerMore?(request: unknown, envelope: object): readonly object[] | undefined;
+}
+
 export function installFakeFixtureServer(seed: FixtureServerSeed): void {
   type Event = {readonly sequence?: number};
   const encoder = new TextEncoder();
@@ -65,6 +70,9 @@ export function installFakeFixtureServer(seed: FixtureServerSeed): void {
       };
       return [{...envelope, ok: true, snapshot}];
     }
+    // What another installer answers (the run chat's commands and queries).
+    const more = (target.fakeHost as FakeHostAnswers).answerMore?.(request, envelope);
+    if (more !== undefined) return more;
     return [{...envelope, ok: false, error: `the fixture run does not answer ${request.type}`}];
   };
   const serve = (port: MessagePort): void => {

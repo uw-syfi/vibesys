@@ -119,7 +119,7 @@ describe('threads', () => {
       ['b', NEW_CHAT_TITLE],
       ['a', 'First'],
     ]);
-    expect(threadEntries(core)[0]?.harness).toBe('claude opus');
+    expect(threadEntries(core)[0]).toMatchObject({provider: 'claude', model: 'opus'});
   });
 
   test('the last thread opens by default, a chosen one wins, a new chat shows none', () => {

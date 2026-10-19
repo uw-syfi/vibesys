@@ -16,8 +16,9 @@ export interface ThreadEntry {
   readonly id: string;
   /** The backend's title, or the placeholder the panel shows for a thread with none. */
   readonly title: string;
-  /** The harness line: provider and model, empty for the run's own. */
-  readonly harness: string;
+  /** The provider and model the thread runs, as ids; null for the run's own. */
+  readonly provider: string | null;
+  readonly model: string | null;
   readonly answers: number;
 }
 
@@ -36,10 +37,6 @@ export type ThreadItem =
 
 export const NEW_CHAT_TITLE = 'New chat';
 
-function harnessOf(provider: string | null, model: string | null): string {
-  return [provider, model].filter(part => part !== null && part !== '').join(' ');
-}
-
 /** The run's threads, newest first. The implicit default thread shows only once it has answers. */
 export function threadEntries(core: CoreState): readonly ThreadEntry[] {
   return core.chatThreads
@@ -50,7 +47,8 @@ export function threadEntries(core: CoreState): readonly ThreadEntry[] {
     .map(thread => ({
       id: thread.id,
       title: thread.title === '' ? NEW_CHAT_TITLE : thread.title,
-      harness: harnessOf(thread.provider, thread.model),
+      provider: thread.provider,
+      model: thread.model,
       answers: core.chatTranscripts[thread.id]?.length ?? 0,
     }))
     .reverse();

@@ -62,6 +62,16 @@ describe('cardView', () => {
     expect(cardView(context(), 'dismissed').phase).toBe('dismissed');
   });
 
+  test('a withdrawal in flight gives way to the ending the server reported', () => {
+    const delivery = [{kind: 'delivered', idea: 1, where: null}, {kind: 'withdrawn'}].reduce(
+      (state, each) => foldDelivery(state, each as DeliveryEvent),
+      SENT,
+    );
+    const view = cardView(context({delivery}), {sent: 'withdrawRequested'});
+    expect(view.status?.label).toBe('Withdrawn');
+    expect(view.phase).toBe('sent');
+  });
+
   test('Send is blocked with a word when the draft cannot go', () => {
     expect(cardView(context(), 'draft').sendBlocked).toBeNull();
     expect(cardView(context({draft: {...DRAFT, text: ' '}}), 'draft').sendBlocked).toBe('Empty');
@@ -96,7 +106,7 @@ describe('cardView', () => {
   });
 
   test('the summary names To and When', () => {
-    expect(steerSummary(DRAFT)).toBe('Role implementer · Every turn');
+    expect(steerSummary(DRAFT)).toBe('Role Implementer · Every turn');
     expect(steerSummary({...DRAFT, target: {kind: 'run', id: null}, mode: 'interrupt'})).toBe(
       'Run · Now',
     );

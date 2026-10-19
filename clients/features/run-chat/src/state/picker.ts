@@ -72,13 +72,13 @@ export function withProvider(
   return offer === undefined ? current : {provider: offer.provider, model: offer.model};
 }
 
-/** The line a chosen pair is summarised by in the panel header. */
-export function choiceLabel(offers: readonly HarnessOffer[], choice: HarnessChoice | null): string {
-  if (choice === null) return '';
+/** The pair as the catalogue names it ("Claude Code Opus"); null when the catalogue does not list it. */
+export function choiceLabel(
+  offers: readonly HarnessOffer[],
+  choice: {readonly provider: string | null; readonly model: string | null} | null,
+): string | null {
   const offer = offers.find(
-    candidate => candidate.provider === choice.provider && candidate.model === choice.model,
+    candidate => candidate.provider === choice?.provider && candidate.model === choice?.model,
   );
-  return offer === undefined
-    ? `${choice.provider} ${choice.model}`
-    : `${providerLabel(offer)} ${modelLabel(offer)}`;
+  return offer === undefined ? null : `${providerLabel(offer)} ${modelLabel(offer)}`;
 }
