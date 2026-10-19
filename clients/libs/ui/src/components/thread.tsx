@@ -1,4 +1,4 @@
-import {type JSX, useState} from 'react';
+import {type JSX, type ReactNode, useState} from 'react';
 import {
   Message,
   type MessageTone,
@@ -11,8 +11,14 @@ import {type ReplyField, StructuredReply} from './structured-reply.js';
 import {Text} from './text.js';
 import {useWindowed} from './windowing.js';
 
-/** One entry of a thread: a heading that starts a section, a message, or a tool call. */
+/** One entry of a thread: a heading that starts a section, a message, a tool call, or a block of the caller's own. */
 export type ThreadItem =
+  | {
+      readonly kind: 'node';
+      readonly id: string;
+      /** What the caller draws in this row (a card with its own controls). */
+      readonly node: ReactNode;
+    }
   | {
       readonly kind: 'heading';
       readonly id: string;
@@ -56,7 +62,7 @@ export type ThreadItem =
 const ESTIMATED_ROW = 72;
 
 function startsOpen(item: ThreadItem): boolean {
-  if (item.kind === 'heading') return true;
+  if (item.kind === 'heading' || item.kind === 'node') return true;
   if (item.startOpen !== undefined) return item.startOpen;
   if (item.kind === 'reply') return true;
   return item.kind === 'message' && (item.variant === 'reply' || item.variant === 'note');
@@ -68,6 +74,7 @@ function Row(props: {
   readonly toggle: (open: boolean) => void;
 }): JSX.Element {
   const {item, open, toggle} = props;
+  if (item.kind === 'node') return <>{item.node}</>;
   if (item.kind === 'heading') {
     return (
       <div className="vs-thread-heading">

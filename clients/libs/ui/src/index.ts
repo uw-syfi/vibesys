@@ -51,6 +51,7 @@ export {ICON_NAMES, Icon, type IconName} from './components/icon.js';
 export {type AxisLabel, type PlacedLabel, placeLabels} from './components/label-fit.js';
 export {
   type Align,
+  Dock,
   Grid,
   type GridColumn,
   type Justify,

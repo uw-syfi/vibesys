@@ -204,6 +204,15 @@ const THREAD: readonly ThreadItem[] = [
     text: 'accuracy check passed in 41s',
   },
   {
+    kind: 'node',
+    id: 'n1',
+    node: (
+      <Card>
+        <Text>A block of the caller’s own, with its own controls.</Text>
+      </Card>
+    ),
+  },
+  {
     kind: 'message',
     id: 'm5',
     author: 'Worker',

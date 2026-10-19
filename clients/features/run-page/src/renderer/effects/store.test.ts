@@ -70,6 +70,20 @@ class FakeApp {
 
   session(): LiveSession {
     return {
+      chat: {
+        ask: () => {
+          this.asked.push('chat:ask');
+          return Promise.resolve({ok: true});
+        },
+        createThread: () => {
+          this.asked.push('chat:createThread');
+          return Promise.resolve({ok: true, threadId: 'thread-1'});
+        },
+        control: () => {
+          this.asked.push('chat:control');
+          return Promise.resolve({kind: 'acknowledged'});
+        },
+      },
       command: command => {
         // Resume now reads as `resume`; a Resume when capacity returns names its `when`.
         this.asked.push(
@@ -444,5 +458,35 @@ test('a session that reports after its run ended reaches nothing', async () => {
   store.dispatch({type: 'record', record: {kind: 'unlisted', why: 'machine'}});
   late?.session(LIVE_VIEW);
   expect(store.getState().session).toBeNull();
+  store.dispose();
+});
+
+test('chat reaches the run only through its attached session', async () => {
+  const app = new FakeApp();
+  const store = createRunPageStore(SEED, fakePorts([], app), new FakeClock().schedule);
+  const signal = new AbortController().signal;
+  await expect(store.chat.ask({threadId: 't', text: 'why?'}, signal)).resolves.toEqual({
+    ok: false,
+    message: 'the run is not connected',
+  });
+  await expect(store.chat.control({control_id: 'c', action: 'pause'})).resolves.toEqual({
+    kind: 'rejected',
+    message: 'the run is not connected',
+  });
+  store.dispatch({type: 'record', record: {kind: 'live', run: running()}});
+  await Promise.resolve();
+  await expect(store.chat.ask({threadId: 't', text: 'why?'}, signal)).resolves.toEqual({ok: true});
+  await expect(store.chat.createThread(null, signal)).resolves.toEqual({
+    ok: true,
+    threadId: 'thread-1',
+  });
+  await expect(store.chat.control({control_id: 'c', action: 'pause'})).resolves.toEqual({
+    kind: 'acknowledged',
+  });
+  expect(app.asked.filter(each => each.startsWith('chat:'))).toEqual([
+    'chat:ask',
+    'chat:createThread',
+    'chat:control',
+  ]);
   store.dispose();
 });

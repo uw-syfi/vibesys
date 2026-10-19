@@ -104,6 +104,27 @@ export function Page(props: {
   );
 }
 
+/**
+ * A screen with a panel docked at its right edge, full height. The screen keeps all its content
+ * and narrows to make room; with no `side` it fills the whole width. `label` names the panel.
+ */
+export function Dock(props: {
+  readonly label: string;
+  readonly side: ReactNode | null;
+  readonly children: ReactNode;
+}): JSX.Element {
+  return (
+    <div className="vs-dock">
+      <div className="vs-dock-main">{props.children}</div>
+      {props.side === null ? null : (
+        <section className="vs-dock-side" aria-label={props.label}>
+          {props.side}
+        </section>
+      )}
+    </div>
+  );
+}
+
 /** Children in a column, `gap` apart. */
 export function Stack(props: FlexProps): JSX.Element {
   return <Flex {...props} direction="column" gap={props.gap ?? 'space-4'} />;

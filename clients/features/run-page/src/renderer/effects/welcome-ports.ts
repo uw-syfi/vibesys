@@ -139,7 +139,35 @@ function openWebSession(
   reportSession();
   session.store.subscribe(() => observer.core(session.store.getState()));
   void session.start();
+  const failure = (error: unknown): {readonly ok: false; readonly message: string} => ({
+    ok: false,
+    message: error instanceof Error ? error.message : String(error),
+  });
   return {
+    chat: {
+      ask: async (input, signal) => {
+        try {
+          await session.ask(input.text, {threadId: input.threadId, signal});
+          return {ok: true};
+        } catch (error) {
+          return failure(error);
+        }
+      },
+      createThread: async (harness, signal) => {
+        try {
+          const thread = await session.createChatThread(harness, {signal});
+          return {ok: true, threadId: thread.thread_id};
+        } catch (error) {
+          return failure(error);
+        }
+      },
+      control: async request => {
+        const outcome = await session.command({type: 'command.control', control: request});
+        return outcome.kind === 'acknowledged'
+          ? {kind: 'acknowledged'}
+          : {kind: 'rejected', message: outcome.message};
+      },
+    },
     command: async command => {
       const outcome = await session.command(
         command.kind === 'pause'

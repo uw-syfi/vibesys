@@ -1,6 +1,14 @@
 /** The Run screen's renderer entry: the screen, and its store over the ports the app provides. */
 
-export type {LiveSession, OpenSession, SessionObserver} from './effects/live-session.js';
+export type {
+  ChatReply,
+  ControlInput,
+  ControlReply,
+  LiveChat,
+  LiveSession,
+  OpenSession,
+  SessionObserver,
+} from './effects/live-session.js';
 export {
   createRunPageStore,
   type RunPageLogs,
@@ -16,4 +24,4 @@ export {
   type RunPageTarget,
   welcomeRunPorts,
 } from './effects/welcome-ports.js';
-export {RunScreen} from './ui/run-screen.js';
+export {type RunChatSlot, RunScreen} from './ui/run-screen.js';

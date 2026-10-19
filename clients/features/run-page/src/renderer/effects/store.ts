@@ -24,7 +24,7 @@ import {
   type SpanDetailReply,
   type SummaryReply,
 } from '../../state/index.js';
-import {type OpenSession, SessionHolder} from './live-session.js';
+import {type LiveChat, type OpenSession, SessionHolder} from './live-session.js';
 
 /** The run's logs as the app reads them. */
 export interface RunPageLogs {
@@ -59,6 +59,8 @@ export interface RunPagePorts {
 }
 
 export interface RunPageStore extends Store<RunPageState, RunPageAction> {
+  /** The attached run's chat. */
+  readonly chat: LiveChat;
   dispose(): void;
 }
 
@@ -288,6 +290,14 @@ class Bounds {
   }
 }
 
+/** Brings each reconciler in step with the state after every change. */
+function reconcile(
+  state: RunPageState,
+  reconcilers: readonly (null | {reconcile(state: RunPageState): void})[],
+): void {
+  for (const each of reconcilers) each?.reconcile(state);
+}
+
 export function createRunPageStore(
   seed: RunPageSeed,
   ports: RunPagePorts,
@@ -358,17 +368,15 @@ export function createRunPageStore(
     perform,
   );
   const ticker = new Ticker(schedule, ports.now, live(store.dispatch));
-  const followers =
-    ports.logs === null ? null : new Followers(ports.logs, schedule, live(store.dispatch));
+  const {logs} = ports;
+  const followers = logs === null ? null : new Followers(logs, schedule, live(store.dispatch));
   store.dispatch({type: 'locate'}); // bounds the wait for the listing to place the run
   const unsubscribe = store.subscribe(() => {
-    const state = store.getState();
-    followers?.reconcile(state);
-    sessions.reconcile(state);
-    ticker.reconcile(state);
+    reconcile(store.getState(), [followers, sessions, ticker]);
   });
   return {
     ...store,
+    chat: sessions.chat,
     dispose: () => {
       disposed = true;
       unsubscribe();

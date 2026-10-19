@@ -2,6 +2,7 @@ import {
   Breadcrumb,
   Button,
   Card,
+  Dock,
   DotLegend,
   Fact,
   FactLine,
@@ -677,6 +678,21 @@ export const FRAME_ENTRIES = {
   Fact: {
     render: () => (
       <Text tone="muted">Facts are the entries of the FactLine above: whole, or shrinking.</Text>
+    ),
+  },
+  Dock: {
+    render: () => (
+      <Dock
+        label="Chat"
+        side={
+          <Stack gap="space-3">
+            <Text variant="section">Chat</Text>
+            <Text tone="muted">Docked full height.</Text>
+          </Stack>
+        }
+      >
+        <Text>The screen keeps its content and narrows.</Text>
+      </Dock>
     ),
   },
   Reserve: {

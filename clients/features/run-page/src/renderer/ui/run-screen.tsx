@@ -6,6 +6,7 @@ import {
   Card,
   Chip,
   type Crumb,
+  Dock,
   LogPane,
   Menu,
   type MenuItem,
@@ -17,7 +18,7 @@ import {
   Text,
   Timeline,
 } from '@vibesys/ui';
-import type {JSX} from 'react';
+import type {JSX, ReactNode} from 'react';
 import {
   clockAt,
   clockCarried,
@@ -109,8 +110,19 @@ function reason(offer: Offer): {disabledReason?: string} {
   return offer.disabledReason === null ? {} : {disabledReason: offer.disabledReason};
 }
 
-function Header(props: {readonly state: RunPageState; readonly dispatch: Dispatch}): JSX.Element {
-  const {state, dispatch} = props;
+/** The chat panel the app hosts beside the run: whether it is open, the button's press, the panel. */
+export interface RunChatSlot {
+  readonly open: boolean;
+  readonly toggle: () => void;
+  readonly panel: ReactNode;
+}
+
+function Header(props: {
+  readonly state: RunPageState;
+  readonly dispatch: Dispatch;
+  readonly chat: RunChatSlot | undefined;
+}): JSX.Element {
+  const {state, dispatch, chat} = props;
   const header = headerView(state);
   const items: MenuItem[] = [
     ...(header.openWindow.disabledReason === null
@@ -152,6 +164,14 @@ function Header(props: {readonly state: RunPageState; readonly dispatch: Dispatc
         )}
       </Stack>
       <Row gap="space-3">
+        {chat === undefined ? null : (
+          <Button
+            variant={chat.open ? 'primary' : 'secondary'}
+            text="Chat"
+            expanded={chat.open}
+            press={chat.toggle}
+          />
+        )}
         {header.pause.shown ? (
           <Button
             variant="secondary"
@@ -406,8 +426,9 @@ function pendingRunScreen(
   dispatch: Dispatch,
   zoom: Zoom,
   route: Route,
+  chat: RunChatSlot | undefined,
 ): JSX.Element | null {
-  const header = <Header state={state} dispatch={dispatch} />;
+  const header = <Header state={state} dispatch={dispatch} chat={chat} />;
   if (state.record.kind === 'unlisted') {
     const unplaced = unplacedRun(state);
     return (
@@ -466,7 +487,10 @@ function pendingRunScreen(
   return null;
 }
 
-/** The run's header, overview, and current level over its summary and selected detail. */
+/**
+ * The run's header, overview, and current level over its summary and selected detail, with the
+ * app's chat panel docked at its right edge when the user has opened it.
+ */
 export function RunScreen(props: {
   readonly state: RunPageState;
   readonly model: RunModel;
@@ -476,6 +500,27 @@ export function RunScreen(props: {
   readonly route: Route;
   readonly zoom: Zoom;
   readonly dispatch: Dispatch;
+  /** The chat panel the app hosts; absent: no Chat button. */
+  readonly chat?: RunChatSlot;
+}): JSX.Element {
+  const {chat, ...rest} = props;
+  return (
+    <Dock label="Chat" side={chat?.open === true ? chat.panel : null}>
+      <RunScreenBody {...rest} chat={chat} />
+    </Dock>
+  );
+}
+
+function RunScreenBody(props: {
+  readonly state: RunPageState;
+  readonly model: RunModel;
+  /** The run to its live end, whatever `model`'s sequence: the chart reads this one. */
+  readonly whole: RunModel;
+  readonly core: CoreState | null;
+  readonly route: Route;
+  readonly zoom: Zoom;
+  readonly dispatch: Dispatch;
+  readonly chat: RunChatSlot | undefined;
 }): JSX.Element {
   const {state, model, route, zoom, dispatch} = props;
   const base: ViewBase = {
@@ -485,7 +530,7 @@ export function RunScreen(props: {
     who: whoBySpan(usageRecords(state)),
     zoom,
   };
-  const pending = pendingRunScreen(state, dispatch, zoom, route);
+  const pending = pendingRunScreen(state, dispatch, zoom, route, props.chat);
   if (pending !== null) return pending;
   const problem = historyProblem(state);
   const transcript = transcriptLoading(state);
@@ -511,7 +556,7 @@ export function RunScreen(props: {
       density="compact"
       header={
         <Stack gap="space-2">
-          <Header state={state} dispatch={dispatch} />
+          <Header state={state} dispatch={dispatch} chat={props.chat} />
           {traceArrival(state) === 'arrived' && before === null ? (
             <RunScrubber
               log={state.run.trace}
