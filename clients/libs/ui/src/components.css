@@ -1091,6 +1091,9 @@ body > div:first-child {
 .vs-table tr[data-kind="total"] td {
   font-weight: var(--text-body-strong-weight);
 }
+.vs-table td:first-child {
+  min-width: calc(var(--space-8) * 3);
+}
 .vs-table-lead {
   display: flex;
   align-items: center;

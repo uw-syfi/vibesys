@@ -145,11 +145,21 @@ function layoutAtWidth(width: number): void {
         cachedShown: [...document.querySelectorAll('.vs-table thead th')].some(
           each => each.textContent === 'cached' && getComputedStyle(each).display !== 'none',
         ),
+        firstCell: box(document.querySelector('.vs-table tbody tr:first-child td:first-child')),
         page: document.scrollingElement?.scrollWidth ?? 0,
       };
     });
     expect(found.width).toBe(width);
     expect(found.page).toBeLessThanOrEqual(width);
+    const first = found.firstCell;
+    expect(
+      (first?.right ?? 0) - (first?.left ?? 0),
+      'the group names keep a readable width',
+    ).toBeGreaterThanOrEqual(120);
+    expect(
+      (first?.bottom ?? 0) - (first?.top ?? 0),
+      'a group name does not wrap letter by letter',
+    ).toBeLessThan(60);
     for (const control of found.controls) {
       expect(control?.left ?? -1).toBeGreaterThanOrEqual(0);
       expect(control?.right ?? width + 1).toBeLessThanOrEqual(width);

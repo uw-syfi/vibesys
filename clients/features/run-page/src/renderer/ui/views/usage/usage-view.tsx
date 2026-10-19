@@ -77,6 +77,7 @@ function columns(results: boolean): readonly TableColumn<UsageRowView>[] {
             key: 'result',
             header: 'result',
             align: 'end' as const,
+            mono: true,
             cell: (row: UsageRowView) =>
               row.result === null ? null : (
                 <Text variant="code" tone={row.result.tone === 'err' ? 'err' : 'muted'}>
