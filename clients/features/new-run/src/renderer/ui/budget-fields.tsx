@@ -32,7 +32,10 @@ function change(props: CardProps, next: Partial<Budget>): void {
 export function IdeasField(props: CardProps): JSX.Element {
   const {rounds} = props.context.form.budget;
   return (
-    <Field label="Ideas to try">
+    <Field
+      label="Ideas to try"
+      help={rounds === null ? 'Task default' : `${rounds} ${rounds === 1 ? 'idea' : 'ideas'}`}
+    >
       <Select
         value={rounds === null ? 'configured' : String(rounds)}
         options={withCurrent(
