@@ -12,8 +12,10 @@ them. No existing dynamic execution path is moved or activated here.
 
 Persisted schema versions are explicit. Unknown or changed operation, envelope,
 or strategy state schemas are rejected and require a caller-supplied migration
-before decoding. `OperationMigration` and `EnvelopeMigration` select a pure
-conversion explicitly and validate its registered target. Legacy dynamic-state
+before decoding. `OperationMigration` selects a pure conversion explicitly and validates
+its registered target. A stored run envelope of an older supported version is brought to
+the current one by the chain in `vs_core._envelope_migrations` (`upgrade_envelope`), so an
+update never forces a fresh run. Legacy dynamic-state
 conversion and its golden fixtures belong to W0B.
 
 `ProposalSubmitted(decisions, expected_revision)` consumes an ordered proposal

@@ -61,9 +61,8 @@ def unset(value: object) -> bool:
 
     For ``Field(exclude_if=unset)`` on optional fields and flags: left out when unset, a value that sets
     none of them serializes, and so digests, budget keys and request ids, exactly as before the
-    field existed. That keeps identities stable; it does not make an older run resumable. Any
-    new field changes the envelope's shape and version, and core refuses an envelope of
-    another version (there is no migration).
+    field existed. That keeps identities stable. Any new field changes the envelope's shape and
+    version, which needs its migration (``vs_core._envelope_migrations``).
     """
     return value is None or value is False or (isinstance(value, tuple) and not value)
 

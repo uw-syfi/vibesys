@@ -9,6 +9,7 @@ import pytest
 
 from vs_core.api import (
     ENVELOPE_SCHEMA_VERSION,
+    OLDEST_SUPPORTED_ENVELOPE_VERSION,
     EventCursor,
     FlowState,
     HostFence,
@@ -162,14 +163,19 @@ def test_invalid_new_record_rejects_before_acquiring_a_lease(tmp_path: Path, mut
 
 
 @pytest.mark.parametrize(
-    ("offset", "origin"), [(-3, "older"), (-1, "older"), (1, "newer")], ids=["old", "last", "new"]
+    ("version", "origin"),
+    [
+        (OLDEST_SUPPORTED_ENVELOPE_VERSION - 3, "older"),
+        (OLDEST_SUPPORTED_ENVELOPE_VERSION - 1, "older"),
+        (ENVELOPE_SCHEMA_VERSION + 1, "newer"),
+    ],
+    ids=["old", "last-unsupported", "new"],
 )
-def test_an_envelope_of_another_version_names_the_vibesys_that_wrote_it(
-    tmp_path: Path, offset: int, origin: str
+def test_an_envelope_of_an_unsupported_version_names_the_vibesys_that_wrote_it(
+    tmp_path: Path, version: int, origin: str
 ) -> None:
     """The version is checked before the shape, which an envelope of another version breaks."""
     project, run_id = project_run(tmp_path)
-    version = ENVELOPE_SCHEMA_VERSION + offset
     current = f'"envelope":{{"schema_version":{ENVELOPE_SCHEMA_VERSION},'
     source = record(run_id).model_dump_json()
     assert current in source
@@ -188,6 +194,31 @@ def test_an_envelope_of_another_version_names_the_vibesys_that_wrote_it(
     assert (
         f"written by an {origin} VibeSys" in message or f"written by a {origin} VibeSys" in message
     )
+
+
+@pytest.mark.parametrize(
+    "version", range(OLDEST_SUPPORTED_ENVELOPE_VERSION, ENVELOPE_SCHEMA_VERSION)
+)
+def test_a_run_saved_at_an_older_supported_version_resumes_at_the_current_one(
+    tmp_path: Path, version: int
+) -> None:
+    """Regression: a version bump with no migration refused every run saved before it."""
+    project, run_id = project_run(tmp_path)
+    saved = record(run_id)
+    current = f'"envelope":{{"schema_version":{ENVELOPE_SCHEMA_VERSION},'
+    source = saved.model_dump_json()
+    assert current in source
+    source = source.replace(current, f'"envelope":{{"schema_version":{version},')
+    store = project.state_store(run_id)
+    fence = store.acquire("writer", now=0, duration=1)
+    assert fence is not None
+    store.commit(
+        None, StoredEnvelope(revision=0, schema_version=1, payload=source.encode()), fence, now=0
+    )
+    resolved = resolve_core_resume(project, driver())
+    assert resolved.run_id == run_id
+    assert resolved.record == saved
+    assert resolved.record.envelope.schema_version == ENVELOPE_SCHEMA_VERSION
 
 
 def test_resume_factory_enforces_legacy_preflight_before_start(tmp_path: Path) -> None:

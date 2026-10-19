@@ -30,6 +30,10 @@ from vs_core._comparison import (
     verdict_unreachable,
 )
 from vs_core._continuations import SuspensionRefusal
+from vs_core._envelope_migrations import (
+    MIGRATIONS as ENVELOPE_MIGRATIONS,
+)
+from vs_core._envelope_migrations import OLDEST_SUPPORTED_ENVELOPE_VERSION
 from vs_core._evidence_views import (
     TurnCandidate,
     TurnCandidateFailed,
@@ -77,13 +81,12 @@ from vs_core._registry import (
     ENVELOPE_SCHEMA_VERSION,
     ClosedRecordContradictionError,
     ContractError,
-    EnvelopeMigration,
     OperationMigration,
     OperationRegistration,
     OperationRegistry,
     UnexpectedEvent,
-    check_envelope_version,
     operation_result,
+    upgrade_envelope,
     validate_startup,
 )
 from vs_core._run_pause import (
@@ -820,6 +823,7 @@ __all__ = [
     "ADOPTED",
     "BASE_MAX_SAMPLES",
     "CAPTURE_SUFFIX",
+    "ENVELOPE_MIGRATIONS",
     "ENVELOPE_SCHEMA_VERSION",
     "EVENT_ROUTES",
     "EXPORT_PATCH_SUFFIX",
@@ -839,6 +843,7 @@ __all__ = [
     "MEASUREMENT_DIAGNOSTIC_LIMIT",
     "MIN_SAMPLES_WITHOUT_FLOOR",
     "NOT_ADOPTED",
+    "OLDEST_SUPPORTED_ENVELOPE_VERSION",
     "OPERATOR_ACTIONS",
     "PLAIN_LINE_CONVENTION",
     "RENDER_SUFFIX",
@@ -1006,7 +1011,6 @@ __all__ = [
     "EndReason",
     "EnsureSession",
     "EnsureWorkspace",
-    "EnvelopeMigration",
     "EvaluationChange",
     "EvaluationContext",
     "EvaluationEvent",
@@ -1448,7 +1452,6 @@ __all__ = [
     "cancelled_items",
     "capacity_wait_stands",
     "check_decisions",
-    "check_envelope_version",
     "close_call",
     "compare",
     "comparison_of",
@@ -1518,6 +1521,7 @@ __all__ = [
     "turn_candidate",
     "turn_reply",
     "unreleased_records",
+    "upgrade_envelope",
     "validate_startup",
     "validate_terminal_inputs",
     "verdict_unreachable",
