@@ -71,6 +71,11 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* The result keeps its width and never breaks inside itself: the title gives way first. */
+.vs-overview-tile-head > :not(:first-child) {
+  flex: none;
+  white-space: nowrap;
+}
 .vs-overview-tile-line {
   display: block;
   min-width: 0;

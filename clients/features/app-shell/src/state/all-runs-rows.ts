@@ -6,8 +6,15 @@
  */
 import {type HostKey, hostFromKey, hostLabel} from '@vibesys/hosts';
 import {type RecentRun, sameRun} from '@vibesys/runs';
-import type {Clock} from './recent-words.js';
-import {dashboardRefs, liveRows, type RunRow, recentRow, type SidebarState} from './sidebar.js';
+import {type Clock, formatStarted} from './recent-words.js';
+import {
+  dashboardRefs,
+  liveRows,
+  type RunRow,
+  recentRow,
+  type SidebarState,
+  titleOf,
+} from './sidebar.js';
 
 /** One run of the dashboard: its row, and what the machine's listing says of it. */
 export interface DashboardRow {
@@ -15,9 +22,7 @@ export interface DashboardRow {
   readonly host: HostKey;
   /** The machine's name, as the app words it. */
   readonly machine: string;
-  /** The run's own name. */
-  readonly name: string;
-  /** The task the run ran, or null when the run has no record of one. */
+  /** The task the machine lists the run with, else its Recent record's; null when neither has one. */
   readonly task: string | null;
   /** The project's path on the machine. */
   readonly project: string;
@@ -34,10 +39,9 @@ export function dashboardRows(state: SidebarState, clock: Clock): readonly Dashb
       host,
       hostLabel: machine,
       project,
-      task:
-        run.task ??
-        state.recent.find(each => sameRun(each, {host, runId: run.runId}))?.task ??
-        null,
+      // The task the user chose, which titles the run on every screen; a listing's task cannot say
+      // whether anyone chose it (a project made from flags has one task, `default`).
+      task: state.recent.find(each => sameRun(each, {host, runId: run.runId}))?.task ?? null,
       runId: run.runId,
       instanceId: null,
       attachedAt: run.createdAt,
@@ -47,10 +51,35 @@ export function dashboardRows(state: SidebarState, clock: Clock): readonly Dashb
       row,
       host,
       machine,
-      name: run.name ?? run.runId,
-      task: ref.task,
+      task: run.task ?? ref.task,
       project,
       createdAt: run.createdAt,
     };
   });
+}
+
+/** What a screen that lists runs by cost (Usage) calls one: its title, and when it began if the app knows. */
+export interface RunLabel {
+  readonly title: string;
+  readonly began: string | null;
+}
+
+/**
+ * The label of any run, by the same title every other screen gives it. When it began is known for
+ * the runs the dashboard lists (the machine's listing says); null for older ones.
+ */
+export function runLabels(
+  state: SidebarState,
+  clock: Clock,
+): (run: {readonly host: HostKey; readonly project: string; readonly runId: string}) => RunLabel {
+  const created = new Map(
+    dashboardRefs(state).map(({host, run}) => [JSON.stringify([host, run.runId]), run.createdAt]),
+  );
+  return ({host, project, runId}) => {
+    const at = created.get(JSON.stringify([host, runId]));
+    return {
+      title: titleOf(state, {host, runId}, project),
+      began: at === undefined ? null : formatStarted(at, clock),
+    };
+  };
 }

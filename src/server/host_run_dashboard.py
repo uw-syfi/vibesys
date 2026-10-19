@@ -5,7 +5,7 @@ dashboard is the same pass's per-idea chart and the reason a run needs its user.
 contracts only: Pydantic and the standard library, so ``server.host_api`` imports them into
 ``RunDigest`` and ``RunSummary`` without the fold.
 
-Public surface: ``RunClosing``, ``IdeaVerdict``, ``IdeaPoint``, ``RunDashboard``, ``RunAttention`` and the
+Public surface: ``RunClosing``, ``IdeaVerdict``, ``IdeaPoint``, ``BestReading``, ``RunDashboard``, ``RunAttention`` and the
 limits ``DASHBOARD_MAX_POINTS``, ``REPEATED_FAILURE_AFTER`` and ``STALLED_AFTER_S``.
 """
 
@@ -64,6 +64,22 @@ DASHBOARD_MAX_POINTS: Final = 64
 stays far under ``HELPER_LINE_MAX_BYTES``."""
 
 
+class BestReading(BaseModel):
+    """The measured value of the run's best idea so far, in the run's own metric.
+
+    It is what the run page shows as the best idea's value when no ratio to the input can be worded
+    (the input was not measured): the reading of the last ``kept`` idea of the chart, with the
+    objective's ``metric`` id and ``unit`` as the journal's ``run_started`` names them (either may be
+    ``None``: a run names no unit, or its journal predates the overview).
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    value: float
+    metric: str | None
+    unit: str | None
+
+
 class RunDashboard(BaseModel):
     """What a run's tile draws, folded from the journal in the digest's pass.
 
@@ -75,7 +91,8 @@ class RunDashboard(BaseModel):
     ideas left out (the ideas count is ``len(points) + points_omitted``). ``failed_streak`` counts
     the ideas at the end of the order that failed, with none passing since (a running idea is
     skipped), over every idea and not only the ones kept. ``last_event_at`` is the journal's last
-    event, the only time fact a stalled run is judged from (``RunAttention``).
+    event, the only time fact a stalled run is judged from (``RunAttention``). ``best`` is the
+    reading of the best idea so far (``BestReading``); absent when no idea was kept with a reading.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -84,6 +101,7 @@ class RunDashboard(BaseModel):
     points_omitted: NonNegativeInt
     failed_streak: NonNegativeInt
     last_event_at: AwareDatetime | None
+    best: Annotated[BestReading | None, Field(exclude_if=lambda each: each is None)] = None
 
 
 class RunAttention(StrEnum):

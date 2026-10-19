@@ -22,7 +22,7 @@ function entry(status: 'live' | 'failed', now: string | null): DashboardRow {
   return {
     row: {
       run: {host: 'local', runId: '20261019-071100'},
-      title: '',
+      title: 'queue-rs',
       detail: '',
       trail: null,
       tooltip: '',
@@ -38,7 +38,6 @@ function entry(status: 'live' | 'failed', now: string | null): DashboardRow {
     },
     host: 'local',
     machine: 'this computer',
-    name: '20261019-071100',
     task: 'mpmc',
     project: '/p/default',
     createdAt: Date.parse('2026-10-19T07:11:00Z'),
@@ -53,6 +52,10 @@ describe('the dashboard input of a run', () => {
     expect(input.reason).toBe('the agent crashed');
     expect(input.runId).toBe('20261019-071100');
     expect(input.task).toBe('mpmc');
+  });
+
+  test('is titled as its row is, the one title every screen gives the run', () => {
+    expect(runInput(entry('live', null), now).title).toBe('queue-rs');
   });
 
   test('does not read what a live run is doing as a reason', () => {

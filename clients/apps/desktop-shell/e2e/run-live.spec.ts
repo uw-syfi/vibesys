@@ -98,7 +98,10 @@ test('a live run folds its trace into the ideas, the failed listed and hideable'
   await page.addInitScript(installFakeRun, {streams: [], text: {}});
   await page.addInitScript(installFakeServer, prototypeRun(RUN_ID));
   await page.goto('./shell.html');
-  await page.getByRole('main').getByRole('button', {name: /^mpmc/}).click();
+  await page
+    .getByRole('main')
+    .getByRole('button', {name: /^queue-rs · mpmc/})
+    .click();
 
   const ideas = page.getByRole('listbox', {name: 'Ideas'});
   await expect(ideas.getByRole('option').first()).toBeVisible();
@@ -122,7 +125,10 @@ test('a run that has tried no idea yet says what will appear, not a guess', asyn
   await page.addInitScript(installFakeRun, {streams: [], text: {}});
   await page.addInitScript(installFakeServer, SERVER);
   await page.goto('./shell.html');
-  await page.getByRole('main').getByRole('button', {name: /^mpmc/}).click();
+  await page
+    .getByRole('main')
+    .getByRole('button', {name: /^queue-rs · mpmc/})
+    .click();
   await expect(page.getByText('No ideas yet')).toBeVisible();
   await expect(page.getByText('nothing measured yet')).toBeVisible();
 });
@@ -137,7 +143,10 @@ test('a live run pauses and resumes from the header over its session, and is let
   await page.addInitScript(installFakeServer, SERVER);
   await page.goto('./shell.html');
   const nav = page.getByRole('navigation', {name: 'VibeSys'});
-  await page.getByRole('main').getByRole('button', {name: /^mpmc/}).click();
+  await page
+    .getByRole('main')
+    .getByRole('button', {name: /^queue-rs · mpmc/})
+    .click();
 
   const pause = page.getByRole('button', {name: 'Pause'});
   await expect(pause).toBeEnabled();

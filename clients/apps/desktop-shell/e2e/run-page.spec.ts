@@ -117,7 +117,10 @@ async function open(page: Page, seed: FakeBridgeSeed): Promise<void> {
   await page.addInitScript(installFakeServer, SERVER);
   await page.goto('./shell.html');
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'ink');
-  await page.getByRole('main').getByRole('button', {name: /^mpmc/}).click();
+  await page
+    .getByRole('main')
+    .getByRole('button', {name: /^queue-rs · mpmc/})
+    .click();
 }
 
 const shots = process.env['RUN_PAGE_SHOTS'];

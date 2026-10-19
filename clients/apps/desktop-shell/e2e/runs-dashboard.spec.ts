@@ -73,6 +73,59 @@ test('a tile says its result against the base, where it ran, its ideas and time,
   await expect(tile.locator('.vs-result-chart-base')).toHaveCount(1);
 });
 
+test('a live run whose input was never measured headlines its best measured value', async ({
+  page,
+}) => {
+  const run: RunCase = {
+    ...(ONE_RUN[0] as RunCase),
+    points: [
+      [null, 'kept'],
+      [null, 'running'],
+    ],
+    best: {value: 287.4, metric: 'output_tokens_per_s', unit: null},
+  };
+  await open(page, dashboardWorld([run]));
+
+  const tile = tiles(page, 'Running').first();
+  await expect(tile).toContainText('287 output tokens/s');
+  await expect(tile).not.toContainText('×');
+});
+
+test('a run that needs the user says why in a few words, whole words, with the full text on hover', async ({
+  page,
+}) => {
+  const full = 'NestedRepositoryError: before the run could begin it found a repository inside';
+  const long = 'the agent was interrupted because the machine went away during the second round';
+  const failing = (runId: string, name: string, endSummary: string): RunCase => ({
+    runId,
+    name,
+    host: 'ssh:host-a',
+    task: 'mpmc',
+    phase: 'failed',
+    ago: 3,
+    attention: 'failed',
+    endSummary,
+    points: [[null, 'failed']],
+  });
+  await open(
+    page,
+    dashboardWorld([
+      failing('r-fail-01', 'queue-rs-a', full),
+      failing('r-fail-02', 'queue-rs-b', long),
+    ]),
+  );
+
+  const notes = tiles(page, 'Needs you').locator('.vs-overview-tile-foot .vs-overview-tile-line');
+  const shown = await notes.evaluateAll(each =>
+    each.map(note => ({text: note.textContent ?? '', title: note.getAttribute('title') ?? ''})),
+  );
+  expect(shown.map(note => note.text).sort()).toEqual([
+    'Nested repository error',
+    'the agent was interrupted…',
+  ]);
+  expect(shown.map(note => note.title).sort()).toEqual([full, long].sort());
+});
+
 test('a run with more ideas than its chart keeps still counts them all', async ({page}) => {
   await open(page, dashboardWorld(OMITTED_RUN));
 
@@ -189,7 +242,9 @@ test('tiles are dense: at 1440 four or more share a row, and at 660 none overlap
 
 test('a machine that cannot list its runs leaves the other machine’s tiles', async ({page}) => {
   const world = dashboardWorld(MANY_RUNS);
-  const {[`ssh:host-b|${'/home/me/projects/queue-rs'}`]: _lost, ...rest} = world.projectRuns ?? {};
+  const rest = Object.fromEntries(
+    Object.entries(world.projectRuns ?? {}).filter(([key]) => !key.startsWith('ssh:host-b|')),
+  );
   await open(page, {...world, projectRuns: rest});
 
   await expect(page.locator('.vs-overview-tile', {hasText: 'host-b'})).toHaveCount(0);

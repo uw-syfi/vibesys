@@ -66,7 +66,10 @@ const sidebar = (page: Page) => page.getByRole('navigation', {name: 'VibeSys'});
 test('a run opens in a window of its own, shown alone and live there', async ({page, context}) => {
   await install(context);
   await page.goto('./shell.html');
-  await page.getByRole('main').getByRole('button', {name: /^mpmc/}).click();
+  await page
+    .getByRole('main')
+    .getByRole('button', {name: /^queue-rs · mpmc/})
+    .click();
   await expect(page.getByRole('radiogroup', {name: 'Show'})).toBeVisible();
 
   const opening = context.waitForEvent('page');
@@ -117,7 +120,10 @@ test('the Settings menu item opens Settings in the main window while a run shows
 }) => {
   await install(context);
   await page.goto('./shell.html');
-  await page.getByRole('main').getByRole('button', {name: /^mpmc/}).click();
+  await page
+    .getByRole('main')
+    .getByRole('button', {name: /^queue-rs · mpmc/})
+    .click();
   const opening = context.waitForEvent('page');
   await page.getByRole('button', {name: 'More actions'}).click();
   await page.getByRole('menuitem', {name: 'Open in new window'}).click();

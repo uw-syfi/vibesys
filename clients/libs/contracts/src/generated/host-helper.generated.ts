@@ -515,6 +515,9 @@ export type Points = IdeaPoint[];
 export type PointsOmitted = number;
 export type FailedStreak = number;
 export type LastEventAt = string | null;
+export type Value = number;
+export type Metric = string | null;
+export type Unit = string | null;
 export type Kind6 = "unreadable";
 export type Message2 = string;
 /**
@@ -833,7 +836,7 @@ export type Tasks1 = string[];
 export type ExternalRepo = boolean;
 export type TaskDetails = ExampleTask[] | null;
 export type Task11 = string;
-export type Metric = string;
+export type Metric1 = string;
 export type Direction = "max" | "min";
 export type Objectives = ExampleObjective[];
 export type Goal = string;
@@ -1870,13 +1873,15 @@ export interface RunEndingFact {
  * ideas left out (the ideas count is ``len(points) + points_omitted``). ``failed_streak`` counts
  * the ideas at the end of the order that failed, with none passing since (a running idea is
  * skipped), over every idea and not only the ones kept. ``last_event_at`` is the journal's last
- * event, the only time fact a stalled run is judged from (``RunAttention``).
+ * event, the only time fact a stalled run is judged from (``RunAttention``). ``best`` is the
+ * reading of the best idea so far (``BestReading``); absent when no idea was kept with a reading.
  */
 export interface RunDashboard {
   points: Points;
   points_omitted: PointsOmitted;
   failed_streak: FailedStreak;
   last_event_at: LastEventAt;
+  best?: BestReading | null;
 }
 /**
  * One idea of a run on the performance chart: its result against the input and its verdict.
@@ -1895,6 +1900,19 @@ export interface IdeaPoint {
   ratio: Ratio;
   verdict: IdeaVerdict;
   at?: At;
+}
+/**
+ * The measured value of the run's best idea so far, in the run's own metric.
+ *
+ * It is what the run page shows as the best idea's value when no ratio to the input can be worded
+ * (the input was not measured): the reading of the last ``kept`` idea of the chart, with the
+ * objective's ``metric`` id and ``unit`` as the journal's ``run_started`` names them (either may be
+ * ``None``: a run names no unit, or its journal predates the overview).
+ */
+export interface BestReading {
+  value: Value;
+  metric: Metric;
+  unit: Unit;
 }
 /**
  * A run whose journal exists and could not be read; ``message`` says why, in one line.
@@ -2214,9 +2232,9 @@ export interface TurnReply {
   span_id: SpanId1;
   kind: Kind7;
   schema_id: SchemaId;
-  value: Value;
+  value: Value1;
 }
-export interface Value {
+export interface Value1 {
   [k: string]: JsonValue;
 }
 export interface Schemas {
@@ -2592,7 +2610,7 @@ export interface ExampleTask {
  * One axis the task's ``objectives.toml`` declares.
  */
 export interface ExampleObjective {
-  metric: Metric;
+  metric: Metric1;
   direction: Direction;
 }
 /**

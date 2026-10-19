@@ -3,7 +3,7 @@
  * shown) and the dashboard's rows over it, and which run notifications a host's listing calls for.
  */
 
-export {type DashboardRow, dashboardRows} from './all-runs-rows.js';
+export {type DashboardRow, dashboardRows, type RunLabel, runLabels} from './all-runs-rows.js';
 export {type RunsKnown, runsKnown} from './home.js';
 export {type NoticeKind, type RunNotice, runNotices} from './notices.js';
 export {NOTICE_REASONS, type RecentNotice, recentNotice} from './recent-notice.js';

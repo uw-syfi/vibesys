@@ -39,38 +39,60 @@ export interface SpendRunRef {
   readonly runId: string;
 }
 
+/** What the page calls a run: its title as every screen words it, and when it began if known. */
+export interface SpendRunLabel {
+  readonly title: string;
+  readonly began: string | null;
+}
+
 export interface UsageScreenProps {
   readonly state: UsageScreenState;
   readonly actions: UsageActions;
+  /** What a run's row is called; the shell owns run titles. */
+  readonly label: (run: SpendRunRef) => SpendRunLabel;
   /** Open the run's Usage face. */
   readonly openRun: (run: SpendRunRef) => void;
 }
 
-const RUN_COLUMNS: readonly TableColumn<RunSpendRow>[] = [
-  {
-    key: 'run',
-    header: 'Run',
-    lead: true,
-    cell: row => (
-      <Stack gap="space-0">
-        <Text variant="body-strong">{row.name}</Text>
-        {row.detail === null ? null : (
-          <Text variant="small" tone="muted">
-            {row.detail}
-          </Text>
-        )}
-      </Stack>
-    ),
-  },
-  {
-    key: 'share',
-    header: 'Share',
-    cell: row => (
-      <Meter label={`${row.detail ?? row.name}: ${row.cost}`} value={row.share} inline />
-    ),
-  },
-  {key: 'cost', header: 'Cost', mono: true, align: 'end', cell: row => row.cost},
-];
+function runColumns(
+  label: (run: SpendRunRef) => SpendRunLabel,
+): readonly TableColumn<RunSpendRow>[] {
+  return [
+    {
+      key: 'run',
+      header: 'Run',
+      lead: true,
+      cell: row => {
+        const {title, began} = label(row);
+        return (
+          <Stack gap="space-0">
+            <Text variant="body-strong">{title}</Text>
+            {began === null ? null : (
+              <Text variant="small" tone="muted">
+                {began}
+              </Text>
+            )}
+          </Stack>
+        );
+      },
+    },
+    {
+      key: 'share',
+      header: 'Share',
+      cell: row => {
+        const {title, began} = label(row);
+        return (
+          <Meter
+            label={`${began === null ? title : `${title} ${began}`}: ${row.cost}`}
+            value={row.share}
+            inline
+          />
+        );
+      },
+    },
+    {key: 'cost', header: 'Cost', mono: true, align: 'end', cell: row => row.cost},
+  ];
+}
 
 const AGENT_COLUMNS: readonly TableColumn<AgentSpendRow>[] = [
   {
@@ -119,8 +141,9 @@ function Section(props: {readonly title: string; readonly children: JSX.Element}
 function Figures(props: {
   readonly view: UsageView;
   readonly openRun: (run: SpendRunRef) => void;
+  readonly label: (run: SpendRunRef) => SpendRunLabel;
 }): JSX.Element {
-  const {view, openRun} = props;
+  const {view, openRun, label} = props;
   if (view.empty) return <EmptyState title="No usage" />;
   const runs = new Map(view.runs.map(row => [row.key, row]));
   return (
@@ -145,7 +168,7 @@ function Figures(props: {
       <Section title="Cost by run">
         <Table
           label="Cost by run"
-          columns={RUN_COLUMNS}
+          columns={runColumns(label)}
           rows={view.runs}
           rowKey={row => row.key}
           select={key => {
@@ -173,7 +196,7 @@ function Figures(props: {
 }
 
 function Body(props: UsageScreenProps): JSX.Element {
-  const {state, actions, openRun} = props;
+  const {state, actions, openRun, label} = props;
   if (state.phase === 'unsupported') return <EmptyState title="Unsupported" />;
   if (state.phase === 'failed') {
     return (
@@ -199,7 +222,7 @@ function Body(props: UsageScreenProps): JSX.Element {
       </Stack>
     );
   }
-  return <Figures view={state.view} openRun={openRun} />;
+  return <Figures view={state.view} openRun={openRun} label={label} />;
 }
 
 export function UsageScreen(props: UsageScreenProps): JSX.Element {

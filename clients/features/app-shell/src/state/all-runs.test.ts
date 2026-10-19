@@ -5,6 +5,7 @@ import {
   type Clock,
   DASHBOARD_RUNS,
   dashboardRows,
+  runLabels,
   SIDEBAR_EMPTY,
   type SidebarAction,
   type SidebarRequest,
@@ -295,5 +296,50 @@ describe('the Runs dashboard', () => {
         runs.map(each => each.runId).sort(),
       );
     }
+  });
+});
+
+describe('what every screen calls a run', () => {
+  /** Two runs of `/p/queue-rs` listed with `task`: one the user opened (with `chosen`), one not. */
+  function listedWith(task: string | null, chosen: string | null) {
+    const {state, requests} = open(
+      [listed('ssh:host-a', [server('live', '/p/queue-rs', 'running')])],
+      [{...opened('ssh:host-a', '/p/queue-rs', 'seen'), task: chosen as string}],
+    );
+    return sidebarStep(
+      state,
+      listedAction(listsOf(requests)[0]?.[2] as number, 'ssh:host-a', '/p/queue-rs', [
+        {runId: 'live', name: 'live', task, createdAt: NOW - HOUR},
+        {runId: 'seen', name: 'seen', task, createdAt: NOW - 2 * HOUR},
+        {runId: 'other', name: 'other', task, createdAt: NOW - 3 * HOUR},
+      ]),
+    ).state;
+  }
+
+  test('is its project and the task the user chose, never a task the machine only lists', () => {
+    // `default` is the one task of a project made from flags: nobody chose it.
+    const rows = dashboardRows(listedWith('default', 'mpmc'), CLOCK);
+    expect(rows.map(each => [each.row.run.runId, each.row.title])).toEqual([
+      ['live', 'queue-rs'],
+      ['seen', 'queue-rs · mpmc'],
+      ['other', 'queue-rs'],
+    ]);
+    // The listing's task still says what the run is of, for grouping.
+    expect(rows.map(each => each.task)).toEqual(['default', 'default', 'default']);
+  });
+
+  test('is worded the same by the Usage page as by the dashboard, with when each began', () => {
+    const state = listedWith('default', 'mpmc');
+    const label = runLabels(state, CLOCK);
+    for (const each of dashboardRows(state, CLOCK)) {
+      const mine = label({host: each.host, project: each.project, runId: each.row.run.runId});
+      expect(mine.title).toBe(each.row.title);
+      expect(mine.began).not.toBeNull();
+    }
+    // A run the dashboard does not list has a title and no start.
+    expect(label({host: 'ssh:host-a', project: '/p/queue-rs', runId: 'gone'})).toEqual({
+      title: 'queue-rs',
+      began: null,
+    });
   });
 });

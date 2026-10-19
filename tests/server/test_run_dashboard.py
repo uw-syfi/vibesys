@@ -41,6 +41,7 @@ from server.host_run_dashboard import (
     DASHBOARD_MAX_POINTS,
     REPEATED_FAILURE_AFTER,
     STALLED_AFTER_S,
+    BestReading,
     IdeaVerdict,
     RunAttention,
     RunDashboard,
@@ -103,9 +104,21 @@ def _span(
     }
 
 
-def journal_of(ideas: list[_Idea], direction: str = "max") -> list[bytes]:
+def journal_of(
+    ideas: list[_Idea],
+    direction: str = "max",
+    metric: str | None = None,
+    unit: str | None = None,
+    *,
+    input_measured: bool = True,
+) -> list[bytes]:
     """The journal of a run that played ``ideas``, one workstream and one gate each, in order."""
-    lines = [_event(1, "run_started", 0, {"overview": {"objective": {"direction": direction}}})]
+    objective: dict[str, JsonValue] = {"direction": direction}
+    if metric is not None:
+        objective["metric"] = metric
+    if unit is not None:
+        objective["unit"] = unit
+    lines = [_event(1, "run_started", 0, {"overview": {"objective": objective}})]
 
     def add(kind: str, at: float, span: dict[str, JsonValue]) -> None:
         lines.append(_event(len(lines) + 1, kind, at, {"span": span}))
@@ -117,10 +130,9 @@ def journal_of(ideas: list[_Idea], direction: str = "max") -> list[bytes]:
         started = _State("running", began, None, None)
         add("span_started", began, _span("workstream", ws, None, started, attrs))
         if idea.reading is not None:
-            gate_attrs: dict[str, JsonValue] = {
-                "metric_value": idea.reading,
-                "vs_baseline": idea.reading / _INPUT,
-            }
+            gate_attrs: dict[str, JsonValue] = {"metric_value": idea.reading}
+            if input_measured:
+                gate_attrs["vs_baseline"] = idea.reading / _INPUT
             verdict = "passed" if idea.outcome == "passed" else "failed_check"
             gate = _State("done", idea.landed - 0.5, idea.landed, verdict)
             add("span_ended", idea.landed, _span("gate", f"op:{index}", ws, gate, gate_attrs))
@@ -226,6 +238,47 @@ def test_the_headline_while_the_run_works_is_the_last_kept_point(
     assert digest.dashboard is not None
     kept = [point.ratio for point in digest.dashboard.points if point.verdict is IdeaVerdict.KEPT]
     assert digest.best_so_far_ratio == (pytest.approx(kept[-1]) if kept else None)
+
+
+@given(
+    ideas=_IDEAS,
+    direction=_DIRECTIONS,
+    metric=st.none() | st.just("output_tokens_per_s"),
+    unit=st.none() | st.just("tok/s"),
+)
+def test_the_best_reading_is_the_last_kept_ideas_value_in_the_runs_own_metric(
+    ideas: list[_Idea], direction: str, metric: str | None, unit: str | None
+) -> None:
+    digest = digest_journal(journal_of(ideas, direction, metric, unit))
+
+    assert digest.dashboard is not None
+    order = _plot_order(ideas)
+    kept = [
+        ideas[at].reading
+        for at, (_, verdict) in zip(order, chart_of(ideas, direction), strict=True)
+        if verdict is IdeaVerdict.KEPT
+    ]
+    expected = (
+        BestReading(value=kept[-1], metric=metric, unit=unit)
+        if kept and kept[-1] is not None
+        else None
+    )
+    assert digest.dashboard.best == expected
+
+
+def test_a_run_whose_input_was_never_measured_still_reads_its_best_value() -> None:
+    """The run page shows the value when no ratio exists: so does the digest (the live-run regression)."""
+    lines = journal_of(
+        [_Idea("passed", 287.0, 5.0)], metric="output_tokens_per_s", input_measured=False
+    )
+
+    digest = digest_journal(lines)
+
+    assert digest.dashboard is not None
+    assert digest.dashboard.points[0].ratio is None
+    assert digest.dashboard.best == BestReading(
+        value=287.0, metric="output_tokens_per_s", unit=None
+    )
 
 
 @given(ideas=_IDEAS)

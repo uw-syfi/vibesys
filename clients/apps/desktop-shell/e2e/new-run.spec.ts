@@ -652,7 +652,10 @@ test('Run again opens Review with the run as it was started', async ({page}) => 
   await page.addInitScript(installFakeNewRun, seed);
   await page.addInitScript(installFakeRun, {streams: [], text: {}});
   await page.goto('./shell.html');
-  await page.getByRole('main').getByRole('button', {name: /^spsc/}).click();
+  await page
+    .getByRole('main')
+    .getByRole('button', {name: /^queue-rs · spsc/})
+    .click();
   await page.getByRole('button', {name: 'Run again', exact: true}).click();
   await expect(question(page, 'Ready to start?')).toBeVisible();
   await expect(main(page)).toContainText('Sonnet 4.5 · Claude Code');

@@ -222,6 +222,19 @@ test('a run opens on its Usage face from its row', async ({page}) => {
   await expect(page.getByRole('main')).toContainText(/host-b · 2026101\d-\d{6}/);
 });
 
+test('a run row is titled as the run is everywhere, by its project, and never by its id', async ({
+  page,
+}) => {
+  const many = USAGE_CASES.find(each => each.name === 'many-runs');
+  if (many === undefined) throw new Error('the cases changed');
+  await open(page, many, 1440);
+  const first = page.getByRole('table', {name: 'Cost by run'}).getByRole('row').nth(1);
+  await expect(first).toContainText('queue-rs');
+  await expect(first).not.toContainText(/2026101\d-\d{6}/);
+  // The task the machine lists is not a title: no row is named after it.
+  await expect(first).not.toContainText('mpmc');
+});
+
 test('the rows open with the keyboard too', async ({page}) => {
   const one = USAGE_CASES.find(each => each.name === 'one-run');
   if (one === undefined) throw new Error('the cases changed');

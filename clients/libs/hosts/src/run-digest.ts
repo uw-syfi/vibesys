@@ -32,6 +32,17 @@ export interface IdeaPoint {
 }
 
 /**
+ * The measured value of a run's best idea so far, in the run's own metric (`BestReading`): what a
+ * tile says when no ratio to the input can be worded. Either name may be null.
+ */
+interface BestReading {
+  readonly value: number;
+  /** The objective's metric id (`output_tokens_per_s`). */
+  readonly metric: string | null;
+  readonly unit: string | null;
+}
+
+/**
  * What a run's tile draws (`runs.list`'s `dashboard`, feature `run_dashboard`): the run page's
  * chart as points in the order results landed, and why the run needs its user, if it does.
  */
@@ -45,6 +56,8 @@ export interface RunDashboardEntry {
   /** The journal's last event, in milliseconds; null when it has none. */
   readonly lastEventAt: number | null;
   readonly attention: RunAttention;
+  /** The best idea so far as measured; null when no idea was kept with a reading (or the host predates it). */
+  readonly best: BestReading | null;
 }
 
 /** One run's digest, or why it could not be read. */
@@ -90,6 +103,7 @@ function dashboardOf(summary: RunSummary, digest: RunDigest): RunDashboardEntry 
     failedStreak: dashboard.failed_streak,
     lastEventAt: dashboard.last_event_at === null ? null : Date.parse(dashboard.last_event_at),
     attention: summary.attention ?? 'none',
+    best: dashboard.best ?? null,
   };
 }
 

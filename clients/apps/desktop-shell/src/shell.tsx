@@ -11,6 +11,7 @@ import {
   dashboardRows,
   digestKey,
   recentNotice,
+  runLabels,
   runsKnown,
   type Screen,
   type SidebarState,
@@ -453,15 +454,18 @@ function MachinesRoute(props: {
 /** The Usage page over its store; a run's row opens that run on its Usage face. */
 function UsageRoute(props: {
   readonly stores: ShellStores;
+  readonly sidebar: SidebarState;
   readonly select: (screen: Screen) => void;
 }): JSX.Element {
   const {stores, select} = props;
   const {store, actions} = stores.usage;
   const state = useStore(store);
+  const label = useMemo(() => runLabels(props.sidebar, viewerClock()), [props.sidebar]);
   return (
     <UsageScreen
       state={state}
       actions={actions}
+      label={label}
       openRun={(run: SpendRunRef) => {
         // The Run screen reads its face from the window's address when it opens.
         stores.page.address.push(routeQuery({...RUN_ROUTE, mode: 'usage'}));
@@ -544,7 +548,7 @@ export function Shell(props: {
           />
         );
       case 'usage':
-        return <UsageRoute stores={props.stores} select={select} />;
+        return <UsageRoute stores={props.stores} sidebar={sidebarState} select={select} />;
       case 'run':
         return (
           <RunRoute

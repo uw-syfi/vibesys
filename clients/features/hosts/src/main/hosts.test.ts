@@ -797,6 +797,7 @@ describe('Hosts.runDigests', () => {
       points_omitted: 2,
       failed_streak: 1,
       last_event_at: '2026-10-17T04:00:00Z',
+      best: {value: 287.4, metric: 'output_tokens_per_s', unit: null},
     };
     const digest = {
       kind: 'digest' as const,
@@ -829,6 +830,7 @@ describe('Hosts.runDigests', () => {
         failedStreak: 1,
         lastEventAt: Date.parse('2026-10-17T04:00:00Z'),
         attention: 'stalled',
+        best: {value: 287.4, metric: 'output_tokens_per_s', unit: null},
       },
     });
 

@@ -14,7 +14,7 @@ import {
   installFakeNewRun,
   installFakeProjectRuns,
 } from './fake-bridge.js';
-import {PROJECT, SEED} from './world.js';
+import {SEED} from './world.js';
 
 export const NOW = Date.parse('2026-10-17T12:00:00Z');
 const HOUR = 3_600_000;
@@ -34,8 +34,16 @@ export interface RunCase {
   /** Each idea's result against the base (none before it has a reading) and verdict, in order. */
   readonly points: readonly (readonly [number | null, Verdict])[];
   readonly omitted?: number;
-  /** The run's own name; its id when none is given. */
+  /** The run's own name, also its project's folder; its id when none is given. */
   readonly name?: string;
+  /** What the machine says it ended with, in its journal's own words. */
+  readonly endSummary?: string;
+  /** The best idea's value in the run's own metric, when the host reads it. */
+  readonly best?: {
+    readonly value: number;
+    readonly metric: string | null;
+    readonly unit: string | null;
+  };
   /** Minutes the journal has been silent. */
   readonly silent?: number;
   readonly attention?: Attention;
@@ -49,17 +57,26 @@ const ENDS: Readonly<Record<'completed' | 'failed' | 'stopped', string>> = {
   stopped: 'stopped',
 };
 
+/** A run's project: one folder per run, named as the run is, so every tile has its own title. */
+function projectOf(run: RunCase): string {
+  return `/home/me/projects/${run.name ?? run.runId}`;
+}
+
 function server(run: RunCase): Record<string, unknown> {
   const ended = run.phase === 'completed' || run.phase === 'failed' || run.phase === 'stopped';
   return {
     id: `0000000000${run.runId.slice(-2)}`,
-    projectRoot: PROJECT,
+    projectRoot: projectOf(run),
     runId: run.runId,
     status: run.phase,
     phase: run.phase,
     paused: run.phase === 'paused' ? 'user' : null,
     end: ended
-      ? {outcome: ENDS[run.phase as keyof typeof ENDS], reason: 'ended', resumable: false}
+      ? {
+          outcome: ENDS[run.phase as keyof typeof ENDS],
+          reason: run.endSummary ?? 'ended',
+          resumable: false,
+        }
       : null,
     startedAt: Math.floor((NOW - run.ago * HOUR) / 1000),
     reason: null,
@@ -82,12 +99,14 @@ function digest(run: RunCase): Record<string, unknown> {
     outcome: over ? ENDS[run.phase as keyof typeof ENDS] : null,
     closing: over ? 'finished' : null,
     over,
+    ...(run.endSummary === undefined ? {} : {endSummary: run.endSummary}),
     dashboard: {
       points: run.points.map(([ratio, verdict]) => ({ratio, verdict})),
       pointsOmitted: run.omitted ?? 0,
       failedStreak: 0,
       lastEventAt: NOW - (run.silent ?? 0) * 60_000,
       attention: run.attention ?? 'none',
+      best: run.best ?? null,
     },
   };
 }
@@ -119,23 +138,32 @@ export function dashboardWorld(
   return {
     ...SEED,
     listings: hosts.map(listing),
-    recent: [],
+    // The user opened every run, so each has the task it was started for.
+    recent: runs.map(run => ({
+      host: run.host,
+      hostLabel: run.host,
+      project: projectOf(run),
+      task: run.task,
+      runId: run.runId,
+      instanceId: null,
+      attachedAt: 1,
+    })),
     machines: [
       {host: 'local', label: 'This Mac', checkout: '~/projs/vibesys'},
       {host: 'ssh:host-a', label: 'host-a', checkout: '/home/me/vibesys'},
       {host: 'ssh:host-b', label: 'host-b', checkout: '/home/me/vibesys'},
     ],
     projectRuns: Object.fromEntries(
-      hosts.map(host => [
-        `${host}|${PROJECT}`,
-        runs
-          .filter(run => run.host === host)
-          .map(run => ({
+      runs.map(run => [
+        `${run.host}|${projectOf(run)}`,
+        [
+          {
             runId: run.runId,
             name: run.name ?? run.runId,
             task: run.task,
             createdAt: NOW - run.ago * HOUR,
-          })),
+          },
+        ],
       ]),
     ),
     digests: Object.fromEntries(runs.map(run => [run.runId, digest(run)])),

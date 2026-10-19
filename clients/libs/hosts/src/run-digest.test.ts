@@ -97,6 +97,33 @@ describe('digestEntries', () => {
   });
 });
 
+describe('the best reading of a tile', () => {
+  const withDashboard = (best?: {value: number; metric: string | null; unit: string | null}) =>
+    summary('a', {
+      kind: 'digest',
+      ideas: 1,
+      adopted_ratio: null,
+      best_so_far_ratio: null,
+      duration_s: 5,
+      ending: null,
+      closing: null,
+      dashboard: {
+        points: [],
+        points_omitted: 0,
+        failed_streak: 0,
+        last_event_at: null,
+        ...(best === undefined ? {} : {best}),
+      },
+    });
+
+  test('is carried as the host measured it, and is null when the host sends none', () => {
+    const best = {value: 287.4, metric: 'output_tokens_per_s', unit: null};
+    const entries = digestEntries([withDashboard(best)]);
+    expect(entries.get('a')).toMatchObject({dashboard: {best}});
+    expect(digestEntries([withDashboard()]).get('a')).toMatchObject({dashboard: {best: null}});
+  });
+});
+
 describe('digestLook', () => {
   test('reads the ending record first and the terminal event after it', () => {
     expect(digestLook(read({outcome: 'stopped', closing: 'finished'}))?.kind).toBe('stopped');

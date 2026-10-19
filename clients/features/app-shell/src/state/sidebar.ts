@@ -522,7 +522,11 @@ function newestByRun(runs: readonly HostRun[]): Map<string, HostRun> {
   return newest;
 }
 
-function titleOf(
+/**
+ * What every screen calls a run: its project's name, then the task the user chose for it (the
+ * Recent record's, else `listedTask`), as the run page's header words it.
+ */
+export function titleOf(
   state: SidebarState,
   run: RunRef,
   project: string,

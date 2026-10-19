@@ -11,6 +11,7 @@ import {
   type IdeaInput,
   type Mark,
   NEEDS_YOU,
+  NOTE_MAX,
   needsYou,
   onMachine,
   type RunInput,
@@ -48,7 +49,7 @@ function run(id: string, over: Partial<RunInput> = {}): RunInput {
   return {
     id,
     runId: id,
-    name: id,
+    title: id,
     task: 'mpmc',
     started: null,
     machine: 'host-a',
@@ -61,6 +62,7 @@ function run(id: string, over: Partial<RunInput> = {}): RunInput {
     costUsd: null,
     seconds: null,
     best: null,
+    measured: null,
     createdAt: 1,
     points: [],
     pointsOmitted: 0,
@@ -186,14 +188,33 @@ describe('a tile', () => {
     expect(tile.result).toEqual({text: '2.00×', tone: 'ok'});
   });
 
-  test('says task, machine and start time, leaving out what is unknown', () => {
-    expect(tileOf(run('a', {name: 'final'})).facts).toBe('mpmc · host-a');
+  test('says machine and start time, leaving out what is unknown, under the title it is given', () => {
+    expect(tileOf(run('a', {title: 'final'})).facts).toBe('host-a');
     expect(
       tileOf(
-        run('a', {name: 'final', hardware: '8 cores', agent: 'Codex', started: 'Oct 19 04:21'}),
+        run('a', {title: 'final', hardware: '8 cores', agent: 'Codex', started: 'Oct 19 04:21'}),
       ).facts,
-    ).toBe('mpmc · host-a · Oct 19 04:21');
-    expect(tileOf(run('a', {name: 'queue-rs-final2827'})).title).toBe('queue-rs-final2827');
+    ).toBe('host-a · Oct 19 04:21');
+    expect(tileOf(run('a', {title: 'queue-rs-final2827'})).title).toBe('queue-rs-final2827');
+  });
+
+  test('headlines the best measured value, in its unit, when no ratio to the input exists', () => {
+    const measured = {value: 287.4, metric: 'output_tokens_per_s', unit: null};
+    expect(tileOf(run('a', {measured})).result).toEqual({
+      text: '287 output tokens/s',
+      tone: 'muted',
+    });
+    expect(tileOf(run('a', {measured: {...measured, unit: 'tok/s'}})).result?.text).toBe(
+      '287 tok/s',
+    );
+    expect(tileOf(run('a', {measured: {value: 0.5, metric: null, unit: null}})).result?.text).toBe(
+      '0.5',
+    );
+  });
+
+  test('prefers the ratio to the input over the measured value', () => {
+    const measured = {value: 287, metric: 'ops_per_s', unit: null};
+    expect(tileOf(run('a', {best: 1.5, measured})).result).toEqual({text: '1.50×', tone: 'ok'});
   });
 
   test('says ideas, cost and time, counting ideas the chart left out', () => {
@@ -361,16 +382,37 @@ describe('a tile of a run that crashed', () => {
     ).toBeNull();
   });
 
-  test('is titled by its task and start time, with the run id as the hint', () => {
-    const tile = tileOf(crashed());
-    expect(tile.title).toBe('mpmc · Oct 19, 07:11');
+  test('is titled as given, with the run id as the hint and the start time among its facts', () => {
+    const tile = tileOf(crashed({title: 'queue-rs · mpmc'}));
+    expect(tile.title).toBe('queue-rs · mpmc');
     expect(tile.hint).toBe('20261019-071100');
-    expect(tile.title).not.toContain('20261019-071100');
-    expect(tile.facts).toBe('host-a');
+    expect(tile.facts).toBe('host-a · Oct 19, 07:11');
   });
 
-  test('keeps a name the run has, and the id when nothing else names it', () => {
-    expect(tileOf(crashed({name: 'tuned queue'})).title).toBe('tuned queue');
-    expect(tileOf(crashed({task: null as never, started: null})).title).toBe('20261019-071100');
+  test('words an error by its class, and keeps the whole line for the pointer', () => {
+    const line = 'NestedRepositoryError: before the run could begin it found a repository inside';
+    const tile = tileOf(crashed({reason: `${line}\ntraceback`}));
+    expect(tile.note).toBe('Nested repository error');
+    expect(tile.noteFull).toBe(line);
+  });
+
+  test('cuts a long reason between words, never inside one, and never past the limit', () => {
+    const WORDS = ['agent', 'was', 'interrupted', 'because', 'the', 'machine', 'went', 'away'];
+    for (const seed of SEEDS) {
+      const random = new Seeded(seed);
+      const reason = Array.from({length: 1 + random.int(14)}, () => random.pick(WORDS)).join(' ');
+      const tile = tileOf(crashed({reason}));
+      const note = tile.note ?? '';
+      const kept = note.endsWith('…') ? note.slice(0, -1) : note;
+      expect(reason === kept || reason.startsWith(`${kept} `)).toBe(true);
+      expect(note.length).toBeLessThanOrEqual(NOTE_MAX + 1);
+      expect(tile.noteFull).toBe(reason);
+    }
+  });
+
+  test('says the first clause of a reason that names no error class', () => {
+    expect(tileOf(crashed({reason: 'Run interrupted. The host lost power'})).note).toBe(
+      'Run interrupted',
+    );
   });
 });

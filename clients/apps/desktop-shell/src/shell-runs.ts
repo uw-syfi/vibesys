@@ -37,17 +37,20 @@ function projectName(path: string): string {
   return path.split('/').filter(Boolean).at(-1) ?? path;
 }
 
+/** The seconds from `at`, in milliseconds, to `now`; null when `at` is not known. */
+function secondsSince(at: number | null | undefined, now: number): number | null {
+  return at == null ? null : Math.max(0, (now - at) / 1000);
+}
+
 /** The dashboard's input for `row`; `now` is the moment a live run's time so far is counted to. */
 export function runInput(entry: DashboardRow, now: number): RunInput {
   const {row, digest} = {row: entry.row, digest: entry.row.digest};
   const dashboard = digest?.dashboard ?? null;
-  const seconds =
-    digest?.durationSeconds ??
-    (row.startedAt === null ? null : Math.max(0, (now - row.startedAt) / 1000));
+  const seconds = digest?.durationSeconds ?? secondsSince(row.startedAt, now);
   return {
     id: digestKey(row.run),
     runId: row.run.runId,
-    name: entry.name,
+    title: entry.row.title,
     task: entry.task ?? projectName(entry.project),
     started: formatStarted(entry.createdAt, {now}),
     machine: entry.machine,
@@ -65,12 +68,12 @@ export function runInput(entry: DashboardRow, now: number): RunInput {
     costUsd: null,
     seconds,
     best: digest === null ? null : (digest.adoptedRatio ?? digest.bestSoFarRatio),
+    measured: dashboard?.best ?? null,
     createdAt: entry.createdAt,
     points: dashboard?.points ?? null,
     pointsOmitted: dashboard?.pointsOmitted ?? 0,
     attention: dashboard?.attention ?? 'none',
     failedStreak: dashboard?.failedStreak ?? 0,
-    silentSeconds:
-      dashboard?.lastEventAt == null ? null : Math.max(0, (now - dashboard.lastEventAt) / 1000),
+    silentSeconds: secondsSince(dashboard?.lastEventAt, now),
   };
 }

@@ -495,6 +495,45 @@
       "title": "BackendUnavailable",
       "type": "object"
     },
+    "BestReading": {
+      "additionalProperties": false,
+      "description": "The measured value of the run's best idea so far, in the run's own metric.\n\nIt is what the run page shows as the best idea's value when no ratio to the input can be worded\n(the input was not measured): the reading of the last ``kept`` idea of the chart, with the\nobjective's ``metric`` id and ``unit`` as the journal's ``run_started`` names them (either may be\n``None``: a run names no unit, or its journal predates the overview).",
+      "properties": {
+        "value": {
+          "title": "Value",
+          "type": "number"
+        },
+        "metric": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Metric"
+        },
+        "unit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Unit"
+        }
+      },
+      "required": [
+        "value",
+        "metric",
+        "unit"
+      ],
+      "title": "BestReading",
+      "type": "object"
+    },
     "ChannelEnd": {
       "additionalProperties": false,
       "description": "The one stderr line a relayed run channel writes when it ends with a nonzero status.",
@@ -5159,7 +5198,7 @@
     },
     "RunDashboard": {
       "additionalProperties": false,
-      "description": "What a run's tile draws, folded from the journal in the digest's pass.\n\n``points`` are the run page's chart (``performanceFold``): the ideas in the order their results\nlanded (the idea's measurement time, else when its last attempt ended or began; ties in the\norder the ideas began), each with its verdict. A run with more than ``DASHBOARD_MAX_POINTS``\nideas keeps the newest points of the verdicts that matter to the line: the oldest ideas that\nare not ``kept`` go first, then the oldest ``kept`` ones, and ``points_omitted`` counts the\nideas left out (the ideas count is ``len(points) + points_omitted``). ``failed_streak`` counts\nthe ideas at the end of the order that failed, with none passing since (a running idea is\nskipped), over every idea and not only the ones kept. ``last_event_at`` is the journal's last\nevent, the only time fact a stalled run is judged from (``RunAttention``).",
+      "description": "What a run's tile draws, folded from the journal in the digest's pass.\n\n``points`` are the run page's chart (``performanceFold``): the ideas in the order their results\nlanded (the idea's measurement time, else when its last attempt ended or began; ties in the\norder the ideas began), each with its verdict. A run with more than ``DASHBOARD_MAX_POINTS``\nideas keeps the newest points of the verdicts that matter to the line: the oldest ideas that\nare not ``kept`` go first, then the oldest ``kept`` ones, and ``points_omitted`` counts the\nideas left out (the ideas count is ``len(points) + points_omitted``). ``failed_streak`` counts\nthe ideas at the end of the order that failed, with none passing since (a running idea is\nskipped), over every idea and not only the ones kept. ``last_event_at`` is the journal's last\nevent, the only time fact a stalled run is judged from (``RunAttention``). ``best`` is the\nreading of the best idea so far (``BestReading``); absent when no idea was kept with a reading.",
       "properties": {
         "points": {
           "items": {
@@ -5190,6 +5229,17 @@
             }
           ],
           "title": "Last Event At"
+        },
+        "best": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BestReading"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [

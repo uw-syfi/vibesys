@@ -45,6 +45,7 @@ from server.host_run_dashboard import (
     DASHBOARD_MAX_POINTS,
     REPEATED_FAILURE_AFTER,
     STALLED_AFTER_S,
+    BestReading,
     IdeaPoint,
     IdeaVerdict,
     RunAttention,
@@ -196,6 +197,8 @@ class _Fold:
         self.first: float | None = None
         self.last: float | None = None
         self.minimize = False
+        self.metric: str | None = None
+        self.unit: str | None = None
         self.workstreams: dict[str, tuple[str, str | None] | None] = {}
         """Each workstream span's idea and revision, by span id, as its latest event left it; ``None`` for a probe."""
         self.adoptions: dict[str, tuple[str | None, dict[str, JsonValue]]] = {}
@@ -231,6 +234,8 @@ class _Fold:
         elif kind == "run_started":
             objective = _object(_object(data.get("overview")).get("objective"))
             self.minimize = objective.get("direction") == "min"
+            self.metric = _text(objective.get("metric"))
+            self.unit = _text(objective.get("unit"))
         elif kind == "run_ending":
             self._ending(data)
         elif isinstance(kind, str) and kind in _CLOSINGS:
@@ -395,6 +400,14 @@ class _Fold:
         kept = [each.measure for each in chart if each.verdict is IdeaVerdict.KEPT]
         return self._improvement(kept[-1]) if kept else None
 
+    def _best_reading(self, chart: list[_Plotted]) -> BestReading | None:
+        """The reading of the last ``kept`` idea of the ``chart``: the best so far, in the metric's own terms."""
+        kept = [each.measure for each in chart if each.verdict is IdeaVerdict.KEPT]
+        measure = kept[-1] if kept else None
+        if measure is None or measure.value is None:
+            return None
+        return BestReading(value=measure.value, metric=self.metric, unit=self.unit)
+
     def _dashboard(self, chart: list[_Plotted]) -> RunDashboard:
         points = [
             IdeaPoint(
@@ -419,7 +432,11 @@ class _Fold:
         shown = tuple(point for at, point in enumerate(points) if at not in gone)
         last = None if self.last is None else datetime.fromtimestamp(self.last, UTC)
         return RunDashboard(
-            points=shown, points_omitted=len(gone), failed_streak=streak, last_event_at=last
+            points=shown,
+            points_omitted=len(gone),
+            failed_streak=streak,
+            last_event_at=last,
+            best=self._best_reading(chart),
         )
 
     def _ending(self, data: dict[str, JsonValue]) -> None:

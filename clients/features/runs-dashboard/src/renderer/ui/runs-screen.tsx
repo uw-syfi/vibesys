@@ -68,6 +68,7 @@ function TileOf(props: {
       }
       figures={tile.figures}
       note={tile.note}
+      noteFull={tile.noteFull}
       status={{tone: tile.status.tone, label: tile.status.label}}
       attention={tile.attention}
       {...(menu.length === 0 ? {} : {menu})}

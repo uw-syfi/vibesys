@@ -91,7 +91,10 @@ async function openRun(page: Page): Promise<void> {
   await page.addInitScript(installFakeRun, {streams: [], text: {}});
   await page.addInitScript(installFakeServer, SERVER);
   await page.goto('./shell.html');
-  await page.getByRole('main').getByRole('button', {name: /^mpmc/}).click();
+  await page
+    .getByRole('main')
+    .getByRole('button', {name: /^queue-rs · mpmc/})
+    .click();
   await expect(page.getByRole('slider', {name: 'Run position'})).toBeVisible();
 }
 

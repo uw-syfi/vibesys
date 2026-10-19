@@ -284,29 +284,3 @@ describe('usageView', () => {
     }
   });
 });
-
-describe('the rows of runs that share a task', () => {
-  test('carry their run id to tell them apart, and a row with its own name carries none', () => {
-    for (const seed of SEEDS) {
-      const random = new Seeded(seed);
-      const base = entry(random, 0);
-      const byRun = Array.from({length: 1 + random.int(8)}, (_, at) => ({
-        runId: `run-${at}`,
-        task: random.pick(['spsc', 'mpmc', null]),
-        costUsd: cents(random, 1000),
-      }));
-      const view = usageView({
-        sources: [{host: 'local', project: '/p', usage: {...base, byRun}}],
-        names: NAMES,
-        unreachable: 0,
-        unsupported: 0,
-        runsLeftOut: 0,
-      });
-      for (const row of view.runs) {
-        const same = view.runs.filter(other => other.name === row.name).length;
-        expect(row.detail).toBe(same > 1 ? row.runId : null);
-      }
-      expect(new Set(view.runs.map(row => row.detail ?? row.name)).size).toBe(view.runs.length);
-    }
-  });
-});

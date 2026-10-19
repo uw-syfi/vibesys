@@ -241,7 +241,11 @@ export async function openFixture(
   // Only a test is bounded: the fixture dev app is open for as long as someone looks at it.
   await page.addInitScript({content: script(installRequestBound, REQUEST_LIMIT)});
   await page.goto('./shell.html');
-  await page.getByRole('main').getByRole('button', {name: /^mpmc/}).first().click();
+  await page
+    .getByRole('main')
+    .getByRole('button', {name: /^queue-rs · mpmc/})
+    .first()
+    .click();
   await expect(page.getByRole('main')).toBeVisible();
 }
 

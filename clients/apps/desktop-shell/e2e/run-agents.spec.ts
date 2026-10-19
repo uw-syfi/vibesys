@@ -120,7 +120,10 @@ async function openRun(page: Page): Promise<void> {
   await page.addInitScript(installFakeRun, LOGS);
   await page.addInitScript(installFakeServer, SERVER);
   await page.goto('./shell.html');
-  await page.getByRole('main').getByRole('button', {name: /^mpmc/}).click();
+  await page
+    .getByRole('main')
+    .getByRole('button', {name: /^queue-rs · mpmc/})
+    .click();
 }
 
 test.use({colorScheme: 'dark', viewport: {width: 1440, height: 900}});

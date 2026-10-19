@@ -24,15 +24,22 @@ export interface IdeaInput {
   readonly verdict: Verdict;
 }
 
+/** A run's best reading in its own metric: the value with the metric's id and unit, when named. */
+export interface MeasuredBest {
+  readonly value: number;
+  readonly metric: string | null;
+  readonly unit: string | null;
+}
+
 /** What the app knows of one run: the tile's facts, none of them formatted. */
 export interface RunInput {
   /** The run's identity as the app names it; a tile's press hands it back. */
   readonly id: string;
   /** The run's id on its machine (`20261019-071100`): never a title, kept as the tile's hint. */
   readonly runId: string;
-  /** The run's own name; the run id itself when the run has none. */
-  readonly name: string;
-  /** The task it runs, or what it is of. */
+  /** The run's title, as every screen words it (the sidebar's row, the run page's header). */
+  readonly title: string;
+  /** The task it runs, or what it is of; groups tiles, never titles one. */
   readonly task: string;
   /** When it started, worded; null when unknown. */
   readonly started: string | null;
@@ -52,6 +59,8 @@ export interface RunInput {
   readonly seconds: number | null;
   /** The adopted result, or the best so far, as a multiple of the base; null when it has none. */
   readonly best: number | null;
+  /** The best idea so far as measured, when the host reads it: what a tile says when `best` is null. */
+  readonly measured: MeasuredBest | null;
   /** When the run was created, in milliseconds; the newest run is first. */
   readonly createdAt: number;
   /** The ideas in order, or null when the host offers no chart data. */
@@ -89,8 +98,12 @@ export interface Tile {
   /** Null when the host offers no chart data (a chart-less tile). */
   readonly chart: TileChart | null;
   readonly figures: string;
-  /** Why the run needs its user, else why its state cannot be read: a word or two; or null. */
+  /**
+   * Why the run needs its user, else why its state cannot be read: a few words, cut at a word; or
+   * null. `noteFull` is the whole text, for the pointer.
+   */
   readonly note: string | null;
+  readonly noteFull: string | null;
   readonly status: {readonly kind: StatusKind; readonly tone: Tone; readonly label: string};
   /** Whether the run needs its user (see `attentionOf`). */
   readonly attention: boolean;
@@ -161,11 +174,46 @@ export const STATUS_TONES: Readonly<Record<StatusKind, Tone>> = {
   unknown: 'neutral',
 };
 
+/** A metric id in words, as the run page words it: `output_tokens_per_s` reads `output tokens/s`. */
+function metricName(metric: string): string {
+  const parts = metric
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .split(/[\s_-]+/)
+    .filter(part => part !== '')
+    .map(part => part.toLowerCase());
+  const words: string[] = [];
+  for (let at = 0; at < parts.length; at += 1) {
+    const [word, next] = [parts[at] ?? '', parts[at + 1]];
+    const previous = words.at(-1);
+    if (word === 'per' && previous !== undefined && next !== undefined) {
+      words[words.length - 1] = `${previous}/${next}`;
+      at += 1;
+    } else {
+      words.push(word);
+    }
+  }
+  return words.join(' ');
+}
+
+/** A metric value as the run page writes it: grouped, at most three significant decimals. */
+function valueWord(value: number): string {
+  const abs = Math.abs(value);
+  const digits = abs >= 100 ? 0 : abs >= 10 ? 1 : abs >= 1 ? 2 : 3;
+  return value.toLocaleString('en-US', {maximumFractionDigits: digits});
+}
+
+/** A reading with its unit, else its metric's name, as the run page words the best idea's value. */
+function measuredWord(reading: MeasuredBest): string {
+  const unit = reading.unit ?? (reading.metric === null ? '' : metricName(reading.metric));
+  return unit === '' ? valueWord(reading.value) : `${valueWord(reading.value)} ${unit}`;
+}
+
 function resultOf(input: RunInput, chart: TileChart | null): Tile['result'] {
   const finalBest = chart === null ? null : (chart.line.at(-1) ?? null);
   const best = input.best ?? (finalBest !== null && finalBest > BASE ? finalBest : null);
-  if (best === null) return null;
-  return {text: ratioWord(best), tone: best > BASE ? 'ok' : 'muted'};
+  if (best !== null) return {text: ratioWord(best), tone: best > BASE ? 'ok' : 'muted'};
+  // No ratio to the input (it was not measured): the best reading itself, which beats nothing known.
+  return input.measured === null ? null : {text: measuredWord(input.measured), tone: 'muted'};
 }
 
 /** The tone of a status pill that says a run needs its user: never the green of a good ending. */
@@ -210,6 +258,39 @@ function firstLine(text: string | null): string | null {
   return line === undefined || line === '' ? null : line;
 }
 
+/** The longest a tile's note runs, in characters, before it is cut at a word. */
+export const NOTE_MAX = 30;
+
+/** `text` cut at the last word boundary within `max` characters, with an ellipsis; whole when it fits. */
+function cutAtWord(text: string, max: number): string {
+  if (text.length <= max) return text;
+  const within = text.slice(0, max + 1);
+  const space = within.lastIndexOf(' ');
+  // One word longer than the room is kept whole: the tile's own ellipsis is the last resort.
+  const cut = space > 0 ? within.slice(0, space) : (text.split(' ')[0] ?? text);
+  return `${cut.replace(/[\s,;:.\-–—]+$/, '')}…`;
+}
+
+/** `SandboxLifecycleError` as words: `Sandbox lifecycle error`. */
+function classWords(name: string): string {
+  const words = name.replace(/([a-z0-9])([A-Z])/g, '$1 $2').toLowerCase();
+  return `${words.charAt(0).toUpperCase()}${words.slice(1)}`;
+}
+
+const ERROR_CLASS = /^([A-Z][A-Za-z0-9]*(?:Error|Exception|Failure|Interrupted))\s*:/;
+
+/**
+ * A reason in a few words: an error's class (`NestedRepositoryError: ...` reads `Nested repository
+ * error`), else the first clause of the line, cut at a word. The whole line is `full`.
+ */
+function reasonWords(text: string): {readonly note: string; readonly full: string} {
+  const full = text.trim();
+  const named = ERROR_CLASS.exec(full);
+  const clause = (full.split(/[.;:](?:\s|$)|\s[-–—]\s/)[0] ?? full).trim();
+  const short = named?.[1] === undefined ? clause : classWords(named[1]);
+  return {note: cutAtWord(short === '' ? full : short, NOTE_MAX), full};
+}
+
 /**
  * The words of a failed or stopped run's tile: why it ended, when its record says, else nothing
  * (the status pill already says `failed`).
@@ -220,18 +301,19 @@ function endNote(input: RunInput): string | null {
     : null;
 }
 
-/** A run's title: its own name, or, when it has none, its task and when it started. */
-function runTitle(input: RunInput): {title: string; sayingFacts: boolean} {
-  if (input.name !== input.runId) return {title: input.name, sayingFacts: false};
-  const parts = [input.task, input.started].filter((part): part is string => part !== null);
-  return parts.length === 0
-    ? {title: input.name, sayingFacts: false}
-    : {title: parts.join(' · '), sayingFacts: true};
+/** The note of a tile unless the status pill already says it (a status is said once), with its full text. */
+function noteOf(
+  note: {readonly note: string; readonly full: string} | null,
+  status: string,
+): Pick<Tile, 'note' | 'noteFull'> {
+  return note === null || note.note.toLowerCase() === status.toLowerCase()
+    ? {note: null, noteFull: null}
+    : {note: note.note, noteFull: note.full};
 }
 
-/** `note` unless the status pill already says it: a status is said once. */
-function noteOf(note: string | null, status: string): string | null {
-  return note !== null && note.toLowerCase() === status.toLowerCase() ? null : note;
+/** A reason that is already a few words says itself whole. */
+function asNote(text: string | null): {readonly note: string; readonly full: string} | null {
+  return text === null ? null : {note: text, full: text};
 }
 
 /** The tile of `input`. */
@@ -245,19 +327,21 @@ export function tileOf(input: RunInput): Tile {
     ...(input.costUsd === null ? [] : [`$${input.costUsd.toFixed(2)}`]),
     ...(input.seconds === null ? [] : [durationWord(input.seconds)]),
   ].join(' · ');
-  const {title, sayingFacts} = runTitle(input);
+  const ended = endNote(input);
   return {
     id: input.id,
-    title,
+    title: input.title,
     hint: input.runId,
     result: resultOf(input, chart),
-    facts: (sayingFacts ? [input.machine] : [input.task, input.machine, input.started])
+    facts: [input.machine, input.started]
       .filter((part): part is string => part !== null)
       .join(' · '),
     chart,
     figures,
-    note: noteOf(
-      endNote(input) ?? attentionWord({...input, attention}) ?? input.problem,
+    ...noteOf(
+      ended === null
+        ? asNote(attentionWord({...input, attention}) ?? input.problem)
+        : reasonWords(ended),
       input.status.word,
     ),
     status: {

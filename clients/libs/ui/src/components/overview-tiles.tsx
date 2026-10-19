@@ -114,6 +114,8 @@ export function OverviewTile(props: {
   readonly chart: ReactNode;
   readonly figures: string;
   readonly note: string | null;
+  /** The note whole, for the pointer when `note` is cut; `note` itself when omitted. */
+  readonly noteFull?: string | null;
   readonly status: {readonly tone: StatusTone; readonly label: string};
   readonly attention?: boolean;
   readonly hint?: string;
@@ -154,7 +156,7 @@ export function OverviewTile(props: {
               {props.figures}
             </Text>
           </span>
-          <span className="vs-overview-tile-line" title={props.note ?? undefined}>
+          <span className="vs-overview-tile-line" title={props.noteFull ?? props.note ?? undefined}>
             <Text variant="small" tone={props.attention === true ? 'err' : 'muted'}>
               {props.note ?? ''}
             </Text>
