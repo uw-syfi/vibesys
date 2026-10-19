@@ -102,6 +102,10 @@ UNMEASURED_TERMS = TERMS.model_copy(update={"measured": ()})
 FACTS = initial_state().run.facts.model_copy(update={"task": TERMS})
 """The run facts every story starts from: the core's sample facts plus a task that measures."""
 
+type InputEnd = Literal["measured", "failed-workload", "failed-accuracy", "no-evidence", "lost"]
+"""How the input's measurement ends: measured; its benchmark or its accuracy check fails (a
+workload failure, typed); it ends without evidence; or it is lost."""
+
 _KINDS = {
     "accuracy": EvidenceKind.CORRECTNESS,
     "benchmark": EvidenceKind.BENCHMARK,
@@ -173,7 +177,7 @@ class World(TypedDict, total=False):
     """The revision ids of candidates whose benchmark check fails."""
     verified: bool
     """Whether a parent revision still reproduces its retained content."""
-    baseline: Literal["measured", "failed-workload", "no-evidence", "lost"]
+    baseline: InputEnd
     """How the measurement of the input ends."""
     handoff_writes_open: bool
     """Leave each handoff write open for the story to answer; else the owner writes it at once."""
@@ -221,7 +225,7 @@ class Host:
     throughputs: dict[str, float] = field(default_factory=dict)
     failing_benchmarks: set[str] = field(default_factory=set)
     verified: bool = True
-    baseline: Literal["measured", "failed-workload", "no-evidence", "lost"] = "measured"
+    baseline: InputEnd = "measured"
     handoff_writes_open: bool = False
     merging: bool = False
     merger_answers: list[int] = field(default_factory=list)
@@ -547,7 +551,10 @@ class Host:
         return not is_input and failing and stage == "benchmark"
 
     def _status_of(self, stage: str, *, is_input: bool) -> ObservationStatus:
-        broken = is_input and self.baseline == "failed-workload" and stage == "benchmark"
+        broken = is_input and (
+            (self.baseline == "failed-workload" and stage == "benchmark")
+            or (self.baseline == "failed-accuracy" and stage == "accuracy")
+        )
         return ObservationStatus.FAILED if broken else ObservationStatus.SUCCEEDED
 
     def _operation(self, asked: Asked, request: Operation) -> None:

@@ -30,7 +30,9 @@ class EvidenceHost(Host):
     """The host of a dynamic flow whose failed benchmarks print ``crash_text``."""
 
     crash_text: str = ""
-    """What a failed benchmark printed; the decoded reading carries it as its feedback."""
+    """What a failed check printed; the decoded reading carries it as its feedback.
+
+    A failed benchmark carries it, and so does the input's own failed accuracy check."""
     candidates_crash: bool = False
     """Whether every candidate's benchmark fails (the input's is set by ``baseline``)."""
     candidates_fail_accuracy: bool = False
@@ -49,6 +51,12 @@ class EvidenceHost(Host):
         reading = super()._reading_of(ref)
         if ref.kind is EvidenceKind.BENCHMARK and not reading.passed:
             return reading.model_copy(update={"feedback": self.crash_text, "partial": self.partial})
+        if (
+            ref.kind is EvidenceKind.CORRECTNESS
+            and ref.purpose == "baseline"
+            and not reading.passed
+        ):
+            return reading.model_copy(update={"feedback": self.crash_text})
         return reading
 
 
