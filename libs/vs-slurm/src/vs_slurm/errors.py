@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+# OpenSSH's exit status when it could not connect or log in (or the remote command exited 255).
+_SSH_CONNECTION_FAILED = 255
+
 
 class SlurmError(RuntimeError):
     """Actionable failure from validation, transport, Slurm, or artifact collection."""
@@ -96,6 +99,13 @@ class SlurmError(RuntimeError):
         )
 
     @classmethod
+    def ssh_transport_failed(cls, operation: str, returncode: int, stderr: str = "") -> SlurmError:
+        """Describe an SSH-transport program (ssh, or rsync through it) that exited nonzero."""
+        if returncode == _SSH_CONNECTION_FAILED:
+            return cls.ssh_connection_failed(operation, stderr)
+        return cls.transport_failed(operation, returncode, stderr)
+
+    @classmethod
     def ssh_connection_failed(cls, operation: str, stderr: str = "") -> SlurmError:
         """Describe an ssh exit 255: no connection or login, usually a prompt a run cannot answer."""
         return SlurmTransportFailedError(
@@ -103,7 +113,7 @@ class SlurmError(RuntimeError):
             "or log in. A run cannot answer a password, passphrase, host-key or "
             "second-factor prompt, so SSH access to the cluster must be non-interactive "
             "(see docs/remote-slurm-execution.md)",
-            returncode=255,
+            returncode=_SSH_CONNECTION_FAILED,
             stderr=stderr,
         )
 

@@ -90,8 +90,6 @@ SERVICE_NOT_READY_EXIT_CODE = 70
 # its TERM, and 137 when the stage outlived the TERM and ``--kill-after`` killed it.
 STAGE_TIMEOUT_EXIT_CODES = frozenset({124, 137})
 _MAX_PROCESS_EXIT_CODE = 255
-# OpenSSH's exit status when it could not connect or log in (or the remote command exited 255).
-_SSH_CONNECTION_FAILED = 255
 _BATCH_RESULT_ROOT = ".vibesys-slurm-results"
 _SERVICE_LOG_TAIL = "service-log-tail.txt"
 _SERVICE_LOG_TAIL_LINES = 400
@@ -1337,6 +1335,9 @@ class _Transport(Protocol):
 
 
 class _ProcessTransport:
+    # Describes a program that exited nonzero; a transport may refine it.
+    _failed = staticmethod(SlurmError.transport_failed)
+
     def __init__(self, processes: Processes, timeout: float) -> None:
         self._processes = processes
         self._timeout = timeout
@@ -1344,10 +1345,6 @@ class _ProcessTransport:
     def _launch(self, argv: Sequence[str]) -> Sequence[str]:
         """Return the argv to start for *argv*; a transport may wrap the program."""
         return argv
-
-    def _failed(self, operation: str, returncode: int, stderr: str) -> SlurmError:
-        """Describe a transport program that exited *returncode*; a transport may refine it."""
-        return SlurmError.transport_failed(operation, returncode, stderr)
 
     def _run(
         self,
@@ -1438,6 +1435,8 @@ class _RsyncTransport(_ProcessTransport):
 
 
 class _SshTransport(_RsyncTransport):
+    _failed = staticmethod(SlurmError.ssh_transport_failed)
+
     def __init__(
         self,
         config: SlurmSshTransport,
@@ -1459,12 +1458,6 @@ class _SshTransport(_RsyncTransport):
             (*self._config.ssh_argv, "--", self._config.host, command),
             operation="exec",
         )
-
-    def _failed(self, operation: str, returncode: int, stderr: str) -> SlurmError:
-        # ssh, and rsync through it, exit 255 when the connection or login failed.
-        if returncode == _SSH_CONNECTION_FAILED:
-            return SlurmError.ssh_connection_failed(operation, stderr)
-        return super()._failed(operation, returncode, stderr)
 
 
 _LOGIN_ENVIRONMENT_NAMES = frozenset(
