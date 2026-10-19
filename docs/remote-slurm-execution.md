@@ -70,6 +70,12 @@ agent cannot run a GPU job in another candidate's files.
 - `~/.sky/config.yaml` and SSH configuration own accounts, partitions, proxies,
   certificates, keys, and site-specific Slurm translation.
 
+A run never prompts on its terminal: the commands it starts have no terminal to
+prompt on, so an `ssh` that would ask for a password, passphrase, host-key
+confirmation or second factor fails instead. Make SSH access non-interactive before the run, for
+example with keys in `ssh-agent`, known host keys, and a `ControlMaster`
+connection opened beforehand.
+
 Do not put credentials or account names in a task manifest or repository profile.
 Install the validated external dependency separately:
 

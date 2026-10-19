@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 # Ctrl-C asks for a stop that cancels the work in flight (Slurm jobs) at once,
 # bounded like every stop, even after a draining stop: the run's control is the
 # one authority for its stop, and a stop there only escalates. The launcher
-# forwards each Ctrl-C once (this process leads its own process group, so the
+# forwards each Ctrl-C once (this process leads its own session, so the
 # terminal's copy never reaches it) and sends a repeated one on as SIGTERM.
 # SIGTERM and SIGHUP end the run now: its task is cancelled, so its teardown
 # cancels external work before the process exits.

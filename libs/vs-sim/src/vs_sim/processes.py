@@ -944,15 +944,19 @@ class _InheritedHandle:
 class InheritedStdioLauncher:
     """Starts real operating-system processes that use this process's terminal.
 
-    Each child leads a process group of its own, so the terminal's job-control signals
-    (interrupt, quit, suspend) reach only this process: the parent decides what reaches
-    the child, and a child never gets one keypress twice, once from the terminal and once
-    forwarded. The child still writes to the terminal; it must not read it.
+    Each child leads a session of its own, with no controlling terminal, so the
+    terminal's job-control signals (interrupt, quit, suspend) reach only this process:
+    the parent decides what reaches the child, and a child never gets one keypress twice,
+    once from the terminal and once forwarded. The child still writes to the terminal
+    through the descriptors it inherits, and job control never stops it for that (under
+    ``stty tostop``) nor for setting the terminal's modes; the terminal is not its
+    controlling terminal. Nor can it or any process it starts open ``/dev/tty``: a program
+    that would prompt there (``ssh`` asking for a password or a host key) fails at once
+    instead of turning the terminal's echo off under the operator, or stopping the run.
 
-    With its own group, the child no longer hears the terminal hang up, and it is a
-    background job of the terminal. So each child gets a lifeline
-    (``LAUNCHER_LIFELINE_ENV``): a child that calls ``follow_launcher`` hangs up when this
-    process exits, by any means, and writes to the terminal without being stopped.
+    Outside the terminal's session, the child no longer hears the terminal hang up. So
+    each child gets a lifeline (``LAUNCHER_LIFELINE_ENV``): a child that calls
+    ``follow_launcher`` hangs up when this process exits, by any means.
     """
 
     async def start(
@@ -966,7 +970,7 @@ class InheritedStdioLauncher:
         environment = {**(os.environ if env is None else env), LAUNCHER_LIFELINE_ENV: str(given)}
         try:
             process = await asyncio.create_subprocess_exec(
-                *argv, env=environment, cwd=cwd, process_group=0, pass_fds=(given,)
+                *argv, env=environment, cwd=cwd, start_new_session=True, pass_fds=(given,)
             )
         except BaseException:
             os.close(held)
@@ -989,18 +993,14 @@ def follow_launcher(environ: MutableMapping[str, str]) -> None:
 
     Call once, early, on the main thread of a launched child; ``environ`` is the process
     environment. Without a lifeline this does nothing. With one, it takes the lifeline out
-    of ``environ`` (so no grandchild reads it as its own) and then:
-
-    * Hangs up when the launcher exits: once the lifeline reaches end-of-file, this process
-      sends itself SIGHUP, the signal a closed terminal sent before the child led its own
-      process group, so the child's own SIGHUP handling (a stop that cancels the run's work)
-      runs even after a SIGKILL, OOM kill or crash of the launcher. A pipe works on every
-      Unix; Linux's ``PR_SET_PDEATHSIG`` would not, and it fires when the parent *thread*
-      exits, not the process.
-    * Ignores SIGTTOU: the child is a background job of the launcher's terminal, which
-      under ``stty tostop`` would stop it at its first write, and for every ``tcsetattr``.
-      The ignored disposition passes to the child's own children, which never read the
-      terminal either (each leads its own process group).
+    of ``environ`` and closes it on every ``exec`` (so no process the child starts reads it
+    as its own, or holds it open), and hangs up when the launcher exits: once the lifeline
+    reaches end-of-file, or cannot be read at all, this process sends itself SIGHUP, the
+    signal a closed terminal sent before the child led its own session, so the child's own
+    SIGHUP handling (a stop that cancels the run's work) runs even after a SIGKILL, OOM
+    kill or crash of the launcher. A pipe works on every Unix; Linux's
+    ``PR_SET_PDEATHSIG`` would not, and it fires when the parent *thread* exits, not the
+    process.
 
     Raises ``LauncherLifelineError`` when ``LAUNCHER_LIFELINE_ENV`` does not hold a
     descriptor number.
@@ -1011,20 +1011,30 @@ def follow_launcher(environ: MutableMapping[str, str]) -> None:
     if not value.isdigit():
         raise LauncherLifelineError(value)
     lifeline = int(value)
-    signal.signal(signal.SIGTTOU, signal.SIG_IGN)
+    inheritable = False  # os.set_inheritable takes its flag by position only
+    with suppress(OSError):
+        # A descriptor that is not open is not read either: the watcher hangs up at once.
+        os.set_inheritable(lifeline, inheritable)
     threading.Thread(
         target=_hang_up_at_end, args=(lifeline,), name="launcher-lifeline", daemon=True
     ).start()
 
 
 def _hang_up_at_end(lifeline: int) -> None:
-    """Block until the launcher exits, then hang this process up."""
-    with suppress(OSError):
-        # The launcher never writes; the read returns only at end-of-file.
-        while os.read(lifeline, 1):
-            pass
-    os.close(lifeline)
-    os.kill(os.getpid(), signal.SIGHUP)
+    """Block until the launcher exits, then hang this process up.
+
+    A lifeline that cannot be read (or closed) hangs up too: the launcher can no longer
+    be heard, and a run nobody can stop must not go on.
+    """
+    try:
+        with suppress(OSError):
+            # The launcher never writes; the read returns only at end-of-file.
+            while os.read(lifeline, 1):
+                pass
+        with suppress(OSError):
+            os.close(lifeline)
+    finally:
+        os.kill(os.getpid(), signal.SIGHUP)
 
 
 async def run_foreground(

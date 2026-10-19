@@ -265,7 +265,7 @@ def test_the_launcher_process_waits_for_its_engine_to_finish_tearing_down(
 def test_a_ctrl_c_reaches_the_engine_only_through_the_launcher(tmp_path: Path) -> None:
     """periodic-1330 MED-1: one Ctrl-C reached the engine twice, from the terminal and the launcher.
 
-    The engine leads a process group of its own, so a terminal's Ctrl-C (sent to the
+    The engine leads a session of its own, so a terminal's Ctrl-C (sent to the
     launcher's group) does not reach it directly: it arrives once, as the launcher's copy.
     """
     environment = _write_engine(tmp_path)
@@ -328,7 +328,7 @@ def _call_real_child(argv: list[str]) -> int:
         (signal.SIGTERM, True),
         (signal.SIGHUP, True),
         (signal.SIGQUIT, True),
-        # PR #3209 MED-2: the child leads its own group, so a shell's `fg` (SIGCONT to the
+        # PR #3209 MED-2: the child leads its own session, so a shell's `fg` (SIGCONT to the
         # launcher's group) reaches it only through the launcher.
         (signal.SIGCONT, True),
     ],
@@ -450,7 +450,7 @@ def _end(launcher: subprocess.Popen[bytes], engine_pid: int | None) -> None:
 def test_an_engine_whose_launcher_is_killed_hangs_up(tmp_path: Path) -> None:
     """PR #3209 MED-1: SIGKILL of the launcher left its engine running, unreachable.
 
-    The engine leads its own process group, so no terminal signal reaches it once its
+    The engine leads its own session, so no terminal signal reaches it once its
     launcher is gone. It hears the launcher's death and hangs up (SIGHUP), as a closed
     terminal used to tell it.
     """
@@ -474,9 +474,9 @@ def test_an_engine_whose_launcher_is_killed_hangs_up(tmp_path: Path) -> None:
 def test_an_engine_writes_its_terminal_under_stty_tostop(tmp_path: Path) -> None:
     """PR #3209 MED-2: with `stty tostop`, the engine stopped at its first terminal write.
 
-    The engine is a background process group on the launcher's terminal, so the kernel
-    stops it with SIGTTOU when ``tostop`` is set. It writes on, and still hears the
-    launcher's Ctrl-C.
+    The engine was a background process group on the launcher's terminal, so the kernel
+    stopped it with SIGTTOU when ``tostop`` was set. In a session of its own the terminal
+    is not its controlling terminal: it writes on, and still hears the launcher's Ctrl-C.
     """
     leader, follower = os.openpty()
     attributes = termios.tcgetattr(follower)
@@ -536,7 +536,6 @@ sys.exit(7)
 
 
 @pytest.mark.regression
-@pytest.mark.xfail(strict=True, reason="PR #3209 follow-up: a run's command can turn echo off")
 def test_no_command_a_run_starts_can_turn_its_terminals_echo_off(tmp_path: Path) -> None:
     """PR #3209 recheck LOW-2: an ssh prompt left the operator's terminal with echo off.
 
@@ -593,7 +592,6 @@ def _lifeline_reaches_a_grandchild() -> tuple[int, bool]:
 
 
 @pytest.mark.regression
-@pytest.mark.xfail(strict=True, reason="PR #3209 follow-up: the lifeline is inheritable")
 def test_no_command_the_run_starts_inherits_its_lifeline() -> None:
     """PR #3209 recheck LOW-1: a command started with ``close_fds=False`` held the lifeline.
 
@@ -617,7 +615,6 @@ def _hang_up_with_a_closed_lifeline() -> bool:
 
 
 @pytest.mark.regression
-@pytest.mark.xfail(strict=True, reason="PR #3209 follow-up: a closed lifeline never hangs up")
 def test_a_lifeline_closed_before_its_end_still_hangs_up() -> None:
     """PR #3209 recheck LOW-3: closing an already closed lifeline raised before the SIGHUP.
 

@@ -3,9 +3,11 @@
 Light host commands run in this process. Run commands execute in a child so
 the run's own teardown remains authoritative.
 
-The child leads its own process group, so the terminal's signals reach only the
-launcher, and the launcher is the one path by which a signal reaches the run:
-each Ctrl-C reaches it exactly once. The launcher forwards every shutdown signal
+The child leads its own session, with no controlling terminal, so the terminal's
+signals reach only the launcher, and no command the run starts can open the
+terminal to prompt the operator (``vs_sim.api.InheritedStdioLauncher``). The
+launcher is the one path by which a signal reaches the run: each Ctrl-C reaches
+it exactly once. The launcher forwards every shutdown signal
 it receives: SIGTERM, SIGHUP and SIGQUIT as they are, the first SIGINT as
 SIGINT, and every later SIGINT as SIGTERM, so a repeated Ctrl-C forces the run
 to end. It forwards SIGCONT too, so a child stopped by any means continues with

@@ -211,7 +211,7 @@ def start_process() -> None:
     """Begin a run process: follow its launcher, then time its boot stages on the real clocks.
 
     Started by the ``vibesys`` launcher, the process hangs up when the launcher exits, by
-    any means, and writes to its terminal from its own process group (``follow_launcher``).
+    any means (``follow_launcher``).
     """
     follow_launcher(os.environ)
     boot_trace.install(boot_trace.BootTrace(wall=SystemClock(), elapsed=MonotonicClock()))
