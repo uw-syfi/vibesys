@@ -69,6 +69,16 @@ runs, `spread`, their relative standard deviation when there are two or more, an
 comparison's current configuration. A run never measures a comparison; `vibesys compare` does,
 once, and stores the reading. The newest `comparisons_read` event replaces the earlier ones.
 
+## Input measurement events
+
+`input_measurement_failed` says the run's input revision failed its own trusted measurement, so
+the run has no input baseline. It carries `failure` (how: `accuracy-failed`, `benchmark-failed`,
+`no-evidence`, `readings-refused`, `readings-undecodable` or `wait-ended`), `stage` (the gate
+stage whose reading failed, or null) and `summary` (the redacted tail of what that stage printed,
+at most 1000 characters). The commit observer emits it once, on the commit that first records the
+failure. The run goes on: the planner is told the failure, and candidates are judged on the
+task's gates alone.
+
 ## Run trace events
 
 This is payload level, recorded here because every client folds it the same way. The run trace
