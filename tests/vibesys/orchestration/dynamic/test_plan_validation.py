@@ -589,9 +589,12 @@ def _parsed(reply: dict[str, object]) -> PortfolioPlan | list[tuple[str | int, .
 
 
 def _rejected_at(paths: list[tuple[str | int, ...]]) -> bool:
-    """Whether a schema rejection names the unknown key or the parts list it is about."""
+    """Whether a schema rejection names the unknown key or the parts list it is about.
+
+    The list itself may also be reported short, since the one entry it held was rejected.
+    """
     named = {"weight", "parents"}
-    return all(path[:2] == ("workstreams", 0) for path in paths) and any(
+    return all(path[:2] == ("workstreams", 0) or path == ("workstreams",) for path in paths) and any(
         named & {str(step) for step in path} for path in paths
     )
 

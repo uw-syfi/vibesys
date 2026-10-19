@@ -292,7 +292,8 @@ def test_a_hypothesis_that_goes_on_after_main_moved_is_asked_to_rebase_onto_main
     assert resumed.parent_revision == RevisionRef.of_git_commit("c2")  # its own work
     assert resumed.rebase_onto == context.main_revision
     text = " ".join(render(PromptTemplate.IMPLEMENT, resumed).split())
-    assert "rebase your work onto it" in text
+    assert "bring main's change into your tree" in text
+    assert "git diff $(git merge-base HEAD c3) c3" in text
 
 
 @MODES
