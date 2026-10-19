@@ -204,6 +204,9 @@ def start_core(host: CoreRunHost, config: RunLoopConfig) -> None:
     host.shell.start(config.host_id, now_at=host.clock.now(), lease_duration=config.lease_duration)
 
 
+_PASSES_TO_WAKE_A_DUE_TIMER = 3
+
+
 async def start_core_awaiting_lease(host: CoreRunHost, config: RunLoopConfig) -> None:
     """Start the shell, waiting out a lease a crashed host left behind.
 
@@ -225,9 +228,12 @@ async def start_core_awaiting_lease(host: CoreRunHost, config: RunLoopConfig) ->
     while True:
         # Take in the stored run first, then let the loop run, then read the clock for the
         # lease: decoding a long run takes seconds, and neither the lease term nor one
-        # unbroken hold on the loop should include it.
+        # unbroken hold on the loop should include it. A task whose timer fell due meanwhile
+        # resumes three loop passes later (the timer fires, its future then wakes the task),
+        # and each zero sleep yields exactly one pass.
         host.shell.prepare_start(config.host_id)
-        await host.clock.sleep(0)
+        for _ in range(_PASSES_TO_WAKE_A_DUE_TIMER):
+            await host.clock.sleep(0)
         try:
             start_core(host, config)
         except LeaseUnavailableError as error:
