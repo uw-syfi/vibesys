@@ -12,12 +12,12 @@ bridge makes it a ``TurnHeld``), and the turn's open dispatch record keeps the l
 (``held``). Every stated limit stays as it was stated; the record's bound is derived from it
 in ``_wait_clock.turn_bound``, which ``record_bound`` uses for every record:
 
-- **Credit.** A hold that ended credits its length. While the gate holds the turn for a
-  backoff, the turn may stay held up to the budget, so its bound is the stated limit plus the
-  budget; once released, the bound is the stated limit plus the time it was held. The credit
-  never exceeds the budget the gate reported.
+- **Credit.** A hold that ended credits its length; the gate bounds each one. While the gate
+  holds the turn for a backoff, the turn may stay held up to the budget, so its bound moves
+  by the budget; once released, by the time it was held, never more than the budget.
 - **Parked.** A hold that waits for the operator or a timed resume (the run is paused for
-  capacity) has no limit of its own: the turn ends with the run.
+  capacity) has no limit of its own: the turn ends with the run. The gate ends a parked hold
+  when the run resumes, so the time the operator took is credited whole.
 - **Late.** A hold that began after the turn's own time ran out cannot revive its limit.
 - **Ceiling.** As every moved limit, a bound carried past the run deadline ends with the run.
 

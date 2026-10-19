@@ -169,11 +169,12 @@ class CapacityHold(Value):
     one. A hold runs from the turn's first capacity stop to the release after its last one, so
     the sends between its waits count too; only a send that ends the hold is the turn's.
 
-    ``credit`` is the time of the turn's holds that ended. ``since`` is when the hold the turn
-    is in began (None when it is in none), and ``released_at`` when that hold's latest wait
-    ended (None while it waits). A ``parked`` hold waits for the operator or a timed resume
-    with the run paused, not for a backoff. ``budget`` is the most hold time the turn is
-    credited: the outage budget the gate applies.
+    ``credit`` is the time of the turn's holds that ended; the gate bounds each of them (by its
+    policy, or by the operator who resumed the run), so core credits it whole. ``since`` is
+    when the hold the turn is in began (None when it is in none), and ``released_at`` when
+    that hold's latest wait ended (None while it waits). A ``parked`` hold waits for the
+    operator or a timed resume with the run paused, not for a backoff. ``budget`` is the most
+    the current hold is credited: the outage budget the gate applies.
     """
 
     credit: Seconds = 0.0

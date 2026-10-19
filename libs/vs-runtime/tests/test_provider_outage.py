@@ -404,46 +404,66 @@ def test_a_stop_request_ends_an_outage_wait_at_once() -> None:
 
 @given(left=st.floats(min_value=1.0, max_value=2 * BUDGET, allow_nan=False))
 def test_the_run_deadline_ends_an_outage_wait(left: float) -> None:
-    """No turn waits past the run's deadline, and none is sent again once it passed."""
+    """No turn waits past the run's deadline, and none is sent again once it passed.
+
+    Past the outage budget the run pauses for the operator instead (S179), and a paused
+    run ends at its deadline by the run loop's stop, modelled here one second after it.
+    """
     run = _Run()
     run.control.set_run_deadline(START + left)
     client = run.client(OUTAGE, *[_outage()] * 60, "ok")
 
+    def stopper() -> None:
+        run.threads.sleep(left + 1.0)
+        run.control.request_stop(StopMode.DRAIN)
+
     def main() -> None:
-        with pytest.raises(AgentQuotaError):
+        run.threads.spawn(stopper, name="deadline-stop", daemon=True)
+        with pytest.raises((AgentQuotaError, RunStopped)):
             _turn(client)
 
     run.threads.run(main)
 
-    [(_, reason, at)] = run.sink.abandoned
-    assert at <= START + max(left, BUDGET)
     if left <= BUDGET:
+        [(_, reason, at)] = run.sink.abandoned
         assert "deadline" in reason
         assert at == START + left
+    else:
+        assert run.sink.abandoned == []
+        assert RunControlTransitionKind.PAUSED in [t.kind for t in run.transitions]
+        assert run.now() == START + left + 1.0
 
 
 @given(failures=st.integers(min_value=0, max_value=60))
 def test_an_outage_is_waited_out_only_within_its_budget(failures: int) -> None:
+    """Within its budget an outage holds only the turn; once spent, the run pauses for the
+    operator rather than fail the turn (S179: before, the gate gave the turn up here)."""
     run = _Run()
     client = run.client(OUTAGE, *[_outage()] * failures, "ok")
     waits = _waits(failures)
 
     if len(waits) == failures:
         assert run.threads.run(lambda: _turn(client)) == "ok"
-        assert run.sink.abandoned == []
+        assert RunControlTransitionKind.PAUSED not in [t.kind for t in run.transitions]
     else:
+        # Nobody resumes the paused run; a stop well after the budget ends the test.
+        def stopper() -> None:
+            run.threads.sleep(BUDGET + 3600.0)
+            run.control.request_stop(StopMode.DRAIN)
 
-        def failing() -> None:
-            with pytest.raises(AgentQuotaError) as raised:
+        def paused() -> None:
+            run.threads.spawn(stopper, name="stopper", daemon=True)
+            with pytest.raises(RunStopped):
                 _turn(client)
-            assert raised.value.condition is QuotaCondition.UNAVAILABLE
 
-        run.threads.run(failing)
-        [(_, reason, _)] = run.sink.abandoned
-        assert "6 h outage budget" in reason
+        run.threads.run(paused)
+        assert RunControlTransitionKind.PAUSED in [t.kind for t in run.transitions]
+        [(error, plan)] = [(e, p) for e, p in run.sink.paused if p.policy == "pause"]
+        assert error.condition is QuotaCondition.UNAVAILABLE
+        assert plan.resumes_at is None
 
+    assert run.sink.abandoned == []
     assert [waited for _, _, waited in run.sink.resumed] == waits[: len(run.sink.resumed)]
-    assert run.now() - START <= BUDGET
 
 
 class _Capture(FakeAgentClient):

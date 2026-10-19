@@ -78,21 +78,20 @@ def _outage() -> AgentQuotaError:
 def credited_limit(stated: float, hold: CapacityHold | None) -> float:
     """Core's rule for a turn's limit, given the latest hold the gate reported for it.
 
-    A turn held now may stay held up to the budget; a parked one (waiting for the operator)
-    until it is released; a released one is credited the time it was held, up to the budget.
+    The holds that ended are credited whole. The current one may last up to the budget while
+    the gate is in it, until it is released when parked (waiting for the operator), and is
+    credited its length up to the budget once released.
     """
     if hold is None:
         return stated
+    at = stated + hold.credit
+    if hold.since is None:
+        return at
     if hold.parked:
         return float("inf")
-    if hold.since is not None and hold.released_at is None:
-        return stated + hold.budget
-    held = hold.credit + (
-        hold.released_at - hold.since
-        if hold.since is not None and hold.released_at is not None
-        else 0.0
-    )
-    return stated + min(held, hold.budget)
+    if hold.released_at is None:
+        return at + hold.budget
+    return at + min(hold.released_at - hold.since, hold.budget)
 
 
 class _Sink(NullAgentEventSink):
@@ -193,10 +192,10 @@ class _Turn:
                 self.ended.append(f"failed: {type(error).__name__}")
 
         self.threads.run(main)
+        self.latest()  # the report the gate made as it let the turn go
 
 
 @pytest.mark.regression
-@pytest.mark.xfail(strict=True, reason="S179: the gate does not report its holds")
 @settings(max_examples=examples(pr=10, nightly=60), deadline=None)
 @example(
     turn_time=1800.0,
@@ -219,6 +218,9 @@ def test_an_outage_shorter_than_the_budget_never_fails_a_turn(
 
     assert turn.ended == ["plan"]
     assert turn.sink.abandoned == []
+    if outage <= send_s:  # the first send outlasted the outage: the turn never stopped
+        assert turn.holds == []
+        return
     # The hold spans the turn's stay at the gate: from its first stop to its last release.
     final = turn.holds[-1]
     assert final.since == pytest.approx(START + send_s)
@@ -226,7 +228,6 @@ def test_an_outage_shorter_than_the_budget_never_fails_a_turn(
     assert final.released_at >= START + outage - send_s
 
 
-@pytest.mark.xfail(strict=True, reason="S179: a spent outage budget gives the turn up")
 @pytest.mark.parametrize("action", [QuotaAction.PAUSE, QuotaAction.WAIT], ids=str)
 def test_an_outage_past_its_budget_pauses_the_run_until_the_operator_resumes(
     action: QuotaAction,

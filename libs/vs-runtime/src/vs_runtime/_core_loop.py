@@ -1328,26 +1328,26 @@ class CoreRuntime[S: StrategyState]:
             flight.task.cancel()
         await asyncio.gather(*(f.task for f in flights), return_exceptions=True)
 
-    def _ended_by_core(self, flight: _Flight, now_at: float) -> bool:
-        """Whether core has ended this request, or its time has passed.
+    def _ended_by_core(self, flight: _Flight) -> bool:
+        """Whether core has ended this request.
 
         Core ends a record at its limit and when a watch fires (it becomes BLOCKED and
         its owner hears ``Failed``). The executor may not know, so the loop stops it.
+        Core alone judges the limit: it moves a record's bound (the time a job queued, a
+        quota pause held the run, or the capacity gate held a turn is never charged to it),
+        so neither the limit the request was authorized with nor the record's stated
+        ``until`` is when it ends (S179).
         """
         current = self.record.envelope.core.records.record(flight.record.request_id)
-        if current is None or current.phase in (RequestPhase.BLOCKED, RequestPhase.COMPLETED):
-            return True
-        # Core's record, not the limit the flight began with: core moves a turn's limit past
-        # the time the run spends held by a quota stop.
-        return current.until.at <= now_at
+        return current is None or current.phase in (RequestPhase.BLOCKED, RequestPhase.COMPLETED)
 
-    async def cancel_ended(self, now_at: float) -> bool:
-        """Cancel the running requests whose limit has passed or that core has ended.
+    async def cancel_ended(self) -> bool:
+        """Cancel the running requests core has ended, at their limit or by a watch.
 
         This is the only place a running request is stopped because a limit or watch
         fired. A cancelled request returns no observation; core already reported it.
         """
-        ended = [f for f in self._flights if not f.task.done() and self._ended_by_core(f, now_at)]
+        ended = [f for f in self._flights if not f.task.done() and self._ended_by_core(f)]
         for flight in ended:
             self._flights.remove(flight)
             flight.task.cancel()
@@ -1406,7 +1406,7 @@ class CoreRuntime[S: StrategyState]:
         try:
             while True:
                 # A failed request surfaces before anything else commits.
-                if self._finish_done() or await self.cancel_ended(now_at) or self.advance():
+                if self._finish_done() or await self.cancel_ended() or self.advance():
                     upkeep()
                     continue
                 if refusal is None:

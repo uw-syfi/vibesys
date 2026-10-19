@@ -111,13 +111,14 @@ class OutagePolicy:
     """How long one turn waits out a provider outage, and how often it tries again.
 
     An outage (``QuotaCondition.UNAVAILABLE``) names no limit and no reset time: the
-    provider kept failing with transient errors. Nobody can decide anything about it,
-    so unlike a quota it never waits for the operator. The turn is sent again after
-    ``first_wait_seconds``, then after waits that double up to ``max_wait_seconds``,
-    until ``budget_seconds`` have passed since the turn's first stop; then the turn
-    fails with the error, as it did before there was a gate, or, with
-    ``switch_when_spent``, the run switches to its fallback provider.
-    :func:`outage_policy_for` derives the policy a run's quota policy asks for.
+    provider kept failing with transient errors. Within its budget nobody needs to decide
+    anything about it, so unlike a quota it holds only the turn, not the run. The turn is
+    sent again after ``first_wait_seconds``, then after waits that double up to
+    ``max_wait_seconds``, until ``budget_seconds`` have passed since the turn's first stop.
+    Then, with ``pause_when_spent``, the run pauses for the operator, as for a quota; with
+    ``switch_when_spent`` the run switches to its fallback provider; with neither the turn
+    fails with the error. :func:`outage_policy_for` derives the policy a run's quota
+    policy asks for.
     """
 
     budget_seconds: float = 6 * 3600.0
@@ -134,11 +135,16 @@ class OutagePolicy:
     left), so an outage never holds a run beyond its deadline."""
     first_wait_seconds: float = 60.0
     max_wait_seconds: float = 600.0
-    """Ten minutes. Each attempt also spends agentshim's own retries (about fifteen
-    minutes, ``TRANSIENT_RETRY_DELAYS_S``) before it stops again, so a stalled turn
-    probes the provider about every 25 minutes at most."""
+    """Ten minutes. Each attempt also spends agentshim's own retry (30 s,
+    ``TRANSIENT_RETRY_DELAYS_S``) and the provider CLI's retries before it stops again, so
+    a stalled turn probes the provider about every quarter hour at most."""
     switch_when_spent: bool = False
     """Switch to the fallback provider once the budget is spent, instead of failing."""
+    pause_when_spent: bool = False
+    """Pause the run for the operator once the budget is spent, instead of failing (S179:
+    an outage must never end a run that asked to wait). The turn stays held, its limit
+    uncharged, until the operator resumes the run; then it is sent again and a new budget
+    starts. ``switch_when_spent`` takes precedence."""
 
     def __post_init__(self) -> None:
         """Reject values no decision can use."""
@@ -157,14 +163,14 @@ PROVIDER_OUTAGE = OutagePolicy()
 def outage_policy_for(quota: QuotaPolicy, base: OutagePolicy = PROVIDER_OUTAGE) -> OutagePolicy:
     """The outage policy a run with quota policy ``quota`` follows.
 
-    ``pause`` and ``wait`` wait an outage out for the whole budget: an outage names
-    nothing an operator could decide, so it never waits for one. ``fail`` and
+    ``pause`` and ``wait`` wait an outage out for the whole budget, then pause the run for
+    the operator, so an outage never ends a run that chose to wait for capacity. ``fail`` and
     ``fallback`` say the run should not sit on a provider that cannot serve it, so
     they allow one backoff step (``first_wait_seconds``, enough for a blip to pass);
     then ``fail`` fails the turn and ``fallback`` switches to the fallback provider.
     """
     if quota.action in (QuotaAction.PAUSE, QuotaAction.WAIT):
-        return base
+        return replace(base, pause_when_spent=True)
     return replace(
         base,
         budget_seconds=base.first_wait_seconds,
@@ -174,19 +180,22 @@ def outage_policy_for(quota: QuotaPolicy, base: OutagePolicy = PROVIDER_OUTAGE) 
 
 def decide_outage(
     policy: OutagePolicy, *, stop: int, elapsed: float, run_left: float | None
-) -> WaitFor | GiveUp | Switch:
+) -> Hold | WaitFor | GiveUp | Switch:
     """Decide what to do about the ``stop``-th outage stop of one turn (the first is 1).
 
     ``elapsed`` is the time since the turn's first outage stop and ``run_left`` the time
     to the run's deadline (``None`` for a run without one). A wait never runs past the
     budget nor past the deadline, so the time from the first stop to the last attempt is
     at most the budget, and a turn never waits once the run is out of time. A spent
-    budget switches providers under ``switch_when_spent``; a deadline never does.
+    budget switches providers under ``switch_when_spent``, else holds for the operator
+    under ``pause_when_spent``; a deadline does neither.
     """
     if run_left is not None and run_left <= 0:
         return GiveUp("the run reached its deadline while the provider was unavailable")
     remaining = policy.budget_seconds - elapsed
     if remaining <= 0:
+        if not policy.switch_when_spent and policy.pause_when_spent:
+            return Hold()
         end = Switch if policy.switch_when_spent else GiveUp
         return end(
             f"the provider stayed unavailable for {describe_seconds(elapsed)}, "

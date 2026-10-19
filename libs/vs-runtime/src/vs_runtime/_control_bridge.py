@@ -29,12 +29,15 @@ from vs_core.api import (
     ControlInput,
     CoreState,
     InputMode,
+    InvocationId,
     PauseOwner,
     RunControlEvent,
     RunPause,
     RunStatus,
     SessionInputReceived,
+    SessionPhase,
     StopMode,
+    TurnHeld,
     capacity_wait_stands,
     control_refusal,
     escalate_stop,
@@ -108,8 +111,29 @@ type ControlAction = Literal[
 
 _LOG = logging.getLogger(__name__)
 
+_HOLDABLE = frozenset({SessionPhase.EXECUTING, SessionPhase.UNKNOWN})
+"""The phases of a turn the capacity gate may be holding: dispatched and not yet ended."""
+
 _MAX_REQUEST_BYTES = 1 << 20
 """The largest inbox request the run reads: a steer's text with ample room."""
+
+
+def _capacity_holds(core: CoreState, channel: RunControlChannel) -> tuple[TurnHeld, ...]:
+    """The capacity gate's hold reports for the turns core runs, which credit their limits.
+
+    A report for a turn core does not run (it already ended it) would change nothing, so it
+    is dropped here rather than committed.
+    """
+    running = {
+        row.invocation.invocation_id.root
+        for row in core.sessions.invocations
+        if row.phase in _HOLDABLE
+    }
+    return tuple(
+        TurnHeld(invocation_id=InvocationId(root=invocation), hold=hold)
+        for invocation, hold in channel.take_capacity_holds().items()
+        if invocation in running
+    )
 
 
 class SteerArtifacts(Protocol):
@@ -251,7 +275,8 @@ class RunControlBridge:
         # sends a standing steer and then its withdrawal through the socket has the steer
         # queued first, so this poll takes it too and records it before the withdrawal.
         withdrawals = self._channel.take_pending_withdrawals()
-        events: list[CoreEvent] = list(unrecorded_steers(core, now_at))
+        events: list[CoreEvent] = list(_capacity_holds(core, self._channel))
+        events.extend(unrecorded_steers(core, now_at))
         if self._lift_pending:
             self._lift_pending = False
             lift = self._event(core, now_at, _Change("resume", when="now"))

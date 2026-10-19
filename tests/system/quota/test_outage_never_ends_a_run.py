@@ -409,7 +409,6 @@ _POLICIES = st.sampled_from(
 
 
 @pytest.mark.regression
-@pytest.mark.xfail(strict=True, reason="S179: a provider outage ends the run")
 @_SETTINGS
 @example(
     pattern=Pattern.TOTAL,

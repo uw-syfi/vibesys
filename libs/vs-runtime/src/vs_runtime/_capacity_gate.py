@@ -6,10 +6,12 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
 from vs_agent.api import Attribution, CapacityGated, ProviderSwitch, QuotaCondition, QuotaPlan
+from vs_core.api import CapacityHold
 from vs_runtime._fallback import ProviderFallback
 from vs_runtime._quota_policy import (
     PROVIDER_OUTAGE,
     GiveUp,
+    Hold,
     OutagePolicy,
     QuotaAction,
     QuotaPolicy,
@@ -197,11 +199,49 @@ class _TurnMemory:
     only, the budget ``decide_quota`` spends. ``capacity_requested`` is whether the
     operator asked this turn to wait for capacity. ``outage`` is the current outage
     streak, kept apart so a quota stop and an outage stop never spend each other's budget.
+
+    ``held``, ``held_since`` and ``released_at`` are the turn's hold as the gate reports it
+    to core (``CapacityHold``), which never charges it to the turn's limit: the length of
+    the holds that ended, when the current one began (an outage streak is one hold, the
+    sends between its waits included), and when its latest wait ended.
     """
 
     quota_waited: float = 0.0
     capacity_requested: bool = False
     outage: _OutageStreak | None = None
+    held: float = 0.0
+    held_since: float | None = None
+    released_at: float | None = None
+
+    def hold(self, now: float, *, continues: bool) -> None:
+        """Begin a hold at ``now``, or with ``continues`` go on with the current one."""
+        if not continues:
+            self.close(now)
+        if self.held_since is None:
+            self.held_since = now
+        self.released_at = None
+
+    def close(self, now: float) -> None:
+        """End the current hold, at its latest release or else ``now``, and credit it."""
+        if self.held_since is not None:
+            end = now if self.released_at is None else self.released_at
+            self.held += end - self.held_since
+        self.held_since = self.released_at = None
+
+    def release(self, now: float) -> None:
+        """End the hold's latest wait at ``now``: the turn is sent again or ends."""
+        if self.held_since is not None and self.released_at is None:
+            self.released_at = now
+
+    def report(self, budget: float, *, parked: bool = False) -> CapacityHold:
+        """The hold as core takes it."""
+        return CapacityHold(
+            credit=self.held,
+            since=self.held_since,
+            released_at=self.released_at,
+            parked=parked and self.held_since is not None and self.released_at is None,
+            budget=budget,
+        )
 
 
 def _memory(stops: CapacityStops) -> _TurnMemory:
@@ -268,13 +308,19 @@ class PolicyCapacityGate:
     and ``wait``, one backoff step under ``fail`` and ``fallback``), and without pausing
     the run: only the stopped turn waits, on its own thread, while the run goes on
     dispatching measurements and other turns. The turn is sent again with backoff
-    until the outage budget is spent or the run's deadline comes, then it fails (or
-    the run switches to its fallback); a stop request or a cancellation of the turn
-    ends the wait at once. An outage names no limit an operator could decide about,
-    and a run left unattended overnight must not end on one. A stop is not an outage
+    until the outage budget is spent, then, under ``pause`` and ``wait``, the run
+    pauses for the operator as for a quota (under ``fail`` the turn fails, under
+    ``fallback`` the run switches); the run's deadline ends the wait, and a stop
+    request or a cancellation of the turn ends it at once. A run left unattended
+    overnight must not end on an outage (S179). A stop is not an outage
     when, while the turn's latest send was failing, its route (provider and model)
     served other turns and no other turn stopped on it: the route is up and the
     failure is the turn's own, so the turn fails at once.
+
+    The gate reports each turn's hold (``CapacityHold``) on the control channel when it
+    begins waiting and when it lets the turn go; the run loop hands the reports to core,
+    which never charges held time to the turn's limit, so a hold the policy allows is
+    never cut short by the limit.
 
     Quota stops and outage stops of one turn keep apart: an outage never spends the
     quota wait budget, and a quota stop ends the turn's outage streak, so a later
@@ -313,9 +359,27 @@ class PolicyCapacityGate:
     ) -> None:
         """Return once the turn may be sent again; raise to end it.
 
-        An outage holds only this turn; any other capacity limit pauses the run.
+        An outage holds only this turn; any other capacity limit pauses the run. The gate
+        reports the turn's hold on the control channel while it waits and when it lets the
+        turn go, so core never charges that time to the turn's limit.
         """
         context = Attribution(role, turn.label, turn.invocation_id)
+        memory = _memory(stops)
+        try:
+            self._stop(error, stops, context)
+        finally:
+            memory.release(self._timer.now())
+            self._report(context, memory)
+
+    def _report(self, context: Attribution, memory: _TurnMemory, *, parked: bool = False) -> None:
+        """Tell the run loop how long the gate has held the turn, for core to credit."""
+        if context.invocation_id is not None:
+            self._control.note_capacity_hold(
+                context.invocation_id, memory.report(self._outage.budget_seconds, parked=parked)
+            )
+
+    def _stop(self, error: AgentQuotaError, stops: CapacityStops, context: Attribution) -> None:
+        """Hold the turn through one capacity stop; raise to end it."""
         memory = _memory(stops)
         now = self._timer.now()
         if stops.cancelled:
@@ -330,6 +394,7 @@ class PolicyCapacityGate:
             self._wait_out_outage(error, stops, now, context)
             return
         memory.outage = None
+        memory.hold(now, continues=False)
         decision = decide_quota(
             self._policy, resets_at=error.resets_at, now=now, waited=memory.quota_waited
         )
@@ -345,7 +410,25 @@ class PolicyCapacityGate:
             None if target is None else target.provider,
             None if target is None else target.model,
         )
+        memory.quota_waited += self._pause_run(error, stops, context, plan, decision)
+
+    def _pause_run(
+        self,
+        error: AgentQuotaError,
+        stops: CapacityStops,
+        context: Attribution,
+        plan: QuotaPlan,
+        decision: Hold | WaitFor,
+    ) -> float:
+        """Pause the run for the turn's stop, park the turn, and return how long it waited.
+
+        ``WaitFor`` arms a timed resume; ``Hold`` waits for the operator. Raises the quota
+        error when the turn was cancelled or the operator resumed with the fallback.
+        """
+        memory = _memory(stops)
+        now = self._timer.now()
         self._events.quota_paused(error, plan, context)
+        self._report(context, memory, parked=True)
         timed = isinstance(decision, WaitFor)
         # The turn owns the pause from before it exists until it stops waiting on it.
         self._control.enter_capacity(timed=timed)
@@ -357,8 +440,9 @@ class PolicyCapacityGate:
                 wake = self._hold(error, stops, memory, context)
         finally:
             self._control.leave_capacity(timed=timed)
+        # The run resumed: the hold ends here, credited whole however long the run was paused.
+        memory.close(self._timer.now())
         waited = self._timer.now() - now
-        memory.quota_waited += waited
         if wake is PauseWake.DETACHED or stops.cancelled:
             self._abandon(
                 error, f"the turn was cancelled after {describe_seconds(waited)}", context, waited
@@ -370,20 +454,24 @@ class PolicyCapacityGate:
         self._events.quota_resumed(
             error, "operator" if wake is PauseWake.RESUMED else "wait_elapsed", waited, context
         )
+        return waited
 
     def _wait_out_outage(
         self, error: AgentQuotaError, stops: CapacityStops, now: float, context: Attribution
     ) -> None:
         """Hold this turn through one outage backoff, without touching the run's pause.
 
-        Returns when the turn should be sent again. Raises ``RunStopped`` on a stop
-        request, and the quota error when the turn was cancelled, the run reached its
-        deadline, the budget is spent, or the route served other turns while this turn's
-        latest send was failing and no other turn stopped on it.
+        Returns when the turn should be sent again. Once the budget is spent under a policy
+        that waits for capacity, pauses the run for the operator instead (``_park_outage``).
+        Raises ``RunStopped`` on a stop request, and the quota error when the turn was
+        cancelled, the run reached its deadline, the budget is spent under ``fail``, or the
+        route served other turns while this turn's latest send was failing and no other
+        turn stopped on it.
         """
         route = (error.provider, stops.model)
         memory = _memory(stops)
         streak = memory.outage
+        memory.hold(now, continues=streak is not None)
         if streak is None:
             streak = memory.outage = _OutageStreak(since=now)
         elif streak.released is not None and self._route_up(route, streak.released):
@@ -407,8 +495,12 @@ class PolicyCapacityGate:
             self._abandon(error, decision.reason, context)
         if isinstance(decision, Switch):
             self._switch_or_abandon(error, "policy", decision.reason, context)
+        if isinstance(decision, Hold):
+            self._park_outage(error, stops, context)
+            return
         plan = QuotaPlan(QuotaAction.WAIT.value, now + decision.seconds, None, None)
         self._events.quota_paused(error, plan, context)
+        self._report(context, memory)
         unsubscribe = self._control.on_stop_requested(stops.interrupt)
         try:
             if not self._control.stop_requested() and not stops.cancelled:
@@ -430,6 +522,27 @@ class PolicyCapacityGate:
             )
         streak.released = self._health.snapshot(route)
         self._events.quota_resumed(error, "wait_elapsed", waited, context)
+
+    def _park_outage(
+        self, error: AgentQuotaError, stops: CapacityStops, context: Attribution
+    ) -> None:
+        """Pause the run for the operator: the turn waited out the whole outage budget.
+
+        The provider may never come back (a revoked account, a removed model), which only
+        the operator can tell, so the run waits for them as for a quota instead of ending
+        (S179). The turn stays parked, its limit uncharged, until the operator resumes the
+        run or asks to wait for capacity; then it is sent again and its next outage stop
+        starts a new streak and budget. A cancellation of the turn ends only its park.
+        """
+        target = self._fallback.target
+        plan = QuotaPlan(
+            QuotaAction.PAUSE.value,
+            None,
+            None if target is None else target.provider,
+            None if target is None else target.model,
+        )
+        self._pause_run(error, stops, context, plan, Hold())
+        _memory(stops).outage = None
 
     def _route_up(self, route: Route, released: RouteHealth) -> bool:
         """Whether ``route`` served turns, and no other turn stopped on it, since ``released``."""

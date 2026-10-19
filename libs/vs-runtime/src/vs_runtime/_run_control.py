@@ -14,7 +14,7 @@ from vs_runtime._operator_control import ControlAction, SteerMode, SteerTarget, 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from vs_core.api import StopMode
+    from vs_core.api import CapacityHold, StopMode
     from vs_runtime._operator_control import ActionRequest
     from vs_sim.api import Threads
 
@@ -617,6 +617,19 @@ class RunControlChannel(Protocol):
         """When the run must end, or ``None`` before the run loop recorded it."""
         ...
 
+    def note_capacity_hold(self, invocation_id: str, hold: CapacityHold) -> None:
+        """Record the capacity gate's latest report of how long it held turn ``invocation_id``.
+
+        The gate holds a stopped turn inside the turn's own call, on the turn's thread; the
+        run loop takes the reports at its control poll (:meth:`take_capacity_holds`) and
+        core credits them to the turn's limit. A report replaces the turn's earlier one.
+        """
+        ...
+
+    def take_capacity_holds(self) -> dict[str, CapacityHold]:
+        """Drain the latest hold report of each turn reported since the previous poll."""
+        ...
+
 
 class RunStopped(BaseException):
     """A requested stop landed at a cooperative run boundary."""
@@ -656,6 +669,7 @@ class RuntimeRunControlChannel:
         self._capacity_request: int | None = None
         self._capacity_requests = 0
         self._run_deadline: float | None = None
+        self._capacity_holds: dict[str, CapacityHold] = {}
         # The quota pause's timed resume, on the ``threads.now`` timeline. ``None`` unless
         # a quota pause armed one, and always ``None`` under the operator's hold.
         self._resume_at: float | None = None
@@ -910,6 +924,17 @@ class RuntimeRunControlChannel:
         """When the run must end, or ``None`` before it was recorded."""
         with self._lock:
             return self._run_deadline
+
+    def note_capacity_hold(self, invocation_id: str, hold: CapacityHold) -> None:
+        """Keep the latest hold report of the turn until the next poll takes it."""
+        with self._lock:
+            self._capacity_holds[invocation_id] = hold
+
+    def take_capacity_holds(self) -> dict[str, CapacityHold]:
+        """Drain the hold reports made since the previous poll, the latest of each turn."""
+        with self._lock:
+            holds, self._capacity_holds = self._capacity_holds, {}
+        return holds
 
     def take_pending_steer(self) -> list[QueuedSteer]:
         """Drain steering queued since the previous invocation boundary."""

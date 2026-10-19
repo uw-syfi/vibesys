@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 import pytest
@@ -242,8 +243,9 @@ def _quota_policy(action: QuotaAction) -> QuotaPolicy:
 def test_the_quota_policy_bounds_how_long_an_outage_is_waited_out(
     action: QuotaAction, stops: list[float]
 ) -> None:
-    """``pause`` and ``wait`` wait an outage out for the whole budget; ``fail`` and ``fallback``
-    wait one backoff step, then fail or switch to the fallback.
+    """``pause`` and ``wait`` wait an outage out for the whole budget, then hold the turn for
+    the operator (S179); ``fail`` and ``fallback`` wait one backoff step, then fail or switch
+    to the fallback.
 
     ``stops`` are the times each later stop took to come back (the send's own retries); the
     turn waits what each decision says, and the sequence ends at the first decision that
@@ -262,7 +264,8 @@ def test_the_quota_policy_bounds_how_long_an_outage_is_waited_out(
 
     first = PROVIDER_OUTAGE.first_wait_seconds
     if action in (QuotaAction.PAUSE, QuotaAction.WAIT):
-        assert policy == PROVIDER_OUTAGE
+        assert policy == replace(PROVIDER_OUTAGE, pause_when_spent=True)
+        assert isinstance(decision, WaitFor | Hold)
     else:
         # One backoff step, then the policy's own end: a switch only under fallback.
         assert waits == [first]
