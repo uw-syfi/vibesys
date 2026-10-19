@@ -1,7 +1,6 @@
 import {mkdirSync} from 'node:fs';
 import {expect, type Page, test} from '@playwright/test';
 import type {RunEvent} from '@vibesys/contracts';
-import {event} from '@vibesys/contracts/testing';
 import {fixtureNamed} from '@vibesys/run-fixtures';
 import {screenCheck} from './checks/screen-check.js';
 import {settled} from './checks/settle.js';
@@ -25,6 +24,11 @@ const CHAT = {agent_kind: 'chat', round_label: 'experiment-chat', chat_thread_id
 
 interface FixtureWindow extends Window {
   fakeHost: {emit(events: readonly unknown[]): void; controls: {control_id?: string}[]};
+}
+
+/** A wire event of the chat's: the envelope the fake run server streams, with the caller's fields. */
+function event(sequence: number, type: string, fields: object = {}): RunEvent {
+  return {timestamp: '2026-10-15T16:31:00Z', type, sequence, ...fields} as unknown as RunEvent;
 }
 
 function created(sequence: number): RunEvent {
@@ -64,7 +68,7 @@ function proposed(sequence: number): RunEvent {
       kind: 'steer_proposed',
       proposal_id: 'proposal-1',
       proposal: {
-        text: 'Keep the weights in bf16 and check the scale first.',
+        text: 'Pad the head and tail counters to their own cache lines.',
         target: {kind: 'role', id: 'implementer'},
         mode: 'standing',
       },
@@ -81,10 +85,11 @@ function delivery(sequence: number, controlId: string, step: Record<string, unkn
 }
 
 const ANSWER = [
-  'The best idea so far is the ring with padding, at **1.42×** the base.',
+  'The best idea so far is the lock-free ring with per-slot sequence numbers, at **1.18×** the input.',
   '',
-  '- It passed every check.',
-  '- Its second attempt fixed the false sharing.',
+  '- 48.6 ops/s against 41.2.',
+  '- Cache-line padding passed at 1.07×.',
+  '- Larger batch size failed at 0.76×.',
 ].join('\n');
 
 /** The sequence after the fixture's own events: where the chat's events start. */
@@ -97,7 +102,7 @@ function firstSequence(): number {
 function conversation(from: number): readonly RunEvent[] {
   return [
     created(from),
-    chunk(from + 1, 'The best idea so far is the ring with padding.'),
+    chunk(from + 1, 'The best idea so far is the lock-free ring.'),
     answered(from + 2, 'What is the best idea?', ANSWER, from + 1),
     proposed(from + 3),
   ];
@@ -167,7 +172,10 @@ test('the last thread opens by default, with a streaming answer', async ({page})
   const from = firstSequence();
   await emit(page, [
     created(from),
-    chunk(from + 1, 'The best idea so far is the ring with padding, because it'),
+    chunk(
+      from + 1,
+      'The best idea so far is the lock-free ring with per-slot sequence numbers, because it',
+    ),
   ]);
   await openPanel(page);
   await expect(panel(page).getByText('Writing')).toBeVisible();
@@ -179,8 +187,15 @@ test('a proposed steer shows as a card, edited before anything is sent', async (
   await emit(page, conversation(firstSequence()));
   await openPanel(page);
   const text = panel(page).getByRole('textbox', {name: 'Steer text'});
-  await expect(text).toHaveValue('Keep the weights in bf16 and check the scale first.');
-  await text.fill('Keep the weights in bf16.');
+  await expect(text).toHaveValue('Pad the head and tail counters to their own cache lines.');
+  await text.fill('Pad head and tail to their own cache lines.');
+  // The target is one select: the whole run, then each role of the run by its display name.
+  await expect(panel(page).getByRole('combobox', {name: 'To'}).locator('option')).toHaveText([
+    'Whole run',
+    'Planner',
+    'Implementer',
+    'Judge',
+  ]);
   await panel(page).getByRole('radiogroup', {name: 'When'}).getByText('Now', {exact: true}).click();
   const sent = await page.evaluate(
     () => (window as unknown as FixtureWindow).fakeHost.controls.length,
@@ -207,7 +222,7 @@ const DELIVERIES: readonly {
     name: 'in-force',
     mode: 'Every turn',
     steps: [{state: 'queued'}, {state: 'in_force', role: 'implementer'}],
-    shows: 'In force · Implementer',
+    shows: 'In force · Implementer · every turn',
   },
   {
     name: 'dropped',
@@ -265,12 +280,27 @@ test('a standing steer in force offers Withdraw, which ends it', async ({page}) 
   await check(page, 'standing-withdrawn');
 });
 
+test('Steer turns what is typed into a card, with no text left in the composer', async ({page}) => {
+  await open(page, 1440);
+  await emit(page, conversation(firstSequence()));
+  await openPanel(page);
+  const composer = panel(page).getByRole('textbox', {name: 'Message'});
+  await composer.fill('Spend the next idea on batching.');
+  await panel(page).getByRole('button', {name: 'Steer', exact: true}).click();
+  await expect(composer).toHaveValue('');
+  await expect(panel(page).getByRole('textbox', {name: 'Steer text'})).toHaveCount(2);
+  await check(page, 'steer-written');
+});
+
 test('a new chat shows the harness picker and an empty thread', async ({page}) => {
   await open(page, 1440);
   await emit(page, conversation(firstSequence()));
   await openPanel(page);
   await panel(page).getByRole('button', {name: 'New chat'}).click();
-  await expect(panel(page).getByText('No messages')).toBeVisible();
+  await expect(panel(page).getByRole('textbox', {name: 'Message'})).toHaveAttribute(
+    'placeholder',
+    'Ask about this run',
+  );
   await expect(panel(page).getByRole('combobox', {name: 'Harness'})).toBeVisible();
   await check(page, 'empty-thread-picker');
   const models = panel(page).getByRole('combobox', {name: 'Model'});
