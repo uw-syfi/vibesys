@@ -901,7 +901,7 @@ class SlurmJobRunner:
         pause: Callable[[float], None],
         timeout_seconds: float,
         cancel_event: Event | None = None,
-        queued: Callable[[SchedulerReading, float], None] = lambda _reading, _waited: None,
+        queued: Callable[[SchedulerReading, float], None] | None = None,
     ) -> SlurmJobWaitResult:
         """Observe until the job runs or ends; ``timed_out``: still queued. Never cancels.
 
@@ -909,7 +909,9 @@ class SlurmJobRunner:
         """
         if not math.isfinite(timeout_seconds) or timeout_seconds <= 0:
             raise SlurmError.invalid_wait_timeout()
-        return self._observe(handle, timeout_seconds, cancel_event, pause, queued=queued)
+        return self._observe(
+            handle, timeout_seconds, cancel_event, pause, queued=queued or _ignore_reading
+        )
 
     def _observe(
         self,
@@ -1326,6 +1328,11 @@ class SlurmJobRunner:
         if match is None:
             raise SlurmError.missing_job_id()
         return match.group(1)
+
+
+def _ignore_reading(reading: SchedulerReading, waited_seconds: float) -> None:
+    """Hear a pending reading and do nothing: the caller only waits for the start."""
+    del reading, waited_seconds
 
 
 class _Transport(Protocol):

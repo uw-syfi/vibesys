@@ -36,7 +36,7 @@ from vs_sim.api.testing import FakePipedProcessLauncher, SimThreads
 from vs_slurm.api import FakeConnector
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable
+    from collections.abc import Callable, Coroutine
 
     from vs_runtime.api.infrastructure import (
         RunEnvironment,
@@ -193,7 +193,7 @@ def _on_the_hosts_threads(
     backend: DaemonBackend,
     open_session: Callable[[RunEnvironmentRequest], RunEnvironmentSession],
     connector: FakeConnector,
-    exercise: Callable[[RuntimeWorkspaces], Awaitable[None]],
+    exercise: Callable[[RuntimeWorkspaces], Coroutine[object, object, None]],
 ) -> None:
     """Run ``exercise`` on the first host, as a simulated thread of the hosts' own threads.
 
