@@ -108,6 +108,7 @@ class World(TypedDict, total=False):
     throughputs: dict[str, float]
     comparisons: dict[str, tuple[float, float]]
     baseline: Baseline
+    input_recovers: bool
     validation: Validation
     attribution_output: str
     attribution_exit_code: int
@@ -142,6 +143,10 @@ class SerialHost:
     ledger: list[EvidenceRef] = field(default_factory=list)
     """Core's ledger of the official records the host answered, as the run's view states it."""
     baseline: Baseline = "measured"
+    input_recovers: bool = False
+    """The input's measurement ends as ``baseline`` once only: measured again, it is measured."""
+    input_measurements: int = 0
+    """How many times the host measured the input."""
     validation: Validation = "passed"
     attribution_output: str = ""
     attribution_exit_code: int = 0
@@ -311,6 +316,10 @@ class SerialHost:
         assert isinstance(plan.candidate, RevisionRef)
         candidate = plan.candidate
         is_input = plan.purpose == "baseline"
+        if is_input:
+            if self.input_recovers and self.input_measurements:
+                self.baseline = "measured"
+            self.input_measurements += 1
         if is_input and self.baseline == "lost":
             self.run.fail(asked, FailureReason.LOST)
             return

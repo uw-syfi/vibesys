@@ -33,7 +33,7 @@ from tests.vibesys.search_faults import assert_flow_closed
 from tests.vibesys.vibesys_flows import across_restarts
 
 from headless.framework_events import format_framework_event
-from vibesys.candidates.api import InputFailureKind
+from vibesys.candidates.api import InputFailureKind, Unmeasurable
 from vibesys.dynamic_core import dynamic_projector
 from vibesys.events import CoreEvent, CoreEventType
 from vibesys.orchestration.dynamic.search.api import (
@@ -41,6 +41,7 @@ from vibesys.orchestration.dynamic.search.api import (
     PlannerPrompt,
     PromptTemplate,
     RunSnapshot,
+    dynamic,
 )
 from vibesys.run.contracts import RunStatus, RunView
 from vibesys.run.integration import LocalRunIntegration
@@ -55,6 +56,7 @@ from vs_core.api import (
     StartAttempt,
     Wait,
 )
+from vs_core.api.testing import RestartPolicy, code_changed
 from vs_runtime.api.testing import idle_environment_system
 from vs_sim.api.testing import ManualClock, SimThreads
 
@@ -348,6 +350,40 @@ def test_an_input_measurement_lost_once_is_taken_again_and_the_run_compares_with
     assert _input_measurements(host) == host.input_measurements == 2
     _assert_adopted(host, uncompared=False)
     assert_flow_closed(host)
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize("step", range(6))
+def test_a_restart_while_the_second_input_measurement_is_decoded_takes_no_third(
+    *, step: int
+) -> None:
+    """The second measurement's checkpoint keeps the first's failure, so a restart stops at two.
+
+    The input's accuracy stage hits its time limit both times (no fault shown, so it is measured
+    once more). The run restarts with a code change after one of its first steps, so its
+    measuring flow resumes from its latest checkpoint rather than replaying its journal. One of
+    those steps (the fourth: the first measurement, its decoding, the second measurement) leaves
+    the second measurement in hand but not yet decoded. The resumed flow still knows this is the second measurement: it keeps the first failure for
+    the planner and does not measure a third time.
+    """
+    resume = RestartPolicy(steps=frozenset({step}), changes=(code_changed(dynamic),))
+    host = begin_with_evidence(
+        config(max_rounds=1),
+        restarting=resume,
+        baseline="failed-accuracy",
+        crash_text=HANG_TEXT,
+        input_blame=MeasurementFailure.AMBIGUOUS,
+    )
+    host.drain_until_turn(PLANNER_LABEL)
+    snapshot = host.run.published(RunSnapshot)
+
+    assert _input_measurements(host) == host.input_measurements == 2
+    assert snapshot is not None
+    baseline = snapshot.baseline
+    assert isinstance(baseline, Unmeasurable)
+    assert baseline.failure.kind is InputFailureKind.ACCURACY_FAILED
+    assert baseline.first_attempt is not None
+    assert baseline.first_attempt.kind is InputFailureKind.ACCURACY_FAILED
 
 
 # How the version before S173 recorded an input that failed its accuracy check: a measured input

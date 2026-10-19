@@ -23,6 +23,7 @@ if TYPE_CHECKING:
     from vibesys.metrics import EvidenceReading, PartialRow
     from vibesys.orchestration.dynamic.search.api import DynamicConfig
     from vs_core.api import EvidenceRef, RunFacts
+    from vs_core.api.testing import RestartPolicy
 
 
 @dataclass
@@ -72,7 +73,7 @@ class EvidenceWorld(World, total=False):
 def begin_with_evidence(
     cfg: DynamicConfig,
     *,
-    restarting: bool,
+    restarting: bool | RestartPolicy,
     facts: RunFacts = FACTS,
     **world: Unpack[EvidenceWorld],
 ) -> EvidenceHost:

@@ -24,11 +24,14 @@ from tests.vibesys.vibesys_flows import across_restarts
 
 from vs_core.api import (
     CaptureCommandBase,
+    EndReason,
     Finish,
+    Measure,
     Operation,
     RequestTurn,
     Retained,
     RevisionRef,
+    RunResultProposal,
     Settle,
     StartAttempt,
     Wait,
@@ -112,6 +115,70 @@ def bases(host: SerialHost) -> list[RevisionRef]:
         for item in host.run.decisions
         if isinstance(item, Wait) and isinstance(item.request, StartAttempt)
     ]
+
+
+def input_measurements(host: SerialHost) -> int:
+    """How many times the run asked core to measure the input."""
+    return sum(
+        isinstance(item, Wait)
+        and isinstance(item.request, Measure)
+        and item.request.plan.purpose == "baseline"
+        for item in host.run.decisions
+    )
+
+
+def adopted(host: SerialHost) -> RunResultProposal:
+    """The result of a run that adopted a retained candidate."""
+    finish = host.run.finished
+    assert isinstance(finish, Finish)
+    assert finish.result.outcome == "success", finish.result.reason
+    assert finish.result.selection is not None
+    assert finish.result.selection.kind == "retained_candidate"
+    return finish.result
+
+
+def uncompared(result: RunResultProposal) -> bool:
+    """Whether the run says its adopted candidate was never compared with the input."""
+    return result.reason.split(":", 1)[0] == EndReason.ADOPTED_WITHOUT_INPUT_COMPARISON
+
+
+# -- the input's measurement -----------------------------------------------------------------
+
+
+@SEARCHES
+@MODES
+def test_an_input_measurement_lost_twice_ends_adopted_without_an_input_comparison(
+    *, search: str, restarting: bool
+) -> None:
+    """A lost measurement shows nothing about the input, so it is taken once more, then stands.
+
+    Both attempts are lost, so there is no bar: the candidate that passes its gates is adopted,
+    and the run says it was never compared with the input.
+    """
+    host = start(search, restarting=restarting, baseline="lost")
+    design(host, "h1")
+    implement(host, search, "c1")
+    host.drain()
+
+    assert input_measurements(host) == host.input_measurements == 2
+    assert uncompared(adopted(host))
+    assert_flow_closed(host)
+
+
+@SEARCHES
+@MODES
+def test_an_input_measurement_lost_once_is_taken_again_and_the_winner_is_compared_with_it(
+    *, search: str, restarting: bool
+) -> None:
+    """The second measurement succeeds, so the candidate is compared with the input as usual."""
+    host = start(search, restarting=restarting, baseline="lost", input_recovers=True)
+    design(host, "h1")
+    implement(host, search, "c1")
+    host.drain()
+
+    assert input_measurements(host) == host.input_measurements == 2
+    assert not uncompared(adopted(host))
+    assert_flow_closed(host)
 
 
 # -- the designer ----------------------------------------------------------------------------
