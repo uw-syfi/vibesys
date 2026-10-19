@@ -54,7 +54,15 @@ export type Screen =
    */
   | {readonly kind: 'new-run'; readonly machine?: HostKey; readonly again?: RunRef}
   | {readonly kind: 'machines'}
-  | {readonly kind: 'settings'}
+  /**
+   * Settings; opened for a machine's `section` (New run's link to set a machine up), it lands on
+   * that machine and section, and leaving it returns to the screen it was opened from.
+   */
+  | {
+      readonly kind: 'settings';
+      readonly machine?: HostKey;
+      readonly section?: 'clusters' | 'logins';
+    }
   | {readonly kind: 'all-runs'}
   | {readonly kind: 'run'; readonly run: RunRef};
 

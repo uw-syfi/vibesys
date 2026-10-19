@@ -120,6 +120,12 @@ interface RetirementCleanups {
   readonly retireOwner?: (owner: string) => Promise<void>;
 }
 
+const COMPUTE = {
+  config_path: '/home/me/.config/vibesys/compute.toml',
+  clusters: [],
+  modal: {token_present: false},
+};
+
 function desktopWorld(cleanups: RetirementCleanups = {}, skipped: SkippedRecent[] = []) {
   const events: string[] = [];
   const logs: string[] = [];
@@ -236,6 +242,12 @@ function desktopWorld(cleanups: RetirementCleanups = {}, skipped: SkippedRecent[
       report: async () => ({kind: 'ready', facts: null}),
       inspect: async () => ({state: 'not_found'}),
       remove: async () => [],
+      compute: async () => ({kind: 'unsupported'}),
+      testCluster: async () => ({outcome: 'failed', stage: 'reach', detail: 'unreachable'}),
+      addCluster: async () => COMPUTE,
+      removeCluster: async () => COMPUTE,
+      agentLogins: async () => ({kind: 'unsupported'}),
+      startLogin: async () => ({outcome: 'unavailable', reason: 'not_installed'}),
     },
     runs,
     settings,
@@ -435,6 +447,46 @@ describe('Desktop New run routing', () => {
       'new-run:start-run',
       'new-run:helper-features',
     ]);
+  });
+});
+
+describe('Desktop machine Settings routing', () => {
+  test('sends each machine Settings request to the machines feature, with its machine', async () => {
+    const w = desktopWorld();
+    const cluster = {
+      name: 'lab',
+      reach: {kind: 'login_node'},
+      workspace: '/work',
+      sbatch_options: [],
+    };
+    const answers: readonly [readonly [string, ...unknown[]], unknown][] = [
+      [[WELCOME_CHANNELS.compute, 'local'], {kind: 'unsupported'}],
+      [
+        [WELCOME_CHANNELS.testCluster, 'local', cluster],
+        {outcome: 'failed', stage: 'reach', detail: 'unreachable'},
+      ],
+      [[WELCOME_CHANNELS.addCluster, 'local', cluster], COMPUTE],
+      [[WELCOME_CHANNELS.removeCluster, 'local', 'lab'], COMPUTE],
+      [[WELCOME_CHANNELS.agentLogins, 'local'], {kind: 'unsupported'}],
+      [
+        [WELCOME_CHANNELS.startLogin, 'local', 'claude'],
+        {outcome: 'unavailable', reason: 'not_installed'},
+      ],
+    ];
+    for (const [[channel, ...args], value] of answers) {
+      await expect(w.ipc.invoke('10:100', channel, ...args)).resolves.toEqual({ok: true, value});
+    }
+  });
+
+  test('a cluster the helper contract rejects never reaches the machines feature', async () => {
+    const w = desktopWorld();
+    const result = await w.ipc.invoke('10:100', WELCOME_CHANNELS.addCluster, 'local', {
+      name: 'a b',
+      reach: {kind: 'login_node'},
+      workspace: '/work',
+    });
+    expect(result).toMatchObject({ok: false});
+    expect(JSON.stringify(result)).toContain('cluster.name');
   });
 });
 

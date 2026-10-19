@@ -92,6 +92,12 @@ function cases(random: Seeded): Case[] {
     agents: random.pick([{}, {judge: {provider: 'claude', model: 'claude-b'}}]),
     args: random.pick([[], ['--max-in-flight', '3']]),
   };
+  const cluster = {
+    name,
+    reach: random.pick([{kind: 'login_node' as const}, {kind: 'ssh' as const, host: 'lab-login'}]),
+    workspace: path,
+    sbatch_options: random.pick([[], ['--account=lab']]),
+  };
   const appearance = {
     mode: random.pick(['system', 'light', 'dark'] as const),
     light: random.pick(['paper', 'mist', 'sand'] as const),
@@ -148,6 +154,12 @@ function cases(random: Seeded): Case[] {
     [bridge => bridge.machine(key), {kind: 'machine', host}],
     [bridge => bridge.inspectCheckout(key, path), {kind: 'inspect-checkout', host, path}],
     [bridge => bridge.removeMachine(key), {kind: 'remove-machine', host}],
+    [bridge => bridge.compute(key), {kind: 'compute', host}],
+    [bridge => bridge.testCluster(key, cluster), {kind: 'test-cluster', host, cluster}],
+    [bridge => bridge.addCluster(key, cluster), {kind: 'add-cluster', host, cluster}],
+    [bridge => bridge.removeCluster(key, name), {kind: 'remove-cluster', host, name}],
+    [bridge => bridge.agentLogins(key), {kind: 'agent-logins', host}],
+    [bridge => bridge.startLogin(key, name), {kind: 'start-login', host, provider: name}],
     [bridge => bridge.describeMachine(key), {kind: 'describe-machine', host}],
     [bridge => bridge.preflight(key, inputs), {kind: 'preflight', host, inputs}],
     [bridge => bridge.examples(key), {kind: 'examples', host}],

@@ -2,6 +2,7 @@ import {expect, type Page, test} from '@playwright/test';
 import {fixtureNamed} from '@vibesys/run-fixtures';
 import {installFakeBridge, installFakeMachines, installFakeNewRun} from './fake-bridge.js';
 import {openFixture} from './fixture-world.js';
+import {revealNav} from './settings-machine.js';
 import {SEED, sidebar} from './world.js';
 
 /**
@@ -36,6 +37,7 @@ async function openSettings(
 }
 
 const openMachines = async (page: Page): Promise<void> => {
+  await revealNav(page);
   await settingsNav(page)
     .getByRole('button', {name: /Machines/})
     .click();

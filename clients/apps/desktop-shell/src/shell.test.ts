@@ -154,3 +154,75 @@ test('regression: Run again opens New run with the options the run was started w
   expect(form.budget).toEqual({rounds: 3, timeLimitS: 600, results: 'publish_github'});
   expect(form.advanced).toBe('--max-in-flight 3');
 });
+
+test('Settings opened for a machine and section lands there, reads the machine, and returns to New run', async () => {
+  const read: string[] = [];
+  const ok = <T>(value: T) => Promise.resolve({ok: true as const, value});
+  const bridge = {
+    ...fakeBridge(),
+    machines: () =>
+      ok([
+        {host: 'local', label: 'This Mac', checkout: '/c'},
+        {host: 'ssh:gpu-box', label: 'gpu-box', checkout: '/c'},
+      ]),
+    compute: (host: string) => {
+      read.push(`compute ${host}`);
+      return ok({kind: 'unsupported' as const});
+    },
+    agentLogins: (host: string) => {
+      read.push(`logins ${host}`);
+      return ok({kind: 'unsupported' as const});
+    },
+  } as WelcomeBridge;
+  const stores = createShellStores(
+    bridge,
+    {mode: 'light', onChange: () => undefined},
+    {setAttribute: () => undefined},
+    () => () => undefined,
+    {
+      messages: {addEventListener: ignore, removeEventListener: ignore},
+      address: NO_ADDRESS,
+      now: () => 0,
+      session: () => {
+        throw new Error('this test opens no run');
+      },
+    },
+    {sidebar: {read: () => null, write: ignore}},
+  );
+  const select = (screen: Screen): void => stores.sidebar.store.dispatch({type: 'select', screen});
+  select({kind: 'new-run', machine: 'ssh:gpu-box'});
+  const before = stores.newRun.getState();
+  select({kind: 'settings', machine: 'ssh:gpu-box', section: 'logins'});
+  expect(stores.machineSettings.getState()).toMatchObject({
+    machine: 'ssh:gpu-box',
+    section: 'logins',
+  });
+  expect(read.sort()).toEqual(['compute ssh:gpu-box', 'logins ssh:gpu-box']);
+  stores.sidebar.store.dispatch({type: 'back-from-settings'});
+  expect(stores.sidebar.store.getState().selection).toMatchObject({kind: 'new-run'});
+  expect(stores.newRun.getState()).toBe(before);
+});
+
+test('Settings opened plainly keeps the machine and section it was on', async () => {
+  const stores = createShellStores(
+    fakeBridge(),
+    {mode: 'light', onChange: () => undefined},
+    {setAttribute: () => undefined},
+    () => () => undefined,
+    {
+      messages: {addEventListener: ignore, removeEventListener: ignore},
+      address: NO_ADDRESS,
+      now: () => 0,
+      session: () => {
+        throw new Error('this test opens no run');
+      },
+    },
+    {sidebar: {read: () => null, write: ignore}},
+  );
+  stores.machineSettings.dispatch({type: 'focus', host: 'ssh:gpu-box', section: 'clusters'});
+  stores.sidebar.store.dispatch({type: 'select', screen: {kind: 'settings'}});
+  expect(stores.machineSettings.getState()).toMatchObject({
+    machine: 'ssh:gpu-box',
+    section: 'clusters',
+  });
+});

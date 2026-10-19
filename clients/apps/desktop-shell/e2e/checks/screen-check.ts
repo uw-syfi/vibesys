@@ -76,6 +76,14 @@ const USER_NAMES: readonly string[] = [
   'remote-host',
   'host-a',
   'host-b',
+  'host-c',
+  // The clusters and SSH aliases the machine Settings journeys type or list.
+  'lab-h100',
+  'lab-login',
+  'amd-login',
+  'amd-hpc',
+  'no-workspace',
+  'no-scheduler',
   // An example's own name, which New run shows in the code face as the catalogue names it.
   'kv-store',
 ];

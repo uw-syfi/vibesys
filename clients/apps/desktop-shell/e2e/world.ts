@@ -1,9 +1,15 @@
 /** The journeys' world: a seeded Fake bridge, and opening the shell page over it. */
 import {expect, type Page} from '@playwright/test';
 import {
+  clusterTestsByAlias,
+  loginStartsByProvider,
+  machineSettingsWorld,
+} from '@vibesys/run-fixtures';
+import {
   type FakeBridgeSeed,
   type FakeNewRun,
   installFakeBridge,
+  installFakeMachineSettings,
   installFakeMachines,
   installFakeNewRun,
 } from './fake-bridge.js';
@@ -82,6 +88,9 @@ export const SEED: FakeBridgeSeed = {
       {name: 'queue-rs', path: '/home/me/projects/queue-rs', checkout: false, project: true},
     ],
   },
+  machineSettings: machineSettingsWorld,
+  clusterTests: clusterTestsByAlias,
+  loginStarts: loginStartsByProvider,
   newRun: {
     ...FAKE_OFFER,
     projects: {
@@ -94,6 +103,7 @@ export const SEED: FakeBridgeSeed = {
 export async function open(page: Page, seed: FakeBridgeSeed = SEED): Promise<void> {
   await page.addInitScript(installFakeBridge, seed);
   await page.addInitScript(installFakeMachines, seed);
+  await page.addInitScript(installFakeMachineSettings, seed);
   await page.addInitScript(installFakeNewRun, seed);
   await page.goto('./shell.html');
   await expect(page.getByRole('navigation', {name: 'VibeSys'})).toBeVisible();

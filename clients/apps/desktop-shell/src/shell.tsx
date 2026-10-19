@@ -38,6 +38,7 @@ import {
 } from '@vibesys/feature-run-page/renderer';
 import {runRecord} from '@vibesys/feature-run-page/state';
 import {
+  createMachineSettingsStore,
   createSettingsStore,
   SettingsScreen,
   type SystemAppearance,
@@ -58,6 +59,8 @@ export type Schedule = (callback: () => void, delayMs: number) => () => void;
 export interface ShellStores {
   readonly sidebar: ReturnType<typeof createSidebarStore>;
   readonly settings: ReturnType<typeof createSettingsStore>;
+  /** What each machine has set up (clusters, clouds, agent logins), and the Settings section shown. */
+  readonly machineSettings: ReturnType<typeof createMachineSettingsStore>;
   readonly bridge: WelcomeBridge;
   readonly schedule: Schedule;
   readonly machines: ReturnType<typeof createMachinesStore>;
@@ -136,6 +139,15 @@ export function createShellStores(
     ...(preferences.draft === undefined ? {} : {draft: preferences.draft}),
     started: run => sidebar.store.dispatch({type: 'select', screen: {kind: 'run', run}}),
   });
+  const machineSettings = createMachineSettingsStore(bridge);
+  const machines = createMachinesStore(bridge);
+  let listed = '';
+  machines.subscribe(() => {
+    const hosts = machines.getState().machines.map(machine => machine.host);
+    if (hosts.join('\n') === listed) return;
+    listed = hosts.join('\n');
+    machineSettings.dispatch({type: 'hosts', hosts});
+  });
   let {recent, selection} = sidebar.store.getState();
   sidebar.store.subscribe(() => {
     const next = sidebar.store.getState();
@@ -146,12 +158,20 @@ export function createShellStores(
     if (next.selection !== selection) {
       selection = next.selection;
       followSelection(newRun.store, selection, next.recent);
+      if (selection.kind === 'settings' && selection.machine !== undefined) {
+        machineSettings.dispatch({
+          type: 'focus',
+          host: selection.machine,
+          section: selection.section ?? 'clusters',
+        });
+      }
     }
   });
   return {
     sidebar,
     settings,
-    machines: createMachinesStore(bridge),
+    machineSettings,
+    machines,
     newRun: newRun.store,
     newRunCompletion: newRun.completion,
     bridge,
@@ -279,10 +299,11 @@ export function Shell(props: {
   readonly stores: ShellStores;
   readonly version: string;
 }): JSX.Element {
-  const {sidebar, settings, machines, newRun, newRunCompletion} = props.stores;
+  const {sidebar, settings, machineSettings, machines, newRun, newRunCompletion} = props.stores;
   const sidebarState = useStore(sidebar.store);
   const settingsState = useStore(settings);
   const machinesState = useStore(machines);
+  const machineSettingsState = useStore(machineSettings);
   const newRunState = useStore(newRun);
   const completionState = useStore(newRunCompletion);
   const select = (screen: Screen): void => sidebar.store.dispatch({type: 'select', screen});
@@ -318,6 +339,11 @@ export function Shell(props: {
               />
             }
             machines={machineCounts(machinesState)}
+            machineSettings={{
+              state: machineSettingsState,
+              dispatch: machineSettings.dispatch,
+              machines: machinesState.machines.map(({host, label}) => ({host, label})),
+            }}
           />
         );
       case 'machines':

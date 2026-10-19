@@ -6,16 +6,25 @@
 import type {Page} from '@playwright/test';
 import {expect} from '@playwright/test';
 import type {WelcomeBridge} from '@vibesys/ipc';
-import {type EndOutcome, type RunFixture, splitLive} from '@vibesys/run-fixtures';
+import {
+  clusterTestsByAlias,
+  type EndOutcome,
+  loginStartsByProvider,
+  machineSettingsWorld,
+  type RunFixture,
+  splitLive,
+} from '@vibesys/run-fixtures';
 import {
   type CoreMethods,
   type FakeBridgeSeed,
   installFakeBridge,
+  installFakeMachineSettings,
   installFakeMachines,
   installFakeNewRun,
   installFakeProjectRuns,
   installFakeWindows,
   installRequestBound,
+  type MachineSettingsMethods,
   type MachinesMethods,
   type NewRunMethods,
   type WindowsMethods,
@@ -44,6 +53,7 @@ const REQUEST_LIMIT = 100;
 type ProvidedByWorld =
   | CoreMethods
   | MachinesMethods
+  | MachineSettingsMethods
   | NewRunMethods
   | WindowsMethods
   | RunMethods
@@ -158,6 +168,9 @@ function seedOf(fixture: RunFixture, theme: 'ink' | 'paper'): FakeBridgeSeed {
     ],
     projectRuns: projectRuns(listing, recent),
     newRun: {...FAKE_OFFER, projects: {[PROJECT]: [TASK]}},
+    machineSettings: machineSettingsWorld,
+    clusterTests: clusterTestsByAlias,
+    loginStarts: loginStartsByProvider,
   };
 }
 
@@ -178,6 +191,7 @@ export function fixtureScripts(fixture: RunFixture, options: OpenOptions = {}): 
   const scripts = [
     script(installFakeBridge, seed),
     script(installFakeMachines, seed),
+    script(installFakeMachineSettings, seed),
     script(installFakeProjectRuns, seed),
     script(installFakeNewRun, seed),
     script(installFakeWindows, undefined),

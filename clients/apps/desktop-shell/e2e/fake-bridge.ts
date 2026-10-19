@@ -60,6 +60,15 @@ export type NewRunMethods =
   | 'copyOut'
   | 'startRun';
 
+/** What `installFakeMachineSettings` provides: each machine's clusters, clouds and agent logins. */
+export type MachineSettingsMethods =
+  | 'compute'
+  | 'testCluster'
+  | 'addCluster'
+  | 'removeCluster'
+  | 'agentLogins'
+  | 'startLogin';
+
 /** What `installFakeWindows` provides. */
 export type WindowsMethods = 'openRunWindow' | 'showMainWindow' | 'openSettings' | 'openExternal';
 
@@ -93,6 +102,17 @@ export interface FakeBridgeSeed {
   readonly checkouts?: Readonly<Record<string, unknown>>;
   /** What `paths.complete` lists for each directory (on a machine with a checkout saved). */
   readonly directories?: Readonly<Record<string, readonly unknown[]>>;
+  /**
+   * What each machine's helper answers machine Settings with, by host: its compute settings and its
+   * agents' logins, each null for a helper that predates it. A machine not named is such a helper.
+   */
+  readonly machineSettings?: Readonly<
+    Record<string, {readonly compute: unknown; readonly logins: readonly unknown[] | null}>
+  >;
+  /** What a connection test finds by the cluster's ssh host alias (`''` for a login node). */
+  readonly clusterTests?: Readonly<Record<string, unknown>>;
+  /** What starting a harness's login answers, by provider. */
+  readonly loginStarts?: Readonly<Record<string, unknown>>;
   /** What New run's helper calls answer; without it they answer as an older helper would. */
   readonly newRun?: {
     readonly machine: unknown;
@@ -334,6 +354,100 @@ export function installFakeMachines(seed: FakeBridgeSeed): void {
       return ok({kind: 'listed', directory, entries, truncated: false});
     },
   } satisfies FakeProvides<MachinesMethods>);
+}
+
+/** What the fake helper did for machine Settings, for the journey to read. */
+export interface FakeMachineSettings {
+  /** Each cluster tested, as `host cluster-name`. */
+  readonly tested: string[];
+  /** Each cluster saved, as `host cluster-name`. */
+  readonly added: string[];
+  /** Each cluster removed, as `host cluster-name`. */
+  readonly removed: string[];
+  /** Each login started, as `host provider`. */
+  readonly logins: string[];
+}
+
+/**
+ * The machine Settings half of the Fake, as a further init script: each machine's helper answers
+ * what it has set up and how its harnesses are signed in, tests a cluster by its ssh alias, saves
+ * one only if it passes the test again, and starts a login as the seed says. What was done is in
+ * `fakeHost.machineSettings`.
+ */
+export function installFakeMachineSettings(seed: FakeBridgeSeed): void {
+  const ok = (value: unknown) => Promise.resolve({ok: true, value});
+  const refused = (error: string) => Promise.resolve({ok: false, error, authNeeded: false});
+  type Cluster = {name: string; reach: {kind: string; host?: string}};
+  type Settings = {
+    config_path: string;
+    clusters: {cluster: Cluster; source: string}[];
+    modal: unknown;
+  };
+  const world = seed.machineSettings ?? {};
+  const settings = new Map<string, Settings | null>(
+    Object.entries(world).map(([host, each]) => [
+      host,
+      each.compute === null ? null : (structuredClone(each.compute) as Settings),
+    ]),
+  );
+  const done: FakeMachineSettings = {tested: [], added: [], removed: [], logins: []};
+  const label = (host: string) => (host === 'local' ? 'This Mac' : host.replace(/^ssh:/, ''));
+  const tests = seed.clusterTests ?? {};
+  const test = (cluster: Cluster) =>
+    tests[cluster.reach.kind === 'ssh' ? (cluster.reach.host ?? '') : ''] ?? {
+      outcome: 'failed',
+      stage: 'reach',
+      detail: `cannot reach ${cluster.reach.host ?? 'the scheduler'}`,
+    };
+  const tooOld = (host: string) => refused(`${label(host)} predates machine compute settings.`);
+  Object.assign((window as unknown as {vibesysWelcome: object}).vibesysWelcome, {
+    compute: (host: string) => {
+      const current = settings.get(host);
+      return ok(
+        current === undefined || current === null
+          ? {kind: 'unsupported'}
+          : {kind: 'offered', value: current},
+      );
+    },
+    testCluster: (host: string, cluster: Cluster) => {
+      done.tested.push(`${host} ${cluster.name}`);
+      return settings.get(host) == null ? tooOld(host) : ok(test(cluster));
+    },
+    addCluster: (host: string, cluster: Cluster) => {
+      const current = settings.get(host);
+      if (current === undefined || current === null) return tooOld(host);
+      if (current.clusters.some(listed => listed.cluster.name === cluster.name)) {
+        return refused(`a cluster named '${cluster.name}' is already set up`);
+      }
+      const result = test(cluster) as {outcome: string; stage?: string; detail?: string};
+      if (result.outcome === 'failed') return refused(`${result.stage}: ${result.detail}`);
+      current.clusters = [...current.clusters, {cluster, source: 'vibesys'}];
+      done.added.push(`${host} ${cluster.name}`);
+      return ok(current);
+    },
+    removeCluster: (host: string, name: string) => {
+      const current = settings.get(host);
+      if (current === undefined || current === null) return tooOld(host);
+      const listed = current.clusters.find(each => each.cluster.name === name);
+      if (listed === undefined) return refused(`no cluster named '${name}' is set up`);
+      if (listed.source !== 'vibesys')
+        return refused(`cluster '${name}' comes from the operator file`);
+      current.clusters = current.clusters.filter(each => each !== listed);
+      done.removed.push(`${host} ${name}`);
+      return ok(current);
+    },
+    agentLogins: (host: string) => {
+      const logins = world[host]?.logins ?? null;
+      return ok(logins === null ? {kind: 'unsupported'} : {kind: 'offered', value: logins});
+    },
+    startLogin: (host: string, provider: string) => {
+      done.logins.push(`${host} ${provider}`);
+      return ok(
+        seed.loginStarts?.[provider] ?? {outcome: 'unavailable', reason: 'no_login_command'},
+      );
+    },
+  } satisfies FakeProvides<MachineSettingsMethods>);
+  Object.assign((window as unknown as {fakeHost: object}).fakeHost, {machineSettings: done});
 }
 
 /**

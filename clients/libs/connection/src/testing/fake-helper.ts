@@ -13,10 +13,14 @@
  * channel at once (`drop`, a broken link).
  */
 import {
+  type AgentLogin,
   type Backend,
   type ChannelEndOutcome,
   type Check,
   type CheckoutInspectReply,
+  type ClusterTestFailed,
+  type ClusterTestPassed,
+  type ComputeSettings,
   type ExampleList,
   type HarnessOption,
   type HelperFeature,
@@ -24,6 +28,8 @@ import {
   helperFeaturesForRequest,
   type InstanceList,
   type LiveInstanceRecord,
+  type LoginStarted,
+  type LoginUnavailable,
   type MachineDescription,
   type PathEntry,
   parseHelperRequest,
@@ -134,6 +140,17 @@ export interface FakeHost {
    * the project they make to `projects` and `directories`.
    */
   examples: ExampleList | null;
+  /** What `compute.list` answers; adds and removals change it, as they change the helper's file. */
+  compute: ComputeSettings;
+  /**
+   * What `compute.test_cluster` finds, by the cluster's ssh host alias (a login-node cluster is
+   * under `''`); a cluster not named here cannot be reached.
+   */
+  readonly clusterTests: Map<string, ClusterTestPassed | ClusterTestFailed>;
+  /** What `agent_logins.list` answers. */
+  logins: AgentLogin[];
+  /** What `agent_logins.start` answers per provider; a provider not named has no login command. */
+  readonly loginStarts: Map<string, LoginStarted | LoginUnavailable>;
 }
 
 /** `listing` as a helper answers a client that does not set `with_catalogue`. */
@@ -351,6 +368,14 @@ export class FakeHelper {
     roles: [...FAKE_ROLES],
     backend: 'cpu',
     examples: null,
+    compute: {
+      config_path: '/home/me/.config/vibesys/compute.toml',
+      clusters: [],
+      modal: {token_present: false},
+    },
+    clusterTests: new Map(),
+    logins: [],
+    loginStarts: new Map(),
   };
   /** Exit every new channel at once with this status and stdout, as a failing bootstrap does. */
   bootstrapExit: {readonly code: number; readonly stdout: string} | null = null;
@@ -402,6 +427,9 @@ export class FakeHelper {
     'example_catalogue',
     'harness_generations',
     'run_role_agents',
+    'measurement_target',
+    'machine_compute',
+    'agent_logins',
   ]);
   /** The run log streams `logs.list` and `logs.read` serve; replace it to seed a store. */
   logStore = new FakeLogStore();
@@ -731,14 +759,15 @@ class HelperSession {
         });
         return;
       case 'harnesses.list':
-        this.#send({
-          type: 'harnesses.list',
-          request_id: id,
-          harnesses:
-            request.with_generations === true
-              ? [...this.#helper.host.harnesses]
-              : this.#helper.host.harnesses.map(withoutGenerations),
-        });
+        this.#harnesses(request);
+        return;
+      case 'compute.list':
+      case 'compute.test_cluster':
+      case 'compute.add_cluster':
+      case 'compute.remove_cluster':
+      case 'agent_logins.list':
+      case 'agent_logins.start':
+        this.#machineSettings(request);
         return;
       case 'run.stop':
         this.#stop(request);
@@ -759,6 +788,131 @@ class HelperSession {
         this.#send({type: 'logs.cancel', request_id: id, read_id: request.read_id});
         return;
     }
+  }
+
+  /** The compute settings and agent login requests, which read or change what the host holds. */
+  #machineSettings(
+    request: Extract<
+      HelperRequest,
+      {
+        type:
+          | 'compute.list'
+          | 'compute.test_cluster'
+          | 'compute.add_cluster'
+          | 'compute.remove_cluster'
+          | 'agent_logins.list'
+          | 'agent_logins.start';
+      }
+    >,
+  ): void {
+    const id = request.request_id;
+    const host = this.#helper.host;
+    switch (request.type) {
+      case 'compute.list':
+        this.#send({type: 'compute.list', request_id: id, settings: host.compute});
+        return;
+      case 'compute.test_cluster':
+        this.#send({
+          type: 'compute.test_cluster',
+          request_id: id,
+          result: this.#testCluster(request.cluster),
+        });
+        return;
+      case 'compute.add_cluster':
+        this.#addCluster(request);
+        return;
+      case 'compute.remove_cluster':
+        this.#removeCluster(request);
+        return;
+      case 'agent_logins.list':
+        this.#send({type: 'agent_logins.list', request_id: id, logins: host.logins});
+        return;
+      case 'agent_logins.start':
+        this.#send({
+          type: 'agent_logins.start',
+          request_id: id,
+          result: host.loginStarts.get(request.provider) ?? {
+            outcome: 'unavailable',
+            reason: 'no_login_command',
+          },
+        });
+        return;
+    }
+  }
+
+  #harnesses(request: Extract<HelperRequest, {type: 'harnesses.list'}>): void {
+    const {harnesses} = this.#helper.host;
+    this.#send({
+      type: 'harnesses.list',
+      request_id: request.request_id,
+      harnesses:
+        request.with_generations === true ? [...harnesses] : harnesses.map(withoutGenerations),
+    });
+  }
+
+  #testCluster(
+    cluster: Extract<HelperRequest, {type: 'compute.test_cluster'}>['cluster'],
+  ): ClusterTestPassed | ClusterTestFailed {
+    const alias = cluster.reach.kind === 'ssh' ? cluster.reach.host : '';
+    return (
+      this.#helper.host.clusterTests.get(alias) ?? {
+        outcome: 'failed',
+        stage: 'reach',
+        detail: `cannot reach ${alias || 'the scheduler'}`,
+      }
+    );
+  }
+
+  #addCluster(request: Extract<HelperRequest, {type: 'compute.add_cluster'}>): void {
+    const id = request.request_id;
+    const host = this.#helper.host;
+    if (host.compute.clusters.some(listed => listed.cluster.name === request.cluster.name)) {
+      this.#send(
+        this.#error(
+          id,
+          'cluster_exists',
+          `a cluster named '${request.cluster.name}' is already set up`,
+        ),
+      );
+      return;
+    }
+    const result = this.#testCluster(request.cluster);
+    if (result.outcome === 'failed') {
+      this.#send(this.#error(id, 'cluster_test_failed', `${result.stage}: ${result.detail}`));
+      return;
+    }
+    host.compute = {
+      ...host.compute,
+      clusters: [...host.compute.clusters, {cluster: request.cluster, source: 'vibesys'}],
+    };
+    this.#send({type: 'compute.add_cluster', request_id: id, settings: host.compute});
+  }
+
+  #removeCluster(request: Extract<HelperRequest, {type: 'compute.remove_cluster'}>): void {
+    const id = request.request_id;
+    const host = this.#helper.host;
+    const listed = host.compute.clusters.find(each => each.cluster.name === request.name);
+    if (listed === undefined) {
+      this.#send(
+        this.#error(id, 'unknown_cluster', `no cluster named '${request.name}' is set up`),
+      );
+      return;
+    }
+    if (listed.source === 'slurm_toml') {
+      this.#send(
+        this.#error(
+          id,
+          'cluster_read_only',
+          `cluster '${request.name}' comes from the operator file`,
+        ),
+      );
+      return;
+    }
+    host.compute = {
+      ...host.compute,
+      clusters: host.compute.clusters.filter(each => each !== listed),
+    };
+    this.#send({type: 'compute.remove_cluster', request_id: id, settings: host.compute});
   }
 
   #examples(request: Extract<HelperRequest, {type: 'examples.list'}>): void {

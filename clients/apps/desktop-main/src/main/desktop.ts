@@ -56,7 +56,19 @@ export interface DesktopDeps {
   >;
   /** The ended runs' recorded events every window reads from (one copy, one read of the host). */
   readonly history: Pick<RunHistoryStore, 'read'>;
-  readonly machines: Pick<MachinesMain, 'machines' | 'report' | 'inspect' | 'remove'>;
+  readonly machines: Pick<
+    MachinesMain,
+    | 'machines'
+    | 'report'
+    | 'inspect'
+    | 'remove'
+    | 'compute'
+    | 'testCluster'
+    | 'addCluster'
+    | 'removeCluster'
+    | 'agentLogins'
+    | 'startLogin'
+  >;
   readonly runs: Pick<RunControl, 'attach' | 'attached' | 'detach' | 'resume' | 'start' | 'stop'>;
   readonly settings: Pick<SettingsStore, 'onRecentChanged' | 'recentSnapshot'>;
   readonly preferences: Pick<PreferencesMain, 'answer'>;
@@ -71,7 +83,7 @@ export interface DesktopDeps {
   readonly log: (message: string) => void;
 }
 
-/** The requests of the Machines and New run screens, and of the windows. */
+/** The requests of the Machines, machine Settings and New run screens, and of the windows. */
 type ScreenRequest = Extract<
   WelcomeRequest,
   {
@@ -80,6 +92,12 @@ type ScreenRequest = Extract<
       | 'machine'
       | 'inspect-checkout'
       | 'remove-machine'
+      | 'compute'
+      | 'test-cluster'
+      | 'add-cluster'
+      | 'remove-cluster'
+      | 'agent-logins'
+      | 'start-login'
       | 'describe-machine'
       | 'preflight'
       | 'examples'
@@ -290,6 +308,18 @@ export class Desktop {
         return machines.inspect(request.host, request.path);
       case 'remove-machine':
         return machines.remove(request.host);
+      case 'compute':
+        return machines.compute(request.host);
+      case 'test-cluster':
+        return machines.testCluster(request.host, request.cluster);
+      case 'add-cluster':
+        return machines.addCluster(request.host, request.cluster);
+      case 'remove-cluster':
+        return machines.removeCluster(request.host, request.name);
+      case 'agent-logins':
+        return machines.agentLogins(request.host);
+      case 'start-login':
+        return machines.startLogin(request.host, request.provider);
       case 'open-run-window':
         return Promise.resolve(this.#openRunWindow(request.run));
       case 'show-main-window':

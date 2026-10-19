@@ -31,7 +31,17 @@ const VALUES: readonly unknown[] = [
   {provider: 'codex', model: 'gpt-a', extra: true},
   {provider: 'codex'},
   {provider: '', model: 'gpt-a'},
+  {name: 'lab', reach: {kind: 'login_node'}, workspace: '/w'},
+  {name: 'lab', reach: {kind: 'login_node'}, workspace: '/w', extra: 1},
+  {name: 'a b', reach: {kind: 'ssh', host: '-oX'}, workspace: 'relative', nodes: 0},
 ];
+
+const CLUSTER = {
+  name: 'lab-h100',
+  reach: {kind: 'ssh', host: 'lab-login'},
+  workspace: '/scratch/vibesys',
+  sbatch_options: ['--account=lab'],
+};
 
 /** One valid argument vector for every privileged welcome request. */
 const VALID_ARGUMENTS: Readonly<
@@ -67,6 +77,12 @@ const VALID_ARGUMENTS: Readonly<
   [WELCOME_CHANNELS.machine]: ['ssh:host-b'],
   [WELCOME_CHANNELS.inspectCheckout]: ['ssh:host-b', '~/vibesys'],
   [WELCOME_CHANNELS.removeMachine]: ['ssh:host-b'],
+  [WELCOME_CHANNELS.compute]: ['ssh:host-b'],
+  [WELCOME_CHANNELS.testCluster]: ['ssh:host-b', CLUSTER],
+  [WELCOME_CHANNELS.addCluster]: ['ssh:host-b', CLUSTER],
+  [WELCOME_CHANNELS.removeCluster]: ['ssh:host-b', 'lab-h100'],
+  [WELCOME_CHANNELS.agentLogins]: ['ssh:host-b'],
+  [WELCOME_CHANNELS.startLogin]: ['ssh:host-b', 'claude'],
   [WELCOME_CHANNELS.describeMachine]: ['local'],
   [WELCOME_CHANNELS.preflight]: [
     'local',
@@ -116,6 +132,19 @@ describe('parseWelcomeRequest', () => {
       }
       checkAccepted(request);
     }
+  });
+
+  test('a cluster is checked by the helper contract, and the error names the key', () => {
+    const parse = (cluster: unknown) =>
+      parseWelcomeRequest(WELCOME_CHANNELS.addCluster, ['ssh:host-b', cluster]);
+    expect(parse(CLUSTER)).toMatchObject({kind: 'add-cluster', cluster: CLUSTER});
+    expect(() => parse({...CLUSTER, name: 'a b'})).toThrow('cluster.name');
+    expect(() => parse({...CLUSTER, nodes: 0})).toThrow('cluster.nodes');
+    expect(() => parse({...CLUSTER, extra: 1})).toThrow('cluster.extra');
+    expect(() => parse({...CLUSTER, reach: {kind: 'ssh', host: '-oProxyCommand=x'}})).toThrow(
+      'cluster.reach.host',
+    );
+    expect(() => parse({...CLUSTER, name: 'a b'})).not.toThrow('Invalid server helper');
   });
 
   test('a resume names the exact run, and a malformed run id is refused', () => {
