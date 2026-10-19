@@ -526,31 +526,41 @@ class CombineCase:
 
 @st.composite
 def combine_cases(draw: st.DrawFn) -> CombineCase:
-    """A combine of picks drawn from offered pairs, unoffered revisions, unknown hypotheses and
-    repeats, sometimes with an unknown key, over a record whose parts beat main or not."""
-    names = draw(st.lists(st.sampled_from("abcdef"), unique=True, max_size=5))
+    """A combine of distinct offered parts, then at most one way of breaking it: an unoffered
+    revision, an unknown hypothesis, a repeated part, too few or too many parts, a used ID or an
+    unknown key; over a record whose parts beat main or not."""
+    names = draw(
+        st.lists(st.sampled_from("abcdefghij"), unique=True, min_size=2, max_size=MAX_PARTS + 1)
+    )
     parents = [
         snapshot(name, ordinal, value=draw(_PART_VALUES))
         for name in names
         for ordinal in range(1, draw(st.integers(1, 2)) + 1)
     ]
     offered = [(item.hypothesis_id, item.revision.revision_id.root) for item in parents]
-    picks: list[tuple[str, str]] = []
-    for _ in range(draw(st.integers(0, 10))):
-        kind = draw(st.sampled_from(["offered", "offered", "unoffered", "unknown", "repeat"]))
-        if kind == "offered" and offered:
-            picks.append(draw(st.sampled_from(offered)))
-        elif kind == "unoffered" and names:
-            picks.append((draw(st.sampled_from(names)), "nope"))
-        elif kind == "repeat" and picks:
-            picks.append(draw(st.sampled_from(picks)))
-        else:
-            picks.append(("zz", "zz-r1"))
-    identifier = draw(st.sampled_from([COMBINE_ID, COMBINE_ID, *names]))
+    chosen = draw(st.lists(st.sampled_from(names), unique=True, min_size=2, max_size=len(names)))
+    picks = [
+        draw(st.sampled_from([pair for pair in offered if pair[0] == name])) for name in chosen
+    ]
+    breaking = draw(
+        st.sampled_from(
+            ["unoffered", None, "unknown", None, "repeat", None, "drop", "used", "entry", "part"]
+        )
+    )
+    if picks and breaking == "unoffered":
+        index = draw(st.integers(0, len(picks) - 1))
+        picks[index] = (picks[index][0], "nope")
+    elif breaking == "unknown":
+        picks.insert(draw(st.integers(0, len(picks))), ("zz", "zz-r1"))
+    elif picks and breaking == "repeat":
+        picks.insert(draw(st.integers(0, len(picks))), draw(st.sampled_from(picks)))
+    elif picks and breaking == "drop":
+        picks = picks[: draw(st.integers(0, 1))]
+    identifier = draw(st.sampled_from(names)) if breaking == "used" else COMBINE_ID
     parts: list[dict[str, object]] = [
         {"hypothesis_id": name, "revision": revision} for name, revision in picks
     ]
-    unknown = draw(st.sampled_from([None, None, "entry", "part"]))
+    unknown = breaking if breaking in {"entry", "part"} else None
     if unknown == "part" and parts:
         parts[draw(st.integers(0, len(parts) - 1))]["weight"] = 1
     entry: dict[str, object] = {
