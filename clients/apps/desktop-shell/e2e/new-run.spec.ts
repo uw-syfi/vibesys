@@ -260,13 +260,11 @@ for (const width of [1440, 1000, 660]) {
         expect((next?.y ?? 0) + (next?.height ?? 0)).toBeLessThanOrEqual(height);
       }
       const [first, ...rest] = boxes;
-      for (const each of rest.slice(0, -1)) expect(each).toEqual(first);
-      const review = rest.at(-1);
+      const review = rest.pop();
+      for (const each of rest) expect(each).toEqual(first);
       expect(review?.back).toEqual(first?.back);
-      expect(review?.next).toEqual({
-        y: (first?.next as {y: number}).y,
-        height: (first?.next as {height: number}).height,
-      });
+      const forward = first?.next as {y: number; height: number} | null;
+      expect(review?.next).toEqual({y: forward?.y, height: forward?.height});
     });
   }
 }
