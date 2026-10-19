@@ -715,111 +715,6 @@
       "title": "ChatData",
       "type": "object"
     },
-    "ChatModelOption": {
-      "additionalProperties": false,
-      "description": "One offered chat model and the source of its suggestion.",
-      "properties": {
-        "model": {
-          "title": "Model",
-          "type": "string"
-        },
-        "source": {
-          "enum": [
-            "run",
-            "role",
-            "suggested"
-          ],
-          "title": "Source",
-          "type": "string"
-        },
-        "default": {
-          "type": "boolean",
-          "default": false,
-          "title": "Default"
-        }
-      },
-      "required": [
-        "model",
-        "source"
-      ],
-      "title": "ChatModelOption",
-      "type": "object"
-    },
-    "ChatOptions": {
-      "additionalProperties": false,
-      "description": "All offered chat selections grouped by provider.",
-      "properties": {
-        "providers": {
-          "items": {
-            "$ref": "#/$defs/ChatProviderOptions"
-          },
-          "title": "Providers",
-          "type": "array"
-        }
-      },
-      "title": "ChatOptions",
-      "type": "object"
-    },
-    "ChatOptionsQuery": {
-      "additionalProperties": false,
-      "description": "Request the agent selections this run's experiment chat offers.",
-      "properties": {
-        "protocol_version": {
-          "const": 1,
-          "default": 1,
-          "title": "Protocol Version",
-          "type": "integer"
-        },
-        "request_id": {
-          "title": "Request Id",
-          "type": "string"
-        },
-        "client_id": {
-          "default": "",
-          "title": "Client Id",
-          "type": "string"
-        },
-        "timestamp": {
-          "format": "date-time",
-          "title": "Timestamp",
-          "type": "string"
-        },
-        "type": {
-          "const": "query.chat_options",
-          "default": "query.chat_options",
-          "title": "Type",
-          "type": "string"
-        }
-      },
-      "required": [
-        "timestamp",
-        "type"
-      ],
-      "title": "ChatOptionsQuery",
-      "type": "object"
-    },
-    "ChatProviderOptions": {
-      "additionalProperties": false,
-      "description": "One supported chat provider and its suggested models.",
-      "properties": {
-        "provider": {
-          "title": "Provider",
-          "type": "string"
-        },
-        "models": {
-          "items": {
-            "$ref": "#/$defs/ChatModelOption"
-          },
-          "title": "Models",
-          "type": "array"
-        }
-      },
-      "required": [
-        "provider"
-      ],
-      "title": "ChatProviderOptions",
-      "type": "object"
-    },
     "ChatQuery": {
       "additionalProperties": false,
       "description": "Send a message to an experiment-chat thread.",
@@ -913,7 +808,7 @@
     },
     "ChatThreadCreateQuery": {
       "additionalProperties": false,
-      "description": "Create a new experiment-chat thread with its own agent selection.\n\nOmitted fields resolve to the run's configured provider and model. The\nresponse carries the resolved settings and thread identity.",
+      "description": "Create a new experiment-chat thread with its own agent selection.\n\n``harness`` is a provider and model pair from the helper's ``harnesses.list`` catalogue,\nthe same one New run draws on. Omitted, the thread runs the run's own provider and model.\nThe response carries the resolved settings and thread identity.",
       "properties": {
         "protocol_version": {
           "const": 1,
@@ -941,29 +836,16 @@
           "title": "Type",
           "type": "string"
         },
-        "provider": {
+        "harness": {
           "anyOf": [
             {
-              "type": "string"
+              "$ref": "#/$defs/HarnessChoice"
             },
             {
               "type": "null"
             }
           ],
-          "default": null,
-          "title": "Provider"
-        },
-        "model": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Model"
+          "default": null
         },
         "title": {
           "anyOf": [
@@ -2803,6 +2685,26 @@
         "gate"
       ],
       "title": "GateStartedData",
+      "type": "object"
+    },
+    "HarnessChoice": {
+      "additionalProperties": false,
+      "description": "One agent CLI provider and one model it runs.",
+      "properties": {
+        "provider": {
+          "title": "Provider",
+          "type": "string"
+        },
+        "model": {
+          "title": "Model",
+          "type": "string"
+        }
+      },
+      "required": [
+        "provider",
+        "model"
+      ],
+      "title": "HarnessChoice",
       "type": "object"
     },
     "HistoryQuery": {
@@ -5201,17 +5103,6 @@
           ],
           "default": null
         },
-        "chat_options": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/ChatOptions"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
         "snapshot": {
           "anyOf": [
             {
@@ -6233,6 +6124,17 @@
           },
           "title": "Chat Threads",
           "type": "array"
+        },
+        "last_chat_thread_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ChatThreadId"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "spans": {
           "items": {
@@ -8309,7 +8211,6 @@
           "command.steer": "#/$defs/SteerCommand",
           "command.stop": "#/$defs/StopCommand",
           "query.chat": "#/$defs/ChatQuery",
-          "query.chat_options": "#/$defs/ChatOptionsQuery",
           "query.chat_thread_create": "#/$defs/ChatThreadCreateQuery",
           "query.design": "#/$defs/DesignQuery",
           "query.design_patch": "#/$defs/DesignPatchQuery",
@@ -8344,9 +8245,6 @@
         },
         {
           "$ref": "#/$defs/ChatThreadCreateQuery"
-        },
-        {
-          "$ref": "#/$defs/ChatOptionsQuery"
         },
         {
           "$ref": "#/$defs/HistoryQuery"

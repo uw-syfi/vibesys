@@ -26,7 +26,7 @@ from server.events import (
     RunStartedData,
     RunStatusChangedData,
 )
-from server.host_api import RunStatus
+from server.host_api import HarnessChoice, RunStatus
 from server.integration import (
     _CORE_FAILURE_CONTEXTS,
     _EVENT_DATA_ADAPTER,
@@ -561,7 +561,8 @@ def test_chat_thread_rejects_an_unsupported_provider(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="is not supported"):
         parts.api.execute(
             ChatThreadCreateQuery(
-                timestamp=REQUEST_TIME, provider="not-a-provider", model="gpt-test"
+                timestamp=REQUEST_TIME,
+                harness=HarnessChoice(provider="not-a-provider", model="gpt-test"),
             )
         )
     parts.integration.close()
@@ -598,8 +599,7 @@ def test_chat_thread_uses_snapshotted_provider_support_and_free_text_model(
     response = parts.api.execute(
         ChatThreadCreateQuery(
             timestamp=REQUEST_TIME,
-            provider="claude",
-            model="future-free-text-model",
+            harness=HarnessChoice(provider="claude", model="future-free-text-model"),
         )
     )
 

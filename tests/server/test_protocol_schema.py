@@ -747,16 +747,24 @@ def test_gate_kind_has_one_definition_on_both_wire_contracts() -> None:
     assert ServerGateKind is GateKind
 
 
-def test_thread_creation_request_no_longer_accepts_a_driver() -> None:
-    """The wire request names provider and model only; ``driver`` is an unknown key."""
+def test_thread_creation_request_names_a_harness_and_no_driver() -> None:
+    """The wire request names a harness choice; ``driver`` and loose provider keys are unknown."""
     request = TypeAdapter(ProtocolRequest)
     request.validate_python(
         {
             "type": "query.chat_thread_create",
             "timestamp": "2026-01-01T00:00:00Z",
-            "provider": "codex",
+            "harness": {"provider": "codex", "model": "gpt-test"},
         }
     )
+    with pytest.raises(ValidationError, match="provider"):
+        request.validate_python(
+            {
+                "type": "query.chat_thread_create",
+                "timestamp": "2026-01-01T00:00:00Z",
+                "provider": "codex",
+            }
+        )
     with pytest.raises(ValidationError, match="driver"):
         request.validate_python(
             {

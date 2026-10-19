@@ -20,7 +20,6 @@ from server.api.performance import (
     summarize_objective,
 )
 from server.api.protocol import (
-    ChatOptionsQuery,
     ChatQuery,
     ChatResult,
     ChatThreadCreateQuery,
@@ -50,7 +49,6 @@ from server.api.protocol import (
     decode_request,
     failure_response,
 )
-from server.chat.options import ChatOptions, build_chat_options
 from server.events import EventType, RunEvent, RunOverview, RunStartedData
 from vibesys.api import (
     REFUSAL_TEXT,
@@ -473,12 +471,6 @@ class RunApi:
             return self._execute_chat(request)
         if isinstance(request, ChatThreadCreateQuery):
             return self._execute_chat_thread_create(request)
-        if isinstance(request, ChatOptionsQuery):
-            return Response(
-                request_id=request.request_id,
-                timestamp=self._now(),
-                chat_options=self.chat_options(),
-            )
         if isinstance(request, HistoryQuery):
             self._journal.record(EventType.STATUS_QUERY, "/history")
             return Response(
@@ -584,8 +576,7 @@ class RunApi:
             raise RunReadOnlyError
         sequence = self._journal.latest_sequence
         spec = self._chat.create_thread(
-            provider=request.provider,
-            model=request.model,
+            harness=request.harness,
             title=request.title,
         )
         return Response(
@@ -599,11 +590,6 @@ class RunApi:
             ),
             events=self._journal.read(sequence),
         )
-
-    def chat_options(self) -> ChatOptions | None:
-        """Return the agent choices available for experiment chat."""
-        settings = self._chat.run_settings
-        return None if settings is None else build_chat_options(settings)
 
     def snapshot(self, *, expected_store_id: str | None = None) -> RunSnapshot:
         """Return state from the expected store, or fail if that sequence space is gone."""
@@ -631,6 +617,7 @@ class RunApi:
                     )
                     for spec in self._chat.threads_locked()
                 ],
+                last_chat_thread_id=self._chat.last_thread_id_locked(),
                 spans=self._integration.trace.spans(),
                 overview=self._current_overview(),
             )

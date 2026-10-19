@@ -61,7 +61,6 @@ export const REQUEST_POLICIES: Readonly<Record<RequestInput['type'], RequestPoli
   'command.stop': {idempotent: true, dedicatedConnection: false},
   'command.pause': {idempotent: true, dedicatedConnection: false},
   'command.resume': {idempotent: true, dedicatedConnection: false},
-  'query.chat_options': READ,
   'query.design': READ,
   'query.design_patch': READ,
   'query.events': READ,

@@ -944,14 +944,6 @@ def fully_populated_response() -> Response:
                 "provider": "provider",
                 "model": "model",
             },
-            "chat_options": {
-                "providers": [
-                    {
-                        "provider": "provider",
-                        "models": [{"model": "model", "source": "run", "default": True}],
-                    }
-                ]
-            },
             "snapshot": {
                 "run_id": "run",
                 "sequence": 1,

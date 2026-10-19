@@ -9,7 +9,6 @@ from typing import TYPE_CHECKING, Annotated, Literal, Never, TypeAliasType
 from pydantic import ConfigDict, Field, FiniteFloat, TypeAdapter, model_validator
 
 from server.api.iterations import MAX_ITERATION_PAGE_SIZE, IterationSlice
-from server.chat.options import ChatOptions
 from server.control_envelope import (
     CommandAckEnvelope,
     ProtocolModel,
@@ -20,7 +19,7 @@ from server.control_envelope import (
 from server.diagnostics import Diagnostic, DiagnosticScope, exception_to_diagnostic
 from server.events import ChatThreadId, RunEvent, RunOverview, WireSpan
 from server.execution import ActiveAgentExecution
-from server.host_api import PROTOCOL_VERSION
+from server.host_api import PROTOCOL_VERSION, HarnessChoice
 from server.run_lifecycle import RunStatus
 from vibesys.api import (
     ControlAction,
@@ -183,21 +182,15 @@ class ChatQuery(Request):
 class ChatThreadCreateQuery(Request):
     """Create a new experiment-chat thread with its own agent selection.
 
-    Omitted fields resolve to the run's configured provider and model. The
-    response carries the resolved settings and thread identity.
+    ``harness`` is a provider and model pair from the helper's ``harnesses.list`` catalogue,
+    the same one New run draws on. Omitted, the thread runs the run's own provider and model.
+    The response carries the resolved settings and thread identity.
     """
 
     type: Literal["query.chat_thread_create"] = "query.chat_thread_create"
-    provider: str | None = None
-    model: str | None = None
+    harness: HarnessChoice | None = None
     # Without a title the server derives one from the thread's first message.
     title: str | None = None
-
-
-class ChatOptionsQuery(Request):
-    """Request the agent selections this run's experiment chat offers."""
-
-    type: Literal["query.chat_options"] = "query.chat_options"
 
 
 class HistoryQuery(Request):
@@ -318,7 +311,6 @@ ProtocolRequest = Annotated[
     | SnapshotQuery
     | ChatQuery
     | ChatThreadCreateQuery
-    | ChatOptionsQuery
     | HistoryQuery
     | PerformanceQuery
     | ExperimentQuery
@@ -358,6 +350,10 @@ class RunSnapshot(ProtocolModel):
     # CHAT event, so a client that folds only a tail cannot rebuild the
     # registry from the events it holds.
     chat_threads: list[ChatThreadInfo] = Field(default_factory=list)
+    # The thread a chat opens on: the one asked in, or created, most recently. None is the
+    # default thread, which also stands when no thread exists. Server-owned like the registry:
+    # a client folding only a tail cannot know which thread was last used.
+    last_chat_thread_id: ChatThreadId | None = None
     # The run trace: every span of the run as its latest span event left it, each after its
     # parent. Folding the run's span events by span id gives the same list.
     spans: list[WireSpan] = Field(default_factory=list)
@@ -587,9 +583,6 @@ class Response(ResponseEnvelope):
 
     chat: ChatResult | None = None
     chat_thread: ChatThreadInfo | None = None
-    # None means the run has not attached its agent selection yet, which is
-    # distinct from a run that offers no provider at all.
-    chat_options: ChatOptions | None = None
     snapshot: RunSnapshot | None = None
     events: list[RunEvent] = Field(default_factory=list)
     performance: list[PerformanceRound] = Field(default_factory=list)
