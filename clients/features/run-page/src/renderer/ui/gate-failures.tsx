@@ -43,7 +43,7 @@ export function GateFailures(props: {readonly model: RunModel}): JSX.Element | n
   if (items.length === 0) return null;
   return (
     <Card>
-      <CheckList items={items} />
+      <CheckList items={items} flush />
     </Card>
   );
 }

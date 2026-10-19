@@ -26,10 +26,17 @@ export const STATES: Readonly<
   pending: {icon: 'circle', word: 'Not checked yet'},
 };
 
-/** A list of checks, each led by an icon of its state. */
-export function CheckList(props: {readonly items: readonly CheckItem[]}): JSX.Element {
+/**
+ * A list of checks, each led by an icon of its state. `flush` drops the hairline and the padding
+ * above the first check, for a list whose frame already has an edge (a card), so the card has no
+ * empty band at its top.
+ */
+export function CheckList(props: {
+  readonly items: readonly CheckItem[];
+  readonly flush?: boolean;
+}): JSX.Element {
   return (
-    <ul className="vs-check-list">
+    <ul className="vs-check-list" data-flush={props.flush === true || undefined}>
       {props.items.map(item => (
         <li key={item.id} className="vs-check" data-state={item.state}>
           <span className="vs-check-icon">

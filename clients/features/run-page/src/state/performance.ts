@@ -52,6 +52,16 @@ function beats(value: number, than: number, direction: Direction): boolean {
   return direction === 'min' ? value < than : value > than;
 }
 
+/**
+ * Whether the framework's comparison of the idea with its base leaves room for a new best: a
+ * result within noise of its base, or worse than it, is no new best however its value reads.
+ * An idea with no comparison (or one too early to tell) stands on its value.
+ */
+function holdsAgainstBase(item: Candidate): boolean {
+  const verdict = item.measurement?.against?.verdict;
+  return verdict !== 'within_noise' && verdict !== 'worse';
+}
+
 /** The input's value: any measurement's value over its ratio to the input; null when unknown. */
 export function inputValueOf(candidates: readonly Candidate[]): number | null {
   for (const item of candidates) {
@@ -81,7 +91,10 @@ export function performanceFold(
   for (const {item, at} of measured) {
     const value = item.measurement?.metricValue as number;
     const result = resultOf(item);
-    const sets = result === 'passed' && (standing === null || beats(value, standing, direction));
+    const sets =
+      result === 'passed' &&
+      holdsAgainstBase(item) &&
+      (standing === null || beats(value, standing, direction));
     if (sets) {
       best.push({at, value});
       standing = value;

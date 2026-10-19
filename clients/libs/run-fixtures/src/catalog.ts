@@ -10,6 +10,7 @@ import failures from './data/failure-reasons.json' with {type: 'json'};
 import finished from './data/finished-run.json' with {type: 'json'};
 import tenIdeas from './data/finished-ten-ideas.json' with {type: 'json'};
 import twoObjectives from './data/finished-two-objectives.json' with {type: 'json'};
+import gateFailed from './data/input-gate-failed.json' with {type: 'json'};
 import reconnect from './data/live-reconnect.json' with {type: 'json'};
 import longTitles from './data/long-titles.json' with {type: 'json'};
 import bases from './data/non-input-bases.json' with {type: 'json'};
@@ -32,6 +33,7 @@ const SOURCES: readonly unknown[] = [
   tenIdeas,
   twoObjectives,
   quotaPause,
+  gateFailed,
   crashed,
 ];
 
@@ -57,6 +59,7 @@ export const FIXTURE_NAMES: readonly string[] = [
   'finished-ten-ideas',
   'finished-two-objectives',
   'quota-pause',
+  'input-gate-failed',
   'crashed-after-turn',
   'weeks-600-ideas',
 ];

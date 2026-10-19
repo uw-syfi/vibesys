@@ -143,14 +143,25 @@ export function Thread(props: {
   readonly size?: 'default' | 'fill';
   /** No frame and no dividers: rows sit on the surface around the thread, as in a chat. */
   readonly plain?: boolean;
+  /**
+   * The id of the row the thread opens at, whole at the top edge (a chat opens at its latest
+   * question), until the reader scrolls or `toEnd` changes; without it the thread opens at its end.
+   */
+  readonly opensAt?: string;
+  /** A number that, each time it changes, scrolls the thread to its end (a new question). */
+  readonly toEnd?: number;
 }): JSX.Element {
   const {items} = props;
   const [flipped, setFlipped] = useState<ReadonlySet<string>>(new Set());
+  const opensAt =
+    props.opensAt === undefined ? -1 : items.findIndex(item => item.id === props.opensAt);
   const win = useWindowed({
     count: items.length,
     keyOf: index => items[index]?.id ?? String(index),
     estimate: ESTIMATED_ROW,
     follow: true,
+    ...(props.toEnd === undefined ? {} : {toEnd: props.toEnd}),
+    ...(opensAt < 0 ? {} : {startAt: opensAt}),
   });
   const flip = (id: string): void => {
     const next = new Set(flipped);
@@ -171,6 +182,10 @@ export function Thread(props: {
         // biome-ignore lint/a11y/noNoninteractiveTabindex: a scrolling box must take the focus so a keyboard can scroll it (WCAG 2.1.1, axe scrollable-region-focusable); no interactive element scrolls text.
         tabIndex={0}
         onScroll={win.scrolled}
+        onWheel={win.touched}
+        onTouchMove={win.touched}
+        onPointerDown={win.touched}
+        onKeyDown={win.touched}
       >
         <li aria-hidden="true" className="vs-thread-gap" style={{height: win.before}} />
         {items.slice(win.first, win.last).map((item, offset) => {

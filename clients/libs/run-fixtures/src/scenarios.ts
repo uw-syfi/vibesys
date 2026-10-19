@@ -480,6 +480,56 @@ function quotaPause(): RunFixture {
   });
 }
 
+/**
+ * A live run whose input benchmark failed before the first idea and never passed, with a long
+ * report: the Benchmark card stands as a failure above the figures, and the run's id is as long as
+ * a real one. A Rust benchmark prints a held value as `Some(8192)`.
+ */
+function inputGateFailed(): RunFixture {
+  const tail = [
+    'quick: warmup sub-run failed (this is where a prefix-cache-preflight failure surfaces):',
+    'sessions arrival rate | saturated (recorded arrivals ignored, bounded by --max-concurrency 12)',
+    'session workload | sessions=12 rounds=72 max_prompt_len=8497 max_prefix_len=6860',
+    'Error: prefix-cache preflight failed',
+    '',
+    'Caused by:',
+    '    preflight: server reported no prefix-cache hit (prompt tokens Some(8192), cached tokens Some(0)). The route reports cached tokens only behind --enable-prompt-tokens-details; see the README.',
+  ].join('\n');
+  return fixture({
+    name: 'input-gate-failed',
+    description:
+      'A live run whose input benchmark failed before the first idea and never passed, so the failure stands above the figures.',
+    runId: '20261019-111041-5a9c0cd3-qwen35-mi210-20261019-111041',
+    state: 'live',
+    build: trace => {
+      trace.event('gate_finished', {gate: 'benchmark', recipe: null, output_tail: tail}, 5, {
+        status: 'failed',
+      });
+      plan(trace, 1, 10);
+      addIdea(trace, {
+        n: 1,
+        title: 'Preallocate the arena',
+        at: 100,
+        round: 1,
+        baseRound: null,
+        end: {kind: 'passed', value: 350.39, sample: 352.1, ratio: 350.39 / 286.96, noInput: true},
+        effect: 'better',
+        usage: usage(47_100_000, 44_600_000, 760_700),
+      });
+      addIdea(trace, {
+        n: 2,
+        title: 'Pin the consumers to cores',
+        at: 800,
+        on: 1,
+        round: 2,
+        baseRound: 1,
+        end: {kind: 'passed', value: 385.4, sample: 395.4, ratio: 385.4 / 350.4, noInput: true},
+        effect: 'better',
+      });
+    },
+  });
+}
+
 /** Ideas that build on other ideas: chains, a merge of two, a base that itself failed. */
 function nonInputBases(): RunFixture {
   return fixture({
@@ -918,5 +968,6 @@ export function scenarios(): readonly RunFixture[] {
     tenIdeas(),
     twoObjectives(),
     quotaPause(),
+    inputGateFailed(),
   ];
 }

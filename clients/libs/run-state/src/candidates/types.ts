@@ -35,6 +35,12 @@ export interface BaseComparison {
   readonly baseCommit: string;
   /** The base's value as the comparison used it. */
   readonly baseValue: number;
+  /**
+   * The framework's reading of the comparison once the noise is allowed for. Only `better` (or
+   * `inconclusive`, too few runs to tell) can make the idea a new best: a result within noise of
+   * its base, or worse, is not.
+   */
+  readonly verdict: 'better' | 'within_noise' | 'worse' | 'inconclusive';
 }
 
 /** What a gate of a candidate measured. */

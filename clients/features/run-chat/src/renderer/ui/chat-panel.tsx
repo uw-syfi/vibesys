@@ -188,8 +188,22 @@ function Composer(props: ChatPanelView): JSX.Element {
   );
 }
 
+/**
+ * The question a thread opens at: its latest, so the exchange the reader came back to starts whole
+ * at the top edge instead of at the end of the answer, which cuts the question by however much the
+ * answer overflows. None while something is being written or waited on: that thread follows its end.
+ */
+function opensAt(items: readonly PanelItem[]): string | null {
+  const writing = items.some(
+    item => item.kind === 'waiting' || (item.kind === 'answer' && item.streaming),
+  );
+  if (writing) return null;
+  return [...items].reverse().find(item => item.kind === 'question')?.id ?? null;
+}
+
 function Panel(props: ChatPanelView): JSX.Element {
   const items = props.items.map(item => uiItem(item, props.roles));
+  const opens = opensAt(props.items);
   return (
     <Stack gap="space-3" grow>
       <Header {...props} />
@@ -198,7 +212,15 @@ function Panel(props: ChatPanelView): JSX.Element {
           {null}
         </Stack>
       ) : (
-        <Thread key={props.shown ?? 'new'} label="Chat" items={items} size="fill" plain />
+        <Thread
+          key={props.shown ?? 'new'}
+          label="Chat"
+          items={items}
+          size="fill"
+          plain
+          toEnd={items.length}
+          {...(opens === null ? {} : {opensAt: opens})}
+        />
       )}
       {props.readOnly ? (
         <Text variant="small" tone="muted">

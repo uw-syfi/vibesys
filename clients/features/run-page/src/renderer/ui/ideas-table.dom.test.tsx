@@ -82,6 +82,7 @@ async function shown(compared = false) {
                       ratio: 1.1,
                       baseCommit: item.attempts[0]?.revision ?? 'x',
                       baseValue: 100,
+                      verdict: 'better' as const,
                     },
                   },
                 }

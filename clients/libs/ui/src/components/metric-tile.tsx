@@ -40,6 +40,8 @@ export function MetricTile(props: {
   readonly note?: string;
   readonly tone?: 'ok' | 'err' | 'muted';
   readonly detail?: string;
+  /** The detail's tooltip when it says more than the detail does; else the detail. */
+  readonly hint?: string;
   readonly trend?: ReactNode;
 }): JSX.Element {
   return (
@@ -57,7 +59,7 @@ export function MetricTile(props: {
           </Text>
         )}
       </div>
-      <span className="vs-tile-detail" title={props.detail}>
+      <span className="vs-tile-detail" title={props.hint ?? props.detail}>
         <Text variant="small" tone="muted">
           {props.detail ?? ' '}
         </Text>

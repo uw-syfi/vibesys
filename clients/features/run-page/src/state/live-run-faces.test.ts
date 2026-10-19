@@ -247,6 +247,38 @@ describe('the input gates that failed, on a live run', () => {
     expect(gatesOf(state)).toEqual(['accuracy', 'benchmark']);
   });
 
+  test('read a later passing attempt the same, whichever of summary, snapshot and event came first', () => {
+    const pass = {
+      ...failedGate(45, 'benchmark', ''),
+      status: 'completed',
+    } as RunEvent;
+    const standing = (state: ReturnType<typeof attached>): (number | null)[] =>
+      createRunReader()
+        .read(state.run.trace, null)
+        .inputGates.map(gate => gate.supersededBy);
+    const page = opened();
+    const summary = {type: 'summary', token: page.summaryToken, reply, wallMs: 3} as const;
+    const snap = {type: 'run-data', wallMs: 1, data: {kind: 'snapshot', snapshot}} as const;
+    const live = events(2, [pass]);
+    const orders = [
+      [page.attached, snap, live, summary],
+      [page.attached, snap, summary, live],
+      [summary, page.attached, snap, live],
+      [page.attached, live, snap, summary],
+    ];
+    for (const order of orders) {
+      // The accuracy gate has no later pass and stands; the benchmark gate was passed at 45.
+      expect(standing(step(page.state, order))).toEqual([null, 45]);
+    }
+    const rebooted = step(page.state, [
+      page.attached,
+      snap,
+      summary,
+      {type: 'run-data', wallMs: 4, data: {kind: 'rebootstrap', base: 'preserve', events: [pass]}},
+    ]);
+    expect(standing(rebooted)).toEqual([null, 45]);
+  });
+
   test('never show on an attached run that has none', () => {
     const state = step(attached(), [
       {type: 'run-data', wallMs: 0, data: {kind: 'snapshot', snapshot}},

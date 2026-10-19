@@ -49,6 +49,7 @@ function settledMeasurement(
       ratio: comparison.ratio,
       baseCommit: comparison.baseCommit,
       baseValue: comparison.baseValue,
+      verdict: comparison.verdict,
     },
   };
 }

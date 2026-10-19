@@ -77,6 +77,19 @@ describe('gateReason', () => {
     expect(gateReason('  \n')).toBeNull();
   });
 
+  test('reads a Rust optional as its value, whatever the value', () => {
+    expect(
+      gateReason(
+        'preflight: no hit (prompt_tokens=Some(8192), cached_tokens=Some(0)). See README.',
+      ),
+    ).toBe('preflight: no hit (prompt_tokens=8192, cached_tokens=0). See README.');
+    for (const seed of SEEDS) {
+      const value = new Seeded(seed).int(1_000_000);
+      expect(gateReason(`bad: n=Some(${value})\n`), `seed ${seed}`).toBe(`bad: n=${value}`);
+      expect(gateReason(`bad: n=Some(Some(${value}))\n`), `seed ${seed}`).toBe(`bad: n=${value}`);
+    }
+  });
+
   test('is never cut, whatever the gate printed', () => {
     for (const seed of SEEDS) {
       const random = new Seeded(seed);

@@ -18,7 +18,7 @@ import {
   type WorkMeter,
 } from '@vibesys/run-state/trace';
 import {AppendLog} from './append-log.js';
-import {foldInputGates, type GateFailure, type InputGates, NO_INPUT_GATES} from './input-gates.js';
+import {foldInputGates, type InputGates, joinedInputGates, NO_INPUT_GATES} from './input-gates.js';
 import {latestTime} from './span-reading.js';
 
 /** The window's hold on the live run: none, being attached under a token, attached, or refused. */
@@ -224,26 +224,10 @@ function appended(log: TraceLog, events: readonly RunEvent[], meter?: WorkMeter)
   return added.length === 0 ? log : extended(log, added, meter);
 }
 
-/**
- * `log` with `failures` among its input gate failures, each once, in sequence order. A failure the
- * log holds as standing that `failures` says a later attempt superseded becomes history.
- */
-function withInputFailures(log: TraceLog, failures: readonly GateFailure[]): TraceLog {
-  const held = new Map(log.inputGates.failures.map(failure => [failure.sequence, failure]));
-  let changed = false;
-  for (const failure of failures) {
-    const known = held.get(failure.sequence);
-    if (known === undefined) {
-      held.set(failure.sequence, failure);
-      changed = true;
-    } else if (known.supersededBy === null && failure.supersededBy !== null) {
-      held.set(failure.sequence, {...known, supersededBy: failure.supersededBy});
-      changed = true;
-    }
-  }
-  if (!changed) return log;
-  const merged = [...held.values()].sort((a, b) => a.sequence - b.sequence);
-  return {...log, inputGates: {...log.inputGates, failures: merged}};
+/** `log` with the failures and passes of `gates` joined to its own, whichever came first. */
+function withInputFailures(log: TraceLog, gates: InputGates): TraceLog {
+  const joined = joinedInputGates(log.inputGates, gates.failures, gates.passes);
+  return joined === log.inputGates ? log : {...log, inputGates: joined};
 }
 
 /**
@@ -252,7 +236,7 @@ function withInputFailures(log: TraceLog, failures: readonly GateFailure[]): Tra
  * A summary of the run, or its journal, is where they come from once the page joined a run late.
  */
 export function withInputGates(log: TraceLog, gates: readonly RunEvent[]): TraceLog {
-  return withInputFailures(log, gates.reduce(foldInputGates, NO_INPUT_GATES).failures);
+  return withInputFailures(log, gates.reduce(foldInputGates, NO_INPUT_GATES));
 }
 
 /** The trace slice after `data`; `meter` counts the spans the live fold writes and copies. */
@@ -265,7 +249,10 @@ export function traceStep(log: TraceLog, data: RunData, meter?: WorkMeter): Trac
       );
       // A snapshot says nothing of the gates before the first idea: those the page already holds
       // (and those a summary brings) stay, whichever came first.
-      const kept = log.inputGates.failures.filter(failure => failure.sequence <= base.sequence);
+      const kept: InputGates = {
+        ...log.inputGates,
+        failures: log.inputGates.failures.filter(failure => failure.sequence <= base.sequence),
+      };
       const fresh = traceLog(base, overviewFromSnapshot(data.snapshot), after);
       return replacing(
         withInputFailures(withInputGates(fresh, data.gates ?? []), kept),
@@ -279,7 +266,7 @@ export function traceStep(log: TraceLog, data: RunData, meter?: WorkMeter): Trac
       if (data.base === 'reset') return appended(EMPTY_TRACE_LOG, data.events, meter);
       const replayed = withInputFailures(
         appended(traceLog(log.base, log.baseOverview, []), data.events, meter),
-        log.inputGates.failures,
+        log.inputGates,
       );
       // What the replay does not replace stays reachable: the page's own earlier fold.
       return replacing(replayed, log, replayed.positions.at(1) ?? log.base.sequence);

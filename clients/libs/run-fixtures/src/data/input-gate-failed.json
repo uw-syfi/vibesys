@@ -1,0 +1,532 @@
+{
+  "format": 1,
+  "name": "input-gate-failed",
+  "description": "A live run whose input benchmark failed before the first idea and never passed, so the failure stands above the figures.",
+  "runId": "20261019-111041-5a9c0cd3-qwen35-mi210-20261019-111041",
+  "state": "live",
+  "objective": {
+    "text": "Maximize trusted end-to-end throughput of the MPMC queue. Every candidate must pass the 100-trial correctness check.",
+    "metric": "total_ops_per_sec",
+    "unit": "ops/s",
+    "direction": "max"
+  },
+  "events": [
+    {
+      "protocol_version": 1,
+      "run_id": "20261019-111041-5a9c0cd3-qwen35-mi210-20261019-111041",
+      "sequence": 1,
+      "timestamp": "2026-10-15T16:30:51+00:00",
+      "type": "run_started",
+      "data": {
+        "kind": "run_started",
+        "outer_loop": "iterate",
+        "input": "objectives/queue.md",
+        "max_rounds": 6,
+        "expected_roles": [
+          "orchestrator",
+          "implementer",
+          "judge"
+        ],
+        "overview": {
+          "objective": {
+            "text": "Maximize trusted end-to-end throughput of the MPMC queue. Every candidate must pass the 100-trial correctness check.",
+            "metric": "total_ops_per_sec",
+            "unit": "ops/s",
+            "direction": "max",
+            "correctness_check": []
+          }
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261019-111041-5a9c0cd3-qwen35-mi210-20261019-111041",
+      "sequence": 2,
+      "timestamp": "2026-10-15T16:30:52+00:00",
+      "type": "run_configured",
+      "data": {
+        "kind": "run_configured",
+        "run_log_path": "logs/20261019-111041-5a9c0cd3-qwen35-mi210-20261019-111041",
+        "project_root": "project",
+        "model": "claude-opus-5",
+        "objective": "Raise queue throughput",
+        "search_policy": "beam",
+        "benchmark_contract": true,
+        "pareto_objectives": null,
+        "max_continuation_rounds": 3,
+        "max_unmeasured_turns": null,
+        "source": "loop"
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261019-111041-5a9c0cd3-qwen35-mi210-20261019-111041",
+      "sequence": 3,
+      "timestamp": "2026-10-15T16:30:53+00:00",
+      "type": "span_started",
+      "data": {
+        "kind": "span_started",
+        "span": {
+          "id": "flow:root#1",
+          "parent": null,
+          "type": "flow",
+          "name": "dynamic",
+          "status": "running",
+          "started_at": 0
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261019-111041-5a9c0cd3-qwen35-mi210-20261019-111041",
+      "sequence": 4,
+      "timestamp": "2026-10-15T16:30:56+00:00",
+      "type": "gate_finished",
+      "status": "failed",
+      "data": {
+        "kind": "gate_finished",
+        "gate": "benchmark",
+        "recipe": null,
+        "output_tail": "quick: warmup sub-run failed (this is where a prefix-cache-preflight failure surfaces):\nsessions arrival rate | saturated (recorded arrivals ignored, bounded by --max-concurrency 12)\nsession workload | sessions=12 rounds=72 max_prompt_len=8497 max_prefix_len=6860\nError: prefix-cache preflight failed\n\nCaused by:\n    preflight: server reported no prefix-cache hit (prompt tokens Some(8192), cached tokens Some(0)). The route reports cached tokens only behind --enable-prompt-tokens-details; see the README."
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261019-111041-5a9c0cd3-qwen35-mi210-20261019-111041",
+      "sequence": 5,
+      "timestamp": "2026-10-15T16:31:01+00:00",
+      "type": "span_started",
+      "data": {
+        "kind": "span_started",
+        "span": {
+          "id": "flow:root/plan#1",
+          "parent": "flow:root#1",
+          "type": "flow",
+          "name": "plan",
+          "status": "running",
+          "started_at": 10,
+          "ended_at": 50,
+          "label": {
+            "kind": "planning_call",
+            "title": "planning call 1",
+            "attrs_json": "{\"call\":1}"
+          }
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261019-111041-5a9c0cd3-qwen35-mi210-20261019-111041",
+      "sequence": 6,
+      "timestamp": "2026-10-15T16:31:41+00:00",
+      "type": "span_ended",
+      "data": {
+        "kind": "span_ended",
+        "span": {
+          "id": "flow:root/plan#1",
+          "parent": "flow:root#1",
+          "type": "flow",
+          "name": "plan",
+          "status": "done",
+          "started_at": 10,
+          "ended_at": 50,
+          "label": {
+            "kind": "planning_call",
+            "title": "planning call 1",
+            "attrs_json": "{\"call\":1}"
+          }
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261019-111041-5a9c0cd3-qwen35-mi210-20261019-111041",
+      "sequence": 7,
+      "timestamp": "2026-10-15T16:32:31+00:00",
+      "type": "span_started",
+      "data": {
+        "kind": "span_started",
+        "span": {
+          "id": "flow:root/ws-1#1",
+          "parent": "flow:root#1",
+          "type": "flow",
+          "name": "workstream",
+          "status": "running",
+          "started_at": 100,
+          "label": {
+            "kind": "workstream",
+            "title": "Preallocate the arena",
+            "attrs_json": "{\"hypothesis_id\":\"H1\",\"parent_revision\":\"r0\",\"base_round\":null,\"round\":1}",
+            "links": []
+          }
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261019-111041-5a9c0cd3-qwen35-mi210-20261019-111041",
+      "sequence": 8,
+      "timestamp": "2026-10-15T16:32:32+00:00",
+      "type": "span_started",
+      "data": {
+        "kind": "span_started",
+        "span": {
+          "id": "op:w1-turn",
+          "parent": "flow:root/ws-1#1",
+          "type": "operation",
+          "name": "agent.turn",
+          "status": "running",
+          "started_at": 101,
+          "label": {
+            "kind": "agent_turn",
+            "title": "implementer",
+            "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-1\",\"started_by\":[\"planner-1\"]}"
+          }
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261019-111041-5a9c0cd3-qwen35-mi210-20261019-111041",
+      "sequence": 9,
+      "timestamp": "2026-10-15T16:32:32+00:00",
+      "type": "agent_execution_started",
+      "execution_id": "exec-w1",
+      "agent_kind": "implementer",
+      "span_id": "op:w1-turn",
+      "data": {
+        "kind": "agent_execution_started",
+        "stage": "implementer",
+        "activity": {
+          "kind": "agent_execution_activity_changed",
+          "mode": "thinking",
+          "summary": ""
+        },
+        "provider": "codex",
+        "model": "claude-opus-5"
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261019-111041-5a9c0cd3-qwen35-mi210-20261019-111041",
+      "sequence": 10,
+      "timestamp": "2026-10-15T16:38:32+00:00",
+      "type": "span_ended",
+      "data": {
+        "kind": "span_ended",
+        "span": {
+          "id": "op:w1-turn",
+          "parent": "flow:root/ws-1#1",
+          "type": "operation",
+          "name": "agent.turn",
+          "status": "done",
+          "started_at": 101,
+          "ended_at": 461,
+          "label": {
+            "kind": "agent_turn",
+            "title": "implementer",
+            "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-1\",\"started_by\":[\"planner-1\"]}"
+          }
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261019-111041-5a9c0cd3-qwen35-mi210-20261019-111041",
+      "sequence": 11,
+      "timestamp": "2026-10-15T16:38:32+00:00",
+      "type": "turn_usage_recorded",
+      "execution_id": "exec-w1",
+      "invocation_id": "inv-w1",
+      "agent_kind": "implementer",
+      "span_id": "op:w1-turn",
+      "data": {
+        "kind": "turn_usage_recorded",
+        "span_id": "op:w1-turn",
+        "total_cost_usd": 32.2905,
+        "duration_ms": 190175,
+        "input_tokens": 47100000,
+        "cache_read_input_tokens": 44600000,
+        "output_tokens": 760700,
+        "reasoning_output_tokens": 190175
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261019-111041-5a9c0cd3-qwen35-mi210-20261019-111041",
+      "sequence": 12,
+      "timestamp": "2026-10-15T16:38:33+00:00",
+      "type": "span_started",
+      "data": {
+        "kind": "span_started",
+        "span": {
+          "id": "op:w1-gate",
+          "parent": "flow:root/ws-1#1",
+          "type": "operation",
+          "name": "evaluation.measure",
+          "status": "running",
+          "started_at": 462,
+          "ended_at": 699,
+          "label": {
+            "kind": "gate",
+            "title": "correctness + benchmark",
+            "attrs_json": "{\"stage\":\"correctness,benchmark\",\"metric_value\":352.1}",
+            "verdict": "passed"
+          }
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261019-111041-5a9c0cd3-qwen35-mi210-20261019-111041",
+      "sequence": 13,
+      "timestamp": "2026-10-15T16:42:30+00:00",
+      "type": "span_ended",
+      "data": {
+        "kind": "span_ended",
+        "span": {
+          "id": "op:w1-gate",
+          "parent": "flow:root/ws-1#1",
+          "type": "operation",
+          "name": "evaluation.measure",
+          "status": "done",
+          "started_at": 462,
+          "ended_at": 699,
+          "label": {
+            "kind": "gate",
+            "title": "correctness + benchmark",
+            "attrs_json": "{\"stage\":\"correctness,benchmark\",\"metric_value\":352.1}",
+            "verdict": "passed"
+          }
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261019-111041-5a9c0cd3-qwen35-mi210-20261019-111041",
+      "sequence": 14,
+      "timestamp": "2026-10-15T16:42:30+00:00",
+      "type": "measurement_compared",
+      "data": {
+        "kind": "measurement_compared",
+        "metric": "total_ops_per_sec",
+        "unit": "ops/s",
+        "direction": "max",
+        "candidate_commit": "r1",
+        "base_commit": "r0",
+        "candidate_value": 350.39,
+        "base_value": 286.96,
+        "ratio": 1.2210412601059382,
+        "noise": 0.03,
+        "verdict": "better",
+        "candidate_samples": 5,
+        "base_samples": 5
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261019-111041-5a9c0cd3-qwen35-mi210-20261019-111041",
+      "sequence": 15,
+      "timestamp": "2026-10-15T16:42:31+00:00",
+      "type": "span_ended",
+      "data": {
+        "kind": "span_ended",
+        "span": {
+          "id": "flow:root/ws-1#1",
+          "parent": "flow:root#1",
+          "type": "flow",
+          "name": "workstream",
+          "status": "done",
+          "started_at": 100,
+          "ended_at": 700,
+          "label": {
+            "kind": "workstream",
+            "title": "Preallocate the arena",
+            "attrs_json": "{\"hypothesis_id\":\"H1\",\"parent_revision\":\"r0\",\"base_round\":null,\"round\":1,\"revision\":\"r1\"}",
+            "verdict": "passed",
+            "links": []
+          }
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261019-111041-5a9c0cd3-qwen35-mi210-20261019-111041",
+      "sequence": 16,
+      "timestamp": "2026-10-15T16:44:11+00:00",
+      "type": "span_started",
+      "data": {
+        "kind": "span_started",
+        "span": {
+          "id": "flow:root/ws-2#1",
+          "parent": "flow:root#1",
+          "type": "flow",
+          "name": "workstream",
+          "status": "running",
+          "started_at": 800,
+          "label": {
+            "kind": "workstream",
+            "title": "Pin the consumers to cores",
+            "attrs_json": "{\"hypothesis_id\":\"H2\",\"parent_revision\":\"r1\",\"base_round\":1,\"round\":2}",
+            "links": [
+              {
+                "rel": "builds_on",
+                "to": "flow:root/ws-1#1"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261019-111041-5a9c0cd3-qwen35-mi210-20261019-111041",
+      "sequence": 17,
+      "timestamp": "2026-10-15T16:44:12+00:00",
+      "type": "span_started",
+      "data": {
+        "kind": "span_started",
+        "span": {
+          "id": "op:w2-turn",
+          "parent": "flow:root/ws-2#1",
+          "type": "operation",
+          "name": "agent.turn",
+          "status": "running",
+          "started_at": 801,
+          "label": {
+            "kind": "agent_turn",
+            "title": "implementer",
+            "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-2\",\"started_by\":[\"planner-1\"]}"
+          }
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261019-111041-5a9c0cd3-qwen35-mi210-20261019-111041",
+      "sequence": 18,
+      "timestamp": "2026-10-15T16:50:12+00:00",
+      "type": "span_ended",
+      "data": {
+        "kind": "span_ended",
+        "span": {
+          "id": "op:w2-turn",
+          "parent": "flow:root/ws-2#1",
+          "type": "operation",
+          "name": "agent.turn",
+          "status": "done",
+          "started_at": 801,
+          "ended_at": 1161,
+          "label": {
+            "kind": "agent_turn",
+            "title": "implementer",
+            "attrs_json": "{\"role\":\"implementer\",\"model\":\"claude-opus-5\",\"agent\":\"impl-2\",\"started_by\":[\"planner-1\"]}"
+          }
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261019-111041-5a9c0cd3-qwen35-mi210-20261019-111041",
+      "sequence": 19,
+      "timestamp": "2026-10-15T16:50:13+00:00",
+      "type": "span_started",
+      "data": {
+        "kind": "span_started",
+        "span": {
+          "id": "op:w2-gate",
+          "parent": "flow:root/ws-2#1",
+          "type": "operation",
+          "name": "evaluation.measure",
+          "status": "running",
+          "started_at": 1162,
+          "ended_at": 1399,
+          "label": {
+            "kind": "gate",
+            "title": "correctness + benchmark",
+            "attrs_json": "{\"stage\":\"correctness,benchmark\",\"metric_value\":395.4}",
+            "verdict": "passed"
+          }
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261019-111041-5a9c0cd3-qwen35-mi210-20261019-111041",
+      "sequence": 20,
+      "timestamp": "2026-10-15T16:54:10+00:00",
+      "type": "span_ended",
+      "data": {
+        "kind": "span_ended",
+        "span": {
+          "id": "op:w2-gate",
+          "parent": "flow:root/ws-2#1",
+          "type": "operation",
+          "name": "evaluation.measure",
+          "status": "done",
+          "started_at": 1162,
+          "ended_at": 1399,
+          "label": {
+            "kind": "gate",
+            "title": "correctness + benchmark",
+            "attrs_json": "{\"stage\":\"correctness,benchmark\",\"metric_value\":395.4}",
+            "verdict": "passed"
+          }
+        }
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261019-111041-5a9c0cd3-qwen35-mi210-20261019-111041",
+      "sequence": 21,
+      "timestamp": "2026-10-15T16:54:10+00:00",
+      "type": "measurement_compared",
+      "data": {
+        "kind": "measurement_compared",
+        "metric": "total_ops_per_sec",
+        "unit": "ops/s",
+        "direction": "max",
+        "candidate_commit": "r2",
+        "base_commit": "r1",
+        "candidate_value": 385.4,
+        "base_value": 350.4,
+        "ratio": 1.0998858447488584,
+        "noise": 0.03,
+        "verdict": "better",
+        "candidate_samples": 5,
+        "base_samples": 5
+      }
+    },
+    {
+      "protocol_version": 1,
+      "run_id": "20261019-111041-5a9c0cd3-qwen35-mi210-20261019-111041",
+      "sequence": 22,
+      "timestamp": "2026-10-15T16:54:11+00:00",
+      "type": "span_ended",
+      "data": {
+        "kind": "span_ended",
+        "span": {
+          "id": "flow:root/ws-2#1",
+          "parent": "flow:root#1",
+          "type": "flow",
+          "name": "workstream",
+          "status": "done",
+          "started_at": 800,
+          "ended_at": 1400,
+          "label": {
+            "kind": "workstream",
+            "title": "Pin the consumers to cores",
+            "attrs_json": "{\"hypothesis_id\":\"H2\",\"parent_revision\":\"r1\",\"base_round\":1,\"round\":2,\"revision\":\"r2\"}",
+            "verdict": "passed",
+            "links": [
+              {
+                "rel": "builds_on",
+                "to": "flow:root/ws-1#1"
+              }
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

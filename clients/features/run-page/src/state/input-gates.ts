@@ -31,10 +31,16 @@ export interface GateFailure {
 /** The gates that failed before any idea began, and whether one has (later failures are not these). */
 export interface InputGates {
   readonly failures: readonly GateFailure[];
+  /**
+   * Every pass seen, with its sequence. Whether a failure stands is read from these, not from the
+   * order the page learned of the two: a failure brought by a summary after a pass arrived live is
+   * still superseded by it.
+   */
+  readonly passes: readonly GatePass[];
   readonly settled: boolean;
 }
 
-export const NO_INPUT_GATES: InputGates = {failures: [], settled: false};
+export const NO_INPUT_GATES: InputGates = {failures: [], passes: [], settled: false};
 
 /** The failure `event` reports, or null when it is no gate finishing failed. */
 function gateFailureOf(event: RunEvent): GateFailure | null {
@@ -49,7 +55,8 @@ function gateFailureOf(event: RunEvent): GateFailure | null {
   };
 }
 
-interface GatePass {
+export interface GatePass {
+  readonly sequence: number;
   readonly gate: string;
   readonly recipe: string | null;
 }
@@ -58,24 +65,62 @@ interface GatePass {
 function gatePassOf(event: RunEvent): GatePass | null {
   const data = event.data;
   if (data?.kind !== 'gate_finished' || event.status === 'failed') return null;
-  return {gate: data.gate, recipe: data.recipe ?? null};
+  return {sequence: event.sequence ?? 0, gate: data.gate, recipe: data.recipe ?? null};
 }
 
 function sameGate(failure: GateFailure, other: GatePass): boolean {
   return failure.gate === other.gate && failure.recipe === other.recipe;
 }
 
-/** `failures` with those a pass of the same gate at `sequence` supersedes (earlier ones only). */
-function supersededBy(
+/** `failures` each with the first pass of its gate after it as the one that superseded it. */
+function resolved(
   failures: readonly GateFailure[],
-  pass: GatePass,
-  sequence: number,
+  passes: readonly GatePass[],
 ): readonly GateFailure[] {
-  const open = (failure: GateFailure): boolean =>
-    failure.supersededBy === null && sameGate(failure, pass) && failure.sequence < sequence;
-  return failures.some(open)
-    ? failures.map(failure => (open(failure) ? {...failure, supersededBy: sequence} : failure))
-    : failures;
+  let changed = false;
+  const next = failures.map(failure => {
+    const first = passes
+      .filter(pass => pass.sequence > failure.sequence && sameGate(failure, pass))
+      .reduce<number | null>(
+        (least, pass) => (least === null || pass.sequence < least ? pass.sequence : least),
+        null,
+      );
+    if (first === failure.supersededBy) return failure;
+    changed = true;
+    return {...failure, supersededBy: first};
+  });
+  return changed ? next : failures;
+}
+
+/**
+ * `gates` with `failures` and `passes` joined to what it holds, each once, in sequence order, and
+ * every failure's superseding pass read again. Joining is order-independent: a page that learns of
+ * a failure from a summary after it saw the pass live reads the same gates as one that saw both live.
+ */
+export function joinedInputGates(
+  gates: InputGates,
+  failures: readonly GateFailure[],
+  passes: readonly GatePass[],
+): InputGates {
+  const knownFailures = new Set(gates.failures.map(failure => failure.sequence));
+  const newFailures = failures.filter(failure => !knownFailures.has(failure.sequence));
+  const knownPasses = new Set(gates.passes.map(pass => pass.sequence));
+  const newPasses = [
+    ...new Map(
+      passes.filter(pass => !knownPasses.has(pass.sequence)).map(pass => [pass.sequence, pass]),
+    ).values(),
+  ];
+  const allPasses =
+    newPasses.length === 0
+      ? gates.passes
+      : [...gates.passes, ...newPasses].sort((a, b) => a.sequence - b.sequence);
+  const joined =
+    newFailures.length === 0
+      ? gates.failures
+      : [...gates.failures, ...newFailures].sort((a, b) => a.sequence - b.sequence);
+  const settled = resolved(joined, allPasses);
+  if (settled === gates.failures && allPasses === gates.passes) return gates;
+  return {...gates, failures: settled, passes: allPasses};
 }
 
 /**
@@ -91,18 +136,12 @@ export function foldInputGates(gates: InputGates, event: RunEvent): InputGates {
     return kind === 'workstream' ? {...gates, settled: true} : gates;
   }
   const pass = gatePassOf(event);
-  if (pass !== null) {
-    const failures = supersededBy(gates.failures, pass, event.sequence ?? 0);
-    return failures === gates.failures ? gates : {...gates, failures};
-  }
+  if (pass !== null) return joinedInputGates(gates, [], [pass]);
   const failure = gateFailureOf(event);
-  // A replayed event is the same failure, not another.
-  if (failure === null || gates.failures.some(known => known.sequence === failure.sequence)) {
-    return gates;
-  }
   // Once an idea has begun, a failure is the idea's own: only passes still count.
-  if (gates.settled) return gates;
-  return {...gates, failures: [...gates.failures, failure]};
+  if (failure === null || gates.settled) return gates;
+  // A replayed event is the same failure, not another.
+  return joinedInputGates(gates, [failure], []);
 }
 
 /** The failures a view at sequence `at` holds (null: all of them), as they stood then. */
@@ -137,18 +176,35 @@ export type GateHistoryView = GateFailureView;
 
 const ERROR_LINE = /\b([A-Z][A-Za-z0-9]*(?:Error|Exception)): ([^)\n]+)/g;
 
+const SOME_VALUE = /\bSome\(([^()]*)\)/g;
+
+/**
+ * `text` with a Rust optional's debug spelling read as its value: a benchmark written in Rust
+ * prints `prompt_tokens=Some(8192)` for a value it holds. The gate's own output is the tool's, not
+ * ours to change, so the sentence the screen words from it says `prompt_tokens=8192`; the printed
+ * output behind the disclosure stays as it was.
+ */
+function withoutOptionals(text: string): string {
+  let current = text;
+  for (let next = current.replace(SOME_VALUE, '$1'); next !== current; ) {
+    current = next;
+    next = current.replace(SOME_VALUE, '$1');
+  }
+  return current;
+}
+
 /** Why a gate failed in words: its last error, else the last line it printed; null with no output. */
 export function gateReason(tail: string | null): string | null {
   if (tail === null) return null;
   const errors = [...tail.matchAll(ERROR_LINE)];
   const last = errors.at(-1);
-  if (last !== undefined) return `${last[1]}: ${last[2]?.trim()}`;
+  if (last !== undefined) return withoutOptionals(`${last[1]}: ${last[2]?.trim()}`);
   const line = tail
     .split('\n')
     .map(each => each.trim())
     .filter(each => each !== '')
     .at(-1);
-  return line ?? null;
+  return line === undefined ? null : withoutOptionals(line);
 }
 
 function capitalized(text: string): string {

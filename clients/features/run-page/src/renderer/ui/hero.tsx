@@ -135,6 +135,7 @@ function Tile(props: {readonly tile: MetricTileView; readonly trend: boolean}): 
       {...(tile.note === null ? {} : {note: tile.note})}
       tone={tile.tone}
       detail={tile.detail}
+      hint={tile.hint}
       trend={
         tile.trend === null || !props.trend ? null : (
           <Sparkline

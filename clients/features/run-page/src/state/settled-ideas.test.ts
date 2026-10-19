@@ -83,6 +83,7 @@ function compared(
   candidate: string,
   base: string,
   values: {readonly candidate: number; readonly base: number},
+  verdict: 'better' | 'within_noise' | 'worse' | 'inconclusive' = 'better',
 ): RunEvent {
   return fixtureEvent(sequence, 'measurement_compared', {
     data: {
@@ -96,7 +97,7 @@ function compared(
       base_value: values.base,
       ratio: values.candidate / values.base,
       noise: 0.02,
-      verdict: 'better',
+      verdict,
       candidate_samples: 2,
       base_samples: 2,
     },
@@ -140,7 +141,13 @@ describe('an idea whose measurement the framework compared', () => {
 
   test('headlines the best idea’s compared mean with the ratio the comparison made, by its base', () => {
     const [tile] = heroView(model).tiles;
-    expect(tile).toMatchObject({figure: '385.4', ratio: null, detail: '1.10× vs round 2'});
+    expect(tile).toMatchObject({
+      figure: '385.4',
+      ratio: null,
+      detail: '1.10× vs round 2',
+      // The tooltip gives the means the ratio came from.
+      hint: '385.4 vs 350.4 · 1.10× vs round 2',
+    });
   });
 
   test('has that mean in the chart’s points, whose tooltips read it', () => {
@@ -230,5 +237,45 @@ describe('an idea whose measurement the framework compared', () => {
       352.1, 395.4,
     ]);
     expect(none.candidates.candidates.map(item => item.measurement?.against)).toEqual([null, null]);
+  });
+});
+
+describe('an idea whose comparison with its base was within noise', () => {
+  const NOISY = [
+    compared(1, 'c2', 'rin', {candidate: 350.39, base: 286.96}),
+    compared(2, 'c3', 'c2', {candidate: 352.4, base: 350.4}, 'within_noise'),
+  ].reduce(reduceEvent, initialCoreState());
+  const model = modelOf(SPANS, NOISY);
+
+  test('is no new best in the chart, though its value is higher', () => {
+    const chart = stripChartView(model, T0, T0 + 4000);
+    expect(chart?.points.map(point => point.label)).toEqual([
+      'Idea 2 · 350.4 · New best',
+      'Idea 3 · 352.4 · Passed',
+    ]);
+  });
+
+  test('is no best on the Ideas list or the hero, from the same reading', () => {
+    expect(model.candidates.best?.candidate).toBe(model.candidates.candidates[0]?.id);
+    expect(heroView(model).bestIdea?.title).toBe('Idea 2');
+  });
+
+  test('is a new best when the comparison says better, for any pair of values', () => {
+    for (const seed of SEEDS) {
+      const random = new Seeded(seed);
+      const first = 1 + random.int(1000);
+      const second = first + 1 + random.int(1000);
+      for (const verdict of ['better', 'within_noise', 'worse', 'inconclusive'] as const) {
+        const core = [
+          compared(1, 'c2', 'rin', {candidate: first, base: 1}),
+          compared(2, 'c3', 'c2', {candidate: second, base: first}, verdict),
+        ].reduce(reduceEvent, initialCoreState());
+        const labels = stripChartView(modelOf(SPANS, core), T0, T0 + 4000)?.points.map(point =>
+          point.label.endsWith('New best'),
+        );
+        const expected = verdict === 'better' || verdict === 'inconclusive';
+        expect(labels?.[1], `seed ${seed} ${verdict}`).toBe(expected);
+      }
+    }
   });
 });

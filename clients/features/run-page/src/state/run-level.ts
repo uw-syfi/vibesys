@@ -13,7 +13,7 @@ import type {
   MeasuredReading,
   ObjectiveAxis,
 } from '@vibesys/run-state/candidates';
-import {baseWords} from './base-words.js';
+import {againstWords} from './base-words.js';
 import {metricLabel, objectiveUnit, unitLabel} from './metric-words.js';
 import {stepLabel, stepTitle} from './names.js';
 import {objectivesOf} from './pareto-view.js';
@@ -63,6 +63,8 @@ export interface MetricTileView {
   readonly tone: 'ok' | 'err' | 'muted';
   /** The best's value and the input's, with the unit: `6,054,154 ops/s · input 1,581,539 ops/s`. */
   readonly detail: string;
+  /** The tooltip of the detail: `detail`, or the compared means with their ratio (`518.7 vs 393.4 \u00b7 1.32\u00d7 vs round 9`). */
+  readonly hint: string;
   readonly trend: TileTrend | null;
 }
 
@@ -190,7 +192,9 @@ function axisTile(model: RunModel, axis: ObjectiveAxis): MetricTileView {
 
 /** What a tile with no value says: that the input could not be measured, else that nothing was. */
 function notMeasured(model: RunModel): string {
-  return model.inputGates.length > 0 ? 'input not measured' : 'nothing measured yet';
+  return model.inputGates.some(failure => failure.supersededBy === null)
+    ? 'input not measured'
+    : 'nothing measured yet';
 }
 
 /**
@@ -207,8 +211,8 @@ function tileWords(
   unit: string,
   better: number | null,
   /** The ratio to the idea's base, worded (`1.10× vs round 2`), said in place of why there is no multiple. */
-  againstBase: string | null = null,
-): Pick<MetricTileView, 'ratio' | 'figure' | 'note' | 'tone' | 'detail'> {
+  againstBase: {readonly words: string; readonly baseValue: number} | null = null,
+): Pick<MetricTileView, 'ratio' | 'figure' | 'note' | 'tone' | 'detail' | 'hint'> {
   const inputPart = input === null ? [] : [`input ${formatValue(input)}${unit}`];
   if (value === null) {
     return {
@@ -217,6 +221,7 @@ function tileWords(
       note: null,
       tone: 'muted',
       detail: [notMeasured(model), ...inputPart].join(' \u00b7 '),
+      hint: [notMeasured(model), ...inputPart].join(' \u00b7 '),
     };
   }
   if (better === null) {
@@ -225,7 +230,9 @@ function tileWords(
       figure: formatValue(value),
       note: unit.trim() === '' ? null : unit.trim(),
       tone: 'muted',
-      detail: input === null ? (againstBase ?? noInputWords(model)) : inputPart.join(''),
+      detail: input === null ? (againstBase?.words ?? noInputWords(model)) : inputPart.join(''),
+      hint:
+        input === null ? againstHint(value, againstBase, noInputWords(model)) : inputPart.join(''),
     };
   }
   const verdict = verdictOf(better);
@@ -235,12 +242,26 @@ function tileWords(
     note: verdict.note,
     tone: verdict.tone,
     detail: [`${formatValue(value)}${unit}`, ...inputPart].join(' \u00b7 '),
+    hint: [`${formatValue(value)}${unit}`, ...inputPart].join(' \u00b7 '),
   };
+}
+
+/** The tooltip of a ratio to the base: the compared means, then the ratio worded by its base. */
+function againstHint(
+  value: number,
+  against: {readonly words: string; readonly baseValue: number} | null,
+  otherwise: string,
+): string {
+  return against === null
+    ? otherwise
+    : `${formatValue(value)} vs ${formatValue(against.baseValue)} \u00b7 ${against.words}`;
 }
 
 /** Why a measured best has no multiple: the input's measurement failed, or the run has none. */
 function noInputWords(model: RunModel): string {
-  return model.inputGates.length > 0 ? 'input not measured' : 'no input';
+  return model.inputGates.some(failure => failure.supersededBy === null)
+    ? 'input not measured'
+    : 'no input';
 }
 
 /** The tile of the run's objective metric. */
@@ -267,7 +288,10 @@ function objectiveTile(model: RunModel, best: CandidateMeasurement | null): Metr
       better,
       against === null
         ? null
-        : `${ratio(against.ratio)} vs ${baseWords(model.candidates.candidates, against)}`,
+        : {
+            words: againstWords(model.candidates.candidates, against, 'whole'),
+            baseValue: against.baseValue,
+          },
     ),
     trend: trendOf(model, name, input),
   };

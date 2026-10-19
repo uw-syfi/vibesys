@@ -125,6 +125,47 @@ export interface RunChatSlot {
   readonly unavailable?: string;
 }
 
+/**
+ * The run's facts under its title: its status and id on one line, the id whole (the line wraps
+ * rather than cut it); the agents and the spend on the next, so the spend takes no line of its own.
+ */
+function RunFacts(props: {readonly header: ReturnType<typeof headerView>}): JSX.Element {
+  const {header} = props;
+  return (
+    <>
+      <FactLine fit="parent" wrap>
+        <Fact>
+          <Chip label={header.status.label} tone={header.status.tone} dot />
+        </Fact>
+        <Fact title={header.subtitle}>
+          <Text variant="code" tone="muted">
+            {header.subtitle}
+          </Text>
+        </Fact>
+      </FactLine>
+      {header.agents.length === 0 && header.spent === null ? null : (
+        <FactLine>
+          {header.agents.map(agent => (
+            <Fact key={agent.role}>
+              <Text variant="small" tone="muted">
+                {agent.role}
+              </Text>
+              <Text variant="code">{agent.ran.join(', ')}</Text>
+            </Fact>
+          ))}
+          {header.spent === null ? null : (
+            <Fact>
+              <Text variant="code" tone="muted" title={header.spent.title}>
+                {header.agents.length === 0 ? header.spent.label : `· ${header.spent.label}`}
+              </Text>
+            </Fact>
+          )}
+        </FactLine>
+      )}
+    </>
+  );
+}
+
 function Header(props: {
   readonly state: RunPageState;
   readonly names: ModelNames;
@@ -149,36 +190,7 @@ function Header(props: {
         <Text as="h1" variant="heading">
           {header.title}
         </Text>
-        {/* One line: the long run id gives way (its whole text on hover), the figures never wrap. */}
-        <FactLine fit="parent" wrap={false}>
-          <Fact>
-            <Chip label={header.status.label} tone={header.status.tone} dot />
-          </Fact>
-          <Fact shrink title={header.subtitle}>
-            <Text variant="code" tone="muted">
-              {header.subtitle}
-            </Text>
-          </Fact>
-          {header.spent === null ? null : (
-            <Fact>
-              <Text variant="code" tone="muted" title={header.spent.title}>
-                {`· ${header.spent.label}`}
-              </Text>
-            </Fact>
-          )}
-        </FactLine>
-        {header.agents.length === 0 ? null : (
-          <FactLine>
-            {header.agents.map(agent => (
-              <Fact key={agent.role}>
-                <Text variant="small" tone="muted">
-                  {agent.role}
-                </Text>
-                <Text variant="code">{agent.ran.join(', ')}</Text>
-              </Fact>
-            ))}
-          </FactLine>
-        )}
+        <RunFacts header={header} />
       </Stack>
       <Row gap="space-2">
         {chat === undefined ? null : (
