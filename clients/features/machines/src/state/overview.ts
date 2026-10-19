@@ -21,6 +21,8 @@ export function cardStatus(machine: Machine): {readonly word: string; readonly t
       return {word: 'Unreachable', tone: 'err'};
     case 'sign-in':
       return {word: 'Sign in', tone: 'warn'};
+    case 'needs-update':
+      return {word: 'Needs an update', tone: 'warn'};
     case 'checkout-not-found':
       return {word: 'Checkout not found', tone: 'warn'};
     case 'checking':
@@ -53,6 +55,7 @@ export function cardAction(machine: Machine): 'sign-in' | 'reconnect' | null {
       return 'reconnect';
     case 'ready':
     case 'checking':
+    case 'needs-update':
     case 'checkout-not-found':
       return null;
   }

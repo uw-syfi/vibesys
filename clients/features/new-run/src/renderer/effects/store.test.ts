@@ -1,8 +1,8 @@
 import {expect, test} from 'bun:test';
 import type {Check, HelperFeature} from '@vibesys/contracts/host-helper';
+import {REQUIRED_HELPER_FEATURES} from '@vibesys/hosts';
 import type {DestinationFound, Offered} from '@vibesys/ipc';
 import {exampleCatalogue} from '@vibesys/run-fixtures';
-import {REQUIRED_HELPER_FEATURES} from '@vibesys/hosts';
 import type {RecentRun, RunRef} from '@vibesys/runs';
 import type {Draft} from '../../state/index.js';
 import {
@@ -876,8 +876,8 @@ async function chooseExample(
   const clock = manualSchedule();
   const features =
     answer === 'not_offered'
-      ? ['run_options', 'preflight', 'examples']
-      : ['run_options', 'preflight', 'examples', 'example_destination'];
+      ? [...REQUIRED_HELPER_FEATURES]
+      : [...REQUIRED_HELPER_FEATURES, 'example_destination'];
   const bridge: NewRunBridge = {
     ...fakeBridge(features, asked),
     examples: () => ok({kind: 'offered' as const, value: exampleCatalogue}),

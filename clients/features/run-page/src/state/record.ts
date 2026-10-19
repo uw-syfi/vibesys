@@ -47,7 +47,7 @@ export function runRecord(
   const listing = listings.find(each => each.host === run.host);
   if (listing?.kind !== 'listed') {
     const block = listing === undefined ? null : blockOf(listing.connection);
-    return block === null ? MACHINE : {...MACHINE, block};
+    return block === null ? MACHINE : {kind: 'unlisted', why: 'machine', block};
   }
   const live = newest(listing.live, run.runId, recent?.project);
   if (live !== undefined) return {kind: 'live', run: live};

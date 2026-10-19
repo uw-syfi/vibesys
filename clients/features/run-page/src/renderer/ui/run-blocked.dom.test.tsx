@@ -80,7 +80,7 @@ async function screen(state: RunPageState): Promise<HTMLElement> {
 
 for (const [block, words, status] of BLOCKS) {
   test(`a run on a machine that is ${block} says so, in words, with no endless search and no Retry`, async () => {
-    const container = await screen(blocked({kind: 'unlisted', block}));
+    const container = await screen(blocked({kind: 'unlisted', why: 'machine', block}));
     expect(container.textContent).toContain(words);
     expect(container.textContent).toContain(status);
     expect(container.textContent).not.toContain('Finding the run');
@@ -89,6 +89,6 @@ for (const [block, words, status] of BLOCKS) {
 }
 
 test('a run on a machine still connecting is still being found', async () => {
-  const container = await screen(blocked({kind: 'unlisted'}));
+  const container = await screen(blocked({kind: 'unlisted', why: 'machine'}));
   expect(container.textContent).toContain('Finding the run');
 });
