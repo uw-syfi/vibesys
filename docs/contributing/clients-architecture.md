@@ -324,7 +324,7 @@ CSS of their own. An app imports `./tokens.css`, `./fonts.css` and `./components
 | `SegmentedControl` | `label`, `options: {value, label}[]`, `value`, `change`, `size?`; native radios, so one tab stop and arrow keys |
 | `Select` | `value`, `options: {value, label, disabledReason?}[]`, `change`, `mono?` |
 | `Field` | `label`, `help?`, `error?`, one control as children |
-| `TextInput` | `value`, `change?`, `placeholder?`, `mono?`, `readOnly?` |
+| `TextInput` | `value`, `change?`, `placeholder?`, `mono?`, `readOnly?`, `rows?` (above one: a multi-line box), `submit?` (Enter; Shift+Enter is a new line) |
 | `PathInput` | `value`, `change`, `completions: {value, detail?}[]`, `placeholder?`; the ARIA combobox pattern |
 | `Checkbox`, `Switch` | `label`, `checked`, `change`, `disabledReason?` |
 | `Chip` | `label`, `tone?: StatusTone`, `dot?` |

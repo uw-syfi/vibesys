@@ -87,7 +87,7 @@ describe('steerCardMachine', () => {
     expect(snapshot.context.delivery).toEqual({kind: 'sent'});
     snapshot = step(snapshot, delivery('c-1', {kind: 'queued'}));
     expect(snapshot.context.delivery).toEqual({kind: 'waiting'});
-    snapshot = step(snapshot, delivery('c-1', {kind: 'delivered', idea: 3}));
+    snapshot = step(snapshot, delivery('c-1', {kind: 'delivered', idea: 3, where: null}));
     expect(inForce(snapshot.context)).toBe(true);
     snapshot = step(snapshot, {type: 'withdraw', controlId: 'w-1'});
     expect(snapshot.value).toEqual({sent: 'withdrawing'});
@@ -100,9 +100,9 @@ describe('steerCardMachine', () => {
 
   test('a delivery report that beats the acknowledgment is kept', () => {
     let snapshot = step(start(), {type: 'send', controlId: 'c-1'});
-    snapshot = step(snapshot, delivery('c-1', {kind: 'delivered', idea: 2}));
+    snapshot = step(snapshot, delivery('c-1', {kind: 'delivered', idea: 2, where: null}));
     snapshot = settled(snapshot, 'send', ACK);
-    expect(snapshot.context.delivery).toEqual({kind: 'delivered', idea: 2});
+    expect(snapshot.context.delivery).toEqual({kind: 'delivered', idea: 2, where: null});
   });
 
   test('a command the run did not take returns the card to its draft with the reason', () => {
@@ -118,7 +118,7 @@ describe('steerCardMachine', () => {
 
   test('a refused withdrawal leaves the steer in force with the reason', () => {
     let snapshot = settled(step(start(), {type: 'send', controlId: 'c-1'}), 'send', ACK);
-    snapshot = step(snapshot, delivery('c-1', {kind: 'delivered', idea: 1}));
+    snapshot = step(snapshot, delivery('c-1', {kind: 'delivered', idea: 1, where: null}));
     snapshot = settled(step(snapshot, {type: 'withdraw', controlId: 'w-1'}), 'retract', ACK);
     snapshot = step(snapshot, delivery('w-1', {kind: 'refused', reason: 'not in force'}));
     expect(snapshot.value).toEqual({sent: 'idle'});
@@ -130,7 +130,7 @@ describe('steerCardMachine', () => {
     const once = {...input, draft: {...input.draft, mode: 'next_turn' as const}};
     let snapshot = getInitialSnapshot(steerCardMachine, once);
     snapshot = settled(step(snapshot, {type: 'send', controlId: 'c-1'}), 'send', ACK);
-    snapshot = step(snapshot, delivery('c-1', {kind: 'delivered', idea: 1}));
+    snapshot = step(snapshot, delivery('c-1', {kind: 'delivered', idea: 1, where: null}));
     expect(step(snapshot, {type: 'withdraw', controlId: 'w-1'}).value).toEqual({sent: 'idle'});
     let waiting = settled(step(start(), {type: 'send', controlId: 'c-1'}), 'send', ACK);
     waiting = step(waiting, {type: 'withdraw', controlId: 'w-1'});
@@ -139,7 +139,9 @@ describe('steerCardMachine', () => {
 
   test('a report for another control changes nothing', () => {
     const sent = settled(step(start(), {type: 'send', controlId: 'c-1'}), 'send', ACK);
-    expect(step(sent, delivery('c-9', {kind: 'delivered', idea: 1})).context.delivery).toEqual({
+    expect(
+      step(sent, delivery('c-9', {kind: 'delivered', idea: 1, where: null})).context.delivery,
+    ).toEqual({
       kind: 'sent',
     });
   });
@@ -164,7 +166,7 @@ describe('steerCardMachine', () => {
           ...(['queued', 'dropped', 'ended', 'withdrawn'] as const).map(kind =>
             delivery(random.pick(controls), {kind}),
           ),
-          delivery(random.pick(controls), {kind: 'delivered', idea: random.int(5)}),
+          delivery(random.pick(controls), {kind: 'delivered', idea: random.int(5), where: null}),
           delivery(random.pick(controls), {kind: 'refused', reason: null}),
           ...live.operations.map(operation =>
             live.done(operation, random.bool() ? ACK : {kind: 'rejected', message: 'no'}),

@@ -54,6 +54,8 @@ export {
   type RunLifetimeBoundary,
   type RunStartupState,
   rehydrateCoreState,
+  type SteerDeliveryFact,
+  type SteerDeliveryStep,
   type TodoItem,
   type UsageMeter,
   type WinnerSelection,

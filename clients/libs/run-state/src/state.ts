@@ -201,6 +201,32 @@ export interface ChatProposal {
   readonly mode: 'next_turn' | 'standing' | 'interrupt';
 }
 
+export type SteerDeliveryStep =
+  | 'queued'
+  | 'withdraw_queued'
+  | 'reached'
+  | 'reached_mid_turn'
+  | 'in_force'
+  | 'dropped'
+  | 'ended'
+  | 'refused';
+
+/** One step in a steer's life, as the server reported it. */
+export interface SteerDeliveryFact {
+  readonly sequence: number;
+  readonly step: SteerDeliveryStep;
+  /** The id the operator sent the steer or withdrawal under; null for a control sent without one. */
+  readonly controlId: string | null;
+  readonly action: 'steer' | 'withdraw' | null;
+  /** For a queued withdrawal: the control id of the steer it ends. */
+  readonly withdraws: string | null;
+  /** The role whose turn took the steer. */
+  readonly role: string | null;
+  readonly attemptId: string | null;
+  /** Why a steer ended unreached or was refused. */
+  readonly reason: string | null;
+}
+
 /** Backend diagnostic facts. Visibility and dismissal belong to the UI. */
 export interface CoreDiagnostic {
   readonly id: string | null;
@@ -332,6 +358,8 @@ export interface CoreState {
   readonly chatThreads: readonly ChatThread[];
   /** The thread the server last wrote to, from the snapshot; null before one names it. */
   readonly lastChatThreadId: string | null;
+  /** The steps of operator steers' lives the server reported, in journal order. */
+  readonly steerDeliveries: readonly SteerDeliveryFact[];
   /** Each thread's answered questions, in journal order, keyed by thread id. */
   readonly chatQuestions: Readonly<Record<string, readonly ChatQuestion[]>>;
   /** The steers each thread's agent proposed, in journal order, keyed by thread id. */
@@ -410,6 +438,7 @@ export function initialCoreState(): CoreState {
     // title either. Naming it is the consumer's job.
     chatThreads: [{id: DEFAULT_CHAT_THREAD_ID, title: '', provider: null, model: null}],
     lastChatThreadId: null,
+    steerDeliveries: [],
     chatQuestions: {},
     chatProposals: {},
     todos: [],

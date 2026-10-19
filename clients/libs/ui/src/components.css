@@ -648,6 +648,10 @@ body > div:first-child {
 .vs-input::placeholder {
   color: var(--muted);
 }
+.vs-input[data-multiline] {
+  padding-block: var(--space-3);
+  resize: none;
+}
 .vs-input[data-mono] {
   font-family: var(--text-code-family);
   font-size: var(--text-code-size);

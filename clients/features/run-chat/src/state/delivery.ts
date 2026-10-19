@@ -3,18 +3,22 @@
  * Events arrive in any order and more than once; the fold only moves forward (sent, waiting,
  * delivered, then one of the endings) and an ending is final, so a card never goes back.
  *
- * `deliveriesOf` is the one place wire events become delivery events. The server does not
- * publish steer delivery yet (#3224, slice A), so it reads none today; wiring the real events is
- * a change to it alone, and fixtures drive the fold directly meanwhile.
+ * `deliveriesOf` is the one place the server's steer delivery steps become delivery events.
  */
-import type {CoreState} from '@vibesys/run-state';
+import type {CoreState, SteerDeliveryFact} from '@vibesys/run-state';
 
 /** What the server says happened to a control, each carrying the control's id. */
 export type DeliveryEvent =
   /** Queued for the target's next turn. */
   | {readonly kind: 'queued'}
   /** Reached the target: consumed by a turn, or delivered into one already running. */
-  | {readonly kind: 'delivered'; readonly idea: number | null}
+  | {
+      readonly kind: 'delivered';
+      /** The idea (its number in the run) whose turn took it, when the caller can say. */
+      readonly idea: number | null;
+      /** The role or attempt whose turn took it. */
+      readonly where: string | null;
+    }
   /** Dropped before it reached a turn (the target ended first). */
   | {readonly kind: 'dropped'}
   /** A standing steer's guidance ended with its target. */
@@ -30,7 +34,7 @@ export interface ControlDelivery {
 export type DeliveryState =
   | {readonly kind: 'sent'}
   | {readonly kind: 'waiting'}
-  | {readonly kind: 'delivered'; readonly idea: number | null}
+  | {readonly kind: 'delivered'; readonly idea: number | null; readonly where: string | null}
   | {readonly kind: 'dropped'}
   | {readonly kind: 'ended'}
   | {readonly kind: 'withdrawn'}
@@ -63,7 +67,7 @@ export function foldDelivery(state: DeliveryState, event: DeliveryEvent): Delive
     case 'queued':
       return advance(state, {kind: 'waiting'});
     case 'delivered':
-      return advance(state, {kind: 'delivered', idea: event.idea});
+      return advance(state, {kind: 'delivered', idea: event.idea, where: event.where});
     case 'dropped':
       // A steer that reached a turn was not dropped.
       return state.kind === 'delivered' ? state : advance(state, {kind: 'dropped'});
@@ -79,10 +83,49 @@ export function foldDelivery(state: DeliveryState, event: DeliveryEvent): Delive
   }
 }
 
+/** The number of the idea an attempt belongs to, as the run screen counts them; null if unknown. */
+export type IdeaOf = (attemptId: string) => number | null;
+
+/** The delivery a server step means for the steer card it names; null for a step no card shows. */
+function deliveryOfFact(fact: SteerDeliveryFact, ideaOf: IdeaOf): ControlDelivery | null {
+  if (fact.controlId === null) return null;
+  const controlId = fact.controlId;
+  switch (fact.step) {
+    case 'queued':
+      return fact.action === 'withdraw' ? null : {controlId, event: {kind: 'queued'}};
+    case 'withdraw_queued':
+      // The card already shows its withdrawal as requested.
+      return null;
+    case 'reached':
+    case 'reached_mid_turn':
+    case 'in_force':
+      return {
+        controlId,
+        event: {
+          kind: 'delivered',
+          idea: fact.attemptId === null ? null : (ideaOf(fact.attemptId) ?? null),
+          where: fact.role ?? fact.attemptId,
+        },
+      };
+    case 'dropped':
+      return {controlId, event: {kind: 'dropped'}};
+    case 'ended':
+      return {
+        controlId: fact.withdraws ?? controlId,
+        event: {kind: fact.reason === 'withdrawn' ? 'withdrawn' : 'ended'},
+      };
+    case 'refused':
+      return {controlId, event: {kind: 'refused', reason: fact.reason}};
+  }
+}
+
 /**
- * The deliveries the run's events report. The wire has no steer delivery events yet, so this
- * reads none; it is the single seam where they will be mapped.
+ * The deliveries the run's events report, in journal order. This is the single place the server's
+ * `steer_delivery` steps become delivery events; the fold itself is `run-state`'s.
  */
-export function deliveriesOf(_core: CoreState): readonly ControlDelivery[] {
-  return [];
+export function deliveriesOf(
+  core: CoreState,
+  ideaOf: IdeaOf = () => null,
+): readonly ControlDelivery[] {
+  return core.steerDeliveries.flatMap(fact => deliveryOfFact(fact, ideaOf) ?? []);
 }

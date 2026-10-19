@@ -1,4 +1,11 @@
-import {createContext, type JSX, type ReactNode, useContext, useId} from 'react';
+import {
+  createContext,
+  type JSX,
+  type KeyboardEvent,
+  type ReactNode,
+  useContext,
+  useId,
+} from 'react';
 
 /** What a `Field` gives the one control inside it: its id, what describes it, and its validity. */
 export interface FieldWiring {
@@ -63,29 +70,59 @@ export function Field(props: {
   );
 }
 
-/** A one-line text input; `mono` for paths and identifiers, `readOnly` for a value shown as set. */
+/**
+ * A text input; `mono` for paths and identifiers, `readOnly` for a value shown as set. With
+ * `rows` above one it is a multi-line box of that height. `submit` runs on Enter; in a multi-line
+ * box Shift+Enter still starts a new line.
+ */
 export function TextInput(props: {
   readonly value: string;
   readonly change?: (value: string) => void;
   readonly placeholder?: string;
   readonly mono?: boolean;
   readonly readOnly?: boolean;
+  readonly rows?: number;
+  readonly submit?: () => void;
 }): JSX.Element {
   const wiring = useFieldWiring('TextInput');
+  const shared = {
+    className: 'vs-input',
+    id: wiring.id,
+    value: props.value,
+    placeholder: props.placeholder,
+    readOnly: props.readOnly,
+    spellCheck: false,
+    autoComplete: 'off',
+    'data-mono': props.mono === true || undefined,
+    'data-mono-id': props.mono === true || undefined,
+    'aria-describedby': wiring.describedBy,
+    'aria-invalid': wiring.invalid || undefined,
+  } as const;
+  const {submit} = props;
+  const onEnter =
+    submit === undefined
+      ? undefined
+      : (event: KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>): void => {
+          if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return;
+          event.preventDefault();
+          submit();
+        };
+  if (props.rows !== undefined && props.rows > 1) {
+    return (
+      <textarea
+        {...shared}
+        rows={props.rows}
+        data-multiline
+        onKeyDown={onEnter}
+        onChange={event => props.change?.(event.target.value)}
+      />
+    );
+  }
   return (
     <input
-      className="vs-input"
-      id={wiring.id}
+      {...shared}
       type="text"
-      value={props.value}
-      placeholder={props.placeholder}
-      readOnly={props.readOnly}
-      spellCheck={false}
-      autoComplete="off"
-      data-mono={props.mono === true || undefined}
-      data-mono-id={props.mono === true || undefined}
-      aria-describedby={wiring.describedBy}
-      aria-invalid={wiring.invalid || undefined}
+      onKeyDown={onEnter}
       onChange={event => props.change?.(event.target.value)}
     />
   );

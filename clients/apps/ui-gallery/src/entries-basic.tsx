@@ -404,6 +404,13 @@ export const BASIC_ENTRIES = {
         <Field label="Read only">
           <TextInput value="~/work/queue" mono readOnly />
         </Field>
+        <Field label="Several lines">
+          <TextInput
+            value={'Keep the weights in bf16.\nCheck the scale first.'}
+            rows={3}
+            change={() => undefined}
+          />
+        </Field>
       </Grid>
     ),
   },

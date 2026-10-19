@@ -7,6 +7,7 @@ export {
   deliveriesOf,
   deliveryEnded,
   foldDelivery,
+  type IdeaOf,
   SENT,
 } from './delivery.js';
 export {
