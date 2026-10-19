@@ -206,6 +206,7 @@ _UNSUCCESSFUL = st.one_of(
 )
 
 
+@pytest.mark.xfail(strict=True, reason="PR #3225 G2: fixed in the next commit")
 @pytest.mark.regression
 @given(result=_UNSUCCESSFUL)
 @example(
@@ -228,3 +229,19 @@ def test_every_run_that_did_not_succeed_is_told_with_a_reason(result: RunResult)
     if result.stop_reason is not None:
         assert result.stop_reason in line
         assert "start a new run" in line
+    if result.status is RunStatus.FAILED:  # a failure is never told as an operator's stop
+        assert "stopped" not in line
+
+
+@pytest.mark.xfail(strict=True, reason="PR #3225 G2: fixed in the next commit")
+@pytest.mark.regression
+def test_a_failed_run_with_no_recorded_cause_is_not_told_as_a_stop() -> None:
+    """PR #3225 G2: a failure without a ``RunFailure`` printed "stopped on request"."""
+    failed = RunResult(run_id="r", loop="dynamic", succeeded=False, status=RunStatus.FAILED)
+
+    line = describe_early_stop(failed)
+
+    assert "stop" not in line
+    assert line == (
+        "Reason: the run failed and recorded no cause; its event log names the error that ended it."
+    )

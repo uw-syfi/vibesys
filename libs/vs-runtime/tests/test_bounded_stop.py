@@ -11,7 +11,7 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from vs_core.api import StopMode
-from vs_runtime.api import Evaluation
+from vs_runtime.api import BenchmarkEvaluation, Evaluation
 from vs_runtime.api.infrastructure import (
     RunStopped,
     StopGraceError,
@@ -79,6 +79,31 @@ async def test_a_stop_that_outlives_the_grace_cancels_the_block_as_a_landed_stop
     assert turn_cancelled.is_set()
     assert timer.delays == [_GRACE_S]
     assert task.cancelling() == 0
+
+
+@pytest.mark.xfail(strict=True, reason="PR #3225 G2: fixed in the next commit")
+@pytest.mark.regression
+@pytest.mark.asyncio
+async def test_a_stop_that_outlives_the_grace_says_so() -> None:
+    """PR #3225 G2: a forced stop raised a bare ``RunStopped``, so the run's result had no reason."""
+    channel = create_run_control_channel(FakeRunControlEventSink(), threads=SimThreads())
+    timer = FakeStopTimer(threads=SimThreads())
+
+    async def run() -> None:
+        async with bounded_stop(channel, grace_s=_GRACE_S, on_stop=_StopWork(), timer=timer):
+            await asyncio.Event().wait()
+
+    task = asyncio.create_task(run())
+    await yield_now()
+    channel.request_stop(StopMode.DRAIN)
+    await _until_armed(timer)
+    timer.expire()
+
+    with pytest.raises(RunStopped) as stopped:
+        await task
+    assert str(stopped.value) == (
+        "the stop outlived its 60 s grace, so the work still running was cancelled"
+    )
 
 
 @pytest.mark.asyncio
@@ -251,6 +276,29 @@ async def test_gated_evaluation_cancels_a_running_evaluation_at_the_stop() -> No
         await running
     assert gate.cancelled_while_live
     assert not gate.released
+
+
+class _CancelledBenchmark(FakeEvaluation):
+    """An evaluation whose benchmark is cancelled from inside, with no stop requested."""
+
+    async def benchmark(self, workspace: object, **kwargs: object) -> BenchmarkEvaluation:
+        del workspace, kwargs
+        raise asyncio.CancelledError
+
+
+@pytest.mark.xfail(strict=True, reason="PR #3225 G2: fixed in the next commit")
+@pytest.mark.regression
+@pytest.mark.asyncio
+async def test_an_evaluation_cancelled_without_a_stop_lands_naming_why() -> None:
+    """PR #3225 G2: the gate's fallback raised a bare ``RunStopped``, told as a stop on request."""
+    channel = create_run_control_channel(FakeRunControlEventSink(), threads=SimThreads())
+    evaluation = stop_gated_evaluation(_CancelledBenchmark(), channel)
+    workspace = FakeWorkspace(path=Path("/workspace"), workspace_id="candidate")
+
+    with pytest.raises(RunStopped) as stopped:
+        await evaluation.benchmark(workspace, output=DISCARD)
+    assert not channel.stop_requested()
+    assert str(stopped.value) == "an evaluation was cancelled before it finished"
 
 
 @pytest.mark.asyncio

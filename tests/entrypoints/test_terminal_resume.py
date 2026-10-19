@@ -19,7 +19,9 @@ from tests.support.task_project import write_task
 
 from entrypoints.cli import build_run_request, parse_cli_invocation
 from entrypoints.headless import main as headless_main
+from entrypoints.server import _DetachedGatewayEffects, _launch_detached_instance
 from entrypoints.server import main as server_main
+from server.host_api import DetachedLaunchFailure
 from vibesys.api import ConfigurationError
 from vibesys.orchestration.dynamic.launch import DynamicLaunch
 from vs_core.api import (
@@ -42,6 +44,7 @@ from vs_runtime.api.core_shell_fixtures import CounterConfig, counter
 
 if TYPE_CHECKING:
     from pathlib import Path
+    from typing import BinaryIO
 
     from vs_core.api import CoreState
 
@@ -185,6 +188,42 @@ def test_the_server_entrypoint_refuses_before_booting(
 
     assert raised.value.code == 2
     assert f"already terminal (cancelled: {_REASON})" in capsys.readouterr().err
+
+
+class _NoChild(_DetachedGatewayEffects):
+    """Detached-launch effects that record any spawn and start nothing."""
+
+    def __init__(self) -> None:
+        self.spawned: list[list[str]] = []
+
+    def spawn(self, command: list[str], environment: dict[str, str], output: BinaryIO) -> None:  # ty: ignore[invalid-method-override]
+        del environment, output
+        self.spawned.append(command)
+        message = "a detached resume of an ended run spawned its server"
+        raise AssertionError(message)
+
+
+@pytest.mark.xfail(strict=True, reason="PR #3225 G1: fixed in the next commit")
+@pytest.mark.regression
+def test_a_detached_resume_refuses_before_spawning_naming_the_outcome_and_reason(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """``--detach --resume`` of an ended run tells the operator why, and spawns no server."""
+    monkeypatch.chdir(_ended_run(tmp_path / "project"))
+    (tmp_path / "runtime").mkdir()
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path / "runtime"))
+    effects = _NoChild()
+
+    with pytest.raises(SystemExit) as raised:
+        _launch_detached_instance(
+            ["--detach", "--outer-loop", "dynamic", "--resume", _RUN_ID], effects
+        )
+
+    failure = DetachedLaunchFailure.model_validate_json(capsys.readouterr().out)
+    assert (failure.code, failure.stage) == ("run_ended", "resume_resolution")
+    assert f"already terminal (cancelled: {_REASON})" in failure.message
+    assert raised.value.code == failure.exit_code == 2
+    assert effects.spawned == []
 
 
 @pytest.mark.parametrize("status", [s for s in CoreRunStatus if s is not CoreRunStatus.TERMINAL])
