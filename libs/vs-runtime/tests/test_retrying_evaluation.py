@@ -303,7 +303,6 @@ class _UnavailableEnvironmentExecutor(ScriptedExecutor):
         return self.refusal() if handle_id in self.submitted else None
 
 
-@pytest.mark.xfail(strict=True, reason="F1: no outcome says the run environment is unavailable")
 @given(retries=_RETRIES)
 def test_a_measurement_refused_because_the_run_environment_is_unavailable_is_never_retried(
     retries: EvaluationRetries,

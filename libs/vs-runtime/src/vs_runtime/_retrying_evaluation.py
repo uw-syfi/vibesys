@@ -32,7 +32,7 @@ from vs_evaluation.api import (
     TrustedEvidence,
     same_work,
 )
-from vs_runtime._failure_classification import job_failure
+from vs_runtime._failure_classification import observed_failure
 
 if TYPE_CHECKING:
     from contextlib import AbstractContextManager
@@ -83,12 +83,15 @@ def terminal_failure(terminal: ExecutorObservation) -> MeasurementFailure | None
     """Whose fault a terminal observation's failure is, or ``None`` when it did not fail."""
     if terminal.state is not EvaluationState.FAILED:
         return None
-    return job_failure(
-        evidence.failure_kind
-        for step in terminal.stage_results
-        if step.result is not None
-        and (evidence := TrustedEvidence.model_validate(step.result)).outcome
-        is EvidenceOutcome.FAILED
+    return observed_failure(
+        (
+            evidence.failure_kind
+            for step in terminal.stage_results
+            if step.result is not None
+            and (evidence := TrustedEvidence.model_validate(step.result)).outcome
+            is EvidenceOutcome.FAILED
+        ),
+        run_environment_unavailable=terminal.run_environment_unavailable,
     )
 
 

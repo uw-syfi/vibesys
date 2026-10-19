@@ -521,8 +521,12 @@ class SlurmEnvironment(RefusesDockerInDocker, _NoopWorkspaceRecovery):
         """
         if not isinstance(self._settings.config.transport, SlurmLocalTransport):
             return
-        if request.run_id in self._root_proofs:
+        running = self._root_proofs.get(request.run_id)
+        if running is not None and not running.closed:
             return
+        # A closed proof (its root session ended) proves nothing: a new root session of the
+        # run starts a new probe, which resumes the closed one's durable record. Children
+        # opening meanwhile still see the closed proof and refuse, failing closed.
         state_root = request.log_dir / "slurm-workspace-root-probe"
         proof = WorkspaceRootProof(
             SlurmJobRunner(

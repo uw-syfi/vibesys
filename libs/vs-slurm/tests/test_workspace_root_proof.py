@@ -259,6 +259,8 @@ def test_stopping_the_run_mid_probe_cancels_its_job_and_a_resume_retries(
         threads.close()
     assert f"scancel {_FIRST_JOB_ID}" in recorded_commands(connector.state)
     _assert_cleaned(tmp_path)
+    # The run stopped the probe itself: it is told nothing that would end it as failed.
+    assert not [report for report in reports if isinstance(report, WorkspaceRootProbeFailed)]
 
     resumed = _threads()
     resumed_reports: list[WorkspaceRootProbeReport] = []

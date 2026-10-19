@@ -58,7 +58,7 @@ from vs_evaluation.api import (
 from vs_evaluation.api import EvidenceKind as StageKind
 from vs_evaluator_protocol.api import ProfileField
 from vs_runtime._evaluation_failure_text import render_stage_output_with_service_log
-from vs_runtime._failure_classification import job_failure
+from vs_runtime._failure_classification import observed_failure
 from vs_runtime._observation_factory import ObservationFacts, ObservationSubject
 
 STAGE_KINDS: dict[str, StageKind] = {
@@ -332,10 +332,13 @@ def _terminal_view(
     observation = make(status, accepted=True, terminal=True, diagnostic=diagnostic)
     evidence, outcomes = _evidence(terminal, plan, subject, observation.sequence)
     failure = (
-        job_failure(
-            item.failure_kind
-            for item in outcomes.values()
-            if item.outcome is EvidenceOutcome.FAILED
+        observed_failure(
+            (
+                item.failure_kind
+                for item in outcomes.values()
+                if item.outcome is EvidenceOutcome.FAILED
+            ),
+            run_environment_unavailable=terminal.run_environment_unavailable,
         )
         if status is ObservationStatus.FAILED
         else None

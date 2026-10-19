@@ -28,7 +28,12 @@ from vs_sandbox.api.slurm import load_slurm_operator_settings
 from vs_sandbox.api.testing import FakeComputeBackend
 from vs_sim.api import DISCARD
 from vs_sim.api.testing import FakePipedProcessLauncher, SimNetwork, SimThreads, VirtualClock
-from vs_slurm.api import FakeConnector, SlurmJobStatus, WorkspaceRootProbeQueued
+from vs_slurm.api import (
+    FakeConnector,
+    SlurmJobStatus,
+    WorkspaceRootProbeProven,
+    WorkspaceRootProbeQueued,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -120,17 +125,13 @@ class _PassThroughConfinement:
         return list(argv)
 
 
-def test_an_agent_gpu_command_waits_for_a_queued_probe_and_never_reaches_srun(
+def _root_session_parts(
     tmp_path: Path,
-) -> None:
-    """The root session hands its proof to the agent's GPU jobs (the gated launcher).
-
-    Fails if the session builds its GPU launcher without the proof: the command would
-    reach ``srun`` while the probe still waits in the queue.
-    """
-    connector = FakeConnector(tmp_path / "cluster")
-    connector.script(_PROBE_OPERATION, states=(SlurmJobStatus.PENDING,), pending_reason="Resources")
-    threads = SimThreads(VirtualClock(limit=_VIRTUAL_LIMIT_SECONDS))
+    threads: SimThreads,
+    connector: FakeConnector,
+    reports: list[WorkspaceRootProbeReport],
+) -> tuple[SlurmEnvironment, RunEnvironmentRequest, FakePipedProcessLauncher]:
+    """A local Slurm root with agent GPU commands, its root-session request, and its launcher."""
     launcher = FakePipedProcessLauncher()
     backend = DaemonBackend(daemon_engine(tmp_path, launcher=launcher), threads=threads)
     config = tmp_path / "slurm.toml"
@@ -157,7 +158,7 @@ max_time_minutes = 90
         job_confinement=_PassThroughConfinement(),
     )
     request = replace(
-        _request(tmp_path, threads, connector, []),
+        _request(tmp_path, threads, connector, reports),
         backend=backend,
         session_role=RunEnvironmentSessionRole.ROOT,
         system=replace(
@@ -168,6 +169,21 @@ max_time_minutes = 90
             launcher=launcher,
         ),
     )
+    return environment, request, launcher
+
+
+def test_an_agent_gpu_command_waits_for_a_queued_probe_and_never_reaches_srun(
+    tmp_path: Path,
+) -> None:
+    """The root session hands its proof to the agent's GPU jobs (the gated launcher).
+
+    Fails if the session builds its GPU launcher without the proof: the command would
+    reach ``srun`` while the probe still waits in the queue.
+    """
+    connector = FakeConnector(tmp_path / "cluster")
+    connector.script(_PROBE_OPERATION, states=(SlurmJobStatus.PENDING,), pending_reason="Resources")
+    threads = SimThreads(VirtualClock(limit=_VIRTUAL_LIMIT_SECONDS))
+    environment, request, launcher = _root_session_parts(tmp_path, threads, connector, [])
     srun_starts_before = len(launcher.started)
 
     def answer_partition_limits(
@@ -201,3 +217,39 @@ max_time_minutes = 90
     assert "rejected before srun" not in result.output  # it was held, not refused by policy
     started = [spec.argv for spec in launcher.started[srun_starts_before:]]
     assert not [argv for argv in started if "srun" in " ".join(argv)], started
+
+
+def test_a_new_root_session_of_the_run_starts_a_new_probe_once_the_last_one_closed(
+    tmp_path: Path,
+) -> None:
+    """A proof its root session closed proves nothing; it never refuses a later session.
+
+    The first root session closes while its probe waits in the queue, which stops the
+    probe. A second root session of the same run, on the same environment, starts a new
+    probe, which the scheduler runs, and the root is proven.
+    """
+    connector = FakeConnector(tmp_path / "cluster")
+    connector.script(_PROBE_OPERATION, states=(SlurmJobStatus.PENDING,), pending_reason="Resources")
+    threads = SimThreads(VirtualClock(limit=_VIRTUAL_LIMIT_SECONDS))
+    reports: list[WorkspaceRootProbeReport] = []
+    environment, request, _launcher = _root_session_parts(tmp_path, threads, connector, reports)
+
+    def open_close_and_open_again() -> None:
+        open_run_environment(environment, request).close()
+        session = open_run_environment(environment, request)
+        try:
+            # Bounded by the probe's own poll cadence; a passing run settles in a few polls.
+            for _ in range(100):
+                if reports and isinstance(reports[-1], WorkspaceRootProbeProven):
+                    break
+                threads.sleep(_NOTICE_WINDOW_SECONDS)
+        finally:
+            session.close()
+
+    try:
+        threads.run(open_close_and_open_again)
+    finally:
+        threads.close()
+
+    assert isinstance(reports[-1], WorkspaceRootProbeProven), reports
+    assert len(connector.submitted_job_ids()) == 2

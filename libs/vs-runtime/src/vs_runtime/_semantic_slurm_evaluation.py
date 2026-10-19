@@ -633,6 +633,8 @@ class SemanticSlurmEvaluationExecutor:
             stage_results=tuple(results),
             failure=None if state is EvaluationState.SUCCEEDED else failure,
             operator_failure=None if state is EvaluationState.SUCCEEDED else operator_failure,
+            run_environment_unavailable=state is EvaluationState.FAILED
+            and observed.run_environment_unavailable,
         )
 
     def _evidence(

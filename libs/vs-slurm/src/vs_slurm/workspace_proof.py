@@ -92,8 +92,9 @@ class WorkspaceRootProof:
     once it failed for good. ``close`` stops a probe still running: its job is
     cancelled, settled and cleaned, and a resume of the run retries it. ``report``
     hears that the job waits in the queue (bounded, see ``probe_workspace_root``), that
-    the proof retries, and how it ended, before any caller can see that ending. A
-    report that raises is logged and dropped: telling the run must never decide it.
+    the proof retries, and how it ended, before any caller can see that ending, unless
+    ``close`` stopped it. A report that raises is logged and dropped: telling the run
+    must never decide it.
     """
 
     def __init__(
@@ -145,6 +146,11 @@ class WorkspaceRootProof:
             self._settled.wait(_CANCEL_POLL_SECONDS)
         return True
 
+    @property
+    def closed(self) -> bool:
+        """Whether ``close`` was called: the proof will prove nothing more."""
+        return self._stop.is_set()
+
     def close(self) -> None:
         """Stop a running probe and wait, bounded, for it to clean up its job."""
         self._stop.set()
@@ -164,8 +170,10 @@ class WorkspaceRootProof:
             self._settled.set()
             raise
         # The run hears the ending before any Slurm work can see it, so a run that ends
-        # on a failed proof ends for that reason, not for what the refusal did after.
-        self._tell(outcome)
+        # on a failed proof ends for that reason, not for what the refusal did after. A
+        # probe the run itself stopped (``close``) ended nothing the run does not know.
+        if not self._stop.is_set():
+            self._tell(outcome)
         if isinstance(outcome, WorkspaceRootProbeProven):
             self._proven = True
         else:

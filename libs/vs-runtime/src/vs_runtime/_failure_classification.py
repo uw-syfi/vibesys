@@ -53,6 +53,7 @@ __all__ = [
     "classify",
     "is_unsettled",
     "job_failure",
+    "observed_failure",
     "signal_of",
 ]
 
@@ -205,6 +206,19 @@ def job_failure(kinds: Iterable[BenchmarkFailureKind | None]) -> MeasurementFail
     if _AMBIGUOUS in seen:
         return MeasurementFailure.AMBIGUOUS
     return MeasurementFailure.WORKLOAD
+
+
+def observed_failure(
+    kinds: Iterable[BenchmarkFailureKind | None], *, run_environment_unavailable: bool
+) -> MeasurementFailure:
+    """The class of a failed evaluation: its job's (`job_failure`), unless it never ran.
+
+    An evaluation the run environment refused because it can run no such work at all
+    is ``RUN_ENVIRONMENT_UNAVAILABLE`` whatever its stages say: no retry can succeed.
+    """
+    if run_environment_unavailable:
+        return MeasurementFailure.RUN_ENVIRONMENT_UNAVAILABLE
+    return job_failure(kinds)
 
 
 def is_unsettled(kind: BenchmarkFailureKind | None) -> bool:
