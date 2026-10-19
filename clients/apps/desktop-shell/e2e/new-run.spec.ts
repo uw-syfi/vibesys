@@ -99,6 +99,7 @@ test('an example of LLM serving: its model, its hardware, its goal, then the run
       harness: {provider: 'claude', model: 'claude-sonnet-4-5'},
       options: {rounds: 3, results: 'keep', roles: []},
       agents: {},
+      measure_on: {kind: 'same_machine'},
       args: [],
     },
   ]);
@@ -177,6 +178,7 @@ test('your own project: a recent one, its task, the agent on its machine, and th
       harness: {provider: 'claude', model: 'claude-opus-4-5'},
       options: {results: 'keep', roles: []},
       agents: {},
+      measure_on: {kind: 'same_machine'},
       args: [],
     },
   ]);
@@ -405,6 +407,7 @@ test('Run again opens Review with the run as it was started', async ({page}) => 
     harness: {provider: 'claude', model: 'claude-sonnet-4-5'},
     options: {rounds: 4, time_limit_s: null, results: 'keep', roles: []},
     agents: {},
+    measure_on: {kind: 'same_machine'},
     args: ['--max-in-flight', '3'],
   };
   const recent = (SEED.recent ?? []).map(each =>
@@ -592,6 +595,63 @@ test('a machine whose VibeSys cannot run an agent per role says so on the Agent 
   });
   await expect(main(page).getByText('Not supported on this machine')).toBeVisible();
   await expect(main(page).getByRole('button', {name: /different agent for a role/})).toHaveCount(0);
+});
+
+test('Where: a machine with nothing set up links to its Settings, and Back returns to the same step', async ({
+  page,
+}) => {
+  await openAt(page, pageNamed('where'));
+  const measured = main(page).getByRole('radiogroup', {name: 'Measured on'});
+  await expect(measured.getByRole('radio')).toHaveCount(1);
+  await expect(measured.getByRole('radio', {name: /Same machine/})).toBeVisible();
+  await main(page).getByRole('button', {name: 'Set up on host-b'}).click();
+  await expect(page.getByRole('combobox', {name: 'Machine'})).toHaveValue('ssh:host-b');
+  await expect(
+    main(page).getByRole('heading', {name: 'Clusters and clouds'}).first(),
+  ).toBeVisible();
+  await page.getByRole('button', {name: 'Back', exact: true}).click();
+  await expect(question(page, /Where does the agent work/)).toBeVisible();
+  await expect(steps(page).getByRole('button', {name: /Where it runs/})).toHaveAttribute(
+    'aria-current',
+    'page',
+  );
+  await expect(
+    main(page)
+      .getByRole('radiogroup', {name: 'Agent works on'})
+      .getByRole('radio', {name: /host-b/}),
+  ).toBeChecked();
+});
+
+test('Where: only what the machine has set up is offered, and the choice is the measurement target', async ({
+  page,
+}) => {
+  await openAt(page, pageNamed('where'));
+  await main(page)
+    .getByRole('radiogroup', {name: 'Agent works on'})
+    .getByRole('radio', {name: /This Mac/})
+    .check();
+  const measured = main(page).getByRole('radiogroup', {name: 'Measured on'});
+  await expect(measured.getByRole('radio')).toHaveCount(5);
+  for (const name of [
+    'Same machine',
+    'Slurm · lab-h100',
+    'Slurm · campus',
+    'Slurm · amd-hpc',
+    'Modal',
+  ]) {
+    await expect(measured.getByRole('radio', {name: new RegExp(name)})).toBeVisible();
+  }
+  await expect(main(page).getByRole('button', {name: /^Set up on/})).toHaveCount(0);
+  await measured.getByRole('radio', {name: 'Slurm · lab-h100'}).check();
+  await proceed(page);
+  await proceed(page);
+  await expect(main(page)).toContainText('Slurm · lab-h100');
+  await main(page).getByRole('button', {name: 'Create the project'}).click();
+  await expect(start(page)).not.toHaveAttribute('aria-disabled', 'true');
+  await start(page).click();
+  await expect(page.getByRole('radiogroup', {name: 'Show'})).toBeVisible();
+  const {started} = await fakeNewRun(page);
+  expect(started).toMatchObject([{measure_on: {kind: 'slurm', cluster: 'lab-h100'}}]);
 });
 
 test('More options starts closed, says what it holds, and stays as left on each machine', async ({

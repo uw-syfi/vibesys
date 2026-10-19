@@ -8,6 +8,7 @@ const DRAFT = {
   at: 'domain' as const,
   agent: null,
   budget: {rounds: null, timeLimitS: null, results: 'keep' as const},
+  measure: {kind: 'same_machine' as const},
   advanced: '',
   destination: null,
 };

@@ -68,6 +68,12 @@ function runFields(inputs: RunInputs, features: readonly HelperFeature[]) {
       "This machine's VibeSys cannot run a different agent for a role. Update it, or use the run's agent for every role.",
     );
   }
+  const measured = inputs.measure_on.kind !== 'same_machine';
+  if (measured && !features.includes('measurement_target')) {
+    throw new Error(
+      "This machine's VibeSys cannot measure on a cluster or cloud. Update it, or measure on this machine.",
+    );
+  }
   return {
     project: inputs.project,
     task: inputs.task,
@@ -75,6 +81,7 @@ function runFields(inputs: RunInputs, features: readonly HelperFeature[]) {
     options: inputs.options,
     ...(inputs.harness === null ? {} : {harness: inputs.harness}),
     ...(roleAgents ? {agents: inputs.agents} : {}),
+    ...(measured ? {measure_on: inputs.measure_on} : {}),
   };
 }
 
@@ -264,6 +271,7 @@ export class NewRunMain {
         harness: inputs.harness,
         options: inputs.options,
         agents: inputs.agents,
+        measure_on: inputs.measure_on,
         args: inputs.args,
       },
     });

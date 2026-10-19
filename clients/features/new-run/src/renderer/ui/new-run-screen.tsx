@@ -4,6 +4,7 @@
  * pane, is one line ("4 of 8 · Hardware") which opens the list. Every answer is kept, so leaving
  * New run and coming back finds the page where it was left.
  */
+import type {HostKey} from '@vibesys/hosts';
 import {Button, Page, Row, SectionLayout, SidebarItem, Stack, Text} from '@vibesys/ui';
 import type {JSX} from 'react';
 import {isDone, type NewRunEvent, type NewRunSnapshot, type StepId} from '../../state/index.js';
@@ -76,6 +77,8 @@ interface ScreenProps {
   readonly machines: readonly MachineOption[];
   /** Open Machines, where the machine's VibeSys checkout is chosen. */
   readonly chooseCheckout: () => void;
+  /** Open Settings on the clusters of `machine`, where a place to measure is set up. */
+  readonly setUp: (machine: HostKey) => void;
   /** The folder field's path completion. */
   readonly completion: FolderCompletion;
 }
@@ -109,7 +112,12 @@ function StepBody(props: ScreenProps & {readonly at: StepId}): JSX.Element {
       return <GoalPage {...cardProps} />;
     case 'where':
       return (
-        <WherePage {...cardProps} machines={props.machines} chooseCheckout={props.chooseCheckout} />
+        <WherePage
+          {...cardProps}
+          machines={props.machines}
+          chooseCheckout={props.chooseCheckout}
+          setUp={() => props.setUp(snapshot.context.form.machine)}
+        />
       );
     case 'agent':
       return <AgentPage {...cardProps} />;

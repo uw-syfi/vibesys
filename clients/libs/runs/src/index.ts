@@ -23,6 +23,7 @@ export {
 export {parseRunRef, type RunRef, sameRun} from './run-ref.js';
 export {
   type HarnessPick,
+  type MeasureTarget,
   parseRunStart,
   parseStoredRunStart,
   type RoleOption,

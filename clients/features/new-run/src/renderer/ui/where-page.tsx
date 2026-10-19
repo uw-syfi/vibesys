@@ -1,27 +1,33 @@
 /**
- * The Where it runs page: the machine the agent works on, and where results are measured. Only
- * measuring on the same machine exists today; clusters and clouds are shown as what they will be,
- * with the plain reason they cannot be chosen yet. Whether the machine has the hardware the task
- * targets is said here and again, with the other checks, on Review.
+ * The Where it runs page: the machine the agent works on, and where results are measured: that
+ * machine, the Slurm clusters and Modal set up on it (from its Settings data), with a way to Settings
+ * to set one up when it has none. Whether the machine has the hardware the task targets is said here
+ * and again, with the other checks, on Review.
  */
+
+import type {MeasureTarget} from '@vibesys/ipc';
 import {
   Banner,
   Button,
   ChoiceTiles,
   Collapsible,
   KeyValue,
+  Row,
   Stack,
   Text,
   type TileOption,
 } from '@vibesys/ui';
 import {type JSX, useState} from 'react';
-import {chosenEntry, fitOf} from '../../state/index.js';
+import {chosenEntry, fitOf, measureOptions, nothingSetUp, targetFacts} from '../../state/index.js';
 import type {CardProps} from './card-props.js';
-import {entriesIn, hardwareLine, type MachineOption, machineFacts, machineLabel} from './view.js';
-
-type Where = 'same' | 'slurm' | 'modal' | 'skypilot';
-
-const SETTINGS_SOON = 'Setting this up comes with each machine’s Settings.';
+import {
+  entriesIn,
+  hardwareLine,
+  type MachineOption,
+  machineFacts,
+  machineLabel,
+  measureLabel,
+} from './view.js';
 
 function MachineDetails(props: CardProps): JSX.Element | null {
   const {context} = props;
@@ -40,10 +46,17 @@ function MachineDetails(props: CardProps): JSX.Element | null {
   );
 }
 
+/** A target's value in the tiles. */
+function targetKey(target: MeasureTarget): string {
+  return target.kind === 'slurm' ? `slurm:${target.cluster}` : target.kind;
+}
+
 export function WherePage(
   props: CardProps & {
     readonly machines: readonly MachineOption[];
     readonly chooseCheckout: () => void;
+    /** Open Settings on the machine's clusters. */
+    readonly setUp: () => void;
   },
 ): JSX.Element {
   const {context, dispatch} = props;
@@ -64,22 +77,14 @@ export function WherePage(
       : {}),
     ...(ownProject && option.value !== machine ? {unavailable: `Your project is on ${name}.`} : {}),
   }));
-  const where: TileOption<Where>[] = [
-    {
-      value: 'same',
-      label: 'Same machine',
-      note: `${name}, where the agent works.`,
-      ...(described === null ? {} : {meta: hardwareLine(described)}),
-    },
-    {value: 'slurm', label: 'Slurm cluster', note: 'Batch jobs.', unavailable: SETTINGS_SOON},
-    {value: 'modal', label: 'Modal', note: 'Cloud GPUs.', unavailable: SETTINGS_SOON},
-    {
-      value: 'skypilot',
-      label: 'SkyPilot',
-      note: 'Any cloud or cluster profile.',
-      unavailable: 'Preview. Not available yet.',
-    },
-  ];
+  const targets = measureOptions(context.compute);
+  const where: TileOption<string>[] = targets.map(target => ({
+    value: targetKey(target),
+    label: measureLabel(target),
+    ...(target.kind === 'same_machine' && described !== null
+      ? {meta: hardwareLine(described)}
+      : {}),
+  }));
   const needs = chosenEntry(context.answers, entriesIn(context))?.details?.hardware ?? null;
   const fit = needs === null ? null : fitOf(needs, described, name);
   const noCheckout = described !== null && described.checkout === null;
@@ -87,7 +92,6 @@ export function WherePage(
     <Stack gap="space-5">
       <Stack gap="space-3">
         <Text variant="section">Agent works on</Text>
-        <Text tone="muted">The agent edits and builds the code on this machine.</Text>
         <ChoiceTiles
           label="Agent works on"
           layout="cards"
@@ -105,14 +109,22 @@ export function WherePage(
       </Stack>
       <Stack gap="space-3">
         <Text variant="section">Measured on</Text>
-        <Text tone="muted">Where each candidate is measured.</Text>
         <ChoiceTiles
           label="Measured on"
           layout="cards"
           options={where}
-          value="same"
-          change={() => undefined}
+          value={targetKey(context.form.measure)}
+          change={key => {
+            const target = targets.find(each => targetKey(each) === key);
+            if (target !== undefined) dispatch({type: 'measure', target});
+          }}
         />
+        <KeyValue items={targetFacts(context.compute, context.form.measure)} />
+        {nothingSetUp(context.compute) ? (
+          <Row>
+            <Button text={`Set up on ${name}`} press={props.setUp} />
+          </Row>
+        ) : null}
       </Stack>
       {fit === null || fit.kind === 'unknown' ? null : (
         <Banner

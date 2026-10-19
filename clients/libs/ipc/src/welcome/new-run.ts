@@ -16,6 +16,7 @@ import type {
 import {type HostId, type HostKey, hostFromKey} from '@vibesys/hosts';
 import {
   type HarnessPick,
+  type MeasureTarget,
   parseRunStart,
   type RoleOption,
   type RunOptions,
@@ -35,7 +36,7 @@ export const NEW_RUN_CHANNELS = {
   helperFeatures: 'vibesys:welcome:helper-features',
 } as const;
 
-export type {HarnessPick, RoleOption, RunOptions};
+export type {HarnessPick, MeasureTarget, RoleOption, RunOptions};
 
 /** What the inputs of a New run are: the checks are for exactly these, and a start uses them. */
 export interface RunInputs extends RunStart {
@@ -141,6 +142,7 @@ function parseRunInputs(value: unknown): RunInputs {
     'harness',
     'options',
     'agents',
+    'measure_on',
     'args',
   ]);
   return {
@@ -150,6 +152,7 @@ function parseRunInputs(value: unknown): RunInputs {
       harness: fields['harness'],
       options: fields['options'],
       agents: fields['agents'],
+      measure_on: fields['measure_on'],
       args: fields['args'],
     }),
   };

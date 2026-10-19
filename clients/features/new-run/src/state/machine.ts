@@ -16,7 +16,14 @@ import type {
   TaskGoal,
 } from '@vibesys/contracts/host-helper';
 import type {HostKey} from '@vibesys/hosts';
-import type {HarnessOffer, Offered, PreflightResult, RunInputs, StartedRun} from '@vibesys/ipc';
+import type {
+  HarnessOffer,
+  MeasureTarget,
+  Offered,
+  PreflightResult,
+  RunInputs,
+  StartedRun,
+} from '@vibesys/ipc';
 import {unprovided} from '@vibesys/machine';
 import type {RecentRun, RunStart} from '@vibesys/runs';
 import {and, assign, raise, type SnapshotFrom, setup} from 'xstate';
@@ -59,6 +66,7 @@ import {
   recordedAgent,
   runInputs,
 } from './form.js';
+import {type Compute, formWithMeasure} from './measure.js';
 import {type Problem, problemOf, type Step} from './problem.js';
 import {formWithRoles, rolesAfter, rolesWithin} from './roles.js';
 
@@ -87,6 +95,8 @@ export interface NewRunContext {
   readonly examples: ExamplesFor | null;
   readonly tasks: {readonly for: string; readonly list: readonly string[]} | null;
   readonly checks: ChecksFor | null;
+  /** What the machine has set up to measure on, from its Settings data (`compute` events). */
+  readonly compute: Compute;
   /** The goal of the user's own task, once read (feature `project_goal`). */
   readonly goal: GoalFor | null;
   /**
@@ -120,6 +130,10 @@ export type NewRunEvent =
   | {readonly type: 'agent'; readonly provider: string; readonly model: string}
   | {readonly type: 'role'; readonly role: RoleChoice}
   | {readonly type: 'budget'; readonly budget: Budget}
+  /** Where results are measured. */
+  | {readonly type: 'measure'; readonly target: MeasureTarget}
+  /** What `machine` has set up, as its Settings data says (null: not known); ignored for another machine. */
+  | {readonly type: 'compute'; readonly machine: HostKey; readonly compute: Compute}
   | {readonly type: 'advanced'; readonly advanced: string}
   /** Where an example is copied to, before it is. */
   | {readonly type: 'destination'; readonly destination: string}
@@ -152,7 +166,7 @@ function withAgent(form: Form, change: (agent: AgentChoice) => AgentChoice): For
 /** The events that change one input of the run that the answers do not name. */
 type InputEvent = Extract<
   NewRunEvent,
-  {readonly type: 'agent' | 'role' | 'budget' | 'advanced' | 'destination'}
+  {readonly type: 'agent' | 'role' | 'budget' | 'measure' | 'advanced' | 'destination'}
 >;
 
 /** The form after `event` changed one of its inputs. */
@@ -183,6 +197,8 @@ function withInput(context: NewRunContext, event: InputEvent): Form {
       }));
     case 'budget':
       return {...form, budget: event.budget};
+    case 'measure':
+      return formWithMeasure({...form, measure: event.target}, context.compute);
     case 'advanced':
       return {...form, advanced: event.advanced};
     case 'destination':
@@ -220,6 +236,7 @@ function freshParts(machine: HostKey, recent: readonly RecentRun[]) {
     examples: null,
     tasks: null,
     goal: null,
+    compute: null,
     checks: null,
     roles: null,
     rerun: lastRun(machine, recent)?.start ?? null,
@@ -392,6 +409,12 @@ export const newRunMachine = setup({
       form: withInput(context, event as InputEvent),
       problem: null,
     })),
+    // What the machine has set up changed: a target it no longer offers is dropped.
+    compute: assign(({context, event}) => {
+      const {machine, compute} = event as Extract<NewRunEvent, {type: 'compute'}>;
+      if (machine !== context.form.machine) return {};
+      return {compute, form: formWithMeasure(context.form, compute)};
+    }),
     answer: assign(({context, event}) => {
       const {change, advance} = event as Extract<NewRunEvent, {type: 'answer'}>;
       return {
@@ -747,6 +770,8 @@ export const newRunMachine = setup({
             agent: {target: '.waiting', actions: 'input'},
             role: {target: '.waiting', actions: 'input'},
             budget: {target: '.waiting', actions: 'input'},
+            measure: {target: '.waiting', actions: 'input'},
+            compute: {target: '.waiting', actions: 'compute'},
             advanced: {target: '.waiting', actions: 'input'},
             destination: {target: '.waiting', actions: 'input'},
             recheck: '.waiting',

@@ -44,6 +44,7 @@ export {
   type MachineReport,
   type MachineSettingsWelcomeBridge,
   type MachinesWelcomeBridge,
+  type MeasureTarget,
   type NewRunWelcomeBridge,
   type Offered,
   type PathCompletion,

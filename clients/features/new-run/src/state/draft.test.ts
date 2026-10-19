@@ -1,11 +1,12 @@
 import {describe, expect, test} from 'bun:test';
+import type {MeasureTarget} from '@vibesys/ipc';
 import {exampleCatalogue} from '@vibesys/run-fixtures';
 import {SEEDS, Seeded} from '@vibesys/store/testing';
 import {type Answers, NO_ANSWERS} from './answers.js';
 import {entriesOf} from './catalogue.js';
 import {type Draft, draftOf, flowOfDraft, parseDraft, storeDraft} from './draft.js';
 import {flowAnswer, startFlow} from './flow.js';
-import {DEFAULT_BUDGET, type Form} from './form.js';
+import {DEFAULT_BUDGET, type Form, SAME_MACHINE} from './form.js';
 
 const FORM: Form = {
   machine: 'ssh:host-a',
@@ -17,6 +18,7 @@ const FORM: Form = {
     roles: [{role: 'judge', agent: {provider: 'claude', model: 'sonnet'}, effort: 'high'}],
   },
   budget: {rounds: 4, timeLimitS: 3600, results: 'publish_github'},
+  measure: {kind: 'same_machine'},
   advanced: '--note "two words"',
 };
 
@@ -39,6 +41,11 @@ function draft(random: Seeded): Draft {
     at: random.pick(['start', 'goal', 'review'] as const),
     agent: random.pick([null, FORM.agent]),
     budget: random.pick([DEFAULT_BUDGET, FORM.budget]),
+    measure: random.pick<MeasureTarget>([
+      SAME_MACHINE,
+      {kind: 'modal'},
+      {kind: 'slurm', cluster: random.pick(['lab-h100', 'amd hpc'])},
+    ]),
     advanced: random.pick(['', FORM.advanced]),
     destination: random.pick([null, '~/elsewhere']),
   };

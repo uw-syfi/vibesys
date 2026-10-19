@@ -20,6 +20,7 @@ const STARTS: readonly (RunStart | null)[] = [
     harness: null,
     options: {rounds: null, time_limit_s: null, results: null, roles: []},
     agents: {},
+    measure_on: {kind: 'same_machine'},
     args: [],
   },
   {
@@ -31,6 +32,7 @@ const STARTS: readonly (RunStart | null)[] = [
       roles: [{role: 'judge', model: null, reasoning_effort: 'high'}],
     },
     agents: {judge: {provider: 'claude', model: 'claude-sonnet-4-5'}},
+    measure_on: {kind: 'same_machine'},
     args: ['--max-in-flight', '3'],
   },
 ];

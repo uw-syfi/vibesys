@@ -333,6 +333,7 @@ test("running a run again keeps that run's model, rounds, time limit, results an
     harness: {provider: 'claude', model: 'm2'},
     options: {rounds: 3, time_limit_s: 3600, results: 'publish_github' as const, roles: []},
     agents: {},
+    measure_on: {kind: 'same_machine' as const},
     args: ['--name', 'a b'],
   };
   const bridge: NewRunBridge = {
@@ -370,6 +371,7 @@ test("switching machines carries that machine's last budget and extra arguments,
     harness: null,
     options: {rounds: 5, results: 'keep' as const, roles: []},
     agents: {},
+    measure_on: {kind: 'same_machine' as const},
     args: ['--x'],
   };
   const {store} = createNewRunStore(fakeBridge(), {

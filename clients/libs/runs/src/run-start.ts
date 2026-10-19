@@ -12,6 +12,10 @@ export type RunOptions = NonNullable<Extract<HelperRequest, {type: 'run.start'}>
 export type RoleOption = NonNullable<RunOptions['roles']>[number];
 /** A provider and one of its vetted models. */
 export type HarnessPick = NonNullable<Extract<HelperRequest, {type: 'run.start'}>['harness']>;
+type MeasureOnField = Extract<HelperRequest, {type: 'run.start'}>['measure_on'];
+
+/** Where results are measured (`run.start`'s `measure_on`): this machine, a cluster of it, or Modal. */
+export type MeasureTarget = NonNullable<MeasureOnField>;
 
 /** The start inputs other than project and task: what Run again prefills. */
 export interface RunStart {
@@ -19,6 +23,8 @@ export interface RunStart {
   readonly options: RunOptions;
   /** The agent of each role that does not use the run's, by role id (`run.start`'s `agents`). */
   readonly agents: Readonly<Record<string, HarnessPick>>;
+  /** Where results are measured; the same machine unless chosen. */
+  readonly measure_on: MeasureTarget;
   /** Advanced arguments, split into words. */
   readonly args: readonly string[];
 }
@@ -107,6 +113,24 @@ function agents(value: unknown): Readonly<Record<string, HarnessPick>> {
   );
 }
 
+function measureOn(value: unknown): MeasureTarget {
+  if (value === null || value === undefined) return {kind: 'same_machine'};
+  const kind = record(value, 'measure_on', ['kind', 'cluster'])['kind'];
+  switch (kind) {
+    case 'same_machine':
+    case 'modal':
+      record(value, 'measure_on', ['kind']);
+      return {kind};
+    case 'slurm':
+      return {
+        kind,
+        cluster: text((value as {cluster?: unknown}).cluster, 'measure_on.cluster'),
+      };
+    default:
+      throw new Error('measure_on.kind must be one of same_machine, slurm, modal');
+  }
+}
+
 function words(value: unknown): readonly string[] {
   if (
     !Array.isArray(value) ||
@@ -125,23 +149,26 @@ export function parseRunStart(fields: {
   readonly harness: unknown;
   readonly options: unknown;
   readonly agents?: unknown;
+  readonly measure_on?: unknown;
   readonly args: unknown;
 }): RunStart {
   return {
     harness: harness(fields.harness),
     options: options(fields.options),
     agents: agents(fields.agents),
+    measure_on: measureOn(fields.measure_on),
     args: words(fields.args),
   };
 }
 
 /** `value` as a `RunStart` (an object with `harness`, `options`, `args`, and `agents` when it has any). */
 export function parseStoredRunStart(value: unknown): RunStart {
-  const fields = record(value, 'start', ['harness', 'options', 'agents', 'args']);
+  const fields = record(value, 'start', ['harness', 'options', 'agents', 'measure_on', 'args']);
   return parseRunStart({
     harness: fields['harness'] ?? null,
     options: fields['options'] ?? {},
     agents: fields['agents'] ?? null,
+    measure_on: fields['measure_on'] ?? null,
     args: fields['args'] ?? [],
   });
 }

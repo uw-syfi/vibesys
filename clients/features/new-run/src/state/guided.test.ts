@@ -262,6 +262,7 @@ const FORM: Form = {
   task: null,
   agent: {provider: 'claude', model: 'm', roles: []},
   budget: DEFAULT_BUDGET,
+  measure: {kind: 'same_machine'},
   advanced: '',
 };
 

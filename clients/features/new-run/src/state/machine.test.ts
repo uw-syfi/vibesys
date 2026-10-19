@@ -7,7 +7,14 @@ import type {
   TaskGoal,
 } from '@vibesys/contracts/host-helper';
 import type {HostKey} from '@vibesys/hosts';
-import type {HarnessOffer, Offered, PreflightResult, RunInputs} from '@vibesys/ipc';
+import type {
+  ComputeSettings,
+  HarnessOffer,
+  MeasureTarget,
+  Offered,
+  PreflightResult,
+  RunInputs,
+} from '@vibesys/ipc';
 import {checkMachine} from '@vibesys/machine/testing';
 import {exampleCatalogue} from '@vibesys/run-fixtures';
 import type {RecentRun} from '@vibesys/runs';
@@ -19,10 +26,12 @@ import type {Draft} from './draft.js';
 import {catalogueFor} from './flow.js';
 import {
   CHECK_DEBOUNCE_MS,
+  type Compute,
   checksPass,
   type FixDone,
   formWithRoles,
   inputsKey,
+  measureOptions,
   missingFeatures,
   type NewRunEvent,
   newRunMachine,
@@ -33,6 +42,7 @@ import {
   roleSummary,
   rolesAfter,
   runInputs,
+  sameTarget,
   splitWords,
   vettedModels,
 } from './index.js';
@@ -78,6 +88,7 @@ const RECENT: readonly RecentRun[] = [
         roles: [{role: 'judge', model: null, reasoning_effort: 'high'}],
       },
       agents: {judge: {provider: 'claude', model: 'claude-a'}},
+      measure_on: {kind: 'same_machine'},
       args: ['--max-in-flight', '3', '--note', 'two words'],
     },
   },
@@ -193,6 +204,24 @@ function inputEvent(random: Seeded, snapshot: SnapshotFrom<typeof newRunMachine>
       role: {role: random.pick(ROLE_IDS), agent: null, effort: random.pick(['default', 'high'])},
     },
     {type: 'budget', budget: {rounds: random.pick([1, 2, 5]), timeLimitS: null, results: 'keep'}},
+    {
+      type: 'measure',
+      target: random.pick<MeasureTarget>([
+        {kind: 'same_machine'},
+        {kind: 'modal'},
+        {kind: 'slurm', cluster: random.pick(['lab-h100', 'amd-hpc'])},
+      ]),
+    },
+    {
+      type: 'compute',
+      machine: random.pick(['local', 'ssh:gpu']),
+      compute: random.pick<Compute>([
+        null,
+        {kind: 'unsupported'},
+        {kind: 'offered', value: SETTINGS_WITH_MODAL},
+        {kind: 'offered', value: SETTINGS_WITH_LAB},
+      ]),
+    },
     {type: 'advanced', advanced: random.pick(['', '--max-in-flight 3', '--max-rounds 4', '"open'])},
     {type: 'destination', destination: random.pick(['~/a', '~/b'])},
     {type: 'again', run: random.pick(RECENT)},
@@ -216,7 +245,21 @@ function expectStartOnlyWhenChecksPass(before: Snapshot, after: Snapshot): void 
   }
 }
 
-const INPUTS = ['answer', 'agent', 'role', 'budget', 'advanced', 'destination'];
+function settings(clusters: readonly string[], modal: boolean): ComputeSettings {
+  return {
+    config_path: '/home/me/.config/vibesys/config.toml',
+    clusters: clusters.map(name => ({
+      cluster: {name, reach: {kind: 'login_node'}, workspace: '/scratch/me'},
+      source: 'user',
+    })),
+    modal: {token_present: modal},
+  } as unknown as ComputeSettings;
+}
+
+const SETTINGS_WITH_MODAL = settings([], true);
+const SETTINGS_WITH_LAB = settings(['lab-h100'], false);
+
+const INPUTS = ['answer', 'agent', 'role', 'budget', 'measure', 'advanced', 'destination'];
 
 /** An input other than the machine never restarts what the machine offers. */
 function expectInputKeepsFacts(before: Snapshot, event: NewRunEvent, after: Snapshot): void {
@@ -260,6 +303,14 @@ function expectInputApplied(before: Snapshot, event: NewRunEvent, after: Snapsho
   if (event.type === 'agent') {
     expect(form.agent).toMatchObject({provider: event.provider, model: event.model});
   }
+}
+
+/** The run is never measured on a target the machine's Settings data says it does not offer. */
+function unofferedMeasure(snapshot: Snapshot): string[] {
+  const {compute, form} = snapshot.context;
+  const offered =
+    compute === null || measureOptions(compute).some(option => sameTarget(option, form.measure));
+  return offered ? [] : ['the run is measured on a target its machine does not offer'];
 }
 
 /** The form never sets a role the run does not have, once the run has reported its roles. */
@@ -337,6 +388,7 @@ describe('newRunMachine', () => {
             }
           }
           problems.push(...unreportedRoles(snapshot));
+          problems.push(...unofferedMeasure(snapshot));
           if (form.project?.source === 'example' && runInputs(form) !== null) {
             problems.push('an example not yet created has run inputs');
           }
@@ -426,6 +478,7 @@ describe('newRunMachine', () => {
         harness: {provider: 'claude', model: 'claude-gone'},
         options: {},
         agents: {},
+        measure_on: {kind: 'same_machine'},
         args: [],
       },
     };
@@ -618,6 +671,7 @@ describe('newRunMachine', () => {
       at: 'where',
       agent: null,
       budget: {rounds: 3, timeLimitS: null, results: 'keep'},
+      measure: {kind: 'same_machine'},
       advanced: '',
       destination: null,
     } as const;

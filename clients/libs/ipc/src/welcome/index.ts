@@ -204,6 +204,7 @@ export type {
 } from './machines.js';
 export type {
   HarnessPick,
+  MeasureTarget,
   NewRunWelcomeBridge,
   Offered,
   PreflightResult,

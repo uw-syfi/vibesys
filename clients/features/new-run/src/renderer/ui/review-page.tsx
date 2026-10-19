@@ -33,6 +33,7 @@ import {
   backendOf,
   entriesIn,
   machineLabel,
+  measureLabel,
   type ReadinessFix,
   readiness,
   readinessStatus,
@@ -109,7 +110,7 @@ function answers(context: NewRunContext): Answer[] {
     {label: 'Agent works on', value: machineLabel(form.machine), step: 'where'},
     {
       label: 'Measured on',
-      value: `Same machine${backend === null ? '' : `, ${backendLabel(backend)}`}`,
+      value: `${measureLabel(form.measure)}${backend === null ? '' : `, ${backendLabel(backend)}`}`,
       step: 'where',
     },
     {label: 'Agent', value: agentWords(context) ?? 'Not chosen', step: 'agent'},

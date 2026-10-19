@@ -3,6 +3,7 @@
  * the "Ready to start" items, why Start is disabled, and the one-line summary of the run.
  */
 import {acceleratorName, type HostKey, hostFromKey, hostLabel} from '@vibesys/hosts';
+import type {MeasureTarget} from '@vibesys/ipc';
 import type {RecentRun} from '@vibesys/runs';
 import type {BrandMarkName, CheckState, KeyValueItem} from '@vibesys/ui';
 import {
@@ -481,6 +482,18 @@ export function moreOptionsSummary(context: NewRunContext): string {
     ...(form.project?.source === 'example' ? ['example location'] : []),
   ];
   return parts.length === 0 ? 'Defaults' : parts.join(' · ');
+}
+
+/** A measurement target as a person reads it: the machine itself, a Slurm cluster by name, Modal. */
+export function measureLabel(target: MeasureTarget): string {
+  switch (target.kind) {
+    case 'same_machine':
+      return 'Same machine';
+    case 'slurm':
+      return `Slurm \u00b7 ${target.cluster}`;
+    case 'modal':
+      return 'Modal';
+  }
 }
 
 /** The agent of each role that does not use the run's, in the order of the run's roles. */

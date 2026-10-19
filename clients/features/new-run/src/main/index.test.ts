@@ -41,6 +41,7 @@ describe('NewRunMain', () => {
       harness: null,
       options: {},
       agents: {},
+      measure_on: {kind: 'same_machine'},
       args: [],
     };
     const answer = (await main.answer({kind: 'preflight', host: LOCAL, inputs})) as {
@@ -64,6 +65,7 @@ describe('NewRunMain', () => {
       harness: null,
       options: {},
       agents: {},
+      measure_on: {kind: 'same_machine'},
       args: [],
     };
     const answer = (await main.answer({kind: 'preflight', host: LOCAL, inputs})) as {
@@ -85,6 +87,7 @@ describe('NewRunMain', () => {
       harness: null,
       options: {},
       agents: {},
+      measure_on: {kind: 'same_machine'},
       args: [],
     };
     const answer = (await main.answer({kind: 'preflight', host: LOCAL, inputs})) as {
@@ -103,6 +106,7 @@ describe('NewRunMain', () => {
       harness: null,
       options: {},
       agents: {},
+      measure_on: {kind: 'same_machine'},
       args: [],
     };
     const answer = (await main.answer({kind: 'preflight', host: LOCAL, inputs})) as {
@@ -122,6 +126,7 @@ describe('NewRunMain', () => {
       harness: null,
       options: {},
       agents: {},
+      measure_on: {kind: 'same_machine'},
       args: [],
     };
     const ids = async () =>
@@ -154,6 +159,7 @@ describe('NewRunMain', () => {
       harness: null,
       options: {},
       agents: {},
+      measure_on: {kind: 'same_machine'},
       args: [],
     };
     const settings = async () =>
@@ -181,6 +187,7 @@ describe('NewRunMain', () => {
         harness: null,
         options: {rounds: 2},
         agents: {},
+        measure_on: {kind: 'same_machine'},
         args: [],
       },
     })) as {runId: string; instanceId: string};
@@ -193,7 +200,13 @@ describe('NewRunMain', () => {
         runId: started.runId,
         instanceId: started.instanceId,
         attachedAt: 42,
-        start: {harness: null, options: {rounds: 2}, agents: {}, args: []},
+        start: {
+          harness: null,
+          options: {rounds: 2},
+          agents: {},
+          measure_on: {kind: 'same_machine'},
+          args: [],
+        },
       },
     ]);
   });
@@ -208,6 +221,7 @@ describe('NewRunMain', () => {
       harness: {provider: 'codex', model: 'gpt-a'},
       options: {},
       agents: {[role]: {provider: 'codex', model: 'gpt-b'}},
+      measure_on: {kind: 'same_machine'},
       args: [],
     };
     await main.answer({kind: 'preflight', host: LOCAL, inputs});
@@ -232,6 +246,7 @@ describe('NewRunMain', () => {
       harness: null,
       options: {},
       agents: {judge: {provider: 'claude', model: 'claude-sonnet-4-5'}},
+      measure_on: {kind: 'same_machine'},
       args: [],
     };
     await expect(main.answer({kind: 'start-run', host: LOCAL, inputs})).rejects.toThrow(
@@ -242,6 +257,41 @@ describe('NewRunMain', () => {
     );
     expect(link.helper.requests.some(request => request.type === 'run.start')).toBe(false);
     expect(remembered).toEqual([]);
+  });
+
+  test('sends where to measure only to a helper that has measurement_target, on the check and the start', async () => {
+    const {link, main, remembered} = subject();
+    link.helper.host.projects.set('/p', ['mpmc']);
+    const inputs: RunInputs = {
+      project: '/p',
+      task: 'mpmc',
+      harness: null,
+      options: {},
+      agents: {},
+      measure_on: {kind: 'slurm', cluster: 'lab-h100'},
+      args: [],
+    };
+    const sent = () =>
+      link.helper.requests
+        .filter(request => request.type === 'run.preflight' || request.type === 'run.start')
+        .map(request => ('measure_on' in request ? request.measure_on : 'absent'));
+    await main.answer({kind: 'preflight', host: LOCAL, inputs});
+    await main.answer({kind: 'start-run', host: LOCAL, inputs});
+    expect(sent()).toEqual([inputs.measure_on, inputs.measure_on]);
+    expect(remembered[0]?.start?.measure_on).toEqual(inputs.measure_on);
+    // Measuring on this machine is the default and sends nothing.
+    const here = {...inputs, measure_on: {kind: 'same_machine' as const}};
+    await main.answer({kind: 'preflight', host: LOCAL, inputs: here});
+    expect(sent().at(-1)).toBe('absent');
+    // A helper without the feature is refused, loudly, before anything starts.
+    link.helper.features.delete('measurement_target');
+    await expect(main.answer({kind: 'start-run', host: LOCAL, inputs})).rejects.toThrow(
+      'cannot measure on a cluster or cloud',
+    );
+    await expect(main.answer({kind: 'preflight', host: LOCAL, inputs})).rejects.toThrow(
+      'cannot measure on a cluster or cloud',
+    );
+    expect(remembered).toHaveLength(1);
   });
 
   test("reads a project task's goal from a helper that has project_goal, and says so when it cannot", async () => {

@@ -5,6 +5,7 @@
  * stale or hand-edited value is no draft and never half of one.
  */
 import {type HostKey, hostFromKey} from '@vibesys/hosts';
+import type {MeasureTarget} from '@vibesys/ipc';
 import {type Answers, NO_ANSWERS, type StepId} from './answers.js';
 import type {CatalogueEntry} from './catalogue.js';
 import {type Flow, formFor} from './flow.js';
@@ -19,6 +20,7 @@ export interface Draft {
   readonly at: StepId;
   readonly agent: AgentChoice | null;
   readonly budget: Budget;
+  readonly measure: MeasureTarget;
   readonly advanced: string;
   /** Where an example's copy goes, when the user changed it. */
   readonly destination: string | null;
@@ -35,6 +37,7 @@ export function draftOf(flow: Flow): Draft | null {
     at: flow.at,
     agent: form.agent,
     budget: form.budget,
+    measure: form.measure,
     advanced: form.advanced,
     destination:
       project !== null && (project.source === 'example' || project.source === 'created')
@@ -51,6 +54,7 @@ export function flowOfDraft(draft: Draft, entries: readonly CatalogueEntry[]): F
     task: null,
     agent: draft.agent,
     budget: draft.budget,
+    measure: draft.measure,
     advanced: draft.advanced,
   };
   const form = formFor(base, draft.answers, entries);
@@ -172,6 +176,14 @@ function parseAgent(value: unknown): AgentChoice | null | undefined {
     : undefined;
 }
 
+function parseMeasure(value: unknown): MeasureTarget | null {
+  const kind = isRecord(value) ? value['kind'] : undefined;
+  if (kind === 'same_machine' || kind === 'modal') return exact(value, ['kind']) ? {kind} : null;
+  const fields = kind === 'slurm' ? exact(value, ['kind', 'cluster']) : null;
+  const cluster = text(fields?.['cluster']);
+  return cluster === null ? null : {kind: 'slurm', cluster};
+}
+
 function parseBudget(value: unknown): Budget | null {
   const fields = exact(value, ['rounds', 'timeLimitS', 'results']);
   if (fields === null) return null;
@@ -208,6 +220,7 @@ export function parseDraft(serialized: string | null): Draft | null {
     'at',
     'agent',
     'budget',
+    'measure',
     'advanced',
     'destination',
   ]);
@@ -217,6 +230,7 @@ export function parseDraft(serialized: string | null): Draft | null {
   const at = STEP_IDS.find(step => step === fields['at']);
   const agent = parseAgent(fields['agent']);
   const budget = parseBudget(fields['budget']);
+  const measure = parseMeasure(fields['measure']);
   const advanced = text(fields['advanced']);
   const destination = nullableText(fields['destination']);
   if (
@@ -225,12 +239,13 @@ export function parseDraft(serialized: string | null): Draft | null {
     at === undefined ||
     agent === undefined ||
     budget === null ||
+    measure === null ||
     advanced === null ||
     destination === undefined
   ) {
     return null;
   }
-  return {machine, answers, at, agent, budget, advanced, destination};
+  return {machine, answers, at, agent, budget, measure, advanced, destination};
 }
 
 export function storeDraft(draft: Draft): string {

@@ -142,6 +142,7 @@ test('regression: Run again opens New run with the options the run was started w
           harness: null,
           options: {rounds: 3, time_limit_s: 600, results: 'publish_github', roles: []},
           agents: {},
+          measure_on: {kind: 'same_machine'},
           args: ['--max-in-flight', '3'],
         },
       },
@@ -191,13 +192,20 @@ test('Settings opened for a machine and section lands there, reads the machine, 
   );
   const select = (screen: Screen): void => stores.sidebar.store.dispatch({type: 'select', screen});
   select({kind: 'new-run', machine: 'ssh:gpu-box'});
+  await settle();
   const before = stores.newRun.getState();
   select({kind: 'settings', machine: 'ssh:gpu-box', section: 'logins'});
   expect(stores.machineSettings.getState()).toMatchObject({
     machine: 'ssh:gpu-box',
     section: 'logins',
   });
-  expect(read.sort()).toEqual(['compute ssh:gpu-box', 'logins ssh:gpu-box']);
+  // The machines New run was for are read once each; Settings read gpu-box already.
+  expect(read.sort()).toEqual([
+    'compute local',
+    'compute ssh:gpu-box',
+    'logins local',
+    'logins ssh:gpu-box',
+  ]);
   stores.sidebar.store.dispatch({type: 'back-from-settings'});
   expect(stores.sidebar.store.getState().selection).toMatchObject({kind: 'new-run'});
   expect(stores.newRun.getState()).toBe(before);
@@ -225,4 +233,61 @@ test('Settings opened plainly keeps the machine and section it was on', async ()
     machine: 'ssh:gpu-box',
     section: 'clusters',
   });
+});
+
+/** Lets the replies of a bridge that answers at once reach the stores. */
+async function settle(): Promise<void> {
+  for (let tick = 0; tick < 8; tick += 1) await Promise.resolve();
+}
+
+test("New run offers what the machine's Settings data says, and returning from Settings keeps the form", async () => {
+  const ok = <T>(value: T) => Promise.resolve({ok: true as const, value});
+  const settings = {
+    config_path: '/home/me/.config/vibesys/config.toml',
+    clusters: [{cluster: {name: 'lab-h100', reach: {kind: 'login_node'}}, source: 'user'}],
+    modal: {token_present: false},
+  };
+  const bridge = {
+    ...fakeBridge(),
+    compute: (host: string) =>
+      ok(
+        host === 'ssh:gpu-box'
+          ? {kind: 'offered' as const, value: settings}
+          : {kind: 'unsupported' as const},
+      ),
+    agentLogins: () => ok({kind: 'unsupported' as const}),
+  } as unknown as WelcomeBridge;
+  const stores = createShellStores(
+    bridge,
+    {mode: 'light', onChange: () => undefined},
+    {setAttribute: () => undefined},
+    () => () => undefined,
+    {
+      messages: {addEventListener: ignore, removeEventListener: ignore},
+      address: NO_ADDRESS,
+      now: () => 0,
+      session: () => {
+        throw new Error('this test opens no run');
+      },
+    },
+    {sidebar: {read: () => null, write: ignore}},
+  );
+  const select = (screen: Screen): void => stores.sidebar.store.dispatch({type: 'select', screen});
+  select({kind: 'new-run', machine: 'ssh:gpu-box'});
+  await settle();
+  expect(stores.newRun.getState().context.compute).toEqual({
+    kind: 'offered',
+    value: settings,
+  } as never);
+  stores.newRun.dispatch({type: 'measure', target: {kind: 'slurm', cluster: 'lab-h100'}});
+  stores.newRun.dispatch({type: 'advanced', advanced: '--max-in-flight 3'});
+  const before = stores.newRun.getState().context;
+  // The link on the Where page: Settings on that machine's clusters, and Back to the same form.
+  select({kind: 'settings', machine: 'ssh:gpu-box', section: 'clusters'});
+  stores.sidebar.store.dispatch({type: 'back-from-settings'});
+  await settle();
+  const after = stores.newRun.getState().context;
+  expect(after.form).toEqual(before.form);
+  expect(after.at).toBe(before.at);
+  expect(after.answers).toEqual(before.answers);
 });

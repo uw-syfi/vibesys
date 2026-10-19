@@ -90,6 +90,11 @@ function cases(random: Seeded): Case[] {
       },
     ]),
     agents: random.pick([{}, {judge: {provider: 'claude', model: 'claude-b'}}]),
+    measure_on: random.pick([
+      {kind: 'same_machine' as const},
+      {kind: 'slurm' as const, cluster: 'lab-h100'},
+      {kind: 'modal' as const},
+    ]),
     args: random.pick([[], ['--max-in-flight', '3']]),
   };
   const cluster = {
