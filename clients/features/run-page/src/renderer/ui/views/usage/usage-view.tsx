@@ -70,7 +70,7 @@ function Name(props: {readonly row: UsageRowView}): JSX.Element {
 
 function columns(results: boolean): readonly TableColumn<UsageRowView>[] {
   return [
-    {key: 'group', header: 'group', cell: row => <Name row={row} />},
+    {key: 'group', header: 'group', lead: true, cell: row => <Name row={row} />},
     ...(results
       ? [
           {

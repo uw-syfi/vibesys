@@ -11,6 +11,8 @@ export interface TableColumn<Row> {
   readonly align?: 'start' | 'end';
   /** Shown only when the table has room: it hides below `NARROW` of its own width. */
   readonly wide?: boolean;
+  /** The column that names the row: it keeps a readable width, and the table scrolls instead. */
+  readonly lead?: boolean;
 }
 
 /** What a row's first cell offers to fold or unfold what the row stands for. */
@@ -91,6 +93,7 @@ export function Table<Row>(props: {
                     data-mono-id={column.mono}
                     data-align={column.align}
                     data-wide={column.wide === true || undefined}
+                    data-lead={column.lead === true || undefined}
                   >
                     {at === 0 && props.fold !== undefined ? (
                       <span className="vs-table-lead">
