@@ -452,6 +452,7 @@ _FAILURE_HEADLINES = {
     RunFailureKind.BUDGET_EXHAUSTED: "the workstream budget ran out",
     RunFailureKind.DEADLINE: "the run's time limit ended it",
     RunFailureKind.NO_RESULT: "the run ended",
+    RunFailureKind.RUN_ENVIRONMENT_UNAVAILABLE: "the run environment could run none of its work",
 }
 
 

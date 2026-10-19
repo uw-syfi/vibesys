@@ -34,6 +34,7 @@ from vibesys.events import (
     json_value,
 )
 from vibesys.run.agent_events import CoreAgentEventSink
+from vibesys.run.environment_failure import RunEnvironmentFailure
 from vibesys.run.event_journal import EventJournal
 from vs_core.api import FlowDriver, FlowState, RunTrace, SpanChange, span_changes
 from vs_project.api import git_repositories
@@ -697,6 +698,8 @@ class LocalRunIntegration:
         self.control = create_run_control_channel(CoreRunControlEvents(self.events), threads)
         self.run_control = ChannelRunControl(self.control, threads)
         """The run's one control entry point: every ingress submits here, so ids are shared."""
+        self.environment_failure = RunEnvironmentFailure(self.control)
+        """Set when the run environment can run none of the run's work; it ends the run."""
         self._closed = False
         self._committed_state_listener: (
             Callable[[str, BaseModel, tuple[str, ...] | None], None] | None

@@ -349,8 +349,25 @@ class TestWorkspaceRootProbeEvents:
 
         assert proven == "[slurm] workspace root proven shared with the compute nodes\n"
         assert failed == (
-            "[slurm] workspace-root probe failed; Slurm work is refused: "
+            "[slurm] workspace-root probe failed; Slurm work is refused and the run ends: "
             "probe job 5000 was never scheduled\n"
+        )
+
+    def test_a_retrying_probe_says_when_the_next_attempt_starts_and_why(self) -> None:
+        out = _render_event(
+            CoreEventType.WORKSPACE_ROOT_PROBE,
+            WorkspaceRootProbeData(
+                state="retrying",
+                failure="probe job 5000 was never scheduled",
+                attempt=2,
+                retry_in_seconds=120.0,
+            ),
+            status=EventStatus.ACTIVE,
+        )
+
+        assert out == (
+            "[slurm] workspace-root probe attempt 2 starts in 2 min; Slurm work keeps "
+            "waiting, agents carry on. Last attempt: probe job 5000 was never scheduled\n"
         )
 
 

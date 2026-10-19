@@ -20,7 +20,6 @@ import shutil
 from functools import partial
 from typing import TYPE_CHECKING
 
-import pytest
 from tests.support.core_plugins import capability_plugin
 from tests.support.skeleton_strategy import IMPLEMENTER, SkeletonStrategy
 from tests.support.task_project import write_task
@@ -206,7 +205,6 @@ def test_while_the_probe_job_waits_in_the_queue_no_measurement_reaches_the_sched
     assert any(event.type is CoreEventType.WORKSPACE_ROOT_PROBE for event in events)
 
 
-@pytest.mark.xfail(strict=True, reason="a failed probe does not end the run yet")
 def test_a_probe_that_failed_for_good_ends_the_run_as_a_failure_naming_the_probe(
     tmp_path: Path, sim: Sim
 ) -> None:

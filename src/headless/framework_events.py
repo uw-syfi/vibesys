@@ -226,10 +226,19 @@ def _format_workspace_root_probe(data: WorkspaceRootProbeData) -> str:
                 f"[slurm] workspace-root probe job {data.job_id} has waited {waited}{limit} "
                 f"in the queue{reason}; Slurm work waits for it, agents carry on"
             )
+        case "retrying":
+            retry_in = describe_seconds(data.retry_in_seconds or 0.0)
+            return (
+                f"[slurm] workspace-root probe attempt {data.attempt} starts in {retry_in}; "
+                f"Slurm work keeps waiting, agents carry on. Last attempt: {data.failure}"
+            )
         case "proven":
             return "[slurm] workspace root proven shared with the compute nodes"
         case "failed":
-            return f"[slurm] workspace-root probe failed; Slurm work is refused: {data.failure}"
+            return (
+                f"[slurm] workspace-root probe failed; Slurm work is refused and the run "
+                f"ends: {data.failure}"
+            )
 
 
 def _format_framework_warning(data: FrameworkWarningData) -> str:

@@ -222,11 +222,26 @@ async def drive_core_run(host: CoreHost, integration: LocalRunIntegration) -> Ru
                 integration.events.emit(CoreEventType.RUN_ENDING, data=run_ending(shell))
     if outcome.refusal is not None:
         raise CoreRunRefusedError(services.run_id, outcome.refusal)
-    status = _status_of(outcome.result, shell)
+    return _run_end(outcome.result, shell, integration.environment_failure.reason)
+
+
+def _run_end(
+    result: RunResultProposal | None, shell: CoreRuntime, environment_failure: str | None
+) -> RunEnd:
+    """How the run ended: the environment's failure, when it stopped the run, else its result."""
+    uncompared = result is not None and result.uncompared
+    if environment_failure is not None:
+        # The environment's failure stopped the run; it ended as a failure, not a stop.
+        return RunEnd(
+            RunStatus.FAILED,
+            _environment_failure(environment_failure, shell),
+            uncompared=uncompared,
+        )
+    status = _status_of(result, shell)
     return RunEnd(
         status,
-        _failure_of(outcome.result, shell) if status is RunStatus.FAILED else None,
-        uncompared=outcome.result is not None and outcome.result.uncompared,
+        _failure_of(result, shell) if status is RunStatus.FAILED else None,
+        uncompared=uncompared,
     )
 
 
@@ -322,6 +337,19 @@ def _failure_of(result: RunResultProposal | None, shell: CoreRuntime) -> RunFail
         reason=reason,
         workstreams_started=started,
         workstream_budget=budget,
+        candidates_kept=sum(1 for item in core.settlement.settlements if item.eligible),
+        adopted_candidate=_adopted_candidate(shell),
+    )
+
+
+def _environment_failure(reason: str, shell: CoreRuntime) -> RunFailure:
+    """A run the environment ended: it could run none of its work, whatever it adopted."""
+    core = shell.record.envelope.core
+    return RunFailure(
+        kind=RunFailureKind.RUN_ENVIRONMENT_UNAVAILABLE,
+        reason=reason,
+        workstreams_started=len(core.attempts.attempts),
+        workstream_budget=core.run.limits.max_attempts,
         candidates_kept=sum(1 for item in core.settlement.settlements if item.eligible),
         adopted_candidate=_adopted_candidate(shell),
     )

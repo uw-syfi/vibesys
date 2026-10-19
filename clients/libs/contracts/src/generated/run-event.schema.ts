@@ -2488,7 +2488,8 @@ const runEventSchema: Record<string, unknown> = {
       "enum": [
         "budget_exhausted",
         "deadline",
-        "no_result"
+        "no_result",
+        "run_environment_unavailable"
       ],
       "title": "RunFailureKind",
       "type": "string"
@@ -3907,7 +3908,7 @@ const runEventSchema: Record<string, unknown> = {
     },
     "WorkspaceRootProbeData": {
       "additionalProperties": false,
-      "description": "The run's probe of its local Slurm workspace root, which runs beside the run.\n\nThe probe is a small Slurm job that proves the compute nodes share the root the run\nstages into. The run starts without it; each Slurm submission (a trusted evaluation,\nan agent's GPU job) waits for it. ``queued``: the probe job ``job_id`` still waits in\nthe scheduler's queue, for the scheduler's ``pending_reason`` (None when it gave\nnone), after ``waited_seconds`` of at most ``queue_timeout_seconds``; it is reported\nat once, then on a bounded cadence or when the reason changes. ``proven``: Slurm work\ngoes ahead. ``failed``: every Slurm submission of the run is refused with ``failure``.",
+      "description": "The run's probe of its local Slurm workspace root, which runs beside the run.\n\nThe probe is a small Slurm job that proves the compute nodes share the root the run\nstages into. The run starts without it; each Slurm submission (a trusted evaluation,\nan agent's GPU job) waits for it. ``queued``: the probe job ``job_id`` still waits in\nthe scheduler's queue, for the scheduler's ``pending_reason`` (None when it gave\nnone), after ``waited_seconds`` of at most ``queue_timeout_seconds``; it is reported\nat once, then on a bounded cadence or when the reason changes. ``retrying``: an\nattempt ended with ``failure`` without saying anything about the root (the queue\nnever scheduled it), and attempt number ``attempt`` follows in ``retry_in_seconds``;\nSlurm work keeps waiting. ``proven``: Slurm work goes ahead. ``failed``: every Slurm\nsubmission of the run is refused with ``failure``, and the run ends as failed.",
       "properties": {
         "kind": {
           "const": "workspace_root_probe",
@@ -3918,6 +3919,7 @@ const runEventSchema: Record<string, unknown> = {
         "state": {
           "enum": [
             "queued",
+            "retrying",
             "proven",
             "failed"
           ],
@@ -3985,6 +3987,32 @@ const runEventSchema: Record<string, unknown> = {
           ],
           "default": null,
           "title": "Failure"
+        },
+        "attempt": {
+          "anyOf": [
+            {
+              "minimum": 2,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Attempt"
+        },
+        "retry_in_seconds": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Retry In Seconds"
         }
       },
       "required": [

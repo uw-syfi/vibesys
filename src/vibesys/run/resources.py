@@ -654,7 +654,9 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                 state_namespace=project_state.local_namespace(run_id, "skypilot"),
                 docker_in_docker=bundle.docker_in_docker,
                 startup=startup.report,
-                workspace_root_probe=CoreWorkspaceRootProbeEvents(integration.events).report,
+                workspace_root_probe=CoreWorkspaceRootProbeEvents(
+                    integration.events, integration.environment_failure
+                ).report,
             )
         environment_resources = open_run_environment_resources(
             run_environment_request,
