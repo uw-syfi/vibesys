@@ -429,7 +429,7 @@ One closed union, owned by `server.host_api` and folded by the existing pure lif
 | `starting {stage, progress}` | `stage` is `resolving`, `probing_workspace` (a Slurm run proving its workspace root), `building_image`, `building_tools` (evaluator tools the cache lacks), or `starting_container`. `progress` is `{done, total \| null, label}` when the stage reports it. | no |
 | `running` | Ready and executing (`RunStatus.RUNNING`; also `pausing`, `paused` as today). | no |
 | `stopping` | A stop was accepted; the run ends at its next boundary. | no |
-| `stopped` | Stopped by request; its result and measurements are kept, and it has ended for good: not resumable (Pause is how a run continues later). | yes |
+| `stopped` | Stopped by request; its result and measurements are kept. A stop whose ending the run committed is final. One the server left before that (its drain outlived the grace bound) is resumable: a resume lifts it. | yes |
 | `failed {reason}` | `reason` is a `Diagnostic` (code, stage, message, log path). | yes |
 | `finished` | Completed (`RunStatus.COMPLETED`). | yes |
 
@@ -483,10 +483,14 @@ Facts enter once:
   `force_stopped` when the server was terminated, `stopped` for a stop that left work unsettled,
   and `failed` otherwise. `reason` is one line (at most 200 characters): core's account of the
   result, else the failure's message. `resumable` is whether the run's durable core record exists
-  and is not terminal and no stop ended it: a run that recorded a result is not resumable, and
-  neither is any stopped run (`stopped`, including one whose drain outlived its grace bound, and
-  `force_stopped`), since a stop ends a run for good. `resume_from_round` is then its finished
-  rounds plus one. A force stop records the stop request in the run's state
+  and is not terminal and no force stop ended it: a run that recorded a result is not resumable,
+  and neither is a `force_stopped` one. A `stopped` run is resumable while the run's ending has not
+  committed (its drain outlived the grace bound): an explicit resume lifts the stop (a stop is a
+  pause the operator can lift, `vs_core`'s `stop_standing`; the process that opens the run records
+  `StopLiftRecorded`, which the search receives as `StopLifted`), and a stop is final only once
+  the search concluded and core committed its ending (#2902 wanted that a stop is not silently
+  undone: only an operator's resume lifts it, never a crash restart). `resume_from_round` is
+  then its finished rounds plus one. A force stop records the stop request in the run's state
   (`ProjectState.record_stop_request`) before the server is signalled, so a resume of a
   force-stopped run commits that stop first, starts no new work, and only finishes the drain and
   ends; `vibesys --resume` refuses a run whose record is terminal (`run_ended`, "run ended; start
@@ -518,7 +522,7 @@ Facts enter once:
     server wrote nothing as it died, and the lock carries no time. Its 24 hours run from then.
 
 The UI renders only the phase: Retry appears only on a link failure, never on an ended phase;
-Resume appears only on an ended run whose `end` says `resumable` (a failure or a crash), never on a stopped or finished one.
+Resume appears only on an ended run whose `end` says `resumable` (a failure, a crash, or a stop whose ending was not committed), never on a finished one.
 
 ## Connection manager
 
@@ -626,7 +630,7 @@ it sent shows as stopping until the record says so. Stopping, by this window or 
 two-minute bound (`FORCE_STOP_BOUND_MS`) on the shell's injected clock under a request token;
 "Force stop" is offered only when that token returns while the run is still stopping, so a late
 bound for an earlier stop is dropped. The screen's Stop confirmation states what is lost (a
-stopped run ends for good; Pause is the resumable path), so it sends `stopConfirmed`, which runs
+stopped run normally ends for good; Pause is the resumable path), so it sends `stopConfirmed`, which runs
 the same stop flow without the app's native question; the stop flow lets a view force an accepted
 graceful stop. The ended banner reads the end record and offers Resume, naming
 `resume_from_round`, only when it says `resumable`. Logs are grouped by their owner (startup

@@ -74,6 +74,7 @@ from vs_core.api import (
     Settlement,
     SettlementId,
     StartAttempt,
+    StopLifted,
     StopRequested,
     StrategyOperations,
     TimeReached,
@@ -562,6 +563,17 @@ class FlowRun[C]:
         self.send(
             StopRequested(
                 control=ControlInput(control_id=ControlId(root=control), action="stop", mode=mode)
+            )
+        )
+
+    def lift_stop(self, control: str = "resume") -> None:
+        """The operator resumes the run, which lifts the stop that stood."""
+        self._timeline.append(control)
+        self.send(
+            StopLifted(
+                control=ControlInput(
+                    control_id=ControlId(root=control), action="resume", when="now"
+                )
             )
         )
 

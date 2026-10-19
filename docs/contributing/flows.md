@@ -162,7 +162,7 @@ A **source** is anything a flow can wait on for a value:
 | `Task[T]` (from `group.start`) | the task's result, once |
 | `Group[T]` | each finished task's result (or `TaskStopped(key)`), once each, in finishing order |
 | `ctx.timer(at)` | `TimeUp(at)`, once |
-| `ctx.stopped` | `StopRequested`, once |
+| `ctx.stopped` | `StopRequested`, once (a lift, `StopLifted`, makes it available again for a later stop) |
 | `ctx.latch(key)` | the value some flow `set` on the run-wide latch `key` (once per run), once per handle |
 | `ctx.channel(key)` | each value any flow `send`s on the run-wide channel `key`, in the order sent, once; one flow reads it |
 
@@ -524,6 +524,12 @@ workspaces, adoption) a toy search runs through the real core with scripted exec
   journaled, so they replay to the same value.
 - `Group.free` is a large constant when the group has no limit. `ctx.stopped` yields the
   `StopRequested` event itself. A stopped `Task` yields `TaskStopped(key)`.
+- A stop is a pause the operator can lift: an explicit resume while the run has not committed
+  its ending delivers `StopLifted`. `ctx.stop_requested` is false again, a flow the stop had not
+  yet interrupted goes on, and a flow it had interrupted stays ended. A root that must outlive the
+  stop's cleanup judges the stop after waiting for its tasks (`multi` and `single` do, so they play
+  the rounds that remain); a root that has already concluded cannot be lifted back (core refuses
+  the resume once its ending committed).
 - Awaiting inside a `finally` while the run itself is being discarded is not supported; use
   `except Stopped` (or `@resource`) for cleanup that awaits.
 - A suspended turn's waits are bounded by the run deadline, so a turn that never resumes cannot

@@ -20,7 +20,7 @@ from ._registry import ContractError
 from .types.attempts import AttemptExhausted, CheckpointResolved
 from .types.common import Scope
 from .types.evaluation import MeasurementResult, ResumeAuthorized, ResumeRefused, TurnSuspended
-from .types.kernel import ControlChanged
+from .types.kernel import ControlChanged, StopLiftRecorded
 from .types.kinds import EventKind
 from .types.measurement import ComparisonSettled
 from .types.records import OperationResult
@@ -39,6 +39,7 @@ from .types.search import (
     ResumeFailed,
     ResumeReady,
     RunView,
+    StopLifted,
     StopRequested,
     TurnEnded,
     TurnYielded,
@@ -274,6 +275,11 @@ def _control(core: CoreState, event: ControlChanged) -> Event:
     return StopRequested(control=event.control)
 
 
+def _stop_lifted(core: CoreState, event: StopLiftRecorded) -> Event:
+    del core
+    return StopLifted(control=event.control)
+
+
 def _delivered(core: CoreState, event: InputDelivered) -> Event:
     del core
     return MessageDelivered(delivery=event)
@@ -307,6 +313,7 @@ _TRANSLATE: dict[type, Callable[[CoreState, Any], Event | Discarded | None]] = {
     AttemptSettled: _settled,
     AttemptReady: _ready,
     ControlChanged: _control,
+    StopLiftRecorded: _stop_lifted,
     InputDelivered: _delivered,
     InputDropped: _dropped,
     InterruptCompleted: _interrupted,

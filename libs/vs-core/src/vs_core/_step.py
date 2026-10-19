@@ -44,7 +44,7 @@ from ._proofs import (
 from ._quota_pause_clock import credit_quota_pause
 from ._registry import ContractError
 from ._routing import SIGNAL_ORDER, event_area
-from ._run_pause import control_refusal
+from ._run_pause import control_refusal, stop_standing
 from ._session_inputs import check_declared_target, may_have_been_read
 from ._session_inputs import mid_turn_offers as _mid_turn_offers
 from ._validation import validate_decision
@@ -116,6 +116,7 @@ from .types.kernel import (
     SessionsContext,
     SettlementContext,
     Signal,
+    StopLiftRecorded,
     StrategyEvent,
     Transition,
 )
@@ -1377,6 +1378,7 @@ def _control(state: CoreState, event: RunControlEvent, dispatch: Dispatch) -> Tr
     if refusal is not None:
         raise refusal
     check_declared_target(event.control.target, state.run.declaration)
+    lifting = event.control.action == "resume" and stop_standing(state.run)
     # A capacity wait leaves the run paused: it only records when the run resumes itself.
     waits = event.control.when == "capacity_returns"
     # Only a pause and a resume change the run's status; a stop returned above.
@@ -1404,8 +1406,9 @@ def _control(state: CoreState, event: RunControlEvent, dispatch: Dispatch) -> Tr
         # A stop returned above; only pause and resume reach core's admission.
         action = "pause" if event.control.action == "pause" else "resume"
         result = propagate(updated, (AdmissionControl(action=action),), dispatch)
+    lifted = (StopLiftRecorded(control=event.control),) if lifting else ()
     return result.model_copy(
-        update={"events": (*result.events, ControlChanged(control=event.control))}
+        update={"events": (*result.events, ControlChanged(control=event.control), *lifted)}
     )
 
 

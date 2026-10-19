@@ -600,7 +600,7 @@ def test_a_refused_control_no_operator_can_be_told_of_is_logged(
         run.poll()
 
     assert _told(run) == []
-    assert "the run refused a pause control: a stopped run takes no pause or resume" in (
+    assert "the run refused a pause control: a stopped run takes no pause, only a resume" in (
         caplog.text
     )
 

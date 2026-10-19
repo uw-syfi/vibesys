@@ -484,8 +484,14 @@ used, keeps its control: sending a different control under it is refused.
 A stop only escalates. `stop` drains the run: work already in flight finishes, and nothing new
 starts. `stop --mode cancel` cancels the work in flight at once, such as evaluations and
 cluster jobs, and also turns a drain already under way into a cancel. A later drain never
-weakens a cancel. While a stop is pending, `resume` is rejected with the reason
-`the run is stopping`.
+weakens a cancel. While a stop is pending in a running process, `resume` is rejected with the
+reason `the run is stopping`.
+
+A stop is a pause you can lift, until the run has concluded. If the process ended before the run
+committed its ending (a drain that outlived its grace bound, a crash during it), `vibesys
+--resume` opens the same run, lifts the stop and goes on with the run's rounds and history; the
+stop and its lift are both in the run's record. A run whose ending committed, and a run ended by
+`force stop`, stay ended. Only an explicit resume lifts a stop: nothing else does.
 
 In the terminal that started the run, with or without `--web`, Ctrl-C asks for a cancelling
 stop, and a second Ctrl-C ends the run at once, through its teardown. Ctrl-Z suspends only the

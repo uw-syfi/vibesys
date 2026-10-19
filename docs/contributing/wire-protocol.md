@@ -249,7 +249,7 @@ nothing: ...` if it then names no guidance in force; a `vibesys control` withdra
 `control_refusal`) against the pause the run is in, including a quota pause the run has not
 committed yet; one the run still refuses when it commits (an input committed first closed or ended
 the run) is set aside in the inbox with the run's reason as soon as that commit lands, and the run
-goes on. A run that recorded a stop takes no pause or resume. A pause or resume acknowledged here
+goes on. A run that recorded a stop takes no pause, and a resume only until its ending commits: that resume lifts the stop (a `vibesys --resume` process records it first, before the search is asked for anything). A pause or resume acknowledged here
 that the run then refuses, when it reads it or when it commits it, is journaled as a `CONTROL`
 event with status `failed` and the text `/control refused: <action> <id>: <reason>`, and what it
 did to the run's pause is undone: a refused pause is lifted, a refused `capacity_returns` or

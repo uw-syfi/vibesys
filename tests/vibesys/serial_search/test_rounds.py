@@ -171,8 +171,15 @@ def test_a_failed_or_stopped_round_ends_the_run_for_good(failure: str) -> None:
     assert failed.over(stopping=False)
     assert failed.failure == failure
     stopped = run_of(5)
-    stopped.finished(done(1, counted=False, stopped=True), None)
+    stopped.finished(done(1, counted=False, stopped=True), None, stopping=True)
     assert stopped.over(stopping=False)
+
+
+def test_a_round_the_operator_stopped_ends_the_run_only_while_the_stop_stands() -> None:
+    lifted = run_of(5)
+    lifted.finished(done(1, counted=False, stopped=True), None, stopping=False)
+    assert not lifted.over(stopping=False)
+    assert lifted.counted == 0
 
 
 @settings(max_examples=examples(pr=8, nightly=100))

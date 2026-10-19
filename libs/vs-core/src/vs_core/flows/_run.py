@@ -21,6 +21,7 @@ from vs_core.types.search import (
     OperationFinished,
     ResumeFailed,
     ResumeReady,
+    StopLifted,
     StopRequested,
     TimeReached,
     TurnYielded,
@@ -684,6 +685,9 @@ class _Run:
             case StopRequested(control=control):
                 if control.action == "stop" and self.stop is None:
                     self._stop(item)
+            case StopLifted():
+                if self.stop is not None:
+                    self._lift_stop()
             case CheckpointKnown(invocation=invocation, checkpoint=checkpoint):
                 self.checkpoints[invocation] = checkpoint
                 self._offer(item)
@@ -785,6 +789,19 @@ class _Run:
             task.stop.set(item)
             if task.group is not None and task.group.stops and not task.stopped:
                 task.stop_pending = True
+
+    def _lift_stop(self) -> None:
+        """Take the stop back: flows it has not yet interrupted go on as if it never came.
+
+        Work the stop already ended stays ended (a task that took ``Stopped`` has returned),
+        and a flow that took the stop value off ``ctx.stopped`` has moved on. A later stop
+        reaches every flow again.
+        """
+        self.stop = None
+        self.trace.stop_lifted()
+        for task in self._tasks:
+            task.stop.lift()
+            task.stop_pending = False
 
     def _settle(self) -> None:
         """Resume flows that can move, in the order they started, until none can."""

@@ -76,6 +76,16 @@ def _v35_to_v36(envelope: JsonObject) -> JsonObject:
     return envelope | {"schema_version": 36}
 
 
+def _v36_to_v37(envelope: JsonObject) -> JsonObject:
+    """Version 37 added the events ``stop_lifted`` and ``stop_lift_recorded`` and nothing else.
+
+    A stop could not be lifted before, so no stored envelope holds either: the shape only grew
+    (the flow journal's event union and the strategy events core publishes), and every
+    version 36 document is a valid version 37 one with its number changed.
+    """
+    return envelope | {"schema_version": 37}
+
+
 def _floor_declared(core: JsonObject) -> bool:
     run = _object(core.get("run"))
     task = _object(_object(run.get("facts")).get("task"))
@@ -100,7 +110,7 @@ def _object(value: JsonValue) -> JsonObject:
     return value if isinstance(value, dict) else {}
 
 
-MIGRATIONS: Final[Mapping[int, Migration]] = {34: _v34_to_v35, 35: _v35_to_v36}
+MIGRATIONS: Final[Mapping[int, Migration]] = {34: _v34_to_v35, 35: _v35_to_v36, 36: _v36_to_v37}
 """Version ``n`` to ``n + 1``, one entry per version, contiguous from the oldest supported."""
 
 OLDEST_SUPPORTED_ENVELOPE_VERSION: Final = min(MIGRATIONS)

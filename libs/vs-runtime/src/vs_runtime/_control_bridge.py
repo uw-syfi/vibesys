@@ -167,8 +167,14 @@ class RunControlBridge:
         inbox: OperatorInbox | None = None,
         *,
         control: ChannelRunControl | None = None,
+        lifts_standing_stop: bool = False,
     ) -> None:
-        """Bind the mailbox, the steer text store, a headless run's inbox, operators' controls."""
+        """Bind the mailbox, the steer text store, a headless run's inbox, operators' controls.
+
+        ``lifts_standing_stop`` says this process was started by an explicit resume of the
+        run, which lifts a stop core recorded before (its first poll records the lift
+        instead of arming the stop). No other start does.
+        """
         self._channel = channel
         self._steer = steer
         self._inbox = inbox
@@ -188,6 +194,8 @@ class RunControlBridge:
         self._position = 0
         self._consumption = SteerConsumption()
         self._started = False
+        self._lifts_standing_stop = lifts_standing_stop
+        self._lift_pending = False
         self._pause: RunPause | None = None
         """Core's pause when it last committed, folded with every pause control emitted since.
 
@@ -226,7 +234,11 @@ class RunControlBridge:
             self._channel.seed(self._pause, capacity_wait_stands=self._stands)
             self._count = len(core.run.controls)
             self._stop = requested_stop_mode(core.run)
-            if self._stop is not None:
+            if self._stop is not None and self._lifts(core):
+                # The operator resumed the run: it lifts the stop core recorded before.
+                self._lift_pending = True
+                self._stop = None
+            elif self._stop is not None:
                 # A stop core recorded before a restart stays in force: the run's
                 # stop bound arms, a resume is refused, and only a cancel escalates it.
                 self._channel.request_stop(self._stop)
@@ -240,6 +252,10 @@ class RunControlBridge:
         # queued first, so this poll takes it too and records it before the withdrawal.
         withdrawals = self._channel.take_pending_withdrawals()
         events: list[CoreEvent] = list(unrecorded_steers(core, now_at))
+        if self._lift_pending:
+            self._lift_pending = False
+            lift = self._event(core, now_at, _Change("resume", when="now"))
+            events += () if lift is None else (lift,)
         self._take_steers(core, now_at, events)
         self._take_actions(core, now_at, events)
         # The pause the run is in reaches core before any request is judged against it.
@@ -263,6 +279,17 @@ class RunControlBridge:
         self._apply_withdrawals(core, now_at, withdrawals, events)
         self._record_channel(core, now_at, events)
         return tuple(events)
+
+    def _lifts(self, core: CoreState) -> bool:
+        """Whether this start lifts the stop core holds: it was asked to, and core takes the lift.
+
+        Core takes it until the run's ending commits, so a run already closing on a stop
+        stays stopping.
+        """
+        if not self._lifts_standing_stop:
+            return False
+        lift = ControlInput(control_id=ControlId(root="pending-lift"), action="resume", when="now")
+        return control_refusal(core, lift) is None
 
     def _record_channel(self, core: CoreState, now_at: float, events: list[CoreEvent]) -> None:
         """Emit the stop and the pause changes the channel holds that core has not recorded.

@@ -161,6 +161,17 @@ class StopRequested(Value):
     control: ControlInput
 
 
+class StopLifted(Value):
+    """An explicit resume lifted the stop that stood: the run goes on, as if not stopped.
+
+    Work the stop already ended stays ended (a task that took ``Stopped`` has returned); a
+    task that had not taken it yet no longer will, and ``ctx.stop_requested`` is false again.
+    """
+
+    kind: Literal["stop_lifted"] = "stop_lifted"
+    control: ControlInput
+
+
 class TimeReached(Value):
     """The run clock reached a time the search asked to be woken at."""
 
@@ -196,6 +207,7 @@ type Event = Annotated[
     | OperationFinished
     | AdoptionFinished
     | StopRequested
+    | StopLifted
     | TimeReached
     | MessageDelivered
     | MessageDropped

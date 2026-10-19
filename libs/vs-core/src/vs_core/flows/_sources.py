@@ -120,6 +120,11 @@ class Timer(_Once[TimeUp]):
 class StopSource(_Once[StopRequested]):
     """The operator's stop, as a value (``ctx.stopped``)."""
 
+    def lift(self) -> None:
+        """The stop was lifted: the value, taken or not, is gone, and a later stop sets it again."""
+        self._values.clear()
+        self._taken = False
+
     def describe(self) -> str:
         return "stop"
 

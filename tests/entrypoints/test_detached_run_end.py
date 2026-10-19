@@ -200,8 +200,9 @@ def _expected_end(
         outcome = RunEndOutcome.FAILED
     else:
         return None
-    stopped = outcome in {RunEndOutcome.STOPPED, RunEndOutcome.FORCE_STOPPED}
-    resumable = ending is not None and ending.resumable and not stopped
+    resumable = (
+        ending is not None and ending.resumable and outcome is not RunEndOutcome.FORCE_STOPPED
+    )
     rounds = None if ending is None or not resumable else ending.rounds_finished + 1
     return outcome, resumable, rounds
 
@@ -263,9 +264,24 @@ def test_a_server_that_exits_before_its_run_ends_leaves_a_failed_end_that_cannot
     )
 
 
-def test_a_stop_that_outlived_its_grace_bound_ends_for_good() -> None:
-    """Regression: a stop whose drain outlived its grace bound left the run resumable."""
+def test_a_stop_whose_ending_was_not_committed_can_be_lifted_by_a_resume() -> None:
+    """A stop is a pause the operator lifts: the run's record is not terminal, so Resume is offered."""
     ending = RunEndingFact(outcome=None, resumable=True, rounds_finished=2)
+
+    _, tombstone = _serve(
+        [_Status(RunStatus.STOPPING), _Ending(ending), _Status(RunStatus.STOPPED)]
+    )
+
+    assert tombstone.end == EndRecord(
+        outcome=RunEndOutcome.STOPPED,
+        reason="Stopped by request.",
+        resumable=True,
+        resume_from_round=3,
+    )
+
+
+def test_a_stop_whose_ending_committed_ends_for_good() -> None:
+    ending = RunEndingFact(outcome=None, resumable=False, rounds_finished=2)
 
     _, tombstone = _serve(
         [_Status(RunStatus.STOPPING), _Ending(ending), _Status(RunStatus.STOPPED)]

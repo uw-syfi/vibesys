@@ -190,8 +190,13 @@ class SerialRun:
             measurement_noise=self.measurement_noise,
         )
 
-    def finished(self, done: RoundDone, span: SpanId | None) -> None:
-        """Fold a round that ended; ``span`` is the round's own, the workstream it labelled."""
+    def finished(self, done: RoundDone, span: SpanId | None, *, stopping: bool = True) -> None:
+        """Fold a round that ended; ``span`` is the round's own, the workstream it labelled.
+
+        A round the operator stopped ends the search only while that stop stands
+        (``stopping``, which a search passes from ``ctx.stop_requested``): once a resume lifted
+        it, the round counts for nothing and the search goes on.
+        """
         self.ledger = done.ledger
         self.counted += int(done.counted)
         if done.closed is not None:
@@ -214,7 +219,7 @@ class SerialRun:
         self.last_profile = done.last_profile or self.last_profile
         self.measurement_noise = done.measurement_noise or self.measurement_noise
         self.failure = done.failure or self.failure
-        self.stopped = self.stopped or done.stopped
+        self.stopped = self.stopped or (done.stopped and stopping)
 
     def eligible(self) -> tuple[candidates.EligibleRound, ...]:
         """Every winner-eligible round that kept a candidate."""

@@ -237,6 +237,18 @@ class ControlChanged(Value):
     control: ControlInput
 
 
+class StopLiftRecorded(Value):
+    """An explicit resume lifted the run's standing stop (the control that did it).
+
+    Core publishes it after the ``ControlChanged`` of the same control, so a consumer sees
+    the stop and then its lift. It is recorded only while the stop stands and the run has not
+    committed its ending (`vs_core._run_pause.control_refusal`).
+    """
+
+    kind: Literal["stop_lift_recorded"] = "stop_lift_recorded"
+    control: ControlInput
+
+
 class RunEnded(Value):
     """Final publication after ownership drains and input receipts settle.
 
@@ -282,6 +294,7 @@ type StrategyEvent = Annotated[
     | OperationResult
     | Failed
     | ControlChanged
+    | StopLiftRecorded
     | AdoptionResult
     | AdoptionFailed
     | RunEnded,

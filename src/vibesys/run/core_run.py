@@ -159,6 +159,8 @@ async def drive_core_run(host: CoreHost, integration: LocalRunIntegration) -> Ru
         if services.control_inbox is None
         else OperatorInbox(services.control_inbox, integration.run_control),
         control=integration.run_control,
+        # A process that opens an existing run is the operator's explicit resume of it.
+        lifts_standing_stop=True,
     )
     loop = CoreRunHost(shell, delivery, services.clock, controls, workspaces=host.workspaces)
     config = _loop_config(services.run_id, host.timing.lease_seconds)

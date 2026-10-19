@@ -31,6 +31,7 @@ from vs_core.types.search import (
     OperationFinished,
     ResumeFailed,
     ResumeReady,
+    StopLifted,
     StopRequested,
     TimeReached,
     TurnEnded,
@@ -76,6 +77,7 @@ type JournaledEvent = Annotated[
     | MeasurementFinished
     | AdoptionFinished
     | StopRequested
+    | StopLifted
     | TimeReached
     | MessageDelivered
     | MessageDropped

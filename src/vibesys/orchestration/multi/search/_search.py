@@ -31,11 +31,19 @@ async def multi(ctx: Flow, config: MultiConfig) -> NoWinner | None:
             task = rounds.start(f"{begin.number:06d}", play_round, MultiRound.of(begin, config))
             match await ctx.first(rounds, ctx.stopped):
                 case RoundDone() as done:
-                    run.finished(done, task.span)
+                    run.finished(done, task.span, stopping=ctx.stop_requested)
                     ctx.choose(*run.leading())
                 case TaskStopped():
-                    run.stopped = True
+                    run.stopped = run.stopped or ctx.stop_requested
                 case StopRequested():
-                    pass  # the group has stopped the round
+                    # The group has stopped the round, which settles what it started. The stop
+                    # is judged once it has: a resume that lifts it meanwhile lets the search
+                    # go on with the rounds it still has.
+                    match await ctx.first(rounds):
+                        case RoundDone() as done:
+                            run.finished(done, task.span, stopping=ctx.stop_requested)
+                            ctx.choose(*run.leading())
+                        case TaskStopped():
+                            run.stopped = run.stopped or ctx.stop_requested
             ctx.publish(run.snapshot())
     return run.ending()

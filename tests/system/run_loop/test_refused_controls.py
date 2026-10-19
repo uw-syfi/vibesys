@@ -174,7 +174,7 @@ async def test_a_socket_pause_the_bridge_refuses_after_a_stop_is_answered(tmp_pa
     core = await _run(tmp_path, SkeletonStrategy.baseline_only(), wiring, actions, timed=150.0)
 
     assert wiring.channel.pause_state() is None
-    assert wiring.refusals() == ["pause p1: a stopped run takes no pause or resume"]
+    assert wiring.refusals() == ["pause p1: a stopped run takes no pause, only a resume"]
     assert ControlId(root="op-p1") not in {c.control_id for c in core.run.controls}
 
 

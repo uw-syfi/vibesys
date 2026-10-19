@@ -31,6 +31,7 @@ class EventKind(StrEnum):
     OPERATION_FINISHED = "operation_finished"
     ADOPTION_FINISHED = "adoption_finished"
     STOP_REQUESTED = "stop_requested"
+    STOP_LIFTED = "stop_lifted"
     TIME_REACHED = "time_reached"
     FAILED = "failed"
     MESSAGE_DELIVERED = "message_delivered"

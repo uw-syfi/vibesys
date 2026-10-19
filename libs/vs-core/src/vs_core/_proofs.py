@@ -734,11 +734,13 @@ def draining(run: RunState) -> bool:
 
 
 def requested_stop_mode(run: RunState) -> StopMode | None:
-    """The strongest mode the run's recorded stop controls ask for; None before any stop."""
+    """The strongest mode the run's standing stop asks for; None before any stop or after a lift."""
     held: StopMode | None = None
     for control in run.controls:
         if control.action == "stop" and control.mode is not None:
             held = escalate_stop(held, control.mode)
+        elif control.action == "resume":
+            held = None  # a resume lifts the stop (`_run_pause.stop_standing`)
     return held
 
 

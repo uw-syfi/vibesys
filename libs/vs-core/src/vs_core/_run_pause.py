@@ -104,7 +104,8 @@ def control_refusal(state: CoreState, control: ControlInput) -> ControlRefusedEr
     terminal run refuses every control. Any other run takes a stop, a steer and a
     withdrawal; it takes an operator action that can change something
     (``action_refusal_kind``), also while it stops or cleans up; and a run that recorded a
-    stop takes no pause or resume.
+    stop takes no pause, and a resume only until its ending commits: that resume lifts the stop
+    (`stop_standing`).
     """
     run = state.run
     if run.status == RunStatus.TERMINAL:
@@ -126,12 +127,29 @@ def _action_refusal(state: CoreState, control: ControlInput) -> ControlRefusedEr
     )
 
 
+def stop_standing(run: RunState) -> bool:
+    """Whether a stop the run recorded still stands: no resume has lifted it since.
+
+    A stop is a pause the operator can lift: an explicit resume while the run has not
+    committed its ending takes the stop back (`control_refusal`). Once the ending commits
+    (the run is closing, then terminal) nothing lifts it.
+    """
+    standing = False
+    for recorded in run.controls:
+        if recorded.action == "stop":
+            standing = True
+        elif recorded.action == "resume":
+            standing = False
+    return standing
+
+
 def _pause_refusal(run: RunState, control: ControlInput) -> ControlRefusedError | None:
-    if any(recorded.action == "stop" for recorded in run.controls):
-        # The stop is final: the search ends the run, and a pause or resume would change
-        # nothing an operator could see before it does.
+    lifts = control.action == "resume" and control.when != "capacity_returns"
+    if stop_standing(run) and not lifts:
+        # A pause would change nothing an operator could see before the search ends the run;
+        # only an explicit resume (which lifts the stop) is taken.
         return ControlRefusedError(
-            control, ("run", "controls"), "a stopped run takes no pause or resume"
+            control, ("run", "controls"), "a stopped run takes no pause, only a resume"
         )
     if run.status in (RunStatus.CLOSING, RunStatus.BLOCKED) or run.result is not None:
         return ControlRefusedError(
