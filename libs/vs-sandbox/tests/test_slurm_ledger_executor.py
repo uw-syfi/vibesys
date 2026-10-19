@@ -272,8 +272,8 @@ class _World:
     ledger: FakeEvaluationLedger = field(
         default_factory=lambda: FakeEvaluationLedger(project=PROJECT)
     )
-    # How long a cancel confirms its job ended; None: the executor's default.
-    cancel_confirmation_seconds: float | None = None
+    # How long a cancel confirms its job ended; the executor's own default unless set.
+    cancel_confirmation_seconds: float = 120.0
     scheduler: _Scheduler = field(init=False)
 
     def __post_init__(self) -> None:
@@ -316,11 +316,7 @@ class _World:
             if policy is not None
             else None,
             ledger_candidate="0f3c9e1",
-            **(
-                {}
-                if self.cancel_confirmation_seconds is None
-                else {"cancel_confirmation_seconds": self.cancel_confirmation_seconds}
-            ),
+            cancel_confirmation_seconds=self.cancel_confirmation_seconds,
         )
         return _Run(executor, sleeper)
 

@@ -263,6 +263,12 @@ class LedgerEvaluations:
         if self._gave_up():
             # Nor wait out another evaluation's guard on the request into a try.
             return Released.DETACHED
+        return await self._release_from_ledger(handle_id, known, attached=attached)
+
+    async def _release_from_ledger(
+        self, handle_id: str, known: str | None, *, attached: bool
+    ) -> Released:
+        """Stop using this evaluation's request; relinquish it if no other run wants it."""
         ledger = self.ledger
         key = known if known is not None else ledger.request_of(handle_id)
         if key is None:

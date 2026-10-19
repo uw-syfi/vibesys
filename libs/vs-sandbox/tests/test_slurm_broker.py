@@ -157,10 +157,11 @@ def test_broker_rejects_rsync_paths_outside_run_roots(tmp_path: Path) -> None:
 def test_a_brokered_process_is_outside_the_callers_process_group(tmp_path: Path) -> None:
     """r14: Ctrl-C to the run's process group killed brokered transport calls."""
     report = "import os; print(os.getpgid(0), os.getpid())"
+    transport = SlurmSshTransport(host="cluster", ssh_command=(sys.executable, "-c", report))
     config = SlurmConfig(
         name="cluster",
         remote_workspace_root="/remote/vibesys",
-        transport=SlurmSshTransport(host="cluster", ssh_command=(sys.executable, "-c", report)),
+        transport=transport,
         transport_timeout_seconds=30,
     )
     broker = SlurmProcessBroker(
@@ -170,9 +171,7 @@ def test_a_brokered_process_is_outside_the_callers_process_group(tmp_path: Path)
     )
     broker.start()
     try:
-        result = _brokered(
-            broker, (*config.transport.ssh_argv, "--", "cluster", "scancel 1"), timeout=30
-        )
+        result = _brokered(broker, (*transport.ssh_argv, "--", "cluster", "scancel 1"), timeout=30)
     finally:
         broker.close()
 
