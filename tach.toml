@@ -87,7 +87,7 @@ layers_explicit_depends_on = true
 
 [[modules]]
 path = "entrypoints"
-depends_on = ["server.api", "vs_decode.api", "vs_logs", "vs_sim.api", "vs_project", "vs_slurm", "vs_github", "vs_issue_tracker", "vs_runtime", "vs_sandbox", "vibesys.api", "vibesys.api.evolve", "vibesys.api.hypothesis", "vibesys.api.metrics", "vibesys.api.profilers", "vs_agent", "server.runtime", "server.instances", "server.host_api", "server.registry", "headless", "launch", "vs_mcp", "server.relay", "server.host_helper", "server.host_helper_requests", "server.host_helper_os", "server.host_helper_logs", "server.host_helper_machine", "server.host_helper_login", "server.host_helper_compute", "server.host_agent_logins", "server.host_preflight", "server.host_examples", "server.host_harness"]
+depends_on = ["server.api", "vs_decode.api", "vs_logs", "vs_sim.api", "vs_project", "vs_slurm", "vs_github", "vs_issue_tracker", "vs_runtime", "vs_sandbox", "vibesys.api", "vibesys.api.evolve", "vibesys.api.hypothesis", "vibesys.api.metrics", "vibesys.api.profilers", "vs_agent", "server.runtime", "server.instances", "server.host_api", "server.registry", "headless", "launch", "vs_mcp", "server.relay", "server.host_helper", "server.host_helper_requests", "server.host_helper_os", "server.host_helper_logs", "server.host_helper_machine", "server.host_helper_compute", "server.host_agent_logins", "server.host_preflight", "server.host_examples", "server.host_harness"]
 
 [[modules]]
 path = "headless"
@@ -270,12 +270,6 @@ path = "server.host_compute"
 depends_on = ["server.host_envelope", "server.host_machine_facts"]
 
 [[modules]]
-# Starting a harness's own login on the helper's machine and reading what it asks of the person.
-# Light: vs_sim processes and threads, and the login messages.
-path = "server.host_helper_login"
-depends_on = ["server.host_agent_logins", "vs_sim.api"]
-
-[[modules]]
 # The host helper's MachineProbe on a real host: hardware, Docker, harness CLIs, checkouts.
 path = "server.host_helper_machine"
 depends_on = ["server.host_api", "server.host_machine_facts", "vs_sim.api"]
@@ -300,7 +294,7 @@ depends_on = ["vs_decode.api", "server.host_api", "server.host_run_dashboard", "
 [[modules]]
 # The host helper's interfaces on a real host: projects, directories, launches, the checkout.
 path = "server.host_helper_os"
-depends_on = ["server.host_examples", "vs_decode.api", "server.host_api", "server.host_helper_logs", "server.host_helper_machine", "server.host_helper_preflight", "server.host_preflight", "server.host_helper_requests", "server.run_digest", "server.span_index", "server.run_summary", "server.run_summary_cache", "vs_logs", "vs_project", "vs_sim.api"]
+depends_on = ["server.host_examples", "server.host_agent_logins", "vs_decode.api", "server.host_api", "server.host_helper_logs", "server.host_helper_machine", "server.host_helper_preflight", "server.host_preflight", "server.host_helper_requests", "server.run_digest", "server.span_index", "server.run_summary", "server.run_summary_cache", "vs_logs", "vs_project", "vs_sim.api"]
 
 [[modules]]
 # A run's summary: the fold of its journal that the run level shows, as a pure read model.

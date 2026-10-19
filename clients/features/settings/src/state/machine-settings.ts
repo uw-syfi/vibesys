@@ -39,11 +39,14 @@ export type Reading<T> =
   | {readonly kind: 'ready'; readonly offered: Offered<T>}
   | {readonly kind: 'failed'; readonly error: string};
 
+/** Why the helper did not start a login: what the contract lists. */
+type UnavailableReason = Extract<LoginStart, {outcome: 'unavailable'}>['reason'];
+
 /** Where starting a harness's own login stands. */
 export type LoginProgress =
   | {readonly kind: 'starting'; readonly token: number}
   | {readonly kind: 'started'; readonly instruction: string | null}
-  | {readonly kind: 'unavailable'; readonly reason: 'not_installed' | 'no_login_command'}
+  | {readonly kind: 'unavailable'; readonly reason: UnavailableReason}
   | {readonly kind: 'failed'; readonly error: string};
 
 export interface MachineView {

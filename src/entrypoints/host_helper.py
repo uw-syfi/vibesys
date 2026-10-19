@@ -36,12 +36,13 @@ from server.host_api import HarnessOption
 from server.host_harness import HarnessDisplay, Maker, ModelGeneration
 from server.host_helper import serve_channel
 from server.host_helper_compute import MachineCompute
-from server.host_helper_login import LoginBounds, LoginStarter
 from server.host_helper_logs import HelperLogs, run_location
 from server.host_helper_machine import HostMachineProbe
 from server.host_helper_os import (
     FileProjects,
     GitCheckoutProbe,
+    LoginBounds,
+    LoginStarter,
     OsConfigFiles,
     OsDirectories,
     ProjectStopIntents,

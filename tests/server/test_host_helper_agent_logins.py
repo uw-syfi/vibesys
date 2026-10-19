@@ -37,7 +37,7 @@ from server.host_api import (
     parse_helper_request,
     request_features,
 )
-from server.host_helper_login import LoginBounds, LoginStarter
+from server.host_helper_os import LoginBounds, LoginStarter
 from server.host_helper_requests import answer
 from vs_agent.api import LoginCommand, LoginCredential, LoginKind, ProviderLogin
 from vs_agent.api import LoginState as ProviderLoginState
