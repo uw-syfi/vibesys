@@ -1,0 +1,111 @@
+{
+  "version": 1,
+  "checkout": "/home/me/vibesys",
+  "examples": [
+    {
+      "name": "data-structures/repositories/queue-rs",
+      "category": "data-structures",
+      "tasks": [
+        "mpmc",
+        "mpsc",
+        "spsc",
+        "verus-mpmc-open"
+      ],
+      "external_repo": false,
+      "task_details": [
+        {
+          "task": "mpmc",
+          "objectives": [
+            {
+              "metric": "total_ops_per_sec",
+              "direction": "max"
+            }
+          ],
+          "goal": "Optimize a multi-producer, multi-consumer bounded FIFO queue.\n\nHeadline metric: `total_ops_per_sec` (maximize).\n\nPreserve the required interface:\n- Provide a native shared library named `./queue-candidate.so`.\n- Export the evaluator's copying C ABI.\n- Implement enqueue and dequeue for copied byte values using the capacity and\n  value size supplied by the trusted runner.\n\nThe candidate may use any language or combination of languages. Successful\noperations must preserve one global FIFO order, the queue must not fabricate or\nduplicate items, and reservations plus published items must respect capacity.\nAn in-flight enqueue may reserve capacity before publication: `FULL` observes\nreserved plus published capacity, while `EMPTY` observes published items only.\nMaximize trusted end-to-end operation throughput for the MPMC workload.\n\nStart from the editable Rust implementation in `src/lib.rs`. It is an\nintentionally naive correctness baseline, not part of the trusted evaluator.\n",
+          "goal_truncated": false,
+          "domain": "data-structures",
+          "hardware": {
+            "accelerator": "CPU",
+            "count": 1,
+            "vendor": "cpu",
+            "backend": "cpu"
+          },
+          "model": null,
+          "workload": {
+            "name": "Multiple producers, multiple consumers",
+            "description": "A bounded FIFO queue where several threads add items and several threads remove them; checked for linearizability, scored in operations per second."
+          }
+        },
+        {
+          "task": "mpsc",
+          "objectives": [
+            {
+              "metric": "total_ops_per_sec",
+              "direction": "max"
+            }
+          ],
+          "goal": "Optimize a multi-producer, single-consumer bounded FIFO queue.\n\nHeadline metric: `total_ops_per_sec` (maximize).\n\nPreserve the required interface:\n- Provide a native shared library named `./queue-candidate.so`.\n- Export the evaluator's copying C ABI.\n- Implement enqueue and dequeue for copied byte values using the capacity and\n  value size supplied by the trusted runner.\n\nThe candidate may use any language or combination of languages. The queue must\nremain linearizable, must not fabricate or duplicate items, and must respect\ncapacity. Maximize trusted end-to-end operation throughput for the MPSC\nworkload.\n\nStart from the editable Rust implementation in `src/lib.rs`. It is an\nintentionally naive correctness baseline, not part of the trusted evaluator.\n",
+          "goal_truncated": false,
+          "domain": "data-structures",
+          "hardware": {
+            "accelerator": "CPU",
+            "count": 1,
+            "vendor": "cpu",
+            "backend": "cpu"
+          },
+          "model": null,
+          "workload": {
+            "name": "Multiple producers, single consumer",
+            "description": "A bounded FIFO queue where several threads add items and one thread removes them; checked for linearizability, scored in operations per second."
+          }
+        },
+        {
+          "task": "spsc",
+          "objectives": [
+            {
+              "metric": "total_ops_per_sec",
+              "direction": "max"
+            }
+          ],
+          "goal": "Optimize a single-producer, single-consumer bounded FIFO queue.\n\nHeadline metric: `total_ops_per_sec` (maximize).\n\nPreserve the required interface:\n- Provide a native shared library named `./queue-candidate.so`.\n- Export the evaluator's copying C ABI.\n- Implement enqueue and dequeue for copied byte values using the capacity and\n  value size supplied by the trusted runner.\n\nThe candidate may use any language or combination of languages. The queue must\nremain linearizable, must not fabricate or duplicate items, and must respect\ncapacity. Maximize trusted end-to-end operation throughput for the SPSC\nworkload.\n\nStart from the editable Rust implementation in `src/lib.rs`. It is an\nintentionally naive correctness baseline, not part of the trusted evaluator.\n",
+          "goal_truncated": false,
+          "domain": "data-structures",
+          "hardware": {
+            "accelerator": "CPU",
+            "count": 1,
+            "vendor": "cpu",
+            "backend": "cpu"
+          },
+          "model": null,
+          "workload": {
+            "name": "Single producer, single consumer",
+            "description": "A bounded FIFO queue where one thread adds items and one thread removes them; checked for linearizability, scored in operations per second."
+          }
+        },
+        {
+          "task": "verus-mpmc-open",
+          "objectives": [
+            {
+              "metric": "total_ops_per_sec",
+              "direction": "max"
+            }
+          ],
+          "goal": "Optimize a formally verified, pure-Rust multi-producer, multi-consumer bounded\nFIFO queue.\n\nHeadline metric: `total_ops_per_sec` (maximize).\n\nThe candidate is the `queue-verus-mpmc` library crate at `verus-mpmc/`. Preserve\nthis fixed public interface:\n\n```rust\npub struct MpmcFifo<T>;\n\nimpl<T> MpmcFifo<T> {\n    pub fn new(capacity: usize) -> Self;\n    pub fn enqueue(&self, value: T) -> Result<(), T>;\n    pub fn dequeue(&self) -> Option<T>;\n    pub fn len(&self) -> usize;\n    pub fn is_empty(&self) -> bool;\n}\n```\n\nInternally, `FifoToken<T>` and each operation's `AtomicUpdate` obligation are\nproof-only. They connect the task-owned abstract FIFO history to the\ncandidate's concrete state and erase from the optimized executable.\n\nThe queue has exact linearizable bounded-FIFO semantics. Every completed\noperation takes effect at one point between its invocation and return:\n\n- `new(capacity)` requires `capacity > 0` and creates an empty queue with that\n  fixed item capacity.\n- `enqueue(value)` returns `Ok(())` exactly when the queue is below capacity at\n  its linearization point and appends `value` to the single global FIFO order.\n  At capacity it returns `Err(value)` and leaves the queue unchanged.\n- `dequeue()` returns and removes the oldest value exactly when one exists. It\n  returns `None` exactly when the queue is empty and leaves the queue unchanged.\n- `len()` returns the exact abstract queue length at its linearization point;\n  `is_empty()` is equivalent to `len() == 0` at its own linearization point.\n\nUnlike the existing native MPMC task, this task does not permit capacity\nreservation before publication. In particular, an enqueue may not make a\nconcurrent enqueue observe full while a concurrent dequeue still observes\nempty. Values are never lost, duplicated, fabricated, or reordered.\n\nOnly files below `verus-mpmc/src/candidate/` are implementer-owned. Keep the\nfixed manifest, module wiring, contract, and public facade unchanged. The\naccuracy command checks those files, runs both a real Rust compilation and\n`cargo verus verify`, then exercises the public Rust API from task-owned code.\nThe candidate owns the representation, synchronization primitives, invariants,\noperation bodies, and the physical points at which it resolves the fixed\nlogical updates. An implementation may transfer an update through a candidate\ninvariant to support helping. The fixed facade delegates to the candidate and\ndoes not contain a lock or select a linearization strategy. Verification must\nfinish with zero errors. Do not use an inconsistent executable path under\nordinary Cargo and verification, or introduce unsound assumptions merely to\nmake the verifier accept the candidate.\n\nThis open-track task evaluates safety and functional refinement. It does not\nclaim a formal proof of lock-freedom, wait-freedom, starvation freedom, allocator\nprogress, scheduler fairness, or the Rust/LLVM toolchain.\n",
+          "goal_truncated": false,
+          "domain": "data-structures",
+          "hardware": {
+            "accelerator": "CPU",
+            "count": 1,
+            "vendor": "cpu",
+            "backend": "cpu"
+          },
+          "model": null,
+          "workload": {
+            "name": "Verified multiple producers, multiple consumers",
+            "description": "A formally verified pure-Rust bounded FIFO queue under several producers and consumers, scored in operations per second."
+          }
+        }
+      ]
+    }
+  ]
+}

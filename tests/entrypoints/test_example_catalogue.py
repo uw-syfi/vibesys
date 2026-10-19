@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING
+from pathlib import Path
 
 import pytest
 from hypothesis import HealthCheck, given, settings
@@ -27,9 +27,6 @@ from vs_project.api import (
     ModelMaker,
 )
 from vs_sim.api.testing import examples
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 _TEXT = st.text(
     alphabet=st.characters(blacklist_categories=("Cs", "Cc"), blacklist_characters='"\\'),
@@ -210,3 +207,23 @@ def test_asking_for_the_catalogue_needs_its_feature() -> None:
         HelperFeature.EXAMPLES,
         HelperFeature.EXAMPLE_CATALOGUE,
     )
+
+
+def test_the_queue_rs_client_fixture_is_what_the_catalogue_reads_from_the_real_example() -> None:
+    """The desktop clients' ``queueRsCatalogue`` fixture is the real example's catalogue, verbatim.
+
+    New run screens are checked on it, so a goal or a workload that changed in the example's task
+    files must change the fixture too (``clients/libs/run-fixtures/src/data``).
+    """
+    root = Path(__file__).resolve().parents[2]
+    fixture = json.loads(
+        (root / "clients/libs/run-fixtures/src/data/queue-rs-catalogue.json").read_text()
+    )
+    real = list_examples(root).model_dump(mode="json", exclude_none=False)
+    queue = [
+        example
+        for example in real["examples"]
+        if example["name"] == "data-structures/repositories/queue-rs"
+    ]
+
+    assert fixture["examples"] == queue

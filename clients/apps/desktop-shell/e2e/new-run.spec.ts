@@ -1,7 +1,7 @@
 import AxeBuilder from '@axe-core/playwright';
 import {expect, type Page, test} from '@playwright/test';
 import {REQUIRED_HELPER_FEATURES} from '@vibesys/hosts';
-import {exampleCatalogueWithoutDetails} from '@vibesys/run-fixtures';
+import {exampleCatalogueWithoutDetails, queueRsCatalogue} from '@vibesys/run-fixtures';
 import {rawTextOf} from './checks/screen-check.js';
 import {
   installFakeBridge,
@@ -147,6 +147,29 @@ test('an example data structure: its structure, its workload, a goal with no dir
   expect(started).toMatchObject([{project: '~/vibesys-projects/stack', task: 'mpmc'}]);
 });
 
+test('an example of the real catalogue shows its goal like a project of the user: the file, the text, what it optimizes', async ({
+  page,
+}) => {
+  const newRun = SEED.newRun;
+  if (newRun === undefined) throw new Error('the seed has no New run helper');
+  await open(page, {...SEED, newRun: {...newRun, examples: queueRsCatalogue}});
+  await choose(page, 'Start from', 'An example');
+  await proceed(page);
+  await choose(page, 'Domain', 'Data structures');
+  await proceed(page);
+  await choose(page, 'Structure', /queue-rs/);
+  await proceed(page);
+  await choose(page, 'Workload', /Multiple producers, multiple consumers/);
+  await proceed(page);
+  await expect(main(page)).toContainText('.vibesys/tasks/mpmc/OBJECTIVE.md');
+  await expect(main(page)).toContainText(
+    'Optimize a multi-producer, multi-consumer bounded FIFO queue',
+  );
+  await expect(main(page)).toContainText('Higher is better');
+  await expect(main(page)).toContainText('total_ops_per_sec');
+  await expect(main(page)).not.toContainText('Goal not shown here');
+});
+
 test('your own project: a recent one, its task, the agent on its machine, and the run starts', async ({
   page,
 }) => {
@@ -190,7 +213,7 @@ test('your own project: a recent one, its task, the agent on its machine, and th
   ]);
 });
 
-test('a machine whose VibeSys cannot read a goal says it is read when the run starts', async ({
+test('a machine whose VibeSys cannot read a goal says Needs an update, not that the goal is hidden', async ({
   page,
 }) => {
   const newRun = SEED.newRun;
@@ -202,7 +225,9 @@ test('a machine whose VibeSys cannot read a goal says it is read when the run st
       features: [...REQUIRED_HELPER_FEATURES, 'run_roles', 'example_catalogue'],
     },
   });
-  await expect(main(page)).toContainText('Goal not shown here');
+  await expect(main(page)).toContainText('Needs an update');
+  await expect(main(page)).toContainText('.vibesys/tasks/mpmc/OBJECTIVE.md');
+  await expect(main(page)).not.toContainText('Goal not shown here');
   await expect(main(page)).not.toContainText('Higher is better');
 });
 
@@ -382,7 +407,9 @@ test('a helper without the catalogue lists examples and their tasks, with no dom
   await expect(question(page, 'Which task?')).toBeVisible();
   await choose(page, 'Task', 'vllm');
   await proceed(page);
-  await expect(main(page)).toContainText('Goal not shown here');
+  await expect(main(page)).toContainText('Needs an update');
+  await expect(main(page)).toContainText('.vibesys/tasks/vllm/OBJECTIVE.md');
+  await expect(main(page)).not.toContainText('Goal not shown here');
 });
 
 test('a machine with no examples dims that start, and says so', async ({page}) => {
@@ -626,7 +653,7 @@ test('an agent for a role: closed until opened, chosen from the run harness, lis
   ]);
 });
 
-test('a machine whose VibeSys cannot run an agent per role says so on the Agent page', async ({
+test('a machine whose VibeSys cannot run an agent per role says Needs an update on that row, never beside an installed harness', async ({
   page,
 }) => {
   const newRun = SEED.newRun;
@@ -635,7 +662,13 @@ test('a machine whose VibeSys cannot run an agent per role says so on the Agent 
     ...SEED,
     newRun: {...newRun, features: [...REQUIRED_HELPER_FEATURES, 'run_roles']},
   });
-  await expect(main(page).getByText('Not supported on this machine')).toBeVisible();
+  // One status for the row that cannot be used; the harness card keeps saying it is installed.
+  const row = main(page).getByText('Use a different agent for a role').locator('..');
+  await expect(row).toContainText('Needs an update');
+  await expect(main(page).getByRole('radiogroup', {name: 'Harness'})).toContainText(
+    'Installed on host-b',
+  );
+  await expect(main(page).getByText('Not supported on this machine')).toHaveCount(0);
   await expect(main(page).getByRole('button', {name: /different agent for a role/})).toHaveCount(0);
 });
 
