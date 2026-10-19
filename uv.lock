@@ -3103,6 +3103,7 @@ name = "vs-evaluation"
 version = "0.1.0"
 source = { editable = "libs/vs-evaluation" }
 dependencies = [
+    { name = "mcp" },
     { name = "pydantic" },
     { name = "vs-decode" },
     { name = "vs-evaluator-protocol" },
@@ -3113,6 +3114,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "mcp", specifier = ">=1.0,<2" },
     { name = "pydantic", specifier = ">=2" },
     { name = "vs-decode", editable = "libs/vs-decode" },
     { name = "vs-evaluator-protocol", editable = "libs/vs-evaluator-protocol" },

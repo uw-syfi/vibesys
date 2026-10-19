@@ -15,12 +15,12 @@ would not start. It needs no token.
 from __future__ import annotations
 
 import argparse
+import asyncio
 import os
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-import anyio
 from mcp import types
 from mcp.server.lowlevel import Server
 from mcp.server.stdio import stdio_server
@@ -142,7 +142,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     except (RelayRefusedError, RelayUnavailableError) as error:
         sys.stderr.write(f"{_MODULE}: {error}\n")
         raise SystemExit(_EXIT_FAILED) from error
-    anyio.run(_serve, build_relay_server(client, tools, args.name))
+    asyncio.run(_serve(build_relay_server(client, tools, args.name)))
 
 
 if __name__ == "__main__":
