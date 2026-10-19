@@ -11,8 +11,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING
 
+import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
+from pydantic import ValidationError
 from tests.vibesys.orchestration.dynamic._host import TERMS
 from tests.vibesys.orchestration.dynamic._values import (
     BASE,
@@ -492,3 +494,133 @@ def _kept_updates(plan: PortfolioPlan, result: PlanCheck) -> tuple[PlannerHypoth
             seen.add(update.hypothesis_id)
             chosen.append(update)
     return tuple(chosen)
+
+
+# -- combining retained candidates ---------------------------------------------------------------
+
+COMBINE_ID = "k"
+MAX_PARTS = 8
+"""The most parts one combine may name."""
+_PART_VALUES = st.none() | st.sampled_from([1.0, 5.0, 9.0])
+"""Each part's own headline: often below main's, since a part that lost alone may be combined."""
+
+
+@dataclass(frozen=True)
+class CombineCase:
+    """A combine entry as the planner wrote it, the record it is checked against, and the rule."""
+
+    entry: dict[str, object]
+    record: Record
+    valid: bool
+    """Whether the entry breaks no rule: 2 to 8 distinct offered exact parts, no unknown key, a
+    new ID. Restated here independently of the search; how the parts measure never matters."""
+
+
+@st.composite
+def combine_cases(draw: st.DrawFn) -> CombineCase:
+    """A combine of picks drawn from offered pairs, unoffered revisions, unknown hypotheses and
+    repeats, sometimes with an unknown key, over a record whose parts beat main or not."""
+    names = draw(st.lists(st.sampled_from("abcdef"), unique=True, max_size=5))
+    parents = [
+        snapshot(name, ordinal, value=draw(_PART_VALUES))
+        for name in names
+        for ordinal in range(1, draw(st.integers(1, 2)) + 1)
+    ]
+    offered = [(item.hypothesis_id, item.revision.revision_id.root) for item in parents]
+    picks: list[tuple[str, str]] = []
+    for _ in range(draw(st.integers(0, 10))):
+        kind = draw(st.sampled_from(["offered", "offered", "unoffered", "unknown", "repeat"]))
+        if kind == "offered" and offered:
+            picks.append(draw(st.sampled_from(offered)))
+        elif kind == "unoffered" and names:
+            picks.append((draw(st.sampled_from(names)), "nope"))
+        elif kind == "repeat" and picks:
+            picks.append(draw(st.sampled_from(picks)))
+        else:
+            picks.append(("zz", "zz-r1"))
+    identifier = draw(st.sampled_from([COMBINE_ID, COMBINE_ID, *names]))
+    parts: list[dict[str, object]] = [
+        {"hypothesis_id": name, "revision": revision} for name, revision in picks
+    ]
+    unknown = draw(st.sampled_from([None, None, "entry", "part"]))
+    if unknown == "part" and parts:
+        parts[draw(st.integers(0, len(parts) - 1))]["weight"] = 1
+    entry: dict[str, object] = {
+        "kind": "combine",
+        "hypothesis_id": identifier,
+        "title": "both halves",
+        "hypothesis": "the halves were designed to work together",
+        "parents": parts,
+        "instructions": "apply in order",
+        "watch_for": "both touch the scheduler",
+        "pass_criteria": "faster than the best part",
+    }
+    if unknown == "entry":
+        entry["weight"] = 1
+    hypotheses = [hypothesis_record(name, HypothesisOutcome.INCONCLUSIVE) for name in names]
+    stray = unknown == "entry" or (unknown == "part" and bool(parts))
+    valid = (
+        not stray
+        and 2 <= len(picks) <= MAX_PARTS
+        and all(pick in offered for pick in picks)
+        and len({name for name, _ in picks}) == len(picks)
+        and identifier not in names
+    )
+    main_value = draw(st.none() | st.sampled_from([1.0, 5.0, 9.0]))
+    return CombineCase(
+        entry, Record(hypotheses=hypotheses, parents=parents, main_value=main_value), valid
+    )
+
+
+def _parsed(reply: dict[str, object]) -> PortfolioPlan | list[tuple[str | int, ...]]:
+    """The reply as the planning call parses it, or the paths of what the schema rejected."""
+    try:
+        return PortfolioPlan.model_validate(reply)
+    except ValidationError as error:
+        return [tuple(item["loc"]) for item in error.errors()]
+
+
+def _rejected_at(paths: list[tuple[str | int, ...]]) -> bool:
+    """Whether a schema rejection names the unknown key or the parts list it is about."""
+    named = {"weight", "parents"}
+    return all(path[:2] == ("workstreams", 0) for path in paths) and any(
+        named & {str(step) for step in path} for path in paths
+    )
+
+
+@settings(max_examples=examples(pr=40, nightly=400), deadline=None, derandomize=True, database=None)
+@given(case=combine_cases())
+@pytest.mark.xfail(strict=True, reason="S182: the combine workstream kind does not exist yet")
+def test_a_combine_is_scheduled_exactly_when_its_parts_are_distinct_offered_exact_revisions(
+    case: CombineCase,
+) -> None:
+    """Parse and validate as the planning call does: accepted iff the restated rule holds.
+
+    Main's measurement and each part's value vary, and never decide: a combine has no
+    beats-main bar, since parts that lost or tied alone are what it is for.
+    """
+    reply = {
+        "reasoning": "combine",
+        "workstreams": [case.entry],
+        "handoff": {"expectations": [], "doubts": []},
+    }
+    plan = _parsed(reply)
+    if not isinstance(plan, PortfolioPlan):
+        assert not case.valid, plan
+        assert _rejected_at(plan), plan
+        return
+    result = check(plan, case.record)
+    assert result.valid == case.valid, result.violations
+    if case.valid:
+        (accepted,) = result.accepted
+        assert accepted.work_id == case.entry["hypothesis_id"]
+        assert accepted.kind is WorkKind.IMPLEMENT  # a combine is an implement of a new hypothesis
+        assert accepted.parent_hypothesis_id is None  # it starts from main
+        parts = [(item.hypothesis_id, item.revision) for item in accepted.combine]
+        expected = [(str(p["hypothesis_id"]), str(p["revision"])) for p in case.entry["parents"]]
+        assert parts == expected
+        return
+    assert result.accepted == ()
+    for item in result.violations:
+        assert item.path[:2] == ("workstreams", 0), item
+        assert len(item.path) >= 3, item  # names the field to fix, not just the entry
