@@ -3,6 +3,7 @@ import type {JSX} from 'react';
 /** Each icon's strokes on a 24 unit grid, drawn in the current text color. */
 const PATHS = {
   plus: 'M12 5v14M5 12h14',
+  'arrow-up': 'M12 19V5M5 12l7-7 7 7',
   'chevron-down': 'M6 9l6 6 6-6',
   'chevron-right': 'M9 6l6 6-6 6',
   'chevron-left': 'M15 6l-6 6 6 6',

@@ -141,6 +141,8 @@ export function Thread(props: {
   readonly label: string;
   readonly items: readonly ThreadItem[];
   readonly size?: 'default' | 'fill';
+  /** No frame and no dividers: rows sit on the surface around the thread, as in a chat. */
+  readonly plain?: boolean;
 }): JSX.Element {
   const {items} = props;
   const [flipped, setFlipped] = useState<ReadonlySet<string>>(new Set());
@@ -157,7 +159,11 @@ export function Thread(props: {
   };
 
   return (
-    <div className="vs-thread" data-size={props.size ?? 'default'}>
+    <div
+      className="vs-thread"
+      data-size={props.size ?? 'default'}
+      data-plain={props.plain === true || undefined}
+    >
       <ul
         ref={win.scroller}
         className="vs-thread-pane"

@@ -675,7 +675,8 @@ body > div:first-child {
 }
 .vs-select[data-size="sm"] .vs-input {
   min-height: var(--control-sm);
-  padding-right: var(--space-6);
+  /* The chevron (an icon wide) sits a gap in from the edge, with a gap of text room before it. */
+  padding-right: var(--space-7);
   border-radius: var(--radius-sm);
   font-size: var(--text-small-size);
 }
@@ -686,6 +687,9 @@ body > div:first-child {
   display: flex;
   transform: translateY(-50%);
   pointer-events: none;
+}
+.vs-select[data-size="sm"] .vs-select-chevron {
+  right: var(--space-3);
 }
 .vs-page[data-side-action] :is(.vs-select, .vs-slider) {
   width: 100%;
@@ -1728,6 +1732,16 @@ button.vs-stage-head {
   padding: var(--space-2) 0;
   border-top: var(--hairline) solid var(--line);
 }
+.vs-thread[data-plain] > .vs-thread-pane {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+.vs-thread[data-plain] .vs-thread-row {
+  padding: var(--space-2) 0;
+  border-top: 0;
+}
 .vs-thread-gap {
   margin: 0;
   padding: 0;
@@ -1968,4 +1982,34 @@ button.vs-stage-head {
   .vs-dock:has(> .vs-dock-side) > .vs-dock-main {
     visibility: hidden;
   }
+}
+
+/* --- chat message ------------------------------------------------------------------------------ */
+
+.vs-chat-message {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+.vs-chat-message-text {
+  color: var(--text);
+  font-family: var(--text-body-family);
+  font-size: var(--text-body-size);
+  line-height: var(--text-body-line);
+}
+/* The end side: a compact bubble on a subtle surface at the end of the line. */
+.vs-chat-message[data-side="end"] {
+  align-items: flex-end;
+}
+.vs-chat-message[data-side="end"] > .vs-chat-message-text {
+  max-width: 85%;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-lg);
+  background: var(--panel-2);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.vs-chat-message[data-side="start"] > .vs-chat-message-text {
+  overflow-wrap: anywhere;
 }
