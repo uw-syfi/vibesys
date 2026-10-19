@@ -94,6 +94,31 @@ def test_the_last_choice_is_the_one_adopted(begin: Begin) -> None:
     assert result.reason.startswith("adopted")
 
 
+@pytest.mark.xfail(strict=True, reason="PR #3235 round 2: fixed in the next commit")
+@pytest.mark.parametrize("chosen", [True, False], ids=["a-candidate", "nothing"])
+def test_an_uncompared_return_says_so_only_of_an_adopted_candidate(
+    begin: Begin, *, chosen: bool
+) -> None:
+    """A root that had no input reading to compare with ends "adopted-without-input-comparison".
+
+    Keeping the input needs no comparison, so a run that chose nothing still keeps the input.
+    """
+
+    async def uncompared(ctx: core.Flow, _config: Config) -> core.Uncompared:
+        if chosen:
+            ctx.choose(kept("a"))
+        return core.Uncompared()
+
+    result = result_of(begin(uncompared))
+    assert result.outcome == "success"
+    if chosen:
+        assert result.selection == selection_of(kept("a"))
+        assert result.reason == "adopted-without-input-comparison: a"
+    else:
+        assert result.selection == BASELINE
+        assert result.reason.startswith("kept-input")
+
+
 def test_choosing_the_input_after_a_candidate_takes_the_candidate_back(begin: Begin) -> None:
     async def regret(ctx: core.Flow, _config: Config) -> None:
         ctx.choose(kept("a"))

@@ -13,6 +13,7 @@ from __future__ import annotations
 import itertools
 from typing import Literal
 
+import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 from pydantic import BaseModel
@@ -251,49 +252,88 @@ def test_the_wire_input_failure_kinds_mirror_the_candidates_kinds() -> None:
     ]
 
 
-_INPUT_FAILURES = st.none() | st.builds(
+_INPUT_FAILURES = st.builds(
     InputFailureSummary,
     kind=st.sampled_from([kind.value for kind in InputFailureKind]),
     stage=st.none() | st.sampled_from(["correctness", "benchmark"]),
     output=st.sampled_from(["", "hung past 1200 s; API_TOKEN=input-secret", "z" * 3000]),
+    attempts=st.integers(1, 2),
+    compared=st.booleans(),
 )
 
 
-@given(failures=st.lists(_INPUT_FAILURES, max_size=6), resume_at=st.integers(0, 6))
-@settings(max_examples=examples(pr=10, nightly=100))
-def test_a_failed_input_measurement_is_announced_once_bounded_and_redacted(
-    failures: list[InputFailureSummary | None], resume_at: int
-) -> None:
-    """S173: each newly committed input failure is told once, with its stage and a safe tail."""
-    states = [_FakeAgentState()] + [
-        _FakeAgentState(revision=revision, input_failure=failure)
-        for revision, failure in enumerate(failures, start=1)
-    ]
-    integration = _integration()
-    captured: list[CoreEvent] = []
-    integration.events.subscribe(captured.append)
-    observer = integration.core_commit_observer("probe", _FakeProjector(), "commit-probe")
-    for index in range(1, len(states)):
-        before = states[index - 1]
-        if index == resume_at:
-            before = _FakeAgentState.model_validate(before.model_dump())
-        observer.committed(before, states[index])
+def _input_states(
+    pending: int, failure: InputFailureSummary | None, after: int
+) -> list[_FakeAgentState]:
+    """A run's commits: the input pending for ``pending`` of them, then its result for ``after``.
 
-    told = [event for event in captured if event.type is CoreEventType.INPUT_MEASUREMENT_FAILED]
-    news = [
-        after.input_failure
-        for before, after in itertools.pairwise(states)
-        if after.input_failure is not None and after.input_failure != before.input_failure
+    The input is measured once per run, so once its failure is committed every later commit
+    holds the same failure.
+    """
+    states = [_FakeAgentState(revision=revision) for revision in range(pending + 1)]
+    states += [
+        _FakeAgentState(revision=revision, input_failure=failure)
+        for revision in range(pending + 1, pending + 1 + after)
     ]
-    assert len(told) == len(news)
-    for event, failure in zip(told, news, strict=True):
-        assert event.data is not None
-        assert event.data.kind == "input_measurement_failed"
-        assert event.data.failure.value == failure.kind
-        assert event.data.stage == failure.stage
-        assert "input-secret" not in event.data.summary
-        assert len(event.data.summary) <= 1000
-        assert event.data.summary == redact_diagnostic_tail(failure.output, max_chars=1000)
+    return states
+
+
+@pytest.mark.xfail(strict=True, reason="PR #3235 round 2: fixed in the next commit")
+@given(
+    run=st.tuples(st.integers(0, 3), st.none() | _INPUT_FAILURES, st.integers(1, 4)),
+    restart=st.integers(0, 7),
+    announcing_before=st.booleans(),
+)
+@settings(max_examples=examples(pr=20, nightly=200))
+def test_a_failed_input_measurement_is_announced_once_per_run_across_a_restart(
+    tmp_path_factory: pytest.TempPathFactory,
+    run: tuple[int, InputFailureSummary | None, int],
+    restart: int,
+    *,
+    announcing_before: bool,
+) -> None:
+    """S173: the input's failure is told once per run, with its stage and a safe tail.
+
+    ``run`` is how many commits the input is pending, its result, and how many commits follow.
+    The run restarts after commit ``restart``: a new process builds a new integration on the
+    same log directory and a new observer, whose first commit's ``previous`` is the persisted
+    record. Before the restart the run either announced as this build does, or ran a build that
+    never announced (``announcing_before`` false, as a run checkpointed before S173 did): then
+    the restarted process announces the failure it loads.
+    """
+    pending, failure, after = run
+    states = _input_states(pending, failure, after)
+    restart = min(restart, len(states) - 2)  # at least one commit after the restart
+    log_dir = tmp_path_factory.mktemp("run") / "logs"
+    first = _integration()
+    first.attach(log_dir, run_id="probe")
+    if announcing_before:
+        observer = first.core_commit_observer("probe", _FakeProjector(), "commit-probe")
+        for before, now in itertools.pairwise(states[: restart + 1]):
+            observer.committed(before, now)
+    restarted = _integration()
+    restarted.attach(log_dir, run_id="probe")
+    resumed = restarted.core_commit_observer("probe", _FakeProjector(), "commit-probe")
+    for before, now in itertools.pairwise(states[restart:]):
+        resumed.committed(before, now)
+
+    told = [
+        event
+        for event in restarted.events.read()
+        if event.type is CoreEventType.INPUT_MEASUREMENT_FAILED
+    ]
+    assert len(told) == (failure is not None)
+    if failure is None:
+        return
+    data = told[0].data
+    assert data is not None
+    assert data.kind == "input_measurement_failed"
+    assert data.failure.value == failure.kind
+    assert data.stage == failure.stage
+    assert (data.attempts, data.compared) == (failure.attempts, failure.compared)
+    assert "input-secret" not in data.summary
+    assert len(data.summary) <= 1000
+    assert data.summary == redact_diagnostic_tail(failure.output, max_chars=1000)
 
 
 @given(

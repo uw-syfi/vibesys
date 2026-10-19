@@ -15,8 +15,10 @@ import dataclasses
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal
 
+import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
+from pydantic import TypeAdapter
 from tests.vibesys.orchestration.dynamic._values import (
     config,
     evidence_of,
@@ -25,7 +27,10 @@ from tests.vibesys.orchestration.dynamic._values import (
     settlement_of,
 )
 
+import vibesys.candidates.api as candidates_api
+import vs_core.api as core_api
 from vibesys.candidates.api import (
+    Baseline,
     InputFailure,
     InputFailureKind,
     InputReading,
@@ -194,7 +199,8 @@ def _check(run: RunRecord, trace: Trace) -> None:
         assert leader.revision.revision_id.root in trace.eligible_candidates
     assert (leader is INPUT) == (not run.eligible_rounds())
     if run.eligible_rounds():
-        assert run.ending() is None
+        compared = run.baseline is None or not candidates_api.uncompared(run.baseline)
+        assert run.ending() == (None if compared else core_api.Uncompared())
     snapshot = run.snapshot()
     assert RunSnapshot.model_validate_json(snapshot.model_dump_json()) == snapshot
     # resumed after a code change from what it checkpoints, the record is the same record
@@ -313,6 +319,7 @@ def play(
     return run, trace
 
 
+@pytest.mark.xfail(strict=True, reason="PR #3235 round 2: fixed in the next commit")
 @settings(max_examples=examples(pr=10, nightly=200), deadline=None, derandomize=True, database=None)
 @given(
     steps=STEPS,
@@ -349,9 +356,14 @@ INPUTS = {
         ),
         reading=InputReading(accuracy_passed=False),
     ),
+    # A checkpoint written before S173 held a failed accuracy check as a measured input.
+    "accuracy failed before S173": TypeAdapter(Baseline).validate_json(
+        '{"kind":"measured","reading":{"accuracy_passed":false}}'
+    ),
 }
 
 
+@pytest.mark.xfail(strict=True, reason="PR #3235 round 2: fixed in the next commit")
 @settings(max_examples=examples(pr=8, nightly=100))
 @given(
     given_input=st.sampled_from(sorted(INPUTS)),
@@ -374,7 +386,8 @@ def test_a_search_ends_without_a_winner_only_when_no_candidate_stands_and_the_in
 
     ending = run.ending()
     if candidates:
-        assert ending is None  # a winner stands
+        # a winner stands; one never compared with the input says so
+        assert ending == (core_api.Uncompared() if candidates_api.uncompared(baseline) else None)
     elif trusted(baseline) and not planner_gave_up:
         assert ending is None  # the trusted input stands
     else:

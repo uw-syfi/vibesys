@@ -56,6 +56,7 @@ from vs_core.api import (
     InvocationId,
     InvocationRef,
     Measure,
+    MeasurementFailure,
     MeasurementFinished,
     MeasurementResult,
     Observation,
@@ -179,6 +180,10 @@ class World(TypedDict, total=False):
     """Whether a parent revision still reproduces its retained content."""
     baseline: InputEnd
     """How the measurement of the input ends."""
+    input_blame: MeasurementFailure | None
+    """How the backend classified the input's failed measurement; None leaves it unclassified."""
+    input_recovers: bool
+    """The input's measurement ends as ``baseline`` once only: measured again, it is measured."""
     handoff_writes_open: bool
     """Leave each handoff write open for the story to answer; else the owner writes it at once."""
     merging: bool
@@ -226,6 +231,10 @@ class Host:
     failing_benchmarks: set[str] = field(default_factory=set)
     verified: bool = True
     baseline: InputEnd = "measured"
+    input_blame: MeasurementFailure | None = None
+    input_recovers: bool = False
+    input_measurements: int = 0
+    """How many times the host measured the input."""
     handoff_writes_open: bool = False
     merging: bool = False
     merger_answers: list[int] = field(default_factory=list)
@@ -511,6 +520,10 @@ class Host:
         assert isinstance(plan.candidate, RevisionRef)
         candidate = plan.candidate
         is_input = plan.purpose == "baseline"
+        if is_input:
+            if self.input_recovers and self.input_measurements:
+                self.baseline = "measured"
+            self.input_measurements += 1
         if is_input and self.baseline == "lost":
             self.run.fail(asked, FailureReason.LOST)
             return
@@ -542,6 +555,7 @@ class Host:
             scope=request.scope,
             evidence=refs,
             status=ObservationStatus.FAILED if failed else ObservationStatus.SUCCEEDED,
+            failure=self.input_blame if is_input and self.baseline != "measured" else None,
         )
         self.run.answer(asked, MeasurementFinished(decision=asked.decision, result=result))
 

@@ -44,6 +44,8 @@ from vibesys.events import (
     FrameworkWarningData,
     GateFinishedData,
     GateKind,
+    InputMeasurementFailedData,
+    InputMeasurementFailureKind,
     InvocationFinishedData,
     PhaseData,
     QuotaPausedData,
@@ -322,6 +324,42 @@ def test_framework_events_bypass_execution_stamping_and_lift_warnings(tmp_path: 
     assert warning.diagnostic.summary == "profiler failed"
     assert warning.diagnostic.detail == "boom"
     assert warning.diagnostic.source == "loop"
+
+
+@pytest.mark.xfail(strict=True, reason="PR #3235 round 2: fixed in the next commit")
+@pytest.mark.regression
+@pytest.mark.parametrize(("attempts", "compared"), [(1, False), (2, True)])
+def test_a_failed_input_measurement_projects_with_a_run_diagnostic(
+    tmp_path: Path, attempts: int, *, compared: bool
+) -> None:
+    """S173: the operator's clients see the input's failure as a run-scoped error diagnostic."""
+    parts = build_server_parts(tmp_path)
+
+    parts.core_events.emit(
+        CoreEventType.INPUT_MEASUREMENT_FAILED,
+        status=CoreEventStatus.FAILED,
+        data=InputMeasurementFailedData(
+            failure=InputMeasurementFailureKind.ACCURACY_FAILED,
+            stage="correctness",
+            summary="accuracy stage exceeded its 1200 s limit",
+            attempts=attempts,
+            compared=compared,
+        ),
+    )
+
+    failed = next(e for e in parts.journal.read() if e.type is EventType.INPUT_MEASUREMENT_FAILED)
+    diagnostic = failed.diagnostic
+    assert diagnostic is not None
+    assert diagnostic.code == "input_measurement_failed"
+    assert diagnostic.scope is DiagnosticScope.RUN
+    assert diagnostic.severity is DiagnosticSeverity.ERROR
+    assert diagnostic.source == "loop"
+    assert diagnostic.summary.startswith(
+        "The input's trusted measurement failed (accuracy-failed, stage correctness"
+    )
+    assert ("measured twice" in diagnostic.summary) is (attempts == 2)
+    assert ("without an input comparison" in diagnostic.summary) is not compared
+    assert diagnostic.detail == "accuracy stage exceeded its 1200 s limit"
 
 
 def test_failed_core_events_project_with_synthesized_diagnostics(tmp_path: Path) -> None:
