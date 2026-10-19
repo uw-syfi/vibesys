@@ -459,21 +459,40 @@ def record_samples(
             sample,
             context.run.now_at,
         )
-        state = state.model_copy(update={"comparisons": _logged(state, context)})
+        state = state.model_copy(update={"comparisons": _logged(state, context, sample)})
     if not job.terminal:
         return AreaChange(state=state)
     state = opened_answer(state, job, context.run.now_at)
     return after_run(AreaChange(state=state), context, job.submission_id)
 
 
-def _logged(state: EvaluationState, context: EvaluationContext) -> tuple[Comparison, ...]:
-    """The comparison log with every comparison the samples now make that it does not hold."""
+def _logged(
+    state: EvaluationState, context: EvaluationContext, sample: Sample
+) -> tuple[Comparison, ...]:
+    """The comparison log with every comparison ``sample`` changes that it does not hold.
+
+    A sample feeds the comparisons of its own input in its own scope (it is their candidate
+    side) and every comparison against its input (it is their base side). Another comparison
+    is not recomputed here: its base samples may have gone stale on the run clock since it was
+    logged, and logging that again would present an old pair, whose verdict the clock changed
+    and no run did, as news beside an unrelated sample.
+    """
     log = state.comparisons
     for comparison in comparisons_of(state, moment_of(context.run)):
+        if not _fed_by(sample, comparison):
+            continue
         last = next((c for c in reversed(log) if _same_subject(c, comparison)), None)
         if last != comparison:
             log = (*log, comparison)
     return log
+
+
+def _fed_by(sample: Sample, comparison: Comparison) -> bool:
+    """Whether ``sample`` is a run of the comparison's candidate input or of its base input."""
+    candidate_side = (
+        sample.scope == comparison.scope and sample.measured_input == comparison.candidate_input
+    )
+    return candidate_side or sample.measured_input == comparison.base_input
 
 
 def _input_of(state: EvaluationState, job: OwnedJob) -> str | None:

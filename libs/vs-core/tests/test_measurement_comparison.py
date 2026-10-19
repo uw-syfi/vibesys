@@ -693,6 +693,45 @@ def test_a_comparison_whose_base_went_partly_stale_is_recomputed_over_the_rest()
 
 
 @pytest.mark.regression
+@settings(max_examples=examples(pr=6, nightly=40), deadline=None, derandomize=True, database=None)
+@given(
+    later=st.floats(min_value=0.55, max_value=0.95, allow_nan=False),
+    unrelated=st.integers(min_value=1, max_value=3),
+)
+@example(later=0.5 + 0.01, unrelated=1)
+def test_a_sample_of_an_unrelated_input_logs_no_comparison_the_clock_alone_changed(
+    *, later: float, unrelated: int
+) -> None:
+    """Only the comparisons a landing sample feeds are logged again, never an old pair.
+
+    The base reads 100 at the start; a close call on a second input earns it a run of 104
+    three quarters of the staleness bound later, so the first input's comparison is logged over
+    both. Once the first base run is stale, another attempt's candidate, measured against
+    another base, lands samples. The first input's comparison over the base run of 104 alone
+    differs from the logged one only because of the clock, and a live run journalled that old
+    pair again beside the new samples (a verdict that flipped from better to within noise,
+    hours after its round ended).
+    """
+    lab = Lab.of("a")
+    lab.call("a", "c1", "input-1")
+    lab.measure({"input-1": 130.0, "base": 100.0})
+    lab.advance(0.75 * STALENESS)
+    lab.call("a", "c2", "input-2")
+    lab.measure({"input-2": 101.0, "base": 104.0})
+    lab.advance(later * STALENESS)
+    lab.state, lab.scopes["b"] = attempt(
+        "b", lab.state.run.facts.baseline, lab.state, base_input="other-base"
+    )
+    before = lab.comparisons()
+    for number in range(unrelated):
+        lab.call("b", f"d{number}", f"input-b{number}")
+        lab.measure({f"input-b{number}": 130.0, "other-base": 100.0})
+    new = lab.comparisons()[len(before) :]
+    assert {c.scope for c in new} == {lab.scopes["b"]}, "only attempt b's comparisons are news"
+    assert [c for c in new if c.candidate_input in {"input-1", "input-2"}] == []
+
+
+@pytest.mark.regression
 def test_an_input_presents_the_comparison_of_its_newest_evaluation() -> None:
     """An input measured in a second evaluation: one comparison, the newest evaluation's.
 

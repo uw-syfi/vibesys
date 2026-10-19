@@ -397,3 +397,19 @@ def test_the_implementer_is_told_about_the_evaluation_tool_exactly_when_it_is_of
     )
     assert ("submit_evaluation" in text) is offered
     assert ("Measure early, on the target" in text) is offered
+
+
+@settings(max_examples=examples(pr=8, nightly=100))
+@given(context=_PLANNING)
+def test_the_planning_prompt_states_what_the_implementer_can_read_of_an_evaluation(
+    context: PlanPrompt,
+) -> None:
+    """A plan cannot demand evidence its implementer has no way to read (round 8 of a live run).
+
+    The designer asked for a report quoting the benchmark's server log lines; the implementer
+    can read only the evaluation's stage verdicts, metrics, summary tails and comparison, so it
+    reported blocked and the round ended with no measurement.
+    """
+    text = _render(PlanTemplate.PLAN, context)
+    assert "cannot read the benchmark's server or process logs" in text
+    assert "the round ends without a measurement" in text

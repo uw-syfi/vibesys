@@ -195,6 +195,14 @@ they are the minimum steps that exercise the failure-prone path (e.g. "confirm
 the image builds," "hit /health and get 200," "run the accuracy checker against
 the live endpoint"). Adapt the strategy across retries based on what failed.
 
+The implementer reads a trusted evaluation only as its reply states it: each stage's
+verdict, its metric values and the end of its summary, and the comparison with the base. It
+cannot read the benchmark's server or process logs, raw outputs or profiler captures, and its
+editor may have no accelerator. {{ reply.pass_criteria }} and {{ reply.activation_evidence }}
+that need such data (a report quoting log lines, a table computed from them) can never be
+met: the implementer reports blocked and the round ends without a measurement. Require only
+what it can read, and measure what needs the logs through the next round's evaluation.
+
 Stage cost: cheap capability, comparable point, then expand past noise.
 Stop on fair falsification; reuse plumbing/rows. Evaluations have no allowance
 to plan for or against. The framework owns the trusted gates, the base, review
