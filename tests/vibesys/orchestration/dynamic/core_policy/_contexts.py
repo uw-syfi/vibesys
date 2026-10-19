@@ -199,10 +199,12 @@ def _buildable(draw: st.DrawFn) -> list[dict[str, object]]:
 
 INPUT_FAILURES = (
     st.none()
-    | st.just({"kind": "benchmark-failed", "output": "bench-output"})
+    | st.just({"kind": "benchmark-failed", "stage": "benchmark", "output": "bench-output"})
+    | st.just({"kind": "accuracy-failed", "stage": "correctness", "output": "hung past 1200 s"})
     | st.just({"kind": "readings-undecodable"})
 )
-"""Why the input is unmeasurable, or None: one kind with the evaluator's output, one without."""
+"""Why the input is unmeasurable, or None: kinds that name a failed stage and its output, and
+one that names neither."""
 
 
 SOURCES = st.lists(

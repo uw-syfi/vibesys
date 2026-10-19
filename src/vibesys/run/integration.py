@@ -15,6 +15,8 @@ from vibesys.events import (
     ExperimentsChangedData,
     FrameworkSource,
     FrameworkWarningData,
+    InputMeasurementFailedData,
+    InputMeasurementFailureKind,
     InvocationFinishedData,
     InvocationStartedData,
     IterationsChangedData,
@@ -35,6 +37,7 @@ from vibesys.run.agent_events import CoreAgentEventSink
 from vibesys.run.event_journal import EventJournal
 from vs_core.api import FlowDriver, FlowState, RunTrace, SpanChange, span_changes
 from vs_project.api import git_repositories
+from vs_redaction.api import redact_diagnostic_tail
 from vs_runtime.api.core import RuntimeRecord, new_comparisons, new_runaways, winner_selection
 from vs_runtime.api.infrastructure import (
     AgentExecutionLifecycleEvent,
@@ -212,6 +215,22 @@ class _RoundFailureProjection(Protocol):
     def operator_text(self) -> str | None: ...
 
 
+class _InputFailureProjection(Protocol):
+    """Product shape of why the input failed its measurement, as ``InputFailureSummary`` has it.
+
+    Structural for the same reason as `_RoundFailureProjection`.
+    """
+
+    @property
+    def kind(self) -> str: ...
+
+    @property
+    def stage(self) -> str | None: ...
+
+    @property
+    def output(self) -> str: ...
+
+
 class _RoundProjection(Protocol):
     """Product facts needed to translate one projected round into events."""
 
@@ -262,6 +281,11 @@ class _RunProjection(Protocol):
 
     @property
     def projection(self) -> Mapping[str, object] | None: ...
+
+    @property
+    def input_failure(self) -> _InputFailureProjection | None:
+        """Why the input failed its trusted measurement; None while pending or measured."""
+        ...
 
 
 class CommittedStateProjector(Protocol):
@@ -314,6 +338,9 @@ def _emit_core_commit_events(
         _emit_round_finished(events, after_rounds[number])
         _emit_workstream_finished(events, after_rounds[number])
     _emit_iterations_changed(events, before, after)
+    _emit_input_measurement_failed(
+        events, None if before is None else before.input_failure, after.input_failure
+    )
     if before is None or _experiments_view(before) == _experiments_view(after):
         return
     events.emit(
@@ -321,6 +348,29 @@ def _emit_core_commit_events(
         data=ExperimentsChangedData(
             reason="round_persisted" if new_round_numbers else "active_hypothesis_changed",
             revision=after.experiment_revision,
+        ),
+    )
+
+
+INPUT_FAILURE_TAIL_CHARS = 1000
+"""How much of the failed stage's output the operator's event carries, after redaction."""
+
+
+def _emit_input_measurement_failed(
+    events: EventJournal,
+    before: _InputFailureProjection | None,
+    after: _InputFailureProjection | None,
+) -> None:
+    """Emit ``INPUT_MEASUREMENT_FAILED`` once, on the commit that first records the failure."""
+    if after is None or after == before:
+        return
+    events.emit(
+        CoreEventType.INPUT_MEASUREMENT_FAILED,
+        status=EventStatus.FAILED,
+        data=InputMeasurementFailedData(
+            failure=InputMeasurementFailureKind(after.kind),
+            stage=after.stage,
+            summary=redact_diagnostic_tail(after.output, max_chars=INPUT_FAILURE_TAIL_CHARS),
         ),
     )
 

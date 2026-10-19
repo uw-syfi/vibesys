@@ -136,6 +136,10 @@ def test_the_planner_prompt_states_the_run_it_plans_for(context: PlannerPrompt) 
     for row in context.baseline:
         assert row.name in text
     assert ("Input not measurable" in text) is (context.input_failure is not None)
+    if context.input_failure is not None:
+        assert (f"stage `{context.input_failure.stage}`" in text) is bool(
+            context.input_failure.stage
+        )
     assert ("choose a profile workstream" in text) is context.profiling
     assert ("none yet" in text) is not bool(context.history)
     assert "Correction required" not in text
@@ -219,6 +223,8 @@ def test_the_implementer_is_given_its_hypothesis_and_what_the_last_turn_left(
     assert ("trusted measurement failed" in text) is (context.input_failure is not None)
     if context.input_failure is not None and context.input_failure.output:
         assert context.input_failure.output in text
+    if context.input_failure is not None and context.input_failure.stage:
+        assert f"stage `{context.input_failure.stage}`" in text
 
 
 @settings(max_examples=examples(pr=8, nightly=100))

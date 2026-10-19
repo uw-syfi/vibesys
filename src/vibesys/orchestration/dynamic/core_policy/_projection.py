@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Literal
 
-from vibesys.candidates.api import reading
+from vibesys.candidates.api import failure, reading
 from vibesys.hypothesis import derive_hypothesis_title
 from vibesys.hypothesis.readmodel import (
     AgentRunProjection,
@@ -26,6 +26,7 @@ from vibesys.run.contracts import (
     IterationStatus,
     IterationSummary,
     IterationTree,
+    InputFailureSummary,
     PluginProjection,
     RoundFailureSummary,
     RoundSummary,
@@ -69,7 +70,16 @@ def project_run_snapshot(snapshot: RunSnapshot, *, experiment_revision: int) -> 
             _summary(view, record) for view, record in zip(projection.rounds, rounds, strict=True)
         ),
         experiment_revision=experiment_revision,
+        input_failure=_input_failure(snapshot),
     )
+
+
+def _input_failure(snapshot: RunSnapshot) -> InputFailureSummary | None:
+    """Why the input failed its trusted measurement, once it has; None while pending or trusted."""
+    why = None if snapshot.baseline is None else failure(snapshot.baseline)
+    if why is None:
+        return None
+    return InputFailureSummary(kind=why.kind.value, stage=why.stage, output=why.output)
 
 
 def _baseline_metrics(snapshot: RunSnapshot) -> tuple[MetricRow, ...]:

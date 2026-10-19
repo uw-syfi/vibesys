@@ -83,6 +83,7 @@ class CoreEventType(StrEnum):
     RUN_CONFIGURED = "run_configured"
     FRAMEWORK_WARNING = "framework_warning"
     WINNER_SELECTED = "winner_selected"
+    INPUT_MEASUREMENT_FAILED = "input_measurement_failed"
     MEASUREMENT_COMPARED = "measurement_compared"
     COMPARISONS_READ = "comparisons_read"
     WORKSTREAM_FINISHED = "workstream_finished"
@@ -822,6 +823,36 @@ class WinnerSelectedData(EventPayload):
     settlement_id: str | None = None
 
 
+class InputMeasurementFailureKind(StrEnum):
+    """Why the run's input revision failed its own trusted measurement. Closed.
+
+    Mirrors ``vibesys.candidates.api.InputFailureKind`` member-for-member: a frozen wire
+    vocabulary the candidates library's own enum can't silently rename underneath.
+    """
+
+    NO_EVIDENCE = "no-evidence"
+    READINGS_REFUSED = "readings-refused"
+    READINGS_UNDECODABLE = "readings-undecodable"
+    ACCURACY_FAILED = "accuracy-failed"
+    BENCHMARK_FAILED = "benchmark-failed"
+    WAIT_ENDED = "wait-ended"
+
+
+class InputMeasurementFailedData(EventPayload):
+    """The run's input revision failed its trusted measurement, so it has no baseline.
+
+    ``failure`` says how, ``stage`` names the gate stage whose reading failed (None when no
+    stage reading did), and ``summary`` is the redacted tail of what that stage printed. Emitted
+    once, when core first commits the failure; the run goes on, and candidates are judged on
+    the task's gates alone, with no input value to beat.
+    """
+
+    kind: Literal["input_measurement_failed"] = "input_measurement_failed"
+    failure: InputMeasurementFailureKind
+    stage: str | None = None
+    summary: str = ""
+
+
 class MeasurementComparedData(EventPayload):
     """A candidate's measurement was compared with its base's: ratio, noise and verdict.
 
@@ -1045,6 +1076,7 @@ CoreEventData = Annotated[
     | RunConfiguredData
     | FrameworkWarningData
     | WinnerSelectedData
+    | InputMeasurementFailedData
     | MeasurementComparedData
     | ComparisonsReadData
     | WorkstreamFinishedData

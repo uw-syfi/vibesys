@@ -213,6 +213,23 @@ class RoundFailureSummary(BaseModel):
     """Credential-safe projection used only by the public run event."""
 
 
+class InputFailureSummary(BaseModel):
+    """Why the run's input revision failed its own trusted measurement, strategy-neutral.
+
+    Like `RoundFailureSummary`, ``kind`` carries a policy enum's value (the candidates
+    library's ``InputFailureKind``), not the enum; ``INPUT_MEASUREMENT_FAILED``'s wiring turns it
+    back into the wire's ``InputMeasurementFailureKind``. ``stage`` names the gate stage whose
+    reading failed, when one did; ``output`` is what that stage printed, unredacted, so it is
+    redacted before it reaches an event.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    kind: str
+    stage: str | None = None
+    output: str = ""
+
+
 class RoundSummary(BaseModel):
     """One policy round in the strategy-neutral shape used for run events."""
 
@@ -438,6 +455,8 @@ class PluginProjection(BaseModel):
     )
     rounds: tuple[RoundSummary, ...] = ()
     experiment_revision: int | None = None
+    input_failure: InputFailureSummary | None = None
+    """Why the input failed its trusted measurement; None while it is pending or measured."""
 
 
 class RunView(BaseModel):
@@ -454,6 +473,8 @@ class RunView(BaseModel):
     )
     rounds: tuple[RoundSummary, ...] = ()
     experiment_revision: int | None = None
+    input_failure: InputFailureSummary | None = None
+    """Why the input failed its trusted measurement; None while it is pending or measured."""
 
     @property
     def projection_failure(self) -> str | None:
@@ -477,6 +498,7 @@ __all__ = [
     "IterationTree",
     "IterationUnavailable",
     "IterationUnavailableReason",
+    "InputFailureSummary",
     "PluginProjection",
     "ProfilerKind",
     "ResumeRef",

@@ -1,0 +1,8 @@
+{
+  "protocol_version": 1,
+  "type": "input_measurement_failed",
+  "sequence": 47,
+  "run_id": "run-conformance",
+  "timestamp": "2026-01-01T00:00:00Z",
+  "text": "the input failed its trusted accuracy check"
+}

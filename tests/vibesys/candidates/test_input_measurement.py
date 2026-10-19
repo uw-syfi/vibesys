@@ -4,9 +4,12 @@ from __future__ import annotations
 
 from hypothesis import given, settings
 from hypothesis import strategies as st
+from pydantic import TypeAdapter
 
 from vibesys.candidates.api import (
+    Baseline,
     InputFailureKind,
+    InputReading,
     Measured,
     NotConfigured,
     Unmeasurable,
@@ -93,15 +96,45 @@ def test_the_input_is_measured_unless_a_gate_it_was_measured_by_failed(
     assert seen is not None
     assert seen.accuracy_passed == verdicts[EvidenceKind.CORRECTNESS]
     assert seen.benchmark_passed == verdicts[EvidenceKind.BENCHMARK]
-    if verdicts[EvidenceKind.BENCHMARK] is False:
-        assert isinstance(found, Unmeasurable)
-        assert found.failure.kind is InputFailureKind.BENCHMARK_FAILED
-        assert found.failure.output == feedback
-        assert not trusted(found)
-    else:
+    # Accuracy is judged first: a benchmark of an inaccurate input measures nothing to keep.
+    failed = next(
+        (kind for kind in (EvidenceKind.CORRECTNESS, EvidenceKind.BENCHMARK) if verdicts[kind] is False),
+        None,
+    )
+    if failed is None:
         assert isinstance(found, Measured)
         assert failure(found) is None
-        assert trusted(found) is (verdicts[EvidenceKind.CORRECTNESS] is not False)
+        assert trusted(found)
+        return
+    assert isinstance(found, Unmeasurable)
+    assert found.failure.kind is (
+        InputFailureKind.ACCURACY_FAILED
+        if failed is EvidenceKind.CORRECTNESS
+        else InputFailureKind.BENCHMARK_FAILED
+    )
+    assert found.failure.stage == "s"
+    assert found.failure.output == feedback
+    assert not trusted(found)
+
+
+@settings(max_examples=examples(pr=8, nightly=100))
+@given(accuracy_passed=st.none() | st.booleans())
+def test_an_input_checkpointed_as_measured_with_failed_accuracy_reads_as_accuracy_failed(
+    accuracy_passed: bool | None,
+) -> None:
+    """A checkpoint written before S173 kept a failed accuracy check as ``measured``."""
+    written = Measured(reading=InputReading(accuracy_passed=accuracy_passed)).model_dump_json()
+
+    found = TypeAdapter(Baseline).validate_json(written)
+
+    why = failure(found)
+    if accuracy_passed is False:
+        assert why is not None
+        assert why.kind is InputFailureKind.ACCURACY_FAILED
+        assert not trusted(found)
+    else:
+        assert why is None
+        assert trusted(found)
 
 
 @settings(max_examples=examples(pr=8, nightly=100))

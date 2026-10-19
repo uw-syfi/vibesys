@@ -12,6 +12,7 @@ from vibesys.api import (
     FrameworkWarningData,
     GateFinishedData,
     GateStartedData,
+    InputMeasurementFailedData,
     MeasurementComparedData,
     ProviderSwitchedData,
     QuotaAbandonedData,
@@ -45,6 +46,8 @@ def format_framework_event(event: CoreEvent) -> str | None:
             text = _format_framework_warning(data)
         case WinnerSelectedData():
             text = _format_winner_selected(data)
+        case InputMeasurementFailedData():
+            text = _format_input_measurement_failed(data)
         case MeasurementComparedData():
             text = _format_measurement_compared(data)
         case ComparisonsReadData():
@@ -232,6 +235,15 @@ def _format_comparisons_read(data: ComparisonsReadData) -> str:
         else:
             parts.append(f"{row.label} {row.status.value.replace('_', ' ')}")
     return "[baselines] " + ", ".join(parts)
+
+
+def _format_input_measurement_failed(data: InputMeasurementFailedData) -> str:
+    where = f", stage {data.stage}" if data.stage else ""
+    line = (
+        f"[input] the input's trusted measurement failed ({data.failure.value}{where}); "
+        "the run goes on with no input baseline, and the planner is told why"
+    )
+    return f"{line}:\n{data.summary}" if data.summary else line
 
 
 def _format_winner_selected(data: WinnerSelectedData) -> str:

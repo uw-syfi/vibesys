@@ -51,11 +51,19 @@ class InputFailureKind(StrEnum):
     READINGS_UNDECODABLE = "readings-undecodable"
     """The evidence owner could not decode the evidence."""
 
+    ACCURACY_FAILED = "accuracy-failed"
+    """The input failed its own trusted accuracy check (a stage that hung past its time limit
+    fails it too); ``stage`` is the stage and ``output`` what it printed."""
+
     BENCHMARK_FAILED = "benchmark-failed"
-    """The input's own benchmark failed; ``output`` is what the evaluation printed."""
+    """The input's own benchmark failed; ``stage`` is the stage and ``output`` what it printed."""
 
     WAIT_ENDED = "wait-ended"
     """Core ended the measurement or its decoding without a result; ``ended`` says why."""
+
+
+_STAGE_FAILURES = frozenset({InputFailureKind.ACCURACY_FAILED, InputFailureKind.BENCHMARK_FAILED})
+"""The kinds that name the gate stage whose reading failed."""
 
 
 class InputFailure(Value):
@@ -66,6 +74,8 @@ class InputFailure(Value):
     """
 
     kind: InputFailureKind
+    stage: str | None = None
+    """The stage whose reading failed: set exactly for a failed accuracy check or benchmark."""
     status: ObservationStatus | None = None
     output: str = ""
     ended: FailureReason | None = None
@@ -75,6 +85,7 @@ class InputFailure(Value):
     def fields_match_kind(self) -> "InputFailure":
         """Refuse a field that does not belong to the kind, or a kind missing its field."""
         wanted = {
+            "stage": self.kind in _STAGE_FAILURES,
             "status": self.kind is InputFailureKind.NO_EVIDENCE,
             "ended": self.kind is InputFailureKind.WAIT_ENDED,
         }
@@ -99,7 +110,13 @@ class InputReading(Value):
 
 
 class Measured(Value):
-    """The input has a trusted reading."""
+    """The input has a trusted reading: it passed every gate it was measured by.
+
+    An input that failed its accuracy check is `Unmeasurable` (``accuracy-failed``), never a
+    `Measured` reading that says so, so every reader of `failure` sees the failure.
+    `input_from_readings` never makes one; a checkpoint an earlier version wrote may still hold
+    one (S173), and `failure` reads it as the ``accuracy-failed`` input it was.
+    """
 
     kind: Literal["measured"] = "measured"
     reading: InputReading
@@ -124,13 +141,7 @@ type Baseline = Annotated[Measured | Unmeasurable | NotConfigured, Field(discrim
 
 def trusted(baseline: Baseline) -> bool:
     """Whether the input revision has a trusted reading, or no gate is configured to give one."""
-    match baseline:
-        case Measured(reading=reading):
-            return reading.accuracy_passed is not False
-        case NotConfigured():
-            return True
-        case Unmeasurable():
-            return False
+    return failure(baseline) is None
 
 
 def reading(baseline: Baseline) -> InputReading | None:
@@ -154,14 +165,26 @@ def input_metrics(baseline: Baseline | None) -> tuple[MetricRow, ...]:
 
 
 def failure(baseline: Baseline) -> InputFailure | None:
-    """Why the input is unmeasurable, or None."""
-    return baseline.failure if isinstance(baseline, Unmeasurable) else None
+    """Why the input is unmeasurable, or None.
+
+    A `Measured` input whose accuracy check failed is one an earlier version checkpointed
+    (S173). That record kept neither the stage nor its output, so the stage is named for the
+    gate (``accuracy``) and the output is empty.
+    """
+    match baseline:
+        case Unmeasurable(failure=why):
+            return why
+        case Measured(reading=seen) if seen.accuracy_passed is False:
+            return InputFailure(kind=InputFailureKind.ACCURACY_FAILED, stage="accuracy")
+        case _:
+            return None
 
 
 def input_from_readings(
     refs: tuple[EvidenceRef, ...], status: str, readings: tuple[EvidenceReading, ...]
 ) -> Baseline:
-    """Fold decoded readings into the baseline; a failed benchmark makes it unmeasurable."""
+    """Fold decoded readings into the baseline; a failed accuracy check or benchmark makes it
+    unmeasurable, naming the stage that failed."""
     accepted = accept_readings(readings, refs)
     if isinstance(accepted, str):
         return Unmeasurable(failure=InputFailure(kind=InputFailureKind.READINGS_REFUSED))
@@ -176,9 +199,14 @@ def input_from_readings(
     if status != "succeeded" or not accepted:
         undecoded = InputFailure(kind=InputFailureKind.READINGS_UNDECODABLE)
         return Unmeasurable(failure=undecoded, reading=seen)
-    if benchmark is not None and not benchmark.passed:
-        failed = InputFailure(kind=InputFailureKind.BENCHMARK_FAILED, output=benchmark.feedback)
-        return Unmeasurable(failure=failed, reading=seen)
+    # Accuracy first: a benchmark of an input that is not accurate measures nothing it must keep.
+    for found, kind in (
+        (accuracy, InputFailureKind.ACCURACY_FAILED),
+        (benchmark, InputFailureKind.BENCHMARK_FAILED),
+    ):
+        if found is not None and not found.passed:
+            failed = InputFailure(kind=kind, stage=found.stage, output=found.feedback)
+            return Unmeasurable(failure=failed, reading=seen)
     return Measured(reading=seen)
 
 

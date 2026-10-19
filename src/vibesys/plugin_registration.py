@@ -76,6 +76,7 @@ def _plugin_run_view(
         iterations=projection.iterations,
         rounds=projection.rounds,
         experiment_revision=projection.experiment_revision,
+        input_failure=projection.input_failure,
     )
 
 

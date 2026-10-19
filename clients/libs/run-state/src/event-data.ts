@@ -149,6 +149,8 @@ const EVENT_DATA_HANDLERS = {
   measurement_compared: runEventData(applyMeasurementComparedData),
   comparisons_read: runEventData(applyComparisonsReadData),
   winner_selected: runEventData(applyWinnerSelectedData),
+  // The planner is told why; frontends show it from the event log, not core state.
+  input_measurement_failed: ignoredEventData,
   workstream_finished: runEventData(applyWorkstreamFinishedData),
   turn_usage_recorded: runEventData(applyTurnUsageData),
   // The run trace is its own fold (`@vibesys/run-state/trace`), not part of the run's core state.

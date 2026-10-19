@@ -145,7 +145,7 @@ def _events_of(snapshot: RunSnapshot) -> list[CoreEvent]:
         iterations=projection.iterations,
         rounds=projection.rounds,
         experiment_revision=projection.experiment_revision,
-        input_failure=projection.input_failure,  # ty: ignore[unknown-argument]
+        input_failure=projection.input_failure,
     )
     integration = LocalRunIntegration(
         clock=ManualClock(),
@@ -175,7 +175,6 @@ def _candidate_measurements(host: EvidenceHost) -> list[str]:
 
 
 @pytest.mark.regression
-@pytest.mark.xfail(strict=True, reason="S173: a failed input accuracy check is told to no one")
 @MODES
 def test_an_input_that_fails_its_accuracy_check_is_announced_told_to_the_planner_and_fixable(
     *, restarting: bool
@@ -190,7 +189,7 @@ def test_an_input_that_fails_its_accuracy_check_is_announced_told_to_the_planner
     host = begin_with_evidence(
         config(max_rounds=1),
         restarting=restarting,
-        baseline="failed-accuracy",  # ty: ignore[invalid-argument-type]
+        baseline="failed-accuracy",
         crash_text=HANG_TEXT,
     )
     host.drain_until_turn(PLANNER_LABEL)
@@ -205,23 +204,23 @@ def test_an_input_that_fails_its_accuracy_check_is_announced_told_to_the_planner
     failed = [
         event
         for event in _events_of(snapshot)
-        if event.type is CoreEventType.INPUT_MEASUREMENT_FAILED  # ty: ignore[unresolved-attribute]
+        if event.type is CoreEventType.INPUT_MEASUREMENT_FAILED
     ]
     assert len(failed) == 1
     data = failed[0].data
     assert data is not None
     assert data.kind == "input_measurement_failed"
-    assert data.failure == "accuracy-failed"  # ty: ignore[unresolved-attribute]
-    assert data.stage == "correctness"  # ty: ignore[unresolved-attribute]
-    assert "exceeded its 1200 s limit" in data.summary  # ty: ignore[unresolved-attribute]
-    assert "s3cret" not in data.summary  # ty: ignore[unresolved-attribute]
+    assert data.failure == "accuracy-failed"
+    assert data.stage == "correctness"
+    assert "exceeded its 1200 s limit" in data.summary
+    assert "s3cret" not in data.summary
     assert format_framework_event(failed[0]) is not None
 
     # (2) The planner's next turn is told the input failed, where, and what it printed.
     failure = told.input_failure
     assert failure is not None
-    assert failure.kind is InputFailureKind.ACCURACY_FAILED  # ty: ignore[unresolved-attribute]
-    assert failure.stage == "correctness"  # ty: ignore[unresolved-attribute]
+    assert failure.kind is InputFailureKind.ACCURACY_FAILED
+    assert failure.stage == "correctness"
     assert failure.output == HANG_TEXT
     text = render(PromptTemplate.PORTFOLIO, told)
     assert "Input not measurable: the input failed its trusted accuracy check" in text

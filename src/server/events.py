@@ -142,6 +142,7 @@ class EventType(StrEnum):
     RUN_CONFIGURED = "run_configured"
     FRAMEWORK_WARNING = "framework_warning"
     WINNER_SELECTED = "winner_selected"
+    INPUT_MEASUREMENT_FAILED = "input_measurement_failed"
     MEASUREMENT_COMPARED = "measurement_compared"
     COMPARISONS_READ = "comparisons_read"
     WORKSTREAM_FINISHED = "workstream_finished"
@@ -805,6 +806,29 @@ class WinnerSelectedData(EventPayload):
     settlement_id: str | None = None
 
 
+class InputMeasurementFailureKind(StrEnum):
+    """Why the run's input failed its own trusted measurement. Closed.
+
+    See ``vibesys.events.InputMeasurementFailureKind``, which this mirrors member-for-member.
+    """
+
+    NO_EVIDENCE = "no-evidence"
+    READINGS_REFUSED = "readings-refused"
+    READINGS_UNDECODABLE = "readings-undecodable"
+    ACCURACY_FAILED = "accuracy-failed"
+    BENCHMARK_FAILED = "benchmark-failed"
+    WAIT_ENDED = "wait-ended"
+
+
+class InputMeasurementFailedData(EventPayload):
+    """The run's input failed its trusted measurement, so the run has no input baseline."""
+
+    kind: Literal["input_measurement_failed"] = "input_measurement_failed"
+    failure: InputMeasurementFailureKind
+    stage: str | None = None
+    summary: str = ""
+
+
 class MeasurementVerdict(StrEnum):
     """Which side of the noise a candidate falls on. Mirrors ``vs_core.api.ComparisonVerdict``."""
 
@@ -1023,6 +1047,7 @@ EventData = Annotated[
     | RunConfiguredData
     | FrameworkWarningData
     | WinnerSelectedData
+    | InputMeasurementFailedData
     | MeasurementComparedData
     | ComparisonsReadData
     | WorkstreamFinishedData

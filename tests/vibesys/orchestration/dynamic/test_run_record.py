@@ -333,7 +333,9 @@ INPUTS = {
     "measured": MEASURED,
     "not configured": NotConfigured(),
     "workload failed": Unmeasurable(
-        failure=InputFailure(kind=InputFailureKind.BENCHMARK_FAILED, output="crashed"),
+        failure=InputFailure(
+            kind=InputFailureKind.BENCHMARK_FAILED, stage="benchmark", output="crashed"
+        ),
         reading=InputReading(accuracy_passed=True, benchmark_passed=False),
     ),
     "no evidence": Unmeasurable(
@@ -341,7 +343,12 @@ INPUTS = {
             kind=InputFailureKind.NO_EVIDENCE, status=ObservationStatus.FAILED, output=""
         )
     ),
-    "accuracy failed": Measured(reading=InputReading(accuracy_passed=False)),
+    "accuracy failed": Unmeasurable(
+        failure=InputFailure(
+            kind=InputFailureKind.ACCURACY_FAILED, stage="correctness", output="hung"
+        ),
+        reading=InputReading(accuracy_passed=False),
+    ),
 }
 
 
