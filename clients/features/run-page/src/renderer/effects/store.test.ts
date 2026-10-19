@@ -441,7 +441,7 @@ test('a session that reports after its run ended reaches nothing', async () => {
   store.dispatch({type: 'record', record: {kind: 'live', run: running()}});
   await Promise.resolve();
   const late = app.observer;
-  store.dispatch({type: 'record', record: {kind: 'unlisted'}});
+  store.dispatch({type: 'record', record: {kind: 'unlisted', why: 'machine'}});
   late?.session(LIVE_VIEW);
   expect(store.getState().session).toBeNull();
   store.dispose();

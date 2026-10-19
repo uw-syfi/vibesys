@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import itertools
 import json
 from typing import TYPE_CHECKING
 
@@ -16,12 +17,16 @@ from server.host_api import (
     HelperError,
     HelperErrorCode,
     HelperFeature,
+    HelperRequest,
+    RunsEventsForSpanRequest,
     RunsReadEventsReply,
     RunsReadEventsRequest,
+    RunsReadTailRequest,
     request_features,
 )
 from server.host_helper_os import FileProjects, JournalTally, tally_journal
 from server.host_helper_requests import ProjectLookupError, answer, event_page
+from server.host_run_summary import RUN_SUMMARY_FILE, RunsSummaryRequest
 from vs_project.api import GitFaultSink, GitRepository, Project
 from vs_project.api.testing import FakeGitRepositories
 from vs_sim.api.testing import SimNetwork, SimThreads
@@ -126,12 +131,46 @@ def test_an_ended_runs_journal_is_read_through_the_helper(tmp_path: Path) -> Non
     )
 
 
-def test_a_run_that_journaled_nothing_has_no_events(tmp_path: Path) -> None:
-    project = project_with_run(tmp_path / "proj", _RUN_ID)
+def _history_requests(project: Path, run_id: str) -> list[HelperRequest]:
+    common: dict[str, object] = {"request_id": "h", "deadline_ms": 5000, "project": str(project)}
+    return [
+        RunsReadEventsRequest(**common, run_id=run_id, from_sequence=1, max=5),
+        RunsReadTailRequest(**common, run_id=run_id, tail=5),
+        RunsEventsForSpanRequest(**common, run_id=run_id, span_id="flow:a", from_sequence=1, max=5),
+        RunsSummaryRequest(**common, run_id=run_id),
+    ]
 
-    assert _read(project, _RUN_ID, 1, 5) == RunsReadEventsReply(
-        request_id="h", events=(), next_sequence=1, complete=True
-    )
+
+@pytest.mark.parametrize(
+    ("recorded", "journaled", "cached"), list(itertools.product([True, False], repeat=3))
+)
+def test_every_history_read_of_a_run_missing_any_piece_is_typed_never_empty_or_silent(
+    tmp_path: Path, *, recorded: bool, journaled: bool, cached: bool
+) -> None:
+    """A run is readable only with its record and its journal; otherwise every read says why.
+
+    Every combination of the pieces a read needs (the run's record, its journal, the summary cache
+    beside it). Regression: a run its project records but whose journal this machine does not hold
+    answered an empty, complete page to events, tail and span reads (a run with no events), while
+    its summary refused it, so a client without summaries opened it as an empty run.
+    """
+    project = project_with_run(tmp_path / "proj", _RUN_ID)
+    directory = Project.log_directory_for(project.resolve(), _RUN_ID)
+    if journaled:
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / RUN_EVENTS_FILE).write_bytes(b"".join(_lines([_event(1), _event(2)])))
+        if cached:
+            (directory / RUN_SUMMARY_FILE).write_text("not a cache")
+    run_id = _RUN_ID if recorded else "20261010-120000-22222222-other"
+    for request in _history_requests(project, run_id):
+        threads = SimThreads()
+        reply = answer(request, fake_host(threads, SimNetwork(threads)), threads.event())
+        if recorded and journaled:
+            assert not isinstance(reply, HelperError), reply
+        else:
+            assert isinstance(reply, HelperError), (request.type, reply)
+            assert reply.code is HelperErrorCode.UNKNOWN_RUN
+            assert run_id in reply.message
 
 
 def test_an_unknown_run_is_refused_naming_it(tmp_path: Path) -> None:

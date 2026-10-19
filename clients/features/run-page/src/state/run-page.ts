@@ -55,9 +55,27 @@ export const FORCE_STOP_BOUND_MS = 2 * 60 * 1000;
 type RunCapability = 'open-window' | 'logs';
 export type Unavailable = Readonly<Partial<Record<RunCapability, string>>>;
 
+/**
+ * Why a run is not in its host's listing: the machine gave no listing (`machine`), or its listing
+ * holds rows that may be this run's server (`unconfirmed`), so absence proves nothing.
+ */
+type UnlistedWhy = 'machine' | 'unconfirmed';
+
+/**
+ * How long the page waits for its host's listing to place the run. The bound only guards against
+ * a listing that never comes; it is not a timing rule, and a late listing still settles the page.
+ */
+export const LOCATE_BOUND_MS = 30_000;
+
+/** Whether the page still waits for the listing to place the run, or has stopped waiting. */
+type Locate =
+  | {readonly kind: 'idle'}
+  | {readonly kind: 'waiting'; readonly bound: number}
+  | {readonly kind: 'unresolved'};
+
 /** The run as the host's registry lists it: live, ended, or not (yet) listed. */
 export type RunRecord =
-  | {readonly kind: 'unlisted'}
+  | {readonly kind: 'unlisted'; readonly why: UnlistedWhy}
   /** A recent run whose server tombstone expired; its journal may still be readable. */
   | {
       readonly kind: 'historical';
@@ -193,6 +211,8 @@ export interface RunPageState {
   readonly hostLabel: string;
   readonly unavailable: Unavailable;
   readonly record: RunRecord;
+  /** The wait for the record to leave `unlisted`. */
+  readonly locate: Locate;
   /**
    * Whether the page follows the selected stream's lines: set once a Logs face, or View logs,
    * picks a stream.
@@ -262,6 +282,8 @@ export type RunPageAction =
   | {readonly type: 'force-stop'}
   | {readonly type: 'stop-failed'}
   | {readonly type: 'bound-elapsed'; readonly token: number}
+  /** The page opened: start waiting for the listing to place the run. */
+  | {readonly type: 'locate'}
   | {readonly type: 'streams'; readonly token: number; readonly outcome: LogListOutcome}
   | {readonly type: 'log-view'; readonly streamId: string; readonly view: LogView}
   | {readonly type: 'pause'}
@@ -302,6 +324,8 @@ export type RunPageAction =
 export type RunPageRequest =
   | {readonly kind: 'stop'; readonly force: boolean}
   | {readonly kind: 'arm-bound'; readonly token: number; readonly ms: number}
+  /** Cancel the bound armed under `token`, when its wait ended first. */
+  | {readonly kind: 'cancel-bound'; readonly token: number}
   | {readonly kind: 'list-logs'; readonly token: number; readonly instanceId: string}
   | {readonly kind: 'pause'}
   | {readonly kind: 'resume'; readonly when: ResumeWhen}
@@ -345,7 +369,8 @@ export interface RunPageSeed {
 export function runPageInitial(seed: RunPageSeed): RunPageState {
   return {
     ...seed,
-    record: {kind: 'unlisted'},
+    record: {kind: 'unlisted', why: 'machine'},
+    locate: {kind: 'idle'},
     followingLogs: false,
     stop: {kind: 'idle'},
     logs: {kind: 'idle'},
@@ -587,9 +612,29 @@ function withRecord(opened: RunPageState, record: RunRecord): RunPageStep {
   const link = linked(fenced);
   const step = recordStep(link.state, record);
   const history = historyFor(step.state);
+  const located = locating(history.state);
   return {
-    state: history.state,
-    requests: [...link.requests, ...step.requests, ...history.requests],
+    state: located.state,
+    requests: [...link.requests, ...step.requests, ...history.requests, ...located.requests],
+  };
+}
+
+/**
+ * Wait for the listing to place a run it does not list yet, with a bound against a listing that
+ * never comes; stop waiting once the run is listed.
+ */
+function locating(state: RunPageState): RunPageStep {
+  if (state.record.kind !== 'unlisted') {
+    if (state.locate.kind === 'idle') return {state, requests: []};
+    const cancel: RunPageRequest[] =
+      state.locate.kind === 'waiting' ? [{kind: 'cancel-bound', token: state.locate.bound}] : [];
+    return {state: {...state, locate: {kind: 'idle'}}, requests: cancel};
+  }
+  if (state.locate.kind !== 'idle') return {state, requests: []};
+  const token = state.next;
+  return {
+    state: {...state, next: token + 1, locate: {kind: 'waiting', bound: token}},
+    requests: [{kind: 'arm-bound', token, ms: LOCATE_BOUND_MS}],
   };
 }
 
@@ -887,6 +932,9 @@ function stoppingStep(state: RunPageState, action: RunPageAction): RunPageStep |
         ? {state: {...state, stop: STOP_IDLE}, requests: []}
         : unchanged(state);
     case 'bound-elapsed':
+      if (state.locate.kind === 'waiting' && state.locate.bound === action.token) {
+        return {state: {...state, locate: {kind: 'unresolved'}}, requests: []};
+      }
       if (stop.kind !== 'stopping' || stop.bound !== action.token) return unchanged(state);
       return {
         state: {...state, stop: {...stop, bound: null, forceOffered: !stop.forced}},
@@ -990,6 +1038,8 @@ export function runPageStep(state: RunPageState, action: RunPageAction): RunPage
   switch (action.type) {
     case 'record':
       return withRecord(state, action.record);
+    case 'locate':
+      return locating(state);
     case 'streams':
       return withStreams(state, action.token, action.outcome);
     case 'log-view':
@@ -1154,6 +1204,9 @@ export function runPageInvariants(state: RunPageState): string[] {
   }
   if (state.summary.kind === 'gone' && !isEndedRecord(state.record)) {
     problems.push('a run that is not over is called gone');
+  }
+  if (state.locate.kind !== 'idle' && state.record.kind !== 'unlisted') {
+    problems.push('the page waits to place a run its host lists');
   }
   return problems;
 }

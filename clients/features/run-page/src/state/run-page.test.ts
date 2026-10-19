@@ -13,6 +13,7 @@ import {
   FORCE_STOP_BOUND_MS,
   HISTORY_PAGE_EVENTS,
   historyAwaiting,
+  LOCATE_BOUND_MS,
   type RunPageAction,
   type RunPageRequest,
   type RunPageState,
@@ -57,7 +58,7 @@ function server(phase: HostRun['phase'], extra: Partial<HostRun> = {}): HostRun 
 }
 
 const RECORDS: readonly RunRecord[] = [
-  {kind: 'unlisted'},
+  {kind: 'unlisted', why: 'machine'},
   {kind: 'live', run: server('starting')},
   {kind: 'live', run: server('running')},
   {kind: 'live', run: server('pausing')},
@@ -81,6 +82,7 @@ const RECORDS: readonly RunRecord[] = [
       },
     }),
   },
+  {kind: 'unlisted', why: 'unconfirmed'},
 ];
 
 function stream(id: string, owner: LogStream['owner'], outcome: LogStream['outcome']): LogStream {
@@ -336,7 +338,13 @@ function issues(request: RunPageRequest): number | null {
 
 function awaited(state: RunPageState) {
   return {
-    bound: state.stop.kind === 'stopping' ? state.stop.bound : null,
+    // Each armed bound (the stop's, the locate wait's) is its own slot, by its token.
+    ...Object.fromEntries(
+      [
+        state.stop.kind === 'stopping' ? state.stop.bound : null,
+        state.locate.kind === 'waiting' ? state.locate.bound : null,
+      ].flatMap(token => (token === null ? [] : [[`bound:${token}`, token]])),
+    ),
     logs: state.logs.kind === 'listing' ? state.logs.token : null,
     attach: state.link.kind === 'attaching' ? state.link.token : null,
     // Each page in flight is its own slot: a reply is awaited by the token it was asked under.
@@ -346,7 +354,7 @@ function awaited(state: RunPageState) {
 }
 
 function reply(action: RunPageAction) {
-  if (action.type === 'bound-elapsed') return {slot: 'bound', token: action.token};
+  if (action.type === 'bound-elapsed') return {slot: `bound:${action.token}`, token: action.token};
   if (action.type === 'streams') return {slot: 'logs', token: action.token};
   if (action.type === 'attached') return {slot: 'attach', token: action.token};
   if (action.type === 'history') return {slot: `history:${action.token}`, token: action.token};
@@ -385,9 +393,9 @@ function notOffered(before: RunPageState, request: RunPageRequest): string | nul
     case 'resume-ended':
       return endedView(before)?.resume == null ? 'resume of a run that cannot resume' : null;
     case 'arm-bound':
-      return request.ms === FORCE_STOP_BOUND_MS
+      return request.ms === FORCE_STOP_BOUND_MS || request.ms === LOCATE_BOUND_MS
         ? null
-        : 'the force bound is not the documented one';
+        : 'a bound is not a documented one';
     default:
       return null;
   }

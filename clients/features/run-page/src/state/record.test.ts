@@ -39,5 +39,6 @@ test('an expired tombstone still opens a recent run from its summary', () => {
 test('uncertain host listings do not classify an old recent run as ended', () => {
   expect(runRecord([{...listing, unverified: [recent.instanceId ?? '']}], recent, recent)).toEqual({
     kind: 'unlisted',
+    why: 'unconfirmed',
   });
 });

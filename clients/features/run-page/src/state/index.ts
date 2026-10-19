@@ -141,6 +141,7 @@ export {
   timelineView,
   traceArrival,
   transcriptLoading,
+  unplacedRun,
   usageRecords,
   viewedRun,
 } from './views.js';

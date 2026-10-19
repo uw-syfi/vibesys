@@ -60,8 +60,12 @@ function endedStatus(phase: HostRun['phase'], end: RunEnd): {label: string; tone
 function status(state: RunPageState): {label: string; tone: Tone} {
   const phase = runPhase(state);
   switch (phase.kind) {
-    case 'unlisted':
-      return {label: 'Looking for the run', tone: 'neutral'};
+    case 'unlisted': {
+      const unplaced = unplacedRun(state);
+      return unplaced === null
+        ? {label: 'Looking for the run', tone: 'neutral'}
+        : {label: unplaced.label, tone: 'warn'};
+    }
     case 'historical':
       return {label: 'Saved run', tone: 'neutral'};
     case 'starting':
@@ -551,6 +555,20 @@ export function historyProblem(state: RunPageState): string | null {
 export function runGoneWords(state: RunPageState): string | null {
   if (state.record.kind !== 'ended' && state.record.kind !== 'historical') return null;
   return state.summary.kind === 'gone' ? RUN_GONE_WORDS : null;
+}
+
+/**
+ * A run the page gave up placing in its host's listing: a status word and the reason in a few
+ * words, else null (the page is still waiting, or the run is placed). Asking again finds nothing
+ * new until the listing changes, and a later listing settles the page by itself.
+ */
+export function unplacedRun(
+  state: RunPageState,
+): {readonly label: string; readonly words: string} | null {
+  if (state.record.kind !== 'unlisted' || state.locate.kind !== 'unresolved') return null;
+  return state.record.why === 'machine'
+    ? {label: 'No answer', words: 'This machine did not list its runs.'}
+    : {label: 'Not confirmed', words: 'This machine could not say whether the run is live.'};
 }
 
 export interface EndedView {

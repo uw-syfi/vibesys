@@ -51,6 +51,7 @@ import {
   timelineView,
   traceArrival,
   transcriptLoading,
+  unplacedRun,
   usageRecords,
   whoBySpan,
 } from '../../state/index.js';
@@ -402,9 +403,14 @@ function pendingRunScreen(
 ): JSX.Element | null {
   const header = <Header state={state} dispatch={dispatch} />;
   if (state.record.kind === 'unlisted') {
+    const unplaced = unplacedRun(state);
     return (
       <Screen density="compact" header={header}>
-        <InitialRunLoading stage="locating" />
+        {unplaced === null ? (
+          <InitialRunLoading stage="locating" />
+        ) : (
+          <RunGone words={unplaced.words} />
+        )}
       </Screen>
     );
   }

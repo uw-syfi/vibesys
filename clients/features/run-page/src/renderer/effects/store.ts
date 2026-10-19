@@ -254,12 +254,47 @@ function performCommand(ports: RunPagePorts, request: RunPageRequest, dispatch: 
   }
 }
 
+/** The timers armed by `arm-bound` requests, by the token each answers with; `live` holds them all. */
+class Bounds {
+  readonly #armed = new Map<number, () => void>();
+
+  constructor(
+    private readonly schedule: ScheduleTimeout,
+    private readonly live: Set<() => void>,
+  ) {}
+
+  perform(
+    request: Extract<RunPageRequest, {readonly kind: 'arm-bound' | 'cancel-bound'}>,
+    dispatch: Dispatch,
+  ): void {
+    const {token} = request;
+    const armed = this.#armed.get(token);
+    if (armed !== undefined) this.#drop(token, armed);
+    if (request.kind === 'cancel-bound') {
+      armed?.();
+      return;
+    }
+    const cancel = this.schedule(() => {
+      this.#drop(token, cancel);
+      dispatch({type: 'bound-elapsed', token});
+    }, request.ms);
+    this.#armed.set(token, cancel);
+    this.live.add(cancel);
+  }
+
+  #drop(token: number, cancel: () => void): void {
+    this.#armed.delete(token);
+    this.live.delete(cancel);
+  }
+}
+
 export function createRunPageStore(
   seed: RunPageSeed,
   ports: RunPagePorts,
   schedule: ScheduleTimeout,
 ): RunPageStore {
   const cancels = new Set<() => void>();
+  const bounds = new Bounds(schedule, cancels);
   let disposed = false;
   // Reports reach the store only while it lives; `store` is assigned before any can arrive.
   const sessions = new SessionHolder(
@@ -282,14 +317,10 @@ export function createRunPageStore(
           () => dispatch({type: 'stop-failed'}),
         );
         return;
-      case 'arm-bound': {
-        const cancel = schedule(() => {
-          cancels.delete(cancel);
-          dispatch({type: 'bound-elapsed', token: request.token});
-        }, request.ms);
-        cancels.add(cancel);
+      case 'arm-bound':
+      case 'cancel-bound':
+        bounds.perform(request, dispatch);
         return;
-      }
       case 'list-logs':
         listLogs(ports, request, dispatch);
         return;
@@ -329,6 +360,7 @@ export function createRunPageStore(
   const ticker = new Ticker(schedule, ports.now, live(store.dispatch));
   const followers =
     ports.logs === null ? null : new Followers(ports.logs, schedule, live(store.dispatch));
+  store.dispatch({type: 'locate'}); // bounds the wait for the listing to place the run
   const unsubscribe = store.subscribe(() => {
     const state = store.getState();
     followers?.reconcile(state);

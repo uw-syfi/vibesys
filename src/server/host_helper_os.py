@@ -323,17 +323,23 @@ class FileProjects:
         The helper serves one channel, so a run it found stays found. The cache is a dict
         of immutable paths that workers only ever add to: two workers racing to resolve
         the same run store the same value, so it needs no lock.
+
+        A run the project records but whose journal this machine does not hold (it is in another
+        project's log store, or its checkout predates the journal) is refused as ``unknown_run``
+        by every read, the summary's way: an empty page would call it a run with no events.
         """
         key = (project, run_id)
-        known = self._journals.get(key)
-        if known is not None:
-            return known
-        root, runs = self.runs(project)
-        if all(run.run_id != run_id for run in runs):
-            message = f"{root} has no run {run_id!r}"
-            raise ProjectLookupError(HelperErrorCode.UNKNOWN_RUN, str(root), message)
-        journal = Project.log_directory_for(root, run_id) / RUN_EVENTS_FILE
-        self._journals[key] = journal
+        journal = self._journals.get(key)
+        if journal is None:
+            root, runs = self.runs(project)
+            if all(run.run_id != run_id for run in runs):
+                message = f"{root} has no run {run_id!r}"
+                raise ProjectLookupError(HelperErrorCode.UNKNOWN_RUN, str(root), message)
+            journal = Project.log_directory_for(root, run_id) / RUN_EVENTS_FILE
+            self._journals[key] = journal
+        if not journal.is_file():
+            message = f"{project} holds no journal of run {run_id!r}"
+            raise ProjectLookupError(HelperErrorCode.UNKNOWN_RUN, str(project), message)
         return journal
 
     def _tally(self, journal: Path, stream: BinaryIO) -> JournalTally:
@@ -387,11 +393,7 @@ class FileProjects:
 
         if self._summary_reader is None:
             self._summary_reader = SummaryReader(self._threads.lock())
-        journal = self._journal(project, run_id)
-        if not journal.is_file():
-            message = f"{project} holds no journal of run {run_id!r}"
-            raise ProjectLookupError(HelperErrorCode.UNKNOWN_RUN, str(project), message)
-        return self._summary_reader.summarize(journal)
+        return self._summary_reader.summarize(self._journal(project, run_id))
 
     def _indexed_read[Facts](
         self, journal: Path, ask: Callable[[JournalIndex], tuple[list[Entry], Facts]]

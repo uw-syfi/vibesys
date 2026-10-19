@@ -1,10 +1,18 @@
 /**
  * The run's record in its host's latest listing: the newest live server driving it, else the newest
- * tombstone it left, else unlisted (the watch has not listed it, or its record expired).
+ * tombstone it left, else a saved run when the listing can prove no server holds it, else unlisted
+ * with the reason it cannot be placed (`UnlistedWhy`).
+ *
+ * A run opened without a recent entry (from the host's own run list) whose tombstone expired is
+ * found in neither of the listing's two lists; the listing proves it is not live when it holds no
+ * row that could be its server (`unverified`, `unreadable`).
  */
 import type {HostListing, HostRun} from '@vibesys/hosts';
 import {type RecentRun, type RunRef, recentStatus} from '@vibesys/runs';
 import type {RunRecord} from './run-page.js';
+
+const MACHINE: RunRecord = {kind: 'unlisted', why: 'machine'};
+const UNCONFIRMED: RunRecord = {kind: 'unlisted', why: 'unconfirmed'};
 
 function newest(runs: readonly HostRun[], runId: string, project?: string): HostRun | undefined {
   return runs
@@ -21,14 +29,15 @@ export function runRecord(
   recent?: RecentRun,
 ): RunRecord {
   const listing = listings.find(each => each.host === run.host);
-  if (listing?.kind !== 'listed') return {kind: 'unlisted'};
+  if (listing?.kind !== 'listed') return MACHINE;
   const live = newest(listing.live, run.runId, recent?.project);
   if (live !== undefined) return {kind: 'live', run: live};
   const ended = newest(listing.ended, run.runId, recent?.project);
   if (ended !== undefined) return {kind: 'ended', run: ended};
-  if (recent === undefined) return {kind: 'unlisted'};
+  const uncertain = listing.unverified.length > 0 || listing.unreadable.length > 0;
+  if (recent === undefined) return uncertain ? UNCONFIRMED : {kind: 'historical', status: null};
   const status = recentStatus(recent, listing);
-  if (status.kind !== 'ended') return {kind: 'unlisted'};
+  if (status.kind !== 'ended') return UNCONFIRMED;
   const phase = status.status;
   return {
     kind: 'historical',
@@ -38,7 +47,8 @@ export function runRecord(
 
 /** Whether two records say the same thing, so an unchanged listing is not folded again. */
 export function sameRecord(left: RunRecord, right: RunRecord): boolean {
-  if (left.kind === 'unlisted' || right.kind === 'unlisted') return left.kind === right.kind;
+  if (left.kind === 'unlisted') return right.kind === 'unlisted' && left.why === right.why;
+  if (right.kind === 'unlisted') return false;
   if (left.kind === 'historical')
     return right.kind === 'historical' && left.status === right.status;
   if (right.kind === 'historical') return false;

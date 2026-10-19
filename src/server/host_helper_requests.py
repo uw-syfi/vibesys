@@ -279,10 +279,10 @@ class Projects(Protocol):
     ) -> EventPage:
         """A page of run ``run_id``'s journal (``event_page`` under ``RUN_EVENTS_READ_MAX_BYTES``).
 
-        A run that journaled nothing has an empty, complete page. With ``with_totals`` the
-        page names the journal's complete lines and their bytes. Raises
-        ``ProjectLookupError`` with ``unknown_run`` when the project has no such run; a run
-        found once is not looked up again while this helper serves.
+        With ``with_totals`` the page names the journal's complete lines and their bytes. Raises
+        ``ProjectLookupError`` with ``unknown_run`` when the project has no such run, or has it
+        recorded and this machine holds no journal of it (not an empty page, which would call it a
+        run with no events); a run found once is not looked up again while this helper serves.
         """
         ...
 
@@ -300,15 +300,14 @@ class Projects(Protocol):
     ) -> TailPage:
         """The newest at most ``limit`` journal events with a sequence below ``before_sequence``.
 
-        Contract as ``run_events``; a run that journaled nothing has an empty, complete page.
+        Contract as ``run_events``.
         """
         ...
 
     def run_summary(self, project: Path, run_id: str) -> Summarized:
         """The fold of run ``run_id``'s whole journal, as it is now (``server.run_summary``).
 
-        A run that journaled nothing has an empty fold. Raises ``ProjectLookupError`` with
-        ``unknown_run`` when the project has no such run.
+        Raises ``ProjectLookupError`` with ``unknown_run`` as ``run_events`` does.
         """
         ...
 
