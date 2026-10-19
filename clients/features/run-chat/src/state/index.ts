@@ -7,7 +7,6 @@ export {
   type CardValue,
   type CardView,
   cardView,
-  steerSummary,
 } from './card-view.js';
 export {
   type ControlDelivery,
@@ -32,7 +31,6 @@ export type {CardActions, CardItem, ChatPanelView, PanelItem} from './panel-view
 export {
   type Catalogue,
   catalogueOf,
-  choiceLabel,
   defaultChoice,
   modelOptions,
   type PickerOption,
@@ -43,14 +41,18 @@ export {
   draftProblem,
   EMPTY_DRAFT,
   modeLabel,
+  parseTargetValue,
+  runRoles,
   STEER_MODES,
   type SteerDraft,
   type SteerMode,
   type SteerRequest,
   type SteerTarget,
   type SteerTargetKind,
-  TARGET_KINDS,
-  targetLabel,
+  type TargetOption,
+  targetName,
+  targetOptions,
+  targetValue,
   type WithdrawRequest,
 } from './steer.js';
 export {

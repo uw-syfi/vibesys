@@ -18,6 +18,7 @@ import {
   type PanelContext,
   type PanelItem,
   panelMachine,
+  runRoles,
   shownThread,
   threadEntries,
   threadItems,
@@ -33,6 +34,8 @@ export interface RunChatOptions {
   readonly ports: RunChatPorts;
   /** The number of the idea an attempt belongs to, for "reached idea N". */
   readonly ideaOf?: IdeaOf;
+  /** Roles seen on the run's agents, besides those its start advertised: the steer targets. */
+  readonly roles?: readonly string[];
 }
 
 /** What the run screen hosts: whether the panel is open, the button's press, and the panel. */
@@ -82,8 +85,7 @@ function cardItem(chat: Chat, id: string, snapshot: CardSnapshot): CardItem {
     view: cardView(context, snapshot.value as CardValue),
     actions: {
       editText: text => cards.send(id, {type: 'edit-text', text}),
-      setTarget: (kind, targetId) =>
-        cards.send(id, {type: 'set-target', target: {kind, id: targetId}}),
+      setTarget: target => cards.send(id, {type: 'set-target', target}),
       setMode: mode => cards.send(id, {type: 'set-mode', mode}),
       send: () => cards.sendSteer(id),
       dismiss: () => cards.send(id, {type: 'dismiss'}),
@@ -168,6 +170,7 @@ export function useRunChat(options: RunChatOptions): RunChatHost {
           threads: threadEntries(core),
           shown,
           items: panelItems(chat, core, shown, context),
+          roles: runRoles(core.expectedRoles, options.roles ?? []),
           dispatch: event => chat.actor.send(event),
         }
       : null,

@@ -35,7 +35,6 @@ export interface PanelContext {
   readonly harness: HarnessChoice | null;
   readonly catalogue: Catalogue;
   readonly composer: string;
-  readonly composeAs: 'ask' | 'steer';
   readonly listOpen: boolean;
   readonly pickerOpen: boolean;
   /** The question sent and not yet answered; `threadId` is null while its thread is created. */
@@ -52,7 +51,8 @@ export type PanelEvent =
   | {readonly type: 'new-chat'}
   | {readonly type: 'set-harness'; readonly harness: HarnessChoice | null}
   | {readonly type: 'set-composer'; readonly text: string}
-  | {readonly type: 'compose-as'; readonly as: 'ask' | 'steer'}
+  /** Turns the draft in the composer into a steer card (an empty draft is an empty card). */
+  | {readonly type: 'new-steer'}
   | {readonly type: 'toggle-list'}
   | {readonly type: 'toggle-picker'}
   /** `threadId`: the thread on screen, null for a new chat. */
@@ -63,7 +63,6 @@ export const panelInitial: PanelContext = {
   harness: null,
   catalogue: {kind: 'loading'},
   composer: '',
-  composeAs: 'ask',
   listOpen: false,
   pickerOpen: false,
   pending: null,
@@ -99,7 +98,18 @@ export const panelMachine = setup({
   type: 'parallel',
   on: {
     'set-composer': {actions: assign(({event}) => ({composer: event.text}))},
-    'compose-as': {actions: assign(({event}) => ({composeAs: event.as}))},
+    'new-steer': {
+      actions: assign(({context}) => ({
+        userSteers: [
+          ...context.userSteers,
+          {
+            id: `user ${context.userSteers.length + 1}`,
+            draft: {...EMPTY_DRAFT, text: context.composer.trim()},
+          },
+        ],
+        composer: '',
+      })),
+    },
     'toggle-list': {actions: assign(({context}) => ({listOpen: !context.listOpen}))},
     'toggle-picker': {actions: assign(({context}) => ({pickerOpen: !context.pickerOpen}))},
     'set-harness': {actions: assign(({event}) => ({harness: event.harness, pickerOpen: false}))},
@@ -160,20 +170,6 @@ export const panelMachine = setup({
             submit: [
               {
                 guard: ({context}) => context.composer.trim() === '',
-              },
-              {
-                guard: ({context}) => context.composeAs === 'steer',
-                actions: assign(({context}) => ({
-                  userSteers: [
-                    ...context.userSteers,
-                    {
-                      id: `user ${context.userSteers.length + 1}`,
-                      draft: {...EMPTY_DRAFT, text: context.composer.trim()},
-                    },
-                  ],
-                  composer: '',
-                  composeAs: 'ask' as const,
-                })),
               },
               {
                 guard: 'hasThread',

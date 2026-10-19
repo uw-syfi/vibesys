@@ -1,6 +1,6 @@
 import {describe, expect, test} from 'bun:test';
 import {SEEDS, Seeded} from '@vibesys/store/testing';
-import {type CardValue, cardView, steerSummary} from './card-view.js';
+import {type CardValue, cardView} from './card-view.js';
 import type {DeliveryEvent} from './delivery.js';
 import {foldDelivery, SENT} from './delivery.js';
 import type {SteerDraft} from './steer.js';
@@ -32,8 +32,12 @@ describe('cardView', () => {
     const states: [DeliveryEvent[], string, boolean][] = [
       [[], 'Sent', false],
       [[{kind: 'queued'}], 'Waiting', false],
-      [[{kind: 'delivered', idea: 4, where: 'implementer'}], 'In force from idea 4', true],
-      [[{kind: 'delivered', idea: null, where: 'implementer'}], 'In force · implementer', true],
+      [[{kind: 'delivered', idea: 4, where: 'implementer'}], 'In force · idea 4', true],
+      [
+        [{kind: 'delivered', idea: null, where: 'implementer'}],
+        'In force · implementer · every turn',
+        true,
+      ],
       [[{kind: 'dropped'}], 'Dropped', false],
       [[{kind: 'delivered', idea: 2, where: null}, {kind: 'ended'}], 'Ended', false],
       [[{kind: 'withdrawn'}], 'Withdrawn', false],
@@ -50,7 +54,7 @@ describe('cardView', () => {
   test('a steer for one turn says Reached, not In force', () => {
     const delivery = foldDelivery(SENT, {kind: 'delivered', idea: 3, where: null});
     const view = cardView(context({delivery, draft: {...DRAFT, mode: 'next_turn'}}), SENT_IDLE);
-    expect(view.status?.label).toBe('Reached idea 3');
+    expect(view.status?.label).toBe('Reached · idea 3');
     expect(view.withdrawable).toBe(false);
   });
 
@@ -105,10 +109,14 @@ describe('cardView', () => {
     }
   });
 
-  test('the summary names To and When', () => {
-    expect(steerSummary(DRAFT)).toBe('Role Implementer · Every turn');
-    expect(steerSummary({...DRAFT, target: {kind: 'run', id: null}, mode: 'interrupt'})).toBe(
-      'Run · Now',
+  test('a delivery with no named place says where the draft was aimed', () => {
+    const delivery = foldDelivery(SENT, {kind: 'delivered', idea: null, where: null});
+    expect(cardView(context({delivery}), SENT_IDLE).status?.label).toBe(
+      'In force · Implementer · every turn',
+    );
+    const once = {...DRAFT, mode: 'next_turn'} as const;
+    expect(cardView(context({delivery, draft: once}), SENT_IDLE).status?.label).toBe(
+      'Reached · Implementer',
     );
   });
 });

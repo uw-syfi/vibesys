@@ -1,10 +1,9 @@
 import {
   Button,
-  EmptyState,
+  ChatMessage,
   Field,
   Menu,
   Row,
-  SegmentedControl,
   Select,
   Stack,
   Text,
@@ -15,7 +14,6 @@ import {
 import type {JSX} from 'react';
 import {
   type ChatPanelView,
-  choiceLabel,
   modelOptions,
   type PanelItem,
   providerOptions,
@@ -23,6 +21,7 @@ import {
 } from '../../state/index.js';
 import {SteerCardView} from './steer-card-view.js';
 
+/** The harness, then the model: the two choices of a new chat in one compact row. */
 function Picker(props: Pick<ChatPanelView, 'panel' | 'dispatch'>): JSX.Element | null {
   const {panel, dispatch} = props;
   const {catalogue, harness} = panel;
@@ -36,7 +35,7 @@ function Picker(props: Pick<ChatPanelView, 'panel' | 'dispatch'>): JSX.Element |
   if (catalogue.kind === 'none' || harness === null) return null;
   const {offers} = catalogue;
   return (
-    <Row gap="space-3">
+    <Row gap="space-3" wrap>
       <Field label="Harness" hideLabel>
         <Select
           size="sm"
@@ -64,15 +63,19 @@ function Picker(props: Pick<ChatPanelView, 'panel' | 'dispatch'>): JSX.Element |
 function Header(props: ChatPanelView): JSX.Element {
   const {threads, shown, dispatch} = props;
   const current = threads.find(entry => entry.id === shown);
-  const {catalogue} = props.panel;
-  const harness =
-    catalogue.kind === 'listed' ? choiceLabel(catalogue.offers, current ?? null) : null;
   return (
-    <Stack gap="space-2">
-      <Row justify="between" gap="space-3">
-        <Text as="h2" variant="heading">
-          Chat
-        </Text>
+    <Stack gap="space-3">
+      <Row justify="between" align="start" gap="space-3">
+        <Stack gap="space-1">
+          <Text as="h2" variant="heading">
+            Chat
+          </Text>
+          {current === undefined ? null : (
+            <Text variant="small" tone="muted">
+              {current.title}
+            </Text>
+          )}
+        </Stack>
         <Row gap="space-2">
           {threads.length === 0 ? null : (
             <Menu
@@ -93,62 +96,61 @@ function Header(props: ChatPanelView): JSX.Element {
             text="New chat"
             press={() => dispatch({type: 'new-chat'})}
           />
-          <Button variant="quiet" size="sm" text="Close" press={() => dispatch({type: 'close'})} />
+          <Button
+            variant="quiet"
+            size="sm"
+            icon="cross"
+            label="Close"
+            press={() => dispatch({type: 'close'})}
+          />
         </Row>
       </Row>
-      {shown === null ? (
-        <Picker panel={props.panel} dispatch={dispatch} />
-      ) : (
-        <Text variant="small" tone="muted">
-          {[current?.title, harness].filter(Boolean).join(' · ')}
-        </Text>
-      )}
+      {shown === null ? <Picker panel={props.panel} dispatch={dispatch} /> : null}
     </Stack>
   );
 }
 
-function uiItem(item: PanelItem): UiThreadItem {
+function row(id: string, node: JSX.Element): UiThreadItem {
+  return {kind: 'node', id, node};
+}
+
+function uiItem(item: PanelItem, roles: readonly string[]): UiThreadItem {
   switch (item.kind) {
     case 'question':
-      return {kind: 'message', id: item.id, author: 'You', variant: 'note', text: item.text};
+      return row(item.id, <ChatMessage side="end" text={item.text} />);
     case 'answer':
-      return {
-        kind: 'message',
-        id: item.id,
-        author: 'Agent',
-        variant: 'reply',
-        text: item.text,
-        ...(item.streaming ? {notice: 'Writing'} : {}),
-      };
+      return row(
+        item.id,
+        <ChatMessage
+          side="start"
+          text={item.text}
+          {...(item.streaming ? {notice: 'Writing'} : {})}
+        />,
+      );
     case 'waiting':
-      return {
-        kind: 'node',
-        id: item.id,
-        node: (
-          <Text variant="small" tone="muted">
-            Working
-          </Text>
-        ),
-      };
+      return row(
+        item.id,
+        <Text variant="small" tone="muted">
+          Working
+        </Text>,
+      );
     case 'card':
-      return {
-        kind: 'node',
-        id: item.card.id,
-        node: (
-          <SteerCardView
-            draft={item.card.draft}
-            view={item.card.view}
-            actions={item.card.actions}
-          />
-        ),
-      };
+      return row(
+        item.card.id,
+        <SteerCardView
+          draft={item.card.draft}
+          view={item.card.view}
+          actions={item.card.actions}
+          roles={roles}
+        />,
+      );
   }
 }
 
+/** One input and one send control; Steer turns what is typed into a steer card. */
 function Composer(props: ChatPanelView): JSX.Element {
-  const {panel, busy, dispatch} = props;
+  const {panel, dispatch} = props;
   const submit = (): void => dispatch({type: 'submit', threadId: props.shown});
-  const asking = panel.composeAs === 'ask';
   return (
     <Stack gap="space-3">
       {panel.error === null ? null : (
@@ -159,30 +161,20 @@ function Composer(props: ChatPanelView): JSX.Element {
       <Field label="Message" hideLabel>
         <TextInput
           value={panel.composer}
-          rows={3}
-          placeholder={asking ? 'Ask' : 'Steer'}
+          rows={2}
+          placeholder="Ask about this run"
           change={text => dispatch({type: 'set-composer', text})}
           submit={submit}
         />
       </Field>
       <Row justify="between" gap="space-3">
-        <SegmentedControl
-          label="Compose as"
-          size="xs"
-          options={[
-            {value: 'ask', label: 'Ask'},
-            {value: 'steer', label: 'Steer'},
-          ]}
-          value={panel.composeAs}
-          change={as => dispatch({type: 'compose-as', as})}
-        />
         <Button
-          variant="primary"
+          variant="quiet"
           size="sm"
-          text={asking ? 'Ask' : 'Steer'}
-          press={submit}
-          {...(busy && asking ? {disabledReason: 'Working'} : {})}
+          text="Steer"
+          press={() => dispatch({type: 'new-steer'})}
         />
+        <Button variant="primary" size="sm" icon="arrow-up" label="Ask" press={submit} />
       </Row>
     </Stack>
   );
@@ -190,17 +182,17 @@ function Composer(props: ChatPanelView): JSX.Element {
 
 /** The chat panel: header, harness picker for a new chat, the thread, and the composer. */
 export function ChatPanel(props: ChatPanelView): JSX.Element {
-  const items = props.items.map(uiItem);
+  const items = props.items.map(item => uiItem(item, props.roles));
   return (
     <Stack gap="space-3" grow>
       <Header {...props} />
-      <Stack gap="space-3" grow>
-        {items.length === 0 ? (
-          <EmptyState title="No messages" />
-        ) : (
-          <Thread key={props.shown ?? 'new'} label="Chat" items={items} size="fill" />
-        )}
-      </Stack>
+      {items.length === 0 ? (
+        <Stack gap="space-3" grow>
+          {null}
+        </Stack>
+      ) : (
+        <Thread key={props.shown ?? 'new'} label="Chat" items={items} size="fill" plain />
+      )}
       <Composer {...props} />
     </Stack>
   );

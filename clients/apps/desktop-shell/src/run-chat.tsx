@@ -34,11 +34,13 @@ export function RunWithChat(props: {
   const {page, run, bridge} = props;
   const ports = useMemo(() => chatPorts(page.chat, bridge, run), [page.chat, bridge, run]);
   const ideaOf = useMemo(() => ideaOfAttempt(page.whole.candidates.candidates), [page.whole]);
+  const roles = useMemo(() => page.whole.agents.agents.map(agent => agent.role), [page.whole]);
   const chat = useRunChat({
     identity: `${run.host} ${run.runId}`,
     core: page.core,
     ports,
     ideaOf,
+    roles,
   });
   return (
     <RunScreen

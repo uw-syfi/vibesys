@@ -184,3 +184,55 @@ test('a proposal that is dismissed is gone and sends nothing', async () => {
   expect(sent).toEqual([]);
   await act(async () => root.unmount());
 });
+
+test('Steer turns the typed text into a card whose target is picked from the run roles', async () => {
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root = createRoot(container);
+  const sent: DeliverRequest[] = [];
+  function WithRoles(): JSX.Element {
+    const chat = useRunChat({
+      identity: 'run',
+      core: fold([THREAD]),
+      ports: fakePorts(sent),
+      roles: ['orchestrator', 'implementer'],
+    });
+    return (
+      <div>
+        <button type="button" onClick={chat.toggle}>
+          Chat
+        </button>
+        {chat.panel === null ? null : <ChatPanel {...chat.panel} />}
+      </div>
+    );
+  }
+  await act(async () => root.render(<WithRoles />));
+  await act(async () => press(container, 'Chat'));
+  // One input, one send control (an icon, so no word of its own), and no author labels.
+  expect(container.querySelectorAll('textarea')).toHaveLength(1);
+  expect(container.querySelector('textarea')?.getAttribute('placeholder')).toBe(
+    'Ask about this run',
+  );
+  expect(container.querySelector('button[aria-label="Ask"]')?.textContent).toBe('');
+  await act(async () => type(container.querySelector('textarea') as Element, 'pad the counters'));
+  await act(async () => press(container, 'Steer'));
+  const select = container.querySelector('select') as HTMLSelectElement;
+  const options = [...select.querySelectorAll('option')].map(each => each.textContent);
+  expect(options).toEqual(['Whole run', 'Planner', 'Implementer']);
+  expect(sent).toEqual([]);
+  await act(async () => {
+    select.value = 'role:implementer';
+    select.dispatchEvent(new window.Event('change', {bubbles: true}) as unknown as Event);
+  });
+  await act(async () => press(container, 'Send'));
+  expect(sent).toEqual([
+    {
+      control_id: 'control-1',
+      action: 'steer',
+      text: 'pad the counters',
+      target: {kind: 'role', id: 'implementer'},
+      mode: 'next_turn',
+    },
+  ]);
+  await act(async () => root.unmount());
+});

@@ -1,14 +1,7 @@
 import {describe, expect, test} from 'bun:test';
 import type {HarnessOffer} from '@vibesys/ipc';
 import {SEEDS, Seeded} from '@vibesys/store/testing';
-import {
-  catalogueOf,
-  choiceLabel,
-  defaultChoice,
-  modelOptions,
-  providerOptions,
-  withProvider,
-} from './picker.js';
+import {catalogueOf, defaultChoice, modelOptions, providerOptions, withProvider} from './picker.js';
 
 const OFFERS: readonly HarnessOffer[] = [
   {
@@ -56,11 +49,5 @@ describe('picker', () => {
         ).toBe(true);
       }
     }
-  });
-
-  test('the chosen pair is named as the catalogue names it', () => {
-    expect(choiceLabel(OFFERS, {provider: 'claude', model: 'opus'})).toBe('Claude Code Opus');
-    expect(choiceLabel(OFFERS, {provider: 'x', model: 'y'})).toBeNull();
-    expect(choiceLabel(OFFERS, null)).toBeNull();
   });
 });

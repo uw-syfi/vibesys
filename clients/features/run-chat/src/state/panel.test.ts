@@ -93,10 +93,9 @@ describe('panelMachine', () => {
     expect(snapshot.context.pending).toBeNull();
   });
 
-  test('a steer written in the composer becomes a card and asks nothing', () => {
-    let snapshot = step(opened(), {type: 'compose-as', as: 'steer'});
-    snapshot = step(snapshot, {type: 'set-composer', text: 'try a smaller batch'});
-    snapshot = step(snapshot, {type: 'submit', threadId: 'thread-1'});
+  test('the Steer control turns the draft into a card and asks nothing', () => {
+    let snapshot = step(opened(), {type: 'set-composer', text: ' try a smaller batch '});
+    snapshot = step(snapshot, {type: 'new-steer'});
     expect(snapshot.value).toMatchObject({chat: 'idle'});
     expect(snapshot.context.userSteers).toEqual([
       {
@@ -104,8 +103,12 @@ describe('panelMachine', () => {
         draft: {text: 'try a smaller batch', target: {kind: 'run', id: null}, mode: 'next_turn'},
       },
     ]);
-    expect(snapshot.context.composeAs).toBe('ask');
     expect(snapshot.context.composer).toBe('');
+    expect(snapshot.context.pending).toBeNull();
+    // With nothing typed it is an empty card to write in, and cards get their own ids.
+    snapshot = step(snapshot, {type: 'new-steer'});
+    expect(snapshot.context.userSteers.map(each => each.id)).toEqual(['user 1', 'user 2']);
+    expect(snapshot.context.userSteers[1]?.draft.text).toBe('');
   });
 
   test('an empty composer submits nothing', () => {
@@ -126,7 +129,7 @@ describe('panelMachine', () => {
           {type: 'new-chat'},
           {type: 'choose-thread', id: random.pick(['a', 'b'])},
           {type: 'set-composer', text: random.pick(['', 'why?', 'what changed?'])},
-          {type: 'compose-as', as: random.pick(['ask', 'steer'])},
+          {type: 'new-steer'},
           {type: 'toggle-list'},
           {type: 'toggle-picker'},
           {type: 'submit', threadId: random.pick([null, 'a'])},

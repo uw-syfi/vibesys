@@ -14,47 +14,37 @@ import type {JSX} from 'react';
 import {
   type CardActions,
   type CardView,
+  parseTargetValue,
   STEER_MODES,
   type SteerDraft,
-  TARGET_KINDS,
+  targetOptions,
+  targetValue,
 } from '../../state/index.js';
 
-function Draft(props: {
+interface CardProps {
   readonly draft: SteerDraft;
   readonly view: CardView;
   readonly actions: CardActions;
-}): JSX.Element {
-  const {draft, view, actions} = props;
-  const {target} = draft;
+  /** The run's roles: what the target select lists after the whole run. */
+  readonly roles: readonly string[];
+}
+
+function Draft(props: CardProps): JSX.Element {
+  const {draft, view, actions, roles} = props;
   return (
     <Stack gap="space-3">
       <Field label="Steer text" hideLabel>
         <TextInput value={draft.text} rows={3} change={actions.editText} />
       </Field>
-      <Row gap="space-3" align="end" wrap>
-        <Field label="To">
+      <Row gap="space-3" wrap>
+        <Field label="To" hideLabel>
           <Select
-            value={target.kind}
             size="sm"
-            options={TARGET_KINDS}
-            change={kind => actions.setTarget(kind, kind === 'run' ? null : (target.id ?? ''))}
+            value={targetValue(draft.target)}
+            options={targetOptions(roles, draft.target)}
+            change={value => actions.setTarget(parseTargetValue(value))}
           />
         </Field>
-        {target.kind === 'run' ? null : (
-          <Field label={`${target.kind} id`} hideLabel>
-            <TextInput
-              value={target.id ?? ''}
-              mono
-              placeholder="id"
-              change={id => actions.setTarget(target.kind, id)}
-            />
-          </Field>
-        )}
-      </Row>
-      <Stack gap="space-2">
-        <Text variant="small" tone="muted">
-          When
-        </Text>
         <SegmentedControl
           label="When"
           size="xs"
@@ -62,7 +52,7 @@ function Draft(props: {
           value={draft.mode}
           change={actions.setMode}
         />
-      </Stack>
+      </Row>
       {view.error === null ? null : (
         <Text variant="small" tone="err">
           {view.error}
@@ -83,42 +73,33 @@ function Draft(props: {
 }
 
 /**
- * One steer: editable until Send, then its text, where it goes and where it stands. Nothing
- * reaches the run until Send is pressed; a standing steer in force offers Withdraw.
+ * One steer, the only bordered thing in the panel: editable until Send, then its text and one
+ * status line. Nothing reaches the run until Send is pressed; a standing steer in force offers
+ * Withdraw.
  */
-export function SteerCardView(props: {
-  readonly draft: SteerDraft;
-  readonly view: CardView;
-  readonly actions: CardActions;
-}): JSX.Element | null {
+export function SteerCardView(props: CardProps): JSX.Element | null {
   const {draft, view, actions} = props;
   if (view.phase === 'dismissed') return null;
-  const editing = view.phase === 'draft';
   return (
-    <Card section="Steer">
-      {editing ? (
-        <Draft draft={draft} view={view} actions={actions} />
+    <Card>
+      {view.phase === 'draft' ? (
+        <Draft {...props} />
       ) : (
         <Stack gap="space-3">
           <Text>{draft.text}</Text>
-          <Row gap="space-3" wrap>
+          <Row gap="space-3" justify="between" wrap>
             {view.status === null ? null : (
               <Chip label={view.status.label} tone={view.status.tone} dot />
             )}
-            <Text variant="small" tone="muted">
-              {view.summary}
-            </Text>
+            {view.withdrawable ? (
+              <Button variant="quiet" size="sm" text="Withdraw" press={actions.withdraw} />
+            ) : null}
           </Row>
           {view.error === null ? null : (
             <Text variant="small" tone="err">
               {view.error}
             </Text>
           )}
-          {view.withdrawable ? (
-            <Row gap="space-3">
-              <Button variant="secondary" size="sm" text="Withdraw" press={actions.withdraw} />
-            </Row>
-          ) : null}
         </Stack>
       )}
     </Card>

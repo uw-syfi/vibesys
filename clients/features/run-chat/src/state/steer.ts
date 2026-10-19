@@ -3,7 +3,7 @@
  * mode), the two requests a card sends (`SteerRequest`, `WithdrawRequest`), and the words each
  * choice is labelled with. The wire types come from the contract; nothing here is a second copy.
  */
-import type {RequestInput} from '@vibesys/contracts';
+import {type RequestInput, roleName} from '@vibesys/contracts';
 
 type ControlRequest = Extract<RequestInput, {readonly type: 'command.control'}>['control'];
 export type SteerRequest = Extract<ControlRequest, {readonly action: 'steer'}>;
@@ -24,13 +24,6 @@ export interface SteerDraft {
   readonly mode: SteerMode;
 }
 
-export const TARGET_KINDS: readonly {readonly value: SteerTargetKind; readonly label: string}[] = [
-  {value: 'run', label: 'Run'},
-  {value: 'role', label: 'Role'},
-  {value: 'attempt', label: 'Attempt'},
-  {value: 'item', label: 'Item'},
-];
-
 export const STEER_MODES: readonly {readonly value: SteerMode; readonly label: string}[] = [
   {value: 'next_turn', label: 'Next turn'},
   {value: 'standing', label: 'Every turn'},
@@ -42,9 +35,62 @@ export function modeLabel(mode: SteerMode): string {
   return STEER_MODES.find(entry => entry.value === mode)?.label ?? mode;
 }
 
-/** The label of a target kind. */
-export function targetLabel(kind: SteerTargetKind): string {
-  return TARGET_KINDS.find(entry => entry.value === kind)?.label ?? kind;
+/** What a target is called on the card: the run, a role by its display name, an attempt or an item. */
+export function targetName(target: SteerTarget): string {
+  switch (target.kind) {
+    case 'run':
+      return 'Whole run';
+    case 'role':
+      return roleName(target.id ?? '');
+    case 'attempt':
+      return `Attempt ${target.id ?? ''}`.trim();
+    case 'item':
+      return `Item ${target.id ?? ''}`.trim();
+  }
+}
+
+/** A target as one string, the value of the card's single target select. */
+export function targetValue(target: SteerTarget): string {
+  return target.kind === 'run' ? 'run' : `${target.kind}:${target.id ?? ''}`;
+}
+
+/** The target `targetValue` wrote; anything that is not a known kind is the whole run. */
+export function parseTargetValue(value: string): SteerTarget {
+  const split = value.indexOf(':');
+  const kind = split < 0 ? value : value.slice(0, split);
+  const id = split < 0 ? '' : value.slice(split + 1);
+  if (kind === 'role' || kind === 'attempt' || kind === 'item') return {kind, id};
+  return {kind: 'run', id: null};
+}
+
+/** The run's roles in order: the ones its start advertised, then any seen since, each once. */
+export function runRoles(
+  advertised: readonly string[] | null,
+  seen: readonly string[],
+): readonly string[] {
+  return [...new Set([...(advertised ?? []), ...seen])];
+}
+
+export interface TargetOption {
+  readonly value: string;
+  readonly label: string;
+}
+
+/**
+ * The targets a steer can go to: the whole run, then each of the run's roles, in the run's order.
+ * The draft's own target is listed too when it is not one of those (a proposal for an attempt or
+ * an item), so a select always shows what the card will send.
+ */
+export function targetOptions(
+  roles: readonly string[],
+  current: SteerTarget,
+): readonly TargetOption[] {
+  const targets: SteerTarget[] = [
+    {kind: 'run', id: null},
+    ...roles.map((id): SteerTarget => ({kind: 'role', id})),
+  ];
+  if (!targets.some(target => targetValue(target) === targetValue(current))) targets.push(current);
+  return targets.map(target => ({value: targetValue(target), label: targetName(target)}));
 }
 
 /** The whole run, next turn: where a steer the user writes starts. */

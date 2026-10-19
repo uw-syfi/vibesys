@@ -1,11 +1,10 @@
 /**
- * What a steer card says about itself: its phase, one status word with a tone, the summary of
- * what it will do or did, and which controls it offers. Pure over the card machine's snapshot, so
+ * What a steer card says about itself: its phase, one status line with a tone, and which controls
+ * it offers. Pure over the card machine's snapshot, so
  * every state the card can be in has its words in one place.
  */
-import {roleName} from '@vibesys/contracts';
 import {type DeliveryState, deliveryEnded} from './delivery.js';
-import {draftProblem, modeLabel, type SteerDraft, targetLabel} from './steer.js';
+import {draftProblem, modeLabel, type SteerDraft, targetName} from './steer.js';
 import {inForce, type SteerCardContext} from './steer-card.js';
 
 export type CardTone = 'neutral' | 'live' | 'ok' | 'warn' | 'err';
@@ -19,10 +18,8 @@ export type CardPhase = 'draft' | 'sending' | 'sent' | 'withdrawing' | 'dismisse
 
 export interface CardView {
   readonly phase: CardPhase;
-  /** The status chip; null while the card is still a draft. */
+  /** The one status line, for example `In force · Implementer · every turn`; null while a draft. */
   readonly status: CardStatus | null;
-  /** To and When as the card shows them once sent, for example `Role implementer · Every turn`. */
-  readonly summary: string;
   /** Why Send is off, as a short word; null when the draft can be sent. */
   readonly sendBlocked: string | null;
   readonly withdrawable: boolean;
@@ -32,7 +29,8 @@ export interface CardView {
 /** The machine value, narrowed to what the view needs. */
 export type CardValue = 'draft' | 'sending' | 'dismissed' | {readonly sent: string};
 
-function deliveryStatus(delivery: DeliveryState, standing: boolean): CardStatus {
+function deliveryStatus(delivery: DeliveryState, draft: SteerDraft): CardStatus {
+  const standing = draft.mode === 'standing';
   switch (delivery.kind) {
     case 'sent':
       return {label: 'Sent', tone: 'neutral'};
@@ -41,10 +39,10 @@ function deliveryStatus(delivery: DeliveryState, standing: boolean): CardStatus 
     case 'delivered': {
       const lead = standing ? 'In force' : 'Reached';
       const tone = standing ? 'live' : 'ok';
-      if (delivery.idea !== null) {
-        return {label: `${lead}${standing ? ' from' : ''} idea ${delivery.idea}`, tone};
-      }
-      return {label: delivery.where === null ? lead : `${lead} · ${delivery.where}`, tone};
+      if (delivery.idea !== null) return {label: `${lead} · idea ${delivery.idea}`, tone};
+      const where = delivery.where ?? targetName(draft.target);
+      const when = standing ? modeLabel(draft.mode).toLowerCase() : null;
+      return {label: [lead, where, when].filter(Boolean).join(' · '), tone};
     }
     case 'dropped':
       return {label: 'Dropped', tone: 'warn'};
@@ -60,18 +58,9 @@ function deliveryStatus(delivery: DeliveryState, standing: boolean): CardStatus 
   }
 }
 
-/** To and When in the words the card's controls use. */
-export function steerSummary(draft: SteerDraft): string {
-  const {target} = draft;
-  const named = target.kind === 'role' ? roleName(target.id ?? '') : (target.id ?? '');
-  const to = target.kind === 'run' ? targetLabel('run') : `${targetLabel(target.kind)} ${named}`;
-  return `${to.trim()} · ${modeLabel(draft.mode)}`;
-}
-
 export function cardView(context: SteerCardContext, value: CardValue): CardView {
-  const summary = steerSummary(context.draft);
   const error = context.error;
-  const base = {summary, error, sendBlocked: draftProblem(context.draft), withdrawable: false};
+  const base = {error, sendBlocked: draftProblem(context.draft), withdrawable: false};
   if (value === 'draft') {
     return {...base, phase: 'draft', status: null};
   }
@@ -86,7 +75,7 @@ export function cardView(context: SteerCardContext, value: CardValue): CardView 
   return {
     ...base,
     phase: 'sent',
-    status: deliveryStatus(context.delivery, context.draft.mode === 'standing'),
+    status: deliveryStatus(context.delivery, context.draft),
     withdrawable: inForce(context),
   };
 }

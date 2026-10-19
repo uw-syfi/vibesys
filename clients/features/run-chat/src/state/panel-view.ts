@@ -5,13 +5,13 @@
  */
 import type {CardView} from './card-view.js';
 import type {PanelContext, PanelEvent} from './panel.js';
-import type {SteerDraft, SteerMode, SteerTargetKind} from './steer.js';
+import type {SteerDraft, SteerMode, SteerTarget} from './steer.js';
 import type {ThreadEntry, ThreadItem} from './thread-view.js';
 
 /** What a card's controls do; each is one event of the card's machine. */
 export interface CardActions {
   editText(text: string): void;
-  setTarget(kind: SteerTargetKind, id: string | null): void;
+  setTarget(target: SteerTarget): void;
   setMode(mode: SteerMode): void;
   send(): void;
   dismiss(): void;
@@ -38,5 +38,7 @@ export interface ChatPanelView {
   /** The thread on screen; null for a new chat. */
   readonly shown: string | null;
   readonly items: readonly PanelItem[];
+  /** The run's roles, in its order: what a steer's target select lists after the whole run. */
+  readonly roles: readonly string[];
   readonly dispatch: (event: PanelEvent) => void;
 }
