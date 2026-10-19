@@ -3,11 +3,16 @@
 from __future__ import annotations
 
 import json
+import os
 import shlex
+import sys
+from contextlib import contextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pytest
+from hypothesis import example, given, settings
+from hypothesis import strategies as st
 
 from vs_sandbox.api import BeforeReadyContext, CommandResult, SandboxLifecycle
 from vs_sandbox.api.evaluator_tools import (
@@ -25,9 +30,10 @@ from vs_sandbox.api.evaluator_tools import (
     tool_token,
 )
 from vs_sandbox.api.testing import FakeCommandRunner
+from vs_sim.api.testing import examples
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Iterator, Sequence
     from typing import Never
 from vs_sim.api import DISCARD
 
@@ -112,8 +118,9 @@ def test_lifecycle_hooks_snapshot_tools_and_execute_target_command(tmp_path: Pat
     assert sandbox.calls[1].command == command
     arguments = shlex.split(command)
     assert arguments[0:2] == ["python3", "-c"]
-    assert json.loads(arguments[-2])["tools"] == {"example": _spec().model_dump(mode="json")}
-    assert arguments[-1] == str(install_parent)
+    assert json.loads(arguments[-3])["tools"] == {"example": _spec().model_dump(mode="json")}
+    assert arguments[-2] == str(install_parent)
+    assert arguments[-1] == ""
 
 
 @pytest.mark.parametrize("exit_code", [None, 17])
@@ -154,11 +161,11 @@ def test_target_install_command_quotes_manifest_and_root(tmp_path: Path) -> None
     arguments = shlex.split(command)
 
     assert arguments[0:2] == ["python3", "-c"]
-    assert json.loads(arguments[-2]) == {
+    assert json.loads(arguments[-3]) == {
         "schema_version": 1,
         "tools": {"example": _spec().model_dump(mode="json")},
     }
-    assert arguments[-1] == str(install_parent)
+    assert arguments[-2] == str(install_parent)
 
 
 def test_target_install_command_rejects_unsafe_tool_name(tmp_path: Path) -> None:
@@ -253,3 +260,128 @@ def test_prepare_tools_reports_timeout_and_cleans_staging(tmp_path: Path) -> Non
 
     cache = tmp_path / "example"
     assert not list(cache.glob(".*-*"))
+
+
+def _installer(search_path: str = "") -> dict[str, Any]:
+    """Load the target-side installer program, as the target's ``python3 -c`` would, without running it."""
+    program = shlex.split(
+        evaluator_tools_install_command({"example": _spec()}, "x", search_path=search_path)
+    )[2]
+    namespace: dict[str, Any] = {"__name__": "installer"}
+    exec(compile(program, "installer", "exec"), namespace)  # noqa: S102  # lint-waiver: LW-930060 [S102]; the installer ships as program text for a target's python3, and loading it in process is the only way to test its logic without starting a process.
+    return namespace
+
+
+@contextmanager
+def _installer_run(root: Path, search_path: str) -> Iterator[dict[str, Any]]:
+    """Set the arguments the installer reads (its input), run no process, restore them after."""
+    previous = sys.argv
+    manifest = json.dumps(
+        {"schema_version": 1, "tools": {"example": _spec().model_dump(mode="json")}}
+    )
+    sys.argv = ["installer", manifest, str(root), search_path]
+    try:
+        yield _installer(search_path)
+    finally:
+        sys.argv = previous
+
+
+@contextmanager
+def _process_path(value: str) -> Iterator[None]:
+    """Set this process's ``PATH`` (an input of the installer), and restore it after."""
+    previous = os.environ["PATH"]
+    os.environ["PATH"] = value
+    try:
+        yield
+    finally:
+        os.environ["PATH"] = previous
+
+
+_DIRECTORY = st.from_regex(r"[a-z]{1,6}", fullmatch=True)
+
+
+@given(
+    login=st.lists(_DIRECTORY, max_size=4, unique=True),
+    own=st.lists(_DIRECTORY, max_size=4, unique=True),
+    with_cargo=st.sets(_DIRECTORY, max_size=3),
+)
+@example(login=["cargobin"], own=["usr"], with_cargo={"cargobin"})
+@settings(max_examples=examples(pr=40, nightly=300), deadline=None)
+def test_cargo_is_found_in_the_login_path_or_the_process_path_and_never_elsewhere(
+    tmp_path_factory: pytest.TempPathFactory,
+    login: list[str],
+    own: list[str],
+    with_cargo: set[str],
+) -> None:
+    """A login-shell directory is searched first; a directory in neither is never searched."""
+    root = tmp_path_factory.mktemp("path")
+    for name in {*login, *own, "elsewhere"}:
+        (root / name).mkdir(exist_ok=True)
+    for name in with_cargo | {"elsewhere"}:
+        (root / name).mkdir(exist_ok=True)
+        binary = root / name / "cargo"
+        binary.write_text("", encoding="utf-8")
+        binary.chmod(0o755)
+    namespace = _installer()
+
+    with _process_path(os.pathsep.join(str(root / name) for name in own)):
+        found = namespace["find_cargo"](
+            namespace["search_directories"](os.pathsep.join(str(root / name) for name in login))
+        )
+
+    expected = next((name for name in [*login, *own] if name in with_cargo), None)
+    assert found == (None if expected is None else str(root / expected / "cargo"))
+
+
+def test_a_missing_cargo_names_the_tool_the_path_searched_and_the_fix(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "login").mkdir()
+    (tmp_path / "own").mkdir()
+    monkeypatch.setenv("PATH", str(tmp_path / "own"))
+
+    with _installer_run(tmp_path / "tools", str(tmp_path / "login")) as namespace:
+        install_error = namespace["InstallError"]
+        with pytest.raises(install_error) as error:
+            namespace["main"]()
+
+    message = str(error.value)
+    assert "'example'" in message
+    assert f"{tmp_path / 'login'}{os.pathsep}{tmp_path / 'own'}" in message
+    assert "login shell" in message
+    assert ".cargo/env" in message
+    assert list((tmp_path / "tools").glob("**/.*")) == []
+
+
+def test_a_verified_cached_install_needs_no_cargo(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A cache hit is verified and used without looking for cargo at all."""
+    monkeypatch.setenv("PATH", str(tmp_path / "empty"))
+
+    def install(arguments: Sequence[str]) -> ToolResult:
+        root = Path(arguments[arguments.index("--root") + 1]) / "bin"
+        root.mkdir(parents=True)
+        for binary in _spec().bins:
+            (root / binary).write_text(f"#!/bin/sh\n# {binary}\n", encoding="utf-8")
+            (root / binary).chmod(0o755)
+        return tool_result(arguments)
+
+    prepare_evaluator_tools({"example": _spec()}, tmp_path / "tools", command_runner=install)
+
+    with _installer_run(tmp_path / "tools", "") as namespace:
+        namespace["main"]()
+
+
+def test_the_search_path_reaches_the_installer_as_its_third_argument(tmp_path: Path) -> None:
+    sandbox = FakeCommandRunner()
+
+    SandboxLifecycle(
+        [
+            EvaluatorToolLifecycleHooks(
+                {"example": _spec()}, tmp_path / "tools", search_path="/login/bin:/x"
+            )
+        ]
+    ).before_ready(sandbox)
+
+    assert shlex.split(sandbox.calls[0].command)[-1] == "/login/bin:/x"

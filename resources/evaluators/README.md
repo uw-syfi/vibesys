@@ -111,7 +111,13 @@ The revision must be a full lowercase commit SHA. VibeSys always passes
 occupy one complete entrypoint argument and may reference only a binary from
 the corresponding declaration.
 
-VibeSys installs tools in the environment that executes the evaluator. Local
+VibeSys installs tools in the environment that executes the evaluator. A
+host install looks for `cargo` only when a tool is not already installed and
+verified, first on the `PATH` of the user's login shell (the lookup that finds
+provider CLIs), then on the process's own, so a run started over a plain `ssh`
+command or by the desktop helper finds `~/.cargo/bin` as a terminal run does.
+When none has `cargo`, the install fails naming the tool, the `PATH` it searched
+and the fix (install Rust for the user, or source `~/.cargo/env` from `~/.profile`). Local
 runs use an operator-owned cache outside the candidate workspace. Docker uses
 a short-lived sandbox with the target image to build and verify tools, then
 mounts only the selected installation roots read-only into the agent sandbox.

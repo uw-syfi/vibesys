@@ -746,6 +746,7 @@ def _make_host_sandbox(request: RunEnvironmentRequest, *, ephemeral: bool = Fals
             EvaluatorToolLifecycleHooks(
                 requirements.tools,
                 required_evaluator_tools_root(requirements, request.workspace),
+                search_path=request.system.host_tool_search_path(),
             )
         )
     return request.backend.make_sandbox(

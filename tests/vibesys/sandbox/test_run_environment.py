@@ -5,6 +5,7 @@ import json
 import shlex
 import subprocess
 import sys
+from dataclasses import replace
 from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
@@ -54,6 +55,7 @@ from vs_runtime.api.infrastructure import (
 )
 from vs_runtime.api.testing import idle_environment_system, unconfined_host_environment
 from vs_sandbox.api import (
+    CommandResult,
     EnvironmentBindMount,
     HostResource,
     HostResourceAccess,
@@ -1119,6 +1121,44 @@ def test_local_environment_prepares_and_translates_evaluator_tool(
         "--dry-run",
     ]
     assert "${TOOL:" not in (session.view.paths.benchmark_command or "")
+
+
+def test_local_environment_installs_tools_with_the_login_shells_path(tmp_path: Path) -> None:
+    """A run started by a non-login shell still finds the user's cargo, as a login shell would."""
+    backend = FakeBackend()
+    backend.sandbox.execute.return_value = CommandResult(exit_code=0, output="", truncated=False)
+    package = resolve_evaluator_package(
+        EvaluatorPackageRequirement(name="vibesys-evaluator-request-factory", version="0.1.0")
+    )
+    tools_root = tmp_path / "operator-tools"
+    reads: list[str] = []
+
+    def login_environment() -> dict[str, str]:
+        reads.append("read")
+        return {"PATH": "/login/cargo/bin:/usr/bin", "HOME": "/home/user"}
+
+    request = _request(
+        tmp_path,
+        backend,
+        accuracy_command="true",
+        benchmark_command=shlex.join(package.command("request-factory-engine")),
+        evaluator_package_root=package.root,
+        evaluator_tools_root=tools_root,
+        system=replace(idle_environment_system(), login_environment=login_environment),
+    )
+    assert reads == []
+
+    _open(unconfined_host_environment(), request)
+
+    SandboxLifecycle(backend.calls[0][1]["lifecycle_hooks"]).before_ready(backend.sandbox)
+    backend.sandbox.execute.assert_called_once_with(
+        evaluator_tools_install_command(
+            package.metadata.tools, tools_root, search_path="/login/cargo/bin:/usr/bin"
+        ),
+        timeout=660,
+        output=DISCARD,
+    )
+    assert reads == ["read"]
 
 
 def test_local_environment_rejects_evaluator_tools_root_inside_workspace(
