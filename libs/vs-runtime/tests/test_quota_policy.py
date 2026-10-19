@@ -6,7 +6,7 @@ from dataclasses import replace
 from typing import TYPE_CHECKING
 
 import pytest
-from hypothesis import given
+from hypothesis import example, given
 from hypothesis import strategies as st
 
 from vs_runtime.api.infrastructure import (
@@ -309,6 +309,7 @@ def test_quota_give_up_reasons_state_durations_in_hours_minutes_and_seconds(
 
 
 @pytest.mark.regression
+@example(spent=3600.0, retry=300.0)
 @given(spent=seconds, retry=st.floats(min_value=1.0, max_value=86_400.0))
 def test_a_spent_outage_budget_resumes_by_itself_only_under_wait(
     spent: float, retry: float
