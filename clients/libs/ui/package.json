@@ -51,6 +51,15 @@
     "src/components.css",
     "src/frame.css",
     "src/controls.css",
+    "src/navigation.css",
+    "src/rail.css",
+    "src/overview-tiles.css",
+    "src/chat.css",
+    "src/base.css",
+    "src/inputs.css",
+    "src/surfaces.css",
+    "src/documents.css",
+    "src/threads.css",
     "src/fonts"
   ],
   "scripts": {

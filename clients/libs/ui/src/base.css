@@ -1,0 +1,443 @@
+/* The shared base and the layout and text primitives. Imported by components.css. */
+
+/* --- shared ------------------------------------------------------------------------------------ */
+
+/* The document a `Page` fills: no default margin, the theme's background. */
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+}
+/* The window is the document: a `Page` or an `AppFrame` in the root element fills it and scrolls. */
+html,
+body,
+body > div:first-child {
+  height: 100%;
+}
+
+.vs-page,
+.vs-page *,
+.vs-flex,
+.vs-split,
+.vs-grid,
+.vs-card,
+.vs-banner,
+.vs-field,
+.vs-button,
+.vs-segmented,
+.vs-toggle,
+.vs-path-input {
+  box-sizing: border-box;
+}
+
+.vs-button:focus-visible,
+.vs-segment:has(:focus-visible),
+.vs-input:focus-visible,
+.vs-checkbox:focus-visible,
+.vs-switch:focus-visible {
+  outline: var(--focus-ring) solid var(--accent);
+  outline-offset: var(--focus-offset);
+}
+
+.vs-help {
+  margin: 0;
+  font-family: var(--text-small-family);
+  font-size: var(--text-small-size);
+  line-height: var(--text-small-line);
+  font-weight: var(--text-small-weight);
+  color: var(--muted);
+}
+.vs-help[data-tone="err"] {
+  color: var(--err);
+}
+
+/* --- layout ------------------------------------------------------------------------------------ */
+
+.vs-page {
+  display: flex;
+  justify-content: center;
+  min-width: 0;
+  height: 100%;
+  overflow-y: auto;
+  padding: var(--space-6) var(--space-6) var(--space-8);
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--text-body-family);
+  font-size: var(--text-body-size);
+  line-height: var(--text-body-line);
+}
+.vs-page-content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  width: 100%;
+  max-width: var(--content);
+}
+.vs-page-content[data-width="wide"] {
+  max-width: var(--content-wide);
+}
+.vs-page-content[data-width="narrow"] {
+  max-width: var(--content-narrow);
+}
+/* `fill`: the whole area, for a page whose content is a grid that wraps to the width. */
+.vs-page-content[data-width="fill"] {
+  max-width: none;
+}
+
+/*
+ * A page with a header or a footer never scrolls itself: they are fixed and the body scrolls
+ * between them. A hint at the bottom edge shows only while more lies below: a cover that scrolls
+ * with the content hides a shade fixed to the edge once the end is reached. Both colors are theme
+ * tokens, so the hint is right in every theme. There is none at the top: the header's own edge
+ * shows that the body continues under it.
+ */
+.vs-page[data-fixed-header] {
+  overflow: hidden;
+  padding-bottom: var(--space-5);
+  --scroll-shade: var(--line);
+}
+.vs-page[data-fixed-header] > .vs-page-content {
+  height: 100%;
+  min-height: 0;
+}
+.vs-page-header {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+.vs-page-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  /* Room for the focus ring of a control at the body's edge. */
+  margin: 0 calc(-1 * var(--space-2));
+  padding: var(--space-2);
+  background:
+    linear-gradient(transparent, var(--bg) 70%) bottom / 100% var(--space-6) no-repeat local,
+    linear-gradient(transparent, var(--scroll-shade)) bottom / 100% var(--space-4) no-repeat scroll;
+}
+.vs-page-footer {
+  flex: none;
+  min-width: 0;
+}
+.vs-page-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  min-width: 0;
+}
+
+/* A long form keeps its checks and primary action in view beside the fields. */
+@media (min-width: 900px) {
+  .vs-page[data-side-action] > .vs-page-content {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) var(--column-aside);
+    grid-template-rows: auto minmax(0, 1fr);
+    gap: 0 var(--space-5);
+  }
+  /* The header heads the whole page; the columns beneath it start on one line. */
+  .vs-page[data-side-action] .vs-page-header {
+    grid-column: 1 / -1;
+  }
+  .vs-page[data-side-action] .vs-page-scroll {
+    grid-column: 1;
+  }
+  .vs-page[data-side-action] .vs-page-footer {
+    grid-column: 2;
+    grid-row: 2;
+    /* The scrolling column's own padding, so both columns' first boxes share a top edge. */
+    padding-top: var(--space-2);
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+  /* The card is as tall as its content, or as the column when that is more; its checks scroll then. */
+  .vs-page[data-side-action] .vs-action-panel {
+    flex: 0 1 auto;
+    min-height: 0;
+  }
+  .vs-page[data-side-action] .vs-action-panel-bar {
+    display: contents;
+  }
+  .vs-page[data-side-action] .vs-action-panel-status {
+    order: 0;
+    padding: var(--space-4) var(--space-4) var(--space-3);
+    text-align: left;
+  }
+  .vs-page[data-side-action] .vs-action-panel-details {
+    order: 1;
+    flex: 0 1 auto;
+    min-height: 0;
+    max-height: none;
+    border-top: var(--hairline) solid var(--line);
+    border-bottom: 0;
+  }
+  .vs-page[data-side-action] .vs-action-panel-summary {
+    order: 2;
+    /* Its row-layout basis would reserve that much height in this column. */
+    flex: none;
+    padding: var(--space-3) var(--space-4);
+  }
+  .vs-page[data-side-action] .vs-action-panel-action {
+    order: 3;
+    margin: auto 0 0;
+    padding: var(--space-4);
+    align-items: stretch;
+  }
+  .vs-page[data-side-action] .vs-action-panel-action .vs-button {
+    width: 100%;
+  }
+}
+
+.vs-flex {
+  display: flex;
+  min-width: 0;
+}
+.vs-flex[data-direction="column"] {
+  flex-direction: column;
+}
+.vs-flex[data-wrap] {
+  flex-wrap: wrap;
+}
+.vs-flex[data-grow] {
+  flex: 1 1 0;
+  min-height: 0;
+}
+.vs-flex[data-width="figure"] {
+  flex: none;
+  width: var(--column-figure);
+}
+.vs-reserve {
+  display: flex;
+  flex-direction: column;
+  visibility: hidden;
+}
+.vs-flex[data-width="chart"] {
+  flex: 1 1 var(--column-chart);
+  min-width: min(100%, var(--column-chart));
+}
+.vs-flex[data-align="start"] {
+  align-items: flex-start;
+}
+.vs-flex[data-align="center"] {
+  align-items: center;
+}
+.vs-flex[data-align="end"] {
+  align-items: flex-end;
+}
+.vs-flex[data-align="stretch"] {
+  align-items: stretch;
+}
+.vs-flex[data-align="baseline"] {
+  align-items: baseline;
+}
+.vs-flex[data-justify="start"] {
+  justify-content: flex-start;
+}
+.vs-flex[data-justify="center"] {
+  justify-content: center;
+}
+.vs-flex[data-justify="end"] {
+  justify-content: flex-end;
+}
+.vs-flex[data-justify="between"] {
+  justify-content: space-between;
+}
+
+.vs-split {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+}
+.vs-split-main {
+  flex: 999 1 var(--column-main);
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+.vs-split-aside {
+  flex: 1 1 var(--column-aside);
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+.vs-section-container {
+  min-width: 0;
+  container-type: inline-size;
+}
+.vs-section-layout {
+  display: grid;
+  grid-template-columns: calc(var(--column-aside) * 0.65) minmax(0, 1fr);
+  align-items: start;
+  gap: var(--space-5);
+}
+.vs-section-nav {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  background: var(--bg);
+}
+.vs-section-content {
+  min-width: 0;
+}
+/* A list of numbered steps carries an answer under each: room for the longest to stay on one line. */
+@container (min-width: 42rem) {
+  .vs-section-layout[data-steps] {
+    grid-template-columns: calc(var(--column-aside) * 0.8) minmax(0, 1fr);
+  }
+}
+@container (max-width: 42rem) {
+  .vs-section-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .vs-section-nav {
+    flex-direction: row;
+    flex-wrap: wrap;
+    padding-block: var(--space-1);
+  }
+  .vs-section-nav .vs-sidebar-item {
+    flex: 1 1 auto;
+  }
+}
+/* Steps: a list beside the content while wide; under one line the reader opens when narrower. */
+.vs-section-toggle {
+  display: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  width: 100%;
+  min-height: var(--control);
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  color: var(--text);
+  font-family: var(--text-body-family);
+  font-size: var(--text-body-size);
+  line-height: var(--text-body-line);
+  font-weight: var(--text-body-strong-weight);
+  text-align: left;
+  cursor: pointer;
+}
+.vs-section-toggle:focus-visible {
+  outline: var(--focus-ring) solid var(--accent);
+  outline-offset: var(--focus-offset);
+}
+.vs-section-steps {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+@container (max-width: 56rem) {
+  .vs-section-layout[data-steps] {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .vs-section-layout[data-steps] .vs-section-nav {
+    position: static;
+    flex-direction: column;
+    flex-wrap: nowrap;
+    padding-block: 0;
+  }
+  .vs-section-layout[data-steps] .vs-section-toggle {
+    display: flex;
+  }
+  .vs-section-layout[data-steps] .vs-section-steps:not([data-open]) {
+    display: none;
+  }
+}
+.vs-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, var(--grid-min)), 1fr));
+}
+.vs-grid[data-min="field"] {
+  --grid-min: var(--column-field);
+}
+.vs-grid[data-min="tile"] {
+  --grid-min: var(--column-tile);
+}
+.vs-grid[data-min="swatch"] {
+  --grid-min: var(--column-swatch);
+}
+.vs-grid[data-min="swatch-row"] {
+  /* Three previews of this width, with their gaps, fit the narrowest Settings card. */
+  --grid-min: calc(var(--column-swatch) * 3 / 4);
+}
+
+/* --- text -------------------------------------------------------------------------------------- */
+
+.vs-text {
+  margin: 0;
+  text-transform: var(--text-transform);
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+.vs-text[data-tone="muted"] {
+  color: var(--muted);
+}
+.vs-text[data-tone="ok"] {
+  color: var(--ok);
+}
+.vs-text[data-tone="warn"] {
+  color: var(--warn);
+}
+.vs-text[data-tone="err"] {
+  color: var(--err);
+}
+
+.vs-wordmark {
+  container-type: inline-size;
+  min-width: 0;
+}
+/*
+ * A mono glyph is 0.6 of the font size wide, so a size of width / columns sets the art at three
+ * fifths of the container's width, capped at the style's size.
+ */
+.vs-wordmark-art {
+  display: block;
+  width: max-content;
+  max-width: 100%;
+  margin: 0;
+  font-family: var(--text-display-family);
+  font-weight: var(--text-display-weight);
+  font-size: min(var(--text-display-size), calc(100cqi / var(--wordmark-columns)));
+  line-height: calc(var(--text-display-line) / var(--text-display-size));
+  letter-spacing: var(--text-display-tracking);
+  white-space: pre;
+  overflow: hidden;
+  color: var(--accent);
+}
+/* On a short window the art takes less of it; it shrinks, it is never cut off. */
+@media (max-height: 880px) {
+  .vs-wordmark-art {
+    font-size: min(calc(var(--text-display-size) * 0.5), calc(100cqi / var(--wordmark-columns)));
+  }
+}
+@media (max-height: 760px) {
+  .vs-wordmark-art {
+    font-size: min(calc(var(--text-display-size) * 0.32), calc(100cqi / var(--wordmark-columns)));
+  }
+}
+.vs-wordmark[data-align="center"] .vs-wordmark-art {
+  margin: 0 auto;
+}
+.vs-wordmark[data-tone="gradient"] .vs-wordmark-art {
+  background: linear-gradient(100deg, var(--text) 15%, var(--accent) 58%, var(--muted) 96%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.vs-icon {
+  flex: none;
+  width: var(--icon);
+  height: var(--icon);
+}
+

@@ -1,0 +1,304 @@
+/* Prose, markdown, check lists, timelines and log panes. Imported by components.css. */
+
+/* --- prose ------------------------------------------------------------------------------------- */
+
+.vs-prose {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+}
+.vs-prose > .vs-text {
+  margin: 0;
+}
+.vs-prose > h3.vs-text:not(:first-child) {
+  padding-top: var(--space-2);
+}
+.vs-prose-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: 0;
+  padding-left: var(--space-5);
+  color: var(--muted);
+}
+.vs-prose-list > li::marker {
+  color: var(--muted);
+}
+.vs-prose-list > li > .vs-markdown {
+  color: var(--text);
+}
+
+/* --- markdown ---------------------------------------------------------------------------------- */
+
+/* Written prose, compact: block gaps are one step, headings stay below a card's title, and nothing
+   widens the page: long words wrap, a code block or a table scrolls inside itself. */
+.vs-markdown {
+  min-width: 0;
+  font-family: var(--text-body-family);
+  font-size: var(--text-body-size);
+  line-height: var(--text-body-line);
+  overflow-wrap: anywhere;
+}
+.vs-markdown > * + * {
+  margin-top: var(--space-3);
+}
+.vs-markdown p,
+.vs-markdown ul,
+.vs-markdown ol,
+.vs-markdown blockquote,
+.vs-markdown pre,
+.vs-markdown table {
+  margin: 0;
+}
+/* Prose keeps a readable line; code and tables use the whole column. */
+.vs-markdown p,
+.vs-markdown ul,
+.vs-markdown ol,
+.vs-markdown blockquote {
+  max-width: var(--measure);
+}
+.vs-markdown ul,
+.vs-markdown ol {
+  padding-left: var(--space-6);
+}
+.vs-markdown li + li,
+.vs-markdown li > ul,
+.vs-markdown li > ol {
+  margin-top: var(--space-1);
+}
+.vs-markdown li::marker {
+  color: var(--muted);
+  font-family: var(--text-body-family);
+}
+.vs-markdown blockquote {
+  padding-left: var(--space-3);
+  border-left: var(--hairline) solid var(--line);
+  color: var(--muted);
+}
+.vs-markdown hr {
+  width: 100%;
+  margin: var(--space-2) 0;
+  border: 0;
+  border-top: var(--hairline) solid var(--line);
+}
+.vs-markdown a {
+  color: var(--accent);
+  text-decoration: underline;
+}
+.vs-markdown a:focus-visible,
+.vs-markdown-pre:focus-visible,
+.vs-markdown-scroll:focus-visible {
+  outline: var(--focus-ring) solid var(--accent);
+  outline-offset: var(--focus-offset);
+}
+.vs-markdown-heading {
+  margin: 0;
+  font-family: var(--text-body-family);
+  font-size: var(--text-body-size);
+  line-height: var(--text-body-line);
+  font-weight: var(--text-body-strong-weight);
+}
+.vs-markdown-heading[data-level="1"],
+.vs-markdown-heading[data-level="2"] {
+  font-size: var(--text-heading-size);
+  line-height: var(--text-heading-line);
+  font-weight: var(--text-heading-weight);
+}
+.vs-markdown strong {
+  font-weight: var(--text-body-strong-weight);
+}
+.vs-markdown code {
+  font-family: var(--text-code-family);
+  font-size: var(--text-code-size);
+  font-style: normal;
+  overflow-wrap: anywhere;
+}
+.vs-markdown :not(pre) > code {
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-sm);
+  background: var(--panel-2);
+}
+.vs-markdown-pre {
+  box-sizing: border-box;
+  max-width: 100%;
+  padding: var(--space-3) var(--space-4);
+  overflow-x: auto;
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius);
+  background: var(--log-bg);
+  color: var(--log-text);
+  font-style: normal;
+}
+.vs-markdown-pre code {
+  font-size: var(--text-code-size);
+  line-height: var(--text-code-line);
+  white-space: pre;
+  overflow-wrap: normal;
+}
+.vs-markdown-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+}
+.vs-markdown table {
+  border-collapse: collapse;
+}
+.vs-markdown th,
+.vs-markdown td {
+  padding: var(--space-1) var(--space-3);
+  border: var(--hairline) solid var(--line);
+  text-align: left;
+  vertical-align: top;
+}
+.vs-markdown th {
+  font-weight: var(--text-body-strong-weight);
+}
+.vs-markdown-image {
+  color: var(--muted);
+  font-style: italic;
+}
+
+/* --- check list -------------------------------------------------------------------------------- */
+
+.vs-check-list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.vs-check {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-3) 0;
+  border-top: var(--hairline) solid var(--line);
+}
+.vs-check-icon {
+  display: flex;
+  padding-top: var(--space-1);
+}
+.vs-check[data-state="ok"] .vs-check-icon {
+  color: var(--ok);
+}
+.vs-check[data-state="warn"] .vs-check-icon {
+  color: var(--warn);
+}
+.vs-check[data-state="fail"] .vs-check-icon {
+  color: var(--err);
+}
+.vs-check[data-state="pending"] .vs-check-icon {
+  color: var(--muted);
+}
+.vs-check-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+.vs-check-fix {
+  padding-top: var(--space-2);
+}
+.vs-check-raw {
+  color: var(--muted);
+  font-family: var(--text-small-family);
+  font-size: var(--text-small-size);
+  line-height: var(--text-small-line);
+}
+.vs-check-raw summary {
+  cursor: pointer;
+}
+.vs-check-raw pre {
+  margin: var(--space-1) 0 0;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--text-code-family);
+}
+
+/* --- timeline ---------------------------------------------------------------------------------- */
+
+.vs-timeline {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.vs-stage {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-3) 0;
+  border-top: var(--hairline) solid var(--line);
+}
+.vs-stage-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-4);
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+}
+button.vs-stage-head {
+  cursor: pointer;
+}
+.vs-stage-label {
+  flex: 1;
+  min-width: 0;
+}
+.vs-stage-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding-left: var(--space-5);
+}
+
+/* --- log pane ---------------------------------------------------------------------------------- */
+
+.vs-log {
+  position: relative;
+  min-width: 0;
+}
+.vs-log-pane {
+  box-sizing: border-box;
+  height: var(--log);
+  margin: 0;
+  padding: var(--space-4) var(--space-5);
+  overflow: auto;
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--log-bg);
+  color: var(--log-text);
+  font-family: var(--text-code-family);
+  font-size: var(--text-code-size);
+  line-height: var(--text-code-line);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.vs-log-pane[data-size="sm"] {
+  height: var(--log-sm);
+}
+.vs-log-line,
+.vs-log-gap {
+  display: block;
+}
+.vs-log-line {
+  min-height: var(--text-code-line);
+}
+.vs-log-line[data-stream="err"] {
+  color: var(--log-err);
+}
+.vs-log-jump {
+  position: absolute;
+  right: var(--space-4);
+  bottom: var(--space-4);
+}
+

@@ -1,0 +1,397 @@
+/* Cards, menus, dialogs, tables, tabs, trees and key values. Imported by components.css. */
+
+/* --- card and banner --------------------------------------------------------------------------- */
+
+.vs-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+  padding: var(--space-5);
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+  color: var(--text);
+}
+.vs-card[data-flush] {
+  padding: 0;
+  gap: 0;
+  overflow: hidden;
+}
+.vs-card-title {
+  margin: 0;
+  display: flex;
+}
+.vs-card[data-flush] .vs-card-title {
+  padding: var(--space-4) var(--space-5);
+}
+
+.vs-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-5);
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+  color: var(--text);
+}
+.vs-banner[data-tone="ok"] {
+  border-color: var(--chip-ok-border);
+  background: var(--banner-ok-bg);
+}
+.vs-banner[data-tone="warn"] {
+  border-color: var(--chip-warn-border);
+  background: var(--banner-warn-bg);
+}
+.vs-banner[data-tone="err"] {
+  border-color: var(--chip-err-border);
+  background: var(--banner-err-bg);
+}
+.vs-banner-text {
+  display: flex;
+  flex: 1 1 var(--column-field);
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.vs-banner-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+
+/* --- menu -------------------------------------------------------------------------------------- */
+
+.vs-menu {
+  position: relative;
+  display: inline-flex;
+  -webkit-app-region: no-drag;
+}
+.vs-menu-list {
+  position: absolute;
+  top: calc(100% + var(--space-2));
+  right: 0;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  min-width: var(--menu);
+  padding: var(--space-2);
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+  box-shadow: var(--elevation-raised);
+  -webkit-app-region: no-drag;
+}
+.vs-menu-list[data-align="start"] {
+  right: auto;
+  left: 0;
+}
+.vs-menu-item {
+  display: flex;
+  align-items: center;
+  min-height: var(--control);
+  margin: 0;
+  padding: 0 var(--space-3);
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text);
+  font-family: var(--text-body-family);
+  font-size: var(--text-body-size);
+  line-height: var(--text-body-line);
+  text-align: left;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.vs-menu-item:hover,
+.vs-menu-item:focus-visible {
+  background: var(--panel-2);
+}
+.vs-menu-item:focus-visible {
+  outline: var(--focus-ring) solid var(--accent);
+  outline-offset: calc(var(--focus-offset) * -2);
+}
+.vs-menu-item[data-danger] {
+  color: var(--err);
+}
+
+/* --- dialog ------------------------------------------------------------------------------------ */
+
+/* A modal sits in the top layer, so percentages are of the window. */
+.vs-dialog {
+  max-width: calc(100% - 2 * var(--space-6));
+  max-height: calc(100% - 2 * var(--space-7));
+  overflow-y: auto;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--text);
+}
+.vs-dialog::backdrop {
+  background: var(--scrim);
+}
+.vs-dialog-card {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  width: var(--content-narrow);
+  max-width: 100%;
+  padding: var(--space-6);
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+  box-shadow: var(--elevation-overlay);
+  font-family: var(--text-body-family);
+  font-size: var(--text-body-size);
+  line-height: var(--text-body-line);
+}
+.vs-dialog-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+.vs-dialog-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--space-3);
+}
+
+/* --- table ------------------------------------------------------------------------------------- */
+
+.vs-table-scroll {
+  container-type: inline-size;
+  overflow-x: auto;
+  min-width: 0;
+  border: var(--hairline) solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+}
+.vs-table-scroll:focus-visible,
+.vs-table tr[data-selectable]:focus-visible,
+.vs-tab:focus-visible,
+.vs-tree:focus-visible,
+.vs-tree-row:focus-visible,
+.vs-stage-head:focus-visible,
+.vs-log-pane:focus-visible,
+.vs-scrubber-range:focus-visible,
+.vs-sidebar-link:focus-visible,
+.vs-sidebar-action:focus-visible,
+.vs-sidebar-more:focus-visible {
+  outline: var(--focus-ring) solid var(--accent);
+  outline-offset: var(--focus-offset);
+}
+.vs-table {
+  width: 100%;
+  border-collapse: collapse;
+  color: var(--text);
+  font-family: var(--text-body-family);
+  font-size: var(--text-body-size);
+  line-height: var(--text-body-line);
+}
+.vs-table th {
+  position: sticky;
+  top: 0;
+  padding: var(--space-3) var(--space-4);
+  background: var(--panel-2);
+  color: var(--muted);
+  font-family: var(--text-section-family);
+  font-size: var(--text-section-size);
+  line-height: var(--text-section-line);
+  font-weight: var(--text-section-weight);
+  letter-spacing: var(--text-section-tracking);
+  text-transform: uppercase;
+  text-align: left;
+  white-space: nowrap;
+}
+.vs-table td {
+  padding: var(--space-3) var(--space-4);
+  border-top: var(--hairline) solid var(--line);
+  vertical-align: top;
+}
+.vs-table td[data-mono] {
+  font-family: var(--text-code-family);
+  font-size: var(--text-code-size);
+  color: var(--muted);
+  white-space: nowrap;
+}
+.vs-table [data-align="end"] {
+  text-align: right;
+}
+.vs-table tr[data-selectable] {
+  cursor: pointer;
+}
+.vs-table tr[data-selectable]:hover {
+  background: var(--panel-2);
+}
+.vs-table tr[aria-current="true"] {
+  background: var(--selection);
+}
+.vs-table tr[data-kind="sub"] td {
+  color: var(--muted);
+}
+.vs-table tr[data-kind="sub"] td:first-child {
+  padding-left: var(--space-7);
+}
+.vs-table tr[data-kind="total"] td {
+  font-weight: var(--text-body-strong-weight);
+}
+.vs-table td[data-control] {
+  padding-block: 0;
+  vertical-align: middle;
+}
+.vs-table-hidden-header {
+  position: absolute;
+  width: var(--hairline);
+  height: var(--hairline);
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.vs-table td[data-lead] {
+  min-width: calc(var(--space-8) * 3);
+}
+.vs-table-lead {
+  display: flex;
+  align-items: center;
+}
+.vs-table-fold {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--space-5);
+  margin: 0 var(--space-2) 0 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  vertical-align: middle;
+}
+/* Columns that need room give way first: the table scroller is its own container, so it is the
+   width of the table, not of the window, that decides. */
+@container (max-width: 760px) {
+  .vs-table [data-wide] {
+    display: none;
+  }
+}
+
+/* --- tabs -------------------------------------------------------------------------------------- */
+
+.vs-tabs {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+.vs-tab-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  border-bottom: var(--hairline) solid var(--line);
+}
+.vs-tab {
+  min-height: var(--control);
+  margin: 0 0 calc(var(--hairline) * -1);
+  padding: 0 var(--space-4);
+  border: 0;
+  border-bottom: var(--focus-ring) solid transparent;
+  background: transparent;
+  color: var(--muted);
+  font-family: var(--text-body-family);
+  font-size: var(--text-body-size);
+  line-height: var(--text-body-line);
+  cursor: pointer;
+}
+.vs-tab:hover {
+  color: var(--text);
+}
+.vs-tab[aria-selected="true"] {
+  border-bottom-color: var(--text);
+  color: var(--text);
+  font-weight: var(--text-body-strong-weight);
+}
+
+/* --- tree -------------------------------------------------------------------------------------- */
+
+.vs-tree {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+.vs-tree-row {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: var(--row);
+  padding: var(--space-2) var(--space-3);
+  padding-left: calc(var(--space-3) + var(--space-5) * var(--tree-depth));
+  border: var(--hairline) solid transparent;
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+.vs-tree-row:hover {
+  background: var(--panel-2);
+}
+.vs-tree-row[aria-selected="true"] {
+  background: var(--selection);
+  border-color: var(--chip-accent-border);
+}
+.vs-tree-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+.vs-tree-row[data-group] .vs-tree-text {
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--space-3);
+}
+.vs-tree-chevron {
+  display: flex;
+  color: var(--muted);
+  transition: transform var(--duration-fast) var(--easing);
+}
+.vs-tree-chevron[data-open] {
+  transform: rotate(90deg);
+}
+
+/* --- key value, stat, empty state --------------------------------------------------------------- */
+
+.vs-key-value {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: var(--space-3) var(--space-4);
+  margin: 0;
+}
+.vs-key-value-row {
+  display: contents;
+}
+.vs-key-value dd {
+  margin: 0;
+  min-width: 0;
+}
+.vs-stat {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+.vs-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-8) var(--space-6);
+  text-align: center;
+}
+.vs-empty-action {
+  padding-top: var(--space-3);
+}
+
