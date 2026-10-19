@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 import pytest
 from pydantic import ValidationError
 
-from vibesys.events import CoreEventType, EventStatus, WorkspaceRootProbeData
+from vibesys.events import CoreEvent, CoreEventType, EventStatus, WorkspaceRootProbeData
 from vibesys.run import EventJournal
 from vibesys.run.environment_failure import RunEnvironmentFailure
 from vibesys.run.slurm_probe_events import CoreWorkspaceRootProbeEvents
@@ -96,6 +96,35 @@ def test_only_a_failed_probe_ends_the_run_and_it_names_the_probe(tmp_path: Path)
 
     events.report(WorkspaceRootProbeFailed(failure="probe job 5001 exited with code 1"))
     events.report(WorkspaceRootProbeFailed(failure="a later failure changes nothing"))
+
+    assert environment.reason == "probe job 5001 exited with code 1"
+    assert control.stop_mode() is StopMode.CANCEL
+
+
+@pytest.mark.xfail(
+    strict=True, reason="the event is emitted before the run is ended (#3243 review N3)"
+)
+def test_a_failed_probe_ends_the_run_even_when_publishing_its_event_raises(
+    tmp_path: Path,
+) -> None:
+    """Regression: a subscriber that raised kept the run going, refusing all its work."""
+    threads = SimThreads()
+    journal = EventJournal(clock=ManualClock(), threads=threads)
+    journal.attach(tmp_path / "run-1", "run-1")
+
+    def broken_subscriber(event: CoreEvent) -> None:
+        del event
+        message = "No space left on device"
+        raise OSError(message)
+
+    journal.subscribe(broken_subscriber)
+    environment, control = _environment(threads)
+    events = CoreWorkspaceRootProbeEvents(journal, environment)
+
+    # The probe logs and drops a report that raises (``WorkspaceRootProof``); the run must
+    # already be ending by then.
+    with pytest.raises(OSError, match="No space left"):
+        events.report(WorkspaceRootProbeFailed(failure="probe job 5001 exited with code 1"))
 
     assert environment.reason == "probe job 5001 exited with code 1"
     assert control.stop_mode() is StopMode.CANCEL
