@@ -25,7 +25,7 @@ jobs = ["clients"]
 [cases.collections]
 native_languages = []
 native_targets = []
-pnpm_packages = ["@vibesys/app-desktop-main", "@vibesys/app-desktop-shell", "@vibesys/feature-new-run", "@vibesys/feature-run-chat", "@vibesys/feature-run-page", "@vibesys/feature-usage", "@vibesys/run-fixtures", "@vibesys/run-session", "@vibesys/run-state"]
+pnpm_packages = ["@vibesys/app-desktop-main", "@vibesys/app-desktop-shell", "@vibesys/app-ui-gallery", "@vibesys/feature-new-run", "@vibesys/feature-run-chat", "@vibesys/feature-run-page", "@vibesys/feature-usage", "@vibesys/run-fixtures", "@vibesys/run-session", "@vibesys/run-state"]
 
 [[cases]]
 name = "evaluator SDK changes reach consumers"
