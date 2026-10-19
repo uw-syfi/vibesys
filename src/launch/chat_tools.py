@@ -347,9 +347,6 @@ def _check_target(targets: SteerTargets | None, target: SteerTarget) -> None:
 
 def build_tools(store: RunStore, run_id: str) -> tuple[ToolSpec[Any], ...]:
     """Build every tool the chat agent gets for one run: the read-only ones and `propose_steer`."""
-    # Touch the run once up front so a missing run_id fails fast and
-    # identically across every tool, instead of each "get_run" discovering it lazily.
-    store.get_run(run_id)
     return (
         _run_summary_tool(store, run_id),
         _list_ideas_tool(store, run_id),

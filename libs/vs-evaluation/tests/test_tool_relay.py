@@ -41,7 +41,7 @@ if TYPE_CHECKING:
     from vs_sim.api import Connection
 
 _SOCKET = Path("/run/relay.sock")
-_TOKEN = "issued-to-one-agent"  # noqa: S105  # lint-waiver: LW-731907 [S105]; a fixed fixture value.
+_TOKEN = "issued-to-one-agent"  # noqa: S105  # lint-waiver: LW-861907 [S105]; a fixed fixture value.
 _TIMEOUT_S = 10.0
 
 
@@ -114,7 +114,7 @@ class _Host:
         )
 
 
-def _serve(body: Callable[[_Host], object], tools: _Tools | None = None, *, seed: int = 0) -> Any:  # noqa: ANN401  # lint-waiver: LW-731908 [ANN401]; the helper returns whatever the test's body observed.
+def _serve(body: Callable[[_Host], object], tools: _Tools | None = None, *, seed: int = 0) -> Any:  # noqa: ANN401  # lint-waiver: LW-861908 [ANN401]; the helper returns whatever the test's body observed.
     threads = SimThreads(schedule_seed=seed)
     host = _Host(threads, tools if tools is not None else _Tools())
 
@@ -336,7 +336,10 @@ def test_no_host_is_an_unavailable_relay_that_says_unreachable() -> None:
 
 
 def test_a_host_that_hangs_up_without_a_reply_is_an_unavailable_relay() -> None:
-    error, _ = _ask_scripted_host(lambda connection, _threads: connection.recv(4096, HANG_GUARD_S))
+    def answer(connection: Connection, _threads: SimThreads) -> None:
+        connection.recv(4096, HANG_GUARD_S)
+
+    error, _ = _ask_scripted_host(answer)
 
     assert isinstance(error, RelayUnavailableError)
     assert "closed without a reply" in str(error)
@@ -360,7 +363,7 @@ def test_a_trickling_host_cannot_outlast_the_call_deadline(interval_s: float) ->
 # --- what an agent sees over MCP ----------------------------------------------------------
 
 
-def _mcp_session(body: Callable[[Any], Any]) -> Any:  # noqa: ANN401  # lint-waiver: LW-731909 [ANN401]; the helper returns whatever the test's body observed.
+def _mcp_session(body: Callable[[Any], Any]) -> Any:  # noqa: ANN401  # lint-waiver: LW-861909 [ANN401]; the helper returns whatever the test's body observed.
     """Run ``body(client_session)`` against the agent-side server forwarding to a live host."""
 
     def over_host(host: _Host) -> object:
@@ -377,7 +380,7 @@ def _mcp_session(body: Callable[[Any], Any]) -> Any:  # noqa: ANN401  # lint-wai
 
 
 def test_the_agent_is_offered_exactly_the_hosts_tools() -> None:
-    async def body(session: Any) -> list[tuple[str, str | None, dict[str, Any]]]:  # noqa: ANN401  # lint-waiver: LW-731910 [ANN401]; the MCP client session type is not part of this library's surface.
+    async def body(session: Any) -> list[tuple[str, str | None, dict[str, Any]]]:  # noqa: ANN401  # lint-waiver: LW-861910 [ANN401]; the MCP client session type is not part of this library's surface.
         listed = await session.list_tools()
         return [(tool.name, tool.description, tool.inputSchema) for tool in listed.tools]
 
@@ -391,7 +394,7 @@ def test_the_agent_is_offered_exactly_the_hosts_tools() -> None:
 
 
 def test_an_agent_call_returns_the_hosts_text_and_a_host_failure_is_a_tool_error() -> None:
-    async def body(session: Any) -> tuple[str, bool, str, bool]:  # noqa: ANN401  # lint-waiver: LW-731911 [ANN401]; the MCP client session type is not part of this library's surface.
+    async def body(session: Any) -> tuple[str, bool, str, bool]:  # noqa: ANN401  # lint-waiver: LW-861911 [ANN401]; the MCP client session type is not part of this library's surface.
         await session.list_tools()  # the session learns the schemas, as an agent's does
         ok = await session.call_tool("echo", {"text": "ab", "times": 2})
         failed = await session.call_tool("fail", {})

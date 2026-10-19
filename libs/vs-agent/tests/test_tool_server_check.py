@@ -48,7 +48,7 @@ def test_a_check_runs_on_the_container_interpreter_and_import_roots_with_its_env
     )
     runner = _runner()
 
-    failures = check_tool_servers(runner, [check], agent_path=str)
+    failures = check_tool_servers(runner, [check])
 
     assert failures == ()
     [call] = runner.calls
@@ -74,7 +74,7 @@ def test_a_check_that_does_not_exit_zero_is_a_failure_naming_the_server_with_bou
     check = StdioServerDescriptor("vibesys-run", "python", ("-m", "server", "--check"))
     runner = _runner(CommandResult(output=output, exit_code=code))
 
-    [failure] = check_tool_servers(runner, [check], agent_path=str)
+    [failure] = check_tool_servers(runner, [check])
 
     assert failure.server == "vibesys-run"
     assert failure.detail
@@ -87,7 +87,7 @@ def test_a_cancelled_check_is_a_failure_even_with_a_zero_exit() -> None:
     check = StdioServerDescriptor("vibesys-run", "python", ("-m", "server"))
     runner = _runner(CommandResult(output="", exit_code=0, cancelled=True))
 
-    failures = check_tool_servers(runner, [check], agent_path=str)
+    failures = check_tool_servers(runner, [check])
 
     assert [failure.server for failure in failures] == ["vibesys-run"]
 
@@ -110,7 +110,7 @@ def test_each_check_runs_and_only_the_failing_ones_are_reported() -> None:
         returncode=1,
     )
 
-    failures = check_tool_servers(runner, [passing, broken, passing], agent_path=str)
+    failures = check_tool_servers(runner, [passing, broken, passing])
 
     assert [(failure.server, failure.detail) for failure in failures] == [
         ("broken", "No module named 'broken'")
@@ -121,6 +121,6 @@ def test_each_check_runs_and_only_the_failing_ones_are_reported() -> None:
 def test_a_check_is_bounded_in_time() -> None:
     runner = _runner()
 
-    check_tool_servers(runner, [StdioServerDescriptor("s", "python", ())], agent_path=str)
+    check_tool_servers(runner, [StdioServerDescriptor("s", "python", ())])
 
     assert runner.calls[0].timeout == CHECK_TIMEOUT_S

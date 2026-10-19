@@ -210,7 +210,7 @@ class ToolRelayService:
     the service.
     """
 
-    def __init__(  # noqa: PLR0913  # lint-waiver: LW-731901 [PLR0913]; the tools, the endpoint, the token and the three effects are independent inputs the caller owns.
+    def __init__(  # noqa: PLR0913  # lint-waiver: LW-861901 [PLR0913]; the tools, the endpoint, the token and the three effects are independent inputs the caller owns.
         self,
         tools: Sequence[ToolSpec[Any]],
         socket_path: Path,
@@ -328,7 +328,7 @@ class ToolRelayService:
         try:
             with self._handlers:
                 return RelayResult(text=spec.handler(arguments))
-        except Exception as error:  # noqa: BLE001  # lint-waiver: LW-731902 [BLE001]; a tool handler may raise anything (a store, a git read); the agent gets the failure as a tool error, as FastMCP gives it, and the service keeps serving.
+        except Exception as error:  # noqa: BLE001  # lint-waiver: LW-861902 [BLE001]; a tool handler may raise anything (a store, a git read); the agent gets the failure as a tool error, as FastMCP gives it, and the service keeps serving.
             return RelayResult(text=f"{type(error).__name__}: {error}", is_error=True)
 
 

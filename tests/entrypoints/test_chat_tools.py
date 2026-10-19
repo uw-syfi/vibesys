@@ -19,7 +19,7 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 from tests.support.multi_search import SearchRecord
-from tests.support.real_git import REAL_GIT
+from tests.support.real_git import NO_GIT, REAL_GIT
 
 from launch import built_in_orchestrations, open_run_store
 from launch.agents import BuiltInSessionAgents
@@ -242,12 +242,14 @@ class TestToolRegistration:
         ]
         assert sending == []
 
-    def test_build_tools_fails_fast_on_an_unknown_run(self, tmp_path: Path) -> None:
+    def test_an_unknown_run_fails_each_call_naming_it(self, tmp_path: Path) -> None:
         project, _run_id = _project_with_run(tmp_path)
         store = open_run_store(project, git=REAL_GIT, threads=SimThreads())
+        server = _server(build_tools(store, "no-such-run"))
 
-        with pytest.raises(Exception, match="no-such-run"):  # vs_project.ProjectStateError
-            build_tools(store, "no-such-run")
+        for tool in ("run_summary", "list_ideas", "list_steps"):
+            with pytest.raises(Exception, match="no-such-run"):  # vs_project.ProjectStateError
+                asyncio.run(_call(server, tool))
 
 
 class TestEndToEnd:
@@ -594,7 +596,7 @@ class _RecordingEvents(NullAgentEventSink):
     def __init__(self) -> None:
         self.tool_results: list[tuple[str, str, bool, str | None]] = []
 
-    def tool_result(  # noqa: PLR0913  # lint-waiver: LW-731905 [PLR0913]; this implements AgentEventSink.tool_result's named-argument contract exactly.
+    def tool_result(  # noqa: PLR0913  # lint-waiver: LW-861905 [PLR0913]; this implements AgentEventSink.tool_result's named-argument contract exactly.
         self,
         tool: str,
         content: str,
@@ -666,7 +668,7 @@ class _ChatSession:
         agents = BuiltInSessionAgents(
             client_factory=lambda **_services: self.client,
             network=self.network,
-            git=REAL_GIT,
+            git=NO_GIT,
             registry=built_in_orchestrations(),
         )
         resources = _chat_resources(

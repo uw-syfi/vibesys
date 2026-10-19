@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 import pytest
 from tests.entrypoints.test_launch_frontends import _request
 from tests.support.core_plugins import failing_plugin
-from tests.support.real_git import REAL_GIT, REAL_PROCESSES
+from tests.support.real_git import NO_GIT, REAL_GIT, REAL_PROCESSES
 
 from entrypoints.production import production_timing
 from launch import (
@@ -37,6 +37,7 @@ if TYPE_CHECKING:
     from vs_agent.api import AgentEventSink, AgentInvocationStore
     from vs_runtime.api.infrastructure import RunState, ScopedAgentEnvironment
     from vs_sandbox.api import HostResource
+    from vs_sim.api import Network
 
 
 class FalseyOrchestrationRegistry(OrchestrationRegistry):
@@ -79,11 +80,11 @@ class FalseyFakeBackendFactory:
 
 
 class FalseyFakeSessionAgents:
-    def __init__(self, client_factory: FalseyFakeAgentFactory) -> None:
+    def __init__(self, client_factory: FalseyFakeAgentFactory, network: Network) -> None:
         self.implementation = BuiltInSessionAgents(
             client_factory=client_factory,
-            network=UnixNetwork(),
-            git=REAL_GIT,
+            network=network,
+            git=NO_GIT,
             registry=built_in_orchestrations(),
         )
         self.calls = 0
@@ -122,7 +123,8 @@ def test_launch_preserves_falsey_injected_implementations(tmp_path: Path) -> Non
     request = _request(tmp_path / "project")
     agents_factory = FalseyFakeAgentFactory()
     backend_factory = FalseyFakeBackendFactory()
-    agents = FalseyFakeSessionAgents(agents_factory)
+    network = UnixNetwork()
+    agents = FalseyFakeSessionAgents(agents_factory, network)
     settings = FalseyLaunchSettings(
         timing=production_timing(),
         processes=REAL_PROCESSES,
@@ -133,7 +135,7 @@ def test_launch_preserves_falsey_injected_implementations(tmp_path: Path) -> Non
         agents=agents,
         git_repository=FakeGitRepositories().repository,
         blocking=ThreadBlockingRunner(),
-        network=UnixNetwork(),
+        network=network,
     )
     validate_descriptor(request.orchestration, registry=registry)
     validate_run_request(request, registry=registry, git=REAL_GIT)

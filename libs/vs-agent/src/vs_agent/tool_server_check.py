@@ -13,12 +13,12 @@ import shlex
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from vs_agent.container_python import containerize_server
 from vs_agent.contracts import MCPServerSpec
-from vs_agent.shim_translation import mcp_server_from
 from vs_sim.api import DISCARD
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable
+    from collections.abc import Iterable
 
     from vs_mcp.api import ToolServerDescriptor
     from vs_sandbox.api import CommandRunner
@@ -39,14 +39,14 @@ class ToolServerFailure:
 def check_tool_servers(
     runner: CommandRunner,
     checks: Iterable[ToolServerDescriptor],
-    *,
-    agent_path: Callable[[str], str],
 ) -> tuple[ToolServerFailure, ...]:
     """Run each check in the container *runner* executes in; return those that did not exit 0.
 
-    Each descriptor is translated exactly as a tool server's is for the container
-    (:func:`~vs_agent.shim_translation.mcp_server_from`), so a check runs on the interpreter and
-    import roots the server will. A check that times out or is cancelled has failed.
+    Each descriptor is made container-ready exactly as a tool server's is
+    (:func:`~vs_agent.container_python.containerize_server`), so a check runs on the interpreter
+    and import roots the server will. A check that times out or is cancelled has failed. Paths
+    are not translated: the container interpreter and the framework mount are the same on both
+    sides.
     """
     failures: list[ToolServerFailure] = []
     for descriptor in checks:
@@ -57,8 +57,8 @@ def check_tool_servers(
             descriptor.env,
             descriptor.runtime_env,
         )
-        server = mcp_server_from(spec, agent_path, containerized=True)
-        words = [f"{key}={value}" for key, value in server.env.items()]
+        server = containerize_server(spec)
+        words = [f"{key}={value}" for key, value in (*server.env, *server.runtime_env)]
         command = shlex.join(["env", *words, server.command, *server.args])
         result = runner.execute(command, timeout=CHECK_TIMEOUT_S, output=DISCARD)
         if result.exit_code != 0 or result.cancelled:

@@ -131,8 +131,9 @@ directory (the one directory every agent container mounts, beside the evaluation
 status sockets), and the agent's tool server (`vs_evaluation.tool_relay_mcp`) imports only the
 container interpreter's packages and relays each call. The relay's token is issued to that one
 conversation, so another agent of the run, which shares the directory, is refused. Before the
-chat's first turn in a container, `launch.agents` runs the server's `--check` there and
-reports a server that cannot start as an error tool result naming it and the cause.
+conversation's first turn in a container, `vs_runtime` runs the server's `--check` there (the
+same interpreter and import roots) and reports a server that cannot start as an error tool
+result naming it and the cause, which the client shows in the Chat panel.
 
 `ProjectSandboxPaths.hidden_paths` is the set the policy hides, so adding a hidden state
 directory is one entry there. The framework's own reads and writes of run state, the

@@ -1955,6 +1955,10 @@ PROGRAM_ENTRIES: dict[str, str] = {
         "the evaluation tool server an agent CLI starts over stdio; its main builds the "
         "Network and clock it reaches the run's evaluation socket with"
     ),
+    "libs/vs-evaluation/src/vs_evaluation/tool_relay_mcp.py": (
+        "the tool relay's agent-side server an agent CLI starts over stdio, and its startup check; "
+        "its main builds the Network and clock it reaches the host's relay socket with"
+    ),
     "libs/vs-evaluation/src/vs_evaluation/queue_status_mcp.py": (
         "the queue status tool server an agent CLI starts over stdio; its main builds the "
         "Network and clock it reaches the run's queue status socket with"

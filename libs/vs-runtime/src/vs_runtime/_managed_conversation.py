@@ -209,18 +209,14 @@ def _container_tool_check(
     environment: AgentExecutionEnvironment,
     events: AgentEventSink,
 ) -> ToolServerStartupCheck | None:
-    """The startup checks of *spec*'s tool servers, run in the agent container; ``None`` off one.
-
-    Absolute paths in a check are not translated: the container interpreter and the
-    framework mount are the same on both sides.
-    """
+    """The startup checks of *spec*'s tool servers, run in the agent container; ``None`` off one."""
     backends = environment.backends
     if not spec.tool_server_checks or not environment.use_docker or not backends:
         return None
     (runner,) = backends.values()
 
     def check() -> tuple[ToolServerFailure, ...]:
-        return check_tool_servers(runner, spec.tool_server_checks, agent_path=str)
+        return check_tool_servers(runner, spec.tool_server_checks)
 
     return ToolServerStartupCheck(check, events)
 

@@ -37,8 +37,10 @@ from vs_sim.api import MonotonicClock, UnixNetwork
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from vs_sim.api import Clock, Network
+
 SOCKET_ENV = "VS_TOOL_RELAY_SOCKET"
-TOKEN_ENV = "VS_TOOL_RELAY_TOKEN"  # noqa: S105  # lint-waiver: LW-731903 [S105]; the name of the environment variable that carries the issued token, not a token.
+TOKEN_ENV = "VS_TOOL_RELAY_TOKEN"  # noqa: S105  # lint-waiver: LW-861903 [S105]; the name of the environment variable that carries the issued token, not a token.
 _MODULE = "vs_evaluation.tool_relay_mcp"
 _EXIT_FAILED = 1
 
@@ -108,7 +110,7 @@ async def _serve(server: Server) -> None:
         await server.run(read, write, server.create_initialization_options())
 
 
-def _client(*, with_token: bool) -> ToolRelayClient:
+def _client(*, with_token: bool, network: Network, clock: Clock) -> ToolRelayClient:
     needed = (SOCKET_ENV, TOKEN_ENV) if with_token else (SOCKET_ENV,)
     missing = [key for key in needed if key not in os.environ]
     if missing:
@@ -117,8 +119,8 @@ def _client(*, with_token: bool) -> ToolRelayClient:
     return ToolRelayClient(
         Path(os.environ[SOCKET_ENV]),
         os.environ[TOKEN_ENV] if with_token else "",
-        network=UnixNetwork(),
-        clock=MonotonicClock(),
+        network=network,
+        clock=clock,
     )
 
 
@@ -130,11 +132,12 @@ def main(argv: Sequence[str] | None = None) -> None:
         "--check", action="store_true", help="Exit 0 when the host relay answers; serve nothing."
     )
     args = parser.parse_args(argv)
+    network, clock = UnixNetwork(), MonotonicClock()
     try:
         if args.check:
-            _client(with_token=False).ping()
+            _client(with_token=False, network=network, clock=clock).ping()
             return
-        client = _client(with_token=True)
+        client = _client(with_token=True, network=network, clock=clock)
         tools = client.list_tools()
     except (RelayRefusedError, RelayUnavailableError) as error:
         sys.stderr.write(f"{_MODULE}: {error}\n")

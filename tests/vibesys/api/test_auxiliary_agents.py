@@ -12,7 +12,7 @@ import pytest
 from pydantic import ValidationError
 from tests.support.core_plugins import failing_plugin
 from tests.support.docker_environment import fake_docker_environment, host_container_backend
-from tests.support.real_git import REAL_GIT, REAL_PROCESSES
+from tests.support.real_git import NO_GIT, REAL_PROCESSES
 from tests.support.task_project import write_task
 
 from entrypoints.production import production_timing
@@ -144,17 +144,18 @@ def _resumable_client(**_kwargs: object) -> FakeAgentClient:
 
 @pytest.fixture(params=[False, True], ids=["built-in", "fake"])
 def agent_settings(request: pytest.FixtureRequest) -> LaunchSettings:
+    network = UnixNetwork()
     return LaunchSettings(
         blocking=ThreadBlockingRunner(),
-        network=UnixNetwork(),
+        network=network,
         timing=production_timing(),
         processes=REAL_PROCESSES,
         piped_processes=FakePipedProcessLauncher(),
         agents=(
             FakeSessionAgents(
                 OsThreads(),
-                network=UnixNetwork(),
-                repository=REAL_GIT,
+                network=network,
+                repository=NO_GIT,
                 registry=built_in_orchestrations(),
             )
             if request.param
@@ -440,8 +441,8 @@ def test_auxiliary_selection_rejected_before_environment_acquisition(
     )
     agents = agent_settings.agents or BuiltInSessionAgents(
         client_factory=_resumable_client,
-        network=UnixNetwork(),
-        git=REAL_GIT,
+        network=agent_settings.network,
+        git=NO_GIT,
         registry=built_in_orchestrations(),
     )
 
