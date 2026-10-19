@@ -110,9 +110,7 @@ function Header(props: ChatPanelView): JSX.Element {
           />
         </Row>
       </Row>
-      {shown === null && props.canAsk ? (
-        <Picker panel={props.panel} dispatch={dispatch} />
-      ) : null}
+      {shown === null && props.canAsk ? <Picker panel={props.panel} dispatch={dispatch} /> : null}
     </Stack>
   );
 }

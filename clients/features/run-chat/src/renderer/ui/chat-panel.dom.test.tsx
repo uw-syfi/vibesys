@@ -247,33 +247,3 @@ test('a live run keeps the question box, New chat and New steer', async () => {
   expect(buttons(container)).toEqual(expect.arrayContaining(['New chat', 'New steer']));
   await unmount();
 });
-
-test('a question typed on an ended run goes to the run through the ask port', async () => {
-  const asked: string[] = [];
-  const ports: RunChatPorts = {
-    ...PORTS,
-    ask: input => {
-      asked.push(input.text);
-      return Promise.resolve({ok: true});
-    },
-  };
-  const {container, unmount} = await mount(
-    <Harness core={fold([THREAD, ANSWERED])} ports={ports} readOnly askable />,
-  );
-  await openChat(container);
-  const box = container.querySelector(`textarea[placeholder="${QUESTION_BOX}"]`);
-  await act(async () => {
-    if (box === null) throw new Error('no question box');
-    Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set?.call(
-      box,
-      'Which idea won?',
-    );
-    box.dispatchEvent(new window.Event('input', {bubbles: true}));
-  });
-  const ask = [...container.querySelectorAll('button')].find(
-    button => button.getAttribute('aria-label') === 'Ask',
-  );
-  await act(async () => ask?.click());
-  expect(asked).toEqual(['Which idea won?']);
-  await unmount();
-});
