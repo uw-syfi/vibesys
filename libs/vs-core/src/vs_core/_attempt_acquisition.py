@@ -42,6 +42,7 @@ from ._proofs import (
 )
 from ._registry import ContractError
 from ._session_scope import retains_write_turn, write_turn_authority, yield_authority, yields_turn
+from ._turn_holds import lost_to_provider
 from .types.attempts import (
     AttemptAdmitted,
     AttemptChargeRefundRequested,
@@ -700,7 +701,7 @@ def _correction_allowed(
 ) -> bool:
     predecessor = invocation.turn.predecessor
     seen = {invocation.invocation}
-    depth = 0
+    links = depth = 0
     child = invocation
     while predecessor is not None:
         if predecessor in seen:
@@ -710,10 +711,12 @@ def _correction_allowed(
         if previous is None or not _terminal(context, previous, attempt):
             return False
         if _completed_interruption(context, attempt, child) is not True:
-            depth += 1
+            links += 1
+            # A re-ask after a turn lost to its provider is no link: the gate bounds an outage.
+            depth += 0 if lost_to_provider(context.records, previous) else 1
         child = previous
         predecessor = previous.turn.predecessor if previous.turn.charge_class != "resume" else None
-    return depth > 0 and depth <= MAX_REASK_CHAIN
+    return links > 0 and depth <= MAX_REASK_CHAIN
 
 
 def _initial_session_acquisition(

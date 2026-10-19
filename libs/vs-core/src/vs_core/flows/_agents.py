@@ -531,7 +531,8 @@ class _Ask:
 
         The turn's own work never failed; its provider was unavailable (an outage, a spent
         quota) past the time core gave it. That is not the role's to spend, so it never counts
-        against ``lost_turns``, and a turn that continued a wait is asked again too: the new
+        against ``lost_turns`` nor against core's ``MAX_REASK_CHAIN`` (admission skips such a
+        link), and a turn that continued a wait is asked again too: the new
         turn follows the lost one in its conversation, with the same prompt, as a correction
         (its continuation was used). The gate's own budget, and the pause it puts the run in
         once that is spent, bound how long the provider is waited for.

@@ -231,7 +231,6 @@ def test_a_resumed_turn_lost_while_held_is_asked_again() -> None:
 
 
 @pytest.mark.regression
-@pytest.mark.xfail(strict=True, reason="MED-2: outage re-asks share MAX_REASK_CHAIN")
 @pytest.mark.parametrize("corrected", [0, 4], ids=["no-corrections", "after-4-corrections"])
 def test_outage_losses_never_spend_the_reask_chain(corrected: int) -> None:
     """More outage losses in one ask than ``MAX_REASK_CHAIN`` allows re-asks still recover.

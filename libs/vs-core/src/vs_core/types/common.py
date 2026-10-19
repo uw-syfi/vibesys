@@ -619,7 +619,10 @@ MAX_CORRECTIONS = 5
 MAX_LOST_TURNS = 5
 """The most times any role may have a lost turn asked again."""
 MAX_REASK_CHAIN = MAX_CORRECTIONS + MAX_LOST_TURNS
-"""The longest chain of corrections and re-asks any role's bounds allow; core refuses a longer one."""
+"""The longest chain of corrections and re-asks any role's bounds allow; core refuses a longer one.
+
+A re-ask after a turn lost to its provider (``PROVIDER_UNAVAILABLE``) is no link of the chain:
+the run's capacity gate bounds an outage, by its budget and the pause that follows it."""
 
 
 class RequestRetries(Value):

@@ -32,6 +32,7 @@ from ._session_state import (
     _record,
     _run_reusable,
 )
+from ._turn_holds import lost_to_provider
 from ._turn_outcomes import (
     acceptance_unresolved,
     is_terminal,
@@ -82,7 +83,7 @@ from .types.waits import WaitKind, WaitOn, WaitSubject
 if TYPE_CHECKING:
     from .types.evaluation_history import EvaluationHistoryCursor
     from .types.kernel import SessionsContext, Signal
-    from .types.records import Request
+    from .types.records import RecordsState, Request
     from .types.sessions import TurnSpec
 
 
@@ -168,6 +169,7 @@ def _validate_resume(
 
 def _validate_correction(
     state: SessionsState,
+    records: RecordsState,
     predecessor: Invocation | None,
     turn: TurnSpec,
     scope: Scope,
@@ -183,13 +185,16 @@ def _validate_correction(
         raise ContractValidationError(
             "turn.predecessor", "correction requires a terminal predecessor"
         )
+    # A re-ask after a turn lost to its provider is no link: the gate bounds an outage.
     chain = predecessor
-    depth = 1
+    links = 1
+    depth = 0 if lost_to_provider(records, predecessor) else 1
     while chain.turn.charge_class == "correction":
-        depth += 1
+        links += 1
         previous = _invocation(state, chain.turn.predecessor) if chain.turn.predecessor else None
-        if previous is None or depth > len(state.invocations):
+        if previous is None or links > len(state.invocations):
             raise ContractValidationError("turn.predecessor", "invalid correction chain")
+        depth += 0 if lost_to_provider(records, previous) else 1
         chain = previous
     if depth > MAX_REASK_CHAIN:
         raise ContractValidationError("turn.predecessor", "correction retry bound exhausted")
@@ -239,7 +244,7 @@ def _validate_successor(
     if turn.continuation_id is not None:
         raise ContractValidationError("turn.continuation_id", "only resume may name a continuation")
     if turn.charge_class == "correction":
-        _validate_correction(state, predecessor, turn, scope)
+        _validate_correction(state, context.records, predecessor, turn, scope)
     elif turn.predecessor is not None:
         if (
             predecessor is None

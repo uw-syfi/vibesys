@@ -23,7 +23,8 @@ in ``_wait_clock.turn_bound``, which ``record_bound`` uses for every record:
 
 A turn core ends while the gate holds it is lost to its provider, not by its transport
 (``held_when_lost``): its result says ``PROVIDER_UNAVAILABLE``, and the agents library asks
-it again without counting it against the role's lost turns.
+it again without counting it against the role's lost turns, nor against the chain of
+re-asks core bounds (``lost_to_provider``): the gate's budget and its pause bound the outage.
 """
 
 from __future__ import annotations
@@ -67,6 +68,21 @@ def held(
     if records == state.records:
         return AreaChange(state=state)
     return AreaChange(state=state.model_copy(update={"records": records}))
+
+
+def lost_to_provider(records: RecordsState, invocation: Invocation) -> bool:
+    """Whether ``invocation`` ended ``PROVIDER_UNAVAILABLE``: core ended it while the gate held it.
+
+    As ``turn_result`` decides it: the turn was cancelled (core released it lost) while held.
+    A re-ask after such a loss is the provider's, so it is no link of the chain of corrections
+    and re-asks core bounds (``MAX_REASK_CHAIN``).
+    """
+    observation = invocation.observation
+    return (
+        observation is not None
+        and observation.status is ObservationStatus.CANCELLED
+        and held_when_lost(records, invocation)
+    )
 
 
 def held_when_lost(records: RecordsState, invocation: Invocation) -> bool:
