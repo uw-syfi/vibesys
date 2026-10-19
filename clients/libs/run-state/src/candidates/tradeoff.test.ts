@@ -50,6 +50,7 @@ function candidate(
       at,
       metricValue: readings[0]?.value ?? null,
       vsBaseline: null,
+      against: null,
       readings,
       inputReadings,
       verdict: null,

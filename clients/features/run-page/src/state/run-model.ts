@@ -15,6 +15,7 @@
  * model is a function of the log and the sequence.
  */
 import type {RunEvent, RunOverview} from '@vibesys/contracts';
+import type {CoreState} from '@vibesys/run-state';
 import {AgentFold, type AgentGraph, agentGraph} from '@vibesys/run-state/agents';
 import {CandidateFold, type CandidateTree, candidateTree} from '@vibesys/run-state/candidates';
 import {closeSpans, type RunEnding, type RunTrace, traceSpans} from '@vibesys/run-state/trace';
@@ -23,6 +24,8 @@ import type {Direction} from './direction.js';
 import {failuresAt, type GateFailure} from './input-gates.js';
 import {overviewAt, type TraceLog, traceAt} from './live.js';
 import {withLiveBest} from './live-best.js';
+import {NO_PAUSES, type QuotaPauseSpan} from './quota-pauses.js';
+import {settleIdeas} from './settled-ideas.js';
 import {latestTime} from './span-reading.js';
 
 /** Counts the units of work a read does (spans folded, nodes built); tests bound it. */
@@ -31,6 +34,22 @@ export interface ReadMeter {
 }
 
 export type {Direction};
+
+/**
+ * What the run's core states that the trace's spans do not: the comparisons that settled each
+ * idea's figures and the stretches turns were stopped on a capacity limit. A model is a function of
+ * the log, the sequence and these.
+ */
+export interface RunFacts {
+  readonly comparisons: CoreState['comparisons'];
+  readonly pauses: readonly QuotaPauseSpan[];
+}
+
+export const NO_FACTS: RunFacts = {comparisons: {}, pauses: NO_PAUSES};
+
+function sameFacts(a: RunFacts, b: RunFacts): boolean {
+  return a.comparisons === b.comparisons && a.pauses === b.pauses;
+}
 
 /** The run at one sequence. */
 export interface RunModel {
@@ -41,6 +60,8 @@ export interface RunModel {
   readonly direction: Direction;
   readonly candidates: CandidateTree;
   readonly agents: AgentGraph;
+  /** Where turns were stopped on a capacity limit: their time is not agent work. */
+  readonly pauses: readonly QuotaPauseSpan[];
   /** The latest run-clock time the trace's spans carry, or null when they carry none. */
   readonly latest: number | null;
   /** The gates that failed before the first idea began: the run could not measure its input. */
@@ -74,7 +95,7 @@ export interface RunReader {
    * live end has every span the run left open ended as the ending says (`closeSpans`), so no idea,
    * step or agent reads as running and every duration stops where the run did.
    */
-  read(log: TraceLog, at: number | null, ending?: RunEnding | null): RunModel;
+  read(log: TraceLog, at: number | null, ending?: RunEnding | null, facts?: RunFacts): RunModel;
 }
 
 const NO_METER: ReadMeter = {count: () => undefined};
@@ -86,14 +107,14 @@ function sameEnding(a: RunEnding, b: RunEnding): boolean {
 }
 
 /** `model` with the spans its run left open ended as `ending` says. */
-function closedModel(model: RunModel, ending: RunEnding): RunModel {
+function closedModel(model: RunModel, ending: RunEnding, facts: RunFacts): RunModel {
   const trace = closeSpans(model.trace, ending);
   if (trace === model.trace) return model;
   const spans = traceSpans(trace);
   return {
     ...model,
     trace,
-    candidates: withLiveBest(candidateTree(spans), model.direction),
+    candidates: withLiveBest(settleIdeas(candidateTree(spans), facts.comparisons), model.direction),
     agents: agentGraph(spans),
     latest: latestTime(spans),
   };
@@ -104,19 +125,19 @@ export function createRunReader(meter: ReadMeter = NO_METER): RunReader {
   let past: {key: PastKey; model: RunModel} | null = null;
   let closed: {source: RunModel; ending: RunEnding; model: RunModel} | null = null;
   return {
-    read(log, at, ending = null) {
+    read(log, at, ending = null, facts = NO_FACTS) {
       if (at === null || at >= lastSequence(log)) {
-        const model = live.read(log);
+        const model = live.read(log, facts);
         if (ending === null) return model;
         if (closed?.source !== model || !sameEnding(closed.ending, ending)) {
           meter.count(model.trace.spans.size);
-          closed = {source: model, ending, model: closedModel(model, ending)};
+          closed = {source: model, ending, model: closedModel(model, ending, facts)};
         }
         return closed.model;
       }
-      const key = pastKey(log, at);
+      const key = pastKey(log, at, facts);
       if (past !== null && samePastKey(past.key, key)) return past.model;
-      past = {key, model: foldedAt(log, at, meter)};
+      past = {key, model: foldedAt(log, at, facts, meter)};
       return past.model;
     },
   };
@@ -141,6 +162,7 @@ class LiveFollower {
   #agents: AgentFold;
   #model: RunModel | null = null;
   #log: TraceLog | null = null;
+  #facts: RunFacts = NO_FACTS;
 
   constructor(meter: ReadMeter) {
     this.#meter = meter;
@@ -148,21 +170,28 @@ class LiveFollower {
     this.#agents = new AgentFold(meter);
   }
 
-  read(log: TraceLog): RunModel {
-    if (log === this.#log && this.#model !== null) return this.#model;
+  read(log: TraceLog, facts: RunFacts): RunModel {
+    if (log === this.#log && this.#model !== null && sameFacts(facts, this.#facts)) {
+      return this.#model;
+    }
     const restarted = this.#follow(log);
     const overview = log.headOverview;
     const direction = directionOf(overview);
-    const candidates = withLiveBest(this.#candidates.tree(), direction);
+    const candidates = withLiveBest(
+      settleIdeas(this.#candidates.tree(), facts.comparisons),
+      direction,
+    );
     const agents = this.#agents.graph();
     const previous = restarted ? null : this.#model;
     this.#log = log;
+    this.#facts = facts;
     if (
       previous !== null &&
       previous.trace === log.head &&
       previous.overview === overview &&
       previous.candidates === candidates &&
       previous.agents === agents &&
+      previous.pauses === facts.pauses &&
       previous.latest === log.latest &&
       previous.inputGates === log.inputGates.failures
     ) {
@@ -179,6 +208,7 @@ class LiveFollower {
       direction,
       candidates,
       agents,
+      pauses: facts.pauses,
       latest: log.latest,
       inputGates: log.inputGates.failures,
       changed,
@@ -223,14 +253,15 @@ interface PastKey {
   readonly base: RunTrace;
   readonly at: number;
   readonly event: RunEvent | null;
+  readonly facts: RunFacts;
 }
 
-function pastKey(log: TraceLog, at: number): PastKey {
-  return {base: log.base, at, event: lastEventAt(log.events, at)};
+function pastKey(log: TraceLog, at: number, facts: RunFacts): PastKey {
+  return {base: log.base, at, event: lastEventAt(log.events, at), facts};
 }
 
 function samePastKey(a: PastKey, b: PastKey): boolean {
-  return a.base === b.base && a.at === b.at && a.event === b.event;
+  return a.base === b.base && a.at === b.at && a.event === b.event && sameFacts(a.facts, b.facts);
 }
 
 /** The last of `events` (in sequence order) at or before `at`, found by halving. */
@@ -238,7 +269,7 @@ function lastEventAt(events: AppendLog<RunEvent>, at: number): RunEvent | null {
   return events.lastWhile(event => (event.sequence ?? 0) <= at) ?? null;
 }
 
-function foldedAt(log: TraceLog, at: number, meter: ReadMeter): RunModel {
+function foldedAt(log: TraceLog, at: number, facts: RunFacts, meter: ReadMeter): RunModel {
   const trace = traceAt(log, at);
   const overview = overviewAt(log, at);
   const direction = directionOf(overview);
@@ -249,8 +280,9 @@ function foldedAt(log: TraceLog, at: number, meter: ReadMeter): RunModel {
     trace,
     overview,
     direction,
-    candidates: withLiveBest(candidateTree(spans), direction),
+    candidates: withLiveBest(settleIdeas(candidateTree(spans), facts.comparisons), direction),
     agents: agentGraph(spans),
+    pauses: facts.pauses,
     latest: latestTime(spans),
     inputGates: failuresAt(log.inputGates, at),
     changed: NOTHING_CHANGED,

@@ -119,6 +119,17 @@ describe('UsageView', () => {
     ]);
   });
 
+  test('says no sentence about its totals or its costs: tiles, labels and numbers only', async () => {
+    const unpriced = {...record('planner', 'codex', 'gpt-6-luna', 1000, 4), cost_usd: null};
+    const view = await mount(USAGE_CONTROLS_DEFAULT, [], [...RECORDS, unpriced]);
+    expect(view.textContent).not.toContain('Totals match');
+    expect(view.textContent).not.toContain('reported');
+    expect(view.textContent).not.toContain('never zero');
+    expect(view.textContent).toContain('1 unpriced');
+    const priced = await mount(USAGE_CONTROLS_DEFAULT, []);
+    expect(priced.textContent).not.toContain('unpriced');
+  });
+
   test('a model the catalogue names shows its name, and one it does not shows its id', async () => {
     const view = await mount({...USAGE_CONTROLS_DEFAULT, by: 'model'}, []);
     expect(view.textContent).toContain('GPT-6 Luna');

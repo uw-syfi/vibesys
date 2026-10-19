@@ -40,6 +40,7 @@ export {
   tradeoffOf,
 } from './tradeoff.js';
 export type {
+  BaseComparison,
   BestCandidate,
   Candidate,
   CandidateAttempt,

@@ -8,6 +8,7 @@
  * nothing (a tree is the same object until a span changes).
  */
 import type {Candidate, CandidateOutcome, CandidateTree} from '@vibesys/run-state/candidates';
+import {againstWords} from './base-words.js';
 import {type IdeaBase, type IdeaBases, ideaBases} from './idea-bases.js';
 import {figureOf, type IdeaTone, outcomeWords} from './idea-words.js';
 import {inputValueOf} from './performance.js';
@@ -179,7 +180,9 @@ function summaryOf(item: Candidate): string | null {
 }
 
 function rowOf(item: Candidate, context: RowContext): IdeaRow {
-  const {figure, tone} = figureOf(item, context.inputKnown);
+  const {figure, tone} = figureOf(item, context.inputKnown, against =>
+    againstWords(context.tree.candidates, against, 'whole'),
+  );
   const attempts = item.attempts.length;
   return {
     id: item.id,

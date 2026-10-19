@@ -26,6 +26,7 @@ function result(
       at,
       metricValue: value,
       vsBaseline: null,
+      against: null,
       readings: [],
       inputReadings: [],
       verdict,

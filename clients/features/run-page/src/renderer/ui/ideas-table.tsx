@@ -84,7 +84,10 @@ function sortedIdeas(model: RunModel, filter: IdeasFilter, sort: IdeasSort) {
   if (sort === 'oldest')
     return [...rows].sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
   const values = new Map(
-    model.candidates.candidates.map(item => [item.id, item.measurement?.vsBaseline ?? null]),
+    model.candidates.candidates.map(item => [
+      item.id,
+      item.measurement?.vsBaseline ?? item.measurement?.against?.ratio ?? null,
+    ]),
   );
   return [...rows].sort((a, b) => byResult(a, b, values, order, model.direction));
 }

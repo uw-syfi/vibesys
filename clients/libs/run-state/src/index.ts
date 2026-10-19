@@ -51,6 +51,7 @@ export {
   type ProviderSwitch,
   type QuotaPause,
   type QuotaState,
+  type QuotaStop,
   type RunLifetimeBoundary,
   type RunStartupState,
   rehydrateCoreState,

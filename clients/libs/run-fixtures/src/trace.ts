@@ -29,6 +29,13 @@ export interface GateReading {
 interface Readings {
   readonly readings?: readonly GateReading[];
   readonly input?: readonly GateReading[];
+  /**
+   * The reading of the one run that answered the gate, when it differs from `value`, the mean the
+   * framework's comparison settled on (a close call earns more runs after the gate is labelled).
+   */
+  readonly sample?: number;
+  /** The run could not measure its input, so the gate states no ratio to it. */
+  readonly noInput?: boolean;
 }
 
 /** What an idea's gate or end reached. */
@@ -93,6 +100,11 @@ export interface IdeaSpec {
   readonly keeps?: number;
   /** What the implementer's turn spent, reported when the turn ends; none when omitted. */
   readonly usage?: TurnUsage;
+  /**
+   * A stop of the implementer's turn on a provider's quota that ended at run-clock second `at`
+   * after holding the turn for `seconds` (`quota_resumed`).
+   */
+  readonly pause?: {readonly at: number; readonly seconds: number};
 }
 
 /**
@@ -208,8 +220,8 @@ function gateAttrs(end: IdeaEnd): Json {
   if (end.kind === 'passed' || end.kind === 'slower' || end.kind === 'measuring') {
     return {
       stage,
-      metric_value: end.value,
-      vs_baseline: end.ratio,
+      metric_value: end.sample ?? end.value,
+      ...(end.noInput === true ? {} : {vs_baseline: end.ratio}),
       ...(end.readings === undefined
         ? {}
         : {metrics: end.readings, input_metrics: end.input ?? []}),
@@ -323,6 +335,22 @@ function gateSpan(spec: IdeaSpec, parent: string, startsAt: number, endsAt: numb
   };
 }
 
+/** The stop of the idea's implementer turn on a provider's quota, when the spec has one. */
+function quotaStop(trace: Trace, spec: IdeaSpec): void {
+  if (spec.pause === undefined) return;
+  trace.event(
+    'quota_resumed',
+    {
+      provider: 'claude',
+      condition: 'quota_exhausted',
+      reason: 'wait_elapsed',
+      waited_seconds: spec.pause.seconds,
+    },
+    spec.pause.at,
+    {agent_kind: 'implementer', invocation_id: `inv-w${spec.n}`},
+  );
+}
+
 /** Write one idea: its workstream, an implementer turn (with retries), and a gate when it got there. */
 export function addIdea(trace: Trace, spec: IdeaSpec): void {
   const took = spec.took ?? 600;
@@ -371,6 +399,7 @@ export function addIdea(trace: Trace, spec: IdeaSpec): void {
     }),
   });
   trace.span('span_started', turn('running', false), turnStart);
+  quotaStop(trace, spec);
   if (spec.usage !== undefined) startedExecution(trace, spec.n, turnId, turnStart);
   if (tries.length > 0)
     trace.span('span_updated', turn('running', false), turnStart + 30 * tries.length);

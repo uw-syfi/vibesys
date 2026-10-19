@@ -25,6 +25,7 @@ import {
   type MutableCoreState,
   type QuotaPause,
   type QuotaState,
+  type QuotaStop,
 } from './state.js';
 import {applySteerDelivery} from './steer-delivery.js';
 import {ledgerWith} from './token-usage.js';
@@ -187,7 +188,28 @@ function applyUsageData(state: CoreState, event: RunEvent): CoreState {
 
 function applyQuotaData(state: CoreState, event: RunEvent, sequence: number): CoreState {
   const quota = quotaFromEvent(state.quota, event, sequence);
-  return quota === state.quota ? state : cloneCoreStateWith(state, {quota});
+  const stop = quotaStopFromEvent(event, sequence);
+  if (quota === state.quota && stop === null) return state;
+  return cloneCoreStateWith(state, {
+    quota,
+    ...(stop === null ? {} : {quotaStops: [...state.quotaStops, stop]}),
+  });
+}
+
+/** The stop a `quota_resumed` or `quota_abandoned` event ends, when it held a turn for some time. */
+function quotaStopFromEvent(event: RunEvent, sequence: number): QuotaStop | null {
+  const data = event.data;
+  if (data?.kind !== 'quota_resumed' && data?.kind !== 'quota_abandoned') return null;
+  const waitedSeconds = data.waited_seconds ?? 0;
+  if (!(waitedSeconds > 0)) return null;
+  return {
+    sequence,
+    provider: data.provider,
+    condition: data.condition ?? null,
+    outcome: data.kind === 'quota_resumed' ? 'resumed' : 'abandoned',
+    waitedSeconds,
+    endedAt: event.timestamp,
+  };
 }
 
 function applyBenchmarkData(state: CoreState, event: RunEvent, sequence: number): CoreState {
@@ -215,7 +237,16 @@ function applyMeasurementComparedData(state: CoreState, event: RunEvent): CoreSt
   return cloneCoreStateWith(state, {
     comparisons: {
       ...state.comparisons,
-      [data.candidate_commit]: {verdict: data.verdict, ratio: data.ratio},
+      [data.candidate_commit]: {
+        verdict: data.verdict,
+        ratio: data.ratio,
+        metric: data.metric,
+        candidateValue: data.candidate_value,
+        baseValue: data.base_value,
+        baseCommit: data.base_commit,
+        candidateSamples: data.candidate_samples,
+        baseSamples: data.base_samples,
+      },
     },
   });
 }

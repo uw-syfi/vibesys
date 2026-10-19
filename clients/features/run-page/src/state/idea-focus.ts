@@ -5,7 +5,8 @@
  * the hero's figure that tells its result, and the chart marks its point (`stripChartView`'s
  * `focus`).
  */
-import type {Candidate} from '@vibesys/run-state/candidates';
+import type {BaseComparison, Candidate} from '@vibesys/run-state/candidates';
+import {baseWords} from './base-words.js';
 import {type Measure, resultLine, selectedWords, standingOf} from './idea-words.js';
 import {resolveZoom} from './run-level.js';
 import type {RunModel} from './run-model.js';
@@ -20,8 +21,10 @@ export function openIdeaId(model: RunModel, route: Route): string | null {
 /** The open idea's result as one line under the hero's figure. */
 export interface IdeaFocusView {
   readonly title: string;
-  /** Its ratio to the input (`3.83×`); null when unmeasured, and for a failed idea. */
+  /** Its ratio to the input (`3.83×`), or with none to its base; null when unmeasured, and for a failed idea. */
   readonly ratio: string | null;
+  /** What `ratio` is against: the base's name (`round 2`) when the run has no ratio to the input; null: the input. */
+  readonly base: string | null;
   /** Its measured value with the unit; null when unmeasured, and for a failed idea. */
   readonly value: string | null;
   /** Its status and why in words (`Failed · not measured`, `Running`), read when no multiple shows. */
@@ -39,11 +42,15 @@ function measureOf(model: RunModel, idea: Candidate): Measure | null {
   const measurement = idea.measurement;
   const value = measurement?.metricValue ?? null;
   const vs = measurement?.vsBaseline ?? null;
-  if (value === null || vs === null) return null;
+  const against = measurement?.against ?? null;
+  if (value === null || (vs === null && against === null)) return null;
   const unit = model.overview?.objective.unit;
+  const words = `${formatValue(value)}${typeof unit === 'string' && unit !== '' ? ` ${unit}` : ''}`;
+  if (vs !== null) return {ratio: ratio(vs), value: words, base: null};
   return {
-    ratio: ratio(vs),
-    value: `${formatValue(value)}${typeof unit === 'string' && unit !== '' ? ` ${unit}` : ''}`,
+    ratio: ratio((against as BaseComparison).ratio),
+    value: words,
+    base: baseWords(model.candidates.candidates, against as BaseComparison),
   };
 }
 
@@ -57,6 +64,7 @@ export function ideaFocusView(model: RunModel, id: string | null): IdeaFocusView
   return {
     title: idea.title,
     ratio: shown?.ratio ?? null,
+    base: shown?.base ?? null,
     value: shown?.value ?? null,
     outcome: selectedWords(idea, measure !== null),
     tone: toneOf(idea),

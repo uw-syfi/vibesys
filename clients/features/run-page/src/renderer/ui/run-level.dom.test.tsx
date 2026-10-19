@@ -288,6 +288,8 @@ test('the performance row is one element whatever idea is open: dots are singled
   expect(kinds()).toEqual(['dim', 'focus', 'dim']);
   // The idea's own result reads under the hero's figure.
   expect(container.textContent).toContain('Selected idea:');
+  // The line names the idea it is about, in its own text and not only in a tooltip.
+  expect(container.textContent).toMatch(/Selected idea:\s*i1/);
 
   const third = container.querySelectorAll('.vs-chart-pick')[2];
   await act(async () => {

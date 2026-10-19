@@ -52,6 +52,7 @@ function measurement(span: Span): CandidateMeasurement {
     at: span.ended_at ?? span.started_at,
     metricValue: numberOrNull(attrs['metric_value']),
     vsBaseline: numberOrNull(attrs['vs_baseline']),
+    against: null,
     readings: readings(attrs['metrics']),
     inputReadings: readings(attrs['input_metrics']),
     verdict: span.label?.verdict ?? null,

@@ -4,12 +4,19 @@ import {SEEDS, Seeded} from '@vibesys/store/testing';
 import {
   failuresAt,
   foldInputGates,
+  type GateFailure,
   gateFailureView,
+  gateHistoryView,
   gateReason,
   NO_INPUT_GATES,
 } from './input-gates.js';
 
-function gate(sequence: number, status: 'failed' | 'completed', tail: string | null): RunEvent {
+function gate(
+  sequence: number,
+  status: 'failed' | 'completed',
+  tail: string | null,
+  name = 'accuracy',
+): RunEvent {
   return {
     protocol_version: 1,
     run_id: 'run',
@@ -18,7 +25,7 @@ function gate(sequence: number, status: 'failed' | 'completed', tail: string | n
     type: 'gate_finished',
     text: '',
     status,
-    data: {kind: 'gate_finished', gate: 'accuracy', recipe: null, output_tail: tail},
+    data: {kind: 'gate_finished', gate: name, recipe: null, output_tail: tail},
   } as RunEvent;
 }
 
@@ -70,12 +77,12 @@ describe('gateReason', () => {
     expect(gateReason('  \n')).toBeNull();
   });
 
-  test('is never longer than a few words can be, whatever the gate printed', () => {
+  test('is never cut, whatever the gate printed', () => {
     for (const seed of SEEDS) {
       const random = new Seeded(seed);
-      const line = 'x'.repeat(random.int(400));
-      const tail = random.bool() ? `${line}\n` : `RuntimeError: ${line}`;
-      expect(gateReason(tail)?.length ?? 0, `seed ${seed}`).toBeLessThanOrEqual(90);
+      const line = 'x'.repeat(1 + random.int(400));
+      expect(gateReason(`${line}\n`), `seed ${seed}`).toBe(line);
+      expect(gateReason(`RuntimeError: ${line}`), `seed ${seed}`).toBe(`RuntimeError: ${line}`);
     }
   });
 });
@@ -127,5 +134,91 @@ describe('the input gates', () => {
     );
     expect(gateFailureView(two.failures)?.tail).toBe('Accuracy\noops\n\nAccuracy\noops');
     expect(gateFailureView([])).toBeNull();
+  });
+});
+
+describe('a gate that failed and was tried again', () => {
+  const REASON = `RuntimeError: ${'the engine refused to start '.repeat(8)}`.trim();
+
+  test('stands failed until a later attempt of the same gate passes, then is history', () => {
+    const events = [gate(1, 'failed', REASON, 'benchmark'), gate(2, 'failed', REASON, 'benchmark')];
+    const failing = events.reduce(foldInputGates, NO_INPUT_GATES);
+    expect(gateFailureView(failing.failures)?.label).toBe('Benchmark');
+    expect(gateHistoryView(failing.failures)).toBeNull();
+    const passed = [...events, gate(3, 'completed', null, 'benchmark')].reduce(
+      foldInputGates,
+      NO_INPUT_GATES,
+    );
+    expect(passed.failures.map(failure => failure.supersededBy)).toEqual([3, 3]);
+    expect(gateFailureView(passed.failures)).toBeNull();
+    expect(gateHistoryView(passed.failures)).toMatchObject({label: 'Benchmark', attempts: 2});
+  });
+
+  test('keeps the whole reason, whatever its length', () => {
+    expect(REASON.length).toBeGreaterThan(200);
+    const gates = [gate(1, 'failed', `${REASON}\n`, 'benchmark')].reduce(
+      foldInputGates,
+      NO_INPUT_GATES,
+    );
+    expect(gateFailureView(gates.failures)?.reason).toBe(REASON);
+  });
+
+  test('is not superseded by a pass of another gate, nor by one before it', () => {
+    const gates = [
+      gate(1, 'completed', null, 'benchmark'),
+      gate(2, 'failed', 'a', 'benchmark'),
+      gate(3, 'completed', null, 'accuracy'),
+    ].reduce(foldInputGates, NO_INPUT_GATES);
+    expect(gates.failures.map(failure => failure.supersededBy)).toEqual([null]);
+    expect(gateFailureView(gates.failures)?.label).toBe('Benchmark');
+  });
+
+  /** A random run of gate events for two gates, each failed or passed. */
+  function randomGates(random: Seeded): RunEvent[] {
+    const events: RunEvent[] = [];
+    for (let at = 1; at <= 2 + random.int(10); at += 1) {
+      const name = random.pick(['accuracy', 'benchmark']);
+      events.push(gate(at, random.bool() ? 'failed' : 'completed', 'tail', name));
+    }
+    return events;
+  }
+
+  /** The first event after `failure` that passed the same gate, the one that should supersede it. */
+  function firstPassAfter(events: readonly RunEvent[], failure: GateFailure): number | null {
+    const later = events.find(
+      event =>
+        (event.sequence ?? 0) > failure.sequence &&
+        event.status !== 'failed' &&
+        event.data?.kind === 'gate_finished' &&
+        event.data.gate === failure.gate,
+    );
+    return later?.sequence ?? null;
+  }
+
+  test('only its own pass supersedes, wherever the events are cut or replayed', () => {
+    for (const seed of SEEDS) {
+      const events = randomGates(new Seeded(seed));
+      const gates = events.reduce(foldInputGates, NO_INPUT_GATES);
+      for (const failure of gates.failures) {
+        expect(failure.supersededBy, `seed ${seed}`).toBe(firstPassAfter(events, failure));
+      }
+      // Replaying every event changes nothing.
+      expect([...events, ...events].reduce(foldInputGates, NO_INPUT_GATES).failures).toEqual(
+        gates.failures,
+      );
+    }
+  });
+
+  test('a view before the pass holds the failure as it stood then: failed', () => {
+    for (const seed of SEEDS) {
+      const gates = randomGates(new Seeded(seed)).reduce(foldInputGates, NO_INPUT_GATES);
+      for (const failure of gates.failures) {
+        if (failure.supersededBy === null) continue;
+        const held = failuresAt(gates, failure.supersededBy - 1).find(
+          each => each.sequence === failure.sequence,
+        );
+        expect(held?.supersededBy, `seed ${seed}`).toBeNull();
+      }
+    }
   });
 });

@@ -37,8 +37,13 @@ import {
   type WhoBySpan,
   whoWords,
 } from '../../../../state/index.js';
+import {
+  pausedSeconds,
+  pauseWords,
+  type QuotaPauseSpan,
+  workedWords,
+} from '../../../../state/quota-pauses.js';
 import {roleSeries} from '../../../../state/role-series.js';
-import {duration} from '../../../../state/span-reading.js';
 import {plain, statusWords} from '../../../../state/span-words.js';
 import {type AttemptLine, attemptLines, endOf} from '../../../../state/timeline-rows.js';
 import type {ViewBase, ViewHeader, Zoom} from '../props.js';
@@ -74,7 +79,10 @@ function standingLabel(props: IdeaViewProps): string {
  */
 function IdeaFacts(props: IdeaViewProps): JSX.Element {
   const {idea, clock} = props;
+  const {pauses} = props.model;
   const known = idea.endedAt !== null || clock.now !== null;
+  const end = endOf(idea.startedAt, idea.endedAt, clock.now);
+  const paused = pausedSeconds(pauses, idea.startedAt, end);
   return (
     <FactLine>
       <Fact>
@@ -83,7 +91,14 @@ function IdeaFacts(props: IdeaViewProps): JSX.Element {
       {known ? (
         <Fact>
           <Text variant="code" tone="muted">
-            {duration(endOf(idea.startedAt, idea.endedAt, clock.now) - idea.startedAt)}
+            {workedWords(pauses, idea.startedAt, end)}
+          </Text>
+        </Fact>
+      ) : null}
+      {known && paused > 0 ? (
+        <Fact>
+          <Text variant="code" tone="muted">
+            {pauseWords(paused)}
           </Text>
         </Fact>
       ) : null}
@@ -187,7 +202,7 @@ function Attempts(props: {
 export function IdeaView(props: IdeaViewProps): JSX.Element {
   const {idea, clock, zoom} = props;
   const [chosen, setChosen] = useState<string | null>(null);
-  const lines = attemptLines(idea, clock.now, unitOf(props.model));
+  const lines = attemptLines(idea, clock.now, unitOf(props.model), props.model.pauses);
   const latest = idea.attempts.at(-1);
   const attempt = idea.attempts.find(each => each.span === chosen) ?? latest;
   if (attempt === undefined) return <EmptyState title="No steps yet" />;
@@ -208,13 +223,20 @@ export function IdeaView(props: IdeaViewProps): JSX.Element {
       {lines.length > 1 ? (
         <Attempts lines={lines} selected={attempt.span} choose={setChosen} />
       ) : null}
-      <StepStrip idea={idea} attempt={attempt} now={clock.now} zoom={zoom} />
+      <StepStrip
+        idea={idea}
+        attempt={attempt}
+        now={clock.now}
+        pauses={props.model.pauses}
+        zoom={zoom}
+      />
       <StepRows
         steps={attempt.steps}
         label={lines.length > 1 ? `Attempt ${number} steps` : `${idea.title} steps`}
         selected={null}
         tokens={props.tokens}
         who={props.who}
+        pauses={props.model.pauses}
         zoom={zoom}
         size="default"
       />
@@ -230,6 +252,8 @@ export interface StepListProps {
   readonly tokens: TokenLedger;
   /** What ran each turn, for the chip beside the role. */
   readonly who: WhoBySpan;
+  /** Where turns were stopped on a capacity limit, left out of each step's duration. */
+  readonly pauses: readonly QuotaPauseSpan[];
   readonly zoom: Zoom;
 }
 
@@ -253,15 +277,24 @@ function noteworthy(step: CandidateStep): ReturnType<typeof stateOf>[] {
   return step.status === 'done' ? [] : [stateOf(step)];
 }
 
-/** What ran an agent turn, then its status when that is noteworthy. */
-function stepBadges(step: CandidateStep, who: WhoBySpan): RowBadge[] {
+/** What ran an agent turn, the pause it sat out when it did, then its status when that is noteworthy. */
+function stepBadges(
+  step: CandidateStep,
+  who: WhoBySpan,
+  pauses: readonly QuotaPauseSpan[],
+): RowBadge[] {
   const ran = step.kind === 'agent_turn' ? whoBadge(who.get(step.span)) : null;
-  return [...(ran === null ? [] : [ran]), ...noteworthy(step)];
+  const paused = step.endedAt === null ? 0 : pausedSeconds(pauses, step.startedAt, step.endedAt);
+  return [
+    ...(ran === null ? [] : [ran]),
+    ...(paused > 0 ? [{label: pauseWords(paused), tone: 'warn' as const}] : []),
+    ...noteworthy(step),
+  ];
 }
 
-/** How long a finished step took; empty while it runs (a list has no clock). */
-function tookOf(step: CandidateStep): string | undefined {
-  return step.endedAt === null ? undefined : duration(step.endedAt - step.startedAt);
+/** How long a finished step took, its quota pauses left out; empty while it runs (a list has no clock). */
+function tookOf(step: CandidateStep, pauses: readonly QuotaPauseSpan[]): string | undefined {
+  return step.endedAt === null ? undefined : workedWords(pauses, step.startedAt, step.endedAt);
 }
 
 function StepRows(props: {
@@ -270,6 +303,7 @@ function StepRows(props: {
   readonly selected: string | null;
   readonly tokens: TokenLedger;
   readonly who: WhoBySpan;
+  readonly pauses: readonly QuotaPauseSpan[];
   readonly zoom: Zoom;
   readonly size: 'default' | 'fill';
 }): JSX.Element {
@@ -288,7 +322,7 @@ function StepRows(props: {
       {...(props.selected === null ? {} : {selected: props.selected})}
     >
       {props.steps.map((step, index) => {
-        const took = tookOf(step);
+        const took = tookOf(step, props.pauses);
         const name = step.role === null ? plain(step.kind) : stepLabel(step);
         // Every row reads alike: its mark, its name (the role, or the kind for a gate), then the
         // step's headline after it when it has one beyond the name.
@@ -304,7 +338,7 @@ function StepRows(props: {
             {...(step.role === null
               ? {hatched: step.kind === 'gate'}
               : {swatch: roleSeries(step.role)})}
-            badges={stepBadges(step, props.who)}
+            badges={stepBadges(step, props.who, props.pauses)}
             {...(took === undefined ? {} : {figure: took})}
             {...(measure === null ? {} : {measure: {...measure, size: 'line' as const}})}
             select={() => props.zoom({type: 'open-step', step: step.span})}
@@ -324,6 +358,7 @@ export function StepList(props: StepListProps): JSX.Element {
       selected={props.selected}
       tokens={props.tokens}
       who={props.who}
+      pauses={props.pauses}
       zoom={props.zoom}
       size="fill"
     />

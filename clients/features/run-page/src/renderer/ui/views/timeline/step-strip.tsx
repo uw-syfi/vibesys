@@ -6,6 +6,7 @@
 import type {Candidate, CandidateAttempt} from '@vibesys/run-state/candidates';
 import {Gantt, Stack, SwatchLegend} from '@vibesys/ui';
 import type {JSX} from 'react';
+import type {QuotaPauseSpan} from '../../../../state/quota-pauses.js';
 import {attemptStrip, legendItems} from '../../../../state/timeline-rows.js';
 import type {Zoom} from '../props.js';
 
@@ -13,10 +14,11 @@ export function StepStrip(props: {
   readonly idea: Candidate;
   readonly attempt: CandidateAttempt;
   readonly now: number | null;
+  readonly pauses: readonly QuotaPauseSpan[];
   readonly zoom: Zoom;
 }): JSX.Element {
   const {idea, attempt, zoom} = props;
-  const strip = attemptStrip(idea, attempt, props.now);
+  const strip = attemptStrip(idea, attempt, props.now, props.pauses);
   const {row} = strip;
   const key = legendItems(strip.legend);
   return (
@@ -37,10 +39,13 @@ export function StepStrip(props: {
             outcome: row.outcome,
             figure: row.figure,
             selected: false,
-            segments: row.segments.map(segment => ({
-              ...segment,
-              press: () => zoom({type: 'open-step', step: segment.id}),
-            })),
+            segments: row.segments.map(segment => {
+              const {step} = segment;
+              return {
+                ...segment,
+                ...(step === null ? {} : {press: () => zoom({type: 'open-step', step})}),
+              };
+            }),
             press: () => undefined,
           },
         ]}

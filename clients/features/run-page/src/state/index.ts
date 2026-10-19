@@ -36,7 +36,13 @@ export {
   noIdeasWords,
   pressChip,
 } from './ideas-view.js';
-export {type GateFailure, type GateFailureView, gateFailureView} from './input-gates.js';
+export {
+  type GateFailure,
+  type GateFailureView,
+  type GateHistoryView,
+  gateFailureView,
+  gateHistoryView,
+} from './input-gates.js';
 export {EMPTY_TRACE_LOG, type RunData, type SessionView, type TraceLog} from './live.js';
 export {type ModelNames, modelNamesOf, NO_MODEL_NAMES} from './model-names.js';
 export {roleLabel, stepKicker, stepLabel, stepTitle} from './names.js';
@@ -48,9 +54,11 @@ export {
   paretoView,
 } from './pareto-view.js';
 export {predatesTraceWords, roundsBeforeTrace} from './predates-trace.js';
+export {pauseWords, workedWords} from './quota-pauses.js';
 export {type ReaderReply, readerHeld} from './reader.js';
 export {runRecord, sameRecord} from './record.js';
 export {roleSeries} from './role-series.js';
+export {createFactsReader} from './run-facts.js';
 export {
   clockAt,
   clockStart,

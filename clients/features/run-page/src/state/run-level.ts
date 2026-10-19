@@ -13,6 +13,7 @@ import type {
   MeasuredReading,
   ObjectiveAxis,
 } from '@vibesys/run-state/candidates';
+import {baseWords} from './base-words.js';
 import {metricLabel, unitLabel} from './metric-words.js';
 import {stepLabel, stepTitle} from './names.js';
 import {objectivesOf} from './pareto-view.js';
@@ -22,6 +23,7 @@ import {
   type PerformancePoint,
   performanceFold,
 } from './performance.js';
+import {workedWords} from './quota-pauses.js';
 import type {Direction, RunModel} from './run-model.js';
 import type {RunPageState} from './run-page.js';
 import {type LogScope, streamToFollow} from './scoped-logs.js';
@@ -205,6 +207,8 @@ function tileWords(
   input: number | null,
   unit: string,
   better: number | null,
+  /** The ratio to the idea's base, worded (`1.10× vs round 2`), said in place of why there is no multiple. */
+  againstBase: string | null = null,
 ): Pick<MetricTileView, 'ratio' | 'figure' | 'note' | 'tone' | 'detail'> {
   const inputPart = input === null ? [] : [`input ${formatValue(input)}${unit}`];
   if (value === null) {
@@ -222,7 +226,7 @@ function tileWords(
       figure: formatValue(value),
       note: unit.trim() === '' ? null : unit.trim(),
       tone: 'muted',
-      detail: input === null ? noInputWords(model) : inputPart.join(''),
+      detail: input === null ? (againstBase ?? noInputWords(model)) : inputPart.join(''),
     };
   }
   const verdict = verdictOf(better);
@@ -252,10 +256,20 @@ function objectiveTile(model: RunModel, best: CandidateMeasurement | null): Metr
   // reading, which is not always the objective's.
   const reading = named ? best?.readings.find(each => each.name === metric) : undefined;
   const value = reading?.value ?? best?.metricValue ?? null;
+  const against = best?.against ?? null;
   return {
     id: named ? metric : 'metric',
     name,
-    ...tileWords(model, value, input, unitWords(model, name), better),
+    ...tileWords(
+      model,
+      value,
+      input,
+      unitWords(model, name),
+      better,
+      against === null
+        ? null
+        : `${ratio(against.ratio)} vs ${baseWords(model.candidates.candidates, against)}`,
+    ),
     trend: trendOf(model, name, input),
   };
 }
@@ -378,7 +392,7 @@ function focusOn(
         {
           from: minutes(open.startedAt),
           to: minutes(to),
-          label: `${open.title} · ${duration(to - open.startedAt)}`,
+          label: `${open.title} · ${workedWords(model.pauses, open.startedAt, to)}`,
         },
       ];
     },

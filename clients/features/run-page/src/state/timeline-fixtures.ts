@@ -39,6 +39,7 @@ export function attempt(id: string, outcome: CandidateOutcome, at: number, took:
             at: at + took,
             metricValue: 40,
             vsBaseline: 1.5,
+            against: null,
             readings: [],
             inputReadings: [],
             verdict: 'passed',
@@ -83,5 +84,5 @@ export function modelOf(
     adoptionOpened: best !== null,
     bestPath: best?.candidate ? [best.candidate] : [],
   };
-  return {candidates: tree, direction: 'max'} as unknown as RunModel;
+  return {candidates: tree, direction: 'max', pauses: []} as unknown as RunModel;
 }

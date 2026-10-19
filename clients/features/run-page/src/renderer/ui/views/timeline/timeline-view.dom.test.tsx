@@ -163,6 +163,7 @@ test('a failed idea has no multiple to show, so its cell is a dash, as in the Id
       at: 300,
       metricValue: null,
       vsBaseline: null,
+      against: null,
       readings: [],
       inputReadings: [],
       verdict: 'failed_check',

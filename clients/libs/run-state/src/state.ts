@@ -136,6 +136,32 @@ export interface MeasurementComparison {
   readonly verdict: 'better' | 'within_noise' | 'worse' | 'inconclusive';
   /** The candidate's value over its base's. */
   readonly ratio: number;
+  /** The metric compared: the name of the headline reading it states the value of. */
+  readonly metric: string;
+  /** The candidate's value as the comparison used it: the mean of its `candidateSamples` runs. */
+  readonly candidateValue: number;
+  /** The base's value as the comparison used it: the mean of its `baseSamples` runs. */
+  readonly baseValue: number;
+  /** The commit the candidate was compared with: the input's, or another idea's. */
+  readonly baseCommit: string;
+  readonly candidateSamples: number;
+  readonly baseSamples: number;
+}
+
+/**
+ * One stop of an agent turn on a provider capacity limit, folded from the `quota_resumed` or
+ * `quota_abandoned` event that ended it. The turn did no work for `waitedSeconds`, which ended at
+ * the event's `endedAt` (the host's wall time, as every event stamps it).
+ */
+export interface QuotaStop {
+  readonly sequence: number;
+  readonly provider: string;
+  /** The limit it stopped on; null in events recorded before the field existed. */
+  readonly condition: 'quota_exhausted' | 'rate_limited' | 'unavailable' | null;
+  readonly outcome: 'resumed' | 'abandoned';
+  readonly waitedSeconds: number;
+  /** The event's timestamp: when the stop ended. */
+  readonly endedAt: string;
 }
 
 type RunStartupProgressData = Extract<
@@ -377,6 +403,8 @@ export interface CoreState {
   readonly todos: readonly ExecutionTodos[];
   readonly usage: UsageMeter | null;
   readonly quota: QuotaState;
+  /** Every stop on a capacity limit that held a turn for some time, in journal order. */
+  readonly quotaStops: readonly QuotaStop[];
   readonly winner: WinnerSelection | null;
   /**
    * The latest comparison with its base of each candidate commit, keyed by `candidate_commit`.
@@ -455,6 +483,7 @@ export function initialCoreState(): CoreState {
     todos: [],
     usage: null,
     quota: {sequence: 0, pause: null, lastSwitch: null},
+    quotaStops: [],
     winner: null,
     comparisons: {},
     benchmarks: [],

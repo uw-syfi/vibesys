@@ -3275,9 +3275,70 @@ describe('measurement comparison state', () => {
       compared(3, 'abc', 'better'),
     ].reduce(reduceEvent, initialCoreState());
     expect(state.comparisons).toEqual({
-      abc: {verdict: 'better', ratio: 1.2},
-      def: {verdict: 'worse', ratio: 1.2},
+      abc: {
+        verdict: 'better',
+        ratio: 1.2,
+        metric: 'total_ops_per_sec',
+        candidateValue: 120,
+        baseValue: 100,
+        baseCommit: 'base-rev',
+        candidateSamples: 5,
+        baseSamples: 5,
+      },
+      def: {
+        verdict: 'worse',
+        ratio: 1.2,
+        metric: 'total_ops_per_sec',
+        candidateValue: 120,
+        baseValue: 100,
+        baseCommit: 'base-rev',
+        candidateSamples: 5,
+        baseSamples: 5,
+      },
     });
+  });
+});
+
+describe('quota stops', () => {
+  const resumed = (sequence: number, waited: number, timestamp: string): RunEvent => ({
+    ...fixtureEvent(sequence, 'quota_resumed', {
+      data: {
+        kind: 'quota_resumed',
+        provider: 'claude',
+        condition: 'rate_limited',
+        reason: 'wait_elapsed',
+        waited_seconds: waited,
+      },
+    }),
+    timestamp,
+  });
+
+  it('starts with none', () => {
+    expect(initialCoreState().quotaStops).toEqual([]);
+  });
+
+  it('records each stop that held a turn, with when it ended and how long it held it', () => {
+    const state = [
+      resumed(1, 2220, '2026-10-18T14:32:00Z'),
+      resumed(2, 0, '2026-10-18T15:00:00Z'),
+      fixtureEvent(3, 'quota_abandoned', {
+        data: {
+          kind: 'quota_abandoned',
+          provider: 'claude',
+          condition: 'unavailable',
+          detail: 'outage',
+          reason: 'budget',
+          waited_seconds: 60,
+        },
+      }),
+    ].reduce(reduceEvent, initialCoreState());
+    expect(state.quotaStops.map(stop => [stop.sequence, stop.outcome, stop.waitedSeconds])).toEqual(
+      [
+        [1, 'resumed', 2220],
+        [3, 'abandoned', 60],
+      ],
+    );
+    expect(state.quotaStops[0]?.endedAt).toBe('2026-10-18T14:32:00Z');
   });
 });
 

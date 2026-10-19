@@ -429,6 +429,57 @@ function basesAndEffects(): RunFixture {
   });
 }
 
+/**
+ * A run whose input's benchmark failed twice before it passed, so no idea has a ratio to the input,
+ * and whose second idea sat out a provider's quota for 37 minutes. Each idea's gate states the
+ * reading of one run; the framework's comparison states the mean of its runs, which is the value.
+ */
+function quotaPause(): RunFixture {
+  const reason = `RuntimeError: ${'the engine failed its preflight '.repeat(5)}`.trim();
+  const gate = (trace: Trace, at: number, failed: boolean): void => {
+    trace.event(
+      'gate_finished',
+      {gate: 'benchmark', recipe: null, output_tail: failed ? `${reason}\n` : null},
+      at,
+      {status: failed ? 'failed' : 'completed'},
+    );
+  };
+  return fixture({
+    name: 'quota-pause',
+    description:
+      'A live run whose input benchmark failed and then passed, whose ideas have no ratio to the input but one to their base, and whose second idea waited 37 minutes on a provider quota.',
+    runId: '20261019-120000',
+    state: 'live',
+    build: trace => {
+      gate(trace, 5, true);
+      gate(trace, 8, true);
+      gate(trace, 12, false);
+      plan(trace, 1, 10);
+      addIdea(trace, {
+        n: 1,
+        title: 'Preallocate the arena',
+        at: 100,
+        round: 1,
+        baseRound: null,
+        end: {kind: 'passed', value: 350.39, sample: 352.1, ratio: 350.39 / 286.96, noInput: true},
+        effect: 'better',
+      });
+      addIdea(trace, {
+        n: 2,
+        title: 'Pin the consumers to cores',
+        at: 800,
+        on: 1,
+        round: 2,
+        baseRound: 1,
+        took: 5000,
+        end: {kind: 'passed', value: 385.4, sample: 395.4, ratio: 385.4 / 350.4, noInput: true},
+        effect: 'better',
+        pause: {at: 3300, seconds: 2220},
+      });
+    },
+  });
+}
+
 /** Ideas that build on other ideas: chains, a merge of two, a base that itself failed. */
 function nonInputBases(): RunFixture {
   return fixture({
@@ -866,5 +917,6 @@ export function scenarios(): readonly RunFixture[] {
     finishedRun(),
     tenIdeas(),
     twoObjectives(),
+    quotaPause(),
   ];
 }

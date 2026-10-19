@@ -68,7 +68,7 @@ function Header(props: ChatPanelView): JSX.Element {
   const current = threads.find(entry => entry.id === shown);
   return (
     <Stack gap="space-3">
-      <Row justify="between" align="start" gap="space-3">
+      <Row justify="between" align="start" gap="space-3" wrap>
         <Stack gap="space-1">
           <Text as="h2" variant="heading">
             Chat

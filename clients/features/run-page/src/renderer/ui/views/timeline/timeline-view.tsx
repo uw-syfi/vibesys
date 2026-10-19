@@ -93,12 +93,16 @@ function RunTimeline(props: ViewBase): JSX.Element {
           end: row.end,
           outcome: row.outcome,
           figure: row.figure,
-          segments: row.segments.map(segment => ({
-            ...segment,
-            ...(row.lane
-              ? {}
-              : {press: () => zoom({type: 'open-step', step: segment.id, idea: row.id})}),
-          })),
+          ...(row.figureTitle === undefined ? {} : {figureTitle: row.figureTitle}),
+          segments: row.segments.map(segment => {
+            const {step} = segment;
+            return {
+              ...segment,
+              ...(row.lane || step === null
+                ? {}
+                : {press: () => zoom({type: 'open-step', step, idea: row.id})}),
+            };
+          }),
           press: () => open(row),
         }))}
       />
@@ -111,5 +115,13 @@ export function TimelineView(props: TimelineViewProps): JSX.Element {
   if (idea === null) return <RunTimeline {...props} />;
   const attempt = idea.attempts.at(-1);
   if (attempt === undefined) return <EmptyState title="No steps yet" />;
-  return <StepStrip idea={idea} attempt={attempt} now={props.clock.now} zoom={props.zoom} />;
+  return (
+    <StepStrip
+      idea={idea}
+      attempt={attempt}
+      now={props.clock.now}
+      pauses={props.model.pauses}
+      zoom={props.zoom}
+    />
+  );
 }

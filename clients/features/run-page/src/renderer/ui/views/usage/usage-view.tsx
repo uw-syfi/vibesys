@@ -4,7 +4,7 @@
  * the chart and the shares count, and whether the chart shows each slice of time or the running
  * total); the chart; its legend; and a table with a row per group that unfolds into a second
  * grouping and follows its series in the chart. Every figure is a fold of the run's usage records
- * (`usageView`), so they agree, and the footnote says how a cost nobody reported reads.
+ * (`usageView`), so they agree; a cost nobody reported is counted `unpriced` on the cost tile.
  */
 import {
   Checkbox,
@@ -270,13 +270,6 @@ export function UsageView(props: UsageViewProps): JSX.Element {
           };
         }}
       />
-      <Text variant="small" tone="muted">
-        {`Totals match the run header. A cost is what the provider reported for each turn${
-          view.unpriced === 0
-            ? '.'
-            : `; ${view.unpriced} ${view.unpriced === 1 ? 'turn reported' : 'turns reported'} none and ${view.unpriced === 1 ? 'counts' : 'count'} as unknown, never zero.`
-        }`}
-      </Text>
     </Stack>
   );
 }

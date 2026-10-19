@@ -146,6 +146,7 @@ test('the compact step list highlights the opened step', async () => {
       selected="a3-g"
       tokens={EMPTY_LEDGER}
       who={new Map()}
+      pauses={[]}
       zoom={() => undefined}
     />,
   );

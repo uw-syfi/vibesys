@@ -224,12 +224,25 @@ function appended(log: TraceLog, events: readonly RunEvent[], meter?: WorkMeter)
   return added.length === 0 ? log : extended(log, added, meter);
 }
 
-/** `log` with `failures` among its input gate failures, each once, in sequence order. */
+/**
+ * `log` with `failures` among its input gate failures, each once, in sequence order. A failure the
+ * log holds as standing that `failures` says a later attempt superseded becomes history.
+ */
 function withInputFailures(log: TraceLog, failures: readonly GateFailure[]): TraceLog {
-  const known = new Set(log.inputGates.failures.map(failure => failure.sequence));
-  const added = failures.filter(failure => !known.has(failure.sequence));
-  if (added.length === 0) return log;
-  const merged = [...log.inputGates.failures, ...added].sort((a, b) => a.sequence - b.sequence);
+  const held = new Map(log.inputGates.failures.map(failure => [failure.sequence, failure]));
+  let changed = false;
+  for (const failure of failures) {
+    const known = held.get(failure.sequence);
+    if (known === undefined) {
+      held.set(failure.sequence, failure);
+      changed = true;
+    } else if (known.supersededBy === null && failure.supersededBy !== null) {
+      held.set(failure.sequence, {...known, supersededBy: failure.supersededBy});
+      changed = true;
+    }
+  }
+  if (!changed) return log;
+  const merged = [...held.values()].sort((a, b) => a.sequence - b.sequence);
   return {...log, inputGates: {...log.inputGates, failures: merged}};
 }
 

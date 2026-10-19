@@ -21,6 +21,7 @@ function measured(item: Candidate, value: number, at: number, verdict: Verdict):
     at,
     metricValue: value,
     vsBaseline: null,
+    against: null,
     readings: [],
     inputReadings: [],
     verdict,

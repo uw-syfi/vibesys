@@ -147,3 +147,25 @@ test('a panel that cannot be drawn shows an error state with Close, and sends Cl
   expect(closed).toEqual(['close']);
   await unmount();
 });
+
+test('the header lets its buttons drop to a line of their own, so New chat never clips at a narrow panel', async () => {
+  const view = {
+    ...viewOf([]),
+    threads: [
+      {
+        id: 't',
+        title: 'A thread title that is long enough to crowd the buttons',
+        provider: null,
+        model: null,
+        answers: 0,
+      },
+    ],
+  };
+  const {container, unmount} = await mount(<ChatPanel {...view} />);
+  const newChat = [...container.querySelectorAll('button')].find(
+    button => button.textContent === 'New chat',
+  );
+  const header = newChat?.closest('.vs-flex[data-justify="between"]');
+  expect(header?.hasAttribute('data-wrap')).toBe(true);
+  await unmount();
+});

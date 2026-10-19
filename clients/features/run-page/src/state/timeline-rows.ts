@@ -13,9 +13,17 @@ import type {
   CandidateOutcome,
   CandidateStep,
 } from '@vibesys/run-state/candidates';
+import {againstWords} from './base-words.js';
 import {figureOf, vsInputCell} from './idea-words.js';
 import {stepLabel, stepTitle} from './names.js';
 import {inputValueOf} from './performance.js';
+import {
+  NO_PAUSES,
+  pauseWords,
+  piecesAround,
+  type QuotaPauseSpan,
+  workedSeconds,
+} from './quota-pauses.js';
 import {roleSeries} from './role-series.js';
 import type {Direction, RunModel} from './run-model.js';
 import {duration, formatValue, ratio, TURNED_DOWN} from './span-reading.js';
@@ -48,6 +56,8 @@ type SegmentKind = 'solid' | 'hatched' | 'grey';
 /** One step as a piece of a bar. */
 export interface StepSegment {
   readonly id: string;
+  /** The step this piece is of (a step that spanned a pause has several); null for a folded lane's marks. */
+  readonly step: string | null;
   readonly start: number;
   readonly end: number;
   readonly kind: SegmentKind;
@@ -70,6 +80,8 @@ export interface TimelineRow {
   readonly outcome: BarOutcome;
   /** The `vs input` cell: the multiple, a dash when there is none, empty while running. */
   readonly figure: string;
+  /** The figure in full, as the hover shows it, when the cell shows a short form of it. */
+  readonly figureTitle?: string;
   readonly segments: readonly StepSegment[];
   readonly lane: boolean;
 }
@@ -116,31 +128,78 @@ function stepKind(step: CandidateStep): SegmentKind {
   return step.kind === 'gate' ? 'hatched' : 'solid';
 }
 
-/** The steps as bar segments; a running step reaches `now`. */
+/**
+ * The steps as bar segments; a running step reaches `now`. A step that spanned a quota pause is cut
+ * around it: its worked pieces keep the step's color and a grey piece stands for the pause, so the
+ * bar never shows the pause as agent work and the step's `took` leaves it out.
+ */
 export function stepSegments(
   steps: readonly CandidateStep[],
   now: number | null,
+  pauses: readonly QuotaPauseSpan[] = NO_PAUSES,
 ): readonly StepSegment[] {
-  return steps.map(step => {
+  return steps.flatMap(step => {
     const end = endOf(step.startedAt, step.endedAt, now);
-    const took = end > step.startedAt ? [duration(end - step.startedAt)] : [];
+    const worked = workedSeconds(pauses, step.startedAt, end);
+    const took = end > step.startedAt ? [duration(worked)] : [];
     const name = step.role === null ? plain(step.kind) : stepLabel(step);
     const title = stepTitle(step);
-    return {
-      id: step.span,
-      start: step.startedAt,
-      end,
-      kind: stepKind(step),
-      role: step.role,
-      ...(step.role === null ? {} : {series: roleSeries(step.role)}),
-      label: [name, ...(title.toLowerCase() === name.toLowerCase() ? [] : [title]), ...took].join(
-        ' · ',
-      ),
-    };
+    const label = [
+      name,
+      ...(title.toLowerCase() === name.toLowerCase() ? [] : [title]),
+      ...took,
+    ].join(' \u00b7 ');
+    return piecesAround(pauses, step.startedAt, end).map((piece, at) =>
+      piece.paused
+        ? {
+            id: `${step.span}#pause${at}`,
+            step: step.span,
+            start: piece.start,
+            end: piece.end,
+            kind: 'grey' as const,
+            role: null,
+            label: pauseWords(piece.end - piece.start),
+          }
+        : {
+            id: at === 0 ? step.span : `${step.span}#${at}`,
+            step: step.span,
+            start: piece.start,
+            end: piece.end,
+            kind: stepKind(step),
+            role: step.role,
+            ...(step.role === null ? {} : {series: roleSeries(step.role)}),
+            label,
+          },
+    );
   });
 }
 
-function rowOf(item: Candidate, now: number | null, inputKnown: boolean): TimelineRow {
+/**
+ * The row's figure: the ideas list's cell, with the base of a multiple that is not over the input
+ * in a short form that fits the column, and the whole cell on hover.
+ */
+function figureCells(
+  item: Candidate,
+  inputKnown: boolean,
+  candidates: readonly Candidate[],
+): Pick<TimelineRow, 'figure' | 'figureTitle'> {
+  if (item.outcome === 'running') return {figure: ''};
+  const whole = vsInputCell(
+    figureOf(item, inputKnown, against => againstWords(candidates, against, 'whole')),
+  ).figure;
+  const short = vsInputCell(
+    figureOf(item, inputKnown, against => againstWords(candidates, against, 'short')),
+  ).figure;
+  return short === whole ? {figure: whole} : {figure: short, figureTitle: whole};
+}
+
+function rowOf(
+  item: Candidate,
+  now: number | null,
+  inputKnown: boolean,
+  candidates: readonly Candidate[],
+  pauses: readonly QuotaPauseSpan[],
+): TimelineRow {
   const steps = item.attempts.flatMap(attempt => attempt.steps);
   return {
     id: item.id,
@@ -148,8 +207,8 @@ function rowOf(item: Candidate, now: number | null, inputKnown: boolean): Timeli
     start: item.startedAt,
     end: endOf(item.startedAt, item.endedAt, now),
     outcome: OUTCOME[item.outcome],
-    figure: item.outcome === 'running' ? '' : vsInputCell(figureOf(item, inputKnown)).figure,
-    segments: stepSegments(steps, now),
+    ...figureCells(item, inputKnown, candidates),
+    segments: stepSegments(steps, now, pauses),
     lane: false,
   };
 }
@@ -172,6 +231,7 @@ function laneOf(failed: readonly TimelineRow[]): TimelineRow {
     .sort((a, b) => a - b)
     .map(bin => ({
       id: `bin-${bin}`,
+      step: null,
       start: start + bin * width,
       end: start + (bin + 1) * width,
       kind: 'grey',
@@ -272,7 +332,7 @@ export function timelineRows(
   const to = Math.max(reached, from + 1);
   const view = range === 'all' ? {from, to} : {from: Math.max(from, to - RANGE_SECONDS[range]), to};
   const inRange = ordered(all)
-    .map(item => rowOf(item, clock.now, inputKnown))
+    .map(item => rowOf(item, clock.now, inputKnown, all, model.pauses))
     .filter(row => row.end >= view.from && row.start <= view.to);
   const failed = inRange.filter(row => row.outcome === 'err');
   const fold = !expanded && failed.length > FAILED_DENSE;
@@ -329,6 +389,7 @@ export function attemptLines(
   idea: Candidate,
   now: number | null,
   unit: string,
+  pauses: readonly QuotaPauseSpan[] = NO_PAUSES,
 ): readonly AttemptLine[] {
   return idea.attempts.map((attempt, at) => {
     const value = attempt.measurement?.metricValue ?? null;
@@ -340,7 +401,13 @@ export function attemptLines(
       value: value === null ? null : `${formatValue(value)}${unit === '' ? '' : ` ${unit}`}`,
       tone: ATTEMPT_TONE[attempt.outcome],
       took: known
-        ? duration(endOf(attempt.startedAt, attempt.endedAt, now) - attempt.startedAt)
+        ? duration(
+            workedSeconds(
+              pauses,
+              attempt.startedAt,
+              endOf(attempt.startedAt, attempt.endedAt, now),
+            ),
+          )
         : '',
     };
   });
@@ -360,10 +427,11 @@ export function attemptStrip(
   idea: Candidate,
   attempt: CandidateAttempt,
   now: number | null,
+  pauses: readonly QuotaPauseSpan[] = NO_PAUSES,
 ): AttemptStrip {
   const end = endOf(attempt.startedAt, attempt.endedAt, now);
   const vs = attempt.measurement?.vsBaseline ?? null;
-  const segments = stepSegments(attempt.steps, now);
+  const segments = stepSegments(attempt.steps, now, pauses);
   return {
     from: attempt.startedAt,
     to: Math.max(end, attempt.startedAt + 1),

@@ -34,6 +34,7 @@ interface Cell {
 }
 
 const FINISHED: Readonly<Record<string, Journey>> = {
+  'quota-pause': {idea: 'Pin the consumers to cores', command: null, judge: false, live: true},
   'crashed-after-turn': {idea: null, command: null, judge: false, live: false},
   'finished-run': {...DEEP, idea: 'Combine the ring with the padding', live: false},
   'finished-ten-ideas': {idea: 'Pad the slot headers', command: null, judge: false, live: false},
@@ -65,6 +66,7 @@ const STRESS: readonly Cell[] = [
   'continuation-rounds',
   'non-input-bases',
   'bases-and-effects',
+  'quota-pause',
   'live-reconnect',
   'crashed-after-turn',
   'weeks-600-ideas',

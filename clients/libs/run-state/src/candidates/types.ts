@@ -23,6 +23,20 @@ export interface MeasuredReading {
   readonly direction: 'max' | 'min';
 }
 
+/**
+ * How the framework compared a candidate's measurement with its base's (`measurement_compared`):
+ * the base is the code the candidate was compared against, which is not always the input. Set by
+ * whoever joins the run's comparisons to the candidates; null from the spans alone.
+ */
+export interface BaseComparison {
+  /** The candidate's value over its base's. */
+  readonly ratio: number;
+  /** The commit of the code it was compared with. */
+  readonly baseCommit: string;
+  /** The base's value as the comparison used it. */
+  readonly baseValue: number;
+}
+
 /** What a gate of a candidate measured. */
 export interface CandidateMeasurement {
   /** The gate span. */
@@ -32,6 +46,8 @@ export interface CandidateMeasurement {
   readonly metricValue: number | null;
   /** The candidate's value divided by the input's. */
   readonly vsBaseline: number | null;
+  /** The comparison with the idea's base; null until one is joined (see `BaseComparison`). */
+  readonly against: BaseComparison | null;
   /** Every reading the benchmark reported, headline first; empty when the gate read none. */
   readonly readings: readonly MeasuredReading[];
   /** The input's own readings, headline first, as this gate knew them; empty while unmeasured. */

@@ -8,6 +8,7 @@ import type {ScheduleTimeout} from '@vibesys/machine';
 import type {CoreState} from '@vibesys/run-state';
 import {useEffect, useMemo, useState, useSyncExternalStore} from 'react';
 import {
+  createFactsReader,
   createRunReader,
   logStreamToFollow,
   type ModelNames,
@@ -118,15 +119,23 @@ export function useRunPage(options: RunPageOptions): {
   const state = useSyncExternalStore(source.subscribe, source.getState, source.getState);
   // biome-ignore lint/correctness/useExhaustiveDependencies: the reader caches one run's folds (`key`); a new run starts a new reader.
   const reader = useMemo(() => createRunReader(), [key]);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: one run's facts reader (`key`), like the reader above.
+  const factsOf = useMemo(() => createFactsReader(), [key]);
   const {route, zoom} = useZoom(key, page.address);
   const ending = state === null ? null : runEnding(state);
+  const facts = state === null ? undefined : factsOf(state.run);
   const model =
     state === null
       ? null
-      : reader.read(state.run.trace, state.view.at === 'live' ? null : state.view.at, ending);
+      : reader.read(
+          state.run.trace,
+          state.view.at === 'live' ? null : state.view.at,
+          ending,
+          facts,
+        );
   // Read after `model`: at the live end it is the same object, and at a past sequence it is the
   // live fold the reader keeps (the past model it also keeps stays for the next scrub).
-  const whole = state === null ? null : reader.read(state.run.trace, null, ending);
+  const whole = state === null ? null : reader.read(state.run.trace, null, ending, facts);
   // The page fetches lines only for its selected stream: while a Logs face is on screen, select
   // the stream it shows. Once selected the function returns null, so this dispatches once per
   // stream the face moves to.

@@ -29,8 +29,8 @@ import {
   tokensTitle,
   turnTokens,
 } from '../../../../state/index.js';
+import {type QuotaPauseSpan, workedWords} from '../../../../state/quota-pauses.js';
 import {roleSeries} from '../../../../state/role-series.js';
-import {duration} from '../../../../state/span-reading.js';
 import {statusWords} from '../../../../state/span-words.js';
 import type {ViewBase, WithCore} from '../props.js';
 import {whoBadge} from '../who-badge.js';
@@ -69,9 +69,13 @@ function tone(status: Status): 'live' | 'ok' | 'err' | 'warn' | 'neutral' {
 const ENDED: ReadonlySet<Status> = new Set<Status>(['done', 'failed', 'stopped']);
 
 /** How long an agent has been at work: its first turn's start to its latest turn's end, or now. */
-function took(agent: AgentNode, now: number | null): string | undefined {
+function took(
+  agent: AgentNode,
+  now: number | null,
+  pauses: readonly QuotaPauseSpan[],
+): string | undefined {
   const end = ENDED.has(agent.status) ? agent.activity.endedAt : now;
-  return end === null ? undefined : duration(end - agent.startedAt);
+  return end === null ? undefined : workedWords(pauses, agent.startedAt, end);
 }
 
 function AgentLine(props: {
@@ -91,7 +95,7 @@ function AgentLine(props: {
     ...(ran === null ? [] : [ran]),
     ...(row.alsoUnder.length === 0 ? [] : [alsoBadge(row.alsoUnder, view.compact)]),
   ];
-  const time = took(agent, view.clock.now);
+  const time = took(agent, view.clock.now, view.model.pauses);
   const {measure} = props;
   return (
     <PickRow
@@ -249,7 +253,13 @@ export function AgentPane(props: AgentPaneProps): JSX.Element {
           {key: 'Status', value: statusWords(agent.status).label},
         ]}
       />
-      <TurnList turns={turns} clock={props.clock} tokens={props.tokens} zoom={zoom} />
+      <TurnList
+        turns={turns}
+        clock={props.clock}
+        pauses={model.pauses}
+        tokens={props.tokens}
+        zoom={zoom}
+      />
     </Stack>
   );
 }
@@ -257,6 +267,7 @@ export function AgentPane(props: AgentPaneProps): JSX.Element {
 function TurnList(props: {
   readonly turns: readonly AgentTurn[];
   readonly clock: ViewBase['clock'];
+  readonly pauses: readonly QuotaPauseSpan[];
   readonly tokens: ViewBase['tokens'];
   readonly zoom: ViewBase['zoom'];
 }): JSX.Element {
@@ -282,7 +293,7 @@ function TurnList(props: {
             lead={String(turn.number)}
             title={turn.headline ?? `Turn ${turn.number}`}
             state={{tone: tone(turn.status), label: statusWords(turn.status).label}}
-            {...(end === null ? {} : {figure: duration(end - turn.startedAt)})}
+            {...(end === null ? {} : {figure: workedWords(props.pauses, turn.startedAt, end)})}
             figureTone="muted"
             {...(measure === null ? {} : {measure: {...measure, size: 'line' as const}})}
             select={() => props.zoom({type: 'open-step', step: turn.span})}

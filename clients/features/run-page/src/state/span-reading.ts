@@ -131,10 +131,14 @@ export function duration(seconds: number): string {
   return `${hours}h ${String(minutes % 60).padStart(2, '0')}m`;
 }
 
-/** A metric value as the screen writes it everywhere: grouped, with at most three significant decimals. */
+/**
+ * A metric value as the screen writes it everywhere: grouped, one decimal below a thousand (so a
+ * rate of 385.4 reads as the 385.4 the comparison stated, never as 385 or 390), fewer above and
+ * more below ten; trailing zeros are dropped.
+ */
 export function formatValue(value: number): string {
   const abs = Math.abs(value);
-  const digits = abs >= 100 ? 0 : abs >= 10 ? 1 : abs >= 1 ? 2 : 3;
+  const digits = abs >= 1000 ? 0 : abs >= 100 ? 1 : abs >= 10 ? 2 : abs >= 1 ? 2 : 3;
   return value.toLocaleString('en-US', {maximumFractionDigits: digits});
 }
 

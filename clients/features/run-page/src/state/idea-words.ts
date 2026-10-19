@@ -5,7 +5,12 @@
  * best, adopted and base (issue #3027): `passed` means the idea beat the input, and a failed idea
  * that was measured says why it failed despite its number.
  */
-import type {Candidate, CandidateTree} from '@vibesys/run-state/candidates';
+import type {
+  BaseComparison,
+  Candidate,
+  CandidateTree,
+  FailedCheck,
+} from '@vibesys/run-state/candidates';
 import {ratio, TURNED_DOWN, words} from './span-reading.js';
 
 /** `text` with its first letter capitalized. */
@@ -46,36 +51,52 @@ const NO_INPUT = 'no input';
 /** The tone of a figure: a good result, a bad one, or a quiet one. */
 export type IdeaTone = 'ok' | 'err' | 'muted';
 
-/** The figure at the right of an idea's row: its ratio, its failed check's progress, or why not. */
-export function figureOf(item: Candidate, inputKnown = true): {figure: string; tone: IdeaTone} {
+/** How far a failed check came: `93/100 trials`, or the check's name when it reports no progress. */
+function progressOf(failed: FailedCheck): string {
+  if (failed.completed === null || failed.required === null) return words(failed.check);
+  return `${failed.completed}/${failed.required}${failed.unit === null ? '' : ` ${failed.unit}`}`;
+}
+
+/**
+ * The figure at the right of an idea's row: its ratio to the input, its failed check's progress, or
+ * why not. An idea the framework compared with a base but has no ratio to the input for shows the
+ * ratio it made, named by that base (`1.10× vs round 2`): `againstWords` words a comparison.
+ */
+export function figureOf(
+  item: Candidate,
+  inputKnown = true,
+  againstWords: (against: BaseComparison) => string = against =>
+    `${ratio(against.ratio)} vs its base`,
+): {figure: string; tone: IdeaTone} {
   if (item.outcome === 'running') return {figure: '', tone: 'muted'};
   const measured = item.measurement;
   const failed = measured?.failed ?? null;
-  if (failed !== null) {
-    const progress =
-      failed.completed !== null && failed.required !== null
-        ? `${failed.completed}/${failed.required}${failed.unit === null ? '' : ` ${failed.unit}`}`
-        : words(failed.check);
-    return {figure: `Failed · ${progress}`, tone: 'err'};
-  }
+  if (failed !== null) return {figure: `Failed · ${progressOf(failed)}`, tone: 'err'};
+  const tone = item.outcome === 'passed' ? 'ok' : 'err';
   if (measured?.vsBaseline !== null && measured?.vsBaseline !== undefined) {
-    return {figure: ratio(measured.vsBaseline), tone: item.outcome === 'passed' ? 'ok' : 'err'};
+    return {figure: ratio(measured.vsBaseline), tone};
+  }
+  if (measured?.against != null) {
+    return {figure: againstWords(measured.against), tone};
   }
   if (item.outcome === 'failed') return {figure: capitalized(outcomeWords(item)), tone: 'err'};
   return inputKnown ? {figure: '–', tone: 'muted'} : {figure: NO_INPUT, tone: 'muted'};
 }
 
-/** What an idea measured, against the input; null when it measured nothing. */
+/** What an idea measured, against the input or, with none, its base; null when it measured nothing. */
 export interface Measure {
   /** `1.50×`. */
   readonly ratio: string;
   /** `6,054,154 ops/s`; null when its value is not known. */
   readonly value: string | null;
+  /** The base the ratio is against (`round 2`); null: the input. */
+  readonly base?: string | null;
 }
 
-/** The measure as a clause: `1.50× the input (6,054,154 ops/s)`. */
+/** The measure as a clause: `1.50× the input (6,054,154 ops/s)`, or `1.10× vs round 2 (…)`. */
 function measureClause(measure: Measure): string {
-  return `${measure.ratio} the input${measure.value === null ? '' : ` (${measure.value})`}`;
+  const against = measure.base == null ? 'the input' : `vs ${measure.base}`;
+  return `${measure.ratio} ${against}${measure.value === null ? '' : ` (${measure.value})`}`;
 }
 
 /**
@@ -121,8 +142,9 @@ export function selectedWords(item: Candidate, measured: boolean): string {
 }
 
 /**
- * The `vs input` column's cell, from an idea's figure: its multiple when it has one, `no input`
- * when the run has no measurement of its input to compare with, else a dash, the same on every
+ * The `vs input` column's cell, from an idea's figure: its multiple when it has one (over the
+ * input, or over its base, named, when the run has no ratio to the input), `no input` when the run
+ * has no measurement of its input to compare with, else a dash, the same on every
  * face that has the column (a failed check's progress or reason is not a
  * comparison with the input).
  */
@@ -130,7 +152,7 @@ export function vsInputCell(figure: {readonly figure: string; readonly tone: Ide
   readonly figure: string;
   readonly tone: IdeaTone;
 } {
-  return figure.figure.endsWith('×') || figure.figure === NO_INPUT
+  return figure.figure.includes('×') || figure.figure === NO_INPUT
     ? figure
     : {figure: '–', tone: 'muted'};
 }

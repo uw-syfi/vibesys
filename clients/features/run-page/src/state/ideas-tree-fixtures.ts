@@ -54,6 +54,7 @@ export function modelOfShape(shape: Shape): RunModel {
     at: null,
     latest: null,
     inputGates: [],
+    pauses: [],
     changed: new Set<string>(),
     agents: {agents: []},
     trace: {spans: new Map()},

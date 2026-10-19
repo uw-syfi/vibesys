@@ -14,6 +14,7 @@ import reconnect from './data/live-reconnect.json' with {type: 'json'};
 import longTitles from './data/long-titles.json' with {type: 'json'};
 import bases from './data/non-input-bases.json' with {type: 'json'};
 import queue from './data/queue-rs-live.json' with {type: 'json'};
+import quotaPause from './data/quota-pause.json' with {type: 'json'};
 import retried from './data/retries.json' with {type: 'json'};
 import {parseFixture, type RunFixture} from './fixture.js';
 import {weeksRun} from './weeks.js';
@@ -30,6 +31,7 @@ const SOURCES: readonly unknown[] = [
   finished,
   tenIdeas,
   twoObjectives,
+  quotaPause,
   crashed,
 ];
 
@@ -54,6 +56,7 @@ export const FIXTURE_NAMES: readonly string[] = [
   'finished-run',
   'finished-ten-ideas',
   'finished-two-objectives',
+  'quota-pause',
   'crashed-after-turn',
   'weeks-600-ideas',
 ];

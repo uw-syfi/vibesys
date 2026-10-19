@@ -36,6 +36,7 @@ import {
   turnTokens,
   whoWords,
 } from '../../../../state/index.js';
+import {workedSeconds} from '../../../../state/quota-pauses.js';
 import {
   type GateView,
   gateView,
@@ -244,7 +245,8 @@ export function stepHeader(props: StepViewProps): PaneHeader {
   const narrative = turnNarrative(props.model.trace, props.core, props.step.span);
   if (narrative === null) return {kicker};
   const end = props.step.endedAt ?? props.clock.now;
-  const seconds = end === null ? null : end - props.step.startedAt;
+  const seconds =
+    end === null ? null : workedSeconds(props.model.pauses, props.step.startedAt, end);
   const spent = turnTokens(props.tokens, props.step.span);
   const tokens = spent === null ? null : tokensLine(spent);
   const ran = whoWords(props.who.get(props.step.span));

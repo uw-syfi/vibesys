@@ -295,7 +295,12 @@ const WHEN = new Intl.DateTimeFormat(undefined, {
   minute: '2-digit',
 });
 
-function tiles(total: UsageTotals, records: number, ideas: number): readonly UsageTile[] {
+function tiles(
+  total: UsageTotals,
+  records: number,
+  ideas: number,
+  unpriced: number,
+): readonly UsageTile[] {
   const parts = split(total);
   const reading: TokensReading | null = tokensReading(total.tokens);
   const input = total.tokens.input;
@@ -306,7 +311,7 @@ function tiles(total: UsageTotals, records: number, ideas: number): readonly Usa
     {
       name: 'Cost',
       figure: dollars(total.costUsd),
-      detail: 'as the providers reported it',
+      detail: unpriced === 0 ? '' : `${unpriced} unpriced`,
       title: '',
     },
     {
@@ -543,9 +548,10 @@ export function usageView(
   const labels = new Map(keys.map(key => [key, labelOf(controls.by, key, ctx).text] as const));
   const rows = rowsOf({records, groups, colors, total, controls, ctx, ideaOf, whole: fold.total});
   const chart = slicesOf(records, keys, colors, controls, labels, ideaOf);
+  const unpriced = records.filter(record => record.cost_usd === null).length;
   return {
     empty: records.length === 0,
-    tiles: tiles(fold.total, fold.total.turns, ctx.ideas.size),
+    tiles: tiles(fold.total, fold.total.turns, ctx.ideas.size, unpriced),
     ...chart,
     legend: keys.map(key => {
       const {text, id} = labelOf(controls.by, key, ctx);
@@ -554,7 +560,7 @@ export function usageView(
     unit: controls.metric === 'cost' ? 'US dollars' : 'tokens',
     rows,
     results: controls.by === 'idea',
-    unpriced: records.filter(record => record.cost_usd === null).length,
+    unpriced,
   };
 }
 

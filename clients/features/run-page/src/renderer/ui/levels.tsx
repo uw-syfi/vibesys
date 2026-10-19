@@ -283,6 +283,7 @@ function StepLevel(
             selected={step.span}
             tokens={base.tokens}
             who={base.who}
+            pauses={base.model.pauses}
             zoom={base.zoom}
           />
         </Pane>

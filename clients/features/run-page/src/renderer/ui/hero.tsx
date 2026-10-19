@@ -59,6 +59,9 @@ function IdeaLine(props: {readonly view: IdeaFocusView | null}): JSX.Element {
           Selected idea:
         </Text>
       </Fact>
+      <Fact shrink title={markdownToPlain(view.title)}>
+        <Text variant="code">{markdownToPlain(view.title)}</Text>
+      </Fact>
       {view.ratio === null || view.value === null ? (
         <Fact title={markdownToPlain(view.title)}>
           <Text variant="code" tone={view.tone}>
@@ -69,7 +72,7 @@ function IdeaLine(props: {readonly view: IdeaFocusView | null}): JSX.Element {
         <>
           <Fact title={markdownToPlain(view.title)}>
             <Text variant="code" tone={view.tone}>
-              {`${view.ratio} vs input`}
+              {`${view.ratio} vs ${view.base ?? 'input'}`}
             </Text>
           </Fact>
           <Fact shrink title={markdownToPlain(view.title)}>
