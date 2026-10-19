@@ -237,7 +237,13 @@ test('New steer turns the typed text into a card whose target is picked from the
   await act(async () => root.unmount());
 });
 
-function started(sequence: number, id: string, role: string, provider: string, model: string): RunEvent {
+function started(
+  sequence: number,
+  id: string,
+  role: string,
+  provider: string,
+  model: string,
+): RunEvent {
   return event(sequence, 'agent_execution_started', {
     execution_id: id,
     agent_kind: role,

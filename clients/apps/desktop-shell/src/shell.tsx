@@ -62,8 +62,8 @@ import {sameRun} from '@vibesys/runs';
 import type {Store} from '@vibesys/store';
 import {applyTheme, Card, EmptyState, Page, type ThemeTarget, WindowFrame} from '@vibesys/ui';
 import {type JSX, useEffect, useMemo, useState, useSyncExternalStore} from 'react';
-import {runCounts, runInput} from './shell-runs.js';
 import {RunWithChat} from './run-chat.js';
+import {runCounts, runInput} from './shell-runs.js';
 
 /** The clock the shell's screens time their bounds on: the window's own timers, in `main.tsx`. */
 export type Schedule = (callback: () => void, delayMs: number) => () => void;

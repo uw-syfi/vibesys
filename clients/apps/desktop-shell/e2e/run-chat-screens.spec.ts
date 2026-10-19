@@ -280,7 +280,9 @@ test('a standing steer in force offers Withdraw, which ends it', async ({page}) 
   await check(page, 'standing-withdrawn');
 });
 
-test('New steer turns what is typed into a card, with no text left in the composer', async ({page}) => {
+test('New steer turns what is typed into a card, with no text left in the composer', async ({
+  page,
+}) => {
   await open(page, 1440);
   await emit(page, conversation(firstSequence()));
   await openPanel(page);

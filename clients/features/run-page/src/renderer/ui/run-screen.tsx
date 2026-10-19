@@ -135,7 +135,8 @@ function Header(props: {
   ];
   return (
     <Row justify="between" align="start" wrap>
-      <Stack gap="space-2">
+      {/* Grown from no width: the actions keep the title's row and the title's lines wrap instead. */}
+      <Stack gap="space-2" grow>
         <Text as="h1" variant="heading">
           {header.title}
         </Text>
@@ -163,7 +164,7 @@ function Header(props: {
           </Row>
         )}
       </Stack>
-      <Row gap="space-3">
+      <Row gap="space-2">
         {chat === undefined ? null : (
           <Button
             variant={chat.open ? 'primary' : 'secondary'}
