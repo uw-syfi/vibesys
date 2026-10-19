@@ -63,6 +63,7 @@ from vibesys.orchestration.dynamic.search._steps import (
     step_states,
 )
 from vibesys.orchestration.dynamic.search._values import (
+    CombineSource,
     FinishedWork,
     HypothesisRecord,
     MainMeasurement,
@@ -550,6 +551,7 @@ class RunRecord:
             parked=self.parked,
             evaluations=self._queue_view(now),
             input_overdue=self._overdue_view(now),
+            space=candidates.space_of(self.terms),
         )
 
     def _queue_view(self, now: float | None) -> EvaluationQueueView | None:
@@ -706,8 +708,9 @@ class RunRecord:
             record = self.hypotheses.get(plan.work_id)
             prior = record.rounds[-1] if record is not None and record.rounds else None
             rebase = self._rebase_onto(plan)
+            parts = self._parts(plan)
             if plan.kind is WorkKind.IMPLEMENT:
-                self.hypotheses[plan.work_id] = _hypotheses.scheduled(record, plan, sequence)
+                self.hypotheses[plan.work_id] = _hypotheses.scheduled(record, plan, sequence, parts)
                 self.main_seen[plan.work_id] = self.main.generation
             start = WorkstreamStart(
                 key=workstream_key(sequence, plan.work_id),
@@ -719,6 +722,7 @@ class RunRecord:
                 config=self.config,
                 baseline=self.baseline,
                 merge=self._sources(plan),
+                combine=parts,
                 rebase_onto=rebase,
                 started_by=_started_by(self.planned_by.get(plan.work_id)),
             )
@@ -741,6 +745,36 @@ class RunRecord:
             for item, option in zip(plan.candidates, found, strict=True)
             if option is not None
         )
+
+    def _parts(self, plan: WorkPlan) -> tuple[CombineSource, ...]:
+        """A combine's parts as the exact revisions offered now, each with its own change.
+
+        A part whose revision is no longer offered (its verification failed since) is left out,
+        and the implementer is told so. A part's change starts where its hypothesis started:
+        the parent of the hypothesis's first workstream.
+        """
+        offered = {
+            (item.snapshot.hypothesis_id, item.snapshot.revision.revision_id.root): item.snapshot
+            for item in self.offered()
+        }
+        parts: list[CombineSource] = []
+        for pick in plan.combine:
+            found = offered.get((pick.hypothesis_id, pick.revision))
+            if found is None:
+                continue
+            first = next(
+                (item for item in self.finished_work if item.plan.work_id == pick.hypothesis_id),
+                None,
+            )
+            parts.append(
+                CombineSource(
+                    hypothesis_id=pick.hypothesis_id,
+                    revision=found.revision,
+                    built_on=self.base if first is None else first.parent,
+                    metric=None if found.benchmark is None else found.benchmark.headline(),
+                )
+            )
+        return tuple(parts)
 
     def finished(self, done: WorkstreamDone) -> None:
         """Keep what a finished workstream leaves behind: its record, round and parent."""

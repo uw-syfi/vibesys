@@ -3,13 +3,22 @@
 from vibesys.orchestration.dynamic.search._outcomes import WorkstreamDone, round_of
 from vibesys.orchestration.dynamic.search._plan import PlanUpdate
 from vibesys.orchestration.dynamic.search._values import (
+    CombineSource,
     HypothesisRecord,
     WorkPlan,
 )
 
 
-def scheduled(known: HypothesisRecord | None, plan: WorkPlan, sequence: int) -> HypothesisRecord:
-    """The record of the hypothesis a plan to implement works on, new or with its latest task."""
+def scheduled(
+    known: HypothesisRecord | None,
+    plan: WorkPlan,
+    sequence: int,
+    parts: tuple[CombineSource, ...] = (),
+) -> HypothesisRecord:
+    """The record of the hypothesis a plan to implement works on, new or with its latest task.
+
+    A new hypothesis a combine starts keeps its ``parts``, so its rows show them for good.
+    """
     if known is not None:
         return known.model_copy(update={"last_task": plan.task})
     return HypothesisRecord(
@@ -19,6 +28,7 @@ def scheduled(known: HypothesisRecord | None, plan: WorkPlan, sequence: int) -> 
         first_sequence=sequence,
         lineage_parent_id=plan.parent_hypothesis_id,
         last_task=plan.task,
+        combined_from=parts,
     )
 
 

@@ -4,7 +4,7 @@ from vibesys.candidates.api import Baseline, review_evaluations
 from vibesys.hypothesis import HypothesisConfig, HypothesisOutcome
 from vibesys.hypothesis.cadence import review_due
 from vibesys.metrics import AcceptedReading, accept_readings
-from vibesys.orchestration.dynamic.models import ImplementerResult, ReviewResult
+from vibesys.orchestration.dynamic.models import ImplementerResult, ReviewResult, UnappliedPart
 from vibesys.orchestration.dynamic.search._briefs import implement_prompt, review_prompt
 from vibesys.orchestration.dynamic.search._measure import input_so_far
 from vibesys.orchestration.dynamic.search._operations import EvidenceReadings
@@ -179,6 +179,7 @@ def _candidate_of(
             summary=reply.summary,
             next_step=reply.next_step,
             revision=revision,
+            unapplied=_of_parts(w, reply),
         )
     )
     work.carried = result
@@ -193,6 +194,16 @@ def _candidate_of(
     if reply.produces_revision() and (revision is None or revision == w.parent):
         raise WorkEndedError(Failure(kind=FailureKind.NO_CHANGED_CANDIDATE))
     return result
+
+
+def _of_parts(w: WorkstreamStart, reply: ImplementerResult) -> tuple[UnappliedPart, ...]:
+    """What the reply could not apply, of the combine's own parts.
+
+    An entry naming any other hypothesis (or any entry outside a combine) is no fact about this
+    candidate, so it is dropped.
+    """
+    parts = {item.hypothesis_id for item in w.combine}
+    return tuple(item for item in reply.unapplied if item.hypothesis_id in parts)
 
 
 def _review_due(w: WorkstreamStart, result: Result) -> bool:

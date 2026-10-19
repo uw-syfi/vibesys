@@ -78,6 +78,8 @@ class WorkstreamKind(StrEnum):
     PROFILE = "profile"
     # Merge candidates into the run's main revision.
     MERGE = "merge"
+    # Build one new candidate, from main, out of several retained candidates.
+    COMBINE = "combine"
 
 
 class WorkstreamPlan(BaseModel):
@@ -258,6 +260,71 @@ class MergePlan(BaseModel):
         return value
 
 
+MAX_COMBINE_PARENTS = MAX_MERGE_CANDIDATES
+"""The most retained candidates one combine may build its candidate from."""
+
+
+class CombineParent(BaseModel):
+    """One part of a combine: an exact offered revision of a buildable candidate."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    hypothesis_id: AgentId = Field(description="The ID of a hypothesis listed as buildable.")
+    revision: str = Field(
+        min_length=1, description="An exact revision of that hypothesis the buildable list offers."
+    )
+
+
+class CombinePlan(BaseModel):
+    """Build one new candidate from several buildable candidates, starting from main.
+
+    The implementer applies each part's own change on a checkout of main, in the order given,
+    runs the project's fast tests and submits the result. The composite is a candidate of a new
+    hypothesis, judged and measured like any other; it does not move main. A part may have lost
+    or tied alone: a combine tests whether the parts work together.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal[WorkstreamKind.COMBINE] = Field(
+        description="Use combine to build one new candidate out of several buildable candidates."
+    )
+    hypothesis_id: AgentId = Field(
+        description="A new hypothesis ID for the composite, unused by any hypothesis, profile or merge."
+    )
+    title: str = Field(min_length=1, description="Name of the combination.")
+    hypothesis: str = Field(
+        min_length=1, description="Why these parts should work better together than alone."
+    )
+    parents: tuple[CombineParent, ...] = Field(
+        min_length=2,
+        max_length=MAX_COMBINE_PARENTS,
+        description=(
+            "The parts, each an exact offered (hypothesis, revision) pair of a different "
+            "hypothesis, in the order to apply them."
+        ),
+    )
+    instructions: str = Field(
+        min_length=1,
+        description="How to combine the parts: which side wins a conflict, what to leave out.",
+    )
+    watch_for: str = Field(
+        min_length=1, description="What the implementer must check or be careful of."
+    )
+    pass_criteria: str = Field(
+        min_length=1, description="Observable evidence that the composite meets its goal."
+    )
+
+    @field_validator("title", "hypothesis", "instructions", "watch_for", "pass_criteria")
+    @classmethod
+    def _nonblank_intent(cls, value: str) -> str:
+        """Require meaningful combination intent without rewriting the planner's text."""
+        if not value.strip():
+            message = "combine intent must not be blank"
+            raise ValueError(message)
+        return value
+
+
 def _workstream_kind(value: object) -> str:
     """Return a planned workstream's kind; an entry without one is an implement workstream."""
     if isinstance(value, dict):
@@ -272,7 +339,8 @@ def _workstream_kind(value: object) -> str:
 type PlannedWorkstream = Annotated[
     Annotated[WorkstreamPlan, Tag(WorkstreamKind.IMPLEMENT.value)]
     | Annotated[ProfilePlan, Tag(WorkstreamKind.PROFILE.value)]
-    | Annotated[MergePlan, Tag(WorkstreamKind.MERGE.value)],
+    | Annotated[MergePlan, Tag(WorkstreamKind.MERGE.value)]
+    | Annotated[CombinePlan, Tag(WorkstreamKind.COMBINE.value)],
     Discriminator(_workstream_kind),
 ]
 
@@ -281,7 +349,8 @@ type PlannedWorkstream = Annotated[
 type PlannerWorkstream = Annotated[
     Annotated[WorkstreamPlan, Tag(WorkstreamKind.IMPLEMENT.value)]
     | Annotated[ProfileDecision, Tag(WorkstreamKind.PROFILE.value)]
-    | Annotated[MergePlan, Tag(WorkstreamKind.MERGE.value)],
+    | Annotated[MergePlan, Tag(WorkstreamKind.MERGE.value)]
+    | Annotated[CombinePlan, Tag(WorkstreamKind.COMBINE.value)],
     Discriminator(_workstream_kind),
 ]
 
@@ -310,7 +379,7 @@ def planned_id(plan: PlannedWorkstream) -> str:
         return plan.profile_id
     if isinstance(plan, MergePlan):
         return plan.merge_id
-    return plan.hypothesis_id
+    return plan.hypothesis_id  # an implement or a combine: both are hypotheses
 
 
 class StrategyReason(StrEnum):
@@ -381,7 +450,8 @@ class PortfolioPlan(BaseModel):
         max_length=32,
         description=(
             "The new workstreams to start: one entry per hypothesis (kind implement), "
-            "per profile (kind profile) or per merge (kind merge)."
+            "per profile (kind profile), per merge (kind merge) or per combination of "
+            "candidates (kind combine)."
         ),
     )
     hypothesis_updates: Annotated[tuple[PlannerHypothesisUpdate, ...], DecidedFrom("history")] = (
@@ -456,7 +526,7 @@ class ImplementPortfolioPlan(PortfolioPlan):
         *,
         union_format: Literal["any_of", "primitive_type_array"] = "any_of",
     ) -> dict[str, Any]:
-        """Return the portfolio schema with implement and merge workstreams as the entry kinds."""
+        """Return the portfolio schema with implement, merge and combine workstreams as the entry kinds."""
         schema = super().model_json_schema(
             by_alias=by_alias,
             ref_template=ref_template,
@@ -473,11 +543,12 @@ class ImplementPortfolioPlan(PortfolioPlan):
             "anyOf": [
                 {"$ref": ref_template.format(model="WorkstreamPlan")},
                 {"$ref": ref_template.format(model="MergePlan")},
+                {"$ref": ref_template.format(model="CombinePlan")},
             ]
         }
         workstreams["description"] = (
-            "The new workstreams to start: one entry per hypothesis (kind implement) or per "
-            "merge (kind merge)."
+            "The new workstreams to start: one entry per hypothesis (kind implement), per "
+            "merge (kind merge) or per combination of candidates (kind combine)."
         )
         return schema
 
@@ -575,10 +646,11 @@ def planner_response_type(
             mode=mode,
             union_format=union_format,
         )
-        result["$defs"]["WorkstreamPlan"]["properties"]["parent_revision"]["enum"] = [
-            None,
-            *sorted(set(revisions)),
-        ]
+        offered = sorted(set(revisions))
+        definitions = result["$defs"]
+        definitions["WorkstreamPlan"]["properties"]["parent_revision"]["enum"] = [None, *offered]
+        if offered:  # with nothing offered no combine is valid, and validation says so
+            definitions["CombineParent"]["properties"]["revision"]["enum"] = offered
         return result
 
     return cast(
@@ -596,6 +668,14 @@ class WorkResult(Value):
     next_step: str = ""
 
 
+class UnappliedPart(Value):
+    """A part of a combine the implementer could not apply as it stands, and why."""
+
+    hypothesis_id: str = Field(min_length=1, description="The part's hypothesis ID.")
+    part: str = Field(min_length=1, description="What was left out: a hunk, a file, a behavior.")
+    why: str = Field(min_length=1, description="Why it could not be applied.")
+
+
 class ImplementerResult(WorkResult, RevisionReply):
     """What an implementer answers: its work, which core checkpoints unless it is blocked."""
 
@@ -603,6 +683,13 @@ class ImplementerResult(WorkResult, RevisionReply):
         HypothesisOutcome,
         DecidedFrom("pass_criteria", "evidence", "rejection", "prior_failure_tail"),
     ]
+    unapplied: tuple[UnappliedPart, ...] = Field(
+        default=(),
+        description=(
+            "For a combine: every part, or piece of one, you could not apply, and why. "
+            "Empty when everything applied, and outside a combine."
+        ),
+    )
 
     @override
     def produces_revision(self) -> bool:
@@ -688,7 +775,10 @@ class ReviewResult(BaseModel):
 
 
 __all__ = [
+    "MAX_COMBINE_PARENTS",
     "MAX_PROFILE_QUESTION_CHARS",
+    "CombineParent",
+    "CombinePlan",
     "EvidenceAttributionError",
     "EvidenceReference",
     "ImplementPortfolioPlan",
@@ -709,6 +799,7 @@ __all__ = [
     "ProfilerResult",
     "ReviewResult",
     "StrategyReason",
+    "UnappliedPart",
     "WorkResult",
     "WorkstreamExpectation",
     "WorkstreamKind",

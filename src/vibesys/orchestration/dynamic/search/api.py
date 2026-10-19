@@ -6,6 +6,7 @@ from vibesys.metrics import AcceptedReading, EvidenceReading, MetricRow, Partial
 from vibesys.orchestration.dynamic.search._briefs import CUT, bounded, fence, tail
 from vibesys.orchestration.dynamic.search._budget import budget
 from vibesys.orchestration.dynamic.search._config import MAX_WIDTH, DynamicConfig
+from vibesys.orchestration.dynamic.search._context import versus_parts
 from vibesys.orchestration.dynamic.search._handoff import (
     HANDOFF,
     WRITE_HANDOFF_KIND,
@@ -59,6 +60,7 @@ from vibesys.orchestration.dynamic.search._plan import (
 )
 from vibesys.orchestration.dynamic.search._progress import refusal
 from vibesys.orchestration.dynamic.search._prompts import (
+    CompositeRow,
     EvaluationQueueView,
     EvidenceCitation,
     ImplementPrompt,
@@ -66,6 +68,7 @@ from vibesys.orchestration.dynamic.search._prompts import (
     MergeableRow,
     MergePrompt,
     OutlinePrompt,
+    PartsVerdict,
     PlannerCorrection,
     PlannerPrompt,
     ProfileHistoryRow,
@@ -112,6 +115,8 @@ from vibesys.orchestration.dynamic.search._values import (
     AgentName,
     Blocker,
     BlockerKind,
+    CombinePick,
+    CombineSource,
     DropReason,
     Expectation,
     Failure,
@@ -155,6 +160,9 @@ __all__ = [
     "Bound",
     "Candidate",
     "Closing",
+    "CombinePick",
+    "CombineSource",
+    "CompositeRow",
     "DropReason",
     "Dropped",
     "DynamicConfig",
@@ -194,6 +202,7 @@ __all__ = [
     "ParentSnapshot",
     "ParentVerification",
     "PartialRow",
+    "PartsVerdict",
     "PickPolicy",
     "PlanCheck",
     "PlanMode",
@@ -254,5 +263,6 @@ __all__ = [
     "snapshot_of",
     "tail",
     "validate",
+    "versus_parts",
     "workstream_key",
 ]

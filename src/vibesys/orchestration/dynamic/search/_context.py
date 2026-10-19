@@ -9,8 +9,8 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Protocol
 
-from vibesys.candidates.api import Baseline, failure, reading
-from vibesys.metrics import reading_of
+from vibesys.candidates.api import Baseline, failure, improves_on, measurement, reading
+from vibesys.metrics import MetricRow, MetricSpace, reading_of
 from vibesys.orchestration.dynamic.models import ProfileOffer
 from vibesys.orchestration.dynamic.search import _briefs as briefs
 from vibesys.orchestration.dynamic.search._config import DynamicConfig
@@ -19,9 +19,11 @@ from vibesys.orchestration.dynamic.search._parents import ParentOption, ParentSn
 from vibesys.orchestration.dynamic.search._plan import PlanLedger
 from vibesys.orchestration.dynamic.search._prompts import (
     BuildableRow,
+    CompositeRow,
     EvaluationQueueView,
     HistoryRow,
     InputOverdueView,
+    PartsVerdict,
     PlannerCorrection,
     PlannerPrompt,
     ProfileHistoryRow,
@@ -29,6 +31,7 @@ from vibesys.orchestration.dynamic.search._prompts import (
     WorkstreamHistoryRow,
 )
 from vibesys.orchestration.dynamic.search._values import (
+    CombineSource,
     FinishedWork,
     HypothesisRecord,
     MainMeasurement,
@@ -104,8 +107,51 @@ def _status(record: HypothesisRecord, running: frozenset[str], submitted: frozen
     return record.strategy.value
 
 
+def _beats(one: MetricRow, other: MetricRow, space: MetricSpace) -> bool:
+    return improves_on(
+        measurement(one), measurement(other), space=space, when_input_unmeasured=False
+    )
+
+
+def versus_parts(
+    metrics: tuple[MetricRow, ...], parts: tuple[CombineSource, ...], space: MetricSpace | None
+) -> PartsVerdict:
+    """How a composite's headline compares with the best part's, beyond the task's noise.
+
+    The best part is one no other part beats. Without a headline on either side, or a space to
+    compare in, the verdict is unknown.
+    """
+    heads = [part.metric for part in parts if part.metric is not None]
+    if not metrics or not heads or space is None:
+        return PartsVerdict.UNKNOWN
+    best = heads[0]
+    for head in heads[1:]:
+        if _beats(head, best, space):
+            best = head
+    if _beats(metrics[0], best, space):
+        return PartsVerdict.BETTER
+    if _beats(best, metrics[0], space):
+        return PartsVerdict.WORSE
+    return PartsVerdict.WITHIN_NOISE
+
+
+def _composite(record: HypothesisRecord, space: MetricSpace | None) -> CompositeRow | None:
+    """A combine's latest candidate beside its parts; None for a hypothesis no combine started."""
+    if not record.combined_from:
+        return None
+    last = record.rounds[-1] if record.rounds else None
+    return CompositeRow(
+        parts=record.combined_from,
+        verdict=versus_parts(() if last is None else last.metrics, record.combined_from, space),
+        unapplied=() if last is None else last.unapplied,
+    )
+
+
 def _history_row(
-    record: HypothesisRecord, running: frozenset[str], submitted: frozenset[str]
+    record: HypothesisRecord,
+    running: frozenset[str],
+    submitted: frozenset[str],
+    space: MetricSpace | None = None,
 ) -> HistoryRow:
     last = record.rounds[-1] if record.rounds else None
     shown = "" if last is None else briefs.tail(last.failure_tail, briefs.FAILURE_CHARS)
@@ -126,6 +172,7 @@ def _history_row(
         failure_tail=shown,
         failure_fence=briefs.fence(shown),
         failure=None if last is None else last.failure,
+        composite=_composite(record, space),
     )
 
 
@@ -233,6 +280,8 @@ class PlanWorld:
     """Every finished merge, oldest first."""
     merge_options: MergeOptions = field(default_factory=MergeOptions)
     """Which candidates a merge may name now; its rows are the prompt's mergeable list."""
+    space: MetricSpace | None = None
+    """The space candidates are compared in: a composite is compared with its parts in it."""
 
     @property
     def working(self) -> tuple[RunningWork, ...]:
@@ -316,7 +365,7 @@ class PlanWorld:
         running = frozenset(item.plan.work_id for item in self.working)
         submitted = self._waiting_ids()
         rows: list[WorkstreamHistoryRow] = [
-            _history_row(item, running, submitted) for item in self.hypotheses
+            _history_row(item, running, submitted, self.space) for item in self.hypotheses
         ]
         implement_rows = tuple(rows)
         profiles = [

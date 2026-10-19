@@ -22,7 +22,12 @@ from vibesys.orchestration.dynamic.search._values import Blocker, BlockerKind
 
 if TYPE_CHECKING:
     from vibesys.candidates.api import Baseline, ReviewEvaluation
-    from vibesys.orchestration.dynamic.search._values import MergeSource, RoundRecord, WorkPlan
+    from vibesys.orchestration.dynamic.search._values import (
+        CombineSource,
+        MergeSource,
+        RoundRecord,
+        WorkPlan,
+    )
     from vs_core.api.search import RevisionRef
 
 CUT = " [cut]"
@@ -79,6 +84,8 @@ class ImplementStart(Protocol):
     def prior(self) -> RoundRecord | None: ...
     @property
     def rebase_onto(self) -> RevisionRef | None: ...
+    @property
+    def combine(self) -> tuple[CombineSource, ...]: ...
 
 
 def implement_prompt(
@@ -91,6 +98,8 @@ def implement_prompt(
     ``baseline`` is the input's measurement as known now: None while it has not landed, and an
     unmeasurable one is shown with why it failed.
     ``w.rebase_onto`` is the run's main when it advanced past this hypothesis's work.
+    ``w.combine`` are a combine's parts as scheduled; a part the plan named and scheduling left
+    out (no longer offered) is named as missing.
     """
     plan, parent, prior = w.plan, w.parent, w.prior
     latest = blockers[-1] if blockers else None
@@ -119,6 +128,17 @@ def implement_prompt(
         last_blocker=None if stuck is None else _shown(stuck),
         turns_without_candidate=len(blockers),
         rebase_onto=w.rebase_onto,
+        combine=w.combine,
+        combine_missing=tuple(
+            pick
+            for pick in plan.combine
+            if not any(
+                part.hypothesis_id == pick.hypothesis_id
+                and part.revision.revision_id.root == pick.revision
+                for part in w.combine
+            )
+        ),
+        watch_for=plan.watch_for if plan.combine else "",
     )
 
 

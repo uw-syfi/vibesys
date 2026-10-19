@@ -13,7 +13,7 @@ from pydantic import Field, model_validator
 
 from vibesys.hypothesis import HypothesisOutcome, HypothesisStrategy
 from vibesys.metrics import AcceptedReading, MetricRow, PartialRow
-from vibesys.orchestration.dynamic.models import StrategyReason
+from vibesys.orchestration.dynamic.models import StrategyReason, UnappliedPart
 from vs_core.api.search import (
     AttemptId,
     CheckpointDecline,
@@ -87,6 +87,26 @@ class Step(Value):
     depends_on: tuple[StepId, ...] = ()
 
 
+class CombinePick(Value):
+    """One part a combine names: a hypothesis and the exact revision of it, as validated."""
+
+    hypothesis_id: str
+    revision: str
+
+
+class CombineSource(Value):
+    """One part of a combine as it was fixed at scheduling: its revision and its own change.
+
+    ``built_on`` is the revision the part's hypothesis started from, so ``built_on..revision``
+    is the part's own change; ``metric`` is its trusted headline, when it had one.
+    """
+
+    hypothesis_id: str
+    revision: RevisionRef
+    built_on: RevisionRef
+    metric: MetricRow | None = None
+
+
 class WorkPlan(Value):
     """The planner's validated choice for one workstream, in immutable form."""
 
@@ -110,7 +130,10 @@ class WorkPlan(Value):
     instructions: str = ""
     """For a merge: how to combine the candidates."""
     watch_for: str = ""
-    """For a merge: what the merger must check or be careful of."""
+    """For a merge or a combine: what the agent must check or be careful of."""
+    combine: tuple[CombinePick, ...] = ()
+    """For a combine: the parts, in the order to apply them. A combine is an implement plan of
+    a new hypothesis that starts from main; a non-empty ``combine`` is what makes it one."""
 
     @property
     def measured(self) -> bool:
@@ -324,6 +347,8 @@ class RoundRecord(Value):
     settlement: SettlementId | None = None
     kept_active: bool = False
     """Whether the implementer asked to keep this direction and the lease allows it."""
+    unapplied: tuple[UnappliedPart, ...] = ()
+    """For a combine: what the implementer said it could not apply, naming one of its parts."""
 
 
 class HypothesisRecord(Value):
@@ -340,6 +365,8 @@ class HypothesisRecord(Value):
     last_task: str = ""
     continuation_rounds: int = Field(default=0, ge=0)
     rounds: tuple[RoundRecord, ...] = ()
+    combined_from: tuple[CombineSource, ...] = ()
+    """For a hypothesis a combine started: its parts, as they were fixed at scheduling."""
 
 
 class Proof(Value):
@@ -462,6 +489,8 @@ class ViolationCode(StrEnum):
     MERGE_CANDIDATE_NOT_BETTER = "merge-candidate-not-better"
     MERGE_BASELINE_PENDING = "merge-baseline-pending"
     MERGE_UNCHECKABLE = "merge-uncheckable"
+    COMBINE_PARENT_REPEATED = "combine-parent-repeated"
+    """A combine names one hypothesis twice: each part is a different hypothesis."""
 
 
 class Alternative(Value):

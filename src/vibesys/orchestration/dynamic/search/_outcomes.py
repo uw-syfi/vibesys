@@ -23,12 +23,14 @@ from vibesys.candidates.api import (
 from vibesys.hypothesis import HypothesisOutcome
 from vibesys.hypothesis.cadence import keeps_hypothesis_active
 from vibesys.metrics import AcceptedReading, MetricRow, reading_of
+from vibesys.orchestration.dynamic.models import UnappliedPart
 from vibesys.orchestration.dynamic.search._config import DynamicConfig
 from vibesys.orchestration.dynamic.search._parents import ParentSnapshot
 from vibesys.orchestration.dynamic.search._values import (
     AgentName,
     Blocker,
     BlockerKind,
+    CombineSource,
     DropReason,
     Failure,
     FailureKind,
@@ -84,6 +86,8 @@ class WorkstreamStart(Value):
     """The input's measurement when the workstream started; None while it was still being measured."""
     merge: tuple[MergeSource, ...] = ()
     """For a merge: the candidates to merge into ``parent`` (main), in order."""
+    combine: tuple[CombineSource, ...] = ()
+    """For a combine: the parts to apply onto ``parent`` (main), in order, fixed at scheduling."""
     rebase_onto: RevisionRef | None = None
     """The run's main, when it advanced past the base of the hypothesis this continues."""
     started_by: tuple[str, ...] = ()
@@ -144,6 +148,8 @@ class Candidate(Value):
     next_step: str = ""
     revision: RevisionRef | None = None
     """The revision core retained for the turn; None when no checkpoint was awaited or none exists."""
+    unapplied: tuple[UnappliedPart, ...] = ()
+    """For a combine: what the implementer could not apply, naming only the combine's parts."""
 
 
 class Verdict(Value):
@@ -614,6 +620,7 @@ def round_of(done: WorkstreamDone) -> RoundRecord:
         failure_tail=_failing_tail(done),
         settlement=None if settlement is None else settlement.settlement_id,
         kept_active=kept,
+        unapplied=() if result is None else result.candidate.unapplied,
     )
 
 
