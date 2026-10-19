@@ -22,6 +22,7 @@ from vs_slurm.api import (
     EntryPhase,
     FakeCluster,
     FakeEvaluationLedger,
+    LedgerError,
     LedgerLabels,
     LedgerListing,
     LedgerPolicy,
@@ -89,7 +90,9 @@ class _World:
         self.questions.append(question)
         return self.answer
 
-    def evals(self, *argv: str) -> tuple[int, str]:
+    def evals(
+        self, *argv: str, call_seconds: float = CONFIG.transport_timeout_seconds
+    ) -> tuple[int, str]:
         host = EvalsHost(
             ledger=lambda project: (
                 FakeEvaluationLedger(project=project)
@@ -98,7 +101,7 @@ class _World:
             ),
             cluster=self.cluster,
             clock=self.clock,
-            call_seconds=CONFIG.transport_timeout_seconds,
+            call_seconds=call_seconds,
             current_project=lambda: PROJECT,
             confirm=self.confirm,
         )
@@ -258,3 +261,20 @@ def test_remove_withdraws_exactly_the_named_entries(
     for index, attached in enumerate(entries):
         expected = EntryPhase.WITHDRAWN if index in removed else EntryPhase.QUEUED
         assert phases[attached.key] is expected
+
+
+@pytest.mark.xfail(
+    strict=True, reason="r3206 recheck LOW-2: the timeout was refused after the confirmation"
+)
+def test_remove_refuses_a_transport_timeout_whose_mark_is_over_the_bound_before_asking(
+    tmp_path: Path,
+) -> None:
+    """A mark at a 200 s timeout would hold 1460 s, over the 900 s any mark may hold."""
+    world = _World(tmp_path)
+    queued = world.submit("cand-a", queue_s=math.inf)
+
+    with pytest.raises(LedgerError, match="transport_timeout_seconds=200"):
+        world.evals("remove", entry_id(queued.key), call_seconds=200.0)
+
+    assert world.questions == []
+    assert world.status(queued) is SlurmJobStatus.PENDING

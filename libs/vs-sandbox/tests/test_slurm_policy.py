@@ -197,3 +197,22 @@ def test_a_ledger_whose_withdrawal_window_exceeds_a_claim_window_is_rejected_nam
 def test_without_a_ledger_any_transport_timeout_loads(tmp_path: Path) -> None:
     """The window bounds only matter to the ledger."""
     assert load_slurm_operator_settings(_ledger_file(tmp_path, 400, None)).policy.ledger is None
+
+
+@pytest.mark.xfail(
+    strict=True, reason="r3206 recheck LOW-2: claim_seconds was bound by the mark window"
+)
+@pytest.mark.parametrize("claim_seconds", [60.0, 300.0, 829.0])
+def test_a_claim_window_shorter_than_the_mark_window_loads(
+    tmp_path: Path, claim_seconds: float
+) -> None:
+    """No rule needs a claim to outlast a withdrawal mark (830 s at the default timeout).
+
+    A mark this build cannot read holds at least ``MAX_WITHDRAWAL_WINDOW_SECONDS``
+    whatever the claim window, so the operator may set a short claim window.
+    """
+    path = _ledger_file(tmp_path, 110, {"claim_seconds": claim_seconds})
+
+    assert load_slurm_operator_settings(path).policy.ledger == LedgerPolicy(
+        claim_seconds=claim_seconds
+    )

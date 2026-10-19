@@ -16,6 +16,7 @@ from hypothesis import strategies as st
 
 from vs_sim.api.testing import ManualClock, examples
 from vs_slurm.api import (
+    MAX_WITHDRAWAL_WINDOW_SECONDS,
     AttachJob,
     AwaitWithdrawal,
     CheckJob,
@@ -63,11 +64,14 @@ class _Case:
     plant_lease: Callable[[str, str, str, float], None]
     # Plant a withdrawal revision's bytes (key, attempt, revision, document), written at a second.
     plant_withdrawal: Callable[[str, int, int, str, float], None]
+    # The remote ledger's connector, through which a test injects faults; None for the Fake.
+    connector: FakeConnector | None = None
 
 
-def _make(implementation: str, root: Path) -> _Case:
+def _make(implementation: str, root: Path, clock: ManualClock | None = None) -> _Case:
+    reader = {} if clock is None else {"clock": clock}
     if implementation == "fake":
-        fake = FakeEvaluationLedger(project=PROJECT)
+        fake = FakeEvaluationLedger(project=PROJECT, **reader)
 
         def put_fake(name: str, content: bytes) -> str:
             path = f"/site/{name}"
@@ -98,7 +102,7 @@ def _make(implementation: str, root: Path) -> _Case:
 
     def open_ledger() -> EvaluationLedger:
         return RemoteEvaluationLedger(
-            config, project=PROJECT, processes=connector, scratch_root=scratch
+            config, project=PROJECT, processes=connector, scratch_root=scratch, **reader
         )
 
     def plant(key: str, attempt: int, document: str) -> None:
@@ -128,7 +132,9 @@ def _make(implementation: str, root: Path) -> _Case:
         path.write_text(document, encoding="utf-8")
         os.utime(path, (written_at, written_at))
 
-    return _Case(open_ledger(), open_ledger, plant, put_file, plant_lease, plant_withdrawal)
+    return _Case(
+        open_ledger(), open_ledger, plant, put_file, plant_lease, plant_withdrawal, connector
+    )
 
 
 IMPLEMENTATIONS = ("fake", "remote")
@@ -642,3 +648,94 @@ def test_an_unreadable_withdrawal_whose_file_time_is_unknown_is_expired_at_once(
     undone = ledger.read(KEY)
     assert undone is not None
     assert isinstance(submit_step(undone, now=now), CheckJob | AttachJob)
+
+
+def _fail_on_the_cluster(connector: FakeConnector, *programs: str) -> None:
+    """Make each of ``programs`` fail in the ledger's reads on the cluster, as on a host without it.
+
+    A shell function of the same name shadows the program in the read's remote command.
+    """
+    shadow = "".join(f"{program}() {{ return 1; }}; " for program in programs)
+
+    def intercept(
+        request: dict[str, object], answer: Callable[[dict[str, object]], dict[str, object]]
+    ) -> dict[str, object]:
+        command = str(request.get("command") or "")
+        if request.get("operation") == "exec" and "withdrawal-*.json" in command:
+            request = {**request, "command": shadow + command}
+        return answer(request)
+
+    connector.intercept(intercept)
+
+
+@pytest.mark.xfail(
+    strict=True, reason="r3206 recheck LOW-1: only date -r reads a file's time; stat is not tried"
+)
+def test_an_unreadable_withdrawal_is_held_by_its_file_time_on_a_host_whose_date_cannot_read_it(
+    tmp_path: Path,
+) -> None:
+    """A login host whose ``date`` has no ``-r`` (BSD, a minimal image) still reads ``stat``."""
+    case = _make("remote", tmp_path)
+    assert case.connector is not None
+    case.plant(KEY, 0, encode_ledger_document(_record(state=LedgerState.SUBMITTED)))
+    case.plant_withdrawal(KEY, 0, 0, _UNREADABLE_WITHDRAWALS[0], _WRITTEN_AT)
+    _fail_on_the_cluster(case.connector, "date")
+
+    entry = case.reopen().read(KEY)
+
+    assert entry is not None
+    held_until = _WRITTEN_AT + max(entry.claim_window, MAX_WITHDRAWAL_WINDOW_SECONDS)
+    assert submit_step(entry, now=held_until) == AwaitWithdrawal(entry, expired=False)
+    assert submit_step(entry, now=held_until + 1) == AwaitWithdrawal(entry, expired=True)
+
+
+@pytest.mark.xfail(
+    strict=True, reason="r3206 recheck LOW-1: a mark whose file time is unknown expired at once"
+)
+@pytest.mark.parametrize("implementation", IMPLEMENTATIONS)
+@given(
+    document=st.sampled_from(_UNREADABLE_WITHDRAWALS),
+    later=st.floats(min_value=0.0, max_value=3 * MAX_WITHDRAWAL_WINDOW_SECONDS),
+)
+@settings(max_examples=examples(pr=5, nightly=50), deadline=None)
+def test_an_unreadable_withdrawal_whose_file_time_is_unknown_holds_from_when_each_reader_first_saw_it(
+    implementation: str, document: str, later: float
+) -> None:
+    """Neither ``stat`` nor ``date -r`` reads its time: it is held for the longest mark window.
+
+    Each reader holds it from its own first read of it, on its own clock, which
+    is after the file was written, so it is never undone while its writer may
+    still cancel; and it is undone once that much time passed, so it never
+    blocks the request for ever.
+    """
+    with TemporaryDirectory() as directory:
+        clock = ManualClock(_WRITTEN_AT)
+        case = _make(implementation, Path(directory), clock)
+        planted = _record(state=LedgerState.SUBMITTED)
+        case.plant(KEY, 0, encode_ledger_document(planted))
+        if case.connector is None:
+            case.plant_withdrawal(KEY, 0, 0, document, math.inf)
+        else:
+            case.plant_withdrawal(KEY, 0, 0, document, _WRITTEN_AT)
+            _fail_on_the_cluster(case.connector, "stat", "date")
+        first_seen = clock.now()
+        reader = case.reopen()
+
+        entry = reader.read(KEY)
+        clock.advance(later)
+        again = reader.read(KEY)
+        newcomer = case.reopen().read(KEY)
+
+        assert entry is not None
+        assert again is not None
+        assert newcomer is not None
+        held_until = first_seen + max(entry.claim_window, MAX_WITHDRAWAL_WINDOW_SECONDS)
+        for read in (entry, again):  # one reader holds it from its first read, however often
+            assert submit_step(read, now=held_until) == AwaitWithdrawal(read, expired=False)
+            assert submit_step(read, now=held_until + 1) == AwaitWithdrawal(read, expired=True)
+        newcomer_until = held_until + later
+        assert submit_step(newcomer, now=newcomer_until) == AwaitWithdrawal(newcomer, expired=False)
+        assert undo_expired_withdrawal(reader, again, now=held_until + 1)
+        undone = reader.read(KEY)
+        assert undone is not None
+        assert isinstance(submit_step(undone, now=held_until + 1), CheckJob | AttachJob)

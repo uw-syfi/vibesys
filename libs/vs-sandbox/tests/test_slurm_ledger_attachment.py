@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import dataclasses
 import math
+from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING
@@ -25,6 +26,7 @@ from vs_sandbox.api.slurm import (
 )
 from vs_sim.api.testing import ManualClock, examples
 from vs_slurm.api import (
+    ClusterCall,
     ClusterObservation,
     ClusterSubmitted,
     FakeCluster,
@@ -39,6 +41,7 @@ from vs_slurm.api import (
     SlurmBatchStage,
     SlurmBatchStageResult,
     SlurmConfig,
+    SlurmError,
     SlurmFileArtifact,
     SlurmJobStatus,
     SlurmSshTransport,
@@ -523,3 +526,61 @@ def test_a_waiter_never_cancels_a_job_its_submitter_recorded_during_the_takeover
     assert asked.operation_id == operation
     assert world.state(key) is LedgerState.SUBMITTED
     assert _active(world, operation)
+
+
+@dataclass
+class _Transport:
+    """The Fake cluster's transport: every inspect and cancel call fails while ``failing``."""
+
+    failing: bool = False
+
+    def __call__(self, _call: ClusterCall) -> None:
+        if self.failing:
+            raise SlurmError.transport_timed_out("exec")
+
+
+@pytest.mark.parametrize(
+    "submitter",
+    [
+        pytest.param(
+            "run-a",
+            marks=pytest.mark.xfail(
+                strict=True,
+                reason="r3206 LOW-C: a failed inspect failed another run's lapsed claim",
+            ),
+            id="another-run",
+        ),
+        pytest.param("run-b", id="this-run-earlier-process"),
+    ],
+)
+def test_a_failed_inspect_of_a_lapsed_claim_never_starts_a_second_live_job(
+    tmp_path: Path, submitter: str
+) -> None:
+    """A dead submitter's job runs, unrecorded; the next asker's inspect and cancel both fail.
+
+    The asker must leave the attempt as it was, rather than end it and start the
+    next attempt's job beside the first: a transport failure is not "no job".
+    """
+    world = _World(tmp_path)
+    transport = _Transport()
+    world.cluster = FakeCluster(clock=world.clock, on_call=transport)
+    request = world.request(submitter)
+    key = world.attachment(submitter).key(request)
+    first = ledger_operation_id(key, 0)
+    world.claim(submitter, key)
+    world.cluster.script(first, queue_wait_s=math.inf)
+    assert isinstance(world.cluster.submit(request, operation_id=first), ClusterSubmitted)
+    world.clock.advance(LedgerPolicy().claim_seconds + 1)
+    second = ledger_operation_id(key, 1)
+    world.cluster.script(second, queue_wait_s=math.inf)
+
+    transport.failing = True
+    asked = world.attachment("run-b").attach(
+        world.cluster, world.request("run-b"), labels=LedgerLabels()
+    )
+    transport.failing = False
+
+    live = [operation for operation in (first, second) if _active(world, operation)]
+    assert len(live) <= 1, f"live jobs of attempts {live}"
+    assert isinstance(asked, AttachPending)
+    assert world.state(key) is LedgerState.SUBMITTING
