@@ -6,7 +6,7 @@
 export {type DashboardRow, dashboardRows} from './all-runs-rows.js';
 export {type NoticeKind, type RunNotice, runNotices} from './notices.js';
 export {NOTICE_REASONS, type RecentNotice, recentNotice} from './recent-notice.js';
-export {type Clock, formatWhen} from './recent-words.js';
+export {type Clock, formatStarted, formatWhen} from './recent-words.js';
 export {type RunRowStatus, statusWord} from './run-status.js';
 export {
   DASHBOARD_RUNS,

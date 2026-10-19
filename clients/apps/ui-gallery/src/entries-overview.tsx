@@ -48,7 +48,7 @@ function Tiles(props: {readonly title: string}): JSX.Element {
         facts="host-a · 8 cores · Codex"
         chart={<Chart />}
         figures="7 ideas · $4.20 · 1h 05m"
-        now="Measuring idea 7"
+        note={null}
         status={{tone: 'live', label: 'running'}}
         menu={[{id: 'archive', label: 'Archive', press: noop}]}
         press={noop}
@@ -59,7 +59,7 @@ function Tiles(props: {readonly title: string}): JSX.Element {
         facts="host-b"
         chart={<Chart points={POINTS.slice(0, 3)} line={LINE.slice(0, 3)} />}
         figures="3 ideas · 12m"
-        now="3 failed in a row"
+        note="3 failed in a row"
         status={{tone: 'err', label: 'failed'}}
         attention
         press={noop}

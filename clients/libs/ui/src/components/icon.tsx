@@ -23,7 +23,8 @@ const PATHS = {
   circle: 'M12 4a8 8 0 1 0 0 16 8 8 0 0 0 0-16z',
   grid: 'M4 5h6v6H4zM14 5h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z',
   usage: 'M5 20V11M12 20V5M19 20v-7',
-  mark: 'M4 6l8 13 8-13',
+  // The app's logo (the website's `logo.svg`): a terminal window with a prompt.
+  mark: 'M4 4h16a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1zM7 9l3 3-3 3M13 15h4',
   sidebar: 'M5 4h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2zM9 4v16',
 } as const;
 

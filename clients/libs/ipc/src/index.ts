@@ -16,7 +16,6 @@ export {
   OPEN_SETTINGS_CHANNEL,
   type PageToMain,
   parsePageMessage,
-  TOGGLE_SIDEBAR_CHANNEL,
   WAKE_CHANNEL,
 } from './bridge.js';
 export {openPortSocket, type PagePort} from './port-socket.js';

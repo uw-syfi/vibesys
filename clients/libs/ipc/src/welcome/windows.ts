@@ -47,8 +47,6 @@ export interface WindowsWelcomeBridge {
   openSettings(): Promise<WelcomeResult<null>>;
   /** Open a web or mail address in the user's own browser or mail app; never in the app. */
   openExternal(url: string): Promise<WelcomeResult<null>>;
-  /** The application menu's "Toggle Sidebar" was chosen. */
-  onToggleSidebar(listener: () => void): void;
   /** Another app window requested Settings. */
   onOpenSettings(listener: () => void): void;
 }

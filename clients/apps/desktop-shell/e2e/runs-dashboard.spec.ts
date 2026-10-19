@@ -38,15 +38,18 @@ test('groups every run of every machine by status, the runs that need the user f
 
   expect(await groupTitles(page)).toEqual([
     'Needs you 2',
-    'Running 3',
+    'Running 2',
     'Paused 1',
-    'Failed 1',
     'Finished 3',
     'Stopped 1',
   ]);
   await expect(tiles(page, 'Needs you')).toHaveCount(2);
   const stalled = tiles(page, 'Needs you').filter({hasText: 'mpsc'});
   await expect(stalled).toContainText('host-b');
+  await expect(stalled).toContainText('stalled 32m');
+  await expect(tiles(page, 'Needs you').filter({hasText: 'spsc'})).toContainText('failed');
+  // A run that needs the user is in that group alone.
+  await expect(page.locator('.vs-overview-tile')).toHaveCount(9);
 });
 
 test('a tile says its result against the base, where it ran, its ideas and time, and charts every idea', async ({
@@ -55,6 +58,7 @@ test('a tile says its result against the base, where it ran, its ideas and time,
   await open(page, dashboardWorld(ONE_RUN));
 
   const tile = tiles(page, 'Running').first();
+  await expect(tile).toContainText('queue-rs-run1');
   await expect(tile).toContainText('mpmc');
   await expect(tile).toContainText('1.42×');
   await expect(tile).toContainText('host-a');
@@ -84,14 +88,14 @@ test('Group by regroups the same tiles by machine, task and agent', async ({page
     (await groupTitles(page)).filter(title => !title.startsWith('Needs you'));
 
   await by.selectOption('machine');
-  expect(await names()).toEqual(['host-a 5', 'host-b 4']);
+  expect(await names()).toEqual(['host-a 4', 'host-b 3']);
   await by.selectOption('task');
-  expect(await names()).toEqual(['mpmc 3', 'mpsc 3', 'spsc 3']);
+  expect(await names()).toEqual(['mpmc 3', 'mpsc 2', 'spsc 2']);
   await by.selectOption('agent');
-  expect(await names()).toEqual(['Unknown 9']);
+  expect(await names()).toEqual(['Unknown 7']);
   await by.selectOption('status');
-  expect((await names())[0]).toBe('Running 3');
-  // The Needs you row stays whatever the grouping.
+  expect((await names())[0]).toBe('Running 2');
+  // Needs you is its own group whatever the grouping.
   await expect(tiles(page, 'Needs you')).toHaveCount(2);
 });
 
@@ -112,7 +116,10 @@ test('the rail counts the runs that need the user, and Runs and the mark both go
 test('a tile opens its run, and the rail keeps Runs as where it came from', async ({page}) => {
   await open(page, dashboardWorld(ONE_RUN));
 
-  await tiles(page, 'Running').first().getByRole('button', {name: /^mpmc/}).click();
+  await tiles(page, 'Running')
+    .first()
+    .getByRole('button', {name: /^queue-rs-run1/})
+    .click();
 
   await expect(page.getByRole('heading', {name: 'Runs'})).toHaveCount(0);
   const rail = page.getByRole('navigation', {name: 'VibeSys'});
@@ -123,7 +130,7 @@ test('Archive takes a run off the dashboard', async ({page}) => {
   await open(page, dashboardWorld(MANY_RUNS));
   await expect(tiles(page, 'Stopped')).toHaveCount(1);
 
-  await page.getByRole('button', {name: 'More for mpsc'}).last().click();
+  await page.getByRole('button', {name: 'More for queue-rs-run9'}).click();
   await page.getByRole('menuitem', {name: 'Archive'}).click();
 
   await expect(page.getByRole('region', {name: 'Stopped', exact: true})).toHaveCount(0);
@@ -135,6 +142,7 @@ test('with no run it offers New run alone, and pressing it opens New run', async
   await expect(page.getByRole('combobox', {name: 'Group by'})).toHaveCount(0);
   const main = page.getByRole('main');
   await expect(main.getByRole('button')).toHaveCount(1);
+  await expect(main.getByRole('img', {name: 'VibeSys'})).toBeVisible();
   await main.getByRole('button', {name: 'New run'}).click();
   await expect(page.getByRole('heading', {name: 'Runs'})).toHaveCount(0);
 });
@@ -145,7 +153,7 @@ test('a machine that cannot list its runs leaves the other machine’s tiles', a
   await open(page, {...world, projectRuns: rest});
 
   await expect(page.locator('.vs-overview-tile', {hasText: 'host-b'})).toHaveCount(0);
-  await expect(page.locator('.vs-overview-tile', {hasText: 'host-a'})).toHaveCount(5 + 1);
+  await expect(page.locator('.vs-overview-tile', {hasText: 'host-a'})).toHaveCount(5);
 });
 
 test('a host that sends no chart data still shows each run as a tile without a chart', async ({
@@ -195,7 +203,7 @@ test('on a machine whose VibeSys is too old for digests, a run still says its ow
   const key = Object.keys(world.projectRuns ?? {}).find(each => each.startsWith('ssh:host-b'));
   if (key === undefined) throw new Error('the world lists nothing on host-b');
   // A run the registry no longer holds: only a digest could say how it went.
-  const old = {runId: 'r-old-99', task: 'mpmc', createdAt: NOW - 50 * 3_600_000};
+  const old = {runId: 'r-old-99', name: 'r-old-99', task: 'mpmc', createdAt: NOW - 50 * 3_600_000};
   await open(page, {
     ...world,
     projectRuns: {...world.projectRuns, [key]: [...(world.projectRuns?.[key] ?? []), old]},

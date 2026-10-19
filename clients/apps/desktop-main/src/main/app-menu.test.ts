@@ -21,7 +21,6 @@ function build(platform: NodeJS.Platform) {
   const calls: string[] = [];
   const template = applicationMenuTemplate(platform, 'VibeSys', {
     openSettings: () => calls.push('settings'),
-    toggleSidebar: () => calls.push('sidebar'),
   });
   return {calls, all: items(template)};
 }
@@ -42,7 +41,6 @@ describe('the application menu', () => {
     for (const platform of PLATFORMS) {
       const template = applicationMenuTemplate(platform, 'VibeSys', {
         openSettings: () => undefined,
-        toggleSidebar: () => undefined,
       });
       const holder = template.find(
         item =>
@@ -53,12 +51,7 @@ describe('the application menu', () => {
     }
   });
 
-  test('Toggle Sidebar only shows its shortcut, which the page handles', () => {
-    const {calls, all} = build('darwin');
-    const toggle = all.find(item => item.label === 'Toggle Sidebar');
-    expect(toggle?.accelerator).toBe('CmdOrCtrl+\\');
-    expect(toggle?.registerAccelerator).toBe(false);
-    choose(toggle);
-    expect(calls).toEqual(['sidebar']);
+  test('View has no sidebar toggle: the shell has no sidebar', () => {
+    expect(build('darwin').all.map(item => item.label)).not.toContain('Toggle Sidebar');
   });
 });

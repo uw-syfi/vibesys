@@ -59,6 +59,8 @@
   justify-content: space-between;
   gap: var(--space-3);
   min-width: 0;
+  /* A tile with no result keeps the head a result gives, so charts line up across a row. */
+  min-height: var(--control-sm);
 }
 .vs-overview-tile[data-menu] .vs-overview-tile-head {
   padding-right: var(--control-sm);
@@ -92,9 +94,25 @@
   right: var(--space-3);
 }
 .vs-result-chart {
+  position: relative;
   display: block;
   width: 100%;
-  height: auto;
+  height: var(--chart-height);
+}
+.vs-result-chart-plot {
+  position: absolute;
+  inset: var(--space-4);
+}
+.vs-result-chart-lines {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+.vs-result-chart-base,
+.vs-result-chart-line {
+  vector-effect: non-scaling-stroke;
 }
 .vs-result-chart-base {
   stroke: var(--muted);
@@ -107,25 +125,30 @@
   stroke: var(--text);
   stroke-width: 1.5;
 }
+.vs-result-chart-mark {
+  position: absolute;
+  box-sizing: border-box;
+  width: var(--dot);
+  height: var(--dot);
+  transform: translate(-50%, -50%);
+  border-radius: var(--radius-full);
+}
 .vs-result-chart-mark[data-mark="kept"] {
-  fill: var(--ok);
-  stroke: var(--ok);
+  background: var(--ok);
 }
 .vs-result-chart-mark[data-mark="not-better"] {
-  fill: var(--panel);
-  stroke: var(--muted);
-  stroke-width: 1.5;
+  border: var(--focus-ring) solid var(--muted);
+  background: var(--panel);
 }
 .vs-result-chart-mark[data-mark="failed"] {
-  fill: none;
-  stroke: var(--err);
-  stroke-width: 1.5;
-  stroke-linecap: round;
+  border-radius: 0;
+  background:
+    linear-gradient(45deg, transparent 43%, var(--err) 43% 57%, transparent 57%),
+    linear-gradient(-45deg, transparent 43%, var(--err) 43% 57%, transparent 57%);
 }
 .vs-result-chart-mark[data-mark="pending"] {
-  fill: var(--accent);
-  stroke: var(--chip-accent-border);
-  stroke-width: 3;
+  background: var(--accent);
+  box-shadow: 0 0 0 var(--dot-ring) var(--chip-accent-border);
 }
 .vs-result-key-mark {
   flex: none;

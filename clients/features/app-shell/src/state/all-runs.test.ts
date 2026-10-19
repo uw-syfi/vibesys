@@ -44,6 +44,7 @@ const opened = (host: 'ssh:host-a' | 'ssh:host-b', project: string, runId: strin
 
 const run = (runId: string, hoursAgo: number, task: string | null = 'mpmc'): ListedRun => ({
   runId,
+  name: runId,
   task,
   createdAt: NOW - hoursAgo * HOUR,
 });
@@ -231,6 +232,7 @@ describe('the Runs dashboard', () => {
       );
       const runs = times.map((time, index) => ({
         runId: `r${index}`,
+        name: `r${index}`,
         task: null,
         createdAt: NOW - time,
       }));

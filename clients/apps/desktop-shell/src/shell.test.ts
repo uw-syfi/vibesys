@@ -269,7 +269,7 @@ test("New run offers what the machine's Settings data says, and returning from S
         throw new Error('this test opens no run');
       },
     },
-    {sidebar: {read: () => null, write: ignore}},
+    {},
   );
   const select = (screen: Screen): void => stores.sidebar.store.dispatch({type: 'select', screen});
   select({kind: 'new-run', machine: 'ssh:gpu-box'});

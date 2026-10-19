@@ -11,7 +11,13 @@ import {
   sidebarInvariants,
   sidebarStep,
 } from './index.js';
-import {formatDuration, formatRatio, formatWhen, resultWords} from './recent-words.js';
+import {
+  formatDuration,
+  formatRatio,
+  formatStarted,
+  formatWhen,
+  resultWords,
+} from './recent-words.js';
 
 const NOW = Date.parse('2026-10-17T12:00:00Z');
 const CLOCK: Clock = {now: NOW, timeZone: 'UTC'};
@@ -33,6 +39,18 @@ describe('formatWhen', () => {
     const tokyo: Clock = {now: NOW, timeZone: 'Asia/Tokyo'};
     // 18:00 UTC on the 16th is 03:00 on the 17th in Tokyo, where it is already the 17th at noon UTC.
     expect(formatWhen(Date.parse('2026-10-16T18:00:00Z'), tokyo)).toBe('03:00');
+  });
+});
+
+describe('formatStarted', () => {
+  test('is always the day and the time, with the year only when it is not this one', () => {
+    const at = (iso: string): string | null => formatStarted(Date.parse(iso), CLOCK);
+    expect(at('2026-10-17T07:32:00Z')).toBe('Oct 17 07:32');
+    expect(at('2026-10-19T04:21:00Z')).toBe('Oct 19 04:21');
+    const nextYear: Clock = {now: Date.parse('2027-01-10T12:00:00Z'), timeZone: 'UTC'};
+    expect(formatStarted(Date.parse('2026-12-31T23:59:00Z'), nextYear)).toBe('Dec 31, 2026 23:59');
+    expect(formatStarted(0, CLOCK)).toBeNull();
+    expect(formatStarted(Number.NaN, CLOCK)).toBeNull();
   });
 });
 

@@ -94,7 +94,6 @@ function installApplicationMenu(main: () => AppWindow): void {
           main().openSettings();
           main().focus();
         },
-        toggleSidebar: () => main().toggleSidebar(),
       }),
     ),
   );

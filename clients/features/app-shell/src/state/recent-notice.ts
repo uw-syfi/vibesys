@@ -17,9 +17,9 @@ export function recentNotice(skipped: readonly SkippedRecent[]): RecentNotice | 
   if (skipped.length === 0) return null;
   const shown = skipped.slice(0, NOTICE_REASONS).map(entry => entry.reason);
   const more = skipped.length - shown.length;
-  const reasons = more > 0 ? [...shown, `and ${more} more`] : shown;
+  const reasons = more > 0 ? [...shown, `+${more} more`] : shown;
   return {
-    title: `${skipped.length} saved ${skipped.length === 1 ? 'run was' : 'runs were'} skipped`,
-    body: `${reasons.join('; ')}. Fix or remove ${skipped.length === 1 ? 'it' : 'them'} in recent.json; until then the runs you open are not remembered.`,
+    title: `${skipped.length} saved ${skipped.length === 1 ? 'run' : 'runs'} skipped`,
+    body: reasons.join('; '),
   };
 }

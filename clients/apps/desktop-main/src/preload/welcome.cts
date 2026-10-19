@@ -74,8 +74,6 @@ const FIRST_PAINT_CHANNEL: typeof import('@vibesys/ipc').FIRST_PAINT_CHANNEL =
   'vibesys:welcome:first-paint';
 const CONNECT_CHANNEL: typeof import('@vibesys/ipc').CONNECT_CHANNEL = 'vibesys:connect';
 const WAKE_CHANNEL: typeof import('@vibesys/ipc').WAKE_CHANNEL = 'vibesys:wake';
-const TOGGLE_SIDEBAR_CHANNEL: typeof import('@vibesys/ipc').TOGGLE_SIDEBAR_CHANNEL =
-  'vibesys:toggle-sidebar';
 const OPEN_SETTINGS_CHANNEL: typeof import('@vibesys/ipc').OPEN_SETTINGS_CHANNEL =
   'vibesys:open-settings';
 const RUN_PORT_MESSAGE: typeof import('@vibesys/ipc').RUN_PORT_MESSAGE = 'vibesys:run-port';
@@ -155,7 +153,6 @@ function createWelcomePreload(capabilities: WelcomePreloadCapabilities): Welcome
     showMainWindow: () => call(CHANNELS.showMainWindow),
     openSettings: () => call(CHANNELS.openSettings),
     openExternal: url => call(CHANNELS.openExternal, url),
-    onToggleSidebar: listener => capabilities.on(TOGGLE_SIDEBAR_CHANNEL, () => listener()),
     onOpenSettings: listener => capabilities.on(OPEN_SETTINGS_CHANNEL, () => listener()),
     onRecent: on(EVENTS.recent),
     onListing: on(EVENTS.listing),

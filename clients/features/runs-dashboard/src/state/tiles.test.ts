@@ -2,15 +2,19 @@ import {describe, expect, test} from 'bun:test';
 import {SEEDS, Seeded} from '@vibesys/store/testing';
 import {
   type Attention,
+  attentionOf,
   BASE,
   chartOf,
   GROUP_BYS,
+  type GroupBy,
   groupTiles,
   type IdeaInput,
   type Mark,
+  NEEDS_YOU,
   needsYou,
   type RunInput,
   type StatusKind,
+  type Tile,
   tileOf,
   tilesOf,
   UNKNOWN_GROUP,
@@ -42,12 +46,14 @@ function ideas(random: Seeded): IdeaInput[] {
 function run(id: string, over: Partial<RunInput> = {}): RunInput {
   return {
     id,
+    name: id,
     task: 'mpmc',
+    started: null,
     machine: 'host-a',
     hardware: null,
     agent: null,
     status: {kind: 'running', word: 'running'},
-    now: null,
+    problem: null,
     ideas: null,
     costUsd: null,
     seconds: null,
@@ -56,6 +62,8 @@ function run(id: string, over: Partial<RunInput> = {}): RunInput {
     points: [],
     pointsOmitted: 0,
     attention: 'none',
+    failedStreak: 0,
+    silentSeconds: null,
     ...over,
   };
 }
@@ -70,7 +78,20 @@ function randomRun(random: Seeded, index: number): RunInput {
     points: random.bool() ? ideas(random) : null,
     pointsOmitted: random.int(3),
     attention: random.pick(ATTENTIONS),
+    failedStreak: random.int(6),
+    silentSeconds: random.bool() ? null : random.int(20_000),
   });
+}
+
+function expectNeedsYouFirst(tiles: readonly Tile[], by: GroupBy): void {
+  const needing = needsYou(tiles).map(tile => tile.id);
+  const groups = groupTiles(tiles, by);
+  const first = needing.length === 0 ? undefined : groups[0];
+  const others = needing.length === 0 ? groups : groups.slice(1);
+  expect(first?.key).toBe(needing.length === 0 ? undefined : NEEDS_YOU);
+  expect(first?.tiles.map(tile => tile.id) ?? []).toEqual(needing);
+  expect(others.flatMap(group => group.tiles).some(tile => tile.attention)).toBe(false);
+  expect(others.some(group => group.key === NEEDS_YOU)).toBe(false);
 }
 
 describe('a tile chart', () => {
@@ -149,10 +170,11 @@ describe('a tile', () => {
   });
 
   test('says machine, hardware and agent, leaving out what is unknown', () => {
-    expect(tileOf(run('a')).facts).toBe('host-a');
-    expect(tileOf(run('a', {hardware: '8 cores', agent: 'Codex'})).facts).toBe(
-      'host-a · 8 cores · Codex',
-    );
+    expect(tileOf(run('a')).facts).toBe('mpmc · host-a');
+    expect(
+      tileOf(run('a', {hardware: '8 cores', agent: 'Codex', started: 'Oct 19 04:21'})).facts,
+    ).toBe('mpmc · host-a · 8 cores · Codex · Oct 19 04:21');
+    expect(tileOf(run('a', {name: 'queue-rs-final2827'})).title).toBe('queue-rs-final2827');
   });
 
   test('says ideas, cost and time, counting ideas the chart left out', () => {
@@ -192,7 +214,7 @@ describe('the tiles of many runs', () => {
       const runs = Array.from({length: random.int(12)}, (_, index) => randomRun(random, index));
       const needing = needsYou(tilesOf(runs)).map(tile => tile.id);
       expect(new Set(needing)).toEqual(
-        new Set(runs.filter(each => each.attention !== 'none').map(each => each.id)),
+        new Set(runs.filter(each => attentionOf(each) !== 'none').map(each => each.id)),
       );
     }
   });
@@ -206,6 +228,42 @@ describe('the tiles of many runs', () => {
       for (const by of GROUP_BYS) {
         const grouped = groupTiles(tiles, by).flatMap(group => group.tiles.map(tile => tile.id));
         expect(grouped.sort()).toEqual(tiles.map(tile => tile.id).sort());
+      }
+    }
+  });
+
+  test('the runs that need you are one group, first, whatever the grouping, and in no other', () => {
+    for (const seed of SEEDS) {
+      const random = new Seeded(seed);
+      const tiles = tilesOf(
+        Array.from({length: random.int(14)}, (_, index) => randomRun(random, index)),
+      );
+      for (const by of GROUP_BYS) expectNeedsYouFirst(tiles, by);
+    }
+  });
+
+  test('a tile says why it needs you in a word or two, else why its state is unread', () => {
+    const note = (over: Partial<RunInput>): string | null => tileOf(run('a', over)).note;
+    expect(note({})).toBeNull();
+    expect(note({problem: 'unreachable'})).toBe('unreachable');
+    expect(note({attention: 'failed', status: {kind: 'stopped', word: 'ended'}})).toBe('failed');
+    // The pill already says failed: the status is said once.
+    expect(note({attention: 'failed', status: {kind: 'failed', word: 'failed'}})).toBeNull();
+    expect(note({attention: 'repeated_failure', failedStreak: 3})).toBe('3 failed in a row');
+    expect(note({attention: 'stalled', silentSeconds: 1920})).toBe('stalled 32m');
+    expect(note({attention: 'stalled', silentSeconds: null})).toBe('stalled');
+    expect(
+      note({attention: 'failed', problem: 'unreachable', status: {kind: 'stopped', word: 'ended'}}),
+    ).toBe('failed');
+  });
+
+  test('a run that is no longer working is never stalled or failing its ideas, and its pill is never green', () => {
+    for (const status of STATUSES) {
+      for (const attention of ATTENTIONS) {
+        const tile = tileOf(run('a', {status: {kind: status, word: 'w'}, attention}));
+        const needs = status === 'running' ? attention !== 'none' : attention === 'failed';
+        expect(tile.attention).toBe(needs);
+        if (needs) expect(['err', 'warn']).toContain(tile.status.tone);
       }
     }
   });

@@ -916,7 +916,7 @@ describe('Hosts.projectRuns', () => {
   const run = (id: string, task: string | null, created: string): RunSummary => ({
     run_id: id,
     task,
-    display_name: id,
+    display_name: `name-of-${id}`,
     created_at: created,
     phase: null,
     instance_id: null,
@@ -936,9 +936,24 @@ describe('Hosts.projectRuns', () => {
     const runs = await subject.hosts.projectRuns(LOCAL, '/srv/project');
 
     expect(runs).toEqual([
-      {runId: 'run-3', task: null, createdAt: Date.parse('2026-10-17T05:00:00Z')},
-      {runId: 'run-2', task: 'mpmc', createdAt: Date.parse('2026-10-17T04:00:00Z')},
-      {runId: 'run-1', task: 'mpmc', createdAt: Date.parse('2026-10-17T03:00:00Z')},
+      {
+        runId: 'run-3',
+        name: 'name-of-run-3',
+        task: null,
+        createdAt: Date.parse('2026-10-17T05:00:00Z'),
+      },
+      {
+        runId: 'run-2',
+        name: 'name-of-run-2',
+        task: 'mpmc',
+        createdAt: Date.parse('2026-10-17T04:00:00Z'),
+      },
+      {
+        runId: 'run-1',
+        name: 'name-of-run-1',
+        task: 'mpmc',
+        createdAt: Date.parse('2026-10-17T03:00:00Z'),
+      },
     ]);
     expect(link.helper.requests.filter(request => request.type === 'runs.list')).toEqual([
       expect.not.objectContaining({digest_runs: expect.anything()}),

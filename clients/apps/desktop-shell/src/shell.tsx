@@ -413,7 +413,10 @@ function RunsRoute(props: {
 }
 
 /** The window: the rail and the selected screen. */
-export function Shell(props: {readonly stores: ShellStores}): JSX.Element {
+export function Shell(props: {
+  readonly stores: ShellStores;
+  readonly version: string;
+}): JSX.Element {
   const {sidebar, machines, newRun} = props.stores;
   const sidebarState = useStore(sidebar.store);
   const machinesState = useStore(machines);
@@ -472,6 +475,7 @@ export function Shell(props: {readonly stores: ShellStores}): JSX.Element {
     <AppShell
       state={sidebarState}
       dispatch={sidebar.store.dispatch}
+      version={props.version}
       badges={{
         needsYou: needsYou(tiles).length,
         machineUnreachable: machineCounts(machinesState).attention > 0,

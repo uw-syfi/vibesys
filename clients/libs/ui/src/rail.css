@@ -4,8 +4,23 @@
   --titlebar-row: max(var(--chrome-inset-height, var(--space-0)), var(--control));
   position: relative;
   display: flex;
+  flex-direction: column;
   height: 100%;
   background: var(--bg);
+}
+.vs-rail-band {
+  flex: none;
+  box-sizing: border-box;
+  height: var(--titlebar-row);
+  /* The band holds the window's own controls and moves the window. */
+  -webkit-app-region: drag;
+  border-bottom: var(--hairline) solid var(--line);
+  background: var(--bg);
+}
+.vs-rail-body {
+  display: flex;
+  flex: 1 1 0;
+  min-height: 0;
 }
 .vs-rail {
   box-sizing: border-box;
@@ -15,7 +30,7 @@
   justify-content: space-between;
   width: var(--rail);
   max-height: 100%;
-  padding: calc(var(--titlebar-row) + var(--space-2)) var(--space-1) var(--space-4);
+  padding: var(--space-3) var(--space-1) var(--space-4);
   /* The rail's background moves the window; its controls stay controls. */
   -webkit-app-region: drag;
   border-right: var(--hairline) solid var(--line);

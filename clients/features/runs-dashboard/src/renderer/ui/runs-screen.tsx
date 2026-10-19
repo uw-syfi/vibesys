@@ -15,9 +15,11 @@ import {
   type SelectOption,
   Stack,
   Text,
+  Wordmark,
 } from '@vibesys/ui';
 import type {JSX} from 'react';
-import {BASE, type GroupBy, groupTiles, needsYou, type Tile} from '../../state/index.js';
+import {BASE, type GroupBy, groupTiles, type Tile} from '../../state/index.js';
+import {WORDMARK} from './wordmark.js';
 
 /** An unfinished New run, as the dashboard offers it: what it is of so far, and where it stands. */
 export interface RunsDraft {
@@ -65,7 +67,7 @@ function TileOf(props: {
         )
       }
       figures={tile.figures}
-      now={tile.now}
+      note={tile.note}
       status={{tone: tile.status.tone, label: tile.status.label}}
       attention={tile.attention}
       {...(menu.length === 0 ? {} : {menu})}
@@ -96,8 +98,8 @@ function Draft(props: {readonly draft: RunsDraft}): JSX.Element {
 }
 
 /**
- * The Runs dashboard, the app's home: a title and a Group by select, the "Needs you" row of the runs
- * that failed or stalled, then every run's tile in groups. With no run it offers New run alone.
+ * The Runs dashboard, the app's home: a title and a Group by select, then every run's tile in
+ * groups, the runs that need their user first, each run in one group. With no run it shows the wordmark over New run.
  * Pressing a tile opens its run (`open` is handed the tile's id); `menu` is a tile's row menu.
  */
 export function RunsScreen(props: {
@@ -112,7 +114,6 @@ export function RunsScreen(props: {
   readonly notice: {readonly title: string; readonly body: string} | null;
 }): JSX.Element {
   const {tiles, by} = props;
-  const attention = needsYou(tiles);
   const tile = (each: Tile): JSX.Element => (
     <TileOf key={each.id} tile={each} open={props.open} menu={props.menu} />
   );
@@ -138,17 +139,15 @@ export function RunsScreen(props: {
         )}
         {props.draft === null ? null : <Draft draft={props.draft} />}
         {tiles.length === 0 ? (
-          <Row justify="center">
-            <Button variant="primary" icon="plus" text="New run" press={props.newRun} />
-          </Row>
+          <Stack gap="space-6">
+            <Wordmark art={WORDMARK} label="VibeSys" align="center" />
+            <Row justify="center">
+              <Button variant="primary" icon="plus" text="New run" press={props.newRun} />
+            </Row>
+          </Stack>
         ) : (
           <>
             <ResultChartKey label="Chart key" items={CHART_KEY} />
-            {attention.length === 0 ? null : (
-              <OverviewGroup title="Needs you" count={attention.length} tone="err">
-                {attention.map(tile)}
-              </OverviewGroup>
-            )}
             {groupTiles(tiles, by).map(group => (
               <OverviewGroup
                 key={group.key}

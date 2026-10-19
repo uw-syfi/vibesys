@@ -19,13 +19,13 @@ describe('the notice for saved runs that could not be read', () => {
 
       const notice = recentNotice(skipped);
 
-      expect(notice?.title).toBe(`${count} saved ${count === 1 ? 'run was' : 'runs were'} skipped`);
+      expect(notice?.title).toBe(`${count} saved ${count === 1 ? 'run' : 'runs'} skipped`);
       for (const [index, entry] of skipped.entries()) {
         expect(notice?.body.includes(entry.reason)).toBe(index < NOTICE_REASONS);
       }
       expect(notice?.body.includes('more')).toBe(count > NOTICE_REASONS);
       if (count > NOTICE_REASONS) {
-        expect(notice?.body).toContain(`and ${count - NOTICE_REASONS} more`);
+        expect(notice?.body).toContain(`+${count - NOTICE_REASONS} more`);
       }
     }
   });

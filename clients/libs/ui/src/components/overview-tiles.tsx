@@ -1,4 +1,4 @@
-import type {JSX, ReactNode} from 'react';
+import type {CSSProperties, JSX, ReactNode} from 'react';
 import {Menu, type MenuItem} from './menu.js';
 import {Chip, StatusDot, type StatusTone} from './status.js';
 import {Text} from './text.js';
@@ -12,17 +12,15 @@ export interface SparkPoint {
   readonly mark: SparkMark;
 }
 
-const WIDTH = 200;
-const HEIGHT = 64;
-const PAD = 8;
-const MARK = 3;
-
 /**
- * Results in a small chart with no axes: one mark per item in the order the results landed, a
+ * Results in a small chart with no axes: one mark per item in the order they came, a
  * dashed `reference` line (the base) and the best-so-far `line`, a step line with one value per
  * point. Filled marks are kept items, hollow ones not better, a cross a failed one and a ringed
- * dot one still pending. The y range fits every point, the line and the reference.
- * `label` describes the chart for assistive technology.
+ * dot one still pending. The y range fits every point, the line and the reference. The chart has
+ * one fixed height (`--chart-height`) and the width of its container: the lines are drawn on a
+ * unit square stretched to the plot, with strokes that do not scale, and each mark is a box placed
+ * by percentage, so a mark keeps its shape at any width. `label` describes the chart for assistive
+ * technology.
  */
 export function ResultChart(props: {
   readonly label: string;
@@ -34,10 +32,10 @@ export function ResultChart(props: {
   const values = [reference, ...line, ...points.map(point => point.y)];
   const low = Math.min(...values);
   const span = Math.max(...values) - low;
-  const y = (value: number): number =>
-    span === 0 ? HEIGHT / 2 : HEIGHT - PAD - ((value - low) / span) * (HEIGHT - 2 * PAD);
-  const x = (index: number): number =>
-    points.length <= 1 ? WIDTH / 2 : PAD + (index * (WIDTH - 2 * PAD)) / (points.length - 1);
+  /** Where `value` sits down the plot, from 0 (top) to 1 (bottom). */
+  const y = (value: number): number => (span === 0 ? 0.5 : 1 - (value - low) / span);
+  /** Where item `index` sits across the plot, from 0 (left) to 1 (right). */
+  const x = (index: number): number => (points.length <= 1 ? 0.5 : index / (points.length - 1));
   const [first, ...rest] = line;
   const path =
     first === undefined
@@ -46,45 +44,33 @@ export function ResultChart(props: {
   // The marks are positional and never reorder, so a mark's place is its key.
   const marks = points.map((point, index) => ({
     key: `mark-${index}`,
-    point,
-    cx: x(index),
-    cy: y(point.y),
+    mark: point.mark,
+    at: {left: `${x(index) * 100}%`, top: `${y(point.y) * 100}%`} satisfies CSSProperties,
   }));
   return (
-    <svg
-      className="vs-result-chart"
-      viewBox={`0 0 ${WIDTH} ${HEIGHT}`}
-      role="img"
-      aria-label={props.label}
-    >
-      <line
-        className="vs-result-chart-base"
-        x1={0}
-        x2={WIDTH}
-        y1={y(reference)}
-        y2={y(reference)}
-      />
-      {path === null ? null : <path className="vs-result-chart-line" d={path} />}
-      {marks.map(({key, point, cx, cy}) =>
-        point.mark === 'failed' ? (
-          <path
-            key={key}
-            className="vs-result-chart-mark"
-            data-mark="failed"
-            d={`M${cx - MARK} ${cy - MARK}L${cx + MARK} ${cy + MARK}M${cx + MARK} ${cy - MARK}L${cx - MARK} ${cy + MARK}`}
+    <div className="vs-result-chart" role="img" aria-label={props.label}>
+      <div className="vs-result-chart-plot">
+        <svg
+          className="vs-result-chart-lines"
+          viewBox="0 0 1 1"
+          preserveAspectRatio="none"
+          aria-hidden="true"
+          focusable="false"
+        >
+          <line
+            className="vs-result-chart-base"
+            x1={0}
+            x2={1}
+            y1={y(reference)}
+            y2={y(reference)}
           />
-        ) : (
-          <circle
-            key={key}
-            className="vs-result-chart-mark"
-            data-mark={point.mark}
-            cx={cx}
-            cy={cy}
-            r={MARK}
-          />
-        ),
-      )}
-    </svg>
+          {path === null ? null : <path className="vs-result-chart-line" d={path} />}
+        </svg>
+        {marks.map(({key, mark, at}) => (
+          <span key={key} className="vs-result-chart-mark" data-mark={mark} style={at} />
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -115,7 +101,8 @@ export function ResultChartKey(props: {
 
 /**
  * One subject at a glance as a tile: its `title` and best `result` against the base, the `facts`
- * line, a `chart`, the `figures` line and what it is doing now with its `status` pill. Pressing
+ * line, a `chart`, the `figures` line and a `note` (a word or two on why it needs its user) beside
+ * its `status` pill, which is the one place its status is said. Pressing
  * it opens the subject; `menu` adds a row menu in its corner. `attention` marks a tile that
  * needs its user.
  */
@@ -125,7 +112,7 @@ export function OverviewTile(props: {
   readonly facts: string;
   readonly chart: ReactNode;
   readonly figures: string;
-  readonly now: string | null;
+  readonly note: string | null;
   readonly status: {readonly tone: StatusTone; readonly label: string};
   readonly attention?: boolean;
   readonly hint?: string;
@@ -165,7 +152,9 @@ export function OverviewTile(props: {
         </span>
         <span className="vs-overview-tile-foot">
           <span className="vs-overview-tile-line">
-            <Text variant="small">{props.now ?? ' '}</Text>
+            <Text variant="small" tone={props.attention === true ? 'err' : 'muted'}>
+              {props.note ?? ' '}
+            </Text>
           </span>
           <Chip label={props.status.label} tone={props.status.tone} dot />
         </span>

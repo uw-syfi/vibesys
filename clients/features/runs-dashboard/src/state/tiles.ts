@@ -2,8 +2,8 @@
  * The Runs dashboard's tiles: a pure fold from what the app knows of each run (`RunInput`) to the
  * view of its tile (`Tile`), and from the tiles to the groups the screen shows. A tile's chart
  * plots every idea once, in the order the results landed, against the base (1.0), with a
- * best-so-far line that never falls; a run that needs its user (`attention`) is also in the
- * "Needs you" row (`needsYou`).
+ * best-so-far line that never falls; a run that needs its user (`attention`) says why in a word
+ * or two (`note`) and is in the "Needs you" group, and in no other.
  */
 
 /** How an idea came out (the run digest's wording). */
@@ -28,15 +28,19 @@ export interface IdeaInput {
 export interface RunInput {
   /** The run's identity as the app names it; a tile's press hands it back. */
   readonly id: string;
+  /** The run's own name: what tells it from the others. */
+  readonly name: string;
   /** The task it runs, or what it is of. */
   readonly task: string;
+  /** When it started, worded; null when unknown. */
+  readonly started: string | null;
   readonly machine: string;
   /** The hardware it runs on and the agent that drives it, when known. */
   readonly hardware: string | null;
   readonly agent: string | null;
   readonly status: {readonly kind: StatusKind; readonly word: string};
-  /** What the run is doing now, in one line; null when nothing says. */
-  readonly now: string | null;
+  /** Why the run's state cannot be read, in a word or two; null when it can. */
+  readonly problem: string | null;
   /** The ideas the run tried, when its journal records them. */
   readonly ideas: number | null;
   /** What it has cost, in US dollars, when known. */
@@ -51,6 +55,10 @@ export interface RunInput {
   /** The ideas the host left out of `points`. */
   readonly pointsOmitted: number;
   readonly attention: Attention;
+  /** The ideas at the end of the run that failed, none passing since. */
+  readonly failedStreak: number;
+  /** How long the journal has been silent, in seconds; null when it has no event. */
+  readonly silentSeconds: number | null;
 }
 
 /** The mark of one idea on a tile's chart. */
@@ -75,12 +83,15 @@ export interface Tile {
   /** Null when the host offers no chart data (a chart-less tile). */
   readonly chart: TileChart | null;
   readonly figures: string;
-  readonly now: string | null;
+  /** Why the run needs its user, else why its state cannot be read: a word or two; or null. */
+  readonly note: string | null;
   readonly status: {readonly kind: StatusKind; readonly tone: Tone; readonly label: string};
+  /** Whether the run needs its user (see `attentionOf`). */
   readonly attention: boolean;
   readonly createdAt: number;
   readonly machine: string;
   readonly agent: string | null;
+  readonly task: string;
 }
 
 /** The base every result is measured against. */
@@ -151,8 +162,47 @@ function resultOf(input: RunInput, chart: TileChart | null): Tile['result'] {
   return {text: ratioWord(best), tone: best > BASE ? 'ok' : 'muted'};
 }
 
+/** The tone of a status pill that says a run needs its user: never the green of a good ending. */
+const ATTENTION_TONES: Readonly<Record<Exclude<Attention, 'none'>, Tone>> = {
+  failed: 'err',
+  repeated_failure: 'warn',
+  stalled: 'warn',
+};
+
+/**
+ * Whether a run needs its user: the host's judgement, except that a run the app reads as no longer
+ * working cannot be stalled or failing its ideas (those say a working run is stuck); only a
+ * failure can outlive it.
+ */
+export function attentionOf(input: RunInput): Attention {
+  if (input.status.kind === 'running' || input.attention === 'failed') return input.attention;
+  return 'none';
+}
+
+/** Why a run needs its user, in a word or two (`failed`, `stalled 32m`, `3 failed in a row`). */
+export function attentionWord(input: RunInput): string | null {
+  switch (input.attention) {
+    case 'none':
+      return null;
+    case 'failed':
+      return 'failed';
+    case 'repeated_failure':
+      return input.failedStreak > 1 ? `${input.failedStreak} failed in a row` : 'failing';
+    case 'stalled':
+      return input.silentSeconds === null
+        ? 'stalled'
+        : `stalled ${durationWord(input.silentSeconds)}`;
+  }
+}
+
+/** `note` unless the status pill already says it: a status is said once. */
+function noteOf(note: string | null, status: string): string | null {
+  return note !== null && note.toLowerCase() === status.toLowerCase() ? null : note;
+}
+
 /** The tile of `input`. */
 export function tileOf(input: RunInput): Tile {
+  const attention = attentionOf(input);
   const chart = input.points === null ? null : chartOf(input.points, input.pointsOmitted);
   const ideas =
     input.ideas ?? (input.points === null ? null : input.points.length + input.pointsOmitted);
@@ -163,23 +213,24 @@ export function tileOf(input: RunInput): Tile {
   ].join(' · ');
   return {
     id: input.id,
-    title: input.task,
+    title: input.name,
     result: resultOf(input, chart),
-    facts: [input.machine, input.hardware, input.agent]
+    facts: [input.task, input.machine, input.hardware, input.agent, input.started]
       .filter((part): part is string => part !== null)
       .join(' · '),
     chart,
     figures,
-    now: input.now,
+    note: noteOf(attentionWord({...input, attention}) ?? input.problem, input.status.word),
     status: {
       kind: input.status.kind,
-      tone: STATUS_TONES[input.status.kind],
+      tone: attention === 'none' ? STATUS_TONES[input.status.kind] : ATTENTION_TONES[attention],
       label: input.status.word,
     },
-    attention: input.attention !== 'none',
+    attention: attention !== 'none',
     createdAt: input.createdAt,
     machine: input.machine,
     agent: input.agent,
+    task: input.task,
   };
 }
 
@@ -198,6 +249,9 @@ export function needsYou(tiles: readonly Tile[]): Tile[] {
 /** What the screen can group runs by. */
 export type GroupBy = 'status' | 'machine' | 'task' | 'agent';
 export const GROUP_BYS: readonly GroupBy[] = ['status', 'machine', 'task', 'agent'];
+
+/** The key of the group of runs that need their user. */
+export const NEEDS_YOU = 'needs-you';
 
 /** One group of tiles, newest first. */
 export interface TileGroup {
@@ -241,7 +295,7 @@ function keyedGroups(tiles: readonly Tile[], by: Exclude<GroupBy, 'status'>): Ti
   const groups = new Map<string, Tile[]>();
   for (const tile of tiles) {
     const key =
-      by === 'machine' ? tile.machine : by === 'task' ? tile.title : (tile.agent ?? UNKNOWN_GROUP);
+      by === 'machine' ? tile.machine : by === 'task' ? tile.task : (tile.agent ?? UNKNOWN_GROUP);
     groups.set(key, [...(groups.get(key) ?? []), tile]);
   }
   return [...groups.entries()]
@@ -250,10 +304,17 @@ function keyedGroups(tiles: readonly Tile[], by: Exclude<GroupBy, 'status'>): Ti
 }
 
 /**
- * `tiles` grouped by `by`: by status, in the order running, paused, failed, finished, stopped,
- * unknown, each under its status word with its dot; otherwise by name, in name order. Every tile
- * is in exactly one group and each group keeps the order the tiles came in.
+ * `tiles` in groups: first "Needs you", the runs that need their user; then the rest grouped by
+ * `by`: by status, in the order running, paused, failed, finished, stopped, unknown, each under
+ * its status word with its dot; otherwise by name, in name order. Every tile is in exactly one
+ * group (a run that needs its user is in "Needs you" and not in its status, machine, task or agent
+ * group) and each group keeps the order the tiles came in; a group with no tile is left out.
  */
 export function groupTiles(tiles: readonly Tile[], by: GroupBy): TileGroup[] {
-  return by === 'status' ? statusGroups(tiles) : keyedGroups(tiles, by);
+  const attention = needsYou(tiles);
+  const rest = tiles.filter(tile => !tile.attention);
+  const groups = by === 'status' ? statusGroups(rest) : keyedGroups(rest, by);
+  return attention.length === 0
+    ? groups
+    : [{key: NEEDS_YOU, title: 'Needs you', tone: 'err', tiles: attention}, ...groups];
 }

@@ -4,7 +4,7 @@
  * dashboard feature knows no host, so this is the one place the two meet.
  */
 import type {DashboardRow, RunRowStatus} from '@vibesys/feature-app-shell/state';
-import {digestKey} from '@vibesys/feature-app-shell/state';
+import {digestKey, formatStarted} from '@vibesys/feature-app-shell/state';
 import type {RunInput, StatusKind} from '@vibesys/feature-runs-dashboard/state';
 
 const STATUS_KINDS: Readonly<Record<RunRowStatus, StatusKind>> = {
@@ -38,7 +38,9 @@ export function runInput(entry: DashboardRow, now: number): RunInput {
     (row.startedAt === null ? null : Math.max(0, (now - row.startedAt) / 1000));
   return {
     id: digestKey(row.run),
+    name: entry.name,
     task: entry.task ?? projectName(entry.project),
+    started: formatStarted(entry.createdAt, {now}),
     machine: entry.machine,
     hardware: null,
     agent: null,
@@ -46,8 +48,8 @@ export function runInput(entry: DashboardRow, now: number): RunInput {
       kind: STATUS_KINDS[row.status],
       word: row.problem === null ? row.look.word : STATUS_WORDS[row.status],
     },
-    // A machine's trouble is a marker beside the run's own status, never its replacement.
-    now: row.problem?.text ?? row.now,
+    // A machine's trouble is a note beside the run's own status, never its replacement.
+    problem: row.problem?.text ?? null,
     ideas: digest?.ideas ?? null,
     costUsd: null,
     seconds,
@@ -56,5 +58,8 @@ export function runInput(entry: DashboardRow, now: number): RunInput {
     points: dashboard?.points ?? null,
     pointsOmitted: dashboard?.pointsOmitted ?? 0,
     attention: dashboard?.attention ?? 'none',
+    failedStreak: dashboard?.failedStreak ?? 0,
+    silentSeconds:
+      dashboard?.lastEventAt == null ? null : Math.max(0, (now - dashboard.lastEventAt) / 1000),
   };
 }

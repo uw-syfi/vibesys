@@ -7,8 +7,9 @@ import {Text} from './text.js';
  * the main area beside it, which holds a `Page`. `top` and `bottom` are the rail's two groups of
  * `RailItem`s, the first from the top and the second from the bottom. The rail starts below the
  * window's own controls (`--chrome-inset-height`, which the desktop app sets before the first
- * paint) and its background drags the window, as does the strip above the main area, which keeps
- * the page clear of the window's controls. `label` names the rail for assistive technology.
+ * paint): a band across the top of the window of that height, which holds the window's
+ * controls and drags the window, and the rail and the page start below it. `label` names the rail
+ * for assistive technology.
  */
 export function RailFrame(props: {
   readonly label: string;
@@ -18,17 +19,19 @@ export function RailFrame(props: {
 }): JSX.Element {
   return (
     <div className="vs-rail-frame">
-      <nav className="vs-rail" aria-label={props.label}>
-        <div className="vs-rail-group">{props.top}</div>
-        {props.bottom === undefined ? null : (
-          <div className="vs-rail-group" data-end>
-            {props.bottom}
-          </div>
-        )}
-      </nav>
-      <div className="vs-app-main">
-        <div className="vs-app-strip" />
-        <div className="vs-app-content">{props.children}</div>
+      <div className="vs-rail-band" />
+      <div className="vs-rail-body">
+        <nav className="vs-rail" aria-label={props.label}>
+          <div className="vs-rail-group">{props.top}</div>
+          {props.bottom === undefined ? null : (
+            <div className="vs-rail-group" data-end>
+              {props.bottom}
+            </div>
+          )}
+        </nav>
+        <div className="vs-app-main">
+          <div className="vs-app-content">{props.children}</div>
+        </div>
       </div>
     </div>
   );

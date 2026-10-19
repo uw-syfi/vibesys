@@ -34,6 +34,10 @@ export interface RunCase {
   /** Each idea's result against the base (none before it has a reading) and verdict, in order. */
   readonly points: readonly (readonly [number | null, Verdict])[];
   readonly omitted?: number;
+  /** The run's own name; its id when none is given. */
+  readonly name?: string;
+  /** Minutes the journal has been silent. */
+  readonly silent?: number;
   readonly attention?: Attention;
   readonly adopted?: number | null;
   readonly minutes?: number;
@@ -82,7 +86,7 @@ function digest(run: RunCase): Record<string, unknown> {
       points: run.points.map(([ratio, verdict]) => ({ratio, verdict})),
       pointsOmitted: run.omitted ?? 0,
       failedStreak: 0,
-      lastEventAt: NOW,
+      lastEventAt: NOW - (run.silent ?? 0) * 60_000,
       attention: run.attention ?? 'none',
     },
   };
@@ -126,7 +130,12 @@ export function dashboardWorld(
         `${host}|${PROJECT}`,
         runs
           .filter(run => run.host === host)
-          .map(run => ({runId: run.runId, task: run.task, createdAt: NOW - run.ago * HOUR})),
+          .map(run => ({
+            runId: run.runId,
+            name: run.name ?? run.runId,
+            task: run.task,
+            createdAt: NOW - run.ago * HOUR,
+          })),
       ]),
     ),
     digests: Object.fromEntries(runs.map(run => [run.runId, digest(run)])),
@@ -159,6 +168,7 @@ const CLIMB = [
 export const ONE_RUN: readonly RunCase[] = [
   {
     runId: 'r-live-01',
+    name: 'queue-rs-run1',
     host: 'ssh:host-a',
     task: 'mpmc',
     phase: 'running',
@@ -172,6 +182,7 @@ export const MANY_RUNS: readonly RunCase[] = [
   ...ONE_RUN,
   {
     runId: 'r-live-02',
+    name: 'queue-rs-run2',
     host: 'ssh:host-b',
     task: 'spsc',
     phase: 'running',
@@ -183,6 +194,7 @@ export const MANY_RUNS: readonly RunCase[] = [
   },
   {
     runId: 'r-paused-03',
+    name: 'queue-rs-run3',
     host: 'ssh:host-a',
     task: 'mpsc',
     phase: 'paused',
@@ -194,6 +206,7 @@ export const MANY_RUNS: readonly RunCase[] = [
   },
   {
     runId: 'r-done-04',
+    name: 'queue-rs-run4',
     host: 'ssh:host-a',
     task: 'mpmc',
     phase: 'completed',
@@ -202,6 +215,7 @@ export const MANY_RUNS: readonly RunCase[] = [
   },
   {
     runId: 'r-done-05',
+    name: 'queue-rs-run5',
     host: 'ssh:host-b',
     task: 'mpmc',
     phase: 'completed',
@@ -214,6 +228,7 @@ export const MANY_RUNS: readonly RunCase[] = [
   },
   {
     runId: 'r-done-06',
+    name: 'queue-rs-run6',
     host: 'ssh:host-b',
     task: 'spsc',
     phase: 'completed',
@@ -222,11 +237,12 @@ export const MANY_RUNS: readonly RunCase[] = [
   },
   {
     runId: 'r-failed-07',
+    name: 'queue-rs-run7',
     host: 'ssh:host-a',
     task: 'spsc',
     phase: 'failed',
     ago: 5,
-    attention: 'repeated_failure',
+    attention: 'failed',
     points: [
       [null, 'failed'],
       [null, 'failed'],
@@ -235,11 +251,13 @@ export const MANY_RUNS: readonly RunCase[] = [
   },
   {
     runId: 'r-stalled-08',
+    name: 'queue-rs-run8',
     host: 'ssh:host-b',
     task: 'mpsc',
     phase: 'running',
     ago: 8,
     attention: 'stalled',
+    silent: 32,
     points: [
       [1.3, 'kept'],
       [1.25, 'not_better'],
@@ -247,6 +265,7 @@ export const MANY_RUNS: readonly RunCase[] = [
   },
   {
     runId: 'r-stopped-09',
+    name: 'queue-rs-run9',
     host: 'ssh:host-a',
     task: 'mpsc',
     phase: 'stopped',
@@ -259,6 +278,7 @@ export const MANY_RUNS: readonly RunCase[] = [
 export const OMITTED_RUN: readonly RunCase[] = [
   {
     runId: 'r-long-01',
+    name: 'queue-rs-run1',
     host: 'ssh:host-a',
     task: 'mpmc',
     phase: 'running',

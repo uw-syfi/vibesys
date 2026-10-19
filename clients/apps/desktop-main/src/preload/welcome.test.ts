@@ -223,16 +223,6 @@ describe('the welcome contract', () => {
     expect(woke).toBe(1);
   });
 
-  test('the menu choosing Toggle Sidebar reaches the view', () => {
-    const main = new ParsingMain();
-    let toggled = 0;
-    main.bridge.onToggleSidebar(() => {
-      toggled += 1;
-    });
-    main.subscribed.get('vibesys:toggle-sidebar')?.(undefined);
-    expect(toggled).toBe(1);
-  });
-
   test('a run window can request Settings in the main window', () => {
     const main = new ParsingMain();
     let opened = 0;

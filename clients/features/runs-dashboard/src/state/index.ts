@@ -6,6 +6,8 @@
 export {type GroupingContext, type GroupingEvent, groupingMachine} from './grouping.js';
 export {
   type Attention,
+  attentionOf,
+  attentionWord,
   BASE,
   chartOf,
   durationWord,
@@ -14,6 +16,7 @@ export {
   groupTiles,
   type IdeaInput,
   type Mark,
+  NEEDS_YOU,
   needsYou,
   type RunInput,
   ratioWord,

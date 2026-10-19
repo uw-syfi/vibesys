@@ -15,6 +15,8 @@ export interface DashboardRow {
   readonly host: HostKey;
   /** The machine's name, as the app words it. */
   readonly machine: string;
+  /** The run's own name. */
+  readonly name: string;
   /** The task the run ran, or null when the run has no record of one. */
   readonly task: string | null;
   /** The project's path on the machine. */
@@ -38,6 +40,6 @@ export function dashboardRows(state: SidebarState, clock: Clock): readonly Dashb
       attachedAt: run.createdAt,
     };
     const row = live.find(each => sameRun(each.run, ref)) ?? recentRow(state, ref, clock);
-    return {row, host, machine, task: run.task, project, createdAt: run.createdAt};
+    return {row, host, machine, name: run.name, task: run.task, project, createdAt: run.createdAt};
   });
 }

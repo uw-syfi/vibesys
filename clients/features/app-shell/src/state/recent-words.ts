@@ -62,6 +62,26 @@ export function formatWhen(at: number, clock: Clock): string | null {
   }).format(at);
 }
 
+/** When a run began, always with its day: `Oct 19 04:21`, and the year when it is not this one; null as `formatWhen`. */
+export function formatStarted(at: number, clock: Clock): string | null {
+  if (!Number.isFinite(at) || at < FIRST_RUN_MS) return null;
+  const zone = clock.timeZone === undefined ? {} : {timeZone: clock.timeZone};
+  const withYear = civil(at, clock.timeZone).year !== civil(clock.now, clock.timeZone).year;
+  const day = new Intl.DateTimeFormat('en-US', {
+    month: 'short',
+    day: 'numeric',
+    ...(withYear ? {year: 'numeric'} : {}),
+    ...zone,
+  }).format(at);
+  const time = new Intl.DateTimeFormat('en-US', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+    ...zone,
+  }).format(at);
+  return `${day} ${time}`;
+}
+
 /** A span in its two largest units: `45s`, `52m`, `1h 05m`. */
 export function formatDuration(seconds: number): string {
   const whole = Math.max(0, Math.round(seconds));

@@ -4,13 +4,11 @@ import type {MenuItemConstructorOptions} from 'electron';
 export interface MenuActions {
   /** Show Settings in the main window, bringing the window to the front. */
   readonly openSettings: () => void;
-  readonly toggleSidebar: () => void;
 }
 
 /**
  * The application menu. Settings holds its accelerator itself, so the shortcut works from any
- * window and focus; View's "Toggle Sidebar" only shows its shortcut, because the app shell's
- * page handles that key and the menu must not toggle twice.
+ * window and focus.
  */
 export function applicationMenuTemplate(
   platform: NodeJS.Platform,
@@ -47,13 +45,6 @@ export function applicationMenuTemplate(
     {
       label: 'View',
       submenu: [
-        {
-          label: 'Toggle Sidebar',
-          accelerator: 'CmdOrCtrl+\\',
-          registerAccelerator: false,
-          click: actions.toggleSidebar,
-        },
-        {type: 'separator'},
         {role: 'reload'},
         {role: 'forceReload'},
         {role: 'toggleDevTools'},

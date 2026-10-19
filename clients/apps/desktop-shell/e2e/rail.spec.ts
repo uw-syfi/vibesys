@@ -236,8 +236,53 @@ test('saved runs that could not be read are said on the dashboard, and the reada
   await open(page, {...SEED, skippedRecent});
 
   const notice = page.getByRole('main').locator('.vs-banner');
-  await expect(notice).toContainText('2 saved runs were skipped');
+  await expect(notice).toContainText('2 saved runs skipped');
   await expect(notice).toContainText('runs[16].task must be a task name');
   await expect(notice).toContainText('runs[17].instanceId');
   expect(await screenCheck(page)).toEqual([]);
+});
+
+test('the rail starts with the app logo, whose tooltip is the version, and it goes home', async ({
+  page,
+}) => {
+  await open(page);
+  const mark = sidebar(page).getByRole('button', {name: 'VibeSys'});
+
+  await expect(mark).toHaveAttribute('title', /^VibeSys \S+$/);
+  await expect(mark.locator('svg.vs-icon path')).toHaveCount(1);
+  await sidebar(page).getByRole('button', {name: 'New', exact: true}).click();
+  await mark.click();
+  await expect(page.getByRole('heading', {name: 'Runs'})).toBeVisible();
+});
+
+test('a band across the top is as tall as the window controls, and the rail and the page start below it', async ({
+  page,
+}) => {
+  await page.setViewportSize({width: 1280, height: 860});
+  await open(page);
+  const inset = await page.evaluate(() =>
+    Number.parseFloat(
+      getComputedStyle(document.documentElement).getPropertyValue('--chrome-inset-height'),
+    ),
+  );
+  const edges = await page.evaluate(() => {
+    const top = (selector: string): number =>
+      document.querySelector(selector)?.getBoundingClientRect().top ?? Number.NaN;
+    const band = document.querySelector('.vs-rail-band')?.getBoundingClientRect();
+    return {
+      bandBottom: band?.bottom ?? Number.NaN,
+      bandTop: band?.top ?? Number.NaN,
+      rail: top('.vs-rail'),
+      page: top('.vs-app-content'),
+      drag: getComputedStyle(document.querySelector('.vs-rail-band') as Element).getPropertyValue(
+        '-webkit-app-region',
+      ),
+    };
+  });
+
+  expect(edges.bandTop).toBe(0);
+  expect(edges.bandBottom).toBeGreaterThanOrEqual(inset);
+  expect(edges.rail).toBe(edges.bandBottom);
+  expect(edges.page).toBe(edges.bandBottom);
+  expect(edges.drag).toBe('drag');
 });

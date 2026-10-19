@@ -75,7 +75,7 @@ function settle(
           token: request.token,
           host: request.host,
           project: request.project,
-          runs: listed.map(runId => ({runId, task: 'mpmc', createdAt: NOW})),
+          runs: listed.map(runId => ({runId, name: runId, task: 'mpmc', createdAt: NOW})),
         };
       }
       const step = sidebarStep(state, action);

@@ -24,6 +24,8 @@ export function AppShell(props: {
   readonly state: SidebarState;
   readonly dispatch: (action: SidebarAction) => void;
   readonly badges: RailBadges;
+  /** The app's version, which the mark's tooltip shows. */
+  readonly version: string;
   readonly screen: (screen: Screen) => ReactNode;
 }): JSX.Element {
   const {state, dispatch, badges} = props;
@@ -34,7 +36,13 @@ export function AppShell(props: {
       label="VibeSys"
       top={
         <>
-          <RailItem icon="mark" label="VibeSys" hideLabel press={go({kind: 'runs'})} />
+          <RailItem
+            icon="mark"
+            label="VibeSys"
+            hint={`VibeSys ${props.version}`}
+            hideLabel
+            press={go({kind: 'runs'})}
+          />
           <RailItem
             icon="plus"
             label="New"
