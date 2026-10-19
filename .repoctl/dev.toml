@@ -27,8 +27,9 @@ app_env = { VIBESYS_USER_DATA_DIR = "{profile}" }
 profile_directory = "build/dev/desktop-profile"
 
 [machine]
-# Looked at on the machine, after --checkout and the profile's saved checkout.
-checkout_candidates = ["~/vibesys"]
+# The desktop app's saved hosts files, the source of truth for each machine's checkout; the first
+# that exists is read (macOS, then Linux). `--checkout` overrides it.
+app_hosts_files = ["~/Library/Application Support/VibeSys/hosts.json", "~/.config/VibeSys/hosts.json"]
 # Ref on the machine that receives HEAD; the checkout is then switched to that commit, detached.
 ship_ref = "refs/vibesys-dev/head"
 sync_command = ["uv", "sync"]

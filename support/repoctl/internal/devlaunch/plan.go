@@ -132,7 +132,7 @@ func refuseRemote(in Inputs) error {
 	case in.Git.Dirty:
 		return Refusal{"the local tree has uncommitted changes to tracked files; commit them, because only the committed HEAD is shipped"}
 	case r.Kind == CheckoutMissing:
-		return Refusal{fmt.Sprintf("no VibeSys checkout found on the machine (tried %s); pass --checkout PATH", strings.Join(r.Tried, ", "))}
+		return Refusal{fmt.Sprintf("no VibeSys checkout at %s on the machine; fix the path (--checkout PATH) or set the machine up again in the app", strings.Join(r.Tried, ", "))}
 	case r.Kind == CheckoutGit && r.Dirty:
 		return Refusal{fmt.Sprintf("the checkout on the machine (%s) has uncommitted changes to tracked files; commit or discard them there", r.Checkout)}
 	}

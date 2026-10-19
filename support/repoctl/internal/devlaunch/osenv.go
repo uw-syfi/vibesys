@@ -80,6 +80,18 @@ func (f OSFiles) Glob(pattern string) ([]string, error) {
 // Read implements Files.
 func (f OSFiles) Read(path string) ([]byte, error) { return os.ReadFile(filepath.Join(f.Root, path)) }
 
+// ReadHome implements Files.
+func (f OSFiles) ReadHome(path string) ([]byte, error) {
+	if path == "~" || strings.HasPrefix(path, "~/") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return nil, err
+		}
+		path = filepath.Join(home, strings.TrimPrefix(path, "~"))
+	}
+	return os.ReadFile(path)
+}
+
 // Exists implements Files.
 func (f OSFiles) Exists(path string) bool {
 	_, err := os.Stat(filepath.Join(f.Root, path))

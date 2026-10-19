@@ -40,6 +40,8 @@ type Clock interface {
 type Files interface {
 	Glob(pattern string) ([]string, error)
 	Read(path string) ([]byte, error)
+	// ReadHome reads a file named outside the repository; a leading `~` is the home directory.
+	ReadHome(path string) ([]byte, error)
 	Exists(path string) bool
 	Write(path string, data []byte) error
 }
@@ -185,29 +187,31 @@ func (s *session) ssh(line string, stdin []byte, timeout time.Duration) ([]byte,
 }
 
 func (s *session) probeMachine() (RemoteState, error) {
-	saved := ""
-	if raw, err := s.env.Files.Read(path.Join(s.cfg.Local.ProfileDirectory, "hosts.json")); err == nil {
-		saved = SavedCheckout(raw, s.opts.Machine)
+	var files []HostsFile
+	for _, p := range s.cfg.Machine.AppHostsFiles {
+		data, err := s.env.Files.ReadHome(p)
+		files = append(files, HostsFile{Path: p, Data: data, Found: err == nil})
 	}
-	candidates := CheckoutCandidates(s.opts.Checkout, saved, s.cfg.Machine.CheckoutCandidates)
-	for _, c := range candidates {
-		if err := ValidateRemotePath(c); err != nil {
-			return RemoteState{}, err
-		}
-		out, err := s.ssh(strings.Join(ProbeCommand(c), " "), nil, 60*time.Second)
-		if err != nil {
-			return RemoteState{}, fmt.Errorf("probing %s on the machine: %w", c, err)
-		}
-		state, found, err := ParseProbe(string(out))
-		if err != nil {
-			return RemoteState{}, err
-		}
-		if found {
-			state.Tried = candidates
-			return state, nil
-		}
+	checkout, err := ResolveCheckout(s.opts.Checkout, s.opts.Machine, files)
+	if err != nil {
+		return RemoteState{}, err
 	}
-	return RemoteState{Kind: CheckoutMissing, Tried: candidates}, nil
+	if err := ValidateRemotePath(checkout); err != nil {
+		return RemoteState{}, err
+	}
+	out, err := s.ssh(strings.Join(ProbeCommand(checkout), " "), nil, 60*time.Second)
+	if err != nil {
+		return RemoteState{}, fmt.Errorf("probing the machine's checkout: %w", err)
+	}
+	state, found, err := ParseProbe(string(out))
+	if err != nil {
+		return RemoteState{}, err
+	}
+	if !found {
+		return RemoteState{Kind: CheckoutMissing, Tried: []string{checkout}}, nil
+	}
+	state.Tried = []string{checkout}
+	return state, nil
 }
 
 // remoteLine is a command line that runs argv in the checkout, with the usual per-user program

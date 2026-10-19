@@ -68,20 +68,6 @@ func ValidateRemotePath(path string) error {
 	return nil
 }
 
-// CheckoutCandidates orders the paths to look for on the machine: the one the user named, the one
-// the dev profile saved for this machine, then the policy's defaults, without repeats.
-func CheckoutCandidates(named, saved string, defaults []string) []string {
-	seen := map[string]bool{}
-	var out []string
-	for _, c := range append([]string{named, saved}, defaults...) {
-		if c != "" && !seen[c] {
-			seen[c] = true
-			out = append(out, c)
-		}
-	}
-	return out
-}
-
 // Hello is the part of a helper's hello reply this command reads.
 type Hello struct {
 	Version  string

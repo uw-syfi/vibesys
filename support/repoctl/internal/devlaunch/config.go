@@ -45,13 +45,15 @@ type LocalConfig struct {
 
 // MachineConfig says how to ship a commit to a machine and how to start its helper.
 type MachineConfig struct {
-	CheckoutCandidates []string `toml:"checkout_candidates"`
-	ShipRef            string   `toml:"ship_ref"`
-	SyncCommand        []string `toml:"sync_command"`
-	HelperCommand      []string `toml:"helper_command"`
-	PathDirectories    []string `toml:"path_directories"`
-	HelloSeconds       int      `toml:"hello_seconds"`
-	HelloPollSeconds   int      `toml:"hello_poll_seconds"`
+	// AppHostsFiles are the desktop app's saved hosts files by platform (`~` is the home
+	// directory); the first that exists says where each machine's checkout is.
+	AppHostsFiles    []string `toml:"app_hosts_files"`
+	ShipRef          string   `toml:"ship_ref"`
+	SyncCommand      []string `toml:"sync_command"`
+	HelperCommand    []string `toml:"helper_command"`
+	PathDirectories  []string `toml:"path_directories"`
+	HelloSeconds     int      `toml:"hello_seconds"`
+	HelloPollSeconds int      `toml:"hello_poll_seconds"`
 }
 
 // ReadConfig reads and validates the policy in policyDir, naming the offending key or path.
@@ -117,8 +119,8 @@ func (c Config) validate() error {
 	if c.Machine.HelloSeconds <= 0 || c.Machine.HelloPollSeconds <= 0 {
 		return fmt.Errorf("machine.hello_seconds and machine.hello_poll_seconds must be positive")
 	}
-	if len(c.Machine.CheckoutCandidates) == 0 {
-		return fmt.Errorf("machine.checkout_candidates must list at least one path")
+	if len(c.Machine.AppHostsFiles) == 0 {
+		return fmt.Errorf("machine.app_hosts_files must list at least one path")
 	}
 	return nil
 }

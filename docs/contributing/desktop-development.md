@@ -48,8 +48,8 @@ Electron apps keep their settings. It returns when the app closes. Commands and 
 
 With `--machine`, the committed HEAD is pushed over ssh to a dev ref in the machine's checkout (no
 GitHub involved) and checked out detached; a checkout that is not a git working tree gets its
-tracked files by rsync. The machine's checkout is `--checkout`, else the one the profile saved for
-it, else the policy's default. `dev` refuses before changing anything if the local tree or the
+tracked files by rsync. The machine's checkout is the one the desktop app saved for it (its `hosts.json`, set on the
+Machines screen); `--checkout` overrides it, and an unsaved machine is an error naming the file. `dev` refuses before changing anything if the local tree or the
 machine's checkout has uncommitted changes to tracked files. It then runs `uv sync` there and starts
 a fresh helper the way the app does, and fails unless that helper's `hello` reports the shipped
 commit within 60 seconds. Each step prints its duration. The helper keeps no state and every run is

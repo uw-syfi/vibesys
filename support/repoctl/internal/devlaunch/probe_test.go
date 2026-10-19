@@ -60,14 +60,18 @@ func TestValidateRemotePath(t *testing.T) {
 	}
 }
 
-func TestCheckoutCandidatesOrderAndDedupe(t *testing.T) {
-	got := CheckoutCandidates("/n", "~/v", []string{"~/v", "/d", "/n"})
-	want := []string{"/n", "~/v", "/d"}
-	if strings.Join(got, ",") != strings.Join(want, ",") {
-		t.Fatalf("got %v, want %v", got, want)
+func TestResolveCheckout(t *testing.T) {
+	saved, _ := SeedHosts("host-a", "~/vs")
+	files := []HostsFile{{Path: "~/one", Found: false}, {Path: "~/two", Data: saved, Found: true}}
+	if got, err := ResolveCheckout("", "host-a", files); err != nil || got != "~/vs" {
+		t.Fatalf("saved: got %q, %v", got, err)
 	}
-	if got := CheckoutCandidates("", "", []string{"~/v"}); len(got) != 1 {
-		t.Fatalf("got %v", got)
+	if got, err := ResolveCheckout("/named", "host-a", files); err != nil || got != "/named" {
+		t.Fatalf("an override beats the saved one: got %q, %v", got, err)
+	}
+	_, err := ResolveCheckout("", "host-b", files)
+	if err == nil || !strings.Contains(err.Error(), "~/one (missing)") || !strings.Contains(err.Error(), "~/two (no entry") || !strings.Contains(err.Error(), "host-b") {
+		t.Fatalf("an unsaved machine must name the files and the machine: %v", err)
 	}
 }
 

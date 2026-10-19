@@ -3,6 +3,7 @@ package devlaunch
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 )
 
 // hostsFile is the desktop app's hosts.json (version 2), whose one writer is the app; this command
@@ -36,4 +37,31 @@ func SeedHosts(alias, checkout string) ([]byte, error) {
 		return nil, fmt.Errorf("seed hosts.json: %w", err)
 	}
 	return append(out, '\n'), nil
+}
+
+// HostsFile is one place the app's saved hosts may be: its path and, when the file exists, its bytes.
+type HostsFile struct {
+	Path  string
+	Data  []byte
+	Found bool
+}
+
+// ResolveCheckout is the machine's checkout: the one the user named, else the one the app saved
+// for it in the first hosts file that exists. The error names every file it looked at.
+func ResolveCheckout(named, alias string, files []HostsFile) (string, error) {
+	if named != "" {
+		return named, nil
+	}
+	var looked []string
+	for _, f := range files {
+		if !f.Found {
+			looked = append(looked, f.Path+" (missing)")
+			continue
+		}
+		if c := SavedCheckout(f.Data, alias); c != "" {
+			return c, nil
+		}
+		looked = append(looked, f.Path+" (no entry for the machine)")
+	}
+	return "", fmt.Errorf("the checkout of machine %q is not saved: looked in %s; add the machine in the app's Machines screen or pass --checkout PATH", alias, strings.Join(looked, ", "))
 }

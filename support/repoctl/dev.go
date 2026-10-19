@@ -13,7 +13,7 @@ import (
 func runDev(root, configPath string, args []string) error {
 	fs := flag.NewFlagSet("dev", flag.ContinueOnError)
 	machine := fs.String("machine", "", "ssh alias of a machine to ship the committed HEAD to before opening the app")
-	checkout := fs.String("checkout", "", "the VibeSys checkout on the machine (default: the profile's saved one, then the policy's)")
+	checkout := fs.String("checkout", "", "the VibeSys checkout on the machine (default: the one the desktop app saved for the machine)")
 	dryRun := fs.Bool("dry-run", false, "print the plan and change nothing")
 	if err := fs.Parse(args); err != nil {
 		return err

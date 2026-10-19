@@ -25,7 +25,7 @@ app_env = { USER_DIR = "{profile}" }
 profile_directory = "build/dev/profile"
 
 [machine]
-checkout_candidates = ["~/vibesys"]
+app_hosts_files = ["~/app/hosts.json"]
 ship_ref = "refs/dev/head"
 sync_command = ["uv", "sync"]
 helper_command = ["uv", "run", "helper"]
@@ -58,6 +58,7 @@ func (f *fakeFiles) Read(p string) ([]byte, error) {
 	}
 	return nil, fmt.Errorf("%s: not found", p)
 }
+func (f *fakeFiles) ReadHome(p string) ([]byte, error) { return f.Read("home:" + p) }
 func (f *fakeFiles) Exists(p string) bool {
 	_, ok := f.files[p]
 	return ok
@@ -120,7 +121,9 @@ func newHarness(t *testing.T, files map[string]string, rules ...rule) *harness {
 }
 
 func baseFiles() map[string]string {
+	saved, _ := SeedHosts("host-a", "/srv/v")
 	return map[string]string{
+		"home:~/app/hosts.json":                  string(saved),
 		"clients/pnpm-lock.yaml":                 "lock",
 		"clients/apps/desktop-main/package.json": "{}",
 		"clients/node_modules":                   "",
@@ -277,6 +280,14 @@ func TestOptionsAreValidatedBeforeAnythingRuns(t *testing.T) {
 		if err := Run(h.env, h.cfg, o); err == nil || len(h.runner.log) != 0 {
 			t.Errorf("%+v: err=%v ran=%v", o, err, h.runner.log)
 		}
+	}
+}
+
+func TestUnsavedMachineFailsNamingTheHostsFile(t *testing.T) {
+	h := newHarness(t, baseFiles(), machineRules("oldhead", "0")...)
+	err := Run(h.env, h.cfg, Options{Machine: "host-b"})
+	if err == nil || !strings.Contains(err.Error(), "~/app/hosts.json") || h.runner.ran("vibesys-dev-probe") {
+		t.Fatalf("got %v, ran %v", err, h.runner.log)
 	}
 }
 
