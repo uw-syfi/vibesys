@@ -12,6 +12,7 @@ import pytest
 from vibesys.events import CoreEventType, RunEndingData
 from vibesys.run.core_run import CoreRunRefusedError, drive_core_run
 from vibesys.run.core_services import ClosableEvaluation, CoreServices
+from vibesys.run.environment_failure import RunEnvironmentFailure
 from vibesys.run.host import CoreHost
 from vs_core.api import RunResultProposal, RunStatus, initial_state
 from vs_project.api import FakeStateStore, Project
@@ -40,6 +41,7 @@ if TYPE_CHECKING:
     from vs_runtime.api.core import AgentEvaluationBridge, CoreRuntime, OperationCatalog
     from vs_runtime.api.infrastructure import (
         OwnedWorkspaces,
+        RunControlChannel,
         RunControlEventSink,
         RunControlTransition,
         WorkspaceHolds,
@@ -124,9 +126,14 @@ class _Events:
 
 @dataclass(frozen=True)
 class _Integration:
-    control: object
+    control: RunControlChannel
     run_control: object = None
     events: _Events = field(default_factory=_Events)
+
+    @property
+    def environment_failure(self) -> RunEnvironmentFailure:
+        """An environment that never fails: these runs end on their own result."""
+        return RunEnvironmentFailure(self.control)
 
 
 def _declared_state() -> CoreState:
