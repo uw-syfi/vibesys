@@ -171,18 +171,20 @@ for handled in handled_signals:
 
 def wait_without_reaping(process, timeout=None):
     # Observe leader exit while retaining its PID and process-group ownership.
-    options = os.WEXITED | os.WNOWAIT
-    if timeout is None:
-        return os.waitid(os.P_PID, process.pid, options)
-    deadline = time.monotonic() + timeout
+    # Poll instead of blocking in waitid: a signal that lands after Python's
+    # last signal check but before the syscall starts never interrupts it, so
+    # a blocking waitid would sleep until the child exits and miss the interrupt.
+    # Each pass re-enters the interpreter, so a pending handler runs within one tick.
+    options = os.WEXITED | os.WNOWAIT | os.WNOHANG
+    deadline = None if timeout is None else time.monotonic() + timeout
     while True:
-        result = os.waitid(os.P_PID, process.pid, options | os.WNOHANG)
+        result = os.waitid(os.P_PID, process.pid, options)
         if result is not None:
             return result
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
+        remaining = None if deadline is None else deadline - time.monotonic()
+        if remaining is not None and remaining <= 0:
             return None
-        time.sleep(min(0.05, remaining))
+        time.sleep(0.05 if remaining is None else min(0.05, remaining))
 
 environment = os.environ.copy()
 environment.update(
