@@ -342,6 +342,10 @@ class FileProjects:
             raise ProjectLookupError(HelperErrorCode.UNKNOWN_RUN, str(project), message)
         return journal
 
+    def run_journal(self, project: Path, run_id: str) -> Path:
+        """The journal file of run ``run_id``, once the project is known to have the run."""
+        return self._journal(project, run_id)
+
     def _tally(self, journal: Path, stream: BinaryIO) -> JournalTally:
         """The journal's complete lines, counted from where the last count stopped.
 

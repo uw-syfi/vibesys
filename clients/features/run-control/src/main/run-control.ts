@@ -39,7 +39,7 @@ import {
   hostLabel,
   instanceObservation,
 } from '@vibesys/hosts';
-import type {HarnessChoice} from '@vibesys/ipc';
+import type {HarnessChoice, ReaderAttached} from '@vibesys/ipc';
 import type {ResumeRunId} from '@vibesys/runs';
 import type {StoredRecentRun} from '@vibesys/settings';
 import {LiveFanout} from './live-fanout.js';
@@ -244,6 +244,38 @@ export class RunControl {
         case 'absent':
           throw new Error(`no live run ${instanceId} on ${hostLabel(id)}`);
       }
+    } catch (error) {
+      this.#forgetClaim(claim);
+      throw error;
+    } finally {
+      await lease?.[Symbol.asyncDispose]();
+    }
+  }
+
+  /**
+   * Attach, for Chat, the server that serves run `runId` of `project` on `id`: the run's live one,
+   * or for a run that ended the read-only one the host starts on demand (`run.reader`, feature
+   * `chat_ended_runs`; a host without it is `unsupported` and nothing is sent). The server is
+   * bound like an attached run, so the window's connections reach it; letting the run go lets the
+   * host's server end, which it does by itself once no connection holds it.
+   */
+  async attachReader(id: HostId, project: string, runId: string): Promise<ReaderAttached> {
+    const claim: Claim = this.#newClaim();
+    let lease: ConnectionLease | null = null;
+    try {
+      lease = await this.#deps.connection(id);
+      const connection = lease.connection;
+      await connection.ready();
+      if (connection.features?.includes('chat_ended_runs') !== true) return {kind: 'unsupported'};
+      if (claim.cancelled) return {kind: 'attached'};
+      const reply = await connection.request({type: 'run.reader', project, run_id: runId});
+      if (claim.cancelled) return {kind: 'attached'};
+      this.#claimTarget(id, reply.instance_id, claim);
+      const bindingLease = lease;
+      lease = null;
+      const record = {id: reply.instance_id, run_id: runId, project_root: project};
+      await this.#bind(claim, id, bindingLease, record, null);
+      return {kind: 'attached'};
     } catch (error) {
       this.#forgetClaim(claim);
       throw error;
@@ -521,7 +553,7 @@ export class RunControl {
     claim: Claim,
     id: HostId,
     lease: ConnectionLease,
-    record: LiveInstanceRecord,
+    record: Pick<LiveInstanceRecord, 'id' | 'run_id' | 'project_root'>,
     task: string | null,
   ): Promise<boolean> {
     const runId = record.run_id;

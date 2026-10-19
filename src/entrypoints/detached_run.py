@@ -53,6 +53,8 @@ from server.host_api import (
     one_line,
 )
 from server.registry import (
+    INSTANCES_DIRECTORY,
+    READERS_DIRECTORY,
     FileInstanceMetadataStore,
     FileInstanceStore,
     InstanceHold,
@@ -332,6 +334,7 @@ def _identity(arguments: list[str]) -> argparse.Namespace:
     parser.add_argument("--instance-id", type=parse_instance_id, required=True)
     parser.add_argument("--run-id", type=_run_id, required=True)
     parser.add_argument("--control-socket", type=Path, required=True)
+    parser.add_argument("--reopen", type=Path, default=None)
     identity, _ = parser.parse_known_args(arguments)
     return identity
 
@@ -397,7 +400,10 @@ def _serve(argv: list[str] | None, runs: Runs | None) -> None:
     identity = _identity(arguments)
     root = instance_root(os.environ, os.getuid())
     clock = SystemClock()
-    with LiveRegistry(FileInstanceStore(root), clock).register(identity.instance_id) as hold:
+    # A read-only server (``--reopen``) is a reader: it registers apart from the runs.
+    directory = INSTANCES_DIRECTORY if identity.reopen is None else READERS_DIRECTORY
+    registry = LiveRegistry(FileInstanceStore(root, directory=directory), clock)
+    with registry.register(identity.instance_id) as hold:
         publisher = RecordPublisher(
             hold,
             _starting_record(identity, root, clock),

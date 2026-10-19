@@ -38,6 +38,8 @@ export interface RunChatOptions {
   readonly ideaOf?: IdeaOf;
   /** Roles seen on the run's agents, besides those its start advertised: the steer targets. */
   readonly roles?: readonly string[];
+  /** The run cannot take a steer (it ended): its cards keep their drafts and cannot send. */
+  readonly readOnly?: boolean;
 }
 
 /** What the run screen hosts: whether the panel is open, the button's press, and the panel. */
@@ -97,12 +99,23 @@ function cardItem(chat: Chat, id: string, snapshot: CardSnapshot): CardItem {
 }
 
 /** The panel's items for the thread on screen, with a live card for each steer. */
-function panelItems(chat: Chat, core: CoreState, shown: string | null, panel: PanelContext) {
+function panelItems(
+  chat: Chat,
+  core: CoreState,
+  shown: string | null,
+  panel: PanelContext,
+  readOnly: boolean,
+) {
   const pending =
     panel.pending !== null && panel.pending.threadId === shown ? panel.pending.text : null;
   const items: PanelItem[] = [];
   const addCard = (id: string, draft: CardItem['draft']): void => {
-    chat.cards.ensure({id, origin: id.startsWith('user ') ? 'user' : 'proposal', draft});
+    chat.cards.ensure({
+      id,
+      origin: id.startsWith('user ') ? 'user' : 'proposal',
+      draft,
+      readOnly,
+    });
     const snapshot = chat.cards.snapshot(id);
     if (snapshot !== null) items.push({kind: 'card', card: cardItem(chat, id, snapshot)});
   };
@@ -167,6 +180,10 @@ export function useRunChat(options: RunChatOptions): RunChatHost {
   useEffect(() => {
     chat?.actor.send({type: 'set-preferred', preferred});
   }, [chat, preferredKey]);
+  const readOnly = options.readOnly === true;
+  useEffect(() => {
+    cards?.setReadOnly(readOnly);
+  }, [cards, readOnly]);
   const ideaOf = options.ideaOf;
   const deliveries = core.steerDeliveries;
   // biome-ignore lint/correctness/useExhaustiveDependencies: deliveries are re-read from the fold whenever it holds new steps; `core` itself changes with every event.
@@ -187,7 +204,7 @@ export function useRunChat(options: RunChatOptions): RunChatHost {
           busy: chatState !== 'idle',
           threads: threadEntries(core),
           shown,
-          items: panelItems(chat, core, shown, context),
+          items: panelItems(chat, core, shown, context, readOnly),
           roles: runRoles(core.expectedRoles, options.roles ?? []),
           dispatch: event => chat.actor.send(event),
         }

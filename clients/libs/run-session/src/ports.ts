@@ -53,7 +53,12 @@ export type RunCommandOutcome =
       readonly action: NonNullable<ProtocolResponse['ack']>['action'];
       readonly status: NonNullable<ProtocolResponse['ack']>['status'];
     }
-  | {readonly kind: 'rejected'; readonly message: string | null};
+  | {
+      readonly kind: 'rejected';
+      readonly message: string | null;
+      /** The server's typed reason (a diagnostic code such as `run_read_only`), when it gave one. */
+      readonly code?: string | null;
+    };
 
 /** Optional thread selection and caller-owned cancellation for one experiment-chat turn. */
 export interface WebChatOptions {

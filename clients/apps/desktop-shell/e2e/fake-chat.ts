@@ -5,6 +5,8 @@
  * (an answer, a delivery step) with `fakeHost.emit`. `installFakeChat` runs in the page after
  * `installFakeFixtureServer`, so it is self-contained.
  */
+import type {FakeProvides} from './fake-bridge.js';
+
 export interface FakeChatSeed {
   readonly runId: string;
   /** The sequence a created thread's event takes: past every event of the run. */
@@ -19,7 +21,11 @@ interface ChatRequest {
   readonly thread_id?: string;
 }
 
+/** What `installFakeChat` provides on the welcome bridge: attaching the reader of an ended run. */
+export type ChatMethods = 'attachReader';
+
 export function installFakeChat(seed: FakeChatSeed): void {
+  let readerAttaches = 0;
   const controls: {control_id?: string; action?: string}[] = [];
   const timestamp = '2026-10-15T16:31:00Z';
   const answerMore = (request: ChatRequest, envelope: object): readonly object[] | undefined => {
@@ -48,5 +54,13 @@ export function installFakeChat(seed: FakeChatSeed): void {
     }
     return undefined;
   };
-  Object.assign((window as unknown as {fakeHost: object}).fakeHost, {controls, answerMore});
+  const page = window as unknown as {vibesysWelcome: object; fakeHost: object};
+  Object.assign(page.vibesysWelcome, {
+    attachReader: () => {
+      readerAttaches += 1;
+      return Promise.resolve({ok: true, value: {kind: 'attached'}});
+    },
+  } satisfies FakeProvides<ChatMethods>);
+  // `readerAttaches` says how many times the page attached the reader of an ended run.
+  Object.assign(page.fakeHost, {controls, answerMore, readerAttaches: () => readerAttaches});
 }

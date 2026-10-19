@@ -311,6 +311,8 @@ def test_web_reopen_accepts_a_log_directory_or_run_events_file(tmp_path: Path) -
     assert _read_only_log_from_argv([]) is None
     assert _read_only_log_from_argv(["--web-reopen", str(log_dir)]) == log_dir
     assert _read_only_log_from_argv(["--web-reopen", str(events)]) == log_dir
+    assert _read_only_log_from_argv(["--reopen", str(log_dir)]) == log_dir
+    assert _read_only_log_from_argv([f"--reopen={events}"]) == log_dir
 
 
 def test_web_origins_accept_repeated_explicit_origins() -> None:

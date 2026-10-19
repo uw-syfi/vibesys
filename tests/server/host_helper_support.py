@@ -53,6 +53,7 @@ from server.host_helper_logs import (
 )
 from server.host_helper_machine import HostMachineProbe
 from server.host_helper_os import FileProjects
+from server.host_helper_readers import Readers
 from server.host_helper_requests import HelperHost, PathHints, Scan, ScannedEntry
 from server.host_preflight import Check, CheckId, CheckState, PreflightReport, SettingsValid
 from server.instances import ControlSocketStopRequester
@@ -435,6 +436,7 @@ def fake_host(
     dialer = operator_dialer(network)
     return HelperHost(
         registry=LiveRegistry(instance_store, threads),
+        readers=Readers(LiveRegistry(FakeInstanceStore(), threads), threads),
         inspector=InstanceInspector(
             instance_store,
             FakeInstanceLogs(),

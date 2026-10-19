@@ -15,10 +15,12 @@ import {createStore, type Store} from '@vibesys/store';
 import {
   followedStreams,
   type HistoryReply,
+  type ReaderReply,
   type RunPageAction,
   type RunPageRequest,
   type RunPageSeed,
   type RunPageState,
+  readerHeld,
   runPageInitial,
   runPageStep,
   type SpanDetailReply,
@@ -40,6 +42,11 @@ export interface RunPagePorts {
   attach(instance: string): Promise<string | null>;
   /** Let the attached run go. */
   release(): void;
+  /**
+   * Attach, for Chat, the server that serves the ended run: the host starts a read-only one on
+   * demand. The reader's session opens through `openSession` like a live run's.
+   */
+  attachReader(): Promise<ReaderReply>;
   /** Open the attached run's session. */
   readonly openSession: OpenSession;
   /** One page of the ended run's recorded events from `from`. */
@@ -290,6 +297,68 @@ class Bounds {
   }
 }
 
+/** The holder of the live run's session. */
+function liveHolder(ports: RunPagePorts, dispatch: Dispatch): SessionHolder {
+  return new SessionHolder(ports.openSession, dispatch, ports.now, state =>
+    state.link.kind === 'attached' ? state.link.instance : null,
+  );
+}
+
+/** Attach the live run's server to this window and say how it went. */
+function attachLive(
+  ports: RunPagePorts,
+  request: Extract<RunPageRequest, {readonly kind: 'attach'}>,
+  dispatch: Dispatch,
+): void {
+  const settle = (error: string | null): void =>
+    dispatch({type: 'attached', token: request.token, error});
+  void ports.attach(request.instance).then(settle, (error: unknown) => settle(String(error)));
+}
+
+/**
+ * The holder of the reader's session, which folds the ended run for Chat: what else it reports
+ * (its stream, its data) the page already has from the run's history.
+ */
+function readerHolder(ports: RunPagePorts, dispatch: Dispatch): SessionHolder {
+  return new SessionHolder(
+    ports.openSession,
+    action => {
+      if (action.type === 'run-core') dispatch({type: 'reader-core', core: action.core});
+    },
+    ports.now,
+    state => (state.reader.link.kind === 'attached' ? 'reader' : null),
+  );
+}
+
+/** Chat's way to the run: a live run's session answers it, and for an ended run the reader's. */
+function chatRoute(live: SessionHolder, reader: SessionHolder): LiveChat {
+  const route = (): LiveChat => (live.isOpen() ? live.chat : reader.chat);
+  return {
+    ask: (input, signal) => route().ask(input, signal),
+    createThread: (harness, signal) => route().createThread(harness, signal),
+    control: request => route().control(request),
+  };
+}
+
+/** Attach the ended run's reader and say how it went, or let it go with its session. */
+function performReader(
+  ports: RunPagePorts,
+  sessions: SessionHolder,
+  request: Extract<RunPageRequest, {readonly kind: 'attach-reader' | 'release-reader'}>,
+  dispatch: Dispatch,
+): void {
+  if (request.kind === 'release-reader') {
+    sessions.close();
+    ports.release();
+    return;
+  }
+  const settle = (reply: ReaderReply): void =>
+    dispatch({type: 'reader-attached', token: request.token, reply});
+  void ports
+    .attachReader()
+    .then(settle, (error: unknown) => settle({kind: 'failed', message: String(error)}));
+}
+
 /** Brings each reconciler in step with the state after every change. */
 function reconcile(
   state: RunPageState,
@@ -307,11 +376,8 @@ export function createRunPageStore(
   const bounds = new Bounds(schedule, cancels);
   let disposed = false;
   // Reports reach the store only while it lives; `store` is assigned before any can arrive.
-  const sessions = new SessionHolder(
-    ports.openSession,
-    action => store.dispatch(action),
-    ports.now,
-  );
+  const sessions = liveHolder(ports, action => store.dispatch(action));
+  const readerSessions = readerHolder(ports, action => store.dispatch(action));
   const live =
     (dispatch: Dispatch): Dispatch =>
     action => {
@@ -335,15 +401,15 @@ export function createRunPageStore(
         listLogs(ports, request, dispatch);
         return;
       case 'attach':
-        void ports.attach(request.instance).then(
-          error => dispatch({type: 'attached', token: request.token, error}),
-          (error: unknown) =>
-            dispatch({type: 'attached', token: request.token, error: String(error)}),
-        );
+        attachLive(ports, request, dispatch);
         return;
       case 'release':
         sessions.close();
         ports.release();
+        return;
+      case 'attach-reader':
+      case 'release-reader':
+        performReader(ports, readerSessions, request, dispatch);
         return;
       case 'read-history':
         readHistory(ports, request, dispatch, schedule, cancels);
@@ -372,18 +438,20 @@ export function createRunPageStore(
   const followers = logs === null ? null : new Followers(logs, schedule, live(store.dispatch));
   store.dispatch({type: 'locate'}); // bounds the wait for the listing to place the run
   const unsubscribe = store.subscribe(() => {
-    reconcile(store.getState(), [followers, sessions, ticker]);
+    reconcile(store.getState(), [followers, sessions, readerSessions, ticker]);
   });
   return {
     ...store,
-    chat: sessions.chat,
+    chat: chatRoute(sessions, readerSessions),
     dispose: () => {
       disposed = true;
       unsubscribe();
       followers?.stop();
       sessions.close();
+      readerSessions.close();
       ticker.stop();
-      if (store.getState().link.kind !== 'none') ports.release();
+      const final = store.getState();
+      if (final.link.kind !== 'none' || readerHeld(final.reader)) ports.release();
       for (const cancel of cancels) cancel();
       cancels.clear();
     },

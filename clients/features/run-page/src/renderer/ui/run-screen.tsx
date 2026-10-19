@@ -119,6 +119,8 @@ export interface RunChatSlot {
   readonly open: boolean;
   readonly toggle: () => void;
   readonly panel: ReactNode;
+  /** Why Chat cannot open (the machine's VibeSys cannot serve an ended run); absent: it can. */
+  readonly unavailable?: string;
 }
 
 function Header(props: {
@@ -177,6 +179,7 @@ function Header(props: {
             label="Chat"
             expanded={chat.open}
             press={chat.toggle}
+            {...(chat.unavailable === undefined ? {} : {disabledReason: chat.unavailable})}
           />
         )}
         {header.pause.shown ? (

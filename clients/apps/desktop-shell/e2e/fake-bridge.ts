@@ -575,7 +575,7 @@ export function installFakeNewRun(seed: FakeBridgeSeed): void {
   const features =
     catalog?.features ??
     words(
-      'run_options preflight examples run_history run_summary run_trace run_roles example_catalogue run_role_agents project_goal',
+      'run_options preflight examples run_history run_summary run_trace run_roles example_catalogue run_role_agents project_goal chat_ended_runs',
     );
   const roles =
     catalog?.roles ?? words('multi-orchestrator multi-profiler multi-implementer multi-judge');

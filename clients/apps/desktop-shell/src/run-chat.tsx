@@ -5,10 +5,10 @@
  */
 import {ChatPanel, type RunChatPorts, useRunChat} from '@vibesys/feature-run-chat/renderer';
 import {RunScreen, type useRunPage} from '@vibesys/feature-run-page/renderer';
-import {ideaOfAttempt} from '@vibesys/feature-run-page/state';
+import {ideaOfAttempt, runHasEnded} from '@vibesys/feature-run-page/state';
 import {settled, type WelcomeBridge} from '@vibesys/ipc';
 import type {RunRef} from '@vibesys/runs';
-import {type JSX, useMemo} from 'react';
+import {type JSX, useEffect, useMemo, useState} from 'react';
 
 type RunPageView = NonNullable<ReturnType<typeof useRunPage>>;
 
@@ -25,6 +25,25 @@ function chatPorts(page: RunPageView['chat'], bridge: WelcomeBridge, run: RunRef
   };
 }
 
+/** The word on a Chat button that cannot open: the machine's VibeSys cannot serve an ended run. */
+const NEEDS_UPDATE = 'Needs an update';
+
+/** Whether the run's machine offers chat on an ended run, asked once the run has ended; null until it said. */
+function useChatsEnded(bridge: WelcomeBridge, run: RunRef, ended: boolean): boolean | null {
+  const [offered, setOffered] = useState<boolean | null>(null);
+  useEffect(() => {
+    if (!ended) return;
+    let current = true;
+    void settled(bridge.helperFeatures(run.host)).then(result => {
+      if (current) setOffered(result.ok ? result.value.includes('chat_ended_runs') : null);
+    });
+    return () => {
+      current = false;
+    };
+  }, [bridge, run.host, ended]);
+  return offered;
+}
+
 /** The Run screen over `page`, with the Chat button and its panel. */
 export function RunWithChat(props: {
   readonly page: RunPageView;
@@ -35,13 +54,22 @@ export function RunWithChat(props: {
   const ports = useMemo(() => chatPorts(page.chat, bridge, run), [page.chat, bridge, run]);
   const ideaOf = useMemo(() => ideaOfAttempt(page.whole.candidates.candidates), [page.whole]);
   const roles = useMemo(() => page.whole.agents.agents.map(agent => agent.role), [page.whole]);
+  const ended = runHasEnded(page.state);
+  const chatsEnded = useChatsEnded(bridge, run, ended);
   const chat = useRunChat({
     identity: `${run.host} ${run.runId}`,
-    core: page.core,
+    core: ended && page.readerCore !== null ? page.readerCore : page.core,
     ports,
     ideaOf,
     roles,
+    readOnly: ended,
   });
+  const {dispatch} = page;
+  useEffect(() => {
+    dispatch({type: 'chat', open: chat.open});
+  }, [dispatch, chat.open]);
+  const unsupported =
+    ended && (chatsEnded === false || page.state.reader.link.kind === 'unsupported');
   return (
     <RunScreen
       state={page.state}
@@ -56,6 +84,7 @@ export function RunWithChat(props: {
         open: chat.open,
         toggle: chat.toggle,
         panel: chat.panel === null ? null : <ChatPanel {...chat.panel} />,
+        ...(unsupported ? {unavailable: NEEDS_UPDATE} : {}),
       }}
     />
   );

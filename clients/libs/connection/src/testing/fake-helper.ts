@@ -121,6 +121,15 @@ export interface FakeHost {
   readonly runHistory: Map<string, readonly RunSummary[]>;
   /** How each live run answers its run channel. */
   readonly runs: Map<string, RunServer>;
+  /** How a read-only server (`run.reader`) answers its run channel. */
+  readerServer: RunServer;
+  /**
+   * The read-only servers `run.reader` started, by the run each serves: a run with a live server
+   * is read through it, and a run that already has a reader shares it.
+   */
+  readonly readers: Map<string, string>;
+  /** The run of every read-only server `run.reader` started, in order. */
+  readonly readerStarts: string[];
   /** Live runs this user may not connect to (`connect_denied`). */
   readonly denied: Set<string>;
   /** Retained bounded diagnostic tails, by instance id. */
@@ -391,6 +400,9 @@ export class FakeHelper {
     directories: new Map(),
     runHistory: new Map(),
     runs: new Map(),
+    readerServer: ECHO_SERVER,
+    readers: new Map(),
+    readerStarts: [],
     denied: new Set(),
     logs: new Map(),
     harnesses: [...FAKE_HARNESSES],
@@ -469,6 +481,7 @@ export class FakeHelper {
     'project_goal',
     'example_destination',
     'usage_window',
+    'chat_ended_runs',
   ]);
   /** The run log streams `logs.list` and `logs.read` serve; replace it to seed a store. */
   logStore = new FakeLogStore();
@@ -630,6 +643,11 @@ export class FakeHelper {
 
   newInstanceId(): string {
     return (this.#nextInstance++).toString(16).padStart(12, '0');
+  }
+
+  /** A read-only server ended by itself, as it does once no client holds it: the next `run.reader` starts another. */
+  endReader(runId: string): void {
+    this.host.readers.delete(runId);
   }
 }
 
@@ -808,10 +826,9 @@ class HelperSession {
         this.#machineSettings(request);
         return;
       case 'run.stop':
-        this.#stop(request);
-        return;
+      case 'run.reader':
       case 'run.connect':
-        this.#connect(id, request.instance_id);
+        this.#runRequest(request);
         return;
       case 'paths.complete':
         this.#complete(id, request.prefix);
@@ -1451,10 +1468,46 @@ class HelperSession {
     this.#send({type: 'run.start', request_id: id, launch: live});
   }
 
+  #runRequest(
+    request: Extract<HelperRequest, {type: 'run.stop' | 'run.reader' | 'run.connect'}>,
+  ): void {
+    if (request.type === 'run.stop') this.#stop(request);
+    else if (request.type === 'run.reader') this.#reader(request);
+    else this.#connect(request.request_id, request.instance_id);
+  }
+
+  /** `run.reader`: a live run's own server, else the read-only one a run that ended shares. */
+  #reader(request: Extract<HelperRequest, {type: 'run.reader'}>): void {
+    const helper = this.#helper;
+    const id = request.request_id;
+    const live = helper.host.instances.find(entry => entry.run_id === request.run_id);
+    if (live !== undefined) {
+      this.#send({type: 'run.reader', request_id: id, instance_id: live.id, read_only: false});
+      return;
+    }
+    const known = helper.host.runHistory.get(request.project) ?? [];
+    if (!known.some(run => run.run_id === request.run_id)) {
+      this.#send(this.#error(id, 'unknown_run', `${request.project} has no run ${request.run_id}`));
+      return;
+    }
+    let reader = helper.host.readers.get(request.run_id);
+    if (reader === undefined) {
+      reader = helper.newInstanceId();
+      helper.host.readers.set(request.run_id, reader);
+      helper.host.readerStarts.push(request.run_id);
+    }
+    this.#send({type: 'run.reader', request_id: id, instance_id: reader, read_only: true});
+  }
+
   #connect(id: string, instanceId: string): void {
     const helper = this.#helper;
-    const live = helper.host.instances.find(entry => entry.id === instanceId);
-    const server = helper.host.runs.get(instanceId);
+    const reader = [...helper.host.readers].find(([, instance]) => instance === instanceId);
+    const live =
+      helper.host.instances.find(entry => entry.id === instanceId) ??
+      (reader === undefined ? undefined : record(instanceId, reader[0]));
+    const server =
+      helper.host.runs.get(instanceId) ??
+      (reader === undefined ? undefined : helper.host.readerServer);
     if (this.#watches.size > 0) {
       this.#send(this.#error(id, 'channel_busy', 'busy'));
       return;

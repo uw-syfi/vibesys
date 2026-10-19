@@ -33,7 +33,7 @@ import {
   type UsageMethods,
   type WindowsMethods,
 } from './fake-bridge.js';
-import {installFakeChat} from './fake-chat.js';
+import {type ChatMethods, installFakeChat} from './fake-chat.js';
 import {type FixtureServerMethods, installFakeFixtureServer} from './fake-fixture-server.js';
 import {type FakeHistorySeed, installFakeHistory} from './fake-history.js';
 import {FAKE_OFFER} from './fake-offer.js';
@@ -64,6 +64,7 @@ type ProvidedByWorld =
   | ExampleDestinationMethods
   | WindowsMethods
   | RunMethods
+  | ChatMethods
   | FixtureServerMethods;
 type MissingMethods = Exclude<keyof WelcomeBridge, ProvidedByWorld>;
 const complete: [MissingMethods] extends [never] ? true : MissingMethods = true;

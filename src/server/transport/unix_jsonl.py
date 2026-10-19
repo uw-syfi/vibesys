@@ -644,6 +644,12 @@ class UnixJsonlServer:
             if session.worker is None or session.worker.is_alive()
         }
 
+    def client_count(self) -> int:
+        """How many clients hold a connection now, admitted or not."""
+        with self._guard:
+            self._discard_finished_sessions_locked()
+            return len(self._sessions)
+
     def wait_for_subscriber(self, timeout: float) -> bool:
         """Wait until a presentation client has established its event stream."""
         return self._subscriptions.wait_for_subscriber(timeout)

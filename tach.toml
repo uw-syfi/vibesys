@@ -87,7 +87,7 @@ layers_explicit_depends_on = true
 
 [[modules]]
 path = "entrypoints"
-depends_on = ["server.api", "vs_decode.api", "vs_logs", "vs_sim.api", "vs_project", "vs_slurm", "vs_github", "vs_issue_tracker", "vs_runtime", "vs_sandbox", "vibesys.api", "vibesys.api.evolve", "vibesys.api.hypothesis", "vibesys.api.metrics", "vibesys.api.profilers", "vs_agent", "server.runtime", "server.instances", "server.host_api", "server.registry", "headless", "launch", "vs_mcp", "server.relay", "server.host_helper", "server.host_helper_requests", "server.host_helper_os", "server.host_helper_logs", "server.host_helper_machine", "server.host_helper_compute", "server.host_agent_logins", "server.host_preflight", "server.host_examples", "server.host_harness"]
+depends_on = ["server.api", "vs_decode.api", "vs_logs", "vs_sim.api", "vs_project", "vs_slurm", "vs_github", "vs_issue_tracker", "vs_runtime", "vs_sandbox", "vibesys.api", "vibesys.api.evolve", "vibesys.api.hypothesis", "vibesys.api.metrics", "vibesys.api.profilers", "vs_agent", "server.runtime", "server.instances", "server.host_api", "server.registry", "headless", "launch", "vs_mcp", "server.relay", "server.host_helper", "server.host_helper_requests", "server.host_helper_os", "server.host_helper_logs", "server.host_helper_machine", "server.host_helper_compute", "server.host_helper_readers", "server.host_agent_logins", "server.host_preflight", "server.host_examples", "server.host_harness"]
 
 [[modules]]
 path = "headless"
@@ -138,7 +138,7 @@ depends_on = ["server", "server.trace", "server.execution", "server.chat", "serv
 # the standard library only; tests/architecture/test_light_entrypoints.py keeps
 # the light entrypoints' import closure free of the engine.
 path = "server.host_api"
-depends_on = ["vs_decode.api", "server.host_agent_logins", "server.host_compute", "server.host_envelope", "server.host_examples", "server.host_harness", "server.host_machine_facts", "server.host_preflight", "server.host_run_dashboard", "server.host_run_events", "server.host_run_summary"]
+depends_on = ["vs_decode.api", "server.host_agent_logins", "server.host_compute", "server.host_envelope", "server.host_examples", "server.host_harness", "server.host_machine_facts", "server.host_preflight", "server.host_run_dashboard", "server.host_run_events", "server.host_run_reader", "server.host_run_summary"]
 
 [[modules]]
 # The fields every helper request and reply carries. Pydantic only.
@@ -159,6 +159,12 @@ path = "server.span_index"
 depends_on = ["server.host_api"]
 
 [[modules]]
+# The helper's run.reader messages: the server Chat reads a run through. Light: Pydantic and
+# the envelope.
+path = "server.host_run_reader"
+depends_on = ["server.host_envelope"]
+
+[[modules]]
 # The helper's runs.summary messages. Light: Pydantic and the envelope.
 path = "server.host_run_summary"
 depends_on = ["server.host_envelope"]
@@ -172,7 +178,7 @@ path = "server.host_machine_facts"
 # The per-user live registry: lifetime locks, records, listing, and the stop
 # decision. Light; the control-socket stop requester is server.instances.
 path = "server.registry"
-depends_on = ["vs_decode.api", "server.host_api", "vs_project", "vs_sim.api"]
+depends_on = ["vs_decode.api", "server.host_api", "server.host_envelope", "vs_project", "vs_sim.api"]
 
 [[modules]]
 # The run protocol's control envelope: request and response framing and
@@ -203,7 +209,12 @@ depends_on = ["server.host_api"]
 
 [[modules]]
 path = "server.runtime"
-depends_on = ["server.read_model", "server.chat", "server.events", "server.execution", "server.journal", "vibesys.api", "server.integration", "server.api", "server.controller", "server.transport", "server.diagnostics", "server.host_api", "vs_project", "vs_sim.api"]
+depends_on = ["server.idle_watch", "server.read_model", "server.chat", "server.events", "server.execution", "server.journal", "vibesys.api", "server.integration", "server.api", "server.controller", "server.transport", "server.diagnostics", "server.host_api", "vs_project", "vs_sim.api"]
+
+[[modules]]
+# The pure decision that ends a read-only server no client holds. The standard library only.
+path = "server.idle_watch"
+depends_on = []
 
 [[modules]]
 # The per-connection stdio relay to a run's control socket, used by the host helper's
@@ -221,7 +232,12 @@ depends_on = ["vs_decode.api", "server.host_api", "server.host_helper_requests",
 [[modules]]
 # The host helper's request answering: one request through the host's interfaces.
 path = "server.host_helper_requests"
-depends_on = ["vs_decode.api", "server.host_agent_logins", "server.host_api", "server.host_compute", "server.host_examples", "server.host_helper_compute", "server.host_helper_logs", "server.host_helper_preflight", "server.host_machine_facts", "server.host_preflight", "server.host_run_dashboard", "server.host_run_events", "server.host_run_summary", "server.registry", "server.relay", "server.run_digest", "server.run_summary", "server.usage_window", "vs_project", "vs_sim.api"]
+depends_on = ["vs_decode.api", "server.host_agent_logins", "server.host_api", "server.host_compute", "server.host_examples", "server.host_helper_compute", "server.host_helper_logs", "server.host_helper_preflight", "server.host_machine_facts", "server.host_preflight", "server.host_run_dashboard", "server.host_run_events", "server.host_run_reader", "server.host_run_summary", "server.host_helper_readers", "server.registry", "server.relay", "server.run_digest", "server.run_summary", "server.usage_window", "vs_project", "vs_sim.api"]
+
+[[modules]]
+# The read-only servers Chat reads ended runs through: found by run, started on demand.
+path = "server.host_helper_readers"
+depends_on = ["server.host_api", "server.registry", "vs_sim.api"]
 
 [[modules]]
 # The host helper's `logs` feature: chunking, tails and the long poll over the LogReader role.

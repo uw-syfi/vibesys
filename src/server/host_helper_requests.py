@@ -155,7 +155,9 @@ from server.host_run_events import (
     RunsReadTailReply,
     RunsReadTailRequest,
 )
+from server.host_run_reader import RunReaderReply, RunReaderRequest
 from server.host_run_summary import UsageWindowReply, UsageWindowRequest
+from server.registry import driving
 from server.relay import (
     BridgeResult,
     ChannelEndOutcome,
@@ -171,6 +173,7 @@ if TYPE_CHECKING:
     from server.host_agent_logins import AgentLogin, LoginStarted, LoginUnavailable
     from server.host_api import RunDigestUnreadable
     from server.host_examples import CreatedProject, ExampleList, TaskGoal
+    from server.host_helper_readers import Readers
     from server.host_preflight import PreflightReport
     from server.registry import InstanceInspector, LiveRegistry, StopEffects
     from server.run_summary import Summarized
@@ -309,6 +312,13 @@ class Projects(Protocol):
 
     def run_summary(self, project: Path, run_id: str) -> Summarized:
         """The fold of run ``run_id``'s whole journal, as it is now (``server.run_summary``).
+
+        Raises ``ProjectLookupError`` with ``unknown_run`` as ``run_events`` does.
+        """
+        ...
+
+    def run_journal(self, project: Path, run_id: str) -> Path:
+        """The journal file of run ``run_id``, which a read-only server serves.
 
         Raises ``ProjectLookupError`` with ``unknown_run`` as ``run_events`` does.
         """
@@ -484,6 +494,8 @@ class HelperHost:
     """Everything a request reads or changes on the host."""
 
     registry: LiveRegistry
+    readers: Readers
+    """The read-only servers this host started so Chat can read runs that have no live one."""
     inspector: InstanceInspector
     stop_effects: StopEffects
     projects: Projects
@@ -901,12 +913,8 @@ def _answer(
             | AgentLoginsStartRequest()
         ):
             reply = _machine_reply(request, host)
-        case RunStartRequest() | RunPreflightRequest():
-            reply = (
-                _start(request, host)
-                if isinstance(request, RunStartRequest)
-                else _preflight(request, host)
-            )
+        case RunStartRequest() | RunPreflightRequest() | RunReaderRequest():
+            reply = _launching_reply(request, host)
         case RunStopRequest(instance_id=instance_id, force=force):
             result = host.registry.stop(instance_id, host.stop_effects, force=force)
             reply = RunStopReply(request_id=request_id, result=result)
@@ -1302,6 +1310,45 @@ def _start(request: RunStartRequest, host: HelperHost) -> RunStartReply | Helper
     return RunStartReply(request_id=request.request_id, launch=launch)
 
 
+def _launching_reply(
+    request: RunStartRequest | RunPreflightRequest | RunReaderRequest, host: HelperHost
+) -> RunStartReply | RunPreflightReply | RunReaderReply | HelperError:
+    """Answer a request that starts a run, checks that one could start, or reads one with a server."""
+    match request:
+        case RunStartRequest():
+            return _start(request, host)
+        case RunPreflightRequest():
+            return _preflight(request, host)
+        case RunReaderRequest():
+            return _reader(request, host)
+
+
+def reader_arguments(journal: Path, run_id: str) -> tuple[str, ...]:
+    """The ``vibesys`` arguments that serve the journal of ``run_id`` read-only, detached."""
+    return ("--detach", "--reopen", str(journal.parent), "--run-id", run_id)
+
+
+def _reader(request: RunReaderRequest, host: HelperHost) -> RunReaderReply | HelperError:
+    """The server Chat reads ``request``'s run through: its live one, else a read-only one.
+
+    A run with a live server is read through it. A run without one is served by the read-only
+    server this host already runs for it, or by one started now from the run's journal, which
+    ends by itself once no client holds it.
+    """
+    live = driving(host.registry.list(), request.run_id)
+    if live is not None:
+        return RunReaderReply(request_id=request.request_id, instance_id=live.id, read_only=False)
+    project = host.projects.require_initialized(Path(_host_path(request.project, host.directories)))
+    journal = host.projects.run_journal(project, request.run_id)
+    started = host.readers.serve(
+        request.run_id,
+        lambda: host.launcher.start(project, reader_arguments(journal, request.run_id)),
+    )
+    if isinstance(started, DetachedLaunchFailure):
+        return _error(request.request_id, HelperErrorCode.READER_FAILED, started.message)
+    return RunReaderReply(request_id=request.request_id, instance_id=started.id, read_only=True)
+
+
 def _unconfigured_target(request_id: str | None, target: SlurmTarget | ModalTarget) -> HelperError:
     if isinstance(target, SlurmTarget):
         message = f"no Slurm cluster named {target.cluster!r} is set up on this machine"
@@ -1432,7 +1479,7 @@ def connect(
     request: RunConnectRequest, host: HelperHost
 ) -> tuple[RunConnectReply, Connection] | HelperError:
     """Open the run's control socket for ``run.connect``; the caller owns the connection."""
-    record = host.registry.find(request.instance_id)
+    record = host.registry.find(request.instance_id) or host.readers.find(request.instance_id)
     if record is None:
         message = f"no live server has id {request.instance_id}"
         return _error(request.request_id, HelperErrorCode.RUN_GONE, message)

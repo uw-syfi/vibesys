@@ -76,6 +76,8 @@ ALLOWED_FIRST_PARTY = (
     "server.host_helper_os",
     "server.host_helper_requests",
     "server.host_run_events",
+    "server.host_run_reader",
+    "server.host_helper_readers",
     "server.host_envelope",
     "server.host_run_dashboard",
     "server.host_run_summary",

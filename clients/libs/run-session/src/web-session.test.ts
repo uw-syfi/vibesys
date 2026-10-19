@@ -513,6 +513,29 @@ describe('WebSession', () => {
     await expect(session.command({type: 'command.stop'})).resolves.toEqual({
       kind: 'rejected',
       message: 'run is read only',
+      code: null,
+    });
+    await session.close();
+  });
+
+  test('a refused command carries the server typed reason', async () => {
+    const {session, transport} = sessionWith(new FakeLifecycle());
+    transport.snapshots.push({
+      request_id: 'request-stop',
+      timestamp: '2026-01-01T00:00:00Z',
+      ok: false,
+      error: 'This finished run is read-only',
+      diagnostic: {
+        code: 'run_read_only',
+        summary: 'This finished run is read-only',
+        scope: 'request',
+      },
+    });
+
+    await expect(session.command({type: 'command.stop'})).resolves.toEqual({
+      kind: 'rejected',
+      message: 'This finished run is read-only',
+      code: 'run_read_only',
     });
     await session.close();
   });

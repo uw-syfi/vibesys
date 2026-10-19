@@ -19,6 +19,7 @@ import {type ChannelOf, instance, project} from './values.js';
 
 export const RUN_CONTROL_CHANNELS = {
   attach: 'vibesys:welcome:attach',
+  attachReader: 'vibesys:welcome:attach-reader',
   resume: 'vibesys:welcome:resume',
   stopConfirmed: 'vibesys:welcome:stop-confirmed',
   releaseRun: 'vibesys:welcome:release-run',
@@ -150,9 +151,25 @@ export type RunSpanPage =
  */
 export const RUN_PORT_MESSAGE = 'vibesys:run-port';
 
+/**
+ * What attaching the server Chat reads a run through came to: it is attached to this window, or
+ * this host's VibeSys cannot serve a run that has ended (`chat_ended_runs`).
+ */
+export type ReaderAttached = {readonly kind: 'attached'} | {readonly kind: 'unsupported'};
+
 /** The welcome bridge's requests the run-control feature makes. */
 export interface RunControlWelcomeBridge {
   attach(host: HostKey, instance: string): Promise<WelcomeResult<null>>;
+  /**
+   * Attach, for Chat, the server that serves run `runId` of `project` on `host`: its live one, or
+   * for a run that ended a read-only one the host starts, which ends by itself once this window
+   * lets the run go. Chat connects to it as to an attached run (`connectRun`).
+   */
+  attachReader(
+    host: HostKey,
+    project: string,
+    runId: string,
+  ): Promise<WelcomeResult<ReaderAttached>>;
   resume(host: HostKey, project: string, run: ResumeRunId): Promise<WelcomeResult<null>>;
   /** Stop a run: the view already asked the user, who said yes. */
   stopConfirmed(host: HostKey, instance: string, force: boolean): Promise<WelcomeResult<null>>;
@@ -215,6 +232,12 @@ export interface RunControlWelcomeBridge {
 
 export type RunControlRequest =
   | {readonly kind: 'attach'; readonly host: HostId; readonly instance: string}
+  | {
+      readonly kind: 'attach-reader';
+      readonly host: HostId;
+      readonly project: string;
+      readonly runId: string;
+    }
   | {
       readonly kind: 'resume';
       readonly host: HostId;
@@ -324,6 +347,13 @@ export function parseRunControlRequest(
   switch (channel) {
     case RUN_CONTROL_CHANNELS.attach:
       return {kind: 'attach', host: hostFromKey(first), instance: instance(second, 'attach to')};
+    case RUN_CONTROL_CHANNELS.attachReader:
+      return {
+        kind: 'attach-reader',
+        host: hostFromKey(first),
+        project: project(second),
+        runId: exactResumeRunId(third),
+      };
     case RUN_CONTROL_CHANNELS.resume:
       return {
         kind: 'resume',

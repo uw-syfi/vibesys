@@ -12,6 +12,7 @@ import {
   headerView,
   nowView,
   quotaBannerView,
+  type ReaderReply,
   type RunPageAction,
   runNow,
   stopBannerView,
@@ -63,6 +64,8 @@ class FakeApp {
   readonly asked: string[] = [];
   observer: SessionObserver | null = null;
   refuse: string | null = null;
+  /** What attaching the reader of an ended run comes to. */
+  readerReply: ReaderReply = {kind: 'attached'};
   /** When set, a command fails to reach the run (its promise rejects) with this message. */
   fail: string | null = null;
   /** This window's clock, which the test advances by hand. */
@@ -115,6 +118,10 @@ function fakePorts(stops: boolean[], app = new FakeApp()): RunPagePorts {
       return Promise.resolve(null);
     },
     release: () => app.asked.push('release'),
+    attachReader: () => {
+      app.asked.push('attach-reader');
+      return Promise.resolve(app.readerReply);
+    },
     openSession: observer => {
       app.asked.push('open');
       app.observer = observer;
@@ -237,6 +244,66 @@ test('an instance replacement restarts a follower even when the stream id is reu
     'a1b2c3d4e5f6',
     'fedcba654321',
   ]);
+  store.dispose();
+});
+
+const ENDED = {kind: 'historical', status: null} as const;
+
+test('chat on an ended run attaches its reader while Chat is open, and lets it go when closed', async () => {
+  const app = new FakeApp();
+  const store = createRunPageStore(SEED, fakePorts([], app), new FakeClock().schedule);
+  const signal = new AbortController().signal;
+  store.dispatch({type: 'record', record: ENDED});
+  expect(app.asked).toEqual([]);
+
+  store.dispatch({type: 'chat', open: true});
+  await settled();
+  expect(app.asked).toEqual(['attach-reader', 'open']);
+  await expect(store.chat.ask({threadId: 't', text: 'why?'}, signal)).resolves.toEqual({ok: true});
+
+  store.dispatch({type: 'chat', open: false});
+  expect(app.asked.slice(3)).toEqual(['close', 'release']);
+  await expect(store.chat.ask({threadId: 't', text: 'why?'}, signal)).resolves.toMatchObject({
+    ok: false,
+  });
+  store.dispose();
+});
+
+test('Chat opened on a live run attaches no reader', async () => {
+  const app = new FakeApp();
+  const store = createRunPageStore(SEED, fakePorts([], app), new FakeClock().schedule);
+  store.dispatch({type: 'record', record: {kind: 'live', run: running()}});
+  store.dispatch({type: 'chat', open: true});
+  await settled();
+  expect(app.asked).toEqual(['attach a1b2c3d4e5f6', 'open']);
+  store.dispose();
+});
+
+test('a host that cannot serve an ended run leaves Chat off and is not asked again', async () => {
+  const app = new FakeApp();
+  app.readerReply = {kind: 'unsupported'};
+  const store = createRunPageStore(SEED, fakePorts([], app), new FakeClock().schedule);
+  store.dispatch({type: 'record', record: ENDED});
+  store.dispatch({type: 'chat', open: true});
+  await settled();
+  store.dispatch({type: 'chat', open: false});
+  store.dispatch({type: 'chat', open: true});
+  await settled();
+  expect(store.getState().reader.link).toEqual({kind: 'unsupported'});
+  expect(app.asked).toEqual(['attach-reader']);
+  store.dispose();
+});
+
+test('a run that goes again lets the reader go before its live server is attached', async () => {
+  const app = new FakeApp();
+  const store = createRunPageStore(SEED, fakePorts([], app), new FakeClock().schedule);
+  store.dispatch({type: 'record', record: ENDED});
+  store.dispatch({type: 'chat', open: true});
+  await settled();
+  app.asked.length = 0;
+  store.dispatch({type: 'record', record: {kind: 'live', run: running()}});
+  await settled();
+  expect(app.asked).toEqual(['close', 'release', 'attach a1b2c3d4e5f6', 'open']);
   store.dispose();
 });
 

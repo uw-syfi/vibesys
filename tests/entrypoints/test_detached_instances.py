@@ -47,6 +47,8 @@ from server.host_api import (
 )
 from server.instances import ControlSocketStopRequester
 from server.registry import (
+    INSTANCES_DIRECTORY,
+    READERS_DIRECTORY,
     TOMBSTONE_RETENTION_SECONDS,
     FakeInstanceLogs,
     FakeInstanceMetadataStore,
@@ -176,8 +178,10 @@ class _ChildEffects(_DetachedGatewayEffects):
         serves: bool,
         exit_status: int | None = None,
         output: bytes = b"child output\n",
+        registry_directory: str = INSTANCES_DIRECTORY,
     ) -> None:
         self.output = output
+        self.registry_directory = registry_directory
         self.root = root
         self.serves = serves
         self.child = _Child(exit_status)
@@ -194,7 +198,7 @@ class _ChildEffects(_DetachedGatewayEffects):
         instance_id = command[command.index("--instance-id") + 1]
         socket_path = command[command.index("--control-socket") + 1]
         run_id = command[command.index("--run-id") + 1]
-        hold = FileInstanceStore(self.root).hold(instance_id)
+        hold = FileInstanceStore(self.root, directory=self.registry_directory).hold(instance_id)
         self.holds.append(hold)
         status = InstanceStatus.SERVING if self.serves else InstanceStatus.STARTING
         hold.publish(_record(instance_id, socket_path, status, run_id))
@@ -325,6 +329,63 @@ def test_a_detached_launch_stops_a_child_that_never_serves(tmp_path: Path) -> No
 def test_detached_server_flags_never_reach_run_parsing() -> None:
     assert _headless_argv(["--detach", "--instance-id", INSTANCE, "--local"]) == ["--local"]
     assert _headless_argv([f"--instance-id={INSTANCE}", "--local"]) == ["--local"]
+
+
+def test_reopen_options_never_reach_run_parsing() -> None:
+    assert _headless_argv(["--reopen", "/logs", "--local"]) == ["--local"]
+    assert _headless_argv(["--reopen=/logs", "--local"]) == ["--local"]
+
+
+def test_a_detached_reopen_starts_a_reader_registered_apart_from_the_runs(
+    resumable: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The read-only server of a run's journal is launched without parsing a run to start."""
+    effects = _ChildEffects(resumable, serves=True, registry_directory=READERS_DIRECTORY)
+
+    _launch_detached_instance(["--detach", "--reopen", "/logs/run", "--run-id", _RUN_ID], effects)
+
+    record = LiveInstanceRecord.model_validate_json(capsys.readouterr().out)
+    assert record.run_id == _RUN_ID
+    assert effects.command[1:3] == ["-m", "entrypoints.detached_run"]
+    assert "--reopen" in effects.command
+    readers = LiveRegistry(FileInstanceStore(resumable, directory=READERS_DIRECTORY), ManualClock())
+    runs = LiveRegistry(FileInstanceStore(resumable), ManualClock())
+    assert [each.id for each in readers.list().instances] == [record.id]
+    assert runs.list().instances == ()
+    effects.holds[0].release()
+
+
+def test_a_detached_reopen_does_not_wait_for_a_live_server_of_the_same_run(
+    resumable: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    live = FileInstanceStore(resumable).hold(INSTANCE)
+    live.publish(_record(INSTANCE, "/run.sock", InstanceStatus.SERVING))
+    effects = _ChildEffects(resumable, serves=True, registry_directory=READERS_DIRECTORY)
+
+    _launch_detached_instance(["--detach", "--reopen", "/logs/run", "--run-id", _RUN_ID], effects)
+
+    record = LiveInstanceRecord.model_validate_json(capsys.readouterr().out)
+    assert record.id != INSTANCE
+    effects.holds[0].release()
+    live.release()
+
+
+def test_a_detached_reopen_without_a_valid_run_is_refused_before_any_spawn(
+    resumable: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    effects = _ChildEffects(resumable, serves=True, registry_directory=READERS_DIRECTORY)
+
+    for arguments in (
+        ["--detach", "--reopen", "/logs/run"],
+        ["--detach", "--reopen", "/l", "--run-id", "../x"],
+    ):
+        with pytest.raises(SystemExit) as exit_info:
+            _launch_detached_instance(arguments, effects)
+        assert exit_info.value.code == 2
+        failure = DetachedLaunchFailure.model_validate_json(capsys.readouterr().out)
+        assert failure.code == "invalid_arguments"
+
+    assert effects.command == []
 
 
 def test_a_detached_launch_chooses_its_own_control_socket(

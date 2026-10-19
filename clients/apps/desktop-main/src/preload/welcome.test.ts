@@ -126,6 +126,10 @@ function cases(random: Seeded): Case[] {
     [bridge => bridge.harnesses(key), {kind: 'harnesses', host}],
     [bridge => bridge.attach(key, instance), {kind: 'attach', host, instance}],
     [
+      bridge => bridge.attachReader(key, path, exactResumeRunId(name)),
+      {kind: 'attach-reader', host, project: path, runId: exactResumeRunId(name)},
+    ],
+    [
       bridge => bridge.resume(key, path, exactResumeRunId(name)),
       {kind: 'resume', host, project: path, run: exactResumeRunId(name)},
     ],

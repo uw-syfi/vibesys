@@ -1011,3 +1011,103 @@ describe('RunControl over the FakeHelper', () => {
     await secondLease[Symbol.asyncDispose]();
   });
 });
+
+describe('RunControl.attachReader over the FakeHelper', () => {
+  const ENDED = {
+    run_id: 'run-a',
+    task: 'spsc',
+    display_name: 'run',
+    created_at: '2026-10-17T03:00:00Z',
+    phase: null,
+    instance_id: null,
+  } as const;
+
+  function endedWorld() {
+    const w = world();
+    w.link.helper.host.runHistory.set('/p', [ENDED]);
+    return w;
+  }
+
+  async function opened(read: () => number, count: number): Promise<void> {
+    for (let turn = 0; turn < 200 && read() < count; turn += 1) {
+      await new Promise(resolve => setImmediate(resolve));
+    }
+    expect(read()).toBe(count);
+  }
+
+  test('a run that ended is read through one read-only server, bound under the run id', async () => {
+    const w = endedWorld();
+
+    expect(await w.runs.attachReader(HOST, '/p', 'run-a')).toEqual({kind: 'attached'});
+
+    const [reader] = [...w.link.helper.host.readers.values()];
+    expect(w.link.helper.host.readerStarts).toEqual(['run-a']);
+    expect(w.runs.attached()).toMatchObject({instanceId: reader, runId: 'run-a', project: '/p'});
+    expect(w.pages.opened).toBe(1);
+    await w.connection[Symbol.asyncDispose]();
+  });
+
+  test('the window connections of a bound reader reach the read-only server', async () => {
+    const w = endedWorld();
+    let connections = 0;
+    w.link.helper.host.readerServer = () => {
+      connections += 1;
+    };
+    await w.runs.attachReader(HOST, '/p', 'run-a');
+
+    w.runs.connect(new FakeRelayPort(), 'run-a');
+    w.runs.connect(new FakeRelayPort(), 'run-a');
+
+    await opened(() => connections, 2);
+    expect(w.link.helper.host.readerStarts).toEqual(['run-a']);
+    await w.connection[Symbol.asyncDispose]();
+  });
+
+  test('attaching again while the reader lives shares it, and a reader that ended is replaced', async () => {
+    const w = endedWorld();
+
+    await w.runs.attachReader(HOST, '/p', 'run-a');
+    w.runs.detach('run-a');
+    await w.runs.attachReader(HOST, '/p', 'run-a');
+    expect(w.link.helper.host.readerStarts).toEqual(['run-a']);
+
+    w.runs.detach('run-a');
+    w.link.helper.endReader('run-a');
+    await w.runs.attachReader(HOST, '/p', 'run-a');
+    expect(w.link.helper.host.readerStarts).toEqual(['run-a', 'run-a']);
+    await w.connection[Symbol.asyncDispose]();
+  });
+
+  test('a run with a live server is bound to it and starts no reader', async () => {
+    const w = endedWorld();
+    w.link.helper.publish(record(RUN_A, 'run-a', '/p'));
+
+    await w.runs.attachReader(HOST, '/p', 'run-a');
+
+    expect(w.runs.attached()).toMatchObject({instanceId: RUN_A, runId: 'run-a'});
+    expect(w.link.helper.host.readerStarts).toEqual([]);
+    await w.connection[Symbol.asyncDispose]();
+  });
+
+  test('a helper that does not offer chat on ended runs is asked nothing and binds nothing', async () => {
+    const w = endedWorld();
+    w.link.helper.features.delete('chat_ended_runs');
+
+    expect(await w.runs.attachReader(HOST, '/p', 'run-a')).toEqual({kind: 'unsupported'});
+
+    expect(w.link.helper.requests.some(request => request.type === 'run.reader')).toBe(false);
+    expect(w.runs.attached()).toBeNull();
+    expect(w.pages.opened).toBe(0);
+    await w.connection[Symbol.asyncDispose]();
+  });
+
+  test('a run the project does not have is refused and binds nothing', async () => {
+    const w = endedWorld();
+
+    await expect(w.runs.attachReader(HOST, '/p', 'run-z')).rejects.toThrow('no run run-z');
+
+    expect(w.runs.attached()).toBeNull();
+    expect(w.link.helper.host.readerStarts).toEqual([]);
+    await w.connection[Symbol.asyncDispose]();
+  });
+});

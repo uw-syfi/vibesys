@@ -38,6 +38,7 @@ from server.host_api import (
     RunEndOutcome,
     StartupFact,
 )
+from server.idle_watch import IdleWatch
 from server.integration import RunIntegrationAdapter
 from server.journal import WireJournal
 from server.read_model import RunInspector
@@ -100,6 +101,10 @@ if TYPE_CHECKING:
 _RunValueT = TypeVar("_RunValueT")
 DETACHED_DRAIN_TIMEOUT_SECONDS = 2.0
 """How long a detached server that is exiting waits for clients to read its last events."""
+READER_IDLE_SECONDS = 60.0
+"""How long a read-only server waits with no client connected before it ends."""
+_SHUTDOWN_POLL_SECONDS = 0.1
+"""How often a detached or read-only server waiting for its shutdown looks at its clients."""
 _TERMINAL_EVENT_TYPES = frozenset(
     {EventType.RUN_FINISHED, EventType.RUN_FAILED, EventType.RUN_INTERRUPTED}
 )
@@ -210,6 +215,7 @@ class ServerRuntime:
         instance_path: Path | None = None,
         detach: bool = False,
         read_only_log: Path | None = None,
+        reader_idle_seconds: float | None = None,
         observer: ServerLifecycleObserver | None = None,
         platform: Platform,
     ) -> None:
@@ -227,6 +233,10 @@ class ServerRuntime:
         ``run_id`` names the run every journaled event belongs to, from the
         first; only a read-only reopen (``read_only_log``) takes it from the
         recorded events instead.
+
+        A read-only server without the web gateway ends once no client has held a
+        connection for ``reader_idle_seconds`` (one nobody connects to ends that long
+        after it listened); without it, it serves until ``shutdown``.
         """
         clock = platform.clock
         self.platform = platform
@@ -243,6 +253,7 @@ class ServerRuntime:
         self.instance_path = instance_path
         self.detach = detach
         self.read_only_log = read_only_log
+        self._reader_idle_seconds = reader_idle_seconds
         self.observer = observer
         self._shutdown = self.threads.event()
         self._shutdown_signal: Signals | None = None
@@ -482,8 +493,18 @@ class ServerRuntime:
             return
         if not self.web and self.read_only_log is None:
             return
-        while not self._shutdown.wait(timeout=0.1):
-            pass
+        idle = (
+            None
+            if self._reader_idle_seconds is None
+            else IdleWatch.begin(self._reader_idle_seconds, self.threads.now())
+        )
+        while not self._shutdown.wait(timeout=_SHUTDOWN_POLL_SECONDS):
+            if idle is None:
+                continue
+            now = self.threads.now()
+            idle = idle.observe(transport.client_count(), now)
+            if idle.expired(now):
+                return
 
     @staticmethod
     def _wait_for_subscriber(transport: UnixJsonlServer) -> None:

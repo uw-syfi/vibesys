@@ -28,6 +28,8 @@ from server.host_api import (
     LiveInstanceRecord,
 )
 from server.registry import (
+    INSTANCES_DIRECTORY,
+    READERS_DIRECTORY,
     FileInstanceStore,
     LiveRegistry,
     driving,
@@ -38,6 +40,7 @@ from server.registry import (
     new_instance_id,
 )
 from server.runtime import (
+    READER_IDLE_SECONDS,
     WEBSOCKET_CLOSE_TIMEOUT_SECONDS,
     WebDiscovery,
     WebGatewayListener,
@@ -51,7 +54,13 @@ from server.runtime import (
     browser_origin,
 )
 from vibesys.api import ConfigurationError
-from vs_project.api import Project, create_operator_key, user_runtime_root
+from vs_project.api import (
+    Project,
+    ProjectStateError,
+    create_operator_key,
+    user_runtime_root,
+    validate_run_id,
+)
 from vs_sim.api import (
     OsThreads,
     Platform,
@@ -226,8 +235,18 @@ def _web_instance_from_argv(argv: list[str]) -> Path:
     )
 
 
+def _first_option(argv: list[str], options: tuple[str, ...]) -> str | None:
+    """The value of the first of ``options`` that ``argv`` sets."""
+    for option in options:
+        value = cli._option_from_argv(argv, option)  # noqa: SLF001  # lint-waiver: LW-101043 [SLF001]; reuse the CLI's private option scanner for the launcher-only flag
+        if value is not None:
+            return value
+    return None
+
+
 def _read_only_log_from_argv(argv: list[str]) -> Path | None:
-    value = cli._option_from_argv(argv, "--web-reopen")  # noqa: SLF001  # lint-waiver: LW-101043 [SLF001]; reuse the CLI's private option scanner for the launcher-only flag
+    """The journal a read-only server serves: ``--web-reopen`` with the web UI, ``--reopen`` without."""
+    value = _first_option(argv, ("--web-reopen", "--reopen"))
     if value is None:
         return None
     path = Path(value).expanduser().resolve()
@@ -249,6 +268,7 @@ def _headless_argv(argv: list[str]) -> list[str]:
             "--web-origin",
             "--web-instance",
             "--web-reopen",
+            "--reopen",
             "--instance-id",
         }:
             skip_next = True
@@ -263,6 +283,7 @@ def _headless_argv(argv: list[str]) -> list[str]:
                 "--web-origin=",
                 "--web-instance=",
                 "--web-reopen=",
+                "--reopen=",
                 "--instance-id=",
             )
         ):
@@ -464,13 +485,16 @@ def _spawn_detached_instance(
     arguments: list[str],
     root: Path,
     effects: _DetachedGatewayEffects,
+    *,
+    registry_directory: str = INSTANCES_DIRECTORY,
 ) -> LiveInstanceRecord:
     """Start a headless detached server under ``root`` and return its serving record.
 
     ``arguments`` name the run (``--run-id``); the server publishes it in its
-    first record, before it loads the engine (``entrypoints.detached_run``).
+    first record, before it loads the engine (``entrypoints.detached_run``), in the
+    registry ``registry_directory`` names.
     """
-    registry = LiveRegistry(FileInstanceStore(root), SystemClock())
+    registry = LiveRegistry(FileInstanceStore(root, directory=registry_directory), SystemClock())
     instance_id = new_instance_id()
     run_directory = instance_run_directory(root, instance_id)
     run_directory.parent.mkdir(mode=0o700, exist_ok=True)
@@ -884,14 +908,39 @@ def _start_detached_instance(
             code="invalid_arguments",
             stage="argument_parsing",
         )
+    root = instance_root(os.environ, os.getuid())
+    if _read_only_log_from_argv(arguments) is not None:
+        return _start_detached_reader(arguments, root, effects)
     # Reject a malformed run before anything is spawned, so the operator sees
     # the diagnostic here rather than in a detached server's log.
     run_id: str = cli.parse_cli_invocation(_headless_argv(arguments)).args.run_id
-    root = instance_root(os.environ, os.getuid())
     live = driving(LiveRegistry(FileInstanceStore(root), SystemClock()).list(), run_id)
     if live is not None:
         raise _DetachedLiveRunError(live)
     return _spawn_detached_instance([*arguments, "--run-id", run_id], root, effects)
+
+
+def _start_detached_reader(
+    arguments: list[str], root: Path, effects: _DetachedGatewayEffects
+) -> LiveInstanceRecord:
+    """Spawn the read-only server of the journal ``--reopen`` names, registered as a reader.
+
+    The run is not started, so there is no run request to parse: ``--run-id`` names the run
+    whose recorded journal is served. A reader drives nothing, so a live server of the same run
+    does not stop one from starting (it registers apart from the runs).
+    """
+    value = _first_option(arguments, ("--run-id",))
+    if value is None:
+        cli.configuration_error(
+            "--reopen needs --run-id, the run the journal records",
+            code="invalid_arguments",
+            stage="argument_parsing",
+        )
+    try:
+        validate_run_id(value)
+    except ProjectStateError as exc:
+        cli.configuration_error(str(exc), code="invalid_arguments", stage="argument_parsing")
+    return _spawn_detached_instance(arguments, root, effects, registry_directory=READERS_DIRECTORY)
 
 
 def main(
@@ -1052,6 +1101,8 @@ def _serve(  # noqa: C901, PLR0912, PLR0915  # lint-waiver: LW-101031 [C901, PLR
                 run_id=run_id,
                 project_root=project_root,
                 detach=detach,
+                read_only_log=read_only_log,
+                reader_idle_seconds=READER_IDLE_SECONDS if read_only_log is not None else None,
                 observer=observer,
                 platform=platform,
             )

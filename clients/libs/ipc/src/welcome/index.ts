@@ -91,6 +91,7 @@ const WELCOME_ARGUMENT_COUNTS = {
   [WELCOME_CHANNELS.tasks]: 2,
   [WELCOME_CHANNELS.harnesses]: 1,
   [WELCOME_CHANNELS.attach]: 2,
+  [WELCOME_CHANNELS.attachReader]: 3,
   [WELCOME_CHANNELS.resume]: 3,
   [WELCOME_CHANNELS.stopConfirmed]: 3,
   [WELCOME_CHANNELS.releaseRun]: 0,
@@ -220,6 +221,7 @@ export type {
 
 export {
   HISTORY_PAGE_MAX,
+  type ReaderAttached,
   RUN_PORT_MESSAGE,
   type RunControlWelcomeBridge,
   type RunHistoryPage,

@@ -35,7 +35,17 @@ import {
 /** The acknowledgment of one control command, as the shell reports it. */
 export type ControlOutcome =
   | {readonly kind: 'acknowledged'}
-  | {readonly kind: 'rejected'; readonly message: string | null};
+  | {readonly kind: 'rejected'; readonly message: string | null; readonly code?: string | null};
+
+/** The diagnostic code of a server that refuses every command, as it serves a run that ended. */
+const READ_ONLY_CODE = 'run_read_only';
+
+/** What a refusal says: the client's word for a typed reason it knows, else the server's message. */
+function refusalWords(output: ControlOutcome): string | null {
+  if (output.kind !== 'rejected') return null;
+  if (output.code === READ_ONLY_CODE) return 'Read only';
+  return output.message ?? 'Refused';
+}
 
 export type DeliverRequest = SteerRequest | WithdrawRequest;
 
@@ -49,6 +59,8 @@ export interface SteerCardContext {
   /** The control id of a withdrawal in flight or acknowledged; null otherwise. */
   readonly withdrawId: string | null;
   readonly delivery: DeliveryState;
+  /** The run cannot take a steer (it ended): the draft is kept, Send is off. */
+  readonly readOnly: boolean;
   /** Why the last send or withdrawal was not taken; null when nothing failed. */
   readonly error: string | null;
 }
@@ -57,9 +69,11 @@ export interface SteerCardInput {
   readonly id: string;
   readonly origin: 'proposal' | 'user';
   readonly draft: SteerDraft;
+  readonly readOnly?: boolean;
 }
 
 export type SteerCardEvent =
+  | {readonly type: 'read-only'; readonly value: boolean}
   | {readonly type: 'edit-text'; readonly text: string}
   | {readonly type: 'set-target'; readonly target: SteerTarget}
   | {readonly type: 'set-mode'; readonly mode: SteerMode}
@@ -93,7 +107,7 @@ export const steerCardMachine = setup({
     ),
   },
   guards: {
-    sendable: ({context}) => draftProblem(context.draft) === null,
+    sendable: ({context}) => !context.readOnly && draftProblem(context.draft) === null,
     canWithdraw: ({context}) => inForce(context),
     refusesWithdrawal: ({context, event}) =>
       event.type === 'delivery' &&
@@ -111,8 +125,10 @@ export const steerCardMachine = setup({
     controlId: null,
     withdrawId: null,
     delivery: SENT,
+    readOnly: input.readOnly ?? false,
     error: null,
   }),
+  on: {'read-only': {actions: assign(({event}) => ({readOnly: event.value}))}},
   initial: 'draft',
   states: {
     draft: {
@@ -150,7 +166,7 @@ export const steerCardMachine = setup({
             actions: assign(({event}) => ({
               controlId: null,
               delivery: SENT,
-              error: event.output.kind === 'rejected' ? (event.output.message ?? 'Refused') : null,
+              error: refusalWords(event.output),
             })),
           },
         ],

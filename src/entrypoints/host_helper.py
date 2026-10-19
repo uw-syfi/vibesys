@@ -51,9 +51,11 @@ from server.host_helper_os import (
     SubprocessRunPreflight,
     run_streams_directory,
 )
+from server.host_helper_readers import Readers
 from server.host_helper_requests import HelperHost
 from server.instances import ControlSocketStopRequester
 from server.registry import (
+    READERS_DIRECTORY,
     FileInstanceLogs,
     FileInstanceMetadataStore,
     FileInstanceStore,
@@ -318,6 +320,9 @@ def real_host(environ: Mapping[str, str], uid: int, threads: Threads) -> HelperH
     )
     return HelperHost(
         registry=LiveRegistry(store, epoch),
+        readers=Readers(
+            LiveRegistry(FileInstanceStore(root, directory=READERS_DIRECTORY), epoch), threads
+        ),
         inspector=inspector,
         stop_effects=StopEffects(
             requester=ControlSocketStopRequester(network, clock=epoch, deadline_clock=threads),

@@ -41,6 +41,7 @@ export type RunPageBridge = Pick<
   | 'logs'
   | 'releaseLogs'
   | 'attach'
+  | 'attachReader'
   | 'releaseRun'
   | 'connectRun'
   | 'onWake'
@@ -166,7 +167,7 @@ function openWebSession(
         const outcome = await session.command({type: 'command.control', control: request});
         return outcome.kind === 'acknowledged'
           ? {kind: 'acknowledged'}
-          : {kind: 'rejected', message: outcome.message};
+          : {kind: 'rejected', message: outcome.message, code: outcome.code ?? null};
       },
     },
     command: async command => {
@@ -246,6 +247,10 @@ export function welcomeRunPorts(
       return result.ok ? null : result.error;
     },
     release: () => void settled(bridge.releaseRun()),
+    attachReader: async () => {
+      const result = await settled(bridge.attachReader(host, target.project, target.run.runId));
+      return result.ok ? result.value : {kind: 'failed', message: result.error};
+    },
     openSession: observer => openWebSession(bridge, page, observer),
     readHistory: async (from, max) => {
       const result = await settled(

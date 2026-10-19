@@ -2633,6 +2633,7 @@ const hostHelperSchema: Record<string, unknown> = {
         "compute_config_unreadable",
         "modal_not_configured",
         "unknown_provider",
+        "reader_failed",
         "internal"
       ],
       "title": "HelperErrorCode",
@@ -2674,7 +2675,8 @@ const hostHelperSchema: Record<string, unknown> = {
         "example_destination",
         "usage_window",
         "run_trace",
-        "run_ending"
+        "run_ending",
+        "chat_ended_runs"
       ],
       "title": "HelperFeature",
       "type": "string"
@@ -5746,6 +5748,83 @@ const hostHelperSchema: Record<string, unknown> = {
       "title": "RunPreflightRequest",
       "type": "object"
     },
+    "RunReaderReply": {
+      "additionalProperties": false,
+      "description": "The server for ``run.connect``: the run's live one, else a read-only one.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "run.reader",
+          "default": "run.reader",
+          "title": "Type",
+          "type": "string"
+        },
+        "instance_id": {
+          "pattern": "^[0-9a-f]{12}$",
+          "title": "Instance Id",
+          "type": "string"
+        },
+        "read_only": {
+          "title": "Read Only",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "request_id",
+        "type",
+        "instance_id",
+        "read_only"
+      ],
+      "title": "RunReaderReply",
+      "type": "object"
+    },
+    "RunReaderRequest": {
+      "additionalProperties": false,
+      "description": "The server to read and chat with run ``run_id`` of ``project`` through.",
+      "properties": {
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Request Id",
+          "type": "string"
+        },
+        "deadline_ms": {
+          "exclusiveMinimum": 0,
+          "maximum": 3600000,
+          "title": "Deadline Ms",
+          "type": "integer"
+        },
+        "type": {
+          "const": "run.reader",
+          "default": "run.reader",
+          "title": "Type",
+          "type": "string"
+        },
+        "project": {
+          "title": "Project",
+          "type": "string"
+        },
+        "run_id": {
+          "minLength": 1,
+          "title": "Run Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "request_id",
+        "deadline_ms",
+        "type",
+        "project",
+        "run_id"
+      ],
+      "title": "RunReaderRequest",
+      "type": "object"
+    },
     "RunResults": {
       "description": "Where a run's results go: kept on the machine, or also published to GitHub.",
       "enum": [
@@ -8218,6 +8297,7 @@ const hostHelperSchema: Record<string, unknown> = {
           "project.task_goal": "#/$defs/ProjectTaskGoalRequest",
           "run.connect": "#/$defs/RunConnectRequest",
           "run.preflight": "#/$defs/RunPreflightRequest",
+          "run.reader": "#/$defs/RunReaderRequest",
           "run.start": "#/$defs/RunStartRequest",
           "run.stop": "#/$defs/RunStopRequest",
           "runs.events_for_span": "#/$defs/RunsEventsForSpanRequest",
@@ -8335,6 +8415,9 @@ const hostHelperSchema: Record<string, unknown> = {
         },
         {
           "$ref": "#/$defs/UsageWindowRequest"
+        },
+        {
+          "$ref": "#/$defs/RunReaderRequest"
         }
       ],
       "title": "Request"
@@ -8370,6 +8453,7 @@ const hostHelperSchema: Record<string, unknown> = {
           "project.task_goal": "#/$defs/ProjectTaskGoalReply",
           "run.connect": "#/$defs/RunConnectReply",
           "run.preflight": "#/$defs/RunPreflightReply",
+          "run.reader": "#/$defs/RunReaderReply",
           "run.start": "#/$defs/RunStartReply",
           "run.stop": "#/$defs/RunStopReply",
           "runs.events_for_span": "#/$defs/RunsEventsForSpanReply",
@@ -8489,6 +8573,9 @@ const hostHelperSchema: Record<string, unknown> = {
           "$ref": "#/$defs/UsageWindowReply"
         },
         {
+          "$ref": "#/$defs/RunReaderReply"
+        },
+        {
           "$ref": "#/$defs/InstancesChanged"
         },
         {
@@ -8539,7 +8626,8 @@ const hostHelperSchema: Record<string, unknown> = {
     "compute.remove_cluster": "machine_compute",
     "agent_logins.list": "agent_logins",
     "agent_logins.start": "agent_logins",
-    "usage.window": "usage_window"
+    "usage.window": "usage_window",
+    "run.reader": "chat_ended_runs"
   },
   "x-vibesys-feature-by-field": {
     "run.start": {

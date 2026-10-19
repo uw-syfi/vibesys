@@ -10,8 +10,8 @@ or an optional field of one, and ``server.host_api`` says which.
 
 Light: Pydantic and the standard library only.
 
-Public surface: ``HelperFeature``, ``RequestId``, ``RunId``, ``SpanId``, ``MAX_DEADLINE_MS``, ``HelperRequestBase`` and
-``HelperReplyBase``.
+Public surface: ``HelperFeature``, ``RequestId``, ``RunId``, ``INSTANCE_ID_PATTERN``, ``InstanceId``,
+``SpanId``, ``MAX_DEADLINE_MS``, ``HelperRequestBase`` and ``HelperReplyBase``.
 """
 
 from __future__ import annotations
@@ -26,6 +26,10 @@ RequestId = Annotated[str, StringConstraints(min_length=1, max_length=128)]
 
 RunId = Annotated[str, StringConstraints(min_length=1)]
 """The durable run a server drives; ``vs_project`` owns its full syntax."""
+
+INSTANCE_ID_PATTERN = r"^[0-9a-f]{12}$"
+InstanceId = Annotated[str, StringConstraints(pattern=INSTANCE_ID_PATTERN)]
+"""A registry key: 12 lowercase hex digits, so it is never a path fragment."""
 
 SpanId = Annotated[str, StringConstraints(pattern=r"^(flow|op):\S*$")]
 """A run-trace span's identity, as the run protocol's ``SpanId``."""
@@ -119,6 +123,9 @@ class HelperFeature(StrEnum):
     """``runs.summary``'s ``with_ending``: the reply names ``input_gates`` and ``terminal``, the gates
     that finished before the first idea and the run's whole failure message, which a run opened
     from its summary has no events to read them from."""
+    CHAT_ENDED_RUNS = "chat_ended_runs"
+    """``run.reader``: the server Chat reads a run through, which for a run with no live server is
+    one started read-only on demand and ended when no client holds it."""
 
 
 class HelperRequestBase(BaseModel):

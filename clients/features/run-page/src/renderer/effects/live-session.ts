@@ -38,7 +38,7 @@ export type ControlInput = Extract<RunCommand, {readonly type: 'command.control'
 /** What the run did with a control: took it, or refused it. */
 export type ControlReply =
   | {readonly kind: 'acknowledged'}
-  | {readonly kind: 'rejected'; readonly message: string | null};
+  | {readonly kind: 'rejected'; readonly message: string | null; readonly code?: string | null};
 
 /** The run's chat over its session: the panel's only way to the run. */
 export interface LiveChat {
@@ -79,10 +79,12 @@ export class SessionHolder {
     private readonly dispatch: (action: RunPageAction) => void,
     /** This window's clock (epoch ms), which stamps when the run's data arrived. */
     private readonly now: () => number,
+    /** The server instance the state wants a session to; null: none. */
+    private readonly wanted: (state: RunPageState) => string | null,
   ) {}
 
   reconcile(state: RunPageState): void {
-    const wanted = state.link.kind === 'attached' ? state.link.instance : null;
+    const wanted = this.wanted(state);
     if (this.#open?.instance === wanted) return;
     this.close();
     if (wanted === null) return;
@@ -126,6 +128,11 @@ export class SessionHolder {
     session = opened;
     // Closed while it was opening (a report moved the link on): close what just opened.
     if (!current) opened.close();
+  }
+
+  /** Whether a session is open. */
+  isOpen(): boolean {
+    return this.#open !== null;
   }
 
   /** The attached session's chat; before one is attached every request says so. */

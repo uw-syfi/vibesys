@@ -14,7 +14,7 @@ does not know, or one it cannot parse, is ``UnreadableRecord``, never dropped
 and never a failure of the whole listing: two checkouts on one host share one
 registry.
 
-Public surface: ``PROTOCOL_VERSION``, ``RECORD_VERSION``, ``INSTANCE_ID_PATTERN``, ``InstanceId``,
+Public surface: ``PROTOCOL_VERSION``, ``RECORD_VERSION``, ``InstanceId``,
 ``RunId``, ``RunStatus``, ``StartupStage``, ``StartupProgress``, ``StartupFact``, ``FailureReason``,
 ``RunPhase``, ``InstanceStatus``, ``RunEndOutcome``, ``EndRecord``, ``RunEndingFact``, ``RunClosing``,
 ``RunDigest``, ``RunDigestUnreadable``, ``one_line``,
@@ -29,7 +29,7 @@ the log streams' ``LogStream``, ``LogStreamOutcome``, ``LogChunk``, ``LogPipeSpa
 ``HELPER_PROTOCOL_VERSIONS``, ``HELPER_REQUEST_FEATURES``, ``HELPER_FIELD_FEATURES``,
 ``request_features``, ``HelperFeature``, ``HelperRequest`` (``parse_helper_request``) and its
 members, the run history read's limit (``RUN_EVENTS_READ_MAX_BYTES``), ``RUN_EVENTS_FILE``, the run
-history's messages (``server.host_run_events``), the run summary's messages
+history's messages (``server.host_run_events``), the run reader's (``server.host_run_reader``), the run summary's messages
 (``server.host_run_summary``, which also holds the usage window's), the run tile's dashboard
 (``server.host_run_dashboard``), the machine facts (``server.host_machine_facts``: ``Accelerator``,
 ``Gpu``, ``Hardware``,
@@ -97,6 +97,7 @@ from server.host_envelope import (
     HelperFeature,
     HelperReplyBase,
     HelperRequestBase,
+    InstanceId,
     RequestId,
     RunId,
     SpanId,
@@ -123,6 +124,7 @@ from server.host_run_events import (
     RunsReadTailReply,
     RunsReadTailRequest,
 )
+from server.host_run_reader import RunReaderReply, RunReaderRequest
 from server.host_run_summary import (
     RunsSummaryReply,
     RunsSummaryRequest,
@@ -137,10 +139,6 @@ PROTOCOL_VERSION = 1
 Defined here, not in ``server.api.protocol``, so a record can name it without
 importing the run protocol; the protocol module re-exports it.
 """
-
-INSTANCE_ID_PATTERN = r"^[0-9a-f]{12}$"
-InstanceId = Annotated[str, StringConstraints(pattern=INSTANCE_ID_PATTERN)]
-"""A registry key: 12 lowercase hex digits, so it is never a path fragment."""
 
 RECORD_VERSION = 5
 """The registry record version this checkout writes; it also reads versions 3 and 4."""
@@ -1178,6 +1176,7 @@ HELPER_REQUEST_FEATURES: Final[Mapping[type[HelperRequestBase], HelperFeature]] 
     AgentLoginsListRequest: HelperFeature.AGENT_LOGINS,
     AgentLoginsStartRequest: HelperFeature.AGENT_LOGINS,
     UsageWindowRequest: HelperFeature.USAGE_WINDOW,
+    RunReaderRequest: HelperFeature.CHAT_ENDED_RUNS,
 }
 """The feature each gated request needs, exported with the generated wire contract."""
 
@@ -1259,7 +1258,8 @@ HelperRequest = Annotated[
     | AgentLoginsStartRequest
     | ProjectTaskGoalRequest
     | ExamplesDestinationRequest
-    | UsageWindowRequest,
+    | UsageWindowRequest
+    | RunReaderRequest,
     Field(discriminator="type"),
 ]
 """Every message a client sends on a helper channel."""
@@ -1762,6 +1762,8 @@ class HelperErrorCode(StrEnum):
     """``run.start``'s ``measure_on`` is Modal and the machine holds no token."""
     UNKNOWN_PROVIDER = "unknown_provider"
     """``agent_logins.start`` named a provider with no harness here; the message names it."""
+    READER_FAILED = "reader_failed"
+    """``run.reader`` could not start the read-only server of a run with no live one; the message says why."""
     INTERNAL = "internal"
     """The helper failed; ``message`` says how."""
 
@@ -1819,6 +1821,7 @@ HelperReply = (
     | ProjectTaskGoalReply
     | ExamplesDestinationReply
     | UsageWindowReply
+    | RunReaderReply
 )
 """A request's result; its ``type`` is the request's."""
 

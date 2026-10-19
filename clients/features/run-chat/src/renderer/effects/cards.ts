@@ -53,6 +53,11 @@ export class SteerCards {
     this.#actors.get(id)?.send(event);
   }
 
+  /** Tells every card whether the run can take a steer; a card that cannot keeps its draft. */
+  setReadOnly(value: boolean): void {
+    for (const actor of this.#actors.values()) actor.send({type: 'read-only', value});
+  }
+
   /** Sends the card its draft as a steer, under a new control id. */
   sendSteer(id: string): void {
     this.send(id, {type: 'send', controlId: this.ports.newControlId()});

@@ -57,6 +57,7 @@ const VALID_ARGUMENTS: Readonly<
   [WELCOME_CHANNELS.tasks]: ['local', '/project'],
   [WELCOME_CHANNELS.harnesses]: ['local'],
   [WELCOME_CHANNELS.attach]: ['local', '0123456789ab'],
+  [WELCOME_CHANNELS.attachReader]: ['local', '/project', 'run-1'],
   [WELCOME_CHANNELS.resume]: ['local', '/project', 'run-1'],
   [WELCOME_CHANNELS.stopConfirmed]: ['local', '0123456789ab', false],
   [WELCOME_CHANNELS.releaseRun]: [],

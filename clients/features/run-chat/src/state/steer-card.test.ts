@@ -184,3 +184,32 @@ describe('steerCardMachine', () => {
     });
   });
 });
+
+describe('a card on a run that cannot take a steer', () => {
+  test('Send does nothing: the card keeps its draft and asks the run for nothing', () => {
+    const readOnly = getInitialSnapshot(steerCardMachine, {...input, readOnly: true});
+    const sent = step(readOnly, {type: 'send', controlId: 'c-1'});
+    expect(sent.value).toBe('draft');
+    expect(sent.context.controlId).toBeNull();
+  });
+
+  test('a run that ends under an open card turns Send off, and keeps the draft for a run that continues', () => {
+    let snapshot = step(start(), {type: 'read-only', value: true});
+    snapshot = step(snapshot, {type: 'edit-text', text: 'still editable'});
+    expect(step(snapshot, {type: 'send', controlId: 'c-1'}).value).toBe('draft');
+    expect(snapshot.context.draft.text).toBe('still editable');
+    snapshot = step(snapshot, {type: 'read-only', value: false});
+    expect(step(snapshot, {type: 'send', controlId: 'c-2'}).value).toBe('sending');
+  });
+
+  test('the typed refusal of a finished run is worded by the client', () => {
+    let snapshot = step(start(), {type: 'send', controlId: 'c-1'});
+    snapshot = settled(snapshot, 'send', {
+      kind: 'rejected',
+      message: 'This finished run is read-only',
+      code: 'run_read_only',
+    });
+    expect(snapshot.value).toBe('draft');
+    expect(snapshot.context.error).toBe('Read only');
+  });
+});

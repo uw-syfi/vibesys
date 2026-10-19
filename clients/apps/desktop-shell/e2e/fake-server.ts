@@ -117,6 +117,8 @@ export function installFakeServer(seed: FakeServerSeed): void {
       window.postMessage({type: 'vibesys:run-port', id}, '*', [channel.port1]);
     },
     onWake: () => undefined,
+    // This host's helper offers nothing beyond the run's own server: Chat is off once it ends.
+    helperFeatures: () => ok([]),
     // This fake records no history: an ended run reads that its host does not serve one.
     readEvents: () => ok({kind: 'unsupported'}),
     readSummary: () => ok({kind: 'unsupported'}),

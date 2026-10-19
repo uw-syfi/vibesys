@@ -60,7 +60,11 @@ function deliveryStatus(delivery: DeliveryState, draft: SteerDraft): CardStatus 
 
 export function cardView(context: SteerCardContext, value: CardValue): CardView {
   const error = context.error;
-  const base = {error, sendBlocked: draftProblem(context.draft), withdrawable: false};
+  const base = {
+    error,
+    sendBlocked: context.readOnly ? 'Read only' : draftProblem(context.draft),
+    withdrawable: false,
+  };
   if (value === 'draft') {
     return {...base, phase: 'draft', status: null};
   }

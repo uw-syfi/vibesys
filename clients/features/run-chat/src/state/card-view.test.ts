@@ -20,6 +20,7 @@ function context(patch: Partial<SteerCardContext> = {}): SteerCardContext {
     controlId: 'c-1',
     withdrawId: null,
     delivery: SENT,
+    readOnly: false,
     error: null,
     ...patch,
   };
@@ -28,6 +29,11 @@ function context(patch: Partial<SteerCardContext> = {}): SteerCardContext {
 const SENT_IDLE: CardValue = {sent: 'idle'};
 
 describe('cardView', () => {
+  test('a card on a run that ended offers no Send, with its reason as a word', () => {
+    const view = cardView(context({readOnly: true, controlId: null}), 'draft');
+    expect(view.sendBlocked).toBe('Read only');
+  });
+
   test('every delivery state has a status word, and a standing steer in force offers Withdraw', () => {
     const states: [DeliveryEvent[], string, boolean][] = [
       [[], 'Sent', false],

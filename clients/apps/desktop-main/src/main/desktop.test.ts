@@ -162,6 +162,10 @@ function desktopWorld(cleanups: RetirementCleanups = {}, skipped: SkippedRecent[
         connection: {kind: 'connected'},
       };
     },
+    attachReader: async (_id, project, runId) => {
+      launches.push(`attach-reader:${project}:${runId}`);
+      return {kind: 'attached'};
+    },
     start: async (_id, project) => {
       launches.push(`start:${project}`);
       bound = {
@@ -414,6 +418,34 @@ describe('Desktop external addresses', () => {
       ),
     ).resolves.toMatchObject({ok: false});
     expect(w.opened).toEqual([]);
+  });
+});
+
+describe('Desktop chat on an ended run', () => {
+  test('attaching its reader names the machine, project and run, and says what came of it', async () => {
+    const w = desktopWorld();
+    const reply = await w.ipc.invoke(
+      '10:100',
+      WELCOME_CHANNELS.attachReader,
+      'ssh:host-b',
+      '/p',
+      'run-1',
+    );
+    expect(reply).toEqual({ok: true, value: {kind: 'attached'}});
+    expect(w.launches).toEqual(['attach-reader:/p:run-1']);
+  });
+
+  test('a run that is not named, or a project that is not a path, is refused before the host', async () => {
+    const w = desktopWorld();
+    for (const args of [
+      ['local', '/p', ''],
+      ['local', 'relative/../p', 'run-1'],
+      ['local', '/p'],
+    ]) {
+      const reply = await w.ipc.invoke('10:100', WELCOME_CHANNELS.attachReader, ...args);
+      expect(reply).toMatchObject({ok: false});
+    }
+    expect(w.launches).toEqual([]);
   });
 });
 

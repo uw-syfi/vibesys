@@ -48,6 +48,7 @@ export {
   paretoView,
 } from './pareto-view.js';
 export {predatesTraceWords, roundsBeforeTrace} from './predates-trace.js';
+export {type ReaderReply, readerHeld} from './reader.js';
 export {runRecord, sameRecord} from './record.js';
 export {roleSeries} from './role-series.js';
 export {

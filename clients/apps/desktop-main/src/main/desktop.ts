@@ -70,7 +70,10 @@ export interface DesktopDeps {
     | 'agentLogins'
     | 'startLogin'
   >;
-  readonly runs: Pick<RunControl, 'attach' | 'attached' | 'detach' | 'resume' | 'start' | 'stop'>;
+  readonly runs: Pick<
+    RunControl,
+    'attach' | 'attachReader' | 'attached' | 'detach' | 'resume' | 'start' | 'stop'
+  >;
   readonly settings: Pick<SettingsStore, 'onRecentChanged' | 'recentSnapshot'>;
   readonly preferences: Pick<PreferencesMain, 'answer'>;
   readonly newRun: Pick<NewRunMain, 'answer'>;
@@ -255,6 +258,8 @@ export class Desktop {
         // The recent entry keeps the run's task: `remember` merges by run id.
         await runs.attach(request.host, request.instance);
         return null;
+      case 'attach-reader':
+        return runs.attachReader(request.host, request.project, request.runId);
       case 'resume':
         await runs.resume(request.host, request.project, request.run);
         return null;

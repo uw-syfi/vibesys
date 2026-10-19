@@ -42,6 +42,17 @@ import {
   traceProblems,
   traceStep,
 } from './live.js';
+import {
+  READER_IDLE,
+  type ReaderAction,
+  type ReaderRequest,
+  type ReaderState,
+  type ReaderStep,
+  readerAttached,
+  readerCore,
+  readerWanted,
+  reconcileReader,
+} from './reader.js';
 import type {RunSummaryState, SummaryReply} from './run-summary.js';
 import {USAGE_CONTROLS_DEFAULT, type UsageControls} from './usage-view.js';
 
@@ -252,6 +263,8 @@ export interface RunPageState {
   readonly link: RunLink;
   /** What the attached run's session reports; null while none runs. */
   readonly session: SessionView | null;
+  /** The window's hold on the server Chat reads this run through while it has ended. */
+  readonly reader: ReaderState;
   /** The run fold and trace so far. */
   readonly run: RunFold;
   /** This window's clock (epoch ms) at its latest tick; null before the first one. */
@@ -304,6 +317,7 @@ export type RunPageAction =
   | {readonly type: 'archive'}
   | {readonly type: 'run-again'}
   | {readonly type: 'attached'; readonly token: number; readonly error: string | null}
+  | ReaderAction
   | {readonly type: 'session'; readonly session: SessionView | null}
   | {readonly type: 'run-core'; readonly core: CoreState}
   /** The run's spans changed: `data` arrived at `wallMs` on this window's clock. */
@@ -344,6 +358,7 @@ export type RunPageRequest =
   | {readonly kind: 'attach'; readonly token: number; readonly instance: string}
   /** Let the attached run go (its session closes with it). */
   | {readonly kind: 'release'}
+  | ReaderRequest
   /** Read the run's summary, answering `summary` with `token`. */
   | {readonly kind: 'read-summary'; readonly token: number; readonly status: RunStatus}
   /** Read the ended run's recorded events from `from`, answering `history` with `token`. */
@@ -392,6 +407,7 @@ export function runPageInitial(seed: RunPageSeed): RunPageState {
     agentsOpen: new Set(),
     link: {kind: 'none'},
     session: null,
+    reader: READER_IDLE,
     run: EMPTY_RUN_FOLD,
     clockMs: null,
     view: {at: 'live'},
@@ -616,13 +632,21 @@ function withRecord(opened: RunPageState, record: RunRecord): RunPageStep {
     : record.kind === 'live'
       ? {...state, record, detail: {kind: 'idle'}}
       : {...state, record};
-  const link = linked(fenced);
+  // The reader is let go before a live run is attached, which takes the window's binding over.
+  const reading = withReader(fenced, isEndedRecord(record), reconcileReader);
+  const link = linked(reading.state);
   const step = recordStep(link.state, record);
   const history = historyFor(step.state);
   const located = locating(history.state);
   return {
     state: located.state,
-    requests: [...link.requests, ...step.requests, ...history.requests, ...located.requests],
+    requests: [
+      ...reading.requests,
+      ...link.requests,
+      ...step.requests,
+      ...history.requests,
+      ...located.requests,
+    ],
   };
 }
 
@@ -1081,9 +1105,32 @@ export function runPageStep(state: RunPageState, action: RunPageAction): RunPage
       return {state: {...state, agentsOpen: toggled(state.agentsOpen, action)}, requests: []};
     case 'view-logs':
       return {state: {...state, followingLogs: true, selected: narration(state)}, requests: []};
+    case 'chat':
+      return withReader(state, isEndedRecord(state.record), (reader, ended, next) =>
+        readerWanted(reader, action.open, ended, next),
+      );
+    case 'reader-attached':
+      return withReader(state, isEndedRecord(state.record), (reader, _ended, next) =>
+        readerAttached(reader, action.token, action.reply, next),
+      );
+    case 'reader-core':
+      return {state: {...state, reader: readerCore(state.reader, action.core)}, requests: []};
     default:
       return {state, requests: []};
   }
+}
+
+/** Apply one step of the reader to the page, taking and returning the page's request tokens. */
+function withReader(
+  state: RunPageState,
+  ended: boolean,
+  step: (reader: ReaderState, ended: boolean, next: number) => ReaderStep,
+): RunPageStep {
+  const result = step(state.reader, ended, state.next);
+  return {
+    state: {...state, reader: result.reader, next: result.next},
+    requests: result.requests,
+  };
 }
 
 function withAttached(state: RunPageState, token: number, error: string | null): RunPageStep {

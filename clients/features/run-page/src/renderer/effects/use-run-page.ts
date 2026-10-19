@@ -58,6 +58,8 @@ export function useRunPage(options: RunPageOptions): {
   readonly whole: RunModel;
   /** The run fold (the transcript the turns read); null before the run reached the window. */
   readonly core: CoreState | null;
+  /** The run as the reader's session folds it, for Chat on an ended run; null otherwise. */
+  readonly readerCore: CoreState | null;
   /** Where the screen is zoomed, and the way to move it. */
   readonly route: Route;
   readonly zoom: (event: ZoomEvent) => void;
@@ -148,6 +150,7 @@ export function useRunPage(options: RunPageOptions): {
     model,
     whole,
     core: state.run.core,
+    readerCore: state.reader.core,
     route,
     zoom,
     chat: store.chat,

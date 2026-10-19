@@ -29,6 +29,7 @@ const CHANNELS: Channels = {
   tasks: 'vibesys:welcome:tasks',
   harnesses: 'vibesys:welcome:harnesses',
   attach: 'vibesys:welcome:attach',
+  attachReader: 'vibesys:welcome:attach-reader',
   resume: 'vibesys:welcome:resume',
   stopConfirmed: 'vibesys:welcome:stop-confirmed',
   releaseRun: 'vibesys:welcome:release-run',
@@ -113,6 +114,7 @@ function createWelcomePreload(capabilities: WelcomePreloadCapabilities): Welcome
     tasks: (host, project) => call(CHANNELS.tasks, host, project),
     harnesses: host => call(CHANNELS.harnesses, host),
     attach: (host, instance) => call(CHANNELS.attach, host, instance),
+    attachReader: (host, project, runId) => call(CHANNELS.attachReader, host, project, runId),
     resume: (host, project, run) => call(CHANNELS.resume, host, project, run),
     releaseRun: () => call(CHANNELS.releaseRun),
     readEvents: (host, project, runId, fromSequence, max) =>

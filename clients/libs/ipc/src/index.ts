@@ -52,6 +52,7 @@ export {
   type PreferencesView,
   type PreflightResult,
   parseWelcomeRequest,
+  type ReaderAttached,
   type RoleOption,
   RUN_PORT_MESSAGE,
   type RunControlWelcomeBridge,

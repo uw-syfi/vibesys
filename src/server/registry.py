@@ -21,6 +21,7 @@ Layout under ``instance_root``::
 
     instances/<id>.lock   lifetime lock, published only once held
     instances/<id>.json   LiveInstanceRecord, written by the holder; its tombstone after
+    readers/<id>.lock, readers/<id>.json   the same for a read-only server (``READERS_DIRECTORY``)
     runs/<id>/control.sock, runs/<id>/server.log, runs/<id>/inspection.json
 
 The module is light: it imports the standard library, Pydantic, the record
@@ -33,7 +34,7 @@ in ``server.instances`` and reaches ``LiveRegistry.stop`` through the
 Public surface: the lock primitives (``LockState``, ``probe_lock``,
 ``LifetimeLock``, ``try_lock``, ``unlock``, ``FLOCK_AVAILABLE``), which the web
 gateway's claim in ``server.transport.discovery`` also uses; ``instance_root``
-and the per-instance paths; ``InstanceStore`` with its ``FileInstanceStore``
+and the per-instance paths; ``INSTANCES_DIRECTORY`` and ``READERS_DIRECTORY``; ``InstanceStore`` with its ``FileInstanceStore``
 and ``FakeInstanceStore`` implementations; ID-scoped log and immutable
 inspection-metadata stores; ``InstanceInspector``; the ``StopRequester``
 interface and the ``StopEffects`` a stop uses; the pure ``judge`` and
@@ -52,11 +53,10 @@ from enum import StrEnum
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as distribution_version
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Final, Protocol
 
 from server.host_api import (
     INSPECTION_LOG_TAIL_BYTES,
-    INSTANCE_ID_PATTERN,
     RECORD_VERSION,
     AvailableLogTail,
     EndRecord,
@@ -77,6 +77,7 @@ from server.host_api import (
     UnreadableRecord,
     parse_record,
 )
+from server.host_envelope import INSTANCE_ID_PATTERN
 from vs_decode.api import Unreadable, ValidationOptions, decode_json
 from vs_project.api import ensure_private_directory, user_runtime_root
 from vs_sim.api import sync_descriptor
@@ -95,6 +96,11 @@ FLOCK_AVAILABLE = fcntl is not None
 """Whether this platform has BSD ``flock``; every lock here needs it."""
 
 _INSTANCE_ID = re.compile(INSTANCE_ID_PATTERN)
+
+INSTANCES_DIRECTORY: Final = "instances"
+"""Where live runs register under the registry root."""
+READERS_DIRECTORY: Final = "readers"
+"""Where read-only servers register under the registry root, apart from the runs."""
 _RECORD_SUFFIX = ".json"
 _LOCK_SUFFIX = ".lock"
 _STOP_POLL_SECONDS = 0.05
@@ -954,10 +960,14 @@ def _write_record(path: Path, record: LiveInstanceRecord) -> None:
 class FileInstanceStore:
     """The registry on a node-local filesystem under ``root``."""
 
-    def __init__(self, root: Path) -> None:
-        """Use ``root/instances`` (created private) for locks and records."""
+    def __init__(self, root: Path, *, directory: str = INSTANCES_DIRECTORY) -> None:
+        """Use ``root/<directory>`` (created private) for locks and records.
+
+        Runs register in ``instances``; read-only servers that let Chat read ended runs
+        (``server.host_helper_readers``) register in ``readers``, so no listing of runs sees them.
+        """
         self._root = root
-        self._directory = root / "instances"
+        self._directory = root / directory
         ensure_private_directory(self._directory, os.getuid())
 
     def ids(self) -> tuple[str, ...]:

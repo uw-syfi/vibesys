@@ -19,6 +19,7 @@
       "helper-compute-gated",
       "helper-agent-logins-gated",
       "helper-usage-window-gated",
+      "helper-run-reader-gated",
       "helper-examples-destination-gated"
     ],
     "registry": [
