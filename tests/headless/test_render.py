@@ -9,6 +9,8 @@ from vibesys.api import (
     FrameworkWarningData,
     GateFinishedData,
     GateStartedData,
+    InputMeasurementFailedData,
+    InputMeasurementFailureKind,
     MeasurementComparedData,
     ProviderSwitchedData,
     QuotaAbandonedData,
@@ -216,6 +218,29 @@ class TestFrameworkEvents:
 
         assert candidate == f"[result] selected trusted winner {'c' * 12} (settlement s-1)\n"
         assert baseline.startswith("[result] selected the trusted input unchanged")
+
+    def test_a_failed_input_measurement_names_how_the_stage_and_what_it_printed(self) -> None:
+        out = _render_event(
+            CoreEventType.INPUT_MEASUREMENT_FAILED,
+            InputMeasurementFailedData(
+                failure=InputMeasurementFailureKind.ACCURACY_FAILED,
+                stage="correctness",
+                summary="accuracy stage exceeded its 1200 s limit",
+            ),
+        )
+        bare = _render_event(
+            CoreEventType.INPUT_MEASUREMENT_FAILED,
+            InputMeasurementFailedData(failure=InputMeasurementFailureKind.READINGS_UNDECODABLE),
+        )
+
+        assert out.startswith(
+            "[input] the input's trusted measurement failed (accuracy-failed, stage correctness)"
+        )
+        assert out.endswith(":\naccuracy stage exceeded its 1200 s limit\n")
+        assert bare.startswith(
+            "[input] the input's trusted measurement failed (readings-undecodable)"
+        )
+        assert bare.count("\n") == 1
 
     def test_a_comparison_states_the_verdict_the_values_and_the_sample_counts(self) -> None:
         out = _render_event(

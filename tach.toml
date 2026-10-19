@@ -1225,7 +1225,7 @@ expose = ["NARRATION_COMMAND", "RUN_LOG_OWNER", "TOOL_BUILD_COMMAND", "UNAVAILAB
 from = ["vibesys.run.logs"]
 
 [[interfaces]]
-expose = ["IterationKind", "IterationMetric", "IterationProjection", "IterationStatus", "IterationSummary", "IterationSupport", "IterationTree", "IterationUnavailable", "IterationUnavailableReason", "PluginProjection", "ProfilerKind", "ResumeRef", "RoundFailureSummary", "RoundSummary", "RunRequest", "RunResult", "RunStatus", "RunView"]
+expose = ["IterationKind", "IterationMetric", "IterationProjection", "IterationStatus", "IterationSummary", "IterationSupport", "IterationTree", "IterationUnavailable", "IterationUnavailableReason", "InputFailureSummary", "PluginProjection", "ProfilerKind", "ResumeRef", "RoundFailureSummary", "RoundSummary", "RunRequest", "RunResult", "RunStatus", "RunView"]
 from = ["vibesys.run.contracts"]
 
 [[interfaces]]

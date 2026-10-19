@@ -984,6 +984,7 @@ const runEventSchema: Record<string, unknown> = {
         "run_configured",
         "framework_warning",
         "winner_selected",
+        "input_measurement_failed",
         "measurement_compared",
         "comparisons_read",
         "workstream_finished",
@@ -1292,6 +1293,57 @@ const runEventSchema: Record<string, unknown> = {
       ],
       "title": "GateStartedData",
       "type": "object"
+    },
+    "InputMeasurementFailedData": {
+      "additionalProperties": false,
+      "description": "The run's input failed its trusted measurement, so the run has no input baseline.",
+      "properties": {
+        "kind": {
+          "const": "input_measurement_failed",
+          "default": "input_measurement_failed",
+          "title": "Kind",
+          "type": "string"
+        },
+        "failure": {
+          "$ref": "#/$defs/InputMeasurementFailureKind"
+        },
+        "stage": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Stage"
+        },
+        "summary": {
+          "default": "",
+          "title": "Summary",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "failure"
+      ],
+      "title": "InputMeasurementFailedData",
+      "type": "object"
+    },
+    "InputMeasurementFailureKind": {
+      "description": "Why the run's input failed its own trusted measurement. Closed.\n\nSee ``vibesys.events.InputMeasurementFailureKind``, which this mirrors member-for-member.",
+      "enum": [
+        "no-evidence",
+        "readings-refused",
+        "readings-undecodable",
+        "accuracy-failed",
+        "benchmark-failed",
+        "wait-ended"
+      ],
+      "title": "InputMeasurementFailureKind",
+      "type": "string"
     },
     "InvocationFinishedData": {
       "additionalProperties": false,
@@ -4163,6 +4215,7 @@ const runEventSchema: Record<string, unknown> = {
               "framework_warning": "#/$defs/FrameworkWarningData",
               "gate_finished": "#/$defs/GateFinishedData",
               "gate_started": "#/$defs/GateStartedData",
+              "input_measurement_failed": "#/$defs/InputMeasurementFailedData",
               "invocation_finished": "#/$defs/InvocationFinishedData",
               "invocation_started": "#/$defs/InvocationStartedData",
               "iterations_changed": "#/$defs/IterationsChangedData",
@@ -4332,6 +4385,9 @@ const runEventSchema: Record<string, unknown> = {
             },
             {
               "$ref": "#/$defs/WinnerSelectedData"
+            },
+            {
+              "$ref": "#/$defs/InputMeasurementFailedData"
             },
             {
               "$ref": "#/$defs/MeasurementComparedData"

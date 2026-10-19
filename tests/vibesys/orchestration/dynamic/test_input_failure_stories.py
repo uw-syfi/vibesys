@@ -193,7 +193,11 @@ def test_an_input_that_fails_its_accuracy_check_is_announced_told_to_the_planner
         crash_text=HANG_TEXT,
     )
     host.drain_until_turn(PLANNER_LABEL)
-    told = _planner_prompt(host)  # the input was measured first: this turn is after it
+    told = _planner_prompt(host)
+    if told.baseline_pending:  # a turn asked while the input is measured plans blind: skip it
+        host.run.fail(host.run.expect_turn(role=PLANNER_LABEL), FailureReason.TIMED_OUT)
+        told = _planner_prompt(host)
+    assert not told.baseline_pending
     snapshot = host.run.published(RunSnapshot)
     assert snapshot is not None
     plan(host, implement("h1"))

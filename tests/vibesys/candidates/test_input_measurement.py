@@ -98,7 +98,11 @@ def test_the_input_is_measured_unless_a_gate_it_was_measured_by_failed(
     assert seen.benchmark_passed == verdicts[EvidenceKind.BENCHMARK]
     # Accuracy is judged first: a benchmark of an inaccurate input measures nothing to keep.
     failed = next(
-        (kind for kind in (EvidenceKind.CORRECTNESS, EvidenceKind.BENCHMARK) if verdicts[kind] is False),
+        (
+            kind
+            for kind in (EvidenceKind.CORRECTNESS, EvidenceKind.BENCHMARK)
+            if verdicts[kind] is False
+        ),
         None,
     )
     if failed is None:
@@ -120,7 +124,7 @@ def test_the_input_is_measured_unless_a_gate_it_was_measured_by_failed(
 @settings(max_examples=examples(pr=8, nightly=100))
 @given(accuracy_passed=st.none() | st.booleans())
 def test_an_input_checkpointed_as_measured_with_failed_accuracy_reads_as_accuracy_failed(
-    accuracy_passed: bool | None,
+    *, accuracy_passed: bool | None
 ) -> None:
     """A checkpoint written before S173 kept a failed accuracy check as ``measured``."""
     written = Measured(reading=InputReading(accuracy_passed=accuracy_passed)).model_dump_json()

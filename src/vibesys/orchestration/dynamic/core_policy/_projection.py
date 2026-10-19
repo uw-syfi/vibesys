@@ -21,12 +21,12 @@ from vibesys.hypothesis.readmodel import (
 )
 from vibesys.orchestration.dynamic.search.api import FailureKind, workstream_key
 from vibesys.run.contracts import (
+    InputFailureSummary,
     IterationKind,
     IterationMetric,
     IterationStatus,
     IterationSummary,
     IterationTree,
-    InputFailureSummary,
     PluginProjection,
     RoundFailureSummary,
     RoundSummary,

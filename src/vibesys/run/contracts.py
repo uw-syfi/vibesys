@@ -489,6 +489,7 @@ class RunView(BaseModel):
 
 
 __all__ = [
+    "InputFailureSummary",
     "IterationKind",
     "IterationMetric",
     "IterationProjection",
@@ -498,7 +499,6 @@ __all__ = [
     "IterationTree",
     "IterationUnavailable",
     "IterationUnavailableReason",
-    "InputFailureSummary",
     "PluginProjection",
     "ProfilerKind",
     "ResumeRef",

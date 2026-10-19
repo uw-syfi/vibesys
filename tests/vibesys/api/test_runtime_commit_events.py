@@ -3,7 +3,8 @@
 After each confirmed commit the run diffs the previous projected `RunView` against the new
 one. It emits `ROUND_FINISHED` and `WORKSTREAM_FINISHED` for newly observed rounds,
 `EXPERIMENTS_CHANGED` when the displayed experiment projection changes, and
-`ITERATIONS_CHANGED` when the policy-owned navigation changes. These tests use a synthetic
+`ITERATIONS_CHANGED` when the policy-owned navigation changes, and `INPUT_MEASUREMENT_FAILED`
+when the input's trusted measurement is first seen to have failed. These tests use a synthetic
 projector and no concrete strategy ID.
 """
 
@@ -18,14 +19,17 @@ from pydantic import BaseModel
 from tests.support.real_git import NO_GIT, NO_GITHUB
 
 from vibesys.api import IterationKind, IterationStatus, IterationSummary, IterationTree
+from vibesys.candidates.api import InputFailureKind
 from vibesys.events import (
     CoreEvent,
     CoreEventType,
     FrameworkWarningData,
+    InputMeasurementFailureKind,
     IterationsChangedData,
     WorkstreamFailureKind,
 )
 from vibesys.run.contracts import (
+    InputFailureSummary,
     IterationUnavailable,
     IterationUnavailableReason,
     RoundFailureSummary,
@@ -64,6 +68,7 @@ class _FakeAgentState(BaseModel):
     repeated_error: bool = False
     unprojectable: bool = False
     """The policy's projection of this state fails validation."""
+    input_failure: InputFailureSummary | None = None
 
 
 class _FakeProjector:
@@ -122,6 +127,7 @@ def _agent_view(state: _FakeAgentState, *, run_id: str = "probe") -> RunView:
         ),
         # A core run stamps every projection with its commit revision.
         experiment_revision=state.revision,
+        input_failure=state.input_failure,
     )
 
 
@@ -237,6 +243,57 @@ def test_workstream_finished_carries_a_typed_bounded_redacted_failure() -> None:
         assert finished.data.last_error is not None
         assert len(finished.data.last_error.text) <= _FAILURE_TEXT_LIMIT
         assert "workstream-secret" not in finished.data.last_error.text
+
+
+def test_the_wire_input_failure_kinds_mirror_the_candidates_kinds() -> None:
+    assert [kind.value for kind in InputMeasurementFailureKind] == [
+        kind.value for kind in InputFailureKind
+    ]
+
+
+_INPUT_FAILURES = st.none() | st.builds(
+    InputFailureSummary,
+    kind=st.sampled_from([kind.value for kind in InputFailureKind]),
+    stage=st.none() | st.sampled_from(["correctness", "benchmark"]),
+    output=st.sampled_from(["", "hung past 1200 s; API_TOKEN=input-secret", "z" * 3000]),
+)
+
+
+@given(failures=st.lists(_INPUT_FAILURES, max_size=6), resume_at=st.integers(0, 6))
+@settings(max_examples=examples(pr=10, nightly=100))
+def test_a_failed_input_measurement_is_announced_once_bounded_and_redacted(
+    failures: list[InputFailureSummary | None], resume_at: int
+) -> None:
+    """S173: each newly committed input failure is told once, with its stage and a safe tail."""
+    states = [_FakeAgentState()] + [
+        _FakeAgentState(revision=revision, input_failure=failure)
+        for revision, failure in enumerate(failures, start=1)
+    ]
+    integration = _integration()
+    captured: list[CoreEvent] = []
+    integration.events.subscribe(captured.append)
+    observer = integration.core_commit_observer("probe", _FakeProjector(), "commit-probe")
+    for index in range(1, len(states)):
+        before = states[index - 1]
+        if index == resume_at:
+            before = _FakeAgentState.model_validate(before.model_dump())
+        observer.committed(before, states[index])
+
+    told = [event for event in captured if event.type is CoreEventType.INPUT_MEASUREMENT_FAILED]
+    news = [
+        after.input_failure
+        for before, after in itertools.pairwise(states)
+        if after.input_failure is not None and after.input_failure != before.input_failure
+    ]
+    assert len(told) == len(news)
+    for event, failure in zip(told, news, strict=True):
+        assert event.data is not None
+        assert event.data.kind == "input_measurement_failed"
+        assert event.data.failure.value == failure.kind
+        assert event.data.stage == failure.stage
+        assert "input-secret" not in event.data.summary
+        assert len(event.data.summary) <= 1000
+        assert event.data.summary == redact_diagnostic_tail(failure.output, max_chars=1000)
 
 
 @given(

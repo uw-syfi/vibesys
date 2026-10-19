@@ -183,8 +183,10 @@ def failure(baseline: Baseline) -> InputFailure | None:
 def input_from_readings(
     refs: tuple[EvidenceRef, ...], status: str, readings: tuple[EvidenceReading, ...]
 ) -> Baseline:
-    """Fold decoded readings into the baseline; a failed accuracy check or benchmark makes it
-    unmeasurable, naming the stage that failed."""
+    """Fold decoded readings into the baseline; a failed check makes it unmeasurable.
+
+    A failed accuracy check or benchmark names the stage that failed, accuracy first.
+    """
     accepted = accept_readings(readings, refs)
     if isinstance(accepted, str):
         return Unmeasurable(failure=InputFailure(kind=InputFailureKind.READINGS_REFUSED))
