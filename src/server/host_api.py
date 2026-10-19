@@ -1158,7 +1158,7 @@ HELPER_REQUEST_FEATURES: Final[Mapping[type[HelperRequestBase], HelperFeature]] 
     RunsReadEventsRequest: HelperFeature.RUN_HISTORY,
     RunsEventsForSpanRequest: HelperFeature.RUN_SPAN_EVENTS,
     RunsReadTailRequest: HelperFeature.RUN_TAIL,
-    RunsSummaryRequest: HelperFeature.RUN_SUMMARY,
+    RunsSummaryRequest: HelperFeature.RUN_TRACE,
     MachineDescribeRequest: HelperFeature.MACHINE_DESCRIBE,
     CheckoutInspectRequest: HelperFeature.CHECKOUT_INSPECT,
     RunPreflightRequest: HelperFeature.PREFLIGHT,
@@ -1197,6 +1197,7 @@ HELPER_FIELD_FEATURES: Final[Mapping[type[HelperRequestBase], Mapping[str, Helpe
     HarnessesListRequest: {"with_generations": HelperFeature.HARNESS_GENERATIONS},
     LogsListRequest: {"span_id": HelperFeature.LOGS_BY_SPAN},
     RunsReadEventsRequest: {"with_totals": HelperFeature.RUN_HISTORY_PAGES},
+    RunsSummaryRequest: {"offset": HelperFeature.RUN_SUMMARY},
     RunsListRequest: {
         "digest_runs": HelperFeature.RUN_DIGEST,
         "with_dashboard": HelperFeature.RUN_DASHBOARD,

@@ -18,7 +18,14 @@ import {
   type TileOption,
 } from '@vibesys/ui';
 import {type JSX, useState} from 'react';
-import {chosenEntry, fitOf, measureOptions, nothingSetUp, targetFacts} from '../../state/index.js';
+import {
+  chosenEntry,
+  fitOf,
+  measureOptions,
+  missingFeatures,
+  nothingSetUp,
+  targetFacts,
+} from '../../state/index.js';
 import type {CardProps} from './card-props.js';
 import {
   entriesIn,
@@ -27,6 +34,7 @@ import {
   machineFacts,
   machineLabel,
   measureLabel,
+  NEEDS_UPDATE,
 } from './view.js';
 
 function MachineDetails(props: CardProps): JSX.Element | null {
@@ -43,6 +51,29 @@ function MachineDetails(props: CardProps): JSX.Element | null {
     >
       <KeyValue items={machineFacts(facts.value)} />
     </Collapsible>
+  );
+}
+
+/** What is wrong with the chosen machine's VibeSys: no checkout, or too old for this app. */
+function MachineNotices(props: CardProps & {readonly chooseCheckout: () => void}): JSX.Element {
+  const {context} = props;
+  const {machine} = context.form;
+  const name = machineLabel(machine);
+  const facts = context.facts?.for === machine ? context.facts.value : null;
+  const noCheckout = facts?.kind === 'offered' && facts.value.checkout === null;
+  return (
+    <>
+      {missingFeatures(context.helper, machine).length > 0 ? (
+        <Banner tone="warn" title={`VibeSys on ${name}`} body={NEEDS_UPDATE} />
+      ) : null}
+      {noCheckout ? (
+        <Banner
+          tone="warn"
+          title={`No VibeSys checkout found on ${name}.`}
+          actions={<Button text="Choose it in Machines" press={props.chooseCheckout} />}
+        />
+      ) : null}
+    </>
   );
 }
 
@@ -87,7 +118,6 @@ export function WherePage(
   }));
   const needs = chosenEntry(context.answers, entriesIn(context))?.details?.hardware ?? null;
   const fit = needs === null ? null : fitOf(needs, described, name);
-  const noCheckout = described !== null && described.checkout === null;
   return (
     <Stack gap="space-5">
       <Stack gap="space-3">
@@ -99,13 +129,7 @@ export function WherePage(
           value={machine}
           change={next => dispatch({type: 'machine', machine: next})}
         />
-        {noCheckout ? (
-          <Banner
-            tone="warn"
-            title={`No VibeSys checkout found on ${name}.`}
-            actions={<Button text="Choose it in Machines" press={props.chooseCheckout} />}
-          />
-        ) : null}
+        <MachineNotices {...props} />
       </Stack>
       <Stack gap="space-3">
         <Text variant="section">Measured on</Text>

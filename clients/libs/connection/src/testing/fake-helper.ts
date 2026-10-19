@@ -446,6 +446,7 @@ export class FakeHelper {
     'run_span_events',
     'run_tail',
     'run_summary',
+    'run_trace',
     'run_history_pages',
     'machine_describe',
     'checkout_inspect',

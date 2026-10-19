@@ -57,7 +57,8 @@ class HelperFeature(StrEnum):
     RUN_HISTORY = "run_history"
     """``runs.read_events``: a run's recorded events, read from disk in bounded pages."""
     RUN_SUMMARY = "run_summary"
-    """``runs.summary``: everything the run level shows, from a read model kept beside the journal."""
+    """``runs.summary``'s pages (``offset``): everything the run level shows, from a read model kept
+    beside the journal."""
     RUN_HISTORY_PAGES = "run_history_pages"
     """``runs.read_events``'s pages of up to ``RUN_EVENTS_READ_MAX`` events, and its ``with_totals``."""
     RUN_SPAN_EVENTS = "run_span_events"
@@ -111,6 +112,9 @@ class HelperFeature(StrEnum):
     """``examples.destination``: what is at a place an example would be copied to."""
     USAGE_WINDOW = "usage_window"
     """``usage.window``: what a project's runs spent in a window of time, for the Usage page."""
+    RUN_TRACE = "run_trace"
+    """``runs.summary``: its reply names ``trace`` and ``rounds_finished``, so a client that reads
+    them (a journal that predates the run trace has no ideas, not zero) needs this to send it."""
 
 
 class HelperRequestBase(BaseModel):

@@ -7,7 +7,13 @@
  * helper there before it saves it).
  */
 import {ConnectionError, type ConnectionLease, HelperRequestError} from '@vibesys/connection';
-import {type HostId, hostFromKey, hostKey, hostLabel} from '@vibesys/hosts';
+import {
+  type HostId,
+  hostFromKey,
+  hostKey,
+  hostLabel,
+  missingRequiredFeatures,
+} from '@vibesys/hosts';
 import type {
   AgentLogin,
   CheckoutInspection,
@@ -93,11 +99,13 @@ export class MachinesMain {
     } catch (error) {
       return unreachable(error);
     }
+    const kind =
+      missingRequiredFeatures(held.connection.features).length === 0 ? 'ready' : 'needs-update';
     try {
       const reply = await held.connection.request({type: 'machine.describe'});
-      return {kind: 'ready', facts: reply.machine};
+      return {kind, facts: reply.machine};
     } catch (error) {
-      if (notNegotiated(error)) return {kind: 'ready', facts: null};
+      if (notNegotiated(error)) return {kind, facts: null};
       return unreachable(error);
     }
   }

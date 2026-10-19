@@ -14,6 +14,7 @@ import {overviewAt, traceAt} from './live.js';
 import {
   commandable,
   type HistoryProgress,
+  type MachineBlock,
   quotaPause,
   type RunPageState,
   runPhase,
@@ -57,10 +58,39 @@ function endedStatus(phase: HostRun['phase'], end: RunEnd): {label: string; tone
   return look === null ? {label: 'Finished', tone: 'ok'} : {label: look.label, tone: look.tone};
 }
 
+const BLOCK_STATUS: Readonly<Record<MachineBlock, string>> = {
+  'needs-update': 'Needs an update',
+  'sign-in': 'Sign in',
+  offline: 'Can’t connect',
+  closed: 'Disconnected',
+};
+
+/**
+ * Why the run cannot be found because its machine will not answer (it needs an update, a sign-in,
+ * or cannot be reached), else null while it is only being looked for. Typed from the machine's
+ * connection, never from the failure text, which may name a path or a user.
+ */
+export function machineBlockWords(state: RunPageState): string | null {
+  if (state.record.kind !== 'unlisted' || state.record.block === undefined) return null;
+  const machine = state.hostLabel;
+  switch (state.record.block) {
+    case 'needs-update':
+      return `VibeSys on ${machine} needs an update`;
+    case 'sign-in':
+      return `Sign in to ${machine}`;
+    case 'offline':
+      return `Can’t reach ${machine}`;
+    case 'closed':
+      return `Disconnected from ${machine}`;
+  }
+}
+
 function status(state: RunPageState): {label: string; tone: Tone} {
   const phase = runPhase(state);
   switch (phase.kind) {
     case 'unlisted': {
+      const block = state.record.kind === 'unlisted' ? state.record.block : undefined;
+      if (block !== undefined) return {label: BLOCK_STATUS[block], tone: 'warn'};
       const unplaced = unplacedRun(state);
       return unplaced === null
         ? {label: 'Looking for the run', tone: 'neutral'}

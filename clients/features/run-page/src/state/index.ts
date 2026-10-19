@@ -132,6 +132,7 @@ export {
   headerView,
   historyLoading,
   historyProblem,
+  machineBlockWords,
   type Offer,
   quotaBannerView,
   runGoneWords,

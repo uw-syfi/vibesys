@@ -2,6 +2,7 @@ import {expect, test} from 'bun:test';
 import type {Check, HelperFeature} from '@vibesys/contracts/host-helper';
 import type {DestinationFound, Offered} from '@vibesys/ipc';
 import {exampleCatalogue} from '@vibesys/run-fixtures';
+import {REQUIRED_HELPER_FEATURES} from '@vibesys/hosts';
 import type {RecentRun, RunRef} from '@vibesys/runs';
 import type {Draft} from '../../state/index.js';
 import {
@@ -19,7 +20,7 @@ const ok = <T>(value: T) => Promise.resolve({ok: true as const, value});
 
 /** The bridge calls New run makes, answering at once from memory, from a helper with `features`. */
 function fakeBridge(
-  features: readonly string[] = ['run_options', 'preflight', 'examples'],
+  features: readonly string[] = REQUIRED_HELPER_FEATURES,
   asked: string[] = [],
   roles: readonly string[] | null = null,
 ): NewRunBridge {
@@ -233,21 +234,47 @@ test('a helper older than New run is never asked to check or start, and Start sa
   await settle();
   const [first] = readiness(store.getState());
   expect(first).toMatchObject({id: 'helper', state: 'fail', label: 'VibeSys on host-b'});
-  expect(first?.detail).toBe(
-    'VibeSys on host-b is older than this app: update its checkout to start runs from here ' +
-      '(it lacks run_options, examples).',
-  );
-  expect(startBlocked(store.getState())).toBe('Fix the items marked above to start.');
+  expect(first?.detail).toBe('Needs an update');
+  expect(startBlocked(store.getState())).toBe('VibeSys on host-b needs an update');
   store.dispatch({type: 'start'});
   await settle();
   expect(asked).toEqual([]);
   expect(store.getState().context.examples?.value).toEqual({kind: 'unsupported'});
 });
 
+test('a helper that serves everything New run asks but the run trace needs an update: Start says so and never starts', async () => {
+  const clock = manualSchedule();
+  const asked: string[] = [];
+  const stale = REQUIRED_HELPER_FEATURES.filter(feature => feature !== 'run_trace');
+  const {store} = runAgain(fakeBridge(stale, asked), recentRun('ssh:host-b', '/p', 2), {
+    schedule: clock.schedule,
+  });
+  await settle();
+  clock.runDue();
+  await settle();
+  const [first] = readiness(store.getState());
+  expect(first).toMatchObject({id: 'helper', state: 'fail', detail: 'Needs an update'});
+  expect(startBlocked(store.getState())).toBe('VibeSys on host-b needs an update');
+  store.dispatch({type: 'start'});
+  await settle();
+  expect(asked).not.toContain('startRun');
+});
+
+test('a helper with every feature the app needs raises no update item', async () => {
+  const clock = manualSchedule();
+  const {store} = runAgain(fakeBridge(), recentRun('ssh:host-b', '/p', 2), {
+    schedule: clock.schedule,
+  });
+  await settle();
+  clock.runDue();
+  await settle();
+  expect(readiness(store.getState()).some(item => item.id === 'helper')).toBe(false);
+});
+
 test('the role table is read from the run: pending, then its roles, from a helper that reports them', async () => {
   const clock = manualSchedule();
   const roles = ['multi-orchestrator', 'multi-judge'];
-  const features = ['run_options', 'preflight', 'examples', 'run_roles'];
+  const features = [...REQUIRED_HELPER_FEATURES, 'run_roles'];
   const {store} = runAgain(fakeBridge(features, [], roles), recentRun('ssh:gpu', '/p', 2), {
     schedule: clock.schedule,
   });
@@ -275,7 +302,7 @@ test('a helper that does not report roles gets an empty state, not the roles of 
 function backendBridge(
   backend: 'cpu' | 'cuda',
   failing: boolean,
-  features: readonly string[] = ['run_options', 'preflight', 'examples', 'run_backend'],
+  features: readonly string[] = [...REQUIRED_HELPER_FEATURES, 'run_backend'],
 ): NewRunBridge {
   return {
     ...fakeBridge(features),
@@ -711,7 +738,7 @@ test('a retry does not touch a step that did not fail', async () => {
   const clock = manualSchedule();
   const asked: string[] = [];
   const failing: NewRunBridge = {
-    ...fakeBridge(['run_options', 'preflight', 'examples'], asked),
+    ...fakeBridge(REQUIRED_HELPER_FEATURES, asked),
     tasks: () =>
       Promise.resolve({ok: false as const, error: 'No such project.', authNeeded: false}),
   };

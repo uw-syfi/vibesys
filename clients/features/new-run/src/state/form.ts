@@ -10,7 +10,7 @@ import type {
   MachineDescription,
   TaskGoal,
 } from '@vibesys/contracts/host-helper';
-import type {HostKey} from '@vibesys/hosts';
+import {type HostKey, missingRequiredFeatures} from '@vibesys/hosts';
 import type {
   DestinationFound,
   HarnessOffer,
@@ -331,15 +331,15 @@ export interface HelperFor {
 }
 
 /**
- * The helper features New run needs: typed run options (`run.start` refuses them otherwise), the
- * Ready to start checks, and the examples. A helper without one predates this app's New run.
+ * The features this app needs that `machine`'s helper lacks (`REQUIRED_HELPER_FEATURES`, the one
+ * rule every screen uses); none while they are not known yet.
  */
-export const NEW_RUN_FEATURES: readonly HelperFeature[] = ['run_options', 'preflight', 'examples'];
-
-/** The features New run needs that `machine`'s helper lacks; none while they are not known yet. */
-export function missingFeatures(helper: HelperFor | null, machine: HostKey): HelperFeature[] {
+export function missingFeatures(
+  helper: HelperFor | null,
+  machine: HostKey,
+): readonly HelperFeature[] {
   if (helper === null || helper.for !== machine) return [];
-  return NEW_RUN_FEATURES.filter(feature => !helper.features.includes(feature));
+  return missingRequiredFeatures(helper.features);
 }
 
 /** Whether `machine`'s helper is known to take `feature`. */

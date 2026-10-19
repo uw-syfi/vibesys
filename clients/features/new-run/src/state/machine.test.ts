@@ -6,7 +6,7 @@ import type {
   MachineDescription,
   TaskGoal,
 } from '@vibesys/contracts/host-helper';
-import type {HostKey} from '@vibesys/hosts';
+import {type HostKey, REQUIRED_HELPER_FEATURES} from '@vibesys/hosts';
 import type {
   ComputeSettings,
   DestinationFound,
@@ -125,9 +125,9 @@ function output(operation: string, random: Seeded): unknown {
     case 'features':
       // A current helper, one before examples, one before typed options, one before both.
       return random.pick([
-        ['run_options', 'preflight', 'examples', 'harnesses', 'run_roles', 'project_goal'],
-        ['run_options', 'preflight', 'examples', 'harnesses', 'example_destination'],
-        ['run_options', 'preflight', 'examples', 'harnesses'],
+        [...REQUIRED_HELPER_FEATURES, 'harnesses', 'run_roles', 'project_goal'],
+        [...REQUIRED_HELPER_FEATURES, 'harnesses', 'example_destination'],
+        [...REQUIRED_HELPER_FEATURES, 'harnesses'],
         ['run_options', 'preflight', 'harnesses'],
         ['preflight', 'examples', 'harnesses'],
         ['harnesses'],
@@ -462,9 +462,7 @@ describe('newRunMachine', () => {
             async () => OFFERS,
           ),
           features: fromPromise<readonly HelperFeature[], {readonly host: HostKey}>(async () => [
-            'run_options',
-            'preflight',
-            'examples',
+            ...REQUIRED_HELPER_FEATURES,
           ]),
           tasks: fromPromise<readonly string[], {readonly host: HostKey; readonly project: string}>(
             async () => ['mpmc', 'spsc'],
@@ -556,7 +554,7 @@ describe('newRunMachine', () => {
     const asked: string[] = [];
     const actor = liveActor({
       tasks: ['one', 'two'],
-      features: ['run_options', 'preflight', 'examples', 'project_goal'],
+      features: [...REQUIRED_HELPER_FEATURES, 'project_goal'],
       goalsAsked: asked,
     });
     actor.start();
@@ -751,7 +749,7 @@ function liveActor(options: {
           async () => OFFERS,
         ),
         features: fromPromise<readonly HelperFeature[], {readonly host: HostKey}>(
-          async () => options.features ?? ['run_options', 'preflight', 'examples'],
+          async () => options.features ?? REQUIRED_HELPER_FEATURES,
         ),
         tasks: fromPromise<readonly string[], {readonly host: HostKey; readonly project: string}>(
           async () => options.tasks ?? ['mpmc', 'spsc'],
@@ -822,9 +820,7 @@ describe('the run reports its roles', () => {
             async () => OFFERS,
           ),
           features: fromPromise<readonly HelperFeature[], {readonly host: HostKey}>(async () => [
-            'run_options',
-            'preflight',
-            'examples',
+            ...REQUIRED_HELPER_FEATURES,
             'run_roles',
           ]),
           tasks: fromPromise<readonly string[], {readonly host: HostKey; readonly project: string}>(

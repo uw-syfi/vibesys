@@ -47,6 +47,7 @@ export {
   type RunEnd,
   type RunPause,
 } from './listing.js';
+export {missingRequiredFeatures, REQUIRED_HELPER_FEATURES} from './required-features.js';
 export {
   digestEntries,
   digestLook,

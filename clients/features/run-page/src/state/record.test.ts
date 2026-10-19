@@ -1,7 +1,7 @@
 import {expect, test} from 'bun:test';
 import type {HostListing} from '@vibesys/hosts';
 import type {RecentRun} from '@vibesys/runs';
-import {runRecord} from './record.js';
+import {runRecord, sameRecord} from './record.js';
 import {runPageInitial, runPageStep} from './run-page.js';
 
 const recent: RecentRun = {
@@ -41,4 +41,26 @@ test('uncertain host listings do not classify an old recent run as ended', () =>
     kind: 'unlisted',
     why: 'unconfirmed',
   });
+});
+
+test('a machine that will not answer is named, not searched forever; one still connecting is not', () => {
+  const unavailable = (connection: Extract<HostListing, {kind: 'unavailable'}>['connection']) =>
+    runRecord([{kind: 'unavailable', host: 'ssh:gpu', connection}], recent, recent);
+  expect(unavailable({kind: 'incompatible', detail: 'x'})).toEqual({
+    kind: 'unlisted',
+    block: 'needs-update',
+  });
+  expect(unavailable({kind: 'auth-needed', detail: 'x'})).toEqual({
+    kind: 'unlisted',
+    block: 'sign-in',
+  });
+  expect(unavailable({kind: 'offline', detail: 'x'})).toEqual({kind: 'unlisted', block: 'offline'});
+  expect(unavailable({kind: 'closed'})).toEqual({kind: 'unlisted', block: 'closed'});
+  for (const waiting of [{kind: 'connecting'}, {kind: 'reconnecting', attempt: 1}] as const) {
+    expect(unavailable(waiting)).toEqual({kind: 'unlisted'});
+  }
+  expect(sameRecord({kind: 'unlisted'}, {kind: 'unlisted', block: 'offline'})).toBe(false);
+  expect(
+    sameRecord({kind: 'unlisted', block: 'offline'}, {kind: 'unlisted', block: 'offline'}),
+  ).toBe(true);
 });

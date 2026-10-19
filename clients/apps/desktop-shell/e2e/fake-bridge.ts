@@ -10,6 +10,7 @@
  * through `window.fakeHost`.
  */
 import type {ExampleList} from '@vibesys/contracts/host-helper';
+import {REQUIRED_HELPER_FEATURES} from '@vibesys/hosts';
 import type {WelcomeBridge} from '@vibesys/ipc';
 
 /**
@@ -110,7 +111,7 @@ export interface FakeBridgeSeed {
   /** The saved machines, as `hosts.json` and This Mac list them. */
   readonly machines?: readonly {host: string; label: string; checkout: string}[];
   /** What each machine's facts say, by host; a machine not named here is ready with `facts`. */
-  readonly reports?: Readonly<Record<string, {kind: string; detail?: string}>>;
+  readonly reports?: Readonly<Record<string, {kind: string; detail?: string; facts?: null}>>;
   /** What `machine.describe` says on a ready machine. */
   readonly facts?: unknown;
   /** What `checkout.inspect` finds at each path (on any machine); other paths hold nothing. */
@@ -568,11 +569,10 @@ export function installFakeNewRun(seed: FakeBridgeSeed): void {
   };
   const insideRepository = (project: string) => project.includes('/vibesys/');
   const words = (text: string) => text.split(' ');
-  const features =
-    catalog?.features ??
-    words(
-      'run_options preflight examples run_roles example_catalogue run_role_agents project_goal',
-    );
+  const features = catalog?.features ?? [
+    ...REQUIRED_HELPER_FEATURES,
+    ...words('run_roles example_catalogue run_role_agents project_goal'),
+  ];
   const roles =
     catalog?.roles ?? words('multi-orchestrator multi-profiler multi-implementer multi-judge');
   const check = (id: string, state: string, detail: string) => ({id, state, detail, fix: null});

@@ -28,6 +28,7 @@ import {
   historyLoading,
   historyProblem,
   ideaAncestry,
+  machineBlockWords,
   type Offer,
   predatesTraceWords,
   quotaBannerView,
@@ -409,10 +410,13 @@ function pendingRunScreen(
 ): JSX.Element | null {
   const header = <Header state={state} dispatch={dispatch} />;
   if (state.record.kind === 'unlisted') {
+    const blocked = machineBlockWords(state);
     const unplaced = unplacedRun(state);
     return (
       <Screen density="compact" header={header}>
-        {unplaced === null ? (
+        {blocked !== null ? (
+          <RunGone words={blocked} />
+        ) : unplaced === null ? (
           <InitialRunLoading stage="locating" />
         ) : (
           <RunUnplaced label={unplaced.label} words={unplaced.words} />

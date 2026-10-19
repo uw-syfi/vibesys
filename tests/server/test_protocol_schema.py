@@ -209,7 +209,7 @@ def test_host_helper_schema_exports_the_authoritative_request_feature_gates() ->
         "runs.read_events": "run_history",
         "runs.events_for_span": "run_span_events",
         "runs.read_tail": "run_tail",
-        "runs.summary": "run_summary",
+        "runs.summary": "run_trace",
         "machine.describe": "machine_describe",
         "checkout.inspect": "checkout_inspect",
         "run.preflight": "preflight",
@@ -259,6 +259,7 @@ def test_host_helper_schema_exports_the_authoritative_field_feature_gates() -> N
         "harnesses.list": {"with_generations": "harness_generations"},
         "logs.list": {"span_id": "logs_by_span"},
         "runs.read_events": {"with_totals": "run_history_pages"},
+        "runs.summary": {"offset": "run_summary"},
         "runs.list": {"digest_runs": "run_digest", "with_dashboard": "run_dashboard"},
         "examples.list": {"with_catalogue": "example_catalogue"},
     }

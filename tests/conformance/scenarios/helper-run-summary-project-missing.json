@@ -2,7 +2,7 @@
   "id": "helper-run-summary-project-missing",
   "protocol": "host-helper",
   "title": "runs.summary on a missing directory",
-  "description": "With run_summary negotiated, runs.summary naming a directory that does not exist is answered project_missing with the path.",
+  "description": "With run_summary and run_trace negotiated, runs.summary naming a directory that does not exist is answered project_missing with the path.",
   "role": "control",
   "transports": [
     "stdio"
@@ -19,7 +19,8 @@
           1
         ],
         "features": [
-          "run_summary"
+          "run_summary",
+          "run_trace"
         ],
         "app_version": "conformance"
       }
@@ -31,7 +32,8 @@
         "request_id": "h",
         "protocol_version": 1,
         "features": [
-          "run_summary"
+          "run_summary",
+          "run_trace"
         ]
       }
     },
