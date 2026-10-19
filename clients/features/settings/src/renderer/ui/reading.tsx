@@ -4,7 +4,7 @@
  */
 import {Banner, Button, Card, EmptyState} from '@vibesys/ui';
 import type {JSX, ReactNode} from 'react';
-import type {Reading as State} from '../../state/index.js';
+import {failureWords, type Reading as State} from '../../state/index.js';
 
 export function Reading<T>(props: {
   readonly what: string;
@@ -26,7 +26,7 @@ export function Reading<T>(props: {
       <Banner
         tone="err"
         title={`Could not read ${props.what} on ${machine}.`}
-        body={reading.error}
+        {...failureWords(reading)}
         actions={<Button text="Try again" press={props.retry} />}
       />
     );

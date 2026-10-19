@@ -1,4 +1,5 @@
 import {describe, expect, test} from 'bun:test';
+import {SYNTHESIZED_TASK_NAME} from '@vibesys/contracts';
 import type {DashboardRow} from '@vibesys/feature-app-shell/state';
 import {SEEDS, Seeded} from '@vibesys/store/testing';
 import {runCounts, runInput} from './shell-runs.js';
@@ -52,6 +53,12 @@ describe('the dashboard input of a run', () => {
     expect(input.reason).toBe('the agent crashed');
     expect(input.runId).toBe('20261019-071100');
     expect(input.task).toBe('mpmc');
+  });
+
+  test('groups a run with no task of its own under its title, never the synthesized task name', () => {
+    const input = runInput({...entry('live', null), task: null}, now);
+    expect(input.task).toBe('queue-rs');
+    expect(input.task).not.toBe(SYNTHESIZED_TASK_NAME);
   });
 
   test('is titled as its row is, the one title every screen gives the run', () => {

@@ -58,7 +58,9 @@ function notNegotiated(error: unknown): boolean {
 /** A failure the user reads: what was being done on which machine, then the helper's own words. */
 function explained(error: unknown, doing: string, id: HostId): Error {
   const detail = error instanceof Error ? error.message : String(error);
-  return new Error(`Could not ${doing} on ${hostLabel(id)}: ${detail}`);
+  const message = `Could not ${doing} on ${hostLabel(id)}: ${detail}`;
+  // A connection failure keeps its typed cause, which the screen words apart from the raw text.
+  return error instanceof ConnectionError ? error.reworded(message) : new Error(message);
 }
 
 export class MachinesMain {

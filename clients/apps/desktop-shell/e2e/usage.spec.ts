@@ -181,6 +181,16 @@ test('what the helper could not price or place is shown as status words', async 
   expect(await missing.getAttribute('title')).toContain('20261001-000001');
 });
 
+test('an unpriced count the helper cannot itemise says so in its pointer', async ({page}) => {
+  const old = USAGE_CASES.find(each => each.name === 'unpriced-no-breakdown');
+  if (old === undefined) throw new Error('the cases changed');
+  await open(page, old, 1440);
+  await expect(page.getByText('2 unpriced', {exact: true})).toBeVisible();
+  const chip = page.locator('span[title]').filter({hasText: '2 unpriced'});
+  // No row holds the count, so the pointer names the machine and what it cannot say.
+  expect(await chip.getAttribute('title')).toMatch(/host-b: no per-run counts/);
+});
+
 test('the window select asks over that window, and a run opens from its row', async ({page}) => {
   const many = USAGE_CASES.find(each => each.name === 'many-runs');
   if (many === undefined) throw new Error('the cases changed');

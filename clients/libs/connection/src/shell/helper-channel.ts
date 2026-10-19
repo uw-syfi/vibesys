@@ -58,6 +58,11 @@ export class ConnectionError extends Error {
     this.reason = reason;
     this.checkout = options?.checkout ?? null;
   }
+
+  /** The same failure (cause and checkout problem) in other words. */
+  reworded(message: string): ConnectionError {
+    return new ConnectionError(this.reason, message, {cause: this, checkout: this.checkout});
+  }
 }
 
 type InputCompletion = (error: ConnectionError | null) => void;

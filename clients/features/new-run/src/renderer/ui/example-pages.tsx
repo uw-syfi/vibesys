@@ -46,6 +46,25 @@ function Listing(props: CardProps): JSX.Element {
   return <Text tone="muted">{status === 'listing' ? 'Listing' : 'No examples'}</Text>;
 }
 
+/** The machines to list examples from: choosing one lists its examples (and tries a failed one again). */
+function MachineChoice(
+  props: CardProps & {readonly machines: readonly MachineOption[]},
+): JSX.Element {
+  const {machine} = props.context.form;
+  return (
+    <Stack gap="space-3">
+      <Text variant="section">Machine</Text>
+      <ChoiceTiles
+        label="Machine"
+        layout="cards"
+        options={props.machines.map(option => ({value: option.value, label: option.label}))}
+        value={machine}
+        change={next => props.dispatch({type: 'machine', machine: next})}
+      />
+    </Stack>
+  );
+}
+
 /**
  * Said when the machine's examples could not be listed: the status, a way to ask again, and the
  * other machines, so a broken one is never the end of the form.
@@ -61,13 +80,7 @@ export function ExamplesFailed(
         <Text tone="err">Failed</Text>
         <Button text="Try again" press={() => dispatch({type: 'machine', machine})} />
       </Row>
-      <ChoiceTiles
-        label="Machine"
-        layout="cards"
-        options={props.machines.map(option => ({value: option.value, label: option.label}))}
-        value={machine}
-        change={next => dispatch({type: 'machine', machine: next})}
-      />
+      <MachineChoice {...props} />
     </Stack>
   );
 }
@@ -90,7 +103,10 @@ function GroupLabel(props: {
   );
 }
 
-export function StartPage(props: CardProps): JSX.Element {
+/** The first question; when the machine's examples failed it also offers the other machines. */
+export function StartPage(
+  props: CardProps & {readonly machines: readonly MachineOption[]},
+): JSX.Element {
   const {context} = props;
   const entries = entriesIn(context);
   const status = examplesStatus(context.examples, context.form.machine);
@@ -113,13 +129,16 @@ export function StartPage(props: CardProps): JSX.Element {
     },
   ];
   return (
-    <ChoiceTiles
-      label="Start from"
-      layout="cards"
-      options={options}
-      value={context.answers.from}
-      change={from => answer(props, {kind: 'from', from})}
-    />
+    <Stack gap="space-5">
+      <ChoiceTiles
+        label="Start from"
+        layout="cards"
+        options={options}
+        value={context.answers.from}
+        change={from => answer(props, {kind: 'from', from})}
+      />
+      {status === 'failed' ? <MachineChoice {...props} /> : null}
+    </Stack>
   );
 }
 

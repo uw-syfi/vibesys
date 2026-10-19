@@ -934,6 +934,7 @@ describe('Hosts.usageWindow', () => {
         tokens: figures.tokens,
         turns: 7,
         unpricedTurns: 1,
+        unpricedItemised: true,
         untimedTurns: 0,
         newBests: 5,
         costPerNewBestUsd: 2.5,
@@ -970,6 +971,7 @@ describe('Hosts.usageWindow', () => {
 
     expect(reply.kind === 'usage' ? reply.usage.byRun[0]?.unpricedTurns : null).toBe(0);
     expect(reply.kind === 'usage' ? reply.usage.byAgent[0]?.unpricedTurns : null).toBe(0);
+    expect(reply.kind === 'usage' ? reply.usage.unpricedItemised : null).toBe(false);
   });
 
   test('returns a typed unsupported outcome without sending the request', async () => {

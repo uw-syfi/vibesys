@@ -1094,3 +1094,29 @@ test('a machine that cannot list its examples says Failed and lets another machi
   await expect(main(page).getByRole('radiogroup', {name: 'Domain'})).toBeVisible();
   await expect(main(page).getByText('Failed', {exact: true})).toHaveCount(0);
 });
+
+test('a fresh profile whose This Mac cannot list examples offers the other machines at once', async ({
+  page,
+}) => {
+  const newRun = SEED.newRun;
+  if (newRun === undefined) throw new Error('the seed has no New run helper');
+  // A fresh profile has no recent run, so the form starts on This Mac.
+  await open(page, {
+    ...SEED,
+    recent: [],
+    listings: [],
+    newRun: {...newRun, examplesFail: ['local']},
+  });
+  await expect(question(page, 'What do you want to optimize?')).toBeVisible();
+  const start = main(page).getByRole('radiogroup', {name: 'Start from', exact: true});
+  await expect(start).toContainText('Failed');
+  // The first page itself offers the configured machines, the broken one chosen.
+  const machines = main(page).getByRole('radiogroup', {name: 'Machine', exact: true});
+  await expect(machines.getByRole('radio')).toHaveCount(2);
+  await expect(machines.getByRole('radio', {name: /This Mac/})).toBeChecked();
+  await machines.getByRole('radio', {name: /host-b/}).click({force: true});
+  // Its examples are listed, so the example path opens.
+  await expect(start).not.toContainText('Failed');
+  await expect(start).toContainText('examples');
+  await expect(machines).toHaveCount(0);
+});

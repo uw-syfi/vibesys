@@ -2,7 +2,13 @@
  * What the machine sections of Settings say about what a helper reported: a cluster's reach and
  * hardware, the Modal token, and each harness's login, each in the words a person reads.
  */
-import type {AgentLogin, ComputeSettings, SlurmClusterSettings} from '@vibesys/ipc';
+import {
+  type AgentLogin,
+  type ComputeSettings,
+  FAILURE_CAUSE_WORDS,
+  type FailureCause,
+  type SlurmClusterSettings,
+} from '@vibesys/ipc';
 
 type Tone = 'neutral' | 'ok' | 'warn' | 'err';
 
@@ -100,4 +106,24 @@ export function signInBlocked(login: AgentLogin, machine: string): string | null
   if (!login.installed) return `${login.provider_name} is not installed on ${machine}.`;
   if (login.can_start_login) return null;
   return `${login.provider_name} has no login command to start.`;
+}
+
+/** What the Machines entry of Settings says of the saved machines: how many, and how many need attention. */
+export function machinesDetail(saved: number, attention: number): string {
+  const count = `${saved} saved`;
+  if (attention === 0) return count;
+  return `${count} · ${attention} ${attention === 1 ? 'needs' : 'need'} attention`;
+}
+
+/**
+ * A failed reading's body: a connection failure as its status word with the raw text for the
+ * pointer; any other failure in the words it came with.
+ */
+export function failureWords(failed: {readonly error: string; readonly cause?: FailureCause}): {
+  readonly body: string;
+  readonly hint?: string;
+} {
+  return failed.cause === undefined
+    ? {body: failed.error}
+    : {body: FAILURE_CAUSE_WORDS[failed.cause], hint: failed.error};
 }

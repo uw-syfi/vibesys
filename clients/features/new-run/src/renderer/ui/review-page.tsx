@@ -188,6 +188,7 @@ export function ProblemBanner(props: {
       tone="err"
       title={words.title}
       body={words.body}
+      {...(words.detail === null ? {} : {hint: words.detail})}
       {...(words.retry
         ? {actions: <Button text="Try again" press={() => dispatch({type: 'retry'})} />}
         : {})}

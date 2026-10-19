@@ -10,6 +10,7 @@ import type {
   AgentLogin,
   ClusterTest,
   ComputeSettings,
+  FailureCause,
   LoginStart,
   MachineEntry,
   Offered,
@@ -37,7 +38,7 @@ export type SettingsSection = 'clusters' | 'logins' | 'machines' | 'appearance' 
 export type Reading<T> =
   | {readonly kind: 'loading'; readonly token: number}
   | {readonly kind: 'ready'; readonly offered: Offered<T>}
-  | {readonly kind: 'failed'; readonly error: string};
+  | {readonly kind: 'failed'; readonly error: string; readonly cause?: FailureCause};
 
 /** Why the helper did not start a login: what the contract lists. */
 type UnavailableReason = Extract<LoginStart, {outcome: 'unavailable'}>['reason'];
@@ -47,7 +48,7 @@ export type LoginProgress =
   | {readonly kind: 'starting'; readonly token: number}
   | {readonly kind: 'started'; readonly instruction: string | null}
   | {readonly kind: 'unavailable'; readonly reason: UnavailableReason}
-  | {readonly kind: 'failed'; readonly error: string};
+  | {readonly kind: 'failed'; readonly error: string; readonly cause?: FailureCause};
 
 export interface MachineView {
   readonly compute: Reading<ComputeSettings>;
@@ -72,7 +73,7 @@ export interface MachineSettingsState {
 
 type Outcome<T> =
   | {readonly ok: true; readonly value: T}
-  | {readonly ok: false; readonly error: string};
+  | {readonly ok: false; readonly error: string; readonly cause?: FailureCause};
 
 export type MachineSettingsAction =
   | {readonly type: 'section'; readonly section: SettingsSection}
@@ -222,11 +223,24 @@ function readOne(
 
 function settled<T>(current: Reading<T>, token: number, result: Outcome<Offered<T>>): Reading<T> {
   if (current.kind !== 'loading' || current.token !== token) return current;
-  return result.ok ? {kind: 'ready', offered: result.value} : {kind: 'failed', error: result.error};
+  return result.ok ? {kind: 'ready', offered: result.value} : failed(result);
+}
+
+/** A failed outcome as it is kept: its words, and its typed cause when the connection's. */
+function failed(result: {readonly error: string; readonly cause?: FailureCause}): {
+  readonly kind: 'failed';
+  readonly error: string;
+  readonly cause?: FailureCause;
+} {
+  return {
+    kind: 'failed',
+    error: result.error,
+    ...(result.cause === undefined ? {} : {cause: result.cause}),
+  };
 }
 
 function startedLogin(result: Outcome<LoginStart>): LoginProgress {
-  if (!result.ok) return {kind: 'failed', error: result.error};
+  if (!result.ok) return failed(result);
   return result.value.outcome === 'started'
     ? {kind: 'started', instruction: result.value.instruction ?? null}
     : {kind: 'unavailable', reason: result.value.reason};

@@ -33,10 +33,6 @@ export function runCounts(rows: readonly {readonly host: HostKey}[]): ReadonlyMa
   return counts;
 }
 
-function projectName(path: string): string {
-  return path.split('/').filter(Boolean).at(-1) ?? path;
-}
-
 /** The seconds from `at`, in milliseconds, to `now`; null when `at` is not known. */
 function secondsSince(at: number | null | undefined, now: number): number | null {
   return at == null ? null : Math.max(0, (now - at) / 1000);
@@ -51,7 +47,8 @@ export function runInput(entry: DashboardRow, now: number): RunInput {
     id: digestKey(row.run),
     runId: row.run.runId,
     title: entry.row.title,
-    task: entry.task ?? projectName(entry.project),
+    // A run with no task of its own is grouped under its title: the project's name.
+    task: entry.task ?? row.title,
     started: formatStarted(entry.createdAt, {now}),
     machine: entry.machine,
     hardware: null,

@@ -21,6 +21,7 @@ export const ZERO_USAGE: UsageWindowEntry = {
   tokens: {input: null, cache_read: null, cache_write: null, output: null, reasoning: null},
   turns: 0,
   unpricedTurns: 0,
+  unpricedItemised: true,
   untimedTurns: 0,
   newBests: 0,
   costPerNewBestUsd: null,

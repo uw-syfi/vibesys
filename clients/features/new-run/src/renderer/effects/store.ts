@@ -45,7 +45,8 @@ export type NewRunBridge = Pick<
 async function value<T>(call: () => Promise<WelcomeResult<T>>): Promise<T> {
   const result = await attempt(call);
   if (result.ok) return result.value;
-  throw new StepFailure('unexpected' in result ? null : result.error);
+  if ('unexpected' in result) throw new StepFailure(null);
+  throw new StepFailure(result.error, result.cause ?? null);
 }
 
 /** The machine with every operation provided by `bridge`. */

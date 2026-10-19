@@ -1,4 +1,5 @@
 import {describe, expect, test} from 'bun:test';
+import {ConnectionError} from '@vibesys/connection';
 import {WELCOME_CHANNELS, type WelcomeResult} from '@vibesys/ipc';
 import {
   type WelcomeDocument,
@@ -278,6 +279,46 @@ describe('WelcomeRouter', () => {
       value: null,
     });
     expect(answered).toEqual(['11:101']);
+  });
+
+  test('a failure of the connection carries its typed cause, however it was reworded', async () => {
+    const causes = ['link', 'auth', 'incompatible', 'run-gone', 'denied', 'capacity'] as const;
+    for (const reason of causes) {
+      const ipc = new FakeWelcomeIpc();
+      new WelcomeRouter(ipc).bind({
+        document: new FakeWelcomeDocument(),
+        url: 'app://vibesys/shell.html',
+        answer: async () => {
+          throw new ConnectionError(reason, 'the helper at /srv/x exited with 1').reworded(
+            'Could not describe: the helper at /srv/x exited with 1',
+          );
+        },
+        retire: async () => undefined,
+      });
+      await expect(ipc.invokeFrom('10:100', WELCOME_CHANNELS.releaseLogs)).resolves.toEqual({
+        ok: false,
+        error: 'Could not describe: the helper at /srv/x exited with 1',
+        authNeeded: reason === 'auth',
+        cause: reason,
+      });
+    }
+  });
+
+  test("a failure that is not the connection's carries no cause", async () => {
+    const ipc = new FakeWelcomeIpc();
+    new WelcomeRouter(ipc).bind({
+      document: new FakeWelcomeDocument(),
+      url: 'app://vibesys/shell.html',
+      answer: async () => {
+        throw new Error('No such project.');
+      },
+      retire: async () => undefined,
+    });
+    await expect(ipc.invokeFrom('10:100', WELCOME_CHANNELS.releaseLogs)).resolves.toEqual({
+      ok: false,
+      error: 'No such project.',
+      authNeeded: false,
+    });
   });
 
   test('destroying the renderer retires its operation generation', async () => {

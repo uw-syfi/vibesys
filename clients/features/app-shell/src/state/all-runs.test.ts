@@ -359,8 +359,19 @@ describe('what every screen calls a run', () => {
       ['seen', 'queue-rs · mpmc'],
       ['other', 'queue-rs'],
     ]);
-    // The listing's task still says what the run is of, for grouping.
-    expect(rows.map(each => each.task)).toEqual(['default', 'default', 'default']);
+    // The one task of a project made from flags is no group: the dashboard groups by the project.
+    expect(rows.map(each => each.task)).toEqual([null, 'mpmc', null]);
+  });
+
+  test('titles a run by its project when its Recent record holds the synthesized task', () => {
+    const rows = dashboardRows(listedWith('default', 'default'), CLOCK);
+    expect(rows.map(each => each.row.title)).toEqual(['queue-rs', 'queue-rs', 'queue-rs']);
+    expect(rows.map(each => each.task)).toEqual([null, null, null]);
+  });
+
+  test('keeps a task someone wrote, whatever its name resembles', () => {
+    const rows = dashboardRows(listedWith('vllm', null), CLOCK);
+    expect(rows.map(each => each.task)).toEqual(['vllm', 'vllm', 'vllm']);
   });
 
   test('is worded the same by the Usage page as by the dashboard, with when each began', () => {

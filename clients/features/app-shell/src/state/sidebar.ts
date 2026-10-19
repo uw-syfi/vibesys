@@ -4,6 +4,7 @@
  * draws are selectors over it, so a push is folded once and every row follows. The saved machines
  * are the Machines store's, not kept here.
  */
+import {isSynthesizedTask} from '@vibesys/contracts';
 import {
   connectionProblem,
   digestLook,
@@ -534,7 +535,8 @@ export function titleOf(
 ): string {
   const task = state.recent.find(recent => sameRun(recent, run))?.task ?? listedTask;
   const name = projectName(project);
-  return task === null ? name : `${name} · ${task}`;
+  // A project made from flags has one task nobody chose: it names nothing.
+  return task === null || isSynthesizedTask(task) ? name : `${name} · ${task}`;
 }
 
 /** The runs a live server drives now, on every listed host. */

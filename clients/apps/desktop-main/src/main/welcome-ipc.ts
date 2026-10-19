@@ -51,6 +51,8 @@ function failure(error: unknown): WelcomeResult<never> {
     ok: false,
     error: error instanceof Error ? error.message : String(error),
     authNeeded: error instanceof ConnectionError && error.reason === 'auth',
+    // The connection's own cause, typed, so a screen words it and keeps the raw text for a tooltip.
+    ...(error instanceof ConnectionError ? {cause: error.reason} : {}),
   };
 }
 

@@ -54,3 +54,4 @@ export {
   validateRunEvent,
   validateRunSnapshot,
 } from './protocol-parse.js';
+export {isSynthesizedTask, SYNTHESIZED_TASK_NAME} from './synthesized-task.js';

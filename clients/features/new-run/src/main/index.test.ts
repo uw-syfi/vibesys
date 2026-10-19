@@ -1,5 +1,5 @@
 import {describe, expect, test} from 'bun:test';
-import {ConnectionManager} from '@vibesys/connection';
+import {ConnectionError, ConnectionManager} from '@vibesys/connection';
 import {FakeLink} from '@vibesys/connection/testing';
 import type {ExampleCreation, RunInputs} from '@vibesys/ipc';
 import {exampleCatalogue} from '@vibesys/run-fixtures';
@@ -30,6 +30,22 @@ function subject() {
 }
 
 describe('NewRunMain', () => {
+  test('a connection failure keeps its typed cause when it is worded for the screen', async () => {
+    const main = new NewRunMain({
+      connect: async () => {
+        throw new ConnectionError('incompatible', 'the host helper for /srv/x exited with 1');
+      },
+      remember: async () => undefined,
+      now: () => 42,
+    });
+    const failure = await main
+      .answer({kind: 'examples', host: LOCAL})
+      .catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(ConnectionError);
+    expect((failure as ConnectionError).reason).toBe('incompatible');
+    expect((failure as ConnectionError).message).toContain('exited with 1');
+  });
+
   test('describes the machine and answers the checks for the inputs', async () => {
     const {link, main} = subject();
     link.helper.host.projects.set('/p', ['mpmc']);

@@ -22,6 +22,7 @@ import type {JSX, ReactNode} from 'react';
 import {
   type MachineSettingsAction,
   type MachineSettingsState,
+  machinesDetail,
   type SettingsAction,
   type SettingsSection,
   type SettingsState,
@@ -217,7 +218,7 @@ function SettingsNav(props: {
           label="Machines"
           {...(props.machines.listed
             ? {
-                detail: `${props.machines.count} saved${props.machines.attention === 0 ? '' : ` · ${props.machines.attention} need attention`}`,
+                detail: machinesDetail(props.machines.count, props.machines.attention),
               }
             : {})}
           active={section === 'machines'}

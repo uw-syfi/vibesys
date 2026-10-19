@@ -18,6 +18,7 @@ interface Entry {
   readonly tokens: Record<string, number | null>;
   readonly turns: number;
   readonly unpricedTurns: number;
+  readonly unpricedItemised: boolean;
   readonly untimedTurns: number;
   readonly newBests: number;
   readonly costPerNewBestUsd: number | null;
@@ -49,6 +50,7 @@ const BASE: Entry = {
   tokens: NO_TOKENS,
   turns: 0,
   unpricedTurns: 0,
+  unpricedItemised: true,
   untimedTurns: 0,
   newBests: 0,
   costPerNewBestUsd: null,
@@ -160,6 +162,17 @@ export const USAGE_CASES: readonly UsageCase[] = [
         output: null,
         reasoning: null,
       },
+    },
+  },
+  {
+    // A helper too old to send per-run counts: the count has no rows to explain it.
+    name: 'unpriced-no-breakdown',
+    runs: 2,
+    answer: {
+      ...spending(2, 2),
+      byRun: spending(2, 2).byRun.map(run => ({...run, unpricedTurns: 0})),
+      unpricedTurns: 2,
+      unpricedItemised: false,
     },
   },
   {

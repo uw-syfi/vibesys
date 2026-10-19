@@ -1,9 +1,10 @@
 import {describe, expect, test} from 'bun:test';
-import type {AgentSpend, UsageWindowEntry} from '@vibesys/hosts';
+import {type AgentSpend, hostFromKey, hostLabel, type UsageWindowEntry} from '@vibesys/hosts';
 import {SEEDS, Seeded} from '@vibesys/store/testing';
 import {
   dollars,
   type ModelName,
+  NO_BREAKDOWN,
   type UsageLoaded,
   type UsageSource,
   usageView,
@@ -71,6 +72,7 @@ function entry(random: Seeded, project: number): UsageWindowEntry {
     },
     turns: byAgent.reduce((total, agent) => total + agent.turns, 0) + unpriced,
     unpricedTurns: unpriced,
+    unpricedItemised: true,
     untimedTurns: random.int(3),
     newBests: bests,
     costPerNewBestUsd: bests === 0 ? null : left / 100 / bests,
@@ -182,6 +184,28 @@ describe('usageView', () => {
       expect(view.runs.reduce((sum, row) => sum + row.unpriced, 0)).toBe(total);
       expect(view.agents.reduce((sum, row) => sum + row.unpriced, 0)).toBe(total);
       for (const row of view.agents) expect(row.unpriced).toBeLessThanOrEqual(row.turns);
+    }
+  });
+
+  test('property: an unpriced count the helper cannot itemise says so, naming the machine', () => {
+    for (const seed of SEEDS) {
+      const loaded = loadedBy(seed);
+      const old = loaded.sources.map((source, at) => ({
+        ...source,
+        usage: {...source.usage, unpricedItemised: at % 2 === 0},
+      }));
+      const view = usageView({...loaded, sources: old});
+      const status = view.status.find(each => each.key === 'unpriced');
+      const unexplained = old.filter(
+        source => source.usage.unpricedTurns > 0 && !source.usage.unpricedItemised,
+      );
+      // One line per such machine, and a count nothing lacks is explained by its rows alone.
+      expect(status?.notes ?? []).toEqual(
+        unexplained.map(source => `${hostLabel(hostFromKey(source.host))}: ${NO_BREAKDOWN}`),
+      );
+      for (const other of view.status.filter(each => each.key !== 'unpriced')) {
+        expect(other.notes).toEqual([]);
+      }
     }
   });
 

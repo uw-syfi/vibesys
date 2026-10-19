@@ -670,7 +670,7 @@ test('a bridge method that is missing fails its step without showing the raw err
 
   const {problem} = store.getState().context;
 
-  expect(problem).toEqual({step: 'harnesses', detail: null});
+  expect(problem).toEqual({step: 'harnesses', detail: null, cause: null});
   expect(JSON.stringify(problem)).not.toContain('is not a function');
 });
 
@@ -685,7 +685,7 @@ test('a call that rejects fails its step without showing the raw error', async (
   });
   await settle();
 
-  expect(store.getState().context.problem).toEqual({step: 'harnesses', detail: null});
+  expect(store.getState().context.problem).toEqual({step: 'harnesses', detail: null, cause: null});
 });
 
 test('a failure the main process reported keeps its words', async () => {
@@ -702,6 +702,30 @@ test('a failure the main process reported keeps its words', async () => {
   expect(store.getState().context.problem).toEqual({
     step: 'harnesses',
     detail: 'host-a is not reachable.',
+    cause: null,
+  });
+});
+
+test('a failure of the connection keeps its typed cause beside the raw words', async () => {
+  const clock = manualSchedule();
+  const refusing: NewRunBridge['harnesses'] = () =>
+    Promise.resolve({
+      ok: false as const,
+      error: 'the host helper for /srv/x on host-a exited with 1: ModuleNotFoundError',
+      authNeeded: false,
+      cause: 'incompatible' as const,
+    });
+  const {store} = createNewRunStore(bridgeWithHarnesses(refusing), {
+    recent: [],
+    schedule: clock.schedule,
+    started: () => undefined,
+  });
+  await settle();
+
+  expect(store.getState().context.problem).toEqual({
+    step: 'harnesses',
+    detail: 'the host helper for /srv/x on host-a exited with 1: ModuleNotFoundError',
+    cause: 'incompatible',
   });
 });
 

@@ -219,6 +219,9 @@ importers:
 
   features/app-shell:
     dependencies:
+      '@vibesys/contracts':
+        specifier: workspace:*
+        version: link:../../libs/contracts
       '@vibesys/hosts':
         specifier: workspace:*
         version: link:../../libs/hosts

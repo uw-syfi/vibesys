@@ -43,9 +43,32 @@ export interface WelcomeOverview {
 /** What directory completion established (`@vibesys/hosts` owns it, with its reducer). */
 export type {PathCompletion} from '@vibesys/hosts';
 
+/**
+ * Why a request failed when the cause is a fact of the connection to the machine, which the main
+ * process knows by type: the screens word it as a status and keep `error`, the raw text (paths,
+ * exit codes), for a tooltip. A failure with no cause worded itself.
+ */
+export type FailureCause = 'link' | 'auth' | 'incompatible' | 'run-gone' | 'denied' | 'capacity';
+
+/** A cause as a status word. */
+export const FAILURE_CAUSE_WORDS: Readonly<Record<FailureCause, string>> = {
+  link: 'Unreachable',
+  auth: 'Sign-in needed',
+  incompatible: 'Incompatible',
+  'run-gone': 'Run gone',
+  denied: 'Denied',
+  capacity: 'Too many sessions',
+};
+
 export type WelcomeResult<T> =
   | {readonly ok: true; readonly value: T}
-  | {readonly ok: false; readonly error: string; readonly authNeeded: boolean};
+  | {
+      readonly ok: false;
+      readonly error: string;
+      readonly authNeeded: boolean;
+      /** Set when the failure is the connection's, not the request's own words. */
+      readonly cause?: FailureCause;
+    };
 
 /**
  * A bridge call that rejected (the main process went away) as a failed result, so a store waiting

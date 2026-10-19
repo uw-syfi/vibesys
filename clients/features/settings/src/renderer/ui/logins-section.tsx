@@ -7,6 +7,7 @@ import type {AgentLogin} from '@vibesys/ipc';
 import {Banner, Button, Card, Chip, Row, Stack, Text} from '@vibesys/ui';
 import type {JSX} from 'react';
 import {
+  failureWords,
   type LoginProgress,
   loginWords,
   type MachineSettingsAction,
@@ -27,7 +28,11 @@ function Progress(props: {
   if (progress === undefined || progress.kind === 'starting') return null;
   if (progress.kind === 'failed') {
     return (
-      <Banner tone="err" title={`Could not start the login on ${machine}.`} body={progress.error} />
+      <Banner
+        tone="err"
+        title={`Could not start the login on ${machine}.`}
+        {...failureWords(progress)}
+      />
     );
   }
   if (progress.kind === 'unavailable') {

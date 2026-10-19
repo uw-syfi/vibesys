@@ -7,7 +7,7 @@
  * no journal of) is carried as a status, never dropped.
  */
 import {roleName} from '@vibesys/contracts';
-import type {HostKey, UsageWindowEntry} from '@vibesys/hosts';
+import {type HostKey, hostFromKey, hostLabel, type UsageWindowEntry} from '@vibesys/hosts';
 import {addTokens, NO_TOKENS, type TokenTally, totalTokens} from '@vibesys/run-state';
 import {compactTokens} from '@vibesys/run-state/usage';
 
@@ -91,6 +91,11 @@ export interface UsageStatus {
   readonly runs: readonly StatusRun[];
   /** Other parts of the count, each a name and a number: `<name>: <n>`. */
   readonly parts: readonly string[];
+  /**
+   * What the count cannot say, one line each: a machine whose VibeSys is too old to say which runs
+   * hold the count names itself, so a count with no breakdown is still explained.
+   */
+  readonly notes: readonly string[];
 }
 
 export interface UsageView {
@@ -200,7 +205,7 @@ function runRows(sources: readonly UsageSource[]): readonly RunSpendRow[] {
       runId: run.runId,
       name: run.task ?? run.runId,
       costUsd: run.costUsd,
-      unpriced: run.unpricedTurns,
+      unpriced: run.unpricedTurns ?? 0,
     })),
   );
   rows.sort(byCost);
@@ -271,6 +276,13 @@ function agentRows(loaded: UsageLoaded): readonly AgentSpendRow[] {
   return rows.map(row => ({...row, cost: dollars(row.costUsd), share: shareOf(row.costUsd, top)}));
 }
 
+/** What a count says of a machine whose VibeSys sends no per-run (or per-agent) unpriced counts. */
+export const NO_BREAKDOWN = 'no per-run counts from this version of VibeSys';
+
+function machineName(host: HostKey): string {
+  return hostLabel(hostFromKey(host));
+}
+
 function projectName(path: string): string {
   return path.split('/').filter(Boolean).at(-1) ?? path;
 }
@@ -298,6 +310,7 @@ function status(
     readonly words: string;
     readonly runs: readonly StatusRun[];
     readonly parts: readonly string[];
+    readonly notes: readonly string[];
   }[] = [
     {
       key: 'unpriced',
@@ -305,6 +318,9 @@ function status(
       words: 'unpriced',
       runs: unpricedRuns,
       parts: unpricedParts,
+      notes: loaded.sources
+        .filter(source => source.usage.unpricedTurns > 0 && !source.usage.unpricedItemised)
+        .map(source => `${machineName(source.host)}: ${NO_BREAKDOWN}`),
     },
     {
       key: 'untimed',
@@ -312,6 +328,7 @@ function status(
       words: 'untimed',
       runs: [],
       parts: [],
+      notes: [],
     },
     {
       key: 'not-counted',
@@ -319,17 +336,33 @@ function status(
       words: notCounted === 1 ? 'run not counted' : 'runs not counted',
       runs: missing,
       parts: leftOut.map(source => `${projectName(source.project)}: ${source.leftOut}`),
+      notes: [],
     },
-    {key: 'unreachable', count: loaded.unreachable, words: 'unreachable', runs: [], parts: []},
-    {key: 'unsupported', count: loaded.unsupported, words: 'unsupported', runs: [], parts: []},
+    {
+      key: 'unreachable',
+      count: loaded.unreachable,
+      words: 'unreachable',
+      runs: [],
+      parts: [],
+      notes: [],
+    },
+    {
+      key: 'unsupported',
+      count: loaded.unsupported,
+      words: 'unsupported',
+      runs: [],
+      parts: [],
+      notes: [],
+    },
   ];
   return counted
     .filter(each => each.count > 0)
-    .map(({key, count, words, runs: of, parts}) => ({
+    .map(({key, count, words, runs: of, parts, notes}) => ({
       key,
       label: `${count} ${words}`,
       runs: of,
       parts,
+      notes,
     }));
 }
 

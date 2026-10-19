@@ -46,6 +46,11 @@ export interface UsageWindowEntry {
   readonly tokens: TokenTally;
   readonly turns: number;
   readonly unpricedTurns: number;
+  /**
+   * Whether the helper said how many unpriced turns each run and each agent holds. A helper that
+   * predates the per-row counts sends none, so `unpricedTurns` has no breakdown to explain it.
+   */
+  readonly unpricedItemised: boolean;
   /** Turns with no recorded end time: they belong to no window. */
   readonly untimedTurns: number;
   /** Ideas kept as the best so far whose result landed in the window. */
@@ -98,6 +103,9 @@ export function usageWindowEntry(reply: UsageWindowReply): UsageWindowEntry {
     tokens: reply.tokens,
     turns: reply.turns,
     unpricedTurns: reply.unpriced_turns,
+    unpricedItemised:
+      reply.by_run.every(run => run.unpriced_turns !== undefined) &&
+      reply.by_agent.every(agent => agent.unpriced_turns !== undefined),
     untimedTurns: reply.untimed_turns,
     newBests: reply.new_bests,
     costPerNewBestUsd: reply.cost_per_new_best_usd,

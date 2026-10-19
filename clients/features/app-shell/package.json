@@ -38,6 +38,7 @@
     "test": "node ../../tools/scripts/run_bun_tests.mjs ./src"
   },
   "dependencies": {
+    "@vibesys/contracts": "workspace:*",
     "@vibesys/hosts": "workspace:*",
     "@vibesys/ipc": "workspace:*",
     "@vibesys/runs": "workspace:*",

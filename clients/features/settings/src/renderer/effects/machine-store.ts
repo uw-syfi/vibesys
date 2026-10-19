@@ -2,7 +2,12 @@
  * The machine-scoped Settings store's shell: its requests go to the welcome bridge, and each reply
  * is dispatched as the action that names its token, so the reducer decides what a late one means.
  */
-import {attempt, type MachineSettingsWelcomeBridge, type WelcomeResult} from '@vibesys/ipc';
+import {
+  attempt,
+  type FailureCause,
+  type MachineSettingsWelcomeBridge,
+  type WelcomeResult,
+} from '@vibesys/ipc';
 import {createStore, type Store} from '@vibesys/store';
 import {
   INITIAL_MACHINE_SETTINGS,
@@ -14,10 +19,15 @@ import {
 
 type Outcome<T> =
   | {readonly ok: true; readonly value: T}
-  | {readonly ok: false; readonly error: string};
+  | {readonly ok: false; readonly error: string; readonly cause?: FailureCause};
 
 function outcome<T>(result: WelcomeResult<T>): Outcome<T> {
-  return result.ok ? {ok: true, value: result.value} : {ok: false, error: result.error};
+  if (result.ok) return {ok: true, value: result.value};
+  return {
+    ok: false,
+    error: result.error,
+    ...(result.cause === undefined ? {} : {cause: result.cause}),
+  };
 }
 
 /** What `call` answered, as the action that names its token. */

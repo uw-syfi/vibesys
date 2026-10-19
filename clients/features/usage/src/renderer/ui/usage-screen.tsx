@@ -163,6 +163,7 @@ function statusHint(
       return status.key === 'not-counted' ? `${name} ${run.runId}` : `${name}: ${run.count}`;
     }),
     ...status.parts,
+    ...status.notes,
   ];
   return lines.length === 0 ? undefined : lines.join('\n');
 }

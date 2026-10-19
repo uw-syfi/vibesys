@@ -4,12 +4,17 @@
  * happened. A raw error (`bridge.x is not a function`) is never shown. A load or check can be tried
  * again from the banner; a fix or start is pressed again where it was pressed.
  */
-import {UNEXPECTED_FAILURE} from '@vibesys/ipc';
+import {FAILURE_CAUSE_WORDS, UNEXPECTED_FAILURE} from '@vibesys/ipc';
 import type {Problem, Step} from '../../state/index.js';
 
 export interface ProblemWords {
   readonly title: string;
   readonly body: string;
+  /**
+   * The raw text behind a typed cause (paths, exit codes), for a tooltip; null when the body is
+   * already the whole account.
+   */
+  readonly detail: string | null;
   /** Whether the banner offers "Try again" (`retry`). */
   readonly retry: boolean;
 }
@@ -45,11 +50,16 @@ const START_UNKNOWN =
 
 export function problemWords(problem: Problem, machine: string): ProblemWords {
   const unreported = problem.detail === null;
+  const typed = problem.cause !== null && problem.detail !== null;
   return {
     title: TITLES[problem.step](machine),
-    body:
-      problem.detail ??
-      (problem.step === 'start' && unreported ? START_UNKNOWN : UNEXPECTED_FAILURE),
+    // A connection failure is a status word, its raw text a tooltip; a failure the main process
+    // worded itself is shown as it said it.
+    body: typed
+      ? FAILURE_CAUSE_WORDS[problem.cause as NonNullable<Problem['cause']>]
+      : (problem.detail ??
+        (problem.step === 'start' && unreported ? START_UNKNOWN : UNEXPECTED_FAILURE)),
+    detail: typed ? problem.detail : null,
     retry: RETRYABLE[problem.step],
   };
 }

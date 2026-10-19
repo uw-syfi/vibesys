@@ -69,6 +69,27 @@ test('a call that throws says something unexpected, and one the main process ref
   expect(view?.logins).toEqual({kind: 'failed', error: 'host-b is unreachable.'});
 });
 
+test('a connection failure is kept with its typed cause beside the raw words', async () => {
+  const store = createMachineSettingsStore(
+    bridge({
+      compute: () =>
+        Promise.resolve({
+          ok: false,
+          error: 'the host helper for /srv/x exited with 1',
+          authNeeded: false,
+          cause: 'incompatible',
+        }),
+    }),
+  );
+  store.dispatch({type: 'focus', host: 'ssh:host-b', section: 'clusters'});
+  await settle();
+  expect(store.getState().views['ssh:host-b']?.compute).toEqual({
+    kind: 'failed',
+    error: 'the host helper for /srv/x exited with 1',
+    cause: 'incompatible',
+  });
+});
+
 test('a cluster is tested and saved through the bridge, with the cluster the form describes', async () => {
   const sent: string[] = [];
   const store = createMachineSettingsStore(

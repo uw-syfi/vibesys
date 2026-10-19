@@ -113,7 +113,7 @@ function StepBody(props: ScreenProps & {readonly at: StepId}): JSX.Element {
   }
   switch (props.at) {
     case 'start':
-      return <StartPage {...cardProps} />;
+      return <StartPage {...cardProps} machines={props.machines} />;
     case 'domain':
       return <DomainPage {...cardProps} />;
     case 'model':

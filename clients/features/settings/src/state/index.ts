@@ -32,9 +32,11 @@ export {
   shownMachine,
 } from './machine-settings.js';
 export {
+  failureWords,
   hardwareModels,
   hardwareWords,
   loginWords,
+  machinesDetail,
   modalWords,
   reachWords,
   signInBlocked,

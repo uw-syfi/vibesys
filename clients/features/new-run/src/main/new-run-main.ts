@@ -2,7 +2,7 @@
  * The New run feature in the main process: it answers the screen's requests with one host helper
  * method each, over the host's connection, and records a started run in Recent.
  */
-import {type ConnectionLease, HelperRequestError} from '@vibesys/connection';
+import {ConnectionError, type ConnectionLease, HelperRequestError} from '@vibesys/connection';
 import type {
   Backend,
   Check,
@@ -62,6 +62,8 @@ type HelperCall = HelperRequest extends infer Request
 /** A failure the user reads: the helper's message, prefixed with what was being done. */
 function plain(error: unknown, doing: string): Error {
   const detail = error instanceof Error ? error.message : String(error);
+  // A connection failure keeps its typed cause, which the screen words apart from the raw text.
+  if (error instanceof ConnectionError) return error.reworded(`${doing}: ${detail}`);
   return new Error(`${doing}: ${detail}`);
 }
 

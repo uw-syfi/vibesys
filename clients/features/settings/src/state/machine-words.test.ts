@@ -1,9 +1,11 @@
 import {describe, expect, test} from 'bun:test';
 import type {AgentLogin} from '@vibesys/ipc';
 import {
+  failureWords,
   hardwareModels,
   hardwareWords,
   loginWords,
+  machinesDetail,
   modalWords,
   reachWords,
   signInBlocked,
@@ -75,5 +77,30 @@ describe('machine words', () => {
     expect(signInBlocked({...LOGIN, can_start_login: false}, 'host-b')).toBe(
       'Claude Code has no login command to start.',
     );
+  });
+});
+
+describe('the Machines entry', () => {
+  test('counts the saved machines and agrees in number with those needing attention', () => {
+    expect(machinesDetail(2, 0)).toBe('2 saved');
+    expect(machinesDetail(2, 1)).toBe('2 saved · 1 needs attention');
+    expect(machinesDetail(5, 2)).toBe('5 saved · 2 need attention');
+    for (let attention = 1; attention <= 6; attention += 1) {
+      const words = machinesDetail(6, attention);
+      expect(words).toContain(attention === 1 ? ' 1 needs ' : ` ${attention} need `);
+    }
+  });
+});
+
+describe('a failed reading', () => {
+  test('a connection failure is its status word with the raw text for the tooltip', () => {
+    const raw = 'the host helper for /srv/x exited with 1: ModuleNotFoundError';
+    const words = failureWords({error: raw, cause: 'incompatible'});
+    expect(words).toEqual({body: 'Incompatible', hint: raw});
+    expect(JSON.stringify(words.body)).not.toContain('/srv');
+  });
+
+  test('any other failure is shown in the words it came with', () => {
+    expect(failureWords({error: 'No such cluster.'})).toEqual({body: 'No such cluster.'});
   });
 });

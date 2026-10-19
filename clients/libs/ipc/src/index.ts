@@ -32,6 +32,8 @@ export {
   type ComputeSettings,
   type DestinationFound,
   type ExampleCreation,
+  FAILURE_CAUSE_WORDS,
+  type FailureCause,
   FIRST_PAINT_CHANNEL,
   type FirstPaint,
   type HarnessChoice,
