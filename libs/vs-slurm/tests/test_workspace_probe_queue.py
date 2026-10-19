@@ -272,10 +272,13 @@ def test_a_probe_still_queued_at_its_deadline_says_so_and_a_resume_retries_it(
         match=(
             rf"probe job {_FIRST_JOB_ID} was never scheduled\. It waited {waited} s in the "
             rf"queue{why} for 1 CPU, 1G of memory and 4 min without GPUs, in the partition "
-            rf"`sbatch_arguments` names.*a resumed run retries the probe.*raise {setting}"
+            rf"`sbatch_arguments` names.*The run retries the probe until "
+            rf"`workspace_root_probe_deadline_seconds`; raise {setting}"
         ),
-    ):
+    ) as never_scheduled:
         _probe(config, connector, root)
+    # It says nothing about the root, so the run may try again (``WorkspaceRootProof``).
+    assert never_scheduled.value.retryable
     assert f"scancel {_FIRST_JOB_ID}" in recorded_commands(connector.state)
     _assert_cleaned(remote)
 

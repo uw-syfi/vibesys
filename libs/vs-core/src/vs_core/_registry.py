@@ -37,7 +37,7 @@ from .types.records import OperationResult, RequestObserved
 from .types.sessions import TurnSpec
 from .types.strategy import Command, Operation, StrategyState, Wait
 
-ENVELOPE_SCHEMA_VERSION = 41
+ENVELOPE_SCHEMA_VERSION = 42
 """The version of the envelope a run writes now.
 
 Raising it needs, in the same change, the migration of the previous version in

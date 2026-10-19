@@ -130,6 +130,16 @@ def _v40_to_v41(envelope: JsonObject) -> JsonObject:
     return envelope | {"schema_version": 41}
 
 
+def _v41_to_v42(envelope: JsonObject) -> JsonObject:
+    """Version 42 added the measurement failure ``run_environment_unavailable`` and nothing else.
+
+    No run could end a measurement that way before, so no stored envelope holds it: the closed
+    set only grew, and every version 41 document is a valid version 42 one with its number
+    changed.
+    """
+    return envelope | {"schema_version": 42}
+
+
 def _floor_declared(core: JsonObject) -> bool:
     run = _object(core.get("run"))
     task = _object(_object(run.get("facts")).get("task"))
@@ -162,6 +172,7 @@ MIGRATIONS: Final[Mapping[int, Migration]] = {
     38: _v38_to_v39,
     39: _v39_to_v40,
     40: _v40_to_v41,
+    41: _v41_to_v42,
 }
 """Version ``n`` to ``n + 1``, one entry per version, contiguous from the oldest supported."""
 
