@@ -28,6 +28,7 @@ function entry(random: Seeded, project: number): UsageWindowEntry {
     runId: `run-${project}-${at}`,
     task: random.bool() ? random.pick(['spsc', 'mpmc', 'kv-store']) : null,
     costUsd: cents(random, 5000),
+    unpricedTurns: 0,
   }));
   const spent = byRun.reduce((total, run) => total + run.costUsd, 0);
   const left = Math.round(spent * 100);
@@ -43,10 +44,19 @@ function entry(random: Seeded, project: number): UsageWindowEntry {
       model: random.pick(MODELS),
       costUsd: part / 100,
       turns: 1 + random.int(9),
+      unpricedTurns: 0,
     });
   }
   const bests = random.int(4);
-  const unpriced = random.int(3);
+  // Unpriced turns belong to a run and to an agent, which the answer says of both.
+  const first = byRun[0];
+  const firstAgent = byAgent[0];
+  const unpriced =
+    first === undefined || firstAgent === undefined ? 0 : Math.min(random.int(3), firstAgent.turns);
+  if (first !== undefined && firstAgent !== undefined) {
+    byRun[0] = {...first, unpricedTurns: unpriced};
+    byAgent[0] = {...firstAgent, unpricedTurns: unpriced};
+  }
   return {
     since: 0,
     until: 1,
@@ -77,13 +87,13 @@ function loadedBy(seed: number): UsageLoaded {
     host: random.pick(['local', 'ssh:host-a', 'ssh:host-b'] as const),
     project: `/work/project-${at}`,
     usage: entry(random, at),
+    leftOut: random.int(3),
   }));
   return {
     sources,
     names: NAMES,
     unreachable: random.int(3),
     unsupported: random.int(3),
-    runsLeftOut: random.int(3),
   };
 }
 
@@ -149,13 +159,42 @@ describe('usageView', () => {
       expect(count('unpriced')).toBe(answers.reduce((total, a) => total + a.unpricedTurns, 0));
       expect(count('untimed')).toBe(answers.reduce((total, a) => total + a.untimedTurns, 0));
       expect(count('not-counted')).toBe(
-        answers.reduce((total, a) => total + a.missingRuns.length, 0) + loaded.runsLeftOut,
+        answers.reduce((total, a) => total + a.missingRuns.length, 0) +
+          loaded.sources.reduce((total, source) => total + source.leftOut, 0),
       );
       expect(count('unreachable')).toBe(loaded.unreachable);
       expect(count('unsupported')).toBe(loaded.unsupported);
       expect(view.agentsOmitted).toBe(answers.reduce((total, a) => total + a.agentsOmitted, 0));
       // A zero count is no status.
       expect(view.status.every(each => !each.label.startsWith('0 '))).toBe(true);
+    }
+  });
+
+  test('property: each unpriced count is explained by the runs and agents that hold its turns', () => {
+    for (const seed of SEEDS) {
+      const loaded = loadedBy(seed);
+      const view = usageView(loaded);
+      const status = view.status.find(each => each.key === 'unpriced');
+      const total = loaded.sources.reduce((sum, source) => sum + source.usage.unpricedTurns, 0);
+      expect(status?.runs.reduce((sum, run) => sum + run.count, 0) ?? 0).toBe(total);
+      expect(status?.parts.length ?? 0).toBe(view.agents.filter(row => row.unpriced > 0).length);
+      // The rows say it too: a row's unpriced count is its own, and none is more than its turns.
+      expect(view.runs.reduce((sum, row) => sum + row.unpriced, 0)).toBe(total);
+      expect(view.agents.reduce((sum, row) => sum + row.unpriced, 0)).toBe(total);
+      for (const row of view.agents) expect(row.unpriced).toBeLessThanOrEqual(row.turns);
+    }
+  });
+
+  test('property: runs not counted are named, by project, and the ones past the bound by count', () => {
+    for (const seed of SEEDS) {
+      const loaded = loadedBy(seed);
+      const status = usageView(loaded).status.find(each => each.key === 'not-counted');
+      const missing = loaded.sources.flatMap(source => source.usage.missingRuns);
+      expect(status?.runs.map(run => run.runId) ?? []).toEqual(missing);
+      const past = loaded.sources.filter(source => source.leftOut > 0);
+      expect(status?.parts ?? []).toEqual(
+        past.map(source => `${source.project.split('/').at(-1)}: ${source.leftOut}`),
+      );
     }
   });
 
@@ -166,17 +205,32 @@ describe('usageView', () => {
         {
           host: 'local',
           project: '/p',
+          leftOut: 0,
           usage: {
             ...base,
             spentUsd: 3,
             byRun: [
-              {runId: 'run-a', task: 'spsc', costUsd: 2},
-              {runId: 'run-b', task: null, costUsd: 1},
+              {runId: 'run-a', task: 'spsc', costUsd: 2, unpricedTurns: 0},
+              {runId: 'run-b', task: null, costUsd: 1, unpricedTurns: 0},
             ],
             byAgent: [
-              {role: 'planner', harness: 'claude', model: 'claude-opus-5-5', costUsd: 2, turns: 4},
-              {role: 'optimizer', harness: 'codex', model: 'gpt-6.1-luna', costUsd: 1, turns: 2},
-              {role: null, harness: null, model: null, costUsd: 0, turns: 1},
+              {
+                role: 'planner',
+                harness: 'claude',
+                model: 'claude-opus-5-5',
+                costUsd: 2,
+                turns: 4,
+                unpricedTurns: 0,
+              },
+              {
+                role: 'optimizer',
+                harness: 'codex',
+                model: 'gpt-6.1-luna',
+                costUsd: 1,
+                turns: 2,
+                unpricedTurns: 0,
+              },
+              {role: null, harness: null, model: null, costUsd: 0, turns: 1, unpricedTurns: 1},
             ],
           },
         },
@@ -184,7 +238,6 @@ describe('usageView', () => {
       names: NAMES,
       unreachable: 0,
       unsupported: 0,
-      runsLeftOut: 0,
     };
     const view = usageView(loaded);
     expect(view.runs.map(run => run.name)).toEqual(['spsc', 'run-b']);
@@ -202,22 +255,23 @@ describe('usageView', () => {
       model: 'claude-opus-5-5',
       costUsd: 1.5,
       turns: 3,
+      unpricedTurns: 1,
     };
     const base = entry(new Seeded(9), 0);
     const source = (project: string): UsageSource => ({
       host: 'local',
       project,
       usage: {...base, spentUsd: 1.5, byRun: [], byAgent: [agent], agentsOmitted: 0},
+      leftOut: 0,
     });
     const view = usageView({
       sources: [source('/a'), source('/b')],
       names: NAMES,
       unreachable: 0,
       unsupported: 0,
-      runsLeftOut: 0,
     });
     expect(view.agents).toHaveLength(1);
-    expect(view.agents[0]).toMatchObject({costUsd: 3, turns: 6, cost: '$3.00'});
+    expect(view.agents[0]).toMatchObject({costUsd: 3, turns: 6, cost: '$3.00', unpriced: 2});
   });
 
   test('a window with no turn is empty; no new best reads none, never a division by zero', () => {
@@ -226,7 +280,6 @@ describe('usageView', () => {
       names: [],
       unreachable: 0,
       unsupported: 0,
-      runsLeftOut: 0,
     });
     expect(view.empty).toBe(true);
     expect(view.tiles.map(tile => tile.figure)).toEqual(['$0.00', '$0.00/h', 'unknown', 'none']);
@@ -240,6 +293,7 @@ describe('usageView', () => {
         {
           host: 'local',
           project: '/p',
+          leftOut: 0,
           usage: {
             ...base,
             spentUsd: 12,
@@ -260,7 +314,6 @@ describe('usageView', () => {
       names: [],
       unreachable: 0,
       unsupported: 0,
-      runsLeftOut: 0,
     });
     expect(view.tiles).toEqual([
       {name: 'Spent', figure: '$12.00', detail: '7 turns'},
@@ -294,14 +347,14 @@ describe('the order of runs that cost the same', () => {
         runId: `run-${at}`,
         task: random.pick(['spsc', 'mpmc', null]),
         costUsd: random.pick([1, 2]),
+        unpricedTurns: 0,
       }));
       const view = (rows: typeof byRun) =>
         usageView({
-          sources: [{host: 'local', project: '/p', usage: {...base, byRun: rows}}],
+          sources: [{host: 'local', project: '/p', usage: {...base, byRun: rows}, leftOut: 0}],
           names: NAMES,
           unreachable: 0,
           unsupported: 0,
-          runsLeftOut: 0,
         }).runs.map(row => row.key);
 
       const shuffled = [...byRun].sort(() => random.next() - 0.5);

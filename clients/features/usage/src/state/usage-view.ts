@@ -16,6 +16,8 @@ export interface UsageSource {
   readonly host: HostKey;
   readonly project: string;
   readonly usage: UsageWindowEntry;
+  /** The project's runs beyond the helper's bound on one question, which the answer does not count. */
+  readonly leftOut: number;
 }
 
 /** How an agent's harness and model are named, as the machine's catalogue gives them. */
@@ -36,8 +38,6 @@ export interface UsageLoaded {
   readonly unreachable: number;
   /** Projects whose machine's VibeSys does not offer usage. */
   readonly unsupported: number;
-  /** Runs beyond the helper's bound on one question, which no answer counts. */
-  readonly runsLeftOut: number;
 }
 
 export interface UsageTile {
@@ -57,6 +57,8 @@ export interface RunSpendRow {
   readonly cost: string;
   /** The row's cost against the costliest row's, from 0 to 1. */
   readonly share: number;
+  /** Its turns in the window that reported no cost, which its cost leaves out. */
+  readonly unpriced: number;
 }
 
 export interface AgentSpendRow {
@@ -69,11 +71,26 @@ export interface AgentSpendRow {
   readonly cost: string;
   readonly turns: number;
   readonly share: number;
+  /** Those of its turns that reported no cost, which its cost leaves out. */
+  readonly unpriced: number;
 }
 
+/** A run a status counts, with how many of its turns (or itself, once) the status counts there. */
+interface StatusRun {
+  readonly host: HostKey;
+  readonly project: string;
+  readonly runId: string;
+  readonly count: number;
+}
+
+/** A status chip: its count in words, and what the count is made of (for the pointer). */
 export interface UsageStatus {
   readonly key: string;
   readonly label: string;
+  /** The runs the count is of, each with its share; none when it counts something else. */
+  readonly runs: readonly StatusRun[];
+  /** Other parts of the count, each a name and a number: `<name>: <n>`. */
+  readonly parts: readonly string[];
 }
 
 export interface UsageView {
@@ -183,6 +200,7 @@ function runRows(sources: readonly UsageSource[]): readonly RunSpendRow[] {
       runId: run.runId,
       name: run.task ?? run.runId,
       costUsd: run.costUsd,
+      unpriced: run.unpricedTurns,
     })),
   );
   rows.sort(byCost);
@@ -200,6 +218,7 @@ interface AgentSum {
   readonly model: string | null;
   costUsd: number;
   turns: number;
+  unpriced: number;
 }
 
 function agentRows(loaded: UsageLoaded): readonly AgentSpendRow[] {
@@ -208,10 +227,11 @@ function agentRows(loaded: UsageLoaded): readonly AgentSpendRow[] {
     for (const agent of usage.byAgent) {
       const key = JSON.stringify([agent.role, agent.harness, agent.model]);
       const found = sums.get(key);
-      if (found === undefined) sums.set(key, {...agent});
+      if (found === undefined) sums.set(key, {...agent, unpriced: agent.unpricedTurns});
       else {
         found.costUsd += agent.costUsd;
         found.turns += agent.turns;
+        found.unpriced += agent.unpricedTurns;
       }
     }
   }
@@ -238,6 +258,7 @@ function agentRows(loaded: UsageLoaded): readonly AgentSpendRow[] {
             },
       costUsd: agent.costUsd,
       turns: agent.turns,
+      unpriced: agent.unpriced,
     };
   });
   rows.sort((left, right) =>
@@ -250,33 +271,79 @@ function agentRows(loaded: UsageLoaded): readonly AgentSpendRow[] {
   return rows.map(row => ({...row, cost: dollars(row.costUsd), share: shareOf(row.costUsd, top)}));
 }
 
-function status(loaded: UsageLoaded): readonly UsageStatus[] {
+function projectName(path: string): string {
+  return path.split('/').filter(Boolean).at(-1) ?? path;
+}
+
+function status(
+  loaded: UsageLoaded,
+  runs: readonly RunSpendRow[],
+  agents: readonly AgentSpendRow[],
+): readonly UsageStatus[] {
   const answers = loaded.sources.map(source => source.usage);
-  const not = sum(answers.map(answer => answer.missingRuns.length)) + loaded.runsLeftOut;
-  const counted: readonly (readonly [string, number, string])[] = [
-    ['unpriced', sum(answers.map(answer => answer.unpricedTurns)), 'unpriced'],
-    ['untimed', sum(answers.map(answer => answer.untimedTurns)), 'untimed'],
-    ['not-counted', not, 'runs not counted'],
-    ['unreachable', loaded.unreachable, 'unreachable'],
-    ['unsupported', loaded.unsupported, 'unsupported'],
+  const missing = loaded.sources.flatMap(({host, project, usage}) =>
+    usage.missingRuns.map(runId => ({host, project, runId, count: 1})),
+  );
+  const leftOut = loaded.sources.filter(source => source.leftOut > 0);
+  const notCounted = missing.length + sum(leftOut.map(source => source.leftOut));
+  const unpricedRuns = runs
+    .filter(row => row.unpriced > 0)
+    .map(({host, project, runId, unpriced}) => ({host, project, runId, count: unpriced}));
+  const unpricedParts = agents
+    .filter(row => row.unpriced > 0)
+    .map(row => `${row.role} ${row.harness} ${row.model.name}: ${row.unpriced}`);
+  const counted: readonly {
+    readonly key: string;
+    readonly count: number;
+    readonly words: string;
+    readonly runs: readonly StatusRun[];
+    readonly parts: readonly string[];
+  }[] = [
+    {
+      key: 'unpriced',
+      count: sum(answers.map(answer => answer.unpricedTurns)),
+      words: 'unpriced',
+      runs: unpricedRuns,
+      parts: unpricedParts,
+    },
+    {
+      key: 'untimed',
+      count: sum(answers.map(answer => answer.untimedTurns)),
+      words: 'untimed',
+      runs: [],
+      parts: [],
+    },
+    {
+      key: 'not-counted',
+      count: notCounted,
+      words: notCounted === 1 ? 'run not counted' : 'runs not counted',
+      runs: missing,
+      parts: leftOut.map(source => `${projectName(source.project)}: ${source.leftOut}`),
+    },
+    {key: 'unreachable', count: loaded.unreachable, words: 'unreachable', runs: [], parts: []},
+    {key: 'unsupported', count: loaded.unsupported, words: 'unsupported', runs: [], parts: []},
   ];
   return counted
-    .filter(([, count]) => count > 0)
-    .map(([key, count, words]) => ({
+    .filter(each => each.count > 0)
+    .map(({key, count, words, runs: of, parts}) => ({
       key,
-      label: `${count} ${key === 'not-counted' && count === 1 ? 'run not counted' : words}`,
+      label: `${count} ${words}`,
+      runs: of,
+      parts,
     }));
 }
 
 /** The page's figures for what the projects answered. */
 export function usageView(loaded: UsageLoaded): UsageView {
   const answers = loaded.sources.map(source => source.usage);
+  const runs = runRows(loaded.sources);
+  const agents = agentRows(loaded);
   return {
     empty: sum(answers.map(answer => answer.turns)) === 0,
     tiles: tiles(loaded),
-    runs: runRows(loaded.sources),
-    agents: agentRows(loaded),
+    runs,
+    agents,
     agentsOmitted: sum(answers.map(answer => answer.agentsOmitted)),
-    status: status(loaded),
+    status: status(loaded, runs, agents),
   };
 }

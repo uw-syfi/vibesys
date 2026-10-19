@@ -238,6 +238,41 @@ describe('the Runs dashboard', () => {
     expect(rows[0]?.row.startedAt).not.toBeNull();
   });
 
+  test('a run the machine reports is listed with no local record and whatever its project lists', () => {
+    // A fresh profile: nothing opened, so no Recent record points at any run.
+    for (const answer of [
+      (): readonly ListedRun[] | null => [],
+      (): readonly ListedRun[] | null => null,
+      (): readonly ListedRun[] | null => [run('other', 3)],
+    ]) {
+      const {state, requests} = open([
+        listed(
+          'ssh:host-a',
+          [server('live', '/p/q', 'running')],
+          [server('done', '/p/q', 'completed')],
+        ),
+      ]);
+      const answered = apply(state, [
+        listedAction(listsOf(requests)[0]?.[2] as number, 'ssh:host-a', '/p/q', answer()),
+      ]);
+
+      const rows = dashboardRows(answered, CLOCK);
+
+      expect(rows.map(each => each.row.run.runId)).toContain('live');
+      expect(rows.map(each => each.row.run.runId)).toContain('done');
+      expect(rows.find(each => each.row.run.runId === 'live')?.row.status).toBe('live');
+      expect(sidebarInvariants(answered)).toEqual([]);
+    }
+  });
+
+  test('before any project listing answers, the live run is already listed once', () => {
+    const {state} = open([listed('ssh:host-a', [server('live', '/p/q', 'running')])]);
+    expect(dashboardRows(state, CLOCK).map(each => each.row.run.runId)).toEqual(['live']);
+    // The project's own listing of it replaces the report, never doubles it.
+    const requests = sidebarStep(state, {type: 'select', screen: {kind: 'new-run'}}).requests;
+    expect(requests).toEqual([]);
+  });
+
   test('an archived run is not shown', () => {
     const {state, requests} = open([listed('ssh:host-a')], [opened('ssh:host-a', '/p/q', 'r0')]);
     const answered = apply(state, [

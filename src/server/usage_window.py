@@ -70,12 +70,17 @@ def usage_window(
     run_costs: dict[RunId, list[float]] = {}
     agent_costs: dict[tuple[str | None, str | None, str | None], list[float]] = {}
     agent_turns: dict[tuple[str | None, str | None, str | None], int] = defaultdict(int)
+    run_unpriced: dict[RunId, int] = defaultdict(int)
+    agent_unpriced: dict[tuple[str | None, str | None, str | None], int] = defaultdict(int)
     for run, record, _ in placed:
         costs = [] if record.cost_usd is None else [record.cost_usd]
         run_costs.setdefault(run.run_id, []).extend(costs)
         agent = (record.role, record.harness, record.model)
         agent_costs.setdefault(agent, []).extend(costs)
         agent_turns[agent] += 1
+        if record.cost_usd is None:
+            run_unpriced[run.run_id] += 1
+            agent_unpriced[agent] += 1
     priced = sum(record.cost_usd is not None for _, record, _ in placed)
     spent = math.fsum(cost for costs in run_costs.values() for cost in costs)
     recent = math.fsum(
@@ -87,7 +92,12 @@ def usage_window(
     tasks = {run.run_id: run.task for run in runs}
     by_run = sorted(
         (
-            RunSpend(run_id=run_id, task=tasks[run_id], cost_usd=math.fsum(costs))
+            RunSpend(
+                run_id=run_id,
+                task=tasks[run_id],
+                cost_usd=math.fsum(costs),
+                unpriced_turns=run_unpriced[run_id],
+            )
             for run_id, costs in run_costs.items()
         ),
         key=lambda each: (-each.cost_usd, each.run_id),
@@ -100,6 +110,7 @@ def usage_window(
                 model=agent[2],
                 cost_usd=math.fsum(costs),
                 turns=agent_turns[agent],
+                unpriced_turns=agent_unpriced[agent],
             )
             for agent, costs in agent_costs.items()
         ),

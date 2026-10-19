@@ -14,7 +14,6 @@ const EMPTY: UsageLoaded = {
   names: [],
   unreachable: 0,
   unsupported: 0,
-  runsLeftOut: 0,
 };
 const USAGE: UsageOutcome = {kind: 'usage', loaded: EMPTY};
 

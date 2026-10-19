@@ -18,6 +18,8 @@ export interface RunSpend {
   /** The task the run was started for; null when the run records none. */
   readonly task: string | null;
   readonly costUsd: number;
+  /** Its turns in the window that reported no cost. */
+  readonly unpricedTurns: number;
 }
 
 /** What one kind of agent spent: a role on a harness and model, each null where unrecorded. */
@@ -27,6 +29,8 @@ export interface AgentSpend {
   readonly model: string | null;
   readonly costUsd: number;
   readonly turns: number;
+  /** Those of `turns` that reported no cost. */
+  readonly unpricedTurns: number;
 }
 
 /** The Usage page's figures for the window `[since, until)`. */
@@ -97,17 +101,20 @@ export function usageWindowEntry(reply: UsageWindowReply): UsageWindowEntry {
     untimedTurns: reply.untimed_turns,
     newBests: reply.new_bests,
     costPerNewBestUsd: reply.cost_per_new_best_usd,
-    byRun: reply.by_run.map(({run_id, task, cost_usd}) => ({
+    // A helper that predates the per-run and per-agent counts sends none: zero is "not said".
+    byRun: reply.by_run.map(({run_id, task, cost_usd, unpriced_turns}) => ({
       runId: run_id,
       task,
       costUsd: cost_usd,
+      unpricedTurns: unpriced_turns ?? 0,
     })),
-    byAgent: reply.by_agent.map(({role, harness, model, cost_usd, turns}) => ({
+    byAgent: reply.by_agent.map(({role, harness, model, cost_usd, turns, unpriced_turns}) => ({
       role,
       harness,
       model,
       costUsd: cost_usd,
       turns,
+      unpricedTurns: unpriced_turns ?? 0,
     })),
     agentsOmitted: reply.agents_omitted,
     missingRuns: [...reply.missing_runs],

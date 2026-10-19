@@ -241,14 +241,17 @@ test('tiles are dense: at 1440 four or more share a row, and at 660 none overlap
   expect(overflow).toBeLessThanOrEqual(0);
 });
 
-test('a machine that cannot list its runs leaves the other machine’s tiles', async ({page}) => {
+test('a machine that cannot list a project’s runs still shows the runs its registry reports', async ({
+  page,
+}) => {
   const world = dashboardWorld(MANY_RUNS);
   const rest = Object.fromEntries(
     Object.entries(world.projectRuns ?? {}).filter(([key]) => !key.startsWith('ssh:host-b|')),
   );
   await open(page, {...world, projectRuns: rest});
 
-  await expect(page.locator('.vs-overview-tile', {hasText: 'host-b'})).toHaveCount(0);
+  // The runs the machine itself reports (live and recently ended) need no project listing.
+  await expect(page.locator('.vs-overview-tile', {hasText: 'host-b'})).toHaveCount(4);
   await expect(page.locator('.vs-overview-tile', {hasText: 'host-a'})).toHaveCount(5);
 });
 

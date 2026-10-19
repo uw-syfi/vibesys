@@ -29,9 +29,9 @@ import {
   type AllRunsState,
   askProjectRuns,
   type ListProjectRuns,
-  listedRunRefs,
   projectRunsListed,
   refreshed,
+  reportedRunRefs,
 } from './all-runs.js';
 import {
   type Clock,
@@ -280,8 +280,8 @@ interface WantedDigest {
 export const DASHBOARD_RUNS = 60;
 
 /** The runs the dashboard shows: not archived, newest first, at most `DASHBOARD_RUNS`. */
-export function dashboardRefs(state: SidebarState): ReturnType<typeof listedRunRefs> {
-  return listedRunRefs(state.allRuns)
+export function dashboardRefs(state: SidebarState): ReturnType<typeof reportedRunRefs> {
+  return reportedRunRefs(state.allRuns, state.listings)
     .filter(
       ({host, run}) =>
         !state.archived.some(archived => sameRun(archived, {host, runId: run.runId})),

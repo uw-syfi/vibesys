@@ -950,6 +950,7 @@ export type CostPerNewBestUsd = number | null;
 export type RunId11 = string;
 export type Task13 = string | null;
 export type CostUsd1 = number;
+export type UnpricedTurns1 = number;
 /**
  * @maxItems 100
  */
@@ -959,6 +960,7 @@ export type Harness1 = string | null;
 export type Model6 = string | null;
 export type CostUsd2 = number;
 export type Turns1 = number;
+export type UnpricedTurns2 = number;
 /**
  * @maxItems 64
  */
@@ -2849,6 +2851,7 @@ export interface RunSpend {
   run_id: RunId11;
   task: Task13;
   cost_usd: CostUsd1;
+  unpriced_turns?: UnpricedTurns1;
 }
 /**
  * What one kind of agent spent in the window: a role on a harness and model.
@@ -2862,6 +2865,7 @@ export interface AgentSpend {
   model: Model6;
   cost_usd: CostUsd2;
   turns: Turns1;
+  unpriced_turns?: UnpricedTurns2;
 }
 /**
  * The server for ``run.connect``: the run's live one, else a read-only one.

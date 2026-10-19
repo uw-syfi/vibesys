@@ -155,6 +155,23 @@ def test_the_window_counts_exactly_the_turns_that_ended_in_it(
 
 
 @given(runs=_RUNS, window=_WINDOWS)
+def test_the_unpriced_turns_are_placed_on_the_runs_and_agents_that_ran_them(
+    runs: list[RunUsage], window: tuple[int, int]
+) -> None:
+    since, length = window
+    reply = usage_window(_request(since, length), runs, ())
+
+    assert sum(each.unpriced_turns for each in reply.by_run) == reply.unpriced_turns
+    assert sum(each.unpriced_turns for each in reply.by_agent) == reply.unpriced_turns
+    for spend in reply.by_run:
+        run = next(each for each in runs if each.run_id == spend.run_id)
+        assert spend.unpriced_turns == sum(
+            record.cost_usd is None for record in _inside(run, since, length)
+        )
+    assert all(each.unpriced_turns <= each.turns for each in reply.by_agent)
+
+
+@given(runs=_RUNS, window=_WINDOWS)
 def test_the_costs_by_run_and_by_agent_are_the_parts_of_the_total(
     runs: list[RunUsage], window: tuple[int, int]
 ) -> None:

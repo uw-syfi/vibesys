@@ -103,7 +103,11 @@ describe('when a Recent row says a run began', () => {
       type: 'recent',
       recent: [recent('r1', '/p/queue-rs', 'mpmc', 1)],
     });
-    const answered = answer(opened.state, opened.requests, new Map([['r1', read({createdAt})]]));
+    const answered = answer(
+      opened.state,
+      [...first.requests, ...opened.requests],
+      new Map([['r1', read({createdAt})]]),
+    );
     return recentRows(answered, CLOCK).rows[0]?.detail;
   }
 

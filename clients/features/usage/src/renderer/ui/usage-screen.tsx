@@ -29,6 +29,7 @@ import {
   USAGE_WINDOWS,
   type UsageActions,
   type UsageScreenState,
+  type UsageStatus,
   type UsageView,
 } from '../../state/index.js';
 
@@ -90,7 +91,18 @@ function runColumns(
         );
       },
     },
-    {key: 'cost', header: 'Cost', mono: true, align: 'end', cell: row => row.cost},
+    {
+      key: 'cost',
+      header: 'Cost',
+      mono: true,
+      align: 'end',
+      cell: row => (
+        <Row gap="space-2" align="center" justify="end">
+          {row.unpriced === 0 ? null : <Chip label={`${row.unpriced} unpriced`} tone="warn" />}
+          {row.cost}
+        </Row>
+      ),
+    },
   ];
 }
 
@@ -111,7 +123,19 @@ const AGENT_COLUMNS: readonly TableColumn<AgentSpendRow>[] = [
       </span>
     ),
   },
-  {key: 'turns', header: 'Turns', mono: true, align: 'end', wide: true, cell: row => row.turns},
+  {
+    key: 'turns',
+    header: 'Turns',
+    mono: true,
+    align: 'end',
+    wide: true,
+    cell: row => (
+      <Row gap="space-2" align="center" justify="end">
+        {row.unpriced === 0 ? null : <Chip label={`${row.unpriced} unpriced`} tone="warn" />}
+        {row.turns}
+      </Row>
+    ),
+  },
   {
     key: 'share',
     header: 'Share',
@@ -126,6 +150,22 @@ const AGENT_COLUMNS: readonly TableColumn<AgentSpendRow>[] = [
   },
   {key: 'cost', header: 'Cost', mono: true, align: 'end', cell: row => row.cost},
 ];
+
+/** What a status counts, a line per part, for the pointer: a run by the title every screen gives it. */
+function statusHint(
+  status: UsageStatus,
+  label: (run: SpendRunRef) => SpendRunLabel,
+): string | undefined {
+  const lines = [
+    ...status.runs.map(run => {
+      const {title, began} = label(run);
+      const name = began === null ? title : `${title} ${began}`;
+      return status.key === 'not-counted' ? `${name} ${run.runId}` : `${name}: ${run.count}`;
+    }),
+    ...status.parts,
+  ];
+  return lines.length === 0 ? undefined : lines.join('\n');
+}
 
 function Section(props: {readonly title: string; readonly children: JSX.Element}): JSX.Element {
   return (
@@ -161,7 +201,9 @@ function Figures(props: {
       {view.status.length === 0 ? null : (
         <Row gap="space-2" wrap>
           {view.status.map(each => (
-            <Chip key={each.key} label={each.label} tone="warn" />
+            <span key={each.key} title={statusHint(each, label)}>
+              <Chip label={each.label} tone="warn" />
+            </span>
           ))}
         </Row>
       )}

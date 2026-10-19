@@ -404,6 +404,8 @@ class RunSpend(BaseModel):
     """The task the run was started for, as ``runs.list`` names it; ``None`` when the run records none."""
     cost_usd: NonNegativeFloat
     """The reported cost of the run's turns that ended in the window."""
+    unpriced_turns: NonNegativeInt = 0
+    """The run's turns in the window that reported no cost (a helper that predates it sends none)."""
 
 
 class AgentSpend(BaseModel):
@@ -421,6 +423,8 @@ class AgentSpend(BaseModel):
     cost_usd: NonNegativeFloat
     turns: NonNegativeInt
     """The turns, priced or not, that ended in the window."""
+    unpriced_turns: NonNegativeInt = 0
+    """Those of ``turns`` that reported no cost (a helper that predates it sends none)."""
 
 
 class UsageWindowReply(HelperReplyBase):

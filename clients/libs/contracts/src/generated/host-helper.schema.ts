@@ -313,6 +313,12 @@ const hostHelperSchema: Record<string, unknown> = {
           "minimum": 0,
           "title": "Turns",
           "type": "integer"
+        },
+        "unpriced_turns": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Unpriced Turns",
+          "type": "integer"
         }
       },
       "required": [
@@ -5918,6 +5924,12 @@ const hostHelperSchema: Record<string, unknown> = {
           "minimum": 0,
           "title": "Cost Usd",
           "type": "number"
+        },
+        "unpriced_turns": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Unpriced Turns",
+          "type": "integer"
         }
       },
       "required": [

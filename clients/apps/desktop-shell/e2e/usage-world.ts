@@ -21,13 +21,19 @@ interface Entry {
   readonly untimedTurns: number;
   readonly newBests: number;
   readonly costPerNewBestUsd: number | null;
-  readonly byRun: readonly {runId: string; task: string | null; costUsd: number}[];
+  readonly byRun: readonly {
+    runId: string;
+    task: string | null;
+    costUsd: number;
+    unpricedTurns: number;
+  }[];
   readonly byAgent: readonly {
     role: string | null;
     harness: string | null;
     model: string | null;
     costUsd: number;
     turns: number;
+    unpricedTurns: number;
   }[];
   readonly agentsOmitted: number;
   readonly missingRuns: readonly string[];
@@ -81,6 +87,7 @@ function spending(count: number, agents: number): Entry {
     runId: run.runId,
     task: run.task,
     costUsd: Math.round((900 / (at + 1)) * 100) / 100,
+    unpricedTurns: 0,
   }));
   const spent = byRun.reduce((total, run) => total + run.costUsd, 0);
   const byAgent = Array.from({length: agents}, (_, at) => {
@@ -92,6 +99,7 @@ function spending(count: number, agents: number): Entry {
       model,
       costUsd: Math.round((spent / agents / (1 + at / 3)) * 100) / 100,
       turns: 3 + at,
+      unpricedTurns: 0,
     };
   });
   return {
@@ -113,6 +121,15 @@ function spending(count: number, agents: number): Entry {
   };
 }
 
+/** `entry` with `counts` of its first runs' and agents' turns unpriced (each count within the agent's turns). */
+function unpricedOn(entry: Entry, counts: readonly number[]): Entry {
+  return {
+    ...entry,
+    byRun: entry.byRun.map((run, at) => ({...run, unpricedTurns: counts[at] ?? 0})),
+    byAgent: entry.byAgent.map((agent, at) => ({...agent, unpricedTurns: counts[at] ?? 0})),
+  };
+}
+
 /** What a world's helper answers for the project, or how it does not. */
 type Answer = Entry | 'unsupported' | 'failed';
 
@@ -130,7 +147,7 @@ export const USAGE_CASES: readonly UsageCase[] = [
     name: 'unpriced-turns',
     runs: 6,
     answer: {
-      ...spending(6, 4),
+      ...unpricedOn(spending(6, 4), [3, 2]),
       unpricedTurns: 5,
       untimedTurns: 2,
       missingRuns: ['20261001-000001'],

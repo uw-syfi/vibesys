@@ -18,7 +18,7 @@ const spent = (usd: number): UsageWindowEntry => ({
   ...ZERO_USAGE,
   spentUsd: usd,
   turns: 1,
-  byRun: [{runId: 'run-0001', task: 'spsc', costUsd: usd}],
+  byRun: [{runId: 'run-0001', task: 'spsc', costUsd: usd, unpricedTurns: 0}],
 });
 
 async function loaded(bridge: FakeUsageBridge) {
@@ -56,7 +56,8 @@ describe('loadUsage', () => {
       {host: 'local', project: '/work/a', runIds: ['run-0003', 'run-0002', 'run-0001'], ...SPAN},
       {host: 'ssh:host-a', project: '/srv/b', runIds: ['run-0001'], ...SPAN},
     ]);
-    expect(result).toMatchObject({unreachable: 0, unsupported: 0, runsLeftOut: 0});
+    expect(result).toMatchObject({unreachable: 0, unsupported: 0});
+    expect(result.sources.map(source => source.leftOut)).toEqual([0, 0]);
   });
 
   test('property: it names at most the helper bound of runs, and counts the rest as left out', async () => {
@@ -75,7 +76,7 @@ describe('loadUsage', () => {
       const result = await loaded(bridge);
       const named = bridge.asked.reduce((total, each) => total + each.runIds.length, 0);
       expect(named).toBeLessThanOrEqual(100);
-      expect(named + result.runsLeftOut).toBe(count);
+      expect(named + (result.sources[0]?.leftOut ?? 0)).toBe(count);
       // A project with no run is not asked at all.
       expect(bridge.asked).toHaveLength(count === 0 ? 0 : 1);
     }

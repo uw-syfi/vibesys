@@ -19,7 +19,7 @@ type Listed = Extract<HostListing, {readonly kind: 'listed'}>;
 
 /** What one project answered, or why it did not. */
 type ProjectAnswer =
-  | {readonly kind: 'source'; readonly source: UsageSource; readonly leftOut: number}
+  | {readonly kind: 'source'; readonly source: UsageSource}
   | {readonly kind: 'none'}
   | {readonly kind: 'unreachable'}
   | {readonly kind: 'unsupported'};
@@ -45,7 +45,7 @@ async function askProject(
   );
   if (outcome === null) return {kind: 'unreachable'};
   if (outcome.kind === 'unsupported') return {kind: 'unsupported'};
-  return {kind: 'source', source: {host, project, usage: outcome.usage}, leftOut};
+  return {kind: 'source', source: {host, project, usage: outcome.usage, leftOut}};
 }
 
 /** What the machine's catalogue calls its harnesses and models; none when it offers no catalogue. */
@@ -103,10 +103,6 @@ export async function loadUsage(
       names: names.flat(),
       unreachable,
       unsupported,
-      runsLeftOut: answers.reduce(
-        (total, answer) => total + (answer.kind === 'source' ? answer.leftOut : 0),
-        0,
-      ),
     },
   };
 }

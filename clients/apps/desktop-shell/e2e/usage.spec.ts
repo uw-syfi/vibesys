@@ -172,6 +172,13 @@ test('what the helper could not price or place is shown as status words', async 
     await expect(page.getByText(label, {exact: true})).toBeVisible();
   }
   await expect(page.getByRole('region', {name: 'Totals'})).toContainText('none');
+  // Each count is understood from structure: the rows that hold it say so, and the chip lists them.
+  await expect(page.getByText('3 unpriced', {exact: true}).first()).toBeVisible();
+  await expect(page.getByText('2 unpriced', {exact: true}).first()).toBeVisible();
+  const chip = page.locator('span[title]').filter({hasText: '5 unpriced'});
+  expect(await chip.getAttribute('title')).toMatch(/: 3\n.*: 2/);
+  const missing = page.locator('span[title]').filter({hasText: '1 run not counted'});
+  expect(await missing.getAttribute('title')).toContain('20261001-000001');
 });
 
 test('the window select asks over that window, and a run opens from its row', async ({page}) => {

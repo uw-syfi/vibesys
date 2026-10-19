@@ -880,8 +880,17 @@ describe('Hosts.usageWindow', () => {
     untimed_turns: 0,
     new_bests: 5,
     cost_per_new_best_usd: 2.5,
-    by_run: [{run_id: 'run-1', task: 'mpmc', cost_usd: 12.5}],
-    by_agent: [{role: 'implementer', harness: 'codex', model: null, cost_usd: 12.5, turns: 7}],
+    by_run: [{run_id: 'run-1', task: 'mpmc', cost_usd: 12.5, unpriced_turns: 1}],
+    by_agent: [
+      {
+        role: 'implementer',
+        harness: 'codex',
+        model: null,
+        cost_usd: 12.5,
+        turns: 7,
+        unpriced_turns: 1,
+      },
+    ],
     agents_omitted: 0,
   };
   const listed: RunSummary = {
@@ -928,12 +937,39 @@ describe('Hosts.usageWindow', () => {
         untimedTurns: 0,
         newBests: 5,
         costPerNewBestUsd: 2.5,
-        byRun: [{runId: 'run-1', task: 'mpmc', costUsd: 12.5}],
-        byAgent: [{role: 'implementer', harness: 'codex', model: null, costUsd: 12.5, turns: 7}],
+        byRun: [{runId: 'run-1', task: 'mpmc', costUsd: 12.5, unpricedTurns: 1}],
+        byAgent: [
+          {
+            role: 'implementer',
+            harness: 'codex',
+            model: null,
+            costUsd: 12.5,
+            turns: 7,
+            unpricedTurns: 1,
+          },
+        ],
         agentsOmitted: 0,
         missingRuns: ['run-9'],
       },
     });
+  });
+
+  test('a helper that predates the per-run unpriced counts reads as none said', async () => {
+    const link = new FakeLink();
+    link.helper.host.projects.set('/srv/project', ['mpmc']);
+    link.helper.host.runHistory.set('/srv/project', [listed]);
+    link.helper.host.usage.set('/srv/project', {
+      ...figures,
+      by_run: [{run_id: 'run-1', task: 'mpmc', cost_usd: 12.5}],
+      by_agent: [{role: 'implementer', harness: 'codex', model: null, cost_usd: 12.5, turns: 7}],
+    });
+    const subject = completionSubject(link);
+    await using _manager = subject.manager;
+
+    const reply = await subject.hosts.usageWindow(LOCAL, '/srv/project', ['run-1'], SINCE, UNTIL);
+
+    expect(reply.kind === 'usage' ? reply.usage.byRun[0]?.unpricedTurns : null).toBe(0);
+    expect(reply.kind === 'usage' ? reply.usage.byAgent[0]?.unpricedTurns : null).toBe(0);
   });
 
   test('returns a typed unsupported outcome without sending the request', async () => {

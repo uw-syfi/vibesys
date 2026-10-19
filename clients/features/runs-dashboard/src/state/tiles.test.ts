@@ -288,6 +288,13 @@ describe('the tiles of many runs', () => {
     expect(note({attention: 'failed', status: {kind: 'stopped', word: 'ended'}})).toBe('failed');
     // The pill already says failed: the status is said once.
     expect(note({attention: 'failed', status: {kind: 'failed', word: 'failed'}})).toBeNull();
+    // Whatever words the pill says it in.
+    for (const word of ['failed to start', 'Failed', 'failed · 2 ideas']) {
+      expect(note({attention: 'failed', status: {kind: 'failed', word}})).toBeNull();
+    }
+    expect(note({attention: 'failed', status: {kind: 'failed', word: 'ended'}})).toBeNull();
+    // A different word is not said by the pill.
+    expect(note({attention: 'failed', status: {kind: 'stopped', word: 'ended'}})).toBe('failed');
     expect(note({attention: 'repeated_failure', failedStreak: 3})).toBe('3 failed in a row');
     expect(note({attention: 'stalled', silentSeconds: 1920})).toBe('stalled 32m');
     expect(note({attention: 'stalled', silentSeconds: null})).toBe('stalled');

@@ -121,7 +121,7 @@ export function refreshed(all: AllRunsState): AllRunsState {
 }
 
 /** Every run the listings hold, with where it is: a project not listed again yet keeps its last listing. */
-export function listedRunRefs(all: AllRunsState): ProjectRunRef[] {
+function listedRunRefs(all: AllRunsState): ProjectRunRef[] {
   const keys = new Set([...Object.keys(all.projects), ...Object.keys(all.stale)]);
   return [...keys].flatMap(key => {
     const slot = all.projects[key];
@@ -129,4 +129,32 @@ export function listedRunRefs(all: AllRunsState): ProjectRunRef[] {
     const [host, project] = JSON.parse(key) as [HostKey, string];
     return runs.map(run => ({host, project, run}));
   });
+}
+
+/**
+ * Every run the dashboard can list: those the project listings hold, and those a machine's own
+ * registry reports (live and recently ended) that no listing holds yet. A machine's report needs
+ * no local record and no second question, so a run it reports is listed and openable at once; a
+ * project listing, when it has the run, says more of it (its name, its task, when it began).
+ */
+export function reportedRunRefs(
+  all: AllRunsState,
+  listings: readonly HostListing[],
+): ProjectRunRef[] {
+  const refs = listedRunRefs(all);
+  const known = new Set(refs.map(({host, run}) => JSON.stringify([host, run.runId])));
+  for (const listing of listings) {
+    if (listing.kind !== 'listed') continue;
+    for (const server of [...listing.live, ...listing.ended]) {
+      const key = JSON.stringify([listing.host, server.runId]);
+      if (known.has(key) || server.projectRoot === '') continue;
+      known.add(key);
+      refs.push({
+        host: listing.host,
+        project: server.projectRoot,
+        run: {runId: server.runId, task: null, createdAt: server.startedAt * 1000},
+      });
+    }
+  }
+  return refs;
 }

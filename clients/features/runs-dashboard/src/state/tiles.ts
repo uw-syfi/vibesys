@@ -313,12 +313,25 @@ function endNote(input: RunInput): string | null {
     : null;
 }
 
+/** The words of `text`, lower case, so "Failed to start" holds the words "failed". */
+function wordsOf(text: string): string {
+  return ` ${text
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean)
+    .join(' ')} `;
+}
+
 /** The note of a tile unless the status pill already says it (a status is said once), with its full text. */
 function noteOf(
   note: {readonly note: string; readonly full: string} | null,
-  status: string,
+  status: {readonly kind: StatusKind; readonly word: string},
 ): Pick<Tile, 'note' | 'noteFull'> {
-  return note === null || note.note.toLowerCase() === status.toLowerCase()
+  const said =
+    note !== null &&
+    (wordsOf(status.word).includes(wordsOf(note.note)) ||
+      (status.kind === 'failed' && wordsOf(note.note) === wordsOf('failed')));
+  return note === null || said
     ? {note: null, noteFull: null}
     : {note: note.note, noteFull: note.full};
 }
@@ -355,7 +368,7 @@ export function tileOf(input: RunInput): Tile {
       ended === null
         ? asNote(attentionWord({...input, attention}) ?? input.problem)
         : reasonWords(ended),
-      input.status.word,
+      input.status,
     ),
     status: {
       kind: input.status.kind,
