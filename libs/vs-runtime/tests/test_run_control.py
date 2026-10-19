@@ -202,13 +202,15 @@ def test_a_steer_step_carries_the_facts_its_state_names_and_no_other(
     state: SteerDeliveryState, fact: str
 ) -> None:
     facts = _FACTS[state]
-    assert SteerDelivery(state=state, **facts).state is state
+    assert SteerDelivery.model_validate({"state": state, **facts}).state is state
     if fact in facts:
         with pytest.raises(ValidationError, match=f"{fact}: a {state.value} step needs {fact}"):
-            SteerDelivery(state=state, **{k: v for k, v in facts.items() if k != fact})
+            SteerDelivery.model_validate(
+                {"state": state, **{k: v for k, v in facts.items() if k != fact}}
+            )
     else:
         with pytest.raises(ValidationError, match=f"{fact}: a {state.value} step has no {fact}"):
-            SteerDelivery(state=state, **{**facts, fact: _EXTRA_FACT[fact]})
+            SteerDelivery.model_validate({"state": state, **facts, fact: _EXTRA_FACT[fact]})
 
 
 @given(kind=st.sampled_from(RunControlTransitionKind))
@@ -228,7 +230,7 @@ def test_a_transition_carries_the_step_of_its_kind_or_none(
     }
     request = "r1" if kind is RunControlTransitionKind.REQUEST_REJECTED else None
     for state in SteerDeliveryState:
-        step = SteerDelivery(state=state, **_FACTS[state])
+        step = SteerDelivery.model_validate({"state": state, **_FACTS[state]})
         if steps.get(kind) is state:
             assert RunControlTransition(kind=kind, request_id=request, delivery=step).delivery
         else:

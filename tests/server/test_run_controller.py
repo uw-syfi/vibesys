@@ -899,5 +899,6 @@ def test_each_steer_step_reaches_the_wire_as_a_typed_event_with_the_control_id(
         if isinstance(event.data, SteerDeliveryData)
         and event.data.delivery.state is SteerDeliveryState.REACHED
     ]
+    assert isinstance(reached.data, SteerDeliveryData)
     assert (reached.agent_kind, reached.execution_id) == ("implementer", "exec-1")
     assert reached.data.delivery.attempt_id == "attempt-3"
