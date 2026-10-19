@@ -60,6 +60,7 @@ if TYPE_CHECKING:
     from vs_runtime.contracts import CandidateWorkspace
     from vs_sandbox.api.slurm import SlurmLedgerAttachment
     from vs_sim.api import Sleeper
+    from vs_slurm.api import WorkspaceRootProof
 
 SCOPE = Scope(owner=RunId(root="run"), generation=0)
 ADMISSION = DecisionId(root="admission-1")
@@ -198,6 +199,7 @@ async def build_stack(  # noqa: PLR0913  # lint-waiver: LW-455560 [PLR0913]; eac
     ledger: SlurmLedgerAttachment | None = None,
     policy: SlurmExecutionPolicy | None = None,
     benchmark_contract: TrustedBenchmarkContract | None = None,
+    root_proof: WorkspaceRootProof | None = None,
 ) -> Stack:
     """Build the semantic Slurm executor over ``cluster``, reusing durable state under root.
 
@@ -209,6 +211,8 @@ async def build_stack(  # noqa: PLR0913  # lint-waiver: LW-455560 [PLR0913]; eac
     passes at once. With ``ledger`` the run's evaluations go through that
     evaluation ledger attachment. ``policy`` is the operator's execution policy, default none.
     ``benchmark_contract`` is how the benchmark's result is read, by default one scalar metric.
+    With ``root_proof`` every evaluation waits for that workspace-root proof before it
+    reaches the cluster.
     """
     cluster = cluster or ScenarioCluster()
     workspaces = _Candidates(
@@ -242,6 +246,7 @@ async def build_stack(  # noqa: PLR0913  # lint-waiver: LW-455560 [PLR0913]; eac
         cluster=cluster,
         stage_output=stage_output,
         ledger=ledger,
+        root_proof=root_proof,
     )
     return Stack(executor, cluster, snapshot, workspaces)
 
