@@ -125,7 +125,10 @@ export interface GateFailureView {
   readonly reason: string | null;
   /** What each printed, headed by its gate when more than one failed; null when none printed. */
   readonly tail: string | null;
-  /** How many attempts failed: 2 when a gate was tried again and failed again. */
+  /**
+   * How many attempts failed: of the gate tried most often for a failure that stands (2 when a gate
+   * was tried again and failed again), in all for failures a later attempt passed over.
+   */
   readonly attempts: number;
 }
 
@@ -184,7 +187,10 @@ function viewOf(failures: readonly GateFailure[]): GateFailureView {
 /** The gates still failed (no later attempt passed) as one row; null when none stands failed. */
 export function gateFailureView(failures: readonly GateFailure[]): GateFailureView | null {
   const standing = failures.filter(failure => failure.supersededBy === null);
-  return standing.length === 0 ? null : viewOf(standing);
+  if (standing.length === 0) return null;
+  const tries = new Map<string, number>();
+  for (const failure of standing) tries.set(nameOf(failure), (tries.get(nameOf(failure)) ?? 0) + 1);
+  return {...viewOf(standing), attempts: Math.max(...tries.values())};
 }
 
 /** The failed attempts a later attempt of the same gate passed over, as one row; null when none. */

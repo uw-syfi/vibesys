@@ -273,3 +273,16 @@ describe('a gate tried again while ideas run', () => {
     }
   });
 });
+
+describe('the attempts a standing failure names', () => {
+  test('are those of one gate, so two different gates failing once each is no retry', () => {
+    const gates = [gate(1, 'failed', 'a', 'accuracy'), gate(2, 'failed', 'b', 'benchmark')].reduce(
+      foldInputGates,
+      NO_INPUT_GATES,
+    );
+    expect(gateFailureView(gates.failures)).toMatchObject({
+      label: 'Accuracy · Benchmark',
+      attempts: 1,
+    });
+  });
+});
