@@ -276,8 +276,7 @@ class Flow:
         published before. It is not a journaled read: the published record is part of the
         replayed state.
         """
-        text = self._run.published
-        return None if text is None else model.model_validate_json(text)
+        return self._run.published_as(model)
 
     @property
     def spans(self) -> RunTrace:

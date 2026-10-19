@@ -7,7 +7,7 @@ from contextlib import suppress
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from pydantic import TypeAdapter, ValidationError
+from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from vs_core._registry import ContractError
 from vs_core.types.common import THIS_RUN, AttemptRef, DecisionId, InvocationRef, RunFacts, Seconds
@@ -781,6 +781,11 @@ class _Run:
             )
             return OperationFinished(decision=item.decision, result=result)
         return item
+
+    def published_as[M: BaseModel](self, model: type[M]) -> M | None:
+        """What the run last published, as ``model``; None before any publish."""
+        text = self.published
+        return None if text is None else model.model_validate_json(text)
 
     def _stop(self, item: StopRequested) -> None:
         self.stop = item

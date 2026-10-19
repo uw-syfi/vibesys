@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from hypothesis import given, settings
+from hypothesis import example, given, settings
 from hypothesis import strategies as st
 from tests.vibesys.orchestration.multi._host import (
     IMPLEMENTER,
@@ -116,6 +116,7 @@ def _finish(host: MultiHost, index: int, stale: set[DecisionId]) -> None:
     ),
     point=st.sampled_from(_POINTS),
 )
+@example(throughputs=[400.0, 200.0], point="between")
 def test_a_run_resumed_on_changed_code_continues_at_the_next_round_with_the_same_best(
     throughputs: list[float], point: _Point
 ) -> None:
@@ -183,6 +184,7 @@ async def _saved_before_snapshots(ctx: Flow, config: MultiConfig) -> NoWinner | 
     ),
     point=st.sampled_from(_POINTS),
 )
+@example(throughputs=[400.0, 200.0], point="between")
 def test_a_run_saved_before_the_root_checkpointed_its_state_is_rebuilt_from_its_record(
     throughputs: list[float], point: _Point
 ) -> None:
