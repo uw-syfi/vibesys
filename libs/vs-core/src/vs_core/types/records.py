@@ -424,15 +424,23 @@ class HostEpoch(Value):
         return self
 
 
+_LEDGER_INDEXES = ("_by_resource", "_inspections", "_positions")
+"""The slots of `RecordsState` that hold its ledger indexes.
+
+Named here, once, so that `RecordsState.model_copy` reads this tuple instead of the class's
+``__slots__``, a dunder the purity ratchet keeps core from reading.
+"""
+
+
 class RecordsState(Value):
     """Records state lifecycle contract."""
 
     # The indexes from request identity, from the resource a request names, and from the request
-    # an inspection inspects, to positions
-    # in ``records``, each built on its first lookup. A state never changes, so neither do its
-    # indexes. Like `Value`'s slots they stay out of equality and serialization; a copy that
-    # keeps the same ``records`` tuple keeps them too (see `model_copy`).
-    __slots__ = ("_by_resource", "_inspections", "_positions")
+    # an inspection inspects, to positions in ``records``, each built on its first lookup. A
+    # state never changes, so neither do its indexes. Like `Value`'s slots they stay out of
+    # equality and serialization; a copy that keeps the same ``records`` tuple keeps them too
+    # (see `model_copy`).
+    __slots__ = _LEDGER_INDEXES
 
     records: tuple[RequestRecord, ...] = ()
     children: tuple[ChildLease, ...] = ()
@@ -460,7 +468,7 @@ class RecordsState(Value):
         """
         copy = super().model_copy(update=update, deep=deep)
         if copy.records is self.records:
-            for slot in RecordsState.__slots__:
+            for slot in _LEDGER_INDEXES:
                 try:
                     object.__setattr__(copy, slot, object.__getattribute__(self, slot))
                 except AttributeError:
