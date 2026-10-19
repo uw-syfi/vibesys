@@ -150,8 +150,8 @@ export function digestLook(entry: Extract<RunDigestEntry, {kind: 'read'}>): EndL
 /** One run of a project as the host lists it: what an all-runs list needs before its digest is read. */
 export interface ListedRun {
   readonly runId: string;
-  /** The run's own name, as the host gives it. */
-  readonly name: string;
+  /** The run's own name, as the host gives it; the run id names a run listed without one. */
+  readonly name?: string;
   /** The task it ran, or null when the run has no record of one (it stopped at start-up). */
   readonly task: string | null;
   /** When the run was created, in milliseconds. */

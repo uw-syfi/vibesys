@@ -40,6 +40,14 @@ export function dashboardRows(state: SidebarState, clock: Clock): readonly Dashb
       attachedAt: run.createdAt,
     };
     const row = live.find(each => sameRun(each.run, ref)) ?? recentRow(state, ref, clock);
-    return {row, host, machine, name: run.name, task: run.task, project, createdAt: run.createdAt};
+    return {
+      row,
+      host,
+      machine,
+      name: run.name ?? run.runId,
+      task: run.task,
+      project,
+      createdAt: run.createdAt,
+    };
   });
 }
