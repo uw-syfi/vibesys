@@ -550,6 +550,9 @@ class _OwnProjector:
         del namespace, state, run_id
         return None
 
+    def steer_targets(self, project: Project, run_id: str) -> None:
+        del project, run_id
+
 
 def test_plugin_registers_its_own_projector() -> None:
     plugin = failing_plugin("own-projector", options=_PluginOptions)

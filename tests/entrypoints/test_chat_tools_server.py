@@ -14,6 +14,8 @@ from typing import TYPE_CHECKING, Any, cast
 from uuid import UUID
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 from tests.support.multi_search import SearchRecord
 from tests.support.real_git import REAL_GIT
 
@@ -25,15 +27,19 @@ from entrypoints.chat_tools_server import (
 )
 from launch import open_run_store
 from vibesys.api import (
+    RunRecordFacts,
     RunStatus,
     RunView,
+    SteerableAttempt,
     SteerMode,
     SteerProposal,
     SteerProposalReceipt,
     SteerTarget,
     SteerTargetKind,
+    SteerTargets,
 )
 from vibesys.api.hypothesis import RoundRecord
+from vibesys.api.testing import FakeRunRecord, FakeRunStore
 from vibesys.hypothesis import OrchestratorPlan
 from vibesys.hypothesis.state import Hypothesis, HypothesisReview, HypothesisState
 from vibesys.orchestration.agent_options import AgentOrchestrationOptions
@@ -55,6 +61,7 @@ if TYPE_CHECKING:
     from vibesys.api.store import RunStore
     from vs_mcp.api import ToolSpec
 
+_ID = st.from_regex(r"[a-z][a-z0-9-]{0,10}", fullmatch=True)
 NOW = datetime(2026, 8, 11, 12, 34, 56, tzinfo=UTC)
 UNIQUE = UUID("12345678-1234-5678-1234-567812345678")
 
@@ -212,6 +219,7 @@ class TestToolRegistration:
             "list_ideas",
             "get_idea",
             "list_steps",
+            "list_targets",
             "list_state_files",
             "read_state_file",
             "propose_steer",
@@ -361,7 +369,7 @@ class TestProposeSteer:
                 server,
                 "propose_steer",
                 text="keep the weights in bf16",
-                target={"kind": "role", "id": "dynamic-implementer"},
+                target={"kind": "role", "id": "multi-implementer"},
                 mode="standing",
             )
         )
@@ -369,7 +377,7 @@ class TestProposeSteer:
         receipt = SteerProposalReceipt.model_validate_json(out)
         assert receipt.proposal == SteerProposal(
             text="keep the weights in bf16",
-            target=SteerTarget(kind=SteerTargetKind.ROLE, id="dynamic-implementer"),
+            target=SteerTarget(kind=SteerTargetKind.ROLE, id="multi-implementer"),
             mode=SteerMode.STANDING,
         )
         assert "cannot send it" in receipt.note
@@ -404,3 +412,136 @@ class TestProposeSteer:
 
         with pytest.raises(Exception, match="propose_steer"):  # mcp ToolError names the tool
             asyncio.run(_call(server, "propose_steer", **arguments))
+
+
+_TARGETS = SteerTargets(
+    roles=("dynamic-planner", "dynamic-implementer"),
+    attempts=(
+        SteerableAttempt(attempt_id="attempt-1", item_id="item-1", ended=True),
+        SteerableAttempt(attempt_id="attempt-2", item_id="item-2", ended=False),
+    ),
+    items=("item-1", "item-2"),
+)
+
+
+def _run_with(targets: SteerTargets | None) -> tuple[FastMCP, FakeRunRecord]:
+    record = FakeRunRecord(
+        run_id="run-1",
+        run_view=RunView(run_id="run-1", loop="dynamic", status=RunStatus.ACTIVE),
+        record_facts=RunRecordFacts(trusted_input_baseline="a" * 40),
+        targets=targets,
+    )
+    return _server(build_tools(FakeRunStore({"run-1": record}), "run-1")), record
+
+
+class TestSteerTargets:
+    """A proposal names a target the run holds, by the ids the run's own state declares."""
+
+    def test_list_targets_shows_the_ids_a_steer_may_name_and_which_attempts_ended(self) -> None:
+        server, _record = _run_with(_TARGETS)
+
+        out = asyncio.run(_call(server, "list_targets"))
+
+        assert out == (
+            "roles: dynamic-planner, dynamic-implementer\n"
+            "attempts: attempt-1 (item item-1, ended), attempt-2 (item item-2)\n"
+            "items: item-1, item-2"
+        )
+
+    def test_list_targets_says_so_for_a_run_with_no_committed_state(self) -> None:
+        server, _record = _run_with(None)
+
+        assert "no state yet" in asyncio.run(_call(server, "list_targets"))
+
+    @pytest.mark.parametrize(
+        "target",
+        [
+            {"kind": "run"},
+            {"kind": "role", "id": "dynamic-planner"},
+            {"kind": "attempt", "id": "attempt-2"},
+            {"kind": "item", "id": "item-1"},
+        ],
+    )
+    def test_a_target_the_run_holds_is_proposed(self, target: dict[str, str]) -> None:
+        server, _record = _run_with(_TARGETS)
+
+        out = asyncio.run(_call(server, "propose_steer", text="go", target=target))
+
+        assert SteerProposalReceipt.model_validate_json(out).proposal.target == (
+            SteerTarget.model_validate(target)
+        )
+
+    @pytest.mark.parametrize(
+        ("target", "named"),
+        [
+            ({"kind": "role", "id": "dynamic-orchestrator"}, ["dynamic-planner"]),
+            ({"kind": "attempt", "id": "attempt-9"}, ["attempt-2"]),
+            ({"kind": "attempt", "id": "attempt-1"}, ["has ended", "attempt-2"]),
+            ({"kind": "item", "id": "item-9"}, ["item-1", "item-2"]),
+        ],
+    )
+    def test_a_target_the_run_would_refuse_is_refused_naming_it_and_the_valid_ids(
+        self, target: dict[str, str], named: list[str]
+    ) -> None:
+        server, _record = _run_with(_TARGETS)
+
+        with pytest.raises(Exception, match="propose_steer") as refused:
+            asyncio.run(_call(server, "propose_steer", text="go", target=target))
+
+        message = str(refused.value)
+        assert repr(target["id"]) in message
+        assert all(part in message for part in named)
+
+    def test_a_run_with_no_committed_state_takes_only_a_steer_for_the_whole_run(self) -> None:
+        server, _record = _run_with(None)
+
+        asyncio.run(_call(server, "propose_steer", text="go"))
+        with pytest.raises(Exception, match="no state yet"):
+            asyncio.run(
+                _call(server, "propose_steer", text="go", target={"kind": "role", "id": "x"})
+            )
+
+    def test_each_proposal_reads_the_run_as_it_stands_now(self) -> None:
+        server, record = _run_with(_TARGETS)
+        target = {"kind": "attempt", "id": "attempt-3"}
+        with pytest.raises(Exception, match="attempt-3"):
+            asyncio.run(_call(server, "propose_steer", text="go", target=target))
+
+        record.targets = _TARGETS.model_copy(
+            update={
+                "attempts": (
+                    *_TARGETS.attempts,
+                    SteerableAttempt(attempt_id="attempt-3", item_id="item-3", ended=False),
+                )
+            }
+        )
+
+        asyncio.run(_call(server, "propose_steer", text="go", target=target))
+
+
+@given(
+    roles=st.lists(_ID, max_size=4, unique=True),
+    attempts=st.lists(st.tuples(_ID, st.booleans()), max_size=4, unique_by=lambda row: row[0]),
+    kind=st.sampled_from(list(SteerTargetKind)[1:]),
+    name=_ID,
+)
+def test_a_proposal_is_accepted_exactly_when_the_targets_hold_its_target(
+    roles: list[str], attempts: list[tuple[str, bool]], kind: SteerTargetKind, name: str
+) -> None:
+    targets = SteerTargets(
+        roles=tuple(roles),
+        attempts=tuple(
+            SteerableAttempt(attempt_id=attempt, item_id=f"item-{attempt}", ended=ended)
+            for attempt, ended in attempts
+        ),
+        items=tuple(f"item-{attempt}" for attempt, _ended in attempts),
+    )
+    server, _record = _run_with(targets)
+    target = {"kind": kind.value, "id": name}
+    allowed = name in targets.ids(kind)
+
+    if allowed:
+        asyncio.run(_call(server, "propose_steer", text="go", target=target))
+    else:
+        with pytest.raises(Exception, match="propose_steer"):
+            asyncio.run(_call(server, "propose_steer", text="go", target=target))

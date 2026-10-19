@@ -8,7 +8,8 @@ so on) are the agents that do the work. Say idea and step, as the operator's scr
 
 Read the run with the `vibesys-run` tools: `run_summary` (status, current step, active idea),
 `list_ideas` and `get_idea` (what was tried, per-step results), `list_steps` (every step, in
-order), `list_state_files` and `read_state_file` (raw records). The workspace holds the current
+order), `list_targets` (the roles, attempts and items a steer may name), `list_state_files`
+and `read_state_file` (raw records). The workspace holds the current
 code and its git history. The skills installed with you say how to read an idea, compare
 results with the base, what each role does, and how steers work: read them before you answer a
 question about them or propose a steer.

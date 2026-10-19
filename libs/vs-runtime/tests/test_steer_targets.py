@@ -60,6 +60,7 @@ from vs_runtime.api.infrastructure import (
     SteerTargetKind,
     WithdrawRequest,
     create_run_control_channel,
+    known_steer_targets,
 )
 from vs_runtime.api.testing import FakeRunControlEventSink
 from vs_sim.api.testing import SimThreads
@@ -497,3 +498,41 @@ def test_a_steer_queued_names_its_mode_and_target() -> None:
 
     (queued,) = _steps(run, SteerDeliveryState.QUEUED)
     assert (queued.control_id, queued.mode, queued.target) == ("keep", SteerMode.STANDING, target)
+
+
+@given(target=_TARGETS)
+def test_the_known_targets_refuse_exactly_what_the_run_cannot_resolve(target: SteerTarget) -> None:
+    """The read model a reader of the run asks and the run's own resolution agree on every target."""
+    refusal = known_steer_targets(_core()).refusal(target)
+
+    assert (refusal is None) == (not isinstance(_expected(target), str))
+
+
+def test_the_known_targets_list_what_a_steer_may_name_and_a_refusal_offers_them() -> None:
+    known = known_steer_targets(_core())
+
+    assert known.roles == _DECLARED
+    assert known.ids(SteerTargetKind.ATTEMPT) == ("live", "parked")  # `done` has ended
+    assert known.items == tuple(f"item-{name}" for name in _ATTEMPTS)
+    assert known.ids(SteerTargetKind.RUN) == ()
+    for kind, bad in [
+        (SteerTargetKind.ROLE, "fake-judge"),
+        (SteerTargetKind.ATTEMPT, "unknown"),
+        (SteerTargetKind.ATTEMPT, "done"),
+        (SteerTargetKind.ITEM, "item-unknown"),
+    ]:
+        refusal = known.refusal(SteerTarget(kind=kind, id=bad))
+        assert refusal is not None
+        assert repr(bad) in refusal.reason
+        assert all(name in refusal.reason for name in known.ids(kind))
+
+
+def test_a_refusal_bounds_the_ids_it_offers() -> None:
+    attempts = {f"a{index}": AttemptPhase.ACTIVE for index in range(40)}
+    known = known_steer_targets(_core(attempts))
+
+    refusal = known.refusal(SteerTarget(kind=SteerTargetKind.ATTEMPT, id="missing"))
+
+    assert refusal is not None
+    assert "and 28 more" in refusal.reason
+    assert "a39" not in refusal.reason

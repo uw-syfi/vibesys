@@ -20,8 +20,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from pydantic import BaseModel, ConfigDict
+
 from vs_core.api import (
     AttemptPhase,
+    AttemptView,
     CoreState,
     InputDropped,
     InputDropReason,
@@ -50,8 +53,6 @@ from vs_runtime._operator_control import (
 from vs_runtime._run_control import SteerTurn
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
-
     from vs_core.api import ControlInput, InputTarget
     from vs_runtime._operator_control import ControlRequest, SteerTarget
     from vs_runtime._run_control import RunControlChannel
@@ -68,50 +69,147 @@ class TargetRefusal:
 _ENDED_ATTEMPT = frozenset({AttemptPhase.CLOSING, AttemptPhase.TERMINAL})
 
 
-def _role(core: CoreState, role: str) -> InputTarget | TargetRefusal:
-    declared = core.run.declaration.roles
-    if RoleId(root=role) not in declared:
-        names = ", ".join(row.root for row in declared) or "none"
+class SteerableAttempt(BaseModel):
+    """One attempt of the run, as a steer's target sees it: its item, and whether it ended."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    attempt_id: str
+    item_id: str
+    ended: bool
+    """Whether its latest generation is closing or terminal: no turn could take a steer."""
+
+
+class SteerTargets(BaseModel):
+    """What a steer can name in a run, read from core's state: the one rule for a valid target.
+
+    ``roles`` are the session role ids the search declared (the ids a steer's ``role`` target
+    and a session's turns use; they are not the plugin's agent ids). The run resolves every
+    steer against this rule, and a read-only reader of the run (the chat agent proposing a
+    steer) asks the same model, so a proposal the run would refuse is refused first.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    roles: tuple[str, ...]
+    attempts: tuple[SteerableAttempt, ...]
+    items: tuple[str, ...]
+
+    def ids(self, kind: SteerTargetKind) -> tuple[str, ...]:
+        """Every id a target of ``kind`` may name now (an ended attempt is not among them)."""
+        match kind:
+            case SteerTargetKind.RUN:
+                return ()
+            case SteerTargetKind.ROLE:
+                return self.roles
+            case SteerTargetKind.ATTEMPT:
+                return tuple(row.attempt_id for row in self.attempts if not row.ended)
+            case SteerTargetKind.ITEM:
+                return self.items
+
+    def refusal(self, target: SteerTarget) -> TargetRefusal | None:
+        """Why no turn could take a steer to ``target`` now, or None when one could."""
+        if target.id is None:
+            return None  # the whole run: a target model names an id for every other kind
+        check = {
+            SteerTargetKind.ROLE: self._role_refusal,
+            SteerTargetKind.ATTEMPT: self._attempt_refusal,
+            SteerTargetKind.ITEM: self._item_refusal,
+        }
+        return check[target.kind](target.id)
+
+    def _role_refusal(self, name: str) -> TargetRefusal | None:
+        if name in self.roles:
+            return None
         return TargetRefusal(
-            f"role {role!r} is not declared by the search (declared: {names})",
+            f"role {name!r} is not declared by the search (declared: {_named(self.roles)})",
             RefusalReason.UNKNOWN_TARGET,
         )
-    return RoleInputTarget(role_id=RoleId(root=role))
+
+    def _attempt_refusal(self, name: str) -> TargetRefusal | None:
+        row = next((row for row in self.attempts if row.attempt_id == name), None)
+        if row is None:
+            return TargetRefusal(
+                f"the run holds no attempt {name!r} (open attempts: "
+                f"{_named(self.ids(SteerTargetKind.ATTEMPT))})",
+                RefusalReason.UNKNOWN_TARGET,
+            )
+        if row.ended:
+            return TargetRefusal(
+                f"attempt {name!r} has ended (open attempts: "
+                f"{_named(self.ids(SteerTargetKind.ATTEMPT))})",
+                RefusalReason.ENDED_TARGET,
+            )
+        return None
+
+    def _item_refusal(self, name: str) -> TargetRefusal | None:
+        if name in self.items:
+            return None
+        return TargetRefusal(
+            f"the run holds no item {name!r} (items: {_named(self.items)})",
+            RefusalReason.UNKNOWN_TARGET,
+        )
 
 
-def _attempt(core: CoreState, attempt: str) -> InputTarget | TargetRefusal:
-    rows = [row for row in core.attempts.attempts if row.attempt_id.root == attempt]
-    if not rows:
-        return TargetRefusal(f"the run holds no attempt {attempt!r}", RefusalReason.UNKNOWN_TARGET)
-    latest = max(rows, key=lambda row: row.generation)
-    if latest.phase in _ENDED_ATTEMPT:
-        return TargetRefusal(f"attempt {attempt!r} has ended", RefusalReason.ENDED_TARGET)
-    return ScopeInputTarget(scope=Scope(owner=latest.attempt_id, generation=latest.generation))
+_NAMED_LIMIT = 12
 
 
-def _item(core: CoreState, item: str) -> InputTarget | TargetRefusal:
-    rows = [row for row in core.attempts.attempts if row.item_id.root == item]
-    if not rows:
-        return TargetRefusal(f"the run holds no item {item!r}", RefusalReason.UNKNOWN_TARGET)
-    return ItemInputTarget(item_id=rows[0].item_id)
+def _named(ids: tuple[str, ...]) -> str:
+    """The ids a refusal offers: all of them, or the first few and how many more there are."""
+    if not ids:
+        return "none"
+    shown = ", ".join(ids[:_NAMED_LIMIT])
+    return shown if len(ids) <= _NAMED_LIMIT else f"{shown}, and {len(ids) - _NAMED_LIMIT} more"
 
 
-_RESOLVERS: dict[SteerTargetKind, Callable[[CoreState, str], InputTarget | TargetRefusal]] = {
-    SteerTargetKind.ROLE: _role,
-    SteerTargetKind.ATTEMPT: _attempt,
-    SteerTargetKind.ITEM: _item,
-}
+def known_steer_targets(core: CoreState) -> SteerTargets:
+    """The targets a steer may name in ``core``: its declared roles, attempts and items."""
+    latest: dict[str, AttemptView] = {}
+    for row in core.attempts.attempts:
+        held = latest.get(row.attempt_id.root)
+        if held is None or row.generation > held.generation:
+            latest[row.attempt_id.root] = row
+    items = dict.fromkeys(row.item_id.root for row in core.attempts.attempts)
+    return SteerTargets(
+        roles=tuple(role.root for role in core.run.declaration.roles),
+        attempts=tuple(
+            SteerableAttempt(
+                attempt_id=name, item_id=row.item_id.root, ended=row.phase in _ENDED_ATTEMPT
+            )
+            for name, row in latest.items()
+        ),
+        items=tuple(items),
+    )
 
 
 def steer_target(core: CoreState, target: SteerTarget) -> InputTarget | TargetRefusal | None:
     """Core's input target for ``target``, None for the whole run, or why there is none.
 
     A role the search does not declare is refused, as is an attempt or item core does not
-    hold or an attempt that has ended, since no turn could take a message for it now.
+    hold or an attempt that has ended, since no turn could take a message for it now
+    (``SteerTargets.refusal``).
     """
     if target.id is None:
         return None
-    return _RESOLVERS[target.kind](core, target.id)
+    refusal = known_steer_targets(core).refusal(target)
+    if refusal is not None:
+        return refusal
+    match target.kind:
+        case SteerTargetKind.ROLE:
+            return RoleInputTarget(role_id=RoleId(root=target.id))
+        case SteerTargetKind.ATTEMPT:
+            latest = max(
+                (row for row in core.attempts.attempts if row.attempt_id.root == target.id),
+                key=lambda row: row.generation,
+            )
+            return ScopeInputTarget(
+                scope=Scope(owner=latest.attempt_id, generation=latest.generation)
+            )
+        case SteerTargetKind.ITEM:
+            row = next(row for row in core.attempts.attempts if row.item_id.root == target.id)
+            return ItemInputTarget(item_id=row.item_id)
+        case SteerTargetKind.RUN:
+            return None
 
 
 def target_refusal(core: CoreState, target: SteerTarget) -> RefusalReason | None:

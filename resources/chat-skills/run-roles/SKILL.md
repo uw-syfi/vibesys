@@ -5,8 +5,9 @@ description: What each agent role of a run does, so a steer or an answer names t
 
 # What each role does
 
-A run's agents have roles. A role id is the search's name and the role, for example
-`dynamic-implementer`. The roles of the default search:
+A run's agents have roles. A role id is the search's name and the role (for example
+`<search>-implementer`); the run declares its own, so call `list_targets` for the exact ids
+and use those, never one you guessed. The kinds of role a search may have:
 
 - planner: plans the next ideas; works in no workspace. Steer it to change what gets tried.
 - implementer: implements one idea in an isolated copy of the code and takes its own

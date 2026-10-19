@@ -19,6 +19,7 @@ from vibesys.run.contracts import (
 from vs_core.api import ContractError, OperationRegistration
 from vs_project.api import StoredEnvelope
 from vs_runtime.api.core import OperationRole, RuntimeRecord
+from vs_runtime.api.infrastructure import known_steer_targets
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -28,6 +29,7 @@ if TYPE_CHECKING:
     from vs_core.api import OperationRegistry, StrategyState
     from vs_project.api import OrchestrationDescriptor, Project
     from vs_runtime.api import CorePolicy, OrchestrationPlugin, OrchestrationResumeDecision
+    from vs_runtime.api.infrastructure import SteerTargets
 
 
 class OrchestrationProjector(Protocol):
@@ -39,6 +41,10 @@ class OrchestrationProjector(Protocol):
 
     def project_committed(self, namespace: str, state: BaseModel, *, run_id: str) -> RunView | None:
         """Project a state just committed by the host."""
+        ...
+
+    def steer_targets(self, project: Project, run_id: str) -> SteerTargets | None:
+        """What a steer may name in the run's last committed state; None before it has one."""
         ...
 
 
@@ -101,6 +107,19 @@ class RuntimeRecordProjector[S: StrategyState, P: BaseModel]:
         record = self.record_type.decode(stored, self.operations)
         return self._view(record, run_id=run_id, status=status)
 
+    def steer_targets(self, project: Project, run_id: str) -> SteerTargets | None:
+        """The roles, attempts and items a steer may name, from the last committed record.
+
+        The record is the one the run itself resolves a steer against, so a steer valid here is
+        valid for the run as of that commit. None when the run has committed no record yet.
+        """
+        stored = project.stored_record(run_id)
+        if stored is None:
+            return None
+        if not isinstance(stored, StoredEnvelope):
+            raise ContractError(("runtime",), "a run without a readable record has no targets")
+        return known_steer_targets(self.record_type.decode(stored, self.operations).envelope.core)
+
     def project_committed(self, namespace: str, state: BaseModel, *, run_id: str) -> RunView | None:
         """Project a runtime record the host just committed under this plugin's namespace."""
         if namespace != self.plugin_id or not isinstance(state, RuntimeRecord):
@@ -136,6 +155,14 @@ class RuntimeRecordProjector[S: StrategyState, P: BaseModel]:
         return _plugin_run_view(
             self.plugin_id, run_id, status, _require_plugin_projection(projection)
         )
+
+
+def project_steer_targets(
+    registration: OrchestrationRegistration | None, project: Project, *, run_id: str
+) -> SteerTargets | None:
+    """The targets a steer may name in a run, or None for a policy with no projector or record."""
+    projector = registration.projector if registration is not None else None
+    return None if projector is None else projector.steer_targets(project, run_id)
 
 
 _NOTHING_PUBLISHED = PluginProjection(payload={}, iterations=IterationTree.from_nodes(()))
@@ -252,4 +279,5 @@ __all__ = [
     "OrchestrationRegistration",
     "RuntimeRecordProjector",
     "project_run",
+    "project_steer_targets",
 ]

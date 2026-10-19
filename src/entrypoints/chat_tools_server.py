@@ -15,12 +15,15 @@ Tool set:
 - `list_ideas`: one line per idea (id, title, step range, resolved outcome).
 - `get_idea`: one idea's full record, including its per-step history.
 - `list_steps`: every completed step, run-wide, in chronological order.
+- `list_targets`: the roles, attempts and items a steer may name in this run, from the run's
+  own committed state (the ids `propose_steer` accepts).
 - `list_state_files` / `read_state_file`: raw access to this run's portable state
   documents (`RunRecord.portable_documents`, read whichever branch is checked out), for
   detail the tools above do not carry. The raw per-attempt/event logs live in `log_dir`,
   a machine-local path outside the project root, which is the only thing this
   subprocess's `--project-root` argument can resolve into.
-- `propose_steer`: the agent's only steering tool. It checks a suggestion and returns it as
+- `propose_steer`: the agent's only steering tool. It checks a suggestion (its target must be
+  one `list_targets` shows) and returns it as
   a `SteerProposalReceipt`, which the run server publishes as a `steer_proposed` event for
   the operator to edit, send or dismiss. It has no way to send: sending is the operator's
   `command.control`, so the agent cannot send guidance because no tool here does.
@@ -47,7 +50,7 @@ from vs_project.api import Git, Project
 from vs_sim.api import OsProcesses, OsThreads
 
 if TYPE_CHECKING:
-    from vibesys.api import RunStore
+    from vibesys.api import RunStore, SteerTargets
 
 PROPOSE_STEER_TOOL = "propose_steer"
 """The one steering tool; the tool-list test holds the chat agent to it."""
@@ -57,6 +60,7 @@ READ_TOOLS = (
     "list_ideas",
     "get_idea",
     "list_steps",
+    "list_targets",
     "list_state_files",
     "read_state_file",
 )
@@ -231,6 +235,32 @@ def _list_steps_tool(store: RunStore, run_id: str) -> ToolSpec[_NoArgs]:
     )
 
 
+def _list_targets_tool(store: RunStore, run_id: str) -> ToolSpec[_NoArgs]:
+    def handler(_args: _NoArgs) -> str:
+        targets = store.get_record(run_id).steer_targets()
+        if targets is None:
+            return "(the run has committed no state yet: only {kind: run} can be named)"
+        attempts = ", ".join(
+            f"{row.attempt_id} (item {row.item_id}{', ended' if row.ended else ''})"
+            for row in targets.attempts
+        )
+        return (
+            f"roles: {', '.join(targets.roles) or '(none)'}\n"
+            f"attempts: {attempts or '(none)'}\n"
+            f"items: {', '.join(targets.items) or '(none)'}"
+        )
+
+    return ToolSpec(
+        name="list_targets",
+        description=(
+            "List the roles, attempts and items a steer can name in this run, as the run holds "
+            "them now. An attempt marked ended takes no steer. Use these ids in propose_steer."
+        ),
+        input_schema=_NoArgs,
+        handler=handler,
+    )
+
+
 def _list_state_files_tool(store: RunStore, run_id: str) -> ToolSpec[_NoArgs]:
     def handler(_args: _NoArgs) -> str:
         documents = store.get_record(run_id).portable_documents()
@@ -268,17 +298,19 @@ def _read_state_file_tool(store: RunStore, run_id: str) -> ToolSpec[_StateFileAr
     )
 
 
-def _propose_steer_tool() -> ToolSpec[_ProposeSteerArgs]:
+def _propose_steer_tool(store: RunStore, run_id: str) -> ToolSpec[_ProposeSteerArgs]:
     """Build `propose_steer`.
 
     The arguments are validated by the same models the operator's `SteerRequest` uses (target
-    kind and id agree, ids have the control schema's shape, mode is one of the three). Whether the
-    run holds the role, attempt or item is the run's to say: only the run process knows its
-    declared roles and live attempts, so the operator's send resolves the target and the run
-    refuses one it cannot (`control_refused`, with the reason).
+    kind and id agree, ids have the control schema's shape, mode is one of the three). The
+    target must also be one the run holds as of its last committed state
+    (`RunRecord.steer_targets`, the rule the run resolves every steer against), so a proposal
+    the run would refuse is refused here, naming the valid ids. The run still resolves the
+    target again when the operator sends: the run may have moved on since.
     """
 
     def handler(args: _ProposeSteerArgs) -> str:
+        _check_target(store.get_record(run_id).steer_targets(), args.target)
         receipt = SteerProposalReceipt(
             kind=STEER_PROPOSAL_KIND,
             proposal=SteerProposal(text=args.text, target=args.target, mode=args.mode),
@@ -302,6 +334,21 @@ def _propose_steer_tool() -> ToolSpec[_ProposeSteerArgs]:
     )
 
 
+def _check_target(targets: SteerTargets | None, target: SteerTarget) -> None:
+    """Raise `ValueError` naming why the run would refuse ``target`` and what it would accept."""
+    if target.id is None:
+        return
+    if targets is None:
+        message = (
+            f"{target.kind.value} {target.id!r}: the run has committed no state yet, so it has "
+            "nothing to name; propose a steer for the whole run ({kind: run})"
+        )
+        raise ValueError(message)
+    refusal = targets.refusal(target)
+    if refusal is not None:
+        raise ValueError(refusal.reason)
+
+
 def build_tools(store: RunStore, run_id: str) -> tuple[ToolSpec[Any], ...]:
     """Build every tool this server exposes for one run: the read-only ones and `propose_steer`."""
     # Touch the run once up front so a missing run_id fails fast and
@@ -312,9 +359,10 @@ def build_tools(store: RunStore, run_id: str) -> tuple[ToolSpec[Any], ...]:
         _list_ideas_tool(store, run_id),
         _get_idea_tool(store, run_id),
         _list_steps_tool(store, run_id),
+        _list_targets_tool(store, run_id),
         _list_state_files_tool(store, run_id),
         _read_state_file_tool(store, run_id),
-        _propose_steer_tool(),
+        _propose_steer_tool(store, run_id),
     )
 
 

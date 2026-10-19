@@ -16,6 +16,7 @@ from vs_runtime.api.testing import FakeRunHandle, FakeRuns, FakeStopTimer
 
 if TYPE_CHECKING:
     from vibesys.api.contracts import RunView
+    from vs_runtime.api.infrastructure import SteerTargets
 
 
 @dataclass
@@ -25,6 +26,8 @@ class FakeRunRecord:
     run_id: str
     run_view: RunView
     record_facts: RunRecordFacts
+    targets: SteerTargets | None = None
+    """What a steer may name in this run; None is a run with no committed state."""
     identity: str = ""
     history: tuple[RunDocument, ...] = ()
     portable: tuple[RunDocument, ...] = ()
@@ -56,6 +59,10 @@ class FakeRunRecord:
     def facts(self) -> RunRecordFacts:
         """Return the configured manifest facts."""
         return self.record_facts
+
+    def steer_targets(self) -> SteerTargets | None:
+        """Return the configured steer targets."""
+        return self.targets
 
     def history_documents(self) -> tuple[RunDocument, ...]:
         """Return configured policy-selected history documents."""
@@ -121,6 +128,29 @@ class FakeRunRecord:
 
 
 @dataclass
+class FakeRunStore:
+    """A run history of in-memory records, read as the product store reads a project."""
+
+    records: dict[str, FakeRunRecord] = field(default_factory=dict)
+
+    def list_runs(self) -> list[RunView]:
+        """Every record's view, most recently added first."""
+        return [record.view() for record in reversed(self.records.values())]
+
+    def get_run(self, run_id: str) -> RunView:
+        """Return one record's view."""
+        return self.get_record(run_id).view()
+
+    def get_record(self, run_id: str) -> FakeRunRecord:
+        """Return one record; an unknown run fails as the product store's read does."""
+        try:
+            return self.records[run_id]
+        except KeyError:
+            message = f"no run {run_id!r}"
+            raise LookupError(message) from None
+
+
+@dataclass
 class FakeProfilerPreflight:
     """A native profiler probe that touches no host: every probe reports ``usable``."""
 
@@ -137,6 +167,7 @@ __all__ = [
     "FakeProfilerPreflight",
     "FakeRunHandle",
     "FakeRunRecord",
+    "FakeRunStore",
     "FakeRuns",
     "FakeStopTimer",
 ]

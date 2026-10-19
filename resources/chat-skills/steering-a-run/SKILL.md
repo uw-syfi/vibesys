@@ -9,11 +9,12 @@ A steer is guidance in plain words that the run's agents read at their next turn
 propose it with `propose_steer(text, target, mode)`; the operator edits, sends or dismisses
 it. You cannot send it, and a proposal changes nothing until they send it.
 
-**Target** says who reads it:
+**Target** says who reads it. Call `list_targets` first: it shows the exact role, attempt and
+item ids the run holds now, and `propose_steer` refuses any other id (the refusal lists the
+valid ones).
 
 - `{kind: run}`: the next turn of any role (the default).
-- `{kind: role, id}`: that role's turns, for example `dynamic-implementer`. See the run-roles
-  skill. A role the run does not have is refused.
+- `{kind: role, id}`: that role's turns. See the run-roles skill for what each kind of role does.
 - `{kind: attempt, id}`: the next turn in that attempt. An attempt that has ended is refused.
 - `{kind: item, id}`: the next turn of any attempt at that work item (an idea).
 

@@ -371,7 +371,7 @@ depends_on = ["vibesys.api._store", "vibesys.plugin_catalog", "vs_project", "vs_
 
 [[modules]]
 path = "vibesys.api._store"
-depends_on = ["vibesys.api.contracts", "vibesys.plugin_catalog", "vs_project", "vs_sim.api"]
+depends_on = ["vibesys.api.contracts", "vibesys.plugin_catalog", "vs_project", "vs_runtime", "vs_sim.api"]
 
 [[modules]]
 path = "vibesys.api.testing"
@@ -1237,7 +1237,7 @@ expose = ["chat_skill_dirs", "resolve_skill_source_dirs", "validate_skill_tree"]
 from = ["vibesys.run.skill_sources"]
 
 [[interfaces]]
-expose = ["IterationSupport", "OrchestrationProjector", "OrchestrationRegistration", "RuntimeRecordProjector", "project_run"]
+expose = ["IterationSupport", "OrchestrationProjector", "OrchestrationRegistration", "RuntimeRecordProjector", "project_run", "project_steer_targets"]
 from = ["vibesys.plugin_registration"]
 
 [[interfaces]]

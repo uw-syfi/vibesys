@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Protocol, runtime_checkable
 from pydantic import BaseModel, ConfigDict
 
 from vibesys.api.contracts import RunStatus
-from vibesys.plugin_catalog import project_run
+from vibesys.plugin_catalog import project_run, project_steer_targets
 from vs_project.api import (
     GitRunHistory,
     GitTracker,
@@ -26,6 +26,7 @@ if TYPE_CHECKING:
     from vibesys.api.contracts import RunView
     from vibesys.plugin_catalog import OrchestrationRegistration, OrchestrationRegistry
     from vs_project.api import Git, OrchestrationRunManifest, Project, RunHistory
+    from vs_runtime.api.infrastructure import SteerTargets
     from vs_sim.api import Threads
 
 
@@ -104,6 +105,14 @@ class RunRecord(Protocol):
 
     def facts(self) -> RunRecordFacts:
         """Return immutable manifest and effective-objective facts."""
+        ...
+
+    def steer_targets(self) -> SteerTargets | None:
+        """Return the roles, attempts and items a steer may name as of the last committed state.
+
+        Read each call, so it follows a run that is still working. None when the run has no
+        committed state to name anything in.
+        """
         ...
 
     def history_documents(self) -> tuple[RunDocument, ...]:
@@ -220,6 +229,11 @@ class _LocalRunRecord:
             run_id=self._run_id,
             status=RunStatus.UNKNOWN,
             loop=manifest.orchestration.id,
+        )
+
+    def steer_targets(self) -> SteerTargets | None:
+        return project_steer_targets(
+            self._registration(self._manifest()), self._project, run_id=self._run_id
         )
 
     def facts(self) -> RunRecordFacts:
