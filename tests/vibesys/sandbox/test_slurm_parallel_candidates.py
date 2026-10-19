@@ -247,7 +247,8 @@ def test_a_candidates_transport_broker_stages_only_its_own_worktree(tmp_path: Pa
             "/bin/true",
             "-a",
             "-e",
-            "/usr/bin/true",
+            # The configured ssh_command with every prompt off (SlurmSshTransport.ssh_argv).
+            "/usr/bin/true -o BatchMode=yes",
             "--",
             f"{local}/",
             "test-cluster:/remote/vibesys/test-cluster/job/",
