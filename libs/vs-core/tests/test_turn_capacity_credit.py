@@ -4,7 +4,8 @@ The gate holds a turn its provider stopped (an outage, a spent quota) inside the
 and reports the hold (``TurnHeld``). Core moves the turn's bound by it: the holds that ended are
 credited whole, the current one by its length up to the budget once released, by the budget while
 the gate is in it, and without end while it is parked for the operator; a hold that began after
-the turn's own time ran out credits nothing. A turn core ends while the gate holds it is lost to
+the turn's own time ran out credits nothing. The send after the gate's latest release has at
+least the gate's ``resend_grace``, whatever own time the turn had left. A turn core ends while the gate holds it is lost to
 its provider (``PROVIDER_UNAVAILABLE``), not by its transport, and is asked again whatever the
 role's ``lost_turns``, a resumed turn included.
 
@@ -18,7 +19,7 @@ import math
 from dataclasses import dataclass, field, replace
 
 import pytest
-from hypothesis import given, settings
+from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
 import vs_core.api as core
@@ -31,6 +32,7 @@ from .toy_agent_search import IMPLEMENTER, ToyHost, run_toy, summary, toy_search
 _SETTINGS = settings(max_examples=12, deadline=None, derandomize=True, database=None)
 BUDGET = 900.0
 """The most of the current hold the gate lets core credit (the outage budget, scaled down)."""
+_LIMIT = IMPLEMENTER.turn_time
 
 
 @dataclass(frozen=True)
@@ -41,6 +43,7 @@ class Shape:
     since: float | None = None
     released: float | None = None
     parked: bool = False
+    grace: float = 0.0
 
     def hold(self, dispatched: float) -> core.CapacityHold:
         return core.CapacityHold(
@@ -49,17 +52,21 @@ class Shape:
             released_at=None if self.released is None else dispatched + self.released,
             parked=self.parked,
             budget=BUDGET,
+            resend_grace=self.grace,
         )
 
     def ends_after(self, limit: float) -> float:
         """How long after its dispatch core ends a turn with stated ``limit`` and this hold."""
         at = limit + self.credit
-        if self.since is None or self.since > at:
+        if self.since is not None and self.since > at:
             return at
-        if self.parked:
-            return math.inf
-        current = BUDGET if self.released is None else self.released - self.since
-        return at + min(current, BUDGET)
+        if self.since is not None:
+            if self.parked:
+                return math.inf
+            current = BUDGET if self.released is None else self.released - self.since
+            at += min(current, BUDGET)
+        # The send after the gate's latest release has at least the gate's grace.
+        return at if self.released is None else max(at, self.released + self.grace)
 
     @property
     def holding(self) -> bool:
@@ -144,6 +151,21 @@ shapes = st.one_of(
     ),
     # Late: the hold began after the turn's own time ran out.
     st.builds(Shape, since=st.just(1e6)),
+    # Released near or past the turn's own limit, with the grace the gate gives its resend:
+    # in the hold (an outage streak), or after the hold ended (a park the run resumed from).
+    st.builds(
+        lambda credit, since, released, grace: Shape(credit, since, since + released, grace=grace),
+        st.floats(0.0, BUDGET),
+        st.floats(0.0, 60.0),
+        st.floats(0.0, 2 * BUDGET),
+        st.floats(0.0, 2 * BUDGET),
+    ),
+    st.builds(
+        lambda credit, released, grace: Shape(credit, released=released, grace=grace),
+        st.floats(1.0, BUDGET),
+        st.floats(_LIMIT - BUDGET, _LIMIT + 2 * BUDGET),
+        st.floats(0.0, 2 * BUDGET),
+    ),
 )
 
 
@@ -161,6 +183,10 @@ def _ended_at(trace: Trace, role: core.Role) -> float | None:
 
 
 @_SETTINGS
+# The resend after a hold that ended, released past the turn's own limit (#3283 review MED-1).
+@example(shape=Shape(credit=100.0, released=_LIMIT + 500.0, grace=600.0))
+# The resend in an outage streak, released after a long hold, with less grace than the hold.
+@example(shape=Shape(since=10.0, released=10.0 + 2 * BUDGET, grace=600.0))
 @given(shape=shapes)
 def test_a_turn_ends_at_its_limit_plus_the_hold_it_is_credited(shape: Shape) -> None:
     implementer = IMPLEMENTER.model_copy(update={"lost_turns": 1})

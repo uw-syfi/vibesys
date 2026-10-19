@@ -15,6 +15,9 @@ in ``_wait_clock.turn_bound``, which ``record_bound`` uses for every record:
 - **Credit.** A hold that ended credits its length; the gate bounds each one. While the gate
   holds the turn for a backoff, the turn may stay held up to the budget, so its bound moves
   by the budget; once released, by the time it was held, never more than the budget.
+- **Resend.** The send after a release has at least the gate's ``resend_grace`` (about one
+  failing send) whatever own time the turn had left, so an outage that started late in the
+  turn does not cut it while its resend is still failing; the next stop reopens the hold.
 - **Parked.** A hold that waits for the operator or a timed resume (the run is paused for
   capacity) has no limit of its own: the turn ends with the run. The gate ends a parked hold
   when the run resumes, so the time the operator took is credited whole.
@@ -29,6 +32,7 @@ re-asks core bounds (``lost_to_provider``): the gate's budget and its pause boun
 
 from __future__ import annotations
 
+import math
 from typing import TYPE_CHECKING
 
 from ._registry import ContractError
@@ -68,6 +72,24 @@ def held(
     if records == state.records:
         return AreaChange(state=state)
     return AreaChange(state=state.model_copy(update={"records": records}))
+
+
+def held_limit(stated: float, hold: CapacityHold) -> float:
+    """When a turn with stated limit ``stated`` ends, given the gate's latest ``hold`` of it.
+
+    Before the run deadline caps it (``_wait_clock.turn_bound``); ``inf`` while it is parked.
+    """
+    at = stated + hold.credit
+    if hold.since is not None and hold.since > at:
+        return at  # late: the hold began after the turn's own time ran out
+    if hold.since is not None:
+        if hold.parked:
+            return math.inf
+        current = hold.budget if hold.released_at is None else hold.released_at - hold.since
+        at += min(current, hold.budget)
+    if hold.released_at is not None:
+        at = max(at, hold.released_at + hold.resend_grace)
+    return at
 
 
 def lost_to_provider(records: RecordsState, invocation: Invocation) -> bool:

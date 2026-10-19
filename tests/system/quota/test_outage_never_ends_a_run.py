@@ -460,7 +460,6 @@ def test_an_outage_shorter_than_the_budget_never_ends_the_run(
 
 
 @pytest.mark.regression
-@pytest.mark.xfail(strict=True, reason="MED-1: the resend after a hold is charged to the turn")
 @_SETTINGS
 # The resumed planner turn near its limit (review of #3283, MED-1): 300 s and 200 s left.
 @example(
@@ -475,7 +474,9 @@ def test_an_outage_shorter_than_the_budget_never_ends_the_run(
 )
 @given(
     hit=st.sampled_from(Hit),
-    spare=st.floats(min_value=0.0, max_value=1800.0),
+    # The gate's report reaches core at the loop's next control poll, so a first stop must
+    # reach the gate one poll before the limit (production polls each second).
+    spare=st.floats(min_value=_CONTROL_POLL_S, max_value=1800.0),
     length=st.floats(min_value=60.0, max_value=BUDGET - 3600.0),
     send_s=st.floats(min_value=5.0, max_value=600.0),
     policy=_POLICIES,
@@ -486,7 +487,8 @@ def test_an_outage_late_in_a_turn_never_ends_the_run(
     """Wherever in the hit turn the outage starts, the run still ends with a winner.
 
     The hit turn works until ``send_s + spare`` of its own time is left, then the outage
-    starts, so its first failing send reaches the gate with ``spare`` left. Before (review of
+    starts, so its first failing send reaches the gate with ``spare`` left (at least one
+    control poll, for its report to reach core before the limit). Before (review of
     #3283, MED-1), the resend after the gate's first wait was charged to the turn, which core
     cut as ``TRANSPORT_LOST``; a resumed turn is never asked again, and the run failed.
     """

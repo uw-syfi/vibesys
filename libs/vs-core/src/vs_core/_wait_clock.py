@@ -39,6 +39,7 @@ from itertools import pairwise
 from typing import TYPE_CHECKING
 
 from ._registry import ContractError
+from ._turn_holds import held_limit
 from .types.evaluation import OwnedJob, RegisteredOwnedJob
 from .types.job_observations import WaitEnd
 
@@ -193,22 +194,14 @@ def wait_bounds(
 def turn_bound(record: RequestRecord, run: RunState) -> Bound:
     """When ``record``'s own limit ends it: its stated limit plus the capacity hold it is credited.
 
-    The rules are ``_turn_holds``'s: the holds that ended credit their length, the current
-    hold may last up to its budget while the gate is in it and credits its length up to the
-    budget once released, a parked one lasts until the run ends, and one that began after the
-    turn's own time ran out credits nothing. A record with no hold ends at its ``until``.
+    The rules are ``_turn_holds.held_limit``'s; a bound past the run deadline ends with the run,
+    and a parked hold lasts until the run ends. A record with no hold ends at its ``until``.
     """
     stated = record.until.at
-    hold = record.capacity_hold
-    if hold is None:
+    if record.capacity_hold is None:
         return Bound(at=stated, by=WaitEnd.LIMIT)
     ceiling = Bound(at=max(run.deadline_at, stated), by=WaitEnd.RUN_END)
-    at = stated + hold.credit
-    if hold.since is not None and hold.since <= at:
-        if hold.parked:
-            return ceiling
-        current = hold.budget if hold.released_at is None else hold.released_at - hold.since
-        at += min(current, hold.budget)
+    at = held_limit(stated, record.capacity_hold)
     return Bound(at=at, by=WaitEnd.LIMIT) if at <= ceiling.at else ceiling
 
 

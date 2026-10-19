@@ -145,10 +145,22 @@ class OutagePolicy:
     an outage must never end a run that asked to wait). The turn stays held, its limit
     uncharged, until the operator resumes the run; then it is sent again and a new budget
     starts. ``switch_when_spent`` takes precedence."""
+    resend_grace_seconds: float = 600.0
+    """Ten minutes: the least time the send after a capacity wait has before core may end the
+    turn, whatever own time the turn had left (core's ``CapacityHold.resend_grace``). A failing
+    send took 3 to 4 min on S179 (agentshim's 30 s retry and the CLI's own retries), so a turn
+    whose outage started late in its own time is not cut while its resend still fails; the
+    next stop reopens the hold first. The gate raises it to twice the longest failing send it
+    saw of the turn. It is also the most a resend that succeeds runs past the turn's limit."""
 
     def __post_init__(self) -> None:
         """Reject values no decision can use."""
-        values = (self.budget_seconds, self.first_wait_seconds, self.max_wait_seconds)
+        values = (
+            self.budget_seconds,
+            self.first_wait_seconds,
+            self.max_wait_seconds,
+            self.resend_grace_seconds,
+        )
         if not all(math.isfinite(value) and value > 0 for value in values):
             message = f"outage policy seconds must be positive numbers, got {values!r}"
             raise ValueError(message)

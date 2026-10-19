@@ -203,7 +203,9 @@ class _TurnMemory:
     ``held``, ``held_since`` and ``released_at`` are the turn's hold as the gate reports it
     to core (``CapacityHold``), which never charges it to the turn's limit: the length of
     the holds that ended, when the current one began (an outage streak is one hold, the
-    sends between its waits included), and when its latest wait ended.
+    sends between its waits included), and when the gate last let the turn go.
+    ``longest_send`` is the longest a send after such a release took to stop again, which
+    sizes the grace core gives the next one.
     """
 
     quota_waited: float = 0.0
@@ -212,9 +214,12 @@ class _TurnMemory:
     held: float = 0.0
     held_since: float | None = None
     released_at: float | None = None
+    longest_send: float = 0.0
 
     def hold(self, now: float, *, continues: bool) -> None:
         """Begin a hold at ``now``, or with ``continues`` go on with the current one."""
+        if self.released_at is not None:
+            self.longest_send = max(self.longest_send, now - self.released_at)
         if not continues:
             self.close(now)
         if self.held_since is None:
@@ -229,18 +234,21 @@ class _TurnMemory:
         self.held_since = self.released_at = None
 
     def release(self, now: float) -> None:
-        """End the hold's latest wait at ``now``: the turn is sent again or ends."""
-        if self.held_since is not None and self.released_at is None:
+        """The gate lets the turn go at ``now`` (it is sent again or ends): its wait ends."""
+        if self.held_since is None and self.held <= 0:
+            return  # never held: nothing to release
+        if self.held_since is None or self.released_at is None:
             self.released_at = now
 
-    def report(self, budget: float, *, parked: bool = False) -> CapacityHold:
-        """The hold as core takes it."""
+    def report(self, budget: float, grace: float, *, parked: bool = False) -> CapacityHold:
+        """The hold as core takes it; the resend gets ``grace``, or twice the longest send."""
         return CapacityHold(
             credit=self.held,
             since=self.held_since,
             released_at=self.released_at,
             parked=parked and self.held_since is not None and self.released_at is None,
             budget=budget,
+            resend_grace=max(grace, 2 * self.longest_send),
         )
 
 
@@ -375,7 +383,10 @@ class PolicyCapacityGate:
         """Tell the run loop how long the gate has held the turn, for core to credit."""
         if context.invocation_id is not None:
             self._control.note_capacity_hold(
-                context.invocation_id, memory.report(self._outage.budget_seconds, parked=parked)
+                context.invocation_id,
+                memory.report(
+                    self._outage.budget_seconds, self._outage.resend_grace_seconds, parked=parked
+                ),
             )
 
     def _stop(self, error: AgentQuotaError, stops: CapacityStops, context: Attribution) -> None:

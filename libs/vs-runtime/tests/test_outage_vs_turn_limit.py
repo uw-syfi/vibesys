@@ -8,7 +8,7 @@ inside the six hour outage budget, ended a planner turn at 30 min after one minu
 Now the gate reports each hold to the run's control channel (``take_capacity_holds``), and core
 extends the turn's limit by it (``vs_core``'s ``CapacityHold``). Here core's limit is modelled by
 a thread that reads what the channel reports and cancels the turn once its uncredited time
-reaches ``turn_time``, by the rule core applies (tested in ``vs_core``'s own tests).
+reaches ``turn_time``, by the rule core applies (``vs_core``'s ``held_limit``).
 
 Once the outage outlasts its budget under the ``pause`` or ``wait`` policy, the gate pauses the
 run for the operator rather than give the turn up, and the turn is sent again on resume.
@@ -38,7 +38,7 @@ from vs_agent.api import (
     SessionScope,
 )
 from vs_agent.api.testing import FakeProvider, FakeTurnScript
-from vs_core.api import StopMode
+from vs_core.api import StopMode, held_limit
 from vs_runtime.api.infrastructure import (
     PROVIDER_OUTAGE,
     CapacityHandling,
@@ -78,22 +78,8 @@ def _outage() -> AgentQuotaError:
 
 
 def credited_limit(stated: float, hold: CapacityHold | None) -> float:
-    """Core's rule for a turn's limit, given the latest hold the gate reported for it.
-
-    The holds that ended are credited whole. The current one may last up to the budget while
-    the gate is in it, until it is released when parked (waiting for the operator), and is
-    credited its length up to the budget once released.
-    """
-    if hold is None:
-        return stated
-    at = stated + hold.credit
-    if hold.since is None:
-        return at
-    if hold.parked:
-        return float("inf")
-    if hold.released_at is None:
-        return at + hold.budget
-    return at + min(hold.released_at - hold.since, hold.budget)
+    """Core's rule for a turn's limit, given the latest hold the gate reported for it."""
+    return stated if hold is None else held_limit(stated, hold)
 
 
 class _Sink(NullAgentEventSink):
@@ -149,7 +135,7 @@ class _Turn:
         def send(request: AgentTurnRequest) -> None:
             del request
             self.threads.sleep(max(START + self.lead - self.clock.now(), 0.0) + self.send_s)
-            if self.clock.now() - START - self.lead < self.outage:
+            if self.clock.now() < START + self.lead + self.outage:
                 raise _outage()
 
         self.client = AgentClient(
@@ -247,7 +233,6 @@ def test_an_outage_shorter_than_the_budget_never_fails_a_turn(
 
 
 @pytest.mark.regression
-@pytest.mark.xfail(strict=True, reason="MED-1: the resend after a hold is charged to the turn")
 @settings(max_examples=examples(pr=10, nightly=60), deadline=None)
 # A turn resumed near its limit (review of #3283, MED-1): 300 s and 200 s of own time left.
 @example(

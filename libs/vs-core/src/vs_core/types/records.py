@@ -172,9 +172,16 @@ class CapacityHold(Value):
     ``credit`` is the time of the turn's holds that ended; the gate bounds each of them (by its
     policy, or by the operator who resumed the run), so core credits it whole. ``since`` is
     when the hold the turn is in began (None when it is in none), and ``released_at`` when
-    that hold's latest wait ended (None while it waits). A ``parked`` hold waits for the
-    operator or a timed resume with the run paused, not for a backoff. ``budget`` is the most
-    the current hold is credited: the outage budget the gate applies.
+    the gate last let the turn go: the end of the current hold's latest wait, or with no
+    current hold the end of the hold that ended last (None while it waits, or if never held).
+    A ``parked`` hold waits for the operator or a timed resume with the run paused, not for a
+    backoff. ``budget`` is the most the current hold is credited: the outage budget the gate
+    applies.
+
+    ``resend_grace`` is the least time the send after a release has before core ends the
+    turn, whatever own time the turn had left: the gate sizes it to one failing send, so a
+    turn near its limit is not cut while its resend is still failing (an outage that started
+    late in the turn), and the next stop reopens the hold before the grace runs out.
     """
 
     credit: Seconds = 0.0
@@ -182,12 +189,13 @@ class CapacityHold(Value):
     released_at: Seconds | None = None
     parked: bool = False
     budget: Seconds
+    resend_grace: Seconds = 0.0
 
     @model_validator(mode="after")
     def consistent(self) -> Self:
-        """A release or a park belongs to a hold, and a parked hold is not released."""
-        if self.since is None and (self.released_at is not None or self.parked):
-            raise ContractValidationError("since", "a released or parked hold names its start")
+        """A park belongs to a hold, and a parked hold is not released."""
+        if self.since is None and self.parked:
+            raise ContractValidationError("since", "a parked hold names its start")
         if (
             self.released_at is not None
             and self.since is not None
