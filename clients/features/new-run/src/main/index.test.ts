@@ -1,7 +1,7 @@
 import {describe, expect, test} from 'bun:test';
 import {ConnectionManager} from '@vibesys/connection';
 import {FakeLink} from '@vibesys/connection/testing';
-import type {RunInputs} from '@vibesys/ipc';
+import type {ExampleCreation, RunInputs} from '@vibesys/ipc';
 import {exampleCatalogue} from '@vibesys/run-fixtures';
 import type {StoredRecentRun} from '@vibesys/settings';
 import {FakeClock} from '@vibesys/transport/testing';
@@ -388,7 +388,7 @@ describe('NewRunMain', () => {
         const {main} = world();
         expect(await ask(main, destination)).toEqual({kind: 'offered', value: found});
         const creatable = found.state === 'absent' || found.state === 'empty';
-        const made = await create(main, destination);
+        const made = (await create(main, destination)) as ExampleCreation;
         expect(made.kind).toBe(creatable ? 'created' : 'taken');
         if (made.kind === 'created') {
           expect(made.created.project).toBe(destination);
