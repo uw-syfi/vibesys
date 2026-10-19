@@ -138,7 +138,10 @@ async function openRun(page: Page, live = false, server: FakeServerSeed = SERVER
     await page.addInitScript(installFakeWindows);
   }
   await page.goto('./shell.html');
-  await page.getByRole('main').getByRole('button', {name: /^mpmc/}).click();
+  await page
+    .getByRole('main')
+    .getByRole('button', {name: /^queue-rs · mpmc/})
+    .click();
 }
 
 /** The Ideas pane is always a flat list. */

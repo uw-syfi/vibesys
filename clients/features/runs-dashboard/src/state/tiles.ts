@@ -202,18 +202,30 @@ function valueWord(value: number): string {
   return value.toLocaleString('en-US', {maximumFractionDigits: digits});
 }
 
-/** A reading with its unit, else its metric's name, as the run page words the best idea's value. */
-function measuredWord(reading: MeasuredBest): string {
-  const unit = reading.unit ?? (reading.metric === null ? '' : metricName(reading.metric));
-  return unit === '' ? valueWord(reading.value) : `${valueWord(reading.value)} ${unit}`;
+/** What a reading is measured in: its unit, else its metric's name, as the run page words them; null when it names neither. */
+function unitOf(reading: MeasuredBest): string | null {
+  const named = reading.unit ?? reading.metric;
+  // An id such as `output_tokens_per_s` is words for a person; a unit such as `ops/s` already is.
+  return named === null || named === '' ? null : named.includes('_') ? metricName(named) : named;
 }
 
-function resultOf(input: RunInput, chart: TileChart | null): Tile['result'] {
+/** A tile's headline, and what it is measured in when it is a value and not a multiple of the base. */
+function headlineOf(
+  input: RunInput,
+  chart: TileChart | null,
+): {readonly result: Tile['result']; readonly unit: string | null} {
   const finalBest = chart === null ? null : (chart.line.at(-1) ?? null);
   const best = input.best ?? (finalBest !== null && finalBest > BASE ? finalBest : null);
-  if (best !== null) return {text: ratioWord(best), tone: best > BASE ? 'ok' : 'muted'};
+  if (best !== null) {
+    return {result: {text: ratioWord(best), tone: best > BASE ? 'ok' : 'muted'}, unit: null};
+  }
   // No ratio to the input (it was not measured): the best reading itself, which beats nothing known.
-  return input.measured === null ? null : {text: measuredWord(input.measured), tone: 'muted'};
+  return input.measured === null
+    ? {result: null, unit: null}
+    : {
+        result: {text: valueWord(input.measured.value), tone: 'muted'},
+        unit: unitOf(input.measured),
+      };
 }
 
 /** The tone of a status pill that says a run needs its user: never the green of a good ending. */
@@ -259,7 +271,7 @@ function firstLine(text: string | null): string | null {
 }
 
 /** The longest a tile's note runs, in characters, before it is cut at a word. */
-export const NOTE_MAX = 30;
+export const NOTE_MAX = 34;
 
 /** `text` cut at the last word boundary within `max` characters, with an ellipsis; whole when it fits. */
 function cutAtWord(text: string, max: number): string {
@@ -328,12 +340,13 @@ export function tileOf(input: RunInput): Tile {
     ...(input.seconds === null ? [] : [durationWord(input.seconds)]),
   ].join(' · ');
   const ended = endNote(input);
+  const {result, unit} = headlineOf(input, chart);
   return {
     id: input.id,
     title: input.title,
     hint: input.runId,
-    result: resultOf(input, chart),
-    facts: [input.machine, input.started]
+    result,
+    facts: [input.machine, input.started, unit]
       .filter((part): part is string => part !== null)
       .join(' · '),
     chart,

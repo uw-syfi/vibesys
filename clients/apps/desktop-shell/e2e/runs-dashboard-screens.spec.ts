@@ -8,6 +8,7 @@ import {settled} from './checks/settle.js';
 import {
   dashboardWorld,
   MANY_RUNS,
+  MEASURED_AND_FAILED,
   OMITTED_RUN,
   ONE_RUN,
   open,
@@ -35,6 +36,7 @@ const DASHBOARDS: readonly (readonly [string, readonly RunCase[]])[] = [
   ['many-runs', MANY_RUNS],
   ['needs-you', NEEDS_YOU],
   ['points-omitted', OMITTED_RUN],
+  ['measured-and-failed', MEASURED_AND_FAILED],
 ];
 
 async function check(page: Page, name: string, ignore: string[] = []): Promise<void> {

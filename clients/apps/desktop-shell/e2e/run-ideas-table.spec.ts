@@ -65,7 +65,10 @@ async function openRun(page: Page, count: number): Promise<void> {
     lineageRun(RUN, {count, chain: count > 100 ? 15 : 4, days: count > 100 ? 14 : 1}),
   );
   await page.goto('./shell.html');
-  await page.getByRole('main').getByRole('button', {name: /^mpmc/}).click();
+  await page
+    .getByRole('main')
+    .getByRole('button', {name: /^queue-rs · mpmc/})
+    .click();
 }
 
 test.use({colorScheme: 'dark', viewport: {width: 1440, height: 900}});

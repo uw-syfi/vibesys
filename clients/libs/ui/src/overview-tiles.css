@@ -93,12 +93,9 @@
   gap: var(--space-2);
   min-width: 0;
 }
-/* The figures keep their width; the note, then the pill's neighbour, gives way with an ellipsis. */
+/* The figures keep their width; the pill sits at the end. The note has a line of its own. */
 .vs-overview-tile-figures {
   flex: none;
-}
-.vs-overview-tile-foot > .vs-overview-tile-line {
-  flex: 1;
 }
 .vs-overview-tile-foot > :last-child {
   flex: none;

@@ -109,7 +109,10 @@ test('a run paused by its usage limit waits for quota, stops waiting, and resume
   await page.addInitScript(installFakeRun, {streams: [], text: {}});
   await page.addInitScript(installFakeServer, SERVER);
   await page.goto('./shell.html');
-  await page.getByRole('main').getByRole('button', {name: /^mpmc/}).click();
+  await page
+    .getByRole('main')
+    .getByRole('button', {name: /^queue-rs · mpmc/})
+    .click();
 
   const main = page.getByRole('main');
   await expect(main.getByText('Paused: Claude hit its usage limit')).toBeVisible();

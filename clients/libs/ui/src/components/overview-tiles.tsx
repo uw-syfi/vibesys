@@ -142,7 +142,7 @@ export function OverviewTile(props: {
             </Text>
           )}
         </span>
-        <span className="vs-overview-tile-line">
+        <span className="vs-overview-tile-line" title={props.facts}>
           <Text variant="small" tone="muted">
             {props.facts}
           </Text>
@@ -150,15 +150,20 @@ export function OverviewTile(props: {
         {props.chart === null ? null : (
           <span className="vs-overview-tile-chart">{props.chart}</span>
         )}
+        {props.note === null ? null : (
+          <span
+            className="vs-overview-tile-line vs-overview-tile-note"
+            title={props.noteFull ?? props.note}
+          >
+            <Text variant="small" tone={props.attention === true ? 'err' : 'muted'}>
+              {props.note}
+            </Text>
+          </span>
+        )}
         <span className="vs-overview-tile-foot">
           <span className="vs-overview-tile-figures">
             <Text variant="small" tone="muted">
               {props.figures}
-            </Text>
-          </span>
-          <span className="vs-overview-tile-line" title={props.noteFull ?? props.note ?? undefined}>
-            <Text variant="small" tone={props.attention === true ? 'err' : 'muted'}>
-              {props.note ?? ''}
             </Text>
           </span>
           <Chip label={props.status.label} tone={props.status.tone} dot />

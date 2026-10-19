@@ -87,7 +87,8 @@ test('a live run whose input was never measured headlines its best measured valu
   await open(page, dashboardWorld([run]));
 
   const tile = tiles(page, 'Running').first();
-  await expect(tile).toContainText('287 output tokens/s');
+  await expect(tile).toContainText('287');
+  await expect(tile).toContainText('output tokens/s');
   await expect(tile).not.toContainText('×');
 });
 
@@ -115,13 +116,13 @@ test('a run that needs the user says why in a few words, whole words, with the f
     ]),
   );
 
-  const notes = tiles(page, 'Needs you').locator('.vs-overview-tile-foot .vs-overview-tile-line');
+  const notes = tiles(page, 'Needs you').locator('.vs-overview-tile-note');
   const shown = await notes.evaluateAll(each =>
     each.map(note => ({text: note.textContent ?? '', title: note.getAttribute('title') ?? ''})),
   );
   expect(shown.map(note => note.text).sort()).toEqual([
     'Nested repository error',
-    'the agent was interrupted…',
+    'the agent was interrupted because…',
   ]);
   expect(shown.map(note => note.title).sort()).toEqual([full, long].sort());
 });

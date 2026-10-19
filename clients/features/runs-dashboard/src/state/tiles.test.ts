@@ -200,16 +200,15 @@ describe('a tile', () => {
 
   test('headlines the best measured value, in its unit, when no ratio to the input exists', () => {
     const measured = {value: 287.4, metric: 'output_tokens_per_s', unit: null};
-    expect(tileOf(run('a', {measured})).result).toEqual({
-      text: '287 output tokens/s',
-      tone: 'muted',
-    });
-    expect(tileOf(run('a', {measured: {...measured, unit: 'tok/s'}})).result?.text).toBe(
-      '287 tok/s',
+    const tile = tileOf(run('a', {measured, started: 'Oct 19 04:21'}));
+    expect(tile.result).toEqual({text: '287', tone: 'muted'});
+    expect(tile.facts).toBe('host-a · Oct 19 04:21 · output tokens/s');
+    expect(tileOf(run('a', {measured: {...measured, unit: 'tok/s'}})).facts).toBe('host-a · tok/s');
+    expect(tileOf(run('a', {measured: {...measured, unit: 'output_tokens_per_s'}})).facts).toBe(
+      'host-a · output tokens/s',
     );
-    expect(tileOf(run('a', {measured: {value: 0.5, metric: null, unit: null}})).result?.text).toBe(
-      '0.5',
-    );
+    const bare = tileOf(run('a', {measured: {value: 0.5, metric: null, unit: null}}));
+    expect([bare.result?.text, bare.facts]).toEqual(['0.5', 'host-a']);
   });
 
   test('prefers the ratio to the input over the measured value', () => {

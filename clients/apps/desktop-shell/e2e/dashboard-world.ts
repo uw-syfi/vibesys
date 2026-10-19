@@ -320,3 +320,42 @@ export const OMITTED_RUN: readonly RunCase[] = [
     }),
   },
 ];
+
+/** A live run whose input was never measured, and runs that failed with long reasons. */
+export const MEASURED_AND_FAILED: readonly RunCase[] = [
+  {
+    runId: 'r-live-measured',
+    name: 'queue-rs-run1',
+    host: 'ssh:host-a',
+    task: 'mpmc',
+    phase: 'running',
+    ago: 1,
+    points: [
+      [null, 'kept'],
+      [null, 'running'],
+    ],
+    best: {value: 287.4, metric: null, unit: 'tok/s'},
+  },
+  {
+    runId: 'r-failed-class',
+    name: 'queue-rs-run2',
+    host: 'ssh:host-a',
+    task: 'mpmc',
+    phase: 'failed',
+    ago: 5,
+    attention: 'failed',
+    endSummary: 'NestedRepositoryError: before the run could begin it found a repository inside',
+    points: [[null, 'failed']],
+  },
+  {
+    runId: 'r-failed-prose',
+    name: 'queue-rs-run3',
+    host: 'ssh:host-a',
+    task: 'mpmc',
+    phase: 'failed',
+    ago: 6,
+    attention: 'failed',
+    endSummary: 'the agent was interrupted because the machine went away during the second round',
+    points: [[null, 'failed']],
+  },
+];
