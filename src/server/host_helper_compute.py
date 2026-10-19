@@ -18,7 +18,7 @@ token is only ever tested for, never read into a reply. Light like the helper
 modules.
 
 Public surface: ``MachineCompute``, ``ConfigFiles``, ``ComputeError``, ``COMPUTE_FILE``,
-``SLURM_FILE``, ``parse_sinfo``, ``accelerator_of_gpu_model``, ``render_toml``.
+``SLURM_FILE``, ``parse_sinfo``, ``accelerator_of_gpu_model``, ``render_toml``, ``remote_command``.
 """
 
 from __future__ import annotations
@@ -26,7 +26,6 @@ from __future__ import annotations
 import json
 import posixpath
 import re
-import shlex
 import tomllib
 from typing import TYPE_CHECKING, Final, Literal, Protocol
 
@@ -453,7 +452,7 @@ class MachineCompute:
         """``argv`` on the cluster: over ssh from here, or here on a login node."""
         reach = cluster.reach
         command = (
-            ("ssh", *_SSH_OPTIONS, reach.host, shlex.join(argv))
+            ("ssh", *_SSH_OPTIONS, reach.host, remote_command(argv))
             if isinstance(reach, SshReach)
             else tuple(argv)
         )
@@ -504,6 +503,11 @@ class MachineCompute:
         self._files.write(self.config_path, render_toml(document))
 
 
+def remote_command(argv: Sequence[str]) -> str:
+    """``argv`` as one command line for the remote shell: each argument single-quoted."""
+    return " ".join("'" + argument.replace("'", "'\\''") + "'" for argument in argv)
+
+
 def _failed(stage: ClusterTestStage, stderr: str | None, fallback: str) -> ClusterTestFailed:
     first = next((line.strip() for line in (stderr or "").splitlines() if line.strip()), fallback)
     return ClusterTestFailed(stage=stage, detail=first[:_LINE_MAX])
@@ -517,5 +521,6 @@ __all__ = [
     "MachineCompute",
     "accelerator_of_gpu_model",
     "parse_sinfo",
+    "remote_command",
     "render_toml",
 ]

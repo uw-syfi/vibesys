@@ -95,6 +95,7 @@ from server.host_compute import (
     MeasurementTarget,
 )
 from server.host_envelope import (
+    HelperFeature,
     HelperReplyBase,
     HelperRequestBase,
     RequestId,
@@ -102,7 +103,6 @@ from server.host_envelope import (
     SpanId,
 )
 from server.host_examples import CreatedProject, ExampleList
-from server.host_features import HelperFeature
 from server.host_harness import HarnessChoice, HarnessOption, generation_conflict
 from server.host_machine_facts import MachineDescription
 from server.host_preflight import Backend, Check, RoleName, RunOptions

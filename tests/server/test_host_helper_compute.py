@@ -8,6 +8,7 @@ command probe (the real ``ssh`` and ``sinfo`` sit behind ``CommandProbe``); requ
 from __future__ import annotations
 
 import json
+import shlex
 import tomllib
 from dataclasses import replace
 from typing import TYPE_CHECKING
@@ -69,6 +70,7 @@ from server.host_helper_compute import (
     MachineCompute,
     accelerator_of_gpu_model,
     parse_sinfo,
+    remote_command,
     render_toml,
 )
 from server.host_helper_preflight import measurement_check, measurement_fits
@@ -441,7 +443,7 @@ def test_a_login_node_runs_its_commands_here_and_an_ssh_cluster_over_ssh() -> No
     assert all(call[0] != "ssh" for call in login_calls)
     assert calls[0][-1] == "true"
     assert all(call[0] == "ssh" and "BatchMode=yes" in call for call in calls)
-    assert "-p gpu" in calls[1][-1]
+    assert shlex.split(calls[1][-1])[-2:] == ["-p", "gpu"]
 
 
 def test_a_machine_that_cannot_run_a_command_fails_the_stage_that_needed_it() -> None:
@@ -878,3 +880,10 @@ def test_a_settings_file_that_is_wrong_answers_the_request_with_its_path() -> No
     assert isinstance(reply, HelperError)
     assert reply.code is HelperErrorCode.COMPUTE_CONFIG_UNREADABLE
     assert reply.path == _CONFIG
+
+
+@given(argv=st.lists(st.text(max_size=20).filter(lambda text: "\x00" not in text), max_size=5))
+def test_a_remote_command_line_gives_the_shell_back_exactly_the_arguments(
+    argv: list[str],
+) -> None:
+    assert shlex.split(remote_command(argv)) == argv
