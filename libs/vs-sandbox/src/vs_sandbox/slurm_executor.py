@@ -854,8 +854,10 @@ class SlurmEvaluationExecutor:
         With the evaluation ledger, a cancel withdraws a request no other run wants
         (``_release``). When the ledger keeps jobs on a stop, closing detaches
         instead: every job keeps running, its record keeps it resumable, and its
-        lease lapses. A release not done within ``CLOSE_RELEASE_BOUND_S`` (a
-        controller that does not answer) is given up the same way.
+        lease lapses. A close starts no ledger relinquish after
+        ``CLOSE_RELEASE_BOUND_S`` (a controller that does not answer) and detaches
+        those jobs the same way; work already under way still finishes, so this
+        bounds when releases start, not how long the close takes.
         """
         self._closing = True
         if self._ledger is not None and self._ledger.ledger.policy.keep_jobs_on_stop:

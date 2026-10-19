@@ -42,15 +42,30 @@ _LOG = logging.getLogger(__name__)
 _RELINQUISH_RETRIES = 3
 
 CLOSE_RELEASE_BOUND_S = 30.0
-"""How long an executor's close keeps starting releases of its ledger jobs, in seconds.
+"""How long an executor's close keeps starting ledger relinquishes, in seconds.
 
 A healthy controller relinquishes every job well within it. On one that does not answer,
 each try waits up to a transport call's limit and is retried, with no end but the
-retries. Past the bound, a close starts no further try: what is left is detached, as a
-run that keeps its jobs on a stop leaves them. Each job's record stays resumable, its
-ledger lease lapses, and the next run that opens the ledger reconciles it. A try already
-running ends within its transport limit, so the release takes at most the bound plus one
-try."""
+retries. Past the bound, a close starts no further relinquish: a job left in the ledger is
+detached, as a run that keeps its jobs on a stop leaves it. Its record stays resumable,
+its ledger lease lapses, and the next run that opens the ledger reconciles it. A job with
+no ledger entry (attached before the ledger was enabled) is still cancelled.
+
+This bounds when relinquishes start, not how long the close takes. Typically the close
+ends within the bound plus one transport call: on a controller that does not answer, the
+first call that times out ends its try. There is no hard bound, because what is already
+under way finishes:
+
+- a relinquish in flight is a whole ledger withdrawal, up to 8 rounds of a read and then a
+  mark write, or an inspect, scancel and record;
+- after a withdrawal, and for a job with no ledger entry, the executor sends scancel and
+  confirms the job ended, up to ``cancel_confirmation_seconds`` worth of inspects;
+- tries already queued on the worker threads at the deadline still run.
+
+Each of these calls is bounded by ``transport_timeout_seconds``. In the extreme, a
+controller that answers every call just under that limit (110 s by default) keeps one job's
+release going for tens of calls, an hour or more. Correctness does not depend on the close
+ending: an interrupted withdrawal's mark expires and is undone."""
 
 
 class BlockingCalls(Protocol):
