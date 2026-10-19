@@ -2154,7 +2154,8 @@ export interface RunsReadTailReply {
  * - ``records``: one ``UsageRecord`` per ``turn_usage_recorded`` event, in journal order, whose
  *   tokens sum to ``tokens`` (``server.run_usage``);
  * - ``input_gates``: the ``gate_finished`` events before the first ``span_started`` of a
- *   workstream span (``foldInputGates``), a client's reading of how the run's input measured;
+ *   workstream span, and after it the passes of a gate that stood failed (a retry of the input's
+ *   gate: ``foldInputGates``), a client's reading of how the run's input measured;
  * - ``terminal``: the last ``run_finished``, ``run_failed`` or ``run_interrupted`` event;
  * - the idea rows, the measurement points and the chart are folds of ``spans`` and ``replies``
  *   the client already owns (``CandidateFold``, ``performanceFold``); nothing duplicates them.
@@ -2206,7 +2207,8 @@ export interface TokenTally {
  * One gate that finished before the run's first idea began: how the run's input measured.
  *
  * A projection of the journal's ``gate_finished`` events that come before the first workstream
- * span (a gate under an idea belongs to the idea, and its span carries it). The client reads a
+ * span (a gate under an idea belongs to the idea, and its span carries it), and a pass of a gate
+ * that stood failed after it (the input's gate tried again). The client reads a
  * gate's short reason from ``output_tail`` itself, as it does for a journal it folds.
  */
 export interface InputGate {
