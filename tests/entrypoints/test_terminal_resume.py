@@ -5,7 +5,8 @@ terminal for good: core never applies another request to it. Resuming one once b
 run (container, environment, agents), found it ended at once and exited saying only that it
 "stopped early". The refusal now comes where the resume reference is resolved, before any host
 probe or resource, and names the stored outcome and reason, so the CLI, headless and the server
-all give it.
+all give it. The session checks again before it opens anything (`tests/vibesys/api/test_runs.py`
+resumes an ended run through `Runs`).
 """
 
 from __future__ import annotations
@@ -18,8 +19,6 @@ from tests.support.task_project import write_task
 
 from entrypoints.cli import build_run_request, parse_cli_invocation
 from entrypoints.headless import main as headless_main
-from entrypoints.production import production_runs
-from entrypoints.run import run_headless
 from entrypoints.server import main as server_main
 from vibesys.api import ConfigurationError
 from vibesys.orchestration.dynamic.launch import DynamicLaunch
@@ -40,7 +39,6 @@ from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecor
 from vs_project.api.testing import run_execution_record
 from vs_runtime.api.core import RuntimeRecord
 from vs_runtime.api.core_shell_fixtures import CounterConfig, counter
-from vs_sim.api.testing import FakeSignalSource
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -187,28 +185,6 @@ def test_the_server_entrypoint_refuses_before_booting(
 
     assert raised.value.code == 2
     assert f"already terminal (cancelled: {_REASON})" in capsys.readouterr().err
-
-
-def test_the_session_refuses_a_run_that_ended_after_its_request_was_validated(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """Headless and the server start runs through the session, which checks again first."""
-    root = _project(tmp_path / "project")
-    monkeypatch.chdir(root)
-    request = build_run_request(
-        parse_cli_invocation(["--outer-loop", "dynamic", "--resume", _RUN_ID])
-    )
-    _commit_core(
-        root,
-        status=CoreRunStatus.TERMINAL,
-        result=RunResultProposal(outcome="cancelled", reason=_REASON),
-    )
-
-    with pytest.raises(ConfigurationError) as raised:
-        run_headless(request, production_runs(), FakeSignalSource())
-
-    assert raised.value.diagnostic.code == "run_ended"
-    assert f"already terminal (cancelled: {_REASON})" in raised.value.diagnostic.message
 
 
 @pytest.mark.parametrize("status", [s for s in CoreRunStatus if s is not CoreRunStatus.TERMINAL])
