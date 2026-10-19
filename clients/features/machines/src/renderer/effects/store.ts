@@ -6,6 +6,7 @@
  */
 import {
   attempt,
+  type FailureCause,
   type HostsWelcomeBridge,
   type MachineSettingsWelcomeBridge,
   type MachinesWelcomeBridge,
@@ -30,10 +31,16 @@ export type Clock = () => number;
 
 type Outcome<T> =
   | {readonly ok: true; readonly value: T}
-  | {readonly ok: false; readonly error: string};
+  | {readonly ok: false; readonly error: string; readonly cause?: FailureCause};
 
+/** A reply as the reducer reads it: a failed connection keeps its typed cause beside its text. */
 function outcome<T>(result: WelcomeResult<T>): Outcome<T> {
-  return result.ok ? {ok: true, value: result.value} : {ok: false, error: result.error};
+  if (result.ok) return {ok: true, value: result.value};
+  return {
+    ok: false,
+    error: result.error,
+    ...(result.cause === undefined ? {} : {cause: result.cause}),
+  };
 }
 
 /** Make `request`; settles once its reply is dispatched. */

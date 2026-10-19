@@ -101,7 +101,7 @@ test('machines show their status from their facts, and each problem carries its 
 
   // A missing checkout is fixed inline: its field is open with the old path.
   await row(page, 'host-b').click();
-  await expect(page.getByText('Nothing is at ~/vibesys on host-b any more.')).toBeVisible();
+  await expect(page.getByTitle(/^Nothing is at ~\/vibesys on host-b any more\./)).toBeVisible();
   const fix = page.getByRole('combobox', {name: 'VibeSys checkout on host-b'});
   await expect(fix).toHaveValue('~/vibesys');
   await shoot(page, 'ink-checkout-not-found');
@@ -116,7 +116,7 @@ test('machines show their status from their facts, and each problem carries its 
   // Sign in is the connection's own action.
   await row(page, 'host-a').click();
   await expect(
-    page.getByText('The app couldn’t connect: your SSH key needs its passphrase.'),
+    page.getByTitle('The app couldn’t connect: your SSH key needs its passphrase.'),
   ).toBeVisible();
   await shoot(page, 'ink-sign-in');
   await page.getByRole('button', {name: 'Sign in', exact: true}).click();
@@ -185,7 +185,7 @@ test('a machine whose VibeSys lacks what the app needs shows Needs an update, no
   await expect(row(page, 'host-a')).toContainText('Needs an update');
   await expect(row(page, 'host-a')).not.toContainText('Ready');
   await row(page, 'host-a').click();
-  await expect(page.getByText('VibeSys on host-a needs an update')).toBeVisible();
+  await expect(page.getByTitle('VibeSys on host-a needs an update')).toBeVisible();
   expect(await rawTextOf(page)).toEqual([]);
 });
 

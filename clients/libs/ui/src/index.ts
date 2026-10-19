@@ -67,7 +67,7 @@ export {
 export {type LogLine, LogPane} from './components/log-pane.js';
 export {LinkOpener, Markdown} from './components/markdown.js';
 export {markdownToPlain} from './components/markdown-plain.js';
-export {Menu, type MenuItem} from './components/menu.js';
+export {Menu, MenuBounds, type MenuItem} from './components/menu.js';
 export {
   Message,
   type MessageTone,

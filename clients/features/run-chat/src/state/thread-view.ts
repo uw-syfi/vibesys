@@ -40,7 +40,12 @@ export type ThreadItem =
   /** The question went out and nothing has come back yet. */
   | {readonly kind: 'waiting'; readonly id: string};
 
-export const NEW_CHAT_TITLE = 'New chat';
+/**
+ * What the Threads menu calls a thread the backend has not titled. It is never "New chat": that is
+ * the action that opens an empty thread, and an existing thread listed under its name was opened
+ * by people who meant the action, showing them another thread's transcript.
+ */
+const UNTITLED_THREAD = 'Untitled';
 
 /** The run's threads, newest first. The implicit default thread shows only once it has answers. */
 export function threadEntries(core: CoreState): readonly ThreadEntry[] {
@@ -51,7 +56,7 @@ export function threadEntries(core: CoreState): readonly ThreadEntry[] {
     )
     .map(thread => ({
       id: thread.id,
-      title: thread.title === '' ? NEW_CHAT_TITLE : thread.title,
+      title: thread.title === '' ? UNTITLED_THREAD : thread.title,
       provider: thread.provider,
       model: thread.model,
       answers: core.chatTranscripts[thread.id]?.length ?? 0,

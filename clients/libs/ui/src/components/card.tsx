@@ -33,7 +33,7 @@ export function Card(props: {
 
 /**
  * A message in a tone: a title, an optional body, and optional actions beside them. `hint` is the
- * longer account behind a short body, for the pointer.
+ * longer account behind a short title or body, for the pointer.
  */
 export function Banner(props: {
   readonly title: string;
@@ -44,10 +44,10 @@ export function Banner(props: {
 }): JSX.Element {
   return (
     <div className="vs-banner" data-tone={props.tone ?? 'neutral'}>
-      <div className="vs-banner-text">
+      <div className="vs-banner-text" title={props.hint}>
         <Text variant="body-strong">{props.title}</Text>
         {props.body === undefined ? null : (
-          <div title={props.hint}>
+          <div>
             <Text tone="muted">{props.body}</Text>
           </div>
         )}

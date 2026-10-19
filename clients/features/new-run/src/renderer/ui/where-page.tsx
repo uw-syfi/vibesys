@@ -153,8 +153,8 @@ export function WherePage(
       {fit === null || fit.kind === 'unknown' ? null : (
         <Banner
           tone={fit.kind === 'fits' ? 'ok' : 'warn'}
-          title={fit.kind === 'fits' ? 'The hardware fits.' : 'The hardware may not fit.'}
-          body={fit.words}
+          title={fit.kind === 'fits' ? 'Hardware fits' : 'Hardware mismatch'}
+          hint={fit.words}
         />
       )}
       <MachineDetails {...props} key={machine} />

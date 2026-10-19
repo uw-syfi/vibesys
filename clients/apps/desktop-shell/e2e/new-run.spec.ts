@@ -79,7 +79,7 @@ test('an example of LLM serving: its model, its hardware, its goal, then the run
       .getByRole('radiogroup', {name: 'Agent works on'})
       .getByRole('radio', {name: /host-b/}),
   ).toBeChecked();
-  await expect(main(page).getByText('The hardware fits.')).toBeVisible();
+  await expect(main(page).getByText('Hardware fits', {exact: true})).toBeVisible();
   await proceed(page);
 
   await expect(question(page, 'Which agent does the work?')).toBeVisible();
@@ -906,12 +906,15 @@ test('Where: a GPU task the agent machine lacks is a misfit only when results ar
     machine: 'local',
   });
   const measured = main(page).getByRole('radiogroup', {name: 'Measured on'});
-  const misfit = main(page).getByText('The hardware may not fit.');
+  const misfit = main(page).getByText('Hardware mismatch', {exact: true});
   await expect(misfit).toBeVisible();
+  // The detail is on the pointer, not drawn.
+  await expect(main(page).getByTitle(/^The task targets .*, but .* has /)).toBeVisible();
+  await expect(main(page).getByText(/The task targets/)).toHaveCount(0);
   for (const name of ['Slurm · lab-h100', 'Slurm · campus', 'Modal']) {
     await measured.getByRole('radio', {name: new RegExp(name)}).check();
     await expect(misfit).toHaveCount(0);
-    await expect(main(page).getByText(/^The hardware fits\.$/)).toHaveCount(0);
+    await expect(main(page).getByText('Hardware fits', {exact: true})).toHaveCount(0);
   }
   await measured.getByRole('radio', {name: /Same machine/}).check();
   await expect(misfit).toBeVisible();

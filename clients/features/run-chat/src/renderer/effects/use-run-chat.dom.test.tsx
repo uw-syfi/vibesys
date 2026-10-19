@@ -312,3 +312,47 @@ test('a new chat starts on the harness and model the run runs on, not the first 
   ]);
   await act(async () => root.unmount());
 });
+
+function chunk(sequence: number, thread: string, text: string): RunEvent {
+  return event(sequence, 'agent_output_chunk', {
+    ...CHAT,
+    chat_thread_id: thread,
+    invocation_id: `turn-${sequence}`,
+    data: {kind: 'agent_output_chunk', channel: 'assistant', content: text},
+  });
+}
+
+function untitled(sequence: number, thread: string): RunEvent {
+  return event(sequence, 'chat_thread_created', {
+    ...CHAT,
+    chat_thread_id: thread,
+    data: {
+      kind: 'chat_thread_created',
+      thread_id: thread,
+      title: '',
+      provider: 'claude',
+      model: 'opus',
+      created_at: '2026-01-01T00:00:00Z',
+    },
+  });
+}
+
+test('New chat opens an empty thread, and no thread in the Threads menu goes by that name', async () => {
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root = createRoot(container);
+  const core = fold([THREAD, chunk(2, 't', 'Still writing the answer'), untitled(3, 'u')]);
+  await act(async () => root.render(<Harness core={core} ports={fakePorts([])} />));
+  await act(async () => press(container, 'Chat'));
+  await act(async () => press(container, 'Threads'));
+  const entries = [...container.querySelectorAll('[role="menuitem"]')].map(each =>
+    each.textContent?.trim(),
+  );
+  expect(entries).toHaveLength(2);
+  expect(entries).not.toContain('New chat');
+  await act(async () => press(container, 'New chat'));
+  expect(container.textContent).not.toContain('Still writing the answer');
+  expect(container.textContent).not.toContain('Writing');
+  expect(container.textContent).not.toContain('Working');
+  await act(async () => root.unmount());
+});

@@ -14,6 +14,7 @@ import {
   LogPane,
   Markdown,
   Menu,
+  MenuBounds,
   type MenuItem,
   type ParetoAxis,
   ParetoChart,
@@ -465,6 +466,16 @@ export const RICH_ENTRIES = {
         <Menu icon="more" label="More actions" align="start" items={MENU} />
         <Menu text="Actions" icon="chevron-down" items={MENU} />
       </Row>
+    ),
+  },
+  MenuBounds: {
+    render: () => (
+      <MenuBounds>
+        <Row justify="between" gap="space-3">
+          <Text>Opens under this row</Text>
+          <Menu text="Bounded" icon="chevron-down" items={MENU} />
+        </Row>
+      </MenuBounds>
     ),
   },
   Dialog: {render: () => <DialogDemo />},

@@ -48,6 +48,8 @@
     "@types/bun": "1.4.2",
     "@types/node": "^24.0.0",
     "@types/react": "19.1.13",
+    "@types/react-dom": "19.1.9",
+    "react-dom": "19.1.1",
     "typescript": "^5.8.3"
   }
 }

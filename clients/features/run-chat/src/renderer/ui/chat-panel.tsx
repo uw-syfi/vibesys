@@ -3,6 +3,7 @@ import {
   ChatMessage,
   Field,
   Menu,
+  MenuBounds,
   Row,
   Select,
   Stack,
@@ -68,48 +69,50 @@ function Header(props: ChatPanelView): JSX.Element {
   const current = threads.find(entry => entry.id === shown);
   return (
     <Stack gap="space-3">
-      <Row justify="between" align="start" gap="space-3" wrap>
-        <Stack gap="space-1">
-          <Text as="h2" variant="heading">
-            Chat
-          </Text>
-          {current === undefined ? null : (
-            <Text variant="small" tone="muted">
-              {current.title}
+      <MenuBounds>
+        <Row justify="between" align="start" gap="space-3" wrap>
+          <Stack gap="space-1">
+            <Text as="h2" variant="heading">
+              Chat
             </Text>
-          )}
-        </Stack>
-        <Row gap="space-2">
-          {threads.length === 0 ? null : (
-            <Menu
-              text="Threads"
-              variant="quiet"
-              size="sm"
-              align="end"
-              items={threads.map(entry => ({
-                id: entry.id,
-                label: entry.title,
-                press: () => dispatch({type: 'choose-thread', id: entry.id}),
-              }))}
-            />
-          )}
-          {props.canAsk ? (
+            {current === undefined ? null : (
+              <Text variant="small" tone="muted">
+                {current.title}
+              </Text>
+            )}
+          </Stack>
+          <Row gap="space-2">
+            {threads.length === 0 ? null : (
+              <Menu
+                text="Threads"
+                variant="quiet"
+                size="sm"
+                align="end"
+                items={threads.map(entry => ({
+                  id: entry.id,
+                  label: entry.title,
+                  press: () => dispatch({type: 'choose-thread', id: entry.id}),
+                }))}
+              />
+            )}
+            {props.canAsk ? (
+              <Button
+                variant="quiet"
+                size="sm"
+                text="New chat"
+                press={() => dispatch({type: 'new-chat'})}
+              />
+            ) : null}
             <Button
               variant="quiet"
               size="sm"
-              text="New chat"
-              press={() => dispatch({type: 'new-chat'})}
+              icon="cross"
+              label="Close"
+              press={() => dispatch({type: 'close'})}
             />
-          ) : null}
-          <Button
-            variant="quiet"
-            size="sm"
-            icon="cross"
-            label="Close"
-            press={() => dispatch({type: 'close'})}
-          />
+          </Row>
         </Row>
-      </Row>
+      </MenuBounds>
       {shown === null && props.canAsk ? <Picker panel={props.panel} dispatch={dispatch} /> : null}
     </Stack>
   );

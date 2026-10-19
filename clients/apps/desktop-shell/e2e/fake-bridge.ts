@@ -114,6 +114,11 @@ export interface FakeBridgeSeed {
   readonly reports?: Readonly<Record<string, {kind: string; detail?: string; facts?: null}>>;
   /** What `machine.describe` says on a ready machine. */
   readonly facts?: unknown;
+  /**
+   * Hosts whose ssh alias does not answer: saving a checkout there fails after the connection
+   * does, as a typed link failure carrying the raw connection text.
+   */
+  readonly unreachableHosts?: readonly string[];
   /** What `checkout.inspect` finds at each path (on any machine); other paths hold nothing. */
   readonly checkouts?: Readonly<Record<string, unknown>>;
   /** What `paths.complete` lists for each directory (on a machine with a checkout saved). */
@@ -409,6 +414,14 @@ export function installFakeMachines(seed: FakeBridgeSeed): void {
     },
     // The hosts feature's checked save: the checkout must hold VibeSys before it is saved.
     setCheckout: (host: string, path: string) => {
+      if (seed.unreachableHosts?.includes(host)) {
+        return Promise.resolve({
+          ok: false,
+          error: `connection down: ssh: connect to host ${label(host)} port 22: Connection refused`,
+          authNeeded: false,
+          cause: 'link',
+        });
+      }
       if (!found(path)) return failed(`${path} on ${label(host)} is not a directory.`);
       const others = machines.filter(machine => machine.host !== host);
       // As main lists them: This Mac first, then by name.

@@ -47,3 +47,21 @@ test('a listing the main process refused keeps its words', async () => {
 
   expect(store.getState().listProblem).toBe('hosts.json is unreadable.');
 });
+
+test('an Add whose connection failed keeps the failure’s typed cause with its text', async () => {
+  const raw = 'connection down: Connection refused';
+  const bridge: MachinesBridge = {
+    ...bridgeListing(() => Promise.resolve({ok: true as const, value: []})),
+    setCheckout: () =>
+      Promise.resolve({ok: false as const, error: raw, authNeeded: false, cause: 'link' as const}),
+  };
+  const store = createMachinesStore(bridge);
+  await settle();
+  store.dispatch({type: 'open-add'});
+  store.dispatch({type: 'add-host', value: 'nowhere'});
+  store.dispatch({type: 'checkout', form: 'add', value: '~/vibesys'});
+  store.dispatch({type: 'submit', form: 'add'});
+  await settle();
+
+  expect(store.getState().adding?.problem).toMatchObject({field: 'host', text: raw, cause: 'link'});
+});

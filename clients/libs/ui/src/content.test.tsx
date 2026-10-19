@@ -2,7 +2,17 @@
 
 import {describe, expect, test} from 'bun:test';
 import {renderToStaticMarkup} from 'react-dom/server';
-import {Chart, CheckList, type CheckState, LogPane, Table} from './index.js';
+import {
+  Banner,
+  Chart,
+  CheckList,
+  type CheckState,
+  Chip,
+  Field,
+  LogPane,
+  Table,
+  TextInput,
+} from './index.js';
 import {MONO_ADVANCE, TYPE} from './tokens/index.js';
 
 describe('LogPane', () => {
@@ -121,5 +131,25 @@ describe('Table', () => {
       <Table label="T" columns={columns} rows={rows} rowKey={row => row.id} />,
     );
     expect(still).not.toMatch(/<tr[^>]*tabindex/);
+  });
+});
+
+describe('the pointer carries the detail behind a short word', () => {
+  test('a banner with a title and no body still has its hint on the pointer', () => {
+    const html = renderToStaticMarkup(<Banner title="Needs an update" hint="The detail." />);
+    expect(html).toContain('class="vs-banner-text" title="The detail."');
+  });
+
+  test('a chip carries its hint, and a field error its own', () => {
+    expect(renderToStaticMarkup(<Chip label="Token found" hint="Held in a profile." />)).toContain(
+      'title="Held in a profile."',
+    );
+    const field = renderToStaticMarkup(
+      <Field label="SSH host" error="Unreachable" errorHint="Connection refused">
+        <TextInput value="" change={() => undefined} />
+      </Field>,
+    );
+    expect(field).toContain('title="Connection refused"');
+    expect(field).toContain('>Unreachable<');
   });
 });

@@ -4,6 +4,7 @@
  * press dispatches an action, except "New run here", which asks the shell to change screens.
  */
 import type {HostKey} from '@vibesys/hosts';
+import {FAILURE_CAUSE_WORDS, type FailureCause} from '@vibesys/ipc';
 import {
   Banner,
   Button,
@@ -42,6 +43,19 @@ type Dispatch = (action: MachinesAction) => void;
 
 const LOCAL: HostKey = 'local';
 const CHECKING = 'Checking the checkout';
+
+/**
+ * A form problem as its field shows it: a failed connection as its status word (Unreachable) with
+ * the raw text on the pointer; any other problem in its own words.
+ */
+function shownProblem(problem: {readonly text: string; readonly cause?: FailureCause}): {
+  readonly error: string;
+  readonly errorHint?: string;
+} {
+  return problem.cause === undefined
+    ? {error: problem.text}
+    : {error: FAILURE_CAUSE_WORDS[problem.cause], errorHint: problem.text};
+}
 
 /** A ref callback with one identity, so it runs as the form mounts and not on every render. */
 function focusFirstField(form: HTMLDivElement | null): void {
@@ -88,7 +102,7 @@ export function AddMachine(props: {
             <Field
               label="SSH host"
               hint="As you’d type after ssh; your SSH config and keys apply."
-              {...(adding.problem?.field === 'host' ? {error: adding.problem.text} : {})}
+              {...(adding.problem?.field === 'host' ? shownProblem(adding.problem) : {})}
             >
               <TextInput
                 value={adding.host}
@@ -99,7 +113,7 @@ export function AddMachine(props: {
             <Field
               label="VibeSys checkout"
               {...(completions.length > 0 && host !== '' ? {help: `Found on ${host}:`} : {})}
-              {...(adding.problem?.field === 'checkout' ? {error: adding.problem.text} : {})}
+              {...(adding.problem?.field === 'checkout' ? shownProblem(adding.problem) : {})}
             >
               <PathInput
                 value={adding.path.checkout}
@@ -138,7 +152,7 @@ function CheckoutForm(props: {
       <Stack gap="space-3">
         <Field
           label={`VibeSys checkout on ${machine.label}`}
-          {...(fixing.problem === null ? {} : {error: fixing.problem.text})}
+          {...(fixing.problem === null ? {} : shownProblem(fixing.problem))}
         >
           <PathInput
             value={fixing.path.checkout}
@@ -192,7 +206,7 @@ function Problem(props: {
     <Banner
       tone="warn"
       title={statusWord(status)}
-      body={problem}
+      hint={problem}
       {...(actions === undefined ? {} : {actions})}
     />
   );
@@ -330,10 +344,13 @@ export function MachinesScreen(props: {
       )}
       <Stack gap="space-1" grow>
         <Text variant="section">Machines</Text>
-        <Text as="h1" variant="title">
+        <Text
+          as="h1"
+          variant="title"
+          title="Each machine runs VibeSys from a checkout you already have there."
+        >
           Where runs can go
         </Text>
-        <Text tone="muted">Each machine runs VibeSys from a checkout you already have there.</Text>
       </Stack>
       <Button variant="primary" text="Add a machine" press={() => dispatch({type: 'open-add'})} />
     </Row>

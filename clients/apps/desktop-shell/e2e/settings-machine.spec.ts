@@ -42,14 +42,17 @@ test('Clusters and clouds lists a set-up machine’s clusters, Modal, SkyPilot a
 }) => {
   await openSettingsAt(page, 1440);
   await openSection(page, 'Clusters and clouds');
-  await expect(main(page).getByText('Stored on This Mac in')).toBeVisible();
+  await expect(main(page).getByText('File', {exact: true})).toHaveAttribute(
+    'title',
+    'Stored on This Mac',
+  );
   await expect(main(page).getByText(/compute\.toml$/)).toBeVisible();
   await expect(main(page).getByRole('heading', {name: 'lab-h100'})).toBeVisible();
   await expect(main(page).getByRole('heading', {name: 'campus'})).toBeVisible();
   await expect(main(page).getByRole('heading', {name: 'cluster-m'})).toBeVisible();
   await expect(main(page).getByText('From the operator file')).toBeVisible();
-  await expect(main(page).getByText('Over SSH, host alias lab-login')).toBeVisible();
-  await expect(main(page).getByText('This Mac is a login node of this cluster')).toBeVisible();
+  await expect(main(page).getByText('SSH · lab-login')).toBeVisible();
+  await expect(main(page).getByText('Login node', {exact: true})).toBeVisible();
   await expect(card(page, 'Modal').getByText('Token found')).toBeVisible();
   await expect(card(page, 'SkyPilot').getByText('Preview')).toBeVisible();
   // A cluster of the operator file is listed and never removed here.
@@ -71,9 +74,11 @@ test('another machine shows its own settings: empty, no Modal token, or too old 
   await expect(card(page, 'Modal').getByText('No token')).toBeVisible();
   await expect(main(page).getByRole('heading', {name: 'lab-h100'})).toHaveCount(0);
   await nav(page).getByRole('combobox', {name: 'Machine'}).selectOption({label: 'host-c'});
-  await expect(main(page).getByText('The VibeSys on host-c is too old for this.')).toBeVisible();
+  await expect(main(page).getByText('Needs an update', {exact: true})).toBeVisible();
+  await expect(main(page).getByTitle(/^The VibeSys on host-c is too old for this/)).toBeVisible();
   await nav(page).getByRole('button', {name: 'Agent logins'}).click();
-  await expect(main(page).getByText('The VibeSys on host-c is too old for this.')).toBeVisible();
+  await expect(main(page).getByText('Needs an update', {exact: true})).toBeVisible();
+  await expect(main(page).getByTitle(/^The VibeSys on host-c is too old for this/)).toBeVisible();
 });
 
 test('a cluster is saved only after Test connection passes, and is then listed and removable', async ({
@@ -161,8 +166,8 @@ test('Agent logins says each harness is signed in, not signed in, or not install
   const row = (name: string) =>
     main(page).locator('.vs-card', {has: page.getByRole('heading', {name})});
   await expect(row('Claude Code').getByText('Signed in')).toBeVisible();
-  await expect(row('Claude Code').getByText('With your account')).toBeVisible();
-  await expect(row('Codex').getByText('With the API key in', {exact: true})).toBeVisible();
+  await expect(row('Claude Code').getByText('Account', {exact: true})).toBeVisible();
+  await expect(row('Codex').getByText('API key', {exact: true}).first()).toBeVisible();
   await expect(row('Codex').getByText('OPENAI_API_KEY', {exact: true})).toBeVisible();
   await expect(
     row('Gemini CLI').getByText('.gemini/oauth_creds.json', {exact: true}),

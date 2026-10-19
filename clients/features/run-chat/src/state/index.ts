@@ -67,7 +67,6 @@ export {
   steerCardMachine,
 } from './steer-card.js';
 export {
-  NEW_CHAT_TITLE,
   shownThread,
   type ThreadChoice,
   type ThreadEntry,

@@ -19,11 +19,9 @@ const ACCELERATORS = {
   cpu: 'CPU only',
 } as const;
 
-/** How `machine` reaches `cluster`. */
-export function reachWords(cluster: SlurmClusterSettings, machine: string): string {
-  return cluster.reach.kind === 'ssh'
-    ? `Over SSH, host alias ${cluster.reach.host}`
-    : `${machine} is a login node of this cluster`;
+/** How the machine reaches `cluster`: SSH and its host alias, or the machine is its login node. */
+export function reachWords(cluster: SlurmClusterSettings): string {
+  return cluster.reach.kind === 'ssh' ? `SSH · ${cluster.reach.host}` : 'Login node';
 }
 
 /** What a cluster's nodes offer, or that it is not stated; the GPU models are `hardwareModels`. */
@@ -78,14 +76,14 @@ const NO_HOW: HowWords = {text: '', identifier: null};
 function howWords(login: AgentLogin): HowWords {
   const {how} = login;
   if (how === null || how === undefined) return NO_HOW;
-  if (how.kind === 'account') return {text: 'With your account', identifier: null};
+  if (how.kind === 'account') return {text: 'Account', identifier: null};
   if (how.variable !== null && how.variable !== undefined) {
-    return {text: 'With the API key in', identifier: how.variable};
+    return {text: 'API key', identifier: how.variable};
   }
   if (how.file !== null && how.file !== undefined) {
-    return {text: 'With the credentials in', identifier: how.file};
+    return {text: 'Credentials', identifier: how.file};
   }
-  return {text: 'With an API key', identifier: null};
+  return {text: 'API key', identifier: null};
 }
 
 /** A harness's login as a chip, with how it is signed in. */

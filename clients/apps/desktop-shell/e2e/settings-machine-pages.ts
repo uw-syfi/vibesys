@@ -85,7 +85,7 @@ export const SETTINGS_PAGES: readonly SettingsPage[] = [
     name: 'clusters too old',
     reach: async page => {
       await openSection(page, 'Clusters and clouds', 'host-c');
-      await expect(main(page).getByText(/too old for this/)).toBeVisible();
+      await expect(main(page).getByText('Needs an update', {exact: true})).toBeVisible();
     },
   },
   {

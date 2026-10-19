@@ -128,16 +128,6 @@ export function machineFacts(machine: Machine): MachineFact[] {
     ];
   }
   if (missing) return [checkout, {key: 'Version', value: '–', mono: true}];
-  const report = machine.report;
-  if (
-    report !== null &&
-    report.kind !== 'ready' &&
-    report.kind !== 'needs-update' &&
-    machine.checking === null
-  ) {
-    const connection = report.kind === 'sign-in' ? 'waiting for sign-in' : report.detail;
-    return [checkout, {key: 'Connection', value: connection, mono: false}];
-  }
   return [checkout];
 }
 

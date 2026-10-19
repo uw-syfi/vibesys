@@ -37,6 +37,8 @@ export function Field(props: {
   /** What the field needs explained, shown as the label's tooltip instead of a line of help. */
   readonly hint?: string;
   readonly error?: string;
+  /** The longer account behind a short `error` (a status word), shown on the pointer. */
+  readonly errorHint?: string;
   /** Names the control to assistive technology and no one else, for a control in a toolbar row. */
   readonly hideLabel?: boolean;
   readonly children: ReactNode;
@@ -65,7 +67,7 @@ export function Field(props: {
         </p>
       )}
       {errorId === undefined ? null : (
-        <p className="vs-help" data-tone="err" id={errorId}>
+        <p className="vs-help" data-tone="err" id={errorId} title={props.errorHint}>
           {props.error}
         </p>
       )}

@@ -35,8 +35,8 @@ export function Reading<T>(props: {
     return (
       <Banner
         tone="warn"
-        title={`The VibeSys on ${machine} is too old for this.`}
-        body="Update its checkout in Machines, then come back."
+        title="Needs an update"
+        hint={`The VibeSys on ${machine} is too old for this. Update its checkout in Machines, then come back.`}
       />
     );
   }

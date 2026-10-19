@@ -191,7 +191,7 @@ test('a menu opens from the keyboard, moves with the arrows, and closes on Esc',
   await expect(page.getByRole('menu')).toHaveCount(0);
   await expect(trigger).toBeFocused();
   await trigger.click();
-  await page.getByRole('heading', {name: 'Menu'}).click();
+  await page.getByRole('heading', {name: 'Menu', exact: true}).click();
   await expect(page.getByRole('menu')).toHaveCount(0);
 });
 

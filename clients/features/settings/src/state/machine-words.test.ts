@@ -22,14 +22,10 @@ const LOGIN: AgentLogin = {
 };
 
 describe('machine words', () => {
-  test('a cluster says how it is reached from the machine that is shown', () => {
+  test('a cluster says how it is reached in a few words, never a sentence', () => {
     const base = {name: 'c', workspace: '/w', sbatch_options: []};
-    expect(reachWords({...base, reach: {kind: 'ssh', host: 'lab-login'}}, 'host-b')).toBe(
-      'Over SSH, host alias lab-login',
-    );
-    expect(reachWords({...base, reach: {kind: 'login_node'}}, 'host-b')).toBe(
-      'host-b is a login node of this cluster',
-    );
+    expect(reachWords({...base, reach: {kind: 'ssh', host: 'lab-login'}})).toBe('SSH · lab-login');
+    expect(reachWords({...base, reach: {kind: 'login_node'}})).toBe('Login node');
   });
 
   test('hardware names what is stated and says so when nothing is', () => {
@@ -53,13 +49,13 @@ describe('machine words', () => {
     expect(loginWords({...LOGIN, how: {kind: 'account'}})).toEqual({
       label: 'Signed in',
       tone: 'ok',
-      how: {text: 'With your account', identifier: null},
+      how: {text: 'Account', identifier: null},
     });
     expect(
       loginWords({...LOGIN, how: {kind: 'api_key', variable: 'ANTHROPIC_API_KEY'}}).how,
-    ).toEqual({text: 'With the API key in', identifier: 'ANTHROPIC_API_KEY'});
+    ).toEqual({text: 'API key', identifier: 'ANTHROPIC_API_KEY'});
     expect(loginWords({...LOGIN, how: {kind: 'api_key', file: '.gemini/creds.json'}}).how).toEqual({
-      text: 'With the credentials in',
+      text: 'Credentials',
       identifier: '.gemini/creds.json',
     });
     expect(loginWords({...LOGIN, state: 'signed_out'})).toMatchObject({label: 'Not signed in'});

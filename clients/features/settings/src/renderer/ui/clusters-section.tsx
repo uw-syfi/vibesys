@@ -277,9 +277,9 @@ function TestResult(props: {
   );
 }
 
-function clusterFacts(cluster: SlurmClusterSettings, machine: string): KeyValueItem[] {
+function clusterFacts(cluster: SlurmClusterSettings): KeyValueItem[] {
   return [
-    {key: 'Reached', value: reachWords(cluster, machine)},
+    {key: 'Reached', value: reachWords(cluster)},
     {key: 'Workspace', value: cluster.workspace, mono: true},
     ...(cluster.partition === null || cluster.partition === undefined
       ? []
@@ -331,13 +331,13 @@ function ClusterCard(props: {
           </Stack>
           {source === 'slurm_toml' ? <Chip label="From the operator file" /> : null}
         </Row>
-        <KeyValue items={clusterFacts(cluster, machine)} />
+        <KeyValue items={clusterFacts(cluster)} />
         <Row gap="space-2" align="start" wrap>
           <Button
             variant="quiet"
             text={removing ? 'Removing…' : 'Remove'}
-            hint={`Remove ${cluster.name} from ${machine}`}
-            {...(reason === null ? {} : {disabledReason: reason})}
+            hint={reason ?? `Remove ${cluster.name} from ${machine}`}
+            {...(reason === null ? {} : {disabledReason: reason, quietReason: true})}
             press={() => dispatch({type: 'remove', host, name: cluster.name})}
           />
         </Row>
@@ -422,8 +422,8 @@ export function ClustersSection(props: {
           view === undefined ? null : (
             <Stack>
               <Row gap="space-1" wrap>
-                <Text variant="small" tone="muted">
-                  Stored on {machine} in
+                <Text variant="small" tone="muted" title={`Stored on ${machine}`}>
+                  File
                 </Text>
                 <Text variant="code">{settings.config_path}</Text>
               </Row>
@@ -441,9 +441,9 @@ export function ClustersSection(props: {
                       dot
                       label={modalWords(settings.modal).label}
                       tone={modalWords(settings.modal).tone}
+                      hint={modalWords(settings.modal).detail}
                     />
                   </Row>
-                  <Text tone="muted">{modalWords(settings.modal).detail}</Text>
                 </Stack>
               </Card>
               <Card section="SkyPilot">

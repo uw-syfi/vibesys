@@ -14,7 +14,7 @@ import {
   validAlias,
   validHostPath,
 } from '@vibesys/hosts';
-import type {CheckoutInspection, MachineEntry, MachineReport} from '@vibesys/ipc';
+import type {CheckoutInspection, FailureCause, MachineEntry, MachineReport} from '@vibesys/ipc';
 import {
   formAwaited,
   inspectedReply,
@@ -57,6 +57,8 @@ type FormField = 'host' | 'checkout';
 interface FormProblem {
   readonly field: FormField;
   readonly text: string;
+  /** Set when the connection failed: the screen words it as a status and keeps `text` for the pointer. */
+  readonly cause?: FailureCause;
 }
 
 interface AddForm {
@@ -103,7 +105,7 @@ export interface MachinesState {
 
 type Outcome<T> =
   | {readonly ok: true; readonly value: T}
-  | {readonly ok: false; readonly error: string};
+  | {readonly ok: false; readonly error: string; readonly cause?: FailureCause};
 
 export type MachinesAction =
   | PlacesAction
@@ -418,10 +420,13 @@ function saved(
   const current = action.form === 'add' ? state.adding : state.fixing;
   if (current === null || current.saving !== action.token) return same(state);
   if (!action.result.ok) {
+    const {error, cause} = action.result;
+    // A failed connection is the host's, not the checkout's: it goes under the host in the Add form.
+    const field = cause !== undefined && action.form === 'add' ? 'host' : 'checkout';
     const failed = {
       ...current,
       saving: null,
-      problem: {field: 'checkout', text: action.result.error},
+      problem: {field, text: error, ...(cause === undefined ? {} : {cause})},
     };
     return same(
       action.form === 'add'

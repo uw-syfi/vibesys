@@ -2,7 +2,7 @@ import {describe, expect, test} from 'bun:test';
 import type {RunEvent} from '@vibesys/contracts';
 import {event} from '@vibesys/contracts/testing';
 import {type CoreState, initialCoreState, reduceEvent, reduceSnapshot} from '@vibesys/run-state';
-import {NEW_CHAT_TITLE, shownThread, threadEntries, threadItems} from './thread-view.js';
+import {shownThread, threadEntries, threadItems} from './thread-view.js';
 
 const CHAT = {agent_kind: 'chat', round_label: 'experiment-chat'} as const;
 
@@ -133,10 +133,17 @@ describe('threads', () => {
   test('listed newest first, with a placeholder title for one with none', () => {
     expect(threadEntries(core).map(entry => [entry.id, entry.title])).toEqual([
       ['c', 'Third'],
-      ['b', NEW_CHAT_TITLE],
+      ['b', 'Untitled'],
       ['a', 'First'],
     ]);
     expect(threadEntries(core)[0]).toMatchObject({provider: 'claude', model: 'opus'});
+  });
+
+  test('a thread with no title is never listed under the name of the New chat action', () => {
+    const untitled = fold([created(1, 'a'), created(2, 'b', 'Second'), created(3, 'c')]);
+    const titles = threadEntries(untitled).map(entry => entry.title);
+    expect(titles).toHaveLength(3);
+    expect(titles).not.toContain('New chat');
   });
 
   test('the last thread opens by default, a chosen one wins, a new chat shows none', () => {

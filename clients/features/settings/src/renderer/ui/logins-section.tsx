@@ -78,7 +78,12 @@ function LoginCard(props: {
               <Text as="h3" variant="item">
                 {login.provider_name}
               </Text>
-              <Chip dot label={words.label} tone={words.tone} />
+              <Chip
+                dot
+                label={words.label}
+                tone={words.tone}
+                {...(login.detail === '' ? {} : {hint: login.detail})}
+              />
             </Row>
             {words.how.text === '' ? null : (
               <Row gap="space-1" wrap>
@@ -88,24 +93,19 @@ function LoginCard(props: {
                 )}
               </Row>
             )}
-            {login.detail === '' ? null : (
-              <Text variant="small" tone="muted">
-                {login.detail}
-              </Text>
-            )}
           </Stack>
           <Button
             variant={login.state === 'signed_in' ? 'quiet' : 'primary'}
             text={starting ? 'Starting…' : 'Sign in'}
-            hint={`Sign in to ${login.provider_name} on ${machine}`}
-            {...(reason === null ? {} : {disabledReason: reason})}
+            hint={reason ?? `Sign in to ${login.provider_name} on ${machine}`}
+            {...(reason === null ? {} : {disabledReason: reason, quietReason: true})}
             press={() => dispatch({type: 'sign-in', host, provider: login.provider})}
           />
         </Row>
         {login.state === 'signed_in' || (login.api_key_variables ?? []).length === 0 ? null : (
           <Row gap="space-2" wrap>
-            <Text variant="small" tone="muted">
-              Or set an API key on {machine} in
+            <Text variant="small" tone="muted" title={`Or set an API key on ${machine}`}>
+              API key
             </Text>
             {(login.api_key_variables ?? []).map(variable => (
               <Text key={variable} variant="code">
