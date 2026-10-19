@@ -208,6 +208,8 @@ async def work(
 
     async def turn(session: Session, ws: Workspace) -> str | None:
         step = await take_turn(ctx, attempt, session, ws)
+        if step is not Next.AGAIN or attempt.turns >= attempt.config.max_retries_per_round:
+            await measure_evaluated(ctx, attempt, ws)
         if step is Next.AGAIN:
             return attempt.feedback or attempt.no_valid_reply or ""
         return None
@@ -224,6 +226,22 @@ async def work(
         ),
         turn=turn,
     )
+
+
+async def measure_evaluated(ctx: Flow, attempt: MultiAttempt, ws: Workspace) -> None:
+    """Have the trusted gates read the revision the agent evaluated, when the attempt is over.
+
+    A round whose implementer was blocked or failed, or never replied, produces no checkpoint
+    and so reaches no gate. The evaluations it took through the trusted tool are still the
+    only measurement of its work, and the designer must not lose it.
+    """
+    if not attempt.owes_evaluated_measurement():
+        return
+    revision = ctx.evaluation.last_evaluated(ws)
+    if revision is not None:
+        attempt.evaluated_gated(
+            revision, await serial.measure_gates(ctx, ws, revision, attempt.baseline)
+        )
 
 
 async def take_turn(ctx: Flow, attempt: MultiAttempt, session: Session, ws: Workspace) -> Next:

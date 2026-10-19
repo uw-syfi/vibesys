@@ -111,6 +111,10 @@ MEASURED_AFTER_REVIEW = "review_passed"
 """Why the trusted gates measure an idea: it passed review."""
 
 
+MEASURED_AFTER_EVALUATION = "evaluated_before_stop"
+"""Why the trusted gates measure an idea its implementer left unsettled: the agent had evaluated it."""
+
+
 def official_due(*, candidate_ready: bool) -> str | None:
     """Why the trusted gates measure this round's reviewed candidate, or None.
 
@@ -120,6 +124,7 @@ def official_due(*, candidate_ready: bool) -> str | None:
 
 
 __all__ = [
+    "MEASURED_AFTER_EVALUATION",
     "MEASURED_AFTER_REVIEW",
     "CandidateDisposition",
     "candidate_evidence_fresh",

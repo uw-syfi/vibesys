@@ -126,13 +126,15 @@ class ReviewedClosing:
     benchmark_configured: bool
     implementer: AgentAttribution | None
     revalidation_required: bool = False
+    evaluated_only: bool = False
+    """The gates measured a revision the agent evaluated, with no ready candidate (`AttemptState`)."""
     effect: EffectVerdict | None = None
     """The framework's verdict on the plan's typed bar, derived from its own comparison."""
 
 
 def _projection(hypothesis: Hypothesis, state: AttemptState) -> PerformanceProjection:
     reply = state.implementation
-    official = state.passed and state.official_reason is not None
+    official = (state.passed or state.evaluated_only) and state.official_reason is not None
     implementation_metric = reply.perf_metric if reply is not None and official else None
     if (
         implementation_metric is None
@@ -205,6 +207,7 @@ def close_reviewed_round(
         passed=facts.passed,
         revalidation_required=facts.revalidation_required,
         official_reason=facts.official_reason,
+        evaluated_only=facts.evaluated_only,
         framework_benchmark=facts.benchmark,
         framework_perf_metric=facts.benchmark_metric,
         retry=facts.attempts,

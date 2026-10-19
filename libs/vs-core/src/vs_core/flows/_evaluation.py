@@ -19,7 +19,7 @@ from vs_core._strategy_operations import (
     EvidenceReadingsBase,
     LocalValidationReport,
 )
-from vs_core.types.common import THIS_RUN, DecisionId, RevisionRef, Value
+from vs_core.types.common import THIS_RUN, DecisionId, ObservationStatus, RevisionRef, Value
 from vs_core.types.evaluation import EvidenceRef, MeasurementPlan, MeasurementResult
 from vs_core.types.measurement import Comparison, ComparisonSettled, StatedComparison
 from vs_core.types.search import MeasurementFinished, OperationFinished
@@ -37,6 +37,7 @@ if TYPE_CHECKING:
     from ._workspaces import Workspace
 
 _REFS = TypeAdapter(tuple[EvidenceRef, ...])
+_REVISION = TypeAdapter(RevisionRef | None)
 _STATED = TypeAdapter(StatedComparison | None)
 
 
@@ -271,20 +272,50 @@ class Evaluation:
             lambda view: _taken(view.measurements, workspace.ref, revision), _REFS
         )
 
+    def last_evaluated(self, workspace: Workspace) -> RevisionRef | None:
+        """The revision of the workspace's newest conclusive trusted evaluation, if any.
 
-def _taken(
-    measurements: tuple[EvidenceRef, ...], attempt: AttemptRef, revision: RevisionRef
+        It is where an agent's own evaluations left off, whether or not the agent ever reported
+        a checkpoint of it, so a flow can ask the trusted gates about work the agent measured
+        and then abandoned (`taken` lists the evaluations of one revision).
+        """
+        return self._kit.read(
+            lambda view: _last_evaluated(view.measurements, workspace.ref), _REVISION
+        )
+
+
+def _attempt_evaluations(
+    measurements: tuple[EvidenceRef, ...], attempt: AttemptRef
 ) -> tuple[EvidenceRef, ...]:
+    """The trusted evaluations the attempt's agents took of any revision, oldest first."""
     held = (
         item
         for item in measurements
         if item.provenance == "trusted"
         and item.purpose == "local-validation"
-        and item.candidate == revision
         and item.scope.owner == attempt.attempt_id
         and item.scope.generation == attempt.generation
     )
     return tuple(sorted(held, key=lambda item: item.observation_sequence))
+
+
+def _taken(
+    measurements: tuple[EvidenceRef, ...], attempt: AttemptRef, revision: RevisionRef
+) -> tuple[EvidenceRef, ...]:
+    return tuple(
+        item for item in _attempt_evaluations(measurements, attempt) if item.candidate == revision
+    )
+
+
+def _last_evaluated(
+    measurements: tuple[EvidenceRef, ...], attempt: AttemptRef
+) -> RevisionRef | None:
+    conclusive = tuple(
+        item
+        for item in _attempt_evaluations(measurements, attempt)
+        if item.status == ObservationStatus.SUCCEEDED
+    )
+    return conclusive[-1].candidate if conclusive else None
 
 
 def _as_ledger_states(view: RunView, held: tuple[EvidenceRef, ...]) -> tuple[EvidenceRef, ...]:

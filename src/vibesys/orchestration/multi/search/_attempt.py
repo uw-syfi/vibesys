@@ -158,6 +158,20 @@ def claims_of(reply: ImplementerResponse) -> ImplementerClaims:
     )
 
 
+@dataclass(frozen=True)
+class Evaluated:
+    """What the trusted gates read of a revision the agent evaluated with no ready candidate.
+
+    The measurement is evidence for the next designer; it adopts nothing, because the
+    implementer offered no candidate for review (it was blocked, failed, or asked to continue).
+    """
+
+    revision: RevisionRef
+    readings: tuple[AcceptedReading, ...]
+    effect: EffectVerdict | None
+    """What the framework's comparison says of the plan's typed bar; None without a comparison."""
+
+
 @dataclass
 class MultiAttempt:
     """What the turns of one round have established so far."""
@@ -190,6 +204,8 @@ class MultiAttempt:
     """What the framework's comparison says of the plan's typed bar; None without a comparison."""
     measurement_noise: serial.MeasurementNoise | None = None
     """The noise the latest trusted comparison stated, which the next designer is shown."""
+    evaluated: Evaluated | None = None
+    """The measurement of the revision the agent evaluated when the attempt ended unsettled."""
     passed: bool = False
     gate_failed: bool = False
     unmeasured: bool = False
@@ -395,6 +411,47 @@ class MultiAttempt:
             case serial.Unreadable(reason=reason):
                 return self.failed(reason)
 
+    def owes_evaluated_measurement(self) -> bool:
+        """Whether the attempt ended with no ready candidate and its trusted evaluations unmeasured.
+
+        An implementer that was blocked, could not implement the idea, asked to continue, or
+        never replied may still have evaluated a revision through the trusted evaluation tool.
+        Nothing else measures it (a candidate the gates measured has its readings), and a failure
+        of the machinery is not the idea's, so neither is a measurement that already failed.
+        """
+        offered = self.response is not None and reviewed.candidate_ready(self.response)
+        return (
+            not offered
+            and bool(self.terms.measured)
+            and not self.readings
+            and self.evaluated is None
+            and not self.unmeasured
+            and self.failure is None
+        )
+
+    def evaluated_gated(self, revision: RevisionRef, result: GateResult) -> None:
+        """Fold the gates' measurement of the revision the agent evaluated.
+
+        A reading is recorded when no gate rejected it, as it is for a round that passed; a
+        rejection is feedback for the designer. A measurement that could not be taken leaves the
+        round as it was: nobody owes the idea a second attempt at the machinery.
+        """
+        if not isinstance(result, serial.Gated):
+            return
+        feedback = serial.failed_gate(result.readings)
+        if feedback is not None:
+            self.feedback = self.feedback or feedback
+            return
+        self.measurement_noise = result.noise or self.measurement_noise
+        comparison = result.comparison
+        self.evaluated = Evaluated(
+            revision=revision,
+            readings=result.readings,
+            effect=None
+            if comparison is None
+            else effect_verdict(comparison, self.plan.minimum_ratio, terms_policy(self.terms)),
+        )
+
     def _gate_failed(self, feedback: str) -> None:
         """A trusted gate rejected the candidate: another attempt may repair it."""
         commit = None if self.candidate is None else self.candidate.revision_id.root
@@ -462,8 +519,14 @@ class MultiAttempt:
     def close(self, settlement: Settlement | None) -> rounds.Ledger:
         """Close the round in the ledger with what core settled (None: nothing was)."""
         retained = None if settlement is None else settlement.candidate
-        benchmark, metric = serial.benchmark_outcome(self.readings)
+        evaluated = self.evaluated
+        benchmark, metric = serial.benchmark_outcome(
+            self.readings if evaluated is None else evaluated.readings
+        )
         passed = self.passed and self.failure is None
+        # A measurement and the revision it measured are recorded together.
+        measured = retained if evaluated is None else evaluated.revision
+        commit = None if measured is None else measured.revision_id.root
         closed = reviewed.close_reviewed_round(
             self.config.hypotheses,
             self.ledger,
@@ -474,16 +537,23 @@ class MultiAttempt:
                 judge=self.judge_outcome(),
                 passed=passed,
                 feedback=None if passed else (self.feedback or self.no_valid_reply or self.failure),
-                official_reason=self.official_reason if passed else None,
+                official_reason=(
+                    rounds.evaluated_reason()
+                    if evaluated is not None
+                    else self.official_reason
+                    if passed
+                    else None
+                ),
                 benchmark=benchmark,
                 benchmark_metric=metric,
-                candidate_commit=None if retained is None else retained.revision_id.root,
+                candidate_commit=commit,
                 attempts=self.turns,
                 accuracy_configured="accuracy" in self.terms.measured,
                 benchmark_configured="benchmark" in self.terms.measured,
                 implementer=AgentAttribution("core", None, None),
                 revalidation_required=self.revalidation_required,
-                effect=self.effect,
+                evaluated_only=evaluated is not None,
+                effect=self.effect if evaluated is None else evaluated.effect,
             ),
         )
         return serial.record_round(

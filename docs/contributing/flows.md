@@ -86,7 +86,7 @@ outside world is an aspect.
 | `ctx.facts`, `ctx.task`, `ctx.capabilities`, `ctx.clock.now()` | The run's facts and view (journaled reads); `ctx.task.run_id` keeps two runs' shared writes apart |
 | `ctx.agents.session(role, ...)` | A conversation with an agent; `await session.turn(prompt, within=s)` |
 | `ctx.workspaces.open(...)` | A workspace as a resource; `keep`, `verify`, `kept` |
-| `ctx.evaluation.measure(...)` | Measure a revision; `readings`, `taken` |
+| `ctx.evaluation.measure(...)` | Measure a revision; `readings`, `taken`, `last_evaluated` |
 | `ctx.owners.perform(request, within=s)` | Ask an owner of an `owned=` operation (an issue board, say) |
 | `async with my_resource(ctx, ...) as r` | Acquire and always release (`@resource`) |
 
@@ -150,7 +150,8 @@ role keeps the mode its `Role` declares.
 `await ctx.evaluation.measure(plan, workspace=ws, within=s)` returns the `MeasurementResult` or
 the `Failed`; `readings(refs, ...)` asks the evidence owner what it decoded; `taken(ws,
 revision)` lists the trusted evaluations the agents took of a revision themselves, in the order
-they happened.
+they happened; `last_evaluated(ws)` names the revision of the newest of them, which is where the
+agents' own measuring left off.
 
 ### Sources and `first`
 

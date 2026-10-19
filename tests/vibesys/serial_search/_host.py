@@ -47,6 +47,7 @@ from vs_core.api import (
     RequestId,
     RequestTurn,
     RevisionRef,
+    Scope,
     Settle,
     StartAttempt,
     StatedComparison,
@@ -60,7 +61,7 @@ from vs_issue_tracker.api import FakeRoadmap, PutRoadmapItems, ReadRoadmap
 if TYPE_CHECKING:
     from pydantic import BaseModel
 
-    from vs_core.api import Scope, SearchDef
+    from vs_core.api import SearchDef
     from vs_core.api.testing import Asked, FakeView, FlowRun
 
 TERMS = TaskTerms(
@@ -146,6 +147,7 @@ class SerialHost:
     roadmap: FakeRoadmap = field(default_factory=FakeRoadmap)
     """The run's roadmap, which the production owner reads and writes."""
     commits: int = 0
+    evaluations: int = 0
     events: int = 0
     measured: list[str] = field(default_factory=list)
     """The revision of every official measurement the host ran."""
@@ -186,6 +188,29 @@ class SerialHost:
         """A fresh revision, as core's checkpoint of an agent's work names it."""
         self.commits += 1
         return RevisionRef.of_git_commit(f"c{self.commits}")
+
+    def evaluate(self, revision: str) -> None:
+        """The latest attempt's agent took a trusted evaluation of ``revision`` through the tool."""
+        attempt = self.opened[-1]
+        self.evaluations += 1
+        self._record(
+            (
+                EvidenceRef(
+                    evidence_id=EvidenceId(root=f"taken-{self.evaluations}"),
+                    kind=EvidenceKind.BENCHMARK,
+                    purpose="local-validation",
+                    scope=Scope(owner=attempt.attempt_id, generation=attempt.generation),
+                    source_request=RequestId(root=f"taken-request-{self.evaluations}"),
+                    candidate=RevisionRef.of_git_commit(revision),
+                    observation_sequence=self.evaluations,
+                    evaluator_digest="e",
+                    workload_digest="w",
+                    environment_digest="n",
+                    provenance="trusted",
+                    status=ObservationStatus.SUCCEEDED,
+                ),
+            )
+        )
 
     # -- answering -----------------------------------------------------------------------------
 

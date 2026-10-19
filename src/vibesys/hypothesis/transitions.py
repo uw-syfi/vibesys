@@ -194,7 +194,8 @@ def baseline_candidates(
     return [
         item
         for item in rounds
-        if item.official_evaluation
+        if item.passed
+        and item.official_evaluation
         and item.perf_metric is not None
         and trusted_perf_provenance(item.perf_provenance)
         and (item.perf_unit == metric or (metric is not None and metric in item.metrics))

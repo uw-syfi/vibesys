@@ -138,6 +138,11 @@ def official_reason(*, candidate_ready: bool = True) -> str | None:
     return cadence.official_due(candidate_ready=candidate_ready)
 
 
+def evaluated_reason() -> str:
+    """Why the trusted gates measure a candidate its implementer left unsettled."""
+    return cadence.MEASURED_AFTER_EVALUATION
+
+
 def pareto_conflict(
     config: HypothesisConfig, ledger: Ledger, reply: CandidateReply
 ) -> ArchiveConflict | None:

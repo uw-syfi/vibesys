@@ -198,6 +198,9 @@ def _candidate_retained(
     official: bool,
     reviewed: bool,
 ) -> bool | None:
+    if data.attempt.evaluated_only:
+        # No ready candidate was offered, so the measurement is evidence and never a checkpoint.
+        return False
     if not reviewed:
         return unmeasured_candidate_retained(CandidateDisposition(candidate.disposition))
     if not data.attempt.passed:
@@ -220,6 +223,7 @@ def _candidate_retained(
             )
             for record in data.records
             if measurement.metric_name is not None
+            and record.passed
             and record.official_evaluation
             and trusted_perf_provenance(record.perf_provenance)
             and (value := record_metric_value(record, measurement.metric_name)) is not None
@@ -243,7 +247,7 @@ def build_round_record(data: RecordInput) -> RoundRecord:
     projection = data.projection
     candidate = _candidate(data)
     official = (
-        attempt.passed
+        (attempt.passed or attempt.evaluated_only)
         and attempt.official_reason is not None
         and data.implementer is not None
         and data.implementer.backend != "stub"

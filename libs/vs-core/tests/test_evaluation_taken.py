@@ -84,3 +84,48 @@ def test_only_this_attempts_current_trusted_local_evidence_of_the_revision_is_of
     foreign = [record(f"foreign-{i}", 1, **FOREIGN[name]) for i, name in enumerate(flaws)]
     both = [*foreign, *mine]
     assert offered(tuple(both)) == tuple(f"mine-{n}" for n in sorted(sequences))
+
+
+def last_evaluated(measurements: tuple[core.EvidenceRef, ...]) -> core.RevisionRef | None:
+    """The revision ``last_evaluated`` names for the attempt under test."""
+
+    class Seen(core.Value):
+        revision: core.RevisionRef | None
+
+    async def review(ctx: core.Flow, _config: Config) -> None:
+        async with open_workspace(ctx, ATTEMPT.root) as workspace:
+            assert isinstance(workspace, core.Workspace)
+            ctx.publish(Seen(revision=ctx.evaluation.last_evaluated(workspace)))
+
+    run = start(review, view=FakeView(changes={"measurements": measurements}))
+    run.open_workspace(run.expect(core.StartAttempt))
+    seen = run.published(Seen)
+    assert seen is not None
+    return seen.revision
+
+
+NOT_THIS_ATTEMPTS = sorted(set(FOREIGN) - {"another revision"})
+
+
+@given(
+    sequences=st.lists(st.integers(1, 50), unique=True, min_size=1, max_size=6),
+    flaws=st.lists(st.sampled_from(NOT_THIS_ATTEMPTS), max_size=4),
+)
+def test_the_last_evaluated_revision_is_where_this_attempts_newest_conclusive_evaluation_was_taken(
+    sequences: list[int], flaws: list[str]
+) -> None:
+    newest = max(sequences)
+    mine = [
+        record(f"mine-{n}", n, candidate=CANDIDATE if n == newest else OTHER) for n in sequences
+    ]
+    # records newer than all of these that are not this attempt's, or did not conclude, name none
+    unfinished = record("unfinished", 100, candidate=OTHER, status=core.ObservationStatus.FAILED)
+    foreign = [
+        record(f"foreign-{i}", 200 + i, **{**FOREIGN[name], "candidate": OTHER})
+        for i, name in enumerate(flaws)
+    ]
+    assert last_evaluated((*foreign, unfinished, *mine)) == CANDIDATE
+
+
+def test_a_workspace_nobody_evaluated_has_no_last_evaluated_revision() -> None:
+    assert last_evaluated(()) is None
