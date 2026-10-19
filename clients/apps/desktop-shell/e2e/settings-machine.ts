@@ -43,7 +43,7 @@ export async function revealNav(page: Page): Promise<void> {
 }
 
 /** Folds the section list again where it folds, as a person does once they have chosen. */
-export async function foldNav(page: Page): Promise<void> {
+async function foldNav(page: Page): Promise<void> {
   const toggle = nav(page).locator('.vs-section-toggle');
   if ((await toggle.isVisible()) && (await toggle.getAttribute('aria-expanded')) === 'true') {
     await toggle.click();
