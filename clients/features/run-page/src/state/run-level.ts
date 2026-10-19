@@ -170,7 +170,7 @@ function axisTile(model: RunModel, axis: ObjectiveAxis): MetricTileView {
   const better = vs === null ? null : improvement(vs, direction);
   const verdict = better === null ? null : verdictOf(better);
   const parts = [
-    value === null ? 'nothing measured yet' : `${formatValue(value)}${words}`,
+    value === null ? notMeasured(model) : `${formatValue(value)}${words}`,
     ...(input === null ? [] : [`input ${formatValue(input)}${words}`]),
   ];
   return {
@@ -184,6 +184,11 @@ function axisTile(model: RunModel, axis: ObjectiveAxis): MetricTileView {
   };
 }
 
+/** What a tile with no value says: that the input could not be measured, else that nothing was. */
+function notMeasured(model: RunModel): string {
+  return model.inputGates.length > 0 ? 'input not measured' : 'nothing measured yet';
+}
+
 /** The tile of the run's objective metric. */
 function objectiveTile(model: RunModel, best: CandidateMeasurement | null): MetricTileView {
   const metric = model.overview?.objective.metric;
@@ -195,7 +200,7 @@ function objectiveTile(model: RunModel, best: CandidateMeasurement | null): Metr
   const verdict = better === null ? null : verdictOf(better);
   const value = best?.metricValue ?? null;
   const parts = [
-    value === null ? 'nothing measured yet' : `${formatValue(value)}${words}`,
+    value === null ? notMeasured(model) : `${formatValue(value)}${words}`,
     ...(input === null ? [] : [`input ${formatValue(input)}${words}`]),
   ];
   return {

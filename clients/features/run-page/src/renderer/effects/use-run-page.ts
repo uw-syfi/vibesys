@@ -15,6 +15,7 @@ import {
   type RunPageSeed,
   type RunPageState,
   type RunRecord,
+  runEnding,
   sameRecord,
   type ZoomEvent,
 } from '../../state/index.js';
@@ -93,13 +94,14 @@ export function useRunPage(options: RunPageOptions): {
   // biome-ignore lint/correctness/useExhaustiveDependencies: the reader caches one run's folds (`key`); a new run starts a new reader.
   const reader = useMemo(() => createRunReader(), [key]);
   const {route, zoom} = useZoom(key, page.address);
+  const ending = state === null ? null : runEnding(state);
   const model =
     state === null
       ? null
-      : reader.read(state.run.trace, state.view.at === 'live' ? null : state.view.at);
+      : reader.read(state.run.trace, state.view.at === 'live' ? null : state.view.at, ending);
   // Read after `model`: at the live end it is the same object, and at a past sequence it is the
   // live fold the reader keeps (the past model it also keeps stays for the next scrub).
-  const whole = state === null ? null : reader.read(state.run.trace, null);
+  const whole = state === null ? null : reader.read(state.run.trace, null, ending);
   // The page fetches lines only for its selected stream: while a Logs face is on screen, select
   // the stream it shows. Once selected the function returns null, so this dispatches once per
   // stream the face moves to.

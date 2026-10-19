@@ -34,6 +34,7 @@ interface Cell {
 }
 
 const FINISHED: Readonly<Record<string, Journey>> = {
+  'crashed-after-turn': {idea: null, command: null, judge: false, live: false},
   'finished-run': {...DEEP, idea: 'Combine the ring with the padding', live: false},
   'finished-ten-ideas': {idea: 'Pad the slot headers', command: null, judge: false, live: false},
   'finished-two-objectives': {
@@ -65,11 +66,12 @@ const STRESS: readonly Cell[] = [
   'non-input-bases',
   'bases-and-effects',
   'live-reconnect',
+  'crashed-after-turn',
   'weeks-600-ideas',
 ].flatMap(fixture =>
   [1000, 1440].map(width => ({
     fixture,
-    journey: SHALLOW,
+    journey: FINISHED[fixture] ?? SHALLOW,
     width,
     theme: 'ink' as const,
   })),

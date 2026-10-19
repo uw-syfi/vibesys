@@ -35,6 +35,7 @@ export {
   noIdeasWords,
   pressChip,
 } from './ideas-view.js';
+export {type GateFailure, type GateFailureView, gateFailureView} from './input-gates.js';
 export {EMPTY_TRACE_LOG, type RunData, type SessionView, type TraceLog} from './live.js';
 export {roleLabel, stepKicker, stepLabel, stepTitle} from './names.js';
 export {
@@ -135,6 +136,7 @@ export {
   machineBlockWords,
   type Offer,
   quotaBannerView,
+  runEnding,
   runGoneWords,
   stopBannerView,
   streamLines,

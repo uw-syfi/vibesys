@@ -56,6 +56,7 @@ import {
   usageRecords,
   whoBySpan,
 } from '../../state/index.js';
+import {GateFailures} from './gate-failures.js';
 import {Hero} from './hero.js';
 import {
   HistoryLoading,
@@ -534,6 +535,7 @@ export function RunScreen(props: {
         <Banner tone="err" title="The run did not take the command" body={state.notice} />
       )}
       <EndedBanner state={state} dispatch={dispatch} zoom={zoom} />
+      <GateFailures model={props.whole} />
       {problem === null ? null : (
         <Banner tone="warn" title="The run’s history is not available" body={problem} />
       )}

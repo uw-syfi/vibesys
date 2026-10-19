@@ -1,0 +1,247 @@
+import {describe, expect, test} from 'bun:test';
+import type {RunEvent} from '@vibesys/contracts';
+import type {HostRun} from '@vibesys/hosts';
+import {fixtureNamed} from '@vibesys/run-fixtures';
+import {initialCoreState, reduceEventBatch} from '@vibesys/run-state';
+import {EMPTY_TRACE, foldTrace, traceSpans} from '@vibesys/run-state/trace';
+import {SEEDS, Seeded} from '@vibesys/store/testing';
+import {outcomeWords} from './idea-words.js';
+import {ageWords, IDEAS_FILTER_DEFAULT, ideasView} from './ideas-view.js';
+import {gateFailureView} from './input-gates.js';
+import {clockAt, clockStart, heroView, nowView} from './run-level.js';
+import {createRunReader, type RunModel} from './run-model.js';
+import {
+  type RunPageRequest,
+  type RunPageState,
+  type RunRecord,
+  runPageInitial,
+  runPageStep,
+} from './run-page.js';
+import type {SummaryReply} from './run-summary.js';
+import {endedView, runEnding} from './views.js';
+
+/**
+ * The run page on a run that ended badly: a real run that crashed (its host Git refused the
+ * workspace) 29 seconds after its implementer turn finished, leaving the idea, the turn and the
+ * round it was in open, with a baseline whose gates failed. The fixture is that run's journal.
+ */
+const fixture = fixtureNamed('crashed-after-turn');
+const RUN = {host: 'ssh:host-a', runId: fixture.runId} as const;
+const FULL_REASON = fixture.end?.reason ?? '';
+const CLIPPED = `${FULL_REASON.slice(0, 199)}…`;
+
+function ended(status: HostRun['phase'], extra: Partial<HostRun> = {}): RunRecord {
+  const run: HostRun = {
+    id: 'a1b2c3d4e5f6',
+    projectRoot: '~/project',
+    runId: fixture.runId,
+    status,
+    phase: status,
+    paused: null,
+    end: {outcome: 'failed', reason: CLIPPED, resumable: true, resume_from_round: 1},
+    startedAt: 1,
+    reason: FULL_REASON,
+    ...extra,
+  };
+  return {kind: 'ended', run};
+}
+
+function opened(record: RunRecord): {state: RunPageState; requests: readonly RunPageRequest[]} {
+  const state = runPageInitial({
+    identity: RUN,
+    title: {project: '~/project', task: 'serve'},
+    hostLabel: 'host-a',
+    unavailable: {},
+  });
+  return runPageStep(state, {type: 'record', record});
+}
+
+function summaryToken(requests: readonly RunPageRequest[]): number {
+  const read = requests.find(request => request.kind === 'read-summary');
+  if (read?.kind !== 'read-summary') throw new Error('the page did not ask for the summary');
+  return read.token;
+}
+
+/** An ended run opened as a host that serves no summary does: its whole history, read in pages. */
+function recordRun(): HostRun {
+  const record = ended('failed');
+  if (record.kind !== 'ended') throw new Error('not ended');
+  return record.run;
+}
+
+function fold(record: RunRecord, batches: readonly (readonly RunEvent[])[]): RunPageState {
+  const first = opened(record);
+  let step = runPageStep(first.state, {
+    type: 'summary',
+    token: summaryToken(first.requests),
+    reply: {kind: 'unsupported'},
+    wallMs: 0,
+  });
+  let from = 1;
+  for (const [at, events] of batches.entries()) {
+    const read = step.requests.find(request => request.kind === 'read-history');
+    if (read?.kind !== 'read-history') throw new Error('the page did not ask for a page');
+    const next = (events.at(-1)?.sequence ?? from) + 1;
+    from = next;
+    step = runPageStep(step.state, {
+      type: 'history',
+      token: read.token,
+      reply: {kind: 'page', events, next, complete: at === batches.length - 1},
+    });
+  }
+  return step.state;
+}
+
+/** An ended run opened from its summary: the host's snapshot of its spans and its usage records. */
+function summarized(record: RunRecord, events: readonly RunEvent[]): RunPageState {
+  const first = opened(record);
+  const trace = foldTrace(EMPTY_TRACE, events);
+  const through = events.at(-1)?.sequence ?? 0;
+  const reply: SummaryReply = {
+    kind: 'summary',
+    snapshot: {
+      run_id: fixture.runId,
+      sequence: through,
+      status: 'failed',
+      spans: [...traceSpans(trace)],
+    },
+    seed: [],
+    through,
+    eventCount: events.length,
+    journalBytes: 0,
+    trace: 'recorded',
+    roundsFinished: 0,
+    records: reduceEventBatch(initialCoreState(), events).usageRecords,
+  };
+  return runPageStep(first.state, {
+    type: 'summary',
+    token: summaryToken(first.requests),
+    reply,
+    wallMs: 0,
+  }).state;
+}
+
+function modelOf(state: RunPageState): RunModel {
+  return createRunReader().read(state.run.trace, null, runEnding(state));
+}
+
+function inBatches(events: readonly RunEvent[], random: Seeded): RunEvent[][] {
+  const batches: RunEvent[][] = [];
+  let at = 0;
+  while (at < events.length) {
+    const size = 1 + random.int(40);
+    batches.push(events.slice(at, at + size));
+    at += size;
+  }
+  return batches;
+}
+
+describe('a run that crashed with work open', () => {
+  const state = fold(ended('failed'), [fixture.events]);
+  const model = modelOf(state);
+
+  test('no idea, step or agent reads as running', () => {
+    expect(model.candidates.candidates.map(idea => idea.outcome)).toEqual(['failed']);
+    expect(model.agents.agents.every(agent => agent.status !== 'running')).toBe(true);
+    expect(nowView(model)).toEqual([]);
+    const view = ideasView(model, IDEAS_FILTER_DEFAULT);
+    expect(view.counts).toEqual({running: 0, passed: 0, failed: 1});
+    expect(view.rows.map(row => row.state.label)).toEqual(['Failed · run failed']);
+  });
+
+  test('the idea says why it ended in words, not Running', () => {
+    const [idea] = model.candidates.candidates;
+    expect(idea === undefined ? '' : outcomeWords(idea)).toBe('failed · run failed');
+  });
+
+  test('a turn that finished before the crash took as long as it recorded, and is done', () => {
+    const implementer = model.agents.agents.find(agent => agent.role === 'implementer');
+    expect(implementer?.status).toBe('done');
+    const took = (implementer?.activity.endedAt ?? 0) - (implementer?.startedAt ?? 0);
+    expect(took).toBeCloseTo(1720.893, 2);
+  });
+
+  test('the idea lasted until the run was last active, and the clock stops there', () => {
+    const [idea] = model.candidates.candidates;
+    const length = (idea?.endedAt ?? 0) - (idea?.startedAt ?? 0);
+    expect(length).toBeGreaterThan(30 * 60);
+    expect(length).toBeLessThan(31 * 60);
+    expect(model.latest).toBe(idea?.endedAt ?? Number.NaN);
+    const now = clockAt(model, null) ?? 0;
+    // The axis ends with the run (about 35 minutes after its first span), not a few minutes in.
+    expect((now - clockStart(model)) / 60).toBeGreaterThan(34);
+    expect(ageWords(idea?.startedAt ?? 0, now)).toMatch(/^3\d/);
+  });
+
+  test('the baseline gate failures are listed with their reason and what they printed', () => {
+    const view = gateFailureView(model.inputGates);
+    expect(view?.label).toBe('Accuracy · Benchmark');
+    expect(view?.reason).toBe("ModuleNotFoundError: No module named 'engine'");
+    expect(view?.tail).toContain('Error while finding module specification');
+    expect(model.inputGates).toHaveLength(2);
+  });
+
+  test('the metric tile says the input was not measured, not that nothing was', () => {
+    const [tile] = heroView(model).tiles;
+    expect(tile?.detail).toBe('input not measured');
+  });
+
+  test('the banner gives the whole reason, not the registry’s cut of it', () => {
+    expect(CLIPPED.endsWith('…')).toBe(true);
+    expect(endedView(state)?.reason).toBe(FULL_REASON);
+  });
+
+  test('a run still going is not closed', () => {
+    const live: RunPageState = {
+      ...state,
+      record: {kind: 'live', run: {...recordRun(), end: null, phase: 'running'}},
+    };
+    expect(runEnding(live)).toBeNull();
+    expect(modelOf(live).candidates.candidates.map(idea => idea.outcome)).toEqual(['running']);
+  });
+});
+
+describe('the same run opened from its summary', () => {
+  const from = modelOf(summarized(ended('failed'), fixture.events));
+  const whole = modelOf(fold(ended('failed'), [fixture.events]));
+
+  test('is closed as the whole history closes it', () => {
+    expect(from.candidates.candidates).toEqual(whole.candidates.candidates);
+    expect(from.agents.agents).toEqual(whole.agents.agents);
+    expect(from.latest).toBe(whole.latest);
+    expect(nowView(from)).toEqual([]);
+  });
+});
+
+describe('how the run ended settles what it left open', () => {
+  test('a stopped run reads stopped, and one that finished reads done', () => {
+    const stopped = modelOf(fold(ended('stopped'), [fixture.events]));
+    const [idea] = stopped.candidates.candidates;
+    expect(idea === undefined ? '' : outcomeWords(idea)).toBe('failed · run stopped');
+    expect(stopped.trace.spans.get('flow:000001/#1')?.status).toBe('stopped');
+    expect(
+      modelOf(fold(ended('completed'), [fixture.events])).trace.spans.get('flow:000001/#1')?.status,
+    ).toBe('done');
+  });
+
+  test('the same page whatever batches the events arrive in, and wherever the crash cut the journal', () => {
+    for (const seed of SEEDS) {
+      const random = new Seeded(seed);
+      const cut = 1 + random.int(fixture.events.length);
+      const events = fixture.events.slice(0, cut);
+      const whole = modelOf(fold(ended('failed'), [events]));
+      const parts = modelOf(fold(ended('failed'), inBatches(events, random)));
+      expect(parts.candidates.candidates, `seed ${seed}`).toEqual(whole.candidates.candidates);
+      expect(parts.agents.agents, `seed ${seed}`).toEqual(whole.agents.agents);
+      expect(parts.latest).toBe(whole.latest);
+      expect(parts.inputGates).toEqual(whole.inputGates);
+      // Whatever prefix the run reached, none of it still runs once the run is over.
+      expect(whole.candidates.candidates.every(idea => idea.outcome !== 'running')).toBe(true);
+      expect(whole.agents.agents.every(agent => agent.status !== 'running')).toBe(true);
+      expect(nowView(whole)).toEqual([]);
+      for (const idea of whole.candidates.candidates) {
+        expect(idea.endedAt ?? Number.NaN).toBeGreaterThanOrEqual(idea.startedAt);
+      }
+    }
+  });
+});

@@ -8,8 +8,8 @@ import type {LogStream, UsageRecord} from '@vibesys/contracts/host-helper';
 import {endedLook, type HostRun, RUN_GONE_WORDS, type RunEnd} from '@vibesys/hosts';
 import {decodeNarrationLine, type LogView, logViewRecords} from '@vibesys/logs';
 import type {CoreState} from '@vibesys/run-state';
-import {type RunTrace, traceSpans} from '@vibesys/run-state/trace';
-import {type AdoptedCandidate, adoptedCandidate, endReason} from './end-words.js';
+import {type RunEnding, type RunTrace, traceSpans} from '@vibesys/run-state/trace';
+import {type AdoptedCandidate, adoptedCandidate, endReason, unclipped} from './end-words.js';
 import {overviewAt, traceAt} from './live.js';
 import {
   commandable,
@@ -630,7 +630,7 @@ export function endedView(state: RunPageState): EndedView | null {
       ? (phase.run.reason ?? 'The run’s record does not say why it ended.')
       : loading && end.outcome === 'adopted'
         ? HISTORY_PENDING
-        : endReason(end.outcome, end.reason, adopted, direction);
+        : endReason(end.outcome, unclipped(end.reason, phase.run.reason), adopted, direction);
   const round = end?.resume_from_round ?? null;
   const resume =
     end?.resumable === true ? (round === null ? 'Resume' : `Resume from round ${round}`) : null;
@@ -667,6 +667,43 @@ export function viewedRun(state: RunPageState): ViewedRun {
 }
 
 const NO_RECORDS: readonly UsageRecord[] = [];
+
+/** The span status a run's registry status settles open spans with; null for a status not final. */
+function endedSpanStatus(status: HostRun['phase']): RunEnding['status'] | null {
+  switch (status) {
+    case 'failed':
+      return 'failed';
+    case 'stopped':
+      return 'stopped';
+    case 'completed':
+      return 'done';
+    default:
+      return null;
+  }
+}
+
+/**
+ * How the run's end settles the spans it left open, from what the page knows of the run: its
+ * registry status and failure, the time the run was last heard, and the turns that recorded their
+ * spend. Null while the run is not over, when the registry gives no final status, or while the
+ * history is still being read (the fold is then a prefix and no pane draws it).
+ */
+export function runEnding(state: RunPageState): RunEnding | null {
+  if (historyLoading(state) !== null) return null;
+  const {record} = state;
+  let status: RunEnding['status'] | null = null;
+  let reason: string | null = null;
+  if (record.kind === 'ended') {
+    status = endedSpanStatus(record.run.phase);
+    reason = record.run.reason;
+  } else if (record.kind === 'historical') {
+    // A saved run whose tombstone expired may not say how it ended: it was not finished, and the
+    // page does not claim it failed.
+    status = record.status === null ? 'stopped' : endedSpanStatus(record.status);
+  }
+  if (status === null) return null;
+  return {status, reason, heardAt: state.run.heard?.run ?? null, turns: usageRecords(state)};
+}
 
 /**
  * The run's usage records, one per finished turn: the summary's while the run is opened from it

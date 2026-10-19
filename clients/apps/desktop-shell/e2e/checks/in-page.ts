@@ -101,7 +101,11 @@ function clipArea(element: Element): Box | null {
 }
 
 function isShown(element: Element): boolean {
+  let below: Element | null = null;
   for (let up: Element | null = element; up !== null; up = up.parentElement) {
+    // What a closed disclosure holds is not drawn, though its text still has a box.
+    if (up instanceof HTMLDetailsElement && !up.open && below?.tagName !== 'SUMMARY') return false;
+    below = up;
     const style = getComputedStyle(up);
     if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') {
       return false;

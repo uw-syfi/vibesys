@@ -18,6 +18,7 @@ import {
   type WorkMeter,
 } from '@vibesys/run-state/trace';
 import {AppendLog} from './append-log.js';
+import {foldInputGates, type InputGates, NO_INPUT_GATES} from './input-gates.js';
 import {latestTime} from './span-reading.js';
 
 /** The window's hold on the live run: none, being attached under a token, attached, or refused. */
@@ -62,6 +63,8 @@ export interface TraceLog {
   readonly latest: number | null;
   /** The latest run-clock time the base's spans carry: when the snapshot was taken, or null. */
   readonly baseLatest: number | null;
+  /** The gates that failed before the first idea began (see `input-gates.ts`). */
+  readonly inputGates: InputGates;
   /**
    * The log this one replaced when a snapshot or a replay moved its base, so the scrubber keeps
    * what it could reach: `positions` and `calls` cover both logs, and a sequence below `handoff`
@@ -69,6 +72,10 @@ export interface TraceLog {
    */
   readonly earlier: TraceLog | null;
   readonly handoff: number;
+}
+
+function isWorkstream(span: Span): boolean {
+  return span.label?.kind === 'workstream';
 }
 
 const TRACE_SPAN_EVENTS: ReadonlySet<string> = new Set([
@@ -92,7 +99,9 @@ function extended(log: TraceLog, added: readonly RunEvent[], meter?: WorkMeter):
   const positions: number[] = [];
   const calls: number[] = [];
   let latest = log.latest;
+  let inputGates = log.inputGates;
   for (const event of added) {
+    inputGates = foldInputGates(inputGates, event);
     const span = spanOf(event);
     if (span === null) continue;
     positions.push(event.sequence ?? 0);
@@ -110,6 +119,7 @@ function extended(log: TraceLog, added: readonly RunEvent[], meter?: WorkMeter):
     positions: log.positions.append(positions),
     calls: log.calls.append(calls),
     latest,
+    inputGates,
   };
 }
 
@@ -130,6 +140,7 @@ export function traceLog(
     calls: AppendLog.of<number>([]),
     latest: baseLatest,
     baseLatest,
+    inputGates: {...NO_INPUT_GATES, settled: traceSpans(base).some(isWorkstream)},
     earlier: null,
     handoff: base.sequence,
   };
@@ -168,12 +179,13 @@ function replacing(next: TraceLog, previous: TraceLog, handoff: number): TraceLo
 
 export const EMPTY_TRACE_LOG: TraceLog = traceLog(EMPTY_TRACE, null, []);
 
-/** The events the slice keeps: the trace's span events and the overview's declaration. */
+/** The events the slice keeps: the trace's span events, the overview's declaration and the gates that finished. */
 const SPAN_EVENTS: ReadonlySet<string> = new Set([
   'span_started',
   'span_updated',
   'span_ended',
   'run_started',
+  'gate_finished',
 ]);
 
 /** What the session folded into its run, as the trace slice needs it. */

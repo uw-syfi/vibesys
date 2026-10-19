@@ -27,6 +27,7 @@ import type {ImplementerOutcome} from '../../../../state/idea-outcomes.js';
 import {standingOf, statusLabel} from '../../../../state/idea-words.js';
 import {
   ideaOutcomeLine,
+  roleLabel,
   spendOf,
   stepLabel,
   stepTitle,
@@ -120,7 +121,7 @@ function Implemented(props: {
     <Stack gap="space-1">
       <Row gap="space-2" align="center">
         <Text variant="small" tone="muted">
-          implementer
+          {roleLabel('implementer')}
         </Text>
         {props.ran === null ? null : (
           <Text variant="code" tone="muted">

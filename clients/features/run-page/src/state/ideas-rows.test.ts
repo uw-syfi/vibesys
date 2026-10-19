@@ -8,6 +8,7 @@ import {idea, modelOf as treeOf} from './timeline-fixtures.js';
 const modelOf = (candidates: readonly Candidate[], best?: string): RunModel =>
   ({
     ...treeOf(candidates, best === undefined ? null : {candidate: best, adopted: false}),
+    inputGates: [],
     changed: new Set<string>(),
   }) as unknown as RunModel;
 
