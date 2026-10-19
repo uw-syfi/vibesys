@@ -29,6 +29,10 @@ const STARTS: Readonly<Record<string, (page: Page) => Promise<void>>> = {
     await page.getByRole('radiogroup', {name: 'Show'}).getByText('Agents').click();
     await expect(page.getByRole('listbox', {name: 'Agents'})).toBeVisible();
   },
+  'the Usage face': async page => {
+    await page.getByRole('radiogroup', {name: 'Show'}).getByText('Usage').click();
+    await expect(page.getByRole('table', {name: 'Usage by group'})).toBeVisible();
+  },
 };
 
 async function reachScreen(page: Page, fixtureName: string, start: string): Promise<void> {

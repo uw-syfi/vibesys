@@ -18,6 +18,7 @@ type Screen =
   | 'judge'
   | 'timeline'
   | 'agents'
+  | 'usage'
   | 'agent'
   | 'scrubbed';
 
@@ -154,10 +155,16 @@ export async function walkScreens(
   }
   await backToRun(page);
   const show = page.getByRole('radiogroup', {name: 'Show'});
-  for (const face of ['timeline', 'agents'] as const) {
-    await show.getByText(face === 'timeline' ? 'Timeline' : 'Agents').click();
-    await walk.at(face);
+  const faces = [
+    {screen: 'timeline', label: 'Timeline'},
+    {screen: 'agents', label: 'Agents'},
+    {screen: 'usage', label: 'Usage'},
+  ] as const;
+  for (const face of faces) {
+    await show.getByText(face.label).click();
+    await walk.at(face.screen);
   }
+  await show.getByText('Agents').click();
   await openAgent(page);
   await walk.at('agent');
   await page.getByRole('navigation', {name: 'Zoom'}).getByRole('button', {name: 'Run'}).click();

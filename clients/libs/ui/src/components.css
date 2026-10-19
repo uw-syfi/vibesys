@@ -577,11 +577,18 @@ body > div:first-child {
 .vs-segment:hover {
   color: var(--text);
 }
-.vs-segmented[data-size="sm"] .vs-segment {
+.vs-segmented[data-size="sm"] .vs-segment,
+.vs-segmented[data-size="xs"] .vs-segment {
   min-height: var(--control-sm);
   padding: 0 var(--space-4);
   font-size: var(--text-small-size);
   line-height: var(--text-small-line);
+}
+.vs-segmented[data-size="xs"] {
+  gap: var(--space-2);
+}
+.vs-segmented[data-size="xs"] .vs-segment {
+  padding: 0 var(--space-3);
 }
 .vs-segment:has(:checked) {
   border-color: var(--text);
@@ -797,6 +804,9 @@ body > div:first-child {
   line-height: var(--text-caption-line);
   font-weight: var(--text-caption-weight);
   white-space: nowrap;
+}
+.vs-chip[data-mono-id] {
+  font-family: var(--text-code-family);
 }
 .vs-chip[data-tone="live"] {
   color: var(--accent);

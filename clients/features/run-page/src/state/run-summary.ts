@@ -17,6 +17,7 @@
  */
 import type {RunEvent, RunSnapshot, RunStatus} from '@vibesys/contracts';
 import {validateRunEvent, validateRunSnapshot} from '@vibesys/contracts';
+import type {UsageRecord} from '@vibesys/contracts/host-helper';
 
 /** A count of tokens as a summary words it; `null`: not reported. */
 export interface WireTokens {
@@ -50,6 +51,8 @@ export interface WireSummary {
   }[];
   readonly tokens: WireTokens;
   readonly usage: readonly {readonly spanId: string; readonly tokens: WireTokens}[];
+  /** One record per finished turn: their tokens sum to `tokens`. */
+  readonly records: readonly UsageRecord[];
 }
 
 /** What the screen takes from a summary: the host's snapshot of the run, and the seed events. */
@@ -64,6 +67,8 @@ export interface SummaryFacts {
   readonly journalBytes: number;
   readonly trace: TraceFormat;
   readonly roundsFinished: number;
+  /** The run's usage records through `through`. */
+  readonly records: readonly UsageRecord[];
 }
 
 /** What one summary read settled to. */
@@ -88,6 +93,7 @@ export type RunSummaryState =
       readonly journalBytes: number;
       readonly trace: TraceFormat;
       readonly roundsFinished: number;
+      readonly records: readonly UsageRecord[];
     }
   /** It arrived after a live session had already folded the run; the session's data stands. */
   | {readonly kind: 'superseded'}
@@ -213,5 +219,6 @@ export function summaryFacts(summary: WireSummary, runId: string, status: RunSta
     journalBytes: summary.journalBytes,
     trace: summary.trace,
     roundsFinished: summary.roundsFinished,
+    records: summary.records,
   };
 }

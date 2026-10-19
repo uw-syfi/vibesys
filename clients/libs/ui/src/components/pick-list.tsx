@@ -183,6 +183,8 @@ export interface RowBadge {
   readonly label: string;
   readonly tone: StatusTone;
   readonly short?: string;
+  /** The label (and `short`) is an identifier a person may copy: set in the code face. */
+  readonly mono?: boolean;
 }
 
 /** A row's lead (a number before its name), with what it means on hover; nothing without one. */
@@ -249,14 +251,19 @@ function Trail(props: {
     <>
       {(props.badges ?? []).map(badge =>
         badge.short === undefined ? (
-          <Chip key={badge.label} label={badge.label} tone={badge.tone} />
+          <Chip
+            key={badge.label}
+            label={badge.label}
+            tone={badge.tone}
+            mono={badge.mono === true}
+          />
         ) : (
           <span key={badge.label} className="vs-pickrow-badge" title={badge.label}>
             <span data-form="full">
-              <Chip label={badge.label} tone={badge.tone} />
+              <Chip label={badge.label} tone={badge.tone} mono={badge.mono === true} />
             </span>
             <span data-form="short">
-              <Chip label={badge.short} tone={badge.tone} />
+              <Chip label={badge.short} tone={badge.tone} mono={badge.mono === true} />
             </span>
           </span>
         ),

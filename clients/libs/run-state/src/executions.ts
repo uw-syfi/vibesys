@@ -19,6 +19,7 @@ import {
   endedRunStatus,
   publishCoreState,
 } from './state.js';
+import {startsWith} from './usage-records.js';
 
 /** Checkpoints reconcile liveness without changing the event replay cursor. */
 export function reconcileActiveExecutions(
@@ -101,6 +102,7 @@ export function applyAgentExecutionStartedData(state: CoreState, event: RunEvent
   if (executionId == null || data?.kind !== 'agent_execution_started') return state;
   const roundKey = roundKeyFor(event);
   return cloneCoreStateWith(state, {
+    executionStarts: startsWith(state.executionStarts, event),
     activeExecutions: {
       ...state.activeExecutions,
       [executionId]: {

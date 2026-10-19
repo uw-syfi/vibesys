@@ -41,6 +41,7 @@ function wire(name: string): WireSummary {
     replies: [],
     tokens: none,
     usage: [],
+    records: [],
   };
 }
 

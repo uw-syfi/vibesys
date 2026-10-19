@@ -16,6 +16,7 @@ import {
   PickList,
   PickRow,
   Row,
+  type RowBadge,
   Stack,
   Text,
 } from '@vibesys/ui';
@@ -31,6 +32,9 @@ import {
   stepTitle,
   tokensColumn,
   turnTokens,
+  type Who,
+  type WhoBySpan,
+  whoWords,
 } from '../../../../state/index.js';
 import {roleSeries} from '../../../../state/role-series.js';
 import {duration} from '../../../../state/span-reading.js';
@@ -38,6 +42,7 @@ import {plain, statusWords} from '../../../../state/span-words.js';
 import {type AttemptLine, attemptLines, endOf} from '../../../../state/timeline-rows.js';
 import type {ViewBase, ViewHeader, Zoom} from '../props.js';
 import {StepStrip} from '../timeline/step-strip.js';
+import {whoBadge} from '../who-badge.js';
 
 export interface IdeaViewProps extends ViewBase {
   readonly idea: Candidate;
@@ -90,9 +95,23 @@ export const ideaHeader: ViewHeader<IdeaViewProps> = props => ({
   meta: <IdeaFacts {...props} />,
 });
 
+/** Who ran the idea's implementer: its latest implementer turn that the records name. */
+function implementerWho(idea: Candidate, who: WhoBySpan): Who | undefined {
+  const turns = idea.attempts
+    .flatMap(attempt => attempt.steps)
+    .filter(step => step.kind === 'agent_turn' && step.role === 'implementer');
+  for (const step of turns.reverse()) {
+    const ran = who.get(step.span);
+    if (ran !== undefined) return ran;
+  }
+  return undefined;
+}
+
 /** The implementer's outcome as a chip (else the idea's own) and its summary under it. */
 function Implemented(props: {
   readonly outcome: ImplementerOutcome;
+  /** What ran the implementer's turn, in words; null when the records do not say. */
+  readonly ran: string | null;
   /** The idea's own outcome, said when the implementer reported none. */
   readonly idea: Candidate;
 }): JSX.Element {
@@ -103,6 +122,11 @@ function Implemented(props: {
         <Text variant="small" tone="muted">
           implementer
         </Text>
+        {props.ran === null ? null : (
+          <Text variant="code" tone="muted">
+            {props.ran}
+          </Text>
+        )}
         {outcome === null ? (
           <Chip label={statusLabel(props.idea)} tone={OUTCOME_TONE[props.idea.outcome]} dot />
         ) : (
@@ -173,7 +197,13 @@ export function IdeaView(props: IdeaViewProps): JSX.Element {
         <Text variant="small">{ideaOutcomeLine(props.model, idea)}</Text>
         <BaseAndEffect {...props} />
       </Stack>
-      {props.outcome === null ? null : <Implemented outcome={props.outcome} idea={idea} />}
+      {props.outcome === null ? null : (
+        <Implemented
+          outcome={props.outcome}
+          idea={idea}
+          ran={whoWords(implementerWho(idea, props.who))}
+        />
+      )}
       {lines.length > 1 ? (
         <Attempts lines={lines} selected={attempt.span} choose={setChosen} />
       ) : null}
@@ -183,6 +213,7 @@ export function IdeaView(props: IdeaViewProps): JSX.Element {
         label={lines.length > 1 ? `Attempt ${number} steps` : `${idea.title} steps`}
         selected={null}
         tokens={props.tokens}
+        who={props.who}
         zoom={zoom}
         size="default"
       />
@@ -196,6 +227,8 @@ export interface StepListProps {
   readonly selected: string | null;
   /** What the run's turns spent, for the figure beside each turn's duration. */
   readonly tokens: TokenLedger;
+  /** What ran each turn, for the chip beside the role. */
+  readonly who: WhoBySpan;
   readonly zoom: Zoom;
 }
 
@@ -219,6 +252,12 @@ function noteworthy(step: CandidateStep): ReturnType<typeof stateOf>[] {
   return step.status === 'done' ? [] : [stateOf(step)];
 }
 
+/** What ran an agent turn, then its status when that is noteworthy. */
+function stepBadges(step: CandidateStep, who: WhoBySpan): RowBadge[] {
+  const ran = step.kind === 'agent_turn' ? whoBadge(who.get(step.span)) : null;
+  return [...(ran === null ? [] : [ran]), ...noteworthy(step)];
+}
+
 /** How long a finished step took; empty while it runs (a list has no clock). */
 function tookOf(step: CandidateStep): string | undefined {
   return step.endedAt === null ? undefined : duration(step.endedAt - step.startedAt);
@@ -229,6 +268,7 @@ function StepRows(props: {
   readonly label: string;
   readonly selected: string | null;
   readonly tokens: TokenLedger;
+  readonly who: WhoBySpan;
   readonly zoom: Zoom;
   readonly size: 'default' | 'fill';
 }): JSX.Element {
@@ -249,7 +289,6 @@ function StepRows(props: {
       {props.steps.map((step, index) => {
         const took = tookOf(step);
         const name = step.role === null ? plain(step.kind) : stepLabel(step);
-        const badges = noteworthy(step);
         // Every row reads alike: its mark, its name (the role, or the kind for a gate), then the
         // step's headline after it when it has one beyond the name.
         const headline = stepTitle(step);
@@ -264,7 +303,7 @@ function StepRows(props: {
             {...(step.role === null
               ? {hatched: step.kind === 'gate'}
               : {swatch: roleSeries(step.role)})}
-            badges={badges}
+            badges={stepBadges(step, props.who)}
             {...(took === undefined ? {} : {figure: took})}
             {...(measure === null ? {} : {measure: {...measure, size: 'line' as const}})}
             select={() => props.zoom({type: 'open-step', step: step.span})}
@@ -283,6 +322,7 @@ export function StepList(props: StepListProps): JSX.Element {
       label={`${props.idea.title} steps`}
       selected={props.selected}
       tokens={props.tokens}
+      who={props.who}
       zoom={props.zoom}
       size="fill"
     />

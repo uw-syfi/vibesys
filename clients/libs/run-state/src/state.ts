@@ -3,6 +3,7 @@
  * the clone and publish helpers every step of the fold goes through.
  */
 import type {Diagnostic, RunEvent, RunSnapshot, RunStatus} from '@vibesys/contracts';
+import type {UsageRecord} from '@vibesys/contracts/host-helper';
 import type {BenchmarkRecord} from './benchmark.js';
 import type {ExecutionStatus} from './execution-status.js';
 import {
@@ -22,6 +23,7 @@ import {
 } from './run-map.js';
 import {EMPTY_LEDGER, type TokenLedger} from './token-usage.js';
 import type {TranscriptEntry} from './transcript-fold.js';
+import type {ExecutionStarts} from './usage-records.js';
 import type {WorkstreamMap} from './workstream.js';
 
 export type AgentExecutionMode = 'thinking' | 'responding' | 'tool' | 'waiting';
@@ -330,6 +332,10 @@ export interface CoreState {
    * Join a span's usage to its agent through the trace (see `TokenLedger`).
    */
   readonly tokens: TokenLedger;
+  /** The agent executions that started, by execution id: who ran each turn (see `UsageRecord`). */
+  readonly executionStarts: ExecutionStarts;
+  /** One record per finished agent turn, in journal order; their tokens sum to `tokens.total`. */
+  readonly usageRecords: readonly UsageRecord[];
   readonly diagnostics: readonly CoreDiagnostic[];
   /** Sequence of the latest semantic experiment invalidation. */
   readonly experimentsRevision: number;
@@ -385,6 +391,8 @@ export function initialCoreState(): CoreState {
     benchmarks: [],
     workstreams: {},
     tokens: EMPTY_LEDGER,
+    executionStarts: {},
+    usageRecords: [],
     diagnostics: [],
     experimentsRevision: 0,
     typedToolEvents: false,

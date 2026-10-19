@@ -51,6 +51,7 @@ const BASE: ViewBase = {
   model: MODEL,
   clock: {start: 0, now: null},
   tokens: EMPTY_LEDGER,
+  who: new Map(),
   zoom: () => undefined,
 };
 

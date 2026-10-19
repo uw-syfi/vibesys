@@ -26,6 +26,7 @@ import {
   Scrubber,
   SegmentedControl,
   Select,
+  StackedBars,
   StatusDot,
   type StatusTone,
   Text,
@@ -775,5 +776,44 @@ describe('Text', () => {
         expect(css).toContain(`--text-${role}-${part}:`);
       }
     });
+  });
+});
+
+describe('StackedBars', () => {
+  const bar = (id: string, parts: readonly number[]) => ({
+    id,
+    title: `${id}: ${parts.join('+')}`,
+    total: parts.reduce((sum, part) => sum + part, 0),
+    segments: parts.map((value, index) => ({key: `${id}-${index}`, series: index, value})),
+  });
+
+  test('draws every bar to the tallest total, each segment its share of it', async () => {
+    const container = await mount(
+      <StackedBars
+        label="Usage over time"
+        unit="tokens"
+        bars={[bar('a', [30, 10]), bar('b', [20])]}
+        from="Oct 1"
+        to="Oct 2"
+      />,
+    );
+    const heights = [...container.querySelectorAll<HTMLElement>('.vs-bars-bar')].map(each =>
+      [...each.querySelectorAll<HTMLElement>('.vs-bars-segment')].map(
+        segment => segment.style.height,
+      ),
+    );
+    expect(heights).toEqual([['75%', '25%'], ['50%']]);
+    expect(container.querySelector('[role="img"]')?.getAttribute('aria-label')).toBe(
+      'Usage over time, in tokens',
+    );
+    expect(container.textContent).toContain('Oct 1');
+    expect(container.textContent).toContain('Oct 2');
+  });
+
+  test('draws nothing tall when nothing was spent', async () => {
+    const container = await mount(
+      <StackedBars label="Usage" unit="tokens" bars={[bar('a', [0])]} />,
+    );
+    expect(container.querySelector<HTMLElement>('.vs-bars-segment')?.style.height).toBe('0%');
   });
 });

@@ -9,7 +9,7 @@ import {type Journey, walkScreens} from './screens.js';
 
 /**
  * Every screen of the Run screen, checked against its real layout: run, idea, step and item
- * levels, the Timeline and Agents faces and the scrubbed run, live and finished, with the sidebar
+ * levels, the Timeline, Agents and Usage faces and the scrubbed run, live and finished, with the sidebar
  * shown and hidden, at 1000, 1440 and 1920 px; and the stress fixtures (long titles, every failure
  * reason, retries, rounds, bases that are not the input, a reconnect, 600 ideas over 14 days) at
  * 1000 and 1440. Each screen must pass the layout and wording checks (`checks/screen-check.ts`)

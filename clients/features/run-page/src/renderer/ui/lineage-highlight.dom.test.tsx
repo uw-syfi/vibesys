@@ -44,7 +44,13 @@ async function shown() {
   document.body.append(container);
   const root = createRoot(container);
   const model = modelOfShape(SHAPE);
-  const base = {model, clock: {start: 0, now: null}, tokens: EMPTY_LEDGER, zoom: () => undefined};
+  const base = {
+    model,
+    clock: {start: 0, now: null},
+    tokens: EMPTY_LEDGER,
+    who: new Map(),
+    zoom: () => undefined,
+  };
   function Harness() {
     const [state, setState] = useState(() =>
       runPageInitial({

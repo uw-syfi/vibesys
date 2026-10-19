@@ -90,7 +90,13 @@ async function face(state: RunPageState, mode: RunMode): Promise<string> {
   document.body.append(container);
   const root = createRoot(container);
   const model = createRunReader().read(state.run.trace, null);
-  const base = {model, clock: {start: 0, now: null}, tokens: EMPTY_LEDGER, zoom: () => undefined};
+  const base = {
+    model,
+    clock: {start: 0, now: null},
+    tokens: EMPTY_LEDGER,
+    who: new Map(),
+    zoom: () => undefined,
+  };
   await act(async () =>
     root.render(
       <RunLevel state={state} base={base} core={null} mode={mode} dispatch={() => undefined} />,
@@ -145,7 +151,13 @@ async function chartAt(scrub: number | null): Promise<{yLabels: string[]; cursor
   document.body.append(container);
   const root = createRoot(container);
   const model = measuredRun(scrub);
-  const base = {model, clock: {start: 0, now: null}, tokens: EMPTY_LEDGER, zoom: () => undefined};
+  const base = {
+    model,
+    clock: {start: 0, now: null},
+    tokens: EMPTY_LEDGER,
+    who: new Map(),
+    zoom: () => undefined,
+  };
   await act(async () =>
     root.render(
       <>
@@ -199,7 +211,13 @@ async function textOf(model: RunModel, showFailed: boolean): Promise<string> {
   const container = document.createElement('div');
   document.body.append(container);
   const root = createRoot(container);
-  const base = {model, clock: {start: 0, now: null}, tokens: EMPTY_LEDGER, zoom: () => undefined};
+  const base = {
+    model,
+    clock: {start: 0, now: null},
+    tokens: EMPTY_LEDGER,
+    who: new Map(),
+    zoom: () => undefined,
+  };
   await act(async () =>
     root.render(
       <>
@@ -239,6 +257,7 @@ test('the performance row is one element whatever idea is open: dots are singled
     model,
     clock: {start: 0, now: null},
     tokens: EMPTY_LEDGER,
+    who: new Map(),
     zoom: (event: ZoomEvent) => {
       opened.push(event);
     },
@@ -300,6 +319,7 @@ function recordedBeforeTrace(): RunPageState {
     replies: [],
     tokens: none,
     usage: [],
+    records: [],
   };
   return runPageStep(asked.state, {
     type: 'summary',

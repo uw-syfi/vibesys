@@ -4,7 +4,7 @@
  * maps these onto `@vibesys/ui` components and decides nothing itself.
  */
 import type {LogOwner, RunEvent, RunOverview, Span} from '@vibesys/contracts';
-import type {LogStream} from '@vibesys/contracts/host-helper';
+import type {LogStream, UsageRecord} from '@vibesys/contracts/host-helper';
 import {endedLook, type HostRun, RUN_GONE_WORDS, type RunEnd} from '@vibesys/hosts';
 import {decodeNarrationLine, type LogView, logViewRecords} from '@vibesys/logs';
 import type {CoreState} from '@vibesys/run-state';
@@ -608,4 +608,17 @@ export function viewedRun(state: RunPageState): ViewedRun {
     spanEvents: state.run.trace.events.toArray(),
     at,
   };
+}
+
+const NO_RECORDS: readonly UsageRecord[] = [];
+
+/**
+ * The run's usage records, one per finished turn: the summary's while the run is opened from it
+ * (the core it seeds holds spend, not who spent it), else the ones the run fold keeps from the
+ * events, which a live session and a history read have. The header's spend is the sum of the same
+ * turns.
+ */
+export function usageRecords(state: RunPageState): readonly UsageRecord[] {
+  if (state.summary.kind === 'ready' && state.history.kind !== 'read') return state.summary.records;
+  return state.run.core?.usageRecords ?? NO_RECORDS;
 }

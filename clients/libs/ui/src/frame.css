@@ -1020,6 +1020,41 @@ button.vs-crumb:focus-visible {
   );
 }
 
+/* --- stacked bars: usage over time as columns of colored segments ------------------------------ */
+
+.vs-bars {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: 0;
+  min-width: 0;
+}
+.vs-bars-plot {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-1);
+  height: calc(var(--space-8) * 2);
+  border-bottom: var(--hairline) solid var(--line);
+}
+.vs-bars-bar {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column-reverse;
+  justify-content: flex-start;
+  min-width: 0;
+  height: 100%;
+}
+.vs-bars-segment {
+  display: block;
+  min-height: var(--hairline);
+  background: var(--seg-color, var(--accent));
+}
+.vs-bars-axis {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
 /* --- narrative: a turn as thinking, text and folded tool lines ----------------------------------- */
 
 /* The narrative fills its pane; only a paragraph is capped (below), never the column. */

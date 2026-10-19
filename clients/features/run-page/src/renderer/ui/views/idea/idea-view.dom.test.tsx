@@ -78,6 +78,7 @@ function view(candidate: Candidate, zoom: (event: ZoomEvent) => void) {
     model: modelOf([candidate]),
     clock: CLOCK,
     tokens: EMPTY_LEDGER,
+    who: new Map(),
     zoom,
     idea: candidate,
     outcome: null,
@@ -140,7 +141,13 @@ test('a segment of the strip opens its step', async () => {
 test('the compact step list highlights the opened step', async () => {
   const candidate = tried();
   const {container, unmount} = await mount(
-    <StepList idea={candidate} selected="a3-g" tokens={EMPTY_LEDGER} zoom={() => undefined} />,
+    <StepList
+      idea={candidate}
+      selected="a3-g"
+      tokens={EMPTY_LEDGER}
+      who={new Map()}
+      zoom={() => undefined}
+    />,
   );
   const rows = options(container, 'mpmc steps');
   expect(rows.map(row => row.getAttribute('aria-selected'))).toEqual(['false', 'true', 'false']);
@@ -300,5 +307,19 @@ test('an agent turn’s step shows its tokens beside its duration; a gate shows 
   expect(figure(steps[1])?.textContent).toBe('');
   // A turn that reported nothing says so, never a zero.
   expect(figure(steps[2])?.textContent).toBe('unknown');
+  await unmount();
+});
+
+test('the implementer and judge rows say what ran them; a turn the records do not name says nothing', async () => {
+  const candidate = idea('mpmc', 'passed', 100, 300);
+  const who = new Map([
+    ['mpmc-a-t', {harness: 'codex', model: 'gpt-6-luna'}],
+    ['mpmc-a-j', {harness: 'claude', model: 'sonnet-5'}],
+  ]);
+  const {container, unmount} = await mount(<IdeaView {...{...view(candidate, () => {}), who}} />);
+  const steps = options(container, 'mpmc steps').map(row => row.textContent ?? '');
+  expect(steps[0]).toContain('gpt-6-luna on codex');
+  expect(steps[1]).not.toContain(' on ');
+  expect(steps[2]).toContain('sonnet-5 on claude');
   await unmount();
 });

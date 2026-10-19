@@ -1,7 +1,9 @@
 import {expect, it} from 'bun:test';
 import {readFileSync} from 'node:fs';
 import {resolve} from 'node:path';
+import type {RunEvent} from '@vibesys/contracts';
 import {parseHelperMessage, type UsageRecord} from '@vibesys/contracts/host-helper';
+import {initialCoreState, reduceEventBatch} from '@vibesys/run-state';
 
 /**
  * The usage records a journal projects to (`server.run_usage`) are one contract with two readers:
@@ -16,6 +18,7 @@ const FIXTURE = resolve(
 );
 
 interface Fixture {
+  readonly events: RunEvent[];
   readonly records: UsageRecord[];
 }
 
@@ -65,4 +68,10 @@ it('has a record that kept its spend but not its execution start', () => {
 
   expect(orphan?.tokens.input).not.toBe(null);
   expect([orphan?.harness, orphan?.model, orphan?.started_at]).toEqual([null, null, null]);
+});
+
+it("folds the fixture's events, as the client does, to the records the host projects from them", () => {
+  const core = reduceEventBatch(initialCoreState(), fixture.events);
+
+  expect(core.usageRecords).toEqual(fixture.records);
 });

@@ -275,6 +275,7 @@ function summaryOf(): SummaryReply {
     journalBytes: 100,
     trace: 'recorded',
     roundsFinished: 0,
+    records: [],
   };
 }
 

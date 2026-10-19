@@ -51,6 +51,8 @@ import {
   timelineView,
   traceArrival,
   transcriptLoading,
+  usageRecords,
+  whoBySpan,
 } from '../../state/index.js';
 import {Hero} from './hero.js';
 import {HistoryLoading, InitialRunLoading, RunGone, RunLoadError} from './history-loading.js';
@@ -456,6 +458,7 @@ export function RunScreen(props: {
     model,
     clock: {start: clockStart(model), now: clockAt(model, runNow(state))},
     tokens: props.core?.tokens ?? EMPTY_LEDGER,
+    who: whoBySpan(usageRecords(state)),
     zoom,
   };
   const pending = pendingRunScreen(state, dispatch, zoom, route);

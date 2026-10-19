@@ -28,6 +28,7 @@ import {
 import {ledgerWith} from './token-usage.js';
 import {appendTranscript, eventToTranscriptEntry, RUN_TRANSCRIPT} from './transcript-fold.js';
 import type {TranscriptFolder} from './transcript-folder.js';
+import {recordOf} from './usage-records.js';
 import {workstreamsWithFinish, workstreamsWithUsage} from './workstream.js';
 
 type RunEventData = NonNullable<RunEvent['data']>;
@@ -228,9 +229,11 @@ function applyWorkstreamFinishedData(
 function applyTurnUsageData(state: CoreState, event: RunEvent): CoreState {
   const data = event.data;
   if (data?.kind !== 'turn_usage_recorded') return state;
+  const record = recordOf(state.executionStarts, event);
   return cloneCoreStateWith(state, {
     workstreams: workstreamsWithUsage(state.workstreams, event, data),
     tokens: ledgerWith(state.tokens, data),
+    ...(record === null ? {} : {usageRecords: [...state.usageRecords, record]}),
   });
 }
 

@@ -58,7 +58,13 @@ async function paneOf(
     root.render(
       <DeepLevel
         state={state}
-        base={{model, clock: {start: 0, now: 1000}, tokens: EMPTY_LEDGER, zoom: () => undefined}}
+        base={{
+          model,
+          clock: {start: 0, now: 1000},
+          tokens: EMPTY_LEDGER,
+          who: new Map(),
+          zoom: () => undefined,
+        }}
         core={null}
         mode="ideas"
         dispatch={() => undefined}

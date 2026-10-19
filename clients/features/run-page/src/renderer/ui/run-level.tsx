@@ -41,6 +41,7 @@ import {
   type RunPageState,
   roundsBeforeTrace,
   traceArrival,
+  usageRecords,
   type ZoomEvent,
 } from '../../state/index.js';
 import {FramedPane} from './framed-pane.js';
@@ -51,6 +52,7 @@ import {agentsHeader, logsHeader, timelineHeader} from './views/headers.js';
 import {LogsView, type LogsViewProps} from './views/logs/logs-view.js';
 import type {PaneHeader, ViewBase, Zoom} from './views/props.js';
 import {TimelineView, type TimelineViewProps} from './views/timeline/timeline-view.js';
+import {UsageView} from './views/usage/usage-view.js';
 
 type Dispatch = (action: RunPageAction) => void;
 
@@ -58,6 +60,7 @@ const MODES: readonly {readonly value: RunMode; readonly label: string}[] = [
   {value: 'ideas', label: 'Ideas'},
   {value: 'timeline', label: 'Timeline'},
   {value: 'agents', label: 'Agents'},
+  {value: 'usage', label: 'Usage'},
   {value: 'logs', label: 'Logs'},
 ];
 
@@ -69,7 +72,7 @@ export function ModeSwitch(props: {
   return (
     <SegmentedControl
       label="Show"
-      size="sm"
+      size="xs"
       options={props.options}
       value={props.mode}
       change={mode => props.zoom({type: 'mode', mode})}
@@ -315,6 +318,17 @@ function runFace(
       };
       return {header: agentsHeader(view), body: <AgentsView {...view} />};
     }
+    case 'usage':
+      return {
+        header: {},
+        body: (
+          <UsageView
+            records={usageRecords(state)}
+            controls={state.usage}
+            change={controls => dispatch({type: 'usage-controls', controls})}
+          />
+        ),
+      };
     case 'logs': {
       const view: LogsViewProps = {...base, state, scope: {kind: 'run'}, dispatch};
       return {header: logsHeader(view), body: <LogsView {...view} />};
@@ -341,6 +355,7 @@ const KICKERS: Readonly<Record<RunMode, string>> = {
   ideas: 'ideas',
   timeline: 'timeline',
   agents: 'agents',
+  usage: 'usage',
   logs: 'logs',
 };
 
@@ -353,8 +368,13 @@ export function RunLevel(props: {
   readonly dispatch: Dispatch;
 }): JSX.Element {
   const {state, base, mode, dispatch} = props;
-  const total =
-    mode === 'agents' ? base.model.agents.agents.length : base.model.candidates.candidates.length;
+  const total = {
+    agents: base.model.agents.agents.length,
+    usage: usageRecords(state).length,
+    ideas: base.model.candidates.candidates.length,
+    timeline: base.model.candidates.candidates.length,
+    logs: 0,
+  }[mode];
   const outcomes = implementerOutcomes(props.core, base.model.candidates);
   const effects = ideaEffects(props.core, base.model.candidates);
   const face = runFace(state, base, outcomes, effects, mode, dispatch);

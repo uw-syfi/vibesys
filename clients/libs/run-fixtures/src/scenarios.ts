@@ -649,7 +649,12 @@ const TEN_INPUT = 1_581_539;
 
 /** What a turn reports: input with its cached share, and output with a quarter of it reasoning. */
 function usage(input: number, cached: number, output: number): TurnUsage {
+  // The cost a provider could report for the counts (uncached and cached input, output), and the
+  // time the counts take at a steady rate: both are functions of the counts, so they stay in step.
+  const cost = (input - cached) * 3e-6 + cached * 3e-7 + output * 1.5e-5;
   return {
+    total_cost_usd: Math.round(cost * 1e4) / 1e4,
+    duration_ms: Math.round(output / 4),
     input_tokens: input,
     cache_read_input_tokens: cached,
     output_tokens: output,

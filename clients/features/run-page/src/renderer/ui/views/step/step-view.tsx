@@ -29,7 +29,13 @@ import {
   TurnResult,
 } from '@vibesys/ui';
 import {type JSX, useState} from 'react';
-import {stepKicker, tokensLine, tokensTitle, turnTokens} from '../../../../state/index.js';
+import {
+  stepKicker,
+  tokensLine,
+  tokensTitle,
+  turnTokens,
+  whoWords,
+} from '../../../../state/index.js';
 import {
   type GateView,
   gateView,
@@ -241,16 +247,24 @@ export function stepHeader(props: StepViewProps): PaneHeader {
   const seconds = end === null ? null : end - props.step.startedAt;
   const spent = turnTokens(props.tokens, props.step.span);
   const tokens = spent === null ? null : tokensLine(spent);
+  const ran = whoWords(props.who.get(props.step.span));
   return {
     kicker,
     meta: (
-      <Text
-        variant="small"
-        tone="muted"
-        {...(spent === null || tokens === null ? {} : {title: tokensTitle(spent)})}
-      >
-        {turnMeta(seconds, narrative, tokens)}
-      </Text>
+      <Row gap="space-3" align="baseline">
+        {ran === null ? null : (
+          <Text variant="code" tone="muted">
+            {ran}
+          </Text>
+        )}
+        <Text
+          variant="small"
+          tone="muted"
+          {...(spent === null || tokens === null ? {} : {title: tokensTitle(spent)})}
+        >
+          {turnMeta(seconds, narrative, tokens)}
+        </Text>
+      </Row>
     ),
   };
 }

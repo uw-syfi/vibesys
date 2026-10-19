@@ -36,6 +36,9 @@
       "path": "./tsconfig.agents.json"
     },
     {
+      "path": "./tsconfig.usage.json"
+    },
+    {
       "path": "../contracts/tsconfig.lib.json"
     },
     {
