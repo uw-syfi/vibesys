@@ -17,6 +17,7 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
+import vs_slurm.api as slurm_api
 from vs_sim.api.testing import SimThreads, VirtualClock, examples
 from vs_slurm.api import (
     FakeConnector,
@@ -348,3 +349,195 @@ def test_a_run_that_crashes_mid_probe_reconciles_its_queued_job_on_restart(
     assert len(_job_names(connector)) == 1
     assert reports[-1] == WorkspaceRootProbeProven()
     _assert_cleaned(tmp_path)
+
+
+def _generation_operation(generation: int) -> str:
+    # test-isolation: a retry's scheduler identity, which the Fake scripts by operation id.
+    key = _RUN_ID if generation == 0 else f"{_RUN_ID}\0retry-{generation}"
+    return "workspace-root-probe-" + hashlib.sha256(key.encode()).hexdigest()[:32]
+
+
+def _deadline_runner(
+    root: Path, connector: FakeConnector, threads: SimThreads, deadline_seconds: int
+) -> SlurmJobRunner:
+    runner = _runner(root, connector, threads)
+    config = runner.config.model_copy(
+        update={"workspace_root_probe_deadline_seconds": deadline_seconds}
+    )
+    return SlurmJobRunner(
+        config, processes=connector, scratch_root=root / "probe-state", clock=threads.clock
+    )
+
+
+def _hide_staging_from_the_node(
+    remote: Path,
+) -> Callable[[dict[str, object], _Answer], dict[str, object]]:
+    """Make the probe job fail on its node: the staged workspace is gone when it runs."""
+
+    def hide(request: dict[str, object], answer: _Answer) -> dict[str, object]:
+        command = str(request.get("command", ""))
+        if request["operation"] == "exec" and " sbatch " in f" {command} ":
+            for workspace in remote.glob("*/*/workspace"):
+                if workspace.is_symlink():
+                    workspace.unlink()
+                else:
+                    shutil.rmtree(workspace)
+        return answer(request)
+
+    return hide
+
+
+@pytest.mark.xfail(strict=True, reason="F1: a never-scheduled probe is not retried in the run")
+def test_a_probe_the_queue_never_scheduled_is_retried_and_slurm_work_waits_for_it(
+    tmp_path: Path,
+) -> None:
+    connector = FakeConnector(tmp_path / "cluster")
+    # The first attempt waits out its queue timeout; the retry is scheduled and proves.
+    connector.script(
+        _generation_operation(0), states=(SlurmJobStatus.PENDING,), pending_reason="Resources"
+    )
+    threads = _threads()
+    reports: list[WorkspaceRootProbeReport] = []
+    proof = WorkspaceRootProof(
+        _deadline_runner(tmp_path, connector, threads, 6 * 3600),
+        state_root=tmp_path / "probe-state",
+        run_id=_RUN_ID,
+        threads=threads,
+        report=reports.append,
+    )
+
+    def run() -> None:
+        proof.start()
+        # Slurm work never sees the first attempt's failure; it waits for the retry.
+        assert proof.require(threads.event()) is True
+        proof.close()
+
+    try:
+        threads.run(run)
+    finally:
+        threads.close()
+
+    retries = [
+        report for report in reports if isinstance(report, slurm_api.WorkspaceRootProbeRetrying)
+    ]
+    assert len(retries) == 1
+    assert "was never scheduled" in retries[0].failure
+    assert retries[0].retry_in_seconds > 0
+    assert reports[-1] == WorkspaceRootProbeProven()
+    names = _job_names(connector)
+    assert len(names) == len(set(names)) == 2
+    _assert_cleaned(tmp_path)
+
+
+@pytest.mark.xfail(strict=True, reason="F1: the probe has no run-level deadline yet")
+@given(deadline_hours=st.integers(min_value=1, max_value=4))
+@settings(max_examples=examples(pr=2, nightly=8), deadline=None)
+def test_a_probe_that_is_never_scheduled_fails_only_once_its_deadline_passed(
+    tmp_path_factory: pytest.TempPathFactory, deadline_hours: int
+) -> None:
+    root = tmp_path_factory.mktemp("deadline")
+    connector = FakeConnector(root / "cluster")
+    for generation in range(64):
+        connector.script(
+            _generation_operation(generation),
+            states=(SlurmJobStatus.PENDING,),
+            pending_reason="Resources",
+        )
+    deadline = deadline_hours * 3600
+    threads = _threads()
+    reports: list[WorkspaceRootProbeReport] = []
+    proof = WorkspaceRootProof(
+        _deadline_runner(root, connector, threads, deadline),
+        state_root=root / "probe-state",
+        run_id=_RUN_ID,
+        threads=threads,
+        report=reports.append,
+    )
+    started = threads.clock.now()
+    failed_at: list[float] = []
+
+    def run() -> None:
+        proof.start()
+        with pytest.raises(SlurmWorkspaceRootProbeError, match="never scheduled"):
+            proof.require(threads.event())
+        failed_at.append(threads.clock.now() - started)
+        proof.close()
+
+    try:
+        threads.run(run)
+    finally:
+        threads.close()
+
+    # It never gives up early, and overruns the deadline by at most one queue wait.
+    assert deadline <= failed_at[0] <= deadline + _QUEUE_SECONDS + 10 * _POLL_SECONDS
+    assert isinstance(reports[-1], WorkspaceRootProbeFailed)
+    names = _job_names(connector)
+    assert len(names) == len(set(names)) >= 2
+    _assert_cleaned(root)
+
+
+def test_a_probe_job_that_failed_ends_the_proof_at_once_without_a_retry(tmp_path: Path) -> None:
+    connector = FakeConnector(tmp_path / "cluster")
+    connector.intercept(_hide_staging_from_the_node(tmp_path / "remote"))
+    threads = _threads()
+    reports: list[WorkspaceRootProbeReport] = []
+    proof = _proof(tmp_path, connector, threads, reports)
+    started = threads.clock.now()
+
+    def run() -> None:
+        proof.start()
+        with pytest.raises(SlurmWorkspaceRootProbeError, match="exited with code"):
+            proof.require(threads.event())
+        # A lasting failure settles within a few polls, never after a backoff.
+        assert threads.clock.now() - started < 10 * _POLL_SECONDS
+        proof.close()
+
+    try:
+        threads.run(run)
+    finally:
+        threads.close()
+
+    assert len(_job_names(connector)) == 1
+    assert isinstance(reports[-1], WorkspaceRootProbeFailed)
+
+
+@pytest.mark.xfail(strict=True, reason="F4: a raising report sink fails the probe")
+@pytest.mark.parametrize("raising_on", ["queued", "outcome"])
+def test_a_report_sink_that_raises_never_fails_the_probe(tmp_path: Path, raising_on: str) -> None:
+    connector = FakeConnector(tmp_path / "cluster")
+    connector.script(
+        _generation_operation(0),
+        states=(SlurmJobStatus.PENDING,) * 3 + (SlurmJobStatus.RUNNING, SlurmJobStatus.COMPLETED),
+        pending_reason="Priority",
+    )
+    threads = _threads()
+    heard: list[WorkspaceRootProbeReport] = []
+
+    def broken_sink(report: WorkspaceRootProbeReport) -> None:
+        heard.append(report)
+        queued = isinstance(report, WorkspaceRootProbeQueued)
+        if queued == (raising_on == "queued"):
+            message = "No space left on device"
+            raise OSError(message)
+
+    proof = WorkspaceRootProof(
+        _runner(tmp_path, connector, threads),
+        state_root=tmp_path / "probe-state",
+        run_id=_RUN_ID,
+        threads=threads,
+        report=broken_sink,
+    )
+
+    def run() -> None:
+        proof.start()
+        assert proof.require(threads.event()) is True
+        proof.close()
+
+    try:
+        threads.run(run)
+    finally:
+        threads.close()
+
+    assert any(isinstance(report, WorkspaceRootProbeQueued) for report in heard)
+    assert heard[-1] == WorkspaceRootProbeProven()
+    assert len(_job_names(connector)) == 1
