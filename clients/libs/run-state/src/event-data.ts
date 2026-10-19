@@ -129,10 +129,8 @@ const EVENT_DATA_HANDLERS = {
   tool_call: runEventData(composeEventDataHandlers(applyAgentStatusData, applyTypedToolData)),
   tool_result: runEventData(applyTypedToolData),
   // A steer proposal belongs to a chat thread, not the run's core state. The chat fold reads it
-  // (the chat client is a later slice of #3224).
   steer_proposed: executionEventData(applyChatProposal),
-  // A steer's delivery steps are folded by the chat client, not the run's core state.
-  steer_delivery: ignoredEventData,
+  steer_delivery: executionEventData(applySteerDelivery),
   todo_update: runEventData(applyTodoData),
   usage_update: runEventData(applyUsageData),
   rate_limit_update: ignoredEventData,
@@ -158,18 +156,9 @@ const EVENT_DATA_HANDLERS = {
   run_ending: ignoredEventData,
 } satisfies Record<EventDataKind, EventDataHandlers>;
 
-/**
- * Kinds a producer publishes before the generated contract has them (read structurally by their
- * module). A kind moves into `EVENT_DATA_HANDLERS` when its type lands.
- */
-const PROVISIONAL_HANDLERS: Readonly<Record<string, EventDataHandlers>> = {
-  steer_delivery: executionEventData(applySteerDelivery),
-};
-
 export function eventDataHandlers(data: RunEvent['data']): EventDataHandlers | null | undefined {
   if (data === undefined || data === null) return undefined;
-  if (isKnownEventDataKind(data.kind)) return EVENT_DATA_HANDLERS[data.kind];
-  return PROVISIONAL_HANDLERS[data.kind] ?? null;
+  return isKnownEventDataKind(data.kind) ? EVENT_DATA_HANDLERS[data.kind] : null;
 }
 
 function isKnownEventDataKind(kind: string): kind is EventDataKind {

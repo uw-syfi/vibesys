@@ -201,15 +201,11 @@ export interface ChatProposal {
   readonly mode: 'next_turn' | 'standing' | 'interrupt';
 }
 
-export type SteerDeliveryStep =
-  | 'queued'
-  | 'withdraw_queued'
-  | 'reached'
-  | 'reached_mid_turn'
-  | 'in_force'
-  | 'dropped'
-  | 'ended'
-  | 'refused';
+/** Where one operator steer or withdrawal stands, as the wire names it. */
+export type SteerDeliveryStep = Extract<
+  NonNullable<RunEvent['data']>,
+  {kind: 'steer_delivery'}
+>['delivery']['state'];
 
 /** One step in a steer's life, as the server reported it. */
 export interface SteerDeliveryFact {

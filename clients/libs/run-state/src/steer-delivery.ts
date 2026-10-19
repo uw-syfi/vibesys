@@ -1,59 +1,24 @@
 /**
  * Steer delivery in the run fold: the steps of an operator steer's life (queued, reached a turn,
  * in force, dropped, ended, refused), each carrying the control id the operator sent it under.
- *
- * The contract for `steer_delivery` is not on this branch yet (#3224, slice A), so the event's
- * data is read structurally here, and only here, from the shape that slice publishes
- * (`SteerDeliveryData.delivery`). When its generated type lands, this module reads the typed
- * data and the kind moves into the exhaustive table of `event-data.ts`; nothing else changes.
  */
 import type {RunEvent} from '@vibesys/contracts';
-import {
-  type CoreState,
-  cloneCoreStateWith,
-  type SteerDeliveryFact,
-  type SteerDeliveryStep,
-} from './state.js';
+import {type CoreState, cloneCoreStateWith, type SteerDeliveryFact} from './state.js';
 
-const STEPS: readonly string[] = [
-  'queued',
-  'withdraw_queued',
-  'reached',
-  'reached_mid_turn',
-  'in_force',
-  'dropped',
-  'ended',
-  'refused',
-];
-
-function text(value: unknown): string | null {
-  return typeof value === 'string' && value !== '' ? value : null;
-}
-
-function isStep(value: unknown): value is SteerDeliveryStep {
-  return typeof value === 'string' && STEPS.includes(value);
-}
-
-function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
-  return typeof value === 'object' && value !== null;
-}
-
-/** The fact a `steer_delivery` event carries, or null for any other event or an unreadable one. */
+/** The fact a `steer_delivery` event carries, or null for any other event. */
 function steerDeliveryOf(event: RunEvent, sequence: number): SteerDeliveryFact | null {
-  const data: unknown = event.data;
-  if (!isRecord(data) || data['kind'] !== 'steer_delivery') return null;
-  const delivery = data['delivery'];
-  if (!isRecord(delivery) || !isStep(delivery['state'])) return null;
-  const action = delivery['action'];
+  const data = event.data;
+  if (data?.kind !== 'steer_delivery') return null;
+  const delivery = data.delivery;
   return {
     sequence,
-    step: delivery['state'],
-    controlId: text(delivery['control_id']),
-    action: action === 'steer' || action === 'withdraw' ? action : null,
-    withdraws: text(delivery['withdraws']),
-    role: text(delivery['role']),
-    attemptId: text(delivery['attempt_id']),
-    reason: text(delivery['reason']),
+    step: delivery.state,
+    controlId: delivery.control_id ?? null,
+    action: delivery.action ?? null,
+    withdraws: delivery.withdraws ?? null,
+    role: delivery.role ?? null,
+    attemptId: delivery.attempt_id ?? null,
+    reason: delivery.reason ?? null,
   };
 }
 

@@ -1203,7 +1203,7 @@ describe('core state projection', () => {
     expect(state.chatTranscripts['thread-a']?.length).toBe(2);
   });
 
-  it('keeps the steps of a steer the server reports by control id, once each, before their contract exists', () => {
+  it('keeps the steps of a steer the server reports by control id, once each', () => {
     const step = (sequence: number, delivery: Record<string, unknown>): RunEvent =>
       ({
         ...baseEvent(sequence, 'steer_delivery' as RunEvent['type']),
@@ -1214,7 +1214,6 @@ describe('core state projection', () => {
       step(2, {state: 'in_force', control_id: 'c-1', role: 'implementer', attempt_id: 'a-3'}),
       step(2, {state: 'in_force', control_id: 'c-1'}),
       step(3, {state: 'refused', control_id: 'c-2', reason: 'no such role'}),
-      step(4, {state: 'sideways', control_id: 'c-3'}),
     ];
     let state = initialCoreState();
     for (const item of events) state = reduceEvent(state, item);
