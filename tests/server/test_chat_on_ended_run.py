@@ -57,6 +57,7 @@ from vs_runtime.api.core import PRODUCTION_LEASE_SECONDS, RunTiming
 from vs_sandbox.api.testing import FakeComputeBackend
 from vs_sim.api.testing import (
     FakePipedProcessLauncher,
+    ManualClock,
     SimBlockingRunner,
     SimNetwork,
     SimThreads,
@@ -365,7 +366,7 @@ def _reader_of(run: _EndedRun, threads: SimThreads, tools: _RunTools) -> RunRead
     )
     client.set_text(None, tools.answer)
     settings = LaunchSettings(
-        timing=RunTiming(threads, PRODUCTION_LEASE_SECONDS, threads),
+        timing=RunTiming(ManualClock(), PRODUCTION_LEASE_SECONDS, threads),
         processes=REAL_PROCESSES,
         piped_processes=FakePipedProcessLauncher(),
         blocking=SimBlockingRunner(threads),
