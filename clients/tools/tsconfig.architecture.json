@@ -20,6 +20,8 @@
       "@vibesys/feature-new-run/main": ["features/new-run/src/main/index.ts"],
       "@vibesys/feature-new-run/renderer": ["features/new-run/src/renderer/index.ts"],
       "@vibesys/feature-new-run/state": ["features/new-run/src/state/index.ts"],
+      "@vibesys/feature-run-chat/renderer": ["features/run-chat/src/renderer/index.ts"],
+      "@vibesys/feature-run-chat/state": ["features/run-chat/src/state/index.ts"],
       "@vibesys/feature-run-control/main": ["features/run-control/src/main/index.ts"],
       "@vibesys/feature-run-page/renderer": ["features/run-page/src/renderer/index.ts"],
       "@vibesys/feature-run-page/state": ["features/run-page/src/state/index.ts"],

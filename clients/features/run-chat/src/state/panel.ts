@@ -1,0 +1,265 @@
+/**
+ * The chat panel's control state, as a machine (docs/contributing/clients-architecture.md,
+ * "State"): closed or open, and while open two regions, the asking flow (idle, creating a thread,
+ * asking it) and the harness catalogue (loading, then ready). Creating a thread and asking are
+ * invoked operations the shell provides over the run session; leaving their state ends them, so
+ * a late answer is never read. The transcript itself is not here: it is the run fold's, read by
+ * `thread-view`.
+ */
+import type {HarnessChoice, HarnessListing} from '@vibesys/ipc';
+import {unprovided} from '@vibesys/machine';
+import {assign, setup} from 'xstate';
+import {type Catalogue, catalogueOf, defaultChoice} from './picker.js';
+import {EMPTY_DRAFT, type SteerDraft} from './steer.js';
+import type {ThreadChoice} from './thread-view.js';
+
+/** How a thread creation or an ask ended. */
+export type ChatOutcome<T> =
+  | ({readonly ok: true} & T)
+  | {readonly ok: false; readonly message: string};
+
+export interface AskInput {
+  readonly threadId: string;
+  readonly text: string;
+}
+
+/** A steer the user wrote in the composer: a card the panel shows beside the proposals. */
+export interface UserSteer {
+  readonly id: string;
+  readonly draft: SteerDraft;
+}
+
+export interface PanelContext {
+  readonly choice: ThreadChoice;
+  /** The harness a new thread starts with; null keeps the run's own. */
+  readonly harness: HarnessChoice | null;
+  readonly catalogue: Catalogue;
+  readonly composer: string;
+  readonly composeAs: 'ask' | 'steer';
+  readonly listOpen: boolean;
+  readonly pickerOpen: boolean;
+  /** The question sent and not yet answered; `threadId` is null while its thread is created. */
+  readonly pending: {readonly threadId: string | null; readonly text: string} | null;
+  readonly userSteers: readonly UserSteer[];
+  readonly error: string | null;
+}
+
+export type PanelEvent =
+  | {readonly type: 'open'}
+  | {readonly type: 'close'}
+  | {readonly type: 'toggle'}
+  | {readonly type: 'choose-thread'; readonly id: string}
+  | {readonly type: 'new-chat'}
+  | {readonly type: 'set-harness'; readonly harness: HarnessChoice | null}
+  | {readonly type: 'set-composer'; readonly text: string}
+  | {readonly type: 'compose-as'; readonly as: 'ask' | 'steer'}
+  | {readonly type: 'toggle-list'}
+  | {readonly type: 'toggle-picker'}
+  /** `threadId`: the thread on screen, null for a new chat. */
+  | {readonly type: 'submit'; readonly threadId: string | null};
+
+export const panelInitial: PanelContext = {
+  choice: {kind: 'last'},
+  harness: null,
+  catalogue: {kind: 'loading'},
+  composer: '',
+  composeAs: 'ask',
+  listOpen: false,
+  pickerOpen: false,
+  pending: null,
+  userSteers: [],
+  error: null,
+};
+
+/** The patch for an ask or a thread creation that did not go through: the text is the user's again. */
+function failed(context: PanelContext, message: string): Partial<PanelContext> {
+  return {pending: null, composer: context.pending?.text ?? context.composer, error: message};
+}
+
+function outcomeMessage(output: ChatOutcome<unknown>): string {
+  return output.ok ? '' : output.message;
+}
+
+export const panelMachine = setup({
+  types: {context: {} as PanelContext, events: {} as PanelEvent},
+  actors: {
+    loadCatalogue: unprovided<HarnessListing>('loadCatalogue'),
+    createThread: unprovided<
+      ChatOutcome<{readonly threadId: string}>,
+      {harness: HarnessChoice | null}
+    >('createThread'),
+    ask: unprovided<ChatOutcome<unknown>, AskInput>('ask'),
+  },
+  guards: {
+    hasThread: ({event}) => event.type === 'submit' && event.threadId !== null,
+  },
+}).createMachine({
+  id: 'chatPanel',
+  context: panelInitial,
+  type: 'parallel',
+  on: {
+    'set-composer': {actions: assign(({event}) => ({composer: event.text}))},
+    'compose-as': {actions: assign(({event}) => ({composeAs: event.as}))},
+    'toggle-list': {actions: assign(({context}) => ({listOpen: !context.listOpen}))},
+    'toggle-picker': {actions: assign(({context}) => ({pickerOpen: !context.pickerOpen}))},
+    'set-harness': {actions: assign(({event}) => ({harness: event.harness, pickerOpen: false}))},
+    'choose-thread': {
+      actions: assign(({event}) => ({
+        choice: {kind: 'thread', id: event.id},
+        listOpen: false,
+        pickerOpen: false,
+      })),
+    },
+    'new-chat': {
+      actions: assign(() => ({
+        choice: {kind: 'new'},
+        listOpen: false,
+        pickerOpen: false,
+      })),
+    },
+  },
+  states: {
+    visibility: {
+      initial: 'closed',
+      states: {
+        closed: {on: {open: 'open', toggle: 'open'}},
+        open: {on: {close: 'closed', toggle: 'closed'}},
+      },
+    },
+    catalogue: {
+      initial: 'idle',
+      states: {
+        idle: {on: {open: 'loading', toggle: 'loading'}},
+        loading: {
+          invoke: {
+            id: 'loadCatalogue',
+            src: 'loadCatalogue',
+            onDone: {
+              target: 'ready',
+              actions: assign(({context, event}) => {
+                const catalogue = catalogueOf(event.output);
+                return {
+                  catalogue,
+                  harness:
+                    context.harness ??
+                    (catalogue.kind === 'listed' ? defaultChoice(catalogue.offers) : null),
+                };
+              }),
+            },
+            onError: {target: 'ready', actions: assign({catalogue: {kind: 'none'}})},
+          },
+        },
+        ready: {},
+      },
+    },
+    chat: {
+      initial: 'idle',
+      states: {
+        idle: {
+          on: {
+            submit: [
+              {
+                guard: ({context}) => context.composer.trim() === '',
+              },
+              {
+                guard: ({context}) => context.composeAs === 'steer',
+                actions: assign(({context}) => ({
+                  userSteers: [
+                    ...context.userSteers,
+                    {
+                      id: `user ${context.userSteers.length + 1}`,
+                      draft: {...EMPTY_DRAFT, text: context.composer.trim()},
+                    },
+                  ],
+                  composer: '',
+                  composeAs: 'ask' as const,
+                })),
+              },
+              {
+                guard: 'hasThread',
+                target: 'asking',
+                actions: assign(({context, event}) => ({
+                  pending: {
+                    threadId: event.type === 'submit' ? event.threadId : null,
+                    text: context.composer.trim(),
+                  },
+                  composer: '',
+                  error: null,
+                })),
+              },
+              {
+                target: 'creating',
+                actions: assign(({context}) => ({
+                  pending: {threadId: null, text: context.composer.trim()},
+                  composer: '',
+                  error: null,
+                })),
+              },
+            ],
+          },
+        },
+        creating: {
+          invoke: {
+            id: 'createThread',
+            src: 'createThread',
+            input: ({context}) => ({harness: context.harness}),
+            onDone: [
+              {
+                guard: ({event}) => event.output.ok,
+                target: 'asking',
+                actions: assign(({context, event}) =>
+                  event.output.ok
+                    ? {
+                        choice: {kind: 'thread' as const, id: event.output.threadId},
+                        pending: {
+                          threadId: event.output.threadId,
+                          text: context.pending?.text ?? '',
+                        },
+                      }
+                    : {},
+                ),
+              },
+              {
+                target: 'idle',
+                actions: assign(({context, event}) =>
+                  failed(context, outcomeMessage(event.output)),
+                ),
+              },
+            ],
+            onError: {
+              target: 'idle',
+              actions: assign(({context, event}) => failed(context, String(event.error))),
+            },
+          },
+        },
+        asking: {
+          invoke: {
+            id: 'ask',
+            src: 'ask',
+            input: ({context}) => ({
+              threadId: context.pending?.threadId ?? '',
+              text: context.pending?.text ?? '',
+            }),
+            onDone: [
+              {
+                guard: ({event}) => event.output.ok,
+                target: 'idle',
+                actions: assign({pending: null}),
+              },
+              {
+                target: 'idle',
+                actions: assign(({context, event}) =>
+                  failed(context, outcomeMessage(event.output)),
+                ),
+              },
+            ],
+            onError: {
+              target: 'idle',
+              actions: assign(({context, event}) => failed(context, String(event.error))),
+            },
+          },
+        },
+      },
+    },
+  },
+});

@@ -1,0 +1,152 @@
+import {describe, expect, test} from 'bun:test';
+import type {HarnessListing} from '@vibesys/ipc';
+import {checkMachine} from '@vibesys/machine/testing';
+import {getInitialSnapshot, getNextSnapshot} from 'xstate';
+import {type PanelEvent, panelMachine} from './panel.js';
+
+type Snapshot = ReturnType<typeof getInitialSnapshot<typeof panelMachine>>;
+
+const LISTING: HarnessListing = {
+  kind: 'listed',
+  harnesses: [
+    {provider: 'claude', model: 'opus', default: false},
+    {provider: 'claude', model: 'sonnet', default: true},
+    {provider: 'codex', model: 'gpt', default: true},
+  ],
+};
+
+type Settled = {readonly type: string; readonly output?: unknown; readonly error?: unknown};
+
+function step(snapshot: Snapshot, event: PanelEvent | Settled): Snapshot {
+  return getNextSnapshot(panelMachine, snapshot, event as PanelEvent);
+}
+
+function opened(): Snapshot {
+  return step(getInitialSnapshot(panelMachine), {type: 'open'});
+}
+
+const done = (id: string, output: unknown) => ({type: `xstate.done.actor.${id}`, output});
+
+describe('panelMachine', () => {
+  test('opens and closes, and keeps what was typed while closed', () => {
+    let snapshot = step(opened(), {type: 'set-composer', text: 'why?'});
+    snapshot = step(snapshot, {type: 'toggle'});
+    expect(snapshot.value).toMatchObject({visibility: 'closed'});
+    snapshot = step(snapshot, {type: 'toggle'});
+    expect(snapshot.value).toMatchObject({chat: 'idle'});
+    expect(snapshot.context.composer).toBe('why?');
+  });
+
+  test('the catalogue loads on open and the first provider default is chosen', () => {
+    const loaded = step(opened(), done('loadCatalogue', LISTING));
+    expect(loaded.context.catalogue.kind).toBe('listed');
+    expect(loaded.context.harness).toEqual({provider: 'claude', model: 'sonnet'});
+    const chosen = step(loaded, {
+      type: 'set-harness',
+      harness: {provider: 'codex', model: 'gpt'},
+    });
+    expect(chosen.context.harness).toEqual({provider: 'codex', model: 'gpt'});
+    // A catalogue that arrives later never overrides a pair the user already chose.
+    const reopened = step(step(chosen, {type: 'close'}), {type: 'open'});
+    expect(reopened.context.harness).toEqual({provider: 'codex', model: 'gpt'});
+  });
+
+  test('an unreadable catalogue leaves nothing to pick, not a stuck panel', () => {
+    const failed = step(opened(), {type: 'xstate.error.actor.loadCatalogue', error: 'no'});
+    expect(failed.context.catalogue).toEqual({kind: 'none'});
+    expect(failed.value).toMatchObject({catalogue: 'ready'});
+  });
+
+  test('closing the panel does not end a question in flight', () => {
+    let snapshot = step(opened(), {type: 'set-composer', text: 'why?'});
+    snapshot = step(snapshot, {type: 'submit', threadId: 'thread-1'});
+    snapshot = step(snapshot, {type: 'close'});
+    expect(snapshot.value).toMatchObject({visibility: 'closed', chat: 'asking'});
+    expect(snapshot.context.pending).toEqual({threadId: 'thread-1', text: 'why?'});
+  });
+
+  test('a first question creates the thread with the chosen harness, then asks it', () => {
+    let snapshot = step(opened(), done('loadCatalogue', LISTING));
+    snapshot = step(snapshot, {type: 'new-chat'});
+    snapshot = step(snapshot, {type: 'set-composer', text: ' what is best? '});
+    snapshot = step(snapshot, {type: 'submit', threadId: null});
+    expect(snapshot.value).toMatchObject({chat: 'creating'});
+    expect(snapshot.context.composer).toBe('');
+    expect(snapshot.context.pending).toEqual({threadId: null, text: 'what is best?'});
+    snapshot = step(snapshot, done('createThread', {ok: true, threadId: 'thread-7'}));
+    expect(snapshot.value).toMatchObject({chat: 'asking'});
+    expect(snapshot.context.choice).toEqual({kind: 'thread', id: 'thread-7'});
+    expect(snapshot.context.pending).toEqual({threadId: 'thread-7', text: 'what is best?'});
+    snapshot = step(snapshot, done('ask', {ok: true}));
+    expect(snapshot.value).toMatchObject({chat: 'idle'});
+    expect(snapshot.context.pending).toBeNull();
+  });
+
+  test('a question that failed comes back to the composer with the reason', () => {
+    let snapshot = step(opened(), {type: 'set-composer', text: 'why?'});
+    snapshot = step(snapshot, {type: 'submit', threadId: 'thread-1'});
+    expect(snapshot.value).toMatchObject({chat: 'asking'});
+    snapshot = step(snapshot, done('ask', {ok: false, message: 'the run is not connected'}));
+    expect(snapshot.value).toMatchObject({chat: 'idle'});
+    expect(snapshot.context.composer).toBe('why?');
+    expect(snapshot.context.error).toBe('the run is not connected');
+    expect(snapshot.context.pending).toBeNull();
+  });
+
+  test('a steer written in the composer becomes a card and asks nothing', () => {
+    let snapshot = step(opened(), {type: 'compose-as', as: 'steer'});
+    snapshot = step(snapshot, {type: 'set-composer', text: 'try a smaller batch'});
+    snapshot = step(snapshot, {type: 'submit', threadId: 'thread-1'});
+    expect(snapshot.value).toMatchObject({chat: 'idle'});
+    expect(snapshot.context.userSteers).toEqual([
+      {
+        id: 'user 1',
+        draft: {text: 'try a smaller batch', target: {kind: 'run', id: null}, mode: 'next_turn'},
+      },
+    ]);
+    expect(snapshot.context.composeAs).toBe('ask');
+    expect(snapshot.context.composer).toBe('');
+  });
+
+  test('an empty composer submits nothing', () => {
+    const snapshot = step(opened(), {type: 'submit', threadId: 'thread-1'});
+    expect(snapshot.value).toMatchObject({chat: 'idle'});
+    expect(snapshot.context.pending).toBeNull();
+  });
+
+  test('model: work belongs to its state and a pending question exists exactly while asking', () => {
+    checkMachine({
+      machine: panelMachine,
+      input: undefined,
+      event: (random, live) =>
+        random.pick<PanelEvent | {type: string}>([
+          {type: 'toggle'},
+          {type: 'open'},
+          {type: 'close'},
+          {type: 'new-chat'},
+          {type: 'choose-thread', id: random.pick(['a', 'b'])},
+          {type: 'set-composer', text: random.pick(['', 'why?', 'what changed?'])},
+          {type: 'compose-as', as: random.pick(['ask', 'steer'])},
+          {type: 'toggle-list'},
+          {type: 'toggle-picker'},
+          {type: 'submit', threadId: random.pick([null, 'a'])},
+          ...live.operations.map(operation =>
+            live.done(
+              operation,
+              operation === 'loadCatalogue'
+                ? LISTING
+                : random.bool()
+                  ? {ok: true, threadId: 'new'}
+                  : {ok: false, message: 'no'},
+            ),
+          ),
+          ...live.operations.map(operation => live.error(operation, new Error('lost'))),
+        ]),
+      invariants: ({value, context}) => {
+        const chat = typeof value === 'object' ? value.chat : null;
+        const busy = chat === 'creating' || chat === 'asking';
+        return busy === (context.pending !== null) ? [] : ['pending and busy differ'];
+      },
+    });
+  });
+});

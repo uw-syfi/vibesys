@@ -374,6 +374,55 @@ importers:
         specifier: ^5.8.3
         version: 5.9.3
 
+  features/run-chat:
+    dependencies:
+      '@vibesys/contracts':
+        specifier: workspace:*
+        version: link:../../libs/contracts
+      '@vibesys/ipc':
+        specifier: workspace:*
+        version: link:../../libs/ipc
+      '@vibesys/machine':
+        specifier: workspace:*
+        version: link:../../libs/machine
+      '@vibesys/run-state':
+        specifier: workspace:*
+        version: link:../../libs/run-state
+      '@vibesys/ui':
+        specifier: workspace:*
+        version: link:../../libs/ui
+      react:
+        specifier: 19.1.1
+        version: 19.1.1
+      xstate:
+        specifier: 5.33.2
+        version: 5.33.2
+    devDependencies:
+      '@types/bun':
+        specifier: 1.4.2
+        version: 1.4.2
+      '@types/node':
+        specifier: ^24.0.0
+        version: 24.13.3
+      '@types/react':
+        specifier: 19.1.13
+        version: 19.1.13
+      '@types/react-dom':
+        specifier: 19.1.9
+        version: 19.1.9(@types/react@19.1.13)
+      '@vibesys/store':
+        specifier: workspace:*
+        version: link:../../libs/store
+      happy-dom:
+        specifier: 20.14.5
+        version: 20.14.5
+      react-dom:
+        specifier: 19.1.1
+        version: 19.1.1(react@19.1.1)
+      typescript:
+        specifier: ^5.8.3
+        version: 5.9.3
+
   features/run-control:
     dependencies:
       '@vibesys/connection':
