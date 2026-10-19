@@ -253,7 +253,7 @@ def test_run_connect_reaches_a_reader_as_it_reaches_a_live_run(tmp_path: Path) -
 
     opened = threads.run(main)
 
-    assert not isinstance(opened, HelperError)
+    assert isinstance(opened, tuple)
     connected, connection = opened
     connection.close()
     assert connected == RunConnectReply(request_id="c", run_id=_RUN, protocol_version=1)
