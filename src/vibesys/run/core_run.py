@@ -50,7 +50,7 @@ if TYPE_CHECKING:
     from vibesys.run.integration import LocalRunIntegration
     from vs_core.api import ArtifactRef
     from vs_runtime.api import ArtifactStore
-    from vs_runtime.api.core import AgentEvaluationBridge, ExecutorRefusal, StallNotes
+    from vs_runtime.api.core import AgentEvaluationBridge, ExecutorRefusal, RunTiming, StallNotes
 
 _UNFINISHED_REASON = "the run ended without recording a result"
 
@@ -97,11 +97,12 @@ class _SteerTexts:
             raise RuntimeError(message)
 
 
-def _loop_config(run_id: str, lease_seconds: float) -> RunLoopConfig:
+def _loop_config(run_id: str, timing: RunTiming) -> RunLoopConfig:
     # One lease holder per process: a restart of the same run is a new host.
     return RunLoopConfig(
         host_id=f"vibesys:{run_id}:{os.getpid()}:{uuid.uuid4().hex[:8]}",
-        lease_duration=lease_seconds,
+        lease_duration=timing.lease_seconds,
+        control_poll_interval=timing.control_poll_seconds,
     )
 
 
@@ -175,7 +176,7 @@ async def drive_core_run(host: CoreHost, integration: LocalRunIntegration) -> Ru
         lifts_standing_stop=True,
     )
     loop = CoreRunHost(shell, delivery, services.clock, controls, workspaces=host.workspaces)
-    config = _loop_config(services.run_id, host.timing.lease_seconds)
+    config = _loop_config(services.run_id, host.timing)
     await start_core_awaiting_lease(loop, config)
     if services.stop_requested:
         # A force stop killed the server before the run committed its stop; the run
