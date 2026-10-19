@@ -86,6 +86,18 @@ def _v36_to_v37(envelope: JsonObject) -> JsonObject:
     return envelope | {"schema_version": 37}
 
 
+def _v37_to_v38(envelope: JsonObject) -> JsonObject:
+    """Version 38 added the capacity hold of a turn and the failure kind of a turn lost to it.
+
+    A request record may carry ``capacity_hold`` (not serialized when unset), the records
+    events gained ``turn_held``, and a turn result may say ``provider_unavailable``. A version
+    37 run had no capacity gate reporting holds, so no stored record holds one and no turn was
+    lost to its provider: the shape only grew, and every version 37 document is a valid
+    version 38 one with its number changed.
+    """
+    return envelope | {"schema_version": 38}
+
+
 def _floor_declared(core: JsonObject) -> bool:
     run = _object(core.get("run"))
     task = _object(_object(run.get("facts")).get("task"))
@@ -110,7 +122,12 @@ def _object(value: JsonValue) -> JsonObject:
     return value if isinstance(value, dict) else {}
 
 
-MIGRATIONS: Final[Mapping[int, Migration]] = {34: _v34_to_v35, 35: _v35_to_v36, 36: _v36_to_v37}
+MIGRATIONS: Final[Mapping[int, Migration]] = {
+    34: _v34_to_v35,
+    35: _v35_to_v36,
+    36: _v36_to_v37,
+    37: _v37_to_v38,
+}
 """Version ``n`` to ``n + 1``, one entry per version, contiguous from the oldest supported."""
 
 OLDEST_SUPPORTED_ENVELOPE_VERSION: Final = min(MIGRATIONS)
