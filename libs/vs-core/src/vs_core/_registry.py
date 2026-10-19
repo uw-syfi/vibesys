@@ -7,7 +7,6 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal, get_args, get_origin, overload
 
 from pydantic import JsonValue, TypeAdapter, ValidationError
-from pydantic_core import to_json
 
 from ._envelope_migrations import (
     OLDEST_SUPPORTED_ENVELOPE_VERSION,
@@ -419,7 +418,7 @@ _ANY_JSON: TypeAdapter[JsonValue] = TypeAdapter(JsonValue)
 """Any JSON value; pydantic's parser bounds nesting, so deep input is invalid, not a crash."""
 
 
-def upgrade_envelope(source: str | bytes, at: tuple[str, ...]) -> str | bytes:
+def upgrade_envelope(source: str | bytes, at: tuple[str, ...]) -> str:
     """The stored JSON ``source`` with its envelope at the current version.
 
     ``at`` is the keys leading to the envelope's ``schema_version`` inside ``source``. An
@@ -433,7 +432,7 @@ def upgrade_envelope(source: str | bytes, at: tuple[str, ...]) -> str | bytes:
     version = _read_envelope_version(source, at, at)
     _validate_envelope_version(version)
     if version == ENVELOPE_SCHEMA_VERSION:
-        return source
+        return source if isinstance(source, str) else source.decode()
     document = _ANY_JSON.validate_json(source)
     holder = _holder(document, at[:-1], at)
     upgraded = upgrade_envelope_document(holder, to=ENVELOPE_SCHEMA_VERSION)
@@ -441,7 +440,7 @@ def upgrade_envelope(source: str | bytes, at: tuple[str, ...]) -> str | bytes:
         document = upgraded
     else:
         _holder(document, at[:-2], at)[at[-2]] = upgraded
-    return to_json(document)
+    return _ANY_JSON.dump_json(document).decode()
 
 
 def _holder(
