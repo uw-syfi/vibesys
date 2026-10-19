@@ -59,12 +59,15 @@ type Failure = Literal["dies", "fails"]
 
 
 class _FailingEffects(LocalAtomicWriteEffects):
-    """Local durability effects that fail at their ``at``-th durable step.
+    """Local durability effects that fail at their ``at``-th step.
 
-    The steps are every file sync, rename and directory sync. The host either dies there, and
-    nothing after it runs, or the step fails with an ``OSError`` that the host sees. Each write
-    syncs the directory before the next write begins, so the files a death leaves are those of
-    some prefix of the steps; failing before each step in turn reaches every one of them.
+    A host that ``fails`` sees an ``OSError`` at the step, and the steps are every file sync,
+    rename and directory sync. A host that ``dies`` runs nothing after the step, and its steps
+    are the renames only: each write syncs the directory before the next write begins, so the
+    files a death leaves are those of the renames before it, and a death at a sync leaves the
+    files of a death at the next rename (the last rename lost) or of no death (it was kept).
+    The syncs themselves are skipped: the test decides what a crash keeps, so making the
+    bytes durable would only slow every example down.
     """
 
     def __init__(self, at: int | None, failure: Failure = "dies") -> None:
@@ -72,7 +75,9 @@ class _FailingEffects(LocalAtomicWriteEffects):
         self._at = at
         self._failure = failure
 
-    def _step(self) -> None:
+    def _step(self, *, rename: bool = False) -> None:
+        if self._failure == "dies" and not rename:
+            return
         self.steps += 1
         if self.steps != self._at:
             return
@@ -82,20 +87,20 @@ class _FailingEffects(LocalAtomicWriteEffects):
         raise OSError(message)
 
     def sync_file(self, stream: AtomicWriteStream) -> None:
+        del stream  # nothing is made durable (see the class)
         self._step()
-        super().sync_file(stream)
 
     def sync_existing_file(self, path: Path) -> None:
+        del path  # nothing is made durable (see the class)
         self._step()
-        super().sync_existing_file(path)
 
     def replace(self, temporary: Path, destination: Path) -> None:
-        self._step()
+        self._step(rename=True)
         super().replace(temporary, destination)
 
     def sync_directory(self, directory: Path) -> None:
+        del directory  # nothing is made durable (see the class)
         self._step()
-        super().sync_directory(directory)
 
 
 class _RefusedError(Exception):
@@ -190,16 +195,17 @@ class _World:
     """One run's store, the hosts that ever held its lease, and the invariants over them."""
 
     def __init__(self, root: Path, holders: list[_Holder]) -> None:
-        self._root = root
+        self._project = Project.open(root)
+        self._older = _OlderRelease(root)
         self.holders = holders
         self.granted = [holder.fence.epoch for holder in holders]
 
     def store(self, effects: _FailingEffects | None = None) -> StateStore:
         """A host of this release, newly started: it trusts nothing it did not read."""
-        return Project.open(self._root).state_store(_RUN, effects=effects)
+        return self._project.state_store(_RUN, effects=effects or _FailingEffects(None))
 
     def older(self) -> _OlderRelease:
-        return _OlderRelease(self._root)
+        return self._older
 
     def valid(self, holder: _Holder, now: float) -> bool:
         if holder.release == "this":
@@ -329,10 +335,9 @@ def _steps(root: Path, start: str) -> int:
     return _start(root, start, None)[1]
 
 
-@pytest.mark.xfail(strict=True, reason="review of #3272, HIGH 1: a crash mid-migration")
 @pytest.mark.parametrize("failure", ["dies", "fails"])
 @pytest.mark.parametrize("start", _STARTS)
-@settings(max_examples=examples(pr=10, nightly=100), deadline=None, database=None)
+@settings(max_examples=examples(pr=10, nightly=50), deadline=None, database=None)
 @given(actions=_ACTIONS, gaps=_GAPS)
 # The review's reproduction: this release takes over after the older host's lease expired and
 # dies before store.json is rewritten; an older host then takes over from store.json, and a

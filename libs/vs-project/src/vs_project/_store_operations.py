@@ -6,12 +6,27 @@ watermark, a few hundred bytes, and is written by every lease operation and afte
 commit. Renewing a lease once rewrote the whole record, so its cost grew with the run
 (FINDINGS S171); now it writes the small document only.
 
-Version 1 of ``store.json`` held the lease too, and had no ``lease.json``. A store written by
-an older release is read as is: its lease is the one inside ``store.json`` until the first
-lease write, which writes ``lease.json`` first and then ``store.json`` as version 2, so a
-crash between the two leaves the lease in ``lease.json``, which is authoritative whenever
-it exists. A version 2 ``store.json`` without a ``lease.json`` is damage: a record is only
-committed under a lease, and inventing an empty one would let the next host reuse an epoch.
+Version 1 of ``store.json`` held the lease too, and had no ``lease.json``. Older releases
+read only ``store.json``, and only version 1, so while ``store.json`` is version 1 (or absent)
+an older host may take, renew or release the lease there at any moment. This release
+therefore grants nothing until ``store.json`` is version 2, which older releases refuse:
+
+1. it copies the lease it read into ``lease.json``, unchanged and marked not ``migrated``;
+2. it rewrites ``store.json`` as version 2, holding the same record (an older release now
+   refuses the store);
+3. only then does it write the lease it grants, marked ``migrated``.
+
+``migrated`` is set only once ``store.json`` version 2 is durable, so a reader that finds it
+trusts ``lease.json`` alone and never reads the record for a lease operation. Until then a
+reader reads both: a version 2 ``store.json`` makes ``lease.json`` the lease; a version 1 or
+absent one makes the lease the later of the two (by epoch, then expiry), because an older host
+may have advanced the copy in ``store.json`` since step 1. A crash at any step leaves a store
+that either release reads consistently, and the next write of this release finishes the
+migration. A version 2 ``store.json`` without a ``lease.json`` is damage: step 1 precedes it,
+and inventing an empty lease would let the next host reuse an epoch.
+
+After step 2 an older release refuses the store ("document version 2, this release reads
+version 1"): resuming a run once on this release ends rollback for that run.
 """
 
 from abc import ABC, abstractmethod
@@ -104,10 +119,18 @@ class LeaseDocument(BaseModel):
     )
     fence: StoreFence | None = None
     observed_at: float = Field(default=0, ge=0, allow_inf_nan=False)
+    # Set only once store.json version 2 is durable: from then on older releases refuse the
+    # store, and this document alone is the lease (see the module).
+    migrated: bool = False
 
     def encode(self) -> bytes:
         """The document's bytes."""
         return self.model_dump_json().encode()
+
+
+def _migrated(lease: LeaseDocument) -> LeaseDocument:
+    """``lease`` marked as written after ``store.json`` version 2 is durable."""
+    return lease if lease.migrated else lease.model_copy(update={"migrated": True})
 
 
 class _Time(BaseModel):
@@ -133,12 +156,40 @@ def _valid_fence(lease: LeaseDocument, fence: StoreFence, now: float) -> bool:
     )
 
 
+def _later(stored: LeaseDocument, moved: LeaseDocument | None) -> LeaseDocument:
+    """The lease of a store not yet migrated: the later of ``store.json``'s and ``lease.json``'s.
+
+    An older host may have taken or renewed the lease in ``store.json`` after this release
+    copied it to ``lease.json``, so neither copy alone is the lease. Epochs only grow, and a
+    renewal only extends expiry, so the later fence is the current one; the watermark is the
+    later of the two, as each only ever advances.
+    """
+    if moved is None:
+        return stored
+    later = max(
+        (moved, stored),
+        key=lambda lease: (
+            (-1, 0.0) if lease.fence is None else (lease.fence.epoch, lease.fence.expires_at)
+        ),
+    )
+    return LeaseDocument(fence=later.fence, observed_at=max(stored.observed_at, moved.observed_at))
+
+
 @dataclass(frozen=True)
 class _Lease:
-    """The lease an operation read, and whether it still lives only in a legacy ``store.json``."""
+    """The lease an operation read, and what it read of ``store.json`` to find it.
+
+    ``record`` is ``store.json`` as read while the store is not ``migrated``, None when there is
+    none; a migrated store's lease operations do not read it.
+    """
 
     document: LeaseDocument
-    legacy_record: StoreDocument | None = None
+    record: StoreDocument | None = None
+
+    @property
+    def migrated(self) -> bool:
+        """Whether ``store.json`` is known to be version 2, which older releases refuse."""
+        return self.document.migrated or (self.record is not None and not self.record.legacy)
 
 
 class StoreOperations(ABC):
@@ -200,18 +251,20 @@ class StoreOperations(ABC):
 
     def _lease(self) -> _Lease:
         lease = self._read_lease()
-        if lease is not None:
+        if lease is not None and lease.migrated:
             return _Lease(document=lease)
         stored = self._read_record()
-        if stored is None:
-            return _Lease(document=LeaseDocument())
-        if not stored.legacy:
-            message = "store.json is in the current format but lease.json is missing"
-            raise StateDocumentDamagedError.invalid(StoreFile.LEASE, message)
-        return _Lease(
-            document=LeaseDocument(fence=stored.fence, observed_at=stored.observed_at),
-            legacy_record=stored,
+        if stored is not None and not stored.legacy:
+            if lease is None:
+                message = "store.json is in the current format but lease.json is missing"
+                raise StateDocumentDamagedError.invalid(StoreFile.LEASE, message)
+            return _Lease(document=lease, record=stored)
+        legacy = (
+            LeaseDocument()
+            if stored is None
+            else LeaseDocument(fence=stored.fence, observed_at=stored.observed_at)
         )
+        return _Lease(document=_later(legacy, lease), record=stored)
 
     def load(self) -> StoreRecord | None:
         """Read the current entire record under the store lock."""
@@ -308,17 +361,15 @@ class StoreOperations(ABC):
             raise ValueError(message)
         with self._operation():
             lease = self._lease()
-            stored = lease.legacy_record or self._read_record()
+            stored = self._read_record() if lease.document.migrated else lease.record
             current = None if stored is None else stored.record
             revision = None if current is None else current.revision
             if revision != expected:
                 return Conflict(reason=ConflictReason.REVISION, revision=revision)
             if not _valid_fence(lease.document, fence, timing.now):
                 return Conflict(reason=ConflictReason.FENCE, revision=revision)
-            if lease.legacy_record is not None:
-                # Move the lease out before the record stops holding it.
-                self._write_document(StoreFile.LEASE, lease.document, None)
-            return self._publish(lease.document, envelope, timing.now)
+            self._migrate(lease)
+            return self._publish(_migrated(lease.document), envelope, timing.now)
 
     def _publish(self, lease: LeaseDocument, envelope: StoreRecord, now: float) -> CommitOutcome:
         fault = next(self._faults, None)
@@ -330,8 +381,14 @@ class StoreOperations(ABC):
         except OSError:
             self._advance_if_published(lease, envelope, now)
             return Unknown(revision=envelope.revision)
-        # The record is published; the watermark that follows it is its own small write.
-        self._write_document(StoreFile.LEASE, lease.model_copy(update={"observed_at": now}), None)
+        # The record is published, so the outcome is Committed whatever happens next. The
+        # watermark that follows it is its own small write; when that fails, the watermark
+        # stays at the previous write's time until the next lease write, which only leaves the
+        # clock check as loose as it was before this commit.
+        with suppress(OSError):
+            self._write_document(
+                StoreFile.LEASE, lease.model_copy(update={"observed_at": now}), None
+            )
         return Committed(record=envelope)
 
     def _advance_if_published(
@@ -353,18 +410,21 @@ class StoreOperations(ABC):
             return
 
     def _write_lease(self, lease: _Lease, document: LeaseDocument) -> None:
+        self._migrate(lease)
         fault = next(self._lease_faults, None)
-        self._write_document(StoreFile.LEASE, document, fault)
-        if lease.legacy_record is None:
+        self._write_document(StoreFile.LEASE, _migrated(document), fault)
+
+    def _migrate(self, lease: _Lease) -> None:
+        """Make ``store.json`` version 2 before anything is granted (see the module).
+
+        Copy the lease read into ``lease.json``, then rewrite ``store.json`` as version 2. A
+        failure of either write fails the operation, which has granted nothing yet.
+        """
+        if lease.migrated:
             return
-        # The lease now lives in lease.json, which is authoritative. Drop the stale copy so
-        # older releases, which would trust it, refuse the store instead. When this write
-        # fails the copy stays until the next commit replaces store.json, and this
-        # release ignores it either way.
-        with suppress(OSError):
-            self._write_document(
-                StoreFile.RECORD, record_document(lease.legacy_record.record), None
-            )
+        self._write_document(StoreFile.LEASE, lease.document, None)
+        record = None if lease.record is None else lease.record.record
+        self._write_document(StoreFile.RECORD, record_document(record), None)
 
     def _write_document(
         self, file: StoreFile, document: StoreDocument | LeaseDocument, fault: CommitFault | None
