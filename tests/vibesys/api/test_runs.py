@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import pytest
@@ -27,6 +28,7 @@ from vibesys.api import (
     OrchestrationRegistry,
     ProfilerKind,
     ResumeRef,
+    RunEndingData,
     RunFailedData,
     RunFailureKind,
     RunRequest,
@@ -36,6 +38,7 @@ from vibesys.api import RunStatus as ProductRunStatus
 from vibesys.api.request import load_task
 from vs_agent.api import AgentCapabilities
 from vs_agent.api.testing import FakeAgentClient, FakeInvocation
+from vs_core.api import EndReason
 from vs_project.api import GitFaultSink, GitRepository, Project, ProjectStateError, validate_run_id
 from vs_project.api.testing import FakeGitRepositories
 from vs_runtime.api import AgentRole
@@ -245,10 +248,22 @@ async def test_requested_stop_returns_typed_status_after_cleanup(
     assert all(event.type is not CoreEventType.RUN_FAILED for event in events)
 
 
-@pytest.mark.parametrize("schedule_seed", range(examples(pr=8, nightly=50)))
-def test_a_failed_public_run_reports_its_verified_adopted_candidate(
-    request_template: RunRequest, schedule_seed: int, sim: Sim
-) -> None:
+@dataclass(frozen=True)
+class _Ran:
+    """What a public run of a skeleton scenario that keeps one candidate left behind."""
+
+    result: RunResult
+    events: list[CoreEvent]
+    revisions: list[str]
+    """The candidate revisions its implementer committed."""
+    processes: int
+    """How many host processes it ran."""
+
+
+def _run_keeping_a_candidate(
+    request_template: RunRequest, sim: Sim, strategy: SkeletonStrategy, schedule_seed: int
+) -> _Ran:
+    """Run ``strategy`` publicly over a task whose benchmark passes; its one turn commits."""
     write_task(
         request_template.project_root,
         'version = 1\n[agent]\ndomain = "generic"\n'
@@ -264,7 +279,7 @@ def test_a_failed_public_run_reports_its_verified_adopted_candidate(
         capability_plugin(
             "identity-test",
             agents=(AgentRole(id=IMPLEMENTER.root, system_prompt="Implement."),),
-            strategy=SkeletonStrategy.failing_after_choice(),
+            strategy=strategy,
         )
     )
     git = _ProductGit()
@@ -326,8 +341,20 @@ def test_a_failed_public_run_reports_its_verified_adopted_candidate(
             session.close()
 
     result = sim.run(exercise(), threads=threads)
+    return _Ran(result, events, candidate_revisions, len(processes.ran))
 
-    assert len(processes.ran) == 1
+
+@pytest.mark.parametrize("schedule_seed", range(examples(pr=8, nightly=50)))
+def test_a_failed_public_run_reports_its_verified_adopted_candidate(
+    request_template: RunRequest, schedule_seed: int, sim: Sim
+) -> None:
+    ran = _run_keeping_a_candidate(
+        request_template, sim, SkeletonStrategy.failing_after_choice(), schedule_seed
+    )
+    result, events, candidate_revisions = ran.result, ran.events, ran.revisions
+    request = request_template
+
+    assert ran.processes == 1
     assert not result.succeeded
     assert result.failure is not None
     assert result.failure.kind is RunFailureKind.BUDGET_EXHAUSTED
@@ -341,6 +368,26 @@ def test_a_failed_public_run_reports_its_verified_adopted_candidate(
     assert len(failed) == 1
     assert isinstance(failed[0].data, RunFailedData)
     assert failed[0].data.failure.adopted_candidate == candidate_revisions[0]
+
+
+@pytest.mark.xfail(
+    strict=True, reason="PR #3235 H1: the uncompared mark is a structured field of the result"
+)
+def test_a_public_run_that_adopts_an_uncompared_candidate_says_so_in_its_result_and_ending(
+    request_template: RunRequest, sim: Sim
+) -> None:
+    """H1: the search's ``Uncompared`` reaches the run's result and its ``run_ending`` event."""
+    ran = _run_keeping_a_candidate(
+        request_template, sim, SkeletonStrategy.uncompared_after_choice(), 0
+    )
+
+    assert ran.result.succeeded
+    assert ran.result.uncompared
+    endings = [event.data for event in ran.events if event.type is CoreEventType.RUN_ENDING]
+    assert len(endings) == 1
+    assert isinstance(endings[0], RunEndingData)
+    assert endings[0].reason is EndReason.ADOPTED
+    assert endings[0].uncompared
 
 
 @pytest.mark.parametrize(

@@ -331,6 +331,34 @@ def test_a_digest_reads_when_and_how_the_run_ended() -> None:
     )
 
 
+@pytest.mark.xfail(
+    strict=True, reason="PR #3235 H1: the uncompared mark is a structured field of the result"
+)
+def test_a_digest_reads_that_an_adoption_the_deadline_ended_was_never_compared() -> None:
+    """H1: a run whose tombstone is gone still says, from its journal, it adopted uncompared."""
+    lines = [
+        _event(1, "server_started", 0),
+        _event(
+            2,
+            "run_ending",
+            61.5,
+            {
+                "reason": "deadline",
+                "summary": "deadline: adopted: c1",
+                "resumable": False,
+                "rounds_finished": 3,
+                "uncompared": True,
+            },
+        ),
+    ]
+
+    digest = digest_journal(lines)
+
+    assert digest.ending is not None
+    assert digest.ending.outcome is RunEndOutcome.DEADLINE
+    assert digest.ending.uncompared
+
+
 def test_a_run_whose_server_died_has_no_ending_and_a_torn_last_line_is_skipped() -> None:
     lines = [_event(1, "server_started", 0), _event(2, "tool_call", 5), b'{"sequence":3,"ty']
 

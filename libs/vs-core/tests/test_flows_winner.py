@@ -243,6 +243,40 @@ def test_the_deadline_control_cancels_the_run_with_its_own_reason(begin: Begin) 
     assert result.reason.startswith("deadline")
 
 
+_H1 = pytest.mark.xfail(
+    strict=True, reason="PR #3235 H1: the uncompared mark is a structured field of the result"
+)
+
+
+@_H1
+@pytest.mark.parametrize("ending", [None, "stop", "deadline"], ids=["returned", "stop", "deadline"])
+@pytest.mark.parametrize("chosen", [True, False], ids=["a-candidate", "nothing"])
+def test_an_uncompared_adoption_is_a_field_of_the_result_however_the_run_ends(
+    begin: Begin, *, ending: str | None, chosen: bool
+) -> None:
+    """The mark is a fact of the result, not of its reason's first word, so a stop keeps it.
+
+    A run ends by its root returning, an operator's stop or the deadline; whichever it is, a
+    result that adopted a candidate the root returned ``Uncompared`` for says so, and one that
+    kept the input does not (keeping the input needs no comparison).
+    """
+
+    async def uncompared(ctx: core.Flow, _config: Config) -> core.Uncompared:
+        if chosen:
+            ctx.choose(kept("a"))
+        if ending is not None:
+            await ctx.stopped
+        return core.Uncompared()
+
+    run = begin(uncompared)
+    if ending is not None:
+        run.stop(ending)
+    result = result_of(run)
+    assert result.selection == (selection_of(kept("a")) if chosen else BASELINE)
+    assert result.outcome == ("success" if ending is None else "cancelled")
+    assert result.uncompared is chosen
+
+
 def test_a_stop_with_no_choice_cancels_with_the_input(begin: Begin) -> None:
     async def waiting(ctx: core.Flow, _config: Config) -> None:
         await ctx.stopped

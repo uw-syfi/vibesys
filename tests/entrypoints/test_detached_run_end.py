@@ -232,6 +232,32 @@ def test_a_run_that_recorded_a_result_ends_with_cores_reason(outcome: RunEndOutc
     )
 
 
+@pytest.mark.xfail(
+    strict=True, reason="PR #3235 H1: the uncompared mark is a structured field of the result"
+)
+@pytest.mark.parametrize(
+    "outcome", [RunEndOutcome.ADOPTED, RunEndOutcome.DEADLINE, RunEndOutcome.STOPPED]
+)
+def test_an_uncompared_adoption_stays_on_the_tombstone_however_the_run_ended(
+    outcome: RunEndOutcome,
+) -> None:
+    """H1: the end record says a candidate was adopted uncompared, also after a deadline or stop."""
+    ending = RunEndingFact(
+        outcome=outcome,
+        summary=f"{outcome}: adopted: c1",
+        resumable=False,
+        rounds_finished=2,
+        uncompared=True,
+    )
+    status = RunStatus.STOPPED if outcome is RunEndOutcome.STOPPED else RunStatus.COMPLETED
+
+    _, tombstone = _serve([_Ending(ending), _Status(status)])
+
+    assert tombstone.end is not None
+    assert tombstone.end.outcome is outcome
+    assert tombstone.end.uncompared
+
+
 def test_a_failed_run_ends_failed_with_the_first_line_of_its_failure() -> None:
     ending = RunEndingFact(outcome=None, resumable=True, rounds_finished=4)
 

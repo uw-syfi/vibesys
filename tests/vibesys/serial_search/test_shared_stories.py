@@ -181,6 +181,32 @@ def test_an_input_measurement_lost_once_is_taken_again_and_the_winner_is_compare
     assert_flow_closed(host)
 
 
+@pytest.mark.xfail(
+    strict=True, reason="PR #3235 H1: the uncompared mark is a structured field of the result"
+)
+@SEARCHES
+@MODES
+def test_an_uncompared_run_that_ends_on_its_deadline_still_says_it_was_never_compared(
+    *, search: str, restarting: bool
+) -> None:
+    """H1: the deadline ends the run after an uncompared candidate was chosen; the mark stays."""
+    host = start(search, restarting=restarting, config={"max_rounds": 3}, baseline="lost")
+    design(host, "h1")
+    implement(host, search, "c1")
+    host.drain_until_turn(PLANNER)
+    host.run.stop("deadline")
+    host.drain()
+
+    finish = host.run.finished
+    assert isinstance(finish, Finish)
+    assert finish.result.outcome == "cancelled"
+    assert finish.result.reason.startswith(EndReason.DEADLINE.value)
+    assert finish.result.selection is not None
+    assert finish.result.selection.kind == "retained_candidate"
+    assert finish.result.uncompared
+    assert_flow_closed(host)
+
+
 # -- the designer ----------------------------------------------------------------------------
 
 

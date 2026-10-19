@@ -352,6 +352,39 @@ def test_an_input_measurement_lost_once_is_taken_again_and_the_run_compares_with
     assert_flow_closed(host)
 
 
+@pytest.mark.xfail(
+    strict=True, reason="PR #3235 H1: the uncompared mark is a structured field of the result"
+)
+@MODES
+def test_an_uncompared_run_that_ends_on_its_deadline_still_says_it_was_never_compared(
+    *, restarting: bool
+) -> None:
+    """H1: a time budget is how a dynamic run usually ends; the mark must survive it.
+
+    The input's measurement is lost twice, so there is no bar. A candidate passes its gates and
+    is chosen, and the deadline then ends the run: the result is cancelled by the deadline, the
+    candidate is adopted, and the result still says it was never compared with the input.
+    """
+    host = begin_with_evidence(config(max_rounds=3), restarting=restarting, baseline="lost")
+    host.drain_until_turn(PLANNER_LABEL)
+    if _planner_prompt(host).baseline_pending:
+        host.run.fail(host.run.expect_turn(role=PLANNER_LABEL), FailureReason.TIMED_OUT)
+    plan(host, implement("h1"))
+    finish_workstream(host, "h1", "c1")
+    host.drain_until_turn(PLANNER_LABEL)
+    host.run.stop("deadline")
+    host.drain()
+
+    finish = host.run.finished
+    assert isinstance(finish, Finish)
+    assert finish.result.outcome == "cancelled"
+    assert finish.result.reason.startswith(EndReason.DEADLINE.value)
+    assert finish.result.selection is not None
+    assert finish.result.selection.kind == "retained_candidate"
+    assert finish.result.uncompared
+    assert_flow_closed(host)
+
+
 @pytest.mark.regression
 @pytest.mark.parametrize("step", range(6))
 def test_a_restart_while_the_second_input_measurement_is_decoded_takes_no_third(

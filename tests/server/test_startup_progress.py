@@ -183,6 +183,43 @@ def test_the_record_observer_is_told_a_quota_pause_and_how_the_run_ended(tmp_pat
     ]
 
 
+@pytest.mark.xfail(
+    strict=True, reason="PR #3235 H1: the uncompared mark is a structured field of the result"
+)
+def test_the_record_observer_is_told_an_uncompared_adoption_the_deadline_ended(
+    tmp_path: Path,
+) -> None:
+    """H1: the server passes the ending's uncompared mark on to the instance record."""
+    observer = RecordingObserver()
+    runtime = _detached_runtime(tmp_path, observer)
+    runtime.controller.attach(tmp_path, run_id="run-1")
+    ending = RunEndingData(
+        reason=EndReason.DEADLINE,
+        summary="deadline: adopted: c1",
+        resumable=False,
+        rounds_finished=2,
+        uncompared=True,
+    )
+    runtime.integration.project_event(
+        make_core_event(
+            CoreEventType.RUN_ENDING,
+            status=EventStatus.ACTIVE,
+            data=ending,
+            timestamp=datetime(2026, 1, 1, tzinfo=UTC),
+        )
+    )
+
+    assert observer.facts == [
+        RunEndingFact(
+            outcome=RunEndOutcome.DEADLINE,
+            summary="deadline: adopted: c1",
+            resumable=False,
+            rounds_finished=2,
+            uncompared=True,
+        ),
+    ]
+
+
 _WAITING = CoreRunStartupProgressData(
     stage=EnvironmentStartupStage.PROBING_WORKSPACE,
     state=EnvironmentStartupState.WAITING,
