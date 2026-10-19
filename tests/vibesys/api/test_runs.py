@@ -20,6 +20,7 @@ from launch import LaunchSettings, create_session, default_runs
 from vibesys.api import (
     ComputeBackend,
     Config,
+    ConfigurationError,
     CoreEvent,
     CoreEventType,
     OrchestrationDescriptor,
@@ -164,11 +165,11 @@ async def test_launch_allocates_identity_before_execution(request_template: RunR
     assert resumed.run_id == allocated
     assert runs.attach(allocated) is resumed
     assert runs.list_active() == (resumed,)
-    resumed_result = await resumed.result()
-    assert resumed_result.run_id == allocated
+    # The first run ended (it failed), so its resume is refused before anything boots (S174).
+    with pytest.raises(ConfigurationError, match="already terminal"):
+        await resumed.result()
     resumed_events = [event async for event in resumed.events()]
-    assert resumed_events
-    assert {event.run_id for event in resumed_events} == {allocated}
+    assert {event.run_id for event in resumed_events} <= {allocated}
     assert runs.attach(allocated) is resumed
     assert runs.list_active() == ()
     assert await handle.result() == result

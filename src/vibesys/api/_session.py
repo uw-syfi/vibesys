@@ -15,7 +15,7 @@ from vibesys.composition import resolve_agent_specs
 from vibesys.events import CoreEventType, EventStatus, RunFailedData, RunStartedData
 from vibesys.orchestration.agent_options import attribution_command_of, objective_axes_of
 from vibesys.plugin_catalog import project_run
-from vibesys.run.core_run import RunEnd, drive_core_run, ensure_not_legacy_resume
+from vibesys.run.core_run import RunEnd, drive_core_run, ensure_resumable
 from vibesys.run.host import open_product_core_host
 from vibesys.run.integration import LocalRunIntegration, RunResources
 from vibesys.run.overview import overview_of
@@ -106,7 +106,7 @@ async def run_plugin(  # noqa: PLR0913  # lint-waiver: LW-040002 [PLR0913]; the 
     built from the run's resources.
     """
     if request.resume is not None:
-        ensure_not_legacy_resume(request.project_root, request.resume.run_id)
+        ensure_resumable(request.project_root, request.resume.run_id)
     async with open_product_core_host(
         request,
         integration,
@@ -325,7 +325,7 @@ class _LocalRunSession:
                 invocation_store_factory=self._implementations.invocation_store_factory,
             )
             succeeded = outcome.status.value == "succeeded"
-        except RunStopped:
+        except RunStopped as stop:
             self._status = RunStatus.STOPPED
             self._integration.events.emit(
                 CoreEventType.STOPPED, "Run stopped by request", status=EventStatus.INTERRUPTED
@@ -335,6 +335,7 @@ class _LocalRunSession:
                 loop=request.orchestration.id,
                 succeeded=False,
                 status=RunStatus.STOPPED,
+                stop_reason=str(stop) or None,
             )
         except BaseException as exc:
             self._status = RunStatus.FAILED

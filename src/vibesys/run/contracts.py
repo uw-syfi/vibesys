@@ -165,6 +165,8 @@ class RunResult(BaseModel):
     succeeded: bool
     status: Literal[RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.STOPPED] = RunStatus.FAILED
     failure: RunFailure | None = None
+    stop_reason: str | None = None
+    """Why a stopped run stopped, as its record says; None when the stop left no reason."""
 
     @model_validator(mode="before")
     @classmethod
@@ -183,6 +185,9 @@ class RunResult(BaseModel):
             raise ValueError(message)
         if self.failure is not None and self.status is not RunStatus.FAILED:
             message = "only a failed RunResult carries a failure"
+            raise ValueError(message)
+        if self.stop_reason is not None and self.status is not RunStatus.STOPPED:
+            message = "only a stopped RunResult carries a stop reason"
             raise ValueError(message)
         return self
 

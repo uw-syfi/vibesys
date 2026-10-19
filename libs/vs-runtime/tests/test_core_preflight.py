@@ -28,6 +28,7 @@ from vs_runtime.api.core import (
     CoreRuntime,
     CoreRuntimeBindings,
     RuntimeRecord,
+    reject_ended_resume,
     reject_legacy_resume,
     resolve_core_resume,
 )
@@ -417,8 +418,35 @@ def test_resuming_an_ended_run_is_refused_naming_the_run(tmp_path: Path) -> None
 
     diagnostic = failure.value.diagnostic
     assert diagnostic.code == "run_ended"
-    assert diagnostic.message == f"cannot resume run {run_id!r}: run ended; start a new run"
+    assert diagnostic.message == (
+        f"cannot resume run {run_id!r}: it is already terminal (cancelled: stopped: by request); "
+        "start a new run"
+    )
     assert project.state.portable_run_export(run_id) == before
+
+
+def test_the_cheap_resume_check_refuses_an_ended_run_with_the_same_words(tmp_path: Path) -> None:
+    """Request validation refuses before anything boots, as the full resolution would."""
+    project, run_id = project_run(tmp_path)
+    _commit(project, run_id, _ended(record(run_id)))
+
+    with pytest.raises(CoreResumeError) as cheap:
+        reject_ended_resume(project, run_id)
+    with pytest.raises(CoreResumeError) as full:
+        resolve_core_resume(project, driver(), run_id=run_id)
+
+    assert cheap.value.diagnostic.code == "run_ended"
+    assert cheap.value.diagnostic.message == full.value.diagnostic.message
+
+
+def test_the_cheap_resume_check_leaves_an_open_or_missing_run_to_the_resume(
+    tmp_path: Path,
+) -> None:
+    project, run_id = project_run(tmp_path)
+    reject_ended_resume(project, run_id)  # nothing committed yet
+    reject_ended_resume(project, "no-such-run")
+    _commit(project, run_id, record(run_id))
+    reject_ended_resume(project, run_id)
 
 
 def test_an_open_run_still_resumes(tmp_path: Path) -> None:

@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import pytest
-from hypothesis import given
+from hypothesis import example, given
 from hypothesis import strategies as st
 
-from entrypoints.cli.loops import describe_failure
-from vibesys.api import RunFailure, RunFailureKind
+from entrypoints.cli.loops import describe_early_stop, describe_failure
+from vibesys.api import RunFailure, RunFailureKind, RunResult, RunStatus
 
 ADOPTED_CANDIDATES = st.text(alphabet="0123456789abcdef", min_size=1, max_size=40)
 VALID_FAILURE_ADOPTION = st.one_of(
@@ -175,3 +175,56 @@ def test_the_headline_reports_a_candidate_that_was_adopted() -> None:
 
     assert "after adopting candidate abc123" in line
     assert "no candidate adopted" not in line
+
+
+_FAILURES = st.builds(
+    RunFailure,
+    kind=st.sampled_from(RunFailureKind),
+    reason=st.text(alphabet="abcdefg ", min_size=1, max_size=20),
+    workstreams_started=st.just(1),
+    workstream_budget=st.just(2),
+    candidates_kept=st.just(0),
+    adopted_candidate=st.none(),
+)
+_UNSUCCESSFUL = st.one_of(
+    st.builds(
+        RunResult,
+        run_id=st.just("r"),
+        loop=st.just("dynamic"),
+        succeeded=st.just(False),
+        status=st.just(RunStatus.FAILED),
+        failure=st.none() | _FAILURES,
+    ),
+    st.builds(
+        RunResult,
+        run_id=st.just("r"),
+        loop=st.just("dynamic"),
+        succeeded=st.just(False),
+        status=st.just(RunStatus.STOPPED),
+        stop_reason=st.none() | st.text(alphabet="abcdefg:", min_size=1, max_size=20),
+    ),
+)
+
+
+@pytest.mark.regression
+@given(result=_UNSUCCESSFUL)
+@example(
+    result=RunResult(
+        run_id="r",
+        loop="dynamic",
+        succeeded=False,
+        status=RunStatus.STOPPED,
+        stop_reason="stopped: no trusted result: the input did not pass its measurement",
+    )
+)
+def test_every_run_that_did_not_succeed_is_told_with_a_reason(result: RunResult) -> None:
+    """S174: a stopped run printed only "run stopped early", with no reason at all."""
+    line = describe_early_stop(result)
+
+    assert line.startswith("Reason: ")
+    assert len(line) > len("Reason: ")
+    if result.failure is not None:
+        assert line.endswith(result.failure.reason)
+    if result.stop_reason is not None:
+        assert result.stop_reason in line
+        assert "start a new run" in line

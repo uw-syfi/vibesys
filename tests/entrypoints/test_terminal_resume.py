@@ -17,6 +17,10 @@ import pytest
 from tests.support.task_project import write_task
 
 from entrypoints.cli import build_run_request, parse_cli_invocation
+from entrypoints.headless import main as headless_main
+from entrypoints.production import production_runs
+from entrypoints.run import run_headless
+from entrypoints.server import main as server_main
 from vibesys.api import ConfigurationError
 from vibesys.orchestration.dynamic.launch import DynamicLaunch
 from vs_core.api import (
@@ -36,6 +40,7 @@ from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecor
 from vs_project.api.testing import run_execution_record
 from vs_runtime.api.core import RuntimeRecord
 from vs_runtime.api.core_shell_fixtures import CounterConfig, counter
+from vs_sim.api.testing import FakeSignalSource
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -115,7 +120,6 @@ def _commit_core(root: Path, *, status: CoreRunStatus, result: RunResultProposal
 
 
 @pytest.mark.regression
-@pytest.mark.xfail(strict=True, reason="S174: resume boots a terminal run; fixed next")
 @pytest.mark.parametrize("outcome", _OUTCOMES)
 def test_resuming_a_terminal_run_is_refused_naming_its_outcome_and_reason(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, outcome: str
@@ -138,3 +142,86 @@ def test_resuming_a_terminal_run_is_refused_naming_its_outcome_and_reason(
     assert diagnostic.message.endswith("start a new run")
     # The refusal reads the record only: the run is left as it was.
     assert Project.open(root).state.portable_run_export(_RUN_ID) == before
+
+
+def _ended_run(root: Path) -> Path:
+    _commit_core(
+        _project(root),
+        status=CoreRunStatus.TERMINAL,
+        result=RunResultProposal(outcome="cancelled", reason=_REASON),
+    )
+    return root
+
+
+def test_the_headless_entrypoint_refuses_before_booting(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.chdir(_ended_run(tmp_path / "project"))
+
+    with pytest.raises(SystemExit) as raised:
+        headless_main(["--outer-loop", "dynamic", "--resume", _RUN_ID])
+
+    assert raised.value.code == 2
+    error = capsys.readouterr().err
+    assert f"already terminal (cancelled: {_REASON})" in error
+    assert "Traceback" not in error
+
+
+def test_the_server_entrypoint_refuses_before_booting(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.chdir(_ended_run(tmp_path / "project"))
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path / "runtime"))
+
+    with pytest.raises(SystemExit) as raised:
+        server_main(
+            [
+                "--control-socket",
+                str(tmp_path / "runtime" / "vibesys" / "control.sock"),
+                "--outer-loop",
+                "dynamic",
+                "--resume",
+                _RUN_ID,
+            ]
+        )
+
+    assert raised.value.code == 2
+    assert f"already terminal (cancelled: {_REASON})" in capsys.readouterr().err
+
+
+def test_the_session_refuses_a_run_that_ended_after_its_request_was_validated(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Headless and the server start runs through the session, which checks again first."""
+    root = _project(tmp_path / "project")
+    monkeypatch.chdir(root)
+    request = build_run_request(
+        parse_cli_invocation(["--outer-loop", "dynamic", "--resume", _RUN_ID])
+    )
+    _commit_core(
+        root,
+        status=CoreRunStatus.TERMINAL,
+        result=RunResultProposal(outcome="cancelled", reason=_REASON),
+    )
+
+    with pytest.raises(ConfigurationError) as raised:
+        run_headless(request, production_runs(), FakeSignalSource())
+
+    assert raised.value.diagnostic.code == "run_ended"
+    assert f"already terminal (cancelled: {_REASON})" in raised.value.diagnostic.message
+
+
+@pytest.mark.parametrize("status", [s for s in CoreRunStatus if s is not CoreRunStatus.TERMINAL])
+def test_a_run_that_has_not_ended_is_not_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, status: CoreRunStatus
+) -> None:
+    root = _project(tmp_path / "project")
+    _commit_core(root, status=status, result=None)
+    monkeypatch.chdir(root)
+
+    request = build_run_request(
+        parse_cli_invocation(["--outer-loop", "dynamic", "--resume", _RUN_ID])
+    )
+
+    assert request.resume is not None
+    assert request.resume.run_id == _RUN_ID

@@ -24,6 +24,7 @@ from vs_project.api import (
     StoredEnvelope,
 )
 from vs_runtime._core_record import RuntimeRecord
+from vs_runtime._run_end import RecordedEnd, recorded_end
 
 if TYPE_CHECKING:
     from vs_project.api import StateNamespace
@@ -151,6 +152,38 @@ def reject_legacy_resume(project: Project, run_id: str) -> None:
             raise failure
 
 
+def reject_ended_resume(project: Project, run_id: str) -> None:
+    """Raise `CoreResumeError` (``run_ended``) when the run's core record says it ended.
+
+    A cheap read-only check for request validation, beside `reject_legacy_resume`: it reads
+    the record as plain JSON, needs no strategy, and runs before anything boots, so resuming a
+    terminal run is refused with its stored outcome and reason instead of booting it. A run
+    that is missing, or never committed a record, is left to the resume itself.
+    """
+    try:
+        selected = project.state.resolve_run(run_id)
+        end = recorded_end(project, selected.run_id)
+    except ProjectStateError:
+        return  # an unreadable record is the resume's own diagnosis (``core_resume_invalid``)
+    if end is not None:
+        raise _ended(project, selected.run_id, end, schema="core record")
+
+
+def _ended(project: Project, run_id: str, end: RecordedEnd, *, schema: str) -> CoreResumeError:
+    """The refusal to resume ``run_id``, which ended as ``end`` says: the one wording of it."""
+    path = _path(project.state.state_store_namespace(run_id), "store.json")
+    outcome = end.outcome or "no recorded outcome"
+    how = outcome if end.reason is None else f"{outcome}: {end.reason}"
+    return CoreResumeError(
+        ResumeDiagnostic(
+            code="run_ended",
+            path=path,
+            source_schema=schema,
+            message=f"cannot resume run {run_id!r}: it is already terminal ({how}); start a new run",
+        )
+    )
+
+
 def resolve_core_resume[S: StrategyState](
     project: Project,
     search: SearchDriver[S, Any],
@@ -218,14 +251,16 @@ def resolve_core_resume[S: StrategyState](
                 message=f"invalid core resume: {path} (runtime schema {schema}): {error}",
             )
         ) from error
-    if record.envelope.core.run.status == RunStatus.TERMINAL:
-        path = _path(project.state.state_store_namespace(selected.run_id), "store.json")
-        raise CoreResumeError(
-            ResumeDiagnostic(
-                code="run_ended",
-                path=path,
-                source_schema=str(stored.schema_version),
-                message=f"cannot resume run {selected.run_id!r}: run ended; start a new run",
-            )
+    run = record.envelope.core.run
+    if run.status == RunStatus.TERMINAL:
+        result = run.result
+        raise _ended(
+            project,
+            selected.run_id,
+            RecordedEnd(
+                outcome=None if result is None else result.outcome,
+                reason=None if result is None else result.reason,
+            ),
+            schema=str(stored.schema_version),
         )
     return ResolvedCoreResume(selected.run_id, project.state_store(selected.run_id), record)

@@ -30,6 +30,7 @@ from vs_runtime.api.core import (
     RunControlBridge,
     RunLoopConfig,
     drive_core,
+    reject_ended_resume,
     reject_legacy_resume,
     start_core_awaiting_lease,
 )
@@ -93,15 +94,20 @@ def _loop_config(run_id: str, lease_seconds: float) -> RunLoopConfig:
     )
 
 
-def ensure_not_legacy_resume(project_root: Path, run_id: str) -> None:
-    """Reject resuming a run that a legacy loop created, before any resource opens.
+def ensure_resumable(project_root: Path, run_id: str) -> None:
+    """Reject resuming a run that cannot go on, before any resource opens.
 
-    The core cannot continue a legacy run's state, and starting a fresh run under its
-    identity would discard that run's history. The error names the run and the file
-    that marks it as legacy.
+    Two runs cannot: one a legacy loop created (the core cannot continue its state, and
+    starting a fresh run under its identity would discard that run's history), and one whose
+    core record is terminal (core never applies another request to it, so booting it only to
+    find it ended would cost the container and environment and say nothing). Every entrypoint
+    resolves its resume reference through here, so the CLI, headless and the server all
+    refuse with the same diagnostic: the run, and the legacy file or the stored outcome and
+    reason.
     """
+    project = Project.open(project_root)
     try:
-        reject_legacy_resume(Project.open(project_root), run_id)
+        reject_legacy_resume(project, run_id)
     except CoreResumeError as error:
         diagnostic = error.diagnostic
         raise ConfigurationError(
@@ -113,6 +119,15 @@ def ensure_not_legacy_resume(project_root: Path, run_id: str) -> None:
                     f"({diagnostic.path}, schema {diagnostic.source_schema}); "
                     "start a new run instead"
                 ),
+            )
+        ) from error
+    try:
+        reject_ended_resume(project, run_id)
+    except CoreResumeError as error:
+        diagnostic = error.diagnostic
+        raise ConfigurationError(
+            ConfigurationDiagnostic(
+                code=diagnostic.code, stage=diagnostic.stage, message=diagnostic.message
             )
         ) from error
 
@@ -244,7 +259,7 @@ def _status_of(result: RunResultProposal | None, shell: CoreRuntime) -> RunStatu
     if result is None:
         return RunStatus.FAILED
     if _ended_by(result, EndReason.STOPPED):
-        raise RunStopped
+        raise RunStopped(result.reason)  # the session reports why it stopped
     kept = _ended_by(result, EndReason.DEADLINE) and _adopted_candidate(shell) is not None
     return RunStatus.SUCCEEDED if result.outcome == "success" or kept else RunStatus.FAILED
 
@@ -300,5 +315,5 @@ __all__ = [
     "CoreRunRefusedError",
     "RunEnd",
     "drive_core_run",
-    "ensure_not_legacy_resume",
+    "ensure_resumable",
 ]

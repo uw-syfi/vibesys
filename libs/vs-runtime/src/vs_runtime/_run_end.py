@@ -9,6 +9,7 @@ status; neither keeps a copy of it.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from pydantic import JsonValue, TypeAdapter
@@ -39,11 +40,11 @@ _RECORD_MAX_BYTES = 256 * 1024 * 1024
 """The largest state document the project's stores read; a core record is one."""
 
 _ANY_JSON: TypeAdapter[JsonValue] = TypeAdapter(JsonValue)
-"""The record as plain JSON: only two fields of it are read, in any envelope version.
+"""The record as plain JSON: only a few fields of it are read, in any envelope version.
 
 A typed model of the record would refuse the record of another VibeSys version, whose
-envelope this version cannot decode; ``status`` and ``result.reason`` of core's run state
-have kept their place and meaning across versions.
+envelope this version cannot decode; ``status``, ``result.outcome`` and ``result.reason`` of
+core's run state have kept their place and meaning across versions.
 """
 
 
@@ -53,8 +54,19 @@ def _member(value: JsonValue, *path: str) -> JsonValue:
     return value
 
 
-def recorded_ending(project: Project, run_id: str) -> str | None:
-    """Why ``run_id`` ended, as its durable core record says, or None while it may apply more.
+@dataclass(frozen=True)
+class RecordedEnd:
+    """How a run's durable core record says it ended: core's result outcome and reason.
+
+    Either is None when the record of an ended run does not carry it.
+    """
+
+    outcome: str | None
+    reason: str | None
+
+
+def recorded_end(project: Project, run_id: str) -> RecordedEnd | None:
+    """How ``run_id`` ended, as its durable core record says, or None while it may apply more.
 
     A run whose core has not committed its first record has not ended. A quarantined record
     has not ended either: the run cannot go on until an operator repairs it, and then it may.
@@ -77,8 +89,21 @@ def recorded_ending(project: Project, run_id: str) -> str | None:
         raise ProjectStateError(message)
     if status != RunStatus.TERMINAL.value:
         return None
+    outcome = _member(run, "result", "outcome")
     reason = _member(run, "result", "reason")
-    return _ending(reason if isinstance(reason, str) else None)
+    return RecordedEnd(
+        outcome=outcome if isinstance(outcome, str) else None,
+        reason=reason if isinstance(reason, str) else None,
+    )
 
 
-__all__ = ["ending", "recorded_ending"]
+def recorded_ending(project: Project, run_id: str) -> str | None:
+    """Why ``run_id`` ended, as its durable core record says, or None while it may apply more.
+
+    Raises ``ProjectStateError`` when the record cannot be read (see `recorded_end`).
+    """
+    end = recorded_end(project, run_id)
+    return None if end is None else _ending(end.reason)
+
+
+__all__ = ["RecordedEnd", "ending", "recorded_end", "recorded_ending"]
