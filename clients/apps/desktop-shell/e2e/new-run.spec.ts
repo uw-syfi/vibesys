@@ -636,7 +636,7 @@ test('Where: only what the machine has set up is offered, and the choice is the 
     'Same machine',
     'Slurm · lab-h100',
     'Slurm · campus',
-    'Slurm · amd-hpc',
+    'Slurm · cluster-m',
     'Modal',
   ]) {
     await expect(measured.getByRole('radio', {name: new RegExp(name)})).toBeVisible();

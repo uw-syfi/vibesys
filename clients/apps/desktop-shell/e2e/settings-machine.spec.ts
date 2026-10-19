@@ -46,7 +46,7 @@ test('Clusters and clouds lists a set-up machine’s clusters, Modal, SkyPilot a
   await expect(main(page).getByText(/compute\.toml$/)).toBeVisible();
   await expect(main(page).getByRole('heading', {name: 'lab-h100'})).toBeVisible();
   await expect(main(page).getByRole('heading', {name: 'campus'})).toBeVisible();
-  await expect(main(page).getByRole('heading', {name: 'amd-hpc'})).toBeVisible();
+  await expect(main(page).getByRole('heading', {name: 'cluster-m'})).toBeVisible();
   await expect(main(page).getByText('From the operator file')).toBeVisible();
   await expect(main(page).getByText('Over SSH, host alias lab-login')).toBeVisible();
   await expect(main(page).getByText('This Mac is a login node of this cluster')).toBeVisible();
@@ -54,7 +54,7 @@ test('Clusters and clouds lists a set-up machine’s clusters, Modal, SkyPilot a
   await expect(card(page, 'SkyPilot').getByText('Preview')).toBeVisible();
   // A cluster of the operator file is listed and never removed here.
   const operator = main(page).locator('.vs-card', {
-    has: page.getByRole('heading', {name: 'amd-hpc'}),
+    has: page.getByRole('heading', {name: 'cluster-m'}),
   });
   await expect(operator.getByRole('button', {name: 'Remove'})).toHaveAttribute(
     'aria-disabled',

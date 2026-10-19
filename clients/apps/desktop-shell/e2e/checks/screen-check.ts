@@ -81,7 +81,7 @@ const USER_NAMES: readonly string[] = [
   'lab-h100',
   'lab-login',
   'amd-login',
-  'amd-hpc',
+  'cluster-m',
   'no-workspace',
   'no-scheduler',
   // An example's own name, which New run shows in the code face as the catalogue names it.

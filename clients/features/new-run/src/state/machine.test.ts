@@ -209,7 +209,7 @@ function inputEvent(random: Seeded, snapshot: SnapshotFrom<typeof newRunMachine>
       target: random.pick<MeasureTarget>([
         {kind: 'same_machine'},
         {kind: 'modal'},
-        {kind: 'slurm', cluster: random.pick(['lab-h100', 'amd-hpc'])},
+        {kind: 'slurm', cluster: random.pick(['lab-h100', 'cluster-m'])},
       ]),
     },
     {

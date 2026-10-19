@@ -11,7 +11,7 @@ import {
   targetFacts,
 } from './measure.js';
 
-const NAMES = ['lab-h100', 'amd-hpc', 'cluster b'];
+const NAMES = ['lab-h100', 'cluster-m', 'cluster b'];
 
 /** A machine's Settings data with arbitrary clusters and Modal token. */
 function arbitrary(random: Seeded): ComputeSettings {

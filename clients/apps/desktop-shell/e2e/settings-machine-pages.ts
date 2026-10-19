@@ -30,7 +30,7 @@ export const SETTINGS_PAGES: readonly SettingsPage[] = [
     name: 'clusters',
     reach: async page => {
       await openSection(page, 'Clusters and clouds');
-      await expect(main(page).getByRole('heading', {name: 'amd-hpc'})).toBeVisible();
+      await expect(main(page).getByRole('heading', {name: 'cluster-m'})).toBeVisible();
     },
   },
   {
@@ -38,7 +38,7 @@ export const SETTINGS_PAGES: readonly SettingsPage[] = [
     reach: async page => {
       await openSection(page, 'Clusters and clouds');
       await revealNav(page);
-      await expect(main(page).getByRole('heading', {name: 'amd-hpc'})).toBeVisible();
+      await expect(main(page).getByRole('heading', {name: 'cluster-m'})).toBeVisible();
     },
   },
   {

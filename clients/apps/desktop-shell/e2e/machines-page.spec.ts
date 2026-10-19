@@ -24,7 +24,7 @@ test('each machine is a card with its clusters and clouds nested under it', asyn
       .filter({hasNot: page.getByRole('columnheader')})
       .locator('td:first-child')
       .allTextContents();
-  expect(await names('This Mac')).toEqual(['lab-h100', 'campus', 'amd-hpc', 'Modal']);
+  expect(await names('This Mac')).toEqual(['lab-h100', 'campus', 'cluster-m', 'Modal']);
   expect(await names('host-a')).toEqual(['lab-h100']);
   expect(await names('host-b')).toEqual([]);
   await expect(card(page, 'host-b').getByText('None', {exact: true})).toBeVisible();

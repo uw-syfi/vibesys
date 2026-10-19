@@ -48,7 +48,7 @@ export const loginNodeCluster: SlurmClusterSettings = {
 
 /** A cluster of the operator file a terminal run reads: listed, never edited. */
 export const operatorCluster: SlurmClusterSettings = {
-  name: 'amd-hpc',
+  name: 'cluster-m',
   reach: {kind: 'ssh', host: 'amd-login'},
   workspace: '/work/vibesys-amd',
   partition: 'mi300x',
@@ -137,10 +137,10 @@ export const measurementChecks: Readonly<Record<string, Check>> = {
     id: 'measurement_target',
     state: 'fail',
     detail:
-      "cluster 'amd-hpc': the task targets the 'cuda' backend, which this cluster does not offer",
+      "cluster 'cluster-m': the task targets the 'cuda' backend, which this cluster does not offer",
     cause: {
       kind: 'measurement_target_misfit',
-      target: {kind: 'slurm', cluster: 'amd-hpc'},
+      target: {kind: 'slurm', cluster: 'cluster-m'},
       backend: 'cuda',
       offered: 'rocm',
     },

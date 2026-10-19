@@ -44,7 +44,7 @@ function draft(random: Seeded): Draft {
     measure: random.pick<MeasureTarget>([
       SAME_MACHINE,
       {kind: 'modal'},
-      {kind: 'slurm', cluster: random.pick(['lab-h100', 'amd hpc'])},
+      {kind: 'slurm', cluster: random.pick(['lab-h100', 'cluster m'])},
     ]),
     advanced: random.pick(['', FORM.advanced]),
     destination: random.pick([null, '~/elsewhere']),
