@@ -159,6 +159,8 @@ class Candidate(Value):
     """The revision core retained for the turn; None when no checkpoint was awaited or none exists."""
     unapplied: tuple[UnappliedPart, ...] = ()
     """For a combine: what the implementer could not apply, naming only the combine's parts."""
+    unattributed: tuple[UnappliedPart, ...] = ()
+    """The reply's ``unapplied`` entries that named no part of the combine (`RoundRecord`)."""
 
 
 class Verdict(Value):
@@ -632,6 +634,7 @@ def round_of(done: WorkstreamDone) -> RoundRecord:
         settlement=None if settlement is None else settlement.settlement_id,
         kept_active=kept,
         unapplied=() if result is None else result.candidate.unapplied,
+        unattributed=() if result is None else result.candidate.unattributed,
     )
 
 

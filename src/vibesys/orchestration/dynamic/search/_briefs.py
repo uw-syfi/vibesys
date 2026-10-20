@@ -132,9 +132,6 @@ def implement_prompt(
         prior_failure_fence=fence(prior_tail),
         last_blocker=None if stuck is None else _shown(stuck),
         turns_without_candidate=len(blockers),
-        reply_rejected=(
-            latest.stray if latest is not None and latest.kind is BlockerKind.REPLY_REJECTED else ()
-        ),
         rebase_onto=w.rebase_onto,
         rebase_from=None if w.rebase_onto is None else w.parent_main,
         combine=w.combine,

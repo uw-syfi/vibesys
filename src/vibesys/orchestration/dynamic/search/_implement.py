@@ -27,7 +27,6 @@ from vibesys.orchestration.dynamic.search._values import (
     BlockerKind,
     Failure,
     FailureKind,
-    StrayUnapplied,
 )
 from vibesys.search_spans.api import turn_label
 from vs_core.api.search import (
@@ -174,13 +173,15 @@ def _candidate_of(
                 Failure(kind=FailureKind.CHECKPOINT_DECLINED, declined=checkpoint.reason)
             )
         revision = getattr(checkpoint, "revision", None)
+    parts = {item.hypothesis_id for item in w.combine}
     result = Result(
         candidate=Candidate(
             outcome=reply.outcome,
             summary=reply.summary,
             next_step=reply.next_step,
             revision=revision,
-            unapplied=reply.unapplied,
+            unapplied=tuple(item for item in reply.unapplied if item.hypothesis_id in parts),
+            unattributed=tuple(item for item in reply.unapplied if item.hypothesis_id not in parts),
         )
     )
     work.carried = result
@@ -192,26 +193,9 @@ def _candidate_of(
             revision=revision,
         )
         return Unmeasured(blocker=failed, result=result)
-    if stray := _stray(w, reply):
-        rejected = Blocker(kind=BlockerKind.REPLY_REJECTED, revision=revision, stray=stray)
-        return Unmeasured(blocker=rejected, result=result)
     if reply.produces_revision() and (revision is None or revision == w.parent):
         raise WorkEndedError(Failure(kind=FailureKind.NO_CHANGED_CANDIDATE))
     return result
-
-
-def _stray(w: WorkstreamStart, reply: ImplementerResult) -> tuple[StrayUnapplied, ...]:
-    """The ``unapplied`` entries that name no part of the combine (any entry, outside one).
-
-    Such an entry is no fact about this candidate, and the implementer's report that a part was
-    dropped would be lost, so the reply is refused with the entries named, not trimmed.
-    """
-    parts = {item.hypothesis_id for item in w.combine}
-    return tuple(
-        StrayUnapplied(index=index, hypothesis_id=item.hypothesis_id)
-        for index, item in enumerate(reply.unapplied)
-        if item.hypothesis_id not in parts
-    )
 
 
 def _review_due(w: WorkstreamStart, result: Result) -> bool:

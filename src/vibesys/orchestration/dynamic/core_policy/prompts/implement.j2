@@ -72,14 +72,6 @@ That is the revision your earlier attempt ended at.
 Feedback from the prior attempt:
 {{ rejection }}
 {% endif %}
-{% if reply_rejected %}
-
-The framework refused your last reply, so its candidate was not measured:
-{% for item in reply_rejected %}
-- {{ reply.unapplied }}[{{ item.index }}].hypothesis_id names `{{ item.hypothesis_id }}`, which is not a part of this {% if combine %}combine{% else %}workstream: it combines nothing{% endif %}.
-{% endfor %}
-{% if combine %}Name only this combine's parts there ({% for part in combine %}`{{ part.hypothesis_id }}`{% if not loop.last %}, {% endif %}{% endfor %}){% else %}Leave {{ reply.unapplied }} empty{% endif %}, and submit your candidate again.
-{% endif %}
 {% if last_blocker %}
 
 Your earlier turn on this hypothesis ended without a candidate ({{ turns_without_candidate }} such

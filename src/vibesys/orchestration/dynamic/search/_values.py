@@ -178,11 +178,16 @@ class BlockerKind(StrEnum):
     REJECTED = "rejected"
     NO_REPLY = "no_reply"
     REPLY_REJECTED = "reply_rejected"
-    """The reply broke a rule only the run can check: ``stray`` names the offending entries."""
+    """The reply broke a rule only the run can check: ``stray`` names the offending entries.
+
+    Only an older build refused a reply so; it is kept so that build's checkpoints decode."""
 
 
 class StrayUnapplied(Value):
-    """An ``unapplied`` entry of an implementer's reply that names no part of its combine."""
+    """An ``unapplied`` entry of an implementer's reply that names no part of its combine.
+
+    Only an older build's ``REPLY_REJECTED`` blocker holds one (see `RoundRecord.unattributed`).
+    """
 
     index: int = Field(ge=0)
     """The entry's position in the reply's ``unapplied`` list."""
@@ -195,7 +200,7 @@ class Blocker(Value):
 
     ``FAILED`` is the implementer's own account (its summary and the next step it names).
     ``REJECTED`` is the reviewer's feedback on a candidate that was not measured.
-    ``REPLY_REJECTED`` is a reply the run refused (``stray`` says why). ``NO_REPLY`` is
+    ``REPLY_REJECTED`` is a reply an older build refused (``stray`` says why). ``NO_REPLY`` is
     a turn that returned nothing usable: ``ended`` or ``turn_failure`` say how, and ``digest``
     fingerprints the diagnostic the executor printed. ``revision`` and ``digest`` are what the
     framework observed, and the only facts that make another turn worth asking.
@@ -368,6 +373,9 @@ class RoundRecord(Value):
     """Whether the implementer asked to keep this direction and the lease allows it."""
     unapplied: tuple[UnappliedPart, ...] = ()
     """For a combine: what the implementer said it could not apply, naming one of its parts."""
+    unattributed: tuple[UnappliedPart, ...] = ()
+    """The implementer's ``unapplied`` entries that named no part of a combine (any entry,
+    outside one): kept as it wrote them, and not read as a part left out."""
 
 
 class HypothesisRecord(Value):
