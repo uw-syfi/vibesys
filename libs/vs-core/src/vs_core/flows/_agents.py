@@ -510,11 +510,15 @@ class _Ask:
     async def _lost(self, lost: InvocationRef) -> Failed | _Again:
         """The transport lost the turn: ask the same question again after a backoff, or report it.
 
-        A turn that continued a wait is never asked again, whatever the role's ``lost_turns``:
-        core authorizes each continuation's resume once, so the caller decides what follows.
+        A turn that continued a wait is asked again at most once, and only if the role asks
+        lost turns again at all: core authorizes each continuation's resume once, so the new
+        turn follows the lost one in its conversation as a correction, with the same prompt,
+        as ``_unavailable`` does. Without it, a resumed turn the transport lost (an outage that
+        began too late in its own time for the capacity gate to hold it, S179) lost its whole
+        workstream.
         """
         role = self.role
-        allowed = 0 if self.resuming else role.lost_turns
+        allowed = min(1, role.lost_turns) if self.resuming else role.lost_turns
         if self.drops >= allowed:
             return Failed(reason=FailureReason.LOST, decision=self.decision, turn=lost)
         await self.kit.timer(self.kit.now() + role.lost_turn_backoff.delay(self.drops))

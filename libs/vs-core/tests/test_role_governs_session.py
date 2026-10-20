@@ -319,10 +319,17 @@ def test_a_lost_turn_is_asked_again_as_often_and_after_as_long_as_the_role_says(
 @_SETTINGS
 @given(lost_turns=st.integers(0, core.MAX_LOST_TURNS))
 @_RESTARTING
-def test_a_lost_resume_is_never_asked_again_whatever_the_roles_lost_turns(
+def test_a_lost_resume_is_asked_again_once_if_the_role_asks_lost_turns_again(
     *, restarting: bool, lost_turns: int
 ) -> None:
-    role = role_of(may_wait_for_evaluations=True, lost_turns=lost_turns)
+    """A resumed turn the transport lost is asked again once, as a correction, then reported.
+
+    Before (review of #3283, weak spot 1), it was never asked again, so an outage that began
+    in a resumed turn's last minutes, too late for the capacity gate to hold it, lost the
+    whole workstream.
+    """
+    backoff = core.Backoff(first=5.0, cap=120.0)
+    role = role_of(may_wait_for_evaluations=True, lost_turns=lost_turns, lost_turn_backoff=backoff)
     run = start(role, restarting=restarting, view=SUSPENDING)
     run.advance_to(0.0)
 
@@ -332,6 +339,15 @@ def test_a_lost_resume_is_never_asked_again_whatever_the_roles_lost_turns(
     assert asked.template == EXCHANGES.resume
 
     run.lose(asked)
+    if lost_turns > 0:
+        assert min(run.sleeping_until) == backoff.delay(0)  # the others are the deadline
+        run.advance_to(backoff.delay(0))
+        again = turn(run)
+        assert again.template == asked.template
+        assert again.context == asked.context
+        assert spec_of(again).charge_class == "correction"
+        assert spec_of(again).predecessor == invocation_of(asked)
+        run.lose(again)
     assert published(run) == Outcome(ended="Failed", reason="lost")
     assert min(run.sleeping_until, default=1000.0) >= 1000.0  # no backoff: only the deadline
 
