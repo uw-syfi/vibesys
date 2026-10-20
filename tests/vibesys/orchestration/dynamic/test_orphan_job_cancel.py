@@ -15,6 +15,7 @@ from collections import deque
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING
 
+import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 from tests.support.dynamic_script import Executors, config, harness
@@ -153,6 +154,8 @@ class _LateJobId:
 
     inner: Executors
     baseline: set[str] = field(default_factory=set)
+    past_deadline: bool = False
+    """Whether the submission also outlasts the run, so the run closes before the answer."""
 
     def __call__(self, request: Request, core: CoreState) -> Answer | tuple[Answer, ...]:
         """What the executors report for ``request``."""
@@ -165,16 +168,18 @@ class _LateJobId:
             self.baseline.add(answer.resource_id.root)
         return answer
 
-    @staticmethod
-    def during(request: Request, core: CoreState) -> tuple[CoreEvent, ...]:
-        """While the input's submission runs, time passes its limit."""
+    def during(self, request: Request, core: CoreState) -> tuple[CoreEvent, ...]:
+        """While the input's submission runs, time passes its limit (and the run's deadline)."""
         if not isinstance(request, SubmitMeasurement) or request.plan.purpose != "baseline":
             return ()
         record = _submission(core)
         assert record is not None
         assert record.dispatched_at is not None
         assert record.limit_from_dispatch is not None
-        return (ClockAdvanced(now_at=record.dispatched_at + record.limit_from_dispatch + 1.0),)
+        passed = record.dispatched_at + record.limit_from_dispatch + 1.0
+        if self.past_deadline:
+            passed = max(passed, core.run.deadline_at + 1.0)
+        return (ClockAdvanced(now_at=passed),)
 
 
 def test_a_job_whose_id_arrives_after_its_submission_ended_is_cancelled() -> None:
@@ -192,3 +197,25 @@ def test_a_job_whose_id_arrives_after_its_submission_ended_is_cancelled() -> Non
     assert submission.failure is not None
     assert script.baseline
     assert _cancels(trace, script.baseline)
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="PR #3235: core's end of the blocked submission at close took the executor's "
+    "sequence 0, so the late sbatch answer halts the host instead of naming a job to cancel",
+)
+def test_a_job_whose_id_arrives_after_the_run_closed_is_cancelled() -> None:
+    """The late ``sbatch`` answer may come after the run closed around its blocked submission.
+
+    The run's deadline passes while the input's submission runs, so the run closes and core
+    ends the submission it waits on. The answer that then names the job is still taken: the
+    job is cancelled and the run ends.
+    """
+    script = _LateJobId(inner=_executors(), past_deadline=True)
+    trace = _drive(script, during_turn=script.during)
+
+    assert trace.finished
+    assert script.baseline
+    cancels = _cancels(trace, script.baseline)
+    assert cancels
+    assert any(record.observation is not None and record.observation.accepted for record in cancels)
