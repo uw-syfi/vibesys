@@ -80,19 +80,31 @@ class WorkstreamParking:
     """How the workstream ``key`` parks its agent slot while core suspends one of its turns.
 
     The `vs_core.api.search.Parking` of its turns: it reports the wait, so the root may lend the
-    slot to other work, and goes on once the root lends it a slot again.
+    slot to other work, and goes on once the root lends it a slot again. Only the implementer's
+    and the judge's turns park; a merger's or profiler's turn that waits keeps its slot.
     """
 
     def __init__(self, ctx: Flow, key: str) -> None:
         """Park the turns of the workstream ``key``, numbering its waits from 1."""
-        self._ctx, self._key, self._waits = ctx, key, 0
+        self._ctx, self._key, self._waits, self._parked = ctx, key, 0, False
 
     def parked(self) -> None:
         """Report the turn's wait: its agent slot is free."""
         self._waits += 1
+        self._parked = True
         self._ctx.channel(REPORTS).send(Suspended(key=self._key, wait=self._waits))
 
     async def resumed(self) -> None:
         """Report the authorized resume, and return once the root lent the turn a slot."""
         self._ctx.channel(REPORTS).send(Resuming(key=self._key, wait=self._waits))
         await self._ctx.latch(RESUMES.of(f"{self._key}.{self._waits}"))
+        self._parked = False
+
+    async def unparked(self) -> None:
+        """Before the next ask: take a slot again if the last wait ended without a resume.
+
+        Core never calls ``resumed`` for a wait that failed (at the run's deadline), so the
+        root still counts the workstream parked; asking its agent again needs a slot first.
+        """
+        if self._parked:
+            await self.resumed()

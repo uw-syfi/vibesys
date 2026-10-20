@@ -20,6 +20,7 @@ from vibesys.orchestration.dynamic.search._outcomes import (
     ended_by,
 )
 from vibesys.orchestration.dynamic.search._progress import refusal
+from vibesys.orchestration.dynamic.search._reports import WorkstreamParking
 from vibesys.orchestration.dynamic.search._resume import ResumeStage, WorkstreamResume, mark
 from vibesys.orchestration.dynamic.search._values import (
     AgentName,
@@ -37,7 +38,6 @@ from vs_core.api.search import (
     FailureReason,
     Flow,
     GaveUp,
-    Parking,
     RetryPolicy,
     RevisionRef,
     Session,
@@ -87,7 +87,7 @@ class Conversation:
     (``parking``).
     """
 
-    def __init__(self, implementer: Session, judge: Session, parking: Parking) -> None:
+    def __init__(self, implementer: Session, judge: Session, parking: WorkstreamParking) -> None:
         """Hold the implementer's and the judge's sessions, and what parks their turns."""
         self.implementer = implementer
         self.judge = judge
@@ -144,6 +144,7 @@ async def implementer_turn(
     """
     prompt = implement_prompt(w, blockers, baseline=baseline)
     implementer = sessions.implementer
+    await sessions.parking.unparked()
     match await implementer.turn(prompt, label=turn_label(implementer), parking=sessions.parking):
         case TurnFinished(reply=ImplementerResult() as reply, checkpoint=checkpoint):
             return _candidate_of(w, work, reply, checkpoint)
@@ -239,6 +240,7 @@ async def review(  # noqa: PLR0913  # LW-220432 [PLR0913]; each argument is a di
         w.plan, revision, result.candidate.summary, review_evaluations(refs, readings)
     )
     judge = sessions.judge
+    await sessions.parking.unparked()
     match await judge.turn(
         prompt, revision=revision, label=turn_label(judge), parking=sessions.parking
     ):

@@ -174,3 +174,16 @@ def test_new_work_queued_for_admission_never_keeps_parked_turns_from_resuming(
     assert isinstance(host.run.finished, Finish), (
         f"stuck: open attempts {len(host.unsettled)}, waiting {[a.path for a in host.run.open]}"
     )
+
+
+@pytest.mark.regression
+def test_a_turn_whose_wait_timed_out_asks_its_agent_again_only_in_a_free_slot() -> None:
+    host, _ = all_waiting(restarting=False)
+    start_new_work(host)
+
+    host.run.advance_to(max(host.run.sleeping_until))  # the waits time out while h3 and h4 work
+    drain_within_width(host)  # h1 and h2 are asked again, each once a slot is free
+
+    timeline = host.run.timeline()
+    assert "000001.h1/implementer.2:" in timeline, timeline
+    assert "000002.h2/implementer.2:" in timeline, timeline
