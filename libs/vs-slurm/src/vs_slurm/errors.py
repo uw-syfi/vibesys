@@ -250,8 +250,9 @@ class SlurmWorkspaceRootProbeError(SlurmError):
     """The startup probe could not prove the configured workspace root shared.
 
     ``retryable`` says that the failure says nothing about the root: the scheduler never
-    started the job, or the run stopped it. A run retries such a probe for as long as it
-    goes on; every other failure is lasting.
+    started the job, the run stopped it, or the job ended without its script reaching an
+    exit (preempted, cancelled, a lost node). A run retries such a probe; every other
+    failure, and a bounded number of attempts that each ended without a verdict, is lasting.
     """
 
     def __init__(self, message: str, *, retryable: bool = False) -> None:
@@ -311,6 +312,28 @@ class SlurmWorkspaceRootProbeError(SlurmError):
             f"queue{why} for {request}, and VibeSys cancelled it. The run retries the probe, "
             f"and its Slurm work waits for it; raise {setting} to let each attempt wait "
             "longer",
+            retryable=True,
+        )
+
+    @classmethod
+    def inconclusive(
+        cls, job_id: str, *, ended: str, attempt: int, attempts: int
+    ) -> SlurmWorkspaceRootProbeError:
+        """Describe a probe job that ended without a verdict on the root (preempted, cancelled).
+
+        Retryable until ``attempt`` reaches ``attempts``; then the probe gives up for good.
+        """
+        prefix = (
+            "Slurm `remote_workspace_root` startup probe failed: "
+            f"probe job {job_id} ended without a verdict on the root ({ended})"
+        )
+        if attempt >= attempts:
+            return cls(
+                f"{prefix}, and VibeSys gave up after {attempts} attempts that each ended so"
+            )
+        return cls(
+            f"{prefix}. The run retries the probe (attempt {attempt} of {attempts} ended so), "
+            "and its Slurm work waits for it",
             retryable=True,
         )
 

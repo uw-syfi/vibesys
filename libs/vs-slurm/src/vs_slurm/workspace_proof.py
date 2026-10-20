@@ -12,9 +12,12 @@ inline: exactly one job per attempt, restart reconciliation, cleanup on every pa
 A probe the queue never scheduled says nothing about the root, so the proof tries it
 again after an exponential backoff, capped at 30 minutes, for as long as the run goes
 on; Slurm work keeps waiting meanwhile. No probe budget ends the run on a full queue:
-only the run's own deadline (which closes the proof) bounds the wait. Any other failure
-is lasting (the job failed, a node token is missing or wrong, the infrastructure
-failed) and settles the proof at once.
+only the run's own deadline (which closes the proof) bounds the wait. A probe job that
+ended without its script reaching an exit (preempted, cancelled by an operator, a lost
+node, overran) says nothing about the root either and is retried the same way, up to a
+bounded number of such attempts counted across resumes. Any other failure is lasting
+(the job failed, a node token is missing or wrong, the infrastructure failed) and
+settles the proof at once.
 """
 
 from __future__ import annotations

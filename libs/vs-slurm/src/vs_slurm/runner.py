@@ -62,6 +62,8 @@ from .remote_operations import (
 from .scheduler_read import framed, unframed
 from .scheduler_states import (
     INITIAL_LIFE,
+    Ended,
+    EndOutcome,
     JobLife,
     NotInQueue,
     QueueRow,
@@ -392,6 +394,8 @@ class SlurmJobWaitResult(BaseModel):
     timed_out: bool
     waited_seconds: float
     """How long this observation lasted, on the runner's clock."""
+    ended: EndOutcome | None = None
+    """How the job ended, when the last reading saw it end; ``status`` folds several into one."""
 
     @property
     def terminal(self) -> bool:
@@ -937,7 +941,11 @@ class SlurmJobRunner:
             if done or remaining <= 0:
                 waited = self._clock.now() - started
                 return SlurmJobWaitResult(
-                    handle=handle, status=status, timed_out=not done, waited_seconds=waited
+                    handle=handle,
+                    status=status,
+                    timed_out=not done,
+                    waited_seconds=waited,
+                    ended=reading.life.outcome if isinstance(reading.life, Ended) else None,
                 )
             seconds = min(self._config.poll_interval_seconds, remaining)
             # Bounded by *seconds*; the event's setter is the cancel path of the

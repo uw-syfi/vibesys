@@ -323,7 +323,6 @@ def _preempt_first_job(
     return response
 
 
-@pytest.mark.xfail(strict=True, reason="F1: a preempted probe job stops the run")
 def test_a_preempted_probe_job_is_retried_while_slurm_work_waits_and_never_stops_the_run(
     tmp_path: Path, sim: Sim
 ) -> None:

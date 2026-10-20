@@ -355,21 +355,26 @@ def test_an_sbatch_refusal_is_reported_in_sbatchs_own_words_and_a_resume_retries
     _assert_cleaned(remote)
 
 
-def test_a_record_written_by_the_previous_release_is_still_read(tmp_path: Path) -> None:
+_FIELDS_ADDED_SINCE = {
+    2: {"generation", "waited_seconds", "pending_reason", "inconclusive_attempts", "job_end"},
+    3: {"inconclusive_attempts", "job_end"},
+}
+
+
+@pytest.mark.parametrize("version", sorted(_FIELDS_ADDED_SINCE))
+def test_a_record_written_by_an_earlier_release_is_still_read(tmp_path: Path, version: int) -> None:
     remote, connector = _setup(tmp_path)
     config = _config(remote)
     _probe(config, connector, tmp_path)
-    # test-isolation: the durable record format is a contract with the previous release,
-    # which wrote version 2 without the retry generation or the queue-wait fields.
+    # test-isolation: the durable record format is a contract with earlier releases: version 2
+    # had no retry generation or queue-wait fields, version 3 no inconclusive attempts.
     record = tmp_path / "probe-state" / "records" / "workspace-root-probe.json"
     current = json.loads(record.read_text(encoding="utf-8"))
-    assert current["version"] == 3
-    legacy = {
-        key: value
-        for key, value in current.items()
-        if key not in {"generation", "waited_seconds", "pending_reason"}
+    assert current["version"] == 4
+    earlier = {
+        key: value for key, value in current.items() if key not in _FIELDS_ADDED_SINCE[version]
     }
-    record.write_text(json.dumps({**legacy, "version": 2}), encoding="utf-8")
+    record.write_text(json.dumps({**earlier, "version": version}), encoding="utf-8")
 
     _probe(config, connector, tmp_path)
 

@@ -196,24 +196,14 @@ def _assert_cleaned(root: Path) -> None:
     assert not [path for path in cluster.iterdir() if path.name != ".vibesys-content-cache"]
 
 
-def _no_verdict(name: str) -> bool:
-    ending = _ENDINGS[name]
-    return ending.verdict is None and not ending.proven
-
-
 def _cases() -> list[object]:
     cases = []
     for name, ending in _ENDINGS.items():
         for ran in (False, True):
             if ending.scripted is SlurmJobStatus.RUNNING and not ran:
                 continue
-            marks = (
-                [pytest.mark.xfail(strict=True, reason="F1: a non-verdict ending ends the proof")]
-                if _no_verdict(name)
-                else []
-            )
             label = f"{name}-{'after-running' if ran else 'from-the-queue'}"
-            cases.append(pytest.param(name, ran, id=label, marks=marks))
+            cases.append(pytest.param(name, ran, id=label))
     return cases
 
 
@@ -273,7 +263,6 @@ def test_only_a_verdict_on_the_root_settles_the_proof_and_any_other_ending_retri
     _assert_cleaned(tmp_path)
 
 
-@pytest.mark.xfail(strict=True, reason="F1: a preempted probe ends the proof at its first attempt")
 def test_attempts_without_a_verdict_are_bounded_and_the_bound_survives_a_restart(
     tmp_path: Path,
 ) -> None:
