@@ -47,7 +47,7 @@ _REPORTS = st.lists(
     max_size=4,
 )
 
-_STATUS = {
+_STATUS: dict[type[object], ComparisonStatus] = {
     ComparisonMeasured: ComparisonStatus.MEASURED,
     ComparisonFailed: ComparisonStatus.FAILED,
     ComparisonNotConfigured: ComparisonStatus.NOT_CONFIGURED,
