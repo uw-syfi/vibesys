@@ -428,3 +428,31 @@ def test_the_operator_pauses_the_deadline_ends_and_the_run_environment_fails_the
         failed = adoption == "verify-failed"
         assert result.outcome == ("failure" if failed else "cancelled")
         assert first == ("adoption-failed" if failed else core.EndReason.DEADLINE.value)
+
+
+@pytest.mark.xfail(strict=True, reason="follow-up 1 of #3327: the operator's stop names the end")
+@pytest.mark.parametrize("operator", [core.StopMode.DRAIN, core.StopMode.CANCEL])
+def test_an_environment_failure_after_the_operators_stop_fails_the_run(
+    operator: core.StopMode,
+) -> None:
+    """Regression (review follow-up 1 of #3327): the first stop alone named the ending.
+
+    The operator stopped the run, then its environment failed for good while the run wound down.
+    The result said ``stopped`` (a resumable pause) while its controls said no resume reopens it.
+    A final stop of the host's decides the ending over an operator's stop recorded before it.
+    """
+
+    async def ended(ctx: core.Flow, _config: Config) -> None:
+        ctx.choose(kept("a"))
+        await ctx.stopped
+
+    run = start(ended, adopting=False)
+    run.stop("stop", mode=operator)
+    run.stop(core.ENVIRONMENT_STOP, mode=core.StopMode.CANCEL)
+    run.adopt(run.expect(core.ProposeWinner))
+    result = run.finished.result if run.finished is not None else None
+    assert result is not None
+    assert (result.outcome, result.reason.split(":", 1)[0]) == (
+        "failure",
+        core.EndReason.FAILED.value,
+    )

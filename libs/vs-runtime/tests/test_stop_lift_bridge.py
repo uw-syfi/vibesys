@@ -8,7 +8,10 @@ committed stays stopping: core takes no resume from there.
 
 from __future__ import annotations
 
+import pytest
+
 from vs_core.api import (
+    DEADLINE_STOP,
     ControlId,
     ControlInput,
     RunResultProposal,
@@ -111,3 +114,42 @@ def test_a_run_whose_ending_is_still_closing_stays_stopping_even_when_resumed() 
     run = _new_process(old, resumed=True)
     run.bridge.poll(run.core, 2.0)
     assert run.channel.stop_requested()
+
+
+def _stopped_by_the_host(stopper: str) -> _Run:
+    """A run the host stopped while it ran; the process died before the run closed."""
+    old = _run()
+    if stopper == "environment":
+        old.channel.request_environment_stop()
+        old.poll()
+    else:
+        deadline = ControlInput(
+            control_id=ControlId(root=DEADLINE_STOP), action="stop", mode=StopMode.DRAIN
+        )
+        old.core = step(old.core, ControlEvent(control=deadline, now_at=1.0)).state
+    assert requested_stop_mode(old.core.run) is not None
+    assert old.core.run.status is RunStatus.RUNNING
+    return old
+
+
+@pytest.mark.xfail(strict=True, reason="B1: a resume lifts the host's own stops")
+@pytest.mark.parametrize("replayed", [False, True], ids=["fresh", "failure-replayed"])
+@pytest.mark.parametrize("stopper", ["environment", "deadline"])
+def test_a_resumed_process_keeps_the_stop_the_host_delivered(
+    stopper: str, *, replayed: bool
+) -> None:
+    """Regression (review B1 of #3327): a resume lifted the run environment's stop for good.
+
+    The environment's stop was recorded, the process died before the run closed (a force stop,
+    a crash), and ``--resume`` lifted the stop. The stored probe record replayed the failure,
+    but core already held the stop's id, so the bridge sent nothing: the channel was stopped,
+    core held no stop, and the run went on with every Slurm job refused. The deadline's stop was
+    lifted the same way. The host's stops are no pause: the resumed process keeps them in force.
+    """
+    run = _new_process(_stopped_by_the_host(stopper), resumed=True)
+    run.poll()
+    if replayed and stopper == "environment":
+        run.channel.request_environment_stop()
+        run.poll()
+    assert run.channel.stop_requested()
+    assert requested_stop_mode(run.core.run) is not None
