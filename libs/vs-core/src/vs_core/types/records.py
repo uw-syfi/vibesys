@@ -428,7 +428,11 @@ class RecoveryCheck(Value):
 
     target: RequestId
     inspection: RequestId | None = None
-    resolution: Literal["pending", "safe-prepared", "reattached", "terminal", "blocked"] = "pending"
+    resolution: Literal[
+        "pending", "safe-prepared", "reattached", "terminal", "unknown", "blocked"
+    ] = "pending"
+    """How the check resolved. ``unknown``: its target's result is discarded whatever it was (a
+    cancel of a job) and its executor could not say, so recovery settled it without an answer."""
     wait: WaitOn | None
     """What a pending check waits on: its target while that is open, the inspections recovery
     sent about the target and the children it left, and the owned jobs that settle children
@@ -465,7 +469,8 @@ class RecoveryBarrier(Value):
             check.resolution in ("pending", "blocked") for check in self.checks
         ):
             raise ContractValidationError(
-                "checks", "READY requires safe-prepared, reattached or terminal proof"
+                "checks",
+                "READY requires safe-prepared, reattached, terminal or unknown-settled checks",
             )
         return self
 

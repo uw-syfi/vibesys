@@ -790,6 +790,24 @@ def _stall_entries(
     ]
 
 
+def _follow_ups(
+    signal: Signal, signals: tuple[Signal, ...], seen: set[tuple[Area, str]]
+) -> tuple[Signal, ...]:
+    """What a kernel signal sends on: for an opened recovery, without a clock tick already taken.
+
+    Opening recovery wakes the clock, but a tick that opened it (an inspection that lapsed
+    unanswered ended the last wait) already ran in this step, and a tick repeats no signal of
+    its own. The loop ticks again after any commit.
+    """
+    if not isinstance(signal, RecoveryReady):
+        return signals
+    return tuple(
+        child
+        for child in signals
+        if not (isinstance(child, ClockAdvanced) and (event_area(child), digest(child)) in seen)
+    )
+
+
 def propagate(
     state: CoreState,
     initial: tuple[Signal, ...],
@@ -835,7 +853,8 @@ def propagate(
         ):
             result, signals = _kernel_signal(state, signal)
             state = result.state
-            pending.extend((child, cause, admission_id) for child in signals)
+            follow_ups = _follow_ups(signal, signals, seen)
+            pending.extend((child, cause, admission_id) for child in follow_ups)
             events.extend(result.events)
             continue
         change = dispatch(state, signal)

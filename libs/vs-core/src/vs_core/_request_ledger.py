@@ -34,7 +34,7 @@ from ._proofs import (
 )
 from ._registry import ClosedRecordContradictionError, ContractError
 from ._request_forward import declaration, owner_signals, records_own
-from ._request_recovery import command_open
+from ._request_recovery import resent
 from ._session_scope import lost_turn_cancellation
 from ._values import digest
 from .types.attempts import RevisionOperationRequested
@@ -437,27 +437,9 @@ def _reissue(
 
     Never begun: no effect started, so the request is simply sent again. Begun without a
     result: the effect may have run, so the request is sent again to resume, and its
-    executor inspects the external effect before repeating it. Either way the request is
-    neither observed nor reported to its owner: the owner never learns it was interrupted,
-    and the replay equals the straight run.
-
-    A command (an inspection, cancel or block) is core's own and has no owner's limit: sent
-    again, it gets a fresh reconciliation bound from now, or a re-send that waited out its
-    first bound would lapse before it is answered.
+    executor inspects the external effect before repeating it (`resent`).
     """
-    until = record.until
-    if command_open(record):
-        fresh = context.run.now_at + context.run.limits.reconciliation_bound
-        until = until.model_copy(update={"at": max(until.at, fresh)})
-    reissued = record.model_copy(
-        update={
-            "phase": RequestPhase.PREPARED,
-            "observation": None,
-            "sequence": None,
-            "retry_at": None,
-            "until": until,
-        }
-    )
+    reissued = resent(record, context.run.now_at, context.run.limits.reconciliation_bound)
     return AreaChange(state=_replace(state, reissued))
 
 

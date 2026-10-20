@@ -510,7 +510,7 @@ class _Loop:
                         mode=StopMode.CANCEL,
                     ),
                     result=RunResultProposal(
-                        outcome="blocked", reason="recovery blocked: outcome unknown"
+                        outcome="blocked", reason=_recovery_blocked_reason(core)
                     ),
                     now_at=now,
                 )
@@ -646,6 +646,14 @@ class _Loop:
 
 
 _RECOVERY_BLOCKED = "recovery-blocked"
+
+
+def _recovery_blocked_reason(core: CoreState) -> str:
+    """Why the run ends blocked: the records whose outcome recovery could not learn, named."""
+    blocked = sorted(
+        check.target.root for check in core.records.recovery.checks if check.resolution == "blocked"
+    )
+    return f"recovery blocked: outcome unknown for {', '.join(blocked)}"
 
 
 def _noop() -> None:

@@ -98,6 +98,17 @@ def _v37_to_v38(envelope: JsonObject) -> JsonObject:
     return envelope | {"schema_version": 38}
 
 
+def _v38_to_v39(envelope: JsonObject) -> JsonObject:
+    """Version 39 added the recovery check resolution ``unknown`` and nothing else.
+
+    Recovery settles a check whose target's result is discarded whatever it was (a cancel of
+    a job) as ``unknown`` when its executor could not say. A version 38 run had no such
+    resolution, so no stored check holds it: the shape only grew, and every version 38
+    document is a valid version 39 one with its number changed.
+    """
+    return envelope | {"schema_version": 39}
+
+
 def _floor_declared(core: JsonObject) -> bool:
     run = _object(core.get("run"))
     task = _object(_object(run.get("facts")).get("task"))
@@ -127,6 +138,7 @@ MIGRATIONS: Final[Mapping[int, Migration]] = {
     35: _v35_to_v36,
     36: _v36_to_v37,
     37: _v37_to_v38,
+    38: _v38_to_v39,
 }
 """Version ``n`` to ``n + 1``, one entry per version, contiguous from the oldest supported."""
 

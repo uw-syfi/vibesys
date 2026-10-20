@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import sys
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Literal
 
 from . import _host_epochs, _wait_clock
@@ -25,6 +27,7 @@ from ._proofs import (
     resolved_observation,
     submission_budget_for,
 )
+from ._recovery_unanswered import Inspection, Settlement, settlement
 from ._registry import ContractError
 from ._request_forward import turn_of
 from ._session_scope import lost_turn_authority
@@ -94,6 +97,8 @@ from .types.until import Failed, FailureReason, WhileAlive, WhileOpen
 from .types.waits import WaitKind, WaitOn, WaitSubject
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from .types.common import Observation, ResourceId
     from .types.evaluation import EvaluationState
     from .types.kernel import RecordsContext, RunState, Signal
@@ -108,7 +113,9 @@ if TYPE_CHECKING:
     from .types.sessions import Invocation, SessionView
     from .types.strategy import Operation
 
-type Resolution = Literal["pending", "safe-prepared", "reattached", "terminal", "blocked"]
+type Resolution = Literal[
+    "pending", "safe-prepared", "reattached", "terminal", "unknown", "blocked"
+]
 
 
 def _child_sources(child: ChildLease, state: RecordsState) -> Verdict[tuple[Observation, ...]]:
@@ -553,10 +560,20 @@ def _observed_resolution(record: RequestRecord, context: RecordsContext) -> Reso
     terminal = observation.terminal and observation.status != ObservationStatus.PENDING
     # A completed request that does not own its resource has nothing left to recover: it
     # creates no children and its resource is another request's to release.
+    # A cancel of a job reports ``cancelled``: the executor accepted the cancellation, and the
+    # job it names is the submission's to release. Its observation never lists children, so
+    # it can never prove a manifest: it was read as unresolved, and a recovery that inspected
+    # it got the same facts back and waited for good.
     names_only = (
         not _owns_resource(record)
         and observation.accepted
-        and observation.status == ObservationStatus.SUCCEEDED
+        and (
+            observation.status == ObservationStatus.SUCCEEDED
+            or (
+                isinstance(record.request, CancelOwnedJob)
+                and observation.status == ObservationStatus.CANCELLED
+            )
+        )
     )
     # A rejection that accepted nothing performed nothing: no resource, no children to find.
     refused = (
@@ -776,25 +793,22 @@ def _aggregate_resolution(
 _IN_FLIGHT = (RequestPhase.PREPARED, RequestPhase.DISPATCHED, RequestPhase.RECONCILING)
 
 
-def _check_wait(
+def _waiting_on(
     state: RecordsState,
     context: RecordsContext,
     check: RecoveryCheck,
     sent: frozenset[RequestId],
     epoch: int,
-) -> WaitOn | None:
-    """What a pending check waits on now: the requests and jobs whose answer re-resolves it.
+) -> tuple[tuple[RequestId, ...], tuple[WaitSubject, ...]]:
+    """The requests and jobs whose answer re-resolves *check*, the target's own included.
 
     Any committed answer about the target re-resolves the check (``_observe``): the target
     itself while it is open, and every inspection of it, the check's own, an earlier epoch's
     sent again, and the inspections of the children it left. A child its typed job ledger
     tracks settles when that job does, so the check names the job, but only when every child
     has one: a child nobody answers for keeps the check from ever resolving. *sent* holds the
-    requests this transition sends. A check left with nothing keeps the wait it had, naming
-    what it waited on, so the run halts with it named.
+    requests this transition sends.
     """
-    if check.resolution != "pending":
-        return None
     record = state.record(check.target)
     children = [child for child in state.children if check.target in child.source_requests]
     expected = [check.target, check.inspection]
@@ -832,9 +846,107 @@ def _check_wait(
         if children and None not in jobs
         else ()
     ) + _owner_sessions(record, context)
+    return requests, subjects
+
+
+def _check_wait(
+    state: RecordsState,
+    context: RecordsContext,
+    check: RecoveryCheck,
+    sent: frozenset[RequestId],
+    epoch: int,
+) -> WaitOn | None:
+    """What a pending check waits on now: the requests and jobs whose answer re-resolves it.
+
+    A check left with nothing keeps the wait it had, naming what it waited on, so the run
+    halts with it named (`_settle_unanswered` settles one nothing can ever answer first).
+    """
+    if check.resolution != "pending":
+        return None
+    requests, subjects = _waiting_on(state, context, check, sent, epoch)
     if not requests and not subjects:
         return check.wait
     return WaitOn(requests=requests, subjects=subjects)
+
+
+def _unbounded(state: RecordsState, context: RecordsContext, record: RequestRecord) -> bool:
+    """Whether no limit will end *record*: it is not open, or its limit is the end of time."""
+    if not is_open(record):
+        return True
+    bound = _wait_clock.record_bound(record, context.evaluation, context.run, state.hosts)
+    return bound.at >= sys.float_info.max
+
+
+def _inspection_of(state: RecordsState, check: RecoveryCheck) -> Inspection:
+    """What became of the inspection this epoch sent about the check's target."""
+    if check.inspection is None:
+        return Inspection.NONE
+    row = state.record(check.inspection)
+    answer = None if row is None else row.observation
+    # An inspection the executor failed to run until its retries or its bound ran out says
+    # nothing about the target; one it ran, whatever it found, answered.
+    if (
+        row is None
+        or row.phase == RequestPhase.BLOCKED
+        or answer is None
+        or answer.status != ObservationStatus.SUCCEEDED
+        or not answer.accepted
+    ):
+        return Inspection.UNREACHABLE
+    return Inspection.ANSWERED
+
+
+_VERDICT: Mapping[Settlement, Resolution] = MappingProxyType(
+    {
+        "resend": "safe-prepared",
+        "unknown": "unknown",
+        "terminal": "terminal",
+        "blocked": "blocked",
+    }
+)
+
+
+def _settle_unanswered(
+    state: RecordsState,
+    context: RecordsContext,
+    barrier: RecoveryBarrier,
+    sent: frozenset[RequestId],
+) -> tuple[RecordsState, RecoveryBarrier]:
+    """Settle every pending check that nothing is left to answer.
+
+    The inspections about its target have all ended and no child job or session can move it:
+    waiting more would hold recovery open in silence. The policy is `settlement`; a ``resend``
+    puts the record back to PREPARED, which the check then reads as safe to dispatch. Only
+    ``unknown`` (a result that is discarded) settles at once: any other verdict about an open
+    record with a limit waits for that limit, which ends the record and blocks its check.
+    """
+    checks = list(barrier.checks)
+    for index, check in enumerate(checks):
+        record = state.record(check.target)
+        if check.resolution != "pending" or record is None:
+            continue
+        requests, subjects = _waiting_on(state, context, check, sent, barrier.epoch)
+        # The target itself answers nothing: its host is dead, and it is not dispatched yet.
+        if subjects or any(request != check.target for request in requests):
+            continue
+        verdict = settlement(
+            record,
+            inspection=_inspection_of(state, check),
+            owes_release=any(
+                check.target in child.source_requests and not _child_proven(child, state)
+                for child in state.children
+            ),
+            resendable=_prepared_episode(record, context),
+        )
+        if verdict != "unknown" and not _unbounded(state, context, record):
+            continue  # its own limit ends it when that passes, as it ends any open record
+        if verdict == "resend" and record.phase != RequestPhase.PREPARED:
+            state = _replace_record(
+                state,
+                resent(record, context.run.now_at, context.run.limits.reconciliation_bound),
+            )
+        checks[index] = check.model_copy(update={"resolution": _VERDICT[verdict], "wait": None})
+    return state, barrier.model_copy(update={"checks": tuple(checks)})
 
 
 def _owner_sessions(
@@ -891,6 +1003,7 @@ def _finish(
     sent_ids = frozenset(
         outbound.request.request_id for outbound in sent if outbound.request.request_id is not None
     )
+    state, barrier = _settle_unanswered(state, context, barrier, sent_ids)
     barrier = barrier.model_copy(
         update={
             "checks": tuple(
@@ -1701,7 +1814,11 @@ def _lapse_command(
     if command is None or not command_open(command) or now_at < command.until.at:
         return AreaChange(state=state)
     blocked = command.model_copy(update={"phase": RequestPhase.BLOCKED})
-    return AreaChange(state=_replace_record(state, blocked))
+    lapsed = _replace_record(state, blocked)
+    if not recovery_waits(lapsed.recovery.phase):
+        return AreaChange(state=lapsed)
+    # The check this command answered for may have nothing left to answer it.
+    return _finish(lapsed, lapsed.recovery, context)
 
 
 def _cancelled_here(record: RequestRecord) -> bool:
@@ -1913,6 +2030,29 @@ def is_open(record: RequestRecord) -> bool:
         RequestPhase.PREPARED,
         RequestPhase.DISPATCHED,
         RequestPhase.RECONCILING,
+    )
+
+
+def resent(record: RequestRecord, now_at: float, reconciliation_bound: float) -> RequestRecord:
+    """An open record the executor can account for, back to PREPARED to go out again unchanged.
+
+    It is neither observed nor reported to its owner: the owner never learns it was
+    interrupted, and the replay equals the straight run. A command (an inspection, cancel or
+    block) is core's own and has no owner's limit: sent again, it gets a fresh reconciliation
+    bound from *now_at*, or a re-send that waited out its first bound would lapse before it is
+    answered.
+    """
+    until = record.until
+    if command_open(record):
+        until = until.model_copy(update={"at": max(until.at, now_at + reconciliation_bound)})
+    return record.model_copy(
+        update={
+            "phase": RequestPhase.PREPARED,
+            "observation": None,
+            "sequence": None,
+            "retry_at": None,
+            "until": until,
+        }
     )
 
 
