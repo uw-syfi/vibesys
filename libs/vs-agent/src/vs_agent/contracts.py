@@ -95,8 +95,8 @@ class AgentContextOverflowError(RuntimeError):
 
     Raised instead of a provider exit error so the session owner can tell a conversation that
     outgrew its model from a failed turn: the work did not fail, and the same message may run
-    in a fresh conversation. agentshim reports the condition as its own failure kind; until it
-    does, only a transport that classifies it raises this.
+    in a fresh conversation. agentshim reports the condition as
+    ``FailureKind.CONTEXT_OVERFLOW``, which ``shim_translation.failure_from`` maps to this.
     """
 
     def __init__(self, provider: str, detail: str) -> None:

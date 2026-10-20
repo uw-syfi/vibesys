@@ -20,6 +20,7 @@ import agentshim
 
 from vs_agent.container_python import containerize_server
 from vs_agent.contracts import (
+    AgentContextOverflowError,
     AgentEvent,
     AgentEventKind,
     AgentOutputSchemaError,
@@ -178,15 +179,18 @@ def failure_from(
     *,
     provider: str,
     exhausted: Sequence[agentshim.RateLimitStatus],
-) -> AgentOutputSchemaError | AgentQuotaError | None:
-    """Classify a failed turn as a schema rejection or a capacity limit.
+) -> AgentOutputSchemaError | AgentQuotaError | AgentContextOverflowError | None:
+    """Classify a failed turn as a schema rejection, a context overflow or a capacity limit.
 
     Returns ``None`` for any other failure, which the caller re-raises as it
     came.
 
     A provider that gave up matching the output schema
     (``FailureKind.SCHEMA``) is an :class:`AgentOutputSchemaError` carrying its
-    validation errors. agentshim classifies a usage or spend limit as
+    validation errors. A conversation that no longer fits the model's context window
+    (``FailureKind.CONTEXT_OVERFLOW``) is an :class:`AgentContextOverflowError`: the work did
+    not fail, and the same turn may run in a fresh conversation. agentshim classifies a usage
+    or spend limit as
     ``USAGE_LIMIT`` and has already waited out the transient failures it can. A
     ``TRANSIENT`` failure that outlasted those waits is sustained rate limiting
     when the provider also reported an exhausted window during the turn, and a
@@ -198,6 +202,8 @@ def failure_from(
     """
     if error.kind is agentshim.FailureKind.SCHEMA:
         return AgentOutputSchemaError(error.detail)
+    if error.kind is agentshim.FailureKind.CONTEXT_OVERFLOW:
+        return AgentContextOverflowError(provider, error.detail or str(error))
     if error.kind is agentshim.FailureKind.USAGE_LIMIT:
         condition = QuotaCondition.QUOTA_EXHAUSTED
     elif error.kind is agentshim.FailureKind.TRANSIENT:

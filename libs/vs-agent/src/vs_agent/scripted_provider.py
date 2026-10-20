@@ -165,8 +165,8 @@ class FakeTurnScript:
     """Per-turn replies, an optional successful-turn renewal threshold and mid-turn steering.
 
     ``context_tokens`` is the context a session's Nth completed turn reports its conversation
-    holds (the last entry repeats; empty reports none), as a provider that reports context
-    use would. agentshim reports no such figure yet, so production sessions report none.
+    holds (the last entry repeats; empty reports none), as agentshim's
+    ``TurnResult.context_tokens`` does.
     """
 
     answers: tuple[Answer, ...]
