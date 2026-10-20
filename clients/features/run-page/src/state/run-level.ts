@@ -14,6 +14,14 @@ import type {
   ObjectiveAxis,
 } from '@vibesys/run-state/candidates';
 import {againstWords} from './base-words.js';
+import {
+  type BaselineNote,
+  type BaselineReference,
+  baselineNotes,
+  baselineReferences,
+  improvement,
+  objectiveMetric,
+} from './baselines.js';
 import {metricLabel, objectiveUnit, unitLabel} from './metric-words.js';
 import {stepLabel, stepTitle} from './names.js';
 import {objectivesOf} from './pareto-view.js';
@@ -72,6 +80,8 @@ export interface HeroView {
   /** One tile per performance measure; today the run's one objective metric. */
   readonly tiles: readonly MetricTileView[];
   readonly measured: number;
+  /** The comparisons with no reading, each by its status word, in the task's order. */
+  readonly baselineNotes: readonly BaselineNote[];
 }
 
 function bestCandidate(model: RunModel): Candidate | null {
@@ -83,11 +93,6 @@ function inputValue(model: RunModel): number | null {
   return inputValueOf(model.candidates.candidates);
 }
 
-/** The ratio as an improvement over the input, where `direction` says which way is better. */
-function improvement(ratioToInput: number, direction: Direction): number {
-  return direction === 'min' && ratioToInput !== 0 ? 1 / ratioToInput : ratioToInput;
-}
-
 /** Within this of 1 the best reads as the same as the input. */
 const SAME = 0.0005;
 
@@ -95,6 +100,85 @@ function verdictOf(better: number): {note: string; tone: MetricTileView['tone']}
   if (better > 1 + SAME) return {note: 'faster than input', tone: 'ok'};
   if (better < 1 - SAME) return {note: 'slower than input', tone: 'err'};
   return {note: 'same as input', tone: 'muted'};
+}
+
+/** The best's reading against one measured comparison, worded for the tile. */
+interface BaselineRatio {
+  readonly label: string;
+  readonly better: number;
+  /** `1.32×`. */
+  readonly ratio: string;
+  /** The comparison's value with the unit: `66.2 tok/s`. */
+  readonly base: string;
+}
+
+/**
+ * The best's value as an improvement over each measured comparison of `references` (those with a
+ * ratio: a base of zero has none), in their order; empty without a value.
+ */
+function baselineRatios(
+  value: number | null,
+  references: readonly BaselineReference[],
+  direction: Direction,
+): readonly BaselineRatio[] {
+  if (value === null) return [];
+  return references.flatMap(reference => {
+    if (!(reference.value > 0)) return [];
+    const better = improvement(value / reference.value, direction);
+    const unit = reference.unit === null ? '' : ` ${unitLabel(reference.unit)}`;
+    return [
+      {
+        label: reference.label,
+        better,
+        ratio: ratio(better),
+        base: `${formatValue(reference.value)}${unit}`,
+      },
+    ];
+  });
+}
+
+/**
+ * The words of a tile with no input to read the best `value` against, set against the run's measured
+ * comparisons `references` instead; null without a value or a comparison (`tileWords` then speaks).
+ */
+function baselineTile(
+  value: number | null,
+  unit: string,
+  references: readonly BaselineReference[],
+  direction: Direction,
+): ReturnType<typeof baselineWords> | null {
+  const [first, ...rest] = baselineRatios(value, references, direction);
+  return value === null || first === undefined
+    ? null
+    : baselineWords(value, unit, [first, ...rest]);
+}
+
+/**
+ * The words of a tile with no input to read the best against, set against the run's comparisons
+ * instead: the ratio to the first is the headline, `vs <label>` what it means, the rest follow the
+ * value in the detail.
+ */
+function baselineWords(
+  value: number,
+  unit: string,
+  ratios: readonly [BaselineRatio, ...BaselineRatio[]],
+): Pick<MetricTileView, 'ratio' | 'figure' | 'note' | 'tone' | 'detail' | 'hint'> {
+  const [first, ...rest] = ratios;
+  const tone = verdictOf(first.better).tone;
+  return {
+    ratio: first.ratio,
+    figure: first.ratio,
+    note: `vs ${first.label}`,
+    tone,
+    detail: [
+      `${formatValue(value)}${unit}`,
+      ...rest.map(item => `${item.ratio} vs ${item.label}`),
+    ].join(' · '),
+    hint: [
+      `${formatValue(value)}${unit}`,
+      ...ratios.map(item => `${item.ratio} vs ${item.label} ${item.base}`),
+    ].join(' · '),
+  };
 }
 
 /** The unit as a suffix (` ops/s`); the metric's name in lower case when the run names no unit. */
@@ -178,7 +262,9 @@ function axisTile(model: RunModel, axis: ObjectiveAxis): MetricTileView {
   return {
     id: axis.name,
     name,
-    ...tileWords(model, value, input, words, better),
+    ...((input === null && better === null
+      ? baselineTile(value, words, baselineReferences(model.baselines, axis.name), direction)
+      : null) ?? tileWords(model, value, input, words, better)),
     trend: trendOf(model, name, input, measuredOn(all, axis.name), direction),
   };
 }
@@ -273,19 +359,27 @@ function objectiveTile(model: RunModel, best: CandidateMeasurement | null): Metr
   return {
     id: named ? metric : 'metric',
     name,
-    ...tileWords(
-      model,
-      value,
-      input,
-      unitWords(model, name),
-      better,
-      against === null
-        ? null
-        : {
-            words: againstWords(model.candidates.candidates, against, 'whole'),
-            baseValue: against.baseValue,
-          },
-    ),
+    ...((input === null && better === null
+      ? baselineTile(
+          value,
+          unitWords(model, name),
+          baselineReferences(model.baselines, named ? metric : null),
+          model.direction,
+        )
+      : null) ??
+      tileWords(
+        model,
+        value,
+        input,
+        unitWords(model, name),
+        better,
+        against === null
+          ? null
+          : {
+              words: againstWords(model.candidates.candidates, against, 'whole'),
+              baseValue: against.baseValue,
+            },
+      )),
     trend: trendOf(model, name, input),
   };
 }
@@ -308,6 +402,7 @@ export function heroView(
         : [objectiveTile(model, leader?.measurement ?? null)],
     measured: model.candidates.candidates.filter(item => item.measurement?.metricValue != null)
       .length,
+    baselineNotes: baselineNotes(model.baselines),
   };
 }
 
@@ -335,6 +430,8 @@ export interface StripChartView {
   /** The best passed value so far (the input's until an idea beats it), as a step line that reaches the end of the axis. */
   readonly steps: readonly {readonly x: number; readonly y: number}[];
   readonly reference: {readonly y: number; readonly label: string} | null;
+  /** One reference line per measured comparison, labelled with its label. */
+  readonly baselines: readonly {readonly y: number; readonly label: string}[];
   readonly xTicks: readonly {readonly value: number; readonly label: string}[];
   readonly yTicks: readonly {readonly value: number; readonly label: string}[];
   /** The y-axis range: from 0 to the largest value of the whole run, with headroom. */
@@ -463,15 +560,25 @@ export function stripChartView(
   const last = steps.at(-1);
   if (last !== undefined && last.x < end) steps.push({x: end, y: last.y});
   const input = inputValue(model);
-  const ys = [0, ...points.map(point => point.y), ...(input === null ? [] : [input])];
+  const metric = objectiveMetric(model);
+  const baselines = baselineReferences(model.baselines, metric).map(reference => ({
+    y: reference.value,
+    label: reference.label,
+  }));
+  const ys = [
+    0,
+    ...points.map(point => point.y),
+    ...(input === null ? [] : [input]),
+    ...baselines.map(line => line.y),
+  ];
   const top = Math.max(...ys);
-  const metric = model.overview?.objective.metric;
   return {
-    label: `${typeof metric === 'string' && metric !== '' ? metricLabel(metric) : 'Metric'} of each measured idea over the run, with the best so far`,
+    label: `${metric === null ? 'Metric' : metricLabel(metric)} of each measured idea over the run, with the best so far`,
     points,
     spans: open.spans(minutes, reached),
     steps,
     reference: input === null ? null : {y: input, label: 'input'},
+    baselines,
     xTicks: ticks(0, end, value => duration(value * 60)),
     yTicks: ticks(Math.min(...ys), top, formatValue),
     yDomain: [Math.min(...ys), top > 0 ? top * HEADROOM : 1],

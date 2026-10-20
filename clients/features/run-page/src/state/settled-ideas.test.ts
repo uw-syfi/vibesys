@@ -117,7 +117,7 @@ function modelOf(spans: readonly Span[], core: CoreState, pauses = NO_PAUSES): R
         data: {kind: 'span_ended', span: each},
       }) as RunEvent,
   );
-  const facts: RunFacts = {comparisons: core.comparisons, pauses};
+  const facts: RunFacts = {comparisons: core.comparisons, baselines: core.baselines, pauses};
   return createRunReader().read(traceLog(EMPTY_TRACE, OVERVIEW, stream), null, null, facts);
 }
 
@@ -211,7 +211,11 @@ describe('an idea whose measurement the framework compared', () => {
   test('is the same object, and so are its ideas, while nothing it reads changes', () => {
     const reader = createRunReader();
     const log = traceLog(EMPTY_TRACE, OVERVIEW, []);
-    const facts: RunFacts = {comparisons: CORE.comparisons, pauses: NO_PAUSES};
+    const facts: RunFacts = {
+      comparisons: CORE.comparisons,
+      baselines: CORE.baselines,
+      pauses: NO_PAUSES,
+    };
     expect(reader.read(log, null, null, facts)).toBe(reader.read(log, null, null, facts));
   });
 

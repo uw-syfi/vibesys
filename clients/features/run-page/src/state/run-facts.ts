@@ -1,5 +1,6 @@
 /**
- * The run's core facts a model reads (`RunFacts`), from the run fold: its comparisons as they are,
+ * The run's core facts a model reads (`RunFacts`), from the run fold: its comparisons and comparison
+ * baselines as they are,
  * and its quota stops placed on the run clock by the offset the page last heard. A page owns one
  * `createFactsReader` for its run: the same object comes back while neither moves, so the run
  * reader's caches hold. The offset drifts by the latency of each event, so a stop that moved less
@@ -36,8 +37,16 @@ export function createFactsReader(): (run: RunFold) => RunFacts {
     ) {
       pausesHeld = {stops: core.quotaStops, offset, pauses: quotaPauses(core.quotaStops, offset)};
     }
-    if (facts.comparisons !== core.comparisons || facts.pauses !== pausesHeld.pauses) {
-      facts = {comparisons: core.comparisons, pauses: pausesHeld.pauses};
+    if (
+      facts.comparisons !== core.comparisons ||
+      facts.baselines !== core.baselines ||
+      facts.pauses !== pausesHeld.pauses
+    ) {
+      facts = {
+        comparisons: core.comparisons,
+        baselines: core.baselines,
+        pauses: pausesHeld.pauses,
+      };
     }
     return facts;
   };

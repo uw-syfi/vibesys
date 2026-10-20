@@ -68,6 +68,7 @@ const STRESS: readonly Cell[] = [
   'bases-and-effects',
   'quota-pause',
   'input-gate-failed',
+  'comparison-baselines',
   'live-reconnect',
   'crashed-after-turn',
   'weeks-600-ideas',

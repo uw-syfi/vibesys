@@ -4,6 +4,7 @@
  * the synthetic ones equal to their scenarios.
  */
 import basesAndEffects from './data/bases-and-effects.json' with {type: 'json'};
+import comparisonBaselines from './data/comparison-baselines.json' with {type: 'json'};
 import continuation from './data/continuation-rounds.json' with {type: 'json'};
 import crashed from './data/crashed-after-turn.json' with {type: 'json'};
 import failures from './data/failure-reasons.json' with {type: 'json'};
@@ -34,6 +35,7 @@ const SOURCES: readonly unknown[] = [
   twoObjectives,
   quotaPause,
   gateFailed,
+  comparisonBaselines,
   crashed,
 ];
 
@@ -60,6 +62,7 @@ export const FIXTURE_NAMES: readonly string[] = [
   'finished-two-objectives',
   'quota-pause',
   'input-gate-failed',
+  'comparison-baselines',
   'crashed-after-turn',
   'weeks-600-ideas',
 ];

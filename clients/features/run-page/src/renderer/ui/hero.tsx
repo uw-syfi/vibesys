@@ -25,6 +25,7 @@ import {
 } from '@vibesys/ui';
 import type {JSX} from 'react';
 import {
+  type HeroView,
   heroView,
   type IdeaFocusView,
   ideaFocusView,
@@ -80,6 +81,22 @@ function IdeaLine(props: {readonly view: IdeaFocusView | null}): JSX.Element {
           </Fact>
         </>
       )}
+    </FactLine>
+  );
+}
+
+/** The comparisons with no reading, each a small label with its status word; none when all read. */
+function BaselineNotes(props: {readonly notes: HeroView['baselineNotes']}): JSX.Element | null {
+  if (props.notes.length === 0) return null;
+  return (
+    <FactLine fit="parent" wrap={false}>
+      {props.notes.map(note => (
+        <Fact key={note.label} title={`${note.label} ${note.words}`}>
+          <Text variant="small" tone="muted">
+            {`${note.label} · ${note.words}`}
+          </Text>
+        </Fact>
+      ))}
     </FactLine>
   );
 }
@@ -181,6 +198,7 @@ export function Hero(
               yDomain={chart.yDomain}
               steps={chart.steps}
               {...(chart.reference === null ? {} : {reference: chart.reference})}
+              references={chart.baselines}
               {...(chart.playhead === null ? {} : {playhead: chart.playhead})}
               xTicks={chart.xTicks}
               yTicks={chart.yTicks}
@@ -190,6 +208,7 @@ export function Hero(
           </Stack>
         )}
       </Row>
+      <BaselineNotes notes={hero.baselineNotes} />
       <IdeaLine view={ideaFocusView(props.model, props.idea)} />
     </Stack>
   );

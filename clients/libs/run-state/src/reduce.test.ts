@@ -3762,3 +3762,97 @@ describe('run startup progress state', () => {
     expect(fold().startup).toEqual(fold().startup);
   });
 });
+
+describe('comparison baseline state', () => {
+  type Row = Extract<
+    NonNullable<RunEvent['data']>,
+    {kind: 'comparisons_read'}
+  >['comparisons'][number];
+  const read = (sequence: number, comparisons: Row[]) =>
+    fixtureEvent(sequence, 'comparisons_read', {data: {kind: 'comparisons_read', comparisons}});
+  const measured: Row = {
+    name: 'vllm',
+    label: 'vLLM',
+    status: 'measured',
+    metric: 'tokens_per_sec',
+    unit: 'tok/s',
+    direction: 'max',
+    value: 66.2,
+    spread: 0.02,
+    samples: 3,
+    hosts: ['host-a'],
+  };
+  const statuses: Row['status'][] = ['measured', 'failed', 'not_configured', 'not_measured'];
+
+  it('starts with none', () => {
+    expect(initialCoreState().baselines).toEqual([]);
+  });
+
+  it('holds every row as the event states it, absent fields as null', () => {
+    const state = reduceEvent(
+      initialCoreState(),
+      read(1, [
+        measured,
+        {name: 'sglang', label: 'SGLang', status: 'not_measured'},
+        {name: 'x', label: 'X', status: 'failed', reason: 'engine exited'},
+      ]),
+    );
+    expect(state.baselines.map(row => [row.label, row.status])).toEqual([
+      ['vLLM', 'measured'],
+      ['SGLang', 'not_measured'],
+      ['X', 'failed'],
+    ]);
+    expect(state.baselines[0]).toEqual({
+      name: 'vllm',
+      label: 'vLLM',
+      status: 'measured',
+      metric: 'tokens_per_sec',
+      unit: 'tok/s',
+      direction: 'max',
+      value: 66.2,
+      spread: 0.02,
+      samples: 3,
+      hosts: ['host-a'],
+      reason: null,
+    });
+    expect(state.baselines[1]).toEqual({
+      name: 'sglang',
+      label: 'SGLang',
+      status: 'not_measured',
+      metric: null,
+      unit: null,
+      direction: null,
+      value: null,
+      spread: null,
+      samples: null,
+      hosts: [],
+      reason: null,
+    });
+    expect(state.baselines[2]?.reason).toBe('engine exited');
+  });
+
+  it('the newest event replaces the earlier ones, whatever they held', () => {
+    for (const first of statuses) {
+      for (const second of statuses) {
+        const state = [
+          read(1, [{name: 'a', label: 'A', status: first}, measured]),
+          read(2, [{name: 'b', label: 'B', status: second}]),
+        ].reduce(reduceEvent, initialCoreState());
+        expect(state.baselines.map(row => row.name)).toEqual(['b']);
+        expect(state.baselines[0]?.status).toBe(second);
+      }
+    }
+  });
+
+  it('an empty reading clears the baselines', () => {
+    const state = [read(1, [measured]), read(2, [])].reduce(reduceEvent, initialCoreState());
+    expect(state.baselines).toEqual([]);
+  });
+
+  it('batching the events gives the same baselines as folding them one by one', () => {
+    const events = [read(1, [measured]), read(2, [{name: 'b', label: 'B', status: 'failed'}])];
+    expect(reduceEventBatch(initialCoreState(), events).baselines).toEqual(
+      events.reduce(reduceEvent, initialCoreState()).baselines,
+    );
+  });
+});

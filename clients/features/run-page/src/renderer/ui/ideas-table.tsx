@@ -4,6 +4,7 @@ import {type JSX, useMemo} from 'react';
 import {vsInputCell} from '../../state/idea-words.js';
 import {
   ageWords,
+  baselineColumns,
   effectWords,
   type IdeaEffects,
   type IdeaRow,
@@ -103,6 +104,7 @@ export function IdeasTable(props: {
 }): JSX.Element {
   const {base, filter, sort} = props;
   const rows = useMemo(() => sortedIdeas(base.model, filter, sort), [base.model, filter, sort]);
+  const columns = useMemo(() => baselineColumns(base.model), [base.model]);
   if (rows.length === 0) {
     const words = noIdeasWords(filter);
     return <EmptyState title={words.title} body={words.body} />;
@@ -116,7 +118,10 @@ export function IdeasTable(props: {
         {...(props.selected === null ? {} : {selected: props.selected})}
         header={{
           start: 'idea',
-          end: [{label: 'vs input', fixed: 'figure'}],
+          end: [
+            {label: 'vs input', fixed: 'figure'},
+            ...columns.labels.map(label => ({label, fixed: 'measure'}) as const),
+          ],
         }}
       >
         {rows.map(row => {
@@ -140,6 +145,7 @@ export function IdeasTable(props: {
                 ? {figureTitle: row.figureTitle}
                 : {})}
               figureTone={cell.tone}
+              measure={(columns.cells.get(row.id) ?? []).map(label => ({label}))}
               fresh={row.fresh}
               hover={on => props.dispatch({type: 'ideas-hover', idea: on ? row.id : null})}
               select={() => base.zoom({type: 'open-idea', idea: row.id})}

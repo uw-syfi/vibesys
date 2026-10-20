@@ -7,6 +7,7 @@
 
 export type {UsageRecord} from '@vibesys/contracts/host-helper';
 export {ideaOfAttempt} from './attempt-ideas.js';
+export {type BaselineColumns, baselineColumns} from './baselines.js';
 export {type HistoryLoadingView, historyLoadingView} from './history-words.js';
 export {type IdeaBase, type IdeaBases, ideaBases} from './idea-bases.js';
 export {effectWords, type IdeaEffect, type IdeaEffects, ideaEffects} from './idea-effects.js';
@@ -56,6 +57,7 @@ export {createFactsReader} from './run-facts.js';
 export {
   clockAt,
   clockStart,
+  type HeroView,
   heroView,
   logStreamToFollow,
   type MetricTileView,

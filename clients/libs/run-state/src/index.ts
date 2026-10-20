@@ -40,6 +40,7 @@ export {
   type ChatProposal,
   type ChatQuestion,
   type ChatThread,
+  type ComparisonBaseline,
   type CoreDiagnostic,
   type CoreRunStatus,
   type CoreState,

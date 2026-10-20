@@ -15,7 +15,7 @@
  * model is a function of the log and the sequence.
  */
 import type {RunEvent, RunOverview} from '@vibesys/contracts';
-import type {CoreState} from '@vibesys/run-state';
+import type {ComparisonBaseline, CoreState} from '@vibesys/run-state';
 import {AgentFold, type AgentGraph, agentGraph} from '@vibesys/run-state/agents';
 import {CandidateFold, type CandidateTree, candidateTree} from '@vibesys/run-state/candidates';
 import {closeSpans, type RunEnding, type RunTrace, traceSpans} from '@vibesys/run-state/trace';
@@ -42,13 +42,15 @@ export type {Direction};
  */
 export interface RunFacts {
   readonly comparisons: CoreState['comparisons'];
+  /** The comparison baselines the run read: other engines' readings of the task's benchmark. */
+  readonly baselines: readonly ComparisonBaseline[];
   readonly pauses: readonly QuotaPauseSpan[];
 }
 
-export const NO_FACTS: RunFacts = {comparisons: {}, pauses: NO_PAUSES};
+export const NO_FACTS: RunFacts = {comparisons: {}, baselines: [], pauses: NO_PAUSES};
 
 function sameFacts(a: RunFacts, b: RunFacts): boolean {
-  return a.comparisons === b.comparisons && a.pauses === b.pauses;
+  return a.comparisons === b.comparisons && a.baselines === b.baselines && a.pauses === b.pauses;
 }
 
 /** The run at one sequence. */
@@ -62,6 +64,8 @@ export interface RunModel {
   readonly agents: AgentGraph;
   /** Where turns were stopped on a capacity limit: their time is not agent work. */
   readonly pauses: readonly QuotaPauseSpan[];
+  /** The comparison baselines the run read (`RunFacts`); other engines' readings to set beside its own. */
+  readonly baselines: readonly ComparisonBaseline[];
   /** The latest run-clock time the trace's spans carry, or null when they carry none. */
   readonly latest: number | null;
   /** The gates that failed before the first idea began: the run could not measure its input. */
@@ -192,6 +196,7 @@ class LiveFollower {
       previous.candidates === candidates &&
       previous.agents === agents &&
       previous.pauses === facts.pauses &&
+      previous.baselines === facts.baselines &&
       previous.latest === log.latest &&
       previous.inputGates === log.inputGates.failures
     ) {
@@ -209,6 +214,7 @@ class LiveFollower {
       candidates,
       agents,
       pauses: facts.pauses,
+      baselines: facts.baselines,
       latest: log.latest,
       inputGates: log.inputGates.failures,
       changed,
@@ -283,6 +289,7 @@ function foldedAt(log: TraceLog, at: number, facts: RunFacts, meter: ReadMeter):
     candidates: withLiveBest(settleIdeas(candidateTree(spans), facts.comparisons), direction),
     agents: agentGraph(spans),
     pauses: facts.pauses,
+    baselines: facts.baselines,
     latest: latestTime(spans),
     inputGates: failuresAt(log.inputGates, at),
     changed: NOTHING_CHANGED,

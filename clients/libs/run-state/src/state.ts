@@ -149,6 +149,26 @@ export interface MeasurementComparison {
 }
 
 /**
+ * One comparison baseline of the task as the run read it from its project's store (the newest
+ * `comparisons_read`): another engine's reading of the same benchmark, shown beside the run's
+ * results. `value` is the mean of `samples` runs and `spread` their relative standard deviation;
+ * each is null when the event does not carry it. `reason` says why a failed or unconfigured one is.
+ */
+export interface ComparisonBaseline {
+  readonly name: string;
+  readonly label: string;
+  readonly status: 'measured' | 'failed' | 'not_configured' | 'not_measured';
+  readonly metric: string | null;
+  readonly unit: string | null;
+  readonly direction: 'max' | 'min' | null;
+  readonly value: number | null;
+  readonly spread: number | null;
+  readonly samples: number | null;
+  readonly hosts: readonly string[];
+  readonly reason: string | null;
+}
+
+/**
  * One stop of an agent turn on a provider capacity limit, folded from the `quota_resumed` or
  * `quota_abandoned` event that ended it. The turn did no work for `waitedSeconds`, which ended at
  * the event's `endedAt` (the host's wall time, as every event stamps it).
@@ -424,6 +444,8 @@ export interface CoreState {
    * Folded from events, so a snapshot read does not carry it.
    */
   readonly comparisons: Readonly<Record<string, MeasurementComparison>>;
+  /** The comparison baselines the run last read (`comparisons_read`), in the task's order. */
+  readonly baselines: readonly ComparisonBaseline[];
   readonly benchmarks: readonly BenchmarkRecord[];
   /**
    * Per-workstream (round) terminal facts folded from `workstream_finished` and
@@ -500,6 +522,7 @@ export function initialCoreState(): CoreState {
     quotaPausedAt: null,
     winner: null,
     comparisons: {},
+    baselines: [],
     benchmarks: [],
     workstreams: {},
     tokens: EMPTY_LEDGER,

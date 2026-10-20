@@ -147,6 +147,7 @@ const EVENT_DATA_HANDLERS = {
   run_configured: ignoredEventData,
   framework_warning: ignoredEventData,
   measurement_compared: runEventData(applyMeasurementComparedData),
+  comparisons_read: runEventData(applyComparisonsReadData),
   winner_selected: runEventData(applyWinnerSelectedData),
   workstream_finished: runEventData(applyWorkstreamFinishedData),
   turn_usage_recorded: runEventData(applyTurnUsageData),
@@ -281,6 +282,27 @@ function applyMeasurementComparedData(state: CoreState, event: RunEvent): CoreSt
         baseSamples: data.base_samples,
       },
     },
+  });
+}
+
+/** The newest `comparisons_read` replaces the baselines the run held. */
+function applyComparisonsReadData(state: CoreState, event: RunEvent): CoreState {
+  const data = event.data;
+  if (data?.kind !== 'comparisons_read') return state;
+  return cloneCoreStateWith(state, {
+    baselines: data.comparisons.map(row => ({
+      name: row.name,
+      label: row.label,
+      status: row.status,
+      metric: row.metric ?? null,
+      unit: row.unit ?? null,
+      direction: row.direction ?? null,
+      value: row.value ?? null,
+      spread: row.spread ?? null,
+      samples: row.samples ?? null,
+      hosts: row.hosts ?? [],
+      reason: row.reason ?? null,
+    })),
   });
 }
 

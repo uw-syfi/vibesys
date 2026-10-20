@@ -212,6 +212,8 @@ export function Chart(props: {
   readonly points: readonly ChartPoint[];
   readonly steps?: readonly {readonly x: number; readonly y: number}[];
   readonly reference?: {readonly y: number; readonly label: string};
+  /** More dashed lines, each labelled at the right end (the `reference` is labelled at the left). */
+  readonly references?: readonly {readonly y: number; readonly label: string}[];
   readonly playhead?: number;
   readonly xTicks?: readonly ChartTick[];
   readonly yTicks?: readonly ChartTick[];
@@ -241,6 +243,7 @@ export function Chart(props: {
       ...steps.map(p => p.y),
       ...yTicks.map(t => t.value),
       ...(props.reference === undefined ? [] : [props.reference.y]),
+      ...(props.references ?? []).map(line => line.y),
     ],
     props.yDomain,
   );
@@ -276,6 +279,25 @@ export function Chart(props: {
             </text>
           </g>
         )}
+        {(props.references ?? []).map(line => (
+          <g key={`${line.label}:${line.y}`} data-reference={line.label}>
+            <line
+              className="vs-chart-reference"
+              x1={plot.left}
+              x2={plot.right}
+              y1={at.y(line.y)}
+              y2={at.y(line.y)}
+            />
+            <text
+              className="vs-chart-label"
+              x={plot.right - 6}
+              y={at.y(line.y) - 6}
+              textAnchor="end"
+            >
+              {line.label}
+            </text>
+          </g>
+        ))}
         {steps.length === 0 ? null : <path className="vs-chart-step" d={stepPath(steps, at)} />}
         {drawnPoints(props.points).map(point => (
           <Point

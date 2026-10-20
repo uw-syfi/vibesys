@@ -530,6 +530,65 @@ function inputGateFailed(): RunFixture {
   });
 }
 
+/**
+ * A live run with no reading of its input and two comparison baselines it read when it started: one
+ * engine measured (three samples) and one not measured yet. The headline reads the ideas against
+ * the measured one, the chart draws its reference line, and the Ideas table has a ratio column for
+ * each.
+ */
+function comparisonBaselines(): RunFixture {
+  return fixture({
+    name: 'comparison-baselines',
+    description:
+      'A live run with no input reading and two comparison baselines: one measured, one not measured.',
+    runId: '20261019-120000',
+    state: 'live',
+    build: trace => {
+      trace.event(
+        'comparisons_read',
+        {
+          comparisons: [
+            {
+              name: 'vllm',
+              label: 'vLLM',
+              status: 'measured',
+              metric: OBJECTIVE.metric,
+              unit: OBJECTIVE.unit,
+              direction: OBJECTIVE.direction,
+              value: 66.2,
+              spread: 0.02,
+              samples: 3,
+              hosts: ['host-a'],
+            },
+            {name: 'sglang', label: 'SGLang', status: 'not_measured'},
+          ],
+        },
+        3,
+      );
+      plan(trace, 1, 10);
+      addIdea(trace, {
+        n: 1,
+        title: 'Preallocate the arena',
+        at: 100,
+        round: 1,
+        baseRound: null,
+        end: {kind: 'passed', value: 350.39, sample: 352.1, ratio: 350.39 / 286.96, noInput: true},
+        effect: 'better',
+      });
+      addIdea(trace, {
+        n: 2,
+        title: 'Pin the consumers to cores',
+        at: 800,
+        on: 1,
+        round: 2,
+        baseRound: 1,
+        end: {kind: 'passed', value: 385.4, sample: 395.4, ratio: 385.4 / 350.4, noInput: true},
+        effect: 'better',
+      });
+    },
+  });
+}
+
 /** Ideas that build on other ideas: chains, a merge of two, a base that itself failed. */
 function nonInputBases(): RunFixture {
   return fixture({
@@ -969,5 +1028,6 @@ export function scenarios(): readonly RunFixture[] {
     twoObjectives(),
     quotaPause(),
     inputGateFailed(),
+    comparisonBaselines(),
   ];
 }
