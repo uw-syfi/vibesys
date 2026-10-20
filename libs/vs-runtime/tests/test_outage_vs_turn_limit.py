@@ -461,3 +461,77 @@ def test_work_between_two_outages_is_charged_to_the_turn(
         last_release + PROVIDER_OUTAGE.resend_grace_seconds,
     )
     assert limit <= cut <= limit + _CORE_POLL_S
+
+
+@dataclass
+class _GrowingSends:
+    """An outage whose failing sends take ``first`` and then ``resends`` seconds (the last repeats).
+
+    The turn's first send works until the outage starts, ``lead`` seconds in, then fails after
+    ``first``; each resend fails after its own duration until the outage is over.
+    """
+
+    lead: float
+    outage: float
+    first: float
+    resends: tuple[float, ...]
+    sent: int = 0
+
+    def __call__(self, turn: _Turn) -> None:
+        if self.sent == 0:
+            took = self.lead + self.first
+        else:
+            took = self.resends[min(self.sent - 1, len(self.resends) - 1)]
+        self.sent += 1
+        turn.threads.sleep(took)
+        if turn.clock.now() < START + self.lead + self.outage:
+            raise _outage()
+
+
+def _resends_within_their_grace(grace: float) -> st.SearchStrategy[tuple[float, ...]]:
+    """Resend durations each at most the grace it gets: ``grace``, or twice the longest before."""
+
+    def grow(factors: list[float]) -> tuple[float, ...]:
+        sends: list[float] = []
+        for factor in factors:
+            sends.append(factor * max(grace, 2 * max(sends, default=0.0)))
+        return tuple(sends)
+
+    return st.lists(st.floats(min_value=0.05, max_value=1.0), min_size=1, max_size=5).map(grow)
+
+
+@pytest.mark.regression
+@settings(max_examples=examples(pr=10, nightly=60), deadline=None)
+# Resends that grow past the base grace (600 s): each fits twice the longest before it.
+@example(
+    spare=0.0,
+    first=240.0,
+    resends=(450.0, 850.0, 1600.0),
+    policy=QuotaPolicy(QuotaAction.WAIT, wait_seconds=7200.0, retry_seconds=300.0),
+)
+@given(
+    spare=st.floats(min_value=0.0, max_value=600.0),
+    first=st.floats(min_value=1.0, max_value=600.0),
+    resends=_resends_within_their_grace(PROVIDER_OUTAGE.resend_grace_seconds),
+    policy=_POLICIES,
+)
+def test_a_resend_slower_than_the_base_grace_is_covered_by_twice_the_longest_send(
+    spare: float, first: float, resends: tuple[float, ...], policy: QuotaPolicy
+) -> None:
+    """A resend gets ``max(resend_grace, 2 x the longest resend so far)`` past its release.
+
+    So a provider whose failing sends grow (a CLI that retries longer under load) does not cut a
+    turn near its limit while a resend no longer than twice the longest before it is failing.
+    Before, no test had a send longer than the base grace, so dropping the doubling went
+    unnoticed (review of #3283, mutation M4).
+    """
+    turn_time = 1800.0
+    lead = turn_time - min(first + spare, turn_time)
+    outage = 3 * 3600.0
+    provider = _GrowingSends(lead, outage, first, resends)
+    turn = _Turn(policy, outage, first, lead=lead, provider=provider)
+    turn.play(turn_time)
+
+    assert turn.cut_at == []
+    assert turn.ended == ["plan"]
+    assert turn.sink.abandoned == []
