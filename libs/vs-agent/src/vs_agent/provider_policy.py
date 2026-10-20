@@ -192,7 +192,7 @@ NODE_VERSION = "24.21.0"
 verified against upstream."""
 
 CLI_VERSIONS: dict[str, str] = {
-    "claude": "2.1.268",
+    "claude": "2.1.304",
     "codex": CODEX_DOCKER_CLI_VERSION,
     "gemini": "0.59.0",
     "opencode": "1.18.30",
@@ -204,6 +204,25 @@ Codex draws from :data:`CODEX_DOCKER_CLI_VERSION` instead of repeating its own
 literal: that constant is this module's own single source for the pin, used
 both here and (formerly) by ``cli_docker``'s now-removed per-run container
 install for Modal and SkyPilot.
+"""
+
+CLAUDE_CLI_MIN_FOR_GENERATION: dict[str, str] = {
+    "5.5": "2.1.293",
+}
+"""The oldest Claude Code release that recognizes every model of a Claude
+generation, by agentshim's ``generation_id``.
+
+A Claude Code older than its model does not know the model's id: it prints
+``unrecognized_model`` on every session and prices the model at a fallback rate
+(2.1.268 billed a 5.5 model about 2.6 times too high, before agentshim priced
+turns itself). The pin in :data:`CLI_VERSIONS` and the models agentshim lists
+move separately, so ``test_claude_cli_pin`` fails when the newest generation
+agentshim lists has no entry here, or the pin is older than an entry.
+Read an entry off the binary: the first release whose ``claude`` executable
+contains every model id of the generation (``npm pack
+@anthropic-ai/claude-code-<platform>@<version>``, then ``grep -a`` each id).
+For 5.5 the Opus model is in 2.1.281, Sonnet in 2.1.284 and Haiku, the last, in
+2.1.293.
 """
 
 # The toolchain pins (Rust, Go, and the container-runtime tools) live in

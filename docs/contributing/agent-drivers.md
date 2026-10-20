@@ -422,6 +422,13 @@ version bump is a one-line change in one module. Each Feature's option defaults
 repeat the pins so `devcontainer features test` can run unconfigured, and a test
 fails if they drift.
 
+The pinned Claude Code must also know every Claude model agentshim lists, or it
+bills an unknown model at a fallback rate. `CLAUDE_CLI_MIN_FOR_GENERATION` names
+the oldest release that knows each generation, and `test_claude_cli_pin` fails
+when agentshim lists a newer generation than the table, or the pin is older
+than an entry. Raise the pin in the same PR that bumps agentshim for a new
+generation.
+
 A task Dockerfile that needs the backend's base image declares `ARG
 BASE_IMAGE` and `FROM ${BASE_IMAGE}`; `agent_image` always passes
 `--build-arg BASE_IMAGE=<resolved base>` when building a task image, so this

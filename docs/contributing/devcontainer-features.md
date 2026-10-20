@@ -214,7 +214,7 @@ Equivalence checks, run on both images of each base (the same script,
 
 - Image config: user `agent`, working directory `/workspace`, `PATH`,
   `RUSTUP_HOME`, `CARGO_HOME`, `PIP_BREAK_SYSTEM_PACKAGES`.
-- Run with no flags: uid 1000 and `pwd` of `/workspace`; `claude` 2.1.268,
+- Run with no flags: uid 1000 and `pwd` of `/workspace`; `claude` 2.1.304,
   `codex` 0.160.0, `gemini` 0.59.0, `opencode` 1.18.30; Node 24.21.0; VibeSys's
   Python imports `mcp`; `cargo` and `rustc` 1.92.0; Go 1.23.12; `uv`; `cargo` and
   `go` found by a login shell.

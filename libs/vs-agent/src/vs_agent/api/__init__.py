@@ -81,6 +81,7 @@ from vs_agent.host_resource_declarations import (
 )
 from vs_agent.progress import AgentProgress, CandidateProgress, RoundProgress
 from vs_agent.provider_policy import (
+    CLAUDE_CLI_MIN_FOR_GENERATION,
     CLI_VERSIONS,
     DEFAULT_CLI_PROVIDER,
     NODE_VERSION,
@@ -183,6 +184,7 @@ if TYPE_CHECKING:
 __all__ = [
     "BASE_ENV_ALLOWLIST",
     "CHECK_TIMEOUT_S",
+    "CLAUDE_CLI_MIN_FOR_GENERATION",
     "CLI_VERSIONS",
     "CONTAINER_FRAMEWORK_ROOT",
     "CONTAINER_PYTHON",

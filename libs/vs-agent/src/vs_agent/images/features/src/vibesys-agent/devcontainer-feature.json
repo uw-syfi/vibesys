@@ -12,7 +12,7 @@
     },
     "claude_version": {
       "type": "string",
-      "default": "2.1.268",
+      "default": "2.1.304",
       "description": "@anthropic-ai/claude-code version; default mirrors vs_agent.provider_policy."
     },
     "codex_version": {
