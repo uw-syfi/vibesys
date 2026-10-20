@@ -40,10 +40,15 @@ from .types.strategy import Command, Operation, StrategyState, Wait
 ENVELOPE_SCHEMA_VERSION = 42
 """The version of the envelope a run writes now.
 
-Raising it needs, in the same change, the migration of the previous version in
+A shape change that every saved envelope survives (a new field with a default, a closed set or
+union that gains a member, a looser bound) keeps it: ``scripts/check_persisted_schema_compat.py``
+accepts exactly those under an unchanged version. Any other change, and a change in what a
+stored value means, raises it. Unenforced: telling a meaning change from a refactor needs a
+reviewer. Raising it needs, in the same change, the migration of the previous version in
 ``vs_core._envelope_migrations`` and a fixture envelope saved by the previous version's code
-(``tests/envelopes``); ``tests/test_envelope_migrations.py`` fails without both. A run saved at
-any version from the oldest supported one resumes through that chain.
+(``tests/envelopes``) that the migration rewrites; ``tests/test_envelope_migrations.py`` fails
+without them. A run saved at any version from the oldest supported one resumes through that
+chain.
 """
 
 if TYPE_CHECKING:

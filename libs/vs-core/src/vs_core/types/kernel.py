@@ -406,9 +406,10 @@ class Transition(Value):
 class RunEnvelope[S: StrategyState](Value):
     """Atomic core, strategy, fence and cursor envelope with explicit versioning.
 
-    ``schema_version`` is ``ENVELOPE_SCHEMA_VERSION`` when written; the shape each version
-    names is pinned in vs-core's ``tests/envelope_schema_versions.txt``. An envelope of an
-    older supported version is migrated to the current one before it is decoded
+    ``schema_version`` is ``ENVELOPE_SCHEMA_VERSION`` when written; the shape is pinned by
+    vs-core's ``tests/envelope.persisted-schema.txt``, and a change every saved envelope
+    survives keeps the version (``scripts/check_persisted_schema_compat.py``). An envelope of
+    an older supported version is migrated to the current one before it is decoded
     (``vs_core._envelope_migrations``, checked by ``tests/test_envelope_migrations.py``); one
     of any other version is refused, before its shape is validated, with an error that names
     the version and says whether an older or a newer VibeSys wrote it. One of the current

@@ -37,3 +37,4 @@
 40.1 9fc0c67aeb60fc70625b58ed62132ceef1e26a5c6a3244d4d0be2c6287ea53a1
 41.1 14a2a239d0435488756d7e1902d4aa2678695604173f4dbc3fd28438bc64e90f
 42.1 8042918fd72cf62a9ee342dcd68e8015079e538119df21f6dabe2a65fcea775b
+# Frozen at this line: the shape is pinned by the readable snapshot beside this file (*.persisted-schema.txt) since #3314; kept as history.

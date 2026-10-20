@@ -12,7 +12,9 @@ supported one up to the one before ``ENVELOPE_SCHEMA_VERSION`` has exactly one r
 migration and one fixture envelope (``tests/envelopes/v<n>-*.json``) that the chain brings to
 the current version and decodes. A change to ``ENVELOPE_SCHEMA_VERSION`` without the previous
 version's migration and fixture fails there. The fixtures are saved by the code of their own
-version, never derived from a later one.
+version, never derived from a later one. Since version 42 a compatible shape change keeps the
+version (``scripts/check_persisted_schema_compat.py``), so every step from 42 on rewrites data
+its fixture holds; the number-only steps below predate that rule.
 
 A migration is frozen at the version it targets, so it states what it needs of the document
 itself and imports nothing that a later change can move (not the models, not the comparison
