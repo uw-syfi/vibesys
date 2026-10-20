@@ -1,6 +1,9 @@
 """What a dynamic run may spend, stated once from its config and its roles.
 
 The run schedules `max_rounds * max_in_flight` workstreams, and each is one admitted attempt.
+Agents work in at most `max_in_flight` of them at once; a parked one (waiting for its trusted
+measurement, or in a turn suspended on its evaluations) keeps its attempt open without an agent,
+so core admits up to `max_in_flight + backlog` attempts (`RunRecord.parked`).
 Core enforces the numbers; this module is the one place that derives them from what the search
 does, so a change to a role's corrections or to the planner's bounds changes the budget with it.
 """
@@ -45,7 +48,9 @@ def budget(config: DynamicConfig) -> RunBudget:
     return RunBudget(
         attempts=starts,
         turns=(starts + 1) * planning + starts * per_workstream + outlining,
-        parallel=config.max_in_flight,
+        # the strategy bounds the agents at work; core must admit the work started beside the
+        # parked attempts, or a parked turn waiting for a slot would wait for itself
+        parallel=max(config.max_in_flight, min(config.max_in_flight + config.backlog, starts)),
         refunds=starts,
         adoption_rounds=ADOPTION_ROUNDS,
     )

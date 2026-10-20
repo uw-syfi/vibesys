@@ -6,7 +6,9 @@ produce: failed, stopped before it started, never opened (refunded), parent unve
 may land at any step, since planning does not wait for it. After every step the record's answers
 must agree with the facts: the budget the config states, the slots free, when planning may start
 again, when the search is over, that no workstream starts before the input is measured, who leads
-and why a search may have no winner.
+and why a search may have no winner. An agent turn may suspend on its evaluations and resume, and
+the run may restart after a code change at any step: agents at work never outnumber
+``max_in_flight``, and a resume waits only while no slot is free.
 """
 
 from __future__ import annotations
@@ -53,9 +55,11 @@ from vibesys.orchestration.dynamic.search.api import (
     QueueState,
     RecordState,
     Result,
+    Resuming,
     RunRecord,
     RunSnapshot,
     Scheduled,
+    Suspended,
     WorkKind,
     WorkPlan,
     WorkstreamDone,
@@ -79,6 +83,7 @@ type Step = tuple[str, int]
 WEIGHTED_KINDS = (
     *("plan", "plan", "start", "start", "end", "end", "end"),
     *("continue", "child", "retire", "no-plan", "measured"),
+    *("suspend", "suspend", "resume", "resume", "grant", "restart"),
 )
 STEPS = st.lists(
     st.tuples(
@@ -99,6 +104,10 @@ class Trace:
     names: int = 0
     withheld: set[str] = field(default_factory=set)
     eligible_candidates: set[str] = field(default_factory=set)
+    idle: dict[str, int] = field(default_factory=dict)
+    """Workstreams whose agent turn is suspended, and the wait it is in: no agent works there."""
+    authorized: set[str] = field(default_factory=set)
+    """The idle workstreams whose resume core authorized."""
 
 
 def _fresh(trace: Trace, *, kind: WorkKind = WorkKind.IMPLEMENT, **changes: object) -> WorkPlan:
@@ -157,11 +166,13 @@ def _check(run: RunRecord, trace: Trace) -> None:
     rules = run.config
     scheduled = len(trace.handed_out)
     assert run.started == scheduled == len(run.finished_work) + len(run.running)
-    assert len(run.running) <= rules.max_in_flight
+    # an agent works in every running workstream whose turn is not suspended
+    assert len(set(run.running) - set(trace.idle)) <= rules.max_in_flight
+    assert len(run.working) <= rules.max_in_flight
     assert scheduled - trace.refunded <= rules.start_budget
     # The run may schedule start_budget workstreams; a refund returns its slot.
     left = rules.start_budget - scheduled + trace.refunded
-    assert run.capacity() == max(0, min(rules.max_in_flight - len(run.running), left))
+    assert run.capacity() == max(0, min(rules.max_in_flight - len(run.working), left))
 
     gate = run.gate
     assert not run.may_plan(stopping=True)
@@ -212,6 +223,33 @@ def _check(run: RunRecord, trace: Trace) -> None:
     ]
 
 
+def _suspend(run: RunRecord, trace: Trace, pick: int) -> None:
+    busy = [key for key in run.running if key not in trace.idle and key not in run.resuming]
+    if busy:
+        key = busy[pick % len(busy)]
+        trace.idle[key] = pick + 1
+        run.suspend(Suspended(key=key, wait=pick + 1))
+        assert key in run.parked or len(run.waits) > run.config.backlog
+
+
+def _resume(run: RunRecord, trace: Trace, pick: int) -> None:
+    waiting = [key for key in trace.idle if key not in trace.authorized]
+    if waiting:
+        key = waiting[pick % len(waiting)]
+        trace.authorized.add(key)
+        run.resume(Resuming(key=key, wait=trace.idle[key]))
+
+
+def _grant(run: RunRecord, trace: Trace, _pick: int) -> None:
+    for key, wait in run.resumes():
+        assert key in trace.authorized
+        assert trace.idle.pop(key) == wait
+        trace.authorized.discard(key)
+    # a resume still waits only for a slot: it is parked and every slot works
+    assert all(key in run.parked for key in run.resuming)
+    assert not run.resuming or not run.free_agents()
+
+
 def _plan(run: RunRecord, trace: Trace, pick: int) -> None:
     count = 1 + pick % max(1, run.capacity())
     plans = [
@@ -222,8 +260,8 @@ def _plan(run: RunRecord, trace: Trace, pick: int) -> None:
 
 
 def _start(run: RunRecord, trace: Trace, _pick: int) -> None:
-    free = run.config.max_in_flight - len(run.running)
-    for begun in run.ready_to_start(max(free, 0)):
+    _grant(run, trace, _pick)  # as the root does, before new work takes the free slots
+    for begun in run.ready_to_start(run.free_agents()):
         trace.handed_out.append(begun)
         assert begun.key in run.running
         assert begun.config == run.config
@@ -237,6 +275,8 @@ def _end(run: RunRecord, trace: Trace, pick: int) -> None:
     if run.running:
         start = list(run.running.values())[pick % len(run.running)]
         _done(run, start, ENDINGS[pick % len(ENDINGS)], trace)
+        trace.idle.pop(start.key, None)
+        trace.authorized.discard(start.key)
 
 
 def _no_plan(run: RunRecord, _trace: Trace, pick: int) -> None:
@@ -291,7 +331,19 @@ ACTIONS: dict[str, Callable[[RunRecord, Trace, int], None]] = {
     "child": _child,
     "retire": _retire,
     "measured": _measured,
+    "suspend": _suspend,
+    "resume": _resume,
+    "grant": _grant,
 }
+
+
+def _restarted(run: RunRecord, trace: Trace) -> RunRecord:
+    """The record a code change resumes: every suspended turn waits for a slot to start again."""
+    resumed = RunRecord.resumed(run.config, run.base, run.terms, run.state())
+    resumed.held_over()
+    trace.idle = dict.fromkeys(resumed.resuming, 0)
+    trace.authorized = set(resumed.resuming)
+    return resumed
 
 
 def _step(run: RunRecord, trace: Trace, action: Step) -> None:
@@ -309,7 +361,10 @@ def play(
         run.baseline = None
     for action in steps:
         before = dict(run.running)
-        _step(run, trace, action)
+        if action[0] == "restart":
+            run = _restarted(run, trace)
+        else:
+            _step(run, trace, action)
         _check(run, trace)
         for key, item in before.items():
             if key in run.running:

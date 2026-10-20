@@ -7,6 +7,7 @@ gets one ``TurnFinished`` or one ``Failed``. Between the two, core runs the turn
     render the prompt -> run the turn -> validate the reply against the role's model
     -> ask for a correction of an invalid reply -> ask again after a lost turn (after a backoff)
     -> suspend a turn that waits for evaluations and resume it when core authorizes
+       (and, with a ``Parking``, once the search lends the turn an agent slot again)
     -> hold a write turn's reply until core recorded its checkpoint -> deliver ONE result.
 
 This is ordinary flow code over the runtime's own handle (a ``Kit``), so it is journaled and
@@ -22,7 +23,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from hashlib import sha256
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 from pydantic import TypeAdapter, ValidationError
 
@@ -104,6 +105,26 @@ class _Again:
 _AGAIN = _Again()
 _BACKOFF_STEPS = 16
 """Outage losses past this many wait the backoff's cap; the doubling stops before it overflows."""
+
+
+class Parking(Protocol):
+    """What a search does with the agent slot of a turn core suspended on its evaluations.
+
+    A suspended turn runs no agent until it resumes, however long its evaluations queue. Core
+    calls ``parked`` once it recorded the wait, so the search may lend the turn's slot to other
+    work. Once core authorizes the resume, the ask awaits ``resumed`` before it asks the agent
+    to go on: the search returns when the turn holds an agent slot again (the resume is bound
+    to a slot late, when one is free). A wait that ends without a resume (core refused it, or
+    the run's deadline came) ends the ask with its failure and never calls ``resumed``.
+    """
+
+    def parked(self) -> None:
+        """Core recorded the turn's wait: its agent slot is free until it resumes."""
+        ...
+
+    async def resumed(self) -> None:
+        """Core authorized the resume: return once the turn holds an agent slot again."""
+        ...
 
 
 class Agents:
@@ -193,6 +214,7 @@ class Session:
         within: Seconds | Within | None = None,
         revision: RevisionRef | None = None,
         label: Label | None = None,
+        parking: Parking | None = None,
     ) -> TurnFinished | Failed:
         """Ask the agent once: its validated reply, or the typed failure that ended the turn.
 
@@ -200,7 +222,8 @@ class Session:
         earlier turn it corrects. Each provider turn of the ask may take the role's
         ``turn_time``; ``within`` narrows that for this ask (the smaller limit applies) and
         adds the watches that may end it earlier. ``label`` labels the span of each provider
-        turn the ask makes.
+        turn the ask makes. ``parking`` lends the agent slot of a turn that waits for its
+        evaluations out until its resume (`Parking`); without it the wait keeps the slot.
         """
         asked = (
             None
@@ -210,7 +233,8 @@ class Session:
         role = self.role
         limit = role.turn_time if asked is None else min(asked.limit, role.turn_time)
         until = Within(limit=limit, watches=() if asked is None else asked.watches)
-        ask = _Ask(self._kit, self, prompt, _Terms(until, revision or self.revision, label))
+        terms = _Terms(until, revision or self.revision, label, parking)
+        ask = _Ask(self._kit, self, prompt, terms)
         while True:
             step = await ask.attempt()
             if not isinstance(step, _Again):
@@ -219,11 +243,12 @@ class Session:
 
 @dataclass(frozen=True)
 class _Terms:
-    """What one ask was asked under: its bound, the revision it works on, its spans' label."""
+    """What one ask was asked under: its bound, revision, spans' label and slot while it waits."""
 
     until: Within
     revision: RevisionRef | None
     label: Label | None
+    parking: Parking | None = None
 
 
 class _Ask:
@@ -232,6 +257,7 @@ class _Ask:
     def __init__(self, kit: Kit, session: Session, prompt: Value, terms: _Terms) -> None:
         self.kit = kit
         until, revision, self.label = terms.until, terms.revision, terms.label
+        self.parking = terms.parking
         self.session = session
         self.role = session.role
         self.until = until
@@ -584,6 +610,8 @@ class _Ask:
             message = f"a suspension was recorded as {recorded.kind}"
             raise ContractError(("agents", "turn"), message)
         wanted = recorded.continuation.continuation_id
+        if self.parking is not None:
+            self.parking.parked()
         ready = self.kit.signal(
             f"resume of {wanted.root}",
             lambda event: (
@@ -607,6 +635,8 @@ class _Ask:
         if not isinstance(authorized, ResumeReady):
             message = f"a resume was authorized as {authorized.kind}"
             raise ContractError(("agents", "turn"), message)
+        if self.parking is not None:
+            await self.parking.resumed()  # held until the search lends the turn a slot again
         return self._resumed(turn, authorized)
 
     def _resumed(self, turn: InvocationRef, ready: ResumeReady) -> _Again:
@@ -657,4 +687,4 @@ class _Ask:
         return got.checkpoint
 
 
-__all__ = ["Agents", "Session", "reply_errors"]
+__all__ = ["Agents", "Parking", "Session", "reply_errors"]

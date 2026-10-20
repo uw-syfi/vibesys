@@ -301,8 +301,9 @@ class PlanWorld:
     """While the task's plan decides what runs, the failed steps the planner may continue (and
     nothing else); None when the planner may propose any workstream."""
     parked: frozenset[str] = frozenset()
-    """The keys of running workstreams parked on their trusted measurement: their agents are
-    done and they hold none of the planner's slots (`RunRecord.parked`)."""
+    """The keys of running workstreams parked while they wait for an evaluation (their trusted
+    measurement, or the evaluations a suspended turn waits on): no agent works in them, and they
+    hold none of the planner's slots (`RunRecord.parked`)."""
     evaluations: EvaluationQueueView | None = None
     input_overdue: InputOverdueView | None = None
     main: RevisionRef | None = None

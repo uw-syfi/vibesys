@@ -21,7 +21,7 @@ the role declaration; ``_run`` drives the coroutines; ``_sources`` is what a flo
 search's span kinds and labels.
 """
 
-from ._agents import Agents, Session
+from ._agents import Agents, Parking, Session
 from ._define import FlowDriver, SearchDef, search
 from ._defs import flow
 from ._errors import Deadlock, FlowCodeChanged, Stopped, TaskStopped, TimeUp
@@ -130,6 +130,7 @@ __all__ = [
     "NotOpened",
     "NotReopened",
     "Owners",
+    "Parking",
     "Pending",
     "RestartSettleReason",
     "RestartSettled",

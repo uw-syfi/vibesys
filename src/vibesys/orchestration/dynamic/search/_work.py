@@ -22,6 +22,7 @@ from vibesys.orchestration.dynamic.search._outcomes import (
     WorkstreamStart,
     ended_by,
 )
+from vibesys.orchestration.dynamic.search._reports import WorkstreamParking
 from vibesys.orchestration.dynamic.search._resume import ResumeStage, WorkstreamResume, mark
 from vibesys.orchestration.dynamic.search._roles import IMPLEMENTER, JUDGE, MERGER, PROFILER
 from vibesys.orchestration.dynamic.search._values import (
@@ -65,7 +66,8 @@ async def implement_and_measure(
         )
         # the implementer's candidate is what the judge reviews: its work started the judge
         judge = ctx.agents.session(JUDGE, workspace=ws, started_by=(implementer.agent,))
-        sessions = Conversation(implementer=implementer, judge=judge)
+        parking = WorkstreamParking(ctx, w.key)
+        sessions = Conversation(implementer=implementer, judge=judge, parking=parking)
         result = await implement_until_measurable(ctx, w, ws, work, sessions, at)
         mark(ctx, w, work, ResumeStage.READY, result=result)
     elif at.result is not None:

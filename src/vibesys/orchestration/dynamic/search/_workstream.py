@@ -23,6 +23,7 @@ from vibesys.orchestration.dynamic.search._outcomes import (
     assertion,
     failure_of,
 )
+from vibesys.orchestration.dynamic.search._reports import RESUMES
 from vibesys.orchestration.dynamic.search._resume import ResumeStage, WorkstreamResume, mark
 from vibesys.orchestration.dynamic.search._spans import (
     label_outcome,
@@ -77,7 +78,8 @@ async def resumed(ctx: Flow, at: WorkstreamResume) -> WorkstreamDone:
     """Go on from the workstream's checkpoint in its workspace, after a code change.
 
     A workspace the restart could not give back was settled by the workstream's salvage, so the
-    workstream ends unmeasured with what it had (`WorkstreamDone.lost`).
+    workstream ends unmeasured with what it had (`WorkstreamDone.lost`). One that waited in a
+    suspended turn goes on once the root lends it an agent slot (`RunRecord.held_over`).
     """
     w, work = at.start, at.work()
     try:
@@ -85,6 +87,7 @@ async def resumed(ctx: Flow, at: WorkstreamResume) -> WorkstreamDone:
             if isinstance(ws, NotReopened):
                 return WorkstreamDone.lost(w, at.workspace, at.result or at.carried, at.merged)
             work.workspace = ws
+            await ctx.latch(RESUMES.of(f"{w.key}.0"))
             closing = await close_with(ctx, w, ws, work, at)
     except Stopped:
         closing = work.stopped()

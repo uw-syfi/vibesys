@@ -53,7 +53,7 @@ from vibesys.orchestration.dynamic.search._queue import (
     SlotVerdict,
     Submission,
 )
-from vibesys.orchestration.dynamic.search._reports import InputOverdue
+from vibesys.orchestration.dynamic.search._reports import InputOverdue, Resuming, Suspended
 from vibesys.orchestration.dynamic.search._steps import (
     DONE,
     StepState,
@@ -212,6 +212,10 @@ class RecordState(Value):
     input_overdue: InputOverdue | None
     planned_by: tuple[tuple[str, str], ...] = ()
     """The agent that planned each queued or started plan, by work id."""
+    waits: tuple[str, ...] | None = None
+    """`RunRecord.waits`; None in a checkpoint from before turns parked: the submitted, in order."""
+    suspended: tuple[tuple[str, int], ...] = ()
+    resuming: tuple[tuple[str, int], ...] = ()
 
 
 class DynamicResume(Value):
@@ -267,6 +271,16 @@ class RunRecord:
     submitted: dict[str, Submission] = field(default_factory=dict)
     """Running workstreams that submitted their candidate for its trusted measurement, by key:
     their agents are done, so they no longer hold an agent slot."""
+    waits: dict[str, None] = field(default_factory=dict)
+    """Running workstreams that wait without an agent at work, in the order they began to: on
+    their trusted measurement (`submitted`), or in a turn core suspended on its evaluations
+    (`suspended`, `resuming`). The earliest, up to the run's backlog, are `parked`."""
+    suspended: dict[str, int] = field(default_factory=dict)
+    """Running workstreams whose agent turn core suspended on its evaluations: the turn's wait
+    number, by key (`Suspended`)."""
+    resuming: dict[str, int] = field(default_factory=dict)
+    """Suspended turns core authorized to resume, each held until it has an agent slot
+    (`resumes`): the wait number, by key."""
     planned_by: dict[str, str] = field(default_factory=dict)
     """The agent whose reply planned each plan, by work id: the planner, or the outliner for a
     step it outlined; it starts the plan's workstreams (`WorkstreamStart.started_by`)."""
@@ -317,6 +331,9 @@ class RunRecord:
             evaluations=self.evaluations.state(),
             input_overdue=self.input_overdue,
             planned_by=tuple(self.planned_by.items()),
+            waits=tuple(self.waits),
+            suspended=tuple(self.suspended.items()),
+            resuming=tuple(self.resuming.items()),
         )
 
     @classmethod
@@ -349,11 +366,25 @@ class RunRecord:
             submitted={item.key: item for item in state.submitted},
             input_overdue=state.input_overdue,
             planned_by=dict(state.planned_by),
+            waits=dict.fromkeys(
+                state.waits if state.waits is not None else (s.key for s in state.submitted)
+            ),
+            suspended=dict(state.suspended),
+            resuming=dict(state.resuming),
         )
         record.main = MainLine.resumed(state.baseline, state.main)
         record.outline = state.outline
         record.evaluations = EvaluationQueue.resumed(config.slots, config.pick, state.evaluations)
         return record
+
+    def held_over(self) -> None:
+        """After a code change, hold every workstream that waited in a suspended turn.
+
+        Its flow restarts from its checkpoint and asks its agent again, so it waits for an agent
+        slot first, as a resume does (wait 0, `RESUMES`). The others go on at once.
+        """
+        self.resuming |= dict.fromkeys(self.suspended, 0) | dict.fromkeys(self.resuming, 0)
+        self.suspended.clear()
 
     def decided_verdicts(self) -> list[tuple[str, SlotVerdict]]:
         """The verdict already decided for each running workstream that submitted.
@@ -416,15 +447,15 @@ class RunRecord:
 
     @property
     def parked(self) -> frozenset[str]:
-        """Running workstreams that wait on their trusted measurement without an agent slot.
+        """Running workstreams that wait without an agent slot, measured or in a suspended turn.
 
-        These are the earliest submitted, up to the run's backlog; any later one keeps its slot.
+        These are the earliest to wait, up to the run's backlog; any later one keeps its slot.
         """
-        return frozenset(list(self.submitted)[: self.config.backlog])
+        return frozenset(list(self.waits)[: self.config.backlog])
 
     @property
     def working(self) -> tuple[WorkstreamStart, ...]:
-        """Running workstreams that hold an agent slot: not parked on their measurement."""
+        """Running workstreams that hold an agent slot: not parked while they wait."""
         parked = self.parked
         return tuple(start for key, start in self.running.items() if key not in parked)
 
@@ -509,8 +540,43 @@ class RunRecord:
             raise RuntimeError(msg)
         self.submitted[submission.key] = submission
         self.evaluations.submit(submission)
-        if submission.key in self.parked:
-            self.gate.blocked_at_done = None  # its agent slot is free: planning may fill it
+        self._wait(submission.key)
+
+    def _wait(self, key: str) -> None:
+        """``key`` waits without an agent at work: parked, its agent slot is free."""
+        self.waits.setdefault(key)
+        if key in self.parked:
+            self.gate.blocked_at_done = None  # planning may fill the slot
+
+    def suspend(self, report: Suspended) -> None:
+        """Core suspended an agent turn of a running workstream on the turn's evaluations.
+
+        A workstream held for a slot (`resuming`) asks no agent, so it suspends nothing.
+        """
+        if report.key in self.running and report.key not in self.resuming:
+            self.suspended[report.key] = report.wait
+            self._wait(report.key)
+
+    def resume(self, report: Resuming) -> None:
+        """Core authorized the resume of a suspended turn: it waits for an agent slot."""
+        if self.suspended.get(report.key) == report.wait:
+            del self.suspended[report.key]
+            self.resuming[report.key] = report.wait
+
+    def resumes(self) -> list[tuple[str, int]]:
+        """Lend agent slots to the resuming turns, first authorized first: the keys and waits.
+
+        A parked turn takes a free slot; one that kept its slot goes on at once. So agents at
+        work never outnumber ``max_in_flight``, however many turns wait.
+        """
+        granted: list[tuple[str, int]] = []
+        for key, wait in list(self.resuming.items()):
+            if key in self.parked and not self.free_agents():
+                continue
+            del self.resuming[key]
+            del self.waits[key]
+            granted.append((key, wait))
+        return granted
 
     def released(self, key: str) -> None:
         """The trusted measurement of ``key`` no longer holds its slot."""
@@ -879,6 +945,9 @@ class RunRecord:
         start = done.start
         del self.running[start.key]
         self.submitted.pop(start.key, None)
+        self.waits.pop(start.key, None)
+        self.suspended.pop(start.key, None)
+        self.resuming.pop(start.key, None)
         self.evaluations.forget(start.key)
         profile = start.plan.kind is WorkKind.PROFILE
         self.finished_work.append(

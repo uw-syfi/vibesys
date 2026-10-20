@@ -81,7 +81,6 @@ def drain_within_width(host: Host, *, limit: int = 800) -> None:
 
 
 @pytest.mark.regression
-@pytest.mark.xfail(strict=True, reason="S190/S191: a suspended turn keeps its agent slot")
 @across_restarts
 def test_the_planner_runs_while_every_workstream_waits_in_a_suspended_turn(
     *, restarting: bool | RestartPolicy
@@ -92,7 +91,6 @@ def test_the_planner_runs_while_every_workstream_waits_in_a_suspended_turn(
 
 
 @pytest.mark.regression
-@pytest.mark.xfail(strict=True, reason="S190/S191: a suspended turn keeps its agent slot")
 @across_restarts
 def test_a_resumed_turn_waits_for_a_free_slot_and_agents_never_outnumber_the_width(
     *, restarting: bool | RestartPolicy
@@ -113,7 +111,6 @@ def test_a_resumed_turn_waits_for_a_free_slot_and_agents_never_outnumber_the_wid
 
 
 @pytest.mark.regression
-@pytest.mark.xfail(strict=True, reason="S190/S191: a suspended turn keeps its agent slot")
 def test_a_code_change_while_turns_wait_restarts_them_only_into_free_slots() -> None:
     host, waits = all_waiting(restarting=False)
     start_new_work(host)
