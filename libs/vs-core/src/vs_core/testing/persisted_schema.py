@@ -201,7 +201,7 @@ def _strip(node: object, *, names: bool = False) -> object:
     if names:
         return {key: _strip(value) for key, value in node.items()}
     return {
-        key: _strip(value, names=key in {"properties", "$defs"})
+        key: _strip(value, names=key in {"properties", "$defs", "mapping"})
         for key, value in node.items()
         if key not in _DROPPED
     }
@@ -275,6 +275,10 @@ class _Compare:
         """Every incompatibility found from the roots down, in walk order."""
         return self._node(self._old, self._new, "")
 
+    def takes(self, old: object, new: object) -> bool:
+        """Whether every document valid under the old schema ``old`` is valid under ``new``."""
+        return not self._node(old, new, "")
+
     def _node(self, old_raw: object, new_raw: object, path: str) -> list[Incompatibility]:
         old, new = _clean(old_raw), _clean(new_raw)
         found: list[Incompatibility] = []
@@ -320,10 +324,15 @@ class _Compare:
         ]
 
     def _union(self, old: Schema, new: Schema, path: str) -> list[Incompatibility]:
-        """Every branch of the old union must be taken by some branch of the new one."""
+        """Every branch of the old union must be taken by some branch of the new one.
+
+        A discriminated union picks its branch by one property's value, so that property and
+        the branch each old tag selects must stay; a new tag is a new member. An undiscriminated
+        union picks the branch that fits best, so a new branch must not also take an old one.
+        """
         old_branches = _branches(old)
         new_branches = _branches(new)
-        found: list[Incompatibility] = []
+        found = self._discriminator(old.get("discriminator"), new.get("discriminator"), path)
         for branch in old_branches:
             trials = [self._node(branch, candidate, path) for candidate in new_branches]
             if not all(trials):
@@ -331,6 +340,53 @@ class _Compare:
             closest = min(trials, key=len)
             described = _json(branch)[:60]
             found += closest or [Incompatibility(path, f"no branch takes the old {described}")]
+        if "discriminator" not in old and "discriminator" not in new:
+            found += self._ambiguity(old_branches, new_branches, path)
+        return found
+
+    def _discriminator(self, old: object, new: object, path: str) -> list[Incompatibility]:
+        """A changed discriminator property, or a lost or retargeted tag, of a union."""
+        if old is None and new is None:
+            return []
+        if old is None or new is None:
+            change = "added" if old is None else "removed"
+            return [Incompatibility(path, f"the union's discriminator was {change}")]
+        old_property = _as_dict(old).get("propertyName")
+        new_property = _as_dict(new).get("propertyName")
+        if old_property != new_property:
+            rule = f"the discriminator changed from {old_property!r} to {new_property!r}"
+            return [Incompatibility(path, rule)]
+        old_tags = _as_dict(_as_dict(old).get("mapping"))
+        new_tags = _as_dict(_as_dict(new).get("mapping"))
+        found: list[Incompatibility] = []
+        for tag, target in old_tags.items():
+            if tag not in new_tags:
+                found.append(Incompatibility(path, f"the discriminator lost the tag {tag!r}"))
+            else:
+                found += self._node({"$ref": target}, {"$ref": new_tags[tag]}, path)
+        return found
+
+    def _ambiguity(
+        self, old_branches: list[object], new_branches: list[object], path: str
+    ) -> list[Incompatibility]:
+        """Each old class branch that more new class branches take than old ones did.
+
+        Pydantic decodes an undiscriminated union's object into the branch that fits it best,
+        so a second branch that also takes an old document may decode it as another class.
+        """
+        old_objects = [b for b in old_branches if _is_object(_expand(_clean(b), self._old_defs))]
+        new_objects = [b for b in new_branches if _is_object(_expand(_clean(b), self._new_defs))]
+        if len(new_objects) <= 1:
+            return []
+        within_old = _Compare({"$defs": self._old_defs}, {"$defs": self._old_defs})
+        found: list[Incompatibility] = []
+        for branch in old_objects:
+            before = sum(within_old.takes(branch, other) for other in old_objects)
+            after = sum(self.takes(branch, candidate) for candidate in new_objects)
+            if after > before:
+                described = _json(branch)[:60]
+                rule = f"another branch now also takes the old {described}, and may decode it"
+                found.append(Incompatibility(path, rule))
         return found
 
     def _closed_set(self, old: Schema, new: Schema, path: str) -> list[Incompatibility]:
@@ -427,6 +483,10 @@ def _branches(node: Schema) -> list[object]:
     """The branches of a union, or ``node`` alone (without what belongs to the field)."""
     branches = _as_list(node.get("anyOf")) or _as_list(node.get("oneOf"))
     return branches or [_without_union(node)]
+
+
+def _is_object(node: Schema) -> bool:
+    return "properties" in node or _types(node) == {"object"}
 
 
 def _without_union(node: Schema) -> Schema:

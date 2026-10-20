@@ -7,8 +7,6 @@ union under an unchanged version, even when each class on its own would still ta
 
 from __future__ import annotations
 
-import pytest
-
 from vs_core.api import ENVELOPE_SCHEMA_VERSION, FlowState, RunEnvelope
 from vs_core.api.testing import schema_snapshot, snapshot_problems
 
@@ -18,7 +16,6 @@ def _envelope_snapshot() -> str:
     return schema_snapshot("RunEnvelope[FlowState]", (ENVELOPE_SCHEMA_VERSION,), schema)
 
 
-@pytest.mark.xfail(strict=True, reason="the check ignores a union's discriminator")
 def test_a_changed_discriminator_of_the_real_envelope_is_reported() -> None:
     """Regression: renaming the envelope's first discriminator property was accepted."""
     base = _envelope_snapshot()
