@@ -6,7 +6,9 @@ the planner runs while every workstream waits (S191: an operator's steer for the
 stored for its next turn, which must come). The resume is bound to a slot late: it waits until
 one is free, so agents at work never outnumber ``max_in_flight``. A run restarted after a code
 change keeps that bound: a workstream that waited in a suspended turn asks its agent again only
-once it has a slot.
+once it has a slot. Core admits at most a limited number of attempts at once (an operator may
+lower it to ``max_in_flight``); a parked turn keeps its attempt open, and new work queued for
+admission must never keep the parked turns from resuming.
 """
 
 from __future__ import annotations
@@ -19,7 +21,7 @@ from tests.vibesys.orchestration.dynamic.test_agent_waits import offering
 from tests.vibesys.vibesys_flows import across_restarts
 
 from vibesys.orchestration.dynamic.search.api import dynamic
-from vs_core.api import Finish, RequestTurn
+from vs_core.api import Finish, RequestTurn, StartAttempt
 from vs_core.api.testing import code_changed
 
 if TYPE_CHECKING:
@@ -80,6 +82,25 @@ def drain_within_width(host: Host, *, limit: int = 800) -> None:
     raise AssertionError(message)
 
 
+def drain_admitting(host: Host, *, limit: int, steps: int = 800) -> None:
+    """Answer everything the ordinary way, admitting an attempt only while fewer than ``limit``
+    are open (core's admission), and never moving the clock: a run that idles until its deadline
+    is stuck."""
+    for _ in range(steps):
+        assert len(at_work(host)) <= WIDTH, (at_work(host), host.run.timeline())
+        full = len(host.unsettled) >= limit
+        answerable = [
+            asked
+            for asked in host.run.open
+            if asked.until is not None and not (full and isinstance(asked.request, StartAttempt))
+        ]
+        if not answerable:
+            return
+        host.answer(answerable[0])
+    message = f"the flow did not settle in {steps} steps: {host.run.timeline()}"
+    raise AssertionError(message)
+
+
 @pytest.mark.regression
 @across_restarts
 def test_the_planner_runs_while_every_workstream_waits_in_a_suspended_turn(
@@ -121,3 +142,24 @@ def test_a_code_change_while_turns_wait_restarts_them_only_into_free_slots() -> 
     assert len(at_work(host)) <= WIDTH, (at_work(host), host.run.timeline())
     drain_within_width(host)
     assert isinstance(host.run.finished, Finish)
+
+
+@pytest.mark.regression
+@pytest.mark.xfail(
+    strict=True, reason="new work queued for admission holds the parked turns' slots"
+)
+@across_restarts
+def test_new_work_queued_for_admission_never_keeps_parked_turns_from_resuming(
+    *, restarting: bool | RestartPolicy
+) -> None:
+    host, waits = all_waiting(restarting=restarting)  # h1 and h2 park, each holding an attempt
+    host.answer(host.open(RequestTurn, label=PLANNER_LABEL)[0])  # the planner plans h3 and h4
+    drain_admitting(host, limit=WIDTH)  # an operator set core's limit to the width
+
+    for wait in waits:
+        host.run.resume_ready(wait)
+    drain_admitting(host, limit=WIDTH)
+
+    assert isinstance(host.run.finished, Finish), (
+        f"stuck: open attempts {len(host.unsettled)}, waiting {[a.path for a in host.run.open]}"
+    )
