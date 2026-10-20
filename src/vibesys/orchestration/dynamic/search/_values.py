@@ -13,7 +13,7 @@ from pydantic import Field, model_validator
 
 from vibesys.hypothesis import HypothesisOutcome, HypothesisStrategy
 from vibesys.metrics import AcceptedReading, MetricRow, PartialRow
-from vibesys.orchestration.dynamic.models import StrategyReason
+from vibesys.orchestration.dynamic.models import StrategyReason, UnappliedPart
 from vs_core.api.search import (
     AttemptId,
     CheckpointDecline,
@@ -87,6 +87,31 @@ class Step(Value):
     depends_on: tuple[StepId, ...] = ()
 
 
+class CombinePick(Value):
+    """One part a combine names: a hypothesis and the exact revision of it, as validated."""
+
+    hypothesis_id: str
+    revision: str
+
+
+COMBINE_MIN_PARTS = 2
+"""A combine needs this many parts: with fewer still buildable when it is to start, it never starts."""
+
+
+class CombineSource(Value):
+    """One part of a combine as it was fixed at scheduling: its revision and its own change.
+
+    ``built_on`` is the main revision the part's tree includes (`RunRecord.main_base_at`), so
+    ``built_on..revision`` is the part's own change against main; ``metric`` is its trusted
+    headline, when it had one.
+    """
+
+    hypothesis_id: str
+    revision: RevisionRef
+    built_on: RevisionRef
+    metric: MetricRow | None = None
+
+
 class WorkPlan(Value):
     """The planner's validated choice for one workstream, in immutable form."""
 
@@ -110,7 +135,10 @@ class WorkPlan(Value):
     instructions: str = ""
     """For a merge: how to combine the candidates."""
     watch_for: str = ""
-    """For a merge: what the merger must check or be careful of."""
+    """For a merge or a combine: what the agent must check or be careful of."""
+    combine: tuple[CombinePick, ...] = ()
+    """For a combine: the parts, in the order to apply them. A combine is an implement plan of
+    a new hypothesis that starts from main; a non-empty ``combine`` is what makes it one."""
 
     @property
     def measured(self) -> bool:
@@ -149,13 +177,25 @@ class BlockerKind(StrEnum):
     FAILED = "failed"
     REJECTED = "rejected"
     NO_REPLY = "no_reply"
+    REPLY_REJECTED = "reply_rejected"
+    """The reply broke a rule only the run can check: ``stray`` names the offending entries."""
+
+
+class StrayUnapplied(Value):
+    """An ``unapplied`` entry of an implementer's reply that names no part of its combine."""
+
+    index: int = Field(ge=0)
+    """The entry's position in the reply's ``unapplied`` list."""
+    hypothesis_id: str
+    """The hypothesis the entry named."""
 
 
 class Blocker(Value):
     """One turn of a workstream that ended without a measurable candidate.
 
     ``FAILED`` is the implementer's own account (its summary and the next step it names).
-    ``REJECTED`` is the reviewer's feedback on a candidate that was not measured. ``NO_REPLY`` is
+    ``REJECTED`` is the reviewer's feedback on a candidate that was not measured.
+    ``REPLY_REJECTED`` is a reply the run refused (``stray`` says why). ``NO_REPLY`` is
     a turn that returned nothing usable: ``ended`` or ``turn_failure`` say how, and ``digest``
     fingerprints the diagnostic the executor printed. ``revision`` and ``digest`` are what the
     framework observed, and the only facts that make another turn worth asking.
@@ -168,6 +208,8 @@ class Blocker(Value):
     digest: str | None = None
     ended: FailureReason | None = None
     turn_failure: TurnFailureKind | None = None
+    stray: tuple[StrayUnapplied, ...] = ()
+    """For ``REPLY_REJECTED``: the ``unapplied`` entries that named no part of the combine."""
 
 
 class DropReason(StrEnum):
@@ -324,6 +366,8 @@ class RoundRecord(Value):
     settlement: SettlementId | None = None
     kept_active: bool = False
     """Whether the implementer asked to keep this direction and the lease allows it."""
+    unapplied: tuple[UnappliedPart, ...] = ()
+    """For a combine: what the implementer said it could not apply, naming one of its parts."""
 
 
 class HypothesisRecord(Value):
@@ -340,6 +384,8 @@ class HypothesisRecord(Value):
     last_task: str = ""
     continuation_rounds: int = Field(default=0, ge=0)
     rounds: tuple[RoundRecord, ...] = ()
+    combined_from: tuple[CombineSource, ...] = ()
+    """For a hypothesis a combine started: its parts, as they were fixed at scheduling."""
 
 
 class Proof(Value):
@@ -359,16 +405,26 @@ class FinishedWork(Value):
     readings: tuple[AcceptedReading, ...] = ()
     proof: Proof | None = None
     """For a profile workstream: the evidence and decoded readings its history row shows."""
+    main_base: RevisionRef | None = None
+    """The main revision the workstream's tree included: the main it caught up with, else the
+    one its parent's tree included. Git history does not say it: under read-only git a catch-up
+    applies main's change without recording main as an ancestor. None in a record kept by an
+    older build."""
 
 
 # -- the run's main revision and its merges -------------------------------------------------------
 
 
 class MergeSource(Value):
-    """One candidate a merge applies: the hypothesis and the exact revision, fixed at scheduling."""
+    """One candidate a merge applies: the hypothesis and the exact revision, fixed at scheduling.
+
+    ``built_on`` is the main revision the candidate's tree includes, so ``built_on..revision`` is
+    its own change; None only in a merge scheduled by an older build.
+    """
 
     hypothesis_id: str
     revision: RevisionRef
+    built_on: RevisionRef | None = None
 
 
 class MergeOutcome(StrEnum):
@@ -462,6 +518,8 @@ class ViolationCode(StrEnum):
     MERGE_CANDIDATE_NOT_BETTER = "merge-candidate-not-better"
     MERGE_BASELINE_PENDING = "merge-baseline-pending"
     MERGE_UNCHECKABLE = "merge-uncheckable"
+    COMBINE_PARENT_REPEATED = "combine-parent-repeated"
+    """A combine names one hypothesis twice: each part is a different hypothesis."""
 
 
 class Alternative(Value):

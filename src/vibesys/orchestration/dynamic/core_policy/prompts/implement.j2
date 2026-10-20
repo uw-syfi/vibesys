@@ -1,6 +1,6 @@
 {% from '_revision.j2' import rev %}
 {% from 'domain_section.j2' import domain_section %}
-{% from '_macros.j2' import citations %}
+{% from '_macros.j2' import apply_change, apply_conflicts, citations, metric %}
 {% from '_failure.j2' import input_failure_text %}
 Own hypothesis `{{ hypothesis_id }}` in this isolated candidate workspace.
 
@@ -13,6 +13,25 @@ Parent revision: `{{ rev(parent_revision) }}`
 
 Evidence references:
 {{ citations(evidence) }}
+{% if combine or combine_missing %}
+
+This workstream combines retained candidates into one new candidate. Your workspace is a
+checkout of main at `{{ rev(parent_revision) }}`. Apply each part's own change (the diff from
+the revision the part was built on to the part), in this order:
+{% for part in combine %}
+{{ loop.index }}. hypothesis `{{ part.hypothesis_id }}` at `{{ rev(part.revision) }}`{% if part.metric %}, which measured {{ metric(part.metric) }} alone{% endif %}: {{ apply_change('git diff ' ~ rev(part.built_on) ~ ' ' ~ rev(part.revision), agent_git_writable) }}
+{% endfor %}
+{% for pick in combine_missing %}
+- hypothesis `{{ pick.hypothesis_id }}` at `{{ pick.revision }}` is no longer buildable: leave it out.
+{% endfor %}
+{{ apply_conflicts(agent_git_writable) }} Combine the parts as the task says, without
+redesigning any of them.
+{% if watch_for %}
+Where the parts interact, watch for: {{ watch_for }}
+{% endif %}
+Then run the project's fast tests, fix what the combination broke, and submit the composite.
+In {{ reply.unapplied }}, list every part, or piece of one, that you could not apply, and why.
+{% endif %}
 {% if baseline_pending %}
 
 The input's own trusted measurement is still queued or running. Write and test your change
@@ -30,9 +49,10 @@ the input fail.
 {% if rebase_onto %}
 
 The run's main revision moved to `{{ rev(rebase_onto) }}` since this hypothesis last ran: a
-merge combined other candidates into it. Before anything else, rebase your work onto it
-(`git rebase {{ rev(rebase_onto) }}`, resolving conflicts so both your change and main's
-behavior survive), and build this turn's candidate on the rebased tree.
+merge combined other candidates into it. Before anything else, bring main's change into your
+tree: {{ apply_change('git diff ' ~ (rev(rebase_from) if rebase_from else '$(git merge-base HEAD ' ~ rev(rebase_onto) ~ ')') ~ ' ' ~ rev(rebase_onto), agent_git_writable) }}.
+{{ apply_conflicts(agent_git_writable) }} Keep both your change and main's behavior, and build
+this turn's candidate on that tree.
 {% endif %}
 {% if worktree_revision %}
 
@@ -51,6 +71,14 @@ That is the revision your earlier attempt ended at.
 
 Feedback from the prior attempt:
 {{ rejection }}
+{% endif %}
+{% if reply_rejected %}
+
+The framework refused your last reply, so its candidate was not measured:
+{% for item in reply_rejected %}
+- {{ reply.unapplied }}[{{ item.index }}].hypothesis_id names `{{ item.hypothesis_id }}`, which is not a part of this {% if combine %}combine{% else %}workstream: it combines nothing{% endif %}.
+{% endfor %}
+{% if combine %}Name only this combine's parts there ({% for part in combine %}`{{ part.hypothesis_id }}`{% if not loop.last %}, {% endif %}{% endfor %}){% else %}Leave {{ reply.unapplied }} empty{% endif %}, and submit your candidate again.
 {% endif %}
 {% if last_blocker %}
 

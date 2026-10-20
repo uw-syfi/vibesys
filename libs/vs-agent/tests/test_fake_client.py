@@ -612,3 +612,35 @@ def test_a_turn_cancelled_before_its_capacity_stop_is_never_handed_to_the_gate(s
 
     assert len(ended) == _TURNS
     assert True not in gate.handed_cancelled
+
+
+@given(condition=st.sampled_from(QuotaCondition), times=st.sampled_from((1, 2, None)))
+def test_with_no_gate_the_fake_resends_one_transient_stop_as_the_real_client(
+    condition: QuotaCondition, times: int | None
+) -> None:
+    """As the real client's own gate: one resend of a transient stop after 30 s, then it raises.
+
+    ``times`` is how many sends fail (``None``: every one). An exhausted quota is never resent.
+    """
+    threads = SimThreads()
+    client = FakeAgentClient(threads=threads, provider="claude")
+    client.fail("implementer", AgentQuotaError("claude", condition, "stop"), times=times)
+    resent = condition is not QuotaCondition.QUOTA_EXHAUSTED
+
+    def main() -> tuple[bool, float]:
+        try:
+            client.invoke_text(
+                kind="implementer",
+                workspace=Path(),
+                system_prompt="sys",
+                user_prompt="go",
+                round_label="r1",
+            )
+        except AgentQuotaError:
+            return False, threads.clock.now()
+        return True, threads.clock.now()
+
+    answered, waited = threads.run(main)
+
+    assert answered == (resent and times == 1)
+    assert (waited >= 30.0) == resent  # each scripted send also takes a little virtual time

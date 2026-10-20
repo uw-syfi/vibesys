@@ -22,7 +22,12 @@ from vibesys.orchestration.dynamic.search._values import Blocker, BlockerKind
 
 if TYPE_CHECKING:
     from vibesys.candidates.api import Baseline, ReviewEvaluation
-    from vibesys.orchestration.dynamic.search._values import MergeSource, RoundRecord, WorkPlan
+    from vibesys.orchestration.dynamic.search._values import (
+        CombineSource,
+        MergeSource,
+        RoundRecord,
+        WorkPlan,
+    )
     from vs_core.api.search import RevisionRef
 
 CUT = " [cut]"
@@ -79,6 +84,14 @@ class ImplementStart(Protocol):
     def prior(self) -> RoundRecord | None: ...
     @property
     def rebase_onto(self) -> RevisionRef | None: ...
+    @property
+    def combine(self) -> tuple[CombineSource, ...]: ...
+    @property
+    def parent_main(self) -> RevisionRef | None: ...
+
+
+_NOT_STUCK = frozenset({BlockerKind.REJECTED, BlockerKind.REPLY_REJECTED})
+"""Turns that made a candidate the review or the run refused: the implementer was not stuck."""
 
 
 def implement_prompt(
@@ -90,13 +103,14 @@ def implement_prompt(
     ``blockers`` are the turns of this workstream that ended without a measurable candidate;
     ``baseline`` is the input's measurement as known now: None while it has not landed, and an
     unmeasurable one is shown with why it failed.
-    ``w.rebase_onto`` is the run's main when it advanced past this hypothesis's work.
+    ``w.rebase_onto`` is the run's main when it advanced past this hypothesis's work, and
+    ``w.parent_main`` the main the work's tree includes: the catch-up applies the change between.
+    ``w.combine`` are a combine's parts as scheduled; a part the plan named and scheduling left
+    out (no longer offered) is named as missing.
     """
     plan, parent, prior = w.plan, w.parent, w.prior
     latest = blockers[-1] if blockers else None
-    stuck = next(
-        (item for item in reversed(blockers) if item.kind is not BlockerKind.REJECTED), None
-    )
+    stuck = next((item for item in reversed(blockers) if item.kind not in _NOT_STUCK), None)
     prior_tail = "" if prior is None else tail(prior.failure_tail, FAILURE_CHARS)
     return ImplementPrompt(
         hypothesis_id=plan.work_id,
@@ -118,7 +132,22 @@ def implement_prompt(
         prior_failure_fence=fence(prior_tail),
         last_blocker=None if stuck is None else _shown(stuck),
         turns_without_candidate=len(blockers),
+        reply_rejected=(
+            latest.stray if latest is not None and latest.kind is BlockerKind.REPLY_REJECTED else ()
+        ),
         rebase_onto=w.rebase_onto,
+        rebase_from=None if w.rebase_onto is None else w.parent_main,
+        combine=w.combine,
+        combine_missing=tuple(
+            pick
+            for pick in plan.combine
+            if not any(
+                part.hypothesis_id == pick.hypothesis_id
+                and part.revision.revision_id.root == pick.revision
+                for part in w.combine
+            )
+        ),
+        watch_for=plan.watch_for if plan.combine else "",
     )
 
 

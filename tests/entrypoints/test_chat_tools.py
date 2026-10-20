@@ -43,11 +43,14 @@ from vs_agent.api import (
     CONTAINER_PYTHON,
     CONTAINER_SERVER_PACKAGES,
     AgentCapabilities,
+    AgentClient,
+    AgentQuotaError,
     MCPServerSpec,
     NullAgentEventSink,
+    QuotaCondition,
     containerize_server,
 )
-from vs_agent.api.testing import FakeAgentClient
+from vs_agent.api.testing import FakeAgentClient, FakeProvider, FakeTurnScript
 from vs_evaluation.api.tool_relay import (
     SOCKET_ENV,
     TOKEN_ENV,
@@ -65,7 +68,7 @@ if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
 
     from vibesys.api.store import RunStore
-    from vs_agent.api import ToolResultPayload
+    from vs_agent.api import AgentClientProtocol, ToolResultPayload
     from vs_mcp.api import ToolServerDescriptor, ToolSpec
     from vs_project.api import Project
 
@@ -556,12 +559,19 @@ class _ChatSession:
     """One chat conversation over a seeded run, opened as production opens it."""
 
     def __init__(
-        self, tmp_path: Path, threads: SimThreads, *, containerized: bool, runner: FakeCommandRunner
+        self,
+        tmp_path: Path,
+        threads: SimThreads,
+        *,
+        containerized: bool,
+        runner: FakeCommandRunner,
+        client: AgentClientProtocol | None = None,
     ) -> None:
+        """``client`` answers the conversation; a Fake client when omitted."""
         project, run_id = project_with_run(tmp_path)
         seed_agent_state(project, run_id)
         self.network = SimNetwork(threads)
-        self.client = FakeAgentClient(
+        self.client = client or FakeAgentClient(
             threads=threads, capabilities=AgentCapabilities(tool_servers=True, session_reuse=True)
         )
         self.events = _RecordingEvents()
@@ -583,6 +593,7 @@ class _ChatSession:
 
     def server(self) -> ToolServerDescriptor:
         """The tool server the agent was given for its first turn."""
+        assert isinstance(self.client, FakeAgentClient)
         [descriptor] = self.client.calls[0].tool_servers or []
         return descriptor
 
@@ -757,3 +768,56 @@ def test_closing_the_chat_stops_its_relay(tmp_path: Path) -> None:
             relay.ping()
 
     threads.run(main)
+
+
+# --- the chat agent meets a provider overload -----------------------------------------------
+#
+# A chat conversation has no capacity gate: no run holds its turns through an outage. A single
+# transient overload (a 529 "overloaded") must not end the operator's chat turn.
+
+
+@pytest.mark.regression
+def test_a_chat_turn_meeting_one_transient_overload_is_sent_again_once_and_answers(
+    tmp_path: Path,
+) -> None:
+    """The real client, over a provider whose first send is overloaded and whose second answers.
+
+    The provider raises the capacity stop a 529 becomes once the CLI's own retries ran out
+    (``QuotaCondition.UNAVAILABLE``); how a 529 is classified is ``vs_agent``'s concern.
+    """
+    threads = SimThreads(schedule_seed=0)
+    sends: list[float] = []
+    overload = AgentQuotaError("codex", QuotaCondition.UNAVAILABLE, "529 overloaded")
+    client = AgentClient(
+        FakeProvider(
+            script=FakeTurnScript(answers=(overload, "the run converged")),
+            on_send=lambda _request: sends.append(threads.clock.now()),
+            threads=threads,
+        ),
+        provider="codex",
+        run_log_file=None,
+        clock=threads,
+        threads=threads,
+    )
+
+    def main() -> tuple[str, float]:
+        chat = _ChatSession(
+            tmp_path,
+            threads,
+            containerized=False,
+            runner=FakeCommandRunner(threads=threads),
+            client=client,
+        )
+        try:
+            started = threads.clock.now()
+            answer = chat.agent.turn("how did the run go?", invocation_id="inv-1")
+            return answer, threads.clock.now() - started
+        finally:
+            chat.agent.close()
+
+    answer, waited = threads.run(main)
+
+    assert answer == "the run converged"
+    assert len(sends) == 2  # the overloaded send, then exactly one resend
+    assert sends[1] - sends[0] == 30.0  # the resend waited for the provider
+    assert waited >= 30.0

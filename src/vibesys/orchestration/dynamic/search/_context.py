@@ -9,8 +9,8 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Protocol
 
-from vibesys.candidates.api import Baseline, failure, reading
-from vibesys.metrics import reading_of
+from vibesys.candidates.api import Baseline, failure, measurement, reading
+from vibesys.metrics import MetricComparison, MetricRow, MetricSpace, reading_of
 from vibesys.orchestration.dynamic.models import ProfileOffer
 from vibesys.orchestration.dynamic.search import _briefs as briefs
 from vibesys.orchestration.dynamic.search._config import DynamicConfig
@@ -19,9 +19,11 @@ from vibesys.orchestration.dynamic.search._parents import ParentOption, ParentSn
 from vibesys.orchestration.dynamic.search._plan import PlanLedger
 from vibesys.orchestration.dynamic.search._prompts import (
     BuildableRow,
+    CompositeRow,
     EvaluationQueueView,
     HistoryRow,
     InputOverdueView,
+    PartsVerdict,
     PlannerCorrection,
     PlannerPrompt,
     ProfileHistoryRow,
@@ -29,6 +31,8 @@ from vibesys.orchestration.dynamic.search._prompts import (
     WorkstreamHistoryRow,
 )
 from vibesys.orchestration.dynamic.search._values import (
+    COMBINE_MIN_PARTS,
+    CombineSource,
     FinishedWork,
     HypothesisRecord,
     MainMeasurement,
@@ -104,8 +108,73 @@ def _status(record: HypothesisRecord, running: frozenset[str], submitted: frozen
     return record.strategy.value
 
 
+def best_part(parts: tuple[CombineSource, ...], space: MetricSpace) -> CombineSource | None:
+    """The part with the strongest trusted headline by raw value, in its metric's direction.
+
+    Noise plays no part in choosing it: the composite is then compared with the strongest single
+    part. None when no part has a headline, or the headlines are on different metrics or have no
+    known direction.
+    """
+    heads = [(part, head) for part in parts if (head := measurement(part.metric)) is not None]
+    if not heads:
+        return None
+    first = heads[0][1]
+    direction = space.direction(first)
+    if direction is None or any(
+        head.metric != first.metric or space.direction(head) != direction for _, head in heads
+    ):
+        return None
+    sign = 1.0 if direction == "max" else -1.0
+    # max keeps the earliest of equal values, so a tie goes to the part applied first.
+    return max(heads, key=lambda item: sign * item[1].value)[0]
+
+
+_VERDICTS = {
+    MetricComparison.BETTER: PartsVerdict.BETTER,
+    MetricComparison.WORSE: PartsVerdict.WORSE,
+    MetricComparison.WITHIN_NOISE: PartsVerdict.WITHIN_NOISE,
+}
+
+
+def versus_parts(
+    metrics: tuple[MetricRow, ...], parts: tuple[CombineSource, ...], space: MetricSpace | None
+) -> PartsVerdict:
+    """How a composite's headline compares with the strongest part's (`best_part`).
+
+    The comparison applies the task's declared noise (a strict one when it declares none).
+    Without a headline on either side, a space to compare in, or with the composite on another
+    metric than the parts, the verdict is unknown.
+    """
+    if not metrics or space is None:
+        return PartsVerdict.UNKNOWN
+    best = best_part(parts, space)
+    if best is None:
+        return PartsVerdict.UNKNOWN
+    found = space.compare(measurement(metrics[0]), measurement(best.metric))
+    return _VERDICTS.get(found, PartsVerdict.UNKNOWN)
+
+
+def _composite(record: HypothesisRecord, space: MetricSpace | None) -> CompositeRow | None:
+    """A combine's latest candidate beside its parts; None for a hypothesis no combine started."""
+    if not record.combined_from:
+        return None
+    last = record.rounds[-1] if record.rounds else None
+    best = None if space is None else best_part(record.combined_from, space)
+    return CompositeRow(
+        parts=record.combined_from,
+        verdict=versus_parts(() if last is None else last.metrics, record.combined_from, space),
+        best_part=None if best is None else best.hypothesis_id,
+        relative_noise=0.0 if space is None else space.relative_noise,
+        cancelled=len(record.combined_from) < COMBINE_MIN_PARTS and not record.rounds,
+        unapplied=() if last is None else last.unapplied,
+    )
+
+
 def _history_row(
-    record: HypothesisRecord, running: frozenset[str], submitted: frozenset[str]
+    record: HypothesisRecord,
+    running: frozenset[str],
+    submitted: frozenset[str],
+    space: MetricSpace | None = None,
 ) -> HistoryRow:
     last = record.rounds[-1] if record.rounds else None
     shown = "" if last is None else briefs.tail(last.failure_tail, briefs.FAILURE_CHARS)
@@ -126,6 +195,7 @@ def _history_row(
         failure_tail=shown,
         failure_fence=briefs.fence(shown),
         failure=None if last is None else last.failure,
+        composite=_composite(record, space),
     )
 
 
@@ -233,6 +303,8 @@ class PlanWorld:
     """Every finished merge, oldest first."""
     merge_options: MergeOptions = field(default_factory=MergeOptions)
     """Which candidates a merge may name now; its rows are the prompt's mergeable list."""
+    space: MetricSpace | None = None
+    """The space candidates are compared in: a composite is compared with its parts in it."""
 
     @property
     def working(self) -> tuple[RunningWork, ...]:
@@ -316,7 +388,7 @@ class PlanWorld:
         running = frozenset(item.plan.work_id for item in self.working)
         submitted = self._waiting_ids()
         rows: list[WorkstreamHistoryRow] = [
-            _history_row(item, running, submitted) for item in self.hypotheses
+            _history_row(item, running, submitted, self.space) for item in self.hypotheses
         ]
         implement_rows = tuple(rows)
         profiles = [

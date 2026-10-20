@@ -33,7 +33,10 @@ collection, pipeline-parallel bubbles, or long-context kernels. Assign an
 experiment to the largest unattributed gap before any micro-optimization.
 Size each candidate in ms per step against the measurement noise; a change
 smaller than the noise cannot be confirmed alone, so batch such changes into
-one experiment.
+one experiment. When the parts of one serving design (a scheduler, a
+prefix cache with exact resume, stage kernels) each measure within noise or
+worse alone, do not drop them: if the run can combine retained candidates,
+combine those parts into one candidate and measure them together.
 
 Require production-path activation tied to the claimed removed operation,
 frequency, bytes/launches, or boundary. Telemetry in token/layer/request loops

@@ -43,6 +43,7 @@ from vs_agent.session_store import NullSessionStore, SessionStore
 from vs_agent.shim_turns import terminal_result_from
 from vs_agent.sink import NULL_AGENT_EVENT_SINK
 from vs_agent.skills import NULL_SKILL_SELECTION
+from vs_agent.ungated_retry import BoundedRetryCapacityGate
 from vs_agent.usage_records import USAGE_FILE, append_usage_record, usage_dict
 from vs_sim.api import CloseOnce, NothingLeft, Released, utc_datetime
 
@@ -282,7 +283,8 @@ class AgentClient:
         self._clock = clock
         self._active_lock = self._threads.lock()
         self._active_sessions: list[LaunchedSession] = []
-        self._capacity_gate: CapacityGate | None = None
+        # No run holds this client until it installs its own gate: one transient resend.
+        self._capacity_gate: CapacityGate = BoundedRetryCapacityGate()
 
     @property
     def capabilities(self) -> AgentCapabilities:
@@ -591,7 +593,11 @@ class AgentClient:
             )
 
     def set_capacity_gate(self, gate: CapacityGate) -> None:
-        """Hand every later provider capacity limit to ``gate`` instead of failing the turn."""
+        """Hand every later provider capacity limit to ``gate``.
+
+        It replaces the client's own gate, which sends a transient stop again once
+        (:class:`~vs_agent.ungated_retry.BoundedRetryCapacityGate`).
+        """
         self._capacity_gate = gate
 
     def run(
@@ -951,8 +957,9 @@ class AgentClient:
         """Publish a turn before running it so cross-thread cancellation cannot miss it.
 
         A turn that stops on a provider capacity limit goes to the capacity
-        gate, when one is installed, and is sent again on the same live
-        session once the gate returns; the gate raises to end the turn. The
+        gate (the run's, or the client's own one-resend gate) and is sent again
+        on the same live session once the gate returns; the gate raises to end
+        the turn. The
         turn's :class:`CapacityStops` record outlives each send, so a
         cancellation that lands while the gate waits ends the wait, and one
         that lands after it keeps the turn from being sent again.
@@ -971,19 +978,16 @@ class AgentClient:
                 try:
                     result = session.run_turn(turn, observer)
                 except AgentQuotaError as error:
-                    gate = self._capacity_gate
-                    if gate is None or stops.cancelled:
+                    if stops.cancelled:
                         # A cancelled turn is not waited for: it ends with its capacity type.
                         raise
                     stops.count += 1
-                    gate.wait_for_capacity(error, turn, role=role, stops=stops)
+                    self._capacity_gate.wait_for_capacity(error, turn, role=role, stops=stops)
                     if stops.cancelled:
                         # Cancelled after the gate let the turn go: it is not sent again.
                         raise error from None
                 else:
-                    gate = self._capacity_gate
-                    if gate is not None:
-                        gate.turn_served(session.profile.name, stops.model)
+                    self._capacity_gate.turn_served(session.profile.name, stops.model)
                     return result
         finally:
             with self._active_lock:

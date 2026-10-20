@@ -10,6 +10,7 @@ from typing import Literal
 
 from vibesys.hypothesis import HypothesisOutcome, HypothesisStrategy
 from vibesys.orchestration.dynamic.models import (
+    CombinePlan,
     MergePlan,
     PortfolioPlan,
     ProfileOffer,
@@ -22,6 +23,7 @@ from vibesys.orchestration.dynamic.search._main import MergeOptions
 from vibesys.orchestration.dynamic.search._parents import ParentOption
 from vibesys.orchestration.dynamic.search._values import (
     Alternative,
+    CombinePick,
     Expectation,
     HandoffNote,
     HypothesisRecord,
@@ -283,6 +285,54 @@ def _merge_violation(
     return None
 
 
+def _combine_violation(
+    position: int, plan: CombinePlan, ledger: PlanLedger, offered: tuple[ParentOption, ...]
+) -> PlanViolation | None:
+    """A combine needs a new hypothesis ID and distinct parts, each an offered exact revision.
+
+    There is no bar against main: parts that lost or tied alone are what a combine is for.
+    """
+    path: tuple[str | int, ...] = ("workstreams", position)
+    identifier = plan.hypothesis_id
+    taken = (
+        {item.hypothesis_id for item in ledger.hypotheses}
+        | ledger.profile_ids
+        | ledger.merge_ids
+        | ledger.running
+        | ledger.submitted
+    )
+    if identifier in taken:
+        return PlanViolation(
+            path=(*path, "hypothesis_id"), code=ViolationCode.HYPOTHESIS_ID_USED, subject=identifier
+        )
+    seen: set[str] = set()
+    for index, part in enumerate(plan.parents):
+        field = (*path, "parents", index)
+        if part.hypothesis_id in seen:
+            return PlanViolation(
+                path=(*field, "hypothesis_id"),
+                code=ViolationCode.COMBINE_PARENT_REPEATED,
+                subject=part.hypothesis_id,
+            )
+        seen.add(part.hypothesis_id)
+        mine = tuple(item for item in offered if item.snapshot.hypothesis_id == part.hypothesis_id)
+        if not mine:
+            return PlanViolation(
+                path=(*field, "hypothesis_id"),
+                code=ViolationCode.PARENT_NOT_BUILDABLE,
+                subject=part.hypothesis_id,
+            )
+        if not any(item.snapshot.revision.revision_id.root == part.revision for item in mine):
+            return PlanViolation(
+                path=(*field, "revision"),
+                code=ViolationCode.REVISION_NOT_OFFERED,
+                subject=part.hypothesis_id,
+                revision=part.revision,
+                usable=_alternatives(offered),
+            )
+    return None
+
+
 def _updates(
     plan: PortfolioPlan, ledger: PlanLedger
 ) -> tuple[tuple[PlanUpdate, ...], tuple[PlanViolation, ...]]:
@@ -344,7 +394,24 @@ def _ranking(
     return (None, tuple(bad)) if bad else (order, ())
 
 
-def _work_plan(entry: WorkstreamPlan | ProfilePlan | MergePlan) -> WorkPlan:
+type _Entry = WorkstreamPlan | ProfilePlan | MergePlan | CombinePlan
+
+
+def _work_plan(entry: _Entry) -> WorkPlan:
+    if isinstance(entry, CombinePlan):
+        return WorkPlan(
+            kind=WorkKind.IMPLEMENT,
+            work_id=entry.hypothesis_id,
+            title=entry.title,
+            hypothesis=entry.hypothesis,
+            task=entry.instructions,
+            pass_criteria=entry.pass_criteria,
+            watch_for=entry.watch_for,
+            combine=tuple(
+                CombinePick(hypothesis_id=part.hypothesis_id, revision=part.revision)
+                for part in entry.parents
+            ),
+        )
     if isinstance(entry, MergePlan):
         return WorkPlan(
             kind=WorkKind.MERGE,
@@ -376,8 +443,8 @@ def _work_plan(entry: WorkstreamPlan | ProfilePlan | MergePlan) -> WorkPlan:
     )
 
 
-def _repairs(entry: WorkstreamPlan | ProfilePlan | MergePlan, repairable: frozenset[str]) -> bool:
-    """Whether ``entry`` continues one of the failed plan steps; a merge never does."""
+def _repairs(entry: _Entry, repairable: frozenset[str]) -> bool:
+    """Whether ``entry`` continues one of the failed plan steps; a merge or combine never does."""
     return (
         isinstance(entry, WorkstreamPlan)
         and entry.continue_hypothesis
@@ -428,6 +495,8 @@ def validate(
         elif isinstance(entry, MergePlan):
             violation = _merge_violation(position, entry, ledger, offered, merging=merging)
             merging = merging or violation is None  # one merge at a time: main moves once
+        elif isinstance(entry, CombinePlan):
+            violation = _combine_violation(position, entry, ledger, offered)
         else:
             violation = _implement_identity(
                 position, entry, ledger, abandoned=abandoned

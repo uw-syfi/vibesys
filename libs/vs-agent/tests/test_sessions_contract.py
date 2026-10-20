@@ -299,8 +299,9 @@ class _ExitStatusError(Exception):
         OSError("pipe"),
         _ExitStatusError("claude exited with status 1"),
         RuntimeError("claude exited with code 1"),
-        # A turn cancelled during an outage keeps its capacity type in the detail (S179).
-        AgentQuotaError("claude", QuotaCondition.UNAVAILABLE, "API Error: 503"),
+        # A turn that ends on a capacity stop keeps its capacity type in the detail (S179).
+        # An exhausted quota: a client's own gate resends only a transient stop.
+        AgentQuotaError("claude", QuotaCondition.QUOTA_EXHAUSTED, "usage limit reached"),
     ],
     ids=lambda error: type(error).__name__,
 )

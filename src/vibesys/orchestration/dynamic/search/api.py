@@ -3,9 +3,10 @@
 from vibesys.candidates.api import ReviewEvaluation
 from vibesys.candidates.api import review_evaluations as evaluations
 from vibesys.metrics import AcceptedReading, EvidenceReading, MetricRow, PartialRow
-from vibesys.orchestration.dynamic.search._briefs import CUT, bounded, fence, tail
+from vibesys.orchestration.dynamic.search._briefs import CUT, bounded, fence, implement_prompt, tail
 from vibesys.orchestration.dynamic.search._budget import budget
 from vibesys.orchestration.dynamic.search._config import MAX_WIDTH, DynamicConfig
+from vibesys.orchestration.dynamic.search._context import best_part, versus_parts
 from vibesys.orchestration.dynamic.search._handoff import (
     HANDOFF,
     WRITE_HANDOFF_KIND,
@@ -59,6 +60,7 @@ from vibesys.orchestration.dynamic.search._plan import (
 )
 from vibesys.orchestration.dynamic.search._progress import refusal
 from vibesys.orchestration.dynamic.search._prompts import (
+    CompositeRow,
     EvaluationQueueView,
     EvidenceCitation,
     ImplementPrompt,
@@ -66,6 +68,7 @@ from vibesys.orchestration.dynamic.search._prompts import (
     MergeableRow,
     MergePrompt,
     OutlinePrompt,
+    PartsVerdict,
     PlannerCorrection,
     PlannerPrompt,
     ProfileHistoryRow,
@@ -112,6 +115,8 @@ from vibesys.orchestration.dynamic.search._values import (
     AgentName,
     Blocker,
     BlockerKind,
+    CombinePick,
+    CombineSource,
     DropReason,
     Expectation,
     Failure,
@@ -126,6 +131,7 @@ from vibesys.orchestration.dynamic.search._values import (
     Proof,
     RoundRecord,
     Step,
+    StrayUnapplied,
     ViolationCode,
     WorkKind,
     WorkPlan,
@@ -155,6 +161,9 @@ __all__ = [
     "Bound",
     "Candidate",
     "Closing",
+    "CombinePick",
+    "CombineSource",
+    "CompositeRow",
     "DropReason",
     "Dropped",
     "DynamicConfig",
@@ -194,6 +203,7 @@ __all__ = [
     "ParentSnapshot",
     "ParentVerification",
     "PartialRow",
+    "PartsVerdict",
     "PickPolicy",
     "PlanCheck",
     "PlanMode",
@@ -225,6 +235,7 @@ __all__ = [
     "SlotVerdict",
     "Step",
     "StepState",
+    "StrayUnapplied",
     "Submission",
     "Verdict",
     "VerifyParentRevision",
@@ -237,6 +248,7 @@ __all__ = [
     "WorkstreamStart",
     "WriteHandoff",
     "assertion",
+    "best_part",
     "blocked_failure",
     "bounded",
     "budget",
@@ -245,6 +257,7 @@ __all__ = [
     "evaluations",
     "failure_of",
     "fence",
+    "implement_prompt",
     "ingest",
     "options",
     "planning_key",
@@ -254,5 +267,6 @@ __all__ = [
     "snapshot_of",
     "tail",
     "validate",
+    "versus_parts",
     "workstream_key",
 ]

@@ -23,12 +23,14 @@ from vibesys.candidates.api import (
 from vibesys.hypothesis import HypothesisOutcome
 from vibesys.hypothesis.cadence import keeps_hypothesis_active
 from vibesys.metrics import AcceptedReading, MetricRow, reading_of
+from vibesys.orchestration.dynamic.models import UnappliedPart
 from vibesys.orchestration.dynamic.search._config import DynamicConfig
 from vibesys.orchestration.dynamic.search._parents import ParentSnapshot
 from vibesys.orchestration.dynamic.search._values import (
     AgentName,
     Blocker,
     BlockerKind,
+    CombineSource,
     DropReason,
     Failure,
     FailureKind,
@@ -84,11 +86,22 @@ class WorkstreamStart(Value):
     """The input's measurement when the workstream started; None while it was still being measured."""
     merge: tuple[MergeSource, ...] = ()
     """For a merge: the candidates to merge into ``parent`` (main), in order."""
+    combine: tuple[CombineSource, ...] = ()
+    """For a combine: the parts to apply onto ``parent`` (main), in order, fixed at scheduling."""
     rebase_onto: RevisionRef | None = None
     """The run's main, when it advanced past the base of the hypothesis this continues."""
+    parent_main: RevisionRef | None = None
+    """The main revision ``parent``'s tree includes (`RunRecord.main_base_at`): a catch-up
+    applies main's change from it to ``rebase_onto``. None in a start scheduled by an older
+    build."""
     started_by: tuple[str, ...] = ()
     """The agents whose reply planned this workstream (the planner, or the outliner of a step):
     they start its agents. Empty when no agent's reply is known to have planned it."""
+
+    @property
+    def main_base(self) -> RevisionRef | None:
+        """The main revision this workstream's tree includes once it caught up with main."""
+        return self.rebase_onto or self.parent_main
 
     @property
     def attempt(self) -> AttemptId:
@@ -144,6 +157,8 @@ class Candidate(Value):
     next_step: str = ""
     revision: RevisionRef | None = None
     """The revision core retained for the turn; None when no checkpoint was awaited or none exists."""
+    unapplied: tuple[UnappliedPart, ...] = ()
+    """For a combine: what the implementer could not apply, naming only the combine's parts."""
 
 
 class Verdict(Value):
@@ -552,6 +567,8 @@ def blocked_failure(blocker: Blocker) -> Failure:
             return Failure(kind=FailureKind.IMPLEMENTATION_FAILED)
         case BlockerKind.REJECTED:
             return Failure(kind=FailureKind.REVIEW_REJECTED)
+        case BlockerKind.REPLY_REJECTED:
+            return Failure(kind=FailureKind.INVALID_REPLY, role=AgentName.IMPLEMENTER)
         case BlockerKind.NO_REPLY:
             if blocker.turn_failure is not None:
                 return Failure(
@@ -614,6 +631,7 @@ def round_of(done: WorkstreamDone) -> RoundRecord:
         failure_tail=_failing_tail(done),
         settlement=None if settlement is None else settlement.settlement_id,
         kept_active=kept,
+        unapplied=() if result is None else result.candidate.unapplied,
     )
 
 

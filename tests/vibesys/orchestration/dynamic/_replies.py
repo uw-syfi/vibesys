@@ -95,6 +95,21 @@ def merge(identifier: str, *candidates: str, **extra: object) -> dict[str, objec
     }
 
 
+def combine(identifier: str, *parents: tuple[str, str], **extra: object) -> dict[str, object]:
+    """One combine entry of a plan: a new hypothesis built from exact (hypothesis, revision) parts."""
+    return {
+        "kind": "combine",
+        "hypothesis_id": identifier,
+        "title": f"title {identifier}",
+        "hypothesis": f"the parts of {identifier} work together",
+        "parents": [{"hypothesis_id": item, "revision": revision} for item, revision in parents],
+        "instructions": "apply them in order; on a conflict keep both behaviors",
+        "watch_for": "both touch the scheduler",
+        "pass_criteria": "faster than the best part",
+        **extra,
+    }
+
+
 def merged(outcome: str = "merged", reason: str = "") -> str:
     """A merger result reply."""
     return json.dumps(
