@@ -649,7 +649,8 @@ cancelled and ends; any other parked or blocked attempt at the item stays parked
 reopened. One already finishing finishes, and its result stands. The notice the agents receive
 names what became of each attempt. `set-max-parallel N` changes how many attempts the run admits at once, from
 1 up to the limit the run was launched with; a lower limit starts nothing new until enough
-attempts end, and stops none that runs. Actions apply in the order they were posted, among the
+attempts end, and stops none that runs. It never raises agent concurrency: a dynamic run's
+agents never outnumber its `--max-in-flight`. Actions apply in the order they were posted, among the
 other requests. When the run takes an action, its agents are told what changed at their next
 turn, and `vibesys control <run-id> status <id>` reads `applied`.
 
