@@ -90,6 +90,10 @@ class ImplementStart(Protocol):
     def parent_main(self) -> RevisionRef | None: ...
 
 
+_NOT_STUCK = frozenset({BlockerKind.REJECTED, BlockerKind.REPLY_REJECTED})
+"""Turns that made a candidate the review or the run refused: the implementer was not stuck."""
+
+
 def implement_prompt(
     w: ImplementStart, blockers: tuple[Blocker, ...], *, baseline: Baseline | None
 ) -> ImplementPrompt:
@@ -106,9 +110,7 @@ def implement_prompt(
     """
     plan, parent, prior = w.plan, w.parent, w.prior
     latest = blockers[-1] if blockers else None
-    stuck = next(
-        (item for item in reversed(blockers) if item.kind is not BlockerKind.REJECTED), None
-    )
+    stuck = next((item for item in reversed(blockers) if item.kind not in _NOT_STUCK), None)
     prior_tail = "" if prior is None else tail(prior.failure_tail, FAILURE_CHARS)
     return ImplementPrompt(
         hypothesis_id=plan.work_id,
@@ -130,6 +132,9 @@ def implement_prompt(
         prior_failure_fence=fence(prior_tail),
         last_blocker=None if stuck is None else _shown(stuck),
         turns_without_candidate=len(blockers),
+        reply_rejected=(
+            latest.stray if latest is not None and latest.kind is BlockerKind.REPLY_REJECTED else ()
+        ),
         rebase_onto=w.rebase_onto,
         rebase_from=None if w.rebase_onto is None else w.parent_main,
         combine=w.combine,

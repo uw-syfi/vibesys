@@ -225,6 +225,42 @@ def test_what_the_implementer_could_not_apply_reaches_the_planner(*, restarting:
     assert "the prefix-cache hunk" in render(PromptTemplate.PORTFOLIO, after)
 
 
+@MODES
+def test_an_unapplied_entry_naming_no_part_refuses_the_reply_and_names_the_field(
+    *, restarting: bool
+) -> None:
+    host, offer = _two_parts_that_lost(restarting=restarting, throughputs=LOST)
+    revisions = {row.hypothesis_id: row.revision.revision_id.root for row in offer.buildable}
+    pair = [(name, revisions[name]) for name in ("h1", "h2")]
+    host.run.reply_raw(host.run.expect_turn(role=PLANNER_LABEL), plan_reply(combine("k1", *pair)))
+    _start(host)
+    kept = {"hypothesis_id": "h2", "part": "the cache hunk", "why": "conflicts with h1"}
+    stray = {"hypothesis_id": "the scheduler part", "part": "all of it", "why": "a typo"}
+    reply = ImplementerResult.model_validate_json(implemented(unapplied=[kept, stray]))
+    checkpoint = Retained(revision=RevisionRef.of_git_commit("c3"))
+    host.run.reply(turn_about(host, "implementer", "k1"), reply, checkpoint=checkpoint)
+
+    # No judge and no measurement: the implementer is asked again, told which field was wrong.
+    assert not host.open(RequestTurn, label="judge")
+    again = turn_about(host, "implementer", "k1").context
+    assert isinstance(again, ImplementPrompt)
+    assert [(item.index, item.hypothesis_id) for item in again.reply_rejected] == [
+        (1, "the scheduler part")
+    ]
+    text = _flat(render(PromptTemplate.IMPLEMENT, again))
+    assert "unapplied`[1].hypothesis_id names `the scheduler part`" in text, text
+    assert "(`h1`, `h2`)" in text
+    fixed = ImplementerResult.model_validate_json(implemented(unapplied=[kept]))
+    checkpoint = Retained(revision=RevisionRef.of_git_commit("c4"))
+    host.run.reply(turn_about(host, "implementer", "k1"), fixed, checkpoint=checkpoint)
+    host.run.reply(turn_about(host, "judge", "k1"), ReviewResult.model_validate_json(reviewed()))
+    _settle(host)
+    after = _plan(host, implement("h3"))
+    composite = getattr(_row(after, "k1"), "composite", None)
+    assert composite is not None
+    assert [item.model_dump() for item in composite.unapplied] == [kept]
+
+
 _TEXT = st.text(st.characters(codec="utf-8", exclude_categories=("Cs",)), min_size=1, max_size=40)
 UNAPPLIED = st.lists(
     st.fixed_dictionaries(

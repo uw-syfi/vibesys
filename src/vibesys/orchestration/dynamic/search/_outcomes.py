@@ -567,6 +567,8 @@ def blocked_failure(blocker: Blocker) -> Failure:
             return Failure(kind=FailureKind.IMPLEMENTATION_FAILED)
         case BlockerKind.REJECTED:
             return Failure(kind=FailureKind.REVIEW_REJECTED)
+        case BlockerKind.REPLY_REJECTED:
+            return Failure(kind=FailureKind.INVALID_REPLY, role=AgentName.IMPLEMENTER)
         case BlockerKind.NO_REPLY:
             if blocker.turn_failure is not None:
                 return Failure(

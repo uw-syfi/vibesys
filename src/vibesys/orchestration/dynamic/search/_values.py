@@ -173,13 +173,25 @@ class BlockerKind(StrEnum):
     FAILED = "failed"
     REJECTED = "rejected"
     NO_REPLY = "no_reply"
+    REPLY_REJECTED = "reply_rejected"
+    """The reply broke a rule only the run can check: ``stray`` names the offending entries."""
+
+
+class StrayUnapplied(Value):
+    """An ``unapplied`` entry of an implementer's reply that names no part of its combine."""
+
+    index: int = Field(ge=0)
+    """The entry's position in the reply's ``unapplied`` list."""
+    hypothesis_id: str
+    """The hypothesis the entry named."""
 
 
 class Blocker(Value):
     """One turn of a workstream that ended without a measurable candidate.
 
     ``FAILED`` is the implementer's own account (its summary and the next step it names).
-    ``REJECTED`` is the reviewer's feedback on a candidate that was not measured. ``NO_REPLY`` is
+    ``REJECTED`` is the reviewer's feedback on a candidate that was not measured.
+    ``REPLY_REJECTED`` is a reply the run refused (``stray`` says why). ``NO_REPLY`` is
     a turn that returned nothing usable: ``ended`` or ``turn_failure`` say how, and ``digest``
     fingerprints the diagnostic the executor printed. ``revision`` and ``digest`` are what the
     framework observed, and the only facts that make another turn worth asking.
@@ -192,6 +204,8 @@ class Blocker(Value):
     digest: str | None = None
     ended: FailureReason | None = None
     turn_failure: TurnFailureKind | None = None
+    stray: tuple[StrayUnapplied, ...] = ()
+    """For ``REPLY_REJECTED``: the ``unapplied`` entries that named no part of the combine."""
 
 
 class DropReason(StrEnum):

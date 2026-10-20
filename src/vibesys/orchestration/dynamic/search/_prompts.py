@@ -26,6 +26,7 @@ from vibesys.orchestration.dynamic.search._values import (
     MergeRecord,
     MergeSource,
     PlanProblem,
+    StrayUnapplied,
     WorkKind,
 )
 from vs_core.api.search import (
@@ -298,6 +299,9 @@ class ImplementPrompt(RolePromptContext):
     """Why the input's own measurement failed, when it had when the turn was asked."""
     rebase_onto: RevisionRef | None = None
     """The run's main, when it advanced past this hypothesis's work: rebase onto it first."""
+    reply_rejected: tuple[StrayUnapplied, ...] = ()
+    """The ``unapplied`` entries of the last reply that named no part of the combine: the run
+    refused that reply, and the implementer submits again with the field corrected."""
     rebase_from: RevisionRef | None = None
     """With ``rebase_onto``: the main revision the work's tree already includes, so the catch-up
     applies only main's change since. None for a workstream an older build scheduled."""
