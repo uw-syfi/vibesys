@@ -496,7 +496,7 @@ depends_on = ["vibesys", "vibesys.inputs", "vs_project", "vs_runtime"]
 [[modules]]
 path = "vibesys.run.host"
 layer = "orchestration_host"
-depends_on = ["vibesys", "vibesys.run", "vibesys.run.evaluation", "vibesys.run.evaluation_socket", "vibesys.run.queue_status", "vibesys.run.evaluation_identity", "vibesys.run.slurm_evaluation", "vibesys.run.profilers", "vibesys.orchestration.skill_selection", "vibesys.run.resources", "vs_agent", "vs_core", "vs_evaluation.api", "vs_project", "vs_runtime", "vs_sandbox", "vs_slurm", "vibesys.run.contracts", "vibesys.run.core_services", "vibesys.run.measurement_events", "vs_mcp", "vs_sim.api"]
+depends_on = ["vibesys", "vibesys.comparisons", "vibesys.run", "vibesys.run.evaluation", "vibesys.run.evaluation_socket", "vibesys.run.queue_status", "vibesys.run.evaluation_identity", "vibesys.run.slurm_evaluation", "vibesys.run.profilers", "vibesys.orchestration.skill_selection", "vibesys.run.resources", "vs_agent", "vs_core", "vs_evaluation.api", "vs_project", "vs_runtime", "vs_sandbox", "vs_slurm", "vibesys.run.contracts", "vibesys.run.core_services", "vibesys.run.measurement_events", "vs_mcp", "vs_sim.api"]
 
 [[modules]]
 path = "vibesys.run.evaluation_socket"

@@ -1018,6 +1018,162 @@
       "title": "CommandResultPayload",
       "type": "object"
     },
+    "ComparisonReadingData": {
+      "additionalProperties": false,
+      "description": "One comparison baseline as the run read it from the project's store.\n\n``value`` is the mean of ``samples`` runs of the task's benchmark against the engine, and\n``spread`` their relative standard deviation (absent for one run). ``reason`` explains a\nfailed or unconfigured comparison. A hidden-from-agents comparison is still shown here:\nthe operator sees it; only the planner's prompt omits it.",
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/ComparisonStatus"
+        },
+        "metric": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Metric"
+        },
+        "unit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Unit"
+        },
+        "direction": {
+          "anyOf": [
+            {
+              "enum": [
+                "max",
+                "min"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Direction"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Value"
+        },
+        "spread": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Spread"
+        },
+        "samples": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Samples"
+        },
+        "hosts": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Hosts",
+          "type": "array"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reason"
+        }
+      },
+      "required": [
+        "name",
+        "label",
+        "status"
+      ],
+      "title": "ComparisonReadingData",
+      "type": "object"
+    },
+    "ComparisonStatus": {
+      "description": "What a run knows of one comparison baseline. Closed; mirrored by ``server.events``.",
+      "enum": [
+        "measured",
+        "failed",
+        "not_configured",
+        "not_measured"
+      ],
+      "title": "ComparisonStatus",
+      "type": "string"
+    },
+    "ComparisonsReadData": {
+      "additionalProperties": false,
+      "description": "The comparison baselines a run read when it started or resumed; the newest event wins.\n\nA run never measures a comparison: ``vibesys compare`` does, once, and stores the reading.",
+      "properties": {
+        "kind": {
+          "const": "comparisons_read",
+          "default": "comparisons_read",
+          "title": "Kind",
+          "type": "string"
+        },
+        "comparisons": {
+          "items": {
+            "$ref": "#/$defs/ComparisonReadingData"
+          },
+          "title": "Comparisons",
+          "type": "array"
+        }
+      },
+      "required": [
+        "kind",
+        "comparisons"
+      ],
+      "title": "ComparisonsReadData",
+      "type": "object"
+    },
     "ConfigurationFailedData": {
       "additionalProperties": false,
       "description": "Diagnostic details for configuration-stage failure.",
@@ -1946,6 +2102,7 @@
         "framework_warning",
         "winner_selected",
         "measurement_compared",
+        "comparisons_read",
         "workstream_finished",
         "turn_usage_recorded",
         "span_started",
@@ -5679,6 +5836,7 @@
                   "benchmark_result": "#/$defs/BenchmarkResultData",
                   "chat": "#/$defs/ChatData",
                   "chat_thread_created": "#/$defs/ChatThreadCreatedData",
+                  "comparisons_read": "#/$defs/ComparisonsReadData",
                   "configuration_failed": "#/$defs/ConfigurationFailedData",
                   "experiments_changed": "#/$defs/ExperimentsChangedData",
                   "framework_warning": "#/$defs/FrameworkWarningData",
@@ -5856,6 +6014,9 @@
                 },
                 {
                   "$ref": "#/$defs/MeasurementComparedData"
+                },
+                {
+                  "$ref": "#/$defs/ComparisonsReadData"
                 },
                 {
                   "$ref": "#/$defs/WorkstreamFinishedData"

@@ -352,6 +352,7 @@ export type EventType =
   | "framework_warning"
   | "winner_selected"
   | "measurement_compared"
+  | "comparisons_read"
   | "workstream_finished"
   | "turn_usage_recorded"
   | "span_started"
@@ -413,6 +414,7 @@ export type Data =
       | FrameworkWarningData
       | WinnerSelectedData
       | MeasurementComparedData
+      | ComparisonsReadData
       | WorkstreamFinishedData
       | TurnUsageData
       | SpanStartedData
@@ -716,7 +718,23 @@ export type BaseSamples = number;
  * Closed set of framework subsystems that emit framework events.
  */
 export type FrameworkSource5 = "gates" | "git_tracking" | "loop" | "gpu" | "skypilot" | "other";
-export type Kind48 = "workstream_finished";
+export type Kind48 = "comparisons_read";
+export type Name3 = string;
+export type Label2 = string;
+/**
+ * What a run knows of one comparison baseline. Closed; mirrored by ``server.events``.
+ */
+export type ComparisonStatus = "measured" | "failed" | "not_configured" | "not_measured";
+export type Metric4 = string | null;
+export type Unit4 = string | null;
+export type Direction3 = ("max" | "min") | null;
+export type Value4 = number | null;
+export type Spread = number | null;
+export type Samples = number | null;
+export type Hosts = string[];
+export type Reason10 = string | null;
+export type Comparisons = ComparisonReadingData[];
+export type Kind49 = "workstream_finished";
 export type SetupFailure = boolean;
 export type Refunded = boolean;
 export type RepeatedError = boolean;
@@ -750,7 +768,7 @@ export type Role1 = string | null;
 export type Turns = number | null;
 export type Limit2 = number | null;
 export type Text6 = string;
-export type Kind49 = "turn_usage_recorded";
+export type Kind50 = "turn_usage_recorded";
 export type InputTokens2 = number | null;
 export type CacheCreationInputTokens = number | null;
 export type CacheReadInputTokens = number | null;
@@ -758,9 +776,9 @@ export type OutputTokens = number | null;
 export type ReasoningOutputTokens = number | null;
 export type TotalCostUsd = number | null;
 export type DurationMs = number | null;
-export type Kind50 = "span_started";
-export type Kind51 = "span_updated";
-export type Kind52 = "span_ended";
+export type Kind51 = "span_started";
+export type Kind52 = "span_updated";
+export type Kind53 = "span_ended";
 /**
  * True when the recording boundary cut variable-size payload fields to keep this event within MAX_SERIALIZED_RUN_EVENT_BYTES.
  */
@@ -856,7 +874,7 @@ export type Reset = boolean;
 export type RemovedHypothesisIds = string[];
 export type ExperimentsReady = boolean | null;
 export type Iterations = IterationSlice | IterationUnavailable | null;
-export type Kind53 = "page";
+export type Kind54 = "page";
 export type SchemaVersion = 1;
 export type RunId4 = string;
 export type ProjectionRevision = string;
@@ -868,7 +886,7 @@ export type ParentId2 = string | null;
  * Policy-neutral kinds a client may use to label navigation rows.
  */
 export type IterationKind = "round" | "workstream" | "attempt" | "generation" | "candidate" | "board" | "item";
-export type Label2 = string;
+export type Label3 = string;
 export type Ordinal = number;
 /**
  * Lifecycle shared by every policy's iteration projection.
@@ -876,13 +894,13 @@ export type Ordinal = number;
 export type IterationStatus = "pending" | "active" | "completed" | "failed" | "cancelled";
 export type ChildCount = number;
 export type Id2 = string;
-export type Value4 = number | null;
-export type Unit4 = string | null;
-export type Direction3 = ("max" | "min") | null;
+export type Value5 = number | null;
+export type Unit5 = string | null;
+export type Direction4 = ("max" | "min") | null;
 export type HeadlineMetrics = IterationMetric[];
 export type Items = IterationSummary[];
 export type NextCursor = string | null;
-export type Kind54 = "unavailable";
+export type Kind55 = "unavailable";
 export type SchemaVersion1 = 1;
 /**
  * Closed reasons why a policy cannot expose iteration navigation.
@@ -945,17 +963,17 @@ export type ClientId18 = string;
 export type Code2 = string;
 export type Message2 = string;
 export type LogOwner = StartupStep | GateStage | ToolBuild | RunNarration;
-export type Kind55 = "startup_step";
+export type Kind56 = "startup_step";
 /**
  * Where an opening environment is, in the order it gets there.
  */
 export type EnvironmentStartupStage = "probing_workspace" | "building_image" | "building_tools" | "starting_container";
-export type Kind56 = "gate_stage";
+export type Kind57 = "gate_stage";
 export type ExecutionId2 = string;
 export type Attempt4 = number;
-export type Kind57 = "tool_build";
-export type Name3 = string;
-export type Kind58 = "run_narration";
+export type Kind58 = "tool_build";
+export type Name4 = string;
+export type Kind59 = "run_narration";
 export type At = string;
 /**
  * A line's severity: the standard ``logging`` level at or below the record's.
@@ -975,10 +993,10 @@ export type StartedBy = string[];
 export type Stage3 = string;
 export type MetricValue1 = number | null;
 export type VsBaseline1 = number | null;
-export type Name4 = string;
+export type Name5 = string;
 export type Finite = number;
-export type Direction4 = "max" | "min";
-export type Unit5 = string | null;
+export type Direction5 = "max" | "min";
+export type Unit6 = string | null;
 export type InputMetrics = MetricRow[];
 export type Metrics = MetricRow[];
 /**
@@ -987,7 +1005,7 @@ export type Metrics = MetricRow[];
 export type EvidenceKind = "correctness" | "benchmark" | "profiling";
 export type Completed = number | null;
 export type Required = number | null;
-export type Unit6 = string | null;
+export type Unit7 = string | null;
 export type Call = number;
 export type HypothesisId1 = string | null;
 export type ParentRevision = string | null;
@@ -2274,6 +2292,36 @@ export interface MeasurementComparedData {
   source?: FrameworkSource5;
 }
 /**
+ * The comparison baselines a run read when it started or resumed; the newest event wins.
+ *
+ * A run never measures a comparison: ``vibesys compare`` does, once, and stores the reading.
+ */
+export interface ComparisonsReadData {
+  kind: Kind48;
+  comparisons: Comparisons;
+}
+/**
+ * One comparison baseline as the run read it from the project's store.
+ *
+ * ``value`` is the mean of ``samples`` runs of the task's benchmark against the engine, and
+ * ``spread`` their relative standard deviation (absent for one run). ``reason`` explains a
+ * failed or unconfigured comparison. A hidden-from-agents comparison is still shown here:
+ * the operator sees it; only the planner's prompt omits it.
+ */
+export interface ComparisonReadingData {
+  name: Name3;
+  label: Label2;
+  status: ComparisonStatus;
+  metric?: Metric4;
+  unit?: Unit4;
+  direction?: Direction3;
+  value?: Value4;
+  spread?: Spread;
+  samples?: Samples;
+  hosts?: Hosts;
+  reason?: Reason10;
+}
+/**
  * Wire summary for one projected, recorded policy round and its typed failure, if any.
  *
  * See ``vibesys.events.WorkstreamFinishedData`` for the generic producer's
@@ -2282,7 +2330,7 @@ export interface MeasurementComparedData {
  * specifically, profile and merge workstreams do not emit this event.
  */
 export interface WorkstreamFinishedData {
-  kind: Kind48;
+  kind: Kind49;
   setup_failure: SetupFailure;
   refunded: Refunded;
   repeated_error: RepeatedError;
@@ -2304,7 +2352,7 @@ export interface WorkstreamFailureData {
  * See ``vibesys.events.TurnUsageData``.
  */
 export interface TurnUsageData {
-  kind: Kind49;
+  kind: Kind50;
   input_tokens?: InputTokens2;
   cache_creation_input_tokens?: CacheCreationInputTokens;
   cache_read_input_tokens?: CacheReadInputTokens;
@@ -2319,21 +2367,21 @@ export interface TurnUsageData {
  */
 export interface SpanStartedData {
   span: Span;
-  kind: Kind50;
+  kind: Kind51;
 }
 /**
  * A span changed.
  */
 export interface SpanUpdatedData {
   span: Span;
-  kind: Kind51;
+  kind: Kind52;
 }
 /**
  * A span ended.
  */
 export interface SpanEndedData {
   span: Span;
-  kind: Kind52;
+  kind: Kind53;
 }
 /**
  * One measured performance result in a run.
@@ -2438,7 +2486,7 @@ export interface ExperimentUpdate {
  * One bounded page, with enough identity to reject stale merges.
  */
 export interface IterationSlice {
-  kind?: Kind53;
+  kind?: Kind54;
   schema_version?: SchemaVersion;
   run_id: RunId4;
   projection_revision: ProjectionRevision;
@@ -2454,7 +2502,7 @@ export interface IterationSummary {
   id: Id1;
   parent_id?: ParentId2;
   kind: IterationKind;
-  label: Label2;
+  label: Label3;
   ordinal: Ordinal;
   status: IterationStatus;
   child_count?: ChildCount;
@@ -2465,15 +2513,15 @@ export interface IterationSummary {
  */
 export interface IterationMetric {
   id: Id2;
-  value?: Value4;
-  unit?: Unit4;
-  direction?: Direction3;
+  value?: Value5;
+  unit?: Unit5;
+  direction?: Direction4;
 }
 /**
  * Typed absence, kept distinct from a supported empty tree.
  */
 export interface IterationUnavailable {
-  kind?: Kind54;
+  kind?: Kind55;
   schema_version?: SchemaVersion1;
   reason: IterationUnavailableReason;
   detail?: Detail5;
@@ -2605,7 +2653,7 @@ export interface ProtocolErrorMessage {
  */
 export interface StartupStep {
   span_id?: SpanId | null;
-  kind: Kind55;
+  kind: Kind56;
   stage: EnvironmentStartupStage;
 }
 /**
@@ -2613,7 +2661,7 @@ export interface StartupStep {
  */
 export interface GateStage {
   span_id?: SpanId | null;
-  kind: Kind56;
+  kind: Kind57;
   execution_id: ExecutionId2;
   gate: GateKind;
   attempt: Attempt4;
@@ -2623,15 +2671,15 @@ export interface GateStage {
  */
 export interface ToolBuild {
   span_id?: SpanId | null;
-  kind: Kind57;
-  name: Name3;
+  kind: Kind58;
+  name: Name4;
 }
 /**
  * The run's own narration for humans: what it is doing, warnings, tracebacks.
  */
 export interface RunNarration {
   span_id?: SpanId | null;
-  kind: Kind58;
+  kind: Kind59;
 }
 /**
  * One narration record, as one JSON line of a narration stream.
@@ -2707,10 +2755,10 @@ export interface GateAttrs {
  * One measured quantity on a declared axis.
  */
 export interface MetricRow {
-  name: Name4;
+  name: Name5;
   value: Finite;
-  direction: Direction4;
-  unit?: Unit5;
+  direction: Direction5;
+  unit?: Unit6;
 }
 /**
  * The trusted check that rejected a candidate, and how far it came when it reported that.
@@ -2722,7 +2770,7 @@ export interface FailedCheck {
   check: EvidenceKind;
   completed?: Completed;
   required?: Required;
-  unit?: Unit6;
+  unit?: Unit7;
 }
 /**
  * A planning call: which call of the run it is.

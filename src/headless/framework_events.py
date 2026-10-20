@@ -5,6 +5,8 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from vibesys.api import (
+    ComparisonsReadData,
+    ComparisonStatus,
     CoreEvent,
     EventStatus,
     FrameworkWarningData,
@@ -45,6 +47,8 @@ def format_framework_event(event: CoreEvent) -> str | None:
             text = _format_winner_selected(data)
         case MeasurementComparedData():
             text = _format_measurement_compared(data)
+        case ComparisonsReadData():
+            text = _format_comparisons_read(data)
     return text
 
 
@@ -217,6 +221,17 @@ def _format_measurement_compared(data: MeasurementComparedData) -> str:
         f"ratio {data.ratio:.3f} \u00b1 {data.noise:.3f} "
         f"({data.candidate_samples} and {data.base_samples} samples)"
     )
+
+
+def _format_comparisons_read(data: ComparisonsReadData) -> str:
+    parts = []
+    for row in data.comparisons:
+        if row.status is ComparisonStatus.MEASURED and row.value is not None:
+            unit = f" {row.unit}" if row.unit else ""
+            parts.append(f"{row.label} {row.value:.4g}{unit}")
+        else:
+            parts.append(f"{row.label} {row.status.value.replace('_', ' ')}")
+    return "[baselines] " + ", ".join(parts)
 
 
 def _format_winner_selected(data: WinnerSelectedData) -> str:

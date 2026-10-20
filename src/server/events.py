@@ -143,6 +143,7 @@ class EventType(StrEnum):
     FRAMEWORK_WARNING = "framework_warning"
     WINNER_SELECTED = "winner_selected"
     MEASUREMENT_COMPARED = "measurement_compared"
+    COMPARISONS_READ = "comparisons_read"
     WORKSTREAM_FINISHED = "workstream_finished"
     TURN_USAGE_RECORDED = "turn_usage_recorded"
     SPAN_STARTED = "span_started"
@@ -832,6 +833,49 @@ class MeasurementComparedData(EventPayload):
     source: FrameworkSource = FrameworkSource.GATES
 
 
+class ComparisonStatus(StrEnum):
+    """What a run knows of one comparison baseline. Closed; mirrored by ``server.events``."""
+
+    MEASURED = "measured"
+    FAILED = "failed"
+    NOT_CONFIGURED = "not_configured"
+    NOT_MEASURED = "not_measured"
+
+
+class ComparisonReadingData(BaseModel):
+    """One comparison baseline as the run read it from the project's store.
+
+    ``value`` is the mean of ``samples`` runs of the task's benchmark against the engine, and
+    ``spread`` their relative standard deviation (absent for one run). ``reason`` explains a
+    failed or unconfigured comparison. A hidden-from-agents comparison is still shown here:
+    the operator sees it; only the planner's prompt omits it.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    name: str
+    label: str
+    status: ComparisonStatus
+    metric: str | None = None
+    unit: str | None = None
+    direction: Literal["max", "min"] | None = None
+    value: FiniteFloat | None = None
+    spread: FiniteFloat | None = None
+    samples: int | None = None
+    hosts: tuple[str, ...] = ()
+    reason: str | None = None
+
+
+class ComparisonsReadData(EventPayload):
+    """The comparison baselines a run read when it started or resumed; the newest event wins.
+
+    A run never measures a comparison: ``vibesys compare`` does, once, and stores the reading.
+    """
+
+    kind: Literal["comparisons_read"] = "comparisons_read"
+    comparisons: tuple[ComparisonReadingData, ...]
+
+
 class WorkstreamFailureKind(StrEnum):
     """Why a workstream ended without a measured candidate. Closed.
 
@@ -980,6 +1024,7 @@ EventData = Annotated[
     | FrameworkWarningData
     | WinnerSelectedData
     | MeasurementComparedData
+    | ComparisonsReadData
     | WorkstreamFinishedData
     | TurnUsageData
     | SpanStartedData

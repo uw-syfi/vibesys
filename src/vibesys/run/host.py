@@ -7,8 +7,9 @@ from dataclasses import dataclass, field, replace
 from functools import partial
 from typing import TYPE_CHECKING, cast
 
+from vibesys.comparisons.api import comparisons_read_data, stored_comparisons
 from vibesys.composition import AgentToolContext, agent_spec_from_config, resolve_agent_specs
-from vibesys.events import CoreEventType, FrameworkSource, FrameworkWarningData
+from vibesys.events import CoreEventType, EventStatus, FrameworkSource, FrameworkWarningData
 from vibesys.orchestration.skill_selection import platform_skill_selection
 from vibesys.run.agent_events import CoreAgentEventSink
 from vibesys.run.contracts import ProfilerKind
@@ -249,7 +250,29 @@ class _ProductHostFactory:
         )
         if self.core_services.profile_capture_withheld:
             logger.lprint(_NO_PROFILE_CAPTURE_NOTE)
+        self._journal_comparisons(resources)
         return RunHostComponents(workspaces=workspaces, blocking=blocking)
+
+    def _journal_comparisons(self, resources: _PreparedRun) -> None:
+        """Journal what the project's store holds for the task's comparison baselines.
+
+        Reads only: a run never measures a comparison (``vibesys compare`` does), so this starts
+        no job and cannot block the run.
+        """
+        bundle = self.request.input_bundle
+        if not bundle.manifest.comparison:
+            return
+        cluster = resources.environment_resources.view.cluster_evaluation
+        reports = stored_comparisons(
+            resources.project_resources.project,
+            bundle,
+            None if cluster is None else cluster.settings,
+        )
+        self.integration.events.emit(
+            CoreEventType.COMPARISONS_READ,
+            status=EventStatus.COMPLETED,
+            data=comparisons_read_data(reports),
+        )
 
     def _root_agent_environment_opener(
         self,

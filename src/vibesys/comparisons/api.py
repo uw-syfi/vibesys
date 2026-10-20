@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from vibesys.comparisons._checkout import RepositoryCheckouts
+from vibesys.comparisons._events import comparisons_read_data
 from vibesys.comparisons._slurm import SlurmSampleExecutors
 from vibesys.comparisons._subjects import comparison_subjects
 from vibesys.domains.registry import resolve_domain
@@ -21,6 +22,7 @@ from vs_project.api import comparison_directory, comparison_namespace, load_obje
 from vs_runtime.api.comparisons import (
     ComparisonFailed,
     ComparisonMeasurer,
+    ComparisonNotConfigured,
     ComparisonPlan,
     ComparisonReading,
     ComparisonStore,
@@ -85,12 +87,23 @@ def _store(project: Project) -> ComparisonStore:
 
 
 def stored_comparisons(
-    project: Project, bundle: InputBundle, settings: SlurmOperatorSettings
+    project: Project, bundle: InputBundle, settings: SlurmOperatorSettings | None
 ) -> tuple[ComparisonReport, ...]:
     """What a run shows: each declared comparison's stored reading, or "not measured".
 
-    Starts no job and never blocks.
+    Starts no job and never blocks. Without Slurm *settings* (a run environment that is not a
+    cluster) nothing was measured for it, and each comparison reads "not configured".
     """
+    if settings is None:
+        return tuple(
+            ComparisonReport(
+                spec.name,
+                spec.label,
+                ComparisonNotConfigured(reason="this run environment is not a Slurm cluster"),
+                visible_to_agents=spec.visible_to_agents,
+            )
+            for spec in bundle.manifest.comparison
+        )
     store = _store(project)
     return tuple(
         ComparisonReport(
@@ -205,6 +218,7 @@ __all__ = [
     "SAMPLES",
     "ComparisonHost",
     "ComparisonReport",
+    "comparisons_read_data",
     "measure_comparisons",
     "stored_comparisons",
 ]

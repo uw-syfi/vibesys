@@ -59,6 +59,16 @@ ratio) and a `verdict` of `better`, `within_noise`, `worse` or `inconclusive` (n
 new sample changes it; the run's commit observer emits one event per logged comparison, in order.
 Folding is by order, and a later event for the same candidate supersedes an earlier one.
 
+## Comparison baseline events
+
+`comparisons_read` carries the comparison baselines a run found in its project's store when it
+started or resumed: one row per declared comparison (`name`, `label`, `status`), in the task's
+order. `status` is `measured` (with `metric`, `unit`, `direction`, `value`, the mean of `samples`
+runs, `spread`, their relative standard deviation when there are two or more, and `hosts`),
+`failed` or `not_configured` (with a `reason`), or `not_measured`: nothing is stored for the
+comparison's current configuration. A run never measures a comparison; `vibesys compare` does,
+once, and stores the reading. The newest `comparisons_read` event replaces the earlier ones.
+
 ## Run trace events
 
 This is payload level, recorded here because every client folds it the same way. The run trace
