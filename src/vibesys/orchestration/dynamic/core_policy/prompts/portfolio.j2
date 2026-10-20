@@ -31,6 +31,14 @@ Input baseline (the root before any change, trusted benchmark):
 {% endfor %}
 A candidate must beat it on the objectives to be adopted.
 {% endif %}
+{% if comparisons %}
+
+Comparison references (mature engines measured once with this same benchmark; none is a candidate and none can be adopted):
+{% for c in comparisons %}
+- {{ c.label }}: {{ c.value }}{% if c.unit %} {{ c.unit }}{% endif %}{% if c.direction %} (better: {{ c.direction }}){% endif %}
+
+{% endfor %}
+{% endif %}
 {% if baseline_pending %}
 
 Input baseline: still being measured (the trusted evaluation may wait in a queue). Plan

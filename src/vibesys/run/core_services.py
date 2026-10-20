@@ -121,6 +121,8 @@ class CoreEnvironment:
     reconciliation_bound_seconds: int
     lifecycle: frozenset[LifecycleCapability]
     """Lifecycle capabilities this host offers the strategy."""
+    prompt_variables: Mapping[str, object] = field(default_factory=dict)
+    """Data the host adds to the run's prompts (see ``CoreRunContext.prompt_variables``)."""
 
 
 def ignore_lifecycle(event: object) -> None:
@@ -315,6 +317,7 @@ def _context(resources: CoreResources, artifacts: ArtifactStore) -> CoreRunConte
         cleanup_bound_seconds=environment.cleanup_bound_seconds,
         reconciliation_bound_seconds=environment.reconciliation_bound_seconds,
         role_models=resources.role_models,
+        prompt_variables=environment.prompt_variables,
     )
 
 

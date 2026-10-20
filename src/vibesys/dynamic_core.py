@@ -8,6 +8,7 @@ operations to the runtime's production owners and read a run's committed record.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -144,6 +145,14 @@ def _task_terms(
     )
 
 
+def _visible_comparisons(context: CoreRunContext) -> tuple[Mapping[str, object], ...]:
+    """The comparison readings the host offers the planner: name and number, as data."""
+    offered = context.prompt_variables.get("comparisons", ())
+    if not isinstance(offered, (list, tuple)):
+        return ()
+    return tuple(row for row in offered if isinstance(row, Mapping))
+
+
 def _core_plan(context: CoreRunContext) -> CorePlan:
     """The plan of one run: the search, its config and the task resolved from what the host opened."""
     require_candidate_sandboxes(context.environment, loop="dynamic")
@@ -202,6 +211,7 @@ def _core_plan(context: CoreRunContext) -> CorePlan:
             environment_notes=context.facts.environment_notes,
             agent_evaluation=True,
             agent_git_writable=context.facts.agent_git_writable,
+            comparisons=_visible_comparisons(context),
             domain_sections=domain_prompt_sections(
                 context.facts, modality=launch.modality, interface=launch.interface
             ),

@@ -7,7 +7,12 @@ from dataclasses import dataclass, field, replace
 from functools import partial
 from typing import TYPE_CHECKING, cast
 
-from vibesys.comparisons.api import comparisons_read_data, stored_comparisons
+from vibesys.comparisons.api import (
+    ComparisonReport,
+    comparisons_read_data,
+    stored_comparisons,
+    visible_comparison_variables,
+)
 from vibesys.composition import AgentToolContext, agent_spec_from_config, resolve_agent_specs
 from vibesys.events import CoreEventType, EventStatus, FrameworkSource, FrameworkWarningData
 from vibesys.orchestration.skill_selection import platform_skill_selection
@@ -162,6 +167,7 @@ class _ProductHostFactory:
     core_services: CoreServices | None = field(default=None, init=False)
     local_evaluation: Evaluation | None = field(default=None, init=False)
     facts: RunFacts | None = field(default=None, init=False)
+    comparisons: tuple[ComparisonReport, ...] = field(default=(), init=False)
 
     def prepare(self, ownership: ReleaseStack) -> RunHostComponents:
         """Open product resources and compose the core services over them."""
@@ -245,33 +251,39 @@ class _ProductHostFactory:
         evaluation = stop_gated_evaluation(evaluation, self.integration.control)
         self.local_evaluation = evaluation
         self.facts = resources.facts
+        self.comparisons = self._read_comparisons(resources)
         self.core_services = self._core_services(
             resources, workspace_resources, session_store, agent_runtime, evaluation, ownership
         )
         if self.core_services.profile_capture_withheld:
             logger.lprint(_NO_PROFILE_CAPTURE_NOTE)
-        self._journal_comparisons(resources)
+        self._journal_comparisons()
         return RunHostComponents(workspaces=workspaces, blocking=blocking)
 
-    def _journal_comparisons(self, resources: _PreparedRun) -> None:
-        """Journal what the project's store holds for the task's comparison baselines.
+    def _read_comparisons(self, resources: _PreparedRun) -> tuple[ComparisonReport, ...]:
+        """What the project's store holds for the task's comparison baselines.
 
         Reads only: a run never measures a comparison (``vibesys compare`` does), so this starts
         no job and cannot block the run.
         """
         bundle = self.request.input_bundle
         if not bundle.manifest.comparison:
-            return
+            return ()
         cluster = resources.environment_resources.view.cluster_evaluation
-        reports = stored_comparisons(
+        return stored_comparisons(
             resources.project_resources.project,
             bundle,
             None if cluster is None else cluster.settings,
         )
+
+    def _journal_comparisons(self) -> None:
+        """Journal the comparison readings the run found."""
+        if not self.comparisons:
+            return
         self.integration.events.emit(
             CoreEventType.COMPARISONS_READ,
             status=EventStatus.COMPLETED,
-            data=comparisons_read_data(reports),
+            data=comparisons_read_data(self.comparisons),
         )
 
     def _root_agent_environment_opener(
@@ -585,6 +597,7 @@ class _ProductHostFactory:
             cleanup_bound_seconds=config.run.cleanup_bound_seconds,
             reconciliation_bound_seconds=config.run.reconciliation_bound_seconds,
             lifecycle=lifecycle,
+            prompt_variables=visible_comparison_variables(self.comparisons),
         )
 
     def _evaluation_diagnostic(self, line: str) -> None:

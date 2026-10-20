@@ -304,6 +304,9 @@ committed. The reading is keyed by the comparison's name, image digest (or build
 `serve`, `env`, `benchmark_args` and the hardware; the evaluator version is recorded with it but
 is not in the key. `--force` measures again. A run reads the stored reading and shows it, or "not
 measured" when none is stored for the current configuration; it starts no job and never blocks.
+Agents are told nothing by default. A comparison with `visible_to_agents = true` that is measured
+is given to the dynamic planner as data, its label and number, in a "Comparison references" line;
+a hidden comparison appears in no prompt.
 A failed measurement reads "failed" with its reason, and a machine without the table below reads
 "not configured". A comparison built from a `dockerfile` is not measured on Slurm yet.
 

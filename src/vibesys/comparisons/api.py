@@ -21,6 +21,7 @@ from vibesys.run.evaluation import trusted_evaluation_plan
 from vs_project.api import comparison_directory, comparison_namespace, load_objectives
 from vs_runtime.api.comparisons import (
     ComparisonFailed,
+    ComparisonMeasured,
     ComparisonMeasurer,
     ComparisonNotConfigured,
     ComparisonPlan,
@@ -31,6 +32,7 @@ from vs_runtime.api.comparisons import (
 from vs_runtime.api.infrastructure import prepare_trusted_evaluator, slurm_evaluation_plan
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
     from pathlib import Path
 
     from vibesys.inputs import InputBundle
@@ -70,6 +72,26 @@ class ComparisonHost:
     processes: Processes | None
     cluster: Cluster | None
     """An already-open cluster; without one, the settings' own transport is reached by *processes*."""
+
+
+def visible_comparison_variables(reports: Iterable[ComparisonReport]) -> dict[str, object]:
+    """The prompt data for the comparisons agents may know: measured ones that opted in.
+
+    Empty unless some comparison is both measured and ``visible_to_agents``; a hidden one never
+    appears, whatever its reading. Name and number only, as data: templates own the wording.
+    """
+    rows = [
+        {
+            "name": report.name,
+            "label": report.label,
+            "value": reading.value,
+            "unit": reading.unit,
+            "direction": reading.direction,
+        }
+        for report in reports
+        if report.visible_to_agents and isinstance(reading := report.reading, ComparisonMeasured)
+    ]
+    return {"comparisons": rows} if rows else {}
 
 
 def _headline(bundle: InputBundle) -> str | None:
@@ -221,4 +243,5 @@ __all__ = [
     "comparisons_read_data",
     "measure_comparisons",
     "stored_comparisons",
+    "visible_comparison_variables",
 ]
