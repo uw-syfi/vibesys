@@ -224,6 +224,24 @@ function appended(log: TraceLog, events: readonly RunEvent[], meter?: WorkMeter)
   return added.length === 0 ? log : extended(log, added, meter);
 }
 
+/**
+ * `log` with the scrubber's reach extended back through `events` older than its base. A base from a
+ * summary stands at the run's newest event, and the session's replay can carry events before it:
+ * the fold has them already, so they add nothing to the head, but they are positions the bar can
+ * stand at. They are read into `earlier` (what the page heard then), as a replaced log's are, so a
+ * view at one of them reads the trace as the page heard it.
+ */
+function reachedBack(log: TraceLog, events: readonly RunEvent[], meter?: WorkMeter): TraceLog {
+  const known = log.earlier === null ? 0 : lastSequence(log.earlier);
+  const older = events.filter(event => {
+    const at = event.sequence ?? 0;
+    return SPAN_EVENTS.has(event.type) && at < log.handoff && at > known;
+  });
+  if (older.length === 0) return log;
+  const earlier = appended(log.earlier ?? EMPTY_TRACE_LOG, older, meter);
+  return replacing(log, earlier, log.handoff);
+}
+
 /** `log` with the failures and passes of `gates` joined to its own, whichever came first. */
 function withInputFailures(log: TraceLog, gates: InputGates): TraceLog {
   const joined = joinedInputGates(log.inputGates, gates.failures, gates.passes);
@@ -261,7 +279,7 @@ export function traceStep(log: TraceLog, data: RunData, meter?: WorkMeter): Trac
       );
     }
     case 'events':
-      return appended(log, data.events, meter);
+      return appended(reachedBack(log, data.events, meter), data.events, meter);
     case 'rebootstrap': {
       if (data.base === 'reset') return appended(EMPTY_TRACE_LOG, data.events, meter);
       const replayed = withInputFailures(
