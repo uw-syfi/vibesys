@@ -329,6 +329,9 @@ IMPLEMENT_PROMPTS = st.builds(
     input_failure=INPUT_FAILURES,
     rebase_onto=st.none() | REVISIONS,
     rebase_from=st.none() | REVISIONS,
+    reply_rejected=st.lists(
+        st.builds(dict, index=st.integers(0, 3), hypothesis_id=tokens("stray")), max_size=2
+    ).map(tuple),
     combine=st.just(()) | PARTS,
     combine_missing=st.lists(
         st.builds(dict, hypothesis_id=tokens("gone"), revision=tokens("rev")), max_size=1
