@@ -72,13 +72,6 @@ export interface HeroView {
   /** One tile per performance measure; today the run's one objective metric. */
   readonly tiles: readonly MetricTileView[];
   readonly measured: number;
-  /**
-   * What the figures are, by the run's adoption span: `adopted` once the run ended, `best` while it
-   * works; null when the run has no best (no adoption yet, or the input stands).
-   */
-  readonly standing: 'best' | 'adopted' | null;
-  /** The idea the figures belong to, to open it; null when `standing` is null. */
-  readonly bestIdea: {readonly id: string; readonly title: string} | null;
 }
 
 function bestCandidate(model: RunModel): Candidate | null {
@@ -315,8 +308,6 @@ export function heroView(
         : [objectiveTile(model, leader?.measurement ?? null)],
     measured: model.candidates.candidates.filter(item => item.measurement?.metricValue != null)
       .length,
-    standing: leader === null ? null : model.candidates.best?.adopted === true ? 'adopted' : 'best',
-    bestIdea: leader === null ? null : {id: leader.id, title: leader.title},
   };
 }
 

@@ -19,8 +19,6 @@ export interface GateFailure {
   /** The gate's kind: `accuracy`, `benchmark`, `build`, `validation`. */
   readonly gate: string;
   readonly recipe: string | null;
-  /** The end of what the gate printed, when it kept any. */
-  readonly tail: string | null;
   /**
    * The sequence of the first later attempt of the same gate (and recipe) that passed, or null
    * while none has: the failure is history then, not the gate's standing.
@@ -50,7 +48,6 @@ function gateFailureOf(event: RunEvent): GateFailure | null {
     sequence: event.sequence ?? 0,
     gate: data.gate,
     recipe: data.recipe ?? null,
-    tail: data.output_tail ?? null,
     supersededBy: null,
   };
 }
@@ -154,103 +151,4 @@ export function failuresAt(gates: InputGates, at: number | null): readonly GateF
         ? {...failure, supersededBy: null}
         : failure,
     );
-}
-
-/** The failed gates as the screen lists them: one row, so a failed baseline takes the room of a line. */
-export interface GateFailureView {
-  /** The gates that failed, once each, in the order they did: `Accuracy · Benchmark`. */
-  readonly label: string;
-  /** Why, in words: the reason they share, else the first gate's, whole. */
-  readonly reason: string | null;
-  /** What each printed, headed by its gate when more than one failed; null when none printed. */
-  readonly tail: string | null;
-  /**
-   * How many attempts failed: of the gate tried most often for a failure that stands (2 when a gate
-   * was tried again and failed again), in all for failures a later attempt passed over.
-   */
-  readonly attempts: number;
-}
-
-/** Gates that failed and then passed on a later attempt: their failed attempts as history. */
-export type GateHistoryView = GateFailureView;
-
-const ERROR_LINE = /\b([A-Z][A-Za-z0-9]*(?:Error|Exception)): ([^)\n]+)/g;
-
-const SOME_VALUE = /\bSome\(([^()]*)\)/g;
-
-/**
- * `text` with a Rust optional's debug spelling read as its value: a benchmark written in Rust
- * prints `prompt_tokens=Some(8192)` for a value it holds. The gate's own output is the tool's, not
- * ours to change, so the sentence the screen words from it says `prompt_tokens=8192`; the printed
- * output behind the disclosure stays as it was.
- */
-function withoutOptionals(text: string): string {
-  let current = text;
-  for (let next = current.replace(SOME_VALUE, '$1'); next !== current; ) {
-    current = next;
-    next = current.replace(SOME_VALUE, '$1');
-  }
-  return current;
-}
-
-/** Why a gate failed in words: its last error, else the last line it printed; null with no output. */
-export function gateReason(tail: string | null): string | null {
-  if (tail === null) return null;
-  const errors = [...tail.matchAll(ERROR_LINE)];
-  const last = errors.at(-1);
-  if (last !== undefined) return withoutOptionals(`${last[1]}: ${last[2]?.trim()}`);
-  const line = tail
-    .split('\n')
-    .map(each => each.trim())
-    .filter(each => each !== '')
-    .at(-1);
-  return line === undefined ? null : withoutOptionals(line);
-}
-
-function capitalized(text: string): string {
-  return `${text.charAt(0).toUpperCase()}${text.slice(1)}`;
-}
-
-function nameOf(failure: GateFailure): string {
-  return capitalized(
-    failure.recipe === null ? failure.gate : `${failure.gate} · ${failure.recipe}`,
-  );
-}
-
-function viewOf(failures: readonly GateFailure[]): GateFailureView {
-  const names = [...new Set(failures.map(nameOf))];
-  const reasons = failures.map(failure => gateReason(failure.tail));
-  const shared = reasons.every(reason => reason === reasons[0]);
-  const printed = failures.filter(failure => failure.tail !== null && failure.tail.trim() !== '');
-  const tail =
-    printed.length === 0
-      ? null
-      : printed
-          .map(failure =>
-            failures.length === 1
-              ? (failure.tail ?? '').trimEnd()
-              : `${nameOf(failure)}\n${(failure.tail ?? '').trimEnd()}`,
-          )
-          .join('\n\n');
-  return {
-    label: names.join(' · '),
-    reason: shared ? (reasons[0] ?? null) : (reasons.find(each => each !== null) ?? null),
-    tail,
-    attempts: failures.length,
-  };
-}
-
-/** The gates still failed (no later attempt passed) as one row; null when none stands failed. */
-export function gateFailureView(failures: readonly GateFailure[]): GateFailureView | null {
-  const standing = failures.filter(failure => failure.supersededBy === null);
-  if (standing.length === 0) return null;
-  const tries = new Map<string, number>();
-  for (const failure of standing) tries.set(nameOf(failure), (tries.get(nameOf(failure)) ?? 0) + 1);
-  return {...viewOf(standing), attempts: Math.max(...tries.values())};
-}
-
-/** The failed attempts a later attempt of the same gate passed over, as one row; null when none. */
-export function gateHistoryView(failures: readonly GateFailure[]): GateHistoryView | null {
-  const history = failures.filter(failure => failure.supersededBy !== null);
-  return history.length === 0 ? null : viewOf(history);
 }

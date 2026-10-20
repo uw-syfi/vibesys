@@ -7,7 +7,7 @@ import {EMPTY_TRACE, foldTrace, traceSpans} from '@vibesys/run-state/trace';
 import {SEEDS, Seeded} from '@vibesys/store/testing';
 import {outcomeWords} from './idea-words.js';
 import {ageWords, IDEAS_FILTER_DEFAULT, ideasView} from './ideas-view.js';
-import {failuresAt, gateFailureView} from './input-gates.js';
+import {failuresAt} from './input-gates.js';
 import {clockAt, clockStart, heroView, nowView} from './run-level.js';
 import {createRunReader, type RunModel} from './run-model.js';
 import {
@@ -224,12 +224,8 @@ describe('a run that crashed with work open', () => {
     expect(ageWords(idea?.startedAt ?? 0, now)).toMatch(/^3\d/);
   });
 
-  test('the baseline gate failures are listed with their reason and what they printed', () => {
-    const view = gateFailureView(model.inputGates);
-    expect(view?.label).toBe('Accuracy · Benchmark');
-    expect(view?.reason).toBe("ModuleNotFoundError: No module named 'engine'");
-    expect(view?.tail).toContain('Error while finding module specification');
-    expect(model.inputGates).toHaveLength(2);
+  test('the baseline gate failures are held, both of them', () => {
+    expect(model.inputGates.map(failure => failure.gate)).toEqual(['accuracy', 'benchmark']);
   });
 
   test('the metric tile says the input was not measured, not that nothing was', () => {
@@ -263,11 +259,8 @@ describe('the same run opened from its summary', () => {
     expect(nowView(from)).toEqual([]);
   });
 
-  test('lists the failed input gates as the whole history does', () => {
+  test('holds the failed input gates as the whole history does', () => {
     expect(from.inputGates).toEqual(whole.inputGates);
-    const view = gateFailureView(from.inputGates);
-    expect(view?.label).toBe('Accuracy \u00b7 Benchmark');
-    expect(view?.reason).toBe("ModuleNotFoundError: No module named 'engine'");
     expect(heroView(from).tiles[0]?.detail).toBe('input not measured');
   });
 

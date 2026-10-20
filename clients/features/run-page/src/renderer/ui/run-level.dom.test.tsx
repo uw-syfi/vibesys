@@ -12,6 +12,7 @@ import {act} from 'react';
 import {createRoot} from 'react-dom/client';
 import {
   createRunReader,
+  RUN_ROUTE,
   type RunMode,
   type RunModel,
   type RunPageAction,
@@ -25,6 +26,7 @@ import {
 import {idea, modelOf} from '../../state/timeline-fixtures.js';
 import {Hero} from './hero.js';
 import {RunLevel} from './run-level.js';
+import {RunScreen} from './run-screen.js';
 
 const window = new Window();
 const installed = Object.getOwnPropertyNames(window).filter(name => !(name in globalThis));
@@ -234,14 +236,14 @@ async function textOf(model: RunModel, showFailed: boolean): Promise<string> {
   return text;
 }
 
-test('the run level says passed, failed, best and adopted, never accepted, kept or rejected', async () => {
+test('the run level says passed, failed and running, never accepted, kept or rejected', async () => {
   for (const adopted of [false, true]) {
     for (const showFailed of [false, true]) {
       const text = await textOf(namedRun(adopted), showFailed);
       expect(text).toContain('1 passed');
       expect(text).toContain('1 failed');
       expect(text).toContain('1 running');
-      expect(text).toContain(adopted ? 'Adopted' : 'Best so far');
+      expect(text).not.toContain('Best so far');
       expect(text).not.toMatch(/turned down/i);
       expect(text).not.toMatch(/accepted|kept|rejected/i);
     }
@@ -384,4 +386,35 @@ test('the selected idea’s line words the objective’s unit, not its metric ke
   container.remove();
   expect(text).toContain('output tokens/s');
   expect(text).not.toContain('output_tokens_per_s');
+});
+
+test('a run whose input benchmark failed shows no gate card and no best-so-far line', async () => {
+  const state = runPageStep(attaching(), SNAPSHOT).state;
+  const failure = {sequence: 1, gate: 'benchmark', recipe: null, supersededBy: null};
+  for (const adopted of [false, true]) {
+    const model = {...namedRun(adopted), inputGates: [failure]} as unknown as RunModel;
+    const container = document.createElement('div');
+    document.body.append(container);
+    const root = createRoot(container);
+    await act(async () =>
+      root.render(
+        <RunScreen
+          state={state}
+          model={model}
+          whole={model}
+          core={null}
+          route={RUN_ROUTE}
+          zoom={() => undefined}
+          dispatch={() => undefined}
+        />,
+      ),
+    );
+    const text = container.textContent ?? '';
+    await act(async () => root.unmount());
+    container.remove();
+    expect(text).not.toContain('Best so far');
+    expect(text).not.toContain('Adopted:');
+    expect(text).not.toContain('Details');
+    expect(text).not.toContain('failed ·');
+  }
 });

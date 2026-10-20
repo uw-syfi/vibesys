@@ -255,9 +255,8 @@ describe('an idea whose comparison with its base was within noise', () => {
     ]);
   });
 
-  test('is no best on the Ideas list or the hero, from the same reading', () => {
+  test('is no best on the Ideas list, from the same reading', () => {
     expect(model.candidates.best?.candidate).toBe(model.candidates.candidates[0]?.id);
-    expect(heroView(model).bestIdea?.title).toBe('Idea 2');
   });
 
   test('is a new best when the comparison says better, for any pair of values', () => {

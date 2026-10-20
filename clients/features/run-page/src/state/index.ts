@@ -36,13 +36,7 @@ export {
   noIdeasWords,
   pressChip,
 } from './ideas-view.js';
-export {
-  type GateFailure,
-  type GateFailureView,
-  type GateHistoryView,
-  gateFailureView,
-  gateHistoryView,
-} from './input-gates.js';
+export type {GateFailure} from './input-gates.js';
 export {EMPTY_TRACE_LOG, type RunData, type SessionView, type TraceLog} from './live.js';
 export {type ModelNames, modelNamesOf, NO_MODEL_NAMES} from './model-names.js';
 export {roleLabel, stepKicker, stepLabel, stepTitle} from './names.js';

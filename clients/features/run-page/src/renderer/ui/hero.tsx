@@ -1,7 +1,7 @@
 /**
  * The performance row: a tile per performance measure (its best ratio to the input, large, with
  * what it means, the value and the input's, and a small trend) sharing a row with the strip chart,
- * and under both, across the whole width, the lines that name the idea the figures belong to.
+ * and under both, across the whole width, the line that reads an open idea's result.
  * The Run screen draws it above the level, so it is the same element at every level and navigating
  * moves nothing in it: the panes below change, this row does not. The lines are as wide as the row,
  * so a long idea name is cut only where the row ends, and never pushes the chart. With an idea open, the chart singles the
@@ -11,7 +11,6 @@
  * time bar's position) in the chart's place, the same size at every level.
  */
 import {
-  Button,
   Chart,
   Fact,
   FactLine,
@@ -19,7 +18,6 @@ import {
   MetricTiles,
   markdownToPlain,
   ParetoChart,
-  Reserve,
   Row,
   Sparkline,
   Stack,
@@ -84,42 +82,6 @@ function IdeaLine(props: {readonly view: IdeaFocusView | null}): JSX.Element {
       )}
     </FactLine>
   );
-}
-
-/**
- * The line under the tiles that names which idea the figures belong to: `Adopted: <idea>` once the
- * run ended, `Best so far: <idea>` while it works; the idea's name opens it. Before there is one
- * the line is drawn empty and kept (`Reserve`), so the tiles above it, and the chart beside or
- * below, stay where they are when the first idea passes or the run is scrubbed to the start.
- */
-function StandingLine(props: {
-  readonly standing: 'best' | 'adopted' | null;
-  readonly idea: {readonly id: string; readonly title: string} | null;
-  readonly open: (idea: string) => void;
-}): JSX.Element {
-  const {standing, idea} = props;
-  const shown = standing !== null && idea !== null;
-  const title = shown ? markdownToPlain(idea.title) : '–';
-  const line = (
-    <FactLine fit="parent" wrap={false}>
-      <Fact>
-        <Text variant="small" tone="muted">
-          {standing === 'adopted' ? 'Adopted:' : 'Best so far:'}
-        </Text>
-      </Fact>
-      <Fact shrink title={title}>
-        <Button
-          size="sm"
-          variant="quiet"
-          text={title}
-          press={() => {
-            if (shown) props.open(idea.id);
-          }}
-        />
-      </Fact>
-    </FactLine>
-  );
-  return shown ? line : <Reserve>{line}</Reserve>;
 }
 
 /**
@@ -228,11 +190,6 @@ export function Hero(
           </Stack>
         )}
       </Row>
-      <StandingLine
-        standing={hero.standing}
-        idea={hero.bestIdea}
-        open={id => props.zoom({type: 'open-idea', idea: id})}
-      />
       <IdeaLine view={ideaFocusView(props.model, props.idea)} />
     </Stack>
   );

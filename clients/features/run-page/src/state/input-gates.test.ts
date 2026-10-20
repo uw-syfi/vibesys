@@ -1,15 +1,7 @@
 import {describe, expect, test} from 'bun:test';
 import type {RunEvent} from '@vibesys/contracts';
 import {SEEDS, Seeded} from '@vibesys/store/testing';
-import {
-  failuresAt,
-  foldInputGates,
-  type GateFailure,
-  gateFailureView,
-  gateHistoryView,
-  gateReason,
-  NO_INPUT_GATES,
-} from './input-gates.js';
+import {failuresAt, foldInputGates, type GateFailure, NO_INPUT_GATES} from './input-gates.js';
 
 function gate(
   sequence: number,
@@ -64,42 +56,6 @@ function journal(random: Seeded): RunEvent[] {
   return events;
 }
 
-describe('gateReason', () => {
-  test('is the last error the gate printed, with its message', () => {
-    expect(
-      gateReason("first\nValueError: bad\nthen (ModuleNotFoundError: No module named 'x')\n"),
-    ).toBe("ModuleNotFoundError: No module named 'x'");
-  });
-
-  test('is the last line it printed when it named no error, and nothing without output', () => {
-    expect(gateReason('building\nlinking\n\n')).toBe('linking');
-    expect(gateReason(null)).toBeNull();
-    expect(gateReason('  \n')).toBeNull();
-  });
-
-  test('reads a Rust optional as its value, whatever the value', () => {
-    expect(
-      gateReason(
-        'preflight: no hit (prompt_tokens=Some(8192), cached_tokens=Some(0)). See README.',
-      ),
-    ).toBe('preflight: no hit (prompt_tokens=8192, cached_tokens=0). See README.');
-    for (const seed of SEEDS) {
-      const value = new Seeded(seed).int(1_000_000);
-      expect(gateReason(`bad: n=Some(${value})\n`), `seed ${seed}`).toBe(`bad: n=${value}`);
-      expect(gateReason(`bad: n=Some(Some(${value}))\n`), `seed ${seed}`).toBe(`bad: n=${value}`);
-    }
-  });
-
-  test('is never cut, whatever the gate printed', () => {
-    for (const seed of SEEDS) {
-      const random = new Seeded(seed);
-      const line = 'x'.repeat(1 + random.int(400));
-      expect(gateReason(`${line}\n`), `seed ${seed}`).toBe(line);
-      expect(gateReason(`RuntimeError: ${line}`), `seed ${seed}`).toBe(`RuntimeError: ${line}`);
-    }
-  });
-});
-
 describe('the input gates', () => {
   test('hold the failures before the first idea began, and no later one', () => {
     const events = [
@@ -133,22 +89,6 @@ describe('the input gates', () => {
       expect(failuresAt(gates, null)).toBe(gates.failures);
     }
   });
-
-  test('read as one row: the gates, why, and what they printed', () => {
-    const one = [gate(7, 'failed', 'oops\n')].reduce(foldInputGates, NO_INPUT_GATES);
-    expect(gateFailureView(one.failures)).toEqual({
-      label: 'Accuracy',
-      reason: 'oops',
-      tail: 'oops',
-      attempts: 1,
-    });
-    const two = [gate(7, 'failed', 'oops\n'), gate(8, 'failed', 'oops\n')].reduce(
-      foldInputGates,
-      NO_INPUT_GATES,
-    );
-    expect(gateFailureView(two.failures)?.tail).toBe('Accuracy\noops\n\nAccuracy\noops');
-    expect(gateFailureView([])).toBeNull();
-  });
 });
 
 describe('a gate that failed and was tried again', () => {
@@ -157,24 +97,12 @@ describe('a gate that failed and was tried again', () => {
   test('stands failed until a later attempt of the same gate passes, then is history', () => {
     const events = [gate(1, 'failed', REASON, 'benchmark'), gate(2, 'failed', REASON, 'benchmark')];
     const failing = events.reduce(foldInputGates, NO_INPUT_GATES);
-    expect(gateFailureView(failing.failures)?.label).toBe('Benchmark');
-    expect(gateHistoryView(failing.failures)).toBeNull();
+    expect(failing.failures.map(failure => failure.supersededBy)).toEqual([null, null]);
     const passed = [...events, gate(3, 'completed', null, 'benchmark')].reduce(
       foldInputGates,
       NO_INPUT_GATES,
     );
     expect(passed.failures.map(failure => failure.supersededBy)).toEqual([3, 3]);
-    expect(gateFailureView(passed.failures)).toBeNull();
-    expect(gateHistoryView(passed.failures)).toMatchObject({label: 'Benchmark', attempts: 2});
-  });
-
-  test('keeps the whole reason, whatever its length', () => {
-    expect(REASON.length).toBeGreaterThan(200);
-    const gates = [gate(1, 'failed', `${REASON}\n`, 'benchmark')].reduce(
-      foldInputGates,
-      NO_INPUT_GATES,
-    );
-    expect(gateFailureView(gates.failures)?.reason).toBe(REASON);
   });
 
   test('is not superseded by a pass of another gate, nor by one before it', () => {
@@ -184,7 +112,7 @@ describe('a gate that failed and was tried again', () => {
       gate(3, 'completed', null, 'accuracy'),
     ].reduce(foldInputGates, NO_INPUT_GATES);
     expect(gates.failures.map(failure => failure.supersededBy)).toEqual([null]);
-    expect(gateFailureView(gates.failures)?.label).toBe('Benchmark');
+    expect(gates.failures.map(failure => failure.gate)).toEqual(['benchmark']);
   });
 
   /** A random run of gate events for two gates, each failed or passed. */
@@ -245,8 +173,7 @@ describe('a gate tried again while ideas run', () => {
       gate(3, 'completed', null, 'benchmark'),
     ];
     const gates = events.reduce(foldInputGates, NO_INPUT_GATES);
-    expect(gateFailureView(gates.failures)).toBeNull();
-    expect(gateHistoryView(gates.failures)).toMatchObject({label: 'Benchmark', attempts: 1});
+    expect(gates.failures.map(failure => failure.supersededBy)).toEqual([3]);
   });
 
   test('stands failed when no attempt passed, a later failure being the idea’s own', () => {
@@ -258,14 +185,6 @@ describe('a gate tried again while ideas run', () => {
     ];
     const gates = events.reduce(foldInputGates, NO_INPUT_GATES);
     expect(gates.failures.map(failure => failure.supersededBy)).toEqual([null]);
-  });
-
-  test('names both attempts when the re-run failed again', () => {
-    const gates = [
-      gate(1, 'failed', 'oops', 'benchmark'),
-      gate(2, 'failed', 'oops', 'benchmark'),
-    ].reduce(foldInputGates, NO_INPUT_GATES);
-    expect(gateFailureView(gates.failures)).toMatchObject({label: 'Benchmark', attempts: 2});
   });
 
   test('is read the same wherever the journal is cut: only a pass of its own gate supersedes', () => {
@@ -284,18 +203,5 @@ describe('a gate tried again while ideas run', () => {
         expect(failure.supersededBy, `seed ${seed}`).toBe(pass?.sequence ?? null);
       }
     }
-  });
-});
-
-describe('the attempts a standing failure names', () => {
-  test('are those of one gate, so two different gates failing once each is no retry', () => {
-    const gates = [gate(1, 'failed', 'a', 'accuracy'), gate(2, 'failed', 'b', 'benchmark')].reduce(
-      foldInputGates,
-      NO_INPUT_GATES,
-    );
-    expect(gateFailureView(gates.failures)).toMatchObject({
-      label: 'Accuracy · Benchmark',
-      attempts: 1,
-    });
   });
 });

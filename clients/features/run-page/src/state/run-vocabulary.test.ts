@@ -194,16 +194,11 @@ describe('the Run screen words over generated runs', () => {
         const word = adopted ? 'adopted' : 'best';
         if (best === null) {
           expect(marked).toEqual([]);
-          expect(heroView(model).standing).toBeNull();
           continue;
         }
         expect(
           marked.map(row => [row.title, row.badges.filter(isMark).map(badge => badge.label)]),
         ).toEqual([[`idea ${best.n}`, [word]]]);
-        expect(heroView(model)).toMatchObject({
-          standing: word,
-          bestIdea: {id: `flow:r${best.n}/#1`},
-        });
         const chart = stripChartView(model, 0, null);
         const onLine = chart?.points.filter(point => point.tone === 'accent') ?? [];
         expect(onLine.at(-1)?.id).toBe(`flow:r${best.n}/#1`);
