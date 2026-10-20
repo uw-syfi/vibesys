@@ -693,7 +693,6 @@ class _CancelWhileWaiting(ToyHost):
 
 
 @pytest.mark.regression
-@pytest.mark.xfail(strict=True, reason="S191: a cancel does not end a suspended turn")
 @pytest.mark.parametrize("role", ["implementer", "judge"])
 def test_a_cancel_ends_a_turn_suspended_on_its_evaluation_and_withdraws_the_evaluation(
     role: str,

@@ -993,6 +993,9 @@ class ResumeRefusal(StrEnum):
     submission's facts or proofs are missing or conflict), so it never will be."""
     PREFIX_MISMATCH = "prefix_mismatch"
     """The history does not extend the waiting turn's paid-cycle prefix."""
+    ATTEMPT_CLOSED = "attempt_closed"
+    """The attempt the turn waited in closed (an operator's cancel, or the search's own close)
+    before core authorized the resume: core stopped the jobs the wait was on."""
 
 
 class ResumeRefused(Value):

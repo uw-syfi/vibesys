@@ -1449,7 +1449,18 @@ def _retire(
         for job in _jobs(state, continuation)
         if not _settled(job)
     )
-    return AreaChange(state=_store(state, retired), signals=signals)
+    # A cancel ends a wait whose resume core has not authorized: the suspended turn hears why,
+    # as it hears any wait core will never resume (S191), instead of waiting out the run.
+    events: tuple[ResumeRefused, ...] = ()
+    if phase == ContinuationPhase.CANCELLED and continuation.phase != ContinuationPhase.AUTHORIZED:
+        events = (
+            ResumeRefused(
+                continuation_id=continuation.continuation_id,
+                invocation=continuation.invocation,
+                reason=ResumeRefusal.ATTEMPT_CLOSED,
+            ),
+        )
+    return AreaChange(state=_store(state, retired), signals=signals, events=events)
 
 
 def _reopen_decision(

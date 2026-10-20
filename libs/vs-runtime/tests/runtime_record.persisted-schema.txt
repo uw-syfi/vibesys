@@ -1344,7 +1344,7 @@ ResumeFailed.refusal required {"$ref":"#/$defs/ResumeRefused"}
 ResumeReady {"additionalProperties":false,"type":"object"}
 ResumeReady.authorization required {"$ref":"#/$defs/ResumeAuthorized"}
 ResumeReady.kind optional {"const":"resume_ready","default":"resume_ready","type":"string"}
-ResumeRefusal {"enum":["history_unavailable","prefix_mismatch"],"type":"string"}
+ResumeRefusal {"enum":["history_unavailable","prefix_mismatch","attempt_closed"],"type":"string"}
 ResumeRefused {"additionalProperties":false,"type":"object"}
 ResumeRefused.continuation_id required {"$ref":"#/$defs/ContinuationId"}
 ResumeRefused.invocation required {"$ref":"#/$defs/InvocationRef"}
