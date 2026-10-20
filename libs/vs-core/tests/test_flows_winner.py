@@ -430,28 +430,54 @@ def test_the_operator_pauses_the_deadline_ends_and_the_run_environment_fails_the
         assert first == ("adoption-failed" if failed else core.EndReason.DEADLINE.value)
 
 
+_STOP_IDS = {
+    "operator": "stop",
+    "deadline": core.DEADLINE_STOP,
+    "environment": core.ENVIRONMENT_STOP,
+}
+_HOST_ENDINGS = {"deadline": core.EndReason.DEADLINE, "environment": core.EndReason.FAILED}
+
+
 @pytest.mark.parametrize("operator", [core.StopMode.DRAIN, core.StopMode.CANCEL])
-def test_an_environment_failure_after_the_operators_stop_fails_the_run(
-    begin: Begin, operator: core.StopMode
+@pytest.mark.parametrize(
+    ("first", "second"),
+    [
+        ("operator", "environment"),
+        ("operator", "deadline"),
+        ("environment", "operator"),
+        ("deadline", "operator"),
+        ("environment", "deadline"),
+        ("deadline", "environment"),
+    ],
+)
+@pytest.mark.parametrize("window", ["while-adopting", "before-the-ending"])
+def test_the_first_host_stop_names_the_ending_whatever_stop_came_before_or_after(
+    begin: Begin, first: str, second: str, operator: core.StopMode, window: str
 ) -> None:
     """Regression (review follow-up 1 of #3327): the first stop alone named the ending.
 
-    The operator stopped the run, then its environment failed for good while the run wound down.
-    The result said ``stopped`` (a resumable pause) while its controls said no resume reopens it.
-    A final stop of the host's decides the ending over an operator's stop recorded before it.
+    The operator stopped the run, then its environment failed for good while the run wound down
+    (the ending was adopting). The result said ``stopped``, a resumable pause, while its controls
+    said no resume reopens it. A host stop (the deadline's, the environment's) is a verdict and
+    an operator's stop a pause, so the first host stop names the ending, whichever came first,
+    and whether the second arrived while the ending adopted or before the ending began.
     """
 
     async def ended(ctx: core.Flow, _config: Config) -> None:
         ctx.choose(kept("a"))
         await ctx.stopped
+        if window == "before-the-ending":
+            await ctx.timer(5.0)  # the root winds down; the second stop arrives meanwhile
 
     run = begin(ended, adopting=False)
-    run.stop("stop", mode=operator)
-    run.stop(core.ENVIRONMENT_STOP, mode=core.StopMode.CANCEL)
+    for requester in (first, second):
+        mode = operator if requester == "operator" else core.StopMode.CANCEL
+        run.stop(_STOP_IDS[requester], mode=mode)
+    if window == "before-the-ending":
+        run.advance_to(5.0)
     run.adopt(run.expect(core.ProposeWinner))
     result = run.finished.result if run.finished is not None else None
     assert result is not None
-    assert (result.outcome, result.reason.split(":", 1)[0]) == (
-        "failure",
-        core.EndReason.FAILED.value,
-    )
+    ending = _HOST_ENDINGS[first if first != "operator" else second]
+    outcome = "failure" if ending is core.EndReason.FAILED else "cancelled"
+    assert (result.outcome, result.reason.split(":", 1)[0]) == (outcome, ending.value)
