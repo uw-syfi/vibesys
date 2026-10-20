@@ -9,7 +9,7 @@ Your workspace is a checkout of main at `{{ rev(main_revision) }}`. Apply the ca
 below in this order; each is an exact revision in this repository, so `git log` and
 `git show` reach it. Apply each candidate's own change, from where it left main:
 {% for source in candidates %}
-{{ loop.index }}. hypothesis `{{ source.hypothesis_id }}` at `{{ rev(source.revision) }}`: {{ apply_change('git diff $(git merge-base ' ~ rev(main_revision) ~ ' ' ~ rev(source.revision) ~ ') ' ~ rev(source.revision), agent_git_writable) }}
+{{ loop.index }}. hypothesis `{{ source.hypothesis_id }}` at `{{ rev(source.revision) }}`: {{ apply_change('git diff ' ~ (rev(source.built_on) if source.built_on else '$(git merge-base ' ~ rev(main_revision) ~ ' ' ~ rev(source.revision) ~ ')') ~ ' ' ~ rev(source.revision), agent_git_writable) }}
 {% else %}
 none: every candidate this merge named is no longer buildable, so refuse.
 {% endfor %}

@@ -293,6 +293,9 @@ class ImplementPrompt(RolePromptContext):
     """Why the input's own measurement failed, when it had when the turn was asked."""
     rebase_onto: RevisionRef | None = None
     """The run's main, when it advanced past this hypothesis's work: rebase onto it first."""
+    rebase_from: RevisionRef | None = None
+    """With ``rebase_onto``: the main revision the work's tree already includes, so the catch-up
+    applies only main's change since. None for a workstream an older build scheduled."""
     combine: tuple[CombineSource, ...] = ()
     """For a combine: the parts to apply onto ``parent_revision`` (main), in order."""
     combine_missing: tuple[CombinePick, ...] = ()

@@ -67,6 +67,7 @@ from vibesys.orchestration.dynamic.search._values import (
     FinishedWork,
     HypothesisRecord,
     MainMeasurement,
+    MergeOutcome,
     MergeRecord,
     MergeSource,
     PlanProblem,
@@ -724,6 +725,7 @@ class RunRecord:
                 merge=self._sources(plan),
                 combine=parts,
                 rebase_onto=rebase,
+                parent_main=self.main_base_at(parent),
                 started_by=_started_by(self.planned_by.get(plan.work_id)),
             )
             self.running[start.key] = start
@@ -741,7 +743,11 @@ class RunRecord:
         """A merge's candidates as the exact revisions offered now, in the planner's order."""
         found = (resolve(self.parents, item, None) for item in plan.candidates)
         return tuple(
-            MergeSource(hypothesis_id=item, revision=option.revision)
+            MergeSource(
+                hypothesis_id=item,
+                revision=option.revision,
+                built_on=self.main_base_at(option.revision),
+            )
             for item, option in zip(plan.candidates, found, strict=True)
             if option is not None
         )
@@ -750,8 +756,8 @@ class RunRecord:
         """A combine's parts as the exact revisions offered now, each with its own change.
 
         A part whose revision is no longer offered (its verification failed since) is left out,
-        and the implementer is told so. A part's change starts where its hypothesis started:
-        the parent of the hypothesis's first workstream.
+        and the implementer is told so. A part's change starts at the main revision its tree
+        includes (`main_base_at`).
         """
         offered = {
             (item.snapshot.hypothesis_id, item.snapshot.revision.revision_id.root): item.snapshot
@@ -762,19 +768,49 @@ class RunRecord:
             found = offered.get((pick.hypothesis_id, pick.revision))
             if found is None:
                 continue
-            first = next(
-                (item for item in self.finished_work if item.plan.work_id == pick.hypothesis_id),
-                None,
-            )
             parts.append(
                 CombineSource(
                     hypothesis_id=pick.hypothesis_id,
                     revision=found.revision,
-                    built_on=self.base if first is None else first.parent,
+                    built_on=self.main_base_at(found.revision),
                     metric=None if found.benchmark is None else found.benchmark.headline(),
                 )
             )
         return tuple(parts)
+
+    def main_base_at(self, revision: RevisionRef) -> RevisionRef:
+        """The main revision ``revision``'s tree includes: where its own change against main starts.
+
+        A revision main has been includes itself. A candidate includes what its workstream's tree
+        did (`FinishedWork.main_base`), and a merge's commit the main the merge started from. Git
+        ancestry cannot tell it: a catch-up under read-only git applies main's change to the tree
+        without recording main as an ancestor. A revision the run did not make is taken as built
+        on the input.
+        """
+        root = revision.revision_id.root
+        mains = {self.base.revision_id.root} | {
+            item.revision.revision_id.root
+            for item in self.main.merges
+            if item.outcome is MergeOutcome.MERGED and item.revision is not None
+        }
+        if root in mains:
+            return revision
+        for merge in self.main.merges:
+            if merge.revision is not None and merge.revision.revision_id.root == root:
+                return merge.base
+        made = {
+            item.sequence
+            for record in self.hypotheses.values()
+            for item in record.rounds
+            if item.candidate is not None and item.candidate.revision_id.root == root
+        }
+        work = next((item for item in self.finished_work if item.sequence in made), None)
+        if work is None:
+            return self.base
+        if work.main_base is not None:
+            return work.main_base
+        # A record an older build kept: the workstream's parent, as if it never caught up.
+        return self.main_base_at(work.parent) if work.parent != revision else self.base
 
     def finished(self, done: WorkstreamDone) -> None:
         """Keep what a finished workstream leaves behind: its record, round and parent."""
@@ -792,6 +828,7 @@ class RunRecord:
                 failure=done.failure,
                 readings=done.evidence.readings if profile else (),
                 proof=done.evidence.proof if profile else None,
+                main_base=start.main_base or self.main_base_at(start.parent),
             )
         )
         self.refunded += int(done.refunded)

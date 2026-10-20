@@ -86,6 +86,8 @@ class ImplementStart(Protocol):
     def rebase_onto(self) -> RevisionRef | None: ...
     @property
     def combine(self) -> tuple[CombineSource, ...]: ...
+    @property
+    def parent_main(self) -> RevisionRef | None: ...
 
 
 def implement_prompt(
@@ -97,7 +99,8 @@ def implement_prompt(
     ``blockers`` are the turns of this workstream that ended without a measurable candidate;
     ``baseline`` is the input's measurement as known now: None while it has not landed, and an
     unmeasurable one is shown with why it failed.
-    ``w.rebase_onto`` is the run's main when it advanced past this hypothesis's work.
+    ``w.rebase_onto`` is the run's main when it advanced past this hypothesis's work, and
+    ``w.parent_main`` the main the work's tree includes: the catch-up applies the change between.
     ``w.combine`` are a combine's parts as scheduled; a part the plan named and scheduling left
     out (no longer offered) is named as missing.
     """
@@ -128,6 +131,7 @@ def implement_prompt(
         last_blocker=None if stuck is None else _shown(stuck),
         turns_without_candidate=len(blockers),
         rebase_onto=w.rebase_onto,
+        rebase_from=None if w.rebase_onto is None else w.parent_main,
         combine=w.combine,
         combine_missing=tuple(
             pick

@@ -90,9 +90,18 @@ class WorkstreamStart(Value):
     """For a combine: the parts to apply onto ``parent`` (main), in order, fixed at scheduling."""
     rebase_onto: RevisionRef | None = None
     """The run's main, when it advanced past the base of the hypothesis this continues."""
+    parent_main: RevisionRef | None = None
+    """The main revision ``parent``'s tree includes (`RunRecord.main_base_at`): a catch-up
+    applies main's change from it to ``rebase_onto``. None in a start scheduled by an older
+    build."""
     started_by: tuple[str, ...] = ()
     """The agents whose reply planned this workstream (the planner, or the outliner of a step):
     they start its agents. Empty when no agent's reply is known to have planned it."""
+
+    @property
+    def main_base(self) -> RevisionRef | None:
+        """The main revision this workstream's tree includes once it caught up with main."""
+        return self.rebase_onto or self.parent_main
 
     @property
     def attempt(self) -> AttemptId:

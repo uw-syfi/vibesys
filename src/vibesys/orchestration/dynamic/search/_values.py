@@ -97,8 +97,9 @@ class CombinePick(Value):
 class CombineSource(Value):
     """One part of a combine as it was fixed at scheduling: its revision and its own change.
 
-    ``built_on`` is the revision the part's hypothesis started from, so ``built_on..revision``
-    is the part's own change; ``metric`` is its trusted headline, when it had one.
+    ``built_on`` is the main revision the part's tree includes (`RunRecord.main_base_at`), so
+    ``built_on..revision`` is the part's own change against main; ``metric`` is its trusted
+    headline, when it had one.
     """
 
     hypothesis_id: str
@@ -386,16 +387,26 @@ class FinishedWork(Value):
     readings: tuple[AcceptedReading, ...] = ()
     proof: Proof | None = None
     """For a profile workstream: the evidence and decoded readings its history row shows."""
+    main_base: RevisionRef | None = None
+    """The main revision the workstream's tree included: the main it caught up with, else the
+    one its parent's tree included. Git history does not say it: under read-only git a catch-up
+    applies main's change without recording main as an ancestor. None in a record kept by an
+    older build."""
 
 
 # -- the run's main revision and its merges -------------------------------------------------------
 
 
 class MergeSource(Value):
-    """One candidate a merge applies: the hypothesis and the exact revision, fixed at scheduling."""
+    """One candidate a merge applies: the hypothesis and the exact revision, fixed at scheduling.
+
+    ``built_on`` is the main revision the candidate's tree includes, so ``built_on..revision`` is
+    its own change; None only in a merge scheduled by an older build.
+    """
 
     hypothesis_id: str
     revision: RevisionRef
+    built_on: RevisionRef | None = None
 
 
 class MergeOutcome(StrEnum):

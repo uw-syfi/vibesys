@@ -50,7 +50,7 @@ the input fail.
 
 The run's main revision moved to `{{ rev(rebase_onto) }}` since this hypothesis last ran: a
 merge combined other candidates into it. Before anything else, bring main's change into your
-tree: {{ apply_change('git diff $(git merge-base HEAD ' ~ rev(rebase_onto) ~ ') ' ~ rev(rebase_onto), agent_git_writable) }}.
+tree: {{ apply_change('git diff ' ~ (rev(rebase_from) if rebase_from else '$(git merge-base HEAD ' ~ rev(rebase_onto) ~ ')') ~ ' ' ~ rev(rebase_onto), agent_git_writable) }}.
 {{ apply_conflicts(agent_git_writable) }} Keep both your change and main's behavior, and build
 this turn's candidate on that tree.
 {% endif %}

@@ -244,9 +244,6 @@ def test_the_unapplied_reply_field_round_trips_and_rejects_unknown_keys(
 WALK = {"c2": 40.0, "c4": 40.0, "c5": 200.0, "c6": 200.0, "c7": 300.0, "c8": 40.0}
 
 
-@pytest.mark.xfail(
-    strict=True, reason="HIGH 1 of the #3299 review: diff bases come from git ancestry"
-)
 @MODES
 def test_a_part_that_caught_up_with_main_twice_is_combined_and_merged_with_its_own_change_only(
     *, restarting: bool
