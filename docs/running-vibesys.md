@@ -271,6 +271,31 @@ warns: when one attempt's agent has had `runaway_evaluations` calls admitted (40
 each a call for a different candidate), the run emits one `framework_warning` event for
 that attempt. The flag never refuses a call or waits on anything.
 
+### Comparison baselines
+
+A task may declare mature engines to measure beside the input with its own benchmark, shown
+as "vs vLLM" and never a candidate. Each is a `[[comparison]]` table of `vibesys.input.toml`
+(the task must declare `interface = "service"`):
+
+```toml
+[[comparison]]
+name = "vllm"                       # lowercase id, used in cache keys and events
+label = "vLLM"                      # what a client shows after "vs"
+image = "docker://rocm/vllm@sha256:<64 hex>"   # or dockerfile = "baselines/vllm.Dockerfile"
+serve = ["vllm", "serve", "--port", "${PORT}"]
+env = { HF_HUB_OFFLINE = "1" }      # optional
+benchmark_args = ["--backend", "vllm"]  # optional; appended to [benchmark].args
+ready_timeout_seconds = 1800        # optional
+visible_to_agents = false           # optional; hidden from agents unless true
+```
+
+Declare exactly one of `image` (a published image pinned by digest; a tag is refused) or
+`dockerfile` (a path in the task). A comparison never uses the task's or the agent's image,
+and `serve` must contain `${PORT}`. Unknown keys, repeated names or labels, and neither or both
+image sources are errors that name the comparison. Machine-specific settings, such as an image
+cache directory or credentials, never belong to the task. Measuring and showing comparisons
+is tracked in [#3308](https://github.com/uw-syfi/vibesys/issues/3308).
+
 ### Who decides whether an idea held
 
 In the multi search the implementer reports implementation status only: `implemented`,

@@ -24,7 +24,13 @@ from pydantic import (
 from vibesys.config import BUNDLED_RESOURCES
 from vibesys.constants import ComputeBackend, DomainName
 from vibesys.inputs._plan import TaskPlan, check_plan_documents, plan_toml_lines
-from vs_project.api import CatalogueInput, Project, RunResourceRequest
+from vs_project.api import (
+    CatalogueInput,
+    ComparisonInput,
+    Project,
+    RunResourceRequest,
+    check_comparisons_are_distinct,
+)
 from vs_runtime.api.infrastructure import (
     EvaluatorPackageNotFoundError,
     EvaluatorPackageRequirement,
@@ -451,6 +457,8 @@ class InputManifest(BaseModel):
     """The design a plan-mode run follows; inert otherwise."""
     catalogue: CatalogueInput | None = None
     """What an example task is about, for the catalogue a client offers; inert for a run."""
+    comparison: tuple[ComparisonInput, ...] = ()
+    """The engines measured beside the input with the task's benchmark (``[[comparison]]``)."""
 
     @model_validator(mode="before")
     @classmethod
@@ -474,6 +482,19 @@ class InputManifest(BaseModel):
         if isinstance(measure, dict) and "result" not in measure:
             return {**data, "measure": {"result_protocol": 2, **measure}}
         return data
+
+    @model_validator(mode="after")
+    def _comparisons_fit_the_task(self) -> InputManifest:
+        """Comparisons are distinct, and run as servers the benchmark reaches over HTTP."""
+        check_comparisons_are_distinct(self.comparison)
+        if self.comparison and self.agent.interface != "service":
+            names = ", ".join(repr(c.name) for c in self.comparison)
+            message = (
+                f"comparison {names}: a baseline is a server the benchmark reaches over HTTP, "
+                'so the task must declare [agent] interface = "service"'
+            )
+            raise ValueError(message)
+        return self
 
     @model_validator(mode="after")
     def _backends_agree(self) -> InputManifest:
@@ -588,9 +609,37 @@ def render_input_manifest(manifest: InputManifest) -> str:
     _append_profile(lines, manifest)
     _append_workspace_sources(lines, manifest)
     _append_evaluator(lines, manifest)
+    _append_comparisons(lines, manifest)
     if manifest.plan is not None:
         lines += plan_toml_lines(manifest.plan)
     return "\n".join(lines) + "\n"
+
+
+def _append_comparisons(lines: list[str], manifest: InputManifest) -> None:
+    for comparison in manifest.comparison:
+        lines.extend(
+            [
+                "",
+                "[[comparison]]",
+                f"name = {_toml_string(comparison.name)}",
+                f"label = {_toml_string(comparison.label)}",
+            ]
+        )
+        if comparison.image is not None:
+            lines.append(f"image = {_toml_string(comparison.image)}")
+        if comparison.dockerfile is not None:
+            lines.append(f"dockerfile = {_toml_string(comparison.dockerfile)}")
+        lines.append(f"serve = {_toml_array(comparison.serve)}")
+        if comparison.env:
+            env = ", ".join(
+                f"{_toml_string(key)} = {_toml_string(value)}"
+                for key, value in comparison.env.items()
+            )
+            lines.append(f"env = {{ {env} }}")
+        if comparison.benchmark_args:
+            lines.append(f"benchmark_args = {_toml_array(comparison.benchmark_args)}")
+        lines.append(f"ready_timeout_seconds = {comparison.ready_timeout_seconds}")
+        lines.append(f"visible_to_agents = {str(comparison.visible_to_agents).lower()}")
 
 
 def _append_profile(lines: list[str], manifest: InputManifest) -> None:
@@ -950,6 +999,7 @@ def load_project_task(project: Project, task: TaskDirectory) -> InputBundle:
     evaluator_path = _resolve_evaluator_source_path(task, manifest)
     if manifest.plan is not None:
         check_plan_documents(task, manifest.plan)
+    _check_comparison_dockerfiles(task, manifest)
 
     return InputBundle(
         root=root,
@@ -1107,6 +1157,26 @@ def _resolve_reference_path(task: TaskDirectory) -> Path | None:
         message = f"reference path is not a directory: {reference_path}"
         raise ValueError(message)
     return reference_path if reference_path.exists() else None
+
+
+def _check_comparison_dockerfiles(task: TaskDirectory, manifest: InputManifest) -> None:
+    """Each comparison's Dockerfile is a file in the task, and never the task's own image."""
+    for comparison in manifest.comparison:
+        if comparison.dockerfile is None:
+            continue
+        path = task.resolve(comparison.dockerfile, must_exist=False)
+        if not path.is_file():
+            message = (
+                f"comparison {comparison.name!r}: dockerfile {comparison.dockerfile!r} "
+                f"is not a file in the task: {path}"
+            )
+            raise FileNotFoundError(message)
+        if task.dockerfile_path is not None and path == task.dockerfile_path.resolve():
+            message = (
+                f"comparison {comparison.name!r}: dockerfile {comparison.dockerfile!r} is the "
+                "task's own image; a comparison needs its own Dockerfile"
+            )
+            raise ValueError(message)
 
 
 def _resolve_evaluator_source_path(task: TaskDirectory, manifest: InputManifest) -> Path | None:

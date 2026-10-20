@@ -10,6 +10,13 @@ Runs use one version 5 manifest containing an ``OrchestrationDescriptor``.
 from typing import TYPE_CHECKING
 
 from vs_project._cli_git_repository import CliGitRepository
+from vs_project._comparison_input import (
+    DEFAULT_READY_TIMEOUT_SECONDS,
+    PORT_PLACEHOLDER,
+    ComparisonInput,
+    ComparisonName,
+    check_comparisons_are_distinct,
+)
 from vs_project._control_inbox import (
     INBOX_FORMAT,
     ControlInbox,
@@ -174,12 +181,14 @@ __all__ = [
     "COMMIT_IDENTITY_NAME",
     "CONTROL_HELLO_MAX_BYTES",
     "DEFAULT_GIT_BACKEND",
+    "DEFAULT_READY_TIMEOUT_SECONDS",
     "GIT_BACKEND_ENV",
     "INBOX_FORMAT",
     "LPRINT_LOGGER",
     "MAX_SOCKET_PATH_BYTES",
     "OBJECTIVES_NAME",
     "OPERATOR_KEY_NAME",
+    "PORT_PLACEHOLDER",
     "PROJECT_SCHEMA_VERSION",
     "RUN_SCHEMA_VERSION",
     "AcceleratorVendor",
@@ -193,6 +202,8 @@ __all__ = [
     "CommitOutcome",
     "CommitSubject",
     "Committed",
+    "ComparisonInput",
+    "ComparisonName",
     "ConfigurationRoot",
     "Conflict",
     "ConflictReason",
@@ -294,6 +305,7 @@ __all__ = [
     "UnsafeProjectPathError",
     "WorkloadInput",
     "atomic_write_bytes",
+    "check_comparisons_are_distinct",
     "create_operator_key",
     "decode_state_document",
     "ended_unapplied",
