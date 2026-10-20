@@ -432,7 +432,8 @@ class _Windows:
 @example(work=5400.0, length=600.0, send_s=240.0)  # the review's reproduction
 @given(
     work=st.floats(min_value=1200.0, max_value=5400.0),
-    length=st.floats(min_value=300.0, max_value=1800.0),
+    # Each outage outlasts two failing sends, so the gate holds the turn in both.
+    length=st.floats(min_value=600.0, max_value=1800.0),
     send_s=st.floats(min_value=30.0, max_value=300.0),
 )
 def test_work_between_two_outages_is_charged_to_the_turn(
