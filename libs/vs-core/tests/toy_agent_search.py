@@ -23,6 +23,7 @@ import vs_core.api as core
 from vs_core.api.search import search
 from vs_core.api.testing import (
     Answer,
+    Failed,
     Faults,
     Harness,
     Running,
@@ -301,6 +302,8 @@ class ToyHost:
     _jobs: int = 0
     _requests: int = 0
     _running: dict[str, int] = field(default_factory=dict)
+    _cancelled: set[str] = field(default_factory=set)
+    """Jobs core cancelled: the scheduler reports each ended failed at its next poll."""
     _asking: dict[str, Ending] = field(default_factory=dict)
 
     # -- the turns' tool calls --------------------------------------------------------------
@@ -369,6 +372,9 @@ class ToyHost:
                 return self._observe(request, state)
             case core.SubmitMeasurement():
                 return self._submit(request)
+            case core.CancelOwnedJob():
+                self._cancelled.add(request.resource_id.root)
+                return Succeeded(resource_id=request.resource_id)
             case core.DispatchTurn() | core.ResumeSessionTurn():
                 return self._turn(request, state)
             case core.ExecuteRegisteredOperation():
@@ -412,6 +418,8 @@ class ToyHost:
 
     def _observe(self, request: core.ObserveOwnedJob, state: core.CoreState) -> Answer:
         job = request.resource_id.root
+        if job in self._cancelled:
+            return Failed(accepted=True)
         left = self._running.get(job, 0)
         if left > 0:
             self._running[job] = left - 1
