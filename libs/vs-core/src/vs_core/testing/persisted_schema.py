@@ -9,8 +9,10 @@ different lines, and Git merges them.
 A change of a shape keeps its version only when every document saved before it still decodes
 after it (`schema_incompatibilities`): a new field with a default, a closed set or a union that
 gains a member, a looser bound, a renamed class. Anything else (a removed, retyped or newly
-required field, a changed default, a tighter bound, a closed set that loses a member) raises the
-version, with a migration where the shape has a chain (`snapshot_problems`).
+required field, a changed default, a tighter bound, a closed set that loses a member, a union's
+discriminator added, removed or renamed, a tag that selects another class, a new branch of an
+undiscriminated union that also takes an old object) raises the version, with a migration where
+the shape has a chain (`snapshot_problems`).
 """
 
 from __future__ import annotations
