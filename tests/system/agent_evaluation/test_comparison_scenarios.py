@@ -12,7 +12,7 @@ from __future__ import annotations
 import hashlib
 import json
 from contextlib import asynccontextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -63,6 +63,7 @@ from vs_project.api.testing import GitKind
 from vs_prompts.api import TemplateRenderer
 from vs_runtime.api.core import (
     AgentEvaluationBridge,
+    AgentEvaluationPolicy,
     AgentEvaluationRecords,
     OwedSubmissions,
     ReceiptEvidenceLedger,
@@ -235,19 +236,28 @@ SEED = 7
 """The noisy cluster's seed in every scenario."""
 
 
+@dataclass(frozen=True)
+class Setting:
+    """What a scenario varies about the run it plays in."""
+
+    task: TaskTerms = TERMS
+    pace: Pace | None = None
+    """With a pace the run clock passes while jobs run, and the base goes stale at its pace."""
+    policy: AgentEvaluationPolicy = POLICY
+    """What the agent's tool measures with."""
+
+
 @asynccontextmanager
 async def play(
     tmp_path: Path,
     script: tuple[Turn, ...],
     *,
     commits: CommitObserver | None = None,
-    task: TaskTerms = TERMS,
-    pace: Pace | None = None,
+    setting: Setting | None = None,
 ) -> AsyncIterator[Played]:
-    """Run the skeleton search with an implementer that plays ``script``; yield what happened.
-
-    With ``pace`` the run clock passes while jobs run, and the base goes stale at its pace.
-    """
+    """Run the skeleton search with an implementer that plays ``script``; yield what happened."""
+    setting = setting or Setting()
+    task, pace, policy = setting.task, setting.pace, setting.policy
     writers: list[ScriptedWriter] = []
     resolvers: list[ToolResolver] = []
     bridges: list[AgentEvaluationBridge] = []
@@ -274,7 +284,7 @@ async def play(
     def yields(workspaces: RuntimeWorkspaces, receipts: StateNamespace) -> AgentEvaluationBridge:
         bridge = AgentEvaluationBridge(
             tmp_path / "evaluation.sock",
-            POLICY,
+            policy,
             ScopeWorkspaces(
                 workspaces, StoreWorkspaceReceipts(ReceiptStore(receipts, threads=loop_threads()))
             ),
@@ -458,6 +468,31 @@ async def test_repeated_runs_of_one_input_aggregate_and_a_lucky_run_is_not_picke
         assert peeked["candidate_value"] == pytest.approx(sum(values[:4]) / 4)
 
 
+async def test_a_resumed_process_measures_with_the_identity_its_run_began_with(
+    tmp_path: Path,
+) -> None:
+    """A host that resumes a run measures as the run's own facts say, not by what it computed.
+
+    A resumed process derives its own environment identity (live, a Slurm profiler broker's
+    socket and token differ in every process) while the run keeps the one it began with, which
+    the strategy's official measurement uses. Were the agent's runs and the base's measured
+    under the process's, they would be another measurement than the official run: the official
+    run would be compared with no base, and the round would report its lone reading, another
+    number than the comparison the agent was told.
+    """
+    process_digest = "cd" * 32
+    policy = replace(POLICY, environment_digest=process_digest)
+    script = (Turn(speed=104.0), Turn(note="again"), Turn(note="and again"), Turn(peek=True))
+    async with play(tmp_path, script, setting=Setting(policy=policy)) as played:
+        facts = played.process.shell.record.envelope.core.run.facts
+        assert facts.environment_digest != process_digest
+        assert {r.plan.environment_digest for r in played.submissions} == {facts.environment_digest}
+        values = played.cluster.runs[104.0]
+        assert len(values) >= 3
+        last = _final(played)
+        assert last.candidate_samples == len(values), "every run of the input is one measurement"
+
+
 async def test_a_decisive_result_is_answered_by_the_agents_own_runs_without_another_run(
     tmp_path: Path,
 ) -> None:
@@ -517,7 +552,7 @@ async def test_an_egregious_count_of_evaluations_is_warned_of_once_and_none_is_r
     observer = integration.core_commit_observer(RUN_ID, None, "runaway-events")
     script = (Turn(speed=110.0), Turn(speed=120.0), Turn(speed=130.0), Turn(speed=140.0))
     task = TERMS.model_copy(update={"runaway_evaluations": 3})
-    async with play(tmp_path, script, commits=observer, task=task) as played:
+    async with play(tmp_path, script, commits=observer, setting=Setting(task=task)) as played:
         calls = played.process.shell.record.envelope.core.evaluation.agent_calls
         assert len([c for c in calls if c.request_id is not None and not c.repeat]) == 4
         assert all(call.rejection is None for call in calls)
@@ -551,7 +586,7 @@ async def test_the_agent_is_told_only_the_comparison_its_fresh_base_samples_make
     sample.
     """
     script = (Turn(speed=130.0), Turn(speed=140.0), Turn(peek=True))
-    async with play(tmp_path, script, pace=STALING) as played:
+    async with play(tmp_path, script, setting=Setting(pace=STALING)) as played:
         state = played.process.shell.record.envelope.core
         assert len(played.cluster.runs[BASE_SPEED]) == 2, "the stale base was measured again"
         assert {c.candidate_value for c in played.comparisons} >= {played.cluster.runs[130.0][0]}, (
@@ -591,7 +626,7 @@ async def test_an_agent_that_resumed_on_a_provisional_comparison_is_told_where_i
     """
     task = TERMS.model_copy(update={"relative_noise": 0.0})
     script = (Turn(speed=130.0), Turn(speed=131.0), Turn(speed=132.0), Turn(speed=133.0))
-    async with play(tmp_path, script, task=task, pace=SLOW) as played:
+    async with play(tmp_path, script, setting=Setting(task=task, pace=SLOW)) as played:
         state = played.process.shell.record.envelope.core
         receipts = [
             wait.authorization_receipt
@@ -623,7 +658,7 @@ async def test_a_repeat_evaluation_tells_the_agent_its_comparison_is_still_settl
     """
     task = TERMS.model_copy(update={"relative_noise": 0.0})
     script = (Turn(speed=130.0), Turn(speed=131.0), Turn(peek=True))
-    async with play(tmp_path, script, task=task, pace=SLOW) as played:
+    async with play(tmp_path, script, setting=Setting(task=task, pace=SLOW)) as played:
         (told,) = played.writer.seen
         assert told is not None, "the tool reported no comparison to the agent"
         assert told["settling"] is True, "core's runs of the comparison were still under way"
@@ -644,7 +679,7 @@ async def test_the_final_check_of_an_idea_waits_for_the_runs_its_close_call_earn
     """
     task = TERMS.model_copy(update={"relative_noise": 0.0})
     async with play(
-        tmp_path, (Turn(speed=104.0, evaluates=False),), task=task, pace=SLOW
+        tmp_path, (Turn(speed=104.0, evaluates=False),), setting=Setting(task=task, pace=SLOW)
     ) as played:
         last = _final(played)
         assert (last.candidate_samples, last.base_samples) == (3, 3)

@@ -55,6 +55,8 @@ from vs_runtime.api.testing import FakeRunControlEventSink
 from vs_sim.api.testing import ManualClock, SimThreads, VirtualClock, examples
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from vs_core.api import CapacityHold
 
 START = 1_000_000.0
@@ -106,13 +108,15 @@ class _Turn:
     """One turn under ``policy`` through an outage of ``outage`` seconds.
 
     The turn's first send works ``lead`` seconds before the outage starts; each failing send
-    then takes ``send_s`` (agentshim's retry and the CLI's own) before it reaches the gate.
+    then takes ``send_s`` (the CLI's own retries) before it reaches the gate.
+    ``provider``, when given, replaces that model: it runs each send on the turn's thread.
     """
 
     policy: QuotaPolicy
     outage: float
     send_s: float
     lead: float = 0.0
+    provider: Callable[[_Turn], None] | None = None
     clock: VirtualClock = field(
         default_factory=lambda: VirtualClock(START, limit=START + 4 * BUDGET)
     )
@@ -134,6 +138,9 @@ class _Turn:
 
         def send(request: AgentTurnRequest) -> None:
             del request
+            if self.provider is not None:
+                self.provider(self)
+                return
             self.threads.sleep(max(START + self.lead - self.clock.now(), 0.0) + self.send_s)
             if self.clock.now() < START + self.lead + self.outage:
                 raise _outage()
@@ -331,3 +338,201 @@ def test_an_outage_past_its_budget_pauses_the_run_until_the_operator_resumes(
     assert turn.sink.abandoned == []
     assert RunControlTransitionKind.PAUSED in [t.kind for t in turn.transitions]
     assert any(hold.parked for hold in turn.holds)
+
+
+_OPERATOR_AFTER_S = 600.0
+"""How long the operator takes to resume a run paused under ``pause``."""
+
+
+@pytest.mark.regression
+@settings(max_examples=examples(pr=6, nightly=40), deadline=None)
+# The review's reproduction: a 30 min turn whose first failing send (240 s) reaches the gate
+# with 60 s of own time left, through an outage one hour past the budget.
+@example(spare=60.0, send_s=240.0, policy=QuotaPolicy(QuotaAction.PAUSE))
+@example(
+    spare=60.0,
+    send_s=240.0,
+    policy=QuotaPolicy(QuotaAction.WAIT, wait_seconds=7200.0, retry_seconds=300.0),
+)
+@given(
+    spare=st.floats(min_value=0.0, max_value=600.0),
+    send_s=st.floats(min_value=1.0, max_value=600.0),
+    policy=_POLICIES,
+)
+def test_an_outage_past_its_budget_late_in_a_turn_never_fails_it(
+    spare: float, send_s: float, policy: QuotaPolicy
+) -> None:
+    """A late outage that outlasts the budget: the run pauses, resumes, and the turn is answered.
+
+    ``spare`` is the own time the turn has left when its first failing send reaches the gate.
+    The park closes the hold at the resume. Before (review of #3283, NEW-1), the failing resend
+    after the resume opened a new hold, which began past the turn's own time; core took it as
+    late, credited nothing, and cut the turn as ``TRANSPORT_LOST``. Under ``wait`` the timed
+    resume is a probe, so for a long outage that resend almost always fails.
+    """
+    turn_time = 1800.0
+    left = min(send_s + spare, turn_time)
+    turn = _Turn(policy, BUDGET + 3600.0, send_s, lead=turn_time - left)
+    resumes = _OPERATOR_AFTER_S if policy.action is QuotaAction.PAUSE else None
+    turn.play(turn_time, operator_resumes_after=resumes)
+
+    assert turn.cut_at == []
+    assert turn.ended == ["plan"]
+    assert turn.sink.abandoned == []
+    assert RunControlTransitionKind.PAUSED in [t.kind for t in turn.transitions]
+
+
+@dataclass
+class _Windows:
+    """A provider down in ``windows`` (seconds after the turn starts) and up between them.
+
+    A send ending in a window fails after ``send_s``. A send that starts while the provider is up
+    does real work until the next window opens, then fails ``send_s`` into it, as a send the
+    outage interrupts does. After the last window the agent hangs, so only core's limit ends
+    the turn. ``sends`` records each send's start and, for a failed one, its stop.
+    """
+
+    windows: tuple[tuple[float, float], ...]
+    send_s: float
+    sends: list[tuple[float, bool, float | None]] = field(default_factory=list)
+    """Each send's start, whether the provider served it, and when it stopped (if it failed)."""
+
+    def __call__(self, turn: _Turn) -> None:
+        begun = turn.clock.now()
+        into = begun - START
+        ends = into + self.send_s
+        served = not self._down(ends)
+        if served:
+            later = [lo for lo, _ in self.windows if lo > into]
+            ends = min(later) + self.send_s if later else 3 * BUDGET  # inside the clock limit
+        turn.threads.sleep(START + ends - begun)
+        if self._down(turn.clock.now() - START):
+            self.sends.append((begun, served, turn.clock.now()))
+            raise _outage()
+        self.sends.append((begun, served, None))
+
+    def _down(self, into: float) -> bool:
+        return any(lo <= into < hi for lo, hi in self.windows)
+
+    def held(self, now: float) -> float:
+        """The time the gate held the turn: from each stop that follows a served send to the
+        start of the next served send (one still open at ``now`` counts up to ``now``)."""
+        total, since = 0.0, None
+        for begun, served, stopped in self.sends:
+            if served and since is not None:
+                total += begun - since
+                since = None
+            if stopped is not None and since is None:
+                since = stopped
+        return total + (0.0 if since is None else now - since)
+
+
+@pytest.mark.regression
+@settings(max_examples=examples(pr=6, nightly=40), deadline=None)
+@example(work=5400.0, length=600.0, send_s=240.0)  # the review's reproduction
+@given(
+    work=st.floats(min_value=1200.0, max_value=5400.0),
+    # Each outage outlasts two failing sends, so the gate holds the turn in both.
+    length=st.floats(min_value=600.0, max_value=1800.0),
+    send_s=st.floats(min_value=30.0, max_value=300.0),
+)
+def test_work_between_two_outages_is_charged_to_the_turn(
+    work: float, length: float, send_s: float
+) -> None:
+    """A 2 h implementer turn works, meets an outage, works ``work`` seconds, meets a second
+    outage that ends at its stated limit, and then hangs: core cuts it at its limit plus only
+    the time the gate actually held it (or the grace of its last resend, if that is later).
+
+    Before (review of #3283, NEW-2), the hold of the first outage stayed open through the work
+    that followed, and that work counted as a failing send that sized the resend grace: the
+    review's turn was cut at 18 960 s, 2.4 times its limit, instead of 8 580 s.
+    """
+    turn_time = 7200.0
+    second = turn_time - length
+    first = second - work - length
+    provider = _Windows(((first, first + length), (second, turn_time)), send_s)
+    turn = _Turn(QuotaPolicy(QuotaAction.PAUSE), 0.0, send_s, provider=provider)
+    turn.play(turn_time)
+
+    [cut] = turn.cut_at
+    # The limit plus the time held, or the resend grace of the send that got through last.
+    last_release = max(begun for begun, served, _ in provider.sends if served)
+    limit = max(
+        START + turn_time + provider.held(cut),
+        last_release + PROVIDER_OUTAGE.resend_grace_seconds,
+    )
+    assert limit <= cut <= limit + _CORE_POLL_S
+
+
+@dataclass
+class _GrowingSends:
+    """An outage whose failing sends take ``first`` and then ``resends`` seconds (the last repeats).
+
+    The turn's first send works until the outage starts, ``lead`` seconds in, then fails after
+    ``first``; each resend fails after its own duration until the outage is over.
+    """
+
+    lead: float
+    outage: float
+    first: float
+    resends: tuple[float, ...]
+    sent: int = 0
+
+    def __call__(self, turn: _Turn) -> None:
+        if self.sent == 0:
+            took = self.lead + self.first
+        else:
+            took = self.resends[min(self.sent - 1, len(self.resends) - 1)]
+        self.sent += 1
+        turn.threads.sleep(took)
+        if turn.clock.now() < START + self.lead + self.outage:
+            raise _outage()
+
+
+def _resends_within_their_grace(grace: float) -> st.SearchStrategy[tuple[float, ...]]:
+    """Resend durations each at most the grace it gets: ``grace``, or twice the longest before."""
+
+    def grow(factors: list[float]) -> tuple[float, ...]:
+        sends: list[float] = []
+        for factor in factors:
+            sends.append(factor * max(grace, 2 * max(sends, default=0.0)))
+        return tuple(sends)
+
+    return st.lists(st.floats(min_value=0.05, max_value=1.0), min_size=1, max_size=5).map(grow)
+
+
+@pytest.mark.regression
+@settings(max_examples=examples(pr=10, nightly=60), deadline=None)
+# Resends that grow past the base grace (600 s): each fits twice the longest before it.
+@example(
+    spare=0.0,
+    first=240.0,
+    resends=(450.0, 850.0, 1600.0),
+    policy=QuotaPolicy(QuotaAction.WAIT, wait_seconds=7200.0, retry_seconds=300.0),
+)
+@given(
+    spare=st.floats(min_value=0.0, max_value=600.0),
+    first=st.floats(min_value=1.0, max_value=600.0),
+    resends=_resends_within_their_grace(PROVIDER_OUTAGE.resend_grace_seconds),
+    policy=_POLICIES,
+)
+def test_a_resend_slower_than_the_base_grace_is_covered_by_twice_the_longest_send(
+    spare: float, first: float, resends: tuple[float, ...], policy: QuotaPolicy
+) -> None:
+    """A resend gets ``max(resend_grace, 2 x the longest resend so far)`` past its release.
+
+    So a provider whose failing sends grow (a CLI that retries longer under load) does not cut a
+    turn near its limit while a resend no longer than twice the longest before it is failing.
+    Before, no test had a send longer than the base grace, so dropping the doubling went
+    unnoticed (review of #3283, mutation M4).
+    """
+    turn_time = 1800.0
+    lead = turn_time - min(first + spare, turn_time)
+    outage = 3 * 3600.0
+    provider = _GrowingSends(lead, outage, first, resends)
+    turn = _Turn(policy, outage, first, lead=lead, provider=provider)
+    turn.play(turn_time)
+
+    assert turn.cut_at == []
+    assert turn.ended == ["plan"]
+    assert turn.sink.abandoned == []

@@ -17,7 +17,7 @@ export type IdeaResult = 'passed' | 'failed' | 'pending';
 export interface PerformancePoint {
   readonly id: string;
   readonly title: string;
-  /** Run-clock seconds when the measurement ended. */
+  /** Run-clock seconds when the idea was first measured (see `measuredAt`). */
   readonly at: number;
   readonly value: number;
   readonly result: IdeaResult;
@@ -62,6 +62,22 @@ function holdsAgainstBase(item: Candidate): boolean {
   return verdict !== 'within_noise' && verdict !== 'worse';
 }
 
+/**
+ * When the idea was first measured: the end of its earliest finished gate, never later than the
+ * measurement it shows. A run resumed on new code asks a gate again (`measure.2`) for an idea it
+ * had measured before, so the gate its measurement reads can end hours after the idea first had
+ * its value; the idea belongs where it first had it, or the best so far would differ before and
+ * after the resume.
+ */
+function measuredAt(item: Candidate): number {
+  const shown = item.measurement?.at ?? item.startedAt;
+  const finished = item.attempts
+    .flatMap(attempt => attempt.steps)
+    .filter(step => step.kind === 'gate' && step.status === 'done' && step.endedAt !== null)
+    .map(step => step.endedAt as number);
+  return Math.min(shown, ...finished);
+}
+
 /** The input's value: any measurement's value over its ratio to the input; null when unknown. */
 export function inputValueOf(candidates: readonly Candidate[]): number | null {
   for (const item of candidates) {
@@ -83,7 +99,7 @@ export function performanceFold(
 ): PerformanceFold {
   const measured = candidates
     .filter(item => item.measurement?.metricValue != null)
-    .map(item => ({item, at: item.measurement?.at ?? item.startedAt}))
+    .map(item => ({item, at: measuredAt(item)}))
     .sort((a, b) => a.at - b.at);
   const points: PerformancePoint[] = [];
   const best: BestStep[] = [];

@@ -9,7 +9,7 @@ The dynamic search runs on the production shell and loop over one virtual clock.
 turn runs a real ``AgentClient`` behind the production capacity gate (``install_capacity_gate``,
 the production timer on simulated threads), sharing the run's control channel with the loop's
 ``RunControlBridge`` as the host wires them. The Fake provider takes ``send_s`` virtual seconds
-per send (agentshim's own transient retry, 30 s, and the attempts) and fails a send that ends
+per send (the CLI's own retries inside its one attempt) and fails a send that ends
 while the outage is down; a cancel ends a send at once, as stopping the provider's process does. A turn the client finishes gets the scripted reply of its role; a client failure is
 what the session executor reports for one (an unknown outcome), and a cancelled flight raises
 as it does in production. Everything else is answered at once by the dynamic script.
@@ -24,6 +24,9 @@ from __future__ import annotations
 
 import asyncio
 import enum
+import hashlib
+import json
+import tempfile
 from collections import Counter, deque
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -32,7 +35,10 @@ from typing import TYPE_CHECKING, Any
 import pytest
 from hypothesis import Phase, example, given, settings
 from hypothesis import strategies as st
-from tests.support.dynamic_script import Executors, config, harness
+from pydantic import TypeAdapter
+from tests.support.dynamic_script import FACTS, TERMS, Executors, config, harness
+from tests.support.owed_submissions import owed_namespace
+from tests.support.synthesized_evidence import SynthesizedEvidence
 from tests.vibesys.orchestration.dynamic._replies import (
     implement,
     implemented,
@@ -53,19 +59,27 @@ from vs_agent.api import (
     SessionScope,
 )
 from vs_agent.api.testing import FakeProvider, FakeTurnScript
-from vs_core.api import CancelTurn, DispatchTurn, ResumeSessionTurn, RunStatus
+from vs_core.api import CancelTurn, DispatchTurn, ResumeSessionTurn, RunStatus, TurnObserved
 from vs_core.testing.drive import Unknown, new_run
+from vs_evaluation.api import SocketSuccess, SubmitCall, WaitCall
 from vs_project.api import FakeStateStore
-from vs_runtime.api.core import PRODUCTION_LEASE_SECONDS as LEASE_SECONDS
 from vs_runtime.api.core import (
+    EVALUATION_TOOL_ID,
+    AgentEvaluationBridge,
+    AgentEvaluationPolicy,
+    AgentEvaluationRecords,
     CoreRunHost,
     CoreRuntime,
     CoreRuntimeBindings,
+    ExecutionResult,
+    OwedSubmissions,
+    ReceiptStore,
     RunControlBridge,
     RunLoopConfig,
     drive_core,
     start_core,
 )
+from vs_runtime.api.core import PRODUCTION_LEASE_SECONDS as LEASE_SECONDS
 from vs_runtime.api.infrastructure import (
     PROVIDER_OUTAGE,
     CapacityHandling,
@@ -79,9 +93,11 @@ from vs_runtime.api.testing import (
     ScriptedExecutors,
     request_executors,
 )
+from vs_runtime.contracts import AgentRole, AgentTool
 from vs_sim.api.testing import (
     ManualClock,
     SimBlockingRunner,
+    SimNetwork,
     VirtualClock,
     examples,
     loop_threads,
@@ -93,9 +109,9 @@ if TYPE_CHECKING:
 
     from pydantic import BaseModel
 
-    from vs_core.api import CoreState, OperationRegistry, Request, SchemaRef
+    from vs_core.api import CoreState, OperationRegistry, Request, SchemaRef, Scope
     from vs_core.testing.drive import Answer
-    from vs_runtime.api.core import ExecutionContext, ExecutionResult
+    from vs_runtime.api.core import ExecutionContext, SnapshotWorkspace
     from vs_sim.api.testing import SimThreads
 
 START = 1.0
@@ -136,6 +152,8 @@ class Hit(enum.StrEnum):
     JUDGE = "judge"
     RESUMED_PLANNER = "resumed-planner"
     """The planner's second turn, which resumes its session."""
+    RESUMED_IMPLEMENTER = "resumed-implementer"
+    """The implementer's turn that continues its evaluation wait (``play`` with ``waits``)."""
 
 
 _TURN_TIME = {"orchestrator": 1800.0, "implementer": 7200.0, "judge": 1800.0}
@@ -157,6 +175,7 @@ class Outage:
     left: float | None = None
     started_at: float | None = None
     planner_turns: int = 0
+    implementer_turns: int = 0
     sends: int = 0
 
     def anchor(self, role: str, now: float) -> None:
@@ -165,11 +184,14 @@ class Outage:
             return
         if role == "orchestrator":
             self.planner_turns += 1
+        if role == "implementer":
+            self.implementer_turns += 1
         wanted = {
             Hit.PLANNER: role == "orchestrator",
             Hit.IMPLEMENTER: role == "implementer",
             Hit.JUDGE: role == "judge",
             Hit.RESUMED_PLANNER: role == "orchestrator" and self.planner_turns == 2,
+            Hit.RESUMED_IMPLEMENTER: role == "implementer" and self.implementer_turns == 2,
         }[self.hit]
         if wanted:
             lead = 0.0 if self.left is None else max(_TURN_TIME[role] - self.left, 0.0)
@@ -273,6 +295,93 @@ class _Script:
         return self._inner(request, core)
 
 
+_EVALUATING = AgentRole(
+    id="implementer", system_prompt="implement", extra_tools=(AgentTool(id=EVALUATION_TOOL_ID),)
+)
+_POLICY = AgentEvaluationPolicy(
+    evaluator_digest=FACTS.evaluator_digest,
+    workload_digest=FACTS.workload_digest,
+    environment_digest=FACTS.environment_digest,
+    recipe=TERMS.recipe,
+    stages=tuple(
+        (stage.stage_id, float(stage.execution_seconds))
+        for stage in TERMS.stages
+        if stage.stage_id in TERMS.measured
+    ),
+    queue_allowance=float(TERMS.queue_allowance),
+    accuracy_stage=TERMS.accuracy_stage,
+    accuracy_gated=TERMS.accuracy_gated,
+)
+_REPLY = TypeAdapter(SocketSuccess)
+
+
+class _Workspace:
+    """The implementer's candidate: one content, so one snapshot, for the whole run."""
+
+    _SNAPSHOT = hashlib.sha256(b"candidate").hexdigest()[:40]
+
+    async def snapshot_and_retain(self, label: str, *, retention_label: str) -> str:
+        del label, retention_label
+        return self._SNAPSHOT
+
+    async def measured_input(self, revision: str) -> str:
+        return f"input:{revision}"
+
+    async def matches_revision(self, revision: str) -> bool:
+        return revision == self._SNAPSHOT
+
+
+class _Workspaces:
+    async def workspace_of(self, scope: Scope) -> SnapshotWorkspace | None:
+        del scope
+        return _Workspace()
+
+
+@dataclass
+class _EvaluationWait:
+    """The implementer's first turn submits its candidate through the evaluation tool and waits.
+
+    Its calls go through the real ``AgentEvaluationBridge`` as the tool's wire frames; the turn
+    then replies waiting, and core suspends it and resumes it once the evaluation settles.
+    """
+
+    script: Executors
+    bridge: AgentEvaluationBridge
+    waited: bool = False
+
+    async def before_reply(self, request: DispatchTurn | ResumeSessionTurn, role: str) -> bool:
+        """For the implementer's first turn, submit and wait; whether it did."""
+        if self.waited or role != "implementer" or request.turn.charge_class == "resume":
+            return False
+        self.waited = True
+        (descriptor,) = self.bridge.servers(_EVALUATING, request.scope)
+        token = dict(descriptor.runtime_env)["VS_EVALUATION_TOKEN"]
+        submitted = await self._call(SubmitCall(token=token).model_dump_json().encode())
+        handle = str(submitted["handle_id"])
+        await self._call(WaitCall(token=token, handles=(handle,)).model_dump_json().encode())
+        waiting = json.dumps({"kind": "waiting_for_evaluation", "handles": [handle]})
+        self.script.implementer.appendleft(waiting)
+        return True
+
+    async def _call(self, frame: bytes) -> dict[str, object]:
+        raw, confirm = await self.bridge.answer(frame)
+        reply = _REPLY.validate_json(raw)
+        confirm()
+        assert isinstance(reply.result, dict)
+        return reply.result
+
+    def suspended(self, request: DispatchTurn, result: ExecutionResult) -> ExecutionResult:
+        """The turn's result with the continuation its accepted wait yields, as the host adds it."""
+        suspension = self.bridge.yielded(request)
+        events = tuple(
+            event.model_copy(update={"suspension": suspension})
+            if isinstance(event, TurnObserved)
+            else event
+            for event in result.owner_events
+        )
+        return ExecutionResult(observation=result.observation, owner_events=events)
+
+
 class _GatedExecutors(ScriptedExecutors):
     """Agent turns run the real client behind the gate; every other request is scripted."""
 
@@ -285,6 +394,8 @@ class _GatedExecutors(ScriptedExecutors):
         provider: _Provider,
     ) -> None:
         super().__init__(script, core, registry, schemas)
+        self.wait: _EvaluationWait | None = None
+        """Set once the shell exists, for a run whose implementer waits for its evaluation."""
         self._failed = script.failed
         self._provider = provider
         self._blocking = SimBlockingRunner(provider.threads)
@@ -331,7 +442,11 @@ class _GatedExecutors(ScriptedExecutors):
             self._failed.add(request.request_id.root)
         finally:
             self._running.pop(invocation, None)
-        return await super().execute(request, context)
+        waited = self.wait is not None and await self.wait.before_reply(request, role)
+        result = await super().execute(request, context)
+        if waited and self.wait is not None and isinstance(request, DispatchTurn):
+            return self.wait.suspended(request, result)
+        return result
 
     async def _stop(self, client: AgentClient, role: str) -> None:
         await self._blocking.run(client.cancel_session, AgentSessionKey(SessionScope.ROLE, role))
@@ -351,8 +466,14 @@ class Played:
     outage_started: bool
 
 
-def play(outage: Outage, *, send_s: float, policy: QuotaPolicy, rounds: int = 1) -> Played:
-    """One dynamic run of ``rounds`` planning calls through ``outage``."""
+def play(
+    outage: Outage, *, send_s: float, policy: QuotaPolicy, rounds: int = 1, waits: bool = False
+) -> Played:
+    """One dynamic run of ``rounds`` planning calls through ``outage``.
+
+    With ``waits`` the host can suspend turns, and the implementer's first turn submits its
+    candidate through the evaluation tool and ends waiting for it.
+    """
     clock = VirtualClock(START)
     script = Executors(
         planner=deque(plan_reply(implement(f"h{n}")) for n in range(rounds)),
@@ -360,8 +481,9 @@ def play(outage: Outage, *, send_s: float, policy: QuotaPolicy, rounds: int = 1)
         judge=deque(reviewed() for _ in range(rounds)),
     )
     selected = config(max_in_flight=1, max_rounds=rounds)
-    hosting = harness(selected)
+    hosting = harness(selected, lifecycle=frozenset({"suspend"})) if waits else harness(selected)
     search = dynamic.driver(selected, hosting.registry)
+    owed = tempfile.TemporaryDirectory()
 
     async def main() -> Played:
         threads = loop_threads()
@@ -369,24 +491,36 @@ def play(outage: Outage, *, send_s: float, policy: QuotaPolicy, rounds: int = 1)
         provider = _Provider(
             clock, threads, channel, CapacityHandling.for_policy(policy, threads), outage, send_s
         )
+        executors = _GatedExecutors(
+            _Script(script),
+            lambda: shell.record.envelope.core,
+            hosting.registry,
+            dynamic.reply_schemas,
+            provider,
+        )
         shell: CoreRuntime[Any] = CoreRuntime(
             FakeStateStore(),
             search,
             new_run(search, hosting),
             config=selected,
             bindings=CoreRuntimeBindings(
-                registry=hosting.registry,
-                executors=request_executors(
-                    _GatedExecutors(
-                        _Script(script),
-                        lambda: shell.record.envelope.core,
-                        hosting.registry,
-                        dynamic.reply_schemas,
-                        provider,
-                    )
-                ),
+                registry=hosting.registry, executors=request_executors(executors)
             ),
         )
+        if waits:
+            bridge = AgentEvaluationBridge(
+                Path("unused.sock"),
+                _POLICY,
+                _Workspaces(),
+                AgentEvaluationRecords(
+                    OwedSubmissions(ReceiptStore(owed_namespace(Path(owed.name)), threads=threads)),
+                    SynthesizedEvidence(),
+                ),
+                network=SimNetwork(threads),
+                threads=threads,
+            )
+            bridge.attach(shell, clock)
+            executors.wait = _EvaluationWait(script, bridge)
         host = CoreRunHost(
             shell, FakePublicationDelivery(), clock, RunControlBridge(channel, _Steers())
         )
@@ -405,7 +539,8 @@ def play(outage: Outage, *, send_s: float, policy: QuotaPolicy, rounds: int = 1)
             outage.started_at is not None,
         )
 
-    return run_virtual(clock, main())
+    with owed:
+        return run_virtual(clock, main())
 
 
 class _Steers:
@@ -413,6 +548,8 @@ class _Steers:
         del ref, text
 
 
+_HITS = st.sampled_from([hit for hit in Hit if hit is not Hit.RESUMED_IMPLEMENTER])
+"""The hits of a run with no evaluation wait (``RESUMED_IMPLEMENTER`` needs ``waits``)."""
 _POLICIES = st.sampled_from(
     [
         QuotaPolicy(QuotaAction.PAUSE),
@@ -439,7 +576,7 @@ _POLICIES = st.sampled_from(
 )
 @given(
     pattern=st.sampled_from(Pattern),
-    hit=st.sampled_from(Hit),
+    hit=_HITS,
     length=st.floats(min_value=60.0, max_value=BUDGET - 3600.0),
     send_s=st.floats(min_value=5.0, max_value=600.0),
     policy=_POLICIES,
@@ -473,7 +610,7 @@ def test_an_outage_shorter_than_the_budget_never_ends_the_run(
     hit=Hit.JUDGE, spare=50.0, length=3600.0, send_s=150.0, policy=QuotaPolicy(QuotaAction.PAUSE)
 )
 @given(
-    hit=st.sampled_from(Hit),
+    hit=_HITS,
     # The gate's report reaches core at the loop's next control poll, so a first stop must
     # reach the gate one poll before the limit (production polls each second).
     spare=st.floats(min_value=_CONTROL_POLL_S, max_value=1800.0),
@@ -501,6 +638,45 @@ def test_an_outage_late_in_a_turn_never_ends_the_run(
     assert played.core.run.result is not None
     assert played.core.run.result.outcome == "success", played.core.run.result
     assert played.asked == Counter(orchestrator=rounds, implementer=rounds, judge=rounds)
+
+
+@pytest.mark.regression
+@_SETTINGS
+# The review's weak spot 1: a 240 s failing send, the outage 120 s before the limit.
+@example(
+    left=0.5,
+    length=3600.0,
+    send_s=240.0,
+    policy=QuotaPolicy(QuotaAction.WAIT, wait_seconds=7200.0, retry_seconds=300.0),
+)
+@given(
+    left=st.floats(min_value=0.0, max_value=0.9),
+    length=st.floats(min_value=600.0, max_value=BUDGET - 3600.0),
+    send_s=st.floats(min_value=120.0, max_value=600.0),
+    policy=_POLICIES,
+)
+def test_an_outage_too_late_for_the_gate_never_loses_a_resumed_turns_workstream(
+    left: float, length: float, send_s: float, policy: QuotaPolicy
+) -> None:
+    """The implementer waits for its evaluation; the turn that continues the wait meets an
+    outage that starts within one failing send of its limit, so its first stop reaches the
+    capacity gate after the limit, and core cuts it as lost by its transport.
+
+    That turn is asked again once, as a correction; the gate holds the new turn through the
+    outage, and the run still ends with a winner. Before (review of #3283, weak spot 1), a
+    turn that continued a wait was never asked again, and the workstream was lost.
+    ``left`` is the own time left when the outage starts, as a fraction of one failing send.
+    """
+    outage = Outage(Pattern.TOTAL, Hit.RESUMED_IMPLEMENTER, length, left=left * send_s)
+    played = play(outage, send_s=send_s, policy=policy, waits=True)
+
+    assert played.outage_started, "the outage hit no turn"
+    assert played.abandoned == [], "the gate gave a turn up"
+    assert played.core.run.result is not None
+    assert played.core.run.result.outcome == "success", played.core.run.result
+    assert played.asked["judge"] == 1, "the implementer's workstream ended before its review"
+    # The waiting turn, its resume (lost), and the one re-ask.
+    assert played.asked == Counter(orchestrator=1, implementer=3, judge=1)
 
 
 def test_a_run_with_no_outage_asks_each_role_once() -> None:

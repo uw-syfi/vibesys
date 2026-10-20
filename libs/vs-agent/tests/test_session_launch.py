@@ -1410,15 +1410,16 @@ def test_a_resumed_turn_that_exhausts_its_retries_keeps_the_conversation(
 
 @pytest.mark.regression
 @pytest.mark.parametrize("provider", CLASSIFYING_PROVIDERS)
-def test_a_sustained_outage_reaches_the_caller_after_one_short_retry(
+def test_a_sustained_outage_reaches_the_caller_after_one_attempt(
     sandbox_builds: list[dict[str, Any]],
     tmp_path: Path,
     provider: str,
 ) -> None:
-    """The production schedule hides at most one 30 s retry of a send from the capacity gate.
+    """The production schedule hides no retry of a send from the capacity gate.
 
     Before (S179), five retries hid about fifteen minutes of every send, which the gate could
-    neither see nor keep off the turn's limit.
+    neither see nor keep off the turn's limit; one 30 s retry still hid a second CLI attempt
+    (review of #3283, weak spot 1).
     """
     del sandbox_builds
     session, fake = _session(
@@ -1432,8 +1433,8 @@ def test_a_sustained_outage_reaches_the_caller_after_one_short_retry(
         session.run_turn(AgentTurnRequest(message="one"))
 
     assert excinfo.value.condition is QuotaCondition.UNAVAILABLE
-    assert len(fake.requests) == 2
-    assert sum(subject.TRANSIENT_RETRY_DELAYS_S) <= 60.0
+    assert len(fake.requests) == 1
+    assert subject.TRANSIENT_RETRY_DELAYS_S == ()
 
 
 @pytest.mark.parametrize("provider", CLASSIFYING_PROVIDERS)
