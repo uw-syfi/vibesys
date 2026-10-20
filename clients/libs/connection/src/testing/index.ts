@@ -17,5 +17,5 @@ export {
   record,
 } from './fake-helper.js';
 export {FakeLogStore, type LogStoreFixture} from './fake-log-store.js';
-export {deferredKillProcess, fakeProcess} from './fake-process.js';
+export {deferredKillProcess, fakeProcess, pipeHeldProcess} from './fake-process.js';
 export {phaseReached} from './phase-reached.js';

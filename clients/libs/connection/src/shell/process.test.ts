@@ -3,6 +3,7 @@ import type {ChildProcess} from 'node:child_process';
 import {EventEmitter} from 'node:events';
 import {PassThrough} from 'node:stream';
 import {FakeClock} from '@vibesys/transport/testing';
+import {fakeProcess, pipeHeldProcess} from '../testing/fake-process.js';
 import {fromChild, retireProcess} from './process.js';
 
 /** The Node child lifecycle boundary, without a real process or signal. */
@@ -88,5 +89,46 @@ describe('Node child process lifecycle evidence', () => {
 
     expect(signaledProcess.running).toBeFalse();
     expect(await signaledProcess.exit).toBeNull();
+  });
+});
+
+describe('retirement of a process whose descendant holds its pipes', () => {
+  test('a dead process is confirmed though its output has not ended', async () => {
+    const clock = new FakeClock();
+    const held = pipeHeldProcess();
+    held.stdout.resume();
+    held.stderr.resume();
+    const retirement = retireProcess(held.process, clock.scheduleTimeout, 100);
+
+    await held.process.terminated;
+    clock.advanceBy(100);
+
+    expect(await retirement.outcome).toEqual({kind: 'confirmed', code: null, pipesHeld: true});
+    held.releasePipes();
+    expect(await retirement.exit).toBeNull();
+  });
+
+  test('a process that never dies is still unconfirmed', async () => {
+    const clock = new FakeClock();
+    const stuck = fakeProcess();
+    const retirement = retireProcess(
+      {...stuck.process, kill: () => {}, terminated: new Promise<void>(() => {})},
+      clock.scheduleTimeout,
+      100,
+    );
+
+    clock.advanceBy(200);
+
+    expect(await retirement.outcome).toEqual({kind: 'unconfirmed'});
+  });
+
+  test('a node child that exited but has not closed is terminated', async () => {
+    const child = new FakeNodeChild(50);
+    const process = fromChild(child.asChildProcess());
+
+    child.emit('exit', 0, null);
+
+    await process.terminated;
+    expect(process.running).toBeFalse();
   });
 });

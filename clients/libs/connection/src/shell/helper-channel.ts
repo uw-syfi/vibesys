@@ -437,7 +437,8 @@ export class HelperChannel implements AsyncDisposable {
     this.#close();
     const outcome = await this.#retire().outcome;
     if (outcome.kind === 'unconfirmed') throw this.#unconfirmedTerminationError();
-    await this.ended;
+    // A dead helper whose pipes a descendant holds ends its output later; the process is gone.
+    if (!outcome.pipesHeld) await this.ended;
   }
 
   #close(): void {
