@@ -55,6 +55,7 @@ from vibesys.orchestration.dynamic.search.api import (
     PlannerPrompt,
     ProfileHistoryRow,
     PromptTemplate,
+    RoundRecord,
     WorkKind,
     WorkPlan,
     best_part,
@@ -451,3 +452,114 @@ def test_the_parts_verdict_is_the_composite_against_the_raw_best_part_in_any_ord
     shuffled = list(parts)
     order.shuffle(shuffled)
     assert versus_parts((row,), tuple(shuffled), space) is got
+
+
+# h3 and h4 build on h1's candidate c1, then m1 merges h1 (main c4). Both trees already hold c1's
+# change, which is all m1 brought into main, so each tree holds main c4 too: their own changes
+# start there. Diffing from the input instead would carry h1's change again, and under read-only
+# git every one of its hunks would be refused (`.rej`) on a tree or main that already has it.
+ON_H1 = {"c1": 200.0, "c2": 250.0, "c3": 40.0, "c4": 200.0, "c5": 250.0, "c6": 40.0}
+
+
+@pytest.mark.xfail(strict=True, reason="a lineage child of a merged candidate diffs from the input")
+@MODES
+def test_a_child_of_a_merged_candidate_diffs_from_the_main_that_merged_its_parent(
+    *, restarting: bool
+) -> None:
+    host = begin(config(max_rounds=12), restarting=restarting, throughputs=ON_H1)
+    first = _plan(host, implement("h1"))
+    base = first.base_revision.revision_id.root
+    _implemented(host, "h1", "c1")
+    on_c1 = {"parent_hypothesis_id": "h1", "parent_revision": "c1"}
+    _plan(host, implement("h3", **on_c1))
+    _implemented(host, "h3", "c2")
+    _plan(host, implement("h4", **on_c1))
+    _implemented(host, "h4", "c3", "inconclusive")
+    _merged(host, "m1", "h1", "c4")
+
+    # Merging h3 applies h3's own change only: h1's is in main c4 already.
+    merging = _flat(
+        render(PromptTemplate.MERGE, _merged(host, "m2", "h3", "c5"), agent_git_writable=False)
+    )
+    assert "`git diff c4 c2 | git apply --reject`" in merging, merging
+    assert f"git diff {base} " not in merging
+
+    # h4 goes on after main moved to c5: it catches up with m2's change only, from c4.
+    _plan(host, implement("h4", continue_hypothesis=True))
+    asked = _implemented(host, "h4", "c6", "inconclusive")
+    caught_up = _flat(render(PromptTemplate.IMPLEMENT, asked, agent_git_writable=False))
+    assert "`git diff c4 c5 | git apply --reject`" in caught_up, caught_up
+    assert f"git diff {base} " not in caught_up
+
+
+STRAY = {"hypothesis_id": "the scheduler part", "part": "all of it", "why": "a typo"}
+
+
+def _reply(host: Host, hypothesis: str, candidate: str, **extra: object) -> None:
+    """The implementer of ``hypothesis`` answers with ``candidate`` and the reply ``extra``."""
+    reply = ImplementerResult.model_validate_json(implemented(**extra))
+    checkpoint = Retained(revision=RevisionRef.of_git_commit(candidate))
+    host.run.reply(turn_about(host, "implementer", hypothesis), reply, checkpoint=checkpoint)
+
+
+def _last_round(host: Host, hypothesis: str) -> RoundRecord:
+    """The latest round of ``hypothesis`` in the record the search published."""
+    record = host.record
+    assert record is not None
+    (found,) = (item for item in record.hypotheses if item.hypothesis_id == hypothesis)
+    return found.rounds[-1]
+
+
+def _judged(host: Host, hypothesis: str, *, passed: bool = True) -> None:
+    verdict = ReviewResult.model_validate_json(reviewed(passed=passed))
+    host.run.reply(turn_about(host, "judge", hypothesis), verdict)
+
+
+@pytest.mark.xfail(
+    strict=True, reason="a stray unapplied entry refuses the reply and spends a turn"
+)
+@MODES
+def test_a_stray_unapplied_entry_on_the_last_turn_still_has_the_composite_measured(
+    *, restarting: bool
+) -> None:
+    host, offer = _two_parts_that_lost(restarting=restarting, throughputs={**LOST, "c4": 300.0})
+    revisions = {row.hypothesis_id: row.revision.revision_id.root for row in offer.buildable}
+    pair = [(name, revisions[name]) for name in ("h1", "h2")]
+    host.run.reply_raw(host.run.expect_turn(role=PLANNER_LABEL), plan_reply(combine("k1", *pair)))
+    _start(host)
+    _reply(host, "k1", "c3")
+    _judged(host, "k1", passed=False)  # the first of the two turns ends without a measurement
+    kept = {"hypothesis_id": "h2", "part": "the cache hunk", "why": "conflicts with h1"}
+    _reply(host, "k1", "c4", unapplied=[kept, STRAY])
+    _judged(host, "k1")
+    _settle(host)
+
+    after = _plan(host, implement("h3"))
+    last = _last_round(host, "k1")
+    assert last.candidate == RevisionRef.of_git_commit("c4")
+    assert [row.value for row in last.metrics] == [300.0]
+    composite = getattr(_row(after, "k1"), "composite", None)
+    assert composite is not None
+    assert composite.verdict.value == "better"
+    # The entry naming no part is kept as the implementer wrote it, not reported against a part.
+    assert [item.model_dump() for item in composite.unapplied] == [kept]
+    assert [item.model_dump() for item in last.unattributed] == [STRAY]
+
+
+@pytest.mark.xfail(strict=True, reason="any unapplied entry outside a combine refuses the reply")
+@MODES
+def test_an_unapplied_entry_outside_a_combine_is_kept_and_the_candidate_measured(
+    *, restarting: bool
+) -> None:
+    host = begin(config(max_rounds=4), restarting=restarting, throughputs={"c1": 200.0})
+    _plan(host, implement("h1"))
+    _start(host)
+    _reply(host, "h1", "c1", unapplied=[STRAY])
+    _judged(host, "h1")
+    _settle(host)
+
+    _plan(host, implement("h2"))
+    last = _last_round(host, "h1")
+    assert [row.value for row in last.metrics] == [200.0]
+    assert last.unapplied == ()
+    assert [item.model_dump() for item in last.unattributed] == [STRAY]
