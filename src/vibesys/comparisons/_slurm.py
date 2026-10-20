@@ -43,8 +43,8 @@ class SlurmSampleExecutors:
         *,
         clock: Clock,
         sleeper: Sleeper,
-        processes: Processes | None = None,
-        cluster: Cluster | None = None,
+        processes: Processes | None,
+        cluster: Cluster | None,
     ) -> None:
         """Bind the operator's settings and the plans every sample's job runs."""
         self._settings = settings

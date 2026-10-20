@@ -2,28 +2,16 @@
 
 from __future__ import annotations
 
-import hashlib
 from typing import TYPE_CHECKING
 
-from vs_runtime.api.comparisons import ComparisonSubject
+from vs_runtime.api.comparisons import ComparisonSubject, context_digest
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from vibesys.inputs import InputBundle
     from vs_project.api import ComparisonInput
     from vs_sandbox.api.slurm import SlurmOperatorSettings
 
 _DIGEST_MARK = "@sha256:"
-
-
-def context_digest(directory: Path) -> str:
-    """The hash of a build context: every file's relative path and bytes, in path order."""
-    digest = hashlib.sha256()
-    for path in sorted(p for p in directory.rglob("*") if p.is_file()):
-        digest.update(path.relative_to(directory).as_posix().encode() + b"\0")
-        digest.update(hashlib.sha256(path.read_bytes()).digest())
-    return digest.hexdigest()
 
 
 def _identity(bundle: InputBundle, spec: ComparisonInput) -> str:

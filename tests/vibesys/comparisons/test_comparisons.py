@@ -109,6 +109,7 @@ class _World:
             blocking=InlineBlockingRunner(),
             repository=self.repository,
             scratch=scratch,
+            processes=None,
             cluster=self.cluster,
         )
 

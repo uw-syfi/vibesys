@@ -17,7 +17,7 @@ from vibesys.comparisons._slurm import SlurmSampleExecutors
 from vibesys.comparisons._subjects import comparison_subjects
 from vibesys.domains.registry import resolve_domain
 from vibesys.run.evaluation import trusted_evaluation_plan
-from vs_project.api import load_objectives
+from vs_project.api import comparison_directory, comparison_namespace, load_objectives
 from vs_runtime.api.comparisons import (
     ComparisonFailed,
     ComparisonMeasurer,
@@ -65,8 +65,8 @@ class ComparisonHost:
     repository: GitRepository
     scratch: Path
     """A fresh directory for the checkout and the plan; the caller removes it."""
-    processes: Processes | None = None
-    cluster: Cluster | None = None
+    processes: Processes | None
+    cluster: Cluster | None
     """An already-open cluster; without one, the settings' own transport is reached by *processes*."""
 
 
@@ -79,7 +79,7 @@ def _headline(bundle: InputBundle) -> str | None:
 
 
 def _store(project: Project) -> ComparisonStore:
-    directory = project.state.comparison_directory()
+    directory = comparison_directory(project.state)
     directory.mkdir(parents=True, exist_ok=True)
     return ComparisonStore(directory)
 
@@ -132,7 +132,7 @@ async def measure_comparisons(  # noqa: PLR0913  # lint-waiver: LW-930097 [PLR09
     if revision is None:
         message = "the project has no commit to check out; commit the input first"
         raise ValueError(message)
-    state = project.state.comparison_directory()
+    state = comparison_directory(project.state)
     prepared = prepare_trusted_evaluator(
         bundle.evaluator_package_root, project.state.machine_cache_directory("evaluator-tools")
     )
@@ -159,7 +159,7 @@ async def measure_comparisons(  # noqa: PLR0913  # lint-waiver: LW-930097 [PLR09
         RepositoryCheckouts(
             project.root, host.repository, host.scratch / "checkouts", host.blocking
         ),
-        project.state.comparison_namespace(),
+        comparison_namespace(project.state),
         state / "slurm-handles",
         clock=host.clock,
         sleeper=host.sleeper,

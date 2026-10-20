@@ -12,6 +12,8 @@ from vs_runtime._comparison import (
     ComparisonSubject,
     StoredComparison,
     bounded_reason,
+    comparison_scratch,
+    context_digest,
 )
 from vs_runtime._comparison_measurement import (
     ComparisonExecutor,
@@ -40,4 +42,6 @@ __all__ = [
     "SampleExecutors",
     "StoredComparison",
     "bounded_reason",
+    "comparison_scratch",
+    "context_digest",
 ]

@@ -1039,27 +1039,6 @@ class ProjectState:
         )
         return _contained_state_dir(cache_root, name, kind="model cache")
 
-    def comparison_directory(self) -> Path:
-        """Return the machine-local directory that holds this project's comparison readings.
-
-        It sits beside the model caches below the project's machine-local state, so it is
-        never committed and never visible to an agent (the ``local`` state is hidden).
-        """
-        return self.model_cache_directory("comparisons")
-
-    def comparison_namespace(self) -> StateNamespace:
-        """Return the typed boundary for the state a comparison's cluster jobs keep (machine-local)."""
-        directory = _contained_state_dir(
-            self.comparison_directory(), "evaluations", kind="comparison evaluations"
-        )
-        return StateNamespace(
-            project_root=self.project_root,
-            root=directory,
-            portable=False,
-            containment_root=self._state_home,
-            namespace_root=_STATE_DIRECTORY_POSIX / "local" / "comparisons",
-        )
-
     def machine_cache_directory(self, name: str) -> Path:
         """Return a named cache shared by every project on this architecture.
 

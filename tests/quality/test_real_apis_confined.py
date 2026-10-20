@@ -1238,6 +1238,10 @@ FILE_IO_EDGE_MODULES: dict[str, Edge] = {
         EdgeKind.STORE,
         "the local progress log",
     ),
+    "libs/vs-runtime/src/vs_runtime/_comparison.py": (
+        EdgeKind.STORE,
+        "the file-backed comparison cache, its build-context digest and scratch directory",
+    ),
     "libs/vs-project/src/vs_project/_task_files.py": (
         EdgeKind.INPUT_LOADER,
         "task objectives",
@@ -1414,6 +1418,10 @@ FILE_IO_EDGE_MODULES: dict[str, Edge] = {
     ),
     "libs/vs-slurm/src/vs_slurm/cluster_store.py": (EdgeKind.STORE, "the cluster state store"),
     "libs/vs-slurm/src/vs_slurm/config.py": (EdgeKind.OPERATOR_CONFIG, "the Slurm cluster file"),
+    "libs/vs-slurm/src/vs_slurm/phase_files.py": (
+        EdgeKind.TRANSFER,
+        "reads the small result files a job leaves in the staged-back results tree",
+    ),
     "libs/vs-slurm/src/vs_slurm/fake_cluster.py": (
         EdgeKind.FAKE,
         "Slurm cluster Fake whose state is files",

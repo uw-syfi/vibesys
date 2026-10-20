@@ -15,7 +15,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shutil
 import statistics
+import tempfile
+from contextlib import contextmanager
+from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, FiniteFloat
@@ -24,11 +28,31 @@ from vs_decode.api import Unreadable, ValidationOptions, read_json
 from vs_project.api import ComparisonInput, atomic_write_bytes
 
 if TYPE_CHECKING:
-    from pathlib import Path
+    from collections.abc import Iterator
 
 MAX_REASON_CHARS = 600
 _MAX_RECORD_BYTES = 1 << 20
 _MIN_SPREAD_SAMPLES = 2
+
+
+def context_digest(directory: Path) -> str:
+    """The hash of a build context: every file's relative path and bytes, in path order."""
+    digest = hashlib.sha256()
+    for path in sorted(p for p in directory.rglob("*") if p.is_file()):
+        digest.update(path.relative_to(directory).as_posix().encode() + b"\0")
+        digest.update(hashlib.sha256(path.read_bytes()).digest())
+    return digest.hexdigest()
+
+
+@contextmanager
+def comparison_scratch(base: Path) -> Iterator[Path]:
+    """A fresh directory below *base* for one measurement's checkout and plan, removed after it."""
+    base.mkdir(parents=True, exist_ok=True)
+    directory = Path(tempfile.mkdtemp(prefix="run-", dir=base))
+    try:
+        yield directory
+    finally:
+        shutil.rmtree(directory, ignore_errors=True)
 
 
 class ComparisonSubject(BaseModel):
@@ -229,4 +253,6 @@ __all__ = [
     "ComparisonSubject",
     "StoredComparison",
     "bounded_reason",
+    "comparison_scratch",
+    "context_digest",
 ]

@@ -13,9 +13,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
-import shutil
 import sys
-import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, TextIO
 
@@ -26,11 +24,13 @@ from vs_project.api import (
     Git,
     NullGitTrackerEvents,
     Project,
+    comparison_directory,
 )
 from vs_runtime.api.comparisons import (
     ComparisonFailed,
     ComparisonMeasured,
     ComparisonNotConfigured,
+    comparison_scratch,
 )
 from vs_sandbox.api.slurm import load_slurm_operator_settings
 from vs_sim.api import OsProcesses, SystemClock, ThreadBlockingRunner
@@ -95,11 +95,9 @@ def run(argv: Sequence[str], out: TextIO | None = None) -> int:
         return 2
     project = Project.open(root)
     settings = load_slurm_operator_settings(args.slurm_config.expanduser())
-    scratch_root = project.state.comparison_directory() / "scratch"
-    scratch_root.mkdir(parents=True, exist_ok=True)
-    scratch = Path(tempfile.mkdtemp(prefix="run-", dir=scratch_root))
     clock = SystemClock()
-    try:
+    scratch_base = comparison_directory(project.state) / "scratch"
+    with comparison_scratch(scratch_base) as scratch:
         host = ComparisonHost(
             clock=clock,
             sleeper=clock,
@@ -109,6 +107,7 @@ def run(argv: Sequence[str], out: TextIO | None = None) -> int:
             ),
             scratch=scratch,
             processes=OsProcesses(),
+            cluster=None,
         )
         reports = asyncio.run(
             measure_comparisons(
@@ -121,8 +120,6 @@ def run(argv: Sequence[str], out: TextIO | None = None) -> int:
                 samples=args.samples,
             )
         )
-    finally:
-        shutil.rmtree(scratch, ignore_errors=True)
     if args.json:
         document = [
             {

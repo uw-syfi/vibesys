@@ -49,6 +49,7 @@ from .errors import (
     SlurmTransportFailedError,
 )
 from .job_teardown import start_in_own_session, teardown_shell
+from .phase_files import NODE_NAME, SERVICE_LOG_TAIL, distinct_tail, read_node
 from .queue_view import QueueSnapshot, parse_queue_snapshot, queue_snapshot_command
 from .remote_file import SlurmFileSource
 from .remote_operations import (
@@ -91,13 +92,7 @@ SERVICE_NOT_READY_EXIT_CODE = 70
 STAGE_TIMEOUT_EXIT_CODES = frozenset({124, 137})
 _MAX_PROCESS_EXIT_CODE = 255
 _BATCH_RESULT_ROOT = ".vibesys-slurm-results"
-_SERVICE_LOG_TAIL = "service-log-tail.txt"
-_NODE_NAME = "node.txt"
-_MAX_NODE_NAME = 255
 _SERVICE_LOG_TAIL_LINES = 400
-_SERVICE_LOG_REPORTED_LINES = 40
-_SERVICE_LOG_LINE_CHARS = 400
-_SERVICE_LOG_TAIL_CHARS = 8_000
 _CONTENT_CACHE_ROOT = ".vibesys-content-cache"
 _STAGE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,62}")
 
@@ -740,8 +735,8 @@ class SlurmJobRunner:
                 except SlurmError as exc:
                     if job_result.exit_code == 0:
                         collection_failure = collection_failure or str(exc)
-            service_log_tail = _distinct_tail(phase_root / _SERVICE_LOG_TAIL)
-            node = _read_node(phase_root / _NODE_NAME)
+            service_log_tail = distinct_tail(phase_root / SERVICE_LOG_TAIL)
+            node = read_node(phase_root / NODE_NAME)
         timings["collection"] = max(0.0, self._clock.now() - collection_started)
         return SlurmBatchResult(
             job_id=job_result.job_id,
@@ -1844,7 +1839,7 @@ def _job_script(request: _JobScriptRequest) -> str:
     if phase_timing_root is not None:
         lines.append(f"mkdir -p {shlex.quote((workspace / phase_timing_root).as_posix())}")
         # The node the job ran on, for whoever reads the result (best effort: never fails the job).
-        node_path = workspace / phase_timing_root / _NODE_NAME
+        node_path = workspace / phase_timing_root / NODE_NAME
         lines.append(f"hostname -s > {shlex.quote(node_path.as_posix())} 2>/dev/null || true")
     if setup_script:
         if phase_timing_root is not None:
@@ -1892,7 +1887,7 @@ def _job_script(request: _JobScriptRequest) -> str:
         ]
     )
     if service is not None and phase_timing_root is not None:
-        tail_path = workspace / phase_timing_root / _SERVICE_LOG_TAIL
+        tail_path = workspace / phase_timing_root / SERVICE_LOG_TAIL
         lines.append(
             f"tail -n {_SERVICE_LOG_TAIL_LINES} .vs-slurm-service.log"
             f" > {shlex.quote(tail_path.as_posix())} 2>/dev/null"
@@ -1944,45 +1939,6 @@ def _service_script(
         f" job_status={SERVICE_NOT_READY_EXIT_CODE}; else"
     )
     return lines
-
-
-def _read_node(path: Path) -> str | None:
-    """The node name the job wrote, or None when it wrote none (it is best effort)."""
-    try:
-        name = path.read_text(encoding="utf-8").strip()
-    except OSError:
-        return None
-    return name if name.isprintable() and name and len(name) <= _MAX_NODE_NAME else None
-
-
-def _distinct_tail(path: Path) -> str:
-    """Return the service log's last lines, keeping only the latest copy of a repeated line.
-
-    Servers often repeat one warning hundreds of times; without this the tail
-    would show only that warning and hide the server's own progress lines.
-    """
-    if not path.is_file():
-        return ""
-    lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
-    seen: set[str] = set()
-    kept: list[str] = []
-    size = 0
-    for raw_line in reversed(lines):
-        line = (
-            raw_line
-            if len(raw_line) <= _SERVICE_LOG_LINE_CHARS
-            else raw_line[:_SERVICE_LOG_LINE_CHARS] + " [line truncated]"
-        )
-        if line in seen:
-            continue
-        size += len(line) + 1
-        if size > _SERVICE_LOG_TAIL_CHARS:
-            break
-        seen.add(line)
-        kept.append(line)
-        if len(kept) == _SERVICE_LOG_REPORTED_LINES:
-            break
-    return "\n".join(reversed(kept))
 
 
 def _queue_reading(life: JobLife, queue: QueueRow | NotInQueue) -> SchedulerReading:
