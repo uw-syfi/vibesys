@@ -230,9 +230,20 @@ class AgentSessions(Protocol):
         ...
 
     def resume(
-        self, key: AgentSessionKey, message: RenderedPrompt, invocation_id: str
+        self,
+        key: AgentSessionKey,
+        message: RenderedPrompt,
+        invocation_id: str,
+        *,
+        standalone: bool = False,
     ) -> InvocationOutcome:
-        """Dispatch once, continuing the checkpointed conversation."""
+        """Dispatch once, continuing the checkpointed conversation.
+
+        A *standalone* message carries the role's whole prompt, so it may run in a fresh
+        conversation instead: when the checkpointed one is near its model's context window,
+        or once after the provider refused it for context overflow. The completed outcome's
+        checkpoint then names the fresh conversation, which later turns continue.
+        """
         ...
 
     def inspect(self, key: AgentSessionKey, invocation_id: str) -> InvocationOutcome:
@@ -567,9 +578,18 @@ class ClientAgentSessions:
             return record.outcome
 
     def resume(
-        self, key: AgentSessionKey, message: RenderedPrompt, invocation_id: str
+        self,
+        key: AgentSessionKey,
+        message: RenderedPrompt,
+        invocation_id: str,
+        *,
+        standalone: bool = False,
     ) -> InvocationOutcome:
-        """Persist dispatch intent before continuing exactly the bound conversation."""
+        """Persist dispatch intent before continuing the bound conversation.
+
+        A *standalone* message may continue in a fresh conversation (see ``AgentSessions``);
+        the binding then follows the fresh conversation.
+        """
         if not isinstance(message, RenderedPrompt):
             detail = "resume message must be a RenderedPrompt"
             raise SessionConfigurationError.because(detail)
@@ -577,7 +597,7 @@ class ClientAgentSessions:
         return self._dispatch(
             key,
             spec,
-            replace(template, message=message, invocation_id=invocation_id),
+            replace(template, message=message, invocation_id=invocation_id, renewable=standalone),
             initial=False,
         )
 
@@ -646,8 +666,12 @@ class ClientAgentSessions:
                 ),
                 session_key=key,
             )
-            if checkpoint is None:
+            if checkpoint is None or (
+                template.renewable and result.provider_session_id != checkpoint.provider_session_id
+            ):
+                # A first turn, or a standalone turn the client ran in a fresh conversation.
                 checkpoint = self.checkpoint(key)
+                self._follow(key, checkpoint)
             outcome = Completed(
                 session_key=str(key),
                 invocation_id=invocation_id,
@@ -676,6 +700,18 @@ class ClientAgentSessions:
                     self._active.discard(invocation_id)
                     self._active_keys.discard(key)
         return outcome
+
+    def _follow(self, key: AgentSessionKey, checkpoint: AgentSessionCheckpoint) -> None:
+        """Bind the key's later turns to the conversation it continues now."""
+        with self._lock:
+            bound = self._bindings.get(key)
+            if bound is None or bound[1].expected_provider_session_id is None:
+                return
+            spec, template = bound
+            self._bindings[key] = (
+                spec,
+                replace(template, expected_provider_session_id=checkpoint.provider_session_id),
+            )
 
     def _initial_checkpoint(self, key: AgentSessionKey) -> AgentSessionCheckpoint | None:
         identity = self._client.provider_session_id(key)

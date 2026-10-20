@@ -19,19 +19,20 @@ from fractions import Fraction
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-import pytest
 from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
-import vs_agent.api as agent_api
 from vs_agent.api import (
+    CONTEXT_RENEWAL_FRACTION,
     AgentClient,
+    AgentContextOverflowError,
     AgentExecutionPolicy,
     AgentSessionKey,
     AgentSessionSpec,
     AgentTurnRequest,
     ClientAgentSessions,
     Completed,
+    ContextUse,
     SessionScope,
     Unknown,
 )
@@ -44,7 +45,6 @@ _WINDOW = 1_000_000
 """The context window agentshim knows for ``_MODEL``."""
 _INSTRUCTIONS = "Implement the hypothesis."
 _KEY = AgentSessionKey(SessionScope.MEMBER, "implementer:worker")
-_XFAIL = pytest.mark.xfail(strict=True, reason="S185: no context renewal yet")
 
 
 @dataclass
@@ -110,7 +110,7 @@ def _world(
         sent.append(request)
         if len(sent) in overflow_on:
             message = "Prompt is too long"
-            raise agent_api.AgentContextOverflowError("claude", message)
+            raise AgentContextOverflowError("claude", message)
 
     threads = SimThreads()
     provider = FakeProvider(
@@ -123,7 +123,6 @@ def _world(
     return _World(sessions, client, workspace, sent)
 
 
-@_XFAIL
 def test_a_conversation_at_85_percent_of_its_window_resumes_in_a_fresh_one(
     tmp_path: Path,
 ) -> None:
@@ -149,7 +148,6 @@ def test_a_conversation_at_85_percent_of_its_window_resumes_in_a_fresh_one(
         world.client.close()
 
 
-@_XFAIL
 def test_a_resume_refused_for_context_overflow_runs_once_more_in_a_fresh_conversation(
     tmp_path: Path,
 ) -> None:
@@ -168,7 +166,6 @@ def test_a_resume_refused_for_context_overflow_runs_once_more_in_a_fresh_convers
         world.client.close()
 
 
-@_XFAIL
 def test_a_second_context_overflow_is_not_retried(tmp_path: Path) -> None:
     world = _world(tmp_path, overflow_on=frozenset({2, 3, 4}))
     try:
@@ -182,7 +179,6 @@ def test_a_second_context_overflow_is_not_retried(tmp_path: Path) -> None:
         world.client.close()
 
 
-@_XFAIL
 def test_an_overflow_of_a_turn_that_answers_the_conversation_is_not_retried_fresh(
     tmp_path: Path,
 ) -> None:
@@ -198,7 +194,6 @@ def test_an_overflow_of_a_turn_that_answers_the_conversation_is_not_retried_fres
         world.client.close()
 
 
-@_XFAIL
 @settings(max_examples=examples(pr=10, nightly=100))
 @given(tokens=st.integers(0, _WINDOW), standalone=st.booleans())
 @example(tokens=799_999, standalone=True)
@@ -216,11 +211,10 @@ def test_a_resume_starts_fresh_exactly_when_it_stands_alone_and_use_reached_the_
             world.client.close()
 
     assert isinstance(resumed, Completed), resumed
-    near = Fraction(tokens, _WINDOW) >= Fraction(agent_api.CONTEXT_RENEWAL_FRACTION)
+    near = Fraction(tokens, _WINDOW) >= Fraction(CONTEXT_RENEWAL_FRACTION)
     assert (resumed.checkpoint != first.checkpoint) == (standalone and near)
 
 
-@_XFAIL
 @settings(max_examples=examples(pr=50, nightly=500))
 @given(
     tokens=st.integers(0, 4_000_000),
@@ -230,9 +224,9 @@ def test_a_resume_starts_fresh_exactly_when_it_stands_alone_and_use_reached_the_
 def test_context_use_is_near_its_limit_exactly_at_and_above_the_threshold(
     tokens: int, window: int | None, threshold: Fraction
 ) -> None:
-    use = agent_api.ContextUse(tokens=tokens, window=window)
+    use = ContextUse(tokens=tokens, window=window)
     near = use.near_limit(threshold)
 
     assert near == (window is not None and tokens >= threshold * window)
     if near:
-        assert agent_api.ContextUse(tokens=tokens + 1, window=window).near_limit(threshold)
+        assert ContextUse(tokens=tokens + 1, window=window).near_limit(threshold)

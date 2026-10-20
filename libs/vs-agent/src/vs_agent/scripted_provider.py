@@ -162,11 +162,17 @@ class FakeSteering(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class FakeTurnScript:
-    """Per-turn replies, an optional successful-turn renewal threshold and mid-turn steering."""
+    """Per-turn replies, an optional successful-turn renewal threshold and mid-turn steering.
+
+    ``context_tokens`` is the context a session's Nth completed turn reports its conversation
+    holds (the last entry repeats; empty reports none), as a provider that reports context
+    use would. agentshim reports no such figure yet, so production sessions report none.
+    """
 
     answers: tuple[Answer, ...]
     reset_after_turn: int | None = None
     steering: FakeSteering = FakeSteering.UNSUPPORTED
+    context_tokens: tuple[int | None, ...] = ()
 
     def __post_init__(self) -> None:
         """Reject empty scripts and invalid renewal boundaries."""
@@ -176,6 +182,9 @@ class FakeTurnScript:
             isinstance(self.reset_after_turn, bool) or self.reset_after_turn < 1
         ):
             message = "reset_after_turn must be a positive integer"
+            raise ValueError(message)
+        if any(tokens is not None and tokens < 0 for tokens in self.context_tokens):
+            message = "context_tokens must be non-negative"
             raise ValueError(message)
 
 
@@ -190,6 +199,8 @@ class _InFlight:
     request: AgentTurnRequest | None = None
     on_turn: Callable[[AgentTurnRequest], None] | None = None
     barrier_error: BaseException | None = None
+    context_tokens: int | None = None
+    """The context the turn that completed last reported."""
 
 
 class _ScriptedConversation:
@@ -262,6 +273,8 @@ class _ScriptedConversation:
         if isinstance(answer, AgentQuotaError):
             raise _failure_for(answer, emit)
         usage, cost = _last_usage(events)
+        contexts = transport.context_tokens
+        flight.context_tokens = contexts[min(invocation, len(contexts)) - 1] if contexts else None
         return agentshim.TurnResult(
             text=_turn_text(answer, transport.in_flight.request),
             structured_output=None,
@@ -322,6 +335,7 @@ class _ScriptedTransport:
     ) -> None:
         self.turns = turns
         self.answers = script.answers
+        self.context_tokens = script.context_tokens
         self.steering = script.steering
         self.in_flight = in_flight
         self._profile = profile
@@ -394,11 +408,13 @@ class ScriptedSession(LaunchedSession):
             self.in_flight.request = request
             self.in_flight.barrier_error = None
             try:
-                return super().run_turn(request, observer)
+                result = super().run_turn(request, observer)
             except Exception:
                 if self.in_flight.barrier_error is not None:
                     raise self.in_flight.barrier_error from None
                 raise
+            self.context_tokens = self.in_flight.context_tokens
+            return result
         finally:
             self.in_flight.request = None
             with self.state_lock:

@@ -422,6 +422,17 @@ class _Dispatch:
     schema: type[BaseModel]
     workspace: AccessGuardedWorkspace
     grant: AccessGrant
+    standalone: bool
+    """The message is the role's own prompt, so the turn may run in a fresh conversation."""
+
+
+def _stands_alone(turn: TurnSpec) -> bool:
+    """Whether the turn's message carries the role's whole prompt rather than answering the last.
+
+    A paid or free turn asks the role's own prompt. A correction answers the reply before it
+    and a resume answers the wait the conversation recorded, so both need that conversation.
+    """
+    return turn.charge_class in ("paid", "free") and turn.predecessor is None
 
 
 _WITHDRAWN = "the invocation was withdrawn before dispatch"
@@ -821,6 +832,7 @@ class RuntimeSessionRequests:
             schema,
             workspace,
             grant,
+            _stands_alone(turn),
         )
         return binding, dispatch
 
@@ -1116,7 +1128,7 @@ class RuntimeSessionRequests:
             dispatch.spec,
             replace(dispatch.template, expected_provider_session_id=checkpoint.provider_session_id),
         )
-        return sessions.resume(key, dispatch.message, invocation)
+        return sessions.resume(key, dispatch.message, invocation, standalone=dispatch.standalone)
 
     @staticmethod
     def _translate(

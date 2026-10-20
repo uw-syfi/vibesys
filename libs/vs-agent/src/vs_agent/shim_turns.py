@@ -277,6 +277,13 @@ class LaunchedSession:
         self.timeout = timeout
         self.log = log
         self.closed = False
+        self.context_tokens: int | None = None
+        """The tokens the conversation's context held after its last completed turn.
+
+        ``None`` when the provider did not say. agentshim 0.22 reports no such figure (its
+        turn usage sums every model call of the turn, which is not the context a resume
+        starts from), so production sessions leave it ``None`` until agentshim does.
+        """
         self._turn: CapacityStops | None = None
 
     def track(self, turn: CapacityStops | None) -> None:

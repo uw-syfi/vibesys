@@ -12,8 +12,10 @@ from pydantic import BaseModel
 from vs_agent import provider_profiles
 from vs_agent.callbacks import AgentLogger
 from vs_agent.cli_common import agent_label, materialize_skills
+from vs_agent.context_budget import ContextUse
 from vs_agent.contracts import (
     AgentCapabilities,
+    AgentContextOverflowError,
     AgentEvent,
     AgentEventKind,
     AgentExecutionPolicy,
@@ -272,6 +274,9 @@ class AgentClient:
         # Where each key's last completed turn ran, kept across evictions so a
         # caller can tell a retired conversation from a replaced one.
         self._last_turn_sessions: dict[AgentSessionKey, str | None] = {}
+        # The context each key's conversation held after its last completed turn, when the
+        # provider reported it. Process-local: a restarted run resumes without the reading.
+        self._context_tokens: dict[AgentSessionKey, int | None] = {}
         #: Roles whose provider CLI passed its readiness probe on this client.
         self._check_readiness = check_readiness
         self._ready_roles: set[str] = set()
@@ -634,6 +639,53 @@ class AgentClient:
 
         fingerprint = session_spec_fingerprint(session_spec)
         turn = self._bind_continuation(session_key, session_spec, turn)
+        if turn.renewable and self._near_context_limit(session_key, session_spec):
+            turn = self._retire(session_key, turn, "its context is near the model's window")
+        continued = self.provider_session_id(session_key)
+        try:
+            result, cached = self._run_keyed(session_spec, turn, session_key, fingerprint, observer)
+        except AgentContextOverflowError as overflow:
+            if not turn.renewable or continued is None:
+                raise
+            # Once, in a fresh conversation: a fresh one that overflows again carries a
+            # message too long for the model, which no further renewal can fix.
+            turn = self._retire(session_key, turn, f"the provider refused it: {overflow.detail}")
+            result, cached = self._run_keyed(session_spec, turn, session_key, fingerprint, observer)
+        expected = turn.expected_provider_session_id
+
+        self._validate_continuation_result(
+            session_key,
+            expected,
+            result,
+            require_provider_checkpoint=turn.require_provider_checkpoint,
+        )
+
+        # Recorded whether or not the conversation was restarted, and exactly as
+        # reported: this is where the turn ran, which a reset afterwards does not
+        # change.
+        self._last_turn_sessions[session_key] = result.provider_session_id
+        if result.restarted:
+            # The session restarted or abandoned the conversation this key names,
+            # so both the live session and the checkpoint describe history that
+            # no longer exists.
+            self._evict(session_key)
+            self._session_store.clear(session_key)
+        else:
+            if result.provider_session_id is not None:
+                cached.provider_session_id = result.provider_session_id
+            self._checkpoint(session_key, session_spec, fingerprint, result)
+            self._context_tokens[session_key] = cached.session.context_tokens
+        return result
+
+    def _run_keyed(
+        self,
+        session_spec: AgentSessionSpec,
+        turn: AgentTurnRequest,
+        session_key: AgentSessionKey,
+        fingerprint: str,
+        observer: AgentObserver,
+    ) -> tuple[AgentTurnResult, _CachedSession]:
+        """Run the turn on the key's live session, opening it (and adopting its checkpoint) first."""
         expected = turn.expected_provider_session_id
         cached = self._sessions.get(session_key)
         if cached is not None and cached.spec != session_spec:
@@ -670,29 +722,29 @@ class AgentClient:
             except Exception as cleanup_error:  # preserve the turn failure  # noqa: BLE001  # lint-waiver: LW-010123 [BLE001]; AgentClient.run must evict a failed provider session while re-raising the turn's original failure.
                 error.add_note(f"agent session cleanup also failed: {cleanup_error}")
             raise
+        return result, cached
 
-        self._validate_continuation_result(
-            session_key,
-            expected,
-            result,
-            require_provider_checkpoint=turn.require_provider_checkpoint,
+    def _near_context_limit(self, key: AgentSessionKey, spec: AgentSessionSpec) -> bool:
+        """Whether the key's conversation reached the renewal share of its model's window."""
+        tokens = self._context_tokens.get(key)
+        if tokens is None or self.provider_session_id(key) is None:
+            return False
+        window = provider_profiles.model_context_window(spec.provider, spec.model)
+        return ContextUse(tokens=tokens, window=window).near_limit()
+
+    def _retire(self, key: AgentSessionKey, turn: AgentTurnRequest, why: str) -> AgentTurnRequest:
+        """Drop the key's conversation, live and checkpointed: *turn* runs in a fresh one."""
+        retired = turn.expected_provider_session_id or self.provider_session_id(key)
+        self._evict(key)
+        self._session_store.clear(key)
+        self._context_tokens.pop(key, None)
+        _emit_and_log(
+            self._sink,
+            f"[session] {turn.label or key}: retired conversation {retired} ({why}); "
+            "the turn runs in a fresh conversation.",
+            self._run_log_file,
         )
-
-        # Recorded whether or not the conversation was restarted, and exactly as
-        # reported: this is where the turn ran, which a reset afterwards does not
-        # change.
-        self._last_turn_sessions[session_key] = result.provider_session_id
-        if result.restarted:
-            # The session restarted or abandoned the conversation this key names,
-            # so both the live session and the checkpoint describe history that
-            # no longer exists.
-            self._evict(session_key)
-            self._session_store.clear(session_key)
-        else:
-            if result.provider_session_id is not None:
-                cached.provider_session_id = result.provider_session_id
-            self._checkpoint(session_key, session_spec, fingerprint, result)
-        return result
+        return replace(turn, expected_provider_session_id=None)
 
     def provider_session_id(self, session_key: AgentSessionKey) -> str | None:
         """Name the provider conversation the next turn on ``session_key`` continues.

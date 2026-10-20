@@ -29,10 +29,12 @@ from vs_agent.container_python import (
     container_import_roots,
     containerize_server,
 )
+from vs_agent.context_budget import CONTEXT_RENEWAL_FRACTION, ContextUse
 from vs_agent.contracts import (
     DEFAULT_TURN_TIMEOUT_S,
     AgentCapabilities,
     AgentClientProtocol,
+    AgentContextOverflowError,
     AgentEvent,
     AgentEventKind,
     AgentExecutionPolicy,
@@ -191,6 +193,7 @@ __all__ = [
     "CONTAINER_PYTHON_HOME",
     "CONTAINER_PYTHON_VERSION",
     "CONTAINER_SERVER_PACKAGES",
+    "CONTEXT_RENEWAL_FRACTION",
     "DEFAULT_CLI_PROVIDER",
     "DEFAULT_TURN_TIMEOUT_S",
     "DOCKER_PROVIDER_ENV",
@@ -205,6 +208,7 @@ __all__ = [
     "AgentCapabilities",
     "AgentClient",
     "AgentClientProtocol",
+    "AgentContextOverflowError",
     "AgentEvent",
     "AgentEventKind",
     "AgentEventSink",
@@ -241,6 +245,7 @@ __all__ = [
     "ClientAgentSessions",
     "CommandResultPayload",
     "Completed",
+    "ContextUse",
     "DurableSessionStore",
     "Harness",
     "InvalidResponse",

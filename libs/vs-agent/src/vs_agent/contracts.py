@@ -90,6 +90,22 @@ class AgentOutputSchemaError(RuntimeError):
         super().__init__(f"agent output did not match the response schema: {detail}")
 
 
+class AgentContextOverflowError(RuntimeError):
+    """The provider refused a turn because its conversation no longer fits the model's window.
+
+    Raised instead of a provider exit error so the session owner can tell a conversation that
+    outgrew its model from a failed turn: the work did not fail, and the same message may run
+    in a fresh conversation. agentshim reports the condition as its own failure kind; until it
+    does, only a transport that classifies it raises this.
+    """
+
+    def __init__(self, provider: str, detail: str) -> None:
+        """Record the provider and its diagnostic."""
+        self.provider = provider
+        self.detail = detail
+        super().__init__(f"{provider} context window exceeded: {detail}")
+
+
 class QuotaCondition(StrEnum):
     """Which kind of capacity limit stopped a provider turn."""
 
@@ -573,6 +589,16 @@ class AgentTurnRequest:
     """Strict continuation: refuse any reset, replacement, or fresh session."""
     require_provider_checkpoint: bool = False
     """Retain resumable history after this turn, including an initial dispatch."""
+    renewable: bool = False
+    """The message stands alone: it may run in a fresh conversation instead of the expected one.
+
+    Set only for a turn whose message carries the role's whole prompt, never for one that
+    answers the conversation (a correction, a resumed wait). The session owner then retires a
+    conversation near its model's context window before the turn, and runs the turn once more
+    in a fresh conversation after the provider refused it for context overflow
+    (``AgentContextOverflowError``). A strict continuation (``expected_provider_session_id``)
+    is checked against the conversation before it is retired.
+    """
 
 
 @dataclass(frozen=True, slots=True)
