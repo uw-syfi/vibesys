@@ -347,9 +347,12 @@ RecordState.outline required {"anyOf":[{"items":{"$ref":"#/$defs/Step"},"type":"
 RecordState.parents required {"items":{"$ref":"#/$defs/ParentSnapshot"},"type":"array"}
 RecordState.planned_by optional {"default":[],"items":{"maxItems":2,"minItems":2,"prefixItems":[{"type":"string"},{"type":"string"}],"type":"array"},"type":"array"}
 RecordState.refunded required {"type":"integer"}
+RecordState.resuming optional {"default":[],"items":{"maxItems":2,"minItems":2,"prefixItems":[{"type":"string"},{"type":"integer"}],"type":"array"},"type":"array"}
 RecordState.running required {"items":{"$ref":"#/$defs/WorkstreamStart"},"type":"array"}
 RecordState.submitted required {"items":{"$ref":"#/$defs/Submission"},"type":"array"}
+RecordState.suspended optional {"default":[],"items":{"maxItems":2,"minItems":2,"prefixItems":[{"type":"string"},{"type":"integer"}],"type":"array"},"type":"array"}
 RecordState.unreachable required {"items":{"$ref":"#/$defs/Unreachable"},"type":"array"}
+RecordState.waits optional {"anyOf":[{"items":{"type":"string"},"type":"array"},{"type":"null"}],"default":null}
 RecordState.withheld required {"items":{"type":"string"},"type":"array"}
 RejectionCode {"enum":["stale-view","identity-conflict","unknown-kind","unknown-schema","undeclared-operation","capability","ownership","generation","closed-scope","budget","dependency","evidence","already-settled","not-implemented-in-kernel"],"type":"string"}
 ReplyError {"additionalProperties":false,"type":"object"}
