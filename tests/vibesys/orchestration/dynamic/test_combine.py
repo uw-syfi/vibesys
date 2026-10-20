@@ -43,6 +43,7 @@ from tests.vibesys.orchestration.dynamic.core_policy._contexts import render
 from tests.vibesys.vibesys_flows import across_restarts
 
 from vibesys.candidates.api import measurement
+from vibesys.dynamic_handoff import render_handoff
 from vibesys.hypothesis import HypothesisStrategy
 from vibesys.metrics import MetricRow, MetricSpace, Objective
 from vibesys.orchestration.dynamic.models import ImplementerResult, MergeResult, ReviewResult
@@ -174,6 +175,11 @@ def test_a_combine_of_two_candidates_that_lost_alone_is_built_from_main_and_repo
     assert set(revisions) == {"h1", "h2"}
     pair = [(name, revisions[name].revision_id.root) for name in ("h1", "h2")]
     host.run.reply_raw(host.run.expect_turn(role=PLANNER_LABEL), plan_reply(combine("k1", *pair)))
+    # The next planner reads the parts in this call's handoff file.
+    written = max(host.handoffs.values(), key=lambda item: item.call)
+    handoff = _flat(render_handoff(written))
+    parts = ", ".join(f"`{name}` at `{revision}`" for name, revision in pair)
+    assert f'combine `k1` "title k1" of {parts}, applied in that order onto main' in handoff
 
     _start(host)
     asked = turn_about(host, "implementer", "k1").context
