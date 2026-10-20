@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import sys
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Literal
 
@@ -685,12 +684,17 @@ def _check_wait(
     return WaitOn(requests=requests, subjects=subjects)
 
 
+_NO_LIMIT = 1.7976931348623157e308
+"""The limit of a request with none: a run with no deadline gives its requests the largest float
+(``Seconds`` allows no infinity)."""
+
+
 def _unbounded(state: RecordsState, context: RecordsContext, record: RequestRecord) -> bool:
     """Whether no limit will end *record*: it is not open, or its limit is the end of time."""
     if not is_open(record):
         return True
     bound = _wait_clock.record_bound(record, context.evaluation, context.run, state.hosts)
-    return bound.at >= sys.float_info.max
+    return bound.at >= _NO_LIMIT
 
 
 def _inspection_of(state: RecordsState, check: RecoveryCheck) -> Inspection:
