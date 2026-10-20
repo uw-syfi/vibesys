@@ -119,6 +119,17 @@ def _v39_to_v40(envelope: JsonObject) -> JsonObject:
     return envelope | {"schema_version": 40}
 
 
+def _v40_to_v41(envelope: JsonObject) -> JsonObject:
+    """Version 41 gave ``RunResultProposal`` an optional ``uncompared`` and nothing else.
+
+    A result saved at 40 says nothing about an adoption never compared with the input, and the
+    field's value for "compared" is absent (it is not serialized when unset), which is exactly
+    what a version 40 document holds. Every version 40 document is a valid version 41 one with
+    its number changed.
+    """
+    return envelope | {"schema_version": 41}
+
+
 def _floor_declared(core: JsonObject) -> bool:
     run = _object(core.get("run"))
     task = _object(_object(run.get("facts")).get("task"))
@@ -150,6 +161,7 @@ MIGRATIONS: Final[Mapping[int, Migration]] = {
     37: _v37_to_v38,
     38: _v38_to_v39,
     39: _v39_to_v40,
+    40: _v40_to_v41,
 }
 """Version ``n`` to ``n + 1``, one entry per version, contiguous from the oldest supported."""
 
