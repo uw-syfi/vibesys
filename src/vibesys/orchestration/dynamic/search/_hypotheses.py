@@ -1,5 +1,7 @@
 """How the hypothesis records change as plans are scheduled and workstreams finish: pure values."""
 
+from vibesys.hypothesis import HypothesisStrategy
+from vibesys.orchestration.dynamic.models import StrategyReason
 from vibesys.orchestration.dynamic.search._outcomes import WorkstreamDone, round_of
 from vibesys.orchestration.dynamic.search._plan import PlanUpdate
 from vibesys.orchestration.dynamic.search._values import (
@@ -29,6 +31,16 @@ def scheduled(
         lineage_parent_id=plan.parent_hypothesis_id,
         last_task=plan.task,
         combined_from=parts,
+    )
+
+
+def cancelled(plan: WorkPlan, sequence: int, parts: tuple[CombineSource, ...]) -> HypothesisRecord:
+    """A combine that never started: fewer than two of its parts were still buildable.
+
+    It is abandoned so it is not continued; its row shows the parts that were left.
+    """
+    return scheduled(None, plan, sequence, parts).model_copy(
+        update={"strategy": HypothesisStrategy.ABANDONED, "reason_kind": StrategyReason.BLOCKED}
     )
 
 

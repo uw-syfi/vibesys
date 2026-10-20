@@ -31,6 +31,7 @@ from vibesys.orchestration.dynamic.search._prompts import (
     WorkstreamHistoryRow,
 )
 from vibesys.orchestration.dynamic.search._values import (
+    COMBINE_MIN_PARTS,
     CombineSource,
     FinishedWork,
     HypothesisRecord,
@@ -164,6 +165,7 @@ def _composite(record: HypothesisRecord, space: MetricSpace | None) -> Composite
         verdict=versus_parts(() if last is None else last.metrics, record.combined_from, space),
         best_part=None if best is None else best.hypothesis_id,
         relative_noise=0.0 if space is None else space.relative_noise,
+        cancelled=len(record.combined_from) < COMBINE_MIN_PARTS and not record.rounds,
         unapplied=() if last is None else last.unapplied,
     )
 

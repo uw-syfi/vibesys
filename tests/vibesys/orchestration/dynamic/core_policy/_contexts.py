@@ -139,6 +139,7 @@ COMPOSITES = st.builds(
     verdict=st.sampled_from(("better", "within_noise", "worse", "unknown")),
     best_part=st.none() | tokens("part"),
     relative_noise=st.sampled_from((0.0, 0.03, 0.125)),
+    cancelled=st.booleans(),
     unapplied=st.lists(
         st.builds(dict, hypothesis_id=tokens("part"), part=tokens("hunk"), why=TEXT), max_size=2
     ).map(tuple),

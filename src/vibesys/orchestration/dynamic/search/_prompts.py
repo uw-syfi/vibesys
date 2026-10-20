@@ -105,6 +105,8 @@ class CompositeRow(Value):
     """The hypothesis of the part with the strongest headline by raw value, the one compared."""
     relative_noise: float = 0.0
     """The task's declared relative noise the comparison allowed; 0 is a strict comparison."""
+    cancelled: bool = False
+    """The combine never started: fewer than two of its parts were still buildable."""
     unapplied: tuple[UnappliedPart, ...] = ()
     """What the implementer said it could not apply."""
 

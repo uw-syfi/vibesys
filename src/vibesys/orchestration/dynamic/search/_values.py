@@ -94,6 +94,10 @@ class CombinePick(Value):
     revision: str
 
 
+COMBINE_MIN_PARTS = 2
+"""A combine needs this many parts: with fewer still buildable when it is to start, it never starts."""
+
+
 class CombineSource(Value):
     """One part of a combine as it was fixed at scheduling: its revision and its own change.
 

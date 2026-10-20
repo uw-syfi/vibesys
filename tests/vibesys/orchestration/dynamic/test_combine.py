@@ -38,10 +38,12 @@ from tests.vibesys.orchestration.dynamic._slots import (
     turn_about,
     verify_parents,
 )
+from tests.vibesys.orchestration.dynamic._values import run_record, snapshot
 from tests.vibesys.orchestration.dynamic.core_policy._contexts import render
 from tests.vibesys.vibesys_flows import across_restarts
 
 from vibesys.candidates.api import measurement
+from vibesys.hypothesis import HypothesisStrategy
 from vibesys.metrics import MetricRow, MetricSpace, Objective
 from vibesys.orchestration.dynamic.models import ImplementerResult, MergeResult, ReviewResult
 from vibesys.orchestration.dynamic.search.api import (
@@ -52,7 +54,10 @@ from vibesys.orchestration.dynamic.search.api import (
     PlannerPrompt,
     ProfileHistoryRow,
     PromptTemplate,
+    WorkKind,
+    WorkPlan,
     best_part,
+    implement_prompt,
     versus_parts,
 )
 from vs_core.api import (
@@ -70,6 +75,8 @@ if TYPE_CHECKING:
     import random
 
     from tests.vibesys.orchestration.dynamic._host import World
+
+    from vibesys.orchestration.dynamic.search.api import ParentSnapshot
 
 MODES = across_restarts
 
@@ -259,6 +266,54 @@ def test_an_unapplied_entry_naming_no_part_refuses_the_reply_and_names_the_field
     composite = getattr(_row(after, "k1"), "composite", None)
     assert composite is not None
     assert [item.model_dump() for item in composite.unapplied] == [kept]
+
+
+def _combine_of(*parts: ParentSnapshot) -> WorkPlan:
+    """An accepted combine ``k1`` of ``parts``, as plan validation leaves it."""
+    picks = [
+        {"hypothesis_id": item.hypothesis_id, "revision": item.revision.revision_id.root}
+        for item in parts
+    ]
+    fields = {"title": "title k1", "hypothesis": "the parts work together", "task": "apply"}
+    return WorkPlan.model_validate(
+        {"kind": WorkKind.IMPLEMENT, "work_id": "k1", **fields, "combine": tuple(picks)}
+    )
+
+
+# No flow story reaches these two: a combine starts the moment it is accepted, and its parts are
+# not parent-checked, so a part leaves the offer between planning and start only through a check
+# that withholds its revision in that window. The record is driven directly instead.
+
+
+def test_a_part_withdrawn_before_the_combine_starts_is_named_to_the_implementer() -> None:
+    a, b, c = (snapshot(name, 1, value=40.0) for name in ("a", "b", "c"))
+    run = run_record(parents=(a, b, c), withheld=(b.revision.revision_id.root,))
+    run.accepted = [_combine_of(a, b, c)]
+    (start,) = run.ready_to_start(1)
+    assert [part.hypothesis_id for part in start.combine] == ["a", "c"]
+    asked = implement_prompt(start, (), baseline=run.baseline)
+    assert [pick.hypothesis_id for pick in asked.combine_missing] == ["b"]
+    told = _flat(render(PromptTemplate.IMPLEMENT, asked))
+    assert "hypothesis `b` at `b-r1` is no longer buildable: leave it out" in told, told
+
+
+def test_a_combine_left_with_one_part_never_starts_and_the_planner_hears_why() -> None:
+    a, b = (snapshot(name, 1, value=40.0) for name in ("a", "b"))
+    run = run_record(parents=(a, b), withheld=(b.revision.revision_id.root,))
+    run.accepted = [_combine_of(a, b)]
+    assert run.ready_to_start(1) == []
+    assert not run.running
+    assert run.free_agents() == run.config.max_in_flight  # its slot was not spent
+    assert run.hypotheses["k1"].strategy is HypothesisStrategy.ABANDONED  # never continued
+    asked = run.world().prompt()
+    assert isinstance(asked, PlannerPrompt)
+    composite = getattr(_row(asked, "k1"), "composite", None)
+    assert composite is not None
+    assert composite.cancelled
+    assert [part.hypothesis_id for part in composite.parts] == ["a"]
+    shown = _flat(render(PromptTemplate.PORTFOLIO, asked))
+    assert "This combine never started" in shown, shown
+    assert "only `a` at `a-r1` of its parts was still buildable, and a combine needs two" in shown
 
 
 _TEXT = st.text(st.characters(codec="utf-8", exclude_categories=("Cs",)), min_size=1, max_size=40)

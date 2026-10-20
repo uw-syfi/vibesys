@@ -3,7 +3,7 @@
 from vibesys.candidates.api import ReviewEvaluation
 from vibesys.candidates.api import review_evaluations as evaluations
 from vibesys.metrics import AcceptedReading, EvidenceReading, MetricRow, PartialRow
-from vibesys.orchestration.dynamic.search._briefs import CUT, bounded, fence, tail
+from vibesys.orchestration.dynamic.search._briefs import CUT, bounded, fence, implement_prompt, tail
 from vibesys.orchestration.dynamic.search._budget import budget
 from vibesys.orchestration.dynamic.search._config import MAX_WIDTH, DynamicConfig
 from vibesys.orchestration.dynamic.search._context import best_part, versus_parts
@@ -255,6 +255,7 @@ __all__ = [
     "evaluations",
     "failure_of",
     "fence",
+    "implement_prompt",
     "ingest",
     "options",
     "planning_key",

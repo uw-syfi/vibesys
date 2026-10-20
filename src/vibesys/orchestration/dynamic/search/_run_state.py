@@ -63,6 +63,7 @@ from vibesys.orchestration.dynamic.search._steps import (
     step_states,
 )
 from vibesys.orchestration.dynamic.search._values import (
+    COMBINE_MIN_PARTS,
     CombineSource,
     FinishedWork,
     HypothesisRecord,
@@ -710,6 +711,9 @@ class RunRecord:
             prior = record.rounds[-1] if record is not None and record.rounds else None
             rebase = self._rebase_onto(plan)
             parts = self._parts(plan)
+            if plan.combine and len(parts) < COMBINE_MIN_PARTS:
+                self.hypotheses[plan.work_id] = _hypotheses.cancelled(plan, sequence, parts)
+                continue
             if plan.kind is WorkKind.IMPLEMENT:
                 self.hypotheses[plan.work_id] = _hypotheses.scheduled(record, plan, sequence, parts)
                 self.main_seen[plan.work_id] = self.main.generation
