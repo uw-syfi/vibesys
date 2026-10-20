@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from hypothesis import given
+from hypothesis import example, given
 from hypothesis import strategies as st
 
 import vs_core.api as core
@@ -215,6 +215,8 @@ def _stop_by(requester: _Requester, index: int) -> core.ControlInput:
     ),
     outcome=st.sampled_from(_OUTCOMES),
 )
+@example(stops=["environment"], outcome="cancelled")  # the reported case: a failed probe
+@example(stops=["operator", "environment"], outcome="cancelled")
 def test_only_an_operator_stop_reopens_a_run_and_a_final_stop_since_the_last_resume_never_does(
     stops: list[_Requester | Literal["resume"]], outcome: _Outcome
 ) -> None:
