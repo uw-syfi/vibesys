@@ -49,8 +49,8 @@ from .errors import (
     SlurmTransportFailedError,
 )
 from .job_teardown import start_in_own_session, teardown_shell
-from .phase_files import NODE_NAME, SERVICE_LOG_TAIL, distinct_tail, read_node
 from .login_environment import login_environment
+from .phase_files import NODE_NAME, SERVICE_LOG_TAIL, distinct_tail, read_node
 from .queue_view import QueueSnapshot, parse_queue_snapshot, queue_snapshot_command
 from .remote_file import SlurmFileSource
 from .remote_operations import (

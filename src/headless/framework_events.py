@@ -47,6 +47,15 @@ def format_framework_event(event: CoreEvent) -> str | None:
             text = _format_framework_warning(data)
         case WinnerSelectedData():
             text = _format_winner_selected(data)
+        case _:
+            text = _format_measurement_event(data)
+    return text
+
+
+def _format_measurement_event(data: object) -> str | None:
+    """Return the rendering of an input-measurement or workspace-probe event, or None."""
+    text: str | None = None
+    match data:
         case InputMeasurementFailedData():
             text = _format_input_measurement_failed(data)
         case MeasurementComparedData():
