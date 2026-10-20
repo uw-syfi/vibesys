@@ -19,8 +19,8 @@ import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING, TextIO
 
-from vibesys.comparisons.api import SAMPLES, ComparisonHost, measure_comparisons
 from vibesys.api.request import load_task
+from vibesys.comparisons.api import SAMPLES, ComparisonHost, measure_comparisons
 from vs_project.api import (
     CliGitRepository,
     Git,
