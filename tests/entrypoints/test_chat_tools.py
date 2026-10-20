@@ -13,7 +13,9 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, cast
 
+import agentshim
 import pytest
+from agentshim.testing import FakeExecutor, scripted_failure, scripted_turn
 from hypothesis import given
 from hypothesis import strategies as st
 from tests.support.chat_run import project_with_run, seed_agent_state
@@ -43,11 +45,13 @@ from vs_agent.api import (
     CONTAINER_PYTHON,
     CONTAINER_SERVER_PACKAGES,
     AgentCapabilities,
+    AgentClient,
+    AgentQuotaError,
     MCPServerSpec,
     NullAgentEventSink,
     containerize_server,
 )
-from vs_agent.api.testing import FakeAgentClient
+from vs_agent.api.testing import FakeAgentClient, fake_agentshim_launcher
 from vs_evaluation.api.tool_relay import (
     SOCKET_ENV,
     TOKEN_ENV,
@@ -65,7 +69,7 @@ if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
 
     from vibesys.api.store import RunStore
-    from vs_agent.api import ToolResultPayload
+    from vs_agent.api import AgentClientProtocol, ToolResultPayload
     from vs_mcp.api import ToolServerDescriptor, ToolSpec
     from vs_project.api import Project
 
@@ -556,12 +560,19 @@ class _ChatSession:
     """One chat conversation over a seeded run, opened as production opens it."""
 
     def __init__(
-        self, tmp_path: Path, threads: SimThreads, *, containerized: bool, runner: FakeCommandRunner
+        self,
+        tmp_path: Path,
+        threads: SimThreads,
+        *,
+        containerized: bool,
+        runner: FakeCommandRunner,
+        client: AgentClientProtocol | None = None,
     ) -> None:
+        """``client`` answers the conversation; a Fake client when omitted."""
         project, run_id = project_with_run(tmp_path)
         seed_agent_state(project, run_id)
         self.network = SimNetwork(threads)
-        self.client = FakeAgentClient(
+        self.client = client or FakeAgentClient(
             threads=threads, capabilities=AgentCapabilities(tool_servers=True, session_reuse=True)
         )
         self.events = _RecordingEvents()
@@ -583,6 +594,7 @@ class _ChatSession:
 
     def server(self) -> ToolServerDescriptor:
         """The tool server the agent was given for its first turn."""
+        assert isinstance(self.client, FakeAgentClient)
         [descriptor] = self.client.calls[0].tool_servers or []
         return descriptor
 
@@ -757,3 +769,55 @@ def test_closing_the_chat_stops_its_relay(tmp_path: Path) -> None:
             relay.ping()
 
     threads.run(main)
+
+
+# --- the chat agent meets a provider overload -----------------------------------------------
+#
+# A chat conversation has no capacity gate: no run holds its turns through an outage. A single
+# transient overload (a 529 "overloaded") must not end the operator's chat turn.
+
+
+@pytest.mark.regression
+@pytest.mark.xfail(
+    strict=True,
+    raises=AgentQuotaError,
+    reason="#3300 removed agentshim's transient retry; a chat client has no gate to hold it",
+)
+def test_a_chat_turn_meeting_one_transient_overload_is_sent_again_once_and_answers(
+    tmp_path: Path,
+) -> None:
+    threads = SimThreads(schedule_seed=0)
+    executor = FakeExecutor(
+        [
+            scripted_failure("codex", agentshim.FailureKind.TRANSIENT),
+            scripted_turn("codex", text="the run converged"),
+        ]
+    )
+    client = AgentClient(
+        fake_agentshim_launcher(provider="codex", executor=executor, threads=threads),
+        provider="codex",
+        run_log_file=None,
+        clock=threads,
+        threads=threads,
+    )
+
+    def main() -> tuple[str, float]:
+        chat = _ChatSession(
+            tmp_path,
+            threads,
+            containerized=False,
+            runner=FakeCommandRunner(threads=threads),
+            client=client,
+        )
+        try:
+            started = threads.clock.now()
+            answer = chat.agent.turn("how did the run go?", invocation_id="inv-1")
+            return answer, threads.clock.now() - started
+        finally:
+            chat.agent.close()
+
+    answer, waited = threads.run(main)
+
+    assert answer == "the run converged"
+    assert len(executor.requests) == 2  # the overloaded attempt, then exactly one resend
+    assert waited >= 30.0  # the resend waited for the provider, not straight back into it
