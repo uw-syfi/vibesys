@@ -373,7 +373,8 @@ export function rawTextCheck(input: CheckInput): Violation[] {
       }),
       ...input.rawWords.filter(word => text.includes(word)).map(word => `enum value "${word}"`),
       ...idHits(text, input),
-      ...nameHits(text, input),
+      // An agent's own prose (rendered markdown) lists hyphenated words between commas: not labels.
+      ...(element.closest('.vs-markdown') === null ? nameHits(text, input) : []),
     ];
     for (const hit of [...new Set(hits)]) {
       found.push({

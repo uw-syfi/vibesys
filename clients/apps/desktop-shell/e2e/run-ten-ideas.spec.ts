@@ -78,10 +78,8 @@ test('the performance row is a tile with a ratio, what it means, and values that
   await expect(tile.locator('.vs-tile-detail')).toHaveText(
     '6,054,154 ops/s · input 1,581,539 ops/s',
   );
-  // The idea the figures belong to is named once, below the row, and opens that idea.
-  await expect(page.getByText('Adopted:')).toBeVisible();
-  await expect(page.getByRole('button', {name: 'Pad the slot headers'}).first()).toBeVisible();
-  await expect(tile.getByText(/Adopted|Best so far/)).toHaveCount(0);
+  // No line names the idea the figures belong to: the Ideas list badges it.
+  await expect(page.getByText(/Adopted:|Best so far/)).toHaveCount(0);
   await shot(page, 'ten-ideas-hero');
 });
 

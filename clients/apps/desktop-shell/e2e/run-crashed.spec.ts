@@ -5,8 +5,7 @@ import {openFixture} from './fixture-world.js';
 /**
  * A real run that crashed after its implementer turn finished, as the Run screen shows it: nothing
  * it left open reads as running, the turn and the idea last as long as they did, the baseline's
- * failed gates are listed with their reason (what they printed behind a disclosure), and the
- * banner gives the whole failure. `RUN_SHOTS` names a directory to save the app window in.
+ * failed gates read as `input not measured` on the figures, and the banner gives the whole failure. `RUN_SHOTS` names a directory to save the app window in.
  */
 const shots = process.env['RUN_SHOTS'];
 
@@ -33,22 +32,6 @@ test('the idea, the turn and the clock stop where the run did', async ({page}) =
   await shot(page, 'agents');
   await page.getByRole('radiogroup', {name: 'Show'}).getByText('Timeline').click();
   await shot(page, 'timeline');
-});
-
-test('the failed baseline gates are listed with their reason, and what they printed is behind a disclosure', async ({
-  page,
-}) => {
-  await openFixture(page, fixtureNamed('crashed-after-turn'));
-  const gates = page.locator('.vs-check-list');
-  await expect(gates.getByText('Accuracy · Benchmark', {exact: true})).toBeVisible();
-  await expect(
-    gates.getByText("ModuleNotFoundError: No module named 'engine'", {exact: true}),
-  ).toHaveCount(1);
-  const first = gates.locator('details').first();
-  await expect(first.locator('pre')).toBeHidden();
-  await first.locator('summary').click();
-  await expect(first.locator('pre')).toContainText('Benchmark');
-  await shot(page, 'gates');
 });
 
 test('the banner gives the whole reason the run failed', async ({page}) => {
