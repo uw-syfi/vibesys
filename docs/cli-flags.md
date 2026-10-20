@@ -68,9 +68,10 @@ once. `--max-rounds N` supplies `N` admissions per slot, so the dynamic search
 may admit at most `N * M` workstreams whose workspaces open. A workstream that
 fails parent verification or workspace admission is refunded and does not
 consume that budget; an operator stop before the workspace opens is not
-refunded. A workstream whose candidate waits for its trusted measurement parks
-and gives its agent slot to new work, so planning and implementing go on while
-measurements queue. `--max-backlog K` caps how many workstreams park at once
+refunded. A workstream whose candidate waits for its trusted measurement, or
+whose agent's turn waits for its own evaluations, parks and gives its agent
+slot to new work, so planning and implementing go on while measurements queue.
+A parked turn resumes only once an agent slot is free. `--max-backlog K` caps how many workstreams park at once
 (default: every waiting one, up to 32); `--max-backlog 0` keeps each agent slot
 held until its workstream ends.
 

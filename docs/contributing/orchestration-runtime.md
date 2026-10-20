@@ -82,7 +82,8 @@ The dynamic search shows the layout. Everything about the search sits in
   `max_unmeasured_turns`, `max_continuation_rounds`, `profiling`.
 - `_queue.py` and `_reports.py`: the run's trusted evaluations. A workstream submits its
   candidate on the `REPORTS` channel and parks (within `max_backlog`, its agent slot goes to new
-  work); the root's `EvaluationQueue` binds a free evaluation slot to the candidate the pick
+  work, as it does while an agent turn is suspended on its own evaluations, until the root
+  grants its resume a free slot on `RESUMES.of(...)`); the root's `EvaluationQueue` binds a free evaluation slot to the candidate the pick
   policy chooses (the newest, or the orchestrator's `evaluation_order`) and answers each
   workstream on its own `VERDICTS.of(key)` latch. A newer candidate of the same line drops the
   waiting one as superseded.
