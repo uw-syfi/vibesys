@@ -11,6 +11,7 @@ from agentshim.providers.claude import ClaudeStreamParser
 from hypothesis import given
 from hypothesis import strategies as st
 
+# test-isolation: usage_from is the one place a library turn's cost becomes the recorded usage; vs_agent.api exposes no narrower seam
 from vs_agent import shim_translation
 from vs_agent.api import CLAUDE_CLI_MIN_FOR_GENERATION, CLI_VERSIONS
 
