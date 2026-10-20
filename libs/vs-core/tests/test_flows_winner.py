@@ -383,3 +383,49 @@ def test_an_unset_uncompared_is_left_out_of_the_result_serialization(
     plain = core.RunResultProposal(outcome=outcome, reason="r")
     assert "uncompared" not in json.loads(plain.model_dump_json())
     assert plain == core.RunResultProposal.model_validate_json(plain.model_dump_json())
+
+
+# -- who stopped the run decides how it ends -------------------------------------------------------
+
+
+@pytest.mark.xfail(strict=True, reason="F2: the environment's stop ends the run as an operator's")
+@pytest.mark.parametrize("adoption", ["adopted", "refused", "verify-failed", "no-winner"])
+@pytest.mark.parametrize("requester", ["operator", "deadline", "environment"])
+def test_the_operator_pauses_the_deadline_ends_and_the_run_environment_fails_the_run(
+    requester: str, adoption: str
+) -> None:
+    """Regression (sweep F2): a run its environment stopped ended ``stopped``, like a pause.
+
+    The run environment stops the run when it can run none of the run's work (a probe that
+    failed for good). That ending is a failure, whatever the adoption did; the operator's stop
+    stays a cancelled pause, and the deadline's a cancelled end.
+    """
+    control = {
+        "operator": "stop",
+        "deadline": core.DEADLINE_STOP,
+        "environment": core.ENVIRONMENT_STOP,
+    }[requester]
+
+    async def ended(ctx: core.Flow, _config: Config) -> core.NoWinner | None:
+        ctx.choose(kept("a"))
+        await ctx.stopped
+        return core.NoWinner(reason="gave up") if adoption == "no-winner" else None
+
+    run = start(ended, adopting=adoption == "adopted")
+    run.stop(control, mode=core.StopMode.CANCEL)
+    if adoption == "refused":
+        run.fail(run.expect(core.ProposeWinner), core.FailureReason.REFUSED)
+    elif adoption == "verify-failed":
+        run.refuse_adoption(
+            run.expect(core.ProposeWinner), core.AdoptionFailureReason.VERIFY_FAILED
+        )
+    result = result_of(run, "cancel")
+    first = result.reason.split(":", 1)[0]
+    if requester == "environment":
+        assert (result.outcome, first) == ("failure", core.EndReason.FAILED.value)
+    elif requester == "operator":
+        assert (result.outcome, first) == ("cancelled", core.EndReason.STOPPED.value)
+    else:
+        failed = adoption == "verify-failed"
+        assert result.outcome == ("failure" if failed else "cancelled")
+        assert first == ("adoption-failed" if failed else core.EndReason.DEADLINE.value)

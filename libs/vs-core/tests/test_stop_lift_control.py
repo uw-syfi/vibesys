@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from typing import Literal
 
+import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
@@ -192,3 +193,49 @@ def test_a_resume_reopens_exactly_the_run_a_standing_operator_stop_cancelled(
     )
     expected = standing and outcome == "cancelled" and not deadline
     assert core.reopens_on_resume(ended) is expected
+
+
+type _Requester = Literal["operator", "deadline", "environment"]
+
+
+def _stop_by(requester: _Requester, index: int) -> core.ControlInput:
+    """A stop asked for by the operator (an ``op-`` id), the deadline, or the run environment."""
+    identity = {
+        "operator": f"op-{index}",
+        "deadline": core.DEADLINE_STOP,
+        "environment": core.ENVIRONMENT_STOP,
+    }[requester]
+    return core.ControlInput(
+        control_id=core.ControlId(root=identity), action="stop", mode=core.StopMode.CANCEL
+    )
+
+
+@pytest.mark.xfail(strict=True, reason="F2: the environment's stop has no id of its own")
+@given(
+    stops=st.lists(
+        st.sampled_from(("operator", "deadline", "environment", "resume")), min_size=1, max_size=6
+    ),
+    outcome=st.sampled_from(_OUTCOMES),
+)
+def test_only_an_operator_stop_reopens_a_run_and_a_final_stop_since_the_last_resume_never_does(
+    stops: list[_Requester | Literal["resume"]], outcome: _Outcome
+) -> None:
+    """Regression (sweep F2): the run environment's stop was taken for an operator's pause.
+
+    A probe that failed for good stopped the run with no id of its own, so its record read
+    resumable and a resume replayed the failure. The deadline's stop and the environment's are
+    the host's verdicts: once either stands, no resume reopens the run.
+    """
+    controls: list[core.ControlInput] = []
+    standing = final = False
+    for index, kind in enumerate(stops):
+        if kind == "resume":
+            controls.append(_control("resume", index))
+            standing = final = False
+            continue
+        controls.append(_stop_by(kind, index))
+        standing = True
+        final = final or kind != "operator"
+    result = core.RunResultProposal(outcome=outcome, reason="x")
+    expected = standing and not final and outcome == "cancelled"
+    assert core.reopens_after(core.RunStatus.TERMINAL, result, controls) is expected

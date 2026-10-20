@@ -24,6 +24,7 @@ from dataclasses import dataclass, field
 from functools import partial
 from typing import TYPE_CHECKING
 
+import pytest
 from tests.support.core_plugins import capability_plugin
 from tests.support.skeleton_strategy import IMPLEMENTER, SkeletonStrategy
 from tests.support.task_project import write_task
@@ -37,6 +38,7 @@ from vibesys.api import (
     OrchestrationDescriptor,
     OrchestrationRegistry,
     ProfilerKind,
+    RunEndingData,
     RunFailureKind,
     RunRequest,
     RunResult,
@@ -44,6 +46,7 @@ from vibesys.api import (
 from vibesys.api.request import RunEnvironmentSpec, load_task
 from vs_agent.api import AgentCapabilities, reap_orphaned_agents
 from vs_agent.api.testing import FakeAgentClient, FakeConfinement, FakeDockerBuildRunner
+from vs_core.api import EndReason
 from vs_core.api.testing import sample_limits
 from vs_project.api import FakeStateStores
 from vs_project.api.testing import FakeGitRepositories
@@ -252,21 +255,7 @@ def test_a_probe_that_failed_for_good_ends_the_run_as_a_failure_naming_the_probe
     tmp_path: Path, sim: Sim
 ) -> None:
     connector = FakeConnector(tmp_path / "cluster")
-    remote = tmp_path / "remote"
-
-    def hide_staging_from_the_node(
-        request: dict[str, object], answer: Callable[[dict[str, object]], dict[str, object]]
-    ) -> dict[str, object]:
-        # The probe job fails on its node: the staged workspace is gone when it runs.
-        if request["operation"] == "exec" and " sbatch " in f" {request.get('command', '')} ":
-            for workspace in remote.glob("*/*/workspace"):
-                if workspace.is_symlink():
-                    workspace.unlink()
-                else:
-                    shutil.rmtree(workspace)
-        return answer(request)
-
-    connector.intercept(hide_staging_from_the_node)
+    connector.intercept(_hide_staging_from_the_node(tmp_path / "remote"))
 
     result, events = _run(tmp_path, sim, connector, SkeletonStrategy.baseline_probe())
 
@@ -278,6 +267,82 @@ def test_a_probe_that_failed_for_good_ends_the_run_as_a_failure_naming_the_probe
     assert len(failed) == 1
     # The probe's own job is all the run ever sent to the scheduler.
     assert _sbatch_count(connector) == 1
+
+
+def _hide_staging_from_the_node(
+    remote: Path,
+) -> Callable[
+    [dict[str, object], Callable[[dict[str, object]], dict[str, object]]], dict[str, object]
+]:
+    def hide(
+        request: dict[str, object], answer: Callable[[dict[str, object]], dict[str, object]]
+    ) -> dict[str, object]:
+        # The probe job fails on its node: the staged workspace is gone when it runs.
+        if request["operation"] == "exec" and " sbatch " in f" {request.get('command', '')} ":
+            for workspace in remote.glob("*/*/workspace"):
+                if workspace.is_symlink():
+                    workspace.unlink()
+                else:
+                    shutil.rmtree(workspace)
+        return answer(request)
+
+    return hide
+
+
+@pytest.mark.xfail(strict=True, reason="F2: the environment's stop ends as a resumable stop")
+def test_a_run_its_probe_failed_ends_failed_and_no_resume_reopens_it(
+    tmp_path: Path, sim: Sim
+) -> None:
+    """Regression (sweep F2): the record said ``stopped``, resumable, while the CLI said failed.
+
+    A resume would replay the probe's lasting failure and end the run again, so a relaunch
+    loop keyed on ``resumable`` would never stop.
+    """
+    connector = FakeConnector(tmp_path / "cluster")
+    connector.intercept(_hide_staging_from_the_node(tmp_path / "remote"))
+
+    result, events = _run(tmp_path, sim, connector, SkeletonStrategy.baseline_probe())
+
+    assert result.failure is not None
+    assert result.failure.kind is RunFailureKind("run_environment_unavailable")
+    (ending,) = [event.data for event in events if event.type is CoreEventType.RUN_ENDING]
+    assert isinstance(ending, RunEndingData)
+    assert ending.reason is EndReason.FAILED
+    assert not ending.resumable
+
+
+def _preempt_first_job(
+    request: dict[str, object], answer: Callable[[dict[str, object]], dict[str, object]]
+) -> dict[str, object]:
+    """The scheduler preempts the probe's first job: ``sacct`` says so, nothing more."""
+    response = answer(request)
+    command = str(request.get("command", ""))
+    stdout = str(response.get("stdout", ""))
+    if "sacct" in command and "-j 5000" in command and stdout.startswith("FAILED|"):
+        response = {**response, "stdout": "PREEMPTED|" + stdout.partition("|")[2]}
+    return response
+
+
+@pytest.mark.xfail(strict=True, reason="F1: a preempted probe job stops the run")
+def test_a_preempted_probe_job_is_retried_while_slurm_work_waits_and_never_stops_the_run(
+    tmp_path: Path, sim: Sim
+) -> None:
+    """Regression (sweep F1): a preempted 2-second probe job ended a multi-hour run."""
+    connector = FakeConnector(tmp_path / "cluster")
+    connector.script(
+        _probe_operation("slurm-probe-run"),
+        states=(SlurmJobStatus.PENDING, SlurmJobStatus.RUNNING, SlurmJobStatus.FAILED),
+    )
+    connector.intercept(_preempt_first_job)
+
+    result, events = _run(tmp_path, sim, connector, SkeletonStrategy.baseline_only())
+
+    assert not [event for event in events if event.type is CoreEventType.STOP_REQUESTED]
+    assert result.failure is not None
+    assert result.failure.kind is not RunFailureKind("run_environment_unavailable")
+    # The retry proved the root, and the held baseline measurement then reached the scheduler.
+    assert result.failure.reason.endswith("the baseline is all there is"), result.failure
+    assert _sbatch_count(connector) >= 3, recorded_commands(connector.state)
 
 
 # The queue holds each probe attempt this long before the attempt gives up on it.
