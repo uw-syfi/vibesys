@@ -147,9 +147,6 @@ def test_a_run_that_adopted_an_uncompared_candidate_says_so_when_it_completes(
     assert "adopted without an input comparison" in capsys.readouterr().out
 
 
-@pytest.mark.xfail(
-    strict=True, reason="B1: an operator stop drops uncompared from RunResult and the CLI"
-)
 def test_a_stopped_run_that_held_an_uncompared_candidate_says_so(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

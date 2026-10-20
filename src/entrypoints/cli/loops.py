@@ -422,6 +422,8 @@ def _run_request(args: argparse.Namespace, runs: Runs | None = None) -> None:
     else:
         sys.stdout.write(f"\n{request.orchestration.id} run stopped early.\n")
         sys.stdout.write(f"{describe_early_stop(result)}\n")
+        if result.uncompared:
+            sys.stdout.write(f"{_UNCOMPARED}\n")
         sys.exit(1)
 
 

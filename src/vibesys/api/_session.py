@@ -15,7 +15,7 @@ from vibesys.composition import resolve_agent_specs
 from vibesys.events import CoreEventType, EventStatus, RunFailedData, RunStartedData
 from vibesys.orchestration.agent_options import attribution_command_of, objective_axes_of
 from vibesys.plugin_catalog import project_run
-from vibesys.run.core_run import RunEnd, drive_core_run, ensure_resumable
+from vibesys.run.core_run import OperatorStopped, RunEnd, drive_core_run, ensure_resumable
 from vibesys.run.host import open_product_core_host
 from vibesys.run.integration import AuxiliaryResources, LocalRunIntegration, RunResources
 from vibesys.run.overview import overview_of
@@ -338,6 +338,7 @@ class _LocalRunSession:
                 succeeded=False,
                 status=RunStatus.STOPPED,
                 stop_reason=str(stop) or None,
+                uncompared=isinstance(stop, OperatorStopped) and stop.uncompared,
             )
         except BaseException as exc:
             self._status = RunStatus.FAILED

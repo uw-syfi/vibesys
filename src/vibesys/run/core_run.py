@@ -265,6 +265,15 @@ def _ended_by(result: RunResultProposal, ending: EndReason) -> bool:
     return result.reason.split(":", 1)[0] == ending.value
 
 
+class OperatorStopped(RunStopped):
+    """The operator's stop ended the run; it carries what the run's result recorded of it."""
+
+    def __init__(self, reason: str, *, uncompared: bool) -> None:
+        """Keep ``reason`` as the message and whether the adopted candidate was never compared."""
+        super().__init__(reason)
+        self.uncompared = uncompared
+
+
 def _status_of(result: RunResultProposal | None, shell: CoreRuntime) -> RunStatus:
     """Map the run's recorded result to the status a plugin returns.
 
@@ -276,7 +285,9 @@ def _status_of(result: RunResultProposal | None, shell: CoreRuntime) -> RunStatu
     if result is None:
         return RunStatus.FAILED
     if _ended_by(result, EndReason.STOPPED):
-        raise RunStopped(result.reason)  # the session reports why it stopped
+        raise OperatorStopped(
+            result.reason, uncompared=result.uncompared
+        )  # the session reports why it stopped
     kept = _ended_by(result, EndReason.DEADLINE) and _adopted_candidate(shell) is not None
     return RunStatus.SUCCEEDED if result.outcome == "success" or kept else RunStatus.FAILED
 

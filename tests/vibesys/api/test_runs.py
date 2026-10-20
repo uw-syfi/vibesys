@@ -400,9 +400,6 @@ def test_a_public_run_that_adopts_an_uncompared_candidate_says_so_in_its_result_
     assert endings[0].uncompared
 
 
-@pytest.mark.xfail(
-    strict=True, reason="B1: an operator stop drops uncompared from RunResult and the CLI"
-)
 def test_a_stopped_public_run_that_held_an_uncompared_choice_says_so(
     request_template: RunRequest, sim: Sim
 ) -> None:
