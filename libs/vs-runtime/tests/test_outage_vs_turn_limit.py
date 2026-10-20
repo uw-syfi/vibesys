@@ -108,7 +108,7 @@ class _Turn:
     """One turn under ``policy`` through an outage of ``outage`` seconds.
 
     The turn's first send works ``lead`` seconds before the outage starts; each failing send
-    then takes ``send_s`` (agentshim's retry and the CLI's own) before it reaches the gate.
+    then takes ``send_s`` (the CLI's own retries) before it reaches the gate.
     ``provider``, when given, replaces that model: it runs each send on the turn's thread.
     """
 

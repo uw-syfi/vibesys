@@ -147,9 +147,9 @@ class OutagePolicy:
     left), so an outage never holds a run beyond its deadline."""
     first_wait_seconds: float = 60.0
     max_wait_seconds: float = 600.0
-    """Ten minutes. Each attempt also spends agentshim's own retry (30 s,
-    ``TRANSIENT_RETRY_DELAYS_S``) and the provider CLI's retries before it stops again, so
-    a stalled turn probes the provider about every quarter hour at most."""
+    """Ten minutes. Each attempt also spends the provider CLI's own retries before it stops
+    again (agentshim retries none, ``TRANSIENT_RETRY_DELAYS_S``), so a stalled turn probes
+    the provider about every quarter hour at most."""
     switch_when_spent: bool = False
     """Switch to the fallback provider once the budget is spent, instead of failing."""
     pause_when_spent: bool = False
@@ -164,7 +164,7 @@ class OutagePolicy:
     resend_grace_seconds: float = 600.0
     """Ten minutes: the least time the send after a capacity wait has before core may end the
     turn, whatever own time the turn had left (core's ``CapacityHold.resend_grace``). A failing
-    send took 3 to 4 min on S179 (agentshim's 30 s retry and the CLI's own retries), so a turn
+    send took 3 to 4 min per CLI attempt on S179 (the CLI's own retries), so a turn
     whose outage started late in its own time is not cut while its resend still fails; the
     next stop reopens the hold first. The gate raises it to twice the longest failing send it
     saw of the turn. It is also the most a resend that succeeds runs past the turn's limit."""

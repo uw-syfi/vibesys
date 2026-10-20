@@ -9,7 +9,7 @@ The dynamic search runs on the production shell and loop over one virtual clock.
 turn runs a real ``AgentClient`` behind the production capacity gate (``install_capacity_gate``,
 the production timer on simulated threads), sharing the run's control channel with the loop's
 ``RunControlBridge`` as the host wires them. The Fake provider takes ``send_s`` virtual seconds
-per send (agentshim's own transient retry, 30 s, and the attempts) and fails a send that ends
+per send (the CLI's own retries inside its one attempt) and fails a send that ends
 while the outage is down; a cancel ends a send at once, as stopping the provider's process does. A turn the client finishes gets the scripted reply of its role; a client failure is
 what the session executor reports for one (an unknown outcome), and a cancelled flight raises
 as it does in production. Everything else is answered at once by the dynamic script.

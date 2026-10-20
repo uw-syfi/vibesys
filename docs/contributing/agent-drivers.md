@@ -323,13 +323,13 @@ process. Fixing that belongs with the checkpoint, not the session.
 agentshim classifies every failed turn: `CliExitError.kind` is a
 `FailureKind`, read by the provider package from what its CLI reported. `vs_agent`
 never matches provider error text. A turn whose kind is `TRANSIENT`
-(an overload, a rate limit, or a server error) is retried in place once,
-after the 30 s in `TRANSIENT_RETRY_DELAYS_S`, before the error propagates. The
-CLI has already retried inside the turn by then. A failure that outlasts the
-retry reaches the client as a capacity limit, and the run's capacity gate waits
-out a longer outage; only the gate's waits are kept off the turn's limit, so a
-longer chain here would charge minutes of every send to it. The retry keeps
-the conversation, and `cancel()` ends a wait immediately. A cancelled turn
+(an overload, a rate limit, or a server error) is not retried in place:
+`TRANSIENT_RETRY_DELAYS_S` is empty, because the CLI has already retried inside
+the turn. The failure reaches the client as a capacity limit after one attempt,
+and the run's capacity gate waits out the outage. Only the gate's waits are kept
+off the turn's limit, so every retry here would charge a whole CLI attempt (3 to
+4 min) to it. A retry, when a caller configures one, keeps the conversation, and
+`cancel()` ends a wait immediately. A cancelled turn
 still ends with its classified capacity error. Every other kind propagates at
 once: a usage limit or a login problem outlasts any backoff here.
 
