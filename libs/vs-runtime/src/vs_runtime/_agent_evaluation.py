@@ -69,7 +69,7 @@ import hashlib
 import hmac
 import os
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from functools import partial
 from typing import TYPE_CHECKING, Any, Literal, Protocol
 
@@ -494,6 +494,13 @@ class AgentEvaluationRecords:
     evidence: EvidenceLookup
 
 
+def _policy_digest(policy: AgentEvaluationPolicy) -> str:
+    """What an owed submission is keyed by: the policy a call was made under."""
+    return hashlib.sha256(
+        f"{policy.purpose}\n{policy.measurement.model_dump_json()}".encode()
+    ).hexdigest()
+
+
 class AgentEvaluationBridge:
     """The unix-socket service, token minting and yield producer of one run.
 
@@ -526,9 +533,6 @@ class AgentEvaluationBridge:
         self._workspaces = workspaces
         self._owed = records.owed
         self._evidence = records.evidence
-        self._policy_digest = hashlib.sha256(
-            f"{policy.purpose}\n{policy.measurement.model_dump_json()}".encode()
-        ).hexdigest()
         self._diagnostics = diagnostics
         self._secret = os.urandom(32)
         self._shell: AdmissionShell | None = None
@@ -547,6 +551,23 @@ class AgentEvaluationBridge:
         """Bind the run's shell and clock, once the shell exists."""
         self._shell = shell
         self._clock = clock
+
+    def _pinned(self, shell: AdmissionShell) -> AgentEvaluationPolicy:
+        """The policy with the evaluator, workload and environment identities of the run's facts.
+
+        A process that resumes a run computes those identities afresh (the environment's holds
+        a per-process broker socket and token), while the run, and the strategy's official
+        measurements, keep the ones it began with. Measured under another, an agent's runs and
+        the base's would be another measurement than the official run's, and never samples of
+        it. The facts are the run's one definition, so the plan takes them from there.
+        """
+        facts = shell.record.envelope.core.run.facts
+        return replace(
+            self._policy,
+            evaluator_digest=facts.evaluator_digest,
+            workload_digest=facts.workload_digest,
+            environment_digest=facts.environment_digest,
+        )
 
     # tool offer
 
@@ -832,7 +853,8 @@ class AgentEvaluationBridge:
             scoped = self._scoped(scope)
             revision = await self._revision(workspace, scoped)
             measured_input = await workspace.measured_input(revision)
-            key = OwedKey(scope=scope, revision=revision, policy=self._policy_digest)
+            policy = self._pinned(shell)
+            key = OwedKey(scope=scope, revision=revision, policy=_policy_digest(policy))
             owed = self._owed.find(key)
             charged = None if owed is None else self._charge_of(shell, owed)
             if owed is not None and charged is not None:
@@ -846,10 +868,10 @@ class AgentEvaluationBridge:
             try:
                 event = AgentMeasurementRequested(
                     scope=scope,
-                    plan=self._policy.plan(
+                    plan=policy.plan(
                         revision_ref(revision), measured_input=measured_input, now_at=now
                     ),
-                    within=Within(limit=self._policy.measurement.budget()),
+                    within=Within(limit=policy.measurement.budget()),
                     call_id=owed.call_id,
                 )
                 transition = self._admit(shell, event, now)

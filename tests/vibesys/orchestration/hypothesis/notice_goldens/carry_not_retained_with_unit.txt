@@ -1,2 +1,2 @@
 exhaustion_info=None
-regression_info="Round 5's official candidate was not retained: 8.5 tok/s. Use its recorded parent and objective directions when choosing the next checkpoint."
+regression_info="Round 5's official candidate passed and measured 8.5 tok/s, but it did not advance the retained checkpoints, so none was kept for it: the measurement is evidence, not a parent. Use its recorded parent and objective directions when choosing the next checkpoint."
