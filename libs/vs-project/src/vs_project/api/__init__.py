@@ -10,7 +10,6 @@ Runs use one version 5 manifest containing an ``OrchestrationDescriptor``.
 from typing import TYPE_CHECKING
 
 from vs_project._cli_git_repository import CliGitRepository
-from vs_project._comparison_state import comparison_directory, comparison_namespace
 from vs_project._control_inbox import (
     INBOX_FORMAT,
     ControlInbox,
@@ -132,6 +131,8 @@ from vs_project._task_files import (
     ServedModelInput,
     WorkloadInput,
     check_comparisons_are_distinct,
+    comparison_directory,
+    comparison_namespace,
     load_objectives,
 )
 from vs_project.api.git_repository import (
