@@ -109,6 +109,16 @@ def _v38_to_v39(envelope: JsonObject) -> JsonObject:
     return envelope | {"schema_version": 39}
 
 
+def _v39_to_v40(envelope: JsonObject) -> JsonObject:
+    """Version 40 gave ``MeasurementResult`` an optional ``decision_id`` and nothing else.
+
+    A result saved at 39 answers no decision of its own: it names none, and the field's value
+    for "none" is absent (it is not serialized when unset), which is exactly what a version 39
+    document holds. Every version 39 document is a valid version 40 one with its number changed.
+    """
+    return envelope | {"schema_version": 40}
+
+
 def _floor_declared(core: JsonObject) -> bool:
     run = _object(core.get("run"))
     task = _object(_object(run.get("facts")).get("task"))
@@ -139,6 +149,7 @@ MIGRATIONS: Final[Mapping[int, Migration]] = {
     36: _v36_to_v37,
     37: _v37_to_v38,
     38: _v38_to_v39,
+    39: _v39_to_v40,
 }
 """Version ``n`` to ``n + 1``, one entry per version, contiguous from the oldest supported."""
 

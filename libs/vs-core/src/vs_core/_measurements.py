@@ -21,6 +21,8 @@ from ._deadlines import resolve_until
 from ._evaluation_history import produce_history
 from ._measurement_reuse import (
     checkpoint_input,
+    held_answer,
+    held_input_run,
     reused_evidence_complete,
     reused_record,
     reused_run,
@@ -71,6 +73,7 @@ from .types.common import (
     MAX_SUBMISSIONS_PER_MEASUREMENT,
     AttemptId,
     AttemptRef,
+    CompletionStatus,
     EvidenceKind,
     ExecuteRegisteredOperation,
     LifecycleClass,
@@ -119,7 +122,7 @@ from .types.evaluation import (
 )
 from .types.evaluation_history import EvaluationStageOutcome
 from .types.job_observations import MeasurementFailure
-from .types.kernel import AreaChange
+from .types.kernel import AreaChange, DecisionCompleted
 from .types.records import (
     Attribution,
     Outbound,
@@ -146,13 +149,12 @@ def _origin(context: EvaluationContext, event: MeasurementRequested) -> Verdict[
         receipt
         for receipt in context.run.receipts
         if isinstance(receipt.decision, Measure)
+        and receipt.decision_id == event.decision_id
         and receipt.decision.scope == event.scope
         and receipt.decision.plan == event.plan
     )
     if not rows:
         return Missing(ProofReason.ABSENT_RECEIPT)
-    # Identical measurements can be proposed again after conclusive failure.
-    # The latest accepted command supplies correlation, never a new budget key.
     receipt = rows[-1]
     proof = accepted_receipt_for(context.run.receipts, receipt.decision_id, receipt.decision)
     if not isinstance(proof, Proven):
@@ -306,6 +308,64 @@ def _reusable_capture(
 def _requested(
     state: EvaluationState, context: EvaluationContext, event: MeasurementRequested
 ) -> AreaChange[EvaluationState]:
+    """Admit a ``Measure`` decision; an answer core gives at once is addressed to the decision.
+
+    A decision with no request of its own to wait on is answered here (refused, answered from
+    evidence core holds, or from the run that already measured its input), and it completes
+    with that answer, so the receipt says it was answered (`unanswered_measures`).
+    """
+    change = _admitted(state, context, event)
+    results = tuple(
+        item.model_copy(update={"decision_id": event.decision_id})
+        if isinstance(item, MeasurementResult)
+        and item.source_request is None
+        and item.decision_id is None
+        else item
+        for item in change.events
+    )
+    answers = tuple(
+        item
+        for item in results
+        if isinstance(item, MeasurementResult) and item.decision_id == event.decision_id
+    )
+    if not answers:
+        return change
+    status = (
+        CompletionStatus.SUCCEEDED
+        if answers[-1].status == ObservationStatus.SUCCEEDED
+        else CompletionStatus.FAILED
+    )
+    done = DecisionCompleted(decision_id=event.decision_id, status=status)
+    return change.model_copy(update={"events": results, "signals": (*change.signals, done)})
+
+
+def _answered_from_held(
+    state: EvaluationState,
+    context: EvaluationContext,
+    event: MeasurementRequested,
+    plan: MeasurementPlan,
+    identity: MeasurementIdentity,
+) -> AreaChange[EvaluationState] | None:
+    """The answer to ``event`` from what core already holds, or None when it must be measured.
+
+    The input's own run answers a repeat of its baseline; evidence of a profile capture that
+    is still valid answers the capture asked for again.
+    """
+    run = held_input_run(state, event.scope, identity)
+    if run is not None:
+        return AreaChange(state=state, events=(held_answer(state, run, event.decision_id),))
+    reuse = _reused(state, context, event.scope, plan)
+    if not reuse:
+        return None
+    result = MeasurementResult(
+        scope=event.scope, evidence=reuse, status=ObservationStatus.SUCCEEDED
+    )
+    return AreaChange(state=state, events=(result,))
+
+
+def _admitted(
+    state: EvaluationState, context: EvaluationContext, event: MeasurementRequested
+) -> AreaChange[EvaluationState]:
     authority = current(context, event.scope)
     origin = _origin(context, event)
     resolved = _resolved_plan(context, event.scope, event.plan)
@@ -319,16 +379,9 @@ def _requested(
     identity = identity_of(plan)
     if not isinstance(identity, Proven):
         return rejected(state, event.scope)
-    reuse = _reused(state, context, event.scope, plan)
-    if reuse:
-        return AreaChange(
-            state=state,
-            events=(
-                MeasurementResult(
-                    scope=event.scope, evidence=reuse, status=ObservationStatus.SUCCEEDED
-                ),
-            ),
-        )
+    held = _answered_from_held(state, context, event, plan, identity.value)
+    if held is not None:
+        return held
     # Replayed commands never allocate another ordinal, including changed timing.
     if any(
         isinstance(row.request, SubmitMeasurement)

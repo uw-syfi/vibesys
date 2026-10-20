@@ -435,8 +435,12 @@ measurement of the same plan, a settlement of the same workspace, or the opening
 workspace is attached to the request already in flight (`LiveFlows.in_flight`) and gets its
 answer. An opening or a settlement core answers before the resumed flow asks again is kept for
 the flow at that path (`InFlight.answer`), so the workspace still opens once; a measurement
-answered first is dropped, and measured again if asked. A workspace whose settlement was in flight
-is left to it (`ws.settling` on reopen, reason `settling`); a workspace that opens with no flow
+answered first is dropped, and asked again if the flow asks. Core answers a repeat of the run's
+input measurement from the run that took it, to the decision that asked, so the input is never
+measured twice. A measurement core accepted and neither started a request for nor answered (a
+run saved before core addressed such answers) is answered when the resumed host's recovery is
+ready. A workspace whose settlement was in flight is left to it (`ws.settling` on reopen,
+reason `settling`); a workspace that opens with no flow
 left to claim it, or whose kept opening its flow ends without taking, is settled as `unclaimed`.
 
 ## The winner

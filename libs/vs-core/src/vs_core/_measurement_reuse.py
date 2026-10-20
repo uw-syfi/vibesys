@@ -1,4 +1,9 @@
-"""The reuse rule: when an official measurement is answered by runs the scope already made.
+"""The reuse rules: when a measurement is answered by runs the scope already made.
+
+Two measurements are answered from what core holds. The input of the run is measured once
+(`held_input_run`): asked for again, as a restarted search does, it is answered with that
+run's records, never with a second run and never with a refusal. An official measurement of a
+candidate may be answered by the scope's runs of it, as follows.
 
 An agent measures its candidate through its evaluation tool, and the strategy then asks for
 the official measurement of the same candidate. Both run the task's one evaluation on the same
@@ -43,20 +48,36 @@ from typing import TYPE_CHECKING
 
 from ._comparison import Measured, Moment, evaluation_of, official_needs_samples, run_reading
 from .types.common import ObservationStatus, RevisionRef
-from .types.evaluation import MeasurementIdentity, OwnedJob, PreparedSubmissionReceipt
+from .types.evaluation import (
+    MEASUREMENT_DIAGNOSTIC_LIMIT,
+    MeasurementIdentity,
+    MeasurementRequested,
+    MeasurementResult,
+    OwnedJob,
+    PreparedSubmissionReceipt,
+)
 from .types.job_observations import MeasurementFailure
+from .types.strategy import Accepted, Measure
 
 if TYPE_CHECKING:
-    from .types.common import Scope
+    from .types.common import DecisionId, Scope
     from .types.evaluation import (
         EvaluationState,
         EvidenceRef,
         MeasurementPlan,
         RegisteredOwnedJob,
     )
-    from .types.kernel import EvaluationContext
+    from .types.kernel import EvaluationContext, RunState
 
-__all__ = ["checkpoint_input", "reused_evidence_complete", "reused_record", "reused_run"]
+__all__ = [
+    "checkpoint_input",
+    "held_answer",
+    "held_input_run",
+    "reused_evidence_complete",
+    "reused_record",
+    "reused_run",
+    "unanswered_measures",
+]
 
 _RUN_PURPOSES = frozenset({"local-validation", "official"})
 """Purposes of runs that measure the task's evaluation on a candidate (not a profile).
@@ -90,6 +111,85 @@ def checkpoint_input(
     if first is None or first.measured_input is None:
         return plan
     return plan.model_copy(update={"measured_input": first.measured_input})
+
+
+def held_input_run(
+    state: EvaluationState, scope: Scope, identity: MeasurementIdentity
+) -> OwnedJob | None:
+    """The run that already measured the input ``identity`` names, once it ended conclusively.
+
+    Only the baseline of a scope is a fact of the input itself: the same measurement asked
+    again gives the same answer, so it is read from the run that took it. A run that ended
+    short of a conclusion (the machinery failed, or it is still going) answers nothing: the
+    budget decides whether the measurement may be run afresh.
+    """
+    if identity.purpose != "baseline":
+        return None
+    budget = next(
+        (
+            held
+            for held in state.submission_budgets
+            if held.scope == scope and held.identity == identity
+        ),
+        None,
+    )
+    latest = None if budget is None or not budget.receipts else budget.receipts[-1]
+    if not isinstance(latest, PreparedSubmissionReceipt):
+        return None
+    run = next((job for job in state.jobs if job.submission_id == latest.request_id), None)
+    return run if run is not None and _conclusive(state, run) else None
+
+
+def held_answer(state: EvaluationState, run: OwnedJob, decision: DecisionId) -> MeasurementResult:
+    """What the run that measured an input told, said again to ``decision``.
+
+    The records are the run's own, as its end reported them; what the executor said of a
+    failure is kept in the receipt of its submission, and the operator's account of it is
+    not kept at all.
+    """
+    receipts = tuple(
+        receipt
+        for budget in state.submission_budgets
+        for receipt in budget.receipts
+        if isinstance(receipt, PreparedSubmissionReceipt)
+        and receipt.request_id == run.submission_id
+    )
+    observation = run.observation
+    return MeasurementResult(
+        scope=run.scope,
+        source_request=run.submission_id,
+        decision_id=decision,
+        evidence=run.evidence,
+        status=run.status,
+        failure=receipts[0].failure if receipts else None,
+        diagnostic=""
+        if observation is None
+        else observation.diagnostic[-MEASUREMENT_DIAGNOSTIC_LIMIT:],
+    )
+
+
+def unanswered_measures(run: RunState) -> tuple[MeasurementRequested, ...]:
+    """The ``Measure`` decisions core accepted and then answered nobody: ask each one again.
+
+    A measurement is answered by the request it started, or at once when it needed none
+    (`_requested`). One accepted with no request and not completed was not answered, whatever
+    became of the event that would have told its flow (a host that stopped between the two): no
+    request exists that could answer it later. Admitting it again gives it the same answer
+    from what core holds, or a request of its own when it still has to be measured.
+    """
+    return tuple(
+        MeasurementRequested(
+            decision_id=receipt.decision_id,
+            scope=receipt.decision.scope,
+            plan=receipt.decision.plan,
+            compared=receipt.decision.compared,
+        )
+        for receipt in run.receipts
+        if isinstance(receipt.decision, Measure)
+        and isinstance(receipt.feedback, Accepted)
+        and not receipt.request_ids
+        and receipt.completion is None
+    )
 
 
 def _identity(job: OwnedJob) -> MeasurementIdentity | None:

@@ -237,6 +237,10 @@ def _measurement(core: CoreState, event: MeasurementResult) -> Event | Discarded
     comparison = comparison_of_result(
         core.evaluation, moment_of(core.run), event.scope, (e.candidate for e in event.evidence)
     )
+    if event.decision_id is not None:
+        # Core answered the decision itself, so no request of its own ended: the run named
+        # as the source may be an earlier one, and whatever became of it is no news here.
+        return MeasurementFinished(decision=event.decision_id, result=event, comparison=comparison)
     if source is None:
         return MeasurementFinished(decision=None, result=event, comparison=comparison)
     return _late(core, source, EventKind.MEASUREMENT_FINISHED) or MeasurementFinished(

@@ -736,6 +736,8 @@ class MeasurementRequested(Value):
     """Measurement requested lifecycle contract."""
 
     kind: Literal["measurement_requested"] = "measurement_requested"
+    decision_id: DecisionId
+    """The ``Measure`` decision asking: the one an answer without a request is addressed to."""
     scope: Scope
     plan: MeasurementPlan
     compared: bool = Field(default=False, exclude_if=unset)
@@ -1027,6 +1029,14 @@ class MeasurementResult(Value):
 
     None only when no request was prepared: rejection at admission, or a result
     served entirely from reusable evidence.
+    """
+    decision_id: DecisionId | None = Field(default=None, exclude_if=unset)
+    """The strategy decision this result answers at once, when no request of its own does.
+
+    Set for a result core gives when it accepts a ``Measure``: a refusal, evidence it already
+    holds, or the earlier run of an input it measured (``source_request`` names that run, not
+    this decision's). None for a result a request ends with, which names its decision through
+    the request, and for an agent's own evaluation, which answers no decision.
     """
     evidence: tuple[EvidenceRef, ...]
     status: ObservationStatus

@@ -576,7 +576,8 @@ def _activation_signal(
 ) -> tuple[Transition, tuple[Signal, ...]]:
     """Admissions resolve canonical decisions; recovery wakes scheduling.
 
-    A recovered run that closes under a cancel applies the cancel again first: a state
+    A recovered run asks again for the measurements it accepted and never answered
+    (`evaluation.unanswered_measures`). One that closes under a cancel applies the cancel again first: a state
     saved before a stop escalated (``_escalated``) holds a drain Finish and a cancel
     recorded after it, with nothing cancelled. Applying a cancel twice changes nothing.
     """
@@ -589,9 +590,14 @@ def _activation_signal(
                 ("recovery", "phase"), "ready notification requires committed barrier proof"
             )
         wake = ClockAdvanced(now_at=state.run.now_at)
+        asked_again = evaluation.unanswered_measures(state.run)
         if _closing_under_cancel(state):
-            return Transition(state=state), (AdmissionControl(action="cancel"), wake)
-        return Transition(state=state), (wake,)
+            return Transition(state=state), (
+                AdmissionControl(action="cancel"),
+                wake,
+                *asked_again,
+            )
+        return Transition(state=state), (wake, *asked_again)
     return _admission_signal(state, signal)
 
 
@@ -1079,7 +1085,10 @@ def _decision_signal(state: CoreState, decision: Command) -> tuple[Signal, ...]:
         case Measure():
             signals = (
                 MeasurementRequested(
-                    scope=decision.scope, plan=decision.plan, compared=decision.compared
+                    decision_id=decision.decision_id,
+                    scope=decision.scope,
+                    plan=decision.plan,
+                    compared=decision.compared,
                 ),
             )
         case ProposeWinner():
