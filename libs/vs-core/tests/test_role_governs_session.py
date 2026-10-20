@@ -11,7 +11,7 @@ import json
 from typing import TYPE_CHECKING, Any
 
 import pytest
-from hypothesis import given, settings
+from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
 import vs_core.api as core
@@ -317,6 +317,7 @@ def test_a_lost_turn_is_asked_again_as_often_and_after_as_long_as_the_role_says(
 
 
 @_SETTINGS
+@example(lost_turns=1)  # the dynamic implementer and judge (review of #3283, weak spot 1)
 @given(lost_turns=st.integers(0, core.MAX_LOST_TURNS))
 @_RESTARTING
 def test_a_lost_resume_is_asked_again_once_if_the_role_asks_lost_turns_again(
