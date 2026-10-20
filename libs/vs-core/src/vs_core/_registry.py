@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Literal, get_args, get_origin, overload
+from typing import TYPE_CHECKING, Final, Literal, get_args, get_origin, overload
 
-from pydantic import JsonValue, TypeAdapter, ValidationError
+from pydantic import BaseModel, JsonValue, TypeAdapter, ValidationError
 
 from ._envelope_migrations import (
     OLDEST_SUPPORTED_ENVELOPE_VERSION,
@@ -48,8 +48,6 @@ any version from the oldest supported one resumes through that chain.
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-
-    from pydantic import BaseModel
 
     from .types.common import Observation, RequestId
     from .types.kernel import CoreState, RunEnvelope
@@ -359,9 +357,11 @@ class OperationRegistry:
         An envelope of an older supported version is brought to the current one first
         (`upgrade_envelope`); every other version is refused.
         """
-        source = upgrade_envelope(source, ("schema_version",))
-        envelope = model.model_validate_json(
-            source, context={"operation_registry": self, "persisted_operation": True}
+        envelope = decode_stored(
+            model,
+            source,
+            ("schema_version",),
+            context={"operation_registry": self, "persisted_operation": True},
         )
         if envelope.strategy_id != envelope.core.run.declaration.strategy_id:
             raise ContractError(("strategy_id",), "strategy declaration mismatch")
@@ -418,6 +418,63 @@ _ANY_JSON: TypeAdapter[JsonValue] = TypeAdapter(JsonValue)
 """Any JSON value; pydantic's parser bounds nesting, so deep input is invalid, not a crash."""
 
 
+_NEWER_WRITER_ERRORS: Final = frozenset(
+    {
+        "extra_forbidden",
+        "literal_error",
+        "enum",
+        "union_tag_invalid",
+        "greater_than",
+        "greater_than_equal",
+        "less_than",
+        "less_than_equal",
+        "string_too_long",
+        "string_too_short",
+        "too_long",
+        "too_short",
+    }
+)
+"""The validation errors a compatible extension of the shape causes in a build that predates it.
+
+A change that every saved document survives keeps ``ENVELOPE_SCHEMA_VERSION``: a new field, a
+closed set that gains a member, a looser bound (``vs_core.testing.persisted_schema``). A
+document that uses one fails an older build with exactly these errors.
+"""
+
+
+def decode_stored[M: BaseModel](
+    model: type[M], source: str | bytes, at: tuple[str, ...], *, context: dict[str, object]
+) -> M:
+    """The stored JSON ``source``, holding an envelope at ``at``, validated as ``model``.
+
+    The envelope is brought to the current version first (`upgrade_envelope`). A document
+    stored at the current version that fails on what a compatible later change adds (a
+    field, a closed-set member, a bound this build does not have) was written by a newer
+    VibeSys that kept the version: it is refused as such, naming those places. Any other
+    failure is the validation error itself.
+    """
+    upgraded, stored = _upgrade(source, at)
+    try:
+        return model.model_validate_json(upgraded, context=context)
+    except ValidationError as error:
+        unknown = [
+            item
+            for item in error.errors(include_url=False, include_context=False)
+            if item["type"] in _NEWER_WRITER_ERRORS
+        ]
+        if stored != ENVELOPE_SCHEMA_VERSION or not unknown:
+            raise
+        # A union reports every branch it tried, so name each unknown place, not one guess.
+        places = "; ".join(
+            f"{'.'.join(map(str, item['loc']))} ({item['msg'].lower()})" for item in unknown[:3]
+        )
+        raise ContractError(
+            tuple(unknown[0]["loc"]),
+            f"this VibeSys does not know {places} in an envelope of its own version "
+            f"{stored}: it was written by a newer VibeSys; resume it with that version",
+        ) from error
+
+
 def upgrade_envelope(source: str | bytes, at: tuple[str, ...]) -> str:
     """The stored JSON ``source`` with its envelope at the current version.
 
@@ -429,10 +486,15 @@ def upgrade_envelope(source: str | bytes, at: tuple[str, ...]) -> str:
     names the version and who wrote it: validating it in full would fail on whichever field
     moved.
     """
+    return _upgrade(source, at)[0]
+
+
+def _upgrade(source: str | bytes, at: tuple[str, ...]) -> tuple[str, int]:
+    """`upgrade_envelope`, and the version the envelope was stored at."""
     version = _read_envelope_version(source, at, at)
     _validate_envelope_version(version)
     if version == ENVELOPE_SCHEMA_VERSION:
-        return source if isinstance(source, str) else source.decode()
+        return (source if isinstance(source, str) else source.decode()), version
     document = _ANY_JSON.validate_json(source)
     holder = _holder(document, at[:-1], at)
     upgraded = upgrade_envelope_document(holder, to=ENVELOPE_SCHEMA_VERSION)
@@ -440,7 +502,7 @@ def upgrade_envelope(source: str | bytes, at: tuple[str, ...]) -> str:
         document = upgraded
     else:
         _holder(document, at[:-2], at)[at[-2]] = upgraded
-    return _ANY_JSON.dump_json(document).decode()
+    return _ANY_JSON.dump_json(document).decode(), version
 
 
 def _holder(

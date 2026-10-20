@@ -15,6 +15,7 @@ from vs_core.api import (
     ENVELOPE_SCHEMA_VERSION,
     Access,
     ClockAdvanced,
+    ContractError,
     CoreState,
     Decision,
     Event,
@@ -220,7 +221,8 @@ def test_unknown_record_fields_fail_before_lease_acquisition() -> None:
     store.commit(
         None, StoredEnvelope(revision=0, schema_version=1, payload=payload.encode()), fence, now=0
     )
-    with pytest.raises(ValidationError, match="unexpected"):
+    # At the current version an unknown field is what a newer VibeSys that kept the version adds.
+    with pytest.raises(ContractError, match=r"unexpected.*written by a newer VibeSys"):
         runtime(store).start("reader", now_at=1, lease_duration=1)
     assert store.acquire("reader", now=1, duration=1) is not None
 

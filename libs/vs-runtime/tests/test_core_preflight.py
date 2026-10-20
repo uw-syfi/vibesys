@@ -199,6 +199,33 @@ def test_an_envelope_of_an_unsupported_version_names_the_vibesys_that_wrote_it(
     )
 
 
+@pytest.mark.parametrize("holder", ["envelope", "record"])
+def test_a_record_with_a_field_a_newer_vibesys_added_names_the_vibesys_that_wrote_it(
+    tmp_path: Path, holder: str
+) -> None:
+    """A compatible shape change keeps the version, so an older build tells it by the field."""
+    project, run_id = project_run(tmp_path)
+    current = f'"envelope":{{"schema_version":{ENVELOPE_SCHEMA_VERSION},'
+    source = record(run_id).model_dump_json()
+    assert current in source
+    added = (
+        source.replace(current, current + '"added_later":1,')
+        if holder == "envelope"
+        else '{"added_later":1,' + source.removeprefix("{")
+    )
+    store = project.state_store(run_id)
+    fence = store.acquire("writer", now=0, duration=1)
+    assert fence is not None
+    store.commit(
+        None, StoredEnvelope(revision=0, schema_version=1, payload=added.encode()), fence, now=0
+    )
+    with pytest.raises(CoreResumeError) as failure:
+        resolve_core_resume(project, driver())
+    message = failure.value.diagnostic.message
+    assert "added_later" in message
+    assert "written by a newer VibeSys" in message
+
+
 @pytest.mark.parametrize(
     "version", range(OLDEST_SUPPORTED_ENVELOPE_VERSION, ENVELOPE_SCHEMA_VERSION)
 )

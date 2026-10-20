@@ -411,7 +411,9 @@ class RunEnvelope[S: StrategyState](Value):
     older supported version is migrated to the current one before it is decoded
     (``vs_core._envelope_migrations``, checked by ``tests/test_envelope_migrations.py``); one
     of any other version is refused, before its shape is validated, with an error that names
-    the version and says whether an older or a newer VibeSys wrote it.
+    the version and says whether an older or a newer VibeSys wrote it. One of the current
+    version holding a field or value this build does not know is refused as written by a
+    newer VibeSys (`vs_core._registry.decode_stored`).
     """
 
     schema_version: int = Field(ge=1)
