@@ -451,6 +451,7 @@ ADMISSION_STORIES = {
     # are authorized to resume; the resumes must get the slots the queued new work does not use
     "parked turns resume past new work queued for admission": (
         2,
+        2,
         [
             *[("plan", 1), ("start", 0), ("admit", 0), ("admit", 0), ("suspend", 0)],
             *[("suspend", 0), ("plan", 1), ("start", 0), ("resume", 0), ("resume", 0)],
@@ -459,6 +460,7 @@ ADMISSION_STORIES = {
     # h1 parks, h2 starts, h1 resumes into the free slot; h2 admitted next must wait for one
     "new work admitted while every slot works waits for one": (
         1,
+        2,
         [
             *[("plan", 0), ("start", 0), ("admit", 0), ("suspend", 0), ("plan", 0)],
             *[("start", 0), ("resume", 0), ("admit", 0)],
@@ -472,12 +474,12 @@ ADMISSION_STORIES = {
 def test_an_admission_limit_never_stalls_the_run_nor_lets_agents_outnumber_the_width(
     story: str,
 ) -> None:
-    width, steps = ADMISSION_STORIES[story]
+    width, limit, steps = ADMISSION_STORIES[story]
     cfg = config(max_rounds=3, max_in_flight=width, max_backlog=width)
-    run, trace = play(cfg, steps, limit=width)
+    run, trace = play(cfg, steps, limit=limit)
 
     assert len(run.running) == 2 * width, run.running  # every step above happened
-    assert trace.seated, trace
+    assert len(trace.admitted & set(run.running)) == limit, trace  # admission is full
 
 
 # -- how the search ends without a candidate --------------------------------------------------------
