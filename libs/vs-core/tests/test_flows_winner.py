@@ -8,7 +8,8 @@ every step, so the choice itself is proven to survive a restart.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import json
+from typing import TYPE_CHECKING, Literal
 
 import pytest
 from hypothesis import example, given
@@ -372,3 +373,13 @@ def test_a_stopped_run_whose_proposal_core_refuses_is_cancelled_not_failed() -> 
     result = result_of(run)
     assert result.outcome == "cancelled"
     assert result.reason == "stopped: adoption-failed: refused"
+
+
+@pytest.mark.parametrize("outcome", ["success", "failure", "cancelled"])
+def test_an_unset_uncompared_is_left_out_of_the_result_serialization(
+    outcome: Literal["success", "failure", "cancelled"],
+) -> None:
+    """Decision digests and version 38 documents hold no ``uncompared`` key for a compared run."""
+    plain = core.RunResultProposal(outcome=outcome, reason="r")
+    assert "uncompared" not in json.loads(plain.model_dump_json())
+    assert plain == core.RunResultProposal.model_validate_json(plain.model_dump_json())

@@ -130,6 +130,8 @@ class SkeletonConfig(core.Value):
     """Adopt the retained choice but report failure, preserving the best partial result."""
     uncompared: bool = False
     """Adopt the retained choice, said never to be compared with the input (``Uncompared``)."""
+    waits_for_stop_after_choice: bool = False
+    """After choosing, wait for the run to be stopped, then say the choice was never compared."""
     turns: int = 1
     """How many implementer turns the attempt asks in one session, one after another."""
     peers: int = 0
@@ -333,12 +335,14 @@ async def skeleton(ctx: Flow, config: SkeletonConfig) -> NoWinner | Uncompared |
     # with accepted evidence for that candidate. Without a measurement the input is all there is.
     eligible = [kept for kept in ctx.workspaces.kept() if kept.settlement.eligible]
     ctx.choose(eligible[0] if eligible else INPUT)
+    if config.waits_for_stop_after_choice:
+        await ctx.first(ctx.stopped)
     return _after_choice(config)
 
 
 def _after_choice(config: SkeletonConfig) -> NoWinner | Uncompared | None:
     """How the scenario ends once it chose: plainly, failed with its choice kept, or uncompared."""
-    if config.uncompared:
+    if config.uncompared or config.waits_for_stop_after_choice:
         return Uncompared()
     return NoWinner(reason="out of rounds", keep_choice=True) if config.fails_after_choice else None
 
@@ -413,6 +417,11 @@ class SkeletonStrategy(core.Value):
     def uncompared_after_choice(cls) -> SkeletonStrategy:
         """Keep and adopt a verified candidate the search says it never compared with the input."""
         return cls(config=SkeletonConfig(uncompared=True))
+
+    @classmethod
+    def uncompared_until_stopped(cls) -> SkeletonStrategy:
+        """Adopt a verified candidate never compared with the input, then wait for a stop."""
+        return cls(config=SkeletonConfig(waits_for_stop_after_choice=True))
 
     @classmethod
     def idle(cls) -> SkeletonStrategy:

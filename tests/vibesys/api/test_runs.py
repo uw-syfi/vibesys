@@ -58,6 +58,7 @@ from vs_sim.api.testing import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from pathlib import Path
 
 
@@ -261,7 +262,12 @@ class _Ran:
 
 
 def _run_keeping_a_candidate(
-    request_template: RunRequest, sim: Sim, strategy: SkeletonStrategy, schedule_seed: int
+    request_template: RunRequest,
+    sim: Sim,
+    strategy: SkeletonStrategy,
+    schedule_seed: int,
+    *,
+    stop_after: tuple[CoreEventType, int] | None = None,
 ) -> _Ran:
     """Run ``strategy`` publicly over a task whose benchmark passes; its one turn commits."""
     write_task(
@@ -312,8 +318,14 @@ def _run_keeping_a_candidate(
     processes = FakeProcesses(no_origin, pass_time=threads.sleep)
     events: list[CoreEvent] = []
 
+    stops: list[Callable[[], None]] = []
+
     def record(event: CoreEvent) -> None:
         events.append(event)
+        if stop_after is not None and stops:
+            kind, count = stop_after
+            if sum(seen.type is kind for seen in events) == count:
+                stops.pop()()
 
     session = create_session(
         request,
@@ -334,6 +346,7 @@ def _run_keeping_a_candidate(
     )
 
     async def exercise() -> RunResult:
+        stops.append(session.stop)
         session.start()
         try:
             return await session.await_result()
@@ -385,6 +398,26 @@ def test_a_public_run_that_adopts_an_uncompared_candidate_says_so_in_its_result_
     assert isinstance(endings[0], RunEndingData)
     assert endings[0].reason is EndReason.ADOPTED
     assert endings[0].uncompared
+
+
+@pytest.mark.xfail(
+    strict=True, reason="B1: an operator stop drops uncompared from RunResult and the CLI"
+)
+def test_a_stopped_public_run_that_held_an_uncompared_choice_says_so(
+    request_template: RunRequest, sim: Sim
+) -> None:
+    """B1: the operator's stop keeps ``uncompared`` in the public result."""
+    ran = _run_keeping_a_candidate(
+        request_template,
+        sim,
+        SkeletonStrategy.uncompared_until_stopped(),
+        0,
+        # The fourth gate result is the candidate's last check, just before the search's choice.
+        stop_after=(CoreEventType.GATE_FINISHED, 4),
+    )
+
+    assert ran.result.status is ProductRunStatus.STOPPED
+    assert ran.result.uncompared
 
 
 @pytest.mark.parametrize(
