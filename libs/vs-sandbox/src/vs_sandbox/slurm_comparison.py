@@ -7,7 +7,7 @@ Apptainer, and appends the baseline's own benchmark arguments.
 
 The operator's per-machine settings (``[vibesys.comparison]``) say where images are cached and
 where model weights live. The task never does: it names only a digest-pinned image. The first
-job on a machine pulls the image into a ``.sif`` under the cache directory (serialized by a
+job on a machine pulls the image into a image under the cache directory (serialized by a
 lock, so concurrent jobs pull once) and every later job reuses it.
 """
 
@@ -59,6 +59,12 @@ class ComparisonMachine(BaseModel):
     """Where pulled ``.sif`` files and Apptainer's layer cache live; shared by the machine's jobs."""
     model_cache_dir: str
     """The Hugging Face home holding the model weights; mounted read-only, with hub access offline."""
+    image_format: Literal["sif", "sandbox"] = "sif"
+    """How a pulled image is kept: one ``.sif`` file, or an unpacked directory (a ``sandbox``).
+
+    A machine whose node scratch cannot hold an image's squashfs, or whose shared filesystem
+    stalls ``mksquashfs`` (no extended attributes), keeps the unpacked directory instead.
+    """
     apptainer: str = Field(default="apptainer", min_length=1)
     binds: tuple[str, ...] = ()
     """Extra ``--bind`` specs (``src[:dst[:opts]]``), for a library or license directory."""
@@ -121,13 +127,32 @@ class BaselineServer(BaseModel):
 
     @property
     def digest(self) -> str:
-        """The image's sha256 hex digest, which names its cached ``.sif``."""
+        """The image's sha256 hex digest, which names its cached image."""
         return self.image.rsplit("@sha256:", 1)[1]
 
 
 def _with_port(element: str) -> str:
     """Quote *element* for the script, with every ``${PORT}`` expanding the job's port."""
     return '"$1"'.join(shlex.quote(part) for part in element.split(SERVE_PORT_PLACEHOLDER))
+
+
+def _pull_lines(apptainer: str, image: str, source: str, *, sandbox: bool) -> list[str]:
+    """The shell lines that make *image* from *source*, ending in an atomic rename.
+
+    A sandbox is unpacked straight into the cache (it can be larger than node scratch); a ``.sif``
+    is built on scratch and copied in.
+    """
+    quoted = shlex.quote(source)
+    if sandbox:
+        return [
+            f"      {apptainer} build --fix-perms --sandbox {image}.$$ {quoted}",
+            f"      mv {image}.$$ {image}",
+        ]
+    return [
+        f'      {apptainer} pull "$work/image.sif" {quoted}',
+        f'      cp "$work/image.sif" {image}.$$',
+        f"      mv {image}.$$ {image}",
+    ]
 
 
 def serve_script(machine: ComparisonMachine, server: BaselineServer) -> str:
@@ -137,7 +162,10 @@ def serve_script(machine: ComparisonMachine, server: BaselineServer) -> str:
     wrote can end a word early.
     """
     cache = shlex.quote(machine.image_cache_dir)
-    sif = shlex.quote(f"{machine.image_cache_dir}/{server.digest}.sif")
+    sandbox = machine.image_format == "sandbox"
+    suffix = "sandbox" if sandbox else "sif"
+    sif = shlex.quote(f"{machine.image_cache_dir}/{server.digest}.{suffix}")
+    present = f"[ ! -d {sif} ]" if sandbox else f"[ ! -f {sif} ]"
     lock = shlex.quote(f"{machine.image_cache_dir}/{server.digest}.lock")
     apptainer = shlex.quote(machine.apptainer)
     scratch = f'"$PWD"/{_SCRATCH}'
@@ -153,19 +181,16 @@ def serve_script(machine: ComparisonMachine, server: BaselineServer) -> str:
     lines = [
         "set -eu",
         f"mkdir -p {cache}",
-        f"if [ ! -f {sif} ]; then",
+        f"if {present}; then",
         "  (",
         "    flock 9",
-        f"    if [ ! -f {sif} ]; then",
-        # Built on the node's own scratch: some shared filesystems lack xattr support, and
-        # building a .sif there stalls in mksquashfs. Only the finished file lands in the cache.
+        f"    if {present}; then",
+        # Layers are cached on the node's own scratch: only the finished image lands in the cache.
         f'      work="${{TMPDIR:-{cache}/work}}/vs-apptainer-$$"',
         '      mkdir -p "$work"',
         '      export APPTAINER_CACHEDIR="$work/layers" APPTAINER_TMPDIR="$work"',
         '      mkdir -p "$APPTAINER_CACHEDIR"',
-        f'      {apptainer} pull "$work/image.sif" {shlex.quote(server.image)}',
-        f'      cp "$work/image.sif" {sif}.$$',
-        f"      mv {sif}.$$ {sif}",
+        *_pull_lines(apptainer, sif, server.image, sandbox=sandbox),
         '      rm -rf "$work"',
         "    fi",
         f"  ) 9>{lock}",

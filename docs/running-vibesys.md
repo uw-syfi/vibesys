@@ -315,6 +315,7 @@ URL and evaluator arguments the baseline's server reuses:
 gpu = "rocm"                         # or "nvidia": which Apptainer GPU flag to bind
 image_cache_dir = "/path/on/cluster" # .sif files and layers; the first job pulls each image once
 model_cache_dir = "/path/on/cluster" # Hugging Face home with the weights; mounted read-only
+image_format = "sif"                 # or "sandbox": keep the image unpacked (when node scratch is too small for a .sif)
 binds = []                           # optional extra --bind specs
 env_passthrough = []                 # optional names of job variables forwarded into the container
 ```

@@ -37,6 +37,7 @@ _ENV = st.dictionaries(_NAMES, _WORDS, max_size=3)
 _MACHINES = st.builds(
     ComparisonMachine,
     gpu=st.sampled_from(["rocm", "nvidia"]),
+    image_format=st.sampled_from(["sif", "sandbox"]),
     image_cache_dir=st.just("/cluster/images"),
     model_cache_dir=st.just("/cluster/hf"),
     binds=st.lists(_WORDS, max_size=2).map(tuple),
@@ -79,7 +80,8 @@ def test_the_engine_is_exec_ed_with_its_argv_whatever_the_words_hold(
     expected = [part.replace("${PORT}", "$1") for part in server.argv]
     assert tokens[-len(expected) :] == expected
     assert tokens[: tokens.index("--cleanenv")] == ["exec", machine.apptainer, "exec"]
-    assert f"/cluster/images/{_DIGEST}.sif" in tokens
+    suffix = "sandbox" if machine.image_format == "sandbox" else "sif"
+    assert f"/cluster/images/{_DIGEST}.{suffix}" in tokens
 
 
 @given(machine=_MACHINES, argv=_ARGV, env=_ENV)
@@ -111,15 +113,17 @@ def test_the_model_cache_is_mounted_read_only_and_the_gpu_runtime_is_bound(
 
 
 @given(machine=_MACHINES, argv=_ARGV)
-def test_the_image_is_pulled_once_under_a_lock_and_cached_by_digest(
+def test_the_image_is_made_once_under_a_lock_in_the_machines_format(
     machine: ComparisonMachine, argv: tuple[str, ...]
 ) -> None:
     script = serve_script(machine, _server(argv))
+    verb = "build" if machine.image_format == "sandbox" else "pull"
 
-    assert script.count(f"{machine.apptainer} pull") == 1
+    assert script.count(f"{machine.apptainer} {verb} ") == 1
+    assert ("--sandbox" in script) is (machine.image_format == "sandbox")
     assert "flock 9" in script
-    assert script.index("flock 9") < script.index(f"{machine.apptainer} pull")
-    assert _IMAGE in shlex.split(next(ln for ln in script.splitlines() if " pull " in ln))
+    assert script.index("flock 9") < script.index(f"{machine.apptainer} {verb} ")
+    assert _IMAGE in shlex.split(next(ln for ln in script.splitlines() if f" {verb} " in ln))
 
 
 @given(machine=_MACHINES, argv=_ARGV)
@@ -170,6 +174,7 @@ _VALID = {
     "model_cache_dir": '"/cluster/hf"',
     "binds": '["/cluster/lib:/opt/lib:ro"]',
     "env_passthrough": '["HF_TOKEN"]',
+    "image_format": '"sandbox"',
 }
 
 
@@ -192,6 +197,7 @@ def test_the_machine_table_is_read_from_the_operator_file(tmp_path: Path) -> Non
     assert policy.comparison.model_cache_dir == "/cluster/hf"
     assert policy.comparison.binds == ("/cluster/lib:/opt/lib:ro",)
     assert policy.comparison.env_passthrough == ("HF_TOKEN",)
+    assert policy.comparison.image_format == "sandbox"
 
 
 def test_a_machine_without_the_table_has_no_comparison_settings(tmp_path: Path) -> None:
@@ -205,6 +211,7 @@ def test_a_machine_without_the_table_has_no_comparison_settings(tmp_path: Path) 
         ("image_cache_dir", '"relative/images"'),
         ("model_cache_dir", '"/a/../b"'),
         ("gpu", '"tpu"'),
+        ("image_format", '"squashfs"'),
         ("env_passthrough", '["not a name"]'),
     ],
 )
