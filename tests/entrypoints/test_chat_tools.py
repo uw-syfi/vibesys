@@ -13,9 +13,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, cast
 
-import agentshim
 import pytest
-from agentshim.testing import FakeExecutor, scripted_failure, scripted_turn
 from hypothesis import given
 from hypothesis import strategies as st
 from tests.support.chat_run import project_with_run, seed_agent_state
@@ -46,11 +44,13 @@ from vs_agent.api import (
     CONTAINER_SERVER_PACKAGES,
     AgentCapabilities,
     AgentClient,
+    AgentQuotaError,
     MCPServerSpec,
     NullAgentEventSink,
+    QuotaCondition,
     containerize_server,
 )
-from vs_agent.api.testing import FakeAgentClient, fake_agentshim_launcher
+from vs_agent.api.testing import FakeAgentClient, FakeProvider, FakeTurnScript
 from vs_evaluation.api.tool_relay import (
     SOCKET_ENV,
     TOKEN_ENV,
@@ -780,15 +780,20 @@ def test_closing_the_chat_stops_its_relay(tmp_path: Path) -> None:
 def test_a_chat_turn_meeting_one_transient_overload_is_sent_again_once_and_answers(
     tmp_path: Path,
 ) -> None:
+    """The real client, over a provider whose first send is overloaded and whose second answers.
+
+    The provider raises the capacity stop a 529 becomes once the CLI's own retries ran out
+    (``QuotaCondition.UNAVAILABLE``); how a 529 is classified is ``vs_agent``'s concern.
+    """
     threads = SimThreads(schedule_seed=0)
-    executor = FakeExecutor(
-        [
-            scripted_failure("codex", agentshim.FailureKind.TRANSIENT),
-            scripted_turn("codex", text="the run converged"),
-        ]
-    )
+    sends: list[float] = []
+    overload = AgentQuotaError("codex", QuotaCondition.UNAVAILABLE, "529 overloaded")
     client = AgentClient(
-        fake_agentshim_launcher(provider="codex", executor=executor, threads=threads),
+        FakeProvider(
+            script=FakeTurnScript(answers=(overload, "the run converged")),
+            on_send=lambda _request: sends.append(threads.clock.now()),
+            threads=threads,
+        ),
         provider="codex",
         run_log_file=None,
         clock=threads,
@@ -813,5 +818,6 @@ def test_a_chat_turn_meeting_one_transient_overload_is_sent_again_once_and_answe
     answer, waited = threads.run(main)
 
     assert answer == "the run converged"
-    assert len(executor.requests) == 2  # the overloaded attempt, then exactly one resend
-    assert waited >= 30.0  # the resend waited for the provider, not straight back into it
+    assert len(sends) == 2  # the overloaded send, then exactly one resend
+    assert sends[1] - sends[0] == 30.0  # the resend waited for the provider
+    assert waited >= 30.0
