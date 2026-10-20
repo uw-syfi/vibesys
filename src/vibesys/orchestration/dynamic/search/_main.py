@@ -203,6 +203,26 @@ class MainLine:
             )
         return MergeOptions(checkable=True, rows=tuple(rows), barred=tuple(barred))
 
+    def held(self, base: RevisionRef, lineage: frozenset[str]) -> RevisionRef:
+        """The latest main a tree holds that holds main ``base`` and the candidates ``lineage``.
+
+        A merge that moved main from a main the tree holds, bringing in only candidates the tree
+        holds, made a main the tree holds as well: a child built on a candidate merged since holds
+        that merge's main. A merge that brought in anything else stops the walk, since the tree
+        lacks that change, and so does every later merge.
+        """
+        at = base
+        for merge in self.merges:
+            if (
+                merge.outcome is MergeOutcome.MERGED
+                and merge.revision is not None
+                and merge.base.revision_id.root == at.revision_id.root
+                and merge.candidates
+                and all(item.revision.revision_id.root in lineage for item in merge.candidates)
+            ):
+                at = merge.revision
+        return at
+
     def finished(self, done: WorkstreamDone, terms: TaskTerms) -> MergeRecord:
         """Fold a finished merge workstream: move main when its commit is sound, record it.
 

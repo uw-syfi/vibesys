@@ -461,7 +461,6 @@ def test_the_parts_verdict_is_the_composite_against_the_raw_best_part_in_any_ord
 ON_H1 = {"c1": 200.0, "c2": 250.0, "c3": 40.0, "c4": 200.0, "c5": 250.0, "c6": 40.0}
 
 
-@pytest.mark.xfail(strict=True, reason="a lineage child of a merged candidate diffs from the input")
 @MODES
 def test_a_child_of_a_merged_candidate_diffs_from_the_main_that_merged_its_parent(
     *, restarting: bool
@@ -490,6 +489,22 @@ def test_a_child_of_a_merged_candidate_diffs_from_the_main_that_merged_its_paren
     caught_up = _flat(render(PromptTemplate.IMPLEMENT, asked, agent_git_writable=False))
     assert "`git diff c4 c5 | git apply --reject`" in caught_up, caught_up
     assert f"git diff {base} " not in caught_up
+
+
+@MODES
+def test_a_child_whose_parent_main_merged_since_has_nothing_to_catch_up_with(
+    *, restarting: bool
+) -> None:
+    host = begin(config(max_rounds=8), restarting=restarting, throughputs=ON_H1)
+    _plan(host, implement("h1"))
+    _implemented(host, "h1", "c1")
+    _plan(host, implement("h4", parent_hypothesis_id="h1", parent_revision="c1"))
+    _implemented(host, "h4", "c2", "inconclusive")
+    _merged(host, "m1", "h1", "c4")
+    _plan(host, implement("h4", continue_hypothesis=True))
+    asked = _implemented(host, "h4", "c3", "inconclusive")
+    assert asked.rebase_onto is None
+    assert "main revision moved" not in _flat(render(PromptTemplate.IMPLEMENT, asked))
 
 
 STRAY = {"hypothesis_id": "the scheduler part", "part": "all of it", "why": "a typo"}

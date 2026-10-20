@@ -709,7 +709,8 @@ class RunRecord:
             parent, lineage = self.parent_of(plan)
             record = self.hypotheses.get(plan.work_id)
             prior = record.rounds[-1] if record is not None and record.rounds else None
-            rebase = self._rebase_onto(plan)
+            parent_main = self.main_base_at(parent)
+            rebase = self._rebase_onto(plan, parent_main)
             parts = self._parts(plan)
             if plan.combine and len(parts) < COMBINE_MIN_PARTS:
                 self.hypotheses[plan.work_id] = _hypotheses.cancelled(plan, sequence, parts)
@@ -729,19 +730,25 @@ class RunRecord:
                 merge=self._sources(plan),
                 combine=parts,
                 rebase_onto=rebase,
-                parent_main=self.main_base_at(parent),
+                parent_main=parent_main,
                 started_by=_started_by(self.planned_by.get(plan.work_id)),
             )
             self.running[start.key] = start
             starts.append(start)
         return starts
 
-    def _rebase_onto(self, plan: WorkPlan) -> RevisionRef | None:
-        """Main, when a hypothesis that goes on last started before main moved; else None."""
+    def _rebase_onto(self, plan: WorkPlan, parent_main: RevisionRef) -> RevisionRef | None:
+        """Main, when a hypothesis that goes on last started before main moved; else None.
+
+        A tree that holds main already (``parent_main``, say its parent was merged since) has
+        nothing to catch up with.
+        """
         if self._own_last_round(plan) is None:
             return None
         seen = self.main_seen.get(plan.work_id, 0)
-        return self.main.revision if self.main.generation > seen else None
+        held = parent_main.revision_id.root == self.main.revision.revision_id.root
+        moved = self.main.generation > seen and not held
+        return self.main.revision if moved else None
 
     def _sources(self, plan: WorkPlan) -> tuple[MergeSource, ...]:
         """A merge's candidates as the exact revisions offered now, in the planner's order."""
@@ -786,10 +793,11 @@ class RunRecord:
         """The main revision ``revision``'s tree includes: where its own change against main starts.
 
         A revision main has been includes itself. A candidate includes what its workstream's tree
-        did (`FinishedWork.main_base`), and a merge's commit the main the merge started from. Git
-        ancestry cannot tell it: a catch-up under read-only git applies main's change to the tree
-        without recording main as an ancestor. A revision the run did not make is taken as built
-        on the input.
+        did (`FinishedWork.main_base`), and every later main a merge made of that main and of
+        candidates its lineage holds (`MainLine.held`): a child built on a candidate that was
+        merged since holds that merge's main. Git ancestry cannot tell it: a catch-up under
+        read-only git applies main's change to the tree without recording main as an ancestor. A
+        revision the run did not make is taken as built on the input.
         """
         root = revision.revision_id.root
         mains = {self.base.revision_id.root} | {
@@ -799,22 +807,40 @@ class RunRecord:
         }
         if root in mains:
             return revision
-        for merge in self.main.merges:
-            if merge.revision is not None and merge.revision.revision_id.root == root:
-                return merge.base
+        work = self._made(root)
+        if work is None:
+            return self.base
+        if work.main_base is not None:
+            recorded = work.main_base
+        elif work.parent != revision:
+            # A record an older build kept: the workstream's parent, as if it never caught up.
+            recorded = self.main_base_at(work.parent)
+        else:
+            recorded = self.base
+        return self.main.held(recorded, self._lineage(revision))
+
+    def _made(self, root: str) -> FinishedWork | None:
+        """The finished workstream whose round made the candidate ``root``; None if none did."""
         made = {
             item.sequence
             for record in self.hypotheses.values()
             for item in record.rounds
             if item.candidate is not None and item.candidate.revision_id.root == root
         }
-        work = next((item for item in self.finished_work if item.sequence in made), None)
-        if work is None:
-            return self.base
-        if work.main_base is not None:
-            return work.main_base
-        # A record an older build kept: the workstream's parent, as if it never caught up.
-        return self.main_base_at(work.parent) if work.parent != revision else self.base
+        return next((item for item in self.finished_work if item.sequence in made), None)
+
+    def _lineage(self, revision: RevisionRef) -> frozenset[str]:
+        """``revision`` and every revision it was built on, through the workstreams that made them.
+
+        Each holds the changes of the ones after it: a workstream starts from its parent's tree.
+        """
+        held: set[str] = set()
+        current: RevisionRef | None = revision
+        while current is not None and current.revision_id.root not in held:
+            held.add(current.revision_id.root)
+            work = self._made(current.revision_id.root)
+            current = None if work is None else work.parent
+        return frozenset(held)
 
     def finished(self, done: WorkstreamDone) -> None:
         """Keep what a finished workstream leaves behind: its record, round and parent."""
