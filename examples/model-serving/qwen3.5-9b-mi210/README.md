@@ -25,7 +25,6 @@ qwen3.5-9b-mi210/
         ├── traces/           # checked-in session slices + full-trace manifest
         ├── slice_trace.py    # cuts traces/ out of the full tracegen output
         ├── fetch_corpus.py   # downloads and verifies the token corpus
-        └── vllm_baseline.sh  # tuned vLLM launch (external comparison point)
 ```
 
 ## Run it
@@ -135,7 +134,7 @@ session-count prefixes of the same trace (`--max-items`).
 **Tool waits.** `tool_wait_after_ms` is a client-side sleep between a
 session's rounds, and `--max-concurrency` counts sessions, holding a slot
 through those sleeps. In principle this under-fills the server by the
-tool-wait share of a round's cycle time. Measured against vLLM on `quick`,
+tool-wait share of a round's cycle time. Measured on `quick`,
 that share is ~2% (mean round 16.7 s vs mean tool wait 0.32 s), so no
 concurrency correction is applied. Recompute it if round latency drops by an
 order of magnitude.
@@ -169,7 +168,7 @@ against an unrelated process on the same port fails fast.
 
 ## Modes
 
-Wall clock against the tuned vLLM baseline at `--max-concurrency 128`, after
+Wall clock at `--max-concurrency 128`, after
 a 12-session warmup sub-run that is excluded from the metric:
 
 | Mode | Sessions | Rounds | Wall clock |
@@ -228,13 +227,12 @@ range).
 
 - Holdout is **never** used to tune a knob, choose between candidate designs,
   or decide whether an experiment worked. That stays on `quick`/`full`.
-- Holdout is run only at milestones (e.g. a parity or win claim vs. tuned
-  vLLM), always paired with tuned vLLM (`benchmark/vllm_baseline.sh`) on the
-  same node in the same job.
+- Holdout is run only at milestones (e.g. a parity or win claim), always
+  paired with the input on the same node in the same job.
 - A claimed win or parity result must hold on holdout too. A `full`-mode win
   that does not reproduce on holdout is a real overfitting signal, not noise
   to explain away.
-- Report holdout's ratio vs. tuned vLLM and its server-vs-planned prefix-hit
+- Report holdout's ratio and its server-vs-planned prefix-hit
   rate alongside the same numbers on `full` mode, to flag any divergence
   between the two.
 
@@ -255,28 +253,21 @@ without adding capacity. `run.py` also reports `total_tokens_per_s`,
 planned prefix-hit rate, and step counts. Any failed request in the measured
 window makes `run.py` exit nonzero without writing a metric.
 
-## vLLM comparison point
+## Comparison baselines
 
-`benchmark/vllm_baseline.sh` launches vLLM in an apptainer image. It needs
-`VLLM_SIF` (a ROCm vLLM image) and `VLLM_CACHE_DIR` (writable cache root with
-the model already in `$VLLM_CACHE_DIR/hf`):
+`vibesys.input.toml` declares two comparison baselines, vLLM and SGLang, each a
+digest-pinned published image with its serve command. They are measured with
+this benchmark by `vibesys compare` on a Slurm cluster whose operator file has a
+`[vibesys.comparison]` table (see `docs/running-vibesys.md`), once, three times
+on different nodes; the reading is stored in the project's machine-local state,
+and a run shows it beside the input ("vs vLLM", "vs SGLang"). Agents are not
+told the numbers. SGLang's server runs token-in/token-out, so its comparison
+passes `--backend sglang-tokens` to the benchmark.
 
 ```bash
-VLLM_SIF=/path/to/vllm-openai-rocm.sif VLLM_CACHE_DIR=/path/to/cache \
-  benchmark/vllm_baseline.sh 8000
+vibesys compare --task default            # measure what is not stored yet
+vibesys compare --only vllm --force       # measure one again
 ```
-
-Tuned config: `--attention-backend TRITON_ATTN --gpu-memory-utilization 0.95
---max-num-seqs 256 --max-num-batched-tokens 16384 --max-model-len 16384
---async-scheduling --enable-prefix-caching --enable-prompt-tokens-details`.
-On vLLM v0.3.1.dev190+g3df4ae153 (ROCm nightly), on the current harness
-(disjoint warmup, same launch config as `benchmark/vllm_baseline.sh`):
-
-| Mode | Output tok/s | Server prefix-hit rate | Planned |
-|:--|--:|--:|--:|
-| `quick` | ~500 (495.6-505.2) | 0.648 | 0.769 |
-| `full` | ~576 | 0.492 | 0.773 |
-| `holdout` | ~532 | 0.442 | 0.783 |
 
 ## Diagnostic profiling load
 

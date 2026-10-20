@@ -24,9 +24,7 @@ gfx942; treat them as hypotheses to re-verify on gfx90a, per
 - The engine may use the kernel and tensor libraries installed in the
   evaluation environment (for example torch, Triton, and the fla kernels), but
   it must not delegate serving to an existing serving framework (vLLM, SGLang,
-  TGI, or similar), as a library or as a subprocess. Tuned vLLM
-  (`benchmark/vllm_baseline.sh`) is the comparison baseline, so a wrapper
-  would measure vLLM against itself.
+  TGI, or similar), as a library or as a subprocess.
 - Everything under `.vibesys/tasks/default/` (`reference/`, `accuracy_checker/`,
   `benchmark/`, `config/`, `cpu_check/`) is a read-only trusted input.
 - The `quick` and `full` benchmarks fail at their preflight unless the server
@@ -48,12 +46,11 @@ gfx942; treat them as hypotheses to re-verify on gfx90a, per
 - vLLM forces a 528-token attention KV block on this model/GPU (hybrid mamba
   page alignment: the attention page must be >= the mamba page). This is an
   observed constraint of vLLM's allocator, not a property of the model.
-- Single-stream decode: ~66 tok/s on vLLM. The objective is aggregate
-  throughput under concurrency.
+- The objective is aggregate throughput under concurrency.
 - vLLM attention backends on this build/model/GPU: `ROCM_ATTN` (vLLM's
   default) and `TRITON_ATTN`. `ROCM_ATTN` cannot use its custom
   paged-attention kernel here and falls back to Triton through a slower
-  dispatch path; `TRITON_ATTN` measured +21-33% output tok/s over it.
+  dispatch path.
 - A vLLM boot at `--gpu-memory-utilization 0.85 --max-model-len 4096`
   reported a GPU KV cache of 547,401 tokens; see `config/platforms/mi210.toml`
   for the capacity budget.
@@ -212,8 +209,7 @@ measured sessions -- see `README.md` "Warmup".
 
 Binding rule: holdout is never used to tune a knob or choose between
 candidates -- that stays on `quick`/`full`. It is run only at milestones (e.g.
-a parity or win claim vs. tuned vLLM), always paired with tuned vLLM
-(`benchmark/vllm_baseline.sh`) on the same node in the same job. A claimed
-win or parity result must hold on holdout too; a `full`-mode win that does not
+a parity or win claim), always paired with the input on the same node in the
+same job. A claimed win or parity result must hold on holdout too; a `full`-mode win that does not
 reproduce on holdout is evidence of overfitting to the tuned sessions, not
 noise, and must not be reported as a validated result.

@@ -46,6 +46,50 @@ class ModeTableTests(unittest.TestCase):
         self.assertEqual(args.mode, "holdout")
 
 
+class BackendTests(unittest.TestCase):
+    """`--backend` picks session_runner's wire protocol; candidates keep the OpenAI one."""
+
+    @staticmethod
+    def _argv(backend: str | None = None) -> list[str]:
+        common = {
+            "trace": Path("t.csv"),
+            "text_file": Path("c.txt"),
+            "tokenizer": Path("tok"),
+            "base_url": "http://127.0.0.1:1/v1",
+            "model": "m",
+            "max_concurrency": 4,
+            "max_items": 2,
+            "max_model_len": 8,
+            "log_path": Path("l"),
+            "summary_path": Path("s"),
+            "timeline_path": Path("tl"),
+        }
+        if backend is None:
+            return run._base_replay_argv(**common)
+        return run._base_replay_argv(**common, backend=backend)
+
+    @staticmethod
+    def _value(argv: list[str], flag: str) -> str:
+        return argv[argv.index(flag) + 1]
+
+    def test_the_default_is_the_openai_protocol(self) -> None:
+        self.assertEqual(
+            run.parse_args(["--mode", "quick", "--request-factory-engine", "e"]).backend, "openai"
+        )
+        self.assertEqual(self._value(self._argv(), "--backend"), "openai")
+
+    def test_every_backend_reaches_session_runner(self) -> None:
+        for backend in run.BACKENDS:
+            args = run.parse_args(
+                ["--mode", "quick", "--request-factory-engine", "e", "--backend", backend]
+            )
+            self.assertEqual(self._value(self._argv(args.backend), "--backend"), backend)
+
+    def test_an_unknown_backend_is_refused(self) -> None:
+        with self.assertRaises(SystemExit):
+            run.parse_args(["--mode", "quick", "--request-factory-engine", "e", "--backend", "x"])
+
+
 class TraceDigestTests(unittest.TestCase):
     """The checked-in trace slices must match their pinned digest and row count."""
 

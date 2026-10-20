@@ -88,6 +88,12 @@ Mode = Literal["smoke", "quick", "full", "holdout"]
 
 DEFAULT_MODEL = "Qwen/Qwen3.5-9B"
 DEFAULT_BASE_URL = "http://127.0.0.1:8000/v1"
+# The wire protocol session_runner speaks to the server (its `--backend`). `openai` is the
+# contract every candidate meets; a comparison baseline's engine may need its native
+# token-in/token-out endpoint (SGLang: `sglang-tokens`, which needs the server's
+# --skip-tokenizer-init and --stream-output).
+BACKENDS = ("openai", "vllm-tokens", "sglang-tokens")
+DEFAULT_BACKEND = "openai"
 
 # Session-count knobs for each mode. Calibrated against the tuned vLLM
 # baseline on 1x MI210 (see ../README.md "Modes"): quick lands at ~2-3
@@ -534,6 +540,7 @@ def _base_replay_argv(
     log_path: Path,
     summary_path: Path,
     timeline_path: Path,
+    backend: str = DEFAULT_BACKEND,
 ) -> list[str]:
     return [
         "--trace",
@@ -551,7 +558,7 @@ def _base_replay_argv(
         "--model",
         model,
         "--backend",
-        "openai",
+        backend,
         "--temperature",
         "0",
         "--arrival-mode",
@@ -741,6 +748,7 @@ def run_replay(args: argparse.Namespace, paths: _ResolvedPaths, mode: Mode) -> d
         log_path=work_dir / f"{mode}_warmup_requests.jsonl",
         summary_path=work_dir / f"{mode}_warmup_summary.json",
         timeline_path=work_dir / f"{mode}_warmup_timeline.parquet",
+        backend=args.backend,
     )
     warmup = run_session_runner(
         args.request_factory_engine,
@@ -768,6 +776,7 @@ def run_replay(args: argparse.Namespace, paths: _ResolvedPaths, mode: Mode) -> d
         log_path=work_dir / f"{mode}_requests.jsonl",
         summary_path=measured_summary_path,
         timeline_path=work_dir / f"{mode}_timeline.parquet",
+        backend=args.backend,
     )
     start = time.monotonic()
     measured = run_session_runner(
@@ -915,6 +924,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--mode", choices=["smoke", "quick", "full", "holdout"], required=True)
     parser.add_argument("--base-url", default=DEFAULT_BASE_URL)
     parser.add_argument("--model", default=DEFAULT_MODEL)
+    parser.add_argument(
+        "--backend",
+        choices=BACKENDS,
+        default=DEFAULT_BACKEND,
+        help="Wire protocol session_runner speaks to the server (default: %(default)s).",
+    )
     parser.add_argument("--output-json", type=Path, default=None)
     parser.add_argument(
         "--vs-output",

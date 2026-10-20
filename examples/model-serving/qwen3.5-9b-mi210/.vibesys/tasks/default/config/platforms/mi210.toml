@@ -65,7 +65,6 @@ observed_at = "vLLM v0.3.1.dev190+g3df4ae153 (ROCm ci nightly), --gpu-memory-uti
 [platform.mi210.known_facts]
 requires_enable_prompt_tokens_details = true
 prompt_tokens_details_flag = "--enable-prompt-tokens-details"
-single_stream_decode_tok_s_approx = 66
 attention_backends_available = ["ROCM_ATTN", "TRITON_ATTN"]
 attention_backend_default = "ROCM_ATTN"
 # vLLM's own default (ROCM_ATTN) measurably underperforms on this model/GPU:
@@ -73,8 +72,8 @@ attention_backend_default = "ROCM_ATTN"
 # decode path here and falls back to Triton with extra dispatch overhead
 # ("Cannot use ROCm custom paged attention kernel, falling back to Triton
 # implementation", chunked_prefill_paged_decode.py:433). Selecting
-# TRITON_ATTN directly measured +21-33% output tok/s. Recommended:
-# TRITON_ATTN (benchmark/vllm_baseline.sh's default), not attention_backend_default.
+# TRITON_ATTN directly skips that path. Recommended: TRITON_ATTN, not
+# attention_backend_default.
 attention_backend_recommended = "TRITON_ATTN"
 attention_backend_incompatible = ["TURBOQUANT"]
 # PyTorch TunableOp (torch 2.9.1+rocm6.4) picks kernels from short timings on an
