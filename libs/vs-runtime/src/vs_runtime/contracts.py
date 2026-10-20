@@ -878,6 +878,12 @@ class CoreRunContext:
     """The longest core waits to learn what became of a request it could not read."""
     role_models: Mapping[str, str] = field(default_factory=dict)
     """The model the operator chose for a role (by role id) where it differs from the run's."""
+    prompt_variables: Mapping[str, object] = field(default_factory=dict)
+    """Data the host adds to the prompts of this run, by template variable name.
+
+    Data only: the policy's templates own the wording, and a policy ignores a variable none of
+    its templates reads.
+    """
 
 
 @dataclass(frozen=True, slots=True)
