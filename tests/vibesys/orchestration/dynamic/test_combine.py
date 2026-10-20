@@ -425,59 +425,6 @@ def test_the_parts_verdict_is_the_composite_against_the_raw_best_part_in_any_ord
     assert versus_parts((row,), tuple(shuffled), space) is got
 
 
-# h3 and h4 build on h1's candidate c1, then m1 merges h1 (main c4). Both trees already hold c1's
-# change, which is all m1 brought into main, so each tree holds main c4 too: their own changes
-# start there. Diffing from the input instead would carry h1's change again, and under read-only
-# git every one of its hunks would be refused (`.rej`) on a tree or main that already has it.
-ON_H1 = {"c1": 200.0, "c2": 250.0, "c3": 40.0, "c4": 200.0, "c5": 250.0, "c6": 40.0}
-
-
-@MODES
-def test_a_child_of_a_merged_candidate_diffs_from_the_main_that_merged_its_parent(
-    *, restarting: bool
-) -> None:
-    host = begin(config(max_rounds=12), restarting=restarting, throughputs=ON_H1)
-    first = _plan(host, implement("h1"))
-    base = first.base_revision.revision_id.root
-    _implemented(host, "h1", "c1")
-    on_c1 = {"parent_hypothesis_id": "h1", "parent_revision": "c1"}
-    _plan(host, implement("h3", **on_c1))
-    _implemented(host, "h3", "c2")
-    _plan(host, implement("h4", **on_c1))
-    _implemented(host, "h4", "c3", "inconclusive")
-    _merged(host, "m1", "h1", "c4")
-
-    # Merging h3 applies h3's own change only: h1's is in main c4 already.
-    merging = _flat(
-        render(PromptTemplate.MERGE, _merged(host, "m2", "h3", "c5"), agent_git_writable=False)
-    )
-    assert "`git diff c4 c2 | git apply --reject`" in merging, merging
-    assert f"git diff {base} " not in merging
-
-    # h4 goes on after main moved to c5: it catches up with m2's change only, from c4.
-    _plan(host, implement("h4", continue_hypothesis=True))
-    asked = _implemented(host, "h4", "c6", "inconclusive")
-    caught_up = _flat(render(PromptTemplate.IMPLEMENT, asked, agent_git_writable=False))
-    assert "`git diff c4 c5 | git apply --reject`" in caught_up, caught_up
-    assert f"git diff {base} " not in caught_up
-
-
-@MODES
-def test_a_child_whose_parent_main_merged_since_has_nothing_to_catch_up_with(
-    *, restarting: bool
-) -> None:
-    host = begin(config(max_rounds=8), restarting=restarting, throughputs=ON_H1)
-    _plan(host, implement("h1"))
-    _implemented(host, "h1", "c1")
-    _plan(host, implement("h4", parent_hypothesis_id="h1", parent_revision="c1"))
-    _implemented(host, "h4", "c2", "inconclusive")
-    _merged(host, "m1", "h1", "c4")
-    _plan(host, implement("h4", continue_hypothesis=True))
-    asked = _implemented(host, "h4", "c3", "inconclusive")
-    assert asked.rebase_onto is None
-    assert "main revision moved" not in _flat(render(PromptTemplate.IMPLEMENT, asked))
-
-
 STRAY = {"hypothesis_id": "the scheduler part", "part": "all of it", "why": "a typo"}
 
 
@@ -559,7 +506,6 @@ FIXUP = {"c1": 200.0, "c2": 250.0, "c3": 40.0, "c4": 200.0, "c5": 250.0, "c6": 3
 
 
 @MODES
-@pytest.mark.xfail(strict=True, reason="a child diffs from the merge commit of its parent")
 def test_a_merger_fix_up_survives_the_merges_and_the_catch_up_of_children_of_what_it_merged(
     *, restarting: bool
 ) -> None:
@@ -600,7 +546,6 @@ PARTLY = {"c1": 200.0, "c2": 210.0, "c3": 40.0, "c4": 260.0, "c5": 40.0}
 
 
 @MODES
-@pytest.mark.xfail(strict=True, reason="a merge only partly in the lineage is not used")
 def test_a_child_of_one_source_of_a_merge_catches_up_with_the_others_from_its_parent(
     *, restarting: bool
 ) -> None:
@@ -627,7 +572,6 @@ CHAIN = {"c1": 200.0, "c2": 210.0, "c3": 40.0, "c4": 260.0, "c5": 40.0}
 
 
 @MODES
-@pytest.mark.xfail(strict=True, reason="a child diffs from the merge commit of its parent")
 def test_a_child_of_the_later_of_two_merged_sources_on_one_line_starts_at_the_later(
     *, restarting: bool
 ) -> None:
@@ -651,7 +595,6 @@ LATE = {"c1": 300.0, "c2": 250.0, "c3": 40.0, "c4": 250.0, "c5": 300.0, "c6": 40
 
 
 @MODES
-@pytest.mark.xfail(strict=True, reason="a merge commit counts as held")
 def test_merging_an_ancestor_after_its_descendant_does_not_move_a_childs_start_back(
     *, restarting: bool
 ) -> None:
@@ -679,11 +622,7 @@ ON_K1 = {"c1": 150.0, "c2": 120.0, "c3": 300.0, "c4": 400.0, "c5": 150.0, "c6": 
 @pytest.mark.parametrize(
     "dropped",
     [
-        pytest.param(
-            False,
-            marks=pytest.mark.xfail(strict=True, reason="a combine's parts are not its lineage"),
-            id="applied",
-        ),
+        pytest.param(False, id="applied"),
         pytest.param(True, id="dropped"),
     ],
 )
@@ -716,7 +655,6 @@ def test_a_child_of_a_combine_whose_part_was_merged_starts_at_that_part(
 
 
 @MODES
-@pytest.mark.xfail(strict=True, reason="unattributed entries are not shown to the planner")
 def test_an_unapplied_entry_naming_no_part_is_shown_on_the_composite_row(
     *, restarting: bool
 ) -> None:

@@ -740,14 +740,13 @@ class RunRecord:
     def _rebase_onto(self, plan: WorkPlan, parent_main: RevisionRef) -> RevisionRef | None:
         """Main, when a hypothesis that goes on last started before main moved; else None.
 
-        A tree that holds main already (``parent_main``, say its parent was merged since) has
-        nothing to catch up with.
+        A tree whose own change starts at main now (``parent_main``) has nothing to catch up with.
         """
         if self._own_last_round(plan) is None:
             return None
         seen = self.main_seen.get(plan.work_id, 0)
-        held = parent_main.revision_id.root == self.main.revision.revision_id.root
-        moved = self.main.generation > seen and not held
+        at_main = parent_main.revision_id.root == self.main.revision.revision_id.root
+        moved = self.main.generation > seen and not at_main
         return self.main.revision if moved else None
 
     def _sources(self, plan: WorkPlan) -> tuple[MergeSource, ...]:
@@ -790,14 +789,16 @@ class RunRecord:
         return tuple(parts)
 
     def main_base_at(self, revision: RevisionRef) -> RevisionRef:
-        """The main revision ``revision``'s tree includes: where its own change against main starts.
+        """Where ``revision``'s own change against main starts: a revision its tree wholly holds.
 
-        A revision main has been includes itself. A candidate includes what its workstream's tree
-        did (`FinishedWork.main_base`), and every later main a merge made of that main and of
-        candidates its lineage holds (`MainLine.held`): a child built on a candidate that was
-        merged since holds that merge's main. Git ancestry cannot tell it: a catch-up under
-        read-only git applies main's change to the tree without recording main as an ancestor. A
-        revision the run did not make is taken as built on the input.
+        A revision main has been starts at itself. A candidate starts where its workstream's tree
+        did (`FinishedWork.main_base`: the main it caught up with, else its parent's start), then
+        at the latest candidate of its lineage a merge has since put into main
+        (`MainLine.start_of`). Main holds that candidate and everything else the merge brought,
+        the merger's own edits included, so a diff from it neither repeats nor removes any of
+        them. Git ancestry cannot tell it: a catch-up under read-only git applies main's change
+        to the tree without recording main as an ancestor. A revision the run did not make is
+        taken as built on the input.
         """
         root = revision.revision_id.root
         mains = {self.base.revision_id.root} | {
@@ -817,7 +818,8 @@ class RunRecord:
             recorded = self.main_base_at(work.parent)
         else:
             recorded = self.base
-        return self.main.held(recorded, self._lineage(revision))
+        lineage = {item: self._lineage(item) for item in self._lineage(root)}
+        return self.main.start_of(recorded, lineage)
 
     def _made(self, root: str) -> FinishedWork | None:
         """The finished workstream whose round made the candidate ``root``; None if none did."""
@@ -829,18 +831,38 @@ class RunRecord:
         }
         return next((item for item in self.finished_work if item.sequence in made), None)
 
-    def _lineage(self, revision: RevisionRef) -> frozenset[str]:
-        """``revision`` and every revision it was built on, through the workstreams that made them.
+    def _lineage(self, root: str) -> frozenset[str]:
+        """``root`` and every revision its tree wholly holds, through the work that made them.
 
-        Each holds the changes of the ones after it: a workstream starts from its parent's tree.
+        A workstream's tree holds its parent's, and a combine's the parts it applied: each part
+        it did not name as left out (`RoundRecord.unapplied`). A combine whose implementer wrote
+        entries naming no part (`RoundRecord.unattributed`) holds none of its parts for certain.
         """
         held: set[str] = set()
-        current: RevisionRef | None = revision
-        while current is not None and current.revision_id.root not in held:
-            held.add(current.revision_id.root)
-            work = self._made(current.revision_id.root)
-            current = None if work is None else work.parent
+        waiting = [root]
+        while waiting:
+            current = waiting.pop()
+            if current in held:
+                continue
+            held.add(current)
+            work = self._made(current)
+            if work is not None:
+                waiting.append(work.parent.revision_id.root)
+                waiting.extend(part.revision_id.root for part in self._applied_parts(work))
         return frozenset(held)
+
+    def _applied_parts(self, work: FinishedWork) -> tuple[RevisionRef, ...]:
+        """The parts a combine workstream applied to its tree; empty for any other workstream."""
+        record = self.hypotheses.get(work.plan.work_id)
+        if record is None or not record.combined_from or record.first_sequence != work.sequence:
+            return ()
+        made = next((item for item in record.rounds if item.sequence == work.sequence), None)
+        if made is None or made.unattributed:
+            return ()
+        left_out = {item.hypothesis_id for item in made.unapplied}
+        return tuple(
+            part.revision for part in record.combined_from if part.hypothesis_id not in left_out
+        )
 
     def finished(self, done: WorkstreamDone) -> None:
         """Keep what a finished workstream leaves behind: its record, round and parent."""

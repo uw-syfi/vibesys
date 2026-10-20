@@ -109,6 +109,9 @@ class CompositeRow(Value):
     """The combine never started: fewer than two of its parts were still buildable."""
     unapplied: tuple[UnappliedPart, ...] = ()
     """What the implementer said it could not apply."""
+    unattributed: tuple[UnappliedPart, ...] = ()
+    """What the implementer said it could not apply, naming no part (`RoundRecord.unattributed`):
+    shown so a dropped part it misnamed is not hidden from the planner."""
 
 
 class HistoryRow(Value):
@@ -306,8 +309,9 @@ class ImplementPrompt(RolePromptContext):
     older build refused that reply (`BlockerKind.REPLY_REJECTED`) and the workstream resumed
     here: the implementer submits again. This build keeps such entries on the round instead."""
     rebase_from: RevisionRef | None = None
-    """With ``rebase_onto``: the main revision the work's tree already includes, so the catch-up
-    applies only main's change since. None for a workstream an older build scheduled."""
+    """With ``rebase_onto``: the revision the work's tree and main both hold (a main, or a merged
+    candidate the work was built on), so the catch-up applies only what main has beyond it. None
+    for a workstream an older build scheduled."""
     combine: tuple[CombineSource, ...] = ()
     """For a combine: the parts to apply onto ``parent_revision`` (main), in order."""
     combine_missing: tuple[CombinePick, ...] = ()

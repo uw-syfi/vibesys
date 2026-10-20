@@ -167,6 +167,7 @@ def _composite(record: HypothesisRecord, space: MetricSpace | None) -> Composite
         relative_noise=0.0 if space is None else space.relative_noise,
         cancelled=len(record.combined_from) < COMBINE_MIN_PARTS and not record.rounds,
         unapplied=() if last is None else last.unapplied,
+        unattributed=() if last is None else last.unattributed,
     )
 
 

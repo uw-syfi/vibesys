@@ -245,6 +245,9 @@ be adopted or offered as a parent.
 {% for item in row.composite.unapplied %}
   Not applied from `{{ item.hypothesis_id }}`: {{ item.part }} ({{ item.why }})
 {% endfor %}
+{% for item in row.composite.unattributed %}
+  Not attributed to a part: `{{ item.hypothesis_id }}`: {{ item.part }} ({{ item.why }})
+{% endfor %}
 {% endif %}
 {% if row.failure %}
   Why it ended: {{ failure_text(row.failure) }}
