@@ -127,3 +127,24 @@ def test_a_reason_is_one_bounded_non_empty_line(text: str) -> None:
     assert reason
     assert "\n" not in reason
     assert len(reason) <= MAX_REASON_CHARS
+
+
+@given(concluded=st.lists(st.booleans(), min_size=1, max_size=8))
+def test_an_attempt_resumes_until_it_ends_and_then_the_next_one_is_new(
+    concluded: list[bool],
+) -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        store = ComparisonStore(Path(directory))
+        subject = _subject(_spec())
+        numbers = []
+        for ends in concluded:
+            number = store.begin_attempt(subject)
+            numbers.append(number)
+            if ends:
+                store.conclude_attempt(subject, number)
+
+        expected = 0
+        for index, number in enumerate(numbers):
+            assert number == expected
+            if concluded[index]:
+                expected += 1

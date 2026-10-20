@@ -275,6 +275,21 @@ async def test_a_failing_benchmark_is_a_failed_comparison_with_its_reason(tmp_pa
     assert not store.has_measured("vllm")
 
 
+async def test_a_failed_measurement_is_run_again_with_fresh_jobs(tmp_path: Path) -> None:
+    cluster = ScenarioCluster()
+    cluster.benchmark_exit = 1
+    measurer, _, store, _, stack = await _rig(tmp_path, cluster, samples=2)
+    failed = await measurer.measure(_subject(), _plan(stack))
+    assert isinstance(failed.reading, ComparisonFailed)
+    cluster.benchmark_exit = 0
+
+    again = await measurer.measure(_subject(), _plan(stack))
+
+    assert isinstance(again.reading, ComparisonMeasured)
+    assert len(set(cluster.submissions)) == 2
+    assert store.has_measured("vllm")
+
+
 async def test_a_failing_accuracy_check_is_a_failed_comparison(tmp_path: Path) -> None:
     cluster = ScenarioCluster()
     cluster.accuracy_exit = 1

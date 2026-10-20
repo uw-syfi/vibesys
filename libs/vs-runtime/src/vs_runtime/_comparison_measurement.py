@@ -141,7 +141,15 @@ class ComparisonMeasurer:
         stored = self._store.get(subject)
         if stored is not None and not plan.remeasure:
             return ComparisonOutcome(stored.reading, cached=True)
-        generation = 0 if stored is None else stored.generation + 1
+        attempt = self._store.begin_attempt(subject)
+        # A stop or an unexpected error leaves the attempt open, so the next one resumes its jobs.
+        outcome = await self._attempt(subject, plan, attempt)
+        self._store.conclude_attempt(subject, attempt)
+        return outcome
+
+    async def _attempt(
+        self, subject: ComparisonSubject, plan: ComparisonPlan, attempt: int
+    ) -> ComparisonOutcome:
         taken: list[_Taken] = []
         for index in range(plan.samples):
             avoiding = (
@@ -149,7 +157,7 @@ class ComparisonMeasurer:
                 if plan.spread_across_nodes
                 else ()
             )
-            result = await self._sample(subject, plan, generation, index, avoiding)
+            result = await self._sample(subject, plan, attempt, index, avoiding)
             if not isinstance(result, _Taken):
                 return ComparisonOutcome(result, cached=False)
             taken.append(result)
@@ -170,7 +178,7 @@ class ComparisonMeasurer:
         self,
         subject: ComparisonSubject,
         plan: ComparisonPlan,
-        generation: int,
+        attempt: int,
         index: int,
         avoiding: tuple[str, ...],
     ) -> _Taken | ComparisonFailed | ComparisonNotConfigured:
@@ -178,7 +186,7 @@ class ComparisonMeasurer:
             held = self._executors.executor_for(subject, avoiding=avoiding)
         except ComparisonUnavailableError as unavailable:
             return ComparisonNotConfigured(reason=bounded_reason(str(unavailable)))
-        handle = f"cmp-{subject.key[:24]}-g{generation}-s{index}"
+        handle = f"cmp-{subject.key[:24]}-a{attempt}-s{index}"
         try:
             terminal = await self._run(held, subject, plan, handle)
         except ExecutorRejectedError as rejected:

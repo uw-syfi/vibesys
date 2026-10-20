@@ -182,6 +182,13 @@ class StoredComparison(BaseModel):
     reading: ComparisonMeasured
 
 
+class _Attempt(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    number: int = Field(ge=0)
+    concluded: bool
+
+
 class ComparisonStore:
     """Readings kept in a directory, one file per key; local to a machine and never committed.
 
@@ -208,6 +215,30 @@ class ComparisonStore:
         key = subject.key
         stored = self._read(self._directory / f"{key}.json")
         return stored if stored is not None and stored.key == key else None
+
+    def begin_attempt(self, subject: ComparisonSubject) -> int:
+        """The number naming this measurement's jobs: new after a concluded one, the same after a stop.
+
+        A measurement that ended (measured or failed) is never replayed from its recorded jobs, so
+        measuring again runs fresh ones; one that was interrupted resumes the jobs it submitted.
+        """
+        path = self._directory / f"{subject.key}.attempt.json"
+        loaded = read_json(
+            path, _Attempt, max_bytes=_MAX_RECORD_BYTES, options=ValidationOptions(strict=True)
+        )
+        last = None if isinstance(loaded, Unreadable) else loaded
+        number = 0 if last is None else last.number if not last.concluded else last.number + 1
+        self._write_attempt(path, _Attempt(number=number, concluded=False))
+        return number
+
+    def conclude_attempt(self, subject: ComparisonSubject, number: int) -> None:
+        """Record that attempt *number* ended, however it ended."""
+        path = self._directory / f"{subject.key}.attempt.json"
+        self._write_attempt(path, _Attempt(number=number, concluded=True))
+
+    @staticmethod
+    def _write_attempt(path: Path, attempt: _Attempt) -> None:
+        atomic_write_bytes(path, (attempt.model_dump_json() + "\n").encode())
 
     def lookup(self, subject: ComparisonSubject) -> ComparisonMeasured | ComparisonNotMeasured:
         """What a run shows: the stored reading for the current configuration, else "not measured"."""
