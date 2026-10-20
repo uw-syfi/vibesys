@@ -30,7 +30,19 @@ function measured(item: Candidate, value: number, at: number, verdict: Verdict):
         ? {check: 'accuracy', completed: 1, required: 2, unit: null}
         : null,
   };
-  return {...item, measurement};
+  // The gate that read the value ended when the measurement did.
+  const gate = {
+    span: `${item.id}-g`,
+    kind: 'gate',
+    title: 'measure',
+    role: null,
+    status: 'done' as const,
+    startedAt: at - 1,
+    endedAt: at,
+  };
+  const [tried] = item.attempts;
+  const attempts = tried === undefined ? [] : [{...tried, measurement, steps: [gate]}];
+  return {...item, measurement, attempts};
 }
 
 function randomRun(random: Seeded): Candidate[] {
@@ -165,5 +177,61 @@ describe('the performance fold', () => {
       points: [],
       best: [],
     });
+  });
+});
+
+/**
+ * A run resumed on new code asks a gate again for ideas it had measured before (`measure.2`): the
+ * gate the idea's measurement reads then ends long after the idea first had its value. Regression:
+ * those ideas moved behind the best of the run, so the step line sat at the first round's value
+ * until the best and the kept rounds between were drawn as points above it.
+ */
+describe('the best so far across a resume', () => {
+  const ROUNDS: readonly [string, number, number][] = [
+    ['r1', 280, 100],
+    ['r2', 340, 200],
+    ['r3', 395, 300],
+    ['r4', 518, 400],
+  ];
+  const RESUMED_AT = 9000;
+
+  function kept(id: string, value: number, at: number): Candidate {
+    return measured(idea(id, 'passed', at - 50, 40), value, at, 'passed');
+  }
+
+  /** `item` after a resume asked its gate again, ending at `again`: its latest measurement. */
+  function reasked(item: Candidate, again: number): Candidate {
+    const [tried] = item.attempts;
+    const shown = item.measurement;
+    if (tried === undefined || shown === null) throw new Error('fixture');
+    const gate = {...(tried.steps[0] as (typeof tried.steps)[number]), span: 'measure.2'};
+    const second = {...gate, startedAt: again - 1, endedAt: again};
+    const measurement = {...shown, at: again, span: 'measure.2'};
+    return {
+      ...item,
+      measurement,
+      attempts: [{...tried, measurement, steps: [...tried.steps, second]}],
+    };
+  }
+
+  test('the line steps at each kept round, the same before and after, whichever rounds were asked again', () => {
+    const before = performanceFold(
+      ROUNDS.map(([id, value, at]) => kept(id, value, at)),
+      'max',
+      100,
+    );
+    expect(before.best.map(step => step.value)).toEqual([280, 340, 395, 518]);
+    for (let mask = 0; mask < 2 ** ROUNDS.length; mask += 1) {
+      const items = ROUNDS.map(([id, value, at], index) =>
+        mask & (1 << index)
+          ? reasked(kept(id, value, at), RESUMED_AT + index)
+          : kept(id, value, at),
+      );
+      const after = performanceFold(items, 'max', 100);
+      expect(after.best, `rounds asked again: ${mask}`).toEqual(before.best);
+      expect(after.points.map(point => [point.id, point.best])).toEqual(
+        before.points.map(point => [point.id, point.best]),
+      );
+    }
   });
 });
