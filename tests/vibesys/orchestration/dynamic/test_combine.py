@@ -77,6 +77,7 @@ if TYPE_CHECKING:
 
     from tests.vibesys.orchestration.dynamic._host import World
 
+    from vibesys.metrics import Direction
     from vibesys.orchestration.dynamic.search.api import ParentSnapshot
 
 MODES = across_restarts
@@ -396,13 +397,13 @@ def test_a_part_that_caught_up_with_main_twice_is_combined_and_merged_with_its_o
     assert "merge-base" not in merging
 
 
-def _part(name: str, value: float, direction: str = "max") -> CombineSource:
+def _part(name: str, value: float, direction: Direction = "max") -> CombineSource:
     row = MetricRow(name="throughput", value=value, direction=direction, unit="tokens/s")
     at = RevisionRef.of_git_commit
     return CombineSource(hypothesis_id=name, revision=at(name), built_on=at("base"), metric=row)
 
 
-def _space(noise: float, direction: str = "max") -> MetricSpace:
+def _space(noise: float, direction: Direction = "max") -> MetricSpace:
     return MetricSpace(objectives=(Objective("throughput", direction),), relative_noise=noise)
 
 
@@ -436,7 +437,7 @@ _VALUES = st.integers(1, 1000).map(float)
     order=st.randoms(use_true_random=False),
 )
 def test_the_parts_verdict_is_the_composite_against_the_raw_best_part_in_any_order(
-    values: list[float], composite: float, noise: float, direction: str, order: random.Random
+    values: list[float], composite: float, noise: float, direction: Direction, order: random.Random
 ) -> None:
     parts = tuple(_part(f"p{index}", value, direction) for index, value in enumerate(values))
     space = _space(noise, direction)
