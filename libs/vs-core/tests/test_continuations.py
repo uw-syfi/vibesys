@@ -800,7 +800,13 @@ def test_retirement_records_exact_park_authority_without_resume(
         core.ContinuationPhase.PARKED if disposition == "park" else core.ContinuationPhase.CANCELLED
     )
     assert stored.park_authority == authority
-    assert result.events == ()
+    # a cancel ends the wait for good: the suspended turn hears it will never resume
+    refused = core.ResumeRefused(
+        continuation_id=continuation.continuation_id,
+        invocation=continuation.invocation,
+        reason=core.ResumeRefusal.ATTEMPT_CLOSED,
+    )
+    assert result.events == (() if disposition == "park" else (refused,))
     assert result.requests == ()
     replay = persisted_step(result.state, event)
     assert replay.events == ()

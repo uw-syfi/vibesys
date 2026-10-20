@@ -26,6 +26,7 @@ from hypothesis import strategies as st
 from pydantic import ValidationError
 
 import vs_core.api as core
+from vs_core.api.testing import Answer, Failed, Succeeded
 
 from .test_attempt_retirement import REDUCERS as QUEUED_REOPEN_REDUCERS
 from .test_attempt_retirement import reopen_fixture as queued_reopen_fixture
@@ -661,12 +662,24 @@ class _CancelWhileWaiting(ToyHost):
 
     It acts at the first poll of the job the suspended turn waits on, which reports running
     for far longer than the run lasts unless core ends it: ``polls_after`` counts the polls
-    of that job after the cancel.
+    of that job after the cancel. A job core cancels reports ended failed at its next poll, as
+    a scheduler does.
     """
 
     sent: list[core.ControlInput] = field(default_factory=list)
     job: core.ResourceId | None = None
     polls_after: int = 0
+    cancelled: set[core.ResourceId] = field(default_factory=set)
+
+    def __call__(self, request: core.Request, state: core.CoreState) -> Answer:
+        match request:
+            case core.CancelOwnedJob():
+                self.cancelled.add(request.resource_id)
+                return Succeeded(resource_id=request.resource_id)
+            case core.ObserveOwnedJob() if request.resource_id in self.cancelled:
+                return Failed(accepted=True)
+            case _:
+                return super().__call__(request, state)
 
     def during_turn(
         self, request: core.Request, state: core.CoreState
