@@ -15,7 +15,7 @@ from tempfile import TemporaryDirectory
 import agentshim
 import pytest
 from agentshim.testing import FakeClock, FakeExecutor, FakeRun, scripted_failure, scripted_turn
-from hypothesis import given
+from hypothesis import example, given
 from hypothesis import strategies as st
 
 from vs_agent.api import (
@@ -41,37 +41,62 @@ def home(tmp_path_factory: pytest.TempPathFactory) -> Path:
     return tmp_path_factory.mktemp("operator-home")
 
 
-def _client(provider: str, runs: list[FakeRun], home: Path) -> AgentClient:
-    fake = FakeExecutor(runs)
-    return AgentClient(
+@dataclass
+class _Subject:
+    """A client over a scripted provider, and the simulated threads its turns run on."""
+
+    client: AgentClient
+    executor: FakeExecutor
+    threads: SimThreads
+
+    def invoke(self, root: Path) -> str:
+        """Run one turn as a simulated thread: a resend's wait passes on the virtual clock.
+
+        The turn's failure is carried out of the simulation and raised here: an error
+        that ends a simulation is raised again by every later run on the same threads.
+        """
+
+        def turn() -> str | AgentQuotaError | agentshim.TurnFailedError:
+            try:
+                return self.client.invoke_text(
+                    kind="implementer",
+                    workspace=root,
+                    system_prompt="sys",
+                    user_prompt="go",
+                    round_label="round-1",
+                    invocation_id="inv-1",
+                )
+            except (AgentQuotaError, agentshim.TurnFailedError) as error:
+                return error
+
+        outcome = self.threads.run(turn)
+        if not isinstance(outcome, str):
+            raise outcome
+        return outcome
+
+
+def _client(provider: str, runs: list[FakeRun], home: Path) -> _Subject:
+    """A client as a run builds it, with the launcher's production retry delays."""
+    executor = FakeExecutor(runs)
+    threads = SimThreads()
+    client = AgentClient(
         ConfinedSessionLauncher(
             provider=provider,
-            executor_factory=lambda: fake,
+            executor_factory=lambda: executor,
             launcher_env=lambda: {
                 "PATH": "/usr/bin:/bin",
                 "HOME": str(home),
                 SANDBOX_DISABLE_ENV: "off",
             },
-            transient_retry_delays=(),
             clock=FakeClock(),
-            threads=SimThreads(),
+            threads=threads,
         ),
         provider=provider,
         run_log_file=None,
         clock=ManualClock(),
-        threads=SimThreads(),
+        threads=threads,
     )
-
-
-def _invoke(client: AgentClient, root: Path) -> str:
-    return client.invoke_text(
-        kind="implementer",
-        workspace=root,
-        system_prompt="sys",
-        user_prompt="go",
-        round_label="round-1",
-        invocation_id="inv-1",
-    )
+    return _Subject(client, executor, threads)
 
 
 def _exhausted_window(resets_at: int) -> str:
@@ -92,7 +117,7 @@ def test_a_usage_limit_is_a_quota_error_naming_the_provider(
     )
 
     with pytest.raises(AgentQuotaError) as excinfo:
-        _invoke(client, tmp_path)
+        client.invoke(tmp_path)
 
     assert excinfo.value.provider == provider
     assert excinfo.value.condition is QuotaCondition.QUOTA_EXHAUSTED
@@ -108,7 +133,7 @@ def test_a_failure_that_is_not_a_capacity_limit_stays_a_plain_failure(
         client = _client(provider, [scripted_failure(provider, kind)], home)
 
         with pytest.raises(agentshim.TurnFailedError) as excinfo:
-            _invoke(client, Path(tmp))
+            client.invoke(Path(tmp))
 
     assert not isinstance(excinfo.value, AgentQuotaError)
     assert excinfo.value.kind is kind
@@ -121,19 +146,21 @@ def test_a_transient_error_with_no_exhausted_window_is_a_provider_outage(
     """A gateway answering ``503 No available accounts`` after every retry is an outage.
 
     It used to propagate as a plain failure, which ended the turn and, for the planner, the
-    run. As a capacity stop it reaches the run's gate, which waits it out.
+    run. As a capacity stop it reaches the run's gate, which waits it out; a client no run
+    holds sends it once more and then raises it.
     """
     run = scripted_failure(provider, agentshim.FailureKind.TRANSIENT)
     client = _client(provider, [run], home)
 
     with pytest.raises(AgentQuotaError) as excinfo:
-        _invoke(client, tmp_path)
+        client.invoke(tmp_path)
 
     assert excinfo.value.provider == provider
     assert excinfo.value.condition is QuotaCondition.UNAVAILABLE
     assert excinfo.value.resets_at is None
     assert isinstance(excinfo.value.__cause__, agentshim.TurnFailedError)
     assert excinfo.value.__cause__.kind is agentshim.FailureKind.TRANSIENT
+    assert len(client.executor.requests) == 2  # the client's own gate resent it once
 
 
 @given(resets_at=st.integers(min_value=1_700_000_000, max_value=1_900_000_000))
@@ -150,7 +177,7 @@ def test_sustained_rate_limiting_is_a_quota_error_that_carries_the_reset_time(
         client = _client("claude", [run], home)
 
         with pytest.raises(AgentQuotaError) as excinfo:
-            _invoke(client, Path(tmp))
+            client.invoke(Path(tmp))
 
     assert excinfo.value.condition is QuotaCondition.RATE_LIMITED
     assert excinfo.value.resets_at == float(resets_at)
@@ -166,13 +193,14 @@ def test_a_turn_after_a_quota_stop_does_not_inherit_its_exhausted_windows(
         returncode=failure.returncode,
     )
     plain = scripted_failure("claude", agentshim.FailureKind.TRANSIENT)
-    client = _client("claude", [stale, scripted_turn("claude", text="x"), plain], home)
+    # The stale turn fails again on the client's own resend; the next turn answers.
+    client = _client("claude", [stale, stale, scripted_turn("claude", text="x"), plain], home)
     with pytest.raises(AgentQuotaError):
-        _invoke(client, tmp_path)
-    assert _invoke(client, tmp_path) == "x"
+        client.invoke(tmp_path)
+    assert client.invoke(tmp_path) == "x"
 
     with pytest.raises(AgentQuotaError) as excinfo:
-        _invoke(client, tmp_path)
+        client.invoke(tmp_path)
 
     # The later failure reported no window, so it is an outage, not the earlier rate limit.
     assert excinfo.value.condition is QuotaCondition.UNAVAILABLE
@@ -200,6 +228,7 @@ class _RecordingGate:
         del provider, model
 
 
+@example(provider="claude", rate_limited=False)  # a run turn's 529 reaches its gate unretried
 @given(provider=st.sampled_from(PROVIDERS), rate_limited=st.booleans())
 def test_a_gated_run_turn_hands_its_first_transient_failure_to_the_gate_unretried(
     provider: str, home: Path, *, rate_limited: bool
@@ -218,30 +247,12 @@ def test_a_gated_run_turn_hands_its_first_transient_failure_to_the_gate_unretrie
         stderr=failure.stderr,
         returncode=failure.returncode,
     )
-    executor = FakeExecutor([first, scripted_turn(provider, text="unreachable")])
-    threads = SimThreads()
-    client = AgentClient(
-        ConfinedSessionLauncher(
-            provider=provider,
-            executor_factory=lambda: executor,
-            launcher_env=lambda: {
-                "PATH": "/usr/bin:/bin",
-                "HOME": str(home),
-                SANDBOX_DISABLE_ENV: "off",
-            },
-            clock=FakeClock(),
-            threads=threads,
-        ),
-        provider=provider,
-        run_log_file=None,
-        clock=ManualClock(),
-        threads=threads,
-    )
-    gate = _RecordingGate(executor)
-    client.set_capacity_gate(gate)
+    subject = _client(provider, [first, scripted_turn(provider, text="unreachable")], home)
+    gate = _RecordingGate(subject.executor)
+    subject.client.set_capacity_gate(gate)
 
     with TemporaryDirectory() as tmp, pytest.raises(AgentQuotaError):
-        _invoke(client, Path(tmp))
+        subject.invoke(Path(tmp))
 
     # Only Claude reports its rate-limit windows in this format; Codex ignores the line.
     sustained = rate_limited and provider == "claude"

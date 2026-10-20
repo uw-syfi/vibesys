@@ -46,7 +46,6 @@ from vs_agent.api import (
     CONTAINER_SERVER_PACKAGES,
     AgentCapabilities,
     AgentClient,
-    AgentQuotaError,
     MCPServerSpec,
     NullAgentEventSink,
     containerize_server,
@@ -778,11 +777,6 @@ def test_closing_the_chat_stops_its_relay(tmp_path: Path) -> None:
 
 
 @pytest.mark.regression
-@pytest.mark.xfail(
-    strict=True,
-    raises=AgentQuotaError,
-    reason="#3300 removed agentshim's transient retry; a chat client has no gate to hold it",
-)
 def test_a_chat_turn_meeting_one_transient_overload_is_sent_again_once_and_answers(
     tmp_path: Path,
 ) -> None:

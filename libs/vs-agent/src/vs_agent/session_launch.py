@@ -96,7 +96,9 @@ first wait (60 s) replaces the retry here. Only the gate's waits are reported to
 core and kept off the turn's limit, so every retry here hides a whole CLI attempt
 (3 to 4 min on S179) from it, and a turn whose outage starts with less own time
 left than that is cut before the gate can hold it (S179: five retries hid about
-fifteen minutes of every send; one 30 s retry still hid two attempts).
+fifteen minutes of every send; one 30 s retry still hid two attempts). A client no
+run holds resends a transient stop once at the client instead, through its own gate
+(:mod:`vs_agent.ungated_retry`), which a run's gate replaces.
 """
 
 LAUNCH_SHELL_ENVIRONMENT: Callable[[], Mapping[str, str]] = launch_shell_environment

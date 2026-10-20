@@ -43,6 +43,7 @@ from vs_agent.session_errors import SessionResumeError
 from vs_agent.session_store import NullSessionStore, SessionStore
 from vs_agent.sink import NULL_AGENT_EVENT_SINK, AgentEventSink
 from vs_agent.skills import NULL_SKILL_SELECTION
+from vs_agent.ungated_retry import BoundedRetryCapacityGate
 from vs_agent.usage_records import append_usage_record
 from vs_mcp.api import StdioServerDescriptor
 from vs_sim.api import utc_datetime
@@ -254,7 +255,8 @@ class FakeAgentClient:
         """The simulator this client's locks and events come from; turns run on it."""
         self._steer_lock = threads.lock()
 
-        self._capacity_gate: CapacityGate | None = None
+        # As the real client: one transient resend until a run installs its gate.
+        self._capacity_gate: CapacityGate = BoundedRetryCapacityGate()
         self._closed = False
         self.cancel_count = 0
         self.cancelled_sessions: list[AgentSessionKey] = []
@@ -800,7 +802,10 @@ class FakeAgentClient:
         )
 
     def set_capacity_gate(self, gate: CapacityGate) -> None:
-        """Route a scripted ``AgentQuotaError`` through ``gate``, as the real client does."""
+        """Route a scripted ``AgentQuotaError`` through ``gate``, as the real client does.
+
+        Until then a transient stop is sent again once, as the real client's own gate does.
+        """
         self._capacity_gate = gate
 
     def _maybe_raise(
@@ -826,21 +831,19 @@ class FakeAgentClient:
                 try:
                     self._raise_scripted(kind)
                 except AgentQuotaError as error:
-                    gate = self._capacity_gate
-                    if gate is None or stops.cancelled:
+                    if stops.cancelled:
                         # As the real client: a cancelled turn is not waited for.
                         raise
                     stops.count += 1
                     request = AgentTurnRequest(
                         message=message, label=label, invocation_id=invocation_id
                     )
-                    gate.wait_for_capacity(error, request, role=kind, stops=stops)
+                    self._capacity_gate.wait_for_capacity(error, request, role=kind, stops=stops)
                     if stops.cancelled:
                         raise error from None
                 else:
-                    gate = self._capacity_gate
-                    if gate is not None and self._provider is not None:
-                        gate.turn_served(self._provider, stops.model)
+                    if self._provider is not None:
+                        self._capacity_gate.turn_served(self._provider, stops.model)
                     return
         finally:
             with self._turns_lock:

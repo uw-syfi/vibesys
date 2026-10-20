@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import itertools
 from dataclasses import dataclass, field
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -9,7 +10,7 @@ from typing import TYPE_CHECKING
 
 import agentshim
 import pytest
-from hypothesis import given
+from hypothesis import example, given
 from hypothesis import strategies as st
 
 from vs_agent.api import (
@@ -192,3 +193,100 @@ def test_a_cancel_after_the_gate_let_the_turn_go_but_before_it_is_sent_is_not_lo
 
     assert len(gate.calls) == cancelled_send - 1
     assert gate.served == []
+
+
+# --- a client no run holds: its own gate resends a transient stop once ----------------------
+
+_TRANSIENT = (QuotaCondition.UNAVAILABLE, QuotaCondition.RATE_LIMITED)
+_RESEND_WAIT_S = 30.0
+"""The wait before the one resend, as before #3300 (``vs_agent.ungated_retry``)."""
+
+
+def _ungated_outcome(conditions: list[QuotaCondition]) -> tuple[QuotaCondition | None, int]:
+    """What a client with no gate installed ends with: the condition it raises, and its sends.
+
+    Only a transient first stop is sent again, once; ``None`` is the scripted answer.
+    """
+    if not conditions:
+        return None, 1
+    if conditions[0] not in _TRANSIENT:
+        return conditions[0], 1
+    return (conditions[1] if len(conditions) > 1 else None), 2
+
+
+@pytest.mark.regression
+@example(conditions=[QuotaCondition.UNAVAILABLE])  # one 529 ended a chat turn (#3300)
+@given(conditions=st.lists(st.sampled_from(QuotaCondition), max_size=4))
+def test_a_client_no_run_holds_resends_one_transient_stop_after_a_wait(
+    conditions: list[QuotaCondition],
+) -> None:
+    """A client with no gate (the server's chat agent) rides out one overload.
+
+    A run's gate replaces this resend; a client no run holds has nothing else between a
+    single 529 and a failed turn. An exhausted quota cannot return within the wait, so it is
+    never sent again, and a stop that outlasts the one resend reaches the caller.
+    """
+    threads = SimThreads()
+    sends: list[float] = []
+    driver = FakeProvider(
+        script=FakeTurnScript(
+            answers=(
+                *[AgentQuotaError("claude", c, f"stop {n}") for n, c in enumerate(conditions)],
+                "ok",
+            )
+        ),
+        on_send=lambda _request: sends.append(threads.clock.now()),
+        threads=threads,
+    )
+    client = AgentClient(
+        driver, provider="mock", model_name="m", clock=ManualClock(), threads=threads
+    )
+    raised: list[QuotaCondition] = []
+
+    def main() -> str | None:
+        with TemporaryDirectory() as tmp:
+            try:
+                return _invoke(client, Path(tmp))
+            except AgentQuotaError as error:
+                raised.append(error.condition)
+                return None
+
+    text = threads.run(main)
+
+    expected, sent = _ungated_outcome(conditions)
+    assert (raised[0] if raised else None) == expected
+    assert (text == "ok") == (expected is None)
+    assert len(sends) == sent
+    assert [later - earlier for earlier, later in itertools.pairwise(sends)] == [_RESEND_WAIT_S] * (
+        sent - 1
+    )
+
+
+def test_cancelling_a_turn_while_it_waits_to_be_resent_ends_it_unsent() -> None:
+    threads = SimThreads()
+    sends: list[float] = []
+    driver = FakeProvider(
+        script=FakeTurnScript(
+            answers=(AgentQuotaError("claude", QuotaCondition.UNAVAILABLE, "529"), "ok")
+        ),
+        on_send=lambda _request: sends.append(threads.clock.now()),
+        threads=threads,
+    )
+    client = AgentClient(
+        driver, provider="mock", model_name="m", clock=ManualClock(), threads=threads
+    )
+
+    def cancel_during_the_wait() -> None:
+        threads.sleep(_RESEND_WAIT_S / 3)
+        client.cancel()
+
+    def main() -> float:
+        threads.spawn(cancel_during_the_wait, name="canceller")
+        with TemporaryDirectory() as tmp, pytest.raises(AgentQuotaError, match="529"):
+            _invoke(client, Path(tmp))
+        return threads.clock.now()
+
+    ended = threads.run(main)
+
+    assert len(sends) == 1
+    assert ended - sends[0] == _RESEND_WAIT_S / 3
