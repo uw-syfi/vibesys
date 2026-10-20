@@ -429,10 +429,16 @@ STRAY = {"hypothesis_id": "the scheduler part", "part": "all of it", "why": "a t
 
 
 def _reply(
-    host: Host, hypothesis: str, candidate: str, unapplied: list[dict[str, str]] | None = None
+    host: Host,
+    hypothesis: str,
+    candidate: str,
+    unapplied: list[dict[str, str]] | None = None,
+    outcome: str = "supported",
 ) -> None:
     """The implementer of ``hypothesis`` answers with ``candidate``, listing ``unapplied``."""
-    reply = ImplementerResult.model_validate_json(implemented(unapplied=unapplied or []))
+    reply = ImplementerResult.model_validate_json(
+        implemented(outcome=outcome, unapplied=unapplied or [])
+    )
     checkpoint = Retained(revision=RevisionRef.of_git_commit(candidate))
     host.run.reply(turn_about(host, "implementer", hypothesis), reply, checkpoint=checkpoint)
 
@@ -674,3 +680,59 @@ def test_an_unapplied_entry_naming_no_part_is_shown_on_the_composite_row(
 
     shown = _flat(render(PromptTemplate.PORTFOLIO, _plan(host, implement("h3"))))
     assert "Not attributed to a part: `the scheduler part`: all of it (a typo)" in shown, shown
+
+
+UNMERGED = {"c1": 200.0, "c2": 250.0, "c3": 40.0, "c4": 260.0}
+
+
+@MODES
+def test_a_merge_that_regressed_but_left_a_commit_does_not_move_a_childs_start(
+    *, restarting: bool
+) -> None:
+    host = begin(config(max_rounds=12), restarting=restarting, throughputs=UNMERGED)
+    first = _plan(host, implement("h1"))
+    base = first.base_revision.revision_id.root
+    _implemented(host, "h1", "c1")
+    _plan(host, implement("h2", parent_hypothesis_id="h1", parent_revision="c1"))
+    _implemented(host, "h2", "c2")
+    # The merge of h1 leaves c3, which measures worse than main: main stays the input and does
+    # not hold c1, so h2's own change (against main) still starts at the input.
+    _merged(host, "m1", "h1", "c3")
+
+    merging = _flat(
+        render(PromptTemplate.MERGE, _merged(host, "m2", "h2", "c4"), agent_git_writable=False)
+    )
+    assert f"`git diff {base} c2 | git apply --reject`" in merging, merging
+    assert "git diff c1 " not in merging
+
+
+CONTINUED = {"c1": 300.0, "c2": 250.0, "c3": 40.0, "c4": 400.0, "c5": 300.0, "c6": 400.0}
+
+
+@MODES
+def test_a_combine_that_dropped_a_part_and_continued_does_not_count_it_once_that_part_merges(
+    *, restarting: bool
+) -> None:
+    host = begin(config(max_rounds=16), restarting=restarting, throughputs=CONTINUED)
+    first = _plan(host, implement("h1"))
+    base = first.base_revision.revision_id.root
+    _implemented(host, "h1", "c1")
+    _plan(host, implement("h2"))
+    _implemented(host, "h2", "c2")
+    _plan(host, combine("k1", ("h1", "c1"), ("h2", "c2")))
+    _start(host)
+    _reply(host, "k1", "c3", unapplied=[LEFT_OUT], outcome="inconclusive")  # drops h1
+    _judged(host, "k1")
+    _settle(host)
+    # Only the first round of a combine says which parts it applied; its continuation reports no
+    # entries, which says nothing about h1.
+    _plan(host, implement("k1", continue_hypothesis=True))
+    _implemented(host, "k1", "c4", "inconclusive")
+    _merged(host, "m1", "h1", "c5")
+
+    merging = _flat(
+        render(PromptTemplate.MERGE, _merged(host, "m2", "k1", "c6"), agent_git_writable=False)
+    )
+    # k1 never took h1, which main now holds: starting at c1 would remove h1 from main.
+    assert f"`git diff {base} c4 | git apply --reject`" in merging, merging
+    assert "git diff c1 " not in merging
