@@ -26,6 +26,8 @@ from tests.vibesys.orchestration.dynamic._replies import (
     combine,
     implement,
     implemented,
+    merge,
+    merged,
     plan_reply,
     reviewed,
 )
@@ -39,14 +41,23 @@ from tests.vibesys.orchestration.dynamic._slots import (
 from tests.vibesys.orchestration.dynamic.core_policy._contexts import render
 from tests.vibesys.vibesys_flows import across_restarts
 
-from vibesys.orchestration.dynamic.models import ImplementerResult, ReviewResult
+from vibesys.orchestration.dynamic.models import ImplementerResult, MergeResult, ReviewResult
 from vibesys.orchestration.dynamic.search.api import (
     ImplementPrompt,
+    MergePrompt,
     PlannerPrompt,
     ProfileHistoryRow,
     PromptTemplate,
 )
-from vs_core.api import Measure, Operation, Retained, RevisionRef, StartAttempt, Withdraw
+from vs_core.api import (
+    Measure,
+    Operation,
+    RequestTurn,
+    Retained,
+    RevisionRef,
+    StartAttempt,
+    Withdraw,
+)
 from vs_sim.api.testing import examples
 
 if TYPE_CHECKING:
@@ -82,10 +93,33 @@ def _plan(host: Host, *entries: dict[str, object]) -> PlannerPrompt:
     return context
 
 
-def _implemented(host: Host, identifier: str, candidate: str) -> None:
+def _implemented(
+    host: Host, identifier: str, candidate: str, outcome: str = "supported"
+) -> ImplementPrompt:
+    """Play one implement workstream through its settlement; what its implementer was asked."""
     _start(host)
-    implement_and_judge(host, identifier, candidate)
+    asked = turn_about(host, "implementer", identifier).context
+    assert isinstance(asked, ImplementPrompt)
+    implement_and_judge(host, identifier, candidate, outcome=outcome)
     _settle(host)
+    return asked
+
+
+def _merged(host: Host, merge_id: str, hypothesis: str, commit: str) -> MergePrompt:
+    """Plan a merge of ``hypothesis`` and have its merger commit ``commit``; what it was asked."""
+    _plan(host, merge(merge_id, hypothesis))
+    _start(host)
+    (asked,) = host.open(RequestTurn, label="merger")
+    context = asked.context
+    assert isinstance(context, MergePrompt)
+    checkpoint = Retained(revision=RevisionRef.of_git_commit(commit))
+    host.run.reply(asked, MergeResult.model_validate_json(merged()), checkpoint=checkpoint)
+    _settle(host)
+    return context
+
+
+def _flat(text: str) -> str:
+    return " ".join(text.split())
 
 
 def _row(context: PlannerPrompt, identifier: str) -> object:
@@ -202,3 +236,55 @@ def test_the_unapplied_reply_field_round_trips_and_rejects_unknown_keys(
         bad = [{**unapplied[0], "severity": "high"}, *unapplied[1:]]
         with pytest.raises(ValueError, match="severity"):
             ImplementerResult.model_validate_json(implemented(unapplied=bad))
+
+
+# Main moves twice under a hypothesis that goes on: m1 merges h1 (main c3), m2 merges h3 (main c6).
+# Under read-only git, catching up applies main's change to the tree without recording main in the
+# git history, so only the run's record knows which main each candidate's tree holds.
+WALK = {"c2": 40.0, "c4": 40.0, "c5": 200.0, "c6": 200.0, "c7": 300.0, "c8": 40.0}
+
+
+@pytest.mark.xfail(
+    strict=True, reason="HIGH 1 of the #3299 review: diff bases come from git ancestry"
+)
+@MODES
+def test_a_part_that_caught_up_with_main_twice_is_combined_and_merged_with_its_own_change_only(
+    *, restarting: bool
+) -> None:
+    host = begin(config(max_rounds=12), restarting=restarting, throughputs=WALK)
+    first = _plan(host, implement("h1"))
+    base = first.base_revision.revision_id.root
+    _implemented(host, "h1", "c1")
+    _plan(host, implement("h2"))
+    _implemented(host, "h2", "c2", "inconclusive")
+    _merged(host, "m1", "h1", "c3")
+    _plan(host, implement("h2", continue_hypothesis=True))
+    caught_up = _flat(
+        render(PromptTemplate.IMPLEMENT, _implemented(host, "h2", "c4", "inconclusive"))
+    )
+    assert f"git diff {base} c3" in caught_up
+    _plan(host, implement("h3"))
+    _implemented(host, "h3", "c5")
+    _merged(host, "m2", "h3", "c6")
+    _plan(host, implement("h2", continue_hypothesis=True))
+    again = _flat(render(PromptTemplate.IMPLEMENT, _implemented(host, "h2", "c7", "inconclusive")))
+    # The second catch-up applies only m2's change: m1's is in the tree already.
+    assert "git diff c3 c6" in again, again
+    assert "merge-base" not in again
+    _plan(host, implement("h4"))
+    _implemented(host, "h4", "c8")
+
+    _plan(host, combine("k1", ("h2", "c7"), ("h4", "c8")))
+    _start(host)
+    asked = turn_about(host, "implementer", "k1").context
+    assert isinstance(asked, ImplementPrompt)
+    told = _flat(render(PromptTemplate.IMPLEMENT, asked))
+    # Each part's own change: h2's tree holds main c6, and h4 started from it.
+    assert "git diff c6 c7" in told, told
+    assert "git diff c6 c8" in told, told
+    implement_and_judge(host, "k1", "c9")
+    _settle(host)
+
+    merging = _flat(render(PromptTemplate.MERGE, _merged(host, "m3", "h2", "c10")))
+    assert "git diff c6 c7" in merging, merging
+    assert "merge-base" not in merging
