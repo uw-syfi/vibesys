@@ -12,6 +12,7 @@ from vs_project.api import ComparisonInput
 from vs_runtime.api.comparisons import (
     MAX_REASON_CHARS,
     ComparisonMeasured,
+    ComparisonNotMeasured,
     ComparisonSample,
     ComparisonStore,
     ComparisonSubject,
@@ -49,6 +50,7 @@ def test_the_key_covers_what_changes_the_number_and_nothing_else(
     base = _subject(_spec(name=name))
 
     assert base.key == _subject(_spec(name=name)).key
+    assert base.key == _subject(_spec(name=name), evaluator="ev@2").key
     # Presentation and operation do not change what is measured.
     assert (
         base.key
@@ -59,7 +61,6 @@ def test_the_key_covers_what_changes_the_number_and_nothing_else(
     changed = [
         _subject(_spec(name=name + "x")),
         _subject(_spec(name=name), identity="b" * 64),
-        _subject(_spec(name=name), evaluator="ev@2"),
         _subject(_spec(name=name), hardware=hardware + "x"),
         _subject(_spec(name=name, serve=["vllm", flag, "${PORT}"])),
         _subject(_spec(name=name, env={key.upper(): value})),
@@ -92,10 +93,12 @@ def test_a_stored_reading_comes_back_and_each_put_is_a_new_generation(
         )
 
         assert store.get(subject) is None
+        assert store.lookup(subject) == ComparisonNotMeasured()
         first = store.put(subject, reading, measured_at=at)
         second = store.put(subject, reading, measured_at=at)
 
         assert store.get(subject) == second
+        assert store.lookup(subject) == reading
         assert (first.generation, second.generation) == (0, 1)
         assert store.has_measured("vllm")
         assert not store.has_measured("sglang")

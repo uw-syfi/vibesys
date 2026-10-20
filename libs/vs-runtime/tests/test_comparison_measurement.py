@@ -208,11 +208,24 @@ async def test_a_reading_is_cached_by_key_and_reused_without_a_job(tmp_path: Pat
     assert store.has_measured("vllm")
 
 
+async def test_an_evaluator_bump_does_not_force_a_new_measurement(tmp_path: Path) -> None:
+    cluster = ScenarioCluster()
+    measurer, _, store, _, stack = await _rig(tmp_path, cluster)
+    await measurer.measure(_subject(), _plan(stack))
+
+    outcome = await measurer.measure(_subject(evaluator="evaluator@2"), _plan(stack))
+
+    assert outcome.cached is True
+    assert len(cluster.submissions) == 1
+    stored = store.get(_subject())
+    assert stored is not None
+    assert stored.evaluator == "evaluator@1"
+
+
 @pytest.mark.parametrize(
     "changed",
     [
         {"identity": "b" * 64},
-        {"evaluator": "evaluator@2"},
         {"hardware": "mi300"},
     ],
 )

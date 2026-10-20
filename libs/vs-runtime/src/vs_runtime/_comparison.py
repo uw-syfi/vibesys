@@ -6,9 +6,9 @@ listed as an idea or offered as a candidate.
 
 A ``ComparisonReading`` is what a client shows: a measured value with its samples, a failure
 with its reason, or "not configured" on a machine that cannot run it. Only a measured reading is
-cached. The cache key names everything that changes the number (the engine's image, how it is
-served and benchmarked, the evaluator and the hardware), so a reading is reused exactly when
-re-measuring would measure the same thing.
+cached. The cache key names what changes the number (the engine's image, how it is served and
+benchmarked, and the hardware), so a reading is reused exactly when re-measuring would measure the
+same thing. A run only reads the cache (``ComparisonStore.lookup``); measuring is an explicit act.
 """
 
 from __future__ import annotations
@@ -40,7 +40,8 @@ class ComparisonSubject(BaseModel):
     identity: str = Field(min_length=1)
     """The engine's image digest, or the hash of the build context its Dockerfile builds from."""
     evaluator: str = Field(min_length=1)
-    """The evaluator version, or the digest of the evaluator's source, that measures it."""
+    """The evaluator version that measures it: recorded with the reading, never part of its key,
+    so an evaluator bump does not silently force a re-measurement."""
     benchmark: tuple[str, ...]
     """The task's benchmark argv (before the comparison's own arguments), which the key covers."""
     hardware: str = Field(min_length=1)
@@ -55,7 +56,6 @@ class ComparisonSubject(BaseModel):
             "env": sorted(self.spec.env.items()),
             "benchmark_args": list(self.spec.benchmark_args),
             "benchmark": list(self.benchmark),
-            "evaluator": self.evaluator,
             "hardware": self.hardware,
         }
         text = json.dumps(document, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
@@ -120,8 +120,17 @@ class ComparisonNotConfigured(BaseModel):
     reason: str = Field(min_length=1, max_length=MAX_REASON_CHARS)
 
 
+class ComparisonNotMeasured(BaseModel):
+    """A comparison nobody measured for its current configuration; a run starts no job for it."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    status: Literal["not_measured"] = "not_measured"
+
+
 ComparisonReading = Annotated[
-    ComparisonMeasured | ComparisonFailed | ComparisonNotConfigured, Field(discriminator="status")
+    ComparisonMeasured | ComparisonFailed | ComparisonNotConfigured | ComparisonNotMeasured,
+    Field(discriminator="status"),
 ]
 
 
@@ -141,6 +150,8 @@ class StoredComparison(BaseModel):
     key: str = Field(pattern=r"^[0-9a-f]{64}$")
     name: str
     label: str
+    evaluator: str = Field(min_length=1)
+    """The evaluator version the reading was measured with."""
     generation: int = Field(ge=0)
     """How many readings this key held before this one; names a re-measurement's job handles."""
     measured_at: float = Field(ge=0)
@@ -174,6 +185,11 @@ class ComparisonStore:
         stored = self._read(self._directory / f"{key}.json")
         return stored if stored is not None and stored.key == key else None
 
+    def lookup(self, subject: ComparisonSubject) -> ComparisonMeasured | ComparisonNotMeasured:
+        """What a run shows: the stored reading for the current configuration, else "not measured"."""
+        stored = self.get(subject)
+        return ComparisonNotMeasured() if stored is None else stored.reading
+
     def put(
         self, subject: ComparisonSubject, reading: ComparisonMeasured, *, measured_at: float
     ) -> StoredComparison:
@@ -183,6 +199,7 @@ class ComparisonStore:
             key=subject.key,
             name=subject.spec.name,
             label=subject.spec.label,
+            evaluator=subject.evaluator,
             generation=0 if earlier is None else earlier.generation + 1,
             measured_at=measured_at,
             reading=reading,
@@ -205,6 +222,7 @@ __all__ = [
     "ComparisonFailed",
     "ComparisonMeasured",
     "ComparisonNotConfigured",
+    "ComparisonNotMeasured",
     "ComparisonReading",
     "ComparisonSample",
     "ComparisonStore",

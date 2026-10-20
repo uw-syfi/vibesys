@@ -3,7 +3,7 @@
 ``ComparisonMeasurer`` is the shell around the pure parts of ``_comparison``: it looks the
 subject up in the cache, and otherwise runs the task's accuracy and benchmark stages once per
 sample on an evaluation executor, reads the benchmark's headline metric from the trusted evidence,
-and keeps the reading. The executor is the same kind a candidate's measurement goes through (a
+and keeps the reading; it runs only when asked to (``vibesys compare``), never from a run. The executor is the same kind a candidate's measurement goes through (a
 Slurm job today); what differs is only the service it runs the benchmark against, which the
 caller's ``SampleExecutors`` builds.
 
@@ -95,7 +95,7 @@ class ComparisonPlan:
     spread_across_nodes: bool = True
     """Whether each sample avoids the nodes the earlier ones ran on."""
     remeasure: bool = False
-    """Measure again even when the cache holds a reading for the subject's key."""
+    """Measure again even when the cache holds a reading for the subject's key (``compare --force``)."""
 
 
 @dataclass(frozen=True, slots=True)

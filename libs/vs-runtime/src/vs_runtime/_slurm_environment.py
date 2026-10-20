@@ -42,7 +42,6 @@ from vs_runtime._run_environment import (
     _command_argv,
     _make_host_sandbox,
     _NoopWorkspaceRecovery,
-    _prepare_evaluation_plan,
     _PreparedRunEnvironment,
     _starting_container,
 )
@@ -52,10 +51,13 @@ from vs_runtime._run_environment_facts import (
     SlurmEnvironmentFacts,
 )
 from vs_runtime._tool_location import ToolLocation, ToolSite, assumed_tool
+from vs_runtime._trusted_evaluation import TrustedEvaluationPlan
 from vs_runtime._trusted_evaluation_preparation import (
     REMOTE_EVALUATOR_GO_MODULES_ROOT,
     REMOTE_EVALUATOR_TOOLS_ROOT,
     TrustedEvaluationCommandPaths,
+    TrustedEvaluatorRequirements,
+    prepare_trusted_evaluation_plan,
 )
 from vs_sandbox.api import HostResource, HostResourceAccess, SandboxSession
 from vs_sandbox.api.slurm import (
@@ -640,48 +642,23 @@ class SlurmEnvironment(RefusesDockerInDocker, _NoopWorkspaceRecovery):
         remote_profiling: bool,
     ) -> _ClusterPlans:
         requirements = request.evaluator_requirements
-        remote = _prepare_evaluation_plan(
-            request,
+        remote = remote_evaluation(
+            policy,
             requirements,
-            TrustedEvaluationCommandPaths(
-                source_project_root=request.workspace,
-                runtime_project_root=".",
-                python_executable=policy.remote_python,
-                runtime_package_root=(
-                    ".vibesys-evaluator-package" if requirements.package_root is not None else None
-                ),
-                runtime_tools_root=REMOTE_EVALUATOR_TOOLS_ROOT,
-                runtime_go_module_cache_root=(
-                    str(REMOTE_EVALUATOR_GO_MODULES_ROOT)
-                    if requirements.go_module is not None
-                    else None
-                ),
+            workspace=request.workspace,
+            accuracy_command=request.accuracy_command,
+            benchmark_command=request.benchmark_command,
+            profile_command=request.profile_command,
+            profiler_support=(
+                (
+                    (request.profiler_support_name, request.profiler_support_path),
+                    *((name, path) for path, name in request.profiler_support_extra),
+                )
+                if remote_profiling
+                else ()
             ),
         )
-        support_paths = {
-            name: Path(path)
-            for name, path in (
-                (".vibesys-evaluator-package", requirements.package_root),
-                (".vibesys-evaluator-tools", requirements.tools_root),
-                (
-                    str(REMOTE_EVALUATOR_GO_MODULES_ROOT),
-                    (
-                        requirements.go_module.cache_root
-                        if requirements.go_module is not None
-                        else None
-                    ),
-                ),
-                *(
-                    (
-                        (request.profiler_support_name, request.profiler_support_path),
-                        *((name, path) for path, name in request.profiler_support_extra),
-                    )
-                    if remote_profiling
-                    else ()
-                ),
-            )
-            if name is not None and path is not None
-        }
+        support_paths = remote.support_paths
         state_root = request.log_dir / "slurm-cluster"
         state_root.mkdir(parents=True, exist_ok=True)
         config_path = request.log_dir / "slurm-operator.toml"
@@ -689,12 +666,7 @@ class SlurmEnvironment(RefusesDockerInDocker, _NoopWorkspaceRecovery):
         capture_plan_path = (
             request.log_dir / "slurm-capture-plan.json" if remote_profiling else None
         )
-        raw_accuracy = _command_argv(remote.accuracy_command)
-        raw_benchmark = _command_argv(remote.benchmark_command)
-        raw_profile = _command_argv(remote.profile_command)
-        profile = policy.remote_argv(raw_profile) if raw_profile is not None else None
-        accuracy = policy.remote_argv(raw_accuracy) if raw_accuracy is not None else None
-        benchmark = policy.remote_argv(raw_benchmark) if raw_benchmark is not None else None
+        accuracy, benchmark, profile = remote.accuracy, remote.benchmark, remote.profile
         evaluation_plan = SlurmEvaluationPlan(
             config_path=config_path,
             cluster_state_root=state_root,
@@ -746,6 +718,113 @@ class SlurmEnvironment(RefusesDockerInDocker, _NoopWorkspaceRecovery):
         )
         broker.start()
         return broker
+
+
+@dataclass(frozen=True, slots=True)
+class RemoteEvaluation:
+    """The trusted commands bound to a cluster job's layout, and the trees the job needs."""
+
+    accuracy: tuple[str, ...] | None
+    benchmark: tuple[str, ...] | None
+    profile: tuple[str, ...] | None
+    support_paths: dict[str, Path]
+    """Immutable local trees staged beside the workspace, by their name in it."""
+
+
+def remote_evaluation(  # noqa: PLR0913  # lint-waiver: LW-930094 [PLR0913]; the commands, the tools and the workspace are independent facts of one binding
+    policy: SlurmExecutionPolicy,
+    requirements: TrustedEvaluatorRequirements,
+    *,
+    workspace: Path,
+    accuracy_command: str | None,
+    benchmark_command: str | None,
+    profile_command: str | None,
+    profiler_support: tuple[tuple[str | None, str | Path | None], ...] = (),
+) -> RemoteEvaluation:
+    """Bind authored commands to the layout of a Slurm job, as every cluster evaluation does."""
+    bound = prepare_trusted_evaluation_plan(
+        TrustedEvaluationPlan(
+            accuracy_command=accuracy_command,
+            benchmark_command=benchmark_command,
+            profile_command=profile_command,
+        ),
+        requirements,
+        TrustedEvaluationCommandPaths(
+            source_project_root=workspace,
+            runtime_project_root=".",
+            python_executable=policy.remote_python,
+            runtime_package_root=(
+                ".vibesys-evaluator-package" if requirements.package_root is not None else None
+            ),
+            runtime_tools_root=REMOTE_EVALUATOR_TOOLS_ROOT,
+            runtime_go_module_cache_root=(
+                str(REMOTE_EVALUATOR_GO_MODULES_ROOT)
+                if requirements.go_module is not None
+                else None
+            ),
+        ),
+    )
+
+    def remote(command: str | None) -> tuple[str, ...] | None:
+        argv = _command_argv(command)
+        return policy.remote_argv(argv) if argv is not None else None
+
+    support_paths = {
+        name: Path(path)
+        for name, path in (
+            (".vibesys-evaluator-package", requirements.package_root),
+            (".vibesys-evaluator-tools", requirements.tools_root),
+            (
+                str(REMOTE_EVALUATOR_GO_MODULES_ROOT),
+                requirements.go_module.cache_root if requirements.go_module is not None else None,
+            ),
+            *profiler_support,
+        )
+        if name is not None and path is not None
+    }
+    return RemoteEvaluation(
+        accuracy=remote(bound.accuracy_command),
+        benchmark=remote(bound.benchmark_command),
+        profile=remote(bound.profile_command),
+        support_paths=support_paths,
+    )
+
+
+def slurm_evaluation_plan(  # noqa: PLR0913  # lint-waiver: LW-930095 [PLR0913]; the settings, commands, tools and state directory are independent facts of one plan
+    settings: SlurmOperatorSettings,
+    requirements: TrustedEvaluatorRequirements,
+    *,
+    workspace: Path,
+    accuracy_command: str | None,
+    benchmark_command: str | None,
+    benchmark_output_argument: str | None,
+    state_directory: Path,
+) -> SlurmEvaluationPlan:
+    """A cluster evaluation plan without profiling, for work that belongs to no run.
+
+    The plan's cluster records and the copy of the operator file it stages live below
+    *state_directory*, which the caller owns.
+    """
+    remote = remote_evaluation(
+        settings.policy,
+        requirements,
+        workspace=workspace,
+        accuracy_command=accuracy_command,
+        benchmark_command=benchmark_command,
+        profile_command=None,
+    )
+    state_root = state_directory / "slurm-cluster"
+    state_root.mkdir(parents=True, exist_ok=True)
+    config_path = state_directory / "slurm-operator.toml"
+    write_slurm_operator_toml(settings, config_path)
+    return SlurmEvaluationPlan(
+        config_path=config_path,
+        cluster_state_root=state_root,
+        accuracy_command=remote.accuracy,
+        benchmark_command=remote.benchmark,
+        benchmark_output_argument=benchmark_output_argument,
+        support_paths=remote.support_paths,
+    )
 
 
 def _start_transport_broker(
