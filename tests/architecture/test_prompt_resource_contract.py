@@ -54,6 +54,7 @@ from vibesys.orchestration.dynamic.search.api import (
     MergeSource,
     PlannerPrompt,
     ReviewEvaluation,
+    StrayUnapplied,
 )
 from vibesys.orchestration.evolve.population import Individual
 from vibesys.orchestration.issue_queue.search.api import IssueBrief, PriorPerformance
@@ -650,13 +651,15 @@ def core_policy_context() -> dict[str, object]:
             ),
         ),
         "rebase_onto": revision,
+        "rebase_from": revision,
+        "reply_rejected": (StrayUnapplied(index=1, hypothesis_id="h9"),),
         "combine": (
             CombineSource(hypothesis_id="h1", revision=revision, built_on=revision),
             CombineSource(hypothesis_id="h2", revision=revision, built_on=revision),
         ),
         "combine_missing": (CombinePick(hypothesis_id="h3", revision="c3"),),
         "merge_id": "m1",
-        "candidates": (MergeSource(hypothesis_id="h1", revision=revision),),
+        "candidates": (MergeSource(hypothesis_id="h1", revision=revision, built_on=revision),),
         "instructions": "Apply h1, then h2.",
         "watch_for": "Both change the scheduler.",
         # The issue queue's typed contexts.
