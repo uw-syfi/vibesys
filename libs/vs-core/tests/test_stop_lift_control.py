@@ -11,7 +11,6 @@ from __future__ import annotations
 
 from typing import Literal
 
-import pytest
 from hypothesis import example, given
 from hypothesis import strategies as st
 
@@ -256,7 +255,6 @@ def _host_control(kind: _HostKind, index: int) -> core.ControlInput:
     return _control(kind, index)
 
 
-@pytest.mark.xfail(strict=True, reason="B1: a resume lifts the host's own stops")
 @given(st.lists(st.sampled_from(_HOST_KINDS), min_size=1, max_size=10))
 @example(["environment", "resume"])  # the reported case: a resume after the probe's stop
 @example(["deadline", "resume"])

@@ -42,7 +42,8 @@ records operators' controls under ``op-`` and ``control-`` identities.
 """
 
 FINAL_STOPS: Final = frozenset({DEADLINE_STOP, ENVIRONMENT_STOP})
-"""The host's own stops: once one stands, no resume reopens the run (``reopens_after``)."""
+"""The host's own stops: once one stands, no resume lifts it (``control_refusal``) and no
+resume reopens the run it ended (``reopens_after``)."""
 
 
 class ControlRefusedError(ContractError):
@@ -130,7 +131,9 @@ def control_refusal(state: CoreState, control: ControlInput) -> ControlRefusedEr
     withdrawal; it takes an operator action that can change something
     (``action_refusal_kind``), also while it stops or cleans up; and a run that recorded a
     stop takes no pause, and a resume only until its ending commits: that resume lifts the stop
-    (`stop_standing`).
+    (`stop_standing`). No resume lifts one of the host's own stops (``FINAL_STOPS``): the
+    deadline's time is spent and the environment's failure would recur, so once one stands it
+    stands until the run ends, across a restart and an explicit resume alike.
     """
     run = state.run
     if run.status == RunStatus.TERMINAL:
@@ -162,13 +165,26 @@ def stop_standing(run: RunState) -> bool:
     (`control_refusal`). While the ending's cleanup runs (the run is closing) nothing lifts
     it; once it is terminal a resume reopens the run (`reopens_on_resume`).
     """
-    standing = False
-    for recorded in run.controls:
+    standing, _final = _stops_after(run.controls)
+    return standing
+
+
+def _stops_after(controls: Sequence[ControlInput]) -> tuple[bool, bool]:
+    """Whether a stop stands after ``controls``, and whether one of the host's own stands.
+
+    The one fold of the run's stops: a stop stands from when it is recorded until a resume
+    follows it. Core refuses a resume while a host stop stands (``_pause_refusal``), so such a
+    resume is never recorded; one a run recorded before that rule (a lifted deadline) still
+    lifts, so a stored run reads as it always did.
+    """
+    standing = final = False
+    for recorded in controls:
         if recorded.action == "stop":
             standing = True
+            final = final or recorded.control_id.root in FINAL_STOPS
         elif recorded.action == "resume":
-            standing = False
-    return standing
+            standing = final = False
+    return standing, final
 
 
 def reopens_on_resume(run: RunState) -> bool:
@@ -190,14 +206,7 @@ def reopens_after(
     """`reopens_on_resume` from the three facts it reads: a reader of a record needs no more."""
     if status != RunStatus.TERMINAL or result is None or result.outcome != "cancelled":
         return False
-    standing = False
-    final = False
-    for recorded in controls:
-        if recorded.action == "stop":
-            standing = True
-            final = final or recorded.control_id.root in FINAL_STOPS
-        elif recorded.action == "resume":
-            standing = final = False
+    standing, final = _stops_after(controls)
     return standing and not final
 
 
@@ -220,7 +229,15 @@ def reopened(run: RunState) -> RunState:
 
 def _pause_refusal(run: RunState, control: ControlInput) -> ControlRefusedError | None:
     lifts = control.action == "resume" and control.when != "capacity_returns"
-    if stop_standing(run) and not lifts:
+    standing, final = _stops_after(run.controls)
+    if final and lifts:
+        # The host's stop is its verdict, not a pause: a resume would meet the same spent
+        # deadline or the same failed environment. Lifting it would leave the run going on
+        # with nothing to stop it again, since core takes a repeated stop as already recorded.
+        return ControlRefusedError(
+            control, ("run", "controls"), "the host stopped the run; no resume lifts its stop"
+        )
+    if standing and not lifts:
         # A pause would change nothing an operator could see before the search ends the run;
         # only an explicit resume (which lifts the stop) is taken.
         return ControlRefusedError(

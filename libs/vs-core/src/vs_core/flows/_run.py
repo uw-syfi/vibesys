@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any
 from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from vs_core._registry import ContractError
+from vs_core._run_pause import FINAL_STOPS
 from vs_core.types.common import THIS_RUN, AttemptRef, DecisionId, InvocationRef, RunFacts, Seconds
 from vs_core.types.kinds import EventKind
 from vs_core.types.measurement import ComparisonSettled
@@ -85,6 +86,7 @@ if TYPE_CHECKING:
     from vs_core._registry import OperationRegistration, OperationRegistry
     from vs_core._strategy_operations import StrategyOperations
     from vs_core.types.agents import Checkpoint
+    from vs_core.types.common import ControlInput
     from vs_core.types.search import RunView
     from vs_core.types.settlement import Selection
 
@@ -684,9 +686,8 @@ class _Run:
                     if timer.at <= now:
                         timer.set(TimeUp(at=timer.at))
                 self._timers = [t for t in self._timers if not t.ready()]
-            case StopRequested(control=control):
-                if control.action == "stop" and self.stop is None:
-                    self._stop(item)
+            case StopRequested():
+                self._stop_requested(item)
             case StopLifted():
                 if self.stop is not None:
                     self._lift_stop()
@@ -789,6 +790,20 @@ class _Run:
         text = self.published
         return None if text is None else model.model_validate_json(text)
 
+    def _stop_requested(self, item: StopRequested) -> None:
+        """Take the run's first stop; a later one only names the ending (``_overrides``).
+
+        The flows already took the first stop, so a later one reaches none of them. Only one of
+        the host's own stops that follows an operator's replaces it, as the stop the ending
+        reads (``_winner._stop_ending``).
+        """
+        if item.control.action != "stop":
+            return
+        if self.stop is None:
+            self._stop(item)
+        elif _overrides(item.control, self.stop):
+            self.stop = item
+
     def _stop(self, item: StopRequested) -> None:
         self.stop = item
         self.trace.stop_requested()
@@ -832,6 +847,17 @@ class _Run:
             return False
         self._resume(task, ready.take(), None)
         return True
+
+
+def _overrides(control: ControlInput, taken: StopRequested) -> bool:
+    """Whether ``control``, a later stop, names the run's ending over the stop already taken.
+
+    Only one of the host's own stops (``FINAL_STOPS``) does, over an operator's: the operator's
+    stop is a pause, the host's a verdict. Between two of the host's stops the first stands.
+    """
+    return (
+        control.control_id.root in FINAL_STOPS and taken.control.control_id.root not in FINAL_STOPS
+    )
 
 
 def _same_plan(old: Measure, new: Measure) -> bool:

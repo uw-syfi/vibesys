@@ -132,7 +132,6 @@ def _stopped_by_the_host(stopper: str) -> _Run:
     return old
 
 
-@pytest.mark.xfail(strict=True, reason="B1: a resume lifts the host's own stops")
 @pytest.mark.parametrize("replayed", [False, True], ids=["fresh", "failure-replayed"])
 @pytest.mark.parametrize("stopper", ["environment", "deadline"])
 def test_a_resumed_process_keeps_the_stop_the_host_delivered(

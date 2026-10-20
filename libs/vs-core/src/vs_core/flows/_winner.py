@@ -184,6 +184,17 @@ _HOST_STOP_ENDINGS = {DEADLINE_STOP: EndReason.DEADLINE, ENVIRONMENT_STOP: EndRe
 """The ending of each of the host's own stops (``FINAL_STOPS``); any other stop is a pause."""
 
 
+def _stop_since(kit: Kit, stopped: EndReason | None) -> EndReason | None:
+    """How the run was stopped once its adoption returned, given how when its ending began.
+
+    The operator's stop is a pause, so one of the host's own stops that arrived while the ending
+    adopted names the ending instead (``_run._overrides``): the run environment failing as the
+    run winds down fails it. Any other ending stays as it began: a run that ended by itself
+    adopted what it chose, whatever stop arrived since.
+    """
+    return _stop_ending(kit) if stopped is EndReason.STOPPED else stopped
+
+
 def _stopped_outcome(stopped: EndReason) -> Literal["cancelled", "failure"]:
     """The outcome a stop ends the run with: the environment's failure fails it."""
     return "failure" if stopped is EndReason.FAILED else "cancelled"
@@ -212,8 +223,7 @@ async def conclude(kit: Kit, returned: NoWinner | Uncompared | None) -> None:
     is ``cancelled`` whatever the adoption did, and a resume reopens the run.
     An ``Uncompared`` return marks an adopted candidate's result as never compared with the input.
     """
-    stopped = _stop_ending(kit)
-    result = await _result(kit, returned, stopped)
+    result = await _result(kit, returned, _stop_ending(kit))
     mode = _finish_mode(kit)
     refused = await kit.finish(
         Finish(decision_id=DecisionId(root="finish"), scope=THIS_RUN, mode=mode, result=result)
@@ -231,11 +241,15 @@ async def conclude(kit: Kit, returned: NoWinner | Uncompared | None) -> None:
 
 
 async def _no_winner(kit: Kit, returned: NoWinner, stopped: EndReason | None) -> RunResultProposal:
+    if returned.keep_choice and kit.run.choice is not None:
+        adopted = await adopt(kit, kit.run.choice)
+        stopped = _stop_since(kit, stopped)
+    else:
+        adopted = None
     outcome = "failure" if stopped is None else _stopped_outcome(stopped)
     reason = reason_text(stopped or EndReason.NO_WINNER, returned.reason)
-    if not returned.keep_choice or kit.run.choice is None:
+    if adopted is None:
         return RunResultProposal(outcome=outcome, reason=reason)
-    adopted = await adopt(kit, kit.run.choice)
     if isinstance(adopted, NotAdopted):
         failed = reason_text(EndReason.ADOPTION_FAILED, adopted.reason.value)
         return RunResultProposal(outcome=outcome, reason=f"{reason}; {failed}")
@@ -267,6 +281,7 @@ async def _result(
         return await _no_winner(kit, returned, stopped)
     selection = kit.run.choice or TrustedBaseline(revision=kit.run.facts.baseline)
     adopted = await adopt(kit, selection)
+    stopped = _stop_since(kit, stopped)
     if isinstance(adopted, NotAdopted):
         return _not_adopted(adopted, stopped)
     kind = EndReason.KEPT_INPUT if isinstance(selection, TrustedBaseline) else EndReason.ADOPTED

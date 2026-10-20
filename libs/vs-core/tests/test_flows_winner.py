@@ -430,10 +430,9 @@ def test_the_operator_pauses_the_deadline_ends_and_the_run_environment_fails_the
         assert first == ("adoption-failed" if failed else core.EndReason.DEADLINE.value)
 
 
-@pytest.mark.xfail(strict=True, reason="follow-up 1 of #3327: the operator's stop names the end")
 @pytest.mark.parametrize("operator", [core.StopMode.DRAIN, core.StopMode.CANCEL])
 def test_an_environment_failure_after_the_operators_stop_fails_the_run(
-    operator: core.StopMode,
+    begin: Begin, operator: core.StopMode
 ) -> None:
     """Regression (review follow-up 1 of #3327): the first stop alone named the ending.
 
@@ -446,7 +445,7 @@ def test_an_environment_failure_after_the_operators_stop_fails_the_run(
         ctx.choose(kept("a"))
         await ctx.stopped
 
-    run = start(ended, adopting=False)
+    run = begin(ended, adopting=False)
     run.stop("stop", mode=operator)
     run.stop(core.ENVIRONMENT_STOP, mode=core.StopMode.CANCEL)
     run.adopt(run.expect(core.ProposeWinner))

@@ -198,7 +198,9 @@ class RunControlBridge:
 
         ``lifts_standing_stop`` says this process was started by an explicit resume of the
         run, which lifts a stop core recorded before (its first poll records the lift
-        instead of arming the stop). No other start does.
+        instead of arming the stop), if core takes the lift: core refuses to lift one of the
+        host's own stops (the deadline's, the run environment's), which stays armed. No other
+        start lifts a stop.
         """
         self._channel = channel
         self._steer = steer
