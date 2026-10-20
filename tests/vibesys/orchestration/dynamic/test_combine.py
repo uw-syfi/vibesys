@@ -618,16 +618,21 @@ def test_merging_an_ancestor_after_its_descendant_does_not_move_a_childs_start_b
 ON_K1 = {"c1": 150.0, "c2": 120.0, "c3": 300.0, "c4": 400.0, "c5": 150.0, "c6": 400.0}
 
 
+LEFT_OUT = {"hypothesis_id": "h1", "part": "all of it", "why": "conflicts with h2"}
+MISNAMED = {**LEFT_OUT, "hypothesis_id": "the h1 part"}
+
+
 @MODES
 @pytest.mark.parametrize(
-    "dropped",
+    "reported",
     [
-        pytest.param(False, id="applied"),
-        pytest.param(True, id="dropped"),
+        pytest.param((), id="applied"),
+        pytest.param((LEFT_OUT,), id="dropped"),
+        pytest.param((MISNAMED,), id="misnamed"),
     ],
 )
 def test_a_child_of_a_combine_whose_part_was_merged_starts_at_that_part(
-    *, restarting: bool, dropped: bool
+    *, restarting: bool, reported: tuple[dict[str, str], ...]
 ) -> None:
     host = begin(config(max_rounds=14), restarting=restarting, throughputs=ON_K1)
     first = _plan(host, implement("h1"))
@@ -637,8 +642,7 @@ def test_a_child_of_a_combine_whose_part_was_merged_starts_at_that_part(
     _implemented(host, "h2", "c2")
     _plan(host, combine("k1", ("h1", "c1"), ("h2", "c2")))
     _start(host)
-    left_out = {"hypothesis_id": "h1", "part": "all of it", "why": "conflicts with h2"}
-    _reply(host, "k1", "c3", unapplied=[left_out] if dropped else None)
+    _reply(host, "k1", "c3", unapplied=list(reported))
     _judged(host, "k1")
     _settle(host)
     _plan(host, implement("h5", parent_hypothesis_id="k1", parent_revision="c3"))
@@ -649,8 +653,9 @@ def test_a_child_of_a_combine_whose_part_was_merged_starts_at_that_part(
         render(PromptTemplate.MERGE, _merged(host, "m2", "h5", "c6"), agent_git_writable=False)
     )
     # The composite applied c1's change onto the input, so h5's tree holds c1, which main holds.
-    # A part the implementer left out is not in the tree: starting at it would revert it.
-    start = base if dropped else "c1"
+    # A part the implementer left out is not in the tree: starting at it would revert it. An
+    # entry naming no part may be a misnamed dropped part, so then no part counts as applied.
+    start = base if reported else "c1"
     assert f"`git diff {start} c4 | git apply --reject`" in merging, merging
 
 
