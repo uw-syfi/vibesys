@@ -23,6 +23,7 @@ from functools import partial
 from typing import TYPE_CHECKING, Literal, Protocol
 
 from vs_core.api import (
+    ENVIRONMENT_STOP,
     ArtifactId,
     ArtifactRef,
     ControlId,
@@ -322,6 +323,15 @@ class RunControlBridge:
         A pause change core would refuse (the run is finishing) is refused (``_refuse``):
         the channel undoes it, and the operator hears why.
         """
+        if self._channel.environment_stopped() and core.run.status != RunStatus.TERMINAL:
+            # The environment's stop is the host's, under core's own id (never ``op-``), so it
+            # ends the run for good; it carries the cancel the channel now holds.
+            stop = ControlInput(
+                control_id=ControlId(root=ENVIRONMENT_STOP), action="stop", mode=StopMode.CANCEL
+            )
+            if stop.control_id not in _held(core) and stop.control_id not in self._asked:
+                events.append(self._recorded(stop, _Change("stop", mode=StopMode.CANCEL), now_at))
+            self._stop = escalate_stop(self._stop, StopMode.CANCEL)
         live = self._channel.stop_mode()
         if live is not None and escalate_stop(self._stop, live) is not self._stop:
             self._stop = live

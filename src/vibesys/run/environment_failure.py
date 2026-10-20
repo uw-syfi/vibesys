@@ -4,14 +4,14 @@ Some failures of the run environment leave the run nothing to do: a local Slurm 
 its probe could not prove shared refuses every measurement and every agent GPU job.
 The environment calls :meth:`RunEnvironmentFailure.fail` once; the run then stops at
 once (a cancel) and ends as a failure that names the cause
-(``RunFailureKind.RUN_ENVIRONMENT_UNAVAILABLE``) rather than as an operator stop.
+(``RunFailureKind.RUN_ENVIRONMENT_UNAVAILABLE``) rather than as an operator stop. Core
+records the stop under its own ``ENVIRONMENT_STOP``, so the run's record ends failed and no
+resume reopens it: a resume would only replay the same failure.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
-
-from vs_core.api import StopMode
 
 if TYPE_CHECKING:
     from vs_runtime.api.infrastructure import RunControlChannel
@@ -38,4 +38,4 @@ class RunEnvironmentFailure:
             return
         # The reason is set before the stop, so the run that the stop ends reads it.
         self._reason = reason
-        self._control.request_stop(StopMode.CANCEL)
+        self._control.request_environment_stop()

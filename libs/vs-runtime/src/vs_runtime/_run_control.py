@@ -8,13 +8,13 @@ from typing import TYPE_CHECKING, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, model_validator
 
-from vs_core.api import PauseOwner, RunPause, escalate_stop
+from vs_core.api import PauseOwner, RunPause, StopMode, escalate_stop
 from vs_runtime._operator_control import ControlAction, SteerMode, SteerTarget, action_summary
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from vs_core.api import CapacityHold, StopMode
+    from vs_core.api import CapacityHold
     from vs_runtime._operator_control import ActionRequest
     from vs_sim.api import Threads
 
@@ -400,6 +400,18 @@ class RunControlChannel(Protocol):
         """Request an unwind at the next cooperative boundary, draining or cancelling work."""
         ...
 
+    def request_environment_stop(self) -> None:
+        """Cancel the run because its run environment can run none of its work.
+
+        Unlike an operator's stop, which a resume lifts, the run records this one under
+        core's ``ENVIRONMENT_STOP`` (``environment_stopped``): the run ends failed, for good.
+        """
+        ...
+
+    def environment_stopped(self) -> bool:
+        """Whether ``request_environment_stop`` was called."""
+        ...
+
     def take_pending_steer(self) -> list[QueuedSteer]:
         """Drain queued steering exactly once."""
         ...
@@ -657,6 +669,7 @@ class RuntimeRunControlChannel:
         self._quota_paused = False
         self._stop_requested = False
         self._stop_mode: StopMode | None = None
+        self._environment_stopped = False
         self._requested_by: dict[Literal["pause", "stop", "capacity"], str | None] = {}
         self._fallback_requested = False
         self._resumed_with_fallback = False
@@ -883,6 +896,17 @@ class RuntimeRunControlChannel:
             listeners = tuple(self._stop_listeners)
         for listener in listeners:
             listener()
+
+    def request_environment_stop(self) -> None:
+        """Cancel the run for its environment's failure; see the protocol."""
+        with self._lock:
+            self._environment_stopped = True
+        self.request_stop(StopMode.CANCEL)
+
+    def environment_stopped(self) -> bool:
+        """Whether the run environment stopped the run."""
+        with self._lock:
+            return self._environment_stopped
 
     def stop_requested(self) -> bool:
         """Return whether a stop is pending, without landing it."""

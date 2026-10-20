@@ -44,9 +44,10 @@ def _record(phase: RunPhase, **fields: object) -> LiveInstanceRecord:
     )
 
 
-def test_every_core_end_reason_is_an_outcome_and_only_the_shells_two_are_added() -> None:
+def test_every_core_end_reason_is_an_outcome_and_only_the_shells_force_stop_is_added() -> None:
     outcomes = {outcome.value for outcome in RunEndOutcome}
-    assert outcomes - {reason.value for reason in EndReason} == {"failed", "force_stopped"}
+    assert outcomes - {reason.value for reason in EndReason} == {"force_stopped"}
+    assert {reason.value for reason in EndReason} <= outcomes
 
 
 @given(st.text())

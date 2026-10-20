@@ -890,6 +890,7 @@ const runEventSchema: Record<string, unknown> = {
         "adoption-failed",
         "stopped",
         "deadline",
+        "failed",
         "finish-refused"
       ],
       "title": "EndReason",

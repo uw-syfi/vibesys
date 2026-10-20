@@ -32,6 +32,18 @@ An operator's stop is a pause (``reopens_on_resume``); the deadline's is the run
 spent, and it ends the run for good.
 """
 
+ENVIRONMENT_STOP: Final = "run-environment"
+"""The identity of the stop the host delivers when the run environment can run none of the run's
+work (a local Slurm root its probe could not prove shared).
+
+Like the deadline's, it is the host's verdict and not a pause: a resume would meet the same
+environment, so it ends the run failed, for good. No operator control can carry it: the host
+records operators' controls under ``op-`` and ``control-`` identities.
+"""
+
+FINAL_STOPS: Final = frozenset({DEADLINE_STOP, ENVIRONMENT_STOP})
+"""The host's own stops: once one stands, no resume reopens the run (``reopens_after``)."""
+
 
 class ControlRefusedError(ContractError):
     """Core refuses ``control`` in the run's state as it stands (``control_refusal``).
@@ -167,7 +179,7 @@ def reopens_on_resume(run: RunState) -> bool:
     the run, so the run stays resumable: the explicit resume that opens it takes the stop back
     and reopens the run (`reopened`), which goes on from what it holds. Every other ending is
     final: a result of the run itself, a refused or blocked run, and the deadline's stop (the
-    time the run was given is spent).
+    time the run was given is spent), and the run environment's stop (it can run nothing).
     """
     return reopens_after(run.status, run.result, run.controls)
 
@@ -179,14 +191,14 @@ def reopens_after(
     if status != RunStatus.TERMINAL or result is None or result.outcome != "cancelled":
         return False
     standing = False
-    by_deadline = False
+    final = False
     for recorded in controls:
         if recorded.action == "stop":
             standing = True
-            by_deadline = by_deadline or recorded.control_id.root == DEADLINE_STOP
+            final = final or recorded.control_id.root in FINAL_STOPS
         elif recorded.action == "resume":
-            standing = by_deadline = False
-    return standing and not by_deadline
+            standing = final = False
+    return standing and not final
 
 
 def reopened(run: RunState) -> RunState:

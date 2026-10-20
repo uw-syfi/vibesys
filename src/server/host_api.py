@@ -313,9 +313,9 @@ _StartedAt = Annotated[float, Field(ge=0, le=ECMASCRIPT_DATE_MAX_SECONDS, allow_
 
 
 class RunEndOutcome(StrEnum):
-    """Why a run ended, on its tombstone: vs-core's ``EndReason`` members and two of the shell's.
+    """Why a run ended, on its tombstone: vs-core's ``EndReason`` members and one of the shell's.
 
-    The first seven are ``vs_core``'s ``EndReason`` values, copied because this module
+    The first eight are ``vs_core``'s ``EndReason`` values, copied because this module
     may not import the core (``tests/server/test_run_end_record.py`` keeps them equal).
     """
 
@@ -334,7 +334,7 @@ class RunEndOutcome(StrEnum):
     FINISH_REFUSED = "finish-refused"
     """Core refused the result."""
     FAILED = "failed"
-    """The run failed before it recorded a result: an error, a startup failure, or a crash."""
+    """The run failed: an error, a crash, or a run environment that could run none of its work."""
     FORCE_STOPPED = "force_stopped"
     """The server was terminated (a force stop) and ended without reaching a safe point."""
 

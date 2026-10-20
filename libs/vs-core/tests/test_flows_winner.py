@@ -388,7 +388,6 @@ def test_an_unset_uncompared_is_left_out_of_the_result_serialization(
 # -- who stopped the run decides how it ends -------------------------------------------------------
 
 
-@pytest.mark.xfail(strict=True, reason="F2: the environment's stop ends the run as an operator's")
 @pytest.mark.parametrize("adoption", ["adopted", "refused", "verify-failed", "no-winner"])
 @pytest.mark.parametrize("requester", ["operator", "deadline", "environment"])
 def test_the_operator_pauses_the_deadline_ends_and_the_run_environment_fails_the_run(

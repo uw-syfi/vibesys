@@ -11,7 +11,6 @@ from __future__ import annotations
 
 from typing import Literal
 
-import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
@@ -210,7 +209,6 @@ def _stop_by(requester: _Requester, index: int) -> core.ControlInput:
     )
 
 
-@pytest.mark.xfail(strict=True, reason="F2: the environment's stop has no id of its own")
 @given(
     stops=st.lists(
         st.sampled_from(("operator", "deadline", "environment", "resume")), min_size=1, max_size=6

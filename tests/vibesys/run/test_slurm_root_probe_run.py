@@ -24,7 +24,6 @@ from dataclasses import dataclass, field
 from functools import partial
 from typing import TYPE_CHECKING
 
-import pytest
 from tests.support.core_plugins import capability_plugin
 from tests.support.skeleton_strategy import IMPLEMENTER, SkeletonStrategy
 from tests.support.task_project import write_task
@@ -289,7 +288,6 @@ def _hide_staging_from_the_node(
     return hide
 
 
-@pytest.mark.xfail(strict=True, reason="F2: the environment's stop ends as a resumable stop")
 def test_a_run_its_probe_failed_ends_failed_and_no_resume_reopens_it(
     tmp_path: Path, sim: Sim
 ) -> None:

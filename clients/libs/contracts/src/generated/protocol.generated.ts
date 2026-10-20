@@ -498,7 +498,7 @@ export type Kind14 = "run_ending";
  * Why the framework ended the run as it did. Closed: the result's reason starts with it.
  */
 export type EndReason =
-  "adopted" | "kept-input" | "no-winner" | "adoption-failed" | "stopped" | "deadline" | "finish-refused";
+  "adopted" | "kept-input" | "no-winner" | "adoption-failed" | "stopped" | "deadline" | "failed" | "finish-refused";
 export type Summary2 = string;
 export type Resumable = boolean;
 export type RoundsFinished = number;

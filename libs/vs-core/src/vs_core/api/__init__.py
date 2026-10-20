@@ -92,6 +92,8 @@ from vs_core._registry import (
     validate_startup,
 )
 from vs_core._run_pause import (
+    DEADLINE_STOP,
+    ENVIRONMENT_STOP,
     ControlRefusedError,
     capacity_wait_stands,
     control_refusal,
@@ -834,8 +836,10 @@ __all__ = [
     "ADOPTED",
     "BASE_MAX_SAMPLES",
     "CAPTURE_SUFFIX",
+    "DEADLINE_STOP",
     "ENVELOPE_MIGRATIONS",
     "ENVELOPE_SCHEMA_VERSION",
+    "ENVIRONMENT_STOP",
     "EVENT_ROUTES",
     "EXPORT_PATCH_SUFFIX",
     "IDENTITY_PATTERN",

@@ -415,9 +415,9 @@ export type EndedAt = number | null;
  */
 export type PauseCause = "user" | "quota";
 /**
- * Why a run ended, on its tombstone: vs-core's ``EndReason`` members and two of the shell's.
+ * Why a run ended, on its tombstone: vs-core's ``EndReason`` members and one of the shell's.
  *
- * The first seven are ``vs_core``'s ``EndReason`` values, copied because this module
+ * The first eight are ``vs_core``'s ``EndReason`` values, copied because this module
  * may not import the core (``tests/server/test_run_end_record.py`` keeps them equal).
  */
 export type RunEndOutcome =
