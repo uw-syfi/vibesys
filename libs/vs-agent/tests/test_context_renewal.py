@@ -321,7 +321,6 @@ _FRESH_SEND_FAILURES: dict[str, Callable[[], Exception]] = {
 
 
 @pytest.mark.regression
-@pytest.mark.xfail(strict=True, reason="a failed renewal drops the old checkpoint (#3315 review)")
 @pytest.mark.parametrize("failure", sorted(_FRESH_SEND_FAILURES))
 @pytest.mark.parametrize("trigger", ["pre-emptive", "overflow"])
 def test_a_failed_fresh_conversation_leaves_the_old_one_resumable(

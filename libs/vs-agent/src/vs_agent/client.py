@@ -639,18 +639,19 @@ class AgentClient:
 
         fingerprint = session_spec_fingerprint(session_spec)
         turn = self._bind_continuation(session_key, session_spec, turn)
-        if turn.renewable and self._near_context_limit(session_key, session_spec):
+        fresh = turn.renewable and self._near_context_limit(session_key, session_spec)
+        if fresh:
             turn = self._retire(session_key, turn, "its context is near the model's window")
         continued = self.provider_session_id(session_key)
         try:
-            result, cached = self._run_keyed(session_spec, turn, session_key, fingerprint, observer)
+            result, cached = self._run_keyed(session_spec, turn, session_key, observer, fresh=fresh)
         except AgentContextOverflowError as overflow:
-            if not turn.renewable or continued is None:
+            if not turn.renewable or fresh or continued is None:
                 raise
             # Once, in a fresh conversation: a fresh one that overflows again carries a
             # message too long for the model, which no further renewal can fix.
             turn = self._retire(session_key, turn, f"the provider refused it: {overflow.detail}")
-            result, cached = self._run_keyed(session_spec, turn, session_key, fingerprint, observer)
+            result, cached = self._run_keyed(session_spec, turn, session_key, observer, fresh=True)
         expected = turn.expected_provider_session_id
 
         self._validate_continuation_result(
@@ -682,10 +683,15 @@ class AgentClient:
         session_spec: AgentSessionSpec,
         turn: AgentTurnRequest,
         session_key: AgentSessionKey,
-        fingerprint: str,
         observer: AgentObserver,
+        *,
+        fresh: bool = False,
     ) -> tuple[AgentTurnResult, _CachedSession]:
-        """Run the turn on the key's live session, opening it (and adopting its checkpoint) first."""
+        """Run the turn on the key's live session, opening it (and adopting its checkpoint) first.
+
+        A *fresh* turn opens its session without adopting the checkpoint, which keeps naming
+        the retired conversation until this turn completes and ``_run`` replaces it.
+        """
         expected = turn.expected_provider_session_id
         cached = self._sessions.get(session_key)
         if cached is not None and cached.spec != session_spec:
@@ -695,8 +701,12 @@ class AgentClient:
             self._evict(session_key)
             cached = None
         if cached is None:
-            session = self._create_checkpointed_session(
-                session_spec, session_key, fingerprint, expected
+            session = (
+                self._open_session(session_spec)
+                if fresh
+                else self._create_checkpointed_session(
+                    session_spec, session_key, session_spec_fingerprint(session_spec), expected
+                )
             )
             # A fresh session in a resumed process holds no conversation. Offer
             # it the checkpointed provider ID so its very first turn resumes
@@ -733,11 +743,15 @@ class AgentClient:
         return ContextUse(tokens=tokens, window=window).near_limit()
 
     def _retire(self, key: AgentSessionKey, turn: AgentTurnRequest, why: str) -> AgentTurnRequest:
-        """Drop the key's conversation, live and checkpointed: *turn* runs in a fresh one."""
+        """Release the key's live conversation: *turn* runs in a fresh one.
+
+        The checkpoint and the context reading still describe the retired conversation, and
+        stay until the fresh turn completes and replaces them. A fresh turn that fails (an
+        outage, a quota stop, a crash) leaves the key resumable on its old conversation, and
+        the next standalone turn retires it again.
+        """
         retired = turn.expected_provider_session_id or self.provider_session_id(key)
         self._evict(key)
-        self._session_store.clear(key)
-        self._context_tokens.pop(key, None)
         _emit_and_log(
             self._sink,
             f"[session] {turn.label or key}: retired conversation {retired} ({why}); "
@@ -824,7 +838,11 @@ class AgentClient:
             or result.restarted
         ):
             self._evict(key)
-            self._session_store.clear(key)
+            if expected is not None:
+                # The checkpointed conversation is the one the provider reset. A turn that
+                # expected none ran in a fresh conversation, so any checkpoint still names a
+                # retired conversation this failure says nothing about.
+                self._session_store.clear(key)
             raise SessionResumeError(str(key), "provider reset or replaced the conversation")
 
     def _validate_continuation(

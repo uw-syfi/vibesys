@@ -242,7 +242,9 @@ class AgentSessions(Protocol):
         A *standalone* message carries the role's whole prompt, so it may run in a fresh
         conversation instead: when the checkpointed one is near its model's context window,
         or once after the provider refused it for context overflow. The completed outcome's
-        checkpoint then names the fresh conversation, which later turns continue.
+        checkpoint then names the fresh conversation, which later turns continue. Until the
+        fresh turn completes, the checkpoint still names the old conversation, so a fresh turn
+        that fails or is interrupted leaves the key resumable.
         """
         ...
 
