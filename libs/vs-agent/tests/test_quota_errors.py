@@ -8,6 +8,7 @@ capacity limit, and the client either hands it to the installed gate or raises.
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass, field
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -17,7 +18,13 @@ from agentshim.testing import FakeClock, FakeExecutor, FakeRun, scripted_failure
 from hypothesis import given
 from hypothesis import strategies as st
 
-from vs_agent.api import AgentClient, AgentQuotaError, QuotaCondition
+from vs_agent.api import (
+    AgentClient,
+    AgentQuotaError,
+    AgentTurnRequest,
+    CapacityStops,
+    QuotaCondition,
+)
 
 # test-isolation: these tests exercise the launcher's own internals, which the facade deliberately hides
 from vs_agent.session_launch import ConfinedSessionLauncher
@@ -170,3 +177,73 @@ def test_a_turn_after_a_quota_stop_does_not_inherit_its_exhausted_windows(
     # The later failure reported no window, so it is an outage, not the earlier rate limit.
     assert excinfo.value.condition is QuotaCondition.UNAVAILABLE
     assert excinfo.value.resets_at is None
+
+
+@dataclass
+class _RecordingGate:
+    """The run's capacity gate as the client sees it: notes how many sends preceded each call.
+
+    It refuses, ending the turn, so the test sees only what reached the gate first.
+    """
+
+    executor: FakeExecutor
+    calls: list[tuple[QuotaCondition, int, int]] = field(default_factory=list)
+
+    def wait_for_capacity(
+        self, error: AgentQuotaError, turn: AgentTurnRequest, *, role: str, stops: CapacityStops
+    ) -> None:
+        del turn, role
+        self.calls.append((error.condition, stops.count, len(self.executor.requests)))
+        raise error
+
+    def turn_served(self, provider: str, model: str | None) -> None:
+        del provider, model
+
+
+@given(provider=st.sampled_from(PROVIDERS), rate_limited=st.booleans())
+def test_a_gated_run_turn_hands_its_first_transient_failure_to_the_gate_unretried(
+    provider: str, home: Path, *, rate_limited: bool
+) -> None:
+    """The run's gate holds a turn through an outage, so nothing below it may retry (#3300).
+
+    A retry below the gate hides a whole provider CLI attempt from the time core credits
+    to the hold (S179). The launcher keeps its production retry delays here, and the first
+    overload, an outage or sustained rate limiting, goes straight to the gate.
+    """
+    failure = scripted_failure(provider, agentshim.FailureKind.TRANSIENT)
+    first = FakeRun(
+        stdout=[_exhausted_window(1_800_000_000), *failure.stdout]
+        if rate_limited
+        else failure.stdout,
+        stderr=failure.stderr,
+        returncode=failure.returncode,
+    )
+    executor = FakeExecutor([first, scripted_turn(provider, text="unreachable")])
+    threads = SimThreads()
+    client = AgentClient(
+        ConfinedSessionLauncher(
+            provider=provider,
+            executor_factory=lambda: executor,
+            launcher_env=lambda: {
+                "PATH": "/usr/bin:/bin",
+                "HOME": str(home),
+                SANDBOX_DISABLE_ENV: "off",
+            },
+            clock=FakeClock(),
+            threads=threads,
+        ),
+        provider=provider,
+        run_log_file=None,
+        clock=ManualClock(),
+        threads=threads,
+    )
+    gate = _RecordingGate(executor)
+    client.set_capacity_gate(gate)
+
+    with TemporaryDirectory() as tmp, pytest.raises(AgentQuotaError):
+        _invoke(client, Path(tmp))
+
+    # Only Claude reports its rate-limit windows in this format; Codex ignores the line.
+    sustained = rate_limited and provider == "claude"
+    expected = QuotaCondition.RATE_LIMITED if sustained else QuotaCondition.UNAVAILABLE
+    assert gate.calls == [(expected, 1, 1)]
