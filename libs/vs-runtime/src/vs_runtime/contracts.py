@@ -315,6 +315,49 @@ class AgentRole(BaseModel):
     required_capabilities: frozenset[AgentCapability] = frozenset()
 
 
+class Checkout(Protocol):
+    """A directory holding one revision's files, which its owner discards."""
+
+    @property
+    def path(self) -> Path:
+        """Return the checkout's host path."""
+        ...
+
+    async def discard(self) -> None:
+        """Release the checkout; safe to call more than once."""
+        ...
+
+
+class CheckoutRoot(Protocol):
+    """The repository a revision is checked out from."""
+
+    @property
+    def path(self) -> Path:
+        """Return the repository's host path."""
+        ...
+
+    async def has_revision(self, revision: str) -> bool:
+        """Return whether the repository holds *revision*."""
+        ...
+
+
+class MeasuredCheckouts(Protocol):
+    """What a trusted executor needs to measure a revision: a fresh checkout of it.
+
+    ``Workspaces`` satisfies it; a measurement that belongs to no run (a comparison
+    baseline's) supplies its own.
+    """
+
+    @property
+    def root(self) -> CheckoutRoot:
+        """Return the repository the revisions live in."""
+        ...
+
+    async def create_measured_candidate(self, revision: str) -> Checkout:
+        """Return a fresh checkout of *revision*, holding what its evaluation reads."""
+        ...
+
+
 class Workspaces(Protocol):
     """Run-owned access to the root and isolated candidate workspaces."""
 

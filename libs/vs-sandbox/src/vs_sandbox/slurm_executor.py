@@ -224,6 +224,8 @@ class SlurmExecutionMetadata(BaseModel):
     # The shared server exited or never answered its readiness probe, so no stage ran;
     # its log tail is the stage output.
     service_not_ready: bool = False
+    # The compute node the allocation ran on, when the job recorded it.
+    node: str | None = None
 
 
 class SlurmCommandResult(BaseModel):
@@ -1262,6 +1264,7 @@ class SlurmEvaluationExecutor:
             collection_failure=batch.collection_failure,
             aggregate_unknown=collected.reason if isinstance(collected, ClusterUnknown) else None,
             service_not_ready=batch.job_exit_code == SERVICE_NOT_READY_EXIT_CODE,
+            node=batch.node,
         )
         by_name = {item.name: item for item in batch.stages}
         results: list[EvaluationStepResult] = []
@@ -1329,6 +1332,7 @@ class SlurmEvaluationExecutor:
                         else StageFailureKind.COLLECTION
                     ),
                     duration_s=item.elapsed_seconds,
+                    host=batch.node,
                 )
             )
         failed = next((item for item in results if item.state is StageState.FAILED), None)

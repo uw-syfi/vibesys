@@ -88,6 +88,8 @@ class ScenarioCluster(FakeCluster):
         self.submissions: list[str] = []
         self.batches: list[SlurmBatchRequest] = []
         """Every batch request the scheduler accepted, in submission order."""
+        self.nodes: list[str | None] = []
+        """The node each accepted batch ran on, in submission order; none when unscripted."""
         self.accepted = threading.Event()
 
     @property
@@ -151,7 +153,12 @@ class ScenarioCluster(FakeCluster):
             phase_timings_seconds={},
             content_cache_hits=0,
             service_log_tail=self.service_log_tail,
+            node=self._node(),
         )
+
+    def _node(self) -> str | None:
+        index = len(self.submissions) - 1
+        return self.nodes[index] if 0 <= index < len(self.nodes) else None
 
 
 class _Candidates(FakeWorkspaces):

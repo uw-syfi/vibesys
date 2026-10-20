@@ -215,6 +215,8 @@ class EvaluationStepResult(BaseModel):
     service_log_tail: str | None = Field(default=None, max_length=STAGE_OUTPUT_TAIL_CHARS)
     """The shared service's log tail beside a failed stage, kept apart from ``failure`` (the
     stage's own output) so a reader that must cut the text keeps the stage's verdict."""
+    host: str | None = Field(default=None, min_length=1, max_length=255)
+    """The machine the stage ran on, when its executor knows it; never part of the evidence."""
 
     @model_validator(mode="after")
     def _result_matches_state(self) -> EvaluationStepResult:

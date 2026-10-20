@@ -18,6 +18,7 @@ from pydantic import (
 )
 
 from vs_sandbox.agent_gpu import AgentGpuConfig
+from vs_sandbox.slurm_comparison import ComparisonMachine
 from vs_slurm.api import (
     MAX_WITHDRAWAL_WINDOW_SECONDS,
     PORT_PLACEHOLDER,
@@ -81,6 +82,8 @@ class SlurmExecutionPolicy(BaseModel):
     benchmark_arguments: tuple[str, ...] = ()
     agent_gpu: AgentGpuConfig | None = None
     ledger: LedgerPolicy | None = None
+    comparison: ComparisonMachine | None = None
+    """The ``[vibesys.comparison]`` table: what this machine gives comparison baselines."""
 
     @field_validator("remote_python")
     @classmethod
@@ -141,12 +144,18 @@ class SlurmExecutionPolicy(BaseModel):
         What a stage reports may echo them; they are the operator's, not the agent's to see.
         """
         service = () if self.service is None else self.service.command
+        machine = (
+            ()
+            if self.comparison is None
+            else (self.comparison.image_cache_dir, self.comparison.model_cache_dir)
+        )
         words = (
             self.remote_python,
             self.setup_script or "",
             *service,
             *self.accuracy_arguments,
             *self.benchmark_arguments,
+            *machine,
         )
         return tuple(word for word in words if word.startswith("/"))
 

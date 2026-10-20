@@ -74,7 +74,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from vs_runtime._measurement_progress import StageOutputOpener
-    from vs_runtime.contracts import CandidateWorkspace, Workspaces
+    from vs_runtime.contracts import Checkout, MeasuredCheckouts
     from vs_sandbox.api.slurm import (
         SlurmExecutionPolicy,
         SlurmLedgerAttachment,
@@ -130,7 +130,7 @@ class _DurableSemanticSubmission(BaseModel):
 
 @dataclass(slots=True)
 class _Execution:
-    workspace: CandidateWorkspace
+    workspace: Checkout
     executor: SlurmEvaluationExecutor
 
 
@@ -143,7 +143,7 @@ class SemanticSlurmEvaluationExecutor:
         policy: SlurmExecutionPolicy,
         plan: SlurmEvaluationPlan,
         trusted_plan: TrustedEvaluationPlan,
-        workspaces: Workspaces,
+        workspaces: MeasuredCheckouts,
         namespace: EvaluationStateNamespace,
         handle_root: Path,
         *,
@@ -565,6 +565,7 @@ class SemanticSlurmEvaluationExecutor:
                     result=evidence.model_dump(mode="json"),
                     operator_summary=operator_evidence_summary,
                     duration_s=raw_step.duration_s,
+                    host=raw_step.host,
                     stdout_tail=(
                         redact_diagnostic_tail(raw.stdout, max_chars=STAGE_OUTPUT_TAIL_CHARS)
                         or None

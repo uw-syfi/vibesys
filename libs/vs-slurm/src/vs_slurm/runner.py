@@ -92,6 +92,8 @@ STAGE_TIMEOUT_EXIT_CODES = frozenset({124, 137})
 _MAX_PROCESS_EXIT_CODE = 255
 _BATCH_RESULT_ROOT = ".vibesys-slurm-results"
 _SERVICE_LOG_TAIL = "service-log-tail.txt"
+_NODE_NAME = "node.txt"
+_MAX_NODE_NAME = 255
 _SERVICE_LOG_TAIL_LINES = 400
 _SERVICE_LOG_REPORTED_LINES = 40
 _SERVICE_LOG_LINE_CHARS = 400
@@ -367,6 +369,8 @@ class SlurmBatchResult:
     service_log_tail: str = ""
     """Last distinct lines of the shared service's log, empty without a service."""
     collection_failure: str | None = None
+    node: str | None = None
+    """The compute node the allocation ran on, when the job recorded it."""
 
 
 @dataclass(frozen=True)
@@ -705,6 +709,7 @@ class SlurmJobRunner:
         }
         collection_failure = job_result.collection_failure
         service_log_tail = ""
+        node: str | None = None
         with tempfile.TemporaryDirectory(
             prefix="vs-slurm-batch-", dir=self._scratch_root
         ) as temporary:
@@ -736,6 +741,7 @@ class SlurmJobRunner:
                     if job_result.exit_code == 0:
                         collection_failure = collection_failure or str(exc)
             service_log_tail = _distinct_tail(phase_root / _SERVICE_LOG_TAIL)
+            node = _read_node(phase_root / _NODE_NAME)
         timings["collection"] = max(0.0, self._clock.now() - collection_started)
         return SlurmBatchResult(
             job_id=job_result.job_id,
@@ -746,6 +752,7 @@ class SlurmJobRunner:
             content_cache_hits=handle.job.content_cache_hits,
             service_log_tail=service_log_tail,
             collection_failure=collection_failure,
+            node=node,
         )
 
     def _collect_stage(
@@ -1836,6 +1843,9 @@ def _job_script(request: _JobScriptRequest) -> str:
     lines.append("unset SSH_CLIENT SSH2_CLIENT")
     if phase_timing_root is not None:
         lines.append(f"mkdir -p {shlex.quote((workspace / phase_timing_root).as_posix())}")
+        # The node the job ran on, for whoever reads the result (best effort: never fails the job).
+        node_path = workspace / phase_timing_root / _NODE_NAME
+        lines.append(f"hostname -s > {shlex.quote(node_path.as_posix())} 2>/dev/null || true")
     if setup_script:
         if phase_timing_root is not None:
             lines.append("setup_started=$SECONDS")
@@ -1934,6 +1944,15 @@ def _service_script(
         f" job_status={SERVICE_NOT_READY_EXIT_CODE}; else"
     )
     return lines
+
+
+def _read_node(path: Path) -> str | None:
+    """The node name the job wrote, or None when it wrote none (it is best effort)."""
+    try:
+        name = path.read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    return name if name.isprintable() and name and len(name) <= _MAX_NODE_NAME else None
 
 
 def _distinct_tail(path: Path) -> str:
