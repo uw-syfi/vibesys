@@ -120,14 +120,24 @@ export function refreshed(all: AllRunsState): AllRunsState {
   return {...all, projects: {}, stale};
 }
 
-/** Every run the listings hold, with where it is: a project not listed again yet keeps its last listing. */
+/**
+ * Every run the listings hold, with where it is: a project not listed again yet keeps its last
+ * listing. A run is one entry per machine however many projects name it (the app may remember one
+ * run under two spellings of its directory): the first listing to hold it speaks.
+ */
 function listedRunRefs(all: AllRunsState): ProjectRunRef[] {
   const keys = new Set([...Object.keys(all.projects), ...Object.keys(all.stale)]);
+  const seen = new Set<string>();
   return [...keys].flatMap(key => {
     const slot = all.projects[key];
     const runs = slot?.kind === 'listed' ? slot.runs : (all.stale[key] ?? []);
     const [host, project] = JSON.parse(key) as [HostKey, string];
-    return runs.map(run => ({host, project, run}));
+    return runs.flatMap(run => {
+      const id = JSON.stringify([host, run.runId]);
+      if (seen.has(id)) return [];
+      seen.add(id);
+      return [{host, project, run}];
+    });
   });
 }
 

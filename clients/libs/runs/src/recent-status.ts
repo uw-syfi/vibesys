@@ -3,7 +3,7 @@
  * (`HostListing`) and those runs: each recent run's status, and the project directories to offer.
  * Pure functions of pushed data; the host is never asked again for them.
  */
-import {type HostKey, type HostListing, type HostRun, instanceObservation} from '@vibesys/hosts';
+import {type HostKey, type HostListing, instanceObservation, newestServerOf} from '@vibesys/hosts';
 import type {RunStart} from './run-start.js';
 
 /** A run the user attached to, as the views list it. */
@@ -55,9 +55,7 @@ export type RecentStatus =
 /** `run`'s status in its host's `listing` (undefined: no listing yet). */
 export function recentStatus(run: RecentRun, listing: HostListing | undefined): RecentStatus {
   if (listing?.kind !== 'listed') return {kind: 'unknown'};
-  const live = listing.live.find(
-    entry => entry.runId === run.runId && entry.projectRoot === run.project,
-  );
+  const live = newestServerOf(listing.live, run.runId, run.project);
   if (live !== undefined) return {kind: 'live', instanceId: live.id, status: live.status};
   if (run.instanceId !== null) {
     const observed = instanceObservation(listing, run.instanceId);
@@ -70,13 +68,7 @@ export function recentStatus(run: RecentRun, listing: HostListing | undefined): 
     return {kind: 'unknown'};
   }
   // A run resumed and ended again has several tombstones: its latest server says how it ended.
-  const ended = listing.ended
-    .filter(entry => entry.runId === run.runId && entry.projectRoot === run.project)
-    .reduce<HostRun | undefined>(
-      (latest, entry) =>
-        latest === undefined || entry.startedAt > latest.startedAt ? entry : latest,
-      undefined,
-    );
+  const ended = newestServerOf(listing.ended, run.runId, run.project);
   return {
     kind: 'ended',
     instanceId: ended?.id ?? run.instanceId,

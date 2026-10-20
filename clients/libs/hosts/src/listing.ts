@@ -105,6 +105,37 @@ function hostRun(record: LiveInstanceRecord): HostRun {
   };
 }
 
+/**
+ * Whether the directory the app remembers a run in names the registry's `root` for it. The app keeps
+ * what the user typed (`~/x`, a trailing slash) and the registry the resolved absolute path.
+ */
+function sameProject(remembered: string, root: string): boolean {
+  const trimmed = (path: string): string => path.replace(/\/+$/, '');
+  const [want, have] = [trimmed(remembered), trimmed(root)];
+  return want === have || (want.startsWith('~/') && have.endsWith(want.slice(1)));
+}
+
+/**
+ * The newest of `servers` (a host's live or ended records) that drives or drove run `runId` in
+ * `project`: a run resumed many times has one record per server, and the latest speaks for it.
+ */
+export function newestServerOf(
+  servers: readonly HostRun[],
+  runId: string,
+  project?: string,
+): HostRun | undefined {
+  return servers
+    .filter(
+      server =>
+        server.runId === runId &&
+        (project === undefined || sameProject(project, server.projectRoot)),
+    )
+    .reduce<HostRun | undefined>(
+      (best, server) => (best === undefined || best.startedAt < server.startedAt ? server : best),
+      undefined,
+    );
+}
+
 /** `listing` from `host`'s registry, as the views list it. */
 export function hostListing(host: HostKey, listing: InstanceList): HostListing {
   return {

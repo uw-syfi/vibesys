@@ -7,7 +7,7 @@
  * found in neither of the listing's two lists; the listing proves it is not live when it holds no
  * row that could be its server (`unverified`, `unreadable`).
  */
-import type {ConnectionStatus, HostListing, HostRun} from '@vibesys/hosts';
+import {type ConnectionStatus, type HostListing, newestServerOf} from '@vibesys/hosts';
 import {type RecentRun, type RunRef, recentStatus} from '@vibesys/runs';
 import type {MachineBlock, RunRecord} from './run-page.js';
 
@@ -30,15 +30,6 @@ function blockOf(connection: ConnectionStatus): MachineBlock | null {
 const MACHINE: RunRecord = {kind: 'unlisted', why: 'machine'};
 const UNCONFIRMED: RunRecord = {kind: 'unlisted', why: 'unconfirmed'};
 
-function newest(runs: readonly HostRun[], runId: string, project?: string): HostRun | undefined {
-  return runs
-    .filter(run => run.runId === runId && (project === undefined || run.projectRoot === project))
-    .reduce<HostRun | undefined>(
-      (best, run) => (best === undefined || best.startedAt < run.startedAt ? run : best),
-      undefined,
-    );
-}
-
 export function runRecord(
   listings: readonly HostListing[],
   run: RunRef,
@@ -49,9 +40,9 @@ export function runRecord(
     const block = listing === undefined ? null : blockOf(listing.connection);
     return block === null ? MACHINE : {kind: 'unlisted', why: 'machine', block};
   }
-  const live = newest(listing.live, run.runId, recent?.project);
+  const live = newestServerOf(listing.live, run.runId, recent?.project);
   if (live !== undefined) return {kind: 'live', run: live};
-  const ended = newest(listing.ended, run.runId, recent?.project);
+  const ended = newestServerOf(listing.ended, run.runId, recent?.project);
   if (ended !== undefined) return {kind: 'ended', run: ended};
   const uncertain = listing.unverified.length > 0 || listing.unreadable.length > 0;
   if (recent === undefined) return uncertain ? UNCONFIRMED : {kind: 'historical', status: null};

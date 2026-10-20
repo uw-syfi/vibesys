@@ -44,6 +44,7 @@ export {
   type InstanceObservation,
   instanceObservation,
   instancePhaseText,
+  newestServerOf,
   type RunEnd,
   type RunPause,
 } from './listing.js';
