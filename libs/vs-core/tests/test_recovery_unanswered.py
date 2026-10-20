@@ -35,7 +35,8 @@ LATER = 1.0e7
 NO_LIMIT = 1.7976931348623157e308
 """An adoption's limit: the run's, and the run has none."""
 
-ATTEMPT = core.Scope(owner=core.AttemptId(root="attempt:h8:8"), generation=0)
+ATTEMPT_ID = core.AttemptId(root="attempt:h8:8")
+ATTEMPT = core.Scope(owner=ATTEMPT_ID, generation=0)
 RUN = core.Scope(owner=core.initial_state().run.run_id, generation=0)
 SELECTION = core.TrustedBaseline(
     revision=core.RevisionRef(revision_id=core.RevisionId(root="rev"), digest="git-commit:rev")
@@ -151,7 +152,7 @@ def outstanding(kind: Outstanding, number: int) -> core.RequestRecord:
     write = core.CloseAttemptScope(
         request_id=request_id,
         scope=ATTEMPT,
-        attempt=core.AttemptRef(attempt_id=ATTEMPT.owner, generation=0),
+        attempt=core.AttemptRef(attempt_id=ATTEMPT_ID, generation=0),
         admission_id=ADMISSION,
     )
     bare = _record(

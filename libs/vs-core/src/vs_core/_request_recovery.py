@@ -20,13 +20,11 @@ from ._proofs import (
     current_closure,
     descriptor_matches,
     fresh_observation,
-    invocation_for,
     observation_for,
-    operation_for,
     released_owner,
     resolved_observation,
-    submission_budget_for,
 )
+from ._recovery_owners import known_owner, operation_decision, typed_job_owner
 from ._recovery_unanswered import Inspection, Settlement, settlement
 from ._registry import ContractError
 from ._request_forward import turn_of
@@ -58,7 +56,6 @@ from .types.evaluation import (
     CancelOwnedJob,
     JobTerminationRequested,
     MeasurementSubmissionEnded,
-    OwnedJob,
     RegisteredOwnedJob,
     SubmitMeasurement,
 )
@@ -91,7 +88,6 @@ from .types.sessions import (
     EnsureSession,
     InvocationCancellationRequested,
     ResumeSessionTurn,
-    SessionPhase,
 )
 from .types.until import Failed, FailureReason, WhileAlive, WhileOpen
 from .types.waits import WaitKind, WaitOn, WaitSubject
@@ -110,8 +106,6 @@ if TYPE_CHECKING:
         RequestRecord,
         TargetObservation,
     )
-    from .types.sessions import Invocation, SessionView
-    from .types.strategy import Operation
 
 type Resolution = Literal[
     "pending", "safe-prepared", "reattached", "terminal", "unknown", "blocked"
@@ -199,184 +193,6 @@ def _child_inspection_fact(
     return Proven((target.observation,))
 
 
-def _operation_decision(record: RequestRecord, context: RecordsContext) -> Operation | None:
-    request = record.request
-    if not isinstance(request, ExecuteRegisteredOperation):
-        return None
-    proof = operation_for(context.run.receipts, request)
-    return proof.value if isinstance(proof, Proven) else None
-
-
-def _invocation_owner(
-    record: RequestRecord, context: RecordsContext, invocation: Invocation, observation: Observation
-) -> bool:
-    request = record.request
-    registered = None
-    if isinstance(request, DispatchTurn | ResumeSessionTurn):
-        turn = request.turn
-    elif isinstance(request, ExecuteRegisteredOperation):
-        decision = _operation_decision(record, context)
-        if (
-            decision is None
-            or decision.registered_turn is None
-            or request.operation.schema_ref.lifecycle != LifecycleClass.SESSION_TURN
-            or record.lifecycle != LifecycleClass.SESSION_TURN
-        ):
-            return False
-        turn = decision.registered_turn
-        registered = request.operation_id
-    else:
-        return False
-    proof = invocation_for(context.sessions.invocations, turn, observation.scope)
-    previous = invocation.observation
-    return (
-        isinstance(proof, Proven)
-        and proof.value == invocation
-        and (registered is None or invocation.registered_operation == registered)
-        and (
-            previous is None
-            or (
-                isinstance(observation_for(record, previous), Proven)
-                and previous.resource_id in (None, observation.resource_id)
-            )
-        )
-    )
-
-
-def _typed_job_owner(
-    record: RequestRecord,
-    context: RecordsContext,
-    observation: Observation,
-    job: OwnedJob | RegisteredOwnedJob,
-) -> bool:
-    """One canonical job correspondence for reattachment and lease transfer."""
-    request = record.request
-    if (
-        not isinstance(observation_for(record, observation), Proven)
-        or job.scope != observation.scope
-        or job.resource_id not in (None, observation.resource_id)
-        or (
-            job.observation is not None
-            and (
-                not isinstance(observation_for(record, job.observation), Proven)
-                or job.observation.resource_id not in (None, observation.resource_id)
-            )
-        )
-    ):
-        return False
-    if isinstance(job, OwnedJob):
-        return (
-            isinstance(request, SubmitMeasurement)
-            and job.submission_id == record.request_id
-            and job.plan == request.plan
-        )
-    if not isinstance(request, ExecuteRegisteredOperation):
-        return False
-    decision = _operation_decision(record, context)
-    descriptor = descriptor_matches(
-        context.registry,
-        context.run.capabilities,
-        request.operation,
-        LifecycleClass.OWNED_JOB,
-        OperationNormalizationKind.NONE,
-    )
-    return (
-        decision is not None
-        and isinstance(descriptor, Proven)
-        and descriptor.value.resource_pool == job.resource_pool
-        and job.request_id == record.request_id
-        and job.operation_id == request.operation_id
-        and job.expected_measurement == decision.registered_measurement
-    )
-
-
-def _submission_owner(record: RequestRecord, context: RecordsContext) -> bool:
-    if not isinstance(record.request, SubmitMeasurement):
-        return False
-    return isinstance(
-        submission_budget_for(
-            record.request, context.evaluation.submission_budgets, context.run.receipts
-        ),
-        Proven,
-    )
-
-
-def _workspace_owner(
-    record: RequestRecord, context: RecordsContext, observation: Observation
-) -> bool:
-    request = record.request
-    if not isinstance(request, EnsureWorkspace):
-        return False
-    # The attempt keeps the ensure request pending only while it acquires. Once it
-    # consumed the accepted answer (it left ACQUIRING) the workspace is the attempt's own,
-    # and a restart must still recognise the resource as owned: otherwise the recovery
-    # check of a completed ensure never resolves.
-    consumed = (
-        record.phase == RequestPhase.COMPLETED
-        and observation.accepted
-        and observation.status == ObservationStatus.SUCCEEDED
-    )
-    return any(
-        owner.attempt_id == request.attempt.attempt_id
-        and owner.generation == request.attempt.generation
-        and isinstance(current_admission(owner, observation.scope, request.admission_id), Proven)
-        and owner.workspace == request.plan
-        and (
-            record.request_id in owner.pending_records
-            or (consumed and owner.phase != AttemptPhase.ACQUIRING)
-        )
-        for owner in context.attempts.attempts
-    )
-
-
-def _session_created(record: RequestRecord, observation: Observation, session: SessionView) -> bool:
-    """The session is the one this completed ensure created, and it is busy with its first turn.
-
-    A session's own acceptance waits for that turn's reply, and the turn waits for recovery
-    to be ready, so recovery cannot wait for acceptance to recognise the ensure's resource.
-    An idle session has no turn to wait on, so it needs its acceptance as before.
-    """
-    return (
-        record.phase == RequestPhase.COMPLETED
-        and observation.accepted
-        and observation.status == ObservationStatus.SUCCEEDED
-        and session.phase in (SessionPhase.ACQUIRING, SessionPhase.EXECUTING)
-        and session.resource_id is not None
-        and observation.resource_id == session.resource_id
-    )
-
-
-def _known_owner(record: RequestRecord, context: RecordsContext, observation: Observation) -> bool:
-    if any(
-        _typed_job_owner(record, context, observation, job)
-        for job in (*context.evaluation.jobs, *context.evaluation.registered_jobs)
-    ):
-        return True
-    if _submission_owner(record, context) or _workspace_owner(record, context, observation):
-        return True
-    if isinstance(record.request, EnsureSession) and any(
-        session.scope == observation.scope
-        and session.resource_id in (None, observation.resource_id)
-        and session.spec == record.request.spec
-        and session.generation == observation.scope.generation
-        and (
-            record.request.required_resource is None
-            or observation.resource_id == record.request.required_resource
-        )
-        and (
-            (session.accepted and session.resource_id is not None)
-            or record.request_id in session.pending_records
-            or _session_created(record, observation, session)
-        )
-        for session in context.sessions.sessions
-    ):
-        return True
-    return any(
-        _invocation_owner(record, context, invocation, observation)
-        for invocation in context.sessions.invocations
-    )
-
-
 def _prepared_episode(record: RequestRecord, context: RecordsContext) -> bool:
     request = record.request
     if record.lifecycle == LifecycleClass.QUERY or isinstance(
@@ -454,7 +270,7 @@ def _reopen_resolved(record: RequestRecord, context: RecordsContext) -> bool:
     )
     if not isinstance(descriptor, Proven):
         return False
-    decision = _operation_decision(record, context)
+    decision = operation_decision(record, context)
     if decision is None:
         return False
     if descriptor.value.normalization != OperationNormalizationKind.SCOPE_REOPEN:
@@ -599,7 +415,7 @@ def _observed_resolution(record: RequestRecord, context: RecordsContext) -> Reso
         observation.accepted
         and observation.resource_id is not None
         and observation.children_complete
-        and _known_owner(record, context, observation)
+        and known_owner(record, context, observation)
     ):
         return "reattached"
     return "pending"
@@ -736,7 +552,7 @@ def _transfer_children(state: RecordsState, context: RecordsContext) -> RecordsS
                 and source.request.admission_id == ancestor.request.admission_id
                 and (child.observation is None or child.observation.request_id == source.request_id)
                 and observation is not None
-                and _typed_job_owner(source, context, observation, job)
+                and typed_job_owner(source, context, observation, job)
                 and (
                     source.request.scope == child.scope
                     and observation.request_id == request_id
@@ -955,7 +771,7 @@ def _owner_sessions(
     """The waiting sessions an ensure's check waits on to learn whether they own its resource.
 
     An ensure resolves as reattached once its session is known to hold the resource it
-    reported (``_known_owner``). A session still settling its own state (unknown after a
+    reported (``known_owner``). A session still settling its own state (unknown after a
     crash, inspecting a turn) moves the check when it settles, so the check names it.
     """
     if record is None or not isinstance(record.request, EnsureSession):
