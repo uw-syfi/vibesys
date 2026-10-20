@@ -345,7 +345,6 @@ _OPERATOR_AFTER_S = 600.0
 
 
 @pytest.mark.regression
-@pytest.mark.xfail(strict=True, reason="review of #3283, NEW-1: the resend after a park is late")
 @settings(max_examples=examples(pr=6, nightly=40), deadline=None)
 # The review's reproduction: a 30 min turn whose first failing send (240 s) reaches the gate
 # with 60 s of own time left, through an outage one hour past the budget.
@@ -429,7 +428,6 @@ class _Windows:
 
 
 @pytest.mark.regression
-@pytest.mark.xfail(strict=True, reason="review of #3283, NEW-2: served work is credited as hold")
 @settings(max_examples=examples(pr=6, nightly=40), deadline=None)
 @example(work=5400.0, length=600.0, send_s=240.0)  # the review's reproduction
 @given(

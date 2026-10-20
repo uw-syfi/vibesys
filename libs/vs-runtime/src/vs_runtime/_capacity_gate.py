@@ -205,8 +205,8 @@ class _TurnMemory:
     to core (``CapacityHold``), which never charges it to the turn's limit: the length of
     the holds that ended, when the current one began (an outage streak is one hold, the
     sends between its waits included), and when the gate last let the turn go.
-    ``longest_send`` is the longest a send after such a release took to stop again, which
-    sizes the grace core gives the next one.
+    ``longest_send`` is the longest a send after such a release took to fail again within its
+    grace, which sizes the grace core gives the next one; a send that ran longer was served.
     """
 
     quota_waited: float = 0.0
@@ -217,14 +217,23 @@ class _TurnMemory:
     released_at: float | None = None
     longest_send: float = 0.0
 
-    def hold(self, now: float, *, continues: bool) -> None:
-        """Begin a hold at ``now``, or with ``continues`` go on with the current one."""
-        if self.released_at is not None:
-            self.longest_send = max(self.longest_send, now - self.released_at)
-        if not continues:
+    def hold(self, now: float, *, continues: bool, grace: float) -> None:
+        """Begin a hold at ``now``, or with ``continues`` go on with the current one.
+
+        A resend that stops again within its grace (``grace``, or twice the longest send) was
+        never served: it stays part of the hold it was sent from, which a park closed at the
+        resume, so the hold still begins at that release. A resend that ran longer did real
+        work: that hold ends at its release and a new one begins ``now``, and its length sizes
+        no grace.
+        """
+        resent = self.released_at
+        failed_fast = resent is not None and now - resent <= max(grace, 2 * self.longest_send)
+        if resent is not None and failed_fast:
+            self.longest_send = max(self.longest_send, now - resent)
+        if not continues or not failed_fast:
             self.close(now)
         if self.held_since is None:
-            self.held_since = now
+            self.held_since = resent if resent is not None and failed_fast else now
         self.released_at = None
 
     def close(self, now: float) -> None:
@@ -406,7 +415,7 @@ class PolicyCapacityGate:
             self._wait_out_outage(error, stops, now, context)
             return
         memory.outage = None
-        memory.hold(now, continues=False)
+        memory.hold(now, continues=False, grace=self._outage.resend_grace_seconds)
         decision = decide_quota(
             self._policy, resets_at=error.resets_at, now=now, waited=memory.quota_waited
         )
@@ -483,7 +492,7 @@ class PolicyCapacityGate:
         route = (error.provider, stops.model)
         memory = _memory(stops)
         streak = memory.outage
-        memory.hold(now, continues=streak is not None)
+        memory.hold(now, continues=streak is not None, grace=self._outage.resend_grace_seconds)
         if streak is None:
             streak = memory.outage = _OutageStreak(since=now)
         elif streak.released is not None and self._route_up(route, streak.released):
