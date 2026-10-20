@@ -351,6 +351,7 @@ export type EventType =
   | "run_configured"
   | "framework_warning"
   | "winner_selected"
+  | "input_measurement_failed"
   | "measurement_compared"
   | "comparisons_read"
   | "workstream_finished"
@@ -413,6 +414,7 @@ export type Data =
       | RunConfiguredData
       | FrameworkWarningData
       | WinnerSelectedData
+      | InputMeasurementFailedData
       | MeasurementComparedData
       | ComparisonsReadData
       | WorkstreamFinishedData
@@ -699,7 +701,19 @@ export type Kind46 = "winner_selected";
 export type Selection = "candidate" | "baseline";
 export type Revision3 = string;
 export type SettlementId = string | null;
-export type Kind47 = "measurement_compared";
+export type Kind47 = "input_measurement_failed";
+/**
+ * Why the run's input failed its own trusted measurement. Closed.
+ *
+ * See ``vibesys.events.InputMeasurementFailureKind``, which this mirrors member-for-member.
+ */
+export type InputMeasurementFailureKind =
+  "no-evidence" | "readings-refused" | "readings-undecodable" | "accuracy-failed" | "benchmark-failed" | "wait-ended";
+export type Stage3 = string | null;
+export type Summary4 = string;
+export type Attempts2 = number;
+export type Compared = boolean;
+export type Kind48 = "measurement_compared";
 export type Metric3 = string;
 export type Unit3 = string | null;
 export type Direction2 = "max" | "min";
@@ -719,7 +733,7 @@ export type BaseSamples = number;
  * Closed set of framework subsystems that emit framework events.
  */
 export type FrameworkSource5 = "gates" | "git_tracking" | "loop" | "gpu" | "skypilot" | "other";
-export type Kind48 = "comparisons_read";
+export type Kind49 = "comparisons_read";
 export type Name3 = string;
 export type Label2 = string;
 /**
@@ -735,7 +749,7 @@ export type Samples = number | null;
 export type Hosts = string[];
 export type Reason10 = string | null;
 export type Comparisons = ComparisonReadingData[];
-export type Kind49 = "workstream_finished";
+export type Kind50 = "workstream_finished";
 export type SetupFailure = boolean;
 export type Refunded = boolean;
 export type RepeatedError = boolean;
@@ -769,7 +783,7 @@ export type Role1 = string | null;
 export type Turns = number | null;
 export type Limit2 = number | null;
 export type Text6 = string;
-export type Kind50 = "turn_usage_recorded";
+export type Kind51 = "turn_usage_recorded";
 export type InputTokens2 = number | null;
 export type CacheCreationInputTokens = number | null;
 export type CacheReadInputTokens = number | null;
@@ -777,9 +791,9 @@ export type OutputTokens = number | null;
 export type ReasoningOutputTokens = number | null;
 export type TotalCostUsd = number | null;
 export type DurationMs = number | null;
-export type Kind51 = "span_started";
-export type Kind52 = "span_updated";
-export type Kind53 = "span_ended";
+export type Kind52 = "span_started";
+export type Kind53 = "span_updated";
+export type Kind54 = "span_ended";
 /**
  * True when the recording boundary cut variable-size payload fields to keep this event within MAX_SERIALIZED_RUN_EVENT_BYTES.
  */
@@ -875,7 +889,7 @@ export type Reset = boolean;
 export type RemovedHypothesisIds = string[];
 export type ExperimentsReady = boolean | null;
 export type Iterations = IterationSlice | IterationUnavailable | null;
-export type Kind54 = "page";
+export type Kind55 = "page";
 export type SchemaVersion = 1;
 export type RunId4 = string;
 export type ProjectionRevision = string;
@@ -901,7 +915,7 @@ export type Direction4 = ("max" | "min") | null;
 export type HeadlineMetrics = IterationMetric[];
 export type Items = IterationSummary[];
 export type NextCursor = string | null;
-export type Kind55 = "unavailable";
+export type Kind56 = "unavailable";
 export type SchemaVersion1 = 1;
 /**
  * Closed reasons why a policy cannot expose iteration navigation.
@@ -964,17 +978,17 @@ export type ClientId18 = string;
 export type Code2 = string;
 export type Message2 = string;
 export type LogOwner = StartupStep | GateStage | ToolBuild | RunNarration;
-export type Kind56 = "startup_step";
+export type Kind57 = "startup_step";
 /**
  * Where an opening environment is, in the order it gets there.
  */
 export type EnvironmentStartupStage = "probing_workspace" | "building_image" | "building_tools" | "starting_container";
-export type Kind57 = "gate_stage";
+export type Kind58 = "gate_stage";
 export type ExecutionId2 = string;
 export type Attempt4 = number;
-export type Kind58 = "tool_build";
+export type Kind59 = "tool_build";
 export type Name4 = string;
-export type Kind59 = "run_narration";
+export type Kind60 = "run_narration";
 export type At = string;
 /**
  * A line's severity: the standard ``logging`` level at or below the record's.
@@ -991,7 +1005,7 @@ export type Agent = string;
 export type Role2 = string;
 export type Model7 = string | null;
 export type StartedBy = string[];
-export type Stage3 = string;
+export type Stage4 = string;
 export type MetricValue1 = number | null;
 export type VsBaseline1 = number | null;
 export type Name5 = string;
@@ -1015,7 +1029,7 @@ export type Round3 = number | null;
 export type Idea = string | null;
 export type Revision4 = string | null;
 export type Outcome = string | null;
-export type Summary4 = string | null;
+export type Summary5 = string | null;
 export type Probe = boolean;
 
 export interface ProtocolDocument {
@@ -2277,10 +2291,23 @@ export interface WinnerSelectedData {
   settlement_id?: SettlementId;
 }
 /**
+ * The run's input failed its trusted measurement, so the run has no trusted baseline.
+ *
+ * Mirrors ``vibesys.events.InputMeasurementFailedData`` field for field.
+ */
+export interface InputMeasurementFailedData {
+  kind: Kind47;
+  failure: InputMeasurementFailureKind;
+  stage?: Stage3;
+  summary?: Summary4;
+  attempts?: Attempts2;
+  compared?: Compared;
+}
+/**
  * A candidate's measurement was compared with its base's. See ``vibesys.events``.
  */
 export interface MeasurementComparedData {
-  kind: Kind47;
+  kind: Kind48;
   metric: Metric3;
   unit?: Unit3;
   direction: Direction2;
@@ -2301,7 +2328,7 @@ export interface MeasurementComparedData {
  * A run never measures a comparison: ``vibesys compare`` does, once, and stores the reading.
  */
 export interface ComparisonsReadData {
-  kind: Kind48;
+  kind: Kind49;
   comparisons: Comparisons;
 }
 /**
@@ -2334,7 +2361,7 @@ export interface ComparisonReadingData {
  * specifically, profile and merge workstreams do not emit this event.
  */
 export interface WorkstreamFinishedData {
-  kind: Kind49;
+  kind: Kind50;
   setup_failure: SetupFailure;
   refunded: Refunded;
   repeated_error: RepeatedError;
@@ -2356,7 +2383,7 @@ export interface WorkstreamFailureData {
  * See ``vibesys.events.TurnUsageData``.
  */
 export interface TurnUsageData {
-  kind: Kind50;
+  kind: Kind51;
   input_tokens?: InputTokens2;
   cache_creation_input_tokens?: CacheCreationInputTokens;
   cache_read_input_tokens?: CacheReadInputTokens;
@@ -2371,21 +2398,21 @@ export interface TurnUsageData {
  */
 export interface SpanStartedData {
   span: Span;
-  kind: Kind51;
+  kind: Kind52;
 }
 /**
  * A span changed.
  */
 export interface SpanUpdatedData {
   span: Span;
-  kind: Kind52;
+  kind: Kind53;
 }
 /**
  * A span ended.
  */
 export interface SpanEndedData {
   span: Span;
-  kind: Kind53;
+  kind: Kind54;
 }
 /**
  * One measured performance result in a run.
@@ -2490,7 +2517,7 @@ export interface ExperimentUpdate {
  * One bounded page, with enough identity to reject stale merges.
  */
 export interface IterationSlice {
-  kind?: Kind54;
+  kind?: Kind55;
   schema_version?: SchemaVersion;
   run_id: RunId4;
   projection_revision: ProjectionRevision;
@@ -2525,7 +2552,7 @@ export interface IterationMetric {
  * Typed absence, kept distinct from a supported empty tree.
  */
 export interface IterationUnavailable {
-  kind?: Kind55;
+  kind?: Kind56;
   schema_version?: SchemaVersion1;
   reason: IterationUnavailableReason;
   detail?: Detail5;
@@ -2657,7 +2684,7 @@ export interface ProtocolErrorMessage {
  */
 export interface StartupStep {
   span_id?: SpanId | null;
-  kind: Kind56;
+  kind: Kind57;
   stage: EnvironmentStartupStage;
 }
 /**
@@ -2665,7 +2692,7 @@ export interface StartupStep {
  */
 export interface GateStage {
   span_id?: SpanId | null;
-  kind: Kind57;
+  kind: Kind58;
   execution_id: ExecutionId2;
   gate: GateKind;
   attempt: Attempt4;
@@ -2675,7 +2702,7 @@ export interface GateStage {
  */
 export interface ToolBuild {
   span_id?: SpanId | null;
-  kind: Kind58;
+  kind: Kind59;
   name: Name4;
 }
 /**
@@ -2683,7 +2710,7 @@ export interface ToolBuild {
  */
 export interface RunNarration {
   span_id?: SpanId | null;
-  kind: Kind59;
+  kind: Kind60;
 }
 /**
  * One narration record, as one JSON line of a narration stream.
@@ -2748,7 +2775,7 @@ export interface AgentTurnAttrs {
  * rejection for another reason) is the search's own.
  */
 export interface GateAttrs {
-  stage: Stage3;
+  stage: Stage4;
   metric_value?: MetricValue1;
   vs_baseline?: VsBaseline1;
   input_metrics?: InputMetrics;
@@ -2811,7 +2838,7 @@ export interface WorkstreamAttrs {
   idea?: Idea;
   revision?: Revision4;
   outcome?: Outcome;
-  summary?: Summary4;
+  summary?: Summary5;
   probe?: Probe;
 }
 export interface EvolveSpanAttributes {
