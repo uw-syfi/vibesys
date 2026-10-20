@@ -23,7 +23,7 @@ from vibesys.orchestration.dynamic.search._outcomes import (
     assertion,
     failure_of,
 )
-from vibesys.orchestration.dynamic.search._reports import RESUMES
+from vibesys.orchestration.dynamic.search._reports import seated
 from vibesys.orchestration.dynamic.search._resume import ResumeStage, WorkstreamResume, mark
 from vibesys.orchestration.dynamic.search._spans import (
     label_outcome,
@@ -68,6 +68,7 @@ async def workstream(ctx: Flow, given: WorkstreamStart | WorkstreamResume) -> Wo
                 return WorkstreamDone.not_opened(w, failure_of(opened.failed, None))
             work.workspace = opened
             mark(ctx, w, work, ResumeStage.WORKING)
+            await seated(ctx, w.key)  # its attempt was admitted: its agents wait for a slot
             closing = await close_with(ctx, w, opened, work, None)
     except Stopped:
         closing = work.stopped()
@@ -87,7 +88,7 @@ async def resumed(ctx: Flow, at: WorkstreamResume) -> WorkstreamDone:
             if isinstance(ws, NotReopened):
                 return WorkstreamDone.lost(w, at.workspace, at.result or at.carried, at.merged)
             work.workspace = ws
-            await ctx.latch(RESUMES.of(f"{w.key}.0"))
+            await seated(ctx, w.key)
             closing = await close_with(ctx, w, ws, work, at)
     except Stopped:
         closing = work.stopped()

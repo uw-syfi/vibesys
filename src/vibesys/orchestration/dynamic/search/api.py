@@ -90,6 +90,7 @@ from vibesys.orchestration.dynamic.search._queue import (
 )
 from vibesys.orchestration.dynamic.search._reports import (
     InputOverdue,
+    Opened,
     Released,
     Resuming,
     Suspended,
@@ -200,6 +201,7 @@ __all__ = [
     "MergeableRow",
     "MetricRow",
     "NoPlan",
+    "Opened",
     "Outline",
     "OutlinePrompt",
     "Outlined",

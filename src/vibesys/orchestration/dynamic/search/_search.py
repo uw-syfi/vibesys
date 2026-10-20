@@ -18,6 +18,8 @@ on its own `VERDICTS` latch: measure now, or never, because a newer submission s
 the queue overflowed. An agent turn core suspended on its own evaluations frees its slot the same
 way (`RunRecord.suspend`); once core authorizes its resume, the root lends it the next free slot
 on its `RESUMES` latch (`RunRecord.resumes`), so agents at work never outnumber `max_in_flight`.
+New work takes its first agent slot the same way, once its workspace opened (`_reports.seated`):
+while its attempt queues for core's admission it holds no slot a resuming turn needs.
 A workstream that waits too long for the input's measurement reports it, and
 the planner is told on its next turn (`RunRecord.overdue`).
 
@@ -51,6 +53,7 @@ from vibesys.orchestration.dynamic.search._reports import (
     VERDICTS,
     Granted,
     InputOverdue,
+    Opened,
     Released,
     Report,
     Resuming,
@@ -98,7 +101,8 @@ async def dynamic(ctx: Flow, given: DynamicConfig | DynamicResume) -> NoWinner |
         run = RunRecord(given, base, None, terms)
     ctx.fall_back_to_input(run.leading()[1])
     # typed, so the match on what they yield below is checked exhaustive
-    # unbounded: the record bounds the workstreams whose agents work (`RunRecord.free_agents`)
+    # unbounded: the record bounds the workstreams started (`RunRecord.room`) and the agents at
+    # work (`RunRecord.free_agents`)
     workstreams: Group[WorkstreamDone] = ctx.group()
     planning: Group[PlanOutcome] = ctx.group(limit=1)
     measuring: Group[Baseline] = ctx.group(limit=1)
@@ -112,7 +116,7 @@ async def dynamic(ctx: Flow, given: DynamicConfig | DynamicResume) -> NoWinner |
         ):
             for key, wait in run.resumes():  # before new work takes the free slots
                 ctx.latch(RESUMES.of(f"{key}.{wait}")).set(Granted())
-            for start in run.ready_to_start(run.free_agents()):
+            for start in run.ready_to_start(run.room()):
                 built.started(ctx, start, workstreams.start(start.key, workstream, start))
             for key, verdict in run.verdicts(stopping=ctx.stop_requested):
                 ctx.latch(VERDICTS.of(key)).set(verdict)
@@ -145,7 +149,7 @@ def resume(
         ctx.latch(INPUT_MEASURED).set(run.baseline)
     for start in run.running.values():
         workstreams.start(start.key, workstream, start)
-        if start.key not in run.resuming:
+        if start.key not in run.resuming and start.key not in run.unseated:
             ctx.latch(RESUMES.of(f"{start.key}.0")).set(Granted())
     for key, verdict in run.decided_verdicts():
         ctx.latch(VERDICTS.of(key)).set(verdict)
@@ -167,7 +171,9 @@ def fold(ctx: Flow, run: RunRecord, event: Event) -> None:
         case WorkstreamDone() as done:
             run.finished(done)
             ctx.choose(*run.leading())
-        case Submission() | Released() | InputOverdue() | Suspended() | Resuming() as report:
+        case (
+            Submission() | Released() | InputOverdue() | Opened() | Suspended() | Resuming()
+        ) as report:
             fold_report(run, report)
         case TaskStopped(key=key):
             run.stopped_before_start(key)
@@ -186,6 +192,8 @@ def fold_report(run: RunRecord, report: Report) -> None:
             run.released(key)
         case InputOverdue() as overdue:
             run.overdue(overdue)
+        case Opened() as opened:
+            run.opened(opened)
         case Suspended() as suspended:
             run.suspend(suspended)
         case Resuming() as resuming:

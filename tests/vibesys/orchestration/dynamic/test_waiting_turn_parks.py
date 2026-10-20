@@ -8,7 +8,8 @@ one is free, so agents at work never outnumber ``max_in_flight``. A run restarte
 change keeps that bound: a workstream that waited in a suspended turn asks its agent again only
 once it has a slot. Core admits at most a limited number of attempts at once (an operator may
 lower it to ``max_in_flight``); a parked turn keeps its attempt open, and new work queued for
-admission must never keep the parked turns from resuming.
+admission must never keep the parked turns from resuming. Every story admits attempts as core
+does, up to the run's launch limit unless it lowers it.
 """
 
 from __future__ import annotations
@@ -20,13 +21,13 @@ from tests.vibesys.orchestration.dynamic._host import PLANNER_LABEL, Host, begin
 from tests.vibesys.orchestration.dynamic.test_agent_waits import offering
 from tests.vibesys.vibesys_flows import across_restarts
 
-from vibesys.orchestration.dynamic.search.api import dynamic
+from vibesys.orchestration.dynamic.search.api import budget, dynamic
 from vs_core.api import Finish, RequestTurn, StartAttempt
 from vs_core.api.testing import code_changed
 
 if TYPE_CHECKING:
     from vs_core.api import Continuation
-    from vs_core.api.testing import RestartPolicy
+    from vs_core.api.testing import Asked, RestartPolicy
 
 WIDTH = 2
 AGENTS = frozenset({"implementer", "judge", "merger", "profiler"})
@@ -43,6 +44,18 @@ def at_work(host: Host) -> set[str]:
     return {asked.decision.root.split("/")[0] for asked in turns if asked.label in AGENTS}
 
 
+def admissible(host: Host, *, limit: int | None = None) -> list[Asked]:
+    """The open waits core would answer now: a start only while fewer than ``limit`` attempts
+    are open (core's admission; by default the run's launch limit)."""
+    limit = budget(host.config).parallel if limit is None else limit
+    full = len(host.unsettled) >= limit
+    return [
+        asked
+        for asked in host.run.open
+        if asked.until is not None and not (full and isinstance(asked.request, StartAttempt))
+    ]
+
+
 def all_waiting(*, restarting: bool | RestartPolicy) -> tuple[Host, list[Continuation]]:
     """A run whose ``WIDTH`` workstreams each suspended their implementer's first turn."""
     host = begin(
@@ -56,7 +69,7 @@ def all_waiting(*, restarting: bool | RestartPolicy) -> tuple[Host, list[Continu
         turns = host.open(RequestTurn, label="implementer")
         if len(turns) == WIDTH:
             return host, [host.run.suspend(turn) for turn in turns]
-        host.answer(next(a for a in host.run.open if a.until is not None and a not in turns))
+        host.answer(next(a for a in admissible(host) if a not in turns))
     message = f"the workstreams never asked their implementers: {host.run.timeline()}"
     raise AssertionError(message)
 
@@ -67,7 +80,10 @@ def start_new_work(host: Host) -> None:
     for _ in range(50):
         if len(at_work(host)) == WIDTH:
             return
-        host.answer(next(a for a in host.run.open if a.until is not None and a.label not in AGENTS))
+        waits = [a for a in admissible(host) if a.label not in AGENTS]
+        if not waits:
+            break  # the new work's attempts wait for core's admission
+        host.answer(waits[0])
     message = f"the new work never asked its agents: {host.run.timeline()}"
     raise AssertionError(message)
 
@@ -76,7 +92,11 @@ def drain_within_width(host: Host, *, limit: int = 800) -> None:
     """Answer everything the ordinary way, checking no more agents work than the run's width."""
     for _ in range(limit):
         assert len(at_work(host)) <= WIDTH, (at_work(host), host.run.timeline())
-        if not host.step(0):
+        if waits := admissible(host):
+            host.answer(waits[0])
+        elif host.run.sleeping_until:
+            host.run.advance_to(min(host.run.sleeping_until))
+        else:
             return
     message = f"the flow did not settle in {limit} steps: {host.run.timeline()}"
     raise AssertionError(message)
@@ -88,15 +108,9 @@ def drain_admitting(host: Host, *, limit: int, steps: int = 800) -> None:
     is stuck."""
     for _ in range(steps):
         assert len(at_work(host)) <= WIDTH, (at_work(host), host.run.timeline())
-        full = len(host.unsettled) >= limit
-        answerable = [
-            asked
-            for asked in host.run.open
-            if asked.until is not None and not (full and isinstance(asked.request, StartAttempt))
-        ]
-        if not answerable:
+        if not (waits := admissible(host, limit=limit)):
             return
-        host.answer(answerable[0])
+        host.answer(waits[0])
     message = f"the flow did not settle in {steps} steps: {host.run.timeline()}"
     raise AssertionError(message)
 
@@ -145,9 +159,6 @@ def test_a_code_change_while_turns_wait_restarts_them_only_into_free_slots() -> 
 
 
 @pytest.mark.regression
-@pytest.mark.xfail(
-    strict=True, reason="new work queued for admission holds the parked turns' slots"
-)
 @across_restarts
 def test_new_work_queued_for_admission_never_keeps_parked_turns_from_resuming(
     *, restarting: bool | RestartPolicy
