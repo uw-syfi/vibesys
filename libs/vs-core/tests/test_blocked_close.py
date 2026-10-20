@@ -427,11 +427,6 @@ def _judged(run: core.CoreState, answer: core.Observation) -> tuple[object, ...]
 
 
 @pytest.mark.regression
-@pytest.mark.xfail(
-    strict=True,
-    reason="PR #3235: the close's end took the executor's next sequence number, so the "
-    "executor's answer that carries it is refused as a sequence conflict",
-)
 @settings(max_examples=examples(pr=20, nightly=300))
 @example(
     later=_Later(
