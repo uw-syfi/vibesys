@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, NamedTuple
+from typing import TYPE_CHECKING, Literal, NamedTuple
 
 import pytest
 
 from vs_core.api import (
     ENVELOPE_SCHEMA_VERSION,
     OLDEST_SUPPORTED_ENVELOPE_VERSION,
+    ControlId,
+    ControlInput,
     EventCursor,
     FlowState,
     HostFence,
@@ -18,6 +20,7 @@ from vs_core.api import (
     RunEnvelope,
     RunId,
     RunResultProposal,
+    StopMode,
     initial_state,
 )
 from vs_core.api import RunStatus as CoreRunStatus
@@ -468,6 +471,70 @@ def test_the_cheap_resume_check_refuses_an_ended_run_with_the_same_words(tmp_pat
 
     assert cheap.value.diagnostic.code == "run_ended"
     assert cheap.value.diagnostic.message == full.value.diagnostic.message
+
+
+def _stopped(
+    candidate: RuntimeRecord[FlowState],
+    *controls: ControlInput,
+    outcome: Literal["success", "failure", "cancelled", "blocked"] = "cancelled",
+) -> RuntimeRecord[FlowState]:
+    """``candidate`` after its run recorded ``controls`` and ended terminal with ``outcome``."""
+    envelope = candidate.envelope
+    core = envelope.core
+    run = core.run.model_copy(
+        update={
+            "status": CoreRunStatus.TERMINAL,
+            "controls": (*core.run.controls, *controls),
+            "result": RunResultProposal(outcome=outcome, reason=f"{outcome}: by request"),
+        }
+    )
+    ended = envelope.model_copy(update={"core": core.model_copy(update={"run": run})})
+    return RuntimeRecord[FlowState].fresh(ended)
+
+
+def _stop(identity: str = "op-1") -> ControlInput:
+    return ControlInput(control_id=ControlId(root=identity), action="stop", mode=StopMode.DRAIN)
+
+
+def _resume(identity: str = "op-2") -> ControlInput:
+    return ControlInput(control_id=ControlId(root=identity), action="resume", when="now")
+
+
+def test_a_run_the_operators_stop_ended_resumes(tmp_path: Path) -> None:
+    """Regression: a run the operator stopped could not be resumed: it was refused as terminal.
+
+    A stop is a pause the operator can lift. Its ending cleans up and keeps the result; the
+    resume reopens the run (core does that when the process starts), so neither check refuses it.
+    """
+    project, run_id = project_run(tmp_path)
+    _commit(project, run_id, _stopped(record(run_id), _stop()))
+
+    reject_ended_resume(project, run_id)
+    assert resolve_core_resume(project, driver(), run_id=run_id).run_id == run_id
+
+
+@pytest.mark.parametrize(
+    ("controls", "outcome"),
+    [
+        ((_stop("deadline"),), "cancelled"),  # the run's time is spent: final
+        ((_stop(), _resume()), "cancelled"),  # no stop stands: the run ended by itself
+        ((_stop(),), "failure"),  # the run's own result
+        ((_stop(),), "success"),
+    ],
+)
+def test_a_run_no_operator_stop_ended_is_still_refused(
+    tmp_path: Path,
+    controls: tuple[ControlInput, ...],
+    outcome: Literal["success", "failure", "cancelled", "blocked"],
+) -> None:
+    project, run_id = project_run(tmp_path)
+    _commit(project, run_id, _stopped(record(run_id), *controls, outcome=outcome))
+
+    with pytest.raises(CoreResumeError) as cheap:
+        reject_ended_resume(project, run_id)
+    with pytest.raises(CoreResumeError) as full:
+        resolve_core_resume(project, driver(), run_id=run_id)
+    assert cheap.value.diagnostic.code == full.value.diagnostic.code == "run_ended"
 
 
 def test_the_cheap_resume_check_leaves_an_open_or_missing_run_to_the_resume(

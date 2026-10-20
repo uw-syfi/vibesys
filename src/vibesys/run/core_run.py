@@ -17,7 +17,14 @@ from typing import TYPE_CHECKING
 
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
 from vibesys.events import CoreEventType, RunEndingData, RunFailure, RunFailureKind
-from vs_core.api import AttemptPhase, EndReason, RetainedCandidate, RunResultProposal, StopMode
+from vs_core.api import (
+    AttemptPhase,
+    EndReason,
+    RetainedCandidate,
+    RunResultProposal,
+    StopMode,
+    reopens_on_resume,
+)
 from vs_core.api import RunStatus as CoreRunStatus
 from vs_project.api import Project
 from vs_runtime.api import RunStatus
@@ -99,8 +106,9 @@ def ensure_resumable(project_root: Path, run_id: str) -> None:
 
     Two runs cannot: one a legacy loop created (the core cannot continue its state, and
     starting a fresh run under its identity would discard that run's history), and one whose
-    core record is terminal (core never applies another request to it, so booting it only to
-    find it ended would cost the container and environment and say nothing). Every entrypoint
+    core record is terminal for a reason of its own (core never applies another request to it,
+    so booting it only to find it ended would cost the container and environment and say
+    nothing). A run the operator's stop ended is not one: the resume reopens it. Every entrypoint
     resolves its resume reference through here, so the CLI, headless and the server all
     refuse with the same diagnostic: the run, and the legacy file or the stored outcome and
     reason.
@@ -226,7 +234,7 @@ def run_ending(shell: CoreRuntime) -> RunEndingData:
     return RunEndingData(
         reason=reason,
         summary="" if result is None else result.reason,
-        resumable=core.run.status != CoreRunStatus.TERMINAL,
+        resumable=core.run.status != CoreRunStatus.TERMINAL or reopens_on_resume(core.run),
         rounds_finished=sum(
             1 for attempt in core.attempts.attempts if attempt.phase == AttemptPhase.TERMINAL
         ),

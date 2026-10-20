@@ -549,11 +549,13 @@ cluster jobs, and also turns a drain already under way into a cancel. A later dr
 weakens a cancel. While a stop is pending in a running process, `resume` is rejected with the
 reason `the run is stopping`.
 
-A stop is a pause you can lift, until the run has concluded. If the process ended before the run
-committed its ending (a drain that outlived its grace bound, a crash during it), `vibesys
---resume` opens the same run, lifts the stop and goes on with the run's rounds and history; the
-stop and its lift are both in the run's record. A run whose ending committed, and a run ended by
-`force stop`, stay ended. Only an explicit resume lifts a stop: nothing else does.
+A stop is a pause you can lift. `vibesys --resume` opens the same run, lifts the stop and goes on
+with the run's rounds and history; the stop and its lift are both in the run's record. This holds
+whether the process ended before the run committed its ending (a drain that outlived its grace
+bound, a crash during it) or the stop ended the run: the resume reopens a run the operator's stop
+ended, with the best it had and its record, and what the ending closed (agent sessions, jobs) is
+started afresh. A run that ended for a reason of its own (a result, a failure, the deadline), and a
+run ended by `force stop`, stay ended. Only an explicit resume lifts a stop: nothing else does.
 
 In the terminal that started the run, with or without `--web`, Ctrl-C asks for a cancelling
 stop, and a second Ctrl-C ends the run at once, through its teardown. Ctrl-Z suspends only the
@@ -562,8 +564,8 @@ command itself dies, for example by `kill -9`, the run reacts as it would to its
 closing: it cancels its work and ends.
 
 `vibesys control <run-id> status ID` prints what became of a control: `pending`, `applied`, or
-`rejected: <reason>`. A run has ended when its core record says so, which is final. It then
-takes no more controls: `vibesys control` refuses a new one before writing anything and exits
+`rejected: <reason>`. A run has ended when its core record says so, which is final, except for a
+run the operator's stop ended (see above). It then takes no more controls: `vibesys control` refuses a new one before writing anything and exits
 with status 3, and a control the run never applied before it ended reads as
 `rejected: the run ended before applying it: ...`. Sending again, with `--control-id`, a control
 the run applied before it ended succeeds and prints its id, so a retry stays one control.

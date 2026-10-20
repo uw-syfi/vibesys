@@ -468,7 +468,10 @@ path:
    fails the run the same way but adopts the last choice first and carries it as the selection
    (a search that ran out of budget after building something worth keeping).
 2. Otherwise core adopts the last choice (nothing chosen: the input, as it stands).
-3. If adoption fails, the run fails with `adoption-failed: <typed reason>`.
+3. If adoption fails, the run fails with `adoption-failed: <typed reason>`, except under the
+   operator's stop: a stop is a pause, so what the adoption did is no verdict on the run, and
+   the result is the stop's (`cancelled`, reason `stopped: adoption-failed: <typed reason>`), which
+   a resume reopens.
 4. If it succeeds, the run succeeds with the selection; a run that was stopped or timed out is
    `cancelled` (reasons `stopped: ...` / `deadline: ...`) and still carries the selection.
 5. The framework finishes the run. If core refuses the result, one plain failure is proposed.
@@ -541,8 +544,14 @@ workspaces, adoption) a toy search runs through the real core with scripted exec
   its ending delivers `StopLifted`. `ctx.stop_requested` is false again, a flow the stop had not
   yet interrupted goes on, and a flow it had interrupted stays ended. A root that must outlive the
   stop's cleanup judges the stop after waiting for its tasks (`multi` and `single` do, so they play
-  the rounds that remain); a root that has already concluded cannot be lifted back (core refuses
-  the resume once its ending committed).
+  the rounds that remain). A root that has already concluded (the stop's ending is committed) is
+  lifted by a restart: while the ending's cleanup runs core refuses the resume, and once the run is
+  terminal the resume reopens it (`reopens_on_resume`: the operator's stop ended it, so it is a
+  pause), and the driver starts every flow again from its latest checkpoint with the stop taken
+  back. The adoption the stop completed answered that stop, so the lift takes it back
+  (`vs_core._adoption.reopen`) and the ending the run reaches later adopts its own winner. A
+  search keeps no copy of the stop in its checkpoint: a flag saved there would end the search again
+  after the resume. The deadline's stop and every result of the run's own end the run for good.
 - Awaiting inside a `finally` while the run itself is being discarded is not supported; use
   `except Stopped` (or `@resource`) for cleanup that awaits.
 - A suspended turn's waits are bounded by the run deadline, so a turn that never resumes cannot

@@ -20,6 +20,7 @@ from vibesys.serial_search.api import (
     LedgerJson,
     RoundDone,
     SerialRun,
+    SerialState,
     accuracy_passed,
     failed_gate,
     settle,
@@ -165,21 +166,35 @@ def test_the_run_is_over_when_stopped_failed_or_out_of_rounds(
 
 @settings(max_examples=examples(pr=8, nightly=100))
 @given(failure=st.text(min_size=1, max_size=8))
-def test_a_failed_or_stopped_round_ends_the_run_for_good(failure: str) -> None:
+def test_a_failed_round_ends_the_run_for_good(failure: str) -> None:
     failed = run_of(5)
     failed.finished(done(1, failure=failure), None)
     assert failed.over(stopping=False)
     assert failed.failure == failure
-    stopped = run_of(5)
-    stopped.finished(done(1, counted=False, stopped=True), None, stopping=True)
-    assert stopped.over(stopping=False)
 
 
 def test_a_round_the_operator_stopped_ends_the_run_only_while_the_stop_stands() -> None:
-    lifted = run_of(5)
-    lifted.finished(done(1, counted=False, stopped=True), None, stopping=False)
-    assert not lifted.over(stopping=False)
-    assert lifted.counted == 0
+    """Regression: a stop was kept in the checkpoint, so a resume that lifted it ended the search."""
+    run = run_of(5)
+    run.finished(done(1, counted=False, stopped=True), None)
+    assert run.over(stopping=True)
+    assert not run.over(stopping=False)
+    assert run.counted == 0
+    assert not run.state().stopped
+    saved = SerialState.model_validate_json(run.state().model_dump_json())
+    resumed = type(run).resumed(HypothesisConfig(max_rounds=5), INPUT_REVISION, TERMS, saved)
+    assert not resumed.over(stopping=False)
+
+
+def test_a_checkpoint_an_earlier_version_saved_stopped_resumes_into_the_rounds_that_remain() -> (
+    None
+):
+    """Earlier versions ended the search by a flag in the checkpoint; the lift that resumes it clears it."""
+    run = run_of(5)
+    saved = run.state().model_copy(update={"stopped": True})
+    resumed = type(run).resumed(HypothesisConfig(max_rounds=5), INPUT_REVISION, TERMS, saved)
+    assert not resumed.over(stopping=False)
+    assert resumed.over(stopping=True)
 
 
 @settings(max_examples=examples(pr=8, nightly=100))

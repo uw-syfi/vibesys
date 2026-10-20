@@ -11,7 +11,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import pytest
-from hypothesis import given
+from hypothesis import example, given
 from hypothesis import strategies as st
 
 import vs_core.api as core
@@ -58,10 +58,10 @@ def selection_of(candidate: core.Kept) -> core.RetainedCandidate:
     )
 
 
-def result_of(run: FlowRun[Config]) -> core.RunResultProposal:
-    """The result the run finished with."""
+def result_of(run: FlowRun[Config], mode: str = "drain") -> core.RunResultProposal:
+    """The result the run finished with, in the mode its stop (if any) chose."""
     assert run.finished is not None
-    assert run.finished.mode == "drain"
+    assert run.finished.mode == mode
     return run.finished.result
 
 
@@ -241,11 +241,47 @@ def test_a_stop_that_ends_in_no_winner_is_cancelled_without_a_selection(begin: B
     assert result.reason == "stopped: out of time"
 
 
-def test_a_failed_adoption_after_a_stop_is_still_a_failure(begin: Begin) -> None:
+def test_a_failed_adoption_after_the_deadline_is_still_a_failure(begin: Begin) -> None:
     run = begin(until_stopped, adopting=False)
-    run.stop()
+    run.stop("deadline")
     run.refuse_adoption(run.expect(core.ProposeWinner), core.AdoptionFailureReason.VERIFY_FAILED)
     assert result_of(run).outcome == "failure"
+
+
+@pytest.mark.parametrize("mode", list(core.StopMode))
+@given(reason=st.sampled_from(list(core.AdoptionFailureReason)))
+@example(reason=core.AdoptionFailureReason.ADOPT_FAILED)
+def test_an_adoption_that_fails_under_the_operators_stop_is_no_failure_of_the_run(
+    mode: core.StopMode, reason: core.AdoptionFailureReason
+) -> None:
+    """Regression: an adoption a stop raced ended the run as failed, and no resume could reopen it.
+
+    A stop is a pause the operator can lift. What the adoption did is no verdict on the run: the
+    result is the stop's (``cancelled``, with the adoption in the reason), whichever way the
+    adoption failed, and the run stays resumable.
+    """
+    run = start(until_stopped, adopting=False)
+    run.stop(mode=mode)
+    run.refuse_adoption(run.expect(core.ProposeWinner), reason)
+    result = result_of(run, mode.value)
+    assert result.outcome == "cancelled"
+    assert result.reason == f"stopped: adoption-failed: {reason.value}"
+    assert result.selection is None
+
+
+@pytest.mark.parametrize("mode", list(core.StopMode))
+@given(cause=st.sampled_from(list(core.RejectionCode)))
+@example(cause=core.RejectionCode.ALREADY_SETTLED)
+def test_a_proposal_core_refuses_under_the_operators_stop_is_no_failure_of_the_run(
+    mode: core.StopMode, cause: core.RejectionCode
+) -> None:
+    """Regression: core refused the stop's proposal (``already-settled``), and the run ended for good."""
+    run = start(until_stopped, adopting=False)
+    run.stop(mode=mode)
+    run.fail(run.expect(core.ProposeWinner), core.FailureReason.REFUSED, cause=cause)
+    result = result_of(run, mode.value)
+    assert result.outcome == "cancelled"
+    assert result.reason == "stopped: adoption-failed: refused"
 
 
 @given(stop_after=st.integers(min_value=0, max_value=2))

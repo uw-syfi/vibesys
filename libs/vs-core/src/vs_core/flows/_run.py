@@ -122,6 +122,8 @@ class _Run:
         self.facts = facts
         self.wiring = wiring
         self.stop: StopRequested | None = None
+        self.concluded = False
+        """Whether the root asked core to end the run (`Kit.finish`): no flow is left to run."""
         self.closed = False
         self.published: str | None = None
         self.choice: Selection | None = None

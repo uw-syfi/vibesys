@@ -476,6 +476,9 @@ class HostOptions:
     shell every control-poll interval while requests run."""
     lifecycle: frozenset[LifecycleCapability] = frozenset()
     """Lifecycle capabilities the run offers its strategy (such as ``suspend``)."""
+    resumed: bool = False
+    """The process was started by the operator's explicit resume of the run, so its controls
+    lift the stop the run's record holds (and reopen a run that stop ended)."""
 
 
 @dataclass
@@ -563,8 +566,9 @@ def scripted_host[C](  # noqa: PLR0913  # lint-waiver: LW-994707 [PLR0913]; a re
         RunControlBridge(
             create_run_control_channel(_IgnoredTransitions(), SimThreads()),
             _NoSteer(),
+            lifts_standing_stop=options.resumed,
         )
-        if options.controlled
+        if options.controlled or options.resumed
         else None
     )
     host = CoreRunHost(

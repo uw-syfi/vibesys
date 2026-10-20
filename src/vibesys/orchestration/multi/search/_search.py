@@ -44,20 +44,20 @@ async def multi(ctx: Flow, given: MultiConfig | MultiResume) -> NoWinner | None:
             ctx.checkpoint(MultiResume(config=config, state=run.state()))
             match await ctx.first(rounds, ctx.stopped):
                 case RoundDone() as done:
-                    run.finished(done, task.span, stopping=ctx.stop_requested)
+                    run.finished(done, task.span)
                     ctx.choose(*run.leading())
                 case TaskStopped():
-                    run.stopped = run.stopped or ctx.stop_requested
+                    pass  # the round settled what it started; `over` judges the stop
                 case StopRequested():
                     # The group has stopped the round, which settles what it started. The stop
                     # is judged once it has: a resume that lifts it meanwhile lets the search
                     # go on with the rounds it still has.
                     match await ctx.first(rounds):
                         case RoundDone() as done:
-                            run.finished(done, task.span, stopping=ctx.stop_requested)
+                            run.finished(done, task.span)
                             ctx.choose(*run.leading())
                         case TaskStopped():
-                            run.stopped = run.stopped or ctx.stop_requested
+                            pass  # the round settled what it started; `over` judges the stop
             ctx.publish(run.snapshot())
         ctx.checkpoint(MultiResume(config=config, state=run.state()))  # the record is final
     return run.ending()

@@ -13,6 +13,7 @@ from vs_core.api import (
     RunStatus,
     SearchDriver,
     StrategyState,
+    reopens_on_resume,
     validate_startup,
 )
 from vs_decode.api import Unreadable, decode_json
@@ -165,7 +166,7 @@ def reject_ended_resume(project: Project, run_id: str) -> None:
         end = recorded_end(project, selected.run_id)
     except ProjectStateError:
         return  # an unreadable record is the resume's own diagnosis (``core_resume_invalid``)
-    if end is not None:
+    if end is not None and not end.reopens:
         raise _ended(project, selected.run_id, end, schema="core record")
 
 
@@ -252,7 +253,7 @@ def resolve_core_resume[S: StrategyState](
             )
         ) from error
     run = record.envelope.core.run
-    if run.status == RunStatus.TERMINAL:
+    if run.status == RunStatus.TERMINAL and not reopens_on_resume(run):
         result = run.result
         raise _ended(
             project,

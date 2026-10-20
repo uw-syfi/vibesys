@@ -29,6 +29,7 @@ from typing import TYPE_CHECKING, Any, TypedDict, Unpack
 from vs_core._ids import IdScheme
 from vs_core._registry import ContractError, OperationRegistration, OperationRegistry
 from vs_core.types.common import OperationSchemaRef, StrategyId
+from vs_core.types.search import StopLifted
 from vs_core.types.strategy import SearchDeclaration
 
 from ._defs import FlowDef
@@ -245,15 +246,21 @@ class FlowDriver[C]:
     ) -> tuple[FlowState, list[Decision]]:
         """Deliver ``event`` to the flows it unblocks and return what they decided."""
         restarted: list[Decision] = []
+        lifting = isinstance(event, StopLifted)
         try:
             run = self._runtime(state)
         except FlowCodeChanged:
-            state, run, restarted = self._restart(state, view)
+            state, run, restarted = self._restart(state, view, lifted=lifting)
         self._cached = None  # a failed update leaves the runtime half-way: never reuse it
         journaled, kept = recorded(event, self._registry)
         item = journaled or kept
         if item is None:
             raise ContractError(("event",), "an event is journaled as itself or as a record")
+        if lifting and run.concluded:
+            # The search ended the run under the stop, so no flow is left to take the lift:
+            # every flow starts again from its latest checkpoint, with the stop taken back.
+            state, run, restarting = self._restart(state, view, lifted=True)
+            restarted.extend(restarting)
         decisions = run.feed(item, view, None)
         step = Step(
             event=journaled,
@@ -340,15 +347,19 @@ class FlowDriver[C]:
             before = step.digest
         return run
 
-    def _restart(self, state: FlowState, view: RunView) -> tuple[FlowState, _Run, list[Decision]]:
+    def _restart(
+        self, state: FlowState, view: RunView, *, lifted: bool = False
+    ) -> tuple[FlowState, _Run, list[Decision]]:
         """Start every running flow again from its latest snapshot, with a fresh journal.
 
         A task that is not a registered flow has no snapshot to start from; ``restore`` drops it
         and leaves it to its parent, which restarts from its own snapshot, to start again.
+        ``lifted`` starts them with the stop that stood taken back (a resume lifted it).
         """
+        live = state.live.model_copy(update={"stop": None}) if lifted else state.live
         run = self._new_run(state.facts)
-        decisions = run.restore(state.live, view, None)
-        restarted = self._first_state(run, state.facts, state.live, decisions)
+        decisions = run.restore(live, view, None)
+        restarted = self._first_state(run, state.facts, live, decisions)
         return restarted, run, decisions
 
 

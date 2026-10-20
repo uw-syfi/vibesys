@@ -46,6 +46,7 @@ from vs_core.api import (
     StopMode,
     orphan_waits,
     project,
+    reopens_on_resume,
     unreleased_records,
 )
 from vs_runtime._core_loop import LeaseUnavailableError
@@ -291,6 +292,9 @@ async def drive_core(
 ) -> RunOutcome:
     """Run a started shell until its run is terminal, an executor is refused, or it fails.
 
+    A run the operator's stop ended is terminal but resumable: the resume this process stands
+    for (``RunControlBridge``'s lift) reopens it before the loop starts.
+
     Each iteration: renew the lease when a third of it has passed, submit controls and
     the deadline stop, deliver the clock, settle the shell, ask the strategy once recovery
     is READY, settle again. Requests (agent turns, submissions) keep running across
@@ -372,7 +376,24 @@ class _Loop:
             if not heartbeat.cancelled() and (failure := heartbeat.exception()) is not None:
                 raise failure
 
+    async def _reopen(self) -> None:
+        """Give a run the operator's stop ended the resume that opened it, which reopens it.
+
+        The loop's controls are read once the run is live, so a terminal record would never see
+        the explicit resume this process stands for. A run no stop ended takes none: it is over.
+        """
+        core = self._core()
+        if self._controls is None or not reopens_on_resume(core.run):
+            return
+        now = self._read()
+        for event in self._controls.poll(core, now):
+            self._shell.submit(event, now_at=now)
+        await self._settle(now)
+        self._settle_controls()
+
     async def _iterate(self) -> RunOutcome:
+        if self._core().run.status == RunStatus.TERMINAL:
+            await self._reopen()
         while self._core().run.status != RunStatus.TERMINAL:
             self._raise_if_lease_lost()
             now = self._read()

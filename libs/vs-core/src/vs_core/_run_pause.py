@@ -9,16 +9,28 @@ under, and any immediate resume ends the pause.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Final
 
 from ._operator_actions import ACTION_REFUSAL_TEXT, action_refusal_kind
 from ._registry import ContractError
 from .types.common import OPERATOR_ACTIONS, PauseOwner, RunPause, RunStatus
+from .types.strategy import Finish
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from ._operator_actions import ActionRefusal
     from .types.common import ControlInput
     from .types.kernel import CoreState, RunState
+    from .types.settlement import RunResultProposal
+
+
+DEADLINE_STOP: Final = "deadline"
+"""The identity of the stop the host delivers when the run's deadline passes.
+
+An operator's stop is a pause (``reopens_on_resume``); the deadline's is the run's time budget
+spent, and it ends the run for good.
+"""
 
 
 class ControlRefusedError(ContractError):
@@ -101,7 +113,8 @@ def control_refusal(state: CoreState, control: ControlInput) -> ControlRefusedEr
 
     The one statement of the rule: core raises the error when the control arrives, and a
     shell that must answer an operator before core commits asks the same question. A
-    terminal run refuses every control. Any other run takes a stop, a steer and a
+    terminal run refuses every control, except the resume that reopens a run the operator's
+    stop ended (`reopens_on_resume`). Any other run takes a stop, a steer and a
     withdrawal; it takes an operator action that can change something
     (``action_refusal_kind``), also while it stops or cleans up; and a run that recorded a
     stop takes no pause, and a resume only until its ending commits: that resume lifts the stop
@@ -109,6 +122,9 @@ def control_refusal(state: CoreState, control: ControlInput) -> ControlRefusedEr
     """
     run = state.run
     if run.status == RunStatus.TERMINAL:
+        lifts = control.action == "resume" and control.when != "capacity_returns"
+        if lifts and reopens_on_resume(run):
+            return None
         return ControlRefusedError(control, ("run", "status"), "terminal run rejects controls")
     if control.action in OPERATOR_ACTIONS:
         return _action_refusal(state, control)
@@ -130,9 +146,9 @@ def _action_refusal(state: CoreState, control: ControlInput) -> ControlRefusedEr
 def stop_standing(run: RunState) -> bool:
     """Whether a stop the run recorded still stands: no resume has lifted it since.
 
-    A stop is a pause the operator can lift: an explicit resume while the run has not
-    committed its ending takes the stop back (`control_refusal`). Once the ending commits
-    (the run is closing, then terminal) nothing lifts it.
+    A stop is a pause the operator can lift: an explicit resume takes the stop back
+    (`control_refusal`). While the ending's cleanup runs (the run is closing) nothing lifts
+    it; once it is terminal a resume reopens the run (`reopens_on_resume`).
     """
     standing = False
     for recorded in run.controls:
@@ -141,6 +157,53 @@ def stop_standing(run: RunState) -> bool:
         elif recorded.action == "resume":
             standing = False
     return standing
+
+
+def reopens_on_resume(run: RunState) -> bool:
+    """Whether a resume reopens the run: the operator's stop ended it, and a stop is a pause.
+
+    A stop ends a run through the search's ending, which cancels what is in flight, adopts the
+    best and commits a ``cancelled`` result. That ending is the stop's cleanup, not a verdict on
+    the run, so the run stays resumable: the explicit resume that opens it takes the stop back
+    and reopens the run (`reopened`), which goes on from what it holds. Every other ending is
+    final: a result of the run itself, a refused or blocked run, and the deadline's stop (the
+    time the run was given is spent).
+    """
+    return reopens_after(run.status, run.result, run.controls)
+
+
+def reopens_after(
+    status: RunStatus, result: RunResultProposal | None, controls: Sequence[ControlInput]
+) -> bool:
+    """`reopens_on_resume` from the three facts it reads: a reader of a record needs no more."""
+    if status != RunStatus.TERMINAL or result is None or result.outcome != "cancelled":
+        return False
+    standing = False
+    by_deadline = False
+    for recorded in controls:
+        if recorded.action == "stop":
+            standing = True
+            by_deadline = by_deadline or recorded.control_id.root == DEADLINE_STOP
+        elif recorded.action == "resume":
+            standing = by_deadline = False
+    return standing and not by_deadline
+
+
+def reopened(run: RunState) -> RunState:
+    """The run a resume reopened (`reopens_on_resume`): running, with no ending committed.
+
+    The ending's ``Finish`` leaves the receipts: it is no longer committed, and the run's next
+    ending is its first (`committed_stop` keeps the first Finish). Every other receipt stays as
+    core answered it. What the ending cleaned up stays cleaned up (its sessions are closed, its
+    jobs cancelled, its attempts settled): the search starts the work that remains afresh.
+    """
+    ended = run.result
+    kept = tuple(
+        receipt
+        for receipt in run.receipts
+        if not (isinstance(receipt.decision, Finish) and receipt.decision.result == ended)
+    )
+    return run.model_copy(update={"status": RunStatus.RUNNING, "result": None, "receipts": kept})
 
 
 def _pause_refusal(run: RunState, control: ControlInput) -> ControlRefusedError | None:

@@ -1,8 +1,9 @@
 """Whether a run has ended, as its core record says: the one fact for "no request applies now".
 
-Core's TERMINAL status is final: a TERMINAL run never resumes (resume refuses it with
-``run_ended``). So a request posted to a TERMINAL run's inbox never applies, and one it never
-applied before it ended never will. The run's own end of inbox (``RunControlBridge.end``) and
+Core's TERMINAL status is final except for a run the operator's stop ended, which a resume
+reopens (``RecordedEnd.reopens``); any other TERMINAL run never resumes (resume refuses it with
+``run_ended``). So a request posted to a TERMINAL run's inbox never applies while no process holds
+the run, and one it never applied before it ended never will. The run's own end of inbox (``RunControlBridge.end``) and
 ``vibesys control``, which reads the record from outside the run, both judge the end by this
 status; neither keeps a copy of it.
 """
@@ -14,7 +15,7 @@ from typing import TYPE_CHECKING
 
 from pydantic import JsonValue, TypeAdapter
 
-from vs_core.api import RunStatus
+from vs_core.api import ControlInput, RunResultProposal, RunStatus, reopens_after
 from vs_decode.api import Unreadable, decode_json
 from vs_project.api import ProjectStateError, StoredEnvelope
 
@@ -58,11 +59,14 @@ def _member(value: JsonValue, *path: str) -> JsonValue:
 class RecordedEnd:
     """How a run's durable core record says it ended: core's result outcome and reason.
 
-    Either is None when the record of an ended run does not carry it.
+    Either is None when the record of an ended run does not carry it. ``reopens`` is whether a
+    resume reopens the run (``vs_core.api.reopens_on_resume``): the operator's stop ended it,
+    and a stop is a pause.
     """
 
     outcome: str | None
     reason: str | None
+    reopens: bool = False
 
 
 def recorded_end(project: Project, run_id: str) -> RecordedEnd | None:
@@ -94,6 +98,41 @@ def recorded_end(project: Project, run_id: str) -> RecordedEnd | None:
     return RecordedEnd(
         outcome=outcome if isinstance(outcome, str) else None,
         reason=reason if isinstance(reason, str) else None,
+        reopens=_reopens(run),
+    )
+
+
+_CONTROLS: TypeAdapter[tuple[ControlInput, ...]] = TypeAdapter(tuple[ControlInput, ...])
+
+
+def _reopens(run: JsonValue) -> bool:
+    """Whether a resume reopens the run its record holds: core's own rule over what it reads.
+
+    The rule reads the status, the result and the controls, which keep their shape across
+    envelope versions and need no operation registry to read, unlike the rest of the run
+    state. A record whose controls or result this version cannot read is not reopened here: the
+    resume itself names what it cannot read.
+    """
+    result_json = _member(run, "result")
+    if result_json is None:
+        return False
+    result = decode_json(
+        _ANY_JSON.dump_json(result_json),
+        RunResultProposal,
+        source="run result",
+        max_bytes=_RECORD_MAX_BYTES,
+    )
+    controls = decode_json(
+        _ANY_JSON.dump_json(_member(run, "controls") or []),
+        _CONTROLS,
+        source="run controls",
+        max_bytes=_RECORD_MAX_BYTES,
+    )
+    status = _member(run, "status")
+    if isinstance(result, Unreadable) or isinstance(controls, Unreadable):
+        return False
+    return status in {member.value for member in RunStatus} and reopens_after(
+        RunStatus(status), result, controls
     )
 
 

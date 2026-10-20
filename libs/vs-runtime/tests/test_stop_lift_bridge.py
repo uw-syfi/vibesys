@@ -80,15 +80,34 @@ def test_a_resumed_process_that_stops_again_stops() -> None:
     assert requested_stop_mode(run.core.run) is StopMode.DRAIN
 
 
-def test_a_run_whose_ending_committed_stays_stopping_even_when_resumed() -> None:
+def _ended_by_the_stop() -> _Run:
     old = _run()
-    closing = ControlEvent(
+    stopping = ControlEvent(
         control=ControlInput(control_id=ControlId(root="stop"), action="stop", mode=StopMode.DRAIN),
         now_at=1.0,
         result=RunResultProposal(outcome="cancelled", reason="operator stop"),
     )
-    old.core = step(old.core, closing).state
-    assert old.core.run.status in {RunStatus.CLOSING, RunStatus.TERMINAL}
+    old.core = step(old.core, stopping).state
+    return old
+
+
+def test_a_resumed_process_lifts_the_stop_that_ended_the_run_and_reopens_it() -> None:
+    """A stop is a pause: the run its ending left terminal is reopened by the resume."""
+    old = _ended_by_the_stop()
+    assert old.core.run.status is RunStatus.TERMINAL
+    run = _new_process(old, resumed=True)
+    run.poll()
+    assert not run.channel.stop_requested()
+    assert run.core.run.status is RunStatus.RUNNING
+    assert requested_stop_mode(run.core.run) is None
+
+
+def test_a_run_whose_ending_is_still_closing_stays_stopping_even_when_resumed() -> None:
+    """Cleanup finishes first: core takes no resume until the ending's cleanup is done."""
+    old = _ended_by_the_stop()
+    old.core = old.core.model_copy(
+        update={"run": old.core.run.model_copy(update={"status": RunStatus.CLOSING})}
+    )
     run = _new_process(old, resumed=True)
     run.bridge.poll(run.core, 2.0)
     assert run.channel.stop_requested()

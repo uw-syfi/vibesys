@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Literal, assert_never
 from pydantic import TypeAdapter
 
 from . import attempts, evaluation, records, scheduling, sessions, settlement
+from ._adoption import reopen as reopen_adoption
 from ._continuations import (
     SuspensionRefusal,
     exhausted,
@@ -45,7 +46,7 @@ from ._proofs import (
 from ._quota_pause_clock import credit_quota_pause
 from ._registry import ContractError
 from ._routing import SIGNAL_ORDER, event_area
-from ._run_pause import control_refusal, stop_standing
+from ._run_pause import control_refusal, reopened, reopens_on_resume, stop_standing
 from ._session_inputs import check_declared_target, may_have_been_read
 from ._session_inputs import mid_turn_offers as _mid_turn_offers
 from ._validation import validate_decision
@@ -1391,6 +1392,23 @@ def _soft_stop(state: CoreState, event: RunControlEvent) -> Transition:
     )
 
 
+def _lifted(state: CoreState, control: ControlInput) -> tuple[CoreState, bool]:
+    """The state a resume starts from, and whether it lifts a standing stop.
+
+    A resume of a run the operator's stop ended reopens it (`reopens_on_resume`). Any resume
+    that lifts a stop takes back the adoption the stop completed: it answered that stop, not the
+    run's ending (`reopen_adoption`).
+    """
+    if control.action != "resume":
+        return state, False
+    if reopens_on_resume(state.run):
+        state = state.model_copy(update={"run": reopened(state.run)})
+    lifting = stop_standing(state.run)
+    if lifting:
+        state = state.model_copy(update={"settlement": reopen_adoption(state.settlement)})
+    return state, lifting
+
+
 def _control(state: CoreState, event: RunControlEvent, dispatch: Dispatch) -> Transition:
     previous = next(
         (
@@ -1412,7 +1430,7 @@ def _control(state: CoreState, event: RunControlEvent, dispatch: Dispatch) -> Tr
     if refusal is not None:
         raise refusal
     check_declared_target(event.control.target, state.run.declaration)
-    lifting = event.control.action == "resume" and stop_standing(state.run)
+    state, lifting = _lifted(state, event.control)
     # A capacity wait leaves the run paused: it only records when the run resumes itself.
     waits = event.control.when == "capacity_returns"
     # Only a pause and a resume change the run's status; a stop returned above.

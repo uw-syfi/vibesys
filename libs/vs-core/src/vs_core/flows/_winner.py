@@ -180,7 +180,9 @@ async def conclude(kit: Kit, returned: NoWinner | None) -> None:
     """End the run: adopt the last choice (unless there is no winner), then finish.
 
     A stop or a deadline makes the result ``cancelled`` (a proposal core refuses because the run
-    is closing included); a failed adoption or a ``NoWinner`` is a ``failure`` with a typed reason.
+    is closing included); a failed adoption or a ``NoWinner`` is a ``failure`` with a typed reason,
+    unless the operator stopped the run: a stop is a pause the operator can lift, so its ending
+    is ``cancelled`` whatever the adoption did, and a resume reopens the run.
     """
     stopped = _stop_ending(kit)
     result = await _result(kit, returned, stopped)
@@ -220,10 +222,15 @@ async def _result(
     selection = kit.run.choice or TrustedBaseline(revision=kit.run.facts.baseline)
     adopted = await adopt(kit, selection)
     if isinstance(adopted, NotAdopted):
-        # Core may refuse the proposal because the stop closed the run to decisions: the operator
-        # ended it and nothing failed. An adoption that was tried and failed still fails the run.
         detail = reason_text(EndReason.ADOPTION_FAILED, adopted.reason.value)
+        if stopped is EndReason.STOPPED:
+            # The operator's stop is a pause, so what the adoption did is no verdict on the run:
+            # core may refuse the proposal because the stop races it, or the restore may fail.
+            # The result says so, and the run stays resumable (`reopens_on_resume`): its next
+            # ending adopts again.
+            return RunResultProposal(outcome="cancelled", reason=reason_text(stopped, detail))
         if stopped is not None and adopted.reason is FailureReason.REFUSED:
+            # The deadline closed the run to decisions: it ended and nothing failed.
             return RunResultProposal(outcome="cancelled", reason=reason_text(stopped, detail))
         return RunResultProposal(outcome="failure", reason=detail)
     kind = EndReason.KEPT_INPUT if isinstance(selection, TrustedBaseline) else EndReason.ADOPTED

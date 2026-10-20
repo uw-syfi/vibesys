@@ -84,16 +84,29 @@ def test_the_same_stop_without_a_lift_ends_the_run(role: str, *, restarting: boo
     assert finish.result.outcome == "cancelled", finish.result
 
 
+@pytest.mark.parametrize("role", _WAITS)
 @MODES
-def test_a_stop_that_left_nothing_to_settle_has_concluded_the_search_before_a_lift(
-    *, restarting: bool
+def test_a_stop_a_resume_lifts_after_the_search_ended_the_run_goes_on_with_its_rounds(
+    role: str, *, restarting: bool
 ) -> None:
-    """The stop is final once the search issued its ending (core then refuses the resume)."""
+    """Regression: a stop whose ending committed was final, so its rounds and best were lost.
+
+    The search ends the run under the stop (adopts what led and finishes). Core reopens the run
+    for the resume that lifts the stop, and the search starts again from its checkpoint: it
+    plays the rounds that remain and adopts the best of them all, as a search never stopped does.
+    """
     host = start(config(max_rounds=2), restarting=restarting)
-    _to_the_second_round_wait(host, PLANNER)
+    _to_the_second_round_wait(host, role)
     host.run.stop()
+    host.drain()
     assert isinstance(host.run.finished, Finish)
     host.run.lift_stop()
+    if role == PLANNER:
+        host.drain_until_turn(PLANNER)  # the round the stop cut short starts again
+    _finish_the_second_round(host, role)
+    record = host.record
+    assert record is not None
+    assert [item.rounds[0].passed for item in record.hypotheses] == [True, True]
     finish = host.run.finished
     assert isinstance(finish, Finish)
-    assert finish.result.outcome == "cancelled"
+    assert finish.result.outcome != "cancelled", finish.result

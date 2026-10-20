@@ -18,6 +18,8 @@ import vs_core.api as core
 
 type _Kind = Literal["drain", "cancel", "pause", "resume", "capacity"]
 _KINDS: tuple[_Kind, ...] = ("drain", "cancel", "pause", "resume", "capacity")
+type _Outcome = Literal["success", "failure", "cancelled", "blocked"]
+_OUTCOMES: tuple[_Outcome, ...] = ("cancelled", "success", "failure")
 
 
 def _control(kind: _Kind, index: int) -> core.ControlInput:
@@ -82,13 +84,111 @@ def test_a_lift_is_published_after_the_resume_that_made_it() -> None:
     assert core.requested_stop_mode(lift.state.run) is None
 
 
-def test_a_resume_after_the_ending_committed_is_refused_and_the_stop_stays() -> None:
-    """A stop that carries its result closes the run: nothing lifts it from there."""
-    state = core.initial_state()
-    proposal = core.RunResultProposal(outcome="cancelled", reason="operator stop")
-    stop = core.RunControlEvent(control=_control("drain", 0), now_at=0.0, result=proposal)
-    state = core.step(state, stop).state
-    assert state.run.status in {core.RunStatus.CLOSING, core.RunStatus.TERMINAL}
+def _ended_by(control: core.ControlInput) -> core.CoreState:
+    """A run that ended terminal under ``control``, a stop that carried its cancelled result."""
+    proposal = core.RunResultProposal(
+        outcome="cancelled", reason=f"stopped: by {control.control_id.root}"
+    )
+    stop = core.RunControlEvent(control=control, now_at=0.0, result=proposal)
+    state = core.step(core.initial_state(), stop).state
+    assert state.run.status is core.RunStatus.TERMINAL
+    return state
+
+
+def _with_outcome(
+    state: core.CoreState, outcome: Literal["success", "failure", "blocked"]
+) -> core.CoreState:
+    result = core.RunResultProposal(outcome=outcome, reason=outcome)
+    return state.model_copy(update={"run": state.run.model_copy(update={"result": result})})
+
+
+def test_a_resume_reopens_a_run_the_operators_stop_ended() -> None:
+    """A stop is a pause: the run it ended is resumable, and goes on with what it held.
+
+    Regression: a run the operator stopped ended for good, so a resume of it was refused and its
+    best, its rounds and its ledger could only be abandoned for a new run.
+    """
+    state = _ended_by(_control("drain", 0))
+    assert core.reopens_on_resume(state.run)
     resume = _control("resume", 1)
-    assert core.control_refusal(state, resume) is not None
-    assert core.requested_stop_mode(state.run) is core.StopMode.DRAIN
+    assert core.control_refusal(state, resume) is None
+    reopened = core.step(state, core.RunControlEvent(control=resume, now_at=1.0))
+    run = reopened.state.run
+    assert (run.status, run.result) == (core.RunStatus.RUNNING, None)
+    assert core.requested_stop_mode(run) is None
+    assert not [row for row in run.receipts if isinstance(row.decision, core.Finish)]
+    assert not reopened.state.scheduling.admission_closed
+    kinds = [type(event) for event in reopened.events]
+    assert kinds.index(core.ControlChanged) < kinds.index(core.StopLiftRecorded)
+    # the run's next ending is its first: core takes it as it would a run never stopped
+    ending = core.Finish(
+        decision_id=core.DecisionId(root="finish.2"),
+        scope=core.Scope(owner=run.run_id, generation=run.generation),
+        mode="drain",
+        result=core.RunResultProposal(outcome="failure", reason="no-winner: done"),
+    )
+    again = core.step(
+        reopened.state,
+        core.DecisionSubmitted(decision=ending, expected_revision=reopened.state.revision),
+    )
+    assert not [event for event in again.events if isinstance(event, core.Rejected)]
+
+
+def test_a_run_the_deadline_ended_is_not_reopened() -> None:
+    state = _ended_by(
+        core.ControlInput(
+            control_id=core.ControlId(root="deadline"), action="stop", mode=core.StopMode.DRAIN
+        )
+    )
+    assert not core.reopens_on_resume(state.run)
+    assert core.control_refusal(state, _control("resume", 1)) is not None
+
+
+def test_a_run_that_ended_by_itself_is_not_reopened() -> None:
+    for outcome in ("success", "failure", "blocked"):
+        state = _with_outcome(_ended_by(_control("drain", 0)), outcome)
+        assert not core.reopens_on_resume(state.run)
+        assert core.control_refusal(state, _control("resume", 1)) is not None
+
+
+def test_a_run_whose_ending_is_still_closing_takes_no_resume() -> None:
+    """Cleanup finishes first: a resume reopens the run only once the ending is committed."""
+    state = _ended_by(_control("drain", 0))
+    closing = state.model_copy(
+        update={"run": state.run.model_copy(update={"status": core.RunStatus.CLOSING})}
+    )
+    assert not core.reopens_on_resume(closing.run)
+    assert core.control_refusal(closing, _control("resume", 1)) is not None
+
+
+@given(
+    kinds=st.lists(st.sampled_from(("drain", "cancel", "resume")), min_size=1, max_size=6),
+    outcome=st.sampled_from(_OUTCOMES),
+    deadline=st.booleans(),
+)
+def test_a_resume_reopens_exactly_the_run_a_standing_operator_stop_cancelled(
+    kinds: list[_Kind], outcome: _Outcome, *, deadline: bool
+) -> None:
+    """The rule over the controls a run recorded before it ended, and its result."""
+    state = core.initial_state()
+    standing = False
+    for index, kind in enumerate(kinds):
+        if kind == "resume" and not standing:
+            continue  # a resume with no stop standing is a plain resume
+        state = core.step(
+            state, core.RunControlEvent(control=_control(kind, index), now_at=float(index))
+        ).state
+        standing = kind != "resume"
+    if standing and deadline:
+        stop = core.ControlInput(
+            control_id=core.ControlId(root="deadline"), action="stop", mode=core.StopMode.DRAIN
+        )
+        state = core.step(state, core.RunControlEvent(control=stop, now_at=9.0)).state
+    ended = state.run.model_copy(
+        update={
+            "status": core.RunStatus.TERMINAL,
+            "result": core.RunResultProposal(outcome=outcome, reason="x"),
+        }
+    )
+    expected = standing and outcome == "cancelled" and not deadline
+    assert core.reopens_on_resume(ended) is expected

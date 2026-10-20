@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 import pytest
-from hypothesis import given, settings
+from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
 import vs_core.api as core
@@ -580,6 +580,82 @@ def test_another_winner_is_refused_while_in_flight_and_after_completion() -> Non
         core.RejectionCode.ALREADY_SETTLED
     ]
     assert len(run.results()) == 1
+
+
+def _adopted(run: Run, selection: core.Selection) -> None:
+    """Propose ``selection`` and answer its adoption until it is verified."""
+    (adopt,) = new_requests(run.propose(selection))
+    (verify,) = new_requests(
+        run.answer(adopt, core.ObservationStatus.SUCCEEDED, revision=selection.revision)
+    )
+    run.answer(verify, core.ObservationStatus.SUCCEEDED, revision=selection.revision)
+
+
+def _control(action: Literal["stop", "resume"], index: int) -> core.RunControlEvent:
+    identity = core.ControlId(root=f"op-{index}")
+    control = (
+        core.ControlInput(control_id=identity, action="stop", mode=core.StopMode.DRAIN)
+        if action == "stop"
+        else core.ControlInput(control_id=identity, action="resume", when="now")
+    )
+    return core.RunControlEvent(control=control, now_at=float(index))
+
+
+@given(first=st.sampled_from(GOOD), later=st.sampled_from(GOOD))
+@example(first=GOOD[0], later=GOOD[1])
+@settings(max_examples=len(GOOD) ** 2, derandomize=True)
+def test_a_lifted_stop_takes_back_the_adoption_it_completed(
+    first: core.Selection, later: core.Selection
+) -> None:
+    """Regression: the winner of a run's later ending was refused as already settled.
+
+    A stopped run adopted its best, a resume lifted the stop, and the run went on and found a
+    better one. Its next ending proposed that winner, and core still held the first adoption as
+    the run's answer, so it refused with ``already-settled`` and the run ended without adopting.
+    """
+    run = start()
+    run.feed(_control("stop", 0))
+    _adopted(run, first)
+    run.feed(_control("resume", 1))
+    assert run.state.settlement.adoption is None
+    (adopt,) = new_requests(run.propose(later))
+    assert adopt.selection == later
+    assert run.rejections() == []
+    (verify,) = new_requests(
+        run.answer(adopt, core.ObservationStatus.SUCCEEDED, revision=later.revision)
+    )
+    run.answer(verify, core.ObservationStatus.SUCCEEDED, revision=later.revision)
+    assert [result.selection for result in run.results()] == [first, later]
+
+
+@given(first=st.sampled_from(GOOD), other=st.sampled_from(GOOD))
+def test_an_adoption_no_lift_took_back_stays_the_runs_answer(
+    first: core.Selection, other: core.Selection
+) -> None:
+    """A stop that stands keeps its adoption: only the lift reopens it."""
+    run = start()
+    run.feed(_control("stop", 0))
+    _adopted(run, first)
+    again = run.propose(other)
+    assert new_requests(again) == []
+    assert (first == other) or [r.code for r in run.rejections()] == [
+        core.RejectionCode.ALREADY_SETTLED
+    ]
+    assert run.state.settlement.adoption is not None
+    assert run.state.settlement.adoption.selection == first
+
+
+def test_a_lift_leaves_an_adoption_underway_to_finish() -> None:
+    run = start()
+    run.feed(_control("stop", 0))
+    selection = GOOD[0]
+    (adopt,) = new_requests(run.propose(selection))
+    run.feed(_control("resume", 1))
+    (verify,) = new_requests(
+        run.answer(adopt, core.ObservationStatus.SUCCEEDED, revision=selection.revision)
+    )
+    run.answer(verify, core.ObservationStatus.SUCCEEDED, revision=selection.revision)
+    assert [result.selection for result in run.results()] == [selection]
 
 
 def test_a_winner_waits_while_an_attempt_still_holds_the_root() -> None:

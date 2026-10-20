@@ -169,10 +169,10 @@ async def _saved_before_snapshots(ctx: Flow, config: MultiConfig) -> NoWinner | 
             task = rounds.start(f"{begin.number:06d}", play_round, MultiRound.of(begin, config))
             match await ctx.first(rounds, ctx.stopped):
                 case RoundDone() as done:
-                    run.finished(done, task.span, stopping=ctx.stop_requested)
+                    run.finished(done, task.span)
                     ctx.choose(*run.leading())
                 case TaskStopped():
-                    run.stopped = True
+                    pass
             ctx.publish(run.snapshot())
     return run.ending()
 

@@ -24,16 +24,15 @@ from vs_sim.api.testing import examples
 
 
 @settings(max_examples=examples(pr=30, nightly=300))
-@given(drawn=rounds_drawn, limit=st.integers(1, 8), stopping=st.booleans())
+@given(drawn=rounds_drawn, limit=st.integers(1, 8))
 def test_a_resumed_run_starts_the_next_round_with_the_same_best(
-    *, drawn: list[tuple[bool, bool, float]], limit: int, stopping: bool
+    *, drawn: list[tuple[bool, bool, float]], limit: int
 ) -> None:
     run = run_of(limit)
     for index, (counted, eligible, value) in enumerate(drawn, start=1):
         run.finished(
             done(index, counted=counted, kept=closed(index, eligible=eligible, value=value)),
             f"flow:{index:06d}/#1",
-            stopping=stopping,
         )
     saved = SerialState.model_validate_json(run.state().model_dump_json())
     resumed = type(run).resumed(HypothesisConfig(max_rounds=limit), INPUT_REVISION, TERMS, saved)

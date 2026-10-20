@@ -17,13 +17,14 @@ Adoption stores its progress in ``SettlementState.adoption``:
 - no observation: the round's AdoptRevision is outstanding.
 - an adopt observation that is applied or unknown: VerifyAdoption is outstanding.
 - a verify observation that is pending: VerifyAdoption is outstanding.
-- ``verified``: complete. Later events change nothing.
+- ``verified``: complete. Later events change nothing, except that a resume which lifts the
+  stop the adoption answered takes it back (`reopen`): the run is not ending.
 - ``failure`` set: the adoption failed for good, AdoptionFailed was emitted once,
   and the fence is released.
 
 Rounds are bounded in one place, ``_may_start_round``: the ledger holds at most
-``Limits.max_adoption_rounds`` AdoptRevision rounds per selection, whether they came
-from an automatic retry or from the strategy proposing the winner again.
+``Limits.max_adoption_rounds`` AdoptRevision rounds per selection that did not verify,
+whether they came from an automatic retry or from the strategy proposing the winner again.
 """
 
 from __future__ import annotations
@@ -99,9 +100,25 @@ def _rounds(records: RecordsState, selection: Selection) -> int:
     )
 
 
+def _completed_adoptions(run: RunState, selection: Selection) -> int:
+    """How many proposals of this selection ended with its adoption verified."""
+    return sum(
+        isinstance(item.decision, ProposeWinner)
+        and item.decision.selection == selection
+        and item.completion == CompletionStatus.SUCCEEDED
+        for item in run.receipts
+    )
+
+
 def _may_start_round(context: SettlementContext, selection: Selection) -> bool:
-    """The one bound on rounds: ``max_adoption_rounds``, the first included."""
-    return _rounds(context.records, selection) < context.run.limits.max_adoption_rounds
+    """The one bound on rounds: ``max_adoption_rounds`` that did not verify, the first included.
+
+    A round that verified is an adoption that completed, not a retry: a resume that lifts a stop
+    reopens the adoption (`AdoptionReopened`), and the run's later endings adopt the same winner
+    again without the earlier ones using up the bound.
+    """
+    spent = _rounds(context.records, selection) - _completed_adoptions(context.run, selection)
+    return spent < context.run.limits.max_adoption_rounds
 
 
 def _ledger_has(records: RecordsState, request_id: RequestId, selection: Selection) -> bool:
@@ -335,6 +352,21 @@ def _replay(
     missing = not _ledger_has(context.records, _verify_id(selection, latest), selection)
     requests = (_verify(context, selection, latest),) if missing else ()
     return AreaChange[SettlementState](state=state, requests=requests)
+
+
+def reopen(state: SettlementState) -> SettlementState:
+    """Take back a completed adoption: the stop it answered was lifted, so the run goes on.
+
+    A stop is a pause the operator can lift, and the adoption a stopped run completed was its
+    answer to that stop, not to its ending. Once the stop is lifted the adoption is open again,
+    and the ending the run reaches later adopts its own winner, whichever that is. Only a
+    verified adoption is taken back. One underway finishes (its restore is a request in flight),
+    and a failed one stays a failure, with the rounds it spent.
+    """
+    adoption = state.adoption
+    if adoption is None or not adoption.verified:
+        return state
+    return state.model_copy(update={"adoption": None})
 
 
 def _stale(adoption: Adoption, observation: Observation) -> bool:

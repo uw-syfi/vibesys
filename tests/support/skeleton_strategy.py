@@ -313,6 +313,7 @@ async def _bare(ctx: Flow, config: SkeletonConfig) -> _Ended | None:
 )
 async def skeleton(ctx: Flow, config: SkeletonConfig) -> NoWinner | None:
     """Play the scenario ``config`` names; the framework adopts the chosen winner."""
+    ctx.checkpoint(config)  # a run the operator stopped restarts from here once a resume reopens it
     if config.fails:
         return NoWinner(reason="scripted")
     if (ended := await _bare(ctx, config)) is not None:
