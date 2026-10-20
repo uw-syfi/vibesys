@@ -88,7 +88,8 @@ class PartsVerdict(StrEnum):
     WITHIN_NOISE = "within_noise"
     WORSE = "worse"
     UNKNOWN = "unknown"
-    """The composite, or every part, has no trusted headline to compare."""
+    """The composite, or every part, has no trusted headline to compare, or they are on
+    different metrics."""
 
 
 class CompositeRow(Value):
@@ -99,6 +100,10 @@ class CompositeRow(Value):
 
     parts: tuple[CombineSource, ...]
     verdict: PartsVerdict
+    best_part: str | None = None
+    """The hypothesis of the part with the strongest headline by raw value, the one compared."""
+    relative_noise: float = 0.0
+    """The task's declared relative noise the comparison allowed; 0 is a strict comparison."""
     unapplied: tuple[UnappliedPart, ...] = ()
     """What the implementer said it could not apply."""
 

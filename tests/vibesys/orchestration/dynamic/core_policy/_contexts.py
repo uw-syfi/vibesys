@@ -137,6 +137,8 @@ COMPOSITES = st.builds(
     dict,
     parts=PARTS,
     verdict=st.sampled_from(("better", "within_noise", "worse", "unknown")),
+    best_part=st.none() | tokens("part"),
+    relative_noise=st.sampled_from((0.0, 0.03, 0.125)),
     unapplied=st.lists(
         st.builds(dict, hypothesis_id=tokens("part"), part=tokens("hunk"), why=TEXT), max_size=2
     ).map(tuple),
@@ -203,7 +205,10 @@ INPUT_FAILURES = (
 
 
 SOURCES = st.lists(
-    st.builds(dict, hypothesis_id=tokens("hid"), revision=REVISIONS), max_size=2
+    st.builds(
+        dict, hypothesis_id=tokens("hid"), revision=REVISIONS, built_on=st.none() | REVISIONS
+    ),
+    max_size=2,
 ).map(tuple)
 MAIN_MEASUREMENTS = st.builds(
     dict,
@@ -322,6 +327,7 @@ IMPLEMENT_PROMPTS = st.builds(
     baseline_pending=st.booleans(),
     input_failure=INPUT_FAILURES,
     rebase_onto=st.none() | REVISIONS,
+    rebase_from=st.none() | REVISIONS,
     combine=st.just(()) | PARTS,
     combine_missing=st.lists(
         st.builds(dict, hypothesis_id=tokens("gone"), revision=tokens("rev")), max_size=1

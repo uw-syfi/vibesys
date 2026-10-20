@@ -41,13 +41,19 @@ from tests.vibesys.orchestration.dynamic._slots import (
 from tests.vibesys.orchestration.dynamic.core_policy._contexts import render
 from tests.vibesys.vibesys_flows import across_restarts
 
+from vibesys.candidates.api import measurement
+from vibesys.metrics import MetricRow, MetricSpace, Objective
 from vibesys.orchestration.dynamic.models import ImplementerResult, MergeResult, ReviewResult
 from vibesys.orchestration.dynamic.search.api import (
+    CombineSource,
     ImplementPrompt,
     MergePrompt,
+    PartsVerdict,
     PlannerPrompt,
     ProfileHistoryRow,
     PromptTemplate,
+    best_part,
+    versus_parts,
 )
 from vs_core.api import (
     Measure,
@@ -61,6 +67,8 @@ from vs_core.api import (
 from vs_sim.api.testing import examples
 
 if TYPE_CHECKING:
+    import random
+
     from tests.vibesys.orchestration.dynamic._host import World
 
 MODES = across_restarts
@@ -184,7 +192,11 @@ def test_a_combine_of_two_candidates_that_lost_alone_is_built_from_main_and_repo
     assert [part.hypothesis_id for part in parts] == ["h1", "h2"]
     assert [part.metric.value for part in parts if part.metric] == [LOST["c1"], LOST["c2"]]
     assert composite.verdict.value == "better"
+    assert composite.best_part == "h2"  # the stronger part alone
     shown = render(PromptTemplate.PORTFOLIO, after)
+    # The task declares no noise: the verdict is a strict comparison and must not claim noise.
+    assert "better in a strict comparison" in _flat(shown), shown
+    assert "beyond" not in _flat(shown).split("combined from `h1`")[1].split(".")[0]
     assert "combined from `h1`" in shown, shown
     assert "`h2`" in shown
     # The composite beats main, so the existing merge path may bring it into main.
@@ -285,3 +297,59 @@ def test_a_part_that_caught_up_with_main_twice_is_combined_and_merged_with_its_o
     merging = _flat(render(PromptTemplate.MERGE, _merged(host, "m3", "h2", "c10")))
     assert "git diff c6 c7" in merging, merging
     assert "merge-base" not in merging
+
+
+def _part(name: str, value: float, direction: str = "max") -> CombineSource:
+    row = MetricRow(name="throughput", value=value, direction=direction, unit="tokens/s")
+    at = RevisionRef.of_git_commit
+    return CombineSource(hypothesis_id=name, revision=at(name), built_on=at("base"), metric=row)
+
+
+def _space(noise: float, direction: str = "max") -> MetricSpace:
+    return MetricSpace(objectives=(Objective("throughput", direction),), relative_noise=noise)
+
+
+def test_the_composite_is_compared_with_the_strongest_part_not_the_first_within_noise() -> None:
+    # B (102) is within 3% of A (100); the composite (104) is 4% over A but only 2% over B.
+    parts = (_part("a", 100.0), _part("b", 102.0))
+    composite = (MetricRow(name="throughput", value=104.0, direction="max"),)
+    space = _space(0.03)
+    best = best_part(parts, space)
+    assert best is not None
+    assert best.hypothesis_id == "b"
+    assert versus_parts(composite, parts, space) is PartsVerdict.WITHIN_NOISE
+    assert versus_parts(composite, parts, _space(0.0)) is PartsVerdict.BETTER
+
+
+def test_a_composite_on_another_metric_than_its_parts_is_not_compared() -> None:
+    parts = (_part("a", 100.0), _part("b", 102.0))
+    composite = (MetricRow(name="latency", value=1.0, direction="min"),)
+    assert versus_parts(composite, parts, _space(0.03)) is PartsVerdict.UNKNOWN
+
+
+_VALUES = st.integers(1, 1000).map(float)
+
+
+@settings(max_examples=examples(pr=50, nightly=500), deadline=None)
+@given(
+    values=st.lists(_VALUES, min_size=2, max_size=5),
+    composite=_VALUES,
+    noise=st.sampled_from((0.0, 0.01, 0.03, 0.1)),
+    direction=st.sampled_from(("max", "min")),
+    order=st.randoms(use_true_random=False),
+)
+def test_the_parts_verdict_is_the_composite_against_the_raw_best_part_in_any_order(
+    values: list[float], composite: float, noise: float, direction: str, order: random.Random
+) -> None:
+    parts = tuple(_part(f"p{index}", value, direction) for index, value in enumerate(values))
+    space = _space(noise, direction)
+    strongest = max(values) if direction == "max" else min(values)
+    row = MetricRow(name="throughput", value=composite, direction=direction)
+    reference = space.compare(
+        measurement(row), measurement(_part("ref", strongest, direction).metric)
+    )
+    got = versus_parts((row,), parts, space)
+    assert got.value == reference.value
+    shuffled = list(parts)
+    order.shuffle(shuffled)
+    assert versus_parts((row,), tuple(shuffled), space) is got
