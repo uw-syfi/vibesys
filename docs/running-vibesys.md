@@ -293,8 +293,33 @@ Declare exactly one of `image` (a published image pinned by digest; a tag is ref
 `dockerfile` (a path in the task). A comparison never uses the task's or the agent's image,
 and `serve` must contain `${PORT}`. Unknown keys, repeated names or labels, and neither or both
 image sources are errors that name the comparison. Machine-specific settings, such as an image
-cache directory or credentials, never belong to the task. Measuring and showing comparisons
-is tracked in [#3308](https://github.com/uw-syfi/vibesys/issues/3308).
+cache directory or credentials, never belong to the task.
+
+A mature reference needs measuring once, so only `vibesys compare` measures one; a run never
+launches a comparison job. `vibesys compare [--task T] [--only NAME] [--force] [--samples N]`
+runs the task's accuracy check and benchmark against each engine, served from its pinned image on
+the operator's Slurm cluster through the same executor as a candidate, three times on different
+nodes (the noise estimate), and stores the reading in the project's machine-local state, never
+committed. The reading is keyed by the comparison's name, image digest (or build-context hash),
+`serve`, `env`, `benchmark_args` and the hardware; the evaluator version is recorded with it but
+is not in the key. `--force` measures again. A run reads the stored reading and shows it, or "not
+measured" when none is stored for the current configuration; it starts no job and never blocks.
+A failed measurement reads "failed" with its reason, and a machine without the table below reads
+"not configured". A comparison built from a `dockerfile` is not measured on Slurm yet.
+
+The operator's Slurm file gets the machine's side, beside `[vibesys.service]`, whose readiness
+URL and evaluator arguments the baseline's server reuses:
+
+```toml
+[vibesys.comparison]
+gpu = "rocm"                         # or "nvidia": which Apptainer GPU flag to bind
+image_cache_dir = "/path/on/cluster" # .sif files and layers; the first job pulls each image once
+model_cache_dir = "/path/on/cluster" # Hugging Face home with the weights; mounted read-only
+binds = []                           # optional extra --bind specs
+env_passthrough = []                 # optional names of job variables forwarded into the container
+```
+
+The measurement is tracked in [#3308](https://github.com/uw-syfi/vibesys/issues/3308).
 
 ### Who decides whether an idea held
 

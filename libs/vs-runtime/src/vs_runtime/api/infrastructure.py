@@ -281,7 +281,7 @@ from vs_runtime._skills import (
     load_skill_frontmatter,
     offered_skill_facts,
 )
-from vs_runtime._slurm_environment import SlurmEnvironment
+from vs_runtime._slurm_environment import SlurmEnvironment, slurm_evaluation_plan
 from vs_runtime._steer_delivery import SteerableAttempt, SteerTargets, known_steer_targets
 from vs_runtime._task_image_policy import (
     EditorImagePlan,
@@ -360,6 +360,7 @@ from vs_runtime._workspaces import (
     WorkspaceResource,
     WorkspaceResourceProvider,
 )
+from vs_runtime.contracts import Checkout, CheckoutRoot, MeasuredCheckouts
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
@@ -549,6 +550,8 @@ __all__ = [
     "CapacityWaitEnd",
     "CapacityWake",
     "ChannelRunControl",
+    "Checkout",
+    "CheckoutRoot",
     "ClusterEvaluationFacts",
     "CommandExecutionResult",
     "ControlAck",
@@ -604,6 +607,7 @@ __all__ = [
     "MacOSProfilerTool",
     "ManagedConversation",
     "ManagedConversationSpec",
+    "MeasuredCheckouts",
     "MissingOutputError",
     "ModalEnvironmentFacts",
     "ModelArtifactDownloader",
@@ -804,6 +808,7 @@ __all__ = [
     "run_environment_record",
     "runs_agent_in_container",
     "signal_of",
+    "slurm_evaluation_plan",
     "stop_gated_evaluation",
     "summarize_linux_profile",
     "validate_run_environment_profile",

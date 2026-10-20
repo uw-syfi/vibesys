@@ -40,6 +40,7 @@ from entrypoints.cli.args import (
     _parse_cli_objective,
     _parse_runs_dir,
 )
+from entrypoints.cli.compare import run as run_compare
 from entrypoints.cli.config import (
     _load_config_or_default,
     _prepare_experiment_repository,
@@ -222,6 +223,8 @@ def dispatch(argv: list[str], runs: Runs | None = None) -> None:
     if argv and argv[0] == "validate":
         _run_validate(argv[1:])
         return
+    if argv and argv[0] == "compare":
+        raise SystemExit(run_compare(argv[1:]))
     if argv and argv[0] == "control":
         raise SystemExit(
             control_main(

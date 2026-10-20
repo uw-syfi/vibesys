@@ -688,7 +688,9 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
             skill_source_paths=tuple(skill_source_paths),
             evaluation_plan=trusted_evaluation_plan(
                 bundle,
-                session,
+                accuracy_command=session.view.paths.accuracy_command,
+                benchmark_command=session.view.paths.benchmark_command,
+                framework_setup_timeout_seconds=session.view.framework_setup_timeout_seconds,
                 candidate_startup_causes=resolve_domain(bundle.domain).candidate_startup_causes,
             ),
             environment_resources=environment_resources,

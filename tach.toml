@@ -87,7 +87,7 @@ layers_explicit_depends_on = true
 
 [[modules]]
 path = "entrypoints"
-depends_on = ["server.api", "vs_decode.api", "vs_logs", "vs_sim.api", "vs_project", "vs_slurm", "vs_github", "vs_issue_tracker", "vs_runtime", "vs_sandbox", "vibesys.api", "vibesys.api.evolve", "vibesys.api.hypothesis", "vibesys.api.metrics", "vibesys.api.profilers", "vs_agent", "server.runtime", "server.instances", "server.host_api", "server.registry", "headless", "launch", "vs_mcp", "server.relay", "server.host_helper", "server.host_helper_requests", "server.host_helper_os", "server.host_helper_logs", "server.host_helper_machine", "server.host_helper_compute", "server.host_helper_readers", "server.host_agent_logins", "server.host_preflight", "server.host_examples", "server.host_harness"]
+depends_on = ["server.api", "vs_decode.api", "vs_logs", "vs_sim.api", "vs_project", "vs_slurm", "vs_github", "vs_issue_tracker", "vs_runtime", "vs_sandbox", "vibesys.api", "vibesys.api.evolve", "vibesys.api.hypothesis", "vibesys.api.metrics", "vibesys.api.profilers", "vs_agent", "server.runtime", "server.instances", "server.host_api", "server.registry", "headless", "launch", "vs_mcp", "server.relay", "server.host_helper", "server.host_helper_requests", "server.host_helper_os", "server.host_helper_logs", "server.host_helper_machine", "server.host_helper_compute", "server.host_helper_readers", "server.host_agent_logins", "server.host_preflight", "server.host_examples", "server.host_harness", "vibesys.comparisons"]
 
 [[modules]]
 path = "headless"
@@ -538,6 +538,16 @@ depends_on = ["vibesys", "vibesys.run", "vibesys.run.contracts", "vibesys.run.en
 path = "vibesys.run.resources"
 layer = "orchestration_host"
 depends_on = ["vibesys", "vibesys.errors", "vibesys.run.evaluation", "vibesys.run.evaluation_socket", "vibesys.run.profilers", "vibesys.orchestration.profilers", "vibesys.orchestration.skill_selection", "vibesys.run", "vibesys.run.contracts", "vibesys.run.environment", "vibesys.run.logs", "vibesys.domains", "vs_agent", "vs_logs", "vs_project", "vs_runtime", "vs_sandbox", "vs_sim.api"]
+
+[[modules]]
+# Comparison baselines: measured on request by `vibesys compare`, read (never measured) by a run.
+path = "vibesys.comparisons"
+layer = "orchestration_host"
+depends_on = ["vibesys", "vibesys.domains", "vibesys.inputs", "vibesys.run.evaluation", "vs_evaluation.api", "vs_project", "vs_runtime", "vs_sandbox", "vs_sim.api", "vs_slurm"]
+
+[[interfaces]]
+expose = ["api", "api\\..*"]
+from = ["vibesys.comparisons"]
 
 [[modules]]
 path = "vibesys.run.evaluation"

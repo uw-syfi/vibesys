@@ -54,10 +54,15 @@ def _spec(**changes: object) -> ComparisonInput:
     return ComparisonInput.model_validate(table)
 
 
-def _subject(spec: ComparisonInput | None = None, **changes: str) -> ComparisonSubject:
-    fields = {"identity": "a" * 64, "evaluator": "evaluator@1", "hardware": "mi210"} | changes
+def _subject(
+    *, identity: str = "a" * 64, evaluator: str = "evaluator@1", hardware: str = "mi210"
+) -> ComparisonSubject:
     return ComparisonSubject(
-        spec=spec or _spec(), benchmark=("measure", "--mode", "quick"), **fields
+        spec=_spec(),
+        identity=identity,
+        evaluator=evaluator,
+        benchmark=("measure", "--mode", "quick"),
+        hardware=hardware,
     )
 
 
@@ -222,19 +227,15 @@ async def test_an_evaluator_bump_does_not_force_a_new_measurement(tmp_path: Path
     assert stored.evaluator == "evaluator@1"
 
 
-@pytest.mark.parametrize(
-    "changed",
-    [
-        {"identity": "b" * 64},
-        {"hardware": "mi300"},
-    ],
-)
-async def test_a_changed_key_is_measured_again(tmp_path: Path, changed: dict[str, str]) -> None:
+@pytest.mark.parametrize(("identity", "hardware"), [("b" * 64, "mi210"), ("a" * 64, "mi300")])
+async def test_a_changed_key_is_measured_again(
+    tmp_path: Path, identity: str, hardware: str
+) -> None:
     cluster = ScenarioCluster()
     measurer, _, _, _, stack = await _rig(tmp_path, cluster, samples=2)
     await measurer.measure(_subject(), _plan(stack))
 
-    outcome = await measurer.measure(_subject(**changed), _plan(stack))
+    outcome = await measurer.measure(_subject(identity=identity, hardware=hardware), _plan(stack))
 
     assert outcome.cached is False
     assert len(cluster.submissions) == 2

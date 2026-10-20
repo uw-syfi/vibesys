@@ -52,7 +52,6 @@ if TYPE_CHECKING:
     from vibesys.run.contracts import RunRequest
     from vs_runtime.api import Workspace
     from vs_runtime.api.infrastructure import (
-        RunEnvironmentSession,
         WorkspaceRuntime,
     )
     from vs_sim.api import OutputSink
@@ -64,13 +63,16 @@ GATE_FEEDBACK_TAIL_CHARS = 4000
 
 def trusted_evaluation_plan(
     bundle: InputBundle,
-    session: RunEnvironmentSession,
     *,
+    accuracy_command: str | None,
+    benchmark_command: str | None,
+    framework_setup_timeout_seconds: int,
     candidate_startup_causes: tuple[str, ...],
 ) -> TrustedEvaluationPlan:
     """Lower task and environment configuration into runtime execution facts.
 
-    ``candidate_startup_causes`` are the run's domain's log patterns for a candidate that
+    The commands and the setup bound are the run environment's (``session.view``) or, for work
+    outside a run, the ones its own layout gives. ``candidate_startup_causes`` are the run's domain's log patterns for a candidate that
     broke its own server; the wiring passes them in, so this module names no domain.
     """
     scalar = bundle.benchmark_result
@@ -93,11 +95,11 @@ def trusted_evaluation_plan(
                 outputs=bundle.candidate_outputs,
             )
         ),
-        accuracy_command=session.view.paths.accuracy_command,
+        accuracy_command=accuracy_command,
         accuracy_timeout_seconds=bundle.manifest.accuracy.timeout_seconds,
-        benchmark_command=session.view.paths.benchmark_command,
+        benchmark_command=benchmark_command,
         benchmark_timeout_seconds=bundle.manifest.benchmark.timeout_seconds,
-        framework_setup_timeout_seconds=session.view.framework_setup_timeout_seconds,
+        framework_setup_timeout_seconds=framework_setup_timeout_seconds,
         profile_command=(
             shlex.join(bundle.profile_command) if bundle.profile_command is not None else None
         ),
