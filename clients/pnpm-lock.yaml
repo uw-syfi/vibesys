@@ -115,6 +115,9 @@ importers:
       '@vibesys/feature-run-chat':
         specifier: workspace:*
         version: link:../../features/run-chat
+      '@vibesys/feature-run-intents':
+        specifier: workspace:*
+        version: link:../../features/run-intents
       '@vibesys/feature-run-page':
         specifier: workspace:*
         version: link:../../features/run-page
@@ -185,9 +188,6 @@ importers:
       '@vibesys/contracts':
         specifier: workspace:*
         version: link:../../libs/contracts
-      '@vibesys/feature-run-intents':
-        specifier: workspace:*
-        version: link:../../features/run-intents
       '@vibesys/proto':
         specifier: workspace:*
         version: link:../../libs/proto

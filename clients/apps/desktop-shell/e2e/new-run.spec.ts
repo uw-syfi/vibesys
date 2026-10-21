@@ -15,6 +15,7 @@ import {
   installFakeProjectRuns,
 } from './fake-bridge.js';
 import {installFakeRun} from './fake-run.js';
+import {addInitScripts, initScript} from './init-scripts.js';
 import {choose, main, NEW_RUN_PAGES, openAt, proceed, question, steps} from './new-run-flow.js';
 import {type FakeHostWindow, openNewRun as open, PROJECT, SEED} from './world.js';
 
@@ -646,11 +647,13 @@ test('Run again opens Review with the run as it was started', async ({page}) => 
       : each,
   );
   const seed = {...SEED, recent};
-  await page.addInitScript(installFakeBridge, seed);
-  await page.addInitScript(installFakeProjectRuns, seed);
-  await page.addInitScript(installFakeMachines, seed);
-  await page.addInitScript(installFakeNewRun, seed);
-  await page.addInitScript(installFakeRun, {streams: [], text: {}});
+  await addInitScripts(page, [
+    initScript(installFakeBridge, seed),
+    initScript(installFakeProjectRuns, seed),
+    initScript(installFakeMachines, seed),
+    initScript(installFakeNewRun, seed),
+    initScript(installFakeRun, {streams: [], text: {}}),
+  ]);
   await page.goto('./shell.html');
   await page
     .getByRole('main')
@@ -988,21 +991,24 @@ test("Machines' New run here opens New run on that machine", async ({page}) => {
 test('a bridge call that throws is worded plainly, names what failed, and Try again reloads it', async ({
   page,
 }) => {
-  await page.addInitScript(installFakeBridge, SEED);
-  await page.addInitScript(installFakeProjectRuns, SEED);
-  await page.addInitScript(installFakeMachines, SEED);
-  await page.addInitScript(installFakeNewRun, SEED);
-  // The agents' request is missing, as a bridge built before it would be.
-  await page.addInitScript(() => {
-    const bridge = (window as unknown as {vibesysWelcome: Record<string, unknown>}).vibesysWelcome;
-    (window as unknown as {restoreHarnesses: () => void}).restoreHarnesses = (() => {
-      const real = bridge['harnesses'];
-      delete bridge['harnesses'];
-      return () => {
-        bridge['harnesses'] = real;
-      };
-    })();
-  });
+  await addInitScripts(page, [
+    initScript(installFakeBridge, SEED),
+    initScript(installFakeProjectRuns, SEED),
+    initScript(installFakeMachines, SEED),
+    initScript(installFakeNewRun, SEED),
+    // The agents' request is missing, as a bridge built before it would be.
+    initScript(() => {
+      const bridge = (window as unknown as {vibesysWelcome: Record<string, unknown>})
+        .vibesysWelcome;
+      (window as unknown as {restoreHarnesses: () => void}).restoreHarnesses = (() => {
+        const real = bridge['harnesses'];
+        delete bridge['harnesses'];
+        return () => {
+          bridge['harnesses'] = real;
+        };
+      })();
+    }, undefined),
+  ]);
   await page.goto('./shell.html');
   await page
     .getByRole('navigation', {name: 'VibeSys'})

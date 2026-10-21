@@ -4,6 +4,7 @@
  * their charts. `dashboardWorld(runs)` turns a list of run cases into the Fake bridge's seed;
  * `open` shows the dashboard on it.
  */
+
 import {expect, type Page} from '@playwright/test';
 import {
   type FakeBridgeSeed,
@@ -14,6 +15,7 @@ import {
   installFakeNewRun,
   installFakeProjectRuns,
 } from './fake-bridge.js';
+import {addInitScripts, initScript} from './init-scripts.js';
 import {SEED} from './world.js';
 
 export const NOW = Date.parse('2026-10-17T12:00:00Z');
@@ -174,12 +176,14 @@ export function dashboardWorld(
 /** Opens the app on `world` and waits for it to settle on the Runs dashboard. */
 export async function open(page: Page, world: FakeBridgeSeed): Promise<void> {
   await page.clock.setFixedTime(NOW);
-  await page.addInitScript(installFakeBridge, world);
-  await page.addInitScript(installFakeMachines, world);
-  await page.addInitScript(installFakeMachineSettings, world);
-  await page.addInitScript(installFakeDigests, world);
-  await page.addInitScript(installFakeProjectRuns, world);
-  await page.addInitScript(installFakeNewRun, world);
+  await addInitScripts(page, [
+    initScript(installFakeBridge, world),
+    initScript(installFakeMachines, world),
+    initScript(installFakeMachineSettings, world),
+    initScript(installFakeDigests, world),
+    initScript(installFakeProjectRuns, world),
+    initScript(installFakeNewRun, world),
+  ]);
   await page.goto('./shell.html');
   await expect(page.getByRole('heading', {name: 'Runs'})).toBeVisible();
 }

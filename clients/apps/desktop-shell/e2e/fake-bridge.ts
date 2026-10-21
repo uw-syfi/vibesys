@@ -6,7 +6,7 @@
  * tasks, and preflight checks that fail `project_own_repository` for a project inside another
  * repository (any path under `/vibesys/`) with its `copy_out` fix. `installFakeBridge`,
  * `installFakeMachines` and `installFakeNewRun` run in the page before its scripts
- * (`page.addInitScript`, in that order), so each is self-contained; the test drives pushes
+ * (one ordered `addInitScripts` call), so each is self-contained; the test drives pushes
  * through `window.fakeHost`.
  */
 import type {ExampleList} from '@vibesys/contracts/host-helper';

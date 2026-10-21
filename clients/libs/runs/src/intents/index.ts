@@ -1,6 +1,7 @@
 /** The protobuf boundary for run intents. UI code consumes values and opaque bytes. */
 import {clone, create, fromBinary, toBinary} from '@bufbuild/protobuf';
 import {
+  type ConfigurationFailed,
   HostCallRequestSchema,
   HostCallResponseSchema,
   HostService,
@@ -26,12 +27,13 @@ export const INTENT_TAIL_METHOD = `/${HostService.typeName}/${HostService.method
 /** The visible controls' defaults. The host surface accepts every typed intent. */
 export function runIntent(
   identity: Pick<PostIntentRequest, 'projectRoot' | 'runId' | 'requestId'>,
-  action: 'pause' | 'resume' | 'stop' | 'steer',
+  action: 'pause' | 'park' | 'resume' | 'stop' | 'steer',
   text = '',
 ): PostIntentRequest {
   switch (action) {
     case 'pause':
-      return create(PostIntentRequestSchema, {...identity, intent: {case: 'pause', value: {}}});
+    case 'park':
+      return create(PostIntentRequestSchema, {...identity, intent: {case: action, value: {}}});
     case 'resume':
       return create(PostIntentRequestSchema, {
         ...identity,
@@ -73,11 +75,18 @@ export function configuredHostCall(bytes: Uint8Array, checkout: string | null): 
   return toBinary(HostCallRequestSchema, request);
 }
 
+/** A typed negative HostCall reply, distinct from an uncertain transport failure. */
+export class IntentRefused extends Error {
+  constructor(failure: ConfigurationFailed) {
+    super(`${failure.message}${failure.stderr ? `: ${failure.stderr}` : ''}`);
+    this.name = 'IntentRefused';
+  }
+}
+
 export function hostIntentResponse(bytes: Uint8Array, requestId: string): PostIntentResponse {
   const response = fromBinary(HostCallResponseSchema, bytes);
   if (response.result.case === 'configurationFailed') {
-    const failure = response.result.value;
-    throw new Error(`${failure.message}${failure.stderr ? `: ${failure.stderr}` : ''}`);
+    throw new IntentRefused(response.result.value);
   }
   if (response.result.case !== 'postIntent' || response.result.value.requestId !== requestId)
     throw new Error('HostCall returned an invalid admission reply');

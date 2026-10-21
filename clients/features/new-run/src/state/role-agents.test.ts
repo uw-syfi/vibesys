@@ -165,3 +165,21 @@ describe('the inputs a run starts with', () => {
     expect(inputs?.options.roles).toEqual([]);
   });
 });
+
+test('an inherited run model has one choice, without an alias that normalizes to no change', () => {
+  const regression: HarnessOffer[] = [
+    {provider: 'claude', model: 'claude-opus-4-5', default: true},
+    {provider: 'claude', model: 'claude-sonnet-4-5', default: false},
+  ];
+  const cases = [regression, ...SEEDS.map(seed => arbitraryOffers(new Seeded(seed)))];
+  for (const offers of cases) {
+    const all = roleModels(offers, PROVIDERS, 'claude');
+    for (const following of all) {
+      const choices = roleModels(offers, PROVIDERS, 'claude', following);
+      expect(choices).toEqual(all.filter(choice => choice.key !== following.key));
+      expect(choices.every(choice => pickedRoleAgent(following, choice) !== null)).toBe(true);
+      // Explicit overrides keep the full list, including a value restored from a saved draft.
+      expect(roleModels(offers, PROVIDERS, 'claude', null)).toEqual(all);
+    }
+  }
+});

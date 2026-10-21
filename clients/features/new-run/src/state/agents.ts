@@ -7,6 +7,7 @@
  */
 import type {HarnessOffer} from '@vibesys/ipc';
 import {type AgentEnvironment, type AgentPick, harnessLabel, modelLabel} from './form.js';
+import {pickedRoleAgent} from './roles.js';
 
 /** A maker of the agent's own models, as the host reports it. */
 export type AgentMaker = NonNullable<HarnessOffer['display']>['maker'] & string;
@@ -258,12 +259,14 @@ export interface RoleModel {
 /**
  * The models a role may choose among, one option per model, grouped by maker and then generation
  * (else family), the groups and the models in the host's order. A model several allowed harnesses
- * run is listed once, on `prefer`'s harness when it runs it.
+ * run is listed once, on `prefer`'s harness when it runs it. When following a run agent, its
+ * selection already has an inheritance option, so the equivalent model is not listed twice.
  */
 export function roleModels(
   offers: readonly HarnessOffer[],
   providers: readonly string[],
   prefer: string,
+  following: AgentPick | null = null,
 ): RoleModel[] {
   const names = new Map(agentGroups(offers).map(group => [group.id, group.name]));
   const chosen = new Map<string, HarnessOffer>();
@@ -289,7 +292,9 @@ export function roleModels(
     });
     groups.set(group, options);
   }
-  return [...groups.values()].flat();
+  return [...groups.values()]
+    .flat()
+    .filter(model => following === null || pickedRoleAgent(following, model) !== null);
 }
 
 /** The allowed harnesses that run `model`, in the host's order. */

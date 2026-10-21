@@ -10,6 +10,7 @@ import {
 } from './fake-bridge.js';
 import {installFakeRun} from './fake-run.js';
 import {type FakeServerSeed, installFakeServer} from './fake-server.js';
+import {addInitScripts, initScript} from './init-scripts.js';
 import {drawnUnderWindowControls, listed, SEED, server} from './world.js';
 
 /**
@@ -40,13 +41,15 @@ const SERVER: FakeServerSeed = {
 
 /** Every page in `context`, the run windows too, gets the Fake bridge before its scripts. */
 async function install(context: BrowserContext): Promise<void> {
-  await context.addInitScript(installFakeBridge, WINDOW_SEED);
-  await context.addInitScript(installFakeMachines, WINDOW_SEED);
-  await context.addInitScript(installFakeNewRun, WINDOW_SEED);
-  await context.addInitScript(installFakeProjectRuns, WINDOW_SEED);
-  await context.addInitScript(installFakeWindows);
-  await context.addInitScript(installFakeRun, {streams: [], text: {}});
-  await context.addInitScript(installFakeServer, SERVER);
+  await addInitScripts(context, [
+    initScript(installFakeBridge, WINDOW_SEED),
+    initScript(installFakeMachines, WINDOW_SEED),
+    initScript(installFakeNewRun, WINDOW_SEED),
+    initScript(installFakeProjectRuns, WINDOW_SEED),
+    initScript(installFakeWindows, undefined),
+    initScript(installFakeRun, {streams: [], text: {}}),
+    initScript(installFakeServer, SERVER),
+  ]);
 }
 
 async function windows(page: Page): Promise<FakeWindows> {

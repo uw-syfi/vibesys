@@ -80,7 +80,14 @@ const fixtureFor = (start: string): string =>
 
 for (const start of CELLS) {
   const fixtureName = fixtureFor(start);
-  test(`every control of ${start} acts on ${fixtureName}`, async ({context}) => {
+  test(`every control of ${start} acts on ${fixtureName}`, async ({
+    context,
+    browser,
+    baseURL,
+    viewport,
+    colorScheme,
+    contextOptions,
+  }) => {
     const first = await context.newPage();
     await reachScreen(first, fixtureName, start);
     const exempt = INERT_BY_DESIGN.filter(each => each.start.test(start));
@@ -90,7 +97,8 @@ for (const start of CELLS) {
     await first.close();
     expect(controls.length, 'the screen has controls').toBeGreaterThan(0);
     const found = await checkControls(
-      context,
+      browser,
+      {...contextOptions, ...(baseURL === undefined ? {} : {baseURL}), viewport, colorScheme},
       controls,
       async page => {
         await reachScreen(page, fixtureName, start);

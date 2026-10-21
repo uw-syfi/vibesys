@@ -156,36 +156,68 @@ test('timeout cancels the unary and a late reply cannot settle its retry', async
   }
 });
 
-test('configuration errors, malformed replies and wrong ids stay visible and retryable', async () => {
-  for (const reply of [
-    new Uint8Array([255]),
-    admission('other'),
-    toBinary(
-      HostCallResponseSchema,
-      create(HostCallResponseSchema, {
-        result: {
-          case: 'configurationFailed',
-          value: {
-            code: 'invalid_input',
-            stage: 'post_intent',
-            message: 'unknown run',
-            stderr: 'detail',
-            exitCode: 2,
+test('typed refusals are final; malformed replies and wrong ids stay unconfirmed', async () => {
+  for (const [reply, status] of [
+    [new Uint8Array([255]), 'uncertain'],
+    [admission('other'), 'uncertain'],
+    [
+      toBinary(
+        HostCallResponseSchema,
+        create(HostCallResponseSchema, {
+          result: {
+            case: 'configurationFailed',
+            value: {
+              code: 'invalid_input',
+              stage: 'post_intent',
+              message: 'unknown run',
+              stderr: 'detail',
+              exitCode: 2,
+            },
           },
-        },
-      }),
-    ),
-  ]) {
+        }),
+      ),
+      'refused',
+    ],
+  ] as const) {
     const {actor, bridge} = fixture();
     try {
       actor.send({type: 'send', request});
       bridge.calls[0]?.resolve(reply);
       await waitFor(actor, snapshot => snapshot.matches({active: 'idle'}), {timeout: 1000});
-      expect(actor.getSnapshot().context.error).not.toBeNull();
-      expect(actor.getSnapshot().context.entries[0]?.status).toBe('uncertain');
+      expect(actor.getSnapshot().context.entries[0]?.status).toBe(status);
+      expect(actor.getSnapshot().context.error === null).toBe(status === 'refused');
     } finally {
       actor.stop();
     }
+  }
+});
+
+test('a typed refusal preserves an outcome-stream failure for earlier pending requests', async () => {
+  const {actor, bridge} = fixture();
+  try {
+    actor.send({type: 'send', request});
+    bridge.streams[0]?.ended('disconnected');
+    bridge.calls[0]?.resolve(
+      toBinary(
+        HostCallResponseSchema,
+        create(HostCallResponseSchema, {
+          result: {
+            case: 'configurationFailed',
+            value: {
+              code: 'invalid_input',
+              stage: 'post_intent',
+              message: 'Request refused',
+              exitCode: 2,
+            },
+          },
+        }),
+      ),
+    );
+    await waitFor(actor, snapshot => snapshot.matches({active: 'idle'}), {timeout: 1000});
+    expect(actor.getSnapshot().context.entries[0]?.status).toBe('refused');
+    expect(actor.getSnapshot().context.error).toBe('disconnected');
+  } finally {
+    actor.stop();
   }
 });
 

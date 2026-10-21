@@ -11,6 +11,7 @@ import {
 import {lineageRun} from './fake-lineage.js';
 import {installFakeRun} from './fake-run.js';
 import {installFakeServer} from './fake-server.js';
+import {addInitScripts, initScript} from './init-scripts.js';
 import {STARTED_AT} from './started-at.js';
 
 const PROJECT = '/home/me/vibesys-projects/queue-rs';
@@ -56,14 +57,16 @@ const SEED: FakeBridgeSeed = {
 };
 
 async function openRun(page: Page, count: number): Promise<void> {
-  await page.addInitScript(installFakeBridge, SEED);
-  await page.addInitScript(installFakeProjectRuns, SEED);
-  await page.addInitScript(installFakeMachines, SEED);
-  await page.addInitScript(installFakeRun, {streams: [], text: {}});
-  await page.addInitScript(
-    installFakeServer,
-    lineageRun(RUN, {count, chain: count > 100 ? 15 : 4, days: count > 100 ? 14 : 1}),
-  );
+  await addInitScripts(page, [
+    initScript(installFakeBridge, SEED),
+    initScript(installFakeProjectRuns, SEED),
+    initScript(installFakeMachines, SEED),
+    initScript(installFakeRun, {streams: [], text: {}}),
+    initScript(
+      installFakeServer,
+      lineageRun(RUN, {count, chain: count > 100 ? 15 : 4, days: count > 100 ? 14 : 1}),
+    ),
+  ]);
   await page.goto('./shell.html');
   await page
     .getByRole('main')

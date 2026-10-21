@@ -9,6 +9,7 @@ import {
   installFakeProjectRuns,
   installFakeUsage,
 } from './fake-bridge.js';
+import {addInitScripts, initScript} from './init-scripts.js';
 import {seedFor, USAGE_CASES, type UsageCase} from './usage-world.js';
 
 /**
@@ -30,10 +31,12 @@ interface UsageHost extends Window {
 async function open(page: Page, usage: UsageCase, width: number): Promise<void> {
   const seed = seedFor(usage);
   await page.setViewportSize({width, height: 900});
-  await page.addInitScript(installFakeBridge, seed);
-  await page.addInitScript(installFakeProjectRuns, seed);
-  await page.addInitScript(installFakeNewRun, seed);
-  await page.addInitScript(installFakeUsage, seed);
+  await addInitScripts(page, [
+    initScript(installFakeBridge, seed),
+    initScript(installFakeProjectRuns, seed),
+    initScript(installFakeNewRun, seed),
+    initScript(installFakeUsage, seed),
+  ]);
   await page.goto('./shell.html');
   await page
     .getByRole('navigation', {name: 'VibeSys'})
@@ -269,10 +272,12 @@ test('Usage asks nothing until it is shown, and again each time it is shown', as
   const asked = () =>
     page.evaluate(() => (window as unknown as UsageHost).fakeHost.usageAsked.length);
   const seed = seedFor(one);
-  await page.addInitScript(installFakeBridge, seed);
-  await page.addInitScript(installFakeProjectRuns, seed);
-  await page.addInitScript(installFakeNewRun, seed);
-  await page.addInitScript(installFakeUsage, seed);
+  await addInitScripts(page, [
+    initScript(installFakeBridge, seed),
+    initScript(installFakeProjectRuns, seed),
+    initScript(installFakeNewRun, seed),
+    initScript(installFakeUsage, seed),
+  ]);
   await page.goto('./shell.html');
   const rail = page.getByRole('navigation', {name: 'VibeSys'});
   await expect(page.getByRole('heading', {name: 'Runs', level: 1})).toBeVisible();

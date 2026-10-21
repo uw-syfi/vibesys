@@ -7,6 +7,7 @@ import {
   installFakeMachines,
   installFakeNewRun,
 } from './fake-bridge.js';
+import {addInitScripts, initScript} from './init-scripts.js';
 
 /** Where the journey's Ink screenshots go, when `MACHINES_SCREENSHOTS` names a directory. */
 const SHOTS = process.env['MACHINES_SCREENSHOTS'];
@@ -62,9 +63,11 @@ const machineList = (page: Page) => page.getByRole('tree', {name: 'Machines'});
 const row = (page: Page, name: string) => machineList(page).getByRole('treeitem', {name});
 
 async function openMachines(page: Page, seed: FakeBridgeSeed = SEED): Promise<void> {
-  await page.addInitScript(installFakeBridge, seed);
-  await page.addInitScript(installFakeMachines, seed);
-  await page.addInitScript(installFakeNewRun, seed);
+  await addInitScripts(page, [
+    initScript(installFakeBridge, seed),
+    initScript(installFakeMachines, seed),
+    initScript(installFakeNewRun, seed),
+  ]);
   await page.goto('./shell.html');
   await page
     .getByRole('navigation', {name: 'VibeSys'})
@@ -199,9 +202,11 @@ test('Escape closes Add a machine, which has the focus as it opens, and no empty
   page,
 }) => {
   const none: FakeBridgeSeed = {...SEED, machines: []};
-  await page.addInitScript(installFakeBridge, none);
-  await page.addInitScript(installFakeMachines, none);
-  await page.addInitScript(installFakeNewRun, none);
+  await addInitScripts(page, [
+    initScript(installFakeBridge, none),
+    initScript(installFakeMachines, none),
+    initScript(installFakeNewRun, none),
+  ]);
   await page.goto('./shell.html');
   await page
     .getByRole('navigation', {name: 'VibeSys'})
