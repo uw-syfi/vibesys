@@ -156,12 +156,16 @@ def ended(projection: Projection) -> None:
                 uncompared=data.uncompared,
             )
         )
-        ending.outcome = (
-            p.Outcome.STOPPED
-            if data.reason is not None and data.reason.value == "stopped"
-            else p.Outcome.FINISHED
-        )
-        projection.ending = ending.to_binary()
+        if ending.outcome != p.Outcome.FAILED:
+            ending.outcome = (
+                p.Outcome.STOPPED
+                if data.reason is not None and data.reason.value == "stopped"
+                else p.Outcome.FINISHED
+            )
+        if projection.epoch_ended:
+            projection.emit("lifecycle", p.Lifecycle(state=p.Oneof("ended", ending)))
+        else:
+            projection.ending = ending.to_binary()
         return
     if isinstance(data, e.RunFailedData):
         failure = data.failure

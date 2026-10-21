@@ -115,16 +115,18 @@ class Projection:
             and value.state is not None
             and value.state.field == "ended"
         ):
+            ending = value.state.value
+            previous = None if self.ending is None else p.Ended.from_binary(self.ending)
             if self.epoch_ended and (
-                value.state.value.outcome != p.Outcome.FAILED
+                self.ending == ending.to_binary()
                 or (
-                    self.ending is not None
-                    and p.Ended.from_binary(self.ending).outcome == p.Outcome.FAILED
+                    previous is not None
+                    and ending.outcome not in {previous.outcome, p.Outcome.FAILED}
                 )
             ):
                 return
             self.epoch_ended = True
-            self.ending = value.state.value.to_binary()
+            self.ending = ending.to_binary()
         self.bound(value, "run")
         if isinstance(value, p.EpochStarted):
             if self.header is not None:

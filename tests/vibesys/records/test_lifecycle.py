@@ -195,3 +195,35 @@ def test_every_run_failure_kind_has_a_supported_native_reason(kind: e.RunFailure
     assert lifecycle.state.field == "ended"
     assert lifecycle.state.value.failure is not None
     assert lifecycle.state.value.failure.kind != p.RunFailureKind.UNSPECIFIED
+
+
+@pytest.mark.regression
+@example(summary="stopped: kept the input", failed=False)
+@given(summary=st.text(alphabet="summary abc123:", max_size=40), failed=st.booleans())
+def test_late_ending_facts_update_the_head_without_downgrading_failure(
+    summary: str, *, failed: bool
+) -> None:
+    state = map_event(
+        MappingState("run-a"),
+        event(
+            e.CoreEventType.RUN_FAILED if failed else e.CoreEventType.STOPPED,
+        ),
+    ).state
+    result = map_event(
+        state,
+        event(
+            e.CoreEventType.RUN_ENDING,
+            e.RunEndingData(
+                reason=EndReason.STOPPED,
+                summary=summary,
+                resumable=True,
+                rounds_finished=0,
+            ),
+        ),
+    )
+    lifecycle = next(r.body.value for r in result.records if r.body and r.body.field == "lifecycle")
+    assert lifecycle.state is not None
+    ending = lifecycle.state.value
+    assert ending.outcome == (p.Outcome.FAILED if failed else p.Outcome.STOPPED)
+    assert ending.summary == summary
+    assert ending.resumable
