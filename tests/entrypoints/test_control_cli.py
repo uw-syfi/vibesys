@@ -125,7 +125,12 @@ def test_a_posted_control_is_what_the_run_records(
 
     status, out, err = _control(root, [run_id, *command])
 
-    assert (status, out, err) == (0, "r-1\n", "")
+    warning = (
+        "Unfinished work may need repeating and may still incur charges.\n"
+        if command[0] == "pause-now"
+        else ""
+    )
+    assert (status, out, err) == (0, "r-1\n", warning)
     (entry,) = Project.open(root).state.control_inbox(run_id).pending()
     request = CONTROL_REQUEST.validate_json(entry.payload)
     assert request.action == command[0].replace("-", "_")
@@ -441,7 +446,7 @@ def test_a_retry_of_an_applied_control_after_the_run_ended_reports_it_applied(
     assert _control(tmp_path, ["--control-id", "stop-1", run_id, "pause-now"]) == (
         0,
         "stop-1\n",
-        "",
+        "Unfinished work may need repeating and may still incur charges.\n",
     )
     assert _control(tmp_path, [run_id, "status", "stop-1"]) == (0, "applied\n", "")
 

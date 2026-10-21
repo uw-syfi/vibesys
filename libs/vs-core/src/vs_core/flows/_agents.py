@@ -478,6 +478,7 @@ class _Ask:
     async def _unsuccessful(self, result: TurnResult) -> Failed | _Again:
         role, turn = self.role, result.invocation
         if result.failure is TurnFailureKind.EPOCH_INTERRUPTED:
+            self.charge = "correction"
             return self._unfinished(turn)
         if result.failure is TurnFailureKind.TRANSPORT_LOST:
             return await self._lost(turn)

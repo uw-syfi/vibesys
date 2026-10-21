@@ -159,3 +159,32 @@ def test_pause_now_releases_active_invocations_before_the_epoch_exits() -> None:
     assert ended.state.run.status is core.RunStatus.PARKED
     assert ended.state.run.result is None
     assert ended.state.sessions.run_charges == state.sessions.run_charges
+
+
+def test_pause_now_retains_unresolved_cancellation_after_its_cleanup_bound() -> None:
+    state, _ = write_turn_world(access=core.Access.READ_ONLY)
+    state = core.step(state, core.RunControlEvent(control=control("pause_now", 1), now_at=1)).state
+    cancellation = next(
+        row for row in state.records.records if isinstance(row.request, core.CancelTurn)
+    )
+    state = state.model_copy(
+        update={
+            "records": state.records.model_copy(
+                update={
+                    "records": tuple(
+                        row.model_copy(update={"phase": core.RequestPhase.BLOCKED})
+                        if row.request_id == cancellation.request_id
+                        else row
+                        for row in state.records.records
+                    )
+                }
+            )
+        }
+    )
+    ended = core.step(state, core.ClockAdvanced(now_at=cancellation.until.at))
+    assert ended.state.run.status is core.RunStatus.PARKED
+    retained = ended.state.records.record(cancellation.request_id)
+    assert retained is not None
+    assert retained.observation is None
+    assert retained.phase is core.RequestPhase.BLOCKED
+    assert ended.state.run.result is None

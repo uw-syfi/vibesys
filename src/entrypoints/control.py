@@ -46,6 +46,9 @@ def time_ordered_id(now: float, token: str) -> str:
     return f"{round(now * 1000):013d}-{token}"
 
 
+_PAUSE_NOW_WARNING = "Unfinished work may need repeating and may still incur charges."
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="vibesys control",
@@ -111,7 +114,8 @@ def _parser() -> argparse.ArgumentParser:
     limit.add_argument("max_parallel", metavar="N", type=int, help="the new limit, at least 1")
     actions.add_parser(
         "pause-now",
-        help="cancel unfinished work and exit; it may need repeating and may still incur charges",
+        help="cancel unfinished work and exit",
+        description=_PAUSE_NOW_WARNING,
     )
     return parser
 
@@ -178,6 +182,8 @@ def control_main(
             "requests in posting order (it has not started yet, or runs an older VibeSys, "
             "which applies them in id order)\n"
         )
+    if request.action == "pause_now":
+        err.write(_PAUSE_NOW_WARNING + "\n")
     out.write(f"{request.control_id}\n")
     return 0
 

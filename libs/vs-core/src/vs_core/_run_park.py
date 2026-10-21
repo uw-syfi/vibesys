@@ -212,6 +212,15 @@ def _turns_in_flight(state: CoreState) -> bool:
     )
 
 
+def _released_or_bounded(state: CoreState, record: RequestRecord | None) -> bool:
+    if record is None:
+        return False
+    observation = record.observation
+    return (observation is not None and observation.accepted and observation.released) or (
+        record.phase is RequestPhase.BLOCKED and state.run.now_at >= record.until.at
+    )
+
+
 def _cancel_turns(state: CoreState) -> tuple[list[Scheduled], bool]:
     park = state.run.park
     if park is None or not park.immediate:
@@ -247,10 +256,7 @@ def _cancel_turns(state: CoreState) -> tuple[list[Scheduled], bool]:
                     until=Until(at=state.run.now_at + state.run.limits.cleanup_bound),
                 )
             )
-        observation = None if held is None else held.observation
-        released = released and (
-            observation is not None and observation.accepted and observation.released
-        )
+        released = released and _released_or_bounded(state, held)
     return pending, released
 
 
@@ -287,16 +293,22 @@ def advance(state: CoreState) -> tuple[CoreState, tuple[Scheduled, ...]]:
                 Scheduled(
                     request=request,
                     until=Until(
-                        at=max(
-                            state.run.now_at + state.run.limits.cleanup_bound,
-                            state.run.now_at if source is None else source.until.at,
+                        at=(
+                            state.run.now_at + state.run.limits.cleanup_bound
+                            if park.immediate
+                            else max(
+                                state.run.now_at + state.run.limits.cleanup_bound,
+                                state.run.now_at if source is None else source.until.at,
+                            )
                         )
                     ),
                 )
             )
         observation = None if held is None else held.observation
         released = released and (
-            observation is not None and observation.accepted and observation.released
+            _released_or_bounded(state, held)
+            if park.immediate
+            else observation is not None and observation.accepted and observation.released
         )
     if pending:
         return state, tuple(pending)

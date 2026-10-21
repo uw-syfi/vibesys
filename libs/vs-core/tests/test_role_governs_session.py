@@ -564,7 +564,7 @@ def test_epoch_interruption_never_spends_a_roles_correction_or_lost_turn(
         again = turn(run)
         assert again.template == asked.template
         assert again.context == asked.context
-        assert spec_of(again).charge_class == spec_of(asked).charge_class
+        assert spec_of(again).charge_class == "correction"
         assert spec_of(again).predecessor == invocation_of(asked)
         assert run.sleeping_until == ()
         asked = again
