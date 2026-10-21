@@ -34,6 +34,7 @@ from vs_agent.contracts import (
 )
 from vs_agent.runner import parse_typed_response
 from vs_agent.session_errors import (
+    AgentExecutionCancelledError,
     InvocationConflictError,
     SessionConfigurationError,
     SessionPersistenceError,
@@ -654,6 +655,7 @@ class ClientAgentSessions:
             detail="dispatch interrupted before acknowledgement",
             checkpoint=checkpoint,
         )
+        interrupted = False
         try:
             result = self._client.run(
                 session_spec=spec,
@@ -680,6 +682,15 @@ class ClientAgentSessions:
                 result=result,
                 checkpoint=checkpoint,
             )
+        except AgentExecutionCancelledError as error:
+            outcome = Unknown(
+                session_key=str(key),
+                invocation_id=invocation_id,
+                detail=str(error),
+                checkpoint=checkpoint,
+            )
+            interrupted = True
+            raise
         except AgentOutputSchemaError as error:
             outcome = self._schema_failure(pending, error, initial=initial)
         except BaseException as error:
@@ -697,7 +708,9 @@ class ClientAgentSessions:
         finally:
             with self._lock:
                 try:
-                    self._record(self._load(), invocation_id, digest, outcome)
+                    self._record(
+                        self._load(), invocation_id, digest, outcome, interrupted=interrupted
+                    )
                 finally:
                     self._active.discard(invocation_id)
                     self._active_keys.discard(key)
@@ -817,8 +830,12 @@ class ClientAgentSessions:
         invocation_id: str,
         digest: str,
         outcome: InvocationOutcome,
+        *,
+        interrupted: bool = False,
     ) -> None:
-        state.record(AgentInvocationRecord(payload_digest=digest, outcome=outcome))
+        state.record(
+            AgentInvocationRecord(payload_digest=digest, outcome=outcome, interrupted=interrupted)
+        )
         try:
             self._slot.save(state)
         except (ProjectError, OSError, ValidationError) as error:

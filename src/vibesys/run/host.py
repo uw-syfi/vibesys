@@ -437,6 +437,7 @@ class _ProductHostFactory:
                         workspaces,
                         clock=self.timing.clock,
                         stage_output=stage_output,
+                        control=self.integration.control,
                     ),
                     self.request.config.evaluation.evaluation_retries(),
                     project.project.state.local_namespace(
@@ -452,6 +453,7 @@ class _ProductHostFactory:
                     if spec.model and spec.model != base.model
                 },
                 agent_turns=turns,
+                control=self.integration.control,
                 invocation_slot=invocations,
                 configuration=configuration,
                 clock=self.timing.clock,
@@ -637,6 +639,7 @@ class _ProductHostFactory:
             ledger_identity=ledger_identity,
             stage_output=stage_output,
             root_proof=cluster.root_proof,
+            control=self.integration.control,
         )
 
     async def stop_new_work(self) -> None:

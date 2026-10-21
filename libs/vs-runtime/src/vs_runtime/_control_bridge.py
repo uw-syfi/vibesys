@@ -725,6 +725,8 @@ class RunControlBridge:
         if control is None:
             return False
         if _is_held(entry, control):
+            if control.action == "park" and not self._channel.drain_ready:
+                return True
             if self._inbox is not None:
                 self._report_outcome(entry.request_id, None)
                 self._inbox.requests.settle(entry.request_id)
@@ -857,8 +859,30 @@ class RunControlBridge:
                 continue
             inbox = change.control_id is not None and change.control_id in self._submitted
             self._refuse(change, error.detail, request_id=change.control_id if inbox else None)
+        if core.run.status in (RunStatus.DRAINING, RunStatus.PARKED) and not self._park_landed:
+            self._park_landed = True
+            self._channel.land_park(
+                tuple(
+                    job.resource_id.root
+                    for job in (*core.evaluation.jobs, *core.evaluation.registered_jobs)
+                    if not job.terminal and job.resource_id is not None
+                )
+            )
         held = {control.control_id for control in core.run.controls}
-        self._settle_inbox(sorted(r for r in self._submitted if _identity(r) in held))
+        self._settle_inbox(
+            sorted(
+                r
+                for r in self._submitted
+                if _identity(r) in held
+                and (
+                    self._channel.drain_ready
+                    or not any(
+                        c.control_id == _identity(r) and c.action == "park"
+                        for c in core.run.controls
+                    )
+                )
+            )
+        )
         for identity, change in self._asked.items():
             if change.action_request is not None and identity in held:
                 self._channel.notify_action_applied(action_summary(change.action_request))
@@ -866,9 +890,6 @@ class RunControlBridge:
         self._asked.clear()
         self._pause = run_pause(core.run)
         self._stands = capacity_wait_stands(core.run)
-        if core.run.status in (RunStatus.DRAINING, RunStatus.PARKED) and not self._park_landed:
-            self._park_landed = True
-            self._channel.land_park()
         if core.run.status != RunStatus.PAUSED:
             self._landed = False
         elif not running and not self._landed:

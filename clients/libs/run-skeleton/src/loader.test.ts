@@ -66,6 +66,9 @@ class FakeRunTransport implements RunTransport {
   push: (response: Uint8Array) => void = () => {
     throw new Error('no stream');
   };
+  endStream: () => void = () => {
+    throw new Error('no stream');
+  };
   streamClosed = false;
 
   unary(method: string, request: Uint8Array, signal: AbortSignalLike): Promise<Uint8Array> {
@@ -88,6 +91,11 @@ class FakeRunTransport implements RunTransport {
         next: () =>
           new Promise<IteratorResult<Uint8Array>>(resolve => {
             const abort = () => {
+              this.streamClosed = true;
+              resolve({done: true, value: undefined});
+            };
+            this.endStream = () => {
+              registration.detach();
               this.streamClosed = true;
               resolve({done: true, value: undefined});
             };
@@ -147,12 +155,14 @@ test('unary timeout aborts ownership and ignores a late response', async () => {
   const clock = new FakeClock();
   const actor = startSkeletonLoader(transport, clock.schedule, INPUT);
   clock.advanceBy(INPUT.timeoutMs);
-  expect(actor.getSnapshot().matches('failed')).toBe(true);
+  expect(actor.getSnapshot().matches('recovering')).toBe(true);
   expect(transport.unarySignal?.aborted).toBe(true);
   transport.finishSkeleton(toBinary(SkeletonResponseSchema, initial()));
   await Promise.resolve();
   expect(actor.getSnapshot().context.load).toBeUndefined();
   expect(transport.streamSignal).toBeUndefined();
+  expect(clock.pending).toBe(1);
+  actor.stop();
   expect(clock.pending).toBe(0);
 });
 
@@ -183,9 +193,37 @@ test.each([
         failure === 'wire' ? new Uint8Array([255]) : toBinary(TailResponseSchema, batch(2n)),
       );
   }
-  await reached(actor, snapshot => snapshot.matches('failed'));
+  const retries = failure === 'deadline' || failure === 'unary' || failure === 'wire';
+  await reached(actor, snapshot => snapshot.matches(retries ? 'recovering' : 'failed'));
   expect(actor.getSnapshot().context.error).toBeDefined();
+  expect(clock.pending).toBe(retries ? 1 : 0);
+  actor.stop();
   expect(clock.pending).toBe(0);
   if (transport.streamSignal)
     expect(transport.streamSignal.aborted || transport.streamClosed).toBe(true);
+});
+
+test('closed streams recover from a fresh Skeleton and release retries when stopped', async () => {
+  const transport = new FakeRunTransport();
+  const clock = new FakeClock();
+  const actor = startSkeletonLoader(transport, clock.schedule, INPUT);
+  for (let cycle = 0; cycle < 5; cycle += 1) {
+    transport.finishSkeleton(toBinary(SkeletonResponseSchema, initial()));
+    await reached(actor, snapshot => snapshot.matches('following'));
+    transport.push(toBinary(TailResponseSchema, batch(1n)));
+    await reached(actor, snapshot => snapshot.context.load?.nextSeq === 2n);
+    transport.push(toBinary(TailResponseSchema, batch(2n)));
+    await reached(actor, snapshot => snapshot.matches({following: 'live'}));
+    expect(actor.getSnapshot().context.error).toBeUndefined();
+    transport.endStream();
+    await reached(actor, snapshot => snapshot.matches('recovering'));
+    expect(actor.getSnapshot().context.load?.nextSeq).toBe(3n);
+    expect(actor.getSnapshot().context.error?.kind).toBe('stream-ended');
+    expect(clock.pending).toBe(1);
+    clock.advanceBy(1000);
+    expect(actor.getSnapshot().matches('loading')).toBe(true);
+  }
+  actor.stop();
+  expect(clock.pending).toBe(0);
+  expect(transport.unarySignal?.aborted).toBe(true);
 });

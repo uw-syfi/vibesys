@@ -226,6 +226,24 @@ native_targets = []
 pnpm_packages = []
 
 [[cases]]
+name = "control admission facade selects Python and real process checks"
+paths = ["libs/vs-runtime/src/vs_runtime/api/control.py"]
+jobs = ["python", "real_tiers"]
+[cases.collections]
+native_languages = []
+native_targets = []
+pnpm_packages = []
+
+[[cases]]
+name = "static pure facade loaders select Python checks"
+paths = ["libs/vs-core/src/vs_core/api/_exports.py"]
+jobs = ["python"]
+[cases.collections]
+native_languages = []
+native_targets = []
+pnpm_packages = []
+
+[[cases]]
 name = "keyed replay core selects Python verification"
 paths = ["libs/vs-core/src/vs_core/api/replay.py", "libs/vs-core/src/vs_core/flows/_replay_identity.py", "libs/vs-core/src/vs_core/flows/_replay_history.py", "libs/vs-core/src/vs_core/flows/_replay_run.py", "libs/vs-core/src/vs_core/flows/_replay_sources.py", "libs/vs-core/src/vs_core/flows/_replay_causality.py", "libs/vs-core/src/vs_core/flows/_replay_schema.py"]
 jobs = ["python"]

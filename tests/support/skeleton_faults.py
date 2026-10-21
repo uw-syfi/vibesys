@@ -76,6 +76,10 @@ class FaultingStore:
         self._inner = inner
         self._gate = gate
 
+    def observe(self) -> StoreRecord | None:
+        """The inner store's atomic observation."""
+        return self._inner.observe()
+
     def load(self) -> StoreRecord | None:
         """The inner store's record."""
         return self._inner.load()

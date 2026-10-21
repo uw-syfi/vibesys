@@ -12,6 +12,7 @@ from .types.attempts import CloseAttemptScope, DiscardWorkspace, RetainRevision,
 from .types.common import RequestId, RunStatus
 from .types.evaluation import (
     CancelOwnedJob,
+    CollectEvidence,
     InspectOwnedJob,
     ObserveOwnedJob,
     OwnedJob,
@@ -30,8 +31,10 @@ from .types.sessions import (
 from .types.until import Until
 
 if TYPE_CHECKING:
+    from .types.common import Scope
     from .types.kernel import CoreState
-    from .types.records import Request, RequestRecord
+    from .types.records import RecordsState, Request, RequestRecord
+    from .types.sessions import Invocation, SessionsState
 
 # These effects finish work already performed by a turn. Everything else waits for
 # relaunch, including prepared turns, measurements, polls and queued attempts.
@@ -45,6 +48,7 @@ _DRAIN_EFFECTS = (
     CloseAttemptScope,
     BlockRequest,
     CancelOwnedJob,
+    CollectEvidence,
 )
 
 
@@ -54,7 +58,26 @@ def dispatch_allowed(state: CoreState, request: Request) -> bool:
         return state.run.park is not None and state.records.recovery.epoch > state.run.park.epoch
     if state.run.status != RunStatus.DRAINING:
         return True
-    return isinstance(request, _DRAIN_EFFECTS)
+    return isinstance(request, _DRAIN_EFFECTS) or (
+        isinstance(request, SubmitMeasurement | ObserveOwnedJob | InspectOwnedJob)
+        and (not isinstance(request, SubmitMeasurement) or request.decision_id is None)
+        and scope_in_flight(state.sessions, state.records, request.scope)
+    )
+
+
+def scope_in_flight(sessions: SessionsState, records: RecordsState, scope: Scope) -> bool:
+    """An admitted turn of this owner has crossed core's dispatch boundary."""
+    return any(turn.scope == scope and _executing(turn, records) for turn in sessions.invocations)
+
+
+def _executing(turn: Invocation, records: RecordsState) -> bool:
+    return turn.phase in (SessionPhase.EXECUTING, SessionPhase.UNKNOWN) and any(
+        isinstance(row.request, DispatchTurn | ResumeSessionTurn)
+        and row.request.turn == turn.turn
+        and row.request.scope == turn.scope
+        and row.phase != RequestPhase.PREPARED
+        for row in records.records
+    )
 
 
 def _unfinished(state: CoreState, record: RequestRecord) -> bool:
@@ -77,17 +100,7 @@ def _unfinished(state: CoreState, record: RequestRecord) -> bool:
 
 def _turns_in_flight(state: CoreState) -> bool:
     """A prepared dispatch marks its invocation executing before I/O actually starts."""
-    return any(
-        turn.phase in (SessionPhase.EXECUTING, SessionPhase.UNKNOWN)
-        and any(
-            isinstance(row.request, DispatchTurn | ResumeSessionTurn)
-            and row.request.turn == turn.turn
-            and row.request.scope == turn.scope
-            and row.phase != RequestPhase.PREPARED
-            for row in state.records.records
-        )
-        for turn in state.sessions.invocations
-    )
+    return any(_executing(turn, state.records) for turn in state.sessions.invocations)
 
 
 def advance(state: CoreState) -> tuple[CoreState, tuple[Scheduled, ...]]:
@@ -122,7 +135,12 @@ def advance(state: CoreState) -> tuple[CoreState, tuple[Scheduled, ...]]:
             pending.append(
                 Scheduled(
                     request=request,
-                    until=Until(at=state.run.now_at + state.run.limits.cleanup_bound),
+                    until=Until(
+                        at=max(
+                            state.run.now_at + state.run.limits.cleanup_bound,
+                            state.run.now_at if source is None else source.until.at,
+                        )
+                    ),
                 )
             )
         observation = None if held is None else held.observation

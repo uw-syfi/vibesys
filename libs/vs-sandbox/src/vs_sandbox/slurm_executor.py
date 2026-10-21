@@ -339,6 +339,7 @@ class SlurmEvaluationExecutor:
         ledger_candidate: str | None = None,
         stage_output: SlurmStageOutputOpener | None = None,
         root_proof: WorkspaceRootProof | None = None,
+        before_dispatch: Callable[[EvaluationRequest], None] | None = None,
     ) -> None:
         """Bind scheduler policy, durable intent, and the cluster interface.
 
@@ -358,6 +359,8 @@ class SlurmEvaluationExecutor:
         output reaches only the collected result.
         ``root_proof`` is the run's workspace-root probe: a first submission waits for it at
         the poll interval, and a failed proof refuses the submission with the probe's error.
+        ``before_dispatch`` may refuse a prepared job before its first scheduler or ledger
+        contact; attaching to an already accepted job does not start another execution.
         """
         if cluster is None:
             if processes is None:
@@ -366,6 +369,7 @@ class SlurmEvaluationExecutor:
             cluster = make_cluster(
                 config, state_root=handle_root / _CLUSTER_STATE, processes=processes, clock=clock
             )
+        self._before_dispatch = before_dispatch
         self._cluster = cluster
         self._stage_output = stage_output
         self._root_proof = root_proof
@@ -1021,6 +1025,8 @@ class SlurmEvaluationExecutor:
                 else "missing batch identity"
             )
             raise SlurmOutcomeUnknownError.observation(handle_id, reason)
+        if self._before_dispatch is not None:
+            self._before_dispatch(request)
         self._write_evaluation(handle_id, None, request, dispatch_started=True)
         submitted = await self._in_thread(
             self._cluster.submit, self._batch_request(request, stages), operation_id=handle_id
@@ -1077,6 +1083,8 @@ class SlurmEvaluationExecutor:
         stages: tuple[SlurmStagePayload, ...],
     ) -> None:
         """Attach to the ledger's job for this request (``LedgerEvaluations.attach``)."""
+        if self._before_dispatch is not None:
+            self._before_dispatch(request)
         self._write_evaluation(handle_id, None, request, dispatch_started=True)
         batch = self._batch_request(request, stages)
         labels = LedgerLabels(candidate=self._ledger_candidate, workstream=request.owner_scope)

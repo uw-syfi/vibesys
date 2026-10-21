@@ -52,7 +52,7 @@ export function GatewayRun(props: {
     runId: seed.identity.runId,
     projectRoot,
     ...(observation ? {relaunch: observation} : {}),
-    enabled: snapshot.matches('active') && projectRoot !== '',
+    enabled: snapshot.context.enabled,
     schedule,
   });
   const sessions = useRunSessions({

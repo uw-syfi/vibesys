@@ -7,6 +7,7 @@ gateway implementation enters this module.
 
 from __future__ import annotations
 
+from importlib import import_module
 from typing import TYPE_CHECKING
 
 from pydantic import ValidationError as ControlValidationError
@@ -18,8 +19,6 @@ from vibesys.api import (
     ControlAction,
     recorded_ending,
 )
-from vibesys.api.chat import run_head
-from vibesys.api.host_relaunch import relaunch_host
 from vs_project.api import INBOX_FORMAT, InboxClosedError, Project, ProjectError
 from vs_proto.api import (
     ChatMessageRequest,
@@ -67,7 +66,9 @@ def host_call(
                 result = _post_intent(request)
                 response = HostCallResponse(result=Oneof("post_intent", result))
             case Oneof("relaunch", request):
-                result = relaunch_host(request, call.checkout, processes=processes, threads=threads)
+                result = import_module("vibesys.api.host_relaunch").relaunch_host(
+                    request, call.checkout, processes=processes, threads=threads
+                )
                 response = HostCallResponse(result=Oneof("relaunch", result))
             case Oneof("chat_message", request):
                 result = _chat_message(request, start_chat)
@@ -170,7 +171,9 @@ def _chat_message(
     project = Project.open(request.project_root)
     project.state.load_run(request.run_id)
     project.state.require_local_run(request.run_id)
-    run_head(Project.run_log_path_for(request.project_root, request.run_id).parent / "run.head")
+    import_module("vibesys.api.chat").run_head(
+        Project.run_log_path_for(request.project_root, request.run_id).parent / "run.head"
+    )
     directory = Project.chat_session_directory_for(
         request.project_root, request.run_id, request.session_id
     )

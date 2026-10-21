@@ -201,3 +201,18 @@ func TestHostCallRelaunchDispatchesWithoutRunPolicy(t *testing.T) {
 		})
 	}
 }
+
+func TestHostCallLostAdmissionIsExplicitlyUnconfirmed(t *testing.T) {
+	for _, failure := range []error{context.DeadlineExceeded, context.Canceled} {
+		t.Run(failure.Error(), func(t *testing.T) {
+			runner := hostcommand.FakeRunner{Program: func(ctx context.Context, c hostcommand.Command) (hostcommand.Result, error) {
+				return hostcommand.Result{ExitCode: -1, Stderr: "process reaped"}, failure
+			}}
+			f := startWithConfig(t, server.Config{HostRunner: runner})
+			response, err := client(t, f, false).HostCall(f.ctx, intentRequest())
+			if err != nil || response.GetConfigurationFailed().GetCode() != "admission_unconfirmed" {
+				t.Fatalf("lost admission reported as a refusal: %v %v", response, err)
+			}
+		})
+	}
+}

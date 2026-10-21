@@ -47,6 +47,7 @@ from ._proofs import (
     submission_budget_for,
 )
 from ._registry import ContractError
+from ._run_park import scope_in_flight
 from ._runaway import runaway_noted
 from ._submission_receipts import (
     canonical_failure,
@@ -450,7 +451,10 @@ def _agent_requested(
         return AreaChange(state=state)
     identity = identity_of(event.plan)
     rejection: AgentRejection | None = None
-    if not continues_admitted_work(context.run):
+    if not continues_admitted_work(context.run) and not (
+        context.run.status == RunStatus.DRAINING
+        and scope_in_flight(context.sessions, context.records, event.scope)
+    ):
         rejection = AgentRejection.RUN_STOPPING
     elif not isinstance(current(context, event.scope), Proven):
         rejection = AgentRejection.NOT_ADMITTED

@@ -5,30 +5,60 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import pytest
-from tests.support.skeleton_strategy import SkeletonStrategy
-from tests.support.skeleton_world import open_skeleton_world
+from tests.support.session_world import ProviderFaults, SessionHost
+from tests.support.skeleton_strategy import (
+    IMPLEMENTATION,
+    IMPLEMENTER,
+    Implementation,
+    SkeletonStrategy,
+)
+from tests.support.skeleton_strategy import (
+    measurement as measurement_plan,
+)
+from tests.support.skeleton_world import CandidateResolver, CandidateWriter, open_skeleton_world
 
+from vs_agent.api import AgentClient, AgentTurnRequest
+from vs_agent.api.testing import FakeAgentInvocationStore, FakeProvider
 from vs_core.api import (
+    AgentMeasurementRequested,
     CancelOwnedJob,
     ObservationStatus,
     ObserveOwnedJob,
     RequestId,
     RunStatus,
     Scope,
+    SessionPhase,
     SubmitMeasurement,
+    Within,
 )
+from vs_evaluation.api import EvaluationState, PollPhase
+from vs_project.api import RequestState
+from vs_project.api.testing import FakeControlInbox
+from vs_prompts.api import TemplateRenderer
 from vs_runtime.api.core import (
     CoreRunHost,
     MeasurementRequests,
+    OperatorInbox,
     ReceiptStore,
     RunControlBridge,
     RunLoopConfig,
     drive_core,
+    report_turns,
     start_core,
 )
-from vs_runtime.api.infrastructure import ChannelRunControl, ParkRequest, RuntimeRunControlChannel
-from vs_runtime.api.testing import FakeRunControlEventSink, ProbedRunClock
-from vs_sim.api.testing import SimThreads, clock_from
+from vs_runtime.api.infrastructure import (
+    AgentExecutionFinished,
+    ChannelRunControl,
+    ParkRequest,
+    RuntimeRunControlChannel,
+)
+from vs_runtime.api.testing import (
+    FakeAgentExecutionLifecycleSink,
+    FakeRunControlEventSink,
+    ProbedRunClock,
+)
+from vs_sim.api import yield_now
+from vs_sim.api.testing import HANG_GUARD_S, ManualClock, SimThreads, clock_from, loop_threads
 from vs_slurm.api import SlurmJobStatus
 
 from .test_evaluation_requests import (
@@ -59,14 +89,18 @@ class Steers:
 class _Operator(ProbedRunClock):
     def __init__(self, clock: VirtualClock) -> None:
         super().__init__(clock)
-        self.act: Callable[[], None] = lambda: None
+        self.act: Callable[[], bool | None] = lambda: None
 
     async def sleep(self, seconds: float) -> None:
-        self.act()
+        if self.act():
+            await yield_now()
+            return
         await super().sleep(seconds)
 
 
-async def test_park_cancels_the_live_job_exits_and_resume_reruns_it(tmp_path: Path) -> None:
+async def test_pause_drain_cancels_the_queued_job_exits_and_relaunch_reruns_it(
+    tmp_path: Path,
+) -> None:
     clock = _Operator(clock_from(1.0))
     threads = SimThreads()
     sink = FakeRunControlEventSink()
@@ -74,7 +108,7 @@ async def test_park_cancels_the_live_job_exits_and_resume_reruns_it(tmp_path: Pa
     operator = ChannelRunControl(channel, threads)
     config = RunLoopConfig(host_id="host-a", lease_duration=300, control_poll_interval=1)
     with open_skeleton_world(tmp_path, SkeletonStrategy.baseline_only()) as world:
-        world.cluster.states = (SlurmJobStatus.RUNNING,) * 1000
+        world.cluster.states = (SlurmJobStatus.PENDING,)
         process = world.runtime()
 
         def request_park() -> None:
@@ -143,3 +177,179 @@ async def test_a_closed_scope_or_cancelled_job_cannot_relaunch_after_park(
         late = await run(current, query(ObserveOwnedJob, "late-poll", resource), epoch=2)
         assert late.observation.observation.status is ObservationStatus.REJECTED
         assert len(cluster.submissions) == before
+
+
+class _EvaluatingTurn:
+    def __init__(self, channel: RuntimeRunControlChannel) -> None:
+        self.threads = loop_threads()
+        self.channel = channel
+        self.entered = self.threads.event()
+        self.evaluated = self.threads.event()
+        self.lifecycle = FakeAgentExecutionLifecycleSink()
+
+    def agents(self, root: Path) -> SessionHost:
+        writer = CandidateWriter(root)
+
+        def on_turn(request: AgentTurnRequest) -> None:
+            self.entered.set()
+            assert self.evaluated.wait(HANG_GUARD_S)
+            writer(request)
+
+        client = report_turns(
+            AgentClient(
+                FakeProvider(answer=writer.answer, on_turn=on_turn, threads=self.threads),
+                clock=ManualClock(),
+                threads=self.threads,
+            ),
+            self.lifecycle,
+            control=self.channel,
+        )
+        resolver = CandidateResolver(
+            root,
+            TemplateRenderer(root),
+            roles=frozenset({IMPLEMENTER}),
+            schemas={IMPLEMENTATION: Implementation},
+            writer=writer,
+            control=self.channel,
+        )
+        return SessionHost(resolver, client, FakeAgentInvocationStore(), [], ProviderFaults())
+
+
+async def test_pause_drain_finishes_a_turns_evaluation_requested_after_applied_then_exits(
+    tmp_path: Path,
+) -> None:
+    clock = _Operator(clock_from(1.0))
+    threads = loop_threads()
+    channel = RuntimeRunControlChannel(FakeRunControlEventSink(), threads)
+    inbox = FakeControlInbox()
+    turn = _EvaluatingTurn(channel)
+
+    config = RunLoopConfig(
+        host_id="host-a", lease_duration=300, control_poll_interval=1, max_concurrent=4
+    )
+    with open_skeleton_world(tmp_path, agents=turn.agents) as world:
+        world.control = channel
+        process = world.runtime()
+        posted = False
+        requested = False
+        applied_before_call = False
+
+        def progress() -> bool:
+            nonlocal posted, requested, applied_before_call
+            changed = False
+            core = process.shell.record.envelope.core
+            if turn.entered.is_set() and not posted:
+                inbox.post(
+                    "pause-drain",
+                    b'{"action":"park","control_id":"pause-drain"}',
+                    ended=lambda: None,
+                )
+                posted = True
+                changed = True
+            status = inbox.status("pause-drain", ended=None)
+            if status is not None and status.state is RequestState.APPLIED and not requested:
+                active = next(
+                    inv for inv in core.sessions.invocations if inv.phase is SessionPhase.EXECUTING
+                )
+                plan = measurement_plan(
+                    core.run.facts.baseline, "official", facts=core.run.facts, now_at=clock.now()
+                )
+                process.shell.admit(
+                    AgentMeasurementRequested(
+                        scope=active.scope,
+                        plan=plan,
+                        within=Within(limit=100),
+                        call_id="after-applied",
+                    ),
+                    now_at=clock.now(),
+                )
+                requested = True
+                applied_before_call = True
+                changed = True
+            if (
+                requested
+                and not turn.evaluated.is_set()
+                and any(
+                    job.terminal and job.scope.owner.kind == "attempt"
+                    for job in core.evaluation.jobs
+                )
+            ):
+                turn.evaluated.set()
+                changed = True
+            return changed
+
+        clock.act = progress
+        controls = RunControlBridge(
+            channel, Steers(), inbox=OperatorInbox(inbox, ChannelRunControl(channel, threads))
+        )
+        host = CoreRunHost(process.shell, process.delivery, clock, controls)
+        start_core(host, config)
+        outcome = await drive_core(host, config)
+        assert outcome.status is RunStatus.PARKED
+        assert applied_before_call
+        assert turn.evaluated.is_set()
+        evaluation = next(
+            job
+            for job in process.shell.record.envelope.core.evaluation.jobs
+            if job.scope.owner.kind == "attempt"
+        )
+        assert evaluation.status is ObservationStatus.SUCCEEDED
+        assert evaluation.evidence
+        assert len(turn.lifecycle.events) == 2
+        finished = turn.lifecycle.events[-1]
+        assert isinstance(finished, AgentExecutionFinished)
+        assert finished.status.value == "completed", finished
+        assert not process.shell.in_flight
+        assert not world.cluster.cancelled
+        process.shell.release_lease(now_at=clock.now())
+
+
+async def test_pause_drain_waits_for_an_executing_evaluation_to_finish(tmp_path: Path) -> None:
+    clock = _Operator(clock_from(1.0))
+    channel = RuntimeRunControlChannel(FakeRunControlEventSink(), loop_threads())
+    inbox = FakeControlInbox()
+    requested_at: float | None = None
+    with open_skeleton_world(tmp_path, SkeletonStrategy.baseline_only()) as world:
+        world.control = channel
+        world.limits = world.limits.model_copy(update={"cleanup_bound": 10})
+        world.cluster.states = (SlurmJobStatus.RUNNING,)
+        process = world.runtime()
+
+        def progress() -> bool:
+            nonlocal requested_at
+            running = any(
+                job.progress is not None and job.progress.state == "running"
+                for job in process.shell.record.envelope.core.evaluation.jobs
+            )
+            if running and requested_at is None:
+                inbox.post(
+                    "pause-drain",
+                    b'{"action":"park","control_id":"pause-drain"}',
+                    ended=lambda: None,
+                )
+                requested_at = clock.now()
+                return True
+            if requested_at is not None and clock.now() >= requested_at + 120:
+                world.cluster.finish_jobs()
+            return False
+
+        clock.act = progress
+        controls = RunControlBridge(
+            channel,
+            Steers(),
+            inbox=OperatorInbox(inbox, ChannelRunControl(channel, loop_threads())),
+        )
+        host = CoreRunHost(process.shell, process.delivery, clock, controls)
+        config = RunLoopConfig(host_id="host-a", lease_duration=300, max_concurrent=4)
+        start_core(host, config)
+        outcome = await drive_core(host, config)
+        assert outcome.status is RunStatus.PARKED
+        job = process.shell.record.envelope.core.evaluation.jobs[0]
+        assert requested_at is not None
+        assert clock.now() >= requested_at + 120
+        observed = await world.evaluations[-1].poll(job.resource_id.root)
+        assert observed.phase is PollPhase.ENDED
+        assert observed.terminal is not None
+        assert observed.terminal.state is EvaluationState.SUCCEEDED
+        assert not world.cluster.cancelled
+        process.shell.release_lease(now_at=clock.now())

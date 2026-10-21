@@ -6,6 +6,7 @@ import {
   API_SCHEMA_HASH,
   HelloRequestSchema,
   HelloResponseSchema,
+  HostCallRequestSchema,
   HostService,
   TailRequestSchema,
   TailResponseSchema,
@@ -26,6 +27,7 @@ export interface GatewayDialer {
 interface LiveCall {
   readonly method: string;
   readonly unary: boolean;
+  readonly deadlineMs: number | undefined;
   bytes: Uint8Array;
   readonly receive: (bytes: Uint8Array) => void;
   readonly finish: (error?: unknown) => void;
@@ -125,6 +127,7 @@ export class GatewayConnection {
       const call: LiveCall = {
         method,
         unary,
+        deadlineMs: unary ? unaryDeadline(method, bytes) : undefined,
         bytes,
         receive,
         abort: null,
@@ -165,7 +168,7 @@ export class GatewayConnection {
           if (call.abort !== abort) return;
           acceptResponse(call, bytes);
         },
-        call.unary ? 15_000 : undefined,
+        call.deadlineMs,
       )
       .then(
         () => {
@@ -179,6 +182,14 @@ export class GatewayConnection {
         },
       );
   }
+}
+
+function unaryDeadline(method: string, bytes: Uint8Array): number {
+  const hostCall = `/${HostService.typeName}/${HostService.method.hostCall.name}`;
+  // Relaunch confirms a writer epoch for up to 25 seconds inside the host.
+  return method === hostCall && fromBinary(HostCallRequestSchema, bytes).method.case === 'relaunch'
+    ? 35_000
+    : 15_000;
 }
 
 async function hello(session: GatewaySession, signal: AbortSignal): Promise<void> {

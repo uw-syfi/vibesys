@@ -116,6 +116,8 @@ _CONTROL_EVENT_TYPES = frozenset(
         CoreEventType.PAUSE_REQUESTED,
         CoreEventType.RESUMED,
         CoreEventType.STOP_REQUESTED,
+        CoreEventType.PARK_REQUESTED,
+        CoreEventType.PARKED,
         CoreEventType.STEER_CONSUMED,
         CoreEventType.STEER_DELIVERED_MID_TURN,
         CoreEventType.STEER_DROPPED,
@@ -521,6 +523,8 @@ class RunIntegrationAdapter:
             CoreEventType.PAUSE_REQUESTED: self.controller.pause_after_call,
             CoreEventType.RESUMED: self.controller.resume,
             CoreEventType.STOP_REQUESTED: self.controller.stop_after_call,
+            CoreEventType.PARK_REQUESTED: self.controller.stop_after_call,
+            CoreEventType.PARKED: self.controller.land_stop_at_boundary,
             CoreEventType.STEER_CONSUMED: lambda: self.controller.record_steer_consumed(
                 agent_kind=event.agent_kind,
                 round_label=event.round_label,

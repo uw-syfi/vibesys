@@ -983,3 +983,28 @@ class ExecuteRegisteredOperation(RequestBase):
         if len(set(identities)) != len(identities):
             raise ContractValidationError("inputs", "duplicate input_id")
         return self
+
+
+class ActionRefusal(StrEnum):
+    """Why core refuses an operator action: it could change nothing, or exceed the launch."""
+
+    NO_SUCH_SUBJECT = "no_such_subject"
+    """The run holds no such attempt, or no attempt at such an item."""
+    ENDED = "ended"
+    """The attempt has ended."""
+    PARKED = "parked"
+    """The attempt is blocked, or parked with no reopening queued: nothing a cancel could stop."""
+    ALREADY_CANCELLED = "already_cancelled"
+    """The item is already cancelled."""
+    ABOVE_LAUNCH_LIMIT = "above_launch_limit"
+    """A parallel limit above the one the run was launched with."""
+
+
+ACTION_REFUSAL_TEXT: dict[ActionRefusal, str] = {
+    ActionRefusal.NO_SUCH_SUBJECT: "the run holds no such attempt or item",
+    ActionRefusal.ENDED: "the attempt has ended",
+    ActionRefusal.PARKED: "the attempt is parked or blocked, so there is nothing to stop",
+    ActionRefusal.ALREADY_CANCELLED: "the item is already cancelled",
+    ActionRefusal.ABOVE_LAUNCH_LIMIT: "the limit is above the one the run was launched with",
+}
+"""The one wording of each refusal, wherever an operator reads it."""

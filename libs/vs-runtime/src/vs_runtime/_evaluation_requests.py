@@ -29,6 +29,7 @@ the child manifest.
 
 from __future__ import annotations
 
+from contextlib import suppress
 from typing import TYPE_CHECKING, assert_never
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -105,6 +106,7 @@ if TYPE_CHECKING:
     from vs_runtime._core_identity import CoreRequestId
     from vs_runtime._core_requests import EvaluationRoleRequest, OwnerEvent
     from vs_runtime._receipt_store import ReceiptStore, Settled, Transient
+    from vs_runtime._run_control import RunControlChannel
 
 _JOBS = "evaluation-jobs"
 _FENCED = "scope episode is closed or the job was cancelled"
@@ -195,12 +197,15 @@ class MeasurementRequests:
         store: ReceiptStore,
         observer: MeasurementObserver | None = None,
         decisions: MeasurementDecisions | None = None,
+        *,
+        control: RunControlChannel | None = None,
     ) -> None:
         """Bind the executor that runs jobs and the receipts that make requests idempotent.
 
         *observer* is told when each stage of a job starts and ends; it never changes a result.
         *decisions* learns which decision each submitted handle answers, for stage output.
         """
+        self._control = control
         self._decisions = MeasurementDecisions() if decisions is None else decisions
         self._jobs = jobs
         self._store = store
@@ -629,6 +634,8 @@ class MeasurementRequests:
             if not self._enter(_fences_of(request, handle), core_identity(request), context):
                 # Fenced while the executor held nothing: the job never will exist.
                 return self._rejected(request, context, _FENCED)
+            if self._control is not None and request.decision_id is None:
+                self._control.prepare_evaluation(handle, request.scope)
             try:
                 await self._jobs.submit(eval_request, handle_id=handle)
             except ExecutorRejectedError as error:
@@ -796,25 +803,29 @@ class MeasurementRequests:
         problem = self._authority_problem(request, context)
         if problem is not None:
             return self._unknown(request, context, problem)
-        if not record.parked:
-            if record.reuses is None:
-                try:
-                    await self._jobs.cancel(record.executor_handle)
-                except ExecutorCancellationUnconfirmedError:
-                    pass
-                except ExecutorCancellationUnknownError as error:
-                    return self._unknown(request, context, str(error))
-            record = record.model_copy(update={"parked": True})
-            self._store.replace(_JOBS, "job", record.handle_id, record)
+        polled = await self._poll(self._executor_handle(record))
+        dependency = self._control is not None and self._control.evaluation_is_dependency(
+            record.handle_id
+        )
+        finishing = polled.phase is PollPhase.RUNNING or dependency
+        if not finishing and not record.parked:
+            try:
+                record = await self._hold_for_relaunch(record, polled)
+            except ExecutorCancellationUnknownError as error:
+                return self._unknown(request, context, str(error))
         polled = await self._poll(self._executor_handle(record))
         released = record.reuses is not None or polled.phase in (
             PollPhase.ENDED,
             PollPhase.UNSUBMITTED,
         )
+        if self._control is not None and (finishing or released):
+            self._control.settle_drain_job(request.resource_id.root)
         while not released:
             await self._jobs.wait_for_change(record.executor_handle, 1.0)
             polled = await self._poll(self._executor_handle(record))
             released = polled.phase in (PollPhase.ENDED, PollPhase.UNSUBMITTED)
+        if self._control is not None:
+            self._control.settle_drain_job(request.resource_id.root)
         own = self._own(
             request,
             context,
@@ -825,7 +836,20 @@ class MeasurementRequests:
             resource=request.resource_id,
             diagnostic="" if released else "park awaits physical job termination",
         )
-        return ExecutionResult(observation=RequestObserved(observation=own))
+        events = ()
+        if finishing:
+            view, _ = await self._view(record, context)
+            events = self._events(view)
+        return ExecutionResult(observation=RequestObserved(observation=own), owner_events=events)
+
+    async def _hold_for_relaunch(self, record: JobRecord, polled: ExecutorPoll) -> JobRecord:
+        """Cancel queued physical work, retaining its logical submission for relaunch."""
+        if record.reuses is None and polled.phase is not PollPhase.ENDED:
+            with suppress(ExecutorCancellationUnconfirmedError):
+                await self._jobs.cancel(record.executor_handle)
+        record = record.model_copy(update={"parked": True})
+        self._store.replace(_JOBS, "job", record.handle_id, record)
+        return record
 
     async def _relaunch(
         self,

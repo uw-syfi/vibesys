@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel
 
-from vs_agent.api import AgentOutputSchemaError, AgentTurnExecutor
+from vs_agent.api import AgentExecutionCancelledError, AgentOutputSchemaError, AgentTurnExecutor
 from vs_core.api import WaitableReply
 from vs_decode.api import Unreadable, decode_json
 from vs_runtime._agent_lifecycle import (
@@ -35,6 +35,7 @@ if TYPE_CHECKING:
         SteerOutcome,
     )
     from vs_runtime._agent_lifecycle import AgentExecutionLifecycleSink
+    from vs_runtime._run_control import RunControlChannel
 
 
 _MAX_REPLY_BYTES = 1024 * 1024
@@ -78,10 +79,17 @@ def structured_reply(schema: type[BaseModel] | None, text: str) -> AgentReply | 
 class LifecycleReportingExecutor:
     """An ``AgentTurnExecutor`` that reports each dispatched turn to a lifecycle sink."""
 
-    def __init__(self, client: AgentTurnExecutor, lifecycle: AgentExecutionLifecycleSink) -> None:
+    def __init__(
+        self,
+        client: AgentTurnExecutor,
+        lifecycle: AgentExecutionLifecycleSink,
+        *,
+        control: RunControlChannel | None = None,
+    ) -> None:
         """Wrap *client*; *lifecycle* is called on the thread that runs the turn."""
         self._client = client
         self._lifecycle = lifecycle
+        self._control = control
 
     @property
     def capabilities(self) -> AgentCapabilities:
@@ -116,18 +124,29 @@ class LifecycleReportingExecutor:
         agent_id = session_spec.role
         label = turn.label or agent_id
         execution_id = turn.invocation_id or ""
-        self._lifecycle(
-            AgentExecutionStarted(
-                agent_id=agent_id,
-                label=label,
-                execution_id=execution_id,
-                system_prompt=turn.instructions,
-                user_prompt=turn.message,
-                provider=session_spec.provider,
-                model=session_spec.model,
-                reasoning_effort=session_spec.reasoning_effort,
-            )
+        started = AgentExecutionStarted(
+            agent_id=agent_id,
+            label=label,
+            execution_id=execution_id,
+            system_prompt=turn.instructions,
+            user_prompt=turn.message,
+            provider=session_spec.provider,
+            model=session_spec.model,
+            reasoning_effort=session_spec.reasoning_effort,
         )
+
+        def publish_start() -> None:
+            self._lifecycle(started)
+
+        if self._control is None:
+            publish_start()
+        else:
+            try:
+                self._control.start_execution(publish_start, execution_id=execution_id)
+            except AgentExecutionCancelledError as error:
+                self._control.finish_execution(execution_id)
+                message = f"{error}: turn {execution_id} ({agent_id})"
+                raise AgentExecutionCancelledError(message) from error
 
         def finished(
             status: AgentExecutionStatus,
@@ -136,6 +155,8 @@ class LifecycleReportingExecutor:
             error: str | None,
             reply: AgentReply | None = None,
         ) -> None:
+            if self._control is not None:
+                self._control.finish_execution(execution_id)
             self._lifecycle(
                 AgentExecutionFinished(
                     agent_id=agent_id,
@@ -172,10 +193,13 @@ class LifecycleReportingExecutor:
 
 
 def report_turns(
-    client: AgentTurnExecutor, lifecycle: AgentExecutionLifecycleSink
+    client: AgentTurnExecutor,
+    lifecycle: AgentExecutionLifecycleSink,
+    *,
+    control: RunControlChannel | None = None,
 ) -> AgentTurnExecutor:
     """The client with every dispatched turn reported to *lifecycle*."""
-    return LifecycleReportingExecutor(client, lifecycle)
+    return LifecycleReportingExecutor(client, lifecycle, control=control)
 
 
 __all__ = ["LifecycleReportingExecutor", "report_turns"]
