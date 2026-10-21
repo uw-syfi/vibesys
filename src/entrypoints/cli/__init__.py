@@ -47,7 +47,7 @@ from entrypoints.cli.config import (
     load_config_and_skills,
 )
 from entrypoints.cli.constants import _OUTER_LOOPS
-from entrypoints.cli.environment import run_environment_spec_from_args
+from entrypoints.cli.environment import TaskImageBuild, run_environment_spec_from_args
 from entrypoints.cli.errors import _configuration_error, _RunArgumentParser
 from entrypoints.cli.inputs import (
     _apply_bundle_profiler_default,
@@ -63,9 +63,10 @@ from entrypoints.cli.loops import (
     _run_request,
     _validate_evolve,
     _validate_plain,
+    validated_run_request,
 )
 from entrypoints.cli.preflight import run_preflight
-from entrypoints.cli.resume import _resolve_resume_args
+from entrypoints.cli.resume import _resolve_resume_args, reader_loop_kind
 from entrypoints.control import control_main, time_ordered_id
 from vibesys.api import ConfigurationError, RunRequest, boot_trace
 from vibesys.api.request import (
@@ -112,6 +113,7 @@ __all__ = [
     "_validate_agent",
     "_validate_target_inputs",
     "_with_operator_constraints",
+    "build_reader_request",
     "build_run_request",
     "configuration_error",
     "dispatch",
@@ -160,6 +162,27 @@ def build_run_request(invocation: CliInvocation) -> RunRequest:
     return _build_run_request(invocation.args)
 
 
+def build_reader_request(project_root: Path, run_id: str) -> RunRequest:
+    """Restore saved settings without switching branches, resuming or building images."""
+    invocation = parse_cli_invocation(
+        [
+            "--outer-loop",
+            reader_loop_kind(project_root, run_id),
+            "--project",
+            str(project_root),
+            "--resume",
+            run_id,
+        ],
+        read_only=True,
+    )
+    request = validated_run_request(invocation.args, read_only=True)[0]
+    environment = run_environment_spec_from_args(
+        invocation.args,
+        task_image=TaskImageBuild(backend=request.backend, allow_build=False),
+    )
+    return request.model_copy(update={"run_environment": environment})
+
+
 def _explicit_cli_dests(
     parser: argparse.ArgumentParser,
     argv: list[str],
@@ -177,7 +200,7 @@ def _explicit_cli_dests(
     )
 
 
-def parse_cli_invocation(argv: list[str]) -> CliInvocation:
+def parse_cli_invocation(argv: list[str], *, read_only: bool = False) -> CliInvocation:
     """Parse and validate one invocation without printing or exiting."""
     loop_kind, remaining = _extract_loop_selection(argv)
     command = _LOOP_COMMANDS[loop_kind]
@@ -187,7 +210,7 @@ def parse_cli_invocation(argv: list[str]) -> CliInvocation:
     args.outer_loop = loop_kind
     args.explicit_cli_dests = _explicit_cli_dests(parser, remaining)
     _normalize_runs_dir(args)
-    _resolve_resume_args(args, loop_kind=loop_kind)
+    _resolve_resume_args(args, loop_kind=loop_kind, read_only=read_only)
     command.validate(args)
     _allocate_run_id(args)
     return CliInvocation(loop_kind=loop_kind, args=args)

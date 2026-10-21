@@ -6,6 +6,7 @@ import {
   RecordSchema,
   RunLiveness,
   SkeletonResponseSchema,
+  TailRequestSchema,
   TailResponseSchema,
   TailStreamResponseSchema,
   WatchRunsResponseSchema,
@@ -18,6 +19,8 @@ export interface WireFixture {
   tail: number[];
   blobs: Record<string, number[]>;
   log: number[];
+  chatRequest: number[];
+  chat: number[];
   watchRuns: number[];
 }
 export function wire(fixture: StoreRunFixture, liveness?: RunLiveness): WireFixture {
@@ -91,6 +94,10 @@ export function wire(fixture: StoreRunFixture, liveness?: RunLiveness): WireFixt
         ],
       ]),
     ),
+    chatRequest: [
+      ...toBinary(TailRequestSchema, create(TailRequestSchema, {sessionId: 'default'})),
+    ],
+    chat: [],
     log: [
       ...toBinary(
         TailStreamResponseSchema,
@@ -106,6 +113,7 @@ export function wire(fixture: StoreRunFixture, liveness?: RunLiveness): WireFixt
 export function installGateway(input: WireFixture): void {
   const calls: string[] = [];
   const streams = new Set<(bytes: Uint8Array) => void>();
+  const chats = new Set<(bytes: Uint8Array) => void>();
   const watchers = new Set<(bytes: Uint8Array) => void>();
   let active = 0;
   Object.assign(window, {
@@ -140,8 +148,15 @@ export function installGateway(input: WireFixture): void {
         active += 1;
         let closed = false;
         if (method === input.methods.tail) {
-          streams.add(receive);
-          receive(new Uint8Array(input.tail));
+          if (
+            [..._bytes].slice(-input.chatRequest.length).join(',') === input.chatRequest.join(',')
+          ) {
+            chats.add(receive);
+            receive(new Uint8Array(input.chat));
+          } else {
+            streams.add(receive);
+            receive(new Uint8Array(input.tail));
+          }
         } else if (method === input.methods.watchRuns) {
           watchers.add(receive);
           receive(new Uint8Array(input.watchRuns));
@@ -153,6 +168,7 @@ export function installGateway(input: WireFixture): void {
               closed = true;
               active -= 1;
               streams.delete(receive);
+              chats.delete(receive);
               watchers.delete(receive);
             }
           },
@@ -160,6 +176,9 @@ export function installGateway(input: WireFixture): void {
       },
     },
     fakeGateway: {
+      appendChat: (bytes: number[]) => {
+        for (const receive of chats) receive(new Uint8Array(bytes));
+      },
       calls: () => calls,
       active: () => active,
       observe: (bytes: number[]) => {

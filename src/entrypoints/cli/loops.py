@@ -365,7 +365,7 @@ def _validate_options(descriptor: OrchestrationDescriptor) -> None:
 
 
 def validated_run_request(
-    args: argparse.Namespace, probe: CommandProbe | None = None
+    args: argparse.Namespace, probe: CommandProbe | None = None, *, read_only: bool = False
 ) -> tuple[RunRequest, Config]:
     """The run's request and configuration, validated as a run validates them, with no effect.
 
@@ -408,7 +408,7 @@ def validated_run_request(
             remote_repo=args.repo,
             repo_visibility=args.repo_visibility,
         )
-        validate_run_request(request, git=Git(OsProcesses()))
+        validate_run_request(request, git=Git(OsProcesses()), read_only=read_only)
         return request, config
 
 

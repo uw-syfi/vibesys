@@ -175,9 +175,11 @@ func (x *HelloResponse) GetGatewayVersion() string {
 }
 
 type TailRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	RunId         string                 `protobuf:"bytes,1,opt,name=run_id,json=runId,proto3" json:"run_id,omitempty"`
-	FromSeq       uint64                 `protobuf:"varint,2,opt,name=from_seq,json=fromSeq,proto3" json:"from_seq,omitempty"`
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	RunId   string                 `protobuf:"bytes,1,opt,name=run_id,json=runId,proto3" json:"run_id,omitempty"`
+	FromSeq uint64                 `protobuf:"varint,2,opt,name=from_seq,json=fromSeq,proto3" json:"from_seq,omitempty"`
+	// Empty selects run.log; otherwise select sessions/<id>/session.log.
+	SessionId     string `protobuf:"bytes,3,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -224,6 +226,13 @@ func (x *TailRequest) GetFromSeq() uint64 {
 		return x.FromSeq
 	}
 	return 0
+}
+
+func (x *TailRequest) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
 }
 
 type TailResponse struct {
@@ -336,7 +345,8 @@ type SkeletonResponse struct {
 	// First sequence not included. Continue with Tail(from_seq = next_seq).
 	NextSeq uint64 `protobuf:"varint,4,opt,name=next_seq,json=nextSeq,proto3" json:"next_seq,omitempty"`
 	// True when the frozen readable prefix was included in full.
-	Complete      bool `protobuf:"varint,5,opt,name=complete,proto3" json:"complete,omitempty"`
+	Complete      bool     `protobuf:"varint,5,opt,name=complete,proto3" json:"complete,omitempty"`
+	Sessions      []string `protobuf:"bytes,6,rep,name=sessions,proto3" json:"sessions,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -404,6 +414,13 @@ func (x *SkeletonResponse) GetComplete() bool {
 		return x.Complete
 	}
 	return false
+}
+
+func (x *SkeletonResponse) GetSessions() []string {
+	if x != nil {
+		return x.Sessions
+	}
+	return nil
 }
 
 type WatchRunsRequest struct {
@@ -524,6 +541,7 @@ type GetBlobsRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	RunId         string                 `protobuf:"bytes,1,opt,name=run_id,json=runId,proto3" json:"run_id,omitempty"`
 	Sha256        []string               `protobuf:"bytes,2,rep,name=sha256,proto3" json:"sha256,omitempty"`
+	SessionId     string                 `protobuf:"bytes,3,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -570,6 +588,13 @@ func (x *GetBlobsRequest) GetSha256() []string {
 		return x.Sha256
 	}
 	return nil
+}
+
+func (x *GetBlobsRequest) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
 }
 
 // At most 16 MiB of blob content per response. Each requested hash has a result
@@ -808,22 +833,25 @@ const file_vibesys_api_v1_host_proto_rawDesc = "" +
 	"\x0fapi_schema_hash\x18\x01 \x01(\tR\rapiSchemaHash\"`\n" +
 	"\rHelloResponse\x12&\n" +
 	"\x0fapi_schema_hash\x18\x01 \x01(\tR\rapiSchemaHash\x12'\n" +
-	"\x0fgateway_version\x18\x02 \x01(\tR\x0egatewayVersion\"?\n" +
+	"\x0fgateway_version\x18\x02 \x01(\tR\x0egatewayVersion\"^\n" +
 	"\vTailRequest\x12\x15\n" +
 	"\x06run_id\x18\x01 \x01(\tR\x05runId\x12\x19\n" +
-	"\bfrom_seq\x18\x02 \x01(\x04R\afromSeq\"I\n" +
+	"\bfrom_seq\x18\x02 \x01(\x04R\afromSeq\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x03 \x01(\tR\tsessionId\"I\n" +
 	"\fTailResponse\x12\x18\n" +
 	"\arecords\x18\x01 \x03(\fR\arecords\x12\x1f\n" +
 	"\vthrough_seq\x18\x02 \x01(\x04R\n" +
 	"throughSeq\"(\n" +
 	"\x0fSkeletonRequest\x12\x15\n" +
-	"\x06run_id\x18\x01 \x01(\tR\x05runId\"\xb6\x01\n" +
+	"\x06run_id\x18\x01 \x01(\tR\x05runId\"\xd2\x01\n" +
 	"\x10SkeletonResponse\x12\x1f\n" +
 	"\bkeyframe\x18\x01 \x01(\fH\x00R\bkeyframe\x88\x01\x01\x12\x18\n" +
 	"\arecords\x18\x02 \x03(\fR\arecords\x12#\n" +
 	"\rcommitted_seq\x18\x03 \x01(\x04R\fcommittedSeq\x12\x19\n" +
 	"\bnext_seq\x18\x04 \x01(\x04R\anextSeq\x12\x1a\n" +
-	"\bcomplete\x18\x05 \x01(\bR\bcompleteB\v\n" +
+	"\bcomplete\x18\x05 \x01(\bR\bcomplete\x12\x1a\n" +
+	"\bsessions\x18\x06 \x03(\tR\bsessionsB\v\n" +
 	"\t_keyframe\"\x12\n" +
 	"\x10WatchRunsRequest\"\xd7\x01\n" +
 	"\x11WatchRunsResponse\x12\x15\n" +
@@ -831,10 +859,12 @@ const file_vibesys_api_v1_host_proto_rawDesc = "" +
 	"\x04head\x18\x02 \x01(\v2\x19.vibesys.store.v1.RunHeadR\x04head\x127\n" +
 	"\bliveness\x18\x03 \x01(\x0e2\x1b.vibesys.api.v1.RunLivenessR\bliveness\x12\x18\n" +
 	"\aremoved\x18\x04 \x01(\bR\aremoved\x12)\n" +
-	"\x10initial_complete\x18\x05 \x01(\bR\x0finitialComplete\"@\n" +
+	"\x10initial_complete\x18\x05 \x01(\bR\x0finitialComplete\"_\n" +
 	"\x0fGetBlobsRequest\x12\x15\n" +
 	"\x06run_id\x18\x01 \x01(\tR\x05runId\x12\x16\n" +
-	"\x06sha256\x18\x02 \x03(\tR\x06sha256\"D\n" +
+	"\x06sha256\x18\x02 \x03(\tR\x06sha256\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x03 \x01(\tR\tsessionId\"D\n" +
 	"\x10GetBlobsResponse\x120\n" +
 	"\x05blobs\x18\x01 \x03(\v2\x1a.vibesys.api.v1.BlobResultR\x05blobs\"|\n" +
 	"\n" +

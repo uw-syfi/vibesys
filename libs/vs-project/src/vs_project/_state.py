@@ -28,7 +28,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from functools import lru_cache
 from pathlib import Path, PurePosixPath
-from typing import TYPE_CHECKING, Literal, NoReturn, Protocol, Self
+from typing import TYPE_CHECKING, Literal, NoReturn, Self
 
 from pydantic import (
     BaseModel,
@@ -36,7 +36,7 @@ from pydantic import (
 
 import vs_project._paths as project_paths
 from vs_decode.api import Unreadable, ValidationOptions, decode_json
-from vs_project._control_inbox import FileControlInbox
+from vs_project._control_inbox import FileControlInbox, validate_request_id
 from vs_project._framework_writes import FRAMEWORK_WRITES
 from vs_project._manifests import (
     _IDENTIFIER_PATTERN,
@@ -83,20 +83,6 @@ _STATE_DIRECTORY_PATH = project_paths.STATE_DIRECTORY_PATH
 _STATE_DIRECTORY_POSIX = project_paths.STATE_DIRECTORY_POSIX
 _RUN_NAMESPACE_PART_COUNT = len(_STATE_DIRECTORY_PARTS) + 3
 _STATE_HOME_ENV = "VIBESYS_STATE_HOME"
-_EXCLUDED_NAMES = frozenset(
-    {
-        ".cache",
-        ".git",
-        ".mypy_cache",
-        ".nox",
-        ".pytest_cache",
-        ".ruff_cache",
-        ".tox",
-        "__pycache__",
-        "agent.toml",
-        "node_modules",
-    }
-)
 
 
 def is_project_state_path(relative_path: Path | str) -> bool:
@@ -844,11 +830,6 @@ class StateSlot[ModelT: BaseModel]:
         self._namespace.apply(self.validate_transition(transition))
 
 
-class _Digest(Protocol):
-    def update(self, data: bytes, /) -> object:
-        """Add bytes to the digest state."""
-
-
 def generate_run_id(
     display_name: str,
     *,
@@ -937,6 +918,18 @@ class ProjectState:
     def log_directory_for(cls, project_root: Path | str, run_id: str) -> Path:
         """Return a run log destination before the project root is materialized."""
         return cls._run_local_directory_for(project_root, run_id, "logs", kind="run log directory")
+
+    @classmethod
+    def chat_session_directory_for(
+        cls, project_root: Path | str, run_id: str, session_id: str
+    ) -> Path:
+        """Resolve a session without creating it or following redirected descendants."""
+        return cls._run_local_directory_for(
+            project_root,
+            run_id,
+            f"logs/sessions/{validate_request_id(session_id)}",
+            kind="chat session directory",
+        )
 
     @classmethod
     def logged_run_ids_for(cls, project_root: Path | str) -> tuple[str, ...]:
@@ -1089,6 +1082,11 @@ class ProjectState:
 
     def input_fingerprint(self) -> str:
         """Hash the portable project input, excluding metadata, secrets, and caches."""
+        # lint-waiver: LW-337001 [PLC0415]; hello never fingerprints project inputs.
+        # > An eager import exceeds the host helper module budget; a dynamic loader
+        # > hides this dependency from tach and adds indirection to its only caller.
+        from vs_project._fingerprint import _is_excluded, _update_fingerprint  # noqa: PLC0415
+
         digest = hashlib.sha256(b"vs-project-input-v1\0")
         paths = sorted(
             self.project_root.rglob("*"),
@@ -1462,6 +1460,21 @@ class ProjectState:
         by the run's agents.
         """
         return FileControlInbox(self.local_namespace(run_id, _CONTROL_NAMESPACE))
+
+    def session_inbox(self, run_id: str, session_id: str) -> FileControlInbox:
+        """Open an ordered, idempotent inbox beside one session's log."""
+        self.load_run(run_id)
+        identity = validate_request_id(session_id)
+        relative = f"logs/sessions/{identity}"
+        return FileControlInbox(
+            StateNamespace(
+                project_root=self.project_root,
+                root=self._local_state_dir(run_id, "logs") / "sessions" / identity,
+                portable=False,
+                containment_root=self._state_home,
+                namespace_root=_STATE_DIRECTORY_POSIX / "local" / "runs" / run_id / relative,
+            )
+        )
 
     def require_local_run(self, run_id: str) -> None:
         """Raise ``ProjectStateError`` unless this state home holds ``run_id``'s local state.
@@ -1946,43 +1959,6 @@ def _validate_storage_root(path: Path, parent: Path, *, name: str) -> None:
         raise ProjectStateError(message) from exc
     if not path_resolved.is_relative_to(parent_resolved):
         raise ProjectStateError.storage_root_escapes(name, parent_resolved, path, path_resolved)
-
-
-def _is_excluded(relative: Path) -> bool:
-    if relative.parts == (_CONFIG_DIRECTORY_NAME,) or relative.parts[:2] == _STATE_DIRECTORY_PARTS:
-        return True
-    for part in relative.parts:
-        if part in _EXCLUDED_NAMES or part == ".env" or part.startswith(".env."):
-            return True
-        if part.endswith((".pyc", ".pyo")):
-            return True
-    return False
-
-
-def _update_fingerprint(digest: _Digest, path: Path, relative: Path) -> None:
-    update = digest.update
-    encoded_path = relative.as_posix().encode("utf-8", "surrogateescape")
-    try:
-        metadata = path.lstat()
-        mode = metadata.st_mode
-        if stat.S_ISDIR(mode):
-            update(b"D\0" + encoded_path + b"\0")
-        elif stat.S_ISLNK(mode):
-            target = str(path.readlink()).encode("utf-8", "surrogateescape")
-            update(b"L\0" + encoded_path + b"\0" + target + b"\0")
-        elif stat.S_ISREG(mode):
-            executable = b"1" if mode & 0o111 else b"0"
-            update(b"F\0" + encoded_path + b"\0" + executable + b"\0")
-            with path.open("rb") as source:
-                while block := source.read(1024 * 1024):
-                    update(block)
-            update(b"\0")
-        else:
-            message = f"Unsupported input file type: {path}"
-            raise ProjectStateError(message)
-    except OSError as exc:
-        message = f"Could not fingerprint project input {path}: {exc}"
-        raise ProjectStateError(message) from exc
 
 
 def _atomic_write_bytes(

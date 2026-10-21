@@ -199,6 +199,24 @@ native_targets = []
 pnpm_packages = []
 
 [[cases]]
+name = "chat session feature changes select its Run screen composition"
+paths = ["clients/features/run-sessions/src/state/machine.ts"]
+jobs = ["clients"]
+[cases.collections]
+native_languages = []
+native_targets = []
+pnpm_packages = ["@vibesys/app-desktop-shell", "@vibesys/feature-run-sessions"]
+
+[[cases]]
+name = "session process changes select Python checks"
+paths = ["src/vibesys/chat/_session.py", "src/vibesys/api/chat.py"]
+jobs = ["python"]
+[cases.collections]
+native_languages = []
+native_targets = []
+pnpm_packages = []
+
+[[cases]]
 name = "host relaunch admission selects Python checks"
 paths = ["src/vibesys/api/host_relaunch.py"]
 jobs = ["python"]

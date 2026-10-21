@@ -15,7 +15,10 @@ from vibesys.api.store import (
 from vs_runtime.api.testing import FakeRunHandle, FakeRuns, FakeStopTimer
 
 if TYPE_CHECKING:
-    from vibesys.api.contracts import RunView
+    from collections.abc import Callable
+
+    from vibesys.api.auxiliary import AuxiliaryAgentLaunch, AuxiliaryAgents, ManagedAgent, RunReady
+    from vibesys.api.contracts import CoreEvent, RunView
     from vs_runtime.api.infrastructure import SteerTargets
 
 
@@ -164,6 +167,7 @@ class FakeProfilerPreflight:
 
 
 __all__ = [
+    "FakeManagedAgent",
     "FakeProfilerPreflight",
     "FakeRunHandle",
     "FakeRunRecord",
@@ -171,3 +175,70 @@ __all__ = [
     "FakeRuns",
     "FakeStopTimer",
 ]
+
+
+@dataclass
+class FakeManagedAgent:
+    """An in-memory conversation with explicit, input-derived model behavior."""
+
+    respond: Callable[[str, str | None], str]
+    messages: list[tuple[str, str | None]] = field(default_factory=list, init=False)
+    closed: bool = field(default=False, init=False)
+
+    def turn(self, message: str, *, invocation_id: str | None = None) -> str:
+        """Serialize one question into this conversation, refusing use after close."""
+        if self.closed:
+            detail = "auxiliary conversation is closed"
+            raise RuntimeError(detail)
+        self.messages.append((message, invocation_id))
+        return self.respond(message, invocation_id)
+
+    def close(self) -> None:
+        """Idempotently release the conversation."""
+        self.closed = True
+
+
+@dataclass
+class FakeAuxiliaryAgents:
+    """An explicit auxiliary scope that creates input-derived Fake conversations."""
+
+    create: Callable[[AuxiliaryAgentLaunch], ManagedAgent]
+    launches: list[AuxiliaryAgentLaunch] = field(default_factory=list, init=False)
+    agents: list[ManagedAgent] = field(default_factory=list, init=False)
+    closed: bool = field(default=False, init=False)
+
+    def create_auxiliary_agent(self, launch: AuxiliaryAgentLaunch) -> ManagedAgent:
+        if self.closed:
+            detail = "auxiliary scope is closed"
+            raise RuntimeError(detail)
+        self.launches.append(launch)
+        agent = self.create(launch)
+        self.agents.append(agent)
+        return agent
+
+    def close(self) -> None:
+        for agent in self.agents:
+            agent.close()
+        self.closed = True
+
+
+@dataclass
+class FakeRunReader:
+    """A read scope with explicit readiness facts and auxiliary ownership."""
+
+    facts: RunReady
+    agents: AuxiliaryAgents
+    sinks: list[Callable[[CoreEvent], object] | None] = field(default_factory=list, init=False)
+    closed: bool = field(default=False, init=False)
+
+    def ready(self) -> RunReady:
+        return self.facts
+
+    def open_auxiliary_agents(
+        self, *, sink: Callable[[CoreEvent], object] | None = None
+    ) -> AuxiliaryAgents:
+        self.sinks.append(sink)
+        return self.agents
+
+    def close(self) -> None:
+        self.closed = True

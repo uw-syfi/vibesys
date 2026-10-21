@@ -6,6 +6,7 @@ import "buf/validate/validate.proto";
 import "google/protobuf/descriptor.proto";
 import "google/protobuf/timestamp.proto";
 import "vibesys/store/v1/content.proto";
+import "vibesys/store/v1/chat.proto";
 import "vibesys/store/v1/epoch.proto";
 import "vibesys/store/v1/intent.proto";
 import "vibesys/store/v1/lifecycle.proto";
@@ -25,7 +26,7 @@ message Record {
   option (buf.validate.message).cel = {
     id: "record.identity"
     message: "seq, epoch and at are required for typed records"
-    expression: "!(has(this.lifecycle) || has(this.span) || has(this.metric) || has(this.stream) || has(this.blob) || has(this.intent) || has(this.notice)) || (this.seq > 0u && this.epoch > 0u && has(this.at))"
+    expression: "!(has(this.lifecycle) || has(this.span) || has(this.metric) || has(this.stream) || has(this.blob) || has(this.intent) || has(this.notice) || has(this.chat)) || (this.seq > 0u && this.epoch > 0u && has(this.at))"
   };
   option (buf.validate.message).cel = {
     id: "record.epoch_started"
@@ -51,6 +52,7 @@ message Record {
     BlobAttached blob = 15;
     IntentState intent = 16;
     Notice notice = 17;
+    ChatRecord chat = 19;
   }
 }
 

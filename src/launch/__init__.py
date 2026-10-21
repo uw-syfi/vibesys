@@ -256,10 +256,14 @@ def orchestration_roles(
 
 
 def validate_run_request(
-    request: RunRequest, *, git: Git, registry: OrchestrationRegistry | None = None
+    request: RunRequest,
+    *,
+    git: Git,
+    registry: OrchestrationRegistry | None = None,
+    read_only: bool = False,
 ) -> None:
     """Validate execution settings and the selected built-in policy; ``git`` starts Git."""
-    _validate_run_request(request, registry=_catalog(registry), git=git)
+    _validate_run_request(request, registry=_catalog(registry), git=git, read_only=read_only)
 
 
 def open_run_store(

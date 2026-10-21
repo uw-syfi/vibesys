@@ -2494,3 +2494,41 @@ def test_resume_of_a_host_run_leaves_the_environment_to_be_derived_from_its_back
     # Docker here is the pre-derivation default; the runtime turns it into the
     # host environment for a host-only backend on macOS and rejects it elsewhere.
     assert run_environment_spec_from_args(args).name == "docker"
+
+
+@pytest.mark.parametrize("environment", ["docker", "slurm"])
+@pytest.mark.parametrize("present", [False, True])
+def test_chat_reader_resolves_saved_task_image_without_building(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    environment: Literal["docker", "slurm"],
+    *,
+    present: bool,
+) -> None:
+    _, daemon, image = _resume_task_image(
+        tmp_path,
+        monkeypatch,
+        environment=environment,
+        recorded=_current_reference,
+        daemon=lambda image: _FakeDockerDaemon(
+            {image: _OLD_ID} if present else {}, next_id=_NEW_ID
+        ),
+    )
+
+    def reader() -> RunEnvironmentSpec:
+        args = parse_cli_invocation(["--resume", "20260811-120000-11111111-agent"]).args
+        return run_environment_spec_from_args(
+            args,
+            task_image=TaskImageBuild(
+                backend=ComputeBackend.CUDA, runner=daemon, allow_build=False
+            ),
+        )
+
+    if present:
+        spec = reader()
+        assert spec.image_id == _OLD_ID
+        assert spec.options["image"] == image
+    else:
+        with pytest.raises(ValueError, match="chat reader cannot rebuild"):
+            reader()
+    assert daemon.builds == []

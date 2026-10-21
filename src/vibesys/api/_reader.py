@@ -6,13 +6,17 @@ from typing import TYPE_CHECKING
 
 from vibesys.api._session import InProcessAuxiliaryAgents, run_ready
 from vibesys.composition import resolve_agent_specs
+from vibesys.run.agent_events import CoreAgentEventSink
 from vibesys.run.integration import LocalRunIntegration
 from vibesys.run.profilers import validate_run_request
 from vibesys.run.reader import open_reader_resources
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from vibesys.api.assembly import SessionImplementations
     from vibesys.api.auxiliary import AuxiliaryAgents, RunReady
+    from vibesys.api.contracts import CoreEvent
     from vibesys.plugin_catalog import OrchestrationRegistry
     from vibesys.run.contracts import RunRequest
 
@@ -58,12 +62,16 @@ class _LocalRunReader:
         """The run's readiness facts, read from its saved record."""
         return self._ready
 
-    def open_auxiliary_agents(self) -> AuxiliaryAgents:
+    def open_auxiliary_agents(
+        self, *, sink: Callable[[CoreEvent], object] | None = None
+    ) -> AuxiliaryAgents:
         """A scope that owns the conversations opened in it."""
         return InProcessAuxiliaryAgents(
             self._resources,
             self._implementations.agents,
-            self._integration.agent_events,
+            self._integration.agent_events
+            if sink is None
+            else CoreAgentEventSink(sink, self._implementations.timing.clock),
             self._implementations.timing.threads,
         )
 
