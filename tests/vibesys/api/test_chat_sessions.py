@@ -9,17 +9,23 @@ from typing import TYPE_CHECKING
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
+from tests.support.task_project import write_task
 
+from entrypoints.chat_session import serve_pending
 from vibesys.api import (
     AgentOutputChunkData,
     CoreEvent,
     CoreEventType,
     JsonResultPayload,
+    RunReady,
+    RunStatus,
+    RunView,
     ToolResultData,
 )
 from vibesys.api.chat import ChatRuntime, ChatSession, SessionAction, SessionLifecycle, run_head
 from vibesys.api.host import host_call
-from vibesys.api.testing import FakeManagedAgent
+from vibesys.api.store import RunRecordFacts
+from vibesys.api.testing import FakeAuxiliaryAgents, FakeManagedAgent, FakeRunReader, FakeRunRecord
 from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord
 from vs_project.api.testing import run_execution_record
 from vs_proto.api import (
@@ -61,7 +67,9 @@ def chat(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> ChatMessageRequest:
         vibesys_version="test",
         run_environment=RunEnvironmentRecord(name="docker"),
         execution=run_execution_record(),
-        orchestration=OrchestrationDescriptor(id="dynamic", config_version=1, options={}),
+        orchestration=OrchestrationDescriptor(
+            id="dynamic", config_version=1, options={"interface": "service", "max_rounds": 2}
+        ),
         trusted_input_baseline="a" * 40,
         now=datetime(2026, 1, 1, tzinfo=UTC),
     )
@@ -403,3 +411,66 @@ def test_session_ids_follow_the_host_contract(chat: ChatMessageRequest, session_
     assert response.result.value.session_id == session_id
     run(chat, lambda text, _invocation: text)
     assert len(events(chat)) == 3
+
+
+def test_process_refreshes_after_relaunch_without_stranding_admitted_messages(
+    chat: ChatMessageRequest,
+) -> None:
+    project = Project.open(chat.project_root)
+    write_task(
+        project.root,
+        'version = 1\n[agent]\ndomain = "generic"\n[accuracy]\ncommand = ["true"]\n[benchmark]\ncommand = ["true"]\n',
+        objective="Make the queue faster.\n",
+    )
+    ready = RunReady(
+        record=FakeRunRecord(
+            chat.run_id,
+            RunView(run_id=chat.run_id, loop="dynamic", status=RunStatus.ACTIVE),
+            RunRecordFacts(trusted_input_baseline="a" * 40),
+        ),
+        log_directory=Project.run_log_path_for(chat.project_root, chat.run_id).parent,
+        frontend_state_directory=project.root / "frontend",
+        agent_provider="codex",
+        agent_model="gpt-test",
+        agent_providers=("codex",),
+    )
+    post(chat)
+    readers: list[FakeRunReader] = []
+    agents: list[FakeManagedAgent] = []
+
+    def open_reader(_request: object) -> FakeRunReader:
+        def respond(text: str, _invocation: str | None) -> str:
+            if len(readers) == 1:
+                publish(chat, epoch=2)
+                second = ChatMessageRequest.from_binary(chat.to_binary())
+                second.request_id, second.text = "q-2", "Why?"
+                post(second)
+            return text
+
+        agent = FakeManagedAgent(respond)
+        agents.append(agent)
+        reader = FakeRunReader(ready, FakeAuxiliaryAgents(lambda _launch: agent))
+        readers.append(reader)
+        return reader
+
+    threads = SimThreads()
+    threads.run(
+        lambda: serve_pending(
+            chat, ChatRuntime(threads.clock, threads, idle_seconds=0), open_reader
+        )
+    )
+    assert len(readers) == 2
+    assert all(reader.closed for reader in readers)
+    assert all(agent.closed for agent in agents)
+    assert agents[0].messages[0][0] == chat.text
+    assert json.loads(agents[1].messages[0][0])["question"] == "Why?"
+    assert len(events(chat)) == 5
+    scope = readers[0].agents
+    assert isinstance(scope, FakeAuxiliaryAgents)
+    assert scope.closed
+    assert scope.launches[0].readable_inputs[0].path == ready.log_directory
+    assert readers[0].sinks[0] is not None
+    with pytest.raises(RuntimeError, match="scope is closed"):
+        scope.create_auxiliary_agent(scope.launches[0])
+    with pytest.raises(RuntimeError, match="conversation is closed"):
+        agents[0].turn("late")

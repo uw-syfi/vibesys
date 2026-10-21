@@ -13,7 +13,7 @@ from entrypoints.production import production_run_readers
 from entrypoints.server import real_gateway_effects
 from server.chat.prompts import experiment_chat_continuation_prompt, experiment_chat_system_prompt
 from vibesys.api import AuxiliaryAgentLaunch, AuxiliaryReadableInput, AuxiliarySkills
-from vibesys.api.chat import ChatRuntime, ChatSession
+from vibesys.api.chat import ChatRuntime, ChatSession, run_head
 from vs_project.api import Project
 from vs_proto.api import ChatMessageRequest, ChatSessionCreated
 from vs_runlog.api import assert_run_unlocked
@@ -113,6 +113,20 @@ def serve(request: ChatMessageRequest, runtime: ChatRuntime, readers: RunReaders
         )
 
 
+def serve_pending(request: ChatMessageRequest, runtime: ChatRuntime, readers: RunReaders) -> None:
+    """Refresh an exiting owner when a new epoch still has admitted messages to answer."""
+    while True:
+        serve(request, runtime, readers)
+        project = Project.open(request.project_root)
+        if not project.state.session_inbox(request.run_id, request.session_id).pending():
+            return
+        _, parked = run_head(
+            Project.run_log_path_for(request.project_root, request.run_id).parent / "run.head"
+        )
+        if parked:
+            return
+
+
 def main(argv: list[str] | None = None) -> int:
     """Open only the named session; a competing owner already serves its inbox."""
     parser = argparse.ArgumentParser(prog="vibesys chat-session")
@@ -128,7 +142,7 @@ def main(argv: list[str] | None = None) -> int:
         text="process",
     )
     try:
-        serve(request, ChatRuntime(SystemClock(), OsThreads()), production_run_readers())
+        serve_pending(request, ChatRuntime(SystemClock(), OsThreads()), production_run_readers())
     except BlockingIOError:
         return 0
     return 0
