@@ -5,8 +5,8 @@ from __future__ import annotations
 from functools import cache
 from typing import TYPE_CHECKING, Any
 
-from jsonschema import Draft202012Validator
-from pydantic import JsonValue, TypeAdapter
+from jsonschema import Draft202012Validator, FormatChecker
+from pydantic import AwareDatetime, JsonValue, TypeAdapter
 
 from vs_core.api import (
     ChargeReceipt,
@@ -36,6 +36,15 @@ if TYPE_CHECKING:
 
 _JSON = TypeAdapter(JsonValue)
 _SCHEMA = TypeAdapter(dict[str, JsonValue])
+_FORMATS = FormatChecker()
+
+
+@_FORMATS.checks("date-time", raises=ValueError)
+def _aware_datetime(value: object) -> bool:
+    TypeAdapter(AwareDatetime).validate_python(value)
+    return True
+
+
 _TYPES: dict[str, TypeAdapter[Any]] = {
     "RequestRecord": TypeAdapter(RequestRecord),
     "ChildLease": TypeAdapter(ChildLease),
@@ -74,7 +83,7 @@ def _reader(strategy: str, name: str) -> Draft202012Validator:
     )
     if isinstance(schema, Unreadable):
         raise FactImportError("descriptor", schema.details())
-    return Draft202012Validator(schema)
+    return Draft202012Validator(schema, format_checker=_FORMATS)
 
 
 class SnapshotDecoder:

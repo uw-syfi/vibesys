@@ -341,6 +341,17 @@ def test_retired_manifests_keep_original_config_without_a_snapshot_upgrade(
     assert path.read_bytes() == data
 
 
+@pytest.mark.parametrize("created_at", ["yesterday", "2026-01-01T00:00:00"])
+def test_retired_manifest_dates_keep_the_original_aware_datetime_contract(created_at: str) -> None:
+    value = json.loads((_FIXTURES / "manifest-v3.json").read_bytes())
+    value["created_at"] = created_at
+    with pytest.raises(FactImportError, match="created_at"):
+        _import(
+            ImportSource("run.json", SourceFormat.MANIFEST, json.dumps(value).encode()),
+            strategy="multi-agent",
+        )
+
+
 def _receipt(family: str, part: str, data: dict[str, Any], key: str = "request-a") -> ImportSource:
     path = f"receipts/{family}/{sha256(key.encode()).hexdigest()}.{part}.json"
     return ImportSource(path, SourceFormat.RECEIPT, json.dumps(data).encode())
