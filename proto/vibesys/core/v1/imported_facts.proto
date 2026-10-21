@@ -106,24 +106,54 @@ message ImportedMeasurement {
   };
 }
 
+enum ImportedStageKind {
+  IMPORTED_STAGE_KIND_UNSPECIFIED = 0;
+  IMPORTED_STAGE_KIND_BUILD = 1;
+  IMPORTED_STAGE_KIND_ACCURACY = 2;
+  IMPORTED_STAGE_KIND_BENCHMARK = 3;
+  IMPORTED_STAGE_KIND_PROFILE = 4;
+}
+
+enum ImportedStageOutcome {
+  IMPORTED_STAGE_OUTCOME_UNSPECIFIED = 0;
+  IMPORTED_STAGE_OUTCOME_PASSED = 1;
+  IMPORTED_STAGE_OUTCOME_FAILED = 2;
+  IMPORTED_STAGE_OUTCOME_OBSERVED = 3;
+}
+
+enum ImportedEvidenceFailure {
+  IMPORTED_EVIDENCE_FAILURE_UNSPECIFIED = 0;
+  IMPORTED_EVIDENCE_FAILURE_WORKLOAD = 1;
+  IMPORTED_EVIDENCE_FAILURE_INFRASTRUCTURE = 2;
+  IMPORTED_EVIDENCE_FAILURE_AMBIGUOUS = 3;
+}
+
+enum ImportedGuidanceTarget {
+  IMPORTED_GUIDANCE_TARGET_UNSPECIFIED = 0;
+  IMPORTED_GUIDANCE_TARGET_RUN = 1;
+  IMPORTED_GUIDANCE_TARGET_ROLE = 2;
+  IMPORTED_GUIDANCE_TARGET_ATTEMPT = 3;
+  IMPORTED_GUIDANCE_TARGET_ITEM = 4;
+}
+
 // Accepted legacy stage payload, including the measured content and environment identities.
 message ImportedStageEvidence {
   string evidence_id = 1 [(buf.validate.field).string.min_len = 1];
   string evaluation_id = 2 [(buf.validate.field).string.min_len = 1];
   string stage_name = 3 [(buf.validate.field).string.min_len = 1];
-  string kind = 4 [(buf.validate.field).string = {in: ["build", "accuracy", "benchmark", "profile"]}];
-  string purpose = 5 [(buf.validate.field).string = {in: ["baseline", "local-validation", "official", "profile"]}];
+  ImportedStageKind kind = 4 [(buf.validate.field).enum = {defined_only: true, not_in: 0}];
+  EvidencePurpose purpose = 5 [(buf.validate.field).enum = {defined_only: true, not_in: 0}];
   string candidate_digest = 6 [(buf.validate.field).string.pattern = "^[0-9a-f]{64}$"];
   string evaluator_digest = 7 [(buf.validate.field).string.pattern = "^[0-9a-f]{64}$"];
   string workload_digest = 8 [(buf.validate.field).string.pattern = "^[0-9a-f]{64}$"];
   string environment_digest = 9 [(buf.validate.field).string.pattern = "^[0-9a-f]{64}$"];
   string trusted_inputs_digest = 10 [(buf.validate.field).string.pattern = "^[0-9a-f]{64}$"];
-  string outcome = 11 [(buf.validate.field).string = {in: ["passed", "failed", "observed"]}];
+  ImportedStageOutcome outcome = 11 [(buf.validate.field).enum = {defined_only: true, not_in: 0}];
   repeated Reading readings = 12;
   optional string summary = 13;
   repeated ImportedEvidenceArtifact artifacts = 14;
   ImportedPartialMeasurement partial = 15;
-  optional string failure_kind = 16 [(buf.validate.field).string = {in: ["workload", "infrastructure", "ambiguous"]}];
+  optional ImportedEvidenceFailure failure_kind = 16 [(buf.validate.field).enum = {defined_only: true, not_in: 0}];
   optional string unmet_requirement = 17;
   string accepted_round = 18 [(buf.validate.field).string.pattern = "^(0|[1-9][0-9]*)$"];
 }
@@ -152,7 +182,7 @@ message ImportedGuidance {
   InputTarget target = 7;
   InputMode mode = 8 [(buf.validate.field).enum.defined_only = true];
   bool disposed = 9;
-  optional string historical_target_kind = 10 [(buf.validate.field).string = {in: ["run", "role", "attempt", "item"]}];
+  optional ImportedGuidanceTarget historical_target_kind = 10 [(buf.validate.field).enum = {defined_only: true, not_in: 0}];
   optional string historical_target_id = 11 [(buf.validate.field).string.min_len = 1];
 }
 

@@ -302,7 +302,7 @@ def test_guidance_retains_disposition_target_and_standing_mode() -> None:
     result = _import(source)
     guidance = _payloads(result, "guidance")[0]
     assert guidance.text == "Focus on latency."
-    assert guidance.historical_target_kind == "role"
+    assert guidance.historical_target_kind.name == "ROLE"
     assert guidance.historical_target_id == "planner"
     assert guidance.mode.name == "STANDING"
     assert not guidance.delivered
@@ -397,8 +397,8 @@ def test_accepted_stage_ledger_keeps_fingerprints_all_readings_and_partial_progr
     assert stage.readings[0].value == 1.0
     assert stage.partial.reading.value == 2.0
     assert stage.partial.completed == "2"
-    assert stage.outcome == "failed"
-    assert stage.purpose == "official"
+    assert stage.outcome.name == "FAILED"
+    assert stage.purpose.name == "OFFICIAL"
 
 
 @given(count=st.integers(min_value=0, max_value=2**100))

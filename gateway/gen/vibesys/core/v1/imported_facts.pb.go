@@ -107,6 +107,220 @@ func (ImportFormat) EnumDescriptor() ([]byte, []int) {
 	return file_vibesys_core_v1_imported_facts_proto_rawDescGZIP(), []int{0}
 }
 
+type ImportedStageKind int32
+
+const (
+	ImportedStageKind_IMPORTED_STAGE_KIND_UNSPECIFIED ImportedStageKind = 0
+	ImportedStageKind_IMPORTED_STAGE_KIND_BUILD       ImportedStageKind = 1
+	ImportedStageKind_IMPORTED_STAGE_KIND_ACCURACY    ImportedStageKind = 2
+	ImportedStageKind_IMPORTED_STAGE_KIND_BENCHMARK   ImportedStageKind = 3
+	ImportedStageKind_IMPORTED_STAGE_KIND_PROFILE     ImportedStageKind = 4
+)
+
+// Enum value maps for ImportedStageKind.
+var (
+	ImportedStageKind_name = map[int32]string{
+		0: "IMPORTED_STAGE_KIND_UNSPECIFIED",
+		1: "IMPORTED_STAGE_KIND_BUILD",
+		2: "IMPORTED_STAGE_KIND_ACCURACY",
+		3: "IMPORTED_STAGE_KIND_BENCHMARK",
+		4: "IMPORTED_STAGE_KIND_PROFILE",
+	}
+	ImportedStageKind_value = map[string]int32{
+		"IMPORTED_STAGE_KIND_UNSPECIFIED": 0,
+		"IMPORTED_STAGE_KIND_BUILD":       1,
+		"IMPORTED_STAGE_KIND_ACCURACY":    2,
+		"IMPORTED_STAGE_KIND_BENCHMARK":   3,
+		"IMPORTED_STAGE_KIND_PROFILE":     4,
+	}
+)
+
+func (x ImportedStageKind) Enum() *ImportedStageKind {
+	p := new(ImportedStageKind)
+	*p = x
+	return p
+}
+
+func (x ImportedStageKind) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (ImportedStageKind) Descriptor() protoreflect.EnumDescriptor {
+	return file_vibesys_core_v1_imported_facts_proto_enumTypes[1].Descriptor()
+}
+
+func (ImportedStageKind) Type() protoreflect.EnumType {
+	return &file_vibesys_core_v1_imported_facts_proto_enumTypes[1]
+}
+
+func (x ImportedStageKind) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use ImportedStageKind.Descriptor instead.
+func (ImportedStageKind) EnumDescriptor() ([]byte, []int) {
+	return file_vibesys_core_v1_imported_facts_proto_rawDescGZIP(), []int{1}
+}
+
+type ImportedStageOutcome int32
+
+const (
+	ImportedStageOutcome_IMPORTED_STAGE_OUTCOME_UNSPECIFIED ImportedStageOutcome = 0
+	ImportedStageOutcome_IMPORTED_STAGE_OUTCOME_PASSED      ImportedStageOutcome = 1
+	ImportedStageOutcome_IMPORTED_STAGE_OUTCOME_FAILED      ImportedStageOutcome = 2
+	ImportedStageOutcome_IMPORTED_STAGE_OUTCOME_OBSERVED    ImportedStageOutcome = 3
+)
+
+// Enum value maps for ImportedStageOutcome.
+var (
+	ImportedStageOutcome_name = map[int32]string{
+		0: "IMPORTED_STAGE_OUTCOME_UNSPECIFIED",
+		1: "IMPORTED_STAGE_OUTCOME_PASSED",
+		2: "IMPORTED_STAGE_OUTCOME_FAILED",
+		3: "IMPORTED_STAGE_OUTCOME_OBSERVED",
+	}
+	ImportedStageOutcome_value = map[string]int32{
+		"IMPORTED_STAGE_OUTCOME_UNSPECIFIED": 0,
+		"IMPORTED_STAGE_OUTCOME_PASSED":      1,
+		"IMPORTED_STAGE_OUTCOME_FAILED":      2,
+		"IMPORTED_STAGE_OUTCOME_OBSERVED":    3,
+	}
+)
+
+func (x ImportedStageOutcome) Enum() *ImportedStageOutcome {
+	p := new(ImportedStageOutcome)
+	*p = x
+	return p
+}
+
+func (x ImportedStageOutcome) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (ImportedStageOutcome) Descriptor() protoreflect.EnumDescriptor {
+	return file_vibesys_core_v1_imported_facts_proto_enumTypes[2].Descriptor()
+}
+
+func (ImportedStageOutcome) Type() protoreflect.EnumType {
+	return &file_vibesys_core_v1_imported_facts_proto_enumTypes[2]
+}
+
+func (x ImportedStageOutcome) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use ImportedStageOutcome.Descriptor instead.
+func (ImportedStageOutcome) EnumDescriptor() ([]byte, []int) {
+	return file_vibesys_core_v1_imported_facts_proto_rawDescGZIP(), []int{2}
+}
+
+type ImportedEvidenceFailure int32
+
+const (
+	ImportedEvidenceFailure_IMPORTED_EVIDENCE_FAILURE_UNSPECIFIED    ImportedEvidenceFailure = 0
+	ImportedEvidenceFailure_IMPORTED_EVIDENCE_FAILURE_WORKLOAD       ImportedEvidenceFailure = 1
+	ImportedEvidenceFailure_IMPORTED_EVIDENCE_FAILURE_INFRASTRUCTURE ImportedEvidenceFailure = 2
+	ImportedEvidenceFailure_IMPORTED_EVIDENCE_FAILURE_AMBIGUOUS      ImportedEvidenceFailure = 3
+)
+
+// Enum value maps for ImportedEvidenceFailure.
+var (
+	ImportedEvidenceFailure_name = map[int32]string{
+		0: "IMPORTED_EVIDENCE_FAILURE_UNSPECIFIED",
+		1: "IMPORTED_EVIDENCE_FAILURE_WORKLOAD",
+		2: "IMPORTED_EVIDENCE_FAILURE_INFRASTRUCTURE",
+		3: "IMPORTED_EVIDENCE_FAILURE_AMBIGUOUS",
+	}
+	ImportedEvidenceFailure_value = map[string]int32{
+		"IMPORTED_EVIDENCE_FAILURE_UNSPECIFIED":    0,
+		"IMPORTED_EVIDENCE_FAILURE_WORKLOAD":       1,
+		"IMPORTED_EVIDENCE_FAILURE_INFRASTRUCTURE": 2,
+		"IMPORTED_EVIDENCE_FAILURE_AMBIGUOUS":      3,
+	}
+)
+
+func (x ImportedEvidenceFailure) Enum() *ImportedEvidenceFailure {
+	p := new(ImportedEvidenceFailure)
+	*p = x
+	return p
+}
+
+func (x ImportedEvidenceFailure) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (ImportedEvidenceFailure) Descriptor() protoreflect.EnumDescriptor {
+	return file_vibesys_core_v1_imported_facts_proto_enumTypes[3].Descriptor()
+}
+
+func (ImportedEvidenceFailure) Type() protoreflect.EnumType {
+	return &file_vibesys_core_v1_imported_facts_proto_enumTypes[3]
+}
+
+func (x ImportedEvidenceFailure) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use ImportedEvidenceFailure.Descriptor instead.
+func (ImportedEvidenceFailure) EnumDescriptor() ([]byte, []int) {
+	return file_vibesys_core_v1_imported_facts_proto_rawDescGZIP(), []int{3}
+}
+
+type ImportedGuidanceTarget int32
+
+const (
+	ImportedGuidanceTarget_IMPORTED_GUIDANCE_TARGET_UNSPECIFIED ImportedGuidanceTarget = 0
+	ImportedGuidanceTarget_IMPORTED_GUIDANCE_TARGET_RUN         ImportedGuidanceTarget = 1
+	ImportedGuidanceTarget_IMPORTED_GUIDANCE_TARGET_ROLE        ImportedGuidanceTarget = 2
+	ImportedGuidanceTarget_IMPORTED_GUIDANCE_TARGET_ATTEMPT     ImportedGuidanceTarget = 3
+	ImportedGuidanceTarget_IMPORTED_GUIDANCE_TARGET_ITEM        ImportedGuidanceTarget = 4
+)
+
+// Enum value maps for ImportedGuidanceTarget.
+var (
+	ImportedGuidanceTarget_name = map[int32]string{
+		0: "IMPORTED_GUIDANCE_TARGET_UNSPECIFIED",
+		1: "IMPORTED_GUIDANCE_TARGET_RUN",
+		2: "IMPORTED_GUIDANCE_TARGET_ROLE",
+		3: "IMPORTED_GUIDANCE_TARGET_ATTEMPT",
+		4: "IMPORTED_GUIDANCE_TARGET_ITEM",
+	}
+	ImportedGuidanceTarget_value = map[string]int32{
+		"IMPORTED_GUIDANCE_TARGET_UNSPECIFIED": 0,
+		"IMPORTED_GUIDANCE_TARGET_RUN":         1,
+		"IMPORTED_GUIDANCE_TARGET_ROLE":        2,
+		"IMPORTED_GUIDANCE_TARGET_ATTEMPT":     3,
+		"IMPORTED_GUIDANCE_TARGET_ITEM":        4,
+	}
+)
+
+func (x ImportedGuidanceTarget) Enum() *ImportedGuidanceTarget {
+	p := new(ImportedGuidanceTarget)
+	*p = x
+	return p
+}
+
+func (x ImportedGuidanceTarget) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (ImportedGuidanceTarget) Descriptor() protoreflect.EnumDescriptor {
+	return file_vibesys_core_v1_imported_facts_proto_enumTypes[4].Descriptor()
+}
+
+func (ImportedGuidanceTarget) Type() protoreflect.EnumType {
+	return &file_vibesys_core_v1_imported_facts_proto_enumTypes[4]
+}
+
+func (x ImportedGuidanceTarget) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use ImportedGuidanceTarget.Descriptor instead.
+func (ImportedGuidanceTarget) EnumDescriptor() ([]byte, []int) {
+	return file_vibesys_core_v1_imported_facts_proto_rawDescGZIP(), []int{4}
+}
+
 // Permanent semantic import contract. Neither P2's store nor P3's log owns it.
 // A source digest identifies the exact original bytes, including for JSON sources.
 type ImportedFrom struct {
@@ -649,19 +863,19 @@ type ImportedStageEvidence struct {
 	EvidenceId          string                      `protobuf:"bytes,1,opt,name=evidence_id,json=evidenceId,proto3" json:"evidence_id,omitempty"`
 	EvaluationId        string                      `protobuf:"bytes,2,opt,name=evaluation_id,json=evaluationId,proto3" json:"evaluation_id,omitempty"`
 	StageName           string                      `protobuf:"bytes,3,opt,name=stage_name,json=stageName,proto3" json:"stage_name,omitempty"`
-	Kind                string                      `protobuf:"bytes,4,opt,name=kind,proto3" json:"kind,omitempty"`
-	Purpose             string                      `protobuf:"bytes,5,opt,name=purpose,proto3" json:"purpose,omitempty"`
+	Kind                ImportedStageKind           `protobuf:"varint,4,opt,name=kind,proto3,enum=vibesys.core.v1.ImportedStageKind" json:"kind,omitempty"`
+	Purpose             EvidencePurpose             `protobuf:"varint,5,opt,name=purpose,proto3,enum=vibesys.core.v1.EvidencePurpose" json:"purpose,omitempty"`
 	CandidateDigest     string                      `protobuf:"bytes,6,opt,name=candidate_digest,json=candidateDigest,proto3" json:"candidate_digest,omitempty"`
 	EvaluatorDigest     string                      `protobuf:"bytes,7,opt,name=evaluator_digest,json=evaluatorDigest,proto3" json:"evaluator_digest,omitempty"`
 	WorkloadDigest      string                      `protobuf:"bytes,8,opt,name=workload_digest,json=workloadDigest,proto3" json:"workload_digest,omitempty"`
 	EnvironmentDigest   string                      `protobuf:"bytes,9,opt,name=environment_digest,json=environmentDigest,proto3" json:"environment_digest,omitempty"`
 	TrustedInputsDigest string                      `protobuf:"bytes,10,opt,name=trusted_inputs_digest,json=trustedInputsDigest,proto3" json:"trusted_inputs_digest,omitempty"`
-	Outcome             string                      `protobuf:"bytes,11,opt,name=outcome,proto3" json:"outcome,omitempty"`
+	Outcome             ImportedStageOutcome        `protobuf:"varint,11,opt,name=outcome,proto3,enum=vibesys.core.v1.ImportedStageOutcome" json:"outcome,omitempty"`
 	Readings            []*Reading                  `protobuf:"bytes,12,rep,name=readings,proto3" json:"readings,omitempty"`
 	Summary             *string                     `protobuf:"bytes,13,opt,name=summary,proto3,oneof" json:"summary,omitempty"`
 	Artifacts           []*ImportedEvidenceArtifact `protobuf:"bytes,14,rep,name=artifacts,proto3" json:"artifacts,omitempty"`
 	Partial             *ImportedPartialMeasurement `protobuf:"bytes,15,opt,name=partial,proto3" json:"partial,omitempty"`
-	FailureKind         *string                     `protobuf:"bytes,16,opt,name=failure_kind,json=failureKind,proto3,oneof" json:"failure_kind,omitempty"`
+	FailureKind         *ImportedEvidenceFailure    `protobuf:"varint,16,opt,name=failure_kind,json=failureKind,proto3,enum=vibesys.core.v1.ImportedEvidenceFailure,oneof" json:"failure_kind,omitempty"`
 	UnmetRequirement    *string                     `protobuf:"bytes,17,opt,name=unmet_requirement,json=unmetRequirement,proto3,oneof" json:"unmet_requirement,omitempty"`
 	AcceptedRound       string                      `protobuf:"bytes,18,opt,name=accepted_round,json=acceptedRound,proto3" json:"accepted_round,omitempty"`
 	unknownFields       protoimpl.UnknownFields
@@ -719,18 +933,18 @@ func (x *ImportedStageEvidence) GetStageName() string {
 	return ""
 }
 
-func (x *ImportedStageEvidence) GetKind() string {
+func (x *ImportedStageEvidence) GetKind() ImportedStageKind {
 	if x != nil {
 		return x.Kind
 	}
-	return ""
+	return ImportedStageKind_IMPORTED_STAGE_KIND_UNSPECIFIED
 }
 
-func (x *ImportedStageEvidence) GetPurpose() string {
+func (x *ImportedStageEvidence) GetPurpose() EvidencePurpose {
 	if x != nil {
 		return x.Purpose
 	}
-	return ""
+	return EvidencePurpose_EVIDENCE_PURPOSE_UNSPECIFIED
 }
 
 func (x *ImportedStageEvidence) GetCandidateDigest() string {
@@ -768,11 +982,11 @@ func (x *ImportedStageEvidence) GetTrustedInputsDigest() string {
 	return ""
 }
 
-func (x *ImportedStageEvidence) GetOutcome() string {
+func (x *ImportedStageEvidence) GetOutcome() ImportedStageOutcome {
 	if x != nil {
 		return x.Outcome
 	}
-	return ""
+	return ImportedStageOutcome_IMPORTED_STAGE_OUTCOME_UNSPECIFIED
 }
 
 func (x *ImportedStageEvidence) GetReadings() []*Reading {
@@ -803,11 +1017,11 @@ func (x *ImportedStageEvidence) GetPartial() *ImportedPartialMeasurement {
 	return nil
 }
 
-func (x *ImportedStageEvidence) GetFailureKind() string {
+func (x *ImportedStageEvidence) GetFailureKind() ImportedEvidenceFailure {
 	if x != nil && x.FailureKind != nil {
 		return *x.FailureKind
 	}
-	return ""
+	return ImportedEvidenceFailure_IMPORTED_EVIDENCE_FAILURE_UNSPECIFIED
 }
 
 func (x *ImportedStageEvidence) GetUnmetRequirement() string {
@@ -954,18 +1168,18 @@ func (x *ImportedPartialMeasurement) GetUnit() string {
 }
 
 type ImportedGuidance struct {
-	state                protoimpl.MessageState `protogen:"open.v1"`
-	Identity             string                 `protobuf:"bytes,1,opt,name=identity,proto3" json:"identity,omitempty"`
-	Text                 string                 `protobuf:"bytes,2,opt,name=text,proto3" json:"text,omitempty"`
-	Artifact             *ArtifactRef           `protobuf:"bytes,3,opt,name=artifact,proto3" json:"artifact,omitempty"`
-	Delivered            bool                   `protobuf:"varint,4,opt,name=delivered,proto3" json:"delivered,omitempty"`
-	Withdrawn            bool                   `protobuf:"varint,5,opt,name=withdrawn,proto3" json:"withdrawn,omitempty"`
-	PossiblyRead         bool                   `protobuf:"varint,6,opt,name=possibly_read,json=possiblyRead,proto3" json:"possibly_read,omitempty"`
-	Target               *InputTarget           `protobuf:"bytes,7,opt,name=target,proto3" json:"target,omitempty"`
-	Mode                 InputMode              `protobuf:"varint,8,opt,name=mode,proto3,enum=vibesys.core.v1.InputMode" json:"mode,omitempty"`
-	Disposed             bool                   `protobuf:"varint,9,opt,name=disposed,proto3" json:"disposed,omitempty"`
-	HistoricalTargetKind *string                `protobuf:"bytes,10,opt,name=historical_target_kind,json=historicalTargetKind,proto3,oneof" json:"historical_target_kind,omitempty"`
-	HistoricalTargetId   *string                `protobuf:"bytes,11,opt,name=historical_target_id,json=historicalTargetId,proto3,oneof" json:"historical_target_id,omitempty"`
+	state                protoimpl.MessageState  `protogen:"open.v1"`
+	Identity             string                  `protobuf:"bytes,1,opt,name=identity,proto3" json:"identity,omitempty"`
+	Text                 string                  `protobuf:"bytes,2,opt,name=text,proto3" json:"text,omitempty"`
+	Artifact             *ArtifactRef            `protobuf:"bytes,3,opt,name=artifact,proto3" json:"artifact,omitempty"`
+	Delivered            bool                    `protobuf:"varint,4,opt,name=delivered,proto3" json:"delivered,omitempty"`
+	Withdrawn            bool                    `protobuf:"varint,5,opt,name=withdrawn,proto3" json:"withdrawn,omitempty"`
+	PossiblyRead         bool                    `protobuf:"varint,6,opt,name=possibly_read,json=possiblyRead,proto3" json:"possibly_read,omitempty"`
+	Target               *InputTarget            `protobuf:"bytes,7,opt,name=target,proto3" json:"target,omitempty"`
+	Mode                 InputMode               `protobuf:"varint,8,opt,name=mode,proto3,enum=vibesys.core.v1.InputMode" json:"mode,omitempty"`
+	Disposed             bool                    `protobuf:"varint,9,opt,name=disposed,proto3" json:"disposed,omitempty"`
+	HistoricalTargetKind *ImportedGuidanceTarget `protobuf:"varint,10,opt,name=historical_target_kind,json=historicalTargetKind,proto3,enum=vibesys.core.v1.ImportedGuidanceTarget,oneof" json:"historical_target_kind,omitempty"`
+	HistoricalTargetId   *string                 `protobuf:"bytes,11,opt,name=historical_target_id,json=historicalTargetId,proto3,oneof" json:"historical_target_id,omitempty"`
 	unknownFields        protoimpl.UnknownFields
 	sizeCache            protoimpl.SizeCache
 }
@@ -1063,11 +1277,11 @@ func (x *ImportedGuidance) GetDisposed() bool {
 	return false
 }
 
-func (x *ImportedGuidance) GetHistoricalTargetKind() string {
+func (x *ImportedGuidance) GetHistoricalTargetKind() ImportedGuidanceTarget {
 	if x != nil && x.HistoricalTargetKind != nil {
 		return *x.HistoricalTargetKind
 	}
-	return ""
+	return ImportedGuidanceTarget_IMPORTED_GUIDANCE_TARGET_UNSPECIFIED
 }
 
 func (x *ImportedGuidance) GetHistoricalTargetId() string {
@@ -1586,27 +1800,31 @@ const file_vibesys_core_v1_imported_facts_proto_rawDesc = "" +
 	"\x1aImportedMeasurement.source\x12'exactly one measurement source required\x1a\x8c\x01(has(this.evidence) ? 1 : 0) + (has(this.sample) ? 1 : 0) + (has(this.historical_reading) ? 1 : 0) + (has(this.stage_evidence) ? 1 : 0) == 1\x1a|\n" +
 	"\x1bImportedMeasurement.trusted\x12'evidence must retain trusted provenance\x1a4!has(this.evidence) || this.evidence.provenance == 1B\x14\n" +
 	"\x12_historical_commitB\x16\n" +
-	"\x14_historical_artifact\"\x96\t\n" +
+	"\x14_historical_artifact\"\xae\t\n" +
 	"\x15ImportedStageEvidence\x12(\n" +
 	"\vevidence_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\n" +
 	"evidenceId\x12,\n" +
 	"\revaluation_id\x18\x02 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\fevaluationId\x12&\n" +
 	"\n" +
-	"stage_name\x18\x03 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\tstageName\x12>\n" +
-	"\x04kind\x18\x04 \x01(\tB*\xbaH'r%R\x05buildR\baccuracyR\tbenchmarkR\aprofileR\x04kind\x12N\n" +
-	"\apurpose\x18\x05 \x01(\tB4\xbaH1r/R\bbaselineR\x10local-validationR\bofficialR\aprofileR\apurpose\x12@\n" +
+	"stage_name\x18\x03 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\tstageName\x12B\n" +
+	"\x04kind\x18\x04 \x01(\x0e2\".vibesys.core.v1.ImportedStageKindB\n" +
+	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x04kind\x12F\n" +
+	"\apurpose\x18\x05 \x01(\x0e2 .vibesys.core.v1.EvidencePurposeB\n" +
+	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\apurpose\x12@\n" +
 	"\x10candidate_digest\x18\x06 \x01(\tB\x15\xbaH\x12r\x102\x0e^[0-9a-f]{64}$R\x0fcandidateDigest\x12@\n" +
 	"\x10evaluator_digest\x18\a \x01(\tB\x15\xbaH\x12r\x102\x0e^[0-9a-f]{64}$R\x0fevaluatorDigest\x12>\n" +
 	"\x0fworkload_digest\x18\b \x01(\tB\x15\xbaH\x12r\x102\x0e^[0-9a-f]{64}$R\x0eworkloadDigest\x12D\n" +
 	"\x12environment_digest\x18\t \x01(\tB\x15\xbaH\x12r\x102\x0e^[0-9a-f]{64}$R\x11environmentDigest\x12I\n" +
 	"\x15trusted_inputs_digest\x18\n" +
-	" \x01(\tB\x15\xbaH\x12r\x102\x0e^[0-9a-f]{64}$R\x13trustedInputsDigest\x129\n" +
-	"\aoutcome\x18\v \x01(\tB\x1f\xbaH\x1cr\x1aR\x06passedR\x06failedR\bobservedR\aoutcome\x124\n" +
+	" \x01(\tB\x15\xbaH\x12r\x102\x0e^[0-9a-f]{64}$R\x13trustedInputsDigest\x12K\n" +
+	"\aoutcome\x18\v \x01(\x0e2%.vibesys.core.v1.ImportedStageOutcomeB\n" +
+	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\aoutcome\x124\n" +
 	"\breadings\x18\f \x03(\v2\x18.vibesys.core.v1.ReadingR\breadings\x12\x1d\n" +
 	"\asummary\x18\r \x01(\tH\x00R\asummary\x88\x01\x01\x12G\n" +
 	"\tartifacts\x18\x0e \x03(\v2).vibesys.core.v1.ImportedEvidenceArtifactR\tartifacts\x12E\n" +
-	"\apartial\x18\x0f \x01(\v2+.vibesys.core.v1.ImportedPartialMeasurementR\apartial\x12R\n" +
-	"\ffailure_kind\x18\x10 \x01(\tB*\xbaH'r%R\bworkloadR\x0einfrastructureR\tambiguousH\x01R\vfailureKind\x88\x01\x01\x120\n" +
+	"\apartial\x18\x0f \x01(\v2+.vibesys.core.v1.ImportedPartialMeasurementR\apartial\x12\\\n" +
+	"\ffailure_kind\x18\x10 \x01(\x0e2(.vibesys.core.v1.ImportedEvidenceFailureB\n" +
+	"\xbaH\a\x82\x01\x04\x10\x01 \x00H\x01R\vfailureKind\x88\x01\x01\x120\n" +
 	"\x11unmet_requirement\x18\x11 \x01(\tH\x02R\x10unmetRequirement\x88\x01\x01\x12?\n" +
 	"\x0eaccepted_round\x18\x12 \x01(\tB\x18\xbaH\x15r\x132\x11^(0|[1-9][0-9]*)$R\racceptedRoundB\n" +
 	"\n" +
@@ -1626,7 +1844,7 @@ const file_vibesys_core_v1_imported_facts_proto_rawDesc = "" +
 	"\n" +
 	"_completedB\v\n" +
 	"\t_requiredB\a\n" +
-	"\x05_unit\"\xc2\x04\n" +
+	"\x05_unit\"\xd6\x04\n" +
 	"\x10ImportedGuidance\x12#\n" +
 	"\bidentity\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\bidentity\x12\x12\n" +
 	"\x04text\x18\x02 \x01(\tR\x04text\x128\n" +
@@ -1636,9 +1854,10 @@ const file_vibesys_core_v1_imported_facts_proto_rawDesc = "" +
 	"\rpossibly_read\x18\x06 \x01(\bR\fpossiblyRead\x124\n" +
 	"\x06target\x18\a \x01(\v2\x1c.vibesys.core.v1.InputTargetR\x06target\x128\n" +
 	"\x04mode\x18\b \x01(\x0e2\x1a.vibesys.core.v1.InputModeB\b\xbaH\x05\x82\x01\x02\x10\x01R\x04mode\x12\x1a\n" +
-	"\bdisposed\x18\t \x01(\bR\bdisposed\x12Z\n" +
+	"\bdisposed\x18\t \x01(\bR\bdisposed\x12n\n" +
 	"\x16historical_target_kind\x18\n" +
-	" \x01(\tB\x1f\xbaH\x1cr\x1aR\x03runR\x04roleR\aattemptR\x04itemH\x00R\x14historicalTargetKind\x88\x01\x01\x12>\n" +
+	" \x01(\x0e2'.vibesys.core.v1.ImportedGuidanceTargetB\n" +
+	"\xbaH\a\x82\x01\x04\x10\x01 \x00H\x00R\x14historicalTargetKind\x88\x01\x01\x12>\n" +
 	"\x14historical_target_id\x18\v \x01(\tB\a\xbaH\x04r\x02\x10\x01H\x01R\x12historicalTargetId\x88\x01\x01B\x19\n" +
 	"\x17_historical_target_kindB\x17\n" +
 	"\x15_historical_target_id\"\xf0\x02\n" +
@@ -1690,7 +1909,29 @@ const file_vibesys_core_v1_imported_facts_proto_rawDesc = "" +
 	"\x18IMPORT_FORMAT_HYPOTHESES\x10\v\x12\x18\n" +
 	"\x14IMPORT_FORMAT_EVENTS\x10\f\x12\x1a\n" +
 	"\x16IMPORT_FORMAT_SESSIONS\x10\r\x12\x19\n" +
-	"\x15IMPORT_FORMAT_CONTROL\x10\x0eB?Z=github.com/uw-syfi/vibesys/gateway/gen/vibesys/core/v1;corev1b\x06proto3"
+	"\x15IMPORT_FORMAT_CONTROL\x10\x0e*\xbd\x01\n" +
+	"\x11ImportedStageKind\x12#\n" +
+	"\x1fIMPORTED_STAGE_KIND_UNSPECIFIED\x10\x00\x12\x1d\n" +
+	"\x19IMPORTED_STAGE_KIND_BUILD\x10\x01\x12 \n" +
+	"\x1cIMPORTED_STAGE_KIND_ACCURACY\x10\x02\x12!\n" +
+	"\x1dIMPORTED_STAGE_KIND_BENCHMARK\x10\x03\x12\x1f\n" +
+	"\x1bIMPORTED_STAGE_KIND_PROFILE\x10\x04*\xa9\x01\n" +
+	"\x14ImportedStageOutcome\x12&\n" +
+	"\"IMPORTED_STAGE_OUTCOME_UNSPECIFIED\x10\x00\x12!\n" +
+	"\x1dIMPORTED_STAGE_OUTCOME_PASSED\x10\x01\x12!\n" +
+	"\x1dIMPORTED_STAGE_OUTCOME_FAILED\x10\x02\x12#\n" +
+	"\x1fIMPORTED_STAGE_OUTCOME_OBSERVED\x10\x03*\xc3\x01\n" +
+	"\x17ImportedEvidenceFailure\x12)\n" +
+	"%IMPORTED_EVIDENCE_FAILURE_UNSPECIFIED\x10\x00\x12&\n" +
+	"\"IMPORTED_EVIDENCE_FAILURE_WORKLOAD\x10\x01\x12,\n" +
+	"(IMPORTED_EVIDENCE_FAILURE_INFRASTRUCTURE\x10\x02\x12'\n" +
+	"#IMPORTED_EVIDENCE_FAILURE_AMBIGUOUS\x10\x03*\xd0\x01\n" +
+	"\x16ImportedGuidanceTarget\x12(\n" +
+	"$IMPORTED_GUIDANCE_TARGET_UNSPECIFIED\x10\x00\x12 \n" +
+	"\x1cIMPORTED_GUIDANCE_TARGET_RUN\x10\x01\x12!\n" +
+	"\x1dIMPORTED_GUIDANCE_TARGET_ROLE\x10\x02\x12$\n" +
+	" IMPORTED_GUIDANCE_TARGET_ATTEMPT\x10\x03\x12!\n" +
+	"\x1dIMPORTED_GUIDANCE_TARGET_ITEM\x10\x04B?Z=github.com/uw-syfi/vibesys/gateway/gen/vibesys/core/v1;corev1b\x06proto3"
 
 var (
 	file_vibesys_core_v1_imported_facts_proto_rawDescOnce sync.Once
@@ -1704,74 +1945,84 @@ func file_vibesys_core_v1_imported_facts_proto_rawDescGZIP() []byte {
 	return file_vibesys_core_v1_imported_facts_proto_rawDescData
 }
 
-var file_vibesys_core_v1_imported_facts_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
+var file_vibesys_core_v1_imported_facts_proto_enumTypes = make([]protoimpl.EnumInfo, 5)
 var file_vibesys_core_v1_imported_facts_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
 var file_vibesys_core_v1_imported_facts_proto_goTypes = []any{
 	(ImportFormat)(0),                  // 0: vibesys.core.v1.ImportFormat
-	(*ImportedFrom)(nil),               // 1: vibesys.core.v1.ImportedFrom
-	(*ImportedContent)(nil),            // 2: vibesys.core.v1.ImportedContent
-	(*ImportedInput)(nil),              // 3: vibesys.core.v1.ImportedInput
-	(*ImportedTask)(nil),               // 4: vibesys.core.v1.ImportedTask
-	(*ImportedCandidate)(nil),          // 5: vibesys.core.v1.ImportedCandidate
-	(*ImportedMeasurement)(nil),        // 6: vibesys.core.v1.ImportedMeasurement
-	(*ImportedStageEvidence)(nil),      // 7: vibesys.core.v1.ImportedStageEvidence
-	(*ImportedEvidenceArtifact)(nil),   // 8: vibesys.core.v1.ImportedEvidenceArtifact
-	(*ImportedPartialMeasurement)(nil), // 9: vibesys.core.v1.ImportedPartialMeasurement
-	(*ImportedGuidance)(nil),           // 10: vibesys.core.v1.ImportedGuidance
-	(*ImportedUsage)(nil),              // 11: vibesys.core.v1.ImportedUsage
-	(*ImportedExternalIdentity)(nil),   // 12: vibesys.core.v1.ImportedExternalIdentity
-	(*ImportedFact)(nil),               // 13: vibesys.core.v1.ImportedFact
-	(*ImportedRunFacts)(nil),           // 14: vibesys.core.v1.ImportedRunFacts
-	(*PureOption)(nil),                 // 15: vibesys.core.v1.PureOption
-	(*ArtifactRef)(nil),                // 16: vibesys.core.v1.ArtifactRef
-	(*TaskStage)(nil),                  // 17: vibesys.core.v1.TaskStage
-	(EvidenceKind)(0),                  // 18: vibesys.core.v1.EvidenceKind
-	(*TaskObjective)(nil),              // 19: vibesys.core.v1.TaskObjective
-	(*RevisionRef)(nil),                // 20: vibesys.core.v1.RevisionRef
-	(*EvidenceRef)(nil),                // 21: vibesys.core.v1.EvidenceRef
-	(*Sample)(nil),                     // 22: vibesys.core.v1.Sample
-	(*Reading)(nil),                    // 23: vibesys.core.v1.Reading
-	(*InputTarget)(nil),                // 24: vibesys.core.v1.InputTarget
-	(InputMode)(0),                     // 25: vibesys.core.v1.InputMode
+	(ImportedStageKind)(0),             // 1: vibesys.core.v1.ImportedStageKind
+	(ImportedStageOutcome)(0),          // 2: vibesys.core.v1.ImportedStageOutcome
+	(ImportedEvidenceFailure)(0),       // 3: vibesys.core.v1.ImportedEvidenceFailure
+	(ImportedGuidanceTarget)(0),        // 4: vibesys.core.v1.ImportedGuidanceTarget
+	(*ImportedFrom)(nil),               // 5: vibesys.core.v1.ImportedFrom
+	(*ImportedContent)(nil),            // 6: vibesys.core.v1.ImportedContent
+	(*ImportedInput)(nil),              // 7: vibesys.core.v1.ImportedInput
+	(*ImportedTask)(nil),               // 8: vibesys.core.v1.ImportedTask
+	(*ImportedCandidate)(nil),          // 9: vibesys.core.v1.ImportedCandidate
+	(*ImportedMeasurement)(nil),        // 10: vibesys.core.v1.ImportedMeasurement
+	(*ImportedStageEvidence)(nil),      // 11: vibesys.core.v1.ImportedStageEvidence
+	(*ImportedEvidenceArtifact)(nil),   // 12: vibesys.core.v1.ImportedEvidenceArtifact
+	(*ImportedPartialMeasurement)(nil), // 13: vibesys.core.v1.ImportedPartialMeasurement
+	(*ImportedGuidance)(nil),           // 14: vibesys.core.v1.ImportedGuidance
+	(*ImportedUsage)(nil),              // 15: vibesys.core.v1.ImportedUsage
+	(*ImportedExternalIdentity)(nil),   // 16: vibesys.core.v1.ImportedExternalIdentity
+	(*ImportedFact)(nil),               // 17: vibesys.core.v1.ImportedFact
+	(*ImportedRunFacts)(nil),           // 18: vibesys.core.v1.ImportedRunFacts
+	(*PureOption)(nil),                 // 19: vibesys.core.v1.PureOption
+	(*ArtifactRef)(nil),                // 20: vibesys.core.v1.ArtifactRef
+	(*TaskStage)(nil),                  // 21: vibesys.core.v1.TaskStage
+	(EvidenceKind)(0),                  // 22: vibesys.core.v1.EvidenceKind
+	(*TaskObjective)(nil),              // 23: vibesys.core.v1.TaskObjective
+	(*RevisionRef)(nil),                // 24: vibesys.core.v1.RevisionRef
+	(*EvidenceRef)(nil),                // 25: vibesys.core.v1.EvidenceRef
+	(*Sample)(nil),                     // 26: vibesys.core.v1.Sample
+	(*Reading)(nil),                    // 27: vibesys.core.v1.Reading
+	(EvidencePurpose)(0),               // 28: vibesys.core.v1.EvidencePurpose
+	(*InputTarget)(nil),                // 29: vibesys.core.v1.InputTarget
+	(InputMode)(0),                     // 30: vibesys.core.v1.InputMode
 }
 var file_vibesys_core_v1_imported_facts_proto_depIdxs = []int32{
 	0,  // 0: vibesys.core.v1.ImportedFrom.format:type_name -> vibesys.core.v1.ImportFormat
-	2,  // 1: vibesys.core.v1.ImportedInput.config:type_name -> vibesys.core.v1.ImportedContent
-	15, // 2: vibesys.core.v1.ImportedInput.options:type_name -> vibesys.core.v1.PureOption
-	15, // 3: vibesys.core.v1.ImportedInput.constraints:type_name -> vibesys.core.v1.PureOption
-	4,  // 4: vibesys.core.v1.ImportedInput.task:type_name -> vibesys.core.v1.ImportedTask
-	16, // 5: vibesys.core.v1.ImportedTask.recipe:type_name -> vibesys.core.v1.ArtifactRef
-	17, // 6: vibesys.core.v1.ImportedTask.stages:type_name -> vibesys.core.v1.TaskStage
-	18, // 7: vibesys.core.v1.ImportedTask.accuracy_gated:type_name -> vibesys.core.v1.EvidenceKind
-	19, // 8: vibesys.core.v1.ImportedTask.objectives:type_name -> vibesys.core.v1.TaskObjective
-	20, // 9: vibesys.core.v1.ImportedCandidate.revision:type_name -> vibesys.core.v1.RevisionRef
-	16, // 10: vibesys.core.v1.ImportedCandidate.artifacts:type_name -> vibesys.core.v1.ArtifactRef
-	21, // 11: vibesys.core.v1.ImportedMeasurement.evidence:type_name -> vibesys.core.v1.EvidenceRef
-	22, // 12: vibesys.core.v1.ImportedMeasurement.sample:type_name -> vibesys.core.v1.Sample
-	23, // 13: vibesys.core.v1.ImportedMeasurement.historical_reading:type_name -> vibesys.core.v1.Reading
-	7,  // 14: vibesys.core.v1.ImportedMeasurement.stage_evidence:type_name -> vibesys.core.v1.ImportedStageEvidence
-	23, // 15: vibesys.core.v1.ImportedStageEvidence.readings:type_name -> vibesys.core.v1.Reading
-	8,  // 16: vibesys.core.v1.ImportedStageEvidence.artifacts:type_name -> vibesys.core.v1.ImportedEvidenceArtifact
-	9,  // 17: vibesys.core.v1.ImportedStageEvidence.partial:type_name -> vibesys.core.v1.ImportedPartialMeasurement
-	23, // 18: vibesys.core.v1.ImportedPartialMeasurement.reading:type_name -> vibesys.core.v1.Reading
-	16, // 19: vibesys.core.v1.ImportedGuidance.artifact:type_name -> vibesys.core.v1.ArtifactRef
-	24, // 20: vibesys.core.v1.ImportedGuidance.target:type_name -> vibesys.core.v1.InputTarget
-	25, // 21: vibesys.core.v1.ImportedGuidance.mode:type_name -> vibesys.core.v1.InputMode
-	1,  // 22: vibesys.core.v1.ImportedFact.imported_from:type_name -> vibesys.core.v1.ImportedFrom
-	3,  // 23: vibesys.core.v1.ImportedFact.input:type_name -> vibesys.core.v1.ImportedInput
-	5,  // 24: vibesys.core.v1.ImportedFact.candidate:type_name -> vibesys.core.v1.ImportedCandidate
-	6,  // 25: vibesys.core.v1.ImportedFact.measurement:type_name -> vibesys.core.v1.ImportedMeasurement
-	10, // 26: vibesys.core.v1.ImportedFact.guidance:type_name -> vibesys.core.v1.ImportedGuidance
-	11, // 27: vibesys.core.v1.ImportedFact.usage:type_name -> vibesys.core.v1.ImportedUsage
-	12, // 28: vibesys.core.v1.ImportedFact.external_identity:type_name -> vibesys.core.v1.ImportedExternalIdentity
-	2,  // 29: vibesys.core.v1.ImportedFact.content:type_name -> vibesys.core.v1.ImportedContent
-	16, // 30: vibesys.core.v1.ImportedFact.content_reference:type_name -> vibesys.core.v1.ArtifactRef
-	13, // 31: vibesys.core.v1.ImportedRunFacts.facts:type_name -> vibesys.core.v1.ImportedFact
-	32, // [32:32] is the sub-list for method output_type
-	32, // [32:32] is the sub-list for method input_type
-	32, // [32:32] is the sub-list for extension type_name
-	32, // [32:32] is the sub-list for extension extendee
-	0,  // [0:32] is the sub-list for field type_name
+	6,  // 1: vibesys.core.v1.ImportedInput.config:type_name -> vibesys.core.v1.ImportedContent
+	19, // 2: vibesys.core.v1.ImportedInput.options:type_name -> vibesys.core.v1.PureOption
+	19, // 3: vibesys.core.v1.ImportedInput.constraints:type_name -> vibesys.core.v1.PureOption
+	8,  // 4: vibesys.core.v1.ImportedInput.task:type_name -> vibesys.core.v1.ImportedTask
+	20, // 5: vibesys.core.v1.ImportedTask.recipe:type_name -> vibesys.core.v1.ArtifactRef
+	21, // 6: vibesys.core.v1.ImportedTask.stages:type_name -> vibesys.core.v1.TaskStage
+	22, // 7: vibesys.core.v1.ImportedTask.accuracy_gated:type_name -> vibesys.core.v1.EvidenceKind
+	23, // 8: vibesys.core.v1.ImportedTask.objectives:type_name -> vibesys.core.v1.TaskObjective
+	24, // 9: vibesys.core.v1.ImportedCandidate.revision:type_name -> vibesys.core.v1.RevisionRef
+	20, // 10: vibesys.core.v1.ImportedCandidate.artifacts:type_name -> vibesys.core.v1.ArtifactRef
+	25, // 11: vibesys.core.v1.ImportedMeasurement.evidence:type_name -> vibesys.core.v1.EvidenceRef
+	26, // 12: vibesys.core.v1.ImportedMeasurement.sample:type_name -> vibesys.core.v1.Sample
+	27, // 13: vibesys.core.v1.ImportedMeasurement.historical_reading:type_name -> vibesys.core.v1.Reading
+	11, // 14: vibesys.core.v1.ImportedMeasurement.stage_evidence:type_name -> vibesys.core.v1.ImportedStageEvidence
+	1,  // 15: vibesys.core.v1.ImportedStageEvidence.kind:type_name -> vibesys.core.v1.ImportedStageKind
+	28, // 16: vibesys.core.v1.ImportedStageEvidence.purpose:type_name -> vibesys.core.v1.EvidencePurpose
+	2,  // 17: vibesys.core.v1.ImportedStageEvidence.outcome:type_name -> vibesys.core.v1.ImportedStageOutcome
+	27, // 18: vibesys.core.v1.ImportedStageEvidence.readings:type_name -> vibesys.core.v1.Reading
+	12, // 19: vibesys.core.v1.ImportedStageEvidence.artifacts:type_name -> vibesys.core.v1.ImportedEvidenceArtifact
+	13, // 20: vibesys.core.v1.ImportedStageEvidence.partial:type_name -> vibesys.core.v1.ImportedPartialMeasurement
+	3,  // 21: vibesys.core.v1.ImportedStageEvidence.failure_kind:type_name -> vibesys.core.v1.ImportedEvidenceFailure
+	27, // 22: vibesys.core.v1.ImportedPartialMeasurement.reading:type_name -> vibesys.core.v1.Reading
+	20, // 23: vibesys.core.v1.ImportedGuidance.artifact:type_name -> vibesys.core.v1.ArtifactRef
+	29, // 24: vibesys.core.v1.ImportedGuidance.target:type_name -> vibesys.core.v1.InputTarget
+	30, // 25: vibesys.core.v1.ImportedGuidance.mode:type_name -> vibesys.core.v1.InputMode
+	4,  // 26: vibesys.core.v1.ImportedGuidance.historical_target_kind:type_name -> vibesys.core.v1.ImportedGuidanceTarget
+	5,  // 27: vibesys.core.v1.ImportedFact.imported_from:type_name -> vibesys.core.v1.ImportedFrom
+	7,  // 28: vibesys.core.v1.ImportedFact.input:type_name -> vibesys.core.v1.ImportedInput
+	9,  // 29: vibesys.core.v1.ImportedFact.candidate:type_name -> vibesys.core.v1.ImportedCandidate
+	10, // 30: vibesys.core.v1.ImportedFact.measurement:type_name -> vibesys.core.v1.ImportedMeasurement
+	14, // 31: vibesys.core.v1.ImportedFact.guidance:type_name -> vibesys.core.v1.ImportedGuidance
+	15, // 32: vibesys.core.v1.ImportedFact.usage:type_name -> vibesys.core.v1.ImportedUsage
+	16, // 33: vibesys.core.v1.ImportedFact.external_identity:type_name -> vibesys.core.v1.ImportedExternalIdentity
+	6,  // 34: vibesys.core.v1.ImportedFact.content:type_name -> vibesys.core.v1.ImportedContent
+	20, // 35: vibesys.core.v1.ImportedFact.content_reference:type_name -> vibesys.core.v1.ArtifactRef
+	17, // 36: vibesys.core.v1.ImportedRunFacts.facts:type_name -> vibesys.core.v1.ImportedFact
+	37, // [37:37] is the sub-list for method output_type
+	37, // [37:37] is the sub-list for method input_type
+	37, // [37:37] is the sub-list for extension type_name
+	37, // [37:37] is the sub-list for extension extendee
+	0,  // [0:37] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_core_v1_imported_facts_proto_init() }
@@ -1812,7 +2063,7 @@ func file_vibesys_core_v1_imported_facts_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_vibesys_core_v1_imported_facts_proto_rawDesc), len(file_vibesys_core_v1_imported_facts_proto_rawDesc)),
-			NumEnums:      1,
+			NumEnums:      5,
 			NumMessages:   14,
 			NumExtensions: 0,
 			NumServices:   0,

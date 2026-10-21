@@ -28,7 +28,7 @@ def import_control(source: ImportSource, registry: OperationRegistry, facts: Fac
             pb.ImportedGuidance(
                 identity=request.control_id,
                 text=request.text,
-                historical_target_kind=request.target.kind.value,
+                historical_target_kind=pb.ImportedGuidanceTarget[request.target.kind.name],
                 historical_target_id=request.target.id,
                 mode={
                     "next_turn": core_common.InputMode.NEXT_TURN,
