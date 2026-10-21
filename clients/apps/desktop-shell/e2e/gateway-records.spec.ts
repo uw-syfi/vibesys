@@ -97,7 +97,7 @@ test('the host switch survives missing legacy history and usage retains its mode
   await page.getByRole('radio', {name: 'Usage', exact: true}).click();
   await page.getByRole('radio', {name: 'Model', exact: true}).click();
   await page.getByRole('radio', {name: 'Tokens', exact: true}).click();
-  await expect(page.getByText('gpt-5-codex', {exact: true}).last()).toBeVisible();
+  await expect(page.getByText('model-a', {exact: true}).last()).toBeVisible();
   await expect(page.getByText(/turns have no end time/)).toHaveCount(0);
   await settled(page);
   expect(await screenCheck(page)).toEqual([]);

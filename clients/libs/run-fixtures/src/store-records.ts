@@ -125,7 +125,7 @@ function turnBody(index: number, seed: number, id: string, startedAt: number): B
               role: 'implementer',
               stage: 'implement',
               provider: 'codex',
-              model: 'gpt-5-codex',
+              model: 'model-a',
               startedAt: {seconds: 1700000000n + BigInt(startedAt + 1)},
               endedAt: {seconds: 1700000000n + BigInt(startedAt + 2)},
               usage: {input: BigInt(10 + seed), output: BigInt(5 + index)},
