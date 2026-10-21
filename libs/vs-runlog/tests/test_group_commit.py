@@ -269,3 +269,17 @@ def test_checkpoint_failure_keeps_old_head_until_recovery(tmp_path: Path) -> Non
         assert Keyframe.from_binary(checkpoint.read_bytes()) == fold_skeleton(
             expected, log_offset=path.stat().st_size
         )
+
+
+def test_close_checkpoints_an_already_committed_epoch(tmp_path: Path) -> None:
+    path = tmp_path / "run.log"
+    writer = FileRunLogWriter(path, clock=ManualClock(), threads=SimThreads())
+    expected = [*initial_records(), event(3)]
+    for record in expected:
+        writer.append(record)
+    writer.commit()
+    assert not (tmp_path / "keyframes/3.pb").exists()
+    writer.close()
+    assert Keyframe.from_binary((tmp_path / "keyframes/3.pb").read_bytes()) == fold_skeleton(
+        expected, log_offset=path.stat().st_size
+    )

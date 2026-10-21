@@ -209,6 +209,8 @@ class FileRunLogWriter:
     def _commit(self, *, checkpoint: bool = False) -> None:
         self._cancel_commit()
         if self.sequence == self._committed_seq:
+            if checkpoint and self.sequence > self._checkpoint_seq:
+                self._publish_keyframe()
             return
         os.fsync(self._stream.fileno())
         if checkpoint or self.sequence - self._checkpoint_seq >= CHECKPOINT_RECORDS:
@@ -280,7 +282,7 @@ class FileRunLogWriter:
                 self._close.run(self._resources.close)
                 return
             try:
-                self._commit()
+                self._commit(checkpoint=True)
             finally:
                 self._cancel_commit()
                 self._close.run(self._resources.close)

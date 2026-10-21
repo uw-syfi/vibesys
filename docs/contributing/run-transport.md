@@ -103,7 +103,7 @@ end not represented by a lifecycle record. `LegacyRunLogTee.commit()` forwards t
 boundary. The tee takes ownership of a configured `FileRunLogWriter`, so the
 live journal can supply its run's clock, loop and locks even when preparation
 runs off-loop. Synchronous offline producers have no event loop and must commit
-explicitly or close; close commits the final suffix. Keyframes are written only
+explicitly or close; close commits the final suffix and checkpoints the epoch. Keyframes are written only
 at commit time, at lifecycle/epoch boundaries or when the committed batch crosses
 the record-count checkpoint threshold. Legacy-only logs still have no native
 headline and retain their existing unfenced gateway compatibility path. The
