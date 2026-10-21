@@ -2196,16 +2196,6 @@
       "title": "EventsQuery",
       "type": "object"
     },
-    "EvidenceKind": {
-      "description": "Closed measurement kinds used for eligibility requirements.",
-      "enum": [
-        "correctness",
-        "benchmark",
-        "profiling"
-      ],
-      "title": "EvidenceKind",
-      "type": "string"
-    },
     "EvolveSpanAttributes": {
       "additionalProperties": false,
       "properties": {
@@ -2439,7 +2429,12 @@
       "description": "The trusted check that rejected a candidate, and how far it came when it reported that.\n\n``completed`` of ``required`` ``unit`` (``93`` of ``100`` ``trials``) is what the check's\nevaluator reported it got through; each is None when it reported no progress.",
       "properties": {
         "check": {
-          "$ref": "#/$defs/EvidenceKind"
+          "enum": [
+            "correctness",
+            "benchmark"
+          ],
+          "title": "Check",
+          "type": "string"
         },
         "completed": {
           "anyOf": [
