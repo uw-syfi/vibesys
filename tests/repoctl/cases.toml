@@ -25,7 +25,7 @@ jobs = ["clients"]
 [cases.collections]
 native_languages = []
 native_targets = []
-pnpm_packages = ["@vibesys/app-desktop-main", "@vibesys/app-desktop-shell", "@vibesys/app-ui-gallery", "@vibesys/feature-new-run", "@vibesys/feature-run-chat", "@vibesys/feature-run-page", "@vibesys/feature-usage", "@vibesys/run-fixtures", "@vibesys/run-session", "@vibesys/run-state"]
+pnpm_packages = ["@vibesys/app-desktop-main", "@vibesys/app-desktop-shell", "@vibesys/app-ui-gallery", "@vibesys/feature-gateway-records", "@vibesys/feature-new-run", "@vibesys/feature-run-chat", "@vibesys/feature-run-page", "@vibesys/feature-usage", "@vibesys/run-fixtures", "@vibesys/run-session", "@vibesys/run-state"]
 
 [[cases]]
 name = "evaluator SDK changes reach consumers"
@@ -61,7 +61,7 @@ native_targets = [
   "resources/evaluators/unordered-map/native_runner",
   "sdk/vs-evaluator/vseval",
 ]
-pnpm_packages = ["@vibesys/app-desktop-main", "@vibesys/app-desktop-shell", "@vibesys/app-ui-gallery", "@vibesys/connection", "@vibesys/contracts", "@vibesys/feature-app-shell", "@vibesys/feature-hosts", "@vibesys/feature-machines", "@vibesys/feature-new-run", "@vibesys/feature-run-chat", "@vibesys/feature-run-control", "@vibesys/feature-run-page", "@vibesys/feature-runs-dashboard", "@vibesys/feature-settings", "@vibesys/feature-usage", "@vibesys/hosts", "@vibesys/ipc", "@vibesys/logs", "@vibesys/machine", "@vibesys/proto", "@vibesys/run-fixtures", "@vibesys/run-history", "@vibesys/run-session", "@vibesys/run-state", "@vibesys/runs", "@vibesys/settings", "@vibesys/store", "@vibesys/transport", "@vibesys/ui"]
+pnpm_packages = ["@vibesys/app-desktop-main", "@vibesys/app-desktop-shell", "@vibesys/app-ui-gallery", "@vibesys/connection", "@vibesys/contracts", "@vibesys/feature-app-shell", "@vibesys/feature-gateway-records", "@vibesys/feature-hosts", "@vibesys/feature-machines", "@vibesys/feature-new-run", "@vibesys/feature-run-chat", "@vibesys/feature-run-control", "@vibesys/feature-run-page", "@vibesys/feature-runs-dashboard", "@vibesys/feature-settings", "@vibesys/feature-usage", "@vibesys/hosts", "@vibesys/ipc", "@vibesys/logs", "@vibesys/machine", "@vibesys/proto", "@vibesys/run-fixtures", "@vibesys/run-history", "@vibesys/run-session", "@vibesys/run-state", "@vibesys/runs", "@vibesys/settings", "@vibesys/store", "@vibesys/transport", "@vibesys/ui"]
 
 [[cases]]
 name = "Stitch plugin changes run the Stitch workspace checks"
@@ -160,7 +160,7 @@ jobs = ["clients", "proto"]
 [cases.collections]
 native_languages = []
 native_targets = []
-pnpm_packages = ["@vibesys/proto"]
+pnpm_packages = ["@vibesys/app-desktop-main", "@vibesys/app-desktop-shell", "@vibesys/app-ui-gallery", "@vibesys/connection", "@vibesys/feature-gateway-records", "@vibesys/feature-hosts", "@vibesys/feature-machines", "@vibesys/feature-new-run", "@vibesys/feature-run-chat", "@vibesys/feature-run-control", "@vibesys/feature-run-page", "@vibesys/feature-usage", "@vibesys/proto", "@vibesys/run-fixtures", "@vibesys/run-session", "@vibesys/run-state"]
 
 [[cases]]
 name = "Go gateway changes select the gateway checks"
