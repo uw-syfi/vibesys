@@ -170,3 +170,21 @@ jobs = ["gateway"]
 native_languages = []
 native_targets = []
 pnpm_packages = []
+
+[[cases]]
+name = "typed journal projection selects Python checks"
+paths = ["src/vibesys/records/api.py"]
+jobs = ["python"]
+[cases.collections]
+native_languages = []
+native_targets = []
+pnpm_packages = []
+
+[[cases]]
+name = "typed journal tee selects Python checks"
+paths = ["src/vibesys/run/runlog_tee.py"]
+jobs = ["python", "real_tiers"]
+[cases.collections]
+native_languages = []
+native_targets = []
+pnpm_packages = []
