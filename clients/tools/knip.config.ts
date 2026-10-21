@@ -104,7 +104,8 @@ for (const {name, directory, manifest} of layout.packages) {
 
 const config: KnipConfig = {
   // The protocol generator calls an external Python tool.
-  ignoreBinaries: ['uv'],
+  // Go is a system build tool, like uv; gateway builds report its absence explicitly.
+  ignoreBinaries: ['uv', 'go'],
   workspaces,
 };
 
