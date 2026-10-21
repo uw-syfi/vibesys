@@ -28,6 +28,7 @@ export function useRelaunch(props: {
   observation.current = props.observation;
   const enabled = props.observation !== undefined;
   useEffect(() => {
+    if (!enabled) return;
     const initial = observation.current;
     if (!initial) return;
     const actor = relaunchActor({
@@ -45,7 +46,7 @@ export function useRelaunch(props: {
       subscription.unsubscribe();
       actor.stop();
     };
-  }, [props.bridge, props.host, props.projectRoot, props.runId, props.schedule]);
+  }, [props.bridge, props.host, props.projectRoot, props.runId, props.schedule, enabled]);
   useEffect(() => {
     if (props.observation) current.current?.send({type: 'observe', observation: props.observation});
   }, [props.observation]);

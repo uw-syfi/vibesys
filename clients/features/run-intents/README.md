@@ -24,17 +24,10 @@ local-run guard, and ended-run rules. Retrying after an uncertain result sends
 the identical request id and payload. A successful HostCall means durable
 admission; the UI stays pending until an IntentState record says applied or
 refused. A reader that has not declared the ordered inbox format is shown with
-a posting-order warning, as the legacy CLI does. The feature follows Tail for those outcomes without changing the
-skeleton projection.
+a posting-order warning, as the legacy CLI does. The feature follows Tail for those outcomes without
+changing the skeleton projection.
 
-## Current limits
-
-Chat-message requests are absent.
-The journal's [control projection](../../../src/vibesys/records/_control.py)
-produces IntentState for steer and guidance delivery events. Lifecycle controls
-publish lifecycle records without request ids, so those requests stay pending
-unless the run emits a matching IntentState. The consumer handles an outcome
-even when it arrives before the admission response.
+## Relaunch
 
 Relaunch shares the header action row and result status line. The shell passes
 the latest epoch and that epoch's lifecycle as the optional `relaunch`
@@ -52,3 +45,10 @@ The app has no safe checkout update operation. Update the host checkout
 before relaunching; the new epoch records its tree hash and dirty flag.
 The gateway requires the checkout's synchronized `.venv/bin/vibesys`; an
 absent executable returns the checkout-missing refusal.
+
+## Current limits
+
+Chat-message requests are absent. The journal's [control projection](../../../src/vibesys/records/_control.py)
+produces IntentState from recorded intent outcomes. A lifecycle record without
+a matching request id does not complete a pending request. The consumer handles
+an outcome even when it arrives before the admission response.
