@@ -344,7 +344,8 @@ PURE_EXPORTS = {
         }
     ),
     "pydantic.fields": frozenset({"FieldInfo"}),
-    "pydantic.dataclasses": frozenset({"dataclass"}),
+    # Class introspection and forward-schema compilation are deterministic and perform no I/O.
+    "pydantic.dataclasses": frozenset({"dataclass", "is_pydantic_dataclass", "rebuild_dataclass"}),
     "pydantic.json_schema": frozenset({"GenerateJsonSchema", "JsonSchemaValue"}),
     "re": frozenset(
         {
