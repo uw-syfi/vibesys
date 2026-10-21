@@ -3,6 +3,7 @@ syntax = "proto3";
 package vibesys.store.v1;
 
 import "buf/validate/validate.proto";
+import "google/protobuf/any.proto";
 import "vibesys/store/v1/common.proto";
 
 option go_package = "github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1";
@@ -41,19 +42,6 @@ enum Outcome {
   OUTCOME_FAILED = 2;
   OUTCOME_STOPPED = 3;
   OUTCOME_INTERRUPTED = 4;
-}
-
-// Core's closed ending vocabulary. Human interruption text is a separate field.
-enum EndReason {
-  END_REASON_UNSPECIFIED = 0;
-  END_REASON_ADOPTED = 1;
-  END_REASON_KEPT_INPUT = 2;
-  END_REASON_NO_WINNER = 3;
-  END_REASON_ADOPTION_FAILED = 4;
-  END_REASON_STOPPED = 5;
-  END_REASON_DEADLINE = 6;
-  END_REASON_FAILED = 7;
-  END_REASON_FINISH_REFUSED = 8;
 }
 
 enum RunFailureKind {
@@ -156,17 +144,16 @@ message Ended {
     defined_only: true
     not_in: [0]
   }];
-  optional EndReason reason = 2 [(buf.validate.field).enum = {
-    defined_only: true
-    not_in: [0]
-  }];
+  reserved 2, 5;
+  reserved "reason", "uncompared";
   string summary = 3 [(buf.validate.field).string.max_bytes = 65536];
   bool resumable = 4;
-  bool uncompared = 5;
   optional RunFailure failure = 6;
   // POSIX signal number when the process caught its interruption.
   optional int32 signal = 7;
   optional string interruption_reason = 8 [(buf.validate.field).string.max_bytes = 65536];
+  // Strategy ending data, described by EpochStarted.descriptors.
+  optional google.protobuf.Any detail = 9;
 }
 
 message RunFailure {
@@ -175,13 +162,8 @@ message RunFailure {
     not_in: [0]
   }];
   string reason = 2 [(buf.validate.field).string.max_bytes = 65536];
-  uint32 workstreams_started = 3;
-  uint32 workstream_budget = 4;
-  uint32 candidates_kept = 5;
-  optional string adopted_candidate = 6 [(buf.validate.field).string = {
-    min_len: 1
-    max_bytes: 65536
-  }];
+  reserved 3 to 6;
+  reserved "workstreams_started", "workstream_budget", "candidates_kept", "adopted_candidate";
   optional string code = 7 [(buf.validate.field).string = {
     min_len: 1
     max_bytes: 65536
@@ -192,4 +174,6 @@ message RunFailure {
   }];
   optional string message = 9 [(buf.validate.field).string.max_bytes = 65536];
   optional int32 exit_code = 10;
+  // Failure-specific strategy data, described by EpochStarted.descriptors.
+  optional google.protobuf.Any detail = 11;
 }

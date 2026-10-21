@@ -9,19 +9,25 @@ from hypothesis import strategies as st
 from protobuf import DescFieldValueEnum, DescFieldValueScalar, Message, ScalarType
 from protobuf.wkt.google.protobuf.any_pb import Any as ProtoAny
 from protobuf.wkt.google.protobuf.descriptor_pb import FileDescriptorSet
-from scripts.generate_record_goldens import attrs_examples, generate, record_examples
+from scripts.generate_record_goldens import (
+    attrs_examples,
+    detail_examples,
+    generate,
+    record_examples,
+)
 
 import vs_proto.api as p
 
 _RECORDS = record_examples()
 _ATTRS = attrs_examples()
+_DETAILS = detail_examples()
 _ROOT = Path(__file__).resolve().parents[3]
 _TEXT = st.text(alphabet=st.characters(exclude_categories=("Cs",)), min_size=1, max_size=32)
 
 
 def walk(message: Message) -> Iterator[Message]:
     """Visit populated store messages through protobuf's public field interface."""
-    if message.desc().file.proto.package != "vibesys.store.v1":
+    if message.desc().file.proto.package not in {"vibesys.store.v1", "vibesys.search.v1"}:
         return
     yield message
     for field in message:
@@ -37,7 +43,7 @@ def walk(message: Message) -> Iterator[Message]:
 def message_examples() -> dict[str, Message]:
     examples = {
         message.desc().name: message
-        for root in [*_RECORDS.values(), *_ATTRS.values()]
+        for root in [*_RECORDS.values(), *_ATTRS.values(), *_DETAILS.values()]
         for message in walk(root)
     }
     examples["Failure"] = p.Failure(kind=p.SpanFailureKind.OUTCOME, message="Gate failed")
@@ -135,7 +141,7 @@ def test_corpus_covers_every_body_and_builtin_attrs_message() -> None:
         for name in p.__all__
         if isinstance(getattr(p, name), type)
         and issubclass(getattr(p, name), Message)
-        and getattr(p, name).desc().file.proto.package == "vibesys.store.v1"
+        and getattr(p, name).desc().file.proto.package in {"vibesys.store.v1", "vibesys.search.v1"}
     }
     assert set(_MESSAGES) == exported
     assert {type(attrs).desc().name for attrs in _ATTRS.values()} == {
@@ -626,3 +632,54 @@ def test_unknown_span_kind_is_descriptor_driven() -> None:
     span.label.attrs = ProtoAny(type_url="example.com/future.Generation", value=b"\x08\x01")
     p.validate(record)
     assert p.Record.from_binary(record.to_binary()) == record
+
+
+def test_store_schema_cannot_import_search_strategy_contracts() -> None:
+    for path in sorted((_ROOT / "proto/vibesys/store/v1").glob("*.proto")):
+        imports = [line.strip() for line in path.read_text().splitlines()]
+        assert not any(
+            line.startswith("import ") and '"vibesys/search/' in line for line in imports
+        ), f"{path.name}: store must carry search types through descriptor-backed Any"
+
+
+@pytest.mark.parametrize("name", _DETAILS)
+@given(suffix=_TEXT, factor=st.integers(min_value=1, max_value=1000))
+def test_search_detail_round_trips_without_a_store_dependency(
+    name: str, suffix: str, factor: int
+) -> None:
+    detail = varied(_DETAILS[name], suffix, factor)
+    p.validate(detail)
+    packed = ProtoAny(
+        type_url="type.googleapis.com/" + detail.desc().type_name, value=detail.to_binary()
+    )
+    decoded = type(detail).from_binary(ProtoAny.from_binary(packed.to_binary()).value)
+    p.validate(decoded)
+    assert decoded == detail
+
+
+def test_epoch_describes_every_search_detail_type() -> None:
+    body = _RECORDS["epoch_started"].body
+    assert body is not None
+    assert isinstance(body.value, p.EpochStarted)
+    descriptors = body.value.descriptors
+    assert descriptors is not None
+    described = {
+        f"{file.package}.{message.name}"
+        for file in descriptors.file
+        for message in file.message_type
+    }
+    assert {detail.desc().type_name for detail in _DETAILS.values()} <= described
+
+
+def test_core_run_contracts_contain_no_search_fields() -> None:
+    assert {field.name for field in p.RunFailure.desc().fields} == {
+        "kind",
+        "reason",
+        "code",
+        "stage",
+        "message",
+        "exit_code",
+        "detail",
+    }
+    assert "max_workstreams" not in {field.name for field in p.RunDescription.desc().fields}
+    assert not {"reason", "uncompared"} & {field.name for field in p.Ended.desc().fields}

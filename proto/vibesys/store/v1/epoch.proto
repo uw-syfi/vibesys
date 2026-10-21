@@ -3,6 +3,7 @@ syntax = "proto3";
 package vibesys.store.v1;
 
 import "buf/validate/validate.proto";
+import "google/protobuf/any.proto";
 import "vibesys/store/v1/common.proto";
 import "vibesys/store/v1/content.proto";
 
@@ -31,11 +32,14 @@ message RunDescription {
     max_bytes: 65536
   }];
   optional Evaluator evaluator = 6;
-  optional uint32 max_workstreams = 7;
+  reserved 7;
+  reserved "max_workstreams";
   repeated string expected_roles = 8 [(buf.validate.field).repeated.items.string = {
     min_len: 1
     max_bytes: 65536
   }];
+  // Strategy run configuration, described by EpochStarted.descriptors.
+  optional google.protobuf.Any detail = 9;
 }
 
 message Evaluator {

@@ -10,6 +10,7 @@ import (
 	_ "github.com/uw-syfi/vibesys/gateway/gen/buf/validate"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
+	anypb "google.golang.org/protobuf/types/known/anypb"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
@@ -283,74 +284,6 @@ func (Outcome) EnumDescriptor() ([]byte, []int) {
 	return file_vibesys_store_v1_lifecycle_proto_rawDescGZIP(), []int{4}
 }
 
-// Core's closed ending vocabulary. Human interruption text is a separate field.
-type EndReason int32
-
-const (
-	EndReason_END_REASON_UNSPECIFIED     EndReason = 0
-	EndReason_END_REASON_ADOPTED         EndReason = 1
-	EndReason_END_REASON_KEPT_INPUT      EndReason = 2
-	EndReason_END_REASON_NO_WINNER       EndReason = 3
-	EndReason_END_REASON_ADOPTION_FAILED EndReason = 4
-	EndReason_END_REASON_STOPPED         EndReason = 5
-	EndReason_END_REASON_DEADLINE        EndReason = 6
-	EndReason_END_REASON_FAILED          EndReason = 7
-	EndReason_END_REASON_FINISH_REFUSED  EndReason = 8
-)
-
-// Enum value maps for EndReason.
-var (
-	EndReason_name = map[int32]string{
-		0: "END_REASON_UNSPECIFIED",
-		1: "END_REASON_ADOPTED",
-		2: "END_REASON_KEPT_INPUT",
-		3: "END_REASON_NO_WINNER",
-		4: "END_REASON_ADOPTION_FAILED",
-		5: "END_REASON_STOPPED",
-		6: "END_REASON_DEADLINE",
-		7: "END_REASON_FAILED",
-		8: "END_REASON_FINISH_REFUSED",
-	}
-	EndReason_value = map[string]int32{
-		"END_REASON_UNSPECIFIED":     0,
-		"END_REASON_ADOPTED":         1,
-		"END_REASON_KEPT_INPUT":      2,
-		"END_REASON_NO_WINNER":       3,
-		"END_REASON_ADOPTION_FAILED": 4,
-		"END_REASON_STOPPED":         5,
-		"END_REASON_DEADLINE":        6,
-		"END_REASON_FAILED":          7,
-		"END_REASON_FINISH_REFUSED":  8,
-	}
-)
-
-func (x EndReason) Enum() *EndReason {
-	p := new(EndReason)
-	*p = x
-	return p
-}
-
-func (x EndReason) String() string {
-	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
-}
-
-func (EndReason) Descriptor() protoreflect.EnumDescriptor {
-	return file_vibesys_store_v1_lifecycle_proto_enumTypes[5].Descriptor()
-}
-
-func (EndReason) Type() protoreflect.EnumType {
-	return &file_vibesys_store_v1_lifecycle_proto_enumTypes[5]
-}
-
-func (x EndReason) Number() protoreflect.EnumNumber {
-	return protoreflect.EnumNumber(x)
-}
-
-// Deprecated: Use EndReason.Descriptor instead.
-func (EndReason) EnumDescriptor() ([]byte, []int) {
-	return file_vibesys_store_v1_lifecycle_proto_rawDescGZIP(), []int{5}
-}
-
 type RunFailureKind int32
 
 const (
@@ -393,11 +326,11 @@ func (x RunFailureKind) String() string {
 }
 
 func (RunFailureKind) Descriptor() protoreflect.EnumDescriptor {
-	return file_vibesys_store_v1_lifecycle_proto_enumTypes[6].Descriptor()
+	return file_vibesys_store_v1_lifecycle_proto_enumTypes[5].Descriptor()
 }
 
 func (RunFailureKind) Type() protoreflect.EnumType {
-	return &file_vibesys_store_v1_lifecycle_proto_enumTypes[6]
+	return &file_vibesys_store_v1_lifecycle_proto_enumTypes[5]
 }
 
 func (x RunFailureKind) Number() protoreflect.EnumNumber {
@@ -406,7 +339,7 @@ func (x RunFailureKind) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use RunFailureKind.Descriptor instead.
 func (RunFailureKind) EnumDescriptor() ([]byte, []int) {
-	return file_vibesys_store_v1_lifecycle_proto_rawDescGZIP(), []int{6}
+	return file_vibesys_store_v1_lifecycle_proto_rawDescGZIP(), []int{5}
 }
 
 // Starting, running with an optional hold, draining, parked, or ended.
@@ -859,18 +792,18 @@ func (x *Draining) GetGoal() DrainGoal {
 }
 
 type Ended struct {
-	state      protoimpl.MessageState `protogen:"open.v1"`
-	Outcome    Outcome                `protobuf:"varint,1,opt,name=outcome,proto3,enum=vibesys.store.v1.Outcome" json:"outcome,omitempty"`
-	Reason     *EndReason             `protobuf:"varint,2,opt,name=reason,proto3,enum=vibesys.store.v1.EndReason,oneof" json:"reason,omitempty"`
-	Summary    string                 `protobuf:"bytes,3,opt,name=summary,proto3" json:"summary,omitempty"`
-	Resumable  bool                   `protobuf:"varint,4,opt,name=resumable,proto3" json:"resumable,omitempty"`
-	Uncompared bool                   `protobuf:"varint,5,opt,name=uncompared,proto3" json:"uncompared,omitempty"`
-	Failure    *RunFailure            `protobuf:"bytes,6,opt,name=failure,proto3,oneof" json:"failure,omitempty"`
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	Outcome   Outcome                `protobuf:"varint,1,opt,name=outcome,proto3,enum=vibesys.store.v1.Outcome" json:"outcome,omitempty"`
+	Summary   string                 `protobuf:"bytes,3,opt,name=summary,proto3" json:"summary,omitempty"`
+	Resumable bool                   `protobuf:"varint,4,opt,name=resumable,proto3" json:"resumable,omitempty"`
+	Failure   *RunFailure            `protobuf:"bytes,6,opt,name=failure,proto3,oneof" json:"failure,omitempty"`
 	// POSIX signal number when the process caught its interruption.
 	Signal             *int32  `protobuf:"varint,7,opt,name=signal,proto3,oneof" json:"signal,omitempty"`
 	InterruptionReason *string `protobuf:"bytes,8,opt,name=interruption_reason,json=interruptionReason,proto3,oneof" json:"interruption_reason,omitempty"`
-	unknownFields      protoimpl.UnknownFields
-	sizeCache          protoimpl.SizeCache
+	// Strategy ending data, described by EpochStarted.descriptors.
+	Detail        *anypb.Any `protobuf:"bytes,9,opt,name=detail,proto3,oneof" json:"detail,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Ended) Reset() {
@@ -910,13 +843,6 @@ func (x *Ended) GetOutcome() Outcome {
 	return Outcome_OUTCOME_UNSPECIFIED
 }
 
-func (x *Ended) GetReason() EndReason {
-	if x != nil && x.Reason != nil {
-		return *x.Reason
-	}
-	return EndReason_END_REASON_UNSPECIFIED
-}
-
 func (x *Ended) GetSummary() string {
 	if x != nil {
 		return x.Summary
@@ -927,13 +853,6 @@ func (x *Ended) GetSummary() string {
 func (x *Ended) GetResumable() bool {
 	if x != nil {
 		return x.Resumable
-	}
-	return false
-}
-
-func (x *Ended) GetUncompared() bool {
-	if x != nil {
-		return x.Uncompared
 	}
 	return false
 }
@@ -959,20 +878,25 @@ func (x *Ended) GetInterruptionReason() string {
 	return ""
 }
 
+func (x *Ended) GetDetail() *anypb.Any {
+	if x != nil {
+		return x.Detail
+	}
+	return nil
+}
+
 type RunFailure struct {
-	state              protoimpl.MessageState `protogen:"open.v1"`
-	Kind               RunFailureKind         `protobuf:"varint,1,opt,name=kind,proto3,enum=vibesys.store.v1.RunFailureKind" json:"kind,omitempty"`
-	Reason             string                 `protobuf:"bytes,2,opt,name=reason,proto3" json:"reason,omitempty"`
-	WorkstreamsStarted uint32                 `protobuf:"varint,3,opt,name=workstreams_started,json=workstreamsStarted,proto3" json:"workstreams_started,omitempty"`
-	WorkstreamBudget   uint32                 `protobuf:"varint,4,opt,name=workstream_budget,json=workstreamBudget,proto3" json:"workstream_budget,omitempty"`
-	CandidatesKept     uint32                 `protobuf:"varint,5,opt,name=candidates_kept,json=candidatesKept,proto3" json:"candidates_kept,omitempty"`
-	AdoptedCandidate   *string                `protobuf:"bytes,6,opt,name=adopted_candidate,json=adoptedCandidate,proto3,oneof" json:"adopted_candidate,omitempty"`
-	Code               *string                `protobuf:"bytes,7,opt,name=code,proto3,oneof" json:"code,omitempty"`
-	Stage              *string                `protobuf:"bytes,8,opt,name=stage,proto3,oneof" json:"stage,omitempty"`
-	Message            *string                `protobuf:"bytes,9,opt,name=message,proto3,oneof" json:"message,omitempty"`
-	ExitCode           *int32                 `protobuf:"varint,10,opt,name=exit_code,json=exitCode,proto3,oneof" json:"exit_code,omitempty"`
-	unknownFields      protoimpl.UnknownFields
-	sizeCache          protoimpl.SizeCache
+	state    protoimpl.MessageState `protogen:"open.v1"`
+	Kind     RunFailureKind         `protobuf:"varint,1,opt,name=kind,proto3,enum=vibesys.store.v1.RunFailureKind" json:"kind,omitempty"`
+	Reason   string                 `protobuf:"bytes,2,opt,name=reason,proto3" json:"reason,omitempty"`
+	Code     *string                `protobuf:"bytes,7,opt,name=code,proto3,oneof" json:"code,omitempty"`
+	Stage    *string                `protobuf:"bytes,8,opt,name=stage,proto3,oneof" json:"stage,omitempty"`
+	Message  *string                `protobuf:"bytes,9,opt,name=message,proto3,oneof" json:"message,omitempty"`
+	ExitCode *int32                 `protobuf:"varint,10,opt,name=exit_code,json=exitCode,proto3,oneof" json:"exit_code,omitempty"`
+	// Failure-specific strategy data, described by EpochStarted.descriptors.
+	Detail        *anypb.Any `protobuf:"bytes,11,opt,name=detail,proto3,oneof" json:"detail,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *RunFailure) Reset() {
@@ -1019,34 +943,6 @@ func (x *RunFailure) GetReason() string {
 	return ""
 }
 
-func (x *RunFailure) GetWorkstreamsStarted() uint32 {
-	if x != nil {
-		return x.WorkstreamsStarted
-	}
-	return 0
-}
-
-func (x *RunFailure) GetWorkstreamBudget() uint32 {
-	if x != nil {
-		return x.WorkstreamBudget
-	}
-	return 0
-}
-
-func (x *RunFailure) GetCandidatesKept() uint32 {
-	if x != nil {
-		return x.CandidatesKept
-	}
-	return 0
-}
-
-func (x *RunFailure) GetAdoptedCandidate() string {
-	if x != nil && x.AdoptedCandidate != nil {
-		return *x.AdoptedCandidate
-	}
-	return ""
-}
-
 func (x *RunFailure) GetCode() string {
 	if x != nil && x.Code != nil {
 		return *x.Code
@@ -1075,11 +971,18 @@ func (x *RunFailure) GetExitCode() int32 {
 	return 0
 }
 
+func (x *RunFailure) GetDetail() *anypb.Any {
+	if x != nil {
+		return x.Detail
+	}
+	return nil
+}
+
 var File_vibesys_store_v1_lifecycle_proto protoreflect.FileDescriptor
 
 const file_vibesys_store_v1_lifecycle_proto_rawDesc = "" +
 	"\n" +
-	" vibesys/store/v1/lifecycle.proto\x12\x10vibesys.store.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1dvibesys/store/v1/common.proto\"\xab\x02\n" +
+	" vibesys/store/v1/lifecycle.proto\x12\x10vibesys.store.v1\x1a\x1bbuf/validate/validate.proto\x1a\x19google/protobuf/any.proto\x1a\x1dvibesys/store/v1/common.proto\"\xab\x02\n" +
 	"\tLifecycle\x128\n" +
 	"\bstarting\x18\x01 \x01(\v2\x1a.vibesys.store.v1.StartingH\x00R\bstarting\x125\n" +
 	"\arunning\x18\x02 \x01(\v2\x19.vibesys.store.v1.RunningH\x00R\arunning\x128\n" +
@@ -1114,49 +1017,43 @@ const file_vibesys_store_v1_lifecycle_proto_rawDesc = "" +
 	"\x06Parked\"G\n" +
 	"\bDraining\x12;\n" +
 	"\x04goal\x18\x01 \x01(\x0e2\x1b.vibesys.store.v1.DrainGoalB\n" +
-	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x04goal\"\xc6\x06\n" +
+	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x04goal\"\xb3\x06\n" +
 	"\x05Ended\x12?\n" +
 	"\aoutcome\x18\x01 \x01(\x0e2\x19.vibesys.store.v1.OutcomeB\n" +
-	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\aoutcome\x12D\n" +
-	"\x06reason\x18\x02 \x01(\x0e2\x1b.vibesys.store.v1.EndReasonB\n" +
-	"\xbaH\a\x82\x01\x04\x10\x01 \x00H\x00R\x06reason\x88\x01\x01\x12#\n" +
+	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\aoutcome\x12#\n" +
 	"\asummary\x18\x03 \x01(\tB\t\xbaH\x06r\x04(\x80\x80\x04R\asummary\x12\x1c\n" +
-	"\tresumable\x18\x04 \x01(\bR\tresumable\x12\x1e\n" +
-	"\n" +
-	"uncompared\x18\x05 \x01(\bR\n" +
-	"uncompared\x12;\n" +
-	"\afailure\x18\x06 \x01(\v2\x1c.vibesys.store.v1.RunFailureH\x01R\afailure\x88\x01\x01\x12\x1b\n" +
-	"\x06signal\x18\a \x01(\x05H\x02R\x06signal\x88\x01\x01\x12?\n" +
-	"\x13interruption_reason\x18\b \x01(\tB\t\xbaH\x06r\x04(\x80\x80\x04H\x03R\x12interruptionReason\x88\x01\x01:\xfd\x02\xbaH\xf9\x02\x1al\n" +
+	"\tresumable\x18\x04 \x01(\bR\tresumable\x12;\n" +
+	"\afailure\x18\x06 \x01(\v2\x1c.vibesys.store.v1.RunFailureH\x00R\afailure\x88\x01\x01\x12\x1b\n" +
+	"\x06signal\x18\a \x01(\x05H\x01R\x06signal\x88\x01\x01\x12?\n" +
+	"\x13interruption_reason\x18\b \x01(\tB\t\xbaH\x06r\x04(\x80\x80\x04H\x02R\x12interruptionReason\x88\x01\x01\x121\n" +
+	"\x06detail\x18\t \x01(\v2\x14.google.protobuf.AnyH\x03R\x06detail\x88\x01\x01:\xfd\x02\xbaH\xf9\x02\x1al\n" +
 	"\rended.failure\x121failure is present exactly when outcome is failed\x1a(has(this.failure) == (this.outcome == 2)\x1a\x80\x01\n" +
 	"\fended.signal\x123signal is positive and only present for interrupted\x1a;!has(this.signal) || (this.outcome == 4 && this.signal > 0)\x1a\x85\x01\n" +
-	"\x19ended.interruption_reason\x123interruption_reason is only present for interrupted\x1a3!has(this.interruption_reason) || this.outcome == 4B\t\n" +
-	"\a_reasonB\n" +
+	"\x19ended.interruption_reason\x123interruption_reason is only present for interrupted\x1a3!has(this.interruption_reason) || this.outcome == 4B\n" +
 	"\n" +
 	"\b_failureB\t\n" +
 	"\a_signalB\x16\n" +
-	"\x14_interruption_reason\"\x94\x04\n" +
+	"\x14_interruption_reasonB\t\n" +
+	"\a_detailJ\x04\b\x02\x10\x03J\x04\b\x05\x10\x06R\x06reasonR\n" +
+	"uncompared\"\xc8\x03\n" +
 	"\n" +
 	"RunFailure\x12@\n" +
 	"\x04kind\x18\x01 \x01(\x0e2 .vibesys.store.v1.RunFailureKindB\n" +
 	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x04kind\x12!\n" +
-	"\x06reason\x18\x02 \x01(\tB\t\xbaH\x06r\x04(\x80\x80\x04R\x06reason\x12/\n" +
-	"\x13workstreams_started\x18\x03 \x01(\rR\x12workstreamsStarted\x12+\n" +
-	"\x11workstream_budget\x18\x04 \x01(\rR\x10workstreamBudget\x12'\n" +
-	"\x0fcandidates_kept\x18\x05 \x01(\rR\x0ecandidatesKept\x12=\n" +
-	"\x11adopted_candidate\x18\x06 \x01(\tB\v\xbaH\br\x06\x10\x01(\x80\x80\x04H\x00R\x10adoptedCandidate\x88\x01\x01\x12$\n" +
-	"\x04code\x18\a \x01(\tB\v\xbaH\br\x06\x10\x01(\x80\x80\x04H\x01R\x04code\x88\x01\x01\x12&\n" +
-	"\x05stage\x18\b \x01(\tB\v\xbaH\br\x06\x10\x01(\x80\x80\x04H\x02R\x05stage\x88\x01\x01\x12(\n" +
-	"\amessage\x18\t \x01(\tB\t\xbaH\x06r\x04(\x80\x80\x04H\x03R\amessage\x88\x01\x01\x12 \n" +
+	"\x06reason\x18\x02 \x01(\tB\t\xbaH\x06r\x04(\x80\x80\x04R\x06reason\x12$\n" +
+	"\x04code\x18\a \x01(\tB\v\xbaH\br\x06\x10\x01(\x80\x80\x04H\x00R\x04code\x88\x01\x01\x12&\n" +
+	"\x05stage\x18\b \x01(\tB\v\xbaH\br\x06\x10\x01(\x80\x80\x04H\x01R\x05stage\x88\x01\x01\x12(\n" +
+	"\amessage\x18\t \x01(\tB\t\xbaH\x06r\x04(\x80\x80\x04H\x02R\amessage\x88\x01\x01\x12 \n" +
 	"\texit_code\x18\n" +
-	" \x01(\x05H\x04R\bexitCode\x88\x01\x01B\x14\n" +
-	"\x12_adopted_candidateB\a\n" +
+	" \x01(\x05H\x03R\bexitCode\x88\x01\x01\x121\n" +
+	"\x06detail\x18\v \x01(\v2\x14.google.protobuf.AnyH\x04R\x06detail\x88\x01\x01B\a\n" +
 	"\x05_codeB\b\n" +
 	"\x06_stageB\n" +
 	"\n" +
 	"\b_messageB\f\n" +
 	"\n" +
-	"_exit_code*\xbc\x01\n" +
+	"_exit_codeB\t\n" +
+	"\a_detailJ\x04\b\x03\x10\aR\x13workstreams_startedR\x11workstream_budgetR\x0fcandidates_keptR\x11adopted_candidate*\xbc\x01\n" +
 	"\fStartupStage\x12\x1d\n" +
 	"\x19STARTUP_STAGE_UNSPECIFIED\x10\x00\x12#\n" +
 	"\x1fSTARTUP_STAGE_PROBING_WORKSPACE\x10\x01\x12 \n" +
@@ -1182,17 +1079,7 @@ const file_vibesys_store_v1_lifecycle_proto_rawDesc = "" +
 	"\x10OUTCOME_FINISHED\x10\x01\x12\x12\n" +
 	"\x0eOUTCOME_FAILED\x10\x02\x12\x13\n" +
 	"\x0fOUTCOME_STOPPED\x10\x03\x12\x17\n" +
-	"\x13OUTCOME_INTERRUPTED\x10\x04*\xfb\x01\n" +
-	"\tEndReason\x12\x1a\n" +
-	"\x16END_REASON_UNSPECIFIED\x10\x00\x12\x16\n" +
-	"\x12END_REASON_ADOPTED\x10\x01\x12\x19\n" +
-	"\x15END_REASON_KEPT_INPUT\x10\x02\x12\x18\n" +
-	"\x14END_REASON_NO_WINNER\x10\x03\x12\x1e\n" +
-	"\x1aEND_REASON_ADOPTION_FAILED\x10\x04\x12\x16\n" +
-	"\x12END_REASON_STOPPED\x10\x05\x12\x17\n" +
-	"\x13END_REASON_DEADLINE\x10\x06\x12\x15\n" +
-	"\x11END_REASON_FAILED\x10\a\x12\x1d\n" +
-	"\x19END_REASON_FINISH_REFUSED\x10\b*\xea\x01\n" +
+	"\x13OUTCOME_INTERRUPTED\x10\x04*\xea\x01\n" +
 	"\x0eRunFailureKind\x12 \n" +
 	"\x1cRUN_FAILURE_KIND_UNSPECIFIED\x10\x00\x12%\n" +
 	"!RUN_FAILURE_KIND_BUDGET_EXHAUSTED\x10\x01\x12\x1d\n" +
@@ -1214,7 +1101,7 @@ func file_vibesys_store_v1_lifecycle_proto_rawDescGZIP() []byte {
 	return file_vibesys_store_v1_lifecycle_proto_rawDescData
 }
 
-var file_vibesys_store_v1_lifecycle_proto_enumTypes = make([]protoimpl.EnumInfo, 7)
+var file_vibesys_store_v1_lifecycle_proto_enumTypes = make([]protoimpl.EnumInfo, 6)
 var file_vibesys_store_v1_lifecycle_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
 var file_vibesys_store_v1_lifecycle_proto_goTypes = []any{
 	(StartupStage)(0),    // 0: vibesys.store.v1.StartupStage
@@ -1222,41 +1109,42 @@ var file_vibesys_store_v1_lifecycle_proto_goTypes = []any{
 	(StageState)(0),      // 2: vibesys.store.v1.StageState
 	(DrainGoal)(0),       // 3: vibesys.store.v1.DrainGoal
 	(Outcome)(0),         // 4: vibesys.store.v1.Outcome
-	(EndReason)(0),       // 5: vibesys.store.v1.EndReason
-	(RunFailureKind)(0),  // 6: vibesys.store.v1.RunFailureKind
-	(*Lifecycle)(nil),    // 7: vibesys.store.v1.Lifecycle
-	(*Starting)(nil),     // 8: vibesys.store.v1.Starting
-	(*Running)(nil),      // 9: vibesys.store.v1.Running
-	(*Hold)(nil),         // 10: vibesys.store.v1.Hold
-	(*OperatorHold)(nil), // 11: vibesys.store.v1.OperatorHold
-	(*Parked)(nil),       // 12: vibesys.store.v1.Parked
-	(*Draining)(nil),     // 13: vibesys.store.v1.Draining
-	(*Ended)(nil),        // 14: vibesys.store.v1.Ended
-	(*RunFailure)(nil),   // 15: vibesys.store.v1.RunFailure
-	(*Progress)(nil),     // 16: vibesys.store.v1.Progress
+	(RunFailureKind)(0),  // 5: vibesys.store.v1.RunFailureKind
+	(*Lifecycle)(nil),    // 6: vibesys.store.v1.Lifecycle
+	(*Starting)(nil),     // 7: vibesys.store.v1.Starting
+	(*Running)(nil),      // 8: vibesys.store.v1.Running
+	(*Hold)(nil),         // 9: vibesys.store.v1.Hold
+	(*OperatorHold)(nil), // 10: vibesys.store.v1.OperatorHold
+	(*Parked)(nil),       // 11: vibesys.store.v1.Parked
+	(*Draining)(nil),     // 12: vibesys.store.v1.Draining
+	(*Ended)(nil),        // 13: vibesys.store.v1.Ended
+	(*RunFailure)(nil),   // 14: vibesys.store.v1.RunFailure
+	(*Progress)(nil),     // 15: vibesys.store.v1.Progress
+	(*anypb.Any)(nil),    // 16: google.protobuf.Any
 }
 var file_vibesys_store_v1_lifecycle_proto_depIdxs = []int32{
-	8,  // 0: vibesys.store.v1.Lifecycle.starting:type_name -> vibesys.store.v1.Starting
-	9,  // 1: vibesys.store.v1.Lifecycle.running:type_name -> vibesys.store.v1.Running
-	13, // 2: vibesys.store.v1.Lifecycle.draining:type_name -> vibesys.store.v1.Draining
-	12, // 3: vibesys.store.v1.Lifecycle.parked:type_name -> vibesys.store.v1.Parked
-	14, // 4: vibesys.store.v1.Lifecycle.ended:type_name -> vibesys.store.v1.Ended
+	7,  // 0: vibesys.store.v1.Lifecycle.starting:type_name -> vibesys.store.v1.Starting
+	8,  // 1: vibesys.store.v1.Lifecycle.running:type_name -> vibesys.store.v1.Running
+	12, // 2: vibesys.store.v1.Lifecycle.draining:type_name -> vibesys.store.v1.Draining
+	11, // 3: vibesys.store.v1.Lifecycle.parked:type_name -> vibesys.store.v1.Parked
+	13, // 4: vibesys.store.v1.Lifecycle.ended:type_name -> vibesys.store.v1.Ended
 	0,  // 5: vibesys.store.v1.Starting.stage:type_name -> vibesys.store.v1.StartupStage
 	2,  // 6: vibesys.store.v1.Starting.state:type_name -> vibesys.store.v1.StageState
-	16, // 7: vibesys.store.v1.Starting.progress:type_name -> vibesys.store.v1.Progress
+	15, // 7: vibesys.store.v1.Starting.progress:type_name -> vibesys.store.v1.Progress
 	1,  // 8: vibesys.store.v1.Starting.condition:type_name -> vibesys.store.v1.WaitCondition
-	10, // 9: vibesys.store.v1.Running.hold:type_name -> vibesys.store.v1.Hold
-	11, // 10: vibesys.store.v1.Hold.operator:type_name -> vibesys.store.v1.OperatorHold
+	9,  // 9: vibesys.store.v1.Running.hold:type_name -> vibesys.store.v1.Hold
+	10, // 10: vibesys.store.v1.Hold.operator:type_name -> vibesys.store.v1.OperatorHold
 	3,  // 11: vibesys.store.v1.Draining.goal:type_name -> vibesys.store.v1.DrainGoal
 	4,  // 12: vibesys.store.v1.Ended.outcome:type_name -> vibesys.store.v1.Outcome
-	5,  // 13: vibesys.store.v1.Ended.reason:type_name -> vibesys.store.v1.EndReason
-	15, // 14: vibesys.store.v1.Ended.failure:type_name -> vibesys.store.v1.RunFailure
-	6,  // 15: vibesys.store.v1.RunFailure.kind:type_name -> vibesys.store.v1.RunFailureKind
-	16, // [16:16] is the sub-list for method output_type
-	16, // [16:16] is the sub-list for method input_type
-	16, // [16:16] is the sub-list for extension type_name
-	16, // [16:16] is the sub-list for extension extendee
-	0,  // [0:16] is the sub-list for field type_name
+	14, // 13: vibesys.store.v1.Ended.failure:type_name -> vibesys.store.v1.RunFailure
+	16, // 14: vibesys.store.v1.Ended.detail:type_name -> google.protobuf.Any
+	5,  // 15: vibesys.store.v1.RunFailure.kind:type_name -> vibesys.store.v1.RunFailureKind
+	16, // 16: vibesys.store.v1.RunFailure.detail:type_name -> google.protobuf.Any
+	17, // [17:17] is the sub-list for method output_type
+	17, // [17:17] is the sub-list for method input_type
+	17, // [17:17] is the sub-list for extension type_name
+	17, // [17:17] is the sub-list for extension extendee
+	0,  // [0:17] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_store_v1_lifecycle_proto_init() }
@@ -1285,7 +1173,7 @@ func file_vibesys_store_v1_lifecycle_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_vibesys_store_v1_lifecycle_proto_rawDesc), len(file_vibesys_store_v1_lifecycle_proto_rawDesc)),
-			NumEnums:      7,
+			NumEnums:      6,
 			NumMessages:   9,
 			NumExtensions: 0,
 			NumServices:   0,

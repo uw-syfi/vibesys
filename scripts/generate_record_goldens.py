@@ -13,6 +13,27 @@ from protobuf.wkt.google.protobuf.descriptor_pb import FileDescriptorSet
 import vs_proto.api as p
 
 
+def packed(message: Message) -> Any:
+    """Pack a descriptor-backed strategy extension without a core import."""
+    return Any(
+        type_url="type.googleapis.com/" + message.desc().type_name, value=message.to_binary()
+    )
+
+
+def detail_examples() -> dict[str, Message]:
+    """Search run, ending and failure details carried by core Any fields."""
+    return {
+        "run_description": p.SearchRunDescription(max_workstreams=4),
+        "ended": p.SearchEnded(reason=p.EndReason.NO_WINNER, uncompared=True),
+        "run_failure": p.SearchRunFailure(
+            workstreams_started=4,
+            workstream_budget=4,
+            candidates_kept=0,
+            adopted_candidate="revision-b",
+        ),
+    }
+
+
 def attrs_examples() -> dict[str, Message]:
     """Return deterministic, populated examples of each built-in span kind."""
     return {
@@ -190,8 +211,9 @@ def record_examples() -> dict[str, p.Record]:
     """One example per body plus lifecycle and attrs variants, with fixed wall time."""
     blob = p.BlobRef(sha256="a" * 64, size=100000, media_type="text/plain")
     attrs = attrs_examples()
+    details = detail_examples()
     epoch = p.EpochStarted(
-        descriptors=descriptors_for(attrs),
+        descriptors=descriptors_for({**attrs, **details}),
         run_id="run-a",
         epoch=1,
         tree_hash="tree-a",
@@ -206,7 +228,7 @@ def record_examples() -> dict[str, p.Record]:
             objectives=[p.Objective(series="throughput", direction=p.Direction.MAX)],
             correctness_check=["check", "--all"],
             evaluator=p.Evaluator(name="bench", version="1"),
-            max_workstreams=4,
+            detail=packed(details["run_description"]),
             expected_roles=["implementer"],
         ),
         span_kinds=[
@@ -279,15 +301,13 @@ def record_examples() -> dict[str, p.Record]:
         "parked": p.Parked(),
         "ended": p.Ended(
             outcome=p.Outcome.FAILED,
-            reason=p.EndReason.NO_WINNER,
+            detail=packed(details["ended"]),
             summary="No candidate",
             resumable=True,
             failure=p.RunFailure(
                 kind=p.RunFailureKind.BUDGET_EXHAUSTED,
                 reason="Budget exhausted",
-                workstreams_started=4,
-                workstream_budget=4,
-                candidates_kept=0,
+                detail=packed(details["run_failure"]),
             ),
         ),
     }

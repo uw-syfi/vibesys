@@ -256,14 +256,14 @@ How to read the table:
 |---|---|---|---|---|---|
 | `server_started` | server journal | delete | none | S | Artifact of the old server process. `EpochStarted` and `Lifecycle.starting` replace it. |
 | `server_ready` | server runtime | delete | e2e fakes only | S | `Lifecycle.running` when startup ends. |
-| `run_started` | `vibesys.api` session, server | epoch | live page fold (objective, metric), digest, run map | M | Strategy name, input, max rounds, expected roles and `RunOverview` go in `EpochStarted.run` (`RunDescription`). Objective text is a blob. Unit and direction are in the series declarations, so the server no longer back-fills them into a snapshot. |
+| `run_started` | `vibesys.api` session, server | epoch | live page fold (objective, metric), digest, run map | M | Strategy name, input, expected roles and `RunOverview` go in `EpochStarted.run` (`RunDescription`); search limits go in its descriptor-backed `SearchRunDescription` detail. Objective text is a blob. Unit and direction are in the series declarations, so the server no longer back-fills them into a snapshot. |
 | `run_startup_progress` | `vibesys.run.resources` | lifecycle | startup bar (`run-session`), startup timing words (`scoped-logs`) | S | `Lifecycle.starting{stage, state, condition, elapsed, progress}`. One record per step; bounded by the number of image-build steps. |
 | `workspace_root_probe` | `slurm_probe_events` | span:`environment_probe` | none (ignored by the fold) | S | Runtime-declared kind. Attrs: `state`, `job_id`, `pending_reason`, `waited_seconds`, `queue_timeout_seconds`, `failure`, `attempt`, `retry_in_seconds`. A `failed` probe ends the run with `RunFailure.kind = environment_unavailable`. |
 | `run_status_changed` | server controller, journal | lifecycle | `CoreState.status`: header, recent-status words | S | `starting\|running\|pausing\|paused\|stopping\|stopped\|completed\|failed` becomes `Running{hold}`, `Draining{goal}`, `Parked`, `Ended{outcome}`. `previous` is derived. |
 | `run_finished` | controller, runtime, session | lifecycle | fold terminates run; digest closing | S | `Ended{outcome = finished}`. |
-| `run_failed` | controller, runtime, session | lifecycle | fold terminates run; digest closing; failure text | S | `Ended{outcome = failed, failure = RunFailure}` (kind, reason, workstreams started and budget, candidates kept, adopted candidate). |
+| `run_failed` | controller, runtime, session | lifecycle | fold terminates run; digest closing; failure text | S | `Ended{outcome = failed, failure = RunFailure}` carries generic kind and reason. Its descriptor-backed `SearchRunFailure` detail carries workstreams started and budget, candidates kept, and adopted candidate. |
 | `run_interrupted` | controller, runtime | lifecycle | fold terminates run | S | `Ended{outcome = interrupted, interruption_reason, signal}` when the process caught the signal. A process that cannot write its own death leaves a log with no `Ended` and no lock holder; the gateway reports `interrupted` as a hint and the next relaunch writes the record (see Intents and epochs). |
-| `run_ending` | `vibesys.run.core_run` | lifecycle | host summary (`with_ending`): end reason, resumable | S | Merged into `Ended`: the closed core `reason`, `summary`, `resumable`, `uncompared`. `rounds_finished` is dropped (count ended workstream spans). |
+| `run_ending` | `vibesys.run.core_run` | lifecycle | host summary (`with_ending`): end reason, resumable | S | Merged into `Ended`: `summary` and `resumable`, plus the descriptor-backed `SearchEnded` detail with its closed search `reason` and `uncompared`. `rounds_finished` is dropped (count ended workstream spans). |
 | `configuration_failed` | server runtime, read model | lifecycle, or launch error | transcript line; diagnostics | S | Raised before a run exists: it is the `Launch` or `HostCall` error. If a run directory exists it is `Ended{failed, kind = configuration, code, stage, message, exit_code}`. |
 
 ### Agent turns and their content
@@ -428,8 +428,14 @@ The authoritative records and their validation rules live in
 [`proto/vibesys/store/v1/record.proto`](https://github.com/uw-syfi/vibesys/blob/main/proto/vibesys/store/v1/record.proto)
 and the concern-specific files it imports. Typed attrs are defined in
 [`agent_attrs.proto`](https://github.com/uw-syfi/vibesys/blob/main/proto/vibesys/store/v1/agent_attrs.proto),
-[`search_attrs.proto`](https://github.com/uw-syfi/vibesys/blob/main/proto/vibesys/store/v1/search_attrs.proto), and
+[`search/v1/attrs.proto`](https://github.com/uw-syfi/vibesys/blob/main/proto/vibesys/search/v1/attrs.proto), and
 [`environment_attrs.proto`](https://github.com/uw-syfi/vibesys/blob/main/proto/vibesys/store/v1/environment_attrs.proto).
+Search run configuration, settlement and failure details are defined in
+[`search/v1/run.proto`](https://github.com/uw-syfi/vibesys/blob/main/proto/vibesys/search/v1/run.proto).
+The store package never imports the search package. Strategy details travel as
+`Any` with their descriptors in `EpochStarted.descriptors`, just like span attrs;
+`test_store_schema_cannot_import_search_strategy_contracts` enforces the dependency boundary.
+
 These files replace the illustrative proto sketch; their published field numbers are authoritative.
 
 `EpochStarted` retains its original checkout and schema identity fields and adds the run description,

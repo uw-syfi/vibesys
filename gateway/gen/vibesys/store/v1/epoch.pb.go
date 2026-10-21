@@ -10,6 +10,7 @@ import (
 	_ "github.com/uw-syfi/vibesys/gateway/gen/buf/validate"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
+	anypb "google.golang.org/protobuf/types/known/anypb"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
@@ -32,10 +33,11 @@ type RunDescription struct {
 	// Argument vector, not a shell command.
 	CorrectnessCheck []string   `protobuf:"bytes,5,rep,name=correctness_check,json=correctnessCheck,proto3" json:"correctness_check,omitempty"`
 	Evaluator        *Evaluator `protobuf:"bytes,6,opt,name=evaluator,proto3,oneof" json:"evaluator,omitempty"`
-	MaxWorkstreams   *uint32    `protobuf:"varint,7,opt,name=max_workstreams,json=maxWorkstreams,proto3,oneof" json:"max_workstreams,omitempty"`
 	ExpectedRoles    []string   `protobuf:"bytes,8,rep,name=expected_roles,json=expectedRoles,proto3" json:"expected_roles,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// Strategy run configuration, described by EpochStarted.descriptors.
+	Detail        *anypb.Any `protobuf:"bytes,9,opt,name=detail,proto3,oneof" json:"detail,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *RunDescription) Reset() {
@@ -110,16 +112,16 @@ func (x *RunDescription) GetEvaluator() *Evaluator {
 	return nil
 }
 
-func (x *RunDescription) GetMaxWorkstreams() uint32 {
-	if x != nil && x.MaxWorkstreams != nil {
-		return *x.MaxWorkstreams
-	}
-	return 0
-}
-
 func (x *RunDescription) GetExpectedRoles() []string {
 	if x != nil {
 		return x.ExpectedRoles
+	}
+	return nil
+}
+
+func (x *RunDescription) GetDetail() *anypb.Any {
+	if x != nil {
+		return x.Detail
 	}
 	return nil
 }
@@ -379,7 +381,7 @@ var File_vibesys_store_v1_epoch_proto protoreflect.FileDescriptor
 
 const file_vibesys_store_v1_epoch_proto_rawDesc = "" +
 	"\n" +
-	"\x1cvibesys/store/v1/epoch.proto\x12\x10vibesys.store.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1dvibesys/store/v1/common.proto\x1a\x1evibesys/store/v1/content.proto\"\xfb\x04\n" +
+	"\x1cvibesys/store/v1/epoch.proto\x12\x10vibesys.store.v1\x1a\x1bbuf/validate/validate.proto\x1a\x19google/protobuf/any.proto\x1a\x1dvibesys/store/v1/common.proto\x1a\x1evibesys/store/v1/content.proto\"\x8e\x05\n" +
 	"\x0eRunDescription\x12'\n" +
 	"\bstrategy\x18\x01 \x01(\tB\v\xbaH\br\x06\x10\x01(\x80\x80\x04R\bstrategy\x12!\n" +
 	"\x05input\x18\x02 \x01(\tB\v\xbaH\br\x06\x10\x01(\x80\x80\x04R\x05input\x12?\n" +
@@ -389,14 +391,14 @@ const file_vibesys_store_v1_epoch_proto_rawDesc = "" +
 	"objectives\x12=\n" +
 	"\x11correctness_check\x18\x05 \x03(\tB\x10\xbaH\r\x92\x01\n" +
 	"\"\br\x06\x10\x01(\x80\x80\x04R\x10correctnessCheck\x12>\n" +
-	"\tevaluator\x18\x06 \x01(\v2\x1b.vibesys.store.v1.EvaluatorH\x00R\tevaluator\x88\x01\x01\x12,\n" +
-	"\x0fmax_workstreams\x18\a \x01(\rH\x01R\x0emaxWorkstreams\x88\x01\x01\x127\n" +
+	"\tevaluator\x18\x06 \x01(\v2\x1b.vibesys.store.v1.EvaluatorH\x00R\tevaluator\x88\x01\x01\x127\n" +
 	"\x0eexpected_roles\x18\b \x03(\tB\x10\xbaH\r\x92\x01\n" +
-	"\"\br\x06\x10\x01(\x80\x80\x04R\rexpectedRoles:\x96\x01\xbaH\x92\x01\x1a\x8f\x01\n" +
+	"\"\br\x06\x10\x01(\x80\x80\x04R\rexpectedRoles\x121\n" +
+	"\x06detail\x18\t \x01(\v2\x14.google.protobuf.AnyH\x01R\x06detail\x88\x01\x01:\x96\x01\xbaH\x92\x01\x1a\x8f\x01\n" +
 	"\x0erun.objectives\x12(objectives must have unique series names\x1aSthis.objectives.all(x, this.objectives.filter(y, y.series == x.series).size() == 1)B\f\n" +
 	"\n" +
-	"_evaluatorB\x12\n" +
-	"\x10_max_workstreams\"S\n" +
+	"_evaluatorB\t\n" +
+	"\a_detailJ\x04\b\a\x10\bR\x0fmax_workstreams\"S\n" +
 	"\tEvaluator\x12\x1f\n" +
 	"\x04name\x18\x01 \x01(\tB\v\xbaH\br\x06\x10\x01(\x80\x80\x04R\x04name\x12%\n" +
 	"\aversion\x18\x02 \x01(\tB\v\xbaH\br\x06\x10\x01(\x80\x80\x04R\aversion\"\xd7\x01\n" +
@@ -444,21 +446,23 @@ var file_vibesys_store_v1_epoch_proto_goTypes = []any{
 	(*SpanKindDecl)(nil),     // 3: vibesys.store.v1.SpanKindDecl
 	(*MetricSeriesDecl)(nil), // 4: vibesys.store.v1.MetricSeriesDecl
 	(*BlobRef)(nil),          // 5: vibesys.store.v1.BlobRef
-	(Direction)(0),           // 6: vibesys.store.v1.Direction
-	(SeriesRole)(0),          // 7: vibesys.store.v1.SeriesRole
+	(*anypb.Any)(nil),        // 6: google.protobuf.Any
+	(Direction)(0),           // 7: vibesys.store.v1.Direction
+	(SeriesRole)(0),          // 8: vibesys.store.v1.SeriesRole
 }
 var file_vibesys_store_v1_epoch_proto_depIdxs = []int32{
 	5, // 0: vibesys.store.v1.RunDescription.objective:type_name -> vibesys.store.v1.BlobRef
 	2, // 1: vibesys.store.v1.RunDescription.objectives:type_name -> vibesys.store.v1.Objective
 	1, // 2: vibesys.store.v1.RunDescription.evaluator:type_name -> vibesys.store.v1.Evaluator
-	6, // 3: vibesys.store.v1.Objective.direction:type_name -> vibesys.store.v1.Direction
-	6, // 4: vibesys.store.v1.MetricSeriesDecl.direction:type_name -> vibesys.store.v1.Direction
-	7, // 5: vibesys.store.v1.MetricSeriesDecl.role:type_name -> vibesys.store.v1.SeriesRole
-	6, // [6:6] is the sub-list for method output_type
-	6, // [6:6] is the sub-list for method input_type
-	6, // [6:6] is the sub-list for extension type_name
-	6, // [6:6] is the sub-list for extension extendee
-	0, // [0:6] is the sub-list for field type_name
+	6, // 3: vibesys.store.v1.RunDescription.detail:type_name -> google.protobuf.Any
+	7, // 4: vibesys.store.v1.Objective.direction:type_name -> vibesys.store.v1.Direction
+	7, // 5: vibesys.store.v1.MetricSeriesDecl.direction:type_name -> vibesys.store.v1.Direction
+	8, // 6: vibesys.store.v1.MetricSeriesDecl.role:type_name -> vibesys.store.v1.SeriesRole
+	7, // [7:7] is the sub-list for method output_type
+	7, // [7:7] is the sub-list for method input_type
+	7, // [7:7] is the sub-list for extension type_name
+	7, // [7:7] is the sub-list for extension extendee
+	0, // [0:7] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_store_v1_epoch_proto_init() }

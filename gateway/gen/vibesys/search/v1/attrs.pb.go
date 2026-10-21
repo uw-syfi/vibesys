@@ -2,12 +2,13 @@
 // versions:
 // 	protoc-gen-go v1.36.11
 // 	protoc        (unknown)
-// source: vibesys/store/v1/search_attrs.proto
+// source: vibesys/search/v1/attrs.proto
 
-package storev1
+package searchv1
 
 import (
 	_ "github.com/uw-syfi/vibesys/gateway/gen/buf/validate"
+	v1 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
@@ -61,11 +62,11 @@ func (x GateStage) String() string {
 }
 
 func (GateStage) Descriptor() protoreflect.EnumDescriptor {
-	return file_vibesys_store_v1_search_attrs_proto_enumTypes[0].Descriptor()
+	return file_vibesys_search_v1_attrs_proto_enumTypes[0].Descriptor()
 }
 
 func (GateStage) Type() protoreflect.EnumType {
-	return &file_vibesys_store_v1_search_attrs_proto_enumTypes[0]
+	return &file_vibesys_search_v1_attrs_proto_enumTypes[0]
 }
 
 func (x GateStage) Number() protoreflect.EnumNumber {
@@ -74,7 +75,7 @@ func (x GateStage) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use GateStage.Descriptor instead.
 func (GateStage) EnumDescriptor() ([]byte, []int) {
-	return file_vibesys_store_v1_search_attrs_proto_rawDescGZIP(), []int{0}
+	return file_vibesys_search_v1_attrs_proto_rawDescGZIP(), []int{0}
 }
 
 type GateSubject int32
@@ -110,11 +111,11 @@ func (x GateSubject) String() string {
 }
 
 func (GateSubject) Descriptor() protoreflect.EnumDescriptor {
-	return file_vibesys_store_v1_search_attrs_proto_enumTypes[1].Descriptor()
+	return file_vibesys_search_v1_attrs_proto_enumTypes[1].Descriptor()
 }
 
 func (GateSubject) Type() protoreflect.EnumType {
-	return &file_vibesys_store_v1_search_attrs_proto_enumTypes[1]
+	return &file_vibesys_search_v1_attrs_proto_enumTypes[1]
 }
 
 func (x GateSubject) Number() protoreflect.EnumNumber {
@@ -123,7 +124,7 @@ func (x GateSubject) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use GateSubject.Descriptor instead.
 func (GateSubject) EnumDescriptor() ([]byte, []int) {
-	return file_vibesys_store_v1_search_attrs_proto_rawDescGZIP(), []int{1}
+	return file_vibesys_search_v1_attrs_proto_rawDescGZIP(), []int{1}
 }
 
 type FrameworkSource int32
@@ -171,11 +172,11 @@ func (x FrameworkSource) String() string {
 }
 
 func (FrameworkSource) Descriptor() protoreflect.EnumDescriptor {
-	return file_vibesys_store_v1_search_attrs_proto_enumTypes[2].Descriptor()
+	return file_vibesys_search_v1_attrs_proto_enumTypes[2].Descriptor()
 }
 
 func (FrameworkSource) Type() protoreflect.EnumType {
-	return &file_vibesys_store_v1_search_attrs_proto_enumTypes[2]
+	return &file_vibesys_search_v1_attrs_proto_enumTypes[2]
 }
 
 func (x FrameworkSource) Number() protoreflect.EnumNumber {
@@ -184,7 +185,7 @@ func (x FrameworkSource) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use FrameworkSource.Descriptor instead.
 func (FrameworkSource) EnumDescriptor() ([]byte, []int) {
-	return file_vibesys_store_v1_search_attrs_proto_rawDescGZIP(), []int{2}
+	return file_vibesys_search_v1_attrs_proto_rawDescGZIP(), []int{2}
 }
 
 type EvidenceKind int32
@@ -220,11 +221,11 @@ func (x EvidenceKind) String() string {
 }
 
 func (EvidenceKind) Descriptor() protoreflect.EnumDescriptor {
-	return file_vibesys_store_v1_search_attrs_proto_enumTypes[3].Descriptor()
+	return file_vibesys_search_v1_attrs_proto_enumTypes[3].Descriptor()
 }
 
 func (EvidenceKind) Type() protoreflect.EnumType {
-	return &file_vibesys_store_v1_search_attrs_proto_enumTypes[3]
+	return &file_vibesys_search_v1_attrs_proto_enumTypes[3]
 }
 
 func (x EvidenceKind) Number() protoreflect.EnumNumber {
@@ -233,7 +234,7 @@ func (x EvidenceKind) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use EvidenceKind.Descriptor instead.
 func (EvidenceKind) EnumDescriptor() ([]byte, []int) {
-	return file_vibesys_store_v1_search_attrs_proto_rawDescGZIP(), []int{3}
+	return file_vibesys_search_v1_attrs_proto_rawDescGZIP(), []int{3}
 }
 
 type Selection int32
@@ -269,11 +270,11 @@ func (x Selection) String() string {
 }
 
 func (Selection) Descriptor() protoreflect.EnumDescriptor {
-	return file_vibesys_store_v1_search_attrs_proto_enumTypes[4].Descriptor()
+	return file_vibesys_search_v1_attrs_proto_enumTypes[4].Descriptor()
 }
 
 func (Selection) Type() protoreflect.EnumType {
-	return &file_vibesys_store_v1_search_attrs_proto_enumTypes[4]
+	return &file_vibesys_search_v1_attrs_proto_enumTypes[4]
 }
 
 func (x Selection) Number() protoreflect.EnumNumber {
@@ -282,7 +283,7 @@ func (x Selection) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use Selection.Descriptor instead.
 func (Selection) EnumDescriptor() ([]byte, []int) {
-	return file_vibesys_store_v1_search_attrs_proto_rawDescGZIP(), []int{4}
+	return file_vibesys_search_v1_attrs_proto_rawDescGZIP(), []int{4}
 }
 
 type ComparisonVerdict int32
@@ -324,11 +325,11 @@ func (x ComparisonVerdict) String() string {
 }
 
 func (ComparisonVerdict) Descriptor() protoreflect.EnumDescriptor {
-	return file_vibesys_store_v1_search_attrs_proto_enumTypes[5].Descriptor()
+	return file_vibesys_search_v1_attrs_proto_enumTypes[5].Descriptor()
 }
 
 func (ComparisonVerdict) Type() protoreflect.EnumType {
-	return &file_vibesys_store_v1_search_attrs_proto_enumTypes[5]
+	return &file_vibesys_search_v1_attrs_proto_enumTypes[5]
 }
 
 func (x ComparisonVerdict) Number() protoreflect.EnumNumber {
@@ -337,7 +338,7 @@ func (x ComparisonVerdict) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use ComparisonVerdict.Descriptor instead.
 func (ComparisonVerdict) EnumDescriptor() ([]byte, []int) {
-	return file_vibesys_store_v1_search_attrs_proto_rawDescGZIP(), []int{5}
+	return file_vibesys_search_v1_attrs_proto_rawDescGZIP(), []int{5}
 }
 
 type BaselineStatus int32
@@ -379,11 +380,11 @@ func (x BaselineStatus) String() string {
 }
 
 func (BaselineStatus) Descriptor() protoreflect.EnumDescriptor {
-	return file_vibesys_store_v1_search_attrs_proto_enumTypes[6].Descriptor()
+	return file_vibesys_search_v1_attrs_proto_enumTypes[6].Descriptor()
 }
 
 func (BaselineStatus) Type() protoreflect.EnumType {
-	return &file_vibesys_store_v1_search_attrs_proto_enumTypes[6]
+	return &file_vibesys_search_v1_attrs_proto_enumTypes[6]
 }
 
 func (x BaselineStatus) Number() protoreflect.EnumNumber {
@@ -392,7 +393,7 @@ func (x BaselineStatus) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use BaselineStatus.Descriptor instead.
 func (BaselineStatus) EnumDescriptor() ([]byte, []int) {
-	return file_vibesys_store_v1_search_attrs_proto_rawDescGZIP(), []int{6}
+	return file_vibesys_search_v1_attrs_proto_rawDescGZIP(), []int{6}
 }
 
 type InputFailureKind int32
@@ -440,11 +441,11 @@ func (x InputFailureKind) String() string {
 }
 
 func (InputFailureKind) Descriptor() protoreflect.EnumDescriptor {
-	return file_vibesys_store_v1_search_attrs_proto_enumTypes[7].Descriptor()
+	return file_vibesys_search_v1_attrs_proto_enumTypes[7].Descriptor()
 }
 
 func (InputFailureKind) Type() protoreflect.EnumType {
-	return &file_vibesys_store_v1_search_attrs_proto_enumTypes[7]
+	return &file_vibesys_search_v1_attrs_proto_enumTypes[7]
 }
 
 func (x InputFailureKind) Number() protoreflect.EnumNumber {
@@ -453,7 +454,7 @@ func (x InputFailureKind) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use InputFailureKind.Descriptor instead.
 func (InputFailureKind) EnumDescriptor() ([]byte, []int) {
-	return file_vibesys_store_v1_search_attrs_proto_rawDescGZIP(), []int{7}
+	return file_vibesys_search_v1_attrs_proto_rawDescGZIP(), []int{7}
 }
 
 // Dynamic search vocabulary, carried by its workstream attrs, not core.
@@ -541,11 +542,11 @@ func (x WorkstreamFailureKind) String() string {
 }
 
 func (WorkstreamFailureKind) Descriptor() protoreflect.EnumDescriptor {
-	return file_vibesys_store_v1_search_attrs_proto_enumTypes[8].Descriptor()
+	return file_vibesys_search_v1_attrs_proto_enumTypes[8].Descriptor()
 }
 
 func (WorkstreamFailureKind) Type() protoreflect.EnumType {
-	return &file_vibesys_store_v1_search_attrs_proto_enumTypes[8]
+	return &file_vibesys_search_v1_attrs_proto_enumTypes[8]
 }
 
 func (x WorkstreamFailureKind) Number() protoreflect.EnumNumber {
@@ -554,7 +555,7 @@ func (x WorkstreamFailureKind) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use WorkstreamFailureKind.Descriptor instead.
 func (WorkstreamFailureKind) EnumDescriptor() ([]byte, []int) {
-	return file_vibesys_store_v1_search_attrs_proto_rawDescGZIP(), []int{8}
+	return file_vibesys_search_v1_attrs_proto_rawDescGZIP(), []int{8}
 }
 
 // The existing planning_call kind, shared by hypothesis searches.
@@ -567,7 +568,7 @@ type PlanningAttrs struct {
 
 func (x *PlanningAttrs) Reset() {
 	*x = PlanningAttrs{}
-	mi := &file_vibesys_store_v1_search_attrs_proto_msgTypes[0]
+	mi := &file_vibesys_search_v1_attrs_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -579,7 +580,7 @@ func (x *PlanningAttrs) String() string {
 func (*PlanningAttrs) ProtoMessage() {}
 
 func (x *PlanningAttrs) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_store_v1_search_attrs_proto_msgTypes[0]
+	mi := &file_vibesys_search_v1_attrs_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -592,7 +593,7 @@ func (x *PlanningAttrs) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PlanningAttrs.ProtoReflect.Descriptor instead.
 func (*PlanningAttrs) Descriptor() ([]byte, []int) {
-	return file_vibesys_store_v1_search_attrs_proto_rawDescGZIP(), []int{0}
+	return file_vibesys_search_v1_attrs_proto_rawDescGZIP(), []int{0}
 }
 
 func (x *PlanningAttrs) GetCall() uint32 {
@@ -625,7 +626,7 @@ type WorkstreamAttrs struct {
 
 func (x *WorkstreamAttrs) Reset() {
 	*x = WorkstreamAttrs{}
-	mi := &file_vibesys_store_v1_search_attrs_proto_msgTypes[1]
+	mi := &file_vibesys_search_v1_attrs_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -637,7 +638,7 @@ func (x *WorkstreamAttrs) String() string {
 func (*WorkstreamAttrs) ProtoMessage() {}
 
 func (x *WorkstreamAttrs) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_store_v1_search_attrs_proto_msgTypes[1]
+	mi := &file_vibesys_search_v1_attrs_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -650,7 +651,7 @@ func (x *WorkstreamAttrs) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkstreamAttrs.ProtoReflect.Descriptor instead.
 func (*WorkstreamAttrs) Descriptor() ([]byte, []int) {
-	return file_vibesys_store_v1_search_attrs_proto_rawDescGZIP(), []int{1}
+	return file_vibesys_search_v1_attrs_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *WorkstreamAttrs) GetHypothesisId() string {
@@ -760,7 +761,7 @@ func (x *WorkstreamAttrs) GetRepeatedError() bool {
 
 type WorkstreamFailure struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Kind          WorkstreamFailureKind  `protobuf:"varint,1,opt,name=kind,proto3,enum=vibesys.store.v1.WorkstreamFailureKind" json:"kind,omitempty"`
+	Kind          WorkstreamFailureKind  `protobuf:"varint,1,opt,name=kind,proto3,enum=vibesys.search.v1.WorkstreamFailureKind" json:"kind,omitempty"`
 	Role          *string                `protobuf:"bytes,2,opt,name=role,proto3,oneof" json:"role,omitempty"`
 	Turns         *uint32                `protobuf:"varint,3,opt,name=turns,proto3,oneof" json:"turns,omitempty"`
 	Limit         *uint32                `protobuf:"varint,4,opt,name=limit,proto3,oneof" json:"limit,omitempty"`
@@ -771,7 +772,7 @@ type WorkstreamFailure struct {
 
 func (x *WorkstreamFailure) Reset() {
 	*x = WorkstreamFailure{}
-	mi := &file_vibesys_store_v1_search_attrs_proto_msgTypes[2]
+	mi := &file_vibesys_search_v1_attrs_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -783,7 +784,7 @@ func (x *WorkstreamFailure) String() string {
 func (*WorkstreamFailure) ProtoMessage() {}
 
 func (x *WorkstreamFailure) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_store_v1_search_attrs_proto_msgTypes[2]
+	mi := &file_vibesys_search_v1_attrs_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -796,7 +797,7 @@ func (x *WorkstreamFailure) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkstreamFailure.ProtoReflect.Descriptor instead.
 func (*WorkstreamFailure) Descriptor() ([]byte, []int) {
-	return file_vibesys_store_v1_search_attrs_proto_rawDescGZIP(), []int{2}
+	return file_vibesys_search_v1_attrs_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *WorkstreamFailure) GetKind() WorkstreamFailureKind {
@@ -846,7 +847,7 @@ type FileChange struct {
 
 func (x *FileChange) Reset() {
 	*x = FileChange{}
-	mi := &file_vibesys_store_v1_search_attrs_proto_msgTypes[3]
+	mi := &file_vibesys_search_v1_attrs_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -858,7 +859,7 @@ func (x *FileChange) String() string {
 func (*FileChange) ProtoMessage() {}
 
 func (x *FileChange) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_store_v1_search_attrs_proto_msgTypes[3]
+	mi := &file_vibesys_search_v1_attrs_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -871,7 +872,7 @@ func (x *FileChange) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FileChange.ProtoReflect.Descriptor instead.
 func (*FileChange) Descriptor() ([]byte, []int) {
-	return file_vibesys_store_v1_search_attrs_proto_rawDescGZIP(), []int{3}
+	return file_vibesys_search_v1_attrs_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *FileChange) GetPath() string {
@@ -899,14 +900,14 @@ func (x *FileChange) GetDiffLength() uint64 {
 // value, unit, vs_baseline or output tail in attrs. Stage output is a LOG stream.
 type GateAttrs struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Stage         GateStage              `protobuf:"varint,1,opt,name=stage,proto3,enum=vibesys.store.v1.GateStage" json:"stage,omitempty"`
-	Subject       GateSubject            `protobuf:"varint,2,opt,name=subject,proto3,enum=vibesys.store.v1.GateSubject" json:"subject,omitempty"`
+	Stage         GateStage              `protobuf:"varint,1,opt,name=stage,proto3,enum=vibesys.search.v1.GateStage" json:"stage,omitempty"`
+	Subject       GateSubject            `protobuf:"varint,2,opt,name=subject,proto3,enum=vibesys.search.v1.GateSubject" json:"subject,omitempty"`
 	Recipe        *string                `protobuf:"bytes,3,opt,name=recipe,proto3,oneof" json:"recipe,omitempty"`
 	Command       *string                `protobuf:"bytes,4,opt,name=command,proto3,oneof" json:"command,omitempty"`
 	Reused        bool                   `protobuf:"varint,5,opt,name=reused,proto3" json:"reused,omitempty"`
 	Failed        *FailedCheck           `protobuf:"bytes,6,opt,name=failed,proto3,oneof" json:"failed,omitempty"`
 	InputFailure  *InputFailure          `protobuf:"bytes,7,opt,name=input_failure,json=inputFailure,proto3,oneof" json:"input_failure,omitempty"`
-	Source        *FrameworkSource       `protobuf:"varint,8,opt,name=source,proto3,enum=vibesys.store.v1.FrameworkSource,oneof" json:"source,omitempty"`
+	Source        *FrameworkSource       `protobuf:"varint,8,opt,name=source,proto3,enum=vibesys.search.v1.FrameworkSource,oneof" json:"source,omitempty"`
 	SourceLabel   *string                `protobuf:"bytes,9,opt,name=source_label,json=sourceLabel,proto3,oneof" json:"source_label,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -914,7 +915,7 @@ type GateAttrs struct {
 
 func (x *GateAttrs) Reset() {
 	*x = GateAttrs{}
-	mi := &file_vibesys_store_v1_search_attrs_proto_msgTypes[4]
+	mi := &file_vibesys_search_v1_attrs_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -926,7 +927,7 @@ func (x *GateAttrs) String() string {
 func (*GateAttrs) ProtoMessage() {}
 
 func (x *GateAttrs) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_store_v1_search_attrs_proto_msgTypes[4]
+	mi := &file_vibesys_search_v1_attrs_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -939,7 +940,7 @@ func (x *GateAttrs) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GateAttrs.ProtoReflect.Descriptor instead.
 func (*GateAttrs) Descriptor() ([]byte, []int) {
-	return file_vibesys_store_v1_search_attrs_proto_rawDescGZIP(), []int{4}
+	return file_vibesys_search_v1_attrs_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *GateAttrs) GetStage() GateStage {
@@ -1007,7 +1008,7 @@ func (x *GateAttrs) GetSourceLabel() string {
 
 type FailedCheck struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Check         EvidenceKind           `protobuf:"varint,1,opt,name=check,proto3,enum=vibesys.store.v1.EvidenceKind" json:"check,omitempty"`
+	Check         EvidenceKind           `protobuf:"varint,1,opt,name=check,proto3,enum=vibesys.search.v1.EvidenceKind" json:"check,omitempty"`
 	Completed     *uint64                `protobuf:"varint,2,opt,name=completed,proto3,oneof" json:"completed,omitempty"`
 	Required      *uint64                `protobuf:"varint,3,opt,name=required,proto3,oneof" json:"required,omitempty"`
 	Unit          *string                `protobuf:"bytes,4,opt,name=unit,proto3,oneof" json:"unit,omitempty"`
@@ -1017,7 +1018,7 @@ type FailedCheck struct {
 
 func (x *FailedCheck) Reset() {
 	*x = FailedCheck{}
-	mi := &file_vibesys_store_v1_search_attrs_proto_msgTypes[5]
+	mi := &file_vibesys_search_v1_attrs_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1029,7 +1030,7 @@ func (x *FailedCheck) String() string {
 func (*FailedCheck) ProtoMessage() {}
 
 func (x *FailedCheck) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_store_v1_search_attrs_proto_msgTypes[5]
+	mi := &file_vibesys_search_v1_attrs_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1042,7 +1043,7 @@ func (x *FailedCheck) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FailedCheck.ProtoReflect.Descriptor instead.
 func (*FailedCheck) Descriptor() ([]byte, []int) {
-	return file_vibesys_store_v1_search_attrs_proto_rawDescGZIP(), []int{5}
+	return file_vibesys_search_v1_attrs_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *FailedCheck) GetCheck() EvidenceKind {
@@ -1075,8 +1076,8 @@ func (x *FailedCheck) GetUnit() string {
 
 type InputFailure struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Kind          InputFailureKind       `protobuf:"varint,1,opt,name=kind,proto3,enum=vibesys.store.v1.InputFailureKind" json:"kind,omitempty"`
-	Stage         *GateStage             `protobuf:"varint,2,opt,name=stage,proto3,enum=vibesys.store.v1.GateStage,oneof" json:"stage,omitempty"`
+	Kind          InputFailureKind       `protobuf:"varint,1,opt,name=kind,proto3,enum=vibesys.search.v1.InputFailureKind" json:"kind,omitempty"`
+	Stage         *GateStage             `protobuf:"varint,2,opt,name=stage,proto3,enum=vibesys.search.v1.GateStage,oneof" json:"stage,omitempty"`
 	Attempts      uint32                 `protobuf:"varint,3,opt,name=attempts,proto3" json:"attempts,omitempty"`
 	Compared      bool                   `protobuf:"varint,4,opt,name=compared,proto3" json:"compared,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -1085,7 +1086,7 @@ type InputFailure struct {
 
 func (x *InputFailure) Reset() {
 	*x = InputFailure{}
-	mi := &file_vibesys_store_v1_search_attrs_proto_msgTypes[6]
+	mi := &file_vibesys_search_v1_attrs_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1097,7 +1098,7 @@ func (x *InputFailure) String() string {
 func (*InputFailure) ProtoMessage() {}
 
 func (x *InputFailure) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_store_v1_search_attrs_proto_msgTypes[6]
+	mi := &file_vibesys_search_v1_attrs_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1110,7 +1111,7 @@ func (x *InputFailure) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use InputFailure.ProtoReflect.Descriptor instead.
 func (*InputFailure) Descriptor() ([]byte, []int) {
-	return file_vibesys_store_v1_search_attrs_proto_rawDescGZIP(), []int{6}
+	return file_vibesys_search_v1_attrs_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *InputFailure) GetKind() InputFailureKind {
@@ -1144,7 +1145,7 @@ func (x *InputFailure) GetCompared() bool {
 type AdoptionAttrs struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Candidate     *string                `protobuf:"bytes,1,opt,name=candidate,proto3,oneof" json:"candidate,omitempty"`
-	Selection     Selection              `protobuf:"varint,2,opt,name=selection,proto3,enum=vibesys.store.v1.Selection" json:"selection,omitempty"`
+	Selection     Selection              `protobuf:"varint,2,opt,name=selection,proto3,enum=vibesys.search.v1.Selection" json:"selection,omitempty"`
 	SettlementId  *string                `protobuf:"bytes,3,opt,name=settlement_id,json=settlementId,proto3,oneof" json:"settlement_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1152,7 +1153,7 @@ type AdoptionAttrs struct {
 
 func (x *AdoptionAttrs) Reset() {
 	*x = AdoptionAttrs{}
-	mi := &file_vibesys_store_v1_search_attrs_proto_msgTypes[7]
+	mi := &file_vibesys_search_v1_attrs_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1164,7 +1165,7 @@ func (x *AdoptionAttrs) String() string {
 func (*AdoptionAttrs) ProtoMessage() {}
 
 func (x *AdoptionAttrs) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_store_v1_search_attrs_proto_msgTypes[7]
+	mi := &file_vibesys_search_v1_attrs_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1177,7 +1178,7 @@ func (x *AdoptionAttrs) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AdoptionAttrs.ProtoReflect.Descriptor instead.
 func (*AdoptionAttrs) Descriptor() ([]byte, []int) {
-	return file_vibesys_store_v1_search_attrs_proto_rawDescGZIP(), []int{7}
+	return file_vibesys_search_v1_attrs_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *AdoptionAttrs) GetCandidate() string {
@@ -1207,10 +1208,10 @@ type ComparisonAttrs struct {
 	state            protoimpl.MessageState `protogen:"open.v1"`
 	Metric           string                 `protobuf:"bytes,1,opt,name=metric,proto3" json:"metric,omitempty"`
 	Unit             string                 `protobuf:"bytes,2,opt,name=unit,proto3" json:"unit,omitempty"`
-	Direction        Direction              `protobuf:"varint,3,opt,name=direction,proto3,enum=vibesys.store.v1.Direction" json:"direction,omitempty"`
+	Direction        v1.Direction           `protobuf:"varint,3,opt,name=direction,proto3,enum=vibesys.store.v1.Direction" json:"direction,omitempty"`
 	Ratio            float64                `protobuf:"fixed64,4,opt,name=ratio,proto3" json:"ratio,omitempty"`
 	Noise            float64                `protobuf:"fixed64,5,opt,name=noise,proto3" json:"noise,omitempty"`
-	Verdict          ComparisonVerdict      `protobuf:"varint,6,opt,name=verdict,proto3,enum=vibesys.store.v1.ComparisonVerdict" json:"verdict,omitempty"`
+	Verdict          ComparisonVerdict      `protobuf:"varint,6,opt,name=verdict,proto3,enum=vibesys.search.v1.ComparisonVerdict" json:"verdict,omitempty"`
 	CandidateValue   float64                `protobuf:"fixed64,7,opt,name=candidate_value,json=candidateValue,proto3" json:"candidate_value,omitempty"`
 	BaseValue        float64                `protobuf:"fixed64,8,opt,name=base_value,json=baseValue,proto3" json:"base_value,omitempty"`
 	CandidateSamples uint32                 `protobuf:"varint,9,opt,name=candidate_samples,json=candidateSamples,proto3" json:"candidate_samples,omitempty"`
@@ -1221,7 +1222,7 @@ type ComparisonAttrs struct {
 
 func (x *ComparisonAttrs) Reset() {
 	*x = ComparisonAttrs{}
-	mi := &file_vibesys_store_v1_search_attrs_proto_msgTypes[8]
+	mi := &file_vibesys_search_v1_attrs_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1233,7 +1234,7 @@ func (x *ComparisonAttrs) String() string {
 func (*ComparisonAttrs) ProtoMessage() {}
 
 func (x *ComparisonAttrs) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_store_v1_search_attrs_proto_msgTypes[8]
+	mi := &file_vibesys_search_v1_attrs_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1246,7 +1247,7 @@ func (x *ComparisonAttrs) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ComparisonAttrs.ProtoReflect.Descriptor instead.
 func (*ComparisonAttrs) Descriptor() ([]byte, []int) {
-	return file_vibesys_store_v1_search_attrs_proto_rawDescGZIP(), []int{8}
+	return file_vibesys_search_v1_attrs_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *ComparisonAttrs) GetMetric() string {
@@ -1263,11 +1264,11 @@ func (x *ComparisonAttrs) GetUnit() string {
 	return ""
 }
 
-func (x *ComparisonAttrs) GetDirection() Direction {
+func (x *ComparisonAttrs) GetDirection() v1.Direction {
 	if x != nil {
 		return x.Direction
 	}
-	return Direction_DIRECTION_UNSPECIFIED
+	return v1.Direction(0)
 }
 
 func (x *ComparisonAttrs) GetRatio() float64 {
@@ -1324,10 +1325,10 @@ func (x *ComparisonAttrs) GetBaseSamples() uint32 {
 type BaselineAttrs struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Label         string                 `protobuf:"bytes,1,opt,name=label,proto3" json:"label,omitempty"`
-	Status        BaselineStatus         `protobuf:"varint,2,opt,name=status,proto3,enum=vibesys.store.v1.BaselineStatus" json:"status,omitempty"`
+	Status        BaselineStatus         `protobuf:"varint,2,opt,name=status,proto3,enum=vibesys.search.v1.BaselineStatus" json:"status,omitempty"`
 	Metric        *string                `protobuf:"bytes,3,opt,name=metric,proto3,oneof" json:"metric,omitempty"`
 	Unit          *string                `protobuf:"bytes,4,opt,name=unit,proto3,oneof" json:"unit,omitempty"`
-	Direction     *Direction             `protobuf:"varint,5,opt,name=direction,proto3,enum=vibesys.store.v1.Direction,oneof" json:"direction,omitempty"`
+	Direction     *v1.Direction          `protobuf:"varint,5,opt,name=direction,proto3,enum=vibesys.store.v1.Direction,oneof" json:"direction,omitempty"`
 	Value         *float64               `protobuf:"fixed64,6,opt,name=value,proto3,oneof" json:"value,omitempty"`
 	Spread        *float64               `protobuf:"fixed64,7,opt,name=spread,proto3,oneof" json:"spread,omitempty"`
 	Samples       *uint32                `protobuf:"varint,8,opt,name=samples,proto3,oneof" json:"samples,omitempty"`
@@ -1339,7 +1340,7 @@ type BaselineAttrs struct {
 
 func (x *BaselineAttrs) Reset() {
 	*x = BaselineAttrs{}
-	mi := &file_vibesys_store_v1_search_attrs_proto_msgTypes[9]
+	mi := &file_vibesys_search_v1_attrs_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1351,7 +1352,7 @@ func (x *BaselineAttrs) String() string {
 func (*BaselineAttrs) ProtoMessage() {}
 
 func (x *BaselineAttrs) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_store_v1_search_attrs_proto_msgTypes[9]
+	mi := &file_vibesys_search_v1_attrs_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1364,7 +1365,7 @@ func (x *BaselineAttrs) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use BaselineAttrs.ProtoReflect.Descriptor instead.
 func (*BaselineAttrs) Descriptor() ([]byte, []int) {
-	return file_vibesys_store_v1_search_attrs_proto_rawDescGZIP(), []int{9}
+	return file_vibesys_search_v1_attrs_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *BaselineAttrs) GetLabel() string {
@@ -1395,11 +1396,11 @@ func (x *BaselineAttrs) GetUnit() string {
 	return ""
 }
 
-func (x *BaselineAttrs) GetDirection() Direction {
+func (x *BaselineAttrs) GetDirection() v1.Direction {
 	if x != nil && x.Direction != nil {
 		return *x.Direction
 	}
-	return Direction_DIRECTION_UNSPECIFIED
+	return v1.Direction(0)
 }
 
 func (x *BaselineAttrs) GetValue() float64 {
@@ -1437,13 +1438,13 @@ func (x *BaselineAttrs) GetReason() string {
 	return ""
 }
 
-var File_vibesys_store_v1_search_attrs_proto protoreflect.FileDescriptor
+var File_vibesys_search_v1_attrs_proto protoreflect.FileDescriptor
 
-const file_vibesys_store_v1_search_attrs_proto_rawDesc = "" +
+const file_vibesys_search_v1_attrs_proto_rawDesc = "" +
 	"\n" +
-	"#vibesys/store/v1/search_attrs.proto\x12\x10vibesys.store.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1dvibesys/store/v1/common.proto\"#\n" +
+	"\x1dvibesys/search/v1/attrs.proto\x12\x11vibesys.search.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1dvibesys/store/v1/common.proto\"#\n" +
 	"\rPlanningAttrs\x12\x12\n" +
-	"\x04call\x18\x01 \x01(\rR\x04call\"\xcf\x06\n" +
+	"\x04call\x18\x01 \x01(\rR\x04call\"\xd1\x06\n" +
 	"\x0fWorkstreamAttrs\x125\n" +
 	"\rhypothesis_id\x18\x01 \x01(\tB\v\xbaH\br\x06\x10\x01(\x80\x80\x04H\x00R\fhypothesisId\x88\x01\x01\x129\n" +
 	"\x0fparent_revision\x18\x02 \x01(\tB\v\xbaH\br\x06\x10\x01(\x80\x80\x04H\x01R\x0eparentRevision\x88\x01\x01\x12\"\n" +
@@ -1454,10 +1455,10 @@ const file_vibesys_store_v1_search_attrs_proto_rawDesc = "" +
 	"\brevision\x18\x06 \x01(\tB\v\xbaH\br\x06\x10\x01(\x80\x80\x04H\x05R\brevision\x88\x01\x01\x12(\n" +
 	"\aoutcome\x18\a \x01(\tB\t\xbaH\x06r\x04(\x80\x80\x04H\x06R\aoutcome\x88\x01\x01\x12(\n" +
 	"\asummary\x18\b \x01(\tB\t\xbaH\x06r\x04(\x80\x80\x04H\aR\asummary\x88\x01\x01\x12\x14\n" +
-	"\x05probe\x18\t \x01(\bR\x05probe\x12B\n" +
+	"\x05probe\x18\t \x01(\bR\x05probe\x12C\n" +
 	"\afailure\x18\n" +
-	" \x01(\v2#.vibesys.store.v1.WorkstreamFailureH\bR\afailure\x88\x01\x01\x122\n" +
-	"\x05files\x18\v \x03(\v2\x1c.vibesys.store.v1.FileChangeR\x05files\x12\x1f\n" +
+	" \x01(\v2$.vibesys.search.v1.WorkstreamFailureH\bR\afailure\x88\x01\x01\x123\n" +
+	"\x05files\x18\v \x03(\v2\x1d.vibesys.search.v1.FileChangeR\x05files\x12\x1f\n" +
 	"\battempts\x18\f \x01(\rH\tR\battempts\x88\x01\x01\x12,\n" +
 	"\x0fprofile_skipped\x18\r \x01(\bH\n" +
 	"R\x0eprofileSkipped\x88\x01\x01\x125\n" +
@@ -1477,9 +1478,9 @@ const file_vibesys_store_v1_search_attrs_proto_rawDesc = "" +
 	"\b_failureB\v\n" +
 	"\t_attemptsB\x12\n" +
 	"\x10_profile_skippedB\x10\n" +
-	"\x0e_judge_verdict\"\xf4\x01\n" +
-	"\x11WorkstreamFailure\x12G\n" +
-	"\x04kind\x18\x01 \x01(\x0e2'.vibesys.store.v1.WorkstreamFailureKindB\n" +
+	"\x0e_judge_verdict\"\xf5\x01\n" +
+	"\x11WorkstreamFailure\x12H\n" +
+	"\x04kind\x18\x01 \x01(\x0e2(.vibesys.search.v1.WorkstreamFailureKindB\n" +
 	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x04kind\x12$\n" +
 	"\x04role\x18\x02 \x01(\tB\v\xbaH\br\x06\x10\x01(\x80\x80\x04H\x00R\x04role\x88\x01\x01\x12\x19\n" +
 	"\x05turns\x18\x03 \x01(\rH\x01R\x05turns\x88\x01\x01\x12\x19\n" +
@@ -1494,18 +1495,18 @@ const file_vibesys_store_v1_search_attrs_proto_rawDesc = "" +
 	"\vdiff_offset\x18\x02 \x01(\x04R\n" +
 	"diffOffset\x12\x1f\n" +
 	"\vdiff_length\x18\x03 \x01(\x04R\n" +
-	"diffLength\"\xc7\x05\n" +
-	"\tGateAttrs\x12=\n" +
-	"\x05stage\x18\x01 \x01(\x0e2\x1b.vibesys.store.v1.GateStageB\n" +
-	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x05stage\x12C\n" +
-	"\asubject\x18\x02 \x01(\x0e2\x1d.vibesys.store.v1.GateSubjectB\n" +
+	"diffLength\"\xcc\x05\n" +
+	"\tGateAttrs\x12>\n" +
+	"\x05stage\x18\x01 \x01(\x0e2\x1c.vibesys.search.v1.GateStageB\n" +
+	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x05stage\x12D\n" +
+	"\asubject\x18\x02 \x01(\x0e2\x1e.vibesys.search.v1.GateSubjectB\n" +
 	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\asubject\x12(\n" +
 	"\x06recipe\x18\x03 \x01(\tB\v\xbaH\br\x06\x10\x01(\x80\x80\x04H\x00R\x06recipe\x88\x01\x01\x12(\n" +
 	"\acommand\x18\x04 \x01(\tB\t\xbaH\x06r\x04(\x80\x80\x04H\x01R\acommand\x88\x01\x01\x12\x16\n" +
-	"\x06reused\x18\x05 \x01(\bR\x06reused\x12:\n" +
-	"\x06failed\x18\x06 \x01(\v2\x1d.vibesys.store.v1.FailedCheckH\x02R\x06failed\x88\x01\x01\x12H\n" +
-	"\rinput_failure\x18\a \x01(\v2\x1e.vibesys.store.v1.InputFailureH\x03R\finputFailure\x88\x01\x01\x12J\n" +
-	"\x06source\x18\b \x01(\x0e2!.vibesys.store.v1.FrameworkSourceB\n" +
+	"\x06reused\x18\x05 \x01(\bR\x06reused\x12;\n" +
+	"\x06failed\x18\x06 \x01(\v2\x1e.vibesys.search.v1.FailedCheckH\x02R\x06failed\x88\x01\x01\x12I\n" +
+	"\rinput_failure\x18\a \x01(\v2\x1f.vibesys.search.v1.InputFailureH\x03R\finputFailure\x88\x01\x01\x12K\n" +
+	"\x06source\x18\b \x01(\x0e2\".vibesys.search.v1.FrameworkSourceB\n" +
 	"\xbaH\a\x82\x01\x04\x10\x01 \x00H\x04R\x06source\x88\x01\x01\x121\n" +
 	"\fsource_label\x18\t \x01(\tB\t\xbaH\x06r\x04(\x80\x80\x04H\x05R\vsourceLabel\x88\x01\x01:u\xbaHr\x1ap\n" +
 	"\x12gate.input_failure\x12+input_failure belongs only to an input gate\x1a-!has(this.input_failure) || this.subject == 1B\t\n" +
@@ -1515,9 +1516,9 @@ const file_vibesys_store_v1_search_attrs_proto_rawDesc = "" +
 	"\a_failedB\x10\n" +
 	"\x0e_input_failureB\t\n" +
 	"\a_sourceB\x0f\n" +
-	"\r_source_label\"\xf1\x02\n" +
-	"\vFailedCheck\x12@\n" +
-	"\x05check\x18\x01 \x01(\x0e2\x1e.vibesys.store.v1.EvidenceKindB\n" +
+	"\r_source_label\"\xf2\x02\n" +
+	"\vFailedCheck\x12A\n" +
+	"\x05check\x18\x01 \x01(\x0e2\x1f.vibesys.search.v1.EvidenceKindB\n" +
 	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x05check\x12!\n" +
 	"\tcompleted\x18\x02 \x01(\x04H\x00R\tcompleted\x88\x01\x01\x12\x1f\n" +
 	"\brequired\x18\x03 \x01(\x04H\x01R\brequired\x88\x01\x01\x12\"\n" +
@@ -1526,32 +1527,32 @@ const file_vibesys_store_v1_search_attrs_proto_rawDesc = "" +
 	"\n" +
 	"_completedB\v\n" +
 	"\t_requiredB\a\n" +
-	"\x05_unit\"\xe1\x01\n" +
-	"\fInputFailure\x12B\n" +
-	"\x04kind\x18\x01 \x01(\x0e2\".vibesys.store.v1.InputFailureKindB\n" +
-	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x04kind\x12B\n" +
-	"\x05stage\x18\x02 \x01(\x0e2\x1b.vibesys.store.v1.GateStageB\n" +
+	"\x05_unit\"\xe3\x01\n" +
+	"\fInputFailure\x12C\n" +
+	"\x04kind\x18\x01 \x01(\x0e2#.vibesys.search.v1.InputFailureKindB\n" +
+	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x04kind\x12C\n" +
+	"\x05stage\x18\x02 \x01(\x0e2\x1c.vibesys.search.v1.GateStageB\n" +
 	"\xbaH\a\x82\x01\x04\x10\x01 \x00H\x00R\x05stage\x88\x01\x01\x12#\n" +
 	"\battempts\x18\x03 \x01(\rB\a\xbaH\x04*\x02 \x00R\battempts\x12\x1a\n" +
 	"\bcompared\x18\x04 \x01(\bR\bcomparedB\b\n" +
-	"\x06_stage\"\xd3\x02\n" +
+	"\x06_stage\"\xd4\x02\n" +
 	"\rAdoptionAttrs\x12.\n" +
-	"\tcandidate\x18\x01 \x01(\tB\v\xbaH\br\x06\x10\x01(\x80\x80\x04H\x00R\tcandidate\x88\x01\x01\x12E\n" +
-	"\tselection\x18\x02 \x01(\x0e2\x1b.vibesys.store.v1.SelectionB\n" +
+	"\tcandidate\x18\x01 \x01(\tB\v\xbaH\br\x06\x10\x01(\x80\x80\x04H\x00R\tcandidate\x88\x01\x01\x12F\n" +
+	"\tselection\x18\x02 \x01(\x0e2\x1c.vibesys.search.v1.SelectionB\n" +
 	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\tselection\x125\n" +
 	"\rsettlement_id\x18\x03 \x01(\tB\v\xbaH\br\x06\x10\x01(\x80\x80\x04H\x01R\fsettlementId\x88\x01\x01:t\xbaHq\x1ao\n" +
 	"\x12adoption.candidate\x12-candidate is required for candidate selection\x1a*this.selection != 1 || has(this.candidate)B\f\n" +
 	"\n" +
 	"_candidateB\x10\n" +
-	"\x0e_settlement_id\"\xcb\x04\n" +
+	"\x0e_settlement_id\"\xcc\x04\n" +
 	"\x0fComparisonAttrs\x12#\n" +
 	"\x06metric\x18\x01 \x01(\tB\v\xbaH\br\x06\x10\x01(\x80\x80\x04R\x06metric\x12\x1d\n" +
 	"\x04unit\x18\x02 \x01(\tB\t\xbaH\x06r\x04(\x80\x80\x04R\x04unit\x12E\n" +
 	"\tdirection\x18\x03 \x01(\x0e2\x1b.vibesys.store.v1.DirectionB\n" +
 	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\tdirection\x12\x1d\n" +
 	"\x05ratio\x18\x04 \x01(\x01B\a\xbaH\x04\x12\x02@\x01R\x05ratio\x12&\n" +
-	"\x05noise\x18\x05 \x01(\x01B\x10\xbaH\r\x12\v@\x01)\x00\x00\x00\x00\x00\x00\x00\x00R\x05noise\x12I\n" +
-	"\averdict\x18\x06 \x01(\x0e2#.vibesys.store.v1.ComparisonVerdictB\n" +
+	"\x05noise\x18\x05 \x01(\x01B\x10\xbaH\r\x12\v@\x01)\x00\x00\x00\x00\x00\x00\x00\x00R\x05noise\x12J\n" +
+	"\averdict\x18\x06 \x01(\x0e2$.vibesys.search.v1.ComparisonVerdictB\n" +
 	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\averdict\x120\n" +
 	"\x0fcandidate_value\x18\a \x01(\x01B\a\xbaH\x04\x12\x02@\x01R\x0ecandidateValue\x12&\n" +
 	"\n" +
@@ -1559,10 +1560,10 @@ const file_vibesys_store_v1_search_attrs_proto_rawDesc = "" +
 	"\x11candidate_samples\x18\t \x01(\rB\a\xbaH\x04*\x02 \x00R\x10candidateSamples\x12*\n" +
 	"\fbase_samples\x18\n" +
 	" \x01(\rB\a\xbaH\x04*\x02 \x00R\vbaseSamples:_\xbaH\\\x1aZ\n" +
-	"\x14comparison.direction\x12-direction must be max or min for a comparison\x1a\x13this.direction != 3\"\xab\x04\n" +
+	"\x14comparison.direction\x12-direction must be max or min for a comparison\x1a\x13this.direction != 3\"\xac\x04\n" +
 	"\rBaselineAttrs\x12!\n" +
-	"\x05label\x18\x01 \x01(\tB\v\xbaH\br\x06\x10\x01(\x80\x80\x04R\x05label\x12D\n" +
-	"\x06status\x18\x02 \x01(\x0e2 .vibesys.store.v1.BaselineStatusB\n" +
+	"\x05label\x18\x01 \x01(\tB\v\xbaH\br\x06\x10\x01(\x80\x80\x04R\x05label\x12E\n" +
+	"\x06status\x18\x02 \x01(\x0e2!.vibesys.search.v1.BaselineStatusB\n" +
 	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x06status\x12(\n" +
 	"\x06metric\x18\x03 \x01(\tB\v\xbaH\br\x06\x10\x01(\x80\x80\x04H\x00R\x06metric\x88\x01\x01\x12\"\n" +
 	"\x04unit\x18\x04 \x01(\tB\t\xbaH\x06r\x04(\x80\x80\x04H\x01R\x04unit\x88\x01\x01\x12J\n" +
@@ -1651,62 +1652,63 @@ const file_vibesys_store_v1_search_attrs_proto_rawDesc = "" +
 	",WORKSTREAM_FAILURE_KIND_EVIDENCE_UNDECODABLE\x10\x10\x127\n" +
 	"3WORKSTREAM_FAILURE_KIND_PROFILE_CAPTURE_UNAVAILABLE\x10\x11\x12&\n" +
 	"\"WORKSTREAM_FAILURE_KIND_TURN_LIMIT\x10\x12\x12)\n" +
-	"%WORKSTREAM_FAILURE_KIND_REPEATED_TURN\x10\x13B\xcb\x01\n" +
-	"\x14com.vibesys.store.v1B\x10SearchAttrsProtoP\x01Z?github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1\xa2\x02\x03VSX\xaa\x02\x10Vibesys.Store.V1\xca\x02\x10Vibesys\\Store\\V1\xe2\x02\x1cVibesys\\Store\\V1\\GPBMetadata\xea\x02\x12Vibesys::Store::V1b\x06proto3"
+	"%WORKSTREAM_FAILURE_KIND_REPEATED_TURN\x10\x13B\xcc\x01\n" +
+	"\x15com.vibesys.search.v1B\n" +
+	"AttrsProtoP\x01ZAgithub.com/uw-syfi/vibesys/gateway/gen/vibesys/search/v1;searchv1\xa2\x02\x03VSX\xaa\x02\x11Vibesys.Search.V1\xca\x02\x11Vibesys\\Search\\V1\xe2\x02\x1dVibesys\\Search\\V1\\GPBMetadata\xea\x02\x13Vibesys::Search::V1b\x06proto3"
 
 var (
-	file_vibesys_store_v1_search_attrs_proto_rawDescOnce sync.Once
-	file_vibesys_store_v1_search_attrs_proto_rawDescData []byte
+	file_vibesys_search_v1_attrs_proto_rawDescOnce sync.Once
+	file_vibesys_search_v1_attrs_proto_rawDescData []byte
 )
 
-func file_vibesys_store_v1_search_attrs_proto_rawDescGZIP() []byte {
-	file_vibesys_store_v1_search_attrs_proto_rawDescOnce.Do(func() {
-		file_vibesys_store_v1_search_attrs_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_vibesys_store_v1_search_attrs_proto_rawDesc), len(file_vibesys_store_v1_search_attrs_proto_rawDesc)))
+func file_vibesys_search_v1_attrs_proto_rawDescGZIP() []byte {
+	file_vibesys_search_v1_attrs_proto_rawDescOnce.Do(func() {
+		file_vibesys_search_v1_attrs_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_vibesys_search_v1_attrs_proto_rawDesc), len(file_vibesys_search_v1_attrs_proto_rawDesc)))
 	})
-	return file_vibesys_store_v1_search_attrs_proto_rawDescData
+	return file_vibesys_search_v1_attrs_proto_rawDescData
 }
 
-var file_vibesys_store_v1_search_attrs_proto_enumTypes = make([]protoimpl.EnumInfo, 9)
-var file_vibesys_store_v1_search_attrs_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
-var file_vibesys_store_v1_search_attrs_proto_goTypes = []any{
-	(GateStage)(0),             // 0: vibesys.store.v1.GateStage
-	(GateSubject)(0),           // 1: vibesys.store.v1.GateSubject
-	(FrameworkSource)(0),       // 2: vibesys.store.v1.FrameworkSource
-	(EvidenceKind)(0),          // 3: vibesys.store.v1.EvidenceKind
-	(Selection)(0),             // 4: vibesys.store.v1.Selection
-	(ComparisonVerdict)(0),     // 5: vibesys.store.v1.ComparisonVerdict
-	(BaselineStatus)(0),        // 6: vibesys.store.v1.BaselineStatus
-	(InputFailureKind)(0),      // 7: vibesys.store.v1.InputFailureKind
-	(WorkstreamFailureKind)(0), // 8: vibesys.store.v1.WorkstreamFailureKind
-	(*PlanningAttrs)(nil),      // 9: vibesys.store.v1.PlanningAttrs
-	(*WorkstreamAttrs)(nil),    // 10: vibesys.store.v1.WorkstreamAttrs
-	(*WorkstreamFailure)(nil),  // 11: vibesys.store.v1.WorkstreamFailure
-	(*FileChange)(nil),         // 12: vibesys.store.v1.FileChange
-	(*GateAttrs)(nil),          // 13: vibesys.store.v1.GateAttrs
-	(*FailedCheck)(nil),        // 14: vibesys.store.v1.FailedCheck
-	(*InputFailure)(nil),       // 15: vibesys.store.v1.InputFailure
-	(*AdoptionAttrs)(nil),      // 16: vibesys.store.v1.AdoptionAttrs
-	(*ComparisonAttrs)(nil),    // 17: vibesys.store.v1.ComparisonAttrs
-	(*BaselineAttrs)(nil),      // 18: vibesys.store.v1.BaselineAttrs
-	(Direction)(0),             // 19: vibesys.store.v1.Direction
+var file_vibesys_search_v1_attrs_proto_enumTypes = make([]protoimpl.EnumInfo, 9)
+var file_vibesys_search_v1_attrs_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
+var file_vibesys_search_v1_attrs_proto_goTypes = []any{
+	(GateStage)(0),             // 0: vibesys.search.v1.GateStage
+	(GateSubject)(0),           // 1: vibesys.search.v1.GateSubject
+	(FrameworkSource)(0),       // 2: vibesys.search.v1.FrameworkSource
+	(EvidenceKind)(0),          // 3: vibesys.search.v1.EvidenceKind
+	(Selection)(0),             // 4: vibesys.search.v1.Selection
+	(ComparisonVerdict)(0),     // 5: vibesys.search.v1.ComparisonVerdict
+	(BaselineStatus)(0),        // 6: vibesys.search.v1.BaselineStatus
+	(InputFailureKind)(0),      // 7: vibesys.search.v1.InputFailureKind
+	(WorkstreamFailureKind)(0), // 8: vibesys.search.v1.WorkstreamFailureKind
+	(*PlanningAttrs)(nil),      // 9: vibesys.search.v1.PlanningAttrs
+	(*WorkstreamAttrs)(nil),    // 10: vibesys.search.v1.WorkstreamAttrs
+	(*WorkstreamFailure)(nil),  // 11: vibesys.search.v1.WorkstreamFailure
+	(*FileChange)(nil),         // 12: vibesys.search.v1.FileChange
+	(*GateAttrs)(nil),          // 13: vibesys.search.v1.GateAttrs
+	(*FailedCheck)(nil),        // 14: vibesys.search.v1.FailedCheck
+	(*InputFailure)(nil),       // 15: vibesys.search.v1.InputFailure
+	(*AdoptionAttrs)(nil),      // 16: vibesys.search.v1.AdoptionAttrs
+	(*ComparisonAttrs)(nil),    // 17: vibesys.search.v1.ComparisonAttrs
+	(*BaselineAttrs)(nil),      // 18: vibesys.search.v1.BaselineAttrs
+	(v1.Direction)(0),          // 19: vibesys.store.v1.Direction
 }
-var file_vibesys_store_v1_search_attrs_proto_depIdxs = []int32{
-	11, // 0: vibesys.store.v1.WorkstreamAttrs.failure:type_name -> vibesys.store.v1.WorkstreamFailure
-	12, // 1: vibesys.store.v1.WorkstreamAttrs.files:type_name -> vibesys.store.v1.FileChange
-	8,  // 2: vibesys.store.v1.WorkstreamFailure.kind:type_name -> vibesys.store.v1.WorkstreamFailureKind
-	0,  // 3: vibesys.store.v1.GateAttrs.stage:type_name -> vibesys.store.v1.GateStage
-	1,  // 4: vibesys.store.v1.GateAttrs.subject:type_name -> vibesys.store.v1.GateSubject
-	14, // 5: vibesys.store.v1.GateAttrs.failed:type_name -> vibesys.store.v1.FailedCheck
-	15, // 6: vibesys.store.v1.GateAttrs.input_failure:type_name -> vibesys.store.v1.InputFailure
-	2,  // 7: vibesys.store.v1.GateAttrs.source:type_name -> vibesys.store.v1.FrameworkSource
-	3,  // 8: vibesys.store.v1.FailedCheck.check:type_name -> vibesys.store.v1.EvidenceKind
-	7,  // 9: vibesys.store.v1.InputFailure.kind:type_name -> vibesys.store.v1.InputFailureKind
-	0,  // 10: vibesys.store.v1.InputFailure.stage:type_name -> vibesys.store.v1.GateStage
-	4,  // 11: vibesys.store.v1.AdoptionAttrs.selection:type_name -> vibesys.store.v1.Selection
-	19, // 12: vibesys.store.v1.ComparisonAttrs.direction:type_name -> vibesys.store.v1.Direction
-	5,  // 13: vibesys.store.v1.ComparisonAttrs.verdict:type_name -> vibesys.store.v1.ComparisonVerdict
-	6,  // 14: vibesys.store.v1.BaselineAttrs.status:type_name -> vibesys.store.v1.BaselineStatus
-	19, // 15: vibesys.store.v1.BaselineAttrs.direction:type_name -> vibesys.store.v1.Direction
+var file_vibesys_search_v1_attrs_proto_depIdxs = []int32{
+	11, // 0: vibesys.search.v1.WorkstreamAttrs.failure:type_name -> vibesys.search.v1.WorkstreamFailure
+	12, // 1: vibesys.search.v1.WorkstreamAttrs.files:type_name -> vibesys.search.v1.FileChange
+	8,  // 2: vibesys.search.v1.WorkstreamFailure.kind:type_name -> vibesys.search.v1.WorkstreamFailureKind
+	0,  // 3: vibesys.search.v1.GateAttrs.stage:type_name -> vibesys.search.v1.GateStage
+	1,  // 4: vibesys.search.v1.GateAttrs.subject:type_name -> vibesys.search.v1.GateSubject
+	14, // 5: vibesys.search.v1.GateAttrs.failed:type_name -> vibesys.search.v1.FailedCheck
+	15, // 6: vibesys.search.v1.GateAttrs.input_failure:type_name -> vibesys.search.v1.InputFailure
+	2,  // 7: vibesys.search.v1.GateAttrs.source:type_name -> vibesys.search.v1.FrameworkSource
+	3,  // 8: vibesys.search.v1.FailedCheck.check:type_name -> vibesys.search.v1.EvidenceKind
+	7,  // 9: vibesys.search.v1.InputFailure.kind:type_name -> vibesys.search.v1.InputFailureKind
+	0,  // 10: vibesys.search.v1.InputFailure.stage:type_name -> vibesys.search.v1.GateStage
+	4,  // 11: vibesys.search.v1.AdoptionAttrs.selection:type_name -> vibesys.search.v1.Selection
+	19, // 12: vibesys.search.v1.ComparisonAttrs.direction:type_name -> vibesys.store.v1.Direction
+	5,  // 13: vibesys.search.v1.ComparisonAttrs.verdict:type_name -> vibesys.search.v1.ComparisonVerdict
+	6,  // 14: vibesys.search.v1.BaselineAttrs.status:type_name -> vibesys.search.v1.BaselineStatus
+	19, // 15: vibesys.search.v1.BaselineAttrs.direction:type_name -> vibesys.store.v1.Direction
 	16, // [16:16] is the sub-list for method output_type
 	16, // [16:16] is the sub-list for method input_type
 	16, // [16:16] is the sub-list for extension type_name
@@ -1714,35 +1716,34 @@ var file_vibesys_store_v1_search_attrs_proto_depIdxs = []int32{
 	0,  // [0:16] is the sub-list for field type_name
 }
 
-func init() { file_vibesys_store_v1_search_attrs_proto_init() }
-func file_vibesys_store_v1_search_attrs_proto_init() {
-	if File_vibesys_store_v1_search_attrs_proto != nil {
+func init() { file_vibesys_search_v1_attrs_proto_init() }
+func file_vibesys_search_v1_attrs_proto_init() {
+	if File_vibesys_search_v1_attrs_proto != nil {
 		return
 	}
-	file_vibesys_store_v1_common_proto_init()
-	file_vibesys_store_v1_search_attrs_proto_msgTypes[1].OneofWrappers = []any{}
-	file_vibesys_store_v1_search_attrs_proto_msgTypes[2].OneofWrappers = []any{}
-	file_vibesys_store_v1_search_attrs_proto_msgTypes[4].OneofWrappers = []any{}
-	file_vibesys_store_v1_search_attrs_proto_msgTypes[5].OneofWrappers = []any{}
-	file_vibesys_store_v1_search_attrs_proto_msgTypes[6].OneofWrappers = []any{}
-	file_vibesys_store_v1_search_attrs_proto_msgTypes[7].OneofWrappers = []any{}
-	file_vibesys_store_v1_search_attrs_proto_msgTypes[9].OneofWrappers = []any{}
+	file_vibesys_search_v1_attrs_proto_msgTypes[1].OneofWrappers = []any{}
+	file_vibesys_search_v1_attrs_proto_msgTypes[2].OneofWrappers = []any{}
+	file_vibesys_search_v1_attrs_proto_msgTypes[4].OneofWrappers = []any{}
+	file_vibesys_search_v1_attrs_proto_msgTypes[5].OneofWrappers = []any{}
+	file_vibesys_search_v1_attrs_proto_msgTypes[6].OneofWrappers = []any{}
+	file_vibesys_search_v1_attrs_proto_msgTypes[7].OneofWrappers = []any{}
+	file_vibesys_search_v1_attrs_proto_msgTypes[9].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_vibesys_store_v1_search_attrs_proto_rawDesc), len(file_vibesys_store_v1_search_attrs_proto_rawDesc)),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_vibesys_search_v1_attrs_proto_rawDesc), len(file_vibesys_search_v1_attrs_proto_rawDesc)),
 			NumEnums:      9,
 			NumMessages:   10,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
-		GoTypes:           file_vibesys_store_v1_search_attrs_proto_goTypes,
-		DependencyIndexes: file_vibesys_store_v1_search_attrs_proto_depIdxs,
-		EnumInfos:         file_vibesys_store_v1_search_attrs_proto_enumTypes,
-		MessageInfos:      file_vibesys_store_v1_search_attrs_proto_msgTypes,
+		GoTypes:           file_vibesys_search_v1_attrs_proto_goTypes,
+		DependencyIndexes: file_vibesys_search_v1_attrs_proto_depIdxs,
+		EnumInfos:         file_vibesys_search_v1_attrs_proto_enumTypes,
+		MessageInfos:      file_vibesys_search_v1_attrs_proto_msgTypes,
 	}.Build()
-	File_vibesys_store_v1_search_attrs_proto = out.File
-	file_vibesys_store_v1_search_attrs_proto_goTypes = nil
-	file_vibesys_store_v1_search_attrs_proto_depIdxs = nil
+	File_vibesys_search_v1_attrs_proto = out.File
+	file_vibesys_search_v1_attrs_proto_goTypes = nil
+	file_vibesys_search_v1_attrs_proto_depIdxs = nil
 }

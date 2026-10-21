@@ -1,11 +1,11 @@
 syntax = "proto3";
 
-package vibesys.store.v1;
+package vibesys.search.v1;
 
 import "buf/validate/validate.proto";
 import "vibesys/store/v1/common.proto";
 
-option go_package = "github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1";
+option go_package = "github.com/uw-syfi/vibesys/gateway/gen/vibesys/search/v1;searchv1";
 
 enum GateStage {
   GATE_STAGE_UNSPECIFIED = 0;
@@ -244,7 +244,7 @@ message ComparisonAttrs {
     max_bytes: 65536
   }];
   string unit = 2 [(buf.validate.field).string.max_bytes = 65536];
-  Direction direction = 3 [(buf.validate.field).enum = {
+  vibesys.store.v1.Direction direction = 3 [(buf.validate.field).enum = {
     defined_only: true
     not_in: [0]
   }];
@@ -279,7 +279,7 @@ message BaselineAttrs {
     max_bytes: 65536
   }];
   optional string unit = 4 [(buf.validate.field).string.max_bytes = 65536];
-  optional Direction direction = 5 [(buf.validate.field).enum = {
+  optional vibesys.store.v1.Direction direction = 5 [(buf.validate.field).enum = {
     defined_only: true
     not_in: [0]
   }];
