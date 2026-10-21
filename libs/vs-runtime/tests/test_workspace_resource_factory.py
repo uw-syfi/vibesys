@@ -17,6 +17,7 @@ from vs_project.api import (
     RunEnvironmentRecord,
 )
 from vs_project.api.testing import FakeGitRepositories, run_execution_record
+from vs_runtime.api import OrchestrationResumeDecision, RuntimeContractError
 from vs_runtime.api.core import BaselineEntryKind
 from vs_runtime.api.infrastructure import (
     AgentExecutionConfiguration,
@@ -51,7 +52,6 @@ if TYPE_CHECKING:
     from typing import TextIO
 
     from vs_project.api import OrchestrationRunManifest
-    from vs_runtime.api import OrchestrationResumeDecision
     from vs_runtime.api.infrastructure import RunEnvironmentSession, WorkspaceResourceEvent
     from vs_sandbox.api import CommandRunner
 
@@ -120,13 +120,23 @@ def _unexpected_resume(
     raise AssertionError
 
 
-def test_factory_owns_candidate_lifecycle_and_reports_restore_failure(tmp_path: Path) -> None:
+@pytest.mark.parametrize("resuming", [False, True])
+def test_factory_owns_candidate_lifecycle_and_reports_restore_failure(
+    tmp_path: Path, *, resuming: bool
+) -> None:
     root = tmp_path / "project"
     root.mkdir()
     (root / "candidate.py").write_text("VALUE = 1\n", encoding="utf-8")
     project = open_project_run_resources(
         _project_request(root), effects=_effects(), resolve_resume=_unexpected_resume
     )
+    if resuming:
+        project.close()
+        project = open_project_run_resources(
+            replace(_project_request(root), existing=True),
+            effects=_effects(),
+            resolve_resume=lambda _manifest: OrchestrationResumeDecision(descriptor=None),
+        )
     backend = FakeComputeBackend(threads=SimThreads())
     opened_sessions: list[_Session] = []
 
@@ -176,8 +186,16 @@ def test_factory_owns_candidate_lifecycle_and_reports_restore_failure(tmp_path: 
     assert candidate_path.is_dir()
     assert candidate.revision == revision
     assert factory.supports_parallel_candidates
-    assert not factory.root.try_restore("missing-revision", clean=True)
-    assert events == [WorkspaceRestoreFailed("missing-revision")]
+    if resuming:
+        notes = root / "operator-notes.txt"
+        notes.write_text("preserve", encoding="utf-8")
+        with pytest.raises(RuntimeContractError, match="project-edit protection"):
+            factory.root.restore(revision, clean=True)
+        assert notes.read_text(encoding="utf-8") == "preserve"
+        assert events == []
+    else:
+        assert not factory.root.try_restore("missing-revision", clean=True)
+        assert events == [WorkspaceRestoreFailed("missing-revision")]
 
     candidate.close()
     assert not candidate_path.exists()
