@@ -7,5 +7,11 @@ export {
   type SkeletonLoadFailure,
   skeletonLoaderMachine,
 } from './loader-machine.js';
-export {ingestSkeleton, ingestTail, type SkeletonLoad} from './loading.js';
+export {
+  ingestSkeleton,
+  ingestTail,
+  observeRun,
+  type RunLivenessHint,
+  type SkeletonLoad,
+} from './loading.js';
 export {foldSkeleton, type Skeleton, seedSkeleton, seekSkeleton} from './model.js';

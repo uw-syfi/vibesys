@@ -2,10 +2,17 @@ import {fromBinary} from '@bufbuild/protobuf';
 import {
   KeyframeSchema,
   RecordSchema,
+  RunLiveness,
   type SkeletonResponse,
   type TailResponse,
 } from '@vibesys/proto';
 import {foldSkeleton, type Skeleton, seedSkeleton} from './model.js';
+
+/** A transient gateway observation, fenced by the writer epoch; never part of history. */
+export interface RunLivenessHint {
+  readonly epoch: number;
+  readonly value: RunLiveness;
+}
 
 export interface SkeletonLoad {
   readonly skeleton: Skeleton;
@@ -61,4 +68,23 @@ export function ingestTail(state: SkeletonLoad, response: TailResponse): Skeleto
         skeleton.throughSeq >= state.committedSeq &&
         skeleton.throughSeq >= state.nextSeq),
   };
+}
+
+/** Read current-epoch writer facts with a transient hint; never mutate the recorded lifecycle. */
+export function observeRun(skeleton: Skeleton, hint?: RunLivenessHint) {
+  const epoch = skeleton.epochs.at(-1);
+  const latest = skeleton.lifecycles.at(-1);
+  const lifecycle = latest && (!epoch || latest.seq >= epoch.seq) ? latest.lifecycle : undefined;
+  const final = lifecycle?.state.case === 'ended' || lifecycle?.state.case === 'parked';
+  return {
+    lifecycle,
+    final,
+    interrupted:
+      !final && hint?.epoch === epoch?.epoch?.epoch && hint?.value === RunLiveness.INTERRUPTED,
+  };
+}
+
+/** A complete final prefix needs no live follower; a prior epoch's end is not final. */
+export function isFinalLoad(load: SkeletonLoad | undefined): boolean {
+  return load?.complete === true && observeRun(load.skeleton).final;
 }

@@ -1,6 +1,6 @@
 /** Skeleton readings are projected into the existing Run screen props; seeking is local. */
 import type {HostRun} from '@vibesys/hosts';
-import {type Skeleton, seekSkeleton} from '@vibesys/run-skeleton';
+import {observeRun, type RunLivenessHint, type Skeleton, seekSkeleton} from '@vibesys/run-skeleton';
 import {agentGraph} from '@vibesys/run-state/agents';
 import {candidateTree} from '@vibesys/run-state/candidates';
 import {lifecycleState, readSkeleton, skeletonPositions} from '@vibesys/run-state/skeleton';
@@ -38,6 +38,7 @@ export function skeletonScreenState(
   skeleton: Skeleton,
   whole: RunModel,
   ui: RunPageState,
+  hint?: RunLivenessHint,
 ): RunPageState {
   const reading = readSkeleton(
     skeleton,
@@ -46,7 +47,7 @@ export function skeletonScreenState(
       ui.view.at === 'live' ? (skeleton.throughSeq ?? 0n) : BigInt(ui.view.at),
     ),
   );
-  const lifecycle = lifecycleState(skeleton.lifecycles.at(-1)?.lifecycle);
+  const lifecycle = observedLifecycle(skeleton, hint);
   const status = lifecycle.status;
   const ended = status === 'completed' || status === 'stopped' || status === 'failed';
   const run: HostRun | null =
@@ -103,4 +104,11 @@ export function skeletonScreenState(
     },
     view: ui.view,
   };
+}
+
+function observedLifecycle(skeleton: Skeleton, hint: RunLivenessHint | undefined) {
+  const observation = observeRun(skeleton, hint);
+  return observation.interrupted
+    ? {status: 'failed' as const, word: 'Interrupted', reason: null}
+    : lifecycleState(observation.lifecycle);
 }

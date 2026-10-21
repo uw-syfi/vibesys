@@ -1,20 +1,32 @@
 /** Gateway read session effects, sharing the existing skeleton loader and immutable cache role. */
 import {create, fromBinary, toBinary} from '@bufbuild/protobuf';
-import type {ScheduleTimeout} from '@vibesys/machine';
+import {clockFrom, type ScheduleTimeout} from '@vibesys/machine';
 import {
   GetBlobsRequestSchema,
   GetBlobsResponseSchema,
   HostService,
   TailStreamRequestSchema,
   TailStreamResponseSchema,
+  WatchRunsRequestSchema,
+  type WatchRunsResponse,
+  WatchRunsResponseSchema,
 } from '@vibesys/proto';
 import type {AbortSignalLike} from '@vibesys/transport';
+import {createActor, fromCallback, fromPromise} from 'xstate';
 import {
+  type RunLivenessHint,
   type RunTransport,
   type SkeletonCache,
   type SkeletonLoad,
   startSkeletonLoader,
 } from './index.js';
+
+import {isFinalLoad} from './loading.js';
+import {
+  type ObservationEvent,
+  type ObservationOperation,
+  runObservationMachine,
+} from './observation.js';
 
 export type ContentCache = Pick<SkeletonCache, 'getBlob' | 'putBlob'>;
 export interface GatewayLogChunk {
@@ -25,7 +37,7 @@ export interface GatewayLogChunk {
 export interface GatewayReader {
   watch(
     runId: string,
-    receive: (load: SkeletonLoad | undefined, failed: boolean) => void,
+    receive: (load: SkeletonLoad | undefined, failed: boolean, hint?: RunLivenessHint) => void,
   ): () => void;
   content(
     runId: string,
@@ -106,16 +118,65 @@ export function gatewayReader(
 ): GatewayReader {
   return {
     watch(runId, receive) {
-      const loader = startSkeletonLoader(transport, schedule, {runId, timeoutMs: 30000});
-      const subscription = loader.subscribe(snapshot =>
-        receive(snapshot.context.load, snapshot.context.error !== undefined),
+      const actor = createActor(
+        runObservationMachine.provide({
+          actors: {
+            history: fromCallback<ObservationEvent, ObservationOperation>(({input}) => {
+              const loader = startSkeletonLoader(transport, schedule, input);
+              const subscription = loader.subscribe(snapshot =>
+                input.receive({
+                  type: 'read',
+                  load: snapshot.context.load,
+                  failed: snapshot.context.error !== undefined,
+                }),
+              );
+              return () => {
+                subscription.unsubscribe();
+                loader.stop();
+              };
+            }),
+            watch: fromPromise<void, ObservationOperation>(async ({input, signal}) => {
+              for await (const bytes of transport.stream(
+                `${SERVICE}${HostService.method.watchRuns.name}`,
+                toBinary(WatchRunsRequestSchema, create(WatchRunsRequestSchema)),
+                signal,
+              )) {
+                if (signal.aborted) return;
+                const response = fromBinary(WatchRunsResponseSchema, bytes);
+                input.receive({type: 'ready'});
+                if (response.runId !== input.runId) continue;
+                input.receive({
+                  type: 'hint',
+                  hint: response.removed
+                    ? undefined
+                    : {
+                        epoch: observedEpoch(response),
+                        value: response.liveness,
+                      },
+                });
+              }
+            }),
+          },
+        }),
+        {input: {runId, timeoutMs: 30000}, clock: clockFrom(schedule)},
+      ).start();
+      const subscription = actor.subscribe(({context}) =>
+        receive(
+          context.load,
+          context.failed || (context.watchFailed && !isFinalLoad(context.load)),
+          context.hint,
+        ),
       );
       return () => {
         subscription.unsubscribe();
-        loader.stop();
+        actor.stop();
       };
     },
     content: (runId, hash, signal) => content(transport, cache, runId, hash, signal),
     log: (runId, streamId, signal, receive) => log(transport, runId, streamId, signal, receive),
   };
+}
+
+function observedEpoch(response: WatchRunsResponse): number {
+  return response.head?.process?.epoch ?? 0;
 }
