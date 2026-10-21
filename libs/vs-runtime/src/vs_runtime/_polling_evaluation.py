@@ -168,17 +168,19 @@ class PollingEvaluationExecutor:
         operator_failure: str | None = None
         try:
             workspace = await self._workspaces.create_measured_candidate(first.snapshot)
-            if self._control is not None:
-                self._control.start_execution(
-                    lambda: None,
-                    evaluation_id=request.key,
+
+            def started() -> None:
+                self._publish(
+                    handle_id,
+                    ExecutorObservation(
+                        state=EvaluationState.RUNNING, current_stage=request.stages[0].name
+                    ),
                 )
-            self._publish(
-                handle_id,
-                ExecutorObservation(
-                    state=EvaluationState.RUNNING, current_stage=request.stages[0].name
-                ),
-            )
+
+            if self._control is None:
+                started()
+            else:
+                self._control.start_execution(started, evaluation_id=request.key)
             for step in request.stages:
                 stage = SemanticEvaluationStage.model_validate(step.payload)
                 with self._open_output(
