@@ -1081,6 +1081,22 @@ class ProjectState:
             project_root=self.project_root, root=self._contained_run_dir(run_id)
         )
 
+    def retained_run_documents(
+        self, run_id: str, *, local_namespace: str | None = None
+    ) -> tuple[StateFile, ...]:
+        """Read originals without requiring today's manifest schema or writing state."""
+        if local_namespace is None:
+            return _snapshot_directory(
+                project_root=self.project_root, root=self._contained_run_dir(run_id)
+            ).files
+        return StateNamespace(
+            project_root=self.project_root,
+            root=self._local_state_dir(run_id, local_namespace),
+            portable=False,
+            containment_root=self._state_home,
+            namespace_root=_STATE_DIRECTORY_POSIX / "local" / "runs" / run_id / local_namespace,
+        ).documents()
+
     def git_integration(self, run_id: str) -> ProjectGitIntegration:
         """Return opaque Git integration capabilities for one run."""
         return ProjectGitIntegration(

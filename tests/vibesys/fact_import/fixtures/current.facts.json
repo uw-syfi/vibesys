@@ -785,48 +785,6 @@
         {
           "format": "IMPORT_FORMAT_ENVELOPE",
           "path": "envelope.json",
-          "selector": "$.strategy.facts",
-          "sha256": "9f4ee9d3d49da785d796a3234923c593fe5533d4a3c5baadf089f4b201634a06"
-        },
-        {
-          "format": "IMPORT_FORMAT_FLOW",
-          "path": "flow.json",
-          "selector": "$.facts",
-          "sha256": "d98db9393805ff7b21a49faaaec41f4990cfe1e3944974d0a5595ead3ae5ce8b"
-        },
-        {
-          "format": "IMPORT_FORMAT_RUNTIME",
-          "path": "runtime.json",
-          "selector": "$.envelope.strategy.facts",
-          "sha256": "8bede26018dd6217af34190ad442fefa84e5b0c20004dfc3297ac63097aa63dd"
-        },
-        {
-          "format": "IMPORT_FORMAT_PROJECT_STORE",
-          "path": "store-v1.json",
-          "selector": "$.record.payload.envelope.strategy.facts",
-          "sha256": "e8958407a75ccf4d920c3f551feda7714c7542718fc37ef6c74e84824ab2e133"
-        },
-        {
-          "format": "IMPORT_FORMAT_PROJECT_STORE",
-          "path": "store-v2.json",
-          "selector": "$.record.payload.envelope.strategy.facts",
-          "sha256": "c3577cc377d4b15b34507d23aa0d2b572d2942caf6bab9cf0e46376508047a8f"
-        }
-      ],
-      "input": {
-        "baselineRevision": "base",
-        "environmentDigest": "environment",
-        "evaluatorDigest": "evaluator",
-        "inputFingerprint": "base-digest",
-        "objective": "two opaque items",
-        "workloadDigest": "workload"
-      }
-    },
-    {
-      "importedFrom": [
-        {
-          "format": "IMPORT_FORMAT_ENVELOPE",
-          "path": "envelope.json",
           "selector": "$.core.run.facts",
           "sha256": "9f4ee9d3d49da785d796a3234923c593fe5533d4a3c5baadf089f4b201634a06"
         },
@@ -850,10 +808,16 @@
         }
       ],
       "input": {
+        "baseline": {
+          "digest": "base-digest",
+          "revisionId": {
+            "kind": "revision",
+            "root": "base"
+          }
+        },
         "baselineRevision": "base",
         "environmentDigest": "environment",
         "evaluatorDigest": "evaluator",
-        "inputFingerprint": "base-digest",
         "objective": "two opaque items",
         "task": {
           "baseStaleness": 600.0,
@@ -890,6 +854,54 @@
             }
           ]
         },
+        "workloadDigest": "workload"
+      }
+    },
+    {
+      "importedFrom": [
+        {
+          "format": "IMPORT_FORMAT_ENVELOPE",
+          "path": "envelope.json",
+          "selector": "$.strategy.facts",
+          "sha256": "9f4ee9d3d49da785d796a3234923c593fe5533d4a3c5baadf089f4b201634a06"
+        },
+        {
+          "format": "IMPORT_FORMAT_FLOW",
+          "path": "flow.json",
+          "selector": "$.facts",
+          "sha256": "d98db9393805ff7b21a49faaaec41f4990cfe1e3944974d0a5595ead3ae5ce8b"
+        },
+        {
+          "format": "IMPORT_FORMAT_RUNTIME",
+          "path": "runtime.json",
+          "selector": "$.envelope.strategy.facts",
+          "sha256": "8bede26018dd6217af34190ad442fefa84e5b0c20004dfc3297ac63097aa63dd"
+        },
+        {
+          "format": "IMPORT_FORMAT_PROJECT_STORE",
+          "path": "store-v1.json",
+          "selector": "$.record.payload.envelope.strategy.facts",
+          "sha256": "e8958407a75ccf4d920c3f551feda7714c7542718fc37ef6c74e84824ab2e133"
+        },
+        {
+          "format": "IMPORT_FORMAT_PROJECT_STORE",
+          "path": "store-v2.json",
+          "selector": "$.record.payload.envelope.strategy.facts",
+          "sha256": "c3577cc377d4b15b34507d23aa0d2b572d2942caf6bab9cf0e46376508047a8f"
+        }
+      ],
+      "input": {
+        "baseline": {
+          "digest": "base-digest",
+          "revisionId": {
+            "kind": "revision",
+            "root": "base"
+          }
+        },
+        "baselineRevision": "base",
+        "environmentDigest": "environment",
+        "evaluatorDigest": "evaluator",
+        "objective": "two opaque items",
         "workloadDigest": "workload"
       }
     },

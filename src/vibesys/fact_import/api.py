@@ -12,23 +12,23 @@ from typing import TYPE_CHECKING
 
 from pydantic import JsonValue, TypeAdapter
 
-from vs_agent.api import AgentSessionState
-from vs_core.api import FlowState, OperationRegistry, OperationResult, RunEnvelope
-from vs_project.api import OrchestrationRunManifest, StoredEnvelope
+from vs_project.api import StoredEnvelope
 from vs_project.api.retained import decode_store
-from vs_proto.api import imported_facts as pb
-from vs_runtime.api.core import PublicationHistory, RuntimeRecord
 from vs_runtime.api.retained import decode_receipt
 
 from ._controls import import_control
 from ._events import import_events
 from ._facts import FactSet, content
+from ._manifests import read_manifest
 from ._rounds import import_round
 from ._snapshots import SnapshotDecoder
 from ._source import MAX_SOURCE_BYTES, FactImportError, ImportSource, SourceFormat, decode
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
+
+    from vs_core.api import OperationRegistry
+    from vs_proto.api import imported_facts as pb
 
 __all__ = ["FactImportError", "ImportSource", "SourceFormat", "import_run_facts"]
 
@@ -39,7 +39,7 @@ class _Importer:
         self.run_id = run_id
         self.strategy = strategy
         self.facts = FactSet()
-        self.snapshots = SnapshotDecoder(registry, self.facts, strategy)
+        self.snapshots = SnapshotDecoder(registry, self.facts, strategy, run_id)
 
     def ingest(self, source: ImportSource) -> None:
         reader = {
@@ -65,11 +65,7 @@ class _Importer:
         import_control(source, self.registry, self.facts)
 
     def sessions(self, source: ImportSource) -> None:
-        state = decode(source, TypeAdapter(AgentSessionState), self.registry)
-        for name, session in sorted(state.sessions.items()):
-            self.facts.external(
-                source, f"$.sessions.{name}", "provider-session", session.session_id
-            )
+        self.snapshots.read(source, "$", source.data, "sessions")
 
     def content(self, source: ImportSource) -> None:
         self.facts.add(source, "$", content(source.data, "application/octet-stream"))
@@ -78,31 +74,19 @@ class _Importer:
         import_round(source, self.registry, self.facts)
 
     def state(self, source: ImportSource) -> None:
-        match source.format:
-            case SourceFormat.RUNTIME:
-                record = decode(source, TypeAdapter(RuntimeRecord[FlowState]), self.registry)
-                self.envelope(source, record.envelope, "$.envelope")
-                self.facts.project(source, "$", record)
-                self.flow(source, "$.envelope.strategy", record.envelope.strategy)
-            case SourceFormat.ENVELOPE:
-                envelope = decode(source, TypeAdapter(RunEnvelope[FlowState]), self.registry)
-                self.envelope(source, envelope, "$")
-                self.facts.project(source, "$", envelope)
-                self.flow(source, "$.strategy", envelope.strategy)
-            case SourceFormat.FLOW:
-                state = decode(source, TypeAdapter(FlowState), self.registry)
-                self.facts.project(source, "$", state)
-                self.flow(source, "$", state)
-            case SourceFormat.LEGACY_DYNAMIC:
-                self.snapshots.read(source, "$", source.data, "legacy")
-            case SourceFormat.HYPOTHESES:
-                self.snapshots.read(source, "$", source.data, "hypotheses")
-            case _:
-                raise FactImportError(source.path, f"unsupported retained format {source.format}")
+        name = {
+            SourceFormat.RUNTIME: "runtime",
+            SourceFormat.ENVELOPE: "envelope",
+            SourceFormat.FLOW: "flow",
+            SourceFormat.LEGACY_DYNAMIC: "legacy",
+            SourceFormat.HYPOTHESES: "hypotheses",
+        }.get(source.format)
+        if name is None:
+            raise FactImportError(source.path, f"unsupported retained format {source.format}")
+        self.snapshots.read(source, "$", source.data, name)
 
     def publications(self, source: ImportSource) -> None:
-        history = decode(source, TypeAdapter(PublicationHistory), self.registry)
-        self.facts.project(source, "$", history)
+        self.snapshots.read(source, "$", source.data, "publications")
 
     def store(self, source: ImportSource) -> None:
         try:
@@ -111,22 +95,13 @@ class _Importer:
             raise FactImportError(source.path, str(error)) from error
         if stored is None:
             return
+        if not isinstance(stored, StoredEnvelope):
+            raise FactImportError(source.path, f"quarantined source: {stored.reason}")
         if stored.schema_version != 1:
             raise FactImportError(
                 f"{source.path}:$.record.schema_version", "unknown runtime record version"
             )
-        if not isinstance(stored, StoredEnvelope):
-            raise FactImportError(source.path, f"quarantined source: {stored.reason}")
-        record = decode(
-            source,
-            TypeAdapter(RuntimeRecord[FlowState]),
-            self.registry,
-            selector="$.record.payload",
-            data=stored.payload,
-        )
-        self.envelope(source, record.envelope, "$.record.payload.envelope")
-        self.facts.project(source, "$.record.payload", record)
-        self.flow(source, "$.record.payload.envelope.strategy", record.envelope.strategy)
+        self.snapshots.read(source, "$.record.payload", stored.payload, "runtime")
 
     def receipt(self, source: ImportSource) -> None:
         path = source.path.removeprefix("receipts/")
@@ -141,67 +116,21 @@ class _Importer:
                 source, "$", identity.kind, identity.identity, identity.source_request
             )
 
-    def envelope(self, source: ImportSource, envelope: RunEnvelope[FlowState], path: str) -> None:
-        if envelope.schema_version not in range(34, 43):
-            raise FactImportError(
-                f"{source.path}:{path}.schema_version", "unknown retained envelope version"
-            )
-        if envelope.core.run.run_id.root != self.run_id:
-            raise FactImportError(
-                f"{source.path}:{path}.core.run.run_id", "source belongs to another run"
-            )
-
     def manifest(self, source: ImportSource) -> None:
-        manifest = decode(source, TypeAdapter(OrchestrationRunManifest), self.registry)
-        if manifest.run_id != self.run_id:
+        strategy, original, options = read_manifest(source, self.registry)
+        value = decode(source, TypeAdapter(dict[str, JsonValue]), self.registry)
+        if value["run_id"] != self.run_id:
             raise FactImportError(f"{source.path}:$.run_id", "source belongs to another run")
-        if manifest.orchestration.id != self.strategy:
+        if strategy != self.strategy:
             raise FactImportError(f"{source.path}:$.orchestration.id", "strategy mismatch")
-        if manifest.orchestration.config_version != 1:
-            raise FactImportError(
-                f"{source.path}:$.orchestration.config_version", "unknown retained config version"
+        if options is not None:
+            self.snapshots.read(
+                source,
+                "$.orchestration.options",
+                TypeAdapter(dict[str, JsonValue]).dump_json(options),
+                "launch",
             )
-        self.snapshots.read(
-            source,
-            "$.orchestration.options",
-            TypeAdapter(dict[str, JsonValue]).dump_json(manifest.orchestration.options).decode(),
-            "launch",
-        )
-        self.facts.add(
-            source,
-            "$",
-            pb.ImportedInput(
-                baseline_revision=manifest.trusted_input_baseline,
-                input_fingerprint=manifest.input_fingerprint,
-                config=[content(source.data, "application/vnd.vibesys.legacy-manifest+json")],
-            ),
-        )
-
-    def flow(self, source: ImportSource, path: str, state: FlowState) -> None:
-        if state.schema_version != 1:
-            raise FactImportError(
-                f"{source.path}:{path}.schema_version", "unknown retained FlowState version"
-            )
-        for section_name, section in (("live", state.live), ("base", state.base)):
-            if section is None:
-                continue
-            for index, flow in enumerate(section.flows):
-                selector = f"{path}.{section_name}.flows[{index}].snapshot_json"
-                self.snapshots.read(source, selector, flow.snapshot_json, flow.name)
-            if section.published is not None:
-                selector = f"{path}.{section_name}.published"
-                self.snapshots.read(source, selector, section.published, "published")
-        for index, step in enumerate(state.journal):
-            if step.recorded is not None:
-                selector = f"{path}.journal[{index}].recorded.result_json"
-                result = decode(
-                    source,
-                    TypeAdapter(OperationResult),
-                    self.registry,
-                    selector=selector,
-                    data=step.recorded.result_json,
-                )
-                self.facts.project(source, selector, result)
+        self.facts.add(source, "$", original)
 
 
 def import_run_facts(

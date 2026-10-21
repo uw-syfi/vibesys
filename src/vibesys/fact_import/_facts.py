@@ -155,7 +155,7 @@ class FactSet:
                 path,
                 pb.ImportedInput(
                     baseline_revision=item.baseline.git_commit or item.baseline.revision_id.root,
-                    input_fingerprint=item.baseline.digest,
+                    baseline=cast("core_leaves.RevisionRef", to_proto(item.baseline)),
                     objective=item.objective,
                     evaluator_digest=item.evaluator_digest,
                     workload_digest=item.workload_digest,

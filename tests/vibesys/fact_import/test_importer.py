@@ -115,6 +115,26 @@ def test_all_current_containers_preserve_the_same_measurements_and_provenance() 
     validate(pb.ImportedRunFacts.from_binary(imported.to_binary()))
 
 
+def test_baseline_content_digest_is_not_fabricated_into_an_input_fingerprint() -> None:
+    inputs = _payloads(_import(_sources()[0]), "input")
+    assert inputs
+    assert all(item.baseline.digest == "base-digest" for item in inputs)
+    assert all(not item.input_fingerprint for item in inputs)
+
+
+@pytest.mark.parametrize(
+    ("key", "replacement"),
+    [("next_publication_sequence", 999), ("delivery_cursor", 999)],
+)
+def test_runtime_cross_field_corruption_is_a_named_prerequisite(key: str, replacement: int) -> None:
+    value = json.loads(_sources()[2].data)
+    value[key] = replacement
+    with pytest.raises(FactImportError, match=r"broken-runtime.json"):
+        _import(
+            ImportSource("broken-runtime.json", SourceFormat.RUNTIME, json.dumps(value).encode())
+        )
+
+
 @pytest.mark.parametrize("name", ["completed", "suspended_evaluation", "empty"])
 def test_legacy_loop_fixtures_import_without_upgrading_their_snapshots(name: str) -> None:
     data = (_FIXTURES / f"legacy-v6-{name}.json").read_bytes()
@@ -227,6 +247,25 @@ def test_project_shell_reads_original_content_and_does_not_modify_the_store(tmp_
     assert all(content.data != b"An edited task." for content in _payloads(result, "content"))
     assert project.state.portable_run_export("run").files == before
     assert namespace.read_bytes("state.json") == legacy
+
+
+@pytest.mark.parametrize(("version", "strategy"), [(3, "multi-agent"), (4, "single-agent")])
+def test_retired_manifests_keep_original_config_without_a_snapshot_upgrade(
+    tmp_path: Path, version: int, strategy: str
+) -> None:
+    data = (_FIXTURES / f"manifest-v{version}.json").read_bytes()
+    source = ImportSource("run.json", SourceFormat.MANIFEST, data)
+    original = _payloads(_import(source, strategy=strategy), "input")[0]
+    assert original.config[0].data == data
+    assert original.input_fingerprint == "1" * 64
+    project = Project.open(tmp_path)
+    # A boundary fixture recreates the retained layout, including an unsupported manifest.
+    path = tmp_path / ".vibesys" / "state" / "runs" / "run" / "run.json"
+    path.parent.mkdir(parents=True)
+    path.write_bytes(data)
+    result = read_run_facts(project, "run", registry=FAKE_REGISTRY)
+    assert _payloads(result, "input") == [original]
+    assert path.read_bytes() == data
 
 
 def _receipt(family: str, part: str, data: dict[str, Any], key: str = "request-a") -> ImportSource:

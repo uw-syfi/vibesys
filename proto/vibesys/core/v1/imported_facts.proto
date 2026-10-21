@@ -47,7 +47,7 @@ message ImportedContent {
 
 message ImportedInput {
   string baseline_revision = 1 [(buf.validate.field).string.min_len = 1];
-  string input_fingerprint = 2 [(buf.validate.field).string.min_len = 1];
+  optional string input_fingerprint = 2 [(buf.validate.field).string.min_len = 1];
   string objective = 3;
   repeated ImportedContent config = 4;
   string evaluator_digest = 5;
@@ -56,6 +56,7 @@ message ImportedInput {
   repeated PureOption options = 8;
   repeated PureOption constraints = 9;
   ImportedTask task = 10;
+  RevisionRef baseline = 11;
 }
 
 // The original measurement contract, with no strategy state or live allowance.

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from ._manifests import read_manifest
 from ._source import MAX_SOURCE_BYTES
 from .api import FactImportError, ImportSource, SourceFormat, import_run_facts
 
@@ -21,6 +22,7 @@ _FORMATS = {
     "single/state.json": SourceFormat.HYPOTHESES,
     "multi/state.json": SourceFormat.HYPOTHESES,
     "agent/state.json": SourceFormat.HYPOTHESES,
+    "core-store/store.json": SourceFormat.PROJECT_STORE,
 }
 _CONTENT_NAMESPACES = frozenset({"artifacts", "runtime", "progress", "handoffs", "evidence"})
 
@@ -45,32 +47,34 @@ def read_run_facts(
     writers before taking this source set and keep exclusive ownership until publishing
     the new epoch. It reads original retained files, never the user's edited task root.
     """
-    manifest = project.state.load_run(run_id)
-    sources = [
-        source
-        for document in project.state.portable_run_export(run_id).files
-        if (source := _portable(document)) is not None
-    ]
-    store = project.state.state_store_namespace(run_id).read_bytes("store.json")
-    if store is not None:
-        sources.append(ImportSource("store/store.json", SourceFormat.PROJECT_STORE, store))
-    for document in project.state.local_namespace(run_id, "receipts").documents():
+    documents = project.state.retained_run_documents(run_id)
+    sources = [source for document in documents if (source := _portable(document)) is not None]
+    manifest = next((source for source in sources if source.format == SourceFormat.MANIFEST), None)
+    if manifest is None:
+        raise FactImportError("run.json", "original run manifest is required")
+    strategy, _, _ = read_manifest(manifest, registry)
+    for document in project.state.retained_run_documents(run_id, local_namespace="receipts"):
         path = document.relative_path.as_posix()
         if path == "receipts.lock":
             continue
         sources.append(ImportSource(f"receipts/{path}", SourceFormat.RECEIPT, document.contents))
-    sessions = project.state.local_namespace(run_id, "agent").read_bytes("sessions.json")
-    if sessions is not None:
-        sources.append(ImportSource("agent/sessions.json", SourceFormat.SESSIONS, sessions))
-    for entry in project.state.control_inbox(run_id).pending():
-        if entry.unreadable is not None:
-            raise FactImportError(f"control/inbox/{entry.request_id}.json", entry.unreadable)
-        sources.append(
-            ImportSource(
-                f"control/inbox/{entry.request_id}.json", SourceFormat.CONTROL, entry.payload
-            )
-        )
+    sources.extend(
+        ImportSource("agent/sessions.json", SourceFormat.SESSIONS, document.contents)
+        for document in project.state.retained_run_documents(run_id, local_namespace="agent")
+        if document.relative_path.as_posix() == "sessions.json"
+    )
+    controls = project.state.retained_run_documents(run_id, local_namespace="control")
+    settled = {
+        document.relative_path.name
+        for document in controls
+        if document.relative_path.parts[0] in ("settled", "rejected")
+    }
+    sources.extend(
+        ImportSource(f"control/{document.relative_path}", SourceFormat.CONTROL, document.contents)
+        for document in controls
+        if document.relative_path.parts[0] == "inbox" and document.relative_path.name not in settled
+    )
     data = project.retained_event_journal(run_id, max_bytes=MAX_SOURCE_BYTES)
     if data is not None:
         sources.append(ImportSource("core-events.jsonl", SourceFormat.EVENTS, data))
-    return import_run_facts(run_id, sources, strategy=manifest.orchestration.id, registry=registry)
+    return import_run_facts(run_id, sources, strategy=strategy, registry=registry)
