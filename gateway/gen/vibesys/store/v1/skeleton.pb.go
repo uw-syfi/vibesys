@@ -724,8 +724,7 @@ const file_vibesys_store_v1_skeleton_proto_rawDesc = "" +
 	"\x05epoch\x18\x02 \x01(\v2\x1e.vibesys.store.v1.EpochStartedB\x06\xbaH\x03\xc8\x01\x01R\x05epoch\"p\n" +
 	"\x10LifecycleVersion\x12\x19\n" +
 	"\x03seq\x18\x01 \x01(\x04B\a\xbaH\x042\x02 \x00R\x03seq\x12A\n" +
-	"\tlifecycle\x18\x02 \x01(\v2\x1b.vibesys.store.v1.LifecycleB\x06\xbaH\x03\xc8\x01\x01R\tlifecycleB\xc8\x01\n" +
-	"\x14com.vibesys.store.v1B\rSkeletonProtoP\x01Z?github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1\xa2\x02\x03VSX\xaa\x02\x10Vibesys.Store.V1\xca\x02\x10Vibesys\\Store\\V1\xe2\x02\x1cVibesys\\Store\\V1\\GPBMetadata\xea\x02\x12Vibesys::Store::V1b\x06proto3"
+	"\tlifecycle\x18\x02 \x01(\v2\x1b.vibesys.store.v1.LifecycleB\x06\xbaH\x03\xc8\x01\x01R\tlifecycleBAZ?github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1b\x06proto3"
 
 var (
 	file_vibesys_store_v1_skeleton_proto_rawDescOnce sync.Once

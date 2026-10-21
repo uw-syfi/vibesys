@@ -2975,6 +2975,15 @@ wheels = [
 ]
 
 [[package]]
+name = "types-protobuf"
+version = "7.35.1.20260906"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/e1/6c/e3e5b3e10bc328126a39637c138f9ebfd734bf14342b9f3540039b4ab995/types_protobuf-7.35.1.20260906.tar.gz", hash = "sha256:efd1a3862d4c967dad5512ef8d56b1530ac84f182c41735b94004756518c4998", size = 69895, upload-time = "2026-09-06T06:35:28.308Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/44/4e/f63e826c68f77ef875506d72f225918800346545ee99847bc28f3394f18d/types_protobuf-7.35.1.20260906-py3-none-any.whl", hash = "sha256:5155e48569e0dabff303fdf578db96cd31ea9a4a63b18018a4ceac6b0ae17462", size = 86419, upload-time = "2026-09-06T06:35:27.247Z" },
+]
+
+[[package]]
 name = "types-toml"
 version = "0.10.8.20260408"
 source = { registry = "https://pypi.org/simple" }
@@ -3058,6 +3067,7 @@ dev = [
     { name = "diff-cover" },
     { name = "hypothesis" },
     { name = "matplotlib" },
+    { name = "protobuf" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "pytest-cov" },
@@ -3068,6 +3078,7 @@ dev = [
     { name = "tach" },
     { name = "twine" },
     { name = "ty" },
+    { name = "types-protobuf" },
     { name = "vs-bench" },
     { name = "vs-dst" },
 ]
@@ -3110,6 +3121,7 @@ dev = [
     { name = "diff-cover" },
     { name = "hypothesis" },
     { name = "matplotlib", specifier = ">=3.10.8" },
+    { name = "protobuf", specifier = "==6.33.5" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "pytest-cov" },
@@ -3120,6 +3132,7 @@ dev = [
     { name = "tach", specifier = "==0.35.1" },
     { name = "twine" },
     { name = "ty", specifier = "==0.0.75" },
+    { name = "types-protobuf", specifier = "==7.35.1.20260906" },
     { name = "vs-bench", editable = "sdk/vs-bench" },
     { name = "vs-dst", editable = "libs/vs-dst" },
 ]

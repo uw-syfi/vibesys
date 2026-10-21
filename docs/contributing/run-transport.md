@@ -22,22 +22,22 @@ model viewers read. It is written as the design. Parts not built yet are marked 
 
 ## Status
 
-Everything is unbuilt except the file inbox (`libs/vs-project/src/vs_project/_control_inbox.py`) and
-the log streams.
-The migration phases are in [Migration](#migration).
+The existing transport remains the default. The gateway and record viewer are opt-in per host.
+The migration phases are in [Migration](#migration); this table distinguishes the implemented
+read path and journal projection from the native core and control work still to come.
 
 | Part | Status | Phase |
 |---|---|---|
-| `vibesys.store.v1` and `vibesys.api.v1` protos, codegen, CI (`buf breaking`) | unbuilt | 1 |
-| Go gateway `vibesysd`: `Hello`, `Tail` | unbuilt | 1 |
-| Electron provisioning of the gateway; one HTTP/2 connection per host behind a per-host switch | unbuilt | 1 |
-| Converter follower: live JSONL journal into `run.log` (`LegacyEvent` records) | unbuilt | 1 |
-| Store records for every event kind ([inventory](#event-inventory)) | unbuilt | 2 |
-| Skeleton keyframes, `run.head`, `~/.vibesys/runs/<run_id>` link | unbuilt | 2 |
-| `Skeleton`, `GetBlobs`, `TailStream`, `WatchRuns`; new Run screen | unbuilt | 2 |
-| Conversion of existing JSONL runs and `store.json` envelopes | unbuilt | 2 |
-| Core state as generated types, `state.pb`, native `run.log` writes | unbuilt | 3 |
-| Intents as records (`IntentState`), pause/park, relaunch epochs | unbuilt | 3 |
+| `vibesys.store.v1` and `vibesys.api.v1` protos, codegen, CI (`buf breaking`) | built; schema hashes derive from embedded descriptors | 1 |
+| Go gateway `vibesysd`: `Hello`, `Tail` | built | 1 |
+| Electron provisioning of the gateway; one HTTP/2 connection per host behind a per-host switch | built; uploads are verified before publication; cold bulk uploads can still fail on some SSH routes | 1 |
+| Live JSONL journal projection into `run.log` | built as a tee installed before journal attachment; emits typed records | 1 |
+| Store records for every event kind ([inventory](#event-inventory)) | schemas and typed journal projection built; the native core producer remains unbuilt | 2 |
+| Skeleton keyframes, `run.head`, `~/.vibesys/runs/<run_id>` link | writers, discovery and converted head/keyframe publication built; legacy-only epochs have no native headline | 2 |
+| `Skeleton`, `GetBlobs`, `TailStream`, `WatchRuns`; new Run screen | RPCs, client skeleton/cache and opt-in raw record panel built; complete native Run screen remains unbuilt | 2 |
+| Conversion of existing JSONL runs and `store.json` envelopes | typed JSONL conversion built, including blob storage for large events and repair of incomplete mirrors; pre-trace journals are skipped, unsupported historical events are rejected, and `store.json` migration remains unbuilt | 2 |
+| Core state as generated types, `state.pb`, native `run.log` writes | unbuilt; typed journal projection does not replace native core commits | 3 |
+| Intents as records (`IntentState`), pause/park, relaunch epochs | schemas built; native execution and recovery remain unbuilt | 3 |
 | Chat sessions as processes with their own log; `HostCall` | unbuilt | 3 |
 | Generated frozen value classes from `.proto` (our own protoc plugin) | prototype only | 3 |
 | Control inbox (files, ordered, durable, idempotent by request id) | built | |

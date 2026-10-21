@@ -861,8 +861,7 @@ const file_vibesys_api_v1_host_proto_rawDesc = "" +
 	"\tWatchRuns\x12 .vibesys.api.v1.WatchRunsRequest\x1a!.vibesys.api.v1.WatchRunsResponse0\x01\x12M\n" +
 	"\bGetBlobs\x12\x1f.vibesys.api.v1.GetBlobsRequest\x1a .vibesys.api.v1.GetBlobsResponse\x12U\n" +
 	"\n" +
-	"TailStream\x12!.vibesys.api.v1.TailStreamRequest\x1a\".vibesys.api.v1.TailStreamResponse0\x01B\xb6\x01\n" +
-	"\x12com.vibesys.api.v1B\tHostProtoP\x01Z;github.com/uw-syfi/vibesys/gateway/gen/vibesys/api/v1;apiv1\xa2\x02\x03VAX\xaa\x02\x0eVibesys.Api.V1\xca\x02\x0eVibesys\\Api\\V1\xe2\x02\x1aVibesys\\Api\\V1\\GPBMetadata\xea\x02\x10Vibesys::Api::V1b\x06proto3"
+	"TailStream\x12!.vibesys.api.v1.TailStreamRequest\x1a\".vibesys.api.v1.TailStreamResponse0\x01B=Z;github.com/uw-syfi/vibesys/gateway/gen/vibesys/api/v1;apiv1b\x06proto3"
 
 var (
 	file_vibesys_api_v1_host_proto_rawDescOnce sync.Once

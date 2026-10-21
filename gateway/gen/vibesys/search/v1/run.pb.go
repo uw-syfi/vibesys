@@ -287,8 +287,7 @@ const file_vibesys_search_v1_run_proto_rawDesc = "" +
 	"\x12END_REASON_STOPPED\x10\x05\x12\x17\n" +
 	"\x13END_REASON_DEADLINE\x10\x06\x12\x15\n" +
 	"\x11END_REASON_FAILED\x10\a\x12\x1d\n" +
-	"\x19END_REASON_FINISH_REFUSED\x10\bB\xca\x01\n" +
-	"\x15com.vibesys.search.v1B\bRunProtoP\x01ZAgithub.com/uw-syfi/vibesys/gateway/gen/vibesys/search/v1;searchv1\xa2\x02\x03VSX\xaa\x02\x11Vibesys.Search.V1\xca\x02\x11Vibesys\\Search\\V1\xe2\x02\x1dVibesys\\Search\\V1\\GPBMetadata\xea\x02\x13Vibesys::Search::V1b\x06proto3"
+	"\x19END_REASON_FINISH_REFUSED\x10\bBCZAgithub.com/uw-syfi/vibesys/gateway/gen/vibesys/search/v1;searchv1b\x06proto3"
 
 var (
 	file_vibesys_search_v1_run_proto_rawDescOnce sync.Once

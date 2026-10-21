@@ -21,12 +21,14 @@
     "!dist/.*.tsbuildinfo"
   ],
   "scripts": {
-    "build": "tsc -b tsconfig.lib.json",
-    "check": "tsc -b",
-    "test": "tsc -b"
+    "prepare": "node generate-schema-files.mjs",
+    "build": "node generate-schema-files.mjs && tsc -b tsconfig.lib.json",
+    "check": "node generate-schema-files.mjs && tsc -b",
+    "test": "node generate-schema-files.mjs && tsc -b && node --test tests/*.test.mjs"
   },
   "dependencies": {
-    "@bufbuild/protobuf": "2.16.0"
+    "@bufbuild/protobuf": "2.16.0",
+    "@noble/hashes": "2.0.1"
   },
   "devDependencies": {
     "typescript": "5.9.3"

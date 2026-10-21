@@ -1,7 +1,9 @@
 """Regenerate the store record corpus with ``uv run python -m scripts.generate_record_goldens``.
 
 Examples exercise every body, lifecycle state and built-in attrs type through
-vs-proto's public surface. The corpus is a wire compatibility contract.
+vs-proto's public surface. The corpus is a wire compatibility contract. The descriptor-bearing epoch is
+local output, generated in tests so independent schema changes never rewrite a
+shared binary. Tests decode the committed Any attrs using that embedded schema.
 """
 
 from pathlib import Path

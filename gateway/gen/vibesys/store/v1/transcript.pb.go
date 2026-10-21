@@ -489,8 +489,7 @@ const file_vibesys_store_v1_transcript_proto_rawDesc = "" +
 	"\x1cTRANSCRIPT_CHANNEL_ASSISTANT\x10\x01\x12\x1f\n" +
 	"\x1bTRANSCRIPT_CHANNEL_ANALYSIS\x10\x02\x12!\n" +
 	"\x1dTRANSCRIPT_CHANNEL_DIAGNOSTIC\x10\x03\x12\x1d\n" +
-	"\x19TRANSCRIPT_CHANNEL_PROMPT\x10\x04B\xca\x01\n" +
-	"\x14com.vibesys.store.v1B\x0fTranscriptProtoP\x01Z?github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1\xa2\x02\x03VSX\xaa\x02\x10Vibesys.Store.V1\xca\x02\x10Vibesys\\Store\\V1\xe2\x02\x1cVibesys\\Store\\V1\\GPBMetadata\xea\x02\x12Vibesys::Store::V1b\x06proto3"
+	"\x19TRANSCRIPT_CHANNEL_PROMPT\x10\x04BAZ?github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1b\x06proto3"
 
 var (
 	file_vibesys_store_v1_transcript_proto_rawDescOnce sync.Once

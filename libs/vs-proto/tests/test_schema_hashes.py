@@ -9,7 +9,8 @@ from protobuf.wkt.google.protobuf.descriptor_pb import (
     FileDescriptorSet,
     SourceCodeInfo,
 )
-from scripts.generate_proto_hashes import schema_hash
+
+from vs_proto.api import schema_hash
 
 
 @given(order=st.permutations(["a.proto", "b.proto"]))

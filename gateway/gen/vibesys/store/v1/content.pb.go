@@ -447,8 +447,7 @@ const file_vibesys_store_v1_content_proto_rawDesc = "" +
 	"\x13STREAM_STATE_OPENED\x10\x01\x12\x16\n" +
 	"\x12STREAM_STATE_ENDED\x10\x02\x12\x17\n" +
 	"\x13STREAM_STATE_FAILED\x10\x03\x12\x19\n" +
-	"\x15STREAM_STATE_DEGRADED\x10\x04B\xc7\x01\n" +
-	"\x14com.vibesys.store.v1B\fContentProtoP\x01Z?github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1\xa2\x02\x03VSX\xaa\x02\x10Vibesys.Store.V1\xca\x02\x10Vibesys\\Store\\V1\xe2\x02\x1cVibesys\\Store\\V1\\GPBMetadata\xea\x02\x12Vibesys::Store::V1b\x06proto3"
+	"\x15STREAM_STATE_DEGRADED\x10\x04BAZ?github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1b\x06proto3"
 
 var (
 	file_vibesys_store_v1_content_proto_rawDescOnce sync.Once

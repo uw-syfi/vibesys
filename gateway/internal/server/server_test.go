@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"github.com/uw-syfi/vibesys/gateway/gen"
 	"hash/crc32"
 	"net"
 	"os"
@@ -12,13 +13,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/uw-syfi/vibesys/gateway/gen"
 	apiv1 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/api/v1"
 	storev1 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1"
 	"github.com/uw-syfi/vibesys/gateway/internal/lifecycle"
 	"github.com/uw-syfi/vibesys/gateway/internal/pipe"
 	"github.com/uw-syfi/vibesys/gateway/internal/runlog"
 	"github.com/uw-syfi/vibesys/gateway/internal/server"
+	"github.com/uw-syfi/vibesys/gateway/schemahash"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
@@ -48,7 +49,7 @@ func startWithClock(t *testing.T, clock server.Clock) fixture {
 	}
 	t.Cleanup(func() { os.RemoveAll(root) })
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	endpoint, err := lifecycle.Listen(root, gen.APISchemaHash)
+	endpoint, err := lifecycle.Listen(root, schemahash.APISchemaHash)
 	if err != nil {
 		cancel()
 		t.Fatal(err)
@@ -76,7 +77,7 @@ func startWithClock(t *testing.T, clock server.Clock) fixture {
 	if err := os.Symlink(run, filepath.Join(root, "runs", "run-1")); err != nil {
 		t.Fatal(err)
 	}
-	return fixture{root: root, run: run, socket: lifecycle.SocketPath(root, gen.APISchemaHash), ctx: ctx}
+	return fixture{root: root, run: run, socket: lifecycle.SocketPath(root, schemahash.APISchemaHash), ctx: ctx}
 }
 
 func client(t *testing.T, f fixture, throughPipe bool) apiv1.HostServiceClient {
@@ -159,13 +160,13 @@ func receive(t *testing.T, stream apiv1.HostService_TailClient, want []byte, seq
 func TestHello(t *testing.T) {
 	f := start(t)
 	c := client(t, f, false)
-	hello, err := c.Hello(f.ctx, &apiv1.HelloRequest{ApiSchemaHash: gen.APISchemaHash})
-	if err != nil || hello.GetApiSchemaHash() != gen.APISchemaHash || hello.GetGatewayVersion() != "test-version" {
+	hello, err := c.Hello(f.ctx, &apiv1.HelloRequest{ApiSchemaHash: schemahash.APISchemaHash})
+	if err != nil || hello.GetApiSchemaHash() != schemahash.APISchemaHash || hello.GetGatewayVersion() != "test-version" {
 		t.Fatalf("Hello = %v, %v", hello, err)
 	}
-	for _, hash := range []string{"", "other-hash", gen.APISchemaHash[:lifecycle.HashPrefixLength] + strings.Repeat("0", 64-lifecycle.HashPrefixLength)} {
+	for _, hash := range []string{"", "other-hash", schemahash.APISchemaHash[:lifecycle.HashPrefixLength] + strings.Repeat("0", 64-lifecycle.HashPrefixLength)} {
 		_, err := c.Hello(f.ctx, &apiv1.HelloRequest{ApiSchemaHash: hash})
-		if status.Code(err) != codes.FailedPrecondition || !strings.Contains(err.Error(), gen.APISchemaHash) || !strings.Contains(err.Error(), `"`+hash+`"`) {
+		if status.Code(err) != codes.FailedPrecondition || !strings.Contains(err.Error(), schemahash.APISchemaHash) || !strings.Contains(err.Error(), `"`+hash+`"`) {
 			t.Fatalf("mismatch = %v", err)
 		}
 	}
@@ -314,7 +315,7 @@ func TestSlowTailDoesNotBlockOtherStreams(t *testing.T) {
 	}
 	// Leave this stream unread. An independent RPC and a second Tail on the same
 	// HTTP/2 connection must still progress, regardless of the slow stream's window.
-	if _, err := c.Hello(f.ctx, &apiv1.HelloRequest{ApiSchemaHash: gen.APISchemaHash}); err != nil {
+	if _, err := c.Hello(f.ctx, &apiv1.HelloRequest{ApiSchemaHash: schemahash.APISchemaHash}); err != nil {
 		t.Fatal(err)
 	}
 	fast, err := c.Tail(f.ctx, &apiv1.TailRequest{RunId: "run-1"})
@@ -340,7 +341,7 @@ func TestTailCancellationKeepsConnectionAlive(t *testing.T) {
 	if _, err := stream.Recv(); status.Code(err) != codes.Canceled {
 		t.Fatalf("cancel = %v", err)
 	}
-	if _, err := c.Hello(f.ctx, &apiv1.HelloRequest{ApiSchemaHash: gen.APISchemaHash}); err != nil {
+	if _, err := c.Hello(f.ctx, &apiv1.HelloRequest{ApiSchemaHash: schemahash.APISchemaHash}); err != nil {
 		t.Fatal(err)
 	}
 }
