@@ -12,6 +12,7 @@ from tests.support.core_plugins import failing_plugin
 from tests.support.real_git import REAL_PROCESSES
 from tests.support.task_project import write_task
 
+from entrypoints.cli import dispatch
 from entrypoints.headless import print_uncaught
 from entrypoints.production import production_timing
 from entrypoints.run import run_headless
@@ -20,15 +21,20 @@ from server.runtime import ServerRuntime
 from vibesys.api import (
     ComputeBackend,
     Config,
+    ConfigurationError,
     OrchestrationDescriptor,
     OrchestrationRegistry,
     ProfilerKind,
+    ResumeRef,
     RunRequest,
+    relaunch,
 )
 from vibesys.api.request import RunEnvironmentSpec, load_task
 from vs_agent.api import AgentCapabilities
 from vs_agent.api.testing import FakeAgentClient, FakeDockerBuildRunner
+from vs_project.api import Project
 from vs_project.api.testing import FakeGitRepositories
+from vs_runlog.api import FileRunLogWriter
 from vs_sandbox.api.testing import FakeComputeBackend
 from vs_sim.api import (
     OsThreads,
@@ -36,7 +42,7 @@ from vs_sim.api import (
     ThreadBlockingRunner,
     UnixNetwork,
 )
-from vs_sim.api.testing import FakePipedProcessLauncher, FakeSignalSource, SimThreads
+from vs_sim.api.testing import FakePipedProcessLauncher, FakeSignalSource, ManualClock, SimThreads
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -117,6 +123,27 @@ def test_headless_entry_starts_and_renders_launch_run(
     assert runs.attach(result.run_id).run_id == result.run_id
     assert runs.list_active() == ()
     assert "[git-tracking]" in capsys.readouterr().out
+
+
+def test_relaunch_cli_requires_a_saved_run_reference() -> None:
+    with pytest.raises(ConfigurationError, match="relaunch requires --resume"):
+        dispatch(["relaunch"])
+
+
+def test_relaunch_api_requires_a_saved_run_reference(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="relaunch requires an existing run"):
+        relaunch(_request(tmp_path / "project"), _runs())
+
+
+def test_relaunch_refuses_a_live_writer_before_opening_saved_state(tmp_path: Path) -> None:
+    request = _request(tmp_path / "project").model_copy(update={"resume": ResumeRef(run_id="held")})
+    path = Project.run_log_path_for(request.project_root, "held")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with (
+        FileRunLogWriter(path, clock=ManualClock(), threads=SimThreads()),
+        pytest.raises(RuntimeError, match=r"run\.lock is held"),
+    ):
+        relaunch(request, _runs())
 
 
 class _CoreRejectedError(Exception):
