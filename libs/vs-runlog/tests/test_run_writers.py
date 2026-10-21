@@ -268,3 +268,22 @@ def test_conflicting_checkpoint_is_preserved_and_releases_lock(tmp_path: Path) -
     checkpoint.unlink()
     with FileRunLogWriter(tmp_path / "run.log"):
         assert Keyframe.from_binary(checkpoint.read_bytes()).through_seq == 1
+
+
+@given(st.lists(st.integers(min_value=2, max_value=8), max_size=32))
+def test_fold_composes_at_every_cut(choices: list[int]) -> None:
+    templates, _ = scenarios()["core"]
+    records = [*templates[:2]]
+    for choice in choices:
+        record = Record.from_binary(templates[choice].to_binary())
+        record.seq = len(records) + 1
+        records.append(record)
+    offsets = [8]
+    for record in records:
+        offsets.append(offsets[-1] + len(encode_frame(record)))
+    expected = fold_skeleton(records, log_offset=offsets[-1])
+    for split in range(len(records) + 1):
+        seed = fold_skeleton(records[:split], log_offset=offsets[split])
+        before = seed.to_binary()
+        assert fold_skeleton(records[split:], seed=seed, log_offset=offsets[-1]) == expected
+        assert seed.to_binary() == before

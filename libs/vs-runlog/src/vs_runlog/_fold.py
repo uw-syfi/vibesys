@@ -36,7 +36,7 @@ def fold_skeleton(
 
 
 def append_skeleton(state: Keyframe, record: Record) -> None:
-    """Append to an exclusively owned projection in linear total replay time."""
+    """Append to an exclusively owned projection without copying its history."""
     if record.seq != state.through_seq + 1:
         message = f"record.seq: expected {state.through_seq + 1}, got {record.seq}"
         raise ValueError(message)
