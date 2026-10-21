@@ -60,16 +60,24 @@ export function installGatewayIpc(
       done = true;
       abort.abort();
       event.sender.removeListener('destroyed', cancelled);
-      event.sender.removeListener('did-start-navigation', cancelled);
+      event.sender.removeListener('did-start-navigation', navigated);
       port.postMessage({end: true, ...(error === undefined ? {} : {error: String(error)})});
       port.close();
     };
     const cancelled = (): void => finish(new Error('gateway caller closed'));
+    const navigated = (
+      _event: unknown,
+      _url: string,
+      inPage: boolean,
+      mainFrame: boolean,
+    ): void => {
+      if (!inPage && mainFrame) cancelled();
+    };
     port.on('message', cancelled);
     port.on('close', cancelled);
     port.start();
     event.sender.once('destroyed', cancelled);
-    event.sender.once('did-start-navigation', cancelled);
+    event.sender.on('did-start-navigation', navigated);
     void (async () => {
       authorize(event, admits);
       const request = parseGatewayRequest(value);

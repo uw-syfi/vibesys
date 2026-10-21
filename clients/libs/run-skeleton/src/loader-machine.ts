@@ -34,7 +34,7 @@ export const skeletonLoaderMachine = setup({
     skeleton: unprovided<SkeletonResponse, string>('skeleton'),
     tail: unprovided<void, TailInput>('tail'),
   },
-  delays: {deadline: ({context}) => context.timeoutMs},
+  delays: {deadline: ({context}) => context.timeoutMs, retry: 1000},
   guards: {
     hasError: ({context}) => context.error !== undefined,
     caughtUp: ({context}) => context.load?.complete === true,
@@ -54,13 +54,13 @@ export const skeletonLoaderMachine = setup({
           actions: assign(({event}) => safely(() => ingestSkeleton(event.output))),
         },
         onError: {
-          target: 'failed',
+          target: 'recovering',
           actions: assign({error: ({event}) => transportFailure(event.error)}),
         },
       },
       after: {
         deadline: {
-          target: 'failed',
+          target: 'recovering',
           actions: assign({
             error: (): SkeletonLoadFailure => ({kind: 'deadline', operation: 'skeleton'}),
           }),
@@ -83,11 +83,11 @@ export const skeletonLoaderMachine = setup({
           };
         },
         onDone: {
-          target: 'failed',
+          target: 'recovering',
           actions: assign({error: (): SkeletonLoadFailure => ({kind: 'stream-ended'})}),
         },
         onError: {
-          target: 'failed',
+          target: 'recovering',
           actions: assign({error: ({event}) => transportFailure(event.error)}),
         },
       },
@@ -101,11 +101,11 @@ export const skeletonLoaderMachine = setup({
           ),
         },
         failed: {
-          target: 'failed',
+          target: 'recovering',
           actions: assign({error: ({event}) => transportFailure(event.error)}),
         },
         closed: {
-          target: 'failed',
+          target: 'recovering',
           actions: assign({error: (): SkeletonLoadFailure => ({kind: 'stream-ended'})}),
         },
       },
@@ -114,7 +114,7 @@ export const skeletonLoaderMachine = setup({
           always: {guard: 'caughtUp', target: 'live'},
           after: {
             deadline: {
-              target: '#skeletonLoader.failed',
+              target: '#skeletonLoader.recovering',
               actions: assign({
                 error: (): SkeletonLoadFailure => ({kind: 'deadline', operation: 'catch-up'}),
               }),
@@ -124,13 +124,14 @@ export const skeletonLoaderMachine = setup({
         live: {},
       },
     },
+    recovering: {after: {retry: 'loading'}},
     failed: {type: 'final'},
   },
 });
 
 function safely(fold: () => SkeletonLoad): Partial<Context> {
   try {
-    return {load: fold()};
+    return {load: fold(), error: undefined};
   } catch (error) {
     return {error: {kind: 'data', cause: error}};
   }

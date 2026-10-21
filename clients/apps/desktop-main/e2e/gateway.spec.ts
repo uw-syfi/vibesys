@@ -131,6 +131,11 @@ for (const mode of ['socket', 'connect pipe'] as const) {
         (window as unknown as GatewayRenderer).gatewayRead(),
       );
       expect(sequences(initial)).toEqual([1n]);
+      for (const fragment of ['timeline', 'agents', 'logs']) {
+        await page.evaluate(fragment => {
+          location.hash = fragment;
+        }, fragment);
+      }
       await appendFile(log, frame(2n));
       const appended = await page.evaluate(() =>
         (window as unknown as GatewayRenderer).gatewayRead(),
