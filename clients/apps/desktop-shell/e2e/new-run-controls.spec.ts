@@ -1,5 +1,5 @@
 import {expect, test} from '@playwright/test';
-import {controlsOf, inertness} from './checks/controls-act.js';
+import {checkControls, controlsOf} from './checks/controls-act.js';
 import {settled} from './checks/settle.js';
 import {main, NEW_RUN_PAGES, openAt} from './new-run-flow.js';
 
@@ -39,15 +39,14 @@ for (const each of NEW_RUN_PAGES) {
     );
     await first.close();
     expect(controls.length, 'the page has controls').toBeGreaterThan(0);
-    const found = await Promise.all(
-      controls.map(async control => {
-        const page = await context.newPage();
+    const found = await checkControls(
+      context,
+      controls,
+      async page => {
         await page.setViewportSize({width: 1440, height: 900});
         await openAt(page, each);
-        const problem = await inertness(page, main(page), control);
-        await page.close();
-        return problem;
-      }),
+      },
+      main,
     );
     const inert = found.filter((problem): problem is string => problem !== null);
     expect(inert, `controls that do nothing:\n${inert.join('\n')}`).toEqual([]);
