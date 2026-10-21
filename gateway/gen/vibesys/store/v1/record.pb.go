@@ -463,8 +463,7 @@ const file_vibesys_store_v1_record_proto_rawDesc = "" +
 	"\x10epoch.objectives\x12Srun objectives must name series declared with the same direction and objective role\x1a\x84\x01!has(this.run) || this.run.objectives.all(o, this.series.exists(s, s.name == o.series && s.direction == o.direction && s.role == 1))\x1a\xe1\x01\n" +
 	"\x13epoch.schema_hashes\x12Rapi_schema_hash and store_schema_hash must be lowercase SHA-256 for a typed header\x1av!has(this.run) || (this.api_schema_hash.matches('^[0-9a-f]{64}$') && this.store_schema_hash.matches('^[0-9a-f]{64}$'))\"!\n" +
 	"\vLegacyEvent\x12\x12\n" +
-	"\x04json\x18\x01 \x01(\tR\x04jsonB\xc6\x01\n" +
-	"\x14com.vibesys.store.v1B\vRecordProtoP\x01Z?github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1\xa2\x02\x03VSX\xaa\x02\x10Vibesys.Store.V1\xca\x02\x10Vibesys\\Store\\V1\xe2\x02\x1cVibesys\\Store\\V1\\GPBMetadata\xea\x02\x12Vibesys::Store::V1b\x06proto3"
+	"\x04json\x18\x01 \x01(\tR\x04jsonBAZ?github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1b\x06proto3"
 
 var (
 	file_vibesys_store_v1_record_proto_rawDescOnce sync.Once

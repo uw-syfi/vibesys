@@ -283,3 +283,6 @@ node_modules/
 # sdk/README.md for the co-development workflow.
 go.work
 go.work.sum
+
+# Local descriptor collector is rebuilt at install/build time.
+clients/libs/proto/src/generated/schema-files.ts

@@ -611,8 +611,7 @@ const file_vibesys_store_v1_environment_attrs_proto_rawDesc = "" +
 	"\x14ProviderSwitchReason\x12&\n" +
 	"\"PROVIDER_SWITCH_REASON_UNSPECIFIED\x10\x00\x12!\n" +
 	"\x1dPROVIDER_SWITCH_REASON_POLICY\x10\x01\x12#\n" +
-	"\x1fPROVIDER_SWITCH_REASON_OPERATOR\x10\x02B\xd0\x01\n" +
-	"\x14com.vibesys.store.v1B\x15EnvironmentAttrsProtoP\x01Z?github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1\xa2\x02\x03VSX\xaa\x02\x10Vibesys.Store.V1\xca\x02\x10Vibesys\\Store\\V1\xe2\x02\x1cVibesys\\Store\\V1\\GPBMetadata\xea\x02\x12Vibesys::Store::V1b\x06proto3"
+	"\x1fPROVIDER_SWITCH_REASON_OPERATOR\x10\x02BAZ?github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1b\x06proto3"
 
 var (
 	file_vibesys_store_v1_environment_attrs_proto_rawDescOnce sync.Once

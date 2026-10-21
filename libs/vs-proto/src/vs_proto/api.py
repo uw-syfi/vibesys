@@ -10,12 +10,7 @@ from protobuf import Oneof
 from protobuf.wkt.google.protobuf.timestamp_pb import Timestamp
 from protovalidate import ValidationError, validate
 
-from vs_proto._generated.schema_hashes import (
-    API_SCHEMA_HASH,
-    RUN_LOG_MAGIC,
-    RUN_LOG_MAX_RECORD_BYTES,
-    STORE_SCHEMA_HASH,
-)
+from vs_proto._generated.framing import RUN_LOG_MAGIC, RUN_LOG_MAX_RECORD_BYTES
 from vs_proto._generated.vibesys.api.v1.host_pb import (
     BlobResult,
     GetBlobsRequest,
@@ -151,6 +146,7 @@ from vs_proto._generated.vibesys.store.v1.span_pb import (
     WaitingOn,
     WaitKind,
 )
+from vs_proto._schema_hashes import API_SCHEMA_HASH, STORE_SCHEMA_HASH, schema_hash
 
 __all__ = [
     "API_SCHEMA_HASH",
@@ -271,5 +267,6 @@ __all__ = [
     "WorkstreamAttrs",
     "WorkstreamFailure",
     "WorkstreamFailureKind",
+    "schema_hash",
     "validate",
 ]

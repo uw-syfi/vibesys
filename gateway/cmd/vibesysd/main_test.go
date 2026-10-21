@@ -15,12 +15,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/uw-syfi/vibesys/gateway/gen"
 	apiv1 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/api/v1"
 	storev1 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1"
 	"github.com/uw-syfi/vibesys/gateway/internal/lifecycle"
 	"github.com/uw-syfi/vibesys/gateway/internal/runlog"
 	"github.com/uw-syfi/vibesys/gateway/internal/server"
+	"github.com/uw-syfi/vibesys/gateway/schemahash"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/protobuf/proto"
@@ -48,7 +48,7 @@ func testTailCLI(t *testing.T, binary string) {
 		t.Fatal(err)
 	}
 	defer os.RemoveAll(root)
-	endpoint, err := lifecycle.Listen(root, gen.APISchemaHash)
+	endpoint, err := lifecycle.Listen(root, schemahash.APISchemaHash)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,7 +123,7 @@ func testTailCLI(t *testing.T, binary string) {
 	}
 	defer connection.Close()
 	c := apiv1.NewHostServiceClient(connection)
-	if _, err := c.Hello(ctx, &apiv1.HelloRequest{ApiSchemaHash: gen.APISchemaHash}); err != nil {
+	if _, err := c.Hello(ctx, &apiv1.HelloRequest{ApiSchemaHash: schemahash.APISchemaHash}); err != nil {
 		t.Fatal(err)
 	}
 	tail, err := c.Tail(ctx, &apiv1.TailRequest{RunId: "run-1", FromSeq: 1})
@@ -184,7 +184,7 @@ func testClosedOutput(t *testing.T, binary string) {
 		t.Fatal(err)
 	}
 	defer os.RemoveAll(root)
-	endpoint, err := lifecycle.Listen(root, gen.APISchemaHash)
+	endpoint, err := lifecycle.Listen(root, schemahash.APISchemaHash)
 	if err != nil {
 		t.Fatal(err)
 	}

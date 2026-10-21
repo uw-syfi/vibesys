@@ -801,6 +801,9 @@ importers:
       '@bufbuild/protobuf':
         specifier: 2.16.0
         version: 2.16.0
+      '@noble/hashes':
+        specifier: 2.0.1
+        version: 2.0.1
     devDependencies:
       typescript:
         specifier: 5.9.3
@@ -1414,6 +1417,10 @@ packages:
     peerDependencies:
       '@emnapi/core': ^1.7.1 || ^2.0.0-alpha.4
       '@emnapi/runtime': ^1.7.1 || ^2.0.0-alpha.4
+
+  '@noble/hashes@2.0.1':
+    resolution: {integrity: sha512-XlOlEbQcE9fmuXxrVTXCTlG2nlRXa9Rj3rr5Ue/+tX+nmkgbX720YHh0VR3hBF9xDvwnb8D2shVGOwNx+ulArw==}
+    engines: {node: '>= 20.19.0'}
 
   '@oxc-parser/binding-android-arm-eabi@0.150.0':
     resolution: {integrity: sha512-oQef2Zu4Prz1KLKznz3HqZzU9uVoA5PMoDZuuLmqms7hKmKSAPzlaMnLllJq3t+rgKmfJJ2siPrpZfFrW06btw==}
@@ -3234,6 +3241,8 @@ snapshots:
       '@emnapi/runtime': 1.11.2
       '@tybys/wasm-util': 0.10.4
     optional: true
+
+  '@noble/hashes@2.0.1': {}
 
   '@oxc-parser/binding-android-arm-eabi@0.150.0':
     optional: true

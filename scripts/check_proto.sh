@@ -26,3 +26,4 @@ fi
 uv run --locked pytest libs/vs-proto/tests libs/vs-runlog/tests --no-cov -q
 pnpm --dir clients --filter @vibesys/proto check
 (cd gateway && go build ./gen/... && go vet ./gen/...)
+./scripts/check_schema_hashes.sh

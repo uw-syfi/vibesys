@@ -10,10 +10,10 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/uw-syfi/vibesys/gateway/gen"
 	apiv1 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/api/v1"
 	"github.com/uw-syfi/vibesys/gateway/internal/runindex"
 	"github.com/uw-syfi/vibesys/gateway/internal/runlog"
+	"github.com/uw-syfi/vibesys/gateway/schemahash"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
@@ -36,10 +36,10 @@ type host struct {
 }
 
 func (h *host) Hello(_ context.Context, request *apiv1.HelloRequest) (*apiv1.HelloResponse, error) {
-	if request.GetApiSchemaHash() != gen.APISchemaHash {
-		return nil, status.Errorf(codes.FailedPrecondition, "API schema hash mismatch: client %q, gateway %q", request.GetApiSchemaHash(), gen.APISchemaHash)
+	if request.GetApiSchemaHash() != schemahash.APISchemaHash {
+		return nil, status.Errorf(codes.FailedPrecondition, "API schema hash mismatch: client %q, gateway %q", request.GetApiSchemaHash(), schemahash.APISchemaHash)
 	}
-	return &apiv1.HelloResponse{ApiSchemaHash: gen.APISchemaHash, GatewayVersion: h.config.Version}, nil
+	return &apiv1.HelloResponse{ApiSchemaHash: schemahash.APISchemaHash, GatewayVersion: h.config.Version}, nil
 }
 
 func (h *host) Tail(request *apiv1.TailRequest, stream apiv1.HostService_TailServer) error {
