@@ -161,3 +161,8 @@ def test_host_call_relaunch_uses_saved_settings_through_the_detached_cli(tmp_pat
         host_call(request.to_binary(), processes=processes, threads=threads)
     )
     assert response.result == Oneof("relaunch", RelaunchResponse(outcome=Oneof("epoch", 2)))
+
+
+def test_relaunch_requires_a_saved_run() -> None:
+    with pytest.raises(ConfigurationError, match="relaunch requires --resume RUN"):
+        parse_cli_invocation(["relaunch"])
