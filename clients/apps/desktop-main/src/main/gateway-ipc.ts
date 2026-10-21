@@ -40,9 +40,15 @@ export function createGatewayCalls(
 
 export function installGatewayIpc(
   ipc: IpcMain,
-  calls: GatewayCalls,
-  settings: SettingsStore,
-  admits: (event: WelcomeInvokeEvent) => boolean,
+  {
+    calls,
+    settings,
+    admits,
+  }: {
+    calls: GatewayCalls;
+    settings: SettingsStore;
+    admits: (event: WelcomeInvokeEvent) => boolean;
+  },
 ): void {
   ipc.on(GATEWAY_CHANNEL, (event, value: unknown) => {
     const port = event.ports[0];
