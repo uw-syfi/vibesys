@@ -402,7 +402,7 @@ depends_on = ["vibesys.api.contracts", "vibesys.plugin_catalog", "vs_project", "
 
 [[modules]]
 path = "vibesys.api.testing"
-depends_on = ["vibesys.api._session", "vibesys.api.contracts", "vibesys.api.profilers", "vibesys.api.session", "vibesys.api.store", "vibesys.api.assembly", "vibesys.plugin_catalog", "vibesys.run.contracts", "vs_agent", "vs_runtime", "vs_sandbox"]
+depends_on = ["vibesys.api.auxiliary", "vibesys.api._session", "vibesys.api.contracts", "vibesys.api.profilers", "vibesys.api.session", "vibesys.api.store", "vibesys.api.assembly", "vibesys.plugin_catalog", "vibesys.run.contracts", "vs_agent", "vs_runtime", "vs_sandbox"]
 
 [[modules]]
 path = "vibesys.orchestration"
