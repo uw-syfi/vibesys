@@ -19,7 +19,6 @@ from ._replay_history import (
     PolicyDrift,
     ReplayAcknowledgements,
     ReplayFrontier,
-    _occurrence_token,
     replay_operation,
 )
 from ._replay_identity import (
@@ -219,8 +218,8 @@ class ReplayScheduler:
             for item in self._history
             if isinstance(item, AcceptedReplay)
             and item.sequence not in self._consumed
-            and item.operation().paid
-            and _occurrence_token(item.operation()) not in disclosed
+            and item.paid
+            and item.occurrence not in disclosed
         )
         drift = PolicyDrift(
             self._drift_count,

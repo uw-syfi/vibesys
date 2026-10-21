@@ -72,6 +72,14 @@ class AcceptedReplay:
         )
 
     @cached_property
+    def paid(self) -> bool:
+        return self.operation().paid
+
+    @cached_property
+    def occurrence(self) -> bytes:
+        return _occurrence_token(self.operation())
+
+    @cached_property
     def token(self) -> bytes:
         operation = self.operation()
         # Key and content, not clock/sequence/policy, identify the causal observation.
@@ -219,6 +227,10 @@ class ReplayAcknowledgements:
         return ReplayAcknowledgements(self.notices, (*self.acknowledgements, ack.to_binary()))
 
     def disclosed(self) -> frozenset[bytes]:
+        return self._disclosed
+
+    @cached_property
+    def _disclosed(self) -> frozenset[bytes]:
         acknowledged = {
             pb.ReplayAcknowledgement.from_binary(value).notice_id
             for value in self.acknowledgements
