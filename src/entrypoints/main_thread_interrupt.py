@@ -49,9 +49,13 @@ class MainThreadInterrupt:
         previous = sys.unraisablehook
 
         def unraisable(error: UnraisableHookArgs) -> None:
-            if error.exc_value is self._raised:
-                self._raised = None
-            previous(error)
+            discarded = error.exc_value is self._raised
+            try:
+                previous(error)
+            finally:
+                # Reporting may block too. Keep later wakes harmless until it finishes.
+                if discarded:
+                    self._raised = None
 
         sys.unraisablehook = unraisable
         try:

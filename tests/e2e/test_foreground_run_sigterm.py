@@ -112,6 +112,8 @@ def _discarded_interruptions(discarded: int) -> None:
 
     def observe(error: UnraisableHookArgs) -> None:
         seen.append(error.exc_value)
+        # A reporting hook can take another wake before it returns.
+        interrupt.take()
 
     def collect(callback: Callable[[str, dict[str, int]], None]) -> None:
         gc.callbacks.append(callback)
