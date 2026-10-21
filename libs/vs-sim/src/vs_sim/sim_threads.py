@@ -101,8 +101,9 @@ def loop_threads() -> SimThreads:
 
     Code that runs on a loop started by :func:`~vs_sim.virtual.run_virtual` without a
     ``driver`` can still hand blocking work to simulated threads: the loop adopts the
-    returned simulator as its driver, on the loop's clock, schedule seed and trace, and
-    closes it when the run ends. Every call on one loop returns the same object.
+    returned simulator as its driver, on the loop's clock, schedule seed and trace.
+    A simulator created here closes when the run ends; a borrowed simulator remains
+    with its synchronous owner. Every call on one loop returns the same object.
 
     Raises:
         RuntimeError: the caller is not on a virtual loop, or the loop's driver is not a
@@ -111,6 +112,8 @@ def loop_threads() -> SimThreads:
     loop = current_virtual_loop()
     if loop.driver is None:
         loop.adopt(SimThreads(loop.clock, schedule_seed=loop.schedule_seed, trace=loop.trace))
+    if isinstance(loop.driver, _BorrowedThreads):
+        return loop.driver.primary
     if not isinstance(loop.driver, SimThreads):
         message = f"the virtual loop is driven by {type(loop.driver).__name__}, not SimThreads"
         raise RuntimeError(message)  # noqa: TRY004  # LW-163851 [TRY004]; a missing precondition of the call, not a bad argument type.
@@ -781,6 +784,10 @@ class SimThreads:
             loop.adopt(_BorrowedThreads(self))
         elif isinstance(loop.driver, _BorrowedThreads):
             loop.driver.add(self)
+        elif isinstance(loop.driver, SimThreads):
+            driver = _BorrowedThreads(loop.driver, owned=loop.driver)
+            driver.add(self)
+            loop.adopt(driver)
         else:
             return
         if not self._timers:
@@ -796,14 +803,20 @@ class SimThreads:
 
 
 class _BorrowedThreads:
-    """Let a virtual loop drive external callers' simulators without owning them.
+    """Drive borrowed schedulers alongside a pre-existing loop-owned scheduler.
 
-    Their synchronous owners may close resources after the loop has shut down.
-    The normal test teardown still closes every simulator through ``undriven_threads``.
+    Synchronous owners retain their workers after the loop shuts down; only a
+    pre-existing loop-owned scheduler closes here. Normal test teardown still
+    closes every simulator through ``undriven_threads``.
     """
 
-    def __init__(self, threads: SimThreads) -> None:
+    def __init__(self, threads: SimThreads, *, owned: SimThreads | None = None) -> None:
         self._threads = [threads]
+        self._owned = owned
+
+    @property
+    def primary(self) -> SimThreads:
+        return self._threads[0]
 
     def add(self, threads: SimThreads) -> None:
         if threads not in self._threads:
@@ -811,10 +824,11 @@ class _BorrowedThreads:
 
     @property
     def executor(self) -> concurrent.futures.Executor:
-        return self._threads[0].executor
+        return self.primary.executor
 
     def attach(self) -> None:
-        pass
+        for threads in self._threads:
+            threads.attach()
 
     def run_until_blocked(self) -> None:
         for threads in self._threads:
@@ -832,7 +846,8 @@ class _BorrowedThreads:
         return "; ".join(threads.describe() for threads in self._threads)
 
     def close(self) -> None:
-        pass
+        if self._owned is not None:
+            self._owned.close()
 
 
 class _LoopWake:
