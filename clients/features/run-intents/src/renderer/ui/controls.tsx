@@ -1,3 +1,4 @@
+import type {RunIntentAction} from '@vibesys/runs/intents';
 import {Button, Card, Field, Row, Stack, Text, TextInput} from '@vibesys/ui';
 import type {JSX} from 'react';
 import type {IntentEntry} from '../../state/index.js';
@@ -28,21 +29,21 @@ export function IntentControls(props: {
   readonly warning: string | null;
   readonly text: string;
   readonly edit: (text: string) => void;
-  readonly send: (action: 'pause' | 'resume' | 'stop' | 'steer') => void;
+  readonly send: (action: RunIntentAction) => void;
   readonly retry: (requestId: string) => void;
 }): JSX.Element {
   return (
     <Card>
       <Stack gap="space-2">
         <Text>Run controls</Text>
-        <Row gap="space-2">
-          {(['pause', 'resume', 'stop'] as const).map(action => (
+        <Row gap="space-2" wrap>
+          {(['pause', 'park', 'resume', 'stop'] as const).map(action => (
             <Button
               key={action}
               quietReason
               {...(props.busy ? {disabledReason: 'Sending a request'} : {})}
               press={() => props.send(action)}
-              text={action === 'pause' ? 'Pause' : action === 'resume' ? 'Resume' : 'Stop'}
+              text={ACTION_LABELS[action]}
             />
           ))}
         </Row>

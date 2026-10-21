@@ -91,6 +91,7 @@ def call(project: Project, run_id: str, intent: Oneof, request_id: str = "r-1") 
 @pytest.mark.parametrize(
     ("name", "intent", "action"),
     [
+        ("park", ParkIntent(), "park"),
         ("pause", PauseIntent(), "pause"),
         ("resume", ResumeIntent(when=ResumeWhen.NOW), "resume"),
         ("resume", ResumeIntent(when=ResumeWhen.CAPACITY_RETURNS), "resume"),
@@ -155,7 +156,6 @@ def test_order_and_request_id_conflicts_are_unchanged(project: tuple[Project, st
 @pytest.mark.parametrize(
     "intent",
     [
-        Oneof("park", ParkIntent()),
         Oneof("resume", ResumeIntent()),
         Oneof("resume", ResumeIntent(when=ResumeWhen.CAPACITY_RETURNS, fallback=True)),
         Oneof("steer", SteerIntent(text="guidance")),

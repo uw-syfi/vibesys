@@ -26,10 +26,12 @@ export const INTENT_TAIL_METHOD = `/${HostService.typeName}/${HostService.method
 /** The visible controls' defaults. The host surface accepts every typed intent. */
 export function runIntent(
   identity: Pick<PostIntentRequest, 'projectRoot' | 'runId' | 'requestId'>,
-  action: 'pause' | 'resume' | 'stop' | 'steer',
+  action: 'pause' | 'park' | 'resume' | 'stop' | 'steer',
   text = '',
 ): PostIntentRequest {
   switch (action) {
+    case 'park':
+      return create(PostIntentRequestSchema, {...identity, intent: {case: 'park', value: {}}});
     case 'pause':
       return create(PostIntentRequestSchema, {...identity, intent: {case: 'pause', value: {}}});
     case 'resume':
@@ -52,6 +54,8 @@ export function runIntent(
       });
   }
 }
+
+export type RunIntentAction = Parameters<typeof runIntent>[1];
 
 /** Take ownership before a mutable generated request enters control state. */
 export function copyIntent(request: PostIntentRequest): PostIntentRequest {

@@ -23,7 +23,7 @@ import {
 const identity = {runId: 'run-1', requestId: 'r-1', projectRoot: '/project'};
 
 test('all visible controls use typed defaults and preserve identity through the pipes', () => {
-  for (const action of ['pause', 'resume', 'stop', 'steer'] as const) {
+  for (const action of ['pause', 'park', 'resume', 'stop', 'steer'] as const) {
     const request = runIntent(identity, action, 'guidance');
     const envelope = fromBinary(
       HostCallRequestSchema,

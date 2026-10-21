@@ -20,12 +20,13 @@ import hashlib
 import logging
 from dataclasses import dataclass
 from functools import partial
-from typing import TYPE_CHECKING, Literal, Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from vs_core.api import (
     ENVIRONMENT_STOP,
     ArtifactId,
     ArtifactRef,
+    ControlAction,
     ControlId,
     ControlInput,
     CoreState,
@@ -97,19 +98,6 @@ if TYPE_CHECKING:
     from vs_project.api import ControlInbox, InboxEntry
     from vs_runtime._operator_control import ActionRequest, ControlRequest
     from vs_runtime._run_control import QueuedWithdraw, RefusedPart, RunControlChannel
-
-
-type ControlAction = Literal[
-    "pause",
-    "park",
-    "resume",
-    "stop",
-    "steer",
-    "withdraw",
-    "cancel_attempt",
-    "cancel_item",
-    "set_max_parallel",
-]
 
 
 _LOG = logging.getLogger(__name__)
