@@ -7,12 +7,12 @@ gateway implementation enters this module.
 
 from __future__ import annotations
 
+from importlib import import_module
 from typing import TYPE_CHECKING
 
 from pydantic import ValidationError as ControlValidationError
 
 from vibesys.api import CONTROL_REQUEST, ConfigurationError, ControlAction, recorded_ending
-from vibesys.api.host_relaunch import relaunch_host
 from vs_project.api import INBOX_FORMAT, InboxClosedError, Project, ProjectError
 from vs_proto.api import (
     ConfigurationFailed,
@@ -49,7 +49,9 @@ def host_call(payload: bytes, *, processes: Processes, threads: Threads) -> byte
                 result = _post_intent(request)
                 response = HostCallResponse(result=Oneof("post_intent", result))
             case Oneof("relaunch", request):
-                result = relaunch_host(request, call.checkout, processes=processes, threads=threads)
+                result = import_module("vibesys.api.host_relaunch").relaunch_host(
+                    request, call.checkout, processes=processes, threads=threads
+                )
                 response = HostCallResponse(result=Oneof("relaunch", result))
             case _:
                 return _failure("invalid_method", "HostCall.method is required")
