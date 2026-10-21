@@ -441,7 +441,7 @@ const file_vibesys_store_v1_record_proto_rawDesc = "" +
 	"\x06notice\x18\x11 \x01(\v2\x18.vibesys.store.v1.NoticeH\x00R\x06notice:\x86\x04\xbaH\x82\x04\x1a\x86\x02\n" +
 	"\x0frecord.identity\x120seq, epoch and at are required for typed records\x1a\xc0\x01!(has(this.lifecycle) || has(this.span) || has(this.metric) || has(this.stream) || has(this.blob) || has(this.intent) || has(this.notice)) || (this.seq > 0u && this.epoch > 0u && has(this.at))\x1a\xf6\x01\n" +
 	"\x14record.epoch_started\x12Vepoch_started epoch must match epoch and seq and at must be present for a typed header\x1a\x85\x01!has(this.epoch_started) || !has(this.epoch_started.run) || (this.epoch == this.epoch_started.epoch && this.seq > 0u && has(this.at))B\r\n" +
-	"\x04body\x12\x05\xbaH\x02\b\x01\"\xa1\f\n" +
+	"\x04body\x12\x05\xbaH\x02\b\x01\"\xd3\r\n" +
 	"\fEpochStarted\x12\x15\n" +
 	"\x06run_id\x18\x01 \x01(\tR\x05runId\x12\x14\n" +
 	"\x05epoch\x18\x02 \x01(\rR\x05epoch\x12\x1b\n" +
@@ -455,9 +455,10 @@ const file_vibesys_store_v1_record_proto_rawDesc = "" +
 	"span_kinds\x18\t \x03(\v2\x1e.vibesys.store.v1.SpanKindDeclR\tspanKinds\x12:\n" +
 	"\x06series\x18\n" +
 	" \x03(\v2\".vibesys.store.v1.MetricSeriesDeclR\x06series\x12D\n" +
-	"\vdescriptors\x18\v \x01(\v2\".google.protobuf.FileDescriptorSetR\vdescriptors:\xb3\b\xbaH\xaf\b\x1a\xd2\x01\n" +
+	"\vdescriptors\x18\v \x01(\v2\".google.protobuf.FileDescriptorSetR\vdescriptors:\xe5\t\xbaH\xe1\t\x1a\xd2\x01\n" +
 	"\x0eepoch.identity\x12Prun_id, epoch, tree_hash and vibesys_version are required for a typed run header\x1an!has(this.run) || (this.run_id != '' && this.epoch > 0u && this.tree_hash != '' && this.vibesys_version != '')\x1a\x8a\x02\n" +
-	"\x10epoch.span_kinds\x12Dspan_kinds must have unique kind names and descriptors when nonempty\x1a\xaf\x01this.span_kinds.all(x, this.span_kinds.filter(y, y.kind == x.kind).size() == 1) && (this.span_kinds.size() == 0 || (has(this.descriptors) && this.descriptors.file.size() > 0))\x1av\n" +
+	"\x10epoch.span_kinds\x12Dspan_kinds must have unique kind names and descriptors when nonempty\x1a\xaf\x01this.span_kinds.all(x, this.span_kinds.filter(y, y.kind == x.kind).size() == 1) && (this.span_kinds.size() == 0 || (has(this.descriptors) && this.descriptors.file.size() > 0))\x1a\xaf\x01\n" +
+	"\x1cepoch.run_detail_descriptors\x12'descriptors are required for run detail\x1af!has(this.run) || !has(this.run.detail) || (has(this.descriptors) && this.descriptors.file.size() > 0)\x1av\n" +
 	"\fepoch.series\x12\x1dseries must have unique names\x1aGthis.series.all(x, this.series.filter(y, y.name == x.name).size() == 1)\x1a\xee\x01\n" +
 	"\x10epoch.objectives\x12Srun objectives must name series declared with the same direction and objective role\x1a\x84\x01!has(this.run) || this.run.objectives.all(o, this.series.exists(s, s.name == o.series && s.direction == o.direction && s.role == 1))\x1a\xe1\x01\n" +
 	"\x13epoch.schema_hashes\x12Rapi_schema_hash and store_schema_hash must be lowercase SHA-256 for a typed header\x1av!has(this.run) || (this.api_schema_hash.matches('^[0-9a-f]{64}$') && this.store_schema_hash.matches('^[0-9a-f]{64}$'))\"!\n" +

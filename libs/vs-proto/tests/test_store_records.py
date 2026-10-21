@@ -635,11 +635,23 @@ def test_unknown_span_kind_is_descriptor_driven() -> None:
 
 
 def test_store_schema_cannot_import_search_strategy_contracts() -> None:
-    for path in sorted((_ROOT / "proto/vibesys/store/v1").glob("*.proto")):
-        imports = [line.strip() for line in path.read_text().splitlines()]
-        assert not any(
-            line.startswith("import ") and '"vibesys/search/' in line for line in imports
-        ), f"{path.name}: store must carry search types through descriptor-backed Any"
+    pending = [message.desc().file for message in _MESSAGES.values()]
+    seen: set[str] = set()
+    while pending:
+        file = pending.pop()
+        if file.name in seen:
+            continue
+        seen.add(file.name)
+        if file.proto.package == "vibesys.store.v1":
+            assert not any(
+                dependency.name.startswith("vibesys/search/") for dependency in file.dependencies
+            ), f"{file.name}: store must carry search types through descriptor-backed Any"
+        pending.extend(file.dependencies)
+    store_files = {
+        str(path.relative_to(_ROOT / "proto"))
+        for path in (_ROOT / "proto/vibesys/store/v1").glob("*.proto")
+    }
+    assert store_files <= seen, "Export store contracts so every proto dependency is checked"
 
 
 @pytest.mark.parametrize("name", _DETAILS)
@@ -683,3 +695,11 @@ def test_core_run_contracts_contain_no_search_fields() -> None:
     }
     assert "max_workstreams" not in {field.name for field in p.RunDescription.desc().fields}
     assert not {"reason", "uncompared"} & {field.name for field in p.Ended.desc().fields}
+
+
+@pytest.mark.parametrize("descriptors", [None, FileDescriptorSet()])
+def test_search_run_details_require_epoch_descriptors(
+    descriptors: FileDescriptorSet | None,
+) -> None:
+    header = changed(_MESSAGES["EpochStarted"], span_kinds=[], descriptors=descriptors)
+    assert_invalid(header, "descriptors")
