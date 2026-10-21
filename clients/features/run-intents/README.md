@@ -31,9 +31,11 @@ skeleton projection.
 
 The existing inbox has no park or chat-message request. Park is represented in
 the typed command surface and refused before writing; chat messages are absent.
-The current main branch does not produce IntentState records, so requests stay
-pending until the run-side producer lands. The outcome consumer already handles
-those records, including an outcome arriving before the admission response.
+The journal's [control projection](../../../src/vibesys/records/_control.py)
+produces IntentState for steer and guidance delivery events. Lifecycle controls
+publish lifecycle records without request ids, so those requests stay pending
+unless the run emits a matching IntentState. The consumer handles an outcome
+even when it arrives before the admission response.
 
 There is no safe existing update-checkout or Launch/relaunch host command to
 reuse. They are absent from HostCall rather than changing a checkout or starting
