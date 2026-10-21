@@ -312,9 +312,6 @@ class FileRunLogWriter:
     def _capture_failure(self) -> Iterator[None]:
         try:
             yield
-        # lint-waiver: LW-946201 [BLE001]; a worker has no synchronous caller to receive a failure.
-        # > Catching only OSError leaves projection or VM failures as orphaned waits;
-        # > a wrapper thread with the same catch only moves this ownership boundary.
         except BaseException as error:
             with self._condition:
                 first_failure = self._failure is None
