@@ -194,6 +194,11 @@ class Project:
         return cls.log_directory_for(project_root, run_id) / "run.log"
 
     @classmethod
+    def run_blobs_directory_for(cls, project_root: Path | str, run_id: str) -> Path:
+        """Return immutable run-transport content, beside the authoritative journal."""
+        return cls.log_directory_for(project_root, run_id) / "blobs"
+
+    @classmethod
     def event_journal_path_for(cls, project_root: Path | str, run_id: str) -> Path:
         """Return the authoritative core-event journal for one run."""
         return cls.log_directory_for(project_root, run_id) / "core-events.jsonl"

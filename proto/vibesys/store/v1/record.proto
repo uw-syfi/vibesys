@@ -38,7 +38,7 @@ message Record {
   oneof body {
     option (buf.validate.oneof).required = true;
     EpochStarted epoch_started = 4;
-    LegacyEvent legacy_event = 5;
+    LegacyEvent legacy_event = 5 [deprecated = true];
     Lifecycle lifecycle = 11;
     SpanRecord span = 12;
     MetricPoint metric = 13;
@@ -50,12 +50,14 @@ message Record {
 }
 
 // EpochStarted identifies the writer and schemas for one run epoch.
+// A journal bridge may amend the same epoch as new kinds and series first
+// appear. Replace by epoch number; declarations grow and their types stay fixed.
 message EpochStarted {
   // A run description identifies the typed header. Phase 1 headers have none.
   option (buf.validate.message).cel = {
     id: "epoch.identity"
     message: "run_id, epoch, tree_hash and vibesys_version are required for a typed run header"
-    expression: "!has(this.run) || (this.run_id != '' && this.epoch > 0u && this.tree_hash != '' && this.vibesys_version != '')"
+    expression: "!has(this.run) || (this.run_id != '' && this.epoch > 0u && (this.tree_hash != '' || (has(this.provenance_known) && !this.provenance_known)) && this.vibesys_version != '')"
   };
   option (buf.validate.message).cel = {
     id: "epoch.span_kinds"
@@ -94,11 +96,15 @@ message EpochStarted {
   repeated SpanKindDecl span_kinds = 9;
   repeated MetricSeriesDecl series = 10;
   google.protobuf.FileDescriptorSet descriptors = 11;
+  // False explicitly records that the journal has no checkout fingerprint.
+  // Absence preserves the validation of previously published typed headers.
+  optional bool provenance_known = 12;
 }
 
 // LegacyEvent is an interim bridge carrying one current JSONL run event verbatim.
 // Retained for the seven-day read window after phase 2 lands. Its field
 // number must be reserved after removal; existing store records remain readable.
 message LegacyEvent {
+  option deprecated = true;
   string json = 1;
 }

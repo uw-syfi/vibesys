@@ -43,12 +43,18 @@ class Projection:
         self.spans = {key: p.Span.from_binary(value) for key, value in state.spans}
         self.invocations = dict(state.invocations)
         self.lengths = dict(state.streams)
+        self.waits = dict(state.waits)
+        self.intents = dict(state.intents)
+        self.metric_values = dict(state.metric_values)
         self.records: list[p.Record] = []
         self.blobs: list[BlobWrite] = []
         self.streams: list[StreamWrite] = []
         self.ending = state.ending
         self.pending = list(state.pending)
         self.final = False
+        self.header = (
+            None if state.epoch_header is None else p.EpochStarted.from_binary(state.epoch_header)
+        )
 
     def bound(self, message: Message, owner: str, path: str = "") -> None:
         """Externalize text losslessly; attachment roles name the original field path."""
@@ -74,8 +80,46 @@ class Projection:
         self.bound(message, owner)
         return pack(message)
 
+    def declare_kind(self, kind: str, attrs_type: str) -> None:
+        if self.header is None or any(k.kind == kind for k in self.header.span_kinds):
+            return
+        header = p.EpochStarted.from_binary(self.header.to_binary())
+        header.span_kinds.append(p.SpanKindDecl(kind=kind, attrs_type=attrs_type, timeline=True))
+        self.emit("epoch_started", header)
+
+    def metric(
+        self,
+        point: p.MetricPoint,
+        *,
+        unit: str = "",
+        direction: p.Direction = p.Direction.NONE,
+        role: p.SeriesRole = p.SeriesRole.REFERENCE,
+    ) -> None:
+        if self.header is not None and not any(s.name == point.series for s in self.header.series):
+            header = p.EpochStarted.from_binary(self.header.to_binary())
+            header.series.append(
+                p.MetricSeriesDecl(name=point.series, unit=unit, direction=direction, role=role)
+            )
+            self.emit("epoch_started", header)
+        key = (point.series, point.span)
+        if self.metric_values.get(key) != point.value:
+            self.metric_values[key] = point.value
+            self.emit("metric", point)
+
     def emit(self, field: str, value: Message) -> None:
         self.bound(value, "run")
+        if isinstance(value, p.EpochStarted):
+            if self.header is not None:
+                value.span_kinds = list(
+                    {k.kind: k for k in [*self.header.span_kinds, *value.span_kinds]}.values()
+                )
+                value.series = list(
+                    {s.name: s for s in [*self.header.series, *value.series]}.values()
+                )
+                if value.run is None:
+                    value.run = self.header.run
+            self.header = value
+
         record = p.Record(
             seq=self.state.sequence + len(self.records) + 1,
             epoch=self.state.epoch,
@@ -114,9 +158,14 @@ class Projection:
             self.state,
             sequence=self.state.sequence + len(self.records),
             origin=self.origin,
+            header_written=True,
+            epoch_header=None if self.header is None else self.header.to_binary(),
             spans=tuple((key, value.to_binary()) for key, value in self.spans.items()),
             invocations=tuple(self.invocations.items()),
             streams=tuple(self.lengths.items()),
+            waits=tuple(self.waits.items()),
+            intents=tuple(self.intents.items()),
+            metric_values=tuple(self.metric_values.items()),
             ending=self.ending,
             pending=tuple(self.pending),
         )

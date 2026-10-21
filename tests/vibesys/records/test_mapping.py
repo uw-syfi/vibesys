@@ -8,6 +8,7 @@ from typing import get_args
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
+from protobuf.wkt.google.protobuf.wrappers_pb import StringValue
 from tests.support.event_models import payload_models, payloads
 
 import vibesys.events as e
@@ -381,3 +382,156 @@ def test_a_record_above_the_cap_raises_instead_of_truncating() -> None:
     source = event(e.CoreEventType.SPAN_UPDATED, e.SpanUpdatedData.model_validate({"span": raw}))
     with pytest.raises(ValueError, match="exceeds"):
         map_event(MappingState("run-a"), source)
+
+
+@given(number=st.integers(min_value=2**53 + 1, max_value=2**100))
+def test_unknown_kinds_keep_exact_json_with_a_declared_descriptor(number: int) -> None:
+    raw: dict[str, object] = {"custom_integer": number}
+    result = map_event(MappingState("run-a"), native_span("custom_kind", raw))
+    span = last_span(result)
+    assert span.label is not None
+    assert span.label.attrs is not None
+    attrs = StringValue.from_binary(span.label.attrs.value)
+    assert attrs.value == json.dumps(raw)
+    headers = [
+        record.body.value
+        for record in result.records
+        if record.body is not None and record.body.field == "epoch_started"
+    ]
+    assert any(
+        kind.kind == "custom_kind" and kind.attrs_type == "google.protobuf.StringValue"
+        for kind in headers[-1].span_kinds
+    )
+    assert_valid(result)
+
+
+@given(value=st.floats(min_value=0, max_value=100, allow_nan=False))
+def test_gate_metrics_are_declared_and_never_copied_into_attrs(value: float) -> None:
+    result = map_event(
+        MappingState("run-a"),
+        native_span(
+            "gate",
+            {
+                "stage": "accuracy,benchmark",
+                "metrics": [{"name": "speed", "value": value, "direction": "max", "unit": "ops/s"}],
+            },
+        ),
+    )
+    span = last_span(result)
+    assert span.label is not None
+    assert span.label.attrs is not None
+    attrs = p.GateAttrs.from_binary(span.label.attrs.value)
+    assert attrs.stage == p.GateStage.MEASUREMENT
+    assert attrs.stages == ["accuracy", "benchmark"]
+    metrics = [
+        record.body.value
+        for record in result.records
+        if record.body is not None and record.body.field == "metric"
+    ]
+    assert len(metrics) == 1
+    assert metrics[0].value == value
+    headers = [
+        record.body.value
+        for record in result.records
+        if record.body is not None and record.body.field == "epoch_started"
+    ]
+    assert any(series.name == "speed" and series.unit == "ops/s" for series in headers[-1].series)
+
+
+@given(provider=_TEXT)
+def test_repeated_capacity_waits_have_distinct_whole_span_identities(provider: str) -> None:
+    state = MappingState("run-a")
+    first = event(
+        e.CoreEventType.QUOTA_PAUSED,
+        e.QuotaPausedData(provider=provider, condition="quota_exhausted", detail="limit"),
+        execution_id="turn-a",
+    )
+    state = map_event(state, first).state
+    resumed = event(
+        e.CoreEventType.QUOTA_RESUMED, e.QuotaResumedData(provider=provider), execution_id="turn-a"
+    ).model_copy(update={"sequence": 2})
+    state = map_event(state, resumed).state
+    later = first.model_copy(update={"sequence": 3})
+    result = map_event(state, later)
+    spans = [p.Span.from_binary(wire) for _, wire in result.state.spans]
+    assert len(spans) == 2
+    assert {span.status for span in spans} == {p.SpanStatus.DONE, p.SpanStatus.RUNNING}
+    assert_valid(result)
+
+
+@given(sequence=_COUNT)
+def test_dynamic_results_enrich_the_original_workstream_by_admission_sequence(
+    sequence: int,
+) -> None:
+    state = map_event(
+        MappingState("run-a"), native_span("workstream", {"sequence": sequence}, ended=True)
+    ).state
+    observation = event(
+        e.CoreEventType.WORKSTREAM_FINISHED,
+        e.WorkstreamFinishedData(setup_failure=False, refunded=False, repeated_error=True),
+        round_label=f"round-{sequence}",
+    )
+    result = map_event(state, observation)
+    assert len(result.state.spans) == 1
+    span = last_span(result)
+    assert span.id == "op:work"
+    assert span.label is not None
+    assert span.label.attrs is not None
+    attrs = p.WorkstreamAttrs.from_binary(span.label.attrs.value)
+    assert attrs.repeated_error
+
+
+@given(attempts=_COUNT)
+def test_unattributed_historical_projection_preserves_typed_facts_without_inventing_work(
+    attempts: int,
+) -> None:
+    state = map_event(
+        MappingState("run-a"),
+        event(
+            e.CoreEventType.ROUND_FINISHED,
+            e.RoundFinishedData(attempts=attempts, judge_verdict="fail", profile_skipped=True),
+            round_label="round-1",
+        ),
+    ).state
+    result = map_event(state, event(e.CoreEventType.RUN_FINISHED))
+    assert not result.state.spans
+    notices = [
+        record.body.value
+        for record in result.records
+        if record.body is not None and record.body.field == "notice"
+    ]
+    assert len(notices) == 1
+    assert notices[0].code == p.NoticeCode.UNATTRIBUTED_EVENT
+    assert notices[0].detail is not None
+    attrs = p.WorkstreamAttrs.from_binary(notices[0].detail.value)
+    assert attrs.attempts == attempts
+    assert attrs.profile_skipped
+    assert_valid(result)
+
+
+@given(value=st.floats(min_value=0, max_value=100, allow_nan=False))
+def test_stage_annotations_update_the_original_operation_without_ending_it(value: float) -> None:
+    state = map_event(
+        MappingState("run-a"), native_span("gate", {"stage": "build,benchmark"})
+    ).state
+    started = event(
+        e.CoreEventType.GATE_STARTED,
+        e.GateStartedData(gate=e.GateKind.BENCHMARK, span_id="op:work"),
+    )
+    state = map_event(state, started).state
+    finished = event(
+        e.CoreEventType.GATE_FINISHED,
+        e.GateFinishedData(
+            gate=e.GateKind.BENCHMARK, span_id="op:work", metric="speed", value=value, unit="ops/s"
+        ),
+    )
+    result = map_event(state, finished)
+    assert len(result.state.spans) == 1
+    span = last_span(result)
+    assert span.id == "op:work"
+    assert span.status == p.SpanStatus.RUNNING
+    assert not span.has_field("ended_at")
+    assert span.label is not None
+    assert span.label.attrs is not None
+    assert p.GateAttrs.from_binary(span.label.attrs.value).subject == p.GateSubject.INPUT
+    assert_valid(result)

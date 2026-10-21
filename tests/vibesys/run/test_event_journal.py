@@ -11,12 +11,14 @@ from vibesys.events import (
     AgentOutputChunkData,
     CoreEventType,
     RoundFinishedData,
+    RunStartedData,
+    SpanStartedData,
     WinnerSelectedData,
 )
 from vibesys.run import EventJournal
 from vibesys.run.integration import LocalRunIntegration
 from vs_project.api import Git, Project
-from vs_proto.api import API_SCHEMA_HASH, RUN_LOG_MAX_RECORD_BYTES, STORE_SCHEMA_HASH
+from vs_proto.api import API_SCHEMA_HASH, STORE_SCHEMA_HASH
 from vs_runlog.api import RunLogReader
 from vs_runtime.api.infrastructure import (
     AgentExecutionFinished,
@@ -156,7 +158,11 @@ def test_live_tee_includes_buffered_events_and_increments_epochs(
     project = Project.open(root)
     clock = ManualClock(start=clock_start)
     journal = EventJournal(clock, SimThreads())
-    journal.emit(CoreEventType.RUN_STARTED, "buffered")
+    journal.emit(
+        CoreEventType.RUN_STARTED,
+        "buffered",
+        data=RunStartedData(outer_loop="single-agent", input="input"),
+    )
     journal.enable_runlog(project, "run-1")
     journal.attach(Project.log_directory_for(project.root, "run-1"), "run-1")
     journal.emit(CoreEventType.RUN_FINISHED, "live")
@@ -165,16 +171,20 @@ def test_live_tee_includes_buffered_events_and_increments_epochs(
     restarted = EventJournal(clock, SimThreads())
     restarted.enable_runlog(project, "run-1")
     restarted.attach(Project.log_directory_for(project.root, "run-1"), "run-1")
-    restarted.emit(CoreEventType.RUN_STARTED, "restarted")
+    restarted.emit(
+        CoreEventType.RUN_STARTED,
+        "restarted",
+        data=RunStartedData(outer_loop="single-agent", input="input"),
+    )
     restarted.close()
     with Project.run_log_path_for(project.root, "run-1").open("rb") as stream:
         records = list(RunLogReader(stream))
-    assert [record.seq for record in records] == [1, 2, 3, 4, 5]
+    assert [record.seq for record in records] == [1, 2, 3]
     assert all(
         record.at is not None and record.at.to_datetime() == journal.read()[0].timestamp
         for record in records
     )
-    assert [record.epoch for record in records] == [1, 1, 1, 2, 2]
+    assert [record.epoch for record in records] == [1, 1, 2]
     headers = [
         record.body.value
         for record in records
@@ -185,11 +195,12 @@ def test_live_tee_includes_buffered_events_and_increments_epochs(
     assert all(header.api_schema_hash == API_SCHEMA_HASH for header in headers)
     assert all(header.store_schema_hash == STORE_SCHEMA_HASH for header in headers)
     lines = Project.event_journal_path_for(project.root, "run-1").read_text().splitlines()
-    assert [
-        record.body.value.json
-        for record in records
-        if record.body is not None and record.body.field == "legacy_event"
-    ] == lines
+    assert len(lines) == 3
+    assert all(
+        record.body is not None and record.body.field != "legacy_event" for record in records
+    )
+    assert headers[0].run is not None
+    assert headers[0].run.strategy == "single-agent"
 
 
 def test_tee_failure_logs_once_and_keeps_journal_and_subscribers_working(
@@ -205,7 +216,22 @@ def test_tee_failure_logs_once_and_keeps_journal_and_subscribers_working(
     journal.attach(Project.log_directory_for(project.root, "run-1"), "run-1")
     seen = []
     journal.subscribe(seen.append)
-    journal.emit(CoreEventType.RUN_STARTED, "x" * RUN_LOG_MAX_RECORD_BYTES)
+    large = SpanStartedData.model_validate(
+        {
+            "span": {
+                "id": "op:large",
+                "parent": None,
+                "type": "operation",
+                "name": "large",
+                "status": "running",
+                "started_at": 0,
+                "waiting_on": [
+                    {"kind": "time", "ref": "x" * 1024, "since": 0} for _ in range(1100)
+                ],
+            }
+        }
+    )
+    journal.emit(CoreEventType.SPAN_STARTED, data=large)
     for _ in range(2):
         journal.emit(CoreEventType.RUN_STARTED)
     journal.close()
@@ -255,15 +281,68 @@ def test_attachment_records_unknown_provenance_without_checkout_processes(
         integration.attach(
             Project.log_directory_for(root, "run-1"), project=project, run_id="run-1"
         )
-        integration.events.emit(CoreEventType.RUN_STARTED)
+        integration.events.emit(
+            CoreEventType.RUN_STARTED, data=RunStartedData(outer_loop="single-agent", input="input")
+        )
     finally:
         integration.close()
     with Project.run_log_path_for(root, "run-1").open("rb") as stream:
         records = list(RunLogReader(stream))
-    assert len(records) == 2
+    assert len(records) == 1
     header = records[0].body
     assert header is not None
     assert header.field == "epoch_started"
     assert header.value.tree_hash == ""
+    assert header.value.has_field("provenance_known")
+    assert header.value.provenance_known is False
     assert header.value.dirty is False
     assert processes.ran == []
+
+
+def test_live_content_replay_after_reattachment_is_lossless(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("VIBESYS_STATE_HOME", str(tmp_path / "home"))
+    root = tmp_path / "project"
+    root.mkdir()
+    project = Project.open(root)
+    logs = Project.log_directory_for(root, "run-1")
+    content = "\u2603" * 400000
+    first = EventJournal(ManualClock(), SimThreads())
+    first.enable_runlog(project, "run-1")
+    first.attach(logs, "run-1")
+    first.emit(
+        CoreEventType.AGENT_OUTPUT_CHUNK,
+        data=AgentOutputChunkData(channel="assistant", content=content),
+        execution_id="turn-a",
+    )
+    first.close()
+    reopened = EventJournal(ManualClock(), SimThreads())
+    reopened.enable_runlog(project, "run-1")
+    reopened.attach(logs, "run-1")
+    reopened.emit(
+        CoreEventType.AGENT_OUTPUT_CHUNK,
+        data=AgentOutputChunkData(channel="assistant", content="later"),
+        execution_id="turn-a",
+    )
+    reopened.close()
+    with Project.run_log_path_for(root, "run-1").open("rb") as stream:
+        records = list(RunLogReader(stream))
+    assert [record.seq for record in records] == list(range(1, len(records) + 1))
+    attachments = [
+        record.body.value
+        for record in records
+        if record.body is not None and record.body.field == "blob"
+    ]
+    assert attachments[0].blob is not None
+    blob = Project.run_blobs_directory_for(root, "run-1") / attachments[0].blob.sha256
+    assert blob.read_bytes() == content.encode()
+    streams = [
+        record.body.value
+        for record in records
+        if record.body is not None and record.body.field == "stream"
+    ]
+    assert len(streams) == 1
+    path = Project.log_streams_directory_for(root, "run-1") / streams[0].id
+    assert b"later" in path.read_bytes()
+    assert len(Project.event_journal_path_for(root, "run-1").read_text().splitlines()) == 2

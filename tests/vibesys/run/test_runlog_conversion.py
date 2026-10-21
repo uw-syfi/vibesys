@@ -10,12 +10,12 @@ if TYPE_CHECKING:
 import pytest
 
 from vibesys.api.transport import ConversionStatus, convert_run
-from vibesys.events import CoreEventType, SpanStartedData
+from vibesys.events import AgentOutputChunkData, CoreEventType, RunStartedData, SpanStartedData
 from vibesys.run import EventJournal
 from vs_core.api import Span, SpanStatus, SpanType
 from vs_project.api import Project
-from vs_proto.api import RUN_LOG_MAGIC
-from vs_runlog.api import RunLogReader
+from vs_proto.api import RUN_LOG_MAGIC, LegacyEvent, Oneof, Record
+from vs_runlog.api import FileRunLogWriter, RunLogReader
 from vs_sim.api.testing import ManualClock, SimThreads
 
 
@@ -50,11 +50,15 @@ def record_trace(journal: EventJournal) -> None:
 
 
 @pytest.mark.parametrize("clock_start", [-0.5, 0.0, 100.25])
-def test_conversion_preserves_json_and_timestamps_and_is_idempotent(
+def test_conversion_preserves_source_and_timestamps_and_is_idempotent(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, clock_start: float
 ) -> None:
     project, journal = journal_at(tmp_path, monkeypatch, clock_start)
-    journal.emit(CoreEventType.RUN_STARTED, "start")
+    journal.emit(
+        CoreEventType.RUN_STARTED,
+        "start",
+        data=RunStartedData(outer_loop="single-agent", input="input"),
+    )
     record_trace(journal)
     journal.emit(CoreEventType.RUN_FINISHED, "finish")
     source = Project.event_journal_path_for(project.root, "run-1")
@@ -64,22 +68,23 @@ def test_conversion_preserves_json_and_timestamps_and_is_idempotent(
     converted = destination.read_bytes()
     with destination.open("rb") as stream:
         records = list(RunLogReader(stream))
-    assert [record.seq for record in records] == [1, 2, 3, 4]
+    assert [record.seq for record in records] == [1, 2, 3]
     assert records[0].body is not None
     assert records[0].body.field == "epoch_started"
     assert all(
         record.at is not None and record.at.to_datetime() == journal.read()[0].timestamp
         for record in records
     )
-    assert [
-        record.body.value.json
-        for record in records
-        if record.body is not None and record.body.field == "legacy_event"
-    ] == original.decode().splitlines()
+    assert [record.body.field for record in records if record.body is not None] == [
+        "epoch_started",
+        "span",
+        "lifecycle",
+    ]
     assert convert_run(project, "run-1").status is ConversionStatus.EXISTS
     assert destination.read_bytes() == converted
     assert source.read_bytes() == original
     assert sorted(path.name for path in destination.parent.iterdir()) == [
+        "blobs",
         "core-events.jsonl",
         "run.log",
     ]
@@ -129,3 +134,36 @@ def test_corrupt_destination_is_reported_without_overwriting_it(
     with pytest.raises(ValueError, match="byte 0"):
         convert_run(project, "run-1")
     assert destination.read_bytes() == b"BADMAGIC"
+
+
+def test_conversion_upgrades_legacy_records_and_externalizes_large_content(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project, journal = journal_at(tmp_path, monkeypatch)
+    record_trace(journal)
+    content = "\u2603" * 400000
+    journal.emit(
+        CoreEventType.AGENT_OUTPUT_CHUNK,
+        data=AgentOutputChunkData(channel="assistant", content=content),
+        execution_id="turn-a",
+    )
+    destination = Project.run_log_path_for(project.root, "run-1")
+    with FileRunLogWriter(destination) as writer:
+        writer.append(Record(seq=1, epoch=1, body=Oneof("legacy_event", LegacyEvent(json="old"))))
+    original = Project.event_journal_path_for(project.root, "run-1").read_bytes()
+    assert convert_run(project, "run-1").status is ConversionStatus.CONVERTED
+    with destination.open("rb") as stream:
+        records = list(RunLogReader(stream))
+    assert all(
+        record.body is not None and record.body.field != "legacy_event" for record in records
+    )
+    attachment = next(
+        record.body.value
+        for record in records
+        if record.body is not None and record.body.field == "blob"
+    )
+    assert attachment.blob is not None
+    path = Project.run_blobs_directory_for(project.root, "run-1") / attachment.blob.sha256
+    assert path.read_bytes() == content.encode()
+    assert Project.event_journal_path_for(project.root, "run-1").read_bytes() == original
+    assert convert_run(project, "run-1").status is ConversionStatus.EXISTS

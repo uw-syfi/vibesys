@@ -5,11 +5,11 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from protobuf.wkt.google.protobuf.descriptor_pb import FileDescriptorSet
-from protobuf.wkt.google.protobuf.struct_pb import Struct
+from protobuf.wkt.google.protobuf.wrappers_pb import StringValue
 
 import vibesys.events as e
 import vs_proto.api as p
-from vibesys.records._common import Projection, enum_value, pack
+from vibesys.records._common import Projection, enum_value
 from vibesys.records._spans import ATTRS_TYPES
 
 if TYPE_CHECKING:
@@ -26,7 +26,8 @@ def descriptors() -> FileDescriptorSet:
             p.SearchRunDescription,
             p.SearchEnded,
             p.SearchRunFailure,
-            Struct,
+            p.TranscriptEntry,
+            StringValue,
         ]
     ]
     while pending:
@@ -43,7 +44,8 @@ def header(projection: Projection, run: p.RunDescription | None = None) -> None:
         p.EpochStarted(
             run_id=projection.state.run_id,
             epoch=projection.state.epoch,
-            tree_hash="unknown",
+            tree_hash="",
+            provenance_known=False,
             vibesys_version=projection.state.vibesys_version,
             api_schema_hash=p.API_SCHEMA_HASH,
             store_schema_hash=p.STORE_SCHEMA_HASH,
@@ -103,7 +105,7 @@ def started(projection: Projection) -> None:
             evaluator=None
             if evaluator is None
             else p.Evaluator(name=evaluator.name, version=evaluator.version),
-            detail=pack(p.SearchRunDescription(max_workstreams=data.max_rounds)),
+            detail=projection.pack(p.SearchRunDescription(max_workstreams=data.max_rounds)),
         ),
     )
 
@@ -146,7 +148,7 @@ def ended(projection: Projection) -> None:
     if isinstance(data, e.RunEndingData):
         ending.summary = projection.text("run", "summary", data.summary)
         ending.resumable = data.resumable
-        ending.detail = pack(
+        ending.detail = projection.pack(
             p.SearchEnded(
                 reason=None if data.reason is None else enum_value(p.EndReason, data.reason),
                 uncompared=data.uncompared,
@@ -158,7 +160,8 @@ def ended(projection: Projection) -> None:
             else p.Outcome.FINISHED
         )
         projection.ending = ending.to_binary()
-    elif isinstance(data, e.RunFailedData):
+        return
+    if isinstance(data, e.RunFailedData):
         failure = data.failure
         kind = (
             "environment_unavailable"
@@ -169,7 +172,7 @@ def ended(projection: Projection) -> None:
         ending.failure = p.RunFailure(
             kind=enum_value(p.RunFailureKind, kind),
             reason=projection.text("run", "failure.reason", failure.reason),
-            detail=pack(
+            detail=projection.pack(
                 p.SearchRunFailure(
                     workstreams_started=failure.workstreams_started,
                     workstream_budget=failure.workstream_budget,

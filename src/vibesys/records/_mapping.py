@@ -31,8 +31,6 @@ DROPS: dict[e.CoreEventType, str] = {
     e.CoreEventType.JUDGE_RESULT: "no producer; workstream verdict owns the result",
     e.CoreEventType.BENCHMARK_RESULT: "no producer; gate metric points own readings",
     e.CoreEventType.RUN_CONFIGURED: "no producer; epoch describes configuration",
-    e.CoreEventType.CONTROL_REFUSED: "unstructured legacy refusal; structured steer refusals map to intents",
-    e.CoreEventType.REQUEST_REJECTED: "unstructured legacy rejection has no request identity",
     e.CoreEventType.ACTION_QUEUED: "pending internal action, not an applied or refused intent",
     e.CoreEventType.ACTION_APPLIED: "legacy action text has no request identity; phase 3 supplies typed actions",
     e.CoreEventType.WORKSPACE_SNAPSHOT: "workstream attrs own revision and parent_revision",
@@ -71,7 +69,7 @@ DISPOSITIONS = MappingProxyType({**DROPS, **dict.fromkeys(MAPPERS, "typed record
 def map_event(state: MappingState, event: e.CoreEvent) -> MappedEvent:
     """Project one event, raising on absent dispositions or invalid typed content."""
     projection = Projection(state, event)
-    if state.sequence == 0 and event.type is not e.CoreEventType.RUN_STARTED:
+    if not state.header_written and event.type is not e.CoreEventType.RUN_STARTED:
         _lifecycle.header(projection)
     projection.final = event.type in {
         e.CoreEventType.RUN_FINISHED,

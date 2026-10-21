@@ -5,13 +5,15 @@
 import type { GenEnum, GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import { enumDesc, fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
 import { file_buf_validate_validate } from "../../../buf/validate/validate_pb.js";
+import type { Any } from "@bufbuild/protobuf/wkt";
+import { file_google_protobuf_any } from "@bufbuild/protobuf/wkt";
 import type { Message } from "@bufbuild/protobuf";
 
 /**
  * Describes the file vibesys/store/v1/notice.proto.
  */
 export const file_vibesys_store_v1_notice: GenFile = /*@__PURE__*/
-  fileDesc("Ch12aWJlc3lzL3N0b3JlL3YxL25vdGljZS5wcm90bxIQdmliZXN5cy5zdG9yZS52MSLBAQoGTm90aWNlEjgKCHNldmVyaXR5GAEgASgOMhoudmliZXN5cy5zdG9yZS52MS5TZXZlcml0eUIKukgHggEEEAEgABI2CgRjb2RlGAIgASgOMhwudmliZXN5cy5zdG9yZS52MS5Ob3RpY2VDb2RlQgq6SAeCAQQQASAAEhwKB21lc3NhZ2UYAyABKAlCC7pICHIGEAEogIAEEh4KBHNwYW4YBCABKAlCC7pICHIGEAEogIAESACIAQFCBwoFX3NwYW4qYgoIU2V2ZXJpdHkSGAoUU0VWRVJJVFlfVU5TUEVDSUZJRUQQABIUChBTRVZFUklUWV9XQVJOSU5HEAESEgoOU0VWRVJJVFlfRVJST1IQAhISCg5TRVZFUklUWV9GQVRBTBADKr4BCgpOb3RpY2VDb2RlEhsKF05PVElDRV9DT0RFX1VOU1BFQ0lGSUVEEAASIQodTk9USUNFX0NPREVfRlJBTUVXT1JLX1dBUk5JTkcQARIoCiROT1RJQ0VfQ09ERV9JTlBVVF9NRUFTVVJFTUVOVF9GQUlMRUQQAhInCiNOT1RJQ0VfQ09ERV9FTlZJUk9OTUVOVF9VTkFWQUlMQUJMRRADEh0KGU5PVElDRV9DT0RFX0NPTkZJR1VSQVRJT04QBELGAQoUY29tLnZpYmVzeXMuc3RvcmUudjFCC05vdGljZVByb3RvUAFaP2dpdGh1Yi5jb20vdXctc3lmaS92aWJlc3lzL2dhdGV3YXkvZ2VuL3ZpYmVzeXMvc3RvcmUvdjE7c3RvcmV2MaICA1ZTWKoCEFZpYmVzeXMuU3RvcmUuVjHKAhBWaWJlc3lzXFN0b3JlXFYx4gIcVmliZXN5c1xTdG9yZVxWMVxHUEJNZXRhZGF0YeoCElZpYmVzeXM6OlN0b3JlOjpWMWIGcHJvdG8z", [file_buf_validate_validate]);
+  fileDesc("Ch12aWJlc3lzL3N0b3JlL3YxL25vdGljZS5wcm90bxIQdmliZXN5cy5zdG9yZS52MSL3AQoGTm90aWNlEjgKCHNldmVyaXR5GAEgASgOMhoudmliZXN5cy5zdG9yZS52MS5TZXZlcml0eUIKukgHggEEEAEgABI2CgRjb2RlGAIgASgOMhwudmliZXN5cy5zdG9yZS52MS5Ob3RpY2VDb2RlQgq6SAeCAQQQASAAEhwKB21lc3NhZ2UYAyABKAlCC7pICHIGEAEogIAEEh4KBHNwYW4YBCABKAlCC7pICHIGEAEogIAESACIAQESKQoGZGV0YWlsGAUgASgLMhQuZ29vZ2xlLnByb3RvYnVmLkFueUgBiAEBQgcKBV9zcGFuQgkKB19kZXRhaWwqYgoIU2V2ZXJpdHkSGAoUU0VWRVJJVFlfVU5TUEVDSUZJRUQQABIUChBTRVZFUklUWV9XQVJOSU5HEAESEgoOU0VWRVJJVFlfRVJST1IQAhISCg5TRVZFUklUWV9GQVRBTBADKuIBCgpOb3RpY2VDb2RlEhsKF05PVElDRV9DT0RFX1VOU1BFQ0lGSUVEEAASIQodTk9USUNFX0NPREVfRlJBTUVXT1JLX1dBUk5JTkcQARIoCiROT1RJQ0VfQ09ERV9JTlBVVF9NRUFTVVJFTUVOVF9GQUlMRUQQAhInCiNOT1RJQ0VfQ09ERV9FTlZJUk9OTUVOVF9VTkFWQUlMQUJMRRADEh0KGU5PVElDRV9DT0RFX0NPTkZJR1VSQVRJT04QBBIiCh5OT1RJQ0VfQ09ERV9VTkFUVFJJQlVURURfRVZFTlQQBULGAQoUY29tLnZpYmVzeXMuc3RvcmUudjFCC05vdGljZVByb3RvUAFaP2dpdGh1Yi5jb20vdXctc3lmaS92aWJlc3lzL2dhdGV3YXkvZ2VuL3ZpYmVzeXMvc3RvcmUvdjE7c3RvcmV2MaICA1ZTWKoCEFZpYmVzeXMuU3RvcmUuVjHKAhBWaWJlc3lzXFN0b3JlXFYx4gIcVmliZXN5c1xTdG9yZVxWMVxHUEJNZXRhZGF0YeoCElZpYmVzeXM6OlN0b3JlOjpWMWIGcHJvdG8z", [file_buf_validate_validate, file_google_protobuf_any]);
 
 /**
  * @generated from message vibesys.store.v1.Notice
@@ -36,6 +38,13 @@ export type Notice = Message<"vibesys.store.v1.Notice"> & {
    * @generated from field: optional string span = 4;
    */
   span?: string | undefined;
+
+  /**
+   * Descriptor-backed details, including historical observations with no owner.
+   *
+   * @generated from field: optional google.protobuf.Any detail = 5;
+   */
+  detail?: Any | undefined;
 };
 
 /**
@@ -107,6 +116,11 @@ export enum NoticeCode {
    * @generated from enum value: NOTICE_CODE_CONFIGURATION = 4;
    */
   CONFIGURATION = 4,
+
+  /**
+   * @generated from enum value: NOTICE_CODE_UNATTRIBUTED_EVENT = 5;
+   */
+  UNATTRIBUTED_EVENT = 5,
 }
 
 /**

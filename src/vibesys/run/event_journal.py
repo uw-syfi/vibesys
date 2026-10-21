@@ -6,8 +6,8 @@ import logging
 from typing import TYPE_CHECKING
 
 from vibesys.events import CoreEvent, CoreEventData, CoreEventType, make_core_event
-from vs_proto.api import Timestamp
-from vs_runlog.api import LegacyRunLogTee
+from vibesys.run.runlog_tee import RunLogTee
+from vs_runlog.api import FileRunContent, FileRunLogWriter
 from vs_runtime.api.infrastructure import DurableEventJournal, EventCodec
 from vs_sim.api import Clock, Threads, utc_datetime
 
@@ -43,7 +43,7 @@ class EventJournal(DurableEventJournal[CoreEvent]):
         super().__init__(_CoreEventCodec(), filename="core-events.jsonl", threads=threads)
         self._clock = clock
         self._runlog_configured = False
-        self._runlog: LegacyRunLogTee | None = None
+        self._runlog: RunLogTee | None = None
 
     def enable_runlog(self, project: Project, run_id: str) -> None:
         """Enable the additive transport and publish discovery once for this process."""
@@ -55,7 +55,15 @@ class EventJournal(DurableEventJournal[CoreEvent]):
             path.parent.mkdir(parents=True, exist_ok=True)
             # Phase 1 has no checkout provenance at launch. Leave it unknown;
             # phase 3 (#3332) records provenance in EpochStarted at the launch boundary.
-            self._runlog = LegacyRunLogTee(path, run_id, self._runlog_timestamp)
+            self._runlog = RunLogTee(
+                FileRunLogWriter(path),
+                FileRunContent(
+                    project.run_blobs_directory_for(project.root, run_id),
+                    project.log_streams_directory_for(project.root, run_id),
+                ),
+                run_id,
+                history=self.read,
+            )
             project.publish_run_for(project.root, run_id)
             self.set_append_sink(self._runlog.append)
         except Exception:
@@ -67,9 +75,6 @@ class EventJournal(DurableEventJournal[CoreEvent]):
         if self._runlog is not None:
             self._runlog.close()
             self._runlog = None
-
-    def _runlog_timestamp(self) -> Timestamp:
-        return Timestamp.from_datetime(utc_datetime(self._clock))
 
     def emit(
         self,

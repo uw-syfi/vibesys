@@ -41,32 +41,38 @@ def finish(projection: Projection, span: p.Span, kind: str, attrs: Message) -> N
     projection.span(span)
 
 
-def workstream(projection: Projection) -> None:
-    event = projection.event
-    matches = [
-        s for s in projection.spans.values() if s.label is not None and s.label.kind == "workstream"
-    ]
-    # Serial round labels are stable attributes, not a nearest-event heuristic.
-    selected = None
-    for span in matches:
-        if span.label is None or span.label.attrs is None:
+def unattributed(projection: Projection, attrs: Message) -> None:
+    """Keep historical strategy facts without inventing a second work unit."""
+    projection.emit(
+        "notice",
+        p.Notice(
+            severity=p.Severity.WARNING,
+            code=p.NoticeCode.UNATTRIBUTED_EVENT,
+            message=f"{projection.event.type}: journal observation has no trace owner",
+            detail=projection.pack(attrs),
+        ),
+    )
+
+
+def _workstream_owner(projection: Projection) -> tuple[p.Span, p.WorkstreamAttrs] | None:
+    label = projection.event.round_label
+    for span in projection.spans.values():
+        if span.label is None or span.label.kind != "workstream" or span.label.attrs is None:
             continue
         attrs = p.WorkstreamAttrs.from_binary(span.label.attrs.value)
-        if event.round_label == f"round-{attrs.round}":
-            selected = span
-    if selected is None and not projection.final:
+        ordinals = [getattr(attrs, name) for name in ("round", "sequence") if attrs.has_field(name)]
+        if label in {f"round-{ordinal}" for ordinal in ordinals}:
+            return span, attrs
+    return None
+
+
+def workstream(projection: Projection) -> None:
+    event = projection.event
+    found = _workstream_owner(projection)
+    if found is None and not projection.final:
         projection.pending.append(event.model_dump_json().encode())
         return
-    if selected is None:
-        selected = labelled(
-            projection, "workstream", "workstream:" + (event.round_label or str(event.sequence))
-        )
-        attrs = p.WorkstreamAttrs()
-    else:
-        if selected.label is None or selected.label.attrs is None:
-            message = "workstream label has no attrs"
-            raise TypeError(message)
-        attrs = p.WorkstreamAttrs.from_binary(selected.label.attrs.value)
+    selected, attrs = (None, p.WorkstreamAttrs()) if found is None else found
     data = event.data
     if isinstance(data, e.RoundFinishedData):
         attrs.attempts = data.attempts
@@ -81,12 +87,17 @@ def workstream(projection: Projection) -> None:
                 role=failure.role,
                 turns=failure.turns,
                 limit=failure.limit,
-                text=projection.text(selected.id, "workstream.failure", failure.text),
+                text=projection.text(
+                    "run" if selected is None else selected.id, "workstream.failure", failure.text
+                ),
             )
     else:
         message = "workstream projection requires a round or workstream result"
         raise TypeError(message)
-    finish(projection, selected, "workstream", attrs)
+    if selected is None:
+        unattributed(projection, attrs)
+    else:
+        finish(projection, selected, "workstream", attrs)
 
 
 def adoption(projection: Projection) -> None:
@@ -106,21 +117,17 @@ def adoption(projection: Projection) -> None:
     if not matches and not projection.final:
         projection.pending.append(projection.event.model_dump_json().encode())
         return
-    span = (
-        matches[-1]
-        if matches
-        else labelled(projection, "adoption", "adoption:" + (data.settlement_id or "input"))
+    attrs = p.AdoptionAttrs(
+        candidate=data.revision if data.selection == "candidate" else None,
+        selection=enum_value(p.Selection, data.selection),
+        settlement_id=data.settlement_id,
     )
-    finish(
-        projection,
-        span,
-        "adoption",
-        p.AdoptionAttrs(
-            candidate=data.revision if data.selection == "candidate" else None,
-            selection=enum_value(p.Selection, data.selection),
-            settlement_id=data.settlement_id,
-        ),
-    )
+    if not matches:
+        unattributed(projection, attrs)
+    else:
+        span = matches[-1]
+        span.label = p.Label(kind="adoption", attrs=projection.pack(attrs, span.id))
+        projection.span(span)
 
 
 def gate(projection: Projection) -> None:
@@ -131,10 +138,11 @@ def gate(projection: Projection) -> None:
     identity = ":".join(
         ("gate", projection.event.execution_id or "input", data.gate, data.recipe or "default")
     )
-    span = labelled(projection, "gate", identity)
+    known = data.span_id is not None and data.span_id in projection.spans
+    span = labelled(projection, "gate", data.span_id or identity)
     attrs = p.GateAttrs(
         stage=enum_value(p.GateStage, data.gate),
-        subject=subject(projection, span.parent),
+        subject=subject(projection, span.parent) if known else p.GateSubject.UNATTRIBUTED,
         recipe=data.recipe,
         source=enum_value(p.FrameworkSource, data.source),
         source_label=data.source_label,
@@ -147,13 +155,23 @@ def gate(projection: Projection) -> None:
         return
     attrs.reused = data.reused
     if data.value is not None and data.metric is not None:
-        projection.emit(
-            "metric",
-            p.MetricPoint(
-                series=data.metric, span=span.id, value=data.value, clock=projection.clock
-            ),
-        )
-    finish(projection, span, "gate", attrs)
+        if known and span.ended_at is None and not projection.final:
+            projection.pending.append(projection.event.model_dump_json().encode())
+        else:
+            projection.metric(
+                p.MetricPoint(
+                    series=data.metric,
+                    span=span.id,
+                    value=data.value,
+                    clock=projection.clock if span.ended_at is None else span.ended_at,
+                ),
+                unit=data.unit or "",
+            )
+    if data.span_id is not None:
+        span.label = p.Label(kind="gate", attrs=projection.pack(attrs, span.id))
+        projection.span(span)
+    else:
+        finish(projection, span, "gate", attrs)
 
 
 def input_failure(projection: Projection) -> None:

@@ -21,6 +21,8 @@ enum GateSubject {
   GATE_SUBJECT_UNSPECIFIED = 0;
   GATE_SUBJECT_INPUT = 1;
   GATE_SUBJECT_CANDIDATE = 2;
+  // Historical stage events did not identify their owning operation.
+  GATE_SUBJECT_UNATTRIBUTED = 3;
 }
 
 enum FrameworkSource {
@@ -128,6 +130,8 @@ message WorkstreamAttrs {
     max_bytes: 65536
   }];
   bool repeated_error = 15;
+  // The dynamic search admission ordinal, distinct from a serial round.
+  optional uint32 sequence = 16;
 }
 
 message WorkstreamFailure {

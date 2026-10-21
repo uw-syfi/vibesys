@@ -13,10 +13,15 @@ class MappingState:
     epoch: int = 1
     vibesys_version: str = "unknown"
     sequence: int = 0
+    header_written: bool = False
+    epoch_header: bytes | None = None
     origin: float | None = None
     spans: tuple[tuple[str, bytes], ...] = ()
     invocations: tuple[tuple[str, str], ...] = ()
     streams: tuple[tuple[str, int], ...] = ()
+    waits: tuple[tuple[str, str], ...] = ()
+    intents: tuple[tuple[str, bytes], ...] = ()
+    metric_values: tuple[tuple[tuple[str, str | None], float], ...] = ()
     ending: bytes | None = None
     pending: tuple[bytes, ...] = ()
 

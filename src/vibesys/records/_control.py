@@ -52,19 +52,51 @@ def steer(projection: Projection) -> None:
         reason=delivery.reason if refused else None,
         mode=None if delivery.mode is None else enum_value(p.SteerMode, delivery.mode),
         withdraws=delivery.withdraws,
+        target=None
+        if delivery.target is None
+        else p.SteerTarget(
+            kind=enum_value(p.SteerTargetKind, delivery.target.kind), id=delivery.target.id
+        ),
     )
+    prior = projection.intents.get(control_id)
+    if prior is not None:
+        previous = p.IntentState.from_binary(prior)
+        for name in ("mode", "target", "withdraws"):
+            if not intent.has_field(name) and previous.has_field(name):
+                field = next(field for field in intent.desc().fields if field.name == name)
+                intent[field] = previous[field]
+    projection.intents[control_id] = intent.to_binary()
     projection.emit("intent", intent)
 
 
-MAPPERS = dict.fromkeys(
-    (
-        e.CoreEventType.PAUSE_REQUESTED,
-        e.CoreEventType.PAUSED,
-        e.CoreEventType.RESUMED,
-        e.CoreEventType.STOP_REQUESTED,
-        e.CoreEventType.STOPPED,
-    ),
-    lifecycle,
+def refusal(projection: Projection) -> None:
+    if isinstance(projection.event.data, e.SteerDeliveryData):
+        steer(projection)
+    else:
+        projection.emit(
+            "notice",
+            p.Notice(
+                severity=p.Severity.WARNING,
+                code=p.NoticeCode.FRAMEWORK_WARNING,
+                message=projection.text(
+                    "run", "control_refused", projection.event.text or projection.event.type.value
+                ),
+            ),
+        )
+
+
+MAPPERS = {e.CoreEventType.CONTROL_REFUSED: refusal, e.CoreEventType.REQUEST_REJECTED: refusal}
+MAPPERS.update(
+    dict.fromkeys(
+        (
+            e.CoreEventType.PAUSE_REQUESTED,
+            e.CoreEventType.PAUSED,
+            e.CoreEventType.RESUMED,
+            e.CoreEventType.STOP_REQUESTED,
+            e.CoreEventType.STOPPED,
+        ),
+        lifecycle,
+    )
 )
 MAPPERS.update(
     dict.fromkeys(

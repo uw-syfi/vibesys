@@ -10,6 +10,7 @@ import (
 	_ "github.com/uw-syfi/vibesys/gateway/gen/buf/validate"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
+	anypb "google.golang.org/protobuf/types/known/anypb"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
@@ -84,6 +85,7 @@ const (
 	NoticeCode_NOTICE_CODE_INPUT_MEASUREMENT_FAILED NoticeCode = 2
 	NoticeCode_NOTICE_CODE_ENVIRONMENT_UNAVAILABLE  NoticeCode = 3
 	NoticeCode_NOTICE_CODE_CONFIGURATION            NoticeCode = 4
+	NoticeCode_NOTICE_CODE_UNATTRIBUTED_EVENT       NoticeCode = 5
 )
 
 // Enum value maps for NoticeCode.
@@ -94,6 +96,7 @@ var (
 		2: "NOTICE_CODE_INPUT_MEASUREMENT_FAILED",
 		3: "NOTICE_CODE_ENVIRONMENT_UNAVAILABLE",
 		4: "NOTICE_CODE_CONFIGURATION",
+		5: "NOTICE_CODE_UNATTRIBUTED_EVENT",
 	}
 	NoticeCode_value = map[string]int32{
 		"NOTICE_CODE_UNSPECIFIED":              0,
@@ -101,6 +104,7 @@ var (
 		"NOTICE_CODE_INPUT_MEASUREMENT_FAILED": 2,
 		"NOTICE_CODE_ENVIRONMENT_UNAVAILABLE":  3,
 		"NOTICE_CODE_CONFIGURATION":            4,
+		"NOTICE_CODE_UNATTRIBUTED_EVENT":       5,
 	}
 )
 
@@ -132,11 +136,13 @@ func (NoticeCode) EnumDescriptor() ([]byte, []int) {
 }
 
 type Notice struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Severity      Severity               `protobuf:"varint,1,opt,name=severity,proto3,enum=vibesys.store.v1.Severity" json:"severity,omitempty"`
-	Code          NoticeCode             `protobuf:"varint,2,opt,name=code,proto3,enum=vibesys.store.v1.NoticeCode" json:"code,omitempty"`
-	Message       string                 `protobuf:"bytes,3,opt,name=message,proto3" json:"message,omitempty"`
-	Span          *string                `protobuf:"bytes,4,opt,name=span,proto3,oneof" json:"span,omitempty"`
+	state    protoimpl.MessageState `protogen:"open.v1"`
+	Severity Severity               `protobuf:"varint,1,opt,name=severity,proto3,enum=vibesys.store.v1.Severity" json:"severity,omitempty"`
+	Code     NoticeCode             `protobuf:"varint,2,opt,name=code,proto3,enum=vibesys.store.v1.NoticeCode" json:"code,omitempty"`
+	Message  string                 `protobuf:"bytes,3,opt,name=message,proto3" json:"message,omitempty"`
+	Span     *string                `protobuf:"bytes,4,opt,name=span,proto3,oneof" json:"span,omitempty"`
+	// Descriptor-backed details, including historical observations with no owner.
+	Detail        *anypb.Any `protobuf:"bytes,5,opt,name=detail,proto3,oneof" json:"detail,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -199,31 +205,41 @@ func (x *Notice) GetSpan() string {
 	return ""
 }
 
+func (x *Notice) GetDetail() *anypb.Any {
+	if x != nil {
+		return x.Detail
+	}
+	return nil
+}
+
 var File_vibesys_store_v1_notice_proto protoreflect.FileDescriptor
 
 const file_vibesys_store_v1_notice_proto_rawDesc = "" +
 	"\n" +
-	"\x1dvibesys/store/v1/notice.proto\x12\x10vibesys.store.v1\x1a\x1bbuf/validate/validate.proto\"\xe0\x01\n" +
+	"\x1dvibesys/store/v1/notice.proto\x12\x10vibesys.store.v1\x1a\x1bbuf/validate/validate.proto\x1a\x19google/protobuf/any.proto\"\x9e\x02\n" +
 	"\x06Notice\x12B\n" +
 	"\bseverity\x18\x01 \x01(\x0e2\x1a.vibesys.store.v1.SeverityB\n" +
 	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\bseverity\x12<\n" +
 	"\x04code\x18\x02 \x01(\x0e2\x1c.vibesys.store.v1.NoticeCodeB\n" +
 	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x04code\x12%\n" +
 	"\amessage\x18\x03 \x01(\tB\v\xbaH\br\x06\x10\x01(\x80\x80\x04R\amessage\x12$\n" +
-	"\x04span\x18\x04 \x01(\tB\v\xbaH\br\x06\x10\x01(\x80\x80\x04H\x00R\x04span\x88\x01\x01B\a\n" +
-	"\x05_span*b\n" +
+	"\x04span\x18\x04 \x01(\tB\v\xbaH\br\x06\x10\x01(\x80\x80\x04H\x00R\x04span\x88\x01\x01\x121\n" +
+	"\x06detail\x18\x05 \x01(\v2\x14.google.protobuf.AnyH\x01R\x06detail\x88\x01\x01B\a\n" +
+	"\x05_spanB\t\n" +
+	"\a_detail*b\n" +
 	"\bSeverity\x12\x18\n" +
 	"\x14SEVERITY_UNSPECIFIED\x10\x00\x12\x14\n" +
 	"\x10SEVERITY_WARNING\x10\x01\x12\x12\n" +
 	"\x0eSEVERITY_ERROR\x10\x02\x12\x12\n" +
-	"\x0eSEVERITY_FATAL\x10\x03*\xbe\x01\n" +
+	"\x0eSEVERITY_FATAL\x10\x03*\xe2\x01\n" +
 	"\n" +
 	"NoticeCode\x12\x1b\n" +
 	"\x17NOTICE_CODE_UNSPECIFIED\x10\x00\x12!\n" +
 	"\x1dNOTICE_CODE_FRAMEWORK_WARNING\x10\x01\x12(\n" +
 	"$NOTICE_CODE_INPUT_MEASUREMENT_FAILED\x10\x02\x12'\n" +
 	"#NOTICE_CODE_ENVIRONMENT_UNAVAILABLE\x10\x03\x12\x1d\n" +
-	"\x19NOTICE_CODE_CONFIGURATION\x10\x04B\xc6\x01\n" +
+	"\x19NOTICE_CODE_CONFIGURATION\x10\x04\x12\"\n" +
+	"\x1eNOTICE_CODE_UNATTRIBUTED_EVENT\x10\x05B\xc6\x01\n" +
 	"\x14com.vibesys.store.v1B\vNoticeProtoP\x01Z?github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1\xa2\x02\x03VSX\xaa\x02\x10Vibesys.Store.V1\xca\x02\x10Vibesys\\Store\\V1\xe2\x02\x1cVibesys\\Store\\V1\\GPBMetadata\xea\x02\x12Vibesys::Store::V1b\x06proto3"
 
 var (
@@ -241,18 +257,20 @@ func file_vibesys_store_v1_notice_proto_rawDescGZIP() []byte {
 var file_vibesys_store_v1_notice_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
 var file_vibesys_store_v1_notice_proto_msgTypes = make([]protoimpl.MessageInfo, 1)
 var file_vibesys_store_v1_notice_proto_goTypes = []any{
-	(Severity)(0),   // 0: vibesys.store.v1.Severity
-	(NoticeCode)(0), // 1: vibesys.store.v1.NoticeCode
-	(*Notice)(nil),  // 2: vibesys.store.v1.Notice
+	(Severity)(0),     // 0: vibesys.store.v1.Severity
+	(NoticeCode)(0),   // 1: vibesys.store.v1.NoticeCode
+	(*Notice)(nil),    // 2: vibesys.store.v1.Notice
+	(*anypb.Any)(nil), // 3: google.protobuf.Any
 }
 var file_vibesys_store_v1_notice_proto_depIdxs = []int32{
 	0, // 0: vibesys.store.v1.Notice.severity:type_name -> vibesys.store.v1.Severity
 	1, // 1: vibesys.store.v1.Notice.code:type_name -> vibesys.store.v1.NoticeCode
-	2, // [2:2] is the sub-list for method output_type
-	2, // [2:2] is the sub-list for method input_type
-	2, // [2:2] is the sub-list for extension type_name
-	2, // [2:2] is the sub-list for extension extendee
-	0, // [0:2] is the sub-list for field type_name
+	3, // 2: vibesys.store.v1.Notice.detail:type_name -> google.protobuf.Any
+	3, // [3:3] is the sub-list for method output_type
+	3, // [3:3] is the sub-list for method input_type
+	3, // [3:3] is the sub-list for extension type_name
+	3, // [3:3] is the sub-list for extension extendee
+	0, // [0:3] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_store_v1_notice_proto_init() }

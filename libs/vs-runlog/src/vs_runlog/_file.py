@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
+import re
 from typing import TYPE_CHECKING, BinaryIO, Self
 
 if TYPE_CHECKING:
@@ -20,6 +22,8 @@ from vs_runlog._lock import RunLock
 from vs_sim.api import CloseOnce, ReleaseStack
 
 CHECKPOINT_RECORDS = 256
+
+_STREAM_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,255}")
 
 
 class RunLogReader:
@@ -179,3 +183,52 @@ def _check_write(written: int | None, expected: int) -> None:
     if written != expected:
         message = "incomplete run.log append"
         raise OSError(message)
+
+
+class FileRunContent:
+    """Immutable blobs and replayable stream appends at caller-owned paths.
+
+    Replaying an identical write succeeds. A hash mismatch, unsafe stream id,
+    missing prefix or conflicting content raises rather than overwriting data.
+    Every file handle is scoped to one operation.
+    """
+
+    def __init__(self, blobs: Path, streams: Path) -> None:
+        """Use layout paths supplied by the project, without discovering a project."""
+        self._blobs = blobs
+        self._streams = streams
+
+    def write_blob(self, digest: str, content: bytes) -> None:
+        """Create immutable content only when its supplied hash matches its bytes."""
+        if hashlib.sha256(content).hexdigest() != digest:
+            message = "blob digest does not match content"
+            raise ValueError(message)
+        self._blobs.mkdir(parents=True, exist_ok=True)
+        path = self._blobs / digest
+        try:
+            with path.open("xb") as stream:
+                stream.write(content)
+        except FileExistsError:
+            if path.read_bytes() != content:
+                message = f"blob {digest} conflicts with existing content"
+                raise ValueError(message) from None
+
+    def append_stream(self, stream_id: str, offset: int, content: bytes) -> None:
+        """Append once at an exact offset, or verify a previously written prefix."""
+        if not _STREAM_ID.fullmatch(stream_id) or offset < 0:
+            message = f"invalid stream id or offset: {stream_id!r}, {offset}"
+            raise ValueError(message)
+        self._streams.mkdir(parents=True, exist_ok=True)
+        path = self._streams / stream_id
+        with path.open("a+b") as stream:
+            size = stream.tell()
+            if size < offset:
+                message = f"stream {stream_id}: missing prefix through {offset}"
+                raise ValueError(message)
+            stream.seek(offset)
+            existing = stream.read(len(content))
+            if existing != content[: len(existing)]:
+                message = f"stream {stream_id}: conflicting content at {offset}"
+                raise ValueError(message)
+            stream.seek(0, 2)
+            stream.write(content[len(existing) :])

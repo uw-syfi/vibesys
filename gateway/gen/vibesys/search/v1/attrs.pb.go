@@ -88,6 +88,8 @@ const (
 	GateSubject_GATE_SUBJECT_UNSPECIFIED GateSubject = 0
 	GateSubject_GATE_SUBJECT_INPUT       GateSubject = 1
 	GateSubject_GATE_SUBJECT_CANDIDATE   GateSubject = 2
+	// Historical stage events did not identify their owning operation.
+	GateSubject_GATE_SUBJECT_UNATTRIBUTED GateSubject = 3
 )
 
 // Enum value maps for GateSubject.
@@ -96,11 +98,13 @@ var (
 		0: "GATE_SUBJECT_UNSPECIFIED",
 		1: "GATE_SUBJECT_INPUT",
 		2: "GATE_SUBJECT_CANDIDATE",
+		3: "GATE_SUBJECT_UNATTRIBUTED",
 	}
 	GateSubject_value = map[string]int32{
-		"GATE_SUBJECT_UNSPECIFIED": 0,
-		"GATE_SUBJECT_INPUT":       1,
-		"GATE_SUBJECT_CANDIDATE":   2,
+		"GATE_SUBJECT_UNSPECIFIED":  0,
+		"GATE_SUBJECT_INPUT":        1,
+		"GATE_SUBJECT_CANDIDATE":    2,
+		"GATE_SUBJECT_UNATTRIBUTED": 3,
 	}
 )
 
@@ -624,8 +628,10 @@ type WorkstreamAttrs struct {
 	ProfileSkipped *bool                  `protobuf:"varint,13,opt,name=profile_skipped,json=profileSkipped,proto3,oneof" json:"profile_skipped,omitempty"`
 	JudgeVerdict   *string                `protobuf:"bytes,14,opt,name=judge_verdict,json=judgeVerdict,proto3,oneof" json:"judge_verdict,omitempty"`
 	RepeatedError  bool                   `protobuf:"varint,15,opt,name=repeated_error,json=repeatedError,proto3" json:"repeated_error,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// The dynamic search admission ordinal, distinct from a serial round.
+	Sequence      *uint32 `protobuf:"varint,16,opt,name=sequence,proto3,oneof" json:"sequence,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *WorkstreamAttrs) Reset() {
@@ -761,6 +767,13 @@ func (x *WorkstreamAttrs) GetRepeatedError() bool {
 		return x.RepeatedError
 	}
 	return false
+}
+
+func (x *WorkstreamAttrs) GetSequence() uint32 {
+	if x != nil && x.Sequence != nil {
+		return *x.Sequence
+	}
+	return 0
 }
 
 type WorkstreamFailure struct {
@@ -1466,7 +1479,7 @@ const file_vibesys_search_v1_attrs_proto_rawDesc = "" +
 	"\n" +
 	"\x1dvibesys/search/v1/attrs.proto\x12\x11vibesys.search.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1dvibesys/store/v1/common.proto\"#\n" +
 	"\rPlanningAttrs\x12\x12\n" +
-	"\x04call\x18\x01 \x01(\rR\x04call\"\xd1\x06\n" +
+	"\x04call\x18\x01 \x01(\rR\x04call\"\xff\x06\n" +
 	"\x0fWorkstreamAttrs\x125\n" +
 	"\rhypothesis_id\x18\x01 \x01(\tB\v\xbaH\br\x06\x10\x01(\x80\x80\x04H\x00R\fhypothesisId\x88\x01\x01\x129\n" +
 	"\x0fparent_revision\x18\x02 \x01(\tB\v\xbaH\br\x06\x10\x01(\x80\x80\x04H\x01R\x0eparentRevision\x88\x01\x01\x12\"\n" +
@@ -1485,7 +1498,8 @@ const file_vibesys_search_v1_attrs_proto_rawDesc = "" +
 	"\x0fprofile_skipped\x18\r \x01(\bH\n" +
 	"R\x0eprofileSkipped\x88\x01\x01\x125\n" +
 	"\rjudge_verdict\x18\x0e \x01(\tB\v\xbaH\br\x06\x10\x01(\x80\x80\x04H\vR\fjudgeVerdict\x88\x01\x01\x12%\n" +
-	"\x0erepeated_error\x18\x0f \x01(\bR\rrepeatedErrorB\x10\n" +
+	"\x0erepeated_error\x18\x0f \x01(\bR\rrepeatedError\x12\x1f\n" +
+	"\bsequence\x18\x10 \x01(\rH\fR\bsequence\x88\x01\x01B\x10\n" +
 	"\x0e_hypothesis_idB\x12\n" +
 	"\x10_parent_revisionB\r\n" +
 	"\v_base_roundB\b\n" +
@@ -1500,7 +1514,8 @@ const file_vibesys_search_v1_attrs_proto_rawDesc = "" +
 	"\b_failureB\v\n" +
 	"\t_attemptsB\x12\n" +
 	"\x10_profile_skippedB\x10\n" +
-	"\x0e_judge_verdict\"\xf5\x01\n" +
+	"\x0e_judge_verdictB\v\n" +
+	"\t_sequence\"\xf5\x01\n" +
 	"\x11WorkstreamFailure\x12H\n" +
 	"\x04kind\x18\x01 \x01(\x0e2(.vibesys.search.v1.WorkstreamFailureKindB\n" +
 	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x04kind\x12$\n" +
@@ -1618,11 +1633,12 @@ const file_vibesys_search_v1_attrs_proto_rawDesc = "" +
 	"\x13GATE_STAGE_ACCURACY\x10\x02\x12\x18\n" +
 	"\x14GATE_STAGE_BENCHMARK\x10\x03\x12\x19\n" +
 	"\x15GATE_STAGE_VALIDATION\x10\x04\x12\x1a\n" +
-	"\x16GATE_STAGE_MEASUREMENT\x10\x05*_\n" +
+	"\x16GATE_STAGE_MEASUREMENT\x10\x05*~\n" +
 	"\vGateSubject\x12\x1c\n" +
 	"\x18GATE_SUBJECT_UNSPECIFIED\x10\x00\x12\x16\n" +
 	"\x12GATE_SUBJECT_INPUT\x10\x01\x12\x1a\n" +
-	"\x16GATE_SUBJECT_CANDIDATE\x10\x02*\xe2\x01\n" +
+	"\x16GATE_SUBJECT_CANDIDATE\x10\x02\x12\x1d\n" +
+	"\x19GATE_SUBJECT_UNATTRIBUTED\x10\x03*\xe2\x01\n" +
 	"\x0fFrameworkSource\x12 \n" +
 	"\x1cFRAMEWORK_SOURCE_UNSPECIFIED\x10\x00\x12\x1a\n" +
 	"\x16FRAMEWORK_SOURCE_GATES\x10\x01\x12!\n" +

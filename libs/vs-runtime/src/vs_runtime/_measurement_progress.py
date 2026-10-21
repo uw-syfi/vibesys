@@ -88,6 +88,10 @@ class MeasurementDecisions:
         """Remember that the measurement ``handle_id`` answers ``decision_id``."""
         self._decisions[handle_id] = decision_id
 
+    def decision(self, handle_id: str) -> str | None:
+        """Return the core decision that submitted a handle, or explicit unknown."""
+        return self._decisions.get(handle_id)
+
     def stage_output(self, opener: StageOutputOpener) -> StageOutputOpener:
         """``opener``, called with each stage's run naming the decision its measurement answers."""
 

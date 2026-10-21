@@ -72,7 +72,11 @@ def finished(projection: Projection) -> None:
     span, attrs = turn(projection)
     if data.result is not None:
         projection.attach(
-            span.id, "raw_result", json.dumps(e.json_value(data.result), ensure_ascii=False)
+            span.id,
+            "raw_result",
+            data.result
+            if isinstance(data.result, str)
+            else json.dumps(e.json_value(data.result), ensure_ascii=False),
         )
     if data.reply is not None:
         text = data.reply.model_dump_json()
@@ -84,7 +88,14 @@ def finished(projection: Projection) -> None:
         span.failure = p.Failure(
             kind=p.SpanFailureKind.OUTCOME, message=projection.text(span.id, "error", data.error)
         )
-    span.status = p.SpanStatus.FAILED if data.error else p.SpanStatus.DONE
+    statuses = {
+        e.EventStatus.FAILED: p.SpanStatus.FAILED,
+        e.EventStatus.CANCELLED: p.SpanStatus.STOPPED,
+        e.EventStatus.INTERRUPTED: p.SpanStatus.STOPPED,
+    }
+    span.status = statuses.get(
+        projection.event.status, p.SpanStatus.FAILED if data.error else p.SpanStatus.DONE
+    )
     span.ended_at = max(span.started_at, projection.clock)
     attrs.transcript_length = projection.lengths.get(stream_id(span.id), 0)
     update_turn(projection, span, attrs)
@@ -174,6 +185,9 @@ def transcript(projection: Projection) -> None:
         raise TypeError(message)
     projection.bound(entry, span_id)
     p.validate(entry)
+    if span_id not in projection.spans:
+        span, attrs = turn(projection)
+        update_turn(projection, span, attrs)
     wire = entry.to_binary()
     length = len(wire)
     prefix = bytearray()
@@ -181,24 +195,25 @@ def transcript(projection: Projection) -> None:
         prefix.append((length & 127) | 128)
         length >>= 7
     prefix.append(length)
-    stream(projection, stream_id(span_id), bytes(prefix) + wire, span_id)
+    stream(
+        projection,
+        p.StreamRef(
+            id=stream_id(span_id),
+            span=span_id,
+            kind=p.StreamKind.TRANSCRIPT,
+            state=p.StreamState.OPENED,
+        ),
+        bytes(prefix) + wire,
+    )
 
 
-def stream(projection: Projection, stream_id: str, content: bytes, span: str | None) -> None:
-    first = stream_id not in projection.lengths
-    offset = projection.lengths.get(stream_id, 0)
-    projection.streams.append(StreamWrite(stream_id, offset, content))
-    projection.lengths[stream_id] = offset + len(content)
+def stream(projection: Projection, reference: p.StreamRef, content: bytes) -> None:
+    first = reference.id not in projection.lengths
+    offset = projection.lengths.get(reference.id, 0)
+    projection.streams.append(StreamWrite(reference.id, offset, content))
+    projection.lengths[reference.id] = offset + len(content)
     if first:
-        projection.emit(
-            "stream",
-            p.StreamRef(
-                id=stream_id,
-                kind=p.StreamKind.TRANSCRIPT if span else p.StreamKind.LOG,
-                span=span,
-                state=p.StreamState.OPENED,
-            ),
-        )
+        projection.emit("stream", reference)
 
 
 def subprocess(projection: Projection) -> None:
@@ -206,12 +221,14 @@ def subprocess(projection: Projection) -> None:
     if not isinstance(data, e.SubprocessOutputData):
         message = "subprocess_output requires SubprocessOutputData"
         raise TypeError(message)
-    stream(
-        projection,
-        "process-" + hashlib.sha256((data.process_id + ":" + data.stream).encode()).hexdigest(),
-        data.content.encode(),
-        None,
+    reference = p.StreamRef(
+        id="process-" + hashlib.sha256((data.process_id + ":" + data.stream).encode()).hexdigest(),
+        span=data.span_id,
+        kind=p.StreamKind.LOG,
+        state=p.StreamState.OPENED,
+        title=data.process_kind + ":" + data.stream,
     )
+    stream(projection, reference, data.content.encode())
 
 
 MAPPERS = {

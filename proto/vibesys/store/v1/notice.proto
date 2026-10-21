@@ -3,6 +3,7 @@ syntax = "proto3";
 package vibesys.store.v1;
 
 import "buf/validate/validate.proto";
+import "google/protobuf/any.proto";
 
 option go_package = "github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1";
 
@@ -21,6 +22,7 @@ enum NoticeCode {
   NOTICE_CODE_INPUT_MEASUREMENT_FAILED = 2;
   NOTICE_CODE_ENVIRONMENT_UNAVAILABLE = 3;
   NOTICE_CODE_CONFIGURATION = 4;
+  NOTICE_CODE_UNATTRIBUTED_EVENT = 5;
 }
 
 message Notice {
@@ -40,4 +42,6 @@ message Notice {
     min_len: 1
     max_bytes: 65536
   }];
+  // Descriptor-backed details, including historical observations with no owner.
+  optional google.protobuf.Any detail = 5;
 }

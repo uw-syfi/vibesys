@@ -448,6 +448,26 @@ attached as a blob, including an oversized interim JSON reply under role `reply`
 protovalidate cannot measure encoded protobuf size. Declaration resolution and validation of an
 `Any` payload against its declared attrs type require the epoch descriptors at the read boundary.
 
+The journal bridge amends `EpochStarted` as it discovers declarations: consumers replace
+an epoch by its number, and each amendment retains the earlier declarations. Historical
+journals without a checkout fingerprint explicitly set `provenance_known` to false.
+They do not invent a checkout identity.
+
+Transcript streams contain unsigned-varint-length-prefixed `TranscriptEntry` messages,
+defined in
+[`transcript.proto`](https://github.com/uw-syfi/vibesys/blob/main/proto/vibesys/store/v1/transcript.proto).
+Each text, tool-call or tool-result entry holds inline content or a `BlobRef`. The turn's
+whole-span replacement seals the stream's final byte length when the turn ends.
+For older string attrs without a blob alternative, the bridge writes `blob:<sha256>`
+and a `BlobAttached` whose role names the field path; an oversized interim reply instead
+omits its inline JSON and uses the `reply` attachment.
+
+Built-in strategy attrs always use their declared search message. A historical custom
+span kind with no known schema declares `google.protobuf.StringValue` and preserves its
+exact JSON text. Historical strategy facts without a reliable span owner become
+`Notice.UNATTRIBUTED_EVENT` with typed `detail`; old gate stages without an owner use
+`GateSubject.UNATTRIBUTED`. Neither path invents a workstream or an input-gate identity.
+
 Notes on the records:
 
 
