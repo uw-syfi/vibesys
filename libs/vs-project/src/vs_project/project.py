@@ -14,8 +14,8 @@ from vs_project._layout import (
     TaskName,
     TasksRoot,
 )
-from vs_project._run_index import publish_run_link
-from vs_project._state import ProjectState
+from vs_project._state import ProjectState, _state_home, validate_run_id
+from vs_project._state_io import publish_run_link
 from vs_project._state_store import LocalStateStore
 from vs_sim.api import ProcessTimeoutError
 
@@ -201,7 +201,10 @@ class Project:
     @classmethod
     def publish_run_for(cls, project_root: Path | str, run_id: str) -> Path:
         """Atomically publish a host discovery link to this run's log directory."""
-        return publish_run_link(run_id, cls.log_directory_for(project_root, run_id))
+        validate_run_id(run_id)
+        return publish_run_link(
+            _state_home() / "runs" / run_id, cls.log_directory_for(project_root, run_id)
+        )
 
     @classmethod
     def logged_run_ids_for(cls, project_root: Path | str) -> tuple[str, ...]:
