@@ -61,8 +61,8 @@ class FrameworkSnapshotStatus(StrEnum):
 class GitTracker:
     """Snapshot tracking for one canonical project repository.
 
-    The project root is also the Git worktree root. Each run advances its own
-    ``vibesys-runs/<run-id>`` branch. Machine-local framework state is excluded
+    The project root is also the Git worktree root. A new run creates its own
+    ``vibesys-runs/<run-id>`` branch; Resume preserves the operator's current checkout. Machine-local framework state is excluded
     through repository-local Git configuration. ``excluded_dirs`` and
     ``excluded_files`` name directories and files, at any depth, that are
     framework inputs rather than candidate content and are never committed.

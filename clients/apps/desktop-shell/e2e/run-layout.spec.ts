@@ -175,7 +175,7 @@ test('a Pause the run does not take is shown as a notice, never thrown, and Paus
   page.on('pageerror', error => errors.push(error.message));
   await open(page, 'queue-rs-live', 1440, ['pause']);
   await page.getByRole('button', {name: 'Pause', exact: true}).click();
-  const notice = page.getByText('The run did not take the command');
+  const notice = page.getByText('The run did not take the command').first();
   await expect(notice).toBeVisible();
   expect(errors).toEqual([]);
   await page.getByRole('button', {name: 'Pause now', exact: true}).click();

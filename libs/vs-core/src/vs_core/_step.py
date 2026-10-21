@@ -1405,9 +1405,8 @@ def _soft_stop(state: CoreState, event: RunControlEvent) -> Transition:
 def _lifted(state: CoreState, control: ControlInput) -> tuple[CoreState, bool]:
     """The state a resume starts from, and whether it lifts a standing stop.
 
-    A resume of a run the operator's stop ended reopens it (`reopens_on_resume`). Any resume
-    that lifts a stop takes back the adoption the stop completed: it answered that stop, not the
-    run's ending (`reopen_adoption`).
+    A successor clears the previous epoch's closure and ending. Adoption authority is
+    reopened independently; the workspace boundary guards writes to the operator root.
     """
     if control.action != "resume":
         return state, False

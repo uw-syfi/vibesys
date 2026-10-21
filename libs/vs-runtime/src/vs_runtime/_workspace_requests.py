@@ -346,12 +346,8 @@ class RuntimeWorkspaceRequests:
             case SnapshotAndRetainRun():
                 return await self._run_snapshot(request, resumed=resumed)
             case AdoptRevision() | VerifyAdoption():
-                return (
-                    _rejected(
-                        "candidate retained; adoption in a resumed epoch requires project-edit protection"
-                    )
-                    if isinstance(request, AdoptRevision) and context.fence.epoch > 1
-                    else await self._adoption(request, resumed=resumed)
+                return await self._adoption(
+                    request, resumed=resumed, allow_write=context.fence.epoch == 1
                 )
             case RestoreRevision() | RetainRevision() | SnapshotAndRetain() | DiscardWorkspace():
                 return await self._attempt_request(request, context, resumed=resumed)
@@ -476,7 +472,9 @@ class RuntimeWorkspaceRequests:
             return commit
         return commit if retained_by_any and owners else None
 
-    async def _adoption(self, request: AdoptRevision | VerifyAdoption, *, resumed: bool) -> _Facts:
+    async def _adoption(
+        self, request: AdoptRevision | VerifyAdoption, *, resumed: bool, allow_write: bool
+    ) -> _Facts:
         root = self._workspaces.root
         ref = request.selection.revision
         commit = await self._known_revision(
@@ -489,6 +487,10 @@ class RuntimeWorkspaceRequests:
         if isinstance(request.selection, TrustedBaseline) and commit != root.trusted_input_baseline:
             return _rejected("selected baseline is not the run's trusted input baseline")
         applied = await root.matches_revision(commit)
+        if isinstance(request, AdoptRevision) and not allow_write and not applied:
+            return _rejected(
+                "candidate retained; adoption in a resumed epoch requires project-edit protection"
+            )
         if isinstance(request, VerifyAdoption):
             if not applied:
                 # The root was read and its tracked content differs from the selection:
@@ -499,15 +501,23 @@ class RuntimeWorkspaceRequests:
                     accepted=True,
                     diagnostic="root workspace content differs from the selected revision",
                 )
-        else:
-            if not (resumed and applied):
-                failure = await self._materialize(root, commit)
-                if failure is not None:
-                    return failure
-            recorded = await self._record_adoption(root, request, commit)
-            if recorded is not None:
-                return recorded
+        elif allow_write:
+            return await self._write_adoption(
+                root, request, commit, already_applied=resumed and applied
+            )
         return _Facts(ObservationStatus.SUCCEEDED, accepted=True, revision=ref)
+
+    async def _write_adoption(
+        self, root: RuntimeWorkspace, request: AdoptRevision, commit: str, *, already_applied: bool
+    ) -> _Facts:
+        if not already_applied:
+            failure = await self._materialize(root, commit)
+            if failure is not None:
+                return failure
+        recorded = await self._record_adoption(root, request, commit)
+        return recorded or _Facts(
+            ObservationStatus.SUCCEEDED, accepted=True, revision=request.selection.revision
+        )
 
     async def _record_adoption(
         self, root: RuntimeWorkspace, request: AdoptRevision, commit: str

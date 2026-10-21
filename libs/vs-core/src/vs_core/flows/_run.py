@@ -852,8 +852,8 @@ class _Run:
 def _overrides(control: ControlInput, taken: StopRequested) -> bool:
     """Whether ``control``, a later stop, names the run's ending over the stop already taken.
 
-    Only one of the host's own stops (``FINAL_STOPS``) does, over an operator's: the operator's
-    stop is a pause, the host's a verdict. Between two of the host's stops the first stands.
+    A host deadline or environment failure overrides an earlier operator shutdown.
+    Between two host causes, the first determines this epoch's result.
     """
     return control.control_id.root.partition(":")[0] in {
         DEADLINE_STOP,

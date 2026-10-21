@@ -136,6 +136,7 @@ def test_pause_now_releases_active_invocations_before_the_epoch_exits() -> None:
     result = core.step(state, core.RunControlEvent(control=control("pause_now", 1), now_at=1))
     assert result.state.run.status is core.RunStatus.DRAINING
     (cancel,) = [request for request in result.requests if isinstance(request, core.CancelTurn)]
+    assert cancel.request_id is not None
     assert cancel.invocation == state.sessions.invocations[0].invocation
     assert not any(isinstance(event, core.Failed) for event in result.events)
     repeated = core.step(result.state, core.ClockAdvanced(now_at=2))

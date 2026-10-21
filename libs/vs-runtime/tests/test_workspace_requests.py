@@ -919,6 +919,11 @@ def test_adoption_applies_inspects_and_verifies_the_selected_revision(tmp_path: 
         root_file = workspaces.root.path / "candidate.py"
         assert root_file.read_text(encoding="utf-8") == "VALUE = 2\n"
         assert await _run(executor, adopt, epoch=2) == applied
+        before_head = workspaces.root.revision
+        same = AdoptRevision(request_id=_rid("adopt-same"), scope=run_scope, selection=selection)
+        checked = await _run(executor, same, epoch=2)
+        assert checked.observation.observation.status is ObservationStatus.SUCCEEDED
+        assert workspaces.root.revision == before_head
         proof = await _run(executor, verify("verify-1"), epoch=2)
         assert proof.observation.observation.status is ObservationStatus.SUCCEEDED
         assert proof.observation.revision == winner
