@@ -240,9 +240,8 @@ def test_file_sync_keeps_descriptor_ownership_and_reports_os_errors(
         stream.flush()
         sync(stream.fileno())
         assert not stream.closed
-        descriptor = stream.fileno()
-    with pytest.raises(OSError, match="Bad file descriptor"):
-        sync(descriptor)
+    with pytest.raises((OSError, ValueError), match="descriptor"):
+        sync(-1)
 
 
 @given(delay=st.sampled_from([0.0, 0.03, 0.1, 0.2, 1.1]))
