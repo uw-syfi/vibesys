@@ -27,18 +27,34 @@ def labelled(projection: Projection, kind: str, identity: str) -> p.Span:
 
 
 def finish(projection: Projection, span: p.Span, kind: str, attrs: Message) -> None:
-    if span.ended_at is None:
+    if not span.has_field("ended_at"):
         span.status = (
             p.SpanStatus.FAILED
             if projection.event.status is e.EventStatus.FAILED
             else p.SpanStatus.DONE
         )
         span.ended_at = max(projection.clock, span.started_at)
-    if span.label is None:
+    update_label(projection, span, kind, attrs)
+    projection.span(span)
+
+
+def update_label(projection: Projection, span: p.Span, kind: str, attrs: Message) -> None:
+    """Supplemental observations enrich the runtime label, never replace its other facts."""
+    label = span.label
+    if (
+        label is not None
+        and label.kind == kind
+        and label.attrs is not None
+        and label.attrs.type_url.endswith("/" + attrs.desc().type_name)
+    ):
+        merged = type(attrs).from_binary(label.attrs.value)
+        for field in attrs:
+            merged[field] = attrs[field]
+        attrs = merged
+    if label is None or label.kind != kind:
         span.label = p.Label(kind=kind, attrs=projection.pack(attrs, span.id))
     else:
-        span.label.attrs = projection.pack(attrs, span.id)
-    projection.span(span)
+        label.attrs = projection.pack(attrs, span.id)
 
 
 def unattributed(projection: Projection, attrs: Message) -> None:
@@ -126,7 +142,7 @@ def adoption(projection: Projection) -> None:
         unattributed(projection, attrs)
     else:
         span = matches[-1]
-        span.label = p.Label(kind="adoption", attrs=projection.pack(attrs, span.id))
+        update_label(projection, span, "adoption", attrs)
         projection.span(span)
 
 
@@ -150,12 +166,12 @@ def gate(projection: Projection) -> None:
     if isinstance(data, e.GateStartedData):
         if data.command is not None:
             attrs.command = data.command
-        span.label = p.Label(kind="gate", attrs=projection.pack(attrs, span.id))
+        update_label(projection, span, "gate", attrs)
         projection.span(span)
         return
     attrs.reused = data.reused
     if data.value is not None and data.metric is not None:
-        if known and span.ended_at is None and not projection.final:
+        if known and not span.has_field("ended_at") and not projection.final:
             projection.pending.append(projection.event.model_dump_json().encode())
         else:
             projection.metric(
@@ -163,12 +179,12 @@ def gate(projection: Projection) -> None:
                     series=data.metric,
                     span=span.id,
                     value=data.value,
-                    clock=projection.clock if span.ended_at is None else span.ended_at,
+                    clock=span.ended_at if span.has_field("ended_at") else projection.clock,
                 ),
                 unit=data.unit or "",
             )
     if data.span_id is not None:
-        span.label = p.Label(kind="gate", attrs=projection.pack(attrs, span.id))
+        update_label(projection, span, "gate", attrs)
         projection.span(span)
     else:
         finish(projection, span, "gate", attrs)

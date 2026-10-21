@@ -10,6 +10,7 @@ import (
 	_ "github.com/uw-syfi/vibesys/gateway/gen/buf/validate"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
+	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
@@ -40,8 +41,11 @@ type AgentTurnAttrs struct {
 	ReplyJson string `protobuf:"bytes,11,opt,name=reply_json,json=replyJson,proto3" json:"reply_json,omitempty"`
 	// Set when the turn ends. The transcript stays a stream, never a second blob.
 	TranscriptLength *uint64 `protobuf:"varint,12,opt,name=transcript_length,json=transcriptLength,proto3,oneof" json:"transcript_length,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// Wall timestamps reported by execution events, independent of elapsed span clocks.
+	StartedAt     *timestamppb.Timestamp `protobuf:"bytes,13,opt,name=started_at,json=startedAt,proto3" json:"started_at,omitempty"`
+	EndedAt       *timestamppb.Timestamp `protobuf:"bytes,14,opt,name=ended_at,json=endedAt,proto3" json:"ended_at,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *AgentTurnAttrs) Reset() {
@@ -158,6 +162,20 @@ func (x *AgentTurnAttrs) GetTranscriptLength() uint64 {
 	return 0
 }
 
+func (x *AgentTurnAttrs) GetStartedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.StartedAt
+	}
+	return nil
+}
+
+func (x *AgentTurnAttrs) GetEndedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.EndedAt
+	}
+	return nil
+}
+
 // Absence means unreported. A reported zero stays present on the wire.
 type TokenUsage struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -255,7 +273,7 @@ var File_vibesys_store_v1_agent_attrs_proto protoreflect.FileDescriptor
 
 const file_vibesys_store_v1_agent_attrs_proto_rawDesc = "" +
 	"\n" +
-	"\"vibesys/store/v1/agent_attrs.proto\x12\x10vibesys.store.v1\x1a\x1bbuf/validate/validate.proto\"\x96\x05\n" +
+	"\"vibesys/store/v1/agent_attrs.proto\x12\x10vibesys.store.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\x88\x06\n" +
 	"\x0eAgentTurnAttrs\x12!\n" +
 	"\x05agent\x18\x01 \x01(\tB\v\xbaH\br\x06\x10\x01(\x80\x80\x04R\x05agent\x12\x1f\n" +
 	"\x04role\x18\x02 \x01(\tB\v\xbaH\br\x06\x10\x01(\x80\x80\x04R\x04role\x12&\n" +
@@ -272,7 +290,10 @@ const file_vibesys_store_v1_agent_attrs_proto_rawDesc = "" +
 	" \x01(\v2\x1c.vibesys.store.v1.TokenUsageH\x05R\x05usage\x88\x01\x01\x12(\n" +
 	"\n" +
 	"reply_json\x18\v \x01(\tB\t\xbaH\x06r\x04(\x80\x80\x04R\treplyJson\x120\n" +
-	"\x11transcript_length\x18\f \x01(\x04H\x06R\x10transcriptLength\x88\x01\x01B\b\n" +
+	"\x11transcript_length\x18\f \x01(\x04H\x06R\x10transcriptLength\x88\x01\x01\x129\n" +
+	"\n" +
+	"started_at\x18\r \x01(\v2\x1a.google.protobuf.TimestampR\tstartedAt\x125\n" +
+	"\bended_at\x18\x0e \x01(\v2\x1a.google.protobuf.TimestampR\aendedAtB\b\n" +
 	"\x06_modelB\n" +
 	"\n" +
 	"\b_attemptB\v\n" +
@@ -315,16 +336,19 @@ func file_vibesys_store_v1_agent_attrs_proto_rawDescGZIP() []byte {
 
 var file_vibesys_store_v1_agent_attrs_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
 var file_vibesys_store_v1_agent_attrs_proto_goTypes = []any{
-	(*AgentTurnAttrs)(nil), // 0: vibesys.store.v1.AgentTurnAttrs
-	(*TokenUsage)(nil),     // 1: vibesys.store.v1.TokenUsage
+	(*AgentTurnAttrs)(nil),        // 0: vibesys.store.v1.AgentTurnAttrs
+	(*TokenUsage)(nil),            // 1: vibesys.store.v1.TokenUsage
+	(*timestamppb.Timestamp)(nil), // 2: google.protobuf.Timestamp
 }
 var file_vibesys_store_v1_agent_attrs_proto_depIdxs = []int32{
 	1, // 0: vibesys.store.v1.AgentTurnAttrs.usage:type_name -> vibesys.store.v1.TokenUsage
-	1, // [1:1] is the sub-list for method output_type
-	1, // [1:1] is the sub-list for method input_type
-	1, // [1:1] is the sub-list for extension type_name
-	1, // [1:1] is the sub-list for extension extendee
-	0, // [0:1] is the sub-list for field type_name
+	2, // 1: vibesys.store.v1.AgentTurnAttrs.started_at:type_name -> google.protobuf.Timestamp
+	2, // 2: vibesys.store.v1.AgentTurnAttrs.ended_at:type_name -> google.protobuf.Timestamp
+	3, // [3:3] is the sub-list for method output_type
+	3, // [3:3] is the sub-list for method input_type
+	3, // [3:3] is the sub-list for extension type_name
+	3, // [3:3] is the sub-list for extension extendee
+	0, // [0:3] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_store_v1_agent_attrs_proto_init() }

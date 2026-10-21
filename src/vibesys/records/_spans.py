@@ -68,7 +68,16 @@ def subject(projection: Projection, parent: str | None) -> p.GateSubject:
 def _known_attrs(projection: Projection, span: CoreSpan, model: BaseModel) -> Message:
     values = model.model_dump(mode="json")
     if isinstance(model, search.AgentTurnAttrs):
-        return p.AgentTurnAttrs(**values, stage=span.name)
+        return p.AgentTurnAttrs(
+            **values,
+            stage=span.name,
+            started_at=p.Timestamp.from_seconds(span.started_at)
+            if projection.state.wall_span_clock
+            else None,
+            ended_at=p.Timestamp.from_seconds(span.ended_at)
+            if projection.state.wall_span_clock and span.ended_at is not None
+            else None,
+        )
     if isinstance(model, search.GateAttrs):
         failed = model.failed
         return p.GateAttrs(
@@ -114,7 +123,7 @@ def _label_attrs(projection: Projection, span: CoreSpan) -> Message:
     return _known_attrs(projection, span, model)
 
 
-def _metric_rows(projection: Projection, source: CoreSpan) -> None:
+def _metric_rows(projection: Projection, source: CoreSpan, span: p.Span) -> None:
     label = source.label
     if label is None or label.kind != "gate" or label.attrs_json is None:
         return
@@ -127,7 +136,7 @@ def _metric_rows(projection: Projection, source: CoreSpan) -> None:
                 series=row.name,
                 span=source.id,
                 value=row.value,
-                clock=source.ended_at if source.ended_at is not None else source.started_at,
+                clock=span.ended_at if span.has_field("ended_at") else span.started_at,
             ),
             unit=row.unit or "",
             direction=enum_value(p.Direction, row.direction),
@@ -146,15 +155,15 @@ def _span_label(projection: Projection, source: CoreSpan) -> p.Label | None:
                 merged = type(attrs).from_binary(prior.value)
                 authoritative = (
                     set(_MODELS[label.kind].model_fields) if label.kind in _MODELS else set()
-                )
+                ).difference({"model"} if label.kind == "agent_turn" else set())
                 for field in merged.desc().fields:
                     if field.name in authoritative and not attrs.has_field(field.name):
                         merged.clear_field(field.name)
                 for field in attrs:
                     if (
                         label.kind == "agent_turn"
-                        and field.name == "stage"
-                        and merged.has_field("stage")
+                        and field.name in {"stage", "model"}
+                        and merged.has_field(field.name)
                     ):
                         continue
                     merged[field] = attrs[field]
@@ -237,7 +246,7 @@ def project_span(projection: Projection, source: CoreSpan, change: p.Change) -> 
     if change == p.Change.STARTED and source.ended_at is not None:
         change = p.Change.ENDED
     projection.span(span, change)
-    _metric_rows(projection, source)
+    _metric_rows(projection, source, span)
 
 
 def _run_clock(projection: Projection, span: p.Span) -> None:
