@@ -20,6 +20,7 @@ from vs_agent.api import (
     AgentClient,
     AgentExecutionPolicy,
     AgentSessionSpec,
+    AgentTurnExecutor,
     AgentTurnRequest,
 )
 from vs_agent.api.testing import (
@@ -294,7 +295,7 @@ class SessionHost:
     """The durable pieces that survive a host restart."""
 
     resolver: FakeSessionResolver
-    client: AgentClient
+    client: AgentTurnExecutor
     journal: FakeAgentInvocationStore
     turns: list[AgentTurnRequest]
     faults: ProviderFaults

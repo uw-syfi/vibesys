@@ -21,7 +21,7 @@ from vs_runtime._operator_control import (
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from vs_core.api import CapacityHold
+    from vs_core.api import CapacityHold, Scope
     from vs_runtime._operator_control import ActionRequest
     from vs_sim.api import Threads
 
@@ -443,7 +443,7 @@ class RunControlChannel(Protocol):
         """Drain queued operator actions exactly once."""
         ...
 
-    def land_park(self) -> None:
+    def land_park(self, jobs: tuple[str, ...] = ()) -> None:
         """Report that core committed a park drain."""
         ...
 
@@ -513,13 +513,43 @@ class RunControlChannel(Protocol):
         """
         ...
 
-    def start_execution(self, started: Callable[[], None]) -> None:
-        """Publish a start atomically with the pause drain's execution boundary.
+    def prepare_evaluation(self, resource_id: str, scope: Scope) -> None:
+        """Identify an evaluation requested by an admitted turn, rather than the strategy."""
+        ...
 
-        The callback only publishes the start, without waiting on execution.
-        A committed drain cancels prepared work with AgentExecutionCancelledError.
-        Automatic quota holds keep their existing capacity mechanism.
-        """
+    def evaluation_is_dependency(self, resource_id: str) -> bool:
+        """Whether an executing turn still owns this evaluation dependency."""
+        ...
+
+    def prepare_execution(self, execution_id: str, scope: Scope) -> None:
+        """Associate the turn's execution identity with its declared owner."""
+        ...
+
+    def finish_execution(self, execution_id: str) -> None:
+        """Release the authority of a turn that finished executing."""
+        ...
+
+    def has_executing_owner(self, owner_scope: str, generation: int) -> bool:
+        """Whether the evaluation is allowed, including an executing turn's dependency."""
+        ...
+
+    def start_execution(
+        self,
+        started: Callable[[], None],
+        *,
+        execution_id: str | None = None,
+        evaluation_id: str | None = None,
+    ) -> None:
+        """Publish a dispatch under the same lock as the pause drain."""
+        ...
+
+    @property
+    def drain_ready(self) -> bool:
+        """Every queued job has been fenced or positively observed executing."""
+        ...
+
+    def settle_drain_job(self, resource_id: str) -> None:
+        """Release the queue barrier for this job."""
         ...
 
     def wait_while_paused(self) -> None:
@@ -698,6 +728,10 @@ class RuntimeRunControlChannel:
         self._capacity_standing = False
         self._stop_listeners: list[Callable[[], object]] = []
         self._execution_closed = False
+        self._prepared_executions: dict[str, Scope] = {}
+        self._evaluation_dependencies: dict[str, Scope] = {}
+        self._executing: dict[str, Scope] = {}
+        self._drain_jobs: set[str] = set()
         self._now = threads.now
         self._capacity_turns = 0
         self._timed_turns = 0
@@ -710,13 +744,84 @@ class RuntimeRunControlChannel:
         self._resume_at: float | None = None
         self._resumed_by = PauseWake.RESUMED
 
-    def start_execution(self, started: Callable[[], None]) -> None:
-        """Fence execution starts with the drain's committed control publication."""
+    def prepare_evaluation(self, resource_id: str, scope: Scope) -> None:
+        """Register the core-proven origin of an agent's evaluation call."""
         with self._lock:
-            if self._execution_closed or self._stop_requested:
+            self._evaluation_dependencies[resource_id] = scope
+
+    def evaluation_is_dependency(self, resource_id: str) -> bool:
+        """Only evaluations requested by an executing turn may cross the pause drain."""
+        with self._lock:
+            scope = self._evaluation_dependencies.get(resource_id)
+            return (
+                not self._stop_requested
+                and scope is not None
+                and self._dependency(f"{scope.owner.kind}:{scope.owner.root}", scope.generation)
+            )
+
+    def prepare_execution(self, execution_id: str, scope: Scope) -> None:
+        """Associate dispatch identity with its declared owner before preparation ends."""
+        with self._lock:
+            self._prepared_executions[execution_id] = scope
+
+    def finish_execution(self, execution_id: str) -> None:
+        """Release this execution's dependency authority after the provider returns."""
+        with self._lock:
+            self._prepared_executions.pop(execution_id, None)
+            self._executing.pop(execution_id, None)
+
+    def _dependency(self, owner_scope: str, generation: int) -> bool:
+        return any(
+            f"{scope.owner.kind}:{scope.owner.root}" == owner_scope
+            and scope.generation == generation
+            for scope in self._executing.values()
+        )
+
+    def has_executing_owner(self, owner_scope: str, generation: int) -> bool:
+        """An executing turn retains authority to run its own evaluation dependency."""
+        with self._lock:
+            return not self._stop_requested and self._dependency(owner_scope, generation)
+
+    def start_execution(
+        self,
+        started: Callable[[], None],
+        *,
+        execution_id: str | None = None,
+        evaluation_id: str | None = None,
+    ) -> None:
+        """Publish dispatch atomically with the pause drain, preserving live dependencies."""
+        with self._lock:
+            allowed = not self._stop_requested and not self._execution_closed
+            if execution_id is None:
+                scope = self._evaluation_dependencies.get(evaluation_id or "")
+                allowed = not self._stop_requested and (
+                    not self._execution_closed
+                    or (
+                        scope is not None
+                        and self._dependency(
+                            f"{scope.owner.kind}:{scope.owner.root}", scope.generation
+                        )
+                    )
+                )
+            if not allowed:
                 message = "pause drain cancelled preparation before execution"
                 raise AgentExecutionCancelledError(message)
+            if execution_id is not None:
+                scope = self._prepared_executions.pop(execution_id, None)
+                if scope is not None:
+                    self._executing[execution_id] = scope
             started()
+
+    @property
+    def drain_ready(self) -> bool:
+        """Queued jobs have either ended or been positively observed already executing."""
+        with self._lock:
+            return not self._drain_jobs
+
+    def settle_drain_job(self, resource_id: str) -> None:
+        """Release a queued-job barrier for the run's next control poll."""
+        with self._lock:
+            self._drain_jobs.discard(resource_id)
 
     @property
     def _paused(self) -> bool:
@@ -1015,10 +1120,11 @@ class RuntimeRunControlChannel:
             pending, self._pending_actions = self._pending_actions, []
         return pending
 
-    def land_park(self) -> None:
+    def land_park(self, jobs: tuple[str, ...] = ()) -> None:
         """Report core's accepted drain, after it is persisted."""
         with self._lock:
             self._execution_closed = True
+            self._drain_jobs.update(jobs)
             self._emit(RunControlTransitionKind.PARK_REQUESTED)
 
     def notify_action_applied(self, summary: str) -> None:

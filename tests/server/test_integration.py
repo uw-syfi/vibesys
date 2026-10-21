@@ -1069,3 +1069,12 @@ def test_a_turns_typed_reply_is_data_on_the_executions_finish_event(tmp_path: Pa
         if event.type is EventType.AGENT_EXECUTION_FINISHED
     ]
     assert [getattr(data, "reply", None) for data in finished] == [reply]
+
+
+def test_pause_drain_events_use_legacy_control_bookkeeping(tmp_path: Path) -> None:
+    parts = build_server_parts(tmp_path)
+    parts.controller.ready()
+    parts.core_events.emit(CoreEventType.PARK_REQUESTED)
+    parts.core_events.emit(CoreEventType.PARKED)
+    assert parts.api.snapshot().status.value == "stopped"
+    assert any(event.type is EventType.CONTROL for event in parts.journal.read())

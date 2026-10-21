@@ -169,7 +169,10 @@ class PollingEvaluationExecutor:
         try:
             workspace = await self._workspaces.create_measured_candidate(first.snapshot)
             if self._control is not None:
-                self._control.start_execution(lambda: None)
+                self._control.start_execution(
+                    lambda: None,
+                    evaluation_id=request.key,
+                )
             self._publish(
                 handle_id,
                 ExecutorObservation(
@@ -243,7 +246,7 @@ class PollingEvaluationExecutor:
                     operator_failure=operator_failure,
                 ),
             )
-        except (asyncio.CancelledError, AgentExecutionCancelledError):
+        except (asyncio.CancelledError, AgentExecutionCancelledError) as cancelled:
             self._publish(
                 handle_id,
                 ExecutorObservation(
@@ -251,7 +254,7 @@ class PollingEvaluationExecutor:
                     stage_results=tuple(results),
                 ),
             )
-            raise
+            raise asyncio.CancelledError from cancelled
         except Exception as error:  # noqa: BLE001  # lint-waiver: LW-930049 [BLE001]; this lifecycle boundary converts arbitrary extension failures into durable diagnostics; narrower catches would let unknown providers bypass the contract.
             raw_failure = render_evaluation_failure(str(error) or None, type(error).__name__)
             self._publish(

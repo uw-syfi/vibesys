@@ -339,7 +339,7 @@ class SlurmEvaluationExecutor:
         ledger_candidate: str | None = None,
         stage_output: SlurmStageOutputOpener | None = None,
         root_proof: WorkspaceRootProof | None = None,
-        before_dispatch: Callable[[], None] | None = None,
+        before_dispatch: Callable[[EvaluationRequest], None] | None = None,
     ) -> None:
         """Bind scheduler policy, durable intent, and the cluster interface.
 
@@ -1026,7 +1026,7 @@ class SlurmEvaluationExecutor:
             )
             raise SlurmOutcomeUnknownError.observation(handle_id, reason)
         if self._before_dispatch is not None:
-            self._before_dispatch()
+            self._before_dispatch(request)
         self._write_evaluation(handle_id, None, request, dispatch_started=True)
         submitted = await self._in_thread(
             self._cluster.submit, self._batch_request(request, stages), operation_id=handle_id
@@ -1084,7 +1084,7 @@ class SlurmEvaluationExecutor:
     ) -> None:
         """Attach to the ledger's job for this request (``LedgerEvaluations.attach``)."""
         if self._before_dispatch is not None:
-            self._before_dispatch()
+            self._before_dispatch(request)
         self._write_evaluation(handle_id, None, request, dispatch_started=True)
         batch = self._batch_request(request, stages)
         labels = LedgerLabels(candidate=self._ledger_candidate, workstream=request.owner_scope)

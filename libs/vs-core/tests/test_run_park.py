@@ -7,6 +7,7 @@ from hypothesis import strategies as st
 import vs_core.api as core
 
 from .test_measurement_pacing import World, limits
+from .test_measurements import plan
 from .test_session_yield_completion import terminal_yield
 from .test_write_turn_retention import answer, snapshots, write_turn_world
 
@@ -148,3 +149,45 @@ def test_a_prepared_turn_is_saved_without_starting_or_holding_the_drain() -> Non
     assert turn.request_id is not None
     with pytest.raises(core.ContractError, match="park"):
         core.step(result.state, core.DispatchAuthorized(request_id=turn.request_id))
+
+
+@given(prepared=st.booleans())
+def test_pause_drain_admits_only_an_executing_turns_evaluation_dependency(
+    *, prepared: bool
+) -> None:
+    state, turn = write_turn_world(access=core.Access.READ_ONLY)
+    if prepared:
+        state = state.model_copy(
+            update={
+                "records": state.records.model_copy(
+                    update={
+                        "records": tuple(
+                            row.model_copy(update={"phase": core.RequestPhase.PREPARED})
+                            if row.request_id == turn.request_id
+                            else row
+                            for row in state.records.records
+                        )
+                    }
+                )
+            }
+        )
+    draining = park(state)
+    result = core.step(
+        draining.state,
+        core.AgentMeasurementRequested(
+            scope=turn.scope,
+            plan=plan(),
+            within=core.Within(limit=100.0),
+            call_id="dependency",
+        ),
+    )
+    submissions = [r for r in result.requests if isinstance(r, core.SubmitMeasurement)]
+    if prepared:
+        assert submissions == []
+    else:
+        assert len(submissions) == 1
+        assert submissions[0].request_id is not None
+        authorized = core.step(
+            result.state, core.DispatchAuthorized(request_id=submissions[0].request_id)
+        )
+        assert authorized.state.run.status is core.RunStatus.DRAINING

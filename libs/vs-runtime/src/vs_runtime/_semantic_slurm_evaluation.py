@@ -429,10 +429,13 @@ class SemanticSlurmEvaluationExecutor:
             before_dispatch=self._admit_execution,
         )
 
-    def _admit_execution(self) -> None:
+    def _admit_execution(self, request: EvaluationRequest) -> None:
         if self._control is not None:
             try:
-                self._control.start_execution(lambda: None)
+                self._control.start_execution(
+                    lambda: None,
+                    evaluation_id=request.key,
+                )
             except AgentExecutionCancelledError as error:
                 raise ExecutorRejectedError(str(error)) from error
 

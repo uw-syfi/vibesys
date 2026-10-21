@@ -246,6 +246,7 @@ def build_core_services(policy: CorePolicy, resources: CoreResources) -> CoreSer
         catalog.require_owned(plan.search.declaration)
         resolver = ProductionSessionResolver(
             ResolverInputs(
+                control=resources.control,
                 roles=resources.roles,
                 schemas=plan.search.reply_schemas,
                 workspaces=resources.workspaces,
@@ -266,7 +267,10 @@ def build_core_services(policy: CorePolicy, resources: CoreResources) -> CoreSer
         blocking=resources.blocking,
         workspaces=resources.workspaces,
         measurement=MeasurementServices(
-            resources.evaluation, resources.measurement_observer, resources.measurement_decisions
+            resources.evaluation,
+            observer=resources.measurement_observer,
+            decisions=resources.measurement_decisions,
+            control=resources.control,
         ),
         sessions=SessionServices(_agent_sessions(resources), resolver, yields=bridge),
         operations=catalog,

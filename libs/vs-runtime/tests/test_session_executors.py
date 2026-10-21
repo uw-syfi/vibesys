@@ -116,6 +116,7 @@ class Run:
             )
 
         inputs = ResolverInputs(
+            control=self.control,
             roles=(
                 AgentRole(
                     id=ROLE.root,

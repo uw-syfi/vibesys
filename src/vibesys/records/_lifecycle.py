@@ -141,6 +141,9 @@ def starting(projection: Projection) -> None:
         ),
     )
 
+    if data.state is e.EnvironmentStartupState.FINISHED:
+        projection.emit("lifecycle", p.Lifecycle(state=p.Oneof("running", p.Running())))
+
 
 def ended(projection: Projection) -> None:
     event = projection.event

@@ -142,8 +142,9 @@ class LifecycleReportingExecutor:
             publish_start()
         else:
             try:
-                self._control.start_execution(publish_start)
+                self._control.start_execution(publish_start, execution_id=execution_id)
             except AgentExecutionCancelledError as error:
+                self._control.finish_execution(execution_id)
                 message = f"{error}: turn {execution_id} ({agent_id})"
                 raise AgentExecutionCancelledError(message) from error
 
@@ -154,6 +155,8 @@ class LifecycleReportingExecutor:
             error: str | None,
             reply: AgentReply | None = None,
         ) -> None:
+            if self._control is not None:
+                self._control.finish_execution(execution_id)
             self._lifecycle(
                 AgentExecutionFinished(
                     agent_id=agent_id,

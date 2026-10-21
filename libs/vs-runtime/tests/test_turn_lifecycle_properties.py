@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import TYPE_CHECKING
 
 import pytest
@@ -18,6 +19,9 @@ from vs_agent.api import (
     AgentTurnRequest,
 )
 from vs_agent.api.testing import FakeProvider, FakeTurnScript
+from vs_core.api import CancelOwnedJob, RunId, Scope
+from vs_evaluation.api import EvaluationState, PollPhase
+from vs_runtime.api import AccuracyEvaluation, PollingEvaluationExecutor
 from vs_runtime.api.core import report_turns
 from vs_runtime.api.infrastructure import (
     AgentExecutionFinished,
@@ -25,8 +29,26 @@ from vs_runtime.api.infrastructure import (
     AgentExecutionStatus,
     create_run_control_channel,
 )
-from vs_runtime.api.testing import FakeAgentExecutionLifecycleSink, FakeRunControlEventSink
-from vs_sim.api.testing import ManualClock, SimThreads
+from vs_runtime.api.slurm_evaluation_stack import ScenarioCluster
+from vs_runtime.api.testing import (
+    FakeAgentExecutionLifecycleSink,
+    FakeEvaluation,
+    FakeRunControlEventSink,
+    FakeWorkspace,
+    FakeWorkspaces,
+)
+from vs_sim.api.testing import (
+    HANG_GUARD_S,
+    Gate,
+    ManualClock,
+    SimBlockingRunner,
+    SimThreads,
+    loop_threads,
+)
+from vs_slurm.api import SlurmJobStatus
+
+from .test_evaluation_requests import query, resource_of, run, settled, submit, world
+from .test_polling_stage_output import _HANDLE, _request, _terminal
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -163,3 +185,88 @@ def test_no_execution_starts_after_applied_pause_drain(
         else:
             client.run(session_spec=_spec(workspace), turn=turn)
             assert len(lifecycle.events) == before + 2
+
+
+async def test_pause_drain_allows_the_evaluation_an_executing_turn_is_waiting_for(
+    tmp_path: Path,
+) -> None:
+    threads = loop_threads()
+    control = create_run_control_channel(FakeRunControlEventSink(), threads=threads)
+    entered = Gate()
+    evaluated = threads.event()
+    owner = Scope(owner=RunId(root="run"), generation=0)
+
+    def on_turn(_turn: AgentTurnRequest) -> None:
+        entered.open()
+        assert evaluated.wait(HANG_GUARD_S)
+
+    client = report_turns(
+        AgentClient(
+            FakeProvider(answer={"value": 1}, on_turn=on_turn, threads=threads),
+            clock=ManualClock(),
+            threads=threads,
+        ),
+        FakeAgentExecutionLifecycleSink(),
+        control=control,
+    )
+    control.prepare_execution("waiting-turn", owner)
+    agent = asyncio.create_task(
+        SimBlockingRunner(threads).run(
+            client.run,
+            session_spec=_spec(tmp_path),
+            turn=AgentTurnRequest(
+                message="evaluate my candidate", invocation_id="waiting-turn", output_schema=_Reply
+            ),
+        )
+    )
+    await entered.wait(agent)
+    control.land_park()
+    workspaces = FakeWorkspaces(FakeWorkspace(path=tmp_path), supports_parallel_candidates=True)
+    evaluation = FakeEvaluation(default_accuracy=AccuracyEvaluation(executed=True))
+    executor = PollingEvaluationExecutor(
+        evaluation, workspaces, clock=ManualClock(), control=control
+    )
+    snapshot = await workspaces.root.snapshot("candidate")
+    request = _request(snapshot).model_copy(
+        update={"owner_scope": "run:run", "owner_generation": 0}
+    )
+    control.prepare_evaluation(request.key, owner)
+    await executor.submit(request, handle_id=_HANDLE)
+    assert (await _terminal(executor)).state is EvaluationState.SUCCEEDED
+    assert len(evaluation.benchmark_calls) == 1
+    evaluated.set()
+    await agent
+    assert not control.has_executing_owner("run:run", 0)
+    await executor.close()
+
+
+async def test_pause_drain_cancels_scheduler_queued_work_before_confirming_application() -> None:
+    control = create_run_control_channel(FakeRunControlEventSink(), threads=loop_threads())
+    cluster = ScenarioCluster()
+    cluster.states = (SlurmJobStatus.PENDING,)
+    async with world(cluster) as w:
+        w.control = control
+        accepted = await submit(w)
+        resource = resource_of(accepted)
+        await settled(w, resource)
+        assert (await w.stack.executor.poll(resource.root)).phase is PollPhase.QUEUED
+        control.land_park((resource.root,))
+        assert not control.drain_ready
+        drain = query(CancelOwnedJob, "pause-drain", resource).model_copy(update={"for_park": True})
+        released = await run(w, drain)
+        assert released.observation.observation.released
+        assert control.drain_ready
+        assert resource.root in cluster.cancelled
+        assert (await w.stack.executor.poll(resource.root)).phase is PollPhase.ENDED
+
+
+def test_pause_drain_job_confirmation_never_requests_a_stop() -> None:
+    channel = create_run_control_channel(FakeRunControlEventSink(), threads=SimThreads())
+    stops: list[bool] = []
+    channel.on_stop_requested(lambda: stops.append(True))
+    channel.land_park(("queued-job",))
+    assert not channel.drain_ready
+    channel.settle_drain_job("queued-job")
+    assert channel.drain_ready
+    assert not stops
+    assert not channel.stop_requested()

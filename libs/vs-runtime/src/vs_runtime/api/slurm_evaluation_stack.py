@@ -117,6 +117,11 @@ class ScenarioCluster(FakeCluster):
         self.accepted.set()
         return outcome
 
+    def finish_jobs(self) -> None:
+        """Let every accepted scripted batch finish with its original real stage results."""
+        for operation, request in zip(self.submissions, self.batches, strict=True):
+            self.script(operation, states=(SlurmJobStatus.COMPLETED,), result=self._result(request))
+
     def _result(self, request: SlurmBatchRequest) -> SlurmBatchResult:
         if self.job_exit_code != 0:
             # An allocation that failed before its stages ran, as when its server never

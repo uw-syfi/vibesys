@@ -19,6 +19,7 @@ if TYPE_CHECKING:
 
 # Every deletion in the event inventory is named here. No default drop exists.
 DROPS: dict[e.CoreEventType, str] = {
+    e.CoreEventType.EXPERIMENTS_CHANGED: "refetch hint; typed lifecycle and spans own readiness",
     e.CoreEventType.INVOCATION_STARTED: "duplicate of agent_execution_started",
     e.CoreEventType.INVOCATION_FINISHED: "duplicate of agent_execution_finished",
     e.CoreEventType.AGENT_EXECUTION_ACTIVITY_CHANGED: "derived from transcript tail",
@@ -26,7 +27,6 @@ DROPS: dict[e.CoreEventType, str] = {
     e.CoreEventType.PHASE_FINISHED: "turn and workstream spans own phase work",
     e.CoreEventType.TODO_UPDATE: "OQ13: no consumer",
     e.CoreEventType.USAGE_UPDATE: "OQ13: in-flight context snapshot has no consumer",
-    e.CoreEventType.EXPERIMENTS_CHANGED: "refetch hint; experiments are a client span fold",
     e.CoreEventType.ITERATIONS_CHANGED: "refetch hint; iterations are a client span fold",
     e.CoreEventType.JUDGE_RESULT: "no producer; workstream verdict owns the result",
     e.CoreEventType.BENCHMARK_RESULT: "no producer; gate metric points own readings",

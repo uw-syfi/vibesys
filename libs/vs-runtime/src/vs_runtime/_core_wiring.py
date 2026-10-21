@@ -52,6 +52,7 @@ if TYPE_CHECKING:
     from vs_core.api import LifecycleCapability
     from vs_evaluation.api import PollingEvaluationExecutor
     from vs_project.api import StateNamespace
+    from vs_runtime._run_control import RunControlChannel
     from vs_runtime._session_requests import SessionResolver, TurnYields
     from vs_runtime._workspaces import RuntimeWorkspaces
     from vs_sim.api import BlockingRunner, Threads
@@ -66,6 +67,7 @@ class MeasurementServices:
     """Hears each measurement stage start and end; it never changes a result."""
     decisions: MeasurementDecisions = dataclasses.field(default_factory=MeasurementDecisions)
     """Learns which decision each measurement answers; share it with the stage output opener."""
+    control: RunControlChannel | None = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -166,7 +168,11 @@ def core_bindings(  # noqa: PLR0913  # lint-waiver: LW-260141 [PLR0913]; the run
     store = ReceiptStore(receipts, threads)
     catalog = operations or empty_catalog()
     session = session_executors(
-        sessions.agent_sessions, sessions.resolver, store, sessions.yields, blocking
+        sessions.agent_sessions,
+        sessions.resolver,
+        store,
+        sessions.yields,
+        blocking,
     )
     proof = ReleasedRunInvocations(
         JournalRunInvocations(sessions.agent_sessions, store), sessions.agent_sessions, store
@@ -177,7 +183,11 @@ def core_bindings(  # noqa: PLR0913  # lint-waiver: LW-260141 [PLR0913]; the run
         ),
         sessions=SessionRequestRouter(session.turns, session.lifecycle),
         evaluation=MeasurementRequests(
-            measurement.executor, store, measurement.observer, measurement.decisions
+            measurement.executor,
+            store,
+            measurement.observer,
+            measurement.decisions,
+            control=measurement.control,
         ),
         operations=RegisteredOperationRequests(
             catalog, NamespaceOperationReceipts(store), ObservationFactory(store)
