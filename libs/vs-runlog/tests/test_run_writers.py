@@ -114,7 +114,10 @@ def test_record_bound_and_recovery_preserve_immutable_checkpoints(count: int) ->
                 writer.append(
                     Record(seq=seq, epoch=1, body=Oneof("legacy_event", LegacyEvent(json="x")))
                 )
-                writer.commit()
+                # Exercise checkpoint cadence with batches rather than one
+                # storage barrier for every generated record.
+                if (seq - 2) % 32 == 0:
+                    writer.commit()
         files = {p.name: p.read_bytes() for p in (root / "keyframes").iterdir()}
         sequences = sorted(int(name.removesuffix(".pb")) for name in files)
         assert (
