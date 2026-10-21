@@ -136,7 +136,7 @@ def test_deferred_failure_is_reported_and_prevents_further_appends(tmp_path: Pat
     run_virtual(clock, exercise())
 
 
-@given(st.lists(st.tuples(st.integers(0, 4), st.integers(0, 100)), max_size=20))
+@given(st.lists(st.tuples(st.integers(0, 4), st.integers(0, 2**32 - 1)), max_size=20))
 @example(operations=[(0, 0), (1, 0), (0, 0), (2, 3), (0, 0), (3, 1)])
 def test_commit_crash_recovery_preserves_durable_prefix(
     operations: list[tuple[int, int]],
@@ -233,3 +233,28 @@ def test_off_loop_construction_and_appends_use_the_supplied_loop(tmp_path: Path)
         await runner.run(writer.close)
 
     run_virtual(clock, exercise())
+
+
+def test_checkpoint_failure_keeps_old_head_until_recovery(tmp_path: Path) -> None:
+    path = tmp_path / "run.log"
+    writer = FileRunLogWriter(path)
+    expected = initial_records()
+    for record in expected:
+        writer.append(record)
+    for seq in range(3, 303):
+        record = event(seq)
+        expected.append(record)
+        writer.append(record)
+    old_head = (tmp_path / "run.head").read_bytes()
+    checkpoint = tmp_path / "keyframes/302.pb"
+    checkpoint.mkdir()
+    with pytest.raises(OSError, match=r"302.pb"):
+        writer.commit()
+    assert (tmp_path / "run.head").read_bytes() == old_head
+    checkpoint.rmdir()
+    with FileRunLogWriter(path) as recovered:
+        assert recovered.sequence == 302
+        assert head(tmp_path) == 302
+        assert Keyframe.from_binary(checkpoint.read_bytes()) == fold_skeleton(
+            expected, log_offset=path.stat().st_size
+        )
