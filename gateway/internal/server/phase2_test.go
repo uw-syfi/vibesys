@@ -101,7 +101,7 @@ func TestSkeletonCommittedAndPhase1(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got.CommittedSeq != tc.want || !bytes.Equal(got.Keyframe, keyframe) {
+			if got.CommittedSeq != tc.want || !got.Complete || (tc.want > 0 && got.NextSeq != tc.want+1) || !bytes.Equal(got.Keyframe, keyframe) {
 				t.Fatalf("Skeleton = %v", got)
 			}
 			count := 0

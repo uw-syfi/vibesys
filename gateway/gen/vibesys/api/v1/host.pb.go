@@ -320,13 +320,19 @@ func (x *SkeletonRequest) GetRunId() string {
 	return ""
 }
 
-// One committed snapshot. No keyframe means replay records from the beginning.
-// A response exceeding gRPC's message size limit fails RESOURCE_EXHAUSTED.
+// A bounded committed prefix, at most 1 MiB encoded. No keyframe means replay
+// from the beginning; a keyframe larger than the budget is omitted. Records that
+// do not fit (including a single large record) are delivered through Tail.
 type SkeletonResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Keyframe      []byte                 `protobuf:"bytes,1,opt,name=keyframe,proto3,oneof" json:"keyframe,omitempty"`
-	Records       [][]byte               `protobuf:"bytes,2,rep,name=records,proto3" json:"records,omitempty"`
-	CommittedSeq  uint64                 `protobuf:"varint,3,opt,name=committed_seq,json=committedSeq,proto3" json:"committed_seq,omitempty"`
+	state    protoimpl.MessageState `protogen:"open.v1"`
+	Keyframe []byte                 `protobuf:"bytes,1,opt,name=keyframe,proto3,oneof" json:"keyframe,omitempty"`
+	Records  [][]byte               `protobuf:"bytes,2,rep,name=records,proto3" json:"records,omitempty"`
+	// Published boundary, or the last included sequence for a phase 1 run.
+	CommittedSeq uint64 `protobuf:"varint,3,opt,name=committed_seq,json=committedSeq,proto3" json:"committed_seq,omitempty"`
+	// First sequence not included. Continue with Tail(from_seq = next_seq).
+	NextSeq uint64 `protobuf:"varint,4,opt,name=next_seq,json=nextSeq,proto3" json:"next_seq,omitempty"`
+	// True when the frozen readable prefix was included in full.
+	Complete      bool `protobuf:"varint,5,opt,name=complete,proto3" json:"complete,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -380,6 +386,20 @@ func (x *SkeletonResponse) GetCommittedSeq() uint64 {
 		return x.CommittedSeq
 	}
 	return 0
+}
+
+func (x *SkeletonResponse) GetNextSeq() uint64 {
+	if x != nil {
+		return x.NextSeq
+	}
+	return 0
+}
+
+func (x *SkeletonResponse) GetComplete() bool {
+	if x != nil {
+		return x.Complete
+	}
+	return false
 }
 
 type WatchRunsRequest struct {
@@ -793,11 +813,13 @@ const file_vibesys_api_v1_host_proto_rawDesc = "" +
 	"\vthrough_seq\x18\x02 \x01(\x04R\n" +
 	"throughSeq\"(\n" +
 	"\x0fSkeletonRequest\x12\x15\n" +
-	"\x06run_id\x18\x01 \x01(\tR\x05runId\"\x7f\n" +
+	"\x06run_id\x18\x01 \x01(\tR\x05runId\"\xb6\x01\n" +
 	"\x10SkeletonResponse\x12\x1f\n" +
 	"\bkeyframe\x18\x01 \x01(\fH\x00R\bkeyframe\x88\x01\x01\x12\x18\n" +
 	"\arecords\x18\x02 \x03(\fR\arecords\x12#\n" +
-	"\rcommitted_seq\x18\x03 \x01(\x04R\fcommittedSeqB\v\n" +
+	"\rcommitted_seq\x18\x03 \x01(\x04R\fcommittedSeq\x12\x19\n" +
+	"\bnext_seq\x18\x04 \x01(\x04R\anextSeq\x12\x1a\n" +
+	"\bcomplete\x18\x05 \x01(\bR\bcompleteB\v\n" +
 	"\t_keyframe\"\x12\n" +
 	"\x10WatchRunsRequest\"\xd7\x01\n" +
 	"\x11WatchRunsResponse\x12\x15\n" +

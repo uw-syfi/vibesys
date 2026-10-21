@@ -12,8 +12,8 @@ import (
 
 // WatchRuns watches directories because run.head and index links are published
 // by atomic rename. Watch installation precedes each scan, closing the race.
-// Liveness is a hint sampled on subscription and filesystem changes; flock
-// itself has no portable change notification (unlock does not modify a file).
+// File contents are never polled. Bounded lock probes are the exception: a
+// crashed writer releases flock without any portable filesystem notification.
 func (h *host) WatchRuns(_ *apiv1.WatchRunsRequest, stream apiv1.HostService_WatchRunsServer) error {
 	watch, err := fsnotify.NewWatcher()
 	if err != nil {
@@ -23,8 +23,11 @@ func (h *host) WatchRuns(_ *apiv1.WatchRunsRequest, stream apiv1.HostService_Wat
 	if err := watch.Add(h.config.Root); err != nil {
 		return rpcError(err)
 	}
+	ticker := h.config.Clock.NewTicker(LivenessProbeInterval)
+	defer ticker.Stop()
 	previous := map[string]*apiv1.WatchRunsResponse{}
 	initial := true
+rescan:
 	for {
 		if err := stream.Context().Err(); err != nil {
 			return rpcError(err)
@@ -56,6 +59,7 @@ func (h *host) WatchRuns(_ *apiv1.WatchRunsRequest, stream apiv1.HostService_Wat
 			return rpcError(err)
 		}
 		current := map[string]*apiv1.WatchRunsResponse{}
+		directories := map[string]string{}
 		for _, entry := range entries {
 			if entry.Type()&os.ModeSymlink == 0 {
 				continue
@@ -84,6 +88,7 @@ func (h *host) WatchRuns(_ *apiv1.WatchRunsRequest, stream apiv1.HostService_Wat
 			}
 			response := &apiv1.WatchRunsResponse{RunId: entry.Name(), Head: head, Liveness: live}
 			current[entry.Name()] = response
+			directories[entry.Name()] = dir
 			if !proto.Equal(previous[entry.Name()], response) {
 				if err := stream.Send(response); err != nil {
 					return err
@@ -110,8 +115,42 @@ func (h *host) WatchRuns(_ *apiv1.WatchRunsRequest, stream apiv1.HostService_Wat
 			}
 			initial = false
 		}
-		if err := waitChange(stream.Context().Done(), watch); err != nil {
-			return rpcError(err)
+		for {
+			select {
+			case <-stream.Context().Done():
+				return rpcError(stream.Context().Err())
+			case _, ok := <-watch.Events:
+				if !ok {
+					return rpcError(os.ErrClosed)
+				}
+				continue rescan
+			case err, ok := <-watch.Errors:
+				if !ok {
+					return rpcError(os.ErrClosed)
+				}
+				if errors.Is(err, fsnotify.ErrEventOverflow) {
+					continue rescan
+				}
+				return rpcError(err)
+			case <-ticker.Ticks():
+				for id, response := range previous {
+					if response.Liveness != apiv1.RunLiveness_RUN_LIVENESS_ALIVE {
+						continue
+					}
+					live, err := liveness(directories[id], response.Head)
+					if err != nil {
+						return rpcError(err)
+					}
+					if live != response.Liveness {
+						// Messages remain immutable after Send, including for gRPC stats.
+						updated := &apiv1.WatchRunsResponse{RunId: id, Head: response.Head, Liveness: live}
+						previous[id] = updated
+						if err := stream.Send(updated); err != nil {
+							return err
+						}
+					}
+				}
+			}
 		}
 	}
 }

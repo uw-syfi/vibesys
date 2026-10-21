@@ -59,15 +59,19 @@ record unchanged, including unknown fields. Tail validates increasing sequence
 numbers. Files must be append-only. A detected replacement or truncation ends
 the stream instead of silently replaying a different log. File and directory
 notifications wake readers, including an atomic run.head rename that advances
-committed_seq. There are no polling timers. Cancellation closes that stream's
+committed_seq. File contents are never polled. Cancellation closes that stream's
 watcher and file descriptor.
 
 When run.head has committed_seq, Tail and Skeleton stop at that sequence. A
 present zero commits no records. With no head or no committed_seq, every complete
 record is committed, preserving the phase 1 converter path. Skeleton freezes its
 read extent, picks the latest keyframe at or below the boundary, and forwards its
-encoded bytes plus later records. A phase 1 run returns no keyframe and all its
-complete records. An incomplete committed prefix is DATA_LOSS.
+encoded bytes plus later records within a bounded unary response. The API
+reports next_seq and complete; clients continue with Tail(from_seq = next_seq).
+A keyframe that exceeds the response budget is omitted and replay starts from
+the log. A phase 1 run returns no keyframe and a bounded prefix of its complete
+records. Its committed_seq is the last included sequence, since it has no
+published boundary. An incomplete committed prefix is DATA_LOSS when reached.
 
 Keyframe headers record through_seq and the next log byte offset. Tail uses a
 keyframe before the requested sequence, or a sparse in-memory index populated
@@ -81,9 +85,10 @@ atomic head replacement is visible. Liveness probes run.lock with a nonblocking
 shared flock probe against the writer's exclusive lock and leaves the persisted head unchanged. A run with an ended lifecycle is
 ended; otherwise a held lock means alive and an unheld lock means interrupted.
 A phase 1 run without a head or lock has unknown liveness. Probes happen on
-subscription and filesystem changes: flock unlock alone has no portable
-filesystem notification, so an idle unlock is observed at the next such change
-or subscription. Writers must publish their lifecycle changes through run.head.
+subscription and filesystem changes. Previously live runs are also re-probed
+every five seconds, using the injected clock. This is the bounded exception to
+file polling: flock unlock after a crash has no filesystem notification. Ended
+and previously interrupted runs are not periodically probed.
 
 GetBlobs returns a result for each requested hash, including failures, and
 verifies SHA-256 before returning content. Paths must be lowercase hexadecimal

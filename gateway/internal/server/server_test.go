@@ -36,6 +36,11 @@ type fixture struct {
 
 func start(t *testing.T) fixture {
 	t.Helper()
+	return startWithClock(t, nil)
+}
+
+func startWithClock(t *testing.T, clock server.Clock) fixture {
+	t.Helper()
 	// Keep Unix socket paths short even on hosts with long temporary roots.
 	root, err := os.MkdirTemp("/tmp", "g")
 	if err != nil {
@@ -50,7 +55,7 @@ func start(t *testing.T) fixture {
 	}
 	done := make(chan error, 1)
 	go func() {
-		done <- server.Serve(ctx, endpoint.Listener, server.Config{Root: root, Version: "test-version"})
+		done <- server.Serve(ctx, endpoint.Listener, server.Config{Root: root, Version: "test-version", Clock: clock})
 	}()
 	t.Cleanup(func() {
 		cancel()

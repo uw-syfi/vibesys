@@ -20,7 +20,8 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-const maxMessageBytes = math.MaxInt32
+// Tail permits one maximum-sized record; blobs have a 16 MiB content budget.
+const maxMessageBytes = 20 << 20
 const blobBytes = 16 << 20
 
 func (h *host) directory(id string) (string, error) {
@@ -174,7 +175,7 @@ func keyframePosition(data []byte) (runlog.Position, error) {
 	return runlog.Position{ThroughSeq: seq, Offset: int64(offset)}, nil
 }
 
-func latestKeyframe(dir string, cap uint64) ([]byte, runlog.Position, error) {
+func latestKeyframe(dir string, cap uint64, maxBytes int) ([]byte, runlog.Position, error) {
 	root, err := os.OpenRoot(dir)
 	if err != nil {
 		return nil, runlog.Position{}, err
@@ -208,7 +209,7 @@ func latestKeyframe(dir string, cap uint64) ([]byte, runlog.Position, error) {
 	if best == 0 {
 		return nil, runlog.Position{}, nil
 	}
-	data, err := readFile(dir, fmt.Sprintf("keyframes/%d.pb", best), maxMessageBytes)
+	data, err := readFile(dir, fmt.Sprintf("keyframes/%d.pb", best), maxBytes)
 	if err != nil {
 		return nil, runlog.Position{}, err
 	}
