@@ -13,6 +13,7 @@ from hypothesis import strategies as st
 from pydantic import TypeAdapter, ValidationError
 
 import vs_core.api as core
+from vs_core.api import values as shared_values
 from vs_core.api.testing import sample_limits, sample_retries
 from vs_proto.api import LegacyEvent, core_common
 from vs_proto.api import ValidationError as ProtoValidationError
@@ -59,6 +60,8 @@ def _sample(cls: type[core.CoreValue], root: str, count: int) -> core.CoreValue:
     }
     if issubclass(cls, core.Identity):
         return cls(root=root)
+    if cls.__name__ in _shared_seeds():
+        return TypeAdapter(cls).validate_json(json.dumps(_shared_seeds()[cls.__name__]))
     return values[cls]()
 
 
@@ -190,3 +193,21 @@ def test_nominal_identity_domains_cannot_be_substituted(
     else:
         with pytest.raises(ValidationError):
             target.model_validate(value)
+
+
+def _shared_seeds() -> dict[str, object]:
+    path = Path(__file__).parent / "fixtures" / "core-values" / "shared-seeds.json"
+    return json.loads(path.read_text())
+
+
+def test_shared_value_differential_fixtures_preserve_old_acceptance_and_json() -> None:
+    path = Path(__file__).parent / "fixtures" / "core-values" / "shared-values.json"
+    for case in json.loads(path.read_text()):
+        cls = getattr(shared_values, case["type"])
+        if case["accepted"]:
+            value = TypeAdapter(cls).validate_json(case["source"])
+            assert json.loads(value.model_dump_json()) == case["output"], case
+            assert from_proto(to_proto(value)) == value
+        else:
+            with pytest.raises(ValidationError):
+                TypeAdapter(cls).validate_json(case["source"])

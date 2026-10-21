@@ -5,10 +5,18 @@ from enum import StrEnum
 from functools import partial
 from typing import Annotated, ClassVar, Literal, final
 
-from pydantic import AfterValidator, ConfigDict, Field
+from pydantic import AfterValidator, ConfigDict, Field, field_serializer
 from pydantic.dataclasses import dataclass
 
-from vs_core._corevalue import CoreValue, FrozenMap, TimestampValue, bounded_integer
+from vs_core._corevalue import (
+    CoreValue,
+    FrozenMap,
+    TimestampValue,
+    bounded_integer,
+    cel_integer,
+    omit_unset,
+    resolve_value,
+)
 from vs_core._generated.vibesys.core.v1.common_cv import (
     ArtifactRef,
     AttemptId,
@@ -128,7 +136,7 @@ class PoolCapacity(CoreValue):
     kw_only=True,
     config=ConfigDict(extra="forbid", strict=True, validate_default=True),
 )
-class RequestRetries(CoreValue, RequestRetryPolicy):
+class RequestRetries(RequestRetryPolicy, CoreValue):
     "How core re-sends a request its executor said it did not run. Declared by the backend.\n\n``limit`` re-sends follow the first attempt, the n-th after ``backoff * 2**(n-1)`` seconds\nof core time, never more than ``backoff_cap``. Core holds no default for any field and\nrefuses a ``limit`` above ``MAX_REQUEST_RETRIES``."
 
     model_fields: ClassVar[tuple[str, ...]] = ("limit", "backoff", "backoff_cap")
@@ -492,3 +500,15 @@ class RunPark(CoreValue):
     epoch: Annotated[int, Field(ge=0)]
 
     __hash__ = CoreValue.cached_hash
+
+
+resolve_value(ScopeInputTarget)
+resolve_value(ItemInputTarget)
+resolve_value(InvocationInputTarget)
+resolve_value(RoleInputTarget)
+resolve_value(PoolCapacity)
+resolve_value(RequestRetries)
+resolve_value(Limits)
+resolve_value(RunPause)
+resolve_value(ControlInput)
+resolve_value(RunPark)

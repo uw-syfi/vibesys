@@ -8,64 +8,24 @@ them and nothing is refused for there being several (`vs_core._comparison`).
 
 from __future__ import annotations
 
-from enum import StrEnum
-from typing import Annotated, Literal
+from typing import Literal
 
 from pydantic import Field
 
-from .common import Count, RequestId, RevisionRef, Scope, Seconds, Value, unset
+from vs_core._generated.vibesys.core.v1.leaves_cv import (
+    BaseRef,
+    Comparison,
+    Direction,
+    Finite,
+    Reading,
+    Sample,
+)
+from vs_core._generated.vibesys.core.v1.vocabulary_cv import (
+    ComparisonVerdict,
+    EffectVerdict,
+)
 
-type Finite = Annotated[float, Field(allow_inf_nan=False)]
-type Direction = Literal["max", "min"]
-
-
-class Reading(Value):
-    """A run's headline reading of the benchmark stage, as the trusted record states it."""
-
-    metric: str = Field(min_length=1)
-    value: Finite
-    direction: Direction | None = None
-    """Which way is better, when the evaluator says; else the task's objective for ``metric``."""
-    unit: str | None = None
-    repetitions: int = Field(default=1, ge=1)
-    """How many repetitions the evaluation averaged into ``value`` inside this one run."""
-
-
-class BaseRef(Value):
-    """The revision a candidate is compared with, and what the evaluation reads there.
-
-    Both facts together or neither: a base without its measured input could not be matched to
-    its own samples.
-    """
-
-    commit: RevisionRef
-    measured_input: str = Field(min_length=1)
-
-
-class Sample(Value):
-    """One framework run of one measured input: the unit of measurement, always traceable.
-
-    A sample is built only from a run that ended conclusively with a trusted benchmark reading,
-    and requires the ``commit`` it measured and the ``measured_input`` digest (#2961). The
-    ``base`` is set on a candidate's sample and names the revision it is compared with.
-    """
-
-    run: RequestId
-    scope: Scope
-    commit: RevisionRef
-    measured_input: str = Field(min_length=1)
-    evaluation: str = Field(min_length=1)
-    """The digest of everything else that makes two runs the same measurement: the evaluator,
-    workload and environment (the host), the recipe, the gates and the accuracy gating. See
-    ``vs_core._comparison.evaluation_of``."""
-    gates: tuple[str, ...]
-    host: str = Field(min_length=1)
-    """The environment digest the run was timed in, which names the executor's host set."""
-    dedicated_resources: bool
-    """Whether the executor held its resources alone while the run was timed (lower noise)."""
-    reading: Reading
-    observed_at: Seconds
-    base: BaseRef | None = None
+from .common import Count, RequestId, Scope, Seconds, Value, unset
 
 
 class CoreRun(Value):
@@ -119,57 +79,6 @@ class Runaway(Value):
     limit: Count
 
 
-class ComparisonVerdict(StrEnum):
-    """Which side of the noise a candidate's result falls on, against its base.
-
-    ``INCONCLUSIVE`` is no side: the samples held give no estimate of the noise (too few runs a
-    side, or runs that all read alike), so the ratio is neither a gain nor within the noise.
-    """
-
-    BETTER = "better"
-    WITHIN_NOISE = "within_noise"
-    WORSE = "worse"
-    INCONCLUSIVE = "inconclusive"
-
-
-class EffectVerdict(StrEnum):
-    """What a comparison says of a plan's expected effect, a minimum ratio over the base.
-
-    The framework derives it (`vs_core._comparison.effect_verdict`); no agent states it.
-    """
-
-    SUPPORTED = "supported"
-    WITHIN_NOISE = "within_noise"
-    DISPROVEN = "disproven"
-    INCONCLUSIVE = "inconclusive"
-
-
-class Comparison(Value):
-    """A candidate's samples compared with its base's: the ratio, its noise and the verdict.
-
-    ``ratio`` is the candidate's mean over the base's, as measured; ``direction`` says which
-    way is better, so ``better`` is a ratio above one for ``max`` and below one for ``min``.
-    ``noise`` is one standard error of the ratio, and a verdict needs two of them: the
-    statistic is in ``vs_core._comparison``.
-    """
-
-    scope: Scope
-    metric: str = Field(min_length=1)
-    unit: str | None = None
-    direction: Direction
-    candidate: RevisionRef
-    candidate_input: str = Field(min_length=1)
-    base: RevisionRef
-    base_input: str = Field(min_length=1)
-    candidate_value: Finite
-    base_value: Finite
-    ratio: Finite
-    noise: Finite = Field(ge=0)
-    verdict: ComparisonVerdict
-    candidate_samples: Count
-    base_samples: Count
-
-
 class StatedComparison(Value):
     """A candidate's comparison with its base as a flow reads it from the run's view.
 
@@ -200,3 +109,20 @@ class ComparisonSettled(Value):
     scope: Scope
     candidate_input: str = Field(min_length=1)
     base_input: str = Field(min_length=1)
+
+
+__all__ = [
+    "BaseClaim",
+    "BaseRef",
+    "Comparison",
+    "ComparisonSettled",
+    "ComparisonVerdict",
+    "CoreRun",
+    "Direction",
+    "EffectVerdict",
+    "Finite",
+    "Reading",
+    "Runaway",
+    "Sample",
+    "StatedComparison",
+]

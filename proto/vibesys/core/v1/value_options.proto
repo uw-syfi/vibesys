@@ -17,6 +17,10 @@ message ValueMessageOptions {
   string base = 4;
   // Export a named numeric bound from a CEL rule for existing callers.
   repeated ValueRuleConstant constants = 5;
+  // Rebuild a subclass as this base when a field promises the base representation.
+  bool narrow_subclasses = 6;
+  // An empty wire marker represented as Python None inside a scalar union.
+  bool null = 7;
 }
 message ValueRuleConstant {
   string name = 1;
@@ -31,12 +35,22 @@ message ValueFieldOptions {
   // Export one scalar rule value, such as an identity pattern, without duplicating it.
   string constant_name = 3;
   string constant_rule = 4;
+  // An explicit legacy constructor default, encoded as JSON and validated by the field.
+  optional string default_json = 5;
+  // Preserve omission of absent optional fields in the persisted JSON envelope.
+  bool omit_unset = 6;
+  // Export scalar aliases from this field's authoritative validation.
+  repeated string aliases = 7;
+  // Immutable set semantics, including canonical JSON and wire ordering.
+  bool frozen_set = 8;
 }
 message ValueEnumOptions {
   // Preserve a string-literal API instead of introducing an enum at call sites.
   bool literal = 1;
   // Keep the literal inline in the legacy JSON Schema instead of emitting a named reference.
   bool inline = 2;
+  // Pure enum behavior, with no schema or validation rules.
+  string mixin = 3;
 }
 message ValueEnumMemberOptions {
   // Persisted spelling when it differs from the lower-case unprefixed enum name.

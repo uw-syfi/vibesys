@@ -1,0 +1,128 @@
+syntax = "proto3";
+package vibesys.core.v1;
+
+import "buf/validate/validate.proto";
+import "vibesys/core/v1/value_options.proto";
+import "vibesys/core/v1/common.proto";
+import "vibesys/core/v1/vocabulary.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/gateway/gen/vibesys/core/v1;corev1";
+
+enum Direction {
+  option (core_enum) = {literal: true, inline: true};
+  DIRECTION_UNSPECIFIED = 0;
+  DIRECTION_MAX = 1 [(core_member).spelling = "max"];
+  DIRECTION_MIN = 2 [(core_member).spelling = "min"];
+}
+
+enum ChargeClass {
+  option (core_enum) = {literal: true, inline: true};
+  CHARGE_CLASS_UNSPECIFIED = 0;
+  CHARGE_CLASS_FREE = 1 [(core_member).spelling = "free"];
+  CHARGE_CLASS_PAID = 2 [(core_member).spelling = "paid"];
+  CHARGE_CLASS_CORRECTION = 3 [(core_member).spelling = "correction"];
+  CHARGE_CLASS_RESUME = 4 [(core_member).spelling = "resume"];
+}
+
+enum TaskObjectiveDirection {
+  option (core_enum) = {literal: true, inline: true};
+  TASK_OBJECTIVE_DIRECTION_UNSPECIFIED = 0;
+  TASK_OBJECTIVE_DIRECTION_MAX = 1 [(core_member).spelling = "max"];
+  TASK_OBJECTIVE_DIRECTION_MIN = 2 [(core_member).spelling = "min"];
+}
+
+// Full identity of one evidence record: the request that produced it plus its ID.
+//
+// EvidenceId alone is only unique within one source request, so two jobs can
+// report the same ID. Every ledger, settlement and continuation lookup keys on
+// this pair.
+message EvidenceKey {
+  string kind = 1 [(buf.validate.field).string = {const: "evidence_key"}, (core_field) = {default_json: "\"evidence_key\""}];
+  RequestId source_request = 2 [(buf.validate.field).required = true, (core_field) = {explicit: true}];
+  EvidenceId evidence_id = 3 [(buf.validate.field).required = true, (core_field) = {explicit: true}];
+}
+
+// Immutable revision identity.
+//
+// Core compares digest as an opaque equality key. Producers that mint a ref from
+// a git commit use of_git_commit, which makes revision_id the commit and digest
+// `git-commit:<commit>`; consumers that must trust the scheme read git_commit,
+// which is None unless digest names the same commit as revision_id.
+message RevisionRef {
+  option (core_value).mixin = "vs_core._revision_ref.RevisionReference";
+  RevisionId revision_id = 1 [(buf.validate.field).required = true, (core_field) = {explicit: true}];
+  string digest = 2 [(buf.validate.field).string = {min_len: 1}];
+}
+
+// One stage the task can measure and the seconds its execution may take.
+message TaskStage {
+  string stage_id = 1 [(buf.validate.field).string = {min_len: 1}];
+  double execution_seconds = 2 [(buf.validate.field).double = {gte: 0, finite: true}];
+}
+
+// One axis the task compares candidates on, and which way is better.
+message TaskObjective {
+  string name = 1 [(buf.validate.field).string = {min_len: 1}];
+  TaskObjectiveDirection direction = 2 [(buf.validate.field).enum = {defined_only: true, not_in: 0}, (core_field) = {explicit: true}];
+}
+
+// A run's headline reading of the benchmark stage, as the trusted record states it.
+message Reading {
+  string metric = 1 [(buf.validate.field).string = {min_len: 1}];
+  double value = 2 [(buf.validate.field).double = {finite: true}, (core_field) = {explicit: true, aliases: "Finite"}];
+  Direction direction = 3 [(buf.validate.field).enum = {defined_only: true}];
+  optional string unit = 4;
+  string repetitions = 5 [(buf.validate.field).string = {pattern: "^[1-9][0-9]*$"}, (core_field) = {integer: true, default_json: "1"}];
+}
+
+// The revision a candidate is compared with, and what the evaluation reads there.
+//
+// Both facts together or neither: a base without its measured input could not be matched to
+// its own samples.
+message BaseRef {
+  RevisionRef commit = 1 [(buf.validate.field).required = true, (core_field) = {explicit: true}];
+  string measured_input = 2 [(buf.validate.field).string = {min_len: 1}];
+}
+
+// One framework run of one measured input: the unit of measurement, always traceable.
+//
+// A sample is built only from a run that ended conclusively with a trusted benchmark reading,
+// and requires the ``commit`` it measured and the ``measured_input`` digest (#2961). The
+// ``base`` is set on a candidate's sample and names the revision it is compared with.
+message Sample {
+  RequestId run = 1 [(buf.validate.field).required = true, (core_field) = {explicit: true}];
+  Scope scope = 2 [(buf.validate.field).required = true, (core_field) = {explicit: true}];
+  RevisionRef commit = 3 [(buf.validate.field).required = true, (core_field) = {explicit: true}];
+  string measured_input = 4 [(buf.validate.field).string = {min_len: 1}];
+  string evaluation = 5 [(buf.validate.field).string = {min_len: 1}];
+  repeated string gates = 6 [(core_field) = {explicit: true}];
+  string host = 7 [(buf.validate.field).string = {min_len: 1}];
+  bool dedicated_resources = 8 [(core_field) = {explicit: true}];
+  Reading reading = 9 [(buf.validate.field).required = true, (core_field) = {explicit: true}];
+  double observed_at = 10 [(buf.validate.field).double = {gte: 0, finite: true}, (core_field) = {explicit: true}];
+  BaseRef base = 11;
+}
+
+// A candidate's samples compared with its base's: the ratio, its noise and the verdict.
+//
+// ``ratio`` is the candidate's mean over the base's, as measured; ``direction`` says which
+// way is better, so ``better`` is a ratio above one for ``max`` and below one for ``min``.
+// ``noise`` is one standard error of the ratio, and a verdict needs two of them: the
+// statistic is in ``vs_core._comparison``.
+message Comparison {
+  Scope scope = 1 [(buf.validate.field).required = true, (core_field) = {explicit: true}];
+  string metric = 2 [(buf.validate.field).string = {min_len: 1}];
+  optional string unit = 3;
+  Direction direction = 4 [(buf.validate.field).enum = {defined_only: true, not_in: 0}, (core_field) = {explicit: true}];
+  RevisionRef candidate = 5 [(buf.validate.field).required = true, (core_field) = {explicit: true}];
+  string candidate_input = 6 [(buf.validate.field).string = {min_len: 1}];
+  RevisionRef base = 7 [(buf.validate.field).required = true, (core_field) = {explicit: true}];
+  string base_input = 8 [(buf.validate.field).string = {min_len: 1}];
+  double candidate_value = 9 [(buf.validate.field).double = {finite: true}, (core_field) = {explicit: true}];
+  double base_value = 10 [(buf.validate.field).double = {finite: true}, (core_field) = {explicit: true}];
+  double ratio = 11 [(buf.validate.field).double = {finite: true}, (core_field) = {explicit: true}];
+  double noise = 12 [(buf.validate.field).double = {finite: true, gte: 0}];
+  ComparisonVerdict verdict = 13 [(buf.validate.field).enum = {defined_only: true, not_in: 0}, (core_field) = {explicit: true}];
+  string candidate_samples = 14 [(buf.validate.field).string = {pattern: "^(0|[1-9][0-9]*)$"}, (core_field) = {integer: true, explicit: true}];
+  string base_samples = 15 [(buf.validate.field).string = {pattern: "^(0|[1-9][0-9]*)$"}, (core_field) = {integer: true, explicit: true}];
+}

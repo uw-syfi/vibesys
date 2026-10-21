@@ -59,6 +59,12 @@ def test_pure_value_libraries_and_ordinary_strategy_text_are_allowed() -> None:
     )
 
 
+@pytest.mark.parametrize("operation", ["is_pydantic_dataclass", "rebuild_dataclass"])
+def test_generated_dataclass_schema_operations_are_pure(operation: str) -> None:
+    source = f"from pydantic.dataclasses import {operation}\n{operation}(Record)"
+    assert scan_source("values.py", source) == ()
+
+
 def test_syntax_errors_fail_closed() -> None:
     with pytest.raises(SyntaxError):
         scan_source("strategy.py", "def invalid(:")
