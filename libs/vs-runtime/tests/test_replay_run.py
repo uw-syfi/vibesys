@@ -5,15 +5,17 @@ from collections.abc import Callable, Coroutine
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
+from protobuf.wkt.google.protobuf.timestamp_pb import Timestamp
 
 from vs_core.api.replay import AcceptedReplay, ReplayCall, ReplayFlow, ReplaySource, SemanticKey
 from vs_project.api import FakeStateStore
-from vs_proto.api import EpochStarted, Span, core_common, replay
+from vs_proto.api import EpochStarted, Span, SpanStatus, core_common, replay
 from vs_runtime.api.replay import (
     FakeReplayExecutor,
     ReplayCompleted,
     ReplayLaunch,
     ReplayParked,
+    ReplayRecoveryRequiredError,
     ReplayResult,
     ReplayRunHost,
     ReplayRuntime,
@@ -197,3 +199,92 @@ async def test_finished_branches_still_retain_all_inflight_paid_usage(sim: Sim) 
         ReplayCompleted("a")
     )
     assert executor.invocations == invocations
+
+
+@pytest.mark.parametrize("dispatched", [False, True])
+async def test_resume_inspects_an_interrupted_start_before_any_retry(
+    sim: Sim, *, dispatched: bool
+) -> None:
+    async def root(ctx: ReplayFlow) -> object:
+        return (await call(ctx, "work")).root
+
+    store = FakeStateStore()
+    executor = FakeReplayExecutor(lambda _: ReplayResult(Reply(root="answer"), paid=True))
+    crashed = host(store, root, executor, sim)
+    crashed.runtime.start(launch("first"), now=sim.clock.now(), at=Timestamp())
+    (span,) = crashed.runtime.prepare(now=sim.clock.now(), at=Timestamp())
+    if dispatched:
+        await crashed.runtime.dispatch(span.id, executor, now=sim.clock.now())
+    crashed.runtime.close(now=sim.clock.now())
+    resumed = host(store, root, executor, sim)
+    assert await drive_replay(resumed, launch("resume")) == ReplayCompleted("answer")
+    assert len(executor.invocations) == 1
+    assert len(resumed.runtime.archive.history) == 1
+    assert resumed.runtime.archive.unresolved == ()
+    stopped = [item for item in resumed.runtime.archive.spans if item.status == SpanStatus.STOPPED]
+    assert len(stopped) == int(not dispatched)
+    assert (span.id in executor.invocations) is dispatched
+
+
+async def test_absent_interrupted_start_uses_current_policy_when_retried(sim: Sim) -> None:
+    async def original(ctx: ReplayFlow) -> object:
+        return await call(ctx, "work", b"old")
+
+    async def edited(ctx: ReplayFlow) -> object:
+        return await call(ctx, "work", b"new")
+
+    def perform(span: Span) -> ReplayResult:
+        assert span.replay is not None
+        assert span.replay.policy is not None
+        assert span.replay.policy.content == b"new"
+        return ReplayResult(Reply(root="answer"), paid=True)
+
+    store = FakeStateStore()
+    executor = FakeReplayExecutor(perform)
+    crashed = host(store, original, executor, sim)
+    crashed.runtime.start(launch("first"), now=0, at=Timestamp())
+    crashed.runtime.prepare(now=0, at=Timestamp())
+    crashed.runtime.close(now=0)
+    resumed = host(store, edited, executor, sim)
+    assert await drive_replay(resumed, launch("resume")) == ReplayCompleted(Reply(root="answer"))
+    assert len(executor.invocations) == 1
+
+
+async def test_failed_external_invocation_stays_uncertain_on_resume(sim: Sim) -> None:
+    async def root(ctx: ReplayFlow) -> object:
+        return await call(ctx, "work")
+
+    async def perform(span: Span) -> ReplayResult:
+        raise ValueError("unknown external state for " + span.id)
+
+    store = FakeStateStore()
+    executor = FakeReplayExecutor(perform)
+    with pytest.raises(ValueError, match="unknown external state"):
+        await drive_replay(host(store, root, executor, sim), launch("first"))
+    with pytest.raises(ReplayRecoveryRequiredError, match="reconcile unfinished"):
+        await drive_replay(host(store, root, executor, sim), launch("resume"))
+    assert len(executor.invocations) == 1
+
+
+async def test_recovered_paid_result_is_disclosed_before_an_edited_frontier(sim: Sim) -> None:
+    async def original(ctx: ReplayFlow) -> object:
+        return (await call(ctx, "original")).root
+
+    async def edited(ctx: ReplayFlow) -> object:
+        return (await call(ctx, "edited")).root
+
+    store = FakeStateStore()
+    executor = FakeReplayExecutor(lambda span: ReplayResult(Reply(root=span.name), paid=True))
+    crashed = host(store, original, executor, sim)
+    crashed.runtime.start(launch("first"), now=0, at=Timestamp())
+    (span,) = crashed.runtime.prepare(now=0, at=Timestamp())
+    await crashed.runtime.dispatch(span.id, executor, now=0)
+    crashed.runtime.close(now=0)
+    resumed = host(store, edited, executor, sim)
+    assert await drive_replay(resumed, launch("notice")) == ReplayParked()
+    assert executor.invocations == (span.id,)
+    assert len(resumed.runtime.archive.history) == 1
+    assert await drive_replay(host(store, edited, executor, sim), launch("ack")) == (
+        ReplayCompleted("edited")
+    )
+    assert len(executor.invocations) == 2

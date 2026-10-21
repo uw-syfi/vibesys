@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Protocol, assert_never
 
 from protobuf import Message, Oneof
 from protobuf.wkt.google.protobuf.any_pb import Any
@@ -32,6 +32,7 @@ from vs_proto.api import (
     Span,
     SpanRecord,
     SpanStatus,
+    Stop,
     validate,
 )
 from vs_proto.api import replay as pb
@@ -80,6 +81,18 @@ class ReplayResult:
     cost_usd: float | None = None
 
 
+@dataclass(frozen=True)
+class ReplayAbsent:
+    """The owning executor proved that the invocation never crossed its boundary."""
+
+
+@dataclass(frozen=True)
+class ReplayUnresolved:
+    """The invocation may still exist. Neither a retry nor an answer is authorized."""
+
+    reason: str
+
+
 class ReplayExecutor(Protocol):
     """Execute a durable start under its fence; do not invent absence on recovery.
 
@@ -88,6 +101,12 @@ class ReplayExecutor(Protocol):
     """
 
     async def execute(self, span: Span, fence: StoreFence) -> ReplayResult: ...
+
+    async def inspect(
+        self, span: Span, fence: StoreFence
+    ) -> ReplayResult | ReplayAbsent | ReplayUnresolved:
+        """Classify the exact durable invocation; Unknown must never be reported as absent."""
+        ...
 
 
 class ReplayRuntime:
@@ -119,6 +138,7 @@ class ReplayRuntime:
         self._dispatchable: set[str] = set()
         self._known_starts: set[str] = set()
         self._prepared_occurrences: set[tuple[bytes, bytes, int]] = set()
+        self._recovery_dirty = False
 
     @property
     def archive(self) -> ReplayArchive:
@@ -171,16 +191,7 @@ class ReplayRuntime:
             self._load()
             self._open_epoch(launch, now=now, at=at)
             self._complete_observed(now=now, at=at)
-            self._scheduler = ReplayScheduler(
-                self._root,
-                self._archive.history,
-                ReplaySettings(
-                    initial_clock=0,
-                    initial_allowance=self._archive.initial_allowance.to_binary(),
-                    fresh_allowance=self._allowance,
-                ),
-                self._archive.acknowledgements,
-            )
+            self._reconstruct()
         except BaseException:
             self._halted = True
             self._store.release(self._fence, now)
@@ -266,6 +277,9 @@ class ReplayRuntime:
         scheduler = self._active_scheduler
         if self._paused:
             return ()
+        if self._recovery_dirty:
+            problem = "finish recovery before preparing more work"
+            raise ReplayCommitError(problem)
         if self._archive.pending_observation is not None:
             problem = "accept the pending observation before preparing more work"
             raise ReplayError(problem)
@@ -428,6 +442,73 @@ class ReplayRuntime:
         )
         try:
             scheduler.accept(AcceptedClock.from_record(record))
+        except BaseException:
+            self._halted = True
+            raise
+
+    @property
+    def recovery(self) -> tuple[Span, ...]:
+        """Inherited starts requiring their owner's inspection before any live dispatch."""
+        _ = self._active_scheduler
+        return tuple(span for span in self._archive.unresolved if span.id not in self._known_starts)
+
+    async def inspect(
+        self, span_id: str, executor: ReplayExecutor, *, now: float
+    ) -> ReplayResult | ReplayAbsent | ReplayUnresolved:
+        """Inspect under the current fence; the caller timestamps the returned observation."""
+        _ = self._active_scheduler
+        if self._known_starts or self._fence is None or not self._store.verify(self._fence, now):
+            problem = "recovery requires a current fence before preparing live work"
+            raise ReplayCommitError(problem)
+        return await executor.inspect(self._span(span_id), self._fence)
+
+    def recover(
+        self, span_id: str, result: ReplayResult | ReplayAbsent, *, now: float, at: Timestamp
+    ) -> None:
+        """Retain the owner's result or confirmed absence, never a guessed retry.
+
+        An absent invocation is stopped, so a reachable request gets a new durable
+        start with today's policy. The original start remains historical.
+        """
+        _ = self._active_scheduler
+        if self._known_starts:
+            problem = "recovery must finish before preparing live work"
+            raise ReplayCommitError(problem)
+        span = self._span(span_id)
+        self._recovery_dirty = True
+        if isinstance(result, ReplayResult):
+            self.observe(span_id, result, now=now, at=at)
+            self._accept_record(self._span(span_id), now=now, at=at)
+        elif isinstance(result, ReplayAbsent):
+            span.status, span.ended_at = SpanStatus.STOPPED, self._archive.clock
+            span.stop = Stop(requested_at=self._archive.clock, landed=True)
+            self._append(Oneof("span", SpanRecord(change=Change.ENDED, span=span)), now=now, at=at)
+
+        else:
+            assert_never(result)
+
+    def finish_recovery(self) -> None:
+        """Reconstruct the root from inspected outcomes before permitting fresh work."""
+        if self.recovery:
+            raise ReplayRecoveryRequiredError(self.recovery)
+        if not self._recovery_dirty:
+            return
+        self._active_scheduler.close()
+        self._reconstruct()
+        self._recovery_dirty = False
+
+    def _reconstruct(self) -> None:
+        try:
+            self._scheduler = ReplayScheduler(
+                self._root,
+                self._archive.history,
+                ReplaySettings(
+                    initial_clock=0,
+                    initial_allowance=self._archive.initial_allowance.to_binary(),
+                    fresh_allowance=self._allowance,
+                ),
+                self._archive.acknowledgements,
+            )
         except BaseException:
             self._halted = True
             raise

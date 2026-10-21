@@ -19,6 +19,7 @@ from vs_proto.api import (
     Span,
     SpanRecord,
     SpanStatus,
+    Stop,
     replay,
 )
 
@@ -278,3 +279,39 @@ def test_a_presentation_update_cannot_erase_execution_metadata() -> None:
     span_of(updated).replay = None
     with pytest.raises(ReplayError, match="execution metadata cannot be removed"):
         decode([*prefix, updated])
+
+
+def test_confirmed_withdrawal_closes_an_unanswered_start_without_an_acceptance() -> None:
+    header, started, _, _ = records()
+    stopped = deepcopy(started)
+    stopped.seq = 3
+    span_record(stopped).change = Change.ENDED
+    span = span_of(stopped)
+    span.status, span.ended_at = SpanStatus.STOPPED, 0
+    span.stop = Stop(requested_at=0, landed=True)
+    archive = decode([header, started, stopped])
+    assert archive.unresolved == ()
+    assert archive.history == ()
+    late = deepcopy(stopped)
+    late.seq = 4
+    span_record(late).change = Change.UPDATED
+    span_of(late).stop = Stop(requested_at=0, landed=False)
+    with pytest.raises(ReplayError, match="execution metadata"):
+        archive.append(late)
+
+
+@pytest.mark.parametrize("change", [Change.UPDATED, Change.ENDED])
+@pytest.mark.parametrize("landed", [None, False])
+def test_unanswered_start_cannot_close_without_confirmed_withdrawal(
+    change: Change, *, landed: bool | None
+) -> None:
+    header, started, _, _ = records()
+    stopped = deepcopy(started)
+    stopped.seq = 3
+    span_record(stopped).change = change
+    span = span_of(stopped)
+    span.status, span.ended_at = SpanStatus.STOPPED, 0
+    if landed is not None:
+        span.stop = Stop(requested_at=0, landed=landed)
+    with pytest.raises(ReplayError, match="confirmed withdrawal"):
+        decode([header, started, stopped])

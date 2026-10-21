@@ -10,17 +10,20 @@ from vs_runtime._replay_run import (
 )
 from vs_runtime._replay_runtime import (
     REPLAY_STORE_SCHEMA_VERSION,
+    ReplayAbsent,
     ReplayCommitError,
     ReplayExecutor,
     ReplayLaunch,
     ReplayRecoveryRequiredError,
     ReplayResult,
     ReplayRuntime,
+    ReplayUnresolved,
 )
 
 __all__ = [
     "REPLAY_STORE_SCHEMA_VERSION",
     "FakeReplayExecutor",
+    "ReplayAbsent",
     "ReplayCommitError",
     "ReplayCompleted",
     "ReplayExecutor",
@@ -32,5 +35,6 @@ __all__ = [
     "ReplayResult",
     "ReplayRunHost",
     "ReplayRuntime",
+    "ReplayUnresolved",
     "drive_replay",
 ]

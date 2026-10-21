@@ -9,7 +9,7 @@ from hypothesis import strategies as st
 from protobuf.wkt.google.protobuf.timestamp_pb import Timestamp
 
 from vs_core.api.replay import ReplayCall, ReplayFlow, SemanticKey
-from vs_project.api import CommitFault, FakeStateStore, StoredEnvelope
+from vs_project.api import CommitFault, FakeStateStore, StoredEnvelope, StoreFence
 from vs_proto.api import EpochStarted, ReplayStore, core_common, replay
 from vs_runtime.api.replay import (
     REPLAY_STORE_SCHEMA_VERSION,
@@ -409,3 +409,17 @@ def test_uncertain_renewal_never_authorizes_more_dispatch(fault: CommitFault) ->
     with pytest.raises(ReplayCommitError, match="halted"):
         shell.prepare(now=1, at=AT)
     shell.close(now=1)
+
+
+@pytest.mark.regression
+async def test_executor_inspection_ignores_changed_presentation_labels() -> None:
+    shell = start(FakeStateStore())
+    (span,) = shell.prepare(now=0, at=AT)
+    fence = StoreFence(host_id="host-a", epoch=1, expires_at=100)
+    executor = FakeReplayExecutor(lambda span: ReplayResult(Reply(root=span.name), paid=True))
+    result = await executor.execute(span, fence)
+    span.name = "Updated display name"
+    assert await executor.inspect(span, fence) == result
+    assert await executor.execute(span, fence) == result
+    assert executor.invocations == (span.id,)
+    shell.close(now=0)

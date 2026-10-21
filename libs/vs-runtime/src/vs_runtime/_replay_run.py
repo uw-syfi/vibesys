@@ -8,6 +8,8 @@ from typing import TYPE_CHECKING
 
 from protobuf.wkt.google.protobuf.timestamp_pb import Timestamp
 
+from vs_runtime._replay_runtime import ReplayUnresolved
+
 if TYPE_CHECKING:
     from vs_proto.api import Span
     from vs_runtime._replay_runtime import ReplayExecutor, ReplayLaunch, ReplayResult, ReplayRuntime
@@ -125,6 +127,34 @@ class _LiveEpoch:
         )
         self.host.runtime.accept(completed.span_id, now=now, at=_at(now))
 
+    async def recover(self) -> None:
+        shell, clock = self.host.runtime, self.host.clock
+        for span in shell.recovery:
+            inspection = asyncio.create_task(
+                shell.inspect(span.id, self.host.executor, now=clock.now())
+            )
+            try:
+                while not inspection.done():
+                    sleeper = asyncio.create_task(clock.sleep(max(0, self.renew_at - clock.now())))
+                    try:
+                        await asyncio.wait(
+                            (inspection, sleeper), return_when=asyncio.FIRST_COMPLETED
+                        )
+                        if not inspection.done():
+                            shell.renew(now=clock.now(), duration=self.launch.lease_duration)
+                            self.renew_at = clock.now() + self.launch.lease_duration / 3
+                    finally:
+                        sleeper.cancel()
+                        await asyncio.gather(sleeper, return_exceptions=True)
+                result = inspection.result()
+                if not isinstance(result, ReplayUnresolved):
+                    shell.recover(span.id, result, now=clock.now(), at=_at(clock.now()))
+            finally:
+                inspection.cancel()
+                await asyncio.gather(inspection, return_exceptions=True)
+        shell.finish_recovery()
+        self.wall_origin, self.flow_origin = clock.now(), shell.archive.clock
+
     async def run(self) -> ReplayCompleted | ReplayParked:
         while True:
             self.start_frontier()
@@ -163,6 +193,7 @@ async def drive_replay(host: ReplayRunHost, launch: ReplayLaunch) -> ReplayCompl
         now = host.clock.now()
         host.runtime.start(launch, now=now, at=_at(now))
         epoch = _LiveEpoch(host, launch)
+        await epoch.recover()
         return await epoch.run()
     finally:
         try:

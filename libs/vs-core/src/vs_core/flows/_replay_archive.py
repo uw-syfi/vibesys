@@ -15,6 +15,7 @@ from vs_proto.api import (
     Record,
     ReplayStore,
     Span,
+    SpanStatus,
     validate,
 )
 from vs_proto.api import replay as pb
@@ -126,7 +127,9 @@ class ReplayArchive:
     @property
     def unresolved(self) -> tuple[Span, ...]:
         return tuple(
-            span for span in self.spans if span.replay is not None and span.replay.outcome is None
+            span
+            for span in self.spans
+            if span.replay is not None and not span.has_field("ended_at")
         )
 
     @property
@@ -248,7 +251,7 @@ class ReplayArchive:
             ):
                 problem = "replay operation changed immutable start metadata"
                 raise ReplayError(problem)
-            if previous.replay is not None and previous.replay.outcome is not None:
+            if previous.has_field("ended_at"):
                 self._presentation_update(previous, span, change)
                 self._spans[span.id] = span.to_binary()
                 return
@@ -277,6 +280,15 @@ class ReplayArchive:
                 raise ReplayError(problem)
             self._history.append(AcceptedReplay.from_record(record))
             self._observed = None
+        elif (change == Change.ENDED or span.has_field("ended_at")) and (
+            change != Change.ENDED
+            or observed is not None
+            or span.status != SpanStatus.STOPPED
+            or span.stop is None
+            or not span.stop.landed
+        ):
+            problem = "an unanswered replay start can end only with confirmed withdrawal"
+            raise ReplayError(problem)
         self._spans[span.id] = span.to_binary()
 
     def _observation(self, span: Span) -> None:
@@ -311,6 +323,7 @@ class ReplayArchive:
         if (
             current.replay != previous.replay
             or current.replay_observation != previous.replay_observation
+            or current.stop != previous.stop
             or current.status != previous.status
             or current.ended_at != previous.ended_at
         ):
