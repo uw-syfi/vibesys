@@ -28,7 +28,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from functools import lru_cache
 from pathlib import Path, PurePosixPath
-from typing import TYPE_CHECKING, Literal, NoReturn, Protocol, Self
+from typing import TYPE_CHECKING, Literal, NoReturn, Self
 
 from pydantic import (
     BaseModel,
@@ -37,6 +37,7 @@ from pydantic import (
 import vs_project._paths as project_paths
 from vs_decode.api import Unreadable, ValidationOptions, decode_json
 from vs_project._control_inbox import FileControlInbox
+from vs_project._fingerprint import _is_excluded, _update_fingerprint
 from vs_project._framework_writes import FRAMEWORK_WRITES
 from vs_project._manifests import (
     _IDENTIFIER_PATTERN,
@@ -83,20 +84,6 @@ _STATE_DIRECTORY_PATH = project_paths.STATE_DIRECTORY_PATH
 _STATE_DIRECTORY_POSIX = project_paths.STATE_DIRECTORY_POSIX
 _RUN_NAMESPACE_PART_COUNT = len(_STATE_DIRECTORY_PARTS) + 3
 _STATE_HOME_ENV = "VIBESYS_STATE_HOME"
-_EXCLUDED_NAMES = frozenset(
-    {
-        ".cache",
-        ".git",
-        ".mypy_cache",
-        ".nox",
-        ".pytest_cache",
-        ".ruff_cache",
-        ".tox",
-        "__pycache__",
-        "agent.toml",
-        "node_modules",
-    }
-)
 
 
 def is_project_state_path(relative_path: Path | str) -> bool:
@@ -842,11 +829,6 @@ class StateSlot[ModelT: BaseModel]:
     def apply(self, transition: StateTransition) -> None:
         """Validate and atomically apply a transition to this slot."""
         self._namespace.apply(self.validate_transition(transition))
-
-
-class _Digest(Protocol):
-    def update(self, data: bytes, /) -> object:
-        """Add bytes to the digest state."""
 
 
 def generate_run_id(
@@ -1973,43 +1955,6 @@ def _validate_storage_root(path: Path, parent: Path, *, name: str) -> None:
         raise ProjectStateError(message) from exc
     if not path_resolved.is_relative_to(parent_resolved):
         raise ProjectStateError.storage_root_escapes(name, parent_resolved, path, path_resolved)
-
-
-def _is_excluded(relative: Path) -> bool:
-    if relative.parts == (_CONFIG_DIRECTORY_NAME,) or relative.parts[:2] == _STATE_DIRECTORY_PARTS:
-        return True
-    for part in relative.parts:
-        if part in _EXCLUDED_NAMES or part == ".env" or part.startswith(".env."):
-            return True
-        if part.endswith((".pyc", ".pyo")):
-            return True
-    return False
-
-
-def _update_fingerprint(digest: _Digest, path: Path, relative: Path) -> None:
-    update = digest.update
-    encoded_path = relative.as_posix().encode("utf-8", "surrogateescape")
-    try:
-        metadata = path.lstat()
-        mode = metadata.st_mode
-        if stat.S_ISDIR(mode):
-            update(b"D\0" + encoded_path + b"\0")
-        elif stat.S_ISLNK(mode):
-            target = str(path.readlink()).encode("utf-8", "surrogateescape")
-            update(b"L\0" + encoded_path + b"\0" + target + b"\0")
-        elif stat.S_ISREG(mode):
-            executable = b"1" if mode & 0o111 else b"0"
-            update(b"F\0" + encoded_path + b"\0" + executable + b"\0")
-            with path.open("rb") as source:
-                while block := source.read(1024 * 1024):
-                    update(block)
-            update(b"\0")
-        else:
-            message = f"Unsupported input file type: {path}"
-            raise ProjectStateError(message)
-    except OSError as exc:
-        message = f"Could not fingerprint project input {path}: {exc}"
-        raise ProjectStateError(message) from exc
 
 
 def _atomic_write_bytes(
