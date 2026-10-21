@@ -10,7 +10,12 @@ from protobuf import Oneof
 from protobuf.wkt.google.protobuf.timestamp_pb import Timestamp
 from protovalidate import ValidationError, validate
 
-from vs_proto._generated.schema_hashes import API_SCHEMA_HASH, STORE_SCHEMA_HASH
+from vs_proto._generated.schema_hashes import (
+    API_SCHEMA_HASH,
+    RUN_LOG_MAGIC,
+    RUN_LOG_MAX_RECORD_BYTES,
+    STORE_SCHEMA_HASH,
+)
 from vs_proto._generated.vibesys.api.v1.host_pb import (
     HelloRequest,
     HelloResponse,
@@ -21,6 +26,8 @@ from vs_proto._generated.vibesys.store.v1.record_pb import EpochStarted, LegacyE
 
 __all__ = [
     "API_SCHEMA_HASH",
+    "RUN_LOG_MAGIC",
+    "RUN_LOG_MAX_RECORD_BYTES",
     "STORE_SCHEMA_HASH",
     "EpochStarted",
     "HelloRequest",
