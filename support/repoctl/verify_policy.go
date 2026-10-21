@@ -13,10 +13,93 @@ import (
 
 // Policy cases are independent expectations for the graph selected by changed paths.
 type policyCase struct {
-	Name        *string              `toml:"name"`
-	Paths       *[]string            `toml:"paths"`
-	Jobs        *[]string            `toml:"jobs"`
-	Collections *map[string][]string `toml:"collections"`
+	Name        *string                           `toml:"name"`
+	Paths       *[]string                         `toml:"paths"`
+	Jobs        *[]string                         `toml:"jobs"`
+	Collections *map[string]collectionExpectation `toml:"collections"`
+}
+
+// collectionExpectation accepts exact values or an intent resolved before verification.
+type collectionExpectation struct {
+	values       []string
+	all          bool
+	dependentsOf string
+}
+
+func (e *collectionExpectation) UnmarshalTOML(value any) error {
+	switch v := value.(type) {
+	case []any:
+		for _, item := range v {
+			text, ok := item.(string)
+			if !ok {
+				return fmt.Errorf("collection list entries must be strings")
+			}
+			e.values = append(e.values, text)
+		}
+	case string:
+		if v != "all" {
+			return fmt.Errorf("unknown collection intent %q; want all", v)
+		}
+		e.all = true
+	case map[string]any:
+		for key := range v {
+			if key != "dependents_of" {
+				return fmt.Errorf("unknown collection intent key %q", key)
+			}
+		}
+		source, ok := v["dependents_of"].(string)
+		if !ok || source == "" {
+			return fmt.Errorf("dependents_of requires a component ID")
+		}
+		e.dependentsOf = source
+	default:
+		return fmt.Errorf("collection must be a string list, all, or a dependents_of table")
+	}
+	return nil
+}
+
+func (e collectionExpectation) resolve(g graph, name string) ([]string, error) {
+	if !e.all && e.dependentsOf == "" {
+		return e.values, nil
+	}
+	if e.dependentsOf != "" {
+		if _, ok := g.Components[e.dependentsOf]; !ok {
+			return nil, fmt.Errorf("unknown dependents_of component %q", e.dependentsOf)
+		}
+		// Follow dependency edges from each component, independently of path selection.
+		reaches := map[string]bool{e.dependentsOf: true}
+		visited := map[string]bool{e.dependentsOf: true}
+		var dependsOn func(string) bool
+		dependsOn = func(id string) bool {
+			if visited[id] {
+				return reaches[id]
+			}
+			visited[id] = true
+			for _, dep := range g.Components[id].DependsOn {
+				if dependsOn(dep) {
+					reaches[id] = true
+				}
+			}
+			return reaches[id]
+		}
+		order := []string{}
+		for _, id := range g.Order {
+			if dependsOn(id) {
+				order = append(order, id)
+			}
+		}
+		g.Order = order
+	}
+	values, err := collectionValues(g, name)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]string, 0, len(values))
+	for value := range values {
+		result = append(result, value)
+	}
+	sort.Strings(result)
+	return result, nil
 }
 
 type policyCases struct {
@@ -78,10 +161,16 @@ func readPolicyCases(path string, g graph) ([]policyCase, error) {
 		if c.Collections == nil {
 			return nil, fmt.Errorf("%s: collections is required", label)
 		}
-		for name, values := range *c.Collections {
+		for name, expectation := range *c.Collections {
 			if !knownCollections[name] {
 				return nil, fmt.Errorf("%s: unknown collection %q", label, name)
 			}
+			values, err := expectation.resolve(g, name)
+			if err != nil {
+				return nil, fmt.Errorf("%s: collection %q: %w", label, name, err)
+			}
+			expectation.values = values
+			(*c.Collections)[name] = expectation
 			if err := unique(values, label+" collection "+name); err != nil {
 				return nil, err
 			}
@@ -123,12 +212,23 @@ func verifyPolicyCases(g graph, cases []policyCase) error {
 		}
 		sort.Strings(collectionNames)
 		for _, name := range collectionNames {
-			want := (*c.Collections)[name]
+			want := (*c.Collections)[name].values
 			got := p.Collections[name]
 			sortedWant := slices.Clone(want)
 			sort.Strings(sortedWant)
 			if !slices.Equal(got, sortedWant) {
-				return fmt.Errorf("case %q: collection %q = %v, want %v", *c.Name, name, got, sortedWant)
+				missing, extra := []string{}, []string{}
+				for _, value := range sortedWant {
+					if !slices.Contains(got, value) {
+						missing = append(missing, value)
+					}
+				}
+				for _, value := range got {
+					if !slices.Contains(sortedWant, value) {
+						extra = append(extra, value)
+					}
+				}
+				return fmt.Errorf("case %q: collection %q: missing %v; extra %v (got %v, want %v)", *c.Name, name, missing, extra, got, sortedWant)
 			}
 		}
 	}

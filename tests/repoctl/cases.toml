@@ -25,7 +25,7 @@ jobs = ["clients"]
 [cases.collections]
 native_languages = []
 native_targets = []
-pnpm_packages = ["@vibesys/app-desktop-main", "@vibesys/app-desktop-shell", "@vibesys/app-ui-gallery", "@vibesys/feature-gateway-records", "@vibesys/feature-new-run", "@vibesys/feature-run-chat", "@vibesys/feature-run-page", "@vibesys/feature-usage", "@vibesys/run-fixtures", "@vibesys/run-session", "@vibesys/run-state"]
+pnpm_packages = { dependents_of = "pnpm:@vibesys/run-state" }
 
 [[cases]]
 name = "evaluator SDK changes reach consumers"
@@ -41,27 +41,9 @@ name = "repoctl code and policy changes select all checks"
 paths = ["support/repoctl/main.go", ".repoctl/components.toml", ".repoctl/checks.toml"]
 jobs = ["agent_image", "evaluators", "examples", "impact", "python", "real_tiers", "stitch", "clients", "proto", "gateway"]
 [cases.collections]
-native_languages = ["go", "rust"]
-native_targets = [
-  "examples/data-structures/ordered-map",
-  "examples/data-structures/prioqueue",
-  "examples/data-structures/repositories/queue-rs",
-  "examples/data-structures/stack",
-  "examples/data-structures/unordered-map",
-  "resources/evaluators/microservice",
-  "resources/evaluators/ordered-map",
-  "resources/evaluators/ordered-map/native_runner",
-  "resources/evaluators/priority-queue",
-  "resources/evaluators/priority-queue/native_runner",
-  "resources/evaluators/queue",
-  "resources/evaluators/queue/native_runner",
-  "resources/evaluators/stack",
-  "resources/evaluators/stack/native_runner",
-  "resources/evaluators/unordered-map",
-  "resources/evaluators/unordered-map/native_runner",
-  "sdk/vs-evaluator/vseval",
-]
-pnpm_packages = ["@vibesys/app-desktop-main", "@vibesys/app-desktop-shell", "@vibesys/app-ui-gallery", "@vibesys/connection", "@vibesys/contracts", "@vibesys/feature-app-shell", "@vibesys/feature-gateway-records", "@vibesys/feature-hosts", "@vibesys/feature-machines", "@vibesys/feature-new-run", "@vibesys/feature-run-chat", "@vibesys/feature-run-control", "@vibesys/feature-run-page", "@vibesys/feature-runs-dashboard", "@vibesys/feature-settings", "@vibesys/feature-usage", "@vibesys/hosts", "@vibesys/ipc", "@vibesys/logs", "@vibesys/machine", "@vibesys/proto", "@vibesys/run-fixtures", "@vibesys/run-history", "@vibesys/run-session", "@vibesys/run-skeleton", "@vibesys/run-state", "@vibesys/runs", "@vibesys/settings", "@vibesys/store", "@vibesys/transport", "@vibesys/ui"]
+native_languages = "all"
+native_targets = "all"
+pnpm_packages = "all"
 
 [[cases]]
 name = "Stitch plugin changes run the Stitch workspace checks"
@@ -160,7 +142,7 @@ jobs = ["clients", "proto"]
 [cases.collections]
 native_languages = []
 native_targets = []
-pnpm_packages = ["@vibesys/app-desktop-main", "@vibesys/app-desktop-shell", "@vibesys/app-ui-gallery", "@vibesys/connection", "@vibesys/feature-gateway-records", "@vibesys/feature-hosts", "@vibesys/feature-machines", "@vibesys/feature-new-run", "@vibesys/feature-run-chat", "@vibesys/feature-run-control", "@vibesys/feature-run-page", "@vibesys/feature-usage", "@vibesys/proto", "@vibesys/run-fixtures", "@vibesys/run-session", "@vibesys/run-skeleton", "@vibesys/run-state"]
+pnpm_packages = { dependents_of = "pnpm:@vibesys/proto" }
 
 [[cases]]
 name = "Go gateway changes select the gateway checks"

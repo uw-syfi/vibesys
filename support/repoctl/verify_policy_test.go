@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -78,6 +79,17 @@ packages = []
 		{"unknown job", strings.Replace(base, "jobs = [\"unit\"]", "jobs = [\"missing\"]", 1), "unknown job"},
 		{"unsafe path", strings.Replace(base, "python/service/handler.py", "../outside", 1), "unsafe path"},
 		{"duplicate path", strings.Replace(base, `"python/service/handler.py"`, `"python/service/handler.py", "python/service/handler.py"`, 1), "duplicate entry"},
+		{"unknown intent", strings.Replace(base, "packages = []", `packages = "everything"`, 1), "unknown collection intent"},
+		{"unknown intent key", strings.Replace(base, "packages = []", `packages = { dependent_of = "pkg:@test/base" }`, 1), "dependent_of"},
+		{"extra intent key", strings.Replace(base, "packages = []", `packages = { dependents_of = "pkg:@test/base", extra = true }`, 1), "extra"},
+		{"unknown source", strings.Replace(base, "packages = []", `packages = { dependents_of = "pkg:missing" }`, 1), "pkg:missing"},
+		{"empty source", strings.Replace(base, "packages = []", `packages = { dependents_of = "" }`, 1), "requires a component ID"},
+		{"nonstring source", strings.Replace(base, "packages = []", `packages = { dependents_of = 1 }`, 1), "requires a component ID"},
+		{"empty intent", strings.Replace(base, "packages = []", `packages = {}`, 1), "requires a component ID"},
+		{"nonstring entry", strings.Replace(base, "packages = []", `packages = [1]`, 1), "entries must be strings"},
+		{"invalid type", strings.Replace(base, "packages = []", `packages = true`, 1), "collection must be"},
+		{"duplicate value", strings.Replace(base, "packages = []", `packages = ["a", "a"]`, 1), "duplicate entry"},
+
 		{"duplicate name", base + base, "duplicate case name"},
 	}
 	for _, tt := range tests {
@@ -122,5 +134,108 @@ packages = []
 				t.Fatalf("error = %v, want %q", err, tt.want)
 			}
 		})
+	}
+}
+
+func TestVerifyPolicyCollectionIntentsFollowGraphGrowth(t *testing.T) {
+	for _, count := range []int{0, 1, 5} {
+		for _, intent := range []string{`"all"`, `{ dependents_of = "pkg:@test/base" }`} {
+			t.Run(fmt.Sprintf("%s/%d", intent, count), func(t *testing.T) {
+				root := fixtureRepo(t)
+				previous := "@test/app"
+				for i := 0; i < count; i++ {
+					name := fmt.Sprintf("@test/consumer-%d", i)
+					writeFixtureFile(t, root, fmt.Sprintf("packages/consumer-%d/package.json", i),
+						fmt.Sprintf(`{"name":%q,"devDependencies":{%q:"workspace:*"}}`, name, previous))
+					previous = name
+				}
+				writeFixtureFile(t, root, "other/unselected/go.mod", "module example.test/unselected\n")
+				// Only the all intent includes this unrelated package.
+				writeFixtureFile(t, root, "packages/unrelated/package.json", `{"name":"@test/unrelated"}`)
+				path, jobs, native := "packages/base/src/index.ts", `["web"]`, `[]`
+				if intent == `"all"` {
+					path, jobs, native = "repoctl.toml", `["unit", "web", "native", "policy"]`, `"all"`
+				}
+				writePolicyCases(t, root, fmt.Sprintf(`[[cases]]
+name = "graph growth"
+paths = [%q]
+jobs = %s
+[cases.collections]
+native_targets = %s
+native_languages = %s
+packages = %s
+`, path, jobs, native, native, intent))
+				g, err := readPolicy(root, "repoctl.toml")
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := runVerifyPolicy(root, g, []string{"--cases", "policy-cases.toml"}); err != nil {
+					t.Fatal(err)
+				}
+			})
+		}
+	}
+}
+
+func TestVerifyPolicyCollectionIntentsDetectDrift(t *testing.T) {
+	for _, tt := range []struct{ name, intent, path, jobs, native, want string }{
+		{"all misses package", `"all"`, "packages/base/index.ts", `["web"]`, `[]`, "missing [@test/unrelated]"},
+		{"dependents misses source", `{ dependents_of = "pkg:@test/base" }`, "packages/app/index.ts", `["web"]`, `[]`, "missing [@test/base]"},
+		{"dependents extra package", `{ dependents_of = "pkg:@test/base" }`, "repoctl.toml", `["unit", "web", "native", "policy"]`, `"all"`, "extra [@test/unrelated]"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			root := fixtureRepo(t)
+			writeFixtureFile(t, root, "packages/unrelated/package.json", `{"name":"@test/unrelated"}`)
+			g, err := readPolicy(root, "repoctl.toml")
+			if err != nil {
+				t.Fatal(err)
+			}
+			writePolicyCases(t, root, fmt.Sprintf(`[[cases]]
+name = "drift"
+paths = [%q]
+jobs = %s
+[cases.collections]
+native_targets = %s
+native_languages = %s
+packages = %s
+`, tt.path, tt.jobs, tt.native, tt.native, tt.intent))
+			err = runVerifyPolicy(root, g, []string{"--cases", "policy-cases.toml"})
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestVerifyPolicyDependentsProjectAcrossClasses(t *testing.T) {
+	root := fixtureRepo(t)
+	policyPath := filepath.Join(root, "repoctl.toml")
+	policy, err := os.ReadFile(policyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy = append(policy, []byte(`
+[[edges]]
+from = "protocol"
+to = "pkg:@test/base"
+`)...)
+	if err := os.WriteFile(policyPath, policy, 0600); err != nil {
+		t.Fatal(err)
+	}
+	g, err := readPolicy(root, "repoctl.toml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	writePolicyCases(t, root, `[[cases]]
+name = "project non-package source"
+paths = ["shared/protocol.txt"]
+jobs = ["web"]
+[cases.collections]
+native_targets = { dependents_of = "protocol" }
+native_languages = []
+packages = { dependents_of = "protocol" }
+`)
+	if err := runVerifyPolicy(root, g, []string{"--cases", "policy-cases.toml"}); err != nil {
+		t.Fatal(err)
 	}
 }
