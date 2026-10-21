@@ -1,0 +1,13 @@
+syntax = "proto3";
+package vibesys.core.testing.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// Exercised by the real plugin and protobuf-py, without a subprocess in the test.
+message MapValue {
+  map<string, int64> counts = 1;
+  repeated string labels = 2;
+  google.protobuf.Timestamp at = 3;
+  repeated google.protobuf.Timestamp history = 4;
+  map<string, google.protobuf.Timestamp> marked = 5;
+}

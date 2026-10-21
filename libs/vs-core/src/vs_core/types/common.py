@@ -15,10 +15,169 @@ from pydantic import (
     model_validator,
 )
 
+from vs_core._generated.vibesys.core.v1.common_cv import (
+    IDENTITY_PATTERN,
+    ArtifactId,
+    ArtifactRef,
+    AttemptId,
+    ChargeId,
+    ContinuationId,
+    ControlAction,
+    ControlId,
+    DecisionId,
+    EventId,
+    EvidenceId,
+    HostId,
+    Identity,
+    InputId,
+    InputMode,
+    InvocationId,
+    InvocationRef,
+    ItemId,
+    OperationId,
+    PauseOwner,
+    PoolId,
+    RequestId,
+    ResourceId,
+    ResumeWhen,
+    RevisionId,
+    RoleId,
+    RunId,
+    RunStatus,
+    SchemaRef,
+    Scope,
+    SessionId,
+    SettlementId,
+    StopMode,
+    StrategyId,
+)
+from vs_core._generated.vibesys.core.v1.control_cv import (
+    MAX_REQUEST_RETRIES,
+    ControlInput,
+    InputTarget,
+    InvocationInputTarget,
+    ItemInputTarget,
+    Limits,
+    PoolCapacity,
+    RequestRetries,
+    RoleInputTarget,
+    RunPause,
+    ScopeInputTarget,
+)
 from vs_core._values import deeply_immutable, emit_fragment
 
 if TYPE_CHECKING:
     from pydantic import SerializationInfo
+
+
+__all__ = [
+    "IDENTITY_PATTERN",
+    "MAX_CORRECTIONS",
+    "MAX_LOST_TURNS",
+    "MAX_REASK_CHAIN",
+    "MAX_REQUEST_RETRIES",
+    "MAX_SUBMISSIONS_PER_MEASUREMENT",
+    "RETRYABLE_FAILURES",
+    "THIS_RUN",
+    "Area",
+    "ArtifactId",
+    "ArtifactRef",
+    "AssessmentKind",
+    "AttemptId",
+    "AttemptRef",
+    "Capabilities",
+    "ChargeId",
+    "ChargeKind",
+    "ChargeReceipt",
+    "CheckpointDecline",
+    "ChildManifest",
+    "CompletionStatus",
+    "ContinuationId",
+    "ContractValidationError",
+    "ControlAction",
+    "ControlId",
+    "ControlInput",
+    "Count",
+    "DecisionId",
+    "DependencyRef",
+    "DependencyStatus",
+    "DigestScheme",
+    "EventCursor",
+    "EventId",
+    "EvidenceId",
+    "EvidenceKey",
+    "EvidenceKind",
+    "ExecuteRegisteredOperation",
+    "Generation",
+    "HostFence",
+    "HostId",
+    "Identity",
+    "IdentityTypeError",
+    "InputId",
+    "InputMode",
+    "InputTarget",
+    "InvocationId",
+    "InvocationInputTarget",
+    "InvocationRef",
+    "ItemId",
+    "ItemInputTarget",
+    "KernelNotImplementedError",
+    "LifecycleCapability",
+    "LifecycleClass",
+    "Limits",
+    "Observation",
+    "ObservationStatus",
+    "OperationDescriptor",
+    "OperationDescriptorError",
+    "OperationId",
+    "OperationNormalizationKind",
+    "OperationRef",
+    "OperationSchemaRef",
+    "OperationWire",
+    "PauseOwner",
+    "PoolCapacity",
+    "PoolId",
+    "PureOption",
+    "RejectionCode",
+    "ReleaseDependency",
+    "RequestBase",
+    "RequestId",
+    "RequestRetries",
+    "ReservedInputOccurrence",
+    "ResourceId",
+    "ResumeWhen",
+    "RevisionAuthority",
+    "RevisionId",
+    "RevisionNumber",
+    "RevisionRef",
+    "RoleId",
+    "RoleInputTarget",
+    "RunFacts",
+    "RunId",
+    "RunPause",
+    "RunStatus",
+    "SchemaRef",
+    "Scope",
+    "ScopeInputTarget",
+    "ScopeReopenNormalization",
+    "Seconds",
+    "SessionId",
+    "SettlementId",
+    "SetupFailureKind",
+    "SignalCycleError",
+    "StopMode",
+    "StrategyId",
+    "TaskObjective",
+    "TaskStage",
+    "TaskTerms",
+    "TurnFailureKind",
+    "Value",
+    "WorkspaceMode",
+    "WorkspaceRef",
+    "escalate_stop",
+    "unset",
+    "validate_setup_failure",
+]
 
 
 class CheckpointDecline(StrEnum):
@@ -121,84 +280,6 @@ type LifecycleCapability = Literal["park", "interrupt", "steer", "suspend", "pro
 """Host-offered lifecycle abilities. "profile-capture" admits profile measurements."""
 
 
-IDENTITY_PATTERN = r"^\S+$"
-"""What every core identity's text matches: no whitespace. Requests that name one check it."""
-
-
-class Identity(Value):
-    """Canonical tagged identity; domains survive JSON union round trips."""
-
-    root: Annotated[str, Field(min_length=1, pattern=IDENTITY_PATTERN)]
-
-    @model_validator(mode="before")
-    @classmethod
-    def distinct(cls, value: object) -> object:
-        """Reject a different identity type in Python and tagged JSON."""
-        if isinstance(value, Identity) and type(value) is not cls:
-            raise IdentityTypeError
-        return value
-
-
-class RunId(Identity):
-    """Distinct run identity."""
-
-    kind: Literal["run"] = "run"
-
-
-class AttemptId(Identity):
-    """Distinct attempt identity."""
-
-    kind: Literal["attempt"] = "attempt"
-
-
-class ItemId(Identity):
-    """Distinct item identity."""
-
-    kind: Literal["item"] = "item"
-
-
-class SessionId(Identity):
-    """Distinct session identity."""
-
-    kind: Literal["session"] = "session"
-
-
-class InvocationId(Identity):
-    """Distinct invocation identity."""
-
-    kind: Literal["invocation"] = "invocation"
-
-
-class ContinuationId(Identity):
-    """Distinct continuation identity."""
-
-    kind: Literal["continuation"] = "continuation"
-
-
-class InputId(Identity):
-    """Identity of one input occurrence, independent of content digest."""
-
-    kind: Literal["input"] = "input"
-
-
-class EvidenceId(Identity):
-    """Distinct evidence identity."""
-
-    kind: Literal["evidence"] = "evidence"
-
-
-class DecisionId(Identity):
-    """Distinct decision identity."""
-
-    kind: Literal["decision"] = "decision"
-
-
-class RequestId(Identity):
-    """Distinct request identity."""
-
-    kind: Literal["request"] = "request"
-
-
 class EvidenceKey(Value):
     """Full identity of one evidence record: the request that produced it plus its ID.
 
@@ -210,89 +291,6 @@ class EvidenceKey(Value):
     kind: Literal["evidence_key"] = "evidence_key"
     source_request: RequestId
     evidence_id: EvidenceId
-
-
-class EventId(Identity):
-    """Distinct event identity."""
-
-    kind: Literal["event"] = "event"
-
-
-class SettlementId(Identity):
-    """Distinct settlement identity."""
-
-    kind: Literal["settlement"] = "settlement"
-
-
-class StrategyId(Identity):
-    """Distinct strategy identity."""
-
-    kind: Literal["strategy"] = "strategy"
-
-
-class OperationId(Identity):
-    """Distinct operation identity."""
-
-    kind: Literal["operation"] = "operation"
-
-
-class ArtifactId(Identity):
-    """Distinct artifact identity."""
-
-    kind: Literal["artifact"] = "artifact"
-
-
-class ResourceId(Identity):
-    """Distinct lease episode, never a reusable raw physical backend identity.
-
-    The owning library's normalization episode-qualifies reused physical IDs;
-    conflicting scope or admission claims cannot reuse one core ResourceId.
-    """
-
-    kind: Literal["resource"] = "resource"
-
-
-class RevisionId(Identity):
-    """Distinct revision identity."""
-
-    kind: Literal["revision"] = "revision"
-
-
-class RoleId(Identity):
-    """Distinct role identity."""
-
-    kind: Literal["role"] = "role"
-
-
-class PoolId(Identity):
-    """Distinct pool identity."""
-
-    kind: Literal["pool"] = "pool"
-
-
-class ChargeId(Identity):
-    """Distinct charge identity."""
-
-    kind: Literal["charge"] = "charge"
-
-
-class ControlId(Identity):
-    """Distinct control identity."""
-
-    kind: Literal["control"] = "control"
-
-
-class HostId(Identity):
-    """Distinct host identity."""
-
-    kind: Literal["host"] = "host"
-
-
-class SchemaRef(Value):
-    """Schema ref lifecycle contract."""
-
-    name: str = Field(min_length=1)
-    version: int = Field(ge=1)
 
 
 class DigestScheme(StrEnum):
@@ -332,21 +330,6 @@ class RevisionRef(Value):
         return commit if commit and commit == self.revision_id.root else None
 
 
-class ArtifactRef(Value):
-    """Artifact ref lifecycle contract."""
-
-    artifact_id: ArtifactId
-    digest: str = Field(min_length=1)
-    schema_ref: SchemaRef | None = None
-
-
-class Scope(Value):
-    """Scope lifecycle contract."""
-
-    owner: Annotated[RunId | AttemptId, Field(discriminator="kind")]
-    generation: Generation
-
-
 THIS_RUN = Scope(owner=RunId(root="this-run"), generation=0)
 """The scope a search names for work the run itself owns. Core replaces it with the run's own."""
 
@@ -355,14 +338,6 @@ class AttemptRef(Value):
     """Attempt ref lifecycle contract."""
 
     attempt_id: AttemptId
-    generation: Generation
-
-
-class InvocationRef(Value):
-    """Invocation ref lifecycle contract."""
-
-    session_id: SessionId
-    invocation_id: InvocationId
     generation: Generation
 
 
@@ -421,16 +396,6 @@ RETRYABLE_FAILURES = frozenset(
     {ObservationStatus.FAILED, ObservationStatus.REJECTED, ObservationStatus.CANCELLED}
 )
 """Statuses that, on a non-terminal observation, say the executor did not run the request."""
-
-
-class RunStatus(StrEnum):
-    """Run status lifecycle contract."""
-
-    RUNNING = "running"
-    PAUSED = "paused"
-    CLOSING = "closing"
-    TERMINAL = "terminal"
-    BLOCKED = "blocked"
 
 
 class RejectionCode(StrEnum):
@@ -599,20 +564,6 @@ class Capabilities(Value):
         return sorted(value)
 
 
-class PoolCapacity(Value):
-    """Scheduling-owned bound for one named capacity pool.
-
-    Unconfigured pools retain exclusive capacity one. Global max_parallel is
-    always an additional bound; a pool capacity never grants unbounded slots.
-    """
-
-    pool_id: PoolId
-    capacity: int = Field(ge=1)
-
-
-# Hard caps no declaration can lift. A backend declares its own bounds below these; core
-# refuses a declaration above them and enforces them whatever a declaration says.
-MAX_REQUEST_RETRIES = 10
 MAX_SUBMISSIONS_PER_MEASUREMENT = 5
 MAX_CORRECTIONS = 5
 """The most corrections of one reply any role may ask for."""
@@ -623,82 +574,6 @@ MAX_REASK_CHAIN = MAX_CORRECTIONS + MAX_LOST_TURNS
 
 A re-ask after a turn lost to its provider (``PROVIDER_UNAVAILABLE``) is no link of the chain:
 the run's capacity gate bounds an outage, by its budget and the pause that follows it."""
-
-
-class RequestRetries(Value):
-    """How core re-sends a request its executor said it did not run. Declared by the backend.
-
-    ``limit`` re-sends follow the first attempt, the n-th after ``backoff * 2**(n-1)`` seconds
-    of core time, never more than ``backoff_cap``. Core holds no default for any field and
-    refuses a ``limit`` above ``MAX_REQUEST_RETRIES``.
-    """
-
-    limit: Count
-    backoff: Seconds = Field(gt=0)
-    backoff_cap: Seconds = Field(gt=0)
-
-    @model_validator(mode="after")
-    def within_hard_cap(self) -> RequestRetries:
-        """Reject a limit above the hard cap and a cap below the first wait."""
-        if self.limit > MAX_REQUEST_RETRIES:
-            raise ContractValidationError("limit", f"above the hard cap {MAX_REQUEST_RETRIES}")
-        if self.backoff_cap < self.backoff:
-            raise ContractValidationError("backoff_cap", "below backoff")
-        return self
-
-    def delay(self, retries: int) -> float:
-        """Core seconds to wait before attempt number ``retries + 1``: doubling, capped."""
-        return min(self.backoff * 2 ** max(retries - 1, 0), self.backoff_cap)
-
-
-class Limits(Value):
-    """Run bounds; every field is explicit, one field per meaning, no default.
-
-    Budget (the run's own): ``max_attempts``, ``max_turns``, ``max_parallel``,
-    ``pool_capacities``, ``max_refunds`` and ``max_adoption_rounds``. How often a reply is corrected or a lost turn
-    asked again is the role's (`Role.corrections`, `Role.lost_turns`); core keeps only
-    `MAX_REASK_CHAIN`.
-    Declared by the backend and applied by core: ``request_retries``. Core's own bounds on its
-    waits and cleanup: the remaining ``*_bound`` and ``observe_*`` fields.
-    """
-
-    max_attempts: Count
-    max_turns: Count
-    max_parallel: int = Field(ge=1)
-    pool_capacities: tuple[PoolCapacity, ...]
-    max_refunds: Count
-    max_adoption_rounds: int = Field(ge=1)
-    """AdoptRevision rounds per selection, the first included."""
-    request_retries: RequestRetries
-    cancellation_bound: Seconds
-    # The least time core gives its own cleanup and inspection requests, even once the run
-    # deadline has passed (see `cleanup` in `_deadlines`).
-    cleanup_bound: Seconds = Field(gt=0)
-    reconciliation_bound: Seconds
-    # Poll cadence for a submitted measurement job, and the cap of the doubling
-    # delay before re-polling a job whose last poll was unknown.
-    observe_interval: Seconds = Field(gt=0)
-    observe_backoff_cap: Seconds = Field(gt=0)
-    # How long one measurement's job may wait in its executor's queue before core ends the
-    # measurement with ``QUEUE_BUDGET_SPENT``, and how often core reports a job still
-    # queued (``JobQueued``). Queue time does not count against a measurement's own limit.
-    queue_wait_budget: Seconds = Field(gt=0)
-    queue_notice_interval: Seconds = Field(gt=0)
-
-    @model_validator(mode="after")
-    def observe_cap_covers_interval(self) -> Limits:
-        """A backoff cap below the base interval would shorten retries below the cadence."""
-        if self.observe_backoff_cap < self.observe_interval:
-            raise ContractValidationError("observe_backoff_cap", "below observe_interval")
-        return self
-
-    @model_validator(mode="after")
-    def distinct_pool_capacities(self) -> Limits:
-        """Reject contradictory capacity declarations for the same pool."""
-        identities = tuple(pool.pool_id for pool in self.pool_capacities)
-        if len(set(identities)) != len(identities):
-            raise ContractValidationError("pool_capacities", "duplicate pool_id")
-        return self
 
 
 class PureOption(Value):
@@ -810,13 +685,6 @@ class RunFacts(Value):
     """What the task fixes; a search that measures candidates reads it with ``ctx.task``."""
 
 
-class StopMode(StrEnum):
-    """How a stop treats work in flight: let it finish, or cancel it."""
-
-    DRAIN = "drain"
-    CANCEL = "cancel"
-
-
 def escalate_stop(held: StopMode | None, asked: StopMode) -> StopMode:
     """The stop in force once ``asked`` arrives while ``held`` is: a stop only escalates.
 
@@ -827,180 +695,10 @@ def escalate_stop(held: StopMode | None, asked: StopMode) -> StopMode:
     return StopMode.CANCEL if StopMode.CANCEL in (held, asked) else StopMode.DRAIN
 
 
-class PauseOwner(StrEnum):
-    """Who paused the run, which decides what may end the pause."""
-
-    OPERATOR = "operator"
-    """The operator holds the run: only the operator's resume ends the hold."""
-    QUOTA = "quota"
-    """A provider quota stop paused the run: the turns that stopped own the pause."""
-
-
-ResumeWhen = Literal["now", "capacity_returns"]
-"""Resume at once, or once provider capacity should be back."""
-
-
-class RunPause(Value):
-    """Why a paused run is paused, and whether the operator asked it to resume itself."""
-
-    owner: PauseOwner
-    capacity_wait: bool = False
-    """The operator asked the run to resume itself once provider capacity returns."""
-
-
-class ScopeInputTarget(Value):
-    """Input for a scope, permitted before any invocation exists."""
-
-    kind: Literal["scope"] = "scope"
-    scope: Scope
-
-
-class ItemInputTarget(Value):
-    """Input for an item, permitted before any invocation exists."""
-
-    kind: Literal["item"] = "item"
-    item_id: ItemId
-
-
-class InvocationInputTarget(Value):
-    """Input for one exact invocation, never silently retargeted."""
-
-    kind: Literal["invocation"] = "invocation"
-    invocation: InvocationRef
-
-
-class RoleInputTarget(Value):
-    """Input for the next session turn of one role the search declares.
-
-    The role is the session's ``role_id``; core rejects a role its search does not declare.
-    """
-
-    kind: Literal["role"] = "role"
-    role_id: RoleId
-
-
-type InputTarget = Annotated[
-    ScopeInputTarget | ItemInputTarget | InvocationInputTarget | RoleInputTarget,
-    Field(discriminator="kind"),
-]
-
-
-class InputMode(StrEnum):
-    """How an input reaches the turns of its target; interrupt metadata grants no refund authority.
-
-    ``NEXT_TURN`` is reserved by the first matching turn and delivered to it once.
-    ``INTERRUPT`` is first offered to a matching session turn that is running, and joins it
-    when the provider takes it; otherwise, or once the provider takes it back, the next
-    matching turn reserves it as a next-turn input. Delivery is at least once: an offer a
-    crash leaves unresolved is offered again, and may reach the turn twice.
-    ``STANDING`` is never reserved: every matching session turn dispatched while it is in force
-    receives it, until it is withdrawn or its target ends.
-    """
-
-    NEXT_TURN = "next-turn"
-    INTERRUPT = "interrupt"
-    STANDING = "standing"
-
-
-type ControlAction = Literal[
-    "pause",
-    "resume",
-    "stop",
-    "steer",
-    "withdraw",
-    "cancel_attempt",
-    "cancel_item",
-    "set_max_parallel",
-]
-"""What a control does: run controls, steering, and the operator actions on core entities."""
-
 OPERATOR_ACTIONS: frozenset[ControlAction] = frozenset(
     {"cancel_attempt", "cancel_item", "set_max_parallel"}
 )
 """The typed operator actions on core entities, which core applies alike in every search."""
-
-
-class ControlInput(Value):
-    """Control input lifecycle contract."""
-
-    control_id: ControlId
-    action: ControlAction
-    mode: StopMode | None = None
-    """Drain or cancel what is in flight: the operator's choice, given with every stop."""
-    artifact: ArtifactRef | None = None
-    """A steer's text, or the notice an operator action leaves for the run's agents.
-
-    Given with every steer and every operator action, and only with them."""
-    target: InputTarget | None = None
-    """Whom a steer is for; None is the whole run. Only a steer has a target."""
-    input_mode: InputMode | None = None
-    """How a steer reaches its target's turns; None is the next turn. Only a steer has one."""
-    withdraws: InputId | None = None
-    """The standing input a withdraw ends. Exactly a withdraw names one."""
-    owner: PauseOwner | None = None
-    """Who paused the run: given with every pause, and only with a pause."""
-    when: ResumeWhen | None = None
-    """When a resume takes effect: given with every resume, and only with a resume."""
-    fallback: bool = False
-    """A resume that switches the stopped turns to the quota fallback; only an immediate one."""
-    capacity_wait_stands: bool = False
-    """An immediate resume that keeps the operator's wait for capacity for the next quota stop.
-
-    A restart resumes a quota pause, since its turns did not survive, but the operator's
-    request to wait for capacity still holds for the next turn that stops on the limit."""
-    attempt: AttemptId | None = None
-    """The attempt a ``cancel_attempt`` cancels: given with it, and only with it."""
-    item: ItemId | None = None
-    """The work item a ``cancel_item`` cancels: given with it, and only with it."""
-    max_parallel: int | None = Field(default=None, ge=1)
-    """The parallel limit a ``set_max_parallel`` sets: given with it, and only with it."""
-
-    @model_validator(mode="after")
-    def action_fields(self) -> ControlInput:
-        """Each operator action names exactly its subject, and leaves a notice."""
-        named = {
-            "cancel_attempt": ("attempt", self.attempt),
-            "cancel_item": ("item", self.item),
-            "set_max_parallel": ("max_parallel", self.max_parallel),
-        }
-        for action, (key, value) in named.items():
-            if (self.action == action) != (value is not None):
-                raise ContractValidationError(key, f"required for {action} and only for it")
-        tells = self.action == "steer" or self.action in OPERATOR_ACTIONS
-        if self.action in OPERATOR_ACTIONS and self.artifact is None:
-            raise ContractValidationError("artifact", "an operator action leaves a notice")
-        if self.artifact is not None and not tells:
-            raise ContractValidationError("artifact", "only a steer or an operator action has one")
-        return self
-
-    @model_validator(mode="after")
-    def mode_belongs_to_stop(self) -> ControlInput:
-        """Each action carries exactly the fields that say what it does; nothing else."""
-        if (self.action == "stop") != (self.mode is not None):
-            raise ContractValidationError("mode", "required for stop and only for stop")
-        if self.target is not None and self.action != "steer":
-            raise ContractValidationError("target", "only a steer has a target")
-        if self.input_mode is not None and self.action != "steer":
-            raise ContractValidationError("input_mode", "only a steer has an input mode")
-        if self.input_mode in (InputMode.STANDING, InputMode.INTERRUPT) and isinstance(
-            self.target, InvocationInputTarget
-        ):
-            raise ContractValidationError(
-                "input_mode", f"{self.input_mode.value} input is for a run, role, attempt or item"
-            )
-        if (self.action == "withdraw") != (self.withdraws is not None):
-            raise ContractValidationError("withdraws", "required for withdraw and only for it")
-        if (self.action == "pause") != (self.owner is not None):
-            raise ContractValidationError("owner", "required for pause and only for pause")
-        if (self.action == "resume") != (self.when is not None):
-            raise ContractValidationError("when", "required for resume and only for resume")
-        if (self.fallback or self.capacity_wait_stands) and self.when != "now":
-            raise ContractValidationError("when", "only an immediate resume switches or keeps")
-        if self.fallback and self.capacity_wait_stands:
-            raise ContractValidationError(
-                "capacity_wait_stands", "a resume switching to the fallback ends the wait"
-            )
-        return self
 
 
 class CompletionStatus(StrEnum):
