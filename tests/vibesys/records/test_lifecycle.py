@@ -94,6 +94,10 @@ def test_native_lifecycle_agrees_with_legacy_status_over_event_sequences(
         assert lifecycle is not None
         if observation.type not in {e.CoreEventType.RUN_FINISHED, e.CoreEventType.RUN_FAILED}:
             assert lifecycle.field == "running"
+            assert isinstance(lifecycle.value, p.Running)
+            assert (lifecycle.value.hold is not None) is (
+                legacy.status in {RunStatus.PAUSING, RunStatus.PAUSED}
+            )
             assert not legacy.status.has_ended
     assert fold.terminal is not None
     assert lifecycle is not None
