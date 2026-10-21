@@ -90,7 +90,7 @@ def test_conversion_preserves_source_and_timestamps_and_is_idempotent(
     assert keyframe.log_offset == len(converted)
     with destination.open("rb") as stream:
         records = list(RunLogReader(stream))
-    assert [record.seq for record in records] == [1, 2, 3]
+    assert [record.seq for record in records] == [1, 2, 3, 4, 5]
     assert records[0].body is not None
     assert records[0].body.field == "epoch_started"
     assert all(
@@ -99,6 +99,8 @@ def test_conversion_preserves_source_and_timestamps_and_is_idempotent(
     )
     assert [record.body.field for record in records if record.body is not None] == [
         "epoch_started",
+        "lifecycle",
+        "span",
         "span",
         "lifecycle",
     ]

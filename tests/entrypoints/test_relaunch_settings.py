@@ -9,9 +9,15 @@ from tests.support.task_project import write_task
 from entrypoints.cli import build_run_request, parse_cli_invocation
 from entrypoints.server import main as server_main
 from vibesys.api import ConfigurationError
+from vibesys.api.host import host_call
+from vibesys.events import CoreEventType, RunStartedData
 from vibesys.orchestration.dynamic.launch import DynamicLaunch
+from vibesys.run import EventJournal
 from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord
 from vs_project.api.testing import run_execution_record
+from vs_proto.api import HostCallRequest, HostCallResponse, Oneof, RelaunchRequest, RelaunchResponse
+from vs_sim.api import ProcessSpec
+from vs_sim.api.testing import FakeProcesses, ManualClock, ProcessScript, SimThreads
 
 _RUN = "20261021-170000-11111111-dynamic"
 
@@ -100,3 +106,58 @@ def test_detached_relaunch_validates_saved_settings_before_spawning(
     output = capsys.readouterr()
     assert "agent_backend" in output.err
     assert "unrecognized arguments" not in output.err
+
+
+@pytest.mark.regression
+def test_host_call_relaunch_uses_saved_settings_through_the_detached_cli(tmp_path: Path) -> None:
+    root = saved_project(tmp_path / "project")
+    project = Project.open(root)
+    checkout = tmp_path / "checkout"
+    executable = checkout / ".venv" / "bin" / "vibesys"
+    executable.parent.mkdir(parents=True)
+    executable.touch()
+    clock = ManualClock()
+    threads = SimThreads()
+
+    def epoch() -> None:
+        journal = EventJournal(clock, threads)
+        try:
+            journal.enable_runlog(project, _RUN)
+            journal.attach(Project.log_directory_for(root, _RUN), _RUN)
+            journal.emit(
+                CoreEventType.RUN_STARTED, data=RunStartedData(outer_loop="dynamic", input="input")
+            )
+            journal.emit(CoreEventType.STOPPED)
+        finally:
+            journal.close()
+
+    epoch()
+
+    def launch(spec: ProcessSpec) -> ProcessScript:
+        assert spec.argv[0] == str(executable)
+        assert "--detach" in spec.argv
+        invocation = parse_cli_invocation(
+            [argument for argument in spec.argv[1:] if argument != "--detach"]
+        )
+        assert invocation.loop_kind == "dynamic"
+        assert invocation.args.agent_backend == "scripted"
+        assert invocation.args.max_rounds == 17
+        epoch()
+        return ProcessScript()
+
+    processes = FakeProcesses(launch, pass_time=threads.sleep)
+    request = HostCallRequest(
+        checkout=str(checkout),
+        method=Oneof(
+            "relaunch",
+            RelaunchRequest(
+                project_root=str(root),
+                run_id=_RUN,
+                expected_epoch=1,
+            ),
+        ),
+    )
+    response = HostCallResponse.from_binary(
+        host_call(request.to_binary(), processes=processes, threads=threads)
+    )
+    assert response.result == Oneof("relaunch", RelaunchResponse(outcome=Oneof("epoch", 2)))
