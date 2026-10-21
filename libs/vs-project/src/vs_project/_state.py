@@ -606,9 +606,17 @@ class StateNamespace:
         """Return an ordered immutable snapshot of this portable namespace."""
         if not self._portable:
             raise ProjectStateError.local_state_cannot_snapshot()
+        return StateSnapshot._create(self._namespace_root, self.documents())  # noqa: SLF001  # lint-waiver: LW-008222 [SLF001]; same-module state code keeps opaque storage private instead of exposing representation accessors.
+
+    def documents(self) -> tuple[StateFile, ...]:
+        """Read every namespace file by relative path, including local retained receipts.
+
+        Unlike a portable snapshot, this grants no authority to commit local files.
+        Symlinks and special files fail before any contents are returned.
+        """
         root = self._validated_root()
         if not root.exists():
-            return StateSnapshot._create(self._namespace_root, ())  # noqa: SLF001  # lint-waiver: LW-008221 [SLF001]; same-module state code keeps opaque storage private instead of exposing representation accessors.
+            return ()
 
         files: list[StateFile] = []
         try:
@@ -629,7 +637,7 @@ class StateNamespace:
                 )
         except OSError as exc:
             raise ProjectStateError.namespace_snapshot_failed(self._kind, root, exc) from exc
-        return StateSnapshot._create(self._namespace_root, tuple(files))  # noqa: SLF001  # lint-waiver: LW-008222 [SLF001]; same-module state code keeps opaque storage private instead of exposing representation accessors.
+        return tuple(files)
 
     def agent_visible_path(self, relative_path: str | PurePosixPath | None = None) -> str:
         """Return a safe project-relative location for an agent-facing prompt.

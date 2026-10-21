@@ -269,3 +269,21 @@ jobs = ["proto", "python"]
 native_languages = []
 native_targets = []
 pnpm_packages = []
+
+[[cases]]
+name = "facts importer selects Python verification"
+paths = ["src/vibesys/fact_import/api.py", "src/vibesys/api/importing.py", "libs/vs-project/src/vs_project/api/retained.py", "libs/vs-runtime/src/vs_runtime/api/retained.py"]
+jobs = ["python"]
+[cases.collections]
+native_languages = []
+native_targets = []
+pnpm_packages = []
+
+[[cases]]
+name = "shared imported facts select proto verification"
+paths = ["proto/vibesys/core/v1/imported_facts.proto"]
+jobs = ["proto"]
+[cases.collections]
+native_languages = []
+native_targets = []
+pnpm_packages = []

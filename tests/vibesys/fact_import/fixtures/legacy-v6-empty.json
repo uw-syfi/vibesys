@@ -1,0 +1,22 @@
+{
+  "schema_version": 6,
+  "experiment_revision": 0,
+  "next_planning_call": 1,
+  "search": {
+    "schema_version": 1,
+    "experiment_revision": 0,
+    "active_hypothesis_id": null,
+    "metrics": {
+      "objectives": [],
+      "relative_noise": 0.0
+    },
+    "hypotheses": [],
+    "profile_guidance": null
+  },
+  "workstreams": [],
+  "profiles": [],
+  "baseline": null,
+  "input_measurement": null,
+  "winner_revision": null,
+  "adoption_pending": false
+}

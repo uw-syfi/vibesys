@@ -1,0 +1,267 @@
+{
+  "schema_version": 9,
+  "lifecycle": {
+    "intents": {
+      "yielded": {
+        "operation_id": "yielded",
+        "scope_id": "kept",
+        "generation": 1,
+        "kind": "turn",
+        "stage": "completed",
+        "resume_revision": null,
+        "invocation_id": "yielded",
+        "continuation_id": null,
+        "evaluation_index": null,
+        "terminal_failure": null
+      },
+      "wait/observe": {
+        "operation_id": "wait/observe",
+        "scope_id": "kept",
+        "generation": 1,
+        "kind": "observe_evaluations",
+        "stage": "prepared",
+        "resume_revision": null,
+        "invocation_id": null,
+        "continuation_id": "wait",
+        "evaluation_index": null,
+        "terminal_failure": null
+      }
+    },
+    "continuations": {
+      "wait": {
+        "continuation_id": "wait",
+        "scope_id": "kept",
+        "generation": 1,
+        "role": "implementer",
+        "session_key": "session",
+        "yielded_invocation_id": "yielded",
+        "retained_revision": "retained",
+        "original_stage": "implementing",
+        "evaluation_scope_id": "workspace",
+        "evaluation_generation": 0,
+        "dependencies": [
+          {
+            "handle": "saved-evaluation-a",
+            "scope_id": "workspace",
+            "generation": 0,
+            "candidate_revision": "candidate-saved-evaluation-a",
+            "candidate_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "evaluator_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "workload_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            "environment_digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+          },
+          {
+            "handle": "saved-evaluation-b",
+            "scope_id": "workspace",
+            "generation": 0,
+            "candidate_revision": "candidate-saved-evaluation-b",
+            "candidate_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "evaluator_digest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "workload_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            "environment_digest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+          }
+        ],
+        "deadline_at_s": 1000.0,
+        "timed_out": null,
+        "progress": {},
+        "settlements": {},
+        "evidence_ids": {},
+        "status": "active",
+        "park_operation_id": null
+      }
+    },
+    "stopped": false
+  },
+  "agent": {
+    "generation": 1,
+    "turns": 0,
+    "expectations": {},
+    "queue": [],
+    "steers": {
+      "kept": []
+    },
+    "journal": [],
+    "next_check_in_s": null,
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "capabilities_withdrawn": [],
+    "finished": null
+  },
+  "experiment_revision": 10,
+  "next_planning_call": 2,
+  "search": {
+    "schema_version": 1,
+    "experiment_revision": 3,
+    "active_hypothesis_id": null,
+    "metrics": {
+      "objectives": [
+        {
+          "name": "throughput",
+          "direction": "max"
+        }
+      ],
+      "relative_noise": 0.0
+    },
+    "hypotheses": [
+      {
+        "hypothesis_id": "kept",
+        "plan": {
+          "hypothesis_id": "kept",
+          "hypothesis_updates": [],
+          "hypothesis": "Mechanism kept limits the objective.",
+          "title": "Investigate kept",
+          "activation_evidence": "",
+          "falsification_criteria": "",
+          "expected_effect": "",
+          "minimum_acceptance_criteria": "",
+          "invariants": "",
+          "recommended_skills": [],
+          "task": "Implement and verify kept.",
+          "pass_criteria": "The change is correct and measurably improves the objective.",
+          "request_official_evaluation": false,
+          "revert_to_round": null,
+          "reasoning": "Explore independent limiting mechanisms."
+        },
+        "started_round": 1,
+        "parent_round": null,
+        "parent_commit": "fake-revision-1",
+        "rounds": [],
+        "feedback": null,
+        "next_step": null,
+        "continuation_rounds": 0,
+        "revert_applied": false,
+        "revert_commit": null,
+        "gate_revalidation_pending": false,
+        "gate_approved_perf_metric": null,
+        "gate_approved_perf_unit": null,
+        "gate_approved_metrics": {},
+        "gate_approved_evaluation_artifact": null,
+        "gate_approved_candidate_disposition": "unassessed",
+        "gate_approved_candidate_metrics": {},
+        "gate_approved_candidate_evaluation_artifact": null,
+        "gate_approved_candidate_operating_point": "",
+        "gate_approved_candidate_retention_reason": "",
+        "gate_candidate_commit": null,
+        "gate_accuracy_passed": false,
+        "declared_outcome": null,
+        "review": "pass",
+        "resolution": null,
+        "measurement": {
+          "round": 1,
+          "metric": "throughput",
+          "value": 2.0,
+          "unit": "throughput",
+          "direction": "max",
+          "baseline_round": null,
+          "baseline_commit": null,
+          "baseline_value": null,
+          "delta_pct": null,
+          "delta_reason": "no_baseline_yet"
+        },
+        "candidate_retained": null,
+        "strategy": "available",
+        "strategy_reason": null,
+        "last_experiment_revision": 3
+      }
+    ],
+    "profile_guidance": null
+  },
+  "workstreams": [
+    {
+      "hypothesis_id": "kept",
+      "sequence": 1,
+      "planning_call": 1,
+      "plan": {
+        "kind": "implement",
+        "hypothesis_id": "kept",
+        "title": "Investigate kept",
+        "hypothesis": "Mechanism kept limits the objective.",
+        "task": "Implement and verify kept.",
+        "pass_criteria": "The change is correct and measurably improves the objective.",
+        "continue_hypothesis": false,
+        "evidence": [
+          {
+            "location": "profile/trace.json",
+            "purpose": "hot kernel",
+            "revision": null
+          }
+        ],
+        "parent_hypothesis_id": null
+      },
+      "parent_revision": "fake-revision-1",
+      "phase": "implementing",
+      "budget": {
+        "spent": 1,
+        "refunded": 0
+      },
+      "invocation_sequence": 0,
+      "candidate_revision": "candidate-1-revision-3",
+      "implementation": {
+        "summary": "Implemented kept.",
+        "outcome": "nominated",
+        "evidence": [
+          {
+            "location": "evidence/kept.json",
+            "purpose": "local verification",
+            "revision": "candidate-1-revision-3"
+          }
+        ],
+        "next_step": ""
+      },
+      "review": {
+        "passed": true,
+        "analysis": "Candidate is correct.",
+        "feedback": ""
+      },
+      "evaluation": {
+        "revision": "candidate-1-revision-3",
+        "local_validation_passed": null,
+        "local_validation_feedback": null,
+        "accuracy_passed": null,
+        "accuracy_feedback": null,
+        "benchmark_passed": true,
+        "benchmark_feedback": null,
+        "metric_name": "throughput",
+        "metric_value": 2.0,
+        "metric_direction": "max",
+        "metric_unit": null,
+        "metrics": {
+          "throughput": 2.0
+        },
+        "partial_measurement": null
+      },
+      "prior_attempt": "",
+      "prior_revision": null,
+      "feedback": null,
+      "last_error": null,
+      "setup_failure": false,
+      "implementer_started": true,
+      "verified": null
+    }
+  ],
+  "profiles": [],
+  "baseline": {
+    "revision": "fake-revision",
+    "local_validation_passed": null,
+    "local_validation_feedback": null,
+    "accuracy_passed": null,
+    "accuracy_feedback": null,
+    "benchmark_passed": true,
+    "benchmark_feedback": null,
+    "metric_name": "throughput",
+    "metric_value": 1.0,
+    "metric_direction": "max",
+    "metric_unit": null,
+    "metrics": {
+      "throughput": 1.0,
+      "latency": 100.0
+    },
+    "partial_measurement": null
+  },
+  "input_measurement": {
+    "revision": "fake-revision",
+    "attempts": 2
+  },
+  "winner_revision": null,
+  "adoption_pending": false
+}

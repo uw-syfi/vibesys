@@ -2041,3 +2041,16 @@ depends_on = ["vs_core._corevalue"]
 [[interfaces]]
 from = ["vs_core._generated.vibesys.core.v1.vocabulary_cv"]
 expose = ["[A-Z].*"]
+
+[[modules]]
+path = "vibesys.fact_import"
+layer = "loops"
+depends_on = ["vibesys", "vs_agent", "vs_core", "vs_project", "vs_proto", "vs_decode.api", "vs_runtime", "vs_evaluation.api", "vibesys.hypothesis"]
+
+[[interfaces]]
+from = ["vibesys.fact_import"]
+expose = ["api", "api\\..*", "reader", "reader\\..*"]
+
+[[modules]]
+path = "vibesys.api.importing"
+depends_on = ["vibesys.fact_import"]
