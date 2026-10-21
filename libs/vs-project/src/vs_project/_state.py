@@ -36,7 +36,7 @@ from pydantic import (
 
 import vs_project._paths as project_paths
 from vs_decode.api import Unreadable, ValidationOptions, decode_json
-from vs_project._control_inbox import FileControlInbox
+from vs_project._control_inbox import FileControlInbox, validate_request_id
 from vs_project._fingerprint import _is_excluded, _update_fingerprint
 from vs_project._framework_writes import FRAMEWORK_WRITES
 from vs_project._manifests import (
@@ -928,7 +928,7 @@ class ProjectState:
         return cls._run_local_directory_for(
             project_root,
             run_id,
-            f"logs/sessions/{validate_run_id(session_id)}",
+            f"logs/sessions/{validate_request_id(session_id)}",
             kind="chat session directory",
         )
 
@@ -1460,7 +1460,7 @@ class ProjectState:
     def session_inbox(self, run_id: str, session_id: str) -> FileControlInbox:
         """Open an ordered, idempotent inbox beside one session's log."""
         self.load_run(run_id)
-        identity = validate_run_id(session_id)
+        identity = validate_request_id(session_id)
         relative = f"logs/sessions/{identity}"
         return FileControlInbox(
             StateNamespace(

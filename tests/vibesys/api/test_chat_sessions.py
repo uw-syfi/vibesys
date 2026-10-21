@@ -378,3 +378,21 @@ def test_reading_an_incomplete_native_head_is_refused(chat: ChatMessageRequest) 
     path.write_bytes(head.to_binary())
     with pytest.raises(ValueError, match="process and lifecycle"):
         run_head(path)
+
+
+@pytest.mark.parametrize("session_id", ["default", "Research_A", "chat2"])
+def test_session_ids_follow_the_host_contract(chat: ChatMessageRequest, session_id: str) -> None:
+    chat.session_id = session_id
+    response = HostCallResponse.from_binary(
+        host_call(
+            HostCallRequest(
+                checkout="/src/vibesys", method=Oneof("chat_message", chat)
+            ).to_binary(),
+            start_chat=post,
+        )
+    )
+    assert response.result is not None
+    assert response.result.field == "chat_message"
+    assert response.result.value.session_id == session_id
+    run(chat, lambda text, _invocation: text)
+    assert len(events(chat)) == 3
