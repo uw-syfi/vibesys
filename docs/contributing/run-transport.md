@@ -86,8 +86,28 @@ which records the last log sequence it covers. On start, recovery drops log reco
 sequence, so the history never shows something core does not hold. After each swap the run writes
 `committed_seq` in `run.head`, and the gateway's `Tail` and `Skeleton` serve only records up to it,
 so a viewer never sees a record that recovery would drop. The phase 1 converter has no `state.pb`
-and commits each converted record at once. (Other orders were considered; see
-[Decisions](#decisions-and-alternatives).)
+and recovers every complete surviving record, syncing that prefix before publishing
+it. Its writer groups ordinary appends: the first pending append schedules a commit
+on the owning event loop after 100 ms, using the `vs-sim` clock/sleeper abstraction.
+The deadline is not reset by later appends. A commit fsyncs the log once, writes any
+due keyframe, then atomically publishes `run.head` with the new `committed_seq`.
+Lifecycle changes, epoch headers and close commit immediately. The 100 ms interval
+keeps live tailing responsive while amortizing sync costs across bursts; scheduling
+and storage stalls can delay completion beyond that interval.
+
+`FileRunLogWriter.append` retains its signature and now acknowledges a write, not
+durability. `commit()` is the explicit durability boundary, including for an epoch
+end not represented by a lifecycle record. `LegacyRunLogTee.commit()` forwards that
+boundary. The tee takes ownership of a configured `FileRunLogWriter`, so the
+live journal can supply its run's clock, loop and locks even when preparation
+runs off-loop. Synchronous offline producers have no event loop and must commit
+explicitly or close; close commits the final suffix. Keyframes are written only
+at commit time, at lifecycle/epoch boundaries or when the committed batch crosses
+the record-count checkpoint threshold. Legacy-only logs still have no native
+headline and retain their existing unfenced gateway compatibility path. The
+`committed_seq` visibility fence applies once native declarations produce a head.
+This log-only commit does not implement the `state.pb` transaction described above.
+(Other orders were considered; see [Decisions](#decisions-and-alternatives).)
 
 **Blobs and streams.** A record never carries large content inline. It carries a `BlobRef` (hash,
 size, media type) and the client fetches by hash, caching in IndexedDB forever because the content

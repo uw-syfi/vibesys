@@ -74,6 +74,7 @@ def test_writer_publishes_head_and_lifecycle_keyframes(tmp_path: Path) -> None:
     with FileRunLogWriter(tmp_path / "run.log") as writer:
         for record in records:
             writer.append(record)
+            writer.commit()
             if record.seq == 1:
                 assert not (tmp_path / "run.head").exists()
                 continue
@@ -110,6 +111,7 @@ def test_record_bound_and_recovery_preserve_immutable_checkpoints(count: int) ->
                 writer.append(
                     Record(seq=seq, epoch=1, body=Oneof("legacy_event", LegacyEvent(json="x")))
                 )
+                writer.commit()
         files = {p.name: p.read_bytes() for p in (root / "keyframes").iterdir()}
         sequences = sorted(int(name.removesuffix(".pb")) for name in files)
         assert (
@@ -206,6 +208,7 @@ def test_usage_replacement_presence_and_operator_hold(tmp_path: Path) -> None:
         for record in first:
             writer.append(record)
         writer.append(records[2])
+        writer.commit()
         head = RunHead.from_binary((tmp_path / "run.head").read_bytes())
         assert head.span_counts == {"agent_turn": 1}
         assert head.usage is not None
