@@ -11,13 +11,13 @@ from typing import Literal, TYPE_CHECKING, TypeAlias
 from protobuf import Message
 from protobuf._codegen import file_desc
 from protobuf.wkt.google.protobuf import any_pb
-from vs_proto._generated.vibesys.core.v1 import common_pb
+from vs_proto._generated.vibesys.core.v1 import leaves_pb
 from vs_proto._generated.vibesys.store.v1 import replay_pb
 
 if TYPE_CHECKING:
     from protobuf import DescFile
     from protobuf.wkt.google.protobuf.any_pb import Any
-    from vs_proto._generated.vibesys.core.v1.common_pb import Identity
+    from vs_proto._generated.vibesys.core.v1.leaves_pb import RevisionRef
     from vs_proto._generated.vibesys.store.v1.replay_pb import ReplayAllowance
 
 
@@ -332,7 +332,7 @@ class SharedContext(Message[_SharedContextFields]):
     Attributes:
         candidate:
             ```proto
-            optional vibesys.core.v1.Identity candidate = 1;
+            optional vibesys.core.v1.RevisionRef candidate = 1;
             ```
         allowance:
             ```proto
@@ -347,21 +347,21 @@ class SharedContext(Message[_SharedContextFields]):
         def __init__(
             self,
             *,
-            candidate: Identity | None = None,
+            candidate: RevisionRef | None = None,
             allowance: ReplayAllowance | None = None,
         ) -> None:
             pass
 
-        candidate: Identity | None
+        candidate: RevisionRef | None
         allowance: ReplayAllowance | None
 
 
 _DESC = file_desc(
-    b'\n\'vibesys/replay/testing/v1/context.proto\x12\x19vibesys.replay.testing.v1\x1a\x1dvibesys/store/v1/replay.proto\x1a\x19google/protobuf/any.proto\x1a\x1cvibesys/core/v1/common.proto"\x99\x01\n\x07Context\x12"\n\tcandidate\x18\x01 \x01(\tR\tcandidateB\x04\xe0\xf9\x18\x01\x12\x1e\n\x07wording\x18\x02 \x01(\tR\x07wordingB\x04\xe0\xf9\x18\x02\x12$\n\x08evidence\x18\x03 \x03(\tR\x08evidenceB\x08\xe0\xf9\x18\x01\xe8\xf9\x18\x01\x12\x1e\n\x07ordered\x18\x04 \x03(\tR\x07orderedB\x04\xe0\xf9\x18\x01:\x04\xf0\xf9\x18\x01"Y\n\rNestedContext\x12B\n\x07context\x18\x01 \x01(\x0b2".vibesys.replay.testing.v1.ContextR\x07contextB\x04\xe0\xf9\x18\x01:\x04\xf0\xf9\x18\x01"9\n\x13UnclassifiedContext\x12\x1c\n\tcandidate\x18\x01 \x01(\tR\tcandidate:\x04\xf0\xf9\x18\x01"j\n\x12UnclassifiedPolicy\x12N\n\x07context\x18\x01 \x01(\x0b2..vibesys.replay.testing.v1.UnclassifiedContextR\x07contextB\x04\xe0\xf9\x18\x02:\x04\xf0\xf9\x18\x01"5\n\x11InvalidSetContext\x12 \n\x08evidence\x18\x01 \x01(\tR\x08evidenceB\x04\xe8\xf9\x18\x01"]\n\x0fRepeatedContext\x12D\n\x08contexts\x18\x01 \x03(\x0b2".vibesys.replay.testing.v1.ContextR\x08contextsB\x04\xe0\xf9\x18\x01:\x04\xf0\xf9\x18\x01"t\n\x1aRepeatedUnclassifiedPolicy\x12P\n\x08contexts\x18\x01 \x03(\x0b2..vibesys.replay.testing.v1.UnclassifiedContextR\x08contextsB\x04\xe0\xf9\x18\x02:\x04\xf0\xf9\x18\x01">\n\x0eOpaqueIdentity\x12,\n\x06values\x18\x01 \x03(\x0b2\x14.google.protobuf.AnyR\x06values"\x8a\x01\n\x08MapValue\x12D\n\x05items\x18\x01 \x03(\x0b2..vibesys.replay.testing.v1.MapValue.ItemsEntryR\x05items\x1a8\n\nItemsEntry\x12\x10\n\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n\x05value\x18\x02 \x01(\tR\x05value:\x028\x01"R\n\x13RepeatedMapIdentity\x12;\n\x06values\x18\x01 \x03(\x0b2#.vibesys.replay.testing.v1.MapValueR\x06values"\x9b\x01\n\rSharedContext\x12=\n\tcandidate\x18\x01 \x01(\x0b2\x19.vibesys.core.v1.IdentityR\tcandidateB\x04\xe0\xf9\x18\x01\x12E\n\tallowance\x18\x02 \x01(\x0b2!.vibesys.store.v1.ReplayAllowanceR\tallowanceB\x04\xe0\xf9\x18\x02:\x04\xf0\xf9\x18\x01b\x06proto3',
+    b'\n\'vibesys/replay/testing/v1/context.proto\x12\x19vibesys.replay.testing.v1\x1a\x1dvibesys/store/v1/replay.proto\x1a\x19google/protobuf/any.proto\x1a\x1cvibesys/core/v1/leaves.proto"\x99\x01\n\x07Context\x12"\n\tcandidate\x18\x01 \x01(\tR\tcandidateB\x04\xe0\xf9\x18\x01\x12\x1e\n\x07wording\x18\x02 \x01(\tR\x07wordingB\x04\xe0\xf9\x18\x02\x12$\n\x08evidence\x18\x03 \x03(\tR\x08evidenceB\x08\xe0\xf9\x18\x01\xe8\xf9\x18\x01\x12\x1e\n\x07ordered\x18\x04 \x03(\tR\x07orderedB\x04\xe0\xf9\x18\x01:\x04\xf0\xf9\x18\x01"Y\n\rNestedContext\x12B\n\x07context\x18\x01 \x01(\x0b2".vibesys.replay.testing.v1.ContextR\x07contextB\x04\xe0\xf9\x18\x01:\x04\xf0\xf9\x18\x01"9\n\x13UnclassifiedContext\x12\x1c\n\tcandidate\x18\x01 \x01(\tR\tcandidate:\x04\xf0\xf9\x18\x01"j\n\x12UnclassifiedPolicy\x12N\n\x07context\x18\x01 \x01(\x0b2..vibesys.replay.testing.v1.UnclassifiedContextR\x07contextB\x04\xe0\xf9\x18\x02:\x04\xf0\xf9\x18\x01"5\n\x11InvalidSetContext\x12 \n\x08evidence\x18\x01 \x01(\tR\x08evidenceB\x04\xe8\xf9\x18\x01"]\n\x0fRepeatedContext\x12D\n\x08contexts\x18\x01 \x03(\x0b2".vibesys.replay.testing.v1.ContextR\x08contextsB\x04\xe0\xf9\x18\x01:\x04\xf0\xf9\x18\x01"t\n\x1aRepeatedUnclassifiedPolicy\x12P\n\x08contexts\x18\x01 \x03(\x0b2..vibesys.replay.testing.v1.UnclassifiedContextR\x08contextsB\x04\xe0\xf9\x18\x02:\x04\xf0\xf9\x18\x01">\n\x0eOpaqueIdentity\x12,\n\x06values\x18\x01 \x03(\x0b2\x14.google.protobuf.AnyR\x06values"\x8a\x01\n\x08MapValue\x12D\n\x05items\x18\x01 \x03(\x0b2..vibesys.replay.testing.v1.MapValue.ItemsEntryR\x05items\x1a8\n\nItemsEntry\x12\x10\n\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n\x05value\x18\x02 \x01(\tR\x05value:\x028\x01"R\n\x13RepeatedMapIdentity\x12;\n\x06values\x18\x01 \x03(\x0b2#.vibesys.replay.testing.v1.MapValueR\x06values"\x9e\x01\n\rSharedContext\x12@\n\tcandidate\x18\x01 \x01(\x0b2\x1c.vibesys.core.v1.RevisionRefR\tcandidateB\x04\xe0\xf9\x18\x01\x12E\n\tallowance\x18\x02 \x01(\x0b2!.vibesys.store.v1.ReplayAllowanceR\tallowanceB\x04\xe0\xf9\x18\x02:\x04\xf0\xf9\x18\x01b\x06proto3',
     [
         replay_pb.desc(),
         any_pb.desc(),
-        common_pb.desc(),
+        leaves_pb.desc(),
     ],
     {
         "Context": Context,
