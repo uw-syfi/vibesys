@@ -186,7 +186,7 @@ _SkeletonResponseFields: TypeAlias = Literal["keyframe", "records", "committed_s
 class SkeletonResponse(Message[_SkeletonResponseFields]):
     """
     One committed snapshot. No keyframe means replay records from the beginning.
-    A response exceeding the gateway's 64 MiB cap fails RESOURCE_EXHAUSTED.
+    A response exceeding gRPC's message size limit fails RESOURCE_EXHAUSTED.
 
     ```proto
     message vibesys.api.v1.SkeletonResponse

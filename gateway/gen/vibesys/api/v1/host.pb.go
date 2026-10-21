@@ -321,7 +321,7 @@ func (x *SkeletonRequest) GetRunId() string {
 }
 
 // One committed snapshot. No keyframe means replay records from the beginning.
-// A response exceeding the gateway's 64 MiB cap fails RESOURCE_EXHAUSTED.
+// A response exceeding gRPC's message size limit fails RESOURCE_EXHAUSTED.
 type SkeletonResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Keyframe      []byte                 `protobuf:"bytes,1,opt,name=keyframe,proto3,oneof" json:"keyframe,omitempty"`

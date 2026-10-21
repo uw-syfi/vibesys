@@ -52,9 +52,10 @@ func (h *host) Skeleton(ctx context.Context, request *apiv1.SkeletonRequest) (*a
 	// Freeze the readable byte extent for phase 1 runs with a concurrent writer.
 	reader := runlog.NewReaderAt(io.NewSectionReader(f, 0, info.Size()), position.Offset)
 	previous := position.ThroughSeq
+	seen := position.Offset > 0
 	size := proto.Size(response)
-	if size > skeletonBytes {
-		return nil, status.Error(codes.ResourceExhausted, "Skeleton exceeds 64 MiB response cap")
+	if size > maxMessageBytes {
+		return nil, status.Error(codes.ResourceExhausted, "Skeleton exceeds gRPC message size limit")
 	}
 	for !bounded || previous < cap {
 		if err := ctx.Err(); err != nil {
@@ -74,14 +75,15 @@ func (h *host) Skeleton(ctx context.Context, request *apiv1.SkeletonRequest) (*a
 		if err != nil {
 			return nil, rpcError(err)
 		}
-		if seq <= previous || (bounded && seq > cap) {
+		if (seen && seq <= previous) || (bounded && seq > cap) {
 			return nil, status.Error(codes.DataLoss, "invalid committed log sequence")
 		}
+		seen = true
 		previous = seq
 		h.index.Observe(filepath.Join(dir, "run.log"), info, runlog.Position{Offset: reader.Offset(), ThroughSeq: seq})
 		size += len(payload) + 10
-		if size > skeletonBytes {
-			return nil, status.Error(codes.ResourceExhausted, "Skeleton exceeds 64 MiB response cap")
+		if size > maxMessageBytes {
+			return nil, status.Error(codes.ResourceExhausted, "Skeleton exceeds gRPC message size limit")
 		}
 		response.Records = append(response.Records, payload)
 	}

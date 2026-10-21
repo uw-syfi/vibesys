@@ -158,7 +158,7 @@ func (f *Follower) next() ([]byte, error) {
 		if seqErr != nil {
 			return nil, seqErr
 		}
-		if seq <= f.position.ThroughSeq {
+		if f.position.Offset > 0 && seq <= f.position.ThroughSeq {
 			return nil, f.reader.corrupt("sequence does not increase")
 		}
 		if f.bounded && seq > f.ceiling {

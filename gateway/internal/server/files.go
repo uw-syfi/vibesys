@@ -20,7 +20,7 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-const skeletonBytes = 64 << 20
+const maxMessageBytes = math.MaxInt32
 const blobBytes = 16 << 20
 
 func (h *host) directory(id string) (string, error) {
@@ -208,7 +208,7 @@ func latestKeyframe(dir string, cap uint64) ([]byte, runlog.Position, error) {
 	if best == 0 {
 		return nil, runlog.Position{}, nil
 	}
-	data, err := readFile(dir, fmt.Sprintf("keyframes/%d.pb", best), skeletonBytes)
+	data, err := readFile(dir, fmt.Sprintf("keyframes/%d.pb", best), maxMessageBytes)
 	if err != nil {
 		return nil, runlog.Position{}, err
 	}

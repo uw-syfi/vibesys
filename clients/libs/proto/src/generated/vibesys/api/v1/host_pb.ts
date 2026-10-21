@@ -120,7 +120,7 @@ export const SkeletonRequestSchema: GenMessage<SkeletonRequest> = /*@__PURE__*/
 
 /**
  * One committed snapshot. No keyframe means replay records from the beginning.
- * A response exceeding the gateway's 64 MiB cap fails RESOURCE_EXHAUSTED.
+ * A response exceeding gRPC's message size limit fails RESOURCE_EXHAUSTED.
  *
  * @generated from message vibesys.api.v1.SkeletonResponse
  */

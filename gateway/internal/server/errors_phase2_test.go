@@ -4,11 +4,14 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"testing"
 
 	apiv1 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/api/v1"
 	storev1 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1"
+	"github.com/uw-syfi/vibesys/gateway/internal/runlog"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
@@ -136,5 +139,57 @@ func TestWatchRunsDoesNotMistakeAnotherProbeForWriter(t *testing.T) {
 	}
 	if got := watchEntry(t, stream); got.Liveness != apiv1.RunLiveness_RUN_LIVENESS_INTERRUPTED {
 		t.Fatal(got)
+	}
+}
+
+func TestPhase1SequenceZeroRemainsReadable(t *testing.T) {
+	f := start(t)
+	zero, one := payload(t, 0, "zero"), payload(t, 1, "one")
+	data := append([]byte(runlog.Magic), frame(zero)...)
+	data = append(data, frame(one)...)
+	write(t, filepath.Join(f.run, "run.log"), false, data)
+	c := client(t, f, false)
+	stream, err := c.Tail(f.ctx, &apiv1.TailRequest{RunId: "run-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := stream.Recv()
+	if err != nil || len(got.GetRecords()) != 2 || !bytes.Equal(got.Records[0], zero) || !bytes.Equal(got.Records[1], one) {
+		t.Fatalf("phase 1 Tail = %v,%v", got, err)
+	}
+	skeleton, err := c.Skeleton(f.ctx, &apiv1.SkeletonRequest{RunId: "run-1"})
+	if err != nil || len(skeleton.GetRecords()) != 2 || !bytes.Equal(skeleton.Records[0], zero) || !bytes.Equal(skeleton.Records[1], one) {
+		t.Fatalf("phase 1 Skeleton = %v,%v", skeleton, err)
+	}
+}
+
+func TestSkeletonPhase1HasNoSmallHistoryCap(t *testing.T) {
+	f := start(t)
+	path := filepath.Join(f.run, "run.log")
+	write(t, path, false, []byte(runlog.Magic))
+	// Phase 1 permits these record sizes. Aggregate history must not acquire an
+	// extra 64 MiB cap merely because Skeleton was added alongside Tail.
+	text := strings.Repeat("x", 4<<20)
+	const count = 17
+	for seq := uint64(1); seq <= count; seq++ {
+		write(t, path, true, frame(payload(t, seq, text)))
+	}
+	got, err := client(t, f, false).Skeleton(f.ctx, &apiv1.SkeletonRequest{RunId: "run-1"}, grpc.MaxCallRecvMsgSize(128<<20))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Keyframe) != 0 || len(got.Records) != count || got.CommittedSeq != count {
+		t.Fatalf("Skeleton count=%d, committed=%d", len(got.Records), got.CommittedSeq)
+	}
+	total := 0
+	for i, record := range got.Records {
+		seq, err := runlog.Sequence(record)
+		if err != nil || seq != uint64(i+1) {
+			t.Fatalf("record %d: seq=%d, err=%v", i, seq, err)
+		}
+		total += len(record)
+	}
+	if total <= 64<<20 {
+		t.Fatal("fixture did not exceed the old history cap")
 	}
 }
