@@ -1,0 +1,50 @@
+{
+  "valid.runlog": {
+    "records": [
+      {
+        "seq": 1,
+        "epoch": 1,
+        "legacy_event": {
+          "json": "{\"type\":\"run_started\"}"
+        }
+      },
+      {
+        "seq": 2,
+        "epoch": 1,
+        "legacy_event": {
+          "json": "{\"text\":\"hello\"}"
+        }
+      }
+    ],
+    "stop": "end",
+    "offset": 72
+  },
+  "torn-tail.runlog": {
+    "records": [
+      {
+        "seq": 1,
+        "epoch": 1,
+        "legacy_event": {
+          "json": "{\"type\":\"run_started\"}"
+        }
+      }
+    ],
+    "stop": "torn_tail",
+    "offset": 43
+  },
+  "bad-crc.runlog": {
+    "records": [],
+    "stop": "corruption",
+    "offset": 8
+  },
+  "over-cap.runlog": {
+    "records": [],
+    "stop": "corruption",
+    "offset": 8
+  },
+  "empty.runlog": {
+    "records": [],
+    "stop": "end",
+    "offset": 8
+  }
+}

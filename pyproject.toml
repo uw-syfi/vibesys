@@ -17,6 +17,7 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
 ]
 dependencies = [
+    "google-crc32c>=1.7,<2",
     "protobuf-py==0.6.0",
     "protovalidate==2.0.0",
     "agentshim>=0.23.0,<0.24",
@@ -71,6 +72,7 @@ vs_sim = ["py.typed"]
 vs_dst = ["py.typed"]
 vs_logs = ["py.typed"]
 vs_proto = ["py.typed"]
+vs_runlog = ["py.typed"]
 
 [dependency-groups]
 proto = ["buf-bin==1.73.0", "protoc-gen-py==0.6.0"]
@@ -103,7 +105,7 @@ test = [
 ]
 
 [tool.pytest.ini_options]
-testpaths = ["tests", "libs/vs-evaluator-protocol/tests", "libs/vs-decode/tests", "libs/vs-redaction/tests", "libs/vs-evaluation/tests", "libs/vs-async-ops/tests", "libs/vs-github/tests", "libs/vs-issue-tracker/tests", "libs/vs-core/tests", "libs/vs-project/tests", "libs/vs-prompts/tests", "libs/vs-runtime/tests", "libs/vs-sandbox/tests", "libs/vs-agent/tests", "libs/vs-slurm/tests", "libs/vs-mcp/tests", "libs/vs-faults/tests", "libs/vs-sim/tests", "libs/vs-dst/tests", "libs/vs-logs/tests", "libs/vs-proto/tests", "sdk/vs-bench/tests"]
+testpaths = ["tests", "libs/vs-evaluator-protocol/tests", "libs/vs-decode/tests", "libs/vs-redaction/tests", "libs/vs-evaluation/tests", "libs/vs-async-ops/tests", "libs/vs-github/tests", "libs/vs-issue-tracker/tests", "libs/vs-core/tests", "libs/vs-project/tests", "libs/vs-prompts/tests", "libs/vs-runtime/tests", "libs/vs-sandbox/tests", "libs/vs-agent/tests", "libs/vs-slurm/tests", "libs/vs-mcp/tests", "libs/vs-faults/tests", "libs/vs-sim/tests", "libs/vs-dst/tests", "libs/vs-logs/tests", "libs/vs-proto/tests", "libs/vs-runlog/tests", "sdk/vs-bench/tests"]
 # Directories whose `slow` tests still run one case each in a pull request (see the vs-sim plugin).
 sim_smoke_slow = ["tests/system/chaos", "tests/system/skeleton", "libs/vs-core/tests"]
 # Bare `--cov` measures the packages listed in `[tool.coverage.run] source`
@@ -159,7 +161,7 @@ markers = [
 
 [tool.coverage.run]
 branch = true
-source = ["entrypoints", "launch", "server", "vibesys", "vs_evaluator_protocol", "vs_decode", "vs_redaction", "vs_evaluation", "vs_async_ops", "vs_github", "vs_issue_tracker", "vs_core", "vs_project", "vs_prompts", "vs_runtime", "vs_sandbox", "vs_agent", "vs_slurm", "vs_mcp", "vs_faults", "vs_sim", "vs_dst", "vs_logs", "vs_proto", "vs_bench"]
+source = ["entrypoints", "launch", "server", "vibesys", "vs_evaluator_protocol", "vs_decode", "vs_redaction", "vs_evaluation", "vs_async_ops", "vs_github", "vs_issue_tracker", "vs_core", "vs_project", "vs_prompts", "vs_runtime", "vs_sandbox", "vs_agent", "vs_slurm", "vs_mcp", "vs_faults", "vs_sim", "vs_dst", "vs_logs", "vs_proto", "vs_runlog", "vs_bench"]
 relative_files = true
 omit = [
     # Module execution stubs contain only a guarded call into a measured
@@ -232,7 +234,7 @@ baseline = "tests/quality/isolation_baseline.jsonl"
 [tool.ruff]
 line-length = 100
 target-version = "py312"
-src = ["src", "tests", "resources/evaluators/microservice", "libs/vs-evaluator-protocol/src", "libs/vs-evaluator-protocol/tests", "libs/vs-decode/src", "libs/vs-decode/tests", "libs/vs-redaction/src", "libs/vs-redaction/tests", "libs/vs-evaluation/src", "libs/vs-evaluation/tests", "libs/vs-async-ops/src", "libs/vs-async-ops/tests", "libs/vs-github/src", "libs/vs-github/tests", "libs/vs-issue-tracker/src", "libs/vs-issue-tracker/tests", "libs/vs-core/src", "libs/vs-core/tests", "libs/vs-project/src", "libs/vs-project/tests", "libs/vs-prompts/src", "libs/vs-prompts/tests", "libs/vs-runtime/src", "libs/vs-runtime/tests", "libs/vs-sandbox/src", "libs/vs-sandbox/tests", "libs/vs-agent/src", "libs/vs-agent/tests", "libs/vs-slurm/src", "libs/vs-slurm/tests", "libs/vs-mcp/src", "libs/vs-mcp/tests", "libs/vs-faults/src", "libs/vs-faults/tests", "libs/vs-sim/src", "libs/vs-sim/pytest_plugin", "libs/vs-sim/tests", "libs/vs-dst/src", "libs/vs-dst/tests", "libs/vs-logs/src", "libs/vs-logs/tests", "libs/vs-proto/src", "libs/vs-proto/tests", "sdk/vs-bench/src", "sdk/vs-bench/tests"]
+src = ["src", "tests", "resources/evaluators/microservice", "libs/vs-evaluator-protocol/src", "libs/vs-evaluator-protocol/tests", "libs/vs-decode/src", "libs/vs-decode/tests", "libs/vs-redaction/src", "libs/vs-redaction/tests", "libs/vs-evaluation/src", "libs/vs-evaluation/tests", "libs/vs-async-ops/src", "libs/vs-async-ops/tests", "libs/vs-github/src", "libs/vs-github/tests", "libs/vs-issue-tracker/src", "libs/vs-issue-tracker/tests", "libs/vs-core/src", "libs/vs-core/tests", "libs/vs-project/src", "libs/vs-project/tests", "libs/vs-prompts/src", "libs/vs-prompts/tests", "libs/vs-runtime/src", "libs/vs-runtime/tests", "libs/vs-sandbox/src", "libs/vs-sandbox/tests", "libs/vs-agent/src", "libs/vs-agent/tests", "libs/vs-slurm/src", "libs/vs-slurm/tests", "libs/vs-mcp/src", "libs/vs-mcp/tests", "libs/vs-faults/src", "libs/vs-faults/tests", "libs/vs-sim/src", "libs/vs-sim/pytest_plugin", "libs/vs-sim/tests", "libs/vs-dst/src", "libs/vs-dst/tests", "libs/vs-logs/src", "libs/vs-logs/tests", "libs/vs-proto/src", "libs/vs-runlog/src", "libs/vs-proto/tests", "libs/vs-runlog/tests", "sdk/vs-bench/src", "sdk/vs-bench/tests"]
 # resources/skills/ vendors reference code (submodule checkouts and copied
 # reference material) that VibeSys does not own and does not hold to repo
 # lint standards; see the UP040/UP046/UP047 note below.
@@ -405,7 +407,7 @@ root = [
     "libs/vs-sim/pytest_plugin",
     "libs/vs-dst/src",
     "libs/vs-logs/src",
-    "libs/vs-proto/src",
+    "libs/vs-proto/src", "libs/vs-runlog/src",
     "sdk/vs-bench/src",
 ]
 
@@ -462,9 +464,9 @@ include = [
     "libs/vs-dst/src",
     "libs/vs-dst/tests",
     "libs/vs-logs/src",
-    "libs/vs-proto/src",
+    "libs/vs-proto/src", "libs/vs-runlog/src",
     "libs/vs-logs/tests",
-    "libs/vs-proto/tests",
+    "libs/vs-proto/tests", "libs/vs-runlog/tests",
     "sdk/vs-bench/src",
     "sdk/vs-bench/tests",
 ]

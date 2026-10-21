@@ -63,6 +63,7 @@ source_roots = [
     "libs/vs-dst/src",
     "libs/vs-logs/src",
     "libs/vs-proto/src",
+    "libs/vs-runlog/src",
 ]
 exclude = ["**/tests", "**/__pycache__", "docs", "examples", "sdk", "resources", "build", "dist", ".venv"]
 # Also freeze imports that exist only under TYPE_CHECKING.
@@ -1919,4 +1920,12 @@ depends_on = []
 
 [[interfaces]]
 from = ["vs_proto"]
+expose = ["api", "api\\..*"]
+
+[[modules]]
+path = "vs_runlog"
+depends_on = ["vs_proto"]
+
+[[interfaces]]
+from = ["vs_runlog"]
 expose = ["api", "api\\..*"]

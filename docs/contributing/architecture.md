@@ -132,7 +132,6 @@ Submodules such as `vibesys.orchestration` and `server.api` are collapsed into t
 
 ```mermaid
 graph TD
-    vs_proto
     entrypoints --> headless
     entrypoints --> launch
     entrypoints --> server
@@ -214,6 +213,7 @@ graph TD
     vs_logs --> vs_sim
     vs_project --> vs_decode
     vs_project --> vs_sim
+    vs_runlog --> vs_proto
     vs_runtime --> vs_agent
     vs_runtime --> vs_async_ops
     vs_runtime --> vs_core
