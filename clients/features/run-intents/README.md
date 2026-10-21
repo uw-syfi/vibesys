@@ -29,8 +29,9 @@ skeleton projection.
 
 ## Current limits
 
-The existing inbox has no park or chat-message request. Park is represented in
-the typed command surface and refused before writing; chat messages are absent.
+Chat messages use a separate session inbox and HostCall. The shell submits a
+chat proposal through this feature's `useRunIntents` actor, preserving the same
+intent admission and outcome handling as the controls.
 The journal's [control projection](../../../src/vibesys/records/_control.py)
 produces IntentState for steer and guidance delivery events. Lifecycle controls
 publish lifecycle records without request ids, so those requests stay pending

@@ -9,6 +9,9 @@
     },
     {
       "path": "./tsconfig.intents.json"
+    },
+    {
+      "path": "./tsconfig.chat.json"
     }
   ]
 }

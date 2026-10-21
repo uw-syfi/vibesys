@@ -41,7 +41,8 @@
     "react-dom": "19.1.1",
     "@vibesys/machine": "workspace:*",
     "@vibesys/run-skeleton": "workspace:*",
-    "@vibesys/feature-run-intents": "workspace:*"
+    "@vibesys/feature-run-intents": "workspace:*",
+    "@vibesys/feature-run-sessions": "workspace:*"
   },
   "devDependencies": {
     "@axe-core/playwright": "4.10.2",

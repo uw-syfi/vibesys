@@ -101,6 +101,9 @@
     },
     {
       "path": "../../features/run-intents/tsconfig.renderer.json"
+    },
+    {
+      "path": "../../features/run-sessions/tsconfig.renderer.json"
     }
   ]
 }

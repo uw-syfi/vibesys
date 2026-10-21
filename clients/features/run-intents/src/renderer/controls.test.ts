@@ -1,7 +1,7 @@
 import {expect, test} from 'bun:test';
 import {create, fromBinary, toBinary} from '@bufbuild/protobuf';
 import type {HostKey} from '@vibesys/hosts';
-import type {GatewayBridge, GatewayCall} from '@vibesys/ipc';
+import {FakeGatewayBridge} from '@vibesys/ipc/testing';
 import {
   HostCallRequestSchema,
   HostCallResponseSchema,
@@ -15,50 +15,8 @@ import {FakeClock} from '@vibesys/transport/testing';
 import {waitFor} from 'xstate';
 import {intentsActor} from './index.js';
 
-/** A byte-preserving bridge: tests choose when the peer answers each owned call. */
-class FakeTransport implements GatewayBridge {
-  readonly calls: Array<{
-    method: string;
-    bytes: Uint8Array;
-    resolve: (bytes: Uint8Array) => void;
-    reject: (error: Error) => void;
-    cancelled: boolean;
-  }> = [];
-  readonly streams: Array<{
-    receive: (bytes: Uint8Array) => void;
-    ended: (error?: string) => void;
-    cancelled: boolean;
-  }> = [];
-  unary(_host: HostKey, method: string, bytes: Uint8Array): GatewayCall<Uint8Array> {
-    const {promise, resolve, reject} = Promise.withResolvers<Uint8Array>();
-    const call = {method, bytes, resolve, reject, cancelled: false};
-    this.calls.push(call);
-    return {
-      result: promise,
-      cancel: () => {
-        call.cancelled = true;
-      },
-    };
-  }
-  stream(
-    _host: HostKey,
-    _method: string,
-    _bytes: Uint8Array,
-    receive: (bytes: Uint8Array) => void,
-    ended: (error?: string) => void,
-  ) {
-    const stream = {receive, ended, cancelled: false};
-    this.streams.push(stream);
-    return {
-      cancel: () => {
-        stream.cancelled = true;
-      },
-    };
-  }
-}
-
 function fixture(enabled = true) {
-  const bridge = new FakeTransport();
+  const bridge = new FakeGatewayBridge();
   const clock = new FakeClock();
   const actor = intentsActor({
     bridge,

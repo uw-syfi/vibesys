@@ -117,6 +117,7 @@ function reason(offer: Offer): {disabledReason?: string} {
 
 /** The chat panel the app hosts beside the run: whether it is open, the button's press, the panel. */
 export interface RunChatSlot {
+  readonly minimumMain?: 'wide';
   readonly open: boolean;
   readonly toggle: () => void;
   readonly panel: ReactNode;
@@ -553,7 +554,11 @@ export function RunScreen(props: {
 }): JSX.Element {
   const {chat, ...rest} = props;
   return (
-    <Dock label="Chat" side={chat?.open === true ? chat.panel : null}>
+    <Dock
+      label="Chat"
+      {...(chat?.minimumMain ? {minimumMain: chat.minimumMain} : {})}
+      side={chat?.open === true ? chat.panel : null}
+    >
       <RunScreenBody {...rest} chat={chat} />
     </Dock>
   );

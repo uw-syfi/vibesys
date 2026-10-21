@@ -11,6 +11,7 @@ export {
   FIXTURE_NAMES,
   fixtureNamed,
 } from './catalog.js';
+export {chatReplay} from './chat.js';
 export {
   clusterTestPassed,
   clusterTestPassedUntyped,

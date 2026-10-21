@@ -89,7 +89,7 @@ layers_explicit_depends_on = true
 
 [[modules]]
 path = "entrypoints"
-depends_on = ["vibesys.api.host", "vibesys.api.transport", "server.api", "vs_decode.api", "vs_logs", "vs_sim.api", "vs_project", "vs_slurm", "vs_github", "vs_issue_tracker", "vs_runtime", "vs_sandbox", "vibesys.api", "vibesys.api.evolve", "vibesys.api.hypothesis", "vibesys.api.metrics", "vibesys.api.profilers", "vs_agent", "server.runtime", "server.instances", "server.host_api", "server.registry", "headless", "launch", "vs_mcp", "server.relay", "server.host_helper", "server.host_helper_requests", "server.host_helper_os", "server.host_helper_logs", "server.host_helper_machine", "server.host_helper_compute", "server.host_helper_readers", "server.host_agent_logins", "server.host_preflight", "server.host_examples", "server.host_harness", "vibesys.comparisons"]
+depends_on = ["server.chat", "vibesys.api.chat", "vs_proto", "vs_runlog", "vibesys.api.host", "vibesys.api.transport", "server.api", "vs_decode.api", "vs_logs", "vs_sim.api", "vs_project", "vs_slurm", "vs_github", "vs_issue_tracker", "vs_runtime", "vs_sandbox", "vibesys.api", "vibesys.api.evolve", "vibesys.api.hypothesis", "vibesys.api.metrics", "vibesys.api.profilers", "vs_agent", "server.runtime", "server.instances", "server.host_api", "server.registry", "headless", "launch", "vs_mcp", "server.relay", "server.host_helper", "server.host_helper_requests", "server.host_helper_os", "server.host_helper_logs", "server.host_helper_machine", "server.host_helper_compute", "server.host_helper_readers", "server.host_agent_logins", "server.host_preflight", "server.host_examples", "server.host_harness", "vibesys.comparisons"]
 
 [[modules]]
 path = "headless"
@@ -378,11 +378,11 @@ depends_on = ["vibesys.api._session", "vs_runtime", "vibesys.api.auxiliary", "vi
 [[modules]]
 # Opening a finished run for conversation: the reader's contract, and its product implementation.
 path = "vibesys.api.reader"
-depends_on = ["vibesys.api._reader", "vibesys.api.assembly", "vibesys.api.auxiliary", "vibesys.plugin_catalog", "vibesys.run.contracts"]
+depends_on = ["vibesys.api.contracts", "vibesys.api._reader", "vibesys.api.assembly", "vibesys.api.auxiliary", "vibesys.plugin_catalog", "vibesys.run.contracts"]
 
 [[modules]]
 path = "vibesys.api._reader"
-depends_on = ["vibesys", "vibesys.api._session", "vibesys.api.assembly", "vibesys.api.auxiliary", "vibesys.plugin_catalog", "vibesys.run", "vibesys.run.contracts", "vibesys.run.profilers", "vibesys.run.reader"]
+depends_on = ["vibesys.api.contracts", "vibesys", "vibesys.api._session", "vibesys.api.assembly", "vibesys.api.auxiliary", "vibesys.plugin_catalog", "vibesys.run", "vibesys.run.contracts", "vibesys.run.profilers", "vibesys.run.reader"]
 
 [[modules]]
 path = "vibesys.api._session"
@@ -1957,7 +1957,7 @@ expose = ["RunLogTee", "JOURNAL_EVENT_MAX_BYTES"]
 [[modules]]
 path = "vibesys.api.host"
 layer = "prompts_and_lower_libs"
-depends_on = ["vibesys.api", "vs_project", "vs_proto"]
+depends_on = ["vibesys.api", "vibesys.api.chat", "vs_project", "vs_proto", "vs_runlog"]
 
 [[interfaces]]
 from = ["vibesys.api.host"]
@@ -1989,3 +1989,19 @@ depends_on = []
 [[interfaces]]
 from = ["vs_core._retry_policy"]
 expose = ["RequestRetryPolicy"]
+
+[[modules]]
+path = "vibesys.chat"
+depends_on = ["vibesys", "vibesys.api.auxiliary", "vs_project", "vs_proto", "vs_runlog", "vs_sim.api"]
+
+[[interfaces]]
+from = ["vibesys.chat"]
+expose = ["_lifecycle.SessionAction", "_lifecycle.SessionLifecycle", "_session.ChatRuntime", "_session.ChatSession", "_session.run_head"]
+
+[[modules]]
+path = "vibesys.api.chat"
+depends_on = ["vibesys.chat"]
+
+[[interfaces]]
+from = ["vibesys.api.chat"]
+expose = ["ChatRuntime", "ChatSession", "SessionAction", "SessionLifecycle", "run_head"]

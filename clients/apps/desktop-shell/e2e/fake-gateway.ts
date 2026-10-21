@@ -5,6 +5,7 @@ import {
   HostService,
   RecordSchema,
   SkeletonResponseSchema,
+  TailRequestSchema,
   TailResponseSchema,
   TailStreamResponseSchema,
 } from '@vibesys/proto';
@@ -16,6 +17,8 @@ export interface WireFixture {
   tail: number[];
   blobs: Record<string, number[]>;
   log: number[];
+  chatRequest: number[];
+  chat: number[];
 }
 export function wire(fixture: StoreRunFixture): WireFixture {
   const encoded = fixture.records.map(record => toBinary(RecordSchema, record));
@@ -66,6 +69,13 @@ export function wire(fixture: StoreRunFixture): WireFixture {
         ],
       ]),
     ),
+    chatRequest: [
+      ...toBinary(
+        TailRequestSchema,
+        create(TailRequestSchema, {runId: 'run-a', sessionId: 'default', fromSeq: 1n}),
+      ),
+    ],
+    chat: [],
     log: [
       ...toBinary(
         TailStreamResponseSchema,
@@ -81,6 +91,7 @@ export function wire(fixture: StoreRunFixture): WireFixture {
 export function installGateway(input: WireFixture): void {
   const calls: string[] = [];
   const streams = new Set<(bytes: Uint8Array) => void>();
+  const chats = new Set<(bytes: Uint8Array) => void>();
   let active = 0;
   Object.assign(window, {
     vibesysGateway: {
@@ -114,8 +125,13 @@ export function installGateway(input: WireFixture): void {
         active += 1;
         let closed = false;
         if (method === input.methods.tail) {
-          streams.add(receive);
-          receive(new Uint8Array(input.tail));
+          if ([..._bytes].join(',') === input.chatRequest.join(',')) {
+            chats.add(receive);
+            receive(new Uint8Array(input.chat));
+          } else {
+            streams.add(receive);
+            receive(new Uint8Array(input.tail));
+          }
         } else if (method === input.methods.log) receive(new Uint8Array(input.log));
         else throw new Error('Unknown stream');
         return {
@@ -124,12 +140,16 @@ export function installGateway(input: WireFixture): void {
               closed = true;
               active -= 1;
               streams.delete(receive);
+              chats.delete(receive);
             }
           },
         };
       },
     },
     fakeGateway: {
+      appendChat: (bytes: number[]) => {
+        for (const receive of chats) receive(new Uint8Array(bytes));
+      },
       calls: () => calls,
       active: () => active,
       append: (bytes: number[]) => {
