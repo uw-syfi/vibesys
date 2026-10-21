@@ -78,6 +78,8 @@ from vs_core._generated.vibesys.core.v1.vocabulary_cv import (
     ChargeKind,
     DigestScheme,
     EvidenceKind,
+    LifecycleClass,
+    ObservationStatus,
 )
 from vs_core._values import deeply_immutable, emit_fragment
 
@@ -319,26 +321,6 @@ class DependencyRef(Value):
 
     decision_id: DecisionId | None = None
     request_id: RequestId | None = None
-
-
-class LifecycleClass(StrEnum):
-    """Lifecycle class lifecycle contract."""
-
-    QUERY = "query"
-    IDEMPOTENT_WRITE = "idempotent_external_write"
-    OWNED_JOB = "owned_long_running_job"
-    SESSION_TURN = "session_turn"
-
-
-class ObservationStatus(StrEnum):
-    """Observation status lifecycle contract."""
-
-    SUCCEEDED = "succeeded"
-    PENDING = "pending"
-    CANCELLED = "cancelled"
-    REJECTED = "rejected"
-    FAILED = "failed"
-    UNKNOWN = "unknown"
 
 
 RETRYABLE_FAILURES = frozenset(

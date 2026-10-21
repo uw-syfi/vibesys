@@ -252,3 +252,8 @@ def test_immutable_acceptance_proof_stays_bound_to_its_original_evidence(
         changed[field] = "failed"
     with pytest.raises(ValidationError, match="acceptance_receipt"):
         shared_values.EvidenceRef.model_validate_json(json.dumps(payload))
+
+
+@pytest.mark.parametrize("name", ["LifecycleClass", "ObservationStatus"])
+def test_shared_enum_dependencies_keep_the_existing_public_identity(name: str) -> None:
+    assert getattr(core, name) is getattr(shared_values, name)
