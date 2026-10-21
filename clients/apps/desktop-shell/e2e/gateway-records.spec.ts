@@ -164,6 +164,13 @@ for (const kind of ['short', 'live', 'blobs'] as const)
       await page.getByRole('radio', {name: 'Ideas', exact: true}).click();
       await page.getByRole('option', {name: /^Idea 1 /}).click();
       await capture('idea');
+      await page
+        .getByRole('listbox', {name: /steps$/})
+        .getByRole('option', {name: /Implementer/i})
+        .first()
+        .click();
+      await expect(page.getByRole('region', {name: 'Implement', exact: true})).toBeVisible();
+      await capture('step');
       await toggle.uncheck();
       await expect(page.getByRole('button', {name: 'Chat', exact: true})).toBeVisible();
       expect(

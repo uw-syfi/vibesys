@@ -559,6 +559,28 @@ export function RunScreen(props: {
   );
 }
 
+function RunHeader(
+  props: Parameters<typeof Header>[0] & {readonly scrubber: boolean},
+): JSX.Element {
+  const {scrubber, ...header} = props;
+  const {state, dispatch} = props;
+  return (
+    <Stack gap="space-2">
+      <Header {...header} />
+      {scrubber ? (
+        <RunScrubber
+          log={state.run.trace}
+          view={state.view}
+          ended={runHasEnded(state)}
+          wall={runWallNow(state)}
+          position={state.positionWord}
+          change={view => dispatch({type: 'view', view})}
+        />
+      ) : null}
+    </Stack>
+  );
+}
+
 function RunScreenBody(props: {
   readonly state: RunPageState;
   readonly model: RunModel;
@@ -623,24 +645,14 @@ function RunScreenBody(props: {
     <Screen
       density="compact"
       header={
-        <Stack gap="space-2">
-          <Header
-            state={state}
-            names={names}
-            dispatch={dispatch}
-            chat={props.chat}
-            toolbar={props.toolbar}
-          />
-          {traceArrival(state) === 'arrived' && before === null ? (
-            <RunScrubber
-              log={state.run.trace}
-              view={state.view}
-              ended={runHasEnded(state)}
-              wall={runWallNow(state)}
-              change={view => dispatch({type: 'view', view})}
-            />
-          ) : null}
-        </Stack>
+        <RunHeader
+          state={state}
+          names={names}
+          dispatch={dispatch}
+          chat={props.chat}
+          toolbar={props.toolbar}
+          scrubber={traceArrival(state) === 'arrived' && before === null}
+        />
       }
     >
       <StopBanner state={state} dispatch={dispatch} />

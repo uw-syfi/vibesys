@@ -233,3 +233,21 @@ for (const [status, word] of [
       }
   });
 }
+
+test('the new scrubber reports monotone elapsed time without fabricating a wall-clock stamp', () => {
+  const epoch = storeRunFixture().records[0];
+  if (!epoch) throw new Error('epoch required');
+  const skeleton = foldSkeleton(seedSkeleton(), [
+    epoch,
+    create(RecordSchema, {
+      seq: 2n,
+      epoch: 1,
+      at: {seconds: 1700000001n},
+      body: {case: 'metric', value: {series: 'throughput', value: 100, clock: 90061}},
+    }),
+  ]);
+  const model = projectSkeleton(skeleton, 2n);
+  expect(model.latest).toBe(90061);
+  const state = skeletonScreenState(SEED, skeleton, model, runPageInitial(SEED));
+  expect(state.positionWord).toBe('25h 01m');
+});

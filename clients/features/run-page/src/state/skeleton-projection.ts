@@ -10,6 +10,7 @@ import {withLiveBest} from './live-best.js';
 import type {RunModel} from './run-model.js';
 import {type RunPageSeed, type RunPageState, runPageInitial} from './run-page.js';
 import {settleIdeas} from './settled-ideas.js';
+import {duration} from './span-reading.js';
 
 export {skeletonPositions} from '@vibesys/run-state/skeleton';
 
@@ -75,6 +76,7 @@ export function skeletonScreenState(
   return {
     ...ui,
     lifecycleWord: lifecycle.word,
+    positionWord: reading.latest === null ? 'Start' : duration(reading.latest),
     startupStages: reading.startup.map(step => ({
       id: step.stage,
       label: (
