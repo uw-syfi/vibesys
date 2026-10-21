@@ -670,6 +670,25 @@ def test_parent_release_never_erases_a_childs_independent_ownership() -> None:
     )
 
 
+def test_creator_request_release_does_not_erase_a_retained_resource_binding() -> None:
+    value = _envelope()
+    receipt = _receipt(
+        "workspace-bindings",
+        "binding",
+        {
+            "ensure_request": value["core"]["records"]["records"][0]["request_id"],
+            "mode": "isolated-child",
+            "base": value["core"]["run"]["facts"]["baseline"],
+            "resource_id": {"kind": "resource", "root": "retained-workspace"},
+            "workspace_id": "workspace-a",
+        },
+    )
+    result = _import(_sources()[0], receipt)
+    assert any(
+        row.identity == "retained-workspace" for row in _payloads(result, "external_identity")
+    )
+
+
 def test_project_retained_journal_is_bounded_and_keeps_original_bytes(tmp_path: Path) -> None:
     project = Project.open(tmp_path)
     path = project.event_journal_path_for(project.root, "run")

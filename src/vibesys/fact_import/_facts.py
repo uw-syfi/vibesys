@@ -219,9 +219,9 @@ class FactSet:
         identity = fact.value.value
         if identity.kind == "child-resource":
             return identity.identity in self._released_children
-        return (
-            identity.identity in self._released_resources
-            or identity.source_request in self._released_requests
+        return identity.identity in self._released_resources or (
+            identity.identity == identity.source_request
+            and identity.source_request in self._released_requests
         )
 
     def _child(self, source: ImportSource, path: str, item: ChildLease) -> None:
