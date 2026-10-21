@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
-from io import BytesIO
+from io import BytesIO, StringIO
 from typing import TYPE_CHECKING
 
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
+from entrypoints.control import control_main
 from entrypoints.host import main
 from vibesys.api import CONTROL_REQUEST
 from vibesys.api.host import host_call
@@ -266,3 +267,50 @@ def test_ended_run_refuses_new_requests_but_accepts_an_applied_retry(
     assert refused.result.value.code == "inbox_closed"
     assert refused.result.value.exit_code == 3
     assert inbox.status("new", ended="stopped") is None
+
+
+@pytest.mark.parametrize("cli_first", [True, False])
+@pytest.mark.parametrize(
+    ("arguments", "intent"),
+    [
+        (["pause"], Oneof("pause", PauseIntent())),
+        (["resume"], Oneof("resume", ResumeIntent(when=ResumeWhen.NOW))),
+        (["stop", "--mode", "cancel"], Oneof("stop", StopIntent(mode=StopMode.CANCEL))),
+        (
+            ["steer", "look here", "--role", "planner", "--standing"],
+            Oneof(
+                "steer",
+                SteerIntent(
+                    text="look here",
+                    target=SteerTarget(kind=SteerTargetKind.ROLE, id="planner"),
+                    mode=SteerMode.STANDING,
+                ),
+            ),
+        ),
+    ],
+)
+def test_legacy_cli_and_host_call_share_byte_identical_request_ids(
+    project: tuple[Project, str], arguments: list[str], intent: Oneof, *, cli_first: bool
+) -> None:
+    owner, run_id = project
+
+    def cli() -> None:
+        assert (
+            control_main(
+                [run_id, "--control-id", "shared", *arguments],
+                cwd=owner.root,
+                new_control_id=lambda: "unused",
+                out=StringIO(),
+                err=StringIO(),
+            )
+            == 0
+        )
+
+    if cli_first:
+        cli()
+    response = call(owner, run_id, intent, "shared")
+    assert response.result is not None
+    assert response.result.field == "post_intent"
+    if not cli_first:
+        cli()
+    assert len(owner.state.control_inbox(run_id).pending()) == 1

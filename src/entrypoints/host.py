@@ -17,7 +17,10 @@ if TYPE_CHECKING:
 
 def run(argv: list[str], *, cwd: Path) -> tuple[int, str, str]:
     """Run a host maintenance method and return exit code, stdout and stderr."""
-    parser = argparse.ArgumentParser(prog="vibesys host")
+    parser = argparse.ArgumentParser(
+        prog="vibesys host",
+        epilog="post-intent reads a HostCallRequest from stdin and writes a HostCallResponse to stdout.",
+    )
     methods = parser.add_subparsers(dest="method", required=True)
     convert = methods.add_parser("convert-run", help="convert a stopped run's JSONL journal")
     convert.add_argument("run", help="run id")
@@ -36,7 +39,12 @@ def main(
 ) -> int:
     """Run one host method from the current directory."""
     arguments = sys.argv[1:] if argv is None else argv
-    if arguments == ["post-intent"]:
+    if arguments[:1] == ["post-intent"]:
+        parser = argparse.ArgumentParser(
+            prog="vibesys host post-intent",
+            description="Read a binary HostCallRequest from stdin; write a binary HostCallResponse to stdout.",
+        )
+        parser.parse_args(arguments[1:])
         source = sys.stdin.buffer if stdin is None else stdin
         destination = sys.stdout.buffer if stdout is None else stdout
         destination.write(host_call(source.read((1 << 20) + 1)))
