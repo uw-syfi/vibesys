@@ -4,11 +4,12 @@ from copy import deepcopy
 from typing import Literal
 
 import pytest
-from hypothesis import given
+from hypothesis import example, given
 from hypothesis import strategies as st
 from protobuf import Oneof
 from protobuf.wkt.google.protobuf.descriptor_pb import FileDescriptorProto, FileDescriptorSet
 from protobuf.wkt.google.protobuf.timestamp_pb import Timestamp
+from scripts.generate_record_goldens import record_examples
 
 from vs_core.api.replay import ReplayArchive, ReplayError, ReplayScheduler, replay_descriptors
 from vs_proto.api import (
@@ -375,3 +376,44 @@ def test_duplicate_epoch_descriptor_names_fail_validation() -> None:
     )
     with pytest.raises(ValidationError, match="invalid ReplayStore"):
         decode([header])
+
+
+_NATIVE_RECORDS = record_examples()
+_NON_POLICY_RECORDS = tuple(
+    name
+    for name, record in _NATIVE_RECORDS.items()
+    if record.body is not None and record.body.field not in {"epoch_started", "legacy_event"}
+)
+
+
+def test_shared_record_corpus_covers_every_archive_body_family() -> None:
+    descriptor = Record.desc().proto
+    index = next(i for i, oneof in enumerate(descriptor.oneof_decl) if oneof.name == "body")
+    declared = {
+        field.name
+        for field in descriptor.field
+        if field.has_field("oneof_index") and field.oneof_index == index
+    }
+    assert declared == {record.body.field for record in _NATIVE_RECORDS.values() if record.body}
+    archive = decode([records()[0]])
+    for sequence, name in enumerate(_NON_POLICY_RECORDS, 2):
+        record = deepcopy(_NATIVE_RECORDS[name])
+        record.seq, record.clock = sequence, 0
+        archive.append(record)
+    assert archive.history == ()
+    assert archive.unresolved == ()
+    assert decode(ReplayStore.from_binary(archive.encode()).records).encode() == archive.encode()
+
+
+@pytest.mark.regression
+@given(names=st.lists(st.sampled_from(_NON_POLICY_RECORDS), min_size=1, max_size=12))
+@example(names=["chat_message"])
+def test_non_policy_native_histories_never_become_replay_operations(names: list[str]) -> None:
+    archive = decode([records()[0]])
+    for sequence, name in enumerate(names, 2):
+        record = deepcopy(_NATIVE_RECORDS[name])
+        record.seq, record.clock = sequence, 0
+        archive.append(record)
+        assert archive.history == ()
+        assert archive.unresolved == ()
+    assert archive.sequence == len(names) + 1

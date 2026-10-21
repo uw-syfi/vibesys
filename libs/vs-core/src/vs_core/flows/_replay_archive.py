@@ -203,7 +203,7 @@ class ReplayArchive:
                     self._span(record, body.change, body.span)
             case Oneof("notice", notice):
                 self._notice(notice.detail)
-            case Oneof("lifecycle" | "metric" | "stream" | "blob" | "intent", _):
+            case Oneof("lifecycle" | "metric" | "stream" | "blob" | "intent" | "chat", _):
                 pass
             case _:
                 problem = "unsupported record in keyed replay archive"
