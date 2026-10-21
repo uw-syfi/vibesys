@@ -247,7 +247,10 @@ class FileRunLogWriter:
         self._generation += 1
         if self._timer is not None:
             if self._loop is not None:
-                self._loop.call_soon_threadsafe(self._timer.cancel)
+                # The owner may close after its loop has already shut down.
+                # Generation fencing still prevents a stale timer from committing.
+                with suppress(RuntimeError):
+                    self._loop.call_soon_threadsafe(self._timer.cancel)
             self._timer = None
 
     def _check_open(self) -> None:

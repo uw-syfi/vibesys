@@ -14,6 +14,7 @@ from hypothesis import strategies as st
 
 from vs_proto.api import RUN_LOG_MAGIC, Keyframe, LegacyEvent, Oneof, Record, RunHead
 from vs_runlog.api import FileRunLogWriter, RunLogReader, encode_frame, fold_skeleton
+from vs_sim.api import yield_now
 from vs_sim.api.testing import (
     ManualClock,
     SimBlockingRunner,
@@ -283,3 +284,25 @@ def test_close_checkpoints_an_already_committed_epoch(tmp_path: Path) -> None:
     assert Keyframe.from_binary((tmp_path / "keyframes/3.pb").read_bytes()) == fold_skeleton(
         expected, log_offset=path.stat().st_size
     )
+
+
+def test_close_after_loop_shutdown_commits_and_releases_lock(tmp_path: Path) -> None:
+    clock = VirtualClock()
+    threads = SimThreads()
+
+    async def exercise() -> FileRunLogWriter:
+        writer = FileRunLogWriter(tmp_path / "run.log", clock=clock, threads=threads)
+        for record in initial_records():
+            writer.append(record)
+        writer.append(event(3))
+        await yield_now()
+        return writer
+
+    writer = run_virtual(clock, exercise())
+    writer.close()
+    writer.close()
+    assert head(tmp_path) == 3
+    with FileRunLogWriter(
+        tmp_path / "run.log", clock=ManualClock(), threads=SimThreads()
+    ) as reopened:
+        assert reopened.sequence == 3
