@@ -59,7 +59,6 @@ class FileRunLogWriter:
 
     def __init__(self, path: Path) -> None:
         """Create a log or scan and recover the existing log before appending."""
-        self.path = path
         self.sequence = 0
         self.epoch = 0
         if not path.exists():

@@ -5,8 +5,26 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from vs_proto.api import RUN_LOG_MAGIC, EpochStarted, LegacyEvent, Oneof, Record, Timestamp
+from vs_proto.api import (
+    RUN_LOG_MAGIC,
+    RUN_LOG_MAX_RECORD_BYTES,
+    EpochStarted,
+    LegacyEvent,
+    Oneof,
+    Record,
+    Timestamp,
+)
 from vs_runlog.api import encode_frame
+
+
+def _length_prefix(value: int) -> bytes:
+    prefix = bytearray()
+    continuation_bit = 128
+    while value >= continuation_bit:
+        prefix.append((value & 127) | continuation_bit)
+        value >>= 7
+    prefix.append(value)
+    return bytes(prefix)
 
 
 def fixtures() -> dict[str, bytes]:
@@ -37,7 +55,7 @@ def fixtures() -> dict[str, bytes]:
         "valid.runlog": RUN_LOG_MAGIC + first + second,
         "torn-tail.runlog": RUN_LOG_MAGIC + first + second[:-1],
         "bad-crc.runlog": RUN_LOG_MAGIC + first + bytes(damaged),
-        "over-cap.runlog": RUN_LOG_MAGIC + b"\x81\x80\x40",
+        "over-cap.runlog": RUN_LOG_MAGIC + _length_prefix(RUN_LOG_MAX_RECORD_BYTES + 1),
         "empty.runlog": RUN_LOG_MAGIC,
         "bad-magic.runlog": b"BADMAGIC",
     }

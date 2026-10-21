@@ -19,6 +19,7 @@ from vs_proto.api import (
     LegacyEvent,
     Oneof,
     Record,
+    Timestamp,
 )
 from vs_runlog.api import (
     FileRunLogWriter,
@@ -121,9 +122,7 @@ def test_resume_offset_and_recover_torn_tail(tmp_path: Path) -> None:
         assert list(RunLogReader(stream, boundary)) == [second]
 
 
-@pytest.mark.parametrize(
-    "contents", [b"BADMAGIC", RUN_LOG_MAGIC + b"\x81\x80\x40", RUN_LOG_MAGIC + b"\x80" * 10]
-)
+@pytest.mark.parametrize("contents", [b"BADMAGIC", RUN_LOG_MAGIC + b"\x80" * 10])
 def test_corruption_is_never_repaired(tmp_path: Path, contents: bytes) -> None:
     path = tmp_path / "run.log"
     path.write_bytes(contents)
@@ -132,30 +131,46 @@ def test_corruption_is_never_repaired(tmp_path: Path, contents: bytes) -> None:
     assert path.read_bytes() == contents
 
 
-@given(
-    st.lists(
-        st.tuples(st.booleans(), _TEXT, st.integers(min_value=0, max_value=2**32 - 1)), max_size=8
+@st.composite
+def _record_values(draw: st.DrawFn) -> Record:
+    uint32 = st.integers(min_value=0, max_value=2**32 - 1)
+    record = Record(
+        epoch=draw(uint32),
+        at=draw(
+            st.one_of(
+                st.none(),
+                st.builds(
+                    Timestamp,
+                    seconds=st.integers(min_value=-62135596800, max_value=253402300799),
+                    nanos=st.integers(min_value=0, max_value=999999999),
+                ),
+            )
+        ),
     )
-)
-def test_both_record_kinds_round_trip_with_arbitrary_epochs(
-    bodies: list[tuple[bool, str, int]],
-) -> None:
-    expected = [
-        Record(
-            seq=i,
-            epoch=epoch,
-            body=(
-                Oneof("epoch_started", EpochStarted(run_id=text, epoch=epoch))
-                if started
-                else Oneof("legacy_event", LegacyEvent(json=text))
+    if draw(st.booleans()):
+        record.body = Oneof(
+            "epoch_started",
+            EpochStarted(
+                run_id=draw(_TEXT),
+                epoch=draw(uint32),
+                tree_hash=draw(_TEXT),
+                dirty=draw(st.booleans()),
+                api_schema_hash=draw(_TEXT),
+                store_schema_hash=draw(_TEXT),
             ),
         )
-        for i, (started, text, epoch) in enumerate(bodies, 1)
-    ]
+    else:
+        record.body = Oneof("legacy_event", LegacyEvent(json=draw(_TEXT)))
+    return record
+
+
+@given(st.lists(_record_values(), max_size=8))
+def test_both_record_kinds_round_trip_with_arbitrary_fields(expected: list[Record]) -> None:
     with TemporaryDirectory() as directory:
         path = Path(directory) / "run.log"
         with FileRunLogWriter(path) as writer:
-            for record in expected:
+            for sequence, record in enumerate(expected, 1):
+                record.seq = sequence
                 writer.append(record)
         with path.open("rb") as stream:
             assert list(RunLogReader(stream)) == expected

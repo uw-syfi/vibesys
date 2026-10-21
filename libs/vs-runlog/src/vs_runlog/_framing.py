@@ -45,7 +45,9 @@ def encode_frame(record: Record) -> bytes:
         prefix.append((length & 127) | 128)
         length >>= 7
     prefix.append(length)
-    return bytes(prefix) + google_crc32c.value(payload).to_bytes(4, "little") + payload
+    return (
+        bytes(prefix) + google_crc32c.value(payload).to_bytes(_CHECKSUM_BYTES, "little") + payload
+    )
 
 
 def read_frame(stream: BinaryIO, offset: int) -> tuple[Record | None, ReadStop]:
