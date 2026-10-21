@@ -15,7 +15,7 @@ _CONTINUATION_BIT = 128
 _CHECKSUM_BYTES = 4
 
 
-class StopReason(StrEnum):
+class RunLogStopReason(StrEnum):
     """Why a reader stopped at its next record boundary."""
 
     END = "end"
@@ -27,7 +27,7 @@ class StopReason(StrEnum):
 class ReadStop:
     """Stop offset is the first byte of the incomplete or corrupt frame."""
 
-    reason: StopReason
+    reason: RunLogStopReason
     offset: int
     detail: str = ""
 
@@ -54,15 +54,15 @@ def read_frame(stream: BinaryIO, offset: int) -> tuple[Record | None, ReadStop]:
     for index in range(_MAX_VARINT_BYTES):
         byte = stream.read(1)
         if not byte:
-            reason = StopReason.END if index == 0 else StopReason.TORN_TAIL
+            reason = RunLogStopReason.END if index == 0 else RunLogStopReason.TORN_TAIL
             return None, ReadStop(reason, offset)
         length |= (byte[0] & 127) << (7 * index)
         if length > RUN_LOG_MAX_RECORD_BYTES:
-            return None, ReadStop(StopReason.CORRUPTION, offset, "length exceeds record cap")
+            return None, ReadStop(RunLogStopReason.CORRUPTION, offset, "length exceeds record cap")
         if not byte[0] & 128:
             break
     else:
-        return None, ReadStop(StopReason.CORRUPTION, offset, "invalid length varint")
+        return None, ReadStop(RunLogStopReason.CORRUPTION, offset, "invalid length varint")
     return _read_payload(stream, offset, length)
 
 
@@ -70,12 +70,12 @@ def _read_payload(stream: BinaryIO, offset: int, length: int) -> tuple[Record | 
     checksum = stream.read(_CHECKSUM_BYTES)
     payload = stream.read(length)
     if len(checksum) != _CHECKSUM_BYTES or len(payload) != length:
-        return None, ReadStop(StopReason.TORN_TAIL, offset)
+        return None, ReadStop(RunLogStopReason.TORN_TAIL, offset)
     if google_crc32c.value(payload) != int.from_bytes(checksum, "little"):
-        return None, ReadStop(StopReason.CORRUPTION, offset, "CRC32C mismatch")
+        return None, ReadStop(RunLogStopReason.CORRUPTION, offset, "CRC32C mismatch")
     try:
         record = Record.from_binary(payload)
         validate(record)
     except ValueError as exc:
-        return None, ReadStop(StopReason.CORRUPTION, offset, f"invalid Record: {exc}")
-    return record, ReadStop(StopReason.END, stream.tell())
+        return None, ReadStop(RunLogStopReason.CORRUPTION, offset, f"invalid Record: {exc}")
+    return record, ReadStop(RunLogStopReason.END, stream.tell())

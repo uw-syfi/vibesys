@@ -23,7 +23,7 @@ from vs_proto.api import (
 from vs_runlog.api import (
     FileRunLogWriter,
     RunLogReader,
-    StopReason,
+    RunLogStopReason,
     encode_frame,
 )
 
@@ -49,7 +49,7 @@ def test_round_trip(texts: list[str]) -> None:
         with path.open("rb") as stream:
             reader = RunLogReader(stream)
             assert list(reader) == expected
-            assert reader.stop.reason is StopReason.END
+            assert reader.stop.reason is RunLogStopReason.END
         with FileRunLogWriter(path) as reopened:
             assert reopened.sequence == len(expected)
 
@@ -60,7 +60,7 @@ def test_any_truncation_is_clean_or_torn(texts: list[str], data: st.DataObject) 
     offset = data.draw(st.integers(min_value=0, max_value=len(encoded)))
     reader = RunLogReader(io.BytesIO(encoded[:offset]))
     list(reader)
-    assert reader.stop.reason in (StopReason.END, StopReason.TORN_TAIL)
+    assert reader.stop.reason in (RunLogStopReason.END, RunLogStopReason.TORN_TAIL)
 
 
 @given(_TEXT, st.data())
@@ -72,7 +72,7 @@ def test_each_payload_byte_flip_is_detected(text: str, data: st.DataObject) -> N
     encoded[index] ^= data.draw(st.integers(min_value=1, max_value=255))
     reader = RunLogReader(io.BytesIO(encoded))
     assert list(reader) == []
-    assert reader.stop.reason is StopReason.CORRUPTION
+    assert reader.stop.reason is RunLogStopReason.CORRUPTION
     assert reader.stop.offset == len(RUN_LOG_MAGIC)
 
 
@@ -207,4 +207,4 @@ def test_recovery_at_any_truncation_preserves_committed_prefix(
         with path.open("rb") as stream:
             recovered = RunLogReader(stream)
             assert list(recovered) == [*committed, next_record]
-            assert recovered.stop.reason is StopReason.END
+            assert recovered.stop.reason is RunLogStopReason.END

@@ -11,7 +11,7 @@ if TYPE_CHECKING:
 
     from vs_proto.api import Record
 from vs_proto.api import RUN_LOG_MAGIC
-from vs_runlog._framing import ReadStop, StopReason, encode_frame, read_frame
+from vs_runlog._framing import ReadStop, RunLogStopReason, encode_frame, read_frame
 
 
 class RunLogReader:
@@ -24,7 +24,7 @@ class RunLogReader:
             raise ValueError(message)
         self._stream = stream
         self._offset = offset
-        self.stop = ReadStop(StopReason.END, offset)
+        self.stop = ReadStop(RunLogStopReason.END, offset)
 
     def __iter__(self) -> Iterator[Record]:
         """Yield complete records, leaving torn and corrupt frames unconsumed."""
@@ -32,10 +32,14 @@ class RunLogReader:
         magic = self._stream.read(len(RUN_LOG_MAGIC))
         if magic != RUN_LOG_MAGIC:
             reason = (
-                StopReason.TORN_TAIL if RUN_LOG_MAGIC.startswith(magic) else StopReason.CORRUPTION
+                RunLogStopReason.TORN_TAIL
+                if RUN_LOG_MAGIC.startswith(magic)
+                else RunLogStopReason.CORRUPTION
             )
             self.stop = ReadStop(
-                reason, 0, "incomplete magic" if reason is StopReason.TORN_TAIL else "bad magic"
+                reason,
+                0,
+                "incomplete magic" if reason is RunLogStopReason.TORN_TAIL else "bad magic",
             )
             return
         self._stream.seek(self._offset or len(RUN_LOG_MAGIC))
@@ -74,10 +78,10 @@ class FileRunLogWriter:
                     raise ValueError(message)
                 self.sequence = record.seq
                 self.epoch = max(self.epoch, record.epoch)
-            if reader.stop.reason is StopReason.CORRUPTION:
+            if reader.stop.reason is RunLogStopReason.CORRUPTION:
                 message = f"corrupt run.log at byte {reader.stop.offset}: {reader.stop.detail}"
                 raise ValueError(message)
-            if reader.stop.reason is StopReason.TORN_TAIL:
+            if reader.stop.reason is RunLogStopReason.TORN_TAIL:
                 stream.truncate(reader.stop.offset)
                 if reader.stop.offset == 0:
                     stream.seek(0)

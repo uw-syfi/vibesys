@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 from vibesys.events import CoreEvent, CoreEventType
 from vs_decode.api import Unreadable, decode_json
 from vs_proto.api import RUN_LOG_MAX_RECORD_BYTES, Timestamp
-from vs_runlog.api import LegacyRunLogTee, RunLogReader, StopReason
+from vs_runlog.api import LegacyRunLogTee, RunLogReader, RunLogStopReason
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -57,10 +57,10 @@ def _already_complete(path: Path) -> bool:
         reader = RunLogReader(stream)
         for _ in reader:
             pass
-    if reader.stop.reason is StopReason.CORRUPTION:
+    if reader.stop.reason is RunLogStopReason.CORRUPTION:
         message = f"corrupt run.log at byte {reader.stop.offset}: {reader.stop.detail}"
         raise ValueError(message)
-    return reader.stop.reason is StopReason.END
+    return reader.stop.reason is RunLogStopReason.END
 
 
 def convert_run(project: Project, run_id: str) -> ConversionResult:
