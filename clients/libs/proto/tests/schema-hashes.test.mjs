@@ -8,7 +8,7 @@ import {
   FieldDescriptorProtoSchema,
   FileDescriptorSetSchema,
 } from '@bufbuild/protobuf/wkt';
-import {API_SCHEMA_HASH, STORE_SCHEMA_HASH, schemaHash} from '../dist/index.js';
+import {API_SCHEMA_HASH, STORE_SCHEMA_HASH, schemaHash} from '@vibesys/proto';
 
 test('public schema identities are SHA-256 digests', () => {
   for (const hash of [API_SCHEMA_HASH, STORE_SCHEMA_HASH]) assert.match(hash, /^[0-9a-f]{64}$/);

@@ -98,6 +98,7 @@ dev = [
     "ruff==0.15.12",
     "twine",
     "ty==0.0.75",
+    "types-protobuf==7.35.1.20260906",
 ]
 test = [
     "hypothesis",
