@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 from protobuf import Oneof
 
@@ -21,6 +22,9 @@ from vs_proto.api import replay as pb
 from ._replay_history import AcceptedClock, AcceptedReplay, ReplayAcknowledgements
 from ._replay_identity import ENCODING_VERSION
 from ._replay_sources import ReplayError
+
+if TYPE_CHECKING:
+    from protobuf.wkt.google.protobuf.any_pb import Any
 
 
 def _execution(span: Span) -> bytes:
@@ -150,25 +154,32 @@ class ReplayArchive:
                 problem = "replay record belongs to no current epoch"
                 raise ReplayError(problem)
             case Oneof("span", body) if body.span is not None:
-                self._span(record, body.change, body.span)
+                if body.span.replay is None:
+                    self._plain_span(body.span)
+                else:
+                    self._span(record, body.change, body.span)
             case Oneof("notice", notice):
-                if notice.detail is not None:
-                    name = notice.detail.type_url.rsplit("/", 1)[-1]
-                    if name == pb.ReplayPolicyDrift.desc().type_name:
-                        value = pb.ReplayPolicyDrift.from_binary(notice.detail.value)
-                        validate(value)
-                        if self._policy_drift is not None:
-                            problem = "an epoch records policy drift only once"
-                            raise ReplayError(problem)
-                        self._policy_drift = value.to_binary()
-                    elif name == pb.ReplayNotice.desc().type_name:
-                        value = pb.ReplayNotice.from_binary(notice.detail.value)
-                        self.acknowledgements = self.acknowledgements.record_notice(value)
-            case Oneof("lifecycle", _):
+                self._notice(notice.detail)
+            case Oneof("lifecycle" | "metric" | "stream" | "blob" | "intent", _):
                 pass
             case _:
                 problem = "unsupported record in keyed replay archive"
                 raise ReplayError(problem)
+
+    def _notice(self, detail: Any | None) -> None:
+        if detail is None:
+            return
+        name = detail.type_url.rsplit("/", 1)[-1]
+        if name == pb.ReplayPolicyDrift.desc().type_name:
+            drift = pb.ReplayPolicyDrift.from_binary(detail.value)
+            validate(drift)
+            if self._policy_drift is not None:
+                problem = "an epoch records policy drift only once"
+                raise ReplayError(problem)
+            self._policy_drift = drift.to_binary()
+        elif name == pb.ReplayNotice.desc().type_name:
+            notice = pb.ReplayNotice.from_binary(detail.value)
+            self.acknowledgements = self.acknowledgements.record_notice(notice)
 
     def _epoch(self, record: Record, epoch: EpochStarted) -> None:
         if (
@@ -206,10 +217,10 @@ class ReplayArchive:
 
     def _span(self, record: Record, change: Change, span: Span) -> None:
         operation = span.replay
-        if operation is None:
-            problem = "keyed operation span needs immutable replay metadata"
-            raise ReplayError(problem)
         previous_bytes = self._spans.get(span.id)
+        if operation is None:
+            problem = "keyed span requires replay metadata"
+            raise ReplayError(problem)
         if previous_bytes is None:
             if change != Change.STARTED or operation.outcome is not None or span.replay_observation:
                 problem = "replay operation must start before observation or outcome"
@@ -221,13 +232,14 @@ class ReplayArchive:
                 or _execution(previous) != _execution(span)
                 or previous.started_at != span.started_at
                 or previous.parent != span.parent
-                or previous.name != span.name
+                or previous.runtime_type != span.runtime_type
             ):
                 problem = "replay operation changed immutable start metadata"
                 raise ReplayError(problem)
             if previous.replay is not None and previous.replay.outcome is not None:
-                problem = "accepted replay operation cannot complete twice"
-                raise ReplayError(problem)
+                self._presentation_update(previous, span, change)
+                self._spans[span.id] = span.to_binary()
+                return
             old = previous.replay_observation
             if old is not None and (
                 span.replay_observation is None
@@ -259,3 +271,24 @@ class ReplayArchive:
                 raise ReplayError(problem)
             self._history.append(AcceptedReplay.from_record(record))
         self._spans[span.id] = span.to_binary()
+
+    def _plain_span(self, span: Span) -> None:
+        previous = self._spans.get(span.id)
+        if previous is not None and Span.from_binary(previous).replay is not None:
+            problem = "replay execution metadata cannot be removed from a span"
+            raise ReplayError(problem)
+        self._spans[span.id] = span.to_binary()
+
+    @staticmethod
+    def _presentation_update(previous: Span, current: Span, change: Change) -> None:
+        if change != Change.UPDATED:
+            problem = "accepted replay operation cannot complete twice"
+            raise ReplayError(problem)
+        if (
+            current.replay != previous.replay
+            or current.replay_observation != previous.replay_observation
+            or current.status != previous.status
+            or current.ended_at != previous.ended_at
+        ):
+            problem = "presentation update changed accepted execution metadata"
+            raise ReplayError(problem)

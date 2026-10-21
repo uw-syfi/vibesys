@@ -437,6 +437,9 @@ class ReplayRuntime:
     def _span(self, span_id: str) -> Span:
         for span in self._archive.spans:
             if span.id == span_id:
+                if span.replay is None:
+                    problem = f"span is not a keyed operation: {span_id}"
+                    raise ReplayError(problem)
                 return span
         problem = f"unknown replay span {span_id}"
         raise ReplayError(problem)
