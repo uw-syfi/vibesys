@@ -15,6 +15,7 @@ from pydantic import (
     model_validator,
 )
 
+from vs_core._corevalue import ContractValidationError
 from vs_core._generated.vibesys.core.v1.common_cv import (
     IDENTITY_PATTERN,
     ArtifactId,
@@ -51,6 +52,7 @@ from vs_core._generated.vibesys.core.v1.common_cv import (
     StopMode,
     StrategyId,
 )
+from vs_core._generated.vibesys.core.v1.contracts_cv import PureOption
 from vs_core._generated.vibesys.core.v1.control_cv import (
     MAX_REQUEST_RETRIES,
     ControlInput,
@@ -64,6 +66,20 @@ from vs_core._generated.vibesys.core.v1.control_cv import (
     RunPark,
     RunPause,
     ScopeInputTarget,
+)
+from vs_core._generated.vibesys.core.v1.leaves_cv import (
+    EvidenceKey,
+    RevisionRef,
+    TaskObjective,
+    TaskStage,
+)
+from vs_core._generated.vibesys.core.v1.vocabulary_cv import (
+    AssessmentKind,
+    ChargeKind,
+    DigestScheme,
+    EvidenceKind,
+    LifecycleClass,
+    ObservationStatus,
 )
 from vs_core._values import deeply_immutable, emit_fragment
 
@@ -282,56 +298,6 @@ type LifecycleCapability = Literal["park", "interrupt", "steer", "suspend", "pro
 """Host-offered lifecycle abilities. "profile-capture" admits profile measurements."""
 
 
-class EvidenceKey(Value):
-    """Full identity of one evidence record: the request that produced it plus its ID.
-
-    EvidenceId alone is only unique within one source request, so two jobs can
-    report the same ID. Every ledger, settlement and continuation lookup keys on
-    this pair.
-    """
-
-    kind: Literal["evidence_key"] = "evidence_key"
-    source_request: RequestId
-    evidence_id: EvidenceId
-
-
-class DigestScheme(StrEnum):
-    """Closed set of revision digest schemes; a digest is `<scheme>:<value>`."""
-
-    GIT_COMMIT = "git-commit"
-
-
-class RevisionRef(Value):
-    """Immutable revision identity.
-
-    Core compares digest as an opaque equality key. Producers that mint a ref from
-    a git commit use of_git_commit, which makes revision_id the commit and digest
-    `git-commit:<commit>`; consumers that must trust the scheme read git_commit,
-    which is None unless digest names the same commit as revision_id.
-    """
-
-    revision_id: RevisionId
-    digest: str = Field(min_length=1)
-
-    @classmethod
-    def of_git_commit(cls, commit: str) -> RevisionRef:
-        """Mint the canonical ref for one git commit."""
-        if not commit or commit != commit.strip() or ":" in commit:
-            raise ContractValidationError("commit", "must be a bare commit id")
-        return cls(
-            revision_id=RevisionId(root=commit), digest=f"{DigestScheme.GIT_COMMIT}:{commit}"
-        )
-
-    @property
-    def git_commit(self) -> str | None:
-        """The commit this ref names, or None when digest is not its git-commit digest."""
-        prefix = f"{DigestScheme.GIT_COMMIT}:"
-        if not self.digest.startswith(prefix):
-            return None
-        commit = self.digest.removeprefix(prefix)
-        return commit if commit and commit == self.revision_id.root else None
-
-
 THIS_RUN = Scope(owner=RunId(root="this-run"), generation=0)
 """The scope a search names for work the run itself owns. Core replaces it with the run's own."""
 
@@ -355,43 +321,6 @@ class DependencyRef(Value):
 
     decision_id: DecisionId | None = None
     request_id: RequestId | None = None
-
-
-class LifecycleClass(StrEnum):
-    """Lifecycle class lifecycle contract."""
-
-    QUERY = "query"
-    IDEMPOTENT_WRITE = "idempotent_external_write"
-    OWNED_JOB = "owned_long_running_job"
-    SESSION_TURN = "session_turn"
-
-
-class EvidenceKind(StrEnum):
-    """Closed measurement kinds used for eligibility requirements."""
-
-    CORRECTNESS = "correctness"
-    BENCHMARK = "benchmark"
-    PROFILING = "profiling"
-
-
-class AssessmentKind(StrEnum):
-    """Closed semantic assessment kinds, distinct from evidence production."""
-
-    CORRECTNESS = "correctness"
-    BENCHMARK = "benchmark"
-    PROFILING = "profiling"
-    LOCAL_VALIDATION = "local-validation"
-
-
-class ObservationStatus(StrEnum):
-    """Observation status lifecycle contract."""
-
-    SUCCEEDED = "succeeded"
-    PENDING = "pending"
-    CANCELLED = "cancelled"
-    REJECTED = "rejected"
-    FAILED = "failed"
-    UNKNOWN = "unknown"
 
 
 RETRYABLE_FAILURES = frozenset(
@@ -536,14 +465,6 @@ class OperationDescriptor(OperationSchemaRef):
         return self
 
 
-class ContractValidationError(ValueError):
-    """Invalid immutable value, identifying the exact field and violated contract."""
-
-    def __init__(self, path: str, detail: str) -> None:
-        """Name the offending field without masking a plausible default."""
-        super().__init__(f"{path}: {detail}")
-
-
 class OperationDescriptorError(ValueError):
     """Invalid operation ownership contract."""
 
@@ -576,27 +497,6 @@ MAX_REASK_CHAIN = MAX_CORRECTIONS + MAX_LOST_TURNS
 
 A re-ask after a turn lost to its provider (``PROVIDER_UNAVAILABLE``) is no link of the chain:
 the run's capacity gate bounds an outage, by its budget and the pause that follows it."""
-
-
-class PureOption(Value):
-    """Pure option lifecycle contract."""
-
-    key: str = Field(min_length=1)
-    value: str | int | Annotated[float, Field(allow_inf_nan=False)] | bool | None
-
-
-class TaskStage(Value):
-    """One stage the task can measure and the seconds its execution may take."""
-
-    stage_id: str = Field(min_length=1)
-    execution_seconds: float = Field(ge=0, allow_inf_nan=False)
-
-
-class TaskObjective(Value):
-    """One axis the task compares candidates on, and which way is better."""
-
-    name: str = Field(min_length=1)
-    direction: Literal["max", "min"]
 
 
 class TaskTerms(Value):
@@ -814,20 +714,6 @@ class Observation(Value):
         return self
 
 
-class ChargeKind(StrEnum):
-    """Separate currencies with different admission and refund semantics.
-
-    ADMISSION charges accepted registration including queued starts. ATTEMPT
-    charges a paid invocation or failed setup cycle without an existing paid
-    charge. TURN charges one logical invocation, regardless of max_turns or
-    charge class, and never refunds.
-    """
-
-    ADMISSION = "admission"
-    ATTEMPT = "attempt"
-    TURN = "turn"
-
-
 class ChargeReceipt(Value):
     """Authoritative charge and bounded, deduplicated refund proof.
 
@@ -983,3 +869,28 @@ class ExecuteRegisteredOperation(RequestBase):
         if len(set(identities)) != len(identities):
             raise ContractValidationError("inputs", "duplicate input_id")
         return self
+
+
+class ActionRefusal(StrEnum):
+    """Why core refuses an operator action: it could change nothing, or exceed the launch."""
+
+    NO_SUCH_SUBJECT = "no_such_subject"
+    """The run holds no such attempt, or no attempt at such an item."""
+    ENDED = "ended"
+    """The attempt has ended."""
+    PARKED = "parked"
+    """The attempt is blocked, or parked with no reopening queued: nothing a cancel could stop."""
+    ALREADY_CANCELLED = "already_cancelled"
+    """The item is already cancelled."""
+    ABOVE_LAUNCH_LIMIT = "above_launch_limit"
+    """A parallel limit above the one the run was launched with."""
+
+
+ACTION_REFUSAL_TEXT: dict[ActionRefusal, str] = {
+    ActionRefusal.NO_SUCH_SUBJECT: "the run holds no such attempt or item",
+    ActionRefusal.ENDED: "the attempt has ended",
+    ActionRefusal.PARKED: "the attempt is parked or blocked, so there is nothing to stop",
+    ActionRefusal.ALREADY_CANCELLED: "the item is already cancelled",
+    ActionRefusal.ABOVE_LAUNCH_LIMIT: "the limit is above the one the run was launched with",
+}
+"""The one wording of each refusal, wherever an operator reads it."""

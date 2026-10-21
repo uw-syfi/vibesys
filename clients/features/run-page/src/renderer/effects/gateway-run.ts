@@ -27,8 +27,8 @@ export function startGatewayRun(
         ),
         setting: fromPromise(({input}) => ports.setting(input)),
         loader: fromCallback<GatewayEvent, {runId: string}>(({input, sendBack}) =>
-          ports.reader.watch(input.runId, (load, failed) =>
-            sendBack({type: 'loaded', load, failed}),
+          ports.reader.watch(input.runId, (load, failed, hint) =>
+            sendBack({type: 'loaded', load, failed, ...(hint ? {hint} : {})}),
           ),
         ),
         content: fromPromise(({input, signal}) =>

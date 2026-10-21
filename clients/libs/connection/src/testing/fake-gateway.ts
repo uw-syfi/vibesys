@@ -6,6 +6,9 @@ import {
   API_SCHEMA_HASH,
   HelloRequestSchema,
   HelloResponseSchema,
+  type HostCallRequest,
+  HostCallRequestSchema,
+  HostService,
   TailRequestSchema,
 } from '@vibesys/proto';
 import {type GatewayDialer, HELLO_METHOD, TAIL_METHOD} from '../shell/gateway.js';
@@ -19,12 +22,19 @@ export interface FakeTail {
   end(code?: number, detail?: string): void;
 }
 
+export interface FakeHostCall {
+  readonly request: HostCallRequest;
+  end(code?: number, detail?: string): void;
+}
+
 export class FakeGateway implements GatewayDialer {
   readonly forces: boolean[] = [];
   schemaHash = API_SCHEMA_HASH;
   readonly #server = createServer();
   readonly #sessions = new Set<ServerHttp2Session>();
   readonly #tails: FakeTail[] = [];
+  readonly #hostCalls: FakeHostCall[] = [];
+  readonly #hostWaiters: Array<(call: FakeHostCall) => void> = [];
   readonly #waiters: Array<(tail: FakeTail) => void> = [];
 
   constructor() {
@@ -62,9 +72,21 @@ export class FakeGateway implements GatewayDialer {
           const waiter = this.#waiters.shift();
           if (waiter === undefined) this.#tails.push(tail);
           else waiter(tail);
+        } else if (method === `/${HostService.typeName}/${HostService.method.hostCall.name}`) {
+          this.#hostCall(stream, messages[0] as Uint8Array);
         } else end(stream, 12, 'unknown method');
       });
     });
+  }
+
+  #hostCall(stream: ServerHttp2Stream, bytes: Uint8Array): void {
+    const call: FakeHostCall = {
+      request: fromBinary(HostCallRequestSchema, bytes),
+      end: (code, detail) => end(stream, code, detail),
+    };
+    const waiter = this.#hostWaiters.shift();
+    if (waiter === undefined) this.#hostCalls.push(call);
+    else waiter(call);
   }
 
   #hello(stream: ServerHttp2Stream, bytes: Uint8Array): void {
@@ -106,6 +128,13 @@ export class FakeGateway implements GatewayDialer {
     return tail === undefined
       ? new Promise(resolve => this.#waiters.push(resolve))
       : Promise.resolve(tail);
+  }
+
+  nextHostCall(): Promise<FakeHostCall> {
+    const call = this.#hostCalls.shift();
+    return call === undefined
+      ? new Promise(resolve => this.#hostWaiters.push(resolve))
+      : Promise.resolve(call);
   }
 
   close(): void {

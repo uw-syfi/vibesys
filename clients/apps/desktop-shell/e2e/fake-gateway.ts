@@ -113,6 +113,8 @@ export function wire(fixture: StoreRunFixture, liveness?: RunLiveness): WireFixt
 export function installGateway(input: WireFixture): void {
   const calls: string[] = [];
   const streams = new Set<(bytes: Uint8Array) => void>();
+  const ended = new Set<(error?: string) => void>();
+  const history = [input.tail];
   const chats = new Set<(bytes: Uint8Array) => void>();
   const watchers = new Set<(bytes: Uint8Array) => void>();
   let active = 0;
@@ -143,7 +145,9 @@ export function installGateway(input: WireFixture): void {
         method: string,
         _bytes: Uint8Array,
         receive: (bytes: Uint8Array) => void,
+        finish: (error?: string) => void,
       ) => {
+        ended.add(finish);
         calls.push(method);
         active += 1;
         let closed = false;
@@ -155,7 +159,7 @@ export function installGateway(input: WireFixture): void {
             receive(new Uint8Array(input.chat));
           } else {
             streams.add(receive);
-            receive(new Uint8Array(input.tail));
+            for (const bytes of history) receive(new Uint8Array(bytes));
           }
         } else if (method === input.methods.watchRuns) {
           watchers.add(receive);
@@ -168,6 +172,7 @@ export function installGateway(input: WireFixture): void {
               closed = true;
               active -= 1;
               streams.delete(receive);
+              ended.delete(finish);
               chats.delete(receive);
               watchers.delete(receive);
             }
@@ -179,12 +184,16 @@ export function installGateway(input: WireFixture): void {
       appendChat: (bytes: number[]) => {
         for (const receive of chats) receive(new Uint8Array(bytes));
       },
+      disconnect: () => {
+        for (const finish of [...ended]) finish('SSH connection closed');
+      },
       calls: () => calls,
       active: () => active,
       observe: (bytes: number[]) => {
         for (const receive of watchers) receive(new Uint8Array(bytes));
       },
       append: (bytes: number[]) => {
+        history.push(bytes);
         for (const receive of streams) receive(new Uint8Array(bytes));
       },
     },

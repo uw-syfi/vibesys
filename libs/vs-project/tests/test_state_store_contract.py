@@ -9,7 +9,7 @@ from threading import Barrier
 from typing import TYPE_CHECKING, cast
 
 import pytest
-from hypothesis import given, settings
+from hypothesis import example, given, settings
 from hypothesis import strategies as st
 from pydantic import ValidationError
 
@@ -776,3 +776,28 @@ def test_a_document_from_a_newer_release_names_both_versions(
 
     with pytest.raises(StateDocumentDamagedError, match=rf"version {newer}.*reads version {read}"):
         store.commit(None, _envelope(0), fence, now=1)
+
+
+@pytest.mark.regression
+@given(payload=st.binary(max_size=1024))
+@example(payload=b"busy run")
+def test_observation_reads_the_whole_published_record_inside_a_writer_transaction(
+    make_store: StoreFactory, payload: bytes
+) -> None:
+    with TemporaryDirectory() as directory:
+        store = make_store(Path(directory))
+        assert store.observe() is None
+        fence = store.acquire("host-a", now=0, duration=100)
+        assert fence is not None
+        envelope = _envelope(0, payload)
+        assert store.commit(None, envelope, fence, now=1) == Committed(record=envelope)
+        observed = []
+        assert store.mutate_if_fenced(
+            fence, now=2, mutation=lambda: observed.append(store.observe())
+        )
+        assert observed == [envelope]
+        quarantine = QuarantinedEnvelope(
+            revision=1, schema_version=1, payload=payload, reason="blocked"
+        )
+        assert store.quarantine(0, quarantine, fence, now=3) == Committed(record=quarantine)
+        assert store.observe() == quarantine

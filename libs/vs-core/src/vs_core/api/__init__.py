@@ -1,777 +1,272 @@
-"""Published pure lifecycle API. Area implementations land in wave 1."""
+"""Published pure lifecycle API. Area implementations land in wave 1.
+
+Exports load on first use so host control commands do not load run execution machinery.
+"""
+
+from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from vs_core._attempt_track import (
-    AttemptTrack,
-    Step,
-)
-from vs_core._comparison import (
-    BASE_MAX_SAMPLES,
-    MAX_CORE_BASE_RUNS,
-    MIN_SAMPLES_WITHOUT_FLOOR,
-    VERDICT_NOISES,
-    ComparisonPolicy,
-    Measured,
-    Moment,
-    close_call,
-    compare,
-    comparison_of,
-    comparison_settling,
-    comparisons_of,
-    effect_resolution,
-    effect_verdict,
-    evaluation_of,
-    latest_comparisons,
-    moment_of,
-    policy_of,
-    samples_of,
-    terms_policy,
-    verdict_unreachable,
-)
-from vs_core._continuations import SuspensionRefusal
-from vs_core._corevalue import CoreValue, FrozenMap, TimestampValue
-from vs_core._envelope_migrations import (
-    MIGRATIONS as ENVELOPE_MIGRATIONS,
-)
-from vs_core._envelope_migrations import OLDEST_SUPPORTED_ENVELOPE_VERSION
-from vs_core._evidence_views import (
-    TurnCandidate,
-    TurnCandidateFailed,
-    TurnCandidatePending,
-    TurnCandidateRetained,
-    ledger_refs,
-    trusted_keys,
-    turn_candidate,
-)
-from vs_core._host_epochs import downtime
-from vs_core._ids import (
-    IdScheme,
-    attempt_id,
-    attempt_ref,
-    component,
-    decision_of_operation,
-    item_id,
-)
-from vs_core._ledger_compaction import compact_ledger
-from vs_core._measurement_recipe import (
-    MeasurementPurpose,
-    MeasurementRecipe,
-    StageBudget,
-)
-from vs_core._operator_actions import (
-    ACTION_REFUSAL_TEXT,
-    ActionRefusal,
-    ItemCancellation,
-    cancelled_items,
-    item_cancellation,
-    notice_input_id,
-    parallel_limit,
-)
-from vs_core._ownership import unreleased_records
-from vs_core._projection import (
-    attempt_view,
-    evidence_view,
-    pending_requests,
-    project,
-    scheduling_view,
-    session_view,
-    settlement_view,
-)
-from vs_core._proofs import requested_stop_mode, stop_mode
-from vs_core._registry import (
-    ENVELOPE_SCHEMA_VERSION,
-    ClosedRecordContradictionError,
-    ContractError,
-    OperationMigration,
-    OperationRegistration,
-    OperationRegistry,
-    UnexpectedEvent,
-    decode_stored,
-    operation_result,
-    upgrade_envelope,
-    validate_startup,
-)
-from vs_core._run_pause import (
-    DEADLINE_STOP,
-    ENVIRONMENT_STOP,
-    ControlRefusedError,
-    capacity_wait_stands,
-    control_refusal,
-    pause_after,
-    reopened,
-    reopens_after,
-    reopens_on_resume,
-    run_pause,
-    stands_after,
-)
-from vs_core._search_events import Translated, run_view, search_events, translate
-from vs_core._search_run import (
-    Advanced,
-    CoreStep,
-    Inbox,
-    SearchDriver,
-    SearchHost,
-    advance,
-    begin,
-    check_decisions,
-    deferred,
-)
-from vs_core._session_scope import write_turn_authority
-from vs_core._step import (
-    CoreReducers,
-    mid_turn_offers,
-    step,
-    suspension_refusal,
-    validate_terminal_inputs,
-)
-from vs_core._strategy_operations import (
-    CAPTURE_SUFFIX,
-    EXPORT_PATCH_SUFFIX,
-    INTERPRET_SUFFIX,
-    RENDER_SUFFIX,
-    RETAIN_SUFFIX,
-    VALIDATE_LOCAL_SUFFIX,
-    VERIFY_SUFFIX,
-    CaptureCommandBase,
-    CommandCapture,
-    EvidenceReadingsBase,
-    ExportPatchBase,
-    InterpretEvidenceBase,
-    LocalValidationReport,
-    OperationKindError,
-    ParentVerification,
-    PatchExport,
-    RenderedArtifacts,
-    RenderRoleArtifactsBase,
-    RetainVerifiedRevisionBase,
-    RetentionReceipt,
-    RolePromptContext,
-    StrategyOperations,
-    ValidateLocalBase,
-    VerifyParentRevisionBase,
-)
-from vs_core._turn_chain import TurnChain
-from vs_core._turn_holds import held_limit
-from vs_core._values import EncodingMismatchError, encode_json, share_unchanged, verify_encoding
-from vs_core._waitable import (
-    SuspendedTurn,
-    Waitable,
-    WaitableReply,
-    WaitingForDependency,
-    WaitingForEvaluation,
-    turn_reply,
-)
-from vs_core._waits import (
-    MAY_WAIT_ON,
-    RESOLUTIONS,
-    OpenWait,
-    Outcome,
-    Producer,
-    Resolution,
-    WaitingPhase,
-    WaitKind,
-    WaitSubject,
-    orphan_waits,
-    owned_job_subject,
-    phase_waits,
-    recorded_waits,
-    subjects,
-    waits,
-)
-from vs_core.api.routing import EVENT_ROUTES
-from vs_core.attempts import advance_attempt
-from vs_core.evaluation import advance_evaluation
-from vs_core.flows import (
-    ADOPTED,
-    INPUT,
-    MARKDOWN_PROSE_CONVENTION,
-    MAX_CORRECTIONS,
-    MAX_LOST_TURNS,
-    MAX_RENDER_SECONDS,
-    MAX_TURN_SECONDS,
-    NOT_ADOPTED,
-    PLAIN_LINE_CONVENTION,
-    Again,
-    Assessment,
-    AttemptOutcome,
-    CaptureSpec,
-    Channel,
-    ChannelKey,
-    Compared,
-    Deadlock,
-    Dropped,
-    EndReason,
-    FailureKind,
-    Flow,
-    FlowCodeChanged,
-    FlowDriver,
-    FlowState,
-    GaveUp,
-    Group,
-    Input,
-    Kept,
-    Label,
-    LabelFields,
-    Latch,
-    LatchKey,
-    NotOpened,
-    NotReopened,
-    NoWinner,
-    Parking,
-    Pending,
-    RestartSettled,
-    RestartSettleReason,
-    RetryPolicy,
-    RevisionReply,
-    Role,
-    RunTask,
-    RunTrace,
-    SearchDef,
-    Session,
-    Source,
-    Span,
-    SpanAttempt,
-    SpanChange,
-    SpanFailure,
-    SpanId,
-    SpanKind,
-    SpanLabel,
-    SpanLink,
-    SpanStatus,
-    SpanStop,
-    SpanType,
-    SpanWaitKind,
-    Stopped,
-    StopSource,
-    Task,
-    TaskStopped,
-    Timer,
-    TimeUp,
-    Tries,
-    Uncompared,
-    UnknownRoleError,
-    Waiting,
-    WaitingOn,
-    WireSpan,
-    Workspace,
-    flow,
-    hours,
-    markdown_prose,
-    minutes,
-    operation_span,
-    plain_line,
-    reply_errors,
-    resource,
-    span_changes,
-)
-from vs_core.records import advance_record, recover
-from vs_core.scheduling import schedule
-from vs_core.sessions import advance_session
-from vs_core.settlement import advance_adoption, settle
-from vs_core.testing.builders import initial_state
-from vs_core.types.agents import (
-    Backoff,
-    Charge,
-    ChargeClass,
-    Checkpoint,
-    Correctable,
-    Correction,
-    Declined,
-    Exchanges,
-    ProtocolContext,
-    ReplyCorrection,
-    ResumeFacts,
-    Retained,
-    WaitUnrecorded,
-)
-from vs_core.types.attempts import (
-    AttemptAdmitted,
-    AttemptBudget,
-    AttemptChargeRefundRequested,
-    AttemptCheckpoint,
-    AttemptClosure,
-    AttemptEvaluationExhausted,
-    AttemptEvaluationHistoryUpdated,
-    AttemptExhausted,
-    AttemptPhase,
-    AttemptReacquireRequested,
-    AttemptRegistered,
-    AttemptSetupFailed,
-    AttemptsEvent,
-    AttemptsState,
-    AttemptView,
-    CheckpointDecline,
-    CheckpointDeclined,
-    CheckpointResolved,
-    CloseAttemptScope,
-    DiscardWorkspace,
-    EnsureWorkspace,
-    InitialSessionsFailed,
-    InitialSessionsReady,
-    InvocationChargeRequested,
-    InvocationCheckpointed,
-    InvocationCheckpointRequested,
-    InvocationEnded,
-    ReacquisitionReady,
-    ReleaseDependencyBlocked,
-    ReleaseDependencyObserved,
-    RestoreRevision,
-    RetainRevision,
-    RetentionRequired,
-    RetireRequested,
-    RevisionOperationObserved,
-    RevisionOperationRequested,
-    ScopeAdmissionReopened,
-    ScopeReopenAdmitted,
-    ScopeReopenRequested,
-    SnapshotAndRetain,
-    WorkspaceObserved,
-    WorkspacePlan,
-    WorkspaceRequest,
-)
-from vs_core.types.common import (
-    IDENTITY_PATTERN,
-    MAX_REASK_CHAIN,
-    MAX_REQUEST_RETRIES,
-    MAX_SUBMISSIONS_PER_MEASUREMENT,
-    OPERATOR_ACTIONS,
-    THIS_RUN,
-    Area,
-    ArtifactId,
-    ArtifactRef,
-    AssessmentKind,
-    AttemptId,
-    AttemptRef,
-    Capabilities,
-    ChargeId,
-    ChargeKind,
-    ChargeReceipt,
-    ChildManifest,
-    CompletionStatus,
-    ContinuationId,
-    ContractValidationError,
-    ControlAction,
-    ControlId,
-    ControlInput,
-    Count,
-    DecisionId,
-    DependencyRef,
-    DependencyStatus,
-    DigestScheme,
-    EventCursor,
-    EventId,
-    EvidenceId,
-    EvidenceKey,
-    EvidenceKind,
-    Generation,
-    HostFence,
-    HostId,
-    Identity,
-    IdentityTypeError,
-    InputId,
-    InputTarget,
-    InvocationId,
-    InvocationInputTarget,
-    InvocationRef,
-    ItemId,
-    ItemInputTarget,
-    KernelNotImplementedError,
-    LifecycleCapability,
-    LifecycleClass,
-    Limits,
-    Observation,
-    ObservationStatus,
-    OperationDescriptor,
-    OperationId,
-    OperationNormalizationKind,
-    OperationRef,
-    OperationSchemaRef,
-    OperationWire,
-    PauseOwner,
-    PoolCapacity,
-    PoolId,
-    PureOption,
-    RejectionCode,
-    ReleaseDependency,
-    RequestBase,
-    RequestId,
-    RequestRetries,
-    ReservedInputOccurrence,
-    ResourceId,
-    ResumeWhen,
-    RevisionAuthority,
-    RevisionId,
-    RevisionNumber,
-    RevisionRef,
-    RoleId,
-    RoleInputTarget,
-    RunFacts,
-    RunId,
-    RunPark,
-    RunPause,
-    RunStatus,
-    SchemaRef,
-    Scope,
-    ScopeInputTarget,
-    ScopeReopenNormalization,
-    Seconds,
-    SessionId,
-    SettlementId,
-    SetupFailureKind,
-    SignalCycleError,
-    StopMode,
-    StrategyId,
-    TaskObjective,
-    TaskStage,
-    TaskTerms,
-    Value,
-    WorkspaceMode,
-    WorkspaceRef,
-    escalate_stop,
-)
-from vs_core.types.evaluation import (
-    MEASUREMENT_DIAGNOSTIC_LIMIT,
-    AgentCall,
-    AgentMeasurementRequested,
-    AgentRejection,
-    CancelOwnedJob,
-    CollectEvidence,
-    Continuation,
-    ContinuationJobsChanged,
-    ContinuationPhase,
-    ContinuationReopenRequested,
-    ContinuationRetireRequested,
-    ContinuationScopeReopened,
-    DeadlineReached,
-    EvaluationEvent,
-    EvaluationRequest,
-    EvaluationState,
-    EvidenceAcceptanceReceipt,
-    EvidenceRef,
-    HistoricalSubmissionReceipt,
-    InspectOwnedJob,
-    JobFactsBeforeObservation,
-    JobObserved,
-    JobQueued,
-    JobsDrainRequested,
-    JobTerminationRequested,
-    JobWaitLapsed,
-    MeasurementIdentity,
-    MeasurementPlan,
-    MeasurementPlanError,
-    MeasurementRequested,
-    MeasurementResult,
-    MeasurementStage,
-    MeasurementStageIdentity,
-    MeasurementSubmissionEnded,
-    MeasurementSubmissionObserved,
-    ObservationsDue,
-    ObservedJobFacts,
-    ObserveOwnedJob,
-    ObservePacing,
-    OwnedJob,
-    PreparedSubmissionReceipt,
-    RegisteredJobObserved,
-    RegisteredJobRequested,
-    RegisteredOwnedJob,
-    ResumeAuthorizationReceipt,
-    ResumeAuthorized,
-    ResumeRefusal,
-    ResumeRefused,
-    SnapshotResultRef,
-    SubmissionBudget,
-    SubmissionReceipt,
-    SubmitMeasurement,
-    TurnSuspended,
-    UnobservedJobFacts,
-)
-from vs_core.types.evaluation_history import (
-    AttemptEvaluationHistory,
-    AttemptEvaluationRecord,
-    AttemptTerminalReason,
-    BenchmarkFailure,
-    EvaluationHistoryAvailability,
-    EvaluationHistoryCursor,
-    EvaluationStageOutcome,
-    EvaluationStageResult,
-    EvaluationTerminalFacts,
-    RepeatedFailureGuidance,
-)
-from vs_core.types.job_observations import (
-    JobProgress,
-    JobTimeout,
-    MeasurementFailure,
-    TimedOut,
-    WaitEnd,
-)
-from vs_core.types.kernel import (
-    AreaChange,
-    AreaContext,
-    AttemptsContext,
-    ControlChanged,
-    CoreEvent,
-    CoreState,
-    CoreView,
-    DecisionCompleted,
-    DecisionReceipt,
-    DecisionSubmitted,
-    EvaluationContext,
-    ProposalSubmitted,
-    RecordsContext,
-    RunControlEvent,
-    RunEnded,
-    RunEnvelope,
-    RunState,
-    RunSummary,
-    SchedulingContext,
-    SessionsContext,
-    SettlementContext,
-    Signal,
-    StopLiftRecorded,
-    StrategyEvent,
-    Transition,
-)
-from vs_core.types.kinds import EventKind, WorkKind
-from vs_core.types.measurement import (
-    BaseClaim,
-    BaseRef,
-    Comparison,
-    ComparisonSettled,
-    ComparisonVerdict,
-    CoreRun,
-    EffectVerdict,
-    Reading,
-    Runaway,
-    Sample,
-    StatedComparison,
-)
-from vs_core.types.records import (
-    Attribution,
-    BlockedRecordStalled,
-    BlockRequest,
-    CancelOwnedResource,
-    CapacityHold,
-    ChildLease,
-    ChildObservationWatermark,
-    DispatchAuthorized,
-    ExecuteRegisteredOperation,
-    HostEpoch,
-    HostRenewed,
-    InspectRequest,
-    OperationResult,
-    OperationRetireRequested,
-    OperationView,
-    Outbound,
-    ReconciliationCommandLapsed,
-    ReconciliationDeadline,
-    ReconciliationRequest,
-    RecordsEvent,
-    RecordsState,
-    RecoveryBarrier,
-    RecoveryCheck,
-    RecoveryCheckWaitLapsed,
-    RecoveryPhase,
-    RecoveryReady,
-    RecoveryStarted,
-    RegisteredOperationRequest,
-    ReissueProof,
-    Request,
-    RequestObserved,
-    RequestPhase,
-    RequestPrepared,
-    RequestRecord,
-    RequestUndispatchable,
-    RetryDue,
-    TargetObservation,
-    TurnHeld,
-    inherit,
-    within,
-)
-from vs_core.types.scheduling import (
-    AdmissionControl,
-    AdmissionRequest,
-    AdmitAttempt,
-    AdoptionFenceLifted,
-    AttemptReady,
-    AttemptReopenRequest,
-    AttemptReopenRequested,
-    AttemptRequest,
-    AttemptRequested,
-    ClockAdvanced,
-    CloseAdmission,
-    ParallelLimitChanged,
-    QueueEntryRetired,
-    RegisterAttempt,
-    RunDrained,
-    SchedulingEvent,
-    SchedulingState,
-    SchedulingView,
-    Slot,
-    SlotChargeEnded,
-    SlotReleased,
-)
-from vs_core.types.scope_reopen import ScopedAdmissionReopen, ScopedAdmissionReopenOutcome
-from vs_core.types.search import (
-    AdoptionFinished,
-    AttemptSummary,
-    CheckpointKnown,
-    Discarded,
-    DiscardReason,
-    Event,
-    Interrupted,
-    MeasurementFinished,
-    MessageDelivered,
-    MessageDropped,
-    OperationFinished,
-    ResumeFailed,
-    ResumeReady,
-    RunView,
-    StopLifted,
-    StopRequested,
-    TimeReached,
-    TurnEnded,
-    TurnFinished,
-    TurnYielded,
-    WorkspaceClosed,
-    WorkspaceOpened,
-    YieldFailed,
-)
-from vs_core.types.session_inputs import (
-    InputDelivered,
-    InputDropped,
-    InputDropReason,
-    InputMode,
-    InputReceipt,
-    InputRecord,
-    MidTurnOffer,
-    SessionInput,
-)
-from vs_core.types.sessions import (
-    TURN_FAILURE_DETAIL_LIMIT,
-    Access,
-    AcquisitionStalled,
-    CancelTurn,
-    CheckpointFailure,
-    CheckpointStalled,
-    CloseSession,
-    DispatchTurn,
-    EnsureSession,
-    InputAcceptanceObserved,
-    InputMidTurnReleased,
-    InputOfferedMidTurn,
-    InputReservationReleased,
-    InputReservationRequested,
-    InputTakenMidTurn,
-    InspectTurn,
-    InterruptClaim,
-    InterruptCompleted,
-    InterruptFailed,
-    InterruptRequested,
-    Invocation,
-    InvocationCancellationRequested,
-    InvocationChargeRefunded,
-    InvocationChargesAuthorized,
-    InvocationCheckpointAvailable,
-    InvocationCheckpointPending,
-    RegisteredTurnRequested,
-    ResumeSessionTurn,
-    RunInvocationCheckpoint,
-    RunInvocationCheckpointObserved,
-    RunInvocationCheckpointRequested,
-    RunSessionsDrainRequested,
-    SessionAcquisitionGroup,
-    SessionDrainRequested,
-    SessionInputReceived,
-    SessionObserved,
-    SessionPhase,
-    SessionProjection,
-    SessionRequest,
-    SessionsAcquireRequested,
-    SessionsEvent,
-    SessionSpec,
-    SessionsState,
-    SessionView,
-    SessionWaitLapsed,
-    SnapshotAndRetainRun,
-    SteerReceived,
-    TurnFailureKind,
-    TurnInputsReserved,
-    TurnObserved,
-    TurnRequested,
-    TurnResult,
-    TurnSpec,
-    YieldPublicationFailed,
-)
-from vs_core.types.settlement import (
-    Adoption,
-    AdoptionFailed,
-    AdoptionFailureReason,
-    AdoptionObserved,
-    AdoptionRequest,
-    AdoptionResult,
-    AdoptionView,
-    AdoptRevision,
-    AssessmentAuthority,
-    AssessmentProposal,
-    AssessmentSubmitted,
-    AttemptSettled,
-    EvidenceRequirement,
-    EvidenceRequirements,
-    OwnershipSettled,
-    RetainedCandidate,
-    RunResultProposal,
-    Selection,
-    Settlement,
-    SettlementEvent,
-    SettlementState,
-    TrustedBaseline,
-    VerifyAdoption,
-    WinnerProposed,
-)
-from vs_core.types.strategy import (
-    Accepted,
-    Cancel,
-    Command,
-    Decision,
-    DecisionBase,
-    DecisionFeedback,
-    Disposition,
-    Finish,
-    Interrupt,
-    Measure,
-    Operation,
-    OperationCodecError,
-    OperationRequest,
-    Park,
-    ProposeWinner,
-    Rejected,
-    RequestTurn,
-    SearchDeclaration,
-    Settle,
-    StartAttempt,
-    StrategyState,
-    Submission,
-    Wait,
-    WakeAt,
-    Withdraw,
-    Work,
-)
-from vs_core.types.until import (
-    REPLY_ERROR_MESSAGE_LIMIT,
-    Failed,
-    FailureReason,
-    ReplyError,
-    ReplyErrorCode,
-    Until,
-    WaitRefusal,
-    WhileAlive,
-    WhileOpen,
-    Within,
-)
-from vs_core.types.waits import WaitOn
+from vs_core.api._exports import EXPORT_MODULES as _EXPORT_MODULES
 
 if TYPE_CHECKING:
+    from vs_core._attempt_track import AttemptTrack, Step
+    from vs_core._comparison import (
+        BASE_MAX_SAMPLES,
+        MAX_CORE_BASE_RUNS,
+        MIN_SAMPLES_WITHOUT_FLOOR,
+        VERDICT_NOISES,
+        ComparisonPolicy,
+        Measured,
+        Moment,
+        close_call,
+        compare,
+        comparison_of,
+        comparison_settling,
+        comparisons_of,
+        effect_resolution,
+        effect_verdict,
+        evaluation_of,
+        latest_comparisons,
+        moment_of,
+        policy_of,
+        samples_of,
+        terms_policy,
+        verdict_unreachable,
+    )
+    from vs_core._continuations import SuspensionRefusal
+    from vs_core._corevalue import CoreValue, FrozenMap, TimestampValue
+    from vs_core._envelope_migrations import MIGRATIONS as ENVELOPE_MIGRATIONS
+    from vs_core._envelope_migrations import OLDEST_SUPPORTED_ENVELOPE_VERSION
+    from vs_core._evidence_views import (
+        TurnCandidate,
+        TurnCandidateFailed,
+        TurnCandidatePending,
+        TurnCandidateRetained,
+        ledger_refs,
+        trusted_keys,
+        turn_candidate,
+    )
+    from vs_core._host_epochs import downtime
+    from vs_core._ids import (
+        IdScheme,
+        attempt_id,
+        attempt_ref,
+        component,
+        decision_of_operation,
+        item_id,
+    )
+    from vs_core._ledger_compaction import compact_ledger
+    from vs_core._measurement_recipe import MeasurementPurpose, MeasurementRecipe, StageBudget
+    from vs_core._operator_actions import (
+        ItemCancellation,
+        cancelled_items,
+        item_cancellation,
+        notice_input_id,
+        parallel_limit,
+    )
+    from vs_core._ownership import unreleased_records
+    from vs_core._projection import (
+        attempt_view,
+        evidence_view,
+        pending_requests,
+        project,
+        scheduling_view,
+        session_view,
+        settlement_view,
+    )
+    from vs_core._proofs import requested_stop_mode, stop_mode
+    from vs_core._registry import (
+        ENVELOPE_SCHEMA_VERSION,
+        ClosedRecordContradictionError,
+        ContractError,
+        OperationMigration,
+        OperationRegistration,
+        OperationRegistry,
+        UnexpectedEvent,
+        decode_stored,
+        operation_result,
+        upgrade_envelope,
+        validate_startup,
+    )
+    from vs_core._run_pause import (
+        DEADLINE_STOP,
+        ENVIRONMENT_STOP,
+        ControlRefusedError,
+        capacity_wait_stands,
+        control_refusal,
+        pause_after,
+        reopened,
+        reopens_after,
+        reopens_on_resume,
+        run_pause,
+        stands_after,
+    )
+    from vs_core._search_events import Translated, run_view, search_events, translate
+    from vs_core._search_run import (
+        Advanced,
+        CoreStep,
+        Inbox,
+        SearchDriver,
+        SearchHost,
+        advance,
+        begin,
+        check_decisions,
+        deferred,
+    )
+    from vs_core._session_scope import write_turn_authority
+    from vs_core._step import (
+        CoreReducers,
+        mid_turn_offers,
+        step,
+        suspension_refusal,
+        validate_terminal_inputs,
+    )
+    from vs_core._strategy_operations import (
+        CAPTURE_SUFFIX,
+        EXPORT_PATCH_SUFFIX,
+        INTERPRET_SUFFIX,
+        RENDER_SUFFIX,
+        RETAIN_SUFFIX,
+        VALIDATE_LOCAL_SUFFIX,
+        VERIFY_SUFFIX,
+        CaptureCommandBase,
+        CommandCapture,
+        EvidenceReadingsBase,
+        ExportPatchBase,
+        InterpretEvidenceBase,
+        LocalValidationReport,
+        OperationKindError,
+        ParentVerification,
+        PatchExport,
+        RenderedArtifacts,
+        RenderRoleArtifactsBase,
+        RetainVerifiedRevisionBase,
+        RetentionReceipt,
+        RolePromptContext,
+        StrategyOperations,
+        ValidateLocalBase,
+        VerifyParentRevisionBase,
+    )
+    from vs_core._turn_chain import TurnChain
+    from vs_core._turn_holds import held_limit
+    from vs_core._values import EncodingMismatchError, encode_json, share_unchanged, verify_encoding
+    from vs_core._waitable import (
+        SuspendedTurn,
+        Waitable,
+        WaitableReply,
+        WaitingForDependency,
+        WaitingForEvaluation,
+        turn_reply,
+    )
+    from vs_core._waits import (
+        MAY_WAIT_ON,
+        RESOLUTIONS,
+        OpenWait,
+        Outcome,
+        Producer,
+        Resolution,
+        WaitingPhase,
+        WaitKind,
+        WaitSubject,
+        orphan_waits,
+        owned_job_subject,
+        phase_waits,
+        recorded_waits,
+        subjects,
+        waits,
+    )
+    from vs_core.api.routing import EVENT_ROUTES
+    from vs_core.attempts import advance_attempt
+    from vs_core.evaluation import advance_evaluation
+    from vs_core.flows import (
+        ADOPTED,
+        INPUT,
+        MARKDOWN_PROSE_CONVENTION,
+        MAX_CORRECTIONS,
+        MAX_LOST_TURNS,
+        MAX_RENDER_SECONDS,
+        MAX_TURN_SECONDS,
+        NOT_ADOPTED,
+        PLAIN_LINE_CONVENTION,
+        Again,
+        Assessment,
+        AttemptOutcome,
+        CaptureSpec,
+        Channel,
+        ChannelKey,
+        Compared,
+        Deadlock,
+        Dropped,
+        EndReason,
+        FailureKind,
+        Flow,
+        FlowCodeChanged,
+        FlowDriver,
+        FlowState,
+        GaveUp,
+        Group,
+        Input,
+        Kept,
+        Label,
+        LabelFields,
+        Latch,
+        LatchKey,
+        NotOpened,
+        NotReopened,
+        NoWinner,
+        Parking,
+        Pending,
+        RestartSettled,
+        RestartSettleReason,
+        RetryPolicy,
+        RevisionReply,
+        Role,
+        RunTask,
+        RunTrace,
+        SearchDef,
+        Session,
+        Source,
+        Span,
+        SpanAttempt,
+        SpanChange,
+        SpanFailure,
+        SpanId,
+        SpanKind,
+        SpanLabel,
+        SpanLink,
+        SpanStatus,
+        SpanStop,
+        SpanType,
+        SpanWaitKind,
+        Stopped,
+        StopSource,
+        Task,
+        TaskStopped,
+        Timer,
+        TimeUp,
+        Tries,
+        Uncompared,
+        UnknownRoleError,
+        Waiting,
+        WaitingOn,
+        WireSpan,
+        Workspace,
+        flow,
+        hours,
+        markdown_prose,
+        minutes,
+        operation_span,
+        plain_line,
+        reply_errors,
+        resource,
+        span_changes,
+    )
+    from vs_core.records import advance_record, recover
+    from vs_core.scheduling import schedule
+    from vs_core.sessions import advance_session
+    from vs_core.settlement import advance_adoption, settle
+    from vs_core.testing.builders import initial_state
     from vs_core.testing.operations import operation_trace
     from vs_core.testing.traces import (
         AttemptsChange,
@@ -785,53 +280,845 @@ if TYPE_CHECKING:
         TraceFrame,
         trace_step,
     )
+    from vs_core.types.agents import (
+        Backoff,
+        Charge,
+        ChargeClass,
+        Checkpoint,
+        Correctable,
+        Correction,
+        Declined,
+        Exchanges,
+        ProtocolContext,
+        ReplyCorrection,
+        ResumeFacts,
+        Retained,
+        WaitUnrecorded,
+    )
+    from vs_core.types.attempts import (
+        AttemptAdmitted,
+        AttemptBudget,
+        AttemptChargeRefundRequested,
+        AttemptCheckpoint,
+        AttemptClosure,
+        AttemptEvaluationExhausted,
+        AttemptEvaluationHistoryUpdated,
+        AttemptExhausted,
+        AttemptPhase,
+        AttemptReacquireRequested,
+        AttemptRegistered,
+        AttemptSetupFailed,
+        AttemptsEvent,
+        AttemptsState,
+        AttemptView,
+        CheckpointDecline,
+        CheckpointDeclined,
+        CheckpointResolved,
+        CloseAttemptScope,
+        DiscardWorkspace,
+        EnsureWorkspace,
+        InitialSessionsFailed,
+        InitialSessionsReady,
+        InvocationChargeRequested,
+        InvocationCheckpointed,
+        InvocationCheckpointRequested,
+        InvocationEnded,
+        ReacquisitionReady,
+        ReleaseDependencyBlocked,
+        ReleaseDependencyObserved,
+        RestoreRevision,
+        RetainRevision,
+        RetentionRequired,
+        RetireRequested,
+        RevisionOperationObserved,
+        RevisionOperationRequested,
+        ScopeAdmissionReopened,
+        ScopeReopenAdmitted,
+        ScopeReopenRequested,
+        SnapshotAndRetain,
+        WorkspaceObserved,
+        WorkspacePlan,
+        WorkspaceRequest,
+    )
+    from vs_core.types.common import (
+        ACTION_REFUSAL_TEXT,
+        IDENTITY_PATTERN,
+        MAX_REASK_CHAIN,
+        MAX_REQUEST_RETRIES,
+        MAX_SUBMISSIONS_PER_MEASUREMENT,
+        OPERATOR_ACTIONS,
+        THIS_RUN,
+        ActionRefusal,
+        Area,
+        ArtifactId,
+        ArtifactRef,
+        AssessmentKind,
+        AttemptId,
+        AttemptRef,
+        Capabilities,
+        ChargeId,
+        ChargeKind,
+        ChargeReceipt,
+        ChildManifest,
+        CompletionStatus,
+        ContinuationId,
+        ContractValidationError,
+        ControlAction,
+        ControlId,
+        ControlInput,
+        Count,
+        DecisionId,
+        DependencyRef,
+        DependencyStatus,
+        DigestScheme,
+        EventCursor,
+        EventId,
+        EvidenceId,
+        EvidenceKey,
+        EvidenceKind,
+        Generation,
+        HostFence,
+        HostId,
+        Identity,
+        IdentityTypeError,
+        InputId,
+        InputTarget,
+        InvocationId,
+        InvocationInputTarget,
+        InvocationRef,
+        ItemId,
+        ItemInputTarget,
+        KernelNotImplementedError,
+        LifecycleCapability,
+        LifecycleClass,
+        Limits,
+        Observation,
+        ObservationStatus,
+        OperationDescriptor,
+        OperationId,
+        OperationNormalizationKind,
+        OperationRef,
+        OperationSchemaRef,
+        OperationWire,
+        PauseOwner,
+        PoolCapacity,
+        PoolId,
+        PureOption,
+        RejectionCode,
+        ReleaseDependency,
+        RequestBase,
+        RequestId,
+        RequestRetries,
+        ReservedInputOccurrence,
+        ResourceId,
+        ResumeWhen,
+        RevisionAuthority,
+        RevisionId,
+        RevisionNumber,
+        RevisionRef,
+        RoleId,
+        RoleInputTarget,
+        RunFacts,
+        RunId,
+        RunPark,
+        RunPause,
+        RunStatus,
+        SchemaRef,
+        Scope,
+        ScopeInputTarget,
+        ScopeReopenNormalization,
+        Seconds,
+        SessionId,
+        SettlementId,
+        SetupFailureKind,
+        SignalCycleError,
+        StopMode,
+        StrategyId,
+        TaskObjective,
+        TaskStage,
+        TaskTerms,
+        Value,
+        WorkspaceMode,
+        WorkspaceRef,
+        escalate_stop,
+    )
+    from vs_core.types.evaluation import (
+        MEASUREMENT_DIAGNOSTIC_LIMIT,
+        AgentCall,
+        AgentMeasurementRequested,
+        AgentRejection,
+        CancelOwnedJob,
+        CollectEvidence,
+        Continuation,
+        ContinuationJobsChanged,
+        ContinuationPhase,
+        ContinuationReopenRequested,
+        ContinuationRetireRequested,
+        ContinuationScopeReopened,
+        DeadlineReached,
+        EvaluationEvent,
+        EvaluationRequest,
+        EvaluationState,
+        EvidenceAcceptanceReceipt,
+        EvidenceRef,
+        HistoricalSubmissionReceipt,
+        InspectOwnedJob,
+        JobFactsBeforeObservation,
+        JobObserved,
+        JobQueued,
+        JobsDrainRequested,
+        JobTerminationRequested,
+        JobWaitLapsed,
+        MeasurementIdentity,
+        MeasurementPlan,
+        MeasurementPlanError,
+        MeasurementRequested,
+        MeasurementResult,
+        MeasurementStage,
+        MeasurementStageIdentity,
+        MeasurementSubmissionEnded,
+        MeasurementSubmissionObserved,
+        ObservationsDue,
+        ObservedJobFacts,
+        ObserveOwnedJob,
+        ObservePacing,
+        OwnedJob,
+        PreparedSubmissionReceipt,
+        RegisteredJobObserved,
+        RegisteredJobRequested,
+        RegisteredOwnedJob,
+        ResumeAuthorizationReceipt,
+        ResumeAuthorized,
+        ResumeRefusal,
+        ResumeRefused,
+        SnapshotResultRef,
+        SubmissionBudget,
+        SubmissionReceipt,
+        SubmitMeasurement,
+        TurnSuspended,
+        UnobservedJobFacts,
+    )
+    from vs_core.types.evaluation_history import (
+        AttemptEvaluationHistory,
+        AttemptEvaluationRecord,
+        AttemptTerminalReason,
+        BenchmarkFailure,
+        EvaluationHistoryAvailability,
+        EvaluationHistoryCursor,
+        EvaluationStageOutcome,
+        EvaluationStageResult,
+        EvaluationTerminalFacts,
+        RepeatedFailureGuidance,
+    )
+    from vs_core.types.job_observations import (
+        JobProgress,
+        JobTimeout,
+        MeasurementFailure,
+        TimedOut,
+        WaitEnd,
+    )
+    from vs_core.types.kernel import (
+        AreaChange,
+        AreaContext,
+        AttemptsContext,
+        ControlChanged,
+        CoreEvent,
+        CoreState,
+        CoreView,
+        DecisionCompleted,
+        DecisionReceipt,
+        DecisionSubmitted,
+        EvaluationContext,
+        ProposalSubmitted,
+        RecordsContext,
+        RunControlEvent,
+        RunEnded,
+        RunEnvelope,
+        RunState,
+        RunSummary,
+        SchedulingContext,
+        SessionsContext,
+        SettlementContext,
+        Signal,
+        StopLiftRecorded,
+        StrategyEvent,
+        Transition,
+    )
+    from vs_core.types.kinds import EventKind, WorkKind
+    from vs_core.types.measurement import (
+        BaseClaim,
+        BaseRef,
+        Comparison,
+        ComparisonSettled,
+        ComparisonVerdict,
+        CoreRun,
+        EffectVerdict,
+        Reading,
+        Runaway,
+        Sample,
+        StatedComparison,
+    )
+    from vs_core.types.records import (
+        Attribution,
+        BlockedRecordStalled,
+        BlockRequest,
+        CancelOwnedResource,
+        CapacityHold,
+        ChildLease,
+        ChildObservationWatermark,
+        DispatchAuthorized,
+        ExecuteRegisteredOperation,
+        HostEpoch,
+        HostRenewed,
+        InspectRequest,
+        OperationResult,
+        OperationRetireRequested,
+        OperationView,
+        Outbound,
+        ReconciliationCommandLapsed,
+        ReconciliationDeadline,
+        ReconciliationRequest,
+        RecordsEvent,
+        RecordsState,
+        RecoveryBarrier,
+        RecoveryCheck,
+        RecoveryCheckWaitLapsed,
+        RecoveryPhase,
+        RecoveryReady,
+        RecoveryStarted,
+        RegisteredOperationRequest,
+        ReissueProof,
+        Request,
+        RequestObserved,
+        RequestPhase,
+        RequestPrepared,
+        RequestRecord,
+        RequestUndispatchable,
+        RetryDue,
+        TargetObservation,
+        TurnHeld,
+        inherit,
+        within,
+    )
+    from vs_core.types.scheduling import (
+        AdmissionControl,
+        AdmissionRequest,
+        AdmitAttempt,
+        AdoptionFenceLifted,
+        AttemptReady,
+        AttemptReopenRequest,
+        AttemptReopenRequested,
+        AttemptRequest,
+        AttemptRequested,
+        ClockAdvanced,
+        CloseAdmission,
+        ParallelLimitChanged,
+        QueueEntryRetired,
+        RegisterAttempt,
+        RunDrained,
+        SchedulingEvent,
+        SchedulingState,
+        SchedulingView,
+        Slot,
+        SlotChargeEnded,
+        SlotReleased,
+    )
+    from vs_core.types.scope_reopen import ScopedAdmissionReopen, ScopedAdmissionReopenOutcome
+    from vs_core.types.search import (
+        AdoptionFinished,
+        AttemptSummary,
+        CheckpointKnown,
+        Discarded,
+        DiscardReason,
+        Event,
+        Interrupted,
+        MeasurementFinished,
+        MessageDelivered,
+        MessageDropped,
+        OperationFinished,
+        ResumeFailed,
+        ResumeReady,
+        RunView,
+        StopLifted,
+        StopRequested,
+        TimeReached,
+        TurnEnded,
+        TurnFinished,
+        TurnYielded,
+        WorkspaceClosed,
+        WorkspaceOpened,
+        YieldFailed,
+    )
+    from vs_core.types.session_inputs import (
+        InputDelivered,
+        InputDropped,
+        InputDropReason,
+        InputMode,
+        InputReceipt,
+        InputRecord,
+        MidTurnOffer,
+        SessionInput,
+    )
+    from vs_core.types.sessions import (
+        TURN_FAILURE_DETAIL_LIMIT,
+        Access,
+        AcquisitionStalled,
+        CancelTurn,
+        CheckpointFailure,
+        CheckpointStalled,
+        CloseSession,
+        DispatchTurn,
+        EnsureSession,
+        InputAcceptanceObserved,
+        InputMidTurnReleased,
+        InputOfferedMidTurn,
+        InputReservationReleased,
+        InputReservationRequested,
+        InputTakenMidTurn,
+        InspectTurn,
+        InterruptClaim,
+        InterruptCompleted,
+        InterruptFailed,
+        InterruptRequested,
+        Invocation,
+        InvocationCancellationRequested,
+        InvocationChargeRefunded,
+        InvocationChargesAuthorized,
+        InvocationCheckpointAvailable,
+        InvocationCheckpointPending,
+        RegisteredTurnRequested,
+        ResumeSessionTurn,
+        RunInvocationCheckpoint,
+        RunInvocationCheckpointObserved,
+        RunInvocationCheckpointRequested,
+        RunSessionsDrainRequested,
+        SessionAcquisitionGroup,
+        SessionDrainRequested,
+        SessionInputReceived,
+        SessionObserved,
+        SessionPhase,
+        SessionProjection,
+        SessionRequest,
+        SessionsAcquireRequested,
+        SessionsEvent,
+        SessionSpec,
+        SessionsState,
+        SessionView,
+        SessionWaitLapsed,
+        SnapshotAndRetainRun,
+        SteerReceived,
+        TurnFailureKind,
+        TurnInputsReserved,
+        TurnObserved,
+        TurnRequested,
+        TurnResult,
+        TurnSpec,
+        YieldPublicationFailed,
+    )
+    from vs_core.types.settlement import (
+        Adoption,
+        AdoptionFailed,
+        AdoptionFailureReason,
+        AdoptionObserved,
+        AdoptionRequest,
+        AdoptionResult,
+        AdoptionView,
+        AdoptRevision,
+        AssessmentAuthority,
+        AssessmentProposal,
+        AssessmentSubmitted,
+        AttemptSettled,
+        EvidenceRequirement,
+        EvidenceRequirements,
+        OwnershipSettled,
+        RetainedCandidate,
+        RunResultProposal,
+        Selection,
+        Settlement,
+        SettlementEvent,
+        SettlementState,
+        TrustedBaseline,
+        VerifyAdoption,
+        WinnerProposed,
+    )
+    from vs_core.types.strategy import (
+        Accepted,
+        Cancel,
+        Command,
+        Decision,
+        DecisionBase,
+        DecisionFeedback,
+        Disposition,
+        Finish,
+        Interrupt,
+        Measure,
+        Operation,
+        OperationCodecError,
+        OperationRequest,
+        Park,
+        ProposeWinner,
+        Rejected,
+        RequestTurn,
+        SearchDeclaration,
+        Settle,
+        StartAttempt,
+        StrategyState,
+        Submission,
+        Wait,
+        WakeAt,
+        Withdraw,
+        Work,
+    )
+    from vs_core.types.until import (
+        REPLY_ERROR_MESSAGE_LIMIT,
+        Failed,
+        FailureReason,
+        ReplyError,
+        ReplyErrorCode,
+        Until,
+        WaitRefusal,
+        WhileAlive,
+        WhileOpen,
+        Within,
+    )
+    from vs_core.types.waits import WaitOn
 
-# Declarative reducer traces are test data whose schema spans every signal and area state, so
-# building their models costs about a third of a second of every process that imports this
-# API. They load on first use; `from vs_core.api import ReducerTrace` still works.
-_LAZY_TRACE_NAMES = frozenset(
-    {
-        "AttemptsChange",
-        "EvaluationChange",
-        "RecordsChange",
-        "ReducerTrace",
-        "SchedulingChange",
-        "SessionsChange",
-        "SettlementChange",
-        "TraceChange",
-        "TraceFrame",
-        "trace_step",
-    }
-)
+_MODULES: dict[str, str] = {
+    name: module
+    for module, names in (
+        ("vs_core._attempt_track", ("AttemptTrack Step ")),
+        (
+            "vs_core._comparison",
+            (
+                "BASE_MAX_SAMPLES MAX_CORE_BASE_RUNS MIN_SAMPLES_WITHOUT_FLOOR VERDICT_NOISES "
+                "ComparisonPolicy Measured Moment close_call compare comparison_of comparison_settling "
+                "comparisons_of effect_resolution effect_verdict evaluation_of latest_comparisons "
+                "moment_of policy_of samples_of terms_policy verdict_unreachable "
+            ),
+        ),
+        ("vs_core._continuations", ("SuspensionRefusal ")),
+        ("vs_core._corevalue", ("CoreValue FrozenMap TimestampValue ")),
+        (
+            "vs_core._envelope_migrations",
+            ("ENVELOPE_MIGRATIONS OLDEST_SUPPORTED_ENVELOPE_VERSION "),
+        ),
+        (
+            "vs_core._evidence_views",
+            (
+                "TurnCandidate TurnCandidateFailed TurnCandidatePending TurnCandidateRetained "
+                "ledger_refs trusted_keys turn_candidate "
+            ),
+        ),
+        ("vs_core._host_epochs", ("downtime ")),
+        (
+            "vs_core._ids",
+            ("IdScheme attempt_id attempt_ref component decision_of_operation item_id "),
+        ),
+        ("vs_core._ledger_compaction", ("compact_ledger ")),
+        ("vs_core._measurement_recipe", ("MeasurementPurpose MeasurementRecipe StageBudget ")),
+        (
+            "vs_core._operator_actions",
+            ("ItemCancellation cancelled_items item_cancellation notice_input_id parallel_limit "),
+        ),
+        ("vs_core._ownership", ("unreleased_records ")),
+        (
+            "vs_core._projection",
+            (
+                "attempt_view evidence_view pending_requests project scheduling_view session_view "
+                "settlement_view "
+            ),
+        ),
+        ("vs_core._proofs", ("requested_stop_mode stop_mode ")),
+        (
+            "vs_core._registry",
+            (
+                "ENVELOPE_SCHEMA_VERSION ClosedRecordContradictionError ContractError "
+                "OperationMigration OperationRegistration OperationRegistry UnexpectedEvent "
+                "decode_stored operation_result upgrade_envelope validate_startup "
+            ),
+        ),
+        (
+            "vs_core._run_pause",
+            (
+                "DEADLINE_STOP ENVIRONMENT_STOP ControlRefusedError capacity_wait_stands "
+                "control_refusal pause_after reopened reopens_after reopens_on_resume run_pause "
+                "stands_after "
+            ),
+        ),
+        ("vs_core._search_events", ("Translated run_view search_events translate ")),
+        (
+            "vs_core._search_run",
+            (
+                "Advanced CoreStep Inbox SearchDriver SearchHost advance begin check_decisions "
+                "deferred "
+            ),
+        ),
+        ("vs_core._session_scope", ("write_turn_authority ")),
+        (
+            "vs_core._step",
+            ("CoreReducers mid_turn_offers step suspension_refusal validate_terminal_inputs "),
+        ),
+        (
+            "vs_core._strategy_operations",
+            (
+                "CAPTURE_SUFFIX EXPORT_PATCH_SUFFIX INTERPRET_SUFFIX RENDER_SUFFIX RETAIN_SUFFIX "
+                "VALIDATE_LOCAL_SUFFIX VERIFY_SUFFIX CaptureCommandBase CommandCapture "
+                "EvidenceReadingsBase ExportPatchBase InterpretEvidenceBase LocalValidationReport "
+                "OperationKindError ParentVerification PatchExport RenderedArtifacts "
+                "RenderRoleArtifactsBase RetainVerifiedRevisionBase RetentionReceipt RolePromptContext "
+                "StrategyOperations ValidateLocalBase VerifyParentRevisionBase "
+            ),
+        ),
+        ("vs_core._turn_chain", ("TurnChain ")),
+        ("vs_core._turn_holds", ("held_limit ")),
+        ("vs_core._values", ("EncodingMismatchError encode_json share_unchanged verify_encoding ")),
+        (
+            "vs_core._waitable",
+            (
+                "SuspendedTurn Waitable WaitableReply WaitingForDependency WaitingForEvaluation "
+                "turn_reply "
+            ),
+        ),
+        (
+            "vs_core._waits",
+            (
+                "MAY_WAIT_ON RESOLUTIONS OpenWait Outcome Producer Resolution WaitingPhase WaitKind "
+                "WaitSubject orphan_waits owned_job_subject phase_waits recorded_waits subjects waits "
+            ),
+        ),
+        ("vs_core.api.routing", ("EVENT_ROUTES ")),
+        ("vs_core.attempts", ("advance_attempt ")),
+        ("vs_core.evaluation", ("advance_evaluation ")),
+        (
+            "vs_core.flows",
+            (
+                "ADOPTED INPUT MARKDOWN_PROSE_CONVENTION MAX_CORRECTIONS MAX_LOST_TURNS "
+                "MAX_RENDER_SECONDS MAX_TURN_SECONDS NOT_ADOPTED PLAIN_LINE_CONVENTION Again "
+                "Assessment AttemptOutcome CaptureSpec Channel ChannelKey Compared Deadlock Dropped "
+                "EndReason FailureKind Flow FlowCodeChanged FlowDriver FlowState GaveUp Group Input "
+                "Kept Label LabelFields Latch LatchKey NotOpened NotReopened NoWinner Parking Pending "
+                "RestartSettled RestartSettleReason RetryPolicy RevisionReply Role RunTask RunTrace "
+                "SearchDef Session Source Span SpanAttempt SpanChange SpanFailure SpanId SpanKind "
+                "SpanLabel SpanLink SpanStatus SpanStop SpanType SpanWaitKind Stopped StopSource Task "
+                "TaskStopped Timer TimeUp Tries Uncompared UnknownRoleError Waiting WaitingOn WireSpan "
+                "Workspace flow hours markdown_prose minutes operation_span plain_line reply_errors "
+                "resource span_changes "
+            ),
+        ),
+        ("vs_core.records", ("advance_record recover ")),
+        ("vs_core.scheduling", ("schedule ")),
+        ("vs_core.sessions", ("advance_session ")),
+        ("vs_core.settlement", ("advance_adoption settle ")),
+        ("vs_core.testing.builders", ("initial_state ")),
+        (
+            "vs_core.types.agents",
+            (
+                "Backoff Charge ChargeClass Checkpoint Correctable Correction Declined Exchanges "
+                "ProtocolContext ReplyCorrection ResumeFacts Retained WaitUnrecorded "
+            ),
+        ),
+        (
+            "vs_core.types.attempts",
+            (
+                "AttemptAdmitted AttemptBudget AttemptChargeRefundRequested AttemptCheckpoint "
+                "AttemptClosure AttemptEvaluationExhausted AttemptEvaluationHistoryUpdated "
+                "AttemptExhausted AttemptPhase AttemptReacquireRequested AttemptRegistered "
+                "AttemptSetupFailed AttemptsEvent AttemptsState AttemptView CheckpointDecline "
+                "CheckpointDeclined CheckpointResolved CloseAttemptScope DiscardWorkspace "
+                "EnsureWorkspace InitialSessionsFailed InitialSessionsReady InvocationChargeRequested "
+                "InvocationCheckpointed InvocationCheckpointRequested InvocationEnded "
+                "ReacquisitionReady ReleaseDependencyBlocked ReleaseDependencyObserved RestoreRevision "
+                "RetainRevision RetentionRequired RetireRequested RevisionOperationObserved "
+                "RevisionOperationRequested ScopeAdmissionReopened ScopeReopenAdmitted "
+                "ScopeReopenRequested SnapshotAndRetain WorkspaceObserved WorkspacePlan "
+                "WorkspaceRequest "
+            ),
+        ),
+        (
+            "vs_core.types.common",
+            (
+                "ACTION_REFUSAL_TEXT ActionRefusal "
+                "IDENTITY_PATTERN MAX_REASK_CHAIN MAX_REQUEST_RETRIES MAX_SUBMISSIONS_PER_MEASUREMENT "
+                "OPERATOR_ACTIONS THIS_RUN Area ArtifactId ArtifactRef AssessmentKind AttemptId "
+                "AttemptRef Capabilities ChargeId ChargeKind ChargeReceipt ChildManifest "
+                "CompletionStatus ContinuationId ContractValidationError ControlAction ControlId "
+                "ControlInput Count DecisionId DependencyRef DependencyStatus DigestScheme EventCursor "
+                "EventId EvidenceId EvidenceKey EvidenceKind Generation HostFence HostId Identity "
+                "IdentityTypeError InputId InputTarget InvocationId InvocationInputTarget "
+                "InvocationRef ItemId ItemInputTarget KernelNotImplementedError LifecycleCapability "
+                "LifecycleClass Limits Observation ObservationStatus OperationDescriptor OperationId "
+                "OperationNormalizationKind OperationRef OperationSchemaRef OperationWire PauseOwner "
+                "PoolCapacity PoolId PureOption RejectionCode ReleaseDependency RequestBase RequestId "
+                "RequestRetries ReservedInputOccurrence ResourceId ResumeWhen RevisionAuthority "
+                "RevisionId RevisionNumber RevisionRef RoleId RoleInputTarget RunFacts RunId RunPark "
+                "RunPause RunStatus SchemaRef Scope ScopeInputTarget ScopeReopenNormalization Seconds "
+                "SessionId SettlementId SetupFailureKind SignalCycleError StopMode StrategyId "
+                "TaskObjective TaskStage TaskTerms Value WorkspaceMode WorkspaceRef escalate_stop "
+            ),
+        ),
+        (
+            "vs_core.types.evaluation",
+            (
+                "MEASUREMENT_DIAGNOSTIC_LIMIT AgentCall AgentMeasurementRequested AgentRejection "
+                "CancelOwnedJob CollectEvidence Continuation ContinuationJobsChanged ContinuationPhase "
+                "ContinuationReopenRequested ContinuationRetireRequested ContinuationScopeReopened "
+                "DeadlineReached EvaluationEvent EvaluationRequest EvaluationState "
+                "EvidenceAcceptanceReceipt EvidenceRef HistoricalSubmissionReceipt InspectOwnedJob "
+                "JobFactsBeforeObservation JobObserved JobQueued JobsDrainRequested "
+                "JobTerminationRequested JobWaitLapsed MeasurementIdentity MeasurementPlan "
+                "MeasurementPlanError MeasurementRequested MeasurementResult MeasurementStage "
+                "MeasurementStageIdentity MeasurementSubmissionEnded MeasurementSubmissionObserved "
+                "ObservationsDue ObservedJobFacts ObserveOwnedJob ObservePacing OwnedJob "
+                "PreparedSubmissionReceipt RegisteredJobObserved RegisteredJobRequested "
+                "RegisteredOwnedJob ResumeAuthorizationReceipt ResumeAuthorized ResumeRefusal "
+                "ResumeRefused SnapshotResultRef SubmissionBudget SubmissionReceipt SubmitMeasurement "
+                "TurnSuspended UnobservedJobFacts "
+            ),
+        ),
+        (
+            "vs_core.types.evaluation_history",
+            (
+                "AttemptEvaluationHistory AttemptEvaluationRecord AttemptTerminalReason "
+                "BenchmarkFailure EvaluationHistoryAvailability EvaluationHistoryCursor "
+                "EvaluationStageOutcome EvaluationStageResult EvaluationTerminalFacts "
+                "RepeatedFailureGuidance "
+            ),
+        ),
+        (
+            "vs_core.types.job_observations",
+            ("JobProgress JobTimeout MeasurementFailure TimedOut WaitEnd "),
+        ),
+        (
+            "vs_core.types.kernel",
+            (
+                "AreaChange AreaContext AttemptsContext ControlChanged CoreEvent CoreState CoreView "
+                "DecisionCompleted DecisionReceipt DecisionSubmitted EvaluationContext "
+                "ProposalSubmitted RecordsContext RunControlEvent RunEnded RunEnvelope RunState "
+                "RunSummary SchedulingContext SessionsContext SettlementContext Signal "
+                "StopLiftRecorded StrategyEvent Transition "
+            ),
+        ),
+        ("vs_core.types.kinds", ("EventKind WorkKind ")),
+        (
+            "vs_core.types.measurement",
+            (
+                "BaseClaim BaseRef Comparison ComparisonSettled ComparisonVerdict CoreRun "
+                "EffectVerdict Reading Runaway Sample StatedComparison "
+            ),
+        ),
+        (
+            "vs_core.types.records",
+            (
+                "Attribution BlockedRecordStalled BlockRequest CancelOwnedResource CapacityHold "
+                "ChildLease ChildObservationWatermark DispatchAuthorized ExecuteRegisteredOperation "
+                "HostEpoch HostRenewed InspectRequest OperationResult OperationRetireRequested "
+                "OperationView Outbound ReconciliationCommandLapsed ReconciliationDeadline "
+                "ReconciliationRequest RecordsEvent RecordsState RecoveryBarrier RecoveryCheck "
+                "RecoveryCheckWaitLapsed RecoveryPhase RecoveryReady RecoveryStarted "
+                "RegisteredOperationRequest ReissueProof Request RequestObserved RequestPhase "
+                "RequestPrepared RequestRecord RequestUndispatchable RetryDue TargetObservation "
+                "TurnHeld inherit within "
+            ),
+        ),
+        (
+            "vs_core.types.scheduling",
+            (
+                "AdmissionControl AdmissionRequest AdmitAttempt AdoptionFenceLifted AttemptReady "
+                "AttemptReopenRequest AttemptReopenRequested AttemptRequest AttemptRequested "
+                "ClockAdvanced CloseAdmission ParallelLimitChanged QueueEntryRetired RegisterAttempt "
+                "RunDrained SchedulingEvent SchedulingState SchedulingView Slot SlotChargeEnded "
+                "SlotReleased "
+            ),
+        ),
+        ("vs_core.types.scope_reopen", ("ScopedAdmissionReopen ScopedAdmissionReopenOutcome ")),
+        (
+            "vs_core.types.search",
+            (
+                "AdoptionFinished AttemptSummary CheckpointKnown Discarded DiscardReason Event "
+                "Interrupted MeasurementFinished MessageDelivered MessageDropped OperationFinished "
+                "ResumeFailed ResumeReady RunView StopLifted StopRequested TimeReached TurnEnded "
+                "TurnFinished TurnYielded WorkspaceClosed WorkspaceOpened YieldFailed "
+            ),
+        ),
+        (
+            "vs_core.types.session_inputs",
+            (
+                "InputDelivered InputDropped InputDropReason InputMode InputReceipt InputRecord "
+                "MidTurnOffer SessionInput "
+            ),
+        ),
+        (
+            "vs_core.types.sessions",
+            (
+                "TURN_FAILURE_DETAIL_LIMIT Access AcquisitionStalled CancelTurn CheckpointFailure "
+                "CheckpointStalled CloseSession DispatchTurn EnsureSession InputAcceptanceObserved "
+                "InputMidTurnReleased InputOfferedMidTurn InputReservationReleased "
+                "InputReservationRequested InputTakenMidTurn InspectTurn InterruptClaim "
+                "InterruptCompleted InterruptFailed InterruptRequested Invocation "
+                "InvocationCancellationRequested InvocationChargeRefunded InvocationChargesAuthorized "
+                "InvocationCheckpointAvailable InvocationCheckpointPending RegisteredTurnRequested "
+                "ResumeSessionTurn RunInvocationCheckpoint RunInvocationCheckpointObserved "
+                "RunInvocationCheckpointRequested RunSessionsDrainRequested SessionAcquisitionGroup "
+                "SessionDrainRequested SessionInputReceived SessionObserved SessionPhase "
+                "SessionProjection SessionRequest SessionsAcquireRequested SessionsEvent SessionSpec "
+                "SessionsState SessionView SessionWaitLapsed SnapshotAndRetainRun SteerReceived "
+                "TurnFailureKind TurnInputsReserved TurnObserved TurnRequested TurnResult TurnSpec "
+                "YieldPublicationFailed "
+            ),
+        ),
+        (
+            "vs_core.types.settlement",
+            (
+                "Adoption AdoptionFailed AdoptionFailureReason AdoptionObserved AdoptionRequest "
+                "AdoptionResult AdoptionView AdoptRevision AssessmentAuthority AssessmentProposal "
+                "AssessmentSubmitted AttemptSettled EvidenceRequirement EvidenceRequirements "
+                "OwnershipSettled RetainedCandidate RunResultProposal Selection Settlement "
+                "SettlementEvent SettlementState TrustedBaseline VerifyAdoption WinnerProposed "
+            ),
+        ),
+        (
+            "vs_core.types.strategy",
+            (
+                "Accepted Cancel Command Decision DecisionBase DecisionFeedback Disposition Finish "
+                "Interrupt Measure Operation OperationCodecError OperationRequest Park ProposeWinner "
+                "Rejected RequestTurn SearchDeclaration Settle StartAttempt StrategyState Submission "
+                "Wait WakeAt Withdraw Work "
+            ),
+        ),
+        (
+            "vs_core.types.until",
+            (
+                "REPLY_ERROR_MESSAGE_LIMIT Failed FailureReason ReplyError ReplyErrorCode Until "
+                "WaitRefusal WhileAlive WhileOpen Within "
+            ),
+        ),
+        ("vs_core.types.waits", ("WaitOn ")),
+        ("vs_core.testing.operations", ("operation_trace ")),
+        (
+            "vs_core.testing.traces",
+            (
+                "AttemptsChange EvaluationChange RecordsChange ReducerTrace SchedulingChange "
+                "SessionsChange SettlementChange TraceChange TraceFrame trace_step "
+            ),
+        ),
+    )
+    for name in names.split()
+}
+
+_ALIASES: dict[str, str] = {"ENVELOPE_MIGRATIONS": "MIGRATIONS"}
 
 
 def __getattr__(name: str) -> object:
-    """Load a lazily exported name from its module on first use."""
-    if name == "operation_trace":
-        from vs_core.testing.operations import (  # noqa: PLC0415  # lint-waiver: LW-209131 [PLC0415]; the reducer-trace models cost about a third of a second to build, so they load on first use instead of with every import of this API.
-            operation_trace,
-        )
+    """Load a declared export through a static pure-module import."""
+    module = _MODULES.get(name)
+    if module is None:
+        message = f"module vs_core.api has no attribute {name!r}"
+        raise AttributeError(message)
+    return _EXPORT_MODULES[module]()[_ALIASES.get(name, name)]
 
-        return operation_trace
-    if name in _LAZY_TRACE_NAMES:
-        from vs_core.testing import (  # noqa: PLC0415  # lint-waiver: LW-209132 [PLC0415]; the reducer-trace models cost about a third of a second to build, so they load on first use instead of with every import of this API.
-            traces,
-        )
 
-        return {
-            "AttemptsChange": traces.AttemptsChange,
-            "EvaluationChange": traces.EvaluationChange,
-            "RecordsChange": traces.RecordsChange,
-            "ReducerTrace": traces.ReducerTrace,
-            "SchedulingChange": traces.SchedulingChange,
-            "SessionsChange": traces.SessionsChange,
-            "SettlementChange": traces.SettlementChange,
-            "TraceChange": traces.TraceChange,
-            "TraceFrame": traces.TraceFrame,
-            "trace_step": traces.trace_step,
-        }[name]
-    message = f"module 'vs_core.api' has no attribute {name!r}"
-    raise AttributeError(message)
+def __dir__() -> list[str]:
+    return sorted(__all__)
 
 
 __all__ = [

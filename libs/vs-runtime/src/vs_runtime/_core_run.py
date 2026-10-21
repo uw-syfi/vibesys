@@ -427,6 +427,7 @@ class _Loop:
             self._shell.submit(ClockAdvanced(now_at=now), now_at=now)
             before = self._signature()
             refusal = await self._settle(now)
+            self._settle_controls()
             if refusal is None and self._core().records.recovery.phase == RecoveryPhase.READY:
                 self._shell.flush(now_at=now)
                 refusal = await self._settle(now)

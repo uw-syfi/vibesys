@@ -1,7 +1,7 @@
 import {unprovided} from '@vibesys/machine';
 import type {SkeletonResponse, TailResponse} from '@vibesys/proto';
 import {assign, setup} from 'xstate';
-import {ingestSkeleton, ingestTail, type SkeletonLoad} from './loading.js';
+import {ingestSkeleton, ingestTail, isFinalLoad, type SkeletonLoad} from './loading.js';
 
 export interface SkeletonLoaderInput {
   readonly runId: string;
@@ -34,7 +34,7 @@ export const skeletonLoaderMachine = setup({
     skeleton: unprovided<SkeletonResponse, string>('skeleton'),
     tail: unprovided<void, TailInput>('tail'),
   },
-  delays: {deadline: ({context}) => context.timeoutMs},
+  delays: {deadline: ({context}) => context.timeoutMs, retry: 1000},
   guards: {
     hasError: ({context}) => context.error !== undefined,
     caughtUp: ({context}) => context.load?.complete === true,
@@ -54,15 +54,17 @@ export const skeletonLoaderMachine = setup({
           actions: assign(({event}) => safely(() => ingestSkeleton(event.output))),
         },
         onError: {
-          target: 'failed',
-          actions: assign({error: ({event}) => transportFailure(event.error)}),
+          target: 'recovering',
+          actions: assign(({context, event}) => ({
+            error: tailFailure(context, transportFailure(event.error)),
+          })),
         },
       },
       after: {
         deadline: {
-          target: 'failed',
+          target: 'recovering',
           actions: assign({
-            error: (): SkeletonLoadFailure => ({kind: 'deadline', operation: 'skeleton'}),
+            error: ({context}) => tailFailure(context, {kind: 'deadline', operation: 'skeleton'}),
           }),
         },
       },
@@ -83,12 +85,14 @@ export const skeletonLoaderMachine = setup({
           };
         },
         onDone: {
-          target: 'failed',
-          actions: assign({error: (): SkeletonLoadFailure => ({kind: 'stream-ended'})}),
+          target: 'recovering',
+          actions: assign(({context}) => ({error: tailFailure(context, {kind: 'stream-ended'})})),
         },
         onError: {
-          target: 'failed',
-          actions: assign({error: ({event}) => transportFailure(event.error)}),
+          target: 'recovering',
+          actions: assign(({context, event}) => ({
+            error: tailFailure(context, transportFailure(event.error)),
+          })),
         },
       },
       on: {
@@ -101,12 +105,14 @@ export const skeletonLoaderMachine = setup({
           ),
         },
         failed: {
-          target: 'failed',
-          actions: assign({error: ({event}) => transportFailure(event.error)}),
+          target: 'recovering',
+          actions: assign(({context, event}) => ({
+            error: tailFailure(context, transportFailure(event.error)),
+          })),
         },
         closed: {
-          target: 'failed',
-          actions: assign({error: (): SkeletonLoadFailure => ({kind: 'stream-ended'})}),
+          target: 'recovering',
+          actions: assign(({context}) => ({error: tailFailure(context, {kind: 'stream-ended'})})),
         },
       },
       states: {
@@ -114,7 +120,7 @@ export const skeletonLoaderMachine = setup({
           always: {guard: 'caughtUp', target: 'live'},
           after: {
             deadline: {
-              target: '#skeletonLoader.failed',
+              target: '#skeletonLoader.recovering',
               actions: assign({
                 error: (): SkeletonLoadFailure => ({kind: 'deadline', operation: 'catch-up'}),
               }),
@@ -124,13 +130,14 @@ export const skeletonLoaderMachine = setup({
         live: {},
       },
     },
+    recovering: {after: {retry: 'loading'}},
     failed: {type: 'final'},
   },
 });
 
 function safely(fold: () => SkeletonLoad): Partial<Context> {
   try {
-    return {load: fold()};
+    return {load: fold(), error: undefined};
   } catch (error) {
     return {error: {kind: 'data', cause: error}};
   }
@@ -138,4 +145,12 @@ function safely(fold: () => SkeletonLoad): Partial<Context> {
 
 function transportFailure(cause: unknown): SkeletonLoadFailure {
   return {kind: 'transport', cause};
+}
+
+/** Losing a follower after a complete terminal prefix loses no live observation. */
+function tailFailure(
+  context: Context,
+  failure: SkeletonLoadFailure,
+): SkeletonLoadFailure | undefined {
+  return isFinalLoad(context.load) ? undefined : failure;
 }

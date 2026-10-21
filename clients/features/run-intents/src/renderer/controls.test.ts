@@ -182,6 +182,46 @@ test('a typed refusal preserves an outcome-stream failure for earlier pending re
   }
 });
 
+test('an ended outcome stream retries independently of an in-flight admission', async () => {
+  const {actor, bridge, clock} = fixture();
+  try {
+    actor.send({type: 'send', request});
+    bridge.streams[0]?.ended('connection lost');
+    expect(bridge.streams[0]?.cancelled).toBe(true);
+    expect(bridge.calls[0]?.cancelled).toBe(false);
+    clock.advanceBy(1000);
+    expect(bridge.streams).toHaveLength(2);
+    bridge.streams[1]?.receive(
+      toBinary(
+        TailResponseSchema,
+        create(TailResponseSchema, {
+          records: [
+            toBinary(
+              RecordSchema,
+              create(RecordSchema, {
+                seq: 1n,
+                body: {
+                  case: 'intent',
+                  value: {controlId: 'r-1', action: IntentAction.PAUSE, step: IntentStep.APPLIED},
+                },
+              }),
+            ),
+          ],
+        }),
+      ),
+    );
+    expect(actor.getSnapshot().context.entries[0]?.status).toBe('applied');
+    expect(actor.getSnapshot().context.error).toBeNull();
+    bridge.calls[0]?.resolve(admission('r-1'));
+    await waitFor(actor, snapshot => snapshot.matches({active: 'idle'}), {timeout: 1000});
+    expect(actor.getSnapshot().context.entries[0]?.status).toBe('applied');
+  } finally {
+    actor.stop();
+  }
+  expect(bridge.streams[1]?.cancelled).toBe(true);
+  expect(clock.pending).toBe(0);
+});
+
 test('relaunch confirms an epoch or a typed refusal and owns every transport call', async () => {
   for (const outcome of [
     {case: 'epoch', value: 2n} as const,

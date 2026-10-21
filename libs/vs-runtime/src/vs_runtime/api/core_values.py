@@ -10,9 +10,31 @@ from typing import TYPE_CHECKING, Any, cast
 
 from vs_core.api import TimestampValue
 from vs_proto.api import Timestamp, validate
+from vs_runtime._core_values.vibesys.core.v1.agent_facts_boundary import (
+    DECODERS as AGENT_FACTS_DECODERS,
+)
+from vs_runtime._core_values.vibesys.core.v1.agent_facts_boundary import (
+    ENCODERS as AGENT_FACTS_ENCODERS,
+)
 from vs_runtime._core_values.vibesys.core.v1.common_boundary import DECODERS as COMMON_DECODERS
 from vs_runtime._core_values.vibesys.core.v1.common_boundary import ENCODERS as COMMON_ENCODERS
+from vs_runtime._core_values.vibesys.core.v1.contracts_boundary import (
+    DECODERS as CONTRACTS_DECODERS,
+)
+from vs_runtime._core_values.vibesys.core.v1.contracts_boundary import (
+    ENCODERS as CONTRACTS_ENCODERS,
+)
 from vs_runtime._core_values.vibesys.core.v1.control_boundary import DECODERS, ENCODERS
+from vs_runtime._core_values.vibesys.core.v1.failures_boundary import DECODERS as FAILURES_DECODERS
+from vs_runtime._core_values.vibesys.core.v1.failures_boundary import ENCODERS as FAILURES_ENCODERS
+from vs_runtime._core_values.vibesys.core.v1.leaves_boundary import DECODERS as LEAVES_DECODERS
+from vs_runtime._core_values.vibesys.core.v1.leaves_boundary import ENCODERS as LEAVES_ENCODERS
+from vs_runtime._core_values.vibesys.core.v1.vocabulary_boundary import (
+    DECODERS as VOCABULARY_DECODERS,
+)
+from vs_runtime._core_values.vibesys.core.v1.vocabulary_boundary import (
+    ENCODERS as VOCABULARY_ENCODERS,
+)
 from vs_runtime._corevalue_wkt import decode_timestamp, encode_timestamp
 
 if TYPE_CHECKING:
@@ -21,8 +43,26 @@ if TYPE_CHECKING:
     from protobuf import Message
 
 
-_ENCODERS = {**COMMON_ENCODERS, **ENCODERS, TimestampValue: encode_timestamp}
-_DECODERS = {**COMMON_DECODERS, **DECODERS, Timestamp: decode_timestamp}
+_ENCODERS = {
+    **COMMON_ENCODERS,
+    **ENCODERS,
+    **VOCABULARY_ENCODERS,
+    **LEAVES_ENCODERS,
+    **CONTRACTS_ENCODERS,
+    **FAILURES_ENCODERS,
+    **AGENT_FACTS_ENCODERS,
+    TimestampValue: encode_timestamp,
+}
+_DECODERS = {
+    **COMMON_DECODERS,
+    **DECODERS,
+    **VOCABULARY_DECODERS,
+    **LEAVES_DECODERS,
+    **CONTRACTS_DECODERS,
+    **FAILURES_DECODERS,
+    **AGENT_FACTS_DECODERS,
+    Timestamp: decode_timestamp,
+}
 
 
 def to_proto(value: object) -> Message:

@@ -19,15 +19,18 @@ from hypothesis import strategies as st
 from vs_evaluation.api import (
     ContentDigest,
     EvaluationRequest,
+    EvaluationState,
     EvaluationStep,
     EvidenceFingerprints,
     EvidenceKind,
     ExecutorSubmissionError,
     SemanticEvaluationStage,
 )
+from vs_runtime.api.infrastructure import create_run_control_channel
 from vs_runtime.api.slurm_evaluation_stack import ScenarioCluster, build_stack
+from vs_runtime.api.testing import FakeRunControlEventSink
 from vs_sim.api import yield_now
-from vs_sim.api.testing import VirtualClock, examples, run_virtual
+from vs_sim.api.testing import SimThreads, VirtualClock, examples, run_virtual, yield_until
 from vs_slurm.api import ClusterObservation, SlurmJobStatus
 
 if TYPE_CHECKING:
@@ -107,3 +110,20 @@ def test_no_job_is_left_queued_by_a_submission_that_raced_the_close(
     )
 
     assert queued == []
+
+
+async def test_pause_drain_refuses_prepared_cluster_execution(tmp_path: Path) -> None:
+    control = create_run_control_channel(FakeRunControlEventSink(), threads=SimThreads())
+    cluster = ScenarioCluster()
+    stack = await build_stack(tmp_path, cluster, control=control)
+    control.land_park()
+    await stack.executor.submit(_request(stack.snapshot), handle_id="pause-drain")
+    observed = await yield_until(
+        lambda: stack.executor.inspect("pause-drain"),
+        lambda seen: seen is not None and seen.state is EvaluationState.FAILED,
+        "the pause drain refusal",
+    )
+    assert observed is not None
+    assert "pause drain" in (observed.failure or "")
+    assert cluster.submissions == []
+    await stack.executor.close()

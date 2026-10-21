@@ -1,5 +1,5 @@
 import type {ScheduleTimeout} from '@vibesys/machine';
-import {useEffect, useMemo, useState} from 'react';
+import {useEffect, useMemo, useRef, useState} from 'react';
 import {getInitialSnapshot} from 'xstate';
 import {
   gatewayRunMachine,
@@ -20,8 +20,15 @@ export function useGatewayRun(options: {
   const {seed, ports, schedule, address} = options;
   const [snapshot, setSnapshot] = useState(() => getInitialSnapshot(gatewayRunMachine, {seed}));
   const [actor, setActor] = useState<ReturnType<typeof startGatewayRun> | null>(null);
+  const latestSeed = useRef(seed);
+  const {host, runId} = seed.identity;
   useEffect(() => {
-    const started = startGatewayRun(ports, schedule, {seed});
+    latestSeed.current = seed;
+  }, [seed]);
+  useEffect(() => {
+    const started = startGatewayRun(ports, schedule, {
+      seed: {...latestSeed.current, identity: {host, runId}},
+    });
     const subscription = started.subscribe(setSnapshot);
     setActor(started);
     setSnapshot(started.getSnapshot());
@@ -29,9 +36,9 @@ export function useGatewayRun(options: {
       subscription.unsubscribe();
       started.stop();
     };
-  }, [ports, schedule, seed]);
+  }, [ports, schedule, host, runId]);
   const {route, zoom} = useZoom(`${seed.identity.host}/${seed.identity.runId}`, address);
-  const {load, ui, text} = snapshot.context;
+  const {load, ui, text, hint} = snapshot.context;
   const skeleton = load?.complete ? load.skeleton : undefined;
   const at = ui.view.at === 'live' ? (skeleton?.throughSeq ?? 0n) : BigInt(ui.view.at);
   const epoch = skeleton?.epochs.filter(item => item.seq <= at).at(-1)?.epoch;
@@ -56,8 +63,10 @@ export function useGatewayRun(options: {
   const {value: model} = modelRead;
   const stateRead = useMemo(
     () =>
-      project(() => (skeleton && whole ? skeletonScreenState(seed, skeleton, whole, ui) : null)),
-    [skeleton, whole, seed, ui],
+      project(() =>
+        skeleton && whole ? skeletonScreenState(seed, skeleton, whole, ui, hint) : null,
+      ),
+    [skeleton, whole, seed, ui, hint],
   );
   const {value: state} = stateRead;
   const projectionError = wholeRead.error ?? modelRead.error ?? stateRead.error;

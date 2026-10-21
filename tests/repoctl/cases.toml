@@ -191,7 +191,7 @@ pnpm_packages = { dependents_of = "pnpm:@vibesys/feature-run-intents" }
 
 [[cases]]
 name = "core value compiler and generated values select regeneration and Python checks"
-paths = ["scripts/corevalue/_emit.py", "libs/vs-core/src/vs_core/_generated/vibesys/core/v1/control_cv.py", "libs/vs-runtime/src/vs_runtime/_core_values/vibesys/core/v1/control_boundary.py"]
+paths = ["scripts/corevalue/_emit.py", "libs/vs-core/src/vs_core/api/values.py", "libs/vs-core/src/vs_core/_revision_ref.py", "libs/vs-core/src/vs_core/_generated/vibesys/core/v1/vocabulary_cv.py", "libs/vs-core/src/vs_core/_generated/vibesys/core/v1/control_cv.py", "libs/vs-runtime/src/vs_runtime/_core_values/vibesys/core/v1/control_boundary.py"]
 jobs = ["proto", "python", "real_tiers"]
 [cases.collections]
 native_languages = []
@@ -219,6 +219,24 @@ pnpm_packages = []
 [[cases]]
 name = "host relaunch admission selects Python checks"
 paths = ["src/vibesys/api/host_relaunch.py"]
+jobs = ["python"]
+[cases.collections]
+native_languages = []
+native_targets = []
+pnpm_packages = []
+
+[[cases]]
+name = "control admission facade selects Python and real process checks"
+paths = ["libs/vs-runtime/src/vs_runtime/api/control.py"]
+jobs = ["python", "real_tiers"]
+[cases.collections]
+native_languages = []
+native_targets = []
+pnpm_packages = []
+
+[[cases]]
+name = "static pure facade loaders select Python checks"
+paths = ["libs/vs-core/src/vs_core/api/_exports.py"]
 jobs = ["python"]
 [cases.collections]
 native_languages = []

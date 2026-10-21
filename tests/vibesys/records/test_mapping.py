@@ -590,3 +590,31 @@ def test_park_records_a_drain_goal_then_a_readable_parked_lifecycle() -> None:
     ]
     assert_valid(draining)
     assert_valid(parked)
+
+
+@pytest.mark.parametrize("stage", list(e.EnvironmentStartupStage))
+@pytest.mark.parametrize(
+    "state", [e.EnvironmentStartupState.RUNNING, e.EnvironmentStartupState.FINISHED]
+)
+def test_finished_startup_does_not_strand_the_run_header(
+    stage: e.EnvironmentStartupStage, state: e.EnvironmentStartupState
+) -> None:
+    mapped = map_event(
+        MappingState("run-a"),
+        event(
+            e.CoreEventType.RUN_STARTUP_PROGRESS,
+            e.RunStartupProgressData(
+                stage=stage,
+                state=state,
+                elapsed_seconds=1 if state is e.EnvironmentStartupState.FINISHED else None,
+            ),
+        ),
+    )
+    lifecycles = [
+        r.body.value for r in mapped.records if r.body is not None and r.body.field == "lifecycle"
+    ]
+    assert lifecycles[-1].state is not None
+    assert lifecycles[-1].state.field == (
+        "running" if state is e.EnvironmentStartupState.FINISHED else "starting"
+    )
+    assert_valid(mapped)

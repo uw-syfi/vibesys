@@ -11,11 +11,13 @@ status; neither keeps a copy of it.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import cache
 from typing import TYPE_CHECKING
 
 from pydantic import JsonValue, TypeAdapter
 
-from vs_core.api import ControlInput, RunResultProposal, RunStatus, reopens_after
+import vs_core.api as core
+from vs_core.api import RunStatus
 from vs_decode.api import Unreadable, decode_json
 from vs_project.api import ProjectStateError, StoredEnvelope
 
@@ -80,7 +82,7 @@ def recorded_end(project: Project, run_id: str) -> RecordedEnd | None:
     if project.state.state_store_namespace(run_id).read_bytes(_STORE_DOCUMENT) is None:
         # Probe first, as resume does, so a read never creates the store's lock or directory.
         return None
-    stored = project.state_store(run_id).load()
+    stored = project.state_store(run_id).observe()
     if not isinstance(stored, StoredEnvelope):
         return None
     record = decode_json(
@@ -102,7 +104,9 @@ def recorded_end(project: Project, run_id: str) -> RecordedEnd | None:
     )
 
 
-_CONTROLS: TypeAdapter[tuple[ControlInput, ...]] = TypeAdapter(tuple[ControlInput, ...])
+@cache
+def _controls() -> TypeAdapter[tuple[core.ControlInput, ...]]:
+    return TypeAdapter(tuple[core.ControlInput, ...])
 
 
 def _reopens(run: JsonValue) -> bool:
@@ -118,20 +122,20 @@ def _reopens(run: JsonValue) -> bool:
         return False
     result = decode_json(
         _ANY_JSON.dump_json(result_json),
-        RunResultProposal,
+        core.RunResultProposal,
         source="run result",
         max_bytes=_RECORD_MAX_BYTES,
     )
     controls = decode_json(
         _ANY_JSON.dump_json(_member(run, "controls") or []),
-        _CONTROLS,
+        _controls(),
         source="run controls",
         max_bytes=_RECORD_MAX_BYTES,
     )
     status = _member(run, "status")
     if isinstance(result, Unreadable) or isinstance(controls, Unreadable):
         return False
-    return status in {member.value for member in RunStatus} and reopens_after(
+    return status in {member.value for member in RunStatus} and core.reopens_after(
         RunStatus(status), result, controls
     )
 

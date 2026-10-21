@@ -41,6 +41,7 @@ from vs_core.api import (
     Limits,
     RunFacts,
     RunStatus,
+    Scope,
     TaskTerms,
     TurnSpec,
 )
@@ -115,7 +116,7 @@ if TYPE_CHECKING:
         TurnSteering,
         TurnYields,
     )
-    from vs_runtime.api.infrastructure import RuntimeWorkspaces
+    from vs_runtime.api.infrastructure import RunControlChannel, RuntimeWorkspaces
     from vs_sim.api import Clock, SleepingClock
 
 LEASE = 100.0
@@ -227,6 +228,7 @@ class World:
     times the store's file writes and directory syncs."""
     evaluations: list[SemanticSlurmEvaluationExecutor] = field(default_factory=list)
     """The evaluation executor of every process started, which a host closes at exit."""
+    control: RunControlChannel | None = None
     task: TaskTerms | None = None
     """What the task fixes about measuring and comparing, when the world's run has terms."""
     steering: Callable[[TurnSteering], TurnSteering] | None = None
@@ -292,6 +294,7 @@ class World:
             clock=self.job_clock,
             sleeper=_LoopPacing(),
             cluster=self.cluster,
+            control=self.control,
         )
         self.evaluations.append(evaluation)
         if self.timed is not None:
@@ -307,7 +310,7 @@ class World:
         bindings = core_bindings(
             receipts=receipts,
             workspaces=workspaces,
-            measurement=MeasurementServices(evaluation),
+            measurement=MeasurementServices(evaluation, control=self.control),
             sessions=SessionServices(
                 self.agents.sessions(),
                 self.agents.resolver,
@@ -479,12 +482,16 @@ class CandidateResolver(FakeSessionResolver):
     """Resolves turns to the candidate worktree the writer commits in."""
 
     writer: CandidateWriter | None = None
+    control: RunControlChannel | None = None
 
     def agent_spec(
         self, turn: TurnSpec, workspace: AccessGuardedWorkspace
     ) -> AgentSessionSpec | None:
         """The Fake provider's session configuration over the live candidate worktree."""
         assert self.writer is not None
+        if self.control is not None:
+            scope = turn.workspace if isinstance(turn.workspace, Scope) else turn.workspace.scope
+            self.control.prepare_execution(turn.invocation_id.root, scope)
         spec = super().agent_spec(turn, workspace)
         assert spec is not None
         return dataclasses.replace(spec, workspace=self.writer.worktree())

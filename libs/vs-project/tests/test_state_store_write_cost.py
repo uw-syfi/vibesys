@@ -11,7 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from hypothesis import given, settings
+from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
 from vs_project.api import Committed, LocalAtomicWriteEffects, Project, StoredEnvelope
@@ -65,3 +65,30 @@ def test_a_commit_publishes_its_record_and_one_lease_document(size: int) -> None
         assert store.commit(None, envelope, fence, now=1) == Committed(record=envelope)
         # The payload is stored in base64, four bytes for every three.
         assert effects.published - before <= 4 * size // 3 + 4 + 2 * _LEASE_BYTES
+
+
+class _ObservedSyncs(LocalAtomicWriteEffects):
+    def __init__(self) -> None:
+        self.syncs: list[Path] = []
+
+    def sync_existing_file(self, path: Path) -> None:
+        self.syncs.append(path)
+        super().sync_existing_file(path)
+
+
+@given(payload=st.binary(max_size=1024))
+@example(payload=b"busy run")
+def test_observing_a_newly_opened_store_never_repairs_durability(payload: bytes) -> None:
+    with TemporaryDirectory() as directory:
+        project = Project.open(Path(directory))
+        writer = project.state_store("run-1")
+        fence = writer.acquire("host-a", now=0, duration=100)
+        assert fence is not None
+        envelope = StoredEnvelope(revision=0, schema_version=1, payload=payload)
+        assert writer.commit(None, envelope, fence, now=1) == Committed(record=envelope)
+        effects = _ObservedSyncs()
+        observer = project.state_store("run-1", effects=effects)
+        assert observer.observe() == envelope
+        assert effects.syncs == []
+        assert observer.load() == envelope
+        assert effects.syncs != []

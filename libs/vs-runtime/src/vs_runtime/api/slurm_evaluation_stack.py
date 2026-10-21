@@ -57,6 +57,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from vs_runtime.api.core import StageOutputOpener
+    from vs_runtime.api.infrastructure import RunControlChannel
     from vs_runtime.contracts import CandidateWorkspace
     from vs_sandbox.api.slurm import SlurmLedgerAttachment
     from vs_sim.api import Sleeper
@@ -115,6 +116,11 @@ class ScenarioCluster(FakeCluster):
         outcome = super().submit(request, operation_id=operation_id)
         self.accepted.set()
         return outcome
+
+    def finish_jobs(self) -> None:
+        """Let every accepted scripted batch finish with its original real stage results."""
+        for operation, request in zip(self.submissions, self.batches, strict=True):
+            self.script(operation, states=(SlurmJobStatus.COMPLETED,), result=self._result(request))
 
     def _result(self, request: SlurmBatchRequest) -> SlurmBatchResult:
         if self.job_exit_code != 0:
@@ -200,6 +206,7 @@ async def build_stack(  # noqa: PLR0913  # lint-waiver: LW-455560 [PLR0913]; eac
     policy: SlurmExecutionPolicy | None = None,
     benchmark_contract: TrustedBenchmarkContract | None = None,
     root_proof: WorkspaceRootProof | None = None,
+    control: RunControlChannel | None = None,
 ) -> Stack:
     """Build the semantic Slurm executor over ``cluster``, reusing durable state under root.
 
@@ -247,6 +254,7 @@ async def build_stack(  # noqa: PLR0913  # lint-waiver: LW-455560 [PLR0913]; eac
         stage_output=stage_output,
         ledger=ledger,
         root_proof=root_proof,
+        control=control,
     )
     return Stack(executor, cluster, snapshot, workspaces)
 

@@ -22,6 +22,7 @@ export {
   TailStreamRequestSchema,
   TailStreamResponseSchema,
   WatchRunsRequestSchema,
+  type WatchRunsResponse,
   WatchRunsResponseSchema,
 } from './generated/vibesys/api/v1/host_pb.js';
 export * from './generated/vibesys/search/v1/attrs_pb.js';

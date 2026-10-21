@@ -63,9 +63,11 @@ export const runIntentsMachine = setup({
         error: params.status === 'uncertain' ? params.error : context.error,
       }),
     ),
-    apply: assign(({context, event}) =>
-      event.type === 'outcomes' ? {entries: outcomeEntries(context.entries, event.outcomes)} : {},
-    ),
+    apply: assign(({context, event}) => {
+      if (event.type !== 'outcomes') return {};
+      const entries = outcomeEntries(context.entries, event.outcomes);
+      return {entries, error: entries.find(entry => entry.status === 'uncertain')?.reason ?? null};
+    }),
   },
   delays: {deadline: 35_000},
 }).createMachine({
@@ -182,5 +184,22 @@ export const runIntentsMachine = setup({
         },
       },
     },
+  },
+});
+
+/** Outcome delivery owns its retry independently of admission calls. */
+export const intentWatchMachine = setup({
+  types: {events: {} as {type: 'ended'}},
+  actors: {
+    read: fromCallback(() => {
+      throw new Error('read was not provided');
+    }),
+  },
+  delays: {retry: 1000},
+}).createMachine({
+  initial: 'watching',
+  states: {
+    watching: {invoke: {src: 'read', onError: 'recovering'}, on: {ended: 'recovering'}},
+    recovering: {after: {retry: 'watching'}},
   },
 });

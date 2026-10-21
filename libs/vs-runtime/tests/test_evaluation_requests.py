@@ -83,6 +83,7 @@ if TYPE_CHECKING:
         ResourceRequirements,
     )
     from vs_project.api import StateNamespace
+    from vs_runtime.api.infrastructure import RunControlChannel
     from vs_sim.api import OutputSink
 
 # Each example builds real workspaces. A pull request draws a sample; the nightly depth
@@ -137,6 +138,7 @@ class World:
         self.cluster = cluster
         self.stack = stack
 
+    control: RunControlChannel | None = None
     observer: MeasurementObserver | None = None
     executor: PollingEvaluationExecutor | None = None
     """An executor over the stack's own, when a test watches what reaches it."""
@@ -156,7 +158,7 @@ class World:
         )
         store = ReceiptStore(cast("StateNamespace", faulting), threads=SimThreads())
         executor = self.stack.executor if self.executor is None else self.executor
-        return MeasurementRequests(executor, store, self.observer), faulting
+        return MeasurementRequests(executor, store, self.observer, control=self.control), faulting
 
 
 @asynccontextmanager

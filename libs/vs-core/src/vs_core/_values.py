@@ -37,13 +37,13 @@ class ImmutableSchemaError(ValueError):
 
 
 @cache
-def _validated_schema(model: type[BaseModel]) -> None:
+def _validated_schema(model: type[BaseModel | CoreValue]) -> None:
     # A class's fields and config are fixed once it is defined, so a verdict of "valid" holds for
     # the rest of the process. `cache` stores only returns: an invalid model raises every time.
     _validate_annotation(model, (), set())
 
 
-def validate_immutable_schema(model: type[BaseModel]) -> None:
+def validate_immutable_schema(model: type[BaseModel | CoreValue]) -> None:
     """Reject mutable containers, open types and mutable nested models."""
     _validated_schema(model)
 
@@ -51,6 +51,7 @@ def validate_immutable_schema(model: type[BaseModel]) -> None:
 def _validate_annotation(annotation: object, path: tuple[str, ...], seen: set[type]) -> None:
     if isinstance(annotation, TypeAliasType):
         annotation = annotation.__value__
+    annotation = type(None) if annotation is None else annotation
     origin = get_origin(annotation)
     arguments = get_args(annotation)
     if origin is Annotated:
@@ -261,13 +262,13 @@ def _immutable_children(node: CoreValue | FrozenMap | tuple | frozenset) -> Iter
     return node
 
 
-def canonical_json(value: BaseModel) -> str:
+def canonical_json(value: BaseModel | CoreValue) -> str:
     """Keep ordered sequences and canonically sort every unordered collection.
 
     A frozen value's text depends only on its class and fields, so it is remembered per
     instance: recovery proves the same recorded requests against their digests on every step.
     """
-    if not value.model_config.get("frozen"):
+    if isinstance(value, CoreValue) or not value.model_config.get("frozen"):
         return _canonical_json(value)
     text: str | None = recall(value, "_canonical")
     if text is None:
@@ -276,8 +277,12 @@ def canonical_json(value: BaseModel) -> str:
     return text
 
 
-def _canonical_json(value: BaseModel) -> str:
-    serialized = value.model_dump(mode="json", serialize_as_any=True)
+def _canonical_json(value: BaseModel | CoreValue) -> str:
+    serialized = (
+        value.model_dump(mode="json")
+        if isinstance(value, CoreValue)
+        else value.model_dump(mode="json", serialize_as_any=True)
+    )
     return json.dumps(
         _canonical(value, serialized), sort_keys=True, separators=(",", ":"), ensure_ascii=False
     )
@@ -312,7 +317,7 @@ def _canonical(value: object, serialized: object) -> object:
     return serialized
 
 
-def digest(value: BaseModel) -> str:
+def digest(value: BaseModel | CoreValue) -> str:
     """Deterministic value fingerprint, with no clock or random identity source."""
     return sha256(canonical_json(value).encode()).hexdigest()
 

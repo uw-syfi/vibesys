@@ -349,7 +349,7 @@ depends_on = []
 # waves repoint them. Reaches core internals directly, which is what makes it
 # the one place allowed to.
 path = "vibesys.api"
-depends_on = ["vs_runlog", "vibesys", "vs_agent", "vs_runtime", "vibesys.inputs", "vibesys.run", "vibesys.run.core_run", "vibesys.run.host", "vibesys.run.environment", "vibesys.run.skill_sources", "vibesys.run.profilers", "vibesys.orchestration.skill_selection", "vs_project", "vs_sandbox", "vs_sim.api", "vibesys.api.auxiliary", "vibesys.api.contracts", "vibesys.api.session", "vibesys.api.reader", "vibesys.api.store", "vibesys.api.assembly", "vibesys.plugin_catalog", "vibesys.orchestration.agent_options", "vibesys.run.contracts", "vibesys.api.runs", "vibesys.domains"]
+depends_on = ["vs_runlog", "vibesys", "vs_agent", "vs_runtime", "vibesys.inputs", "vibesys.run", "vibesys.run.core_run", "vibesys.run.host", "vibesys.run.environment", "vibesys.run.skill_sources", "vibesys.run.profilers", "vibesys.orchestration.skill_selection", "vs_project", "vs_sandbox", "vs_sim.api", "vibesys.api.auxiliary", "vibesys.api.contracts", "vibesys.api.session", "vibesys.api.reader", "vibesys.api.store", "vibesys.api.assembly", "vibesys.plugin_catalog", "vibesys.orchestration.agent_options", "vibesys.run.contracts", "vibesys.api.runs", "vibesys.domains", "vibesys.errors"]
 
 [[modules]]
 path = "vibesys.api.evolve"
@@ -1427,7 +1427,7 @@ expose = ["NativeProfilerPreflight", "ProfilerPreflight", "SessionAgents", "Sess
 [[modules]]
 path = "vs_core"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_core._corevalue", "vs_core._generated", "vs_core._dispatch_episode", "vs_core._session_checkpoints", "vs_core._session_rows", "vs_core._session_scope", "vs_core._turn_outcomes", "vs_core._proofs", "vs_core._waits", "vs_core.types", "vs_core.types.common", "vs_core._values", "vs_core._outcomes"]
+depends_on = ["vs_core._corevalue", "vs_core._generated", "vs_core._dispatch_episode", "vs_core._session_checkpoints", "vs_core._session_rows", "vs_core._session_scope", "vs_core._turn_outcomes", "vs_core._proofs", "vs_core._waits", "vs_core.types", "vs_core.types.common", "vs_core._values", "vs_core._outcomes", "vs_core._generated.vibesys.core.v1.common_cv", "vs_core._generated.vibesys.core.v1.vocabulary_cv"]
 
 [[interfaces]]
 from = ["vs_core"]
@@ -1481,7 +1481,7 @@ expose = ["Mismatch", "Missing", "ProofField", "ProofReason", "Proven", "Verdict
 [[modules]]
 path = "vs_core.types"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_core.types.common", "vs_core._outcomes"]
+depends_on = ["vs_core.types.common", "vs_core._outcomes", "vs_core._generated", "vs_core._generated.vibesys.core.v1.common_cv", "vs_core._generated.vibesys.core.v1.vocabulary_cv"]
 
 [[interfaces]]
 from = ["vs_core.types"]
@@ -1490,7 +1490,7 @@ expose = ["[a-z_]+\\.[A-Z].*", "sessions\\.(session_waits|session_may_wait|turn_
 [[modules]]
 path = "vs_core.types.common"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_core._generated", "vs_core._values"]
+depends_on = ["vs_core._generated", "vs_core._values", "vs_core._corevalue", "vs_core._generated.vibesys.core.v1.common_cv", "vs_core._generated.vibesys.core.v1.vocabulary_cv"]
 
 [[interfaces]]
 from = ["vs_core.types.common"]
@@ -1966,7 +1966,7 @@ expose = ["host_call"]
 [[modules]]
 path = "vs_core._generated"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_core._corevalue", "vs_core._retry_policy"]
+depends_on = ["vs_core._corevalue", "vs_core._retry_policy", "vs_core._revision_ref", "vs_core._generated.vibesys.core.v1.common_cv", "vs_core._generated.vibesys.core.v1.vocabulary_cv"]
 
 [[interfaces]]
 from = ["vs_core._generated"]
@@ -1979,7 +1979,7 @@ depends_on = []
 
 [[interfaces]]
 from = ["vs_core._corevalue"]
-expose = ["CoreValue", "FrozenMap", "TimestampValue", "bounded_integer"]
+expose = ["CoreValue", "FrozenMap", "TimestampValue", "bounded_integer", "omit_unset", "ContractValidationError", "resolve_value", "cel_integer"]
 
 [[modules]]
 path = "vs_core._retry_policy"
@@ -2014,3 +2014,30 @@ depends_on = ["vibesys.api", "vs_project", "vs_proto", "vs_runlog", "vs_sim.api"
 [[interfaces]]
 from = ["vibesys.api.host_relaunch"]
 expose = ["relaunch_host"]
+
+[[modules]]
+path = "vs_core._revision_ref"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_core._corevalue", "vs_core._generated.vibesys.core.v1.common_cv", "vs_core._generated.vibesys.core.v1.vocabulary_cv"]
+
+[[interfaces]]
+from = ["vs_core._revision_ref"]
+expose = ["RevisionReference"]
+
+[[modules]]
+path = "vs_core._generated.vibesys.core.v1.common_cv"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_core._corevalue"]
+
+[[interfaces]]
+from = ["vs_core._generated.vibesys.core.v1.common_cv"]
+expose = ["[A-Z].*"]
+
+[[modules]]
+path = "vs_core._generated.vibesys.core.v1.vocabulary_cv"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_core._corevalue"]
+
+[[interfaces]]
+from = ["vs_core._generated.vibesys.core.v1.vocabulary_cv"]
+expose = ["[A-Z].*"]

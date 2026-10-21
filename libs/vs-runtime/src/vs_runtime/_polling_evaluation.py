@@ -13,6 +13,7 @@ from contextlib import nullcontext
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from vs_agent.api import AgentExecutionCancelledError
 from vs_evaluation.api import (
     MAX_EVIDENCE_SUMMARY_CHARS,
     AvailabilitySnapshot,
@@ -48,6 +49,7 @@ if TYPE_CHECKING:
     from contextlib import AbstractContextManager
 
     from vs_runtime._measurement_progress import StageOutputOpener
+    from vs_runtime._run_control import RunControlChannel
     from vs_runtime.contracts import CandidateWorkspace, Evaluation, Workspace, Workspaces
     from vs_sim.api import Clock, OutputSink
 
@@ -78,12 +80,14 @@ class PollingEvaluationExecutor:
         *,
         clock: Clock,
         stage_output: StageOutputOpener | None = None,
+        control: RunControlChannel | None = None,
     ) -> None:
         """Evaluate through ``evaluation`` in candidate workspaces from ``workspaces``.
 
         ``clock`` stamps availability observations. ``stage_output`` opens the stream
         each stage's command writes its raw output to while it runs; ``None`` discards it.
         """
+        self._control = control
         self._clock = clock
         self._stage_output = stage_output
         self._evaluation = evaluation
@@ -164,12 +168,19 @@ class PollingEvaluationExecutor:
         operator_failure: str | None = None
         try:
             workspace = await self._workspaces.create_measured_candidate(first.snapshot)
-            self._publish(
-                handle_id,
-                ExecutorObservation(
-                    state=EvaluationState.RUNNING, current_stage=request.stages[0].name
-                ),
-            )
+
+            def started() -> None:
+                self._publish(
+                    handle_id,
+                    ExecutorObservation(
+                        state=EvaluationState.RUNNING, current_stage=request.stages[0].name
+                    ),
+                )
+
+            if self._control is None:
+                started()
+            else:
+                self._control.start_execution(started, evaluation_id=request.key)
             for step in request.stages:
                 stage = SemanticEvaluationStage.model_validate(step.payload)
                 with self._open_output(
@@ -237,7 +248,7 @@ class PollingEvaluationExecutor:
                     operator_failure=operator_failure,
                 ),
             )
-        except asyncio.CancelledError:
+        except (asyncio.CancelledError, AgentExecutionCancelledError) as cancelled:
             self._publish(
                 handle_id,
                 ExecutorObservation(
@@ -245,7 +256,7 @@ class PollingEvaluationExecutor:
                     stage_results=tuple(results),
                 ),
             )
-            raise
+            raise asyncio.CancelledError from cancelled
         except Exception as error:  # noqa: BLE001  # lint-waiver: LW-930049 [BLE001]; this lifecycle boundary converts arbitrary extension failures into durable diagnostics; narrower catches would let unknown providers bypass the contract.
             raw_failure = render_evaluation_failure(str(error) or None, type(error).__name__)
             self._publish(

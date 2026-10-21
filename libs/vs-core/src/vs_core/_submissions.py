@@ -21,6 +21,7 @@ from ._proofs import (
     current_admission,
     released_owner,
 )
+from ._run_park import scope_in_flight
 from ._values import digest
 from .types.attempts import (
     AttemptPhase,
@@ -30,6 +31,7 @@ from .types.common import (
     ObservationStatus,
     RequestId,
     RevisionRef,
+    RunStatus,
     Scope,
 )
 from .types.evaluation import (
@@ -65,7 +67,10 @@ __all__ = [
 
 
 def current(context: EvaluationContext, scope: Scope) -> Verdict[DecisionId | None]:
-    if not continues_admitted_work(context.run):
+    if not continues_admitted_work(context.run) and not (
+        context.run.status == RunStatus.DRAINING
+        and scope_in_flight(context.sessions, context.records, scope)
+    ):
         return Missing(ProofReason.UNRESOLVED)
     if scope.owner == context.run.run_id:
         return (

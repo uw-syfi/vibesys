@@ -19,8 +19,13 @@ import {installGateway, wire} from './fake-gateway.js';
 import {openFixture} from './fixture-world.js';
 
 interface GatewayWindow {
-  fakeGateway: {calls(): string[]; active(): number; append(bytes: number[]): void};
-  fakeHost: {calls: unknown[][]};
+  fakeGateway: {
+    calls(): string[];
+    active(): number;
+    append(bytes: number[]): void;
+    disconnect(): void;
+  };
+  fakeHost: {calls: unknown[][]; recent(runs: readonly unknown[]): void};
 }
 
 function appliedState(action: IntentAction) {
@@ -196,4 +201,19 @@ test('intent controls app-window contact sheet', async ({page}) => {
   await page.goto(`file://${join(shots, 'intents-contact-sheet.html')}`);
   await page.setViewportSize({width: 1500, height: 900});
   await page.screenshot({path: join(shots, 'intents-contact-sheet.png'), fullPage: true});
+});
+
+test('a pause drain confirmation survives the run reader reconnecting', async ({page}) => {
+  const {requests, outcome} = await openIntents(page);
+  await page.getByRole('button', {name: 'Park', exact: true}).click();
+  await expect(page.getByText('Park · Pending', {exact: true})).toBeVisible();
+  await page.evaluate(() => {
+    const world = window as unknown as GatewayWindow;
+    world.fakeGateway.disconnect();
+    world.fakeHost.recent([]);
+  });
+  await outcome(0, 'applied');
+  await expect(page.getByText('Park · Applied', {exact: true})).toBeVisible();
+  expect(requests).toHaveLength(1);
+  await expect(page.getByText('Parked', {exact: true}).first()).toBeVisible();
 });
