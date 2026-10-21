@@ -64,7 +64,18 @@ export async function controlsOf(scope: Locator): Promise<Control[]> {
 /** What a person reads off the page: its accessibility tree without the controls' own state. */
 async function content(page: Page): Promise<string> {
   const tree = await page.locator('body').ariaSnapshot();
-  return tree.replace(/ \[(?:active|checked|selected|pressed|current)(?:=[^\]]*)?\]/g, '');
+  // Chromium omits optgroup children from its Linux snapshot. Read the displayed text too,
+  // as ariaSnapshot already does for text fields, rather than counting selection flags.
+  const selections = await page
+    .getByRole('combobox')
+    .evaluateAll(elements =>
+      elements.map(element =>
+        element instanceof HTMLSelectElement
+          ? [...element.selectedOptions].map(option => option.textContent)
+          : null,
+      ),
+    );
+  return `${tree.replace(/ \[(?:active|checked|selected|pressed|current)(?:=[^\]]*)?\]/g, '')}\n${JSON.stringify(selections)}`;
 }
 
 /** Uses `control` as a person would: presses it, types in it, picks another option, or moves it. */
