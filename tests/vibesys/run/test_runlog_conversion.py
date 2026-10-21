@@ -59,7 +59,10 @@ def test_conversion_preserves_json_and_timestamps_and_is_idempotent(
     journal.emit(CoreEventType.RUN_FINISHED, "finish")
     source = Project.event_journal_path_for(project.root, "run-1")
     original = source.read_bytes()
-    assert convert_run(project, "run-1").status is ConversionStatus.CONVERTED
+    assert (
+        convert_run(project, "run-1", clock=ManualClock(), threads=SimThreads()).status
+        is ConversionStatus.CONVERTED
+    )
     destination = Project.run_log_path_for(project.root, "run-1")
     converted = destination.read_bytes()
     with destination.open("rb") as stream:
@@ -76,7 +79,10 @@ def test_conversion_preserves_json_and_timestamps_and_is_idempotent(
         for record in records
         if record.body is not None and record.body.field == "legacy_event"
     ] == original.decode().splitlines()
-    assert convert_run(project, "run-1").status is ConversionStatus.EXISTS
+    assert (
+        convert_run(project, "run-1", clock=ManualClock(), threads=SimThreads()).status
+        is ConversionStatus.EXISTS
+    )
     assert destination.read_bytes() == converted
     assert source.read_bytes() == original
     assert sorted(path.name for path in destination.parent.iterdir()) == [
@@ -94,7 +100,7 @@ def test_empty_and_pretrace_journals_are_skipped(
         journal.emit(CoreEventType.RUN_STARTED)
     else:
         Project.event_journal_path_for(project.root, "run-1").touch()
-    result = convert_run(project, "run-1")
+    result = convert_run(project, "run-1", clock=ManualClock(), threads=SimThreads())
     assert result.status is ConversionStatus.SKIPPED
     assert ("predates" if with_old_event else "no events") in result.reason
     assert not Project.run_log_path_for(project.root, "run-1").exists()
@@ -113,10 +119,13 @@ def test_conversion_replaces_torn_destination_only_after_success(
     with source.open("ab") as stream:
         stream.write(b"{malformed}")
     with pytest.raises(ValueError, match="journal event"):
-        convert_run(project, "run-1")
+        convert_run(project, "run-1", clock=ManualClock(), threads=SimThreads())
     assert destination.read_bytes() == torn
     source.write_bytes(original)
-    assert convert_run(project, "run-1").status is ConversionStatus.CONVERTED
+    assert (
+        convert_run(project, "run-1", clock=ManualClock(), threads=SimThreads()).status
+        is ConversionStatus.CONVERTED
+    )
 
 
 def test_corrupt_destination_is_reported_without_overwriting_it(
@@ -127,5 +136,5 @@ def test_corrupt_destination_is_reported_without_overwriting_it(
     destination = Project.run_log_path_for(project.root, "run-1")
     destination.write_bytes(b"BADMAGIC")
     with pytest.raises(ValueError, match="byte 0"):
-        convert_run(project, "run-1")
+        convert_run(project, "run-1", clock=ManualClock(), threads=SimThreads())
     assert destination.read_bytes() == b"BADMAGIC"

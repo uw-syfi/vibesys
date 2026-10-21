@@ -14,7 +14,14 @@ from hypothesis import strategies as st
 
 from vs_proto.api import RUN_LOG_MAGIC, Keyframe, LegacyEvent, Oneof, Record, RunHead
 from vs_runlog.api import FileRunLogWriter, RunLogReader, encode_frame, fold_skeleton
-from vs_sim.api.testing import SimBlockingRunner, VirtualClock, loop_threads, run_virtual
+from vs_sim.api.testing import (
+    ManualClock,
+    SimBlockingRunner,
+    SimThreads,
+    VirtualClock,
+    loop_threads,
+    run_virtual,
+)
 
 _FIXTURES = Path(__file__).resolve().parents[3] / "proto/testdata/skeleton"
 
@@ -37,7 +44,9 @@ def head(root: Path) -> int:
 def test_appends_leave_visibility_and_keyframes_at_previous_commit(count: int) -> None:
     with TemporaryDirectory() as temporary:
         root = Path(temporary)
-        with FileRunLogWriter(root / "run.log") as writer:
+        with FileRunLogWriter(
+            root / "run.log", clock=ManualClock(), threads=SimThreads()
+        ) as writer:
             for record in initial_records():
                 writer.append(record)
             before = {p.name: p.read_bytes() for p in (root / "keyframes").iterdir()}
@@ -65,7 +74,7 @@ def test_first_pending_append_sets_deadline_without_debouncing(tmp_path: Path) -
     clock = VirtualClock()
 
     async def exercise() -> None:
-        with FileRunLogWriter(tmp_path / "run.log", clock=clock) as writer:
+        with FileRunLogWriter(tmp_path / "run.log", clock=clock, threads=SimThreads()) as writer:
             for record in initial_records():
                 writer.append(record)
             writer.append(event(3))
@@ -86,7 +95,7 @@ def test_explicit_boundary_invalidates_old_timer(tmp_path: Path, boundary: str) 
     clock = VirtualClock()
 
     async def exercise() -> None:
-        writer = FileRunLogWriter(tmp_path / "run.log", clock=clock)
+        writer = FileRunLogWriter(tmp_path / "run.log", clock=clock, threads=SimThreads())
         templates = runpy.run_path(str(_FIXTURES / "generate.py"))["scenarios"]()["core"][0]
         for record in templates[:2]:
             writer.append(record)
@@ -117,7 +126,7 @@ def test_deferred_failure_is_reported_and_prevents_further_appends(tmp_path: Pat
     clock = VirtualClock()
 
     async def exercise() -> None:
-        writer = FileRunLogWriter(tmp_path / "run.log", clock=clock)
+        writer = FileRunLogWriter(tmp_path / "run.log", clock=clock, threads=SimThreads())
         for record in initial_records():
             writer.append(record)
         writer.append(event(3))
@@ -129,7 +138,9 @@ def test_deferred_failure_is_reported_and_prevents_further_appends(tmp_path: Pat
         with pytest.raises(OSError, match=r"run.head"):
             writer.close()
         (tmp_path / "run.head").rmdir()
-        with FileRunLogWriter(tmp_path / "run.log") as recovered:
+        with FileRunLogWriter(
+            tmp_path / "run.log", clock=ManualClock(), threads=SimThreads()
+        ) as recovered:
             assert recovered.sequence == 3
             assert head(tmp_path) == 3
 
@@ -144,7 +155,7 @@ def test_commit_crash_recovery_preserves_durable_prefix(
     with TemporaryDirectory() as temporary:
         root = Path(temporary)
         path = root / "run.log"
-        writer = FileRunLogWriter(path)
+        writer = FileRunLogWriter(path, clock=ManualClock(), threads=SimThreads())
         expected = initial_records()
         for record in expected:
             writer.append(record)
@@ -183,7 +194,7 @@ def test_commit_crash_recovery_preserves_durable_prefix(
                 reader = RunLogReader(io.BytesIO(crash_log))
                 surviving = list(reader)
                 assert surviving[:committed] == expected[:committed]
-                writer = FileRunLogWriter(path)
+                writer = FileRunLogWriter(path, clock=ManualClock(), threads=SimThreads())
                 expected = surviving
                 committed = len(expected)
                 checkpoint = Keyframe.from_binary((root / f"keyframes/{committed}.pb").read_bytes())
@@ -199,13 +210,13 @@ def test_commit_crash_recovery_preserves_durable_prefix(
 
 def test_recovery_refuses_to_erase_a_committed_record(tmp_path: Path) -> None:
     path = tmp_path / "run.log"
-    with FileRunLogWriter(path) as writer:
+    with FileRunLogWriter(path, clock=ManualClock(), threads=SimThreads()) as writer:
         for record in initial_records():
             writer.append(record)
     before = (tmp_path / "run.head").read_bytes()
     path.write_bytes(path.read_bytes()[:-1])
     with pytest.raises(ValueError, match="lost committed records"):
-        FileRunLogWriter(path)
+        FileRunLogWriter(path, clock=ManualClock(), threads=SimThreads())
     assert (tmp_path / "run.head").read_bytes() == before
 
 
@@ -237,7 +248,7 @@ def test_off_loop_construction_and_appends_use_the_supplied_loop(tmp_path: Path)
 
 def test_checkpoint_failure_keeps_old_head_until_recovery(tmp_path: Path) -> None:
     path = tmp_path / "run.log"
-    writer = FileRunLogWriter(path)
+    writer = FileRunLogWriter(path, clock=ManualClock(), threads=SimThreads())
     expected = initial_records()
     for record in expected:
         writer.append(record)
@@ -252,7 +263,7 @@ def test_checkpoint_failure_keeps_old_head_until_recovery(tmp_path: Path) -> Non
         writer.commit()
     assert (tmp_path / "run.head").read_bytes() == old_head
     checkpoint.rmdir()
-    with FileRunLogWriter(path) as recovered:
+    with FileRunLogWriter(path, clock=ManualClock(), threads=SimThreads()) as recovered:
         assert recovered.sequence == 302
         assert head(tmp_path) == 302
         assert Keyframe.from_binary(checkpoint.read_bytes()) == fold_skeleton(

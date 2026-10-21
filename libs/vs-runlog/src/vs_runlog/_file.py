@@ -14,14 +14,14 @@ if TYPE_CHECKING:
     from types import TracebackType
 
     from vs_proto.api import Record
-    from vs_sim.api import Threads
+    from vs_sim.api import SleepingClock, Threads
 from vs_proto.api import RUN_LOG_MAGIC, Keyframe, RunHead, RunProcess, validate
 from vs_runlog._atomic import publish, sync_directory, write_keyframe
 from vs_runlog._fold import append_skeleton
 from vs_runlog._framing import ReadStop, RunLogStopReason, encode_frame, read_frame
 from vs_runlog._head import project_head
 from vs_runlog._lock import RunLock
-from vs_sim.api import CloseOnce, MonotonicClock, OsThreads, ReleaseStack, SleepingClock
+from vs_sim.api import CloseOnce, ReleaseStack
 
 CHECKPOINT_RECORDS = 256
 COMMIT_INTERVAL = 0.1
@@ -78,17 +78,18 @@ class FileRunLogWriter:
         self,
         path: Path,
         *,
-        clock: SleepingClock | None = None,
+        clock: SleepingClock,
+        threads: Threads,
         loop: asyncio.AbstractEventLoop | None = None,
-        threads: Threads | None = None,
     ) -> None:
         """Recover a log; pass the owning ``loop`` when constructing off-loop.
 
-        ``clock`` drives deferred commits. Otherwise the current loop and a
-        monotonic clock are used; offline writers commit explicitly.
+        ``clock`` drives deferred commits and ``threads`` supplies the lock that
+        serializes worker appends with commits. Otherwise the current loop is
+        used; offline writers commit explicitly.
         """
-        self._mutex = (threads if threads is not None else OsThreads()).rlock()
-        self._clock = clock if clock is not None else MonotonicClock()
+        self._mutex = threads.rlock()
+        self._clock = clock
         self._timer: asyncio.Task[None] | None = None
         self._generation = 0
         self._failure: BaseException | None = None

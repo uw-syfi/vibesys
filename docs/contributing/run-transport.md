@@ -95,6 +95,8 @@ Lifecycle changes, epoch headers and close commit immediately. The 100 ms interv
 keeps live tailing responsive while amortizing sync costs across bursts; scheduling
 and storage stalls can delay completion beyond that interval.
 
+`FileRunLogWriter` takes the run's clock and threads interfaces explicitly;
+entrypoints supply the real implementations and tests supply simulated ones.
 `FileRunLogWriter.append` retains its signature and now acknowledges a write, not
 durability. `commit()` is the explicit durability boundary, including for an epoch
 end not represented by a lifecycle record. `LegacyRunLogTee.commit()` forwards that
