@@ -224,6 +224,7 @@ def test_late_ending_facts_update_the_head_without_downgrading_failure(
     lifecycle = next(r.body.value for r in result.records if r.body and r.body.field == "lifecycle")
     assert lifecycle.state is not None
     ending = lifecycle.state.value
+    assert isinstance(ending, p.Ended)
     assert ending.outcome == (p.Outcome.FAILED if failed else p.Outcome.STOPPED)
     assert ending.summary == summary
     assert ending.resumable
