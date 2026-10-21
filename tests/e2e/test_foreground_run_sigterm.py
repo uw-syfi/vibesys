@@ -14,6 +14,7 @@ import signal
 import subprocess
 import sys
 from functools import partial
+from types import FunctionType
 from typing import TYPE_CHECKING
 
 import pytest
@@ -166,7 +167,9 @@ def _wake_at_reporting_return() -> None:
     previous = sys.getprofile()
     attempted = False
     with interrupt.recovering():
-        hook_code = sys.unraisablehook.__code__
+        hook = sys.unraisablehook
+        assert isinstance(hook, FunctionType)
+        hook_code = hook.__code__
 
         def wake_at_return(frame: FrameType, event: str, _arg: object) -> None:
             nonlocal attempted
