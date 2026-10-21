@@ -254,6 +254,26 @@ def test_inlined_numeric_schemas_keep_finiteness_and_bounds(
 
 
 @given(
+    path=st.lists(st.text() | st.integers(), max_size=10),
+    code=st.sampled_from(list(shared_values.ReplyErrorCode)),
+    message=st.text(max_size=500),
+)
+@example(
+    path=["field", 0, -1, 2**100], code=shared_values.ReplyErrorCode.WRONG_TYPE, message="invalid"
+)
+def test_reply_error_paths_preserve_string_and_integer_parts_across_every_wire_form(
+    path: list[str | int], code: shared_values.ReplyErrorCode, message: str
+) -> None:
+    value = shared_values.ReplyError(path=tuple(path), code=code, message=message)
+    wire = to_proto(value)
+    assert from_proto(type(wire).from_binary(wire.to_binary())) == value
+    assert from_proto(type(wire).from_json(wire.to_json())) == value
+    restored = shared_values.ReplyError.model_validate_json(value.model_dump_json())
+    assert restored == value
+    assert [type(part) for part in restored.path] == [type(part) for part in path]
+
+
+@given(
     field=st.sampled_from(["source_request", "scope", "observation_sequence", "status"]),
     sequence=st.integers(min_value=1, max_value=10**100),
 )
