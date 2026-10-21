@@ -227,6 +227,7 @@ class RuntimeWorkspaceRequests:
         *blocking* runs the executor's own disk checks off the event loop. *evidence*
         reads back what an adopted revision measured, for the commit that records it.
         """
+        self._allow_adoption = True
         self._evidence = evidence
         self._blocking = blocking
         self._workspaces = workspaces
@@ -236,6 +237,10 @@ class RuntimeWorkspaceRequests:
         self._observations = ObservationFactory(store)
         self._fences = EffectFences(store)
         self._locks: dict[str, asyncio.Lock] = {}
+
+    def protect_adoption(self) -> None:
+        """Retain selections without replacing the root after an operator Resume."""
+        self._allow_adoption = False
 
     async def execute(self, request: Request, context: ExecutionContext) -> ExecutionOutcome:
         """Execute, replay or inspect one request under its canonical identity."""
@@ -347,7 +352,7 @@ class RuntimeWorkspaceRequests:
                 return await self._run_snapshot(request, resumed=resumed)
             case AdoptRevision() | VerifyAdoption():
                 return await self._adoption(
-                    request, resumed=resumed, allow_write=context.fence.epoch == 1
+                    request, resumed=resumed, allow_write=self._allow_adoption
                 )
             case RestoreRevision() | RetainRevision() | SnapshotAndRetain() | DiscardWorkspace():
                 return await self._attempt_request(request, context, resumed=resumed)

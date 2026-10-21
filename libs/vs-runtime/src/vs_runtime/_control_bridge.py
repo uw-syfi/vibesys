@@ -187,10 +187,9 @@ class RunControlBridge:
         """Bind the mailbox, the steer text store, a headless run's inbox, operators' controls.
 
         ``lifts_standing_stop`` says this process was started by an explicit resume of the
-        run, which lifts a stop core recorded before (its first poll records the lift
-        instead of arming the stop), if core takes the lift: core refuses to lift one of the
-        host's own stops (the deadline's, the run environment's), which stays armed. No other
-        start lifts a stop.
+        run. Once prior cleanup has settled, that start reopens admission after any ending.
+        Its first poll lifts a previously recorded shutdown instead of arming it again.
+        Ordinary writer recovery preserves the standing shutdown.
         """
         self._channel = channel
         self._steer = steer
@@ -236,6 +235,11 @@ class RunControlBridge:
         ``poll`` like every control.
         """
         return self._channel.on_stop_requested(listener)
+
+    @property
+    def resumes_run(self) -> bool:
+        """Whether this host was launched by an explicit operator Resume."""
+        return self._lifts_standing_stop
 
     def poll(self, core: CoreState, now_at: float) -> tuple[CoreEvent, ...]:
         """Controls requested since the last poll, in submission order.
@@ -301,11 +305,7 @@ class RunControlBridge:
         return tuple(events)
 
     def _lifts(self, core: CoreState) -> bool:
-        """Whether this start lifts the stop core holds: it was asked to, and core takes the lift.
-
-        Core takes it until the run's ending commits, so a run already closing on a stop
-        stays stopping.
-        """
+        """Whether this explicit Resume can reopen the recorded shutdown now."""
         if not self._lifts_standing_stop:
             return False
         lift = ControlInput(control_id=ControlId(root="pending-lift"), action="resume", when="now")

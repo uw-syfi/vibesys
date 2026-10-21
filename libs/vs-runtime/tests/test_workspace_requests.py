@@ -346,17 +346,20 @@ def _git(path: Path, *args: str) -> str:
 
 
 def _executor(
-    workspaces: RuntimeWorkspaces, store: ReceiptStore | None = None
+    workspaces: RuntimeWorkspaces, store: ReceiptStore | None = None, *, allow_adoption: bool = True
 ) -> tuple[RuntimeWorkspaceRequests, ReceiptStore]:
     """A host's executor over the run's durable receipts (a new one models a restart)."""
     chosen = store or _ENVS[workspaces].store()
-    return RuntimeWorkspaceRequests(
+    executor = RuntimeWorkspaceRequests(
         workspaces,
         chosen,
         SettledRunInvocations(),
         blocking=InlineBlockingRunner(),
         evidence=ReceiptEvidenceLedger(chosen),
-    ), chosen
+    )
+    if not allow_adoption:
+        executor.protect_adoption()
+    return executor, chosen
 
 
 async def _run(
@@ -930,7 +933,8 @@ def test_adoption_applies_inspects_and_verifies_the_selected_revision(tmp_path: 
         # A new adoption in a resumed epoch is guarded until project-edit protection lands.
         again = AdoptRevision(request_id=_rid("adopt-2"), scope=run_scope, selection=selection)
         root_file.write_text("VALUE = 3\n", encoding="utf-8")
-        refused = await _run(executor, again, epoch=3)
+        resumed, _ = _executor(workspaces, allow_adoption=False)
+        refused = await _run(resumed, again, epoch=3)
         assert refused.observation.observation.status is ObservationStatus.REJECTED
         assert "project-edit protection" in refused.observation.observation.diagnostic
         assert root_file.read_text(encoding="utf-8") == "VALUE = 3\n"
@@ -2135,9 +2139,7 @@ def test_core_accepts_a_retry_after_unknown_and_replays_across_restarts(
             assert _status(lost) is ObservationStatus.UNKNOWN
             second, _ = _executor(env.start_host())
             retried = await _run(second, request, epoch=2)
-            assert _status(retried) is (
-                ObservationStatus.REJECTED if kind is AdoptRevision else ObservationStatus.SUCCEEDED
-            )
+            assert _status(retried) is ObservationStatus.SUCCEEDED
             third, _ = _executor(env.start_host())
             return [lost, retried, await _run(third, request, epoch=3)]
 

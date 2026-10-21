@@ -214,7 +214,12 @@ def start_core(host: CoreRunHost, config: RunLoopConfig) -> None:
 
 
 def _take_lease(host: CoreRunHost, config: RunLoopConfig) -> None:
-    host.shell.start(config.host_id, now_at=host.clock.now(), lease_duration=config.lease_duration)
+    host.shell.start(
+        config.host_id,
+        now_at=host.clock.now(),
+        lease_duration=config.lease_duration,
+        resume=host.controls is not None and host.controls.resumes_run,
+    )
 
 
 _PASSES_TO_WAKE_A_DUE_TIMER = 3
@@ -340,11 +345,16 @@ class _Loop:
         self._stall_notes = stall_notes
         self._time = self._core().run.now_at
         self._deadline_stop = False
-        self._resume_pending = self._core().run.status in (
-            RunStatus.TERMINAL,
-            RunStatus.PARKED,
-            RunStatus.CLOSING,
-            RunStatus.BLOCKED,
+        self._resume_pending = (
+            self._controls is not None
+            and self._controls.resumes_run
+            and self._core().run.status
+            in (
+                RunStatus.TERMINAL,
+                RunStatus.PARKED,
+                RunStatus.CLOSING,
+                RunStatus.BLOCKED,
+            )
         )
         self._first_dispatch = self._shell.dispatched
         self._lease: asyncio.Task[None] | None = None

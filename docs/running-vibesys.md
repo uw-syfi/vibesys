@@ -557,7 +557,9 @@ deadline or environment failure. Its fresh duration defaults to the original dur
 preserves saved results and the operator's current project checkout. It never inherits a prior
 epoch's closing intent. Today's loader still needs a current core record; an older retained
 format that it cannot load produces a prerequisite diagnostic. Importing those older formats
-is a separate change.
+is a separate change. Until project-edit protection lands, root work that would snapshot or
+restore edits present at Resume fails with a prerequisite diagnostic and preserves those
+edits. Resumed adoption retains the candidate instead of replacing the checkout.
 
 Use `vibesys --resume <run-id>` to start the new epoch. A live writer must exit before another
 can launch. Guidance remains durable advice for upcoming work.

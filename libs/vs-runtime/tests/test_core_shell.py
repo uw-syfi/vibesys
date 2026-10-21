@@ -7,7 +7,7 @@ from types import UnionType
 from typing import TYPE_CHECKING, Annotated, Any, get_args, get_origin
 
 import pytest
-from hypothesis import given
+from hypothesis import example, given
 from hypothesis import strategies as st
 from pydantic import ValidationError
 
@@ -494,8 +494,16 @@ def test_a_strategy_state_that_breaks_its_own_invariant_never_becomes_durable() 
     assert store.load() == before
 
 
-@given(duration=st.integers(min_value=1, max_value=86400), gap=st.integers(1, 100000))
-def test_each_epoch_receives_the_original_full_duration(duration: int, gap: int) -> None:
+@example(duration=60, gap=100, resume=False)
+@example(duration=60, gap=100, resume=True)
+@given(
+    duration=st.integers(min_value=1, max_value=86400),
+    gap=st.integers(1, 100000),
+    resume=st.booleans(),
+)
+def test_only_operator_resume_renews_the_original_duration(
+    duration: int, gap: int, *, resume: bool
+) -> None:
     store = FakeStateStore()
     initial = declared(counter)
     initial = initial.model_copy(
@@ -509,7 +517,8 @@ def test_each_epoch_receives_the_original_full_duration(duration: int, gap: int)
             config=CounterConfig(),
             bindings=CoreRuntimeBindings(transitions=ShellTraceTransitions()),
         )
-        shell.start("host", now_at=started, lease_duration=1)
-        assert shell.record.envelope.core.run.deadline_at == started + duration
+        shell.start("host", now_at=started, lease_duration=1, resume=resume)
+        expected = started + duration if resume else duration
+        assert shell.record.envelope.core.run.deadline_at == expected
         assert shell.record.envelope.core.run.duration_seconds == duration
         shell.release_lease(now_at=started)

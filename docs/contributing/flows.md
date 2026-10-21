@@ -548,7 +548,9 @@ workspaces, adoption) a toy search runs through the real core with scripted exec
 - Resume opens a new epoch after every ending. `StopLifted(new_epoch=True)` restarts flows
   from their retained checkpoints with the old shutdown cleared. The duration is fresh;
   lifetime usage and accepted results remain recorded. The original input baseline is fixed,
-  and resumed adoption is guarded until project-edit protection can prove it safe. A search
+  and resumed adoption is guarded until project-edit protection can prove it safe. Root
+  snapshots and restores also refuse edits present at Resume. Ordinary writer recovery
+  preserves its deadline and publication authority; it does not imply operator Resume. A search
   keeps no copy of an epoch's shutdown in its own checkpoint.
 - Awaiting inside a `finally` while the run itself is being discarded is not supported; use
   `except Stopped` (or `@resource`) for cleanup that awaits.

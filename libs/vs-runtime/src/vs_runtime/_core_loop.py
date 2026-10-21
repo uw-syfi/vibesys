@@ -502,7 +502,7 @@ class CoreRuntime[S: StrategyState]:
             self._start_checked = (self._record, host_id)
 
     def _provisional(
-        self, host_id: str, *, now_at: float
+        self, host_id: str, *, now_at: float, resume: bool = False
     ) -> tuple[RunEnvelope[S], tuple[Decision, ...]]:
         """The envelope a start by ``host_id`` would commit, validated, and a new run's decisions.
 
@@ -514,7 +514,7 @@ class CoreRuntime[S: StrategyState]:
             else self.record.envelope.core
         )
         duration = core.run.duration_seconds or self._initial.run.duration_seconds
-        if duration is not None:
+        if duration is not None and (self._record is None or resume):
             core = core.model_copy(
                 update={
                     "run": core.run.model_copy(
@@ -573,7 +573,9 @@ class CoreRuntime[S: StrategyState]:
             # A resumed run's start never reads its time before taking the lease.
             self._provisional(host_id, now_at=self.record.envelope.core.run.now_at)
 
-    def start(self, host_id: str, *, now_at: float, lease_duration: float) -> None:
+    def start(
+        self, host_id: str, *, now_at: float, lease_duration: float, resume: bool = False
+    ) -> None:
         """Validate before lease acquisition, then commit new-epoch recovery.
 
         No backend setup or execution occurs here. Unfinished identities produce
@@ -583,7 +585,7 @@ class CoreRuntime[S: StrategyState]:
             message = "runtime already started"
             raise RuntimeError(message)
         self._load()
-        provisional, decisions = self._provisional(host_id, now_at=now_at)
+        provisional, decisions = self._provisional(host_id, now_at=now_at, resume=resume)
         fence = self._store.acquire(host_id, now=now_at, duration=lease_duration)
         if fence is None:
             message = "runtime lease unavailable"

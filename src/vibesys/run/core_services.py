@@ -172,6 +172,7 @@ class CoreResources:
     """Hears each measurement stage start and end, for the host's event stream."""
     commit_observer: CommitObserver = field(default_factory=IgnoreCommits)
     """Hears each confirmed commit, for committed views and round events."""
+    resuming: bool = False
     control: RunControlChannel | None = None
     agent_lifecycle: AgentExecutionLifecycleSink = ignore_lifecycle
     """Receives the start and end of each provider turn, for the host's event stream."""
@@ -273,6 +274,7 @@ def build_core_services(policy: CorePolicy, resources: CoreResources) -> CoreSer
         ),
         sessions=SessionServices(_agent_sessions(resources), resolver, yields=bridge),
         operations=catalog,
+        allow_adoption=not resources.resuming,
     )
     return CoreServices(
         run_id=run_id,
