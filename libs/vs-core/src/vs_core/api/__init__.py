@@ -30,6 +30,7 @@ from vs_core._comparison import (
     verdict_unreachable,
 )
 from vs_core._continuations import SuspensionRefusal
+from vs_core._corevalue import CoreValue, FrozenMap, TimestampValue
 from vs_core._envelope_migrations import (
     MIGRATIONS as ENVELOPE_MIGRATIONS,
 )
@@ -999,6 +1000,7 @@ __all__ = [
     "CoreRun",
     "CoreState",
     "CoreStep",
+    "CoreValue",
     "CoreView",
     "Correctable",
     "Correction",
@@ -1061,6 +1063,7 @@ __all__ = [
     "FlowCodeChanged",
     "FlowDriver",
     "FlowState",
+    "FrozenMap",
     "GaveUp",
     "Generation",
     "Group",
@@ -1397,6 +1400,7 @@ __all__ = [
     "TimeUp",
     "TimedOut",
     "Timer",
+    "TimestampValue",
     "TraceChange",
     "TraceFrame",
     "Transition",

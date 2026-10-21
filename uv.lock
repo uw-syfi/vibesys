@@ -3459,6 +3459,7 @@ version = "0.1.0"
 source = { editable = "libs/vs-runtime" }
 dependencies = [
     { name = "jinja2" },
+    { name = "protobuf-py" },
     { name = "pydantic" },
     { name = "pyyaml" },
     { name = "vs-agent" },
@@ -3472,6 +3473,7 @@ dependencies = [
     { name = "vs-mcp" },
     { name = "vs-project" },
     { name = "vs-prompts" },
+    { name = "vs-proto" },
     { name = "vs-redaction" },
     { name = "vs-sandbox" },
     { name = "vs-sim" },
@@ -3481,6 +3483,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "jinja2", specifier = ">=3.1" },
+    { name = "protobuf-py", specifier = "==0.6.0" },
     { name = "pydantic", specifier = ">=2" },
     { name = "pyyaml", specifier = ">=6" },
     { name = "vs-agent", editable = "libs/vs-agent" },
@@ -3494,6 +3497,7 @@ requires-dist = [
     { name = "vs-mcp", editable = "libs/vs-mcp" },
     { name = "vs-project", editable = "libs/vs-project" },
     { name = "vs-prompts", editable = "libs/vs-prompts" },
+    { name = "vs-proto", editable = "libs/vs-proto" },
     { name = "vs-redaction", editable = "libs/vs-redaction" },
     { name = "vs-sandbox", editable = "libs/vs-sandbox" },
     { name = "vs-sim", editable = "libs/vs-sim" },

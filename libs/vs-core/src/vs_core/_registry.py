@@ -426,6 +426,7 @@ _ANY_JSON: TypeAdapter[JsonValue] = TypeAdapter(JsonValue)
 _NEWER_WRITER_ERRORS: Final = frozenset(
     {
         "extra_forbidden",
+        "unexpected_keyword_argument",
         "literal_error",
         "enum",
         "union_tag_invalid",

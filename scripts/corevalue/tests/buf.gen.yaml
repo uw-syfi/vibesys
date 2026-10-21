@@ -1,0 +1,14 @@
+version: v2
+inputs:
+  - directory: scripts/corevalue/tests/proto
+plugins:
+  - local: protoc-gen-py
+    out: scripts/corevalue/tests/generated_pb
+  - local: [uv, run, --locked, --group, proto, python, -m, scripts.protoc_gen_corevalue]
+    out: scripts/corevalue/tests/generated_values
+  - local: [uv, run, --locked, --group, proto, python, -m, scripts.protoc_gen_corevalue]
+    out: scripts/corevalue/tests/generated_boundary
+    opt:
+      - boundary=true
+      - value_module=scripts.corevalue.tests.values_api
+      - pb_module=scripts.corevalue.tests.generated_pb.vibesys.core.testing.v1.values_pb

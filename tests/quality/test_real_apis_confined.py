@@ -1746,6 +1746,10 @@ PARSE_EDGE_MODULES: dict[str, tuple[ParseKind, str]] = {
         ParseKind.FAKE,
         "a scripted reply value, as the response model",
     ),
+    "libs/vs-core/src/vs_core/_corevalue.py": (
+        ParseKind.MODEL_HOOK,
+        "the generated value's Pydantic-compatible parse method; its ingress callers remain scanned",
+    ),
     "libs/vs-core/src/vs_core/_registry.py": (
         ParseKind.OWN_STORE,
         "persisted operation wires and run envelopes, and in-memory re-validation",

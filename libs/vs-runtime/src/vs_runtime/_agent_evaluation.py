@@ -589,7 +589,10 @@ class AgentEvaluationBridge:
             message = "unknown evaluation token"
             raise PermissionError(message)
         scope = decode_json(
-            base64.urlsafe_b64decode(body), Scope, source="evaluation token", max_bytes=_FRAME_LIMIT
+            base64.urlsafe_b64decode(body),
+            TypeAdapter(Scope),
+            source="evaluation token",
+            max_bytes=_FRAME_LIMIT,
         )
         if isinstance(scope, Unreadable):
             raise PermissionError(str(scope))
