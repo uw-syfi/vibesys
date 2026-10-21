@@ -1,0 +1,21 @@
+syntax = "proto3";
+package vibesys.replay.testing.v1;
+
+import "vibesys/store/v1/replay.proto";
+
+// Test-only typed renderer input. Production strategies own their context schema.
+message Context {
+  string candidate = 1 [(vibesys.store.v1.replay_field) = REPLAY_FIELD_KIND_IDENTITY];
+  string wording = 2 [(vibesys.store.v1.replay_field) = REPLAY_FIELD_KIND_POLICY];
+  repeated string evidence = 3 [(vibesys.store.v1.replay_field) = REPLAY_FIELD_KIND_IDENTITY, (vibesys.store.v1.replay_set) = true];
+  repeated string ordered = 4 [(vibesys.store.v1.replay_field) = REPLAY_FIELD_KIND_IDENTITY];
+}
+message NestedContext {
+  Context context = 1 [(vibesys.store.v1.replay_field) = REPLAY_FIELD_KIND_IDENTITY];
+}
+message UnclassifiedContext {
+  string candidate = 1;
+}
+message UnclassifiedPolicy {
+  UnclassifiedContext context = 1 [(vibesys.store.v1.replay_field) = REPLAY_FIELD_KIND_POLICY];
+}

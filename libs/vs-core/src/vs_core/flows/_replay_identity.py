@@ -133,8 +133,8 @@ def _sort_key(value: object) -> bytes:
 
 def _normalize(message: Message) -> Message:
     if message.to_binary() != message.to_binary(write_unknown_fields=False):
-        message = f"identity {message.desc().type_name} contains unknown fields"
-        raise ReplayIdentityError(message)
+        problem = f"identity {message.desc().type_name} contains unknown fields"
+        raise ReplayIdentityError(problem)
     result = deepcopy(message)
     for field in message:
         value = message[field]
@@ -159,8 +159,8 @@ def encode_identity(
     a fixed-size chained causal digest. It is not cross-language canonicalization.
     """
     if not contract or len(dependencies) != DIGEST_BYTES:
-        message = "identity needs a semantic contract and 32-byte dependencies"
-        raise ReplayIdentityError(message)
+        problem = "identity needs a semantic contract and 32-byte dependencies"
+        raise ReplayIdentityError(problem)
     _check_schema(message.desc(), set())
     normalized = _normalize(message)
     validate(normalized)
@@ -184,6 +184,23 @@ class ClassifiedContext:
 
     def message(self) -> Message:
         return self.message_type.from_binary(self.content)
+
+
+def _check_classification(desc: DescMessage, seen: set[str]) -> None:
+    if desc.type_name in seen:
+        return
+    seen.add(desc.type_name)
+    for field in desc.fields:
+        options = field.proto.options
+        kind = options[pb.ext_replay_field] if options is not None else 0
+        if kind not in (pb.ReplayFieldKind.IDENTITY, pb.ReplayFieldKind.POLICY):
+            problem = f"unclassified prompt field {desc.type_name}.{field.name}"
+            raise ReplayIdentityError(problem)
+        value = field.value
+        if isinstance(value, DescFieldValueList):
+            value = value.element
+        if isinstance(value, DescFieldValueMessage):
+            _check_classification(value.message, seen)
 
 
 def _classified(message: Message) -> Message:
@@ -211,6 +228,9 @@ def classify_context(
     message: Message, *, contract: str, dependencies: bytes = EMPTY_CAUSALITY
 ) -> ClassifiedContext:
     """Reject unclassified renderer inputs, and derive identity from typed content."""
+    _check_schema(message.desc(), set())
+    _check_classification(message.desc(), set())
+    message = _normalize(message)
     validate(message)
     identity = encode_identity(_classified(message), contract=contract, dependencies=dependencies)
     return ClassifiedContext(type(message), message.to_binary(), identity)

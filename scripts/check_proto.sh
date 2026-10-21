@@ -3,6 +3,7 @@
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$root"
+uv run --locked python -m scripts.check_proto_layers
 uv run --locked --group proto buf lint
 base="${PROTO_BASE_REF:-origin/main}"
 # Only the first introduction has no store to compare. A missing ref is an error.
@@ -17,7 +18,7 @@ else
   echo "No store schema at $base; establishing the initial additive baseline."
 fi
 ./scripts/generate_proto.sh
-generated=(libs/vs-proto/src/vs_proto/_generated clients/libs/proto/src/generated gateway/gen
+generated=(libs/vs-core/tests/generated libs/vs-proto/src/vs_proto/_generated clients/libs/proto/src/generated gateway/gen
   libs/vs-core/src/vs_core/_generated libs/vs-runtime/src/vs_runtime/_core_values
   scripts/corevalue/tests/generated_pb scripts/corevalue/tests/generated_values scripts/corevalue/tests/generated_boundary)
 git diff --exit-code -- "${generated[@]}"

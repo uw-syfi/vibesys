@@ -427,6 +427,51 @@ func (x *OperationReplay) GetAllowance() *ReplayAllowance {
 	return nil
 }
 
+// Timer-only progress is an observation, not a keyed paid operation.
+type ReplayClock struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Allowance     *ReplayAllowance       `protobuf:"bytes,1,opt,name=allowance,proto3" json:"allowance,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReplayClock) Reset() {
+	*x = ReplayClock{}
+	mi := &file_vibesys_store_v1_replay_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReplayClock) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReplayClock) ProtoMessage() {}
+
+func (x *ReplayClock) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_store_v1_replay_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReplayClock.ProtoReflect.Descriptor instead.
+func (*ReplayClock) Descriptor() ([]byte, []int) {
+	return file_vibesys_store_v1_replay_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *ReplayClock) GetAllowance() *ReplayAllowance {
+	if x != nil {
+		return x.Allowance
+	}
+	return nil
+}
+
 type ReplayNotice struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
@@ -438,7 +483,7 @@ type ReplayNotice struct {
 
 func (x *ReplayNotice) Reset() {
 	*x = ReplayNotice{}
-	mi := &file_vibesys_store_v1_replay_proto_msgTypes[5]
+	mi := &file_vibesys_store_v1_replay_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -450,7 +495,7 @@ func (x *ReplayNotice) String() string {
 func (*ReplayNotice) ProtoMessage() {}
 
 func (x *ReplayNotice) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_store_v1_replay_proto_msgTypes[5]
+	mi := &file_vibesys_store_v1_replay_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -463,7 +508,7 @@ func (x *ReplayNotice) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReplayNotice.ProtoReflect.Descriptor instead.
 func (*ReplayNotice) Descriptor() ([]byte, []int) {
-	return file_vibesys_store_v1_replay_proto_rawDescGZIP(), []int{5}
+	return file_vibesys_store_v1_replay_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *ReplayNotice) GetId() string {
@@ -497,7 +542,7 @@ type ReplayAcknowledgement struct {
 
 func (x *ReplayAcknowledgement) Reset() {
 	*x = ReplayAcknowledgement{}
-	mi := &file_vibesys_store_v1_replay_proto_msgTypes[6]
+	mi := &file_vibesys_store_v1_replay_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -509,7 +554,7 @@ func (x *ReplayAcknowledgement) String() string {
 func (*ReplayAcknowledgement) ProtoMessage() {}
 
 func (x *ReplayAcknowledgement) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_store_v1_replay_proto_msgTypes[6]
+	mi := &file_vibesys_store_v1_replay_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -522,7 +567,7 @@ func (x *ReplayAcknowledgement) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReplayAcknowledgement.ProtoReflect.Descriptor instead.
 func (*ReplayAcknowledgement) Descriptor() ([]byte, []int) {
-	return file_vibesys_store_v1_replay_proto_rawDescGZIP(), []int{6}
+	return file_vibesys_store_v1_replay_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *ReplayAcknowledgement) GetNoticeId() string {
@@ -603,7 +648,9 @@ const file_vibesys_store_v1_replay_proto_rawDesc = "" +
 	"\bcost_usd\x18\t \x01(\x01B\x10\xbaH\r\x12\v@\x01)\x00\x00\x00\x00\x00\x00\x00\x00H\x00R\acostUsd\x88\x01\x01\x12G\n" +
 	"\tallowance\x18\n" +
 	" \x01(\v2!.vibesys.store.v1.ReplayAllowanceB\x06\xbaH\x03\xc8\x01\x01R\tallowanceB\v\n" +
-	"\t_cost_usd\"\x9c\x01\n" +
+	"\t_cost_usd\"V\n" +
+	"\vReplayClock\x12G\n" +
+	"\tallowance\x18\x01 \x01(\v2!.vibesys.store.v1.ReplayAllowanceB\x06\xbaH\x03\xc8\x01\x01R\tallowance\"\x9c\x01\n" +
 	"\fReplayNotice\x12\x17\n" +
 	"\x02id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x02id\x129\n" +
 	"\x06unused\x18\x02 \x03(\v2!.vibesys.store.v1.OperationReplayR\x06unused\x128\n" +
@@ -632,7 +679,7 @@ func file_vibesys_store_v1_replay_proto_rawDescGZIP() []byte {
 }
 
 var file_vibesys_store_v1_replay_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_vibesys_store_v1_replay_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
+var file_vibesys_store_v1_replay_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
 var file_vibesys_store_v1_replay_proto_goTypes = []any{
 	(ReplayFieldKind)(0),              // 0: vibesys.store.v1.ReplayFieldKind
 	(*OperationKey)(nil),              // 1: vibesys.store.v1.OperationKey
@@ -640,27 +687,29 @@ var file_vibesys_store_v1_replay_proto_goTypes = []any{
 	(*ReplayAllowance)(nil),           // 3: vibesys.store.v1.ReplayAllowance
 	(*ReplayPolicy)(nil),              // 4: vibesys.store.v1.ReplayPolicy
 	(*OperationReplay)(nil),           // 5: vibesys.store.v1.OperationReplay
-	(*ReplayNotice)(nil),              // 6: vibesys.store.v1.ReplayNotice
-	(*ReplayAcknowledgement)(nil),     // 7: vibesys.store.v1.ReplayAcknowledgement
-	(*anypb.Any)(nil),                 // 8: google.protobuf.Any
-	(*descriptorpb.FieldOptions)(nil), // 9: google.protobuf.FieldOptions
+	(*ReplayClock)(nil),               // 6: vibesys.store.v1.ReplayClock
+	(*ReplayNotice)(nil),              // 7: vibesys.store.v1.ReplayNotice
+	(*ReplayAcknowledgement)(nil),     // 8: vibesys.store.v1.ReplayAcknowledgement
+	(*anypb.Any)(nil),                 // 9: google.protobuf.Any
+	(*descriptorpb.FieldOptions)(nil), // 10: google.protobuf.FieldOptions
 }
 var file_vibesys_store_v1_replay_proto_depIdxs = []int32{
 	2,  // 0: vibesys.store.v1.OperationKey.scope:type_name -> vibesys.store.v1.KeyComponent
 	1,  // 1: vibesys.store.v1.OperationReplay.key:type_name -> vibesys.store.v1.OperationKey
 	4,  // 2: vibesys.store.v1.OperationReplay.policy:type_name -> vibesys.store.v1.ReplayPolicy
-	8,  // 3: vibesys.store.v1.OperationReplay.outcome:type_name -> google.protobuf.Any
+	9,  // 3: vibesys.store.v1.OperationReplay.outcome:type_name -> google.protobuf.Any
 	3,  // 4: vibesys.store.v1.OperationReplay.allowance:type_name -> vibesys.store.v1.ReplayAllowance
-	5,  // 5: vibesys.store.v1.ReplayNotice.unused:type_name -> vibesys.store.v1.OperationReplay
-	1,  // 6: vibesys.store.v1.ReplayNotice.pending:type_name -> vibesys.store.v1.OperationKey
-	9,  // 7: vibesys.store.v1.replay_field:extendee -> google.protobuf.FieldOptions
-	9,  // 8: vibesys.store.v1.replay_set:extendee -> google.protobuf.FieldOptions
-	0,  // 9: vibesys.store.v1.replay_field:type_name -> vibesys.store.v1.ReplayFieldKind
-	10, // [10:10] is the sub-list for method output_type
-	10, // [10:10] is the sub-list for method input_type
-	9,  // [9:10] is the sub-list for extension type_name
-	7,  // [7:9] is the sub-list for extension extendee
-	0,  // [0:7] is the sub-list for field type_name
+	3,  // 5: vibesys.store.v1.ReplayClock.allowance:type_name -> vibesys.store.v1.ReplayAllowance
+	5,  // 6: vibesys.store.v1.ReplayNotice.unused:type_name -> vibesys.store.v1.OperationReplay
+	1,  // 7: vibesys.store.v1.ReplayNotice.pending:type_name -> vibesys.store.v1.OperationKey
+	10, // 8: vibesys.store.v1.replay_field:extendee -> google.protobuf.FieldOptions
+	10, // 9: vibesys.store.v1.replay_set:extendee -> google.protobuf.FieldOptions
+	0,  // 10: vibesys.store.v1.replay_field:type_name -> vibesys.store.v1.ReplayFieldKind
+	11, // [11:11] is the sub-list for method output_type
+	11, // [11:11] is the sub-list for method input_type
+	10, // [10:11] is the sub-list for extension type_name
+	8,  // [8:10] is the sub-list for extension extendee
+	0,  // [0:8] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_store_v1_replay_proto_init() }
@@ -675,7 +724,7 @@ func file_vibesys_store_v1_replay_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_vibesys_store_v1_replay_proto_rawDesc), len(file_vibesys_store_v1_replay_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   7,
+			NumMessages:   8,
 			NumExtensions: 2,
 			NumServices:   0,
 		},

@@ -58,6 +58,11 @@ message OperationReplay {
   ReplayAllowance allowance = 10 [(buf.validate.field).required = true];
 }
 
+// Timer-only progress is an observation, not a keyed paid operation.
+message ReplayClock {
+  ReplayAllowance allowance = 1 [(buf.validate.field).required = true];
+}
+
 message ReplayNotice {
   string id = 1 [(buf.validate.field).string.min_len = 1];
   repeated OperationReplay unused = 2;

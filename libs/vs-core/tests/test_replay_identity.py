@@ -13,9 +13,16 @@ from vs_core.api.replay import (
     ReplayIdentityError,
     SemanticKey,
     chain_dependency,
+    classify_context,
     encode_identity,
 )
 from vs_proto.api import core_common, replay
+
+from .generated.vibesys.replay.testing.v1.context_pb import (
+    Context,
+    NestedContext,
+    UnclassifiedPolicy,
+)
 
 
 @given(value=st.text(alphabet="abcdefghijklmnopqrstuvwxyz0123456789", min_size=1, max_size=100))
@@ -70,3 +77,37 @@ def test_key_scope_is_typed_and_roundtrips(position: int) -> None:
 def test_position_without_recorded_parent_is_invalid() -> None:
     with pytest.raises(ReplayIdentityError, match="recorded outcome"):
         SemanticKey("implement").recorded_position(b"not-a-digest", 1)
+
+
+def test_prompt_context_requires_classification_even_for_absent_policy_fields() -> None:
+
+    with pytest.raises(ReplayIdentityError, match="unclassified prompt field"):
+        classify_context(UnclassifiedPolicy(), contract="plan.v1")
+
+
+@given(wording=st.text(), evidence=st.lists(st.sampled_from(["a", "b", "c"])))
+def test_typed_context_centralizes_sets_and_keeps_ordered_fields(
+    wording: str, evidence: list[str]
+) -> None:
+
+    original = Context(candidate="a", wording="old", evidence=evidence, ordered=["a", "b"])
+    changed = Context(
+        candidate="a", wording=wording, evidence=list(reversed(evidence)), ordered=["a", "b"]
+    )
+    before = classify_context(original, contract="plan.v1")
+    after = classify_context(changed, contract="plan.v1")
+    assert before.identity == after.identity
+    assert after.message() == Context(
+        candidate="a", wording=wording, evidence=sorted(set(evidence)), ordered=["a", "b"]
+    )
+    changed.candidate = "b"
+    assert before.identity != classify_context(changed, contract="plan.v1").identity
+    changed.candidate = "a"
+    changed.ordered.reverse()
+    assert before.identity != classify_context(changed, contract="plan.v1").identity
+    nested = classify_context(NestedContext(context=original), contract="plan.v1")
+    original.wording = "new"
+    assert (
+        nested.identity
+        == classify_context(NestedContext(context=original), contract="plan.v1").identity
+    )
