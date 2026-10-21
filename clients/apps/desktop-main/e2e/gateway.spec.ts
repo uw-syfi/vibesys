@@ -14,6 +14,7 @@ import {
 } from 'node:fs/promises';
 import {arch, platform} from 'node:os';
 import {join} from 'node:path';
+import {Transform} from 'node:stream';
 import {fileURLToPath} from 'node:url';
 import {create, fromBinary, toBinary} from '@bufbuild/protobuf';
 import {
@@ -234,6 +235,48 @@ test('SSH provisioning verifies size and SHA-256, skips matching bytes and atomi
     await rm(home, {recursive: true, force: true});
   }
 });
+
+for (const damage of ['truncated', 'corrupt'] as const) {
+  test(`SSH provisioning preserves the installed binary after a ${damage} upload`, async () => {
+    const temporaryHome = await mkdtemp('/tmp/vsg-provision-');
+    const bytes = Buffer.from('a complete verified gateway artifact');
+    const destination = join(temporaryHome, GATEWAY_DIRECTORY, 'vibesysd');
+    const link = new SshLink({
+      alias: 'host-a',
+      controlPath: '/tmp/vsg-control',
+      askpass: '/tmp/vsg-askpass',
+      scheduleTimeout: schedule,
+      spawn: (_command, args, env) => {
+        const child = spawn('/bin/sh', ['-c', args.at(-1) as string], {
+          stdio: 'pipe',
+          env: {...process.env, ...env, HOME: temporaryHome},
+        });
+        const transfer = new Transform({
+          transform(chunk: Buffer, _encoding, callback) {
+            const changed = Buffer.from(chunk);
+            if (damage === 'corrupt') changed[0] = (changed[0] ?? 0) ^ 1;
+            callback(null, damage === 'truncated' ? changed.subarray(0, 1) : changed);
+          },
+        });
+        transfer.pipe(child.stdin);
+        return {...fromChild(child), stdin: transfer};
+      },
+    });
+    try {
+      await mkdir(join(temporaryHome, GATEWAY_DIRECTORY), {recursive: true});
+      await writeFile(destination, bytes);
+      const original = await stat(destination);
+      await expect(
+        provisionGateway(link, async () => bytes, true, new AbortController().signal, schedule),
+      ).rejects.toThrow(/gateway (artifact verification|command failed)/);
+      expect((await readFile(destination)).equals(bytes)).toBe(true);
+      expect((await stat(destination)).ino).toBe(original.ino);
+      expect(await readdir(join(temporaryHome, GATEWAY_DIRECTORY))).toEqual(['vibesysd']);
+    } finally {
+      await rm(temporaryHome, {recursive: true, force: true});
+    }
+  });
+}
 
 interface GatewayRenderer {
   vibesysGateway: import('@vibesys/ipc').GatewayBridge;
