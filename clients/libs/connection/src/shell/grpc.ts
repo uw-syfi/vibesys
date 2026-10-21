@@ -16,7 +16,7 @@ export class GrpcError extends Error {
 }
 
 export function grpcFrame(bytes: Uint8Array): Buffer {
-  if (bytes.byteLength > MAX_MESSAGE) throw new Error('gRPC message exceeds 16 MiB');
+  if (bytes.byteLength > MAX_MESSAGE) throw new GrpcError(8, 'gRPC message exceeds 16 MiB');
   const frame = Buffer.alloc(5 + bytes.byteLength);
   frame.writeUInt32BE(bytes.byteLength, 1);
   frame.set(bytes, 5);
@@ -30,9 +30,10 @@ export class GrpcDecoder {
     this.#buffer = Buffer.concat([this.#buffer, bytes]);
     const messages: Uint8Array[] = [];
     while (this.#buffer.length >= 5) {
-      if (this.#buffer[0] !== 0) throw new Error('compressed gRPC messages are unsupported');
+      if (this.#buffer[0] !== 0)
+        throw new GrpcError(12, 'compressed gRPC messages are unsupported');
       const size = this.#buffer.readUInt32BE(1);
-      if (size > MAX_MESSAGE) throw new Error('gRPC message exceeds 16 MiB');
+      if (size > MAX_MESSAGE) throw new GrpcError(8, 'gRPC message exceeds 16 MiB');
       if (this.#buffer.length < size + 5) break;
       messages.push(this.#buffer.subarray(5, size + 5));
       this.#buffer = this.#buffer.subarray(size + 5);

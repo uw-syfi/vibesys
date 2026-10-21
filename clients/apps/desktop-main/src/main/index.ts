@@ -42,7 +42,7 @@ import {
 } from './app-security.js';
 import {AppStartup} from './app-startup.js';
 import {Desktop} from './desktop.js';
-import {gatewaySetting, installGatewayIpc} from './gateway-ipc.js';
+import {createGatewayCalls, gatewaySetting, installGatewayIpc} from './gateway-ipc.js';
 import {type LaunchPlan, userDataOverride} from './launch-args.js';
 import {planFromSecondInstance, prepareLaunchHandoff} from './launch-handoff.js';
 import {RunWindows} from './run-windows.js';
@@ -122,8 +122,7 @@ function runNotifier(preferences: PreferencesMain, focus: () => void): RunNotifi
 }
 
 function installGateway(manager: ConnectionManager, settings: SettingsStore) {
-  return installGatewayIpc(
-    ipcMain,
+  return createGatewayCalls(
     manager,
     settings,
     fileURLToPath(new URL('../gateway/', import.meta.url)),
@@ -145,7 +144,7 @@ async function openWindow(
     preferencesPath: join(userData, 'preferences.json'),
     log,
   });
-  const disableGateway = installGateway(manager, settings);
+  const gateway = installGateway(manager, settings);
   const welcome = new WelcomeFeed();
   const preferences = new PreferencesMain({
     store: settings,
@@ -206,7 +205,11 @@ async function openWindow(
     settings,
     preferences,
     newRun: newRunMain(hosts, settings),
-    gatewaySetting: gatewaySetting(settings, host => hosts.checkout(host), disableGateway),
+    gatewaySetting: gatewaySetting(
+      settings,
+      host => hosts.checkout(host),
+      host => gateway.disable(host),
+    ),
     runWindows: windows.runs,
     shellUrl: SHELL_URL,
     openExternal: url => shell.openExternal(url),
@@ -228,6 +231,7 @@ async function openWindow(
   // A machine that slept has dead connections nobody has noticed yet: check them now.
   powerMonitor.on('resume', () => manager.wake());
   watchNetwork(manager);
+  installGatewayIpc(ipcMain, gateway, event => desktop.admitsRenderer(event));
   return desktop;
 }
 

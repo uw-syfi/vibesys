@@ -12,23 +12,34 @@ import {
   symlink,
   writeFile,
 } from 'node:fs/promises';
-import {connect} from 'node:net';
 import {arch, platform} from 'node:os';
 import {join} from 'node:path';
-import {Duplex} from 'node:stream';
 import {fileURLToPath} from 'node:url';
 import {create, fromBinary, toBinary} from '@bufbuild/protobuf';
-import {expect, test} from '@playwright/test';
+import {
+  type ElectronApplication,
+  _electron as electron,
+  expect,
+  type Page,
+  test,
+} from '@playwright/test';
 import {
   fromChild,
   GATEWAY_DIRECTORY,
-  GatewayCalls,
   gatewayTarget,
   provisionGateway,
   SshLink,
   TAIL_METHOD,
 } from '@vibesys/connection';
-import {API_SCHEMA_HASH, RecordSchema, TailRequestSchema, TailResponseSchema} from '@vibesys/proto';
+import {
+  API_SCHEMA_HASH,
+  HelloRequestSchema,
+  HelloResponseSchema,
+  RecordSchema,
+  TailRequestSchema,
+  TailResponseSchema,
+} from '@vibesys/proto';
+import {electronRuntimeArgs} from './electron-launch-policy.mjs';
 
 const repository = fileURLToPath(new URL('../../../../', import.meta.url));
 let buildDirectory: string;
@@ -69,65 +80,72 @@ for (const mode of ['socket', 'connect pipe'] as const) {
     const serve = spawn(binary, ['serve', '--root', root], {stdio: 'ignore'});
     const serveEnded = new Promise<void>(resolve => serve.once('close', () => resolve()));
     serve.once('error', ready.reject);
-    let pipe: ReturnType<typeof spawn> | null = null;
-    let pipeEnded = Promise.resolve();
-    const abort = new AbortController();
-    let calls: GatewayCalls | null = null;
+    let app: ElectronApplication | null = null;
     try {
       await ready.promise;
       watcher.close();
-      calls = new GatewayCalls(
-        async () => true,
-        () => ({
-          dial: async () => {
-            if (mode === 'socket') return connect(join(gateway, 'sock'));
-            pipe = spawn(binary, ['connect', '--root', root], {stdio: 'pipe'});
-            pipe.stderr?.resume();
-            pipeEnded = new Promise(resolve => pipe?.once('close', () => resolve()));
-            const duplex = Duplex.from({readable: pipe.stdout, writable: pipe.stdin});
-            duplex.once('close', () => pipe?.kill());
-            return duplex;
-          },
-        }),
-        schedule,
-      );
-      const initial = deferred<void>();
-      const appended = deferred<void>();
-      const seqs: bigint[] = [];
-      const tail = calls.stream(
-        'local',
-        TAIL_METHOD,
-        toBinary(TailRequestSchema, create(TailRequestSchema, {runId: 'run-a', fromSeq: 1n})),
-        abort.signal,
-        bytes => {
-          for (const bytesRecord of fromBinary(TailResponseSchema, bytes).records) {
-            const record = fromBinary(RecordSchema, bytesRecord);
-            seqs.push(record.seq);
-            if (record.seq === 1n) initial.resolve();
-            if (record.seq === 2n) appended.resolve();
-          }
+      app = await electron.launch({
+        args: [
+          fileURLToPath(new URL('./gateway-app.mjs', import.meta.url)),
+          ...electronRuntimeArgs(),
+        ],
+        env: {
+          ...process.env,
+          VIBESYS_GATEWAY_ROOT: root,
+          VIBESYS_GATEWAY_BINARY: binary,
+          VIBESYS_GATEWAY_MODE: mode,
         },
-      );
-      const outcome = tail.catch(error => {
-        initial.reject(error);
-        appended.reject(error);
       });
-      // Attach both rejection handlers before external I/O can fail.
-      const deliveries = Promise.all([initial.promise, appended.promise]);
-      await initial.promise;
+      const page = await app.firstWindow();
+      await app.evaluate(async () => {
+        await (globalThis as typeof globalThis & {vibesysGatewayReady: Promise<void>})
+          .vibesysGatewayReady;
+      });
+      const hello = await page.evaluate(
+        async request => {
+          const bridge = (window as unknown as GatewayRenderer).vibesysGateway;
+          return [
+            ...(await bridge.unary(
+              'local',
+              '/vibesys.api.v1.HostService/Hello',
+              new Uint8Array(request),
+            ).result),
+          ];
+        },
+        [
+          ...toBinary(
+            HelloRequestSchema,
+            create(HelloRequestSchema, {apiSchemaHash: API_SCHEMA_HASH}),
+          ),
+        ],
+      );
+      expect(fromBinary(HelloResponseSchema, new Uint8Array(hello)).apiSchemaHash).toBe(
+        API_SCHEMA_HASH,
+      );
+      await startTail(page);
+      const initial = await page.evaluate(() =>
+        (window as unknown as GatewayRenderer).gatewayRead(),
+      );
+      expect(sequences(initial)).toEqual([1n]);
       await appendFile(log, frame(2n));
-      await deliveries;
-      expect(seqs).toEqual([1n, 2n]);
-      abort.abort();
-      await outcome;
+      const appended = await page.evaluate(() =>
+        (window as unknown as GatewayRenderer).gatewayRead(),
+      );
+      expect(sequences(appended)).toEqual([2n]);
+      await page.evaluate(() => (window as unknown as GatewayRenderer).gatewayCancel());
+      await app.evaluate(async () => {
+        await (globalThis as typeof globalThis & {vibesysGatewayClosed: Promise<void>})
+          .vibesysGatewayClosed;
+      });
     } finally {
       watcher.close();
-      abort.abort();
-      calls?.disable('local');
-      if (pipe !== null) (pipe as ReturnType<typeof spawn>).kill();
       serve.kill();
-      await Promise.all([serveEnded, pipeEnded]);
-      await rm(root, {recursive: true, force: true});
+      await serveEnded;
+      try {
+        if (app !== null) await app.close();
+      } finally {
+        await rm(root, {recursive: true, force: true});
+      }
     }
   });
 }
@@ -213,3 +231,52 @@ test('SSH provisioning verifies size and SHA-256, skips matching bytes and atomi
     await rm(home, {recursive: true, force: true});
   }
 });
+
+interface GatewayRenderer {
+  vibesysGateway: import('@vibesys/ipc').GatewayBridge;
+  gatewayRead(): Promise<number[]>;
+  gatewayCancel(): void;
+}
+function sequences(bytes: number[]): bigint[] {
+  return fromBinary(TailResponseSchema, new Uint8Array(bytes)).records.map(
+    bytes => fromBinary(RecordSchema, bytes).seq,
+  );
+}
+
+async function startTail(page: Page): Promise<void> {
+  await page.evaluate(
+    request => {
+      const target = window as unknown as GatewayRenderer;
+      const queued: number[][] = [];
+      const waiting: Array<{resolve(bytes: number[]): void; reject(error: unknown): void}> = [];
+      let ended: string | undefined;
+      target.gatewayRead = () => {
+        const bytes = queued.shift();
+        if (bytes !== undefined) return Promise.resolve(bytes);
+        if (ended !== undefined) return Promise.reject(new Error(ended));
+        return new Promise((resolve, reject) => waiting.push({resolve, reject}));
+      };
+      const call = target.vibesysGateway.stream(
+        'local',
+        request.method,
+        new Uint8Array(request.bytes),
+        bytes => {
+          const waiter = waiting.shift();
+          if (waiter === undefined) queued.push([...bytes]);
+          else waiter.resolve([...bytes]);
+        },
+        error => {
+          ended = error ?? 'stream ended';
+          for (const waiter of waiting.splice(0)) waiter.reject(new Error(ended));
+        },
+      );
+      target.gatewayCancel = () => call.cancel();
+    },
+    {
+      method: TAIL_METHOD,
+      bytes: [
+        ...toBinary(TailRequestSchema, create(TailRequestSchema, {runId: 'run-a', fromSeq: 1n})),
+      ],
+    },
+  );
+}

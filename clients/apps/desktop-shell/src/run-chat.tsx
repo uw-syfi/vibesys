@@ -91,33 +91,33 @@ export function RunWithChat(props: {
     ended && (chatsEnded?.reads === false || page.state.reader.link.kind === 'unsupported');
   const gateway = typeof window === 'undefined' ? undefined : window.vibesysGateway;
   return (
-    <>
-      <RunScreen
-        state={page.state}
-        model={page.model}
-        whole={page.whole}
-        core={page.core}
-        route={page.route}
-        zoom={page.zoom}
-        dispatch={page.dispatch}
-        modelNames={page.modelNames}
-        chat={{
-          open: chat.open,
-          toggle: chat.toggle,
-          panel: chat.panel === null ? null : <ChatPanel {...chat.panel} />,
-          ...(unsupported ? {unavailable: NEEDS_UPDATE} : {}),
-        }}
-      />
-      {gateway === undefined ? null : (
-        <GatewayRecords
-          key={`${run.host}/${run.runId}`}
-          bridge={gateway}
-          schedule={props.schedule}
-          settings={bridge}
-          host={run.host}
-          runId={run.runId}
-        />
-      )}
-    </>
+    <RunScreen
+      state={page.state}
+      model={page.model}
+      whole={page.whole}
+      core={page.core}
+      route={page.route}
+      zoom={page.zoom}
+      dispatch={page.dispatch}
+      modelNames={page.modelNames}
+      chat={{
+        open: chat.open,
+        toggle: chat.toggle,
+        panel: chat.panel === null ? null : <ChatPanel {...chat.panel} />,
+        ...(unsupported ? {unavailable: NEEDS_UPDATE} : {}),
+      }}
+      supplemental={
+        gateway === undefined ? null : (
+          <GatewayRecords
+            key={`${run.host}/${run.runId}`}
+            bridge={gateway}
+            schedule={props.schedule}
+            settings={bridge}
+            host={run.host}
+            runId={run.runId}
+          />
+        )
+      }
+    />
   );
 }

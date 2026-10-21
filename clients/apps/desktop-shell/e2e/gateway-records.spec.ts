@@ -82,6 +82,9 @@ for (const width of [1000, 1440]) {
     await expect(table.getByRole('row')).toHaveCount(3);
     await table.scrollIntoViewIfNeeded();
     await settled(page);
+    const rail = await page.getByRole('navigation', {name: 'VibeSys'}).boundingBox();
+    expect(rail).not.toBeNull();
+    expect((rail?.y ?? 0) + (rail?.height ?? 0)).toBe(900);
     expect(await screenCheck(page)).toEqual([]);
     const shots = process.env['SCREENS_DIR'];
     if (shots !== undefined) {

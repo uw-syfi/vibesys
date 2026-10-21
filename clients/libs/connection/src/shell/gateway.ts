@@ -163,19 +163,7 @@ export class GatewayConnection {
         abort.signal,
         bytes => {
           if (call.abort !== abort) return;
-          const response =
-            call.method === TAIL_METHOD ? fromBinary(TailResponseSchema, bytes) : null;
-          const request = response === null ? null : fromBinary(TailRequestSchema, call.bytes);
-          if (response !== null && request !== null && response.throughSeq < request.fromSeq) {
-            throw new GrpcError(15, 'Tail returned a sequence before the requested cursor');
-          }
-          call.receive(bytes);
-          if (response !== null && request !== null) {
-            call.bytes = toBinary(TailRequestSchema, {
-              ...request,
-              fromSeq: response.throughSeq + 1n,
-            });
-          }
+          acceptResponse(call, bytes);
         },
         call.unary ? 15_000 : undefined,
       )
@@ -233,4 +221,26 @@ async function openSession(
     }
   }
   throw new Error('gateway handshake did not complete');
+}
+
+/** Validate before publishing, then advance only after the consumer accepts the complete batch. */
+function acceptResponse(call: LiveCall, bytes: Uint8Array): void {
+  let resumed: Uint8Array | undefined;
+  if (call.method === TAIL_METHOD) {
+    try {
+      const response = fromBinary(TailResponseSchema, bytes);
+      const request = fromBinary(TailRequestSchema, call.bytes);
+      if (response.throughSeq < request.fromSeq)
+        throw new Error('sequence precedes requested cursor');
+      resumed = toBinary(TailRequestSchema, {...request, fromSeq: response.throughSeq + 1n});
+    } catch (cause) {
+      throw new GrpcError(15, `invalid Tail response: ${String(cause)}`);
+    }
+  }
+  try {
+    call.receive(bytes);
+  } catch (cause) {
+    throw new GrpcError(13, `gateway consumer failed: ${String(cause)}`);
+  }
+  if (resumed !== undefined) call.bytes = resumed;
 }

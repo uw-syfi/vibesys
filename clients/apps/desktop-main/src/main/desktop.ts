@@ -25,6 +25,7 @@ import type {WelcomeFeed} from './welcome-feed.js';
 import {
   type WelcomeBinding,
   type WelcomeDocument,
+  type WelcomeInvokeEvent,
   type WelcomeIpc,
   WelcomeRouter,
 } from './welcome-ipc.js';
@@ -135,6 +136,11 @@ export class Desktop {
   #recentGeneration = 0;
   /** Every window's surface requests, routed by the window that sent each. */
   readonly #router: WelcomeRouter;
+
+  /** The same current app documents authorized for welcome requests. */
+  admitsRenderer(event: WelcomeInvokeEvent): boolean {
+    return this.#router.admits(event);
+  }
 
   constructor(deps: DesktopDeps) {
     this.#deps = deps;

@@ -17,15 +17,14 @@ import {GATEWAY_CHANNEL, parseGatewayRequest} from '@vibesys/ipc';
 import {type SettingsStore, settingsFor, withHostSettings} from '@vibesys/settings';
 import type {ScheduleTimeout} from '@vibesys/transport';
 import type {IpcMain} from 'electron';
-import {isSameAppPage, SHELL_URL} from './app-assets.js';
+import {rendererGeneration, type WelcomeInvokeEvent} from './welcome-ipc.js';
 
-export function installGatewayIpc(
-  ipc: IpcMain,
+export function createGatewayCalls(
   manager: ConnectionManager,
   settings: SettingsStore,
   resources: string,
   schedule: ScheduleTimeout,
-): (host: HostKey) => void {
+): GatewayCalls {
   const calls = new GatewayCalls(
     async key => {
       const {settings: file} = await settings.hosts();
@@ -35,6 +34,14 @@ export function installGatewayIpc(
     schedule,
   );
   manager.onDisposing(() => calls.close());
+  return calls;
+}
+
+export function installGatewayIpc(
+  ipc: IpcMain,
+  calls: GatewayCalls,
+  admits: (event: WelcomeInvokeEvent) => boolean,
+): void {
   ipc.on(GATEWAY_CHANNEL, (event, value: unknown) => {
     const port = event.ports[0];
     if (port === undefined) return;
@@ -56,7 +63,7 @@ export function installGatewayIpc(
     event.sender.once('destroyed', cancelled);
     event.sender.once('did-start-navigation', cancelled);
     void (async () => {
-      authorize(event);
+      authorize(event, admits);
       const request = parseGatewayRequest(value);
       const receive = (bytes: Uint8Array): void => {
         if (!done) port.postMessage({bytes});
@@ -66,7 +73,6 @@ export function installGatewayIpc(
       else await calls.stream(request.host, request.method, request.bytes, abort.signal, receive);
     })().then(() => finish(), finish);
   });
-  return host => calls.disable(host);
 }
 
 function gatewayFor(
@@ -108,13 +114,19 @@ function gatewayFor(
   };
 }
 
-function authorize(event: import('electron').IpcMainEvent): void {
+function authorize(
+  event: import('electron').IpcMainEvent,
+  admits: (event: WelcomeInvokeEvent) => boolean,
+): void {
   if (
     event.senderFrame !== event.sender.mainFrame ||
-    !isSameAppPage(event.senderFrame?.url ?? null, SHELL_URL)
-  ) {
-    throw new Error('not the app shell');
-  }
+    !admits({
+      senderId: event.sender.id,
+      senderUrl: event.senderFrame?.url ?? null,
+      rendererGeneration: rendererGeneration(event.senderFrame),
+    })
+  )
+    throw new Error('not an app-owned shell document');
 }
 
 export function gatewaySetting(

@@ -538,6 +538,8 @@ export function RunScreen(props: {
   readonly chat?: RunChatSlot;
   /** The host's names for the run's models; absent or without a model: its id shows. */
   readonly modelNames?: ModelNames;
+  /** App-owned run diagnostics, in the page’s scrolling body. */
+  readonly supplemental?: ReactNode;
 }): JSX.Element {
   const {chat, ...rest} = props;
   return (
@@ -558,6 +560,8 @@ function RunScreenBody(props: {
   readonly dispatch: Dispatch;
   readonly chat: RunChatSlot | undefined;
   readonly modelNames?: ModelNames;
+  /** App-owned run diagnostics, in the page’s scrolling body. */
+  readonly supplemental?: ReactNode;
 }): JSX.Element {
   const {state, model, route, zoom, dispatch} = props;
   const names = props.modelNames ?? NO_MODEL_NAMES;
@@ -642,6 +646,7 @@ function RunScreenBody(props: {
         <Banner tone="warn" title="The step’s transcript is not available" body={detail.problem} />
       )}
       <LevelBody deep={deep} route={route} zoomed={zoomed} level={level} />
+      {props.supplemental}
     </Screen>
   );
 }

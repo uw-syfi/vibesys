@@ -243,3 +243,30 @@ test('closing the bridge cancels calls waiting on settings and live Tail calls',
   ).rejects.toThrow('closed');
   fake.close();
 });
+
+for (const fault of ['malformed protobuf', 'consumer failure'] as const) {
+  test(`${fault} fails a Tail call without reconnecting a healthy host`, {
+    timeout: 15000,
+  }, async () => {
+    const fake = new FakeGateway();
+    const clock = new FakeClock();
+    const connection = new GatewayConnection(fake, clock.schedule);
+    const result = connection
+      .stream(TAIL_METHOD, request(), new AbortController().signal, () => {
+        if (fault === 'consumer failure') throw new Error('consumer stopped');
+      })
+      .catch(error => String(error));
+    try {
+      const tail = await fake.nextTail();
+      tail.send(fault === 'malformed protobuf' ? new Uint8Array([255]) : response(1n));
+      expect(await result).toContain(
+        fault === 'malformed protobuf' ? 'invalid Tail response' : 'consumer failed',
+      );
+      expect(fake.forces).toEqual([false]);
+      expect(clock.pendingDelays()).toEqual([]);
+    } finally {
+      connection.close();
+      fake.close();
+    }
+  });
+}
