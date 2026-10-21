@@ -1,7 +1,7 @@
 /** Gateway screen control owns the setting, loader, content request and selected log follower. */
 import {emptyLogView, foldChunk, type LogView} from '@vibesys/logs';
 import {unprovided} from '@vibesys/machine';
-import type {SkeletonLoad} from '@vibesys/run-skeleton';
+import type {RunLivenessHint, SkeletonLoad} from '@vibesys/run-skeleton';
 import {assign, fromCallback, setup} from 'xstate';
 import {
   type RunPageAction,
@@ -24,10 +24,11 @@ export type GatewayEvent =
   | {type: 'ui'; action: RunPageAction}
   | {type: 'log'; streamId: string; text: string; offset: number; next: number}
   | {type: 'log-failed'}
-  | {type: 'loaded'; load: SkeletonLoad | undefined; failed: boolean};
+  | {type: 'loaded'; load: SkeletonLoad | undefined; failed: boolean; hint?: RunLivenessHint};
 export interface GatewayRunContext extends GatewayInput {
   enabled: boolean;
   load: SkeletonLoad | undefined;
+  hint: RunLivenessHint | undefined;
   ui: RunPageState;
   text: Readonly<Record<string, string>>;
   contentHash: string;
@@ -108,6 +109,7 @@ export const gatewayRunMachine = setup({
     ...input,
     enabled: false,
     load: undefined,
+    hint: undefined,
     ui: runPageInitial(input.seed),
     text: {},
     contentHash: '',
@@ -154,6 +156,7 @@ export const gatewayRunMachine = setup({
     active: {
       entry: assign({
         load: undefined,
+        hint: undefined,
         contentHash: '',
         attemptedContent: new Set(),
         ui: ({context}) => ({...context.ui, selected: null, views: {}}),
@@ -169,7 +172,13 @@ export const gatewayRunMachine = setup({
         loaded: {
           actions: assign({
             load: ({event}) => event.load,
-            error: ({context, event}) => (event.failed ? 'Disconnected' : context.error),
+            hint: ({event}) => event.hint,
+            error: ({context, event}) =>
+              event.failed
+                ? 'Disconnected'
+                : context.error === 'Disconnected'
+                  ? null
+                  : context.error,
           }),
         },
         ui: {actions: assign({ui: ({context, event}) => uiStep(context.ui, event.action)})},

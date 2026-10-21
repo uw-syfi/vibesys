@@ -5,8 +5,10 @@ import {
   Change,
   DrainGoal,
   KeyframeSchema,
+  LifecycleSchema,
   Outcome,
   RecordSchema,
+  RunLiveness,
   RuntimeType,
   SpanFailureKind,
   SpanSchema,
@@ -255,3 +257,51 @@ test('the new scrubber reports monotone elapsed time without fabricating a wall-
   const state = skeletonScreenState(SEED, skeleton, model, runPageInitial(SEED));
   expect(state.positionWord).toBe('25h 01m');
 });
+
+const HINT_STATES = [
+  {case: 'running', value: {}},
+  {case: 'running', value: {hold: {reason: {case: 'operator', value: {}}}}},
+  {case: 'parked', value: {}},
+  {case: 'ended', value: {outcome: Outcome.FINISHED}},
+  {case: 'ended', value: {outcome: Outcome.INTERRUPTED}},
+] as const;
+
+for (let epoch = 1; epoch <= 8; epoch += 1)
+  test.each([
+    ...HINT_STATES,
+  ])(`property: epoch ${epoch} lock hints affect only open current epochs: %p`, state => {
+    const first = storeRunFixture('live').records[0];
+    if (first?.body.case !== 'epochStarted') throw new Error('epoch required');
+    const started = create(RecordSchema, {
+      ...first,
+      epoch,
+      body: {case: 'epochStarted', value: {...first.body.value, epoch}},
+    });
+    const skeleton = foldSkeleton(seedSkeleton(), [
+      started,
+      create(RecordSchema, {
+        seq: started.seq + 1n,
+        epoch,
+        body: {case: 'lifecycle', value: {state}},
+      }),
+    ]);
+    const whole = projectSkeleton(skeleton, skeleton.throughSeq ?? 0n);
+    const ui = runPageInitial(SEED);
+    const before = skeletonScreenState(SEED, skeleton, whole, ui);
+    for (const observedEpoch of [epoch - 1, epoch, epoch + 1])
+      for (const value of [RunLiveness.ALIVE, RunLiveness.INTERRUPTED, RunLiveness.UNSPECIFIED]) {
+        const screen = skeletonScreenState(SEED, skeleton, whole, ui, {
+          epoch: observedEpoch,
+          value,
+        });
+        const interrupted =
+          state.case === 'running' && observedEpoch === epoch && value === RunLiveness.INTERRUPTED;
+        expect(headerView(screen).status.label).toBe(
+          interrupted ? 'Interrupted' : headerView(before).status.label,
+        );
+        expect(screen.record.kind).toBe(interrupted ? 'ended' : before.record.kind);
+        expect(skeleton.lifecycles.at(-1)?.lifecycle?.state).toEqual(
+          create(LifecycleSchema, {state}).state,
+        );
+      }
+  });
