@@ -7,6 +7,8 @@ import {
   type HostCallRequest,
   HostCallRequestSchema,
   HostCallResponseSchema,
+  LifecycleSchema,
+  Outcome,
   type Record,
   RecordSchema,
   TailResponseSchema,
@@ -120,6 +122,25 @@ for (const width of [1000, 1440, 1920])
       await page.evaluate(() => (window as unknown as GatewayWindow).fakeGateway.active()),
     ).toBe(0);
   });
+for (const state of ['parked', 'stopped'] as const)
+  for (const width of [1000, 1440, 1920])
+    test(`${state} run retains chat history at ${width}px`, async ({page}) => {
+      await page.setViewportSize({width, height: 900});
+      const {fixture, requests} = await prepareSession(page, state);
+      await page.addInitScript(installGateway, fixture);
+      await openFixture(page, {...fixtureNamed('finished-run'), runId: 'run-a'});
+      await page.getByRole('switch', {name: 'Run transport v2'}).check();
+      await page.getByRole('button', {name: 'Chat', exact: true}).click();
+      const pane = page.getByRole('region', {name: 'Chat', exact: true}).last();
+      await expect(
+        pane.getByText('The queue avoids repeated allocation.', {exact: true}),
+      ).toBeVisible();
+      await captureSession(page, width, `${state}-history`);
+      expect(requests).toHaveLength(0);
+      await pane.getByRole('button', {name: 'Close chat'}).click();
+      await expect(page.getByRole('button', {name: 'Relaunch', exact: true})).toBeVisible();
+    });
+
 test('session app-window contact sheet', async ({page}) => {
   if (!shots || sheet.length === 0) return;
   const html = contactSheetHtml(sheet, 3);
@@ -138,8 +159,19 @@ const tail = (records: ReturnType<typeof chatReplay>) => [
   ),
 ];
 
-async function prepareSession(page: Page) {
-  const fixture = wire(storeRunFixture('live'));
+async function prepareSession(page: Page, state: 'live' | 'parked' | 'stopped' = 'live') {
+  const source = storeRunFixture(state === 'live' ? 'live' : 'short');
+  if (state !== 'live') {
+    const last = source.records.at(-1);
+    if (last?.body.case !== 'lifecycle') throw new Error('Missing lifecycle');
+    last.body.value = create(LifecycleSchema, {
+      state:
+        state === 'parked'
+          ? {case: 'parked', value: {}}
+          : {case: 'ended', value: {outcome: Outcome.STOPPED}},
+    });
+  }
+  const fixture = wire(source);
   fixture.chat = tail(chatReplay());
   const requests: HostCallRequest[] = [];
   await page.exposeFunction('postIntent', (_host: string, bytes: number[]) => {
