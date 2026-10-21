@@ -101,6 +101,9 @@ for (const mode of ['socket', 'connect pipe'] as const) {
         await (globalThis as typeof globalThis & {vibesysGatewayReady: Promise<void>})
           .vibesysGatewayReady;
       });
+      // Main-process readiness and Playwright's renderer debugger use separate connections.
+      // Observe the target document's load in Playwright before evaluating in its context.
+      await page.waitForURL('app://vibesys/gateway.html', {waitUntil: 'load'});
       const hello = await page.evaluate(
         async request => {
           const bridge = (window as unknown as GatewayRenderer).vibesysGateway;

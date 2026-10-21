@@ -31,7 +31,7 @@
     "check": "tsc -b",
     "test": "pnpm test:bun && pnpm test:node",
     "test:bun": "node ../../tools/scripts/run_bun_tests.mjs ./src",
-    "test:node": "pnpm build && node ../../tools/scripts/run_node_tests.mjs ./node-tests"
+    "test:node": "turbo run build --filter=@vibesys/connection... && node ../../tools/scripts/run_node_tests.mjs ./node-tests"
   },
   "dependencies": {
     "@vibesys/contracts": "workspace:*",

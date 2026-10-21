@@ -10,9 +10,10 @@ import {retireProcess, type SpawnedProcess} from './process.js';
 export type GatewayTarget = 'linux-amd64' | 'linux-arm64' | 'darwin-arm64';
 export const GATEWAY_DIRECTORY = `.vibesys/gateway/${API_SCHEMA_HASH.slice(0, 16)}`;
 
+/** Normalize platform names reported by either remote uname or local Node os APIs. */
 export function gatewayTarget(output: string): GatewayTarget {
   const [os, arch] = output.trim().split(/\s+/);
-  const target = `${os?.toLowerCase()}-${arch === 'x86_64' ? 'amd64' : arch === 'aarch64' ? 'arm64' : arch}`;
+  const target = `${os?.toLowerCase()}-${arch === 'x86_64' || arch === 'x64' ? 'amd64' : arch === 'aarch64' ? 'arm64' : arch}`;
   if (target === 'linux-amd64' || target === 'linux-arm64' || target === 'darwin-arm64')
     return target;
   throw new Error(`unsupported gateway platform: ${output.trim()}`);

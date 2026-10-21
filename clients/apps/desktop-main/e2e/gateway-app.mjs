@@ -8,7 +8,8 @@ import {fileURLToPath} from 'node:url';
 import {fromChild, GatewayCalls, gatewayProcess} from '@vibesys/connection';
 import {API_SCHEMA_HASH} from '@vibesys/proto';
 import {app, BrowserWindow, ipcMain, protocol} from 'electron';
-import {installGatewayIpc} from '../dist/main/gateway-ipc.js';
+// Resolve the built entry at runtime, as the other Electron E2E compositions do.
+const {installGatewayIpc} = await import(new URL('../dist/main/gateway-ipc.js', import.meta.url));
 
 const root = process.env.VIBESYS_GATEWAY_ROOT;
 const binary = process.env.VIBESYS_GATEWAY_BINARY;
