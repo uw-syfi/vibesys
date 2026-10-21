@@ -63,22 +63,31 @@ def test_relaunch_freezes_clock_and_records_checkout(
     journal.close()
     records = read(Project.run_log_path_for(root, "run-a"))
     assert [r.clock for r in records] == [0, 5, 5, 5, 8]
-    assert [r.at.to_datetime().timestamp() for r in records] == [100, 105, 1105, 1105, 1108]
+    assert [r.at.to_datetime().timestamp() for r in records if r.at is not None] == [
+        100,
+        105,
+        1105,
+        1105,
+        1108,
+    ]
     headers = [r.body.value for r in records if r.body and r.body.field == "epoch_started"]
     assert [(h.epoch, h.tree_hash, h.dirty, h.provenance_known) for h in headers] == [
         (1, "tree-a", True, True),
         (2, "tree-b", False, True),
     ]
     ends = [
-        r
+        (r, r.body.value.state.value.outcome)
         for r in records
-        if r.body and r.body.field == "lifecycle" and r.body.value.state.field == "ended"
+        if r.body
+        and r.body.field == "lifecycle"
+        and r.body.value.state is not None
+        and r.body.value.state.field == "ended"
     ]
-    assert [(r.epoch, r.body.value.state.value.outcome) for r in ends] == [
+    assert [(r.epoch, outcome) for r, outcome in ends] == [
         (1, p.Outcome.INTERRUPTED),
         (2, p.Outcome.FINISHED),
     ]
-    for record in ends:
+    for record, _ in ends:
         assert (
             Project.run_log_path_for(root, "run-a").parent / "keyframes" / f"{record.seq}.pb"
         ).exists()
@@ -140,6 +149,7 @@ def assert_crash_prefix(tmp_path: Path, cut: int | None) -> None:
             if r.epoch == epoch
             and r.body
             and r.body.field == "lifecycle"
+            and r.body.value.state is not None
             and r.body.value.state.field == "ended"
         ]
         assert len(ends) == 1
@@ -203,7 +213,11 @@ def test_relaunch_recovers_epoch_clock_origins(tmp_path: Path, initial_clock: fl
     resumed = read(path)
     base = initial_clock or 0
     assert [r.clock for r in resumed[2:]] == [base + 5, base + 5, base + 5, base + 6]
-    assert resumed[-1].body.value.span.started_at == base + 1
+    body = resumed[-1].body
+    assert body is not None
+    assert body.field == "span"
+    assert body.value.span is not None
+    assert body.value.span.started_at == base + 1
 
 
 def test_live_writer_refuses_relaunch_without_mutating_log(tmp_path: Path) -> None:
@@ -252,7 +266,11 @@ def test_span_times_keep_their_original_epoch_on_relaunch(tmp_path: Path) -> Non
     journal.emit(CoreEventType.RUN_FINISHED)
     journal.close()
     records = read(Project.run_log_path_for(tmp_path, "run-spans"))
-    spans = [r.body.value.span for r in records if r.body and r.body.field == "span"]
+    spans = [
+        r.body.value.span
+        for r in records
+        if r.body and r.body.field == "span" and r.body.value.span is not None
+    ]
     assert [(s.started_at, s.ended_at if s.has_field("ended_at") else None) for s in spans] == [
         (2, None),
         (2, 8),
@@ -260,6 +278,9 @@ def test_span_times_keep_their_original_epoch_on_relaunch(tmp_path: Path) -> Non
     ends = [
         r.epoch
         for r in records
-        if r.body and r.body.field == "lifecycle" and r.body.value.state.field == "ended"
+        if r.body
+        and r.body.field == "lifecycle"
+        and r.body.value.state is not None
+        and r.body.value.state.field == "ended"
     ]
     assert ends == [1, 2]

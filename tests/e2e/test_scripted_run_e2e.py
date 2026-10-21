@@ -194,10 +194,13 @@ def test_scripted_run_relaunches_once_from_saved_state(tmp_path: Path) -> None:
     headers = [r.body.value.epoch for r in records if r.body and r.body.field == "epoch_started"]
     assert set(headers) == {1, 2}
     ends = [
-        r
+        (r.epoch, r.body.value.state.value.outcome)
         for r in records
-        if r.body and r.body.field == "lifecycle" and r.body.value.state.field == "ended"
+        if r.body
+        and r.body.field == "lifecycle"
+        and r.body.value.state is not None
+        and r.body.value.state.field == "ended"
     ]
-    assert [r.epoch for r in ends] == [1, 2]
-    assert ends[0].body.value.state.value.outcome in {p.Outcome.STOPPED, p.Outcome.INTERRUPTED}
+    assert [epoch for epoch, _ in ends] == [1, 2]
+    assert ends[0][1] in {p.Outcome.STOPPED, p.Outcome.INTERRUPTED}
     assert [r.clock for r in records] == sorted(r.clock for r in records)
