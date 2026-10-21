@@ -5,12 +5,14 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"buf.build/go/protovalidate"
 	apiv1 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/api/v1"
 	"github.com/uw-syfi/vibesys/gateway/internal/hostcommand"
+	"github.com/uw-syfi/vibesys/gateway/internal/runlog"
 	"github.com/uw-syfi/vibesys/gateway/internal/server"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -145,14 +147,27 @@ func TestHostRejectsInvalidStreamedHead(t *testing.T) {
 	}
 }
 
-func TestHostRejectsInvalidUnaryResponse(t *testing.T) {
+func TestHostCallValidationKeepsItsFailureEnvelope(t *testing.T) {
 	runner := hostcommand.FakeRunner{Program: func(_ context.Context, _ hostcommand.Command) (hostcommand.Result, error) {
 		output, err := proto.Marshal(&apiv1.HostCallResponse{Result: &apiv1.HostCallResponse_ConfigurationFailed{ConfigurationFailed: &apiv1.ConfigurationFailed{Stage: "test", Message: "missing code"}}})
 		return hostcommand.Result{Output: output}, err
 	}}
 	f := startWithConfig(t, server.Config{HostRunner: runner})
-	_, err := client(t, f, false).HostCall(f.ctx, intentRequest())
-	if status.Code(err) != codes.Internal || !strings.Contains(err.Error(), "configuration_failed.code") {
-		t.Fatalf("expected invalid unary configuration_failed.code, got %v", err)
+	response, err := client(t, f, false).HostCall(f.ctx, intentRequest())
+	failure := response.GetConfigurationFailed()
+	if err != nil || failure.GetCode() != "invalid_host_response" || !strings.Contains(failure.GetMessage(), "configuration_failed.code") {
+		t.Fatalf("expected typed invalid configuration_failed.code, got %v %v", response, err)
+	}
+}
+
+func TestHostRejectsAnUnrepresentableSkeletonContinuation(t *testing.T) {
+	f := start(t)
+	seq := ^uint64(0)
+	publishHead(t, f, head(&seq))
+	data := append([]byte(runlog.Magic), frame(payload(t, seq, "record"))...)
+	write(t, filepath.Join(f.run, "run.log"), false, data)
+	_, err := client(t, f, false).Skeleton(f.ctx, &apiv1.SkeletonRequest{RunId: "run-1"})
+	if status.Code(err) != codes.Internal || !strings.Contains(err.Error(), "committed_seq") {
+		t.Fatalf("expected invalid unary committed_seq, got %v", err)
 	}
 }

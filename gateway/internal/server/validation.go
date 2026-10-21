@@ -36,6 +36,12 @@ func validateUnary(ctx context.Context, request any, _ *grpc.UnaryServerInfo, ha
 		return nil, err
 	}
 	if err := validateMessage(response, codes.Internal); err != nil {
+		// HostCall promises typed diagnostics for invalid subprocess replies too.
+		if hostCall {
+			reply, _ := response.(*apiv1.HostCallResponse)
+			failure := reply.GetConfigurationFailed()
+			return hostFailure("invalid_host_response", err.Error(), int(failure.GetExitCode()), failure.GetStderr()), nil
+		}
 		return nil, err
 	}
 	return response, nil
