@@ -29,15 +29,19 @@ func (h *host) Skeleton(ctx context.Context, request *apiv1.SkeletonRequest) (*a
 	if err != nil {
 		return nil, rpcError(err)
 	}
-	data, position, err := latestKeyframe(dir, cap, skeletonBytes-32)
+	sessionIDs, err := sessions(dir)
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	listingBytes := proto.Size(&apiv1.SkeletonResponse{Sessions: sessionIDs})
+	if listingBytes+32 > skeletonBytes {
+		return nil, status.Error(codes.ResourceExhausted, "session listing exceeds skeleton budget")
+	}
+	data, position, err := latestKeyframe(dir, cap, skeletonBytes-listingBytes-32)
 	if status.Code(err) == codes.ResourceExhausted {
 		// An oversized keyframe cannot fit a unary prefix. Replay from the log.
 		data, position, err = nil, runlog.Position{}, nil
 	}
-	if err != nil {
-		return nil, rpcError(err)
-	}
-	sessionIDs, err := sessions(dir)
 	if err != nil {
 		return nil, rpcError(err)
 	}
@@ -71,7 +75,7 @@ func (h *host) Skeleton(ctx context.Context, request *apiv1.SkeletonRequest) (*a
 	previous := position.ThroughSeq
 	seen := position.Offset > 0
 	// Reserve maximum encodings of committed_seq, next_seq and complete.
-	size := proto.Size(&apiv1.SkeletonResponse{Keyframe: data}) + 24
+	size := proto.Size(&apiv1.SkeletonResponse{Keyframe: data, Sessions: sessionIDs}) + 24
 	for !bounded || previous < cap {
 		if err := ctx.Err(); err != nil {
 			return nil, rpcError(err)

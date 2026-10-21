@@ -3,6 +3,8 @@ package server_test
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"fmt"
 	apiv1 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/api/v1"
 	storev1 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1"
 	"github.com/uw-syfi/vibesys/gateway/internal/hostcommand"
@@ -13,6 +15,7 @@ import (
 	"google.golang.org/protobuf/proto"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -33,6 +36,13 @@ func TestSessionDiscoveryTailFenceAndBlobReads(t *testing.T) {
 	skeleton, err := client.Skeleton(f.ctx, &apiv1.SkeletonRequest{RunId: "run-1"})
 	if err != nil || len(skeleton.GetSessions()) != 1 || skeleton.Sessions[0] != "default" {
 		t.Fatalf("sessions: %v %v", skeleton, err)
+	}
+	blob := []byte("session evidence")
+	digest := fmt.Sprintf("%x", sha256.Sum256(blob))
+	write(t, filepath.Join(dir, "blobs", digest), false, blob)
+	got, err := client.GetBlobs(f.ctx, &apiv1.GetBlobsRequest{RunId: "run-1", SessionId: "default", Sha256: []string{digest}})
+	if err != nil || len(got.GetBlobs()) != 1 || !bytes.Equal(got.Blobs[0].Data, blob) {
+		t.Fatalf("session blob: %v %v", got, err)
 	}
 	ctx, cancel := context.WithCancel(f.ctx)
 	defer cancel()
@@ -78,5 +88,20 @@ func TestChatMessageHostCallRoundTrip(t *testing.T) {
 	response, err := client(t, f, false).HostCall(f.ctx, request)
 	if err != nil || response.GetChatMessage().GetRequestId() != "q-1" {
 		t.Fatalf("response: %v %v", response, err)
+	}
+}
+
+func TestSessionListingRespectsSkeletonBudget(t *testing.T) {
+	f := start(t)
+	writeFrames(t, f, 1)
+	for i := 0; i < 8100; i++ {
+		id := fmt.Sprintf("%04d%s", i, strings.Repeat("a", 124))
+		if err := os.MkdirAll(filepath.Join(f.run, "sessions", id), 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_, err := client(t, f, false).Skeleton(f.ctx, &apiv1.SkeletonRequest{RunId: "run-1"})
+	if status.Code(err) != codes.ResourceExhausted {
+		t.Fatalf("listing budget: %v", err)
 	}
 }

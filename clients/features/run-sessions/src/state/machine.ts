@@ -130,13 +130,24 @@ export const runSessionsMachine = setup({
                 id: 'resolve',
                 src: 'resolve',
                 input: ({context}) => context.queue[0] ?? [],
-                onDone: {
-                  target: 'idle',
-                  actions: assign(({context, event}) => ({
-                    history: foldChat(context.history, event.output),
-                    queue: context.queue.slice(1),
-                  })),
-                },
+                onDone: [
+                  {
+                    guard: ({context, event}) => {
+                      try {
+                        foldChat(context.history, event.output);
+                        return true;
+                      } catch {
+                        return false;
+                      }
+                    },
+                    target: 'idle',
+                    actions: assign(({context, event}) => ({
+                      history: foldChat(context.history, event.output),
+                      queue: context.queue.slice(1),
+                    })),
+                  },
+                  {target: 'failed', actions: assign({error: 'History unavailable'})},
+                ],
                 onError: {
                   target: 'failed',
                   actions: assign(({event}) => ({error: String(event.error)})),

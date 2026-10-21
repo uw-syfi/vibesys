@@ -70,10 +70,7 @@ export function wire(fixture: StoreRunFixture): WireFixture {
       ]),
     ),
     chatRequest: [
-      ...toBinary(
-        TailRequestSchema,
-        create(TailRequestSchema, {runId: 'run-a', sessionId: 'default', fromSeq: 1n}),
-      ),
+      ...toBinary(TailRequestSchema, create(TailRequestSchema, {sessionId: 'default'})),
     ],
     chat: [],
     log: [
@@ -125,7 +122,9 @@ export function installGateway(input: WireFixture): void {
         active += 1;
         let closed = false;
         if (method === input.methods.tail) {
-          if ([..._bytes].join(',') === input.chatRequest.join(',')) {
+          if (
+            [..._bytes].slice(-input.chatRequest.length).join(',') === input.chatRequest.join(',')
+          ) {
             chats.add(receive);
             receive(new Uint8Array(input.chat));
           } else {

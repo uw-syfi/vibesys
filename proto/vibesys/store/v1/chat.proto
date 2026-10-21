@@ -16,10 +16,10 @@ message ChatRecord {
   }
 }
 message ChatSessionCreated {
-  string id = 1 [(buf.validate.field).string.pattern = "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$"];
+  string id = 1 [(buf.validate.field).string = {pattern: "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$", max_bytes: 65536}];
   string title = 2 [(buf.validate.field).string.max_bytes = 65536];
-  string provider = 3 [(buf.validate.field).string = {min_len: 1, max_bytes: 256}];
-  string model = 4 [(buf.validate.field).string = {min_len: 1, max_bytes: 256}];
+  string provider = 3 [(buf.validate.field).string = {min_len: 1, max_bytes: 65536}];
+  string model = 4 [(buf.validate.field).string = {min_len: 1, max_bytes: 65536}];
 }
 enum ChatRole {
   CHAT_ROLE_UNSPECIFIED = 0;
@@ -27,7 +27,7 @@ enum ChatRole {
   CHAT_ROLE_ASSISTANT = 2;
 }
 message ChatMessage {
-  string request_id = 1 [(buf.validate.field).string.pattern = "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"];
+  string request_id = 1 [(buf.validate.field).string = {pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$", max_bytes: 65536}];
   ChatRole role = 2 [(buf.validate.field).enum = {defined_only: true, not_in: [0]}];
   oneof content {
     option (buf.validate.oneof).required = true;
@@ -37,12 +37,12 @@ message ChatMessage {
   bool failed = 5;
 }
 message ChatToken {
-  string request_id = 1 [(buf.validate.field).string.pattern = "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"];
+  string request_id = 1 [(buf.validate.field).string = {pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$", max_bytes: 65536}];
   string text = 2 [(buf.validate.field).string = {min_len: 1, max_bytes: 65536}];
 }
 message ChatSteerProposed {
-  string id = 1 [(buf.validate.field).string = {min_len: 1, max_bytes: 256}];
-  string request_id = 2 [(buf.validate.field).string.pattern = "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"];
+  string id = 1 [(buf.validate.field).string = {min_len: 1, max_bytes: 65536}];
+  string request_id = 2 [(buf.validate.field).string = {pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$", max_bytes: 65536}];
   string text = 3 [(buf.validate.field).string = {min_len: 1, max_bytes: 65536}];
   SteerTarget target = 4 [(buf.validate.field).required = true];
   SteerMode mode = 5 [(buf.validate.field).enum = {defined_only: true, not_in: [0]}];

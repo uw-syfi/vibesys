@@ -105,3 +105,24 @@ test('reconnect resumes the session sequence and preserves messages', async () =
     actor.stop();
   }
 });
+
+test('a corrupt sequence reports failed content without stopping the chat actor', async () => {
+  const {actor, bridge} = fixture();
+  try {
+    bridge.streams[0]?.receive(
+      toBinary(
+        TailResponseSchema,
+        create(TailResponseSchema, {
+          records: [toBinary(RecordSchema, create(RecordSchema, {seq: 2n}))],
+        }),
+      ),
+    );
+    await waitFor(actor, state => state.matches({active: {content: 'failed'}}), {timeout: 1000});
+    expect(actor.getSnapshot().context.error).toBe('History unavailable');
+    expect(actor.getSnapshot().context.history.throughSeq).toBe(0n);
+    actor.send({type: 'toggle'});
+    expect(actor.getSnapshot().value).toBe('closed');
+  } finally {
+    actor.stop();
+  }
+});

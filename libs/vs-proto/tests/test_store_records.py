@@ -125,6 +125,11 @@ def varied(template: Message, suffix: str, factor: int) -> Message:
                     # Hashes are constrained hex, and the reply is JSON text.
                     if field.name == "sha256" or field.name.endswith("_schema_hash"):
                         message[field] = f"{factor:064x}"
+                    elif message.desc().name.startswith("Chat") and field.name in {
+                        "id",
+                        "request_id",
+                    }:
+                        message[field] = value + f"-{factor}"
                     elif field.name == "attrs_type":
                         continue  # The declaration must still name its embedded descriptor.
                     elif field.name == "reply_json":
