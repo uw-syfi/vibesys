@@ -29,13 +29,13 @@ from server.api.protocol import (
 from server.api.service import RunApi
 from server.chat.manager import ChatAnswer
 from server.events import EventType
+from server.run_lifecycle import RunStatus
 from server.transport.unix_jsonl import (
     MAX_SOCKET_PATH_BYTES,
     SocketPathTooLongError,
     UnixJsonlServer,
     validate_socket_path,
 )
-from vs_runtime.api.infrastructure import PauseNowRequest
 from vs_sim.api import Connection, OsThreads, UnixNetwork
 from vs_sim.api.testing import HANG_GUARD_S, SimNetwork, SimThreads
 
@@ -149,8 +149,7 @@ def test_transport_round_trips_the_stop_command(socket_dir: Path) -> None:
         assert response["ok"] is True
         assert response["client_id"] == "unix-client"
         assert response["ack"] == {"action": "pause_now", "status": "pending"}
-        (action,) = parts.control.take_pending_actions()
-        assert isinstance(action, PauseNowRequest)
+        assert parts.controller.run_status() is RunStatus.STOPPING
 
     _served(socket_dir, socket_dir / "logs", body)
 

@@ -52,6 +52,7 @@ from server.api.protocol import (
 from server.events import EventType, RunEvent, RunOverview, RunStartedData
 from vibesys.api import (
     REFUSAL_TEXT,
+    ControlAction,
     ControlStatus,
     IterationUnavailable,
     PauseNowRequest,
@@ -258,9 +259,7 @@ _REFUSALS: dict[RefusalReason, Callable[[], Exception]] = {
 """The protocol error each refusal answers with."""
 
 
-type ControlProtocolCommand = (
-    PauseCommand | ResumeCommand | SteerCommand | StopCommand | ControlCommand
-)
+type ControlProtocolCommand = PauseCommand | ResumeCommand | SteerCommand | ControlCommand
 """Every protocol request that controls the run."""
 
 
@@ -277,9 +276,7 @@ def control_request(command: ControlProtocolCommand) -> ControlRequest:
         return PauseRequest(control_id=control_id)
     if isinstance(command, ResumeCommand):
         return ResumeRequest(control_id=control_id, fallback=command.fallback, when=command.when)
-    if isinstance(command, SteerCommand):
-        return SteerRequest(control_id=control_id, text=command.text)
-    return PauseNowRequest(control_id=control_id)
+    return SteerRequest(control_id=control_id, text=command.text)
 
 
 class RunControlSlot:
@@ -299,6 +296,7 @@ class RunControlSlot:
         self._state = _RunControlState.AWAITING_SESSION
         self._control: RunControl | None = None
         self._stop_pending: PauseNowRequest | None = None
+        self._shutdown_pending = False
 
     def install(self, control: RunControl) -> None:
         """Install the session and deliver one retained stop intent, if any."""
@@ -312,6 +310,9 @@ class RunControlSlot:
                 # concurrent command cannot overtake this retained intent.
                 control.submit(self._stop_pending)
                 self._stop_pending = None
+            if self._shutdown_pending:
+                control.stop(StopMode.DRAIN)
+                self._shutdown_pending = False
             self._control = control
             self._state = _RunControlState.ACTIVE
 
@@ -336,8 +337,10 @@ class RunControlSlot:
             self._control.stop(mode)
             return True
 
-    def execute(self, command: ControlProtocolCommand) -> CommandAck:
+    def execute(self, command: ControlProtocolCommand | StopCommand) -> CommandAck:
         """Apply one command or retain the sole command safe before startup."""
+        if isinstance(command, StopCommand):
+            return self._shutdown()
         request = control_request(command)
         with self._condition:
             control = self._control
@@ -360,6 +363,17 @@ class RunControlSlot:
                 return CommandAck(action=ack.action, status="pending")
             case _:
                 return CommandAck(action=ack.action, status="consumed")
+
+    def _shutdown(self) -> CommandAck:
+        """The registry's process shutdown also reaches hosts without a core control poll."""
+        with self._condition:
+            if self._control is not None:
+                self._control.stop(StopMode.DRAIN)
+            elif self._state is _RunControlState.AWAITING_SESSION:
+                self._shutdown_pending = True
+            else:
+                raise RunControlUnavailableError(self._state)
+        return CommandAck(action=ControlAction.PAUSE_NOW, status="pending")
 
 
 @dataclass(frozen=True)
@@ -549,7 +563,7 @@ class RunApi:
         message = f"Unsupported protocol request: {type(request).__name__}"
         raise TypeError(message)
 
-    def _execute_command(self, request: ControlProtocolCommand) -> Response:
+    def _execute_command(self, request: ControlProtocolCommand | StopCommand) -> Response:
         """Send a command through the runtime's synchronized control slot."""
         if self._controller.is_read_only():
             raise RunReadOnlyError

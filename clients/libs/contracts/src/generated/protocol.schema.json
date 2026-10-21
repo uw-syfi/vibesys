@@ -7709,7 +7709,7 @@
     },
     "StopCommand": {
       "additionalProperties": false,
-      "description": "Request stopping after the active agent call.",
+      "description": "Internal detached-host shutdown at its cooperative boundary.",
       "properties": {
         "protocol_version": {
           "const": 1,

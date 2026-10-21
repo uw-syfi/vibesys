@@ -332,15 +332,15 @@ def test_snapshot_status_agrees_with_the_fold_at_the_terminal_event(tmp_path: Pa
     assert [event.type for event in parts.journal.read()].count(EventType.RUN_FINISHED) == 1
 
 
-def test_legacy_stop_command_queues_pause_now_for_core(tmp_path: Path) -> None:
+def test_legacy_host_shutdown_reaches_the_process_stop_boundary(tmp_path: Path) -> None:
     parts = build_server_parts(tmp_path)
     parts.start_execution("implementer", "round 1", "work")
     reply = parts.api.execute(StopCommand(timestamp=REQUEST_TIME))
     assert reply.ack is not None
     assert (reply.ack.action, reply.ack.status) == ("pause_now", "pending")
-    (request,) = parts.control.take_pending_actions()
-    assert request.action == "pause_now"
-    assert parts.api.snapshot().status is RunStatus.RUNNING
+    assert parts.control.stop_mode() is StopMode.DRAIN
+    assert parts.control.take_pending_actions() == []
+    assert parts.api.snapshot().status is RunStatus.STOPPING
 
 
 def test_stopped_run_refuses_the_next_controlled_invocation(tmp_path: Path) -> None:
@@ -491,7 +491,6 @@ _SINGLE_ACTION_COMMANDS = st.one_of(
         timestamp=st.just(REQUEST_TIME),
         text=st.text(min_size=1, max_size=20).filter(str.strip),
     ),
-    st.builds(StopCommand, timestamp=st.just(REQUEST_TIME)),
 )
 
 
@@ -501,6 +500,7 @@ def _channel_state(parts: ServerParts) -> tuple[object, ...]:
         parts.control.pause_requested(),
         parts.control.stop_mode(),
         parts.control.consume_fallback_request(),
+        parts.control.take_pending_actions(),
     )
 
 
@@ -884,3 +884,13 @@ def test_each_steer_step_reaches_the_wire_as_a_typed_event_with_the_control_id(
     assert isinstance(reached.data, SteerDeliveryData)
     assert (reached.agent_kind, reached.execution_id) == ("implementer", "exec-1")
     assert reached.data.delivery.attempt_id == "attempt-3"
+
+
+def test_pause_now_uses_the_core_queue_instead_of_the_host_shutdown_flag(tmp_path: Path) -> None:
+    parts = build_server_parts(tmp_path)
+    request = PauseNowRequest(control_id="immediate-pause")
+    response = parts.api.execute(ControlCommand(timestamp=REQUEST_TIME, control=request))
+    assert response.ack is not None
+    assert response.ack.action is ControlAction.PAUSE_NOW
+    assert not parts.control.stop_requested()
+    assert parts.control.take_pending_actions() == [request]

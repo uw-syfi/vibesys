@@ -40,13 +40,9 @@ from server.transport.discovery import WebInstanceClaim, WebInstanceRecord
 from vibesys.run.integration import LocalRunIntegration
 from vs_runtime.api.infrastructure import (
     ChannelRunControl,
-    ControlAck,
-    ControlRequest,
-    PauseNowRequest,
-    RunControlChannel,
 )
 from vs_runtime.api.testing import idle_environment_system
-from vs_sim.api import OsThreads, Platform, Threads
+from vs_sim.api import OsThreads, Platform
 from vs_sim.api.testing import ManualClock, SimThreads
 
 if TYPE_CHECKING:
@@ -66,23 +62,6 @@ _INDEX_HTML = "<!doctype html><title>composed bundle</title>"
 # verdict and expiring it only produces a failure message. See #1053 for the
 # distinction this repository draws.
 _DEADLOCK_GUARD_SECONDS = 30.0
-
-
-class _SessionControlStub(ChannelRunControl):
-    """The session's controls over a ``RunControlChannel``, counting the stops it applies.
-
-    A bare ``runtime.run(...)`` callback never goes through ``ServerRuntime.drive``, so the
-    test installs the control role a live session provides.
-    """
-
-    def __init__(self, control: RunControlChannel, threads: Threads) -> None:
-        super().__init__(control, threads)
-        self.stop_calls = 0
-
-    def submit(self, request: ControlRequest) -> ControlAck:
-        if isinstance(request, PauseNowRequest):
-            self.stop_calls += 1
-        return super().submit(request)
 
 
 def _await_socket(runtime: ServerRuntime) -> None:
@@ -266,7 +245,7 @@ def test_stop_acknowledged_while_transport_starts_reaches_the_session(tmp_path: 
         threads=OsThreads(),
         system=idle_environment_system(),
     )
-    control = _SessionControlStub(integration.control, integration.threads)
+    control = ChannelRunControl(integration.control, integration.threads)
 
     class Observer(RecordingObserver):
         def listening(self) -> None:
@@ -287,10 +266,7 @@ def test_stop_acknowledged_while_transport_starts_reaches_the_session(tmp_path: 
     def run() -> bool:
         runtime.controls.install(control)
         try:
-            return any(
-                request.action == "pause_now"
-                for request in integration.control.take_pending_actions()
-            )
+            return integration.control.stop_requested()
         finally:
             runtime.controls.release(control)
 
@@ -300,7 +276,6 @@ def test_stop_acknowledged_while_transport_starts_reaches_the_session(tmp_path: 
         integration.close()
 
     assert stop_reached_session is True
-    assert control.stop_calls == 1
     with pytest.raises(RunControlUnavailableError, match="after the run session ends"):
         runtime.api.execute(StopCommand(timestamp=REQUEST_TIME))
 

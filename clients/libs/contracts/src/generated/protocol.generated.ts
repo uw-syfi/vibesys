@@ -1084,7 +1084,7 @@ export interface SteerCommand {
   text: Text;
 }
 /**
- * Request stopping after the active agent call.
+ * Internal detached-host shutdown at its cooperative boundary.
  */
 export interface StopCommand {
   protocol_version?: ProtocolVersion3;
