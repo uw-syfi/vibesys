@@ -83,7 +83,7 @@ export function GatewayRun(props: {
       {...(busy ? {disabledReason: 'Connecting'} : {})}
     />
   );
-  if (snapshot.matches('off')) return <>{props.legacy(<Card>{toggle}</Card>)}</>;
+  if (snapshot.matches('off')) return <>{props.legacy(toggle)}</>;
   if (
     page.state === null ||
     page.model === null ||

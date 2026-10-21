@@ -21,11 +21,13 @@ import {storeRunFixture} from '@vibesys/run-fixtures';
 import {foldSkeleton, seedSkeleton, seekSkeleton} from '@vibesys/run-skeleton';
 import {usageOverTime} from '@vibesys/run-state/usage';
 import {
+  clockStart,
   headerView,
   projectSkeleton,
   runPageInitial,
   skeletonPositions,
   skeletonScreenState,
+  stripChartView,
   timelineView,
 } from './index.js';
 
@@ -298,5 +300,31 @@ test('usage retains recorded wall timestamps across elapsed-clock gaps and unkno
     const chart = usageOverTime(state.run.core?.usageRecords ?? [], 'model', 4);
     expect(chart.undated.turns).toBe(seed === 0 ? 1 : 0);
     expect(chart.buckets.length > 0).toBe(seed !== 0);
+  }
+});
+
+test('a keyframe map order cannot change the run origin or performance chart duration', () => {
+  for (let seed = 1; seed <= 12; seed += 1) {
+    const fixture = storeRunFixture('short', 1 + (seed % 4), seed);
+    const skeleton = foldSkeleton(seedSkeleton(), fixture.records);
+    const through = skeleton.throughSeq ?? 0n;
+    const fromRecords = projectSkeleton(skeleton, through);
+    const entries = Object.entries(skeleton.spans);
+    for (let offset = 1; offset < entries.length; offset += 1) {
+      const reordered = [...entries.slice(offset), ...entries.slice(0, offset)];
+      const keyframe = seedSkeleton(
+        create(KeyframeSchema, {
+          ...skeleton,
+          throughSeq: through,
+          logOffset: 8n,
+          spans: Object.fromEntries(reordered),
+        }),
+      );
+      const fromKeyframe = projectSkeleton(keyframe, through);
+      expect(clockStart(fromKeyframe)).toBe(clockStart(fromRecords));
+      expect(stripChartView(fromKeyframe, clockStart(fromKeyframe), fromKeyframe.latest)).toEqual(
+        stripChartView(fromRecords, clockStart(fromRecords), fromRecords.latest),
+      );
+    }
   }
 });
