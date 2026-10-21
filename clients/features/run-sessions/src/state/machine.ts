@@ -19,6 +19,7 @@ export interface ChatContext {
 export type ChatEvent =
   | {readonly type: 'send'; readonly request: ChatMessageRequest}
   | {readonly type: 'toggle'}
+  | {readonly type: 'reload'}
   | {readonly type: 'retry'}
   | {readonly type: 'records'; readonly records: readonly Record[]}
   | {readonly type: 'disconnected'};
@@ -55,6 +56,16 @@ export const runSessionsMachine = setup({
     active: {
       type: 'parallel',
       on: {
+        reload: {
+          target: 'active',
+          reenter: true,
+          actions: assign(({context}) => ({
+            queue: [],
+            contentFailed: false,
+            error: null,
+            uncertain: context.current !== null || context.uncertain,
+          })),
+        },
         toggle: {
           target: 'closed',
           actions: assign(({context}) => ({

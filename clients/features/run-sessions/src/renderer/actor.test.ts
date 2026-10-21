@@ -120,8 +120,11 @@ test('a corrupt sequence reports failed content without stopping the chat actor'
     await waitFor(actor, state => state.matches({active: {content: 'failed'}}), {timeout: 1000});
     expect(actor.getSnapshot().context.error).toBe('History unavailable');
     expect(actor.getSnapshot().context.history.throughSeq).toBe(0n);
-    actor.send({type: 'toggle'});
-    expect(actor.getSnapshot().value).toBe('closed');
+    actor.send({type: 'reload'});
+    expect(actor.getSnapshot().context.contentFailed).toBe(false);
+    expect(bridge.streams[0]?.cancelled).toBe(true);
+    const retry = fromBinary(TailRequestSchema, bridge.streams[1]?.bytes as Uint8Array);
+    expect(retry.fromSeq).toBe(1n);
   } finally {
     actor.stop();
   }

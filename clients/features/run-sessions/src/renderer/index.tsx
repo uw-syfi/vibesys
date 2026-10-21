@@ -45,6 +45,8 @@ export function useRunSessions(
       edit={setText}
       busy={snapshot.matches({active: {sending: 'posting'}})}
       error={snapshot.context.error}
+      contentFailed={snapshot.context.contentFailed}
+      reload={() => current.current?.send({type: 'reload'})}
       uncertain={snapshot.context.uncertain}
       steerBusy={props.steerBusy}
       steer={props.sendSteer}

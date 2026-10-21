@@ -11,6 +11,8 @@ export function SessionPane(props: {
   readonly retry: () => void;
   readonly busy: boolean;
   readonly error: string | null;
+  readonly contentFailed: boolean;
+  readonly reload: () => void;
   readonly uncertain: boolean;
   readonly steerBusy: boolean;
   readonly steer: (proposal: ChatSteerProposed) => void;
@@ -66,9 +68,10 @@ export function SessionPane(props: {
             />
             {props.error ? (
               <Text tone="err" title={props.error}>
-                Not confirmed
+                {props.contentFailed ? 'Unavailable' : 'Not confirmed'}
               </Text>
             ) : null}
+            {props.contentFailed ? <Button text="Retry history" press={props.reload} /> : null}
             {props.uncertain ? (
               <Button
                 text="Retry message"

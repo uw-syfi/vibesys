@@ -1,12 +1,13 @@
 import {mkdirSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {create, fromBinary, toBinary} from '@bufbuild/protobuf';
-import {expect, type Page, test} from '@playwright/test';
+import {expect, type Locator, type Page, test} from '@playwright/test';
 import {
   ChatRole,
   type HostCallRequest,
   HostCallRequestSchema,
   HostCallResponseSchema,
+  type Record,
   RecordSchema,
   TailResponseSchema,
 } from '@vibesys/proto';
@@ -111,6 +112,7 @@ for (const width of [1000, 1440, 1920])
     );
     await expect(pane.getByText('It reduces contention under load.', {exact: true})).toBeVisible();
     await capture('answered');
+    await recoverHistory(page, pane, width, answer);
     await pane.getByRole('button', {name: 'Close chat'}).click();
     await expect(page.getByText('Guidance · Pending', {exact: true})).toBeVisible();
     await page.getByRole('switch', {name: 'Run transport v2'}).uncheck();
@@ -173,4 +175,15 @@ async function captureSession(page: Page, width: number, state: string): Promise
   const file = `session-${width}-${state}.png`;
   await page.screenshot({path: join(shots, file)});
   sheet.push({name: `${width}/${state}`, file});
+}
+
+async function recoverHistory(page: Page, pane: Locator, width: number, answer: Record) {
+  await page.evaluate(
+    bytes => (window as unknown as GatewayWindow).fakeGateway.appendChat(bytes),
+    tail([create(RecordSchema, {...answer, seq: 10n})]),
+  );
+  await expect(pane.getByText('Unavailable', {exact: true})).toBeVisible();
+  await captureSession(page, width, 'unavailable');
+  await pane.getByRole('button', {name: 'Retry history'}).click();
+  await expect(pane.getByText('Unavailable', {exact: true})).not.toBeVisible();
 }
