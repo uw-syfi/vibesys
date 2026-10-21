@@ -1,5 +1,5 @@
 /** The protobuf boundary for run intents. UI code consumes values and opaque bytes. */
-import {create, fromBinary, toBinary} from '@bufbuild/protobuf';
+import {clone, create, fromBinary, toBinary} from '@bufbuild/protobuf';
 import {
   HostCallRequestSchema,
   HostCallResponseSchema,
@@ -51,6 +51,11 @@ export function runIntent(
         },
       });
   }
+}
+
+/** Take ownership before a mutable generated request enters control state. */
+export function copyIntent(request: PostIntentRequest): PostIntentRequest {
+  return clone(PostIntentRequestSchema, request);
 }
 
 export function hostIntentRequest(request: PostIntentRequest): Uint8Array {

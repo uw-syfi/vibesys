@@ -107,3 +107,28 @@ test('an outcome stream failure does not change an in-flight admission', () => {
   } as never);
   expect(admitted.context.entries[0]?.status).toBe('pending');
 });
+
+test('retry owns the original payload even if its caller edits the generated message', () => {
+  const mutable = create(PostIntentRequestSchema, {
+    requestId: 'owned',
+    runId: 'run-1',
+    projectRoot: '/project',
+    intent: {case: 'steer', value: {text: 'original guidance'}},
+  });
+  const sending = getNextSnapshot(
+    runIntentsMachine,
+    getInitialSnapshot(runIntentsMachine, {enabled: true}),
+    {type: 'send', request: mutable},
+  );
+  mutable.requestId = 'changed';
+  if (mutable.intent.case === 'steer') mutable.intent.value.text = 'changed guidance';
+  const timedOut = getNextSnapshot(runIntentsMachine, sending, {
+    type: 'xstate.after.deadline.runIntents.active.sending',
+  } as never);
+  const retry = getNextSnapshot(runIntentsMachine, timedOut, {type: 'retry', requestId: 'owned'});
+  expect(retry.context.current?.requestId).toBe('owned');
+  expect(retry.context.current?.intent).toMatchObject({
+    case: 'steer',
+    value: {text: 'original guidance'},
+  });
+});

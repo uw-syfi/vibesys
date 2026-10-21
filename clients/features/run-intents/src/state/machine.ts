@@ -1,6 +1,6 @@
 import {unprovided} from '@vibesys/machine';
 import type {IntentState, PostIntentRequest, PostIntentResponse} from '@vibesys/runs/intents';
-import {IntentStep} from '@vibesys/runs/intents';
+import {copyIntent, IntentStep} from '@vibesys/runs/intents';
 import {assign, fromCallback, setup} from 'xstate';
 
 export interface RunIntentsInput {
@@ -92,14 +92,17 @@ export const runIntentsMachine = setup({
               guard: ({context, event}) =>
                 !context.entries.some(entry => entry.request.requestId === event.request.requestId),
               target: 'sending',
-              actions: assign(({context, event}) => ({
-                current: event.request,
-                error: null,
-                entries: [
-                  ...context.entries,
-                  {request: event.request, status: 'sending' as const, reason: null},
-                ],
-              })),
+              actions: assign(({context, event}) => {
+                const request = copyIntent(event.request);
+                return {
+                  current: request,
+                  error: null,
+                  entries: [
+                    ...context.entries,
+                    {request, status: 'sending' as const, reason: null},
+                  ],
+                };
+              }),
             },
             retry: {
               guard: ({context, event}) =>
