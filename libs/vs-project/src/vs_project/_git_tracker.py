@@ -141,7 +141,7 @@ class GitTracker:
         self._work_tree: Path | None = None
 
     def init(self, *, existing: bool, trusted_input_baseline: str | None = None) -> None:
-        """Create a run branch, or resume the existing branch for this run."""
+        """Create a run branch, or resume without changing the operator checkout."""
         self._init_project(
             existing=existing,
             trusted_input_baseline=trusted_input_baseline,
@@ -818,7 +818,7 @@ class GitTracker:
         self._install_project_excludes()
         self._require_private_inputs_absent_from_history()
         if existing:
-            self._resume_user_project(branch, trusted_input_baseline)
+            self._resume_user_project(trusted_input_baseline)
             return
 
         self._start_user_project(
@@ -854,28 +854,9 @@ class GitTracker:
             raise ValueError(message)
         return True
 
-    def _resume_user_project(
-        self,
-        branch: str,
-        trusted_input_baseline: str | None,
-    ) -> None:
-        if not self._branch_exists(branch):
-            message = f"cannot resume VibeSys run {self.run_id!r}: branch {branch!r} does not exist"
-            raise ValueError(message)
-        current = self._current_branch()
-        if current == branch:
-            # Already checked out: by an earlier step of this resume, which noted the home
-            # branch, or by a run that ended without returning.
-            self._home_branch = self._home_of_run_branch(branch)
-        else:
-            self._require_clean_project(
-                "cannot switch to the resumed VibeSys branch with pending project changes"
-            )
-            home = self._home_of(current)
-            if home is not None:
-                self._state_integration.record_home_branch(home)
-            self._git.switch_branch(branch)
-            self._home_branch = home
+    def _resume_user_project(self, trusted_input_baseline: str | None) -> None:
+        """Reattach the immutable input without checking out or cleaning the operator root."""
+        self._home_branch = self._home_of(self._current_branch())
         if trusted_input_baseline is not None:
             self.configure_trusted_input_baseline(trusted_input_baseline)
 

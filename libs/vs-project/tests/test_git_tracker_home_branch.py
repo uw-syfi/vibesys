@@ -19,7 +19,7 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 import pytest
-from hypothesis import given, settings
+from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
 from vs_project.api import (
@@ -147,11 +147,12 @@ def test_consecutive_runs_start_from_the_home_branch_and_all_stay_resumable(
         _assert_branched_from(world, home_tip, run_ids, run_id)
     assert world.listed() == run_ids
 
+    before_resume = world.checked_out()
     for run_id in data.draw(st.permutations(run_ids)):
         resumed = world.tracker(run_id)
         resumed.init(existing=True)
-        assert world.checked_out() == f"vibesys-runs/{run_id}"
-        assert Project.open(world.root).state.load_run(run_id).run_id == run_id
+        assert world.checked_out() == before_resume
+        assert world.history().manifest(run_id).run_id == run_id
         assert world.listed() == run_ids
 
     tracker = _run(world, "after-resumes", runs)
@@ -204,11 +205,12 @@ def test_projects_with_stacked_run_branches_keep_every_run_and_start_from_home(
     _assert_branched_from(world, home_tip, ["old-a", "old-b", "new"], "new")
     assert world.tip("vibesys-runs/old-b") == stacked
     assert world.listed() == ["old-a", "old-b", "new"]
+    before_resume = world.checked_out()
     for run_id in ("old-a", "old-b"):
         old = world.tracker(run_id)
         old.init(existing=True)
-        assert world.checked_out() == f"vibesys-runs/{run_id}"
-        assert Project.open(world.root).state.load_run(run_id).run_id == run_id
+        assert world.checked_out() == before_resume
+        assert world.history().manifest(run_id).run_id == run_id
         assert world.listed() == ["old-a", "old-b", "new"]
 
 
@@ -222,3 +224,35 @@ def test_a_new_run_refuses_a_run_branch_whose_home_is_unknown(tmp_path: Path) ->
     with pytest.raises(ValueError, match="started from is unknown"):
         world.tracker("new").init(existing=False)
     assert world.checked_out() == "vibesys-runs/old"
+
+
+@pytest.mark.regression
+@example(home="main", contents="operator edits", staged=True)
+@given(
+    home=_HOME_BRANCHES,
+    contents=st.text(alphabet="abcdef 0123", min_size=1, max_size=30),
+    staged=st.booleans(),
+)
+def test_resume_preserves_the_operator_branch_tree_and_index(
+    tmp_path_factory: pytest.TempPathFactory, home: str, contents: str, *, staged: bool
+) -> None:
+    world = World(tmp_path_factory.mktemp("resume") / "project", home)
+    baseline = world.tip(home)
+    assert baseline is not None
+    _run(world, "run-a", 0)
+    world.git().switch_branch(home)
+    source = world.root / "main.py"
+    source.write_text(contents, encoding="utf-8")
+    if staged:
+        world.git().stage_all(["main.py"])
+    loose = world.root / "notes.txt"
+    loose.write_text("keep my notes", encoding="utf-8")
+    before = (world.git().uncommitted_paths(()), world.git().has_staged_changes())
+    resumed = world.tracker("run-a")
+    resumed.init(existing=True, trusted_input_baseline=baseline)
+    assert world.checked_out() == home
+    assert world.tip(home) == baseline
+    assert resumed.trusted_input_baseline == baseline
+    assert source.read_text(encoding="utf-8") == contents
+    assert loose.read_text(encoding="utf-8") == "keep my notes"
+    assert (world.git().uncommitted_paths(()), world.git().has_staged_changes()) == before

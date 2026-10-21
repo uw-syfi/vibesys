@@ -60,12 +60,7 @@ async function openIntents(page: Page) {
   const outcome = async (index: number, result: 'applied' | 'refused'): Promise<void> => {
     const request = requests[index]?.request;
     if (!request) throw new Error('No posted intent');
-    const action =
-      request.intent.case === 'pauseNow'
-        ? IntentAction.PAUSE_NOW
-        : request.intent.case === 'resume'
-          ? IntentAction.RESUME
-          : IntentAction.PAUSE;
+    const action = request.intent.case === 'pauseNow' ? IntentAction.PAUSE_NOW : IntentAction.PAUSE;
     const {records} = intentReplay(result, request.requestId, ++sequence, action);
     if (result === 'applied') {
       records.push(
