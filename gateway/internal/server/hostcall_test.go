@@ -38,9 +38,27 @@ func TestHostCallPassesTypedPipesAndConfiguredCheckout(t *testing.T) {
 		return hostcommand.Result{Output: output}, nil
 	}}
 	f := startWithConfig(t, server.Config{HostRunner: runner})
-	response, err := client(t, f, false).HostCall(f.ctx, request)
-	if err != nil || response.GetPostIntent().GetRequestId() != "r-1" || !response.GetPostIntent().GetOrderedReader() {
-		t.Fatalf("HostCall: %v %v", response, err)
+	connection := client(t, f, false)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	type reply struct {
+		response *apiv1.HostCallResponse
+		err      error
+	}
+	done := make(chan reply, 1)
+	go func() {
+		response, err := connection.HostCall(ctx, request)
+		done <- reply{response, err}
+	}()
+	// The RPC deliberately has no client deadline: only the gateway can have
+	// supplied the runner's deadline. The fixture deadline is a hang guard.
+	select {
+	case got := <-done:
+		if got.err != nil || got.response.GetPostIntent().GetRequestId() != "r-1" || !got.response.GetPostIntent().GetOrderedReader() {
+			t.Fatalf("HostCall: %v %v", got.response, got.err)
+		}
+	case <-f.ctx.Done():
+		t.Fatal("HostCall did not return")
 	}
 }
 
