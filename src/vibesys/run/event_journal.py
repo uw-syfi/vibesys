@@ -67,8 +67,7 @@ class EventJournal(DurableEventJournal[CoreEvent]):
             self._runlog = None
 
     def _runlog_timestamp(self) -> Timestamp:
-        timestamp = utc_datetime(self._clock)
-        return Timestamp(seconds=int(timestamp.timestamp()), nanos=timestamp.microsecond * 1000)
+        return Timestamp.from_datetime(utc_datetime(self._clock))
 
     def emit(
         self,

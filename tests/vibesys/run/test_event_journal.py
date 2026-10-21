@@ -145,15 +145,16 @@ def test_local_integrations_own_isolated_agent_event_streams(tmp_path: Path) -> 
         second.close()
 
 
+@pytest.mark.parametrize("clock_start", [-0.5, 1234.25])
 def test_live_tee_includes_buffered_events_and_increments_epochs(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, clock_start: float
 ) -> None:
 
     monkeypatch.setenv("VIBESYS_STATE_HOME", str(tmp_path / "home"))
     root = tmp_path / "project"
     root.mkdir()
     project = Project.open(root)
-    clock = ManualClock(start=1234)
+    clock = ManualClock(start=clock_start)
     journal = EventJournal(clock, SimThreads())
     journal.emit(CoreEventType.RUN_STARTED, "buffered")
     journal.enable_runlog(project, "run-1")
@@ -169,6 +170,10 @@ def test_live_tee_includes_buffered_events_and_increments_epochs(
     with Project.run_log_path_for(project.root, "run-1").open("rb") as stream:
         records = list(RunLogReader(stream))
     assert [record.seq for record in records] == [1, 2, 3, 4, 5]
+    assert all(
+        record.at is not None and record.at.to_datetime() == journal.read()[0].timestamp
+        for record in records
+    )
     assert [record.epoch for record in records] == [1, 1, 1, 2, 2]
     headers = [
         record.body.value

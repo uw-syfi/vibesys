@@ -90,16 +90,12 @@ def convert_run(project: Project, run_id: str) -> ConversionResult:
         return ConversionResult(ConversionStatus.SKIPPED, "journal has no events")
     if not has_trace:
         return ConversionResult(ConversionStatus.SKIPPED, "journal predates the run trace")
-    timestamp = first.timestamp
-    at = Timestamp(seconds=int(timestamp.timestamp()), nanos=timestamp.microsecond * 1000)
+    at = Timestamp.from_datetime(first.timestamp)
     with TemporaryDirectory(prefix=".convert-run-", dir=destination.parent) as temporary:
         staged = Path(temporary) / "run.log"
         with LegacyRunLogTee(staged, run_id, lambda: at) as tee:
             for line, event in _events(journal):
-                timestamp = event.timestamp
-                at = Timestamp(
-                    seconds=int(timestamp.timestamp()), nanos=timestamp.microsecond * 1000
-                )
+                at = Timestamp.from_datetime(event.timestamp)
                 tee.append(line)
         staged.replace(destination)
     project.publish_run_for(project.root, run_id)

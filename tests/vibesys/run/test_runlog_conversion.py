@@ -19,13 +19,15 @@ from vs_runlog.api import RunLogReader
 from vs_sim.api.testing import ManualClock, SimThreads
 
 
-def journal_at(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Project, EventJournal]:
+def journal_at(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, clock_start: float = 100
+) -> tuple[Project, EventJournal]:
     """Build a JSONL-only run, as an older checkout would have written."""
     monkeypatch.setenv("VIBESYS_STATE_HOME", str(tmp_path / "home"))
     root = tmp_path / "project"
     root.mkdir()
     project = Project.open(root)
-    journal = EventJournal(ManualClock(start=100), SimThreads())
+    journal = EventJournal(ManualClock(start=clock_start), SimThreads())
     journal.attach(Project.log_directory_for(root, "run-1"), "run-1")
     return project, journal
 
@@ -47,10 +49,11 @@ def record_trace(journal: EventJournal) -> None:
     )
 
 
+@pytest.mark.parametrize("clock_start", [-0.5, 0.0, 100.25])
 def test_conversion_preserves_json_and_timestamps_and_is_idempotent(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, clock_start: float
 ) -> None:
-    project, journal = journal_at(tmp_path, monkeypatch)
+    project, journal = journal_at(tmp_path, monkeypatch, clock_start)
     journal.emit(CoreEventType.RUN_STARTED, "start")
     record_trace(journal)
     journal.emit(CoreEventType.RUN_FINISHED, "finish")
@@ -64,7 +67,10 @@ def test_conversion_preserves_json_and_timestamps_and_is_idempotent(
     assert [record.seq for record in records] == [1, 2, 3, 4]
     assert records[0].body is not None
     assert records[0].body.field == "epoch_started"
-    assert [record.at.seconds for record in records if record.at is not None] == [100] * 4
+    assert all(
+        record.at is not None and record.at.to_datetime() == journal.read()[0].timestamp
+        for record in records
+    )
     assert [
         record.body.value.json
         for record in records
