@@ -84,6 +84,7 @@ interface FixtureWindow extends Window {
 
 export interface OpenOptions {
   readonly refuseActions?: readonly string[];
+  readonly summary?: 'gone' | 'unsupported';
   readonly theme?: 'ink' | 'paper';
   /** A finished run's history served in small pages, held part-way: see `fake-history.ts`. */
   readonly historyServing?: Omit<FakeHistorySeed, 'events'>;
@@ -205,6 +206,7 @@ export function fixtureScripts(fixture: RunFixture, options: OpenOptions = {}): 
     script(installFakeRun, {streams: [], text: {}}),
     script(installFakeFixtureServer, {
       runId: fixture.runId,
+      ...(options.summary ? {summary: options.summary} : {}),
       first: live ? splitLive(fixture).first : fixture.events,
       ...(live ? {} : {history: fixture.events}),
       overview: {

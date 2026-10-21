@@ -3,6 +3,7 @@ syntax = "proto3";
 package vibesys.store.v1;
 
 import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
 
 option go_package = "github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1";
 
@@ -47,6 +48,9 @@ message AgentTurnAttrs {
   string reply_json = 11 [(buf.validate.field).string.max_bytes = 65536];
   // Set when the turn ends. The transcript stays a stream, never a second blob.
   optional uint64 transcript_length = 12;
+  // Wall timestamps reported by execution events, independent of elapsed span clocks.
+  google.protobuf.Timestamp started_at = 13;
+  google.protobuf.Timestamp ended_at = 14;
 }
 
 // Absence means unreported. A reported zero stays present on the wire.

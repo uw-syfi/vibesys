@@ -20,6 +20,7 @@ export interface GatewayLogInput {
   readonly receive: (event: GatewayEvent) => void;
 }
 export type GatewayEvent =
+  | {type: 'setting-changed'}
   | {type: 'toggle'; enabled: boolean}
   | {type: 'ui'; action: RunPageAction}
   | {type: 'log'; streamId: string; text: string; offset: number; next: number}
@@ -90,6 +91,9 @@ function receivedLog(
 export const gatewayRunMachine = setup({
   types: {context: {} as GatewayRunContext, input: {} as GatewayInput, events: {} as GatewayEvent},
   actors: {
+    watchSetting: fromCallback<GatewayEvent>(() => {
+      throw new Error('setting watch not provided');
+    }),
     setting: unprovided<boolean, boolean | undefined>('transport setting'),
     loader: fromCallback<GatewayEvent, {runId: string}>(() => {
       throw new Error('loader not provided');
@@ -117,7 +121,9 @@ export const gatewayRunMachine = setup({
     error: null,
   }),
   initial: 'checking',
+  invoke: {id: 'watch-setting', src: 'watchSetting'},
   on: {
+    'setting-changed': {target: '.checking', reenter: true},
     toggle: {
       target: '.saving',
       reenter: true,

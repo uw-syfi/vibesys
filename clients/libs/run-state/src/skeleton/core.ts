@@ -1,5 +1,6 @@
 /** Reported turn usage is projected by span; absent values stay unknown. */
 import {fromBinary} from '@bufbuild/protobuf';
+import {timestampDate} from '@bufbuild/protobuf/wkt';
 import type {UsageRecord} from '@vibesys/contracts/host-helper';
 import {AgentTurnAttrsSchema} from '@vibesys/proto';
 import {addTokens, type CoreState, initialCoreState, NO_TOKENS, type TokenTally} from '../index.js';
@@ -37,8 +38,8 @@ export function skeletonCore(view: StoreView): CoreState {
       model: turn.model ?? null,
       reasoning_effort: turn.reasoningEffort ?? null,
       harness_version: turn.harnessVersion ?? null,
-      started_at: null,
-      ended_at: null,
+      started_at: turn.startedAt ? timestampDate(turn.startedAt).toISOString() : null,
+      ended_at: turn.endedAt ? timestampDate(turn.endedAt).toISOString() : null,
       cost_usd: usage?.costUsd ?? null,
       duration_ms: count(usage?.durationMs),
       tokens: {

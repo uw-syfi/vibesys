@@ -107,6 +107,7 @@ export class SettingsStore {
   readonly #filesystem: SettingsFilesystem;
   /** The last update; each update starts after it settles. */
   #queue: Promise<void> = Promise.resolve();
+  readonly #hostsListeners = new Set<(settings: SettingsFile) => void>();
   readonly #recentListeners = new Set<(recent: RecentFile) => void>();
   readonly #preferencesListeners = new Set<(preferences: Preferences) => void>();
 
@@ -229,8 +230,17 @@ export class SettingsStore {
     return this.#serialize(async () => {
       const hosts = await this.#readHosts();
       if (hosts.failure !== null) throw hosts.failure;
-      return writeJson(this.#filesystem, this.#options.settingsPath, update(hosts.value), current);
+      const next = update(hosts.value);
+      const outcome = await writeJson(this.#filesystem, this.#options.settingsPath, next, current);
+      if (outcome === 'committed') this.#notify(this.#hostsListeners, next, 'host-settings');
+      return outcome;
     });
+  }
+
+  /** Hear each committed host setting, including changes made in another window. */
+  onHostsChanged(listener: (settings: SettingsFile) => void): () => void {
+    this.#hostsListeners.add(listener);
+    return () => this.#hostsListeners.delete(listener);
   }
 
   /**

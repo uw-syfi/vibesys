@@ -40,7 +40,7 @@ export interface DesktopDeps {
     AppWindow,
     'focus' | 'openSettings' | 'releaseSurfaceRun' | 'sendWelcome' | 'welcome'
   >;
-  readonly welcome: Pick<WelcomeFeed, 'recent' | 'snapshot'>;
+  readonly welcome: Pick<WelcomeFeed, 'recent' | 'snapshot' | 'hostSettings'>;
   readonly hosts: Pick<
     Hosts,
     | 'cancelCheckout'
@@ -80,7 +80,7 @@ export interface DesktopDeps {
     RunControl,
     'attach' | 'attachReader' | 'attached' | 'detach' | 'resume' | 'start'
   >;
-  readonly settings: Pick<SettingsStore, 'onRecentChanged' | 'recentSnapshot'>;
+  readonly settings: Pick<SettingsStore, 'onRecentChanged' | 'recentSnapshot' | 'onHostsChanged'>;
   readonly preferences: Pick<PreferencesMain, 'answer'>;
   readonly newRun: Pick<NewRunMain, 'answer'>;
   /** The app shell's page: the only one admitted to the main window's requests. */
@@ -144,6 +144,11 @@ export class Desktop {
 
   constructor(deps: DesktopDeps) {
     this.#deps = deps;
+    deps.settings.onHostsChanged(() => {
+      const event = deps.welcome.hostSettings();
+      deps.window.sendWelcome(WELCOME_EVENTS.hostSettings, event);
+      deps.runWindows.sendWelcome(WELCOME_EVENTS.hostSettings, event);
+    });
     deps.settings.onRecentChanged(recent => {
       const generation = ++this.#recentGeneration;
       const value = welcomeRecent(recent);

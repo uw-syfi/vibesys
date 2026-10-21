@@ -84,6 +84,36 @@ for (const kind of ['short', 'live', 'blobs'] as const)
     });
   }
 
+test('the host switch survives missing legacy history and usage retains its model and dates', async ({
+  page,
+}) => {
+  await page.setViewportSize({width: 1440, height: 900});
+  await page.addInitScript(installGateway, wire(storeRunFixture('short')));
+  await openFixture(page, {...fixtureNamed('finished-run'), runId: 'run-a'}, {summary: 'gone'});
+  await expect(page.getByText('Could not load this run', {exact: true})).toBeVisible();
+  const toggle = page.getByRole('switch', {name: 'Run transport v2'});
+  await expect(toggle).not.toBeChecked();
+  await toggle.check();
+  await page.getByRole('radio', {name: 'Usage', exact: true}).click();
+  await page.getByRole('radio', {name: 'Model', exact: true}).click();
+  await page.getByRole('radio', {name: 'Tokens', exact: true}).click();
+  await expect(page.getByText('model-a', {exact: true}).last()).toBeVisible();
+  await expect(page.getByText(/turns have no end time/)).toHaveCount(0);
+  await settled(page);
+  expect(await screenCheck(page)).toEqual([]);
+  if (shots) {
+    const file = 'store-usage-model-dated.png';
+    await page.screenshot({path: join(shots, file)});
+    sheet.push({name: 'Usage by model, dated', file});
+  }
+  await toggle.uncheck();
+  await expect(page.getByText('Could not load this run', {exact: true})).toBeVisible();
+  await expect(toggle).not.toBeChecked();
+  await expect(page.getByRole('button', {name: 'Pause', exact: true})).toHaveCount(0);
+  await toggle.check();
+  await expect(page.getByRole('button', {name: 'Pause', exact: true})).toBeVisible();
+});
+
 test('store Run app-window contact sheet', async ({page}) => {
   if (!shots || sheet.length === 0) return;
   const html = contactSheetHtml(sheet, 3);
