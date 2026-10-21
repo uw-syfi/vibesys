@@ -112,7 +112,7 @@ func rpcError(err error) error {
 // Serve owns the gRPC server until listener closure or context cancellation.
 // The caller owns socket publication and connection/idle accounting.
 func Serve(ctx context.Context, listener net.Listener, config Config) error {
-	server := grpc.NewServer(grpc.MaxSendMsgSize(runlog.MaxRecordBytes + 32))
+	server := grpc.NewServer(grpc.MaxSendMsgSize(gen.RunLogMaxRecordBytes + 32))
 	apiv1.RegisterHostServiceServer(server, &host{config: config})
 	stop := context.AfterFunc(ctx, server.Stop)
 	defer stop()
