@@ -7,13 +7,7 @@
 import type {RunCommand} from '@vibesys/run-session';
 import type {CoreState} from '@vibesys/run-state';
 import type {AbortSignalLike} from '@vibesys/transport';
-import type {
-  ResumeWhen,
-  RunData,
-  RunPageAction,
-  RunPageState,
-  SessionView,
-} from '../../state/index.js';
+import type {RunData, RunPageAction, RunPageState, SessionView} from '../../state/index.js';
 
 /** What a live session reports to the store. */
 export interface SessionObserver {
@@ -22,11 +16,8 @@ export interface SessionObserver {
   data(data: RunData): void;
 }
 
-/** A command the Run screen sends over the session: Pause, or Resume now or when capacity returns. */
-export type SessionCommand =
-  | {readonly kind: 'pause'}
-  | {readonly kind: 'pause-now'}
-  | {readonly kind: 'resume'; readonly when: ResumeWhen};
+/** A command the Run screen sends over the session: Pause or Pause now. */
+export type SessionCommand = {readonly kind: 'pause'} | {readonly kind: 'pause-now'};
 
 /** What a chat request came to: it went through, or why it did not. */
 export type ChatReply<T> =

@@ -172,17 +172,13 @@ function openWebSession(
       },
     },
     command: async command => {
-      const outcome = await session.command(
-        command.kind === 'pause' || command.kind === 'pause-now'
-          ? {
-              type: 'command.control',
-              control: {
-                control_id: crypto.randomUUID(),
-                action: command.kind === 'pause-now' ? 'pause_now' : 'pause',
-              },
-            }
-          : {type: 'command.resume', when: command.when},
-      );
+      const outcome = await session.command({
+        type: 'command.control',
+        control: {
+          control_id: crypto.randomUUID(),
+          action: command.kind === 'pause-now' ? 'pause_now' : 'pause',
+        },
+      });
       return outcome.kind === 'acknowledged'
         ? null
         : (outcome.message ?? `the run refused ${command.kind}`);

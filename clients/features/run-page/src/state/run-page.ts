@@ -7,12 +7,7 @@ import type {RunEvent, RunStatus} from '@vibesys/contracts';
 import type {LogStream} from '@vibesys/contracts/host-helper';
 import type {HostRun, RunEnd} from '@vibesys/hosts';
 import type {LogListOutcome, LogView} from '@vibesys/logs';
-import {
-  type CoreState,
-  initialCoreState,
-  type QuotaPause,
-  reduceEventBatch,
-} from '@vibesys/run-state';
+import {type CoreState, initialCoreState, reduceEventBatch} from '@vibesys/run-state';
 import type {RunRef} from '@vibesys/runs';
 import {createMachine, getInitialSnapshot, getNextSnapshot, type SnapshotFrom} from 'xstate';
 import {type HistoryPage, type HistoryPager, receivePage, startHistory} from './history-pager.js';
@@ -45,7 +40,6 @@ import {receiveTracePage, startTraceHistory, type TraceHistory} from './trace-hi
 import {USAGE_CONTROLS_DEFAULT, type UsageControls} from './usage-view.js';
 
 /** When a Resume takes effect: now, or once the provider's capacity returns. */
-export type ResumeWhen = 'now' | 'capacity_returns';
 
 /** What the app could not do for this run, with why; an action named here is shown disabled. */
 type RunCapability = 'open-window' | 'logs';
@@ -194,7 +188,7 @@ const pauseNowMachine = createMachine({
         confirm: {target: 'sent', guard: ({event}) => event.allowed},
       },
     },
-    sent: {on: {ask: {target: 'confirming', guard: ({event}) => event.allowed}}},
+    sent: {},
   },
 });
 
@@ -298,8 +292,6 @@ export interface RunPageState {
   /** An ended run's earlier span events, read into its trace so the scrubber has positions. */
   readonly traceHistory: TraceHistory;
   readonly detail: SpanDetail;
-  /** Why the attached run refused to wait for its quota; the wait is not offered again for it. */
-  readonly waitRefused: string | null;
   readonly next: number;
 }
 
@@ -324,11 +316,6 @@ export type RunPageAction =
   | {readonly type: 'streams'; readonly token: number; readonly outcome: LogListOutcome}
   | {readonly type: 'log-view'; readonly streamId: string; readonly view: LogView}
   | {readonly type: 'pause'}
-  | {readonly type: 'resume'}
-  /** Resume the quota-paused run when capacity returns. */
-  | {readonly type: 'wait-for-quota'}
-  /** End that wait: the run stays paused. */
-  | {readonly type: 'stop-waiting'}
   | {readonly type: 'resume-ended'}
   | {readonly type: 'open-window'}
   | {readonly type: 'archive'}
@@ -342,8 +329,6 @@ export type RunPageAction =
   /** This window's clock, ticked while the screen shows time passing on a live run. */
   | {readonly type: 'tick'; readonly wallMs: number}
   | {readonly type: 'command-refused'; readonly message: string}
-  /** The run refused a Resume when capacity returns (an older server rejects `when`). */
-  | {readonly type: 'wait-refused'; readonly message: string}
   | {readonly type: 'view'; readonly view: RunView}
   | {readonly type: 'history'; readonly token: number; readonly reply: HistoryReply}
   /** A page of the ended run's earlier span events arrived (or did not). */
@@ -368,7 +353,6 @@ export type RunPageRequest =
   | {readonly kind: 'cancel-bound'; readonly token: number}
   | {readonly kind: 'list-logs'; readonly token: number; readonly instanceId: string}
   | {readonly kind: 'pause'}
-  | {readonly kind: 'resume'; readonly when: ResumeWhen}
   | {readonly kind: 'resume-ended'; readonly fromRound: number | null}
   | {readonly kind: 'open-window'}
   | {readonly kind: 'archive'}
@@ -443,7 +427,6 @@ export function runPageInitial(seed: RunPageSeed): RunPageState {
     history: {kind: 'idle'},
     traceHistory: {kind: 'idle'},
     detail: {kind: 'idle'},
-    waitRefused: null,
     next: 1,
   };
 }
@@ -547,7 +530,6 @@ function linked(state: RunPageState): RunPageStep {
       link: {kind: 'attaching', token, instance: wanted},
       session: null,
       run: EMPTY_RUN_FOLD,
-      waitRefused: null,
     },
     requests: [...release, {kind: 'attach', token, instance: wanted}],
   };
@@ -1038,27 +1020,14 @@ function confirmStep(state: RunPageState, action: RunPageAction): RunPageStep | 
   }
 }
 
-/** Whether a protocol command (Pause, Resume) can reach the run now: its session's controls are up. */
+/** Whether a live pause command can reach the run now: its session's controls are up. */
 export function commandable(state: RunPageState): boolean {
   return state.link.kind === 'attached' && state.session?.controls === true;
-}
-
-/** The usage-limit stop the run is paused on, while it is paused by quota; null otherwise. */
-export function quotaPause(state: RunPageState): QuotaPause | null {
-  const phase = runPhase(state);
-  if (phase.kind !== 'paused' || phase.by !== 'quota') return null;
-  return state.run.core?.quota.pause ?? null;
-}
-
-/** Whether the run waits for its quota now (it acknowledged a Resume when capacity returns). */
-function waitingForQuota(state: RunPageState): boolean {
-  return quotaPause(state)?.waiting != null;
 }
 
 /** A command the screen offers, sent only when the current state offers it. */
 function commandStep(state: RunPageState, action: RunPageAction): RunPageStep | null {
   const phase = runPhase(state);
-  const byQuota = phase.kind === 'paused' && phase.by === 'quota';
   // A command sent is a new attempt: what the last one reported no longer stands.
   const offered = (when: boolean, request: RunPageRequest): RunPageStep => ({
     state: when ? {...state, notice: null} : state,
@@ -1069,21 +1038,6 @@ function commandStep(state: RunPageState, action: RunPageAction): RunPageStep | 
       return offered(commandable(state) && phase.kind === 'running' && !phase.pausing, {
         kind: 'pause',
       });
-    case 'resume':
-      return offered(commandable(state) && phase.kind === 'paused', {
-        kind: 'resume',
-        when: 'now',
-      });
-    case 'wait-for-quota':
-      return offered(
-        commandable(state) && byQuota && !waitingForQuota(state) && state.waitRefused === null,
-        {
-          kind: 'resume',
-          when: 'capacity_returns',
-        },
-      );
-    case 'stop-waiting':
-      return offered(commandable(state) && waitingForQuota(state), {kind: 'pause'});
     case 'resume-ended': {
       const end = phase.kind === 'ended' ? phase.end : null;
       return offered(phase.kind === 'ended' || phase.kind === 'historical', {
@@ -1253,15 +1207,6 @@ function liveStep(state: RunPageState, action: RunPageAction): RunPageStep | nul
       return {state: {...state, clockMs: action.wallMs}, requests: []};
     case 'command-refused':
       return {state: {...state, notice: action.message}, requests: []};
-    case 'wait-refused':
-      return {
-        state: {
-          ...state,
-          notice: `The run cannot wait for its quota: ${action.message}`,
-          waitRefused: action.message,
-        },
-        requests: [],
-      };
     case 'view':
       return {state: {...state, view: action.view}, requests: []};
     case 'history':

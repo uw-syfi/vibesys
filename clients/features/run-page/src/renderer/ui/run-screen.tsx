@@ -212,14 +212,6 @@ function Header(props: {
             {...reason(header.pause)}
           />
         ) : null}
-        {header.resume.shown ? (
-          <Button
-            variant="primary"
-            text="Resume"
-            press={() => dispatch({type: 'resume'})}
-            {...reason(header.resume)}
-          />
-        ) : null}
         {header.pauseNow.shown ? (
           <Button
             variant="danger"

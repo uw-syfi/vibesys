@@ -123,17 +123,11 @@ class Followers {
 }
 
 /** Tells the screen the run did not take `request`: a refusal (a message), or the command failing to reach it. */
-function refusal(
-  request:
-    | {readonly kind: 'pause' | 'pause-now'}
-    | {readonly kind: 'resume'; readonly when: string},
-  refused: unknown,
-  dispatch: Dispatch,
-): void {
+function refusal(kind: 'pause' | 'pause-now', refused: unknown, dispatch: Dispatch): void {
   if (refused === null) return;
   const message = refused instanceof Error ? refused.message : String(refused);
-  const waited = request.kind === 'resume' && request.when === 'capacity_returns';
-  dispatch({type: waited ? 'wait-refused' : 'command-refused', message});
+  if (kind === 'pause-now') dispatch({type: 'pause-now-failed'});
+  dispatch({type: 'command-refused', message});
 }
 
 /** How often the clock ticks at the live end: a second, the finest the screen writes. */
@@ -445,10 +439,9 @@ export function createRunPageStore(
         return;
       case 'pause':
       case 'pause-now':
-      case 'resume':
         void sessions.command(request).then(
-          refused => refusal(request, refused, dispatch),
-          (error: unknown) => refusal(request, error, dispatch),
+          refused => refusal(request.kind, refused, dispatch),
+          (error: unknown) => refusal(request.kind, error, dispatch),
         );
         return;
       default:

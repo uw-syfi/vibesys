@@ -30,7 +30,6 @@ import {
   headerView,
   logGroups,
   pauseNowBannerView,
-  quotaBannerView,
   runGoneWords,
   streamLines,
   timelineView,
@@ -143,10 +142,6 @@ const USER_ACTIONS: readonly RunPageAction[] = [
   {type: 'confirm-pause-now'},
   {type: 'pause-now-failed'},
   {type: 'pause'},
-  {type: 'resume'},
-  {type: 'wait-for-quota'},
-  {type: 'stop-waiting'},
-  {type: 'wait-refused', message: "unknown field 'when'"},
   {type: 'resume-ended'},
   {type: 'open-window'},
   {type: 'archive'},
@@ -377,29 +372,13 @@ function reply(action: RunPageAction) {
   return null;
 }
 
-/** Why a Pause or Resume was not on offer in `before` (header or quota banner), or null. */
-function commandNotOffered(
-  before: RunPageState,
-  request: Extract<RunPageRequest, {kind: 'pause' | 'resume'}>,
-): string | null {
-  const header = headerView(before);
-  const banner = quotaBannerView(before, String);
-  const offers =
-    request.kind === 'pause'
-      ? [header.pause, banner?.stopWaiting]
-      : request.when === 'now'
-        ? [header.resume, banner?.resumeNow]
-        : [banner?.wait];
-  const offered = offers.some(each => each?.shown === true && each.disabledReason === null);
-  return offered ? null : `${request.kind} was sent while not offered`;
-}
-
 /** Why `request` was not on offer in `before`, or null when it was. */
 function notOffered(before: RunPageState, request: RunPageRequest): string | null {
   switch (request.kind) {
     case 'pause':
-    case 'resume':
-      return commandNotOffered(before, request);
+      return headerView(before).pause.shown && headerView(before).pause.disabledReason === null
+        ? null
+        : 'pause was sent while not offered';
     case 'pause-now':
       return pauseNowBannerView(before).kind === 'confirm'
         ? null
@@ -440,48 +419,16 @@ describe('the run page store', () => {
     }
   });
 
-  test('a quota pause offers Resume now and the wait, and the wait offers Stop waiting', () => {
-    const at = (seconds: number) => `t${seconds}`;
-    const attached = fold(initial(), [
-      {type: 'record', record: {kind: 'live', run: server('paused', {paused: 'quota'})}},
-    ]);
-    const token = attached.requests.find(request => request.kind === 'attach');
-    const ready = fold(attached.state, [
-      {type: 'attached', token: token?.kind === 'attach' ? token.token : 0, error: null},
-      {type: 'session', session: {hasSnapshot: true, streaming: true, controls: true, error: null}},
-      {type: 'run-core', core: quotaCore(1)},
-    ]).state;
-    expect(headerView(ready).resume.shown).toBe(false);
-    expect(quotaBannerView(ready, at)).toMatchObject({
-      title: 'Paused: Claude hit its usage limit',
-      body: 'Claude usage limit reached. Claude expects capacity back at t1760580000.',
-      wait: {shown: true},
-      stopWaiting: {shown: false},
-    });
-    expect(fold(ready, [{type: 'wait-for-quota'}]).requests).toEqual([
-      {kind: 'resume', when: 'capacity_returns'},
-    ]);
-    expect(fold(ready, [{type: 'resume'}]).requests).toEqual([{kind: 'resume', when: 'now'}]);
-    // Stop waiting is not on offer before the run waits.
-    expect(fold(ready, [{type: 'stop-waiting'}]).requests).toEqual([]);
-
-    const waiting = fold(ready, [{type: 'run-core', core: quotaCore(2)}]).state;
-    expect(quotaBannerView(waiting, at)).toMatchObject({
-      title: "Waiting for Claude's quota",
-      body: 'The run resumes by itself at about t1760580120.',
-      wait: {shown: false},
-      stopWaiting: {shown: true},
-    });
-    expect(fold(waiting, [{type: 'stop-waiting'}]).requests).toEqual([{kind: 'pause'}]);
-    expect(fold(waiting, [{type: 'wait-for-quota'}]).requests).toEqual([]);
-
-    const cancelled = fold(waiting, [{type: 'run-core', core: quotaCore(3)}]).state;
-    expect(quotaBannerView(cancelled, at)?.wait.shown).toBe(true);
-    // A run paused by its user shows no quota banner.
-    const byUser = fold(cancelled, [
-      {type: 'record', record: {kind: 'live', run: server('paused')}},
-    ]).state;
-    expect(quotaBannerView(byUser, at)).toBeNull();
+  test('quota holds stay internal while Pause now remains available', () => {
+    for (const stage of [0, 1, 2, 3]) {
+      const state = fold(attached(), [
+        {type: 'record', record: {kind: 'live', run: server('paused', {paused: 'quota'})}},
+        {type: 'run-core', core: quotaCore(stage)},
+      ]).state;
+      expect(Object.keys(headerView(state))).not.toContain('resume');
+      expect(headerView(state).pauseNow.shown).toBe(true);
+      expect(fold(state, [{type: 'pause'}]).requests).toEqual([]);
+    }
   });
 
   test('same-store rebootstrap keeps the snapshot base and replaces the replay suffix', () => {
