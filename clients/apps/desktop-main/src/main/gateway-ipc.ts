@@ -14,6 +14,7 @@ import {
 } from '@vibesys/connection';
 import {type HostKey, hostFromKey, hostKey} from '@vibesys/hosts';
 import {GATEWAY_CHANNEL, parseGatewayRequest} from '@vibesys/ipc';
+import {configuredHostCall, HOST_CALL_METHOD} from '@vibesys/runs/intents';
 import {type SettingsStore, settingsFor, withHostSettings} from '@vibesys/settings';
 import type {ScheduleTimeout} from '@vibesys/transport';
 import type {IpcMain} from 'electron';
@@ -40,6 +41,7 @@ export function createGatewayCalls(
 export function installGatewayIpc(
   ipc: IpcMain,
   calls: GatewayCalls,
+  settings: SettingsStore,
   admits: (event: WelcomeInvokeEvent) => boolean,
 ): void {
   ipc.on(GATEWAY_CHANNEL, (event, value: unknown) => {
@@ -68,9 +70,17 @@ export function installGatewayIpc(
       const receive = (bytes: Uint8Array): void => {
         if (!done) port.postMessage({bytes});
       };
-      if (request.kind === 'unary')
-        receive(await calls.unary(request.host, request.method, request.bytes, abort.signal));
-      else await calls.stream(request.host, request.method, request.bytes, abort.signal, receive);
+      if (request.kind === 'unary') {
+        let bytes = request.bytes;
+        if (request.method === HOST_CALL_METHOD) {
+          const {settings: file} = await settings.hosts();
+          bytes = configuredHostCall(
+            bytes,
+            settingsFor(file, hostFromKey(request.host))?.checkout ?? null,
+          );
+        }
+        receive(await calls.unary(request.host, request.method, bytes, abort.signal));
+      } else await calls.stream(request.host, request.method, request.bytes, abort.signal, receive);
     })().then(() => finish(), finish);
   });
 }

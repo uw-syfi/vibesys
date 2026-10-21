@@ -22,6 +22,9 @@
     },
     {
       "path": "../store/tsconfig.testing.json"
+    },
+    {
+      "path": "./tsconfig.intents.json"
     }
   ]
 }

@@ -152,3 +152,12 @@ jobs = ["gateway"]
 native_languages = []
 native_targets = []
 pnpm_packages = []
+
+[[cases]]
+name = "intent control changes select their mountable feature"
+paths = ["clients/features/run-intents/src/state/machine.ts"]
+jobs = ["clients"]
+[cases.collections]
+native_languages = []
+native_targets = []
+pnpm_packages = ["@vibesys/feature-run-intents"]

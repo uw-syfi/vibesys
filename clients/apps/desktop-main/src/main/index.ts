@@ -231,7 +231,7 @@ async function openWindow(
   // A machine that slept has dead connections nobody has noticed yet: check them now.
   powerMonitor.on('resume', () => manager.wake());
   watchNetwork(manager);
-  installGatewayIpc(ipcMain, gateway, event => desktop.admitsRenderer(event));
+  installGatewayIpc(ipcMain, gateway, settings, event => desktop.admitsRenderer(event));
   return desktop;
 }
 

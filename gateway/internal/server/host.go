@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 
 	apiv1 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/api/v1"
+	"github.com/uw-syfi/vibesys/gateway/internal/hostcommand"
 	"github.com/uw-syfi/vibesys/gateway/internal/runindex"
 	"github.com/uw-syfi/vibesys/gateway/internal/runlog"
 	"github.com/uw-syfi/vibesys/gateway/schemahash"
@@ -24,9 +25,10 @@ const batchBytes = 1 << 20
 
 // Config is process wiring; the API hash comes only from generated code.
 type Config struct {
-	Root    string
-	Version string
-	Clock   Clock
+	Root       string
+	Version    string
+	Clock      Clock
+	HostRunner hostcommand.Runner
 }
 
 type host struct {
@@ -124,6 +126,9 @@ func rpcError(err error) error {
 // Serve owns the gRPC server until listener closure or context cancellation.
 // The caller owns socket publication and connection/idle accounting.
 func Serve(ctx context.Context, listener net.Listener, config Config) error {
+	if config.HostRunner == nil {
+		config.HostRunner = hostcommand.ExecRunner{}
+	}
 	if config.Clock == nil {
 		config.Clock = SystemClock{}
 	}
