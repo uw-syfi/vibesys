@@ -17,6 +17,7 @@ import {createShellStores, RunWindow, Shell} from './shell.js';
 declare global {
   interface Window {
     vibesysWelcome?: WelcomeBridge;
+    vibesysGateway?: import('@vibesys/ipc').GatewayBridge;
   }
 }
 

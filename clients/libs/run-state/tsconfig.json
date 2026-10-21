@@ -30,6 +30,9 @@
     },
     {
       "path": "./tsconfig.test.json"
+    },
+    {
+      "path": "./tsconfig.records.json"
     }
   ]
 }

@@ -43,6 +43,12 @@
     },
     {
       "path": "../contracts/tsconfig.testing.json"
+    },
+    {
+      "path": "./tsconfig.records.json"
+    },
+    {
+      "path": "../proto/tsconfig.lib.json"
     }
   ]
 }

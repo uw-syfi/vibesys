@@ -21,7 +21,8 @@
     "src/overview/**",
     "src/candidates/**",
     "src/agents/**",
-    "src/usage/**"
+    "src/usage/**",
+    "src/records/**"
   ],
   "references": [
     {

@@ -86,6 +86,9 @@
     },
     {
       "path": "../../features/run-chat/tsconfig.state.json"
+    },
+    {
+      "path": "../../features/gateway-records/tsconfig.renderer.json"
     }
   ]
 }

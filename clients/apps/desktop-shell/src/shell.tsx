@@ -303,7 +303,7 @@ function RunRoute(props: {
       </Page>
     );
   }
-  return <RunWithChat page={page} run={run} bridge={stores.bridge} />;
+  return <RunWithChat page={page} run={run} bridge={stores.bridge} schedule={stores.schedule} />;
 }
 
 /** The unfinished New run the dashboard offers, or null when there is not one. */
