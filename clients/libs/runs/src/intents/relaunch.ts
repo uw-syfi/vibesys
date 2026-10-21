@@ -59,7 +59,7 @@ export function hostRelaunchResponse(bytes: Uint8Array, expectedEpoch: bigint): 
 
 export function relaunchLabel(result: RelaunchResponse | null): string | null {
   if (!result) return null;
-  if (result.outcome.case === 'epoch') return 'Epoch ' + result.outcome.value.toString();
+  if (result.outcome.case === 'epoch') return `Epoch ${result.outcome.value.toString()}`;
   switch (result.outcome.value) {
     case RelaunchRefusal.LOCKED:
       return 'Refused: locked';

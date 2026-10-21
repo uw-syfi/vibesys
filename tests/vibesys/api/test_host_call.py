@@ -325,6 +325,13 @@ def test_legacy_cli_and_host_call_share_byte_identical_request_ids(
     assert len(owner.state.control_inbox(run_id).pending()) == 1
 
 
+def host_executable(checkout: Path) -> Path:
+    executable = checkout / ".venv" / "bin" / "vibesys"
+    executable.parent.mkdir(parents=True)
+    executable.touch()
+    return executable
+
+
 def relaunch_call(owner: Project, run_id: str, checkout: Path) -> HostCallRequest:
 
     return HostCallRequest(
@@ -342,10 +349,7 @@ def test_host_relaunch_round_trip_confirms_the_new_epoch(
 ) -> None:
 
     owner, run_id = project
-    checkout = tmp_path / "checkout"
-    executable = checkout / ".venv" / "bin" / "vibesys"
-    executable.parent.mkdir(parents=True)
-    executable.touch()
+    executable = host_executable(tmp_path / "checkout")
     threads = SimThreads()
     clock = ManualClock()
     journal = EventJournal(clock, threads)
@@ -357,9 +361,17 @@ def test_host_relaunch_round_trip_confirms_the_new_epoch(
         journal.emit(CoreEventType.STOPPED)
     journal.close()
     path = Project.run_log_path_for(owner.root, run_id)
-    request = relaunch_call(owner, run_id, checkout)
+    request = relaunch_call(owner, run_id, executable.parents[2])
 
     def launch(spec: ProcessSpec) -> ProcessScript:
+        if len(processes.ran) > 1:
+            return ProcessScript(returncode=1)
+        concurrent = HostCallResponse.from_binary(
+            host_call(request.to_binary(), processes=processes, threads=threads)
+        )
+        assert concurrent.result is not None
+        assert concurrent.result.field == "relaunch"
+        assert concurrent.result.value.outcome == Oneof("refusal", RelaunchRefusal.LOCKED)
         assert spec.argv == (str(executable), "--resume", run_id, "--detach", str(owner.root))
         resumed = EventJournal(clock, threads)
         resumed.checkout = ("tree-b", True)

@@ -185,6 +185,9 @@ importers:
       '@vibesys/contracts':
         specifier: workspace:*
         version: link:../../libs/contracts
+      '@vibesys/feature-run-intents':
+        specifier: workspace:*
+        version: link:../../features/run-intents
       '@vibesys/proto':
         specifier: workspace:*
         version: link:../../libs/proto

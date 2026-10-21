@@ -286,7 +286,10 @@ test('relaunch rejects malformed, missing, stale and unknown outcomes as uncerta
     toBinary(
       HostCallResponseSchema,
       create(HostCallResponseSchema, {
-        result: {case: 'relaunch', value: {outcome: {case: 'refusal', value: 99 as RelaunchRefusal}}},
+        result: {
+          case: 'relaunch',
+          value: {outcome: {case: 'refusal', value: 99 as RelaunchRefusal}},
+        },
       }),
     ),
   ]) {

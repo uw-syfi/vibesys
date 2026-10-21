@@ -9,7 +9,13 @@ from vibesys.api import ConfigurationError
 from vibesys.api.request import ensure_resumable
 from vs_project.api import Project
 from vs_proto.api import Oneof, RelaunchRefusal, RelaunchResponse
-from vs_runlog.api import RunLogReader, RunLogStopReason, assert_run_unlocked
+from vs_runlog.api import (
+    RunLaunchLockedError,
+    RunLogReader,
+    RunLogStopReason,
+    assert_run_unlocked,
+    exclusive_run_launch,
+)
 from vs_sim.api import Capture, ProcessOutcome, ProcessSpec
 
 if TYPE_CHECKING:
@@ -38,6 +44,18 @@ def relaunch_host(
     project.state.load_run(request.run_id)
     project.state.require_local_run(request.run_id)
     path = Project.run_log_path_for(project.root, request.run_id)
+    if not path.exists():
+        return _refused(RelaunchRefusal.EPOCH_CHANGED)
+    try:
+        with exclusive_run_launch(path):
+            return _launch(request, executable, path, processes, threads)
+    except RunLaunchLockedError:
+        return _refused(RelaunchRefusal.LOCKED)
+
+
+def _launch(
+    request: RelaunchRequest, executable: Path, path: Path, processes: Processes, threads: Threads
+) -> RelaunchResponse:
     try:
         assert_run_unlocked(path)
     except RuntimeError:
@@ -46,7 +64,7 @@ def relaunch_host(
     if epoch != request.expected_epoch:
         return _refused(RelaunchRefusal.EPOCH_CHANGED)
     try:
-        ensure_resumable(project.root, request.run_id)
+        ensure_resumable(Path(request.project_root), request.run_id)
     except ConfigurationError as error:
         if error.diagnostic.code != "run_ended":
             raise
@@ -59,9 +77,9 @@ def relaunch_host(
                 "--resume",
                 request.run_id,
                 "--detach",
-                str(project.root),
+                request.project_root,
             ),
-            cwd=project.root,
+            cwd=Path(request.project_root),
             max_output_bytes=65536,
         ),
         timeout=20,

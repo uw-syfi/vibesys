@@ -65,7 +65,7 @@ One directory per run, opened only through `vs-project`'s `Project`.
 | `streams/<id>` | log streams (build output, stage output, narration) | the run | append-only |
 | `keyframes/<seq>.pb` | the skeleton at a log sequence | the run, at its checkpoints | immutable |
 | `run.head` | tiny status and headline for dashboards, and `committed_seq` | the run | replaced atomically |
-| `run.lock` | an advisory lock the live run holds; no content | the run | held while the process lives |
+| `launch.lock` | serializes host relaunch admission until the new epoch is observed | the host command | held only during launch |\n| `run.lock` | an advisory lock the live run holds; no content | the run | held while the process lives |
 | `state.pb` | core's snapshot; records the last log sequence it covers | the run | compare-and-swap |
 | `inbox/` | intents posted by viewers | the gateway | one file per request |
 | `sessions/<id>/` | a chat session: its own `session.log` and inbox | the session process | as the run |
@@ -189,7 +189,7 @@ command returns the epoch actually observed in `run.log`, or a typed refusal: lo
 checkout missing, or epoch changed. An unexpected launch failure or an unconfirmed epoch uses
 HostCall's configuration diagnostic. It is uncertain whether a timed-out call launched, so the
 client never retries it automatically. Requests name the observed epoch; a retry against a later
-epoch is refused. The writer still acquires the lifetime lock atomically.
+epoch is refused. The host command holds a separate launch lock across admission and epoch\nconfirmation, so concurrent app calls cannot both admit the same observed epoch. The writer\nstill acquires the lifetime lock atomically.
 
 The app currently validates and selects a host checkout but offers no safe update operation.
 The operator updates that checkout before relaunching. No update-checkout method is exposed.
