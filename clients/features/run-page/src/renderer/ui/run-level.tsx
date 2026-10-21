@@ -173,7 +173,10 @@ function IdeasFace(props: {
     return (
       <>
         {props.modeControls ? <ModeSwitch mode="ideas" options={MODES} zoom={base.zoom} /> : null}
-        <EmptyState title="No ideas yet" body="Each idea the run tries shows here." />
+        <EmptyState
+          title="No ideas yet"
+          body={base.emptyLabelsOnly ? '' : 'Each idea the run tries shows here.'}
+        />
       </>
     );
   }
@@ -325,6 +328,7 @@ function runFace(
         header: {},
         body: (
           <UsageView
+            emptyLabelsOnly={base.emptyLabelsOnly === true}
             records={usageRecords(state)}
             context={usageContext(base.model, base.names ?? NO_MODEL_NAMES)}
             controls={state.usage}

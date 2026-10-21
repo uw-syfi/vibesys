@@ -170,6 +170,7 @@ for (const kind of ['short', 'live', 'blobs'] as const)
         .first()
         .click();
       await expect(page.getByRole('region', {name: 'Implement', exact: true})).toBeVisible();
+      await expect(page.getByText('No transcript', {exact: true})).toBeVisible();
       await capture('step');
       await toggle.uncheck();
       await expect(page.getByRole('button', {name: 'Chat', exact: true})).toBeVisible();

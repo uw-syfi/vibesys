@@ -599,6 +599,7 @@ function RunScreenBody(props: {
   const {state, model, route, zoom, dispatch} = props;
   const names = props.modelNames ?? NO_MODEL_NAMES;
   const base: ViewBase = {
+    emptyLabelsOnly: state.readOnly === true,
     names,
     model,
     // The run's own start, read from the whole run: a scrubbed model before its first span has no
