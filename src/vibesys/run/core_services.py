@@ -78,6 +78,7 @@ if TYPE_CHECKING:
         AgentExecutionEnvironment,
         AgentExecutionLifecycleSink,
         LocalValidationEvents,
+        RunControlChannel,
         RunEnvironmentView,
         RuntimeWorkspaces,
         TrustedEvaluationPlan,
@@ -171,6 +172,7 @@ class CoreResources:
     """Hears each measurement stage start and end, for the host's event stream."""
     commit_observer: CommitObserver = field(default_factory=IgnoreCommits)
     """Hears each confirmed commit, for committed views and round events."""
+    control: RunControlChannel | None = None
     agent_lifecycle: AgentExecutionLifecycleSink = ignore_lifecycle
     """Receives the start and end of each provider turn, for the host's event stream."""
     evaluation_diagnostics: Callable[[str], None] = ignore_diagnostic
@@ -478,7 +480,9 @@ def turn_executor(client: AgentClientProtocol) -> AgentTurnExecutor:
 
 
 def _agent_sessions(resources: CoreResources) -> ClientAgentSessions:
-    reported = report_turns(resources.agent_turns, resources.agent_lifecycle)
+    reported = report_turns(
+        resources.agent_turns, resources.agent_lifecycle, control=resources.control
+    )
     return ClientAgentSessions(reported, resources.invocation_slot, threads=resources.threads)
 
 

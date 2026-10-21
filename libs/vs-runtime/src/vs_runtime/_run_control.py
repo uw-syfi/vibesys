@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, model_validator
 
+from vs_agent.api import AgentExecutionCancelledError
 from vs_core.api import PauseOwner, RunPause, StopMode, escalate_stop
 from vs_runtime._operator_control import (
     ControlAction,
@@ -512,6 +513,15 @@ class RunControlChannel(Protocol):
         """
         ...
 
+    def start_execution(self, started: Callable[[], None]) -> None:
+        """Publish a start atomically with the pause drain's execution boundary.
+
+        The callback only publishes the start, without waiting on execution.
+        A committed drain cancels prepared work with AgentExecutionCancelledError.
+        Automatic quota holds keep their existing capacity mechanism.
+        """
+        ...
+
     def wait_while_paused(self) -> None:
         """Park while paused and land a stop that releases the wait.
 
@@ -687,6 +697,7 @@ class RuntimeRunControlChannel:
         # A capacity wait core recorded before a restart: the next capacity stop takes it.
         self._capacity_standing = False
         self._stop_listeners: list[Callable[[], object]] = []
+        self._execution_closed = False
         self._now = threads.now
         self._capacity_turns = 0
         self._timed_turns = 0
@@ -698,6 +709,14 @@ class RuntimeRunControlChannel:
         # a quota pause armed one, and always ``None`` under the operator's hold.
         self._resume_at: float | None = None
         self._resumed_by = PauseWake.RESUMED
+
+    def start_execution(self, started: Callable[[], None]) -> None:
+        """Fence execution starts with the drain's committed control publication."""
+        with self._lock:
+            if self._execution_closed or self._stop_requested:
+                message = "pause drain cancelled preparation before execution"
+                raise AgentExecutionCancelledError(message)
+            started()
 
     @property
     def _paused(self) -> bool:
@@ -999,6 +1018,7 @@ class RuntimeRunControlChannel:
     def land_park(self) -> None:
         """Report core's accepted drain, after it is persisted."""
         with self._lock:
+            self._execution_closed = True
             self._emit(RunControlTransitionKind.PARK_REQUESTED)
 
     def notify_action_applied(self, summary: str) -> None:

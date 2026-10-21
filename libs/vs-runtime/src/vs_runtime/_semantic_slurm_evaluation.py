@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict
 
+from vs_agent.api import AgentExecutionCancelledError
 from vs_evaluation.api import (
     MAX_EVIDENCE_SUMMARY_CHARS,
     STAGE_OUTPUT_TAIL_CHARS,
@@ -74,6 +75,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from vs_runtime._measurement_progress import StageOutputOpener
+    from vs_runtime._run_control import RunControlChannel
     from vs_runtime.contracts import Checkout, MeasuredCheckouts
     from vs_sandbox.api.slurm import (
         SlurmExecutionPolicy,
@@ -157,6 +159,7 @@ class SemanticSlurmEvaluationExecutor:
         ledger_identity: tuple[str, str] | None = None,
         stage_output: StageOutputOpener | None = None,
         root_proof: WorkspaceRootProof | None = None,
+        control: RunControlChannel | None = None,
     ) -> None:
         """Bind external Slurm policy to semantic evaluation state.
 
@@ -173,6 +176,7 @@ class SemanticSlurmEvaluationExecutor:
         ``root_proof`` is the run's workspace-root probe; no evaluation is submitted
         before it proves the root, and none at all once it failed.
         """
+        self._control = control
         self._root_proof = root_proof
         self._stage_failure_text = stage_failure_text
         self._clock = clock
@@ -422,7 +426,15 @@ class SemanticSlurmEvaluationExecutor:
             ledger_candidate=candidate,
             stage_output=stage_output,
             root_proof=self._root_proof,
+            before_dispatch=self._admit_execution,
         )
+
+    def _admit_execution(self) -> None:
+        if self._control is not None:
+            try:
+                self._control.start_execution(lambda: None)
+            except AgentExecutionCancelledError as error:
+                raise ExecutorRejectedError(str(error)) from error
 
     def _supported_evidence_kinds(self) -> tuple[str, ...]:
         """Return the kinds this plan has a command for.

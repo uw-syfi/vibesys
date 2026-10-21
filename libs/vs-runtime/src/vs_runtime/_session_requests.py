@@ -38,6 +38,7 @@ from typing import TYPE_CHECKING, Protocol, assert_never
 from pydantic import BaseModel, ConfigDict, field_validator
 
 from vs_agent.api import (
+    AgentExecutionCancelledError,
     AgentOutputSchemaError,
     AgentSessionKey,
     AgentTurnRequest,
@@ -948,13 +949,22 @@ class RuntimeSessionRequests:
         """The dispatch's journal outcome, or the facts of a dispatch that ended without one."""
         try:
             return await self._outcome(bkey, binding, dispatch, call)
-        except _WithdrawnError:
+        except (AgentExecutionCancelledError, _WithdrawnError) as cancelled:
             # Cancelled before the provider call: no turn ran, so it wrote nothing to judge.
             try:
                 await self.settlement.settle(access_key)
             except AccessSettlementError as error:
                 return _unknown(str(error), binding.resource_id)
-            return _rejected(_WITHDRAWN, binding.resource_id)
+            return (
+                _Facts(
+                    ObservationStatus.CANCELLED,
+                    accepted=True,
+                    resource_id=binding.resource_id,
+                    diagnostic=str(cancelled),
+                )
+                if isinstance(cancelled, AgentExecutionCancelledError)
+                else _rejected(_WITHDRAWN, binding.resource_id)
+            )
         except InvocationConflictError as error:
             return _rejected(f"invocation conflicts with its journal: {error}", binding.resource_id)
         except SessionConfigurationError as error:

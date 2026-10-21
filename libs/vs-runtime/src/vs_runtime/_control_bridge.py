@@ -857,6 +857,9 @@ class RunControlBridge:
                 continue
             inbox = change.control_id is not None and change.control_id in self._submitted
             self._refuse(change, error.detail, request_id=change.control_id if inbox else None)
+        if core.run.status in (RunStatus.DRAINING, RunStatus.PARKED) and not self._park_landed:
+            self._park_landed = True
+            self._channel.land_park()
         held = {control.control_id for control in core.run.controls}
         self._settle_inbox(sorted(r for r in self._submitted if _identity(r) in held))
         for identity, change in self._asked.items():
@@ -866,9 +869,6 @@ class RunControlBridge:
         self._asked.clear()
         self._pause = run_pause(core.run)
         self._stands = capacity_wait_stands(core.run)
-        if core.run.status in (RunStatus.DRAINING, RunStatus.PARKED) and not self._park_landed:
-            self._park_landed = True
-            self._channel.land_park()
         if core.run.status != RunStatus.PAUSED:
             self._landed = False
         elif not running and not self._landed:

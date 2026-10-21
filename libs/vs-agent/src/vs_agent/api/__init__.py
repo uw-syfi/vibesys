@@ -129,6 +129,7 @@ from vs_agent.session_environment import (
     validate_env_names,
 )
 from vs_agent.session_errors import (
+    AgentExecutionCancelledError,
     InvocationConflictError,
     SessionConfigurationError,
     SessionPersistenceError,
@@ -212,6 +213,7 @@ __all__ = [
     "AgentEvent",
     "AgentEventKind",
     "AgentEventSink",
+    "AgentExecutionCancelledError",
     "AgentExecutionPolicy",
     "AgentInvocationRecord",
     "AgentInvocationState",

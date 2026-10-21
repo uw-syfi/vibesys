@@ -11,6 +11,7 @@ from pydantic import BaseModel
 
 from vs_agent.api import (
     AgentClient,
+    AgentExecutionCancelledError,
     AgentExecutionPolicy,
     AgentOutputSchemaError,
     AgentSessionSpec,
@@ -22,8 +23,9 @@ from vs_runtime.api.infrastructure import (
     AgentExecutionFinished,
     AgentExecutionStarted,
     AgentExecutionStatus,
+    create_run_control_channel,
 )
-from vs_runtime.api.testing import FakeAgentExecutionLifecycleSink
+from vs_runtime.api.testing import FakeAgentExecutionLifecycleSink, FakeRunControlEventSink
 from vs_sim.api.testing import ManualClock, SimThreads
 
 if TYPE_CHECKING:
@@ -132,3 +134,32 @@ def test_a_turns_start_names_the_provider_and_reasoning_effort_of_its_session(
     started, _ = lifecycle.events
     assert isinstance(started, AgentExecutionStarted)
     assert (started.provider, started.reasoning_effort) == ("fake", effort)
+
+
+@given(starts=st.lists(st.booleans(), min_size=1, max_size=30))
+def test_no_execution_starts_after_applied_pause_drain(
+    tmp_path_factory: pytest.TempPathFactory, starts: list[bool]
+) -> None:
+    control = create_run_control_channel(FakeRunControlEventSink(), threads=SimThreads())
+    lifecycle = FakeAgentExecutionLifecycleSink()
+    provider = FakeProvider(answer={"value": 1}, threads=SimThreads())
+    client = report_turns(
+        AgentClient(provider, clock=ManualClock(), threads=SimThreads()),
+        lifecycle,
+        control=control,
+    )
+    workspace = tmp_path_factory.mktemp("pause-drain")
+    draining = False
+    for index, drain in enumerate(starts):
+        if drain:
+            control.land_park()
+            draining = True
+        turn = AgentTurnRequest(message="m", output_schema=_Reply, invocation_id=str(index))
+        before = len(lifecycle.events)
+        if draining:
+            with pytest.raises(AgentExecutionCancelledError, match="pause drain"):
+                client.run(session_spec=_spec(workspace), turn=turn)
+            assert len(lifecycle.events) == before
+        else:
+            client.run(session_spec=_spec(workspace), turn=turn)
+            assert len(lifecycle.events) == before + 2

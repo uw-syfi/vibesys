@@ -57,6 +57,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from vs_runtime.api.core import StageOutputOpener
+    from vs_runtime.api.infrastructure import RunControlChannel
     from vs_runtime.contracts import CandidateWorkspace
     from vs_sandbox.api.slurm import SlurmLedgerAttachment
     from vs_sim.api import Sleeper
@@ -200,6 +201,7 @@ async def build_stack(  # noqa: PLR0913  # lint-waiver: LW-455560 [PLR0913]; eac
     policy: SlurmExecutionPolicy | None = None,
     benchmark_contract: TrustedBenchmarkContract | None = None,
     root_proof: WorkspaceRootProof | None = None,
+    control: RunControlChannel | None = None,
 ) -> Stack:
     """Build the semantic Slurm executor over ``cluster``, reusing durable state under root.
 
@@ -247,6 +249,7 @@ async def build_stack(  # noqa: PLR0913  # lint-waiver: LW-455560 [PLR0913]; eac
         stage_output=stage_output,
         ledger=ledger,
         root_proof=root_proof,
+        control=control,
     )
     return Stack(executor, cluster, snapshot, workspaces)
 

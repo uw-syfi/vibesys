@@ -13,6 +13,7 @@ from contextlib import nullcontext
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from vs_agent.api import AgentExecutionCancelledError
 from vs_evaluation.api import (
     MAX_EVIDENCE_SUMMARY_CHARS,
     AvailabilitySnapshot,
@@ -48,6 +49,7 @@ if TYPE_CHECKING:
     from contextlib import AbstractContextManager
 
     from vs_runtime._measurement_progress import StageOutputOpener
+    from vs_runtime._run_control import RunControlChannel
     from vs_runtime.contracts import CandidateWorkspace, Evaluation, Workspace, Workspaces
     from vs_sim.api import Clock, OutputSink
 
@@ -78,12 +80,14 @@ class PollingEvaluationExecutor:
         *,
         clock: Clock,
         stage_output: StageOutputOpener | None = None,
+        control: RunControlChannel | None = None,
     ) -> None:
         """Evaluate through ``evaluation`` in candidate workspaces from ``workspaces``.
 
         ``clock`` stamps availability observations. ``stage_output`` opens the stream
         each stage's command writes its raw output to while it runs; ``None`` discards it.
         """
+        self._control = control
         self._clock = clock
         self._stage_output = stage_output
         self._evaluation = evaluation
@@ -164,6 +168,8 @@ class PollingEvaluationExecutor:
         operator_failure: str | None = None
         try:
             workspace = await self._workspaces.create_measured_candidate(first.snapshot)
+            if self._control is not None:
+                self._control.start_execution(lambda: None)
             self._publish(
                 handle_id,
                 ExecutorObservation(
@@ -237,7 +243,7 @@ class PollingEvaluationExecutor:
                     operator_failure=operator_failure,
                 ),
             )
-        except asyncio.CancelledError:
+        except (asyncio.CancelledError, AgentExecutionCancelledError):
             self._publish(
                 handle_id,
                 ExecutorObservation(
