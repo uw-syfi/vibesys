@@ -233,3 +233,12 @@ jobs = ["python", "real_tiers"]
 native_languages = []
 native_targets = []
 pnpm_packages = []
+
+[[cases]]
+name = "static pure facade loaders select Python checks"
+paths = ["libs/vs-core/src/vs_core/api/_exports.py"]
+jobs = ["python"]
+[cases.collections]
+native_languages = []
+native_targets = []
+pnpm_packages = []
