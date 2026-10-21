@@ -8,7 +8,7 @@
  * while the panes stay as they were is dead. The comparison reads the accessibility tree once the
  * screen has settled (`settle.ts`), so it never waits for a duration.
  */
-import type {Locator, Page} from '@playwright/test';
+import type {BrowserContext, Locator, Page} from '@playwright/test';
 import {settled} from './settle.js';
 
 /** The roles the check uses, and how it uses each. */
@@ -90,11 +90,7 @@ async function use(scope: Locator, control: Control): Promise<void> {
 }
 
 /** `null` when using `control` changes the screen; else the sentence saying it does nothing. */
-export async function inertness(
-  page: Page,
-  scope: Locator,
-  control: Control,
-): Promise<string | null> {
+async function inertness(page: Page, scope: Locator, control: Control): Promise<string | null> {
   await settled(page);
   const before = await content(page);
   await use(scope, control);
@@ -102,4 +98,32 @@ export async function inertness(
   return (await content(page)) === before
     ? `${describeControl(control)} changes nothing on the screen`
     : null;
+}
+
+/** Fresh pages for the audit, with at most two renderers alive per worker. */
+export async function checkControls(
+  context: BrowserContext,
+  controls: readonly Control[],
+  reach: (page: Page) => Promise<void>,
+  scope: (page: Page) => Locator,
+): Promise<(string | null)[]> {
+  const found: (string | null)[] = [];
+  const pending = controls.entries();
+  const outcomes = await Promise.allSettled(
+    Array.from({length: Math.min(2, controls.length)}, async () => {
+      for (const [index, control] of pending) {
+        const page = await context.newPage();
+        try {
+          await reach(page);
+          found[index] = await inertness(page, scope(page), control);
+        } finally {
+          await page.close();
+        }
+      }
+    }),
+  );
+  for (const outcome of outcomes) {
+    if (outcome.status === 'rejected') throw outcome.reason;
+  }
+  return found;
 }

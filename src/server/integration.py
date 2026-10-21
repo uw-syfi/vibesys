@@ -459,6 +459,10 @@ class RunIntegrationAdapter:
 
     def project_event(self, event: CoreEvent) -> None:
         """Project one core event onto server tracking state and the wire journal."""
+        if event.type is CoreEventType.INTENT_STATE:
+            # The additive run.log owns outcomes; legacy control events still
+            # update the existing frontend through _CONTROL_EVENT_TYPES.
+            return
         if event.type in _CONTROL_EVENT_TYPES:
             self._project_control_event(event)
             return

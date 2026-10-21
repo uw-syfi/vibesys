@@ -16,6 +16,14 @@ class MappingState:
     header_written: bool = False
     epoch_header: bytes | None = None
     origin: float | None = None
+    clock: float = 0
+    clock_offset: float = 0
+    tree_hash: str = ""
+    dirty: bool = False
+    epoch_ended: bool = False
+    native_intents: bool = False
+    wall_span_clock: bool = False
+    clock_epochs: tuple[tuple[float, float], ...] = ()
     spans: tuple[tuple[str, bytes], ...] = ()
     invocations: tuple[tuple[str, str], ...] = ()
     streams: tuple[tuple[str, int], ...] = ()

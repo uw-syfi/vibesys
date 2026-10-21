@@ -79,7 +79,7 @@ class CoreRunRefusedError(RuntimeError):
         )
 
 
-class _SteerTexts:
+class StoredSteerArtifacts:
     """Where steer text lives: the run's content-addressed artifact store.
 
     A steer control carries only the digest of its text, so the text must be readable by
@@ -87,6 +87,7 @@ class _SteerTexts:
     """
 
     def __init__(self, artifacts: ArtifactStore) -> None:
+        """Store steer text in the run's content-addressed artifacts."""
         self._artifacts = artifacts
 
     def put(self, ref: ArtifactRef, text: str) -> None:
@@ -167,10 +168,14 @@ async def drive_core_run(host: CoreHost, integration: LocalRunIntegration) -> Ru
     delivery = JournalPublicationDelivery(services.publications, services.bindings.registry)
     controls = RunControlBridge(
         integration.control,
-        _SteerTexts(services.artifacts),
+        StoredSteerArtifacts(services.artifacts),
         inbox=None
         if services.control_inbox is None
-        else OperatorInbox(services.control_inbox, integration.run_control),
+        else OperatorInbox(
+            services.control_inbox,
+            integration.run_control,
+            integration.events,
+        ),
         control=integration.run_control,
         # A process that opens an existing run is the operator's explicit resume of it.
         lifts_standing_stop=True,
@@ -220,10 +225,15 @@ async def drive_core_run(host: CoreHost, integration: LocalRunIntegration) -> Ru
                 # A crashed process cannot reach this line, so its restart waits out the
                 # lease (see ``start_core_awaiting_lease``); any return or raise here frees it.
                 shell.release_lease(now_at=services.clock.now())
-                integration.events.emit(CoreEventType.RUN_ENDING, data=run_ending(shell))
+                _record_ending(shell, integration)
     if outcome.refusal is not None:
         raise CoreRunRefusedError(services.run_id, outcome.refusal)
     return _run_end(outcome.result, shell, integration.environment_failure.reason)
+
+
+def _record_ending(shell: CoreRuntime, integration: LocalRunIntegration) -> None:
+    if shell.record.envelope.core.run.status != CoreRunStatus.PARKED:
+        integration.events.emit(CoreEventType.RUN_ENDING, data=run_ending(shell))
 
 
 def _run_end(
@@ -377,6 +387,7 @@ def _adopted_candidate(shell: CoreRuntime) -> str | None:
 __all__ = [
     "CoreRunRefusedError",
     "RunEnd",
+    "StoredSteerArtifacts",
     "drive_core_run",
     "ensure_resumable",
 ]

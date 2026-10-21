@@ -10,7 +10,8 @@ and core records every control that has a ``control_id``, from either, under the
 ``op-<control id>`` (for an inbox request, also its name in the inbox). The bridge settles an
 inbox request only once core holds that identity, so a request is applied exactly once across
 a crash, a resume, or a resend through the other ingress: a request core already holds is
-settled, one it does not is applied again. A control without an id (a session's
+settled. A committed intent decision also restores its inbox marker before any reapplication.
+A control without an id (a session's
 ``RunControl`` call) is recorded as ``control-<n>``.
 """
 
@@ -572,6 +573,7 @@ class RunControlBridge:
 
         Raises ``ProjectStateError`` when the inbox cannot be marked.
         """
+        self._report_outcome(request_id, reason)
         if self._inbox is not None and self._inbox.requests.reject(request_id, reason):
             # A request rejected already keeps its first reason, which it was reported with.
             self._channel.notify_request_rejected(request_id, reason)
@@ -626,6 +628,8 @@ class RunControlBridge:
         """
         held = _held(core)
         for entry in inbox.requests.pending():
+            if self._settle_decided(inbox, entry.request_id):
+                continue
             if self._settle_held(entry, held):
                 continue
             if entry.request_id not in self._submitted:
@@ -634,6 +638,10 @@ class RunControlBridge:
                 reason = self._apply(inbox, entry, core, now_at, events)
                 if reason is None:
                     self._submitted.add(entry.request_id)
+                    if inbox.journal is not None:
+                        # Commit this decision before judging a later request, so
+                        # a later refusal cannot overtake its applied outcome.
+                        break
                 else:
                     self._reject(entry.request_id, reason)
 
@@ -696,7 +704,9 @@ class RunControlBridge:
             return
         try:
             for entry in inbox.requests.pending():
-                if not self._settle_held(entry, _held(core)):
+                if not self._settle_decided(inbox, entry.request_id) and not self._settle_held(
+                    entry, _held(core)
+                ):
                     self._reject(entry.request_id, ended_unapplied(ending))
         except ProjectStateError as error:
             _LOG.warning("the run's control inbox cannot be set aside at its end: %s", error)
@@ -716,6 +726,7 @@ class RunControlBridge:
             return False
         if _is_held(entry, control):
             if self._inbox is not None:
+                self._report_outcome(entry.request_id, None)
                 self._inbox.requests.settle(entry.request_id)
         else:
             self._reject(entry.request_id, "its control_id already named a different control")
@@ -869,10 +880,40 @@ class RunControlBridge:
         if self._inbox is None:
             return
         try:
-            for request_id in request_ids:
-                self._inbox.requests.settle(request_id)
+            for entry in self._inbox.requests.pending():
+                if entry.request_id in request_ids:
+                    self._report_outcome(entry.request_id, None)
+                    self._inbox.requests.settle(entry.request_id)
         except ProjectStateError as error:
             _LOG.warning("the run's control inbox cannot be marked; its requests wait: %s", error)
+
+    def _settle_decided(self, inbox: OperatorInbox, request_id: str) -> bool:
+        decision = None if inbox.journal is None else inbox.journal.intent_decision(request_id)
+        if decision is None:
+            return False
+        applied, reason = decision
+        if applied:
+            inbox.requests.settle(request_id)
+        elif reason is not None:
+            self._reject(request_id, reason)
+        else:
+            message = "a recorded refusal must carry its reason"
+            raise ValueError(message)
+        return True
+
+    def _report_outcome(self, request_id: str, reason: str | None) -> None:
+        if self._inbox is None or self._inbox.journal is None:
+            return
+        entry = next(
+            (e for e in self._inbox.requests.pending() if e.request_id == request_id), None
+        )
+        if entry is None:
+            return
+        request = _parsed(entry)
+        if not isinstance(request, Unreadable):
+            self._inbox.journal.intent_outcome(
+                request.model_copy(update={"control_id": request_id}), reason
+            )
 
     def _event(self, core: CoreState, now_at: float, change: _Change) -> RunControlEvent | None:
         """The event recording one control, or None when core already holds that control.
@@ -906,12 +947,25 @@ class RunControlBridge:
         return RunControlEvent(control=control, now_at=now_at)
 
 
+class IntentJournal(Protocol):
+    """Persist and recover decisions before the inbox acknowledges them."""
+
+    def intent_decision(self, control_id: str) -> tuple[bool, str | None] | None:
+        """Return (applied, reason), or None; a refusal must carry its reason."""
+        ...
+
+    def intent_outcome(self, request: ControlRequest, reason: str | None) -> None:
+        """Persist one decision; None means applied, otherwise the refusal reason."""
+        ...
+
+
 @dataclass(frozen=True)
 class OperatorInbox:
     """A run's durable control inbox and the run's controls it is applied through."""
 
     requests: ControlInbox
     control: ChannelRunControl
+    journal: IntentJournal | None = None
 
 
 def _held(core: CoreState) -> dict[ControlId, ControlInput]:

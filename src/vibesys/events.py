@@ -47,6 +47,8 @@ JsonResultPayload = _agent_api.JsonResultPayload
 class CoreEventType(StrEnum):
     """Closed set of observations produced by a core run."""
 
+    INTENT_STATE = "intent_state"
+
     RUN_STARTED = "run_started"
     RUN_STARTUP_PROGRESS = "run_startup_progress"
     WORKSPACE_ROOT_PROBE = "workspace_root_probe"
@@ -200,6 +202,13 @@ class SteerDeliveryData(EventPayload):
 
     kind: Literal["steer_delivery"] = "steer_delivery"
     delivery: SteerDelivery
+
+
+class IntentStateData(EventPayload):
+    """A generated IntentState's JSON inside the transitional journal envelope."""
+
+    kind: Literal["intent_state"] = "intent_state"
+    state_json: str
 
 
 class InvocationStartedData(EventPayload):
@@ -1102,7 +1111,8 @@ class SpanEndedData(_SpanData):
 
 
 CoreEventData = Annotated[
-    SteerDeliveryData
+    IntentStateData
+    | SteerDeliveryData
     | InvocationStartedData
     | InvocationFinishedData
     | AgentExecutionStartedData

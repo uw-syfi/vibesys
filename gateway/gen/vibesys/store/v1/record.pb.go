@@ -35,6 +35,8 @@ type Record struct {
 	Seq   uint64                 `protobuf:"varint,1,opt,name=seq,proto3" json:"seq,omitempty"`
 	At    *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=at,proto3" json:"at,omitempty"`
 	Epoch uint32                 `protobuf:"varint,3,opt,name=epoch,proto3" json:"epoch,omitempty"`
+	// Monotone run seconds, excluding downtime between epochs. Absent in older logs.
+	Clock *float64 `protobuf:"fixed64,18,opt,name=clock,proto3,oneof" json:"clock,omitempty"`
 	// Types that are valid to be assigned to Body:
 	//
 	//	*Record_EpochStarted
@@ -98,6 +100,13 @@ func (x *Record) GetAt() *timestamppb.Timestamp {
 func (x *Record) GetEpoch() uint32 {
 	if x != nil {
 		return x.Epoch
+	}
+	return 0
+}
+
+func (x *Record) GetClock() float64 {
+	if x != nil && x.Clock != nil {
+		return *x.Clock
 	}
 	return 0
 }
@@ -441,11 +450,12 @@ var File_vibesys_store_v1_record_proto protoreflect.FileDescriptor
 
 const file_vibesys_store_v1_record_proto_rawDesc = "" +
 	"\n" +
-	"\x1dvibesys/store/v1/record.proto\x12\x10vibesys.store.v1\x1a\x1bbuf/validate/validate.proto\x1a google/protobuf/descriptor.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1evibesys/store/v1/content.proto\x1a\x1cvibesys/store/v1/epoch.proto\x1a\x1dvibesys/store/v1/intent.proto\x1a vibesys/store/v1/lifecycle.proto\x1a\x1dvibesys/store/v1/notice.proto\x1a\x1bvibesys/store/v1/span.proto\"\x87\t\n" +
+	"\x1dvibesys/store/v1/record.proto\x12\x10vibesys.store.v1\x1a\x1bbuf/validate/validate.proto\x1a google/protobuf/descriptor.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1evibesys/store/v1/content.proto\x1a\x1cvibesys/store/v1/epoch.proto\x1a\x1dvibesys/store/v1/intent.proto\x1a vibesys/store/v1/lifecycle.proto\x1a\x1dvibesys/store/v1/notice.proto\x1a\x1bvibesys/store/v1/span.proto\"\xbe\t\n" +
 	"\x06Record\x12\x10\n" +
 	"\x03seq\x18\x01 \x01(\x04R\x03seq\x12*\n" +
 	"\x02at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\x02at\x12\x14\n" +
-	"\x05epoch\x18\x03 \x01(\rR\x05epoch\x12E\n" +
+	"\x05epoch\x18\x03 \x01(\rR\x05epoch\x12+\n" +
+	"\x05clock\x18\x12 \x01(\x01B\x10\xbaH\r\x12\v@\x01)\x00\x00\x00\x00\x00\x00\x00\x00H\x01R\x05clock\x88\x01\x01\x12E\n" +
 	"\repoch_started\x18\x04 \x01(\v2\x1e.vibesys.store.v1.EpochStartedH\x00R\fepochStarted\x12F\n" +
 	"\flegacy_event\x18\x05 \x01(\v2\x1d.vibesys.store.v1.LegacyEventB\x02\x18\x01H\x00R\vlegacyEvent\x12;\n" +
 	"\tlifecycle\x18\v \x01(\v2\x1b.vibesys.store.v1.LifecycleH\x00R\tlifecycle\x122\n" +
@@ -457,7 +467,8 @@ const file_vibesys_store_v1_record_proto_rawDesc = "" +
 	"\x06notice\x18\x11 \x01(\v2\x18.vibesys.store.v1.NoticeH\x00R\x06notice:\x86\x04\xbaH\x82\x04\x1a\x86\x02\n" +
 	"\x0frecord.identity\x120seq, epoch and at are required for typed records\x1a\xc0\x01!(has(this.lifecycle) || has(this.span) || has(this.metric) || has(this.stream) || has(this.blob) || has(this.intent) || has(this.notice)) || (this.seq > 0u && this.epoch > 0u && has(this.at))\x1a\xf6\x01\n" +
 	"\x14record.epoch_started\x12Vepoch_started epoch must match epoch and seq and at must be present for a typed header\x1a\x85\x01!has(this.epoch_started) || !has(this.epoch_started.run) || (this.epoch == this.epoch_started.epoch && this.seq > 0u && has(this.at))B\r\n" +
-	"\x04body\x12\x05\xbaH\x02\b\x01\"\xd5\x0e\n" +
+	"\x04body\x12\x05\xbaH\x02\b\x01B\b\n" +
+	"\x06_clock\"\xd5\x0e\n" +
 	"\fEpochStarted\x12\x15\n" +
 	"\x06run_id\x18\x01 \x01(\tR\x05runId\x12\x14\n" +
 	"\x05epoch\x18\x02 \x01(\rR\x05epoch\x12\x1b\n" +

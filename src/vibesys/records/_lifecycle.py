@@ -44,8 +44,9 @@ def header(projection: Projection, run: p.RunDescription | None = None) -> None:
         p.EpochStarted(
             run_id=projection.state.run_id,
             epoch=projection.state.epoch,
-            tree_hash="",
-            provenance_known=False,
+            tree_hash=projection.state.tree_hash,
+            dirty=projection.state.dirty,
+            provenance_known=bool(projection.state.tree_hash),
             vibesys_version=projection.state.vibesys_version,
             api_schema_hash=p.API_SCHEMA_HASH,
             store_schema_hash=p.STORE_SCHEMA_HASH,
@@ -181,6 +182,8 @@ def ended(projection: Projection) -> None:
                 )
             ),
         )
+    elif event.type is e.CoreEventType.STOPPED:
+        ending.outcome = p.Outcome.STOPPED
     else:
         ending.outcome = p.Outcome.FINISHED
     projection.emit("lifecycle", p.Lifecycle(state=p.Oneof("ended", ending)))
@@ -214,5 +217,6 @@ MAPPERS = {
     e.CoreEventType.RUN_FINISHED: ended,
     e.CoreEventType.RUN_FAILED: ended,
     e.CoreEventType.RUN_ENDING: ended,
+    e.CoreEventType.STOPPED: ended,
     e.CoreEventType.FRAMEWORK_WARNING: warning,
 }

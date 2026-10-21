@@ -220,6 +220,14 @@ def start_process() -> None:
 
 def dispatch(argv: list[str], runs: Runs | None = None) -> None:
     """Parse and run one headless VibeSys invocation, on ``runs`` or the default launcher."""
+    if argv and argv[0] == "relaunch":
+        argv = argv[1:]
+        if _option_from_argv(argv, "--resume") is None:
+            _configuration_error(
+                "relaunch requires --resume RUN",
+                code="relaunch_requires_run",
+                stage="resume_resolution",
+            )
     if argv and argv[0] == "validate":
         _run_validate(argv[1:])
         return

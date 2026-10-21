@@ -37,7 +37,7 @@ read path and journal projection from the native core and control work still to 
 | `Skeleton`, `GetBlobs`, `TailStream`, `WatchRuns`; new Run screen | RPCs, client skeleton/cache and opt-in raw record panel built; complete native Run screen remains unbuilt | 2 |
 | Conversion of existing JSONL runs and `store.json` envelopes | typed journal conversion and bulk project/host-index conversion built, including blobs, final keyframes, head publication and repair; pre-trace and unsupported journals are reported as skipped; core envelopes remain the resume authority until phase 3 | 2 |
 | Core state as generated types, `state.pb`, native `run.log` writes | unbuilt; typed journal projection does not replace native core commits | 3 |
-| Intents as records (`IntentState`), pause/park, relaunch epochs | schemas built; native execution and recovery remain unbuilt | 3 |
+| Intents as records (`IntentState`), pause/park, relaunch epochs | inbox outcomes and relaunch epochs built over the current saved-state resume path; park and native state recovery remain unbuilt | 3 |
 | Chat sessions as processes with their own log; `HostCall` | unbuilt | 3 |
 | Generated frozen value classes from `.proto` (our own protoc plugin) | prototype only | 3 |
 | Control inbox (files, ordered, durable, idempotent by request id) | built | |
@@ -87,23 +87,35 @@ sequence, so the history never shows something core does not hold. After each sw
 `committed_seq` in `run.head`, and the gateway's `Tail` and `Skeleton` serve only records up to it,
 so a viewer never sees a record that recovery would drop. The phase 1 converter has no `state.pb`
 and recovers every complete surviving record, syncing that prefix before publishing
-it. Its writer groups ordinary appends: the first pending append schedules a commit
-on the owning event loop after 100 ms, using the `vs-sim` clock/sleeper abstraction.
-The deadline is not reset by later appends. A commit fsyncs the log once, writes any
-due keyframe, then atomically publishes `run.head` with the new `committed_seq`.
-Lifecycle changes, epoch headers and close commit immediately. The 100 ms interval
-keeps live tailing responsive while amortizing sync costs across bursts; scheduling
-and storage stalls can delay completion beyond that interval.
+it. Its writer groups ordinary appends: the first pending append wakes a dedicated
+committer with a deadline 100 ms after the batch handoff, using the injected clock
+and thread condition. Later appends do not reset that deadline. The committer
+swaps out the pending batch under the append lock, then fsyncs the log, folds its
+records, writes boundary and due keyframes and atomically publishes `run.head` outside
+that lock. Ordinary appends never wait for fsync or projection publication.
+Lifecycle changes, epoch headers and close request an immediate commit and wait
+for durability.
+
+The deadline does not depend on the owner event loop being free. Subject to
+committer scheduling, an append handed off without a commit in flight becomes
+durable within 100 ms plus its commit duration. An append handed off during a
+commit becomes durable within the greater of 100 ms and the remaining in-flight
+commit time, plus its own commit duration. Thus a storage stall longer than the
+interval can contribute to two successive batches' lag; there is no fixed
+completion bound without a storage-latency bound. Encoding and stream-write time
+before the handoff are outside this bound.
 
 `FileRunLogWriter` takes the run's clock and threads interfaces explicitly;
 entrypoints supply the real implementations and tests supply simulated ones.
-`FileRunLogWriter.append` retains its signature and now acknowledges a write, not
-durability. `commit()` is the explicit durability boundary, including for an epoch
-end not represented by a lifecycle record. `RunLogTee.commit()` forwards that
+`FileRunLogWriter.append` retains its signature and acknowledges a write; ordinary
+records await a later durability fence. `commit()` is the explicit durability
+boundary, including for an epoch end not represented by a lifecycle record.
+`RunLogTee.commit()` forwards that
 boundary. The tee takes ownership of a configured `FileRunLogWriter`, so the
-live journal can supply its run's clock, loop and locks even when preparation
-runs off-loop. Synchronous offline producers have no event loop and must commit
-explicitly or close; close commits the final suffix and checkpoints the epoch. Keyframes are written only
+live journal can supply its run's clock and threads even when preparation
+runs off-loop. Offline producers use the same committer. Close drains the final
+suffix, checkpoints the epoch and joins the committer before releasing ownership.
+Keyframes are written only
 at commit time, at lifecycle/epoch boundaries or when the committed batch crosses
 the record-count checkpoint threshold. Legacy-only logs still have no native
 headline and retain their existing unfenced gateway compatibility path. The
@@ -159,6 +171,15 @@ then its `EpochStarted`, so the log holds the fact and the gateway's inference (
 `Ended` and no lock holder) is only a live hint. The run clock is monotone across epochs and
 frozen while parked; it resumes from `state.pb`. `Record.at` carries wall time. The timeline marks
 epoch boundaries with wall-time labels and collapses parked gaps.
+
+The current relaunch implementation uses the existing saved core envelope until the generated
+state migration supplies `state.pb`. The plain `vibesys.api.relaunch` function and
+`vibesys relaunch --resume <run-reference>` share that resume path. The journal projection writes
+one outcome per inbox request before its acknowledgement, retaining the legacy frontend's
+control events. Relaunch restores missing inbox markers from recorded decisions before judging
+pending requests again. New records carry `Record.clock`, excluding downtime; older records without it
+derive elapsed time within each epoch from their wall timestamps. Span times retain the epoch
+in which each transition occurred, including spans that remain open across a relaunch.
 
 **Chat sessions** belong to the run and outlive relaunches as data. They are separate processes
 with their own `session.log` and inbox, started on demand and exiting when idle or at park. The

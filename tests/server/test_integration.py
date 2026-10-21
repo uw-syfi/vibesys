@@ -46,6 +46,7 @@ from vibesys.events import (
     GateKind,
     InputMeasurementFailedData,
     InputMeasurementFailureKind,
+    IntentStateData,
     InvocationFinishedData,
     PhaseData,
     QuotaPausedData,
@@ -281,6 +282,19 @@ def test_a_quota_pause_reaches_the_wire_journal_under_the_active_execution(
     assert paused.agent_kind == "implementer"
     assert paused.data is not None
     assert paused.data.kind == "quota_paused"
+
+
+def test_native_intent_outcomes_do_not_enter_the_legacy_wire_journal(tmp_path: Path) -> None:
+    parts = build_server_parts(tmp_path)
+    before = parts.journal.read()
+    parts.core_events.emit(
+        CoreEventType.INTENT_STATE,
+        data=IntentStateData(
+            state_json='{"controlId":"pause-a","action":"INTENT_ACTION_PAUSE","step":"INTENT_STEP_APPLIED"}'
+        ),
+    )
+    assert parts.journal.read() == before
+    parts.integration.close()
 
 
 def test_framework_events_bypass_execution_stamping_and_lift_warnings(tmp_path: Path) -> None:

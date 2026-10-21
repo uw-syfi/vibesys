@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 
 from headless import printable
 from headless import run as render_run
-from vibesys.api import RunStopped, StopMode
+from vibesys.api import RunStopped, StopMode, relaunch
 from vs_sim.api import Signals
 
 if TYPE_CHECKING:
@@ -161,7 +161,7 @@ def run_headless(request: RunRequest, runs: Runs, signals: SignalSource) -> RunR
     """
 
     async def execute() -> RunResult:
-        handle = runs.resume(request) if request.resume is not None else runs.start(request)
+        handle = relaunch(request, runs) if request.resume is not None else runs.start(request)
         return await supervise(handle, render_run(handle), signals=signals)
 
     try:
