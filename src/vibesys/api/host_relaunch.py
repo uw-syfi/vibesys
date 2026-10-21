@@ -74,6 +74,7 @@ def _launch(
                 "--resume",
                 request.run_id,
                 "--detach",
+                "--project",
                 request.project_root,
             ),
             cwd=Path(request.project_root),

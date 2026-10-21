@@ -675,7 +675,9 @@ def _assert_headless_stream(
     """
     kinds = [event.type for event in events]
     assert set(kinds) >= _REQUIRED_KINDS, sorted(k.value for k in _REQUIRED_KINDS - set(kinds))
-    assert kinds[0] is CoreEventType.RUN_STARTED
+    assert kinds.count(CoreEventType.RUN_STARTED) == 1
+    started = kinds.index(CoreEventType.RUN_STARTED)
+    assert CoreEventType.RUN_STARTUP_PROGRESS not in kinds[started + 1 :]
     assert kinds[-1] is CoreEventType.RUN_FINISHED
     sequences = [event.sequence for event in events]
     assert sequences == sorted(set(sequences)), "event sequence numbers must increase"

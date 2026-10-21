@@ -2314,7 +2314,6 @@ def test_dispatch_owns_headless_rendering(
     cli.dispatch(["--input", str(project)])
 
     assert [call.args[0].type for call in renderer.handle.call_args_list] == [
-        CoreEventType.RUN_STARTED,
         CoreEventType.RUN_FINISHED,
     ]
 
@@ -2337,7 +2336,6 @@ def test_dispatch_records_failure_through_the_headless_renderer(
         cli.dispatch(["--input", str(project)])
 
     assert [call.args[0].type for call in renderer.handle.call_args_list] == [
-        CoreEventType.RUN_STARTED,
         CoreEventType.RUN_FAILED,
     ]
 

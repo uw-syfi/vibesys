@@ -141,6 +141,8 @@ def content(projection: Projection, span: str, role: str, text: str) -> p.Transc
 
 def transcript(projection: Projection) -> None:
     data = projection.event.data
+    if isinstance(data, e.AgentOutputChunkData) and data.channel == "tool":
+        return  # OQ13: typed tool_call/tool_result entries own tool content.
     span_id = owner(projection)
     if span_id == "run" and isinstance(
         data, (e.AgentOutputChunkData, e.ToolCallData, e.ToolResultData)
@@ -161,8 +163,6 @@ def transcript(projection: Projection) -> None:
         )
         return
     if isinstance(data, e.AgentOutputChunkData):
-        if data.channel == "tool":
-            return  # OQ13: typed tool_call/tool_result entries own tool content.
         entry = p.TranscriptEntry(
             entry=p.Oneof(
                 "text",

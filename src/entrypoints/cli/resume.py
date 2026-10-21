@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, cast
@@ -246,12 +247,6 @@ def _recorded_cli_selection(orchestration_id: str) -> tuple[str, str | None]:
         )
 
 
-def reader_loop_kind(project_root: Path, run_id: str) -> str:
-    """The parser that restores this saved run's settings without changing its checkout."""
-    manifest = Project.open(project_root).state.load_run(run_id)
-    return _recorded_cli_selection(manifest.orchestration.id)[0]
-
-
 def _restore_descriptor_options(
     args: argparse.Namespace, manifest: OrchestrationRunManifest, *, loop_kind: str
 ) -> None:
@@ -336,17 +331,17 @@ def _requested_resume(args: argparse.Namespace, *, direct: bool) -> str | None:
     return None if args.run_id is None else str(args.run_id)
 
 
-def _resume_manifest(project: Project, run_id: str, *, read_only: bool) -> OrchestrationRunManifest:
-    if not read_only:
-        _switch_project_resume_branch(project.root, run_id)
-    return project.state.load_run(run_id)
+@dataclass(frozen=True)
+class _ResumeSelection:
+    project_root: Path
+    run_id: str
+    manifest: OrchestrationRunManifest
 
 
-def _resolve_resume_args(
-    args: argparse.Namespace, *, loop_kind: str, read_only: bool = False
-) -> None:
+def _load_resume_selection(args: argparse.Namespace) -> _ResumeSelection | None:
+    """Read saved identity and settings once, before choosing a strategy parser."""
     if args.resume is None:
-        return
+        return None
     if args.repo is not None:
         _configuration_error(
             "--repo creates a remote for a new experiment and cannot be combined with --resume",
@@ -370,7 +365,9 @@ def _resolve_resume_args(
         run_id = _requested_resume(args, direct=direct)
         if run_id is None:
             run_id = store.current_run_id() or _latest_run_id(project)
-        manifest = _resume_manifest(project, run_id, read_only=read_only)
+        events = NullGitTrackerEvents()
+        repository = open_git_repository(project_root, git=Git(OsProcesses()), faults=events)
+        manifest = GitRunHistory(project, repository).manifest(run_id)
     except ProjectStateError as exc:
         message = str(exc)
         _configuration_error(
@@ -389,9 +386,22 @@ def _resolve_resume_args(
             stage="resume_resolution",
         )
     validate_descriptor(manifest.orchestration)
-    # Refuse a run that cannot go on where its reference is resolved, so every entrypoint (the
-    # detached launcher included, which spawns its server before any request is built) says why.
+    return _ResumeSelection(project_root, run_id, manifest)
+
+
+def _resolve_resume_args(
+    args: argparse.Namespace,
+    *,
+    loop_kind: str,
+    selection: _ResumeSelection | None = None,
+    read_only: bool = False,
+) -> None:
+    selected = selection or _load_resume_selection(args)
+    if selected is None:
+        return
+    project_root, run_id, manifest = selected.project_root, selected.run_id, selected.manifest
     if not read_only:
+        _switch_project_resume_branch(project_root, run_id)
         ensure_resumable(project_root, run_id)
     args.resume = run_id
     args.run_id = run_id
