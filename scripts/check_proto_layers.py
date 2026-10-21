@@ -15,8 +15,6 @@ if TYPE_CHECKING:
     from collections.abc import Mapping
 from pathlib import Path
 
-_PROTO_IMPORT = re.compile(r'\bimport\s+(?:(?:public|weak)\s+)?"([^"]+)"\s*;')
-_PACKAGE = re.compile(r"\bpackage\s+([a-zA-Z0-9_.]+)\s*;")
 _STRATEGY_BINDING = re.compile(r"(?:^|[./])strategies(?:[./]|$)")
 _STRATEGY = re.compile(r"(?:^|[./])strategies[./]([a-zA-Z0-9_]+)(?:[./]|$)")
 _SHARED = ("vibesys/store/", "vibesys/core/")
@@ -30,24 +28,44 @@ _GENERIC = (
 )
 
 
-def _without_comments(source: str) -> str:
-    return re.sub(r"//[^\n]*|/\*.*?\*/", "", source, flags=re.DOTALL)
+def _proto_declarations(source: str) -> tuple[str | None, tuple[str, ...]]:
+    # Tokenize strings before keywords: comment delimiters or the word import
+    # inside a CEL rule cannot hide or invent a dependency.
+    tokens = re.findall(
+        r'//[^\n]*|/\*.*?\*/|"(?:\\.|[^"\\])*"|[a-zA-Z_][a-zA-Z0-9_]*|[.;]', source, flags=re.DOTALL
+    )
+    tokens = [token for token in tokens if not token.startswith(("//", "/*"))]
+    package = None
+    imports = []
+    for index, lexeme in enumerate(tokens):
+        if lexeme == "package":
+            rest = tokens[index + 1 :]
+            if ";" in rest:
+                package = "".join(rest[: rest.index(";")])
+        if lexeme == "import":
+            rest = tokens[index + 1 :]
+            if rest and rest[0] in {"weak", "public"}:
+                rest = rest[1:]
+            if len(rest) > 1 and rest[0].startswith('"') and rest[1] == ";":
+                imports.append(rest[0][1:-1])
+    return package, tuple(imports)
 
 
 def _proto_violations(path: str, source: str) -> list[str]:
     relative = path.removeprefix("proto/")
     strategy = _STRATEGY.search(relative)
     shared = relative.startswith(_SHARED)
+    package, imports = _proto_declarations(source)
     if strategy is None and not shared:
+        if package is not None and package.startswith("vibesys.strategies."):
+            return [f"{path}: strategy package must live under proto/vibesys/strategies/<owner>/v1"]
         return []
-    source = _without_comments(source)
     found = []
     if strategy is not None:
         expected = f"vibesys.strategies.{strategy[1]}.v1"
-        package = _PACKAGE.search(source)
-        if package is None or package[1] != expected:
+        if package != expected:
             found.append(f"{path}: strategy messages must declare package {expected}")
-    for dependency in _PROTO_IMPORT.findall(source):
+    for dependency in imports:
         own = strategy is not None and dependency.startswith(f"vibesys/strategies/{strategy[1]}/")
         if not dependency.startswith((*_EXTERNAL, *_SHARED)) and not own:
             found.append(

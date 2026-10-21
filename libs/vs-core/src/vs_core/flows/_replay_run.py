@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass, field
 from math import isfinite
 from typing import TYPE_CHECKING, TypeVar, cast
@@ -11,6 +12,7 @@ from protovalidate import validate
 
 from vs_proto.api import replay as pb
 
+from ._replay_causality import EMPTY_FRONTIER, CausalGraph, _Frontier
 from ._replay_history import (
     AcceptedClock,
     AcceptedReplay,
@@ -21,12 +23,13 @@ from ._replay_history import (
     replay_operation,
 )
 from ._replay_identity import (
-    EMPTY_CAUSALITY,
+    ClassifiedContext,
     EncodedIdentity,
     SemanticKey,
-    chain_dependency,
+    classify_context,
     encode_identity,
 )
+from ._replay_schema import reply_schema_digest
 from ._replay_sources import (
     ReplayCausalityError,
     ReplayChannel,
@@ -35,6 +38,7 @@ from ._replay_sources import (
     ReplayDivergenceError,
     ReplayError,
     ReplayFlow,
+    ReplayGroup,
     ReplayLatch,
     ReplaySource,
     ReplayTask,
@@ -52,14 +56,15 @@ T = TypeVar("T")
 Occurrence = tuple[SemanticKey, EncodedIdentity]
 
 
-@dataclass
+@dataclass(eq=False)
 class _Pending:
     key: SemanticKey
     identity: EncodedIdentity
+    frontier: _Frontier
     policy_bytes: bytes
     reply: type[Message]
     outcome: _Delivery | None = None
-    waiters: list[_Operation] = field(default_factory=list)
+    joined_policies: set[bytes] = field(default_factory=set)
 
 
 @dataclass(frozen=True)
@@ -99,6 +104,8 @@ class ReplayScheduler:
         self._fresh_allowance = settings.fresh_allowance
         self._acks = acknowledgements or ReplayAcknowledgements()
         self._tasks: list[ReplayTask] = []
+        self._causal = CausalGraph()
+        self._released_frontier = EMPTY_FRONTIER
         self._current: ReplayTask | None = None
         self._timers: list[ReplayTimer] = []
         self._pending: dict[Occurrence, _Pending] = {}
@@ -106,13 +113,22 @@ class ReplayScheduler:
         self._active: dict[SemanticKey, _Pending] = {}
         self._past: set[Occurrence] = set()
         self._consumed: set[int] = set()
-        self._drift: list[tuple[str, str]] = []
+        self._drift_count = 0
+        self._drift_roles: set[str] = set()
+        self._drift_templates: set[str] = set()
         self._history = tuple(sorted(history, key=lambda item: item.sequence))
         self._last_sequence = 0
         self._last_clock = settings.initial_clock
         self._reconstructing = True
+        try:
+            self._reconstruct(root)
+        except BaseException:
+            self.close()
+            raise
+
+    def _reconstruct(self, root: Callable[[ReplayFlow], Coroutine[object, object, object]]) -> None:
         self._validate_history()
-        self._create(root, EMPTY_CAUSALITY)
+        self._create(root, EMPTY_FRONTIER)
         self._quiesce()
         for accepted in self._history:
             self._release(accepted)
@@ -139,7 +155,7 @@ class ReplayScheduler:
             sequence, clock = accepted.sequence, accepted.clock
 
     def _create(
-        self, flow: Callable[[ReplayFlow], Coroutine[object, object, T]], causal: bytes
+        self, flow: Callable[[ReplayFlow], Coroutine[object, object, T]], causal: _Frontier
     ) -> ReplayTask[T]:
         task = ReplayTask(len(self._tasks), flow(ReplayFlow(self)), causal)
         self._tasks.append(task)
@@ -150,11 +166,22 @@ class ReplayScheduler:
     ) -> ReplayTask[T]:
         return self._create(flow, self.current_causality())
 
-    def current_causality(self) -> bytes:
+    def current_causality(self) -> _Frontier:
         if self._current is None:
             problem = "flow primitive used outside a running continuation"
             raise ReplayError(problem)
         return self._current.causality
+
+    def observe(self, frontier: _Frontier) -> None:
+        """Include a synchronous latch read in the current continuation's provenance."""
+        if self._current is None:
+            problem = "latch value read outside a running continuation"
+            raise ReplayError(problem)
+        self._current.causality = self._causal.merge(self._current.causality, frontier)
+
+    def observe_absence(self) -> None:
+        """An unset shared latch reflects all observations already released to the run."""
+        self.observe(self._released_frontier)
 
     @property
     def result(self) -> object:
@@ -179,9 +206,9 @@ class ReplayScheduler:
             and _occurrence_token(item.operation()) not in disclosed
         )
         drift = PolicyDrift(
-            len(self._drift),
-            tuple(sorted({role for role, _ in self._drift if role})),
-            tuple(sorted({template for _, template in self._drift if template})),
+            self._drift_count,
+            tuple(sorted(self._drift_roles)),
+            tuple(sorted(self._drift_templates)),
         )
         return ReplayFrontier(unused, tuple(pending.key for pending in self._waiting()), drift)
 
@@ -198,8 +225,34 @@ class ReplayScheduler:
         operation.allowance = pb.ReplayAllowance.from_binary(self.allowance_bytes)
         return operation
 
+    def _awaited_sources(self) -> Iterable[ReplaySource]:
+        for task in self._tasks:
+            stack = [task.waiting] if task.waiting is not None and task.result is None else []
+            while stack:
+                source = stack.pop()
+                if isinstance(source, _First):
+                    stack.extend(reversed(source.sources))
+                else:
+                    yield source
+
+    def _has_waiter(self, pending: _Pending) -> bool:
+        return any(
+            self._sources.get(source) is pending
+            for source in self._awaited_sources()
+            if isinstance(source, _Operation)
+        )
+
     def _waiting(self) -> Iterable[_Pending]:
-        return (pending for pending in self._pending.values() if pending.outcome is None)
+        active = {
+            self._sources[source]
+            for source in self._awaited_sources()
+            if isinstance(source, _Operation)
+        }
+        return (
+            pending
+            for pending in self._pending.values()
+            if pending.outcome is None and pending in active
+        )
 
     def accept(self, accepted: AcceptedReplay | AcceptedClock) -> None:
         """Deliver a durably accepted live result using the same release step as replay."""
@@ -230,7 +283,7 @@ class ReplayScheduler:
         occurrence = (accepted.key, accepted.identity)
         pending = self._pending.get(occurrence)
         self._past.add(occurrence)
-        if pending is None:
+        if pending is None or not self._has_waiter(pending):
             return
         operation = accepted.operation()
         reply = operation.outcome
@@ -243,27 +296,37 @@ class ReplayScheduler:
         if operation.policy is None:
             problem = "historical operation has no policy"
             raise ReplayError(problem)
-        if policy.to_binary() != operation.policy.to_binary():
-            self._drift.append((operation.policy.role, operation.policy.template))
-            if (policy.role, policy.template) != (operation.policy.role, operation.policy.template):
-                # One count per result, while retaining both old and changed names.
-                self._drift[-1] = (
-                    policy.role or operation.policy.role,
-                    policy.template or operation.policy.template,
-                )
+        if policy.reply_schema_digest != operation.policy.reply_schema_digest:
+            problem = "historical reply schema is incompatible; bump the semantic data contract"
+            raise ReplayConsumerError(problem)
+        self._policy_drift(pending, operation.policy)
         self.clock = accepted.clock
         if operation.allowance is None:
             problem = "historical operation has no positional allowance"
             raise ReplayError(problem)
         self.allowance_bytes = operation.allowance.to_binary()
-        pending.outcome = _Delivery(value, accepted.token)
+        self._released_frontier = self._causal.append(self._released_frontier, accepted.token)
+        pending.outcome = _Delivery(value, self._causal.append(pending.frontier, accepted.token))
         self._active.pop(pending.key, None)
         self._consumed.add(accepted.sequence)
         self._quiesce()
 
+    def _policy_drift(self, pending: _Pending, historical: pb.ReplayPolicy) -> None:
+        policies = {pending.policy_bytes, *pending.joined_policies}
+        if policies == {historical.to_binary()}:
+            return
+        self._drift_count += 1
+        for value in (*policies, historical.to_binary()):
+            policy = pb.ReplayPolicy.from_binary(value)
+            if policy.role:
+                self._drift_roles.add(policy.role)
+            if policy.template:
+                self._drift_templates.add(policy.template)
+
     def _register(self, source: ReplaySource, task: ReplayTask) -> None:
         if isinstance(source, _Operation):
-            self._register_call(source, task)
+            if source not in self._sources:
+                self._register_call(source, task)
         elif isinstance(source, _First):
             for child in source.sources:
                 self._register(child, task)
@@ -272,16 +335,22 @@ class ReplayScheduler:
         elif isinstance(source, ReplayTask):
             self._owned_tasks((source,))
         elif isinstance(source, ReplayTimer):
-            if source not in self._timers:
-                problem = "timer belongs to another replay scheduler"
-                raise ReplayError(problem)
-        elif isinstance(source, (ReplayChannel, ReplayLatch)):
+            self._register_timer(source, task)
+        elif isinstance(source, (ReplayChannel, ReplayLatch, ReplayGroup)):
             if source.scheduler is not self:
                 problem = "source belongs to another replay scheduler"
                 raise ReplayError(problem)
         else:
             problem = "foreign awaitable in replay flow"
             raise ReplayError(problem)
+
+    def _register_timer(self, source: ReplayTimer, task: ReplayTask) -> None:
+        if source not in self._timers:
+            problem = "timer belongs to another replay scheduler"
+            raise ReplayError(problem)
+        source.registered = True
+        if source.deadline <= self.clock and source.result is None:
+            source.result = _Delivery(self.clock, task.causality)
 
     def _owned_tasks(self, tasks: Sequence[ReplayTask]) -> None:
         for task in tasks:
@@ -291,68 +360,92 @@ class ReplayScheduler:
 
     def _register_call(self, source: _Operation, task: ReplayTask) -> None:
         call = source.call
-        identity = encode_identity(
-            call.identity, contract=call.contract, dependencies=task.causality
+        identity = (
+            classify_context(
+                call.identity.message(), contract=call.contract, dependencies=task.causality.digest
+            ).identity
+            if isinstance(call.identity, ClassifiedContext)
+            else encode_identity(
+                call.identity, contract=call.contract, dependencies=task.causality.digest
+            )
         )
         occurrence = (call.key, identity)
         if occurrence in self._past:
             problem = f"late exact request behind replay cursor: {call.key}"
             raise ReplayCausalityError(problem)
         active = self._active.get(call.key)
+        if active is not None and not self._has_waiter(active):
+            active = None
         if active is not None and active.identity != identity:
             problem = f"concurrent divergent identities for semantic key {call.key}"
             raise ReplayDivergenceError(problem)
         if not isinstance(call.reply, type) or not issubclass(call.reply, Message):
             problem = "replay reply must be a protobuf message type"
             raise ReplayConsumerError(problem)
-        validate(call.policy)
-        if call.policy.reply_type != call.reply.desc().type_name:
+        policy = deepcopy(call.policy)
+        digest = reply_schema_digest(call.reply)
+        if policy.has_field("reply_schema_digest") and policy.reply_schema_digest != digest:
+            problem = "reply schema proof contradicts typed consumer"
+            raise ReplayConsumerError(problem)
+        policy.reply_schema_digest = digest
+        validate(policy)
+        if policy.reply_type != call.reply.desc().type_name:
             problem = "replay policy reply type contradicts typed consumer"
             raise ReplayConsumerError(problem)
         pending = self._pending.get(occurrence)
         if pending is None:
             pending = _Pending(
-                call.key, identity, call.policy.to_binary(), cast("type[Message]", call.reply)
+                call.key,
+                identity,
+                task.causality,
+                policy.to_binary(),
+                cast("type[Message]", call.reply),
             )
             self._pending[occurrence] = pending
         elif pending.reply is not call.reply:
             problem = "equal concurrent occurrences have incompatible reply consumers"
             raise ReplayConsumerError(problem)
-        pending.waiters.append(source)
+        if policy.to_binary() != pending.policy_bytes:
+            pending.joined_policies.add(policy.to_binary())
         self._sources[source] = pending
         self._active[call.key] = pending
 
     def _ready(self, source: ReplaySource) -> bool:
         if isinstance(source, _Operation):
-            return self._sources[source].outcome is not None
+            return not source.consumed and self._sources[source].outcome is not None
         if isinstance(source, (ReplayTask, ReplayLatch, ReplayTimer)):
-            return source.result is not None
-        if isinstance(source, ReplayChannel):
-            return bool(source.queue)
+            return not source.consumed and source.result is not None
+        if isinstance(source, (ReplayChannel, ReplayGroup)):
+            return bool(source.queue if isinstance(source, ReplayChannel) else source.results)
         if isinstance(source, _First):
             return any(self._ready(child) for child in source.sources)
         if isinstance(source, _All):
-            return all(child.result is not None for child in source.tasks)
+            return not source.consumed and all(child.result is not None for child in source.tasks)
         return False
 
     def _take(self, source: ReplaySource) -> _Delivery:
         if isinstance(source, _Operation):
+            source.consumed = True
             delivered = cast("_Delivery", self._sources[source].outcome)
             value = delivered.value
             return _Delivery(type(value).from_binary(value.to_binary()), delivered.causality)
         if isinstance(source, (ReplayTask, ReplayLatch, ReplayTimer)):
+            source.consumed = True
             return cast("_Delivery", source.result)
         if isinstance(source, ReplayChannel):
             return source.queue.popleft()
+        if isinstance(source, ReplayGroup):
+            return source.results.popleft()
         if isinstance(source, _First):
             index = next(i for i, child in enumerate(source.sources) if self._ready(child))
             delivered = self._take(source.sources[index])
             return _Delivery((index, delivered.value), delivered.causality)
         if isinstance(source, _All):
             results = tuple(cast("_Delivery", task.result) for task in source.tasks)
-            causal = EMPTY_CAUSALITY
+            source.consumed = True
+            causal = EMPTY_FRONTIER
             for result in results:
-                causal = chain_dependency(causal, result.causality)
+                causal = self._causal.merge(causal, result.causality)
             return _Delivery(tuple(result.value for result in results), causal)
         problem = "unsupported replay source"
         raise ReplayError(problem)
@@ -379,7 +472,7 @@ class ReplayScheduler:
         try:
             if task.started:
                 delivery = self._take(cast("ReplaySource", task.waiting))
-                task.causality = chain_dependency(task.causality, delivery.causality)
+                task.causality = self._causal.merge(task.causality, delivery.causality)
                 source = task.coroutine.send(delivery)
             else:
                 task.started = True
@@ -392,6 +485,8 @@ class ReplayScheduler:
         except StopIteration as completed:
             task.waiting = None
             task.result = _Delivery(completed.value, task.causality)
+            if task.group is not None:
+                task.group.results.append(task.result)
         finally:
             self._current = None
 
@@ -403,22 +498,32 @@ class ReplayScheduler:
         self._timers.append(timer)
         return timer
 
+    def _awaited_timers(self) -> tuple[ReplayTimer, ...]:
+        return tuple(
+            source for source in self._awaited_sources() if isinstance(source, ReplayTimer)
+        )
+
     def clock_requests(self) -> tuple[float, ...]:
         """Deadlines whose firings must return as recorded serial clock observations."""
-        return tuple(sorted({timer.deadline for timer in self._timers if timer.result is None}))
+        return tuple(
+            sorted({timer.deadline for timer in self._awaited_timers() if timer.result is None})
+        )
 
     def _release_clock(self, accepted: AcceptedClock) -> None:
         ready = [
             timer
-            for timer in self._timers
+            for timer in self._awaited_timers()
             if timer.result is None and timer.deadline <= accepted.clock
         ]
         if not ready:
             return
         self.clock = accepted.clock
         self.allowance_bytes = accepted.allowance_bytes
+        self._released_frontier = self._causal.append(self._released_frontier, accepted.token)
         for timer in ready:
-            timer.result = _Delivery(accepted.clock, accepted.token)
+            timer.result = _Delivery(
+                accepted.clock, self._causal.append(EMPTY_FRONTIER, accepted.token)
+            )
         self._quiesce()
 
     def _check_deadlock(self) -> None:

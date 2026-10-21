@@ -13,7 +13,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file vibesys/store/v1/replay.proto.
  */
 export const file_vibesys_store_v1_replay: GenFile = /*@__PURE__*/
-  fileDesc("Ch12aWJlc3lzL3N0b3JlL3YxL3JlcGxheS5wcm90bxIQdmliZXN5cy5zdG9yZS52MSJZCgxPcGVyYXRpb25LZXkSGgoJb3BlcmF0aW9uGAEgASgJQge6SARyAhABEi0KBXNjb3BlGAIgAygLMh4udmliZXN5cy5zdG9yZS52MS5LZXlDb21wb25lbnQibgoMS2V5Q29tcG9uZW50EkYKBGtpbmQYASABKAlCOLpINXIzUgZwYXJlbnRSBGl0ZW1SBnNhbXBsZVIIcmV2aXNpb25SEXJlY29yZGVkX3Bvc2l0aW9uEhYKBXZhbHVlGAIgASgJQge6SARyAhABIlwKD1JlcGxheUFsbG93YW5jZRISCgppdGVyYXRpb25zGAEgASgEEhAKCGNhcGFjaXR5GAIgASgEEiMKCXJlbWFpbmluZxgDIAEoAUIQukgNEgtAASkAAAAAAAAAACJcCgxSZXBsYXlQb2xpY3kSDAoEcm9sZRgBIAEoCRIQCgh0ZW1wbGF0ZRgCIAEoCRIPCgdjb250ZW50GAMgASgMEhsKCnJlcGx5X3R5cGUYBCABKAlCB7pIBHICEAEipgMKD09wZXJhdGlvblJlcGxheRIzCgNrZXkYASABKAsyHi52aWJlc3lzLnN0b3JlLnYxLk9wZXJhdGlvbktleUIGukgDyAEBEiEKEGVuY29kaW5nX3ZlcnNpb24YAiABKA1CB7pIBCoCCAESGQoIaWRlbnRpdHkYAyABKAxCB7pIBHoCEAESIAoPaWRlbnRpdHlfZGlnZXN0GAQgASgMQge6SAR6AmggEh0KDGRlcGVuZGVuY2llcxgFIAEoDEIHukgEegJoIBI2CgZwb2xpY3kYBiABKAsyHi52aWJlc3lzLnN0b3JlLnYxLlJlcGxheVBvbGljeUIGukgDyAEBEiUKB291dGNvbWUYByABKAsyFC5nb29nbGUucHJvdG9idWYuQW55EgwKBHBhaWQYCCABKAgSJwoIY29zdF91c2QYCSABKAFCELpIDRILQAEpAAAAAAAAAABIAIgBARI8CglhbGxvd2FuY2UYCiABKAsyIS52aWJlc3lzLnN0b3JlLnYxLlJlcGxheUFsbG93YW5jZUIGukgDyAEBQgsKCV9jb3N0X3VzZCJLCgtSZXBsYXlDbG9jaxI8CglhbGxvd2FuY2UYASABKAsyIS52aWJlc3lzLnN0b3JlLnYxLlJlcGxheUFsbG93YW5jZUIGukgDyAEBIocBCgxSZXBsYXlOb3RpY2USEwoCaWQYASABKAlCB7pIBHICEAESMQoGdW51c2VkGAIgAygLMiEudmliZXN5cy5zdG9yZS52MS5PcGVyYXRpb25SZXBsYXkSLwoHcGVuZGluZxgDIAMoCzIeLnZpYmVzeXMuc3RvcmUudjEuT3BlcmF0aW9uS2V5IlcKFVJlcGxheUFja25vd2xlZGdlbWVudBIaCglub3RpY2VfaWQYASABKAlCB7pIBHICEAESIgoRbGF1bmNoX3JlcXVlc3RfaWQYAiABKAlCB7pIBHICEAEqcgoPUmVwbGF5RmllbGRLaW5kEiEKHVJFUExBWV9GSUVMRF9LSU5EX1VOU1BFQ0lGSUVEEAASHgoaUkVQTEFZX0ZJRUxEX0tJTkRfSURFTlRJVFkQARIcChhSRVBMQVlfRklFTERfS0lORF9QT0xJQ1kQAjplCgxyZXBsYXlfZmllbGQSHS5nb29nbGUucHJvdG9idWYuRmllbGRPcHRpb25zGJyPAyABKA4yIS52aWJlc3lzLnN0b3JlLnYxLlJlcGxheUZpZWxkS2luZFILcmVwbGF5RmllbGQ6PgoKcmVwbGF5X3NldBIdLmdvb2dsZS5wcm90b2J1Zi5GaWVsZE9wdGlvbnMYnY8DIAEoCFIJcmVwbGF5U2V0QkFaP2dpdGh1Yi5jb20vdXctc3lmaS92aWJlc3lzL2dhdGV3YXkvZ2VuL3ZpYmVzeXMvc3RvcmUvdjE7c3RvcmV2MWIGcHJvdG8z", [file_buf_validate_validate, file_google_protobuf_any, file_google_protobuf_descriptor]);
+  fileDesc("Ch12aWJlc3lzL3N0b3JlL3YxL3JlcGxheS5wcm90bxIQdmliZXN5cy5zdG9yZS52MSJZCgxPcGVyYXRpb25LZXkSGgoJb3BlcmF0aW9uGAEgASgJQge6SARyAhABEi0KBXNjb3BlGAIgAygLMh4udmliZXN5cy5zdG9yZS52MS5LZXlDb21wb25lbnQiZAoMS2V5Q29tcG9uZW50EjwKBGtpbmQYASABKA4yIi52aWJlc3lzLnN0b3JlLnYxLktleUNvbXBvbmVudEtpbmRCCrpIB4IBBBABIAASFgoFdmFsdWUYAiABKAlCB7pIBHICEAEiXAoPUmVwbGF5QWxsb3dhbmNlEhIKCml0ZXJhdGlvbnMYASABKAQSEAoIY2FwYWNpdHkYAiABKAQSIwoJcmVtYWluaW5nGAMgASgBQhC6SA0SC0ABKQAAAAAAAAAAIp8BCgxSZXBsYXlQb2xpY3kSDAoEcm9sZRgBIAEoCRIQCgh0ZW1wbGF0ZRgCIAEoCRIPCgdjb250ZW50GAMgASgMEhsKCnJlcGx5X3R5cGUYBCABKAlCB7pIBHICEAESKQoTcmVwbHlfc2NoZW1hX2RpZ2VzdBgFIAEoDEIHukgEegJoIEgAiAEBQhYKFF9yZXBseV9zY2hlbWFfZGlnZXN0Io4GCg9PcGVyYXRpb25SZXBsYXkSMwoDa2V5GAEgASgLMh4udmliZXN5cy5zdG9yZS52MS5PcGVyYXRpb25LZXlCBrpIA8gBARIhChBlbmNvZGluZ192ZXJzaW9uGAIgASgNQge6SAQqAggBEhkKCGlkZW50aXR5GAMgASgMQge6SAR6AhABEiAKD2lkZW50aXR5X2RpZ2VzdBgEIAEoDEIHukgEegJoIBIdCgxkZXBlbmRlbmNpZXMYBSABKAxCB7pIBHoCaCASNgoGcG9saWN5GAYgASgLMh4udmliZXN5cy5zdG9yZS52MS5SZXBsYXlQb2xpY3lCBrpIA8gBARIlCgdvdXRjb21lGAcgASgLMhQuZ29vZ2xlLnByb3RvYnVmLkFueRIMCgRwYWlkGAggASgIEicKCGNvc3RfdXNkGAkgASgBQhC6SA0SC0ABKQAAAAAAAAAASACIAQESPAoJYWxsb3dhbmNlGAogASgLMiEudmliZXN5cy5zdG9yZS52MS5SZXBsYXlBbGxvd2FuY2VCBrpIA8gBARInChFhY2NlcHRlZF9zZXF1ZW5jZRgLIAEoBEIHukgEMgIgAEgBiAEBOqYCukiiAhqWAQodb3BlcmF0aW9uX3JlcGxheS5yZXBseV9zY2hlbWESO3JlY29yZGVkIG9wZXJhdGlvbnMgcmVxdWlyZSB0aGUgd3JpdGVyJ3MgcmVwbHkgc2NoZW1hIHByb29mGjhoYXModGhpcy5wb2xpY3kpICYmIGhhcyh0aGlzLnBvbGljeS5yZXBseV9zY2hlbWFfZGlnZXN0KRqGAQobb3BlcmF0aW9uX3JlcGxheS5hY2NlcHRhbmNlEjVhbiBvdXRjb21lIHJlcXVpcmVzIGl0cyBpbW11dGFibGUgYWNjZXB0YW5jZSBzZXF1ZW5jZRowaGFzKHRoaXMub3V0Y29tZSkgPT0gaGFzKHRoaXMuYWNjZXB0ZWRfc2VxdWVuY2UpQgsKCV9jb3N0X3VzZEIUChJfYWNjZXB0ZWRfc2VxdWVuY2UiSwoLUmVwbGF5Q2xvY2sSPAoJYWxsb3dhbmNlGAEgASgLMiEudmliZXN5cy5zdG9yZS52MS5SZXBsYXlBbGxvd2FuY2VCBrpIA8gBASKYAgoMUmVwbGF5Tm90aWNlEhMKAmlkGAEgASgJQge6SARyAhABEjsKBnVudXNlZBgCIAMoCzIhLnZpYmVzeXMuc3RvcmUudjEuT3BlcmF0aW9uUmVwbGF5Qgi6SAWSAQIIARIvCgdwZW5kaW5nGAMgAygLMh4udmliZXN5cy5zdG9yZS52MS5PcGVyYXRpb25LZXk6hAG6SIABGn4KGnJlcGxheV9ub3RpY2UucGFpZF9yZXN1bHRzEjJ1bnVzZWQgZW50cmllcyBtdXN0IGlkZW50aWZ5IGFjY2VwdGVkIHBhaWQgcmVzdWx0cxosdGhpcy51bnVzZWQuYWxsKHgsIHgucGFpZCAmJiBoYXMoeC5vdXRjb21lKSkiagoVUmVwbGF5QWNrbm93bGVkZ2VtZW50Eh8KCW5vdGljZV9pZBgBIAEoCUIHukgEcgIQAUgAiAEBEiIKEWxhdW5jaF9yZXF1ZXN0X2lkGAIgASgJQge6SARyAhABQgwKCl9ub3RpY2VfaWQqcgoPUmVwbGF5RmllbGRLaW5kEiEKHVJFUExBWV9GSUVMRF9LSU5EX1VOU1BFQ0lGSUVEEAASHgoaUkVQTEFZX0ZJRUxEX0tJTkRfSURFTlRJVFkQARIcChhSRVBMQVlfRklFTERfS0lORF9QT0xJQ1kQAircAQoQS2V5Q29tcG9uZW50S2luZBIiCh5LRVlfQ09NUE9ORU5UX0tJTkRfVU5TUEVDSUZJRUQQABIdChlLRVlfQ09NUE9ORU5UX0tJTkRfUEFSRU5UEAESGwoXS0VZX0NPTVBPTkVOVF9LSU5EX0lURU0QAhIdChlLRVlfQ09NUE9ORU5UX0tJTkRfU0FNUExFEAMSHwobS0VZX0NPTVBPTkVOVF9LSU5EX1JFVklTSU9OEAQSKAokS0VZX0NPTVBPTkVOVF9LSU5EX1JFQ09SREVEX1BPU0lUSU9OEAU6ZQoMcmVwbGF5X2ZpZWxkEh0uZ29vZ2xlLnByb3RvYnVmLkZpZWxkT3B0aW9ucxicjwMgASgOMiEudmliZXN5cy5zdG9yZS52MS5SZXBsYXlGaWVsZEtpbmRSC3JlcGxheUZpZWxkOj4KCnJlcGxheV9zZXQSHS5nb29nbGUucHJvdG9idWYuRmllbGRPcHRpb25zGJ2PAyABKAhSCXJlcGxheVNldEJBWj9naXRodWIuY29tL3V3LXN5ZmkvdmliZXN5cy9nYXRld2F5L2dlbi92aWJlc3lzL3N0b3JlL3YxO3N0b3JldjFiBnByb3RvMw", [file_buf_validate_validate, file_google_protobuf_any, file_google_protobuf_descriptor]);
 
 /**
  * Names are semantic, never source locations or live collection positions.
@@ -44,9 +44,9 @@ export const OperationKeySchema: GenMessage<OperationKey> = /*@__PURE__*/
  */
 export type KeyComponent = Message<"vibesys.store.v1.KeyComponent"> & {
   /**
-   * @generated from field: string kind = 1;
+   * @generated from field: vibesys.store.v1.KeyComponentKind kind = 1;
    */
-  kind: string;
+  kind: KeyComponentKind;
 
   /**
    * @generated from field: string value = 2;
@@ -113,6 +113,13 @@ export type ReplayPolicy = Message<"vibesys.store.v1.ReplayPolicy"> & {
    * @generated from field: string reply_type = 4;
    */
   replyType: string;
+
+  /**
+   * Derived by the writer from the reachable retained reply descriptors.
+   *
+   * @generated from field: optional bytes reply_schema_digest = 5;
+   */
+  replySchemaDigest?: Uint8Array | undefined;
 };
 
 /**
@@ -180,6 +187,13 @@ export type OperationReplay = Message<"vibesys.store.v1.OperationReplay"> & {
    * @generated from field: vibesys.store.v1.ReplayAllowance allowance = 10;
    */
   allowance?: ReplayAllowance | undefined;
+
+  /**
+   * Later span updates retain this sequence; they are not new acceptances.
+   *
+   * @generated from field: optional uint64 accepted_sequence = 11;
+   */
+  acceptedSequence?: bigint | undefined;
 };
 
 /**
@@ -240,9 +254,11 @@ export const ReplayNoticeSchema: GenMessage<ReplayNotice> = /*@__PURE__*/
  */
 export type ReplayAcknowledgement = Message<"vibesys.store.v1.ReplayAcknowledgement"> & {
   /**
-   * @generated from field: string notice_id = 1;
+   * A launch without a preceding unacknowledged notice still records its id.
+   *
+   * @generated from field: optional string notice_id = 1;
    */
-  noticeId: string;
+  noticeId?: string | undefined;
 
   /**
    * @generated from field: string launch_request_id = 2;
@@ -284,6 +300,47 @@ export enum ReplayFieldKind {
  */
 export const ReplayFieldKindSchema: GenEnum<ReplayFieldKind> = /*@__PURE__*/
   enumDesc(file_vibesys_store_v1_replay, 0);
+
+/**
+ * @generated from enum vibesys.store.v1.KeyComponentKind
+ */
+export enum KeyComponentKind {
+  /**
+   * @generated from enum value: KEY_COMPONENT_KIND_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * @generated from enum value: KEY_COMPONENT_KIND_PARENT = 1;
+   */
+  PARENT = 1,
+
+  /**
+   * @generated from enum value: KEY_COMPONENT_KIND_ITEM = 2;
+   */
+  ITEM = 2,
+
+  /**
+   * @generated from enum value: KEY_COMPONENT_KIND_SAMPLE = 3;
+   */
+  SAMPLE = 3,
+
+  /**
+   * @generated from enum value: KEY_COMPONENT_KIND_REVISION = 4;
+   */
+  REVISION = 4,
+
+  /**
+   * @generated from enum value: KEY_COMPONENT_KIND_RECORDED_POSITION = 5;
+   */
+  RECORDED_POSITION = 5,
+}
+
+/**
+ * Describes the enum vibesys.store.v1.KeyComponentKind.
+ */
+export const KeyComponentKindSchema: GenEnum<KeyComponentKind> = /*@__PURE__*/
+  enumDesc(file_vibesys_store_v1_replay, 1);
 
 /**
  * @generated from extension: vibesys.store.v1.ReplayFieldKind replay_field = 51100;

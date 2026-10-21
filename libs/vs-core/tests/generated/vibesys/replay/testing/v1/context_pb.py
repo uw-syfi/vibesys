@@ -10,10 +10,12 @@ from typing import Literal, TYPE_CHECKING, TypeAlias
 
 from protobuf import Message
 from protobuf._codegen import file_desc
+from protobuf.wkt.google.protobuf import any_pb
 from vs_proto._generated.vibesys.store.v1 import replay_pb
 
 if TYPE_CHECKING:
     from protobuf import DescFile
+    from protobuf.wkt.google.protobuf.any_pb import Any
 
 
 _ContextFields: TypeAlias = Literal["candidate", "wording", "evidence", "ordered"]
@@ -148,17 +150,192 @@ class UnclassifiedPolicy(Message[_UnclassifiedPolicyFields]):
 
         context: UnclassifiedContext | None
 
+_InvalidSetContextFields: TypeAlias = Literal["evidence"]
+
+class InvalidSetContext(Message[_InvalidSetContextFields]):
+    """
+    ```proto
+    message vibesys.replay.testing.v1.InvalidSetContext
+    ```
+
+    Attributes:
+        evidence:
+            ```proto
+            string evidence = 1;
+            ```
+    """
+
+    __slots__ = ("evidence",)
+
+    if TYPE_CHECKING:
+
+        def __init__(
+            self,
+            *,
+            evidence: str = "",
+        ) -> None:
+            pass
+
+        evidence: str
+
+_RepeatedContextFields: TypeAlias = Literal["contexts"]
+
+class RepeatedContext(Message[_RepeatedContextFields]):
+    """
+    ```proto
+    message vibesys.replay.testing.v1.RepeatedContext
+    ```
+
+    Attributes:
+        contexts:
+            ```proto
+            repeated vibesys.replay.testing.v1.Context contexts = 1;
+            ```
+    """
+
+    __slots__ = ("contexts",)
+
+    if TYPE_CHECKING:
+
+        def __init__(
+            self,
+            *,
+            contexts: list[Context] | None = None,
+        ) -> None:
+            pass
+
+        contexts: list[Context]
+
+_RepeatedUnclassifiedPolicyFields: TypeAlias = Literal["contexts"]
+
+class RepeatedUnclassifiedPolicy(Message[_RepeatedUnclassifiedPolicyFields]):
+    """
+    ```proto
+    message vibesys.replay.testing.v1.RepeatedUnclassifiedPolicy
+    ```
+
+    Attributes:
+        contexts:
+            ```proto
+            repeated vibesys.replay.testing.v1.UnclassifiedContext contexts = 1;
+            ```
+    """
+
+    __slots__ = ("contexts",)
+
+    if TYPE_CHECKING:
+
+        def __init__(
+            self,
+            *,
+            contexts: list[UnclassifiedContext] | None = None,
+        ) -> None:
+            pass
+
+        contexts: list[UnclassifiedContext]
+
+_OpaqueIdentityFields: TypeAlias = Literal["values"]
+
+class OpaqueIdentity(Message[_OpaqueIdentityFields]):
+    """
+    ```proto
+    message vibesys.replay.testing.v1.OpaqueIdentity
+    ```
+
+    Attributes:
+        values:
+            ```proto
+            repeated google.protobuf.Any values = 1;
+            ```
+    """
+
+    __slots__ = ("values",)
+
+    if TYPE_CHECKING:
+
+        def __init__(
+            self,
+            *,
+            values: list[Any] | None = None,
+        ) -> None:
+            pass
+
+        values: list[Any]
+
+_MapValueFields: TypeAlias = Literal["items"]
+
+class MapValue(Message[_MapValueFields]):
+    """
+    ```proto
+    message vibesys.replay.testing.v1.MapValue
+    ```
+
+    Attributes:
+        items:
+            ```proto
+            map<string, string> items = 1;
+            ```
+    """
+
+    __slots__ = ("items",)
+
+    if TYPE_CHECKING:
+
+        def __init__(
+            self,
+            *,
+            items: dict[str, str] | None = None,
+        ) -> None:
+            pass
+
+        items: dict[str, str]
+
+_RepeatedMapIdentityFields: TypeAlias = Literal["values"]
+
+class RepeatedMapIdentity(Message[_RepeatedMapIdentityFields]):
+    """
+    ```proto
+    message vibesys.replay.testing.v1.RepeatedMapIdentity
+    ```
+
+    Attributes:
+        values:
+            ```proto
+            repeated vibesys.replay.testing.v1.MapValue values = 1;
+            ```
+    """
+
+    __slots__ = ("values",)
+
+    if TYPE_CHECKING:
+
+        def __init__(
+            self,
+            *,
+            values: list[MapValue] | None = None,
+        ) -> None:
+            pass
+
+        values: list[MapValue]
+
 
 _DESC = file_desc(
-    b'\n\'vibesys/replay/testing/v1/context.proto\x12\x19vibesys.replay.testing.v1\x1a\x1dvibesys/store/v1/replay.proto"\x93\x01\n\x07Context\x12"\n\tcandidate\x18\x01 \x01(\tR\tcandidateB\x04\xe0\xf9\x18\x01\x12\x1e\n\x07wording\x18\x02 \x01(\tR\x07wordingB\x04\xe0\xf9\x18\x02\x12$\n\x08evidence\x18\x03 \x03(\tR\x08evidenceB\x08\xe0\xf9\x18\x01\xe8\xf9\x18\x01\x12\x1e\n\x07ordered\x18\x04 \x03(\tR\x07orderedB\x04\xe0\xf9\x18\x01"S\n\rNestedContext\x12B\n\x07context\x18\x01 \x01(\x0b2".vibesys.replay.testing.v1.ContextR\x07contextB\x04\xe0\xf9\x18\x01"3\n\x13UnclassifiedContext\x12\x1c\n\tcandidate\x18\x01 \x01(\tR\tcandidate"d\n\x12UnclassifiedPolicy\x12N\n\x07context\x18\x01 \x01(\x0b2..vibesys.replay.testing.v1.UnclassifiedContextR\x07contextB\x04\xe0\xf9\x18\x02b\x06proto3',
+    b'\n\'vibesys/replay/testing/v1/context.proto\x12\x19vibesys.replay.testing.v1\x1a\x1dvibesys/store/v1/replay.proto\x1a\x19google/protobuf/any.proto"\x93\x01\n\x07Context\x12"\n\tcandidate\x18\x01 \x01(\tR\tcandidateB\x04\xe0\xf9\x18\x01\x12\x1e\n\x07wording\x18\x02 \x01(\tR\x07wordingB\x04\xe0\xf9\x18\x02\x12$\n\x08evidence\x18\x03 \x03(\tR\x08evidenceB\x08\xe0\xf9\x18\x01\xe8\xf9\x18\x01\x12\x1e\n\x07ordered\x18\x04 \x03(\tR\x07orderedB\x04\xe0\xf9\x18\x01"S\n\rNestedContext\x12B\n\x07context\x18\x01 \x01(\x0b2".vibesys.replay.testing.v1.ContextR\x07contextB\x04\xe0\xf9\x18\x01"3\n\x13UnclassifiedContext\x12\x1c\n\tcandidate\x18\x01 \x01(\tR\tcandidate"d\n\x12UnclassifiedPolicy\x12N\n\x07context\x18\x01 \x01(\x0b2..vibesys.replay.testing.v1.UnclassifiedContextR\x07contextB\x04\xe0\xf9\x18\x02"5\n\x11InvalidSetContext\x12 \n\x08evidence\x18\x01 \x01(\tR\x08evidenceB\x04\xe8\xf9\x18\x01"W\n\x0fRepeatedContext\x12D\n\x08contexts\x18\x01 \x03(\x0b2".vibesys.replay.testing.v1.ContextR\x08contextsB\x04\xe0\xf9\x18\x01"n\n\x1aRepeatedUnclassifiedPolicy\x12P\n\x08contexts\x18\x01 \x03(\x0b2..vibesys.replay.testing.v1.UnclassifiedContextR\x08contextsB\x04\xe0\xf9\x18\x02">\n\x0eOpaqueIdentity\x12,\n\x06values\x18\x01 \x03(\x0b2\x14.google.protobuf.AnyR\x06values"\x8a\x01\n\x08MapValue\x12D\n\x05items\x18\x01 \x03(\x0b2..vibesys.replay.testing.v1.MapValue.ItemsEntryR\x05items\x1a8\n\nItemsEntry\x12\x10\n\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n\x05value\x18\x02 \x01(\tR\x05value:\x028\x01"R\n\x13RepeatedMapIdentity\x12;\n\x06values\x18\x01 \x03(\x0b2#.vibesys.replay.testing.v1.MapValueR\x06valuesb\x06proto3',
     [
         replay_pb.desc(),
+        any_pb.desc(),
     ],
     {
         "Context": Context,
         "NestedContext": NestedContext,
         "UnclassifiedContext": UnclassifiedContext,
         "UnclassifiedPolicy": UnclassifiedPolicy,
+        "InvalidSetContext": InvalidSetContext,
+        "RepeatedContext": RepeatedContext,
+        "RepeatedUnclassifiedPolicy": RepeatedUnclassifiedPolicy,
+        "OpaqueIdentity": OpaqueIdentity,
+        "MapValue": MapValue,
+        "RepeatedMapIdentity": RepeatedMapIdentity,
     },
 )
 

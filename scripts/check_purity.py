@@ -41,17 +41,24 @@ PURE_EXPORTS = {
             "ReplayAcknowledgement",
         )
     },
+    "vs_proto.api.replay.KeyComponentKind": frozenset(
+        {"PARENT", "ITEM", "SAMPLE", "REVISION", "RECORDED_POSITION"}
+    ),
     "vs_proto.api.replay.ReplayFieldKind": frozenset({"IDENTITY", "POLICY"}),
     "protobuf": frozenset(
         {
             "Message",
             "DescMessage",
+            "DescEnum",
+            "DescFieldValue",
+            "DescFieldValueEnum",
             "Oneof",
             "DescFieldValueList",
             "DescFieldValueMap",
             "DescFieldValueMessage",
         }
     ),
+    "protobuf.wkt.google.protobuf.descriptor_pb": frozenset({"DescriptorProto"}),
     "protovalidate": frozenset({"validate"}),
     "vs_proto.api": frozenset({"replay", "Record"}),
     # Decoding bytes already in memory is a pure function of them; ``read_json`` reads a file

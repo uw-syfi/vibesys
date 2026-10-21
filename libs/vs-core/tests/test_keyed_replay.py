@@ -20,8 +20,12 @@ from vs_core.api.replay import (
     ReplayScheduler,
     ReplaySettings,
     SemanticKey,
+    classify_context,
 )
 from vs_proto.api import core_common, replay
+
+from .generated.vibesys.replay.testing.v1.context_pb import Context
+from .replay_model import LinearCausality
 
 Reply = core_common.Identity
 Root = Callable[[ReplayFlow], Coroutine[object, object, object]]
@@ -55,6 +59,7 @@ def accepted(
         type_url="type.googleapis.com/" + Reply.desc().type_name,
         value=Reply(root=value).to_binary(),
     )
+    start.accepted_sequence = seq
     start.paid = True
     start.cost_usd = 0.5
     return AcceptedReplay(seq, float(seq) if clock is None else clock, start.to_binary())
@@ -441,3 +446,188 @@ def test_joined_consumers_receive_independent_historical_messages() -> None:
     history = finish(live, ["original"])
     assert live.result == ("changed", "original")
     assert ReplayScheduler(root, history, settings()).result == live.result
+
+
+@pytest.mark.parametrize("transport", ["task", "channel", "latch", "group", "scope"])
+def test_pure_helper_wrappers_preserve_the_causal_frontier(transport: str) -> None:
+    async def old(ctx: ReplayFlow) -> object:
+        await ctx.call(ask("A"))
+        return await ctx.call(ask("B"))
+
+    async def changed(ctx: ReplayFlow) -> object:
+        channel = ctx.channel()
+        latch = ctx.latch()
+        group = ctx.group()
+
+        async def helper(child: ReplayFlow) -> object:
+            reply = await child.call(ask("A"))
+            channel.send(reply)
+            latch.set(reply)
+            return reply
+
+        if transport == "scope":
+            async with group:
+                group.start(helper)
+        else:
+            task = group.start(helper)
+            if transport == "task":
+                await task
+            elif transport == "channel":
+                await channel
+            elif transport == "latch":
+                await latch
+            else:
+                await group
+        return await ctx.call(ask("B"))
+
+    live = ReplayScheduler(old, (), settings())
+    history = finish(live, ["a", "b"])
+    replayed = ReplayScheduler(changed, history, settings())
+    assert replayed.result == live.result
+    assert replayed.frontier().unused == ()
+    assert replayed.dispatches() == ()
+
+
+def test_group_is_a_source_in_finishing_order() -> None:
+    async def root(ctx: ReplayFlow) -> object:
+        group = ctx.group()
+
+        async def a(child: ReplayFlow) -> object:
+            return (await child.call(ask("A"))).root
+
+        async def b(child: ReplayFlow) -> object:
+            return (await child.call(ask("B"))).root
+
+        group.start(a)
+        group.start(b)
+        return (await group, await group)
+
+    live = ReplayScheduler(root, (), settings())
+    a, b = live.dispatches()
+    history = [accepted(b, 1, "b"), accepted(a, 2, "a")]
+    for item in history:
+        live.accept(item)
+    assert live.result == ("b", "a")
+    assert ReplayScheduler(root, history, settings()).result == live.result
+
+
+@pytest.mark.parametrize("source_kind", ["task", "latch", "timer"])
+def test_sources_do_not_yield_a_value_twice(source_kind: str) -> None:
+    async def root(ctx: ReplayFlow) -> object:
+        async def done(_: ReplayFlow) -> object:
+            return "done"
+
+        if source_kind == "task":
+            source = ctx.group().start(done)
+        elif source_kind == "latch":
+            source = ctx.latch()
+            source.set("done")
+        else:
+            source = ctx.timer(1)
+        await source
+        return await source
+
+    if source_kind == "timer":
+        run = ReplayScheduler(root, (), settings())
+        with pytest.raises(ReplayDeadlockError, match="no producer"):
+            run.accept(AcceptedClock(1, 1, settings().initial_allowance))
+        run.close()
+    else:
+        with pytest.raises(ReplayDeadlockError, match="no producer"):
+            ReplayScheduler(root, (), settings())
+
+
+def test_typed_prompt_context_policy_is_excluded_when_scheduler_adds_dependencies() -> None:
+    def root(wording: str) -> Root:
+        async def flow(ctx: ReplayFlow) -> object:
+            await ctx.call(ask("before"))
+            context = Context(candidate="a", wording=wording)
+            call = ReplayCall(
+                SemanticKey("prompt"),
+                classify_context(context, contract="plan.v1"),
+                "plan.v1",
+                ask("prompt", policy=wording.encode()).policy,
+                Reply,
+            )
+            return await ctx.call(call)
+
+        return flow
+
+    live = ReplayScheduler(root("old"), (), settings())
+    history = finish(live, ["a", "b"])
+    replayed = ReplayScheduler(root("new wording"), history, settings())
+    assert replayed.result == live.result
+    assert replayed.frontier().drift.count == 1
+    assert replayed.dispatches() == ()
+
+
+@given(
+    lengths=st.lists(st.integers(min_value=1, max_value=5), min_size=1, max_size=4),
+    choices=st.lists(st.integers(min_value=0, max_value=100), min_size=1, max_size=20),
+)
+def test_generated_causal_digests_match_an_independent_ordered_observation_model(
+    lengths: list[int], choices: list[int]
+) -> None:
+    received = []
+
+    async def root(ctx: ReplayFlow) -> object:
+        await ctx.call(ask("seed"))
+        reports = ctx.channel()
+        group = ctx.group()
+
+        def worker(branch: int) -> Root:
+            async def child(child_ctx: ReplayFlow) -> object:
+                for sample in range(lengths[branch]):
+                    await child_ctx.call(ask(f"branch.{branch}.{sample}"))
+                    reports.send((branch, sample))
+                return None
+
+            return child
+
+        for branch in range(len(lengths)):
+            group.start(worker(branch))
+        for _ in range(sum(lengths)):
+            branch, sample = await reports
+            received.append((branch, sample))
+            await ctx.call(ask(f"planning.{branch}.{sample}"))
+        await group.all()
+        return await ctx.call(ask("final"))
+
+    live = ReplayScheduler(root, (), settings())
+    model = LinearCausality(len(lengths))
+    saved = []
+    while not live.completed:
+        starts = live.dispatches()
+        for start in starts:
+            model.check(start)
+        chosen = starts[choices[len(saved) % len(choices)] % len(starts)]
+        assert chosen.key is not None
+        observation = accepted(chosen, len(saved) + 1, f"reply-{len(saved)}")
+        model.accept(observation)
+        saved.append(observation)
+        live.accept(observation)
+    expected_order = tuple(received)
+    received.clear()
+    replayed = ReplayScheduler(root, saved, settings())
+    assert tuple(received) == expected_order
+    assert replayed.result == live.result
+    assert not replayed.frontier().unused
+
+
+def test_drift_notice_names_both_historical_and_current_roles_and_templates() -> None:
+    async def old(ctx: ReplayFlow) -> object:
+        return await ctx.call(ask("one"))
+
+    async def changed(ctx: ReplayFlow) -> object:
+        call = ask("one", policy=b"new")
+        call.policy.role = "reviewer"
+        call.policy.template = "review.j2"
+        return await ctx.call(call)
+
+    live = ReplayScheduler(old, (), settings())
+    saved = finish(live, ["a"])
+    run = ReplayScheduler(changed, saved, settings())
+    assert run.frontier().drift.count == 1
+    assert run.frontier().drift.roles == ("planner", "reviewer")
+    assert run.frontier().drift.templates == ("plan.j2", "review.j2")
+    assert run.result == live.result

@@ -5,6 +5,7 @@ from math import inf, nan
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
+from protobuf import Message
 from protobuf.wkt.google.protobuf.any_pb import Any
 from protobuf.wkt.google.protobuf.struct_pb import Struct
 
@@ -20,7 +21,12 @@ from vs_proto.api import core_common, replay
 
 from .generated.vibesys.replay.testing.v1.context_pb import (
     Context,
+    InvalidSetContext,
     NestedContext,
+    OpaqueIdentity,
+    RepeatedContext,
+    RepeatedMapIdentity,
+    RepeatedUnclassifiedPolicy,
     UnclassifiedPolicy,
 )
 
@@ -111,3 +117,54 @@ def test_typed_context_centralizes_sets_and_keeps_ordered_fields(
         nested.identity
         == classify_context(NestedContext(context=original), contract="plan.v1").identity
     )
+
+
+def test_semantic_keys_reject_unknown_fields() -> None:
+    key = SemanticKey("operation").to_proto()
+    unknown = replay.OperationKey.from_binary(key.to_binary() + b"\xa0\x06\x01")
+    with pytest.raises(ReplayIdentityError, match="unknown fields"):
+        SemanticKey.from_proto(unknown)
+
+
+def test_unknown_fields_nested_in_identity_are_rejected() -> None:
+    context = Context.from_binary(Context(candidate="a").to_binary() + b"\xa0\x06\x01")
+    with pytest.raises(ReplayIdentityError, match="unknown fields"):
+        encode_identity(NestedContext(context=context), contract="plan.v1")
+
+
+def test_set_annotation_on_a_scalar_fails_at_the_writer() -> None:
+    with pytest.raises(ReplayIdentityError, match="requires a repeated field"):
+        encode_identity(InvalidSetContext(evidence="a"), contract="plan.v1")
+
+
+def test_writer_encoding_v1_is_pinned() -> None:
+    expected = bytes.fromhex(
+        "766962657379732e6964656e7469747901000000000000000c63616e6469646174652e76310000000000000018766962657379732e636f72652e76312e4964656e7469747999fc031b5f55a1e0ad2c275528eb68c27195ed88613cddca3532f96da8df273a00000000000000030a0178"
+    )
+    value = encode_identity(core_common.Identity(root="x"), contract="candidate.v1")
+    assert value.version == 1
+    assert value.canonical == expected
+
+
+@pytest.mark.parametrize("message", [OpaqueIdentity(), RepeatedMapIdentity()])
+def test_forbidden_schemas_nested_in_empty_repeated_fields_are_rejected(message: Message) -> None:
+    with pytest.raises(ReplayIdentityError, match=r"Any|map"):
+        encode_identity(message, contract="plan.v1")
+
+
+def test_repeated_context_fields_are_classified_even_when_absent() -> None:
+    with pytest.raises(ReplayIdentityError, match="unclassified prompt field"):
+        classify_context(RepeatedUnclassifiedPolicy(), contract="plan.v1")
+
+
+def test_policy_inside_repeated_identity_context_does_not_change_identity() -> None:
+    before = RepeatedContext(
+        contexts=[Context(candidate="a", wording="old"), Context(candidate="b", wording="old")]
+    )
+    after = RepeatedContext(
+        contexts=[Context(candidate="a", wording="new"), Context(candidate="b", wording="new")]
+    )
+    identity = classify_context(before, contract="plan.v1").identity
+    assert identity == classify_context(after, contract="plan.v1").identity
+    after.contexts.reverse()
+    assert identity != classify_context(after, contract="plan.v1").identity

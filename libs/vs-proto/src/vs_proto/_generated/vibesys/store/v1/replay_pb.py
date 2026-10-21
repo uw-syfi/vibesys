@@ -67,7 +67,7 @@ class KeyComponent(Message[_KeyComponentFields]):
     Attributes:
         kind:
             ```proto
-            string kind = 1;
+            vibesys.store.v1.KeyComponentKind kind = 1;
             ```
         value:
             ```proto
@@ -82,12 +82,12 @@ class KeyComponent(Message[_KeyComponentFields]):
         def __init__(
             self,
             *,
-            kind: str = "",
+            kind: KeyComponentKind | None = None,
             value: str = "",
         ) -> None:
             pass
 
-        kind: str
+        kind: KeyComponentKind
         value: str
 
 _ReplayAllowanceFields: TypeAlias = Literal["iterations", "capacity", "remaining"]
@@ -132,7 +132,7 @@ class ReplayAllowance(Message[_ReplayAllowanceFields]):
         capacity: int
         remaining: float
 
-_ReplayPolicyFields: TypeAlias = Literal["role", "template", "content", "reply_type"]
+_ReplayPolicyFields: TypeAlias = Literal["role", "template", "content", "reply_type", "reply_schema_digest"]
 
 class ReplayPolicy(Message[_ReplayPolicyFields]):
     """
@@ -157,9 +157,15 @@ class ReplayPolicy(Message[_ReplayPolicyFields]):
             ```proto
             string reply_type = 4;
             ```
+        reply_schema_digest:
+            Derived by the writer from the reachable retained reply descriptors.
+
+            ```proto
+            optional bytes reply_schema_digest = 5;
+            ```
     """
 
-    __slots__ = ("role", "template", "content", "reply_type")
+    __slots__ = ("role", "template", "content", "reply_type", "reply_schema_digest")
 
     if TYPE_CHECKING:
 
@@ -170,6 +176,7 @@ class ReplayPolicy(Message[_ReplayPolicyFields]):
             template: str = "",
             content: bytes = b"",
             reply_type: str = "",
+            reply_schema_digest: bytes | None = None,
         ) -> None:
             pass
 
@@ -177,8 +184,9 @@ class ReplayPolicy(Message[_ReplayPolicyFields]):
         template: str
         content: bytes
         reply_type: str
+        reply_schema_digest: bytes
 
-_OperationReplayFields: TypeAlias = Literal["key", "encoding_version", "identity", "identity_digest", "dependencies", "policy", "outcome", "paid", "cost_usd", "allowance"]
+_OperationReplayFields: TypeAlias = Literal["key", "encoding_version", "identity", "identity_digest", "dependencies", "policy", "outcome", "paid", "cost_usd", "allowance", "accepted_sequence"]
 
 class OperationReplay(Message[_OperationReplayFields]):
     """
@@ -232,9 +240,15 @@ class OperationReplay(Message[_OperationReplayFields]):
             ```proto
             optional vibesys.store.v1.ReplayAllowance allowance = 10;
             ```
+        accepted_sequence:
+            Later span updates retain this sequence; they are not new acceptances.
+
+            ```proto
+            optional uint64 accepted_sequence = 11;
+            ```
     """
 
-    __slots__ = ("key", "encoding_version", "identity", "identity_digest", "dependencies", "policy", "outcome", "paid", "cost_usd", "allowance")
+    __slots__ = ("key", "encoding_version", "identity", "identity_digest", "dependencies", "policy", "outcome", "paid", "cost_usd", "allowance", "accepted_sequence")
 
     if TYPE_CHECKING:
 
@@ -251,6 +265,7 @@ class OperationReplay(Message[_OperationReplayFields]):
             paid: bool = False,
             cost_usd: float | None = None,
             allowance: ReplayAllowance | None = None,
+            accepted_sequence: int | None = None,
         ) -> None:
             pass
 
@@ -264,6 +279,7 @@ class OperationReplay(Message[_OperationReplayFields]):
         paid: bool
         cost_usd: float
         allowance: ReplayAllowance | None
+        accepted_sequence: int
 
 _ReplayClockFields: TypeAlias = Literal["allowance"]
 
@@ -345,8 +361,10 @@ class ReplayAcknowledgement(Message[_ReplayAcknowledgementFields]):
 
     Attributes:
         notice_id:
+            A launch without a preceding unacknowledged notice still records its id.
+
             ```proto
-            string notice_id = 1;
+            optional string notice_id = 1;
             ```
         launch_request_id:
             ```proto
@@ -361,7 +379,7 @@ class ReplayAcknowledgement(Message[_ReplayAcknowledgementFields]):
         def __init__(
             self,
             *,
-            notice_id: str = "",
+            notice_id: str | None = None,
             launch_request_id: str = "",
         ) -> None:
             pass
@@ -396,6 +414,46 @@ class ReplayFieldKind(Enum):
     IDENTITY = 1
     POLICY = 2
 
+class KeyComponentKind(Enum):
+    """
+    ```proto
+    enum vibesys.store.v1.KeyComponentKind
+    ```
+
+    Attributes:
+        UNSPECIFIED:
+            ```proto
+            KEY_COMPONENT_KIND_UNSPECIFIED = 0
+            ```
+        PARENT:
+            ```proto
+            KEY_COMPONENT_KIND_PARENT = 1
+            ```
+        ITEM:
+            ```proto
+            KEY_COMPONENT_KIND_ITEM = 2
+            ```
+        SAMPLE:
+            ```proto
+            KEY_COMPONENT_KIND_SAMPLE = 3
+            ```
+        REVISION:
+            ```proto
+            KEY_COMPONENT_KIND_REVISION = 4
+            ```
+        RECORDED_POSITION:
+            ```proto
+            KEY_COMPONENT_KIND_RECORDED_POSITION = 5
+            ```
+    """
+
+    UNSPECIFIED = 0
+    PARENT = 1
+    ITEM = 2
+    SAMPLE = 3
+    REVISION = 4
+    RECORDED_POSITION = 5
+
 ext_replay_field: Final[Extension[FieldOptions, ReplayFieldKind]] = Extension()
 """
 ```proto
@@ -414,7 +472,7 @@ extend google.protobuf.FieldOptions { optional bool replay_set = 51101 [json_nam
 
 
 _DESC = file_desc(
-    b'\n\x1dvibesys/store/v1/replay.proto\x12\x10vibesys.store.v1\x1a\x1bbuf/validate/validate.proto\x1a\x19google/protobuf/any.proto\x1a google/protobuf/descriptor.proto"k\n\x0cOperationKey\x12%\n\toperation\x18\x01 \x01(\tR\toperationB\x07\xbaH\x04r\x02\x10\x01\x124\n\x05scope\x18\x02 \x03(\x0b2\x1e.vibesys.store.v1.KeyComponentR\x05scope"{\n\x0cKeyComponent\x12L\n\x04kind\x18\x01 \x01(\tR\x04kindB8\xbaH5r3R\x06parentR\x04itemR\x06sampleR\x08revisionR\x11recorded_position\x12\x1d\n\x05value\x18\x02 \x01(\tR\x05valueB\x07\xbaH\x04r\x02\x10\x01"}\n\x0fReplayAllowance\x12\x1e\n\niterations\x18\x01 \x01(\x04R\niterations\x12\x1a\n\x08capacity\x18\x02 \x01(\x04R\x08capacity\x12.\n\tremaining\x18\x03 \x01(\x01R\tremainingB\x10\xbaH\r\x12\x0b@\x01)\x00\x00\x00\x00\x00\x00\x00\x00"\x80\x01\n\x0cReplayPolicy\x12\x12\n\x04role\x18\x01 \x01(\tR\x04role\x12\x1a\n\x08template\x18\x02 \x01(\tR\x08template\x12\x18\n\x07content\x18\x03 \x01(\x0cR\x07content\x12&\n\nreply_type\x18\x04 \x01(\tR\treplyTypeB\x07\xbaH\x04r\x02\x10\x01"\x8f\x04\n\x0fOperationReplay\x128\n\x03key\x18\x01 \x01(\x0b2\x1e.vibesys.store.v1.OperationKeyR\x03keyB\x06\xbaH\x03\xc8\x01\x01\x122\n\x10encoding_version\x18\x02 \x01(\rR\x0fencodingVersionB\x07\xbaH\x04*\x02\x08\x01\x12#\n\x08identity\x18\x03 \x01(\x0cR\x08identityB\x07\xbaH\x04z\x02\x10\x01\x120\n\x0fidentity_digest\x18\x04 \x01(\x0cR\x0eidentityDigestB\x07\xbaH\x04z\x02h \x12+\n\x0cdependencies\x18\x05 \x01(\x0cR\x0cdependenciesB\x07\xbaH\x04z\x02h \x12>\n\x06policy\x18\x06 \x01(\x0b2\x1e.vibesys.store.v1.ReplayPolicyR\x06policyB\x06\xbaH\x03\xc8\x01\x01\x12.\n\x07outcome\x18\x07 \x01(\x0b2\x14.google.protobuf.AnyR\x07outcome\x12\x12\n\x04paid\x18\x08 \x01(\x08R\x04paid\x120\n\x08cost_usd\x18\t \x01(\x01H\x00R\x07costUsdB\x10\xbaH\r\x12\x0b@\x01)\x00\x00\x00\x00\x00\x00\x00\x00\x88\x01\x01\x12G\n\tallowance\x18\n \x01(\x0b2!.vibesys.store.v1.ReplayAllowanceR\tallowanceB\x06\xbaH\x03\xc8\x01\x01B\x0b\n\t_cost_usd"V\n\x0bReplayClock\x12G\n\tallowance\x18\x01 \x01(\x0b2!.vibesys.store.v1.ReplayAllowanceR\tallowanceB\x06\xbaH\x03\xc8\x01\x01"\x9c\x01\n\x0cReplayNotice\x12\x17\n\x02id\x18\x01 \x01(\tR\x02idB\x07\xbaH\x04r\x02\x10\x01\x129\n\x06unused\x18\x02 \x03(\x0b2!.vibesys.store.v1.OperationReplayR\x06unused\x128\n\x07pending\x18\x03 \x03(\x0b2\x1e.vibesys.store.v1.OperationKeyR\x07pending"r\n\x15ReplayAcknowledgement\x12$\n\tnotice_id\x18\x01 \x01(\tR\x08noticeIdB\x07\xbaH\x04r\x02\x10\x01\x123\n\x11launch_request_id\x18\x02 \x01(\tR\x0flaunchRequestIdB\x07\xbaH\x04r\x02\x10\x01*r\n\x0fReplayFieldKind\x12!\n\x1dREPLAY_FIELD_KIND_UNSPECIFIED\x10\x00\x12\x1e\n\x1aREPLAY_FIELD_KIND_IDENTITY\x10\x01\x12\x1c\n\x18REPLAY_FIELD_KIND_POLICY\x10\x02:e\n\x0creplay_field\x18\x9c\x8f\x03 \x01(\x0e2!.vibesys.store.v1.ReplayFieldKind\x12\x1d.google.protobuf.FieldOptionsR\x0breplayField:>\n\nreplay_set\x18\x9d\x8f\x03 \x01(\x08\x12\x1d.google.protobuf.FieldOptionsR\treplaySetBAZ?github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1b\x06proto3',
+    b'\n\x1dvibesys/store/v1/replay.proto\x12\x10vibesys.store.v1\x1a\x1bbuf/validate/validate.proto\x1a\x19google/protobuf/any.proto\x1a google/protobuf/descriptor.proto"k\n\x0cOperationKey\x12%\n\toperation\x18\x01 \x01(\tR\toperationB\x07\xbaH\x04r\x02\x10\x01\x124\n\x05scope\x18\x02 \x03(\x0b2\x1e.vibesys.store.v1.KeyComponentR\x05scope"q\n\x0cKeyComponent\x12B\n\x04kind\x18\x01 \x01(\x0e2".vibesys.store.v1.KeyComponentKindR\x04kindB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x12\x1d\n\x05value\x18\x02 \x01(\tR\x05valueB\x07\xbaH\x04r\x02\x10\x01"}\n\x0fReplayAllowance\x12\x1e\n\niterations\x18\x01 \x01(\x04R\niterations\x12\x1a\n\x08capacity\x18\x02 \x01(\x04R\x08capacity\x12.\n\tremaining\x18\x03 \x01(\x01R\tremainingB\x10\xbaH\r\x12\x0b@\x01)\x00\x00\x00\x00\x00\x00\x00\x00"\xd6\x01\n\x0cReplayPolicy\x12\x12\n\x04role\x18\x01 \x01(\tR\x04role\x12\x1a\n\x08template\x18\x02 \x01(\tR\x08template\x12\x18\n\x07content\x18\x03 \x01(\x0cR\x07content\x12&\n\nreply_type\x18\x04 \x01(\tR\treplyTypeB\x07\xbaH\x04r\x02\x10\x01\x12<\n\x13reply_schema_digest\x18\x05 \x01(\x0cH\x00R\x11replySchemaDigestB\x07\xbaH\x04z\x02h \x88\x01\x01B\x16\n\x14_reply_schema_digest"\x89\x07\n\x0fOperationReplay\x128\n\x03key\x18\x01 \x01(\x0b2\x1e.vibesys.store.v1.OperationKeyR\x03keyB\x06\xbaH\x03\xc8\x01\x01\x122\n\x10encoding_version\x18\x02 \x01(\rR\x0fencodingVersionB\x07\xbaH\x04*\x02\x08\x01\x12#\n\x08identity\x18\x03 \x01(\x0cR\x08identityB\x07\xbaH\x04z\x02\x10\x01\x120\n\x0fidentity_digest\x18\x04 \x01(\x0cR\x0eidentityDigestB\x07\xbaH\x04z\x02h \x12+\n\x0cdependencies\x18\x05 \x01(\x0cR\x0cdependenciesB\x07\xbaH\x04z\x02h \x12>\n\x06policy\x18\x06 \x01(\x0b2\x1e.vibesys.store.v1.ReplayPolicyR\x06policyB\x06\xbaH\x03\xc8\x01\x01\x12.\n\x07outcome\x18\x07 \x01(\x0b2\x14.google.protobuf.AnyR\x07outcome\x12\x12\n\x04paid\x18\x08 \x01(\x08R\x04paid\x120\n\x08cost_usd\x18\t \x01(\x01H\x00R\x07costUsdB\x10\xbaH\r\x12\x0b@\x01)\x00\x00\x00\x00\x00\x00\x00\x00\x88\x01\x01\x12G\n\tallowance\x18\n \x01(\x0b2!.vibesys.store.v1.ReplayAllowanceR\tallowanceB\x06\xbaH\x03\xc8\x01\x01\x129\n\x11accepted_sequence\x18\x0b \x01(\x04H\x01R\x10acceptedSequenceB\x07\xbaH\x042\x02 \x00\x88\x01\x01B\x0b\n\t_cost_usdB\x14\n\x12_accepted_sequence:\xa6\x02\xbaH\xa2\x02\x1a\x96\x01\n\x1doperation_replay.reply_schema\x12;recorded operations require the writer\'s reply schema proof\x1a8has(this.policy) && has(this.policy.reply_schema_digest)\x1a\x86\x01\n\x1boperation_replay.acceptance\x125an outcome requires its immutable acceptance sequence\x1a0has(this.outcome) == has(this.accepted_sequence)"V\n\x0bReplayClock\x12G\n\tallowance\x18\x01 \x01(\x0b2!.vibesys.store.v1.ReplayAllowanceR\tallowanceB\x06\xbaH\x03\xc8\x01\x01"\xad\x02\n\x0cReplayNotice\x12\x17\n\x02id\x18\x01 \x01(\tR\x02idB\x07\xbaH\x04r\x02\x10\x01\x12C\n\x06unused\x18\x02 \x03(\x0b2!.vibesys.store.v1.OperationReplayR\x06unusedB\x08\xbaH\x05\x92\x01\x02\x08\x01\x128\n\x07pending\x18\x03 \x03(\x0b2\x1e.vibesys.store.v1.OperationKeyR\x07pending:\x84\x01\xbaH\x80\x01\x1a~\n\x1areplay_notice.paid_results\x122unused entries must identify accepted paid results\x1a,this.unused.all(x, x.paid && has(x.outcome))"\x85\x01\n\x15ReplayAcknowledgement\x12)\n\tnotice_id\x18\x01 \x01(\tH\x00R\x08noticeIdB\x07\xbaH\x04r\x02\x10\x01\x88\x01\x01\x123\n\x11launch_request_id\x18\x02 \x01(\tR\x0flaunchRequestIdB\x07\xbaH\x04r\x02\x10\x01B\x0c\n\n_notice_id*r\n\x0fReplayFieldKind\x12!\n\x1dREPLAY_FIELD_KIND_UNSPECIFIED\x10\x00\x12\x1e\n\x1aREPLAY_FIELD_KIND_IDENTITY\x10\x01\x12\x1c\n\x18REPLAY_FIELD_KIND_POLICY\x10\x02*\xdc\x01\n\x10KeyComponentKind\x12"\n\x1eKEY_COMPONENT_KIND_UNSPECIFIED\x10\x00\x12\x1d\n\x19KEY_COMPONENT_KIND_PARENT\x10\x01\x12\x1b\n\x17KEY_COMPONENT_KIND_ITEM\x10\x02\x12\x1d\n\x19KEY_COMPONENT_KIND_SAMPLE\x10\x03\x12\x1f\n\x1bKEY_COMPONENT_KIND_REVISION\x10\x04\x12(\n$KEY_COMPONENT_KIND_RECORDED_POSITION\x10\x05:e\n\x0creplay_field\x18\x9c\x8f\x03 \x01(\x0e2!.vibesys.store.v1.ReplayFieldKind\x12\x1d.google.protobuf.FieldOptionsR\x0breplayField:>\n\nreplay_set\x18\x9d\x8f\x03 \x01(\x08\x12\x1d.google.protobuf.FieldOptionsR\treplaySetBAZ?github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1b\x06proto3',
     [
         validate_pb.desc(),
         any_pb.desc(),
@@ -430,6 +488,7 @@ _DESC = file_desc(
         "ReplayNotice": ReplayNotice,
         "ReplayAcknowledgement": ReplayAcknowledgement,
         "ReplayFieldKind": ReplayFieldKind,
+        "KeyComponentKind": KeyComponentKind,
         "replay_field": ext_replay_field,
         "replay_set": ext_replay_set,
     },

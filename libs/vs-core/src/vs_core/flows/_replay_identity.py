@@ -8,6 +8,7 @@ from hashlib import sha256
 from math import isfinite
 
 from protobuf import (
+    DescFieldValue,
     DescFieldValueList,
     DescFieldValueMap,
     DescFieldValueMessage,
@@ -44,7 +45,7 @@ class SemanticKey:
     """Stable operation and typed scope; positions refer only to recorded outcomes."""
 
     operation: str
-    scope: tuple[tuple[str, str], ...] = ()
+    scope: tuple[tuple[pb.KeyComponentKind, str], ...] = ()
 
     def __post_init__(self) -> None:
         validate(self.to_proto())
@@ -58,29 +59,36 @@ class SemanticKey:
     @classmethod
     def from_proto(cls, key: pb.OperationKey) -> SemanticKey:
         validate(key)
+        if key.to_binary() != key.to_binary(write_unknown_fields=False):
+            problem = "semantic key contains unknown fields"
+            raise ReplayIdentityError(problem)
         return cls(key.operation, tuple((part.kind, part.value) for part in key.scope))
 
     def item(self, item: str) -> SemanticKey:
-        return SemanticKey(self.operation, (*self.scope, ("item", item)))
+        return SemanticKey(self.operation, (*self.scope, (pb.KeyComponentKind.ITEM, item)))
 
     def parent(self, outcome_digest: bytes) -> SemanticKey:
         if len(outcome_digest) != DIGEST_BYTES:
             message = "parent must be a recorded outcome digest"
             raise ReplayIdentityError(message)
-        return SemanticKey(self.operation, (*self.scope, ("parent", outcome_digest.hex())))
+        return SemanticKey(
+            self.operation, (*self.scope, (pb.KeyComponentKind.PARENT, outcome_digest.hex()))
+        )
 
     def recorded_position(self, outcome_digest: bytes, position: int) -> SemanticKey:
         if isinstance(position, bool) or position < 0:
             message = "recorded position must be a nonnegative integer"
             raise ReplayIdentityError(message)
         parent = self.parent(outcome_digest)
-        return SemanticKey(self.operation, (*parent.scope, ("recorded_position", str(position))))
+        return SemanticKey(
+            self.operation, (*parent.scope, (pb.KeyComponentKind.RECORDED_POSITION, str(position)))
+        )
 
     def sample(self, sample: str) -> SemanticKey:
-        return SemanticKey(self.operation, (*self.scope, ("sample", sample)))
+        return SemanticKey(self.operation, (*self.scope, (pb.KeyComponentKind.SAMPLE, sample)))
 
     def revision(self, revision: str) -> SemanticKey:
-        return SemanticKey(self.operation, (*self.scope, ("revision", revision)))
+        return SemanticKey(self.operation, (*self.scope, (pb.KeyComponentKind.REVISION, revision)))
 
 
 @dataclass(frozen=True)
@@ -96,6 +104,14 @@ class EncodedIdentity:
         return sha256(self.canonical).digest()
 
 
+def _message_type(value: DescFieldValue) -> DescMessage | None:
+    if isinstance(value, DescFieldValueMessage):
+        return value.message
+    if isinstance(value, DescFieldValueList) and isinstance(value.element, DescMessage):
+        return value.element
+    return None
+
+
 def _check_schema(desc: DescMessage, seen: set[str]) -> None:
     if desc.type_name in seen:
         return
@@ -105,13 +121,21 @@ def _check_schema(desc: DescMessage, seen: set[str]) -> None:
         raise ReplayIdentityError(message)
     for field in desc.fields:
         value = field.value
+        if (
+            field.proto.options is not None
+            and field.proto.options[pb.ext_replay_set]
+            and not isinstance(value, DescFieldValueList)
+        ):
+            problem = (
+                f"identity {desc.type_name}.{field.name}: replay_set requires a repeated field"
+            )
+            raise ReplayIdentityError(problem)
         if isinstance(value, DescFieldValueMap):
             message = f"identity {desc.type_name}.{field.name} cannot be a map"
             raise ReplayIdentityError(message)
-        if isinstance(value, DescFieldValueList):
-            value = value.element
-        if isinstance(value, DescFieldValueMessage):
-            _check_schema(value.message, seen)
+        nested = _message_type(value)
+        if nested is not None:
+            _check_schema(nested, seen)
 
 
 def _normalize_value(value: object) -> object:
@@ -128,7 +152,16 @@ def _normalize_value(value: object) -> object:
 def _sort_key(value: object) -> bytes:
     if isinstance(value, Message):
         return value.to_binary()
-    return repr(value).encode()
+    if isinstance(value, bytes):
+        return value
+    if isinstance(value, str):
+        return value.encode("utf-8")
+    if isinstance(value, int):
+        return str(int(value)).encode("ascii")
+    if isinstance(value, float):
+        return value.hex().encode("ascii")
+    problem = "identity set contains an unsupported protobuf value"
+    raise ReplayIdentityError(problem)
 
 
 def _normalize(message: Message) -> Message:
@@ -196,11 +229,9 @@ def _check_classification(desc: DescMessage, seen: set[str]) -> None:
         if kind not in (pb.ReplayFieldKind.IDENTITY, pb.ReplayFieldKind.POLICY):
             problem = f"unclassified prompt field {desc.type_name}.{field.name}"
             raise ReplayIdentityError(problem)
-        value = field.value
-        if isinstance(value, DescFieldValueList):
-            value = value.element
-        if isinstance(value, DescFieldValueMessage):
-            _check_classification(value.message, seen)
+        nested = _message_type(field.value)
+        if nested is not None:
+            _check_classification(nested, seen)
 
 
 def _classified(message: Message) -> Message:
@@ -218,7 +249,7 @@ def _classified(message: Message) -> Message:
             if isinstance(value, Message):
                 identity[field] = _classified(value)
             elif isinstance(field.value, DescFieldValueList) and isinstance(
-                field.value.element, DescFieldValueMessage
+                field.value.element, DescMessage
             ):
                 identity[field] = [_classified(item) for item in value]
     return identity

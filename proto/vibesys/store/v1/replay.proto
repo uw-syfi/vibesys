@@ -24,8 +24,16 @@ message OperationKey {
   string operation = 1 [(buf.validate.field).string.min_len = 1];
   repeated KeyComponent scope = 2;
 }
+enum KeyComponentKind {
+  KEY_COMPONENT_KIND_UNSPECIFIED = 0;
+  KEY_COMPONENT_KIND_PARENT = 1;
+  KEY_COMPONENT_KIND_ITEM = 2;
+  KEY_COMPONENT_KIND_SAMPLE = 3;
+  KEY_COMPONENT_KIND_REVISION = 4;
+  KEY_COMPONENT_KIND_RECORDED_POSITION = 5;
+}
 message KeyComponent {
-  string kind = 1 [(buf.validate.field).string = {in: ["parent", "item", "sample", "revision", "recorded_position"]}];
+  KeyComponentKind kind = 1 [(buf.validate.field).enum = {defined_only: true, not_in: [0]}];
   string value = 2 [(buf.validate.field).string.min_len = 1];
 }
 
@@ -40,11 +48,23 @@ message ReplayPolicy {
   string template = 2;
   bytes content = 3;
   string reply_type = 4 [(buf.validate.field).string.min_len = 1];
+  // Derived by the writer from the reachable retained reply descriptors.
+  optional bytes reply_schema_digest = 5 [(buf.validate.field).bytes.len = 32];
 }
 
 // Immutable execution metadata, separate from mutable span labels. Outcome Any
 // is decoded with the epoch's retained descriptors, never the current reply type.
 message OperationReplay {
+  option (buf.validate.message).cel = {
+    id: "operation_replay.reply_schema"
+    message: "recorded operations require the writer's reply schema proof"
+    expression: "has(this.policy) && has(this.policy.reply_schema_digest)"
+  };
+  option (buf.validate.message).cel = {
+    id: "operation_replay.acceptance"
+    message: "an outcome requires its immutable acceptance sequence"
+    expression: "has(this.outcome) == has(this.accepted_sequence)"
+  };
   OperationKey key = 1 [(buf.validate.field).required = true];
   uint32 encoding_version = 2 [(buf.validate.field).uint32.const = 1];
   bytes identity = 3 [(buf.validate.field).bytes.min_len = 1];
@@ -56,6 +76,8 @@ message OperationReplay {
   bool paid = 8;
   optional double cost_usd = 9 [(buf.validate.field).double = {gte: 0, finite: true}];
   ReplayAllowance allowance = 10 [(buf.validate.field).required = true];
+  // Later span updates retain this sequence; they are not new acceptances.
+  optional uint64 accepted_sequence = 11 [(buf.validate.field).uint64.gt = 0];
 }
 
 // Timer-only progress is an observation, not a keyed paid operation.
@@ -64,11 +86,17 @@ message ReplayClock {
 }
 
 message ReplayNotice {
+  option (buf.validate.message).cel = {
+    id: "replay_notice.paid_results"
+    message: "unused entries must identify accepted paid results"
+    expression: "this.unused.all(x, x.paid && has(x.outcome))"
+  };
   string id = 1 [(buf.validate.field).string.min_len = 1];
-  repeated OperationReplay unused = 2;
+  repeated OperationReplay unused = 2 [(buf.validate.field).repeated.min_items = 1];
   repeated OperationKey pending = 3;
 }
 message ReplayAcknowledgement {
-  string notice_id = 1 [(buf.validate.field).string.min_len = 1];
+  // A launch without a preceding unacknowledged notice still records its id.
+  optional string notice_id = 1 [(buf.validate.field).string.min_len = 1];
   string launch_request_id = 2 [(buf.validate.field).string.min_len = 1];
 }

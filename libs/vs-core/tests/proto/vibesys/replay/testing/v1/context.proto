@@ -2,6 +2,7 @@ syntax = "proto3";
 package vibesys.replay.testing.v1;
 
 import "vibesys/store/v1/replay.proto";
+import "google/protobuf/any.proto";
 
 // Test-only typed renderer input. Production strategies own their context schema.
 message Context {
@@ -18,4 +19,24 @@ message UnclassifiedContext {
 }
 message UnclassifiedPolicy {
   UnclassifiedContext context = 1 [(vibesys.store.v1.replay_field) = REPLAY_FIELD_KIND_POLICY];
+}
+
+message InvalidSetContext {
+  string evidence = 1 [(vibesys.store.v1.replay_set) = true];
+}
+
+message RepeatedContext {
+  repeated Context contexts = 1 [(vibesys.store.v1.replay_field) = REPLAY_FIELD_KIND_IDENTITY];
+}
+message RepeatedUnclassifiedPolicy {
+  repeated UnclassifiedContext contexts = 1 [(vibesys.store.v1.replay_field) = REPLAY_FIELD_KIND_POLICY];
+}
+message OpaqueIdentity {
+  repeated google.protobuf.Any values = 1;
+}
+message MapValue {
+  map<string, string> items = 1;
+}
+message RepeatedMapIdentity {
+  repeated MapValue values = 1;
 }

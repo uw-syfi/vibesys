@@ -74,6 +74,64 @@ func (ReplayFieldKind) EnumDescriptor() ([]byte, []int) {
 	return file_vibesys_store_v1_replay_proto_rawDescGZIP(), []int{0}
 }
 
+type KeyComponentKind int32
+
+const (
+	KeyComponentKind_KEY_COMPONENT_KIND_UNSPECIFIED       KeyComponentKind = 0
+	KeyComponentKind_KEY_COMPONENT_KIND_PARENT            KeyComponentKind = 1
+	KeyComponentKind_KEY_COMPONENT_KIND_ITEM              KeyComponentKind = 2
+	KeyComponentKind_KEY_COMPONENT_KIND_SAMPLE            KeyComponentKind = 3
+	KeyComponentKind_KEY_COMPONENT_KIND_REVISION          KeyComponentKind = 4
+	KeyComponentKind_KEY_COMPONENT_KIND_RECORDED_POSITION KeyComponentKind = 5
+)
+
+// Enum value maps for KeyComponentKind.
+var (
+	KeyComponentKind_name = map[int32]string{
+		0: "KEY_COMPONENT_KIND_UNSPECIFIED",
+		1: "KEY_COMPONENT_KIND_PARENT",
+		2: "KEY_COMPONENT_KIND_ITEM",
+		3: "KEY_COMPONENT_KIND_SAMPLE",
+		4: "KEY_COMPONENT_KIND_REVISION",
+		5: "KEY_COMPONENT_KIND_RECORDED_POSITION",
+	}
+	KeyComponentKind_value = map[string]int32{
+		"KEY_COMPONENT_KIND_UNSPECIFIED":       0,
+		"KEY_COMPONENT_KIND_PARENT":            1,
+		"KEY_COMPONENT_KIND_ITEM":              2,
+		"KEY_COMPONENT_KIND_SAMPLE":            3,
+		"KEY_COMPONENT_KIND_REVISION":          4,
+		"KEY_COMPONENT_KIND_RECORDED_POSITION": 5,
+	}
+)
+
+func (x KeyComponentKind) Enum() *KeyComponentKind {
+	p := new(KeyComponentKind)
+	*p = x
+	return p
+}
+
+func (x KeyComponentKind) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (KeyComponentKind) Descriptor() protoreflect.EnumDescriptor {
+	return file_vibesys_store_v1_replay_proto_enumTypes[1].Descriptor()
+}
+
+func (KeyComponentKind) Type() protoreflect.EnumType {
+	return &file_vibesys_store_v1_replay_proto_enumTypes[1]
+}
+
+func (x KeyComponentKind) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use KeyComponentKind.Descriptor instead.
+func (KeyComponentKind) EnumDescriptor() ([]byte, []int) {
+	return file_vibesys_store_v1_replay_proto_rawDescGZIP(), []int{1}
+}
+
 // Names are semantic, never source locations or live collection positions.
 type OperationKey struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -129,7 +187,7 @@ func (x *OperationKey) GetScope() []*KeyComponent {
 
 type KeyComponent struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Kind          string                 `protobuf:"bytes,1,opt,name=kind,proto3" json:"kind,omitempty"`
+	Kind          KeyComponentKind       `protobuf:"varint,1,opt,name=kind,proto3,enum=vibesys.store.v1.KeyComponentKind" json:"kind,omitempty"`
 	Value         string                 `protobuf:"bytes,2,opt,name=value,proto3" json:"value,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -165,11 +223,11 @@ func (*KeyComponent) Descriptor() ([]byte, []int) {
 	return file_vibesys_store_v1_replay_proto_rawDescGZIP(), []int{1}
 }
 
-func (x *KeyComponent) GetKind() string {
+func (x *KeyComponent) GetKind() KeyComponentKind {
 	if x != nil {
 		return x.Kind
 	}
-	return ""
+	return KeyComponentKind_KEY_COMPONENT_KIND_UNSPECIFIED
 }
 
 func (x *KeyComponent) GetValue() string {
@@ -241,13 +299,15 @@ func (x *ReplayAllowance) GetRemaining() float64 {
 }
 
 type ReplayPolicy struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Role          string                 `protobuf:"bytes,1,opt,name=role,proto3" json:"role,omitempty"`
-	Template      string                 `protobuf:"bytes,2,opt,name=template,proto3" json:"template,omitempty"`
-	Content       []byte                 `protobuf:"bytes,3,opt,name=content,proto3" json:"content,omitempty"`
-	ReplyType     string                 `protobuf:"bytes,4,opt,name=reply_type,json=replyType,proto3" json:"reply_type,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	Role      string                 `protobuf:"bytes,1,opt,name=role,proto3" json:"role,omitempty"`
+	Template  string                 `protobuf:"bytes,2,opt,name=template,proto3" json:"template,omitempty"`
+	Content   []byte                 `protobuf:"bytes,3,opt,name=content,proto3" json:"content,omitempty"`
+	ReplyType string                 `protobuf:"bytes,4,opt,name=reply_type,json=replyType,proto3" json:"reply_type,omitempty"`
+	// Derived by the writer from the reachable retained reply descriptors.
+	ReplySchemaDigest []byte `protobuf:"bytes,5,opt,name=reply_schema_digest,json=replySchemaDigest,proto3,oneof" json:"reply_schema_digest,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *ReplayPolicy) Reset() {
@@ -308,6 +368,13 @@ func (x *ReplayPolicy) GetReplyType() string {
 	return ""
 }
 
+func (x *ReplayPolicy) GetReplySchemaDigest() []byte {
+	if x != nil {
+		return x.ReplySchemaDigest
+	}
+	return nil
+}
+
 // Immutable execution metadata, separate from mutable span labels. Outcome Any
 // is decoded with the epoch's retained descriptors, never the current reply type.
 type OperationReplay struct {
@@ -320,11 +387,13 @@ type OperationReplay struct {
 	Policy          *ReplayPolicy          `protobuf:"bytes,6,opt,name=policy,proto3" json:"policy,omitempty"`
 	Outcome         *anypb.Any             `protobuf:"bytes,7,opt,name=outcome,proto3" json:"outcome,omitempty"`
 	// seq and clock come exclusively from the accepting Record envelope.
-	Paid          bool             `protobuf:"varint,8,opt,name=paid,proto3" json:"paid,omitempty"`
-	CostUsd       *float64         `protobuf:"fixed64,9,opt,name=cost_usd,json=costUsd,proto3,oneof" json:"cost_usd,omitempty"`
-	Allowance     *ReplayAllowance `protobuf:"bytes,10,opt,name=allowance,proto3" json:"allowance,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Paid      bool             `protobuf:"varint,8,opt,name=paid,proto3" json:"paid,omitempty"`
+	CostUsd   *float64         `protobuf:"fixed64,9,opt,name=cost_usd,json=costUsd,proto3,oneof" json:"cost_usd,omitempty"`
+	Allowance *ReplayAllowance `protobuf:"bytes,10,opt,name=allowance,proto3" json:"allowance,omitempty"`
+	// Later span updates retain this sequence; they are not new acceptances.
+	AcceptedSequence *uint64 `protobuf:"varint,11,opt,name=accepted_sequence,json=acceptedSequence,proto3,oneof" json:"accepted_sequence,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *OperationReplay) Reset() {
@@ -425,6 +494,13 @@ func (x *OperationReplay) GetAllowance() *ReplayAllowance {
 		return x.Allowance
 	}
 	return nil
+}
+
+func (x *OperationReplay) GetAcceptedSequence() uint64 {
+	if x != nil && x.AcceptedSequence != nil {
+		return *x.AcceptedSequence
+	}
+	return 0
 }
 
 // Timer-only progress is an observation, not a keyed paid operation.
@@ -533,9 +609,10 @@ func (x *ReplayNotice) GetPending() []*OperationKey {
 }
 
 type ReplayAcknowledgement struct {
-	state           protoimpl.MessageState `protogen:"open.v1"`
-	NoticeId        string                 `protobuf:"bytes,1,opt,name=notice_id,json=noticeId,proto3" json:"notice_id,omitempty"`
-	LaunchRequestId string                 `protobuf:"bytes,2,opt,name=launch_request_id,json=launchRequestId,proto3" json:"launch_request_id,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// A launch without a preceding unacknowledged notice still records its id.
+	NoticeId        *string `protobuf:"bytes,1,opt,name=notice_id,json=noticeId,proto3,oneof" json:"notice_id,omitempty"`
+	LaunchRequestId string  `protobuf:"bytes,2,opt,name=launch_request_id,json=launchRequestId,proto3" json:"launch_request_id,omitempty"`
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -571,8 +648,8 @@ func (*ReplayAcknowledgement) Descriptor() ([]byte, []int) {
 }
 
 func (x *ReplayAcknowledgement) GetNoticeId() string {
-	if x != nil {
-		return x.NoticeId
+	if x != nil && x.NoticeId != nil {
+		return *x.NoticeId
 	}
 	return ""
 }
@@ -620,22 +697,25 @@ const file_vibesys_store_v1_replay_proto_rawDesc = "" +
 	"\x1dvibesys/store/v1/replay.proto\x12\x10vibesys.store.v1\x1a\x1bbuf/validate/validate.proto\x1a\x19google/protobuf/any.proto\x1a google/protobuf/descriptor.proto\"k\n" +
 	"\fOperationKey\x12%\n" +
 	"\toperation\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\toperation\x124\n" +
-	"\x05scope\x18\x02 \x03(\v2\x1e.vibesys.store.v1.KeyComponentR\x05scope\"{\n" +
-	"\fKeyComponent\x12L\n" +
-	"\x04kind\x18\x01 \x01(\tB8\xbaH5r3R\x06parentR\x04itemR\x06sampleR\brevisionR\x11recorded_positionR\x04kind\x12\x1d\n" +
+	"\x05scope\x18\x02 \x03(\v2\x1e.vibesys.store.v1.KeyComponentR\x05scope\"q\n" +
+	"\fKeyComponent\x12B\n" +
+	"\x04kind\x18\x01 \x01(\x0e2\".vibesys.store.v1.KeyComponentKindB\n" +
+	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x04kind\x12\x1d\n" +
 	"\x05value\x18\x02 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x05value\"}\n" +
 	"\x0fReplayAllowance\x12\x1e\n" +
 	"\n" +
 	"iterations\x18\x01 \x01(\x04R\n" +
 	"iterations\x12\x1a\n" +
 	"\bcapacity\x18\x02 \x01(\x04R\bcapacity\x12.\n" +
-	"\tremaining\x18\x03 \x01(\x01B\x10\xbaH\r\x12\v@\x01)\x00\x00\x00\x00\x00\x00\x00\x00R\tremaining\"\x80\x01\n" +
+	"\tremaining\x18\x03 \x01(\x01B\x10\xbaH\r\x12\v@\x01)\x00\x00\x00\x00\x00\x00\x00\x00R\tremaining\"\xd6\x01\n" +
 	"\fReplayPolicy\x12\x12\n" +
 	"\x04role\x18\x01 \x01(\tR\x04role\x12\x1a\n" +
 	"\btemplate\x18\x02 \x01(\tR\btemplate\x12\x18\n" +
 	"\acontent\x18\x03 \x01(\fR\acontent\x12&\n" +
 	"\n" +
-	"reply_type\x18\x04 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\treplyType\"\x8f\x04\n" +
+	"reply_type\x18\x04 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\treplyType\x12<\n" +
+	"\x13reply_schema_digest\x18\x05 \x01(\fB\a\xbaH\x04z\x02h H\x00R\x11replySchemaDigest\x88\x01\x01B\x16\n" +
+	"\x14_reply_schema_digest\"\x89\a\n" +
 	"\x0fOperationReplay\x128\n" +
 	"\x03key\x18\x01 \x01(\v2\x1e.vibesys.store.v1.OperationKeyB\x06\xbaH\x03\xc8\x01\x01R\x03key\x122\n" +
 	"\x10encoding_version\x18\x02 \x01(\rB\a\xbaH\x04*\x02\b\x01R\x0fencodingVersion\x12#\n" +
@@ -647,21 +727,35 @@ const file_vibesys_store_v1_replay_proto_rawDesc = "" +
 	"\x04paid\x18\b \x01(\bR\x04paid\x120\n" +
 	"\bcost_usd\x18\t \x01(\x01B\x10\xbaH\r\x12\v@\x01)\x00\x00\x00\x00\x00\x00\x00\x00H\x00R\acostUsd\x88\x01\x01\x12G\n" +
 	"\tallowance\x18\n" +
-	" \x01(\v2!.vibesys.store.v1.ReplayAllowanceB\x06\xbaH\x03\xc8\x01\x01R\tallowanceB\v\n" +
-	"\t_cost_usd\"V\n" +
+	" \x01(\v2!.vibesys.store.v1.ReplayAllowanceB\x06\xbaH\x03\xc8\x01\x01R\tallowance\x129\n" +
+	"\x11accepted_sequence\x18\v \x01(\x04B\a\xbaH\x042\x02 \x00H\x01R\x10acceptedSequence\x88\x01\x01:\xa6\x02\xbaH\xa2\x02\x1a\x96\x01\n" +
+	"\x1doperation_replay.reply_schema\x12;recorded operations require the writer's reply schema proof\x1a8has(this.policy) && has(this.policy.reply_schema_digest)\x1a\x86\x01\n" +
+	"\x1boperation_replay.acceptance\x125an outcome requires its immutable acceptance sequence\x1a0has(this.outcome) == has(this.accepted_sequence)B\v\n" +
+	"\t_cost_usdB\x14\n" +
+	"\x12_accepted_sequence\"V\n" +
 	"\vReplayClock\x12G\n" +
-	"\tallowance\x18\x01 \x01(\v2!.vibesys.store.v1.ReplayAllowanceB\x06\xbaH\x03\xc8\x01\x01R\tallowance\"\x9c\x01\n" +
+	"\tallowance\x18\x01 \x01(\v2!.vibesys.store.v1.ReplayAllowanceB\x06\xbaH\x03\xc8\x01\x01R\tallowance\"\xad\x02\n" +
 	"\fReplayNotice\x12\x17\n" +
-	"\x02id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x02id\x129\n" +
-	"\x06unused\x18\x02 \x03(\v2!.vibesys.store.v1.OperationReplayR\x06unused\x128\n" +
-	"\apending\x18\x03 \x03(\v2\x1e.vibesys.store.v1.OperationKeyR\apending\"r\n" +
-	"\x15ReplayAcknowledgement\x12$\n" +
-	"\tnotice_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\bnoticeId\x123\n" +
-	"\x11launch_request_id\x18\x02 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x0flaunchRequestId*r\n" +
+	"\x02id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x02id\x12C\n" +
+	"\x06unused\x18\x02 \x03(\v2!.vibesys.store.v1.OperationReplayB\b\xbaH\x05\x92\x01\x02\b\x01R\x06unused\x128\n" +
+	"\apending\x18\x03 \x03(\v2\x1e.vibesys.store.v1.OperationKeyR\apending:\x84\x01\xbaH\x80\x01\x1a~\n" +
+	"\x1areplay_notice.paid_results\x122unused entries must identify accepted paid results\x1a,this.unused.all(x, x.paid && has(x.outcome))\"\x85\x01\n" +
+	"\x15ReplayAcknowledgement\x12)\n" +
+	"\tnotice_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01H\x00R\bnoticeId\x88\x01\x01\x123\n" +
+	"\x11launch_request_id\x18\x02 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x0flaunchRequestIdB\f\n" +
+	"\n" +
+	"_notice_id*r\n" +
 	"\x0fReplayFieldKind\x12!\n" +
 	"\x1dREPLAY_FIELD_KIND_UNSPECIFIED\x10\x00\x12\x1e\n" +
 	"\x1aREPLAY_FIELD_KIND_IDENTITY\x10\x01\x12\x1c\n" +
-	"\x18REPLAY_FIELD_KIND_POLICY\x10\x02:e\n" +
+	"\x18REPLAY_FIELD_KIND_POLICY\x10\x02*\xdc\x01\n" +
+	"\x10KeyComponentKind\x12\"\n" +
+	"\x1eKEY_COMPONENT_KIND_UNSPECIFIED\x10\x00\x12\x1d\n" +
+	"\x19KEY_COMPONENT_KIND_PARENT\x10\x01\x12\x1b\n" +
+	"\x17KEY_COMPONENT_KIND_ITEM\x10\x02\x12\x1d\n" +
+	"\x19KEY_COMPONENT_KIND_SAMPLE\x10\x03\x12\x1f\n" +
+	"\x1bKEY_COMPONENT_KIND_REVISION\x10\x04\x12(\n" +
+	"$KEY_COMPONENT_KIND_RECORDED_POSITION\x10\x05:e\n" +
 	"\freplay_field\x12\x1d.google.protobuf.FieldOptions\x18\x9c\x8f\x03 \x01(\x0e2!.vibesys.store.v1.ReplayFieldKindR\vreplayField:>\n" +
 	"\n" +
 	"replay_set\x12\x1d.google.protobuf.FieldOptions\x18\x9d\x8f\x03 \x01(\bR\treplaySetBAZ?github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1b\x06proto3"
@@ -678,38 +772,40 @@ func file_vibesys_store_v1_replay_proto_rawDescGZIP() []byte {
 	return file_vibesys_store_v1_replay_proto_rawDescData
 }
 
-var file_vibesys_store_v1_replay_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
+var file_vibesys_store_v1_replay_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
 var file_vibesys_store_v1_replay_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
 var file_vibesys_store_v1_replay_proto_goTypes = []any{
 	(ReplayFieldKind)(0),              // 0: vibesys.store.v1.ReplayFieldKind
-	(*OperationKey)(nil),              // 1: vibesys.store.v1.OperationKey
-	(*KeyComponent)(nil),              // 2: vibesys.store.v1.KeyComponent
-	(*ReplayAllowance)(nil),           // 3: vibesys.store.v1.ReplayAllowance
-	(*ReplayPolicy)(nil),              // 4: vibesys.store.v1.ReplayPolicy
-	(*OperationReplay)(nil),           // 5: vibesys.store.v1.OperationReplay
-	(*ReplayClock)(nil),               // 6: vibesys.store.v1.ReplayClock
-	(*ReplayNotice)(nil),              // 7: vibesys.store.v1.ReplayNotice
-	(*ReplayAcknowledgement)(nil),     // 8: vibesys.store.v1.ReplayAcknowledgement
-	(*anypb.Any)(nil),                 // 9: google.protobuf.Any
-	(*descriptorpb.FieldOptions)(nil), // 10: google.protobuf.FieldOptions
+	(KeyComponentKind)(0),             // 1: vibesys.store.v1.KeyComponentKind
+	(*OperationKey)(nil),              // 2: vibesys.store.v1.OperationKey
+	(*KeyComponent)(nil),              // 3: vibesys.store.v1.KeyComponent
+	(*ReplayAllowance)(nil),           // 4: vibesys.store.v1.ReplayAllowance
+	(*ReplayPolicy)(nil),              // 5: vibesys.store.v1.ReplayPolicy
+	(*OperationReplay)(nil),           // 6: vibesys.store.v1.OperationReplay
+	(*ReplayClock)(nil),               // 7: vibesys.store.v1.ReplayClock
+	(*ReplayNotice)(nil),              // 8: vibesys.store.v1.ReplayNotice
+	(*ReplayAcknowledgement)(nil),     // 9: vibesys.store.v1.ReplayAcknowledgement
+	(*anypb.Any)(nil),                 // 10: google.protobuf.Any
+	(*descriptorpb.FieldOptions)(nil), // 11: google.protobuf.FieldOptions
 }
 var file_vibesys_store_v1_replay_proto_depIdxs = []int32{
-	2,  // 0: vibesys.store.v1.OperationKey.scope:type_name -> vibesys.store.v1.KeyComponent
-	1,  // 1: vibesys.store.v1.OperationReplay.key:type_name -> vibesys.store.v1.OperationKey
-	4,  // 2: vibesys.store.v1.OperationReplay.policy:type_name -> vibesys.store.v1.ReplayPolicy
-	9,  // 3: vibesys.store.v1.OperationReplay.outcome:type_name -> google.protobuf.Any
-	3,  // 4: vibesys.store.v1.OperationReplay.allowance:type_name -> vibesys.store.v1.ReplayAllowance
-	3,  // 5: vibesys.store.v1.ReplayClock.allowance:type_name -> vibesys.store.v1.ReplayAllowance
-	5,  // 6: vibesys.store.v1.ReplayNotice.unused:type_name -> vibesys.store.v1.OperationReplay
-	1,  // 7: vibesys.store.v1.ReplayNotice.pending:type_name -> vibesys.store.v1.OperationKey
-	10, // 8: vibesys.store.v1.replay_field:extendee -> google.protobuf.FieldOptions
-	10, // 9: vibesys.store.v1.replay_set:extendee -> google.protobuf.FieldOptions
-	0,  // 10: vibesys.store.v1.replay_field:type_name -> vibesys.store.v1.ReplayFieldKind
-	11, // [11:11] is the sub-list for method output_type
-	11, // [11:11] is the sub-list for method input_type
-	10, // [10:11] is the sub-list for extension type_name
-	8,  // [8:10] is the sub-list for extension extendee
-	0,  // [0:8] is the sub-list for field type_name
+	3,  // 0: vibesys.store.v1.OperationKey.scope:type_name -> vibesys.store.v1.KeyComponent
+	1,  // 1: vibesys.store.v1.KeyComponent.kind:type_name -> vibesys.store.v1.KeyComponentKind
+	2,  // 2: vibesys.store.v1.OperationReplay.key:type_name -> vibesys.store.v1.OperationKey
+	5,  // 3: vibesys.store.v1.OperationReplay.policy:type_name -> vibesys.store.v1.ReplayPolicy
+	10, // 4: vibesys.store.v1.OperationReplay.outcome:type_name -> google.protobuf.Any
+	4,  // 5: vibesys.store.v1.OperationReplay.allowance:type_name -> vibesys.store.v1.ReplayAllowance
+	4,  // 6: vibesys.store.v1.ReplayClock.allowance:type_name -> vibesys.store.v1.ReplayAllowance
+	6,  // 7: vibesys.store.v1.ReplayNotice.unused:type_name -> vibesys.store.v1.OperationReplay
+	2,  // 8: vibesys.store.v1.ReplayNotice.pending:type_name -> vibesys.store.v1.OperationKey
+	11, // 9: vibesys.store.v1.replay_field:extendee -> google.protobuf.FieldOptions
+	11, // 10: vibesys.store.v1.replay_set:extendee -> google.protobuf.FieldOptions
+	0,  // 11: vibesys.store.v1.replay_field:type_name -> vibesys.store.v1.ReplayFieldKind
+	12, // [12:12] is the sub-list for method output_type
+	12, // [12:12] is the sub-list for method input_type
+	11, // [11:12] is the sub-list for extension type_name
+	9,  // [9:11] is the sub-list for extension extendee
+	0,  // [0:9] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_store_v1_replay_proto_init() }
@@ -717,13 +813,15 @@ func file_vibesys_store_v1_replay_proto_init() {
 	if File_vibesys_store_v1_replay_proto != nil {
 		return
 	}
+	file_vibesys_store_v1_replay_proto_msgTypes[3].OneofWrappers = []any{}
 	file_vibesys_store_v1_replay_proto_msgTypes[4].OneofWrappers = []any{}
+	file_vibesys_store_v1_replay_proto_msgTypes[7].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_vibesys_store_v1_replay_proto_rawDesc), len(file_vibesys_store_v1_replay_proto_rawDesc)),
-			NumEnums:      1,
+			NumEnums:      2,
 			NumMessages:   8,
 			NumExtensions: 2,
 			NumServices:   0,

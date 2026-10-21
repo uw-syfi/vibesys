@@ -71,3 +71,22 @@ def test_viewer_uses_shared_facts_and_generic_descriptor_views() -> None:
 
 def test_repository_message_layers_respect_ownership() -> None:
     assert main() == 0
+
+
+def test_comment_delimiters_inside_literals_cannot_hide_an_import() -> None:
+    path = "proto/vibesys/core/v1/shared.proto"
+    source = """syntax = "proto3"; package vibesys.core.v1;
+option java_package = "/*";
+import "vibesys/strategies/dynamic/v1/request.proto";
+option go_package = "*/";
+"""
+    assert path in violations({path: source})[0]
+    assert not violations({path: 'package vibesys.core.v1; // import "bad.proto";\n'})
+    assert not violations(
+        {path: 'package vibesys.core.v1; option java_package = "import bad.proto;";'}
+    )
+
+
+def test_strategy_messages_cannot_evade_ownership_by_moving_the_proto_file() -> None:
+    path = "proto/vibesys/other/v1/request.proto"
+    assert path in violations({path: "package vibesys.strategies.dynamic.v1;"})[0]

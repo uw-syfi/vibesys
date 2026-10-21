@@ -31,6 +31,9 @@ class AcceptedReplay:
             raise ReplayError(problem)
         operation = self.operation()
         validate(operation)
+        if operation.accepted_sequence != self.sequence:
+            problem = "operation metadata does not identify this record as its acceptance"
+            raise ReplayError(problem)
         if operation.outcome is None:
             problem = "accepted replay has no historical outcome"
             raise ReplayError(problem)
@@ -41,7 +44,7 @@ class AcceptedReplay:
     @classmethod
     def from_record(cls, record: Record) -> AcceptedReplay:
         validate(record)
-        if record.clock is None:
+        if not record.has_field("clock"):
             problem = "keyed replay requires Record.clock"
             raise ReplayError(problem)
         match record.body:
@@ -102,7 +105,7 @@ class AcceptedClock:
     def from_record(cls, record: Record) -> AcceptedClock:
         validate(record)
         if (
-            record.clock is None
+            not record.has_field("clock")
             or record.replay_clock is None
             or record.replay_clock.allowance is None
         ):
@@ -142,7 +145,7 @@ class ReplayFrontier:
 
     @property
     def unknown_cost_count(self) -> int:
-        return sum(item.operation().cost_usd is None for item in self.unused)
+        return sum(not item.operation().has_field("cost_usd") for item in self.unused)
 
     @property
     def notice_id(self) -> str | None:
@@ -172,6 +175,27 @@ class ReplayAcknowledgements:
     notices: tuple[bytes, ...] = ()
     acknowledgements: tuple[bytes, ...] = ()
 
+    def __post_init__(self) -> None:
+        notices = [pb.ReplayNotice.from_binary(value) for value in self.notices]
+        acknowledgements = [
+            pb.ReplayAcknowledgement.from_binary(value) for value in self.acknowledgements
+        ]
+        for message in (*notices, *acknowledgements):
+            validate(message)
+        known = {notice.id for notice in notices}
+        launches = [ack.launch_request_id for ack in acknowledgements]
+        acknowledged = [ack.notice_id for ack in acknowledgements if ack.has_field("notice_id")]
+        if (
+            len(known) != len(notices)
+            or len(set(launches)) != len(launches)
+            or len(set(acknowledged)) != len(acknowledged)
+        ):
+            problem = "replay history repeats a notice, launch or acknowledgement"
+            raise ReplayError(problem)
+        if set(acknowledged) - known:
+            problem = "replay acknowledgement names an unknown notice"
+            raise ReplayError(problem)
+
     def record_notice(self, notice: pb.ReplayNotice) -> ReplayAcknowledgements:
         validate(notice)
         known = [pb.ReplayNotice.from_binary(value) for value in self.notices]
@@ -188,17 +212,21 @@ class ReplayAcknowledgements:
             problem = "Resume requires a launch request id"
             raise ReplayError(problem)
         acks = [pb.ReplayAcknowledgement.from_binary(value) for value in self.acknowledgements]
-        if any(ack.launch_request_id == launch_request_id for ack in acks) or not self.notices:
+        if any(ack.launch_request_id == launch_request_id for ack in acks):
             return self
-        notice = pb.ReplayNotice.from_binary(self.notices[-1])
-        if any(ack.notice_id == notice.id for ack in acks):
-            return self
-        ack = pb.ReplayAcknowledgement(notice_id=notice.id, launch_request_id=launch_request_id)
+        notice_id = None
+        if self.notices:
+            notice = pb.ReplayNotice.from_binary(self.notices[-1])
+            if not any(ack.notice_id == notice.id for ack in acks):
+                notice_id = notice.id
+        ack = pb.ReplayAcknowledgement(notice_id=notice_id, launch_request_id=launch_request_id)
         return ReplayAcknowledgements(self.notices, (*self.acknowledgements, ack.to_binary()))
 
     def disclosed(self) -> frozenset[bytes]:
         acknowledged = {
-            pb.ReplayAcknowledgement.from_binary(value).notice_id for value in self.acknowledgements
+            pb.ReplayAcknowledgement.from_binary(value).notice_id
+            for value in self.acknowledgements
+            if pb.ReplayAcknowledgement.from_binary(value).has_field("notice_id")
         }
         return frozenset(
             _occurrence_token(item)
