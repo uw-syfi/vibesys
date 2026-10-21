@@ -1,0 +1,109 @@
+syntax = "proto3";
+
+package vibesys.store.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/any.proto";
+import "vibesys/store/v1/common.proto";
+import "vibesys/store/v1/content.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1";
+
+// Epoch-local run identity and objective. Objectives are ordered headline first.
+message RunDescription {
+  option (buf.validate.message).cel = {
+    id: "run.objectives"
+    message: "objectives must have unique series names"
+    expression: "this.objectives.all(x, this.objectives.filter(y, y.series == x.series).size() == 1)"
+  };
+  string strategy = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 65536
+  }];
+  string input = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 65536
+  }];
+  BlobRef objective = 3 [(buf.validate.field).required = true];
+  repeated Objective objectives = 4;
+  // Argument vector, not a shell command.
+  repeated string correctness_check = 5 [(buf.validate.field).repeated.items.string = {
+    min_len: 1
+    max_bytes: 65536
+  }];
+  optional Evaluator evaluator = 6;
+  reserved 7;
+  reserved "max_workstreams";
+  repeated string expected_roles = 8 [(buf.validate.field).repeated.items.string = {
+    min_len: 1
+    max_bytes: 65536
+  }];
+  // Strategy run configuration, described by EpochStarted.descriptors.
+  optional google.protobuf.Any detail = 9;
+}
+
+message Evaluator {
+  string name = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 65536
+  }];
+  string version = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 65536
+  }];
+}
+
+message Objective {
+  option (buf.validate.message).cel = {
+    id: "objective.direction"
+    message: "direction must be max or min for an objective"
+    expression: "this.direction != 3"
+  };
+  string series = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 65536
+  }];
+  Direction direction = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+}
+
+// attrs_type is a fully qualified message name in EpochStarted.descriptors.
+// Verdicts and link relations are declared by the strategy, not by core.
+message SpanKindDecl {
+  string kind = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 65536
+  }];
+  string attrs_type = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 65536
+  }];
+  repeated string verdicts = 3 [(buf.validate.field).repeated.items.string = {
+    min_len: 1
+    max_bytes: 65536
+  }];
+  repeated string link_rels = 4 [(buf.validate.field).repeated.items.string = {
+    min_len: 1
+    max_bytes: 65536
+  }];
+  bool timeline = 5;
+}
+
+// A series is declared once per epoch. NONE is for nondirectional resource data.
+message MetricSeriesDecl {
+  string name = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 65536
+  }];
+  string unit = 2 [(buf.validate.field).string.max_bytes = 65536];
+  Direction direction = 3 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  SeriesRole role = 4 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+}

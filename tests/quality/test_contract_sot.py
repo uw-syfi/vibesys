@@ -721,3 +721,54 @@ def test_recreated_untracked_source_cannot_keep_and_transfer_its_budget(tmp_path
     args = ["--root", str(tmp_path), "--base-ref", "main"]
     assert main(args) == 1
     assert main([*args, "--write"]) == 1
+
+
+def waiver_config(root: Path, symbol: str = "OldModel") -> None:
+    (root / "pyproject.toml").write_text(
+        '[tool.vibesys.file_length]\ngenerated = ["src/generated"]\n'
+        "[tool.vibesys.contract_sot]\n"
+        'copy_waivers = [{path = "src/generated/types.py", symbol = "'
+        + symbol
+        + '", reason = "Phase 3 replaces hand-written core types."}]\n'
+    )
+
+
+def test_named_generated_copy_waiver_preserves_other_copies_and_import_checks(
+    tmp_path: Path,
+) -> None:
+    repository(tmp_path, "class OldModel: pass\n")
+    generated = tmp_path / "src/generated/types.py"
+    generated.parent.mkdir()
+    generated.write_text("class OldModel: pass\nfrom legacy.types import OldModel as Legacy\n")
+    assert any(str(generated.relative_to(tmp_path)) in error for error in measure(tmp_path).errors)
+    waiver_config(tmp_path)
+    scan = measure(tmp_path)
+    assert not any("src/generated/types.py" in error for error in scan.errors)
+    assert any("src/consumer.py" in error for error in scan.errors)
+    assert scan.counts[("src/generated/types.py", OWNER, "OldModel")] == 1
+    generated.write_text(
+        generated.read_text() + "class RenamedCopy:\n    first: int\n    second: str\n"
+    )
+    assert any("copied frozen contract RenamedCopy" in error for error in measure(tmp_path).errors)
+
+
+@pytest.mark.parametrize("state", ["absent", "renamed", "no_longer_copy"])
+def test_generated_copy_waiver_must_be_removed_when_it_stops_matching(
+    tmp_path: Path, state: str
+) -> None:
+    repository(tmp_path, "")
+    waiver_config(tmp_path)
+    generated = tmp_path / "src/generated/types.py"
+    generated.parent.mkdir()
+    if state != "absent":
+        generated.write_text("class Unrelated: pass\n" if state == "renamed" else "value = 1\n")
+    assert any("stale copy waiver" in error for error in measure(tmp_path).errors)
+
+
+def test_copy_waiver_cannot_exempt_a_handwritten_contract(tmp_path: Path) -> None:
+    repository(tmp_path, "class OldModel: pass\n")
+    waiver_config(tmp_path)
+    project = tmp_path / "pyproject.toml"
+    project.write_text(project.read_text().replace("src/generated/types.py", "src/consumer.py"))
+    with pytest.raises(ValueError, match=r"contract_sot.copy_waivers: src/consumer.py"):
+        measure(tmp_path)

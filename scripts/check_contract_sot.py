@@ -23,6 +23,7 @@ import json
 import shutil
 import subprocess
 import sys
+import tomllib
 from collections import Counter
 from dataclasses import dataclass
 from functools import cache, cached_property
@@ -86,6 +87,44 @@ class Manifest(BaseModel):
     replacements: tuple[Replacement, ...]
 
 
+class CopyWaiver(BaseModel):
+    """One generated contract temporarily duplicated during a named migration."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+    path: str = Field(min_length=1)
+    symbol: SymbolName
+    reason: str = Field(min_length=1)
+
+
+class GateConfig(BaseModel):
+    """Explicit per-contract exceptions, never a directory-wide scan exclusion."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+    copy_waivers: list[CopyWaiver] = Field(default_factory=list)
+
+
+def copy_waivers(root: Path) -> dict[str, frozenset[str]]:
+    """Read exact generated-contract exceptions from the project configuration."""
+    project = root / "pyproject.toml"
+    if not project.exists():
+        return {}
+    config = tomllib.loads(project.read_text()).get("tool", {}).get("vibesys", {})
+    waivers = GateConfig.model_validate(config.get("contract_sot", {})).copy_waivers
+    generated = config.get("file_length", {}).get("generated", [])
+    result: dict[str, frozenset[str]] = {}
+    for waiver in waivers:
+        path = Path(waiver.path)
+        if (
+            path.is_absolute()
+            or ".." in path.parts
+            or not any(path.is_relative_to(directory) for directory in generated)
+            or waiver.symbol in result.get(waiver.path, frozenset())
+        ):
+            raise ContractGateError.invalid_waiver(waiver.path)
+        result[waiver.path] = result.get(waiver.path, frozenset()) | {waiver.symbol}
+    return result
+
+
 class BaselineRecord(BaseModel):
     """One nonempty consumer and positive occurrence allowance."""
 
@@ -121,6 +160,11 @@ class Source:
 
 class ContractGateError(ValueError):
     """Invalid manifest/baseline input, with the offending key or record."""
+
+    @classmethod
+    def invalid_waiver(cls, path: str) -> ContractGateError:
+        """Name a duplicate or non-generated copy exception."""
+        return cls(f"invalid contract_sot.copy_waivers: {path}")
 
     @classmethod
     def invalid(cls, detail: object) -> ContractGateError:
@@ -575,11 +619,13 @@ def copied_definitions(
     authorities: dict[str, frozenset[str]],
     fingerprints: set[tuple[str, ...]],
     exports: dict[str, Names],
+    waived: frozenset[str] = frozenset(),
 ) -> list[str]:
     """Reject alternate named or structurally identical model definitions."""
     names = {name.rpartition(".")[2] for name in authorities}
     canonical = set().union(*authorities.values())
     errors = []
+    used: set[str] = set()
     for node in source.nodes:
         if isinstance(node, ast.Call):
             bases = {
@@ -609,7 +655,13 @@ def copied_definitions(
             or node.name in names
             or (len(signature) >= GETATTR_ARGUMENTS and signature in fingerprints)
         ):
-            errors.append(f"{source.path}:{node.lineno}: copied frozen contract {node.name}")
+            if node.name in waived:
+                used.add(node.name)
+            else:
+                errors.append(f"{source.path}:{node.lineno}: copied frozen contract {node.name}")
+    errors.extend(
+        f"{source.path}: stale copy waiver for {name}; remove it" for name in waived - used
+    )
     return errors
 
 
@@ -777,12 +829,21 @@ def measure(root: Path, parsed: tuple[Source, ...] | None = None) -> Scan:
     counts: Counter[Key] = Counter()
     errors = canonical_errors(authorities, parsed, exports)
     errors.extend(shape_errors(manifest, class_definitions(parsed)))
+    waivers = copy_waivers(root)
+    errors.extend(
+        f"{path}: stale copy waiver; file is absent, remove it"
+        for path in waivers.keys() - {source.path for source in parsed}
+    )
     for source in parsed:
         scan = source_counts(source, exports[source.module], exports, set(authorities))
         counts.update(scan.counts)
         errors.extend(scan.errors)
         owners = {name: resolve(canonical, exports) for name, canonical in authorities.items()}
-        errors.extend(copied_definitions(source, owners, fingerprints, exports))
+        errors.extend(
+            copied_definitions(
+                source, owners, fingerprints, exports, waivers.get(source.path, frozenset())
+            )
+        )
     return Scan(counts, tuple(errors))
 
 

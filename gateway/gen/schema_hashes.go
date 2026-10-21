@@ -3,6 +3,6 @@
 package gen
 
 const APISchemaHash = "ef8866b280f8c93dbb921a004a10712a7f9566179c5e9a268993e30460c9bfde"
-const StoreSchemaHash = "1c646e1fc02cc9ba95f132332e947502f540e3c61d99bef6d8e82f639808c4ea"
+const StoreSchemaHash = "f9951121319550c554a4729a4e97f4665d25f10c4031e1d2d15a8f359f445abd"
 const RunLogMaxRecordBytes = 1048576
 const RunLogMagic = "VSRLOG01"
