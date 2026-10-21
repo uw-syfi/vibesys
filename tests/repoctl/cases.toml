@@ -39,7 +39,7 @@ pnpm_packages = []
 [[cases]]
 name = "repoctl code and policy changes select all checks"
 paths = ["support/repoctl/main.go", ".repoctl/components.toml", ".repoctl/checks.toml"]
-jobs = ["agent_image", "evaluators", "examples", "impact", "python", "real_tiers", "stitch", "clients", "proto"]
+jobs = ["agent_image", "evaluators", "examples", "impact", "python", "real_tiers", "stitch", "clients", "proto", "gateway"]
 [cases.collections]
 native_languages = ["go", "rust"]
 native_targets = [
@@ -136,9 +136,9 @@ native_targets = []
 pnpm_packages = []
 
 [[cases]]
-name = "generated Go bindings select the fast contract check"
+name = "generated Go bindings select contract and gateway checks"
 paths = ["gateway/gen/vibesys/api/v1/host.pb.go"]
-jobs = ["proto"]
+jobs = ["proto", "gateway"]
 [cases.collections]
 native_languages = []
 native_targets = []
@@ -161,3 +161,12 @@ jobs = ["clients", "proto"]
 native_languages = []
 native_targets = []
 pnpm_packages = ["@vibesys/proto"]
+
+[[cases]]
+name = "Go gateway changes select the gateway checks"
+paths = ["gateway/internal/server/host.go"]
+jobs = ["gateway"]
+[cases.collections]
+native_languages = []
+native_targets = []
+pnpm_packages = []

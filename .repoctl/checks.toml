@@ -343,3 +343,12 @@ language = "python"
 directory = "."
 timeout_seconds = 60
 commands = [["./scripts/check_proto.sh"]]
+
+[[check_groups]]
+name = "gateway_checks"
+trigger_job = "gateway"
+include_in_test = true
+language = "go"
+directory = "gateway"
+timeout_seconds = 60
+commands = [["./check.sh"]]

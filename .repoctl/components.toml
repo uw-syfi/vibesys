@@ -1,6 +1,6 @@
 # Repository component ownership, discovery, and change impact policy.
 default_base = "main"
-jobs = ["python", "clients", "examples", "agent_image", "real_tiers", "evaluators", "impact", "stitch", "proto"]
+jobs = ["python", "clients", "examples", "agent_image", "real_tiers", "evaluators", "impact", "stitch", "proto", "gateway"]
 
 ignored_roots = ["website", "third_party", ".agents", ".claude", ".github/ISSUE_TEMPLATE", ".github/DISCUSSION_TEMPLATE"]
 ignored_files = ["AGENTS.md", "CLAUDE.md", "LICENSE", "agent.toml.example", ".env.example", ".gitattributes", ".gitignore", ".github/CODEOWNERS", ".github/pull_request_template.md", ".github/delegated-merge.md"]
@@ -293,3 +293,9 @@ class = "manual"
 job = "proto"
 roots = ["proto", "libs/vs-proto", "clients/libs/proto", "gateway/gen"]
 files = ["buf.yaml", "buf.gen.yaml", "scripts/generate_proto.sh", "scripts/generate_proto_hashes.py", "scripts/check_proto.sh", "gateway/go.mod", "gateway/go.sum", "clients/package.json", "clients/pnpm-lock.yaml", "pyproject.toml", "uv.lock"]
+
+[[components]]
+id = "gateway"
+class = "manual"
+job = "gateway"
+root = "gateway"

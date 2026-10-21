@@ -75,7 +75,7 @@ func TestLocalTestSelectionNarrowsHeavyGroups(t *testing.T) {
 		{
 			name:        "repoctl only (f39d7eb8c)",
 			paths:       []string{"support/repoctl/test.go", "support/repoctl/test_test.go"},
-			wantCI:      []string{"agent_image", "clients", "evaluators", "examples", "impact", "proto", "python", "real_tiers", "stitch"},
+			wantCI:      []string{"agent_image", "clients", "evaluators", "examples", "gateway", "impact", "proto", "python", "real_tiers", "stitch"},
 			wantGroups:  []string{"repoctl_tests"},
 			wantSkipped: []string{},
 			wantTargets: 0,
@@ -111,6 +111,22 @@ func TestLocalTestSelectionNarrowsHeavyGroups(t *testing.T) {
 			wantGroups:  []string{"examples_cpu_check_shard", "examples_native_evaluator_tests", "examples_tests", "python_tests"},
 			wantSkipped: []string{},
 			wantTargets: -1,
+		},
+		{
+			name:        "gateway source selects only the Go checks",
+			paths:       []string{"gateway/internal/server/host.go"},
+			wantCI:      []string{"gateway"},
+			wantGroups:  []string{"gateway_checks"},
+			wantSkipped: []string{},
+			wantTargets: 0,
+		},
+		{
+			name:        "generated Go bindings select contract and gateway checks",
+			paths:       []string{"gateway/gen/vibesys/api/v1/host.pb.go"},
+			wantCI:      []string{"gateway", "proto"},
+			wantGroups:  []string{"gateway_checks", "proto"},
+			wantSkipped: []string{},
+			wantTargets: 0,
 		},
 		{
 			name:        "proto source selects only the contract check",
