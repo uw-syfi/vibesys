@@ -415,6 +415,7 @@ def test_unset_latch_read_tracks_the_released_knowledge_frontier() -> None:
 
 @pytest.mark.parametrize("obsolete_wire", [False, True])
 def test_same_reply_name_with_a_different_retained_schema_is_not_reinterpreted(
+    *,
     obsolete_wire: bool,
 ) -> None:
     (item,) = history()
