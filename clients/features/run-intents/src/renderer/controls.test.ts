@@ -7,10 +7,13 @@ import {
   HostCallResponseSchema,
   IntentAction,
   IntentStep,
+  LifecycleSchema,
   PostIntentRequestSchema,
   RecordSchema,
   RelaunchRefusal,
+  RunLiveness,
   TailResponseSchema,
+  WatchRunsResponseSchema,
 } from '@vibesys/proto';
 import {relaunchRequest} from '@vibesys/runs/intents';
 import {FakeClock} from '@vibesys/transport/testing';
@@ -27,6 +30,8 @@ class FakeTransport implements GatewayBridge {
     cancelled: boolean;
   }> = [];
   readonly streams: Array<{
+    method: string;
+    bytes: Uint8Array;
     receive: (bytes: Uint8Array) => void;
     ended: (error?: string) => void;
     cancelled: boolean;
@@ -44,12 +49,12 @@ class FakeTransport implements GatewayBridge {
   }
   stream(
     _host: HostKey,
-    _method: string,
-    _bytes: Uint8Array,
+    method: string,
+    bytes: Uint8Array,
     receive: (bytes: Uint8Array) => void,
     ended: (error?: string) => void,
   ) {
-    const stream = {receive, ended, cancelled: false};
+    const stream = {method, bytes, receive, ended, cancelled: false};
     this.streams.push(stream);
     return {
       cancel: () => {
@@ -235,6 +240,10 @@ test('relaunch confirms an epoch or a typed refusal and owns every transport cal
       bridge,
       host: 'local' as HostKey,
       request: relaunchRequest('/project', 'run-1', 1n),
+      observation: {
+        epoch: 1n,
+        lifecycle: create(LifecycleSchema, {state: {case: 'parked', value: {}}}),
+      },
       schedule: clock.schedule,
     });
     actor.start();
@@ -265,7 +274,7 @@ test('relaunch confirms an epoch or a typed refusal and owns every transport cal
       actor.stop();
     }
     expect(bridge.calls.every(call => call.cancelled)).toBe(true);
-    expect(bridge.streams).toHaveLength(0);
+    expect(bridge.streams).toHaveLength(1);
   }
 });
 
@@ -277,6 +286,10 @@ test('relaunch deadline and owner shutdown cancel the call; late replies never s
       bridge,
       host: 'local' as HostKey,
       request: relaunchRequest('/project', 'run-1', 1n),
+      observation: {
+        epoch: 1n,
+        lifecycle: create(LifecycleSchema, {state: {case: 'parked', value: {}}}),
+      },
       schedule: clock.schedule,
     });
     actor.start();
@@ -331,6 +344,10 @@ test('relaunch rejects malformed, missing, stale and unknown outcomes as uncerta
       bridge,
       host: 'local' as HostKey,
       request: relaunchRequest('/project', 'run-1', 1n),
+      observation: {
+        epoch: 1n,
+        lifecycle: create(LifecycleSchema, {state: {case: 'parked', value: {}}}),
+      },
       schedule: clock.schedule,
     });
     actor.start();
@@ -343,4 +360,95 @@ test('relaunch rejects malformed, missing, stale and unknown outcomes as uncerta
       actor.stop();
     }
   }
+});
+
+test('Tail may observe a new epoch before HostCall acknowledges it without cancelling the launch', async () => {
+  const bridge = new FakeTransport();
+  const clock = new FakeClock();
+  const actor = relaunchActor({
+    bridge,
+    host: 'local' as HostKey,
+    request: relaunchRequest('/project', 'run-1', 1n),
+    observation: {
+      epoch: 1n,
+      lifecycle: create(LifecycleSchema, {state: {case: 'parked', value: {}}}),
+    },
+    schedule: clock.schedule,
+  });
+  actor.start();
+  try {
+    actor.send({type: 'relaunch'});
+    actor.send({
+      type: 'observe',
+      observation: {
+        epoch: 2n,
+        lifecycle: create(LifecycleSchema, {state: {case: 'running', value: {}}}),
+      },
+    });
+    expect(bridge.calls[0]?.cancelled).toBe(false);
+    bridge.calls[0]?.resolve(
+      toBinary(
+        HostCallResponseSchema,
+        create(HostCallResponseSchema, {
+          result: {case: 'relaunch', value: {outcome: {case: 'epoch', value: 2n}}},
+        }),
+      ),
+    );
+    await waitFor(actor, snapshot => snapshot.matches('settled'), {timeout: 1000});
+    expect(actor.getSnapshot().context.result?.outcome).toEqual({case: 'epoch', value: 2n});
+    actor.send({
+      type: 'observe',
+      observation: {
+        epoch: 2n,
+        lifecycle: create(LifecycleSchema, {state: {case: 'parked', value: {}}}),
+      },
+    });
+    expect(actor.getSnapshot().value).toBe('ready');
+    actor.send({type: 'relaunch'});
+    const sent = fromBinary(HostCallRequestSchema, bridge.calls[1]?.bytes as Uint8Array);
+    expect(sent.method).toMatchObject({case: 'relaunch', value: {expectedEpoch: 2n}});
+  } finally {
+    actor.stop();
+  }
+  expect(bridge.streams.every(stream => stream.cancelled)).toBe(true);
+});
+
+test('an interrupted WatchRuns hint enables relaunch only for the current run and epoch', () => {
+  const bridge = new FakeTransport();
+  const clock = new FakeClock();
+  const actor = relaunchActor({
+    bridge,
+    host: 'local' as HostKey,
+    request: relaunchRequest('/project', 'run-1', 2n),
+    observation: {
+      epoch: 2n,
+      lifecycle: create(LifecycleSchema, {state: {case: 'running', value: {}}}),
+    },
+    schedule: clock.schedule,
+  });
+  actor.start();
+  try {
+    const watch = bridge.streams[0];
+    expect(watch?.method).toBe('/vibesys.api.v1.HostService/WatchRuns');
+    const hint = (runId: string, epoch: number) =>
+      toBinary(
+        WatchRunsResponseSchema,
+        create(WatchRunsResponseSchema, {
+          runId,
+          liveness: RunLiveness.INTERRUPTED,
+          head: {process: {epoch}},
+        }),
+      );
+    for (const bytes of [hint('other', 2), hint('run-1', 1)]) {
+      watch?.receive(bytes);
+      actor.send({type: 'relaunch'});
+      expect(bridge.calls).toHaveLength(0);
+    }
+    watch?.receive(hint('run-1', 2));
+    actor.send({type: 'relaunch'});
+    expect(bridge.calls).toHaveLength(1);
+  } finally {
+    actor.stop();
+  }
+  expect(bridge.streams.every(stream => stream.cancelled)).toBe(true);
 });

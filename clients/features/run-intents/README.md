@@ -37,19 +37,17 @@ publish lifecycle records without request ids, so those requests stay pending
 unless the run emits a matching IntentState. The consumer handles an outcome
 even when it arrives before the admission response.
 
-Relaunch is available through the optional `relaunch` prop: `{epoch, state}`,
-where `epoch` is the observed epoch as a bigint and `state` is `parked`,
-`stopped-resumable`, or `interrupted`. The shell supplies it only for those
-reader observations and omits it for a live or permanently ended run.
-`RunIntents` mounts the Relaunch control next to the intent card and keys it
-by epoch. The separate `Relaunch` export uses the same component and actor.
-Shell composition remains owned by the Run controls work.
+Relaunch shares the header action row and result status line. The shell passes
+the latest epoch and that epoch's lifecycle as the optional `relaunch`
+observation, independently of timeline scrubbing. The feature watches
+`WatchRuns` for that run's liveness, fenced by the writer epoch. It offers
+Relaunch for parked, stopped-resumable, or interrupted observations and hides
+it for an active writer or a permanently ended run.
 
-Relaunch invokes the typed HostCall method. It displays the new epoch or the
-refusal word. A timeout or lost connection is unconfirmed and never retried
-automatically; refresh the run and inspect its timeline first. The request's
-observed epoch prevents a stale retry from silently opening another epoch.
-Tail and the existing skeleton fold supply the timeline boundary.
+The actor retains an in-flight request and its result when Tail observes the
+new epoch before HostCall replies. A new eligible epoch enables the next
+operator relaunch. An unconfirmed call is never retried automatically.
+The existing skeleton fold supplies the timeline boundary.
 
 The app has no safe checkout update operation. Update the host checkout
 before relaunching; the new epoch records its tree hash and dirty flag.

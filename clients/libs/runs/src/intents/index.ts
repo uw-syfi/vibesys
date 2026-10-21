@@ -106,12 +106,20 @@ export function intentTailResponse(bytes: Uint8Array): readonly IntentState[] {
 
 export {
   copyRelaunch,
+  copyRelaunchObservation,
   hostRelaunchRequest,
   hostRelaunchResponse,
+  livenessRequest,
+  livenessResponse,
+  type RelaunchLiveness,
+  type RelaunchObservation,
   RelaunchRefusal,
   type RelaunchRequest,
   type RelaunchResponse,
   type RelaunchTarget,
+  RUN_LIVENESS_METHOD,
+  RunLiveness,
   relaunchLabel,
   relaunchRequest,
+  relaunchTarget,
 } from './relaunch.js';

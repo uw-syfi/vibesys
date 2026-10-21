@@ -3,14 +3,21 @@ import {clone, create, fromBinary, toBinary} from '@bufbuild/protobuf';
 import {
   HostCallRequestSchema,
   HostCallResponseSchema,
+  HostService,
+  type Lifecycle,
+  LifecycleSchema,
+  Outcome,
   RelaunchRefusal,
   type RelaunchRequest,
   RelaunchRequestSchema,
   type RelaunchResponse,
+  RunLiveness,
+  WatchRunsRequestSchema,
+  WatchRunsResponseSchema,
 } from '@vibesys/proto';
 
 export type {RelaunchRequest, RelaunchResponse} from '@vibesys/proto';
-export {RelaunchRefusal} from '@vibesys/proto';
+export {RelaunchRefusal, RunLiveness} from '@vibesys/proto';
 
 /** Only these reader observations offer relaunch; the host rechecks admission. */
 export interface RelaunchTarget {
@@ -72,4 +79,54 @@ export function relaunchLabel(result: RelaunchResponse | null): string | null {
     default:
       return null;
   }
+}
+
+export interface RelaunchLiveness {
+  readonly epoch: bigint;
+  readonly value: RunLiveness;
+}
+
+export interface RelaunchObservation {
+  readonly epoch: bigint;
+  readonly lifecycle?: Lifecycle;
+}
+
+/** Use the latest writer facts, never the scrubbed timeline position. */
+export function relaunchTarget(
+  observation: RelaunchObservation,
+  liveness: RelaunchLiveness,
+): RelaunchTarget | null {
+  const live = liveness.epoch === observation.epoch ? liveness.value : RunLiveness.UNSPECIFIED;
+  if (observation.epoch < 1n || liveness.epoch > observation.epoch || live === RunLiveness.ALIVE)
+    return null;
+  const state = observation.lifecycle?.state;
+  if (state?.case === 'parked') return {epoch: observation.epoch, state: 'parked'};
+  if (state?.case === 'ended') {
+    if (state.value.outcome === Outcome.STOPPED)
+      return {epoch: observation.epoch, state: 'stopped-resumable'};
+    if (state.value.outcome === Outcome.INTERRUPTED)
+      return {epoch: observation.epoch, state: 'interrupted'};
+    return null;
+  }
+  return live === RunLiveness.INTERRUPTED ? {epoch: observation.epoch, state: 'interrupted'} : null;
+}
+
+export const RUN_LIVENESS_METHOD = `/${HostService.typeName}/${HostService.method.watchRuns.name}`;
+export function livenessRequest(): Uint8Array {
+  return toBinary(WatchRunsRequestSchema, create(WatchRunsRequestSchema));
+}
+export function livenessResponse(bytes: Uint8Array, runId: string): RelaunchLiveness | null {
+  const response = fromBinary(WatchRunsResponseSchema, bytes);
+  if (response.runId !== runId) return null;
+  return {
+    epoch: BigInt(response.head?.process?.epoch ?? 0),
+    value: response.removed ? RunLiveness.UNSPECIFIED : response.liveness,
+  };
+}
+
+export function copyRelaunchObservation(value: RelaunchObservation): RelaunchObservation {
+  return {
+    epoch: value.epoch,
+    ...(value.lifecycle ? {lifecycle: clone(LifecycleSchema, value.lifecycle)} : {}),
+  };
 }

@@ -7,4 +7,4 @@ export {
   runIntentsMachine,
 } from './machine.js';
 
-export {relaunchMachine} from './relaunch.js';
+export {type RelaunchEvent, relaunchMachine} from './relaunch.js';
