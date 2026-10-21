@@ -68,6 +68,9 @@ _NEWLINE: Final = b"\n"
 _SIDECAR_BATCH_BYTES: Final = 1 << 20
 _SOURCE_STAMP_MAX_BYTES: Final = 256
 _SOURCE_STAT_FIELDS: Final = 5
+_TIMESTAMP_TICK_NS: Final = 2_000_000_000
+"""The coarsest file timestamp granularity assumed (ext3 and FAT keep seconds, FAT two): an edit
+made this soon after another can keep the same ``mtime_ns`` and ``ctime_ns``."""
 
 
 def sidecar_path(journal: Path) -> Path:
@@ -109,6 +112,38 @@ def _same_source(path: Path, expected: _SourceStat | None) -> bool:
     return current.size > expected.size or (
         current.mtime_ns == expected.mtime_ns and current.ctime_ns == expected.ctime_ns
     )
+
+
+def _is_racy(journal: Path, source: _SourceStat | None) -> bool:
+    """Whether a rewrite of ``journal`` after ``source`` was taken could keep ``source``'s stat.
+
+    The file system's own clock is the stamp's modification time (the stamp is written after
+    the journal event it describes). When the journal was modified within one timestamp tick
+    of it, or after it, an in-place edit of the same size can leave ``mtime_ns`` and
+    ``ctime_ns`` unchanged, so the stat alone cannot say the journal is unchanged. A missing
+    stamp is racy.
+    """
+    if source is None:
+        return True
+    try:
+        taken_ns = _identity_path(journal).stat().st_mtime_ns
+    except OSError:
+        return True
+    return taken_ns - source.mtime_ns < _TIMESTAMP_TICK_NS
+
+
+def _lines_intact(journal: Path, entries: Sequence[Entry]) -> bool:
+    """Whether every entry's line is still in ``journal`` with the checksum it was indexed with."""
+    try:
+        with journal.open("rb") as stream:
+            for entry in entries:
+                stream.seek(entry.offset)
+                line = stream.read(entry.length)
+                if len(line) != entry.length or zlib.crc32(line) != entry.crc:
+                    return False
+    except OSError:
+        return False
+    return True
 
 
 def _read_source_stamp(path: Path) -> _SourceStat | None:
@@ -264,6 +299,7 @@ class JournalIndex:
         """Start with no entries, or with the entries ``tables`` holds."""
         self._tables = _Tables() if tables is None else tables
         self._source: _SourceStat | None = None
+        self._racy = True
 
     @property
     def entries(self) -> list[Entry]:
@@ -307,19 +343,30 @@ class JournalIndex:
         """An index of the same entries that ``add`` can extend without changing this one."""
         copied = JournalIndex(self._tables.copy())
         copied._source = self._source
+        copied._racy = self._racy
         return copied
 
     def matches_source(self, journal: Path) -> bool:
-        """Whether ``journal`` is unchanged or an append-only extension since this index."""
-        return _same_source(journal, self._source)
+        """Whether ``journal`` is unchanged or an append-only extension since this index.
+
+        A stat that equals the snapshot's proves nothing while the snapshot is racy (see
+        ``_is_racy``), so every indexed line is then checked against its checksum.
+        """
+        if not _same_source(journal, self._source):
+            return False
+        if self._racy and _source_stat(journal) == self._source:
+            return _lines_intact(journal, self._tables.entries)
+        return True
 
     def record_source(self, journal: Path) -> None:
         """Remember the journal's file identity and stat after its indexed prefix was read."""
         self._source = _source_stat(journal)
+        self._racy = _is_racy(journal, self._source)
 
-    def set_source_snapshot(self, source: _SourceStat | None) -> None:
+    def set_source_snapshot(self, journal: Path, source: _SourceStat | None) -> None:
         """Use the source snapshot validated with a sidecar."""
         self._source = source
+        self._racy = _is_racy(journal, source)
 
     def tail(self, before: int | None, count: int, max_bytes: int) -> tuple[list[Entry], bool]:
         """The newest entries below sequence ``before`` (all when ``None``) one page carries.
@@ -515,7 +562,9 @@ def _checked_sidecar(journal: Path) -> tuple[JournalIndex, int]:
     source = _read_source_stamp(_identity_path(journal))
     if not _same_source(journal, source) or not _matches_journal(journal, index):
         return JournalIndex(), 0
-    index.set_source_snapshot(source)
+    index.set_source_snapshot(journal, source)
+    if index.entries and not index.matches_source(journal):
+        return JournalIndex(), 0
     return index, valid
 
 
