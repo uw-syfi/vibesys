@@ -1,7 +1,8 @@
-"""Protobuf host command boundary over the existing, reviewed control inbox.
+"""Typed host commands for control inbox writes and detached relaunch admission.
 
-The command acknowledges persistence only. The run owns applying a request and
-publishing its IntentState. No CLI or gateway implementation enters this module.
+PostIntent acknowledges persistence; the run owns applying the request and
+publishing its IntentState. Relaunch confirms the new writer epoch. No CLI or
+gateway implementation enters this module.
 """
 
 from __future__ import annotations
