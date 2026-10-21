@@ -36,8 +36,6 @@ if TYPE_CHECKING:
         Config,
         ConfigInvalid,
         ConfigurationCause,
-        ConfigurationDiagnostic,
-        ConfigurationError,
         CoreEvent,
         EventStatus,
         GitHubUnavailable,
@@ -86,6 +84,7 @@ if TYPE_CHECKING:
     )
     from vibesys.composition import agent_spec_from_config
     from vibesys.constants import KNOWN_COMPUTE_BACKENDS, ComputeBackend, DomainName
+    from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
     from vibesys.events import (
         AgentExecutionStartedData,
         AgentOutputChannel,
@@ -193,7 +192,7 @@ _MODULES: dict[str, str] = {
             "vibesys.api.contracts",
             (
                 "ArgumentsRejected ArgumentsUnrecognized Config ConfigInvalid ConfigurationCause "
-                "ConfigurationDiagnostic ConfigurationError CoreEvent EventStatus GitHubUnavailable "
+                "CoreEvent EventStatus GitHubUnavailable "
                 "IterationKind IterationMetric IterationProjection IterationStatus IterationSummary "
                 "IterationSupport IterationTree IterationUnavailable IterationUnavailableReason "
                 "ModelNotVetted OrchestrationDescriptor PluginProjection ProfilerKind ResumeRef "
@@ -202,6 +201,7 @@ _MODULES: dict[str, str] = {
                 "configuration_error "
             ),
         ),
+        ("vibesys.errors", "ConfigurationDiagnostic ConfigurationError "),
         ("vibesys.api.domains", ("domain_modalities ")),
         ("vibesys.api.entry", ("load_config ")),
         ("vibesys.api.reader", ("RunReader RunReaders ")),
