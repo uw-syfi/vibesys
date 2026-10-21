@@ -10,6 +10,7 @@ import (
 	_ "github.com/uw-syfi/vibesys/gateway/gen/buf/validate"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
+	descriptorpb "google.golang.org/protobuf/types/descriptorpb"
 	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 	reflect "reflect"
 	sync "sync"
@@ -26,7 +27,9 @@ const (
 // Record is the append-only run log envelope. Store changes are additive only.
 // A run.log starts with the eight-byte magic VSRLOG01. Each record then has
 // a uvarint payload length, a four-byte little-endian CRC32C of the payload,
-// and the payload: one encoded vibesys.store.v1.Record.
+// and the payload: one encoded vibesys.store.v1.Record, at most 1 MiB.
+// Writers and readers enforce the encoded byte cap. Content above 64 KiB is
+// attached as a blob; truncation is never a valid way to meet either cap.
 type Record struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	Seq   uint64                 `protobuf:"varint,1,opt,name=seq,proto3" json:"seq,omitempty"`
@@ -36,6 +39,13 @@ type Record struct {
 	//
 	//	*Record_EpochStarted
 	//	*Record_LegacyEvent
+	//	*Record_Lifecycle
+	//	*Record_Span
+	//	*Record_Metric
+	//	*Record_Stream
+	//	*Record_Blob
+	//	*Record_Intent
+	//	*Record_Notice
 	Body          isRecord_Body `protobuf_oneof:"body"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -117,6 +127,69 @@ func (x *Record) GetLegacyEvent() *LegacyEvent {
 	return nil
 }
 
+func (x *Record) GetLifecycle() *Lifecycle {
+	if x != nil {
+		if x, ok := x.Body.(*Record_Lifecycle); ok {
+			return x.Lifecycle
+		}
+	}
+	return nil
+}
+
+func (x *Record) GetSpan() *SpanRecord {
+	if x != nil {
+		if x, ok := x.Body.(*Record_Span); ok {
+			return x.Span
+		}
+	}
+	return nil
+}
+
+func (x *Record) GetMetric() *MetricPoint {
+	if x != nil {
+		if x, ok := x.Body.(*Record_Metric); ok {
+			return x.Metric
+		}
+	}
+	return nil
+}
+
+func (x *Record) GetStream() *StreamRef {
+	if x != nil {
+		if x, ok := x.Body.(*Record_Stream); ok {
+			return x.Stream
+		}
+	}
+	return nil
+}
+
+func (x *Record) GetBlob() *BlobAttached {
+	if x != nil {
+		if x, ok := x.Body.(*Record_Blob); ok {
+			return x.Blob
+		}
+	}
+	return nil
+}
+
+func (x *Record) GetIntent() *IntentState {
+	if x != nil {
+		if x, ok := x.Body.(*Record_Intent); ok {
+			return x.Intent
+		}
+	}
+	return nil
+}
+
+func (x *Record) GetNotice() *Notice {
+	if x != nil {
+		if x, ok := x.Body.(*Record_Notice); ok {
+			return x.Notice
+		}
+	}
+	return nil
+}
+
 type isRecord_Body interface {
 	isRecord_Body()
 }
@@ -129,9 +202,51 @@ type Record_LegacyEvent struct {
 	LegacyEvent *LegacyEvent `protobuf:"bytes,5,opt,name=legacy_event,json=legacyEvent,proto3,oneof"`
 }
 
+type Record_Lifecycle struct {
+	Lifecycle *Lifecycle `protobuf:"bytes,11,opt,name=lifecycle,proto3,oneof"`
+}
+
+type Record_Span struct {
+	Span *SpanRecord `protobuf:"bytes,12,opt,name=span,proto3,oneof"`
+}
+
+type Record_Metric struct {
+	Metric *MetricPoint `protobuf:"bytes,13,opt,name=metric,proto3,oneof"`
+}
+
+type Record_Stream struct {
+	Stream *StreamRef `protobuf:"bytes,14,opt,name=stream,proto3,oneof"`
+}
+
+type Record_Blob struct {
+	Blob *BlobAttached `protobuf:"bytes,15,opt,name=blob,proto3,oneof"`
+}
+
+type Record_Intent struct {
+	Intent *IntentState `protobuf:"bytes,16,opt,name=intent,proto3,oneof"`
+}
+
+type Record_Notice struct {
+	Notice *Notice `protobuf:"bytes,17,opt,name=notice,proto3,oneof"`
+}
+
 func (*Record_EpochStarted) isRecord_Body() {}
 
 func (*Record_LegacyEvent) isRecord_Body() {}
+
+func (*Record_Lifecycle) isRecord_Body() {}
+
+func (*Record_Span) isRecord_Body() {}
+
+func (*Record_Metric) isRecord_Body() {}
+
+func (*Record_Stream) isRecord_Body() {}
+
+func (*Record_Blob) isRecord_Body() {}
+
+func (*Record_Intent) isRecord_Body() {}
+
+func (*Record_Notice) isRecord_Body() {}
 
 // EpochStarted identifies the writer and schemas for one run epoch.
 type EpochStarted struct {
@@ -142,8 +257,14 @@ type EpochStarted struct {
 	Dirty           bool                   `protobuf:"varint,4,opt,name=dirty,proto3" json:"dirty,omitempty"`
 	ApiSchemaHash   string                 `protobuf:"bytes,5,opt,name=api_schema_hash,json=apiSchemaHash,proto3" json:"api_schema_hash,omitempty"`
 	StoreSchemaHash string                 `protobuf:"bytes,6,opt,name=store_schema_hash,json=storeSchemaHash,proto3" json:"store_schema_hash,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// Existing checkout fields stay authoritative; no duplicate Checkout message.
+	VibesysVersion string                          `protobuf:"bytes,7,opt,name=vibesys_version,json=vibesysVersion,proto3" json:"vibesys_version,omitempty"`
+	Run            *RunDescription                 `protobuf:"bytes,8,opt,name=run,proto3" json:"run,omitempty"`
+	SpanKinds      []*SpanKindDecl                 `protobuf:"bytes,9,rep,name=span_kinds,json=spanKinds,proto3" json:"span_kinds,omitempty"`
+	Series         []*MetricSeriesDecl             `protobuf:"bytes,10,rep,name=series,proto3" json:"series,omitempty"`
+	Descriptors    *descriptorpb.FileDescriptorSet `protobuf:"bytes,11,opt,name=descriptors,proto3" json:"descriptors,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *EpochStarted) Reset() {
@@ -218,9 +339,44 @@ func (x *EpochStarted) GetStoreSchemaHash() string {
 	return ""
 }
 
+func (x *EpochStarted) GetVibesysVersion() string {
+	if x != nil {
+		return x.VibesysVersion
+	}
+	return ""
+}
+
+func (x *EpochStarted) GetRun() *RunDescription {
+	if x != nil {
+		return x.Run
+	}
+	return nil
+}
+
+func (x *EpochStarted) GetSpanKinds() []*SpanKindDecl {
+	if x != nil {
+		return x.SpanKinds
+	}
+	return nil
+}
+
+func (x *EpochStarted) GetSeries() []*MetricSeriesDecl {
+	if x != nil {
+		return x.Series
+	}
+	return nil
+}
+
+func (x *EpochStarted) GetDescriptors() *descriptorpb.FileDescriptorSet {
+	if x != nil {
+		return x.Descriptors
+	}
+	return nil
+}
+
 // LegacyEvent is an interim bridge carrying one current JSONL run event verbatim.
-// Phase 2 replaces this body when the event inventory is implemented. Its field
-// number remains reserved after removal; existing store records remain readable.
+// Retained for the seven-day read window after phase 2 lands. Its field
+// number must be reserved after removal; existing store records remain readable.
 type LegacyEvent struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Json          string                 `protobuf:"bytes,1,opt,name=json,proto3" json:"json,omitempty"`
@@ -269,21 +425,43 @@ var File_vibesys_store_v1_record_proto protoreflect.FileDescriptor
 
 const file_vibesys_store_v1_record_proto_rawDesc = "" +
 	"\n" +
-	"\x1dvibesys/store/v1/record.proto\x12\x10vibesys.store.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xf6\x01\n" +
+	"\x1dvibesys/store/v1/record.proto\x12\x10vibesys.store.v1\x1a\x1bbuf/validate/validate.proto\x1a google/protobuf/descriptor.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1evibesys/store/v1/content.proto\x1a\x1cvibesys/store/v1/epoch.proto\x1a\x1dvibesys/store/v1/intent.proto\x1a vibesys/store/v1/lifecycle.proto\x1a\x1dvibesys/store/v1/notice.proto\x1a\x1bvibesys/store/v1/span.proto\"\x83\t\n" +
 	"\x06Record\x12\x10\n" +
 	"\x03seq\x18\x01 \x01(\x04R\x03seq\x12*\n" +
 	"\x02at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\x02at\x12\x14\n" +
 	"\x05epoch\x18\x03 \x01(\rR\x05epoch\x12E\n" +
 	"\repoch_started\x18\x04 \x01(\v2\x1e.vibesys.store.v1.EpochStartedH\x00R\fepochStarted\x12B\n" +
-	"\flegacy_event\x18\x05 \x01(\v2\x1d.vibesys.store.v1.LegacyEventH\x00R\vlegacyEventB\r\n" +
-	"\x04body\x12\x05\xbaH\x02\b\x01\"\xc2\x01\n" +
+	"\flegacy_event\x18\x05 \x01(\v2\x1d.vibesys.store.v1.LegacyEventH\x00R\vlegacyEvent\x12;\n" +
+	"\tlifecycle\x18\v \x01(\v2\x1b.vibesys.store.v1.LifecycleH\x00R\tlifecycle\x122\n" +
+	"\x04span\x18\f \x01(\v2\x1c.vibesys.store.v1.SpanRecordH\x00R\x04span\x127\n" +
+	"\x06metric\x18\r \x01(\v2\x1d.vibesys.store.v1.MetricPointH\x00R\x06metric\x125\n" +
+	"\x06stream\x18\x0e \x01(\v2\x1b.vibesys.store.v1.StreamRefH\x00R\x06stream\x124\n" +
+	"\x04blob\x18\x0f \x01(\v2\x1e.vibesys.store.v1.BlobAttachedH\x00R\x04blob\x127\n" +
+	"\x06intent\x18\x10 \x01(\v2\x1d.vibesys.store.v1.IntentStateH\x00R\x06intent\x122\n" +
+	"\x06notice\x18\x11 \x01(\v2\x18.vibesys.store.v1.NoticeH\x00R\x06notice:\x86\x04\xbaH\x82\x04\x1a\x86\x02\n" +
+	"\x0frecord.identity\x120seq, epoch and at are required for typed records\x1a\xc0\x01!(has(this.lifecycle) || has(this.span) || has(this.metric) || has(this.stream) || has(this.blob) || has(this.intent) || has(this.notice)) || (this.seq > 0u && this.epoch > 0u && has(this.at))\x1a\xf6\x01\n" +
+	"\x14record.epoch_started\x12Vepoch_started epoch must match epoch and seq and at must be present for a typed header\x1a\x85\x01!has(this.epoch_started) || !has(this.epoch_started.run) || (this.epoch == this.epoch_started.epoch && this.seq > 0u && has(this.at))B\r\n" +
+	"\x04body\x12\x05\xbaH\x02\b\x01\"\xd3\r\n" +
 	"\fEpochStarted\x12\x15\n" +
 	"\x06run_id\x18\x01 \x01(\tR\x05runId\x12\x14\n" +
 	"\x05epoch\x18\x02 \x01(\rR\x05epoch\x12\x1b\n" +
 	"\ttree_hash\x18\x03 \x01(\tR\btreeHash\x12\x14\n" +
 	"\x05dirty\x18\x04 \x01(\bR\x05dirty\x12&\n" +
 	"\x0fapi_schema_hash\x18\x05 \x01(\tR\rapiSchemaHash\x12*\n" +
-	"\x11store_schema_hash\x18\x06 \x01(\tR\x0fstoreSchemaHash\"!\n" +
+	"\x11store_schema_hash\x18\x06 \x01(\tR\x0fstoreSchemaHash\x122\n" +
+	"\x0fvibesys_version\x18\a \x01(\tB\t\xbaH\x06r\x04(\x80\x80\x04R\x0evibesysVersion\x122\n" +
+	"\x03run\x18\b \x01(\v2 .vibesys.store.v1.RunDescriptionR\x03run\x12=\n" +
+	"\n" +
+	"span_kinds\x18\t \x03(\v2\x1e.vibesys.store.v1.SpanKindDeclR\tspanKinds\x12:\n" +
+	"\x06series\x18\n" +
+	" \x03(\v2\".vibesys.store.v1.MetricSeriesDeclR\x06series\x12D\n" +
+	"\vdescriptors\x18\v \x01(\v2\".google.protobuf.FileDescriptorSetR\vdescriptors:\xe5\t\xbaH\xe1\t\x1a\xd2\x01\n" +
+	"\x0eepoch.identity\x12Prun_id, epoch, tree_hash and vibesys_version are required for a typed run header\x1an!has(this.run) || (this.run_id != '' && this.epoch > 0u && this.tree_hash != '' && this.vibesys_version != '')\x1a\x8a\x02\n" +
+	"\x10epoch.span_kinds\x12Dspan_kinds must have unique kind names and descriptors when nonempty\x1a\xaf\x01this.span_kinds.all(x, this.span_kinds.filter(y, y.kind == x.kind).size() == 1) && (this.span_kinds.size() == 0 || (has(this.descriptors) && this.descriptors.file.size() > 0))\x1a\xaf\x01\n" +
+	"\x1cepoch.run_detail_descriptors\x12'descriptors are required for run detail\x1af!has(this.run) || !has(this.run.detail) || (has(this.descriptors) && this.descriptors.file.size() > 0)\x1av\n" +
+	"\fepoch.series\x12\x1dseries must have unique names\x1aGthis.series.all(x, this.series.filter(y, y.name == x.name).size() == 1)\x1a\xee\x01\n" +
+	"\x10epoch.objectives\x12Srun objectives must name series declared with the same direction and objective role\x1a\x84\x01!has(this.run) || this.run.objectives.all(o, this.series.exists(s, s.name == o.series && s.direction == o.direction && s.role == 1))\x1a\xe1\x01\n" +
+	"\x13epoch.schema_hashes\x12Rapi_schema_hash and store_schema_hash must be lowercase SHA-256 for a typed header\x1av!has(this.run) || (this.api_schema_hash.matches('^[0-9a-f]{64}$') && this.store_schema_hash.matches('^[0-9a-f]{64}$'))\"!\n" +
 	"\vLegacyEvent\x12\x12\n" +
 	"\x04json\x18\x01 \x01(\tR\x04jsonB\xc6\x01\n" +
 	"\x14com.vibesys.store.v1B\vRecordProtoP\x01Z?github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1\xa2\x02\x03VSX\xaa\x02\x10Vibesys.Store.V1\xca\x02\x10Vibesys\\Store\\V1\xe2\x02\x1cVibesys\\Store\\V1\\GPBMetadata\xea\x02\x12Vibesys::Store::V1b\x06proto3"
@@ -302,20 +480,42 @@ func file_vibesys_store_v1_record_proto_rawDescGZIP() []byte {
 
 var file_vibesys_store_v1_record_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
 var file_vibesys_store_v1_record_proto_goTypes = []any{
-	(*Record)(nil),                // 0: vibesys.store.v1.Record
-	(*EpochStarted)(nil),          // 1: vibesys.store.v1.EpochStarted
-	(*LegacyEvent)(nil),           // 2: vibesys.store.v1.LegacyEvent
-	(*timestamppb.Timestamp)(nil), // 3: google.protobuf.Timestamp
+	(*Record)(nil),                         // 0: vibesys.store.v1.Record
+	(*EpochStarted)(nil),                   // 1: vibesys.store.v1.EpochStarted
+	(*LegacyEvent)(nil),                    // 2: vibesys.store.v1.LegacyEvent
+	(*timestamppb.Timestamp)(nil),          // 3: google.protobuf.Timestamp
+	(*Lifecycle)(nil),                      // 4: vibesys.store.v1.Lifecycle
+	(*SpanRecord)(nil),                     // 5: vibesys.store.v1.SpanRecord
+	(*MetricPoint)(nil),                    // 6: vibesys.store.v1.MetricPoint
+	(*StreamRef)(nil),                      // 7: vibesys.store.v1.StreamRef
+	(*BlobAttached)(nil),                   // 8: vibesys.store.v1.BlobAttached
+	(*IntentState)(nil),                    // 9: vibesys.store.v1.IntentState
+	(*Notice)(nil),                         // 10: vibesys.store.v1.Notice
+	(*RunDescription)(nil),                 // 11: vibesys.store.v1.RunDescription
+	(*SpanKindDecl)(nil),                   // 12: vibesys.store.v1.SpanKindDecl
+	(*MetricSeriesDecl)(nil),               // 13: vibesys.store.v1.MetricSeriesDecl
+	(*descriptorpb.FileDescriptorSet)(nil), // 14: google.protobuf.FileDescriptorSet
 }
 var file_vibesys_store_v1_record_proto_depIdxs = []int32{
-	3, // 0: vibesys.store.v1.Record.at:type_name -> google.protobuf.Timestamp
-	1, // 1: vibesys.store.v1.Record.epoch_started:type_name -> vibesys.store.v1.EpochStarted
-	2, // 2: vibesys.store.v1.Record.legacy_event:type_name -> vibesys.store.v1.LegacyEvent
-	3, // [3:3] is the sub-list for method output_type
-	3, // [3:3] is the sub-list for method input_type
-	3, // [3:3] is the sub-list for extension type_name
-	3, // [3:3] is the sub-list for extension extendee
-	0, // [0:3] is the sub-list for field type_name
+	3,  // 0: vibesys.store.v1.Record.at:type_name -> google.protobuf.Timestamp
+	1,  // 1: vibesys.store.v1.Record.epoch_started:type_name -> vibesys.store.v1.EpochStarted
+	2,  // 2: vibesys.store.v1.Record.legacy_event:type_name -> vibesys.store.v1.LegacyEvent
+	4,  // 3: vibesys.store.v1.Record.lifecycle:type_name -> vibesys.store.v1.Lifecycle
+	5,  // 4: vibesys.store.v1.Record.span:type_name -> vibesys.store.v1.SpanRecord
+	6,  // 5: vibesys.store.v1.Record.metric:type_name -> vibesys.store.v1.MetricPoint
+	7,  // 6: vibesys.store.v1.Record.stream:type_name -> vibesys.store.v1.StreamRef
+	8,  // 7: vibesys.store.v1.Record.blob:type_name -> vibesys.store.v1.BlobAttached
+	9,  // 8: vibesys.store.v1.Record.intent:type_name -> vibesys.store.v1.IntentState
+	10, // 9: vibesys.store.v1.Record.notice:type_name -> vibesys.store.v1.Notice
+	11, // 10: vibesys.store.v1.EpochStarted.run:type_name -> vibesys.store.v1.RunDescription
+	12, // 11: vibesys.store.v1.EpochStarted.span_kinds:type_name -> vibesys.store.v1.SpanKindDecl
+	13, // 12: vibesys.store.v1.EpochStarted.series:type_name -> vibesys.store.v1.MetricSeriesDecl
+	14, // 13: vibesys.store.v1.EpochStarted.descriptors:type_name -> google.protobuf.FileDescriptorSet
+	14, // [14:14] is the sub-list for method output_type
+	14, // [14:14] is the sub-list for method input_type
+	14, // [14:14] is the sub-list for extension type_name
+	14, // [14:14] is the sub-list for extension extendee
+	0,  // [0:14] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_store_v1_record_proto_init() }
@@ -323,9 +523,22 @@ func file_vibesys_store_v1_record_proto_init() {
 	if File_vibesys_store_v1_record_proto != nil {
 		return
 	}
+	file_vibesys_store_v1_content_proto_init()
+	file_vibesys_store_v1_epoch_proto_init()
+	file_vibesys_store_v1_intent_proto_init()
+	file_vibesys_store_v1_lifecycle_proto_init()
+	file_vibesys_store_v1_notice_proto_init()
+	file_vibesys_store_v1_span_proto_init()
 	file_vibesys_store_v1_record_proto_msgTypes[0].OneofWrappers = []any{
 		(*Record_EpochStarted)(nil),
 		(*Record_LegacyEvent)(nil),
+		(*Record_Lifecycle)(nil),
+		(*Record_Span)(nil),
+		(*Record_Metric)(nil),
+		(*Record_Stream)(nil),
+		(*Record_Blob)(nil),
+		(*Record_Intent)(nil),
+		(*Record_Notice)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{

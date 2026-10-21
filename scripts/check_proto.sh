@@ -8,7 +8,7 @@ base="${PROTO_BASE_REF:-origin/main}"
 # Only the first introduction has no store to compare. A missing ref is an error.
 git rev-parse --verify "$base^{commit}" > /dev/null
 if git cat-file -e "$base:buf.yaml" 2>/dev/null; then
-  uv run --locked --group proto buf breaking --path proto/vibesys/store/v1 \
+  uv run --locked --group proto buf breaking --path proto/vibesys/store/v1 --path proto/vibesys/search/v1 \
     --against ".git#ref=$base"
 elif git cat-file -e "$base:proto/vibesys/store/v1" 2>/dev/null; then
   echo "Store exists at $base but buf.yaml is missing; restore its breaking-check configuration." >&2

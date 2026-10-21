@@ -194,6 +194,15 @@ floor = 40
 # implies it is untested.
 allowlist = []
 
+[tool.vibesys.contract_sot]
+# Phase 3 generates the core types from these protos and deletes the hand-written
+# copies. Only this generated Attempt is temporarily exempt from the copy rule;
+# imports and all other copies remain checked. Proto regenerate-and-diff guards it.
+# A directory exclusion would hide unrelated copies and legacy imports.
+copy_waivers = [
+    { path = "libs/vs-proto/src/vs_proto/_generated/vibesys/store/v1/span_pb.py", symbol = "Attempt", reason = "Run transport v2 phase 3 generates core types from proto and deletes hand-written copies (#3332)." },
+]
+
 [tool.vibesys.file_length]
 # God-file ceiling for first-party Python, in physical lines (`wc -l`).
 # Enforced by `scripts/check_file_length.py`. Ruff's C901/PL rules bound

@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package vibesys.api.v1;
 
+import "vibesys/store/v1/skeleton.proto";
+
 option go_package = "github.com/uw-syfi/vibesys/gateway/gen/vibesys/api/v1;apiv1";
 
 // HostService is a stateless view over a host user's run files.
@@ -13,6 +15,10 @@ service HostService {
   // Tail follows the log live until the client cancels, starting at from_seq
   // (inclusive). Record bytes pass through unchanged; only seq is decoded.
   rpc Tail(TailRequest) returns (stream TailResponse);
+  rpc Skeleton(SkeletonRequest) returns (SkeletonResponse);
+  rpc WatchRuns(WatchRunsRequest) returns (stream WatchRunsResponse);
+  rpc GetBlobs(GetBlobsRequest) returns (GetBlobsResponse);
+  rpc TailStream(TailStreamRequest) returns (stream TailStreamResponse);
 }
 
 message HelloRequest {
@@ -34,4 +40,71 @@ message TailResponse {
   repeated bytes records = 1;
   // The last sequence delivered in this response.
   uint64 through_seq = 2;
+}
+
+message SkeletonRequest {
+  string run_id = 1;
+}
+
+// A bounded committed prefix, at most 1 MiB encoded. No keyframe means replay
+// from the beginning; a keyframe larger than the budget is omitted. Records that
+// do not fit (including a single large record) are delivered through Tail.
+message SkeletonResponse {
+  optional bytes keyframe = 1;
+  repeated bytes records = 2;
+  // Published boundary, or the last included sequence for a phase 1 run.
+  uint64 committed_seq = 3;
+  // First sequence not included. Continue with Tail(from_seq = next_seq).
+  uint64 next_seq = 4;
+  // True when the frozen readable prefix was included in full.
+  bool complete = 5;
+}
+
+message WatchRunsRequest {}
+
+// Initial entries precede an initial_complete marker. Later entries replace by
+// run_id; removed is a tombstone. A phase 1 run has no head and UNKNOWN liveness.
+message WatchRunsResponse {
+  string run_id = 1;
+  vibesys.store.v1.RunHead head = 2;
+  RunLiveness liveness = 3;
+  bool removed = 4;
+  bool initial_complete = 5;
+}
+
+enum RunLiveness {
+  RUN_LIVENESS_UNSPECIFIED = 0;
+  RUN_LIVENESS_ALIVE = 1;
+  RUN_LIVENESS_INTERRUPTED = 2;
+  RUN_LIVENESS_ENDED = 3;
+}
+
+message GetBlobsRequest {
+  string run_id = 1;
+  repeated string sha256 = 2;
+}
+
+// At most 16 MiB of blob content per response. Each requested hash has a result
+// in request order, including duplicates and failures; retry omitted content in
+// a smaller request. error_code is a google.rpc.Code number, zero on success.
+message GetBlobsResponse {
+  repeated BlobResult blobs = 1;
+}
+
+message BlobResult {
+  string sha256 = 1;
+  bytes data = 2;
+  int32 error_code = 3;
+  string error_message = 4;
+}
+
+message TailStreamRequest {
+  string run_id = 1;
+  string stream_id = 2;
+  uint64 from_offset = 3;
+}
+
+message TailStreamResponse {
+  bytes data = 1;
+  uint64 next_offset = 2;
 }

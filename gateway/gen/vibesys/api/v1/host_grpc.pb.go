@@ -19,8 +19,12 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	HostService_Hello_FullMethodName = "/vibesys.api.v1.HostService/Hello"
-	HostService_Tail_FullMethodName  = "/vibesys.api.v1.HostService/Tail"
+	HostService_Hello_FullMethodName      = "/vibesys.api.v1.HostService/Hello"
+	HostService_Tail_FullMethodName       = "/vibesys.api.v1.HostService/Tail"
+	HostService_Skeleton_FullMethodName   = "/vibesys.api.v1.HostService/Skeleton"
+	HostService_WatchRuns_FullMethodName  = "/vibesys.api.v1.HostService/WatchRuns"
+	HostService_GetBlobs_FullMethodName   = "/vibesys.api.v1.HostService/GetBlobs"
+	HostService_TailStream_FullMethodName = "/vibesys.api.v1.HostService/TailStream"
 )
 
 // HostServiceClient is the client API for HostService service.
@@ -36,6 +40,10 @@ type HostServiceClient interface {
 	// Tail follows the log live until the client cancels, starting at from_seq
 	// (inclusive). Record bytes pass through unchanged; only seq is decoded.
 	Tail(ctx context.Context, in *TailRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[TailResponse], error)
+	Skeleton(ctx context.Context, in *SkeletonRequest, opts ...grpc.CallOption) (*SkeletonResponse, error)
+	WatchRuns(ctx context.Context, in *WatchRunsRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[WatchRunsResponse], error)
+	GetBlobs(ctx context.Context, in *GetBlobsRequest, opts ...grpc.CallOption) (*GetBlobsResponse, error)
+	TailStream(ctx context.Context, in *TailStreamRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[TailStreamResponse], error)
 }
 
 type hostServiceClient struct {
@@ -75,6 +83,64 @@ func (c *hostServiceClient) Tail(ctx context.Context, in *TailRequest, opts ...g
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type HostService_TailClient = grpc.ServerStreamingClient[TailResponse]
 
+func (c *hostServiceClient) Skeleton(ctx context.Context, in *SkeletonRequest, opts ...grpc.CallOption) (*SkeletonResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SkeletonResponse)
+	err := c.cc.Invoke(ctx, HostService_Skeleton_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostServiceClient) WatchRuns(ctx context.Context, in *WatchRunsRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[WatchRunsResponse], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &HostService_ServiceDesc.Streams[1], HostService_WatchRuns_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[WatchRunsRequest, WatchRunsResponse]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type HostService_WatchRunsClient = grpc.ServerStreamingClient[WatchRunsResponse]
+
+func (c *hostServiceClient) GetBlobs(ctx context.Context, in *GetBlobsRequest, opts ...grpc.CallOption) (*GetBlobsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetBlobsResponse)
+	err := c.cc.Invoke(ctx, HostService_GetBlobs_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostServiceClient) TailStream(ctx context.Context, in *TailStreamRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[TailStreamResponse], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &HostService_ServiceDesc.Streams[2], HostService_TailStream_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[TailStreamRequest, TailStreamResponse]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type HostService_TailStreamClient = grpc.ServerStreamingClient[TailStreamResponse]
+
 // HostServiceServer is the server API for HostService service.
 // All implementations must embed UnimplementedHostServiceServer
 // for forward compatibility.
@@ -88,6 +154,10 @@ type HostServiceServer interface {
 	// Tail follows the log live until the client cancels, starting at from_seq
 	// (inclusive). Record bytes pass through unchanged; only seq is decoded.
 	Tail(*TailRequest, grpc.ServerStreamingServer[TailResponse]) error
+	Skeleton(context.Context, *SkeletonRequest) (*SkeletonResponse, error)
+	WatchRuns(*WatchRunsRequest, grpc.ServerStreamingServer[WatchRunsResponse]) error
+	GetBlobs(context.Context, *GetBlobsRequest) (*GetBlobsResponse, error)
+	TailStream(*TailStreamRequest, grpc.ServerStreamingServer[TailStreamResponse]) error
 	mustEmbedUnimplementedHostServiceServer()
 }
 
@@ -103,6 +173,18 @@ func (UnimplementedHostServiceServer) Hello(context.Context, *HelloRequest) (*He
 }
 func (UnimplementedHostServiceServer) Tail(*TailRequest, grpc.ServerStreamingServer[TailResponse]) error {
 	return status.Error(codes.Unimplemented, "method Tail not implemented")
+}
+func (UnimplementedHostServiceServer) Skeleton(context.Context, *SkeletonRequest) (*SkeletonResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method Skeleton not implemented")
+}
+func (UnimplementedHostServiceServer) WatchRuns(*WatchRunsRequest, grpc.ServerStreamingServer[WatchRunsResponse]) error {
+	return status.Error(codes.Unimplemented, "method WatchRuns not implemented")
+}
+func (UnimplementedHostServiceServer) GetBlobs(context.Context, *GetBlobsRequest) (*GetBlobsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetBlobs not implemented")
+}
+func (UnimplementedHostServiceServer) TailStream(*TailStreamRequest, grpc.ServerStreamingServer[TailStreamResponse]) error {
+	return status.Error(codes.Unimplemented, "method TailStream not implemented")
 }
 func (UnimplementedHostServiceServer) mustEmbedUnimplementedHostServiceServer() {}
 func (UnimplementedHostServiceServer) testEmbeddedByValue()                     {}
@@ -154,6 +236,64 @@ func _HostService_Tail_Handler(srv interface{}, stream grpc.ServerStream) error 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type HostService_TailServer = grpc.ServerStreamingServer[TailResponse]
 
+func _HostService_Skeleton_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SkeletonRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServiceServer).Skeleton(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: HostService_Skeleton_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServiceServer).Skeleton(ctx, req.(*SkeletonRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _HostService_WatchRuns_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(WatchRunsRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(HostServiceServer).WatchRuns(m, &grpc.GenericServerStream[WatchRunsRequest, WatchRunsResponse]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type HostService_WatchRunsServer = grpc.ServerStreamingServer[WatchRunsResponse]
+
+func _HostService_GetBlobs_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetBlobsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServiceServer).GetBlobs(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: HostService_GetBlobs_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServiceServer).GetBlobs(ctx, req.(*GetBlobsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _HostService_TailStream_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(TailStreamRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(HostServiceServer).TailStream(m, &grpc.GenericServerStream[TailStreamRequest, TailStreamResponse]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type HostService_TailStreamServer = grpc.ServerStreamingServer[TailStreamResponse]
+
 // HostService_ServiceDesc is the grpc.ServiceDesc for HostService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -165,11 +305,29 @@ var HostService_ServiceDesc = grpc.ServiceDesc{
 			MethodName: "Hello",
 			Handler:    _HostService_Hello_Handler,
 		},
+		{
+			MethodName: "Skeleton",
+			Handler:    _HostService_Skeleton_Handler,
+		},
+		{
+			MethodName: "GetBlobs",
+			Handler:    _HostService_GetBlobs_Handler,
+		},
 	},
 	Streams: []grpc.StreamDesc{
 		{
 			StreamName:    "Tail",
 			Handler:       _HostService_Tail_Handler,
+			ServerStreams: true,
+		},
+		{
+			StreamName:    "WatchRuns",
+			Handler:       _HostService_WatchRuns_Handler,
+			ServerStreams: true,
+		},
+		{
+			StreamName:    "TailStream",
+			Handler:       _HostService_TailStream_Handler,
 			ServerStreams: true,
 		},
 	},

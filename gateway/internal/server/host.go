@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"path/filepath"
 
 	"github.com/uw-syfi/vibesys/gateway/gen"
 	apiv1 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/api/v1"
@@ -25,11 +26,13 @@ const batchBytes = 1 << 20
 type Config struct {
 	Root    string
 	Version string
+	Clock   Clock
 }
 
 type host struct {
 	apiv1.UnimplementedHostServiceServer
 	config Config
+	index  runlog.Index
 }
 
 func (h *host) Hello(_ context.Context, request *apiv1.HelloRequest) (*apiv1.HelloResponse, error) {
@@ -49,6 +52,15 @@ func (h *host) Tail(request *apiv1.TailRequest, stream apiv1.HostService_TailSer
 		return rpcError(err)
 	}
 	defer follower.Close()
+	cap, _, err := committed(filepath.Dir(path))
+	if err != nil {
+		return rpcError(err)
+	}
+	position, err := h.seek(path, request.GetFromSeq(), cap)
+	if err != nil {
+		return rpcError(err)
+	}
+	follower.Seek(position, &h.index, func() (uint64, bool, error) { return committed(filepath.Dir(path)) })
 	// Headers publish that discovery and watch installation succeeded. A caller
 	// can now append without depending on goroutine scheduling or polling.
 	if err := stream.SendHeader(metadata.MD{}); err != nil {
@@ -112,7 +124,10 @@ func rpcError(err error) error {
 // Serve owns the gRPC server until listener closure or context cancellation.
 // The caller owns socket publication and connection/idle accounting.
 func Serve(ctx context.Context, listener net.Listener, config Config) error {
-	server := grpc.NewServer(grpc.MaxSendMsgSize(runlog.MaxRecordBytes + 32))
+	if config.Clock == nil {
+		config.Clock = SystemClock{}
+	}
+	server := grpc.NewServer(grpc.MaxSendMsgSize(maxMessageBytes))
 	apiv1.RegisterHostServiceServer(server, &host{config: config})
 	stop := context.AfterFunc(ctx, server.Stop)
 	defer stop()

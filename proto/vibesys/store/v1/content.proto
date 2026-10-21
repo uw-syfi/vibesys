@@ -1,0 +1,95 @@
+syntax = "proto3";
+
+package vibesys.store.v1;
+
+import "buf/validate/validate.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1";
+
+enum StreamKind {
+  STREAM_KIND_UNSPECIFIED = 0;
+  STREAM_KIND_LOG = 1;
+  STREAM_KIND_TRANSCRIPT = 2;
+}
+
+enum StreamState {
+  STREAM_STATE_UNSPECIFIED = 0;
+  STREAM_STATE_OPENED = 1;
+  STREAM_STATE_ENDED = 2;
+  STREAM_STATE_FAILED = 3;
+  STREAM_STATE_DEGRADED = 4;
+}
+
+// Value is a finite, possibly signed measurement. clock is run-clock seconds.
+message MetricPoint {
+  string series = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 65536
+  }];
+  optional string span = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 65536
+  }];
+  double value = 3 [(buf.validate.field).double.finite = true];
+  double clock = 4 [(buf.validate.field).double = {
+    gte: 0
+    finite: true
+  }];
+}
+
+// Streams are append-only. Only a closed LOG carries length here; a TRANSCRIPT
+// belongs to a turn whose final AgentTurnAttrs.transcript_length seals its view.
+message StreamRef {
+  option (buf.validate.message).cel = {
+    id: "stream.length"
+    message: "length is absent for transcripts and opened logs, and required when a log closes"
+    expression: "has(this.length) == (this.kind == 1 && this.state != 1)"
+  };
+  option (buf.validate.message).cel = {
+    id: "stream.span"
+    message: "span is required for a transcript"
+    expression: "this.kind != 2 || has(this.span)"
+  };
+  string id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 65536
+  }];
+  StreamKind kind = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  optional string span = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 65536
+  }];
+  string title = 4 [(buf.validate.field).string.max_bytes = 65536];
+  StreamState state = 5 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  optional uint64 length = 6;
+}
+
+// Immutable content addressed by the lowercase hexadecimal SHA-256 of its bytes.
+message BlobRef {
+  string sha256 = 1 [(buf.validate.field).string.pattern = "^[0-9a-f]{64}$"];
+  uint64 size = 2;
+  string media_type = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 65536
+  }];
+}
+
+// Roles are extensible (system_prompt, user_prompt, raw_result, reply, diff, ...).
+// Content above 64 KiB is attached rather than truncated or embedded in a record.
+message BlobAttached {
+  string span = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 65536
+  }];
+  string role = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 65536
+  }];
+  BlobRef blob = 3 [(buf.validate.field).required = true];
+}

@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"syscall"
-	"time"
 
 	"github.com/fsnotify/fsnotify"
 )
@@ -18,11 +17,16 @@ import (
 // may block; Close must be called after the reader has stopped. Use one per Tail
 // so a blocked consumer retains only its own bounded batch.
 type Follower struct {
-	path    string
-	watch   *fsnotify.Watcher
-	file    *os.File
-	reader  *Reader
-	pending []byte
+	path     string
+	watch    *fsnotify.Watcher
+	file     *os.File
+	reader   *Reader
+	pending  []byte
+	position Position
+	index    *Index
+	limit    func() (uint64, bool, error)
+	ceiling  uint64
+	bounded  bool
 }
 
 // Open installs the directory watch before inspecting the file, closing the
@@ -39,6 +43,14 @@ func Open(path string) (*Follower, error) {
 	return &Follower{path: path, watch: watch}, nil
 }
 
+// Seek configures a committed reader before its first Read. The limit is
+// reloaded after filesystem notifications, including atomic run.head renames.
+func (f *Follower) Seek(position Position, index *Index, limit func() (uint64, bool, error)) {
+	f.position = position
+	f.index = index
+	f.limit = limit
+}
+
 func (f *Follower) Close() error {
 	err := f.watch.Close()
 	if f.file != nil {
@@ -51,17 +63,28 @@ func (f *Follower) Close() error {
 // target batch size. A single larger record is returned alone (at most
 // MaxRecordBytes). It may return a valid batch alongside a terminal error.
 func (f *Follower) Read(ctx context.Context, targetBytes int) ([][]byte, error) {
-	// This re-check recovers from coalesced/lost filesystem notifications. Normal
-	// progress is event driven; no correctness test waits for the ticker.
-	guard := time.NewTicker(3 * time.Second)
-	defer guard.Stop()
 	var batch [][]byte
 	size := 0
+	refresh := true
 	for {
 		if err := ctx.Err(); err != nil {
 			return batch, err
 		}
-		payload, err := f.next()
+		if refresh && f.limit != nil {
+			ceiling, bounded, err := f.limit()
+			if err != nil {
+				return batch, err
+			}
+			f.ceiling, f.bounded = ceiling, bounded
+			refresh = false
+		}
+		var payload []byte
+		var err error
+		if f.bounded && f.position.ThroughSeq >= f.ceiling && f.pending == nil {
+			err = io.EOF
+		} else {
+			payload, err = f.next()
+		}
 		if err == nil {
 			if len(batch) > 0 && size+len(payload)+binary.MaxVarintLen64+1 > targetBytes {
 				f.pending = payload
@@ -94,8 +117,8 @@ func (f *Follower) Read(ctx context.Context, targetBytes int) ([][]byte, error) 
 			if !errors.Is(err, fsnotify.ErrEventOverflow) {
 				return nil, err
 			}
-		case <-guard.C:
 		}
+		refresh = true
 	}
 }
 
@@ -127,9 +150,29 @@ func (f *Follower) next() ([]byte, error) {
 			return nil, err
 		}
 		f.file = file
-		f.reader = NewReader(file)
+		f.reader = NewReaderAt(file, f.position.Offset)
 	}
 	payload, err := f.reader.Next()
+	if err == nil && f.limit != nil {
+		seq, seqErr := Sequence(payload)
+		if seqErr != nil {
+			return nil, seqErr
+		}
+		if f.position.Offset > 0 && seq <= f.position.ThroughSeq {
+			return nil, f.reader.corrupt("sequence does not increase")
+		}
+		if f.bounded && seq > f.ceiling {
+			return nil, f.reader.corrupt("sequence exceeds committed boundary")
+		}
+		f.position = Position{Offset: f.reader.Offset(), ThroughSeq: seq}
+		if f.index != nil {
+			info, statErr := f.file.Stat()
+			if statErr != nil {
+				return nil, statErr
+			}
+			f.index.Observe(f.path, info, f.position)
+		}
+	}
 	if err == io.EOF {
 		opened, statErr := f.file.Stat()
 		if statErr != nil {
