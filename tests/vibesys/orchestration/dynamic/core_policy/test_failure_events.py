@@ -3,8 +3,8 @@
 import pytest
 
 import vs_proto.api as p
-from vibesys.candidates.api import NotConfigured
-from vibesys.events import WorkstreamFailureData, WorkstreamFailureKind
+from vibesys.candidates.api import InputFailureKind, NotConfigured
+from vibesys.events import InputMeasurementFailureKind, WorkstreamFailureData, WorkstreamFailureKind
 from vibesys.orchestration.dynamic.core_policy.api import project_run_snapshot
 from vibesys.orchestration.dynamic.search.api import (
     AgentName,
@@ -106,3 +106,11 @@ def test_unmeasured_candidates_keep_the_drop_reason_and_stop_cleanly(reason: Dro
         else WorkstreamFailureKind.ENDED
     )
     assert reason.value in failure.text
+
+
+@pytest.mark.parametrize("kind", InputFailureKind)
+def test_every_input_failure_has_supported_legacy_and_native_reasons(
+    kind: InputFailureKind,
+) -> None:
+    event_kind = InputMeasurementFailureKind(kind.value)
+    assert p.InputFailureKind[event_kind.name] != p.InputFailureKind.UNSPECIFIED

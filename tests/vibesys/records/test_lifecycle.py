@@ -173,3 +173,25 @@ def test_unstructured_failure_overrides_the_provisional_ending(
     assert lifecycle.state.value.outcome == p.Outcome.FAILED
     assert lifecycle.state.value.failure is not None
     assert lifecycle.state.value.failure.reason == text
+
+
+@pytest.mark.parametrize("kind", e.RunFailureKind)
+def test_every_run_failure_kind_has_a_supported_native_reason(kind: e.RunFailureKind) -> None:
+    failed = event(
+        e.CoreEventType.RUN_FAILED,
+        e.RunFailedData(
+            failure=e.RunFailure(
+                kind=kind,
+                reason="failure",
+                workstreams_started=0,
+                workstream_budget=1,
+                candidates_kept=0,
+            )
+        ),
+    )
+    result = map_event(MappingState("run-a"), failed)
+    lifecycle = next(r.body.value for r in result.records if r.body and r.body.field == "lifecycle")
+    assert lifecycle.state is not None
+    assert lifecycle.state.field == "ended"
+    assert lifecycle.state.value.failure is not None
+    assert lifecycle.state.value.failure.kind != p.RunFailureKind.UNSPECIFIED
