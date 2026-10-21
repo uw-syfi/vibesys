@@ -904,6 +904,7 @@ REAL_API_EDGES: dict[Key, str] = {
     **{
         (relative, "fs_sync"): f"{_OWN_STORE}: {what}"
         for relative, what in (
+            ("libs/vs-runlog/src/vs_runlog/_file.py", "durable run.log appends"),
             ("libs/vs-runlog/src/vs_runlog/_atomic.py", "atomic head and keyframe publication"),
             ("libs/vs-runlog/src/vs_runlog/_lock.py", "the run lifetime lock"),
             ("libs/vs-project/src/vs_project/_operator_key.py", "the operator key file"),

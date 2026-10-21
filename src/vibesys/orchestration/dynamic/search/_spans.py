@@ -42,6 +42,7 @@ def workstream_attrs(w: WorkstreamStart) -> WorkstreamAttrs:
     """
     return WorkstreamAttrs(
         hypothesis_id=w.plan.work_id,
+        sequence=w.sequence,
         parent_revision=w.parent.revision_id.root,
         idea=w.plan.title or w.plan.hypothesis or None,
         probe=w.plan.kind is WorkKind.PROFILE,

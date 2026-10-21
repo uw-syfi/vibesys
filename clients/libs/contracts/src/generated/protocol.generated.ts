@@ -1042,6 +1042,7 @@ export type Revision4 = string | null;
 export type Outcome = string | null;
 export type Summary5 = string | null;
 export type Probe = boolean;
+export type Sequence2 = number | null;
 
 export interface ProtocolDocument {
   request: Request;
@@ -1927,6 +1928,7 @@ export interface AgentStatusData {
  */
 export interface SubprocessOutputData {
   kind: Kind22;
+  span_id?: SpanId | null;
   process_id: ProcessId;
   process_kind: ProcessKind;
   stream: Stream1;
@@ -2240,6 +2242,7 @@ export interface ProviderSwitchedData {
  */
 export interface GateStartedData {
   kind: Kind42;
+  span_id?: SpanId | null;
   gate: GateKind;
   recipe?: Recipe;
   command?: Command;
@@ -2258,6 +2261,7 @@ export interface GateStartedData {
  */
 export interface GateFinishedData {
   kind: Kind43;
+  span_id?: SpanId | null;
   gate: GateKind;
   recipe?: Recipe1;
   reused?: Reused;
@@ -2876,6 +2880,7 @@ export interface WorkstreamAttrs {
   outcome?: Outcome;
   summary?: Summary5;
   probe?: Probe;
+  sequence?: Sequence2;
 }
 export interface EvolveSpanAttributes {
   adoption?: AdoptionAttrs | null;

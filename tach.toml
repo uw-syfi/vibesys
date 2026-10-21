@@ -478,7 +478,7 @@ depends_on = []
 [[modules]]
 path = "vibesys.run"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_runlog", "vs_proto", "vs_core", "vs_decode.api", "vibesys", "vibesys.errors", "vs_agent", "vs_runtime", "vibesys.inputs", "vs_github", "vs_sandbox", "vs_project", "vs_slurm", "vs_sim.api", "vs_redaction.api"]
+depends_on = ["vibesys.run.runlog_tee", "vs_runlog", "vs_proto", "vs_core", "vs_decode.api", "vibesys", "vibesys.errors", "vs_agent", "vs_runtime", "vibesys.inputs", "vs_github", "vs_sandbox", "vs_project", "vs_slurm", "vs_sim.api", "vs_redaction.api"]
 
 [[modules]]
 path = "vibesys.run.evaluation_identity"
@@ -518,7 +518,7 @@ depends_on = ["vibesys.run.evaluation_socket", "vs_agent", "vs_core", "vs_github
 [[modules]]
 path = "vibesys.run.measurement_events"
 layer = "orchestration_host"
-depends_on = ["vibesys", "vs_redaction.api", "vs_runtime"]
+depends_on = ["vibesys", "vs_redaction.api", "vs_runtime", "vs_core"]
 
 [[modules]]
 path = "vibesys.run.core_run"
@@ -1936,4 +1936,20 @@ depends_on = ["vibesys.run"]
 
 [[interfaces]]
 from = ["vibesys.api.transport"]
-expose = ["ConversionResult", "ConversionStatus", "convert_run"]
+expose = ["ConversionResult", "ConversionStatus", "RunConversion", "convert_run", "convert_runs"]
+
+[[modules]]
+path = "vibesys.records"
+depends_on = ["vibesys", "vibesys.search_spans", "vs_core", "vs_decode.api", "vs_proto"]
+
+[[interfaces]]
+from = ["vibesys.records"]
+expose = ["api", "api\\..*"]
+
+[[modules]]
+path = "vibesys.run.runlog_tee"
+depends_on = ["vibesys", "vibesys.records", "vs_decode.api", "vs_runlog"]
+
+[[interfaces]]
+from = ["vibesys.run.runlog_tee"]
+expose = ["RunLogTee", "JOURNAL_EVENT_MAX_BYTES"]

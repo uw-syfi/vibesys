@@ -679,6 +679,8 @@ class SubprocessOutputData(EventPayload):
     """Captured output from a managed subprocess."""
 
     kind: Literal["subprocess_output"] = "subprocess_output"
+    span_id: SpanId | None = Field(default=None, exclude_if=lambda value: value is None)
+    """The operation that owns this stage, when its submission named one."""
     process_id: str
     process_kind: str
     stream: OutputStream
@@ -757,6 +759,8 @@ class GateStartedData(EventPayload):
     """
 
     kind: Literal["gate_started"] = "gate_started"
+    span_id: SpanId | None = Field(default=None, exclude_if=lambda value: value is None)
+    """The operation that owns this stage, when its submission named one."""
     gate: GateKind
     # The validation recipe being executed; None for build, accuracy and benchmark.
     recipe: str | None = None
@@ -778,6 +782,8 @@ class GateFinishedData(EventPayload):
     """
 
     kind: Literal["gate_finished"] = "gate_finished"
+    span_id: SpanId | None = Field(default=None, exclude_if=lambda value: value is None)
+    """The operation that owns this stage, when its submission named one."""
     gate: GateKind
     recipe: str | None = None
     # True when a prior result for the same input was reused instead of

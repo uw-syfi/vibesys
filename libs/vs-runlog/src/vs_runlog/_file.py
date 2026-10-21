@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
+import re
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, BinaryIO, Self
@@ -24,6 +26,8 @@ from vs_sim.api import CloseOnce, ReleaseStack
 
 CHECKPOINT_RECORDS = 256
 COMMIT_INTERVAL = 0.1
+
+_STREAM_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,255}")
 
 
 @dataclass(frozen=True)
@@ -343,6 +347,18 @@ class FileRunLogWriter:
         write_keyframe(self._path.parent / "keyframes", self._skeleton, sync=self._sync)
         self._checkpoint_seq = self._skeleton.through_seq
 
+    def checkpoint(self) -> None:
+        """Commit and checkpoint the current prefix, including a final conversion.
+
+        Unlike periodic checkpoints this is explicit: callers can finish a batch
+        at an arbitrary record and still open it without replaying its suffix.
+        """
+        with self._condition:
+            self._check_open()
+            target = self.sequence
+            self._request_commit(target, checkpoint=True)
+            self._wait_committed(target, checkpoint=True)
+
     def close(self) -> None:
         """Drain and join the committer, releasing ownership even after a failure."""
         with self._condition:
@@ -369,7 +385,93 @@ class FileRunLogWriter:
         self.close()
 
 
+def install_run_log(staged: Path, destination: Path) -> None:
+    """Install a quiescent conversion with its head and keyframes.
+
+    The staged log lives in a disposable sibling directory. The authoritative
+    JSONL source is untouched; old derived keyframes must not survive a rewrite.
+    """
+    if staged.parent == destination.parent:
+        message = "staged run.log needs a separate disposable directory"
+        raise ValueError(message)
+    lock = RunLock(destination.parent / "run.lock")
+    try:
+        keyframes = destination.parent / "keyframes"
+        if keyframes.exists():
+            keyframes.replace(staged.parent / "previous-keyframes")
+        staged.replace(destination)
+        staged_keyframes = staged.parent / "keyframes"
+        if staged_keyframes.exists():
+            staged_keyframes.replace(keyframes)
+        head = destination.parent / "run.head"
+        staged_head = staged.parent / "run.head"
+        if staged_head.exists():
+            staged_head.replace(head)
+        else:
+            head.unlink(missing_ok=True)
+        sync_directory(destination.parent)
+    finally:
+        lock.close()
+
+
 def _check_write(written: int | None, expected: int) -> None:
     if written != expected:
         message = "incomplete run.log append"
         raise OSError(message)
+
+
+class FileRunContent:
+    """Immutable blobs and replayable stream appends at caller-owned paths.
+
+    Replaying an identical write succeeds. A hash mismatch, unsafe stream id,
+    missing prefix or conflicting content raises rather than overwriting data.
+    Every file handle is scoped to one operation.
+    """
+
+    def __init__(self, blobs: Path, streams: Path) -> None:
+        """Use layout paths supplied by the project, without discovering a project."""
+        self._blobs = blobs
+        self._streams = streams
+
+    def write_blob(self, digest: str, content: bytes) -> None:
+        """Create immutable content only when its supplied hash matches its bytes."""
+        if hashlib.sha256(content).hexdigest() != digest:
+            message = "blob digest does not match content"
+            raise ValueError(message)
+        self._blobs.mkdir(parents=True, exist_ok=True)
+        path = self._blobs / digest
+        try:
+            with path.open("xb") as stream:
+                stream.write(content)
+                stream.flush()
+                os.fsync(stream.fileno())
+        except FileExistsError:
+            if path.read_bytes() != content:
+                message = f"blob {digest} conflicts with existing content"
+                raise ValueError(message) from None
+        sync_directory(self._blobs)
+        sync_directory(self._blobs.parent)
+
+    def append_stream(self, stream_id: str, offset: int, content: bytes) -> None:
+        """Append once at an exact offset, or verify a previously written prefix."""
+        if not _STREAM_ID.fullmatch(stream_id) or offset < 0:
+            message = f"invalid stream id or offset: {stream_id!r}, {offset}"
+            raise ValueError(message)
+        self._streams.mkdir(parents=True, exist_ok=True)
+        path = self._streams / stream_id
+        with path.open("a+b") as stream:
+            size = stream.tell()
+            if size < offset:
+                message = f"stream {stream_id}: missing prefix through {offset}"
+                raise ValueError(message)
+            stream.seek(offset)
+            existing = stream.read(len(content))
+            if existing != content[: len(existing)]:
+                message = f"stream {stream_id}: conflicting content at {offset}"
+                raise ValueError(message)
+            stream.seek(0, 2)
+            stream.write(content[len(existing) :])
+            stream.flush()
+            os.fsync(stream.fileno())
+        sync_directory(self._streams)
+        sync_directory(self._streams.parent)

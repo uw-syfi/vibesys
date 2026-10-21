@@ -31,6 +31,8 @@ const (
 	GateStage_GATE_STAGE_ACCURACY    GateStage = 2
 	GateStage_GATE_STAGE_BENCHMARK   GateStage = 3
 	GateStage_GATE_STAGE_VALIDATION  GateStage = 4
+	// A measurement operation can cover several or task-defined evaluator stages.
+	GateStage_GATE_STAGE_MEASUREMENT GateStage = 5
 )
 
 // Enum value maps for GateStage.
@@ -41,6 +43,7 @@ var (
 		2: "GATE_STAGE_ACCURACY",
 		3: "GATE_STAGE_BENCHMARK",
 		4: "GATE_STAGE_VALIDATION",
+		5: "GATE_STAGE_MEASUREMENT",
 	}
 	GateStage_value = map[string]int32{
 		"GATE_STAGE_UNSPECIFIED": 0,
@@ -48,6 +51,7 @@ var (
 		"GATE_STAGE_ACCURACY":    2,
 		"GATE_STAGE_BENCHMARK":   3,
 		"GATE_STAGE_VALIDATION":  4,
+		"GATE_STAGE_MEASUREMENT": 5,
 	}
 )
 
@@ -84,6 +88,8 @@ const (
 	GateSubject_GATE_SUBJECT_UNSPECIFIED GateSubject = 0
 	GateSubject_GATE_SUBJECT_INPUT       GateSubject = 1
 	GateSubject_GATE_SUBJECT_CANDIDATE   GateSubject = 2
+	// Historical stage events did not identify their owning operation.
+	GateSubject_GATE_SUBJECT_UNATTRIBUTED GateSubject = 3
 )
 
 // Enum value maps for GateSubject.
@@ -92,11 +98,13 @@ var (
 		0: "GATE_SUBJECT_UNSPECIFIED",
 		1: "GATE_SUBJECT_INPUT",
 		2: "GATE_SUBJECT_CANDIDATE",
+		3: "GATE_SUBJECT_UNATTRIBUTED",
 	}
 	GateSubject_value = map[string]int32{
-		"GATE_SUBJECT_UNSPECIFIED": 0,
-		"GATE_SUBJECT_INPUT":       1,
-		"GATE_SUBJECT_CANDIDATE":   2,
+		"GATE_SUBJECT_UNSPECIFIED":  0,
+		"GATE_SUBJECT_INPUT":        1,
+		"GATE_SUBJECT_CANDIDATE":    2,
+		"GATE_SUBJECT_UNATTRIBUTED": 3,
 	}
 )
 
@@ -620,8 +628,10 @@ type WorkstreamAttrs struct {
 	ProfileSkipped *bool                  `protobuf:"varint,13,opt,name=profile_skipped,json=profileSkipped,proto3,oneof" json:"profile_skipped,omitempty"`
 	JudgeVerdict   *string                `protobuf:"bytes,14,opt,name=judge_verdict,json=judgeVerdict,proto3,oneof" json:"judge_verdict,omitempty"`
 	RepeatedError  bool                   `protobuf:"varint,15,opt,name=repeated_error,json=repeatedError,proto3" json:"repeated_error,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// The dynamic search admission ordinal, distinct from a serial round.
+	Sequence      *uint32 `protobuf:"varint,16,opt,name=sequence,proto3,oneof" json:"sequence,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *WorkstreamAttrs) Reset() {
@@ -757,6 +767,13 @@ func (x *WorkstreamAttrs) GetRepeatedError() bool {
 		return x.RepeatedError
 	}
 	return false
+}
+
+func (x *WorkstreamAttrs) GetSequence() uint32 {
+	if x != nil && x.Sequence != nil {
+		return *x.Sequence
+	}
+	return 0
 }
 
 type WorkstreamFailure struct {
@@ -899,16 +916,18 @@ func (x *FileChange) GetDiffLength() uint64 {
 // Readings are MetricPoints owned by this gate; there is no duplicate metric
 // value, unit, vs_baseline or output tail in attrs. Stage output is a LOG stream.
 type GateAttrs struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Stage         GateStage              `protobuf:"varint,1,opt,name=stage,proto3,enum=vibesys.search.v1.GateStage" json:"stage,omitempty"`
-	Subject       GateSubject            `protobuf:"varint,2,opt,name=subject,proto3,enum=vibesys.search.v1.GateSubject" json:"subject,omitempty"`
-	Recipe        *string                `protobuf:"bytes,3,opt,name=recipe,proto3,oneof" json:"recipe,omitempty"`
-	Command       *string                `protobuf:"bytes,4,opt,name=command,proto3,oneof" json:"command,omitempty"`
-	Reused        bool                   `protobuf:"varint,5,opt,name=reused,proto3" json:"reused,omitempty"`
-	Failed        *FailedCheck           `protobuf:"bytes,6,opt,name=failed,proto3,oneof" json:"failed,omitempty"`
-	InputFailure  *InputFailure          `protobuf:"bytes,7,opt,name=input_failure,json=inputFailure,proto3,oneof" json:"input_failure,omitempty"`
-	Source        *FrameworkSource       `protobuf:"varint,8,opt,name=source,proto3,enum=vibesys.search.v1.FrameworkSource,oneof" json:"source,omitempty"`
-	SourceLabel   *string                `protobuf:"bytes,9,opt,name=source_label,json=sourceLabel,proto3,oneof" json:"source_label,omitempty"`
+	state        protoimpl.MessageState `protogen:"open.v1"`
+	Stage        GateStage              `protobuf:"varint,1,opt,name=stage,proto3,enum=vibesys.search.v1.GateStage" json:"stage,omitempty"`
+	Subject      GateSubject            `protobuf:"varint,2,opt,name=subject,proto3,enum=vibesys.search.v1.GateSubject" json:"subject,omitempty"`
+	Recipe       *string                `protobuf:"bytes,3,opt,name=recipe,proto3,oneof" json:"recipe,omitempty"`
+	Command      *string                `protobuf:"bytes,4,opt,name=command,proto3,oneof" json:"command,omitempty"`
+	Reused       bool                   `protobuf:"varint,5,opt,name=reused,proto3" json:"reused,omitempty"`
+	Failed       *FailedCheck           `protobuf:"bytes,6,opt,name=failed,proto3,oneof" json:"failed,omitempty"`
+	InputFailure *InputFailure          `protobuf:"bytes,7,opt,name=input_failure,json=inputFailure,proto3,oneof" json:"input_failure,omitempty"`
+	Source       *FrameworkSource       `protobuf:"varint,8,opt,name=source,proto3,enum=vibesys.search.v1.FrameworkSource,oneof" json:"source,omitempty"`
+	SourceLabel  *string                `protobuf:"bytes,9,opt,name=source_label,json=sourceLabel,proto3,oneof" json:"source_label,omitempty"`
+	// Exact evaluator stage ids, in order. stage categorizes the operation.
+	Stages        []string `protobuf:"bytes,10,rep,name=stages,proto3" json:"stages,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1006,6 +1025,13 @@ func (x *GateAttrs) GetSourceLabel() string {
 	return ""
 }
 
+func (x *GateAttrs) GetStages() []string {
+	if x != nil {
+		return x.Stages
+	}
+	return nil
+}
+
 type FailedCheck struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Check         EvidenceKind           `protobuf:"varint,1,opt,name=check,proto3,enum=vibesys.search.v1.EvidenceKind" json:"check,omitempty"`
@@ -1075,11 +1101,13 @@ func (x *FailedCheck) GetUnit() string {
 }
 
 type InputFailure struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Kind          InputFailureKind       `protobuf:"varint,1,opt,name=kind,proto3,enum=vibesys.search.v1.InputFailureKind" json:"kind,omitempty"`
-	Stage         *GateStage             `protobuf:"varint,2,opt,name=stage,proto3,enum=vibesys.search.v1.GateStage,oneof" json:"stage,omitempty"`
-	Attempts      uint32                 `protobuf:"varint,3,opt,name=attempts,proto3" json:"attempts,omitempty"`
-	Compared      bool                   `protobuf:"varint,4,opt,name=compared,proto3" json:"compared,omitempty"`
+	state    protoimpl.MessageState `protogen:"open.v1"`
+	Kind     InputFailureKind       `protobuf:"varint,1,opt,name=kind,proto3,enum=vibesys.search.v1.InputFailureKind" json:"kind,omitempty"`
+	Stage    *GateStage             `protobuf:"varint,2,opt,name=stage,proto3,enum=vibesys.search.v1.GateStage,oneof" json:"stage,omitempty"`
+	Attempts uint32                 `protobuf:"varint,3,opt,name=attempts,proto3" json:"attempts,omitempty"`
+	Compared bool                   `protobuf:"varint,4,opt,name=compared,proto3" json:"compared,omitempty"`
+	// Task-defined and historical ids, including the old correctness spelling.
+	StageId       *string `protobuf:"bytes,5,opt,name=stage_id,json=stageId,proto3,oneof" json:"stage_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1140,6 +1168,13 @@ func (x *InputFailure) GetCompared() bool {
 		return x.Compared
 	}
 	return false
+}
+
+func (x *InputFailure) GetStageId() string {
+	if x != nil && x.StageId != nil {
+		return *x.StageId
+	}
+	return ""
 }
 
 type AdoptionAttrs struct {
@@ -1444,7 +1479,7 @@ const file_vibesys_search_v1_attrs_proto_rawDesc = "" +
 	"\n" +
 	"\x1dvibesys/search/v1/attrs.proto\x12\x11vibesys.search.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1dvibesys/store/v1/common.proto\"#\n" +
 	"\rPlanningAttrs\x12\x12\n" +
-	"\x04call\x18\x01 \x01(\rR\x04call\"\xd1\x06\n" +
+	"\x04call\x18\x01 \x01(\rR\x04call\"\xff\x06\n" +
 	"\x0fWorkstreamAttrs\x125\n" +
 	"\rhypothesis_id\x18\x01 \x01(\tB\v\xbaH\br\x06\x10\x01(\x80\x80\x04H\x00R\fhypothesisId\x88\x01\x01\x129\n" +
 	"\x0fparent_revision\x18\x02 \x01(\tB\v\xbaH\br\x06\x10\x01(\x80\x80\x04H\x01R\x0eparentRevision\x88\x01\x01\x12\"\n" +
@@ -1463,7 +1498,8 @@ const file_vibesys_search_v1_attrs_proto_rawDesc = "" +
 	"\x0fprofile_skipped\x18\r \x01(\bH\n" +
 	"R\x0eprofileSkipped\x88\x01\x01\x125\n" +
 	"\rjudge_verdict\x18\x0e \x01(\tB\v\xbaH\br\x06\x10\x01(\x80\x80\x04H\vR\fjudgeVerdict\x88\x01\x01\x12%\n" +
-	"\x0erepeated_error\x18\x0f \x01(\bR\rrepeatedErrorB\x10\n" +
+	"\x0erepeated_error\x18\x0f \x01(\bR\rrepeatedError\x12\x1f\n" +
+	"\bsequence\x18\x10 \x01(\rH\fR\bsequence\x88\x01\x01B\x10\n" +
 	"\x0e_hypothesis_idB\x12\n" +
 	"\x10_parent_revisionB\r\n" +
 	"\v_base_roundB\b\n" +
@@ -1478,7 +1514,8 @@ const file_vibesys_search_v1_attrs_proto_rawDesc = "" +
 	"\b_failureB\v\n" +
 	"\t_attemptsB\x12\n" +
 	"\x10_profile_skippedB\x10\n" +
-	"\x0e_judge_verdict\"\xf5\x01\n" +
+	"\x0e_judge_verdictB\v\n" +
+	"\t_sequence\"\xf5\x01\n" +
 	"\x11WorkstreamFailure\x12H\n" +
 	"\x04kind\x18\x01 \x01(\x0e2(.vibesys.search.v1.WorkstreamFailureKindB\n" +
 	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x04kind\x12$\n" +
@@ -1495,7 +1532,7 @@ const file_vibesys_search_v1_attrs_proto_rawDesc = "" +
 	"\vdiff_offset\x18\x02 \x01(\x04R\n" +
 	"diffOffset\x12\x1f\n" +
 	"\vdiff_length\x18\x03 \x01(\x04R\n" +
-	"diffLength\"\xcc\x05\n" +
+	"diffLength\"\xf6\x05\n" +
 	"\tGateAttrs\x12>\n" +
 	"\x05stage\x18\x01 \x01(\x0e2\x1c.vibesys.search.v1.GateStageB\n" +
 	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x05stage\x12D\n" +
@@ -1508,7 +1545,10 @@ const file_vibesys_search_v1_attrs_proto_rawDesc = "" +
 	"\rinput_failure\x18\a \x01(\v2\x1f.vibesys.search.v1.InputFailureH\x03R\finputFailure\x88\x01\x01\x12K\n" +
 	"\x06source\x18\b \x01(\x0e2\".vibesys.search.v1.FrameworkSourceB\n" +
 	"\xbaH\a\x82\x01\x04\x10\x01 \x00H\x04R\x06source\x88\x01\x01\x121\n" +
-	"\fsource_label\x18\t \x01(\tB\t\xbaH\x06r\x04(\x80\x80\x04H\x05R\vsourceLabel\x88\x01\x01:u\xbaHr\x1ap\n" +
+	"\fsource_label\x18\t \x01(\tB\t\xbaH\x06r\x04(\x80\x80\x04H\x05R\vsourceLabel\x88\x01\x01\x12(\n" +
+	"\x06stages\x18\n" +
+	" \x03(\tB\x10\xbaH\r\x92\x01\n" +
+	"\"\br\x06\x10\x01(\x80\x80\x04R\x06stages:u\xbaHr\x1ap\n" +
 	"\x12gate.input_failure\x12+input_failure belongs only to an input gate\x1a-!has(this.input_failure) || this.subject == 1B\t\n" +
 	"\a_recipeB\n" +
 	"\n" +
@@ -1527,15 +1567,17 @@ const file_vibesys_search_v1_attrs_proto_rawDesc = "" +
 	"\n" +
 	"_completedB\v\n" +
 	"\t_requiredB\a\n" +
-	"\x05_unit\"\xe3\x01\n" +
+	"\x05_unit\"\x9b\x02\n" +
 	"\fInputFailure\x12C\n" +
 	"\x04kind\x18\x01 \x01(\x0e2#.vibesys.search.v1.InputFailureKindB\n" +
 	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x04kind\x12C\n" +
 	"\x05stage\x18\x02 \x01(\x0e2\x1c.vibesys.search.v1.GateStageB\n" +
 	"\xbaH\a\x82\x01\x04\x10\x01 \x00H\x00R\x05stage\x88\x01\x01\x12#\n" +
 	"\battempts\x18\x03 \x01(\rB\a\xbaH\x04*\x02 \x00R\battempts\x12\x1a\n" +
-	"\bcompared\x18\x04 \x01(\bR\bcomparedB\b\n" +
-	"\x06_stage\"\xd4\x02\n" +
+	"\bcompared\x18\x04 \x01(\bR\bcompared\x12)\n" +
+	"\bstage_id\x18\x05 \x01(\tB\t\xbaH\x06r\x04(\x80\x80\x04H\x01R\astageId\x88\x01\x01B\b\n" +
+	"\x06_stageB\v\n" +
+	"\t_stage_id\"\xd4\x02\n" +
 	"\rAdoptionAttrs\x12.\n" +
 	"\tcandidate\x18\x01 \x01(\tB\v\xbaH\br\x06\x10\x01(\x80\x80\x04H\x00R\tcandidate\x88\x01\x01\x12F\n" +
 	"\tselection\x18\x02 \x01(\x0e2\x1c.vibesys.search.v1.SelectionB\n" +
@@ -1584,17 +1626,19 @@ const file_vibesys_search_v1_attrs_proto_rawDesc = "" +
 	"\a_spreadB\n" +
 	"\n" +
 	"\b_samplesB\t\n" +
-	"\a_reason*\x8b\x01\n" +
+	"\a_reason*\xa7\x01\n" +
 	"\tGateStage\x12\x1a\n" +
 	"\x16GATE_STAGE_UNSPECIFIED\x10\x00\x12\x14\n" +
 	"\x10GATE_STAGE_BUILD\x10\x01\x12\x17\n" +
 	"\x13GATE_STAGE_ACCURACY\x10\x02\x12\x18\n" +
 	"\x14GATE_STAGE_BENCHMARK\x10\x03\x12\x19\n" +
-	"\x15GATE_STAGE_VALIDATION\x10\x04*_\n" +
+	"\x15GATE_STAGE_VALIDATION\x10\x04\x12\x1a\n" +
+	"\x16GATE_STAGE_MEASUREMENT\x10\x05*~\n" +
 	"\vGateSubject\x12\x1c\n" +
 	"\x18GATE_SUBJECT_UNSPECIFIED\x10\x00\x12\x16\n" +
 	"\x12GATE_SUBJECT_INPUT\x10\x01\x12\x1a\n" +
-	"\x16GATE_SUBJECT_CANDIDATE\x10\x02*\xe2\x01\n" +
+	"\x16GATE_SUBJECT_CANDIDATE\x10\x02\x12\x1d\n" +
+	"\x19GATE_SUBJECT_UNATTRIBUTED\x10\x03*\xe2\x01\n" +
 	"\x0fFrameworkSource\x12 \n" +
 	"\x1cFRAMEWORK_SOURCE_UNSPECIFIED\x10\x00\x12\x1a\n" +
 	"\x16FRAMEWORK_SOURCE_GATES\x10\x01\x12!\n" +

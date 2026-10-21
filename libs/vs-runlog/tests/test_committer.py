@@ -134,7 +134,8 @@ def test_appends_complete_while_fsync_or_head_publication_is_held(
 
 
 _OPERATIONS = st.lists(
-    st.sampled_from(["append", "advance", "commit", "lifecycle", "epoch"]), max_size=20
+    st.sampled_from(["append", "advance", "commit", "checkpoint", "lifecycle", "epoch"]),
+    max_size=20,
 )
 
 
@@ -177,8 +178,9 @@ def test_interleavings_bound_lag_preserve_fence_and_surface_storage_failure(
                 elif operation == "advance":
                     # Blocking work on the owner thread, not an asyncio yield.
                     threads.sleep(0.07)
-                elif operation == "commit":
-                    writer.commit()
+                elif operation in {"commit", "checkpoint"}:
+                    boundary = writer.commit if operation == "commit" else writer.checkpoint
+                    boundary()
                     assert head(root) == writer.sequence
                 else:
                     template = declarations()[0 if operation == "epoch" else 1]

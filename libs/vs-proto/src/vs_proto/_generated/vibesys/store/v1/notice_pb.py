@@ -10,14 +10,16 @@ from typing import Literal, TYPE_CHECKING, TypeAlias
 
 from protobuf import Enum, Message
 from protobuf._codegen import file_desc
+from protobuf.wkt.google.protobuf import any_pb
 
 from ....buf.validate import validate_pb
 
 if TYPE_CHECKING:
     from protobuf import DescFile
+    from protobuf.wkt.google.protobuf.any_pb import Any
 
 
-_NoticeFields: TypeAlias = Literal["severity", "code", "message", "span"]
+_NoticeFields: TypeAlias = Literal["severity", "code", "message", "span", "detail"]
 
 class Notice(Message[_NoticeFields]):
     """
@@ -42,9 +44,15 @@ class Notice(Message[_NoticeFields]):
             ```proto
             optional string span = 4;
             ```
+        detail:
+            Descriptor-backed details, including historical observations with no owner.
+
+            ```proto
+            optional google.protobuf.Any detail = 5;
+            ```
     """
 
-    __slots__ = ("severity", "code", "message", "span")
+    __slots__ = ("severity", "code", "message", "span", "detail")
 
     if TYPE_CHECKING:
 
@@ -55,6 +63,7 @@ class Notice(Message[_NoticeFields]):
             code: NoticeCode | None = None,
             message: str = "",
             span: str | None = None,
+            detail: Any | None = None,
         ) -> None:
             pass
 
@@ -62,6 +71,7 @@ class Notice(Message[_NoticeFields]):
         code: NoticeCode
         message: str
         span: str
+        detail: Any | None
 
 class Severity(Enum):
     """
@@ -123,6 +133,10 @@ class NoticeCode(Enum):
             ```proto
             NOTICE_CODE_CONFIGURATION = 4
             ```
+        UNATTRIBUTED_EVENT:
+            ```proto
+            NOTICE_CODE_UNATTRIBUTED_EVENT = 5
+            ```
     """
 
     UNSPECIFIED = 0
@@ -130,12 +144,14 @@ class NoticeCode(Enum):
     INPUT_MEASUREMENT_FAILED = 2
     ENVIRONMENT_UNAVAILABLE = 3
     CONFIGURATION = 4
+    UNATTRIBUTED_EVENT = 5
 
 
 _DESC = file_desc(
-    b'\n\x1dvibesys/store/v1/notice.proto\x12\x10vibesys.store.v1\x1a\x1bbuf/validate/validate.proto"\xe0\x01\n\x06Notice\x12B\n\x08severity\x18\x01 \x01(\x0e2\x1a.vibesys.store.v1.SeverityR\x08severityB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x12<\n\x04code\x18\x02 \x01(\x0e2\x1c.vibesys.store.v1.NoticeCodeR\x04codeB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x12%\n\x07message\x18\x03 \x01(\tR\x07messageB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x12$\n\x04span\x18\x04 \x01(\tH\x00R\x04spanB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x88\x01\x01B\x07\n\x05_span*b\n\x08Severity\x12\x18\n\x14SEVERITY_UNSPECIFIED\x10\x00\x12\x14\n\x10SEVERITY_WARNING\x10\x01\x12\x12\n\x0eSEVERITY_ERROR\x10\x02\x12\x12\n\x0eSEVERITY_FATAL\x10\x03*\xbe\x01\n\nNoticeCode\x12\x1b\n\x17NOTICE_CODE_UNSPECIFIED\x10\x00\x12!\n\x1dNOTICE_CODE_FRAMEWORK_WARNING\x10\x01\x12(\n$NOTICE_CODE_INPUT_MEASUREMENT_FAILED\x10\x02\x12\'\n#NOTICE_CODE_ENVIRONMENT_UNAVAILABLE\x10\x03\x12\x1d\n\x19NOTICE_CODE_CONFIGURATION\x10\x04BAZ?github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1b\x06proto3',
+    b'\n\x1dvibesys/store/v1/notice.proto\x12\x10vibesys.store.v1\x1a\x1bbuf/validate/validate.proto\x1a\x19google/protobuf/any.proto"\x9e\x02\n\x06Notice\x12B\n\x08severity\x18\x01 \x01(\x0e2\x1a.vibesys.store.v1.SeverityR\x08severityB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x12<\n\x04code\x18\x02 \x01(\x0e2\x1c.vibesys.store.v1.NoticeCodeR\x04codeB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x12%\n\x07message\x18\x03 \x01(\tR\x07messageB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x12$\n\x04span\x18\x04 \x01(\tH\x00R\x04spanB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x88\x01\x01\x121\n\x06detail\x18\x05 \x01(\x0b2\x14.google.protobuf.AnyH\x01R\x06detail\x88\x01\x01B\x07\n\x05_spanB\t\n\x07_detail*b\n\x08Severity\x12\x18\n\x14SEVERITY_UNSPECIFIED\x10\x00\x12\x14\n\x10SEVERITY_WARNING\x10\x01\x12\x12\n\x0eSEVERITY_ERROR\x10\x02\x12\x12\n\x0eSEVERITY_FATAL\x10\x03*\xe2\x01\n\nNoticeCode\x12\x1b\n\x17NOTICE_CODE_UNSPECIFIED\x10\x00\x12!\n\x1dNOTICE_CODE_FRAMEWORK_WARNING\x10\x01\x12(\n$NOTICE_CODE_INPUT_MEASUREMENT_FAILED\x10\x02\x12\'\n#NOTICE_CODE_ENVIRONMENT_UNAVAILABLE\x10\x03\x12\x1d\n\x19NOTICE_CODE_CONFIGURATION\x10\x04\x12"\n\x1eNOTICE_CODE_UNATTRIBUTED_EVENT\x10\x05BAZ?github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1b\x06proto3',
     [
         validate_pb.desc(),
+        any_pb.desc(),
     ],
     {
         "Notice": Notice,

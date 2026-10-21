@@ -471,7 +471,7 @@ class _ProductHostFactory:
                 # events stay ungrouped until this path carries its own
                 # per-attempt identity to pass through here.
                 local_validation_events=CoreLocalValidationEvents(self.integration.events),
-                measurement_observer=CoreMeasurementEvents(self.integration.events),
+                measurement_observer=CoreMeasurementEvents(self.integration.events, decisions),
                 measurement_decisions=decisions,
                 commit_observer=self.integration.core_commit_observer(
                     project.state.run_id, self.projector, self.plugin.id

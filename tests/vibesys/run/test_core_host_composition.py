@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 import pytest
 from hypothesis import example, given
 from hypothesis import strategies as st
+from protobuf.wkt.google.protobuf.wrappers_pb import StringValue
 from tests.support.container_credentials import set_container_cli_credentials
 from tests.support.core_plugins import core_policy
 from tests.support.docker_environment import fake_docker_environment, host_container_backend
@@ -480,11 +481,21 @@ def test_core_host_tees_startup_and_live_events(texts: list[str]) -> None:
         journal = Project.event_journal_path_for(project_root, run_id).read_text().split("\n")[:-1]
         with Project.run_log_path_for(project_root, run_id).open("rb") as stream:
             records = list(RunLogReader(stream))
-        assert len(records) == len(journal) + 1
-        assert [
-            record.body.value.json
+        assert records[0].body is not None
+        assert records[0].body.field == "epoch_started"
+        assert any(
+            record.body is not None and record.body.field == "lifecycle" for record in records
+        )
+        assert all(
+            record.body is not None and record.body.field != "legacy_event" for record in records
+        )
+        notices = [
+            StringValue.from_binary(record.body.value.detail.value).value
+            if record.body.value.detail is not None
+            else record.body.value.message
             for record in records
-            if record.body is not None and record.body.field == "legacy_event"
-        ] == journal
+            if record.body is not None and record.body.field == "notice"
+        ]
         if texts:
+            assert notices[-len(texts) :] == texts
             assert [json.loads(line)["text"] for line in journal[-len(texts) :]] == texts

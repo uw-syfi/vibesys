@@ -50,7 +50,7 @@ class PlanningAttrs(Message[_PlanningAttrsFields]):
 
         call: int
 
-_WorkstreamAttrsFields: TypeAlias = Literal["hypothesis_id", "parent_revision", "base_round", "round", "idea", "revision", "outcome", "summary", "probe", "failure", "files", "attempts", "profile_skipped", "judge_verdict", "repeated_error"]
+_WorkstreamAttrsFields: TypeAlias = Literal["hypothesis_id", "parent_revision", "base_round", "round", "idea", "revision", "outcome", "summary", "probe", "failure", "files", "attempts", "profile_skipped", "judge_verdict", "repeated_error", "sequence"]
 
 class WorkstreamAttrs(Message[_WorkstreamAttrsFields]):
     """
@@ -119,9 +119,15 @@ class WorkstreamAttrs(Message[_WorkstreamAttrsFields]):
             ```proto
             bool repeated_error = 15;
             ```
+        sequence:
+            The dynamic search admission ordinal, distinct from a serial round.
+
+            ```proto
+            optional uint32 sequence = 16;
+            ```
     """
 
-    __slots__ = ("hypothesis_id", "parent_revision", "base_round", "round", "idea", "revision", "outcome", "summary", "probe", "failure", "files", "attempts", "profile_skipped", "judge_verdict", "repeated_error")
+    __slots__ = ("hypothesis_id", "parent_revision", "base_round", "round", "idea", "revision", "outcome", "summary", "probe", "failure", "files", "attempts", "profile_skipped", "judge_verdict", "repeated_error", "sequence")
 
     if TYPE_CHECKING:
 
@@ -143,6 +149,7 @@ class WorkstreamAttrs(Message[_WorkstreamAttrsFields]):
             profile_skipped: bool | None = None,
             judge_verdict: str | None = None,
             repeated_error: bool = False,
+            sequence: int | None = None,
         ) -> None:
             pass
 
@@ -161,6 +168,7 @@ class WorkstreamAttrs(Message[_WorkstreamAttrsFields]):
         profile_skipped: bool
         judge_verdict: str
         repeated_error: bool
+        sequence: int
 
 _WorkstreamFailureFields: TypeAlias = Literal["kind", "role", "turns", "limit", "text"]
 
@@ -256,7 +264,7 @@ class FileChange(Message[_FileChangeFields]):
         diff_offset: int
         diff_length: int
 
-_GateAttrsFields: TypeAlias = Literal["stage", "subject", "recipe", "command", "reused", "failed", "input_failure", "source", "source_label"]
+_GateAttrsFields: TypeAlias = Literal["stage", "subject", "recipe", "command", "reused", "failed", "input_failure", "source", "source_label", "stages"]
 
 class GateAttrs(Message[_GateAttrsFields]):
     """
@@ -304,9 +312,15 @@ class GateAttrs(Message[_GateAttrsFields]):
             ```proto
             optional string source_label = 9;
             ```
+        stages:
+            Exact evaluator stage ids, in order. stage categorizes the operation.
+
+            ```proto
+            repeated string stages = 10;
+            ```
     """
 
-    __slots__ = ("stage", "subject", "recipe", "command", "reused", "failed", "input_failure", "source", "source_label")
+    __slots__ = ("stage", "subject", "recipe", "command", "reused", "failed", "input_failure", "source", "source_label", "stages")
 
     if TYPE_CHECKING:
 
@@ -322,6 +336,7 @@ class GateAttrs(Message[_GateAttrsFields]):
             input_failure: InputFailure | None = None,
             source: FrameworkSource | None = None,
             source_label: str | None = None,
+            stages: list[str] | None = None,
         ) -> None:
             pass
 
@@ -334,6 +349,7 @@ class GateAttrs(Message[_GateAttrsFields]):
         input_failure: InputFailure | None
         source: FrameworkSource
         source_label: str
+        stages: list[str]
 
 _FailedCheckFields: TypeAlias = Literal["check", "completed", "required", "unit"]
 
@@ -381,7 +397,7 @@ class FailedCheck(Message[_FailedCheckFields]):
         required: int
         unit: str
 
-_InputFailureFields: TypeAlias = Literal["kind", "stage", "attempts", "compared"]
+_InputFailureFields: TypeAlias = Literal["kind", "stage", "attempts", "compared", "stage_id"]
 
 class InputFailure(Message[_InputFailureFields]):
     """
@@ -406,9 +422,15 @@ class InputFailure(Message[_InputFailureFields]):
             ```proto
             bool compared = 4;
             ```
+        stage_id:
+            Task-defined and historical ids, including the old correctness spelling.
+
+            ```proto
+            optional string stage_id = 5;
+            ```
     """
 
-    __slots__ = ("kind", "stage", "attempts", "compared")
+    __slots__ = ("kind", "stage", "attempts", "compared", "stage_id")
 
     if TYPE_CHECKING:
 
@@ -419,6 +441,7 @@ class InputFailure(Message[_InputFailureFields]):
             stage: GateStage | None = None,
             attempts: int = 0,
             compared: bool = False,
+            stage_id: str | None = None,
         ) -> None:
             pass
 
@@ -426,6 +449,7 @@ class InputFailure(Message[_InputFailureFields]):
         stage: GateStage
         attempts: int
         compared: bool
+        stage_id: str
 
 _AdoptionAttrsFields: TypeAlias = Literal["candidate", "selection", "settlement_id"]
 
@@ -664,6 +688,12 @@ class GateStage(Enum):
             ```proto
             GATE_STAGE_VALIDATION = 4
             ```
+        MEASUREMENT:
+            A measurement operation can cover several or task-defined evaluator stages.
+
+            ```proto
+            GATE_STAGE_MEASUREMENT = 5
+            ```
     """
 
     UNSPECIFIED = 0
@@ -671,6 +701,7 @@ class GateStage(Enum):
     ACCURACY = 2
     BENCHMARK = 3
     VALIDATION = 4
+    MEASUREMENT = 5
 
 class GateSubject(Enum):
     """
@@ -691,11 +722,18 @@ class GateSubject(Enum):
             ```proto
             GATE_SUBJECT_CANDIDATE = 2
             ```
+        UNATTRIBUTED:
+            Historical stage events did not identify their owning operation.
+
+            ```proto
+            GATE_SUBJECT_UNATTRIBUTED = 3
+            ```
     """
 
     UNSPECIFIED = 0
     INPUT = 1
     CANDIDATE = 2
+    UNATTRIBUTED = 3
 
 class FrameworkSource(Enum):
     """
@@ -1021,7 +1059,7 @@ class WorkstreamFailureKind(Enum):
 
 
 _DESC = file_desc(
-    b'\n\x1dvibesys/search/v1/attrs.proto\x12\x11vibesys.search.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1dvibesys/store/v1/common.proto"#\n\rPlanningAttrs\x12\x12\n\x04call\x18\x01 \x01(\rR\x04call"\xd1\x06\n\x0fWorkstreamAttrs\x125\n\rhypothesis_id\x18\x01 \x01(\tH\x00R\x0chypothesisIdB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x88\x01\x01\x129\n\x0fparent_revision\x18\x02 \x01(\tH\x01R\x0eparentRevisionB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x88\x01\x01\x12"\n\nbase_round\x18\x03 \x01(\rH\x02R\tbaseRound\x88\x01\x01\x12\x19\n\x05round\x18\x04 \x01(\rH\x03R\x05round\x88\x01\x01\x12"\n\x04idea\x18\x05 \x01(\tH\x04R\x04ideaB\t\xbaH\x06r\x04(\x80\x80\x04\x88\x01\x01\x12,\n\x08revision\x18\x06 \x01(\tH\x05R\x08revisionB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x88\x01\x01\x12(\n\x07outcome\x18\x07 \x01(\tH\x06R\x07outcomeB\t\xbaH\x06r\x04(\x80\x80\x04\x88\x01\x01\x12(\n\x07summary\x18\x08 \x01(\tH\x07R\x07summaryB\t\xbaH\x06r\x04(\x80\x80\x04\x88\x01\x01\x12\x14\n\x05probe\x18\t \x01(\x08R\x05probe\x12C\n\x07failure\x18\n \x01(\x0b2$.vibesys.search.v1.WorkstreamFailureH\x08R\x07failure\x88\x01\x01\x123\n\x05files\x18\x0b \x03(\x0b2\x1d.vibesys.search.v1.FileChangeR\x05files\x12\x1f\n\x08attempts\x18\x0c \x01(\rH\tR\x08attempts\x88\x01\x01\x12,\n\x0fprofile_skipped\x18\r \x01(\x08H\nR\x0eprofileSkipped\x88\x01\x01\x125\n\rjudge_verdict\x18\x0e \x01(\tH\x0bR\x0cjudgeVerdictB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x88\x01\x01\x12%\n\x0erepeated_error\x18\x0f \x01(\x08R\rrepeatedErrorB\x10\n\x0e_hypothesis_idB\x12\n\x10_parent_revisionB\r\n\x0b_base_roundB\x08\n\x06_roundB\x07\n\x05_ideaB\x0b\n\t_revisionB\n\n\x08_outcomeB\n\n\x08_summaryB\n\n\x08_failureB\x0b\n\t_attemptsB\x12\n\x10_profile_skippedB\x10\n\x0e_judge_verdict"\xf5\x01\n\x11WorkstreamFailure\x12H\n\x04kind\x18\x01 \x01(\x0e2(.vibesys.search.v1.WorkstreamFailureKindR\x04kindB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x12$\n\x04role\x18\x02 \x01(\tH\x00R\x04roleB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x88\x01\x01\x12\x19\n\x05turns\x18\x03 \x01(\rH\x01R\x05turns\x88\x01\x01\x12\x19\n\x05limit\x18\x04 \x01(\rH\x02R\x05limit\x88\x01\x01\x12\x1d\n\x04text\x18\x05 \x01(\tR\x04textB\t\xbaH\x06r\x04(\x80\x80\x04B\x07\n\x05_roleB\x08\n\x06_turnsB\x08\n\x06_limit"o\n\nFileChange\x12\x1f\n\x04path\x18\x01 \x01(\tR\x04pathB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x12\x1f\n\x0bdiff_offset\x18\x02 \x01(\x04R\ndiffOffset\x12\x1f\n\x0bdiff_length\x18\x03 \x01(\x04R\ndiffLength"\xcc\x05\n\tGateAttrs\x12>\n\x05stage\x18\x01 \x01(\x0e2\x1c.vibesys.search.v1.GateStageR\x05stageB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x12D\n\x07subject\x18\x02 \x01(\x0e2\x1e.vibesys.search.v1.GateSubjectR\x07subjectB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x12(\n\x06recipe\x18\x03 \x01(\tH\x00R\x06recipeB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x88\x01\x01\x12(\n\x07command\x18\x04 \x01(\tH\x01R\x07commandB\t\xbaH\x06r\x04(\x80\x80\x04\x88\x01\x01\x12\x16\n\x06reused\x18\x05 \x01(\x08R\x06reused\x12;\n\x06failed\x18\x06 \x01(\x0b2\x1e.vibesys.search.v1.FailedCheckH\x02R\x06failed\x88\x01\x01\x12I\n\rinput_failure\x18\x07 \x01(\x0b2\x1f.vibesys.search.v1.InputFailureH\x03R\x0cinputFailure\x88\x01\x01\x12K\n\x06source\x18\x08 \x01(\x0e2".vibesys.search.v1.FrameworkSourceH\x04R\x06sourceB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x88\x01\x01\x121\n\x0csource_label\x18\t \x01(\tH\x05R\x0bsourceLabelB\t\xbaH\x06r\x04(\x80\x80\x04\x88\x01\x01B\t\n\x07_recipeB\n\n\x08_commandB\t\n\x07_failedB\x10\n\x0e_input_failureB\t\n\x07_sourceB\x0f\n\r_source_label:u\xbaHr\x1ap\n\x12gate.input_failure\x12+input_failure belongs only to an input gate\x1a-!has(this.input_failure) || this.subject == 1"\xf2\x02\n\x0bFailedCheck\x12A\n\x05check\x18\x01 \x01(\x0e2\x1f.vibesys.search.v1.EvidenceKindR\x05checkB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x12!\n\tcompleted\x18\x02 \x01(\x04H\x00R\tcompleted\x88\x01\x01\x12\x1f\n\x08required\x18\x03 \x01(\x04H\x01R\x08required\x88\x01\x01\x12"\n\x04unit\x18\x04 \x01(\tH\x02R\x04unitB\t\xbaH\x06r\x04(\x80\x80\x04\x88\x01\x01B\x0c\n\n_completedB\x0b\n\t_requiredB\x07\n\x05_unit:\x93\x01\xbaH\x8f\x01\x1a\x8c\x01\n\x16failed_check.completed\x12"completed must not exceed required\x1aN!has(this.completed) || !has(this.required) || this.completed <= this.required"\xe3\x01\n\x0cInputFailure\x12C\n\x04kind\x18\x01 \x01(\x0e2#.vibesys.search.v1.InputFailureKindR\x04kindB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x12C\n\x05stage\x18\x02 \x01(\x0e2\x1c.vibesys.search.v1.GateStageH\x00R\x05stageB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x88\x01\x01\x12#\n\x08attempts\x18\x03 \x01(\rR\x08attemptsB\x07\xbaH\x04*\x02 \x00\x12\x1a\n\x08compared\x18\x04 \x01(\x08R\x08comparedB\x08\n\x06_stage"\xd4\x02\n\rAdoptionAttrs\x12.\n\tcandidate\x18\x01 \x01(\tH\x00R\tcandidateB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x88\x01\x01\x12F\n\tselection\x18\x02 \x01(\x0e2\x1c.vibesys.search.v1.SelectionR\tselectionB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x125\n\rsettlement_id\x18\x03 \x01(\tH\x01R\x0csettlementIdB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x88\x01\x01B\x0c\n\n_candidateB\x10\n\x0e_settlement_id:t\xbaHq\x1ao\n\x12adoption.candidate\x12-candidate is required for candidate selection\x1a*this.selection != 1 || has(this.candidate)"\xcc\x04\n\x0fComparisonAttrs\x12#\n\x06metric\x18\x01 \x01(\tR\x06metricB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x12\x1d\n\x04unit\x18\x02 \x01(\tR\x04unitB\t\xbaH\x06r\x04(\x80\x80\x04\x12E\n\tdirection\x18\x03 \x01(\x0e2\x1b.vibesys.store.v1.DirectionR\tdirectionB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x12\x1d\n\x05ratio\x18\x04 \x01(\x01R\x05ratioB\x07\xbaH\x04\x12\x02@\x01\x12&\n\x05noise\x18\x05 \x01(\x01R\x05noiseB\x10\xbaH\r\x12\x0b@\x01)\x00\x00\x00\x00\x00\x00\x00\x00\x12J\n\x07verdict\x18\x06 \x01(\x0e2$.vibesys.search.v1.ComparisonVerdictR\x07verdictB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x120\n\x0fcandidate_value\x18\x07 \x01(\x01R\x0ecandidateValueB\x07\xbaH\x04\x12\x02@\x01\x12&\n\nbase_value\x18\x08 \x01(\x01R\tbaseValueB\x07\xbaH\x04\x12\x02@\x01\x124\n\x11candidate_samples\x18\t \x01(\rR\x10candidateSamplesB\x07\xbaH\x04*\x02 \x00\x12*\n\x0cbase_samples\x18\n \x01(\rR\x0bbaseSamplesB\x07\xbaH\x04*\x02 \x00:_\xbaH\\\x1aZ\n\x14comparison.direction\x12-direction must be max or min for a comparison\x1a\x13this.direction != 3"\xac\x04\n\rBaselineAttrs\x12!\n\x05label\x18\x01 \x01(\tR\x05labelB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x12E\n\x06status\x18\x02 \x01(\x0e2!.vibesys.search.v1.BaselineStatusR\x06statusB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x12(\n\x06metric\x18\x03 \x01(\tH\x00R\x06metricB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x88\x01\x01\x12"\n\x04unit\x18\x04 \x01(\tH\x01R\x04unitB\t\xbaH\x06r\x04(\x80\x80\x04\x88\x01\x01\x12J\n\tdirection\x18\x05 \x01(\x0e2\x1b.vibesys.store.v1.DirectionH\x02R\tdirectionB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x88\x01\x01\x12"\n\x05value\x18\x06 \x01(\x01H\x03R\x05valueB\x07\xbaH\x04\x12\x02@\x01\x88\x01\x01\x12-\n\x06spread\x18\x07 \x01(\x01H\x04R\x06spreadB\x10\xbaH\r\x12\x0b@\x01)\x00\x00\x00\x00\x00\x00\x00\x00\x88\x01\x01\x12&\n\x07samples\x18\x08 \x01(\rH\x05R\x07samplesB\x07\xbaH\x04*\x02 \x00\x88\x01\x01\x12&\n\x05hosts\x18\t \x03(\tR\x05hostsB\x10\xbaH\r\x92\x01\n"\x08r\x06\x10\x01(\x80\x80\x04\x12&\n\x06reason\x18\n \x01(\tH\x06R\x06reasonB\t\xbaH\x06r\x04(\x80\x80\x04\x88\x01\x01B\t\n\x07_metricB\x07\n\x05_unitB\x0c\n\n_directionB\x08\n\x06_valueB\t\n\x07_spreadB\n\n\x08_samplesB\t\n\x07_reason*\x8b\x01\n\tGateStage\x12\x1a\n\x16GATE_STAGE_UNSPECIFIED\x10\x00\x12\x14\n\x10GATE_STAGE_BUILD\x10\x01\x12\x17\n\x13GATE_STAGE_ACCURACY\x10\x02\x12\x18\n\x14GATE_STAGE_BENCHMARK\x10\x03\x12\x19\n\x15GATE_STAGE_VALIDATION\x10\x04*_\n\x0bGateSubject\x12\x1c\n\x18GATE_SUBJECT_UNSPECIFIED\x10\x00\x12\x16\n\x12GATE_SUBJECT_INPUT\x10\x01\x12\x1a\n\x16GATE_SUBJECT_CANDIDATE\x10\x02*\xe2\x01\n\x0fFrameworkSource\x12 \n\x1cFRAMEWORK_SOURCE_UNSPECIFIED\x10\x00\x12\x1a\n\x16FRAMEWORK_SOURCE_GATES\x10\x01\x12!\n\x1dFRAMEWORK_SOURCE_GIT_TRACKING\x10\x02\x12\x19\n\x15FRAMEWORK_SOURCE_LOOP\x10\x03\x12\x18\n\x14FRAMEWORK_SOURCE_GPU\x10\x04\x12\x1d\n\x19FRAMEWORK_SOURCE_SKYPILOT\x10\x05\x12\x1a\n\x16FRAMEWORK_SOURCE_OTHER\x10\x06*i\n\x0cEvidenceKind\x12\x1d\n\x19EVIDENCE_KIND_UNSPECIFIED\x10\x00\x12\x1d\n\x19EVIDENCE_KIND_CORRECTNESS\x10\x01\x12\x1b\n\x17EVIDENCE_KIND_BENCHMARK\x10\x02*W\n\tSelection\x12\x19\n\x15SELECTION_UNSPECIFIED\x10\x00\x12\x17\n\x13SELECTION_CANDIDATE\x10\x01\x12\x16\n\x12SELECTION_BASELINE\x10\x02*\xbe\x01\n\x11ComparisonVerdict\x12"\n\x1eCOMPARISON_VERDICT_UNSPECIFIED\x10\x00\x12\x1d\n\x19COMPARISON_VERDICT_BETTER\x10\x01\x12#\n\x1fCOMPARISON_VERDICT_WITHIN_NOISE\x10\x02\x12\x1c\n\x18COMPARISON_VERDICT_WORSE\x10\x03\x12#\n\x1fCOMPARISON_VERDICT_INCONCLUSIVE\x10\x04*\xb1\x01\n\x0eBaselineStatus\x12\x1f\n\x1bBASELINE_STATUS_UNSPECIFIED\x10\x00\x12\x1c\n\x18BASELINE_STATUS_MEASURED\x10\x01\x12\x1a\n\x16BASELINE_STATUS_FAILED\x10\x02\x12"\n\x1eBASELINE_STATUS_NOT_CONFIGURED\x10\x03\x12 \n\x1cBASELINE_STATUS_NOT_MEASURED\x10\x04*\xa4\x02\n\x10InputFailureKind\x12"\n\x1eINPUT_FAILURE_KIND_UNSPECIFIED\x10\x00\x12"\n\x1eINPUT_FAILURE_KIND_NO_EVIDENCE\x10\x01\x12\'\n#INPUT_FAILURE_KIND_READINGS_REFUSED\x10\x02\x12+\n\'INPUT_FAILURE_KIND_READINGS_UNDECODABLE\x10\x03\x12&\n"INPUT_FAILURE_KIND_ACCURACY_FAILED\x10\x04\x12\'\n#INPUT_FAILURE_KIND_BENCHMARK_FAILED\x10\x05\x12!\n\x1dINPUT_FAILURE_KIND_WAIT_ENDED\x10\x06*\x90\x07\n\x15WorkstreamFailureKind\x12\'\n#WORKSTREAM_FAILURE_KIND_UNSPECIFIED\x10\x00\x12#\n\x1fWORKSTREAM_FAILURE_KIND_STOPPED\x10\x01\x12-\n)WORKSTREAM_FAILURE_KIND_PARENT_UNVERIFIED\x10\x02\x12#\n\x1fWORKSTREAM_FAILURE_KIND_REFUSED\x10\x03\x12!\n\x1dWORKSTREAM_FAILURE_KIND_ENDED\x10\x04\x12)\n%WORKSTREAM_FAILURE_KIND_OUT_OF_BUDGET\x10\x05\x12\'\n#WORKSTREAM_FAILURE_KIND_TURN_FAILED\x10\x06\x12)\n%WORKSTREAM_FAILURE_KIND_INVALID_REPLY\x10\x07\x12)\n%WORKSTREAM_FAILURE_KIND_RENDER_FAILED\x10\x08\x12(\n$WORKSTREAM_FAILURE_KIND_WAIT_REFUSED\x10\t\x12/\n+WORKSTREAM_FAILURE_KIND_CHECKPOINT_DECLINED\x10\n\x120\n,WORKSTREAM_FAILURE_KIND_NO_CHANGED_CANDIDATE\x10\x0b\x121\n-WORKSTREAM_FAILURE_KIND_IMPLEMENTATION_FAILED\x10\x0c\x12+\n\'WORKSTREAM_FAILURE_KIND_REVIEW_REJECTED\x10\r\x12/\n+WORKSTREAM_FAILURE_KIND_NO_TRUSTED_EVIDENCE\x10\x0e\x12,\n(WORKSTREAM_FAILURE_KIND_EVIDENCE_REFUSED\x10\x0f\x120\n,WORKSTREAM_FAILURE_KIND_EVIDENCE_UNDECODABLE\x10\x10\x127\n3WORKSTREAM_FAILURE_KIND_PROFILE_CAPTURE_UNAVAILABLE\x10\x11\x12&\n"WORKSTREAM_FAILURE_KIND_TURN_LIMIT\x10\x12\x12)\n%WORKSTREAM_FAILURE_KIND_REPEATED_TURN\x10\x13BCZAgithub.com/uw-syfi/vibesys/gateway/gen/vibesys/search/v1;searchv1b\x06proto3',
+    b'\n\x1dvibesys/search/v1/attrs.proto\x12\x11vibesys.search.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1dvibesys/store/v1/common.proto"#\n\rPlanningAttrs\x12\x12\n\x04call\x18\x01 \x01(\rR\x04call"\xff\x06\n\x0fWorkstreamAttrs\x125\n\rhypothesis_id\x18\x01 \x01(\tH\x00R\x0chypothesisIdB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x88\x01\x01\x129\n\x0fparent_revision\x18\x02 \x01(\tH\x01R\x0eparentRevisionB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x88\x01\x01\x12"\n\nbase_round\x18\x03 \x01(\rH\x02R\tbaseRound\x88\x01\x01\x12\x19\n\x05round\x18\x04 \x01(\rH\x03R\x05round\x88\x01\x01\x12"\n\x04idea\x18\x05 \x01(\tH\x04R\x04ideaB\t\xbaH\x06r\x04(\x80\x80\x04\x88\x01\x01\x12,\n\x08revision\x18\x06 \x01(\tH\x05R\x08revisionB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x88\x01\x01\x12(\n\x07outcome\x18\x07 \x01(\tH\x06R\x07outcomeB\t\xbaH\x06r\x04(\x80\x80\x04\x88\x01\x01\x12(\n\x07summary\x18\x08 \x01(\tH\x07R\x07summaryB\t\xbaH\x06r\x04(\x80\x80\x04\x88\x01\x01\x12\x14\n\x05probe\x18\t \x01(\x08R\x05probe\x12C\n\x07failure\x18\n \x01(\x0b2$.vibesys.search.v1.WorkstreamFailureH\x08R\x07failure\x88\x01\x01\x123\n\x05files\x18\x0b \x03(\x0b2\x1d.vibesys.search.v1.FileChangeR\x05files\x12\x1f\n\x08attempts\x18\x0c \x01(\rH\tR\x08attempts\x88\x01\x01\x12,\n\x0fprofile_skipped\x18\r \x01(\x08H\nR\x0eprofileSkipped\x88\x01\x01\x125\n\rjudge_verdict\x18\x0e \x01(\tH\x0bR\x0cjudgeVerdictB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x88\x01\x01\x12%\n\x0erepeated_error\x18\x0f \x01(\x08R\rrepeatedError\x12\x1f\n\x08sequence\x18\x10 \x01(\rH\x0cR\x08sequence\x88\x01\x01B\x10\n\x0e_hypothesis_idB\x12\n\x10_parent_revisionB\r\n\x0b_base_roundB\x08\n\x06_roundB\x07\n\x05_ideaB\x0b\n\t_revisionB\n\n\x08_outcomeB\n\n\x08_summaryB\n\n\x08_failureB\x0b\n\t_attemptsB\x12\n\x10_profile_skippedB\x10\n\x0e_judge_verdictB\x0b\n\t_sequence"\xf5\x01\n\x11WorkstreamFailure\x12H\n\x04kind\x18\x01 \x01(\x0e2(.vibesys.search.v1.WorkstreamFailureKindR\x04kindB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x12$\n\x04role\x18\x02 \x01(\tH\x00R\x04roleB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x88\x01\x01\x12\x19\n\x05turns\x18\x03 \x01(\rH\x01R\x05turns\x88\x01\x01\x12\x19\n\x05limit\x18\x04 \x01(\rH\x02R\x05limit\x88\x01\x01\x12\x1d\n\x04text\x18\x05 \x01(\tR\x04textB\t\xbaH\x06r\x04(\x80\x80\x04B\x07\n\x05_roleB\x08\n\x06_turnsB\x08\n\x06_limit"o\n\nFileChange\x12\x1f\n\x04path\x18\x01 \x01(\tR\x04pathB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x12\x1f\n\x0bdiff_offset\x18\x02 \x01(\x04R\ndiffOffset\x12\x1f\n\x0bdiff_length\x18\x03 \x01(\x04R\ndiffLength"\xf6\x05\n\tGateAttrs\x12>\n\x05stage\x18\x01 \x01(\x0e2\x1c.vibesys.search.v1.GateStageR\x05stageB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x12D\n\x07subject\x18\x02 \x01(\x0e2\x1e.vibesys.search.v1.GateSubjectR\x07subjectB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x12(\n\x06recipe\x18\x03 \x01(\tH\x00R\x06recipeB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x88\x01\x01\x12(\n\x07command\x18\x04 \x01(\tH\x01R\x07commandB\t\xbaH\x06r\x04(\x80\x80\x04\x88\x01\x01\x12\x16\n\x06reused\x18\x05 \x01(\x08R\x06reused\x12;\n\x06failed\x18\x06 \x01(\x0b2\x1e.vibesys.search.v1.FailedCheckH\x02R\x06failed\x88\x01\x01\x12I\n\rinput_failure\x18\x07 \x01(\x0b2\x1f.vibesys.search.v1.InputFailureH\x03R\x0cinputFailure\x88\x01\x01\x12K\n\x06source\x18\x08 \x01(\x0e2".vibesys.search.v1.FrameworkSourceH\x04R\x06sourceB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x88\x01\x01\x121\n\x0csource_label\x18\t \x01(\tH\x05R\x0bsourceLabelB\t\xbaH\x06r\x04(\x80\x80\x04\x88\x01\x01\x12(\n\x06stages\x18\n \x03(\tR\x06stagesB\x10\xbaH\r\x92\x01\n"\x08r\x06\x10\x01(\x80\x80\x04B\t\n\x07_recipeB\n\n\x08_commandB\t\n\x07_failedB\x10\n\x0e_input_failureB\t\n\x07_sourceB\x0f\n\r_source_label:u\xbaHr\x1ap\n\x12gate.input_failure\x12+input_failure belongs only to an input gate\x1a-!has(this.input_failure) || this.subject == 1"\xf2\x02\n\x0bFailedCheck\x12A\n\x05check\x18\x01 \x01(\x0e2\x1f.vibesys.search.v1.EvidenceKindR\x05checkB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x12!\n\tcompleted\x18\x02 \x01(\x04H\x00R\tcompleted\x88\x01\x01\x12\x1f\n\x08required\x18\x03 \x01(\x04H\x01R\x08required\x88\x01\x01\x12"\n\x04unit\x18\x04 \x01(\tH\x02R\x04unitB\t\xbaH\x06r\x04(\x80\x80\x04\x88\x01\x01B\x0c\n\n_completedB\x0b\n\t_requiredB\x07\n\x05_unit:\x93\x01\xbaH\x8f\x01\x1a\x8c\x01\n\x16failed_check.completed\x12"completed must not exceed required\x1aN!has(this.completed) || !has(this.required) || this.completed <= this.required"\x9b\x02\n\x0cInputFailure\x12C\n\x04kind\x18\x01 \x01(\x0e2#.vibesys.search.v1.InputFailureKindR\x04kindB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x12C\n\x05stage\x18\x02 \x01(\x0e2\x1c.vibesys.search.v1.GateStageH\x00R\x05stageB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x88\x01\x01\x12#\n\x08attempts\x18\x03 \x01(\rR\x08attemptsB\x07\xbaH\x04*\x02 \x00\x12\x1a\n\x08compared\x18\x04 \x01(\x08R\x08compared\x12)\n\x08stage_id\x18\x05 \x01(\tH\x01R\x07stageIdB\t\xbaH\x06r\x04(\x80\x80\x04\x88\x01\x01B\x08\n\x06_stageB\x0b\n\t_stage_id"\xd4\x02\n\rAdoptionAttrs\x12.\n\tcandidate\x18\x01 \x01(\tH\x00R\tcandidateB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x88\x01\x01\x12F\n\tselection\x18\x02 \x01(\x0e2\x1c.vibesys.search.v1.SelectionR\tselectionB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x125\n\rsettlement_id\x18\x03 \x01(\tH\x01R\x0csettlementIdB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x88\x01\x01B\x0c\n\n_candidateB\x10\n\x0e_settlement_id:t\xbaHq\x1ao\n\x12adoption.candidate\x12-candidate is required for candidate selection\x1a*this.selection != 1 || has(this.candidate)"\xcc\x04\n\x0fComparisonAttrs\x12#\n\x06metric\x18\x01 \x01(\tR\x06metricB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x12\x1d\n\x04unit\x18\x02 \x01(\tR\x04unitB\t\xbaH\x06r\x04(\x80\x80\x04\x12E\n\tdirection\x18\x03 \x01(\x0e2\x1b.vibesys.store.v1.DirectionR\tdirectionB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x12\x1d\n\x05ratio\x18\x04 \x01(\x01R\x05ratioB\x07\xbaH\x04\x12\x02@\x01\x12&\n\x05noise\x18\x05 \x01(\x01R\x05noiseB\x10\xbaH\r\x12\x0b@\x01)\x00\x00\x00\x00\x00\x00\x00\x00\x12J\n\x07verdict\x18\x06 \x01(\x0e2$.vibesys.search.v1.ComparisonVerdictR\x07verdictB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x120\n\x0fcandidate_value\x18\x07 \x01(\x01R\x0ecandidateValueB\x07\xbaH\x04\x12\x02@\x01\x12&\n\nbase_value\x18\x08 \x01(\x01R\tbaseValueB\x07\xbaH\x04\x12\x02@\x01\x124\n\x11candidate_samples\x18\t \x01(\rR\x10candidateSamplesB\x07\xbaH\x04*\x02 \x00\x12*\n\x0cbase_samples\x18\n \x01(\rR\x0bbaseSamplesB\x07\xbaH\x04*\x02 \x00:_\xbaH\\\x1aZ\n\x14comparison.direction\x12-direction must be max or min for a comparison\x1a\x13this.direction != 3"\xac\x04\n\rBaselineAttrs\x12!\n\x05label\x18\x01 \x01(\tR\x05labelB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x12E\n\x06status\x18\x02 \x01(\x0e2!.vibesys.search.v1.BaselineStatusR\x06statusB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x12(\n\x06metric\x18\x03 \x01(\tH\x00R\x06metricB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x88\x01\x01\x12"\n\x04unit\x18\x04 \x01(\tH\x01R\x04unitB\t\xbaH\x06r\x04(\x80\x80\x04\x88\x01\x01\x12J\n\tdirection\x18\x05 \x01(\x0e2\x1b.vibesys.store.v1.DirectionH\x02R\tdirectionB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x88\x01\x01\x12"\n\x05value\x18\x06 \x01(\x01H\x03R\x05valueB\x07\xbaH\x04\x12\x02@\x01\x88\x01\x01\x12-\n\x06spread\x18\x07 \x01(\x01H\x04R\x06spreadB\x10\xbaH\r\x12\x0b@\x01)\x00\x00\x00\x00\x00\x00\x00\x00\x88\x01\x01\x12&\n\x07samples\x18\x08 \x01(\rH\x05R\x07samplesB\x07\xbaH\x04*\x02 \x00\x88\x01\x01\x12&\n\x05hosts\x18\t \x03(\tR\x05hostsB\x10\xbaH\r\x92\x01\n"\x08r\x06\x10\x01(\x80\x80\x04\x12&\n\x06reason\x18\n \x01(\tH\x06R\x06reasonB\t\xbaH\x06r\x04(\x80\x80\x04\x88\x01\x01B\t\n\x07_metricB\x07\n\x05_unitB\x0c\n\n_directionB\x08\n\x06_valueB\t\n\x07_spreadB\n\n\x08_samplesB\t\n\x07_reason*\xa7\x01\n\tGateStage\x12\x1a\n\x16GATE_STAGE_UNSPECIFIED\x10\x00\x12\x14\n\x10GATE_STAGE_BUILD\x10\x01\x12\x17\n\x13GATE_STAGE_ACCURACY\x10\x02\x12\x18\n\x14GATE_STAGE_BENCHMARK\x10\x03\x12\x19\n\x15GATE_STAGE_VALIDATION\x10\x04\x12\x1a\n\x16GATE_STAGE_MEASUREMENT\x10\x05*~\n\x0bGateSubject\x12\x1c\n\x18GATE_SUBJECT_UNSPECIFIED\x10\x00\x12\x16\n\x12GATE_SUBJECT_INPUT\x10\x01\x12\x1a\n\x16GATE_SUBJECT_CANDIDATE\x10\x02\x12\x1d\n\x19GATE_SUBJECT_UNATTRIBUTED\x10\x03*\xe2\x01\n\x0fFrameworkSource\x12 \n\x1cFRAMEWORK_SOURCE_UNSPECIFIED\x10\x00\x12\x1a\n\x16FRAMEWORK_SOURCE_GATES\x10\x01\x12!\n\x1dFRAMEWORK_SOURCE_GIT_TRACKING\x10\x02\x12\x19\n\x15FRAMEWORK_SOURCE_LOOP\x10\x03\x12\x18\n\x14FRAMEWORK_SOURCE_GPU\x10\x04\x12\x1d\n\x19FRAMEWORK_SOURCE_SKYPILOT\x10\x05\x12\x1a\n\x16FRAMEWORK_SOURCE_OTHER\x10\x06*i\n\x0cEvidenceKind\x12\x1d\n\x19EVIDENCE_KIND_UNSPECIFIED\x10\x00\x12\x1d\n\x19EVIDENCE_KIND_CORRECTNESS\x10\x01\x12\x1b\n\x17EVIDENCE_KIND_BENCHMARK\x10\x02*W\n\tSelection\x12\x19\n\x15SELECTION_UNSPECIFIED\x10\x00\x12\x17\n\x13SELECTION_CANDIDATE\x10\x01\x12\x16\n\x12SELECTION_BASELINE\x10\x02*\xbe\x01\n\x11ComparisonVerdict\x12"\n\x1eCOMPARISON_VERDICT_UNSPECIFIED\x10\x00\x12\x1d\n\x19COMPARISON_VERDICT_BETTER\x10\x01\x12#\n\x1fCOMPARISON_VERDICT_WITHIN_NOISE\x10\x02\x12\x1c\n\x18COMPARISON_VERDICT_WORSE\x10\x03\x12#\n\x1fCOMPARISON_VERDICT_INCONCLUSIVE\x10\x04*\xb1\x01\n\x0eBaselineStatus\x12\x1f\n\x1bBASELINE_STATUS_UNSPECIFIED\x10\x00\x12\x1c\n\x18BASELINE_STATUS_MEASURED\x10\x01\x12\x1a\n\x16BASELINE_STATUS_FAILED\x10\x02\x12"\n\x1eBASELINE_STATUS_NOT_CONFIGURED\x10\x03\x12 \n\x1cBASELINE_STATUS_NOT_MEASURED\x10\x04*\xa4\x02\n\x10InputFailureKind\x12"\n\x1eINPUT_FAILURE_KIND_UNSPECIFIED\x10\x00\x12"\n\x1eINPUT_FAILURE_KIND_NO_EVIDENCE\x10\x01\x12\'\n#INPUT_FAILURE_KIND_READINGS_REFUSED\x10\x02\x12+\n\'INPUT_FAILURE_KIND_READINGS_UNDECODABLE\x10\x03\x12&\n"INPUT_FAILURE_KIND_ACCURACY_FAILED\x10\x04\x12\'\n#INPUT_FAILURE_KIND_BENCHMARK_FAILED\x10\x05\x12!\n\x1dINPUT_FAILURE_KIND_WAIT_ENDED\x10\x06*\x90\x07\n\x15WorkstreamFailureKind\x12\'\n#WORKSTREAM_FAILURE_KIND_UNSPECIFIED\x10\x00\x12#\n\x1fWORKSTREAM_FAILURE_KIND_STOPPED\x10\x01\x12-\n)WORKSTREAM_FAILURE_KIND_PARENT_UNVERIFIED\x10\x02\x12#\n\x1fWORKSTREAM_FAILURE_KIND_REFUSED\x10\x03\x12!\n\x1dWORKSTREAM_FAILURE_KIND_ENDED\x10\x04\x12)\n%WORKSTREAM_FAILURE_KIND_OUT_OF_BUDGET\x10\x05\x12\'\n#WORKSTREAM_FAILURE_KIND_TURN_FAILED\x10\x06\x12)\n%WORKSTREAM_FAILURE_KIND_INVALID_REPLY\x10\x07\x12)\n%WORKSTREAM_FAILURE_KIND_RENDER_FAILED\x10\x08\x12(\n$WORKSTREAM_FAILURE_KIND_WAIT_REFUSED\x10\t\x12/\n+WORKSTREAM_FAILURE_KIND_CHECKPOINT_DECLINED\x10\n\x120\n,WORKSTREAM_FAILURE_KIND_NO_CHANGED_CANDIDATE\x10\x0b\x121\n-WORKSTREAM_FAILURE_KIND_IMPLEMENTATION_FAILED\x10\x0c\x12+\n\'WORKSTREAM_FAILURE_KIND_REVIEW_REJECTED\x10\r\x12/\n+WORKSTREAM_FAILURE_KIND_NO_TRUSTED_EVIDENCE\x10\x0e\x12,\n(WORKSTREAM_FAILURE_KIND_EVIDENCE_REFUSED\x10\x0f\x120\n,WORKSTREAM_FAILURE_KIND_EVIDENCE_UNDECODABLE\x10\x10\x127\n3WORKSTREAM_FAILURE_KIND_PROFILE_CAPTURE_UNAVAILABLE\x10\x11\x12&\n"WORKSTREAM_FAILURE_KIND_TURN_LIMIT\x10\x12\x12)\n%WORKSTREAM_FAILURE_KIND_REPEATED_TURN\x10\x13BCZAgithub.com/uw-syfi/vibesys/gateway/gen/vibesys/search/v1;searchv1b\x06proto3',
     [
         validate_pb.desc(),
         common_pb.desc(),

@@ -98,3 +98,25 @@ def test_multiple_external_simulators_share_one_loop_timeline() -> None:
     run_virtual(clock, exercise())
     for owner in owners:
         owner.close()
+
+
+@given(seed=st.integers(0, 2**32 - 1))
+def test_external_contended_lock_receives_ownership_from_worker(seed: int) -> None:
+    threads = SimThreads(schedule_seed=seed)
+    lock = threads.lock()
+    entered = threads.event()
+    seen: list[str] = []
+
+    def worker() -> None:
+        with lock:
+            entered.set()
+            threads.sleep(0.1)
+            seen.append("worker")
+
+    child = threads.spawn(worker, name="holder")
+    assert entered.wait(HANG_GUARD_S)
+    with lock:
+        seen.append("owner")
+    child.join(HANG_GUARD_S)
+    assert seen == ["worker", "owner"]
+    threads.close()
