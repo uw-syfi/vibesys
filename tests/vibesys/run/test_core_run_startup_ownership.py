@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
 import pytest
 
-from vibesys.events import CoreEventType, RunEndingData
+import vs_proto.api as p
+from vibesys.events import CoreEventType, IntentStateData, RunEndingData
+from vibesys.run import EventJournal
 from vibesys.run.core_run import CoreRunRefusedError, drive_core_run
 from vibesys.run.core_services import ClosableEvaluation, CoreServices
 from vibesys.run.environment_failure import RunEnvironmentFailure
@@ -33,7 +35,6 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
-    from vibesys.events import CoreEventData
     from vibesys.run.integration import LocalRunIntegration
     from vs_core.api import CoreState
     from vs_project.api import ControlInbox
@@ -111,24 +112,11 @@ class _FollowingWorkspaces:
         assert self.holds is not None
 
 
-@dataclass
-class _Events:
-    """Collects the events a core run emits."""
-
-    emitted: list[tuple[CoreEventType, CoreEventData | None]] = field(default_factory=list)
-
-    def emit(
-        self, event_type: CoreEventType, text: str = "", *, data: CoreEventData | None = None
-    ) -> None:
-        del text
-        self.emitted.append((event_type, data))
-
-
 @dataclass(frozen=True)
 class _Integration:
     control: RunControlChannel
+    events: EventJournal
     run_control: object = None
-    events: _Events = field(default_factory=_Events)
 
     @property
     def environment_failure(self) -> RunEnvironmentFailure:
@@ -204,7 +192,8 @@ def _startup_host(
         _Integration(
             create_run_control_channel(
                 FakeRunControlEventSink() if ended is None else ended.sink, threads=threads
-            )
+            ),
+            EventJournal(clock, threads),
         ),
     )
     return host, integration, clock
@@ -228,7 +217,7 @@ def test_a_bridge_startup_failure_closes_the_bridge_and_releases_the_run_lease(
     assert not bridge.shell.holds_lease(now_at=clock.now())
     # The run recorded no result, so a resume continues it from its first round.
     events = cast("_Integration", integration).events
-    assert events.emitted == [
+    assert [(e.type, e.data) for e in events.history()] == [
         (
             CoreEventType.RUN_ENDING,
             RunEndingData(reason=None, resumable=True, rounds_finished=0),
@@ -280,8 +269,9 @@ def test_a_run_force_stopped_before_starts_no_new_work_and_goes_straight_to_its_
 
     assert refusal.request_id.root.startswith("adopt:")
     events = cast("_Integration", integration).events
-    assert [event_type for event_type, _data in events.emitted] == [CoreEventType.RUN_ENDING]
-    ((_type, ending),) = events.emitted
+    assert [e.type for e in events.history()] == [CoreEventType.RUN_ENDING]
+    (event,) = events.history()
+    ending = event.data
     assert isinstance(ending, RunEndingData)
     assert ending.rounds_finished == 0
 
@@ -338,6 +328,7 @@ def test_an_ended_run_rejects_what_its_inbox_still_holds(
     assert [(t.kind, t.request_id) for t in sink.transitions] == [
         (RunControlTransitionKind.REQUEST_REJECTED, "p1")
     ]
+    assert_terminal_refusal(cast("_Integration", integration).events)
 
 
 @pytest.mark.parametrize("bridge", [None, _FailingBridge()], ids=["returns", "raises"])
@@ -363,6 +354,19 @@ def test_a_failure_answering_the_last_controls_still_releases_the_lease(
             "SinkError: control journal unwritable"
         ]
     events = cast("_Integration", integration).events
-    assert [event_type for event_type, _data in events.emitted] == [CoreEventType.RUN_ENDING]
+    assert [e.type for e in events.history() if e.type is not CoreEventType.INTENT_STATE] == [
+        CoreEventType.RUN_ENDING
+    ]
+    assert_terminal_refusal(events)
     # Another host takes the run's lease at once: this one freed it rather than let it lapse.
     assert host.services.store.acquire("next-host", now=clock.now(), duration=1.0) is not None
+
+
+def assert_terminal_refusal(events: EventJournal) -> None:
+    outcomes = [
+        p.IntentState.from_json(e.data.state_json)
+        for e in events.history()
+        if isinstance(e.data, IntentStateData)
+    ]
+    assert [(o.control_id, o.step) for o in outcomes] == [("p1", p.IntentStep.REFUSED)]
+    assert outcomes[0].reason
