@@ -25,12 +25,17 @@ import type {WelcomeFeed} from './welcome-feed.js';
 import {
   type WelcomeBinding,
   type WelcomeDocument,
+  type WelcomeInvokeEvent,
   type WelcomeIpc,
   WelcomeRouter,
 } from './welcome-ipc.js';
 import type {AppWindow} from './window.js';
 
 export interface DesktopDeps {
+  readonly gatewaySetting: (
+    host: import('@vibesys/hosts').HostId,
+    enabled: boolean | undefined,
+  ) => Promise<boolean>;
   readonly window: Pick<
     AppWindow,
     'focus' | 'openSettings' | 'releaseSurfaceRun' | 'sendWelcome' | 'welcome'
@@ -93,6 +98,7 @@ type ScreenRequest = Extract<
   WelcomeRequest,
   {
     readonly kind:
+      | 'run-transport-v2'
       | 'machines'
       | 'machine'
       | 'inspect-checkout'
@@ -130,6 +136,11 @@ export class Desktop {
   #recentGeneration = 0;
   /** Every window's surface requests, routed by the window that sent each. */
   readonly #router: WelcomeRouter;
+
+  /** The same current app documents authorized for welcome requests. */
+  admitsRenderer(event: WelcomeInvokeEvent): boolean {
+    return this.#router.admits(event);
+  }
 
   constructor(deps: DesktopDeps) {
     this.#deps = deps;
@@ -335,6 +346,8 @@ export class Desktop {
   #screen(request: ScreenRequest): Promise<unknown> {
     const {machines} = this.#deps;
     switch (request.kind) {
+      case 'run-transport-v2':
+        return this.#deps.gatewaySetting(request.host, request.enabled);
       case 'machines':
         return machines.machines();
       case 'machine':

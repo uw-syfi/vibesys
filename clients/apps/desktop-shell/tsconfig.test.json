@@ -39,6 +39,9 @@
     },
     {
       "path": "../../libs/ui/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/proto/tsconfig.lib.json"
     }
   ]
 }

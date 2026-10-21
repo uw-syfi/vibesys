@@ -48,6 +48,7 @@ const VALID_ARGUMENTS: Readonly<
   Record<(typeof WELCOME_CHANNELS)[keyof typeof WELCOME_CHANNELS], readonly unknown[]>
 > = {
   [WELCOME_CHANNELS.overview]: [],
+  [WELCOME_CHANNELS.runTransportV2]: ['local', false],
   [WELCOME_CHANNELS.setCheckout]: ['local', '/checkout', 1],
   [WELCOME_CHANNELS.cancelCheckout]: [1],
   [WELCOME_CHANNELS.signIn]: ['local'],

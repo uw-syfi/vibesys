@@ -82,6 +82,7 @@ type WelcomeChannel = (typeof WELCOME_CHANNELS)[keyof typeof WELCOME_CHANNELS];
 /** The complete positional shape of every welcome request at the renderer boundary. */
 const WELCOME_ARGUMENT_COUNTS = {
   [WELCOME_CHANNELS.overview]: 0,
+  [WELCOME_CHANNELS.runTransportV2]: 2,
   [WELCOME_CHANNELS.setCheckout]: 3,
   [WELCOME_CHANNELS.cancelCheckout]: 1,
   [WELCOME_CHANNELS.signIn]: 1,

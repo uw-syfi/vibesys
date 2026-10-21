@@ -20,6 +20,7 @@ type Events = typeof import('@vibesys/ipc').WELCOME_EVENTS;
 
 const CHANNELS: Channels = {
   overview: 'vibesys:welcome:overview',
+  runTransportV2: 'vibesys:welcome:run-transport-v2',
   setCheckout: 'vibesys:welcome:set-checkout',
   cancelCheckout: 'vibesys:welcome:cancel-checkout',
   signIn: 'vibesys:welcome:sign-in',
@@ -105,6 +106,7 @@ function createWelcomePreload(capabilities: WelcomePreloadCapabilities): Welcome
   }
   return {
     platform: capabilities.platform,
+    runTransportV2: (host, enabled) => call(CHANNELS.runTransportV2, host, enabled),
     overview: () => call(CHANNELS.overview),
     setCheckout: (host, path, change) => call(CHANNELS.setCheckout, host, path, change),
     cancelCheckout: change => call(CHANNELS.cancelCheckout, change),
@@ -187,6 +189,32 @@ if (process.type === 'renderer') {
       },
     }),
   );
+  electron.contextBridge.exposeInMainWorld('vibesysGateway', {
+    unary: (host, method, bytes) => {
+      let cancel = (): void => {};
+      const result = new Promise<Uint8Array>((resolve, reject) => {
+        let response: Uint8Array | undefined;
+        cancel = openGateway(
+          'unary',
+          host,
+          method,
+          bytes,
+          value => {
+            response = value;
+          },
+          error => {
+            if (error !== undefined) reject(new Error(error));
+            else if (response === undefined) reject(new Error('missing unary response'));
+            else resolve(response);
+          },
+        );
+      });
+      return {result, cancel: () => cancel()};
+    },
+    stream: (host, method, bytes, receive, ended) => ({
+      cancel: openGateway('stream', host, method, bytes, receive, ended),
+    }),
+  } satisfies import('@vibesys/ipc').GatewayBridge);
   prepareFirstPaint(electron.ipcRenderer.sendSync(FIRST_PAINT_CHANNEL));
 }
 
@@ -215,3 +243,31 @@ function prepareFirstPaint(reply: unknown): void {
 }
 
 export = createWelcomePreload;
+
+/** Ports are owned in the preload; renderer callbacks receive only structured protobuf bytes. */
+function openGateway(
+  kind: 'unary' | 'stream',
+  host: string,
+  method: string,
+  bytes: Uint8Array,
+  receive: (bytes: Uint8Array) => void,
+  ended: (error?: string) => void,
+): () => void {
+  const electron: typeof import('electron') = require('electron');
+  const {port1, port2} = new MessageChannel();
+  let closed = false;
+  const finish = (error?: string): void => {
+    if (closed) return;
+    closed = true;
+    port1.postMessage({cancel: true});
+    port1.close();
+    ended(error);
+  };
+  port1.onmessage = event => {
+    const reply = event.data as import('@vibesys/ipc').GatewayReply;
+    if ('bytes' in reply) receive(reply.bytes);
+    else finish(reply.error);
+  };
+  electron.ipcRenderer.postMessage('vibesys:gateway', {kind, host, method, bytes}, [port2]);
+  return () => finish('cancelled');
+}

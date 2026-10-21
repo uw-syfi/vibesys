@@ -161,6 +161,11 @@ export class WelcomeRouter {
     }
   }
 
+  /** Share the app's current-window admission with other IPC surfaces. */
+  admits(event: WelcomeInvokeEvent): boolean {
+    return [...this.#windows].some(window => window.admits(event));
+  }
+
   /** Answer `binding`'s window from now until its native window closes. */
   bind(binding: WelcomeBinding): void {
     const window: WindowAdmission = new WindowAdmission(binding, () =>

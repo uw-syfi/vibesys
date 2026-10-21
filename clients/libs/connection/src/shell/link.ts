@@ -20,7 +20,7 @@
 import {spawn} from 'node:child_process';
 import {homedir} from 'node:os';
 import type {ScheduleTimeout} from '@vibesys/transport';
-import {bootstrapUv, localBootstrap, remoteBootstrap} from './bootstrap.js';
+import {bootstrapUv, localBootstrap, remoteBootstrap, remoteCommand} from './bootstrap.js';
 import {ConnectionError} from './helper-channel.js';
 import {
   fromChild,
@@ -275,6 +275,14 @@ export class SshLink implements Link {
     return this.#ssh(
       ['-T', '-o', 'ControlMaster=no', '-o', 'BatchMode=yes', '--', this.#options.alias],
       remoteBootstrap(checkout, this.#uv),
+    );
+  }
+
+  /** A binary channel over this link's existing SSH master and host configuration. */
+  spawnCommand(command: string): SpawnedProcess {
+    return this.#ssh(
+      ['-T', '-o', 'ControlMaster=no', '-o', 'BatchMode=yes', '--', this.#options.alias],
+      remoteCommand(command),
     );
   }
 

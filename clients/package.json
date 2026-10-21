@@ -18,7 +18,8 @@
     "new:package": "node tools/scripts/new_package.mjs",
     "build:clients": "turbo run build",
     "check:clients": "turbo run check",
-    "test:clients": "pnpm test:ts-architecture && pnpm test:conformance && pnpm test:bun-runner && pnpm test:node-runner && turbo run test"
+    "test:clients": "pnpm test:ts-architecture && pnpm test:conformance && pnpm test:bun-runner && pnpm test:node-runner && turbo run test",
+    "dev": "turbo run build --filter=@vibesys/app-desktop-main... && pnpm --filter @vibesys/app-desktop-main exec electron ."
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.3",

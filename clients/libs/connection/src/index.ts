@@ -14,7 +14,20 @@ export {
   ConnectionManager,
   DEFAULT_CONNECTION_CONFIG,
 } from './shell/connection-manager.js';
+export {GatewayConnection, type GatewayDialer, HELLO_METHOD, TAIL_METHOD} from './shell/gateway.js';
+export {GatewayCalls} from './shell/gateway-calls.js';
+export {localGateway} from './shell/gateway-local.js';
+export {
+  GATEWAY_DIRECTORY,
+  type GatewayTarget,
+  gatewayArtifact,
+  gatewayProcess,
+  gatewayTarget,
+  provisionGateway,
+} from './shell/gateway-provision.js';
+export {GrpcDecoder, GrpcError, grpcFrame} from './shell/grpc.js';
 export {ConnectionError, HelperRequestError} from './shell/helper-channel.js';
 export {HostConnection, type LogsLease} from './shell/host-connection.js';
 export {type Link, LocalLink, SshLink} from './shell/link.js';
+export {fromChild, type SpawnedProcess} from './shell/process.js';
 export type {CheckoutProblem, Phase} from './state/host-connection.js';

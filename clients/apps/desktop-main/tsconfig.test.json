@@ -55,6 +55,9 @@
     },
     {
       "path": "../../libs/run-history/tsconfig.testing.json"
+    },
+    {
+      "path": "../../libs/proto/tsconfig.lib.json"
     }
   ]
 }

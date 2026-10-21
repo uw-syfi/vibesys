@@ -436,3 +436,23 @@ describe('WelcomeRouter', () => {
     expect(answered).toEqual(['main 10:100', 'run 20:200', 'main 10:100']);
   });
 });
+
+test('other IPC surfaces share current-window admission and refuse unregistered shell windows', () => {
+  const router = new WelcomeRouter(new FakeWelcomeIpc());
+  const document = new FakeWelcomeDocument();
+  router.bind({
+    document,
+    url: 'app://vibesys/shell.html',
+    answer: async () => null,
+    retire: async () => {},
+  });
+  const event = {senderId: 7, senderUrl: 'app://vibesys/shell.html', rendererGeneration: '1:1'};
+  expect(router.admits(event)).toBe(true);
+  expect(router.admits({...event, senderId: 8})).toBe(false);
+  expect(router.admits({...event, senderUrl: 'https://example.test/'})).toBe(false);
+  document.replace(8);
+  expect(router.admits(event)).toBe(false);
+  expect(router.admits({...event, senderId: 8})).toBe(true);
+  document.destroy();
+  expect(router.admits({...event, senderId: 8})).toBe(false);
+});

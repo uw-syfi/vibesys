@@ -38,7 +38,8 @@
     "@vibesys/transport": "workspace:*",
     "@vibesys/ui": "workspace:*",
     "react": "19.1.1",
-    "react-dom": "19.1.1"
+    "react-dom": "19.1.1",
+    "@vibesys/feature-gateway-records": "workspace:*"
   },
   "devDependencies": {
     "@axe-core/playwright": "4.10.2",
@@ -50,6 +51,8 @@
     "@vibesys/contracts": "workspace:*",
     "@vibesys/run-fixtures": "workspace:*",
     "@vitejs/plugin-react": "5.0.4",
-    "typescript": "^5.8.3"
+    "typescript": "^5.8.3",
+    "@vibesys/proto": "workspace:*",
+    "@bufbuild/protobuf": "2.16.0"
   }
 }

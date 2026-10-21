@@ -9,6 +9,10 @@ type WorkspacePolicy = NonNullable<KnipConfig['workspaces']>[string];
 // name instead of silently falling back to knip's default entry-point heuristics, which is how
 // `web` came to be audited against defaults meant for a library rather than a bundled app.
 const PACKAGE_POLICIES: Record<string, WorkspacePolicy> = {
+  'libs/connection': {
+    entry: ['src/index.ts', 'src/testing/index.ts', 'src/**/*.test.ts', 'node-tests/**/*.test.ts'],
+    project: ['src/**/*.ts', 'node-tests/**/*.ts'],
+  },
   'libs/proto': {
     entry: ['src/index.ts', 'tests/*.mjs'],
     project: ['src/**/*.ts', '*.mjs', 'tests/*.mjs'],
@@ -104,7 +108,8 @@ for (const {name, directory, manifest} of layout.packages) {
 
 const config: KnipConfig = {
   // The protocol generator calls an external Python tool.
-  ignoreBinaries: ['uv'],
+  // Go is a system build tool, like uv; gateway builds report its absence explicitly.
+  ignoreBinaries: ['uv', 'go'],
   workspaces,
 };
 

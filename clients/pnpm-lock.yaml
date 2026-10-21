@@ -76,6 +76,9 @@ importers:
         specifier: workspace:*
         version: link:../../libs/ui
     devDependencies:
+      '@bufbuild/protobuf':
+        specifier: 2.16.0
+        version: 2.16.0
       '@playwright/test':
         specifier: 1.55.0
         version: 1.55.0
@@ -85,6 +88,9 @@ importers:
       '@types/node':
         specifier: ^24.0.0
         version: 24.13.3
+      '@vibesys/proto':
+        specifier: workspace:*
+        version: link:../../libs/proto
       '@vibesys/store':
         specifier: workspace:*
         version: link:../../libs/store
@@ -100,6 +106,9 @@ importers:
       '@vibesys/feature-app-shell':
         specifier: workspace:*
         version: link:../../features/app-shell
+      '@vibesys/feature-gateway-records':
+        specifier: workspace:*
+        version: link:../../features/gateway-records
       '@vibesys/feature-machines':
         specifier: workspace:*
         version: link:../../features/machines
@@ -152,6 +161,9 @@ importers:
       '@axe-core/playwright':
         specifier: 4.10.2
         version: 4.10.2(playwright-core@1.55.0)
+      '@bufbuild/protobuf':
+        specifier: 2.16.0
+        version: 2.16.0
       '@playwright/test':
         specifier: 1.55.0
         version: 1.55.0
@@ -170,6 +182,9 @@ importers:
       '@vibesys/contracts':
         specifier: workspace:*
         version: link:../../libs/contracts
+      '@vibesys/proto':
+        specifier: workspace:*
+        version: link:../../libs/proto
       '@vibesys/run-fixtures':
         specifier: workspace:*
         version: link:../../libs/run-fixtures
@@ -243,6 +258,43 @@ importers:
       react:
         specifier: 19.1.1
         version: 19.1.1
+    devDependencies:
+      '@types/bun':
+        specifier: 1.4.2
+        version: 1.4.2
+      '@types/node':
+        specifier: ^24.0.0
+        version: 24.13.3
+      '@types/react':
+        specifier: 19.1.13
+        version: 19.1.13
+      typescript:
+        specifier: ^5.8.3
+        version: 5.9.3
+
+  features/gateway-records:
+    dependencies:
+      '@vibesys/hosts':
+        specifier: workspace:*
+        version: link:../../libs/hosts
+      '@vibesys/ipc':
+        specifier: workspace:*
+        version: link:../../libs/ipc
+      '@vibesys/machine':
+        specifier: workspace:*
+        version: link:../../libs/machine
+      '@vibesys/run-state':
+        specifier: workspace:*
+        version: link:../../libs/run-state
+      '@vibesys/ui':
+        specifier: workspace:*
+        version: link:../../libs/ui
+      react:
+        specifier: 19.1.1
+        version: 19.1.1
+      xstate:
+        specifier: 5.33.2
+        version: 5.33.2
     devDependencies:
       '@types/bun':
         specifier: 1.4.2
@@ -661,6 +713,9 @@ importers:
 
   libs/connection:
     dependencies:
+      '@bufbuild/protobuf':
+        specifier: 2.16.0
+        version: 2.16.0
       '@vibesys/contracts':
         specifier: workspace:*
         version: link:../contracts
@@ -673,6 +728,9 @@ importers:
       '@vibesys/machine':
         specifier: workspace:*
         version: link:../machine
+      '@vibesys/proto':
+        specifier: workspace:*
+        version: link:../proto
       '@vibesys/transport':
         specifier: workspace:*
         version: link:../transport
@@ -689,6 +747,9 @@ importers:
       '@vibesys/store':
         specifier: workspace:*
         version: link:../store
+      expect:
+        specifier: 30.5.2
+        version: 30.5.2
       typescript:
         specifier: ^5.8.3
         version: 5.9.3
@@ -904,9 +965,15 @@ importers:
 
   libs/run-state:
     dependencies:
+      '@bufbuild/protobuf':
+        specifier: 2.16.0
+        version: 2.16.0
       '@vibesys/contracts':
         specifier: workspace:*
         version: link:../contracts
+      '@vibesys/proto':
+        specifier: workspace:*
+        version: link:../proto
     devDependencies:
       '@types/bun':
         specifier: 1.4.2

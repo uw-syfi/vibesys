@@ -14,7 +14,8 @@
       "./overview": "neutral",
       "./candidates": "neutral",
       "./agents": "neutral",
-      "./usage": "neutral"
+      "./usage": "neutral",
+      "./records": "neutral"
     }
   },
   "exports": {
@@ -62,6 +63,11 @@
       "@vibesys/source": "./src/usage/index.ts",
       "types": "./dist/usage/index.d.ts",
       "default": "./dist/usage/index.js"
+    },
+    "./records": {
+      "@vibesys/source": "./src/records/index.ts",
+      "types": "./dist/records/index.d.ts",
+      "default": "./dist/records/index.js"
     }
   },
   "files": [
@@ -71,14 +77,16 @@
     "README.md"
   ],
   "scripts": {
-    "build": "tsc -b tsconfig.lib.json tsconfig.rounds.json tsconfig.performance.json tsconfig.transcript.json tsconfig.trace.json tsconfig.overview.json tsconfig.candidates.json tsconfig.agents.json tsconfig.usage.json",
+    "build": "tsc -b tsconfig.lib.json tsconfig.rounds.json tsconfig.performance.json tsconfig.transcript.json tsconfig.trace.json tsconfig.overview.json tsconfig.candidates.json tsconfig.agents.json tsconfig.usage.json tsconfig.records.json",
     "check": "tsc -b",
     "test": "node ../../tools/scripts/run_bun_tests.mjs ./src",
     "bench:performance": "bun bench/performance-projection.ts",
     "bench:run-map": "bun bench/run-map.ts"
   },
   "dependencies": {
-    "@vibesys/contracts": "workspace:*"
+    "@vibesys/contracts": "workspace:*",
+    "@vibesys/proto": "workspace:*",
+    "@bufbuild/protobuf": "2.16.0"
   },
   "devDependencies": {
     "@types/bun": "1.4.2",
