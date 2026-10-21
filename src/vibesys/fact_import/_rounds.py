@@ -21,8 +21,12 @@ if TYPE_CHECKING:
     from ._source import ImportSource
 
 
-def _round(value: dict[str, Any]) -> RoundRecord:
-    return parse_round_record(value)
+def _round(value: object) -> RoundRecord:
+    data = TypeAdapter(dict[str, Any]).validate_python(value, strict=True)
+    if data.get("implementer_driver") not in (None, "agentshim"):
+        message = "implementer_driver: unknown retained driver"
+        raise ValueError(message)
+    return parse_round_record(data)
 
 
 _ROUND = TypeAdapter(Annotated[RoundRecord, BeforeValidator(_round)])

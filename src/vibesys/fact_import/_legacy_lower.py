@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, cast
 
 from vs_core.api.values import Reading
-from vs_proto.api import core_leaves
+from vs_proto.api import core_common, core_leaves
 from vs_proto.api import imported_facts as pb
 from vs_runtime.api.core_values import to_proto
 
@@ -88,8 +88,11 @@ def _steer(source: ImportSource, path: str, item: dict[str, Any], facts: FactSet
         source,
         path,
         pb.ImportedGuidance(
-            identity=path,
+            identity=f"{path.rsplit('[', 1)[0]}:{item['note_sha256']}",
             text=item["text"],
+            mode=core_common.InputMode.INTERRUPT
+            if item["interrupt"]
+            else core_common.InputMode.NEXT_TURN,
             delivered=item.get("delivered_to") is not None,
             disposed=item.get("dropped") is not None,
             possibly_read=item.get("reserved_to") is not None,

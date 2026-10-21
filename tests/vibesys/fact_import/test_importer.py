@@ -178,6 +178,79 @@ def test_generated_stores_return_validated_facts_or_a_named_prerequisite(
         assert outcome == _import(source)
 
 
+_JSON_VALUES = st.recursive(
+    st.none() | st.booleans() | st.integers() | st.text(max_size=20),
+    lambda children: (
+        st.lists(children, max_size=4) | st.dictionaries(st.text(max_size=20), children, max_size=4)
+    ),
+    max_leaves=12,
+)
+
+
+@given(value=_JSON_VALUES, source_format=st.sampled_from(tuple(SourceFormat)))
+def test_generated_json_stores_are_total(value: object, source_format: SourceFormat) -> None:
+    source = ImportSource("generated.json", source_format, json.dumps(value).encode())
+    try:
+        outcome = _import(source)
+    except FactImportError as error:
+        outcome = error
+    if isinstance(outcome, FactImportError):
+        assert outcome.path
+    else:
+        validate(outcome)
+        assert outcome.to_binary() == _import(source).to_binary()
+
+
+@pytest.mark.parametrize("data", [b"null", b"1", b"true"])
+def test_nonobject_round_records_name_the_source_instead_of_escaping_the_decoder(
+    data: bytes,
+) -> None:
+    with pytest.raises(FactImportError, match=r"round.json"):
+        _import(ImportSource("round.json", SourceFormat.ROUND, data))
+
+
+def test_pretrace_round_spellings_work_inside_retained_hypothesis_snapshots() -> None:
+    state = json.loads((_FIXTURES / "legacy-v6-completed.json").read_bytes())["search"]
+    round_value = state["hypotheses"][0]["rounds"][0]
+    round_value["round"] = round_value.pop("round_number")
+    round_value["implementer_driver"] = "agentshim"
+    round_source = ImportSource("round.json", SourceFormat.ROUND, json.dumps(round_value).encode())
+    snapshot_source = ImportSource(
+        "single/state.json", SourceFormat.HYPOTHESES, json.dumps(state).encode()
+    )
+    expected = _payloads(_import(round_source), "measurement")
+    assert expected
+    assert expected[0] in _payloads(_import(snapshot_source), "measurement")
+    round_value["implementer_driver"] = "unknown-driver"
+    with pytest.raises(FactImportError, match="implementer_driver"):
+        _import(ImportSource("round.json", SourceFormat.ROUND, json.dumps(round_value).encode()))
+
+
+@pytest.mark.parametrize("key", ["hypothesis:h1", "unknown:h1", "role:judge"])
+def test_retained_sessions_keep_external_identity_and_validate_the_stored_key(key: str) -> None:
+    source = ImportSource(
+        "agent/sessions.json",
+        SourceFormat.SESSIONS,
+        json.dumps(
+            {
+                "schema_version": 1,
+                "sessions": {
+                    key: {
+                        "spec_fingerprint": "fingerprint",
+                        "session_id": "session-a",
+                        "provider": "codex",
+                    }
+                },
+            }
+        ).encode(),
+    )
+    if key == "hypothesis:h1":
+        assert _payloads(_import(source), "external_identity")[0].identity == "session-a"
+    else:
+        with pytest.raises(FactImportError, match="sessions"):
+            _import(source)
+
+
 @pytest.mark.parametrize("value", [float("nan"), float("inf"), -float("inf")])
 def test_nonfinite_measurements_are_rejected_with_the_source_path(value: float) -> None:
     envelope = _envelope()
@@ -366,6 +439,9 @@ def test_legacy_versions_keep_fact_semantics_without_changing_the_source_version
 )
 def test_every_retained_envelope_fixture_lowers_without_an_upgrade(fixture: Path) -> None:
     value = json.loads(fixture.read_bytes())
+    value["strategy_id"]["root"] = "single"
+    value["core"]["run"]["declaration"]["strategy_id"]["root"] = "single"
+    value["state_schema"]["name"] = "single.flow-state"
     for section in (value["strategy"]["live"], value["strategy"].get("base")):
         if section is not None:
             for flow in section["flows"]:
@@ -403,6 +479,8 @@ def test_unknown_envelope_version_and_cross_run_input_are_prerequisites() -> Non
         _import(ImportSource("future.json", SourceFormat.ENVELOPE, json.dumps(value).encode()))
     with pytest.raises(FactImportError, match="another run"):
         import_run_facts("another", [_sources()[0]], strategy="single", registry=FAKE_REGISTRY)
+    with pytest.raises(FactImportError, match="another strategy"):
+        _import(_sources()[0], strategy="dynamic")
 
 
 def test_accepted_stage_ledger_keeps_fingerprints_all_readings_and_partial_progress() -> None:
@@ -551,6 +629,26 @@ def test_guidance_occurrences_coalesce_with_withdrawal_instead_of_redelivering_o
         fact for fact in result.facts if fact.value is not None and fact.value.field == "guidance"
     )
     assert {origin.path for origin in fact.imported_from} == {advice.path, withdrawal.path}
+
+
+def test_legacy_guidance_identity_and_mode_survive_note_reordering() -> None:
+    value = json.loads((_FIXTURES / "legacy-v6-empty.json").read_bytes())
+    notes = [
+        {"note_sha256": name * 64, "text": name, "sent_at_s": 1.0, "interrupt": True}
+        for name in ("a", "b")
+    ]
+    value["agent"] = {"steers": {"W1": notes}}
+    first = _import(
+        ImportSource("dynamic/state.json", SourceFormat.LEGACY_DYNAMIC, json.dumps(value).encode()),
+        strategy="dynamic",
+    )
+    notes.reverse()
+    second = _import(
+        ImportSource("dynamic/state.json", SourceFormat.LEGACY_DYNAMIC, json.dumps(value).encode()),
+        strategy="dynamic",
+    )
+    assert _payloads(first, "guidance") == _payloads(second, "guidance")
+    assert all(row.mode.name == "INTERRUPT" for row in _payloads(first, "guidance"))
 
 
 def test_parent_release_never_erases_a_childs_independent_ownership() -> None:

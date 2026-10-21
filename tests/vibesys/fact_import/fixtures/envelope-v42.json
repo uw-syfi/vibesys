@@ -1621,7 +1621,7 @@
         "roles": [],
         "strategy_id": {
           "kind": "strategy",
-          "root": "sequential"
+          "root": "single"
         }
       },
       "facts": {
@@ -1748,7 +1748,7 @@
   },
   "schema_version": 42,
   "state_schema": {
-    "name": "sequential.flow-state",
+    "name": "single.flow-state",
     "version": 1
   },
   "strategy": {
@@ -1894,6 +1894,6 @@
   },
   "strategy_id": {
     "kind": "strategy",
-    "root": "sequential"
+    "root": "single"
   }
 }

@@ -4,21 +4,28 @@ from __future__ import annotations
 
 from typing import Any
 
+from vs_agent.api import AgentSessionKey
+
 from ._source import FactImportError, ImportSource
 
 
 def validate_container(
-    source: ImportSource, path: str, name: str, value: dict[str, Any], run_id: str
+    source: ImportSource,
+    path: str,
+    name: str,
+    value: dict[str, Any],
+    identity: tuple[str, str],
 ) -> None:
+    run_id, strategy = identity
     if name == "flow":
         if value["schema_version"] != 1:
             raise FactImportError(
                 f"{source.path}:{path}.schema_version", "unknown retained FlowState version"
             )
     elif name == "envelope":
-        _envelope(source, path, value, run_id)
+        _envelope(source, path, value, run_id, strategy)
     elif name == "runtime":
-        _envelope(source, f"{path}.envelope", value["envelope"], run_id)
+        _envelope(source, f"{path}.envelope", value["envelope"], run_id, strategy)
         cursor = value["envelope"]["event_cursor"]["sequence"]
         if value["next_publication_sequence"] != cursor + 1:
             raise FactImportError(
@@ -33,9 +40,25 @@ def validate_container(
             )
     elif name == "publications":
         _publications(source, path, value["publications"], run_id, 1)
+    elif name == "sessions":
+        _sessions(source, path, value)
 
 
-def _envelope(source: ImportSource, path: str, value: dict[str, Any], run_id: str) -> None:
+def _sessions(source: ImportSource, path: str, value: dict[str, Any]) -> None:
+    for key in value.get("sessions", {}):
+        try:
+            identity = AgentSessionKey.parse(key)
+        except ValueError as error:
+            raise FactImportError(f"{source.path}:{path}.sessions.{key}", str(error)) from error
+        if not identity.durable:
+            raise FactImportError(
+                f"{source.path}:{path}.sessions.{key}", "session scope is not persistable"
+            )
+
+
+def _envelope(
+    source: ImportSource, path: str, value: dict[str, Any], run_id: str, strategy: str
+) -> None:
     if value["schema_version"] not in range(34, 43):
         raise FactImportError(
             f"{source.path}:{path}.schema_version", "unknown retained envelope version"
@@ -48,10 +71,17 @@ def _envelope(source: ImportSource, path: str, value: dict[str, Any], run_id: st
         raise FactImportError(
             f"{source.path}:{path}.strategy.schema_version", "unknown retained FlowState version"
         )
-    if value["state_schema"]["version"] != value["strategy"]["schema_version"]:
+    if value["state_schema"] != {
+        "name": f"{value['strategy_id']['root']}.flow-state",
+        "version": value["strategy"]["schema_version"],
+    }:
         raise FactImportError(f"{source.path}:{path}.state_schema", "strategy declaration mismatch")
     if value["strategy_id"] != value["core"]["run"]["declaration"]["strategy_id"]:
         raise FactImportError(f"{source.path}:{path}.strategy_id", "strategy declaration mismatch")
+    if value["strategy_id"]["root"] != strategy:
+        raise FactImportError(
+            f"{source.path}:{path}.strategy_id", "source belongs to another strategy"
+        )
 
 
 def _publications(

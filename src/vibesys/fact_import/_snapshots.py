@@ -106,7 +106,13 @@ class SnapshotDecoder:
             path = ".".join(str(part) for part in error.absolute_path)
             raise FactImportError(f"{source.path}:{selector}.{path}", error.message)
         if isinstance(value, dict):
-            validate_container(source, selector, name, value, self.run_id)
+            validate_container(
+                source,
+                selector,
+                name,
+                value,
+                (self.run_id, _STRATEGIES.get(self.strategy, self.strategy)),
+            )
             if name == "operation-result":
                 self._embedded(source, selector, "OperationResult", value)
         self._visit(source, selector, value, reader, reader.schema)
@@ -157,7 +163,11 @@ class SnapshotDecoder:
             "ProviderSessionRecord",
         ):
             self._embedded(source, path, name, value)
-        if name == "RoundRecord":
+        if (
+            name == "RoundRecord"
+            and isinstance(value, dict)
+            and ("round_number" in value or "round" in value)
+        ):
             # Embedded round bytes have the same permanent boundary as standalone records.
             record = read_round(source, self.registry, selector=path, data=data)
             lower_round(source, path, record, self.facts)
