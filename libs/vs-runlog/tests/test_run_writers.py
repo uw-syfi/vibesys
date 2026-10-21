@@ -9,11 +9,12 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 import pytest
-from hypothesis import given
+from hypothesis import example, given
 from hypothesis import strategies as st
 from protobuf.wkt.google.protobuf.any_pb import Any
 
 from vs_proto.api import (
+    RUN_LOG_MAGIC,
     AgentTurnAttrs,
     Change,
     Hold,
@@ -54,7 +55,8 @@ def test_shared_conformance_streams(name: str) -> None:
     # Every possible split has the same result when bootstrapping from a keyframe.
     for split in range(1, len(records)):
         seed = fold_skeleton(
-            records[:split], log_offset=8 + sum(len(encode_frame(r)) for r in records[:split])
+            records[:split],
+            log_offset=len(RUN_LOG_MAGIC) + sum(len(encode_frame(r)) for r in records[:split]),
         )
         before = seed.to_binary()
         assert fold_skeleton(records[split:], seed=seed, log_offset=expected.log_offset) == expected
@@ -95,6 +97,7 @@ def test_writer_publishes_head_and_lifecycle_keyframes(tmp_path: Path) -> None:
 
 
 @given(st.integers(min_value=0, max_value=600))
+@example(count=600)
 def test_record_bound_and_recovery_preserve_immutable_checkpoints(count: int) -> None:
     with TemporaryDirectory() as temporary:
         root = Path(temporary)
@@ -278,7 +281,7 @@ def test_fold_composes_at_every_cut(choices: list[int]) -> None:
         record = Record.from_binary(templates[choice].to_binary())
         record.seq = len(records) + 1
         records.append(record)
-    offsets = [8]
+    offsets = [len(RUN_LOG_MAGIC)]
     for record in records:
         offsets.append(offsets[-1] + len(encode_frame(record)))
     expected = fold_skeleton(records, log_offset=offsets[-1])

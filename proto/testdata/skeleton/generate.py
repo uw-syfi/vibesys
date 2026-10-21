@@ -7,6 +7,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from vs_proto.api import (
+    RUN_LOG_MAGIC,
     BlobRef,
     Change,
     Direction,
@@ -124,7 +125,7 @@ def scenarios() -> dict[str, tuple[list[Record], Keyframe]]:
         "legacy": (legacy, Keyframe(through_seq=1)),
     }
     for stream_records, keyframe in cases.values():
-        keyframe.log_offset = 8 + sum(len(encode_frame(r)) for r in stream_records)
+        keyframe.log_offset = len(RUN_LOG_MAGIC) + sum(len(encode_frame(r)) for r in stream_records)
     return cases
 
 
