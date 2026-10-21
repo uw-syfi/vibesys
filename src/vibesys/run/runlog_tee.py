@@ -38,7 +38,8 @@ def _epoch_clocks(records: tuple[p.Record, ...]) -> tuple[float, tuple[tuple[flo
         if record.at is None:
             continue
         at = record.at.to_datetime().timestamp()
-        origin, offset = epochs.setdefault(record.epoch, (at, clock))
+        epoch_clock = record.clock if record.has_field("clock") else clock
+        origin, offset = epochs.setdefault(record.epoch, (at, epoch_clock))
         clock = max(clock, record.clock if record.has_field("clock") else offset + at - origin)
     return clock, tuple(epochs.values())
 

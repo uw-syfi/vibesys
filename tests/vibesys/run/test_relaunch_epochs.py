@@ -150,18 +150,21 @@ def test_crash_between_the_two_epoch_writes_does_not_duplicate_the_end(tmp_path:
     assert_crash_prefix(tmp_path, None)
 
 
-def test_relaunch_reads_older_records_without_a_clock_field(tmp_path: Path) -> None:
+@pytest.mark.parametrize("initial_clock", [None, 7.0])
+def test_relaunch_recovers_epoch_clock_origins(tmp_path: Path, initial_clock: float | None) -> None:
     path = tmp_path / "run.log"
     records = [
         p.Record(
             seq=1,
             epoch=1,
+            clock=initial_clock,
             at=p.Timestamp(seconds=100),
             body=p.Oneof("epoch_started", p.EpochStarted(epoch=1, run_id="run-a")),
         ),
         p.Record(
             seq=2,
             epoch=1,
+            clock=None if initial_clock is None else initial_clock + 5,
             at=p.Timestamp(seconds=105),
             body=p.Oneof("lifecycle", p.Lifecycle(state=p.Oneof("running", p.Running()))),
         ),
@@ -178,8 +181,29 @@ def test_relaunch_reads_older_records_without_a_clock_field(tmp_path: Path) -> N
             .model_dump_json()
             .encode()
         )
+        span = TypeAdapter(WireSpan).validate_python(
+            {
+                "id": "flow:old#1",
+                "parent": None,
+                "type": "flow",
+                "name": "old",
+                "status": "running",
+                "started_at": 101,
+            }
+        )
+        tee.append(
+            make_core_event(
+                CoreEventType.SPAN_STARTED,
+                data=SpanStartedData(span=span),
+                timestamp=datetime.fromtimestamp(1106, tz=UTC),
+            )
+            .model_dump_json()
+            .encode()
+        )
     resumed = read(path)
-    assert [r.clock for r in resumed[2:]] == [5, 5, 5]
+    base = initial_clock or 0
+    assert [r.clock for r in resumed[2:]] == [base + 5, base + 5, base + 5, base + 6]
+    assert resumed[-1].body.value.span.started_at == base + 1
 
 
 def test_live_writer_refuses_relaunch_without_mutating_log(tmp_path: Path) -> None:
