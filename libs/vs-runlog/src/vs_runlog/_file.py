@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import os
 import re
 from contextlib import contextmanager
@@ -290,18 +291,22 @@ class FileRunLogWriter:
                         return batch, checkpoint
 
     def _run_committer(self) -> None:
-        with self._capture_failure():
-            while (work := self._take_batch()) is not None:
-                batch, checkpoint = work
-                self._commit_batch(batch, checkpoint=checkpoint)
+        try:
+            with self._capture_failure():
+                while (work := self._take_batch()) is not None:
+                    batch, checkpoint = work
+                    self._commit_batch(batch, checkpoint=checkpoint)
+                    with self._condition:
+                        self._committed_seq = self._skeleton.through_seq
+                        self._condition.notify_all()
+        finally:
+            try:
+                with self._capture_failure():
+                    self._close.run(self._resources.close)
+            finally:
                 with self._condition:
-                    self._committed_seq = self._skeleton.through_seq
+                    self._done = True
                     self._condition.notify_all()
-        with self._capture_failure():
-            self._close.run(self._resources.close)
-        with self._condition:
-            self._done = True
-            self._condition.notify_all()
 
     @contextmanager
     def _capture_failure(self) -> Iterator[None]:
@@ -310,10 +315,13 @@ class FileRunLogWriter:
         # lint-waiver: LW-946201 [BLE001]; a worker has no synchronous caller to receive a failure.
         # > Catching only OSError leaves projection or VM failures as orphaned waits;
         # > a wrapper thread with the same catch only moves this ownership boundary.
-        except BaseException as error:  # noqa: BLE001
+        except BaseException as error:
             with self._condition:
-                if self._failure is None:
+                first_failure = self._failure is None
+                if first_failure:
                     self._failure = error
+            if first_failure:
+                logging.getLogger(__name__).exception("Deferred run.log commit failed")
 
     def _commit_batch(self, batch: list[tuple[Record, int]], *, checkpoint: bool) -> None:
         for record, offset in batch:

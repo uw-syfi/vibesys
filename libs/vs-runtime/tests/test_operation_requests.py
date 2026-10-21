@@ -332,7 +332,7 @@ async def test_a_schema_version_the_catalog_does_not_declare_is_rejected() -> No
         request = execute_request(catalog_of(items), pick(items, "echo").request, "req-old")
         schema = request.operation.schema_ref
         old = schema.model_copy(
-            update={"request_schema": schema.request_schema.model_copy(update={"version": 0})}
+            update={"request_schema": schema.request_schema.model_copy(update={"version": 2})}
         )
         stale = request.model_copy(
             update={"operation": request.operation.model_copy(update={"schema_ref": old})}

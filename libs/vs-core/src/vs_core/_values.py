@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 import weakref
+from dataclasses import fields
 from enum import Enum
 from functools import cache
 from hashlib import sha256
@@ -21,6 +22,8 @@ from typing import (
 )
 
 from pydantic import BaseModel, ConfigDict, TypeAdapter
+
+from vs_core._corevalue import CoreValue, FrozenMap
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
@@ -59,11 +62,11 @@ def _validate_annotation(annotation: object, path: tuple[str, ...], seen: set[ty
             for child in arguments
         ):
             raise ImmutableSchemaError(path, "immutable primitive Literal required")
-    elif origin in (tuple, frozenset, UnionType, Union):
+    elif origin in (tuple, frozenset, FrozenMap, UnionType, Union):
         for child in arguments:
             if child is not Ellipsis:
                 _validate_annotation(child, path, seen)
-    elif isinstance(annotation, type) and issubclass(annotation, BaseModel):
+    elif isinstance(annotation, type) and issubclass(annotation, BaseModel | CoreValue):
         _validate_model(annotation, path, seen)
     elif isinstance(annotation, type) and (
         annotation in (str, int, float, bool, bytes, type(None))
@@ -79,10 +82,18 @@ def _validate_annotation(annotation: object, path: tuple[str, ...], seen: set[ty
         raise ImmutableSchemaError(path, "immutable closed field type required")
 
 
-def _validate_model(model: type[BaseModel], path: tuple[str, ...], seen: set[type]) -> None:
+def _validate_model(
+    model: type[BaseModel] | type[CoreValue], path: tuple[str, ...], seen: set[type]
+) -> None:
     if model in seen:
         return
     seen.add(model)
+    if issubclass(model, CoreValue):
+        for member in fields(model):
+            _validate_annotation(
+                model.__pydantic_fields__[member.name].annotation, (*path, member.name), seen
+            )
+        return
     config = model.model_config
     if not (config.get("frozen") and config.get("strict") and config.get("extra") == "forbid"):
         raise ImmutableSchemaError(path, "strict immutable value model required")
@@ -234,11 +245,20 @@ def _walk_immutable(values: Iterable[object]) -> bool:
         if isinstance(node, BaseModel):
             if not node.model_config.get("frozen") or not _judge_immutable(node):
                 return False
-        elif isinstance(node, tuple | frozenset):
-            pending.extend(node)
+        elif isinstance(node, CoreValue | FrozenMap | tuple | frozenset):
+            pending.extend(_immutable_children(node))
         elif not isinstance(node, Enum) or type(node.value) not in _IMMUTABLE_LEAF_TYPES:
             return False
     return True
+
+
+def _immutable_children(node: CoreValue | FrozenMap | tuple | frozenset) -> Iterable[object]:
+    """Children of the closed immutable container representations."""
+    if isinstance(node, CoreValue):
+        return (getattr(node, member.name) for member in fields(node))
+    if isinstance(node, FrozenMap):
+        return (*node.keys(), *node.values())
+    return node
 
 
 def canonical_json(value: BaseModel) -> str:
@@ -266,6 +286,8 @@ def _canonical_json(value: BaseModel) -> str:
 def _canonical(value: object, serialized: object) -> object:
     if type(value) in _IMMUTABLE_LEAF_TYPES:
         return serialized
+    if isinstance(value, CoreValue) and isinstance(serialized, dict):
+        return {name: _canonical(getattr(value, name), child) for name, child in serialized.items()}
     if isinstance(value, BaseModel) and isinstance(serialized, dict):
         names = _wire_names(type(value))
         result: dict[str, object] = {}
