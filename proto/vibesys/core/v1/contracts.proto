@@ -1,0 +1,40 @@
+syntax = "proto3";
+package vibesys.core.v1;
+
+import "buf/validate/validate.proto";
+import "vibesys/core/v1/value_options.proto";
+import "vibesys/core/v1/common.proto";
+import "vibesys/core/v1/vocabulary.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/gateway/gen/vibesys/core/v1;corev1";
+
+message NullValue {
+  option (core_value).null = true;
+}
+
+message PureOptionValue {
+  option (core_value).union = true;
+  oneof value {
+    option (buf.validate.oneof).required = true;
+    string text = 1;
+    string integer = 2 [(buf.validate.field).string.pattern = "^(0|-?[1-9][0-9]*)$", (core_field).integer = true];
+    double real = 3 [(buf.validate.field).double.finite = true];
+    bool flag = 4;
+    NullValue null = 5;
+  }
+}
+
+// Pure option lifecycle contract.
+message PureOption {
+  string key = 1 [(buf.validate.field).string.min_len = 1];
+  PureOptionValue value = 2 [(buf.validate.field).required = true];
+}
+
+// Operation schema ref lifecycle contract.
+message OperationSchemaRef {
+  option (core_value).narrow_subclasses = true;
+  string kind = 1 [(buf.validate.field).string.min_len = 1];
+  SchemaRef request_schema = 2 [(buf.validate.field).required = true];
+  SchemaRef outcome_schema = 3 [(buf.validate.field).required = true];
+  LifecycleClass lifecycle = 4 [(buf.validate.field).enum = {defined_only: true, not_in: 0}];
+}

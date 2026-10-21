@@ -277,16 +277,16 @@ Command {"discriminator":{"mapping":{"finish":"#/$defs/Finish","measure":"#/$def
 Comparison {"additionalProperties":false,"type":"object"}
 Comparison.base required {"$ref":"#/$defs/RevisionRef"}
 Comparison.base_input required {"minLength":1,"type":"string"}
-Comparison.base_samples required {"$ref":"#/$defs/Count"}
-Comparison.base_value required {"$ref":"#/$defs/vs_core__types__measurement__Finite__1"}
+Comparison.base_samples required {"minimum":0,"type":"integer"}
+Comparison.base_value required {"type":"number"}
 Comparison.candidate required {"$ref":"#/$defs/RevisionRef"}
 Comparison.candidate_input required {"minLength":1,"type":"string"}
-Comparison.candidate_samples required {"$ref":"#/$defs/Count"}
-Comparison.candidate_value required {"$ref":"#/$defs/vs_core__types__measurement__Finite__1"}
-Comparison.direction required {"$ref":"#/$defs/Direction"}
+Comparison.candidate_samples required {"minimum":0,"type":"integer"}
+Comparison.candidate_value required {"type":"number"}
+Comparison.direction required {"enum":["max","min"],"type":"string"}
 Comparison.metric required {"minLength":1,"type":"string"}
-Comparison.noise required {"$ref":"#/$defs/vs_core__types__measurement__Finite__2"}
-Comparison.ratio required {"$ref":"#/$defs/vs_core__types__measurement__Finite__1"}
+Comparison.noise required {"minimum":0.0,"type":"number"}
+Comparison.ratio required {"type":"number"}
 Comparison.scope required {"$ref":"#/$defs/Scope"}
 Comparison.unit optional {"anyOf":[{"type":"string"},{"type":"null"}],"default":null}
 Comparison.verdict required {"$ref":"#/$defs/ComparisonVerdict"}
@@ -372,7 +372,6 @@ Declined.reason required {"$ref":"#/$defs/CheckpointDecline"}
 DependencyRef {"additionalProperties":false,"type":"object"}
 DependencyRef.decision_id optional {"anyOf":[{"$ref":"#/$defs/DecisionId"},{"type":"null"}],"default":null}
 DependencyRef.request_id optional {"anyOf":[{"$ref":"#/$defs/RequestId"},{"type":"null"}],"default":null}
-Direction {"enum":["max","min"],"type":"string"}
 DiscardWorkspace {"additionalProperties":false,"type":"object"}
 DiscardWorkspace.admission_id optional {"anyOf":[{"$ref":"#/$defs/DecisionId"},{"type":"null"}],"default":null}
 DiscardWorkspace.attempt required {"$ref":"#/$defs/AttemptRef"}
@@ -761,6 +760,7 @@ MessageDelivered.kind optional {"const":"message_delivered","default":"message_d
 MessageDropped {"additionalProperties":false,"type":"object"}
 MessageDropped.drop required {"$ref":"#/$defs/InputDropped"}
 MessageDropped.kind optional {"const":"message_dropped","default":"message_dropped","type":"string"}
+NullValue {"type":"null"}
 Observation {"additionalProperties":false,"type":"object"}
 Observation.accepted optional {"default":false,"type":"boolean"}
 Observation.admission_id optional {"anyOf":[{"$ref":"#/$defs/DecisionId"},{"type":"null"}],"default":null}
@@ -869,13 +869,14 @@ ProposeWinner.scope required {"$ref":"#/$defs/Scope"}
 ProposeWinner.selection required {"$ref":"#/$defs/Selection"}
 PureOption {"additionalProperties":false,"type":"object"}
 PureOption.key required {"minLength":1,"type":"string"}
-PureOption.value required {"anyOf":[{"type":"string"},{"type":"integer"},{"type":"number"},{"type":"boolean"},{"type":"null"}]}
+PureOption.value required {"$ref":"#/$defs/PureOptionValue"}
+PureOptionValue {"anyOf":[{"type":"string"},{"type":"integer"},{"type":"number"},{"type":"boolean"},{"$ref":"#/$defs/NullValue"}]}
 Reading {"additionalProperties":false,"type":"object"}
-Reading.direction optional {"anyOf":[{"$ref":"#/$defs/Direction"},{"type":"null"}],"default":null}
+Reading.direction optional {"anyOf":[{"enum":["max","min"],"type":"string"},{"type":"null"}],"default":null}
 Reading.metric required {"minLength":1,"type":"string"}
 Reading.repetitions optional {"default":1,"minimum":1,"type":"integer"}
 Reading.unit optional {"anyOf":[{"type":"string"},{"type":"null"}],"default":null}
-Reading.value required {"$ref":"#/$defs/vs_core__types__measurement__Finite__1"}
+Reading.value required {"type":"number"}
 ReconciliationRequest {"discriminator":{"mapping":{"block_request":"#/$defs/BlockRequest","cancel_owned_resource":"#/$defs/CancelOwnedResource","inspect_request":"#/$defs/InspectRequest"},"propertyName":"kind"},"oneOf":[{"$ref":"#/$defs/InspectRequest"},{"$ref":"#/$defs/CancelOwnedResource"},{"$ref":"#/$defs/BlockRequest"}]}
 Recorded {"additionalProperties":false,"type":"object"}
 Recorded.decision required {"$ref":"#/$defs/DecisionId"}
@@ -945,8 +946,9 @@ RepeatedFailureGuidance.traceback_signature optional {"anyOf":[{"minLength":1,"t
 ReplyError {"additionalProperties":false,"type":"object"}
 ReplyError.code required {"$ref":"#/$defs/ReplyErrorCode"}
 ReplyError.message optional {"default":"","maxLength":500,"type":"string"}
-ReplyError.path required {"items":{"anyOf":[{"type":"string"},{"type":"integer"}]},"type":"array"}
+ReplyError.path required {"items":{"$ref":"#/$defs/ReplyPathPart"},"type":"array"}
 ReplyErrorCode {"enum":["missing","unexpected","wrong-type","invalid-value","not-json"],"type":"string"}
+ReplyPathPart {"anyOf":[{"type":"string"},{"type":"integer"}]}
 Request {"discriminator":{"mapping":{"adopt_revision":"#/$defs/AdoptionRequest","block_request":"#/$defs/ReconciliationRequest","cancel_owned_job":"#/$defs/EvaluationRequest","cancel_owned_resource":"#/$defs/ReconciliationRequest","cancel_turn":"#/$defs/SessionRequest","close_attempt_scope":"#/$defs/WorkspaceRequest","close_session":"#/$defs/SessionRequest","collect_evidence":"#/$defs/EvaluationRequest","discard_workspace":"#/$defs/WorkspaceRequest","dispatch_turn":"#/$defs/SessionRequest","ensure_session":"#/$defs/SessionRequest","ensure_workspace":"#/$defs/WorkspaceRequest","execute_registered_operation":"#/$defs/RegisteredOperationRequest","inspect_owned_job":"#/$defs/EvaluationRequest","inspect_request":"#/$defs/ReconciliationRequest","inspect_turn":"#/$defs/SessionRequest","observe_owned_job":"#/$defs/EvaluationRequest","restore_revision":"#/$defs/WorkspaceRequest","resume_session_turn":"#/$defs/SessionRequest","retain_revision":"#/$defs/WorkspaceRequest","snapshot_and_retain":"#/$defs/WorkspaceRequest","snapshot_and_retain_run":"#/$defs/SessionRequest","submit_measurement":"#/$defs/EvaluationRequest","verify_adoption":"#/$defs/AdoptionRequest"},"propertyName":"kind"},"oneOf":[{"$ref":"#/$defs/WorkspaceRequest"},{"$ref":"#/$defs/SessionRequest"},{"$ref":"#/$defs/EvaluationRequest"},{"$ref":"#/$defs/AdoptionRequest"},{"$ref":"#/$defs/RegisteredOperationRequest"},{"$ref":"#/$defs/ReconciliationRequest"}]}
 RequestId {"additionalProperties":false,"type":"object"}
 RequestId.kind optional {"const":"request","default":"request","type":"string"}
@@ -1141,7 +1143,7 @@ Sample.evaluation required {"minLength":1,"type":"string"}
 Sample.gates required {"items":{"type":"string"},"type":"array"}
 Sample.host required {"minLength":1,"type":"string"}
 Sample.measured_input required {"minLength":1,"type":"string"}
-Sample.observed_at required {"$ref":"#/$defs/vs_core__types__common__Seconds__1"}
+Sample.observed_at required {"minimum":0.0,"type":"number"}
 Sample.reading required {"$ref":"#/$defs/Reading"}
 Sample.run required {"$ref":"#/$defs/RequestId"}
 Sample.scope required {"$ref":"#/$defs/Scope"}
@@ -1357,7 +1359,7 @@ TaskObjective {"additionalProperties":false,"type":"object"}
 TaskObjective.direction required {"enum":["max","min"],"type":"string"}
 TaskObjective.name required {"minLength":1,"type":"string"}
 TaskStage {"additionalProperties":false,"type":"object"}
-TaskStage.execution_seconds required {"minimum":0,"type":"number"}
+TaskStage.execution_seconds required {"minimum":0.0,"type":"number"}
 TaskStage.stage_id required {"minLength":1,"type":"string"}
 TaskTerms {"additionalProperties":false,"type":"object"}
 TaskTerms.accuracy_gated optional {"default":[],"items":{"$ref":"#/$defs/EvidenceKind"},"type":"array"}
@@ -1481,5 +1483,3 @@ YieldPublicationFailed.kind optional {"const":"yield_publication_failed","defaul
 YieldPublicationFailed.reason required {"$ref":"#/$defs/CheckpointFailure"}
 vs_core__types__common__Seconds__1 {"minimum":0,"type":"number"}
 vs_core__types__common__Seconds__2 {"exclusiveMinimum":0,"minimum":0,"type":"number"}
-vs_core__types__measurement__Finite__1 {"type":"number"}
-vs_core__types__measurement__Finite__2 {"minimum":0,"type":"number"}

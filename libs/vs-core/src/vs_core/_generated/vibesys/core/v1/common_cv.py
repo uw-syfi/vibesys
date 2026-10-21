@@ -5,10 +5,18 @@ from enum import StrEnum
 from functools import partial
 from typing import Annotated, ClassVar, Literal, final
 
-from pydantic import AfterValidator, ConfigDict, Field
+from pydantic import AfterValidator, ConfigDict, Field, field_serializer
 from pydantic.dataclasses import dataclass
 
-from vs_core._corevalue import CoreValue, FrozenMap, TimestampValue, bounded_integer
+from vs_core._corevalue import (
+    CoreValue,
+    FrozenMap,
+    TimestampValue,
+    bounded_integer,
+    cel_integer,
+    omit_unset,
+    resolve_value,
+)
 
 IDENTITY_PATTERN = "^\\S+$"
 
@@ -524,3 +532,32 @@ class InvocationRef(CoreValue):
     generation: Annotated[int, Field(ge=0)]
 
     __hash__ = CoreValue.cached_hash
+
+
+resolve_value(Identity)
+resolve_value(RunId)
+resolve_value(AttemptId)
+resolve_value(ItemId)
+resolve_value(SessionId)
+resolve_value(InvocationId)
+resolve_value(ContinuationId)
+resolve_value(InputId)
+resolve_value(EvidenceId)
+resolve_value(DecisionId)
+resolve_value(RequestId)
+resolve_value(EventId)
+resolve_value(SettlementId)
+resolve_value(StrategyId)
+resolve_value(OperationId)
+resolve_value(ArtifactId)
+resolve_value(ResourceId)
+resolve_value(RevisionId)
+resolve_value(RoleId)
+resolve_value(PoolId)
+resolve_value(ChargeId)
+resolve_value(ControlId)
+resolve_value(HostId)
+resolve_value(SchemaRef)
+resolve_value(ArtifactRef)
+resolve_value(Scope)
+resolve_value(InvocationRef)

@@ -1,0 +1,71 @@
+syntax = "proto3";
+package vibesys.core.testing.v1;
+
+import "google/protobuf/timestamp.proto";
+import "buf/validate/validate.proto";
+import "vibesys/core/v1/value_options.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/gateway/gen/vibesys/core/testing/v1;testingv1";
+
+// Exercised by the real plugin and protobuf-py, without a subprocess in the test.
+message MapValue {
+  map<string, int64> counts = 1;
+  repeated string labels = 2;
+  google.protobuf.Timestamp at = 3;
+  repeated google.protobuf.Timestamp history = 4;
+  map<string, google.protobuf.Timestamp> marked = 5;
+}
+
+
+message Quantity {
+  option (vibesys.core.v1.core_value).narrow_subclasses = true;
+  option (buf.validate.message).cel = {id: "Quantity.bounds", expression: "this.lower <= this.value && this.value <= this.upper", message: "value outside range"};
+  double value = 1 [(buf.validate.field).double.finite = true];
+  double lower = 2 [(buf.validate.field).double.finite = true];
+  double upper = 3 [(buf.validate.field).double.finite = true];
+}
+
+message ExtendedQuantity {
+  option (vibesys.core.v1.core_value).base = "Quantity";
+  option (buf.validate.message).cel = {id: "Quantity.bounds", expression: "this.lower <= this.value && this.value <= this.upper", message: "value outside range"};
+  double value = 1 [(buf.validate.field).double.finite = true];
+  double lower = 2 [(buf.validate.field).double.finite = true];
+  double upper = 3 [(buf.validate.field).double.finite = true];
+  string label = 4;
+}
+
+message Ordinal {
+  string ordinal = 1 [(buf.validate.field).string.pattern = "^[1-9][0-9]*$", (vibesys.core.v1.core_field) = {integer: true, default_json: "1", aliases: "Count"}];
+}
+
+message OrderedValues {
+  option (buf.validate.message).cel = {id: "OrderedValues.order", expression: "this.records.all(r, size(r.ordinal) < size(string(size(this.coverage))) || (size(r.ordinal) == size(string(size(this.coverage))) && r.ordinal <= string(size(this.coverage)))) && this.records.all(r, this.coverage[int(r.ordinal) - 1] == r)", message: "ordinal outside coverage"};
+  option (buf.validate.message).cel = {id: "OrderedValues.sequence", expression: "this.records == this.coverage.filter(s, this.records.exists(r, r == s))", message: "records out of order"};
+  option (buf.validate.message).cel = {id: "OrderedValues.unique", expression: "this.records.map(r, r.ordinal).unique()", message: "duplicate ordinal"};
+  repeated Ordinal records = 1;
+  repeated string labels = 2 [(vibesys.core.v1.core_field).frozen_set = true];
+  Quantity quantity = 3;
+  repeated Ordinal coverage = 5;
+  optional string explicit_text = 4 [(vibesys.core.v1.core_field).explicit = true];
+}
+
+
+enum Choice {
+  CHOICE_UNSPECIFIED = 0;
+  CHOICE_FIRST = 1;
+  CHOICE_SECOND = 2;
+  CHOICE_THIRD = 3;
+}
+
+enum LiteralChoice {
+  option (vibesys.core.v1.core_enum) = {literal: true, inline: true};
+  LITERAL_CHOICE_UNSPECIFIED = 0;
+  LITERAL_CHOICE_FIRST = 1;
+  LITERAL_CHOICE_SECOND = 2;
+  LITERAL_CHOICE_THIRD = 3;
+}
+
+message EnumSelection {
+  Choice choice = 1 [(buf.validate.field).enum = {defined_only: true, not_in: [0, 2]}];
+  LiteralChoice literal = 2 [(buf.validate.field).enum = {defined_only: true, in: [1, 3]}];
+}

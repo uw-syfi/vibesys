@@ -11,10 +11,10 @@ from dataclasses import Field as DataclassField
 from dataclasses import fields, replace
 from functools import cache
 from types import GenericAlias, MappingProxyType
-from typing import TYPE_CHECKING, Annotated, ClassVar, Literal, Self, get_args
+from typing import TYPE_CHECKING, Annotated, Any, ClassVar, Literal, Self, get_args
 
 from pydantic import ConfigDict, Field, GetCoreSchemaHandler, TypeAdapter
-from pydantic.dataclasses import dataclass
+from pydantic.dataclasses import dataclass, is_pydantic_dataclass, rebuild_dataclass
 
 if TYPE_CHECKING:
     from pydantic.fields import FieldInfo
@@ -64,15 +64,23 @@ class CoreValue:
     def __deepcopy__(self, memo: dict[int, object] | None = None) -> Self:
         return self
 
-    def model_dump(self, *, mode: Literal["python", "json"] = "python") -> dict[str, object]:
-        return adapter(type(self)).dump_python(self, mode=mode)
+    def model_dump(
+        self,
+        *,
+        mode: Literal["python", "json"] = "python",
+        exclude: set[str] | None = None,
+        round_trip: bool = False,
+    ) -> dict[str, Any]:
+        return adapter(type(self)).dump_python(
+            self, mode=mode, exclude=exclude, round_trip=round_trip
+        )
 
     def model_dump_json(self) -> str:
         return adapter(type(self)).dump_json(self).decode()
 
     @classmethod
-    def model_validate(cls, value: object) -> Self:
-        return adapter(cls).validate_python(value)
+    def model_validate(cls, value: object, *, strict: bool | None = None) -> Self:
+        return adapter(cls).validate_python(value, strict=strict)
 
     @classmethod
     def model_validate_json(cls, value: str | bytes) -> Self:
@@ -197,3 +205,29 @@ class ValueTypeError(ValueError):
 
     def __init__(self, expected: str, actual: str) -> None:
         super().__init__(f"value type mismatch: expected {expected}, got {actual}")
+
+
+def omit_unset(value: object) -> bool:
+    """Keep the legacy spelling of optional data absent from an envelope."""
+    return value is None or value is False or (isinstance(value, tuple) and not value)
+
+
+class ContractValidationError(ValueError):
+    """Invalid immutable value, identifying the exact field and violated contract."""
+
+    def __init__(self, path: str, detail: str) -> None:
+        """Name the offending field without masking a plausible default."""
+        super().__init__(f"{path}: {detail}")
+
+
+def resolve_value(cls: type[CoreValue]) -> None:
+    """Resolve a generated file's forward unions before nested serializers see its values."""
+    if not is_pydantic_dataclass(cls):
+        expected = "Pydantic dataclass"
+        raise ValueTypeError(expected, cls.__name__)
+    rebuild_dataclass(cls)
+
+
+def cel_integer(value: int) -> int:
+    """Preserve CEL's checked int64 conversion after a rule bounds a decimal ordinal."""
+    return bounded_integer(value, minimum=-(2**63), maximum=2**63 - 1)

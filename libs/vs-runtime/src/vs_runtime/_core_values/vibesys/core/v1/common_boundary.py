@@ -5,7 +5,7 @@ from typing import Callable, Literal, cast
 
 from protobuf import Message, Oneof
 
-import vs_core.api as values
+import vs_core.api.values as values
 from vs_proto.api import core_common as pb
 from vs_runtime._corevalue_wkt import decode_timestamp, encode_timestamp
 
@@ -56,14 +56,14 @@ def decode_StopMode(v: pb.StopMode) -> values.StopMode:
     return values.StopMode({1: "drain", 2: "cancel"}[v])
 
 
-def encode_ResumeWhen(v: values.ResumeWhen | None) -> pb.ResumeWhen:
+def encode_ResumeWhen(v: Literal["now", "capacity_returns"] | None) -> pb.ResumeWhen:
     return {"now": pb.ResumeWhen.NOW, "capacity_returns": pb.ResumeWhen.CAPACITY_RETURNS}.get(
         v, pb.ResumeWhen.UNSPECIFIED
     )
 
 
-def decode_ResumeWhen(v: pb.ResumeWhen) -> values.ResumeWhen:
-    return cast(values.ResumeWhen, {1: "now", 2: "capacity_returns"}[v])
+def decode_ResumeWhen(v: pb.ResumeWhen) -> Literal["now", "capacity_returns"]:
+    return cast(Literal["now", "capacity_returns"], {1: "now", 2: "capacity_returns"}[v])
 
 
 def encode_InputMode(v: values.InputMode | None) -> pb.InputMode:
@@ -78,7 +78,21 @@ def decode_InputMode(v: pb.InputMode) -> values.InputMode:
     return values.InputMode({1: "next-turn", 2: "interrupt", 3: "standing"}[v])
 
 
-def encode_ControlAction(v: values.ControlAction | None) -> pb.ControlAction:
+def encode_ControlAction(
+    v: Literal[
+        "pause",
+        "resume",
+        "stop",
+        "steer",
+        "withdraw",
+        "cancel_attempt",
+        "cancel_item",
+        "set_max_parallel",
+        "park",
+        "pause_now",
+    ]
+    | None,
+) -> pb.ControlAction:
     return {
         "pause": pb.ControlAction.PAUSE,
         "resume": pb.ControlAction.RESUME,
@@ -93,9 +107,33 @@ def encode_ControlAction(v: values.ControlAction | None) -> pb.ControlAction:
     }.get(v, pb.ControlAction.UNSPECIFIED)
 
 
-def decode_ControlAction(v: pb.ControlAction) -> values.ControlAction:
+def decode_ControlAction(
+    v: pb.ControlAction,
+) -> Literal[
+    "pause",
+    "resume",
+    "stop",
+    "steer",
+    "withdraw",
+    "cancel_attempt",
+    "cancel_item",
+    "set_max_parallel",
+    "park",
+    "pause_now",
+]:
     return cast(
-        values.ControlAction,
+        Literal[
+            "pause",
+            "resume",
+            "stop",
+            "steer",
+            "withdraw",
+            "cancel_attempt",
+            "cancel_item",
+            "set_max_parallel",
+            "park",
+            "pause_now",
+        ],
         {
             1: "pause",
             2: "resume",

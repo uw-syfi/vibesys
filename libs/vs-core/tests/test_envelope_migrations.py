@@ -55,6 +55,9 @@ def test_a_saved_envelope_of_each_supported_version_decodes_at_the_current_versi
     decoded = FAKE_REGISTRY.decode_envelope(_Envelope, path.read_text(encoding="utf-8"))
     assert decoded.schema_version == core.ENVELOPE_SCHEMA_VERSION
     assert decoded.core.run.run_id == core.initial_state().run.run_id
+    assert (
+        FAKE_REGISTRY.decode_envelope(_Envelope, FAKE_REGISTRY.encode_envelope(decoded)) == decoded
+    )
 
 
 def test_a_comparison_with_no_estimate_of_noise_reads_inconclusive_after_the_migration() -> None:

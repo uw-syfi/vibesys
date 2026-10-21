@@ -191,7 +191,7 @@ pnpm_packages = { dependents_of = "pnpm:@vibesys/feature-run-intents" }
 
 [[cases]]
 name = "core value compiler and generated values select regeneration and Python checks"
-paths = ["scripts/corevalue/_emit.py", "libs/vs-core/src/vs_core/_generated/vibesys/core/v1/control_cv.py", "libs/vs-runtime/src/vs_runtime/_core_values/vibesys/core/v1/control_boundary.py"]
+paths = ["scripts/corevalue/_emit.py", "libs/vs-core/src/vs_core/api/values.py", "libs/vs-core/src/vs_core/_revision_ref.py", "libs/vs-core/src/vs_core/_generated/vibesys/core/v1/vocabulary_cv.py", "libs/vs-core/src/vs_core/_generated/vibesys/core/v1/control_cv.py", "libs/vs-runtime/src/vs_runtime/_core_values/vibesys/core/v1/control_boundary.py"]
 jobs = ["proto", "python", "real_tiers"]
 [cases.collections]
 native_languages = []

@@ -5,7 +5,7 @@ from typing import Callable, Literal, cast
 
 from protobuf import Message, Oneof
 
-import vs_core.api as values
+import vs_core.api.values as values
 from vs_proto.api import core_control as pb
 from vs_runtime._core_values.vibesys.core.v1.common_boundary import (
     decode_ArtifactRef,

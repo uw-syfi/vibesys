@@ -242,11 +242,11 @@ Positive {"exclusiveMinimum":0,"maximum":1000,"type":"integer"}
 Proof {"additionalProperties":false,"type":"object"}
 Proof.refs required {"items":{"$ref":"#/$defs/EvidenceRef"},"type":"array"}
 Reading {"additionalProperties":false,"type":"object"}
-Reading.direction optional {"anyOf":[{"$ref":"#/$defs/Direction"},{"type":"null"}],"default":null}
+Reading.direction optional {"anyOf":[{"enum":["max","min"],"type":"string"},{"type":"null"}],"default":null}
 Reading.metric required {"minLength":1,"type":"string"}
 Reading.repetitions optional {"default":1,"minimum":1,"type":"integer"}
 Reading.unit optional {"anyOf":[{"type":"string"},{"type":"null"}],"default":null}
-Reading.value required {"$ref":"#/$defs/Finite"}
+Reading.value required {"type":"number"}
 RejectionCode {"enum":["stale-view","identity-conflict","unknown-kind","unknown-schema","undeclared-operation","capability","ownership","generation","closed-scope","budget","dependency","evidence","already-settled","not-implemented-in-kernel"],"type":"string"}
 RequestId {"additionalProperties":false,"type":"object"}
 RequestId.kind optional {"const":"request","default":"request","type":"string"}

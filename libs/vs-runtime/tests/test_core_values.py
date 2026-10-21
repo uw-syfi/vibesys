@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import FrozenInstanceError, fields
 from pathlib import Path
 from typing import TYPE_CHECKING, get_args
@@ -13,8 +14,9 @@ from hypothesis import strategies as st
 from pydantic import TypeAdapter, ValidationError
 
 import vs_core.api as core
+from vs_core.api import values as shared_values
 from vs_core.api.testing import sample_limits, sample_retries
-from vs_proto.api import LegacyEvent, core_common
+from vs_proto.api import LegacyEvent, core_agent_facts, core_common
 from vs_proto.api import ValidationError as ProtoValidationError
 from vs_proto.api import core_control as core_state
 from vs_runtime.api.core_values import from_proto, to_proto, value_types
@@ -59,6 +61,8 @@ def _sample(cls: type[core.CoreValue], root: str, count: int) -> core.CoreValue:
     }
     if issubclass(cls, core.Identity):
         return cls(root=root)
+    if cls.__name__ in _shared_seeds():
+        return TypeAdapter(cls).validate_json(json.dumps(_shared_seeds()[cls.__name__]))
     return values[cls]()
 
 
@@ -191,3 +195,126 @@ def test_nominal_identity_domains_cannot_be_substituted(
     else:
         with pytest.raises(ValidationError):
             target.model_validate(value)
+
+
+def _shared_seeds() -> dict[str, object]:
+    path = Path(__file__).parent / "fixtures" / "core-values" / "shared-seeds.json"
+    return json.loads(path.read_text())
+
+
+def test_shared_value_differential_fixtures_preserve_old_acceptance_and_json() -> None:
+    path = Path(__file__).parent / "fixtures" / "core-values" / "shared-values.json"
+    for case in json.loads(path.read_text()):
+        cls = getattr(shared_values, case["type"])
+        if case["accepted"]:
+            value = TypeAdapter(cls).validate_json(case["source"])
+            assert json.loads(value.model_dump_json()) == case["output"], case
+            assert from_proto(to_proto(value)) == value
+        else:
+            with pytest.raises(ValidationError):
+                TypeAdapter(cls).validate_json(case["source"])
+
+
+@pytest.mark.parametrize(
+    ("name", "field", "nonnegative"),
+    [
+        ("Reading", "value", False),
+        ("Comparison", "candidate_value", False),
+        ("Comparison", "base_value", False),
+        ("Comparison", "ratio", False),
+        ("Comparison", "noise", True),
+        ("Sample", "observed_at", True),
+        ("TaskStage", "execution_seconds", True),
+        ("PureOption", "value", False),
+    ],
+)
+@given(number=st.floats())
+@example(number=float("nan"))
+@example(number=float("inf"))
+@example(number=float("-inf"))
+@example(number=-1.0)
+@example(number=0.0)
+def test_inlined_numeric_schemas_keep_finiteness_and_bounds(
+    name: str, field: str, *, nonnegative: bool, number: float
+) -> None:
+    """JSON Schema cannot express finiteness; its inlining must not lose the validator."""
+    cls = getattr(shared_values, name)
+    seed = _shared_seeds()[name]
+    assert isinstance(seed, dict)
+    payload = dict(seed)
+    payload[field] = number
+    source = json.dumps(payload)
+    if not math.isfinite(number) or (nonnegative and number < 0):
+        with pytest.raises(ValidationError, match=field):
+            TypeAdapter(cls).validate_json(source)
+    else:
+        value = TypeAdapter(cls).validate_json(source)
+        assert getattr(value, field) == number
+        assert TypeAdapter(cls).validate_json(value.model_dump_json()) == value
+        assert from_proto(to_proto(value)) == value
+
+
+@given(
+    path=st.lists(st.text() | st.integers(), max_size=10),
+    code=st.sampled_from(list(shared_values.ReplyErrorCode)),
+    message=st.text(max_size=500),
+)
+@example(
+    path=["field", 0, -1, 2**100], code=shared_values.ReplyErrorCode.WRONG_TYPE, message="invalid"
+)
+def test_reply_error_paths_preserve_string_and_integer_parts_across_every_wire_form(
+    path: list[str | int], code: shared_values.ReplyErrorCode, message: str
+) -> None:
+    value = shared_values.ReplyError(path=tuple(path), code=code, message=message)
+    wire = to_proto(value)
+    assert from_proto(type(wire).from_binary(wire.to_binary())) == value
+    assert from_proto(type(wire).from_json(wire.to_json())) == value
+    restored = shared_values.ReplyError.model_validate_json(value.model_dump_json())
+    assert restored == value
+    assert [type(part) for part in restored.path] == [type(part) for part in path]
+
+
+@given(
+    field=st.sampled_from(["source_request", "scope", "observation_sequence", "status"]),
+    sequence=st.integers(min_value=1, max_value=10**100),
+)
+@example(field="observation_sequence", sequence=2**100)
+def test_immutable_acceptance_proof_stays_bound_to_its_original_evidence(
+    field: str, sequence: int
+) -> None:
+    value = shared_values.EvidenceRef.model_validate_json(
+        json.dumps(_shared_seeds()["EvidenceRef"])
+    )
+    message = to_proto(value)
+    assert isinstance(message, core_agent_facts.EvidenceRef)
+    receipt = message.acceptance_receipt
+    assert receipt is not None
+    if field == "source_request":
+        assert receipt.source_request is not None
+        receipt.source_request.root = "other-source"
+    elif field == "scope":
+        assert receipt.scope is not None
+        receipt.scope.generation = str(sequence)
+    elif field == "observation_sequence":
+        receipt.observation_sequence = str(value.observation_sequence + sequence)
+    else:
+        receipt.status = type(receipt.status).FAILED
+    with pytest.raises(ProtoValidationError):
+        from_proto(message)
+    payload = json.loads(value.model_dump_json())
+    changed = payload["acceptance_receipt"]
+    if field == "source_request":
+        changed[field]["root"] = "other-source"
+    elif field == "scope":
+        changed[field]["generation"] = sequence
+    elif field == "observation_sequence":
+        changed[field] += sequence
+    else:
+        changed[field] = "failed"
+    with pytest.raises(ValidationError, match="acceptance_receipt"):
+        shared_values.EvidenceRef.model_validate_json(json.dumps(payload))
+
+
+@pytest.mark.parametrize("name", ["LifecycleClass", "ObservationStatus"])
+def test_shared_enum_dependencies_keep_the_existing_public_identity(name: str) -> None:
+    assert getattr(core, name) is getattr(shared_values, name)
