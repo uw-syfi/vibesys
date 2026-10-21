@@ -3,6 +3,7 @@ import type {RunEvent} from '@vibesys/contracts';
 import {fixtureNamed} from '@vibesys/run-fixtures';
 import {settled} from './checks/settle.js';
 import {fixtureScripts, openFixture} from './fixture-world.js';
+import {addInitScripts} from './init-scripts.js';
 
 /**
  * Chat on a run that ended, with no backend: the run's page attaches the reader the host starts for
@@ -96,11 +97,10 @@ test('a steer the agent proposed on an ended run cannot be sent', async ({page})
 async function openEndedChat(page: Page, features?: readonly string[]): Promise<void> {
   if (features !== undefined) {
     // The world's scripts first, then a helper that offers only `features`.
-    for (const content of fixtureScripts(fixtureNamed(FIXTURE)))
-      await page.addInitScript({content});
-    await page.addInitScript({
-      content: `Object.assign(window.vibesysWelcome, {helperFeatures: () => Promise.resolve({ok: true, value: ${JSON.stringify(features)}})});`,
-    });
+    await addInitScripts(page, [
+      ...fixtureScripts(fixtureNamed(FIXTURE)),
+      `Object.assign(window.vibesysWelcome, {helperFeatures: () => Promise.resolve({ok: true, value: ${JSON.stringify(features)}})});`,
+    ]);
     await page.goto('./shell.html');
     await page
       .getByRole('main')
@@ -146,11 +146,10 @@ test('a helper whose reader answers offers the question box and New chat, but no
 
 test('an older helper shows Chat off for an ended run, and nothing is attached', async ({page}) => {
   // The world's scripts first, then a helper that offers none of the features.
-  for (const content of fixtureScripts(fixtureNamed(FIXTURE))) await page.addInitScript({content});
-  await page.addInitScript({
-    content:
-      'Object.assign(window.vibesysWelcome, {helperFeatures: () => Promise.resolve({ok: true, value: []})});',
-  });
+  await addInitScripts(page, [
+    ...fixtureScripts(fixtureNamed(FIXTURE)),
+    'Object.assign(window.vibesysWelcome, {helperFeatures: () => Promise.resolve({ok: true, value: []})});',
+  ]);
   await page.goto('./shell.html');
   await page
     .getByRole('main')

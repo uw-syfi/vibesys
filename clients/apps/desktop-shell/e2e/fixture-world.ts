@@ -3,6 +3,7 @@
  * ended, and the fixture server (`fake-fixture-server.ts`) replaying its events. The one place the
  * journeys and the screen checks get a realistic run from, instead of a hand-made one.
  */
+
 import type {Page} from '@playwright/test';
 import {expect} from '@playwright/test';
 import type {WelcomeBridge} from '@vibesys/ipc';
@@ -39,6 +40,7 @@ import {type FakeHistorySeed, installFakeHistory} from './fake-history.js';
 import {FAKE_OFFER} from './fake-offer.js';
 import {installFakeRun, type RunMethods} from './fake-run.js';
 import {type FakeSummarySpanSeed, installFakeSummarySpan} from './fake-summary-span.js';
+import {addInitScripts, initScript as script} from './init-scripts.js';
 import {STARTED_AT} from './started-at.js';
 
 const PROJECT = '/work/queue-rs';
@@ -180,14 +182,11 @@ function seedOf(fixture: RunFixture, theme: 'ink' | 'paper'): FakeBridgeSeed {
 }
 
 /** A self-contained installer called with its seed, as a script a page runs. */
-function script<A>(install: (seed: A) => void, seed: A): string {
-  return `(${install.toString()})(${JSON.stringify(seed)});`;
-}
 
 /**
  * The scripts that make a page the app opened on `fixture`, in the order they must run before the
  * page's own scripts: the Fake bridge, its machines, the fake run, and the fixture server
- * replaying the run. Playwright adds them as init scripts (`openFixture`); the fixture dev app
+ * replaying the run. Playwright adds them as one init script (`openFixture`); the fixture dev app
  * serves them to the page (`e2e/tools/dev-fixture.ts`).
  */
 export function fixtureScripts(fixture: RunFixture, options: OpenOptions = {}): readonly string[] {
@@ -237,9 +236,11 @@ export async function openFixture(
   fixture: RunFixture,
   options: OpenOptions = {},
 ): Promise<void> {
-  for (const content of fixtureScripts(fixture, options)) await page.addInitScript({content});
-  // Only a test is bounded: the fixture dev app is open for as long as someone looks at it.
-  await page.addInitScript({content: script(installRequestBound, REQUEST_LIMIT)});
+  await addInitScripts(page, [
+    ...fixtureScripts(fixture, options),
+    // The dev app stays open; only the test world bounds requests.
+    script(installRequestBound, REQUEST_LIMIT),
+  ]);
   await page.goto('./shell.html');
   await page
     .getByRole('main')

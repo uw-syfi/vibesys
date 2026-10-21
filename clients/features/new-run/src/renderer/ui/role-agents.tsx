@@ -41,7 +41,7 @@ function RoleRow(
   const run = {provider: agent.provider, model: agent.model};
   const own = roleAgent(agent, choice);
   const providers = roleProviders(offers, agent.provider, AGENT_ENVIRONMENT);
-  const models = roleModels(offers, providers, own.provider);
+  const models = roleModels(offers, providers, own.provider, choice.agent === null ? run : null);
   const harnesses = roleHarnesses(offers, providers, own.model);
   const set = (next: ReturnType<typeof pickedRoleAgent>): void =>
     dispatch({type: 'role', role: {...choice, agent: next}});

@@ -1,4 +1,5 @@
 /** The journeys' world: a seeded Fake bridge, and opening the shell page over it. */
+
 import {expect, type Page} from '@playwright/test';
 import {
   clusterTestsByAlias,
@@ -16,6 +17,7 @@ import {
   installFakeProjectRuns,
 } from './fake-bridge.js';
 import {FAKE_OFFER} from './fake-offer.js';
+import {addInitScripts, initScript} from './init-scripts.js';
 import {STARTED_AT} from './started-at.js';
 
 export interface FakeHostWindow extends Window {
@@ -123,12 +125,14 @@ export const SEED: FakeBridgeSeed = {
 };
 
 export async function open(page: Page, seed: FakeBridgeSeed = SEED): Promise<void> {
-  await page.addInitScript(installFakeBridge, seed);
-  await page.addInitScript(installFakeMachines, seed);
-  await page.addInitScript(installFakeMachineSettings, seed);
-  await page.addInitScript(installFakeNewRun, seed);
-  await page.addInitScript(installFakeProjectRuns, seed);
-  await page.addInitScript(installFakeExampleDestination, seed);
+  await addInitScripts(page, [
+    initScript(installFakeBridge, seed),
+    initScript(installFakeMachines, seed),
+    initScript(installFakeMachineSettings, seed),
+    initScript(installFakeNewRun, seed),
+    initScript(installFakeProjectRuns, seed),
+    initScript(installFakeExampleDestination, seed),
+  ]);
   await page.goto('./shell.html');
   await expect(page.getByRole('navigation', {name: 'VibeSys'})).toBeVisible();
 }

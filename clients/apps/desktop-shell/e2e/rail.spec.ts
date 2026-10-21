@@ -9,6 +9,7 @@ import {
 import {installFakeRun} from './fake-run.js';
 import {type FakeServerSeed, installFakeServer} from './fake-server.js';
 import {judgeEvents, RUN_ID, traceEvents, turnEvents} from './fake-trace.js';
+import {addInitScripts, initScript} from './init-scripts.js';
 import {revealNav} from './settings-machine.js';
 import {STARTED_AT} from './started-at.js';
 import {drawnUnderWindowControls, type FakeHostWindow, open, SEED, sidebar} from './world.js';
@@ -85,11 +86,13 @@ const SERVER: FakeServerSeed = {
 };
 
 async function openRun(page: Page): Promise<void> {
-  await page.addInitScript(installFakeBridge, WORLD);
-  await page.addInitScript(installFakeMachines, WORLD);
-  await page.addInitScript(installFakeProjectRuns, WORLD);
-  await page.addInitScript(installFakeRun, {streams: [], text: {}});
-  await page.addInitScript(installFakeServer, SERVER);
+  await addInitScripts(page, [
+    initScript(installFakeBridge, WORLD),
+    initScript(installFakeMachines, WORLD),
+    initScript(installFakeProjectRuns, WORLD),
+    initScript(installFakeRun, {streams: [], text: {}}),
+    initScript(installFakeServer, SERVER),
+  ]);
   await page.goto('./shell.html');
   await page
     .getByRole('main')

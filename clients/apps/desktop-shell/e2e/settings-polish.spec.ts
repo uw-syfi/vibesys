@@ -2,6 +2,7 @@ import {expect, type Page, test} from '@playwright/test';
 import {fixtureNamed} from '@vibesys/run-fixtures';
 import {installFakeBridge, installFakeMachines, installFakeNewRun} from './fake-bridge.js';
 import {openFixture} from './fixture-world.js';
+import {addInitScripts, initScript} from './init-scripts.js';
 import {revealNav} from './settings-machine.js';
 import {SEED, sidebar} from './world.js';
 
@@ -26,9 +27,11 @@ async function openSettings(
 ): Promise<void> {
   const world = {...SEED, machines};
   await resize(page, width);
-  await page.addInitScript(installFakeBridge, world);
-  await page.addInitScript(installFakeMachines, world);
-  await page.addInitScript(installFakeNewRun, world);
+  await addInitScripts(page, [
+    initScript(installFakeBridge, world),
+    initScript(installFakeMachines, world),
+    initScript(installFakeNewRun, world),
+  ]);
   await page.goto('./shell.html');
   expect(await page.evaluate(() => window.innerWidth)).toBe(width);
   await sidebar(page).getByRole('button', {name: 'Settings'}).click();

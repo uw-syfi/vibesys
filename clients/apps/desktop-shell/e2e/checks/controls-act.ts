@@ -8,7 +8,7 @@
  * while the panes stay as they were is dead. The comparison reads the accessibility tree once the
  * screen has settled (`settle.ts`), so it never waits for a duration.
  */
-import type {BrowserContext, Locator, Page} from '@playwright/test';
+import type {Browser, BrowserContextOptions, Locator, Page} from '@playwright/test';
 import {settled} from './settle.js';
 
 /** The roles the check uses, and how it uses each. */
@@ -100,9 +100,10 @@ async function inertness(page: Page, scope: Locator, control: Control): Promise<
     : null;
 }
 
-/** Fresh pages for the audit, with at most two renderers alive per worker. */
+/** Each control owns a fresh browser context, including its storage and any popups. */
 export async function checkControls(
-  context: BrowserContext,
+  browser: Browser,
+  options: BrowserContextOptions,
   controls: readonly Control[],
   reach: (page: Page) => Promise<void>,
   scope: (page: Page) => Locator,
@@ -112,12 +113,13 @@ export async function checkControls(
   const outcomes = await Promise.allSettled(
     Array.from({length: Math.min(2, controls.length)}, async () => {
       for (const [index, control] of pending) {
-        const page = await context.newPage();
+        const context = await browser.newContext(options);
         try {
+          const page = await context.newPage();
           await reach(page);
           found[index] = await inertness(page, scope(page), control);
         } finally {
-          await page.close();
+          await context.close();
         }
       }
     }),

@@ -4,6 +4,7 @@
  * that cannot be reached; the cluster tests answer by the cluster's ssh alias. Each machine's runs
  * are the runs its listing names, as the dashboard counts them.
  */
+
 import {expect, type Page} from '@playwright/test';
 import {computeSettings, computeSettingsEmpty, sshCluster} from '@vibesys/run-fixtures';
 import {
@@ -13,6 +14,7 @@ import {
   installFakeMachines,
   installFakeProjectRuns,
 } from './fake-bridge.js';
+import {addInitScripts, initScript} from './init-scripts.js';
 import {PROJECT, SEED, server} from './world.js';
 
 /** Facts of a machine with GPUs, two runs live. */
@@ -198,11 +200,13 @@ export const rail = (page: Page) => page.getByRole('navigation', {name: 'VibeSys
 /** Opens the app over `world` at `width` (measured) and goes to Machines by the rail. */
 export async function openMachines(page: Page, width: number, world: MachinesWorld): Promise<void> {
   const {seed} = world;
-  await page.addInitScript(installFakeBridge, seed);
-  await page.addInitScript(installFakeMachines, seed);
-  await page.addInitScript(installFakeMachineSettings, seed);
-  await page.addInitScript(installFakeProjectRuns, seed);
-  if (world.name === 'a test in progress') await page.addInitScript(holdTests);
+  await addInitScripts(page, [
+    initScript(installFakeBridge, seed),
+    initScript(installFakeMachines, seed),
+    initScript(installFakeMachineSettings, seed),
+    initScript(installFakeProjectRuns, seed),
+    ...(world.name === 'a test in progress' ? [initScript(holdTests, undefined)] : []),
+  ]);
   await page.goto('./shell.html');
   await resizeTo(page, width);
   await rail(page).getByRole('button', {name: 'Machines'}).click();

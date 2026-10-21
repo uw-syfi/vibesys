@@ -9,6 +9,7 @@ import {
 import {installFakeRun} from './fake-run.js';
 import {prototypeRun} from './fake-run-data.js';
 import {type FakeServerSeed, installFakeServer} from './fake-server.js';
+import {addInitScripts, initScript} from './init-scripts.js';
 import {STARTED_AT} from './started-at.js';
 
 /**
@@ -92,11 +93,13 @@ test.use({colorScheme: 'dark'});
 test('a live run folds its trace into the ideas, the failed listed and hideable', async ({
   page,
 }) => {
-  await page.addInitScript(installFakeBridge, SEED);
-  await page.addInitScript(installFakeProjectRuns, SEED);
-  await page.addInitScript(installFakeMachines, SEED);
-  await page.addInitScript(installFakeRun, {streams: [], text: {}});
-  await page.addInitScript(installFakeServer, prototypeRun(RUN_ID));
+  await addInitScripts(page, [
+    initScript(installFakeBridge, SEED),
+    initScript(installFakeProjectRuns, SEED),
+    initScript(installFakeMachines, SEED),
+    initScript(installFakeRun, {streams: [], text: {}}),
+    initScript(installFakeServer, prototypeRun(RUN_ID)),
+  ]);
   await page.goto('./shell.html');
   await page
     .getByRole('main')
@@ -119,11 +122,13 @@ test('a live run folds its trace into the ideas, the failed listed and hideable'
 });
 
 test('a run that has tried no idea yet says what will appear, not a guess', async ({page}) => {
-  await page.addInitScript(installFakeBridge, SEED);
-  await page.addInitScript(installFakeProjectRuns, SEED);
-  await page.addInitScript(installFakeMachines, SEED);
-  await page.addInitScript(installFakeRun, {streams: [], text: {}});
-  await page.addInitScript(installFakeServer, SERVER);
+  await addInitScripts(page, [
+    initScript(installFakeBridge, SEED),
+    initScript(installFakeProjectRuns, SEED),
+    initScript(installFakeMachines, SEED),
+    initScript(installFakeRun, {streams: [], text: {}}),
+    initScript(installFakeServer, SERVER),
+  ]);
   await page.goto('./shell.html');
   await page
     .getByRole('main')
@@ -136,11 +141,13 @@ test('a run that has tried no idea yet says what will appear, not a guess', asyn
 test('a live run pauses and resumes from the header over its session, and is let go', async ({
   page,
 }) => {
-  await page.addInitScript(installFakeBridge, SEED);
-  await page.addInitScript(installFakeProjectRuns, SEED);
-  await page.addInitScript(installFakeMachines, SEED);
-  await page.addInitScript(installFakeRun, {streams: [], text: {}});
-  await page.addInitScript(installFakeServer, SERVER);
+  await addInitScripts(page, [
+    initScript(installFakeBridge, SEED),
+    initScript(installFakeProjectRuns, SEED),
+    initScript(installFakeMachines, SEED),
+    initScript(installFakeRun, {streams: [], text: {}}),
+    initScript(installFakeServer, SERVER),
+  ]);
   await page.goto('./shell.html');
   const nav = page.getByRole('navigation', {name: 'VibeSys'});
   await page

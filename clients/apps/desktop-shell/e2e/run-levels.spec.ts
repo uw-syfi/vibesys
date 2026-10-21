@@ -12,6 +12,7 @@ import {installFakeLive, moreTurnEvents, turnReplyEvent} from './fake-live.js';
 import {installFakeRun} from './fake-run.js';
 import {type FakeServerSeed, installFakeServer} from './fake-server.js';
 import {judgeEvents, RUN_ID, traceEvents, turnEvents, W5_GATE} from './fake-trace.js';
+import {addInitScripts, initScript} from './init-scripts.js';
 import {STARTED_AT} from './started-at.js';
 
 /**
@@ -128,15 +129,16 @@ async function check(page: Page, name: string): Promise<void> {
 }
 
 async function openRun(page: Page, live = false, server: FakeServerSeed = SERVER): Promise<void> {
-  await page.addInitScript(installFakeBridge, SEED);
-  await page.addInitScript(installFakeProjectRuns, SEED);
-  await page.addInitScript(installFakeMachines, SEED);
-  await page.addInitScript(installFakeRun, LOGS);
-  await page.addInitScript(installFakeServer, server);
-  if (live) {
-    await page.addInitScript(installFakeLive);
-    await page.addInitScript(installFakeWindows);
-  }
+  await addInitScripts(page, [
+    initScript(installFakeBridge, SEED),
+    initScript(installFakeProjectRuns, SEED),
+    initScript(installFakeMachines, SEED),
+    initScript(installFakeRun, LOGS),
+    initScript(installFakeServer, server),
+    ...(live
+      ? [initScript(installFakeLive, undefined), initScript(installFakeWindows, undefined)]
+      : []),
+  ]);
   await page.goto('./shell.html');
   await page
     .getByRole('main')
