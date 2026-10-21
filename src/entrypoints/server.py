@@ -142,9 +142,13 @@ def _termination_signal(
         scope.enter_context(
             relay.relay([Signals.SIGINT, Signals.SIGTERM, Signals.SIGHUP], on_signal)
         )
-        # End resends before the relay joins its blocked request callback.
+        # Keep the callback as a backstop if the first interruption lands in the
+        # finally suite itself. Both disarm requests before the relay joins them.
         scope.callback(interrupt.finish)
-        yield
+        try:
+            yield
+        finally:
+            interrupt.finish()
 
 
 def _control_socket_from_argv(argv: list[str]) -> Path | None:
