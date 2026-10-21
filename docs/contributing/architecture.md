@@ -216,6 +216,7 @@ graph TD
     vs_project --> vs_decode
     vs_project --> vs_sim
     vs_runlog --> vs_proto
+    vs_runlog --> vs_sim
     vs_runtime --> vs_agent
     vs_runtime --> vs_async_ops
     vs_runtime --> vs_core

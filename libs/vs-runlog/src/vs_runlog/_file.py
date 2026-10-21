@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-from contextlib import ExitStack
 from typing import TYPE_CHECKING, BinaryIO, Self
 
 if TYPE_CHECKING:
@@ -18,6 +17,7 @@ from vs_runlog._fold import append_skeleton
 from vs_runlog._framing import ReadStop, RunLogStopReason, encode_frame, read_frame
 from vs_runlog._head import project_head
 from vs_runlog._lock import RunLock
+from vs_sim.api import CloseOnce, ReleaseStack
 
 CHECKPOINT_RECORDS = 256
 
@@ -74,7 +74,8 @@ class FileRunLogWriter:
         self._skeleton = Keyframe()
         self._checkpoint_seq = 0
         self._process: RunProcess | None = None
-        self._resources = ExitStack()
+        self._resources = ReleaseStack()
+        self._close = CloseOnce()
         try:
             lock = RunLock(path.parent / "run.lock")
             self._resources.callback(lock.close)
@@ -86,7 +87,8 @@ class FileRunLogWriter:
                 sync_directory(path.parent)
             else:
                 self._recover(path)
-            self._stream = self._resources.enter_context(path.open("ab", buffering=0))
+            self._stream = path.open("ab", buffering=0)
+            self._resources.callback(self._stream.close)
             if self.sequence:
                 self._publish_head()
                 self._publish_keyframe()
@@ -141,7 +143,6 @@ class FileRunLogWriter:
         if body and body.field == "epoch_started" and record.at is not None:
             self._process = RunProcess(pid=os.getpid(), epoch=record.epoch, started_at=record.at)
         self._publish_head()
-        body = record.body
         boundary = body is not None and body.field in {"lifecycle", "epoch_started"}
         if boundary or record.seq - self._checkpoint_seq >= CHECKPOINT_RECORDS:
             self._publish_keyframe()
@@ -158,7 +159,7 @@ class FileRunLogWriter:
 
     def close(self) -> None:
         """Release the unbuffered append handle; safe to call more than once."""
-        self._resources.close()
+        self._close.run(self._resources.close)
 
     def __enter__(self) -> Self:
         """Own the append handle for a lexical scope."""

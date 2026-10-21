@@ -1924,7 +1924,7 @@ expose = ["api", "api\\..*"]
 
 [[modules]]
 path = "vs_runlog"
-depends_on = ["vs_proto"]
+depends_on = ["vs_proto", "vs_sim.api"]
 
 [[interfaces]]
 from = ["vs_runlog"]
