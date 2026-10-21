@@ -247,6 +247,7 @@ CancelOwnedJob {"additionalProperties":false,"type":"object"}
 CancelOwnedJob.admission_id optional {"anyOf":[{"$ref":"#/$defs/DecisionId"},{"type":"null"}],"default":null}
 CancelOwnedJob.decision_id optional {"anyOf":[{"$ref":"#/$defs/DecisionId"},{"type":"null"}],"default":null}
 CancelOwnedJob.depends_on optional {"default":[],"items":{"$ref":"#/$defs/RequestId"},"type":"array"}
+CancelOwnedJob.for_park optional {"default":false,"type":"boolean"}
 CancelOwnedJob.kind optional {"const":"cancel_owned_job","default":"cancel_owned_job","type":"string"}
 CancelOwnedJob.request_id optional {"anyOf":[{"$ref":"#/$defs/RequestId"},{"type":"null"}],"default":null}
 CancelOwnedJob.resource_id required {"$ref":"#/$defs/ResourceId"}
@@ -412,7 +413,7 @@ ContinuationScopeReopened.continuation_id required {"$ref":"#/$defs/Continuation
 ContinuationScopeReopened.kind optional {"const":"continuation_scope_reopened","default":"continuation_scope_reopened","type":"string"}
 ContinuationScopeReopened.observation required {"$ref":"#/$defs/Observation"}
 ContinuationScopeReopened.park_authority required {"$ref":"#/$defs/RequestId"}
-ControlAction {"enum":["pause","resume","stop","steer","withdraw","cancel_attempt","cancel_item","set_max_parallel"],"type":"string"}
+ControlAction {"enum":["pause","resume","stop","steer","withdraw","cancel_attempt","cancel_item","set_max_parallel","park"],"type":"string"}
 ControlChanged {"additionalProperties":false,"type":"object"}
 ControlChanged.control required {"$ref":"#/$defs/ControlInput"}
 ControlChanged.kind optional {"const":"control_changed","default":"control_changed","type":"string"}
@@ -1462,6 +1463,9 @@ RunJobsCancelRequested {"additionalProperties":false,"type":"object"}
 RunJobsCancelRequested.authority required {"$ref":"#/$defs/DecisionId"}
 RunJobsCancelRequested.kind optional {"const":"run_jobs_cancel_requested","default":"run_jobs_cancel_requested","type":"string"}
 RunJobsCancelRequested.scope required {"$ref":"#/$defs/Scope"}
+RunPark {"additionalProperties":false,"type":"object"}
+RunPark.control_id required {"$ref":"#/$defs/ControlId"}
+RunPark.epoch required {"minimum":0,"type":"integer"}
 RunResultProposal {"additionalProperties":false,"type":"object"}
 RunResultProposal.outcome required {"enum":["success","failure","blocked","cancelled"],"type":"string"}
 RunResultProposal.reason required {"minLength":1,"type":"string"}
@@ -1481,12 +1485,13 @@ RunState.facts required {"$ref":"#/$defs/RunFacts"}
 RunState.generation optional {"$ref":"#/$defs/Count","default":0}
 RunState.limits required {"$ref":"#/$defs/Limits"}
 RunState.now_at required {"$ref":"#/$defs/Seconds"}
+RunState.park optional {"anyOf":[{"$ref":"#/$defs/RunPark"},{"type":"null"}],"default":null}
 RunState.receipts optional {"default":[],"items":{"$ref":"#/$defs/DecisionReceipt"},"type":"array"}
 RunState.requirements optional {"$ref":"#/$defs/EvidenceRequirements","default":{"allow_empty_queue_success":false,"assessment_authorities":[],"required_assessments":[],"required_evidence":[]}}
 RunState.result optional {"anyOf":[{"$ref":"#/$defs/RunResultProposal"},{"type":"null"}],"default":null}
 RunState.run_id required {"$ref":"#/$defs/RunId"}
 RunState.status optional {"$ref":"#/$defs/RunStatus","default":"running"}
-RunStatus {"enum":["running","paused","closing","terminal","blocked"],"type":"string"}
+RunStatus {"enum":["running","paused","closing","terminal","blocked","draining","parked"],"type":"string"}
 RunTrace {"additionalProperties":false,"type":"object"}
 RunTrace.spans optional {"default":[],"items":{"$ref":"#/$defs/Span"},"type":"array"}
 Runaway {"additionalProperties":false,"type":"object"}

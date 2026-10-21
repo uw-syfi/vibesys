@@ -153,6 +153,7 @@ class RunStatus(StrEnum):
     COMPLETED = "completed"
     FAILED = "failed"
     STOPPED = "stopped"
+    PARKED = "parked"
 
 
 class RunResult(BaseModel):
@@ -163,7 +164,9 @@ class RunResult(BaseModel):
     run_id: str
     loop: str
     succeeded: bool
-    status: Literal[RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.STOPPED] = RunStatus.FAILED
+    status: Literal[RunStatus.COMPLETED, RunStatus.FAILED, RunStatus.STOPPED, RunStatus.PARKED] = (
+        RunStatus.FAILED
+    )
     failure: RunFailure | None = None
     uncompared: bool = False
     """The run adopted a candidate never compared with the input: the input failed its own

@@ -535,3 +535,21 @@ def test_stage_annotations_update_the_original_operation_without_ending_it(value
     assert span.label.attrs is not None
     assert p.GateAttrs.from_binary(span.label.attrs.value).subject == p.GateSubject.INPUT
     assert_valid(result)
+
+
+def test_park_records_a_drain_goal_then_a_readable_parked_lifecycle() -> None:
+    state = MappingState("run-a")
+    draining = map_event(state, event(e.CoreEventType.PARK_REQUESTED))
+    parked = map_event(
+        draining.state, event(e.CoreEventType.PARKED).model_copy(update={"sequence": 2})
+    )
+    lifecycle = [
+        record.body.value
+        for result in (draining, parked)
+        for record in result.records
+        if record.body is not None and record.body.field == "lifecycle"
+    ]
+    assert [item.state.field for item in lifecycle] == ["draining", "parked"]
+    assert lifecycle[0].state.value.goal == p.DrainGoal.PARK
+    assert_valid(draining)
+    assert_valid(parked)

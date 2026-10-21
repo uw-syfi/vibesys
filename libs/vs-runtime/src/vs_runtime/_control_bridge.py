@@ -58,6 +58,7 @@ from vs_runtime._operator_control import (
     CancelItemRequest,
     ChannelRunControl,
     ControlStatus,
+    ParkRequest,
     PauseRequest,
     ResumeRequest,
     SetMaxParallelRequest,
@@ -100,6 +101,7 @@ if TYPE_CHECKING:
 
 type ControlAction = Literal[
     "pause",
+    "park",
     "resume",
     "stop",
     "steer",
@@ -235,6 +237,7 @@ class RunControlBridge:
 
         A stop only escalates (``escalate_stop``): the channel's stop reaches core again
         only when it is stronger than this."""
+        self._park_landed = False
         self._landed = False
 
     def watch_stop(self, listener: Callable[[], object]) -> Callable[[], None]:
@@ -541,11 +544,15 @@ class RunControlBridge:
         refused_inbox = None
         for request in self._channel.take_pending_actions():
             state = self._as_asked(_after(core, events))
-            change = _Change(
-                request.action.value,
-                text=notice_text(request, state),
-                control_id=request.control_id,
-                action_request=request,
+            change = (
+                _Change("park", control_id=request.control_id)
+                if isinstance(request, ParkRequest)
+                else _Change(
+                    request.action.value,
+                    text=notice_text(request, state),
+                    control_id=request.control_id,
+                    action_request=request,
+                )
             )
             refusal = control_refusal(state, change.control(_identity(request.control_id)))
             if refusal is None:
@@ -736,6 +743,8 @@ class RunControlBridge:
             return request
         identity = request.control_id
         match request:
+            case ParkRequest():
+                return self._take_actions(core, now_at, events, inbox_id=identity)
             case PauseRequest() | ResumeRequest():
                 # Core records a capacity wait too, so the entry settles once core holds it.
                 # ``_submitted_request`` asked core's rule first, so this is never refused.
@@ -798,6 +807,8 @@ class RunControlBridge:
                 return target.reason
         pending = ControlId(root="pending")
         match request:
+            case ParkRequest():
+                check = _Change("park").control(pending)
             case StopRequest(mode=mode):
                 check = _Change("stop", mode=mode).control(pending)
             case PauseRequest() | ResumeRequest():
@@ -852,6 +863,9 @@ class RunControlBridge:
         self._asked.clear()
         self._pause = run_pause(core.run)
         self._stands = capacity_wait_stands(core.run)
+        if core.run.status in (RunStatus.DRAINING, RunStatus.PARKED) and not self._park_landed:
+            self._park_landed = True
+            self._channel.land_park()
         if core.run.status != RunStatus.PAUSED:
             self._landed = False
         elif not running and not self._landed:
@@ -1034,8 +1048,10 @@ def _records(control: ControlInput, request: ControlRequest) -> bool:
                 when,
                 fallback,
             )
-        case PauseRequest():
-            return control.action == "pause" and control.owner is PauseOwner.OPERATOR
+        case ParkRequest() | PauseRequest():
+            return control.action == request.action.value and (
+                isinstance(request, ParkRequest) or control.owner is PauseOwner.OPERATOR
+            )
         case CancelAttemptRequest() | CancelItemRequest() | SetMaxParallelRequest():
             return records_action(control, request)
 

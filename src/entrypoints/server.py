@@ -1157,7 +1157,7 @@ def _serve(  # noqa: C901, PLR0912, PLR0915  # lint-waiver: LW-101031 [C901, PLR
     # `result` is `None` when `ServerRuntime.run` absorbed an operator stop
     # (`RunStopped`) as a clean backend exit; only a completed run's
     # `RunResult.succeeded` decides the process exit code.
-    if result is not None and not result.succeeded:
+    if result is not None and not result.succeeded and result.status.value != "parked":
         raise SystemExit(1)
 
 

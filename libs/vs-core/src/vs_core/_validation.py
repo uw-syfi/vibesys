@@ -60,7 +60,11 @@ def takes_command(run: RunState, command: Command) -> bool:
     """
     if run.status == RunStatus.RUNNING and run.result is None:
         return True
-    return isinstance(command, Finish | Withdraw) and run.status != RunStatus.TERMINAL
+    return isinstance(command, Finish | Withdraw) and run.status not in (
+        RunStatus.TERMINAL,
+        RunStatus.DRAINING,
+        RunStatus.PARKED,
+    )
 
 
 def validate_decision(

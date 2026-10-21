@@ -119,6 +119,8 @@ class CoreEventType(StrEnum):
     GUIDANCE_ENDED = "guidance_ended"
     GUIDANCE_REACHED = "guidance_reached"
     PAUSE_REQUESTED = "pause_requested"
+    PARK_REQUESTED = "park_requested"
+    PARKED = "parked"
     RESUMED = "resumed"
     STOP_REQUESTED = "stop_requested"
     STEER_CONSUMED = "steer_consumed"

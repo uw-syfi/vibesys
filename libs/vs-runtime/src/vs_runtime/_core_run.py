@@ -390,6 +390,21 @@ class _Loop:
         the explicit resume this process stands for. A run no stop ended takes none: it is over.
         """
         core = self._core()
+        if core.run.status == RunStatus.PARKED and core.run.park is not None:
+            now = self._read()
+            self._shell.submit(
+                RunControlEvent(
+                    control=ControlInput(
+                        control_id=ControlId(root=f"unpark:{core.records.recovery.epoch}"),
+                        action="resume",
+                        when="now",
+                    ),
+                    now_at=now,
+                ),
+                now_at=now,
+            )
+            await self._settle(now)
+            return
         if self._controls is None or not reopens_on_resume(core.run):
             return
         now = self._read()
@@ -399,9 +414,9 @@ class _Loop:
         self._settle_controls()
 
     async def _iterate(self) -> RunOutcome:
-        if self._core().run.status == RunStatus.TERMINAL:
+        if self._core().run.status in (RunStatus.TERMINAL, RunStatus.PARKED):
             await self._reopen()
-        while self._core().run.status != RunStatus.TERMINAL:
+        while self._core().run.status not in (RunStatus.TERMINAL, RunStatus.PARKED):
             self._raise_if_lease_lost()
             now = self._read()
             self._renew(now)
@@ -425,7 +440,7 @@ class _Loop:
             # Before the loop can exit: a control the commit that ended the run refused is
             # answered now, since no later poll will see it.
             self._settle_controls()
-            if self._core().run.status == RunStatus.TERMINAL:
+            if self._core().run.status in (RunStatus.TERMINAL, RunStatus.PARKED):
                 break
             if self._signature() == before:
                 await self._wait(now)

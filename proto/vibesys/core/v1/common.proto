@@ -15,6 +15,8 @@ enum RunStatus {
   RUN_STATUS_CLOSING = 3;
   RUN_STATUS_TERMINAL = 4;
   RUN_STATUS_BLOCKED = 5;
+  RUN_STATUS_DRAINING = 6;
+  RUN_STATUS_PARKED = 7;
 }
 
 // Who paused the run, which decides what may end the pause.
@@ -65,6 +67,7 @@ enum ControlAction {
   CONTROL_ACTION_CANCEL_ATTEMPT = 6;
   CONTROL_ACTION_CANCEL_ITEM = 7;
   CONTROL_ACTION_SET_MAX_PARALLEL = 8;
+  CONTROL_ACTION_PARK = 9;
 }
 
 // Canonical tagged identity; domains survive JSON union round trips.

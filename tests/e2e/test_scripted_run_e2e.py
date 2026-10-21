@@ -19,10 +19,10 @@ from __future__ import annotations
 import re
 from typing import TYPE_CHECKING
 
-from tests.e2e.dynamic_loop_harness import _AGENT_CONFIG, LoopInput, run_request
+from tests.e2e.dynamic_loop_harness import _AGENT_CONFIG, LoopInput, resume_request, run_request
 
 from launch.scripted_agents import ScriptedDynamicAgents
-from vibesys.api import RunStatus
+from vibesys.api import ParkRequest, RunStatus
 from vibesys.events import CoreEventType, WorkstreamFinishedData
 from vibesys.orchestration.dynamic.scripted.api import (
     CHAT_REPLY,
@@ -40,6 +40,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
+    from vibesys.api import RunHandle
     from vs_agent.api import AgentClientProtocol, AgentEventSink, AgentSpec
 
 ROUNDS = 3
@@ -144,3 +145,42 @@ def test_scripted_agents_plan_edit_and_judge_through_the_real_backend(tmp_path: 
     assert any(error is not None for error in ended)
     # The agents narrate their turns, so a frontend has something to show for each.
     assert CoreEventType.AGENT_OUTPUT_CHUNK in types
+
+
+def test_a_scripted_run_parks_cleanly_and_resumes_the_saved_search(tmp_path: Path) -> None:
+    loop_input = LoopInput.create(
+        tmp_path, agent_config=f"{_AGENT_CONFIG}[agent]\nscripted_seed = {SEED}\n"
+    )
+    request = loop_input.request(agent_backend="scripted", max_rounds=ROUNDS, max_in_flight=2)
+
+    def park_on_start(handle: RunHandle) -> None:
+        handle.session.submit(ParkRequest(control_id="park-before-start"))
+
+    parked = run_request(
+        request,
+        _NoAgents(),
+        client_factory=_scripted_client,
+        slurm_processes=loop_input.connector,
+        state_stores=loop_input.state_stores,
+        on_handle=park_on_start,
+        verify=False,
+    )
+    parked.raise_error()
+    assert parked.status is RunStatus.PARKED
+    types = [event.type for event in parked.events]
+    assert CoreEventType.PARK_REQUESTED in types
+    assert CoreEventType.PARKED in types
+    assert CoreEventType.RUN_FAILED not in types
+    assert CoreEventType.STOPPED not in types
+    resumed = run_request(
+        resume_request(request, parked.run_id),
+        _NoAgents(),
+        client_factory=_scripted_client,
+        slurm_processes=loop_input.connector,
+        state_stores=loop_input.state_stores,
+        verify=False,
+    )
+    resumed.raise_error()
+    assert resumed.status is RunStatus.COMPLETED
+    assert resumed.run_id == parked.run_id
+    assert any(event.type is CoreEventType.INVOCATION_FINISHED for event in resumed.events)

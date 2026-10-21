@@ -47,6 +47,7 @@ class ControlAction(StrEnum):
 
     STEER = "steer"
     PAUSE = "pause"
+    PARK = "park"
     RESUME = "resume"
     STOP = "stop"
     WITHDRAW = "withdraw"
@@ -149,6 +150,12 @@ def check_one_way_to_resume(*, fallback: bool, when: ResumeWhen) -> None:
         raise ValueError(message)
 
 
+class ParkRequest(_Request):
+    """Finish turns in flight, release evaluation jobs, save and exit for relaunch."""
+
+    action: Literal[ControlAction.PARK] = ControlAction.PARK
+
+
 class ResumeRequest(_Request):
     """Continue a paused run.
 
@@ -242,6 +249,7 @@ def action_summary(request: ActionRequest) -> str:
 type ControlRequest = Annotated[
     SteerRequest
     | PauseRequest
+    | ParkRequest
     | ResumeRequest
     | StopRequest
     | WithdrawRequest
@@ -423,6 +431,9 @@ class ChannelRunControl:
             case WithdrawRequest(withdraws=withdraws, control_id=control_id):
                 self._channel.queue_withdraw(withdraws, control_id)
                 status = ControlStatus.PENDING
+            case ParkRequest():
+                self._channel.queue_action(request)
+                status = ControlStatus.PENDING
             case PauseRequest(control_id=control_id):
                 self._channel.request_pause(control_id)
                 status = ControlStatus.PENDING
@@ -509,6 +520,7 @@ __all__ = [
     "ControlAction",
     "ControlRequest",
     "ControlStatus",
+    "ParkRequest",
     "PauseRequest",
     "RefusalReason",
     "ResumeRequest",

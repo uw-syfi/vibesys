@@ -61,6 +61,7 @@ from vs_core._generated.vibesys.core.v1.control_cv import (
     PoolCapacity,
     RequestRetries,
     RoleInputTarget,
+    RunPark,
     RunPause,
     ScopeInputTarget,
 )
@@ -154,6 +155,7 @@ __all__ = [
     "RoleInputTarget",
     "RunFacts",
     "RunId",
+    "RunPark",
     "RunPause",
     "RunStatus",
     "SchemaRef",

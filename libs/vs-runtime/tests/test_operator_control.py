@@ -116,6 +116,8 @@ _REVIEWED_FIELDS = frozenset(
         ("withdraw", "control_id", "string"),
         ("withdraw", "action", "string"),
         ("withdraw", "withdraws", "string"),
+        ("park", "control_id", "string"),
+        ("park", "action", "string"),
         ("pause", "control_id", "string"),
         ("pause", "action", "string"),
         ("resume", "control_id", "string"),
