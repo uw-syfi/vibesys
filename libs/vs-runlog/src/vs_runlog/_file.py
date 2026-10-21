@@ -218,7 +218,7 @@ class FileRunLogWriter:
         frame = encode_frame(record)
         # The caller may reuse or mutate its protobuf after append returns.
         owned = Record.from_binary(record.to_binary())
-        boundary = bool(owned.body and owned.body.field in {"lifecycle", "epoch_started"})
+        boundary = _is_boundary(owned)
         with self._condition:
             self._check_open()
             if owned.seq != self.sequence + 1:
@@ -321,6 +321,8 @@ class FileRunLogWriter:
                 logging.getLogger(__name__).exception("Deferred run.log commit failed")
 
     def _commit_batch(self, batch: list[tuple[Record, int]], *, checkpoint: bool) -> None:
+        if batch:
+            self._sync(self._stream.fileno())
         for record, offset in batch:
             append_skeleton(self._skeleton, record)
             self._skeleton.log_offset = offset
@@ -328,9 +330,12 @@ class FileRunLogWriter:
                 self._process = RunProcess(
                     pid=os.getpid(), epoch=record.epoch, started_at=record.at
                 )
-        if batch:
-            self._sync(self._stream.fileno())
-        if checkpoint or self._skeleton.through_seq - self._checkpoint_seq >= CHECKPOINT_RECORDS:
+            if _is_boundary(record):
+                self._publish_keyframe()
+        through = self._skeleton.through_seq
+        if (checkpoint and through > self._checkpoint_seq) or (
+            through - self._checkpoint_seq >= CHECKPOINT_RECORDS
+        ):
             self._publish_keyframe()
         if batch:
             self._publish_head()
@@ -417,6 +422,10 @@ def install_run_log(staged: Path, destination: Path) -> None:
         sync_directory(destination.parent)
     finally:
         lock.close()
+
+
+def _is_boundary(record: Record) -> bool:
+    return bool(record.body and record.body.field in {"lifecycle", "epoch_started"})
 
 
 def _check_write(written: int | None, expected: int) -> None:

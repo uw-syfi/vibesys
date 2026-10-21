@@ -17,8 +17,8 @@ from hypothesis import example, given
 from hypothesis import strategies as st
 
 from vs_faults.api import Boundary, FaultGate, FaultPlan, FaultRule, HostCrashError, HostFault
-from vs_proto.api import Keyframe, LegacyEvent, Oneof, Record, RunHead
-from vs_runlog.api import FileRunLogWriter, OsFileSync, RunLogReader
+from vs_proto.api import RUN_LOG_MAGIC, Keyframe, LegacyEvent, Oneof, Record, RunHead
+from vs_runlog.api import FileRunLogWriter, OsFileSync, RunLogReader, encode_frame, fold_skeleton
 from vs_sim.api.testing import HANG_GUARD_S, SimThreads, VirtualClock
 
 _FIXTURES = Path(__file__).resolve().parents[3] / "proto/testdata/skeleton"
@@ -303,6 +303,55 @@ def test_checkpoint_requested_during_commit_preempts_the_next_batch_deadline(
             assert done.wait(HANG_GUARD_S)
             assert clock.now() == at
             assert head(tmp_path) == 4
+            child.join(HANG_GUARD_S)
+
+    threads.run(exercise)
+
+
+@pytest.mark.parametrize("kind", ["lifecycle", "epoch"])
+def test_a_boundary_keeps_its_keyframe_when_later_records_share_the_batch(
+    tmp_path: Path, kind: str
+) -> None:
+    clock = VirtualClock()
+    threads = SimThreads(clock)
+    probe = SyncProbe(tmp_path, threads)
+    started = threads.event()
+    done = threads.event()
+    expected = declarations()
+    ending = declarations()[0 if kind == "epoch" else 1]
+    ending.seq = 4
+    if kind == "epoch":
+        ending.epoch = 2
+        assert ending.body is not None
+        assert ending.body.field == "epoch_started"
+        ending.body.value.epoch = 2
+    expected.extend([event(3), ending, event(5, ending.epoch)])
+
+    def exercise() -> None:
+        with FileRunLogWriter(
+            tmp_path / "run.log", clock=clock, threads=threads, sync=probe
+        ) as writer:
+            for record in expected[:2]:
+                writer.append(record)
+            probe.hold()
+            writer.append(expected[2])
+            assert probe.entered.wait(HANG_GUARD_S)
+
+            def boundary() -> None:
+                started.set()
+                writer.append(ending)
+                done.set()
+
+            child = threads.spawn(boundary, name="boundary")
+            assert started.wait(HANG_GUARD_S)
+            writer.append(expected[4])
+            assert not done.is_set()
+            probe.release.set()
+            assert done.wait(HANG_GUARD_S)
+            offset = len(RUN_LOG_MAGIC) + sum(len(encode_frame(record)) for record in expected[:4])
+            checkpoint = Keyframe.from_binary((tmp_path / "keyframes/4.pb").read_bytes())
+            assert checkpoint == fold_skeleton(expected[:4], log_offset=offset)
+            assert head(tmp_path) == 5
             child.join(HANG_GUARD_S)
 
     threads.run(exercise)

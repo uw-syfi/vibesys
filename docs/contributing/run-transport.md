@@ -90,8 +90,8 @@ and recovers every complete surviving record, syncing that prefix before publish
 it. Its writer groups ordinary appends: the first pending append wakes a dedicated
 committer with a deadline 100 ms after the batch handoff, using the injected clock
 and thread condition. Later appends do not reset that deadline. The committer
-swaps out the pending batch under the append lock, then folds its projection,
-fsyncs the log, writes any due keyframe and atomically publishes `run.head` outside
+swaps out the pending batch under the append lock, then fsyncs the log, folds its
+records, writes boundary and due keyframes and atomically publishes `run.head` outside
 that lock. Ordinary appends never wait for fsync or projection publication.
 Lifecycle changes, epoch headers and close request an immediate commit and wait
 for durability.
