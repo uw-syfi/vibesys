@@ -1028,10 +1028,7 @@ export type Direction5 = "max" | "min";
 export type Unit6 = string | null;
 export type InputMetrics = MetricRow[];
 export type Metrics = MetricRow[];
-/**
- * Closed measurement kinds used for eligibility requirements.
- */
-export type EvidenceKind = "correctness" | "benchmark" | "profiling";
+export type Check = "correctness" | "benchmark";
 export type Completed = number | null;
 export type Required = number | null;
 export type Unit7 = string | null;
@@ -2848,7 +2845,7 @@ export interface MetricRow {
  * evaluator reported it got through; each is None when it reported no progress.
  */
 export interface FailedCheck {
-  check: EvidenceKind;
+  check: Check;
   completed?: Completed;
   required?: Required;
   unit?: Unit7;
