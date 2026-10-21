@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Literal, assert_never
 
 from pydantic import TypeAdapter
 
-from . import attempts, evaluation, records, scheduling, sessions, settlement
+from . import _run_park, attempts, evaluation, records, scheduling, sessions, settlement
 from ._adoption import reopen as reopen_adoption
 from ._continuations import (
     SuspensionRefusal,
@@ -86,6 +86,7 @@ from .types.common import (
     RejectionCode,
     RequestId,
     RevisionAuthority,
+    RunPark,
     RunStatus,
     Scope,
     SettlementId,
@@ -207,6 +208,7 @@ if TYPE_CHECKING:
     from .evaluation import Reducer as EvaluationReducer
     from .types.evaluation import Continuation
     from .types.evaluation_history import EvaluationHistoryCursor
+    from .types.kernel import RunState
     from .types.session_inputs import MidTurnOffer
 
 MAX_SIGNALS = 1024
@@ -1433,9 +1435,10 @@ def _control(state: CoreState, event: RunControlEvent, dispatch: Dispatch) -> Tr
     state, lifting = _lifted(state, event.control)
     # A capacity wait leaves the run paused: it only records when the run resumes itself.
     waits = event.control.when == "capacity_returns"
-    # Only a pause and a resume change the run's status; a stop returned above.
+    # A stop returned above; park closes admission without ending the search.
     statuses = {
         "pause": RunStatus.PAUSED,
+        "park": RunStatus.DRAINING,
         "resume": state.run.status if waits else RunStatus.RUNNING,
     }
     state = _advance_run_time(state, event.now_at)
@@ -1445,6 +1448,7 @@ def _control(state: CoreState, event: RunControlEvent, dispatch: Dispatch) -> Tr
             "status": statuses.get(event.control.action, state.run.status),
         }
     )
+    run = _park_authority(state, run, event.control)
     updated = state.model_copy(update={"run": run})
     if event.control.action == "steer" or waits:
         result = Transition(state=updated)
@@ -1455,13 +1459,29 @@ def _control(state: CoreState, event: RunControlEvent, dispatch: Dispatch) -> Tr
             updated, (InputWithdrawRequested(input_id=event.control.withdraws),), dispatch
         )
     else:
-        # A stop returned above; only pause and resume reach core's admission.
-        action = "pause" if event.control.action == "pause" else "resume"
+        # Park closes intake while preserving queued work for relaunch.
+        actions: dict[str, Literal["pause", "drain", "resume"]] = {
+            "pause": "pause",
+            "park": "drain",
+        }
+        action = actions.get(event.control.action, "resume")
         result = propagate(updated, (AdmissionControl(action=action),), dispatch)
     lifted = (StopLiftRecorded(control=event.control),) if lifting else ()
     return result.model_copy(
         update={"events": (*result.events, ControlChanged(control=event.control), *lifted)}
     )
+
+
+def _park_authority(state: CoreState, run: RunState, control: ControlInput) -> RunState:
+    if control.action == "park":
+        return run.model_copy(
+            update={
+                "park": RunPark(control_id=control.control_id, epoch=state.records.recovery.epoch)
+            }
+        )
+    if control.action == "resume":
+        return run.model_copy(update={"park": None})
+    return run
 
 
 def _operator_action(state: CoreState, event: RunControlEvent, dispatch: Dispatch) -> Transition:
@@ -1737,6 +1757,8 @@ def _validate_authorization(state: CoreState, event: CoreEvent) -> None:
             raise ContractError(
                 ("dependency",), "dispatch requires successful dependency completion"
             )
+        if not _run_park.dispatch_allowed(state, record.request):
+            raise ContractError(("dependency",), "park holds new work until relaunch")
         _validate_dispatch_episode(state, record.request)
         _validate_resume_authority(state, record.request)
 
@@ -1789,6 +1811,13 @@ def consume(
     text) has never seen. One owner at the exit keeps that true for all of them.
     """
     given = state
+    if (
+        state.run.status == RunStatus.PARKED
+        and state.run.park is not None
+        and state.records.recovery.epoch == state.run.park.epoch
+        and not isinstance(event, RecoveryStarted | RunControlEvent | DispatchAuthorized)
+    ):
+        return Transition(state=state)
     _validate_observation_ingress(state, event)
     _validate_authorization(state, event)
     if isinstance(event, DecisionCompleted | RecoveryReady | InputWithdrawRequested):
@@ -1812,6 +1841,14 @@ def consume(
             state = state.model_copy(update={"records": opened, "evaluation": waits})
         state = _advance_event_time(state, event)
         result = propagate(state, (event,), dispatch, _event_cause(state, event))
+    parked, cancellations = _run_park.advance(result.state)
+    if cancellations:
+        registered = _registered_transition(parked, list(cancellations), list(result.events))
+        result = registered.model_copy(
+            update={"requests": (*result.requests, *registered.requests)}
+        )
+    else:
+        result = result.model_copy(update={"state": parked})
     unmet = unmet_waits(given, result.state)
     if unmet:
         raise ContractError(("wait",), f"a recorded wait breaks its contract: {unmet[0]}")

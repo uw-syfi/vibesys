@@ -50,6 +50,7 @@ from vibesys.api import (
     RunResult,
     RunStatus,
     RunStopped,
+    relaunch,
 )
 from vibesys.candidates import api as candidates
 from vibesys.dynamic_roles import IMPLEMENTER, JUDGE, ORCHESTRATOR
@@ -634,6 +635,7 @@ def run_request(  # noqa: PLR0913
     agents: AgentsSource,
     *,
     verify: bool = True,
+    relaunch_saved: bool = False,
     budget_s: float = SIMULATED_BUDGET_S,
     on_handle: Callable[[RunHandle], None] | None = None,
     stop_timer: StopTimer | None = None,
@@ -681,7 +683,10 @@ def run_request(  # noqa: PLR0913
         events.extend([event async for event in handle.events()])
 
     async def run() -> LoopRun:
-        handle = runs.resume(request) if request.resume is not None else runs.start(request)
+        if relaunch_saved:
+            handle = relaunch(request, runs)
+        else:
+            handle = runs.resume(request) if request.resume is not None else runs.start(request)
         collector = asyncio.ensure_future(collect(handle))
         if on_handle is not None:
             on_handle(handle)

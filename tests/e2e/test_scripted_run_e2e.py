@@ -24,7 +24,7 @@ from tests.e2e.dynamic_loop_harness import _AGENT_CONFIG, LoopInput, resume_requ
 
 import vs_proto.api as p
 from launch.scripted_agents import ScriptedDynamicAgents
-from vibesys.api import RunHandle, RunStatus
+from vibesys.api import ParkRequest, RunHandle, RunStatus
 from vibesys.events import CoreEventType, WorkstreamFinishedData
 from vibesys.orchestration.dynamic.scripted.api import (
     CHAT_REPLY,
@@ -204,3 +204,53 @@ def test_scripted_run_relaunches_once_from_saved_state(tmp_path: Path) -> None:
     assert [epoch for epoch, _ in ends] == [1, 2]
     assert ends[0][1] in {p.Outcome.STOPPED, p.Outcome.INTERRUPTED}
     assert [r.clock for r in records] == sorted(r.clock for r in records)
+
+
+def test_a_scripted_run_parks_cleanly_and_resumes_the_saved_search(tmp_path: Path) -> None:
+    loop_input = LoopInput.create(
+        tmp_path,
+        on_disk_state=True,
+        agent_config=f"{_AGENT_CONFIG}[agent]\nscripted_seed = {SEED}\n",
+    )
+    request = loop_input.request(agent_backend="scripted", max_rounds=ROUNDS, max_in_flight=2)
+
+    def park_on_start(handle: RunHandle) -> None:
+        handle.session.submit(ParkRequest(control_id="park-before-start"))
+
+    parked = run_request(
+        request,
+        _NoAgents(),
+        client_factory=_scripted_client,
+        slurm_processes=loop_input.connector,
+        on_handle=park_on_start,
+        verify=False,
+    )
+    parked.raise_error()
+    assert parked.status is RunStatus.PARKED
+    types = [event.type for event in parked.events]
+    assert CoreEventType.PARK_REQUESTED in types
+    assert CoreEventType.PARKED in types
+    assert CoreEventType.RUN_FAILED not in types
+    assert CoreEventType.STOPPED not in types
+    assert CoreEventType.RUN_ENDING not in types
+    with Project.run_log_path_for(loop_input.root, parked.run_id).open("rb") as stream:
+        records = list(RunLogReader(stream))
+    lifecycle = [
+        record.body.value.state.field
+        for record in records
+        if record.body and record.body.field == "lifecycle" and record.body.value.state is not None
+    ]
+    assert lifecycle[-2:] == ["draining", "parked"]
+    assert "ended" not in lifecycle
+    resumed = run_request(
+        resume_request(request, parked.run_id),
+        _NoAgents(),
+        client_factory=_scripted_client,
+        slurm_processes=loop_input.connector,
+        verify=False,
+        relaunch_saved=True,
+    )
+    resumed.raise_error()
+    assert resumed.status is RunStatus.COMPLETED
+    assert resumed.run_id == parked.run_id
+    assert any(event.type is CoreEventType.INVOCATION_FINISHED for event in resumed.events)

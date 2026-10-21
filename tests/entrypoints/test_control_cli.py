@@ -110,6 +110,7 @@ _COMMANDS = st.one_of(
         st.text(min_size=1, max_size=20).filter(str.strip),
         st.sampled_from(["dynamic-planner", "dynamic-worker"]),
     ),
+    st.just(["park"]),
     st.just(["pause"]),
     st.just(["resume"]),
     st.just(["resume", "--fallback"]),
@@ -449,3 +450,21 @@ def test_a_post_to_a_run_that_has_not_declared_posting_order_warns(tmp_path: Pat
 
     assert (status, out) == (0, "p-1\n")
     assert "has not declared that it applies requests in posting order" in err
+
+
+def test_park_posts_to_the_allow_list_and_settles_after_the_durable_drain(tmp_path: Path) -> None:
+    run_id = _project_with_run(tmp_path)
+    project = Project.open(tmp_path)
+    channel = create_run_control_channel(FakeRunControlEventSink(), threads=SimThreads())
+    inbox = project.state.control_inbox(run_id)
+    bridge = RunControlBridge(
+        channel, _Texts(), inbox=OperatorInbox(inbox, ChannelRunControl(channel, SimThreads()))
+    )
+    assert _control(tmp_path, [run_id, "park"], "park-1")[0] == 0
+    state = initial_state()
+    for event in bridge.poll(state, 1.0):
+        state = step(state, event).state
+    bridge.settled(state, running=False)
+    assert state.run.status == RunStatus.PARKED
+    assert state.run.result is None
+    assert _control(tmp_path, [run_id, "status", "park-1"])[1].strip() == "applied"

@@ -29,6 +29,7 @@ from .common import (
     RevisionNumber,
     RunFacts,
     RunId,
+    RunPark,
     RunStatus,
     SchemaRef,
     Seconds,
@@ -117,6 +118,7 @@ class RunState(Value):
     run_id: RunId
     generation: Count = 0
     status: RunStatus = RunStatus.RUNNING
+    park: RunPark | None = None
     now_at: Seconds
     deadline_at: Seconds
     facts: RunFacts

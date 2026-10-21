@@ -136,16 +136,33 @@ def control_refusal(state: CoreState, control: ControlInput) -> ControlRefusedEr
     stands until the run ends, across a restart and an explicit resume alike.
     """
     run = state.run
-    if run.status == RunStatus.TERMINAL:
-        lifts = control.action == "resume" and control.when != "capacity_returns"
-        if lifts and reopens_on_resume(run):
-            return None
-        return ControlRefusedError(control, ("run", "status"), "terminal run rejects controls")
+    if run.status in (RunStatus.DRAINING, RunStatus.PARKED, RunStatus.TERMINAL):
+        return _inactive_refusal(state, control)
     if control.action in OPERATOR_ACTIONS:
         return _action_refusal(state, control)
     if control.action in ("stop", "steer", "withdraw"):
         return None
     return _pause_refusal(run, control)
+
+
+def _inactive_refusal(state: CoreState, control: ControlInput) -> ControlRefusedError | None:
+    run = state.run
+    if run.status in (RunStatus.DRAINING, RunStatus.PARKED):
+        if (
+            run.status == RunStatus.PARKED
+            and control.action == "resume"
+            and control.when == "now"
+            and run.park is not None
+            and state.records.recovery.epoch > run.park.epoch
+        ):
+            return None
+        return ControlRefusedError(control, ("run", "status"), "park is terminal for this epoch")
+    if run.status == RunStatus.TERMINAL:
+        lifts = control.action == "resume" and control.when != "capacity_returns"
+        if lifts and reopens_on_resume(run):
+            return None
+        return ControlRefusedError(control, ("run", "status"), "terminal run rejects controls")
+    return None
 
 
 def _action_refusal(state: CoreState, control: ControlInput) -> ControlRefusedError | None:

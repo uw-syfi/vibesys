@@ -272,6 +272,7 @@
       "enum": [
         "steer",
         "pause",
+        "park",
         "resume",
         "stop",
         "withdraw",

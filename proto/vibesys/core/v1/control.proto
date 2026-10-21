@@ -200,3 +200,9 @@ message ControlInput {
   ItemId item = 13;
   optional string max_parallel = 14 [(buf.validate.field).string.pattern = "^[1-9][0-9]*$", (core_field).integer = true];
 }
+
+// Durable drain authority. A parked run can resume only in a later host epoch.
+message RunPark {
+  ControlId control_id = 1 [(buf.validate.field).required = true];
+  string epoch = 2 [(buf.validate.field).string.pattern = "^(0|[1-9][0-9]*)$", (core_field).integer = true];
+}

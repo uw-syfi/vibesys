@@ -225,16 +225,23 @@ async def drive_core_run(host: CoreHost, integration: LocalRunIntegration) -> Ru
                 # A crashed process cannot reach this line, so its restart waits out the
                 # lease (see ``start_core_awaiting_lease``); any return or raise here frees it.
                 shell.release_lease(now_at=services.clock.now())
-                integration.events.emit(CoreEventType.RUN_ENDING, data=run_ending(shell))
+                _record_ending(shell, integration)
     if outcome.refusal is not None:
         raise CoreRunRefusedError(services.run_id, outcome.refusal)
     return _run_end(outcome.result, shell, integration.environment_failure.reason)
+
+
+def _record_ending(shell: CoreRuntime, integration: LocalRunIntegration) -> None:
+    if shell.record.envelope.core.run.status != CoreRunStatus.PARKED:
+        integration.events.emit(CoreEventType.RUN_ENDING, data=run_ending(shell))
 
 
 def _run_end(
     result: RunResultProposal | None, shell: CoreRuntime, environment_failure: str | None
 ) -> RunEnd:
     """How the run ended: the environment's failure, when it stopped the run, else its result."""
+    if shell.record.envelope.core.run.status == CoreRunStatus.PARKED:
+        raise OperatorParked
     uncompared = result is not None and result.uncompared
     if environment_failure is not None:
         # The environment's failure stopped the run; it ended as a failure, not a stop.
@@ -284,6 +291,10 @@ def _unacknowledged_notes(bridge: AgentEvaluationBridge | None) -> StallNotes:
 def _ended_by(result: RunResultProposal, ending: EndReason) -> bool:
     """Whether the framework ended the run for ``ending`` (its reason starts with the ending)."""
     return result.reason.split(":", 1)[0] == ending.value
+
+
+class OperatorParked(BaseException):
+    """The epoch drained successfully; the saved search resumes on relaunch."""
 
 
 class OperatorStopped(RunStopped):

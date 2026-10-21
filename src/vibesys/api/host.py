@@ -92,8 +92,7 @@ def _control_payload(request: PostIntentRequest) -> dict[str, object]:
     common: dict[str, object] = {"control_id": request.request_id}
     match request.intent:
         case Oneof("park", _):
-            message = "park is not supported by this checkout's control inbox"
-            raise ValueError(message)
+            payload = {"action": ControlAction.PARK}
         case Oneof("pause", _):
             payload = {"action": ControlAction.PAUSE}
         case Oneof("resume", value):

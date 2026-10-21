@@ -20,6 +20,10 @@ def lifecycle(projection: Projection) -> None:
             )
         ),
         e.CoreEventType.RESUMED: p.Lifecycle(state=p.Oneof("running", p.Running())),
+        e.CoreEventType.PARK_REQUESTED: p.Lifecycle(
+            state=p.Oneof("draining", p.Draining(goal=p.DrainGoal.PARK))
+        ),
+        e.CoreEventType.PARKED: p.Lifecycle(state=p.Oneof("parked", p.Parked())),
         e.CoreEventType.STOP_REQUESTED: p.Lifecycle(
             state=p.Oneof("draining", p.Draining(goal=p.DrainGoal.STOP))
         ),
@@ -108,6 +112,8 @@ MAPPERS.update(
             e.CoreEventType.PAUSE_REQUESTED,
             e.CoreEventType.PAUSED,
             e.CoreEventType.RESUMED,
+            e.CoreEventType.PARK_REQUESTED,
+            e.CoreEventType.PARKED,
             e.CoreEventType.STOP_REQUESTED,
         ),
         lifecycle,

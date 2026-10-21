@@ -15,7 +15,13 @@ from vibesys.composition import resolve_agent_specs
 from vibesys.events import CoreEventType, EventStatus, RunFailedData, RunStartedData
 from vibesys.orchestration.agent_options import attribution_command_of, objective_axes_of
 from vibesys.plugin_catalog import project_run
-from vibesys.run.core_run import OperatorStopped, RunEnd, drive_core_run, ensure_resumable
+from vibesys.run.core_run import (
+    OperatorParked,
+    OperatorStopped,
+    RunEnd,
+    drive_core_run,
+    ensure_resumable,
+)
 from vibesys.run.host import open_product_core_host
 from vibesys.run.integration import AuxiliaryResources, LocalRunIntegration, RunResources
 from vibesys.run.overview import overview_of
@@ -328,6 +334,15 @@ class _LocalRunSession:
                 invocation_store_factory=self._implementations.invocation_store_factory,
             )
             succeeded = outcome.status.value == "succeeded"
+        except OperatorParked:
+            self._status = RunStatus.PARKED
+            self._integration.events.emit(CoreEventType.PARKED, "Run saved for relaunch")
+            return RunResult(
+                run_id=self._run_id(),
+                loop=request.orchestration.id,
+                succeeded=False,
+                status=RunStatus.PARKED,
+            )
         except RunStopped as stop:
             self._status = RunStatus.STOPPED
             self._integration.events.emit(

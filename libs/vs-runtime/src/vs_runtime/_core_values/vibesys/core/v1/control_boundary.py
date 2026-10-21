@@ -227,6 +227,14 @@ def decode_ControlInput(m: pb.ControlInput) -> values.ControlInput:
     )
 
 
+def encode_RunPark(v: values.RunPark) -> pb.RunPark:
+    return pb.RunPark(control_id=encode_ControlId(v.control_id), epoch=str(v.epoch))
+
+
+def decode_RunPark(m: pb.RunPark) -> values.RunPark:
+    return values.RunPark(control_id=decode_ControlId(_required(m.control_id)), epoch=int(m.epoch))
+
+
 ENCODERS: dict[type, Callable[..., Message]] = {
     values.ScopeInputTarget: encode_ScopeInputTarget,
     values.ItemInputTarget: encode_ItemInputTarget,
@@ -237,6 +245,7 @@ ENCODERS: dict[type, Callable[..., Message]] = {
     values.Limits: encode_Limits,
     values.RunPause: encode_RunPause,
     values.ControlInput: encode_ControlInput,
+    values.RunPark: encode_RunPark,
 }
 DECODERS: dict[type, Callable[..., object]] = {
     pb.ScopeInputTarget: decode_ScopeInputTarget,
@@ -249,4 +258,5 @@ DECODERS: dict[type, Callable[..., object]] = {
     pb.Limits: decode_Limits,
     pb.RunPause: decode_RunPause,
     pb.ControlInput: decode_ControlInput,
+    pb.RunPark: decode_RunPark,
 }
