@@ -34,6 +34,8 @@ def publish_run_link(link: Path, directory: Path) -> Path:
         message = f"run index entry is not a symlink: {link}"
         raise ProjectStateError(message)
     directory.mkdir(parents=True, exist_ok=True)
+    if link.is_symlink() and link.resolve() == directory.resolve():
+        return link
     with tempfile.TemporaryDirectory(prefix=".publish-", dir=index) as temporary:
         staged = Path(temporary) / "link"
         staged.symlink_to(directory.resolve(), target_is_directory=True)

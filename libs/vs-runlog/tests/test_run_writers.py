@@ -20,8 +20,8 @@ from vs_proto.api import (
     Hold,
     Keyframe,
     Label,
-    LegacyEvent,
     Lifecycle,
+    MetricPoint,
     Oneof,
     OperatorHold,
     Record,
@@ -112,7 +112,12 @@ def test_record_bound_and_recovery_preserve_immutable_checkpoints(count: int) ->
                 writer.append(record)
             for seq in range(3, count + 3):
                 writer.append(
-                    Record(seq=seq, epoch=1, body=Oneof("legacy_event", LegacyEvent(json="x")))
+                    Record(
+                        seq=seq,
+                        epoch=1,
+                        at=Timestamp(seconds=seq),
+                        body=Oneof("metric", MetricPoint(series="progress", value=float(seq))),
+                    )
                 )
                 # Exercise checkpoint cadence with batches rather than one
                 # storage barrier for every generated record.
@@ -129,7 +134,12 @@ def test_record_bound_and_recovery_preserve_immutable_checkpoints(count: int) ->
         with FileRunLogWriter(path, clock=ManualClock(), threads=SimThreads()) as writer:
             assert writer.sequence == count + 2
             writer.append(
-                Record(seq=count + 3, epoch=1, body=Oneof("legacy_event", LegacyEvent(json="last")))
+                Record(
+                    seq=count + 3,
+                    epoch=1,
+                    at=Timestamp(seconds=count + 3),
+                    body=Oneof("metric", MetricPoint(series="progress", value=float(count))),
+                )
             )
         for name, payload in files.items():
             assert (root / "keyframes" / name).read_bytes() == payload

@@ -16,6 +16,7 @@ from scripts.generate_record_goldens import (
     detail_examples,
     generate,
     record_examples,
+    transcript_examples,
 )
 
 import vs_proto.api as p
@@ -97,7 +98,13 @@ def skeleton_examples() -> list[Message]:
 def message_examples() -> dict[str, Message]:
     examples = {
         message.desc().name: message
-        for root in [*_RECORDS.values(), *_ATTRS.values(), *_DETAILS.values(), *skeleton_examples()]
+        for root in [
+            *_RECORDS.values(),
+            *_ATTRS.values(),
+            *_DETAILS.values(),
+            *skeleton_examples(),
+            *transcript_examples().values(),
+        ]
         for message in walk(root)
     }
     examples["Failure"] = p.Failure(kind=p.SpanFailureKind.OUTCOME, message="Gate failed")
@@ -411,7 +418,9 @@ def test_required_messages_cannot_be_absent(name: str, field: str) -> None:
     assert_invalid(message, field)
 
 
-@pytest.mark.parametrize("message", [p.Record(), p.Lifecycle(), p.Hold()])
+@pytest.mark.parametrize(
+    "message", [p.Record(), p.Lifecycle(), p.Hold(), p.TranscriptEntry(), p.TranscriptContent()]
+)
 def test_required_oneofs_cannot_be_absent(message: Message) -> None:
     assert_invalid(message, message.desc().oneofs[0].name)
 

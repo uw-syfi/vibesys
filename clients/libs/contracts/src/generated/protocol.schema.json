@@ -2630,6 +2630,17 @@
           "title": "Kind",
           "type": "string"
         },
+        "span_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SpanId"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "gate": {
           "$ref": "#/$defs/GateKind"
         },
@@ -2798,6 +2809,17 @@
           "default": "gate_started",
           "title": "Kind",
           "type": "string"
+        },
+        "span_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SpanId"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "gate": {
           "$ref": "#/$defs/GateKind"
@@ -7737,6 +7759,17 @@
           "title": "Kind",
           "type": "string"
         },
+        "span_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SpanId"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "process_id": {
           "title": "Process Id",
           "type": "string"
@@ -8624,6 +8657,18 @@
           "default": false,
           "title": "Probe",
           "type": "boolean"
+        },
+        "sequence": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sequence"
         }
       },
       "title": "WorkstreamAttrs",

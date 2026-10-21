@@ -25,7 +25,9 @@ def test_publish_replaces_stale_link_and_keeps_transport_beside_journal(
     assert link == state_home / "runs/run-1"
     assert link.is_symlink()
     assert link.resolve() == Project.log_directory_for(first, "run-1")
+    inode = link.lstat().st_ino
     assert Project.publish_run_for(first, "run-1") == link
+    assert link.lstat().st_ino == inode
     Project.publish_run_for(second, "run-1")
     assert link.resolve() == Project.log_directory_for(second, "run-1")
     assert sorted(path.name for path in link.parent.iterdir()) == ["run-1"]
@@ -61,3 +63,20 @@ def test_index_rejects_unsafe_run_ids(
     with pytest.raises(ProjectStateError, match="run"):
         Project.publish_run_for(tmp_path, run_id)
     assert not (tmp_path / "home/runs").exists()
+
+
+def test_index_discovery_reports_every_entry_without_creating_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home = tmp_path / "home"
+    monkeypatch.setenv("VIBESYS_STATE_HOME", str(home))
+    assert Project.indexed_run_directories() == ()
+    assert not home.exists()
+    index = home / "runs"
+    index.mkdir(parents=True)
+    (index / "bad").write_bytes(b"keep")
+    (index / "dangling").symlink_to(home / "absent")
+    (index / "directory").mkdir()
+    assert Project.indexed_run_directories() == tuple(
+        index / name for name in ("bad", "dangling", "directory")
+    )

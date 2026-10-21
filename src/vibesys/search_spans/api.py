@@ -24,6 +24,8 @@ searches' ``serial_search``).
 from collections.abc import Sequence
 from typing import Literal, Self
 
+from pydantic import Field
+
 from vibesys.metrics import EvidenceReading, MetricRow, reading_of
 from vs_core.api.search import (
     ADOPTED,
@@ -75,6 +77,8 @@ class WorkstreamAttrs(Value):
     outcome: str | None = None
     summary: str | None = None
     probe: bool = False
+    sequence: int | None = Field(default=None, exclude_if=lambda value: value is None)
+    """The dynamic workstream admission ordinal, used to join its projected result."""
 
 
 class FailedCheck(Value):

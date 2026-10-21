@@ -1120,6 +1120,17 @@ const runEventSchema: Record<string, unknown> = {
           "title": "Kind",
           "type": "string"
         },
+        "span_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SpanId"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "gate": {
           "$ref": "#/$defs/GateKind"
         },
@@ -1244,6 +1255,17 @@ const runEventSchema: Record<string, unknown> = {
           "default": "gate_started",
           "title": "Kind",
           "type": "string"
+        },
+        "span_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SpanId"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "gate": {
           "$ref": "#/$defs/GateKind"
@@ -3459,6 +3481,17 @@ const runEventSchema: Record<string, unknown> = {
           "default": "subprocess_output",
           "title": "Kind",
           "type": "string"
+        },
+        "span_id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SpanId"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "process_id": {
           "title": "Process Id",

@@ -1,0 +1,60 @@
+syntax = "proto3";
+
+package vibesys.store.v1;
+
+import "buf/validate/validate.proto";
+import "vibesys/store/v1/content.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1";
+
+// Transcript streams contain uvarint-length-prefixed TranscriptEntry messages.
+// Large content is immutable and fetched through its BlobRef, never truncated.
+message TranscriptEntry {
+  oneof entry {
+    option (buf.validate.oneof).required = true;
+    TranscriptText text = 1;
+    TranscriptToolCall tool_call = 2;
+    TranscriptToolResult tool_result = 3;
+  }
+}
+
+enum TranscriptChannel {
+  TRANSCRIPT_CHANNEL_UNSPECIFIED = 0;
+  TRANSCRIPT_CHANNEL_ASSISTANT = 1;
+  TRANSCRIPT_CHANNEL_ANALYSIS = 2;
+  TRANSCRIPT_CHANNEL_DIAGNOSTIC = 3;
+  TRANSCRIPT_CHANNEL_PROMPT = 4;
+}
+
+// Exactly one representation, including an explicitly present empty string.
+message TranscriptContent {
+  oneof value {
+    option (buf.validate.oneof).required = true;
+    string inline = 1 [(buf.validate.field).string.max_bytes = 65536];
+    BlobRef blob = 2;
+  }
+}
+
+message TranscriptText {
+  TranscriptChannel channel = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  TranscriptContent content = 2 [(buf.validate.field).required = true];
+}
+
+message TranscriptToolCall {
+  string tool = 1 [(buf.validate.field).string.max_bytes = 65536];
+  optional string call_id = 2 [(buf.validate.field).string.max_bytes = 65536];
+  // JSON until tool argument schemas are available at the provider boundary.
+  TranscriptContent arguments_json = 3 [(buf.validate.field).required = true];
+}
+
+message TranscriptToolResult {
+  string tool = 1 [(buf.validate.field).string.max_bytes = 65536];
+  optional string call_id = 2 [(buf.validate.field).string.max_bytes = 65536];
+  bool is_error = 3;
+  TranscriptContent content = 4 [(buf.validate.field).required = true];
+  // The complete command or JSON payload, independent of the display content.
+  optional TranscriptContent payload_json = 5;
+}

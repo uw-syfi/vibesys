@@ -7,8 +7,8 @@ import logging
 from typing import TYPE_CHECKING
 
 from vibesys.events import CoreEvent, CoreEventData, CoreEventType, make_core_event
-from vs_proto.api import Timestamp
-from vs_runlog.api import FileRunLogWriter, LegacyRunLogTee
+from vibesys.run.runlog_tee import RunLogTee
+from vs_runlog.api import FileRunContent, FileRunLogWriter
 from vs_runtime.api.infrastructure import DurableEventJournal, EventCodec
 from vs_sim.api import SleepingClock, Threads, utc_datetime
 
@@ -49,7 +49,7 @@ class EventJournal(DurableEventJournal[CoreEvent]):
         except RuntimeError:
             self._loop = None
         self._runlog_configured = False
-        self._runlog: LegacyRunLogTee | None = None
+        self._runlog: RunLogTee | None = None
 
     def enable_runlog(self, project: Project, run_id: str) -> None:
         """Enable the additive transport and publish discovery once for this process."""
@@ -61,10 +61,14 @@ class EventJournal(DurableEventJournal[CoreEvent]):
             path.parent.mkdir(parents=True, exist_ok=True)
             # Phase 1 has no checkout provenance at launch. Leave it unknown;
             # phase 3 (#3332) records provenance in EpochStarted at the launch boundary.
-            self._runlog = LegacyRunLogTee(
+            self._runlog = RunLogTee(
                 FileRunLogWriter(path, clock=self._clock, loop=self._loop, threads=self._threads),
+                FileRunContent(
+                    project.run_blobs_directory_for(project.root, run_id),
+                    project.log_streams_directory_for(project.root, run_id),
+                ),
                 run_id,
-                self._runlog_timestamp,
+                history=self.read,
             )
             project.publish_run_for(project.root, run_id)
             self.set_append_sink(self._runlog.append)
@@ -81,9 +85,6 @@ class EventJournal(DurableEventJournal[CoreEvent]):
                 logging.getLogger(__name__).exception("Run log tee failed during final commit")
             finally:
                 self._runlog = None
-
-    def _runlog_timestamp(self) -> Timestamp:
-        return Timestamp.from_datetime(utc_datetime(self._clock))
 
     def emit(
         self,

@@ -121,6 +121,7 @@ def test_the_protocol_exports_the_span_kinds_attribute_schema_of_every_built_in_
         "outcome",
         "summary",
         "probe",
+        "sequence",
     }
     gate = set(defs["GateAttrs"]["properties"])
     assert gate == {
