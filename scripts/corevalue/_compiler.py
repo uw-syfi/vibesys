@@ -24,6 +24,6 @@ def compile_files(files: Sequence[DescFile], options: Options) -> tuple[tuple[st
             continue
         validate_file(file)
         suffix = "_boundary.py" if options.boundary else "_cv.py"
-        content = boundary_file(file, options) if options.boundary else value_file(file)
+        content = boundary_file(file, options) if options.boundary else value_file(file, options)
         outputs.append((file.name.removesuffix(".proto") + suffix, content))
     return tuple(outputs)

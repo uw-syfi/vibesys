@@ -10,6 +10,8 @@ from typing import TYPE_CHECKING, Any, cast
 
 from vs_core.api import TimestampValue
 from vs_proto.api import Timestamp, validate
+from vs_runtime._core_values.vibesys.core.v1.common_boundary import DECODERS as COMMON_DECODERS
+from vs_runtime._core_values.vibesys.core.v1.common_boundary import ENCODERS as COMMON_ENCODERS
 from vs_runtime._core_values.vibesys.core.v1.control_boundary import DECODERS, ENCODERS
 from vs_runtime._corevalue_wkt import decode_timestamp, encode_timestamp
 
@@ -19,8 +21,8 @@ if TYPE_CHECKING:
     from protobuf import Message
 
 
-_ENCODERS = {**ENCODERS, TimestampValue: encode_timestamp}
-_DECODERS = {**DECODERS, Timestamp: decode_timestamp}
+_ENCODERS = {**COMMON_ENCODERS, **ENCODERS, TimestampValue: encode_timestamp}
+_DECODERS = {**COMMON_DECODERS, **DECODERS, Timestamp: decode_timestamp}
 
 
 def to_proto(value: object) -> Message:

@@ -13,6 +13,7 @@ from protobuf import (
     DescMessage,
 )
 
+from scripts.corevalue._imports import imports as converter_imports
 from scripts.corevalue._schema import (
     Options,
     extension,
@@ -29,16 +30,20 @@ from scripts.corevalue._schema import (
 def boundary_file(file: DescFile, settings: Options | None = None) -> str:
     """Converters live outside core; protobuf and protovalidate never enter core's imports."""
     settings = settings or Options()
+    pb_module = settings.pb_module.format(file=file.name.rsplit("/", 1)[-1].removesuffix(".proto"))
     lines = [
         f"# Generated from {file.name} by protoc-gen-corevalue. DO NOT EDIT.",
         "from __future__ import annotations",
         "from protobuf import Message, Oneof",
         "from typing import Callable, Literal, cast",
         f"import {settings.value_module} as values",
-        f"from {settings.pb_module.rsplit('.', 1)[0]} import {settings.pb_module.rsplit('.', 1)[1]} as pb",
+        f"from {pb_module.rsplit('.', 1)[0]} import {pb_module.rsplit('.', 1)[1]} as pb",
         "from vs_runtime._corevalue_wkt import encode_timestamp, decode_timestamp",
         "",
     ]
+    lines.extend(converter_imports(file, settings.boundary_package, boundary=True))
+    for enum in file.enums:
+        lines.extend(_enum(enum))
     lines.extend(
         [
             "def _required[T](value: T | None) -> T:",
@@ -68,14 +73,7 @@ def enc_element(kind: object, attr: str) -> str:
             else f"encode_{name(kind)}({attr})"
         )
     if isinstance(kind, DescEnum):
-        table = (
-            "{"
-            + ", ".join(
-                f"{spelling!r}: pb.{name(kind)}.{member}" for member, spelling, _ in members(kind)
-            )
-            + "}"
-        )
-        return f"{table}.get({attr}, pb.{name(kind)}.UNSPECIFIED)"
+        return f"encode_{name(kind)}({attr})"
     return attr
 
 
@@ -88,14 +86,7 @@ def dec_element(kind: object, attr: str) -> str:
             else f"decode_{name(kind)}({attr})"
         )
     if isinstance(kind, DescEnum):
-        table = {number: spelling for _, spelling, number in members(kind)}
-        opts = extension(kind, options.ext_core_enum)
-        converted = f"{table!r}[{attr}]"
-        return (
-            f"cast(values.{name(kind)}, {converted})"
-            if opts and opts.literal
-            else f"values.{name(kind)}({converted})"
-        )
+        return f"decode_{name(kind)}({attr})"
     return attr
 
 
@@ -197,3 +188,25 @@ def _decimal(f: DescField, attr: str, *, encode: bool) -> str | None:
             )
         return expr
     return None
+
+
+def _enum(enum: DescEnum) -> list[str]:
+    """Share enum conversions with importing contract files."""
+    n = name(enum)
+    entries = members(enum)
+    encoded = (
+        "{" + ", ".join(f"{spelling!r}: pb.{n}.{member}" for member, spelling, _ in entries) + "}"
+    )
+    decoded = repr({number: spelling for _, spelling, number in entries})
+    opts = extension(enum, options.ext_core_enum)
+    result = (
+        f"cast(values.{n}, {decoded}[v])" if opts and opts.literal else f"values.{n}({decoded}[v])"
+    )
+    return [
+        f"def encode_{n}(v: values.{n} | None) -> pb.{n}:",
+        f"    return {encoded}.get(v, pb.{n}.UNSPECIFIED)",
+        "",
+        f"def decode_{n}(v: pb.{n}) -> values.{n}:",
+        f"    return {result}",
+        "",
+    ]

@@ -9,7 +9,9 @@ from protobuf.plugin import get_comments
 
 from scripts.corevalue._cel import cel
 from scripts.corevalue._constants import constants
+from scripts.corevalue._imports import imports as type_imports
 from scripts.corevalue._schema import (
+    Options,
     extension,
     field_shape,
     is_union,
@@ -30,11 +32,14 @@ def doc(desc: object) -> str:
     return cleandoc(get_comments(desc).leading or "") or f"Immutable {desc.name} value."
 
 
-def value_file(file: DescFile) -> str:
+def value_file(file: DescFile, settings: Options | None = None) -> str:
     """Value file."""
+    settings = settings or Options()
     enums = list(file.enums)
     messages = list(file.messages)
-    imports = _behavior_imports(messages)
+    imports = _behavior_imports(messages) + type_imports(
+        file, settings.value_package, boundary=False
+    )
     lines = [
         f"# Generated from {file.name} by protoc-gen-corevalue. DO NOT EDIT.",
         "from __future__ import annotations",

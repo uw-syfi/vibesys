@@ -1961,7 +1961,7 @@ depends_on = ["vs_core._corevalue", "vs_core._retry_policy"]
 
 [[interfaces]]
 from = ["vs_core._generated"]
-expose = ["vibesys\\.core\\.v1\\.control_cv\\.[A-Z].*"]
+expose = ["vibesys\\.core\\.v1\\.[a-z_]+_cv\\.[A-Z].*"]
 
 [[modules]]
 path = "vs_core._corevalue"

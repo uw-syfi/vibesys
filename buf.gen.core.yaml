@@ -1,7 +1,7 @@
 version: v2
 inputs:
   - directory: proto
-    paths: [proto/vibesys/core/v1/control.proto]
+    paths: [proto/vibesys/core/v1/common.proto, proto/vibesys/core/v1/control.proto]
 plugins:
   - local: [uv, run, --locked, --group, proto, python, -m, scripts.protoc_gen_corevalue]
     out: libs/vs-core/src/vs_core/_generated

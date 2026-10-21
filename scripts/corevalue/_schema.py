@@ -33,7 +33,9 @@ class Options:
 
     boundary: bool = False
     value_module: str = "vs_core.api"
-    pb_module: str = "vs_proto.api.core_state"
+    pb_module: str = "vs_proto.api.core_{file}"
+    value_package: str = "vs_core._generated"
+    boundary_package: str = "vs_runtime._core_values"
 
 
 def extension(desc: object, key: object, default: object = None) -> object:

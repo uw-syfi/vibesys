@@ -14,8 +14,9 @@ from pydantic import TypeAdapter, ValidationError
 
 import vs_core.api as core
 from vs_core.api.testing import sample_limits, sample_retries
-from vs_proto.api import LegacyEvent, core_state
+from vs_proto.api import LegacyEvent, core_common
 from vs_proto.api import ValidationError as ProtoValidationError
+from vs_proto.api import core_control as core_state
 from vs_runtime.api.core_values import from_proto, to_proto, value_types
 
 if TYPE_CHECKING:
@@ -165,13 +166,13 @@ def test_unsupported_valid_proto_messages_fail_by_name() -> None:
         from_proto(LegacyEvent(json="{}"))
 
 
-@given(owner=st.sampled_from([core_state.PauseOwner.UNSPECIFIED, core_state.PauseOwner(99)]))
+@given(owner=st.sampled_from([core_common.PauseOwner.UNSPECIFIED, core_common.PauseOwner(99)]))
 def test_proto_validation_runs_before_core_values_are_constructed(
-    owner: core_state.PauseOwner,
+    owner: core_common.PauseOwner,
 ) -> None:
     message = core_state.ControlInput(
-        control_id=core_state.ControlId(root="c", kind="control"),
-        action=core_state.ControlAction.PAUSE,
+        control_id=core_common.ControlId(root="c", kind="control"),
+        action=core_common.ControlAction.PAUSE,
         owner=owner,
     )
     with pytest.raises(ProtoValidationError):

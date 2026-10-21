@@ -14,6 +14,7 @@ from protobuf import (
 )
 
 from scripts.corevalue._constants import constants
+from scripts.corevalue._imports import foreign_types
 from scripts.corevalue._schema import (
     GenerationError,
     extension,
@@ -51,7 +52,7 @@ def validate_file(file: object) -> None:
         if not key.isidentifier() or not key.isupper() or key in claimed:
             raise GenerationError(file.name, f"invalid or duplicate exported constant: {key}")
         claimed.add(key)
-    for desc in [*file.enums, *file.messages]:
+    for desc in [*file.enums, *file.messages, *foreign_types(file)]:
         generated = name(desc)
         if generated in claimed:
             raise GenerationError(file.name, f"generated name collision: {generated}")
@@ -135,9 +136,13 @@ def _reference(kind: object, path: str, file: object) -> None:
         isinstance(kind, DescMessage)
         and kind.file is not file
         and kind.type_name != "google.protobuf.Timestamp"
-    ):
+    ) and kind.file.proto.package != file.proto.package:
         raise GenerationError(
-            path, f"imported message {kind.type_name} requires its own value binding"
+            path, f"imported message {kind.type_name} requires an explicit value package"
         )
-    if isinstance(kind, DescEnum) and kind.file is not file:
-        raise GenerationError(path, "imported enums require their own value binding")
+    if (
+        isinstance(kind, DescEnum)
+        and kind.file is not file
+        and kind.file.proto.package != file.proto.package
+    ):
+        raise GenerationError(path, "imported enum requires an explicit value package")

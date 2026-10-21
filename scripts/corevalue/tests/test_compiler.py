@@ -17,7 +17,8 @@ from scripts.corevalue.api import (
     compile_values,
 )
 from scripts.corevalue.tests.api import MapValue, encode
-from vs_proto.api import core_state, core_value_options
+from vs_proto.api import core_control as core_state
+from vs_proto.api import core_value_options
 
 if TYPE_CHECKING:
     from collections.abc import Callable
