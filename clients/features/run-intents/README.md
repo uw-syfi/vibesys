@@ -23,7 +23,8 @@ The command uses the existing inbox's validation, posting order, idempotence,
 local-run guard, and ended-run rules. Retrying after an uncertain result sends
 the identical request id and payload. A successful HostCall means durable
 admission; the UI stays pending until an IntentState record says applied or
-refused. The feature follows Tail for those outcomes without changing the
+refused. A reader that has not declared the ordered inbox format is shown with
+a posting-order warning, as the legacy CLI does. The feature follows Tail for those outcomes without changing the
 skeleton projection.
 
 ## Current limits

@@ -25,6 +25,7 @@ export function IntentControls(props: {
   readonly busy: boolean;
   readonly entries: readonly IntentEntry[];
   readonly error: string | null;
+  readonly warning: string | null;
   readonly text: string;
   readonly edit: (text: string) => void;
   readonly send: (action: 'pause' | 'resume' | 'stop' | 'steer') => void;
@@ -56,6 +57,7 @@ export function IntentControls(props: {
           text="Send guidance"
         />
         <Text tone="muted">Requests stay pending until the run records their outcome.</Text>
+        {props.warning ? <Text tone="warn">{props.warning}</Text> : null}
         {props.error ? (
           <Text tone="err" title={props.error}>
             Request updates unavailable

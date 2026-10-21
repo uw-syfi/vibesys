@@ -132,3 +132,17 @@ test('retry owns the original payload even if its caller edits the generated mes
     value: {text: 'original guidance'},
   });
 });
+
+test('an undeclared ordered reader is visible without claiming application', () => {
+  const sending = getNextSnapshot(
+    runIntentsMachine,
+    getInitialSnapshot(runIntentsMachine, {enabled: true}),
+    {type: 'send', request},
+  );
+  const admitted = getNextSnapshot(runIntentsMachine, sending, {
+    type: 'xstate.done.actor.post',
+    output: create(PostIntentResponseSchema, {requestId: 'r-1', orderedReader: false}),
+  } as never);
+  expect(admitted.context.entries[0]?.status).toBe('pending');
+  expect(admitted.context.warning).toContain('Posting order has not been confirmed');
+});

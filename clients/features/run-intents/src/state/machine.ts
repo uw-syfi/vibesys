@@ -16,6 +16,7 @@ export interface RunIntentsContext {
   readonly entries: readonly IntentEntry[];
   readonly current: PostIntentRequest | null;
   readonly error: string | null;
+  readonly warning: string | null;
 }
 export type RunIntentsEvent =
   | {readonly type: 'send'; readonly request: PostIntentRequest}
@@ -67,7 +68,13 @@ export const runIntentsMachine = setup({
   delays: {deadline: 35_000},
 }).createMachine({
   id: 'runIntents',
-  context: ({input}) => ({enabled: input.enabled, entries: [], current: null, error: null}),
+  context: ({input}) => ({
+    enabled: input.enabled,
+    entries: [],
+    current: null,
+    error: null,
+    warning: null,
+  }),
   initial: 'routing',
   states: {
     routing: {
@@ -135,7 +142,10 @@ export const runIntentsMachine = setup({
             },
             onDone: {
               target: 'idle',
-              actions: assign(({context}) => ({
+              actions: assign(({context, event}) => ({
+                warning: event.output.orderedReader
+                  ? null
+                  : 'Posting order has not been confirmed. Start or restart this run with the current VibeSys.',
                 entries: context.entries.map(entry =>
                   entry.status === 'sending' ? {...entry, status: 'pending' as const} : entry,
                 ),

@@ -51,6 +51,7 @@ export function RunIntents(props: {
       busy={snapshot.matches({active: 'sending'})}
       entries={snapshot.context.entries}
       error={snapshot.context.error}
+      warning={snapshot.context.warning}
       text={text}
       edit={setText}
       send={send}
