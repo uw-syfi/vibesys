@@ -95,13 +95,17 @@ test('regression: a run opened from its summary has its time bar whole, at the e
   await expect(page.getByRole('listbox', {name: 'Ideas'})).toBeVisible();
   const bar = page.getByRole('slider', {name: 'Run position'});
   await expect(bar).toBeVisible();
-  // One position to stand at: the track is drawn whole, the playhead at its end, nothing to move.
-  expect(
-    await bar.evaluate(range => {
-      const input = range as HTMLInputElement;
-      return [input.min, input.max, input.value, input.disabled];
-    }),
-  ).toEqual(['0', '1', '1', true]);
+  // The ended run's trace pages in, so the track is drawn whole from its first position to its
+  // last, with the playhead at the end.
+  const {min, max, value, disabled} = await bar.evaluate(range => {
+    const input = range as HTMLInputElement;
+    return {min: input.min, max: input.max, value: input.value, disabled: input.disabled};
+  });
+  expect({min, atEnd: value === max, movable: !disabled && Number(max) > 0}).toEqual({
+    min: '0',
+    atEnd: true,
+    movable: true,
+  });
   await expect(page.getByText('End', {exact: true})).toBeVisible();
 });
 
