@@ -191,18 +191,22 @@ def encode_identity(
     Encoding v1 pins protobuf-py 0.6.0 writer order, framed type/contract and
     a fixed-size chained causal digest. It is not cross-language canonicalization.
     """
-    if not contract or len(dependencies) != DIGEST_BYTES:
-        problem = "identity needs a semantic contract and 32-byte dependencies"
-        raise ReplayIdentityError(problem)
     _check_schema(message.desc(), set())
     normalized = _normalize(message)
     validate(normalized)
+    return _encode_normalized(normalized, contract=contract, dependencies=dependencies)
+
+
+def _encode_normalized(message: Message, *, contract: str, dependencies: bytes) -> EncodedIdentity:
+    if not contract or len(dependencies) != DIGEST_BYTES:
+        problem = "identity needs a semantic contract and 32-byte dependencies"
+        raise ReplayIdentityError(problem)
     canonical = (
         b"vibesys.identity\x01"
         + _frame(contract.encode())
         + _frame(message.desc().type_name.encode())
         + dependencies
-        + _frame(normalized.to_binary())
+        + _frame(message.to_binary())
     )
     return EncodedIdentity(canonical, dependencies)
 
@@ -273,5 +277,9 @@ def classify_context(
     _check_classification(message.desc(), set())
     message = _normalize(message)
     validate(message)
-    identity = encode_identity(_classified(message), contract=contract, dependencies=dependencies)
+    # The complete context was validated above. Its identity projection omits
+    # policy, including fields that the complete context requires.
+    identity = _encode_normalized(
+        _classified(message), contract=contract, dependencies=dependencies
+    )
     return ClassifiedContext(type(message), message.to_binary(), identity)

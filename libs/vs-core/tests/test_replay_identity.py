@@ -4,7 +4,7 @@ from math import inf, nan
 from typing import cast
 
 import pytest
-from hypothesis import given
+from hypothesis import example, given
 from hypothesis import strategies as st
 from protobuf import Message
 from protobuf.wkt.google.protobuf.any_pb import Any
@@ -18,7 +18,7 @@ from vs_core.api.replay import (
     classify_context,
     encode_identity,
 )
-from vs_proto.api import core_common, core_leaves, replay
+from vs_proto.api import ValidationError, core_common, core_leaves, replay
 
 from .generated.vibesys.replay.testing.v1.context_pb import (
     Context,
@@ -28,6 +28,7 @@ from .generated.vibesys.replay.testing.v1.context_pb import (
     RepeatedContext,
     RepeatedMapIdentity,
     RepeatedUnclassifiedPolicy,
+    RequiredPolicyContext,
     SharedContext,
     UnclassifiedPolicy,
 )
@@ -203,3 +204,18 @@ def test_typed_context_inherits_classification_for_shared_facts() -> None:
 def test_a_shared_value_alone_is_not_a_declared_prompt_context() -> None:
     with pytest.raises(ReplayIdentityError, match="must declare replay_context"):
         classify_context(core_common.Identity(root="candidate-a"), contract="plan.v1")
+
+
+@pytest.mark.regression
+@given(model=st.text(min_size=1, max_size=30, alphabet=st.characters(blacklist_categories=("Cs",))))
+@example(model="model-b")
+def test_required_policy_fields_validate_before_their_identity_projection(model: str) -> None:
+    before = RequiredPolicyContext(candidate="candidate-a", model="model-a")
+    after = RequiredPolicyContext(candidate="candidate-a", model=model)
+    identity = classify_context(before, contract="turn.v1").identity
+    assert identity == classify_context(after, contract="turn.v1").identity
+    after.candidate = "candidate-b"
+    assert identity != classify_context(after, contract="turn.v1").identity
+    before.model = ""
+    with pytest.raises(ValidationError, match="RequiredPolicyContext"):
+        classify_context(before, contract="turn.v1")
