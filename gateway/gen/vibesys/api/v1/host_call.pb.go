@@ -121,6 +121,61 @@ func (StopMode) EnumDescriptor() ([]byte, []int) {
 	return file_vibesys_api_v1_host_call_proto_rawDescGZIP(), []int{1}
 }
 
+type RelaunchRefusal int32
+
+const (
+	RelaunchRefusal_RELAUNCH_REFUSAL_UNSPECIFIED      RelaunchRefusal = 0
+	RelaunchRefusal_RELAUNCH_REFUSAL_LOCKED           RelaunchRefusal = 1
+	RelaunchRefusal_RELAUNCH_REFUSAL_ENDED            RelaunchRefusal = 2
+	RelaunchRefusal_RELAUNCH_REFUSAL_CHECKOUT_MISSING RelaunchRefusal = 3
+	RelaunchRefusal_RELAUNCH_REFUSAL_EPOCH_CHANGED    RelaunchRefusal = 4
+)
+
+// Enum value maps for RelaunchRefusal.
+var (
+	RelaunchRefusal_name = map[int32]string{
+		0: "RELAUNCH_REFUSAL_UNSPECIFIED",
+		1: "RELAUNCH_REFUSAL_LOCKED",
+		2: "RELAUNCH_REFUSAL_ENDED",
+		3: "RELAUNCH_REFUSAL_CHECKOUT_MISSING",
+		4: "RELAUNCH_REFUSAL_EPOCH_CHANGED",
+	}
+	RelaunchRefusal_value = map[string]int32{
+		"RELAUNCH_REFUSAL_UNSPECIFIED":      0,
+		"RELAUNCH_REFUSAL_LOCKED":           1,
+		"RELAUNCH_REFUSAL_ENDED":            2,
+		"RELAUNCH_REFUSAL_CHECKOUT_MISSING": 3,
+		"RELAUNCH_REFUSAL_EPOCH_CHANGED":    4,
+	}
+)
+
+func (x RelaunchRefusal) Enum() *RelaunchRefusal {
+	p := new(RelaunchRefusal)
+	*p = x
+	return p
+}
+
+func (x RelaunchRefusal) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (RelaunchRefusal) Descriptor() protoreflect.EnumDescriptor {
+	return file_vibesys_api_v1_host_call_proto_enumTypes[2].Descriptor()
+}
+
+func (RelaunchRefusal) Type() protoreflect.EnumType {
+	return &file_vibesys_api_v1_host_call_proto_enumTypes[2]
+}
+
+func (x RelaunchRefusal) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use RelaunchRefusal.Descriptor instead.
+func (RelaunchRefusal) EnumDescriptor() ([]byte, []int) {
+	return file_vibesys_api_v1_host_call_proto_rawDescGZIP(), []int{2}
+}
+
 // The caller takes checkout from the host's saved configuration. Carrying it on
 // each call lets a stateless gateway immediately follow a checkout change.
 type HostCallRequest struct {
@@ -129,6 +184,7 @@ type HostCallRequest struct {
 	// Types that are valid to be assigned to Method:
 	//
 	//	*HostCallRequest_PostIntent
+	//	*HostCallRequest_Relaunch
 	//	*HostCallRequest_ChatMessage
 	Method        isHostCallRequest_Method `protobuf_oneof:"method"`
 	unknownFields protoimpl.UnknownFields
@@ -188,6 +244,15 @@ func (x *HostCallRequest) GetPostIntent() *PostIntentRequest {
 	return nil
 }
 
+func (x *HostCallRequest) GetRelaunch() *RelaunchRequest {
+	if x != nil {
+		if x, ok := x.Method.(*HostCallRequest_Relaunch); ok {
+			return x.Relaunch
+		}
+	}
+	return nil
+}
+
 func (x *HostCallRequest) GetChatMessage() *ChatMessageRequest {
 	if x != nil {
 		if x, ok := x.Method.(*HostCallRequest_ChatMessage); ok {
@@ -205,11 +270,17 @@ type HostCallRequest_PostIntent struct {
 	PostIntent *PostIntentRequest `protobuf:"bytes,2,opt,name=post_intent,json=postIntent,proto3,oneof"`
 }
 
+type HostCallRequest_Relaunch struct {
+	Relaunch *RelaunchRequest `protobuf:"bytes,3,opt,name=relaunch,proto3,oneof"`
+}
+
 type HostCallRequest_ChatMessage struct {
 	ChatMessage *ChatMessageRequest `protobuf:"bytes,4,opt,name=chat_message,json=chatMessage,proto3,oneof"`
 }
 
 func (*HostCallRequest_PostIntent) isHostCallRequest_Method() {}
+
+func (*HostCallRequest_Relaunch) isHostCallRequest_Method() {}
 
 func (*HostCallRequest_ChatMessage) isHostCallRequest_Method() {}
 
@@ -221,6 +292,7 @@ type HostCallResponse struct {
 	//
 	//	*HostCallResponse_PostIntent
 	//	*HostCallResponse_ConfigurationFailed
+	//	*HostCallResponse_Relaunch
 	//	*HostCallResponse_ChatMessage
 	Result        isHostCallResponse_Result `protobuf_oneof:"result"`
 	unknownFields protoimpl.UnknownFields
@@ -282,6 +354,15 @@ func (x *HostCallResponse) GetConfigurationFailed() *ConfigurationFailed {
 	return nil
 }
 
+func (x *HostCallResponse) GetRelaunch() *RelaunchResponse {
+	if x != nil {
+		if x, ok := x.Result.(*HostCallResponse_Relaunch); ok {
+			return x.Relaunch
+		}
+	}
+	return nil
+}
+
 func (x *HostCallResponse) GetChatMessage() *ChatMessageResponse {
 	if x != nil {
 		if x, ok := x.Result.(*HostCallResponse_ChatMessage); ok {
@@ -303,6 +384,10 @@ type HostCallResponse_ConfigurationFailed struct {
 	ConfigurationFailed *ConfigurationFailed `protobuf:"bytes,2,opt,name=configuration_failed,json=configurationFailed,proto3,oneof"`
 }
 
+type HostCallResponse_Relaunch struct {
+	Relaunch *RelaunchResponse `protobuf:"bytes,3,opt,name=relaunch,proto3,oneof"`
+}
+
 type HostCallResponse_ChatMessage struct {
 	ChatMessage *ChatMessageResponse `protobuf:"bytes,4,opt,name=chat_message,json=chatMessage,proto3,oneof"`
 }
@@ -310,6 +395,8 @@ type HostCallResponse_ChatMessage struct {
 func (*HostCallResponse_PostIntent) isHostCallResponse_Result() {}
 
 func (*HostCallResponse_ConfigurationFailed) isHostCallResponse_Result() {}
+
+func (*HostCallResponse_Relaunch) isHostCallResponse_Result() {}
 
 func (*HostCallResponse_ChatMessage) isHostCallResponse_Result() {}
 
@@ -1066,6 +1153,150 @@ func (x *SetParallelismIntent) GetMaxParallel() uint32 {
 	return 0
 }
 
+// The observed epoch fences retries. Reconcile an uncertain call through
+// Skeleton before retrying; it must never start a second new epoch silently.
+type RelaunchRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ProjectRoot   string                 `protobuf:"bytes,1,opt,name=project_root,json=projectRoot,proto3" json:"project_root,omitempty"`
+	RunId         string                 `protobuf:"bytes,2,opt,name=run_id,json=runId,proto3" json:"run_id,omitempty"`
+	ExpectedEpoch uint64                 `protobuf:"varint,3,opt,name=expected_epoch,json=expectedEpoch,proto3" json:"expected_epoch,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RelaunchRequest) Reset() {
+	*x = RelaunchRequest{}
+	mi := &file_vibesys_api_v1_host_call_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RelaunchRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RelaunchRequest) ProtoMessage() {}
+
+func (x *RelaunchRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_api_v1_host_call_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RelaunchRequest.ProtoReflect.Descriptor instead.
+func (*RelaunchRequest) Descriptor() ([]byte, []int) {
+	return file_vibesys_api_v1_host_call_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *RelaunchRequest) GetProjectRoot() string {
+	if x != nil {
+		return x.ProjectRoot
+	}
+	return ""
+}
+
+func (x *RelaunchRequest) GetRunId() string {
+	if x != nil {
+		return x.RunId
+	}
+	return ""
+}
+
+func (x *RelaunchRequest) GetExpectedEpoch() uint64 {
+	if x != nil {
+		return x.ExpectedEpoch
+	}
+	return 0
+}
+
+type RelaunchResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Outcome:
+	//
+	//	*RelaunchResponse_Epoch
+	//	*RelaunchResponse_Refusal
+	Outcome       isRelaunchResponse_Outcome `protobuf_oneof:"outcome"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RelaunchResponse) Reset() {
+	*x = RelaunchResponse{}
+	mi := &file_vibesys_api_v1_host_call_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RelaunchResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RelaunchResponse) ProtoMessage() {}
+
+func (x *RelaunchResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_api_v1_host_call_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RelaunchResponse.ProtoReflect.Descriptor instead.
+func (*RelaunchResponse) Descriptor() ([]byte, []int) {
+	return file_vibesys_api_v1_host_call_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *RelaunchResponse) GetOutcome() isRelaunchResponse_Outcome {
+	if x != nil {
+		return x.Outcome
+	}
+	return nil
+}
+
+func (x *RelaunchResponse) GetEpoch() uint64 {
+	if x != nil {
+		if x, ok := x.Outcome.(*RelaunchResponse_Epoch); ok {
+			return x.Epoch
+		}
+	}
+	return 0
+}
+
+func (x *RelaunchResponse) GetRefusal() RelaunchRefusal {
+	if x != nil {
+		if x, ok := x.Outcome.(*RelaunchResponse_Refusal); ok {
+			return x.Refusal
+		}
+	}
+	return RelaunchRefusal_RELAUNCH_REFUSAL_UNSPECIFIED
+}
+
+type isRelaunchResponse_Outcome interface {
+	isRelaunchResponse_Outcome()
+}
+
+type RelaunchResponse_Epoch struct {
+	Epoch uint64 `protobuf:"varint,1,opt,name=epoch,proto3,oneof"`
+}
+
+type RelaunchResponse_Refusal struct {
+	Refusal RelaunchRefusal `protobuf:"varint,2,opt,name=refusal,proto3,enum=vibesys.api.v1.RelaunchRefusal,oneof"`
+}
+
+func (*RelaunchResponse_Epoch) isRelaunchResponse_Outcome() {}
+
+func (*RelaunchResponse_Refusal) isRelaunchResponse_Outcome() {}
+
 // Retrying an id with identical content admits exactly one question.
 type ChatMessageRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -1080,7 +1311,7 @@ type ChatMessageRequest struct {
 
 func (x *ChatMessageRequest) Reset() {
 	*x = ChatMessageRequest{}
-	mi := &file_vibesys_api_v1_host_call_proto_msgTypes[14]
+	mi := &file_vibesys_api_v1_host_call_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1092,7 +1323,7 @@ func (x *ChatMessageRequest) String() string {
 func (*ChatMessageRequest) ProtoMessage() {}
 
 func (x *ChatMessageRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_api_v1_host_call_proto_msgTypes[14]
+	mi := &file_vibesys_api_v1_host_call_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1105,7 +1336,7 @@ func (x *ChatMessageRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ChatMessageRequest.ProtoReflect.Descriptor instead.
 func (*ChatMessageRequest) Descriptor() ([]byte, []int) {
-	return file_vibesys_api_v1_host_call_proto_rawDescGZIP(), []int{14}
+	return file_vibesys_api_v1_host_call_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *ChatMessageRequest) GetProjectRoot() string {
@@ -1153,7 +1384,7 @@ type ChatMessageResponse struct {
 
 func (x *ChatMessageResponse) Reset() {
 	*x = ChatMessageResponse{}
-	mi := &file_vibesys_api_v1_host_call_proto_msgTypes[15]
+	mi := &file_vibesys_api_v1_host_call_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1165,7 +1396,7 @@ func (x *ChatMessageResponse) String() string {
 func (*ChatMessageResponse) ProtoMessage() {}
 
 func (x *ChatMessageResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_api_v1_host_call_proto_msgTypes[15]
+	mi := &file_vibesys_api_v1_host_call_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1178,7 +1409,7 @@ func (x *ChatMessageResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ChatMessageResponse.ProtoReflect.Descriptor instead.
 func (*ChatMessageResponse) Descriptor() ([]byte, []int) {
-	return file_vibesys_api_v1_host_call_proto_rawDescGZIP(), []int{15}
+	return file_vibesys_api_v1_host_call_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *ChatMessageResponse) GetSessionId() string {
@@ -1199,18 +1430,20 @@ var File_vibesys_api_v1_host_call_proto protoreflect.FileDescriptor
 
 const file_vibesys_api_v1_host_call_proto_rawDesc = "" +
 	"\n" +
-	"\x1evibesys/api/v1/host_call.proto\x12\x0evibesys.api.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1dvibesys/store/v1/intent.proto\"\xd9\x01\n" +
+	"\x1evibesys/api/v1/host_call.proto\x12\x0evibesys.api.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1dvibesys/store/v1/intent.proto\"\x98\x02\n" +
 	"\x0fHostCallRequest\x12&\n" +
 	"\bcheckout\x18\x01 \x01(\tB\n" +
 	"\xbaH\ar\x05\x10\x01(\x80 R\bcheckout\x12D\n" +
 	"\vpost_intent\x18\x02 \x01(\v2!.vibesys.api.v1.PostIntentRequestH\x00R\n" +
-	"postIntent\x12G\n" +
+	"postIntent\x12=\n" +
+	"\brelaunch\x18\x03 \x01(\v2\x1f.vibesys.api.v1.RelaunchRequestH\x00R\brelaunch\x12G\n" +
 	"\fchat_message\x18\x04 \x01(\v2\".vibesys.api.v1.ChatMessageRequestH\x00R\vchatMessageB\x0f\n" +
-	"\x06method\x12\x05\xbaH\x02\b\x01\"\x8e\x02\n" +
+	"\x06method\x12\x05\xbaH\x02\b\x01\"\xce\x02\n" +
 	"\x10HostCallResponse\x12E\n" +
 	"\vpost_intent\x18\x01 \x01(\v2\".vibesys.api.v1.PostIntentResponseH\x00R\n" +
 	"postIntent\x12X\n" +
-	"\x14configuration_failed\x18\x02 \x01(\v2#.vibesys.api.v1.ConfigurationFailedH\x00R\x13configurationFailed\x12H\n" +
+	"\x14configuration_failed\x18\x02 \x01(\v2#.vibesys.api.v1.ConfigurationFailedH\x00R\x13configurationFailed\x12>\n" +
+	"\brelaunch\x18\x03 \x01(\v2 .vibesys.api.v1.RelaunchResponseH\x00R\brelaunch\x12H\n" +
 	"\fchat_message\x18\x04 \x01(\v2#.vibesys.api.v1.ChatMessageResponseH\x00R\vchatMessageB\x0f\n" +
 	"\x06result\x12\x05\xbaH\x02\b\x01\"\xc0\x01\n" +
 	"\x13ConfigurationFailed\x12\x1f\n" +
@@ -1265,7 +1498,17 @@ const file_vibesys_api_v1_host_call_proto_rawDesc = "" +
 	"\x10CancelItemIntent\x12(\n" +
 	"\x04item\x18\x01 \x01(\tB\x14\xbaH\x11r\x0f\x10\x01\x18\x80\x022\b^[^\\s]+$R\x04item\"B\n" +
 	"\x14SetParallelismIntent\x12*\n" +
-	"\fmax_parallel\x18\x01 \x01(\rB\a\xbaH\x04*\x02(\x01R\vmaxParallel\"\xb8\x02\n" +
+	"\fmax_parallel\x18\x01 \x01(\rB\a\xbaH\x04*\x02(\x01R\vmaxParallel\"\xb1\x01\n" +
+	"\x0fRelaunchRequest\x12-\n" +
+	"\fproject_root\x18\x01 \x01(\tB\n" +
+	"\xbaH\ar\x05\x10\x01(\x80 R\vprojectRoot\x12?\n" +
+	"\x06run_id\x18\x02 \x01(\tB(\xbaH%r#2!^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$R\x05runId\x12.\n" +
+	"\x0eexpected_epoch\x18\x03 \x01(\x04B\a\xbaH\x042\x02(\x01R\rexpectedEpoch\"\x8e\x01\n" +
+	"\x10RelaunchResponse\x12\x1f\n" +
+	"\x05epoch\x18\x01 \x01(\x04B\a\xbaH\x042\x02(\x01H\x00R\x05epoch\x12G\n" +
+	"\arefusal\x18\x02 \x01(\x0e2\x1f.vibesys.api.v1.RelaunchRefusalB\n" +
+	"\xbaH\a\x82\x01\x04\x10\x01 \x00H\x00R\arefusalB\x10\n" +
+	"\aoutcome\x12\x05\xbaH\x02\b\x01\"\xb8\x02\n" +
 	"\x12ChatMessageRequest\x12-\n" +
 	"\fproject_root\x18\x01 \x01(\tB\n" +
 	"\xbaH\ar\x05\x10\x01(\x80 R\vprojectRoot\x12?\n" +
@@ -1288,7 +1531,13 @@ const file_vibesys_api_v1_host_call_proto_rawDesc = "" +
 	"\bStopMode\x12\x19\n" +
 	"\x15STOP_MODE_UNSPECIFIED\x10\x00\x12\x13\n" +
 	"\x0fSTOP_MODE_DRAIN\x10\x01\x12\x14\n" +
-	"\x10STOP_MODE_CANCEL\x10\x02B=Z;github.com/uw-syfi/vibesys/gateway/gen/vibesys/api/v1;apiv1b\x06proto3"
+	"\x10STOP_MODE_CANCEL\x10\x02*\xb7\x01\n" +
+	"\x0fRelaunchRefusal\x12 \n" +
+	"\x1cRELAUNCH_REFUSAL_UNSPECIFIED\x10\x00\x12\x1b\n" +
+	"\x17RELAUNCH_REFUSAL_LOCKED\x10\x01\x12\x1a\n" +
+	"\x16RELAUNCH_REFUSAL_ENDED\x10\x02\x12%\n" +
+	"!RELAUNCH_REFUSAL_CHECKOUT_MISSING\x10\x03\x12\"\n" +
+	"\x1eRELAUNCH_REFUSAL_EPOCH_CHANGED\x10\x04B=Z;github.com/uw-syfi/vibesys/gateway/gen/vibesys/api/v1;apiv1b\x06proto3"
 
 var (
 	file_vibesys_api_v1_host_call_proto_rawDescOnce sync.Once
@@ -1302,54 +1551,60 @@ func file_vibesys_api_v1_host_call_proto_rawDescGZIP() []byte {
 	return file_vibesys_api_v1_host_call_proto_rawDescData
 }
 
-var file_vibesys_api_v1_host_call_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_vibesys_api_v1_host_call_proto_msgTypes = make([]protoimpl.MessageInfo, 16)
+var file_vibesys_api_v1_host_call_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
+var file_vibesys_api_v1_host_call_proto_msgTypes = make([]protoimpl.MessageInfo, 18)
 var file_vibesys_api_v1_host_call_proto_goTypes = []any{
 	(ResumeWhen)(0),              // 0: vibesys.api.v1.ResumeWhen
 	(StopMode)(0),                // 1: vibesys.api.v1.StopMode
-	(*HostCallRequest)(nil),      // 2: vibesys.api.v1.HostCallRequest
-	(*HostCallResponse)(nil),     // 3: vibesys.api.v1.HostCallResponse
-	(*ConfigurationFailed)(nil),  // 4: vibesys.api.v1.ConfigurationFailed
-	(*PostIntentRequest)(nil),    // 5: vibesys.api.v1.PostIntentRequest
-	(*PostIntentResponse)(nil),   // 6: vibesys.api.v1.PostIntentResponse
-	(*PauseIntent)(nil),          // 7: vibesys.api.v1.PauseIntent
-	(*ParkIntent)(nil),           // 8: vibesys.api.v1.ParkIntent
-	(*ResumeIntent)(nil),         // 9: vibesys.api.v1.ResumeIntent
-	(*StopIntent)(nil),           // 10: vibesys.api.v1.StopIntent
-	(*SteerIntent)(nil),          // 11: vibesys.api.v1.SteerIntent
-	(*WithdrawIntent)(nil),       // 12: vibesys.api.v1.WithdrawIntent
-	(*CancelAttemptIntent)(nil),  // 13: vibesys.api.v1.CancelAttemptIntent
-	(*CancelItemIntent)(nil),     // 14: vibesys.api.v1.CancelItemIntent
-	(*SetParallelismIntent)(nil), // 15: vibesys.api.v1.SetParallelismIntent
-	(*ChatMessageRequest)(nil),   // 16: vibesys.api.v1.ChatMessageRequest
-	(*ChatMessageResponse)(nil),  // 17: vibesys.api.v1.ChatMessageResponse
-	(*v1.SteerTarget)(nil),       // 18: vibesys.store.v1.SteerTarget
-	(v1.SteerMode)(0),            // 19: vibesys.store.v1.SteerMode
+	(RelaunchRefusal)(0),         // 2: vibesys.api.v1.RelaunchRefusal
+	(*HostCallRequest)(nil),      // 3: vibesys.api.v1.HostCallRequest
+	(*HostCallResponse)(nil),     // 4: vibesys.api.v1.HostCallResponse
+	(*ConfigurationFailed)(nil),  // 5: vibesys.api.v1.ConfigurationFailed
+	(*PostIntentRequest)(nil),    // 6: vibesys.api.v1.PostIntentRequest
+	(*PostIntentResponse)(nil),   // 7: vibesys.api.v1.PostIntentResponse
+	(*PauseIntent)(nil),          // 8: vibesys.api.v1.PauseIntent
+	(*ParkIntent)(nil),           // 9: vibesys.api.v1.ParkIntent
+	(*ResumeIntent)(nil),         // 10: vibesys.api.v1.ResumeIntent
+	(*StopIntent)(nil),           // 11: vibesys.api.v1.StopIntent
+	(*SteerIntent)(nil),          // 12: vibesys.api.v1.SteerIntent
+	(*WithdrawIntent)(nil),       // 13: vibesys.api.v1.WithdrawIntent
+	(*CancelAttemptIntent)(nil),  // 14: vibesys.api.v1.CancelAttemptIntent
+	(*CancelItemIntent)(nil),     // 15: vibesys.api.v1.CancelItemIntent
+	(*SetParallelismIntent)(nil), // 16: vibesys.api.v1.SetParallelismIntent
+	(*RelaunchRequest)(nil),      // 17: vibesys.api.v1.RelaunchRequest
+	(*RelaunchResponse)(nil),     // 18: vibesys.api.v1.RelaunchResponse
+	(*ChatMessageRequest)(nil),   // 19: vibesys.api.v1.ChatMessageRequest
+	(*ChatMessageResponse)(nil),  // 20: vibesys.api.v1.ChatMessageResponse
+	(*v1.SteerTarget)(nil),       // 21: vibesys.store.v1.SteerTarget
+	(v1.SteerMode)(0),            // 22: vibesys.store.v1.SteerMode
 }
 var file_vibesys_api_v1_host_call_proto_depIdxs = []int32{
-	5,  // 0: vibesys.api.v1.HostCallRequest.post_intent:type_name -> vibesys.api.v1.PostIntentRequest
-	16, // 1: vibesys.api.v1.HostCallRequest.chat_message:type_name -> vibesys.api.v1.ChatMessageRequest
-	6,  // 2: vibesys.api.v1.HostCallResponse.post_intent:type_name -> vibesys.api.v1.PostIntentResponse
-	4,  // 3: vibesys.api.v1.HostCallResponse.configuration_failed:type_name -> vibesys.api.v1.ConfigurationFailed
-	17, // 4: vibesys.api.v1.HostCallResponse.chat_message:type_name -> vibesys.api.v1.ChatMessageResponse
-	7,  // 5: vibesys.api.v1.PostIntentRequest.pause:type_name -> vibesys.api.v1.PauseIntent
-	8,  // 6: vibesys.api.v1.PostIntentRequest.park:type_name -> vibesys.api.v1.ParkIntent
-	9,  // 7: vibesys.api.v1.PostIntentRequest.resume:type_name -> vibesys.api.v1.ResumeIntent
-	10, // 8: vibesys.api.v1.PostIntentRequest.stop:type_name -> vibesys.api.v1.StopIntent
-	11, // 9: vibesys.api.v1.PostIntentRequest.steer:type_name -> vibesys.api.v1.SteerIntent
-	12, // 10: vibesys.api.v1.PostIntentRequest.withdraw:type_name -> vibesys.api.v1.WithdrawIntent
-	13, // 11: vibesys.api.v1.PostIntentRequest.cancel_attempt:type_name -> vibesys.api.v1.CancelAttemptIntent
-	14, // 12: vibesys.api.v1.PostIntentRequest.cancel_item:type_name -> vibesys.api.v1.CancelItemIntent
-	15, // 13: vibesys.api.v1.PostIntentRequest.set_parallelism:type_name -> vibesys.api.v1.SetParallelismIntent
-	0,  // 14: vibesys.api.v1.ResumeIntent.when:type_name -> vibesys.api.v1.ResumeWhen
-	1,  // 15: vibesys.api.v1.StopIntent.mode:type_name -> vibesys.api.v1.StopMode
-	18, // 16: vibesys.api.v1.SteerIntent.target:type_name -> vibesys.store.v1.SteerTarget
-	19, // 17: vibesys.api.v1.SteerIntent.mode:type_name -> vibesys.store.v1.SteerMode
-	18, // [18:18] is the sub-list for method output_type
-	18, // [18:18] is the sub-list for method input_type
-	18, // [18:18] is the sub-list for extension type_name
-	18, // [18:18] is the sub-list for extension extendee
-	0,  // [0:18] is the sub-list for field type_name
+	6,  // 0: vibesys.api.v1.HostCallRequest.post_intent:type_name -> vibesys.api.v1.PostIntentRequest
+	17, // 1: vibesys.api.v1.HostCallRequest.relaunch:type_name -> vibesys.api.v1.RelaunchRequest
+	19, // 2: vibesys.api.v1.HostCallRequest.chat_message:type_name -> vibesys.api.v1.ChatMessageRequest
+	7,  // 3: vibesys.api.v1.HostCallResponse.post_intent:type_name -> vibesys.api.v1.PostIntentResponse
+	5,  // 4: vibesys.api.v1.HostCallResponse.configuration_failed:type_name -> vibesys.api.v1.ConfigurationFailed
+	18, // 5: vibesys.api.v1.HostCallResponse.relaunch:type_name -> vibesys.api.v1.RelaunchResponse
+	20, // 6: vibesys.api.v1.HostCallResponse.chat_message:type_name -> vibesys.api.v1.ChatMessageResponse
+	8,  // 7: vibesys.api.v1.PostIntentRequest.pause:type_name -> vibesys.api.v1.PauseIntent
+	9,  // 8: vibesys.api.v1.PostIntentRequest.park:type_name -> vibesys.api.v1.ParkIntent
+	10, // 9: vibesys.api.v1.PostIntentRequest.resume:type_name -> vibesys.api.v1.ResumeIntent
+	11, // 10: vibesys.api.v1.PostIntentRequest.stop:type_name -> vibesys.api.v1.StopIntent
+	12, // 11: vibesys.api.v1.PostIntentRequest.steer:type_name -> vibesys.api.v1.SteerIntent
+	13, // 12: vibesys.api.v1.PostIntentRequest.withdraw:type_name -> vibesys.api.v1.WithdrawIntent
+	14, // 13: vibesys.api.v1.PostIntentRequest.cancel_attempt:type_name -> vibesys.api.v1.CancelAttemptIntent
+	15, // 14: vibesys.api.v1.PostIntentRequest.cancel_item:type_name -> vibesys.api.v1.CancelItemIntent
+	16, // 15: vibesys.api.v1.PostIntentRequest.set_parallelism:type_name -> vibesys.api.v1.SetParallelismIntent
+	0,  // 16: vibesys.api.v1.ResumeIntent.when:type_name -> vibesys.api.v1.ResumeWhen
+	1,  // 17: vibesys.api.v1.StopIntent.mode:type_name -> vibesys.api.v1.StopMode
+	21, // 18: vibesys.api.v1.SteerIntent.target:type_name -> vibesys.store.v1.SteerTarget
+	22, // 19: vibesys.api.v1.SteerIntent.mode:type_name -> vibesys.store.v1.SteerMode
+	2,  // 20: vibesys.api.v1.RelaunchResponse.refusal:type_name -> vibesys.api.v1.RelaunchRefusal
+	21, // [21:21] is the sub-list for method output_type
+	21, // [21:21] is the sub-list for method input_type
+	21, // [21:21] is the sub-list for extension type_name
+	21, // [21:21] is the sub-list for extension extendee
+	0,  // [0:21] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_api_v1_host_call_proto_init() }
@@ -1359,11 +1614,13 @@ func file_vibesys_api_v1_host_call_proto_init() {
 	}
 	file_vibesys_api_v1_host_call_proto_msgTypes[0].OneofWrappers = []any{
 		(*HostCallRequest_PostIntent)(nil),
+		(*HostCallRequest_Relaunch)(nil),
 		(*HostCallRequest_ChatMessage)(nil),
 	}
 	file_vibesys_api_v1_host_call_proto_msgTypes[1].OneofWrappers = []any{
 		(*HostCallResponse_PostIntent)(nil),
 		(*HostCallResponse_ConfigurationFailed)(nil),
+		(*HostCallResponse_Relaunch)(nil),
 		(*HostCallResponse_ChatMessage)(nil),
 	}
 	file_vibesys_api_v1_host_call_proto_msgTypes[3].OneofWrappers = []any{
@@ -1377,13 +1634,17 @@ func file_vibesys_api_v1_host_call_proto_init() {
 		(*PostIntentRequest_CancelItem)(nil),
 		(*PostIntentRequest_SetParallelism)(nil),
 	}
+	file_vibesys_api_v1_host_call_proto_msgTypes[15].OneofWrappers = []any{
+		(*RelaunchResponse_Epoch)(nil),
+		(*RelaunchResponse_Refusal)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_vibesys_api_v1_host_call_proto_rawDesc), len(file_vibesys_api_v1_host_call_proto_rawDesc)),
-			NumEnums:      2,
-			NumMessages:   16,
+			NumEnums:      3,
+			NumMessages:   18,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

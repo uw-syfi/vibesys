@@ -14,6 +14,7 @@ message HostCallRequest {
   oneof method {
     option (buf.validate.oneof).required = true;
     PostIntentRequest post_intent = 2;
+    RelaunchRequest relaunch = 3;
     ChatMessageRequest chat_message = 4;
   }
 }
@@ -25,6 +26,7 @@ message HostCallResponse {
     option (buf.validate.oneof).required = true;
     PostIntentResponse post_intent = 1;
     ConfigurationFailed configuration_failed = 2;
+    RelaunchResponse relaunch = 3;
     ChatMessageResponse chat_message = 4;
   }
 }
@@ -102,6 +104,28 @@ message CancelItemIntent {
 }
 message SetParallelismIntent {
   uint32 max_parallel = 1 [(buf.validate.field).uint32.gte = 1];
+}
+
+// The observed epoch fences retries. Reconcile an uncertain call through
+// Skeleton before retrying; it must never start a second new epoch silently.
+message RelaunchRequest {
+  string project_root = 1 [(buf.validate.field).string = {min_len: 1, max_bytes: 4096}];
+  string run_id = 2 [(buf.validate.field).string.pattern = "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$"];
+  uint64 expected_epoch = 3 [(buf.validate.field).uint64.gte = 1];
+}
+message RelaunchResponse {
+  oneof outcome {
+    option (buf.validate.oneof).required = true;
+    uint64 epoch = 1 [(buf.validate.field).uint64.gte = 1];
+    RelaunchRefusal refusal = 2 [(buf.validate.field).enum = {defined_only: true, not_in: [0]}];
+  }
+}
+enum RelaunchRefusal {
+  RELAUNCH_REFUSAL_UNSPECIFIED = 0;
+  RELAUNCH_REFUSAL_LOCKED = 1;
+  RELAUNCH_REFUSAL_ENDED = 2;
+  RELAUNCH_REFUSAL_CHECKOUT_MISSING = 3;
+  RELAUNCH_REFUSAL_EPOCH_CHANGED = 4;
 }
 
 // Retrying an id with identical content admits exactly one question.

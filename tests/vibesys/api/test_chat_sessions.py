@@ -47,11 +47,21 @@ from vs_proto.api import (
     validate,
 )
 from vs_runlog.api import RunLogReader, assert_run_unlocked
-from vs_sim.api.testing import SimThreads
+from vs_sim.api.testing import FakeProcesses, ProcessScript, SimThreads
 
 if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
+
+
+def chat_call(
+    payload: bytes, *, start_chat: Callable[[ChatMessageRequest], None] | None = None
+) -> bytes:
+    threads = SimThreads()
+    processes = FakeProcesses(lambda _spec: ProcessScript(), pass_time=threads.sleep)
+    response = host_call(payload, processes=processes, threads=threads, start_chat=start_chat)
+    assert not processes.ran
+    return response
 
 
 @pytest.fixture
@@ -156,13 +166,13 @@ def test_start_on_demand_idle_exit_and_relaunch_preserve_history(chat: ChatMessa
     payload = HostCallRequest(
         checkout="/src/vibesys", method=Oneof("chat_message", chat)
     ).to_binary()
-    response = HostCallResponse.from_binary(host_call(payload, start_chat=starts.append))
+    response = HostCallResponse.from_binary(chat_call(payload, start_chat=starts.append))
     validate(response)
     assert response.result is not None
     assert response.result.field == "chat_message"
     assert starts == [chat]
     # Retrying admission is still one ordered inbox message.
-    assert host_call(payload, start_chat=starts.append) == response.to_binary()
+    assert chat_call(payload, start_chat=starts.append) == response.to_binary()
     agent = run(chat, lambda text, _invocation: f"answer to {text}")
     assert agent.closed
     assert len(agent.messages) == 1
@@ -260,18 +270,28 @@ def test_conflicting_id_and_missing_launcher_are_typed_failures(chat: ChatMessag
     payload = HostCallRequest(
         checkout="/src/vibesys", method=Oneof("chat_message", chat)
     ).to_binary()
-    unavailable = HostCallResponse.from_binary(host_call(payload))
+    unavailable = HostCallResponse.from_binary(chat_call(payload))
     assert unavailable.result is not None
     assert unavailable.result.field == "configuration_failed"
     assert unavailable.result.value.code == "unavailable"
-    admitted = HostCallResponse.from_binary(host_call(payload, start_chat=lambda _request: None))
+    admitted = HostCallResponse.from_binary(
+        chat_call(
+            payload,
+            start_chat=lambda _request: None,
+        )
+    )
     assert admitted.result is not None
     assert admitted.result.field == "chat_message"
     chat.text = "changed"
     payload = HostCallRequest(
         checkout="/src/vibesys", method=Oneof("chat_message", chat)
     ).to_binary()
-    refused = HostCallResponse.from_binary(host_call(payload, start_chat=lambda _request: None))
+    refused = HostCallResponse.from_binary(
+        chat_call(
+            payload,
+            start_chat=lambda _request: None,
+        )
+    )
     assert refused.result is not None
     assert refused.result.field == "configuration_failed"
 
@@ -399,7 +419,7 @@ def test_reading_an_incomplete_native_head_is_refused(chat: ChatMessageRequest) 
 def test_session_ids_follow_the_host_contract(chat: ChatMessageRequest, session_id: str) -> None:
     chat.session_id = session_id
     response = HostCallResponse.from_binary(
-        host_call(
+        chat_call(
             HostCallRequest(
                 checkout="/src/vibesys", method=Oneof("chat_message", chat)
             ).to_binary(),

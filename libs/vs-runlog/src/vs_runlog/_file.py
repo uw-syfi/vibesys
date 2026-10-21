@@ -116,6 +116,13 @@ class RunLogReader:
             yield record
 
 
+@contextmanager
+def open_run_log(path: Path, offset: int = 0) -> Iterator[RunLogReader]:
+    """Own the file handle while reading from a validated frame boundary."""
+    with path.open("rb") as stream:
+        yield RunLogReader(stream, offset)
+
+
 class FileRunLogWriter:
     """Append dense sequences, recovering only an incomplete final frame on open.
 

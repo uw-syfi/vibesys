@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -26,6 +27,8 @@ func (h *host) HostCall(ctx context.Context, request *apiv1.HostCallRequest) (*a
 		method, requestID = "post-intent", request.GetPostIntent().GetRequestId()
 	case request.GetChatMessage() != nil:
 		method, requestID = "chat-message", request.GetChatMessage().GetRequestId()
+	case request.GetRelaunch() != nil:
+		method = "relaunch"
 	default:
 		return hostFailure("invalid_method", "HostCall.method is required", -1, ""), nil
 	}
@@ -46,6 +49,9 @@ func (h *host) HostCall(ctx context.Context, request *apiv1.HostCallRequest) (*a
 		Executable: filepath.Join(checkout, ".venv", "bin", "vibesys"),
 		Args:       []string{"host", method}, Input: input, StateRoot: h.config.Root,
 	})
+	if request.GetRelaunch() != nil && errors.Is(err, os.ErrNotExist) {
+		return &apiv1.HostCallResponse{Result: &apiv1.HostCallResponse_Relaunch{Relaunch: &apiv1.RelaunchResponse{Outcome: &apiv1.RelaunchResponse_Refusal{Refusal: apiv1.RelaunchRefusal_RELAUNCH_REFUSAL_CHECKOUT_MISSING}}}}, nil
+	}
 	if err != nil || result.ExitCode != 0 {
 		message := fmt.Sprintf("vibesys host %s exited %d", method, result.ExitCode)
 		if err != nil {
@@ -63,6 +69,9 @@ func (h *host) HostCall(ctx context.Context, request *apiv1.HostCallRequest) (*a
 		valid := method == "post-intent" && response.GetPostIntent() != nil && response.GetPostIntent().GetRequestId() == requestID
 		if method == "chat-message" {
 			valid = response.GetChatMessage() != nil && response.GetChatMessage().GetRequestId() == requestID && response.GetChatMessage().GetSessionId() == request.GetChatMessage().GetSessionId()
+		}
+		if method == "relaunch" {
+			valid = response.GetRelaunch() != nil
 		}
 		if !valid {
 			return hostFailure("invalid_host_response", "vibesys host "+method+" returned a different method or identity", result.ExitCode, result.Stderr), nil

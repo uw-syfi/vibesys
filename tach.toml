@@ -1957,7 +1957,7 @@ expose = ["RunLogTee", "JOURNAL_EVENT_MAX_BYTES"]
 [[modules]]
 path = "vibesys.api.host"
 layer = "prompts_and_lower_libs"
-depends_on = ["vibesys.api", "vibesys.api.chat", "vs_project", "vs_proto", "vs_runlog"]
+depends_on = ["vibesys.api", "vibesys.api.chat", "vibesys.api.host_relaunch", "vs_project", "vs_proto", "vs_runlog", "vs_sim.api"]
 
 [[interfaces]]
 from = ["vibesys.api.host"]
@@ -2005,3 +2005,12 @@ depends_on = ["vibesys.chat"]
 [[interfaces]]
 from = ["vibesys.api.chat"]
 expose = ["ChatRuntime", "ChatSession", "SessionAction", "SessionLifecycle", "run_head"]
+
+[[modules]]
+path = "vibesys.api.host_relaunch"
+layer = "prompts_and_lower_libs"
+depends_on = ["vibesys.api", "vs_project", "vs_proto", "vs_runlog", "vs_sim.api"]
+
+[[interfaces]]
+from = ["vibesys.api.host_relaunch"]
+expose = ["relaunch_host"]

@@ -85,7 +85,7 @@ from server.transport.websocket import WebSocketGateway
 from server.transport.websocket import (
     browser_origin as browser_origin,  # noqa: PLC0414  # lint-waiver: LW-101108 [PLC0414]; re-export the browser-origin parser through the allowed runtime composition boundary, so the launcher validates `--web-origin` against the one definition the gateway enforces
 )
-from vibesys.api import ConfigurationError, RunStopped, StopMode
+from vibesys.api import ConfigurationError, RunStopped, StopMode, relaunch
 from vs_sim.api import Signals
 
 if TYPE_CHECKING:
@@ -329,7 +329,7 @@ class ServerRuntime:
 
         async def execute() -> RunResult:
             handle = (
-                self.runs.resume(request)
+                relaunch(request, self.runs)
                 if request.resume is not None
                 else self.runs.start(request)
             )

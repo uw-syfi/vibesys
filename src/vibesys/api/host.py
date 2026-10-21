@@ -1,7 +1,8 @@
-"""Protobuf host command boundary over the existing, reviewed control inbox.
+"""Typed host commands for control inbox writes and detached relaunch admission.
 
-The command acknowledges persistence only. The run owns applying a request and
-publishing its IntentState. No CLI or gateway implementation enters this module.
+PostIntent acknowledges persistence; the run owns applying the request and
+publishing its IntentState. Relaunch confirms the new writer epoch. No CLI or
+gateway implementation enters this module.
 """
 
 from __future__ import annotations
@@ -10,8 +11,15 @@ from typing import TYPE_CHECKING
 
 from pydantic import ValidationError as ControlValidationError
 
-from vibesys.api import CONTROL_REQUEST, ControlAction, recorded_ending
+from vibesys.api import (
+    CONTROL_REQUEST,
+    ConfigurationDiagnostic,
+    ConfigurationError,
+    ControlAction,
+    recorded_ending,
+)
 from vibesys.api.chat import run_head
+from vibesys.api.host_relaunch import relaunch_host
 from vs_project.api import INBOX_FORMAT, InboxClosedError, Project, ProjectError
 from vs_proto.api import (
     ChatMessageRequest,
@@ -31,12 +39,17 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from vs_proto.api import PostIntentRequest, SteerIntent
+    from vs_sim.api import Processes, Threads
 
 __all__ = ["host_call"]
 
 
 def host_call(
-    payload: bytes, *, start_chat: Callable[[ChatMessageRequest], None] | None = None
+    payload: bytes,
+    *,
+    processes: Processes,
+    threads: Threads,
+    start_chat: Callable[[ChatMessageRequest], None] | None = None,
 ) -> bytes:
     """Validate and execute one HostCall envelope, returning a typed response.
 
@@ -53,13 +66,17 @@ def host_call(
             case Oneof("post_intent", request):
                 result = _post_intent(request)
                 response = HostCallResponse(result=Oneof("post_intent", result))
+            case Oneof("relaunch", request):
+                result = relaunch_host(request, call.checkout, processes=processes, threads=threads)
+                response = HostCallResponse(result=Oneof("relaunch", result))
             case Oneof("chat_message", request):
-                if start_chat is None:
-                    return _failure("unavailable", "chat process launcher was not supplied")
                 result = _chat_message(request, start_chat)
                 response = HostCallResponse(result=Oneof("chat_message", result))
             case _:
                 return _failure("invalid_method", "HostCall.method is required")
+    except ConfigurationError as error:
+        diagnostic = error.diagnostic
+        return _failure(diagnostic.code, diagnostic.message, exit_code=diagnostic.exit_code)
     except InboxClosedError as error:
         return _failure("inbox_closed", str(error), exit_code=3)
     except (ValueError, OSError, ProjectError, ControlValidationError, ValidationError) as error:
@@ -140,8 +157,16 @@ def _steer_payload(value: SteerIntent) -> dict[str, object]:
 
 
 def _chat_message(
-    request: ChatMessageRequest, start: Callable[[ChatMessageRequest], None]
+    request: ChatMessageRequest, start: Callable[[ChatMessageRequest], None] | None
 ) -> ChatMessageResponse:
+    if start is None:
+        raise ConfigurationError(
+            ConfigurationDiagnostic(
+                code="unavailable",
+                stage="host_call",
+                message="chat process launcher was not supplied",
+            )
+        )
     project = Project.open(request.project_root)
     project.state.load_run(request.run_id)
     project.state.require_local_run(request.run_id)

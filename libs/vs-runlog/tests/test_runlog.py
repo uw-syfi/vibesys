@@ -26,6 +26,7 @@ from vs_runlog.api import (
     RunLogReader,
     RunLogStopReason,
     encode_frame,
+    open_run_log,
 )
 from vs_sim.api.testing import ManualClock, SimThreads
 
@@ -48,8 +49,7 @@ def test_round_trip(texts: list[str]) -> None:
         with FileRunLogWriter(path, clock=ManualClock(), threads=SimThreads()) as writer:
             for record in expected:
                 writer.append(record)
-        with path.open("rb") as stream:
-            reader = RunLogReader(stream)
+        with open_run_log(path) as reader:
             assert list(reader) == expected
             assert reader.stop.reason is RunLogStopReason.END
         with FileRunLogWriter(path, clock=ManualClock(), threads=SimThreads()) as reopened:

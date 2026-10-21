@@ -1,11 +1,12 @@
 import type {HostKey} from '@vibesys/hosts';
 import type {GatewayBridge} from '@vibesys/ipc';
 import type {ScheduleTimeout} from '@vibesys/machine';
-import {type RunIntentAction, runIntent} from '@vibesys/runs/intents';
+import {type RelaunchObservation, type RunIntentAction, runIntent} from '@vibesys/runs/intents';
 import {type JSX, useEffect, useRef, useState} from 'react';
 import type {SnapshotFrom} from 'xstate';
 import type {runIntentsMachine} from '../state/index.js';
 import {intentsActor} from './effects/controls.js';
+import {useRelaunch} from './relaunch.js';
 import {IntentControls} from './ui/controls.js';
 
 /** Mount with a key of host/runId. enabled is the host's runTransportV2 setting. */
@@ -16,6 +17,7 @@ export function useRunIntents(props: {
   readonly runId: string;
   readonly enabled: boolean;
   readonly schedule: ScheduleTimeout;
+  readonly relaunch?: RelaunchObservation;
 }) {
   const [snapshot, setSnapshot] = useState<SnapshotFrom<typeof runIntentsMachine> | null>(null);
   const [text, setText] = useState('');
@@ -38,6 +40,7 @@ export function useRunIntents(props: {
       actor.stop();
     };
   }, [props.bridge, props.host, props.runId, props.enabled, props.schedule]);
+  const relaunch = useRelaunch({...props, observation: props.enabled ? props.relaunch : undefined});
   const busy = snapshot?.matches({active: 'sending'}) ?? false;
   const sendRequest = (
     request: Parameters<NonNullable<typeof current.current>['send']>[0] & {type: 'send'},
@@ -54,6 +57,7 @@ export function useRunIntents(props: {
   };
   const controls = (
     <IntentControls
+      {...(relaunch ? {relaunch} : {})}
       busy={snapshot.matches({active: 'sending'})}
       entries={snapshot.context.entries}
       error={snapshot.context.error}
@@ -74,3 +78,4 @@ export function RunIntents(props: Parameters<typeof useRunIntents>[0]): JSX.Elem
 }
 
 export {intentsActor} from './effects/controls.js';
+export {relaunchActor} from './effects/relaunch.js';

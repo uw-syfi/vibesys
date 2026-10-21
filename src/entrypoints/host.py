@@ -12,17 +12,19 @@ from entrypoints.chat_session import start_chat
 from vibesys.api.host import host_call
 from vibesys.api.transport import ConversionStatus, convert_run, convert_runs
 from vs_project.api import Project, ProjectError
-from vs_sim.api import OsThreads, SystemClock
+from vs_sim.api import OsProcesses, OsThreads, SystemClock
 
 if TYPE_CHECKING:
     from typing import BinaryIO
+
+    from vs_sim.api import Processes, Threads
 
 
 def run(argv: list[str], *, cwd: Path) -> tuple[int, str, str]:
     """Run a host maintenance method and return exit code, stdout and stderr."""
     parser = argparse.ArgumentParser(
         prog="vibesys host",
-        epilog="post-intent reads a HostCallRequest from stdin and writes a HostCallResponse to stdout.",
+        epilog="post-intent and relaunch read a HostCallRequest from stdin and write a HostCallResponse to stdout.",
     )
     methods = parser.add_subparsers(dest="method", required=True)
     convert = methods.add_parser("convert-run", help="convert a stopped run's JSONL journal")
@@ -49,19 +51,31 @@ def run(argv: list[str], *, cwd: Path) -> tuple[int, str, str]:
 
 
 def main(
-    argv: list[str] | None = None, *, stdin: BinaryIO | None = None, stdout: BinaryIO | None = None
+    argv: list[str] | None = None,
+    *,
+    stdin: BinaryIO | None = None,
+    stdout: BinaryIO | None = None,
+    processes: Processes | None = None,
+    threads: Threads | None = None,
 ) -> int:
     """Run one host method from the current directory."""
     arguments = sys.argv[1:] if argv is None else argv
-    if arguments[:1] in (["post-intent"], ["chat-message"]):
+    if arguments[:1] in (["post-intent"], ["relaunch"], ["chat-message"]):
         parser = argparse.ArgumentParser(
-            prog="vibesys host post-intent",
+            prog=f"vibesys host {arguments[0]}",
             description="Read a binary HostCallRequest from stdin; write a binary HostCallResponse to stdout.",
         )
         parser.parse_args(arguments[1:])
         source = sys.stdin.buffer if stdin is None else stdin
         destination = sys.stdout.buffer if stdout is None else stdout
-        destination.write(host_call(source.read((1 << 20) + 1), start_chat=start_chat))
+        destination.write(
+            host_call(
+                source.read((1 << 20) + 1),
+                start_chat=start_chat,
+                processes=OsProcesses() if processes is None else processes,
+                threads=OsThreads() if threads is None else threads,
+            )
+        )
         return 0
     code, output, error = run(arguments, cwd=Path.cwd())
     sys.stdout.write(output)

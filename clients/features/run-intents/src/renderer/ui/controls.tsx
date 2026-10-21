@@ -2,6 +2,7 @@ import type {RunIntentAction} from '@vibesys/runs/intents';
 import {Button, Dialog, Field, Row, Stack, Text, TextInput} from '@vibesys/ui';
 import type {JSX} from 'react';
 import type {IntentEntry} from '../../state/index.js';
+import {RelaunchAction, RelaunchStatus, type RelaunchView} from './relaunch.js';
 
 const ACTION_LABELS: Record<NonNullable<IntentEntry['request']['intent']['case']>, string> = {
   pause: 'Pause',
@@ -24,6 +25,7 @@ const STATUS_LABELS: Record<IntentEntry['status'], string> = {
 
 export function IntentControls(props: {
   readonly busy: boolean;
+  readonly relaunch?: RelaunchView;
   readonly entries: readonly IntentEntry[];
   readonly error: string | null;
   readonly warning: string | null;
@@ -47,8 +49,10 @@ export function IntentControls(props: {
             text={ACTION_LABELS[action]}
           />
         ))}
+        {props.relaunch ? <RelaunchAction {...props.relaunch} /> : null}
         <Button text="Guidance" press={() => props.showGuidance(true)} />
       </Row>
+      {props.relaunch ? <RelaunchStatus {...props.relaunch} /> : null}
       {props.warning ? (
         <Text tone="warn" title={props.warning}>
           Posting order unknown

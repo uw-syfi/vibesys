@@ -7,9 +7,11 @@ import type {RunPageSeed} from '@vibesys/feature-run-page/state';
 import {useRunSessions} from '@vibesys/feature-run-sessions/renderer';
 import type {GatewayBridge, WelcomeBridge} from '@vibesys/ipc';
 import type {ScheduleTimeout} from '@vibesys/machine';
+import type {Skeleton} from '@vibesys/run-skeleton';
 import {gatewayContentCache} from '@vibesys/run-skeleton/cache';
 import {gatewayReader} from '@vibesys/run-skeleton/reader';
 import {proposalIntent} from '@vibesys/runs/chat';
+import type {RelaunchObservation} from '@vibesys/runs/intents';
 import {Card, EmptyState, Page, Stack, Switch, Text} from '@vibesys/ui';
 import {type JSX, type ReactNode, useMemo} from 'react';
 import {gatewayTransport} from './gateway-transport.js';
@@ -40,6 +42,7 @@ export function GatewayRun(props: {
   );
   const page = useGatewayRun({seed, ports, schedule, address});
   const {snapshot} = page;
+  const observation = observationOf(snapshot.context.load?.skeleton);
   const record = page.state?.record;
   const projectRoot =
     record?.kind === 'live' || record?.kind === 'ended' ? record.run.projectRoot : '';
@@ -48,6 +51,7 @@ export function GatewayRun(props: {
     host: seed.identity.host,
     runId: seed.identity.runId,
     projectRoot,
+    ...(observation ? {relaunch: observation} : {}),
     enabled: snapshot.matches('active') && projectRoot !== '',
     schedule,
   });
@@ -115,4 +119,16 @@ export function GatewayRun(props: {
       }
     />
   );
+}
+
+function observationOf(skeleton: Skeleton | undefined): RelaunchObservation | undefined {
+  const latest = skeleton?.epochs.at(-1);
+  if (!latest?.epoch) return undefined;
+  const lifecycle = skeleton?.lifecycles.at(-1);
+  return {
+    epoch: BigInt(latest.epoch.epoch),
+    ...(lifecycle?.lifecycle && lifecycle.seq >= latest.seq
+      ? {lifecycle: lifecycle.lifecycle}
+      : {}),
+  };
 }
