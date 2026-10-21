@@ -11,7 +11,7 @@ on:
       - 'website/**'
       - '.github/workflows/website.yml'
   pull_request:
-    branches: [main]
+    branches: [main, 'transport/**']
   # GitHub merge queue: Required PR CI must report on the queue's temporary
   # gh-readonly-queue/... branch or the queue waits for it until timeout.
   merge_group:
@@ -49,6 +49,7 @@ jobs:
       native_languages: ${{ steps.filter.outputs.native_languages }}
       pnpm_packages: ${{ steps.filter.outputs.pnpm_packages }}
       impact: ${{ steps.filter.outputs.impact }}
+      gateway: ${{ steps.filter.outputs.gateway }}
       # The per-file test seconds the shards balance on, read once here so that
       # every shard of a run sees the same record (a shard that read a newer
       # cache entry than its siblings would break the partition of the suite).
@@ -392,6 +393,28 @@ jobs:
         env:
           NATIVE_TARGETS: ${{ needs.changes.outputs.native_targets }}
         run: ./support/repoctl/repoctl run-native --targets-json "$NATIVE_TARGETS"
+
+  # Runs on every push to main, not only when the gateway changed: a cache is
+  # readable only from its own ref and the default branch, so the module and build
+  # caches that pull-request and merge-queue runs restore are the ones a passing
+  # main run saved. Without it a merge-queue run always starts cold.
+  gateway:
+    needs: changes
+    if: needs.changes.outputs.gateway == 'true' || github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: gateway/go.mod
+          cache-dependency-path: gateway/go.sum
+
+      - name: Check the host gateway
+        run: ./support/repoctl/repoctl run-checks --group gateway_checks
 
   impact-tool:
     needs: changes
@@ -1162,6 +1185,7 @@ jobs:
       - queue-native
       - stitch
       - impact-tool
+      - gateway
       - validate-examples
       - validate-examples-cpu-check
       - native-evaluator-examples
@@ -1225,6 +1249,7 @@ jobs:
       - clients-e2e
       - queue-native
       - impact-tool
+      - gateway
       - validate-examples
       - validate-examples-cpu-check
       - native-evaluator-examples
