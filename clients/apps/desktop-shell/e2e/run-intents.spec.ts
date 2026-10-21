@@ -132,9 +132,7 @@ test('Pause escalates to Pause now in the same epoch and waits for journal outco
   await expect(page.getByText('Paused', {exact: true}).first()).toBeVisible();
   expect(
     await page.evaluate(() =>
-      (window as unknown as GatewayWindow).fakeHost.calls.filter(
-        call => call[0] === 'resume' || call[0] === 'stopConfirmed',
-      ),
+      (window as unknown as GatewayWindow).fakeHost.calls.filter(call => call[0] === 'resume'),
     ),
   ).toEqual([]);
   await toggle.uncheck();

@@ -40,10 +40,10 @@ from ._request_forward import turn_of
 from .types.common import ExecuteRegisteredOperation, ObservationStatus
 from .types.kernel import AreaChange
 from .types.records import RequestPhase, TurnHeld
-from .types.sessions import DispatchTurn, ResumeSessionTurn
+from .types.sessions import DispatchTurn, ResumeSessionTurn, TurnFailureKind
 
 if TYPE_CHECKING:
-    from .types.kernel import RecordsContext
+    from .types.kernel import RecordsContext, SessionsContext
     from .types.records import CapacityHold, RecordsEvent, RecordsState, RequestRecord
     from .types.sessions import Invocation
 
@@ -154,3 +154,12 @@ def _dispatches(record: RequestRecord, invocation: Invocation) -> bool:
         and request.operation_id == invocation.registered_operation
         and request.scope == invocation.scope
     )
+
+
+def lost_failure(context: SessionsContext, invocation: Invocation) -> TurnFailureKind:
+    """A lost physical turn is unfinished when its epoch or capacity hold interrupted it."""
+    if context.run.park is not None or interrupted_by_epoch(context.records, invocation):
+        return TurnFailureKind.EPOCH_INTERRUPTED
+    if held_when_lost(context.records, invocation):
+        return TurnFailureKind.PROVIDER_UNAVAILABLE
+    return TurnFailureKind.TRANSPORT_LOST

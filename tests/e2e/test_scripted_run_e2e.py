@@ -206,7 +206,7 @@ def test_scripted_run_relaunches_once_from_saved_state(tmp_path: Path) -> None:
     assert [r.clock for r in records] == sorted(r.clock for r in records)
 
 
-def test_a_scripted_run_parks_cleanly_and_resumes_the_saved_search(tmp_path: Path) -> None:
+def test_a_scripted_run_pauses_then_resumes_without_overwriting_the_project(tmp_path: Path) -> None:
     loop_input = LoopInput.create(
         tmp_path,
         on_disk_state=True,
@@ -214,15 +214,17 @@ def test_a_scripted_run_parks_cleanly_and_resumes_the_saved_search(tmp_path: Pat
     )
     request = loop_input.request(agent_backend="scripted", max_rounds=ROUNDS, max_in_flight=2)
 
-    def park_on_start(handle: RunHandle) -> None:
-        handle.session.submit(PauseRequest(control_id="park-before-start"))
+    original = (loop_input.root / "queue.py").read_bytes()
+
+    def pause_on_start(handle: RunHandle) -> None:
+        handle.session.submit(PauseRequest(control_id="pause-before-start"))
 
     parked = run_request(
         request,
         _NoAgents(),
         client_factory=_scripted_client,
         slurm_processes=loop_input.connector,
-        on_handle=park_on_start,
+        on_handle=pause_on_start,
         verify=False,
     )
     parked.raise_error()
@@ -251,6 +253,8 @@ def test_a_scripted_run_parks_cleanly_and_resumes_the_saved_search(tmp_path: Pat
         relaunch_saved=True,
     )
     resumed.raise_error()
-    assert resumed.status is RunStatus.COMPLETED
+    # P1 resumes the search but guards publication until project-edit protection lands.
+    assert resumed.status is RunStatus.FAILED
+    assert (loop_input.root / "queue.py").read_bytes() == original
     assert resumed.run_id == parked.run_id
     assert any(event.type is CoreEventType.INVOCATION_FINISHED for event in resumed.events)

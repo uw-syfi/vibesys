@@ -78,7 +78,7 @@ export interface DesktopDeps {
   >;
   readonly runs: Pick<
     RunControl,
-    'attach' | 'attachReader' | 'attached' | 'detach' | 'resume' | 'start' | 'stop'
+    'attach' | 'attachReader' | 'attached' | 'detach' | 'resume' | 'start'
   >;
   readonly settings: Pick<SettingsStore, 'onRecentChanged' | 'recentSnapshot'>;
   readonly preferences: Pick<PreferencesMain, 'answer'>;
@@ -288,9 +288,6 @@ export class Desktop {
         return runs.attachReader(request.host, request.project, request.runId);
       case 'resume':
         await runs.resume(request.host, request.project, request.run);
-        return null;
-      case 'stop':
-        await runs.stop(request.host, request.instance, request.force, true);
         return null;
       case 'logs':
         return hosts.logs(request.host, request.instance, request.request, rendererGeneration);

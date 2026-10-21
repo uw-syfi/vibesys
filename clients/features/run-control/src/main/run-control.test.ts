@@ -255,10 +255,7 @@ function world(
       pages.opened += 1;
       return {wake: () => (pages.woken += 1), close: () => (pages.closed += 1)};
     },
-    confirm: async () => {
-      pages.confirms += 1;
-      return true;
-    },
+
     remember: (run, current) => recents.remember(run, current),
     changed: () => {
       calls.changes += 1;
@@ -990,7 +987,6 @@ describe('RunControl over the FakeHelper', () => {
     const runs = new RunControl({
       connection: async () => firstLease,
       openPage: () => ({wake: () => {}, close: () => {}}),
-      confirm: async () => true,
       remember: (run, current) => recents.remember(run, current),
       changed: () => {},
       log: () => {},

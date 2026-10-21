@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from . import _turn_holds
 from .types.common import (
     ContractValidationError,
     InvocationRef,
@@ -23,7 +22,7 @@ from .types.sessions import (
 )
 
 if TYPE_CHECKING:
-    from .types.kernel import SessionsContext, Signal
+    from .types.kernel import Signal
 
 
 def turn_result(
@@ -64,17 +63,6 @@ def turn_result(
         detail=observation.diagnostic[:TURN_FAILURE_DETAIL_LIMIT],
         reply_errors=() if reply is None else reply.reply_errors,
     )
-
-
-def lost_failure(context: SessionsContext, invocation: Invocation) -> TurnFailureKind:
-    """A lost physical turn is unfinished when its epoch or capacity hold interrupted it."""
-    if context.run.park is not None or _turn_holds.interrupted_by_epoch(
-        context.records, invocation
-    ):
-        return TurnFailureKind.EPOCH_INTERRUPTED
-    if _turn_holds.held_when_lost(context.records, invocation):
-        return TurnFailureKind.PROVIDER_UNAVAILABLE
-    return TurnFailureKind.TRANSPORT_LOST
 
 
 def observed_phase(invocation: Invocation, event: TurnObserved) -> SessionPhase:
