@@ -23,6 +23,7 @@ _GENERIC = (
     "libs/vs-core/src/",
     "libs/vs-runlog/src/",
     "src/headless/",
+    "src/server/",
     "src/vibesys/records/",
     "clients/",
 )

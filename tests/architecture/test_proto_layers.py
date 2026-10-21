@@ -42,6 +42,7 @@ def test_strategy_package_must_match_owner_directory() -> None:
         "libs/vs-core/src/vs_core/flows/flow.py",
         "libs/vs-runlog/src/vs_runlog/view.py",
         "src/headless/view.py",
+        "src/server/run_view.py",
         "src/vibesys/records/view.py",
         "libs/vs-proto/src/vs_proto/api.py",
     ],
