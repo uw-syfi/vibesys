@@ -1,48 +1,38 @@
-"""Interrupt the main thread from any thread, even when its wake-up signal lands early.
+"""Interrupt the main thread despite early signals and discarded handler exceptions.
 
-CPython runs a signal's Python handler on the main thread only, and only between
-bytecodes. A thread that wants the main thread to stop sends it a signal, which ends the
-system call the main thread is blocked in (``epoll_wait`` in an idle event loop, a lock
-wait) so the handler runs. A signal that lands after the main thread's last check for
-pending handlers but before it enters that system call ends nothing: the handler stays
-pending until something else wakes the main thread, which in an idle run never happens.
+A wake can land before a blocking call, or its ``KeyboardInterrupt`` can land in a
+GC callback or finalizer where Python discards exceptions. Resend wakes until the
+scope ends, but raise again only when Python reports that it discarded our exception.
+An exception still unwinding must never be followed by one that interrupts cleanup.
 """
 
 from __future__ import annotations
 
+import sys
+from contextlib import contextmanager
+from inspect import currentframe
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterator
+    from sys import UnraisableHookArgs
+    from types import CodeType
 
     from vs_sim.api import Threads
 
 RESEND_SECONDS = 0.05
-"""How long a request waits for the main thread to take its signal before sending it again.
-
-It bounds only how late a signal that landed early is repeated; a signal that ends the
-main thread's wait is taken at once.
-"""
+"""How long a request waits before resending a wake that may have landed early."""
 
 STUCK_SECONDS = 5.0
-"""How long a request resends before it reports the main thread as stuck.
-
-The resends never stop on their own: a main thread blocked in a native call that ignores
-signals takes none of them. The report says so once, so the hang is visible.
-"""
+"""How long an unanswered request waits before reporting the main thread as stuck."""
 
 
 class MainThreadInterrupt:
-    """Raise ``KeyboardInterrupt`` on the main thread once, however early its signal lands.
+    """Raise once unless Python reports that the exception was discarded.
 
-    ``wake`` sends the main thread a signal whose handler calls :meth:`take`. A request
-    sends it again until the main thread has taken it, so a signal lost to the window
-    before a blocking call is followed by one that ends the call. Only the first take
-    raises: a repeated signal, or a later request, never interrupts the cleanup that the
-    first interruption started.
-
-    A request still unanswered after ``STUCK_SECONDS`` calls ``stuck`` once with the
-    seconds it has waited, and keeps resending.
+    Enter ``recovering`` before requesting an interruption. Its hook forwards unrelated failures to the
+    previous hook. Only the exact exception raised by ``take`` rearms delivery,
+    once the reporting hook has left the stack. ``finish`` ends the resend loop before the signal relay is joined.
     """
 
     def __init__(
@@ -52,27 +42,80 @@ class MainThreadInterrupt:
         self._wake = wake
         self._threads = threads
         self._stuck = stuck
-        self._taken = threads.event()
+        self._finished = threads.event()
+        self._raised: KeyboardInterrupt | None = None
+        self._discarded = False
+        self._reporting_code: CodeType | None = None
+
+    @contextmanager
+    def recovering(self) -> Iterator[None]:
+        """Recover discarded interruptions and restore the previous hook on every exit."""
+        previous = sys.unraisablehook
+
+        def unraisable(error: UnraisableHookArgs) -> None:
+            if error.exc_value is self._raised:
+                self._discarded = True
+            else:
+                previous(error)
+
+        self._reporting_code = unraisable.__code__
+        sys.unraisablehook = unraisable
+        try:
+            yield
+        finally:
+            self.finish()
+            sys.unraisablehook = previous
+            # The traceback retains this scope and the run until the exception is released.
+            self._raised = None
+            self._reporting_code = None
+
+    def _reporting(self) -> bool:
+        """A raise inside the unraisable hook is itself discarded without another hook call."""
+        if self._reporting_code is None:
+            return False
+        frame = currentframe()
+        try:
+            while frame is not None:
+                if frame.f_code is self._reporting_code:
+                    return True
+                frame = frame.f_back
+            return False
+        finally:
+            del frame
 
     def take(self) -> None:
-        """Called by the wake signal's handler on the main thread.
+        """Raise on the main thread unless the interruption is already propagating.
 
         Raises:
-            KeyboardInterrupt: the first time it is called.
+            KeyboardInterrupt: until one escapes its callback instead of being discarded.
         """
-        if self._taken.is_set():
+        if self._finished.is_set() or self._reporting():
             return
-        self._taken.set()
-        raise KeyboardInterrupt
+        if self._discarded:
+            self._discarded = False
+            self._raised = None
+        if self._raised is not None:
+            return
+        self._raised = KeyboardInterrupt()
+        raise self._raised
+
+    def finish(self) -> None:
+        """Disarm delivery and release requesters before joining the signal relay."""
+        self._finished.set()
 
     def request(self) -> None:
-        """Interrupt the main thread from any other thread; returns once it has taken it."""
+        """Resend until ``finish``; a taken wake may still be reported as discarded."""
         started = self._threads.now()
         reported = False
-        while not self._taken.is_set():
+        while not self._finished.is_set():
             self._wake()
-            self._taken.wait(RESEND_SECONDS)
+            self._finished.wait(RESEND_SECONDS)
             waited = self._threads.now() - started
-            if not reported and not self._taken.is_set() and waited >= STUCK_SECONDS:
+            if (
+                not reported
+                and not self._finished.is_set()
+                and self._raised is None
+                and waited >= STUCK_SECONDS
+            ):
                 reported = True
                 self._stuck(waited)

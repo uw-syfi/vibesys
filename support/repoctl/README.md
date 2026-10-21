@@ -117,7 +117,22 @@ collections and missing check groups fail instead of silently skipping checks.
 
 `verify-policy --cases FILE` checks expected jobs and collections for
 repository-owned scenarios in a separate TOML file. CI runs it before
-publishing a plan. Generic tests generate fake graphs and compare selection
+publishing a plan. Each case names `paths`, exact `jobs`, and every configured
+collection under `[cases.collections]`. A collection expectation accepts:
+
+- An explicit string list (including `[]`) when the exact set is the contract.
+- `"all"` for every eligible value in the discovered graph's collection.
+- `{ dependents_of = "component-id" }` for the named component and all its
+  transitive dependents, projected into that collection. Use the full graph ID,
+  for example `pnpm:@vibesys/proto`, rather than a package name alone.
+
+Intent expectations use the same discovered graph and collection eligibility
+rules as selection, but resolve independently of changed-path selection.
+Adding a package or dependency therefore needs no edit to an intent case.
+Verification still requires exact equality and names missing and extra values;
+unknown intents, keys, and component IDs fail validation.
+
+Generic tests generate fake graphs and compare selection
 against an independent reachability oracle. Bounded fuzz runs cover graph
 selection and Git diff parsing when the tool or its policy changes.
 
