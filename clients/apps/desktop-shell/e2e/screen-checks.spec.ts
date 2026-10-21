@@ -127,3 +127,30 @@ test('the contact sheet names and shows every screen, escaped', () => {
   expect(html).toContain('queue-rs-live/run/&lt;sidebar&gt;/1440');
   expect(html).not.toContain('<sidebar>');
 });
+
+for (const broken of [false, true]) {
+  test(`a modal surface ${broken ? 'still reports its own overlap and focus-ring defects' : 'may cover its background'}`, async ({
+    page,
+  }) => {
+    await show(
+      page,
+      `
+      <span style="position:absolute;left:8px;top:8px">Background title</span>
+      <span style="position:absolute;left:8px;top:38px">Background field</span>
+      <dialog id="modal" style="margin:0;left:0;top:0;padding:8px;border:0;width:220px;height:100px">
+        <span>Message</span>
+        <input aria-label="Message" autofocus style="position:absolute;left:8px;top:40px;width:160px;height:20px;outline:4px solid blue"/>
+        ${broken ? '<span style="position:absolute;left:8px;top:8px">Overlapping title</span><span style="position:absolute;left:8px;top:36px">Crowded field</span>' : ''}
+      </dialog>
+      <script>document.getElementById('modal').showModal();</script>
+    `,
+    );
+    const violations = await screenCheck(page, ['overlap', 'focus-ring']);
+    if (broken) {
+      expect(violations.some(each => each.check === 'overlap')).toBe(true);
+      expect(violations.some(each => each.check === 'focus-ring')).toBe(true);
+    } else {
+      expect(violations).toEqual([]);
+    }
+  });
+}

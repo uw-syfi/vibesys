@@ -114,6 +114,11 @@ function isShown(element: Element): boolean {
   return true;
 }
 
+/** A native modal is painted above its background, so their boxes may overlap. */
+function sameDialog(a: Element, b: Element): boolean {
+  return a.closest('dialog:modal') === b.closest('dialog:modal');
+}
+
 /** The text on screen: each non-blank text node of a shown element, with its visible line boxes. */
 function textBoxes(): TextBox[] {
   const found: TextBox[] = [];
@@ -216,7 +221,12 @@ export function overlapCheck(): Violation[] {
   for (const [index, a] of lines.entries()) {
     for (const b of lines.slice(index + 1)) {
       if (b.line.left >= a.line.right) break;
-      if (a.box.node === b.box.node || !drawnOver(a.line, b.line)) continue;
+      if (
+        a.box.node === b.box.node ||
+        !sameDialog(a.box.element, b.box.element) ||
+        !drawnOver(a.line, b.line)
+      )
+        continue;
       found.push({
         check: 'overlap',
         message: `text overlaps text: "${a.box.text.slice(0, 30)}" and "${b.box.text.slice(0, 30)}"`,
@@ -857,7 +867,12 @@ export function focusRingCheck(): Violation[] {
   };
   const found: Violation[] = [];
   for (const {element, text, lines} of textBoxes()) {
-    if (active.contains(element) || active.closest('label')?.contains(element)) continue;
+    if (
+      !sameDialog(active, element) ||
+      active.contains(element) ||
+      active.closest('label')?.contains(element)
+    )
+      continue;
     if (lines.some(line => cut(line, ring) !== null)) {
       found.push({
         check: 'focus-ring',
@@ -907,6 +922,7 @@ export const HELPERS: readonly ((...args: never[]) => unknown)[] = [
   hasLabel,
   clipArea,
   isShown,
+  sameDialog,
   drawnChildren,
   roomBottom,
   columnRoom,

@@ -16,6 +16,7 @@ import {
   configuredHostCall,
   hostIntentRequest,
   hostIntentResponse,
+  IntentRefused,
   intentTailResponse,
   runIntent,
 } from '@vibesys/runs/intents';
@@ -23,7 +24,7 @@ import {
 const identity = {runId: 'run-1', requestId: 'r-1', projectRoot: '/project'};
 
 test('all visible controls use typed defaults and preserve identity through the pipes', () => {
-  for (const action of ['pause', 'resume', 'stop', 'steer'] as const) {
+  for (const action of ['pause', 'park', 'resume', 'stop', 'steer'] as const) {
     const request = runIntent(identity, action, 'guidance');
     const envelope = fromBinary(
       HostCallRequestSchema,
@@ -80,4 +81,27 @@ test('only IntentState records are outcomes, with refusal reasons preserved', ()
   );
   expect(result).toHaveLength(1);
   expect(result[0]?.reason).toBe('role ended');
+});
+
+test('typed HostCall refusals remain distinct from malformed or unconfirmed replies', () => {
+  for (const code of ['invalid_input', 'inbox_closed', 'request_too_large', 'invalid_method']) {
+    for (const stderr of ['', 'details']) {
+      const bytes = toBinary(
+        HostCallResponseSchema,
+        create(HostCallResponseSchema, {
+          result: {
+            case: 'configurationFailed',
+            value: {
+              code,
+              stage: 'post_intent',
+              message: 'Request refused',
+              stderr,
+              exitCode: 2,
+            },
+          },
+        }),
+      );
+      expect(() => hostIntentResponse(bytes, 'r-1')).toThrow(IntentRefused);
+    }
+  }
 });

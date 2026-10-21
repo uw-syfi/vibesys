@@ -1,6 +1,6 @@
 import {unprovided} from '@vibesys/machine';
 import type {IntentState, PostIntentRequest, PostIntentResponse} from '@vibesys/runs/intents';
-import {copyIntent, IntentStep} from '@vibesys/runs/intents';
+import {copyIntent, IntentRefused, IntentStep} from '@vibesys/runs/intents';
 import {assign, fromCallback, setup} from 'xstate';
 
 export interface RunIntentsInput {
@@ -53,14 +53,16 @@ export const runIntentsMachine = setup({
     }),
   },
   actions: {
-    fail: assign(({context}, params: {readonly error: string}) => ({
-      entries: context.entries.map(entry =>
-        entry.status === 'sending'
-          ? {...entry, status: 'uncertain' as const, reason: params.error}
-          : entry,
-      ),
-      error: params.error,
-    })),
+    fail: assign(
+      ({context}, params: {readonly error: string; readonly status: 'refused' | 'uncertain'}) => ({
+        entries: context.entries.map(entry =>
+          entry.status === 'sending'
+            ? {...entry, status: params.status, reason: params.error}
+            : entry,
+        ),
+        error: params.status === 'uncertain' ? params.error : context.error,
+      }),
+    ),
     apply: assign(({context, event}) =>
       event.type === 'outcomes' ? {entries: outcomeEntries(context.entries, event.outcomes)} : {},
     ),
@@ -153,7 +155,16 @@ export const runIntentsMachine = setup({
             },
             onError: {
               target: 'idle',
-              actions: {type: 'fail', params: ({event}) => ({error: String(event.error)})},
+              actions: {
+                type: 'fail',
+                params: ({event}) => ({
+                  error:
+                    event.error instanceof IntentRefused
+                      ? event.error.message
+                      : String(event.error),
+                  status: event.error instanceof IntentRefused ? 'refused' : 'uncertain',
+                }),
+              },
             },
           },
           after: {
@@ -161,7 +172,10 @@ export const runIntentsMachine = setup({
               target: 'idle',
               actions: {
                 type: 'fail',
-                params: {error: 'No admission reply. Retry uses the same request id.'},
+                params: {
+                  error: 'No admission reply. Retry uses the same request id.',
+                  status: 'uncertain',
+                },
               },
             },
           },

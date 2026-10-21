@@ -32,6 +32,7 @@ export {
   type RunFixture,
   splitLive,
 } from './fixture.js';
+export {INTENT_REPLAYS, type IntentReplay, intentReplay} from './intent-records.js';
 export {
   clusterTestsByAlias,
   loginStartsByProvider,

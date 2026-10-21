@@ -19,6 +19,7 @@ export function RunIntents(props: {
 }): JSX.Element | null {
   const [snapshot, setSnapshot] = useState<SnapshotFrom<typeof runIntentsMachine> | null>(null);
   const [text, setText] = useState('');
+  const [guidanceOpen, showGuidance] = useState(false);
   const current = useRef<ReturnType<typeof intentsActor> | null>(null);
   useEffect(() => {
     const actor = intentsActor({
@@ -38,13 +39,14 @@ export function RunIntents(props: {
     };
   }, [props.bridge, props.host, props.runId, props.enabled, props.schedule]);
   if (!props.enabled || !snapshot) return null;
-  const send = (action: 'pause' | 'resume' | 'stop' | 'steer') => {
+  const send = (action: 'pause' | 'park' | 'resume' | 'stop' | 'steer') => {
     const request = runIntent(
       {projectRoot: props.projectRoot, runId: props.runId, requestId: crypto.randomUUID()},
       action,
       text,
     );
     current.current?.send({type: 'send', request});
+    if (action === 'steer') showGuidance(false);
   };
   return (
     <IntentControls
@@ -52,6 +54,8 @@ export function RunIntents(props: {
       entries={snapshot.context.entries}
       error={snapshot.context.error}
       warning={snapshot.context.warning}
+      guidanceOpen={guidanceOpen}
+      showGuidance={showGuidance}
       text={text}
       edit={setText}
       send={send}
