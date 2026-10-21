@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import argparse
 import sys
+from collections import Counter
 from pathlib import Path
 
-from vibesys.api.transport import convert_run
+from vibesys.api.transport import ConversionStatus, convert_run, convert_runs
 from vs_project.api import Project, ProjectError
 
 
@@ -17,12 +18,23 @@ def run(argv: list[str], *, cwd: Path) -> tuple[int, str, str]:
     convert = methods.add_parser("convert-run", help="convert a stopped run's JSONL journal")
     convert.add_argument("run", help="run id")
     convert.add_argument("--project", type=Path, default=cwd, help="project directory")
+    bulk = methods.add_parser("convert-runs", help="convert stopped project and host-index runs")
+    bulk.add_argument("--project", type=Path, default=cwd, help="project directory")
     args = parser.parse_args(argv)
     root = args.project if args.project.is_absolute() else cwd / args.project
     try:
-        result = convert_run(Project.open(root), args.run)
-    except (OSError, ValueError, ProjectError) as exc:
-        return 1, "", f"vibesys host convert-run: {exc}\n"
+        project = Project.open(root)
+        if args.method == "convert-runs":
+            rows = convert_runs(project)
+            counts = Counter(row.result.status for row in rows)
+            output = "".join(
+                f"{row.run}: {row.result.status}: {row.result.reason}\n" for row in rows
+            )
+            summary = ", ".join(f"{status}={counts[status]}" for status in ConversionStatus)
+            return int(counts[ConversionStatus.FAILED] > 0), output + summary + "\n", ""
+        result = convert_run(project, args.run)
+    except (OSError, ValueError, TypeError, ProjectError) as exc:
+        return 1, "", f"vibesys host {args.method}: {exc}\n"
     return 0, f"{result.status}: {result.reason}\n", ""
 
 

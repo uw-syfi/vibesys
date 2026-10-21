@@ -211,6 +211,16 @@ class Project:
             _state_home() / "runs" / run_id, cls.log_directory_for(project_root, run_id)
         )
 
+    @staticmethod
+    def indexed_run_directories() -> tuple[Path, ...]:
+        """List all host discovery entries, including damaged and dangling entries.
+
+        Maintenance callers must report unsupported entries rather than silently
+        ignoring them. No state or index is created by this read.
+        """
+        index = _state_home() / "runs"
+        return tuple(sorted(index.iterdir())) if index.is_dir() else ()
+
     @classmethod
     def logged_run_ids_for(cls, project_root: Path | str) -> tuple[str, ...]:
         """Return the ids of the runs with logs on this machine under ``project_root``, sorted.

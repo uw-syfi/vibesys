@@ -161,6 +161,15 @@ class FileRunLogWriter:
         write_keyframe(self._path.parent / "keyframes", self._skeleton)
         self._checkpoint_seq = self.sequence
 
+    def checkpoint(self) -> None:
+        """Publish the current durable prefix for readers, including a final conversion.
+
+        Unlike periodic checkpoints this is explicit: callers can finish a batch
+        at an arbitrary record and still open it without replaying its suffix.
+        """
+        self._publish_head()
+        self._publish_keyframe()
+
     def close(self) -> None:
         """Release the unbuffered append handle; safe to call more than once."""
         self._close.run(self._resources.close)
