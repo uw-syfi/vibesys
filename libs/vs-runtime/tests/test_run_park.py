@@ -31,6 +31,7 @@ from vs_core.api import (
     SubmitMeasurement,
     Within,
 )
+from vs_evaluation.api import EvaluationState, PollPhase
 from vs_project.api import RequestState
 from vs_project.api.testing import FakeControlInbox
 from vs_prompts.api import TemplateRenderer
@@ -310,12 +311,17 @@ async def test_pause_drain_waits_for_an_executing_evaluation_to_finish(tmp_path:
     requested_at: float | None = None
     with open_skeleton_world(tmp_path, SkeletonStrategy.baseline_only()) as world:
         world.control = channel
+        world.limits = world.limits.model_copy(update={"cleanup_bound": 10})
         world.cluster.states = (SlurmJobStatus.RUNNING,)
         process = world.runtime()
 
         def progress() -> bool:
             nonlocal requested_at
-            if world.cluster.submissions and requested_at is None:
+            running = any(
+                job.progress is not None and job.progress.state == "running"
+                for job in process.shell.record.envelope.core.evaluation.jobs
+            )
+            if running and requested_at is None:
                 inbox.post(
                     "pause-drain",
                     b'{"action":"park","control_id":"pause-drain"}',
@@ -339,6 +345,11 @@ async def test_pause_drain_waits_for_an_executing_evaluation_to_finish(tmp_path:
         outcome = await drive_core(host, config)
         assert outcome.status is RunStatus.PARKED
         job = process.shell.record.envelope.core.evaluation.jobs[0]
-        assert job.status is ObservationStatus.SUCCEEDED
+        assert requested_at is not None
+        assert clock.now() >= requested_at + 120
+        observed = await world.evaluations[-1].poll(job.resource_id.root)
+        assert observed.phase is PollPhase.ENDED
+        assert observed.terminal is not None
+        assert observed.terminal.state is EvaluationState.SUCCEEDED
         assert not world.cluster.cancelled
         process.shell.release_lease(now_at=clock.now())

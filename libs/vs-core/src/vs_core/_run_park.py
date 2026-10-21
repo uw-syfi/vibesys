@@ -146,7 +146,12 @@ def advance(state: CoreState) -> tuple[CoreState, tuple[Scheduled, ...]]:
             pending.append(
                 Scheduled(
                     request=request,
-                    until=Until(at=state.run.now_at + state.run.limits.cleanup_bound),
+                    until=Until(
+                        at=max(
+                            state.run.now_at + state.run.limits.cleanup_bound,
+                            state.run.now_at if source is None else source.until.at,
+                        )
+                    ),
                 )
             )
         observation = None if held is None else held.observation
