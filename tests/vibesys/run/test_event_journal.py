@@ -13,7 +13,11 @@ from vibesys.events import (
     RoundFinishedData,
     WinnerSelectedData,
 )
+from vibesys.run import EventJournal
 from vibesys.run.integration import LocalRunIntegration
+from vs_project.api import Project
+from vs_proto.api import API_SCHEMA_HASH, RUN_LOG_MAX_RECORD_BYTES, STORE_SCHEMA_HASH
+from vs_runlog.api import RunLogReader
 from vs_runtime.api.infrastructure import (
     AgentExecutionFinished,
     AgentExecutionStarted,
@@ -139,3 +143,88 @@ def test_local_integrations_own_isolated_agent_event_streams(tmp_path: Path) -> 
     finally:
         first.close()
         second.close()
+
+
+def test_live_tee_includes_buffered_events_and_increments_epochs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+
+    monkeypatch.setenv("VIBESYS_STATE_HOME", str(tmp_path / "home"))
+    root = tmp_path / "project"
+    root.mkdir()
+    project = Project.open(root)
+    clock = ManualClock(start=1234)
+    journal = EventJournal(clock, SimThreads())
+    journal.emit(CoreEventType.RUN_STARTED, "buffered")
+    journal.enable_runlog(project, "run-1")
+    journal.attach(Project.log_directory_for(project.root, "run-1"), "run-1")
+    journal.emit(CoreEventType.RUN_FINISHED, "live")
+    journal.enable_runlog(project, "run-1")
+    journal.close()
+    restarted = EventJournal(clock, SimThreads())
+    restarted.enable_runlog(project, "run-1")
+    restarted.attach(Project.log_directory_for(project.root, "run-1"), "run-1")
+    restarted.emit(CoreEventType.RUN_STARTED, "restarted")
+    restarted.close()
+    with Project.run_log_path_for(project.root, "run-1").open("rb") as stream:
+        records = list(RunLogReader(stream))
+    assert [record.seq for record in records] == [1, 2, 3, 4, 5]
+    assert [record.epoch for record in records] == [1, 1, 1, 2, 2]
+    headers = [
+        record.body.value
+        for record in records
+        if record.body is not None and record.body.field == "epoch_started"
+    ]
+    assert [header.epoch for header in headers] == [1, 2]
+    assert all(header.run_id == "run-1" for header in headers)
+    assert all(header.api_schema_hash == API_SCHEMA_HASH for header in headers)
+    assert all(header.store_schema_hash == STORE_SCHEMA_HASH for header in headers)
+    lines = Project.event_journal_path_for(project.root, "run-1").read_text().splitlines()
+    assert [
+        record.body.value.json
+        for record in records
+        if record.body is not None and record.body.field == "legacy_event"
+    ] == lines
+
+
+def test_tee_failure_logs_once_and_keeps_journal_and_subscribers_working(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+
+    monkeypatch.setenv("VIBESYS_STATE_HOME", str(tmp_path / "home"))
+    root = tmp_path / "project"
+    root.mkdir()
+    project = Project.open(root)
+    journal = EventJournal(ManualClock(), SimThreads())
+    journal.enable_runlog(project, "run-1")
+    journal.attach(Project.log_directory_for(project.root, "run-1"), "run-1")
+    seen = []
+    journal.subscribe(seen.append)
+    journal.emit(CoreEventType.RUN_STARTED, "x" * RUN_LOG_MAX_RECORD_BYTES)
+    for _ in range(2):
+        journal.emit(CoreEventType.RUN_STARTED)
+    journal.close()
+    assert len(journal.read()) == len(seen) == 3
+    assert len(Project.event_journal_path_for(project.root, "run-1").read_text().splitlines()) == 3
+    assert sum("tee disabled" in record.message for record in caplog.records) == 1
+
+
+def test_tee_initialization_failure_is_additive(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+
+    monkeypatch.setenv("VIBESYS_STATE_HOME", str(tmp_path / "home"))
+    root = tmp_path / "project"
+    root.mkdir()
+    project = Project.open(root)
+    path = Project.run_log_path_for(project.root, "run-1")
+    path.parent.mkdir(parents=True)
+    path.write_bytes(b"corrupt!")
+    journal = EventJournal(ManualClock(), SimThreads())
+    journal.enable_runlog(project, "run-1")
+    journal.enable_runlog(project, "run-1")
+    journal.attach(path.parent, "run-1")
+    journal.emit(CoreEventType.RUN_STARTED)
+    assert len(journal.read()) == 1
+    assert path.read_bytes() == b"corrupt!"
+    assert sum("tee disabled" in record.message for record in caplog.records) == 1

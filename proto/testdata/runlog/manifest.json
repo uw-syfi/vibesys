@@ -3,13 +3,26 @@
     "records": [
       {
         "seq": 1,
+        "at": {
+          "seconds": 123,
+          "nanos": 456
+        },
         "epoch": 1,
-        "legacy_event": {
-          "json": "{\"type\":\"run_started\"}"
+        "epoch_started": {
+          "run_id": "run-fixture",
+          "epoch": 1,
+          "tree_hash": "tree-fixture",
+          "dirty": true,
+          "api_schema_hash": "api-fixture",
+          "store_schema_hash": "store-fixture"
         }
       },
       {
         "seq": 2,
+        "at": {
+          "seconds": 124,
+          "nanos": 0
+        },
         "epoch": 1,
         "legacy_event": {
           "json": "{\"text\":\"hello\"}"
@@ -17,25 +30,51 @@
       }
     ],
     "stop": "end",
-    "offset": 72
+    "offset": 118
   },
   "torn-tail.runlog": {
     "records": [
       {
         "seq": 1,
+        "at": {
+          "seconds": 123,
+          "nanos": 456
+        },
         "epoch": 1,
-        "legacy_event": {
-          "json": "{\"type\":\"run_started\"}"
+        "epoch_started": {
+          "run_id": "run-fixture",
+          "epoch": 1,
+          "tree_hash": "tree-fixture",
+          "dirty": true,
+          "api_schema_hash": "api-fixture",
+          "store_schema_hash": "store-fixture"
         }
       }
     ],
     "stop": "torn_tail",
-    "offset": 43
+    "offset": 85
   },
   "bad-crc.runlog": {
-    "records": [],
+    "records": [
+      {
+        "seq": 1,
+        "at": {
+          "seconds": 123,
+          "nanos": 456
+        },
+        "epoch": 1,
+        "epoch_started": {
+          "run_id": "run-fixture",
+          "epoch": 1,
+          "tree_hash": "tree-fixture",
+          "dirty": true,
+          "api_schema_hash": "api-fixture",
+          "store_schema_hash": "store-fixture"
+        }
+      }
+    ],
     "stop": "corruption",
-    "offset": 8
+    "offset": 85
   },
   "over-cap.runlog": {
     "records": [],
@@ -46,5 +85,10 @@
     "records": [],
     "stop": "end",
     "offset": 8
+  },
+  "bad-magic.runlog": {
+    "records": [],
+    "stop": "corruption",
+    "offset": 0
   }
 }

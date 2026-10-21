@@ -5,43 +5,71 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from vs_proto.api import LegacyEvent, Oneof, Record
-from vs_runlog.api import MAGIC, encode_frame
+from vs_proto.api import RUN_LOG_MAGIC, EpochStarted, LegacyEvent, Oneof, Record, Timestamp
+from vs_runlog.api import encode_frame
 
 
 def fixtures() -> dict[str, bytes]:
     """Return every deterministic fixture and its expected-record manifest."""
+    epoch = EpochStarted(
+        run_id="run-fixture",
+        epoch=1,
+        tree_hash="tree-fixture",
+        dirty=True,
+        api_schema_hash="api-fixture",
+        store_schema_hash="store-fixture",
+    )
     records = [
         Record(
-            seq=1, epoch=1, body=Oneof("legacy_event", LegacyEvent(json='{"type":"run_started"}'))
+            seq=1, at=Timestamp(seconds=123, nanos=456), epoch=1, body=Oneof("epoch_started", epoch)
         ),
-        Record(seq=2, epoch=1, body=Oneof("legacy_event", LegacyEvent(json='{"text":"hello"}'))),
+        Record(
+            seq=2,
+            at=Timestamp(seconds=124),
+            epoch=1,
+            body=Oneof("legacy_event", LegacyEvent(json='{"text":"hello"}')),
+        ),
     ]
     first, second = (encode_frame(record) for record in records)
-    damaged = bytearray(first)
+    damaged = bytearray(second)
     damaged[-1] ^= 1
     files = {
-        "valid.runlog": MAGIC + first + second,
-        "torn-tail.runlog": MAGIC + first + second[:-1],
-        "bad-crc.runlog": MAGIC + bytes(damaged),
-        "over-cap.runlog": MAGIC + b"\x81\x80\x40",
-        "empty.runlog": MAGIC,
+        "valid.runlog": RUN_LOG_MAGIC + first + second,
+        "torn-tail.runlog": RUN_LOG_MAGIC + first + second[:-1],
+        "bad-crc.runlog": RUN_LOG_MAGIC + first + bytes(damaged),
+        "over-cap.runlog": RUN_LOG_MAGIC + b"\x81\x80\x40",
+        "empty.runlog": RUN_LOG_MAGIC,
+        "bad-magic.runlog": b"BADMAGIC",
     }
     expected = [
-        {"seq": record.seq, "epoch": record.epoch, "legacy_event": {"json": record.body.value.json}}
-        for record in records
-        if record.body is not None
+        {
+            "seq": 1,
+            "at": {"seconds": 123, "nanos": 456},
+            "epoch": 1,
+            "epoch_started": {
+                "run_id": "run-fixture",
+                "epoch": 1,
+                "tree_hash": "tree-fixture",
+                "dirty": True,
+                "api_schema_hash": "api-fixture",
+                "store_schema_hash": "store-fixture",
+            },
+        },
+        {
+            "seq": 2,
+            "at": {"seconds": 124, "nanos": 0},
+            "epoch": 1,
+            "legacy_event": {"json": '{"text":"hello"}'},
+        },
     ]
+    boundary = len(RUN_LOG_MAGIC + first)
     manifest = {
         "valid.runlog": {"records": expected, "stop": "end", "offset": len(files["valid.runlog"])},
-        "torn-tail.runlog": {
-            "records": expected[:1],
-            "stop": "torn_tail",
-            "offset": len(MAGIC + first),
-        },
-        "bad-crc.runlog": {"records": [], "stop": "corruption", "offset": len(MAGIC)},
-        "over-cap.runlog": {"records": [], "stop": "corruption", "offset": len(MAGIC)},
-        "empty.runlog": {"records": [], "stop": "end", "offset": len(MAGIC)},
+        "torn-tail.runlog": {"records": expected[:1], "stop": "torn_tail", "offset": boundary},
+        "bad-crc.runlog": {"records": expected[:1], "stop": "corruption", "offset": boundary},
+        "over-cap.runlog": {"records": [], "stop": "corruption", "offset": len(RUN_LOG_MAGIC)},
+        "empty.runlog": {"records": [], "stop": "end", "offset": len(RUN_LOG_MAGIC)},
+        "bad-magic.runlog": {"records": [], "stop": "corruption", "offset": 0},
     }
     files["manifest.json"] = (json.dumps(manifest, indent=2) + "\n").encode()
     return files

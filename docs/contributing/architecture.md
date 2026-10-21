@@ -178,7 +178,9 @@ graph TD
     vibesys --> vs_mcp
     vibesys --> vs_project
     vibesys --> vs_prompts
+    vibesys --> vs_proto
     vibesys --> vs_redaction
+    vibesys --> vs_runlog
     vibesys --> vs_runtime
     vibesys --> vs_sandbox
     vibesys --> vs_sim

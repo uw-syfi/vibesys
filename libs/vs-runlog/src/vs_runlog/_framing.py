@@ -8,10 +8,8 @@ from typing import BinaryIO
 
 import google_crc32c
 
-from vs_proto.api import Record
+from vs_proto.api import RUN_LOG_MAX_RECORD_BYTES, Record, validate
 
-MAGIC = b"VSRLOG01"
-MAX_RECORD_BYTES = 1024 * 1024
 _MAX_VARINT_BYTES = 10
 _CONTINUATION_BIT = 128
 _CHECKSUM_BYTES = 4
@@ -36,9 +34,10 @@ class ReadStop:
 
 def encode_frame(record: Record) -> bytes:
     """Encode one bounded record with a Castagnoli checksum."""
+    validate(record)
     payload = record.to_binary()
-    if len(payload) > MAX_RECORD_BYTES:
-        message = f"record payload exceeds {MAX_RECORD_BYTES} bytes: {len(payload)}"
+    if len(payload) > RUN_LOG_MAX_RECORD_BYTES:
+        message = f"record payload exceeds {RUN_LOG_MAX_RECORD_BYTES} bytes: {len(payload)}"
         raise ValueError(message)
     length = len(payload)
     prefix = bytearray()
@@ -58,7 +57,7 @@ def read_frame(stream: BinaryIO, offset: int) -> tuple[Record | None, ReadStop]:
             reason = StopReason.END if index == 0 else StopReason.TORN_TAIL
             return None, ReadStop(reason, offset)
         length |= (byte[0] & 127) << (7 * index)
-        if length > MAX_RECORD_BYTES:
+        if length > RUN_LOG_MAX_RECORD_BYTES:
             return None, ReadStop(StopReason.CORRUPTION, offset, "length exceeds record cap")
         if not byte[0] & 128:
             break
@@ -76,6 +75,7 @@ def _read_payload(stream: BinaryIO, offset: int, length: int) -> tuple[Record | 
         return None, ReadStop(StopReason.CORRUPTION, offset, "CRC32C mismatch")
     try:
         record = Record.from_binary(payload)
+        validate(record)
     except ValueError as exc:
         return None, ReadStop(StopReason.CORRUPTION, offset, f"invalid Record: {exc}")
     return record, ReadStop(StopReason.END, stream.tell())

@@ -44,9 +44,11 @@ from server.host_api import (
 )
 from server.host_helper import ChannelState, Received, Send, step
 from server.transport.discovery import WebInstanceRecord
+from vibesys.api.transport import convert_run
 from vibesys.run import CoreAgentEventSink
 from vs_decode.api import Unreadable, decode_json, read_json
 from vs_evaluator_protocol.api import ProtocolError, parse_records
+from vs_project.api import Project
 from vs_runtime.api import CommandResult
 from vs_runtime.api.infrastructure import (
     LocalValidationRecipeError,
@@ -312,8 +314,20 @@ def _connector_broker_request(frame: bytes, workspace: Path) -> None:
     )
 
 
+def _convert_run_journal(frame: bytes, directory: Path) -> None:
+    project_root = directory / "conversion-project"
+    project_root.mkdir(exist_ok=True)
+    with pytest.MonkeyPatch.context() as environment:
+        environment.setenv("VIBESYS_STATE_HOME", str(directory / "conversion-home"))
+        journal = Project.event_journal_path_for(project_root, "run-1")
+        journal.parent.mkdir(parents=True, exist_ok=True)
+        journal.write_bytes(frame)
+        convert_run(Project.open(project_root), "run-1")
+
+
 _DECODERS = {
     "decode-json": _Decoder(_decode_json_file),
+    "runlog-conversion": _Decoder(_convert_run_journal, (ValueError,)),
     "slurm-connector-broker": _Decoder(_connector_broker_request, (PermissionError,)),
     "protocol-request": _Decoder(_decode_request),
     "instance-record": _Decoder(_parse_record),
