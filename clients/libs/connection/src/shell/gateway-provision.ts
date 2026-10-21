@@ -1,9 +1,10 @@
 /** Artifact verification and atomic installation over the existing SSH command channel. */
 import {createHash, randomUUID} from 'node:crypto';
 import {readFile} from 'node:fs/promises';
-import {Duplex} from 'node:stream';
+import {Duplex, type Writable} from 'node:stream';
 import {API_SCHEMA_HASH} from '@vibesys/proto';
 import {registerAbort, type ScheduleTimeout} from '@vibesys/transport';
+import {GATEWAY_COMMAND_TIMEOUT_MS, GATEWAY_UPLOAD_TIMEOUT_MS} from '../state/gateway.js';
 import type {SshLink} from './link.js';
 import {retireProcess, type SpawnedProcess} from './process.js';
 
@@ -89,10 +90,12 @@ function command(
     let settled = false;
     let cancel = (): void => {};
     let detach = (): void => {};
+    let cancelInput = (): void => {};
     const finish = (error?: unknown): void => {
       if (settled) return;
       settled = true;
       cancel();
+      cancelInput();
       detach();
       if (error !== undefined) {
         void retireProcess(process, schedule).outcome;
@@ -120,8 +123,52 @@ function command(
     detach = registration.detach;
     if (registration.aborted) finish(new Error('cancelled'));
     if (!settled) {
-      cancel = schedule(() => finish(new Error('gateway command timed out')), 30_000);
-      process.stdin.end(input);
+      cancel = schedule(
+        () => finish(new Error('gateway command timed out')),
+        input === undefined ? GATEWAY_COMMAND_TIMEOUT_MS : GATEWAY_UPLOAD_TIMEOUT_MS,
+      );
+      if (input === undefined) process.stdin.end();
+      else cancelInput = upload(process.stdin, input, schedule, finish);
     }
   });
+}
+
+// Pace cold uploads conservatively: bursts can reset SSH jump connections.
+const UPLOAD_BYTES_PER_SECOND = 512 * 1024;
+const UPLOAD_CHUNK_BYTES = 32 * 1024;
+
+/** One outstanding write at a time: pipe backpressure can only make the transfer slower. */
+function upload(
+  stdin: Writable,
+  bytes: Uint8Array,
+  schedule: ScheduleTimeout,
+  failed: (error: unknown) => void,
+): () => void {
+  let offset = 0;
+  let cancelled = false;
+  let cancel = (): void => {};
+  const next = (): void => {
+    if (cancelled) return;
+    if (offset === bytes.length) {
+      stdin.end();
+      return;
+    }
+    const chunk = bytes.subarray(offset, offset + UPLOAD_CHUNK_BYTES);
+    cancel = schedule(
+      () => {
+        if (cancelled) return;
+        offset += chunk.length;
+        stdin.write(chunk, error => {
+          if (error) failed(error);
+          else next();
+        });
+      },
+      (1000 * chunk.length) / UPLOAD_BYTES_PER_SECOND,
+    );
+  };
+  next();
+  return () => {
+    cancelled = true;
+    cancel();
+  };
 }

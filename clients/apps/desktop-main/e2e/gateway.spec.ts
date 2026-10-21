@@ -193,6 +193,8 @@ function frame(seq: bigint): Buffer {
 }
 
 test('SSH provisioning verifies size and SHA-256, skips matching bytes and atomically repairs corruption', async () => {
+  // Three full cold transfers are deliberately paced; this bound only guards a hang.
+  test.setTimeout(180_000);
   const home = await mkdtemp('/tmp/vsg-provision-');
   const link = new SshLink({
     alias: 'host-a',
