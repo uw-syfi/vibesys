@@ -182,6 +182,8 @@ def ended(projection: Projection) -> None:
                 )
             ),
         )
+    elif event.type is e.CoreEventType.STOPPED:
+        ending.outcome = p.Outcome.STOPPED
     else:
         ending.outcome = p.Outcome.FINISHED
     projection.emit("lifecycle", p.Lifecycle(state=p.Oneof("ended", ending)))
@@ -215,5 +217,6 @@ MAPPERS = {
     e.CoreEventType.RUN_FINISHED: ended,
     e.CoreEventType.RUN_FAILED: ended,
     e.CoreEventType.RUN_ENDING: ended,
+    e.CoreEventType.STOPPED: ended,
     e.CoreEventType.FRAMEWORK_WARNING: warning,
 }

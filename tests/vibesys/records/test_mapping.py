@@ -14,6 +14,7 @@ from tests.support.event_models import payload_models, payloads
 import vibesys.events as e
 import vs_proto.api as p
 from vibesys.records.api import DISPOSITIONS, MappedEvent, MappingState, map_event
+from vs_core.api import EndReason
 
 _AT = datetime(2026, 1, 1, tzinfo=UTC)
 _ROOT = Path(__file__).resolve().parents[3]
@@ -43,6 +44,40 @@ def assert_valid(result: MappedEvent) -> None:
         decoded = p.Record.from_binary(record.to_binary())
         p.validate(decoded)
         assert decoded == record
+
+
+@given(summary=st.text(alphabet="summary 0123456789", max_size=30), resumable=st.booleans())
+def test_one_stopped_end_retains_the_core_ending_summary_and_resume_decision(
+    summary: str, *, resumable: bool
+) -> None:
+    state = map_event(
+        MappingState("run-a"),
+        event(
+            e.CoreEventType.RUN_ENDING,
+            e.RunEndingData(
+                reason=EndReason.STOPPED,
+                summary=summary,
+                resumable=resumable,
+                rounds_finished=0,
+            ),
+        ),
+    ).state
+    stopped = map_event(state, event(e.CoreEventType.STOPPED))
+    finished = map_event(stopped.state, event(e.CoreEventType.RUN_FINISHED))
+    ends = [
+        r.body.value.state.value
+        for r in (*stopped.records, *finished.records)
+        if r.body
+        and r.body.field == "lifecycle"
+        and r.body.value.state is not None
+        and r.body.value.state.field == "ended"
+    ]
+    assert len(ends) == 1
+    assert ends[0].outcome == p.Outcome.STOPPED
+    assert ends[0].summary == summary
+    assert ends[0].resumable is resumable
+    assert ends[0].detail is not None
+    assert p.SearchEnded.from_binary(ends[0].detail.value).reason == p.EndReason.STOPPED
 
 
 @pytest.mark.parametrize(

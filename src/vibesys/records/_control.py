@@ -23,9 +23,6 @@ def lifecycle(projection: Projection) -> None:
         e.CoreEventType.STOP_REQUESTED: p.Lifecycle(
             state=p.Oneof("draining", p.Draining(goal=p.DrainGoal.STOP))
         ),
-        e.CoreEventType.STOPPED: p.Lifecycle(
-            state=p.Oneof("ended", p.Ended(outcome=p.Outcome.STOPPED))
-        ),
     }
     projection.emit("lifecycle", states[event.type])
 
@@ -112,7 +109,6 @@ MAPPERS.update(
             e.CoreEventType.PAUSED,
             e.CoreEventType.RESUMED,
             e.CoreEventType.STOP_REQUESTED,
-            e.CoreEventType.STOPPED,
         ),
         lifecycle,
     )
