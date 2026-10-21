@@ -16,12 +16,13 @@ from vibesys.run.core_run import CoreRunRefusedError, drive_core_run
 from vibesys.run.core_services import ClosableEvaluation, CoreServices
 from vibesys.run.environment_failure import RunEnvironmentFailure
 from vibesys.run.host import CoreHost
-from vs_core.api import RunResultProposal, RunStatus, initial_state
+from vs_core.api import Flow, RunResultProposal, RunStatus, initial_state
+from vs_core.api.search import search
 from vs_project.api import FakeStateStore, Project
 from vs_project.api.testing import FakeControlInbox
 from vs_runtime.api import ArtifactStore
 from vs_runtime.api.core import CoreRuntimeBindings, RunStalledError, RunTiming
-from vs_runtime.api.core_shell_fixtures import CounterConfig, ShellTraceTransitions, counter
+from vs_runtime.api.core_shell_fixtures import CounterConfig, ShellTraceTransitions
 from vs_runtime.api.infrastructure import (
     PauseRequest,
     RunControlTransitionKind,
@@ -47,6 +48,13 @@ if TYPE_CHECKING:
         RunControlTransition,
         WorkspaceHolds,
     )
+
+
+@search("startup-ownership", config=CounterConfig)
+async def counter(ctx: Flow, config: CounterConfig) -> None:
+    """A checkpointed idle search can reopen after an earlier epoch ended."""
+    ctx.checkpoint(config)
+    await ctx.first(ctx.stopped)
 
 
 class BridgeStartError(RuntimeError):

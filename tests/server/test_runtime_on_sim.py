@@ -19,13 +19,14 @@ from tests.server.support import CONTROL_KEY, REQUEST_TIME, operator_dialer, sim
 from tests.support.real_git import NO_GITHUB, REAL_GIT
 
 from entrypoints.production import production_runs
-from server.api.protocol import StopCommand, SubscribeRequest
+from server.api.protocol import SubscribeRequest
 from server.events import RunInterruptedData
 from server.runtime import ServerRuntime
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
 from vibesys.events import CoreEventType, EventStatus
 from vibesys.run.event_journal import EventJournal as CoreEventJournal
 from vibesys.run.integration import LocalRunIntegration
+from vs_core.api import StopMode
 from vs_runtime.api.infrastructure import ChannelRunControl
 from vs_runtime.api.testing import idle_environment_system
 from vs_sim.api import OsThreads, Signals
@@ -364,7 +365,7 @@ def test_runtime_returns_cleanly_after_an_operator_stop(
             control = ChannelRunControl(integration.control, threads)
             runtime.controls.install(control)
             try:
-                runtime.api.execute(StopCommand(timestamp=REQUEST_TIME))
+                runtime.controls.stop(StopMode.DRAIN)
                 integration.control.raise_if_stopped()
                 return "unreachable"
             finally:
