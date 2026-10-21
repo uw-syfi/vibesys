@@ -217,9 +217,9 @@ class FakeAuxiliaryAgents:
         return agent
 
     def close(self) -> None:
-        self.closed = True
         for agent in self.agents:
             agent.close()
+        self.closed = True
 
 
 @dataclass
