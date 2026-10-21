@@ -1,0 +1,40 @@
+syntax = "proto3";
+
+package vibesys.store.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1";
+
+// Record is the append-only run log envelope. Store changes are additive only.
+// A run.log starts with the eight-byte magic VSRLOG01. Each record then has
+// a uvarint payload length, a four-byte little-endian CRC32C of the payload,
+// and the payload: one encoded vibesys.store.v1.Record.
+message Record {
+  uint64 seq = 1;
+  google.protobuf.Timestamp at = 2;
+  uint32 epoch = 3;
+  oneof body {
+    option (buf.validate.oneof).required = true;
+    EpochStarted epoch_started = 4;
+    LegacyEvent legacy_event = 5;
+  }
+}
+
+// EpochStarted identifies the writer and schemas for one run epoch.
+message EpochStarted {
+  string run_id = 1;
+  uint32 epoch = 2;
+  string tree_hash = 3;
+  bool dirty = 4;
+  string api_schema_hash = 5;
+  string store_schema_hash = 6;
+}
+
+// LegacyEvent is an interim bridge carrying one current JSONL run event verbatim.
+// Phase 2 replaces this body when the event inventory is implemented. Its field
+// number remains reserved after removal; existing store records remain readable.
+message LegacyEvent {
+  string json = 1;
+}

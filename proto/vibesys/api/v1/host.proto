@@ -1,0 +1,37 @@
+syntax = "proto3";
+
+package vibesys.api.v1;
+
+option go_package = "github.com/uw-syfi/vibesys/gateway/gen/vibesys/api/v1;apiv1";
+
+// HostService is a stateless view over a host user's run files.
+// API schemas require an exact hash match, with no compatibility negotiation.
+service HostService {
+  // Hello compares the client and gateway API schema hashes. A mismatch fails
+  // with gRPC FAILED_PRECONDITION and a message naming both hashes.
+  rpc Hello(HelloRequest) returns (HelloResponse);
+  // Tail follows the log live until the client cancels, starting at from_seq
+  // (inclusive). Record bytes pass through unchanged; only seq is decoded.
+  rpc Tail(TailRequest) returns (stream TailResponse);
+}
+
+message HelloRequest {
+  string api_schema_hash = 1;
+}
+
+message HelloResponse {
+  string api_schema_hash = 1;
+  string gateway_version = 2;
+}
+
+message TailRequest {
+  string run_id = 1;
+  uint64 from_seq = 2;
+}
+
+message TailResponse {
+  // Each element is one encoded vibesys.store.v1.Record, without log framing.
+  repeated bytes records = 1;
+  // The last sequence delivered in this response.
+  uint64 through_seq = 2;
+}
