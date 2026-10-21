@@ -142,7 +142,9 @@ def content(projection: Projection, span: str, role: str, text: str) -> p.Transc
 def transcript(projection: Projection) -> None:
     data = projection.event.data
     span_id = owner(projection)
-    if span_id == "run":
+    if span_id == "run" and isinstance(
+        data, (e.AgentOutputChunkData, e.ToolCallData, e.ToolResultData)
+    ):
         stream(
             projection,
             p.StreamRef(

@@ -124,6 +124,15 @@ def journal(wall: int, specs: list[tuple[int, str]]) -> list[e.CoreEvent]:
                 ),
             },
         }
+        if index % 2 == 0:
+            add(
+                e.CoreEventType.SPAN_STARTED,
+                start,
+                {
+                    "kind": "span_started",
+                    "span": dict(gate, status="running", ended_at=None),
+                },
+            )
         add(e.CoreEventType.SPAN_ENDED, end, {"kind": "span_ended", "span": gate})
     observations.sort(key=lambda event: event.timestamp)
     add(e.CoreEventType.RUN_FINISHED, max(s + i + 1 for i, (s, _) in enumerate(specs)))
@@ -157,11 +166,14 @@ def test_metric_and_span_durations_match_legacy_clock(events: list[e.CoreEvent])
         assert mapped.ended_at - mapped.started_at == pytest.approx(
             source.ended_at - source.started_at
         )
+    latest_metrics: dict[str, p.MetricPoint] = {}
     for record in records:
         if record.body and record.body.field == "metric":
             metric = record.body.value
-            assert metric.clock == spans[metric.span].ended_at
+            latest_metrics[metric.span] = metric
             assert metric.clock <= record.clock
+    for span_id, metric in latest_metrics.items():
+        assert metric.clock == spans[span_id].ended_at
 
 
 @pytest.mark.regression
