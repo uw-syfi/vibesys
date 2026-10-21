@@ -163,6 +163,8 @@ class SnapshotDecoder:
         ):
             lower_legacy_value(source, path, name, value, self.facts)
         data = _JSON.dump_json(value)
+        if name == "AcceptedReading" and isinstance(value, dict):
+            self.facts.accepted_reading(source, path, value)
         if isinstance(value, dict) and name in (
             "LiveFlow",
             "LiveFlows",

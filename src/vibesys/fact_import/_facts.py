@@ -4,11 +4,12 @@ from __future__ import annotations
 
 from dataclasses import fields, is_dataclass
 from hashlib import sha256
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from pydantic import BaseModel
 
 from vibesys.hypothesis import RoundRecord
+from vibesys.metrics import AcceptedReading
 from vs_core.api import (
     ChargeReceipt,
     ChildLease,
@@ -37,6 +38,7 @@ from vs_proto.api import imported_facts as pb
 from vs_runtime.api.core import EvidenceEntry
 from vs_runtime.api.core_values import to_proto
 
+from ._accepted import accepted_measurement
 from ._guidance import consolidate_guidance
 from ._rounds import lower_round
 from ._source import FactImportError, ImportSource, ensure_finite
@@ -68,7 +70,12 @@ class FactSet:
             raise FactImportError(f"{source.path}:{selector}", str(error)) from error
         key = name.encode() + b"\0" + value.to_binary()
         if identity is not None:
-            prior = self._identities.setdefault((name, identity), key)
+            domain = (
+                f"{name}:{value.scope.name}:{value.unit}"
+                if isinstance(value, pb.ImportedUsage)
+                else name
+            )
+            prior = self._identities.setdefault((domain, identity), key)
             if prior != key:
                 raise FactImportError(f"{source.path}:{selector}", f"conflicting {name} {identity}")
         if key in self._facts:
@@ -98,12 +105,15 @@ class FactSet:
         """Visit schema-validated fields only; strings are never scanned for plausible facts."""
         ensure_finite(source, selector, value)
         for path, item in walk(selector, value):
-            self._project_value(source, path, item)
+            if isinstance(item, RoundRecord):
+                lower_round(source, path, item, self)
+            elif isinstance(item, AcceptedReading):
+                self.accepted_reading(source, path, item.model_dump(mode="json"))
+            else:
+                self._project_value(source, path, item)
 
     def _project_value(self, source: ImportSource, path: str, item: object) -> None:
-        if isinstance(item, RoundRecord):
-            lower_round(source, path, item, self)
-        elif isinstance(item, values.ArtifactRef):
+        if isinstance(item, values.ArtifactRef):
             self.add(source, path, cast("core_common.ArtifactRef", to_proto(item)))
         elif isinstance(item, values.RevisionRef):
             self.add(
@@ -126,20 +136,7 @@ class FactSet:
                 identity=f"evidence:{item.source_request.root}:{item.evidence_id.root}",
             )
         elif isinstance(item, ChargeReceipt):
-            self.add(
-                source,
-                path,
-                usage(
-                    identity=item.charge_id.root,
-                    unit=item.kind.value,
-                    amount=item.charged,
-                    refunded=item.refunded,
-                    source_request=None
-                    if item.source_request is None
-                    else item.source_request.root,
-                ),
-                identity=item.charge_id.root,
-            )
+            self._charge(source, path, item)
         elif isinstance(item, EvidenceEntry):
             self.add(
                 source,
@@ -173,6 +170,27 @@ class FactSet:
             )
         else:
             self._ownership(source, path, item)
+
+    def _charge(self, source: ImportSource, path: str, item: ChargeReceipt) -> None:
+        value = usage(
+            identity=item.charge_id.root,
+            unit=item.kind.value,
+            amount=item.charged,
+            refunded=item.refunded,
+            scope=pb.ImportedUsageScope.CHARGE,
+        )
+        if item.source_request is not None:
+            value.source_request = item.source_request.root
+        self.add(source, path, value, identity=item.charge_id.root)
+
+    def accepted_reading(self, source: ImportSource, path: str, value: dict[str, Any]) -> None:
+        measurement = accepted_measurement(value)
+        self.add(
+            source,
+            path,
+            measurement,
+            identity=f"accepted:{value['source_request']['root']}:{value['evidence_id']['root']}",
+        )
 
     def _ownership(self, source: ImportSource, path: str, item: object) -> None:
         if isinstance(item, OwnedJob):
@@ -304,7 +322,7 @@ def usage(
     unit: str,
     amount: int | float | None,
     *,
-    source_request: str | None = None,
+    scope: pb.ImportedUsageScope,
     refunded: int = 0,
 ) -> pb.ImportedUsage:
     if amount is None:
@@ -317,8 +335,8 @@ def usage(
         identity=identity,
         unit=unit,
         quantity=quantity,
-        source_request=source_request,
         refunded_count=str(refunded),
+        scope=scope,
     )
 
 

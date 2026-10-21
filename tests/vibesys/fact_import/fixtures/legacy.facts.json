@@ -140,6 +140,7 @@
         "count": "1",
         "identity": "workstream:1",
         "refundedCount": "0",
+        "scope": "IMPORTED_USAGE_SCOPE_AGGREGATE",
         "unit": "attempt"
       }
     }

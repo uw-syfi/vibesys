@@ -2045,7 +2045,7 @@ expose = ["[A-Z].*"]
 [[modules]]
 path = "vibesys.fact_import"
 layer = "loops"
-depends_on = ["vibesys", "vs_agent", "vs_core", "vs_project", "vs_proto", "vs_decode.api", "vs_runtime", "vs_evaluation.api", "vs_evaluator_protocol", "vibesys.hypothesis"]
+depends_on = ["vibesys", "vs_agent", "vs_core", "vs_project", "vs_proto", "vs_decode.api", "vs_runtime", "vs_evaluation.api", "vs_evaluator_protocol", "vibesys.hypothesis", "vibesys.metrics"]
 
 [[interfaces]]
 from = ["vibesys.fact_import"]

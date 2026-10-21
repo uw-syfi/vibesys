@@ -97,14 +97,29 @@ message ImportedMeasurement {
   optional string historical_commit = 4 [(buf.validate.field).string.min_len = 1];
   optional string historical_artifact = 5 [(buf.validate.field).string.min_len = 1];
   ImportedStageEvidence stage_evidence = 6;
+  ImportedAcceptedReading accepted_reading = 7;
   option (buf.validate.message).cel = {
     id: "ImportedMeasurement.source", message: "exactly one measurement source required",
-    expression: "(has(this.evidence) ? 1 : 0) + (has(this.sample) ? 1 : 0) + (has(this.historical_reading) ? 1 : 0) + (has(this.stage_evidence) ? 1 : 0) == 1"
+    expression: "(has(this.evidence) ? 1 : 0) + (has(this.sample) ? 1 : 0) + (has(this.historical_reading) ? 1 : 0) + (has(this.stage_evidence) ? 1 : 0) + (has(this.accepted_reading) ? 1 : 0) == 1"
   };
   option (buf.validate.message).cel = {
     id: "ImportedMeasurement.trusted", message: "evidence must retain trusted provenance",
     expression: "!has(this.evidence) || this.evidence.provenance == 1"
   };
+}
+
+// An owner-decoded reading bound to its original evidence key. It may survive
+// in a snapshot after the corresponding stage receipt is no longer available.
+message ImportedAcceptedReading {
+  EvidenceKey key = 1 [(buf.validate.field).required = true];
+  EvidenceKind kind = 2 [(buf.validate.field).enum = {defined_only: true, not_in: 0}];
+  bool passed = 3;
+  string stage = 4 [(buf.validate.field).string.min_len = 1];
+  string protocol = 5 [(buf.validate.field).string.pattern = "^[1-9][0-9]*$"];
+  repeated Reading readings = 6;
+  ImportedPartialMeasurement partial = 7;
+  string feedback = 8;
+  optional string unmet_requirement = 9;
 }
 
 enum ImportedStageKind {
@@ -187,6 +202,15 @@ message ImportedGuidance {
   optional string historical_target_id = 11 [(buf.validate.field).string.min_len = 1];
 }
 
+enum ImportedUsageScope {
+  IMPORTED_USAGE_SCOPE_UNSPECIFIED = 0;
+  IMPORTED_USAGE_SCOPE_CHARGE = 1;
+  IMPORTED_USAGE_SCOPE_INVOCATION = 2;
+  IMPORTED_USAGE_SCOPE_AGGREGATE = 3;
+}
+
+// Historical accounting observations. Aggregate and component observations can
+// overlap; retaining both never authorizes summing them as independent charges.
 message ImportedUsage {
   string identity = 1 [(buf.validate.field).string.min_len = 1];
   string unit = 2 [(buf.validate.field).string.min_len = 1];
@@ -198,6 +222,7 @@ message ImportedUsage {
   }
   string refunded_count = 6 [(buf.validate.field).string.pattern = "^(0|[1-9][0-9]*)$"];
   optional string source_request = 4 [(buf.validate.field).string.min_len = 1];
+  ImportedUsageScope scope = 8 [(buf.validate.field).enum = {defined_only: true, not_in: 0}];
 }
 
 // Retained obligations require inspection by the new epoch, never redispatch authority.

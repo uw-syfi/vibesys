@@ -431,6 +431,52 @@ def test_guidance_retains_disposition_target_and_standing_mode() -> None:
     assert not guidance.delivered
 
 
+def test_aggregate_and_component_usage_remain_distinct_overlapping_observations() -> None:
+    legacy = json.loads((_FIXTURES / "legacy-v6-empty.json").read_bytes())
+    legacy["agent"] = {"input_tokens": 3, "output_tokens": 4}
+    event = {
+        "type": "turn_usage_recorded",
+        "timestamp": "2026-01-01T00:00:00Z",
+        "execution_id": "invocation-a",
+        "data": {"kind": "turn_usage_recorded", "input_tokens": 3},
+    }
+    result = _import(
+        ImportSource(
+            "dynamic/state.json", SourceFormat.LEGACY_DYNAMIC, json.dumps(legacy).encode()
+        ),
+        ImportSource("core-events.jsonl", SourceFormat.EVENTS, json.dumps(event).encode()),
+        strategy="dynamic",
+    )
+    usage = [row for row in _payloads(result, "usage") if row.unit == "input_tokens"]
+    assert {row.scope.name for row in usage} == {"AGGREGATE", "INVOCATION"}
+    assert len(usage) == 2
+    assert all(row.quantity.value == "3" for row in usage)
+
+
+def test_charge_and_invocation_identifiers_have_separate_accounting_domains() -> None:
+    envelope = _envelope()
+    envelope["core"]["sessions"]["run_charges"] = [
+        {
+            "charge_id": {"kind": "charge", "root": "invocation-a:input_tokens"},
+            "kind": "turn",
+            "charged": 2,
+        }
+    ]
+    event = {
+        "type": "turn_usage_recorded",
+        "timestamp": "2026-01-01T00:00:00Z",
+        "execution_id": "invocation-a",
+        "data": {"kind": "turn_usage_recorded", "input_tokens": 3},
+    }
+    result = _import(
+        ImportSource("envelope.json", SourceFormat.ENVELOPE, json.dumps(envelope).encode()),
+        ImportSource("core-events.jsonl", SourceFormat.EVENTS, json.dumps(event).encode()),
+    )
+    usage = _payloads(result, "usage")
+    assert any(row.scope.name == "CHARGE" and row.quantity.value == "2" for row in usage)
+    assert any(row.scope.name == "INVOCATION" and row.quantity.value == "3" for row in usage)
+
+
 @pytest.mark.parametrize("version", list(range(1, 10)))
 def test_legacy_versions_keep_fact_semantics_without_changing_the_source_version(
     version: int,
@@ -541,6 +587,7 @@ def test_usage_counts_remain_exact_above_machine_integer_and_float_precision(cou
     usage = _payloads(result, "usage")[0]
     assert usage.quantity.field == "count"
     assert usage.quantity.value == str(count)
+    assert usage.scope.name == "CHARGE"
 
 
 def test_current_guidance_preserves_the_exact_shared_target_and_content_reference() -> None:
@@ -616,6 +663,52 @@ def test_current_store_and_legacy_fixtures_match_shared_fact_goldens() -> None:
         assert_exact_text(
             _FIXTURES / f"{name}.facts.json",
             json.dumps(json.loads(result.to_json()), sort_keys=True, indent=2) + "\n",
+        )
+
+
+def test_snapshot_only_run_keeps_all_accepted_metrics_and_partial_progress() -> None:
+    source = ImportSource(
+        "flow.json", SourceFormat.FLOW, (_FIXTURES / "flow-multimetric.json").read_bytes()
+    )
+    result = _import(source, strategy="dynamic")
+    accepted = [
+        row.accepted_reading
+        for row in _payloads(result, "measurement")
+        if row.accepted_reading is not None
+    ]
+    assert len(accepted) == 2
+    benchmark = next(row for row in accepted if row.key.evidence_id.root == "benchmark")
+    assert benchmark.key.source_request.root == "benchmark-request"
+    assert [(reading.metric, reading.value) for reading in benchmark.readings] == [
+        ("throughput", 2.0),
+        ("p99", 3.0),
+    ]
+    assert benchmark.partial.completed == "1"
+    assert benchmark.partial.required == "4"
+    assert not benchmark.passed
+    assert all(
+        origin.sha256 == sha256(source.data).hexdigest()
+        for fact in result.facts
+        for origin in fact.imported_from
+    )
+    assert_exact_text(
+        _FIXTURES / "flow-multimetric.facts.json",
+        json.dumps(json.loads(result.to_json()), sort_keys=True, indent=2) + "\n",
+    )
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), -float("inf")])
+def test_snapshot_accepted_metrics_reject_nonfinite_values_with_the_embedded_path(
+    value: float,
+) -> None:
+    flow = json.loads((_FIXTURES / "flow-multimetric.json").read_bytes())
+    published = json.loads(flow["live"]["published"])
+    published["parents"][0]["benchmark"]["metrics"][0]["value"] = value
+    flow["live"]["published"] = json.dumps(published)
+    with pytest.raises(FactImportError, match=r"flow.json.*published.*metrics.*value"):
+        _import(
+            ImportSource("flow.json", SourceFormat.FLOW, json.dumps(flow).encode()),
+            strategy="dynamic",
         )
 
 

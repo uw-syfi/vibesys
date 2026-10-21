@@ -90,7 +90,12 @@ def _event(source: ImportSource, path: str, row: CoreEvent, facts: FactSet) -> N
             facts.add(
                 source,
                 f"{path}.data.{name}",
-                usage(identity=identity, unit=name, amount=getattr(value, name)),
+                usage(
+                    identity=identity,
+                    unit=name,
+                    amount=getattr(value, name),
+                    scope=pb.ImportedUsageScope.INVOCATION,
+                ),
                 identity=f"{identity}:{name}",
             )
     elif isinstance(value, WorkspaceSnapshotData):

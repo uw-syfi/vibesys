@@ -35,7 +35,12 @@ def _workstream(source: ImportSource, path: str, item: dict[str, Any], facts: Fa
     facts.add(
         source,
         path,
-        usage(identity=f"workstream:{item['sequence']}", unit="attempt", amount=amount),
+        usage(
+            identity=f"workstream:{item['sequence']}",
+            unit="attempt",
+            amount=amount,
+            scope=pb.ImportedUsageScope.AGGREGATE,
+        ),
     )
     if feedback := item.get("feedback"):
         facts.add(
@@ -102,7 +107,16 @@ def _steer(source: ImportSource, path: str, item: dict[str, Any], facts: FactSet
 
 def _agent(source: ImportSource, path: str, item: dict[str, Any], facts: FactSet) -> None:
     for unit in ("input_tokens", "output_tokens"):
-        facts.add(source, path, usage(identity=f"agent:{unit}", unit=unit, amount=item.get(unit)))
+        facts.add(
+            source,
+            path,
+            usage(
+                identity=f"agent:{unit}",
+                unit=unit,
+                amount=item.get(unit),
+                scope=pb.ImportedUsageScope.AGGREGATE,
+            ),
+        )
 
 
 def _dependency(source: ImportSource, path: str, item: dict[str, Any], facts: FactSet) -> None:
