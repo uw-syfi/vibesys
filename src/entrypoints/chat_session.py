@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import os
-import sys
 from contextlib import ExitStack
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -38,11 +37,9 @@ def start_chat(request: ChatMessageRequest) -> None:
         return
     effects = real_gateway_effects()
     with (directory / "process.log").open("ab") as output:
-        process = effects.spawn(
+        process = effects.spawn_python(
+            "entrypoints.chat_session",
             [
-                sys.executable,
-                "-m",
-                "entrypoints.chat_session",
                 "--project",
                 request.project_root,
                 "--run",

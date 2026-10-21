@@ -368,6 +368,12 @@ class _DetachedGatewayEffects:
             start_new_session=True,
         )
 
+    def spawn_python(
+        self, module: str, arguments: list[str], environment: dict[str, str], output: BinaryIO
+    ) -> _DetachedProcess:
+        """Launch a framework child with the same installed interpreter as this host."""
+        return self.spawn([sys.executable, "-m", module, *arguments], environment, output)
+
     def discover(self, instance_path: Path) -> WebInstanceRecord | None:
         return self._discovery.discover(instance_path, cleanup_stale=False)
 
@@ -475,11 +481,7 @@ def _start_detached_child[T](launch: _DetachedLaunch[T], effects: _DetachedGatew
     launch's output as stdout and stderr.
     """
     environment = {**os.environ, "VIBESYS_DETACHED_CHILD": "1"}
-    process = effects.spawn(
-        [sys.executable, "-m", launch.module, *launch.arguments],
-        environment,
-        launch.output,
-    )
+    process = effects.spawn_python(launch.module, launch.arguments, environment, launch.output)
     deadline = effects.monotonic() + _DETACHED_START_HANG_GUARD_SECONDS
     while effects.monotonic() < deadline:
         value = launch.ready()
