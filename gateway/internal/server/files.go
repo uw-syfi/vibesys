@@ -7,6 +7,8 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"regexp"
+	"sort"
 	"strconv"
 	"syscall"
 
@@ -224,4 +226,58 @@ func latestKeyframe(dir string, cap uint64, maxBytes int) ([]byte, runlog.Positi
 		return nil, runlog.Position{}, status.Error(codes.DataLoss, "keyframe filename and through_seq differ")
 	}
 	return data, position, nil
+}
+
+var sessionID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$`)
+
+func (h *host) contentDirectory(runID, session string) (string, error) {
+	dir, err := h.directory(runID)
+	if err != nil || session == "" {
+		return dir, err
+	}
+	if !sessionID.MatchString(session) {
+		return "", status.Error(codes.InvalidArgument, "invalid session_id")
+	}
+	path := filepath.Join(dir, "sessions", session)
+	// Session directories are owned by the session process, never symlink routes.
+	for _, component := range []string{filepath.Join(dir, "sessions"), path} {
+		info, err := os.Lstat(component)
+		if err != nil {
+			return "", rpcError(err)
+		}
+		if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+			return "", status.Error(codes.InvalidArgument, "session path must be a directory")
+		}
+	}
+	return path, nil
+}
+
+func (h *host) logPath(runID, session string) (string, error) {
+	dir, err := h.contentDirectory(runID, session)
+	if err != nil {
+		return "", err
+	}
+	name := "run.log"
+	if session != "" {
+		name = "session.log"
+	}
+	return filepath.Join(dir, name), nil
+}
+
+func sessions(dir string) ([]string, error) {
+	entries, err := os.ReadDir(filepath.Join(dir, "sessions"))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	result := []string{}
+	for _, entry := range entries {
+		if entry.IsDir() && sessionID.MatchString(entry.Name()) {
+			result = append(result, entry.Name())
+		}
+	}
+	sort.Strings(result)
+	return result, nil
 }

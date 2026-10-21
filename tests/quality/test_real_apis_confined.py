@@ -1209,6 +1209,18 @@ type Edge = tuple[EdgeKind, str]
 # parse JSON or TOML directly. Everything else asks the owner of the data. Keep one line
 # per module: its kind, and a note naming the data.
 FILE_IO_EDGE_MODULES: dict[str, Edge] = {
+    "libs/vs-project/src/vs_project/_fingerprint.py": (
+        EdgeKind.INPUT_LOADER,
+        "Project's portable input fingerprint reader, extracted from its state implementation",
+    ),
+    "src/entrypoints/chat_session.py": (
+        EdgeKind.PROCESS_BOUNDARY,
+        "the detached session's process output log",
+    ),
+    "src/vibesys/chat/_session.py": (
+        EdgeKind.LOG,
+        "session log shell: reads the run head and its own answer blobs through Project paths",
+    ),
     "libs/vs-runlog/src/vs_runlog/_atomic.py": (
         EdgeKind.LOG,
         "durable atomic publication of run store protobuf files",

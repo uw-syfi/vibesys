@@ -80,12 +80,14 @@ class TaskImageBuild:
     The Dockerfile is built on *backend*'s default image, passed as
     ``BASE_IMAGE``. *runner* runs the Docker commands; ``None`` runs the real
     Docker CLI. *platform* is the host platform the run opens on, which decides
-    whether a host-only backend derives the host environment.
+    whether a host-only backend derives the host environment. ``allow_build=False``
+    resolves a saved image for a reader without rebuilding a missing one.
     """
 
     backend: ComputeBackend
     runner: DockerBuildRunner | None = None
     platform: str = sys.platform
+    allow_build: bool = True
 
 
 def _task_image_facts(
@@ -138,6 +140,9 @@ def _editor_image(
         launch=launch,
         facts=_task_image_facts(dockerfile, image, launch, build),
     )
+    if plan.build is not None and not build.allow_build:
+        message = f"the saved task image {image} is unavailable; a chat reader cannot rebuild it"
+        raise ValueError(message)
     if plan.notice is not None:
         sys.stderr.write(f"{plan.notice}\n")
     if plan.build is None:

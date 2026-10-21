@@ -48,7 +48,10 @@ absent executable returns the checkout-missing refusal.
 
 ## Current limits
 
-Chat-message requests are absent. The journal's [control projection](../../../src/vibesys/records/_control.py)
+Chat messages use a separate session inbox and HostCall. The shell submits a
+chat proposal through this feature's `useRunIntents` actor, preserving the same
+intent admission and outcome handling as the controls.
+The journal's [control projection](../../../src/vibesys/records/_control.py)
 produces IntentState from recorded intent outcomes. A lifecycle record without
 a matching request id does not complete a pending request. The consumer handles
 an outcome even when it arrives before the admission response.

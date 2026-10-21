@@ -143,6 +143,8 @@ graph TD
     entrypoints --> vs_logs
     entrypoints --> vs_mcp
     entrypoints --> vs_project
+    entrypoints --> vs_proto
+    entrypoints --> vs_runlog
     entrypoints --> vs_runtime
     entrypoints --> vs_sandbox
     entrypoints --> vs_sim

@@ -38,7 +38,7 @@ read path and journal projection from the native core and control work still to 
 | Conversion of existing JSONL runs and `store.json` envelopes | typed journal conversion and bulk project/host-index conversion built, including blobs, final keyframes, head publication and repair; pre-trace and unsupported journals are reported as skipped; core envelopes remain the resume authority until phase 3 | 2 |
 | Core state as generated types, `state.pb`, native `run.log` writes | unbuilt; typed journal projection does not replace native core commits | 3 |
 | Intents as records (`IntentState`), pause/park, relaunch epochs | inbox outcomes, park and relaunch epochs built over the current saved-state resume path; native state recovery remains unbuilt | 3 |
-| Typed `HostCall` for intents and relaunch; chat sessions as processes | HostCall built; chat sessions remain unbuilt | 3 |
+| Chat sessions as processes with their own log; `HostCall` | built behind the per-host switch; reuses the existing auxiliary chat agent, prompts and read tools | 3 |
 | Generated frozen value classes from `.proto` (our own protoc plugin) | prototype only | 3 |
 | Control inbox (files, ordered, durable, idempotent by request id) | built | |
 | Log streams (`vs_logs`) | built; moves under the run directory | 2 |
@@ -205,6 +205,13 @@ run: a session reads the run's files, its answers and token streaming are append
 and a steer it proposes is data in that log that the operator may send as an intent. A generic
 `Attach` bidirectional byte stream to a socket a session owns is reserved for future byte-level
 interaction (terminals). The run never serves one.
+
+`vibesys host chat-message` admits a typed message to the session inbox and starts its process
+if needed. Admission and idle exit share a lock, so a message cannot be stranded by an idle
+exit. The session uses the shared runlog writer and publishes its own commit fence in
+`sessions/<id>/run.head`. `Skeleton.sessions` lists the conversations; `Tail` and `GetBlobs`
+select their files with `session_id`. The desktop mounts chat beside the Run screen and sends
+an operator-approved proposal through the same run-intents feature as the run controls.
 
 ## The gateway and the connection
 

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import io
 import runpy
 from pathlib import Path
@@ -236,10 +235,9 @@ def test_off_loop_construction_and_appends_use_the_supplied_loop(tmp_path: Path)
     async def exercise() -> None:
         threads = loop_threads()
         runner = SimBlockingRunner(threads)
-        loop = asyncio.get_running_loop()
 
         def append_burst() -> FileRunLogWriter:
-            writer = FileRunLogWriter(tmp_path / "run.log", clock=clock, loop=loop, threads=threads)
+            writer = FileRunLogWriter(tmp_path / "run.log", clock=clock, threads=threads)
             for record in initial_records():
                 writer.append(record)
             for seq in range(3, 303):

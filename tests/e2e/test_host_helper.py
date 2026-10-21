@@ -186,6 +186,7 @@ def test_hello_loads_no_engine_and_reports_its_start_up_time(
     record_property("hello_modules", len(loaded))
     assert "pydantic" in loaded, "importtime reported no modules; the check would be vacuous"
     assert [name for name in loaded if is_heavy(name)] == []
+    assert "vs_project._fingerprint" not in loaded
     assert len(loaded) <= _MODULE_CEILING
     # #2351: minting an instance id with ``secrets`` loaded ``secrets``, ``hmac``
     # and ``base64`` on every hello and pushed the count over the ceiling.

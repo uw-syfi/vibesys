@@ -9,8 +9,11 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from vibesys.api.assembly import SessionImplementations
     from vibesys.api.auxiliary import AuxiliaryAgents, RunReady
+    from vibesys.api.contracts import CoreEvent
     from vibesys.plugin_catalog import OrchestrationRegistry
     from vibesys.run.contracts import RunRequest
 
@@ -22,7 +25,9 @@ class RunReader(Protocol):
         """The facts a frontend attaches chat with, as a live run publishes them."""
         ...
 
-    def open_auxiliary_agents(self) -> AuxiliaryAgents:
+    def open_auxiliary_agents(
+        self, *, sink: Callable[[CoreEvent], object] | None = None
+    ) -> AuxiliaryAgents:
         """An independent caller-owned scope of conversations over the saved run."""
         ...
 

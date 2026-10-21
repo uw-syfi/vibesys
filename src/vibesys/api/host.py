@@ -11,10 +11,19 @@ from typing import TYPE_CHECKING
 
 from pydantic import ValidationError as ControlValidationError
 
-from vibesys.api import CONTROL_REQUEST, ConfigurationError, ControlAction, recorded_ending
+from vibesys.api import (
+    CONTROL_REQUEST,
+    ConfigurationDiagnostic,
+    ConfigurationError,
+    ControlAction,
+    recorded_ending,
+)
+from vibesys.api.chat import run_head
 from vibesys.api.host_relaunch import relaunch_host
 from vs_project.api import INBOX_FORMAT, InboxClosedError, Project, ProjectError
 from vs_proto.api import (
+    ChatMessageRequest,
+    ChatMessageResponse,
     ConfigurationFailed,
     HostCallRequest,
     HostCallResponse,
@@ -24,15 +33,24 @@ from vs_proto.api import (
     ValidationError,
     validate,
 )
+from vs_runlog.api import RunLock
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from vs_proto.api import PostIntentRequest, SteerIntent
     from vs_sim.api import Processes, Threads
 
 __all__ = ["host_call"]
 
 
-def host_call(payload: bytes, *, processes: Processes, threads: Threads) -> bytes:
+def host_call(
+    payload: bytes,
+    *,
+    processes: Processes,
+    threads: Threads,
+    start_chat: Callable[[ChatMessageRequest], None] | None = None,
+) -> bytes:
     """Validate and execute one HostCall envelope, returning a typed response.
 
     Invalid input, unsupported intents and closed inboxes return the documented
@@ -51,6 +69,9 @@ def host_call(payload: bytes, *, processes: Processes, threads: Threads) -> byte
             case Oneof("relaunch", request):
                 result = relaunch_host(request, call.checkout, processes=processes, threads=threads)
                 response = HostCallResponse(result=Oneof("relaunch", result))
+            case Oneof("chat_message", request):
+                result = _chat_message(request, start_chat)
+                response = HostCallResponse(result=Oneof("chat_message", result))
             case _:
                 return _failure("invalid_method", "HostCall.method is required")
     except ConfigurationError as error:
@@ -133,3 +154,32 @@ def _steer_payload(value: SteerIntent) -> dict[str, object]:
             "id": target.id if target.kind != SteerTargetKind.RUN else None,
         },
     }
+
+
+def _chat_message(
+    request: ChatMessageRequest, start: Callable[[ChatMessageRequest], None] | None
+) -> ChatMessageResponse:
+    if start is None:
+        raise ConfigurationError(
+            ConfigurationDiagnostic(
+                code="unavailable",
+                stage="host_call",
+                message="chat process launcher was not supplied",
+            )
+        )
+    project = Project.open(request.project_root)
+    project.state.load_run(request.run_id)
+    project.state.require_local_run(request.run_id)
+    run_head(Project.run_log_path_for(request.project_root, request.run_id).parent / "run.head")
+    directory = Project.chat_session_directory_for(
+        request.project_root, request.run_id, request.session_id
+    )
+    directory.mkdir(parents=True, exist_ok=True)
+    gate = RunLock(directory / "admission.lock")
+    try:
+        inbox = project.state.session_inbox(request.run_id, request.session_id)
+        inbox.post(request.request_id, request.to_binary(), ended=lambda: None)
+        start(request)
+    finally:
+        gate.close()
+    return ChatMessageResponse(request_id=request.request_id, session_id=request.session_id)

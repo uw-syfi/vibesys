@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 import pytest
 from tests.support.task_project import write_task
 
-from entrypoints.cli import build_run_request, parse_cli_invocation
+from entrypoints.cli import build_reader_request, build_run_request, parse_cli_invocation
 from entrypoints.headless import main as headless_main
 from entrypoints.server import _DetachedGatewayEffects, _launch_detached_instance
 from entrypoints.server import main as server_main
@@ -44,7 +44,7 @@ from vs_runtime.api.core_shell_fixtures import CounterConfig, counter
 
 if TYPE_CHECKING:
     from pathlib import Path
-    from typing import BinaryIO
+    from typing import BinaryIO, Literal
 
     from vs_core.api import CoreState
 
@@ -239,3 +239,19 @@ def test_a_run_that_has_not_ended_is_not_refused(
 
     assert request.resume is not None
     assert request.resume.run_id == _RUN_ID
+
+
+@pytest.mark.parametrize("outcome", _OUTCOMES)
+def test_chat_reader_restores_terminal_run_without_resuming(
+    tmp_path: Path, outcome: Literal["success", "failure", "blocked", "cancelled"]
+) -> None:
+    root = _project(tmp_path / "read")
+    _commit_core(
+        root,
+        status=CoreRunStatus.TERMINAL,
+        result=RunResultProposal(outcome=outcome, reason=_REASON),
+    )
+    request = build_reader_request(root, _RUN_ID)
+    assert request.resume is not None
+    assert request.resume.run_id == _RUN_ID
+    assert request.project_root == root

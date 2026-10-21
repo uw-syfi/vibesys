@@ -10,7 +10,7 @@ from vs_runlog._file import (
 )
 from vs_runlog._fold import fold_skeleton
 from vs_runlog._framing import ReadStop, RunLogStopReason, encode_frame
-from vs_runlog._lock import RunLaunchLockedError, assert_run_unlocked, exclusive_run_launch
+from vs_runlog._lock import RunLaunchLockedError, RunLock, assert_run_unlocked, exclusive_run_launch
 
 __all__ = [
     "FileRunContent",
@@ -19,6 +19,7 @@ __all__ = [
     "OsFileSync",
     "ReadStop",
     "RunLaunchLockedError",
+    "RunLock",
     "RunLogReader",
     "RunLogStopReason",
     "assert_run_unlocked",

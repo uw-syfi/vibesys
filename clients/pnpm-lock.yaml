@@ -121,6 +121,9 @@ importers:
       '@vibesys/feature-run-page':
         specifier: workspace:*
         version: link:../../features/run-page
+      '@vibesys/feature-run-sessions':
+        specifier: workspace:*
+        version: link:../../features/run-sessions
       '@vibesys/feature-runs-dashboard':
         specifier: workspace:*
         version: link:../../features/runs-dashboard
@@ -623,6 +626,52 @@ importers:
       react-dom:
         specifier: 19.1.1
         version: 19.1.1(react@19.1.1)
+      typescript:
+        specifier: ^5.8.3
+        version: 5.9.3
+
+  features/run-sessions:
+    dependencies:
+      '@vibesys/hosts':
+        specifier: workspace:*
+        version: link:../../libs/hosts
+      '@vibesys/ipc':
+        specifier: workspace:*
+        version: link:../../libs/ipc
+      '@vibesys/machine':
+        specifier: workspace:*
+        version: link:../../libs/machine
+      '@vibesys/runs':
+        specifier: workspace:*
+        version: link:../../libs/runs
+      '@vibesys/ui':
+        specifier: workspace:*
+        version: link:../../libs/ui
+      react:
+        specifier: 19.1.1
+        version: 19.1.1
+      xstate:
+        specifier: 5.33.2
+        version: 5.33.2
+    devDependencies:
+      '@bufbuild/protobuf':
+        specifier: 2.16.0
+        version: 2.16.0
+      '@types/bun':
+        specifier: 1.4.2
+        version: 1.4.2
+      '@types/node':
+        specifier: ^24.0.0
+        version: 24.13.3
+      '@types/react':
+        specifier: 19.1.13
+        version: 19.1.13
+      '@vibesys/proto':
+        specifier: workspace:*
+        version: link:../../libs/proto
+      '@vibesys/transport':
+        specifier: workspace:*
+        version: link:../../libs/transport
       typescript:
         specifier: ^5.8.3
         version: 5.9.3
