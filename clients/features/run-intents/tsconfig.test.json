@@ -33,6 +33,9 @@
     },
     {
       "path": "../../libs/proto/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/ipc/tsconfig.testing.json"
     }
   ]
 }

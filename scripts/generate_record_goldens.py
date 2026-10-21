@@ -321,6 +321,29 @@ def record_examples() -> dict[str, p.Record]:
             epoch=1,
             body=p.Oneof("span", span_example(kind, value)),
         )
+    chats = {
+        "created": p.ChatSessionCreated(
+            id="default", title="Questions", provider="test", model="test"
+        ),
+        "message": p.ChatMessage(
+            request_id="q-1", role=p.ChatRole.USER, content=p.Oneof("text", "Why?")
+        ),
+        "token": p.ChatToken(request_id="q-1", text="Because"),
+        "proposed_steer": p.ChatSteerProposed(
+            id="proposal-a",
+            request_id="q-1",
+            text="Compare allocations",
+            target=p.SteerTarget(kind=p.SteerTargetKind.RUN),
+            mode=p.SteerMode.NEXT_TURN,
+        ),
+    }
+    for name, value in chats.items():
+        result["chat_" + name] = p.Record(
+            seq=1,
+            at=p.Timestamp(seconds=123),
+            epoch=1,
+            body=p.Oneof("chat", p.ChatRecord(event=p.Oneof(name, value))),
+        )
     states = {
         "starting": p.Starting(
             stage=p.StartupStage.BUILDING_IMAGE,

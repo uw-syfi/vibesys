@@ -14,7 +14,8 @@
   ],
   "exclude": [
     "src/**/*.test.ts",
-    "src/intents/**"
+    "src/intents/**",
+    "src/chat/**"
   ],
   "references": [
     {

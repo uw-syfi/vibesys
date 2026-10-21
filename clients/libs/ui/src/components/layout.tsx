@@ -110,11 +110,12 @@ export function Page(props: {
  */
 export function Dock(props: {
   readonly label: string;
+  readonly minimumMain?: 'wide';
   readonly side: ReactNode | null;
   readonly children: ReactNode;
 }): JSX.Element {
   return (
-    <div className="vs-dock">
+    <div className="vs-dock" data-minimum-main={props.minimumMain}>
       <div className="vs-dock-main">{props.children}</div>
       {props.side === null ? null : (
         <section className="vs-dock-side" aria-label={props.label}>

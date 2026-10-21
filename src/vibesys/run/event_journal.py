@@ -68,7 +68,7 @@ class EventJournal(DurableEventJournal[CoreEvent]):
             path = project.run_log_path_for(project.root, run_id)
             path.parent.mkdir(parents=True, exist_ok=True)
             self._runlog = RunLogTee(
-                FileRunLogWriter(path, clock=self._clock, loop=self._loop, threads=self._threads),
+                FileRunLogWriter(path, clock=self._clock, threads=self._threads),
                 FileRunContent(
                     project.run_blobs_directory_for(project.root, run_id),
                     project.log_streams_directory_for(project.root, run_id),

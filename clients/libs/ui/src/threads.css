@@ -422,3 +422,16 @@
     visibility: hidden;
   }
 }
+
+/* A dense main screen needs more room than a prose document; below that width chat takes the screen. */
+@container (max-width: 1040px) {
+  .vs-dock[data-minimum-main="wide"] > .vs-dock-side {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    box-shadow: var(--elevation-overlay);
+  }
+  .vs-dock[data-minimum-main="wide"]:has(> .vs-dock-side) > .vs-dock-main {
+    visibility: hidden;
+  }
+}

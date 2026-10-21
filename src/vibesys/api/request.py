@@ -153,7 +153,9 @@ def validate_descriptor(
     registry.resolve(descriptor.id).parse_options(descriptor)
 
 
-def validate_run_request(request: RunRequest, *, registry: OrchestrationRegistry, git: Git) -> None:
+def validate_run_request(
+    request: RunRequest, *, registry: OrchestrationRegistry, git: Git, read_only: bool = False
+) -> None:
     """Reject invalid execution settings and policy role keys before host probes."""
     registration = registry.resolve(request.orchestration.id)
     options = registration.parse_options(request.orchestration)
@@ -170,7 +172,7 @@ def validate_run_request(request: RunRequest, *, registry: OrchestrationRegistry
     require_one_login_per_container(
         specs, containerized=run_environment_uses_docker(request.run_environment)
     )
-    if request.resume is not None and registration.plugin.core is not None:
+    if not read_only and request.resume is not None and registration.plugin.core is not None:
         ensure_resumable(request.project_root, request.resume.run_id)
 
 

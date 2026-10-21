@@ -21,10 +21,13 @@ const hostCallDeadline = 30 * time.Second
 // stdout. Python owns all validation and product policy, including inbox writes.
 func (h *host) HostCall(ctx context.Context, request *apiv1.HostCallRequest) (*apiv1.HostCallResponse, error) {
 	method := ""
-	switch request.Method.(type) {
-	case *apiv1.HostCallRequest_PostIntent:
-		method = "post-intent"
-	case *apiv1.HostCallRequest_Relaunch:
+	requestID := ""
+	switch {
+	case request.GetPostIntent() != nil:
+		method, requestID = "post-intent", request.GetPostIntent().GetRequestId()
+	case request.GetChatMessage() != nil:
+		method, requestID = "chat-message", request.GetChatMessage().GetRequestId()
+	case request.GetRelaunch() != nil:
 		method = "relaunch"
 	default:
 		return hostFailure("invalid_method", "HostCall.method is required", -1, ""), nil
@@ -62,8 +65,17 @@ func (h *host) HostCall(ctx context.Context, request *apiv1.HostCallRequest) (*a
 	}
 	if failure := response.GetConfigurationFailed(); failure != nil {
 		failure.Stderr = safeDiagnostic(strings.TrimSpace(failure.Stderr + "\n" + result.Stderr))
-	} else if (method == "post-intent" && (response.GetPostIntent() == nil || response.GetPostIntent().GetRequestId() != request.GetPostIntent().GetRequestId())) || (method == "relaunch" && response.GetRelaunch() == nil) {
-		return hostFailure("invalid_host_response", "vibesys host "+method+" returned a different method or request_id", result.ExitCode, result.Stderr), nil
+	} else {
+		valid := method == "post-intent" && response.GetPostIntent() != nil && response.GetPostIntent().GetRequestId() == requestID
+		if method == "chat-message" {
+			valid = response.GetChatMessage() != nil && response.GetChatMessage().GetRequestId() == requestID && response.GetChatMessage().GetSessionId() == request.GetChatMessage().GetSessionId()
+		}
+		if method == "relaunch" {
+			valid = response.GetRelaunch() != nil
+		}
+		if !valid {
+			return hostFailure("invalid_host_response", "vibesys host "+method+" returned a different method or identity", result.ExitCode, result.Stderr), nil
+		}
 	}
 	return response, nil
 }

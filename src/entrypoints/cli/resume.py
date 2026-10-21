@@ -235,19 +235,29 @@ def _restore_evolve_objectives(
     return []
 
 
+def _recorded_cli_selection(orchestration_id: str) -> tuple[str, str | None]:
+    try:
+        return _POLICY_CLI_SELECTION[orchestration_id]
+    except KeyError:
+        _configuration_error(
+            f"The CLI cannot resume orchestration {orchestration_id!r}",
+            code="project_resume_configuration_invalid",
+            stage="resume_resolution",
+        )
+
+
+def reader_loop_kind(project_root: Path, run_id: str) -> str:
+    """The parser that restores this saved run's settings without changing its checkout."""
+    manifest = Project.open(project_root).state.load_run(run_id)
+    return _recorded_cli_selection(manifest.orchestration.id)[0]
+
+
 def _restore_descriptor_options(
     args: argparse.Namespace, manifest: OrchestrationRunManifest, *, loop_kind: str
 ) -> None:
     """Restore omitted flags from the single active descriptor format."""
     descriptor = manifest.orchestration
-    try:
-        recorded_loop, inner_loop = _POLICY_CLI_SELECTION[descriptor.id]
-    except KeyError:
-        _configuration_error(
-            f"The CLI cannot resume orchestration {descriptor.id!r}",
-            code="project_resume_configuration_invalid",
-            stage="resume_resolution",
-        )
+    recorded_loop, inner_loop = _recorded_cli_selection(descriptor.id)
     if recorded_loop != loop_kind:
         _configuration_error(
             f"Run uses --outer-loop {recorded_loop}, not {loop_kind}",
@@ -326,7 +336,15 @@ def _requested_resume(args: argparse.Namespace, *, direct: bool) -> str | None:
     return None if args.run_id is None else str(args.run_id)
 
 
-def _resolve_resume_args(args: argparse.Namespace, *, loop_kind: str) -> None:
+def _resume_manifest(project: Project, run_id: str, *, read_only: bool) -> OrchestrationRunManifest:
+    if not read_only:
+        _switch_project_resume_branch(project.root, run_id)
+    return project.state.load_run(run_id)
+
+
+def _resolve_resume_args(
+    args: argparse.Namespace, *, loop_kind: str, read_only: bool = False
+) -> None:
     if args.resume is None:
         return
     if args.repo is not None:
@@ -352,8 +370,7 @@ def _resolve_resume_args(args: argparse.Namespace, *, loop_kind: str) -> None:
         run_id = _requested_resume(args, direct=direct)
         if run_id is None:
             run_id = store.current_run_id() or _latest_run_id(project)
-        _switch_project_resume_branch(project_root, run_id)
-        manifest = store.load_run(run_id)
+        manifest = _resume_manifest(project, run_id, read_only=read_only)
     except ProjectStateError as exc:
         message = str(exc)
         _configuration_error(
@@ -374,7 +391,8 @@ def _resolve_resume_args(args: argparse.Namespace, *, loop_kind: str) -> None:
     validate_descriptor(manifest.orchestration)
     # Refuse a run that cannot go on where its reference is resolved, so every entrypoint (the
     # detached launcher included, which spawns its server before any request is built) says why.
-    ensure_resumable(project_root, run_id)
+    if not read_only:
+        ensure_resumable(project_root, run_id)
     args.resume = run_id
     args.run_id = run_id
     args.exp_name = run_id

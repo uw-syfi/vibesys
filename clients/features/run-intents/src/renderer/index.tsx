@@ -10,7 +10,7 @@ import {useRelaunch} from './relaunch.js';
 import {IntentControls} from './ui/controls.js';
 
 /** Mount with a key of host/runId. enabled is the host's runTransportV2 setting. */
-export function RunIntents(props: {
+export function useRunIntents(props: {
   readonly bridge: GatewayBridge;
   readonly host: HostKey;
   readonly projectRoot: string;
@@ -18,7 +18,7 @@ export function RunIntents(props: {
   readonly enabled: boolean;
   readonly schedule: ScheduleTimeout;
   readonly relaunch?: RelaunchObservation;
-}): JSX.Element | null {
+}) {
   const [snapshot, setSnapshot] = useState<SnapshotFrom<typeof runIntentsMachine> | null>(null);
   const [text, setText] = useState('');
   const [guidanceOpen, showGuidance] = useState(false);
@@ -41,7 +41,11 @@ export function RunIntents(props: {
     };
   }, [props.bridge, props.host, props.runId, props.enabled, props.schedule]);
   const relaunch = useRelaunch({...props, observation: props.enabled ? props.relaunch : undefined});
-  if (!props.enabled || !snapshot) return null;
+  const busy = snapshot?.matches({active: 'sending'}) ?? false;
+  const sendRequest = (
+    request: Parameters<NonNullable<typeof current.current>['send']>[0] & {type: 'send'},
+  ) => current.current?.send(request);
+  if (!props.enabled || !snapshot) return {controls: null, busy, sendRequest};
   const send = (action: RunIntentAction) => {
     const request = runIntent(
       {projectRoot: props.projectRoot, runId: props.runId, requestId: crypto.randomUUID()},
@@ -51,7 +55,7 @@ export function RunIntents(props: {
     current.current?.send({type: 'send', request});
     if (action === 'steer') showGuidance(false);
   };
-  return (
+  const controls = (
     <IntentControls
       {...(relaunch ? {relaunch} : {})}
       busy={snapshot.matches({active: 'sending'})}
@@ -66,6 +70,11 @@ export function RunIntents(props: {
       retry={requestId => current.current?.send({type: 'retry', requestId})}
     />
   );
+  return {controls, busy, sendRequest};
+}
+
+export function RunIntents(props: Parameters<typeof useRunIntents>[0]): JSX.Element | null {
+  return useRunIntents(props).controls;
 }
 
 export {intentsActor} from './effects/controls.js';

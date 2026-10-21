@@ -194,6 +194,13 @@ class Project:
         return cls.log_directory_for(project_root, run_id) / "run.log"
 
     @classmethod
+    def chat_session_directory_for(
+        cls, project_root: Path | str, run_id: str, session_id: str
+    ) -> Path:
+        """A run-owned chat session, retained with the run's log directory."""
+        return ProjectState.chat_session_directory_for(project_root, run_id, session_id)
+
+    @classmethod
     def run_blobs_directory_for(cls, project_root: Path | str, run_id: str) -> Path:
         """Return immutable run-transport content, beside the authoritative journal."""
         return cls.log_directory_for(project_root, run_id) / "blobs"
