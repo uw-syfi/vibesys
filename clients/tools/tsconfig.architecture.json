@@ -13,8 +13,6 @@
       "@vibesys/feature-app-shell/main": ["features/app-shell/src/main/index.ts"],
       "@vibesys/feature-app-shell/renderer": ["features/app-shell/src/renderer/index.ts"],
       "@vibesys/feature-app-shell/state": ["features/app-shell/src/state/index.ts"],
-      "@vibesys/feature-gateway-records/renderer": ["features/gateway-records/src/renderer/index.tsx"],
-      "@vibesys/feature-gateway-records/state": ["features/gateway-records/src/state/index.ts"],
       "@vibesys/feature-hosts/main": ["features/hosts/src/main/index.ts"],
       "@vibesys/feature-machines/main": ["features/machines/src/main/index.ts"],
       "@vibesys/feature-machines/renderer": ["features/machines/src/renderer/index.ts"],

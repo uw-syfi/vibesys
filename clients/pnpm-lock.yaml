@@ -275,43 +275,6 @@ importers:
         specifier: ^5.8.3
         version: 5.9.3
 
-  features/gateway-records:
-    dependencies:
-      '@vibesys/hosts':
-        specifier: workspace:*
-        version: link:../../libs/hosts
-      '@vibesys/ipc':
-        specifier: workspace:*
-        version: link:../../libs/ipc
-      '@vibesys/machine':
-        specifier: workspace:*
-        version: link:../../libs/machine
-      '@vibesys/run-state':
-        specifier: workspace:*
-        version: link:../../libs/run-state
-      '@vibesys/ui':
-        specifier: workspace:*
-        version: link:../../libs/ui
-      react:
-        specifier: 19.1.1
-        version: 19.1.1
-      xstate:
-        specifier: 5.33.2
-        version: 5.33.2
-    devDependencies:
-      '@types/bun':
-        specifier: 1.4.2
-        version: 1.4.2
-      '@types/node':
-        specifier: ^24.0.0
-        version: 24.13.3
-      '@types/react':
-        specifier: 19.1.13
-        version: 19.1.13
-      typescript:
-        specifier: ^5.8.3
-        version: 5.9.3
-
   features/hosts:
     dependencies:
       '@vibesys/connection':
