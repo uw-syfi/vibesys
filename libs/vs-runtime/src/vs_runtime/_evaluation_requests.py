@@ -179,7 +179,7 @@ def job_fence(scope: Scope, admission_id: DecisionId | None, handle: str) -> Fen
     return FenceKey(FenceKind.MEASUREMENT_JOB, f"{_scope_key(scope, admission_id)}/{handle}")
 
 
-def _fences_of(request: SubmitMeasurement, handle: str) -> tuple[FenceKey, FenceKey]:
+def _fences_of(request: RequestBase, handle: str) -> tuple[FenceKey, FenceKey]:
     return (
         scope_fence(request.scope, request.admission_id),
         job_fence(request.scope, request.admission_id, handle),
@@ -670,7 +670,9 @@ class MeasurementRequests:
         record = self._owned(request, request.resource_id)
         if record is None:
             return self._rejected(request, context, "job is not owned by this scope")
-        record = await self._relaunch(record, context)
+        record = await self._relaunch(record, request, context)
+        if isinstance(record, ExecutionResult):
+            return record
         view, _ = await self._view(record, context)
         own = self._own(
             request,
@@ -825,29 +827,50 @@ class MeasurementRequests:
         )
         return ExecutionResult(observation=RequestObserved(observation=own))
 
-    async def _relaunch(self, record: JobRecord, context: ExecutionContext) -> JobRecord:
+    async def _relaunch(
+        self,
+        record: JobRecord,
+        request: ObserveOwnedJob | InspectOwnedJob,
+        context: ExecutionContext,
+    ) -> JobRecord | ExecutionResult:
         """Rerun a parked physical job under a new handle, retaining its logical resource id.
 
         The next poll after resume owns this step. Persist the new handle before submit,
         so a crash resumes the same idempotent submission instead of starting another.
         """
-        if record.reuses is not None:
+        if record.reuses is not None or not (record.parked or record.relaunch):
             return record
-        if record.parked:
-            record = record.model_copy(update={"parked": False, "relaunch": record.relaunch + 1})
-            self._store.replace(_JOBS, "job", record.handle_id, record)
         if (
-            record.relaunch
-            and (await self._poll(record.executor_handle)).phase is PollPhase.UNSUBMITTED
+            not record.parked
+            and (await self._poll(record.executor_handle)).phase is not PollPhase.UNSUBMITTED
         ):
-            eval_request = measurement_request(
-                record.plan,
-                record.scope,
-                record.executor_handle,
-                deadline_at=context.now_at + record.plan.time_bound,
-            )
-            await self._jobs.submit(eval_request, handle_id=record.executor_handle)
-        return record
+            return record
+        fences = _fences_of(request, record.handle_id)
+        by = core_identity(request)
+        try:
+            with self._store.exclusive():
+                if not self._enter(fences, by, context):
+                    return self._rejected(request, context, _FENCED)
+                if record.parked:
+                    record = record.model_copy(
+                        update={"parked": False, "relaunch": record.relaunch + 1}
+                    )
+                    self._store.replace(_JOBS, "job", record.handle_id, record)
+            if (await self._poll(record.executor_handle)).phase is PollPhase.UNSUBMITTED:
+                problem = self._authority_problem(request, context)
+                if problem is not None:
+                    return self._unknown(request, context, problem)
+                eval_request = measurement_request(
+                    record.plan,
+                    record.scope,
+                    record.executor_handle,
+                    deadline_at=context.now_at + record.plan.time_bound,
+                )
+                await self._jobs.submit(eval_request, handle_id=record.executor_handle)
+            return record
+        finally:
+            for fence in fences:
+                self._fences.leave(fence, by=by)
 
     async def _cancel_for_close(self, handle: str) -> None:
         """Ask the executor to cancel *handle*; nothing the cancel does decides the handle's fate."""

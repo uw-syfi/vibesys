@@ -4,10 +4,19 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import pytest
 from tests.support.skeleton_strategy import SkeletonStrategy
 from tests.support.skeleton_world import open_skeleton_world
 
-from vs_core.api import ObservationStatus, RequestId, RunStatus, Scope, SubmitMeasurement
+from vs_core.api import (
+    CancelOwnedJob,
+    ObservationStatus,
+    ObserveOwnedJob,
+    RequestId,
+    RunStatus,
+    Scope,
+    SubmitMeasurement,
+)
 from vs_runtime.api.core import (
     CoreRunHost,
     MeasurementRequests,
@@ -22,7 +31,17 @@ from vs_runtime.api.testing import FakeRunControlEventSink, ProbedRunClock
 from vs_sim.api.testing import SimThreads, clock_from
 from vs_slurm.api import SlurmJobStatus
 
-from .test_evaluation_requests import context_for
+from .test_evaluation_requests import (
+    ScenarioCluster,
+    close_request,
+    context_for,
+    query,
+    resource_of,
+    run,
+    settled,
+    submit,
+    world,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -104,3 +123,23 @@ async def test_park_cancels_the_live_job_exits_and_resume_reruns_it(tmp_path: Pa
         assert reused.observation.observation.status is ObservationStatus.SUCCEEDED
         assert len(world.cluster.submissions) == submitted
         resumed.shell.release_lease(now_at=clock.now())
+
+
+@pytest.mark.parametrize("close_scope", [False, True])
+async def test_a_closed_scope_or_cancelled_job_cannot_relaunch_after_park(
+    *,
+    close_scope: bool,
+) -> None:
+    cluster = ScenarioCluster()
+    cluster.states = (SlurmJobStatus.PENDING,)
+    async with world(cluster) as current:
+        resource = resource_of(await submit(current))
+        await settled(current, resource)
+        park = query(CancelOwnedJob, "park", resource).model_copy(update={"for_park": True})
+        assert (await run(current, park)).observation.observation.released
+        closing = close_request() if close_scope else query(CancelOwnedJob, "stop-job", resource)
+        await run(current, closing)
+        before = len(cluster.submissions)
+        late = await run(current, query(ObserveOwnedJob, "late-poll", resource), epoch=2)
+        assert late.observation.observation.status is ObservationStatus.REJECTED
+        assert len(cluster.submissions) == before
