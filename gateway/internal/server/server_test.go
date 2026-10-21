@@ -36,7 +36,7 @@ type fixture struct {
 
 func start(t *testing.T) fixture {
 	t.Helper()
-	// Keep the full hash-addressed socket within macOS's 104-byte path limit.
+	// Keep Unix socket paths short even on hosts with long temporary roots.
 	root, err := os.MkdirTemp("/tmp", "g")
 	if err != nil {
 		t.Fatal(err)
@@ -158,7 +158,7 @@ func TestHello(t *testing.T) {
 	if err != nil || hello.GetApiSchemaHash() != gen.APISchemaHash || hello.GetGatewayVersion() != "test-version" {
 		t.Fatalf("Hello = %v, %v", hello, err)
 	}
-	for _, hash := range []string{"", "other-hash"} {
+	for _, hash := range []string{"", "other-hash", gen.APISchemaHash[:lifecycle.HashPrefixLength] + strings.Repeat("0", 64-lifecycle.HashPrefixLength)} {
 		_, err := c.Hello(f.ctx, &apiv1.HelloRequest{ApiSchemaHash: hash})
 		if status.Code(err) != codes.FailedPrecondition || !strings.Contains(err.Error(), gen.APISchemaHash) || !strings.Contains(err.Error(), `"`+hash+`"`) {
 			t.Fatalf("mismatch = %v", err)

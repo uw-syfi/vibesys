@@ -6,15 +6,20 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"syscall"
 )
+
+// HashPrefixLength names the per-version directory; Hello still verifies the
+// entire API hash before declaring compatibility.
+const HashPrefixLength = 16
 
 var ErrServing = errors.New("gateway already serving")
 
 // SocketPath is shared by serve and connect. Root is the host's .vibesys
 // directory; schemaHash is the generated API hash.
 func SocketPath(root, schemaHash string) string {
-	return filepath.Join(root, "gateway", schemaHash, "vibesysd.sock")
+	return filepath.Join(root, "gateway", schemaHash[:min(len(schemaHash), HashPrefixLength)], "sock")
 }
 
 // Endpoint owns the listener and the per-hash process lock. The lock file is
@@ -26,6 +31,9 @@ type Endpoint struct {
 
 func Listen(root, schemaHash string) (*Endpoint, error) {
 	path := SocketPath(root, schemaHash)
+	if err := ValidateSocketPath(path); err != nil {
+		return nil, err
+	}
 	directory := filepath.Dir(path)
 	if err := os.MkdirAll(directory, 0700); err != nil {
 		return nil, err
@@ -75,4 +83,18 @@ func Listen(root, schemaHash string) (*Endpoint, error) {
 
 func (e *Endpoint) Close() error {
 	return errors.Join(e.Listener.Close(), e.lock.Close())
+}
+
+// ValidateSocketPath reports the kernel address bound before any bind or dial.
+// The sockaddr's byte array includes the terminating NUL, so the path itself
+// must be strictly shorter than that array (104 bytes on macOS, 108 on Linux).
+func ValidateSocketPath(path string) error {
+	limit := 108
+	if runtime.GOOS == "darwin" {
+		limit = 104
+	}
+	if len(path) >= limit {
+		return fmt.Errorf("Unix socket path %q is %d bytes; must be shorter than the %d-byte limit on %s", path, len(path), limit, runtime.GOOS)
+	}
+	return nil
 }

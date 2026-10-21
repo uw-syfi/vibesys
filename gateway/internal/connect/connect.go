@@ -13,12 +13,16 @@ import (
 	"time"
 
 	"github.com/fsnotify/fsnotify"
+	"github.com/uw-syfi/vibesys/gateway/internal/lifecycle"
 )
 
 // Dial starts at most one detached serve candidate per invocation. Concurrent
 // candidates are serialized by serve's lock. The caller bounds startup via ctx.
 // binary and args are the current executable and its serve argument vector.
 func Dial(ctx context.Context, socket, binary string, args []string) (net.Conn, error) {
+	if err := lifecycle.ValidateSocketPath(socket); err != nil {
+		return nil, err
+	}
 	dial := func() (net.Conn, error) { return (&net.Dialer{}).DialContext(ctx, "unix", socket) }
 	connection, err := dial()
 	if err == nil {
