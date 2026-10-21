@@ -2,11 +2,14 @@
 package runindex
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
 )
+
+var ErrInvalidID = errors.New("invalid run_id")
 
 var runID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$`)
 
@@ -14,7 +17,7 @@ var runID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$`)
 // not been created yet. It rejects traversal and entries that are not symlinks.
 func Resolve(root, id string) (string, error) {
 	if !runID.MatchString(id) {
-		return "", fmt.Errorf("invalid run_id %q", id)
+		return "", fmt.Errorf("%w %q", ErrInvalidID, id)
 	}
 	entry := filepath.Join(root, "runs", id)
 	info, err := os.Lstat(entry)

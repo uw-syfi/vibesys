@@ -24,6 +24,9 @@ type Corruption struct {
 }
 
 func (e *Corruption) Error() string {
+	if e.Offset < 0 {
+		return "run.log corruption: " + e.Reason
+	}
 	return fmt.Sprintf("run.log corruption at byte %d: %s", e.Offset, e.Reason)
 }
 

@@ -2,10 +2,13 @@ package runlog
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"syscall"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
@@ -60,12 +63,12 @@ func (f *Follower) Read(ctx context.Context, targetBytes int) ([][]byte, error) 
 		}
 		payload, err := f.next()
 		if err == nil {
-			if len(batch) > 0 && size+len(payload) > targetBytes {
+			if len(batch) > 0 && size+len(payload)+binary.MaxVarintLen64+1 > targetBytes {
 				f.pending = payload
 				return batch, nil
 			}
 			batch = append(batch, payload)
-			size += len(payload)
+			size += len(payload) + binary.MaxVarintLen64 + 1
 			if size >= targetBytes {
 				return batch, nil
 			}
@@ -103,12 +106,21 @@ func (f *Follower) next() ([]byte, error) {
 		return payload, nil
 	}
 	if f.file == nil {
-		file, err := os.Open(f.path)
+		file, err := os.OpenFile(f.path, os.O_RDONLY|syscall.O_NONBLOCK, 0)
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, io.EOF
 		}
 		if err != nil {
 			return nil, err
+		}
+		info, err := file.Stat()
+		if err != nil {
+			file.Close()
+			return nil, err
+		}
+		if !info.Mode().IsRegular() {
+			file.Close()
+			return nil, fmt.Errorf("run.log is not a regular file")
 		}
 		if err := f.watch.Add(f.path); err != nil {
 			file.Close()

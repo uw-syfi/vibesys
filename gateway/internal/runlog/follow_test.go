@@ -90,7 +90,7 @@ func TestFollowBatchBound(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	for _, want := range records {
-		got, err := follower.Read(ctx, 3)
+		got, err := follower.Read(ctx, 14)
 		if err != nil || len(got) != 1 || !bytes.Equal(got[0], want) {
 			t.Fatalf("Read = %v, %v", got, err)
 		}

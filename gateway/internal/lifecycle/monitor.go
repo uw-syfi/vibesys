@@ -36,14 +36,15 @@ func NewMonitor(timeout time.Duration, clock Clock, onIdle func()) *Monitor {
 	return m
 }
 
-func (m *Monitor) Opened() {
+func (m *Monitor) Opened() bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.stopped {
-		return
+		return false
 	}
 	m.cancel()
 	m.state = m.state.Opened()
+	return true
 }
 
 func (m *Monitor) Closed() {

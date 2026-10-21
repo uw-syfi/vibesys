@@ -63,8 +63,14 @@ func Dial(ctx context.Context, socket, binary string, args []string) (net.Conn, 
 		select {
 		case <-ctx.Done():
 			return nil, fmt.Errorf("gateway startup: %w", ctx.Err())
-		case <-watch.Events:
-		case err := <-watch.Errors:
+		case _, ok := <-watch.Events:
+			if !ok {
+				return nil, os.ErrClosed
+			}
+		case err, ok := <-watch.Errors:
+			if !ok {
+				return nil, os.ErrClosed
+			}
 			if !errors.Is(err, fsnotify.ErrEventOverflow) {
 				return nil, err
 			}
