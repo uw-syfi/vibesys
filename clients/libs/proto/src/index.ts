@@ -1,6 +1,11 @@
 /** Host and store schemas generated from proto/. Encode using @bufbuild/protobuf. */
 
-export {API_SCHEMA_HASH, STORE_SCHEMA_HASH, RUN_LOG_MAX_RECORD_BYTES, RUN_LOG_MAGIC} from './generated/schema-hashes.js';
+export {
+  API_SCHEMA_HASH,
+  RUN_LOG_MAGIC,
+  RUN_LOG_MAX_RECORD_BYTES,
+  STORE_SCHEMA_HASH,
+} from './generated/schema-hashes.js';
 export {
   type HelloRequest,
   HelloRequestSchema,
