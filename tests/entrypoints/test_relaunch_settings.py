@@ -83,6 +83,15 @@ def test_explicit_strategy_or_execution_changes_still_fail(tmp_path: Path) -> No
 
 
 @pytest.mark.regression
+def test_invalid_resume_arguments_fail_before_switching_the_checkout(tmp_path: Path) -> None:
+    root = saved_project(tmp_path / "project")
+    (root / ".git").write_text("gitdir: missing\n")
+    with pytest.raises(ConfigurationError) as raised:
+        parse_cli_invocation(["--project", str(root), "--resume", _RUN, "--unknown-resume-option"])
+    assert raised.value.diagnostic.stage == "argument_parsing"
+
+
+@pytest.mark.regression
 def test_detached_relaunch_validates_saved_settings_before_spawning(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:

@@ -217,7 +217,7 @@ def parse_cli_invocation(argv: list[str], *, read_only: bool = False) -> CliInvo
     if any(argument == "--resume" or argument.startswith("--resume=") for argument in remaining):
         probe, _ = _LOOP_COMMANDS[loop_kind].build_parser().parse_known_args(remaining)
         _normalize_runs_dir(probe)
-        selection = _load_resume_selection(probe, read_only=read_only)
+        selection = _load_resume_selection(probe)
         explicit_loop, _ = _extract_flag(argv, "--outer-loop")
         if selection is not None and explicit_loop is None:
             loop_kind, _ = _recorded_cli_selection(selection.manifest.orchestration.id)

@@ -331,12 +331,6 @@ def _requested_resume(args: argparse.Namespace, *, direct: bool) -> str | None:
     return None if args.run_id is None else str(args.run_id)
 
 
-def _resume_manifest(project: Project, run_id: str, *, read_only: bool) -> OrchestrationRunManifest:
-    if not read_only:
-        _switch_project_resume_branch(project.root, run_id)
-    return project.state.load_run(run_id)
-
-
 @dataclass(frozen=True)
 class _ResumeSelection:
     project_root: Path
@@ -344,9 +338,7 @@ class _ResumeSelection:
     manifest: OrchestrationRunManifest
 
 
-def _load_resume_selection(
-    args: argparse.Namespace, *, read_only: bool = False
-) -> _ResumeSelection | None:
+def _load_resume_selection(args: argparse.Namespace) -> _ResumeSelection | None:
     """Read saved identity and settings once, before choosing a strategy parser."""
     if args.resume is None:
         return None
@@ -373,7 +365,9 @@ def _load_resume_selection(
         run_id = _requested_resume(args, direct=direct)
         if run_id is None:
             run_id = store.current_run_id() or _latest_run_id(project)
-        manifest = _resume_manifest(project, run_id, read_only=read_only)
+        events = NullGitTrackerEvents()
+        repository = open_git_repository(project_root, git=Git(OsProcesses()), faults=events)
+        manifest = GitRunHistory(project, repository).manifest(run_id)
     except ProjectStateError as exc:
         message = str(exc)
         _configuration_error(
@@ -392,10 +386,6 @@ def _load_resume_selection(
             stage="resume_resolution",
         )
     validate_descriptor(manifest.orchestration)
-    # Refuse a run that cannot go on where its reference is resolved, so every entrypoint (the
-    # detached launcher included, which spawns its server before any request is built) says why.
-    if not read_only:
-        ensure_resumable(project_root, run_id)
     return _ResumeSelection(project_root, run_id, manifest)
 
 
@@ -406,10 +396,13 @@ def _resolve_resume_args(
     selection: _ResumeSelection | None = None,
     read_only: bool = False,
 ) -> None:
-    selected = selection or _load_resume_selection(args, read_only=read_only)
+    selected = selection or _load_resume_selection(args)
     if selected is None:
         return
     project_root, run_id, manifest = selected.project_root, selected.run_id, selected.manifest
+    if not read_only:
+        _switch_project_resume_branch(project_root, run_id)
+        ensure_resumable(project_root, run_id)
     args.resume = run_id
     args.run_id = run_id
     args.exp_name = run_id
