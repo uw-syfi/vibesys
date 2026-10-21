@@ -2,6 +2,7 @@ import {create, toBinary} from '@bufbuild/protobuf';
 import {
   GetBlobsRequestSchema,
   GetBlobsResponseSchema,
+  HostService,
   RecordSchema,
   SkeletonResponseSchema,
   TailResponseSchema,
@@ -10,6 +11,7 @@ import {
 import type {StoreRunFixture} from '@vibesys/run-fixtures';
 
 export interface WireFixture {
+  methods: Record<'skeleton' | 'tail' | 'blobs' | 'log' | 'hostCall', string>;
   skeleton: number[];
   tail: number[];
   blobs: Record<string, number[]>;
@@ -18,7 +20,16 @@ export interface WireFixture {
 export function wire(fixture: StoreRunFixture): WireFixture {
   const encoded = fixture.records.map(record => toBinary(RecordSchema, record));
   const prefix = fixture.records.slice(0, fixture.initialCount);
+  const method = (name: keyof typeof HostService.method): string =>
+    `/${HostService.typeName}/${HostService.method[name].name}`;
   return {
+    methods: {
+      skeleton: method('skeleton'),
+      tail: method('tail'),
+      blobs: method('getBlobs'),
+      log: method('tailStream'),
+      hostCall: method('hostCall'),
+    },
     skeleton: [
       ...toBinary(
         SkeletonResponseSchema,
@@ -75,7 +86,7 @@ export function installGateway(input: WireFixture): void {
     vibesysGateway: {
       unary: (host: string, method: string, request: Uint8Array) => {
         calls.push(method);
-        if (method.endsWith('/HostCall')) {
+        if (method === input.methods.hostCall) {
           const peer = window as unknown as {
             postIntent(host: string, bytes: number[]): Promise<number[]>;
           };
@@ -84,11 +95,12 @@ export function installGateway(input: WireFixture): void {
             cancel: () => undefined,
           };
         }
-        const bytes = method.endsWith('/Skeleton')
-          ? input.skeleton
-          : method.endsWith('/GetBlobs')
-            ? input.blobs[[...request].join(',')]
-            : undefined;
+        const bytes =
+          method === input.methods.skeleton
+            ? input.skeleton
+            : method === input.methods.blobs
+              ? input.blobs[[...request].join(',')]
+              : undefined;
         if (!bytes) throw new Error('Unknown unary');
         return {result: Promise.resolve(new Uint8Array(bytes)), cancel: () => undefined};
       },
@@ -101,10 +113,10 @@ export function installGateway(input: WireFixture): void {
         calls.push(method);
         active += 1;
         let closed = false;
-        if (method.endsWith('/Tail')) {
+        if (method === input.methods.tail) {
           streams.add(receive);
           receive(new Uint8Array(input.tail));
-        } else if (method.endsWith('/TailStream')) receive(new Uint8Array(input.log));
+        } else if (method === input.methods.log) receive(new Uint8Array(input.log));
         else throw new Error('Unknown stream');
         return {
           cancel: () => {
