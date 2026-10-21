@@ -498,7 +498,8 @@ class ControlInput(CoreValue):
 class RunPark(CoreValue):
     "Durable drain authority. A parked run can resume only in a later host epoch."
 
-    model_fields: ClassVar[tuple[str, ...]] = ("immediate", "control_id", "epoch")
+    model_fields: ClassVar[tuple[str, ...]] = ("admitted_turns", "immediate", "control_id", "epoch")
+    admitted_turns: tuple[InvocationRef, ...] = ()
     immediate: bool = False
     control_id: ControlId
     epoch: Annotated[int, Field(ge=0)]

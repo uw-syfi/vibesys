@@ -37,7 +37,7 @@ read path and journal projection from the native core and control work still to 
 | `Skeleton`, `GetBlobs`, `TailStream`, `WatchRuns`; new Run screen | RPCs, client skeleton/cache and opt-in raw record panel built; complete native Run screen remains unbuilt | 2 |
 | Conversion of existing JSONL runs and `store.json` envelopes | typed journal conversion and bulk project/host-index conversion built, including blobs, final keyframes, head publication and repair; pre-trace and unsupported journals are reported as skipped; core envelopes remain the resume authority until phase 3 | 2 |
 | Core state as generated types, `state.pb`, native `run.log` writes | unbuilt; typed journal projection does not replace native core commits | 3 |
-| Intents as records (`IntentState`), pause/park, relaunch epochs | inbox outcomes, park and relaunch epochs built over the current saved-state resume path; native state recovery remains unbuilt | 3 |
+| Intents as records (`IntentState`), Pause/Pause now, relaunch epochs | inbox outcomes, Pause and Resume epochs built over the current saved-state resume path; native state recovery remains unbuilt | 3 |
 | Chat sessions as processes with their own log; `HostCall` | built behind the per-host switch; reuses the existing auxiliary chat agent, prompts and read tools | 3 |
 | Generated frozen value classes from `.proto` (our own protoc plugin) | prototype only | 3 |
 | Control inbox (files, ordered, durable, idempotent by request id) | built | |
@@ -200,7 +200,7 @@ The operator updates that checkout before relaunching. No update-checkout method
 The new epoch records the checkout's tree hash and dirty flag, including operator edits.
 
 **Chat sessions** belong to the run and outlive relaunches as data. They are separate processes
-with their own `session.log` and inbox, started on demand and exiting when idle or at park. The
+with their own `session.log` and inbox, started on demand and exiting when idle or when paused. The
 default session id is `default`, and sessions are kept as long as the run is. They are not the
 run: a session reads the run's files, its answers and token streaming are appends to its own log,
 and a steer it proposes is data in that log that the operator may send as an intent. A generic
@@ -562,7 +562,7 @@ Notes on the records:
 |---|---|
 | 1. Walking skeleton | protos, codegen and CI; Go gateway with `Hello` and `Tail`; Electron provisioning and one HTTP/2 connection behind a per-host switch; a Python converter that follows a live JSONL journal into `run.log` as `LegacyEvent{json}` records |
 | 2. Complete read path | the inventory above in the store model; keyframes and `run.head`; `Skeleton`, `GetBlobs`, `TailStream`, `WatchRuns`; the new Run screen; conversion of all existing runs |
-| 3. Write path | core state as generated types and `state.pb`; the run writes `run.log` natively; intents, pause and park, relaunch epochs; chat sessions; `HostCall` |
+| 3. Write path | core state as generated types and `state.pb`; the run writes `run.log` natively; intents, Pause and Pause now, Resume epochs; chat sessions; `HostCall` |
 | 4. Cutover | delete the run protocol, its service and transports, the relay and run sockets, the helper protocol and its features, the reader server, registry tombstones and record versions, the dual summary fold, the conformance corpus, the strategy-specific event kinds, the Pydantic contract models and JSON Schema pipeline, the envelope JSON migration chain and the persisted-shape snapshots |
 
 Existing JSONL runs are converted to the typed store read model in phase 2. The converter

@@ -8,8 +8,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from ._strategy_operations import RenderRoleArtifactsBase
 from .types.attempts import CloseAttemptScope, DiscardWorkspace, RetainRevision, SnapshotAndRetain
-from .types.common import RequestId, RunStatus
+from .types.common import DecisionId, ExecuteRegisteredOperation, RequestId, RunStatus
 from .types.evaluation import (
     CancelOwnedJob,
     CollectEvidence,
@@ -28,13 +29,15 @@ from .types.sessions import (
     SessionPhase,
     SnapshotAndRetainRun,
 )
+from .types.strategy import Operation, RequestTurn
 from .types.until import Until
 
 if TYPE_CHECKING:
-    from .types.common import Scope
+    from .types.common import InvocationRef, Scope
     from .types.kernel import CoreState
     from .types.records import RecordsState, Request, RequestRecord
     from .types.sessions import Invocation, SessionsState
+    from .types.strategy import Command
 
 # These effects finish work already performed by a turn. Everything else waits for
 # relaunch, including prepared turns, measurements, polls and queued attempts.
@@ -52,6 +55,89 @@ _DRAIN_EFFECTS = (
 )
 
 
+def admitted_turns(state: CoreState) -> tuple[InvocationRef, ...]:
+    """Capture physical ancestors once; only their bounded logical successors may drain."""
+    return tuple(
+        invocation.invocation
+        for invocation in state.sessions.invocations
+        if any(
+            isinstance(row.request, DispatchTurn | ResumeSessionTurn)
+            and row.request.turn == invocation.turn
+            and row.request.scope == invocation.scope
+            and row.phase != RequestPhase.PREPARED
+            and row.dispatched_in in (None, state.records.recovery.epoch)
+            for row in state.records.records
+        )
+    )
+
+
+def _ancestor_bound(state: CoreState, ref: InvocationRef | None) -> float | None:
+    park = state.run.park
+    if park is None or park.immediate or park.epoch != state.records.recovery.epoch:
+        return None
+    seen: set[InvocationRef] = set()
+    while ref is not None and ref not in seen:
+        seen.add(ref)
+        invocation = next(
+            (row for row in state.sessions.invocations if row.invocation == ref), None
+        )
+        if invocation is None:
+            return None
+        if ref in park.admitted_turns:
+            return invocation.until.at if state.run.now_at < invocation.until.at else None
+        ref = invocation.turn.predecessor
+    return None
+
+
+def drain_bound(state: CoreState, command: Command) -> float | None:
+    """The original deadline authorizing a correction or evaluation-wait continuation."""
+    ref = None
+    if isinstance(command, RequestTurn):
+        ref = command.turn.predecessor
+        if command.turn.continuation_id is not None:
+            continuation = next(
+                (
+                    row
+                    for row in state.evaluation.continuations
+                    if row.continuation_id == command.turn.continuation_id
+                ),
+                None,
+            )
+            ref = None if continuation is None else continuation.invocation
+    elif isinstance(command, Operation) and isinstance(command.request, RenderRoleArtifactsBase):
+        ref = command.request.continuation_of
+    return _ancestor_bound(state, ref)
+
+
+def _request_bound(state: CoreState, request: Request) -> float | None:
+    if isinstance(request, DispatchTurn | ResumeSessionTurn):
+        return drain_bound(
+            state,
+            RequestTurn(
+                decision_id=request.decision_id or DecisionId(root="drain-proof"),
+                scope=request.scope,
+                turn=request.turn,
+            ),
+        )
+    if isinstance(request, EnsureSession):
+        return next(
+            (
+                _ancestor_bound(state, row.turn.predecessor)
+                for row in state.sessions.invocations
+                if row.turn.session.session_id == request.spec.session_id
+                and _ancestor_bound(state, row.turn.predecessor) is not None
+            ),
+            None,
+        )
+    if isinstance(request, ExecuteRegisteredOperation):
+        receipt = next(
+            (row for row in state.run.receipts if request.request_id in row.request_ids), None
+        )
+        if receipt is not None and receipt.decision is not None:
+            return drain_bound(state, receipt.decision)
+    return None
+
+
 def dispatch_allowed(state: CoreState, request: Request) -> bool:
     """Whether the park drain permits this effect; the authorization boundary owns the gate."""
     if state.run.status == RunStatus.PARKED:
@@ -60,10 +146,14 @@ def dispatch_allowed(state: CoreState, request: Request) -> bool:
         return True
     if pause_withdraws(state, request):
         return False
-    return isinstance(request, _DRAIN_EFFECTS) or (
-        isinstance(request, SubmitMeasurement | ObserveOwnedJob | InspectOwnedJob)
-        and (not isinstance(request, SubmitMeasurement) or request.decision_id is None)
-        and scope_in_flight(state.sessions, state.records, request.scope)
+    return (
+        _request_bound(state, request) is not None
+        or isinstance(request, _DRAIN_EFFECTS)
+        or (
+            isinstance(request, SubmitMeasurement | ObserveOwnedJob | InspectOwnedJob)
+            and (not isinstance(request, SubmitMeasurement) or request.decision_id is None)
+            and scope_in_flight(state.sessions, state.records, request.scope)
+        )
     )
 
 
@@ -112,7 +202,56 @@ def _unfinished(state: CoreState, record: RequestRecord) -> bool:
 
 def _turns_in_flight(state: CoreState) -> bool:
     """A prepared dispatch marks its invocation executing before I/O actually starts."""
-    return any(_executing(turn, state.records) for turn in state.sessions.invocations)
+    return any(
+        _executing(turn, state.records)
+        or (
+            turn.phase is SessionPhase.SUSPENDED
+            and _ancestor_bound(state, turn.invocation) is not None
+        )
+        for turn in state.sessions.invocations
+    )
+
+
+def _cancel_turns(state: CoreState) -> tuple[list[Scheduled], bool]:
+    park = state.run.park
+    if park is None or not park.immediate:
+        return [], True
+    pending: list[Scheduled] = []
+    released = True
+    for invocation in state.sessions.invocations:
+        if invocation.phase is SessionPhase.TERMINAL:
+            continue
+        identity = RequestId(
+            root=f"pause-now:{park.control_id.root}:{invocation.invocation.invocation_id.root}"
+        )
+        held = state.records.record(identity)
+        if held is None:
+            source = next(
+                (
+                    row.request
+                    for row in state.records.records
+                    if isinstance(row.request, DispatchTurn | ResumeSessionTurn)
+                    and row.request.turn == invocation.turn
+                    and row.request.scope == invocation.scope
+                ),
+                None,
+            )
+            pending.append(
+                Scheduled(
+                    request=CancelTurn(
+                        request_id=identity,
+                        scope=invocation.scope,
+                        admission_id=None if source is None else source.admission_id,
+                        invocation=invocation.invocation,
+                    ),
+                    until=Until(at=state.run.now_at + state.run.limits.cleanup_bound),
+                )
+            )
+        observation = None if held is None else held.observation
+        released = released and (
+            observation is not None and observation.accepted and observation.released
+        )
+    return pending, released
 
 
 def advance(state: CoreState) -> tuple[CoreState, tuple[Scheduled, ...]]:
@@ -127,8 +266,7 @@ def advance(state: CoreState) -> tuple[CoreState, tuple[Scheduled, ...]]:
         for record in state.records.records
     ):
         return state, ()
-    pending = []
-    released = True
+    pending, released = _cancel_turns(state)
     for job in (*state.evaluation.jobs, *state.evaluation.registered_jobs):
         if job.terminal or job.resource_id is None:
             continue

@@ -148,7 +148,7 @@ def test_transport_round_trips_the_stop_command(socket_dir: Path) -> None:
 
         assert response["ok"] is True
         assert response["client_id"] == "unix-client"
-        assert response["ack"] == {"action": "stop", "status": "pending"}
+        assert response["ack"] == {"action": "pause_now", "status": "pending"}
         assert parts.controller.run_status() is RunStatus.STOPPING
 
     _served(socket_dir, socket_dir / "logs", body)

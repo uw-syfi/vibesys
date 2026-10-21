@@ -151,11 +151,7 @@ export function headerView(state: RunPageState, names: ModelNames = NO_MODEL_NAM
       state.readOnly !== true && phase.kind === 'running' && !phase.pausing,
       commandReason(state),
     ),
-    // A run paused by a usage limit is resumed from its banner, which also offers to wait.
-    resume: offer(
-      state.readOnly !== true && phase.kind === 'paused' && phase.by === 'user',
-      commandReason(state),
-    ),
+    resume: offer(false),
     pauseNow: offer(
       state.readOnly !== true && state.record.kind === 'live',
       state.pauseNow.kind === 'confirming' ? 'Confirm or cancel below' : commandReason(state),

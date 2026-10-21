@@ -117,12 +117,6 @@ def _control_payload(request: PostIntentRequest) -> dict[str, object]:
             payload = {"action": "pause_now", "expected_epoch": request.expected_epoch}
         case Oneof("pause", _):
             payload = {"action": ControlAction.PAUSE, "expected_epoch": request.expected_epoch}
-        case Oneof("resume", value):
-            payload = {
-                "action": ControlAction.RESUME,
-                "fallback": value.fallback,
-                "when": value.when.name.lower(),
-            }
         case Oneof("steer", value):
             payload = _steer_payload(value)
         case Oneof("withdraw", value):

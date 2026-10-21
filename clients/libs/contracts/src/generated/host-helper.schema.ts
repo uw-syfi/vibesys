@@ -1667,7 +1667,7 @@ const hostHelperSchema: Record<string, unknown> = {
     },
     "EndRecord": {
       "additionalProperties": false,
-      "description": "How a run ended, as its tombstone reports it: the sidebar's Recent row and the ended banner.\n\n``resumable`` is retained for older readers; current controls permit every ending.\nA launch independently checks storage prerequisites and writer exclusion.\n``resume_from_round`` is the next round, when the server knew it\n(a crashed server did not say). ``uncompared``: the run adopted a candidate never compared\nwith the input (it failed its own measurement), whichever ``outcome`` ended it.",
+      "description": "How a run ended, as its tombstone reports it: the sidebar's Recent row and the ended banner.\n\n``resumable`` is retained for older readers; current controls permit every ending.\nLaunch checks storage and writer exclusion; ``resume_from_round`` is the next round\n(a crashed server did not say). ``uncompared``: the run adopted a candidate never compared\nwith the input (it failed its own measurement), whichever ``outcome`` ended it.",
       "properties": {
         "outcome": {
           "$ref": "#/$defs/RunEndOutcome"

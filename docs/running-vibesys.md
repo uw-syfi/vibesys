@@ -536,8 +536,8 @@ vibesys control <run-id> pause-now
 
 The command validates the control, writes it, and prints its id. The run applies it at its next
 control poll, about once a second, or when it resumes if it is not running. Controls apply in the
-order they were sent, whatever their ids. A control the run cannot apply, such as a pause after
-a stop, is rejected: the run records a `request_rejected` event that names the control and the
+order they were sent, whatever their ids. A control the run cannot apply, such as a closing request for an older
+epoch, is rejected: the run records a `request_rejected` event that names the control and the
 reason. Each control is applied once, even across a crash or when the same control also arrives
 over a client's socket: pass `--control-id ID` to resend the same control safely. An id, once
 used, keeps its control: sending a different control under it is refused.

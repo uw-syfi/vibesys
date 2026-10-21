@@ -181,7 +181,7 @@ def _stop_ending(kit: Kit) -> EndReason | None:
 
 
 _HOST_STOP_ENDINGS = {DEADLINE_STOP: EndReason.DEADLINE, ENVIRONMENT_STOP: EndReason.FAILED}
-"""The ending of each of the host's own stops (``FINAL_STOPS``); any other stop is a pause."""
+"""The current epoch result produced by each host shutdown cause."""
 
 
 def _stop_since(kit: Kit, stopped: EndReason | None) -> EndReason | None:
@@ -262,7 +262,7 @@ def _not_adopted(adopted: NotAdopted, stopped: EndReason | None) -> RunResultPro
     if stopped is EndReason.STOPPED:
         # The operator's stop is a pause, so what the adoption did is no verdict on the run:
         # core may refuse the proposal because the stop races it, or the restore may fail.
-        # The result says so, and the run stays resumable (`reopens_on_resume`): its next
+        # The result says so, and a successor epoch may resume: its next
         # ending adopts again.
         return RunResultProposal(outcome="cancelled", reason=reason_text(stopped, detail))
     if stopped is EndReason.FAILED:

@@ -272,7 +272,7 @@ def test_stop_acknowledged_while_transport_starts_reaches_the_session(tmp_path: 
         def listening(self) -> None:
             response = runtime.api.execute(StopCommand(timestamp=REQUEST_TIME))
             assert response.ack is not None
-            assert (response.ack.action, response.ack.status) == ("stop", "pending")
+            assert (response.ack.action, response.ack.status) == ("pause_now", "pending")
 
     runtime = ServerRuntime(
         run_id="run-1",
@@ -287,7 +287,10 @@ def test_stop_acknowledged_while_transport_starts_reaches_the_session(tmp_path: 
     def run() -> bool:
         runtime.controls.install(control)
         try:
-            return integration.control.stop_requested()
+            return any(
+                request.action == "pause_now"
+                for request in integration.control.take_pending_actions()
+            )
         finally:
             runtime.controls.release(control)
 

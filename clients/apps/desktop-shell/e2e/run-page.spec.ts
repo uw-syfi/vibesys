@@ -12,12 +12,7 @@ import {type FakeServerSeed, installFakeServer} from './fake-server.js';
 import {addInitScripts, initScript} from './init-scripts.js';
 import {STARTED_AT} from './started-at.js';
 
-/**
- * The Run screen's journey against the Fake bridge and a fake run that reports its startup steps
- * and writes its logs: open it from the sidebar, watch it start, read its logs, stop it (with Force
- * stop offered only once stopping has taken two minutes on the page's clock), and see it end.
- * Screens are checked in the Ink theme; `RUN_PAGE_SHOTS` names a directory to save them in.
- */
+/** The Run screen starts, drains, cancels, and resumes through its shipping bridge. */
 
 interface FakeHostWindow extends Window {
   fakeHost: {commands: string[]; listing(listing: unknown): void; calls: unknown[][]};
@@ -164,7 +159,7 @@ test('a run starts, writes its logs, permits cancellation during drain, and resu
   // Running: the timeline goes; the Logs face groups the streams by owner and follows one.
   await push(page, listed([server('running')], []));
   await expect(startup).toHaveCount(0);
-  await expect(page.getByRole('button', {name: 'Pause'})).toBeEnabled();
+  await expect(page.getByRole('button', {name: 'Pause', exact: true})).toBeEnabled();
   await page.getByRole('radiogroup', {name: 'Show'}).getByText('Logs').click();
   const streams = page.getByRole('listbox', {name: 'Log streams'});
   for (const group of ['Startup', 'Gates', 'Tool builds', 'Run narration']) {
@@ -238,7 +233,7 @@ test('the run level says what will appear before anything is measured, and keeps
   await expect(page.getByText('No ideas yet')).toBeVisible();
 });
 
-test('a cleanly stopped run offers no Resume', async ({page}) => {
+test('every ended run offers Resume', async ({page}) => {
   const stopped = server('stopped', {
     outcome: 'stopped',
     reason: 'Stopped by you.',
@@ -246,7 +241,7 @@ test('a cleanly stopped run offers no Resume', async ({page}) => {
   });
   await open(page, {...SEED, listings: [listed([], [stopped])]});
   await expect(page.getByText('Stopped by you.')).toBeVisible();
-  await expect(page.getByRole('button', {name: /^Resume/})).toHaveCount(0);
+  await expect(page.getByRole('button', {name: 'Resume', exact: true})).toBeVisible();
   await page.getByRole('button', {name: 'View logs'}).click();
   await expect(
     page.getByRole('radiogroup', {name: 'Show'}).getByRole('radio', {name: 'Logs'}),

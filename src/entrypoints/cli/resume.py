@@ -346,7 +346,9 @@ def _load_resume_selection(args: argparse.Namespace) -> _ResumeSelection | None:
         run_id = _requested_resume(args, direct=direct)
         if run_id is None:
             run_id = store.current_run_id() or _latest_run_id(project)
-        manifest = project.state.load_run(run_id)
+        events = NullGitTrackerEvents()
+        repository = open_git_repository(project_root, git=Git(OsProcesses()), faults=events)
+        manifest = GitRunHistory(project, repository).manifest(run_id)
 
     except ProjectStateError as exc:
         message = str(exc)

@@ -1212,6 +1212,9 @@ def _submitted(
         if rejection is None and isinstance(submission, Wait)
         else None
     )
+    bound = _run_park.drain_bound(state, decision)
+    if until is not None and bound is not None:
+        until = until.model_copy(update={"at": min(until.at, bound)})
     receipt = DecisionReceipt(
         decision_id=decision.decision_id,
         decision=None if rejection is not None else decision,
@@ -1225,6 +1228,10 @@ def _submitted(
     )
     if rejection is not None:
         return Transition(state=updated, events=(rejection,))
+    if bound is not None:
+        updated = updated.model_copy(
+            update={"run": updated.run.model_copy(update={"status": RunStatus.DRAINING})}
+        )
     if isinstance(decision, Finish):
         updated = updated.model_copy(
             update={
@@ -1404,7 +1411,7 @@ def _lifted(state: CoreState, control: ControlInput) -> tuple[CoreState, bool]:
     """
     if control.action != "resume":
         return state, False
-    lifting = stop_standing(state.run) or state.run.status == RunStatus.TERMINAL
+    lifting = stop_standing(state.run) or state.run.status in (RunStatus.TERMINAL, RunStatus.PARKED)
     if state.run.status == RunStatus.TERMINAL:
         state = state.model_copy(update={"run": reopened(state.run)})
     if lifting:
@@ -1433,6 +1440,7 @@ def _control(state: CoreState, event: RunControlEvent, dispatch: Dispatch) -> Tr
     if refusal is not None:
         raise refusal
     check_declared_target(event.control.target, state.run.declaration)
+    new_epoch = state.run.status in (RunStatus.TERMINAL, RunStatus.PARKED)
     state, lifting = _lifted(state, event.control)
     # A capacity wait leaves the run paused: it only records when the run resumes itself.
     waits = event.control.when == "capacity_returns"
@@ -1471,7 +1479,7 @@ def _control(state: CoreState, event: RunControlEvent, dispatch: Dispatch) -> Tr
         }
         action = actions.get(event.control.action, "resume")
         result = propagate(updated, (AdmissionControl(action=action),), dispatch)
-    lifted = (StopLiftRecorded(control=event.control),) if lifting else ()
+    lifted = (StopLiftRecorded(control=event.control, new_epoch=new_epoch),) if lifting else ()
     return result.model_copy(
         update={"events": (*result.events, ControlChanged(control=event.control), *lifted)}
     )
@@ -1487,6 +1495,11 @@ def _park_authority(state: CoreState, run: RunState, control: ControlInput) -> R
                     control_id=control.control_id,
                     epoch=state.records.recovery.epoch,
                     immediate=control.action == "pause_now",
+                    admitted_turns=(
+                        state.run.park.admitted_turns
+                        if state.run.park is not None
+                        else _run_park.admitted_turns(state)
+                    ),
                 )
             }
         )
@@ -1826,7 +1839,14 @@ def consume(
         state.run.status == RunStatus.PARKED
         and state.run.park is not None
         and state.records.recovery.epoch == state.run.park.epoch
-        and not isinstance(event, RecoveryStarted | RunControlEvent | DispatchAuthorized)
+        and not isinstance(
+            event,
+            RecoveryStarted
+            | RunControlEvent
+            | DispatchAuthorized
+            | DecisionSubmitted
+            | ProposalSubmitted,
+        )
     ):
         return Transition(state=state)
     _validate_observation_ingress(state, event)

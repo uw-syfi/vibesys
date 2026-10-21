@@ -52,7 +52,7 @@ AdoptionResult.observation required {"$ref":"#/$defs/Observation"}
 AdoptionResult.selection required {"$ref":"#/$defs/Selection"}
 AgentCall {"additionalProperties":false,"type":"object"}
 AgentCall.call_id required {"type":"string"}
-AgentCall.deadline_at optional {"anyOf":[{"$ref":"#/$defs/Seconds"},{"type":"null"}],"default":null}
+AgentCall.deadline_at optional {"anyOf":[{"$ref":"#/$defs/vs_core__types__common__Seconds__1"},{"type":"null"}],"default":null}
 AgentCall.rejection optional {"anyOf":[{"$ref":"#/$defs/AgentRejection"},{"type":"null"}],"default":null}
 AgentCall.repeat optional {"default":false,"type":"boolean"}
 AgentCall.request_id optional {"anyOf":[{"$ref":"#/$defs/RequestId"},{"type":"null"}],"default":null}
@@ -91,7 +91,7 @@ AttemptClosure.admission_id required {"$ref":"#/$defs/DecisionId"}
 AttemptClosure.authority required {"$ref":"#/$defs/RequestId"}
 AttemptClosure.discard_refused optional {"default":false,"type":"boolean"}
 AttemptClosure.disposition required {"enum":["park","cancel","settle"],"type":"string"}
-AttemptClosure.requested_at required {"$ref":"#/$defs/Seconds"}
+AttemptClosure.requested_at required {"$ref":"#/$defs/vs_core__types__common__Seconds__1"}
 AttemptClosure.retention_refused optional {"default":false,"type":"boolean"}
 AttemptEvaluationHistory {"additionalProperties":false,"type":"object"}
 AttemptEvaluationHistory.availability optional {"$ref":"#/$defs/EvaluationHistoryAvailability","default":"unavailable"}
@@ -203,12 +203,12 @@ Capabilities {"additionalProperties":false,"type":"object"}
 Capabilities.lifecycle optional {"default":[],"items":{"$ref":"#/$defs/LifecycleCapability"},"type":"array","uniqueItems":true}
 Capabilities.operations optional {"default":[],"items":{"$ref":"#/$defs/OperationDescriptor"},"type":"array"}
 CapacityHold {"additionalProperties":false,"type":"object"}
-CapacityHold.budget required {"$ref":"#/$defs/Seconds"}
-CapacityHold.credit optional {"$ref":"#/$defs/Seconds","default":0.0}
+CapacityHold.budget required {"$ref":"#/$defs/vs_core__types__common__Seconds__1"}
+CapacityHold.credit optional {"$ref":"#/$defs/vs_core__types__common__Seconds__1","default":0.0}
 CapacityHold.parked optional {"default":false,"type":"boolean"}
-CapacityHold.released_at optional {"anyOf":[{"$ref":"#/$defs/Seconds"},{"type":"null"}],"default":null}
-CapacityHold.resend_grace optional {"$ref":"#/$defs/Seconds","default":0.0}
-CapacityHold.since optional {"anyOf":[{"$ref":"#/$defs/Seconds"},{"type":"null"}],"default":null}
+CapacityHold.released_at optional {"anyOf":[{"$ref":"#/$defs/vs_core__types__common__Seconds__1"},{"type":"null"}],"default":null}
+CapacityHold.resend_grace optional {"$ref":"#/$defs/vs_core__types__common__Seconds__1","default":0.0}
+CapacityHold.since optional {"anyOf":[{"$ref":"#/$defs/vs_core__types__common__Seconds__1"},{"type":"null"}],"default":null}
 ChargeId {"additionalProperties":false,"type":"object"}
 ChargeId.kind optional {"const":"charge","default":"charge","type":"string"}
 ChargeId.root required {"minLength":1,"pattern":"^\\S+$","type":"string"}
@@ -301,8 +301,8 @@ Continuation {"additionalProperties":false,"type":"object"}
 Continuation.authorization_receipt optional {"anyOf":[{"$ref":"#/$defs/ResumeAuthorizationReceipt"},{"type":"null"}],"default":null}
 Continuation.cancelled_resolutions optional {"default":[],"items":{"$ref":"#/$defs/ResourceId"},"type":"array"}
 Continuation.continuation_id required {"$ref":"#/$defs/ContinuationId"}
-Continuation.deadline_at required {"$ref":"#/$defs/Seconds"}
-Continuation.downtime_credit optional {"$ref":"#/$defs/Seconds","default":0}
+Continuation.deadline_at required {"$ref":"#/$defs/vs_core__types__common__Seconds__1"}
+Continuation.downtime_credit optional {"$ref":"#/$defs/vs_core__types__common__Seconds__1","default":0}
 Continuation.evidence optional {"default":[],"items":{"$ref":"#/$defs/EvidenceRef"},"type":"array"}
 Continuation.invocation required {"$ref":"#/$defs/InvocationRef"}
 Continuation.jobs required {"items":{"$ref":"#/$defs/ResourceId"},"type":"array"}
@@ -362,7 +362,7 @@ DecisionReceipt.completion optional {"anyOf":[{"$ref":"#/$defs/CompletionStatus"
 DecisionReceipt.decision optional {"anyOf":[{"$ref":"#/$defs/Command"},{"type":"null"}],"default":null}
 DecisionReceipt.decision_id required {"$ref":"#/$defs/DecisionId"}
 DecisionReceipt.feedback required {"$ref":"#/$defs/DecisionFeedback"}
-DecisionReceipt.limit optional {"anyOf":[{"$ref":"#/$defs/Seconds"},{"type":"null"}],"default":null}
+DecisionReceipt.limit optional {"anyOf":[{"$ref":"#/$defs/vs_core__types__common__Seconds__1"},{"type":"null"}],"default":null}
 DecisionReceipt.payload_digest required {"type":"string"}
 DecisionReceipt.request_ids optional {"default":[],"items":{"$ref":"#/$defs/RequestId"},"type":"array"}
 DecisionReceipt.until optional {"anyOf":[{"$ref":"#/$defs/Until"},{"type":"null"}],"default":null}
@@ -488,7 +488,7 @@ Failed.decision optional {"anyOf":[{"$ref":"#/$defs/DecisionId"},{"type":"null"}
 Failed.digest optional {"anyOf":[{"type":"string"},{"type":"null"}],"default":null}
 Failed.errors optional {"default":[],"items":{"$ref":"#/$defs/ReplyError"},"type":"array"}
 Failed.kind optional {"const":"failed","default":"failed","type":"string"}
-Failed.limit_at optional {"anyOf":[{"$ref":"#/$defs/Seconds"},{"type":"null"}],"default":null}
+Failed.limit_at optional {"anyOf":[{"$ref":"#/$defs/vs_core__types__common__Seconds__1"},{"type":"null"}],"default":null}
 Failed.reason required {"$ref":"#/$defs/FailureReason"}
 Failed.refusal optional {"anyOf":[{"$ref":"#/$defs/WaitRefusal"},{"type":"null"}],"default":null}
 Failed.turn optional {"anyOf":[{"$ref":"#/$defs/InvocationRef"},{"type":"null"}],"default":null}
@@ -523,9 +523,9 @@ HistoricalSubmissionReceipt.kind optional {"const":"historical","default":"histo
 HistoricalSubmissionReceipt.ordinal required {"minimum":1,"type":"integer"}
 HistoricalSubmissionReceipt.proof required {"$ref":"#/$defs/ArtifactRef"}
 HostEpoch {"additionalProperties":false,"type":"object"}
-HostEpoch.alive_at required {"$ref":"#/$defs/Seconds"}
+HostEpoch.alive_at required {"$ref":"#/$defs/vs_core__types__common__Seconds__1"}
 HostEpoch.epoch required {"$ref":"#/$defs/Count"}
-HostEpoch.started_at required {"$ref":"#/$defs/Seconds"}
+HostEpoch.started_at required {"$ref":"#/$defs/vs_core__types__common__Seconds__1"}
 HostFence {"additionalProperties":false,"type":"object"}
 HostFence.epoch required {"$ref":"#/$defs/Count"}
 HostFence.host_id required {"$ref":"#/$defs/HostId"}
@@ -545,7 +545,7 @@ InputDelivered.mid_turn optional {"default":false,"type":"boolean"}
 InputDelivered.observation required {"$ref":"#/$defs/Observation"}
 InputDropReason {"enum":["owner-terminal","owner-cancelled","run-terminal","invocation-terminal","withdrawn","delivery-unknown"],"type":"string"}
 InputDropped {"additionalProperties":false,"type":"object"}
-InputDropped.at required {"$ref":"#/$defs/Seconds"}
+InputDropped.at required {"$ref":"#/$defs/vs_core__types__common__Seconds__1"}
 InputDropped.input_id required {"$ref":"#/$defs/InputId"}
 InputDropped.kind optional {"const":"input_dropped","default":"input_dropped","type":"string"}
 InputDropped.reason required {"$ref":"#/$defs/InputDropReason"}
@@ -618,7 +618,7 @@ Invocation.evaluation_prefix optional {"anyOf":[{"$ref":"#/$defs/EvaluationHisto
 Invocation.guidance_ids optional {"default":[],"items":{"$ref":"#/$defs/InputId"},"type":"array"}
 Invocation.input_ids optional {"default":[],"items":{"$ref":"#/$defs/InputId"},"type":"array"}
 Invocation.invocation required {"$ref":"#/$defs/InvocationRef"}
-Invocation.limit optional {"anyOf":[{"$ref":"#/$defs/Seconds"},{"type":"null"}],"default":null}
+Invocation.limit optional {"anyOf":[{"$ref":"#/$defs/vs_core__types__common__Seconds__1"},{"type":"null"}],"default":null}
 Invocation.observation optional {"anyOf":[{"$ref":"#/$defs/Observation"},{"type":"null"}],"default":null}
 Invocation.output_json optional {"anyOf":[{"type":"string"},{"type":"null"}],"default":null}
 Invocation.output_schema optional {"anyOf":[{"$ref":"#/$defs/SchemaRef"},{"type":"null"}],"default":null}
@@ -651,16 +651,16 @@ ItemInputTarget {"additionalProperties":false,"type":"object"}
 ItemInputTarget.item_id required {"$ref":"#/$defs/ItemId"}
 ItemInputTarget.kind optional {"const":"item","default":"item","type":"string"}
 JobProgress {"additionalProperties":false,"type":"object"}
-JobProgress.estimated_start_at optional {"anyOf":[{"$ref":"#/$defs/Seconds"},{"type":"null"}],"default":null}
+JobProgress.estimated_start_at optional {"anyOf":[{"$ref":"#/$defs/vs_core__types__common__Seconds__1"},{"type":"null"}],"default":null}
 JobProgress.observation_sequence required {"$ref":"#/$defs/Count"}
-JobProgress.observed_at required {"$ref":"#/$defs/Seconds"}
+JobProgress.observed_at required {"$ref":"#/$defs/vs_core__types__common__Seconds__1"}
 JobProgress.pending_reason optional {"anyOf":[{"type":"string"},{"type":"null"}],"default":null}
-JobProgress.queued_s optional {"anyOf":[{"$ref":"#/$defs/Seconds"},{"type":"null"}],"default":null}
-JobProgress.ran_s optional {"anyOf":[{"$ref":"#/$defs/Seconds"},{"type":"null"}],"default":null}
+JobProgress.queued_s optional {"anyOf":[{"$ref":"#/$defs/vs_core__types__common__Seconds__1"},{"type":"null"}],"default":null}
+JobProgress.ran_s optional {"anyOf":[{"$ref":"#/$defs/vs_core__types__common__Seconds__1"},{"type":"null"}],"default":null}
 JobProgress.stage_id optional {"anyOf":[{"minLength":1,"type":"string"},{"type":"null"}],"default":null}
 JobProgress.state required {"enum":["pending","running","unknown"],"type":"string"}
 JobTimeout {"additionalProperties":false,"type":"object"}
-JobTimeout.at required {"$ref":"#/$defs/Seconds"}
+JobTimeout.at required {"$ref":"#/$defs/vs_core__types__common__Seconds__1"}
 JobTimeout.by required {"$ref":"#/$defs/WaitEnd"}
 JobTimeout.progress optional {"anyOf":[{"$ref":"#/$defs/JobProgress"},{"type":"null"}],"default":null}
 JobTimeout.resource_id required {"$ref":"#/$defs/ResourceId"}
@@ -730,11 +730,11 @@ MeasurementPlan.evaluator_digest required {"type":"string"}
 MeasurementPlan.measured_input optional {"anyOf":[{"minLength":1,"type":"string"},{"type":"null"}],"default":null}
 MeasurementPlan.policy required {"enum":["ordered","parallel"],"type":"string"}
 MeasurementPlan.purpose required {"enum":["baseline","local-validation","official","profile"],"type":"string"}
-MeasurementPlan.queue_allowance required {"$ref":"#/$defs/Seconds"}
+MeasurementPlan.queue_allowance required {"$ref":"#/$defs/vs_core__types__common__Seconds__1"}
 MeasurementPlan.recipe required {"$ref":"#/$defs/ArtifactRef"}
 MeasurementPlan.reusable_evidence optional {"default":[],"items":{"$ref":"#/$defs/EvidenceId"},"type":"array"}
 MeasurementPlan.stages required {"items":{"$ref":"#/$defs/MeasurementStage"},"type":"array"}
-MeasurementPlan.submitted_at required {"$ref":"#/$defs/Seconds"}
+MeasurementPlan.submitted_at required {"$ref":"#/$defs/vs_core__types__common__Seconds__1"}
 MeasurementPlan.workload_digest required {"type":"string"}
 MeasurementResult {"additionalProperties":false,"type":"object"}
 MeasurementResult.decision_id optional {"anyOf":[{"$ref":"#/$defs/DecisionId"},{"type":"null"}],"default":null}
@@ -748,7 +748,7 @@ MeasurementResult.source_request optional {"anyOf":[{"$ref":"#/$defs/RequestId"}
 MeasurementResult.status required {"$ref":"#/$defs/ObservationStatus"}
 MeasurementStage {"additionalProperties":false,"type":"object"}
 MeasurementStage.depends_on optional {"default":[],"items":{"type":"string"},"type":"array"}
-MeasurementStage.execution_budget required {"$ref":"#/$defs/Seconds"}
+MeasurementStage.execution_budget required {"$ref":"#/$defs/vs_core__types__common__Seconds__1"}
 MeasurementStage.required_outputs optional {"default":[],"items":{"type":"string"},"type":"array"}
 MeasurementStage.stage_id required {"minLength":1,"type":"string"}
 MeasurementStageIdentity {"additionalProperties":false,"type":"object"}
@@ -770,7 +770,7 @@ Observation.children_complete optional {"default":false,"type":"boolean"}
 Observation.diagnostic optional {"default":"","type":"string"}
 Observation.event_id required {"$ref":"#/$defs/EventId"}
 Observation.measured_input optional {"anyOf":[{"minLength":1,"type":"string"},{"type":"null"}],"default":null}
-Observation.observed_at required {"$ref":"#/$defs/Seconds"}
+Observation.observed_at required {"$ref":"#/$defs/vs_core__types__common__Seconds__1"}
 Observation.released optional {"default":false,"type":"boolean"}
 Observation.request_id required {"$ref":"#/$defs/RequestId"}
 Observation.resource_id optional {"anyOf":[{"$ref":"#/$defs/ResourceId"},{"type":"null"}],"default":null}
@@ -828,7 +828,7 @@ OperationWire {"additionalProperties":false,"type":"object"}
 OperationWire.payload_json required {"type":"string"}
 OperationWire.schema_ref required {"$ref":"#/$defs/OperationSchemaRef"}
 OwnedJob {"additionalProperties":false,"type":"object"}
-OwnedJob.answer_until optional {"anyOf":[{"$ref":"#/$defs/Seconds"},{"type":"null"}],"default":null}
+OwnedJob.answer_until optional {"anyOf":[{"$ref":"#/$defs/vs_core__types__common__Seconds__1"},{"type":"null"}],"default":null}
 OwnedJob.base optional {"anyOf":[{"$ref":"#/$defs/BaseRef"},{"type":"null"}],"default":null}
 OwnedJob.children optional {"default":[],"items":{"$ref":"#/$defs/ResourceId"},"type":"array"}
 OwnedJob.collecting optional {"anyOf":[{"$ref":"#/$defs/RequestId"},{"type":"null"}],"default":null}
@@ -837,7 +837,7 @@ OwnedJob.observation optional {"anyOf":[{"$ref":"#/$defs/Observation"},{"type":"
 OwnedJob.pacing optional {"$ref":"#/$defs/ObservePacing","default":{"retries":0}}
 OwnedJob.plan required {"$ref":"#/$defs/MeasurementPlan"}
 OwnedJob.progress optional {"anyOf":[{"$ref":"#/$defs/JobProgress"},{"type":"null"}],"default":null}
-OwnedJob.queue_credit optional {"$ref":"#/$defs/Seconds","default":0}
+OwnedJob.queue_credit optional {"$ref":"#/$defs/vs_core__types__common__Seconds__1","default":0}
 OwnedJob.released optional {"default":false,"type":"boolean"}
 OwnedJob.resource_id required {"$ref":"#/$defs/ResourceId"}
 OwnedJob.reuses optional {"anyOf":[{"$ref":"#/$defs/RequestId"},{"type":"null"}],"default":null}
@@ -915,7 +915,7 @@ RegisteredOwnedJob.observation optional {"anyOf":[{"$ref":"#/$defs/Observation"}
 RegisteredOwnedJob.operation_id required {"$ref":"#/$defs/OperationId"}
 RegisteredOwnedJob.pacing optional {"$ref":"#/$defs/ObservePacing","default":{"retries":0}}
 RegisteredOwnedJob.progress optional {"anyOf":[{"$ref":"#/$defs/JobProgress"},{"type":"null"}],"default":null}
-RegisteredOwnedJob.queue_credit optional {"$ref":"#/$defs/Seconds","default":0}
+RegisteredOwnedJob.queue_credit optional {"$ref":"#/$defs/vs_core__types__common__Seconds__1","default":0}
 RegisteredOwnedJob.released optional {"default":false,"type":"boolean"}
 RegisteredOwnedJob.request_id required {"$ref":"#/$defs/RequestId"}
 RegisteredOwnedJob.resource_id optional {"anyOf":[{"$ref":"#/$defs/ResourceId"},{"type":"null"}],"default":null}
@@ -955,12 +955,12 @@ RequestPhase {"enum":["prepared","dispatched","reconciling","completed","blocked
 RequestRecord {"additionalProperties":false,"type":"object"}
 RequestRecord.addressed_by required {"items":{"$ref":"#/$defs/RequestId"},"type":"array"}
 RequestRecord.capacity_hold optional {"anyOf":[{"$ref":"#/$defs/CapacityHold"},{"type":"null"}],"default":null}
-RequestRecord.dispatched_at optional {"anyOf":[{"$ref":"#/$defs/Seconds"},{"type":"null"}],"default":null}
+RequestRecord.dispatched_at optional {"anyOf":[{"$ref":"#/$defs/vs_core__types__common__Seconds__1"},{"type":"null"}],"default":null}
 RequestRecord.dispatched_in optional {"anyOf":[{"$ref":"#/$defs/Count"},{"type":"null"}],"default":null}
 RequestRecord.evaluation_result optional {"anyOf":[{"$ref":"#/$defs/EvaluationTerminalFacts"},{"type":"null"}],"default":null}
 RequestRecord.failure optional {"anyOf":[{"$ref":"#/$defs/Failed"},{"type":"null"}],"default":null}
 RequestRecord.lifecycle required {"$ref":"#/$defs/LifecycleClass"}
-RequestRecord.limit_from_dispatch optional {"anyOf":[{"$ref":"#/$defs/Seconds"},{"type":"null"}],"default":null}
+RequestRecord.limit_from_dispatch optional {"anyOf":[{"$ref":"#/$defs/vs_core__types__common__Seconds__1"},{"type":"null"}],"default":null}
 RequestRecord.observation optional {"anyOf":[{"$ref":"#/$defs/Observation"},{"type":"null"}],"default":null}
 RequestRecord.outcome optional {"anyOf":[{"$ref":"#/$defs/BaseModel"},{"type":"null"}],"default":null}
 RequestRecord.outcome_json optional {"anyOf":[{"type":"string"},{"type":"null"}],"default":null}
@@ -969,7 +969,7 @@ RequestRecord.payload_digest required {"type":"string"}
 RequestRecord.phase required {"$ref":"#/$defs/RequestPhase"}
 RequestRecord.request required {"$ref":"#/$defs/Request"}
 RequestRecord.request_id required {"$ref":"#/$defs/RequestId"}
-RequestRecord.retry_at optional {"anyOf":[{"$ref":"#/$defs/Seconds"},{"type":"null"}],"default":null}
+RequestRecord.retry_at optional {"anyOf":[{"$ref":"#/$defs/vs_core__types__common__Seconds__1"},{"type":"null"}],"default":null}
 RequestRecord.retry_count optional {"$ref":"#/$defs/Count","default":0}
 RequestRecord.sequence optional {"anyOf":[{"$ref":"#/$defs/Count"},{"type":"null"}],"default":null}
 RequestRecord.setup_failure optional {"$ref":"#/$defs/SetupFailureKind","default":"unknown"}
@@ -1100,6 +1100,7 @@ RunInvocationCheckpoint.retention required {"enum":["wip","candidate"],"type":"s
 RunInvocationCheckpoint.revision required {"$ref":"#/$defs/RevisionRef"}
 RunInvocationCheckpoint.scope required {"$ref":"#/$defs/Scope"}
 RunPark {"additionalProperties":false,"type":"object"}
+RunPark.admitted_turns optional {"default":[],"items":{"$ref":"#/$defs/InvocationRef"},"type":"array"}
 RunPark.control_id required {"$ref":"#/$defs/ControlId"}
 RunPark.epoch required {"minimum":0,"type":"integer"}
 RunPark.immediate optional {"default":false,"type":"boolean"}
@@ -1112,13 +1113,13 @@ RunState {"additionalProperties":false,"type":"object"}
 RunState.artifacts optional {"default":[],"items":{"$ref":"#/$defs/ArtifactRef"},"type":"array"}
 RunState.capabilities optional {"$ref":"#/$defs/Capabilities","default":{"lifecycle":[],"operations":[]}}
 RunState.controls optional {"default":[],"items":{"$ref":"#/$defs/ControlInput"},"type":"array"}
-RunState.deadline_at required {"$ref":"#/$defs/Seconds"}
+RunState.deadline_at required {"$ref":"#/$defs/vs_core__types__common__Seconds__1"}
 RunState.declaration required {"$ref":"#/$defs/SearchDeclaration"}
-RunState.duration_seconds optional {"anyOf":[{"$ref":"#/$defs/Seconds"},{"type":"null"}],"default":null}
+RunState.duration_seconds optional {"anyOf":[{"$ref":"#/$defs/vs_core__types__common__Seconds__2"},{"type":"null"}],"default":null}
 RunState.facts required {"$ref":"#/$defs/RunFacts"}
 RunState.generation optional {"$ref":"#/$defs/Count","default":0}
 RunState.limits required {"$ref":"#/$defs/Limits"}
-RunState.now_at required {"$ref":"#/$defs/Seconds"}
+RunState.now_at required {"$ref":"#/$defs/vs_core__types__common__Seconds__1"}
 RunState.park optional {"anyOf":[{"$ref":"#/$defs/RunPark"},{"type":"null"}],"default":null}
 RunState.receipts optional {"default":[],"items":{"$ref":"#/$defs/DecisionReceipt"},"type":"array"}
 RunState.requirements optional {"$ref":"#/$defs/EvidenceRequirements","default":{"allow_empty_queue_success":false,"assessment_authorities":[],"required_assessments":[],"required_evidence":[]}}
@@ -1140,14 +1141,14 @@ Sample.evaluation required {"minLength":1,"type":"string"}
 Sample.gates required {"items":{"type":"string"},"type":"array"}
 Sample.host required {"minLength":1,"type":"string"}
 Sample.measured_input required {"minLength":1,"type":"string"}
-Sample.observed_at required {"$ref":"#/$defs/Seconds"}
+Sample.observed_at required {"$ref":"#/$defs/vs_core__types__common__Seconds__1"}
 Sample.reading required {"$ref":"#/$defs/Reading"}
 Sample.run required {"$ref":"#/$defs/RequestId"}
 Sample.scope required {"$ref":"#/$defs/Scope"}
 SchedulingState {"additionalProperties":false,"type":"object"}
 SchedulingState.admission_closed optional {"default":false,"type":"boolean"}
 SchedulingState.queue optional {"default":[],"items":{"$ref":"#/$defs/AdmissionRequest"},"type":"array"}
-SchedulingState.released_slot_seconds optional {"$ref":"#/$defs/Seconds","default":0.0}
+SchedulingState.released_slot_seconds optional {"$ref":"#/$defs/vs_core__types__common__Seconds__1","default":0.0}
 SchedulingState.slots optional {"default":[],"items":{"$ref":"#/$defs/Slot"},"type":"array"}
 SchemaRef {"additionalProperties":false,"type":"object"}
 SchemaRef.name required {"minLength":1,"type":"string"}
@@ -1172,7 +1173,6 @@ SearchDeclaration.required optional {"default":[],"items":{"$ref":"#/$defs/Lifec
 SearchDeclaration.required_operations optional {"default":[],"items":{"$ref":"#/$defs/OperationSchemaRef"},"type":"array"}
 SearchDeclaration.roles optional {"default":[],"items":{"$ref":"#/$defs/RoleId"},"type":"array"}
 SearchDeclaration.strategy_id required {"$ref":"#/$defs/StrategyId"}
-Seconds {"minimum":0,"type":"number"}
 Selection {"discriminator":{"mapping":{"retained_candidate":"#/$defs/RetainedCandidate","trusted_baseline":"#/$defs/TrustedBaseline"},"propertyName":"kind"},"oneOf":[{"$ref":"#/$defs/RetainedCandidate"},{"$ref":"#/$defs/TrustedBaseline"}]}
 SessionAcquisitionGroup {"additionalProperties":false,"type":"object"}
 SessionAcquisitionGroup.admission_id required {"$ref":"#/$defs/DecisionId"}
@@ -1188,7 +1188,7 @@ SessionInput {"additionalProperties":false,"type":"object"}
 SessionInput.artifact required {"$ref":"#/$defs/ArtifactRef"}
 SessionInput.input_id required {"$ref":"#/$defs/InputId"}
 SessionInput.mode optional {"$ref":"#/$defs/InputMode","default":"next-turn"}
-SessionInput.received_at required {"$ref":"#/$defs/Seconds"}
+SessionInput.received_at required {"$ref":"#/$defs/vs_core__types__common__Seconds__1"}
 SessionInput.sequence required {"$ref":"#/$defs/Count"}
 SessionInput.target required {"$ref":"#/$defs/InputTarget"}
 SessionPhase {"enum":["acquiring","idle","executing","checkpointed","suspended","closing","terminal","unknown"],"type":"string"}
@@ -1245,9 +1245,9 @@ SettlementState.settlements optional {"default":[],"items":{"$ref":"#/$defs/Sett
 SetupFailureKind {"enum":["transient","permanent","unsupported","unknown"],"type":"string"}
 Slot {"additionalProperties":false,"type":"object"}
 Slot.admission_id required {"$ref":"#/$defs/DecisionId"}
-Slot.admitted_at required {"$ref":"#/$defs/Seconds"}
+Slot.admitted_at required {"$ref":"#/$defs/vs_core__types__common__Seconds__1"}
 Slot.attempt required {"$ref":"#/$defs/AttemptRef"}
-Slot.charge_ended_at optional {"anyOf":[{"$ref":"#/$defs/Seconds"},{"type":"null"}],"default":null}
+Slot.charge_ended_at optional {"anyOf":[{"$ref":"#/$defs/vs_core__types__common__Seconds__1"},{"type":"null"}],"default":null}
 Slot.pools optional {"default":[],"items":{"$ref":"#/$defs/PoolId"},"type":"array"}
 SnapshotAndRetain {"additionalProperties":false,"type":"object"}
 SnapshotAndRetain.admission_id optional {"anyOf":[{"$ref":"#/$defs/DecisionId"},{"type":"null"}],"default":null}
@@ -1272,25 +1272,25 @@ SnapshotResultRef {"additionalProperties":false,"type":"object"}
 SnapshotResultRef.request_id required {"$ref":"#/$defs/RequestId"}
 Span {"additionalProperties":false,"type":"object"}
 Span.attempts optional {"default":[],"items":{"$ref":"#/$defs/SpanAttempt"},"type":"array"}
-Span.ended_at optional {"anyOf":[{"$ref":"#/$defs/Seconds"},{"type":"null"}],"default":null}
+Span.ended_at optional {"anyOf":[{"$ref":"#/$defs/vs_core__types__common__Seconds__1"},{"type":"null"}],"default":null}
 Span.failure optional {"anyOf":[{"$ref":"#/$defs/SpanFailure"},{"type":"null"}],"default":null}
 Span.id required {"$ref":"#/$defs/SpanId"}
 Span.invocation optional {"anyOf":[{"type":"string"},{"type":"null"}],"default":null}
 Span.label optional {"anyOf":[{"$ref":"#/$defs/SpanLabel"},{"type":"null"}],"default":null}
 Span.name required {"type":"string"}
 Span.parent required {"anyOf":[{"$ref":"#/$defs/SpanId"},{"type":"null"}]}
-Span.started_at required {"$ref":"#/$defs/Seconds"}
+Span.started_at required {"$ref":"#/$defs/vs_core__types__common__Seconds__1"}
 Span.status required {"$ref":"#/$defs/SpanStatus"}
 Span.stop optional {"anyOf":[{"$ref":"#/$defs/SpanStop"},{"type":"null"}],"default":null}
 Span.type required {"$ref":"#/$defs/SpanType"}
 Span.waiting_on optional {"default":[],"items":{"$ref":"#/$defs/WaitingOn"},"type":"array"}
 SpanAttempt {"additionalProperties":false,"type":"object"}
-SpanAttempt.ended_at optional {"anyOf":[{"$ref":"#/$defs/Seconds"},{"type":"null"}],"default":null}
+SpanAttempt.ended_at optional {"anyOf":[{"$ref":"#/$defs/vs_core__types__common__Seconds__1"},{"type":"null"}],"default":null}
 SpanAttempt.n required {"type":"integer"}
 SpanAttempt.of required {"type":"integer"}
 SpanAttempt.outcome optional {"anyOf":[{"$ref":"#/$defs/AttemptOutcome"},{"type":"null"}],"default":null}
 SpanAttempt.reason optional {"anyOf":[{"type":"string"},{"type":"null"}],"default":null}
-SpanAttempt.started_at required {"$ref":"#/$defs/Seconds"}
+SpanAttempt.started_at required {"$ref":"#/$defs/vs_core__types__common__Seconds__1"}
 SpanFailure {"additionalProperties":false,"type":"object"}
 SpanFailure.kind required {"$ref":"#/$defs/FailureKind"}
 SpanFailure.message required {"type":"string"}
@@ -1308,7 +1308,7 @@ SpanLink.to required {"$ref":"#/$defs/SpanId"}
 SpanStatus {"enum":["pending","running","waiting","done","failed","stopped"],"type":"string"}
 SpanStop {"additionalProperties":false,"type":"object"}
 SpanStop.landed optional {"default":false,"type":"boolean"}
-SpanStop.requested_at required {"$ref":"#/$defs/Seconds"}
+SpanStop.requested_at required {"$ref":"#/$defs/vs_core__types__common__Seconds__1"}
 SpanType {"enum":["flow","operation"],"type":"string"}
 SpanWaitKind {"enum":["operation","slot","time","stop"],"type":"string"}
 StartAttempt {"additionalProperties":false,"type":"object"}
@@ -1321,7 +1321,7 @@ StartAttempt.kind optional {"const":"start_attempt","default":"start_attempt","t
 StartAttempt.scope required {"$ref":"#/$defs/Scope"}
 StartAttempt.workspace required {"$ref":"#/$defs/WorkspacePlan"}
 Step {"additionalProperties":false,"type":"object"}
-Step.at required {"$ref":"#/$defs/Seconds"}
+Step.at required {"$ref":"#/$defs/vs_core__types__common__Seconds__1"}
 Step.digest required {"type":"string"}
 Step.event optional {"anyOf":[{"$ref":"#/$defs/JournaledEvent"},{"type":"null"}],"default":null}
 Step.reads optional {"default":[],"items":{"type":"string"},"type":"array"}
@@ -1329,6 +1329,7 @@ Step.recorded optional {"anyOf":[{"$ref":"#/$defs/Recorded"},{"type":"null"}],"d
 StopLifted {"additionalProperties":false,"type":"object"}
 StopLifted.control required {"$ref":"#/$defs/ControlInput"}
 StopLifted.kind optional {"const":"stop_lifted","default":"stop_lifted","type":"string"}
+StopLifted.new_epoch optional {"default":false,"type":"boolean"}
 StopMode {"enum":["drain","cancel"],"type":"string"}
 StopRequested {"additionalProperties":false,"type":"object"}
 StopRequested.control required {"$ref":"#/$defs/ControlInput"}
@@ -1374,12 +1375,12 @@ TaskTerms.runaway_evaluations optional {"default":40,"minimum":1,"type":"integer
 TaskTerms.stages required {"items":{"$ref":"#/$defs/TaskStage"},"type":"array"}
 TimeReached {"additionalProperties":false,"type":"object"}
 TimeReached.kind optional {"const":"time_reached","default":"time_reached","type":"string"}
-TimeReached.time required {"$ref":"#/$defs/Seconds"}
+TimeReached.time required {"$ref":"#/$defs/vs_core__types__common__Seconds__1"}
 TimedOut {"additionalProperties":false,"type":"object"}
 TimedOut.by optional {"$ref":"#/$defs/WaitEnd","default":"limit"}
-TimedOut.deadline_at required {"$ref":"#/$defs/Seconds"}
+TimedOut.deadline_at required {"$ref":"#/$defs/vs_core__types__common__Seconds__1"}
 TimedOut.kind optional {"const":"timed_out","default":"timed_out","type":"string"}
-TimedOut.reached_at required {"$ref":"#/$defs/Seconds"}
+TimedOut.reached_at required {"$ref":"#/$defs/vs_core__types__common__Seconds__1"}
 TimedOut.unfinished required {"items":{"$ref":"#/$defs/JobTimeout"},"minItems":1,"type":"array"}
 TrustedBaseline {"additionalProperties":false,"type":"object"}
 TrustedBaseline.kind optional {"const":"trusted_baseline","default":"trusted_baseline","type":"string"}
@@ -1415,7 +1416,7 @@ TurnYielded {"additionalProperties":false,"type":"object"}
 TurnYielded.continuation required {"$ref":"#/$defs/Continuation"}
 TurnYielded.kind optional {"const":"turn_yielded","default":"turn_yielded","type":"string"}
 Until {"additionalProperties":false,"type":"object"}
-Until.at required {"$ref":"#/$defs/Seconds"}
+Until.at required {"$ref":"#/$defs/vs_core__types__common__Seconds__1"}
 Until.watches optional {"default":[],"items":{"$ref":"#/$defs/Watch"},"type":"array"}
 VerifyAdoption {"additionalProperties":false,"type":"object"}
 VerifyAdoption.admission_id optional {"anyOf":[{"$ref":"#/$defs/DecisionId"},{"type":"null"}],"default":null}
@@ -1430,7 +1431,7 @@ WaitKind {"enum":["session","recovery-check","owned-job","release-dependency","y
 WaitOn {"additionalProperties":false,"type":"object"}
 WaitOn.requests optional {"default":[],"items":{"$ref":"#/$defs/RequestId"},"type":"array"}
 WaitOn.subjects optional {"default":[],"items":{"$ref":"#/$defs/WaitSubject"},"type":"array"}
-WaitOn.timer optional {"anyOf":[{"$ref":"#/$defs/Seconds"},{"type":"null"}],"default":null}
+WaitOn.timer optional {"anyOf":[{"$ref":"#/$defs/vs_core__types__common__Seconds__1"},{"type":"null"}],"default":null}
 WaitRefusal {"enum":["not-offered","not-recorded","not-published","not-resumable"],"type":"string"}
 WaitSubject {"additionalProperties":false,"type":"object"}
 WaitSubject.identity required {"type":"string"}
@@ -1438,7 +1439,7 @@ WaitSubject.kind required {"$ref":"#/$defs/WaitKind"}
 WaitingOn {"additionalProperties":false,"type":"object"}
 WaitingOn.kind required {"$ref":"#/$defs/SpanWaitKind"}
 WaitingOn.ref required {"type":"string"}
-WaitingOn.since required {"$ref":"#/$defs/Seconds"}
+WaitingOn.since required {"$ref":"#/$defs/vs_core__types__common__Seconds__1"}
 Watch {"discriminator":{"mapping":{"while_alive":"#/$defs/WhileAlive","while_open":"#/$defs/WhileOpen"},"propertyName":"kind"},"oneOf":[{"$ref":"#/$defs/WhileOpen"},{"$ref":"#/$defs/WhileAlive"}]}
 WhileAlive {"additionalProperties":false,"type":"object"}
 WhileAlive.job required {"$ref":"#/$defs/ResourceId"}
@@ -1478,5 +1479,7 @@ YieldPublicationFailed.decline optional {"anyOf":[{"$ref":"#/$defs/CheckpointDec
 YieldPublicationFailed.invocation required {"$ref":"#/$defs/InvocationRef"}
 YieldPublicationFailed.kind optional {"const":"yield_publication_failed","default":"yield_publication_failed","type":"string"}
 YieldPublicationFailed.reason required {"$ref":"#/$defs/CheckpointFailure"}
+vs_core__types__common__Seconds__1 {"minimum":0,"type":"number"}
+vs_core__types__common__Seconds__2 {"exclusiveMinimum":0,"minimum":0,"type":"number"}
 vs_core__types__measurement__Finite__1 {"type":"number"}
 vs_core__types__measurement__Finite__2 {"minimum":0,"type":"number"}

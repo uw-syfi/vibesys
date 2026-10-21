@@ -13,7 +13,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file vibesys/api/v1/host_call.proto.
  */
 export const file_vibesys_api_v1_host_call: GenFile = /*@__PURE__*/
-  fileDesc("Ch52aWJlc3lzL2FwaS92MS9ob3N0X2NhbGwucHJvdG8SDnZpYmVzeXMuYXBpLnYxIusBCg9Ib3N0Q2FsbFJlcXVlc3QSHAoIY2hlY2tvdXQYASABKAlCCrpIB3IFEAEogCASOAoLcG9zdF9pbnRlbnQYAiABKAsyIS52aWJlc3lzLmFwaS52MS5Qb3N0SW50ZW50UmVxdWVzdEgAEjMKCHJlbGF1bmNoGAMgASgLMh8udmliZXN5cy5hcGkudjEuUmVsYXVuY2hSZXF1ZXN0SAASOgoMY2hhdF9tZXNzYWdlGAQgASgLMiIudmliZXN5cy5hcGkudjEuQ2hhdE1lc3NhZ2VSZXF1ZXN0SABCDwoGbWV0aG9kEgW6SAIIASKWAgoQSG9zdENhbGxSZXNwb25zZRI5Cgtwb3N0X2ludGVudBgBIAEoCzIiLnZpYmVzeXMuYXBpLnYxLlBvc3RJbnRlbnRSZXNwb25zZUgAEkMKFGNvbmZpZ3VyYXRpb25fZmFpbGVkGAIgASgLMiMudmliZXN5cy5hcGkudjEuQ29uZmlndXJhdGlvbkZhaWxlZEgAEjQKCHJlbGF1bmNoGAMgASgLMiAudmliZXN5cy5hcGkudjEuUmVsYXVuY2hSZXNwb25zZUgAEjsKDGNoYXRfbWVzc2FnZRgEIAEoCzIjLnZpYmVzeXMuYXBpLnYxLkNoYXRNZXNzYWdlUmVzcG9uc2VIAEIPCgZyZXN1bHQSBbpIAggBIpgBChNDb25maWd1cmF0aW9uRmFpbGVkEhkKBGNvZGUYASABKAlCC7pICHIGEAEogIAEEhoKBXN0YWdlGAIgASgJQgu6SAhyBhABKICABBIcCgdtZXNzYWdlGAMgASgJQgu6SAhyBhABKICABBIRCglleGl0X2NvZGUYBCABKAUSGQoGc3RkZXJyGAUgASgJQgm6SAZyBCiAgAQiqwYKEVBvc3RJbnRlbnRSZXF1ZXN0EhYKDmV4cGVjdGVkX2Vwb2NoGA4gASgEEiAKDHByb2plY3Rfcm9vdBgBIAEoCUIKukgHcgUQASiAIBI4CgZydW5faWQYAiABKAlCKLpIJXIjMiFeW0EtWmEtejAtOV1bQS1aYS16MC05Xy1dezAsMTI3fSQSPQoKcmVxdWVzdF9pZBgDIAEoCUIpukgmciQyIl5bQS1aYS16MC05XVtBLVphLXowLTkuXy1dezAsMTI3fSQSLAoFcGF1c2UYBCABKAsyGy52aWJlc3lzLmFwaS52MS5QYXVzZUludGVudEgAEi4KBnJlc3VtZRgGIAEoCzIcLnZpYmVzeXMuYXBpLnYxLlJlc3VtZUludGVudEgAEiwKBXN0ZWVyGAggASgLMhsudmliZXN5cy5hcGkudjEuU3RlZXJJbnRlbnRIABIyCgh3aXRoZHJhdxgJIAEoCzIeLnZpYmVzeXMuYXBpLnYxLldpdGhkcmF3SW50ZW50SAASPQoOY2FuY2VsX2F0dGVtcHQYCiABKAsyIy52aWJlc3lzLmFwaS52MS5DYW5jZWxBdHRlbXB0SW50ZW50SAASNwoLY2FuY2VsX2l0ZW0YCyABKAsyIC52aWJlc3lzLmFwaS52MS5DYW5jZWxJdGVtSW50ZW50SAASPwoPc2V0X3BhcmFsbGVsaXNtGAwgASgLMiQudmliZXN5cy5hcGkudjEuU2V0UGFyYWxsZWxpc21JbnRlbnRIABIzCglwYXVzZV9ub3cYDSABKAsyHi52aWJlc3lzLmFwaS52MS5QYXVzZU5vd0ludGVudEgAOosBukiHARqEAQoMaW50ZW50LmVwb2NoEi5QYXVzZSBhbmQgUGF1c2Ugbm93IHJlcXVpcmUgdGhlIG9ic2VydmVkIGVwb2NoGkQhKGhhcyh0aGlzLnBhdXNlKSB8fCBoYXModGhpcy5wYXVzZV9ub3cpKSB8fCB0aGlzLmV4cGVjdGVkX2Vwb2NoID4gMEIPCgZpbnRlbnQSBbpIAggBSgQIBRAGSgQIBxAIUgRwYXJrUgRzdG9wImsKElBvc3RJbnRlbnRSZXNwb25zZRI9CgpyZXF1ZXN0X2lkGAEgASgJQim6SCZyJDIiXltBLVphLXowLTldW0EtWmEtejAtOS5fLV17MCwxMjd9JBIWCg5vcmRlcmVkX3JlYWRlchgCIAEoCCINCgtQYXVzZUludGVudCIQCg5QYXVzZU5vd0ludGVudCLJAQoMUmVzdW1lSW50ZW50EhAKCGZhbGxiYWNrGAEgASgIEjQKBHdoZW4YAiABKA4yGi52aWJlc3lzLmFwaS52MS5SZXN1bWVXaGVuQgq6SAeCAQQQASAAOnG6SG4abAoLcmVzdW1lLm1vZGUSO2ZhbGxiYWNrIHJlc3VtZXMgbm93OyBpdCBjYW5ub3Qgd2FpdCBmb3IgY2FwYWNpdHkgdG8gcmV0dXJuGiAhdGhpcy5mYWxsYmFjayB8fCB0aGlzLndoZW4gIT0gMiKWAQoLU3RlZXJJbnRlbnQSGQoEdGV4dBgBIAEoCUILukgIcgYQASiAgAQSNQoGdGFyZ2V0GAIgASgLMh0udmliZXN5cy5zdG9yZS52MS5TdGVlclRhcmdldEIGukgDyAEBEjUKBG1vZGUYAyABKA4yGy52aWJlc3lzLnN0b3JlLnYxLlN0ZWVyTW9kZUIKukgHggEEEAEgACJOCg5XaXRoZHJhd0ludGVudBI8Cgl3aXRoZHJhd3MYASABKAlCKbpIJnIkMiJeW0EtWmEtejAtOV1bQS1aYS16MC05Ll8tXXswLDEyN30kIjwKE0NhbmNlbEF0dGVtcHRJbnRlbnQSJQoHYXR0ZW1wdBgBIAEoCUIUukgRcg8QARiAAjIIXlteXHNdKyQiNgoQQ2FuY2VsSXRlbUludGVudBIiCgRpdGVtGAEgASgJQhS6SBFyDxABGIACMgheW15cc10rJCI1ChRTZXRQYXJhbGxlbGlzbUludGVudBIdCgxtYXhfcGFyYWxsZWwYASABKA1CB7pIBCoCKAEijgEKD1JlbGF1bmNoUmVxdWVzdBIgCgxwcm9qZWN0X3Jvb3QYASABKAlCCrpIB3IFEAEogCASOAoGcnVuX2lkGAIgASgJQii6SCVyIzIhXltBLVphLXowLTldW0EtWmEtejAtOV8tXXswLDEyN30kEh8KDmV4cGVjdGVkX2Vwb2NoGAMgASgEQge6SAQyAigBIn4KEFJlbGF1bmNoUmVzcG9uc2USGAoFZXBvY2gYASABKARCB7pIBDICKAFIABI+CgdyZWZ1c2FsGAIgASgOMh8udmliZXN5cy5hcGkudjEuUmVsYXVuY2hSZWZ1c2FsQgq6SAeCAQQQASAASABCEAoHb3V0Y29tZRIFukgCCAEiiAIKEkNoYXRNZXNzYWdlUmVxdWVzdBIgCgxwcm9qZWN0X3Jvb3QYASABKAlCCrpIB3IFEAEogCASOAoGcnVuX2lkGAIgASgJQii6SCVyIzIhXltBLVphLXowLTldW0EtWmEtejAtOV8tXXswLDEyN30kEjwKCnNlc3Npb25faWQYAyABKAlCKLpIJXIjMiFeW0EtWmEtejAtOV1bQS1aYS16MC05Xy1dezAsMTI3fSQSPQoKcmVxdWVzdF9pZBgEIAEoCUIpukgmciQyIl5bQS1aYS16MC05XVtBLVphLXowLTkuXy1dezAsMTI3fSQSGQoEdGV4dBgFIAEoCUILukgIcgYQASiAgAQikgEKE0NoYXRNZXNzYWdlUmVzcG9uc2USPAoKc2Vzc2lvbl9pZBgBIAEoCUIoukglciMyIV5bQS1aYS16MC05XVtBLVphLXowLTlfLV17MCwxMjd9JBI9CgpyZXF1ZXN0X2lkGAIgASgJQim6SCZyJDIiXltBLVphLXowLTldW0EtWmEtejAtOS5fLV17MCwxMjd9JCpgCgpSZXN1bWVXaGVuEhsKF1JFU1VNRV9XSEVOX1VOU1BFQ0lGSUVEEAASEwoPUkVTVU1FX1dIRU5fTk9XEAESIAocUkVTVU1FX1dIRU5fQ0FQQUNJVFlfUkVUVVJOUxACKrcBCg9SZWxhdW5jaFJlZnVzYWwSIAocUkVMQVVOQ0hfUkVGVVNBTF9VTlNQRUNJRklFRBAAEhsKF1JFTEFVTkNIX1JFRlVTQUxfTE9DS0VEEAESGgoWUkVMQVVOQ0hfUkVGVVNBTF9FTkRFRBACEiUKIVJFTEFVTkNIX1JFRlVTQUxfQ0hFQ0tPVVRfTUlTU0lORxADEiIKHlJFTEFVTkNIX1JFRlVTQUxfRVBPQ0hfQ0hBTkdFRBAEQj1aO2dpdGh1Yi5jb20vdXctc3lmaS92aWJlc3lzL2dhdGV3YXkvZ2VuL3ZpYmVzeXMvYXBpL3YxO2FwaXYxYgZwcm90bzM", [file_buf_validate_validate, file_vibesys_store_v1_intent]);
+  fileDesc("Ch52aWJlc3lzL2FwaS92MS9ob3N0X2NhbGwucHJvdG8SDnZpYmVzeXMuYXBpLnYxIusBCg9Ib3N0Q2FsbFJlcXVlc3QSHAoIY2hlY2tvdXQYASABKAlCCrpIB3IFEAEogCASOAoLcG9zdF9pbnRlbnQYAiABKAsyIS52aWJlc3lzLmFwaS52MS5Qb3N0SW50ZW50UmVxdWVzdEgAEjMKCHJlbGF1bmNoGAMgASgLMh8udmliZXN5cy5hcGkudjEuUmVsYXVuY2hSZXF1ZXN0SAASOgoMY2hhdF9tZXNzYWdlGAQgASgLMiIudmliZXN5cy5hcGkudjEuQ2hhdE1lc3NhZ2VSZXF1ZXN0SABCDwoGbWV0aG9kEgW6SAIIASKWAgoQSG9zdENhbGxSZXNwb25zZRI5Cgtwb3N0X2ludGVudBgBIAEoCzIiLnZpYmVzeXMuYXBpLnYxLlBvc3RJbnRlbnRSZXNwb25zZUgAEkMKFGNvbmZpZ3VyYXRpb25fZmFpbGVkGAIgASgLMiMudmliZXN5cy5hcGkudjEuQ29uZmlndXJhdGlvbkZhaWxlZEgAEjQKCHJlbGF1bmNoGAMgASgLMiAudmliZXN5cy5hcGkudjEuUmVsYXVuY2hSZXNwb25zZUgAEjsKDGNoYXRfbWVzc2FnZRgEIAEoCzIjLnZpYmVzeXMuYXBpLnYxLkNoYXRNZXNzYWdlUmVzcG9uc2VIAEIPCgZyZXN1bHQSBbpIAggBIpgBChNDb25maWd1cmF0aW9uRmFpbGVkEhkKBGNvZGUYASABKAlCC7pICHIGEAEogIAEEhoKBXN0YWdlGAIgASgJQgu6SAhyBhABKICABBIcCgdtZXNzYWdlGAMgASgJQgu6SAhyBhABKICABBIRCglleGl0X2NvZGUYBCABKAUSGQoGc3RkZXJyGAUgASgJQgm6SAZyBCiAgAQiiQYKEVBvc3RJbnRlbnRSZXF1ZXN0EhYKDmV4cGVjdGVkX2Vwb2NoGA4gASgEEiAKDHByb2plY3Rfcm9vdBgBIAEoCUIKukgHcgUQASiAIBI4CgZydW5faWQYAiABKAlCKLpIJXIjMiFeW0EtWmEtejAtOV1bQS1aYS16MC05Xy1dezAsMTI3fSQSPQoKcmVxdWVzdF9pZBgDIAEoCUIpukgmciQyIl5bQS1aYS16MC05XVtBLVphLXowLTkuXy1dezAsMTI3fSQSLAoFcGF1c2UYBCABKAsyGy52aWJlc3lzLmFwaS52MS5QYXVzZUludGVudEgAEiwKBXN0ZWVyGAggASgLMhsudmliZXN5cy5hcGkudjEuU3RlZXJJbnRlbnRIABIyCgh3aXRoZHJhdxgJIAEoCzIeLnZpYmVzeXMuYXBpLnYxLldpdGhkcmF3SW50ZW50SAASPQoOY2FuY2VsX2F0dGVtcHQYCiABKAsyIy52aWJlc3lzLmFwaS52MS5DYW5jZWxBdHRlbXB0SW50ZW50SAASNwoLY2FuY2VsX2l0ZW0YCyABKAsyIC52aWJlc3lzLmFwaS52MS5DYW5jZWxJdGVtSW50ZW50SAASPwoPc2V0X3BhcmFsbGVsaXNtGAwgASgLMiQudmliZXN5cy5hcGkudjEuU2V0UGFyYWxsZWxpc21JbnRlbnRIABIzCglwYXVzZV9ub3cYDSABKAsyHi52aWJlc3lzLmFwaS52MS5QYXVzZU5vd0ludGVudEgAOosBukiHARqEAQoMaW50ZW50LmVwb2NoEi5QYXVzZSBhbmQgUGF1c2Ugbm93IHJlcXVpcmUgdGhlIG9ic2VydmVkIGVwb2NoGkQhKGhhcyh0aGlzLnBhdXNlKSB8fCBoYXModGhpcy5wYXVzZV9ub3cpKSB8fCB0aGlzLmV4cGVjdGVkX2Vwb2NoID4gMEIPCgZpbnRlbnQSBbpIAggBSgQIBRAGSgQIBhAHSgQIBxAIUgRwYXJrUgZyZXN1bWVSBHN0b3AiawoSUG9zdEludGVudFJlc3BvbnNlEj0KCnJlcXVlc3RfaWQYASABKAlCKbpIJnIkMiJeW0EtWmEtejAtOV1bQS1aYS16MC05Ll8tXXswLDEyN30kEhYKDm9yZGVyZWRfcmVhZGVyGAIgASgIIg0KC1BhdXNlSW50ZW50IhAKDlBhdXNlTm93SW50ZW50IpYBCgtTdGVlckludGVudBIZCgR0ZXh0GAEgASgJQgu6SAhyBhABKICABBI1CgZ0YXJnZXQYAiABKAsyHS52aWJlc3lzLnN0b3JlLnYxLlN0ZWVyVGFyZ2V0Qga6SAPIAQESNQoEbW9kZRgDIAEoDjIbLnZpYmVzeXMuc3RvcmUudjEuU3RlZXJNb2RlQgq6SAeCAQQQASAAIk4KDldpdGhkcmF3SW50ZW50EjwKCXdpdGhkcmF3cxgBIAEoCUIpukgmciQyIl5bQS1aYS16MC05XVtBLVphLXowLTkuXy1dezAsMTI3fSQiPAoTQ2FuY2VsQXR0ZW1wdEludGVudBIlCgdhdHRlbXB0GAEgASgJQhS6SBFyDxABGIACMgheW15cc10rJCI2ChBDYW5jZWxJdGVtSW50ZW50EiIKBGl0ZW0YASABKAlCFLpIEXIPEAEYgAIyCF5bXlxzXSskIjUKFFNldFBhcmFsbGVsaXNtSW50ZW50Eh0KDG1heF9wYXJhbGxlbBgBIAEoDUIHukgEKgIoASKOAQoPUmVsYXVuY2hSZXF1ZXN0EiAKDHByb2plY3Rfcm9vdBgBIAEoCUIKukgHcgUQASiAIBI4CgZydW5faWQYAiABKAlCKLpIJXIjMiFeW0EtWmEtejAtOV1bQS1aYS16MC05Xy1dezAsMTI3fSQSHwoOZXhwZWN0ZWRfZXBvY2gYAyABKARCB7pIBDICKAEifgoQUmVsYXVuY2hSZXNwb25zZRIYCgVlcG9jaBgBIAEoBEIHukgEMgIoAUgAEj4KB3JlZnVzYWwYAiABKA4yHy52aWJlc3lzLmFwaS52MS5SZWxhdW5jaFJlZnVzYWxCCrpIB4IBBBABIABIAEIQCgdvdXRjb21lEgW6SAIIASKIAgoSQ2hhdE1lc3NhZ2VSZXF1ZXN0EiAKDHByb2plY3Rfcm9vdBgBIAEoCUIKukgHcgUQASiAIBI4CgZydW5faWQYAiABKAlCKLpIJXIjMiFeW0EtWmEtejAtOV1bQS1aYS16MC05Xy1dezAsMTI3fSQSPAoKc2Vzc2lvbl9pZBgDIAEoCUIoukglciMyIV5bQS1aYS16MC05XVtBLVphLXowLTlfLV17MCwxMjd9JBI9CgpyZXF1ZXN0X2lkGAQgASgJQim6SCZyJDIiXltBLVphLXowLTldW0EtWmEtejAtOS5fLV17MCwxMjd9JBIZCgR0ZXh0GAUgASgJQgu6SAhyBhABKICABCKSAQoTQ2hhdE1lc3NhZ2VSZXNwb25zZRI8CgpzZXNzaW9uX2lkGAEgASgJQii6SCVyIzIhXltBLVphLXowLTldW0EtWmEtejAtOV8tXXswLDEyN30kEj0KCnJlcXVlc3RfaWQYAiABKAlCKbpIJnIkMiJeW0EtWmEtejAtOV1bQS1aYS16MC05Ll8tXXswLDEyN30kKrkBCg9SZWxhdW5jaFJlZnVzYWwSIAocUkVMQVVOQ0hfUkVGVVNBTF9VTlNQRUNJRklFRBAAEhsKF1JFTEFVTkNIX1JFRlVTQUxfTE9DS0VEEAESJQohUkVMQVVOQ0hfUkVGVVNBTF9DSEVDS09VVF9NSVNTSU5HEAMSIgoeUkVMQVVOQ0hfUkVGVVNBTF9FUE9DSF9DSEFOR0VEEAQiBAgCEAIqFlJFTEFVTkNIX1JFRlVTQUxfRU5ERURCPVo7Z2l0aHViLmNvbS91dy1zeWZpL3ZpYmVzeXMvZ2F0ZXdheS9nZW4vdmliZXN5cy9hcGkvdjE7YXBpdjFiBnByb3RvMw", [file_buf_validate_validate, file_vibesys_store_v1_intent]);
 
 /**
  * The caller takes checkout from the host's saved configuration. Carrying it on
@@ -174,12 +174,6 @@ export type PostIntentRequest = Message<"vibesys.api.v1.PostIntentRequest"> & {
     case: "pause";
   } | {
     /**
-     * @generated from field: vibesys.api.v1.ResumeIntent resume = 6;
-     */
-    value: ResumeIntent;
-    case: "resume";
-  } | {
-    /**
      * @generated from field: vibesys.api.v1.SteerIntent steer = 8;
      */
     value: SteerIntent;
@@ -276,28 +270,6 @@ export const PauseNowIntentSchema: GenMessage<PauseNowIntent> = /*@__PURE__*/
   messageDesc(file_vibesys_api_v1_host_call, 6);
 
 /**
- * @generated from message vibesys.api.v1.ResumeIntent
- */
-export type ResumeIntent = Message<"vibesys.api.v1.ResumeIntent"> & {
-  /**
-   * @generated from field: bool fallback = 1;
-   */
-  fallback: boolean;
-
-  /**
-   * @generated from field: vibesys.api.v1.ResumeWhen when = 2;
-   */
-  when: ResumeWhen;
-};
-
-/**
- * Describes the message vibesys.api.v1.ResumeIntent.
- * Use `create(ResumeIntentSchema)` to create a new message.
- */
-export const ResumeIntentSchema: GenMessage<ResumeIntent> = /*@__PURE__*/
-  messageDesc(file_vibesys_api_v1_host_call, 7);
-
-/**
  * @generated from message vibesys.api.v1.SteerIntent
  */
 export type SteerIntent = Message<"vibesys.api.v1.SteerIntent"> & {
@@ -322,7 +294,7 @@ export type SteerIntent = Message<"vibesys.api.v1.SteerIntent"> & {
  * Use `create(SteerIntentSchema)` to create a new message.
  */
 export const SteerIntentSchema: GenMessage<SteerIntent> = /*@__PURE__*/
-  messageDesc(file_vibesys_api_v1_host_call, 8);
+  messageDesc(file_vibesys_api_v1_host_call, 7);
 
 /**
  * @generated from message vibesys.api.v1.WithdrawIntent
@@ -339,7 +311,7 @@ export type WithdrawIntent = Message<"vibesys.api.v1.WithdrawIntent"> & {
  * Use `create(WithdrawIntentSchema)` to create a new message.
  */
 export const WithdrawIntentSchema: GenMessage<WithdrawIntent> = /*@__PURE__*/
-  messageDesc(file_vibesys_api_v1_host_call, 9);
+  messageDesc(file_vibesys_api_v1_host_call, 8);
 
 /**
  * @generated from message vibesys.api.v1.CancelAttemptIntent
@@ -356,7 +328,7 @@ export type CancelAttemptIntent = Message<"vibesys.api.v1.CancelAttemptIntent"> 
  * Use `create(CancelAttemptIntentSchema)` to create a new message.
  */
 export const CancelAttemptIntentSchema: GenMessage<CancelAttemptIntent> = /*@__PURE__*/
-  messageDesc(file_vibesys_api_v1_host_call, 10);
+  messageDesc(file_vibesys_api_v1_host_call, 9);
 
 /**
  * @generated from message vibesys.api.v1.CancelItemIntent
@@ -373,7 +345,7 @@ export type CancelItemIntent = Message<"vibesys.api.v1.CancelItemIntent"> & {
  * Use `create(CancelItemIntentSchema)` to create a new message.
  */
 export const CancelItemIntentSchema: GenMessage<CancelItemIntent> = /*@__PURE__*/
-  messageDesc(file_vibesys_api_v1_host_call, 11);
+  messageDesc(file_vibesys_api_v1_host_call, 10);
 
 /**
  * @generated from message vibesys.api.v1.SetParallelismIntent
@@ -390,7 +362,7 @@ export type SetParallelismIntent = Message<"vibesys.api.v1.SetParallelismIntent"
  * Use `create(SetParallelismIntentSchema)` to create a new message.
  */
 export const SetParallelismIntentSchema: GenMessage<SetParallelismIntent> = /*@__PURE__*/
-  messageDesc(file_vibesys_api_v1_host_call, 12);
+  messageDesc(file_vibesys_api_v1_host_call, 11);
 
 /**
  * The observed epoch fences retries. Reconcile an uncertain call through
@@ -420,7 +392,7 @@ export type RelaunchRequest = Message<"vibesys.api.v1.RelaunchRequest"> & {
  * Use `create(RelaunchRequestSchema)` to create a new message.
  */
 export const RelaunchRequestSchema: GenMessage<RelaunchRequest> = /*@__PURE__*/
-  messageDesc(file_vibesys_api_v1_host_call, 13);
+  messageDesc(file_vibesys_api_v1_host_call, 12);
 
 /**
  * @generated from message vibesys.api.v1.RelaunchResponse
@@ -449,7 +421,7 @@ export type RelaunchResponse = Message<"vibesys.api.v1.RelaunchResponse"> & {
  * Use `create(RelaunchResponseSchema)` to create a new message.
  */
 export const RelaunchResponseSchema: GenMessage<RelaunchResponse> = /*@__PURE__*/
-  messageDesc(file_vibesys_api_v1_host_call, 14);
+  messageDesc(file_vibesys_api_v1_host_call, 13);
 
 /**
  * Retrying an id with identical content admits exactly one question.
@@ -488,7 +460,7 @@ export type ChatMessageRequest = Message<"vibesys.api.v1.ChatMessageRequest"> & 
  * Use `create(ChatMessageRequestSchema)` to create a new message.
  */
 export const ChatMessageRequestSchema: GenMessage<ChatMessageRequest> = /*@__PURE__*/
-  messageDesc(file_vibesys_api_v1_host_call, 15);
+  messageDesc(file_vibesys_api_v1_host_call, 14);
 
 /**
  * @generated from message vibesys.api.v1.ChatMessageResponse
@@ -510,33 +482,7 @@ export type ChatMessageResponse = Message<"vibesys.api.v1.ChatMessageResponse"> 
  * Use `create(ChatMessageResponseSchema)` to create a new message.
  */
 export const ChatMessageResponseSchema: GenMessage<ChatMessageResponse> = /*@__PURE__*/
-  messageDesc(file_vibesys_api_v1_host_call, 16);
-
-/**
- * @generated from enum vibesys.api.v1.ResumeWhen
- */
-export enum ResumeWhen {
-  /**
-   * @generated from enum value: RESUME_WHEN_UNSPECIFIED = 0;
-   */
-  UNSPECIFIED = 0,
-
-  /**
-   * @generated from enum value: RESUME_WHEN_NOW = 1;
-   */
-  NOW = 1,
-
-  /**
-   * @generated from enum value: RESUME_WHEN_CAPACITY_RETURNS = 2;
-   */
-  CAPACITY_RETURNS = 2,
-}
-
-/**
- * Describes the enum vibesys.api.v1.ResumeWhen.
- */
-export const ResumeWhenSchema: GenEnum<ResumeWhen> = /*@__PURE__*/
-  enumDesc(file_vibesys_api_v1_host_call, 0);
+  messageDesc(file_vibesys_api_v1_host_call, 15);
 
 /**
  * @generated from enum vibesys.api.v1.RelaunchRefusal
@@ -553,11 +499,6 @@ export enum RelaunchRefusal {
   LOCKED = 1,
 
   /**
-   * @generated from enum value: RELAUNCH_REFUSAL_ENDED = 2;
-   */
-  ENDED = 2,
-
-  /**
    * @generated from enum value: RELAUNCH_REFUSAL_CHECKOUT_MISSING = 3;
    */
   CHECKOUT_MISSING = 3,
@@ -572,4 +513,4 @@ export enum RelaunchRefusal {
  * Describes the enum vibesys.api.v1.RelaunchRefusal.
  */
 export const RelaunchRefusalSchema: GenEnum<RelaunchRefusal> = /*@__PURE__*/
-  enumDesc(file_vibesys_api_v1_host_call, 1);
+  enumDesc(file_vibesys_api_v1_host_call, 0);

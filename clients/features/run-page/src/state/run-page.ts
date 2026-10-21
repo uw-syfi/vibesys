@@ -1,21 +1,6 @@
 /**
- * The Run screen's store: a pure reducer over what the app learns about one run (its registry
- * record, from the host's watch, and its log streams) and what the user does on the screen.
- *
- * The run's lifecycle is the record's: the page never guesses a phase the host did not report,
- * except that a Stop it sent shows as stopping until the record catches up. Stopping arms a bound
- * (`FORCE_STOP_BOUND_MS`) on the shell's injected clock through a request token; only when that
- * token comes back while the run is still stopping is "Force stop" offered, and a reply for an
- * earlier stop is dropped. Commands are requests the shell performs through the existing
- * run-control paths; the reducer does no I/O and reads no clock.
- *
- * A live run is attached under a token (`link`); once attached, the shell runs the run's session
- * (`@vibesys/run-session`) and reports what it says (`session`) and what it folded (`run`). Pause
- * and Resume are protocol commands, so they are offered only while the session can deliver one.
- * A run paused by a usage limit also offers to wait: Resume with `when: capacity_returns`, which the
- * run acknowledges with `quota_waiting` (folded into the pause by `@vibesys/run-state`), and "Stop
- * waiting" (Pause) once it waits. A server that refuses the wait (an older one rejects `when`) no
- * longer offers it for this run instance (`waitRefused`).
+ * Pure Run screen state and effects. Pause drains the epoch; Pause now confirms once,
+ * records its pending request, and remains pending until durable state catches up.
  */
 
 import type {RunEvent, RunStatus} from '@vibesys/contracts';
@@ -196,7 +181,7 @@ export type SpanDetailReply =
   | {readonly kind: 'failed'; readonly message: string};
 
 /** Confirmation for cancellation; the backend record remains the lifecycle authority. */
-export type PauseNowFlow = {readonly kind: 'idle' | 'confirming' | 'sent'};
+type PauseNowFlow = {readonly kind: 'idle' | 'confirming' | 'sent'};
 
 /** Where the scrubber stands: following the newest event, or at one event's sequence. */
 export type RunView = {readonly at: 'live'} | {readonly at: number};

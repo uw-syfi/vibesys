@@ -322,6 +322,7 @@ class _Ask:
             subject=f"{self.session.subject}.{self.role.name}",
             ordinal=serial,
             context=self.input,
+            continuation_of=self.predecessor or self.invocation,
         )
         scope: Scope = THIS_RUN if self.session.workspace is None else self.session.workspace.scope
         operation = Operation(

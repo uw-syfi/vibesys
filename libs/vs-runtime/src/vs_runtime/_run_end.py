@@ -24,7 +24,7 @@ _STORE_DOCUMENT = "store.json"
 
 def ending(core: CoreState) -> str | None:
     """Why the run ended, or None while core may still apply a request."""
-    if core.run.status not in (RunStatus.TERMINAL, RunStatus.PARKED):
+    if core.run.status != RunStatus.TERMINAL:
         return None
     return _ending(None if core.run.result is None else core.run.result.reason)
 
@@ -98,7 +98,7 @@ def recorded_end(project: Project, run_id: str) -> RecordedEnd | None:
     if status not in {member.value for member in RunStatus}:
         message = f"run {run_id!r}: its core record does not say whether it ended"
         raise ProjectStateError(message)
-    if status not in (RunStatus.TERMINAL.value, RunStatus.PARKED.value):
+    if status != RunStatus.TERMINAL.value:
         return None
     outcome = _member(run, "result", "outcome")
     reason = _member(run, "result", "reason")

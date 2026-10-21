@@ -32,8 +32,6 @@ from vs_proto.api import (
     PostIntentRequest,
     RelaunchRefusal,
     RelaunchRequest,
-    ResumeIntent,
-    ResumeWhen,
     SetParallelismIntent,
     SteerIntent,
     SteerMode,
@@ -112,9 +110,6 @@ def call(project: Project, run_id: str, intent: Oneof, request_id: str = "r-1") 
     [
         ("pause_now", PauseNowIntent(), "pause_now"),
         ("pause", PauseIntent(), "pause"),
-        ("resume", ResumeIntent(when=ResumeWhen.NOW), "resume"),
-        ("resume", ResumeIntent(when=ResumeWhen.CAPACITY_RETURNS), "resume"),
-        ("resume", ResumeIntent(when=ResumeWhen.NOW, fallback=True), "resume"),
         (
             "steer",
             SteerIntent(
@@ -161,7 +156,7 @@ def test_post_round_trips_into_reviewed_inbox(
 def test_order_and_request_id_conflicts_are_unchanged(project: tuple[Project, str]) -> None:
     owner, run_id = project
     call(owner, run_id, Oneof("pause", PauseIntent()), "z")
-    call(owner, run_id, Oneof("resume", ResumeIntent(when=ResumeWhen.NOW)), "a")
+    call(owner, run_id, Oneof("pause_now", PauseNowIntent()), "a")
     call(owner, run_id, Oneof("pause", PauseIntent()), "z")
     response = call(owner, run_id, Oneof("pause_now", PauseNowIntent()), "z")
     assert response.result is not None
@@ -173,8 +168,6 @@ def test_order_and_request_id_conflicts_are_unchanged(project: tuple[Project, st
 @pytest.mark.parametrize(
     "intent",
     [
-        Oneof("resume", ResumeIntent()),
-        Oneof("resume", ResumeIntent(when=ResumeWhen.CAPACITY_RETURNS, fallback=True)),
         Oneof("steer", SteerIntent(text="guidance")),
         Oneof("withdraw", WithdrawIntent(withdraws="../bad")),
         Oneof("set_parallelism", SetParallelismIntent()),
@@ -279,7 +272,7 @@ def test_ended_run_refuses_new_requests_but_accepts_an_applied_retry(
     accepted = call(owner, run_id, Oneof("pause", PauseIntent()))
     assert accepted.result is not None
     assert accepted.result.field == "post_intent"
-    refused = call(owner, run_id, Oneof("resume", ResumeIntent(when=ResumeWhen.NOW)), "new")
+    refused = call(owner, run_id, Oneof("pause_now", PauseNowIntent()), "new")
     assert refused.result is not None
     assert refused.result.field == "configuration_failed"
     assert refused.result.value.code == "inbox_closed"

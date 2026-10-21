@@ -81,7 +81,6 @@ async function openRelaunch(page: Page, state: RunState, result = 'epoch') {
     release: () => {
       const refusal = {
         locked: RelaunchRefusal.LOCKED,
-        ended: RelaunchRefusal.ENDED,
         checkout: RelaunchRefusal.CHECKOUT_MISSING,
         changed: RelaunchRefusal.EPOCH_CHANGED,
       }[result];
@@ -193,7 +192,6 @@ test('Relaunch header action, results and new epoch survive Tail before acknowle
   }
   for (const [result, label] of [
     ['locked', 'Refused: locked'],
-    ['ended', 'Refused: ended'],
     ['checkout', 'Refused: checkout missing'],
     ['changed', 'Refused: epoch changed'],
     ['uncertain', 'Resume not confirmed. Check the timeline before trying again.'],

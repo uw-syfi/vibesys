@@ -7,7 +7,6 @@ import {RelaunchAction, RelaunchStatus, type RelaunchView} from './relaunch.js';
 const ACTION_LABELS: Record<NonNullable<IntentEntry['request']['intent']['case']>, string> = {
   pause: 'Pause',
   pauseNow: 'Pause now',
-  resume: 'Resume',
   steer: 'Guidance',
   withdraw: 'Withdraw guidance',
   cancelAttempt: 'Cancel attempt',

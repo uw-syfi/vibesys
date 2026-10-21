@@ -11,14 +11,7 @@ import {type FakeServerSeed, installFakeServer} from './fake-server.js';
 import {addInitScripts, initScript} from './init-scripts.js';
 import {STARTED_AT} from './started-at.js';
 
-/**
- * The quota banner against the Fake bridge and a fake run paused on a usage limit: it names the
- * provider and its reset time, "Wait and resume when quota is back" sends Resume when capacity
- * returns and shows the expected time once the run reports `quota_waiting`, "Stop waiting" sends
- * Pause and the banner returns on `quota_wait_cancelled`, and "Resume now" sends Resume now. Times
- * are formatted in UTC here so the journey reads the same everywhere. Checked in the Ink theme;
- * `QUOTA_SHOTS` names a directory to save the screens in.
- */
+/** Quota holds stay internal; Pause now remains available to close the epoch. */
 
 interface FakeHostWindow extends Window {
   fakeHost: {commands: string[]};
@@ -128,5 +121,5 @@ test('a quota hold stays internal while the operator can cancel the epoch', asyn
   ).toBeVisible();
   expect((await new AxeBuilder({page}).analyze()).violations).toEqual([]);
   await shoot(page, 'ink-quota-held');
-  expect(await commands(page)).toEqual([]);
+  expect((await commands(page)).filter(command => command.startsWith('command.'))).toEqual([]);
 });

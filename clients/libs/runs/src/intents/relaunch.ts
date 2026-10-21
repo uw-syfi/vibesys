@@ -54,7 +54,6 @@ export function hostRelaunchResponse(bytes: Uint8Array, expectedEpoch: bigint): 
     (result.outcome.case === 'refusal' &&
       [
         RelaunchRefusal.LOCKED,
-        RelaunchRefusal.ENDED,
         RelaunchRefusal.CHECKOUT_MISSING,
         RelaunchRefusal.EPOCH_CHANGED,
       ].includes(result.outcome.value))
@@ -69,8 +68,6 @@ export function relaunchLabel(result: RelaunchResponse | null): string | null {
   switch (result.outcome.value) {
     case RelaunchRefusal.LOCKED:
       return 'Refused: locked';
-    case RelaunchRefusal.ENDED:
-      return 'Refused: ended';
     case RelaunchRefusal.CHECKOUT_MISSING:
       return 'Refused: checkout missing';
     case RelaunchRefusal.EPOCH_CHANGED:

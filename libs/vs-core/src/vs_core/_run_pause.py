@@ -129,7 +129,10 @@ def control_refusal(state: CoreState, control: ControlInput) -> ControlRefusedEr
 
 def _inactive_refusal(state: CoreState, control: ControlInput) -> ControlRefusedError | None:
     run = state.run
-    if run.status == RunStatus.DRAINING and control.action in ("pause_now", "steer", "withdraw"):
+    if (
+        control.action in ("steer", "withdraw")
+        and run.status in (RunStatus.DRAINING, RunStatus.PARKED)
+    ) or (run.status == RunStatus.DRAINING and control.action == "pause_now"):
         return None
     if run.status in (RunStatus.DRAINING, RunStatus.PARKED):
         if (

@@ -6,7 +6,6 @@ import {
   IntentAction,
   IntentStep,
   RecordSchema,
-  ResumeWhen,
   SteerMode,
   SteerTargetKind,
   TailResponseSchema,
@@ -23,7 +22,7 @@ import {
 const identity = {runId: 'run-1', requestId: 'r-1', projectRoot: '/project', expectedEpoch: 1n};
 
 test('all visible controls use typed defaults and preserve identity through the pipes', () => {
-  for (const action of ['pause', 'pauseNow', 'resume', 'steer'] as const) {
+  for (const action of ['pause', 'pauseNow', 'steer'] as const) {
     const request = runIntent(identity, action, 'guidance');
     const envelope = fromBinary(
       HostCallRequestSchema,
@@ -34,7 +33,6 @@ test('all visible controls use typed defaults and preserve identity through the 
     if (envelope.method.case !== 'postIntent') throw new Error('wrong method');
     expect(envelope.method.value).toEqual(request);
     expect(request.intent.case).toBe(action);
-    if (request.intent.case === 'resume') expect(request.intent.value.when).toBe(ResumeWhen.NOW);
     if (request.intent.case === 'steer') {
       expect(request.intent.value.mode).toBe(SteerMode.NEXT_TURN);
       expect(request.intent.value.target?.kind).toBe(SteerTargetKind.RUN);

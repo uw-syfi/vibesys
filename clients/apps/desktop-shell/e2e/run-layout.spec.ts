@@ -10,10 +10,15 @@ import {openFixture, playLive} from './fixture-world.js';
  * shows. Each reads the fixtures the screen checks walk.
  */
 
-async function open(page: Page, name: string, width: number): Promise<void> {
+async function open(
+  page: Page,
+  name: string,
+  width: number,
+  refuseActions: readonly string[] = [],
+): Promise<void> {
   await page.setViewportSize({width, height: 900});
   const fixture = fixtureNamed(name);
-  await openFixture(page, fixture);
+  await openFixture(page, fixture, {refuseActions});
   await playLive(page, fixture);
   await expect(page.getByRole('slider', {name: 'Run position'})).toBeVisible();
   await settled(page);
@@ -163,19 +168,19 @@ test('an idea is named in the monospace face in its pane title, its Steps title 
   expect(crumb.idea).not.toBe(crumb.row);
 });
 
-test('a Pause the run does not take is shown as a notice, never thrown, and a Stop keeps its button while it asks', async ({
+test('a Pause the run does not take is shown as a notice, never thrown, and Pause now keeps its button while it asks', async ({
   page,
 }) => {
   const errors: string[] = [];
   page.on('pageerror', error => errors.push(error.message));
-  await open(page, 'queue-rs-live', 1440);
-  await page.getByRole('button', {name: 'Pause'}).click();
+  await open(page, 'queue-rs-live', 1440, ['pause']);
+  await page.getByRole('button', {name: 'Pause', exact: true}).click();
   const notice = page.getByText('The run did not take the command');
   await expect(notice).toBeVisible();
   expect(errors).toEqual([]);
-  await page.getByRole('button', {name: 'Stop', exact: true}).click();
-  await expect(page.getByText('Stop this run?')).toBeVisible();
-  const stop = page.getByRole('button', {name: 'Stop', exact: true});
+  await page.getByRole('button', {name: 'Pause now', exact: true}).click();
+  await expect(page.getByText('Pause now?')).toBeVisible();
+  const stop = page.getByRole('button', {name: 'Pause now', exact: true}).first();
   await expect(stop).toBeVisible();
   await expect(stop).toHaveAttribute('aria-disabled', 'true');
   await page.getByRole('button', {name: 'Keep running'}).click();
