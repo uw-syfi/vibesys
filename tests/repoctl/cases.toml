@@ -197,3 +197,12 @@ jobs = ["proto", "python", "real_tiers"]
 native_languages = []
 native_targets = []
 pnpm_packages = []
+
+[[cases]]
+name = "host relaunch admission selects Python checks"
+paths = ["src/vibesys/api/host_relaunch.py"]
+jobs = ["python"]
+[cases.collections]
+native_languages = []
+native_targets = []
+pnpm_packages = []

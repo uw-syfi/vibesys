@@ -9,11 +9,13 @@ import {
   IntentStep,
   PostIntentRequestSchema,
   RecordSchema,
+  RelaunchRefusal,
   TailResponseSchema,
 } from '@vibesys/proto';
+import {relaunchRequest} from '@vibesys/runs/intents';
 import {FakeClock} from '@vibesys/transport/testing';
 import {waitFor} from 'xstate';
-import {intentsActor} from './index.js';
+import {intentsActor, relaunchActor} from './index.js';
 
 /** A byte-preserving bridge: tests choose when the peer answers each owned call. */
 class FakeTransport implements GatewayBridge {
@@ -181,6 +183,127 @@ test('configuration errors, malformed replies and wrong ids stay visible and ret
       await waitFor(actor, snapshot => snapshot.matches({active: 'idle'}), {timeout: 1000});
       expect(actor.getSnapshot().context.error).not.toBeNull();
       expect(actor.getSnapshot().context.entries[0]?.status).toBe('uncertain');
+    } finally {
+      actor.stop();
+    }
+  }
+});
+
+test('relaunch confirms an epoch or a typed refusal and owns every transport call', async () => {
+  for (const outcome of [
+    {case: 'epoch', value: 2n} as const,
+    {case: 'refusal', value: RelaunchRefusal.LOCKED} as const,
+    {case: 'refusal', value: RelaunchRefusal.ENDED} as const,
+    {case: 'refusal', value: RelaunchRefusal.CHECKOUT_MISSING} as const,
+    {case: 'refusal', value: RelaunchRefusal.EPOCH_CHANGED} as const,
+  ]) {
+    const bridge = new FakeTransport();
+    const clock = new FakeClock();
+    const actor = relaunchActor({
+      bridge,
+      host: 'local' as HostKey,
+      request: relaunchRequest('/project', 'run-1', 1n),
+      schedule: clock.schedule,
+    });
+    actor.start();
+    try {
+      actor.send({type: 'relaunch'});
+      actor.send({type: 'relaunch'});
+      expect(bridge.calls).toHaveLength(1);
+      const call = bridge.calls[0];
+      const sent = fromBinary(HostCallRequestSchema, call?.bytes as Uint8Array);
+      expect(sent.checkout).toBe('');
+      expect(sent.method).toMatchObject({
+        case: 'relaunch',
+        value: {runId: 'run-1', projectRoot: '/project', expectedEpoch: 1n},
+      });
+      call?.resolve(
+        toBinary(
+          HostCallResponseSchema,
+          create(HostCallResponseSchema, {
+            result: {case: 'relaunch', value: {outcome}},
+          }),
+        ),
+      );
+      await waitFor(actor, snapshot => snapshot.matches('settled'), {timeout: 1000});
+      expect(actor.getSnapshot().context.result?.outcome).toEqual(outcome);
+      actor.send({type: 'relaunch'});
+      expect(bridge.calls).toHaveLength(1);
+    } finally {
+      actor.stop();
+    }
+    expect(bridge.calls.every(call => call.cancelled)).toBe(true);
+    expect(bridge.streams).toHaveLength(0);
+  }
+});
+
+test('relaunch deadline and owner shutdown cancel the call; late replies never settle', async () => {
+  for (const mode of ['deadline', 'stop'] as const) {
+    const bridge = new FakeTransport();
+    const clock = new FakeClock();
+    const actor = relaunchActor({
+      bridge,
+      host: 'local' as HostKey,
+      request: relaunchRequest('/project', 'run-1', 1n),
+      schedule: clock.schedule,
+    });
+    actor.start();
+    actor.send({type: 'relaunch'});
+    if (mode === 'deadline') clock.advanceBy(35_000);
+    else actor.stop();
+    expect(bridge.calls[0]?.cancelled).toBe(true);
+    bridge.calls[0]?.resolve(
+      toBinary(
+        HostCallResponseSchema,
+        create(HostCallResponseSchema, {
+          result: {case: 'relaunch', value: {outcome: {case: 'epoch', value: 2n}}},
+        }),
+      ),
+    );
+    await Promise.resolve();
+    expect(actor.getSnapshot().context.result).toBeNull();
+    if (mode === 'deadline') expect(actor.getSnapshot().value).toBe('uncertain');
+    actor.stop();
+  }
+});
+
+test('relaunch rejects malformed, missing, stale and unknown outcomes as uncertain', async () => {
+  for (const bytes of [
+    new Uint8Array([255]),
+    admission(),
+    toBinary(
+      HostCallResponseSchema,
+      create(HostCallResponseSchema, {
+        result: {case: 'relaunch', value: {}},
+      }),
+    ),
+    toBinary(
+      HostCallResponseSchema,
+      create(HostCallResponseSchema, {
+        result: {case: 'relaunch', value: {outcome: {case: 'epoch', value: 1n}}},
+      }),
+    ),
+    toBinary(
+      HostCallResponseSchema,
+      create(HostCallResponseSchema, {
+        result: {case: 'relaunch', value: {outcome: {case: 'refusal', value: 99 as RelaunchRefusal}}},
+      }),
+    ),
+  ]) {
+    const bridge = new FakeTransport();
+    const clock = new FakeClock();
+    const actor = relaunchActor({
+      bridge,
+      host: 'local' as HostKey,
+      request: relaunchRequest('/project', 'run-1', 1n),
+      schedule: clock.schedule,
+    });
+    actor.start();
+    try {
+      actor.send({type: 'relaunch'});
+      bridge.calls[0]?.resolve(bytes);
+      await waitFor(actor, snapshot => snapshot.matches('uncertain'), {timeout: 1000});
+      expect(actor.getSnapshot().context.result).toBeNull();
     } finally {
       actor.stop();
     }

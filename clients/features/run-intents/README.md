@@ -37,7 +37,21 @@ publish lifecycle records without request ids, so those requests stay pending
 unless the run emits a matching IntentState. The consumer handles an outcome
 even when it arrives before the admission response.
 
-There is no safe existing update-checkout or Launch/relaunch host command to
-reuse. They are absent from HostCall rather than changing a checkout or starting
-a process under new policy. The gateway requires the configured checkout's
-synchronized `.venv/bin/vibesys`; a missing executable returns a typed diagnostic.
+Relaunch is available through the optional `relaunch` prop: `{epoch, state}`,
+where `epoch` is the observed epoch as a bigint and `state` is `parked`,
+`stopped-resumable`, or `interrupted`. The shell supplies it only for those
+reader observations and omits it for a live or permanently ended run.
+`RunIntents` mounts the Relaunch control next to the intent card and keys it
+by epoch. The separate `Relaunch` export uses the same component and actor.
+Shell composition remains owned by the Run controls work.
+
+Relaunch invokes the typed HostCall method. It displays the new epoch or the
+refusal word. A timeout or lost connection is unconfirmed and never retried
+automatically; refresh the run and inspect its timeline first. The request's
+observed epoch prevents a stale retry from silently opening another epoch.
+Tail and the existing skeleton fold supply the timeline boundary.
+
+The app has no safe checkout update operation. Update the host checkout
+before relaunching; the new epoch records its tree hash and dirty flag.
+The gateway requires the checkout's synchronized `.venv/bin/vibesys`; an
+absent executable returns the checkout-missing refusal.

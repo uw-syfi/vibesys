@@ -3,6 +3,7 @@ package server_test
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -145,5 +146,58 @@ func TestHostCallCancellationReachesRunner(t *testing.T) {
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("call did not stop")
+	}
+}
+
+func TestHostCallRelaunchDispatchesWithoutRunPolicy(t *testing.T) {
+	for _, mode := range []string{"epoch", "locked", "ended", "checkout", "wrong-method", "missing"} {
+		t.Run(mode, func(t *testing.T) {
+			request := &apiv1.HostCallRequest{Checkout: "/src/checkout", Method: &apiv1.HostCallRequest_Relaunch{Relaunch: &apiv1.RelaunchRequest{ProjectRoot: "/project", RunId: "run-1", ExpectedEpoch: 1}}}
+			runner := hostcommand.FakeRunner{Program: func(ctx context.Context, c hostcommand.Command) (hostcommand.Result, error) {
+				if strings.Join(c.Args, " ") != "host relaunch" || c.Executable != "/src/checkout/.venv/bin/vibesys" {
+					t.Fatalf("command: %+v", c)
+				}
+				decoded := &apiv1.HostCallRequest{}
+				if err := proto.Unmarshal(c.Input, decoded); err != nil || !proto.Equal(decoded, request) {
+					t.Fatalf("stdin: %v %v", decoded, err)
+				}
+				if mode == "missing" {
+					return hostcommand.Result{ExitCode: -1}, os.ErrNotExist
+				}
+				result := &apiv1.RelaunchResponse{Outcome: &apiv1.RelaunchResponse_Epoch{Epoch: 2}}
+				switch mode {
+				case "locked":
+					result.Outcome = &apiv1.RelaunchResponse_Refusal{Refusal: apiv1.RelaunchRefusal_RELAUNCH_REFUSAL_LOCKED}
+				case "ended":
+					result.Outcome = &apiv1.RelaunchResponse_Refusal{Refusal: apiv1.RelaunchRefusal_RELAUNCH_REFUSAL_ENDED}
+				case "checkout":
+					result.Outcome = &apiv1.RelaunchResponse_Refusal{Refusal: apiv1.RelaunchRefusal_RELAUNCH_REFUSAL_CHECKOUT_MISSING}
+				}
+				response := &apiv1.HostCallResponse{Result: &apiv1.HostCallResponse_Relaunch{Relaunch: result}}
+				if mode == "wrong-method" {
+					response.Result = &apiv1.HostCallResponse_PostIntent{PostIntent: &apiv1.PostIntentResponse{RequestId: "r-1"}}
+				}
+				output, err := proto.Marshal(response)
+				return hostcommand.Result{Output: output}, err
+			}}
+			f := startWithConfig(t, server.Config{HostRunner: runner})
+			response, err := client(t, f, false).HostCall(f.ctx, request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if mode == "wrong-method" {
+				if response.GetConfigurationFailed().GetCode() != "invalid_host_response" {
+					t.Fatal(response)
+				}
+			} else if response.GetRelaunch() == nil {
+				t.Fatal(response)
+			}
+			if mode == "epoch" && response.GetRelaunch().GetEpoch() != 2 {
+				t.Fatal(response)
+			}
+			if mode == "missing" && response.GetRelaunch().GetRefusal() != apiv1.RelaunchRefusal_RELAUNCH_REFUSAL_CHECKOUT_MISSING {
+				t.Fatal(response)
+			}
+		})
 	}
 }

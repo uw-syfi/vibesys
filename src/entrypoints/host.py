@@ -11,10 +11,12 @@ from typing import TYPE_CHECKING
 from vibesys.api.host import host_call
 from vibesys.api.transport import ConversionStatus, convert_run, convert_runs
 from vs_project.api import Project, ProjectError
-from vs_sim.api import OsThreads, SystemClock
+from vs_sim.api import OsProcesses, OsThreads, SystemClock
 
 if TYPE_CHECKING:
     from typing import BinaryIO
+
+    from vs_sim.api import Processes, Threads
 
 
 def run(argv: list[str], *, cwd: Path) -> tuple[int, str, str]:
@@ -48,11 +50,16 @@ def run(argv: list[str], *, cwd: Path) -> tuple[int, str, str]:
 
 
 def main(
-    argv: list[str] | None = None, *, stdin: BinaryIO | None = None, stdout: BinaryIO | None = None
+    argv: list[str] | None = None,
+    *,
+    stdin: BinaryIO | None = None,
+    stdout: BinaryIO | None = None,
+    processes: Processes | None = None,
+    threads: Threads | None = None,
 ) -> int:
     """Run one host method from the current directory."""
     arguments = sys.argv[1:] if argv is None else argv
-    if arguments[:1] == ["post-intent"]:
+    if arguments[:1] in (["post-intent"], ["relaunch"]):
         parser = argparse.ArgumentParser(
             prog="vibesys host post-intent",
             description="Read a binary HostCallRequest from stdin; write a binary HostCallResponse to stdout.",
@@ -60,7 +67,13 @@ def main(
         parser.parse_args(arguments[1:])
         source = sys.stdin.buffer if stdin is None else stdin
         destination = sys.stdout.buffer if stdout is None else stdout
-        destination.write(host_call(source.read((1 << 20) + 1)))
+        destination.write(
+            host_call(
+                source.read((1 << 20) + 1),
+                processes=OsProcesses() if processes is None else processes,
+                threads=OsThreads() if threads is None else threads,
+            )
+        )
         return 0
     code, output, error = run(arguments, cwd=Path.cwd())
     sys.stdout.write(output)
