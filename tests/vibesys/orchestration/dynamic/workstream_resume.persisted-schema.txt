@@ -168,7 +168,7 @@ InvocationId {"additionalProperties":false,"type":"object"}
 InvocationId.kind optional {"const":"invocation","default":"invocation","type":"string"}
 InvocationId.root required {"minLength":1,"pattern":"^\\S+$","type":"string"}
 InvocationRef {"additionalProperties":false,"type":"object"}
-InvocationRef.generation required {"$ref":"#/$defs/Generation"}
+InvocationRef.generation required {"minimum":0,"type":"integer"}
 InvocationRef.invocation_id required {"$ref":"#/$defs/InvocationId"}
 InvocationRef.session_id required {"$ref":"#/$defs/SessionId"}
 Measured {"additionalProperties":false,"type":"object"}
@@ -289,8 +289,9 @@ SchemaRef {"additionalProperties":false,"type":"object"}
 SchemaRef.name required {"minLength":1,"type":"string"}
 SchemaRef.version required {"minimum":1,"type":"integer"}
 Scope {"additionalProperties":false,"type":"object"}
-Scope.generation required {"$ref":"#/$defs/Generation"}
-Scope.owner required {"discriminator":{"mapping":{"attempt":"#/$defs/AttemptId","run":"#/$defs/RunId"},"propertyName":"kind"},"oneOf":[{"$ref":"#/$defs/RunId"},{"$ref":"#/$defs/AttemptId"}]}
+Scope.generation required {"minimum":0,"type":"integer"}
+Scope.owner required {"$ref":"#/$defs/ScopeOwner"}
+ScopeOwner {"discriminator":{"mapping":{"attempt":"#/$defs/AttemptId","run":"#/$defs/RunId"},"propertyName":"kind"},"oneOf":[{"$ref":"#/$defs/RunId"},{"$ref":"#/$defs/AttemptId"}]}
 Seconds {"minimum":0,"type":"number"}
 SessionId {"additionalProperties":false,"type":"object"}
 SessionId.kind optional {"const":"session","default":"session","type":"string"}
