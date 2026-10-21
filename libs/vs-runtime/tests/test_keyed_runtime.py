@@ -210,6 +210,18 @@ async def test_expired_lease_prevents_dispatch_without_calling_executor() -> Non
     shell.close(now=100)
 
 
+async def test_durable_observation_retires_an_unused_dispatch_authorization() -> None:
+    shell = start(FakeStateStore())
+    (span,) = shell.prepare(now=0, at=AT)
+    shell.observe(span.id, ReplayResult(Reply(root="known"), paid=True), now=0, at=AT)
+    executor = FakeReplayExecutor(lambda span: ReplayResult(Reply(root=span.name)))
+    with pytest.raises(ReplayCommitError, match="no current authorization"):
+        await shell.dispatch(span.id, executor, now=0)
+    assert executor.invocations == ()
+    shell.accept(span.id, now=0, at=AT)
+    shell.close(now=0)
+
+
 def test_timer_only_progress_is_durable_and_replays_its_allowance() -> None:
     async def root(ctx: ReplayFlow) -> object:
         await ctx.timer(4)

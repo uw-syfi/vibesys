@@ -11,8 +11,16 @@ from protobuf.wkt.google.protobuf.timestamp_pb import Timestamp
 from vs_runtime._replay_runtime import ReplayPending, ReplayRecoveryRequiredError, ReplayUnknown
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from vs_proto.api import Span
-    from vs_runtime._replay_runtime import ReplayExecutor, ReplayLaunch, ReplayResult, ReplayRuntime
+    from vs_runtime._replay_runtime import (
+        ReplayEnding,
+        ReplayExecutor,
+        ReplayLaunch,
+        ReplayResult,
+        ReplayRuntime,
+    )
     from vs_sim.api import SleepingClock
 
 
@@ -23,6 +31,8 @@ class ReplayRunHost:
     runtime: ReplayRuntime
     executor: ReplayExecutor
     clock: SleepingClock
+    ending: Callable[[object], ReplayEnding]
+    """Pure policy mapping from the root value to a resumable epoch ending."""
 
 
 @dataclass(frozen=True)
@@ -170,6 +180,8 @@ class _LiveEpoch:
                 if shell.paused:
                     return ReplayParked()
                 if shell.completed:
+                    now = self.host.clock.now()
+                    shell.finish(self.host.ending(shell.result), now=now, at=_at(now))
                     return ReplayCompleted(shell.result)
             completed = await self.wait()
             # Renewal precedes persistence even when a completion and heartbeat

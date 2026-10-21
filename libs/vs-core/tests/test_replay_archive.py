@@ -14,9 +14,13 @@ from scripts.generate_record_goldens import record_examples
 from vs_core.api.replay import ReplayArchive, ReplayError, ReplayScheduler, replay_descriptors
 from vs_proto.api import (
     Change,
+    Ended,
     EpochStarted,
+    Lifecycle,
+    Outcome,
     Record,
     ReplayStore,
+    Running,
     RuntimeType,
     Span,
     SpanRecord,
@@ -417,3 +421,62 @@ def test_non_policy_native_histories_never_become_replay_operations(names: list[
         assert archive.history == ()
         assert archive.unresolved == ()
     assert archive.sequence == len(names) + 1
+
+
+def closed_prefix(length: int) -> list[Record]:
+    prefix = records()[:length]
+    prefix.append(
+        Record(
+            seq=length + 1,
+            epoch=1,
+            at=Timestamp(seconds=1),
+            clock=0,
+            body=Oneof(
+                "lifecycle",
+                Lifecycle(
+                    state=Oneof(
+                        "ended",
+                        Ended(outcome=Outcome.INTERRUPTED, resumable=True, summary="Interrupted."),
+                    )
+                ),
+            ),
+        )
+    )
+    return prefix
+
+
+@pytest.mark.parametrize("length", [1, 2, 3])
+def test_ended_epoch_rejects_new_execution_facts(length: int) -> None:
+    prefix = closed_prefix(length)
+    late = records()[length]
+    late.seq += 1
+    with pytest.raises(ReplayError, match="closed epoch"):
+        decode([*prefix, late])
+
+
+def test_running_presentation_cannot_reopen_an_ended_epoch() -> None:
+    prefix = closed_prefix(4)
+    prefix.append(
+        Record(
+            seq=6,
+            epoch=1,
+            at=Timestamp(seconds=1),
+            clock=0,
+            body=Oneof("lifecycle", Lifecycle(state=Oneof("running", Running()))),
+        )
+    )
+    label = deepcopy(prefix[3])
+    label.seq = 7
+    span_record(label).change = Change.UPDATED
+    span_of(label).name = "A later presentation label"
+    archive = decode([*prefix, label])
+    assert archive.epoch_closed
+    assert len(archive.history) == 1
+
+
+@pytest.mark.parametrize("length", [2, 3])
+def test_clock_and_operation_observations_cannot_share_a_record(length: int) -> None:
+    prefix = records()[: length + 1]
+    prefix[-1].replay_clock = replay.ReplayClock(allowance=replay.ReplayAllowance(iterations=10))
+    with pytest.raises(ReplayError, match=r"policy observation|pending observation"):
+        decode(prefix)

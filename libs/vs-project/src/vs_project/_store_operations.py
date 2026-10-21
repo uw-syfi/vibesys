@@ -197,11 +197,13 @@ class StoreOperations(ABC):
 
     def __init__(
         self,
-        fault_plan: Iterable[CommitFault],
+        fault_plan: Iterable[CommitFault | None],
         lease_fault_plan: Iterable[CommitFault | None] = (),
         observation_fault_plan: Iterable[ObservationFault | None] = (),
     ) -> None:
-        self._faults = iter(tuple(CommitFault(fault) for fault in fault_plan))
+        self._faults = iter(
+            tuple(None if fault is None else CommitFault(fault) for fault in fault_plan)
+        )
         self._lease_faults = iter(
             tuple(None if fault is None else CommitFault(fault) for fault in lease_fault_plan)
         )

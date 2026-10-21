@@ -58,6 +58,7 @@ class ReplayArchive:
     clock: float = 0.0
     _policy_drift: bytes | None = field(default=None, init=False, repr=False)
     _observed: str | None = field(default=None, init=False, repr=False)
+    _epoch_closed: bool = field(default=False, init=False, repr=False)
 
     @classmethod
     def decode(cls, payload: bytes) -> ReplayArchive:
@@ -91,6 +92,7 @@ class ReplayArchive:
         result.clock = self.clock
         result._policy_drift = self._policy_drift
         result._observed = self._observed
+        result._epoch_closed = self._epoch_closed
         return result
 
     @property
@@ -100,6 +102,11 @@ class ReplayArchive:
     @property
     def epoch(self) -> int:
         return len(self._epochs)
+
+    @property
+    def epoch_closed(self) -> bool:
+        """An ended or parked epoch stays closed until a new epoch header opens it."""
+        return self._epoch_closed
 
     @property
     def current_epoch(self) -> EpochStarted:
@@ -182,8 +189,16 @@ class ReplayArchive:
         ):
             problem = "accept the pending observation before advancing the replay clock"
             raise ReplayError(problem)
+        history_length = len(self._history)
         self._body(record)
         if record.replay_clock is not None:
+            if (
+                self._epoch_closed
+                or self._observed is not None
+                or len(self._history) != history_length
+            ):
+                problem = "one open-epoch policy observation is allowed per record"
+                raise ReplayError(problem)
             self._history.append(AcceptedClock.from_record(record))
         self._records.append(record.to_binary())
         self._frames.append(ReplayStore(records=[record]).to_binary())
@@ -203,7 +218,10 @@ class ReplayArchive:
                     self._span(record, body.change, body.span)
             case Oneof("notice", notice):
                 self._notice(notice.detail)
-            case Oneof("lifecycle" | "metric" | "stream" | "blob" | "intent" | "chat", _):
+            case Oneof("lifecycle", lifecycle):
+                if lifecycle.state is not None and lifecycle.state.field in {"parked", "ended"}:
+                    self._epoch_closed = True
+            case Oneof("metric" | "stream" | "blob" | "intent" | "chat", _):
                 pass
             case _:
                 problem = "unsupported record in keyed replay archive"
@@ -260,6 +278,7 @@ class ReplayArchive:
         self.acknowledgements = resumed
         self._epochs.append(epoch.to_binary())
         self._policy_drift = None
+        self._epoch_closed = False
 
     def _amend_epoch(self, epoch: EpochStarted) -> None:
         previous = self.current_epoch
@@ -296,6 +315,7 @@ class ReplayArchive:
     def _span(self, record: Record, change: Change, span: Span) -> None:
         operation = span.replay
         previous_bytes = self._spans.get(span.id)
+        self._check_epoch_open(previous_bytes)
         if operation is None:
             problem = "keyed span requires replay metadata"
             raise ReplayError(problem)
@@ -353,6 +373,13 @@ class ReplayArchive:
             problem = "an unanswered replay start can end only with confirmed withdrawal"
             raise ReplayError(problem)
         self._index_span(span)
+
+    def _check_epoch_open(self, previous_bytes: bytes | None) -> None:
+        if self._epoch_closed and (
+            previous_bytes is None or not Span.from_binary(previous_bytes).has_field("ended_at")
+        ):
+            problem = "a closed epoch cannot start or accept replay work"
+            raise ReplayError(problem)
 
     def _index_span(self, span: Span) -> None:
         self._spans[span.id] = span.to_binary()

@@ -101,7 +101,7 @@ class FakeStateStore(StoreOperations):
     def __init__(
         self,
         *,
-        fault_plan: Iterable[CommitFault] = (),
+        fault_plan: Iterable[CommitFault | None] = (),
         lease_fault_plan: Iterable[CommitFault | None] = (),
         observation_fault_plan: Iterable[ObservationFault | None] = (),
     ) -> None:
@@ -209,7 +209,7 @@ class LocalStateStore(StoreOperations):
         project: Project,
         run_id: str,
         *,
-        fault_plan: Iterable[CommitFault] = (),
+        fault_plan: Iterable[CommitFault | None] = (),
         lease_fault_plan: Iterable[CommitFault | None] = (),
         observation_fault_plan: Iterable[ObservationFault | None] = (),
         effects: StoreDurabilityEffects | None = None,

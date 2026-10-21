@@ -42,7 +42,7 @@ if TYPE_CHECKING:
             self,
             root: Path,
             /,
-            faults: tuple[CommitFault, ...] = (),
+            faults: tuple[CommitFault | None, ...] = (),
             *,
             lease_faults: tuple[CommitFault | None, ...] = (),
             observation_faults: tuple[ObservationFault | None, ...] = (),
@@ -51,7 +51,7 @@ if TYPE_CHECKING:
 
 def _fake(
     _root: Path,
-    faults: tuple[CommitFault, ...] = (),
+    faults: tuple[CommitFault | None, ...] = (),
     *,
     lease_faults: tuple[CommitFault | None, ...] = (),
     observation_faults: tuple[ObservationFault | None, ...] = (),
@@ -65,7 +65,7 @@ def _fake(
 
 def _local(
     root: Path,
-    faults: tuple[CommitFault, ...] = (),
+    faults: tuple[CommitFault | None, ...] = (),
     *,
     lease_faults: tuple[CommitFault | None, ...] = (),
     observation_faults: tuple[ObservationFault | None, ...] = (),
@@ -171,6 +171,24 @@ def test_conflict_does_not_consume_fault_plan(make_store: StoreFactory, tmp_path
     assert isinstance(store.commit(1, _envelope(2), fence, now=1), Conflict)
     assert store.commit(None, _envelope(0), fence, now=2) == Unknown(revision=0)
     assert store.load() == _envelope(0)
+
+
+@given(successful=st.integers(min_value=0, max_value=8))
+def test_fault_plan_can_select_a_later_commit(make_store: StoreFactory, successful: int) -> None:
+    with TemporaryDirectory() as directory:
+        store = make_store(Path(directory), (None,) * successful + (CommitFault.UNKNOWN_AFTER,))
+        fence = store.acquire("host-a", now=0, duration=10)
+        assert fence is not None
+        revision = None
+        for index in range(successful + 1):
+            candidate = _envelope(index)
+            outcome = store.commit(revision, candidate, fence, now=1)
+            expected = (
+                Unknown(revision=index) if index == successful else Committed(record=candidate)
+            )
+            assert outcome == expected
+            assert store.load() == candidate
+            revision = index
 
 
 def test_fence_renewal_expiry_and_takeover(make_store: StoreFactory, tmp_path: Path) -> None:

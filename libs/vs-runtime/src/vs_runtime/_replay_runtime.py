@@ -22,10 +22,12 @@ from vs_core.api.replay import (
 from vs_project.api import Committed, StateStore, StoredEnvelope, StoreFence
 from vs_proto.api import (
     Change,
+    Ended,
     EpochStarted,
     Lifecycle,
     Notice,
     NoticeCode,
+    Outcome,
     Parked,
     Record,
     RuntimeType,
@@ -98,6 +100,14 @@ class ReplayUnknown:
     """The owner cannot prove completion or absence. Blind redispatch is forbidden."""
 
     reason: str
+
+
+@dataclass(frozen=True)
+class ReplayEnding:
+    """An explicit native epoch result plus the typed proof for its optional detail."""
+
+    state: Ended
+    detail: Message | None = None
 
 
 class ReplayExecutor(Protocol):
@@ -214,6 +224,25 @@ class ReplayRuntime:
         ):
             problem = "Resume launch already recorded; inspect its epoch instead of relaunching"
             raise ReplayCommitError(problem)
+        if epochs and not self._archive.epoch_closed:
+            self._append(
+                Oneof(
+                    "lifecycle",
+                    Lifecycle(
+                        state=Oneof(
+                            "ended",
+                            Ended(
+                                outcome=Outcome.INTERRUPTED,
+                                summary="The epoch writer was interrupted. External work is retained for inspection.",
+                                resumable=True,
+                                interruption_reason="writer_restarted",
+                            ),
+                        )
+                    ),
+                ),
+                now=now,
+                at=at,
+            )
         acks = self._archive.acknowledgements.resume(launch.request_id)
         epoch = deepcopy(launch.header)
         epoch.epoch = len(epochs) + 1
@@ -289,34 +318,13 @@ class ReplayRuntime:
         if self._archive.pending_observation is not None:
             problem = "accept the pending observation before preparing more work"
             raise ReplayError(problem)
-        self._record_schemas(scheduler.schema_types, now=now, at=at)
-        self._record_drift(now=now, at=at)
-        notice = scheduler.frontier().notice()
-        if notice is not None:
-            if notice.to_binary() not in self._archive.acknowledgements.notices:
-                self._append(
-                    Oneof(
-                        "notice",
-                        Notice(
-                            severity=Severity.WARNING,
-                            code=NoticeCode.FRAMEWORK_WARNING,
-                            message="Earlier paid results are retained but this version did not use them. Resume to continue with new work.",
-                            detail=Any(type_url=notice.desc().type_name, value=notice.to_binary()),
-                        ),
-                    ),
-                    now=now,
-                    at=at,
-                )
-            self._append(
-                Oneof("lifecycle", Lifecycle(state=Oneof("parked", Parked()))), now=now, at=at
-            )
-            self._paused = True
-            return ()
-        unresolved = tuple(
-            span for span in self._archive.unresolved if span.id not in self._known_starts
-        )
+        unresolved = self.recovery
         if unresolved:
             raise ReplayRecoveryRequiredError(unresolved)
+        self._record_schemas(scheduler.schema_types, now=now, at=at)
+        self._record_drift(now=now, at=at)
+        if self._disclose_unused(now=now, at=at):
+            return ()
         started = []
         for operation in scheduler.dispatches():
             key = operation.key
@@ -342,6 +350,32 @@ class ReplayRuntime:
             self._prepared_occurrences.add(occurrence)
             started.append(deepcopy(span))
         return tuple(started)
+
+    def _disclose_unused(self, *, now: float, at: Timestamp) -> bool:
+        notice = self.frontier.notice()
+        if notice is not None:
+            if self._archive.unresolved:
+                raise ReplayRecoveryRequiredError(self._archive.unresolved)
+            if notice.to_binary() not in self._archive.acknowledgements.notices:
+                self._append(
+                    Oneof(
+                        "notice",
+                        Notice(
+                            severity=Severity.WARNING,
+                            code=NoticeCode.FRAMEWORK_WARNING,
+                            message="Earlier paid results are retained but this version did not use them. Resume to continue with new work.",
+                            detail=Any(type_url=notice.desc().type_name, value=notice.to_binary()),
+                        ),
+                    ),
+                    now=now,
+                    at=at,
+                )
+            self._append(
+                Oneof("lifecycle", Lifecycle(state=Oneof("parked", Parked()))), now=now, at=at
+            )
+            self._paused = True
+            return True
+        return False
 
     def _record_schemas(
         self, messages: tuple[type[Message], ...], *, now: float, at: Timestamp
@@ -435,6 +469,7 @@ class ReplayRuntime:
         self._append(
             Oneof("span", SpanRecord(change=Change.UPDATED, span=span)), now=now, at=at, clock=clock
         )
+        self._dispatchable.discard(span_id)
 
     def accept(self, span_id: str, *, now: float, at: Timestamp) -> None:
         """Commit acceptance, then release precisely that outcome to the scheduler."""
@@ -565,6 +600,38 @@ class ReplayRuntime:
             problem = f"span is not a keyed operation: {span_id}"
             raise ReplayError(problem)
         return span
+
+    def finish(self, ending: ReplayEnding, *, now: float, at: Timestamp) -> None:
+        """Retain a completed epoch's explicit policy result; every replay run stays resumable."""
+        scheduler = self._active_scheduler
+        state = deepcopy(ending.state)
+        if ending.detail is not None:
+            validate(ending.detail)
+            packed = Any(type_url=ending.detail.desc().type_name, value=ending.detail.to_binary())
+            if state.detail is not None and state.detail != packed:
+                problem = "ending detail contradicts its typed value"
+                raise ReplayError(problem)
+            state.detail = packed
+        elif state.detail is not None:
+            problem = "ending detail requires its typed value"
+            raise ReplayError(problem)
+        validate(state)
+        if not state.resumable:
+            problem = "replay epochs must remain resumable"
+            raise ReplayError(problem)
+        if (
+            not scheduler.completed
+            or scheduler.frontier().unused
+            or self._archive.unresolved
+            or self._archive.epoch_closed
+        ):
+            problem = "an epoch can finish only after replay, disclosure and owned work settle"
+            raise ReplayError(problem)
+        self._record_schemas(scheduler.schema_types, now=now, at=at)
+        self._record_drift(now=now, at=at)
+        if ending.detail is not None:
+            self._record_schemas((type(ending.detail),), now=now, at=at)
+        self._append(Oneof("lifecycle", Lifecycle(state=Oneof("ended", state))), now=now, at=at)
 
     def clock_requests(self) -> tuple[float, ...]:
         """Pending flow deadlines, released only through durable clock observations."""

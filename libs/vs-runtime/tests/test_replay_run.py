@@ -1,18 +1,42 @@
 """The live driver owns concurrency; only serial durable outcomes reach flow code."""
 
 from collections.abc import Callable, Coroutine
+from dataclasses import replace
 
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
+from protobuf import Oneof
 from protobuf.wkt.google.protobuf.timestamp_pb import Timestamp
+from protobuf.wkt.google.protobuf.wrappers_pb import StringValue
 
-from vs_core.api.replay import AcceptedReplay, ReplayCall, ReplayFlow, ReplaySource, SemanticKey
-from vs_project.api import FakeStateStore
-from vs_proto.api import EpochStarted, Span, SpanStatus, core_common, replay
+from vs_core.api.replay import (
+    AcceptedReplay,
+    ReplayArchive,
+    ReplayCall,
+    ReplayFlow,
+    ReplaySource,
+    SemanticKey,
+)
+from vs_project.api import CommitFault, FakeStateStore, StoredEnvelope
+from vs_proto.api import (
+    Ended,
+    EpochStarted,
+    Outcome,
+    Record,
+    ReplayStore,
+    RunFailure,
+    RunFailureKind,
+    Span,
+    SpanStatus,
+    core_common,
+    replay,
+)
 from vs_runtime.api.replay import (
     FakeReplayExecutor,
+    ReplayCommitError,
     ReplayCompleted,
+    ReplayEnding,
     ReplayLaunch,
     ReplayParked,
     ReplayRecoveryRequiredError,
@@ -21,7 +45,7 @@ from vs_runtime.api.replay import (
     ReplayRuntime,
     drive_replay,
 )
-from vs_sim.api.testing import Sim
+from vs_sim.api.testing import Sim, swept
 
 Reply = core_common.Identity
 Root = Callable[[ReplayFlow], Coroutine[object, object, object]]
@@ -47,7 +71,12 @@ def host(
     store: FakeStateStore, root: Root, executor: FakeReplayExecutor, sim: Sim
 ) -> ReplayRunHost:
     return ReplayRunHost(
-        ReplayRuntime(store, root, replay.ReplayAllowance(iterations=10)), executor, sim.clock
+        ReplayRuntime(store, root, replay.ReplayAllowance(iterations=10)),
+        executor,
+        sim.clock,
+        lambda _: ReplayEnding(
+            Ended(outcome=Outcome.FINISHED, summary="The root completed.", resumable=True)
+        ),
     )
 
 
@@ -288,3 +317,175 @@ async def test_recovered_paid_result_is_disclosed_before_an_edited_frontier(sim:
         ReplayCompleted("edited")
     )
     assert len(executor.invocations) == 2
+
+
+@pytest.mark.parametrize(
+    "outcome", [Outcome.FINISHED, Outcome.FAILED, Outcome.STOPPED, Outcome.INTERRUPTED]
+)
+async def test_every_recorded_epoch_end_resumes_without_repeating_paid_work(
+    sim: Sim, outcome: Outcome
+) -> None:
+    async def root(ctx: ReplayFlow) -> object:
+        return (await call(ctx, "work")).root
+
+    def ending(value: object) -> ReplayEnding:
+        return ReplayEnding(
+            Ended(
+                outcome=outcome,
+                summary="The epoch ended.",
+                resumable=True,
+                failure=RunFailure(kind=RunFailureKind.NO_RESULT, reason="declared result")
+                if outcome == Outcome.FAILED
+                else None,
+            ),
+            StringValue(value=str(value)),
+        )
+
+    store = FakeStateStore()
+    executor = FakeReplayExecutor(lambda span: ReplayResult(Reply(root=span.name), paid=True))
+    first = replace(host(store, root, executor, sim), ending=ending)
+    assert await drive_replay(first, launch("first")) == ReplayCompleted("work")
+    assert first.runtime.archive.epoch_closed
+    before = ReplayStore.from_binary(first.runtime.archive.encode()).records
+    resumed = replace(host(store, root, executor, sim), ending=ending)
+    assert await drive_replay(resumed, launch("resume")) == ReplayCompleted("work")
+    after = ReplayStore.from_binary(resumed.runtime.archive.encode()).records
+    assert after[: len(before)] == before
+    ends = [end for _, end in epoch_endings(after)]
+    assert [end.outcome for end in ends] == [outcome, outcome]
+    assert all(end.resumable for end in ends)
+    assert len(executor.invocations) == 1
+    assert resumed.runtime.archive.epoch == 2
+    assert resumed.runtime.archive.epoch_closed
+    for epoch in resumed.runtime.archive.epochs:
+        assert epoch.descriptors is not None
+        assert StringValue.desc().file.name in {file.name for file in epoch.descriptors.file}
+    for end in ends:
+        assert end.detail is not None
+        assert StringValue.from_binary(end.detail.value).value == "work"
+
+
+async def test_resume_closes_an_interrupted_predecessor_without_claiming_external_termination(
+    sim: Sim,
+) -> None:
+    async def root(ctx: ReplayFlow) -> object:
+        return await call(ctx, "work")
+
+    store = FakeStateStore()
+    executor = FakeReplayExecutor(lambda span: ReplayResult(Reply(root=span.name), paid=True))
+    interrupted = host(store, root, executor, sim)
+    interrupted.runtime.start(launch("first"), now=0, at=Timestamp())
+    interrupted.runtime.prepare(now=0, at=Timestamp())
+    interrupted.runtime.close(now=0)
+    resumed = host(store, root, executor, sim)
+    await drive_replay(resumed, launch("resume"))
+    records = ReplayStore.from_binary(resumed.runtime.archive.encode()).records
+    ends = epoch_endings(records)
+    assert ends[0][0] == 1
+    assert ends[0][1].outcome == Outcome.INTERRUPTED
+    assert ends[0][1].resumable
+    assert ends[1][0] == 2
+    assert ends[1][1].outcome == Outcome.FINISHED
+
+
+def epoch_endings(records: list[Record]) -> list[tuple[int, Ended]]:
+    ends = []
+    for record in records:
+        match record.body:
+            case Oneof("lifecycle", lifecycle):
+                match lifecycle.state:
+                    case Oneof("ended", ended):
+                        ends.append((record.epoch, ended))
+    return ends
+
+
+def retained(store: FakeStateStore) -> ReplayStore:
+    envelope = store.load()
+    assert isinstance(envelope, StoredEnvelope)
+    return ReplayStore.from_binary(envelope.payload)
+
+
+@pytest.mark.parametrize("fault", list(CommitFault))
+async def test_live_commit_crash_sweep_retains_exactly_one_logical_result(
+    sim: Sim, fault: CommitFault
+) -> None:
+    async def root(ctx: ReplayFlow) -> object:
+        return tuple([(await call(ctx, key)).root for key in ("a", "b", "c")])
+
+    def executor() -> FakeReplayExecutor:
+        return FakeReplayExecutor(lambda span: ReplayResult(Reply(root=span.name), paid=True))
+
+    baseline = FakeStateStore()
+    assert await drive_replay(host(baseline, root, executor(), sim), launch("baseline")) == (
+        ReplayCompleted(("a", "b", "c"))
+    )
+    for boundary in swept(len(retained(baseline).records), sample=3):
+        store = FakeStateStore(fault_plan=(None,) * boundary + (fault,))
+        owner = executor()
+        with pytest.raises((ReplayCommitError, OSError)):
+            await drive_replay(host(store, root, owner, sim), launch("first"))
+        assert await drive_replay(host(store, root, owner, sim), launch("recovery")) == (
+            ReplayCompleted(("a", "b", "c"))
+        )
+        archive = ReplayArchive.decode(retained(store).to_binary())
+        assert len(archive.history) == len(owner.invocations) == 3
+        assert len({value.sequence for value in archive.history}) == 3
+
+
+@pytest.mark.parametrize("fault", list(CommitFault))
+async def test_notice_and_ack_commit_crash_sweep_never_spends_before_disclosure(
+    sim: Sim, fault: CommitFault
+) -> None:
+    async def original(ctx: ReplayFlow) -> object:
+        return (await call(ctx, "original")).root
+
+    async def edited(ctx: ReplayFlow) -> object:
+        return (await call(ctx, "edited")).root
+
+    def executor() -> FakeReplayExecutor:
+        return FakeReplayExecutor(lambda span: ReplayResult(Reply(root=span.name), paid=True))
+
+    baseline = FakeStateStore()
+    owner = executor()
+    await drive_replay(host(baseline, original, owner, sim), launch("original"))
+    original_length = len(retained(baseline).records)
+    assert (
+        await drive_replay(host(baseline, edited, owner, sim), launch("notice")) == ReplayParked()
+    )
+    await drive_replay(host(baseline, edited, owner, sim), launch("ack"))
+    count = len(retained(baseline).records) - original_length
+    for offset in swept(count, sample=3):
+        boundary = original_length + offset
+        store = FakeStateStore(fault_plan=(None,) * boundary + (fault,))
+        owner = executor()
+        await drive_replay(host(store, original, owner, sim), launch("original"))
+        completed = False
+        for attempt in range(4):
+            try:
+                result = await drive_replay(
+                    host(store, edited, owner, sim), launch(f"edited-{attempt}")
+                )
+            except (ReplayCommitError, OSError):
+                continue
+            if result == ReplayCompleted("edited"):
+                completed = True
+                break
+            assert result == ReplayParked()
+            assert len(owner.invocations) == 1
+        assert completed
+        assert len(owner.invocations) == 2
+        records = retained(store).records
+        notice = next(
+            record.seq
+            for record in records
+            if record.body and record.body.field == "notice" and record.body.value.detail
+        )
+        edited_start = next(
+            record.seq
+            for record in records
+            if record.body
+            and record.body.field == "span"
+            and record.body.value.span is not None
+            and record.body.value.span.name == "edited"
+        )
+        assert notice < edited_start
