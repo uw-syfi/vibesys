@@ -24,6 +24,8 @@ from vs_runlog.api import (
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
+    from vs_sim.api import SleepingClock, Threads
+
 
 class RunLogConversionError(ValueError):
     """A journal or destination cannot be safely converted."""
@@ -107,7 +109,9 @@ def _has_checkpoint(directory: Path, sequence: int) -> bool:
     return head.committed_seq == sequence
 
 
-def convert_run(project: Project, run_id: str) -> ConversionResult:
+def convert_run(
+    project: Project, run_id: str, *, clock: SleepingClock, threads: Threads
+) -> ConversionResult:
     """Convert one stopped project run; leave its journal and core store untouched.
 
     Core envelopes remain the resume authority until phase 3 introduces state.pb.
@@ -115,7 +119,7 @@ def convert_run(project: Project, run_id: str) -> ConversionResult:
     """
     directory = project.log_directory_for(project.root, run_id)
     try:
-        result = _convert_directory(directory, run_id)
+        result = _convert_directory(directory, run_id, clock=clock, threads=threads)
     except _UnsupportedJournalError as exc:
         return ConversionResult(ConversionStatus.SKIPPED, str(exc))
     if result.status in {ConversionStatus.CONVERTED, ConversionStatus.EXISTS}:
@@ -127,7 +131,9 @@ def convert_run(project: Project, run_id: str) -> ConversionResult:
     return result
 
 
-def _convert_directory(directory: Path, run_id: str) -> ConversionResult:
+def _convert_directory(
+    directory: Path, run_id: str, *, clock: SleepingClock, threads: Threads
+) -> ConversionResult:
     """Atomically convert a quiescent run with trace events, preserving the JSONL source.
 
     Callers stop the run before converting. A complete destination is left byte
@@ -138,7 +144,7 @@ def _convert_directory(directory: Path, run_id: str) -> ConversionResult:
     if sequence := _complete_sequence(destination):
         if _has_checkpoint(directory, sequence):
             return ConversionResult(ConversionStatus.EXISTS, "already converted")
-        with FileRunLogWriter(destination):
+        with FileRunLogWriter(destination, clock=clock, threads=threads):
             pass
         return ConversionResult(ConversionStatus.CONVERTED, "repaired run.head and keyframes")
     journal = directory / "core-events.jsonl"
@@ -161,7 +167,7 @@ def _convert_directory(directory: Path, run_id: str) -> ConversionResult:
     with TemporaryDirectory(prefix=".convert-run-", dir=destination.parent) as temporary:
         staged = Path(temporary) / "run.log"
         content = FileRunContent(directory / "blobs", directory / "streams")
-        writer = FileRunLogWriter(staged)
+        writer = FileRunLogWriter(staged, clock=clock, threads=threads)
         with RunLogTee(writer, content, run_id) as tee:
             for line, _ in _events(journal):
                 tee.append(line)
@@ -178,9 +184,11 @@ class RunConversion:
     result: ConversionResult
 
 
-def _attempt(directory: Path, run_id: str) -> ConversionResult:
+def _attempt(
+    directory: Path, run_id: str, *, clock: SleepingClock, threads: Threads
+) -> ConversionResult:
     try:
-        return _convert_directory(directory, run_id)
+        return _convert_directory(directory, run_id, clock=clock, threads=threads)
     except _UnsupportedJournalError as exc:
         return ConversionResult(ConversionStatus.SKIPPED, str(exc))
     except (OSError, ValueError, TypeError, ProjectError) as exc:
@@ -202,7 +210,9 @@ def _indexed_target(entry: Path) -> Path | ConversionResult:
         return target
 
 
-def convert_runs(project: Project) -> tuple[RunConversion, ...]:
+def convert_runs(
+    project: Project, *, clock: SleepingClock, threads: Threads
+) -> tuple[RunConversion, ...]:
     """Convert stopped project runs and every host index entry, once per target.
 
     Originals are never deleted, including after the seven-day retention window.
@@ -217,7 +227,7 @@ def convert_runs(project: Project) -> tuple[RunConversion, ...]:
         directory = project.log_directory_for(project.root, run_id)
         seen.add(directory.resolve())
         try:
-            result = convert_run(project, run_id)
+            result = convert_run(project, run_id, clock=clock, threads=threads)
         except (OSError, ValueError, TypeError, ProjectError) as exc:
             result = ConversionResult(ConversionStatus.FAILED, str(exc))
         if (
@@ -239,7 +249,7 @@ def convert_runs(project: Project) -> tuple[RunConversion, ...]:
                 ConversionStatus.SKIPPED, "already processed this index target"
             )
         else:
-            result = _attempt(target, entry.name)
+            result = _attempt(target, entry.name, clock=clock, threads=threads)
             seen.add(target)
         if result.status is ConversionStatus.EXISTS:
             result = ConversionResult(ConversionStatus.SKIPPED, result.reason)

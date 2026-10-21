@@ -13,6 +13,7 @@ from vibesys.events import CoreEvent, CoreEventType, RunStartedData, SpanStarted
 from vs_core.api import Span, SpanStatus, SpanType
 from vs_project.api import Project
 from vs_proto.api import Keyframe, RunHead
+from vs_sim.api.testing import ManualClock, SimThreads
 
 
 def fixtures(project: Project) -> dict[str, bytes]:
@@ -57,7 +58,7 @@ def fixtures(project: Project) -> dict[str, bytes]:
         for i, (kind, data, text) in enumerate(bodies, 1)
     )
     project.event_journal_path_for(project.root, run_id).write_bytes(journal)
-    convert_run(project, run_id)
+    convert_run(project, run_id, clock=ManualClock(), threads=SimThreads())
     head = RunHead.from_binary((directory / "run.head").read_bytes())
     head.clear_field("process")
     expected = (directory / "keyframes" / f"{head.committed_seq}.pb").read_bytes()

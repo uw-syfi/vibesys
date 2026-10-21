@@ -27,6 +27,7 @@ from vs_runlog.api import (
     RunLogStopReason,
     encode_frame,
 )
+from vs_sim.api.testing import ManualClock, SimThreads
 
 _TEXT = st.text(alphabet=st.characters(exclude_categories=("Cs",)), max_size=256)
 
@@ -44,14 +45,14 @@ def test_round_trip(texts: list[str]) -> None:
     expected = records(texts)
     with TemporaryDirectory() as directory:
         path = Path(directory) / "run.log"
-        with FileRunLogWriter(path) as writer:
+        with FileRunLogWriter(path, clock=ManualClock(), threads=SimThreads()) as writer:
             for record in expected:
                 writer.append(record)
         with path.open("rb") as stream:
             reader = RunLogReader(stream)
             assert list(reader) == expected
             assert reader.stop.reason is RunLogStopReason.END
-        with FileRunLogWriter(path) as reopened:
+        with FileRunLogWriter(path, clock=ManualClock(), threads=SimThreads()) as reopened:
             assert reopened.sequence == len(expected)
 
 
@@ -102,7 +103,7 @@ def test_shared_fixtures_regenerate_identically() -> None:
 
 def test_cap_and_sequence_errors_leave_log_unchanged(tmp_path: Path) -> None:
     path = tmp_path / "run.log"
-    with FileRunLogWriter(path) as writer:
+    with FileRunLogWriter(path, clock=ManualClock(), threads=SimThreads()) as writer:
         with pytest.raises(ValueError, match="seq"):
             writer.append(records(["a", "b"])[1])
         with pytest.raises(ValueError, match="exceeds"):
@@ -115,7 +116,7 @@ def test_resume_offset_and_recover_torn_tail(tmp_path: Path) -> None:
     boundary = len(RUN_LOG_MAGIC + encode_frame(first))
     path = tmp_path / "run.log"
     path.write_bytes(RUN_LOG_MAGIC + encode_frame(first) + encode_frame(second)[:-1])
-    with FileRunLogWriter(path) as writer:
+    with FileRunLogWriter(path, clock=ManualClock(), threads=SimThreads()) as writer:
         assert path.stat().st_size == boundary
         writer.append(second)
     with path.open("rb") as stream:
@@ -127,7 +128,7 @@ def test_corruption_is_never_repaired(tmp_path: Path, contents: bytes) -> None:
     path = tmp_path / "run.log"
     path.write_bytes(contents)
     with pytest.raises(ValueError, match="corrupt"):
-        FileRunLogWriter(path)
+        FileRunLogWriter(path, clock=ManualClock(), threads=SimThreads())
     assert path.read_bytes() == contents
 
 
@@ -168,7 +169,7 @@ def _record_values(draw: st.DrawFn) -> Record:
 def test_both_record_kinds_round_trip_with_arbitrary_fields(expected: list[Record]) -> None:
     with TemporaryDirectory() as directory:
         path = Path(directory) / "run.log"
-        with FileRunLogWriter(path) as writer:
+        with FileRunLogWriter(path, clock=ManualClock(), threads=SimThreads()) as writer:
             for sequence, record in enumerate(expected, 1):
                 record.seq = sequence
                 writer.append(record)
@@ -183,7 +184,9 @@ def test_writer_accepts_exact_cap_and_rejects_one_byte_over(tmp_path: Path) -> N
         "legacy_event", LegacyEvent(json="x" * (RUN_LOG_MAX_RECORD_BYTES - overflow))
     )
     assert len(record.to_binary()) == RUN_LOG_MAX_RECORD_BYTES
-    with FileRunLogWriter(tmp_path / "run.log") as writer:
+    with FileRunLogWriter(
+        tmp_path / "run.log", clock=ManualClock(), threads=SimThreads()
+    ) as writer:
         writer.append(record)
         record.seq = 2
         record.body.value.json += "x"
@@ -193,7 +196,7 @@ def test_writer_accepts_exact_cap_and_rejects_one_byte_over(tmp_path: Path) -> N
 
 
 def test_closed_writer_cannot_append_and_close_is_idempotent(tmp_path: Path) -> None:
-    writer = FileRunLogWriter(tmp_path / "run.log")
+    writer = FileRunLogWriter(tmp_path / "run.log", clock=ManualClock(), threads=SimThreads())
     writer.close()
     writer.close()
     with pytest.raises(ValueError, match="closed"):
@@ -217,7 +220,7 @@ def test_recovery_at_any_truncation_preserves_committed_prefix(
     with TemporaryDirectory() as directory:
         path = Path(directory) / "run.log"
         path.write_bytes(prefix)
-        with FileRunLogWriter(path) as writer:
+        with FileRunLogWriter(path, clock=ManualClock(), threads=SimThreads()) as writer:
             writer.append(next_record)
         with path.open("rb") as stream:
             recovered = RunLogReader(stream)

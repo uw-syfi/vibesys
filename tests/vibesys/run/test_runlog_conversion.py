@@ -17,11 +17,18 @@ from vibesys.api.transport import ConversionStatus, convert_run, convert_runs
 from vibesys.events import AgentOutputChunkData, CoreEventType, RunStartedData, SpanStartedData
 from vibesys.records.api import MappingState, map_event
 from vibesys.run import EventJournal
+from vibesys.run.runlog_tee import RunLogTee
 from vs_core.api import ENVELOPE_SCHEMA_VERSION, FlowState, RunEnvelope, Span, SpanStatus, SpanType
 from vs_core.api.testing import FAKE_REGISTRY
 from vs_project.api import Project, StoredEnvelope
 from vs_proto.api import RUN_LOG_MAGIC, EpochStarted, Keyframe, LegacyEvent, Oneof, Record, RunHead
-from vs_runlog.api import FileRunLogWriter, RunLogReader, encode_frame, fold_skeleton
+from vs_runlog.api import (
+    FileRunContent,
+    FileRunLogWriter,
+    RunLogReader,
+    encode_frame,
+    fold_skeleton,
+)
 from vs_sim.api.testing import ManualClock, SimThreads
 
 
@@ -69,7 +76,10 @@ def test_conversion_preserves_source_and_timestamps_and_is_idempotent(
     journal.emit(CoreEventType.RUN_FINISHED, "finish")
     source = Project.event_journal_path_for(project.root, "run-1")
     original = source.read_bytes()
-    assert convert_run(project, "run-1").status is ConversionStatus.CONVERTED
+    assert (
+        convert_run(project, "run-1", clock=ManualClock(), threads=SimThreads()).status
+        is ConversionStatus.CONVERTED
+    )
     destination = Project.run_log_path_for(project.root, "run-1")
     converted = destination.read_bytes()
     head = RunHead.from_binary((destination.parent / "run.head").read_bytes())
@@ -92,7 +102,10 @@ def test_conversion_preserves_source_and_timestamps_and_is_idempotent(
         "span",
         "lifecycle",
     ]
-    assert convert_run(project, "run-1").status is ConversionStatus.EXISTS
+    assert (
+        convert_run(project, "run-1", clock=ManualClock(), threads=SimThreads()).status
+        is ConversionStatus.EXISTS
+    )
     assert destination.read_bytes() == converted
     assert source.read_bytes() == original
     assert sorted(path.name for path in destination.parent.iterdir()) == [
@@ -114,7 +127,7 @@ def test_empty_and_pretrace_journals_are_skipped(
         journal.emit(CoreEventType.RUN_STARTED)
     else:
         Project.event_journal_path_for(project.root, "run-1").touch()
-    result = convert_run(project, "run-1")
+    result = convert_run(project, "run-1", clock=ManualClock(), threads=SimThreads())
     assert result.status is ConversionStatus.SKIPPED
     assert ("predates" if with_old_event else "no events") in result.reason
     assert not Project.run_log_path_for(project.root, "run-1").exists()
@@ -133,10 +146,13 @@ def test_conversion_replaces_torn_destination_only_after_success(
     with source.open("ab") as stream:
         stream.write(b"{malformed}")
     with pytest.raises(ValueError, match="journal event"):
-        convert_run(project, "run-1")
+        convert_run(project, "run-1", clock=ManualClock(), threads=SimThreads())
     assert destination.read_bytes() == torn
     source.write_bytes(original)
-    assert convert_run(project, "run-1").status is ConversionStatus.CONVERTED
+    assert (
+        convert_run(project, "run-1", clock=ManualClock(), threads=SimThreads()).status
+        is ConversionStatus.CONVERTED
+    )
 
 
 def test_corrupt_destination_is_reported_without_overwriting_it(
@@ -147,7 +163,7 @@ def test_corrupt_destination_is_reported_without_overwriting_it(
     destination = Project.run_log_path_for(project.root, "run-1")
     destination.write_bytes(b"BADMAGIC")
     with pytest.raises(ValueError, match="byte 0"):
-        convert_run(project, "run-1")
+        convert_run(project, "run-1", clock=ManualClock(), threads=SimThreads())
     assert destination.read_bytes() == b"BADMAGIC"
 
 
@@ -163,11 +179,14 @@ def test_conversion_upgrades_legacy_records_and_externalizes_large_content(
         execution_id="turn-a",
     )
     destination = Project.run_log_path_for(project.root, "run-1")
-    with FileRunLogWriter(destination) as writer:
+    with FileRunLogWriter(destination, clock=ManualClock(), threads=SimThreads()) as writer:
         writer.append(Record(seq=1, epoch=1, body=Oneof("epoch_started", EpochStarted())))
         writer.append(Record(seq=2, epoch=1, body=Oneof("legacy_event", LegacyEvent(json="old"))))
     original = Project.event_journal_path_for(project.root, "run-1").read_bytes()
-    assert convert_run(project, "run-1").status is ConversionStatus.CONVERTED
+    assert (
+        convert_run(project, "run-1", clock=ManualClock(), threads=SimThreads()).status
+        is ConversionStatus.CONVERTED
+    )
     with destination.open("rb") as stream:
         records = list(RunLogReader(stream))
     assert all(
@@ -182,7 +201,10 @@ def test_conversion_upgrades_legacy_records_and_externalizes_large_content(
     path = Project.run_blobs_directory_for(project.root, "run-1") / attachment.blob.sha256
     assert path.read_bytes() == content.encode()
     assert Project.event_journal_path_for(project.root, "run-1").read_bytes() == original
-    assert convert_run(project, "run-1").status is ConversionStatus.EXISTS
+    assert (
+        convert_run(project, "run-1", clock=ManualClock(), threads=SimThreads()).status
+        is ConversionStatus.EXISTS
+    )
 
 
 @pytest.mark.parametrize("empty_header", [False, True])
@@ -192,10 +214,13 @@ def test_conversion_repairs_a_tee_with_no_event_records(
     project, journal = journal_at(tmp_path, monkeypatch)
     record_trace(journal)
     destination = Project.run_log_path_for(project.root, "run-1")
-    with FileRunLogWriter(destination) as writer:
+    with FileRunLogWriter(destination, clock=ManualClock(), threads=SimThreads()) as writer:
         if empty_header:
             writer.append(Record(seq=1, epoch=1, body=Oneof("epoch_started", EpochStarted())))
-    assert convert_run(project, "run-1").status is ConversionStatus.CONVERTED
+    assert (
+        convert_run(project, "run-1", clock=ManualClock(), threads=SimThreads()).status
+        is ConversionStatus.CONVERTED
+    )
     with destination.open("rb") as stream:
         records = list(RunLogReader(stream))
     assert any(record.body is not None and record.body.field == "span" for record in records)
@@ -231,7 +256,10 @@ def test_conversion_fold_and_every_keyframe_suffix_equal_the_typed_mapping(
             )
         source = Project.event_journal_path_for(project.root, "run-1")
         before = source.read_bytes()
-        assert convert_run(project, "run-1").status is ConversionStatus.CONVERTED
+        assert (
+            convert_run(project, "run-1", clock=ManualClock(), threads=SimThreads()).status
+            is ConversionStatus.CONVERTED
+        )
         destination = Project.run_log_path_for(project.root, "run-1")
         with destination.open("rb") as stream:
             records = list(RunLogReader(stream))
@@ -257,7 +285,10 @@ def test_conversion_fold_and_every_keyframe_suffix_equal_the_typed_mapping(
             for p in destination.parent.rglob("*")
             if p.is_file()
         }
-        assert convert_run(project, "run-1").status is ConversionStatus.EXISTS
+        assert (
+            convert_run(project, "run-1", clock=ManualClock(), threads=SimThreads()).status
+            is ConversionStatus.EXISTS
+        )
         assert {
             p.relative_to(destination.parent): p.read_bytes()
             for p in destination.parent.rglob("*")
@@ -276,7 +307,7 @@ def test_conversion_repairs_old_complete_log_without_rewriting_it(
     )
     record_trace(journal)
     journal.emit(CoreEventType.RUN_FINISHED)
-    convert_run(project, "run-1")
+    convert_run(project, "run-1", clock=ManualClock(), threads=SimThreads())
     directory = Project.log_directory_for(project.root, "run-1")
     original = (directory / "run.log").read_bytes()
     if missing in {"head", "both"}:
@@ -284,14 +315,17 @@ def test_conversion_repairs_old_complete_log_without_rewriting_it(
     if missing in {"keyframes", "both"}:
         for path in (directory / "keyframes").iterdir():
             path.unlink()
-    result = convert_run(project, "run-1")
+    result = convert_run(project, "run-1", clock=ManualClock(), threads=SimThreads())
     assert result.status is ConversionStatus.CONVERTED
     assert "repaired" in result.reason
     head = RunHead.from_binary((directory / "run.head").read_bytes())
     seed = Keyframe.from_binary((directory / "keyframes" / f"{head.committed_seq}.pb").read_bytes())
     assert seed.log_offset == len(original)
     assert (directory / "run.log").read_bytes() == original
-    assert convert_run(project, "run-1").status is ConversionStatus.EXISTS
+    assert (
+        convert_run(project, "run-1", clock=ManualClock(), threads=SimThreads()).status
+        is ConversionStatus.EXISTS
+    )
 
 
 @pytest.mark.parametrize(
@@ -312,7 +346,7 @@ def test_phase_two_conversion_preserves_saved_core_envelopes_and_their_resume_mi
     original = json.dumps({"version": 1, "record": record.model_dump(mode="json")}).encode()
     namespace = project.state.state_store_namespace("run-1")
     namespace.write_bytes("store.json", original)
-    result = convert_run(project, "run-1")
+    result = convert_run(project, "run-1", clock=ManualClock(), threads=SimThreads())
     assert result.status is ConversionStatus.CONVERTED
     assert "state.pb conversion is phase 3" in result.reason
     assert namespace.read_bytes("store.json") == original
@@ -349,7 +383,10 @@ def test_bulk_reports_every_project_and_index_outcome_and_continues_after_failur
     index = external_link.parent
     (index / "broken").symlink_to(tmp_path / "absent")
     (index / "unsupported").write_bytes(b"keep")
-    rows = {row.run: row.result for row in convert_runs(project)}
+    rows = {
+        row.run: row.result
+        for row in convert_runs(project, clock=ManualClock(), threads=SimThreads())
+    }
     assert rows["run-1"].status is ConversionStatus.CONVERTED
     assert rows["bad"].status is ConversionStatus.FAILED
     assert rows["empty"].status is ConversionStatus.SKIPPED
@@ -361,7 +398,10 @@ def test_bulk_reports_every_project_and_index_outcome_and_continues_after_failur
     assert rows[str(index / "unsupported")].status is ConversionStatus.SKIPPED
     assert "already processed" in rows[str(index / "run-1")].reason
     assert len(rows) == 9
-    second = {row.run: row.result for row in convert_runs(project)}
+    second = {
+        row.run: row.result
+        for row in convert_runs(project, clock=ManualClock(), threads=SimThreads())
+    }
     assert second["run-1"].status is ConversionStatus.SKIPPED
     assert second["run-1"].reason == "already converted"
     assert second[str(external_link)].reason == "already converted"
@@ -377,7 +417,7 @@ def test_bulk_reports_a_store_only_run_as_unsupported_in_phase_two(
     project = Project.open(root)
     namespace = project.state.state_store_namespace("store-only")
     namespace.write_bytes("store.json", b"original core state")
-    rows = convert_runs(project)
+    rows = convert_runs(project, clock=ManualClock(), threads=SimThreads())
     assert len(rows) == 1
     assert rows[0].run == "store-only"
     assert rows[0].result.status is ConversionStatus.SKIPPED
@@ -409,7 +449,7 @@ def test_conversion_reports_or_repairs_damaged_derived_state(
     )
     record_trace(journal)
     journal.emit(CoreEventType.RUN_FINISHED)
-    convert_run(project, "run-1")
+    convert_run(project, "run-1", clock=ManualClock(), threads=SimThreads())
     directory = Project.log_directory_for(project.root, "run-1")
     head = RunHead.from_binary((directory / "run.head").read_bytes())
     if damage == "log-sequence":
@@ -420,19 +460,25 @@ def test_conversion_reports_or_repairs_damaged_derived_state(
             RUN_LOG_MAGIC + b"".join(encode_frame(r) for r in records)
         )
         with pytest.raises(ValueError, match="non-dense"):
-            convert_run(project, "run-1")
+            convert_run(project, "run-1", clock=ManualClock(), threads=SimThreads())
     elif damage == "keyframe-offset":
         path = directory / "keyframes" / f"{head.committed_seq}.pb"
         seed = Keyframe.from_binary(path.read_bytes())
         seed.log_offset += 1
         path.write_bytes(seed.to_binary())
         with pytest.raises(ValueError, match="checkpoint does not match"):
-            convert_run(project, "run-1")
+            convert_run(project, "run-1", clock=ManualClock(), threads=SimThreads())
     else:
         head.committed_seq -= 1
         (directory / "run.head").write_bytes(head.to_binary())
-        assert convert_run(project, "run-1").status is ConversionStatus.CONVERTED
-        assert convert_run(project, "run-1").status is ConversionStatus.EXISTS
+        assert (
+            convert_run(project, "run-1", clock=ManualClock(), threads=SimThreads()).status
+            is ConversionStatus.CONVERTED
+        )
+        assert (
+            convert_run(project, "run-1", clock=ManualClock(), threads=SimThreads()).status
+            is ConversionStatus.EXISTS
+        )
 
 
 def test_bulk_reports_index_publication_failure_and_preserves_the_entry(
@@ -443,8 +489,33 @@ def test_bulk_reports_index_publication_failure_and_preserves_the_entry(
     home = tmp_path / "home"
     (home / "runs").mkdir()
     (home / "runs/run-1").write_bytes(b"keep")
-    results = convert_runs(project)
+    results = convert_runs(project, clock=ManualClock(), threads=SimThreads())
     assert results[0].result.status is ConversionStatus.FAILED
     assert "not a symlink" in results[0].result.reason
     assert results[1].result.status is ConversionStatus.SKIPPED
     assert (home / "runs/run-1").read_bytes() == b"keep"
+
+
+def test_typed_tee_explicit_commit_publishes_pending_checkpoint(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project, journal = journal_at(tmp_path, monkeypatch)
+    record_trace(journal)
+    for _ in range(300):
+        journal.emit(CoreEventType.FRAMEWORK_WARNING, text="progress")
+    destination = Project.run_log_path_for(project.root, "run-1")
+    writer = FileRunLogWriter(destination, clock=ManualClock(), threads=SimThreads())
+    content = FileRunContent(
+        Project.run_blobs_directory_for(project.root, "run-1"),
+        Project.log_streams_directory_for(project.root, "run-1"),
+    )
+    with RunLogTee(writer, content, "run-1") as tee:
+        source = Project.event_journal_path_for(project.root, "run-1")
+        for line in source.read_bytes().splitlines():
+            tee.append(line)
+        with destination.open("rb") as stream:
+            records = list(RunLogReader(stream))
+        checkpoint = destination.parent / "keyframes" / f"{records[-1].seq}.pb"
+        assert not checkpoint.exists()
+        tee.commit()
+        assert Keyframe.from_binary(checkpoint.read_bytes()).through_seq == records[-1].seq
