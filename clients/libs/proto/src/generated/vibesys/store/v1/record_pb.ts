@@ -5,21 +5,35 @@
 import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
 import { file_buf_validate_validate } from "../../../buf/validate/validate_pb.js";
-import type { Timestamp } from "@bufbuild/protobuf/wkt";
-import { file_google_protobuf_timestamp } from "@bufbuild/protobuf/wkt";
+import type { FileDescriptorSet, Timestamp } from "@bufbuild/protobuf/wkt";
+import { file_google_protobuf_descriptor, file_google_protobuf_timestamp } from "@bufbuild/protobuf/wkt";
+import type { BlobAttached, MetricPoint, StreamRef } from "./content_pb.js";
+import { file_vibesys_store_v1_content } from "./content_pb.js";
+import type { MetricSeriesDecl, RunDescription, SpanKindDecl } from "./epoch_pb.js";
+import { file_vibesys_store_v1_epoch } from "./epoch_pb.js";
+import type { IntentState } from "./intent_pb.js";
+import { file_vibesys_store_v1_intent } from "./intent_pb.js";
+import type { Lifecycle } from "./lifecycle_pb.js";
+import { file_vibesys_store_v1_lifecycle } from "./lifecycle_pb.js";
+import type { Notice } from "./notice_pb.js";
+import { file_vibesys_store_v1_notice } from "./notice_pb.js";
+import type { SpanRecord } from "./span_pb.js";
+import { file_vibesys_store_v1_span } from "./span_pb.js";
 import type { Message } from "@bufbuild/protobuf";
 
 /**
  * Describes the file vibesys/store/v1/record.proto.
  */
 export const file_vibesys_store_v1_record: GenFile = /*@__PURE__*/
-  fileDesc("Ch12aWJlc3lzL3N0b3JlL3YxL3JlY29yZC5wcm90bxIQdmliZXN5cy5zdG9yZS52MSLLAQoGUmVjb3JkEgsKA3NlcRgBIAEoBBImCgJhdBgCIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASDQoFZXBvY2gYAyABKA0SNwoNZXBvY2hfc3RhcnRlZBgEIAEoCzIeLnZpYmVzeXMuc3RvcmUudjEuRXBvY2hTdGFydGVkSAASNQoMbGVnYWN5X2V2ZW50GAUgASgLMh0udmliZXN5cy5zdG9yZS52MS5MZWdhY3lFdmVudEgAQg0KBGJvZHkSBbpIAggBIoMBCgxFcG9jaFN0YXJ0ZWQSDgoGcnVuX2lkGAEgASgJEg0KBWVwb2NoGAIgASgNEhEKCXRyZWVfaGFzaBgDIAEoCRINCgVkaXJ0eRgEIAEoCBIXCg9hcGlfc2NoZW1hX2hhc2gYBSABKAkSGQoRc3RvcmVfc2NoZW1hX2hhc2gYBiABKAkiGwoLTGVnYWN5RXZlbnQSDAoEanNvbhgBIAEoCULGAQoUY29tLnZpYmVzeXMuc3RvcmUudjFCC1JlY29yZFByb3RvUAFaP2dpdGh1Yi5jb20vdXctc3lmaS92aWJlc3lzL2dhdGV3YXkvZ2VuL3ZpYmVzeXMvc3RvcmUvdjE7c3RvcmV2MaICA1ZTWKoCEFZpYmVzeXMuU3RvcmUuVjHKAhBWaWJlc3lzXFN0b3JlXFYx4gIcVmliZXN5c1xTdG9yZVxWMVxHUEJNZXRhZGF0YeoCElZpYmVzeXM6OlN0b3JlOjpWMWIGcHJvdG8z", [file_buf_validate_validate, file_google_protobuf_timestamp]);
+  fileDesc("Ch12aWJlc3lzL3N0b3JlL3YxL3JlY29yZC5wcm90bxIQdmliZXN5cy5zdG9yZS52MSKhCAoGUmVjb3JkEgsKA3NlcRgBIAEoBBImCgJhdBgCIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASDQoFZXBvY2gYAyABKA0SNwoNZXBvY2hfc3RhcnRlZBgEIAEoCzIeLnZpYmVzeXMuc3RvcmUudjEuRXBvY2hTdGFydGVkSAASNQoMbGVnYWN5X2V2ZW50GAUgASgLMh0udmliZXN5cy5zdG9yZS52MS5MZWdhY3lFdmVudEgAEjAKCWxpZmVjeWNsZRgLIAEoCzIbLnZpYmVzeXMuc3RvcmUudjEuTGlmZWN5Y2xlSAASLAoEc3BhbhgMIAEoCzIcLnZpYmVzeXMuc3RvcmUudjEuU3BhblJlY29yZEgAEi8KBm1ldHJpYxgNIAEoCzIdLnZpYmVzeXMuc3RvcmUudjEuTWV0cmljUG9pbnRIABItCgZzdHJlYW0YDiABKAsyGy52aWJlc3lzLnN0b3JlLnYxLlN0cmVhbVJlZkgAEi4KBGJsb2IYDyABKAsyHi52aWJlc3lzLnN0b3JlLnYxLkJsb2JBdHRhY2hlZEgAEi8KBmludGVudBgQIAEoCzIdLnZpYmVzeXMuc3RvcmUudjEuSW50ZW50U3RhdGVIABIqCgZub3RpY2UYESABKAsyGC52aWJlc3lzLnN0b3JlLnYxLk5vdGljZUgAOoYEukiCBBqGAgoPcmVjb3JkLmlkZW50aXR5EjBzZXEsIGVwb2NoIGFuZCBhdCBhcmUgcmVxdWlyZWQgZm9yIHR5cGVkIHJlY29yZHMawAEhKGhhcyh0aGlzLmxpZmVjeWNsZSkgfHwgaGFzKHRoaXMuc3BhbikgfHwgaGFzKHRoaXMubWV0cmljKSB8fCBoYXModGhpcy5zdHJlYW0pIHx8IGhhcyh0aGlzLmJsb2IpIHx8IGhhcyh0aGlzLmludGVudCkgfHwgaGFzKHRoaXMubm90aWNlKSkgfHwgKHRoaXMuc2VxID4gMHUgJiYgdGhpcy5lcG9jaCA+IDB1ICYmIGhhcyh0aGlzLmF0KSka9gEKFHJlY29yZC5lcG9jaF9zdGFydGVkElZlcG9jaF9zdGFydGVkIGVwb2NoIG11c3QgbWF0Y2ggZXBvY2ggYW5kIHNlcSBhbmQgYXQgbXVzdCBiZSBwcmVzZW50IGZvciBhIHR5cGVkIGhlYWRlchqFASFoYXModGhpcy5lcG9jaF9zdGFydGVkKSB8fCAhaGFzKHRoaXMuZXBvY2hfc3RhcnRlZC5ydW4pIHx8ICh0aGlzLmVwb2NoID09IHRoaXMuZXBvY2hfc3RhcnRlZC5lcG9jaCAmJiB0aGlzLnNlcSA+IDB1ICYmIGhhcyh0aGlzLmF0KSlCDQoEYm9keRIFukgCCAEi3wwKDEVwb2NoU3RhcnRlZBIOCgZydW5faWQYASABKAkSDQoFZXBvY2gYAiABKA0SEQoJdHJlZV9oYXNoGAMgASgJEg0KBWRpcnR5GAQgASgIEhcKD2FwaV9zY2hlbWFfaGFzaBgFIAEoCRIZChFzdG9yZV9zY2hlbWFfaGFzaBgGIAEoCRIiCg92aWJlc3lzX3ZlcnNpb24YByABKAlCCbpIBnIEKICABBItCgNydW4YCCABKAsyIC52aWJlc3lzLnN0b3JlLnYxLlJ1bkRlc2NyaXB0aW9uEjIKCnNwYW5fa2luZHMYCSADKAsyHi52aWJlc3lzLnN0b3JlLnYxLlNwYW5LaW5kRGVjbBIyCgZzZXJpZXMYCiADKAsyIi52aWJlc3lzLnN0b3JlLnYxLk1ldHJpY1Nlcmllc0RlY2wSNwoLZGVzY3JpcHRvcnMYCyABKAsyIi5nb29nbGUucHJvdG9idWYuRmlsZURlc2NyaXB0b3JTZXQ65Qm6SOEJGtIBCg5lcG9jaC5pZGVudGl0eRJQcnVuX2lkLCBlcG9jaCwgdHJlZV9oYXNoIGFuZCB2aWJlc3lzX3ZlcnNpb24gYXJlIHJlcXVpcmVkIGZvciBhIHR5cGVkIHJ1biBoZWFkZXIabiFoYXModGhpcy5ydW4pIHx8ICh0aGlzLnJ1bl9pZCAhPSAnJyAmJiB0aGlzLmVwb2NoID4gMHUgJiYgdGhpcy50cmVlX2hhc2ggIT0gJycgJiYgdGhpcy52aWJlc3lzX3ZlcnNpb24gIT0gJycpGooCChBlcG9jaC5zcGFuX2tpbmRzEkRzcGFuX2tpbmRzIG11c3QgaGF2ZSB1bmlxdWUga2luZCBuYW1lcyBhbmQgZGVzY3JpcHRvcnMgd2hlbiBub25lbXB0eRqvAXRoaXMuc3Bhbl9raW5kcy5hbGwoeCwgdGhpcy5zcGFuX2tpbmRzLmZpbHRlcih5LCB5LmtpbmQgPT0geC5raW5kKS5zaXplKCkgPT0gMSkgJiYgKHRoaXMuc3Bhbl9raW5kcy5zaXplKCkgPT0gMCB8fCAoaGFzKHRoaXMuZGVzY3JpcHRvcnMpICYmIHRoaXMuZGVzY3JpcHRvcnMuZmlsZS5zaXplKCkgPiAwKSkarwEKHGVwb2NoLnJ1bl9kZXRhaWxfZGVzY3JpcHRvcnMSJ2Rlc2NyaXB0b3JzIGFyZSByZXF1aXJlZCBmb3IgcnVuIGRldGFpbBpmIWhhcyh0aGlzLnJ1bikgfHwgIWhhcyh0aGlzLnJ1bi5kZXRhaWwpIHx8IChoYXModGhpcy5kZXNjcmlwdG9ycykgJiYgdGhpcy5kZXNjcmlwdG9ycy5maWxlLnNpemUoKSA+IDApGnYKDGVwb2NoLnNlcmllcxIdc2VyaWVzIG11c3QgaGF2ZSB1bmlxdWUgbmFtZXMaR3RoaXMuc2VyaWVzLmFsbCh4LCB0aGlzLnNlcmllcy5maWx0ZXIoeSwgeS5uYW1lID09IHgubmFtZSkuc2l6ZSgpID09IDEpGu4BChBlcG9jaC5vYmplY3RpdmVzElNydW4gb2JqZWN0aXZlcyBtdXN0IG5hbWUgc2VyaWVzIGRlY2xhcmVkIHdpdGggdGhlIHNhbWUgZGlyZWN0aW9uIGFuZCBvYmplY3RpdmUgcm9sZRqEASFoYXModGhpcy5ydW4pIHx8IHRoaXMucnVuLm9iamVjdGl2ZXMuYWxsKG8sIHRoaXMuc2VyaWVzLmV4aXN0cyhzLCBzLm5hbWUgPT0gby5zZXJpZXMgJiYgcy5kaXJlY3Rpb24gPT0gby5kaXJlY3Rpb24gJiYgcy5yb2xlID09IDEpKRrhAQoTZXBvY2guc2NoZW1hX2hhc2hlcxJSYXBpX3NjaGVtYV9oYXNoIGFuZCBzdG9yZV9zY2hlbWFfaGFzaCBtdXN0IGJlIGxvd2VyY2FzZSBTSEEtMjU2IGZvciBhIHR5cGVkIGhlYWRlchp2IWhhcyh0aGlzLnJ1bikgfHwgKHRoaXMuYXBpX3NjaGVtYV9oYXNoLm1hdGNoZXMoJ15bMC05YS1mXXs2NH0kJykgJiYgdGhpcy5zdG9yZV9zY2hlbWFfaGFzaC5tYXRjaGVzKCdeWzAtOWEtZl17NjR9JCcpKSIbCgtMZWdhY3lFdmVudBIMCgRqc29uGAEgASgJQsYBChRjb20udmliZXN5cy5zdG9yZS52MUILUmVjb3JkUHJvdG9QAVo/Z2l0aHViLmNvbS91dy1zeWZpL3ZpYmVzeXMvZ2F0ZXdheS9nZW4vdmliZXN5cy9zdG9yZS92MTtzdG9yZXYxogIDVlNYqgIQVmliZXN5cy5TdG9yZS5WMcoCEFZpYmVzeXNcU3RvcmVcVjHiAhxWaWJlc3lzXFN0b3JlXFYxXEdQQk1ldGFkYXRh6gISVmliZXN5czo6U3RvcmU6OlYxYgZwcm90bzM", [file_buf_validate_validate, file_google_protobuf_descriptor, file_google_protobuf_timestamp, file_vibesys_store_v1_content, file_vibesys_store_v1_epoch, file_vibesys_store_v1_intent, file_vibesys_store_v1_lifecycle, file_vibesys_store_v1_notice, file_vibesys_store_v1_span]);
 
 /**
  * Record is the append-only run log envelope. Store changes are additive only.
  * A run.log starts with the eight-byte magic VSRLOG01. Each record then has
  * a uvarint payload length, a four-byte little-endian CRC32C of the payload,
- * and the payload: one encoded vibesys.store.v1.Record.
+ * and the payload: one encoded vibesys.store.v1.Record, at most 1 MiB.
+ * Writers and readers enforce the encoded byte cap. Content above 64 KiB is
+ * attached as a blob; truncation is never a valid way to meet either cap.
  *
  * @generated from message vibesys.store.v1.Record
  */
@@ -54,6 +68,48 @@ export type Record = Message<"vibesys.store.v1.Record"> & {
      */
     value: LegacyEvent;
     case: "legacyEvent";
+  } | {
+    /**
+     * @generated from field: vibesys.store.v1.Lifecycle lifecycle = 11;
+     */
+    value: Lifecycle;
+    case: "lifecycle";
+  } | {
+    /**
+     * @generated from field: vibesys.store.v1.SpanRecord span = 12;
+     */
+    value: SpanRecord;
+    case: "span";
+  } | {
+    /**
+     * @generated from field: vibesys.store.v1.MetricPoint metric = 13;
+     */
+    value: MetricPoint;
+    case: "metric";
+  } | {
+    /**
+     * @generated from field: vibesys.store.v1.StreamRef stream = 14;
+     */
+    value: StreamRef;
+    case: "stream";
+  } | {
+    /**
+     * @generated from field: vibesys.store.v1.BlobAttached blob = 15;
+     */
+    value: BlobAttached;
+    case: "blob";
+  } | {
+    /**
+     * @generated from field: vibesys.store.v1.IntentState intent = 16;
+     */
+    value: IntentState;
+    case: "intent";
+  } | {
+    /**
+     * @generated from field: vibesys.store.v1.Notice notice = 17;
+     */
+    value: Notice;
+    case: "notice";
   } | { case: undefined; value?: undefined };
 };
 
@@ -99,6 +155,33 @@ export type EpochStarted = Message<"vibesys.store.v1.EpochStarted"> & {
    * @generated from field: string store_schema_hash = 6;
    */
   storeSchemaHash: string;
+
+  /**
+   * Existing checkout fields stay authoritative; no duplicate Checkout message.
+   *
+   * @generated from field: string vibesys_version = 7;
+   */
+  vibesysVersion: string;
+
+  /**
+   * @generated from field: vibesys.store.v1.RunDescription run = 8;
+   */
+  run?: RunDescription | undefined;
+
+  /**
+   * @generated from field: repeated vibesys.store.v1.SpanKindDecl span_kinds = 9;
+   */
+  spanKinds: SpanKindDecl[];
+
+  /**
+   * @generated from field: repeated vibesys.store.v1.MetricSeriesDecl series = 10;
+   */
+  series: MetricSeriesDecl[];
+
+  /**
+   * @generated from field: google.protobuf.FileDescriptorSet descriptors = 11;
+   */
+  descriptors?: FileDescriptorSet | undefined;
 };
 
 /**
@@ -110,8 +193,8 @@ export const EpochStartedSchema: GenMessage<EpochStarted> = /*@__PURE__*/
 
 /**
  * LegacyEvent is an interim bridge carrying one current JSONL run event verbatim.
- * Phase 2 replaces this body when the event inventory is implemented. Its field
- * number remains reserved after removal; existing store records remain readable.
+ * Retained for the seven-day read window after phase 2 lands. Its field
+ * number must be reserved after removal; existing store records remain readable.
  *
  * @generated from message vibesys.store.v1.LegacyEvent
  */

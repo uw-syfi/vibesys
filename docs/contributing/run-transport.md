@@ -256,14 +256,14 @@ How to read the table:
 |---|---|---|---|---|---|
 | `server_started` | server journal | delete | none | S | Artifact of the old server process. `EpochStarted` and `Lifecycle.starting` replace it. |
 | `server_ready` | server runtime | delete | e2e fakes only | S | `Lifecycle.running` when startup ends. |
-| `run_started` | `vibesys.api` session, server | epoch | live page fold (objective, metric), digest, run map | M | Strategy name, input, max rounds, expected roles and `RunOverview` go in `EpochStarted.run` (`RunDescription`). Objective text is a blob. Unit and direction are in the series declarations, so the server no longer back-fills them into a snapshot. |
+| `run_started` | `vibesys.api` session, server | epoch | live page fold (objective, metric), digest, run map | M | Strategy name, input, expected roles and `RunOverview` go in `EpochStarted.run` (`RunDescription`); search limits go in its descriptor-backed `SearchRunDescription` detail. Objective text is a blob. Unit and direction are in the series declarations, so the server no longer back-fills them into a snapshot. |
 | `run_startup_progress` | `vibesys.run.resources` | lifecycle | startup bar (`run-session`), startup timing words (`scoped-logs`) | S | `Lifecycle.starting{stage, state, condition, elapsed, progress}`. One record per step; bounded by the number of image-build steps. |
 | `workspace_root_probe` | `slurm_probe_events` | span:`environment_probe` | none (ignored by the fold) | S | Runtime-declared kind. Attrs: `state`, `job_id`, `pending_reason`, `waited_seconds`, `queue_timeout_seconds`, `failure`, `attempt`, `retry_in_seconds`. A `failed` probe ends the run with `RunFailure.kind = environment_unavailable`. |
 | `run_status_changed` | server controller, journal | lifecycle | `CoreState.status`: header, recent-status words | S | `starting\|running\|pausing\|paused\|stopping\|stopped\|completed\|failed` becomes `Running{hold}`, `Draining{goal}`, `Parked`, `Ended{outcome}`. `previous` is derived. |
 | `run_finished` | controller, runtime, session | lifecycle | fold terminates run; digest closing | S | `Ended{outcome = finished}`. |
-| `run_failed` | controller, runtime, session | lifecycle | fold terminates run; digest closing; failure text | S | `Ended{outcome = failed, failure = RunFailure}` (kind, reason, workstreams started and budget, candidates kept, adopted candidate). |
-| `run_interrupted` | controller, runtime | lifecycle | fold terminates run | S | `Ended{outcome = interrupted, reason, signal}` when the process caught the signal. A process that cannot write its own death leaves a log with no `Ended` and no lock holder; the gateway reports `interrupted` as a hint and the next relaunch writes the record (see Intents and epochs). |
-| `run_ending` | `vibesys.run.core_run` | lifecycle | host summary (`with_ending`): end reason, resumable | S | Merged into `Ended`: `reason`, `summary`, `resumable`, `uncompared`. `rounds_finished` is dropped (count ended workstream spans). |
+| `run_failed` | controller, runtime, session | lifecycle | fold terminates run; digest closing; failure text | S | `Ended{outcome = failed, failure = RunFailure}` carries generic kind and reason. Its descriptor-backed `SearchRunFailure` detail carries workstreams started and budget, candidates kept, and adopted candidate. |
+| `run_interrupted` | controller, runtime | lifecycle | fold terminates run | S | `Ended{outcome = interrupted, interruption_reason, signal}` when the process caught the signal. A process that cannot write its own death leaves a log with no `Ended` and no lock holder; the gateway reports `interrupted` as a hint and the next relaunch writes the record (see Intents and epochs). |
+| `run_ending` | `vibesys.run.core_run` | lifecycle | host summary (`with_ending`): end reason, resumable | S | Merged into `Ended`: `summary` and `resumable`, plus the descriptor-backed `SearchEnded` detail with its closed search `reason` and `uncompared`. `rounds_finished` is dropped (count ended workstream spans). |
 | `configuration_failed` | server runtime, read model | lifecycle, or launch error | transcript line; diagnostics | S | Raised before a run exists: it is the `Launch` or `HostCall` error. If a run directory exists it is `Ended{failed, kind = configuration, code, stage, message, exit_code}`. |
 
 ### Agent turns and their content
@@ -424,214 +424,32 @@ Places where today's data names one search, and what it becomes:
 
 ### The records
 
-A sketch of `vibesys.store.v1`. Field numbers are placeholders. Validation rules
-(protovalidate) are omitted for brevity and live in the same file.
+The authoritative records and their validation rules live in
+[`proto/vibesys/store/v1/record.proto`](https://github.com/uw-syfi/vibesys/blob/main/proto/vibesys/store/v1/record.proto)
+and the concern-specific files it imports. Typed attrs are defined in
+[`agent_attrs.proto`](https://github.com/uw-syfi/vibesys/blob/main/proto/vibesys/store/v1/agent_attrs.proto),
+[`search/v1/attrs.proto`](https://github.com/uw-syfi/vibesys/blob/main/proto/vibesys/search/v1/attrs.proto), and
+[`environment_attrs.proto`](https://github.com/uw-syfi/vibesys/blob/main/proto/vibesys/store/v1/environment_attrs.proto).
+Search run configuration, settlement and failure details are defined in
+[`search/v1/run.proto`](https://github.com/uw-syfi/vibesys/blob/main/proto/vibesys/search/v1/run.proto).
+The store package never imports the search package. Strategy details travel as
+`Any` with their descriptors in `EpochStarted.descriptors`, just like span attrs;
+`test_store_schema_cannot_import_search_strategy_contracts` enforces the dependency boundary.
 
-```proto
-syntax = "proto3";
-package vibesys.store.v1;
+These files replace the illustrative proto sketch; their published field numbers are authoritative.
 
-message Record {
-  uint64 seq = 1;                           // dense from 1 within run.log
-  google.protobuf.Timestamp at = 2;         // wall time
-  oneof body {
-    EpochStarted epoch = 10;
-    Lifecycle lifecycle = 11;
-    SpanRecord span = 12;
-    MetricPoint metric = 13;
-    StreamRef stream = 14;
-    BlobAttached blob = 15;
-    IntentState intent = 16;
-    Notice notice = 17;
-    LegacyEvent legacy = 99;                // phase 1 only: {type, json}; deleted at cutover
-  }
-}
+`EpochStarted` retains its original checkout and schema identity fields and adds the run description,
+kind declarations, series declarations, descriptors and version. `LegacyEvent` remains readable for
+seven days after phase 2 lands. Existing phase 1 fields retain their validation behavior.
 
-// ---- epoch ----
-message EpochStarted {
-  uint32 epoch = 1;                          // 1, 2, ... one per launch
-  Checkout checkout = 2;
-  RunDescription run = 3;
-  repeated SpanKindDecl span_kinds = 4;
-  repeated MetricSeriesDecl series = 5;
-  google.protobuf.FileDescriptorSet descriptors = 6;  // attrs and reply messages
-}
-message Checkout { string tree_hash = 1; bool dirty = 2; string vibesys_version = 3; }
-message RunDescription {
-  string strategy = 1;                       // name of the registered search
-  string input = 2;
-  BlobRef objective = 3;                     // OBJECTIVE.md
-  repeated Objective objectives = 4;         // headline first
-  repeated string correctness_check = 5;     // argv
-  optional Evaluator evaluator = 6;          // name, version; absent for a source tree
-  optional uint32 max_workstreams = 7;
-  repeated string expected_roles = 8;
-}
-message Objective { string series = 1; Direction direction = 2; }
-message SpanKindDecl {
-  string kind = 1;
-  string attrs_type = 2;                     // full name in descriptors
-  repeated string verdicts = 3;
-  repeated string link_rels = 4;
-  bool timeline = 5;                         // a hint; kinds a client does not know are shown
-}
-message MetricSeriesDecl {
-  string name = 1;
-  string unit = 2;
-  Direction direction = 3;                   // MAX | MIN | NONE
-  SeriesRole role = 4;                       // OBJECTIVE | RESOURCE | REFERENCE
-}
+Inline text fields are bounded at 64 KiB by protovalidate. Content above that cap is
+attached as a blob, including an oversized interim JSON reply under role `reply`. The serialized
+1 MiB record cap is enforced by the log writer and reader, which can measure the actual bytes;
+protovalidate cannot measure encoded protobuf size. Declaration resolution and validation of an
+`Any` payload against its declared attrs type require the epoch descriptors at the read boundary.
 
-// ---- lifecycle ----
-message Lifecycle {
-  oneof state {
-    Starting starting = 1;
-    Running running = 2;
-    Draining draining = 3;
-    Parked parked = 4;
-    Ended ended = 5;
-  }
-}
-message Starting {
-  string stage = 1;                          // from the run environment's startup stages
-  StageState state = 2;                      // RUNNING | WAITING | FINISHED
-  optional Progress progress = 3;            // done, total, label
-  optional string condition = 4;             // what a WAITING stage waits on
-  optional double elapsed_seconds = 5;
-}
-message Running { optional Hold hold = 1; }
-message Hold {
-  oneof reason { OperatorHold operator = 1; string capacity_span = 2; }
-}
-message Draining { DrainGoal goal = 1; }     // PARK | STOP (pause is Running{hold})
-message Parked {}
-message Ended {
-  Outcome outcome = 1;                       // FINISHED | FAILED | STOPPED | INTERRUPTED
-  optional string reason = 2;                // core's EndReason
-  string summary = 3;
-  bool resumable = 4;
-  bool uncompared = 5;
-  optional RunFailure failure = 6;
-}
-message RunFailure {
-  FailureKind kind = 1;     // BUDGET_EXHAUSTED | DEADLINE | NO_RESULT | ENVIRONMENT_UNAVAILABLE | CONFIGURATION
-  string reason = 2;
-  uint32 workstreams_started = 3;
-  uint32 workstream_budget = 4;
-  uint32 candidates_kept = 5;
-  optional string adopted_candidate = 6;
-}
+Notes on the records:
 
-// ---- spans ----
-message SpanRecord {
-  Change change = 1;                         // STARTED | UPDATED | ENDED
-  Span span = 2;                             // whole, after the change; replace by id
-}
-message Span {
-  string id = 1;                             // flow:<path>#<n> | op:<decision id>
-  optional string parent = 2;
-  RuntimeType runtime_type = 3;              // FLOW | OPERATION
-  string name = 4;
-  SpanStatus status = 5;                     // RUNNING | WAITING | PENDING | DONE | FAILED | STOPPED
-  repeated WaitingOn waiting_on = 6;
-  repeated Attempt attempts = 7;
-  double started_at = 8;                     // run clock
-  optional double ended_at = 9;
-  optional Failure failure = 10;
-  optional Stop stop = 11;
-  optional Label label = 12;                 // set by the strategy
-}
-message Label {
-  string kind = 1;
-  string title = 2;
-  optional string verdict = 3;
-  optional string reason = 4;
-  repeated SpanLink links = 5;               // {rel, to}
-  google.protobuf.Any attrs = 6;             // the declared message of this kind
-}
-
-// ---- numbers, streams, content ----
-message MetricPoint {
-  string series = 1;
-  optional string span = 2;
-  double value = 3;
-  double clock = 4;                          // run clock
-}
-message StreamRef {
-  string id = 1;
-  StreamKind kind = 2;                       // LOG | TRANSCRIPT
-  optional string span = 3;                  // owner
-  string title = 4;
-  StreamState state = 5;                     // OPENED | ENDED | FAILED | DEGRADED
-  optional uint64 length = 6;                // set when a LOG stream closes; a transcript's
-                                             // final length is on its turn span
-}
-message BlobRef { string sha256 = 1; uint64 size = 2; string media_type = 3; }
-message BlobAttached {
-  string span = 1;
-  string role = 2;                           // system_prompt | user_prompt | raw_result | diff | ...
-  BlobRef blob = 3;
-}
-
-// ---- operator ----
-message IntentState {
-  string control_id = 1;
-  IntentAction action = 2;                   // STEER | WITHDRAW | PAUSE | PARK | RESUME | STOP |
-                                             // CANCEL_ATTEMPT | CANCEL_ITEM | SET_MAX_PARALLEL
-  IntentStep step = 3;                       // APPLIED | REFUSED
-  optional string reason_code = 4;
-  optional string reason = 5;
-  optional SteerTarget target = 7;
-  optional SteerMode mode = 8;
-  optional string withdraws = 9;
-}                                            // steer delivery: span links to control_id
-message Notice {
-  Severity severity = 1;                     // WARNING | ERROR | FATAL
-  NoticeCode code = 2;                       // closed enum
-  string message = 3;
-  optional string span = 4;
-}
-
-// ---- strategy-declared attrs, as the shared hypothesis searches ----
-message AgentTurnAttrs {
-  string agent = 1; string role = 2; optional string model = 3;
-  repeated string started_by = 4;
-  string stage = 5; optional uint32 attempt = 6;
-  optional string provider = 7; optional string reasoning_effort = 8;
-  optional string harness_version = 9;
-  optional TokenUsage usage = 10;            // set at the end
-  optional uint64 transcript_length = 12;    // set at the end: final length of the transcript stream
-  string reply_json = 11;                    // set at the end; phase 3 reserves it for a proto reply
-}
-message TokenUsage {                         // an absent field was not reported
-  optional uint64 input = 1; optional uint64 cache_read = 2; optional uint64 cache_creation = 3;
-  optional uint64 output = 4; optional uint64 reasoning = 5;
-  optional double cost_usd = 6; optional uint64 duration_ms = 7;
-}
-message WorkstreamAttrs {
-  optional string hypothesis_id = 1; optional string parent_revision = 2;
-  optional uint32 base_round = 3; optional uint32 round = 4;
-  optional string idea = 5; optional string revision = 6;
-  optional string outcome = 7; optional string summary = 8;
-  bool probe = 9;
-  optional WorkstreamFailure failure = 10;   // dynamic search's FailureKind
-  repeated FileChange files = 11;
-  optional uint32 attempts = 12; optional bool profile_skipped = 13;
-}
-message GateAttrs {
-  string stage = 1; GateSubject subject = 2; // INPUT | CANDIDATE
-  optional string recipe = 3; optional string command = 4; bool reused = 5;
-  optional FailedCheck failed = 6; optional InputFailure input_failure = 7;
-}
-message AdoptionAttrs {
-  optional string candidate = 1; Selection selection = 2; optional string settlement_id = 3;
-}
-message ComparisonAttrs { /* metric, unit, direction, ratio, noise, verdict, values, samples */ }
-message BaselineAttrs   { /* label, status, metric, unit, direction, value, spread, samples, hosts, reason */ }
-message CapacityWaitAttrs { /* provider, condition, detail, resets_at, resumes_at, policy, fallback, ... */ }
-```
-
-Notes on the sketch:
 
 - A span record carries the whole span, as today's span events do, so the client fold stays
   "replace by id". Deltas are not used; revisit only if measured record bytes say so.

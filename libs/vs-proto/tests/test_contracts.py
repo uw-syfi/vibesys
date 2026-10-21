@@ -8,6 +8,8 @@ from hypothesis import strategies as st
 
 from vs_proto.api import (
     API_SCHEMA_HASH,
+    RUN_LOG_MAGIC,
+    RUN_LOG_MAX_RECORD_BYTES,
     STORE_SCHEMA_HASH,
     EpochStarted,
     LegacyEvent,
@@ -70,3 +72,14 @@ def test_generated_hashes_agree_across_languages(name: str) -> None:
     go_name = {"API": "API", "STORE": "Store"}[name]
     assert f"{name}_SCHEMA_HASH = '{expected}'" in typescript
     assert f'{go_name}SchemaHash = "{expected}"' in go
+
+
+def test_generated_runlog_limits_agree_across_languages() -> None:
+
+    root = Path(__file__).resolve().parents[3]
+    typescript = (root / "clients/libs/proto/src/generated/schema-hashes.ts").read_text()
+    go = (root / "gateway/gen/schema_hashes.go").read_text()
+    assert f"RUN_LOG_MAX_RECORD_BYTES = {RUN_LOG_MAX_RECORD_BYTES};" in typescript
+    assert f"RunLogMaxRecordBytes = {RUN_LOG_MAX_RECORD_BYTES}" in go
+    assert f"RUN_LOG_MAGIC = '{RUN_LOG_MAGIC.decode()}';" in typescript
+    assert f'RunLogMagic = "{RUN_LOG_MAGIC.decode()}"' in go

@@ -20,6 +20,7 @@ import pytest
         "vs_core.api",
         "vs_project.api",
         "vs_proto.api",
+        "vs_runlog.api",
         "vs_prompts.api",
         "vs_runtime.api",
         "vs_sandbox.api",

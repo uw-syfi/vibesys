@@ -714,13 +714,16 @@ class LocalRunIntegration:
         run_id: str | None = None,
     ) -> None:
         """Attach event persistence to the run's log directory."""
-        del project
-        self.events.attach(log_dir, run_id or log_dir.parent.name)
+        identity = run_id or log_dir.parent.name
+        if project is not None:
+            self.events.enable_runlog(project, identity)
+        self.events.attach(log_dir, identity)
 
     def close(self) -> None:
         """Release integration-owned resources."""
         if self._closed:
             return
+        self.events.close()
         self._closed = True
 
     def agent_execution_event(self, event: AgentExecutionLifecycleEvent) -> CoreEvent:

@@ -7,12 +7,14 @@ import (
 	"fmt"
 	"hash/crc32"
 	"io"
+
+	"github.com/uw-syfi/vibesys/gateway/gen"
 )
 
-const Magic = "VSRLOG01"
+const Magic = gen.RunLogMagic
 
 // MaxRecordBytes bounds memory even when a damaged prefix declares a huge length.
-const MaxRecordBytes = 16 << 20
+const MaxRecordBytes = gen.RunLogMaxRecordBytes
 
 var castagnoli = crc32.MakeTable(crc32.Castagnoli)
 
@@ -33,15 +35,16 @@ func (e *Corruption) Error() string {
 // Reader advances only after a complete, checksum-verified record. The source
 // must retain its existing bytes; concurrent appends are supported.
 type Reader struct {
-	source io.ReaderAt
-	offset int64
+	source    io.ReaderAt
+	offset    int64
+	magicRead bool
 }
 
 func NewReader(source io.ReaderAt) *Reader { return &Reader{source: source} }
 
 // Next returns the original payload, io.EOF for an incomplete tail, or an error.
 func (r *Reader) Next() ([]byte, error) {
-	if r.offset == 0 {
+	if !r.magicRead {
 		var magic [len(Magic)]byte
 		if _, err := r.source.ReadAt(magic[:], 0); err != nil {
 			return nil, err
@@ -49,7 +52,10 @@ func (r *Reader) Next() ([]byte, error) {
 		if !bytes.Equal(magic[:], []byte(Magic)) {
 			return nil, r.corrupt("invalid magic")
 		}
-		r.offset = int64(len(Magic))
+		r.magicRead = true
+		if r.offset == 0 {
+			r.offset = int64(len(Magic))
+		}
 	}
 	var prefix [binary.MaxVarintLen64]byte
 	n, err := r.source.ReadAt(prefix[:], r.offset)
@@ -67,7 +73,7 @@ func (r *Reader) Next() ([]byte, error) {
 		return nil, r.corrupt("length varint overflow")
 	}
 	if length > MaxRecordBytes {
-		return nil, r.corrupt("record exceeds 16 MiB limit")
+		return nil, r.corrupt(fmt.Sprintf("record exceeds %d byte limit", MaxRecordBytes))
 	}
 	frame := make([]byte, 4+int(length))
 	if _, err := r.source.ReadAt(frame, r.offset+int64(width)); err != nil {

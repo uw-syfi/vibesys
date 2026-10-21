@@ -1206,6 +1206,14 @@ type Edge = tuple[EdgeKind, str]
 # parse JSON or TOML directly. Everything else asks the owner of the data. Keep one line
 # per module: its kind, and a note naming the data.
 FILE_IO_EDGE_MODULES: dict[str, Edge] = {
+    "libs/vs-runlog/src/vs_runlog/_file.py": (
+        EdgeKind.LOG,
+        "the run.log file sink and recovery reader; framing stays in the pure _framing module",
+    ),
+    "src/vibesys/run/runlog_conversion.py": (
+        EdgeKind.LOG,
+        "the one-shot run.log sink that reads the authoritative JSONL journal and stages conversion",
+    ),
     "libs/vs-agent/src/vs_agent/images.py": (
         EdgeKind.GENERATOR,
         "content-addresses the build context it hands to docker build",
@@ -1285,7 +1293,7 @@ FILE_IO_EDGE_MODULES: dict[str, Edge] = {
     ),
     "libs/vs-project/src/vs_project/_state_io.py": (
         EdgeKind.STORE,
-        "atomic, durable state document writes and reads",
+        "atomic, durable state documents and atomic host run discovery links",
     ),
     "libs/vs-project/src/vs_project/_state_store.py": (EdgeKind.STORE, "the local StateStore"),
     "libs/vs-project/src/vs_project/_workspace_tree.py": (

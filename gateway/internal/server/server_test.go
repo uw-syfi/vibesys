@@ -36,6 +36,11 @@ type fixture struct {
 
 func start(t *testing.T) fixture {
 	t.Helper()
+	return startWithClock(t, nil)
+}
+
+func startWithClock(t *testing.T, clock server.Clock) fixture {
+	t.Helper()
 	// Keep Unix socket paths short even on hosts with long temporary roots.
 	root, err := os.MkdirTemp("/tmp", "g")
 	if err != nil {
@@ -50,7 +55,7 @@ func start(t *testing.T) fixture {
 	}
 	done := make(chan error, 1)
 	go func() {
-		done <- server.Serve(ctx, endpoint.Listener, server.Config{Root: root, Version: "test-version"})
+		done <- server.Serve(ctx, endpoint.Listener, server.Config{Root: root, Version: "test-version", Clock: clock})
 	}()
 	t.Cleanup(func() {
 		cancel()
@@ -289,9 +294,15 @@ func TestSlowTailDoesNotBlockOtherStreams(t *testing.T) {
 	f := start(t)
 	c := client(t, f, false)
 	data := []byte(runlog.Magic)
-	first := payload(t, 1, strings.Repeat("x", 1<<20))
+	// Account for the protobuf envelope so each record reaches the wire cap.
+	text := strings.Repeat("x", gen.RunLogMaxRecordBytes)
+	text = text[:len(text)-(len(payload(t, 1, text))-gen.RunLogMaxRecordBytes)]
+	first := payload(t, 1, text)
+	if len(first) != gen.RunLogMaxRecordBytes {
+		t.Fatalf("record size = %d, want %d", len(first), gen.RunLogMaxRecordBytes)
+	}
 	for seq := uint64(1); seq <= 8; seq++ {
-		data = append(data, frame(payload(t, seq, strings.Repeat("x", 1<<20)))...)
+		data = append(data, frame(payload(t, seq, text))...)
 	}
 	write(t, filepath.Join(f.run, "run.log"), false, data)
 	slow, err := c.Tail(f.ctx, &apiv1.TailRequest{RunId: "run-1"})
