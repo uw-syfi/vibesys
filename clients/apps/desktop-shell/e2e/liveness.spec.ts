@@ -32,7 +32,8 @@ for (const width of [1000, 1440, 1920]) {
       await page.setViewportSize({width, height: 900});
       const fixture = storeRunFixture('live');
       const seq = (fixture.records.at(-1)?.seq ?? 0n) + 1n;
-      fixture.records.push(
+      const records = [
+        ...fixture.records,
         create(RecordSchema, {
           seq,
           epoch: 1,
@@ -47,10 +48,10 @@ for (const width of [1000, 1440, 1920]) {
             },
           },
         }),
-      );
+      ];
       await page.addInitScript(
         installGateway,
-        wire({...fixture, initialCount: fixture.records.length}, RunLiveness.ALIVE),
+        wire({...fixture, records, initialCount: records.length}, RunLiveness.ALIVE),
       );
       await openFixture(page, {...fixtureNamed('finished-run'), runId: 'run-a'});
       await page.getByRole('switch', {name: 'Run transport v2'}).check();
