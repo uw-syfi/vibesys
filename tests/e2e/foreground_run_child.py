@@ -125,6 +125,7 @@ def interrupted_run(
 
     Call through ``run_in_child``: it installs signal handlers and swaps module attributes.
     """
+    # Capture the deterministic discarded-wake hang before the unchanged parent guard.
     faulthandler.dump_traceback_later(20, repeat=True)
     BlockedRuntime.self_target = target
     BlockedRuntime.discard_wake_in_gc = discard_wake_in_gc
