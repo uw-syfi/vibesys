@@ -22,20 +22,24 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+// Attrs for agent_turn, including the final usage and transcript byte length.
 type AgentTurnAttrs struct {
-	state            protoimpl.MessageState `protogen:"open.v1"`
-	Agent            string                 `protobuf:"bytes,1,opt,name=agent,proto3" json:"agent,omitempty"`
-	Role             string                 `protobuf:"bytes,2,opt,name=role,proto3" json:"role,omitempty"`
-	Model            *string                `protobuf:"bytes,3,opt,name=model,proto3,oneof" json:"model,omitempty"`
-	StartedBy        []string               `protobuf:"bytes,4,rep,name=started_by,json=startedBy,proto3" json:"started_by,omitempty"`
-	Stage            string                 `protobuf:"bytes,5,opt,name=stage,proto3" json:"stage,omitempty"`
-	Attempt          *uint32                `protobuf:"varint,6,opt,name=attempt,proto3,oneof" json:"attempt,omitempty"`
-	Provider         *string                `protobuf:"bytes,7,opt,name=provider,proto3,oneof" json:"provider,omitempty"`
-	ReasoningEffort  *string                `protobuf:"bytes,8,opt,name=reasoning_effort,json=reasoningEffort,proto3,oneof" json:"reasoning_effort,omitempty"`
-	HarnessVersion   *string                `protobuf:"bytes,9,opt,name=harness_version,json=harnessVersion,proto3,oneof" json:"harness_version,omitempty"`
-	Usage            *TokenUsage            `protobuf:"bytes,10,opt,name=usage,proto3,oneof" json:"usage,omitempty"`
-	ReplyJson        string                 `protobuf:"bytes,11,opt,name=reply_json,json=replyJson,proto3" json:"reply_json,omitempty"`
-	TranscriptLength *uint64                `protobuf:"varint,12,opt,name=transcript_length,json=transcriptLength,proto3,oneof" json:"transcript_length,omitempty"`
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	Agent           string                 `protobuf:"bytes,1,opt,name=agent,proto3" json:"agent,omitempty"`
+	Role            string                 `protobuf:"bytes,2,opt,name=role,proto3" json:"role,omitempty"`
+	Model           *string                `protobuf:"bytes,3,opt,name=model,proto3,oneof" json:"model,omitempty"`
+	StartedBy       []string               `protobuf:"bytes,4,rep,name=started_by,json=startedBy,proto3" json:"started_by,omitempty"`
+	Stage           string                 `protobuf:"bytes,5,opt,name=stage,proto3" json:"stage,omitempty"`
+	Attempt         *uint32                `protobuf:"varint,6,opt,name=attempt,proto3,oneof" json:"attempt,omitempty"`
+	Provider        *string                `protobuf:"bytes,7,opt,name=provider,proto3,oneof" json:"provider,omitempty"`
+	ReasoningEffort *string                `protobuf:"bytes,8,opt,name=reasoning_effort,json=reasoningEffort,proto3,oneof" json:"reasoning_effort,omitempty"`
+	HarnessVersion  *string                `protobuf:"bytes,9,opt,name=harness_version,json=harnessVersion,proto3,oneof" json:"harness_version,omitempty"`
+	Usage           *TokenUsage            `protobuf:"bytes,10,opt,name=usage,proto3,oneof" json:"usage,omitempty"`
+	// Interim JSON text until reply messages move to proto in phase 3. Above
+	// 64 KiB, omit this text and attach its complete bytes under blob role reply.
+	ReplyJson string `protobuf:"bytes,11,opt,name=reply_json,json=replyJson,proto3" json:"reply_json,omitempty"`
+	// Set when the turn ends. The transcript stays a stream, never a second blob.
+	TranscriptLength *uint64 `protobuf:"varint,12,opt,name=transcript_length,json=transcriptLength,proto3,oneof" json:"transcript_length,omitempty"`
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
 }
@@ -154,6 +158,7 @@ func (x *AgentTurnAttrs) GetTranscriptLength() uint64 {
 	return 0
 }
 
+// Absence means unreported. A reported zero stays present on the wire.
 type TokenUsage struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Input         *uint64                `protobuf:"varint,1,opt,name=input,proto3,oneof" json:"input,omitempty"`

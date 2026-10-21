@@ -23,6 +23,9 @@ _SpanRecordFields: TypeAlias = Literal["change", "span"]
 
 class SpanRecord(Message[_SpanRecordFields]):
     """
+    The whole span replaces its previous version by id. UPDATED can replace an
+    ended span, for example when comparison samples change. There are no deltas.
+
     ```proto
     message vibesys.store.v1.SpanRecord
     ```
@@ -57,6 +60,8 @@ _SpanFields: TypeAlias = Literal["id", "parent", "runtime_type", "name", "status
 
 class Span(Message[_SpanFields]):
     """
+    Times are seconds on the monotone run clock, which freezes while parked.
+
     ```proto
     message vibesys.store.v1.Span
     ```
@@ -317,6 +322,9 @@ _LabelFields: TypeAlias = Literal["kind", "title", "verdict", "reason", "links",
 
 class Label(Message[_LabelFields]):
     """
+    Resolve attrs_type from the declaration current at the span start. The read
+    boundary unpacks and validates attrs with that descriptor; Any is extensible.
+
     ```proto
     message vibesys.store.v1.Label
     ```
@@ -375,6 +383,8 @@ _SpanLinkFields: TypeAlias = Literal["rel", "to"]
 
 class SpanLink(Message[_SpanLinkFields]):
     """
+    A link may target a span or an intent control_id (delivery of a steer).
+
     ```proto
     message vibesys.store.v1.SpanLink
     ```

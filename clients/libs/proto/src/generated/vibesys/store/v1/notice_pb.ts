@@ -77,6 +77,9 @@ export const SeveritySchema: GenEnum<Severity> = /*@__PURE__*/
   enumDesc(file_vibesys_store_v1_notice, 0);
 
 /**
+ * Initial notice categories cover the inventory's run-level diagnostics.
+ * New categories may be added without changing a recorded message.
+ *
  * @generated from enum vibesys.store.v1.NoticeCode
  */
 export enum NoticeCode {

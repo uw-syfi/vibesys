@@ -40,6 +40,8 @@ enum SteerTargetKind {
   STEER_TARGET_KIND_ITEM = 4;
 }
 
+// What the run did with a request. Delivery is a link from the receiving turn
+// to control_id, not another intent step. Refusals always carry a reason.
 message IntentState {
   option (buf.validate.message).cel = {
     id: "intent.reason"

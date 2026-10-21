@@ -14,6 +14,8 @@ export const file_vibesys_store_v1_agent_attrs: GenFile = /*@__PURE__*/
   fileDesc("CiJ2aWJlc3lzL3N0b3JlL3YxL2FnZW50X2F0dHJzLnByb3RvEhB2aWJlc3lzLnN0b3JlLnYxIpgECg5BZ2VudFR1cm5BdHRycxIaCgVhZ2VudBgBIAEoCUILukgIcgYQASiAgAQSGQoEcm9sZRgCIAEoCUILukgIcgYQASiAgAQSHwoFbW9kZWwYAyABKAlCC7pICHIGEAEogIAESACIAQESJAoKc3RhcnRlZF9ieRgEIAMoCUIQukgNkgEKIghyBhABKICABBIaCgVzdGFnZRgFIAEoCUILukgIcgYQASiAgAQSFAoHYXR0ZW1wdBgGIAEoDUgBiAEBEiIKCHByb3ZpZGVyGAcgASgJQgu6SAhyBhABKICABEgCiAEBEioKEHJlYXNvbmluZ19lZmZvcnQYCCABKAlCC7pICHIGEAEogIAESAOIAQESKQoPaGFybmVzc192ZXJzaW9uGAkgASgJQgu6SAhyBhABKICABEgEiAEBEjAKBXVzYWdlGAogASgLMhwudmliZXN5cy5zdG9yZS52MS5Ub2tlblVzYWdlSAWIAQESHQoKcmVwbHlfanNvbhgLIAEoCUIJukgGcgQogIAEEh4KEXRyYW5zY3JpcHRfbGVuZ3RoGAwgASgESAaIAQFCCAoGX21vZGVsQgoKCF9hdHRlbXB0QgsKCV9wcm92aWRlckITChFfcmVhc29uaW5nX2VmZm9ydEISChBfaGFybmVzc192ZXJzaW9uQggKBl91c2FnZUIUChJfdHJhbnNjcmlwdF9sZW5ndGgiqAIKClRva2VuVXNhZ2USEgoFaW5wdXQYASABKARIAIgBARIXCgpjYWNoZV9yZWFkGAIgASgESAGIAQESGwoOY2FjaGVfY3JlYXRpb24YAyABKARIAogBARITCgZvdXRwdXQYBCABKARIA4gBARIWCglyZWFzb25pbmcYBSABKARIBIgBARInCghjb3N0X3VzZBgGIAEoAUIQukgNEgtAASkAAAAAAAAAAEgFiAEBEhgKC2R1cmF0aW9uX21zGAcgASgESAaIAQFCCAoGX2lucHV0Qg0KC19jYWNoZV9yZWFkQhEKD19jYWNoZV9jcmVhdGlvbkIJCgdfb3V0cHV0QgwKCl9yZWFzb25pbmdCCwoJX2Nvc3RfdXNkQg4KDF9kdXJhdGlvbl9tc0LKAQoUY29tLnZpYmVzeXMuc3RvcmUudjFCD0FnZW50QXR0cnNQcm90b1ABWj9naXRodWIuY29tL3V3LXN5ZmkvdmliZXN5cy9nYXRld2F5L2dlbi92aWJlc3lzL3N0b3JlL3YxO3N0b3JldjGiAgNWU1iqAhBWaWJlc3lzLlN0b3JlLlYxygIQVmliZXN5c1xTdG9yZVxWMeICHFZpYmVzeXNcU3RvcmVcVjFcR1BCTWV0YWRhdGHqAhJWaWJlc3lzOjpTdG9yZTo6VjFiBnByb3RvMw", [file_buf_validate_validate]);
 
 /**
+ * Attrs for agent_turn, including the final usage and transcript byte length.
+ *
  * @generated from message vibesys.store.v1.AgentTurnAttrs
  */
 export type AgentTurnAttrs = Message<"vibesys.store.v1.AgentTurnAttrs"> & {
@@ -68,11 +70,16 @@ export type AgentTurnAttrs = Message<"vibesys.store.v1.AgentTurnAttrs"> & {
   usage?: TokenUsage | undefined;
 
   /**
+   * Interim JSON text until reply messages move to proto in phase 3. Above
+   * 64 KiB, omit this text and attach its complete bytes under blob role reply.
+   *
    * @generated from field: string reply_json = 11;
    */
   replyJson: string;
 
   /**
+   * Set when the turn ends. The transcript stays a stream, never a second blob.
+   *
    * @generated from field: optional uint64 transcript_length = 12;
    */
   transcriptLength?: bigint | undefined;
@@ -86,6 +93,8 @@ export const AgentTurnAttrsSchema: GenMessage<AgentTurnAttrs> = /*@__PURE__*/
   messageDesc(file_vibesys_store_v1_agent_attrs, 0);
 
 /**
+ * Absence means unreported. A reported zero stays present on the wire.
+ *
  * @generated from message vibesys.store.v1.TokenUsage
  */
 export type TokenUsage = Message<"vibesys.store.v1.TokenUsage"> & {

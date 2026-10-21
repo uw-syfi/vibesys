@@ -95,6 +95,9 @@ class Severity(Enum):
 
 class NoticeCode(Enum):
     """
+    Initial notice categories cover the inventory's run-level diagnostics.
+    New categories may be added without changing a recorded message.
+
     ```proto
     enum vibesys.store.v1.NoticeCode
     ```

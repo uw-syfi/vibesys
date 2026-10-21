@@ -36,6 +36,8 @@ enum ProviderSwitchReason {
   PROVIDER_SWITCH_REASON_OPERATOR = 2;
 }
 
+// Runtime-declared environment_probe kind. A failed probe also ends the run
+// with RunFailureKind.ENVIRONMENT_UNAVAILABLE.
 message EnvironmentProbeAttrs {
   option (buf.validate.message).cel = {
     id: "probe.job_id"
@@ -66,7 +68,7 @@ message EnvironmentProbeAttrs {
     finite: true
   }];
   optional double queue_timeout_seconds = 5 [(buf.validate.field).double = {
-    gte: 0
+    gte: 1
     finite: true
   }];
   optional string failure = 6 [(buf.validate.field).string = {
@@ -80,6 +82,8 @@ message EnvironmentProbeAttrs {
   }];
 }
 
+// Parent is the stopped turn. The span duration is the wait, so no duration is
+// copied here. A run holds only for quota exhaustion or a rate limit.
 message CapacityWaitAttrs {
   option (buf.validate.message).cel = {
     id: "capacity.fallback"
@@ -110,12 +114,14 @@ message CapacityWaitAttrs {
     max_bytes: 65536
   }];
   optional google.protobuf.Timestamp wait_resumes_at = 9;
+  // Resumption uses operator or wait_elapsed; abandonment carries a free reason.
   optional string reason = 10 [(buf.validate.field).string = {
     min_len: 1
     max_bytes: 65536
   }];
 }
 
+// Instant span linked to its capacity_wait with rel settles.
 message ProviderSwitchAttrs {
   string from_provider = 1 [(buf.validate.field).string = {
     min_len: 1

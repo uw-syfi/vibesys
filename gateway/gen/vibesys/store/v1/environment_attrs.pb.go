@@ -234,6 +234,8 @@ func (ProviderSwitchReason) EnumDescriptor() ([]byte, []int) {
 	return file_vibesys_store_v1_environment_attrs_proto_rawDescGZIP(), []int{3}
 }
 
+// Runtime-declared environment_probe kind. A failed probe also ends the run
+// with RunFailureKind.ENVIRONMENT_UNAVAILABLE.
 type EnvironmentProbeAttrs struct {
 	state               protoimpl.MessageState `protogen:"open.v1"`
 	State               ProbeState             `protobuf:"varint,1,opt,name=state,proto3,enum=vibesys.store.v1.ProbeState" json:"state,omitempty"`
@@ -334,6 +336,8 @@ func (x *EnvironmentProbeAttrs) GetRetryInSeconds() float64 {
 	return 0
 }
 
+// Parent is the stopped turn. The span duration is the wait, so no duration is
+// copied here. A run holds only for quota exhaustion or a rate limit.
 type CapacityWaitAttrs struct {
 	state            protoimpl.MessageState `protogen:"open.v1"`
 	Provider         string                 `protobuf:"bytes,1,opt,name=provider,proto3" json:"provider,omitempty"`
@@ -345,9 +349,10 @@ type CapacityWaitAttrs struct {
 	FallbackProvider *string                `protobuf:"bytes,7,opt,name=fallback_provider,json=fallbackProvider,proto3,oneof" json:"fallback_provider,omitempty"`
 	FallbackModel    *string                `protobuf:"bytes,8,opt,name=fallback_model,json=fallbackModel,proto3,oneof" json:"fallback_model,omitempty"`
 	WaitResumesAt    *timestamppb.Timestamp `protobuf:"bytes,9,opt,name=wait_resumes_at,json=waitResumesAt,proto3,oneof" json:"wait_resumes_at,omitempty"`
-	Reason           *string                `protobuf:"bytes,10,opt,name=reason,proto3,oneof" json:"reason,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// Resumption uses operator or wait_elapsed; abandonment carries a free reason.
+	Reason        *string `protobuf:"bytes,10,opt,name=reason,proto3,oneof" json:"reason,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *CapacityWaitAttrs) Reset() {
@@ -450,6 +455,7 @@ func (x *CapacityWaitAttrs) GetReason() string {
 	return ""
 }
 
+// Instant span linked to its capacity_wait with rel settles.
 type ProviderSwitchAttrs struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	FromProvider  string                 `protobuf:"bytes,1,opt,name=from_provider,json=fromProvider,proto3" json:"from_provider,omitempty"`
@@ -537,7 +543,7 @@ const file_vibesys_store_v1_environment_attrs_proto_rawDesc = "" +
 	"\x06job_id\x18\x02 \x01(\tB\v\xbaH\br\x06\x10\x01(\x80\x80\x04H\x00R\x05jobId\x88\x01\x01\x125\n" +
 	"\x0epending_reason\x18\x03 \x01(\tB\t\xbaH\x06r\x04(\x80\x80\x04H\x01R\rpendingReason\x88\x01\x01\x12<\n" +
 	"\x0ewaited_seconds\x18\x04 \x01(\x01B\x10\xbaH\r\x12\v@\x01)\x00\x00\x00\x00\x00\x00\x00\x00H\x02R\rwaitedSeconds\x88\x01\x01\x12I\n" +
-	"\x15queue_timeout_seconds\x18\x05 \x01(\x01B\x10\xbaH\r\x12\v@\x01)\x00\x00\x00\x00\x00\x00\x00\x00H\x03R\x13queueTimeoutSeconds\x88\x01\x01\x12*\n" +
+	"\x15queue_timeout_seconds\x18\x05 \x01(\x01B\x10\xbaH\r\x12\v@\x01)\x00\x00\x00\x00\x00\x00\xf0?H\x03R\x13queueTimeoutSeconds\x88\x01\x01\x12*\n" +
 	"\afailure\x18\x06 \x01(\tB\v\xbaH\br\x06\x10\x01(\x80\x80\x04H\x04R\afailure\x88\x01\x01\x12\x1d\n" +
 	"\aattempt\x18\a \x01(\rH\x05R\aattempt\x88\x01\x01\x12?\n" +
 	"\x10retry_in_seconds\x18\b \x01(\x01B\x10\xbaH\r\x12\v@\x01)\x00\x00\x00\x00\x00\x00\x00\x00H\x06R\x0eretryInSeconds\x88\x01\x01:\xae\x04\xbaH\xaa\x04\x1a\xaa\x01\n" +

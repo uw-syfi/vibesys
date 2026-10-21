@@ -51,6 +51,8 @@ enum SpanFailureKind {
   SPAN_FAILURE_KIND_INTERRUPTION = 2;
 }
 
+// The whole span replaces its previous version by id. UPDATED can replace an
+// ended span, for example when comparison samples change. There are no deltas.
 message SpanRecord {
   option (buf.validate.message).cel = {
     id: "span_record.change"
@@ -64,6 +66,7 @@ message SpanRecord {
   Span span = 2 [(buf.validate.field).required = true];
 }
 
+// Times are seconds on the monotone run clock, which freezes while parked.
 message Span {
   option (buf.validate.message).cel = {
     id: "span.ended_at"
@@ -161,6 +164,8 @@ message Stop {
   bool landed = 2;
 }
 
+// Resolve attrs_type from the declaration current at the span start. The read
+// boundary unpacks and validates attrs with that descriptor; Any is extensible.
 message Label {
   string kind = 1 [(buf.validate.field).string = {
     min_len: 1
@@ -176,6 +181,7 @@ message Label {
   google.protobuf.Any attrs = 6 [(buf.validate.field).required = true];
 }
 
+// A link may target a span or an intent control_id (delivery of a steer).
 message SpanLink {
   string rel = 1 [(buf.validate.field).string = {
     min_len: 1

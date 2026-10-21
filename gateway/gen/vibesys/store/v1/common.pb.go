@@ -126,6 +126,7 @@ func (SeriesRole) EnumDescriptor() ([]byte, []int) {
 	return file_vibesys_store_v1_common_proto_rawDescGZIP(), []int{1}
 }
 
+// Progress counts completed steps; total is absent when the producer cannot know it.
 type Progress struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Done          uint64                 `protobuf:"varint,1,opt,name=done,proto3" json:"done,omitempty"`

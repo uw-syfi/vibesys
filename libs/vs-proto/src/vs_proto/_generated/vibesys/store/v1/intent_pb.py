@@ -21,6 +21,9 @@ _IntentStateFields: TypeAlias = Literal["control_id", "action", "step", "reason_
 
 class IntentState(Message[_IntentStateFields]):
     """
+    What the run did with a request. Delivery is a link from the receiving turn
+    to control_id, not another intent step. Refusals always carry a reason.
+
     ```proto
     message vibesys.store.v1.IntentState
     ```

@@ -21,6 +21,8 @@ _ProgressFields: TypeAlias = Literal["done", "total", "label"]
 
 class Progress(Message[_ProgressFields]):
     """
+    Progress counts completed steps; total is absent when the producer cannot know it.
+
     ```proto
     message vibesys.store.v1.Progress
     ```

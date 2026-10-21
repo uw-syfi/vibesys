@@ -456,6 +456,7 @@ func (InputFailureKind) EnumDescriptor() ([]byte, []int) {
 	return file_vibesys_store_v1_search_attrs_proto_rawDescGZIP(), []int{7}
 }
 
+// Dynamic search vocabulary, carried by its workstream attrs, not core.
 type WorkstreamFailureKind int32
 
 const (
@@ -556,6 +557,7 @@ func (WorkstreamFailureKind) EnumDescriptor() ([]byte, []int) {
 	return file_vibesys_store_v1_search_attrs_proto_rawDescGZIP(), []int{8}
 }
 
+// The existing planning_call kind, shared by hypothesis searches.
 type PlanningAttrs struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Call          uint32                 `protobuf:"varint,1,opt,name=call,proto3" json:"call,omitempty"`
@@ -832,6 +834,7 @@ func (x *WorkstreamFailure) GetText() string {
 	return ""
 }
 
+// A path and its byte range in the workstream's attached diff blob.
 type FileChange struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Path          string                 `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`
@@ -892,6 +895,8 @@ func (x *FileChange) GetDiffLength() uint64 {
 	return 0
 }
 
+// Readings are MetricPoints owned by this gate; there is no duplicate metric
+// value, unit, vs_baseline or output tail in attrs. Stage output is a LOG stream.
 type GateAttrs struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Stage         GateStage              `protobuf:"varint,1,opt,name=stage,proto3,enum=vibesys.store.v1.GateStage" json:"stage,omitempty"`
@@ -1196,6 +1201,8 @@ func (x *AdoptionAttrs) GetSettlementId() string {
 	return ""
 }
 
+// Links named candidate and base identify the compared spans. No commit-hash
+// join keys are copied here. ratio and noise describe their sampled comparison.
 type ComparisonAttrs struct {
 	state            protoimpl.MessageState `protogen:"open.v1"`
 	Metric           string                 `protobuf:"bytes,1,opt,name=metric,proto3" json:"metric,omitempty"`
@@ -1312,6 +1319,8 @@ func (x *ComparisonAttrs) GetBaseSamples() uint32 {
 	return 0
 }
 
+// One baseline:<name> span is replaced as readings change; timeline is false
+// on its declaration. Unmeasured baselines may omit all measurement fields.
 type BaselineAttrs struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Label         string                 `protobuf:"bytes,1,opt,name=label,proto3" json:"label,omitempty"`

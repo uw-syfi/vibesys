@@ -3,4 +3,4 @@
 package gen
 
 const APISchemaHash = "ef8866b280f8c93dbb921a004a10712a7f9566179c5e9a268993e30460c9bfde"
-const StoreSchemaHash = "02b982671b6a6b198fbf4e44ede129f44974d11c72c8150ca673018b127687a0"
+const StoreSchemaHash = "b6022be164b329f2bef1f9f28ae3ca263fd2b89d56f0b5c4f5aa23040d3e4522"

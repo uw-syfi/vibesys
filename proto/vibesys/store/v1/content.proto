@@ -20,6 +20,7 @@ enum StreamState {
   STREAM_STATE_DEGRADED = 4;
 }
 
+// Value is a finite, possibly signed measurement. clock is run-clock seconds.
 message MetricPoint {
   string series = 1 [(buf.validate.field).string = {
     min_len: 1
@@ -36,6 +37,8 @@ message MetricPoint {
   }];
 }
 
+// Streams are append-only. Only a closed LOG carries length here; a TRANSCRIPT
+// belongs to a turn whose final AgentTurnAttrs.transcript_length seals its view.
 message StreamRef {
   option (buf.validate.message).cel = {
     id: "stream.length"
@@ -67,6 +70,7 @@ message StreamRef {
   optional uint64 length = 6;
 }
 
+// Immutable content addressed by the lowercase hexadecimal SHA-256 of its bytes.
 message BlobRef {
   string sha256 = 1 [(buf.validate.field).string.pattern = "^[0-9a-f]{64}$"];
   uint64 size = 2;
@@ -76,6 +80,8 @@ message BlobRef {
   }];
 }
 
+// Roles are extensible (system_prompt, user_prompt, raw_result, reply, diff, ...).
+// Content above 64 KiB is attached rather than truncated or embedded in a record.
 message BlobAttached {
   string span = 1 [(buf.validate.field).string = {
     min_len: 1

@@ -74,6 +74,8 @@ func (Severity) EnumDescriptor() ([]byte, []int) {
 	return file_vibesys_store_v1_notice_proto_rawDescGZIP(), []int{0}
 }
 
+// Initial notice categories cover the inventory's run-level diagnostics.
+// New categories may be added without changing a recorded message.
 type NoticeCode int32
 
 const (

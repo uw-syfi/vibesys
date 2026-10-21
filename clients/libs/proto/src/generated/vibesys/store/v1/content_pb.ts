@@ -14,6 +14,8 @@ export const file_vibesys_store_v1_content: GenFile = /*@__PURE__*/
   fileDesc("Ch52aWJlc3lzL3N0b3JlL3YxL2NvbnRlbnQucHJvdG8SEHZpYmVzeXMuc3RvcmUudjEijAEKC01ldHJpY1BvaW50EhsKBnNlcmllcxgBIAEoCUILukgIcgYQASiAgAQSHgoEc3BhbhgCIAEoCUILukgIcgYQASiAgARIAIgBARIWCgV2YWx1ZRgDIAEoAUIHukgEEgJAARIfCgVjbG9jaxgEIAEoAUIQukgNEgtAASkAAAAAAAAAAEIHCgVfc3BhbiLxAwoJU3RyZWFtUmVmEhcKAmlkGAEgASgJQgu6SAhyBhABKICABBI2CgRraW5kGAIgASgOMhwudmliZXN5cy5zdG9yZS52MS5TdHJlYW1LaW5kQgq6SAeCAQQQASAAEh4KBHNwYW4YAyABKAlCC7pICHIGEAEogIAESACIAQESGAoFdGl0bGUYBCABKAlCCbpIBnIEKICABBI4CgVzdGF0ZRgFIAEoDjIdLnZpYmVzeXMuc3RvcmUudjEuU3RyZWFtU3RhdGVCCrpIB4IBBBABIAASEwoGbGVuZ3RoGAYgASgESAGIAQE69QG6SPEBGpoBCg1zdHJlYW0ubGVuZ3RoElBsZW5ndGggaXMgYWJzZW50IGZvciB0cmFuc2NyaXB0cyBhbmQgb3BlbmVkIGxvZ3MsIGFuZCByZXF1aXJlZCB3aGVuIGEgbG9nIGNsb3Nlcxo3aGFzKHRoaXMubGVuZ3RoKSA9PSAodGhpcy5raW5kID09IDEgJiYgdGhpcy5zdGF0ZSAhPSAxKRpSCgtzdHJlYW0uc3BhbhIhc3BhbiBpcyByZXF1aXJlZCBmb3IgYSB0cmFuc2NyaXB0GiB0aGlzLmtpbmQgIT0gMiB8fCBoYXModGhpcy5zcGFuKUIHCgVfc3BhbkIJCgdfbGVuZ3RoIl8KB0Jsb2JSZWYSJQoGc2hhMjU2GAEgASgJQhW6SBJyEDIOXlswLTlhLWZdezY0fSQSDAoEc2l6ZRgCIAEoBBIfCgptZWRpYV90eXBlGAMgASgJQgu6SAhyBhABKICABCJ1CgxCbG9iQXR0YWNoZWQSGQoEc3BhbhgBIAEoCUILukgIcgYQASiAgAQSGQoEcm9sZRgCIAEoCUILukgIcgYQASiAgAQSLwoEYmxvYhgDIAEoCzIZLnZpYmVzeXMuc3RvcmUudjEuQmxvYlJlZkIGukgDyAEBKloKClN0cmVhbUtpbmQSGwoXU1RSRUFNX0tJTkRfVU5TUEVDSUZJRUQQABITCg9TVFJFQU1fS0lORF9MT0cQARIaChZTVFJFQU1fS0lORF9UUkFOU0NSSVBUEAIqkAEKC1N0cmVhbVN0YXRlEhwKGFNUUkVBTV9TVEFURV9VTlNQRUNJRklFRBAAEhcKE1NUUkVBTV9TVEFURV9PUEVORUQQARIWChJTVFJFQU1fU1RBVEVfRU5ERUQQAhIXChNTVFJFQU1fU1RBVEVfRkFJTEVEEAMSGQoVU1RSRUFNX1NUQVRFX0RFR1JBREVEEARCxwEKFGNvbS52aWJlc3lzLnN0b3JlLnYxQgxDb250ZW50UHJvdG9QAVo/Z2l0aHViLmNvbS91dy1zeWZpL3ZpYmVzeXMvZ2F0ZXdheS9nZW4vdmliZXN5cy9zdG9yZS92MTtzdG9yZXYxogIDVlNYqgIQVmliZXN5cy5TdG9yZS5WMcoCEFZpYmVzeXNcU3RvcmVcVjHiAhxWaWJlc3lzXFN0b3JlXFYxXEdQQk1ldGFkYXRh6gISVmliZXN5czo6U3RvcmU6OlYxYgZwcm90bzM", [file_buf_validate_validate]);
 
 /**
+ * Value is a finite, possibly signed measurement. clock is run-clock seconds.
+ *
  * @generated from message vibesys.store.v1.MetricPoint
  */
 export type MetricPoint = Message<"vibesys.store.v1.MetricPoint"> & {
@@ -46,6 +48,9 @@ export const MetricPointSchema: GenMessage<MetricPoint> = /*@__PURE__*/
   messageDesc(file_vibesys_store_v1_content, 0);
 
 /**
+ * Streams are append-only. Only a closed LOG carries length here; a TRANSCRIPT
+ * belongs to a turn whose final AgentTurnAttrs.transcript_length seals its view.
+ *
  * @generated from message vibesys.store.v1.StreamRef
  */
 export type StreamRef = Message<"vibesys.store.v1.StreamRef"> & {
@@ -88,6 +93,8 @@ export const StreamRefSchema: GenMessage<StreamRef> = /*@__PURE__*/
   messageDesc(file_vibesys_store_v1_content, 1);
 
 /**
+ * Immutable content addressed by the lowercase hexadecimal SHA-256 of its bytes.
+ *
  * @generated from message vibesys.store.v1.BlobRef
  */
 export type BlobRef = Message<"vibesys.store.v1.BlobRef"> & {
@@ -115,6 +122,9 @@ export const BlobRefSchema: GenMessage<BlobRef> = /*@__PURE__*/
   messageDesc(file_vibesys_store_v1_content, 2);
 
 /**
+ * Roles are extensible (system_prompt, user_prompt, raw_result, reply, diff, ...).
+ * Content above 64 KiB is attached rather than truncated or embedded in a record.
+ *
  * @generated from message vibesys.store.v1.BlobAttached
  */
 export type BlobAttached = Message<"vibesys.store.v1.BlobAttached"> & {

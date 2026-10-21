@@ -25,6 +25,8 @@ _RunDescriptionFields: TypeAlias = Literal["strategy", "input", "objective", "ob
 
 class RunDescription(Message[_RunDescriptionFields]):
     """
+    Epoch-local run identity and objective. Objectives are ordered headline first.
+
     ```proto
     message vibesys.store.v1.RunDescription
     ```
@@ -47,6 +49,8 @@ class RunDescription(Message[_RunDescriptionFields]):
             repeated vibesys.store.v1.Objective objectives = 4;
             ```
         correctness_check:
+            Argument vector, not a shell command.
+
             ```proto
             repeated string correctness_check = 5;
             ```
@@ -163,6 +167,9 @@ _SpanKindDeclFields: TypeAlias = Literal["kind", "attrs_type", "verdicts", "link
 
 class SpanKindDecl(Message[_SpanKindDeclFields]):
     """
+    attrs_type is a fully qualified message name in EpochStarted.descriptors.
+    Verdicts and link relations are declared by the strategy, not by core.
+
     ```proto
     message vibesys.store.v1.SpanKindDecl
     ```
@@ -215,6 +222,8 @@ _MetricSeriesDeclFields: TypeAlias = Literal["name", "unit", "direction", "role"
 
 class MetricSeriesDecl(Message[_MetricSeriesDeclFields]):
     """
+    A series is declared once per epoch. NONE is for nondirectional resource data.
+
     ```proto
     message vibesys.store.v1.MetricSeriesDecl
     ```
@@ -259,7 +268,7 @@ class MetricSeriesDecl(Message[_MetricSeriesDeclFields]):
 
 
 _DESC = file_desc(
-    b'\n\x1cvibesys/store/v1/epoch.proto\x12\x10vibesys.store.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1dvibesys/store/v1/common.proto\x1a\x1evibesys/store/v1/content.proto"\xe2\x03\n\x0eRunDescription\x12\'\n\x08strategy\x18\x01 \x01(\tR\x08strategyB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x12!\n\x05input\x18\x02 \x01(\tR\x05inputB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x12?\n\tobjective\x18\x03 \x01(\x0b2\x19.vibesys.store.v1.BlobRefR\tobjectiveB\x06\xbaH\x03\xc8\x01\x01\x12;\n\nobjectives\x18\x04 \x03(\x0b2\x1b.vibesys.store.v1.ObjectiveR\nobjectives\x12=\n\x11correctness_check\x18\x05 \x03(\tR\x10correctnessCheckB\x10\xbaH\r\x92\x01\n"\x08r\x06\x10\x01(\x80\x80\x04\x12>\n\tevaluator\x18\x06 \x01(\x0b2\x1b.vibesys.store.v1.EvaluatorH\x00R\tevaluator\x88\x01\x01\x12,\n\x0fmax_workstreams\x18\x07 \x01(\rH\x01R\x0emaxWorkstreams\x88\x01\x01\x127\n\x0eexpected_roles\x18\x08 \x03(\tR\rexpectedRolesB\x10\xbaH\r\x92\x01\n"\x08r\x06\x10\x01(\x80\x80\x04B\x0c\n\n_evaluatorB\x12\n\x10_max_workstreams"S\n\tEvaluator\x12\x1f\n\x04name\x18\x01 \x01(\tR\x04nameB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x12%\n\x07version\x18\x02 \x01(\tR\x07versionB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04"\xd7\x01\n\tObjective\x12#\n\x06series\x18\x01 \x01(\tR\x06seriesB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x12E\n\tdirection\x18\x02 \x01(\x0e2\x1b.vibesys.store.v1.DirectionR\tdirectionB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00:^\xbaH[\x1aY\n\x13objective.direction\x12-direction must be max or min for an objective\x1a\x13this.direction != 3"\xd4\x01\n\x0cSpanKindDecl\x12\x1f\n\x04kind\x18\x01 \x01(\tR\x04kindB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x12*\n\nattrs_type\x18\x02 \x01(\tR\tattrsTypeB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x12,\n\x08verdicts\x18\x03 \x03(\tR\x08verdictsB\x10\xbaH\r\x92\x01\n"\x08r\x06\x10\x01(\x80\x80\x04\x12-\n\tlink_rels\x18\x04 \x03(\tR\x08linkRelsB\x10\xbaH\r\x92\x01\n"\x08r\x06\x10\x01(\x80\x80\x04\x12\x1a\n\x08timeline\x18\x05 \x01(\x08R\x08timeline"\xd7\x01\n\x10MetricSeriesDecl\x12\x1f\n\x04name\x18\x01 \x01(\tR\x04nameB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x12\x1d\n\x04unit\x18\x02 \x01(\tR\x04unitB\t\xbaH\x06r\x04(\x80\x80\x04\x12E\n\tdirection\x18\x03 \x01(\x0e2\x1b.vibesys.store.v1.DirectionR\tdirectionB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x12<\n\x04role\x18\x04 \x01(\x0e2\x1c.vibesys.store.v1.SeriesRoleR\x04roleB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00B\xc5\x01\n\x14com.vibesys.store.v1B\nEpochProtoP\x01Z?github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1\xa2\x02\x03VSX\xaa\x02\x10Vibesys.Store.V1\xca\x02\x10Vibesys\\Store\\V1\xe2\x02\x1cVibesys\\Store\\V1\\GPBMetadata\xea\x02\x12Vibesys::Store::V1b\x06proto3',
+    b'\n\x1cvibesys/store/v1/epoch.proto\x12\x10vibesys.store.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1dvibesys/store/v1/common.proto\x1a\x1evibesys/store/v1/content.proto"\xfb\x04\n\x0eRunDescription\x12\'\n\x08strategy\x18\x01 \x01(\tR\x08strategyB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x12!\n\x05input\x18\x02 \x01(\tR\x05inputB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x12?\n\tobjective\x18\x03 \x01(\x0b2\x19.vibesys.store.v1.BlobRefR\tobjectiveB\x06\xbaH\x03\xc8\x01\x01\x12;\n\nobjectives\x18\x04 \x03(\x0b2\x1b.vibesys.store.v1.ObjectiveR\nobjectives\x12=\n\x11correctness_check\x18\x05 \x03(\tR\x10correctnessCheckB\x10\xbaH\r\x92\x01\n"\x08r\x06\x10\x01(\x80\x80\x04\x12>\n\tevaluator\x18\x06 \x01(\x0b2\x1b.vibesys.store.v1.EvaluatorH\x00R\tevaluator\x88\x01\x01\x12,\n\x0fmax_workstreams\x18\x07 \x01(\rH\x01R\x0emaxWorkstreams\x88\x01\x01\x127\n\x0eexpected_roles\x18\x08 \x03(\tR\rexpectedRolesB\x10\xbaH\r\x92\x01\n"\x08r\x06\x10\x01(\x80\x80\x04B\x0c\n\n_evaluatorB\x12\n\x10_max_workstreams:\x96\x01\xbaH\x92\x01\x1a\x8f\x01\n\x0erun.objectives\x12(objectives must have unique series names\x1aSthis.objectives.all(x, this.objectives.filter(y, y.series == x.series).size() == 1)"S\n\tEvaluator\x12\x1f\n\x04name\x18\x01 \x01(\tR\x04nameB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x12%\n\x07version\x18\x02 \x01(\tR\x07versionB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04"\xd7\x01\n\tObjective\x12#\n\x06series\x18\x01 \x01(\tR\x06seriesB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x12E\n\tdirection\x18\x02 \x01(\x0e2\x1b.vibesys.store.v1.DirectionR\tdirectionB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00:^\xbaH[\x1aY\n\x13objective.direction\x12-direction must be max or min for an objective\x1a\x13this.direction != 3"\xd4\x01\n\x0cSpanKindDecl\x12\x1f\n\x04kind\x18\x01 \x01(\tR\x04kindB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x12*\n\nattrs_type\x18\x02 \x01(\tR\tattrsTypeB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x12,\n\x08verdicts\x18\x03 \x03(\tR\x08verdictsB\x10\xbaH\r\x92\x01\n"\x08r\x06\x10\x01(\x80\x80\x04\x12-\n\tlink_rels\x18\x04 \x03(\tR\x08linkRelsB\x10\xbaH\r\x92\x01\n"\x08r\x06\x10\x01(\x80\x80\x04\x12\x1a\n\x08timeline\x18\x05 \x01(\x08R\x08timeline"\xd7\x01\n\x10MetricSeriesDecl\x12\x1f\n\x04name\x18\x01 \x01(\tR\x04nameB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x12\x1d\n\x04unit\x18\x02 \x01(\tR\x04unitB\t\xbaH\x06r\x04(\x80\x80\x04\x12E\n\tdirection\x18\x03 \x01(\x0e2\x1b.vibesys.store.v1.DirectionR\tdirectionB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x12<\n\x04role\x18\x04 \x01(\x0e2\x1c.vibesys.store.v1.SeriesRoleR\x04roleB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00B\xc5\x01\n\x14com.vibesys.store.v1B\nEpochProtoP\x01Z?github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1\xa2\x02\x03VSX\xaa\x02\x10Vibesys.Store.V1\xca\x02\x10Vibesys\\Store\\V1\xe2\x02\x1cVibesys\\Store\\V1\\GPBMetadata\xea\x02\x12Vibesys::Store::V1b\x06proto3',
     [
         validate_pb.desc(),
         common_pb.desc(),

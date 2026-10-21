@@ -21,6 +21,8 @@ _MetricPointFields: TypeAlias = Literal["series", "span", "value", "clock"]
 
 class MetricPoint(Message[_MetricPointFields]):
     """
+    Value is a finite, possibly signed measurement. clock is run-clock seconds.
+
     ```proto
     message vibesys.store.v1.MetricPoint
     ```
@@ -67,6 +69,9 @@ _StreamRefFields: TypeAlias = Literal["id", "kind", "span", "title", "state", "l
 
 class StreamRef(Message[_StreamRefFields]):
     """
+    Streams are append-only. Only a closed LOG carries length here; a TRANSCRIPT
+    belongs to a turn whose final AgentTurnAttrs.transcript_length seals its view.
+
     ```proto
     message vibesys.store.v1.StreamRef
     ```
@@ -125,6 +130,8 @@ _BlobRefFields: TypeAlias = Literal["sha256", "size", "media_type"]
 
 class BlobRef(Message[_BlobRefFields]):
     """
+    Immutable content addressed by the lowercase hexadecimal SHA-256 of its bytes.
+
     ```proto
     message vibesys.store.v1.BlobRef
     ```
@@ -165,6 +172,9 @@ _BlobAttachedFields: TypeAlias = Literal["span", "role", "blob"]
 
 class BlobAttached(Message[_BlobAttachedFields]):
     """
+    Roles are extensible (system_prompt, user_prompt, raw_result, reply, diff, ...).
+    Content above 64 KiB is attached rather than truncated or embedded in a record.
+
     ```proto
     message vibesys.store.v1.BlobAttached
     ```

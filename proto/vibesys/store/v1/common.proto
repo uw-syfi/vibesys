@@ -20,6 +20,7 @@ enum SeriesRole {
   SERIES_ROLE_REFERENCE = 3;
 }
 
+// Progress counts completed steps; total is absent when the producer cannot know it.
 message Progress {
   option (buf.validate.message).cel = {
     id: "progress.total"

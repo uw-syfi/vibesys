@@ -6,6 +6,7 @@ import "buf/validate/validate.proto";
 
 option go_package = "github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1";
 
+// Attrs for agent_turn, including the final usage and transcript byte length.
 message AgentTurnAttrs {
   string agent = 1 [(buf.validate.field).string = {
     min_len: 1
@@ -41,10 +42,14 @@ message AgentTurnAttrs {
     max_bytes: 65536
   }];
   optional TokenUsage usage = 10;
+  // Interim JSON text until reply messages move to proto in phase 3. Above
+  // 64 KiB, omit this text and attach its complete bytes under blob role reply.
   string reply_json = 11 [(buf.validate.field).string.max_bytes = 65536];
+  // Set when the turn ends. The transcript stays a stream, never a second blob.
   optional uint64 transcript_length = 12;
 }
 
+// Absence means unreported. A reported zero stays present on the wire.
 message TokenUsage {
   optional uint64 input = 1;
   optional uint64 cache_read = 2;

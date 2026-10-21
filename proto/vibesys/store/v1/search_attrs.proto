@@ -69,6 +69,7 @@ enum InputFailureKind {
   INPUT_FAILURE_KIND_WAIT_ENDED = 6;
 }
 
+// Dynamic search vocabulary, carried by its workstream attrs, not core.
 enum WorkstreamFailureKind {
   WORKSTREAM_FAILURE_KIND_UNSPECIFIED = 0;
   WORKSTREAM_FAILURE_KIND_STOPPED = 1;
@@ -92,6 +93,7 @@ enum WorkstreamFailureKind {
   WORKSTREAM_FAILURE_KIND_REPEATED_TURN = 19;
 }
 
+// The existing planning_call kind, shared by hypothesis searches.
 message PlanningAttrs {
   uint32 call = 1;
 }
@@ -140,6 +142,7 @@ message WorkstreamFailure {
   string text = 5 [(buf.validate.field).string.max_bytes = 65536];
 }
 
+// A path and its byte range in the workstream's attached diff blob.
 message FileChange {
   string path = 1 [(buf.validate.field).string = {
     min_len: 1
@@ -149,6 +152,8 @@ message FileChange {
   uint64 diff_length = 3;
 }
 
+// Readings are MetricPoints owned by this gate; there is no duplicate metric
+// value, unit, vs_baseline or output tail in attrs. Stage output is a LOG stream.
 message GateAttrs {
   option (buf.validate.message).cel = {
     id: "gate.input_failure"
@@ -226,6 +231,8 @@ message AdoptionAttrs {
   }];
 }
 
+// Links named candidate and base identify the compared spans. No commit-hash
+// join keys are copied here. ratio and noise describe their sampled comparison.
 message ComparisonAttrs {
   option (buf.validate.message).cel = {
     id: "comparison.direction"
@@ -256,6 +263,8 @@ message ComparisonAttrs {
   uint32 base_samples = 10 [(buf.validate.field).uint32.gt = 0];
 }
 
+// One baseline:<name> span is replaced as readings change; timeline is false
+// on its declaration. Unmeasured baselines may omit all measurement fields.
 message BaselineAttrs {
   string label = 1 [(buf.validate.field).string = {
     min_len: 1

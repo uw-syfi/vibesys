@@ -7,6 +7,21 @@ import "vibesys/store/v1/common.proto";
 
 option go_package = "github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1";
 
+// Runtime-owned startup vocabulary, independent of the strategy.
+enum StartupStage {
+  STARTUP_STAGE_UNSPECIFIED = 0;
+  STARTUP_STAGE_PROBING_WORKSPACE = 1;
+  STARTUP_STAGE_BUILDING_IMAGE = 2;
+  STARTUP_STAGE_BUILDING_TOOLS = 3;
+  STARTUP_STAGE_STARTING_CONTAINER = 4;
+}
+
+enum WaitCondition {
+  WAIT_CONDITION_UNSPECIFIED = 0;
+  WAIT_CONDITION_QUEUED = 1;
+  WAIT_CONDITION_RUNNING = 2;
+}
+
 enum StageState {
   STAGE_STATE_UNSPECIFIED = 0;
   STAGE_STATE_RUNNING = 1;
@@ -26,6 +41,19 @@ enum Outcome {
   OUTCOME_FAILED = 2;
   OUTCOME_STOPPED = 3;
   OUTCOME_INTERRUPTED = 4;
+}
+
+// Core's closed ending vocabulary. Human interruption text is a separate field.
+enum EndReason {
+  END_REASON_UNSPECIFIED = 0;
+  END_REASON_ADOPTED = 1;
+  END_REASON_KEPT_INPUT = 2;
+  END_REASON_NO_WINNER = 3;
+  END_REASON_ADOPTION_FAILED = 4;
+  END_REASON_STOPPED = 5;
+  END_REASON_DEADLINE = 6;
+  END_REASON_FAILED = 7;
+  END_REASON_FINISH_REFUSED = 8;
 }
 
 enum RunFailureKind {
@@ -65,18 +93,18 @@ message Starting {
     message: "progress is present only when state is running"
     expression: "!has(this.progress) || this.state == 1"
   };
-  string stage = 1 [(buf.validate.field).string = {
-    min_len: 1
-    max_bytes: 65536
+  StartupStage stage = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
   }];
   StageState state = 2 [(buf.validate.field).enum = {
     defined_only: true
     not_in: [0]
   }];
   optional Progress progress = 3;
-  optional string condition = 4 [(buf.validate.field).string = {
-    min_len: 1
-    max_bytes: 65536
+  optional WaitCondition condition = 4 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
   }];
   optional double elapsed_seconds = 5 [(buf.validate.field).double = {
     gte: 0
@@ -92,7 +120,10 @@ message Hold {
   oneof reason {
     option (buf.validate.oneof).required = true;
     OperatorHold operator = 1;
-    string capacity_span = 2 [(buf.validate.field).string.min_len = 1];
+    string capacity_span = 2 [(buf.validate.field).string = {
+      min_len: 1
+      max_bytes: 65536
+    }];
   }
 }
 message OperatorHold {}
@@ -116,16 +147,26 @@ message Ended {
     message: "signal is positive and only present for interrupted"
     expression: "!has(this.signal) || (this.outcome == 4 && this.signal > 0)"
   };
+  option (buf.validate.message).cel = {
+    id: "ended.interruption_reason"
+    message: "interruption_reason is only present for interrupted"
+    expression: "!has(this.interruption_reason) || this.outcome == 4"
+  };
   Outcome outcome = 1 [(buf.validate.field).enum = {
     defined_only: true
     not_in: [0]
   }];
-  optional string reason = 2 [(buf.validate.field).string.max_bytes = 65536];
+  optional EndReason reason = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
   string summary = 3 [(buf.validate.field).string.max_bytes = 65536];
   bool resumable = 4;
   bool uncompared = 5;
   optional RunFailure failure = 6;
+  // POSIX signal number when the process caught its interruption.
   optional int32 signal = 7;
+  optional string interruption_reason = 8 [(buf.validate.field).string.max_bytes = 65536];
 }
 
 message RunFailure {

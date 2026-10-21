@@ -8,7 +8,13 @@ import "vibesys/store/v1/content.proto";
 
 option go_package = "github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1";
 
+// Epoch-local run identity and objective. Objectives are ordered headline first.
 message RunDescription {
+  option (buf.validate.message).cel = {
+    id: "run.objectives"
+    message: "objectives must have unique series names"
+    expression: "this.objectives.all(x, this.objectives.filter(y, y.series == x.series).size() == 1)"
+  };
   string strategy = 1 [(buf.validate.field).string = {
     min_len: 1
     max_bytes: 65536
@@ -19,6 +25,7 @@ message RunDescription {
   }];
   BlobRef objective = 3 [(buf.validate.field).required = true];
   repeated Objective objectives = 4;
+  // Argument vector, not a shell command.
   repeated string correctness_check = 5 [(buf.validate.field).repeated.items.string = {
     min_len: 1
     max_bytes: 65536
@@ -58,6 +65,8 @@ message Objective {
   }];
 }
 
+// attrs_type is a fully qualified message name in EpochStarted.descriptors.
+// Verdicts and link relations are declared by the strategy, not by core.
 message SpanKindDecl {
   string kind = 1 [(buf.validate.field).string = {
     min_len: 1
@@ -78,6 +87,7 @@ message SpanKindDecl {
   bool timeline = 5;
 }
 
+// A series is declared once per epoch. NONE is for nondirectional resource data.
 message MetricSeriesDecl {
   string name = 1 [(buf.validate.field).string = {
     min_len: 1

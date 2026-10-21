@@ -248,6 +248,8 @@ func (SteerTargetKind) EnumDescriptor() ([]byte, []int) {
 	return file_vibesys_store_v1_intent_proto_rawDescGZIP(), []int{3}
 }
 
+// What the run did with a request. Delivery is a link from the receiving turn
+// to control_id, not another intent step. Refusals always carry a reason.
 type IntentState struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	ControlId     string                 `protobuf:"bytes,1,opt,name=control_id,json=controlId,proto3" json:"control_id,omitempty"`

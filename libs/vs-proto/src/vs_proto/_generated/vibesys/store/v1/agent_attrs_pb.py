@@ -21,6 +21,8 @@ _AgentTurnAttrsFields: TypeAlias = Literal["agent", "role", "model", "started_by
 
 class AgentTurnAttrs(Message[_AgentTurnAttrsFields]):
     """
+    Attrs for agent_turn, including the final usage and transcript byte length.
+
     ```proto
     message vibesys.store.v1.AgentTurnAttrs
     ```
@@ -67,10 +69,15 @@ class AgentTurnAttrs(Message[_AgentTurnAttrsFields]):
             optional vibesys.store.v1.TokenUsage usage = 10;
             ```
         reply_json:
+            Interim JSON text until reply messages move to proto in phase 3. Above
+            64 KiB, omit this text and attach its complete bytes under blob role reply.
+
             ```proto
             string reply_json = 11;
             ```
         transcript_length:
+            Set when the turn ends. The transcript stays a stream, never a second blob.
+
             ```proto
             optional uint64 transcript_length = 12;
             ```
@@ -115,6 +122,8 @@ _TokenUsageFields: TypeAlias = Literal["input", "cache_read", "cache_creation", 
 
 class TokenUsage(Message[_TokenUsageFields]):
     """
+    Absence means unreported. A reported zero stays present on the wire.
+
     ```proto
     message vibesys.store.v1.TokenUsage
     ```

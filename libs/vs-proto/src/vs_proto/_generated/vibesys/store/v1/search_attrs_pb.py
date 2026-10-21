@@ -24,6 +24,8 @@ _PlanningAttrsFields: TypeAlias = Literal["call"]
 
 class PlanningAttrs(Message[_PlanningAttrsFields]):
     """
+    The existing planning_call kind, shared by hypothesis searches.
+
     ```proto
     message vibesys.store.v1.PlanningAttrs
     ```
@@ -216,6 +218,8 @@ _FileChangeFields: TypeAlias = Literal["path", "diff_offset", "diff_length"]
 
 class FileChange(Message[_FileChangeFields]):
     """
+    A path and its byte range in the workstream's attached diff blob.
+
     ```proto
     message vibesys.store.v1.FileChange
     ```
@@ -256,6 +260,9 @@ _GateAttrsFields: TypeAlias = Literal["stage", "subject", "recipe", "command", "
 
 class GateAttrs(Message[_GateAttrsFields]):
     """
+    Readings are MetricPoints owned by this gate; there is no duplicate metric
+    value, unit, vs_baseline or output tail in attrs. Stage output is a LOG stream.
+
     ```proto
     message vibesys.store.v1.GateAttrs
     ```
@@ -464,6 +471,9 @@ _ComparisonAttrsFields: TypeAlias = Literal["metric", "unit", "direction", "rati
 
 class ComparisonAttrs(Message[_ComparisonAttrsFields]):
     """
+    Links named candidate and base identify the compared spans. No commit-hash
+    join keys are copied here. ratio and noise describe their sampled comparison.
+
     ```proto
     message vibesys.store.v1.ComparisonAttrs
     ```
@@ -546,6 +556,9 @@ _BaselineAttrsFields: TypeAlias = Literal["label", "status", "metric", "unit", "
 
 class BaselineAttrs(Message[_BaselineAttrsFields]):
     """
+    One baseline:<name> span is replaced as readings change; timeline is false
+    on its declaration. Unmeasured baselines may omit all measurement fields.
+
     ```proto
     message vibesys.store.v1.BaselineAttrs
     ```
@@ -896,6 +909,8 @@ class InputFailureKind(Enum):
 
 class WorkstreamFailureKind(Enum):
     """
+    Dynamic search vocabulary, carried by its workstream attrs, not core.
+
     ```proto
     enum vibesys.store.v1.WorkstreamFailureKind
     ```

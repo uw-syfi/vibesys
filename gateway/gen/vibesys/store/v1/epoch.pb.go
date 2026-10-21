@@ -22,16 +22,18 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+// Epoch-local run identity and objective. Objectives are ordered headline first.
 type RunDescription struct {
-	state            protoimpl.MessageState `protogen:"open.v1"`
-	Strategy         string                 `protobuf:"bytes,1,opt,name=strategy,proto3" json:"strategy,omitempty"`
-	Input            string                 `protobuf:"bytes,2,opt,name=input,proto3" json:"input,omitempty"`
-	Objective        *BlobRef               `protobuf:"bytes,3,opt,name=objective,proto3" json:"objective,omitempty"`
-	Objectives       []*Objective           `protobuf:"bytes,4,rep,name=objectives,proto3" json:"objectives,omitempty"`
-	CorrectnessCheck []string               `protobuf:"bytes,5,rep,name=correctness_check,json=correctnessCheck,proto3" json:"correctness_check,omitempty"`
-	Evaluator        *Evaluator             `protobuf:"bytes,6,opt,name=evaluator,proto3,oneof" json:"evaluator,omitempty"`
-	MaxWorkstreams   *uint32                `protobuf:"varint,7,opt,name=max_workstreams,json=maxWorkstreams,proto3,oneof" json:"max_workstreams,omitempty"`
-	ExpectedRoles    []string               `protobuf:"bytes,8,rep,name=expected_roles,json=expectedRoles,proto3" json:"expected_roles,omitempty"`
+	state      protoimpl.MessageState `protogen:"open.v1"`
+	Strategy   string                 `protobuf:"bytes,1,opt,name=strategy,proto3" json:"strategy,omitempty"`
+	Input      string                 `protobuf:"bytes,2,opt,name=input,proto3" json:"input,omitempty"`
+	Objective  *BlobRef               `protobuf:"bytes,3,opt,name=objective,proto3" json:"objective,omitempty"`
+	Objectives []*Objective           `protobuf:"bytes,4,rep,name=objectives,proto3" json:"objectives,omitempty"`
+	// Argument vector, not a shell command.
+	CorrectnessCheck []string   `protobuf:"bytes,5,rep,name=correctness_check,json=correctnessCheck,proto3" json:"correctness_check,omitempty"`
+	Evaluator        *Evaluator `protobuf:"bytes,6,opt,name=evaluator,proto3,oneof" json:"evaluator,omitempty"`
+	MaxWorkstreams   *uint32    `protobuf:"varint,7,opt,name=max_workstreams,json=maxWorkstreams,proto3,oneof" json:"max_workstreams,omitempty"`
+	ExpectedRoles    []string   `protobuf:"bytes,8,rep,name=expected_roles,json=expectedRoles,proto3" json:"expected_roles,omitempty"`
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
 }
@@ -226,6 +228,8 @@ func (x *Objective) GetDirection() Direction {
 	return Direction_DIRECTION_UNSPECIFIED
 }
 
+// attrs_type is a fully qualified message name in EpochStarted.descriptors.
+// Verdicts and link relations are declared by the strategy, not by core.
 type SpanKindDecl struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Kind          string                 `protobuf:"bytes,1,opt,name=kind,proto3" json:"kind,omitempty"`
@@ -302,6 +306,7 @@ func (x *SpanKindDecl) GetTimeline() bool {
 	return false
 }
 
+// A series is declared once per epoch. NONE is for nondirectional resource data.
 type MetricSeriesDecl struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
@@ -374,7 +379,7 @@ var File_vibesys_store_v1_epoch_proto protoreflect.FileDescriptor
 
 const file_vibesys_store_v1_epoch_proto_rawDesc = "" +
 	"\n" +
-	"\x1cvibesys/store/v1/epoch.proto\x12\x10vibesys.store.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1dvibesys/store/v1/common.proto\x1a\x1evibesys/store/v1/content.proto\"\xe2\x03\n" +
+	"\x1cvibesys/store/v1/epoch.proto\x12\x10vibesys.store.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1dvibesys/store/v1/common.proto\x1a\x1evibesys/store/v1/content.proto\"\xfb\x04\n" +
 	"\x0eRunDescription\x12'\n" +
 	"\bstrategy\x18\x01 \x01(\tB\v\xbaH\br\x06\x10\x01(\x80\x80\x04R\bstrategy\x12!\n" +
 	"\x05input\x18\x02 \x01(\tB\v\xbaH\br\x06\x10\x01(\x80\x80\x04R\x05input\x12?\n" +
@@ -387,7 +392,8 @@ const file_vibesys_store_v1_epoch_proto_rawDesc = "" +
 	"\tevaluator\x18\x06 \x01(\v2\x1b.vibesys.store.v1.EvaluatorH\x00R\tevaluator\x88\x01\x01\x12,\n" +
 	"\x0fmax_workstreams\x18\a \x01(\rH\x01R\x0emaxWorkstreams\x88\x01\x01\x127\n" +
 	"\x0eexpected_roles\x18\b \x03(\tB\x10\xbaH\r\x92\x01\n" +
-	"\"\br\x06\x10\x01(\x80\x80\x04R\rexpectedRolesB\f\n" +
+	"\"\br\x06\x10\x01(\x80\x80\x04R\rexpectedRoles:\x96\x01\xbaH\x92\x01\x1a\x8f\x01\n" +
+	"\x0erun.objectives\x12(objectives must have unique series names\x1aSthis.objectives.all(x, this.objectives.filter(y, y.series == x.series).size() == 1)B\f\n" +
 	"\n" +
 	"_evaluatorB\x12\n" +
 	"\x10_max_workstreams\"S\n" +

@@ -17,13 +17,20 @@ option go_package = "github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;sto
 // Record is the append-only run log envelope. Store changes are additive only.
 // A run.log starts with the eight-byte magic VSRLOG01. Each record then has
 // a uvarint payload length, a four-byte little-endian CRC32C of the payload,
-// and the payload: one encoded vibesys.store.v1.Record.
+// and the payload: one encoded vibesys.store.v1.Record, at most 1 MiB.
+// Writers and readers enforce the encoded byte cap. Content above 64 KiB is
+// attached as a blob; truncation is never a valid way to meet either cap.
 message Record {
   // Phase 1 records keep their validation behavior during the seven-day bridge.
   option (buf.validate.message).cel = {
     id: "record.identity"
     message: "seq, epoch and at are required for typed records"
     expression: "!(has(this.lifecycle) || has(this.span) || has(this.metric) || has(this.stream) || has(this.blob) || has(this.intent) || has(this.notice)) || (this.seq > 0u && this.epoch > 0u && has(this.at))"
+  };
+  option (buf.validate.message).cel = {
+    id: "record.epoch_started"
+    message: "epoch_started epoch must match epoch and seq and at must be present for a typed header"
+    expression: "!has(this.epoch_started) || !has(this.epoch_started.run) || (this.epoch == this.epoch_started.epoch && this.seq > 0u && has(this.at))"
   };
   uint64 seq = 1;
   google.protobuf.Timestamp at = 2;
@@ -44,6 +51,32 @@ message Record {
 
 // EpochStarted identifies the writer and schemas for one run epoch.
 message EpochStarted {
+  // A run description identifies the typed header. Phase 1 headers have none.
+  option (buf.validate.message).cel = {
+    id: "epoch.identity"
+    message: "run_id, epoch, tree_hash and vibesys_version are required for a typed run header"
+    expression: "!has(this.run) || (this.run_id != '' && this.epoch > 0u && this.tree_hash != '' && this.vibesys_version != '')"
+  };
+  option (buf.validate.message).cel = {
+    id: "epoch.span_kinds"
+    message: "span_kinds must have unique kind names and descriptors when nonempty"
+    expression: "this.span_kinds.all(x, this.span_kinds.filter(y, y.kind == x.kind).size() == 1) && (this.span_kinds.size() == 0 || (has(this.descriptors) && this.descriptors.file.size() > 0))"
+  };
+  option (buf.validate.message).cel = {
+    id: "epoch.series"
+    message: "series must have unique names"
+    expression: "this.series.all(x, this.series.filter(y, y.name == x.name).size() == 1)"
+  };
+  option (buf.validate.message).cel = {
+    id: "epoch.objectives"
+    message: "run objectives must name series declared with the same direction and objective role"
+    expression: "!has(this.run) || this.run.objectives.all(o, this.series.exists(s, s.name == o.series && s.direction == o.direction && s.role == 1))"
+  };
+  option (buf.validate.message).cel = {
+    id: "epoch.schema_hashes"
+    message: "api_schema_hash and store_schema_hash must be lowercase SHA-256 for a typed header"
+    expression: "!has(this.run) || (this.api_schema_hash.matches('^[0-9a-f]{64}$') && this.store_schema_hash.matches('^[0-9a-f]{64}$'))"
+  };
   string run_id = 1;
   uint32 epoch = 2;
   string tree_hash = 3;

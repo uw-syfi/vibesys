@@ -126,6 +126,7 @@ func (StreamState) EnumDescriptor() ([]byte, []int) {
 	return file_vibesys_store_v1_content_proto_rawDescGZIP(), []int{1}
 }
 
+// Value is a finite, possibly signed measurement. clock is run-clock seconds.
 type MetricPoint struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Series        string                 `protobuf:"bytes,1,opt,name=series,proto3" json:"series,omitempty"`
@@ -194,6 +195,8 @@ func (x *MetricPoint) GetClock() float64 {
 	return 0
 }
 
+// Streams are append-only. Only a closed LOG carries length here; a TRANSCRIPT
+// belongs to a turn whose final AgentTurnAttrs.transcript_length seals its view.
 type StreamRef struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
@@ -278,6 +281,7 @@ func (x *StreamRef) GetLength() uint64 {
 	return 0
 }
 
+// Immutable content addressed by the lowercase hexadecimal SHA-256 of its bytes.
 type BlobRef struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Sha256        string                 `protobuf:"bytes,1,opt,name=sha256,proto3" json:"sha256,omitempty"`
@@ -338,6 +342,8 @@ func (x *BlobRef) GetMediaType() string {
 	return ""
 }
 
+// Roles are extensible (system_prompt, user_prompt, raw_result, reply, diff, ...).
+// Content above 64 KiB is attached rather than truncated or embedded in a record.
 type BlobAttached struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Span          string                 `protobuf:"bytes,1,opt,name=span,proto3" json:"span,omitempty"`

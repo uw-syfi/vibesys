@@ -341,6 +341,8 @@ func (SpanFailureKind) EnumDescriptor() ([]byte, []int) {
 	return file_vibesys_store_v1_span_proto_rawDescGZIP(), []int{5}
 }
 
+// The whole span replaces its previous version by id. UPDATED can replace an
+// ended span, for example when comparison samples change. There are no deltas.
 type SpanRecord struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Change        Change                 `protobuf:"varint,1,opt,name=change,proto3,enum=vibesys.store.v1.Change" json:"change,omitempty"`
@@ -393,6 +395,7 @@ func (x *SpanRecord) GetSpan() *Span {
 	return nil
 }
 
+// Times are seconds on the monotone run clock, which freezes while parked.
 type Span struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
@@ -773,6 +776,8 @@ func (x *Stop) GetLanded() bool {
 	return false
 }
 
+// Resolve attrs_type from the declaration current at the span start. The read
+// boundary unpacks and validates attrs with that descriptor; Any is extensible.
 type Label struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Kind          string                 `protobuf:"bytes,1,opt,name=kind,proto3" json:"kind,omitempty"`
@@ -857,6 +862,7 @@ func (x *Label) GetAttrs() *anypb.Any {
 	return nil
 }
 
+// A link may target a span or an intent control_id (delivery of a steer).
 type SpanLink struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Rel           string                 `protobuf:"bytes,1,opt,name=rel,proto3" json:"rel,omitempty"`
