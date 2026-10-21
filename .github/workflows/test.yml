@@ -244,7 +244,13 @@ jobs:
       # Reuse this job's Node, Python and Go setup rather than adding a runner.
       - name: Check protobuf contracts
         if: needs.changes.outputs.proto == 'true'
-        run: ./support/repoctl/repoctl run-checks --group proto
+        env:
+          # The checkout is shallow; the store compatibility check compares
+          # against the pull request's base (main outside a pull request).
+          BASE_BRANCH: ${{ github.base_ref || 'main' }}
+        run: |
+          git fetch --no-tags --depth=1 origin "+refs/heads/${BASE_BRANCH}:refs/remotes/origin/${BASE_BRANCH}"
+          PROTO_BASE_REF="origin/${BASE_BRANCH}" ./support/repoctl/repoctl run-checks --group proto
 
   clients-tests:
     needs: changes
