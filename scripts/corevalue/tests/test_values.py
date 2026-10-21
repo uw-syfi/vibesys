@@ -8,6 +8,41 @@ from hypothesis import strategies as st
 from pydantic import ValidationError
 
 from scripts.corevalue.tests.api import FrozenMap, MapValue, TimestampValue, decode, encode
+from vs_core.api import (
+    ENVELOPE_SCHEMA_VERSION,
+    EventCursor,
+    HostFence,
+    HostId,
+    OperationRegistry,
+    RunEnvelope,
+    StrategyState,
+    initial_state,
+)
+
+
+class GeneratedMapState(StrategyState):
+    value: MapValue
+
+
+@given(counts=st.dictionaries(st.text(max_size=10), st.integers(min_value=-100, max_value=100)))
+def test_generated_maps_work_inside_the_existing_persisted_envelope(counts: dict[str, int]) -> None:
+    state = initial_state()
+    envelope = RunEnvelope[GeneratedMapState](
+        schema_version=ENVELOPE_SCHEMA_VERSION,
+        fence=HostFence(host_id=HostId(root="host"), epoch=1),
+        strategy_id=state.run.declaration.strategy_id,
+        state_schema=state.run.declaration.state_schema,
+        core=state,
+        strategy=GeneratedMapState(
+            schema_version=state.run.declaration.state_schema.version,
+            value=MapValue(counts=FrozenMap(counts)),
+        ),
+        event_cursor=EventCursor(sequence=0),
+    )
+    registry = OperationRegistry()
+    encoded = registry.encode_envelope(envelope)
+    assert registry.decode_envelope(RunEnvelope[GeneratedMapState], encoded) == envelope
+    assert registry.reload_envelope(RunEnvelope[GeneratedMapState], envelope) == envelope
 
 
 @given(

@@ -99,6 +99,7 @@ class FrozenMap[K, V](Mapping[K, V]):
     """A copied immutable map with order-independent equality and cached hash."""
 
     __slots__ = ("_data", "_hash")
+    __pydantic_serializer__: ClassVar[object]
 
     def __init__(self, items: Mapping[K, V] | None = None) -> None:
         object.__setattr__(self, "_data", MappingProxyType(dict(items or {})))
@@ -157,6 +158,11 @@ def _map_input(value: object) -> object:
 def _map_output(value: FrozenMap) -> dict:
     """The envelope's ordinary JSON object spelling."""
     return dict(value)
+
+
+# Envelope canonicalization uses Pydantic's duck-typed serialization. Register the
+# same map serializer there, where a field's generic annotation is unavailable.
+FrozenMap.__pydantic_serializer__ = TypeAdapter(FrozenMap[object, object]).serializer
 
 
 # Timestamp's intrinsic range is part of the protobuf well-known type, rather than

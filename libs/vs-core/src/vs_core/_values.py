@@ -62,7 +62,7 @@ def _validate_annotation(annotation: object, path: tuple[str, ...], seen: set[ty
             for child in arguments
         ):
             raise ImmutableSchemaError(path, "immutable primitive Literal required")
-    elif origin in (tuple, frozenset, UnionType, Union):
+    elif origin in (tuple, frozenset, FrozenMap, UnionType, Union):
         for child in arguments:
             if child is not Ellipsis:
                 _validate_annotation(child, path, seen)
