@@ -47,7 +47,7 @@ from entrypoints.cli.config import (
     load_config_and_skills,
 )
 from entrypoints.cli.constants import _OUTER_LOOPS
-from entrypoints.cli.environment import run_environment_spec_from_args
+from entrypoints.cli.environment import TaskImageBuild, run_environment_spec_from_args
 from entrypoints.cli.errors import _configuration_error, _RunArgumentParser
 from entrypoints.cli.inputs import (
     _apply_bundle_profiler_default,
@@ -175,7 +175,12 @@ def build_reader_request(project_root: Path, run_id: str) -> RunRequest:
         ],
         read_only=True,
     )
-    return validated_run_request(invocation.args, read_only=True)[0]
+    request = validated_run_request(invocation.args, read_only=True)[0]
+    environment = run_environment_spec_from_args(
+        invocation.args,
+        task_image=TaskImageBuild(backend=request.backend, allow_build=False),
+    )
+    return request.model_copy(update={"run_environment": environment})
 
 
 def _explicit_cli_dests(
