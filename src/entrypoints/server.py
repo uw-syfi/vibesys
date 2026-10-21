@@ -119,7 +119,8 @@ def _termination_signal(
     CPython runs Python handlers on the main thread only, so a handler installed
     for SIGTERM is not run while the main thread is blocked in the run. *relay*
     observes the signal on whichever thread took it, then *wake* interrupts the main
-    thread, resent until the main thread has taken it (see ``MainThreadInterrupt``).
+    thread, resent until the scope ends so discarded interruptions can be recovered
+    (see ``MainThreadInterrupt``).
     """
 
     def on_wake() -> None:
@@ -129,6 +130,7 @@ def _termination_signal(
     with ExitStack() as scope:
         send = scope.enter_context(wake.armed(on_wake))
         interrupt = MainThreadInterrupt(send, threads, _report_stuck_main_thread)
+        scope.enter_context(interrupt.recovering())
 
         def on_signal(signum: int) -> None:
             number = Signals(signum)
@@ -140,6 +142,8 @@ def _termination_signal(
         scope.enter_context(
             relay.relay([Signals.SIGINT, Signals.SIGTERM, Signals.SIGHUP], on_signal)
         )
+        # End resends before the relay joins its blocked request callback.
+        scope.callback(interrupt.finish)
         yield
 
 

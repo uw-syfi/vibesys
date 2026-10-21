@@ -53,11 +53,12 @@ def _interruptions(
                     first_interruption.set()
 
         threads.spawn(main_thread, name="main-thread")
-        for _ in range(requests):
-            interrupt.request()
-        wait_or_fail(first_interruption, "the main thread's interruption")
-        # Let every resend still on its way reach the main thread.
+        for index in range(requests):
+            threads.spawn(interrupt.request, name=f"request-{index}")
+            wait_or_fail(first_interruption, "the main thread taking the request")
+        # A taken wake keeps resending without raising again during cleanup.
         threads.sleep(1.0)
+        interrupt.finish()
         return len(interrupted), len(sent), stuck
 
     return threads.run(run)

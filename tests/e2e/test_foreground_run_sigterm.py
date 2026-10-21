@@ -8,21 +8,32 @@ to prove the wiring.
 
 from __future__ import annotations
 
+import gc
 import os
 import signal
 import subprocess
 import sys
 from functools import partial
+from typing import TYPE_CHECKING
 
 import pytest
+from hypothesis import example, given
+from hypothesis import strategies as st
 from tests.e2e.foreground_run_child import interrupted_run
 
+from entrypoints.main_thread_interrupt import MainThreadInterrupt
+from vs_sim.api import OsThreads
 from vs_sim.api.testing import (
     HANG_GUARD_S,
     TGKILL_SUPPORTED,
     run_in_child,
     send_to_thread,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+    from sys import UnraisableHookArgs
+
 
 requires_tgkill = pytest.mark.skipif(
     not TGKILL_SUPPORTED, reason="tgkill syscall number is unknown"
@@ -45,6 +56,14 @@ def test_sigterm_taken_by_any_thread_interrupts_the_foreground_run(
     # lands, the run ends interrupted (the interleavings are in
     # tests/entrypoints/test_main_thread_interrupt.py).
     cleanups, ended = run_in_child(partial(interrupted_run, transports, target))
+
+    assert ended == "interrupted"
+    assert cleanups == [True]
+
+
+@requires_tgkill
+def test_sigterm_whose_first_wake_is_discarded_by_gc_still_interrupts_the_run() -> None:
+    cleanups, ended = run_in_child(partial(interrupted_run, 1, 0, discard_wake_in_gc=True))
 
     assert ended == "interrupted"
     assert cleanups == [True]
@@ -82,3 +101,59 @@ def test_sigterm_taken_by_a_transport_thread_stops_the_real_server_process() -> 
         child.kill()
     assert "cleanup shutdown=True" in output
     assert child.returncode != 0
+
+
+def _discarded_interruptions(discarded: int) -> None:
+    """Exercise the scope in a child: hooks and GC callbacks belong to the process."""
+    seen: list[BaseException | None] = []
+    previous = sys.unraisablehook
+    enabled = gc.isenabled()
+    gc.disable()
+
+    def observe(error: UnraisableHookArgs) -> None:
+        seen.append(error.exc_value)
+
+    def collect(callback: Callable[[str, dict[str, int]], None]) -> None:
+        gc.callbacks.append(callback)
+        try:
+            gc.collect()
+        finally:
+            gc.callbacks.remove(callback)
+
+    interrupt = MainThreadInterrupt(lambda: None, OsThreads(), lambda _waited: None)
+
+    def discard(phase: str, _info: dict[str, int]) -> None:
+        if phase == "start":
+            interrupt.take()
+
+    def unrelated(phase: str, _info: dict[str, int]) -> None:
+        if phase == "start":
+            raise ValueError
+
+    sys.unraisablehook = observe
+    try:
+        with interrupt.recovering():
+            for _ in range(discarded):
+                collect(discard)
+            assert len(seen) == discarded
+            assert all(isinstance(error, KeyboardInterrupt) for error in seen)
+            with pytest.raises(KeyboardInterrupt):
+                interrupt.take()
+            # Ordinary propagation protects cleanup; an unrelated unraisable error
+            # must be forwarded without rearming this interruption.
+            collect(unrelated)
+            assert isinstance(seen[-1], ValueError)
+            interrupt.take()
+        assert sys.unraisablehook is observe
+        interrupt.take()
+    finally:
+        sys.unraisablehook = previous
+        if enabled:
+            gc.enable()
+
+
+@pytest.mark.regression
+@example(discarded=1)
+@given(discarded=st.integers(0, 5))
+def test_only_our_discarded_interruptions_rearm_delivery(discarded: int) -> None:
+    run_in_child(partial(_discarded_interruptions, discarded))
