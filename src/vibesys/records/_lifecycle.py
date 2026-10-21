@@ -188,16 +188,22 @@ def ended(projection: Projection) -> None:
 
 def warning(projection: Projection) -> None:
     data = projection.event.data
-    if not isinstance(data, e.FrameworkWarningData):
-        message = "framework_warning requires FrameworkWarningData"
+    if data is None:
+        # Older producers persist the warning text without a structured payload.
+        text = projection.event.text or ""
+    elif isinstance(data, e.FrameworkWarningData):
+        text = data.summary + ("\n" + data.detail if data.detail else "")
+    else:
+        message = "framework_warning requires text or FrameworkWarningData"
         raise TypeError(message)
-    text = data.summary + ("\n" + data.detail if data.detail else "")
     projection.emit(
         "notice",
         p.Notice(
             severity=p.Severity.WARNING,
             code=p.NoticeCode.FRAMEWORK_WARNING,
-            message=projection.text("run", "notice", text),
+            message=projection.text("run", "notice", text or "Framework warning"),
+            # Notice requires a display message; retain an empty source exactly.
+            detail=projection.pack(StringValue(value=text)) if not text else None,
         ),
     )
 
