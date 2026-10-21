@@ -37,7 +37,7 @@ read path and journal projection from the native core and control work still to 
 | `Skeleton`, `GetBlobs`, `TailStream`, `WatchRuns`; new Run screen | RPCs, client skeleton/cache and opt-in raw record panel built; complete native Run screen remains unbuilt | 2 |
 | Conversion of existing JSONL runs and `store.json` envelopes | typed journal conversion and bulk project/host-index conversion built, including blobs, final keyframes, head publication and repair; pre-trace and unsupported journals are reported as skipped; core envelopes remain the resume authority until phase 3 | 2 |
 | Core state as generated types, `state.pb`, native `run.log` writes | unbuilt; typed journal projection does not replace native core commits | 3 |
-| Intents as records (`IntentState`), pause/park, relaunch epochs | inbox outcomes and relaunch epochs built over the current saved-state resume path; park and native state recovery remain unbuilt | 3 |
+| Intents as records (`IntentState`), pause/park, relaunch epochs | inbox outcomes, park and relaunch epochs built over the current saved-state resume path; native state recovery remains unbuilt | 3 |
 | Typed `HostCall` for intents and relaunch; chat sessions as processes | HostCall built; chat sessions remain unbuilt | 3 |
 | Generated frozen value classes from `.proto` (our own protoc plugin) | prototype only | 3 |
 | Control inbox (files, ordered, durable, idempotent by request id) | built | |

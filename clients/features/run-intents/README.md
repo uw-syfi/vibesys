@@ -17,7 +17,7 @@ fills HostCall's checkout from the host's current saved configuration. The
 feature never chooses an executable. Its actor cancels every owned call when
 unmounted or disabled. The legacy controls stay on the legacy path.
 
-Pause, resume, stop (drain), and guidance are visible controls. The typed host
+Pause, resume, stop (drain), park, and guidance are visible controls. The typed host
 surface also accepts withdraw, cancel-attempt, cancel-item, and set-parallelism.
 The command uses the existing inbox's validation, posting order, idempotence,
 local-run guard, and ended-run rules. Retrying after an uncertain result sends
@@ -29,8 +29,7 @@ skeleton projection.
 
 ## Current limits
 
-The existing inbox has no park or chat-message request. Park is represented in
-the typed command surface and refused before writing; chat messages are absent.
+Chat-message requests are absent.
 The journal's [control projection](../../../src/vibesys/records/_control.py)
 produces IntentState for steer and guidance delivery events. Lifecycle controls
 publish lifecycle records without request ids, so those requests stay pending
