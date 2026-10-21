@@ -67,7 +67,10 @@ class PollingEvaluationExecutor:
     """Run semantic evaluation requests in-process, publishing observations a caller polls.
 
     Each submitted request evaluates its candidate snapshot in a fresh candidate
-    workspace through the trusted ``Evaluation`` effects, one stage at a time.
+    workspace through the trusted ``Evaluation`` effects, one stage at a time;
+    where the run environment cannot open isolated candidates (the host), the
+    stages run in the root workspace, which holds the submitted revision once the
+    agent's turn is over, as trusted commands do there.
     Observations are process-local: nothing survives a restart.
     """
 
@@ -163,7 +166,15 @@ class PollingEvaluationExecutor:
         failure: str | None = None
         operator_failure: str | None = None
         try:
-            workspace = await self._workspaces.create_measured_candidate(first.snapshot)
+            if self._workspaces.supports_parallel_candidates:
+                workspace = await self._workspaces.create_measured_candidate(first.snapshot)
+                evaluated: Workspace = workspace
+            else:
+                # The host run environment opens no isolated candidate: the gates
+                # run in the root, which holds the submitted revision once the
+                # agent's turn is over, as trusted commands do there. Nothing is
+                # withheld from it; it is the agent's live tree.
+                evaluated = self._workspaces.root
             self._publish(
                 handle_id,
                 ExecutorObservation(
@@ -175,7 +186,7 @@ class PollingEvaluationExecutor:
                 with self._open_output(
                     StageRun(handle_id, step.name, purpose=stage.purpose)
                 ) as output:
-                    observed = await self._evaluate(workspace, stage, handle_id, output)
+                    observed = await self._evaluate(evaluated, stage, handle_id, output)
                 evidence = observed.evidence
                 results.append(
                     EvaluationStepResult(

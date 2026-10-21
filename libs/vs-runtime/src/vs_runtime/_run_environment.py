@@ -707,7 +707,10 @@ class HostEnvironment(RefusesDockerInDocker, _NoopWorkspaceRecovery):
     def prepare(self, request: RunEnvironmentRequest) -> _PreparedRunEnvironment:
         """Fail with ``SandboxUnavailableError`` when host confinement is unavailable."""
         reject_docker_in_docker(docker_in_docker=request.docker_in_docker, environment="host")
-        self._build_sandbox(request.workspace, env={}, require_enforcement=True)
+        # The launcher's environment carries the operator's confinement choice
+        # (VIBESYS_AGENT_SANDBOX=landlock where bubblewrap cannot run); an
+        # empty one would demand bubblewrap and fail a job container.
+        self._build_sandbox(request.workspace, env=dict(os.environ), require_enforcement=True)
         return _PreparedRunEnvironment(HostEnvironmentFacts(), partial(self._open, request))
 
     def _open(

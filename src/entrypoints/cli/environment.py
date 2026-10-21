@@ -219,6 +219,10 @@ def run_environment_spec_from_args(
     )
     image = plan.image
 
+    if requested_environment == "host":
+        # Agents and evaluation on this machine, under its own sandbox; the
+        # editor-image decision above already refused a task Dockerfile here.
+        return RunEnvironmentSpec(name="host", options={})
     if requested_environment == "slurm-gpu":
         return RunEnvironmentSpec(
             name="slurm-gpu",

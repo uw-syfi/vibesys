@@ -358,11 +358,15 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--run-environment",
         type=_run_environment_name,
-        choices=("docker", "modal", "skypilot", "slurm", "slurm-gpu"),
+        choices=("docker", "host", "modal", "skypilot", "slurm", "slurm-gpu"),
         default=None,
         help=(
             "Select where evaluation runs; the default is docker. Agents always run "
-            "in a local Docker container. SkyPilot and Modal keep the agent in a "
+            "in a local Docker container, except under host, which runs agents and "
+            "evaluation on this machine inside its own sandbox (bubblewrap or "
+            "Landlock on Linux, Seatbelt on macOS): for a machine that has the GPUs "
+            "and the serving stack but no Docker daemon, such as a job container. "
+            "SkyPilot and Modal keep the agent in a "
             "local CPU-only Docker editor and dispatch evaluation remotely. "
             "slurm-gpu is a deprecated alias: it reads the old [slurm_gpu] file, "
             "translates it to a slurm configuration with local transport and "

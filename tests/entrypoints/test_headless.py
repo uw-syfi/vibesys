@@ -215,6 +215,17 @@ accelerator_backend = "rocm"
     assert spec.resources.accelerators_per_node == 4
 
 
+def test_cli_selects_the_host_environment_on_request(tmp_path: Path) -> None:
+    """A machine with the GPUs and the serving stack but no Docker daemon (a job
+    container) runs agents and evaluation on the host, under its own sandbox."""
+    project = _write_input_project(tmp_path)
+
+    invocation = parse_cli_invocation(["--input", str(project), "--run-environment", "host"])
+    spec = run_environment_spec_from_args(invocation.args)
+
+    assert spec == RunEnvironmentSpec(name="host", options={})
+
+
 def _write_slurm_operator_config(path: Path) -> Path:
     """Write the smallest operator file that the CLI's profiler validation can load."""
     path.write_text(

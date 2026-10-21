@@ -194,3 +194,24 @@ def test_a_host_record_is_not_migrated_to_docker_on_any_platform(platform: str) 
         log=lambda _: None,
     )
     assert (run_environment_record(relaunch) == record) is (platform == "darwin")
+
+
+def test_prepare_hands_the_launcher_environment_to_the_sandbox_builder(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The operator's confinement choice (``VIBESYS_AGENT_SANDBOX=landlock`` where
+    bubblewrap cannot run, as in a job container) lives in the launcher's
+    environment; a builder given an empty one demands bubblewrap and refuses."""
+    seen: list[dict[str, str]] = []
+
+    def build(
+        workspace: Path, *, env: dict[str, str], require_enforcement: bool = False
+    ) -> WorkspaceSandbox | None:
+        del require_enforcement
+        seen.append(env)
+        return _sandbox(workspace)
+
+    monkeypatch.setenv("VIBESYS_AGENT_SANDBOX", "landlock")
+    HostEnvironment(build_sandbox=build).prepare(_request(Path("/project")))
+
+    assert seen[0]["VIBESYS_AGENT_SANDBOX"] == "landlock"
