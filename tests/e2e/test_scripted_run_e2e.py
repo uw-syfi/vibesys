@@ -16,13 +16,15 @@ The edits of that example are built and measured natively by ``test_scripted_que
 
 from __future__ import annotations
 
+import asyncio
 import re
 from typing import TYPE_CHECKING
 
-from tests.e2e.dynamic_loop_harness import _AGENT_CONFIG, LoopInput, run_request
+from tests.e2e.dynamic_loop_harness import _AGENT_CONFIG, LoopInput, resume_request, run_request
 
+import vs_proto.api as p
 from launch.scripted_agents import ScriptedDynamicAgents
-from vibesys.api import RunStatus
+from vibesys.api import RunHandle, RunStatus
 from vibesys.events import CoreEventType, WorkstreamFinishedData
 from vibesys.orchestration.dynamic.scripted.api import (
     CHAT_REPLY,
@@ -34,6 +36,8 @@ from vibesys.orchestration.dynamic.scripted.api import (
     Workload,
 )
 from vs_agent.api import ScriptedAgentClient, ScriptedClientSetup
+from vs_project.api import Project
+from vs_runlog.api import RunLogReader
 from vs_sim.api import OsThreads
 
 if TYPE_CHECKING:
@@ -144,3 +148,56 @@ def test_scripted_agents_plan_edit_and_judge_through_the_real_backend(tmp_path: 
     assert any(error is not None for error in ended)
     # The agents narrate their turns, so a frontend has something to show for each.
     assert CoreEventType.AGENT_OUTPUT_CHUNK in types
+
+
+def test_scripted_run_relaunches_once_from_saved_state(tmp_path: Path) -> None:
+    loop_input = LoopInput.create(
+        tmp_path,
+        on_disk_state=True,
+        agent_config=f"{_AGENT_CONFIG}[agent]\nscripted_seed = {SEED}\n",
+    )
+    request = loop_input.request(agent_backend="scripted", max_rounds=1, max_in_flight=1)
+    stopped: list[asyncio.Task[None]] = []
+
+    async def stop_after_start(handle: RunHandle) -> None:
+        async with asyncio.timeout(60):
+            async for event in handle.events():
+                if event.type is CoreEventType.AGENT_EXECUTION_STARTED:
+                    handle.stop()
+                    return
+        message = "the scripted run ended before starting an agent"
+        raise AssertionError(message)
+
+    first = run_request(
+        request,
+        _NoAgents(),
+        client_factory=_scripted_client,
+        slurm_processes=loop_input.connector,
+        verify=False,
+        on_handle=lambda handle: stopped.append(asyncio.create_task(stop_after_start(handle))),
+    )
+    first.raise_error()
+    assert first.status is RunStatus.STOPPED
+    assert len(stopped) == 1
+    stopped[0].result()
+    second = run_request(
+        resume_request(request, first.run_id),
+        _NoAgents(),
+        client_factory=_scripted_client,
+        slurm_processes=loop_input.connector,
+        verify=False,
+    )
+    second.raise_error()
+    assert second.run_id == first.run_id
+    with Project.run_log_path_for(loop_input.root, first.run_id).open("rb") as stream:
+        records = list(RunLogReader(stream))
+    headers = [r.body.value.epoch for r in records if r.body and r.body.field == "epoch_started"]
+    assert set(headers) == {1, 2}
+    ends = [
+        r
+        for r in records
+        if r.body and r.body.field == "lifecycle" and r.body.value.state.field == "ended"
+    ]
+    assert [r.epoch for r in ends] == [1, 2]
+    assert ends[0].body.value.state.value.outcome in {p.Outcome.STOPPED, p.Outcome.INTERRUPTED}
+    assert [r.clock for r in records] == sorted(r.clock for r in records)

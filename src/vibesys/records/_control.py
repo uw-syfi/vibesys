@@ -44,6 +44,8 @@ def steer(projection: Projection) -> None:
             if link not in span.label.links:
                 span.label.links.append(link)
             projection.span(span)
+    if projection.state.native_intents:
+        return
     refused = delivery.state.value in {"dropped", "refused"}
     intent = p.IntentState(
         control_id=control_id,
@@ -85,7 +87,24 @@ def refusal(projection: Projection) -> None:
         )
 
 
-MAPPERS = {e.CoreEventType.CONTROL_REFUSED: refusal, e.CoreEventType.REQUEST_REJECTED: refusal}
+def outcome(projection: Projection) -> None:
+    data = projection.event.data
+    if not isinstance(data, e.IntentStateData):
+        message = "intent_state requires IntentStateData"
+        raise TypeError(message)
+    intent = p.IntentState.from_json(data.state_json)
+    p.validate(intent)
+    if intent.control_id in projection.intents:
+        return
+    projection.intents[intent.control_id] = intent.to_binary()
+    projection.emit("intent", intent)
+
+
+MAPPERS = {
+    e.CoreEventType.CONTROL_REFUSED: refusal,
+    e.CoreEventType.REQUEST_REJECTED: refusal,
+    e.CoreEventType.INTENT_STATE: outcome,
+}
 MAPPERS.update(
     dict.fromkeys(
         (

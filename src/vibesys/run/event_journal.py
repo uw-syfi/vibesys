@@ -6,14 +6,21 @@ import asyncio
 import logging
 from typing import TYPE_CHECKING
 
-from vibesys.events import CoreEvent, CoreEventData, CoreEventType, make_core_event
+import vs_proto.api as p
+from vibesys.events import CoreEvent, CoreEventData, CoreEventType, IntentStateData, make_core_event
 from vibesys.run.runlog_tee import RunLogTee
 from vs_runlog.api import FileRunContent, FileRunLogWriter
-from vs_runtime.api.infrastructure import DurableEventJournal, EventCodec
+from vs_runtime.api.infrastructure import (
+    DurableEventJournal,
+    EventCodec,
+    SteerRequest,
+    WithdrawRequest,
+)
 from vs_sim.api import SleepingClock, Threads, utc_datetime
 
 if TYPE_CHECKING:
     from vs_project.api import Project
+    from vs_runtime.api.infrastructure import ControlRequest
 
 
 class _CoreEventCodec(EventCodec[CoreEvent]):
@@ -89,6 +96,26 @@ class EventJournal(DurableEventJournal[CoreEvent]):
                 logging.getLogger(__name__).exception("Run log tee failed during final commit")
             finally:
                 self._runlog = None
+
+    def intent_outcome(self, request: ControlRequest, reason: str | None) -> None:
+        """Journal and commit the decision before the inbox marks the request answered."""
+        intent = p.IntentState(
+            control_id=request.control_id,
+            action=p.IntentAction[request.action.name],
+            step=p.IntentStep.APPLIED if reason is None else p.IntentStep.REFUSED,
+            reason=reason,
+        )
+        if isinstance(request, SteerRequest):
+            intent.mode = p.SteerMode[request.mode.name]
+            intent.target = p.SteerTarget(
+                kind=p.SteerTargetKind[request.target.kind.name], id=request.target.id
+            )
+        elif isinstance(request, WithdrawRequest):
+            intent.withdraws = request.withdraws
+        p.validate(intent)
+        self.emit(CoreEventType.INTENT_STATE, data=IntentStateData(state_json=intent.to_json()))
+        if self._runlog is not None:
+            self._runlog.commit()
 
     def emit(
         self,

@@ -42,6 +42,9 @@ _JSON_SCALARS = st.none() | st.booleans() | st.integers() | st.text(max_size=8)
 # rule it states (no trailing dot, no reserved device name), not a copy of some of them.
 _THREAD_ID = TypeAdapter(ChatThreadId).json_schema()
 _FIELD_VALUES: dict[str, st.SearchStrategy[object]] = {
+    "state_json": st.just(
+        '{"controlId":"request-a","action":"INTENT_ACTION_PAUSE","step":"INTENT_STEP_APPLIED"}'
+    ),
     "thread_id": st.from_regex(_THREAD_ID["pattern"], fullmatch=True).filter(
         lambda value: len(value) <= _THREAD_ID["maxLength"]
     ),

@@ -577,6 +577,7 @@ class RunControlBridge:
 
         Raises ``ProjectStateError`` when the inbox cannot be marked.
         """
+        self._report_outcome(request_id, reason)
         if self._inbox is not None and self._inbox.requests.reject(request_id, reason):
             # A request rejected already keeps its first reason, which it was reported with.
             self._channel.notify_request_rejected(request_id, reason)
@@ -639,6 +640,10 @@ class RunControlBridge:
                 reason = self._apply(inbox, entry, core, now_at, events)
                 if reason is None:
                     self._submitted.add(entry.request_id)
+                    if inbox.outcome is not None:
+                        # Commit this decision before judging a later request, so
+                        # a later refusal cannot overtake its applied outcome.
+                        break
                 else:
                     self._reject(entry.request_id, reason)
 
@@ -717,6 +722,7 @@ class RunControlBridge:
             return False
         if _is_held(entry, control):
             if self._inbox is not None:
+                self._report_outcome(entry.request_id, None)
                 self._inbox.requests.settle(entry.request_id)
         else:
             self._reject(entry.request_id, "its control_id already named a different control")
@@ -863,10 +869,24 @@ class RunControlBridge:
         if self._inbox is None:
             return
         try:
-            for request_id in request_ids:
-                self._inbox.requests.settle(request_id)
+            for entry in self._inbox.requests.pending():
+                if entry.request_id in request_ids:
+                    self._report_outcome(entry.request_id, None)
+                    self._inbox.requests.settle(entry.request_id)
         except ProjectStateError as error:
             _LOG.warning("the run's control inbox cannot be marked; its requests wait: %s", error)
+
+    def _report_outcome(self, request_id: str, reason: str | None) -> None:
+        if self._inbox is None or self._inbox.outcome is None:
+            return
+        entry = next(
+            (e for e in self._inbox.requests.pending() if e.request_id == request_id), None
+        )
+        if entry is None:
+            return
+        request = _parsed(entry)
+        if not isinstance(request, Unreadable):
+            self._inbox.outcome(request.model_copy(update={"control_id": request_id}), reason)
 
     def _event(self, core: CoreState, now_at: float, change: _Change) -> RunControlEvent | None:
         """The event recording one control, or None when core already holds that control.
@@ -906,6 +926,8 @@ class OperatorInbox:
 
     requests: ControlInbox
     control: ChannelRunControl
+    outcome: Callable[[ControlRequest, str | None], None] | None = None
+    """Persist a decision before its inbox marker; replay must be idempotent by request id."""
 
 
 def _held(core: CoreState) -> dict[ControlId, ControlInput]:

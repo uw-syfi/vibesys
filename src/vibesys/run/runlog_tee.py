@@ -64,7 +64,7 @@ class RunLogTee:
         self._tree_hash, self._dirty = checkout
 
     def _initialize(self, event: CoreEvent) -> MappingState:
-        state = MappingState(self._run_id, vibesys_version=version("vibesys"))
+        state = MappingState(self._run_id, vibesys_version=version("vibesys"), native_intents=True)
         for historical in self._history():
             result = map_event(state, historical)
             self._write_content(result)
