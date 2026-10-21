@@ -32,9 +32,7 @@ if TYPE_CHECKING:
 __all__ = ["host_call"]
 
 
-def host_call(
-    payload: bytes, *, processes: Processes | None = None, threads: Threads | None = None
-) -> bytes:
+def host_call(payload: bytes, *, processes: Processes, threads: Threads) -> bytes:
     """Validate and execute one HostCall envelope, returning a typed response.
 
     Invalid input, unsupported intents and closed inboxes return the documented

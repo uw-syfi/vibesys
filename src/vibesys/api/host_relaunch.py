@@ -11,10 +11,10 @@ from vs_project.api import Project
 from vs_proto.api import Oneof, RelaunchRefusal, RelaunchResponse
 from vs_runlog.api import (
     RunLaunchLockedError,
-    RunLogReader,
     RunLogStopReason,
     assert_run_unlocked,
     exclusive_run_launch,
+    open_run_log,
 )
 from vs_sim.api import Capture, ProcessOutcome, ProcessSpec
 
@@ -26,7 +26,7 @@ __all__ = ["relaunch_host"]
 
 
 def relaunch_host(
-    request: RelaunchRequest, checkout: str, *, processes: Processes | None, threads: Threads | None
+    request: RelaunchRequest, checkout: str, *, processes: Processes, threads: Threads
 ) -> RelaunchResponse:
     """Refuse before spawning; confirm success only from the writer's epoch record.
 
@@ -34,9 +34,6 @@ def relaunch_host(
     reply is uncertain, never retried automatically. expected_epoch fences a
     later retry after the first writer has exited.
     """
-    if processes is None or threads is None:
-        message = "relaunch requires process and thread implementations"
-        raise ValueError(message)
     executable = Path(checkout).expanduser() / ".venv" / "bin" / "vibesys"
     if not executable.is_file():
         return _refused(RelaunchRefusal.CHECKOUT_MISSING)
@@ -110,8 +107,7 @@ def _confirm_epoch(
 def _epoch(path: Path, offset: int = 0) -> tuple[int, int]:
     if not path.exists():
         return 0, 0
-    with path.open("rb") as stream:
-        reader = RunLogReader(stream, offset)
+    with open_run_log(path, offset) as reader:
         epoch = max(
             (
                 record.epoch

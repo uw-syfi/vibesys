@@ -82,6 +82,14 @@ def project(
     return project, manifest.run_id
 
 
+def inbox_call(payload: bytes) -> bytes:
+    threads = SimThreads()
+    processes = FakeProcesses(lambda _: ProcessScript(), pass_time=threads.sleep)
+    response = host_call(payload, processes=processes, threads=threads)
+    assert not processes.ran
+    return response
+
+
 def call(project: Project, run_id: str, intent: Oneof, request_id: str = "r-1") -> HostCallResponse:
     request = HostCallRequest(
         checkout="/src/vibesys",
@@ -92,7 +100,7 @@ def call(project: Project, run_id: str, intent: Oneof, request_id: str = "r-1") 
             ),
         ),
     )
-    response = HostCallResponse.from_binary(host_call(request.to_binary()))
+    response = HostCallResponse.from_binary(inbox_call(request.to_binary()))
     validate(response)
     return response
 
@@ -185,7 +193,7 @@ def test_invalid_or_unsupported_intents_never_write(
 
 @given(st.binary(max_size=500))
 def test_arbitrary_input_has_a_typed_result(payload: bytes) -> None:
-    response = HostCallResponse.from_binary(host_call(payload))
+    response = HostCallResponse.from_binary(inbox_call(payload))
     validate(response)
     assert response.result is not None
     assert response.result.field == "configuration_failed"
@@ -229,7 +237,7 @@ def test_host_command_uses_binary_stdin_stdout_and_the_real_inbox(
 
 
 def test_oversized_input_has_a_typed_failure() -> None:
-    response = HostCallResponse.from_binary(host_call(b"x" * ((1 << 20) + 1)))
+    response = HostCallResponse.from_binary(inbox_call(b"x" * ((1 << 20) + 1)))
     validate(response)
     assert response.result is not None
     assert response.result.field == "configuration_failed"
