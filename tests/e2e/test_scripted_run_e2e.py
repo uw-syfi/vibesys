@@ -21,6 +21,7 @@ import re
 from typing import TYPE_CHECKING
 
 from tests.e2e.dynamic_loop_harness import _AGENT_CONFIG, LoopInput, resume_request, run_request
+from tests.support.real_git import REAL_GIT
 
 import vs_proto.api as p
 from launch.scripted_agents import ScriptedDynamicAgents
@@ -36,7 +37,7 @@ from vibesys.orchestration.dynamic.scripted.api import (
     Workload,
 )
 from vs_agent.api import ScriptedAgentClient, ScriptedClientSetup
-from vs_project.api import Project
+from vs_project.api import NullGitTrackerEvents, Project, open_git_repository
 from vs_runlog.api import RunLogReader
 from vs_sim.api import OsThreads
 
@@ -244,6 +245,14 @@ def test_a_scripted_run_pauses_then_resumes_without_overwriting_the_project(tmp_
     ]
     assert lifecycle[-2:] == ["draining", "parked"]
     assert "ended" not in lifecycle
+    repository = open_git_repository(loop_input.root, git=REAL_GIT, faults=NullGitTrackerEvents())
+    home = "operator-work"
+    repository.switch_branch(home, create=True)
+    edited = original + b"\n# operator notes\n"
+    (loop_input.root / "queue.py").write_bytes(edited)
+    repository.stage_all(["queue.py"])
+    (loop_input.root / "notes.txt").write_text("keep my notes", encoding="utf-8")
+    before = repository.uncommitted_paths(["queue.py", "notes.txt"])
     resumed = run_request(
         resume_request(request, parked.run_id),
         _NoAgents(),
@@ -255,6 +264,11 @@ def test_a_scripted_run_pauses_then_resumes_without_overwriting_the_project(tmp_
     resumed.raise_error()
     # P1 resumes the search but guards publication until project-edit protection lands.
     assert resumed.status is RunStatus.FAILED
-    assert (loop_input.root / "queue.py").read_bytes() == original
+    assert repository.current_branch() == home
+    assert (loop_input.root / "queue.py").read_bytes() == edited
+    assert (loop_input.root / "notes.txt").read_text(encoding="utf-8") == "keep my notes"
+    assert repository.has_staged_changes(["queue.py"])
+    assert repository.uncommitted_paths(["queue.py", "notes.txt"]) == before
     assert resumed.run_id == parked.run_id
-    assert any(event.type is CoreEventType.INVOCATION_FINISHED for event in resumed.events)
+    with Project.run_log_path_for(loop_input.root, resumed.run_id).open("rb") as stream:
+        assert max(record.epoch for record in RunLogReader(stream)) == 2
