@@ -10,11 +10,13 @@ from __future__ import annotations
 
 import sys
 from contextlib import contextmanager
+from inspect import currentframe
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
     from sys import UnraisableHookArgs
+    from types import CodeType
 
     from vs_sim.api import Threads
 
@@ -28,9 +30,9 @@ STUCK_SECONDS = 5.0
 class MainThreadInterrupt:
     """Raise once unless Python reports that the exception was discarded.
 
-    Enter ``recovering`` before requesting an interruption. Its hook chains to the
-    process's previous unraisable hook and rearms only the exact exception raised by
-    ``take``. ``finish`` ends the resend loop before the signal relay is joined.
+    Enter ``recovering`` before requesting an interruption. Its hook forwards unrelated failures to the
+    previous hook. Only the exact exception raised by ``take`` rearms delivery,
+    once the reporting hook has left the stack. ``finish`` ends the resend loop before the signal relay is joined.
     """
 
     def __init__(
@@ -42,6 +44,8 @@ class MainThreadInterrupt:
         self._stuck = stuck
         self._finished = threads.event()
         self._raised: KeyboardInterrupt | None = None
+        self._discarded = False
+        self._reporting_code: CodeType | None = None
 
     @contextmanager
     def recovering(self) -> Iterator[None]:
@@ -49,14 +53,12 @@ class MainThreadInterrupt:
         previous = sys.unraisablehook
 
         def unraisable(error: UnraisableHookArgs) -> None:
-            discarded = error.exc_value is self._raised
-            try:
+            if error.exc_value is self._raised:
+                self._discarded = True
+            else:
                 previous(error)
-            finally:
-                # Reporting may block too. Keep later wakes harmless until it finishes.
-                if discarded:
-                    self._raised = None
 
+        self._reporting_code = unraisable.__code__
         sys.unraisablehook = unraisable
         try:
             yield
@@ -65,6 +67,21 @@ class MainThreadInterrupt:
             sys.unraisablehook = previous
             # The traceback retains this scope and the run until the exception is released.
             self._raised = None
+            self._reporting_code = None
+
+    def _reporting(self) -> bool:
+        """A raise inside the unraisable hook is itself discarded without another hook call."""
+        if self._reporting_code is None:
+            return False
+        frame = currentframe()
+        try:
+            while frame is not None:
+                if frame.f_code is self._reporting_code:
+                    return True
+                frame = frame.f_back
+            return False
+        finally:
+            del frame
 
     def take(self) -> None:
         """Raise on the main thread unless the interruption is already propagating.
@@ -72,7 +89,12 @@ class MainThreadInterrupt:
         Raises:
             KeyboardInterrupt: until one escapes its callback instead of being discarded.
         """
-        if self._finished.is_set() or self._raised is not None:
+        if self._finished.is_set() or self._reporting():
+            return
+        if self._discarded:
+            self._discarded = False
+            self._raised = None
+        if self._raised is not None:
             return
         self._raised = KeyboardInterrupt()
         raise self._raised

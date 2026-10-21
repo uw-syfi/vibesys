@@ -33,6 +33,7 @@ from vs_sim.api.testing import (
 if TYPE_CHECKING:
     from collections.abc import Callable
     from sys import UnraisableHookArgs
+    from types import FrameType
 
 
 requires_tgkill = pytest.mark.skipif(
@@ -137,8 +138,7 @@ def _discarded_interruptions(discarded: int) -> None:
         with interrupt.recovering():
             for _ in range(discarded):
                 finalize(interrupt.take)
-            assert len(seen) == discarded
-            assert all(isinstance(error, KeyboardInterrupt) for error in seen)
+            assert seen == []
             with pytest.raises(KeyboardInterrupt):
                 interrupt.take()
             # Ordinary propagation protects cleanup; an unrelated unraisable error
@@ -159,3 +159,32 @@ def _discarded_interruptions(discarded: int) -> None:
 @given(discarded=st.integers(0, 5))
 def test_only_our_discarded_interruptions_rearm_delivery(discarded: int) -> None:
     run_in_child(partial(_discarded_interruptions, discarded))
+
+
+def _wake_at_reporting_return() -> None:
+    interrupt = MainThreadInterrupt(lambda: None, OsThreads(), lambda _waited: None)
+    previous = sys.getprofile()
+    attempted = False
+    with interrupt.recovering():
+        hook_code = sys.unraisablehook.__code__
+
+        def wake_at_return(frame: FrameType, event: str, _arg: object) -> None:
+            nonlocal attempted
+            if event == "return" and frame.f_code is hook_code and not attempted:
+                attempted = True
+                interrupt.take()
+
+        # Force a wake at the callback-return boundary; no scheduler timing is involved.
+        sys.setprofile(wake_at_return)
+        try:
+            finalizer = _Finalizer(interrupt.take)
+            del finalizer
+        finally:
+            sys.setprofile(previous)
+        assert attempted
+        with pytest.raises(KeyboardInterrupt):
+            interrupt.take()
+
+
+def test_a_wake_at_the_unraisable_hook_return_is_deferred() -> None:
+    run_in_child(_wake_at_reporting_return)
