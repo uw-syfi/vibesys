@@ -75,7 +75,7 @@ class _CommitIntent:
                 return _CommitBatch(checkpoint=True)
             return None if self.closing else _WaitCommit()
         delay = max(0.0, self.due - now)
-        if delay and self.urgent_seq <= committed_seq:
+        if delay and not checkpoint and self.urgent_seq <= committed_seq:
             return _WaitCommit(delay)
         return _CommitBatch(checkpoint)
 

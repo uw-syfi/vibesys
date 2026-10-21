@@ -266,3 +266,43 @@ def test_idle_append_completes_within_interval_plus_one_commit(delay: float) -> 
                 assert probe.publications[-1] == (3, pytest.approx(at + _INTERVAL + delay))
 
         threads.run(exercise)
+
+
+def test_checkpoint_requested_during_commit_preempts_the_next_batch_deadline(
+    tmp_path: Path,
+) -> None:
+    clock = VirtualClock()
+    threads = SimThreads(clock)
+    probe = SyncProbe(tmp_path, threads)
+    started = threads.event()
+    done = threads.event()
+
+    def exercise() -> None:
+        with FileRunLogWriter(
+            tmp_path / "run.log", clock=clock, threads=threads, sync=probe
+        ) as writer:
+            for record in declarations():
+                writer.append(record)
+            probe.hold()
+            writer.append(event(3))
+            assert probe.entered.wait(HANG_GUARD_S)
+
+            def checkpoint() -> None:
+                started.set()
+                writer.checkpoint()
+                done.set()
+
+            # The unseeded simulator runs this child until it waits, so the
+            # checkpoint targets seq 3 while that batch is still in flight.
+            child = threads.spawn(checkpoint, name="checkpoint")
+            assert started.wait(HANG_GUARD_S)
+            writer.append(event(4))
+            assert not done.is_set()
+            at = clock.now()
+            probe.release.set()
+            assert done.wait(HANG_GUARD_S)
+            assert clock.now() == at
+            assert head(tmp_path) == 4
+            child.join(HANG_GUARD_S)
+
+    threads.run(exercise)
