@@ -188,12 +188,12 @@ def test_live_tee_includes_buffered_events_and_increments_epochs(
     restarted.close()
     with Project.run_log_path_for(project.root, "run-1").open("rb") as stream:
         records = list(RunLogReader(stream))
-    assert [record.seq for record in records] == [1, 2, 3]
+    assert [record.seq for record in records] == [1, 2, 3, 4, 5]
     assert all(
         record.at is not None and record.at.to_datetime() == journal.read()[0].timestamp
         for record in records
     )
-    assert [record.epoch for record in records] == [1, 1, 2]
+    assert [record.epoch for record in records] == [1, 1, 1, 2, 2]
     headers = [
         record.body.value
         for record in records
@@ -297,7 +297,12 @@ def test_attachment_records_unknown_provenance_without_checkout_processes(
         integration.close()
     with Project.run_log_path_for(root, "run-1").open("rb") as stream:
         records = list(RunLogReader(stream))
-    assert len(records) == 1
+    assert len(records) == 2
+    lifecycle = records[1].body
+    assert lifecycle is not None
+    assert lifecycle.field == "lifecycle"
+    assert lifecycle.value.state is not None
+    assert lifecycle.value.state.field == "running"
     header = records[0].body
     assert header is not None
     assert header.field == "epoch_started"

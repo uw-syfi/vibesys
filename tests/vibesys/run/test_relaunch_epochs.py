@@ -62,10 +62,12 @@ def test_relaunch_freezes_clock_and_records_checkout(
     journal.emit(CoreEventType.RUN_FINISHED)
     journal.close()
     records = read(Project.run_log_path_for(root, "run-a"))
-    assert [r.clock for r in records] == [0, 5, 5, 5, 8]
+    assert [r.clock for r in records] == [0, 0, 5, 5, 5, 5, 8]
     assert [r.at.to_datetime().timestamp() for r in records if r.at is not None] == [
         100,
+        100,
         105,
+        1105,
         1105,
         1105,
         1108,

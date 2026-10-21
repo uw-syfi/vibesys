@@ -9,9 +9,10 @@ frontier.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, assert_never
 
 from vibesys.candidates.api import Unmeasurable, failure, input_metrics
+from vibesys.events import WorkstreamFailureKind
 from vibesys.hypothesis import derive_hypothesis_title
 from vibesys.hypothesis.readmodel import (
     AgentRunProjection,
@@ -19,7 +20,7 @@ from vibesys.hypothesis.readmodel import (
     HypothesisView,
     RoundView,
 )
-from vibesys.orchestration.dynamic.search.api import FailureKind, workstream_key
+from vibesys.orchestration.dynamic.search.api import DropReason, FailureKind, workstream_key
 from vibesys.run.contracts import (
     InputFailureSummary,
     IterationKind,
@@ -236,7 +237,9 @@ def _failure_text(failure: Failure) -> str:
     ):
         if reason is not None:
             return reason.value
-    return ""
+    if failure.dropped is not None:
+        return f"{failure.kind.value}: {failure.dropped.value}"
+    return failure.kind.value
 
 
 def _operator_failure_text(failure: Failure) -> str:
@@ -248,12 +251,53 @@ def _operator_failure_text(failure: Failure) -> str:
     return _failure_text(failure)
 
 
+def _event_failure_kind(failure: Failure) -> WorkstreamFailureKind:
+    """Translate search reasons to the frozen operator vocabulary exhaustively."""
+    kind = failure.kind
+    match kind:
+        case FailureKind.NOT_MEASURED:
+            return (
+                WorkstreamFailureKind.STOPPED
+                if failure.dropped is DropReason.STOPPED
+                else WorkstreamFailureKind.ENDED
+            )
+        case FailureKind.MERGE_REFUSED:
+            return WorkstreamFailureKind.REFUSED
+        case FailureKind.MERGE_UNSOUND:
+            return WorkstreamFailureKind.NO_TRUSTED_EVIDENCE
+        case FailureKind.MERGE_REGRESSED:
+            return WorkstreamFailureKind.REVIEW_REJECTED
+        case (
+            FailureKind.STOPPED
+            | FailureKind.PARENT_UNVERIFIED
+            | FailureKind.REFUSED
+            | FailureKind.ENDED
+            | FailureKind.OUT_OF_BUDGET
+            | FailureKind.TURN_FAILED
+            | FailureKind.INVALID_REPLY
+            | FailureKind.RENDER_FAILED
+            | FailureKind.WAIT_REFUSED
+            | FailureKind.CHECKPOINT_DECLINED
+            | FailureKind.NO_CHANGED_CANDIDATE
+            | FailureKind.IMPLEMENTATION_FAILED
+            | FailureKind.REVIEW_REJECTED
+            | FailureKind.NO_TRUSTED_EVIDENCE
+            | FailureKind.EVIDENCE_REFUSED
+            | FailureKind.EVIDENCE_UNDECODABLE
+            | FailureKind.PROFILE_CAPTURE_UNAVAILABLE
+            | FailureKind.TURN_LIMIT
+            | FailureKind.REPEATED_TURN
+        ):
+            return WorkstreamFailureKind(kind.value)
+    assert_never(kind)
+
+
 def _round_failure_summary(failure: Failure | None) -> RoundFailureSummary | None:
     """The round's typed failure, in the strategy-neutral shape ``WORKSTREAM_FINISHED`` reads."""
     if failure is None:
         return None
     return RoundFailureSummary(
-        kind=failure.kind.value,
+        kind=_event_failure_kind(failure).value,
         role=failure.role.value if failure.role is not None else None,
         turns=failure.turns,
         limit=failure.limit,

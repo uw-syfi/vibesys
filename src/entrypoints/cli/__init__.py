@@ -66,7 +66,11 @@ from entrypoints.cli.loops import (
     validated_run_request,
 )
 from entrypoints.cli.preflight import run_preflight
-from entrypoints.cli.resume import _resolve_resume_args, reader_loop_kind
+from entrypoints.cli.resume import (
+    _load_resume_selection,
+    _recorded_cli_selection,
+    _resolve_resume_args,
+)
 from entrypoints.control import control_main, time_ordered_id
 from vibesys.api import ConfigurationError, RunRequest, boot_trace
 from vibesys.api.request import (
@@ -166,8 +170,6 @@ def build_reader_request(project_root: Path, run_id: str) -> RunRequest:
     """Restore saved settings without switching branches, resuming or building images."""
     invocation = parse_cli_invocation(
         [
-            "--outer-loop",
-            reader_loop_kind(project_root, run_id),
             "--project",
             str(project_root),
             "--resume",
@@ -202,7 +204,23 @@ def _explicit_cli_dests(
 
 def parse_cli_invocation(argv: list[str], *, read_only: bool = False) -> CliInvocation:
     """Parse and validate one invocation without printing or exiting."""
+    if argv and argv[0] == "relaunch":
+        argv = argv[1:]
+        if _option_from_argv(argv, "--resume") is None:
+            _configuration_error(
+                "relaunch requires --resume RUN",
+                code="relaunch_requires_run",
+                stage="resume_resolution",
+            )
     loop_kind, remaining = _extract_loop_selection(argv)
+    selection = None
+    if any(argument == "--resume" or argument.startswith("--resume=") for argument in remaining):
+        probe, _ = _LOOP_COMMANDS[loop_kind].build_parser().parse_known_args(remaining)
+        _normalize_runs_dir(probe)
+        selection = _load_resume_selection(probe)
+        explicit_loop, _ = _extract_flag(argv, "--outer-loop")
+        if selection is not None and explicit_loop is None:
+            loop_kind, _ = _recorded_cli_selection(selection.manifest.orchestration.id)
     command = _LOOP_COMMANDS[loop_kind]
     parser = command.build_parser()
     parser.prog = f"vibesys --outer-loop {loop_kind}"
@@ -210,7 +228,7 @@ def parse_cli_invocation(argv: list[str], *, read_only: bool = False) -> CliInvo
     args.outer_loop = loop_kind
     args.explicit_cli_dests = _explicit_cli_dests(parser, remaining)
     _normalize_runs_dir(args)
-    _resolve_resume_args(args, loop_kind=loop_kind, read_only=read_only)
+    _resolve_resume_args(args, loop_kind=loop_kind, selection=selection, read_only=read_only)
     command.validate(args)
     _allocate_run_id(args)
     return CliInvocation(loop_kind=loop_kind, args=args)
@@ -243,14 +261,6 @@ def start_process() -> None:
 
 def dispatch(argv: list[str], runs: Runs | None = None) -> None:
     """Parse and run one headless VibeSys invocation, on ``runs`` or the default launcher."""
-    if argv and argv[0] == "relaunch":
-        argv = argv[1:]
-        if _option_from_argv(argv, "--resume") is None:
-            _configuration_error(
-                "relaunch requires --resume RUN",
-                code="relaunch_requires_run",
-                stage="resume_resolution",
-            )
     if argv and argv[0] == "validate":
         _run_validate(argv[1:])
         return

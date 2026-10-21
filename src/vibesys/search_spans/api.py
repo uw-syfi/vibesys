@@ -88,7 +88,7 @@ class FailedCheck(Value):
     evaluator reported it got through; each is None when it reported no progress.
     """
 
-    check: EvidenceKind
+    check: Literal[EvidenceKind.CORRECTNESS, EvidenceKind.BENCHMARK]
     completed: int | None = None
     required: int | None = None
     unit: str | None = None

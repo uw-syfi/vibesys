@@ -995,8 +995,8 @@ class ComparisonsReadData(EventPayload):
 class WorkstreamFailureKind(StrEnum):
     """Why a workstream ended without a measured candidate. Closed.
 
-    Mirrors ``dynamic.search.api.FailureKind`` member-for-member: a frozen
-    wire vocabulary core's own enum can't silently rename underneath.
+    Frozen operator vocabulary. Policies translate their richer failure kinds
+    before publishing a round, retaining the specific reason in its text.
     """
 
     STOPPED = "stopped"

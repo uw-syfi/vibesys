@@ -226,6 +226,22 @@ class _LocalRunSession:
                 run_ready(resources.auxiliary(), self._registry, self._implementations)
             )
 
+        request = self._request
+        project_max_rounds = self._registration.project_max_rounds
+        self._integration.events.emit(
+            CoreEventType.RUN_STARTED,
+            status=EventStatus.ACTIVE,
+            data=RunStartedData(
+                outer_loop=request.orchestration.id,
+                input=str(request.input_bundle.root),
+                max_rounds=project_max_rounds(self._plugin_options)
+                if project_max_rounds is not None
+                else None,
+                expected_roles=tuple(role.id for role in self._registration.plugin.agents),
+                overview=overview_of(request.input_bundle, objective_axes_of(self._plugin_options)),
+            ),
+        )
+
     def _run_id(self) -> str:
         """Use the provisioned ID once a custom runtime has created its run."""
         if self._resources is not None:
@@ -301,20 +317,7 @@ class _LocalRunSession:
         request = self._request
         plugin = self._registration.plugin
         options = self._plugin_options
-        project_max_rounds = self._registration.project_max_rounds
-        max_rounds = project_max_rounds(options) if project_max_rounds is not None else None
         try:
-            self._integration.events.emit(
-                CoreEventType.RUN_STARTED,
-                status=EventStatus.ACTIVE,
-                data=RunStartedData(
-                    outer_loop=request.orchestration.id,
-                    input=str(request.input_bundle.root),
-                    max_rounds=max_rounds,
-                    expected_roles=tuple(role.id for role in plugin.agents),
-                    overview=overview_of(request.input_bundle, objective_axes_of(options)),
-                ),
-            )
             outcome = await run_plugin(
                 request,
                 self._integration,

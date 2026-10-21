@@ -380,7 +380,14 @@ def test_host_relaunch_round_trip_confirms_the_new_epoch(
         assert concurrent.result is not None
         assert concurrent.result.field == "relaunch"
         assert concurrent.result.value.outcome == Oneof("refusal", RelaunchRefusal.LOCKED)
-        assert spec.argv == (str(executable), "--resume", run_id, "--detach", str(owner.root))
+        assert spec.argv == (
+            str(executable),
+            "--resume",
+            run_id,
+            "--detach",
+            "--project",
+            str(owner.root),
+        )
         resumed = EventJournal(clock, threads)
         resumed.checkout = ("tree-b", True)
         resumed.enable_runlog(owner, run_id)
