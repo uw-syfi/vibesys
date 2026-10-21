@@ -7,7 +7,8 @@ aggregates="$(git ls-files -- \
   libs/vs-proto/src/vs_proto/_generated/schema_hashes.py \
   clients/libs/proto/src/generated/schema-hashes.ts \
   clients/libs/proto/src/generated/schema-files.ts \
-  gateway/gen/schema_hashes.go)"
+  gateway/gen/schema_hashes.go \
+  proto/testdata/records/epoch_started.pb)"
 if [[ -n "$aggregates" ]]; then
   printf 'Remove committed aggregate schema outputs; derive them locally instead:\n%s\n' "$aggregates" >&2
   exit 1

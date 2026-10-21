@@ -1,9 +1,11 @@
 """Typed store contracts validate at the public boundary and retain wire data."""
 
+import json
 from collections.abc import Callable, Iterator
 from pathlib import Path
 
 import pytest
+from google.protobuf import descriptor_pool, json_format, message_factory
 from hypothesis import given
 from hypothesis import strategies as st
 from protobuf import DescFieldValueEnum, DescFieldValueScalar, Message, ScalarType
@@ -201,7 +203,7 @@ def test_corpus_covers_every_body_and_builtin_attrs_message() -> None:
     }
 
 
-@pytest.mark.parametrize("name", _RECORDS)
+@pytest.mark.parametrize("name", [name for name in _RECORDS if name != "epoch_started"])
 def test_record_goldens_are_byte_stable(name: str) -> None:
     wire = (_ROOT / "proto/testdata/records" / (name + ".pb")).read_bytes()
     assert len(wire) <= 1024 * 1024
@@ -212,9 +214,55 @@ def test_record_goldens_are_byte_stable(name: str) -> None:
 def test_golden_regenerator_reproduces_exact_corpus(tmp_path: Path) -> None:
     generate(tmp_path)
     expected = _ROOT / "proto/testdata/records"
-    assert {path.name for path in tmp_path.iterdir()} == {path.name for path in expected.iterdir()}
-    for path in tmp_path.iterdir():
-        assert path.read_bytes() == (expected / path.name).read_bytes()
+    committed = {path.name for path in expected.iterdir() if path.name != "epoch_started.pb"}
+    assert {path.name for path in tmp_path.iterdir()} == committed | {"epoch_started.pb"}
+    for name in committed:
+        assert (tmp_path / name).read_bytes() == (expected / name).read_bytes()
+
+
+@pytest.fixture(scope="module")
+def embedded_pool(tmp_path_factory: pytest.TempPathFactory) -> descriptor_pool.DescriptorPool:
+    """Load only the test-time epoch's embedded schema into an independent runtime."""
+    directory = tmp_path_factory.mktemp("record-corpus")
+    generate(directory)
+    wire = (directory / "epoch_started.pb").read_bytes()
+    assert len(wire) <= 1024 * 1024
+    record = p.Record.from_binary(wire)
+    p.validate(record)
+    assert record.to_binary() == wire
+    body = record.body
+    assert body is not None
+    assert isinstance(body.value, p.EpochStarted)
+    assert body.value.descriptors is not None
+    pool = descriptor_pool.DescriptorPool()
+    pending = {file.name: file for file in body.value.descriptors.file}
+    while pending:
+        ready = [file for file in pending.values() if not set(file.dependency) & pending.keys()]
+        assert ready, f"Descriptor import cycle: {sorted(pending)}"
+        for file in ready:
+            pool.AddSerializedFile(file.to_binary())
+            del pending[file.name]
+    return pool
+
+
+@pytest.mark.parametrize("kind", _ATTRS)
+def test_any_attrs_decode_using_only_the_generated_epoch_descriptors(
+    kind: str, embedded_pool: descriptor_pool.DescriptorPool
+) -> None:
+    record = p.Record.from_binary(
+        (_ROOT / "proto/testdata/records" / f"span_{kind}.pb").read_bytes()
+    )
+    body = record.body
+    assert body is not None
+    assert isinstance(body.value, p.SpanRecord)
+    span = body.value.span
+    assert span is not None
+    assert span.label is not None
+    attrs = span.label.attrs
+    assert attrs is not None
+    descriptor = embedded_pool.FindMessageTypeByName(attrs.type_url.rsplit("/", 1)[1])
+    decoded = message_factory.GetMessageClass(descriptor).FromString(attrs.value)
+    assert json_format.MessageToDict(decoded) == json.loads(_ATTRS[kind].to_json())
 
 
 def set_field(message: Message, name: str, value: object) -> None:

@@ -85,6 +85,7 @@ dev = [
     "tach==0.35.1",
     "matplotlib>=3.10.8",
     "pytest",
+    "protobuf==6.33.5",
     "pytest-asyncio",
     "pytest-cov",
     "pytest-timeout",
