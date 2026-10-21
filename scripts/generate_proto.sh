@@ -10,7 +10,5 @@ from pathlib import Path
 for path in Path("clients/libs/proto/src/generated").rglob("*.ts"):
     path.write_text(path.read_text(encoding="utf-8").rstrip() + "\n", encoding="utf-8")
 PYTHON
-image="$(mktemp)"
-trap 'rm -f "$image"' EXIT
-uv run --locked --group proto buf build --as-file-descriptor-set --exclude-source-info -o "$image"
-uv run --locked --group proto python scripts/generate_proto_hashes.py "$image"
+uv run --locked --group proto python scripts/generate_proto_framing.py
+node clients/libs/proto/generate-schema-files.mjs

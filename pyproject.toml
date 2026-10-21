@@ -85,6 +85,7 @@ dev = [
     "tach==0.35.1",
     "matplotlib>=3.10.8",
     "pytest",
+    "protobuf==6.33.5",
     "pytest-asyncio",
     "pytest-cov",
     "pytest-timeout",
@@ -97,6 +98,7 @@ dev = [
     "ruff==0.15.12",
     "twine",
     "ty==0.0.75",
+    "types-protobuf==7.35.1.20260906",
 ]
 test = [
     "hypothesis",

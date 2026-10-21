@@ -1652,9 +1652,7 @@ const file_vibesys_search_v1_attrs_proto_rawDesc = "" +
 	",WORKSTREAM_FAILURE_KIND_EVIDENCE_UNDECODABLE\x10\x10\x127\n" +
 	"3WORKSTREAM_FAILURE_KIND_PROFILE_CAPTURE_UNAVAILABLE\x10\x11\x12&\n" +
 	"\"WORKSTREAM_FAILURE_KIND_TURN_LIMIT\x10\x12\x12)\n" +
-	"%WORKSTREAM_FAILURE_KIND_REPEATED_TURN\x10\x13B\xcc\x01\n" +
-	"\x15com.vibesys.search.v1B\n" +
-	"AttrsProtoP\x01ZAgithub.com/uw-syfi/vibesys/gateway/gen/vibesys/search/v1;searchv1\xa2\x02\x03VSX\xaa\x02\x11Vibesys.Search.V1\xca\x02\x11Vibesys\\Search\\V1\xe2\x02\x1dVibesys\\Search\\V1\\GPBMetadata\xea\x02\x13Vibesys::Search::V1b\x06proto3"
+	"%WORKSTREAM_FAILURE_KIND_REPEATED_TURN\x10\x13BCZAgithub.com/uw-syfi/vibesys/gateway/gen/vibesys/search/v1;searchv1b\x06proto3"
 
 var (
 	file_vibesys_search_v1_attrs_proto_rawDescOnce sync.Once

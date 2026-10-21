@@ -13,11 +13,11 @@ import (
 	"syscall"
 	"time"
 
-	schema "github.com/uw-syfi/vibesys/gateway/gen"
 	"github.com/uw-syfi/vibesys/gateway/internal/connect"
 	"github.com/uw-syfi/vibesys/gateway/internal/lifecycle"
 	"github.com/uw-syfi/vibesys/gateway/internal/pipe"
 	"github.com/uw-syfi/vibesys/gateway/internal/server"
+	schema "github.com/uw-syfi/vibesys/gateway/schemahash"
 )
 
 const version = "0.1.0"

@@ -14,6 +14,7 @@
       "**/*.cts",
       "**/*.mts",
       "tools/scripts/**/*.mjs",
+      "libs/proto/**/*.mjs",
       "libs/ui/src/**/*.css",
       "!libs/ui/src/tokens.css",
       "!**/dist",

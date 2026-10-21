@@ -1086,8 +1086,7 @@ const file_vibesys_store_v1_lifecycle_proto_rawDesc = "" +
 	"\x19RUN_FAILURE_KIND_DEADLINE\x10\x02\x12\x1e\n" +
 	"\x1aRUN_FAILURE_KIND_NO_RESULT\x10\x03\x12,\n" +
 	"(RUN_FAILURE_KIND_ENVIRONMENT_UNAVAILABLE\x10\x04\x12\"\n" +
-	"\x1eRUN_FAILURE_KIND_CONFIGURATION\x10\x05B\xc9\x01\n" +
-	"\x14com.vibesys.store.v1B\x0eLifecycleProtoP\x01Z?github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1\xa2\x02\x03VSX\xaa\x02\x10Vibesys.Store.V1\xca\x02\x10Vibesys\\Store\\V1\xe2\x02\x1cVibesys\\Store\\V1\\GPBMetadata\xea\x02\x12Vibesys::Store::V1b\x06proto3"
+	"\x1eRUN_FAILURE_KIND_CONFIGURATION\x10\x05BAZ?github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1b\x06proto3"
 
 var (
 	file_vibesys_store_v1_lifecycle_proto_rawDescOnce sync.Once

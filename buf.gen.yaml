@@ -4,6 +4,9 @@ inputs:
   - directory: proto
 managed:
   enabled: true
+  # check_schema_hashes requires embedded descriptors to retain source options.
+  disable:
+    - path: vibesys
   override:
     - file_option: go_package
       path: buf/validate/validate.proto

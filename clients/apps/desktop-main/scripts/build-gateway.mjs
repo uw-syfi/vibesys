@@ -4,12 +4,10 @@ import {spawnSync} from 'node:child_process';
 import {mkdir, readFile, readdir, rename, writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
+import {API_SCHEMA_HASH as apiHash} from '@vibesys/proto';
 
 const root = fileURLToPath(new URL('../../../../', import.meta.url));
 const gateway = join(root, 'gateway');
-const hashes = await readFile(join(root, 'clients/libs/proto/src/generated/schema-hashes.ts'), 'utf8');
-const apiHash = /API_SCHEMA_HASH = ['"]([a-f0-9]+)['"]/.exec(hashes)?.[1];
-if (!apiHash) throw new Error('API_SCHEMA_HASH is missing from generated bindings');
 const output = join(root, 'clients/apps/desktop-main/dist/gateway', apiHash.slice(0, 16));
 
 async function sources(directory) {

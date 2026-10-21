@@ -14,8 +14,8 @@ const PACKAGE_POLICIES: Record<string, WorkspacePolicy> = {
     project: ['src/**/*.ts', 'node-tests/**/*.ts'],
   },
   'libs/proto': {
-    entry: ['src/index.ts'],
-    project: ['src/**/*.ts'],
+    entry: ['src/index.ts', 'tests/*.mjs'],
+    project: ['src/**/*.ts', '*.mjs', 'tests/*.mjs'],
     // Tool-owned bindings are guarded by the proto regenerate-and-diff check.
     ignore: ['src/generated/**'],
   },

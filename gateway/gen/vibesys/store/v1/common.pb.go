@@ -208,8 +208,7 @@ const file_vibesys_store_v1_common_proto_rawDesc = "" +
 	"\x17SERIES_ROLE_UNSPECIFIED\x10\x00\x12\x19\n" +
 	"\x15SERIES_ROLE_OBJECTIVE\x10\x01\x12\x18\n" +
 	"\x14SERIES_ROLE_RESOURCE\x10\x02\x12\x19\n" +
-	"\x15SERIES_ROLE_REFERENCE\x10\x03B\xc6\x01\n" +
-	"\x14com.vibesys.store.v1B\vCommonProtoP\x01Z?github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1\xa2\x02\x03VSX\xaa\x02\x10Vibesys.Store.V1\xca\x02\x10Vibesys\\Store\\V1\xe2\x02\x1cVibesys\\Store\\V1\\GPBMetadata\xea\x02\x12Vibesys::Store::V1b\x06proto3"
+	"\x15SERIES_ROLE_REFERENCE\x10\x03BAZ?github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1b\x06proto3"
 
 var (
 	file_vibesys_store_v1_common_proto_rawDescOnce sync.Once
