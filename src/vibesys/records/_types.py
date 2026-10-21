@@ -22,6 +22,8 @@ class MappingState:
     dirty: bool = False
     epoch_ended: bool = False
     native_intents: bool = False
+    wall_span_clock: bool = False
+    clock_epochs: tuple[tuple[float, float], ...] = ()
     spans: tuple[tuple[str, bytes], ...] = ()
     invocations: tuple[tuple[str, str], ...] = ()
     streams: tuple[tuple[str, int], ...] = ()

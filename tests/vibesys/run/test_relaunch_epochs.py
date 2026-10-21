@@ -7,11 +7,19 @@ from tempfile import TemporaryDirectory
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
+from pydantic import TypeAdapter
 
 import vs_proto.api as p
-from vibesys.events import CoreEventType, RunStartedData, make_core_event
+from vibesys.events import (
+    CoreEventType,
+    RunStartedData,
+    SpanEndedData,
+    SpanStartedData,
+    make_core_event,
+)
 from vibesys.run import EventJournal
 from vibesys.run.runlog_tee import RunLogTee
+from vs_core.api import SpanStatus, WireSpan
 from vs_project.api import Project
 from vs_runlog.api import (
     FileRunContent,
@@ -144,3 +152,52 @@ def test_live_writer_refuses_relaunch_without_mutating_log(tmp_path: Path) -> No
             assert_run_unlocked(path)
         assert path.read_bytes() == before
     assert_run_unlocked(path)
+
+
+def test_span_times_keep_their_original_epoch_on_relaunch(tmp_path: Path) -> None:
+    project = Project.open(tmp_path)
+    clock = ManualClock(start=100)
+
+    def open_journal() -> EventJournal:
+        journal = EventJournal(clock, SimThreads())
+        journal.enable_runlog(project, "run-spans")
+        journal.attach(Project.log_directory_for(tmp_path, "run-spans"), "run-spans")
+        journal.emit(
+            CoreEventType.RUN_STARTED, data=RunStartedData(outer_loop="test", input="input")
+        )
+        return journal
+
+    journal = open_journal()
+    clock.advance(5)
+    span = TypeAdapter(WireSpan).validate_python(
+        {
+            "id": "flow:work#1",
+            "parent": None,
+            "type": "flow",
+            "name": "work",
+            "status": "running",
+            "started_at": 102,
+        }
+    )
+    journal.emit(CoreEventType.SPAN_STARTED, data=SpanStartedData(span=span))
+    journal.close()
+    clock.advance(1000)
+    journal = open_journal()
+    clock.advance(3)
+    finished = span.model_copy(update={"status": SpanStatus.DONE, "ended_at": 1108})
+    journal.emit(CoreEventType.SPAN_ENDED, data=SpanEndedData(span=finished))
+    journal.emit(CoreEventType.STOPPED)
+    journal.emit(CoreEventType.RUN_FINISHED)
+    journal.close()
+    records = read(Project.run_log_path_for(tmp_path, "run-spans"))
+    spans = [r.body.value.span for r in records if r.body and r.body.field == "span"]
+    assert [(s.started_at, s.ended_at if s.has_field("ended_at") else None) for s in spans] == [
+        (2, None),
+        (2, 8),
+    ]
+    ends = [
+        r.epoch
+        for r in records
+        if r.body and r.body.field == "lifecycle" and r.body.value.state.field == "ended"
+    ]
+    assert ends == [1, 2]

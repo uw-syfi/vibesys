@@ -10,6 +10,7 @@ import vs_proto.api as p
 from vibesys.events import CoreEvent
 from vibesys.records.api import MappedEvent, MappingState, map_event
 from vs_decode.api import Unreadable, decode_json
+from vs_runlog.api import fold_skeleton
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
@@ -27,6 +28,19 @@ def _decode(payload: bytes) -> CoreEvent:
     if isinstance(event, Unreadable):
         raise TypeError(event.details("journal event"))
     return event
+
+
+def _epoch_clocks(records: tuple[p.Record, ...]) -> tuple[float, tuple[tuple[float, float], ...]]:
+    """Older records lack clock; their wall times define each epoch's elapsed time."""
+    clock = 0.0
+    epochs: dict[int, tuple[float, float]] = {}
+    for record in records:
+        if record.at is None:
+            continue
+        at = record.at.to_datetime().timestamp()
+        origin, offset = epochs.setdefault(record.epoch, (at, clock))
+        clock = max(clock, record.clock if record.has_field("clock") else offset + at - origin)
+    return clock, tuple(epochs.values())
 
 
 class RunLogTee:
@@ -55,9 +69,18 @@ class RunLogTee:
             result = map_event(state, historical)
             self._write_content(result)
             state = result.state
-        last = self._writer.last_record
-        clock = 0 if last is None else (last.clock or 0)
-        if last is not None and not self._writer.epoch_ended:
+        records = self._writer.read()
+        last = records[-1] if records else None
+        ended = any(
+            r.epoch == self._writer.epoch
+            and r.body is not None
+            and r.body.field == "lifecycle"
+            and r.body.value.state is not None
+            and r.body.value.state.field == "ended"
+            for r in records
+        )
+        clock, epochs = _epoch_clocks(records)
+        if last is not None and not ended:
             self._writer.append(
                 p.Record(
                     seq=self._writer.sequence + 1,
@@ -92,6 +115,13 @@ class RunLogTee:
             clock_offset=clock,
             tree_hash=self._tree_hash,
             dirty=self._dirty,
+            wall_span_clock=True,
+            clock_epochs=(*epochs, (event.timestamp.timestamp(), clock)),
+            spans=tuple(
+                (key, history.versions[-1].span.to_binary())
+                for key, history in fold_skeleton(records, log_offset=0).spans.items()
+                if history.versions and history.versions[-1].span is not None
+            ),
         )
 
     def append(self, payload: bytes) -> None:

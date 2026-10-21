@@ -229,6 +229,8 @@ def project_span(projection: Projection, source: CoreSpan, change: p.Change) -> 
         else p.Stop(requested_at=source.stop.requested_at, landed=source.stop.landed),
         label=mapped_label,
     )
+    if projection.state.wall_span_clock:
+        _run_clock(projection, span)
     if source.invocation is not None:
         projection.invocations[source.invocation] = source.id
     # A task can start and end within one core commit; its first snapshot is terminal.
@@ -236,3 +238,43 @@ def project_span(projection: Projection, source: CoreSpan, change: p.Change) -> 
         change = p.Change.ENDED
     projection.span(span, change)
     _metric_rows(projection, source)
+
+
+def _run_clock(projection: Projection, span: p.Span) -> None:
+    """Translate runtime wall times; retained versions own times from older epochs."""
+    previous = projection.spans.get(span.id)
+
+    def convert(value: float, prior: float | None = None) -> float:
+        if prior is not None:
+            return prior
+        for wall, clock in reversed(projection.state.clock_epochs):
+            if value >= wall:
+                return max(0.0, clock + value - wall)
+        return 0
+
+    span.started_at = convert(span.started_at, None if previous is None else previous.started_at)
+    if span.has_field("ended_at"):
+        span.ended_at = convert(
+            span.ended_at,
+            None if previous is None or not previous.has_field("ended_at") else previous.ended_at,
+        )
+    if span.stop is not None:
+        prior = None if previous is None else previous.stop
+        span.stop.requested_at = convert(
+            span.stop.requested_at, None if prior is None else prior.requested_at
+        )
+    attempts = {} if previous is None else {a.n: a for a in previous.attempts}
+    for attempt in span.attempts:
+        prior = attempts.get(attempt.n)
+        attempt.started_at = convert(
+            attempt.started_at, None if prior is None else prior.started_at
+        )
+        if attempt.has_field("ended_at"):
+            attempt.ended_at = convert(
+                attempt.ended_at,
+                None if prior is None or not prior.has_field("ended_at") else prior.ended_at,
+            )
+    waits = {} if previous is None else {(w.kind, w.ref): w for w in previous.waiting_on}
+    for wait in span.waiting_on:
+        prior = waits.get((wait.kind, wait.ref))
+        wait.since = convert(wait.since, None if prior is None else prior.since)

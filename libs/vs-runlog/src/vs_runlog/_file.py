@@ -104,8 +104,6 @@ class FileRunLogWriter:
                 self._loop = asyncio.get_running_loop()
         self.sequence = 0
         self.epoch = 0
-        self.last_record: Record | None = None
-        self.epoch_ended = False
         self._path = path
         self._skeleton = Keyframe()
         self._checkpoint_seq = 0
@@ -149,7 +147,6 @@ class FileRunLogWriter:
                 append_skeleton(self._skeleton, record)
                 self.sequence = record.seq
                 self.epoch = max(self.epoch, record.epoch)
-                self._observe(record)
             if self.sequence < committed:
                 message = f"run.log lost committed records: head {committed}, log {self.sequence}"
                 raise ValueError(message)
@@ -185,7 +182,6 @@ class FileRunLogWriter:
                 self._skeleton.log_offset = self._stream.tell()
                 self.sequence = record.seq
                 self.epoch = max(self.epoch, record.epoch)
-                self._observe(record)
                 body = record.body
                 if body and body.field == "epoch_started" and record.at is not None:
                     self._process = RunProcess(
@@ -214,15 +210,12 @@ class FileRunLogWriter:
                 self._abort(error)
                 raise
 
-    def _observe(self, record: Record) -> None:
-        if self.last_record is None or record.epoch != self.last_record.epoch:
-            self.epoch_ended = False
-        body = record.body
-        if body is not None and body.field == "lifecycle":
-            state = body.value.state
-            if state is not None and state.field == "ended":
-                self.epoch_ended = True
-        self.last_record = type(record).from_binary(record.to_binary())
+    def read(self) -> tuple[Record, ...]:
+        """Copy the complete history under the writer lock for epoch recovery."""
+        with self._mutex:
+            self._check_open()
+            with self._path.open("rb") as stream:
+                return tuple(RunLogReader(stream))
 
     def _commit(self, *, checkpoint: bool = False) -> None:
         self._cancel_commit()
