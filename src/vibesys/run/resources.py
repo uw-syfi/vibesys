@@ -477,7 +477,9 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
                 effects=ProjectRunEffects(
                     git_events=CoreGitTrackerEvents(integration.events),
                     log_emit=run_log_emitter(integration.agent_events),
-                    on_log_ready=integration.attach,
+                    on_log_ready=lambda log_dir: integration.attach(
+                        log_dir, project=Project.open(project_root), run_id=run_id
+                    ),
                     clock=clock,
                     git_repository=integration.git_repository,
                     state_stores=integration.state_stores,
@@ -521,7 +523,6 @@ def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-wa
         evaluator_tool_roots = prepared_evaluator.tool_roots
 
         with boot_trace.span("workspace_setup"):
-            integration.attach(log_dir, project=project, run_id=run_id)
             integration.events.emit(
                 CoreEventType.EXPERIMENTS_CHANGED,
                 data=ExperimentsChangedData(reason="project_attached"),
