@@ -31,7 +31,7 @@ def _checkout_provenance(git: Git | None, root: Path) -> tuple[str, bool]:
         if tree.returncode != 0 or not tree.stdout.strip():
             return "", False
         status = git.run_text(
-            ["status", "--porcelain", "--untracked-files=normal"],
+            ["status", "--porcelain", "--untracked-files=normal", "--ignore-submodules=none"],
             cwd=root,
             timeout=_CHECKOUT_PROBE_SECONDS,
         )

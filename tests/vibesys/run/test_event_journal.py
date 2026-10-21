@@ -257,7 +257,12 @@ def test_epoch_records_checkout_provenance_at_attachment(
         assert not (tmp_path / "home/runs/run-1").exists()
         if spec.argv[1:] == ("rev-parse", "HEAD^{tree}"):
             return ProcessScript(stdout=f"{tree_hash}\n".encode())
-        assert spec.argv[1:] == ("status", "--porcelain", "--untracked-files=normal")
+        assert spec.argv[1:] == (
+            "status",
+            "--porcelain",
+            "--untracked-files=normal",
+            "--ignore-submodules=none",
+        )
         return ProcessScript(stdout=b"?? new.py\n" if dirty else b"")
 
     clock = ManualClock()
