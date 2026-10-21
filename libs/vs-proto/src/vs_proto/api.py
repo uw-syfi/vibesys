@@ -159,7 +159,12 @@ from vs_proto._generated.vibesys.store.v1.notice_pb import (
     NoticeCode,
     Severity,
 )
-from vs_proto._generated.vibesys.store.v1.record_pb import EpochStarted, LegacyEvent, Record
+from vs_proto._generated.vibesys.store.v1.record_pb import (
+    EpochStarted,
+    LegacyEvent,
+    Record,
+    ReplayStore,
+)
 from vs_proto._generated.vibesys.store.v1.skeleton_pb import (
     EpochVersion,
     HeadlineObjective,
@@ -288,6 +293,7 @@ __all__ = [
     "RelaunchRefusal",
     "RelaunchRequest",
     "RelaunchResponse",
+    "ReplayStore",
     "ResumeIntent",
     "ResumeWhen",
     "RunDescription",

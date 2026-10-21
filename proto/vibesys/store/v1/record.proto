@@ -122,3 +122,9 @@ message LegacyEvent {
   option deprecated = true;
   string json = 1;
 }
+
+// P2 retains the same native records inside today's atomic StateStore payload.
+// P3 changes the recorder, not the replay semantics or operation contracts.
+message ReplayStore {
+  repeated Record records = 1;
+}

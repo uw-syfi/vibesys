@@ -18,7 +18,7 @@ else
   echo "No store schema at $base; establishing the initial additive baseline."
 fi
 ./scripts/generate_proto.sh
-generated=(libs/vs-core/tests/generated libs/vs-proto/src/vs_proto/_generated clients/libs/proto/src/generated gateway/gen
+generated=(libs/vs-runtime/tests/generated libs/vs-core/tests/generated libs/vs-proto/src/vs_proto/_generated clients/libs/proto/src/generated gateway/gen
   libs/vs-core/src/vs_core/_generated libs/vs-runtime/src/vs_runtime/_core_values
   scripts/corevalue/tests/generated_pb scripts/corevalue/tests/generated_values scripts/corevalue/tests/generated_boundary)
 git diff --exit-code -- "${generated[@]}"

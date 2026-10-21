@@ -105,3 +105,18 @@ message ReplayAcknowledgement {
   optional string notice_id = 1 [(buf.validate.field).string.min_len = 1];
   string launch_request_id = 2 [(buf.validate.field).string.min_len = 1];
 }
+
+// A surviving observation can complete its operation after a writer crash.
+// Recording this does not itself deliver an answer to a continuation.
+message ReplayObservation {
+  google.protobuf.Any outcome = 1 [(buf.validate.field).required = true];
+  bool paid = 2;
+  optional double cost_usd = 3 [(buf.validate.field).double = {gte: 0, finite: true}];
+}
+
+// Earlier answers remain usable when only prompts or limits change.
+message ReplayPolicyDrift {
+  uint64 results = 1 [(buf.validate.field).uint64.gt = 0];
+  repeated string roles = 2;
+  repeated string templates = 3;
+}

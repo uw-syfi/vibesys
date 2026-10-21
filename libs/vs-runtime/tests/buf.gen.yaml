@@ -1,0 +1,6 @@
+version: v2
+plugins:
+  - local: protoc-gen-py
+    out: libs/vs-runtime/tests/generated
+    opt:
+      - map_imports=vibesys/store/**:vs_proto._generated

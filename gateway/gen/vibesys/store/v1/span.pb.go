@@ -397,22 +397,23 @@ func (x *SpanRecord) GetSpan() *Span {
 
 // Times are seconds on the monotone run clock, which freezes while parked.
 type Span struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	Parent        *string                `protobuf:"bytes,2,opt,name=parent,proto3,oneof" json:"parent,omitempty"`
-	RuntimeType   RuntimeType            `protobuf:"varint,3,opt,name=runtime_type,json=runtimeType,proto3,enum=vibesys.store.v1.RuntimeType" json:"runtime_type,omitempty"`
-	Name          string                 `protobuf:"bytes,4,opt,name=name,proto3" json:"name,omitempty"`
-	Status        SpanStatus             `protobuf:"varint,5,opt,name=status,proto3,enum=vibesys.store.v1.SpanStatus" json:"status,omitempty"`
-	WaitingOn     []*WaitingOn           `protobuf:"bytes,6,rep,name=waiting_on,json=waitingOn,proto3" json:"waiting_on,omitempty"`
-	Attempts      []*Attempt             `protobuf:"bytes,7,rep,name=attempts,proto3" json:"attempts,omitempty"`
-	StartedAt     float64                `protobuf:"fixed64,8,opt,name=started_at,json=startedAt,proto3" json:"started_at,omitempty"`
-	EndedAt       *float64               `protobuf:"fixed64,9,opt,name=ended_at,json=endedAt,proto3,oneof" json:"ended_at,omitempty"`
-	Failure       *Failure               `protobuf:"bytes,10,opt,name=failure,proto3,oneof" json:"failure,omitempty"`
-	Stop          *Stop                  `protobuf:"bytes,11,opt,name=stop,proto3,oneof" json:"stop,omitempty"`
-	Label         *Label                 `protobuf:"bytes,12,opt,name=label,proto3,oneof" json:"label,omitempty"`
-	Replay        *OperationReplay       `protobuf:"bytes,13,opt,name=replay,proto3,oneof" json:"replay,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	Id                string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Parent            *string                `protobuf:"bytes,2,opt,name=parent,proto3,oneof" json:"parent,omitempty"`
+	RuntimeType       RuntimeType            `protobuf:"varint,3,opt,name=runtime_type,json=runtimeType,proto3,enum=vibesys.store.v1.RuntimeType" json:"runtime_type,omitempty"`
+	Name              string                 `protobuf:"bytes,4,opt,name=name,proto3" json:"name,omitempty"`
+	Status            SpanStatus             `protobuf:"varint,5,opt,name=status,proto3,enum=vibesys.store.v1.SpanStatus" json:"status,omitempty"`
+	WaitingOn         []*WaitingOn           `protobuf:"bytes,6,rep,name=waiting_on,json=waitingOn,proto3" json:"waiting_on,omitempty"`
+	Attempts          []*Attempt             `protobuf:"bytes,7,rep,name=attempts,proto3" json:"attempts,omitempty"`
+	StartedAt         float64                `protobuf:"fixed64,8,opt,name=started_at,json=startedAt,proto3" json:"started_at,omitempty"`
+	EndedAt           *float64               `protobuf:"fixed64,9,opt,name=ended_at,json=endedAt,proto3,oneof" json:"ended_at,omitempty"`
+	Failure           *Failure               `protobuf:"bytes,10,opt,name=failure,proto3,oneof" json:"failure,omitempty"`
+	Stop              *Stop                  `protobuf:"bytes,11,opt,name=stop,proto3,oneof" json:"stop,omitempty"`
+	Label             *Label                 `protobuf:"bytes,12,opt,name=label,proto3,oneof" json:"label,omitempty"`
+	Replay            *OperationReplay       `protobuf:"bytes,13,opt,name=replay,proto3,oneof" json:"replay,omitempty"`
+	ReplayObservation *ReplayObservation     `protobuf:"bytes,14,opt,name=replay_observation,json=replayObservation,proto3,oneof" json:"replay_observation,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *Span) Reset() {
@@ -532,6 +533,13 @@ func (x *Span) GetLabel() *Label {
 func (x *Span) GetReplay() *OperationReplay {
 	if x != nil {
 		return x.Replay
+	}
+	return nil
+}
+
+func (x *Span) GetReplayObservation() *ReplayObservation {
+	if x != nil {
+		return x.ReplayObservation
 	}
 	return nil
 }
@@ -933,7 +941,7 @@ const file_vibesys_store_v1_span_proto_rawDesc = "" +
 	"\x06change\x18\x01 \x01(\x0e2\x18.vibesys.store.v1.ChangeB\n" +
 	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x06change\x122\n" +
 	"\x04span\x18\x02 \x01(\v2\x16.vibesys.store.v1.SpanB\x06\xbaH\x03\xc8\x01\x01R\x04span:\xe2\x01\xbaH\xde\x01\x1a\xdb\x01\n" +
-	"\x12span_record.change\x12Rended requires ended_at and started requires an open span; updated replaces either\x1aqhas(this.span) && (this.change != 3 || has(this.span.ended_at)) && (this.change != 1 || !has(this.span.ended_at))\"\xc1\a\n" +
+	"\x12span_record.change\x12Rended requires ended_at and started requires an open span; updated replaces either\x1aqhas(this.span) && (this.change != 3 || has(this.span.ended_at)) && (this.change != 1 || !has(this.span.ended_at))\"\xb1\b\n" +
 	"\x04Span\x12\x1b\n" +
 	"\x02id\x18\x01 \x01(\tB\v\xbaH\br\x06\x10\x01(\x80\x80\x04R\x02id\x12(\n" +
 	"\x06parent\x18\x02 \x01(\tB\v\xbaH\br\x06\x10\x01(\x80\x80\x04H\x00R\x06parent\x88\x01\x01\x12L\n" +
@@ -952,7 +960,8 @@ const file_vibesys_store_v1_span_proto_rawDesc = "" +
 	" \x01(\v2\x19.vibesys.store.v1.FailureH\x02R\afailure\x88\x01\x01\x12/\n" +
 	"\x04stop\x18\v \x01(\v2\x16.vibesys.store.v1.StopH\x03R\x04stop\x88\x01\x01\x122\n" +
 	"\x05label\x18\f \x01(\v2\x17.vibesys.store.v1.LabelH\x04R\x05label\x88\x01\x01\x12>\n" +
-	"\x06replay\x18\r \x01(\v2!.vibesys.store.v1.OperationReplayH\x05R\x06replay\x88\x01\x01:\xc9\x01\xbaH\xc5\x01\x1a\xc2\x01\n" +
+	"\x06replay\x18\r \x01(\v2!.vibesys.store.v1.OperationReplayH\x05R\x06replay\x88\x01\x01\x12W\n" +
+	"\x12replay_observation\x18\x0e \x01(\v2#.vibesys.store.v1.ReplayObservationH\x06R\x11replayObservation\x88\x01\x01:\xc9\x01\xbaH\xc5\x01\x1a\xc2\x01\n" +
 	"\rspan.ended_at\x12Jended_at must follow started_at and be present exactly for terminal status\x1aehas(this.ended_at) == (this.status >= 4) && (!has(this.ended_at) || this.ended_at >= this.started_at)B\t\n" +
 	"\a_parentB\v\n" +
 	"\t_ended_atB\n" +
@@ -960,7 +969,8 @@ const file_vibesys_store_v1_span_proto_rawDesc = "" +
 	"\b_failureB\a\n" +
 	"\x05_stopB\b\n" +
 	"\x06_labelB\t\n" +
-	"\a_replay\"\x8c\x01\n" +
+	"\a_replayB\x15\n" +
+	"\x13_replay_observation\"\x8c\x01\n" +
 	"\tWaitingOn\x12:\n" +
 	"\x04kind\x18\x01 \x01(\x0e2\x1a.vibesys.store.v1.WaitKindB\n" +
 	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x04kind\x12\x1b\n" +
@@ -1050,22 +1060,23 @@ func file_vibesys_store_v1_span_proto_rawDescGZIP() []byte {
 var file_vibesys_store_v1_span_proto_enumTypes = make([]protoimpl.EnumInfo, 6)
 var file_vibesys_store_v1_span_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
 var file_vibesys_store_v1_span_proto_goTypes = []any{
-	(Change)(0),             // 0: vibesys.store.v1.Change
-	(RuntimeType)(0),        // 1: vibesys.store.v1.RuntimeType
-	(SpanStatus)(0),         // 2: vibesys.store.v1.SpanStatus
-	(WaitKind)(0),           // 3: vibesys.store.v1.WaitKind
-	(AttemptOutcome)(0),     // 4: vibesys.store.v1.AttemptOutcome
-	(SpanFailureKind)(0),    // 5: vibesys.store.v1.SpanFailureKind
-	(*SpanRecord)(nil),      // 6: vibesys.store.v1.SpanRecord
-	(*Span)(nil),            // 7: vibesys.store.v1.Span
-	(*WaitingOn)(nil),       // 8: vibesys.store.v1.WaitingOn
-	(*Attempt)(nil),         // 9: vibesys.store.v1.Attempt
-	(*Failure)(nil),         // 10: vibesys.store.v1.Failure
-	(*Stop)(nil),            // 11: vibesys.store.v1.Stop
-	(*Label)(nil),           // 12: vibesys.store.v1.Label
-	(*SpanLink)(nil),        // 13: vibesys.store.v1.SpanLink
-	(*OperationReplay)(nil), // 14: vibesys.store.v1.OperationReplay
-	(*anypb.Any)(nil),       // 15: google.protobuf.Any
+	(Change)(0),               // 0: vibesys.store.v1.Change
+	(RuntimeType)(0),          // 1: vibesys.store.v1.RuntimeType
+	(SpanStatus)(0),           // 2: vibesys.store.v1.SpanStatus
+	(WaitKind)(0),             // 3: vibesys.store.v1.WaitKind
+	(AttemptOutcome)(0),       // 4: vibesys.store.v1.AttemptOutcome
+	(SpanFailureKind)(0),      // 5: vibesys.store.v1.SpanFailureKind
+	(*SpanRecord)(nil),        // 6: vibesys.store.v1.SpanRecord
+	(*Span)(nil),              // 7: vibesys.store.v1.Span
+	(*WaitingOn)(nil),         // 8: vibesys.store.v1.WaitingOn
+	(*Attempt)(nil),           // 9: vibesys.store.v1.Attempt
+	(*Failure)(nil),           // 10: vibesys.store.v1.Failure
+	(*Stop)(nil),              // 11: vibesys.store.v1.Stop
+	(*Label)(nil),             // 12: vibesys.store.v1.Label
+	(*SpanLink)(nil),          // 13: vibesys.store.v1.SpanLink
+	(*OperationReplay)(nil),   // 14: vibesys.store.v1.OperationReplay
+	(*ReplayObservation)(nil), // 15: vibesys.store.v1.ReplayObservation
+	(*anypb.Any)(nil),         // 16: google.protobuf.Any
 }
 var file_vibesys_store_v1_span_proto_depIdxs = []int32{
 	0,  // 0: vibesys.store.v1.SpanRecord.change:type_name -> vibesys.store.v1.Change
@@ -1078,16 +1089,17 @@ var file_vibesys_store_v1_span_proto_depIdxs = []int32{
 	11, // 7: vibesys.store.v1.Span.stop:type_name -> vibesys.store.v1.Stop
 	12, // 8: vibesys.store.v1.Span.label:type_name -> vibesys.store.v1.Label
 	14, // 9: vibesys.store.v1.Span.replay:type_name -> vibesys.store.v1.OperationReplay
-	3,  // 10: vibesys.store.v1.WaitingOn.kind:type_name -> vibesys.store.v1.WaitKind
-	4,  // 11: vibesys.store.v1.Attempt.outcome:type_name -> vibesys.store.v1.AttemptOutcome
-	5,  // 12: vibesys.store.v1.Failure.kind:type_name -> vibesys.store.v1.SpanFailureKind
-	13, // 13: vibesys.store.v1.Label.links:type_name -> vibesys.store.v1.SpanLink
-	15, // 14: vibesys.store.v1.Label.attrs:type_name -> google.protobuf.Any
-	15, // [15:15] is the sub-list for method output_type
-	15, // [15:15] is the sub-list for method input_type
-	15, // [15:15] is the sub-list for extension type_name
-	15, // [15:15] is the sub-list for extension extendee
-	0,  // [0:15] is the sub-list for field type_name
+	15, // 10: vibesys.store.v1.Span.replay_observation:type_name -> vibesys.store.v1.ReplayObservation
+	3,  // 11: vibesys.store.v1.WaitingOn.kind:type_name -> vibesys.store.v1.WaitKind
+	4,  // 12: vibesys.store.v1.Attempt.outcome:type_name -> vibesys.store.v1.AttemptOutcome
+	5,  // 13: vibesys.store.v1.Failure.kind:type_name -> vibesys.store.v1.SpanFailureKind
+	13, // 14: vibesys.store.v1.Label.links:type_name -> vibesys.store.v1.SpanLink
+	16, // 15: vibesys.store.v1.Label.attrs:type_name -> google.protobuf.Any
+	16, // [16:16] is the sub-list for method output_type
+	16, // [16:16] is the sub-list for method input_type
+	16, // [16:16] is the sub-list for extension type_name
+	16, // [16:16] is the sub-list for extension extendee
+	0,  // [0:16] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_store_v1_span_proto_init() }

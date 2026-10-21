@@ -1,0 +1,258 @@
+"""Validate native replay prefixes independently of the storage implementation."""
+
+from __future__ import annotations
+
+from copy import deepcopy
+from dataclasses import dataclass, field
+
+from protobuf import Oneof
+
+from vs_proto.api import (
+    RUN_LOG_MAX_RECORD_BYTES,
+    Change,
+    EpochStarted,
+    Record,
+    ReplayStore,
+    Span,
+    validate,
+)
+from vs_proto.api import replay as pb
+
+from ._replay_history import AcceptedClock, AcceptedReplay, ReplayAcknowledgements
+from ._replay_identity import ENCODING_VERSION
+from ._replay_sources import ReplayError
+
+
+def _execution(span: Span) -> bytes:
+    operation = deepcopy(span.replay)
+    if operation is None:
+        problem = "keyed span requires replay metadata"
+        raise ReplayError(problem)
+    for name in ("outcome", "accepted_sequence", "paid", "cost_usd"):
+        operation.clear_field(name)
+    return operation.to_binary()
+
+
+@dataclass
+class ReplayArchive:
+    """Disposable validated index over a complete native-record prefix.
+
+    The records, not this index, are authoritative. All accessors return fresh
+    protobuf values. Unknown record families and malformed transitions fail
+    before reconstruction or dispatch. A logical start without an observation
+    requires executor reconciliation; it never proves absence.
+    """
+
+    _records: list[bytes] = field(default_factory=list, init=False, repr=False)
+    _frames: list[bytes] = field(default_factory=list, init=False, repr=False)
+    _spans: dict[str, bytes] = field(default_factory=dict, init=False, repr=False)
+    _history: list[AcceptedReplay | AcceptedClock] = field(default_factory=list, init=False)
+    _epochs: list[bytes] = field(default_factory=list, init=False, repr=False)
+    acknowledgements: ReplayAcknowledgements = field(default_factory=ReplayAcknowledgements)
+    clock: float = 0.0
+    _policy_drift: bytes | None = field(default=None, init=False, repr=False)
+
+    @classmethod
+    def decode(cls, payload: bytes) -> ReplayArchive:
+        store = ReplayStore.from_binary(payload)
+        validate(store)
+        result = cls()
+        for record in store.records:
+            result.append(record)
+        return result
+
+    def encode(self) -> bytes:
+        # Repeated-message protobuf fields concatenate. The generated writer
+        # frames each Record once; no custom identity or protobuf encoder lives here.
+        return b"".join(self._frames)
+
+    def fork(self) -> ReplayArchive:
+        """Stage a transition without reparsing or mutating the confirmed prefix."""
+        result = ReplayArchive()
+        result._records = self._records.copy()
+        result._frames = self._frames.copy()
+        result._spans = self._spans.copy()
+        result._history = self._history.copy()
+        result._epochs = self._epochs.copy()
+        result.acknowledgements = self.acknowledgements
+        result.clock = self.clock
+        result._policy_drift = self._policy_drift
+        return result
+
+    @property
+    def sequence(self) -> int:
+        return len(self._records)
+
+    @property
+    def history(self) -> tuple[AcceptedReplay | AcceptedClock, ...]:
+        return tuple(self._history)
+
+    @property
+    def policy_drift(self) -> pb.ReplayPolicyDrift | None:
+        return (
+            None
+            if self._policy_drift is None
+            else pb.ReplayPolicyDrift.from_binary(self._policy_drift)
+        )
+
+    @property
+    def initial_allowance(self) -> pb.ReplayAllowance:
+        if not self._epochs:
+            problem = "replay archive has no initial epoch"
+            raise ReplayError(problem)
+        allowance = self.epochs[0].initial_allowance
+        if allowance is None:
+            problem = "initial keyed epoch has no historical allowance"
+            raise ReplayError(problem)
+        return allowance
+
+    @property
+    def epochs(self) -> tuple[EpochStarted, ...]:
+        return tuple(EpochStarted.from_binary(value) for value in self._epochs)
+
+    @property
+    def spans(self) -> tuple[Span, ...]:
+        return tuple(Span.from_binary(value) for value in self._spans.values())
+
+    @property
+    def unresolved(self) -> tuple[Span, ...]:
+        return tuple(
+            span for span in self.spans if span.replay is not None and span.replay.outcome is None
+        )
+
+    def append(self, record: Record) -> None:
+        """Fold one validated next record; callers discard the index on failure."""
+        validate(record)
+        if len(record.to_binary()) > RUN_LOG_MAX_RECORD_BYTES:
+            problem = "replay record exceeds the native record byte cap; retain content as a blob"
+            raise ReplayError(problem)
+        if record.seq != self.sequence + 1 or not record.has_field("clock"):
+            problem = "replay records require contiguous sequence and Record.clock"
+            raise ReplayError(problem)
+        if record.clock < self.clock:
+            problem = "replay Record.clock must be monotone"
+            raise ReplayError(problem)
+        self._body(record)
+        if record.replay_clock is not None:
+            self._history.append(AcceptedClock.from_record(record))
+        self._records.append(record.to_binary())
+        self._frames.append(ReplayStore(records=[record]).to_binary())
+        self.clock = record.clock
+
+    def _body(self, record: Record) -> None:
+        match record.body:
+            case Oneof("epoch_started", epoch):
+                self._epoch(record, epoch)
+            case _ if not self._epochs or record.epoch != self.epochs[-1].epoch:
+                problem = "replay record belongs to no current epoch"
+                raise ReplayError(problem)
+            case Oneof("span", body) if body.span is not None:
+                self._span(record, body.change, body.span)
+            case Oneof("notice", notice):
+                if notice.detail is not None:
+                    name = notice.detail.type_url.rsplit("/", 1)[-1]
+                    if name == pb.ReplayPolicyDrift.desc().type_name:
+                        value = pb.ReplayPolicyDrift.from_binary(notice.detail.value)
+                        validate(value)
+                        if self._policy_drift is not None:
+                            problem = "an epoch records policy drift only once"
+                            raise ReplayError(problem)
+                        self._policy_drift = value.to_binary()
+                    elif name == pb.ReplayNotice.desc().type_name:
+                        value = pb.ReplayNotice.from_binary(notice.detail.value)
+                        self.acknowledgements = self.acknowledgements.record_notice(value)
+            case Oneof("lifecycle", _):
+                pass
+            case _:
+                problem = "unsupported record in keyed replay archive"
+                raise ReplayError(problem)
+
+    def _epoch(self, record: Record, epoch: EpochStarted) -> None:
+        if (
+            epoch.epoch != len(self._epochs) + 1
+            or epoch.epoch != record.epoch
+            or epoch.identity_encoding_version != ENCODING_VERSION
+            or epoch.initial_allowance is None
+            or epoch.replay_acknowledgement is None
+        ):
+            problem = (
+                "keyed epoch needs sequential identity, encoding, allowance and launch relation"
+            )
+            raise ReplayError(problem)
+        if self._epochs:
+            original = self.epochs[0]
+            if epoch.run_id != original.run_id:
+                problem = "a Resume epoch cannot change the original run identity"
+                raise ReplayError(problem)
+            if original.run is not None and (
+                epoch.run is None
+                or epoch.run.strategy != original.run.strategy
+                or epoch.run.input != original.run.input
+                or epoch.run.objective != original.run.objective
+            ):
+                problem = "a Resume epoch cannot replace the original task or source input"
+                raise ReplayError(problem)
+        ack = epoch.replay_acknowledgement
+        resumed = self.acknowledgements.resume(ack.launch_request_id)
+        if resumed == self.acknowledgements or resumed.acknowledgements[-1] != ack.to_binary():
+            problem = "epoch repeats a launch or contradicts the preceding notice acknowledgement"
+            raise ReplayError(problem)
+        self.acknowledgements = resumed
+        self._epochs.append(epoch.to_binary())
+        self._policy_drift = None
+
+    def _span(self, record: Record, change: Change, span: Span) -> None:
+        operation = span.replay
+        if operation is None:
+            problem = "keyed operation span needs immutable replay metadata"
+            raise ReplayError(problem)
+        previous_bytes = self._spans.get(span.id)
+        if previous_bytes is None:
+            if change != Change.STARTED or operation.outcome is not None or span.replay_observation:
+                problem = "replay operation must start before observation or outcome"
+                raise ReplayError(problem)
+        else:
+            previous = Span.from_binary(previous_bytes)
+            if (
+                change == Change.STARTED
+                or _execution(previous) != _execution(span)
+                or previous.started_at != span.started_at
+                or previous.parent != span.parent
+                or previous.name != span.name
+            ):
+                problem = "replay operation changed immutable start metadata"
+                raise ReplayError(problem)
+            if previous.replay is not None and previous.replay.outcome is not None:
+                problem = "accepted replay operation cannot complete twice"
+                raise ReplayError(problem)
+            old = previous.replay_observation
+            if old is not None and (
+                span.replay_observation is None
+                or old.to_binary() != span.replay_observation.to_binary()
+            ):
+                problem = "replay observation cannot be replaced or removed"
+                raise ReplayError(problem)
+        observed = span.replay_observation
+        if observed is not None and (
+            observed.outcome is None
+            or operation.policy is None
+            or observed.outcome.type_url.rsplit("/", 1)[-1] != operation.policy.reply_type
+        ):
+            problem = "observation does not match the operation's reply contract"
+            raise ReplayError(problem)
+        if operation.outcome is not None:
+            if (
+                previous_bytes is None
+                or Span.from_binary(previous_bytes).replay_observation is None
+                or observed is None
+                or observed.outcome is None
+                or operation.outcome.to_binary() != observed.outcome.to_binary()
+                or operation.paid != observed.paid
+                or operation.cost_usd != observed.cost_usd
+                or operation.has_field("cost_usd") != observed.has_field("cost_usd")
+                or change != Change.ENDED
+            ):
+                problem = "acceptance requires its previously durable observation"
+                raise ReplayError(problem)
+            self._history.append(AcceptedReplay.from_record(record))
+        self._spans[span.id] = span.to_binary()

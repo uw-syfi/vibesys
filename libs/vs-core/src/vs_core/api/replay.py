@@ -4,6 +4,7 @@ Identity is validated before matching. Shells retain protobuf records and drive
 accepted observations in log order; flow continuations use only this scheduler.
 """
 
+from vs_core.flows._replay_archive import ReplayArchive
 from vs_core.flows._replay_history import (
     AcceptedClock,
     AcceptedReplay,
@@ -48,6 +49,7 @@ __all__ = [
     "EncodedIdentity",
     "PolicyDrift",
     "ReplayAcknowledgements",
+    "ReplayArchive",
     "ReplayCall",
     "ReplayCausalityError",
     "ReplayChannel",
