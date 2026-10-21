@@ -450,3 +450,17 @@ def test_run_result_accepts_typed_stopped_outcome() -> None:
     )
     assert result.status is ProductRunStatus.STOPPED
     assert not result.succeeded
+
+
+@pytest.mark.regression
+def test_startup_completion_precedes_running_declaration(
+    request_template: RunRequest, sim: Sim
+) -> None:
+    ran = _run_keeping_a_candidate(
+        request_template, sim, SkeletonStrategy.uncompared_after_choice(), 0
+    )
+    kinds = [event.type for event in ran.events]
+    started = kinds.index(CoreEventType.RUN_STARTED)
+    startup = [i for i, kind in enumerate(kinds) if kind is CoreEventType.RUN_STARTUP_PROGRESS]
+    assert startup
+    assert max(startup) < started
