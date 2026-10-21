@@ -861,10 +861,6 @@ class RunControlBridge:
             self._refuse(change, error.detail, request_id=change.control_id if inbox else None)
         if core.run.status in (RunStatus.DRAINING, RunStatus.PARKED) and not self._park_landed:
             self._park_landed = True
-            for job in core.evaluation.jobs:
-                source = core.records.record(job.submission_id)
-                if source is not None and source.request.decision_id is None:
-                    self._channel.prepare_evaluation(job.resource_id.root, job.scope)
             self._channel.land_park(
                 tuple(
                     job.resource_id.root

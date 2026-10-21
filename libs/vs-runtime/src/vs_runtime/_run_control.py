@@ -529,10 +529,6 @@ class RunControlChannel(Protocol):
         """Release the authority of a turn that finished executing."""
         ...
 
-    def has_executing_owner(self, owner_scope: str, generation: int) -> bool:
-        """Whether the evaluation is allowed, including an executing turn's dependency."""
-        ...
-
     def start_execution(
         self,
         started: Callable[[], None],
@@ -729,7 +725,7 @@ class RuntimeRunControlChannel:
         self._stop_listeners: list[Callable[[], object]] = []
         self._execution_closed = False
         self._prepared_executions: dict[str, Scope] = {}
-        self._evaluation_dependencies: dict[str, Scope] = {}
+        self._evaluation_dependencies: dict[str, frozenset[str]] = {}
         self._executing: dict[str, Scope] = {}
         self._drain_jobs: set[str] = set()
         self._now = threads.now
@@ -745,19 +741,18 @@ class RuntimeRunControlChannel:
         self._resumed_by = PauseWake.RESUMED
 
     def prepare_evaluation(self, resource_id: str, scope: Scope) -> None:
-        """Register the core-proven origin of an agent's evaluation call."""
+        """Capture the executing callers once; a later turn cannot inherit their queued jobs."""
         with self._lock:
-            self._evaluation_dependencies[resource_id] = scope
+            self._evaluation_dependencies.setdefault(
+                resource_id,
+                frozenset(key for key, owner in self._executing.items() if owner == scope),
+            )
 
     def evaluation_is_dependency(self, resource_id: str) -> bool:
-        """Only evaluations requested by an executing turn may cross the pause drain."""
+        """A turn that requested this evaluation must still be executing."""
         with self._lock:
-            scope = self._evaluation_dependencies.get(resource_id)
-            return (
-                not self._stop_requested
-                and scope is not None
-                and self._dependency(f"{scope.owner.kind}:{scope.owner.root}", scope.generation)
-            )
+            owners = self._evaluation_dependencies.get(resource_id, frozenset())
+            return not self._stop_requested and not owners.isdisjoint(self._executing)
 
     def prepare_execution(self, execution_id: str, scope: Scope) -> None:
         """Associate dispatch identity with its declared owner before preparation ends."""
@@ -770,18 +765,6 @@ class RuntimeRunControlChannel:
             self._prepared_executions.pop(execution_id, None)
             self._executing.pop(execution_id, None)
 
-    def _dependency(self, owner_scope: str, generation: int) -> bool:
-        return any(
-            f"{scope.owner.kind}:{scope.owner.root}" == owner_scope
-            and scope.generation == generation
-            for scope in self._executing.values()
-        )
-
-    def has_executing_owner(self, owner_scope: str, generation: int) -> bool:
-        """An executing turn retains authority to run its own evaluation dependency."""
-        with self._lock:
-            return not self._stop_requested and self._dependency(owner_scope, generation)
-
     def start_execution(
         self,
         started: Callable[[], None],
@@ -792,17 +775,8 @@ class RuntimeRunControlChannel:
         """Publish dispatch atomically with the pause drain, preserving live dependencies."""
         with self._lock:
             allowed = not self._stop_requested and not self._execution_closed
-            if execution_id is None:
-                scope = self._evaluation_dependencies.get(evaluation_id or "")
-                allowed = not self._stop_requested and (
-                    not self._execution_closed
-                    or (
-                        scope is not None
-                        and self._dependency(
-                            f"{scope.owner.kind}:{scope.owner.root}", scope.generation
-                        )
-                    )
-                )
+            if execution_id is None and evaluation_id is not None:
+                allowed = allowed or self.evaluation_is_dependency(evaluation_id)
             if not allowed:
                 message = "pause drain cancelled preparation before execution"
                 raise AgentExecutionCancelledError(message)

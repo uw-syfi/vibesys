@@ -236,7 +236,7 @@ async def test_pause_drain_allows_the_evaluation_an_executing_turn_is_waiting_fo
     assert len(evaluation.benchmark_calls) == 1
     evaluated.set()
     await agent
-    assert not control.has_executing_owner("run:run", 0)
+    assert not control.evaluation_is_dependency(request.key)
     await executor.close()
 
 
@@ -270,3 +270,21 @@ def test_pause_drain_job_confirmation_never_requests_a_stop() -> None:
     assert channel.drain_ready
     assert not stops
     assert not channel.stop_requested()
+
+
+def test_pause_drain_does_not_transfer_queued_evaluations_to_a_later_turn() -> None:
+    channel = create_run_control_channel(FakeRunControlEventSink(), threads=SimThreads())
+    scope = Scope(owner=RunId(root="run"), generation=0)
+    channel.prepare_execution("earlier-turn", scope)
+    channel.start_execution(lambda: None, execution_id="earlier-turn")
+    channel.prepare_evaluation("queued-evaluation", scope)
+    channel.finish_execution("earlier-turn")
+    channel.prepare_execution("later-turn", scope)
+    channel.start_execution(lambda: None, execution_id="later-turn")
+    channel.prepare_evaluation("queued-evaluation", scope)
+    channel.prepare_evaluation("later-evaluation", scope)
+    channel.land_park()
+    assert not channel.evaluation_is_dependency("queued-evaluation")
+    with pytest.raises(AgentExecutionCancelledError):
+        channel.start_execution(lambda: None, evaluation_id="queued-evaluation")
+    channel.start_execution(lambda: None, evaluation_id="later-evaluation")

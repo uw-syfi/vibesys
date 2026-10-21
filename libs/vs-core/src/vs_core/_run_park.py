@@ -34,7 +34,7 @@ if TYPE_CHECKING:
     from .types.common import Scope
     from .types.kernel import CoreState
     from .types.records import RecordsState, Request, RequestRecord
-    from .types.sessions import SessionsState
+    from .types.sessions import Invocation, SessionsState
 
 # These effects finish work already performed by a turn. Everything else waits for
 # relaunch, including prepared turns, measurements, polls and queued attempts.
@@ -67,17 +67,16 @@ def dispatch_allowed(state: CoreState, request: Request) -> bool:
 
 def scope_in_flight(sessions: SessionsState, records: RecordsState, scope: Scope) -> bool:
     """An admitted turn of this owner has crossed core's dispatch boundary."""
-    return any(
-        turn.scope == scope
-        and turn.phase in (SessionPhase.EXECUTING, SessionPhase.UNKNOWN)
-        and any(
-            isinstance(row.request, DispatchTurn | ResumeSessionTurn)
-            and row.request.turn == turn.turn
-            and row.request.scope == scope
-            and row.phase != RequestPhase.PREPARED
-            for row in records.records
-        )
-        for turn in sessions.invocations
+    return any(turn.scope == scope and _executing(turn, records) for turn in sessions.invocations)
+
+
+def _executing(turn: Invocation, records: RecordsState) -> bool:
+    return turn.phase in (SessionPhase.EXECUTING, SessionPhase.UNKNOWN) and any(
+        isinstance(row.request, DispatchTurn | ResumeSessionTurn)
+        and row.request.turn == turn.turn
+        and row.request.scope == turn.scope
+        and row.phase != RequestPhase.PREPARED
+        for row in records.records
     )
 
 
@@ -101,17 +100,7 @@ def _unfinished(state: CoreState, record: RequestRecord) -> bool:
 
 def _turns_in_flight(state: CoreState) -> bool:
     """A prepared dispatch marks its invocation executing before I/O actually starts."""
-    return any(
-        turn.phase in (SessionPhase.EXECUTING, SessionPhase.UNKNOWN)
-        and any(
-            isinstance(row.request, DispatchTurn | ResumeSessionTurn)
-            and row.request.turn == turn.turn
-            and row.request.scope == turn.scope
-            and row.phase != RequestPhase.PREPARED
-            for row in state.records.records
-        )
-        for turn in state.sessions.invocations
-    )
+    return any(_executing(turn, state.records) for turn in state.sessions.invocations)
 
 
 def advance(state: CoreState) -> tuple[CoreState, tuple[Scheduled, ...]]:
