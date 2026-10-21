@@ -238,7 +238,9 @@ def test_inlined_numeric_schemas_keep_finiteness_and_bounds(
 ) -> None:
     """JSON Schema cannot express finiteness; its inlining must not lose the validator."""
     cls = getattr(shared_values, name)
-    payload = dict(_shared_seeds()[name])
+    seed = _shared_seeds()[name]
+    assert isinstance(seed, dict)
+    payload = dict(seed)
     payload[field] = number
     source = json.dumps(payload)
     if not math.isfinite(number) or (nonnegative and number < 0):
