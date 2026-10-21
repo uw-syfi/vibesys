@@ -35,6 +35,7 @@ def main() -> None:
             (
                 "        self._active[call.key] = pending\n",
                 "        self._active[call.key] = pending\n"
+                "        pending.registered = True\n"
                 "        for recorded in self._history:\n"
                 "            if isinstance(recorded, AcceptedReplay) and (recorded.key, recorded.identity) == occurrence:\n"
                 "                self._release(recorded)\n"

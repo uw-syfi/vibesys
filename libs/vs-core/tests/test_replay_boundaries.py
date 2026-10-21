@@ -464,3 +464,69 @@ def test_prompt_calls_cannot_bypass_typed_context_classification() -> None:
 
     with pytest.raises(ReplayIdentityError, match="classified typed context"):
         ReplayScheduler(root, (), settings())
+
+
+@pytest.mark.parametrize("transition", ["await", "accept"])
+def test_a_registered_first_loser_keeps_its_answer_for_a_later_await(transition: str) -> None:
+    async def root(ctx: ReplayFlow) -> object:
+        loser = ctx.call(ask("A"))
+        await ctx.first(loser, ctx.call(ask("B")))
+        await ctx.call(ask("C"))
+        return await loser
+
+    live = ReplayScheduler(root, (), settings())
+    a_start, b_start = live.dispatches()
+    b = accepted(b_start, 1, "b")
+    a = accepted(a_start, 2, "a")
+    live.accept(b)
+    live.accept(a)
+    assert live.frontier().unused == ()
+    live.close()
+    rebuilt = ReplayScheduler(root, [b, a], settings())
+    try:
+        (c_start,) = rebuilt.dispatches()
+        assert c_start.key is not None
+        assert c_start.key.operation == "C"
+        if transition == "await":
+            rebuilt.accept(accepted(c_start, 3, "c"))
+            assert rebuilt.result == Reply(root="a")
+            assert rebuilt.dispatches() == ()
+            assert rebuilt.frontier().unused == ()
+        else:
+            with pytest.raises(ReplayError, match="multiple accepted"):
+                rebuilt.accept(accepted(a.operation(), 3, "a"))
+    finally:
+        rebuilt.close()
+
+
+def test_transient_first_requests_rebind_causality_when_they_are_actually_reached() -> None:
+    async def original(ctx: ReplayFlow) -> object:
+        return await ctx.call(ask("A"))
+
+    async def changed(ctx: ReplayFlow) -> object:
+        ready = ctx.latch()
+        ready.set("ready")
+        later = ctx.call(ask("A"))
+        await ctx.first(ready, later)
+        await ctx.call(ask("C"))
+        return await later
+
+    live = ReplayScheduler(original, (), settings())
+    (a_start,) = live.dispatches()
+    a = accepted(a_start, 1, "old-a")
+    live.accept(a)
+    preview = ReplayScheduler(changed, [a], settings())
+    notice = preview.frontier().notice()
+    assert notice is not None
+    acks = ReplayAcknowledgements().record_notice(notice).resume("next-launch")
+    preview.close()
+    rebuilt = ReplayScheduler(changed, [a], settings(), acks)
+    try:
+        (c_start,) = rebuilt.dispatches()
+        rebuilt.accept(accepted(c_start, 2, "c"))
+        (new_a,) = rebuilt.dispatches()
+        assert new_a.identity != a.operation().identity
+        rebuilt.accept(accepted(new_a, 3, "new-a"))
+        assert rebuilt.result == Reply(root="new-a")
+    finally:
+        rebuilt.close()

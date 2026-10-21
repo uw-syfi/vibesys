@@ -79,6 +79,8 @@ class _Pending:
     policy_bytes: bytes
     reply: type[Message]
     outcome: _Delivery | None = None
+    registered: bool = False
+    owners: set[int] = field(default_factory=set)
     joined_policies: set[bytes] = field(default_factory=set)
 
 
@@ -257,6 +259,11 @@ class ReplayScheduler:
             if isinstance(source, _Operation)
         )
 
+    def _registered(self, pending: _Pending) -> bool:
+        return pending.registered and any(
+            self._tasks[owner].result is None for owner in pending.owners
+        )
+
     def _waiting(self) -> Iterable[_Pending]:
         active = {
             self._sources[source]
@@ -280,6 +287,9 @@ class ReplayScheduler:
             self._check_deadlock()
             return
         occurrence = (accepted.key, accepted.identity)
+        if occurrence in self._past:
+            problem = "one logical occurrence has multiple accepted outcomes"
+            raise ReplayError(problem)
         if occurrence not in self._pending or self._pending[occurrence].outcome is not None:
             problem = "live acceptance has no pending logical operation"
             raise ReplayError(problem)
@@ -298,7 +308,7 @@ class ReplayScheduler:
         occurrence = (accepted.key, accepted.identity)
         pending = self._pending.get(occurrence)
         self._past.add(occurrence)
-        if pending is None or not self._has_waiter(pending):
+        if pending is None or not self._registered(pending):
             return
         operation = accepted.operation()
         reply = operation.outcome
@@ -340,8 +350,7 @@ class ReplayScheduler:
 
     def _register(self, source: ReplaySource, task: ReplayTask) -> None:
         if isinstance(source, _Operation):
-            if source not in self._sources:
-                self._register_call(source, task)
+            self._register_operation(source, task)
         elif isinstance(source, _First):
             for child in source.sources:
                 self._register(child, task)
@@ -358,6 +367,17 @@ class ReplayScheduler:
         else:
             problem = "foreign awaitable in replay flow"
             raise ReplayError(problem)
+
+    def _register_operation(self, source: _Operation, task: ReplayTask) -> None:
+        pending = self._sources.get(source)
+        if pending is None or (
+            pending.outcome is None
+            and (not pending.registered or (pending.key, pending.identity) in self._past)
+        ):
+            self._sources.pop(source, None)
+            self._register_call(source, task)
+        else:
+            pending.owners.add(task.ordinal)
 
     def _register_timer(self, source: ReplayTimer, task: ReplayTask) -> None:
         if source not in self._timers:
@@ -381,7 +401,7 @@ class ReplayScheduler:
             problem = f"late exact request behind replay cursor: {call.key}"
             raise ReplayCausalityError(problem)
         active = self._active.get(call.key)
-        if active is not None and not self._has_waiter(active):
+        if active is not None and not self._registered(active) and not self._has_waiter(active):
             active = None
         if active is not None and active.identity != identity:
             problem = f"concurrent divergent identities for semantic key {call.key}"
@@ -414,6 +434,7 @@ class ReplayScheduler:
             raise ReplayConsumerError(problem)
         if policy.to_binary() != pending.policy_bytes:
             pending.joined_policies.add(policy.to_binary())
+        pending.owners.add(task.ordinal)
         self._sources[source] = pending
         self._active[call.key] = pending
 
@@ -471,6 +492,12 @@ class ReplayScheduler:
                 None,
             )
             if task is None:
+                # A parked request remains registered even when a first() winner
+                # moves its consumer elsewhere. Its retained answer can be awaited
+                # later, just like a buffered channel or completed child result.
+                for source in self._awaited_sources():
+                    if isinstance(source, _Operation):
+                        self._sources[source].registered = True
                 return
             self._advance(task)
 

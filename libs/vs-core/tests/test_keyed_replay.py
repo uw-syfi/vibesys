@@ -292,7 +292,7 @@ def test_live_acceptance_rejects_reordering_and_duplicate_acceptance() -> None:
     (one,) = live.dispatches()
     first = accepted(one, 4, "a")
     live.accept(first)
-    with pytest.raises(ReplayError, match="no pending"):
+    with pytest.raises(ReplayError, match="multiple accepted"):
         live.accept(first)
     (two,) = live.dispatches()
     with pytest.raises(ReplayError, match="advance log sequence"):
