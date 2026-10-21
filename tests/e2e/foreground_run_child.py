@@ -100,12 +100,15 @@ def interrupted_run(transports: int, target: int) -> tuple[list[bool], str]:
     Call through ``run_in_child``: it installs signal handlers and swaps module attributes.
     """
     BlockedRuntime.self_target = target
+    faulthandler.dump_traceback_later(20, repeat=True)
     try:
         _serve(transports)
     except KeyboardInterrupt:
         ended = "interrupted"
     else:
         ended = "returned"
+    finally:
+        faulthandler.cancel_dump_traceback_later()
     return BlockedRuntime.cleanups, ended
 
 
