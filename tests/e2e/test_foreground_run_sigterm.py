@@ -103,8 +103,16 @@ def test_sigterm_taken_by_a_transport_thread_stops_the_real_server_process() -> 
     assert child.returncode != 0
 
 
+class _Finalizer:
+    def __init__(self, callback: Callable[[], None]) -> None:
+        self.callback = callback
+
+    def __del__(self) -> None:
+        self.callback()
+
+
 def _discarded_interruptions(discarded: int) -> None:
-    """Exercise the scope in a child: hooks and GC callbacks belong to the process."""
+    """Exercise the scope in a child: hooks and finalizers belong to the process."""
     seen: list[BaseException | None] = []
     previous = sys.unraisablehook
     enabled = gc.isenabled()
@@ -115,35 +123,27 @@ def _discarded_interruptions(discarded: int) -> None:
         # A reporting hook can take another wake before it returns.
         interrupt.take()
 
-    def collect(callback: Callable[[str, dict[str, int]], None]) -> None:
-        gc.callbacks.append(callback)
-        try:
-            gc.collect()
-        finally:
-            gc.callbacks.remove(callback)
+    def finalize(callback: Callable[[], None]) -> None:
+        finalizer = _Finalizer(callback)
+        del finalizer
 
     interrupt = MainThreadInterrupt(lambda: None, OsThreads(), lambda _waited: None)
 
-    def discard(phase: str, _info: dict[str, int]) -> None:
-        if phase == "start":
-            interrupt.take()
-
-    def unrelated(phase: str, _info: dict[str, int]) -> None:
-        if phase == "start":
-            raise ValueError
+    def unrelated() -> None:
+        raise ValueError
 
     sys.unraisablehook = observe
     try:
         with interrupt.recovering():
             for _ in range(discarded):
-                collect(discard)
+                finalize(interrupt.take)
             assert len(seen) == discarded
             assert all(isinstance(error, KeyboardInterrupt) for error in seen)
             with pytest.raises(KeyboardInterrupt):
                 interrupt.take()
             # Ordinary propagation protects cleanup; an unrelated unraisable error
             # must be forwarded without rearming this interruption.
-            collect(unrelated)
+            finalize(unrelated)
             assert isinstance(seen[-1], ValueError)
             interrupt.take()
         assert sys.unraisablehook is observe
