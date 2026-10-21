@@ -98,6 +98,9 @@
     },
     {
       "path": "../../libs/run-skeleton/tsconfig.cache.json"
+    },
+    {
+      "path": "../../features/run-intents/tsconfig.renderer.json"
     }
   ]
 }

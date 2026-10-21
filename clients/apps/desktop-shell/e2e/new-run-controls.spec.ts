@@ -28,7 +28,14 @@ const INERT_BY_DESIGN: readonly {
 ];
 
 for (const each of NEW_RUN_PAGES) {
-  test(`every control of the ${each.name} page acts`, async ({context}) => {
+  test(`every control of the ${each.name} page acts`, async ({
+    context,
+    browser,
+    baseURL,
+    viewport,
+    colorScheme,
+    contextOptions,
+  }) => {
     const first = await context.newPage();
     await first.setViewportSize({width: 1440, height: 900});
     await openAt(first, each);
@@ -40,7 +47,8 @@ for (const each of NEW_RUN_PAGES) {
     await first.close();
     expect(controls.length, 'the page has controls').toBeGreaterThan(0);
     const found = await checkControls(
-      context,
+      browser,
+      {...contextOptions, ...(baseURL === undefined ? {} : {baseURL}), viewport, colorScheme},
       controls,
       async page => {
         await page.setViewportSize({width: 1440, height: 900});

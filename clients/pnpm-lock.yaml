@@ -115,6 +115,9 @@ importers:
       '@vibesys/feature-run-chat':
         specifier: workspace:*
         version: link:../../features/run-chat
+      '@vibesys/feature-run-intents':
+        specifier: workspace:*
+        version: link:../../features/run-intents
       '@vibesys/feature-run-page':
         specifier: workspace:*
         version: link:../../features/run-page

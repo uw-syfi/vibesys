@@ -92,7 +92,7 @@ test('Park is enabled on the new path and sends the typed host intent', async ()
         ),
       ),
     );
-    expect(container.textContent).toContain('Park: Pending');
+    expect(container.textContent).toContain('Park · Pending');
   } finally {
     await act(async () => root.unmount());
     container.remove();

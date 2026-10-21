@@ -8,6 +8,7 @@ import {
 } from './fake-bridge.js';
 import {installFakeRun} from './fake-run.js';
 import {type FakeServerSeed, installFakeServer} from './fake-server.js';
+import {addInitScripts, initScript} from './init-scripts.js';
 import {STARTED_AT} from './started-at.js';
 
 /**
@@ -103,11 +104,13 @@ test.use({colorScheme: 'dark', timezoneId: 'UTC', locale: 'en-US'});
 test('a run paused by its usage limit waits for quota, stops waiting, and resumes now', async ({
   page,
 }) => {
-  await page.addInitScript(installFakeBridge, SEED);
-  await page.addInitScript(installFakeProjectRuns, SEED);
-  await page.addInitScript(installFakeMachines, SEED);
-  await page.addInitScript(installFakeRun, {streams: [], text: {}});
-  await page.addInitScript(installFakeServer, SERVER);
+  await addInitScripts(page, [
+    initScript(installFakeBridge, SEED),
+    initScript(installFakeProjectRuns, SEED),
+    initScript(installFakeMachines, SEED),
+    initScript(installFakeRun, {streams: [], text: {}}),
+    initScript(installFakeServer, SERVER),
+  ]);
   await page.goto('./shell.html');
   await page
     .getByRole('main')

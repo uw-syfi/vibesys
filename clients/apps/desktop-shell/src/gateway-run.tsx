@@ -1,5 +1,6 @@
 /** The app chooses one reader for a run, using the existing host setting. */
 
+import {RunIntents} from '@vibesys/feature-run-intents/renderer';
 import type {RunPageAddress} from '@vibesys/feature-run-page/renderer';
 import {type GatewayRunPorts, RunScreen, useGatewayRun} from '@vibesys/feature-run-page/renderer';
 import type {RunPageSeed} from '@vibesys/feature-run-page/state';
@@ -71,7 +72,22 @@ export function GatewayRun(props: {
       route={page.route}
       zoom={page.zoom}
       dispatch={page.dispatch}
-      toolbar={toggle}
+      toolbar={
+        <>
+          {toggle}
+          {page.state.record.kind === 'live' || page.state.record.kind === 'ended' ? (
+            <RunIntents
+              key={`${seed.identity.host}/${seed.identity.runId}`}
+              bridge={bridge}
+              host={seed.identity.host}
+              runId={seed.identity.runId}
+              projectRoot={page.state.record.run.projectRoot}
+              enabled={snapshot.context.enabled}
+              schedule={schedule}
+            />
+          ) : null}
+        </>
+      }
       supplemental={
         snapshot.context.error ? <Text tone="err">{snapshot.context.error}</Text> : null
       }

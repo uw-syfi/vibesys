@@ -187,7 +187,7 @@ jobs = ["clients"]
 [cases.collections]
 native_languages = []
 native_targets = []
-pnpm_packages = ["@vibesys/feature-run-intents"]
+pnpm_packages = ["@vibesys/app-desktop-shell", "@vibesys/feature-run-intents"]
 
 [[cases]]
 name = "core value compiler and generated values select regeneration and Python checks"

@@ -9,6 +9,7 @@ import {
 import {installFakeRun} from './fake-run.js';
 import {type FakeServerSeed, installFakeServer} from './fake-server.js';
 import {judgeEvents, RUN_ID, traceEvents, turnEvents, usageEvents, W5_GATE} from './fake-trace.js';
+import {addInitScripts, initScript} from './init-scripts.js';
 import {STARTED_AT} from './started-at.js';
 
 /**
@@ -114,11 +115,13 @@ async function check(page: Page, name: string): Promise<void> {
 }
 
 async function openRun(page: Page): Promise<void> {
-  await page.addInitScript(installFakeBridge, SEED);
-  await page.addInitScript(installFakeProjectRuns, SEED);
-  await page.addInitScript(installFakeMachines, SEED);
-  await page.addInitScript(installFakeRun, LOGS);
-  await page.addInitScript(installFakeServer, SERVER);
+  await addInitScripts(page, [
+    initScript(installFakeBridge, SEED),
+    initScript(installFakeProjectRuns, SEED),
+    initScript(installFakeMachines, SEED),
+    initScript(installFakeRun, LOGS),
+    initScript(installFakeServer, SERVER),
+  ]);
   await page.goto('./shell.html');
   await page
     .getByRole('main')
