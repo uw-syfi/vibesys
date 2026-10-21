@@ -127,7 +127,6 @@ class PolicyDrift:
     templates: tuple[str, ...]
 
 
-
 @dataclass(frozen=True)
 class ReplayFrontier:
     """Quiescent reconstruction result. A notice must be durable before dispatch."""
