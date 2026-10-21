@@ -241,6 +241,9 @@ export const WatchRunsResponseSchema: GenMessage<WatchRunsResponse> = /*@__PURE_
   messageDesc(file_vibesys_api_v1_host, 7);
 
 /**
+ * Malformed hashes reject the whole request before filesystem access. File
+ * lookup/content failures for admitted hashes remain per-result errors.
+ *
  * @generated from message vibesys.api.v1.GetBlobsRequest
  */
 export type GetBlobsRequest = Message<"vibesys.api.v1.GetBlobsRequest"> & {
@@ -416,7 +419,7 @@ export const RunLivenessSchema: GenEnum<RunLiveness> = /*@__PURE__*/
 export const HostService: GenService<{
   /**
    * Hello compares the client and gateway API schema hashes. A mismatch fails
-   * with gRPC FAILED_PRECONDITION and a message naming both hashes.
+   * with gRPC FAILED_PRECONDITION and a message naming both well-formed hashes.
    *
    * @generated from rpc vibesys.api.v1.HostService.HostCall
    */

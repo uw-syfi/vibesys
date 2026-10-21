@@ -1,7 +1,11 @@
 /** Host and store schemas generated from proto/. Encode using @bufbuild/protobuf. */
 
 export {descriptorRegistry} from './descriptor-registry.js';
-export {RUN_LOG_MAGIC, RUN_LOG_MAX_RECORD_BYTES} from './generated/framing.js';
+export {
+  HOST_API_MAX_MESSAGE_BYTES,
+  RUN_LOG_MAGIC,
+  RUN_LOG_MAX_RECORD_BYTES,
+} from './generated/framing.js';
 export * from './generated/vibesys/api/v1/host_call_pb.js';
 export {
   BlobResultSchema,

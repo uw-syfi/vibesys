@@ -343,6 +343,9 @@ _GetBlobsRequestFields: TypeAlias = Literal["run_id", "sha256", "session_id"]
 
 class GetBlobsRequest(Message[_GetBlobsRequestFields]):
     """
+    Malformed hashes reject the whole request before filesystem access. File
+    lookup/content failures for admitted hashes remain per-result errors.
+
     ```proto
     message vibesys.api.v1.GetBlobsRequest
     ```

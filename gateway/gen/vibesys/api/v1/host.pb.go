@@ -543,6 +543,8 @@ func (x *WatchRunsResponse) GetInitialComplete() bool {
 	return false
 }
 
+// Malformed hashes reject the whole request before filesystem access. File
+// lookup/content failures for admitted hashes remain per-result errors.
 type GetBlobsRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	RunId         string                 `protobuf:"bytes,1,opt,name=run_id,json=runId,proto3" json:"run_id,omitempty"`

@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/uw-syfi/vibesys/gateway/gen"
 	apiv1 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/api/v1"
 	"github.com/uw-syfi/vibesys/gateway/internal/hostcommand"
 	"github.com/uw-syfi/vibesys/gateway/internal/runindex"
@@ -132,7 +133,7 @@ func Serve(ctx context.Context, listener net.Listener, config Config) error {
 	if config.Clock == nil {
 		config.Clock = SystemClock{}
 	}
-	server := grpc.NewServer(grpc.MaxSendMsgSize(maxMessageBytes), grpc.UnaryInterceptor(validateUnary), grpc.StreamInterceptor(validateStream))
+	server := grpc.NewServer(grpc.MaxSendMsgSize(gen.HostAPIMaxMessageBytes), grpc.UnaryInterceptor(validateUnary), grpc.StreamInterceptor(validateStream))
 	apiv1.RegisterHostServiceServer(server, &host{config: config})
 	stop := context.AfterFunc(ctx, server.Stop)
 	defer stop()

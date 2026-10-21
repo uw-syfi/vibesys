@@ -6,7 +6,7 @@ from typing import NotRequired, TypedDict
 
 import pytest
 
-from vs_proto import api as p
+import vs_proto.api as p
 
 
 class HostCase(TypedDict):

@@ -1,10 +1,13 @@
 import {describe, test} from 'node:test';
 import {create, toBinary} from '@bufbuild/protobuf';
 import {
+  GetBlobsResponseSchema,
+  HOST_API_MAX_MESSAGE_BYTES,
   HostCallRequestSchema,
   HostService,
   TailRequestSchema,
   TailResponseSchema,
+  validatedFromBinary,
 } from '@vibesys/proto';
 import {Seeded} from '@vibesys/store/testing';
 import {FakeClock} from '@vibesys/transport/testing';
@@ -50,7 +53,9 @@ describe('gateway public transport', () => {
 
   test('rejects compression, oversized lengths, and truncated frames', () => {
     expect(() => new GrpcDecoder().push(new Uint8Array([1, 0, 0, 0, 0]))).toThrow('compressed');
-    expect(() => new GrpcDecoder().push(new Uint8Array([0, 2, 0, 0, 0]))).toThrow('16 MiB');
+    expect(() => new GrpcDecoder().push(new Uint8Array([0, 2, 0, 0, 0]))).toThrow(
+      String(HOST_API_MAX_MESSAGE_BYTES),
+    );
     for (let length = 1; length < 8; length += 1) {
       const decoder = new GrpcDecoder();
       decoder.push(grpcFrame(new Uint8Array(3)).subarray(0, length));
@@ -323,3 +328,16 @@ for (const [method, deadline] of [
     }
   });
 }
+
+test('a maximum-size blob plus response metadata fits the shared gateway frame budget', () => {
+  const data = new Uint8Array(16 * 1024 * 1024);
+  const response = create(GetBlobsResponseSchema, {blobs: [{sha256: 'a'.repeat(64), data}]});
+  const bytes = toBinary(GetBlobsResponseSchema, response);
+  const decoder = new GrpcDecoder();
+  const decoded = decoder.push(grpcFrame(bytes));
+  decoder.finish();
+  expect(decoded).toHaveLength(1);
+  expect(
+    validatedFromBinary(GetBlobsResponseSchema, decoded[0] as Uint8Array).blobs[0]?.data.byteLength,
+  ).toBe(data.byteLength);
+});

@@ -202,7 +202,7 @@ func TestGetBlobsResponseBudget(t *testing.T) {
 	if err := os.Mkdir(filepath.Join(f.run, "blobs"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	content := bytes.Repeat([]byte("x"), 9<<20)
+	content := bytes.Repeat([]byte("x"), 16<<20)
 	sum := sha256.Sum256(content)
 	hash := hex.EncodeToString(sum[:])
 	write(t, filepath.Join(f.run, "blobs", hash), false, content)
