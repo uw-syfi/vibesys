@@ -7,7 +7,7 @@ name = "vs-runlog"
 version = "0.1.0"
 description = "Framed append-only run logs"
 requires-python = ">=3.12"
-dependencies = ["google-crc32c>=1.7,<2", "vs-proto"]
+dependencies = ["google-crc32c>=1.7,<2", "vs-proto", "vs-sim"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -17,3 +17,4 @@ vs_runlog = ["py.typed"]
 
 [tool.uv.sources]
 vs-proto = { workspace = true }
+vs-sim = { workspace = true }
