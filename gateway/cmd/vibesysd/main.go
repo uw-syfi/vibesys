@@ -49,6 +49,9 @@ func run(ctx context.Context, args []string) error {
 		flags.DurationVar(&timeout, "startup-timeout", timeout, "maximum wait for a serving gateway")
 	}
 	if err := flags.Parse(args[1:]); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
 		return err
 	}
 	if flags.NArg() != 0 {
@@ -94,8 +97,8 @@ func bridge(ctx context.Context, root string, startup time.Duration) error {
 		return err
 	}
 	startupCtx, cancel := context.WithTimeout(ctx, startup)
-	defer cancel()
 	connection, err := connect.Dial(startupCtx, lifecycle.SocketPath(root, schema.APISchemaHash), binary, []string{"serve", "--root", root})
+	cancel()
 	if err != nil {
 		return err
 	}
