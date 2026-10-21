@@ -128,7 +128,12 @@ class PolicyDrift:
 
     @property
     def message(self) -> str:
-        return "Earlier answers kept; your edits apply to new work."
+        message = "Earlier answers kept; your edits apply to new work."
+        if self.roles:
+            message += " Changed roles: " + ", ".join(self.roles) + "."
+        if self.templates:
+            message += " Changed templates: " + ", ".join(self.templates) + "."
+        return message
 
 
 @dataclass(frozen=True)

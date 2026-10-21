@@ -76,7 +76,7 @@ class SemanticKey:
         )
 
     def recorded_position(self, outcome_digest: bytes, position: int) -> SemanticKey:
-        if isinstance(position, bool) or position < 0:
+        if not isinstance(position, int) or isinstance(position, bool) or position < 0:
             message = "recorded position must be a nonnegative integer"
             raise ReplayIdentityError(message)
         parent = self.parent(outcome_digest)
@@ -219,6 +219,11 @@ class ClassifiedContext:
         return self.message_type.from_binary(self.content)
 
 
+def _is_context(desc: DescMessage) -> bool:
+    options = desc.proto.options
+    return options is not None and options[pb.ext_replay_context]
+
+
 def _check_classification(desc: DescMessage, seen: set[str]) -> None:
     if desc.type_name in seen:
         return
@@ -230,7 +235,7 @@ def _check_classification(desc: DescMessage, seen: set[str]) -> None:
             problem = f"unclassified prompt field {desc.type_name}.{field.name}"
             raise ReplayIdentityError(problem)
         nested = _message_type(field.value)
-        if nested is not None:
+        if nested is not None and _is_context(nested):
             _check_classification(nested, seen)
 
 
@@ -246,10 +251,12 @@ def _classified(message: Message) -> Message:
             del identity[field]
         elif field in message:
             value = message[field]
-            if isinstance(value, Message):
+            if isinstance(value, Message) and _is_context(value.desc()):
                 identity[field] = _classified(value)
-            elif isinstance(field.value, DescFieldValueList) and isinstance(
-                field.value.element, DescMessage
+            elif (
+                isinstance(field.value, DescFieldValueList)
+                and isinstance(field.value.element, DescMessage)
+                and _is_context(field.value.element)
             ):
                 identity[field] = [_classified(item) for item in value]
     return identity
@@ -259,6 +266,9 @@ def classify_context(
     message: Message, *, contract: str, dependencies: bytes = EMPTY_CAUSALITY
 ) -> ClassifiedContext:
     """Reject unclassified renderer inputs, and derive identity from typed content."""
+    if not _is_context(message.desc()):
+        problem = f"prompt context {message.desc().type_name} must declare replay_context"
+        raise ReplayIdentityError(problem)
     _check_schema(message.desc(), set())
     _check_classification(message.desc(), set())
     message = _normalize(message)

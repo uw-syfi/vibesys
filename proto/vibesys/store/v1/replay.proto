@@ -13,6 +13,11 @@ enum ReplayFieldKind {
   REPLAY_FIELD_KIND_IDENTITY = 1;
   REPLAY_FIELD_KIND_POLICY = 2;
 }
+extend google.protobuf.MessageOptions {
+  // Contexts classify their own fields. Shared facts inherit the classification
+  // of the enclosing context field and need no replay-specific annotations.
+  bool replay_context = 51102;
+}
 extend google.protobuf.FieldOptions {
   ReplayFieldKind replay_field = 51100;
   // Only repeated fields may be sets. The writer sorts and deduplicates them.

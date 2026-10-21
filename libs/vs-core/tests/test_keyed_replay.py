@@ -43,7 +43,9 @@ def settings(fresh: int = 10) -> ReplaySettings:
 def ask(key: str, candidate: str = "candidate-a", policy: bytes = b"old") -> ReplayCall[Reply]:
     return ReplayCall(
         SemanticKey(key),
-        Reply(root=candidate),
+        classify_context(
+            Context(candidate=candidate, wording=policy.decode("utf-8")), contract="plan.v1"
+        ),
         "plan.v1",
         replay.ReplayPolicy(
             role="planner", template="plan.j2", content=policy, reply_type=Reply.desc().type_name
@@ -104,6 +106,8 @@ def test_fold_history_reuses_after_prompt_allowance_and_helper_edits(
     assert replayed.frontier().drift.count == len(values)
     assert replayed.frontier().drift.roles == ("planner",)
     assert replayed.frontier().drift.templates == ("plan.j2",)
+    assert "Changed roles: planner." in replayed.frontier().drift.message
+    assert "Changed templates: plan.j2." in replayed.frontier().drift.message
     assert replayed.allowance_bytes == settings(fresh).fresh_allowance
 
 

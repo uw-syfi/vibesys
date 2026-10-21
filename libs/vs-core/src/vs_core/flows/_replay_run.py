@@ -25,6 +25,7 @@ from ._replay_history import (
 from ._replay_identity import (
     ClassifiedContext,
     EncodedIdentity,
+    ReplayIdentityError,
     SemanticKey,
     classify_context,
     encode_identity,
@@ -51,6 +52,20 @@ from ._replay_sources import (
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine, Iterable, Sequence
+
+    from ._replay_sources import ReplayCall
+
+
+def _call_identity(call: ReplayCall, frontier: _Frontier) -> EncodedIdentity:
+    if call.policy.template and not isinstance(call.identity, ClassifiedContext):
+        problem = f"prompt {call.key.operation} requires a classified typed context"
+        raise ReplayIdentityError(problem)
+    if isinstance(call.identity, ClassifiedContext):
+        return classify_context(
+            call.identity.message(), contract=call.contract, dependencies=frontier.digest
+        ).identity
+    return encode_identity(call.identity, contract=call.contract, dependencies=frontier.digest)
+
 
 T = TypeVar("T")
 Occurrence = tuple[SemanticKey, EncodedIdentity]
@@ -360,15 +375,7 @@ class ReplayScheduler:
 
     def _register_call(self, source: _Operation, task: ReplayTask) -> None:
         call = source.call
-        identity = (
-            classify_context(
-                call.identity.message(), contract=call.contract, dependencies=task.causality.digest
-            ).identity
-            if isinstance(call.identity, ClassifiedContext)
-            else encode_identity(
-                call.identity, contract=call.contract, dependencies=task.causality.digest
-            )
-        )
+        identity = _call_identity(call, task.causality)
         occurrence = (call.key, identity)
         if occurrence in self._past:
             problem = f"late exact request behind replay cursor: {call.key}"

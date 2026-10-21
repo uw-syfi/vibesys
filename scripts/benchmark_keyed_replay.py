@@ -1,6 +1,6 @@
 """Manual performance workload, separate from deterministic correctness tests.
 
-Run: uv run python -m libs.vs-core.tests.replay_benchmark
+Run: uv run python -m scripts.benchmark_keyed_replay
 The default builds 10,000 operations across 100 branches, alternating proposal
 and selector-admission observations. The root folds every report into its causal
 frontier; every admission builds and classifies a typed prompt context. Timings
@@ -15,6 +15,7 @@ import json
 import platform
 import sys
 import tracemalloc
+from importlib import import_module
 from typing import TYPE_CHECKING
 
 from protobuf.wkt.google.protobuf.any_pb import Any
@@ -31,7 +32,7 @@ from vs_core.api.replay import (
 from vs_proto.api import core_common, replay
 from vs_sim.api import MonotonicClock
 
-from .generated.vibesys.replay.testing.v1.context_pb import Context
+Context = import_module("libs.vs-core.tests.generated.vibesys.replay.testing.v1.context_pb").Context
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine
@@ -115,6 +116,13 @@ def build_history(
     return tuple(history)
 
 
+def fresh_history(history: tuple[AcceptedReplay, ...]) -> tuple[AcceptedReplay, ...]:
+    """Discard live-run memoization so the benchmark includes a cold replay index."""
+    return tuple(
+        AcceptedReplay(item.sequence, item.clock, item.operation_bytes) for item in history
+    )
+
+
 def measure(branches: int, rounds: int) -> dict[str, object]:
     """Measure replay separately from history generation, and memory separately from time."""
     allowance = replay.ReplayAllowance(
@@ -126,13 +134,13 @@ def measure(branches: int, rounds: int) -> dict[str, object]:
     gc.collect()
     clock = MonotonicClock()
     began = clock.now()
-    run = ReplayScheduler(root, history, settings)
+    run = ReplayScheduler(root, fresh_history(history), settings)
     elapsed = clock.now() - began
     result = run.result
     del run
     gc.collect()
     tracemalloc.start()
-    run = ReplayScheduler(root, history, settings)
+    run = ReplayScheduler(root, fresh_history(history), settings)
     _, peak = tracemalloc.get_traced_memory()
     tracemalloc.stop()
     if run.result != result or run.dispatches() or run.frontier().unused:

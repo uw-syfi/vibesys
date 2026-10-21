@@ -663,6 +663,14 @@ func (x *ReplayAcknowledgement) GetLaunchRequestId() string {
 
 var file_vibesys_store_v1_replay_proto_extTypes = []protoimpl.ExtensionInfo{
 	{
+		ExtendedType:  (*descriptorpb.MessageOptions)(nil),
+		ExtensionType: (*bool)(nil),
+		Field:         51102,
+		Name:          "vibesys.store.v1.replay_context",
+		Tag:           "varint,51102,opt,name=replay_context",
+		Filename:      "vibesys/store/v1/replay.proto",
+	},
+	{
 		ExtendedType:  (*descriptorpb.FieldOptions)(nil),
 		ExtensionType: (*ReplayFieldKind)(nil),
 		Field:         51100,
@@ -680,14 +688,23 @@ var file_vibesys_store_v1_replay_proto_extTypes = []protoimpl.ExtensionInfo{
 	},
 }
 
+// Extension fields to descriptorpb.MessageOptions.
+var (
+	// Contexts classify their own fields. Shared facts inherit the classification
+	// of the enclosing context field and need no replay-specific annotations.
+	//
+	// optional bool replay_context = 51102;
+	E_ReplayContext = &file_vibesys_store_v1_replay_proto_extTypes[0]
+)
+
 // Extension fields to descriptorpb.FieldOptions.
 var (
 	// optional vibesys.store.v1.ReplayFieldKind replay_field = 51100;
-	E_ReplayField = &file_vibesys_store_v1_replay_proto_extTypes[0]
+	E_ReplayField = &file_vibesys_store_v1_replay_proto_extTypes[1]
 	// Only repeated fields may be sets. The writer sorts and deduplicates them.
 	//
 	// optional bool replay_set = 51101;
-	E_ReplaySet = &file_vibesys_store_v1_replay_proto_extTypes[1]
+	E_ReplaySet = &file_vibesys_store_v1_replay_proto_extTypes[2]
 )
 
 var File_vibesys_store_v1_replay_proto protoreflect.FileDescriptor
@@ -755,7 +772,8 @@ const file_vibesys_store_v1_replay_proto_rawDesc = "" +
 	"\x17KEY_COMPONENT_KIND_ITEM\x10\x02\x12\x1d\n" +
 	"\x19KEY_COMPONENT_KIND_SAMPLE\x10\x03\x12\x1f\n" +
 	"\x1bKEY_COMPONENT_KIND_REVISION\x10\x04\x12(\n" +
-	"$KEY_COMPONENT_KIND_RECORDED_POSITION\x10\x05:e\n" +
+	"$KEY_COMPONENT_KIND_RECORDED_POSITION\x10\x05:H\n" +
+	"\x0ereplay_context\x12\x1f.google.protobuf.MessageOptions\x18\x9e\x8f\x03 \x01(\bR\rreplayContext:e\n" +
 	"\freplay_field\x12\x1d.google.protobuf.FieldOptions\x18\x9c\x8f\x03 \x01(\x0e2!.vibesys.store.v1.ReplayFieldKindR\vreplayField:>\n" +
 	"\n" +
 	"replay_set\x12\x1d.google.protobuf.FieldOptions\x18\x9d\x8f\x03 \x01(\bR\treplaySetBAZ?github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1b\x06proto3"
@@ -775,18 +793,19 @@ func file_vibesys_store_v1_replay_proto_rawDescGZIP() []byte {
 var file_vibesys_store_v1_replay_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
 var file_vibesys_store_v1_replay_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
 var file_vibesys_store_v1_replay_proto_goTypes = []any{
-	(ReplayFieldKind)(0),              // 0: vibesys.store.v1.ReplayFieldKind
-	(KeyComponentKind)(0),             // 1: vibesys.store.v1.KeyComponentKind
-	(*OperationKey)(nil),              // 2: vibesys.store.v1.OperationKey
-	(*KeyComponent)(nil),              // 3: vibesys.store.v1.KeyComponent
-	(*ReplayAllowance)(nil),           // 4: vibesys.store.v1.ReplayAllowance
-	(*ReplayPolicy)(nil),              // 5: vibesys.store.v1.ReplayPolicy
-	(*OperationReplay)(nil),           // 6: vibesys.store.v1.OperationReplay
-	(*ReplayClock)(nil),               // 7: vibesys.store.v1.ReplayClock
-	(*ReplayNotice)(nil),              // 8: vibesys.store.v1.ReplayNotice
-	(*ReplayAcknowledgement)(nil),     // 9: vibesys.store.v1.ReplayAcknowledgement
-	(*anypb.Any)(nil),                 // 10: google.protobuf.Any
-	(*descriptorpb.FieldOptions)(nil), // 11: google.protobuf.FieldOptions
+	(ReplayFieldKind)(0),                // 0: vibesys.store.v1.ReplayFieldKind
+	(KeyComponentKind)(0),               // 1: vibesys.store.v1.KeyComponentKind
+	(*OperationKey)(nil),                // 2: vibesys.store.v1.OperationKey
+	(*KeyComponent)(nil),                // 3: vibesys.store.v1.KeyComponent
+	(*ReplayAllowance)(nil),             // 4: vibesys.store.v1.ReplayAllowance
+	(*ReplayPolicy)(nil),                // 5: vibesys.store.v1.ReplayPolicy
+	(*OperationReplay)(nil),             // 6: vibesys.store.v1.OperationReplay
+	(*ReplayClock)(nil),                 // 7: vibesys.store.v1.ReplayClock
+	(*ReplayNotice)(nil),                // 8: vibesys.store.v1.ReplayNotice
+	(*ReplayAcknowledgement)(nil),       // 9: vibesys.store.v1.ReplayAcknowledgement
+	(*anypb.Any)(nil),                   // 10: google.protobuf.Any
+	(*descriptorpb.MessageOptions)(nil), // 11: google.protobuf.MessageOptions
+	(*descriptorpb.FieldOptions)(nil),   // 12: google.protobuf.FieldOptions
 }
 var file_vibesys_store_v1_replay_proto_depIdxs = []int32{
 	3,  // 0: vibesys.store.v1.OperationKey.scope:type_name -> vibesys.store.v1.KeyComponent
@@ -798,13 +817,14 @@ var file_vibesys_store_v1_replay_proto_depIdxs = []int32{
 	4,  // 6: vibesys.store.v1.ReplayClock.allowance:type_name -> vibesys.store.v1.ReplayAllowance
 	6,  // 7: vibesys.store.v1.ReplayNotice.unused:type_name -> vibesys.store.v1.OperationReplay
 	2,  // 8: vibesys.store.v1.ReplayNotice.pending:type_name -> vibesys.store.v1.OperationKey
-	11, // 9: vibesys.store.v1.replay_field:extendee -> google.protobuf.FieldOptions
-	11, // 10: vibesys.store.v1.replay_set:extendee -> google.protobuf.FieldOptions
-	0,  // 11: vibesys.store.v1.replay_field:type_name -> vibesys.store.v1.ReplayFieldKind
-	12, // [12:12] is the sub-list for method output_type
-	12, // [12:12] is the sub-list for method input_type
-	11, // [11:12] is the sub-list for extension type_name
-	9,  // [9:11] is the sub-list for extension extendee
+	11, // 9: vibesys.store.v1.replay_context:extendee -> google.protobuf.MessageOptions
+	12, // 10: vibesys.store.v1.replay_field:extendee -> google.protobuf.FieldOptions
+	12, // 11: vibesys.store.v1.replay_set:extendee -> google.protobuf.FieldOptions
+	0,  // 12: vibesys.store.v1.replay_field:type_name -> vibesys.store.v1.ReplayFieldKind
+	13, // [13:13] is the sub-list for method output_type
+	13, // [13:13] is the sub-list for method input_type
+	12, // [12:13] is the sub-list for extension type_name
+	9,  // [9:12] is the sub-list for extension extendee
 	0,  // [0:9] is the sub-list for field type_name
 }
 
@@ -823,7 +843,7 @@ func file_vibesys_store_v1_replay_proto_init() {
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_vibesys_store_v1_replay_proto_rawDesc), len(file_vibesys_store_v1_replay_proto_rawDesc)),
 			NumEnums:      2,
 			NumMessages:   8,
-			NumExtensions: 2,
+			NumExtensions: 3,
 			NumServices:   0,
 		},
 		GoTypes:           file_vibesys_store_v1_replay_proto_goTypes,

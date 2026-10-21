@@ -1,6 +1,7 @@
 """Semantic data, not helpers or policy, identifies historical work."""
 
 from math import inf, nan
+from typing import cast
 
 import pytest
 from hypothesis import given
@@ -27,6 +28,7 @@ from .generated.vibesys.replay.testing.v1.context_pb import (
     RepeatedContext,
     RepeatedMapIdentity,
     RepeatedUnclassifiedPolicy,
+    SharedContext,
     UnclassifiedPolicy,
 )
 
@@ -83,6 +85,12 @@ def test_key_scope_is_typed_and_roundtrips(position: int) -> None:
 def test_position_without_recorded_parent_is_invalid() -> None:
     with pytest.raises(ReplayIdentityError, match="recorded outcome"):
         SemanticKey("implement").recorded_position(b"not-a-digest", 1)
+
+
+@pytest.mark.parametrize("position", [True, -1, 1.5])
+def test_position_requires_a_nonnegative_integer(position: object) -> None:
+    with pytest.raises(ReplayIdentityError, match="nonnegative integer"):
+        SemanticKey("implement").recorded_position(EMPTY_CAUSALITY, cast("int", position))
 
 
 def test_prompt_context_requires_classification_even_for_absent_policy_fields() -> None:
@@ -168,3 +176,24 @@ def test_policy_inside_repeated_identity_context_does_not_change_identity() -> N
     assert identity == classify_context(after, contract="plan.v1").identity
     after.contexts.reverse()
     assert identity != classify_context(after, contract="plan.v1").identity
+
+
+def test_typed_context_inherits_classification_for_shared_facts() -> None:
+    before = SharedContext(
+        candidate=core_common.Identity(root="candidate-a"),
+        allowance=replay.ReplayAllowance(remaining=1),
+    )
+    after = SharedContext(
+        candidate=core_common.Identity(root="candidate-a"),
+        allowance=replay.ReplayAllowance(remaining=99),
+    )
+    identity = classify_context(before, contract="plan.v1").identity
+    assert identity == classify_context(after, contract="plan.v1").identity
+    assert after.candidate is not None
+    after.candidate.root = "candidate-b"
+    assert identity != classify_context(after, contract="plan.v1").identity
+
+
+def test_a_shared_value_alone_is_not_a_declared_prompt_context() -> None:
+    with pytest.raises(ReplayIdentityError, match="must declare replay_context"):
+        classify_context(core_common.Identity(root="candidate-a"), contract="plan.v1")

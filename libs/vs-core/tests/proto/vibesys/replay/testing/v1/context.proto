@@ -3,21 +3,26 @@ package vibesys.replay.testing.v1;
 
 import "vibesys/store/v1/replay.proto";
 import "google/protobuf/any.proto";
+import "vibesys/core/v1/common.proto";
 
 // Test-only typed renderer input. Production strategies own their context schema.
 message Context {
+  option (vibesys.store.v1.replay_context) = true;
   string candidate = 1 [(vibesys.store.v1.replay_field) = REPLAY_FIELD_KIND_IDENTITY];
   string wording = 2 [(vibesys.store.v1.replay_field) = REPLAY_FIELD_KIND_POLICY];
   repeated string evidence = 3 [(vibesys.store.v1.replay_field) = REPLAY_FIELD_KIND_IDENTITY, (vibesys.store.v1.replay_set) = true];
   repeated string ordered = 4 [(vibesys.store.v1.replay_field) = REPLAY_FIELD_KIND_IDENTITY];
 }
 message NestedContext {
+  option (vibesys.store.v1.replay_context) = true;
   Context context = 1 [(vibesys.store.v1.replay_field) = REPLAY_FIELD_KIND_IDENTITY];
 }
 message UnclassifiedContext {
+  option (vibesys.store.v1.replay_context) = true;
   string candidate = 1;
 }
 message UnclassifiedPolicy {
+  option (vibesys.store.v1.replay_context) = true;
   UnclassifiedContext context = 1 [(vibesys.store.v1.replay_field) = REPLAY_FIELD_KIND_POLICY];
 }
 
@@ -26,9 +31,11 @@ message InvalidSetContext {
 }
 
 message RepeatedContext {
+  option (vibesys.store.v1.replay_context) = true;
   repeated Context contexts = 1 [(vibesys.store.v1.replay_field) = REPLAY_FIELD_KIND_IDENTITY];
 }
 message RepeatedUnclassifiedPolicy {
+  option (vibesys.store.v1.replay_context) = true;
   repeated UnclassifiedContext contexts = 1 [(vibesys.store.v1.replay_field) = REPLAY_FIELD_KIND_POLICY];
 }
 message OpaqueIdentity {
@@ -39,4 +46,10 @@ message MapValue {
 }
 message RepeatedMapIdentity {
   repeated MapValue values = 1;
+}
+
+message SharedContext {
+  option (vibesys.store.v1.replay_context) = true;
+  vibesys.core.v1.Identity candidate = 1 [(vibesys.store.v1.replay_field) = REPLAY_FIELD_KIND_IDENTITY];
+  vibesys.store.v1.ReplayAllowance allowance = 2 [(vibesys.store.v1.replay_field) = REPLAY_FIELD_KIND_POLICY];
 }

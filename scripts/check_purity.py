@@ -29,7 +29,14 @@ PURE_EXPORTS = {
     # Reflection, immutable schema options and validation operate only on in-memory values.
     "copy": frozenset({"deepcopy"}),
     "vs_proto.api.replay": frozenset(
-        {"OperationKey", "KeyComponent", "ReplayFieldKind", "ext_replay_field", "ext_replay_set"}
+        {
+            "OperationKey",
+            "KeyComponent",
+            "ReplayFieldKind",
+            "ext_replay_field",
+            "ext_replay_set",
+            "ext_replay_context",
+        }
     ),
     **{
         f"vs_proto.api.replay.{name}": frozenset({"from_binary"})

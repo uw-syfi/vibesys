@@ -16,6 +16,7 @@ from vs_core.api.replay import (
     ReplayDeadlockError,
     ReplayError,
     ReplayFlow,
+    ReplayIdentityError,
     ReplayScheduler,
     ReplaySettings,
 )
@@ -34,7 +35,7 @@ from vs_proto.api import (
     replay,
 )
 
-from .test_keyed_replay import Root, accepted, ask, finish, settings
+from .test_keyed_replay import Reply, Root, accepted, ask, finish, settings
 
 
 def as_record(value: AcceptedReplay) -> Record:
@@ -446,3 +447,13 @@ def test_writer_reply_proof_traverses_maps_oneofs_and_enums(reply: type[Message]
     assert start.policy is not None
     assert len(start.policy.reply_schema_digest) == 32
     run.close()
+
+
+def test_prompt_calls_cannot_bypass_typed_context_classification() -> None:
+    async def root(ctx: ReplayFlow) -> object:
+        base = ask("prompt")
+        raw = ReplayCall(base.key, Reply(root="candidate-a"), base.contract, base.policy, Reply)
+        return await ctx.call(raw)
+
+    with pytest.raises(ReplayIdentityError, match="classified typed context"):
+        ReplayScheduler(root, (), settings())
