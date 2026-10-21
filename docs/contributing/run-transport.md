@@ -176,7 +176,8 @@ The current relaunch implementation uses the existing saved core envelope until 
 state migration supplies `state.pb`. The plain `vibesys.api.relaunch` function and
 `vibesys relaunch --resume <run-reference>` share that resume path. The journal projection writes
 one outcome per inbox request before its acknowledgement, retaining the legacy frontend's
-control events. New records carry `Record.clock`, excluding downtime; older records without it
+control events. Relaunch restores missing inbox markers from recorded decisions before judging
+pending requests again. New records carry `Record.clock`, excluding downtime; older records without it
 derive elapsed time within each epoch from their wall timestamps. Span times retain the epoch
 in which each transition occurred, including spans that remain open across a relaunch.
 

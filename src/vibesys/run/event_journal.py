@@ -97,6 +97,13 @@ class EventJournal(DurableEventJournal[CoreEvent]):
             finally:
                 self._runlog = None
 
+    def intent_decision(self, control_id: str) -> tuple[bool, str | None] | None:
+        """Recover a typed decision whose inbox marker may not have reached disk."""
+        intent = None if self._runlog is None else self._runlog.intent(control_id)
+        if intent is None:
+            return None
+        return intent.step is p.IntentStep.APPLIED, intent.reason or None
+
     def intent_outcome(self, request: ControlRequest, reason: str | None) -> None:
         """Journal and commit the decision before the inbox marks the request answered."""
         intent = p.IntentState(

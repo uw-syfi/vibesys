@@ -172,7 +172,9 @@ async def drive_core_run(host: CoreHost, integration: LocalRunIntegration) -> Ru
         inbox=None
         if services.control_inbox is None
         else OperatorInbox(
-            services.control_inbox, integration.run_control, integration.events.intent_outcome
+            services.control_inbox,
+            integration.run_control,
+            integration.events,
         ),
         control=integration.run_control,
         # A process that opens an existing run is the operator's explicit resume of it.

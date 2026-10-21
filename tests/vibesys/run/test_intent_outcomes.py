@@ -5,6 +5,7 @@ from functools import partial
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
@@ -12,7 +13,7 @@ import vs_proto.api as p
 from vibesys.events import CoreEventType, RunStartedData
 from vibesys.run import EventJournal
 from vibesys.run.core_run import StoredSteerArtifacts
-from vs_core.api import initial_state, step
+from vs_core.api import RunResultProposal, RunStatus, initial_state, step
 from vs_project.api import OrchestrationDescriptor, Project, RequestState, RunEnvironmentRecord
 from vs_project.api.testing import run_execution_record
 from vs_runlog.api import RunLogReader
@@ -70,6 +71,45 @@ def test_outcome_recovery_uses_typed_records_after_a_crash_before_mirroring(tmp_
     assert_outcomes(tmp_path, [0, 1, 2, 3], crash_before_ack=True, mirror_gap=True)
 
 
+@pytest.mark.parametrize("terminal", [False, True])
+def test_a_committed_refusal_is_not_reapplied_after_a_crash_before_its_inbox_marker(
+    tmp_path: Path, *, terminal: bool
+) -> None:
+    project = inbox_project(tmp_path)
+    run_id = "run-outcomes"
+    inbox = project.state.control_inbox(run_id)
+    request = PauseRequest(control_id="pause")
+    inbox.post(request.control_id, request.model_dump_json().encode(), ended=lambda: None)
+    clock = ManualClock(start=100)
+    events = open_journal(project, run_id, clock)
+    reason = "the prior run ended before applying this request"
+    events.intent_outcome(request, reason)
+    events.close()
+    events = open_journal(project, run_id, clock)
+    controls = inbox_bridge(project, run_id, events)
+    core = initial_state()
+    if terminal:
+        core = core.model_copy(
+            update={
+                "run": core.run.model_copy(
+                    update={
+                        "status": RunStatus.TERMINAL,
+                        "result": RunResultProposal(outcome="cancelled", reason="stopped: request"),
+                    }
+                )
+            }
+        )
+        controls.end(core)
+    else:
+        assert controls.poll(core, clock.now()) == ()
+    status = inbox.status(request.control_id, ended=None)
+    assert status is not None
+    assert status.state is RequestState.REJECTED
+    assert status.reason == reason
+    events.close()
+    assert_recorded_outcomes(project, run_id, [request.control_id])
+
+
 def assert_outcomes(
     root: Path,
     actions: list[int],
@@ -78,6 +118,57 @@ def assert_outcomes(
     post_all: bool = False,
     mirror_gap: bool = False,
 ) -> None:
+    project = inbox_project(root)
+    run_id = "run-outcomes"
+    inbox = project.state.control_inbox(run_id)
+    clock = ManualClock(start=100)
+    core = initial_state()
+    journal = partial(open_journal, project, run_id, clock)
+
+    events = journal()
+    if post_all:
+        for index, action in enumerate(actions):
+            request = _REQUESTS[action].model_copy(update={"control_id": f"request-{index}"})
+            inbox.post(request.control_id, request.model_dump_json().encode(), ended=lambda: None)
+    expected_ids = []
+    for index, action in enumerate(actions):
+        request = _REQUESTS[action].model_copy(update={"control_id": f"request-{index}"})
+        expected_ids.append(request.control_id)
+        # Posting while the process is down must not consume the request.
+        events.close()
+        if not post_all:
+            inbox.post(request.control_id, request.model_dump_json().encode(), ended=lambda: None)
+        clock.advance(1000)
+        events = journal()
+        controls = inbox_bridge(project, run_id, events)
+        changes = controls.poll(core, clock.now())
+        for change in changes:
+            core = step(core, change).state
+        if crash_before_ack and changes:
+            # Durable prefix: core and the outcome committed, inbox marker did not.
+            if mirror_gap:
+                events.close()
+                events = journal(mirror=False)
+            events.intent_outcome(request, None)
+            events.close()
+            clock.advance(1000)
+            events = journal()
+            controls = inbox_bridge(project, run_id, events)
+            for change in controls.poll(core, clock.now()):
+                core = step(core, change).state
+        controls.settled(core, running=False)
+        status = inbox.status(request.control_id, ended=None)
+        assert status is not None
+        assert status.state in {RequestState.APPLIED, RequestState.REJECTED}
+        # Resending a consumed request after another process start adds no outcome.
+        pending = inbox.pending()
+        inbox.post(request.control_id, request.model_dump_json().encode(), ended=lambda: None)
+        assert inbox.pending() == pending
+    events.close()
+    assert_recorded_outcomes(project, run_id, expected_ids)
+
+
+def inbox_project(root: Path) -> Project:
     project = Project.open(root)
     run_id = "run-outcomes"
     at = datetime(2026, 1, 1, tzinfo=UTC)
@@ -95,62 +186,19 @@ def assert_outcomes(
             now=at,
         )
     )
-    inbox = project.state.control_inbox(run_id)
-    clock = ManualClock(start=100)
-    core = initial_state()
+    return project
+
+
+def inbox_bridge(project: Project, run_id: str, events: EventJournal) -> RunControlBridge:
+    threads = SimThreads()
+    channel = create_run_control_channel(FakeRunControlEventSink(), threads)
+    control = ChannelRunControl(channel, threads)
     texts = StoredSteerArtifacts(ArtifactStore(project.state.local_namespace(run_id, "core")))
-
-    journal = partial(open_journal, project, run_id, clock)
-
-    def bridge(events: EventJournal) -> RunControlBridge:
-        threads = SimThreads()
-        channel = create_run_control_channel(FakeRunControlEventSink(), threads)
-        control = ChannelRunControl(channel, threads)
-        return RunControlBridge(
-            channel, texts, OperatorInbox(inbox, control, events.intent_outcome)
-        )
-
-    events = journal()
-    if post_all:
-        for index, action in enumerate(actions):
-            request = _REQUESTS[action].model_copy(update={"control_id": f"request-{index}"})
-            inbox.post(request.control_id, request.model_dump_json().encode(), ended=lambda: None)
-    expected_ids = []
-    for index, action in enumerate(actions):
-        request = _REQUESTS[action].model_copy(update={"control_id": f"request-{index}"})
-        expected_ids.append(request.control_id)
-        # Posting while the process is down must not consume the request.
-        events.close()
-        if not post_all:
-            inbox.post(request.control_id, request.model_dump_json().encode(), ended=lambda: None)
-        clock.advance(1000)
-        events = journal()
-        controls = bridge(events)
-        changes = controls.poll(core, clock.now())
-        for change in changes:
-            core = step(core, change).state
-        if crash_before_ack and changes:
-            # Durable prefix: core and the outcome committed, inbox marker did not.
-            if mirror_gap:
-                events.close()
-                events = journal(mirror=False)
-            events.intent_outcome(request, None)
-            events.close()
-            clock.advance(1000)
-            events = journal()
-            controls = bridge(events)
-            for change in controls.poll(core, clock.now()):
-                core = step(core, change).state
-        controls.settled(core, running=False)
-        status = inbox.status(request.control_id, ended=None)
-        assert status is not None
-        assert status.state in {RequestState.APPLIED, RequestState.REJECTED}
-        # Resending a consumed request after another process start adds no outcome.
-        pending = inbox.pending()
-        inbox.post(request.control_id, request.model_dump_json().encode(), ended=lambda: None)
-        assert inbox.pending() == pending
-    events.close()
-    assert_recorded_outcomes(project, run_id, expected_ids)
+    return RunControlBridge(
+        channel,
+        texts,
+        OperatorInbox(project.state.control_inbox(run_id), control, events),
+    )
 
 
 def open_journal(

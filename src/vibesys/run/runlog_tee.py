@@ -138,6 +138,17 @@ class RunLogTee:
             ),
         )
 
+    def intent(self, control_id: str) -> p.IntentState | None:
+        """Return a previously recorded outcome without exposing mutable projection state."""
+        if self._state is not None:
+            payload = dict(self._state.intents).get(control_id)
+            return None if payload is None else p.IntentState.from_binary(payload)
+        for record in reversed(self._writer.read()):
+            body = record.body
+            if body and body.field == "intent" and body.value.control_id == control_id:
+                return body.value
+        return None
+
     def append(self, payload: bytes) -> None:
         """Project committed JSONL bytes, writing referenced content before records."""
         try:
