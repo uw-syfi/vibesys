@@ -23,6 +23,7 @@ export {
 } from './generated/vibesys/api/v1/host_pb.js';
 export * from './generated/vibesys/search/v1/attrs_pb.js';
 export * from './generated/vibesys/store/v1/agent_attrs_pb.js';
+export * from './generated/vibesys/store/v1/chat_pb.js';
 export * from './generated/vibesys/store/v1/common_pb.js';
 export * from './generated/vibesys/store/v1/content_pb.js';
 export * from './generated/vibesys/store/v1/environment_attrs_pb.js';

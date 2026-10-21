@@ -13,7 +13,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file vibesys/api/v1/host_call.proto.
  */
 export const file_vibesys_api_v1_host_call: GenFile = /*@__PURE__*/
-  fileDesc("Ch52aWJlc3lzL2FwaS92MS9ob3N0X2NhbGwucHJvdG8SDnZpYmVzeXMuYXBpLnYxInoKD0hvc3RDYWxsUmVxdWVzdBIcCghjaGVja291dBgBIAEoCUIKukgHcgUQASiAIBI4Cgtwb3N0X2ludGVudBgCIAEoCzIhLnZpYmVzeXMuYXBpLnYxLlBvc3RJbnRlbnRSZXF1ZXN0SABCDwoGbWV0aG9kEgW6SAIIASKjAQoQSG9zdENhbGxSZXNwb25zZRI5Cgtwb3N0X2ludGVudBgBIAEoCzIiLnZpYmVzeXMuYXBpLnYxLlBvc3RJbnRlbnRSZXNwb25zZUgAEkMKFGNvbmZpZ3VyYXRpb25fZmFpbGVkGAIgASgLMiMudmliZXN5cy5hcGkudjEuQ29uZmlndXJhdGlvbkZhaWxlZEgAQg8KBnJlc3VsdBIFukgCCAEimAEKE0NvbmZpZ3VyYXRpb25GYWlsZWQSGQoEY29kZRgBIAEoCUILukgIcgYQASiAgAQSGgoFc3RhZ2UYAiABKAlCC7pICHIGEAEogIAEEhwKB21lc3NhZ2UYAyABKAlCC7pICHIGEAEogIAEEhEKCWV4aXRfY29kZRgEIAEoBRIZCgZzdGRlcnIYBSABKAlCCbpIBnIEKICABCKQBQoRUG9zdEludGVudFJlcXVlc3QSIAoMcHJvamVjdF9yb290GAEgASgJQgq6SAdyBRABKIAgEjgKBnJ1bl9pZBgCIAEoCUIoukglciMyIV5bQS1aYS16MC05XVtBLVphLXowLTlfLV17MCwxMjd9JBI9CgpyZXF1ZXN0X2lkGAMgASgJQim6SCZyJDIiXltBLVphLXowLTldW0EtWmEtejAtOS5fLV17MCwxMjd9JBIsCgVwYXVzZRgEIAEoCzIbLnZpYmVzeXMuYXBpLnYxLlBhdXNlSW50ZW50SAASKgoEcGFyaxgFIAEoCzIaLnZpYmVzeXMuYXBpLnYxLlBhcmtJbnRlbnRIABIuCgZyZXN1bWUYBiABKAsyHC52aWJlc3lzLmFwaS52MS5SZXN1bWVJbnRlbnRIABIqCgRzdG9wGAcgASgLMhoudmliZXN5cy5hcGkudjEuU3RvcEludGVudEgAEiwKBXN0ZWVyGAggASgLMhsudmliZXN5cy5hcGkudjEuU3RlZXJJbnRlbnRIABIyCgh3aXRoZHJhdxgJIAEoCzIeLnZpYmVzeXMuYXBpLnYxLldpdGhkcmF3SW50ZW50SAASPQoOY2FuY2VsX2F0dGVtcHQYCiABKAsyIy52aWJlc3lzLmFwaS52MS5DYW5jZWxBdHRlbXB0SW50ZW50SAASNwoLY2FuY2VsX2l0ZW0YCyABKAsyIC52aWJlc3lzLmFwaS52MS5DYW5jZWxJdGVtSW50ZW50SAASPwoPc2V0X3BhcmFsbGVsaXNtGAwgASgLMiQudmliZXN5cy5hcGkudjEuU2V0UGFyYWxsZWxpc21JbnRlbnRIAEIPCgZpbnRlbnQSBbpIAggBImsKElBvc3RJbnRlbnRSZXNwb25zZRI9CgpyZXF1ZXN0X2lkGAEgASgJQim6SCZyJDIiXltBLVphLXowLTldW0EtWmEtejAtOS5fLV17MCwxMjd9JBIWCg5vcmRlcmVkX3JlYWRlchgCIAEoCCINCgtQYXVzZUludGVudCIMCgpQYXJrSW50ZW50IskBCgxSZXN1bWVJbnRlbnQSEAoIZmFsbGJhY2sYASABKAgSNAoEd2hlbhgCIAEoDjIaLnZpYmVzeXMuYXBpLnYxLlJlc3VtZVdoZW5CCrpIB4IBBBABIAA6cbpIbhpsCgtyZXN1bWUubW9kZRI7ZmFsbGJhY2sgcmVzdW1lcyBub3c7IGl0IGNhbm5vdCB3YWl0IGZvciBjYXBhY2l0eSB0byByZXR1cm4aICF0aGlzLmZhbGxiYWNrIHx8IHRoaXMud2hlbiAhPSAyIkAKClN0b3BJbnRlbnQSMgoEbW9kZRgBIAEoDjIYLnZpYmVzeXMuYXBpLnYxLlN0b3BNb2RlQgq6SAeCAQQQASAAIpYBCgtTdGVlckludGVudBIZCgR0ZXh0GAEgASgJQgu6SAhyBhABKICABBI1CgZ0YXJnZXQYAiABKAsyHS52aWJlc3lzLnN0b3JlLnYxLlN0ZWVyVGFyZ2V0Qga6SAPIAQESNQoEbW9kZRgDIAEoDjIbLnZpYmVzeXMuc3RvcmUudjEuU3RlZXJNb2RlQgq6SAeCAQQQASAAIk4KDldpdGhkcmF3SW50ZW50EjwKCXdpdGhkcmF3cxgBIAEoCUIpukgmciQyIl5bQS1aYS16MC05XVtBLVphLXowLTkuXy1dezAsMTI3fSQiPAoTQ2FuY2VsQXR0ZW1wdEludGVudBIlCgdhdHRlbXB0GAEgASgJQhS6SBFyDxABGIACMgheW15cc10rJCI2ChBDYW5jZWxJdGVtSW50ZW50EiIKBGl0ZW0YASABKAlCFLpIEXIPEAEYgAIyCF5bXlxzXSskIjUKFFNldFBhcmFsbGVsaXNtSW50ZW50Eh0KDG1heF9wYXJhbGxlbBgBIAEoDUIHukgEKgIoASpgCgpSZXN1bWVXaGVuEhsKF1JFU1VNRV9XSEVOX1VOU1BFQ0lGSUVEEAASEwoPUkVTVU1FX1dIRU5fTk9XEAESIAocUkVTVU1FX1dIRU5fQ0FQQUNJVFlfUkVUVVJOUxACKlAKCFN0b3BNb2RlEhkKFVNUT1BfTU9ERV9VTlNQRUNJRklFRBAAEhMKD1NUT1BfTU9ERV9EUkFJThABEhQKEFNUT1BfTU9ERV9DQU5DRUwQAkI9WjtnaXRodWIuY29tL3V3LXN5ZmkvdmliZXN5cy9nYXRld2F5L2dlbi92aWJlc3lzL2FwaS92MTthcGl2MWIGcHJvdG8z", [file_buf_validate_validate, file_vibesys_store_v1_intent]);
+  fileDesc("Ch52aWJlc3lzL2FwaS92MS9ob3N0X2NhbGwucHJvdG8SDnZpYmVzeXMuYXBpLnYxIrYBCg9Ib3N0Q2FsbFJlcXVlc3QSHAoIY2hlY2tvdXQYASABKAlCCrpIB3IFEAEogCASOAoLcG9zdF9pbnRlbnQYAiABKAsyIS52aWJlc3lzLmFwaS52MS5Qb3N0SW50ZW50UmVxdWVzdEgAEjoKDGNoYXRfbWVzc2FnZRgEIAEoCzIiLnZpYmVzeXMuYXBpLnYxLkNoYXRNZXNzYWdlUmVxdWVzdEgAQg8KBm1ldGhvZBIFukgCCAEi4AEKEEhvc3RDYWxsUmVzcG9uc2USOQoLcG9zdF9pbnRlbnQYASABKAsyIi52aWJlc3lzLmFwaS52MS5Qb3N0SW50ZW50UmVzcG9uc2VIABJDChRjb25maWd1cmF0aW9uX2ZhaWxlZBgCIAEoCzIjLnZpYmVzeXMuYXBpLnYxLkNvbmZpZ3VyYXRpb25GYWlsZWRIABI7CgxjaGF0X21lc3NhZ2UYBCABKAsyIy52aWJlc3lzLmFwaS52MS5DaGF0TWVzc2FnZVJlc3BvbnNlSABCDwoGcmVzdWx0EgW6SAIIASKYAQoTQ29uZmlndXJhdGlvbkZhaWxlZBIZCgRjb2RlGAEgASgJQgu6SAhyBhABKICABBIaCgVzdGFnZRgCIAEoCUILukgIcgYQASiAgAQSHAoHbWVzc2FnZRgDIAEoCUILukgIcgYQASiAgAQSEQoJZXhpdF9jb2RlGAQgASgFEhkKBnN0ZGVychgFIAEoCUIJukgGcgQogIAEIpAFChFQb3N0SW50ZW50UmVxdWVzdBIgCgxwcm9qZWN0X3Jvb3QYASABKAlCCrpIB3IFEAEogCASOAoGcnVuX2lkGAIgASgJQii6SCVyIzIhXltBLVphLXowLTldW0EtWmEtejAtOV8tXXswLDEyN30kEj0KCnJlcXVlc3RfaWQYAyABKAlCKbpIJnIkMiJeW0EtWmEtejAtOV1bQS1aYS16MC05Ll8tXXswLDEyN30kEiwKBXBhdXNlGAQgASgLMhsudmliZXN5cy5hcGkudjEuUGF1c2VJbnRlbnRIABIqCgRwYXJrGAUgASgLMhoudmliZXN5cy5hcGkudjEuUGFya0ludGVudEgAEi4KBnJlc3VtZRgGIAEoCzIcLnZpYmVzeXMuYXBpLnYxLlJlc3VtZUludGVudEgAEioKBHN0b3AYByABKAsyGi52aWJlc3lzLmFwaS52MS5TdG9wSW50ZW50SAASLAoFc3RlZXIYCCABKAsyGy52aWJlc3lzLmFwaS52MS5TdGVlckludGVudEgAEjIKCHdpdGhkcmF3GAkgASgLMh4udmliZXN5cy5hcGkudjEuV2l0aGRyYXdJbnRlbnRIABI9Cg5jYW5jZWxfYXR0ZW1wdBgKIAEoCzIjLnZpYmVzeXMuYXBpLnYxLkNhbmNlbEF0dGVtcHRJbnRlbnRIABI3CgtjYW5jZWxfaXRlbRgLIAEoCzIgLnZpYmVzeXMuYXBpLnYxLkNhbmNlbEl0ZW1JbnRlbnRIABI/Cg9zZXRfcGFyYWxsZWxpc20YDCABKAsyJC52aWJlc3lzLmFwaS52MS5TZXRQYXJhbGxlbGlzbUludGVudEgAQg8KBmludGVudBIFukgCCAEiawoSUG9zdEludGVudFJlc3BvbnNlEj0KCnJlcXVlc3RfaWQYASABKAlCKbpIJnIkMiJeW0EtWmEtejAtOV1bQS1aYS16MC05Ll8tXXswLDEyN30kEhYKDm9yZGVyZWRfcmVhZGVyGAIgASgIIg0KC1BhdXNlSW50ZW50IgwKClBhcmtJbnRlbnQiyQEKDFJlc3VtZUludGVudBIQCghmYWxsYmFjaxgBIAEoCBI0CgR3aGVuGAIgASgOMhoudmliZXN5cy5hcGkudjEuUmVzdW1lV2hlbkIKukgHggEEEAEgADpxukhuGmwKC3Jlc3VtZS5tb2RlEjtmYWxsYmFjayByZXN1bWVzIG5vdzsgaXQgY2Fubm90IHdhaXQgZm9yIGNhcGFjaXR5IHRvIHJldHVybhogIXRoaXMuZmFsbGJhY2sgfHwgdGhpcy53aGVuICE9IDIiQAoKU3RvcEludGVudBIyCgRtb2RlGAEgASgOMhgudmliZXN5cy5hcGkudjEuU3RvcE1vZGVCCrpIB4IBBBABIAAilgEKC1N0ZWVySW50ZW50EhkKBHRleHQYASABKAlCC7pICHIGEAEogIAEEjUKBnRhcmdldBgCIAEoCzIdLnZpYmVzeXMuc3RvcmUudjEuU3RlZXJUYXJnZXRCBrpIA8gBARI1CgRtb2RlGAMgASgOMhsudmliZXN5cy5zdG9yZS52MS5TdGVlck1vZGVCCrpIB4IBBBABIAAiTgoOV2l0aGRyYXdJbnRlbnQSPAoJd2l0aGRyYXdzGAEgASgJQim6SCZyJDIiXltBLVphLXowLTldW0EtWmEtejAtOS5fLV17MCwxMjd9JCI8ChNDYW5jZWxBdHRlbXB0SW50ZW50EiUKB2F0dGVtcHQYASABKAlCFLpIEXIPEAEYgAIyCF5bXlxzXSskIjYKEENhbmNlbEl0ZW1JbnRlbnQSIgoEaXRlbRgBIAEoCUIUukgRcg8QARiAAjIIXlteXHNdKyQiNQoUU2V0UGFyYWxsZWxpc21JbnRlbnQSHQoMbWF4X3BhcmFsbGVsGAEgASgNQge6SAQqAigBIogCChJDaGF0TWVzc2FnZVJlcXVlc3QSIAoMcHJvamVjdF9yb290GAEgASgJQgq6SAdyBRABKIAgEjgKBnJ1bl9pZBgCIAEoCUIoukglciMyIV5bQS1aYS16MC05XVtBLVphLXowLTlfLV17MCwxMjd9JBI8CgpzZXNzaW9uX2lkGAMgASgJQii6SCVyIzIhXltBLVphLXowLTldW0EtWmEtejAtOV8tXXswLDEyN30kEj0KCnJlcXVlc3RfaWQYBCABKAlCKbpIJnIkMiJeW0EtWmEtejAtOV1bQS1aYS16MC05Ll8tXXswLDEyN30kEhkKBHRleHQYBSABKAlCC7pICHIGEAEogIAEIpIBChNDaGF0TWVzc2FnZVJlc3BvbnNlEjwKCnNlc3Npb25faWQYASABKAlCKLpIJXIjMiFeW0EtWmEtejAtOV1bQS1aYS16MC05Xy1dezAsMTI3fSQSPQoKcmVxdWVzdF9pZBgCIAEoCUIpukgmciQyIl5bQS1aYS16MC05XVtBLVphLXowLTkuXy1dezAsMTI3fSQqYAoKUmVzdW1lV2hlbhIbChdSRVNVTUVfV0hFTl9VTlNQRUNJRklFRBAAEhMKD1JFU1VNRV9XSEVOX05PVxABEiAKHFJFU1VNRV9XSEVOX0NBUEFDSVRZX1JFVFVSTlMQAipQCghTdG9wTW9kZRIZChVTVE9QX01PREVfVU5TUEVDSUZJRUQQABITCg9TVE9QX01PREVfRFJBSU4QARIUChBTVE9QX01PREVfQ0FOQ0VMEAJCPVo7Z2l0aHViLmNvbS91dy1zeWZpL3ZpYmVzeXMvZ2F0ZXdheS9nZW4vdmliZXN5cy9hcGkvdjE7YXBpdjFiBnByb3RvMw", [file_buf_validate_validate, file_vibesys_store_v1_intent]);
 
 /**
  * The caller takes checkout from the host's saved configuration. Carrying it on
@@ -36,6 +36,12 @@ export type HostCallRequest = Message<"vibesys.api.v1.HostCallRequest"> & {
      */
     value: PostIntentRequest;
     case: "postIntent";
+  } | {
+    /**
+     * @generated from field: vibesys.api.v1.ChatMessageRequest chat_message = 4;
+     */
+    value: ChatMessageRequest;
+    case: "chatMessage";
   } | { case: undefined; value?: undefined };
 };
 
@@ -68,6 +74,12 @@ export type HostCallResponse = Message<"vibesys.api.v1.HostCallResponse"> & {
      */
     value: ConfigurationFailed;
     case: "configurationFailed";
+  } | {
+    /**
+     * @generated from field: vibesys.api.v1.ChatMessageResponse chat_message = 4;
+     */
+    value: ChatMessageResponse;
+    case: "chatMessage";
   } | { case: undefined; value?: undefined };
 };
 
@@ -387,6 +399,67 @@ export type SetParallelismIntent = Message<"vibesys.api.v1.SetParallelismIntent"
  */
 export const SetParallelismIntentSchema: GenMessage<SetParallelismIntent> = /*@__PURE__*/
   messageDesc(file_vibesys_api_v1_host_call, 13);
+
+/**
+ * Retrying an id with identical content admits exactly one question.
+ *
+ * @generated from message vibesys.api.v1.ChatMessageRequest
+ */
+export type ChatMessageRequest = Message<"vibesys.api.v1.ChatMessageRequest"> & {
+  /**
+   * @generated from field: string project_root = 1;
+   */
+  projectRoot: string;
+
+  /**
+   * @generated from field: string run_id = 2;
+   */
+  runId: string;
+
+  /**
+   * @generated from field: string session_id = 3;
+   */
+  sessionId: string;
+
+  /**
+   * @generated from field: string request_id = 4;
+   */
+  requestId: string;
+
+  /**
+   * @generated from field: string text = 5;
+   */
+  text: string;
+};
+
+/**
+ * Describes the message vibesys.api.v1.ChatMessageRequest.
+ * Use `create(ChatMessageRequestSchema)` to create a new message.
+ */
+export const ChatMessageRequestSchema: GenMessage<ChatMessageRequest> = /*@__PURE__*/
+  messageDesc(file_vibesys_api_v1_host_call, 14);
+
+/**
+ * @generated from message vibesys.api.v1.ChatMessageResponse
+ */
+export type ChatMessageResponse = Message<"vibesys.api.v1.ChatMessageResponse"> & {
+  /**
+   * @generated from field: string session_id = 1;
+   */
+  sessionId: string;
+
+  /**
+   * @generated from field: string request_id = 2;
+   */
+  requestId: string;
+};
+
+/**
+ * Describes the message vibesys.api.v1.ChatMessageResponse.
+ * Use `create(ChatMessageResponseSchema)` to create a new message.
+ */
+export const ChatMessageResponseSchema: GenMessage<ChatMessageResponse> = /*@__PURE__*/
+  messageDesc(file_vibesys_api_v1_host_call, 15);
 
 /**
  * @generated from enum vibesys.api.v1.ResumeWhen

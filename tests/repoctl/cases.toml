@@ -197,3 +197,12 @@ jobs = ["proto", "python", "real_tiers"]
 native_languages = []
 native_targets = []
 pnpm_packages = []
+
+[[cases]]
+name = "session process changes select Python checks"
+paths = ["src/vibesys/chat/_session.py", "src/vibesys/api/chat.py"]
+jobs = ["python"]
+[cases.collections]
+native_languages = []
+native_targets = []
+pnpm_packages = []

@@ -11,8 +11,11 @@ from typing import TYPE_CHECKING
 from pydantic import ValidationError as ControlValidationError
 
 from vibesys.api import CONTROL_REQUEST, ControlAction, recorded_ending
+from vibesys.api.chat import run_head
 from vs_project.api import INBOX_FORMAT, InboxClosedError, Project, ProjectError
 from vs_proto.api import (
+    ChatMessageRequest,
+    ChatMessageResponse,
     ConfigurationFailed,
     HostCallRequest,
     HostCallResponse,
@@ -22,14 +25,19 @@ from vs_proto.api import (
     ValidationError,
     validate,
 )
+from vs_runlog.api import RunLock
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from vs_proto.api import PostIntentRequest, SteerIntent
 
 __all__ = ["host_call"]
 
 
-def host_call(payload: bytes) -> bytes:
+def host_call(
+    payload: bytes, *, start_chat: Callable[[ChatMessageRequest], None] | None = None
+) -> bytes:
     """Validate and execute one HostCall envelope, returning a typed response.
 
     Invalid input, unsupported intents and closed inboxes return the documented
@@ -45,6 +53,11 @@ def host_call(payload: bytes) -> bytes:
             case Oneof("post_intent", request):
                 result = _post_intent(request)
                 response = HostCallResponse(result=Oneof("post_intent", result))
+            case Oneof("chat_message", request):
+                if start_chat is None:
+                    return _failure("unavailable", "chat process launcher was not supplied")
+                result = _chat_message(request, start_chat)
+                response = HostCallResponse(result=Oneof("chat_message", result))
             case _:
                 return _failure("invalid_method", "HostCall.method is required")
     except InboxClosedError as error:
@@ -58,9 +71,7 @@ def _failure(code: str, message: str, *, exit_code: int = 2) -> bytes:
     return HostCallResponse(
         result=Oneof(
             "configuration_failed",
-            ConfigurationFailed(
-                code=code, stage="post_intent", message=message, exit_code=exit_code
-            ),
+            ConfigurationFailed(code=code, stage="host_call", message=message, exit_code=exit_code),
         )
     ).to_binary()
 
@@ -127,3 +138,24 @@ def _steer_payload(value: SteerIntent) -> dict[str, object]:
             "id": target.id if target.kind != SteerTargetKind.RUN else None,
         },
     }
+
+
+def _chat_message(
+    request: ChatMessageRequest, start: Callable[[ChatMessageRequest], None]
+) -> ChatMessageResponse:
+    project = Project.open(request.project_root)
+    project.state.load_run(request.run_id)
+    project.state.require_local_run(request.run_id)
+    run_head(Project.run_log_path_for(request.project_root, request.run_id).parent / "run.head")
+    directory = Project.chat_session_directory_for(
+        request.project_root, request.run_id, request.session_id
+    )
+    directory.mkdir(parents=True, exist_ok=True)
+    gate = RunLock(directory / "admission.lock")
+    try:
+        inbox = project.state.session_inbox(request.run_id, request.session_id)
+        inbox.post(request.request_id, request.to_binary(), ended=lambda: None)
+        start(request)
+    finally:
+        gate.close()
+    return ChatMessageResponse(request_id=request.request_id, session_id=request.session_id)

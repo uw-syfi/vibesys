@@ -15,6 +15,8 @@ from vs_proto._generated.framing import RUN_LOG_MAGIC, RUN_LOG_MAX_RECORD_BYTES
 from vs_proto._generated.vibesys.api.v1.host_call_pb import (
     CancelAttemptIntent,
     CancelItemIntent,
+    ChatMessageRequest,
+    ChatMessageResponse,
     ConfigurationFailed,
     HostCallRequest,
     HostCallResponse,
@@ -79,6 +81,14 @@ from vs_proto._generated.vibesys.search.v1.run_pb import (
 from vs_proto._generated.vibesys.store.v1.agent_attrs_pb import (
     AgentTurnAttrs,
     TokenUsage,
+)
+from vs_proto._generated.vibesys.store.v1.chat_pb import (
+    ChatMessage,
+    ChatRecord,
+    ChatRole,
+    ChatSessionCreated,
+    ChatSteerProposed,
+    ChatToken,
 )
 from vs_proto._generated.vibesys.store.v1.common_pb import (
     Direction,
@@ -198,6 +208,14 @@ __all__ = [
     "CapacityPolicy",
     "CapacityWaitAttrs",
     "Change",
+    "ChatMessage",
+    "ChatMessageRequest",
+    "ChatMessageResponse",
+    "ChatRecord",
+    "ChatRole",
+    "ChatSessionCreated",
+    "ChatSteerProposed",
+    "ChatToken",
     "ComparisonAttrs",
     "ComparisonVerdict",
     "ConfigurationFailed",

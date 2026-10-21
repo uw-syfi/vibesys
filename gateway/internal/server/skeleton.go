@@ -37,7 +37,11 @@ func (h *host) Skeleton(ctx context.Context, request *apiv1.SkeletonRequest) (*a
 	if err != nil {
 		return nil, rpcError(err)
 	}
-	response := &apiv1.SkeletonResponse{Keyframe: data, CommittedSeq: position.ThroughSeq, NextSeq: position.ThroughSeq + 1, Complete: true}
+	sessionIDs, err := sessions(dir)
+	if err != nil {
+		return nil, rpcError(err)
+	}
+	response := &apiv1.SkeletonResponse{Keyframe: data, CommittedSeq: position.ThroughSeq, NextSeq: position.ThroughSeq + 1, Complete: true, Sessions: sessionIDs}
 	if position.Offset == 0 {
 		response.NextSeq = 0 // Phase 1 logs may start at sequence zero.
 	}

@@ -12,8 +12,7 @@ from itertools import islice
 from typing import TYPE_CHECKING, BinaryIO, Self
 
 if TYPE_CHECKING:
-    import asyncio
-    from collections.abc import Iterator
+    from collections.abc import Callable, Iterator
     from pathlib import Path
     from types import TracebackType
 
@@ -134,15 +133,15 @@ class FileRunLogWriter:
         *,
         clock: SleepingClock,
         threads: Threads,
-        loop: asyncio.AbstractEventLoop | None = None,
         sync: FileSync | None = None,
+        headline: Callable[[Keyframe, RunProcess | None], RunHead | None] = project_head,
     ) -> None:
-        """Recover and own a committer; ``loop`` is retained for caller compatibility.
+        """Recover and own a committer with caller-selected headline projection.
 
         ``clock`` sets deadlines; condition timeouts use the injected ``threads``
         timeline. ``sync`` is the log durability operation (also used in recovery).
         """
-        del loop
+        self._headline = headline
         self._condition = threads.condition()
         self._clock = clock
         self._sync = OsFileSync() if sync is None else sync
@@ -356,7 +355,7 @@ class FileRunLogWriter:
             raise ValueError(message)
 
     def _publish_head(self) -> None:
-        head = project_head(self._skeleton, self._process)
+        head = self._headline(self._skeleton, self._process)
         if head is not None:
             validate(head)
             publish(self._path.parent / "run.head", head.to_binary(), sync=self._sync)

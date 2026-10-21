@@ -15,7 +15,7 @@ import (
 var blobHash = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
 func (h *host) GetBlobs(ctx context.Context, request *apiv1.GetBlobsRequest) (*apiv1.GetBlobsResponse, error) {
-	dir, err := h.directory(request.GetRunId())
+	dir, err := h.contentDirectory(request.GetRunId(), request.GetSessionId())
 	if err != nil {
 		return nil, err
 	}

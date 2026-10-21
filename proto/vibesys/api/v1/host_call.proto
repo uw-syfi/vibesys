@@ -14,6 +14,7 @@ message HostCallRequest {
   oneof method {
     option (buf.validate.oneof).required = true;
     PostIntentRequest post_intent = 2;
+    ChatMessageRequest chat_message = 4;
   }
 }
 
@@ -24,6 +25,7 @@ message HostCallResponse {
     option (buf.validate.oneof).required = true;
     PostIntentResponse post_intent = 1;
     ConfigurationFailed configuration_failed = 2;
+    ChatMessageResponse chat_message = 4;
   }
 }
 
@@ -100,4 +102,17 @@ message CancelItemIntent {
 }
 message SetParallelismIntent {
   uint32 max_parallel = 1 [(buf.validate.field).uint32.gte = 1];
+}
+
+// Retrying an id with identical content admits exactly one question.
+message ChatMessageRequest {
+  string project_root = 1 [(buf.validate.field).string = {min_len: 1, max_bytes: 4096}];
+  string run_id = 2 [(buf.validate.field).string.pattern = "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$"];
+  string session_id = 3 [(buf.validate.field).string.pattern = "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$"];
+  string request_id = 4 [(buf.validate.field).string.pattern = "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"];
+  string text = 5 [(buf.validate.field).string = {min_len: 1, max_bytes: 65536}];
+}
+message ChatMessageResponse {
+  string session_id = 1 [(buf.validate.field).string.pattern = "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$"];
+  string request_id = 2 [(buf.validate.field).string.pattern = "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"];
 }

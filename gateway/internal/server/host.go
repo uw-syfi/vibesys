@@ -45,7 +45,7 @@ func (h *host) Hello(_ context.Context, request *apiv1.HelloRequest) (*apiv1.Hel
 }
 
 func (h *host) Tail(request *apiv1.TailRequest, stream apiv1.HostService_TailServer) error {
-	path, err := runindex.Resolve(h.config.Root, request.GetRunId())
+	path, err := h.logPath(request.GetRunId(), request.GetSessionId())
 	if err != nil {
 		return rpcError(err)
 	}

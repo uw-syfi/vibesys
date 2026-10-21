@@ -939,6 +939,18 @@ class ProjectState:
         return cls._run_local_directory_for(project_root, run_id, "logs", kind="run log directory")
 
     @classmethod
+    def chat_session_directory_for(
+        cls, project_root: Path | str, run_id: str, session_id: str
+    ) -> Path:
+        """Resolve a session without creating it or following redirected descendants."""
+        return cls._run_local_directory_for(
+            project_root,
+            run_id,
+            f"logs/sessions/{validate_run_id(session_id)}",
+            kind="chat session directory",
+        )
+
+    @classmethod
     def logged_run_ids_for(cls, project_root: Path | str) -> tuple[str, ...]:
         """Return the ids of the runs this machine holds logs for under ``project_root``, sorted.
 
@@ -1462,6 +1474,21 @@ class ProjectState:
         by the run's agents.
         """
         return FileControlInbox(self.local_namespace(run_id, _CONTROL_NAMESPACE))
+
+    def session_inbox(self, run_id: str, session_id: str) -> FileControlInbox:
+        """Open an ordered, idempotent inbox beside one session's log."""
+        self.load_run(run_id)
+        identity = validate_run_id(session_id)
+        relative = f"logs/sessions/{identity}"
+        return FileControlInbox(
+            StateNamespace(
+                project_root=self.project_root,
+                root=self._local_state_dir(run_id, "logs") / "sessions" / identity,
+                portable=False,
+                containment_root=self._state_home,
+                namespace_root=_STATE_DIRECTORY_POSIX / "local" / "runs" / run_id / relative,
+            )
+        )
 
     def require_local_run(self, run_id: str) -> None:
         """Raise ``ProjectStateError`` unless this state home holds ``run_id``'s local state.

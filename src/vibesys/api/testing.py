@@ -15,6 +15,8 @@ from vibesys.api.store import (
 from vs_runtime.api.testing import FakeRunHandle, FakeRuns, FakeStopTimer
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from vibesys.api.contracts import RunView
     from vs_runtime.api.infrastructure import SteerTargets
 
@@ -164,6 +166,7 @@ class FakeProfilerPreflight:
 
 
 __all__ = [
+    "FakeManagedAgent",
     "FakeProfilerPreflight",
     "FakeRunHandle",
     "FakeRunRecord",
@@ -171,3 +174,24 @@ __all__ = [
     "FakeRuns",
     "FakeStopTimer",
 ]
+
+
+@dataclass
+class FakeManagedAgent:
+    """An in-memory conversation with explicit, input-derived model behavior."""
+
+    respond: Callable[[str, str | None], str]
+    messages: list[tuple[str, str | None]] = field(default_factory=list, init=False)
+    closed: bool = field(default=False, init=False)
+
+    def turn(self, message: str, *, invocation_id: str | None = None) -> str:
+        """Serialize one question into this conversation, refusing use after close."""
+        if self.closed:
+            detail = "auxiliary conversation is closed"
+            raise RuntimeError(detail)
+        self.messages.append((message, invocation_id))
+        return self.respond(message, invocation_id)
+
+    def close(self) -> None:
+        """Idempotently release the conversation."""
+        self.closed = True

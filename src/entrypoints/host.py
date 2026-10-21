@@ -8,6 +8,7 @@ from collections import Counter
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from entrypoints.chat_session import start_chat
 from vibesys.api.host import host_call
 from vibesys.api.transport import ConversionStatus, convert_run, convert_runs
 from vs_project.api import Project, ProjectError
@@ -52,7 +53,7 @@ def main(
 ) -> int:
     """Run one host method from the current directory."""
     arguments = sys.argv[1:] if argv is None else argv
-    if arguments[:1] == ["post-intent"]:
+    if arguments[:1] in (["post-intent"], ["chat-message"]):
         parser = argparse.ArgumentParser(
             prog="vibesys host post-intent",
             description="Read a binary HostCallRequest from stdin; write a binary HostCallResponse to stdout.",
@@ -60,7 +61,7 @@ def main(
         parser.parse_args(arguments[1:])
         source = sys.stdin.buffer if stdin is None else stdin
         destination = sys.stdout.buffer if stdout is None else stdout
-        destination.write(host_call(source.read((1 << 20) + 1)))
+        destination.write(host_call(source.read((1 << 20) + 1), start_chat=start_chat))
         return 0
     code, output, error = run(arguments, cwd=Path.cwd())
     sys.stdout.write(output)

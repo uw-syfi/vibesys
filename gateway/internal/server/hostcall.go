@@ -19,8 +19,15 @@ const hostCallDeadline = 30 * time.Second
 // HostCall dispatches typed methods and carries opaque protobuf across stdin and
 // stdout. Python owns all validation and product policy, including inbox writes.
 func (h *host) HostCall(ctx context.Context, request *apiv1.HostCallRequest) (*apiv1.HostCallResponse, error) {
-	if request.GetPostIntent() == nil {
-		return hostFailure("invalid_method", "HostCall.method must be post_intent", -1, ""), nil
+	method := ""
+	requestID := ""
+	switch {
+	case request.GetPostIntent() != nil:
+		method, requestID = "post-intent", request.GetPostIntent().GetRequestId()
+	case request.GetChatMessage() != nil:
+		method, requestID = "chat-message", request.GetChatMessage().GetRequestId()
+	default:
+		return hostFailure("invalid_method", "HostCall.method is required", -1, ""), nil
 	}
 	checkout, err := checkoutPath(request.GetCheckout())
 	if err != nil {
@@ -37,10 +44,10 @@ func (h *host) HostCall(ctx context.Context, request *apiv1.HostCallRequest) (*a
 	defer cancel()
 	result, err := h.config.HostRunner.Run(callCtx, hostcommand.Command{
 		Executable: filepath.Join(checkout, ".venv", "bin", "vibesys"),
-		Args:       []string{"host", "post-intent"}, Input: input, StateRoot: h.config.Root,
+		Args:       []string{"host", method}, Input: input, StateRoot: h.config.Root,
 	})
 	if err != nil || result.ExitCode != 0 {
-		message := fmt.Sprintf("vibesys host post-intent exited %d", result.ExitCode)
+		message := fmt.Sprintf("vibesys host %s exited %d", method, result.ExitCode)
 		if err != nil {
 			message += ": " + err.Error()
 		}
@@ -48,12 +55,18 @@ func (h *host) HostCall(ctx context.Context, request *apiv1.HostCallRequest) (*a
 	}
 	response := &apiv1.HostCallResponse{}
 	if err := proto.Unmarshal(result.Output, response); err != nil || response.Result == nil {
-		return hostFailure("invalid_host_response", "vibesys host post-intent returned invalid protobuf", result.ExitCode, result.Stderr), nil
+		return hostFailure("invalid_host_response", "vibesys host "+method+" returned invalid protobuf", result.ExitCode, result.Stderr), nil
 	}
 	if failure := response.GetConfigurationFailed(); failure != nil {
 		failure.Stderr = safeDiagnostic(strings.TrimSpace(failure.Stderr + "\n" + result.Stderr))
-	} else if response.GetPostIntent().GetRequestId() != request.GetPostIntent().GetRequestId() {
-		return hostFailure("invalid_host_response", "vibesys host post-intent returned a different request_id", result.ExitCode, result.Stderr), nil
+	} else {
+		valid := method == "post-intent" && response.GetPostIntent() != nil && response.GetPostIntent().GetRequestId() == requestID
+		if method == "chat-message" {
+			valid = response.GetChatMessage() != nil && response.GetChatMessage().GetRequestId() == requestID && response.GetChatMessage().GetSessionId() == request.GetChatMessage().GetSessionId()
+		}
+		if !valid {
+			return hostFailure("invalid_host_response", "vibesys host "+method+" returned a different method or identity", result.ExitCode, result.Stderr), nil
+		}
 	}
 	return response, nil
 }

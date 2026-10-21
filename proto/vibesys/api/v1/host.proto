@@ -35,6 +35,8 @@ message HelloResponse {
 message TailRequest {
   string run_id = 1;
   uint64 from_seq = 2;
+  // Empty selects run.log; otherwise select sessions/<id>/session.log.
+  string session_id = 3;
 }
 
 message TailResponse {
@@ -60,6 +62,7 @@ message SkeletonResponse {
   uint64 next_seq = 4;
   // True when the frozen readable prefix was included in full.
   bool complete = 5;
+  repeated string sessions = 6;
 }
 
 message WatchRunsRequest {}
@@ -84,6 +87,7 @@ enum RunLiveness {
 message GetBlobsRequest {
   string run_id = 1;
   repeated string sha256 = 2;
+  string session_id = 3;
 }
 
 // At most 16 MiB of blob content per response. Each requested hash has a result
