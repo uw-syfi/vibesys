@@ -11,3 +11,9 @@ fi
 
 go vet ./...
 go test -count=1 -timeout 45s ./...
+
+# Compile every package's tests for each release target, so a symbol missing on
+# another OS fails here and not only in CI.
+for target in linux/amd64 linux/arm64 darwin/arm64; do
+  GOOS="${target%/*}" GOARCH="${target#*/}" go vet ./...
+done

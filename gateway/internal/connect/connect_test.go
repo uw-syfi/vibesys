@@ -7,9 +7,10 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"syscall"
 	"testing"
 	"time"
+
+	"golang.org/x/sys/unix"
 )
 
 func TestDetachedStartup(t *testing.T) {
@@ -65,11 +66,11 @@ func TestDetachedHelper(t *testing.T) {
 	}
 	defer connection.Close()
 	connection.SetDeadline(time.Now().Add(10 * time.Second))
-	group, err := syscall.Getpgid(0)
+	group, err := unix.Getpgid(0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	session, err := syscall.Getsid(0)
+	session, err := unix.Getsid(0)
 	if err != nil {
 		t.Fatal(err)
 	}
