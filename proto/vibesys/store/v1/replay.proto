@@ -55,6 +55,10 @@ message ReplayPolicy {
   string reply_type = 4 [(buf.validate.field).string.min_len = 1];
   // Derived by the writer from the reachable retained reply descriptors.
   optional bytes reply_schema_digest = 5 [(buf.validate.field).bytes.len = 32];
+  // The writer retains the complete typed request, including policy fields that
+  // do not enter identity. Executors never decode the canonical identity framing.
+  // Absent only in recorder prototypes predating typed request retention.
+  google.protobuf.Any request = 6;
 }
 
 // Immutable execution metadata, separate from mutable span labels. Outcome Any

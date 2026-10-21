@@ -306,8 +306,12 @@ type ReplayPolicy struct {
 	ReplyType string                 `protobuf:"bytes,4,opt,name=reply_type,json=replyType,proto3" json:"reply_type,omitempty"`
 	// Derived by the writer from the reachable retained reply descriptors.
 	ReplySchemaDigest []byte `protobuf:"bytes,5,opt,name=reply_schema_digest,json=replySchemaDigest,proto3,oneof" json:"reply_schema_digest,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// The writer retains the complete typed request, including policy fields that
+	// do not enter identity. Executors never decode the canonical identity framing.
+	// Absent only in recorder prototypes predating typed request retention.
+	Request       *anypb.Any `protobuf:"bytes,6,opt,name=request,proto3" json:"request,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ReplayPolicy) Reset() {
@@ -371,6 +375,13 @@ func (x *ReplayPolicy) GetReplyType() string {
 func (x *ReplayPolicy) GetReplySchemaDigest() []byte {
 	if x != nil {
 		return x.ReplySchemaDigest
+	}
+	return nil
+}
+
+func (x *ReplayPolicy) GetRequest() *anypb.Any {
+	if x != nil {
+		return x.Request
 	}
 	return nil
 }
@@ -847,14 +858,15 @@ const file_vibesys_store_v1_replay_proto_rawDesc = "" +
 	"iterations\x18\x01 \x01(\x04R\n" +
 	"iterations\x12\x1a\n" +
 	"\bcapacity\x18\x02 \x01(\x04R\bcapacity\x12.\n" +
-	"\tremaining\x18\x03 \x01(\x01B\x10\xbaH\r\x12\v@\x01)\x00\x00\x00\x00\x00\x00\x00\x00R\tremaining\"\xd6\x01\n" +
+	"\tremaining\x18\x03 \x01(\x01B\x10\xbaH\r\x12\v@\x01)\x00\x00\x00\x00\x00\x00\x00\x00R\tremaining\"\x86\x02\n" +
 	"\fReplayPolicy\x12\x12\n" +
 	"\x04role\x18\x01 \x01(\tR\x04role\x12\x1a\n" +
 	"\btemplate\x18\x02 \x01(\tR\btemplate\x12\x18\n" +
 	"\acontent\x18\x03 \x01(\fR\acontent\x12&\n" +
 	"\n" +
 	"reply_type\x18\x04 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\treplyType\x12<\n" +
-	"\x13reply_schema_digest\x18\x05 \x01(\fB\a\xbaH\x04z\x02h H\x00R\x11replySchemaDigest\x88\x01\x01B\x16\n" +
+	"\x13reply_schema_digest\x18\x05 \x01(\fB\a\xbaH\x04z\x02h H\x00R\x11replySchemaDigest\x88\x01\x01\x12.\n" +
+	"\arequest\x18\x06 \x01(\v2\x14.google.protobuf.AnyR\arequestB\x16\n" +
 	"\x14_reply_schema_digest\"\x89\a\n" +
 	"\x0fOperationReplay\x128\n" +
 	"\x03key\x18\x01 \x01(\v2\x1e.vibesys.store.v1.OperationKeyB\x06\xbaH\x03\xc8\x01\x01R\x03key\x122\n" +
@@ -944,23 +956,24 @@ var file_vibesys_store_v1_replay_proto_goTypes = []any{
 var file_vibesys_store_v1_replay_proto_depIdxs = []int32{
 	3,  // 0: vibesys.store.v1.OperationKey.scope:type_name -> vibesys.store.v1.KeyComponent
 	1,  // 1: vibesys.store.v1.KeyComponent.kind:type_name -> vibesys.store.v1.KeyComponentKind
-	2,  // 2: vibesys.store.v1.OperationReplay.key:type_name -> vibesys.store.v1.OperationKey
-	5,  // 3: vibesys.store.v1.OperationReplay.policy:type_name -> vibesys.store.v1.ReplayPolicy
-	12, // 4: vibesys.store.v1.OperationReplay.outcome:type_name -> google.protobuf.Any
-	4,  // 5: vibesys.store.v1.OperationReplay.allowance:type_name -> vibesys.store.v1.ReplayAllowance
-	4,  // 6: vibesys.store.v1.ReplayClock.allowance:type_name -> vibesys.store.v1.ReplayAllowance
-	6,  // 7: vibesys.store.v1.ReplayNotice.unused:type_name -> vibesys.store.v1.OperationReplay
-	2,  // 8: vibesys.store.v1.ReplayNotice.pending:type_name -> vibesys.store.v1.OperationKey
-	12, // 9: vibesys.store.v1.ReplayObservation.outcome:type_name -> google.protobuf.Any
-	13, // 10: vibesys.store.v1.replay_context:extendee -> google.protobuf.MessageOptions
-	14, // 11: vibesys.store.v1.replay_field:extendee -> google.protobuf.FieldOptions
-	14, // 12: vibesys.store.v1.replay_set:extendee -> google.protobuf.FieldOptions
-	0,  // 13: vibesys.store.v1.replay_field:type_name -> vibesys.store.v1.ReplayFieldKind
-	14, // [14:14] is the sub-list for method output_type
-	14, // [14:14] is the sub-list for method input_type
-	13, // [13:14] is the sub-list for extension type_name
-	10, // [10:13] is the sub-list for extension extendee
-	0,  // [0:10] is the sub-list for field type_name
+	12, // 2: vibesys.store.v1.ReplayPolicy.request:type_name -> google.protobuf.Any
+	2,  // 3: vibesys.store.v1.OperationReplay.key:type_name -> vibesys.store.v1.OperationKey
+	5,  // 4: vibesys.store.v1.OperationReplay.policy:type_name -> vibesys.store.v1.ReplayPolicy
+	12, // 5: vibesys.store.v1.OperationReplay.outcome:type_name -> google.protobuf.Any
+	4,  // 6: vibesys.store.v1.OperationReplay.allowance:type_name -> vibesys.store.v1.ReplayAllowance
+	4,  // 7: vibesys.store.v1.ReplayClock.allowance:type_name -> vibesys.store.v1.ReplayAllowance
+	6,  // 8: vibesys.store.v1.ReplayNotice.unused:type_name -> vibesys.store.v1.OperationReplay
+	2,  // 9: vibesys.store.v1.ReplayNotice.pending:type_name -> vibesys.store.v1.OperationKey
+	12, // 10: vibesys.store.v1.ReplayObservation.outcome:type_name -> google.protobuf.Any
+	13, // 11: vibesys.store.v1.replay_context:extendee -> google.protobuf.MessageOptions
+	14, // 12: vibesys.store.v1.replay_field:extendee -> google.protobuf.FieldOptions
+	14, // 13: vibesys.store.v1.replay_set:extendee -> google.protobuf.FieldOptions
+	0,  // 14: vibesys.store.v1.replay_field:type_name -> vibesys.store.v1.ReplayFieldKind
+	15, // [15:15] is the sub-list for method output_type
+	15, // [15:15] is the sub-list for method input_type
+	14, // [14:15] is the sub-list for extension type_name
+	11, // [11:14] is the sub-list for extension extendee
+	0,  // [0:11] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_store_v1_replay_proto_init() }

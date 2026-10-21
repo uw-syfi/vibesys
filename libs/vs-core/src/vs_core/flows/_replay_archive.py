@@ -51,6 +51,7 @@ class ReplayArchive:
     _records: list[bytes] = field(default_factory=list, init=False, repr=False)
     _frames: list[bytes] = field(default_factory=list, init=False, repr=False)
     _spans: dict[str, bytes] = field(default_factory=dict, init=False, repr=False)
+    _unfinished: dict[str, None] = field(default_factory=dict, init=False, repr=False)
     _history: list[AcceptedReplay | AcceptedClock] = field(default_factory=list, init=False)
     _epochs: list[bytes] = field(default_factory=list, init=False, repr=False)
     acknowledgements: ReplayAcknowledgements = field(default_factory=ReplayAcknowledgements)
@@ -62,7 +63,9 @@ class ReplayArchive:
     def decode(cls, payload: bytes) -> ReplayArchive:
         store = ReplayStore.from_binary(payload)
         validate(store)
-        if store.to_binary() != store.to_binary(write_unknown_fields=False):
+        envelope = deepcopy(store)
+        envelope.clear_field("records")
+        if envelope.to_binary() != envelope.to_binary(write_unknown_fields=False):
             problem = "replay store contains unknown envelope fields; a newer reader is required"
             raise ReplayError(problem)
         result = cls()
@@ -81,6 +84,7 @@ class ReplayArchive:
         result._records = self._records.copy()
         result._frames = self._frames.copy()
         result._spans = self._spans.copy()
+        result._unfinished = self._unfinished.copy()
         result._history = self._history.copy()
         result._epochs = self._epochs.copy()
         result.acknowledgements = self.acknowledgements
@@ -92,6 +96,25 @@ class ReplayArchive:
     @property
     def sequence(self) -> int:
         return len(self._records)
+
+    @property
+    def epoch(self) -> int:
+        return len(self._epochs)
+
+    @property
+    def current_epoch(self) -> EpochStarted:
+        if not self._epochs:
+            problem = "replay archive has no current epoch"
+            raise ReplayError(problem)
+        return EpochStarted.from_binary(self._epochs[-1])
+
+    def span(self, span_id: str) -> Span:
+        """Return one detached span without decoding the rest of the retained history."""
+        value = self._spans.get(span_id)
+        if value is None:
+            problem = f"unknown replay span {span_id}"
+            raise ReplayError(problem)
+        return Span.from_binary(value)
 
     @property
     def history(self) -> tuple[AcceptedReplay | AcceptedClock, ...]:
@@ -110,7 +133,7 @@ class ReplayArchive:
         if not self._epochs:
             problem = "replay archive has no initial epoch"
             raise ReplayError(problem)
-        allowance = self.epochs[0].initial_allowance
+        allowance = EpochStarted.from_binary(self._epochs[0]).initial_allowance
         if allowance is None:
             problem = "initial keyed epoch has no historical allowance"
             raise ReplayError(problem)
@@ -126,11 +149,7 @@ class ReplayArchive:
 
     @property
     def unresolved(self) -> tuple[Span, ...]:
-        return tuple(
-            span
-            for span in self.spans
-            if span.replay is not None and not span.has_field("ended_at")
-        )
+        return tuple(self.span(span_id) for span_id in self._unfinished)
 
     @property
     def pending_observation(self) -> Span | None:
@@ -140,6 +159,15 @@ class ReplayArchive:
     def append(self, record: Record) -> None:
         """Fold one validated next record; callers discard the index on failure."""
         validate(record)
+        envelope = deepcopy(record)
+        if envelope.body is not None and envelope.body.field == "epoch_started":
+            # Descriptors retain arbitrary annotation extensions so historical
+            # strategy messages stay independently decodable. They are content,
+            # not executable record metadata.
+            envelope.body.value.descriptors = None
+        if envelope.to_binary() != envelope.to_binary(write_unknown_fields=False):
+            problem = "replay record contains unknown envelope fields; a newer reader is required"
+            raise ReplayError(problem)
         if len(record.to_binary()) > RUN_LOG_MAX_RECORD_BYTES:
             problem = "replay record exceeds the native record byte cap; retain content as a blob"
             raise ReplayError(problem)
@@ -165,7 +193,7 @@ class ReplayArchive:
         match record.body:
             case Oneof("epoch_started", epoch):
                 self._epoch(record, epoch)
-            case _ if not self._epochs or record.epoch != self.epochs[-1].epoch:
+            case _ if not self._epochs or record.epoch != self.epoch:
                 problem = "replay record belongs to no current epoch"
                 raise ReplayError(problem)
             case Oneof("span", body) if body.span is not None:
@@ -197,6 +225,9 @@ class ReplayArchive:
             self.acknowledgements = self.acknowledgements.record_notice(notice)
 
     def _epoch(self, record: Record, epoch: EpochStarted) -> None:
+        if self._epochs and epoch.epoch == len(self._epochs):
+            self._amend_epoch(epoch)
+            return
         if (
             epoch.epoch != len(self._epochs) + 1
             or epoch.epoch != record.epoch
@@ -229,6 +260,38 @@ class ReplayArchive:
         self.acknowledgements = resumed
         self._epochs.append(epoch.to_binary())
         self._policy_drift = None
+
+    def _amend_epoch(self, epoch: EpochStarted) -> None:
+        previous = self.current_epoch
+        before, after = deepcopy(previous), deepcopy(epoch)
+        for name in ("descriptors", "span_kinds", "series"):
+            before.clear_field(name)
+            after.clear_field(name)
+        if before != after:
+            problem = "epoch amendment can only grow declarations, not change execution metadata"
+            raise ReplayError(problem)
+        old_files = [] if previous.descriptors is None else previous.descriptors.file
+        new_files = [] if epoch.descriptors is None else epoch.descriptors.file
+        groups = (
+            (
+                [(f.name, f.to_binary()) for f in old_files],
+                {f.name: f.to_binary() for f in new_files},
+            ),
+            (
+                [(k.kind, k.to_binary()) for k in previous.span_kinds],
+                {k.kind: k.to_binary() for k in epoch.span_kinds},
+            ),
+            (
+                [(s.name, s.to_binary()) for s in previous.series],
+                {s.name: s.to_binary() for s in epoch.series},
+            ),
+        )
+        for old, new in groups:
+            for name, value in old:
+                if new.get(name) != value:
+                    problem = f"epoch declaration {name} cannot be replaced or removed"
+                    raise ReplayError(problem)
+        self._epochs[-1] = epoch.to_binary()
 
     def _span(self, record: Record, change: Change, span: Span) -> None:
         operation = span.replay
@@ -289,7 +352,14 @@ class ReplayArchive:
         ):
             problem = "an unanswered replay start can end only with confirmed withdrawal"
             raise ReplayError(problem)
+        self._index_span(span)
+
+    def _index_span(self, span: Span) -> None:
         self._spans[span.id] = span.to_binary()
+        if span.has_field("ended_at"):
+            self._unfinished.pop(span.id, None)
+        else:
+            self._unfinished[span.id] = None
 
     def _observation(self, span: Span) -> None:
         if span.replay is None:

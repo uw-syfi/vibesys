@@ -24,6 +24,7 @@ from vs_core.flows._replay_identity import (
     encode_identity,
 )
 from vs_core.flows._replay_run import ReplayScheduler, ReplaySettings
+from vs_core.flows._replay_schema import replay_descriptors
 from vs_core.flows._replay_sources import (
     ReplayCall,
     ReplayCausalityError,
@@ -71,4 +72,5 @@ __all__ = [
     "chain_dependency",
     "classify_context",
     "encode_identity",
+    "replay_descriptors",
 ]

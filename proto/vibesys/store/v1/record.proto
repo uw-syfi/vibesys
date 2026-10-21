@@ -75,6 +75,11 @@ message EpochStarted {
     expression: "this.span_kinds.all(x, this.span_kinds.filter(y, y.kind == x.kind).size() == 1) && (this.span_kinds.size() == 0 || (has(this.descriptors) && this.descriptors.file.size() > 0))"
   };
   option (buf.validate.message).cel = {
+    id: "epoch.descriptor_files"
+    message: "descriptor files must have nonempty unique names"
+    expression: "!has(this.descriptors) || this.descriptors.file.all(x, x.name != '' && this.descriptors.file.filter(y, y.name == x.name).size() == 1)"
+  };
+  option (buf.validate.message).cel = {
     id: "epoch.run_detail_descriptors"
     message: "descriptors are required for run detail"
     expression: "!has(this.run) || !has(this.run.detail) || (has(this.descriptors) && this.descriptors.file.size() > 0)"

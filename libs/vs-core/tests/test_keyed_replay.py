@@ -669,3 +669,44 @@ def test_unused_live_siblings_do_not_prevent_retaining_later_completions(count: 
     assert replayed.result == "1"
     assert replayed.frontier().unused == tuple(history[1:])
     replayed.close()
+
+
+@given(wording=st.text(max_size=30, alphabet=st.characters(blacklist_categories=("Cs",))))
+def test_typed_request_retains_policy_fields_without_entering_reuse_identity(wording: str) -> None:
+    async def root(ctx: ReplayFlow) -> object:
+        return await ctx.call(ask("turn", policy=wording.encode()))
+
+    live = ReplayScheduler(root, (), settings())
+    (operation,) = live.dispatches()
+    assert operation.policy is not None
+    request = operation.policy.request
+    assert request is not None
+    assert request.type_url == Context.desc().type_name
+    assert Context.from_binary(request.value) == Context(candidate="candidate-a", wording=wording)
+    files = {file.name for file in live.schemas.file}
+    assert Context.desc().file.name in files
+    assert Reply.desc().file.name in files
+    assert "buf/validate/validate.proto" in files
+    first = accepted(operation, 1, "answer")
+    live.accept(first)
+    live.close()
+
+    async def edited(ctx: ReplayFlow) -> object:
+        return await ctx.call(ask("turn", policy=b"updated"))
+
+    resumed = ReplayScheduler(edited, [first], settings())
+    assert resumed.result == Reply(root="answer")
+    assert resumed.dispatches() == ()
+    resumed.close()
+
+
+def test_an_explicit_request_proof_cannot_contradict_its_typed_input() -> None:
+    async def root(ctx: ReplayFlow) -> object:
+        call = ask("turn")
+        call.policy.request = Any(
+            type_url=Reply.desc().type_name, value=Reply(root="other").to_binary()
+        )
+        return await ctx.call(call)
+
+    with pytest.raises(ValueError, match="retained request contradicts"):
+        ReplayScheduler(root, (), settings())

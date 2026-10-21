@@ -7,9 +7,10 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 from protobuf import Oneof
+from protobuf.wkt.google.protobuf.descriptor_pb import FileDescriptorProto, FileDescriptorSet
 from protobuf.wkt.google.protobuf.timestamp_pb import Timestamp
 
-from vs_core.api.replay import ReplayArchive, ReplayError, ReplayScheduler
+from vs_core.api.replay import ReplayArchive, ReplayError, ReplayScheduler, replay_descriptors
 from vs_proto.api import (
     Change,
     EpochStarted,
@@ -20,6 +21,7 @@ from vs_proto.api import (
     SpanRecord,
     SpanStatus,
     Stop,
+    ValidationError,
     replay,
 )
 
@@ -315,3 +317,61 @@ def test_unanswered_start_cannot_close_without_confirmed_withdrawal(
         span.stop = Stop(requested_at=0, landed=landed)
     with pytest.raises(ReplayError, match="confirmed withdrawal"):
         decode([header, started, stopped])
+
+
+def test_epoch_declarations_grow_without_opening_an_epoch_or_acknowledging_again() -> None:
+    header = records()[0]
+    amended = deepcopy(header)
+    amended.seq = 2
+    schemas = replay_descriptors(Reply)
+    epoch_of(amended).descriptors = schemas
+    archive = decode([header, amended])
+    assert archive.epoch == 1
+    assert len(archive.epochs) == 1
+    assert len(archive.acknowledgements.acknowledgements) == 1
+    assert archive.current_epoch.descriptors == schemas
+    assert archive.initial_allowance.iterations == 10
+    roundtrip = decode(ReplayStore.from_binary(archive.encode()).records)
+    assert roundtrip.current_epoch.descriptors == schemas
+    assert roundtrip.encode() == archive.encode()
+
+
+@pytest.mark.parametrize("edit", ["allowance", "remove", "replace"])
+def test_epoch_amendments_cannot_replace_execution_or_retained_schemas(edit: str) -> None:
+    header = records()[0]
+    epoch_of(header).descriptors = replay_descriptors(Reply)
+    amended = deepcopy(header)
+    amended.seq = 2
+    epoch = epoch_of(amended)
+    if edit == "allowance":
+        assert epoch.initial_allowance is not None
+        epoch.initial_allowance.iterations += 1
+    elif edit == "remove":
+        epoch.descriptors = None
+    else:
+        assert epoch.descriptors is not None
+        epoch.descriptors.file[0].package = "changed"
+    with pytest.raises(ReplayError, match=r"execution metadata|cannot be replaced or removed"):
+        decode([header, amended])
+
+
+def test_descriptor_annotation_extensions_survive_but_unknown_record_metadata_is_rejected() -> None:
+    header = records()[0]
+    wire = FileDescriptorProto(name="historical.proto").to_binary() + b"\xa0\x06\x01"
+    epoch_of(header).descriptors = FileDescriptorSet(file=[FileDescriptorProto.from_binary(wire)])
+    archive = decode([header])
+    retained = archive.current_epoch.descriptors
+    assert retained is not None
+    assert retained.file[0].to_binary() == wire
+    unknown = Record.from_binary(header.to_binary() + b"\xa0\x06\x01")
+    with pytest.raises(ReplayError, match="unknown envelope fields"):
+        decode([unknown])
+
+
+def test_duplicate_epoch_descriptor_names_fail_validation() -> None:
+    header = records()[0]
+    epoch_of(header).descriptors = FileDescriptorSet(
+        file=[FileDescriptorProto(name="same.proto"), FileDescriptorProto(name="same.proto")]
+    )
+    with pytest.raises(ValidationError, match="invalid ReplayStore"):
+        decode([header])

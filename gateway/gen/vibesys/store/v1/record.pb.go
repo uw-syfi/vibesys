@@ -568,7 +568,7 @@ const file_vibesys_store_v1_record_proto_rawDesc = "" +
 	"\x14record.epoch_started\x12Vepoch_started epoch must match epoch and seq and at must be present for a typed header\x1a\x85\x01!has(this.epoch_started) || !has(this.epoch_started.run) || (this.epoch == this.epoch_started.epoch && this.seq > 0u && has(this.at))B\r\n" +
 	"\x04body\x12\x05\xbaH\x02\b\x01B\b\n" +
 	"\x06_clockB\x0f\n" +
-	"\r_replay_clock\"\xa8\x11\n" +
+	"\r_replay_clock\"\xfd\x12\n" +
 	"\fEpochStarted\x12\x15\n" +
 	"\x06run_id\x18\x01 \x01(\tR\x05runId\x12\x14\n" +
 	"\x05epoch\x18\x02 \x01(\rR\x05epoch\x12\x1b\n" +
@@ -586,11 +586,10 @@ const file_vibesys_store_v1_record_proto_rawDesc = "" +
 	"\x10provenance_known\x18\f \x01(\bH\x00R\x0fprovenanceKnown\x88\x01\x01\x12H\n" +
 	"\x19identity_encoding_version\x18\r \x01(\rB\a\xbaH\x04*\x02\b\x01H\x01R\x17identityEncodingVersion\x88\x01\x01\x12S\n" +
 	"\x11initial_allowance\x18\x0e \x01(\v2!.vibesys.store.v1.ReplayAllowanceH\x02R\x10initialAllowance\x88\x01\x01\x12c\n" +
-	"\x16replay_acknowledgement\x18\x0f \x01(\v2'.vibesys.store.v1.ReplayAcknowledgementH\x03R\x15replayAcknowledgement\x88\x01\x01:\xa2\n" +
-	"\xbaH\x9e\n" +
-	"\x1a\x8f\x02\n" +
+	"\x16replay_acknowledgement\x18\x0f \x01(\v2'.vibesys.store.v1.ReplayAcknowledgementH\x03R\x15replayAcknowledgement\x88\x01\x01:\xf7\v\xbaH\xf3\v\x1a\x8f\x02\n" +
 	"\x0eepoch.identity\x12Prun_id, epoch, tree_hash and vibesys_version are required for a typed run header\x1a\xaa\x01!has(this.run) || (this.run_id != '' && this.epoch > 0u && (this.tree_hash != '' || (has(this.provenance_known) && !this.provenance_known)) && this.vibesys_version != '')\x1a\x8a\x02\n" +
-	"\x10epoch.span_kinds\x12Dspan_kinds must have unique kind names and descriptors when nonempty\x1a\xaf\x01this.span_kinds.all(x, this.span_kinds.filter(y, y.kind == x.kind).size() == 1) && (this.span_kinds.size() == 0 || (has(this.descriptors) && this.descriptors.file.size() > 0))\x1a\xaf\x01\n" +
+	"\x10epoch.span_kinds\x12Dspan_kinds must have unique kind names and descriptors when nonempty\x1a\xaf\x01this.span_kinds.all(x, this.span_kinds.filter(y, y.kind == x.kind).size() == 1) && (this.span_kinds.size() == 0 || (has(this.descriptors) && this.descriptors.file.size() > 0))\x1a\xd2\x01\n" +
+	"\x16epoch.descriptor_files\x120descriptor files must have nonempty unique names\x1a\x85\x01!has(this.descriptors) || this.descriptors.file.all(x, x.name != '' && this.descriptors.file.filter(y, y.name == x.name).size() == 1)\x1a\xaf\x01\n" +
 	"\x1cepoch.run_detail_descriptors\x12'descriptors are required for run detail\x1af!has(this.run) || !has(this.run.detail) || (has(this.descriptors) && this.descriptors.file.size() > 0)\x1av\n" +
 	"\fepoch.series\x12\x1dseries must have unique names\x1aGthis.series.all(x, this.series.filter(y, y.name == x.name).size() == 1)\x1a\xee\x01\n" +
 	"\x10epoch.objectives\x12Srun objectives must name series declared with the same direction and objective role\x1a\x84\x01!has(this.run) || this.run.objectives.all(o, this.series.exists(s, s.name == o.series && s.direction == o.direction && s.role == 1))\x1a\xe1\x01\n" +

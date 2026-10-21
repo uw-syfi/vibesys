@@ -17,6 +17,7 @@ from vs_core.api.replay import (
     ReplayError,
     ReplayScheduler,
     ReplaySettings,
+    replay_descriptors,
 )
 from vs_project.api import Committed, StateStore, StoredEnvelope, StoreFence
 from vs_proto.api import (
@@ -145,6 +146,7 @@ class ReplayRuntime:
         self._known_starts: set[str] = set()
         self._prepared_occurrences: set[tuple[bytes, bytes, int]] = set()
         self._recovery_dirty = False
+        self._schema_types: set[type[Message]] = set()
 
     @property
     def archive(self) -> ReplayArchive:
@@ -249,9 +251,7 @@ class ReplayRuntime:
             raise ReplayCommitError(problem)
         record = Record(
             seq=self._archive.sequence + 1,
-            epoch=(
-                body.value.epoch if body.field == "epoch_started" else len(self._archive.epochs)
-            ),
+            epoch=(body.value.epoch if body.field == "epoch_started" else self._archive.epoch),
             clock=self._archive.clock if clock is None else clock,
             replay_clock=replay_clock,
             at=at,
@@ -289,6 +289,7 @@ class ReplayRuntime:
         if self._archive.pending_observation is not None:
             problem = "accept the pending observation before preparing more work"
             raise ReplayError(problem)
+        self._record_schemas(scheduler.schema_types, now=now, at=at)
         self._record_drift(now=now, at=at)
         notice = scheduler.frontier().notice()
         if notice is not None:
@@ -342,6 +343,32 @@ class ReplayRuntime:
             started.append(deepcopy(span))
         return tuple(started)
 
+    def _record_schemas(
+        self, messages: tuple[type[Message], ...], *, now: float, at: Timestamp
+    ) -> None:
+        messages = tuple(message for message in messages if message not in self._schema_types)
+        if not messages:
+            return
+        schemas = replay_descriptors(*messages)
+        epoch = self._archive.current_epoch
+        previous = epoch.descriptors
+        files = {} if previous is None else {file.name: file for file in previous.file}
+        added = False
+        for file in schemas.file:
+            known = files.get(file.name)
+            if known is not None and known.to_binary() != file.to_binary():
+                problem = f"epoch descriptor {file.name} conflicts with the retained schema"
+                raise ReplayError(problem)
+            if known is None:
+                files[file.name] = file
+                added = True
+        if added:
+            # The existing native header can grow declarations within its epoch;
+            # identity, allowance and launch acknowledgement stay immutable.
+            epoch.descriptors = type(schemas)(file=[files[name] for name in sorted(files)])
+            self._append(Oneof("epoch_started", epoch), now=now, at=at)
+        self._schema_types.update(messages)
+
     def _record_drift(self, *, now: float, at: Timestamp) -> None:
         drift = self.frontier.drift
         if drift.count and self._archive.policy_drift is None:
@@ -392,6 +419,14 @@ class ReplayRuntime:
         """Retain a validated observation before attempting logical acceptance."""
         validate(result.outcome)
         span = self._span(span_id)
+        if (
+            span.replay is None
+            or span.replay.policy is None
+            or result.outcome.desc().type_name != span.replay.policy.reply_type
+        ):
+            problem = "observation does not match the operation's reply contract"
+            raise ReplayError(problem)
+        self._record_schemas((type(result.outcome),), now=now, at=at)
         span.replay_observation = pb.ReplayObservation(
             outcome=Any(type_url=result.outcome.desc().type_name, value=result.outcome.to_binary()),
             paid=result.paid,
@@ -525,14 +560,11 @@ class ReplayRuntime:
                 self._accept_record(span, now=now, at=at)
 
     def _span(self, span_id: str) -> Span:
-        for span in self._archive.spans:
-            if span.id == span_id:
-                if span.replay is None:
-                    problem = f"span is not a keyed operation: {span_id}"
-                    raise ReplayError(problem)
-                return span
-        problem = f"unknown replay span {span_id}"
-        raise ReplayError(problem)
+        span = self._archive.span(span_id)
+        if span.replay is None:
+            problem = f"span is not a keyed operation: {span_id}"
+            raise ReplayError(problem)
+        return span
 
     def clock_requests(self) -> tuple[float, ...]:
         """Pending flow deadlines, released only through durable clock observations."""
