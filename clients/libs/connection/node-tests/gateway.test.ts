@@ -1,6 +1,11 @@
 import {describe, test} from 'node:test';
 import {create, toBinary} from '@bufbuild/protobuf';
-import {TailRequestSchema, TailResponseSchema} from '@vibesys/proto';
+import {
+  HostCallRequestSchema,
+  HostService,
+  TailRequestSchema,
+  TailResponseSchema,
+} from '@vibesys/proto';
 import {Seeded} from '@vibesys/store/testing';
 import {FakeClock} from '@vibesys/transport/testing';
 import {expect} from 'expect';
@@ -264,6 +269,42 @@ for (const fault of ['malformed protobuf', 'consumer failure'] as const) {
       );
       expect(fake.forces).toEqual([false]);
       expect(clock.pendingDelays()).toEqual([]);
+    } finally {
+      connection.close();
+      fake.close();
+    }
+  });
+}
+
+for (const [method, deadline] of [
+  ['postIntent', 15_000],
+  ['relaunch', 35_000],
+] as const) {
+  test(`host ${method} leaves room for its inner admission deadline`, async () => {
+    const fake = new FakeGateway();
+    const clock = new FakeClock();
+    const connection = new GatewayConnection(fake, clock.schedule);
+    const request = create(HostCallRequestSchema, {
+      method:
+        method === 'relaunch'
+          ? {case: 'relaunch', value: {projectRoot: '/project', runId: 'run-a', expectedEpoch: 1n}}
+          : {
+              case: 'postIntent',
+              value: {projectRoot: '/project', runId: 'run-a', requestId: 'id-a'},
+            },
+    });
+    const pending = connection
+      .unary(
+        `/${HostService.typeName}/${HostService.method.hostCall.name}`,
+        toBinary(HostCallRequestSchema, request),
+        new AbortController().signal,
+      )
+      .catch(error => String(error));
+    try {
+      await fake.nextHostCall();
+      await clock.waitUntilScheduled(deadline);
+      clock.advanceBy(deadline);
+      expect(await pending).toContain('deadline');
     } finally {
       connection.close();
       fake.close();

@@ -44,7 +44,12 @@ func (h *host) HostCall(ctx context.Context, request *apiv1.HostCallRequest) (*a
 	if len(input) > hostcommand.MaxOutput {
 		return hostFailure("invalid_input", "HostCall request exceeds 1 MiB", -1, ""), nil
 	}
-	callCtx, cancel := context.WithTimeout(ctx, hostCallDeadline)
+	deadline := hostCallDeadline
+	if request.GetRelaunch() != nil {
+		// The host confirms its new writer epoch for up to 25 seconds; the client allows 35.
+		deadline = 30 * time.Second
+	}
+	callCtx, cancel := context.WithTimeout(ctx, deadline)
 	defer cancel()
 	result, err := h.config.HostRunner.Run(callCtx, hostcommand.Command{
 		Executable: filepath.Join(checkout, ".venv", "bin", "vibesys"),
