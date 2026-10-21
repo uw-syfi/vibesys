@@ -151,6 +151,14 @@ from vs_proto._generated.vibesys.store.v1.span_pb import (
     WaitingOn,
     WaitKind,
 )
+from vs_proto._generated.vibesys.store.v1.transcript_pb import (
+    TranscriptChannel,
+    TranscriptContent,
+    TranscriptEntry,
+    TranscriptText,
+    TranscriptToolCall,
+    TranscriptToolResult,
+)
 
 __all__ = [
     "API_SCHEMA_HASH",
@@ -262,6 +270,12 @@ __all__ = [
     "TailStreamResponse",
     "Timestamp",
     "TokenUsage",
+    "TranscriptChannel",
+    "TranscriptContent",
+    "TranscriptEntry",
+    "TranscriptText",
+    "TranscriptToolCall",
+    "TranscriptToolResult",
     "ValidationError",
     "WaitCondition",
     "WaitKind",

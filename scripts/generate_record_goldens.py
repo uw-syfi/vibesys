@@ -20,6 +20,35 @@ def packed(message: Message) -> Any:
     )
 
 
+def transcript_examples() -> dict[str, Message]:
+    """Every transcript entry variant and both content representations."""
+    inline = p.TranscriptContent(value=p.Oneof("inline", "hello"))
+    blob = p.TranscriptContent(
+        value=p.Oneof("blob", p.BlobRef(sha256="a" * 64, size=65537, media_type="text/plain"))
+    )
+    return {
+        "text": p.TranscriptEntry(
+            entry=p.Oneof(
+                "text", p.TranscriptText(channel=p.TranscriptChannel.ASSISTANT, content=inline)
+            )
+        ),
+        "call": p.TranscriptEntry(
+            entry=p.Oneof(
+                "tool_call",
+                p.TranscriptToolCall(tool="shell", call_id="call-a", arguments_json=inline),
+            )
+        ),
+        "result": p.TranscriptEntry(
+            entry=p.Oneof(
+                "tool_result",
+                p.TranscriptToolResult(
+                    tool="shell", call_id="call-a", content=blob, payload_json=inline
+                ),
+            )
+        ),
+    }
+
+
 def detail_examples() -> dict[str, Message]:
     """Search run, ending and failure details carried by core Any fields."""
     return {

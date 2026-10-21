@@ -1937,3 +1937,11 @@ depends_on = ["vibesys.run"]
 [[interfaces]]
 from = ["vibesys.api.transport"]
 expose = ["ConversionResult", "ConversionStatus", "convert_run"]
+
+[[modules]]
+path = "vibesys.records"
+depends_on = ["vibesys", "vibesys.search_spans", "vs_core", "vs_decode.api", "vs_proto"]
+
+[[interfaces]]
+from = ["vibesys.records"]
+expose = ["api", "api\\..*"]

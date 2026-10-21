@@ -13,6 +13,8 @@ enum GateStage {
   GATE_STAGE_ACCURACY = 2;
   GATE_STAGE_BENCHMARK = 3;
   GATE_STAGE_VALIDATION = 4;
+  // A measurement operation can cover several or task-defined evaluator stages.
+  GATE_STAGE_MEASUREMENT = 5;
 }
 
 enum GateSubject {
@@ -181,6 +183,11 @@ message GateAttrs {
     not_in: [0]
   }];
   optional string source_label = 9 [(buf.validate.field).string.max_bytes = 65536];
+  // Exact evaluator stage ids, in order. stage categorizes the operation.
+  repeated string stages = 10 [(buf.validate.field).repeated.items.string = {
+    min_len: 1
+    max_bytes: 65536
+  }];
 }
 
 message FailedCheck {
@@ -209,6 +216,8 @@ message InputFailure {
   }];
   uint32 attempts = 3 [(buf.validate.field).uint32.gt = 0];
   bool compared = 4;
+  // Task-defined and historical ids, including the old correctness spelling.
+  optional string stage_id = 5 [(buf.validate.field).string.max_bytes = 65536];
 }
 
 message AdoptionAttrs {
