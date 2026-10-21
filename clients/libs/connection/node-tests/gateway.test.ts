@@ -1,7 +1,9 @@
 import {describe, test} from 'node:test';
 import {create, toBinary} from '@bufbuild/protobuf';
 import {
+  API_SCHEMA_HASH,
   GetBlobsResponseSchema,
+  HelloResponseSchema,
   HOST_API_MAX_MESSAGE_BYTES,
   HostCallRequestSchema,
   HostService,
@@ -16,6 +18,7 @@ import {
   GatewayCalls,
   GatewayConnection,
   GrpcDecoder,
+  GrpcError,
   grpcFrame,
   HELLO_METHOD,
   TAIL_METHOD,
@@ -30,6 +33,35 @@ const response = (seq: bigint) =>
     TailResponseSchema,
     create(TailResponseSchema, {throughSeq: seq, records: [new Uint8Array([Number(seq)])]}),
   );
+
+for (const fault of ['malformed protobuf', 'gateway_version', 'rejected version'] as const) {
+  test(`invalid Hello ${fault} ends the call with no reconnect`, {timeout: 15000}, async () => {
+    const fake = new FakeGateway();
+    fake.helloFault =
+      fault === 'malformed protobuf'
+        ? new Uint8Array([255])
+        : fault === 'rejected version'
+          ? new GrpcError(13, 'gateway_version must be nonempty')
+          : toBinary(
+              HelloResponseSchema,
+              create(HelloResponseSchema, {apiSchemaHash: API_SCHEMA_HASH}),
+            );
+    const clock = new FakeClock();
+    const connection = new GatewayConnection(fake, clock.schedule);
+    try {
+      await expect(
+        connection.stream(TAIL_METHOD, request(), new AbortController().signal, () => {}),
+      ).rejects.toThrow(
+        fault === 'malformed protobuf' ? 'invalid Hello response' : 'gateway_version',
+      );
+      expect(fake.forces).toEqual([false]);
+      expect(clock.pendingDelays()).toEqual([]);
+    } finally {
+      connection.close();
+      fake.close();
+    }
+  });
+}
 
 describe('gateway public transport', () => {
   test('gRPC frames survive generated fragmentation and coalescing', () => {

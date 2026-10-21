@@ -5,6 +5,7 @@ import {clockFrom} from '@vibesys/machine';
 import {
   API_SCHEMA_HASH,
   HelloRequestSchema,
+  type HelloResponse,
   HelloResponseSchema,
   HostCallRequestSchema,
   HostService,
@@ -55,7 +56,9 @@ export class GatewayConnection {
             } catch (error) {
               return {
                 ok: false as const,
-                fatal: error instanceof GrpcError && error.code === 9,
+                fatal:
+                  error instanceof GrpcError &&
+                  (error.code === 9 || error.code === 13 || error.code === 15),
                 error: String(error),
               };
             }
@@ -200,14 +203,17 @@ function unaryDeadline(method: string, bytes: Uint8Array): number {
 }
 
 async function hello(session: GatewaySession, signal: AbortSignal): Promise<void> {
-  const response = validatedFromBinary(
-    HelloResponseSchema,
-    await session.unary(
-      HELLO_METHOD,
-      toBinary(HelloRequestSchema, create(HelloRequestSchema, {apiSchemaHash: API_SCHEMA_HASH})),
-      signal,
-    ),
+  const bytes = await session.unary(
+    HELLO_METHOD,
+    toBinary(HelloRequestSchema, create(HelloRequestSchema, {apiSchemaHash: API_SCHEMA_HASH})),
+    signal,
   );
+  let response: HelloResponse;
+  try {
+    response = validatedFromBinary(HelloResponseSchema, bytes);
+  } catch (cause) {
+    throw new GrpcError(15, `invalid Hello response: ${String(cause)}`);
+  }
   if (response.apiSchemaHash !== API_SCHEMA_HASH) {
     throw new GrpcError(
       9,
