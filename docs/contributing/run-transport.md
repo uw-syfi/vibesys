@@ -37,7 +37,7 @@ The migration phases are in [Migration](#migration).
 | `Skeleton`, `GetBlobs`, `TailStream`, `WatchRuns`; new Run screen | unbuilt | 2 |
 | Conversion of existing JSONL runs and `store.json` envelopes | unbuilt | 2 |
 | Core state as generated types, `state.pb`, native `run.log` writes | unbuilt | 3 |
-| Intents as records (`IntentState`), drain/park, relaunch epochs | unbuilt | 3 |
+| Intents as records (`IntentState`), pause/park, relaunch epochs | unbuilt | 3 |
 | Chat sessions as processes with their own log; `HostCall` | unbuilt | 3 |
 | Generated frozen value classes from `.proto` (our own protoc plugin) | prototype only | 3 |
 | Control inbox (files, ordered, durable, idempotent by request id) | built | |
@@ -64,7 +64,8 @@ One directory per run, opened only through `vs-project`'s `Project`.
 | `blobs/<sha256>` | large content: transcripts, diffs, tool output, prompts | the run | immutable, content-addressed |
 | `streams/<id>` | log streams (build output, stage output, narration) | the run | append-only |
 | `keyframes/<seq>.pb` | the skeleton at a log sequence | the run, at its checkpoints | immutable |
-| `run.head` | tiny status and headline for dashboards | the run | replaced atomically |
+| `run.head` | tiny status and headline for dashboards, and `committed_seq` | the run | replaced atomically |
+| `run.lock` | an advisory lock the live run holds; no content | the run | held while the process lives |
 | `state.pb` | core's snapshot; records the last log sequence it covers | the run | compare-and-swap |
 | `inbox/` | intents posted by viewers | the gateway | one file per request |
 | `sessions/<id>/` | a chat session: its own `session.log` and inbox | the session process | as the run |
@@ -73,18 +74,26 @@ One directory per run, opened only through `vs-project`'s `Project`.
 written through `Project`. The gateway lists that directory and never rebuilds the project layout.
 
 **`run.log` framing.** An 8-byte magic `VSRLOG01`, then per record: a uvarint payload length, a
-4-byte little-endian CRC32C of the payload, and the payload (an encoded `Record`). A tail that ends
-inside a record is a torn tail: the reader waits. A complete record whose CRC does not match is
-corruption: the reader stops and reports it.
+4-byte little-endian CRC32C of the payload, and the payload (an encoded `Record`). A record is at
+most 1 MiB. A producer puts content over 64 KiB in a blob; a writer asked to append more than the
+cap raises, which is a bug in the producer and never truncation. A tail that ends inside a record
+is a torn tail: the reader waits. A complete record whose CRC does not match is corruption: the
+reader stops and reports it. A length over the cap is also corruption, which guards against a
+damaged length varint.
 
 **Commit and recovery.** One commit appends its log records, then compare-and-swaps `state.pb`,
 which records the last log sequence it covers. On start, recovery drops log records past that
-sequence, so the history never shows something core does not hold. (Making `run.log` core's own
-event-sourced journal instead was considered; see [Decisions](#decisions-and-alternatives).)
+sequence, so the history never shows something core does not hold. After each swap the run writes
+`committed_seq` in `run.head`, and the gateway's `Tail` and `Skeleton` serve only records up to it,
+so a viewer never sees a record that recovery would drop. The phase 1 converter has no `state.pb`
+and commits each converted record at once. (Other orders were considered; see
+[Decisions](#decisions-and-alternatives).)
 
 **Blobs and streams.** A record never carries large content inline. It carries a `BlobRef` (hash,
 size, media type) and the client fetches by hash, caching in IndexedDB forever because the content
-cannot change. Log streams are append-only files read by offset.
+cannot change. Log streams are append-only files read by offset. A turn's transcript is a stream
+only; when the turn span ends, its attrs record the stream's final length, which makes (stream id,
+length) immutable and cacheable. There is no second, sealed copy.
 
 **Skeleton keyframes.** The skeleton is what a client holds in memory to scrub: the span table
 with each span's versions by sequence (status, verdict, attrs), the metric series, the stream
@@ -94,30 +103,44 @@ the log records after it, so opening a run reads a keyframe, not the log.
 
 **`run.head`.** The headline a list row draws: lifecycle, strategy name, objective and best result
 against the input, counts of work units, token and cost totals, a bounded point list for the tile
-chart, and whether the run needs its user. The run writes it; no reader folds a journal for it.
+chart, and whether the run needs its user. The run writes it, computing the headline from the same
+metric points a client plots; no reader folds a journal for it.
 This deletes the second (Python) copy of the summary fold.
 
 ## Intents and epochs
 
-**Intents** are pause, drain, resume, stop, steer, withdraw, cancel and set-parallelism, and chat
+**Intents** are pause, park, resume, stop, steer, withdraw, cancel and set-parallelism, and chat
 messages. A viewer posts one to the run's inbox through the gateway. The run reads the inbox at
 its control poll, applies each request once, and records an `IntentState` (`applied` or `refused`,
 with the reason) in its log. A request posted while the run is parked or down is applied after it
 relaunches; commands are durable. The ordering, idempotence and rejection rules of the inbox
-are unchanged.
+are unchanged. Until phase 3, the inbox stays JSON with its reviewed field allow-list and
+`PostIntent` is a `HostCall` to `vibesys host post-intent`, which uses the existing Python inbox
+writer so the gateway holds no product logic. In phase 3 the inbox becomes protobuf together with
+intents as records, and the allow-list becomes proto validation. An `IntentState` is `applied` or
+`refused`; delivery of a steer is recorded as links from the turn span to the request id.
 
-**Drain and park.** Drain finishes the agent turns in flight, starts no new work, and cancels
-in-flight evaluations. Evaluation jobs are idempotent, so they are rerun after relaunch. The process
-then exits with lifecycle `parked`. Pause is the same hold without the exit (see
-[open question 7](#open-questions)).
+**Pause, park and stop.** Pause holds new work, keeps the process, and lets evaluations continue.
+Park drains: it finishes the agent turns in flight, starts no new work, cancels in-flight
+evaluations, and then exits with lifecycle `parked`. Evaluation jobs are idempotent, so they are
+rerun after relaunch. Stop is separate and ends the run. Pause and park are two intents because
+they cancel different things.
 
 **Relaunch** starts the same run as a new epoch from the host checkout. The `EpochStarted` record
 records the tree hash and a dirty flag, so the timeline shows each epoch boundary and which code
 ran in it. A run restarts from `state.pb`; its open spans from the previous epoch are resumed or
 ended by the same rules a restart after a code change uses today
-([flows.md](flows.md#the-run-trace)).
+([flows.md](flows.md#the-run-trace)). A live run holds a `flock` on `run.lock`, and the gateway
+probes it without blocking. The run and the gateway share a host (principle 2), so only local lock
+semantics matter. A relaunch first writes the missing `Ended(INTERRUPTED)` for the previous epoch,
+then its `EpochStarted`, so the log holds the fact and the gateway's inference (a log with no
+`Ended` and no lock holder) is only a live hint. The run clock is monotone across epochs and
+frozen while parked; it resumes from `state.pb`. `Record.at` carries wall time. The timeline marks
+epoch boundaries with wall-time labels and collapses parked gaps.
 
-**Chat sessions** are separate processes with their own `session.log` and inbox. They are not the
+**Chat sessions** belong to the run and outlive relaunches as data. They are separate processes
+with their own `session.log` and inbox, started on demand and exiting when idle or at park. The
+default session id is `default`, and sessions are kept as long as the run is. They are not the
 run: a session reads the run's files, its answers and token streaming are appends to its own log,
 and a steer it proposes is data in that log that the operator may send as an intent. A generic
 `Attach` bidirectional byte stream to a socket a session owns is reserved for future byte-level
@@ -196,8 +219,9 @@ A run's history is a sequence of `Record`s. Core names no strategy.
 - **Lifecycle** is `starting{stage,progress} | running | draining | parked | ended{outcome}`.
 - **Intent states** record what the run did with each intent.
 - **Epoch started** opens each epoch with the checkout, run description and declarations.
-- **Notice** carries a human-facing warning or failure (a proposal; see
-  [open question 6](#open-questions)).
+- **Notice** carries a human-facing warning or failure: a severity, a code, a message and an
+  optional span id. Narration lines are unstructured and a span status cannot hold run-level
+  warnings, so neither serves.
 
 The client holds the skeleton and scrubs locally: the state at sequence `s` is a lookup in the span
 versions and series, not a replay. Content is fetched lazily by hash.
@@ -238,7 +262,7 @@ How to read the table:
 | `run_status_changed` | server controller, journal | lifecycle | `CoreState.status`: header, recent-status words | S | `starting\|running\|pausing\|paused\|stopping\|stopped\|completed\|failed` becomes `Running{hold}`, `Draining{goal}`, `Parked`, `Ended{outcome}`. `previous` is derived. |
 | `run_finished` | controller, runtime, session | lifecycle | fold terminates run; digest closing | S | `Ended{outcome = finished}`. |
 | `run_failed` | controller, runtime, session | lifecycle | fold terminates run; digest closing; failure text | S | `Ended{outcome = failed, failure = RunFailure}` (kind, reason, workstreams started and budget, candidates kept, adopted candidate). |
-| `run_interrupted` | controller, runtime | lifecycle | fold terminates run | S | `Ended{outcome = interrupted, reason, signal}` when the process caught the signal. A process that cannot write its own death is detected by the gateway (open question 2). |
+| `run_interrupted` | controller, runtime | lifecycle | fold terminates run | S | `Ended{outcome = interrupted, reason, signal}` when the process caught the signal. A process that cannot write its own death leaves a log with no `Ended` and no lock holder; the gateway reports `interrupted` as a hint and the next relaunch writes the record (see Intents and epochs). |
 | `run_ending` | `vibesys.run.core_run` | lifecycle | host summary (`with_ending`): end reason, resumable | S | Merged into `Ended`: `reason`, `summary`, `resumable`, `uncompared`. `rounds_finished` is dropped (count ended workstream spans). |
 | `configuration_failed` | server runtime, read model | lifecycle, or launch error | transcript line; diagnostics | S | Raised before a run exists: it is the `Launch` or `HostCall` error. If a run directory exists it is `Ended{failed, kind = configuration, code, stage, message, exit_code}`. |
 
@@ -250,11 +274,11 @@ How to read the table:
 | `invocation_finished` | server execution | delete | none | L | Same, for `agent_execution_finished`. |
 | `agent_execution_started` | server execution, `run.integration` | span:`agent_turn` attrs, blob | agents view, step narrative, usage join (`ExecutionStart`) | L | The span already exists. Add attrs `stage`, `attempt`, `provider`, `model`, `reasoning_effort`, `harness_version`. `system_prompt` and `user_prompt` are blob attachments (`system_prompt`, `user_prompt`). The execution id is the span id, so the usage join disappears. |
 | `agent_execution_activity_changed` | server execution | delete | active-turn word (`activeExecutions`) | S | Derived by the client from the tail of the turn's transcript stream (last entry kind and tool). A past sequence needs no activity. |
-| `agent_execution_finished` | server execution, `run.integration` | span:`agent_turn` end attrs, blob | turn rows (typed reply fields), idea outcomes | L | `reply` (kind, value) becomes `Any` attrs with its descriptor in the epoch header, replacing `json_schema`. `result` (the raw text) is a blob attachment (`raw_result`). `error` is the span's failure. |
+| `agent_execution_finished` | server execution, `run.integration` | span:`agent_turn` end attrs, blob | turn rows (typed reply fields), idea outcomes | L | `reply` (kind, value) is JSON text in one attr until phase 3, when reply models become proto messages and the field is reserved and deleted after the 7-day read window. `result` (the raw text) is a blob attachment (`raw_result`). `error` is the span's failure. |
 | `agent_output_chunk` | server execution, `run.agent_events` | stream (`transcript`) | step narrative, turn rows | M | Transcript entries `assistant`, `analysis`, `prompt`, `diagnostic`. The channel `tool` is dropped (typed tool entries replace it). `status` (progress, label, elapsed, tokens) is presentation and is deleted. |
 | `tool_call` | `run.agent_events` | stream (`transcript`) | turn rows (tool cards) | M | Entry: tool, call id, args. Args over the inline cap go to a blob. |
 | `tool_result` | `run.agent_events` | stream (`transcript`), blob | turn rows | L | Entry: tool, call id, error flag, summary. `content` and `payload` (command stdout and stderr, JSON) are a blob when over the cap. |
-| `todo_update` | `run.agent_events` | stream (`transcript`) | none | S | Entry kind `todos`. Add a screen first, or delete. |
+| `todo_update` | `run.agent_events` | delete | none | S | No consumer. Re-adding an entry kind later is additive. |
 | `usage_update` | `run.agent_events` | delete | none (`CoreState.usage` is unread) | S | Context fill per tool call. High rate, no consumer. A `context_fill` metric series can return when a screen needs it. |
 | `turn_usage_recorded` | `run.agent_events` | span:`agent_turn` end attrs | usage view, run summary, global Usage page, workstream usage | S | `TokenUsage` attrs: input, cache read, cache creation, output, reasoning, cost, duration; unreported is absent, never zero. Summing over spans gives the run's spend. The `span_id` stamping on events is gone. |
 | `phase_started` | server execution, `run.integration` | delete | run map only; the Run screen reads no phase | S | Each phase is an agent turn or a workstream span. |
@@ -275,7 +299,7 @@ wait, so `waited_seconds` is no longer a field.
 | `quota_resumed` | `run.agent_events` | span:`capacity_wait` end | quota stops (timeline exclusion) | S | Verdict `resumed`; attr `reason` (`operator\|wait_elapsed`). |
 | `quota_abandoned` | `run.agent_events` | span:`capacity_wait` end | quota stops | S | Status `failed`, verdict `abandoned`, attr `reason`. |
 | `provider_switched` | `run.agent_events` | span:`provider_switch` (instant) | header reason text | S | Attrs `from_provider`, `to_provider`, `to_model`, `reason`, `detail`; link `settles` to the `capacity_wait` span. |
-| `rate_limit_update` | `run.agent_events` | metric series `rate_limit.<provider>.<window>` | none | S | Value is the used fraction. `limit`, `resets_at` and `window_minutes` are dropped until a screen needs them. |
+| `rate_limit_update` | `run.agent_events` | metric series `rate_limit.<provider>.<window>` | none | S | Value is the used fraction. `limit`, `resets_at` and `window_minutes` are dropped (no consumer; re-adding is additive). |
 
 ### Evaluation, candidates and results
 
@@ -285,7 +309,7 @@ projection after each commit; in the new model the spans already carry the facts
 | Kind | Producer | Target | Viewer today | Size | Notes |
 |---|---|---|---|---|---|
 | `gate_started` | `run.evaluation`, `measurement_events` | span:`gate` start | candidate fold (gate spans), digest | S | The gate span exists. Add attrs `recipe`, `command`, `source`, `source_label`; `stage` already covers validation, build, accuracy and benchmark. |
-| `gate_finished` | `run.evaluation`, `measurement_events`, read model | span:`gate` end; metric points | candidate fold, digest, input-gates tail, performance chart | M | Add `reused`. The readings (`metric`, `value`, `unit`) become metric points on the gate span (open question 4). `output_tail` is deleted: the gate stage's log stream is the tail. `round_label` is deleted. |
+| `gate_finished` | `run.evaluation`, `measurement_events`, read model | span:`gate` end; metric points | candidate fold, digest, input-gates tail, performance chart | M | Add `reused`. The readings (`metric`, `value`, `unit`, `vs_baseline`) are not attrs: metric points on the gate span are the single source, and `vs_baseline` is a client fold. `output_tail` is deleted: the gate stage's log stream is the tail. `round_label` is deleted. |
 | `workstream_finished` | `run.integration` | span:`workstream` end attrs | none (`CoreState.workstreams` is unread) | S | **Strategy-specific.** Attr `failure`: kind (19 members of `WorkstreamFailureKind`, a dynamic-search vocabulary), role, turns, limit, text; plus `repeated_error`. `setup_failure` and `refunded` are always false today and are dropped. |
 | `round_finished` | `run.integration`, read model | delete | digest "rounds finished", legacy-trace detection | S | **Strategy-specific** (serial rounds). The workstream span ends with the same facts: `attempts`, `judge_verdict` and `profile_skipped` become `workstream` attrs the serial searches fill; `perf_metric` and `perf_unit` are the gate's metric point. |
 | `judge_result` | none (no producer) | delete | transcript row | S | Declared, never emitted. The judge's verdict is a `workstream` verdict. |
@@ -293,10 +317,10 @@ projection after each commit; in the new model the spans already carry the facts
 | `winner_selected` | `run.integration` | span:`adoption` attrs | none (`CoreState.winner` is unread) | S | `AdoptionAttrs.candidate` already names the revision. Add `selection` (`candidate\|baseline`) and `settlement_id`. |
 | `input_measurement_failed` | `run.integration` | span:`gate` (subject `input`) attrs; notice | input gates panel, header diagnostic | M | Attrs `input_failure{kind, stage, attempts, compared}`. The redacted summary tail is a blob attachment. A notice makes it visible when no span is open. Add `subject` (`input\|candidate`) to `GateAttrs` instead of inferring input gates from time order. |
 | `measurement_compared` | `run.integration` | span:`comparison` | idea figures (`comparisons`), idea standing | S | One span per comparison, updated when samples change. Attrs `metric`, `unit`, `direction`, `ratio`, `noise`, `verdict` (`better\|within_noise\|worse\|inconclusive`), `candidate_value`, `base_value`, `candidate_samples`, `base_samples`. Links `candidate` and `base` to the compared spans replace commit hashes as join keys. |
-| `comparisons_read` | `run.host` | span:`baseline` | baselines in the hero | M | One span per baseline name (id `baseline:<name>`), updated in place when read again. Attrs `label`, `status`, `metric`, `unit`, `direction`, `value`, `spread`, `samples`, `hosts`, `reason`. Hidden from the timeline (open question 12). |
+| `comparisons_read` | `run.host` | span:`baseline` | baselines in the hero | M | One span per baseline name (id `baseline:<name>`), updated in place when read again. Attrs `label`, `status`, `metric`, `unit`, `direction`, `value`, `spread`, `samples`, `hosts`, `reason`. Hidden from the timeline (`SpanKindDecl.timeline` is a hint; unknown kinds are shown). |
 | `workspace_snapshot` | `run.git_events` | delete | transcript status row | S | `revision` and `parent_revision` are already `workstream` attrs. The changed files and diff are attached to the workstream at its end (blob `diff`, attr `files`); see the `query.design` row below. |
 | `run_configured` | none (no producer) | delete | transcript status row | S | Declared, never emitted; `EpochStarted` is the configured run. |
-| `framework_warning` | `run.git_events`, `gpu_events`, `host`, `integration` | notice | none shown (folded into diagnostics) | S | `Notice{severity, code, summary, detail, source, span}`. |
+| `framework_warning` | `run.git_events`, `gpu_events`, `host`, `integration` | notice | none shown (folded into diagnostics) | S | `Notice{severity, code, message, span}`. |
 
 ### Spans, projections and the operator
 
@@ -308,7 +332,7 @@ projection after each commit; in the new model the spans already carry the facts
 | `experiments_changed` | `run.integration`, service | delete | none (`experimentsRevision` is unread) | S | A refetch hint for `query.experiments`; there is no query. |
 | `iterations_changed` | `run.integration` | delete | browser session only | S | A refetch hint for `query.iterations`. The tree is the span parent links in the skeleton. |
 | `control` | server controller | intent | none shown | S | Free text such as `/steer: ...` with a status becomes `IntentState`. The text forms (`/control refused: ...`, `/steer dropped: ...`) become typed steps and reasons. |
-| `steer_delivery` | server integration | intent | run chat steer cards (`steerDeliveries`) | S | Steps `queued`, `reached`, `in_force`, `dropped`, `ended`, `refused`, with control id, action, role, attempt and reason. `reached` names the turn span. |
+| `steer_delivery` | server integration | span link | run chat steer cards (`steerDeliveries`) | S | The turn span that received a steer links to the request id; `refused` is the `IntentState`. The client derives `queued`, `reached`, `in_force`, `dropped` and `ended` from the links and the span's status. |
 | `status_query` | server service, read model | delete | none | S | A viewer's read journaled as history. Viewers write nothing. |
 | `chat` | chat manager | chat | run chat | M | An assistant message in the session log. The thread title is a session-log record. |
 | `chat_thread_created` | chat manager | chat | run chat thread list | S | The session's first record: id, title, provider, model, created. Threads are discovered by listing `sessions/`. |
@@ -325,11 +349,12 @@ Primary target of each of the 57 kinds:
 | Target | Kinds |
 |---|---|
 | span (kind + attrs) | 20 |
-| delete | 16 |
+| delete | 17 |
 | lifecycle (one of them as a launch error when no run exists) | 7 |
-| stream | 6 |
+| stream | 5 |
 | chat-session log | 3 |
-| intent state | 2 |
+| intent state | 1 |
+| span link (steer delivery) | 1 |
 | epoch | 1 |
 | metric series | 1 |
 | notice | 1 |
@@ -337,7 +362,7 @@ Primary target of each of the 57 kinds:
 Some kinds also use a secondary target, shown in the table: a blob attachment
 (`agent_execution_started`, `agent_execution_finished`, `tool_result`), metric points
 (`gate_finished`), a notice (`input_measurement_failed`) and a run hold in the lifecycle
-(`quota_paused`). Of the 16 deletions, 3 have no producer today (`judge_result`,
+(`quota_paused`). Of the 17 deletions, 3 have no producer today (`judge_result`,
 `benchmark_result`, `run_configured`), 2 are legacy duplicates (`invocation_started`,
 `invocation_finished`), 2 are refetch hints for queries that no longer exist
 (`experiments_changed`, `iterations_changed`), and 1 journals a viewer's read (`status_query`).
@@ -369,7 +394,7 @@ tail, `query.events`; the others are for the frozen web run page, which is dropp
 | `query.history` | persisted run history | the same `Tail` | no |
 | `query.iterations` | a page of the policy's iteration tree | client fold over span `parent` links in the skeleton | yes |
 | `query.performance` | rounds, objective context | metric series with unit and direction, `RunDescription.objectives`, the input's gate (`subject = input`); client fold | no |
-| `query.experiments` | hypothesis log with revision deltas | client fold over `workstream` spans grouped by `hypothesis_id` (what `CandidateFold` does); search extras (claim, action, disposition) are `workstream` or `hypothesis` attrs | no |
+| `query.experiments` | hypothesis log with revision deltas | client fold over `workstream` spans grouped by `hypothesis_id` (what `CandidateFold` does); search extras (claim, action, disposition) are `workstream` attrs | no |
 | `query.design` | files each round touched | `workstream` attrs `files` and blob `diff`, attached at the workstream's end | no |
 | `query.design_patch` | one file's patch | `GetBlobs` of the diff blob (per-file ranges in `files`) | no |
 
@@ -448,7 +473,7 @@ message SpanKindDecl {
   string attrs_type = 2;                     // full name in descriptors
   repeated string verdicts = 3;
   repeated string link_rels = 4;
-  bool timeline = 5;                         // false: shown by dedicated views only
+  bool timeline = 5;                         // a hint; kinds a client does not know are shown
 }
 message MetricSeriesDecl {
   string name = 1;
@@ -478,7 +503,7 @@ message Running { optional Hold hold = 1; }
 message Hold {
   oneof reason { OperatorHold operator = 1; string capacity_span = 2; }
 }
-message Draining { DrainGoal goal = 1; }     // PAUSE | PARK | STOP
+message Draining { DrainGoal goal = 1; }     // PARK | STOP (pause is Running{hold})
 message Parked {}
 message Ended {
   Outcome outcome = 1;                       // FINISHED | FAILED | STOPPED | INTERRUPTED
@@ -538,8 +563,8 @@ message StreamRef {
   optional string span = 3;                  // owner
   string title = 4;
   StreamState state = 5;                     // OPENED | ENDED | FAILED | DEGRADED
-  optional uint64 length = 6;                // set when it closes
-  optional BlobRef sealed = 7;               // a closed TRANSCRIPT, content-addressed
+  optional uint64 length = 6;                // set when a LOG stream closes; a transcript's
+                                             // final length is on its turn span
 }
 message BlobRef { string sha256 = 1; uint64 size = 2; string media_type = 3; }
 message BlobAttached {
@@ -551,23 +576,20 @@ message BlobAttached {
 // ---- operator ----
 message IntentState {
   string control_id = 1;
-  IntentAction action = 2;                   // STEER | WITHDRAW | PAUSE | RESUME | DRAIN | STOP |
+  IntentAction action = 2;                   // STEER | WITHDRAW | PAUSE | PARK | RESUME | STOP |
                                              // CANCEL_ATTEMPT | CANCEL_ITEM | SET_MAX_PARALLEL
-  IntentStep step = 3;                       // APPLIED | REFUSED | REACHED | IN_FORCE | DROPPED | ENDED
+  IntentStep step = 3;                       // APPLIED | REFUSED
   optional string reason_code = 4;
   optional string reason = 5;
-  optional string span = 6;                  // the turn a steer reached
   optional SteerTarget target = 7;
   optional SteerMode mode = 8;
   optional string withdraws = 9;
-}
+}                                            // steer delivery: span links to control_id
 message Notice {
   Severity severity = 1;                     // WARNING | ERROR | FATAL
-  string code = 2;
-  string summary = 3;
-  optional string detail = 4;
-  string source = 5;
-  optional string span = 6;
+  NoticeCode code = 2;                       // closed enum
+  string message = 3;
+  optional string span = 4;
 }
 
 // ---- strategy-declared attrs, as the shared hypothesis searches ----
@@ -578,7 +600,8 @@ message AgentTurnAttrs {
   optional string provider = 7; optional string reasoning_effort = 8;
   optional string harness_version = 9;
   optional TokenUsage usage = 10;            // set at the end
-  google.protobuf.Any reply = 11;            // set at the end; descriptor in the epoch
+  optional uint64 transcript_length = 12;    // set at the end: final length of the transcript stream
+  string reply_json = 11;                    // set at the end; phase 3 reserves it for a proto reply
 }
 message TokenUsage {                         // an absent field was not reported
   optional uint64 input = 1; optional uint64 cache_read = 2; optional uint64 cache_creation = 3;
@@ -611,14 +634,21 @@ message CapacityWaitAttrs { /* provider, condition, detail, resets_at, resumes_a
 Notes on the sketch:
 
 - A span record carries the whole span, as today's span events do, so the client fold stays
-  "replace by id" (open question 3).
+  "replace by id". Deltas are not used; revisit only if measured record bytes say so.
 - `MetricPoint` replaces the gate's inline reading rows: the performance chart is a series plot,
-  and a search with no gates (an evolutionary one) emits points the same way (open question 4).
+  and a search with no gates (an evolutionary one) emits points the same way. The run computes `run.head`'s headline from the same points.
 - Declared span kinds and series live in the epoch because a relaunch may change code. A client
   reads the latest epoch's declarations for new spans and the declaration current at a span's start
   for old ones.
 - Unknown oneof members and unknown fields are skipped, which is what makes additive evolution
   safe in both directions.
+- No `hypothesis` span kind: the client groups `workstream` spans by `hypothesis_id`, and a
+  strategy may declare its own kind later.
+- `reply_json` is the phase 1 form of a turn's reply. In phase 3 each reply model becomes a proto
+  message with the core types, `reply_json` is reserved, and its field is deleted after the 7-day
+  read window.
+- Pre-trace journals (finished rounds, no span events) are not converted; the converter reports
+  each as skipped.
 
 ## Migration
 
@@ -626,7 +656,7 @@ Notes on the sketch:
 |---|---|
 | 1. Walking skeleton | protos, codegen and CI; Go gateway with `Hello` and `Tail`; Electron provisioning and one HTTP/2 connection behind a per-host switch; a Python converter that follows a live JSONL journal into `run.log` as `LegacyEvent{json}` records |
 | 2. Complete read path | the inventory above in the store model; keyframes and `run.head`; `Skeleton`, `GetBlobs`, `TailStream`, `WatchRuns`; the new Run screen; conversion of all existing runs |
-| 3. Write path | core state as generated types and `state.pb`; the run writes `run.log` natively; intents, drain and park, relaunch epochs; chat sessions; `HostCall` |
+| 3. Write path | core state as generated types and `state.pb`; the run writes `run.log` natively; intents, pause and park, relaunch epochs; chat sessions; `HostCall` |
 | 4. Cutover | delete the run protocol, its service and transports, the relay and run sockets, the helper protocol and its features, the reader server, registry tombstones and record versions, the dual summary fold, the conformance corpus, the strategy-specific event kinds, the Pydantic contract models and JSON Schema pipeline, the envelope JSON migration chain and the persisted-shape snapshots |
 
 Existing JSONL runs, and `store.json` core envelopes, are converted to the new format. The
@@ -643,60 +673,15 @@ originals are kept for a week.
 | Contract language | `.proto` with protovalidate | JSON Schema generated from Pydantic: one direction of codegen, no streaming services, no descriptors for rendering unknown kinds, and the schema drifts from the code that checks it. |
 | State and log | A (log records, then compare-and-swap `state.pb`, recovery drops past it) | B: `run.log` is core's own event-sourced journal. It is a bigger rewrite of recovery for a modest gain; kept possible. |
 | RPC framework | gRPC | Connect: the benefit is browser and curl access, and the browser is dropped. Bidirectional streams (`Attach`) need HTTP/2 either way, and Node `http2` over our duplex is enough. Revisit if a browser client returns. |
+| Order of log append and `state.pb` swap | Log first, then swap, with `committed_seq` bounding what is served | Writing `state.pb` before the log: state would name records not yet on disk. |
+| Transcript form | One stream; the turn span's end records its final length | A sealed content-addressed blob copy when the turn ends: two forms for one fact. |
+| Pause and park | Two intents: `pause` holds new work and keeps the process; `park` drains and exits | One intent with an exit flag: the two cancel different things (park cancels in-flight evaluations, pause does not). |
+| Turn reply typing | Proto messages in phase 3; JSON text in one reserved field until then | Descriptor-rendered `Any` from phase 1 would force every reply model into proto before the core types move. |
+| Run-level warnings | A `Notice` record | Lines in the narration stream are unstructured; a span status cannot hold a warning with no span. |
 | Browser support | Dropped | A browser cannot hold ssh. A future browser client is a local `vibesys ui` process that reuses the same bridge. |
 
 ## Open questions
 
-1. **Committed versus visible.** A tailer can read a record the run appended before it
-   compare-and-swapped `state.pb`. If the run dies in between, recovery drops that record, but a
-   viewer already saw it. Proposed: the run publishes `committed_seq` in `run.head` after each
-   swap, and the gateway serves only up to it. This costs a small write per commit and has to be
-   settled before phase 3.
-2. **A run that cannot write its own death.** `kill -9` and a host reboot leave no `ended` record.
-   Proposed: the run holds an advisory lock on a file in its directory and the gateway probes it;
-   the gateway reports `interrupted` for a log with no `ended` and no lock holder. The threshold
-   and the stale-NFS case need measuring.
-3. **Whole span or delta per span record.** Whole spans keep the fold trivial and match today's
-   events; attrs are small once content moves to blobs. A delta would cost less on large updates.
-4. **Readings as gate attrs or metric points.** Today the gate span carries `metrics` rows,
-   `metric_value` and `vs_baseline`. Proposed: metric points are the single source and
-   `vs_baseline` is a client fold against the input's gate. This changes `run.head`'s headline
-   computation.
-5. **Transcript form.** A running turn's transcript is a stream (live appends); the proposal seals
-   it into a content-addressed blob when the turn ends. Two forms for one content, or only the
-   stream?
-6. **Notice is not in the agreed record list.** Warnings and failures that are for people
-   (`framework_warning`, input failures, the old `diagnostic` envelope) need a home. Alternatives:
-   lines in the narration stream, or a span status plus reason.
-7. **Pause versus drain.** Pause holds new work and keeps the process (a capacity wait, a
-   short hold); drain also exits. Both are modeled as holds with a goal. Should they be one intent
-   with an `exit` flag?
-8. **Steer delivery steps on `IntentState`.** The agreed outcome is `applied | refused`. Delivery
-   (`reached`, `in_force`, `dropped`, `ended`) extends it. Alternative: delivery as links on the
-   turn span.
-9. **Reply models.** A turn's typed reply is a Pydantic model per role with a JSON Schema today.
-   Rendering unknown replies by descriptor requires each reply model to become a proto message
-   too. Alternative: `reply` as JSON text plus a schema id.
-10. **Run clock across epochs.** Spans use the run clock, which deterministic replay depends on.
-    Does it advance while a run is parked? Timeline durations across an epoch boundary need a
-    rule.
-11. **Hypothesis grouping.** Candidates are `workstream` spans that share `hypothesis_id`, folded
-    by the client. An explicit `hypothesis` parent span would make the experiment log a span
-    query, at the cost of a new kind.
-12. **Timeline visibility of reference kinds.** `baseline` and `provider_switch` spans should not
-    clutter the timeline. `SpanKindDecl.timeline` is a hint a strategy sets; unknown kinds default
-    to shown.
-13. **Dropped fields.** `usage_update` (context fill), `todo_update` entries and the rate-limit
-    window details have no consumer. They are deleted or reduced here; say so now if a screen is
-    planned.
-14. **Pre-trace journals.** A journal with finished rounds and no span events predates the run
-    trace; the digest reports its ideas as unknown. Convert them with no spans, or leave them
-    unconverted?
-15. **Inbox payload.** Requests are JSON files today with a reviewed allow-list of field names
-    (`control_schema_fields`). They become protobuf bytes; the allow-list must move into the
-    `.proto` validation.
-16. **Record size.** The old per-event cap (`MAX_SERIALIZED_RUN_EVENT_BYTES`) existed for
-    WebSocket frames. Pick a record cap for the log and decide what a producer does at the cap
-    (always a blob, never truncation).
-17. **Chat session discovery and retention.** Sessions are listed from the run directory. Whether a
-    session outlives a relaunch, and how the default thread is named, are not decided.
+- **Lock behaviour on an NFS root.** The `run.lock` design assumes local `flock` semantics, which
+  hold because the run and gateway share a host. Whether a lock holder is still visible when the
+  run directory is on an NFS root is measured in phase 2.
