@@ -3,7 +3,7 @@
 from collections.abc import Callable, Coroutine
 
 import pytest
-from hypothesis import given
+from hypothesis import example, given
 from hypothesis import strategies as st
 from protobuf.wkt.google.protobuf.any_pb import Any
 
@@ -641,3 +641,31 @@ def test_drift_notice_names_both_historical_and_current_roles_and_templates() ->
     assert run.frontier().drift.roles == ("planner", "reviewer")
     assert run.frontier().drift.templates == ("plan.j2", "review.j2")
     assert run.result == live.result
+
+
+@pytest.mark.regression
+@given(count=st.integers(min_value=3, max_value=8))
+@example(count=3)
+def test_unused_live_siblings_do_not_prevent_retaining_later_completions(count: int) -> None:
+    async def root(ctx: ReplayFlow) -> object:
+        _, result = await ctx.first(*(ctx.call(ask(str(index))) for index in range(count)))
+        assert isinstance(result, Reply)
+        return result.root
+
+    live = ReplayScheduler(root, (), settings())
+    starts = live.dispatches()
+    history = []
+    for sequence, start in enumerate(starts, 1):
+        result = accepted(start, sequence, str(sequence))
+        live.accept(result)
+        history.append(result)
+    assert live.completed
+    assert live.result == "1"
+    assert live.frontier().known_cost_usd == (count - 1) * 0.5
+    assert len(live.frontier().unused) == count - 1
+    assert live.dispatches() == ()
+    live.close()
+    replayed = ReplayScheduler(root, history, settings())
+    assert replayed.result == "1"
+    assert replayed.frontier().unused == tuple(history[1:])
+    replayed.close()

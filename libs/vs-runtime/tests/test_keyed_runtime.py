@@ -351,7 +351,12 @@ def test_observation_must_be_accepted_before_another_clock_or_result(second_cloc
         group = ctx.group()
         group.start(lambda ctx: child(ctx, "a"))
         group.start(lambda ctx: child(ctx, "b"))
-        return (await group).root, ctx.clock(), (await group).root, ctx.clock()
+        first = await group
+        assert isinstance(first, Reply)
+        first_clock = ctx.clock()
+        second = await group
+        assert isinstance(second, Reply)
+        return first.root, first_clock, second.root, ctx.clock()
 
     store = FakeStateStore()
     shell = start(store, root)
@@ -375,3 +380,32 @@ def test_observation_must_be_accepted_before_another_clock_or_result(second_cloc
     recovered.accept(a.id, now=0, at=AT)
     assert recovered.result == ("b", 8, "a", second_clock)
     recovered.close(now=0)
+
+
+async def test_renewal_keeps_long_turns_fenced_and_lost_renewal_halts_dispatch() -> None:
+    store = FakeStateStore()
+    shell = start(store)
+    (span,) = shell.prepare(now=0, at=AT)
+    shell.renew(now=90, duration=100)
+    executor = FakeReplayExecutor(lambda span: ReplayResult(Reply(root=span.name), paid=True))
+    result = await shell.dispatch(span.id, executor, now=120)
+    shell.observe(span.id, result, now=120, at=AT)
+    shell.accept(span.id, now=120, at=AT)
+    assert shell.result == ("implement",)
+    with pytest.raises(ReplayCommitError, match="lease was lost"):
+        shell.renew(now=190, duration=100)
+    with pytest.raises(ReplayCommitError, match="halted"):
+        shell.prepare(now=190, at=AT)
+    shell.close(now=190)
+
+
+@pytest.mark.parametrize("fault", list(CommitFault))
+def test_uncertain_renewal_never_authorizes_more_dispatch(fault: CommitFault) -> None:
+    store = FakeStateStore(lease_fault_plan=(None, fault))
+    shell = start(store)
+    shell.prepare(now=0, at=AT)
+    with pytest.raises(OSError, match="state-store"):
+        shell.renew(now=1, duration=100)
+    with pytest.raises(ReplayCommitError, match="halted"):
+        shell.prepare(now=1, at=AT)
+    shell.close(now=1)

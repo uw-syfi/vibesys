@@ -447,10 +447,39 @@ class ReplayRuntime:
         problem = f"unknown replay span {span_id}"
         raise ReplayError(problem)
 
+    def clock_requests(self) -> tuple[float, ...]:
+        """Pending flow deadlines, released only through durable clock observations."""
+        return self._active_scheduler.clock_requests()
+
+    @property
+    def paused(self) -> bool:
+        """The current epoch ended at an unused-results notice."""
+        _ = self._active_scheduler
+        return self._paused
+
+    def renew(self, *, now: float, duration: float) -> None:
+        """Renew the writer while executor calls are in flight; uncertainty halts dispatch."""
+        _ = self._active_scheduler
+        if self._fence is None:
+            problem = "replay writer has no lease to renew"
+            raise ReplayCommitError(problem)
+        try:
+            renewed = self._store.renew(self._fence, now, duration)
+        except BaseException:
+            self._halted = True
+            raise
+        if renewed is None:
+            self._halted = True
+            problem = "replay writer lease was lost"
+            raise ReplayCommitError(problem)
+        self._fence = renewed
+
     def close(self, *, now: float) -> None:
         """Discard local continuations and release ownership; retained starts remain unfinished."""
-        if self._scheduler is not None:
-            self._scheduler.close()
-        if self._fence is not None:
-            self._store.release(self._fence, now)
         self._halted = True
+        try:
+            if self._scheduler is not None:
+                self._scheduler.close()
+        finally:
+            if self._fence is not None:
+                self._store.release(self._fence, now)

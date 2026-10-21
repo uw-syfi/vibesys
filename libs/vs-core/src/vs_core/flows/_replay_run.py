@@ -277,9 +277,6 @@ class ReplayScheduler:
 
     def accept(self, accepted: AcceptedReplay | AcceptedClock) -> None:
         """Deliver a durably accepted live result using the same release step as replay."""
-        if self.frontier().unused:
-            problem = "unused paid work must be durably disclosed and acknowledged before new work"
-            raise ReplayError(problem)
         if isinstance(accepted, AcceptedClock):
             self._release(accepted)
             self._history = (*self._history, accepted)
