@@ -19,6 +19,10 @@ export class WelcomeFeed {
   #recent: readonly RecentRun[] | null = null;
   readonly #listings = new Map<HostKey, HostListing>();
 
+  hostSettings(): WelcomeEvent<null> {
+    return this.#next(null);
+  }
+
   recent(value: readonly RecentRun[]): WelcomeEvent<readonly RecentRun[]> {
     this.#recent = value;
     return this.#next(value);

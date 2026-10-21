@@ -15,6 +15,8 @@ import type {RecentRun, SkippedRecent} from '@vibesys/runs';
 
 /** The events the main process sends the welcome view. */
 export const WELCOME_EVENTS = {
+  /** Host settings committed; readers reload their own host from the shared store. */
+  hostSettings: 'vibesys:welcome:host-settings-changed',
   /** The recent runs changed (`RecentRun[]`): the settings store wrote them. */
   recent: 'vibesys:welcome:recent',
   /** A host's runs changed (`HostListing`), as its helper pushed them. */

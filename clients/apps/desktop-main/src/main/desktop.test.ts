@@ -235,6 +235,7 @@ function desktopWorld(cleanups: RetirementCleanups = {}, skipped: SkippedRecent[
   };
   const recent: RecentFile = {version: 4, runs: []};
   const settings: DesktopDeps['settings'] = {
+    onHostsChanged: () => () => undefined,
     onRecentChanged: () => () => undefined,
     recentSnapshot: async () => ({recent, skipped}),
   };

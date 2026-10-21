@@ -111,3 +111,41 @@ test('recent delivery snapshots registration for the current event', async () =>
 
   expect(heard).toEqual(['self:1', 'later:1', 'self:2']);
 });
+
+test('host settings notify every window only after a committed atomic write', async () => {
+  const filesystem = new FakeSettingsFilesystem();
+  const settings = new SettingsStore({
+    settingsPath: '/settings/hosts.json',
+    recentPath: '/settings/recent.json',
+    preferencesPath: '/settings/preferences.json',
+    filesystem,
+    log: () => {},
+  });
+  const first: boolean[] = [];
+  const second: boolean[] = [];
+  const stopFirst = settings.onHostsChanged(file => {
+    expect(JSON.parse(filesystem.text('/settings/hosts.json'))).toEqual(file);
+    first.push(file.hosts['local']?.runTransportV2 ?? false);
+  });
+  const stopSecond = settings.onHostsChanged(file =>
+    second.push(file.hosts['local']?.runTransportV2 ?? false),
+  );
+  for (const enabled of [true, false, true]) {
+    const next = {
+      version: 2 as const,
+      hosts: {local: {checkout: '/src/vibesys', runTransportV2: enabled}},
+    };
+    expect(
+      await settings.updateHosts(
+        () => next,
+        () => false,
+      ),
+    ).toBe('cancelled');
+    expect(await settings.updateHosts(() => next)).toBe('committed');
+  }
+  stopFirst();
+  stopSecond();
+  await settings.updateHosts(() => ({version: 2, hosts: {}}));
+  expect(first).toEqual([true, false, true]);
+  expect(second).toEqual(first);
+});

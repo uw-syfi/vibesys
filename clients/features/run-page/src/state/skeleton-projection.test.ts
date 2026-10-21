@@ -1,6 +1,8 @@
 import {expect, test} from 'bun:test';
-import {create} from '@bufbuild/protobuf';
+import {clone, create, toBinary} from '@bufbuild/protobuf';
+import {AnySchema} from '@bufbuild/protobuf/wkt';
 import {
+  AgentTurnAttrsSchema,
   AttemptOutcome,
   Change,
   DrainGoal,
@@ -17,6 +19,7 @@ import {
 } from '@vibesys/proto';
 import {storeRunFixture} from '@vibesys/run-fixtures';
 import {foldSkeleton, seedSkeleton, seekSkeleton} from '@vibesys/run-skeleton';
+import {usageOverTime} from '@vibesys/run-state/usage';
 import {
   headerView,
   projectSkeleton,
@@ -254,4 +257,46 @@ test('the new scrubber reports monotone elapsed time without fabricating a wall-
   expect(model.latest).toBe(90061);
   const state = skeletonScreenState(SEED, skeleton, model, runPageInitial(SEED));
   expect(state.positionWord).toBe('25h 01m');
+});
+
+test('usage retains recorded wall timestamps across elapsed-clock gaps and unknown values', () => {
+  for (const seed of [0, 1, 10, 1000]) {
+    const fixture = storeRunFixture('short', 1);
+    const records = fixture.records.map(record => {
+      const copied = clone(RecordSchema, record);
+      if (copied.body.case !== 'span') return copied;
+      const span = copied.body.value.span;
+      if (span?.label?.kind !== 'agent_turn') return copied;
+      span.startedAt = 1;
+      span.endedAt = 4;
+      span.label.attrs = create(AnySchema, {
+        typeUrl: `type.googleapis.com/${AgentTurnAttrsSchema.typeName}`,
+        value: toBinary(
+          AgentTurnAttrsSchema,
+          create(AgentTurnAttrsSchema, {
+            agent: 'agent-a',
+            role: 'implementer',
+            stage: 'implement',
+            model: 'model-a',
+            startedAt: {seconds: 1700000000n + BigInt(seed)},
+            ...(seed === 0 ? {} : {endedAt: {seconds: 1700000003n + BigInt(seed)}}),
+            usage: {input: 3n},
+          }),
+        ),
+      });
+      return copied;
+    });
+    const skeleton = foldSkeleton(seedSkeleton(), records);
+    const model = projectSkeleton(skeleton, skeleton.throughSeq ?? 0n);
+    const state = skeletonScreenState(SEED, skeleton, model, runPageInitial(SEED));
+    const usage = state.run.core?.usageRecords[0];
+    expect(usage?.started_at).toBe(new Date((1700000000 + seed) * 1000).toISOString());
+    expect(usage?.ended_at).toBe(
+      seed === 0 ? null : new Date((1700000003 + seed) * 1000).toISOString(),
+    );
+    expect(usage?.model).toBe('model-a');
+    const chart = usageOverTime(state.run.core?.usageRecords ?? [], 'model', 4);
+    expect(chart.undated.turns).toBe(seed === 0 ? 1 : 0);
+    expect(chart.buckets.length > 0).toBe(seed !== 0);
+  }
 });

@@ -42,6 +42,7 @@ test('model: every setting, content and log operation belongs to its active stat
     input: {seed: SEED},
     event: (random, live) =>
       random.pick([
+        {type: 'setting-changed'},
         {type: 'toggle', enabled: random.pick([true, false])},
         {
           type: 'loaded',
@@ -75,6 +76,7 @@ test('Skeleton then Tail, local seek, verified cached content, logs and cancella
   let enabled = true;
   const ports = {
     reader: gatewayReader(transport, cache, clock.schedule),
+    watchSetting: () => () => {},
     setting: async (value: boolean | undefined) => {
       enabled = value ?? enabled;
       return enabled;
@@ -127,6 +129,7 @@ test('off is inert, live records append while scrubbed and switching streams can
   const actor = startGatewayRun(
     {
       reader: gatewayReader(transport, new FakeSkeletonCache(), clock.schedule),
+      watchSetting: () => () => {},
       setting: async value => value ?? false,
     },
     clock.schedule,
@@ -162,6 +165,7 @@ test('failed unary and corrupt content surface errors without using the legacy p
     const actor = startGatewayRun(
       {
         reader: gatewayReader(transport, new FakeSkeletonCache(), clock.schedule),
+        watchSetting: () => () => {},
         setting: async () => true,
       },
       new FakeClock().schedule,
@@ -186,6 +190,7 @@ test('setting, content and first-log deadlines use the injected clock', async ()
   const checking = startGatewayRun(
     {
       reader,
+      watchSetting: () => () => {},
       setting: () =>
         new Promise(resolve => {
           finishSetting = resolve;
@@ -202,7 +207,11 @@ test('setting, content and first-log deadlines use the injected clock', async ()
   checking.stop();
   transport.held.add(`${SERVICE}GetBlobs`);
   transport.held.add(`${SERVICE}TailStream`);
-  const actor = startGatewayRun({reader, setting: async () => true}, clock.schedule, {seed: SEED});
+  const actor = startGatewayRun(
+    {reader, watchSetting: () => () => {}, setting: async () => true},
+    clock.schedule,
+    {seed: SEED},
+  );
   await reached(actor, snapshot => snapshot.matches({active: {content: 'reading'}}));
   actor.send({type: 'ui', action: {type: 'select-stream', streamId: 'build-log'}});
   await transport.called(`${SERVICE}GetBlobs`);
@@ -224,6 +233,7 @@ test('each objective hash is attempted once even when content fails', async () =
   const actor = startGatewayRun(
     {
       reader: gatewayReader(transport, new FakeSkeletonCache(), clock.schedule),
+      watchSetting: () => () => {},
       setting: async () => true,
     },
     clock.schedule,
@@ -238,4 +248,111 @@ test('each objective hash is attempted once even when content fails', async () =
   expect(transport.calls.filter(call => call.method.endsWith('GetBlobs'))).toHaveLength(2);
   expect(actor.getSnapshot().context.error).toBe('Content unavailable');
   actor.stop();
+});
+
+/** The shared host store: subscriptions observe committed writes in all windows. */
+class HostSetting {
+  enabled = true;
+  readonly listeners = new Set<() => void>();
+  readonly watch = (listener: () => void): (() => void) => {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  };
+  readonly setting = async (value: boolean | undefined): Promise<boolean> => {
+    if (value !== undefined) {
+      this.enabled = value;
+      for (const listener of [...this.listeners]) listener();
+    }
+    return this.enabled;
+  };
+}
+
+test('all windows follow the shared host switch and cancel their readers together', async () => {
+  const settings = new HostSetting();
+  const clock = new FakeClock();
+  const transports = [
+    new FakeRunTransport(storeRunFixture()),
+    new FakeRunTransport(storeRunFixture()),
+  ];
+  const windows = transports.map(transport =>
+    startGatewayRun(
+      {
+        reader: gatewayReader(transport, new FakeSkeletonCache(), clock.schedule),
+        setting: settings.setting,
+        watchSetting: settings.watch,
+      },
+      clock.schedule,
+      {seed: SEED},
+    ),
+  );
+  try {
+    for (const window of windows)
+      await reached(window, snapshot => snapshot.context.load?.complete === true);
+    for (let step = 0; step < 8; step += 1) {
+      const enabled = step % 2 === 1;
+      windows[step % windows.length]?.send({type: 'toggle', enabled});
+      for (const window of windows) {
+        await reached(window, snapshot =>
+          enabled
+            ? snapshot.context.load?.complete === true && snapshot.matches('active')
+            : snapshot.matches('off'),
+        );
+        expect(window.getSnapshot().context.enabled).toBe(enabled);
+      }
+      if (!enabled)
+        expect(
+          transports.every(transport =>
+            transport.calls
+              .filter(call => call.method.endsWith('/Tail'))
+              .every(call => call.signal.aborted),
+          ),
+        ).toBe(true);
+    }
+  } finally {
+    for (const window of windows) window.stop();
+  }
+  expect(settings.listeners.size).toBe(0);
+  expect(
+    transports.every(transport =>
+      transport.calls
+        .filter(call => call.method.endsWith('/Tail'))
+        .every(call => call.signal.aborted),
+    ),
+  ).toBe(true);
+});
+
+test('a changed host setting fences a stale initial read', async () => {
+  const settings = new HostSetting();
+  const clock = new FakeClock();
+  let finishRead: (enabled: boolean) => void = () => {
+    throw new Error('read not started');
+  };
+  let first = true;
+  const transport = new FakeRunTransport(storeRunFixture());
+  const actor = startGatewayRun(
+    {
+      reader: gatewayReader(transport, new FakeSkeletonCache(), clock.schedule),
+      watchSetting: settings.watch,
+      setting: value => {
+        if (!first) return settings.setting(value);
+        first = false;
+        return new Promise(resolve => {
+          finishRead = resolve;
+        });
+      },
+    },
+    clock.schedule,
+    {seed: SEED},
+  );
+  try {
+    await settings.setting(false);
+    await reached(actor, snapshot => snapshot.matches('off'));
+    finishRead(true);
+    await Promise.resolve();
+    expect(actor.getSnapshot().context.enabled).toBe(false);
+    expect(actor.getSnapshot().matches('off')).toBe(true);
+    expect(transport.calls).toHaveLength(0);
+  } finally {
+    actor.stop();
+  }
 });

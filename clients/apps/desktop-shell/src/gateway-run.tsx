@@ -25,6 +25,7 @@ export function GatewayRun(props: {
   const {bridge, settings, seed, schedule, address} = props;
   const ports = useMemo<GatewayRunPorts>(
     () => ({
+      watchSetting: listener => settings.onHostSettingsChanged(listener),
       reader: gatewayReader(
         gatewayTransport(bridge, seed.identity.host),
         gatewayContentCache(indexedDB),
