@@ -46,7 +46,6 @@ from vs_core.api import (
     StopMode,
     orphan_waits,
     project,
-    reopens_on_resume,
     unreleased_records,
 )
 from vs_runtime._core_loop import LeaseUnavailableError
@@ -340,8 +339,12 @@ class _Loop:
         self._next_wake = next_wake
         self._stall_notes = stall_notes
         self._time = self._core().run.now_at
-        self._deadline_stop = any(
-            c.control_id.root == "deadline" for c in self._core().run.controls
+        self._deadline_stop = False
+        self._resume_pending = self._core().run.status in (
+            RunStatus.TERMINAL,
+            RunStatus.PARKED,
+            RunStatus.CLOSING,
+            RunStatus.BLOCKED,
         )
         self._first_dispatch = self._shell.dispatched
         self._lease: asyncio.Task[None] | None = None
@@ -384,32 +387,26 @@ class _Loop:
                 raise failure
 
     async def _reopen(self) -> None:
-        """Give a run the operator's stop ended the resume that opened it, which reopens it.
-
-        The loop's controls are read once the run is live, so a terminal record would never see
-        the explicit resume this process stands for. A run no stop ended takes none: it is over.
-        """
+        """Open the successor epoch after the previous ending's cleanup has settled."""
         core = self._core()
-        if core.run.status == RunStatus.PARKED and core.run.park is not None:
-            now = self._read()
-            self._shell.submit(
-                RunControlEvent(
-                    control=ControlInput(
-                        control_id=ControlId(root=f"unpark:{core.records.recovery.epoch}"),
-                        action="resume",
-                        when="now",
-                    ),
-                    now_at=now,
-                ),
-                now_at=now,
-            )
-            await self._settle(now)
-            return
-        if self._controls is None or not reopens_on_resume(core.run):
+        if not self._resume_pending or core.run.status not in (
+            RunStatus.TERMINAL,
+            RunStatus.PARKED,
+        ):
             return
         now = self._read()
-        for event in self._controls.poll(core, now):
-            self._shell.submit(event, now_at=now)
+        self._shell.submit(
+            RunControlEvent(
+                control=ControlInput(
+                    control_id=ControlId(root=f"resume:{core.records.recovery.epoch}"),
+                    action="resume",
+                    when="now",
+                ),
+                now_at=now,
+            ),
+            now_at=now,
+        )
+        self._resume_pending = False
         await self._settle(now)
         self._settle_controls()
 
@@ -442,6 +439,9 @@ class _Loop:
             # answered now, since no later poll will see it.
             self._settle_controls()
             if self._core().run.status in (RunStatus.TERMINAL, RunStatus.PARKED):
+                if self._resume_pending:
+                    await self._reopen()
+                    continue
                 break
             if self._signature() == before:
                 await self._wait(now)
@@ -540,7 +540,9 @@ class _Loop:
             events.append(
                 RunControlEvent(
                     control=ControlInput(
-                        control_id=ControlId(root="deadline"), action="stop", mode=StopMode.DRAIN
+                        control_id=ControlId(root=f"deadline:{core.records.recovery.epoch}"),
+                        action="stop",
+                        mode=StopMode.DRAIN,
                     ),
                     now_at=now,
                 )
@@ -549,7 +551,9 @@ class _Loop:
             events.append(
                 RunControlEvent(
                     control=ControlInput(
-                        control_id=ControlId(root=_RECOVERY_BLOCKED),
+                        control_id=ControlId(
+                            root=f"{_RECOVERY_BLOCKED}:{core.records.recovery.epoch}"
+                        ),
                         action="stop",
                         mode=StopMode.CANCEL,
                     ),
@@ -574,7 +578,10 @@ class _Loop:
         return (
             core.records.recovery.phase == RecoveryPhase.BLOCKED
             and core.run.result is None
-            and not any(c.control_id.root == _RECOVERY_BLOCKED for c in core.run.controls)
+            and not any(
+                c.control_id.root == f"{_RECOVERY_BLOCKED}:{core.records.recovery.epoch}"
+                for c in core.run.controls
+            )
             and (
                 (
                     not self._shell.in_flight
@@ -632,7 +639,10 @@ class _Loop:
         # would only wait out the deadline before the same stall.
         recovering = core.records.recovery.phase != RecoveryPhase.READY and not (
             core.records.recovery.phase == RecoveryPhase.BLOCKED
-            and any(c.control_id.root == _RECOVERY_BLOCKED for c in core.run.controls)
+            and any(
+                c.control_id.root == f"{_RECOVERY_BLOCKED}:{core.records.recovery.epoch}"
+                for c in core.run.controls
+            )
         )
         past_deadline = now >= core.run.deadline_at
         if due is None and not paused and (not recovering or past_deadline):

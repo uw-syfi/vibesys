@@ -89,6 +89,7 @@ if TYPE_CHECKING:
         upgrade_envelope,
         validate_startup,
     )
+    from vs_core._run_park import pause_withdraws
     from vs_core._run_pause import (
         DEADLINE_STOP,
         ENVIRONMENT_STOP,
@@ -97,8 +98,6 @@ if TYPE_CHECKING:
         control_refusal,
         pause_after,
         reopened,
-        reopens_after,
-        reopens_on_resume,
         run_pause,
         stands_after,
     )
@@ -837,11 +836,12 @@ _MODULES: dict[str, str] = {
                 "decode_stored operation_result upgrade_envelope validate_startup "
             ),
         ),
+        ("vs_core._run_park", "pause_withdraws "),
         (
             "vs_core._run_pause",
             (
                 "DEADLINE_STOP ENVIRONMENT_STOP ControlRefusedError capacity_wait_stands "
-                "control_refusal pause_after reopened reopens_after reopens_on_resume run_pause "
+                "control_refusal pause_after reopened run_pause "
                 "stands_after "
             ),
         ),
@@ -1806,6 +1806,7 @@ __all__ = [
     "owned_job_subject",
     "parallel_limit",
     "pause_after",
+    "pause_withdraws",
     "pending_requests",
     "phase_waits",
     "plain_line",
@@ -1814,8 +1815,6 @@ __all__ = [
     "recorded_waits",
     "recover",
     "reopened",
-    "reopens_after",
-    "reopens_on_resume",
     "reply_errors",
     "requested_stop_mode",
     "resource",

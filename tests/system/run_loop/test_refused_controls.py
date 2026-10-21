@@ -35,10 +35,10 @@ from vs_runtime.api.core import (
 )
 from vs_runtime.api.infrastructure import (
     ChannelRunControl,
+    PauseNowRequest,
     PauseRequest,
     RunControlTransitionKind,
     RuntimeRunControlChannel,
-    StopRequest,
 )
 from vs_runtime.api.testing import FakeRunControlEventSink, ProbedRunClock
 from vs_sim.api.testing import SimThreads, clock_from
@@ -167,7 +167,7 @@ async def test_a_socket_pause_the_bridge_refuses_after_a_stop_is_answered(tmp_pa
             return ControlId(root="op-s1") in recorded and core.run.status != RunStatus.TERMINAL
 
         clock.actions += [
-            (measuring, lambda: wiring.control.submit(StopRequest(control_id="s1"))),
+            (measuring, lambda: wiring.control.submit(PauseNowRequest(control_id="s1"))),
             (stopped, lambda: wiring.control.submit(PauseRequest(control_id="p1"))),
         ]
 

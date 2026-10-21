@@ -346,7 +346,13 @@ class RuntimeWorkspaceRequests:
             case SnapshotAndRetainRun():
                 return await self._run_snapshot(request, resumed=resumed)
             case AdoptRevision() | VerifyAdoption():
-                return await self._adoption(request, resumed=resumed)
+                return (
+                    _rejected(
+                        "candidate retained; adoption in a resumed epoch requires project-edit protection"
+                    )
+                    if isinstance(request, AdoptRevision) and context.fence.epoch > 1
+                    else await self._adoption(request, resumed=resumed)
+                )
             case RestoreRevision() | RetainRevision() | SnapshotAndRetain() | DiscardWorkspace():
                 return await self._attempt_request(request, context, resumed=resumed)
             case _:

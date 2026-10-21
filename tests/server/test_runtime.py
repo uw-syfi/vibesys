@@ -42,8 +42,8 @@ from vs_runtime.api.infrastructure import (
     ChannelRunControl,
     ControlAck,
     ControlRequest,
+    PauseNowRequest,
     RunControlChannel,
-    StopRequest,
 )
 from vs_runtime.api.testing import idle_environment_system
 from vs_sim.api import OsThreads, Platform, Threads
@@ -80,7 +80,7 @@ class _SessionControlStub(ChannelRunControl):
         self.stop_calls = 0
 
     def submit(self, request: ControlRequest) -> ControlAck:
-        if isinstance(request, StopRequest):
+        if isinstance(request, PauseNowRequest):
             self.stop_calls += 1
         return super().submit(request)
 

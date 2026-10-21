@@ -5,7 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from vibesys.api import ConfigurationError
 from vibesys.api.request import ensure_resumable
 from vs_project.api import Project
 from vs_proto.api import Oneof, RelaunchRefusal, RelaunchResponse
@@ -60,12 +59,7 @@ def _launch(
     epoch, offset = _epoch(path)
     if epoch != request.expected_epoch:
         return _refused(RelaunchRefusal.EPOCH_CHANGED)
-    try:
-        ensure_resumable(Path(request.project_root), request.run_id)
-    except ConfigurationError as error:
-        if error.diagnostic.code != "run_ended":
-            raise
-        return _refused(RelaunchRefusal.ENDED)
+    ensure_resumable(Path(request.project_root), request.run_id)
     deadline = threads.now() + 25
     result = processes.run(
         ProcessSpec(

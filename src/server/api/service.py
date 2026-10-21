@@ -54,14 +54,13 @@ from vibesys.api import (
     REFUSAL_TEXT,
     ControlStatus,
     IterationUnavailable,
+    PauseNowRequest,
     PauseRequest,
     RefusalReason,
     ResumeRequest,
     RunRecordReadError,
     SteerRequest,
     StopMode,
-    StopRequest,
-    escalate_stop,
 )
 from vibesys.api.hypothesis import agent_projection
 from vs_sim.api import utc_datetime
@@ -280,7 +279,7 @@ def control_request(command: ControlProtocolCommand) -> ControlRequest:
         return ResumeRequest(control_id=control_id, fallback=command.fallback, when=command.when)
     if isinstance(command, SteerCommand):
         return SteerRequest(control_id=control_id, text=command.text)
-    return StopRequest(control_id=control_id)
+    return PauseNowRequest(control_id=control_id)
 
 
 class RunControlSlot:
@@ -299,7 +298,7 @@ class RunControlSlot:
         self._condition = condition
         self._state = _RunControlState.AWAITING_SESSION
         self._control: RunControl | None = None
-        self._stop_pending: StopRequest | None = None
+        self._stop_pending: PauseNowRequest | None = None
 
     def install(self, control: RunControl) -> None:
         """Install the session and deliver one retained stop intent, if any."""
@@ -344,14 +343,9 @@ class RunControlSlot:
             control = self._control
             if control is None:
                 if self._state is _RunControlState.AWAITING_SESSION and isinstance(
-                    request, StopRequest
+                    request, PauseNowRequest
                 ):
-                    pending = self._stop_pending
-                    if (
-                        pending is None
-                        or escalate_stop(pending.mode, request.mode) is not pending.mode
-                    ):
-                        self._stop_pending = request
+                    self._stop_pending = request
                     return CommandAck(action=request.action, status="pending")
                 raise RunControlUnavailableError(self._state)
             # Delivered while the slot prevents session release.

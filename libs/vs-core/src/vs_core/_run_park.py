@@ -58,10 +58,22 @@ def dispatch_allowed(state: CoreState, request: Request) -> bool:
         return state.run.park is not None and state.records.recovery.epoch > state.run.park.epoch
     if state.run.status != RunStatus.DRAINING:
         return True
+    if pause_withdraws(state, request):
+        return False
     return isinstance(request, _DRAIN_EFFECTS) or (
         isinstance(request, SubmitMeasurement | ObserveOwnedJob | InspectOwnedJob)
         and (not isinstance(request, SubmitMeasurement) or request.decision_id is None)
         and scope_in_flight(state.sessions, state.records, request.scope)
+    )
+
+
+def pause_withdraws(state: CoreState, request: Request) -> bool:
+    """Whether committed Pause now withdrew this effect's right to complete the epoch."""
+    return (
+        state.run.park is not None
+        and state.records.recovery.epoch == state.run.park.epoch
+        and state.run.park.immediate
+        and not isinstance(request, _DRAIN_EFFECTS)
     )
 
 
@@ -109,7 +121,7 @@ def advance(state: CoreState) -> tuple[CoreState, tuple[Scheduled, ...]]:
     if state.run.status != RunStatus.DRAINING or park is None:
         return state, ()
     # Polls/submissions already authorized must commit before their jobs are cancelled.
-    if any(
+    if not park.immediate and any(
         _unfinished(state, record)
         and isinstance(record.request, SubmitMeasurement | ObserveOwnedJob | InspectOwnedJob)
         for record in state.records.records
@@ -131,6 +143,7 @@ def advance(state: CoreState) -> tuple[CoreState, tuple[Scheduled, ...]]:
                 admission_id=None if source is None else source.request.admission_id,
                 resource_id=job.resource_id,
                 for_park=True,
+                immediate=park.immediate,
             )
             pending.append(
                 Scheduled(
@@ -149,13 +162,14 @@ def advance(state: CoreState) -> tuple[CoreState, tuple[Scheduled, ...]]:
         )
     if pending:
         return state, tuple(pending)
-    if (
-        not released
-        or any(_unfinished(state, row) for row in state.records.records)
-        or _turns_in_flight(state)
+    if not released or (
+        not park.immediate
+        and (
+            any(_unfinished(state, row) for row in state.records.records) or _turns_in_flight(state)
+        )
     ):
         return state, ()
-    if any(
+    if not park.immediate and any(
         row.phase == RequestPhase.PREPARED and dispatch_allowed(state, row.request)
         for row in state.records.records
     ):

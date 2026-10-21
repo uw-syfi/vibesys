@@ -356,8 +356,9 @@ def one_line(text: str) -> str | None:
 class EndRecord(BaseModel):
     """How a run ended, as its tombstone reports it: the sidebar's Recent row and the ended banner.
 
-    ``resumable`` says whether a resume continues the run: its durable record exists and is not
-    terminal. ``resume_from_round`` is the round that resume starts at, when the server knew it
+    ``resumable`` is retained for older readers; current controls permit every ending.
+    A launch independently checks storage prerequisites and writer exclusion.
+    ``resume_from_round`` is the next round, when the server knew it
     (a crashed server did not say). ``uncompared``: the run adopted a candidate never compared
     with the input (it failed its own measurement), whichever ``outcome`` ended it.
     """

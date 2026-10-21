@@ -492,3 +492,24 @@ def test_a_strategy_state_that_breaks_its_own_invariant_never_becomes_durable() 
     with pytest.raises(ValidationError):
         shell.advance()
     assert store.load() == before
+
+
+@given(duration=st.integers(min_value=1, max_value=86400), gap=st.integers(1, 100000))
+def test_each_epoch_receives_the_original_full_duration(duration: int, gap: int) -> None:
+    store = FakeStateStore()
+    initial = declared(counter)
+    initial = initial.model_copy(
+        update={"run": initial.run.model_copy(update={"duration_seconds": float(duration)})}
+    )
+    for started in (0, gap, gap * 2):
+        shell = CoreRuntime(
+            store,
+            counter.driver(CounterConfig()),
+            initial,
+            config=CounterConfig(),
+            bindings=CoreRuntimeBindings(transitions=ShellTraceTransitions()),
+        )
+        shell.start("host", now_at=started, lease_duration=1)
+        assert shell.record.envelope.core.run.deadline_at == started + duration
+        assert shell.record.envelope.core.run.duration_seconds == duration
+        shell.release_lease(now_at=started)

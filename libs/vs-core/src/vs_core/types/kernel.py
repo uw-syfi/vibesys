@@ -121,6 +121,8 @@ class RunState(Value):
     park: RunPark | None = None
     now_at: Seconds
     deadline_at: Seconds
+    duration_seconds: Seconds | None = None
+    """Original epoch duration; older records use the supplied run configuration once."""
     facts: RunFacts
     capabilities: Capabilities = Capabilities()
     limits: Limits

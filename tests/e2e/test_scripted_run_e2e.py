@@ -24,7 +24,7 @@ from tests.e2e.dynamic_loop_harness import _AGENT_CONFIG, LoopInput, resume_requ
 
 import vs_proto.api as p
 from launch.scripted_agents import ScriptedDynamicAgents
-from vibesys.api import ParkRequest, RunHandle, RunStatus
+from vibesys.api import PauseRequest, RunHandle, RunStatus
 from vibesys.events import CoreEventType, WorkstreamFinishedData
 from vibesys.orchestration.dynamic.scripted.api import (
     CHAT_REPLY,
@@ -215,7 +215,7 @@ def test_a_scripted_run_parks_cleanly_and_resumes_the_saved_search(tmp_path: Pat
     request = loop_input.request(agent_backend="scripted", max_rounds=ROUNDS, max_in_flight=2)
 
     def park_on_start(handle: RunHandle) -> None:
-        handle.session.submit(ParkRequest(control_id="park-before-start"))
+        handle.session.submit(PauseRequest(control_id="park-before-start"))
 
     parked = run_request(
         request,

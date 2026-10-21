@@ -12,7 +12,7 @@ from hypothesis import strategies as st
 import vs_core.api as core
 
 type _Kind = Literal["operator", "quota", "now", "fallback", "capacity"]
-_KINDS: tuple[_Kind, ...] = ("operator", "quota", "now", "fallback", "capacity")
+_KINDS: tuple[_Kind, ...] = ("quota", "now", "fallback", "capacity")
 
 
 def _control(kind: _Kind, index: int) -> core.ControlInput:

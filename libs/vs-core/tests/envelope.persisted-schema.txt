@@ -177,6 +177,7 @@ CancelOwnedJob.admission_id optional {"anyOf":[{"$ref":"#/$defs/DecisionId"},{"t
 CancelOwnedJob.decision_id optional {"anyOf":[{"$ref":"#/$defs/DecisionId"},{"type":"null"}],"default":null}
 CancelOwnedJob.depends_on optional {"default":[],"items":{"$ref":"#/$defs/RequestId"},"type":"array"}
 CancelOwnedJob.for_park optional {"default":false,"type":"boolean"}
+CancelOwnedJob.immediate optional {"default":false,"type":"boolean"}
 CancelOwnedJob.kind optional {"const":"cancel_owned_job","default":"cancel_owned_job","type":"string"}
 CancelOwnedJob.request_id optional {"anyOf":[{"$ref":"#/$defs/RequestId"},{"type":"null"}],"default":null}
 CancelOwnedJob.resource_id required {"$ref":"#/$defs/ResourceId"}
@@ -316,7 +317,7 @@ ContinuationId {"additionalProperties":false,"type":"object"}
 ContinuationId.kind optional {"const":"continuation","default":"continuation","type":"string"}
 ContinuationId.root required {"minLength":1,"pattern":"^\\S+$","type":"string"}
 ContinuationPhase {"enum":["waiting","authorized","resumed","parked","cancelled","reopening","blocked"],"type":"string"}
-ControlAction {"enum":["pause","resume","stop","steer","withdraw","cancel_attempt","cancel_item","set_max_parallel","park"],"type":"string"}
+ControlAction {"enum":["pause","resume","stop","steer","withdraw","cancel_attempt","cancel_item","set_max_parallel","park","pause_now"],"type":"string"}
 ControlId {"additionalProperties":false,"type":"object"}
 ControlId.kind optional {"const":"control","default":"control","type":"string"}
 ControlId.root required {"minLength":1,"pattern":"^\\S+$","type":"string"}
@@ -1101,6 +1102,7 @@ RunInvocationCheckpoint.scope required {"$ref":"#/$defs/Scope"}
 RunPark {"additionalProperties":false,"type":"object"}
 RunPark.control_id required {"$ref":"#/$defs/ControlId"}
 RunPark.epoch required {"minimum":0,"type":"integer"}
+RunPark.immediate optional {"default":false,"type":"boolean"}
 RunResultProposal {"additionalProperties":false,"type":"object"}
 RunResultProposal.outcome required {"enum":["success","failure","blocked","cancelled"],"type":"string"}
 RunResultProposal.reason required {"minLength":1,"type":"string"}
@@ -1112,6 +1114,7 @@ RunState.capabilities optional {"$ref":"#/$defs/Capabilities","default":{"lifecy
 RunState.controls optional {"default":[],"items":{"$ref":"#/$defs/ControlInput"},"type":"array"}
 RunState.deadline_at required {"$ref":"#/$defs/Seconds"}
 RunState.declaration required {"$ref":"#/$defs/SearchDeclaration"}
+RunState.duration_seconds optional {"anyOf":[{"$ref":"#/$defs/Seconds"},{"type":"null"}],"default":null}
 RunState.facts required {"$ref":"#/$defs/RunFacts"}
 RunState.generation optional {"$ref":"#/$defs/Count","default":0}
 RunState.limits required {"$ref":"#/$defs/Limits"}
@@ -1385,7 +1388,7 @@ TurnEnded {"additionalProperties":false,"type":"object"}
 TurnEnded.decision required {"$ref":"#/$defs/DecisionId"}
 TurnEnded.kind optional {"const":"turn_ended","default":"turn_ended","type":"string"}
 TurnEnded.result required {"$ref":"#/$defs/TurnResult"}
-TurnFailureKind {"enum":["provider_failed","transport_lost","cancelled","provider_unavailable"],"type":"string"}
+TurnFailureKind {"enum":["provider_failed","transport_lost","cancelled","epoch_interrupted","provider_unavailable"],"type":"string"}
 TurnResult {"additionalProperties":false,"type":"object"}
 TurnResult.detail optional {"default":"","maxLength":4000,"type":"string"}
 TurnResult.failure optional {"anyOf":[{"$ref":"#/$defs/TurnFailureKind"},{"type":"null"}],"default":null}

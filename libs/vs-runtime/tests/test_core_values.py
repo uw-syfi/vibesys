@@ -104,6 +104,7 @@ def test_every_control_action_roundtrips(root: str, action: core.ControlAction) 
     notice = core.ArtifactRef(artifact_id=core.ArtifactId(root=root), digest=root)
     choices: dict[str, dict[str, object]] = {
         "park": {},
+        "pause_now": {},
         "pause": {"owner": core.PauseOwner.OPERATOR},
         "resume": {"when": "now"},
         "stop": {"mode": core.StopMode.CANCEL},

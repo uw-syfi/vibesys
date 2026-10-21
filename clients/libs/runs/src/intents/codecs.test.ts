@@ -9,7 +9,6 @@ import {
   ResumeWhen,
   SteerMode,
   SteerTargetKind,
-  StopMode,
   TailResponseSchema,
 } from '@vibesys/proto';
 import {
@@ -21,10 +20,10 @@ import {
   runIntent,
 } from '@vibesys/runs/intents';
 
-const identity = {runId: 'run-1', requestId: 'r-1', projectRoot: '/project'};
+const identity = {runId: 'run-1', requestId: 'r-1', projectRoot: '/project', expectedEpoch: 1n};
 
 test('all visible controls use typed defaults and preserve identity through the pipes', () => {
-  for (const action of ['pause', 'park', 'resume', 'stop', 'steer'] as const) {
+  for (const action of ['pause', 'pauseNow', 'resume', 'steer'] as const) {
     const request = runIntent(identity, action, 'guidance');
     const envelope = fromBinary(
       HostCallRequestSchema,
@@ -36,7 +35,6 @@ test('all visible controls use typed defaults and preserve identity through the 
     expect(envelope.method.value).toEqual(request);
     expect(request.intent.case).toBe(action);
     if (request.intent.case === 'resume') expect(request.intent.value.when).toBe(ResumeWhen.NOW);
-    if (request.intent.case === 'stop') expect(request.intent.value.mode).toBe(StopMode.DRAIN);
     if (request.intent.case === 'steer') {
       expect(request.intent.value.mode).toBe(SteerMode.NEXT_TURN);
       expect(request.intent.value.target?.kind).toBe(SteerTargetKind.RUN);

@@ -42,7 +42,7 @@ from ._proofs import (
 )
 from ._registry import ContractError
 from ._session_scope import retains_write_turn, write_turn_authority, yield_authority, yields_turn
-from ._turn_holds import lost_to_provider
+from ._turn_holds import lost_without_debit
 from .types.attempts import (
     AttemptAdmitted,
     AttemptChargeRefundRequested,
@@ -713,7 +713,7 @@ def _correction_allowed(
         if _completed_interruption(context, attempt, child) is not True:
             links += 1
             # A re-ask after a turn lost to its provider is no link: the gate bounds an outage.
-            depth += 0 if lost_to_provider(context.records, previous) else 1
+            depth += 0 if lost_without_debit(context.records, previous) else 1
         child = previous
         predecessor = previous.turn.predecessor if previous.turn.charge_class != "resume" else None
     return links > 0 and depth <= MAX_REASK_CHAIN

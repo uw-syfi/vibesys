@@ -922,16 +922,13 @@ def test_adoption_applies_inspects_and_verifies_the_selected_revision(tmp_path: 
         proof = await _run(executor, verify("verify-1"), epoch=2)
         assert proof.observation.observation.status is ObservationStatus.SUCCEEDED
         assert proof.observation.revision == winner
-        # Interrupted before the result was recorded: the root already proves the
-        # content, so the retry reports success instead of applying again.
+        # A new adoption in a resumed epoch is guarded until project-edit protection lands.
         again = AdoptRevision(request_id=_rid("adopt-2"), scope=run_scope, selection=selection)
-        crashing = _failing(_ENVS[workspaces])
-        flaky, _ = _executor(workspaces, crashing)
-        crashing.fail_done = True
-        with pytest.raises(OSError, match="host died"):
-            await _run(flaky, again, epoch=3)
-        resumed = await _run(executor, again, epoch=3)
-        assert resumed.observation.observation.status is ObservationStatus.SUCCEEDED
+        root_file.write_text("VALUE = 3\n", encoding="utf-8")
+        refused = await _run(executor, again, epoch=3)
+        assert refused.observation.observation.status is ObservationStatus.REJECTED
+        assert "project-edit protection" in refused.observation.observation.diagnostic
+        assert root_file.read_text(encoding="utf-8") == "VALUE = 3\n"
         # Drift after adoption is never reported as verified.
         root_file.write_text("VALUE = 3\n", encoding="utf-8")
         drifted = await _run(executor, verify("verify-2"), epoch=3)
@@ -2133,7 +2130,9 @@ def test_core_accepts_a_retry_after_unknown_and_replays_across_restarts(
             assert _status(lost) is ObservationStatus.UNKNOWN
             second, _ = _executor(env.start_host())
             retried = await _run(second, request, epoch=2)
-            assert _status(retried) is ObservationStatus.SUCCEEDED
+            assert _status(retried) is (
+                ObservationStatus.REJECTED if kind is AdoptRevision else ObservationStatus.SUCCEEDED
+            )
             third, _ = _executor(env.start_host())
             return [lost, retried, await _run(third, request, epoch=3)]
 

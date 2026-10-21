@@ -177,7 +177,7 @@ def _stop_ending(kit: Kit) -> EndReason | None:
     stop = kit.run.stop
     if stop is None:
         return None
-    return _HOST_STOP_ENDINGS.get(stop.control.control_id.root, EndReason.STOPPED)
+    return _HOST_STOP_ENDINGS.get(stop.control.control_id.root.partition(":")[0], EndReason.STOPPED)
 
 
 _HOST_STOP_ENDINGS = {DEADLINE_STOP: EndReason.DEADLINE, ENVIRONMENT_STOP: EndReason.FAILED}

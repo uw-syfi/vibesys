@@ -6,7 +6,6 @@ import {
   HostService,
   type Lifecycle,
   LifecycleSchema,
-  Outcome,
   RelaunchRefusal,
   type RelaunchRequest,
   RelaunchRequestSchema,
@@ -22,7 +21,7 @@ export {RelaunchRefusal, RunLiveness} from '@vibesys/proto';
 /** Only these reader observations offer relaunch; the host rechecks admission. */
 export interface RelaunchTarget {
   readonly epoch: bigint;
-  readonly state: 'parked' | 'stopped-resumable' | 'interrupted';
+  readonly state: 'parked' | 'ended' | 'interrupted';
 }
 
 export function relaunchRequest(
@@ -102,11 +101,7 @@ export function relaunchTarget(
   const state = observation.lifecycle?.state;
   if (state?.case === 'parked') return {epoch: observation.epoch, state: 'parked'};
   if (state?.case === 'ended') {
-    if (state.value.outcome === Outcome.STOPPED)
-      return {epoch: observation.epoch, state: 'stopped-resumable'};
-    if (state.value.outcome === Outcome.INTERRUPTED)
-      return {epoch: observation.epoch, state: 'interrupted'};
-    return null;
+    return {epoch: observation.epoch, state: 'ended'};
   }
   return live === RunLiveness.INTERRUPTED ? {epoch: observation.epoch, state: 'interrupted'} : null;
 }

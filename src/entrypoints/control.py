@@ -25,7 +25,7 @@ from typing import TYPE_CHECKING
 
 from pydantic import ValidationError
 
-from vibesys.api import CONTROL_REQUEST, SteerMode, StopMode, recorded_ending
+from vibesys.api import CONTROL_REQUEST, SteerMode, recorded_ending, recorded_epoch
 from vs_project.api import INBOX_FORMAT, InboxClosedError, Project, ProjectError, RequestState
 
 if TYPE_CHECKING:
@@ -50,6 +50,7 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="vibesys control",
         description="Send a control to a run through its control inbox.",
+        epilog="Resume a run as a new epoch with: vibesys --resume RUN",
     )
     parser.add_argument("run_id", help="the run to control")
     parser.add_argument(
@@ -91,21 +92,7 @@ def _parser() -> argparse.ArgumentParser:
         "withdraw", help="end standing guidance sent earlier as a standing steer"
     )
     withdraw.add_argument("withdraws", metavar="CONTROL_ID", help="the standing steer's id")
-    actions.add_parser("park", help="finish agent turns, save and exit for relaunch")
-    actions.add_parser("pause", help="hold the run at its next safe boundary")
-    resume = actions.add_parser("resume", help="continue a paused run")
-    how = resume.add_mutually_exclusive_group()
-    how.add_argument(
-        "--fallback",
-        action="store_true",
-        help="switch a run paused on a provider capacity limit to its fallback provider",
-    )
-    how.add_argument(
-        "--when",
-        choices=("now", "capacity_returns"),
-        default="now",
-        help="resume now, or once provider capacity returns",
-    )
+    actions.add_parser("pause", help="finish in-flight turns and exit")
     status = actions.add_parser(
         "status", help="say whether a request is pending, applied or rejected, and why"
     )
@@ -122,12 +109,9 @@ def _parser() -> argparse.ArgumentParser:
         "set-max-parallel", help="change how many attempts the run admits at once"
     )
     limit.add_argument("max_parallel", metavar="N", type=int, help="the new limit, at least 1")
-    stop = actions.add_parser("stop", help="end the run")
-    stop.add_argument(
-        "--mode",
-        choices=[mode.value for mode in StopMode],
-        default=StopMode.DRAIN.value,
-        help="drain the work in flight, or cancel it",
+    actions.add_parser(
+        "pause-now",
+        help="cancel unfinished work and exit; it may need repeating and may still incur charges",
     )
     return parser
 
@@ -145,8 +129,6 @@ def _payload(arguments: argparse.Namespace, control_id: str) -> dict[str, object
     # Every other action's options are its request's fields, under the same names.
     fields = {
         "withdraw": ("withdraws",),
-        "resume": ("fallback", "when"),
-        "stop": ("mode",),
         "cancel_attempt": ("attempt",),
         "cancel_item": ("item",),
         "set_max_parallel": ("max_parallel",),
@@ -170,10 +152,11 @@ def control_main(
     if arguments.action == "status":
         return _status(arguments, cwd=cwd, out=out, err=err)
     try:
-        request = CONTROL_REQUEST.validate_python(
-            _payload(arguments, arguments.control_id or new_control_id())
-        )
         project = Project.open(arguments.project or cwd)
+        payload = _payload(arguments, arguments.control_id or new_control_id())
+        if arguments.action in ("pause", "pause-now"):
+            payload["expected_epoch"] = recorded_epoch(project, arguments.run_id)
+        request = CONTROL_REQUEST.validate_python(payload)
         project.state.load_run(arguments.run_id)
         project.state.require_local_run(arguments.run_id)
         inbox = project.state.control_inbox(arguments.run_id)

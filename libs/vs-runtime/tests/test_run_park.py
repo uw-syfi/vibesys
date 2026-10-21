@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING
 
 import pytest
@@ -49,7 +50,7 @@ from vs_runtime.api.core import (
 from vs_runtime.api.infrastructure import (
     AgentExecutionFinished,
     ChannelRunControl,
-    ParkRequest,
+    PauseRequest,
     RuntimeRunControlChannel,
 )
 from vs_runtime.api.testing import (
@@ -113,7 +114,7 @@ async def test_pause_drain_cancels_the_queued_job_exits_and_relaunch_reruns_it(
 
         def request_park() -> None:
             if world.cluster.submissions:
-                operator.submit(ParkRequest(control_id="park"))
+                operator.submit(PauseRequest(control_id="park"))
                 clock.act = lambda: None
 
         clock.act = request_park
@@ -241,7 +242,13 @@ async def test_pause_drain_finishes_a_turns_evaluation_requested_after_applied_t
             if turn.entered.is_set() and not posted:
                 inbox.post(
                     "pause-drain",
-                    b'{"action":"park","control_id":"pause-drain"}',
+                    json.dumps(
+                        {
+                            "action": "pause",
+                            "control_id": "pause-drain",
+                            "expected_epoch": process.shell.record.envelope.core.records.recovery.epoch,
+                        }
+                    ).encode(),
                     ended=lambda: None,
                 )
                 posted = True
@@ -324,7 +331,13 @@ async def test_pause_drain_waits_for_an_executing_evaluation_to_finish(tmp_path:
             if running and requested_at is None:
                 inbox.post(
                     "pause-drain",
-                    b'{"action":"park","control_id":"pause-drain"}',
+                    json.dumps(
+                        {
+                            "action": "pause",
+                            "control_id": "pause-drain",
+                            "expected_epoch": process.shell.record.envelope.core.records.recovery.epoch,
+                        }
+                    ).encode(),
                     ended=lambda: None,
                 )
                 requested_at = clock.now()

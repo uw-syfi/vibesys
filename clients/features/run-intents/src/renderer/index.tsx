@@ -48,7 +48,12 @@ export function useRunIntents(props: {
   if (!props.enabled || !snapshot) return {controls: null, busy, sendRequest};
   const send = (action: RunIntentAction) => {
     const request = runIntent(
-      {projectRoot: props.projectRoot, runId: props.runId, requestId: crypto.randomUUID()},
+      {
+        projectRoot: props.projectRoot,
+        runId: props.runId,
+        requestId: crypto.randomUUID(),
+        expectedEpoch: props.relaunch?.epoch ?? 0n,
+      },
       action,
       text,
     );

@@ -47,6 +47,7 @@ from vs_core.api import (
     deferred,
     encode_json,
     orphan_waits,
+    pause_withdraws,
     run_view,
     share_unchanged,
     step,
@@ -71,7 +72,7 @@ from vs_runtime._core_requests import (
 from vs_runtime._evaluation_jobs import awaits_submissions
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator
+    from collections.abc import Callable, Iterator, Sequence
 
     from vs_core.api import OpenWait, Request
     from vs_project.api import Project
@@ -512,6 +513,18 @@ class CoreRuntime[S: StrategyState]:
             if self._record is None
             else self.record.envelope.core
         )
+        duration = core.run.duration_seconds or self._initial.run.duration_seconds
+        if duration is not None:
+            core = core.model_copy(
+                update={
+                    "run": core.run.model_copy(
+                        update={
+                            "duration_seconds": duration,
+                            "deadline_at": max(core.run.now_at, now_at) + duration,
+                        }
+                    )
+                }
+            )
         if not core.run.declaration.resumable_as(self._search.declaration):
             raise ContractError(("declaration",), "initial strategy declaration mismatch")
         selected = validate_startup(self._search.declaration, core.run.capabilities)
@@ -1348,11 +1361,23 @@ class CoreRuntime[S: StrategyState]:
         fired. A cancelled request returns no observation; core already reported it.
         """
         ended = [f for f in self._flights if not f.task.done() and self._ended_by_core(f)]
-        for flight in ended:
+        return await self._cancel_flights(ended)
+
+    async def _cancel_withdrawn(self) -> bool:
+        return await self._cancel_flights(
+            [
+                flight
+                for flight in self._flights
+                if pause_withdraws(self.record.envelope.core, flight.record.request)
+            ]
+        )
+
+    async def _cancel_flights(self, flights: Sequence[_Flight]) -> bool:
+        for flight in flights:
             self._flights.remove(flight)
             flight.task.cancel()
-        await asyncio.gather(*(f.task for f in ended), return_exceptions=True)
-        return bool(ended)
+        await asyncio.gather(*(flight.task for flight in flights), return_exceptions=True)
+        return bool(flights)
 
     async def wait_for_flight(self) -> None:
         """Return once a running request has finished (at once when one already has).
@@ -1406,7 +1431,12 @@ class CoreRuntime[S: StrategyState]:
         try:
             while True:
                 # A failed request surfaces before anything else commits.
-                if self._finish_done() or await self.cancel_ended() or self.advance():
+                if (
+                    await self._cancel_withdrawn()
+                    or self._finish_done()
+                    or await self.cancel_ended()
+                    or self.advance()
+                ):
                     upkeep()
                     continue
                 if refusal is None:

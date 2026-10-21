@@ -200,9 +200,7 @@ def _expected_end(
         outcome = RunEndOutcome.FAILED
     else:
         return None
-    resumable = (
-        ending is not None and ending.resumable and outcome is not RunEndOutcome.FORCE_STOPPED
-    )
+    resumable = True
     rounds = None if ending is None or not resumable else ending.rounds_finished + 1
     return outcome, resumable, rounds
 
@@ -228,7 +226,10 @@ def test_a_run_that_recorded_a_result_ends_with_cores_reason(outcome: RunEndOutc
     _, tombstone = _serve([_Ending(ending), _Status(status)])
 
     assert tombstone.end == EndRecord(
-        outcome=outcome, reason=f"{outcome}: the search said why", resumable=False
+        outcome=outcome,
+        reason=f"{outcome}: the search said why",
+        resumable=True,
+        resume_from_round=4,
     )
 
 
@@ -268,7 +269,7 @@ def test_a_failed_run_ends_failed_with_the_first_line_of_its_failure() -> None:
     )
 
 
-def test_a_terminated_server_ends_force_stopped_for_good() -> None:
+def test_a_terminated_server_remains_resumable() -> None:
     """Regression: a force-stopped run was offered a resume, while a cleanly stopped one was not."""
     ending = RunEndingFact(outcome=None, resumable=True, rounds_finished=0)
 
@@ -276,14 +277,14 @@ def test_a_terminated_server_ends_force_stopped_for_good() -> None:
 
     assert tombstone.end is not None
     assert tombstone.end.outcome is RunEndOutcome.FORCE_STOPPED
-    assert (tombstone.end.resumable, tombstone.end.resume_from_round) == (False, None)
+    assert (tombstone.end.resumable, tombstone.end.resume_from_round) == (True, 1)
 
 
-def test_a_server_that_exits_before_its_run_ends_leaves_a_failed_end_that_cannot_resume() -> None:
+def test_a_server_that_exits_before_its_run_ends_remains_resumable() -> None:
     _, tombstone = _serve([])
 
     assert tombstone.end == EndRecord(
-        outcome=RunEndOutcome.FAILED, reason=SERVER_EXITED.message, resumable=False
+        outcome=RunEndOutcome.FAILED, reason=SERVER_EXITED.message, resumable=True
     )
 
 
@@ -303,7 +304,7 @@ def test_a_stop_whose_ending_was_not_committed_can_be_lifted_by_a_resume() -> No
     )
 
 
-def test_a_stop_whose_ending_committed_ends_for_good() -> None:
+def test_a_stop_whose_ending_committed_remains_resumable() -> None:
     ending = RunEndingFact(outcome=None, resumable=False, rounds_finished=2)
 
     _, tombstone = _serve(
@@ -311,7 +312,10 @@ def test_a_stop_whose_ending_committed_ends_for_good() -> None:
     )
 
     assert tombstone.end == EndRecord(
-        outcome=RunEndOutcome.STOPPED, reason="Stopped by request.", resumable=False
+        outcome=RunEndOutcome.STOPPED,
+        reason="Stopped by request.",
+        resumable=True,
+        resume_from_round=3,
     )
 
 
@@ -339,9 +343,7 @@ def test_a_quota_pause_is_reported_until_the_run_resumes() -> None:
 
 @settings(max_examples=examples(pr=40, nightly=400), deadline=None)
 @given(facts=st.lists(_FACTS, max_size=12), crashes=st.booleans())
-def test_only_a_crash_or_an_open_failure_leaves_a_run_resumable(
-    facts: list[_Fact], *, crashes: bool
-) -> None:
+def test_every_ending_leaves_a_run_resumable(facts: list[_Fact], *, crashes: bool) -> None:
     """Over any stop, force stop and crash ordering: a stop ends the run; a crash keeps it."""
     threads = SimThreads()
     store = FakeInstanceStore()
@@ -371,8 +373,5 @@ def test_only_a_crash_or_an_open_failure_leaves_a_run_resumable(
         assert end is not None
         assert end.resumable
         return
-    stopped = any(isinstance(fact, _Terminated) for fact in facts) or tombstone.phase.status is (
-        RunStatus.STOPPED
-    )
-    if end is not None and stopped:
-        assert not end.resumable
+    if end is not None:
+        assert end.resumable

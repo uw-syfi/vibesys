@@ -22,7 +22,7 @@ from tests.system.delivery._skeleton_subject import (
     launch,
 )
 
-from vs_core.api import OwnedJob, RegisteredOwnedJob, RunStatus, reopens_on_resume
+from vs_core.api import OwnedJob, RegisteredOwnedJob, RunStatus
 from vs_core.testing.liveness import Budget, End, assert_live, final_state
 from vs_dst.api import Effects, RecoverableExecutors
 from vs_project.api import FakeStateStore
@@ -254,7 +254,7 @@ def _resumed_until_it_ends_itself(world: Faulted) -> list[CoreState]:
         assert core.run.result is not None
         if core.run.result.outcome != "cancelled":
             return left
-        assert reopens_on_resume(core.run), core.run.result
+        assert core.run.status == RunStatus.TERMINAL
         clock_at = host.clock.now() + LEASE + 1
     pytest.fail(f"the run was still stopping after {MAX_HOSTS} hosts")
 

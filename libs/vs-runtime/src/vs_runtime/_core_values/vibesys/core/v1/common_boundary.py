@@ -89,6 +89,7 @@ def encode_ControlAction(v: values.ControlAction | None) -> pb.ControlAction:
         "cancel_item": pb.ControlAction.CANCEL_ITEM,
         "set_max_parallel": pb.ControlAction.SET_MAX_PARALLEL,
         "park": pb.ControlAction.PARK,
+        "pause_now": pb.ControlAction.PAUSE_NOW,
     }.get(v, pb.ControlAction.UNSPECIFIED)
 
 
@@ -105,6 +106,7 @@ def decode_ControlAction(v: pb.ControlAction) -> values.ControlAction:
             7: "cancel_item",
             8: "set_max_parallel",
             9: "park",
+            10: "pause_now",
         }[v],
     )
 

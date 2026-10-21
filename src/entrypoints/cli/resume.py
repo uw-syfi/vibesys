@@ -19,9 +19,7 @@ from vibesys.api.profilers import coerce_profiler_kind
 from vibesys.api.request import ensure_resumable, migrate_recorded_run_environment
 from vs_project.api import (
     Git,
-    GitError,
     GitRunHistory,
-    GitTracker,
     NullGitTrackerEvents,
     OrchestrationRunManifest,
     Project,
@@ -290,23 +288,6 @@ def _restore_descriptor_options(
     args.project_run_configuration = SimpleNamespace(**manifest.execution.model_dump())
 
 
-def _switch_project_resume_branch(project_root: Path, run_id: str) -> None:
-    """Select the run branch before callers read committed project files."""
-    if not (project_root / ".git").exists():
-        return
-    events = NullGitTrackerEvents()
-    repository = open_git_repository(project_root, git=Git(OsProcesses()), faults=events)
-    tracker = GitTracker(project_root, events=events, run_id=run_id, repository=repository)
-    try:
-        tracker.init(existing=True)
-    except (GitError, ValueError) as exc:
-        _configuration_error(
-            f"Cannot resume project run {run_id!r}: {exc}",
-            code="resume_not_found",
-            stage="resume_resolution",
-        )
-
-
 def _latest_run_id(project: Project) -> str:
     """The project's latest run, whichever branch is checked out (each run has its own)."""
     events = NullGitTrackerEvents()
@@ -365,9 +346,8 @@ def _load_resume_selection(args: argparse.Namespace) -> _ResumeSelection | None:
         run_id = _requested_resume(args, direct=direct)
         if run_id is None:
             run_id = store.current_run_id() or _latest_run_id(project)
-        events = NullGitTrackerEvents()
-        repository = open_git_repository(project_root, git=Git(OsProcesses()), faults=events)
-        manifest = GitRunHistory(project, repository).manifest(run_id)
+        manifest = project.state.load_run(run_id)
+
     except ProjectStateError as exc:
         message = str(exc)
         _configuration_error(
@@ -401,7 +381,6 @@ def _resolve_resume_args(
         return
     project_root, run_id, manifest = selected.project_root, selected.run_id, selected.manifest
     if not read_only:
-        _switch_project_resume_branch(project_root, run_id)
         ensure_resumable(project_root, run_id)
     args.resume = run_id
     args.run_id = run_id

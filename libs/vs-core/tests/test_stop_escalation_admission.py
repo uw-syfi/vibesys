@@ -44,7 +44,7 @@ def _pause(now_at: float) -> core.RunControlEvent:
     control = core.ControlInput(
         control_id=core.ControlId(root="op-pause"),
         action="pause",
-        owner=core.PauseOwner.OPERATOR,
+        owner=core.PauseOwner.QUOTA,
     )
     return core.RunControlEvent(control=control, now_at=now_at)
 

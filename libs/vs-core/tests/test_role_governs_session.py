@@ -548,3 +548,25 @@ def test_a_role_asked_of_another_roles_agent_is_that_agents_id_and_model(
     assert asked.decision.root.startswith("router")
     with pytest.raises(core.UnknownRoleError):
         definition.with_models({"router": model})
+
+
+@pytest.mark.regression
+@example(interruptions=3)
+@given(interruptions=st.integers(1, 12))
+@_RESTARTING
+def test_epoch_interruption_never_spends_a_roles_correction_or_lost_turn(
+    *, restarting: bool, interruptions: int
+) -> None:
+    run = start(role_of(lost_turns=0, corrections=0), restarting=restarting)
+    asked = turn(run)
+    for _ in range(interruptions):
+        run.fail_turn(asked, core.TurnFailureKind.EPOCH_INTERRUPTED)
+        again = turn(run)
+        assert again.template == asked.template
+        assert again.context == asked.context
+        assert spec_of(again).charge_class == spec_of(asked).charge_class
+        assert spec_of(again).predecessor == invocation_of(asked)
+        assert run.sleeping_until == ()
+        asked = again
+    run.lose(asked)
+    assert published(run) == Outcome(ended="Failed", reason="lost")

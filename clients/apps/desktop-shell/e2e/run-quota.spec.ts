@@ -101,9 +101,7 @@ async function shoot(page: Page, name: string): Promise<void> {
 
 test.use({colorScheme: 'dark', timezoneId: 'UTC', locale: 'en-US'});
 
-test('a run paused by its usage limit waits for quota, stops waiting, and resumes now', async ({
-  page,
-}) => {
+test('a quota hold stays internal while the operator can cancel the epoch', async ({page}) => {
   await addInitScripts(page, [
     initScript(installFakeBridge, SEED),
     initScript(installFakeProjectRuns, SEED),
@@ -118,25 +116,17 @@ test('a run paused by its usage limit waits for quota, stops waiting, and resume
     .click();
 
   const main = page.getByRole('main');
-  await expect(main.getByText('Paused: Claude hit its usage limit')).toBeVisible();
-  await expect(main.getByText(/Claude expects capacity back at Thu 02:00/)).toBeVisible();
-  const wait = page.getByRole('button', {name: 'Wait and resume when quota is back'});
-  await expect(wait).toBeEnabled();
+  await expect(main.getByText('Paused · usage limit', {exact: true}).first()).toBeVisible();
+  await expect(page.getByRole('button', {name: 'Wait and resume when quota is back'})).toHaveCount(
+    0,
+  );
+  await expect(page.getByRole('button', {name: 'Stop waiting'})).toHaveCount(0);
+  await expect(page.getByRole('button', {name: 'Resume now'})).toHaveCount(0);
+  await page.getByRole('button', {name: 'Pause now', exact: true}).click();
+  await expect(
+    page.getByText('Unfinished work may need repeating and may still incur charges.'),
+  ).toBeVisible();
   expect((await new AxeBuilder({page}).analyze()).violations).toEqual([]);
-  await shoot(page, 'ink-quota-paused');
-
-  await wait.click();
-  await expect.poll(() => commands(page)).toContain('command.resume:capacity_returns');
-  await expect(main.getByText("Waiting for Claude's quota")).toBeVisible();
-  await expect(main.getByText(/resumes by itself at about Thu 02:02/)).toBeVisible();
-  await expect(wait).toHaveCount(0);
-  await shoot(page, 'ink-quota-waiting');
-
-  await page.getByRole('button', {name: 'Stop waiting'}).click();
-  await expect.poll(() => commands(page)).toContain('command.pause');
-  await expect(main.getByText('Paused: Claude hit its usage limit')).toBeVisible();
-  await expect(wait).toBeEnabled();
-
-  await page.getByRole('button', {name: 'Resume now'}).click();
-  await expect.poll(() => commands(page)).toContain('command.resume');
+  await shoot(page, 'ink-quota-held');
+  expect(await commands(page)).toEqual([]);
 });

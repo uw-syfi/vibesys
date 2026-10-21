@@ -22,7 +22,7 @@ import {settled} from './checks/settle.js';
 import {installGateway, wire} from './fake-gateway.js';
 import {openFixture} from './fixture-world.js';
 
-type RunState = 'parked' | 'stopped-resumable' | 'interrupted';
+type RunState = 'parked' | 'stopped-resumable' | 'interrupted' | 'finished' | 'failed';
 interface GatewayWindow {
   fakeGateway: {append(bytes: number[]): void; observe(bytes: number[]): void};
 }
@@ -37,7 +37,17 @@ function replay(state: RunState): StoreRunFixture {
       state:
         state === 'parked'
           ? {case: 'parked', value: {}}
-          : {case: 'ended', value: {outcome: Outcome.STOPPED}},
+          : {
+              case: 'ended',
+              value: {
+                outcome:
+                  state === 'finished'
+                    ? Outcome.FINISHED
+                    : state === 'failed'
+                      ? Outcome.FAILED
+                      : Outcome.STOPPED,
+              },
+            },
     });
   return {...fixture, records, initialCount: records.length};
 }
@@ -65,7 +75,7 @@ async function openRelaunch(page: Page, state: RunState, result = 'epoch') {
   );
   await openFixture(page, {...fixtureNamed('finished-run'), runId: 'run-a'});
   await page.getByRole('switch', {name: 'Run transport v2'}).check();
-  await expect(page.getByRole('button', {name: 'Relaunch', exact: true})).toBeEnabled();
+  await expect(page.getByRole('button', {name: 'Resume', exact: true})).toBeEnabled();
   return {
     fixture,
     release: () => {
@@ -159,16 +169,22 @@ test('Relaunch header action, results and new epoch survive Tail before acknowle
     entries.push({name, file});
   };
   for (const width of [1000, 1440, 1920]) {
-    for (const state of ['parked', 'stopped-resumable', 'interrupted'] as const) {
+    for (const state of [
+      'parked',
+      'stopped-resumable',
+      'interrupted',
+      'finished',
+      'failed',
+    ] as const) {
       const page = await context.newPage();
       await page.setViewportSize({width, height: 900});
       const world = await openRelaunch(page, state);
       await capture(page, `${state}-${width}-ready`);
-      await page.getByRole('button', {name: 'Relaunch', exact: true}).click();
-      await expect(page.getByRole('button', {name: 'Relaunch', exact: true})).toBeDisabled();
+      await page.getByRole('button', {name: 'Resume', exact: true}).click();
+      await expect(page.getByRole('button', {name: 'Resume', exact: true})).toBeDisabled();
       await capture(page, `${state}-${width}-launching`);
       await newEpoch(page, world.fixture);
-      await expect(page.getByRole('button', {name: 'Relaunch', exact: true})).toBeVisible();
+      await expect(page.getByRole('button', {name: 'Resume', exact: true})).toBeVisible();
       world.release();
       await expect(page.getByText('Epoch 2', {exact: true})).toBeVisible();
       await capture(page, `${state}-${width}-epoch`);
@@ -180,12 +196,12 @@ test('Relaunch header action, results and new epoch survive Tail before acknowle
     ['ended', 'Refused: ended'],
     ['checkout', 'Refused: checkout missing'],
     ['changed', 'Refused: epoch changed'],
-    ['uncertain', 'Relaunch not confirmed. Check the timeline before trying again.'],
+    ['uncertain', 'Resume not confirmed. Check the timeline before trying again.'],
   ] as const) {
     const page = await context.newPage();
     await page.setViewportSize({width: 1000, height: 900});
     const world = await openRelaunch(page, 'interrupted', result);
-    await page.getByRole('button', {name: 'Relaunch', exact: true}).click();
+    await page.getByRole('button', {name: 'Resume', exact: true}).click();
     world.release();
     await expect(page.getByText(label, {exact: true})).toBeVisible();
     await capture(page, result);

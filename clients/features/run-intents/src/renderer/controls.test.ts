@@ -35,6 +35,7 @@ function fixture(enabled = true) {
 }
 const request = create(PostIntentRequestSchema, {
   projectRoot: '/project',
+  expectedEpoch: 1n,
   runId: 'run-1',
   requestId: 'r-1',
   intent: {case: 'pause', value: {}},

@@ -36,7 +36,6 @@ import type {RunPageAddress} from './use-zoom.js';
 /** The welcome bridge's calls the Run screen makes. */
 export type RunPageBridge = Pick<
   WelcomeBridge,
-  | 'stopConfirmed'
   | 'resume'
   | 'archive'
   | 'logs'
@@ -174,8 +173,14 @@ function openWebSession(
     },
     command: async command => {
       const outcome = await session.command(
-        command.kind === 'pause'
-          ? {type: 'command.pause'}
+        command.kind === 'pause' || command.kind === 'pause-now'
+          ? {
+              type: 'command.control',
+              control: {
+                control_id: crypto.randomUUID(),
+                action: command.kind === 'pause-now' ? 'pause_now' : 'pause',
+              },
+            }
           : {type: 'command.resume', when: command.when},
       );
       return outcome.kind === 'acknowledged'
@@ -240,11 +245,6 @@ export function welcomeRunPorts(
 ): RunPagePorts & {releaseLogs(): void} {
   const {host} = target.run;
   return {
-    stop: async force => {
-      const instance = target.instance();
-      if (instance === null) return false;
-      return (await settled(bridge.stopConfirmed(host, instance, force))).ok;
-    },
     attach: async instance => {
       const result = await settled(bridge.attach(host, instance));
       return result.ok ? null : result.error;

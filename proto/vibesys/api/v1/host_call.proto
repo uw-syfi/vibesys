@@ -40,20 +40,27 @@ message ConfigurationFailed {
 }
 
 message PostIntentRequest {
+  option (buf.validate.message).cel = {
+    id: "intent.epoch"
+    message: "Pause and Pause now require the observed epoch"
+    expression: "!(has(this.pause) || has(this.pause_now)) || this.expected_epoch > 0"
+  };
+  uint64 expected_epoch = 14;
   string project_root = 1 [(buf.validate.field).string = {min_len: 1, max_bytes: 4096}];
   string run_id = 2 [(buf.validate.field).string.pattern = "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$"];
   string request_id = 3 [(buf.validate.field).string.pattern = "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"];
+  reserved 5, 7;
+  reserved "park", "stop";
   oneof intent {
     option (buf.validate.oneof).required = true;
     PauseIntent pause = 4;
-    ParkIntent park = 5;
     ResumeIntent resume = 6;
-    StopIntent stop = 7;
     SteerIntent steer = 8;
     WithdrawIntent withdraw = 9;
     CancelAttemptIntent cancel_attempt = 10;
     CancelItemIntent cancel_item = 11;
     SetParallelismIntent set_parallelism = 12;
+    PauseNowIntent pause_now = 13;
   }
 }
 
@@ -64,8 +71,7 @@ message PostIntentResponse {
   bool ordered_reader = 2;
 }
 message PauseIntent {}
-// Reserved in the command surface; refused until the existing inbox supports it.
-message ParkIntent {}
+message PauseNowIntent {}
 message ResumeIntent {
   option (buf.validate.message).cel = {
     id: "resume.mode"
@@ -79,14 +85,6 @@ enum ResumeWhen {
   RESUME_WHEN_UNSPECIFIED = 0;
   RESUME_WHEN_NOW = 1;
   RESUME_WHEN_CAPACITY_RETURNS = 2;
-}
-message StopIntent {
-  StopMode mode = 1 [(buf.validate.field).enum = {defined_only: true, not_in: [0]}];
-}
-enum StopMode {
-  STOP_MODE_UNSPECIFIED = 0;
-  STOP_MODE_DRAIN = 1;
-  STOP_MODE_CANCEL = 2;
 }
 message SteerIntent {
   string text = 1 [(buf.validate.field).string = {min_len: 1, max_bytes: 65536}];

@@ -92,7 +92,7 @@ def held_limit(stated: float, hold: CapacityHold) -> float:
     return at
 
 
-def lost_to_provider(records: RecordsState, invocation: Invocation) -> bool:
+def lost_without_debit(records: RecordsState, invocation: Invocation) -> bool:
     """Whether ``invocation`` ended ``PROVIDER_UNAVAILABLE``: core ended it while the gate held it.
 
     As ``turn_result`` decides it: the turn was cancelled (core released it lost) while held.
@@ -103,7 +103,18 @@ def lost_to_provider(records: RecordsState, invocation: Invocation) -> bool:
     return (
         observation is not None
         and observation.status is ObservationStatus.CANCELLED
-        and held_when_lost(records, invocation)
+        and (held_when_lost(records, invocation) or interrupted_by_epoch(records, invocation))
+    )
+
+
+def interrupted_by_epoch(records: RecordsState, invocation: Invocation) -> bool:
+    """The unfinished dispatch belongs to an earlier host, including a crashed epoch."""
+    return any(
+        _dispatches(record, invocation)
+        and record.dispatched_in is not None
+        and record.dispatched_in < records.recovery.epoch
+        and (record.observation is None or record.observation.status in _NOT_RETURNED)
+        for record in records.records
     )
 
 

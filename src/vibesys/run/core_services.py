@@ -215,7 +215,6 @@ class CoreServices:
     """The in-turn evaluation tool service, when the plan offers one; the run loop serves it."""
     profile_capture_withheld: bool = False
     """The plan would offer profile work, but the run environment cannot capture a profile."""
-    stop_requested: bool = False
     """The operator force-stopped this run before (``record_stop_request``): it only ends."""
     control_inbox: ControlInbox | None = None
     """The run's durable control inbox, where ``vibesys control`` writes; the loop reads it."""
@@ -290,7 +289,6 @@ def build_core_services(policy: CorePolicy, resources: CoreResources) -> CoreSer
         clock=resources.clock,
         agent_evaluation=bridge,
         profile_capture_withheld=plan.profile_capture_withheld,
-        stop_requested=resources.project.state.stop_requested(run_id),
         control_inbox=resources.project.state.control_inbox(run_id),
     )
 
@@ -360,6 +358,7 @@ def _initial_state(
         offered=catalog,
         startup=CoreStartup(
             deadline_at=resources.clock.now() + plan.deadline_seconds,
+            duration_seconds=plan.deadline_seconds,
             limits=plan.limits,
             lifecycle=_lifecycle(resources, suspendable=suspendable),
             requirements=plan.requirements,

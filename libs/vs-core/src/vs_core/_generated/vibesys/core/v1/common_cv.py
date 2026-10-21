@@ -60,6 +60,7 @@ type ControlAction = Literal[
     "cancel_item",
     "set_max_parallel",
     "park",
+    "pause_now",
 ]
 
 

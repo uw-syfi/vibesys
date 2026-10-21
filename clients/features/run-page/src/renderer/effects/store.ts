@@ -36,8 +36,6 @@ export interface RunPageLogs {
 
 /** What the Run screen asks of the app. */
 export interface RunPagePorts {
-  /** Stop the run (`force`: without waiting for a safe point); resolves false when it could not. */
-  stop(force: boolean): Promise<boolean>;
   /** Attach the live run's server `instance` to this window; resolves null, or why it could not. */
   attach(instance: string): Promise<string | null>;
   /** Let the attached run go. */
@@ -126,7 +124,9 @@ class Followers {
 
 /** Tells the screen the run did not take `request`: a refusal (a message), or the command failing to reach it. */
 function refusal(
-  request: {readonly kind: 'pause'} | {readonly kind: 'resume'; readonly when: string},
+  request:
+    | {readonly kind: 'pause' | 'pause-now'}
+    | {readonly kind: 'resume'; readonly when: string},
   refused: unknown,
   dispatch: Dispatch,
 ): void {
@@ -416,12 +416,6 @@ export function createRunPageStore(
     const dispatch = live(raw);
     if (disposed) return;
     switch (request.kind) {
-      case 'stop':
-        void ports.stop(request.force).then(
-          stopped => (stopped ? undefined : dispatch({type: 'stop-failed'})),
-          () => dispatch({type: 'stop-failed'}),
-        );
-        return;
       case 'arm-bound':
       case 'cancel-bound':
         bounds.perform(request, dispatch);
@@ -450,6 +444,7 @@ export function createRunPageStore(
         readSummary(ports, request, dispatch, schedule, cancels);
         return;
       case 'pause':
+      case 'pause-now':
       case 'resume':
         void sessions.command(request).then(
           refused => refusal(request, refused, dispatch),

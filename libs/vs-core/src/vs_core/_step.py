@@ -46,7 +46,7 @@ from ._proofs import (
 from ._quota_pause_clock import credit_quota_pause
 from ._registry import ContractError
 from ._routing import SIGNAL_ORDER, event_area
-from ._run_pause import control_refusal, reopened, reopens_on_resume, stop_standing
+from ._run_pause import control_refusal, reopened, stop_standing
 from ._session_inputs import check_declared_target, may_have_been_read
 from ._session_inputs import mid_turn_offers as _mid_turn_offers
 from ._validation import validate_decision
@@ -83,6 +83,7 @@ from .types.common import (
     OperationId,
     OperationNormalizationKind,
     OperationRef,
+    PauseOwner,
     RejectionCode,
     RequestId,
     RevisionAuthority,
@@ -1403,9 +1404,9 @@ def _lifted(state: CoreState, control: ControlInput) -> tuple[CoreState, bool]:
     """
     if control.action != "resume":
         return state, False
-    if reopens_on_resume(state.run):
+    lifting = stop_standing(state.run) or state.run.status == RunStatus.TERMINAL
+    if state.run.status == RunStatus.TERMINAL:
         state = state.model_copy(update={"run": reopened(state.run)})
-    lifting = stop_standing(state.run)
     if lifting:
         state = state.model_copy(update={"settlement": reopen_adoption(state.settlement)})
     return state, lifting
@@ -1437,7 +1438,10 @@ def _control(state: CoreState, event: RunControlEvent, dispatch: Dispatch) -> Tr
     waits = event.control.when == "capacity_returns"
     # A stop returned above; park closes admission without ending the search.
     statuses = {
-        "pause": RunStatus.PAUSED,
+        "pause": (
+            RunStatus.PAUSED if event.control.owner is PauseOwner.QUOTA else RunStatus.DRAINING
+        ),
+        "pause_now": RunStatus.DRAINING,
         "park": RunStatus.DRAINING,
         "resume": state.run.status if waits else RunStatus.RUNNING,
     }
@@ -1461,7 +1465,8 @@ def _control(state: CoreState, event: RunControlEvent, dispatch: Dispatch) -> Tr
     else:
         # Park closes intake while preserving queued work for relaunch.
         actions: dict[str, Literal["pause", "drain", "resume"]] = {
-            "pause": "pause",
+            "pause": "pause" if event.control.owner is PauseOwner.QUOTA else "drain",
+            "pause_now": "drain",
             "park": "drain",
         }
         action = actions.get(event.control.action, "resume")
@@ -1473,10 +1478,16 @@ def _control(state: CoreState, event: RunControlEvent, dispatch: Dispatch) -> Tr
 
 
 def _park_authority(state: CoreState, run: RunState, control: ControlInput) -> RunState:
-    if control.action == "park":
+    if control.action in ("park", "pause_now") or (
+        control.action == "pause" and control.owner is PauseOwner.OPERATOR
+    ):
         return run.model_copy(
             update={
-                "park": RunPark(control_id=control.control_id, epoch=state.records.recovery.epoch)
+                "park": RunPark(
+                    control_id=control.control_id,
+                    epoch=state.records.recovery.epoch,
+                    immediate=control.action == "pause_now",
+                )
             }
         )
     if control.action == "resume":

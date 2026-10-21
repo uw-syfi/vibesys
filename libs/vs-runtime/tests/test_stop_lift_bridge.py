@@ -24,14 +24,13 @@ from vs_core.api import (
 from vs_core.api import RunControlEvent as ControlEvent
 from vs_project.api.testing import FakeControlInbox
 from vs_runtime.api.core import OperatorInbox, RunControlBridge
-from vs_runtime.api.infrastructure import StopRequest
 
 from .test_pause_record import _restarted, _Run, _run, _Texts
 
 
 def _stopped_run() -> _Run:
     run = _run()
-    run.control.submit(StopRequest(control_id="s1"))
+    run.control.stop()
     run.poll()
     assert requested_stop_mode(run.core.run) is StopMode.DRAIN
     return run
@@ -77,7 +76,7 @@ def test_a_resumed_process_records_the_lift_and_never_stops() -> None:
 def test_a_resumed_process_that_stops_again_stops() -> None:
     run = _new_process(_stopped_run(), resumed=True)
     run.poll()
-    run.control.submit(StopRequest(control_id="s2"))
+    run.control.stop()
     run.poll()
     assert run.channel.stop_requested()
     assert requested_stop_mode(run.core.run) is StopMode.DRAIN
@@ -134,21 +133,13 @@ def _stopped_by_the_host(stopper: str) -> _Run:
 
 @pytest.mark.parametrize("replayed", [False, True], ids=["fresh", "failure-replayed"])
 @pytest.mark.parametrize("stopper", ["environment", "deadline"])
-def test_a_resumed_process_keeps_the_stop_the_host_delivered(
-    stopper: str, *, replayed: bool
-) -> None:
-    """Regression (review B1 of #3327): a resume lifted the run environment's stop for good.
-
-    The environment's stop was recorded, the process died before the run closed (a force stop,
-    a crash), and ``--resume`` lifted the stop. The stored probe record replayed the failure,
-    but core already held the stop's id, so the bridge sent nothing: the channel was stopped,
-    core held no stop, and the run went on with every Slurm job refused. The deadline's stop was
-    lifted the same way. The host's stops are no pause: the resumed process keeps them in force.
-    """
+def test_a_resumed_process_lifts_each_old_host_stop(stopper: str, *, replayed: bool) -> None:
     run = _new_process(_stopped_by_the_host(stopper), resumed=True)
     run.poll()
+    assert not run.channel.stop_requested()
+    assert requested_stop_mode(run.core.run) is None
     if replayed and stopper == "environment":
         run.channel.request_environment_stop()
         run.poll()
-    assert run.channel.stop_requested()
-    assert requested_stop_mode(run.core.run) is not None
+        assert run.channel.stop_requested()
+        assert requested_stop_mode(run.core.run) is StopMode.CANCEL

@@ -25,6 +25,7 @@ export interface SessionObserver {
 /** A command the Run screen sends over the session: Pause, or Resume now or when capacity returns. */
 export type SessionCommand =
   | {readonly kind: 'pause'}
+  | {readonly kind: 'pause-now'}
   | {readonly kind: 'resume'; readonly when: ResumeWhen};
 
 /** What a chat request came to: it went through, or why it did not. */

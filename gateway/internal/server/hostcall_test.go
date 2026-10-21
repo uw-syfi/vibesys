@@ -16,7 +16,7 @@ import (
 )
 
 func intentRequest() *apiv1.HostCallRequest {
-	return &apiv1.HostCallRequest{Checkout: "/src/host checkout", Method: &apiv1.HostCallRequest_PostIntent{PostIntent: &apiv1.PostIntentRequest{ProjectRoot: "/project", RunId: "run-1", RequestId: "r-1", Intent: &apiv1.PostIntentRequest_Pause{Pause: &apiv1.PauseIntent{}}}}}
+	return &apiv1.HostCallRequest{Checkout: "/src/host checkout", Method: &apiv1.HostCallRequest_PostIntent{PostIntent: &apiv1.PostIntentRequest{ExpectedEpoch: 1, ProjectRoot: "/project", RunId: "run-1", RequestId: "r-1", Intent: &apiv1.PostIntentRequest_Pause{Pause: &apiv1.PauseIntent{}}}}}
 }
 
 func TestHostCallPassesTypedPipesAndConfiguredCheckout(t *testing.T) {

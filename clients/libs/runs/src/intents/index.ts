@@ -13,7 +13,6 @@ import {
   ResumeWhen,
   SteerMode,
   SteerTargetKind,
-  StopMode,
   TailRequestSchema,
   TailResponseSchema,
 } from '@vibesys/proto';
@@ -26,23 +25,18 @@ export const INTENT_TAIL_METHOD = `/${HostService.typeName}/${HostService.method
 
 /** The visible controls' defaults. The host surface accepts every typed intent. */
 export function runIntent(
-  identity: Pick<PostIntentRequest, 'projectRoot' | 'runId' | 'requestId'>,
-  action: 'pause' | 'park' | 'resume' | 'stop' | 'steer',
+  identity: Pick<PostIntentRequest, 'projectRoot' | 'runId' | 'requestId' | 'expectedEpoch'>,
+  action: 'pause' | 'pauseNow' | 'resume' | 'steer',
   text = '',
 ): PostIntentRequest {
   switch (action) {
     case 'pause':
-    case 'park':
+    case 'pauseNow':
       return create(PostIntentRequestSchema, {...identity, intent: {case: action, value: {}}});
     case 'resume':
       return create(PostIntentRequestSchema, {
         ...identity,
         intent: {case: 'resume', value: {when: ResumeWhen.NOW}},
-      });
-    case 'stop':
-      return create(PostIntentRequestSchema, {
-        ...identity,
-        intent: {case: 'stop', value: {mode: StopMode.DRAIN}},
       });
     case 'steer':
       return create(PostIntentRequestSchema, {

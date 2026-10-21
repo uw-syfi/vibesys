@@ -20,7 +20,7 @@ import {STARTED_AT} from './started-at.js';
  */
 
 interface FakeHostWindow extends Window {
-  fakeHost: {listing(listing: unknown): void; calls: unknown[][]};
+  fakeHost: {commands: string[]; listing(listing: unknown): void; calls: unknown[][]};
 }
 
 const PROJECT = '/home/me/vibesys-projects/queue-rs';
@@ -145,7 +145,7 @@ async function calls(page: Page): Promise<unknown[][]> {
 
 test.use({colorScheme: 'dark'});
 
-test('a run starts, writes its logs, stops with Force stop after the bound, and ends', async ({
+test('a run starts, writes its logs, permits cancellation during drain, and resumes after ending', async ({
   page,
 }) => {
   await page.clock.install();
@@ -181,27 +181,18 @@ test('a run starts, writes its logs, stops with Force stop after the bound, and 
   expect((await new AxeBuilder({page}).analyze()).violations).toEqual([]);
   await shot(page, 'ink-logs');
 
-  // Stop: the confirmation says what is lost; Force stop only after two minutes of stopping.
-  await page.getByRole('button', {name: 'Stop', exact: true}).click();
-  await expect(page.getByText('cannot be resumed')).toBeVisible();
-  await shot(page, 'ink-stop-confirm');
-  await page.getByRole('button', {name: 'Stop run'}).click();
-  await expect.poll(() => calls(page)).toEqual([['stopConfirmed', 'ssh:host-b', INSTANCE, false]]);
+  // Pause now is immediately available while a graceful Pause drains.
   await push(page, listed([server('stopping')], []));
-  const force = page.getByRole('button', {name: 'Force stop'});
-  await page.clock.fastForward('01:59');
-  await expect(page.getByText('Stopping · waiting')).toBeVisible();
-  await expect(force).toHaveCount(0);
-  await page.clock.fastForward('00:02');
-  await expect(force).toBeVisible();
-  await shot(page, 'ink-force-stop');
-  await force.click();
+  await expect(page.getByText('Pausing', {exact: true}).first()).toBeVisible();
+  await page.getByRole('button', {name: 'Pause now', exact: true}).click();
+  await expect(
+    page.getByText('Unfinished work may need repeating and may still incur charges.'),
+  ).toBeVisible();
+  await shot(page, 'ink-pause-now-confirm');
+  await page.getByRole('button', {name: 'Pause now', exact: true}).last().click();
   await expect
-    .poll(() => calls(page))
-    .toEqual([
-      ['stopConfirmed', 'ssh:host-b', INSTANCE, false],
-      ['stopConfirmed', 'ssh:host-b', INSTANCE, true],
-    ]);
+    .poll(() => page.evaluate(() => (window as unknown as FakeHostWindow).fakeHost.commands))
+    .toContain('command.control:pause_now');
 
   // Ended: the banner reads the end record; Resume names the round, only when resumable.
   await push(
@@ -219,10 +210,9 @@ test('a run starts, writes its logs, stops with Force stop after the bound, and 
     ),
   );
   await expect(page.getByText('W6’s benchmark timed out after 300 s.')).toBeVisible();
-  await expect(force).toHaveCount(0);
   expect((await new AxeBuilder({page}).analyze()).violations).toEqual([]);
   await shot(page, 'ink-ended');
-  await page.getByRole('button', {name: 'Resume from round 2'}).click();
+  await page.getByRole('button', {name: 'Resume', exact: true}).click();
   await expect
     .poll(async () => (await calls(page)).at(-1))
     .toEqual(['resume', 'ssh:host-b', PROJECT, RUN_ID]);

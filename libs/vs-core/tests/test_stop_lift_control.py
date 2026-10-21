@@ -29,7 +29,7 @@ def _control(kind: _Kind, index: int) -> core.ControlInput:
             return core.ControlInput(control_id=identity, action="stop", mode=core.StopMode(kind))
         case "pause":
             return core.ControlInput(
-                control_id=identity, action="pause", owner=core.PauseOwner.OPERATOR
+                control_id=identity, action="pause", owner=core.PauseOwner.QUOTA
             )
         case "resume":
             return core.ControlInput(control_id=identity, action="resume", when="now")
@@ -109,7 +109,6 @@ def test_a_resume_reopens_a_run_the_operators_stop_ended() -> None:
     best, its rounds and its ledger could only be abandoned for a new run.
     """
     state = _ended_by(_control("drain", 0))
-    assert core.reopens_on_resume(state.run)
     resume = _control("resume", 1)
     assert core.control_refusal(state, resume) is None
     reopened = core.step(state, core.RunControlEvent(control=resume, now_at=1.0))
@@ -134,64 +133,13 @@ def test_a_resume_reopens_a_run_the_operators_stop_ended() -> None:
     assert not [event for event in again.events if isinstance(event, core.Rejected)]
 
 
-def test_a_run_the_deadline_ended_is_not_reopened() -> None:
-    state = _ended_by(
-        core.ControlInput(
-            control_id=core.ControlId(root="deadline"), action="stop", mode=core.StopMode.DRAIN
-        )
-    )
-    assert not core.reopens_on_resume(state.run)
-    assert core.control_refusal(state, _control("resume", 1)) is not None
-
-
-def test_a_run_that_ended_by_itself_is_not_reopened() -> None:
-    for outcome in ("success", "failure", "blocked"):
-        state = _with_outcome(_ended_by(_control("drain", 0)), outcome)
-        assert not core.reopens_on_resume(state.run)
-        assert core.control_refusal(state, _control("resume", 1)) is not None
-
-
 def test_a_run_whose_ending_is_still_closing_takes_no_resume() -> None:
     """Cleanup finishes first: a resume reopens the run only once the ending is committed."""
     state = _ended_by(_control("drain", 0))
     closing = state.model_copy(
         update={"run": state.run.model_copy(update={"status": core.RunStatus.CLOSING})}
     )
-    assert not core.reopens_on_resume(closing.run)
     assert core.control_refusal(closing, _control("resume", 1)) is not None
-
-
-@given(
-    kinds=st.lists(st.sampled_from(("drain", "cancel", "resume")), min_size=1, max_size=6),
-    outcome=st.sampled_from(_OUTCOMES),
-    deadline=st.booleans(),
-)
-def test_a_resume_reopens_exactly_the_run_a_standing_operator_stop_cancelled(
-    kinds: list[_Kind], outcome: _Outcome, *, deadline: bool
-) -> None:
-    """The rule over the controls a run recorded before it ended, and its result."""
-    state = core.initial_state()
-    standing = False
-    for index, kind in enumerate(kinds):
-        if kind == "resume" and not standing:
-            continue  # a resume with no stop standing is a plain resume
-        state = core.step(
-            state, core.RunControlEvent(control=_control(kind, index), now_at=float(index))
-        ).state
-        standing = kind != "resume"
-    if standing and deadline:
-        stop = core.ControlInput(
-            control_id=core.ControlId(root="deadline"), action="stop", mode=core.StopMode.DRAIN
-        )
-        state = core.step(state, core.RunControlEvent(control=stop, now_at=9.0)).state
-    ended = state.run.model_copy(
-        update={
-            "status": core.RunStatus.TERMINAL,
-            "result": core.RunResultProposal(outcome=outcome, reason="x"),
-        }
-    )
-    expected = standing and outcome == "cancelled" and not deadline
-    assert core.reopens_on_resume(ended) is expected
 
 
 type _Requester = Literal["operator", "deadline", "environment"]
@@ -207,38 +155,6 @@ def _stop_by(requester: _Requester, index: int) -> core.ControlInput:
     return core.ControlInput(
         control_id=core.ControlId(root=identity), action="stop", mode=core.StopMode.CANCEL
     )
-
-
-@given(
-    stops=st.lists(
-        st.sampled_from(("operator", "deadline", "environment", "resume")), min_size=1, max_size=6
-    ),
-    outcome=st.sampled_from(_OUTCOMES),
-)
-@example(stops=["environment"], outcome="cancelled")  # the reported case: a failed probe
-@example(stops=["operator", "environment"], outcome="cancelled")
-def test_only_an_operator_stop_reopens_a_run_and_a_final_stop_since_the_last_resume_never_does(
-    stops: list[_Requester | Literal["resume"]], outcome: _Outcome
-) -> None:
-    """Regression (sweep F2): the run environment's stop was taken for an operator's pause.
-
-    A probe that failed for good stopped the run with no id of its own, so its record read
-    resumable and a resume replayed the failure. The deadline's stop and the environment's are
-    the host's verdicts: once either stands, no resume reopens the run.
-    """
-    controls: list[core.ControlInput] = []
-    standing = final = False
-    for index, kind in enumerate(stops):
-        if kind == "resume":
-            controls.append(_control("resume", index))
-            standing = final = False
-            continue
-        controls.append(_stop_by(kind, index))
-        standing = True
-        final = final or kind != "operator"
-    result = core.RunResultProposal(outcome=outcome, reason="x")
-    expected = standing and not final and outcome == "cancelled"
-    assert core.reopens_after(core.RunStatus.TERMINAL, result, controls) is expected
 
 
 type _HostKind = Literal["drain", "cancel", "resume", "deadline", "environment"]
@@ -259,7 +175,7 @@ def _host_control(kind: _HostKind, index: int) -> core.ControlInput:
 @example(["environment", "resume"])  # the reported case: a resume after the probe's stop
 @example(["deadline", "resume"])
 @example(["drain", "environment", "resume"])
-def test_no_resume_lifts_a_stop_the_host_delivered_while_the_run_runs(
+def test_an_explicit_resume_lifts_each_host_stop(
     kinds: list[_HostKind],
 ) -> None:
     """Regression (review B1 of #3327): a resume lifted the deadline's and the environment's stop.
@@ -270,18 +186,9 @@ def test_no_resume_lifts_a_stop_the_host_delivered_while_the_run_runs(
     stands core refuses a resume, so the stop stands to the run's end.
     """
     state = core.initial_state()
-    final = False
     for index, kind in enumerate(kinds):
         control = _host_control(kind, index)
-        refused = core.control_refusal(state, control)
-        if kind == "resume" and final:
-            assert refused is not None
-            continue
-        if kind == "resume" and core.requested_stop_mode(state.run) is None:
-            continue  # a resume with no stop standing is a plain resume
-        assert refused is None
+        assert core.control_refusal(state, control) is None
         state = core.step(state, core.RunControlEvent(control=control, now_at=float(index))).state
-        final = final or kind in {"deadline", "environment"}
         if kind == "resume":
             assert core.requested_stop_mode(state.run) is None
-    assert (core.requested_stop_mode(state.run) is not None) or not final

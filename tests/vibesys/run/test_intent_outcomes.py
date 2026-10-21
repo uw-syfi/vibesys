@@ -23,11 +23,11 @@ from vs_runtime.api.infrastructure import (
     CancelAttemptRequest,
     CancelItemRequest,
     ChannelRunControl,
+    PauseNowRequest,
     PauseRequest,
     ResumeRequest,
     SetMaxParallelRequest,
     SteerRequest,
-    StopRequest,
     WithdrawRequest,
     create_run_control_channel,
 )
@@ -42,7 +42,7 @@ _REQUESTS = [
     WithdrawRequest(control_id="withdraw", withdraws="missing"),
     CancelAttemptRequest(control_id="cancel-attempt", attempt="missing"),
     CancelItemRequest(control_id="cancel-item", item="missing"),
-    StopRequest(control_id="stop"),
+    PauseNowRequest(control_id="stop"),
 ]
 
 

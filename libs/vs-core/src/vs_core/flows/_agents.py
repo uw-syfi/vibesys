@@ -476,6 +476,8 @@ class _Ask:
 
     async def _unsuccessful(self, result: TurnResult) -> Failed | _Again:
         role, turn = self.role, result.invocation
+        if result.failure is TurnFailureKind.EPOCH_INTERRUPTED:
+            return self._unfinished(turn)
         if result.failure is TurnFailureKind.TRANSPORT_LOST:
             return await self._lost(turn)
         if result.failure is TurnFailureKind.PROVIDER_UNAVAILABLE:
@@ -572,12 +574,16 @@ class _Ask:
             self.kit.now() + role.lost_turn_backoff.delay(min(self.outages, _BACKOFF_STEPS))
         )
         self.charge = "correction"
-        self.predecessor = lost
+        self.outages += 1
+        return self._unfinished(lost)
+
+    def _unfinished(self, invocation: InvocationRef) -> _Again:
+        """Retry an unfinished invocation without spending corrections or lost-turn allowances."""
+        self.predecessor = invocation
         self.resume = None
         self.continuation = None
         self.invocation = None
         self.resuming = False
-        self.outages += 1
         return _AGAIN
 
     # -- waiting for what core decides ---------------------------------------------------------
