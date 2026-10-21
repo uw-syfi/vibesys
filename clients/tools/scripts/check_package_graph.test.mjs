@@ -744,6 +744,22 @@ test('strict-imports rejects a UI kit declared in the manifest, naming the key',
 
 test('strict-imports allows the listed libraries, react-dom and tests', async t => {
   const workspace = validWorkspace();
+  workspace['run-skeleton'] = {
+    manifest: {
+      name: '@vibesys/run-skeleton',
+      vibesys: {layer: 'domain', entries: {'.': 'neutral'}},
+      exports: {'.': source('index')},
+    },
+    files: {
+      'src/index.ts': 'export const skeleton = 1;\n',
+      'tsconfig.lib.json': project({include: ['src']}),
+    },
+  };
+  workspace.screen.manifest.dependencies['@vibesys/run-skeleton'] = 'workspace:*';
+  workspace.screen.files['src/renderer/index.ts'] += "import '@vibesys/run-skeleton';\n";
+  workspace.screen.files['tsconfig.renderer.json'].references.push({
+    path: '../../libs/run-skeleton/tsconfig.lib.json',
+  });
   workspace.screen.files['src/renderer/index.ts'] +=
     "import 'react-dom/client';\nimport '@vibesys/connection';\nimport '@vibesys/ui';\n";
   workspace.screen.manifest.dependencies['@vibesys/connection'] = 'workspace:*';

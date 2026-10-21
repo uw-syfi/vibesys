@@ -411,6 +411,14 @@ change this screen at the same time.
 | The run's summary read model and its seeding | `state/run-summary.ts` |
 | Talking to the app, the host or the live session | `renderer/effects/` |
 
+The per-host transport-v2 setting selects an additive reader. `@vibesys/run-skeleton` owns
+Skeleton and Tail loading, local history lookup, content caching and log following. The pure
+`@vibesys/run-state/skeleton` adapter translates sought store values into the existing screen's
+span, measurement and usage values. `state/skeleton-projection.ts` builds the shared `RunModel`;
+`state/gateway-machine.ts` owns the reader's setting, content requests and selected log stream.
+The desktop shell injects the generic Electron byte bridge. With the setting off, the existing
+run session and screen store remain the read path.
+
 Data folds and selectors, all pure and under `state/`:
 
 - `state/run-page.ts`: the store, a reducer over the host's record of the run and the user's

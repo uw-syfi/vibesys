@@ -32,6 +32,8 @@
     "typescript": "^5.8.3"
   },
   "dependencies": {
-    "@vibesys/contracts": "workspace:*"
+    "@vibesys/contracts": "workspace:*",
+    "@bufbuild/protobuf": "2.16.0",
+    "@vibesys/proto": "workspace:*"
   }
 }

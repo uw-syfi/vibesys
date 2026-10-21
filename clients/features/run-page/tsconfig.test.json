@@ -33,6 +33,21 @@
     },
     {
       "path": "../../libs/machine/tsconfig.testing.json"
+    },
+    {
+      "path": "../../libs/run-skeleton/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/run-skeleton/tsconfig.cache.json"
+    },
+    {
+      "path": "../../libs/transport/tsconfig.testing.json"
+    },
+    {
+      "path": "../../libs/run-skeleton/tsconfig.testing.json"
+    },
+    {
+      "path": "../../libs/proto/tsconfig.lib.json"
     }
   ]
 }

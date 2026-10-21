@@ -224,7 +224,17 @@ type RunLogs =
   | {readonly kind: 'listed'; readonly instanceId: string; readonly streams: readonly LogStream[]}
   | {readonly kind: 'failed'; readonly message: string; readonly unsupported: boolean};
 
+export interface StageView {
+  readonly id: string;
+  readonly state: 'done' | 'active' | 'waiting' | 'failed';
+  readonly label: string;
+  readonly streamId: string | null;
+}
+
 export interface RunPageState {
+  readonly startupStages?: readonly StageView[];
+  readonly readOnly?: boolean;
+  readonly lifecycleWord?: string | undefined;
   readonly identity: RunRef;
   /** What the sidebar knows about the run's name: its project and task. */
   readonly title: {readonly project: string; readonly task: string | null};
