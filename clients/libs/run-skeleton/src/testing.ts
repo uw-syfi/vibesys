@@ -12,6 +12,8 @@ import {
   TailResponseSchema,
   TailStreamRequestSchema,
   TailStreamResponseSchema,
+  type WatchRunsResponse,
+  WatchRunsResponseSchema,
 } from '@vibesys/proto';
 import {type AbortSignalLike, registerAbort} from '@vibesys/transport';
 import type {RunTransport} from './index.js';
@@ -22,9 +24,19 @@ interface Subscriber {
   readonly receive: () => void;
 }
 
+interface Cursor {
+  nextSeq: bigint;
+  streamId: string;
+  offset: bigint;
+  observation: number;
+  initial: WatchRunsResponse[];
+}
+
 export class FakeRunTransport implements RunTransport {
   readonly calls: {method: string; request: Uint8Array; signal: AbortSignalLike}[] = [];
   readonly #subscribers = new Set<Subscriber>();
+  readonly #observations: WatchRunsResponse[] = [];
+  readonly #closed = new Set<string>();
   readonly #records: StoreRecord[];
   #initialCount: number;
   readonly #blobs: Readonly<Record<string, Uint8Array>>;
@@ -62,6 +74,22 @@ export class FakeRunTransport implements RunTransport {
   }
   publish(records: readonly StoreRecord[]): void {
     this.#records.push(...records);
+    for (const subscriber of [...this.#subscribers]) subscriber.receive();
+  }
+  observe(response: WatchRunsResponse): void {
+    this.#observations.push(response);
+    for (const subscriber of [...this.#subscribers]) subscriber.receive();
+  }
+  close(method: string): void {
+    this.#closed.add(method);
+    for (const subscriber of [...this.#subscribers]) subscriber.receive();
+  }
+  recover(method: string): void {
+    this.#closed.delete(method);
+    this.failures.delete(method);
+  }
+  fail(method: string, error: Error): void {
+    this.failures.set(method, error);
     for (const subscriber of [...this.#subscribers]) subscriber.receive();
   }
   async unary(method: string, request: Uint8Array, signal: AbortSignalLike): Promise<Uint8Array> {
@@ -122,11 +150,14 @@ export class FakeRunTransport implements RunTransport {
     const registration = registerAbort(signal, subscriber.receive);
     try {
       while (!signal.aborted) {
+        const failure = this.failures.get(method);
+        if (failure) throw failure;
         const batch = this.batch(method, cursor);
         if (batch) {
           yield batch;
           continue;
         }
+        if (this.#closed.has(method)) return;
         await new Promise<void>(resolve => {
           wake = resolve;
         });
@@ -150,13 +181,24 @@ export class FakeRunTransport implements RunTransport {
       if (!input.runId || !input.streamId) throw new Error('run_id and stream_id required');
       streamId = input.streamId;
       offset = input.fromOffset;
-    } else throw new Error(`Unknown stream method ${method}`);
-    return {nextSeq, streamId, offset};
+    } else if (method !== `${SERVICE}WatchRuns`) throw new Error(`Unknown stream method ${method}`);
+    const current = new Map<string, WatchRunsResponse>();
+    for (const response of this.#observations) {
+      if (response.removed) current.delete(response.runId);
+      else current.set(response.runId, response);
+    }
+    return {
+      nextSeq,
+      streamId,
+      offset,
+      observation: this.#observations.length,
+      initial: [...current.values(), create(WatchRunsResponseSchema, {initialComplete: true})],
+    };
   }
-  private batch(
-    method: string,
-    cursor: {nextSeq: bigint; streamId: string; offset: bigint},
-  ): Uint8Array | undefined {
+  private batch(method: string, cursor: Cursor): Uint8Array | undefined {
+    if (method === `${SERVICE}WatchRuns`) {
+      return this.observation(cursor);
+    }
     if (method === `${SERVICE}Tail`) {
       const records = this.#records.filter(record => record.seq >= cursor.nextSeq);
       if (records.length > 0) {
@@ -183,6 +225,13 @@ export class FakeRunTransport implements RunTransport {
       }
     }
     return undefined;
+  }
+  private observation(cursor: Cursor): Uint8Array | undefined {
+    const initial = cursor.initial.shift();
+    if (initial) return toBinary(WatchRunsResponseSchema, initial);
+    const response = this.#observations[cursor.observation];
+    if (response) cursor.observation += 1;
+    return response ? toBinary(WatchRunsResponseSchema, response) : undefined;
   }
   private async wait(method: string, signal: AbortSignalLike): Promise<void> {
     if (!this.held.has(method)) return;
