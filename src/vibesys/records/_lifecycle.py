@@ -109,6 +109,7 @@ def started(projection: Projection) -> None:
             detail=projection.pack(p.SearchRunDescription(max_workstreams=data.max_rounds)),
         ),
     )
+    projection.emit("lifecycle", p.Lifecycle(state=p.Oneof("running", p.Running())))
 
 
 def starting(projection: Projection) -> None:
@@ -182,10 +183,24 @@ def ended(projection: Projection) -> None:
                 )
             ),
         )
+    elif event.type is e.CoreEventType.RUN_FAILED:
+        ending.outcome = p.Outcome.FAILED
+        ending.failure = p.RunFailure(
+            kind=p.RunFailureKind.NO_RESULT,
+            reason=projection.text("run", "failure.reason", event.text or ""),
+        )
     elif event.type is e.CoreEventType.STOPPED:
         ending.outcome = p.Outcome.STOPPED
-    else:
+    elif ending.outcome == p.Outcome.UNSPECIFIED:
         ending.outcome = p.Outcome.FINISHED
+    for span in list(projection.spans.values()):
+        if span.status in {p.SpanStatus.RUNNING, p.SpanStatus.WAITING, p.SpanStatus.PENDING}:
+            span.status = (
+                p.SpanStatus.FAILED if ending.outcome == p.Outcome.FAILED else p.SpanStatus.STOPPED
+            )
+            span.ended_at = max(span.started_at, projection.clock)
+            span.waiting_on = []
+            projection.span(span, p.Change.ENDED)
     projection.emit("lifecycle", p.Lifecycle(state=p.Oneof("ended", ending)))
 
 
