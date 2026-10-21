@@ -904,6 +904,9 @@ REAL_API_EDGES: dict[Key, str] = {
     **{
         (relative, "fs_sync"): f"{_OWN_STORE}: {what}"
         for relative, what in (
+            ("libs/vs-runlog/src/vs_runlog/_file.py", "durable run.log appends"),
+            ("libs/vs-runlog/src/vs_runlog/_atomic.py", "atomic head and keyframe publication"),
+            ("libs/vs-runlog/src/vs_runlog/_lock.py", "the run lifetime lock"),
             ("libs/vs-project/src/vs_project/_operator_key.py", "the operator key file"),
             ("libs/vs-project/src/vs_project/_state.py", "the project state lock file"),
             ("libs/vs-project/src/vs_project/_state_io.py", "atomic state file replacement"),
@@ -1206,6 +1209,14 @@ type Edge = tuple[EdgeKind, str]
 # parse JSON or TOML directly. Everything else asks the owner of the data. Keep one line
 # per module: its kind, and a note naming the data.
 FILE_IO_EDGE_MODULES: dict[str, Edge] = {
+    "libs/vs-runlog/src/vs_runlog/_atomic.py": (
+        EdgeKind.LOG,
+        "durable atomic publication of run store protobuf files",
+    ),
+    "libs/vs-runlog/src/vs_runlog/_lock.py": (
+        EdgeKind.LOG,
+        "the run.lock lifetime descriptor",
+    ),
     "libs/vs-runlog/src/vs_runlog/_file.py": (
         EdgeKind.LOG,
         "the run.log file sink and recovery reader; framing stays in the pure _framing module",
