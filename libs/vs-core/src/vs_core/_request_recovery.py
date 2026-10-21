@@ -355,6 +355,10 @@ def _resolution(record: RequestRecord, context: RecordsContext) -> Resolution:
         # executor answer can matter: an inspection that finds it begun and unsealed (the host
         # died as the poll ran) must not hold the run in recovery, as it did a run whose old
         # polls of jobs core had long released came back unknown.
+        # "terminal" settles only the recovery check, even for an Unknown observation;
+        # it proves no external acceptance, termination or release and changes no ledger
+        # facts. test_ambiguous_acceptance_never_replays_any_lifecycle_class exhausts this
+        # exception and requires every other ambiguous class/phase to stay pending.
         return "terminal"
     return _observed_resolution(record, context)
 
