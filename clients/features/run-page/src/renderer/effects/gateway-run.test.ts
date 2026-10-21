@@ -84,13 +84,17 @@ test('Skeleton then Tail, local seek, verified cached content, logs and cancella
   await reached(
     actor,
     snapshot =>
-      snapshot.context.load?.complete === true && Object.keys(snapshot.context.text).length === 1,
+      snapshot.context.load?.complete === true && Object.keys(snapshot.context.text).length === 2,
   );
   const tail = transport.calls.find(call => call.method === `${SERVICE}Tail`);
   if (!tail) throw new Error('Tail required');
   expect(fromBinary(TailRequestSchema, tail.request).fromSeq).toBe(4n);
   expect(transport.calls.filter(call => call.method === `${SERVICE}Skeleton`)).toHaveLength(1);
-  expect(transport.calls.filter(call => call.method === `${SERVICE}GetBlobs`)).toHaveLength(1);
+  expect(transport.calls.filter(call => call.method === `${SERVICE}GetBlobs`)).toHaveLength(2);
+  expect(Object.values(actor.getSnapshot().context.text).sort()).toEqual([
+    'Steady throughput',
+    'Throughput',
+  ]);
   const calls = transport.calls.length;
   actor.send({type: 'ui', action: {type: 'view', view: {at: 3}}});
   expect(actor.getSnapshot().context.ui.view.at).toBe(3);
@@ -111,8 +115,8 @@ test('Skeleton then Tail, local seek, verified cached content, logs and cancella
   const reopened = startGatewayRun({...ports, setting: async () => true}, clock.schedule, {
     seed: SEED,
   });
-  await reached(reopened, snapshot => Object.keys(snapshot.context.text).length === 1);
-  expect(transport.calls.filter(call => call.method.endsWith('GetBlobs'))).toHaveLength(1);
+  await reached(reopened, snapshot => Object.keys(snapshot.context.text).length === 2);
+  expect(transport.calls.filter(call => call.method.endsWith('GetBlobs'))).toHaveLength(2);
   reopened.stop();
 });
 
@@ -209,5 +213,29 @@ test('setting, content and first-log deadlines use the injected clock', async ()
   expect(transport.calls.find(call => call.method.endsWith('TailStream'))?.signal.aborted).toBe(
     true,
   );
+  actor.stop();
+});
+
+test('each objective hash is attempted once even when content fails', async () => {
+  const fixture = storeRunFixture('blobs');
+  const clock = new FakeClock();
+  const transport = new FakeRunTransport(fixture);
+  transport.failures.set(`${SERVICE}GetBlobs`, new Error('Fault'));
+  const actor = startGatewayRun(
+    {
+      reader: gatewayReader(transport, new FakeSkeletonCache(), clock.schedule),
+      setting: async () => true,
+    },
+    clock.schedule,
+    {seed: SEED},
+  );
+  await reached(
+    actor,
+    snapshot =>
+      transport.calls.filter(call => call.method.endsWith('GetBlobs')).length === 2 &&
+      snapshot.matches({active: {content: 'idle'}}),
+  );
+  expect(transport.calls.filter(call => call.method.endsWith('GetBlobs'))).toHaveLength(2);
+  expect(actor.getSnapshot().context.error).toBe('Content unavailable');
   actor.stop();
 });

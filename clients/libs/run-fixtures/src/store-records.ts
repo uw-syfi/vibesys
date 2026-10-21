@@ -29,6 +29,8 @@ import {storeFacts} from './store-facts.js';
 
 const OBJECTIVE = 'Throughput';
 const HASH = '960bcc4e48b929b89a54da1613c577f938e27adffd9fefc84b176a081eba5ae6';
+const LATER_OBJECTIVE = 'Steady throughput';
+const LATER_HASH = '4a657cf6c298504dbf4d95c3ff7258dfef96c97ffe27063c03763eea40d7b734';
 
 export interface StoreRunFixture {
   readonly records: readonly StoreRecord[];
@@ -51,12 +53,12 @@ function descriptors() {
 
 type Body = NonNullable<MessageInitShape<typeof RecordSchema>['body']>;
 
-function epochBody(): Body {
+function epochBody(epoch = 1, objective = OBJECTIVE, hash = HASH): Body {
   return {
     case: 'epochStarted',
     value: create(EpochStartedSchema, {
       runId: 'run-a',
-      epoch: 1,
+      epoch,
       treeHash: 'a'.repeat(40),
       vibesysVersion: 'test',
       apiSchemaHash: API_SCHEMA_HASH,
@@ -65,7 +67,7 @@ function epochBody(): Body {
       run: {
         strategy: 'search',
         input: 'input',
-        objective: {sha256: HASH, size: BigInt(OBJECTIVE.length), mediaType: 'text/plain'},
+        objective: {sha256: hash, size: BigInt(objective.length), mediaType: 'text/plain'},
         objectives: [{series: 'throughput', direction: Direction.MAX}],
         expectedRoles: ['implementer'],
       },
@@ -175,11 +177,12 @@ export function storeRunFixture(
   seed = 1,
 ): StoreRunFixture {
   const records: StoreRecord[] = [];
+  let epoch = 1;
   const push = (body: NonNullable<MessageInitShape<typeof RecordSchema>['body']>): void => {
     records.push(
       create(RecordSchema, {
         seq: BigInt(records.length + 1),
-        epoch: 1,
+        epoch,
         at: {seconds: 1700000000n + BigInt(records.length)},
         body,
       }),
@@ -236,6 +239,10 @@ export function storeRunFixture(
       },
     });
   }
+  if (kind === 'blobs') {
+    epoch = 2;
+    push(epochBody(epoch, LATER_OBJECTIVE, LATER_HASH));
+  }
   if (kind === 'facts') for (const body of storeFacts()) push(body);
   push({
     case: 'stream',
@@ -251,7 +258,12 @@ export function storeRunFixture(
   return {
     records,
     initialCount: kind === 'live' ? 3 : records.length,
-    blobs: {[HASH]: Uint8Array.from(OBJECTIVE, char => char.charCodeAt(0))},
+    blobs: {
+      [HASH]: Uint8Array.from(OBJECTIVE, char => char.charCodeAt(0)),
+      ...(kind === 'blobs'
+        ? {[LATER_HASH]: Uint8Array.from(LATER_OBJECTIVE, char => char.charCodeAt(0))}
+        : {}),
+    },
     streams: {'build-log': Uint8Array.from('Build complete\n', char => char.charCodeAt(0))},
   };
 }

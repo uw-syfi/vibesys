@@ -31,11 +31,18 @@ export interface GatewayRunContext extends GatewayInput {
   ui: RunPageState;
   text: Readonly<Record<string, string>>;
   contentHash: string;
+  attemptedContent: ReadonlySet<string>;
   error: string | null;
 }
 
-function objectiveHash(context: GatewayRunContext): string {
-  return context.load?.skeleton.epochs.at(-1)?.epoch?.run?.objective?.sha256 ?? '';
+function nextContentHash(context: GatewayRunContext): string {
+  const epochs = context.load?.skeleton.epochs ?? [];
+  for (let index = epochs.length - 1; index >= 0; index -= 1) {
+    const hash = epochs[index]?.epoch?.run?.objective?.sha256 ?? '';
+    if (hash !== '' && context.text[hash] === undefined && !context.attemptedContent.has(hash))
+      return hash;
+  }
+  return '';
 }
 
 /** Presentation changes reuse the existing pure reducer; gateway commands never reach legacy ports. */
@@ -92,10 +99,7 @@ export const gatewayRunMachine = setup({
     log: unprovided<void, GatewayLogInput>('log transport'),
   },
   guards: {
-    needsContent: ({context}) =>
-      objectiveHash(context) !== '' &&
-      context.text[objectiveHash(context)] === undefined &&
-      context.contentHash !== objectiveHash(context),
+    needsContent: ({context}) => nextContentHash(context) !== '',
     hasStream: ({context}) => context.ui.selected !== null,
   },
 }).createMachine({
@@ -107,6 +111,7 @@ export const gatewayRunMachine = setup({
     ui: runPageInitial(input.seed),
     text: {},
     contentHash: '',
+    attemptedContent: new Set(),
     error: null,
   }),
   initial: 'checking',
@@ -150,6 +155,7 @@ export const gatewayRunMachine = setup({
       entry: assign({
         load: undefined,
         contentHash: '',
+        attemptedContent: new Set(),
         ui: ({context}) => ({...context.ui, selected: null, views: {}}),
       }),
       type: 'parallel',
@@ -176,7 +182,13 @@ export const gatewayRunMachine = setup({
               always: {
                 guard: 'needsContent',
                 target: 'reading',
-                actions: assign({contentHash: ({context}) => objectiveHash(context)}),
+                actions: assign(({context}) => {
+                  const hash = nextContentHash(context);
+                  return {
+                    contentHash: hash,
+                    attemptedContent: new Set([...context.attemptedContent, hash]),
+                  };
+                }),
               },
             },
             reading: {

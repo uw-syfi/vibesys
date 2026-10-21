@@ -35,7 +35,11 @@ const SEED = {
 
 for (let seed = 1; seed <= 24; seed += 1) {
   test(`property: seek and keyframes match every prefix (seed ${seed})`, () => {
-    const {records} = storeRunFixture(seed % 2 ? 'short' : 'live', 1 + (seed % 5), seed);
+    const {records} = storeRunFixture(
+      seed % 3 === 0 ? 'blobs' : seed % 2 ? 'short' : 'live',
+      1 + (seed % 5),
+      seed,
+    );
     const full = foldSkeleton(seedSkeleton(), records);
     const cached = seedSkeleton(
       create(KeyframeSchema, {...full, throughSeq: full.throughSeq ?? 0n, logOffset: 8n}),

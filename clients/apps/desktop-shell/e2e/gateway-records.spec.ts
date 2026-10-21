@@ -3,6 +3,7 @@ import {join} from 'node:path';
 import {create, toBinary} from '@bufbuild/protobuf';
 import {expect, test} from '@playwright/test';
 import {
+  GetBlobsRequestSchema,
   GetBlobsResponseSchema,
   RecordSchema,
   SkeletonResponseSchema,
@@ -18,7 +19,7 @@ import {openFixture} from './fixture-world.js';
 interface WireFixture {
   skeleton: number[];
   tail: number[];
-  blobs: number[];
+  blobs: Record<string, number[]>;
   log: number[];
 }
 function wire(fixture: StoreRunFixture): WireFixture {
@@ -45,14 +46,22 @@ function wire(fixture: StoreRunFixture): WireFixture {
         }),
       ),
     ],
-    blobs: [
-      ...toBinary(
-        GetBlobsResponseSchema,
-        create(GetBlobsResponseSchema, {
-          blobs: Object.entries(fixture.blobs).map(([sha256, data]) => ({sha256, data})),
-        }),
-      ),
-    ],
+    blobs: Object.fromEntries(
+      Object.entries(fixture.blobs).map(([sha256, data]) => [
+        [
+          ...toBinary(
+            GetBlobsRequestSchema,
+            create(GetBlobsRequestSchema, {runId: 'run-a', sha256: [sha256]}),
+          ),
+        ].join(','),
+        [
+          ...toBinary(
+            GetBlobsResponseSchema,
+            create(GetBlobsResponseSchema, {blobs: [{sha256, data}]}),
+          ),
+        ],
+      ]),
+    ),
     log: [
       ...toBinary(
         TailStreamResponseSchema,
@@ -71,12 +80,12 @@ function installGateway(input: WireFixture): void {
   let active = 0;
   Object.assign(window, {
     vibesysGateway: {
-      unary: (_host: string, method: string) => {
+      unary: (_host: string, method: string, request: Uint8Array) => {
         calls.push(method);
         const bytes = method.endsWith('/Skeleton')
           ? input.skeleton
           : method.endsWith('/GetBlobs')
-            ? input.blobs
+            ? input.blobs[[...request].join(',')]
             : undefined;
         if (!bytes) throw new Error('Unknown unary');
         return {result: Promise.resolve(new Uint8Array(bytes)), cancel: () => undefined};
@@ -144,6 +153,16 @@ for (const kind of ['short', 'live', 'blobs'] as const)
         await page.screenshot({path: join(shots, file)});
         sheet.push({name: `${kind}/${width}/${mode}`, file});
       };
+      await expect
+        .poll(async () =>
+          page.evaluate(
+            () =>
+              (window as unknown as GatewayWindow).fakeGateway
+                .calls()
+                .filter(method => method.endsWith('/GetBlobs')).length,
+          ),
+        )
+        .toBe(kind === 'blobs' ? 2 : 1);
       await capture('ideas');
       await range.fill('2');
       await capture('scrubbed');
@@ -151,7 +170,9 @@ for (const kind of ['short', 'live', 'blobs'] as const)
         (window as unknown as GatewayWindow).fakeGateway.calls(),
       );
       expect(calls.filter(method => method.endsWith('/Skeleton'))).toHaveLength(1);
-      expect(calls.filter(method => method.endsWith('/GetBlobs'))).toHaveLength(1);
+      expect(calls.filter(method => method.endsWith('/GetBlobs'))).toHaveLength(
+        kind === 'blobs' ? 2 : 1,
+      );
       await page
         .getByRole('button', {name: kind === 'live' ? 'Back to live' : 'Jump to end'})
         .click();
