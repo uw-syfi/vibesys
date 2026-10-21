@@ -37,7 +37,7 @@ read path and journal projection from the native core and control work still to 
 | `Skeleton`, `GetBlobs`, `TailStream`, `WatchRuns`; new Run screen | RPCs, client skeleton/cache and opt-in raw record panel built; complete native Run screen remains unbuilt | 2 |
 | Conversion of existing JSONL runs and `store.json` envelopes | typed journal conversion and bulk project/host-index conversion built, including blobs, final keyframes, head publication and repair; pre-trace and unsupported journals are reported as skipped; core envelopes remain the resume authority until phase 3 | 2 |
 | Core state as generated types, `state.pb`, native `run.log` writes | unbuilt; typed journal projection does not replace native core commits | 3 |
-| Intents as records (`IntentState`), pause/park, relaunch epochs | schemas built; native execution and recovery remain unbuilt | 3 |
+| Intents as records (`IntentState`), pause/park, relaunch epochs | inbox outcomes and relaunch epochs built over the current saved-state resume path; park and native state recovery remain unbuilt | 3 |
 | Chat sessions as processes with their own log; `HostCall` | unbuilt | 3 |
 | Generated frozen value classes from `.proto` (our own protoc plugin) | prototype only | 3 |
 | Control inbox (files, ordered, durable, idempotent by request id) | built | |
@@ -159,6 +159,14 @@ then its `EpochStarted`, so the log holds the fact and the gateway's inference (
 `Ended` and no lock holder) is only a live hint. The run clock is monotone across epochs and
 frozen while parked; it resumes from `state.pb`. `Record.at` carries wall time. The timeline marks
 epoch boundaries with wall-time labels and collapses parked gaps.
+
+The current relaunch implementation uses the existing saved core envelope until the generated
+state migration supplies `state.pb`. The plain `vibesys.api.relaunch` function and
+`vibesys relaunch --resume <run-reference>` share that resume path. The journal projection writes
+one outcome per inbox request before its acknowledgement, retaining the legacy frontend's
+control events. New records carry `Record.clock`, excluding downtime; older records without it
+derive elapsed time within each epoch from their wall timestamps. Span times retain the epoch
+in which each transition occurred, including spans that remain open across a relaunch.
 
 **Chat sessions** belong to the run and outlive relaunches as data. They are separate processes
 with their own `session.log` and inbox, started on demand and exiting when idle or at park. The
