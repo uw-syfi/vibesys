@@ -12,6 +12,7 @@ from protobuf.wkt.google.protobuf.struct_pb import Struct
 
 from vs_core.api.replay import (
     EMPTY_CAUSALITY,
+    EncodedIdentity,
     ReplayIdentityError,
     SemanticKey,
     chain_dependency,
@@ -153,6 +154,37 @@ def test_writer_encoding_v1_is_pinned() -> None:
     value = encode_identity(core_common.Identity(root="x"), contract="candidate.v1")
     assert value.version == 1
     assert value.canonical == expected
+
+
+def test_retained_writer_identity_rejects_every_truncated_frame() -> None:
+    encoded = encode_identity(core_common.Identity(root="x"), contract="candidate.v1")
+    for end in range(len(encoded.canonical)):
+        with pytest.raises(ReplayIdentityError):
+            EncodedIdentity(encoded.canonical[:end], encoded.dependencies)
+
+
+@given(extra=st.binary(min_size=1, max_size=64))
+def test_retained_writer_identity_rejects_trailing_content(extra: bytes) -> None:
+    encoded = encode_identity(core_common.Identity(root="x"), contract="candidate.v1")
+    with pytest.raises(ReplayIdentityError, match="trailing bytes"):
+        EncodedIdentity(encoded.canonical + extra, encoded.dependencies)
+
+
+@pytest.mark.parametrize("field", ["contract", "type"])
+@pytest.mark.parametrize("change", ["empty", "utf8"])
+def test_retained_identity_requires_valid_typed_contract_names(field: str, change: str) -> None:
+    encoded = encode_identity(core_common.Identity(root="x"), contract="candidate.v1")
+    name = (
+        b"candidate.v1" if field == "contract" else core_common.Identity.desc().type_name.encode()
+    )
+    offset = encoded.canonical.index(name)
+    value = bytearray(encoded.canonical)
+    if change == "empty":
+        value[offset - 8 : offset] = b"\x00" * 8
+    else:
+        value[offset] = 0xFF
+    with pytest.raises(ReplayIdentityError, match=r"contract.*type|UTF-8"):
+        EncodedIdentity(bytes(value), encoded.dependencies)
 
 
 @pytest.mark.parametrize("message", [OpaqueIdentity(), RepeatedMapIdentity()])

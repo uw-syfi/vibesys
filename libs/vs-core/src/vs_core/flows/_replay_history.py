@@ -37,7 +37,7 @@ class AcceptedReplay:
         if operation.outcome is None:
             problem = "accepted replay has no historical outcome"
             raise ReplayError(problem)
-        if sha256(operation.identity).digest() != operation.identity_digest:
+        if self.identity.digest != operation.identity_digest:
             problem = "accepted identity digest contradicts retained bytes"
             raise ReplayError(problem)
 

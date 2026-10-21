@@ -22,6 +22,7 @@ from vs_proto.api import replay as pb
 ENCODING_VERSION = 1
 DIGEST_BYTES = 32
 EMPTY_CAUSALITY = sha256(b"vibesys.replay.causality.v1").digest()
+_IDENTITY_PREFIX = b"vibesys.identity\x01"
 
 
 class ReplayIdentityError(ValueError):
@@ -99,9 +100,45 @@ class EncodedIdentity:
     dependencies: bytes
     version: int = ENCODING_VERSION
 
+    def __post_init__(self) -> None:
+        if (
+            self.version != ENCODING_VERSION
+            or len(self.dependencies) != DIGEST_BYTES
+            or not self.canonical.startswith(_IDENTITY_PREFIX)
+        ):
+            problem = "invalid replay identity encoding or dependency digest"
+            raise ReplayIdentityError(problem)
+        offset = len(_IDENTITY_PREFIX)
+        for _ in range(2):
+            value, offset = _unframe(self.canonical, offset)
+            if not value:
+                problem = "replay identity requires its semantic contract and message type"
+                raise ReplayIdentityError(problem)
+            try:
+                value.decode("utf-8")
+            except UnicodeDecodeError as error:
+                problem = "replay identity contract and type must be UTF-8"
+                raise ReplayIdentityError(problem) from error
+        if self.canonical[offset : offset + DIGEST_BYTES] != self.dependencies:
+            problem = "replay identity contradicts its dependency digest"
+            raise ReplayIdentityError(problem)
+        _, offset = _unframe(self.canonical, offset + DIGEST_BYTES)
+        if offset != len(self.canonical):
+            problem = "replay identity has trailing bytes"
+            raise ReplayIdentityError(problem)
+
     @property
     def digest(self) -> bytes:
         return sha256(self.canonical).digest()
+
+
+def _unframe(value: bytes, offset: int) -> tuple[bytes, int]:
+    start = offset + 8
+    end = start + int.from_bytes(value[offset:start], "big")
+    if start > len(value) or end > len(value):
+        problem = "truncated replay identity frame"
+        raise ReplayIdentityError(problem)
+    return value[start:end], end
 
 
 def _message_type(value: DescFieldValue) -> DescMessage | None:
@@ -202,7 +239,7 @@ def _encode_normalized(message: Message, *, contract: str, dependencies: bytes) 
         problem = "identity needs a semantic contract and 32-byte dependencies"
         raise ReplayIdentityError(problem)
     canonical = (
-        b"vibesys.identity\x01"
+        _IDENTITY_PREFIX
         + _frame(contract.encode())
         + _frame(message.desc().type_name.encode())
         + dependencies

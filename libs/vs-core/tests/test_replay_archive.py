@@ -1,27 +1,42 @@
 """Prefix validation is pure and independent of the recorder or storage implementation."""
 
 from copy import deepcopy
+from hashlib import sha256
 from typing import Literal
 
 import pytest
 from hypothesis import example, given
 from hypothesis import strategies as st
 from protobuf import Oneof
+from protobuf.wkt.google.protobuf.any_pb import Any
 from protobuf.wkt.google.protobuf.descriptor_pb import FileDescriptorProto, FileDescriptorSet
 from protobuf.wkt.google.protobuf.timestamp_pb import Timestamp
 from scripts.generate_record_goldens import record_examples
 
-from vs_core.api.replay import ReplayArchive, ReplayError, ReplayScheduler, replay_descriptors
+from vs_core.api.replay import (
+    AcceptedReplay,
+    PolicyDrift,
+    ReplayArchive,
+    ReplayError,
+    ReplayFrontier,
+    ReplayIdentityError,
+    ReplayScheduler,
+    SemanticKey,
+    replay_descriptors,
+)
 from vs_proto.api import (
     Change,
     Ended,
     EpochStarted,
     Lifecycle,
+    Notice,
+    NoticeCode,
     Outcome,
     Record,
     ReplayStore,
     Running,
     RuntimeType,
+    Severity,
     Span,
     SpanRecord,
     SpanStatus,
@@ -479,4 +494,95 @@ def test_clock_and_operation_observations_cannot_share_a_record(length: int) -> 
     prefix = records()[: length + 1]
     prefix[-1].replay_clock = replay.ReplayClock(allowance=replay.ReplayAllowance(iterations=10))
     with pytest.raises(ReplayError, match=r"policy observation|pending observation"):
+        decode(prefix)
+
+
+def notice_record() -> Record:
+    notice = ReplayFrontier(
+        (AcceptedReplay.from_record(records()[-1]),),
+        (SemanticKey("future"),),
+        PolicyDrift(0, (), ()),
+    ).notice()
+    assert notice is not None
+    return Record(
+        seq=5,
+        epoch=1,
+        at=Timestamp(seconds=1),
+        clock=0,
+        body=Oneof(
+            "notice",
+            Notice(
+                severity=Severity.WARNING,
+                code=NoticeCode.FRAMEWORK_WARNING,
+                message="Unused paid results.",
+                detail=Any(type_url=notice.desc().type_name, value=notice.to_binary()),
+            ),
+        ),
+    )
+
+
+def test_notice_retains_the_exact_accepted_outcomes() -> None:
+    record = notice_record()
+    archive = decode([*records(), record])
+    assert len(archive.acknowledgements.notices) == 1
+    assert len(archive.acknowledgements.resume("next").disclosed()) == 1
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize("change", ["unknown", "duplicate", "id", "cost"])
+@given(value=st.integers(min_value=0, max_value=100))
+@example(value=1)
+def test_notice_cannot_invent_or_change_its_accepted_history(change: str, value: int) -> None:
+    record = notice_record()
+    assert record.body is not None
+    assert record.body.field == "notice"
+    detail = record.body.value.detail
+    assert detail is not None
+    notice = replay.ReplayNotice.from_binary(detail.value)
+    if change == "unknown":
+        notice.unused[0].accepted_sequence = value + 5
+    elif change == "duplicate":
+        notice.unused.append(deepcopy(notice.unused[0]))
+    elif change == "id":
+        notice.id = str(value)
+    else:
+        notice.unused[0].cost_usd = float(value)
+    detail.value = notice.to_binary()
+    with pytest.raises(ReplayError, match="replay notice"):
+        decode([*records(), record])
+
+
+@pytest.mark.parametrize("kind", ["disclosure", "drift"])
+def test_unknown_framework_notice_metadata_is_rejected(kind: str) -> None:
+    record = notice_record()
+    assert record.body is not None
+    assert record.body.field == "notice"
+    detail = record.body.value.detail
+    assert detail is not None
+    if kind == "drift":
+        drift = replay.ReplayPolicyDrift(results=1, roles=["implementer"])
+        detail.type_url, detail.value = drift.desc().type_name, drift.to_binary()
+    detail.value += b"\xa0\x06\x01"
+    with pytest.raises(ReplayError, match="unknown replay metadata"):
+        decode([*records(), record])
+
+
+@pytest.mark.regression
+@given(content=st.binary(max_size=64))
+@example(content=b"x")
+def test_unanswered_start_requires_a_well_formed_identity(content: bytes) -> None:
+    prefix = records()[:2]
+    operation = operation_of(prefix[-1])
+    operation.identity = b"invalid" + content
+    operation.identity_digest = sha256(operation.identity).digest()
+    with pytest.raises(ReplayIdentityError, match="identity encoding"):
+        decode(prefix)
+
+
+@pytest.mark.parametrize("field", ["identity_digest", "dependencies"])
+def test_unanswered_start_rejects_contradictory_identity_proofs(field: str) -> None:
+    prefix = records()[:2]
+    operation = operation_of(prefix[-1])
+    setattr(operation, field, b"x" * 32)
+    with pytest.raises((ReplayError, ReplayIdentityError), match="contradicts"):
         decode(prefix)

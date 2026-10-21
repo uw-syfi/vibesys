@@ -6,7 +6,7 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from protobuf import Oneof
+from protobuf import Message, Oneof
 
 from vs_proto.api import (
     RUN_LOG_MAX_RECORD_BYTES,
@@ -20,8 +20,14 @@ from vs_proto.api import (
 )
 from vs_proto.api import replay as pb
 
-from ._replay_history import AcceptedClock, AcceptedReplay, ReplayAcknowledgements
-from ._replay_identity import ENCODING_VERSION
+from ._replay_history import (
+    AcceptedClock,
+    AcceptedReplay,
+    PolicyDrift,
+    ReplayAcknowledgements,
+    ReplayFrontier,
+)
+from ._replay_identity import ENCODING_VERSION, EncodedIdentity, SemanticKey
 from ._replay_sources import ReplayError
 
 if TYPE_CHECKING:
@@ -36,6 +42,24 @@ def _execution(span: Span) -> bytes:
     for name in ("outcome", "accepted_sequence", "paid", "cost_usd"):
         operation.clear_field(name)
     return operation.to_binary()
+
+
+def _check_identity(operation: pb.OperationReplay) -> None:
+    identity = EncodedIdentity(
+        operation.identity, operation.dependencies, operation.encoding_version
+    )
+    if identity.digest != operation.identity_digest:
+        problem = "replay identity digest contradicts retained bytes"
+        raise ReplayError(problem)
+
+
+def _metadata[T: Message](detail: Any, message: type[T]) -> T:
+    value = message.from_binary(detail.value)
+    validate(value)
+    if value.to_binary() != value.to_binary(write_unknown_fields=False):
+        problem = f"unknown replay metadata fields in {message.desc().type_name}"
+        raise ReplayError(problem)
+    return value
 
 
 @dataclass
@@ -232,15 +256,44 @@ class ReplayArchive:
             return
         name = detail.type_url.rsplit("/", 1)[-1]
         if name == pb.ReplayPolicyDrift.desc().type_name:
-            drift = pb.ReplayPolicyDrift.from_binary(detail.value)
-            validate(drift)
+            drift = _metadata(detail, pb.ReplayPolicyDrift)
             if self._policy_drift is not None:
                 problem = "an epoch records policy drift only once"
                 raise ReplayError(problem)
             self._policy_drift = drift.to_binary()
         elif name == pb.ReplayNotice.desc().type_name:
-            notice = pb.ReplayNotice.from_binary(detail.value)
+            notice = _metadata(detail, pb.ReplayNotice)
+            self._validate_notice(notice)
             self.acknowledgements = self.acknowledgements.record_notice(notice)
+
+    def _validate_notice(self, notice: pb.ReplayNotice) -> None:
+        if self._epoch_closed:
+            problem = "a closed epoch cannot disclose new replay results"
+            raise ReplayError(problem)
+        history = {
+            item.sequence: item for item in self._history if isinstance(item, AcceptedReplay)
+        }
+        unused = []
+        seen = set()
+        for operation in notice.unused:
+            accepted = history.get(operation.accepted_sequence)
+            if (
+                accepted is None
+                or accepted.operation_bytes != operation.to_binary()
+                or accepted.sequence in seen
+            ):
+                problem = "replay notice must name distinct unchanged accepted outcomes"
+                raise ReplayError(problem)
+            unused.append(accepted)
+            seen.add(accepted.sequence)
+        frontier = ReplayFrontier(
+            tuple(unused),
+            tuple(SemanticKey.from_proto(key) for key in notice.pending),
+            PolicyDrift(0, (), ()),
+        )
+        if notice.id != frontier.notice_id:
+            problem = "replay notice id contradicts its retained results and frontier"
+            raise ReplayError(problem)
 
     def _epoch(self, record: Record, epoch: EpochStarted) -> None:
         if self._epochs and epoch.epoch == len(self._epochs):
@@ -320,6 +373,7 @@ class ReplayArchive:
             problem = "keyed span requires replay metadata"
             raise ReplayError(problem)
         if previous_bytes is None:
+            _check_identity(operation)
             if change != Change.STARTED or operation.outcome is not None or span.replay_observation:
                 problem = "replay operation must start before observation or outcome"
                 raise ReplayError(problem)
