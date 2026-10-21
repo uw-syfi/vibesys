@@ -12,6 +12,7 @@ import "vibesys/store/v1/intent.proto";
 import "vibesys/store/v1/lifecycle.proto";
 import "vibesys/store/v1/notice.proto";
 import "vibesys/store/v1/span.proto";
+import "vibesys/store/v1/replay.proto";
 
 option go_package = "github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1";
 
@@ -106,6 +107,10 @@ message EpochStarted {
   // False explicitly records that the journal has no checkout fingerprint.
   // Absence preserves the validation of previously published typed headers.
   optional bool provenance_known = 12;
+  // Present only for keyed epochs. Retain this writer encoding indefinitely.
+  optional uint32 identity_encoding_version = 13 [(buf.validate.field).uint32.const = 1];
+  optional ReplayAllowance initial_allowance = 14;
+  optional ReplayAcknowledgement replay_acknowledgement = 15;
 }
 
 // LegacyEvent is an interim bridge carrying one current JSONL run event verbatim.

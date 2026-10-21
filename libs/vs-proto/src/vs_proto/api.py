@@ -81,6 +81,7 @@ from vs_proto._generated.vibesys.search.v1.run_pb import (
     SearchRunDescription,
     SearchRunFailure,
 )
+from vs_proto._generated.vibesys.store.v1 import replay_pb as replay
 from vs_proto._generated.vibesys.store.v1.agent_attrs_pb import (
     AgentTurnAttrs,
     TokenUsage,
@@ -346,6 +347,7 @@ __all__ = [
     "core_common",
     "core_control",
     "core_value_options",
+    "replay",
     "schema_hash",
     "validate",
     "validation_rules",

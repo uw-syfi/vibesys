@@ -1,0 +1,69 @@
+syntax = "proto3";
+package vibesys.store.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/any.proto";
+import "google/protobuf/descriptor.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1";
+
+// Every prompt-context field declares whether it changes semantic input or policy.
+enum ReplayFieldKind {
+  REPLAY_FIELD_KIND_UNSPECIFIED = 0;
+  REPLAY_FIELD_KIND_IDENTITY = 1;
+  REPLAY_FIELD_KIND_POLICY = 2;
+}
+extend google.protobuf.FieldOptions {
+  ReplayFieldKind replay_field = 51100;
+  // Only repeated fields may be sets. The writer sorts and deduplicates them.
+  bool replay_set = 51101;
+}
+
+// Names are semantic, never source locations or live collection positions.
+message OperationKey {
+  string operation = 1 [(buf.validate.field).string.min_len = 1];
+  repeated KeyComponent scope = 2;
+}
+message KeyComponent {
+  string kind = 1 [(buf.validate.field).string = {in: ["parent", "item", "sample", "revision", "recorded_position"]}];
+  string value = 2 [(buf.validate.field).string.min_len = 1];
+}
+
+// All historical budget arithmetic reads this observation's value during replay.
+message ReplayAllowance {
+  uint64 iterations = 1;
+  uint64 capacity = 2;
+  double remaining = 3 [(buf.validate.field).double = {gte: 0, finite: true}];
+}
+message ReplayPolicy {
+  string role = 1;
+  string template = 2;
+  bytes content = 3;
+  string reply_type = 4 [(buf.validate.field).string.min_len = 1];
+}
+
+// Immutable execution metadata, separate from mutable span labels. Outcome Any
+// is decoded with the epoch's retained descriptors, never the current reply type.
+message OperationReplay {
+  OperationKey key = 1 [(buf.validate.field).required = true];
+  uint32 encoding_version = 2 [(buf.validate.field).uint32.const = 1];
+  bytes identity = 3 [(buf.validate.field).bytes.min_len = 1];
+  bytes identity_digest = 4 [(buf.validate.field).bytes.len = 32];
+  bytes dependencies = 5 [(buf.validate.field).bytes.len = 32];
+  ReplayPolicy policy = 6 [(buf.validate.field).required = true];
+  google.protobuf.Any outcome = 7;
+  // seq and clock come exclusively from the accepting Record envelope.
+  bool paid = 8;
+  optional double cost_usd = 9 [(buf.validate.field).double = {gte: 0, finite: true}];
+  ReplayAllowance allowance = 10 [(buf.validate.field).required = true];
+}
+
+message ReplayNotice {
+  string id = 1 [(buf.validate.field).string.min_len = 1];
+  repeated OperationReplay unused = 2;
+  repeated OperationKey pending = 3;
+}
+message ReplayAcknowledgement {
+  string notice_id = 1 [(buf.validate.field).string.min_len = 1];
+  string launch_request_id = 2 [(buf.validate.field).string.min_len = 1];
+}
