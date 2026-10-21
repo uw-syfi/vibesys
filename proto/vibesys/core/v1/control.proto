@@ -1,0 +1,459 @@
+syntax = "proto3";
+package vibesys.core.v1;
+
+import "buf/validate/validate.proto";
+import "vibesys/core/v1/value_options.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/gateway/gen/vibesys/core/v1;corev1";
+
+
+// Run status lifecycle contract.
+enum RunStatus {
+  RUN_STATUS_UNSPECIFIED = 0;
+  RUN_STATUS_RUNNING = 1;
+  RUN_STATUS_PAUSED = 2;
+  RUN_STATUS_CLOSING = 3;
+  RUN_STATUS_TERMINAL = 4;
+  RUN_STATUS_BLOCKED = 5;
+}
+
+// Who paused the run, which decides what may end the pause.
+enum PauseOwner {
+  PAUSE_OWNER_UNSPECIFIED = 0;
+  PAUSE_OWNER_OPERATOR = 1;
+  PAUSE_OWNER_QUOTA = 2;
+}
+
+// How a stop treats work in flight: let it finish, or cancel it.
+enum StopMode {
+  STOP_MODE_UNSPECIFIED = 0;
+  STOP_MODE_DRAIN = 1;
+  STOP_MODE_CANCEL = 2;
+}
+
+enum ResumeWhen {
+  option (core_enum) = {literal: true, inline: true};
+  RESUME_WHEN_UNSPECIFIED = 0;
+  RESUME_WHEN_NOW = 1;
+  RESUME_WHEN_CAPACITY_RETURNS = 2;
+}
+
+// How an input reaches the turns of its target; interrupt metadata grants no refund authority.
+//
+// ``NEXT_TURN`` is reserved by the first matching turn and delivered to it once.
+// ``INTERRUPT`` is first offered to a matching session turn that is running, and joins it
+// when the provider takes it; otherwise, or once the provider takes it back, the next
+// matching turn reserves it as a next-turn input. Delivery is at least once: an offer a
+// crash leaves unresolved is offered again, and may reach the turn twice.
+// ``STANDING`` is never reserved: every matching session turn dispatched while it is in force
+// receives it, until it is withdrawn or its target ends.
+enum InputMode {
+  INPUT_MODE_UNSPECIFIED = 0;
+  INPUT_MODE_NEXT_TURN = 1 [(core_member).spelling = "next-turn"];
+  INPUT_MODE_INTERRUPT = 2;
+  INPUT_MODE_STANDING = 3;
+}
+
+enum ControlAction {
+  option (core_enum).literal = true;
+  CONTROL_ACTION_UNSPECIFIED = 0;
+  CONTROL_ACTION_PAUSE = 1;
+  CONTROL_ACTION_RESUME = 2;
+  CONTROL_ACTION_STOP = 3;
+  CONTROL_ACTION_STEER = 4;
+  CONTROL_ACTION_WITHDRAW = 5;
+  CONTROL_ACTION_CANCEL_ATTEMPT = 6;
+  CONTROL_ACTION_CANCEL_ITEM = 7;
+  CONTROL_ACTION_SET_MAX_PARALLEL = 8;
+}
+
+// Canonical tagged identity; domains survive JSON union round trips.
+message Identity {
+  string root = 1 [(buf.validate.field).string = {min_len: 1, pattern: "^\\S+$"}, (core_field) = {constant_name: "IDENTITY_PATTERN", constant_rule: "pattern"}];
+}
+
+// Distinct run identity.
+message RunId {
+  option (core_value).base = "Identity";
+  string root = 1 [(buf.validate.field).string = {min_len: 1, pattern: "^\\S+$"}];
+  string kind = 2 [(buf.validate.field).string.const = "run"];
+}
+
+// Distinct attempt identity.
+message AttemptId {
+  option (core_value).base = "Identity";
+  string root = 1 [(buf.validate.field).string = {min_len: 1, pattern: "^\\S+$"}];
+  string kind = 2 [(buf.validate.field).string.const = "attempt"];
+}
+
+// Distinct item identity.
+message ItemId {
+  option (core_value).base = "Identity";
+  string root = 1 [(buf.validate.field).string = {min_len: 1, pattern: "^\\S+$"}];
+  string kind = 2 [(buf.validate.field).string.const = "item"];
+}
+
+// Distinct session identity.
+message SessionId {
+  option (core_value).base = "Identity";
+  string root = 1 [(buf.validate.field).string = {min_len: 1, pattern: "^\\S+$"}];
+  string kind = 2 [(buf.validate.field).string.const = "session"];
+}
+
+// Distinct invocation identity.
+message InvocationId {
+  option (core_value).base = "Identity";
+  string root = 1 [(buf.validate.field).string = {min_len: 1, pattern: "^\\S+$"}];
+  string kind = 2 [(buf.validate.field).string.const = "invocation"];
+}
+
+// Distinct continuation identity.
+message ContinuationId {
+  option (core_value).base = "Identity";
+  string root = 1 [(buf.validate.field).string = {min_len: 1, pattern: "^\\S+$"}];
+  string kind = 2 [(buf.validate.field).string.const = "continuation"];
+}
+
+// Identity of one input occurrence, independent of content digest.
+message InputId {
+  option (core_value).base = "Identity";
+  string root = 1 [(buf.validate.field).string = {min_len: 1, pattern: "^\\S+$"}];
+  string kind = 2 [(buf.validate.field).string.const = "input"];
+}
+
+// Distinct evidence identity.
+message EvidenceId {
+  option (core_value).base = "Identity";
+  string root = 1 [(buf.validate.field).string = {min_len: 1, pattern: "^\\S+$"}];
+  string kind = 2 [(buf.validate.field).string.const = "evidence"];
+}
+
+// Distinct decision identity.
+message DecisionId {
+  option (core_value).base = "Identity";
+  string root = 1 [(buf.validate.field).string = {min_len: 1, pattern: "^\\S+$"}];
+  string kind = 2 [(buf.validate.field).string.const = "decision"];
+}
+
+// Distinct request identity.
+message RequestId {
+  option (core_value).base = "Identity";
+  string root = 1 [(buf.validate.field).string = {min_len: 1, pattern: "^\\S+$"}];
+  string kind = 2 [(buf.validate.field).string.const = "request"];
+}
+
+// Distinct event identity.
+message EventId {
+  option (core_value).base = "Identity";
+  string root = 1 [(buf.validate.field).string = {min_len: 1, pattern: "^\\S+$"}];
+  string kind = 2 [(buf.validate.field).string.const = "event"];
+}
+
+// Distinct settlement identity.
+message SettlementId {
+  option (core_value).base = "Identity";
+  string root = 1 [(buf.validate.field).string = {min_len: 1, pattern: "^\\S+$"}];
+  string kind = 2 [(buf.validate.field).string.const = "settlement"];
+}
+
+// Distinct strategy identity.
+message StrategyId {
+  option (core_value).base = "Identity";
+  string root = 1 [(buf.validate.field).string = {min_len: 1, pattern: "^\\S+$"}];
+  string kind = 2 [(buf.validate.field).string.const = "strategy"];
+}
+
+// Distinct operation identity.
+message OperationId {
+  option (core_value).base = "Identity";
+  string root = 1 [(buf.validate.field).string = {min_len: 1, pattern: "^\\S+$"}];
+  string kind = 2 [(buf.validate.field).string.const = "operation"];
+}
+
+// Distinct artifact identity.
+message ArtifactId {
+  option (core_value).base = "Identity";
+  string root = 1 [(buf.validate.field).string = {min_len: 1, pattern: "^\\S+$"}];
+  string kind = 2 [(buf.validate.field).string.const = "artifact"];
+}
+
+// Distinct lease episode, never a reusable raw physical backend identity.
+//
+// The owning library's normalization episode-qualifies reused physical IDs;
+// conflicting scope or admission claims cannot reuse one core ResourceId.
+message ResourceId {
+  option (core_value).base = "Identity";
+  string root = 1 [(buf.validate.field).string = {min_len: 1, pattern: "^\\S+$"}];
+  string kind = 2 [(buf.validate.field).string.const = "resource"];
+}
+
+// Distinct revision identity.
+message RevisionId {
+  option (core_value).base = "Identity";
+  string root = 1 [(buf.validate.field).string = {min_len: 1, pattern: "^\\S+$"}];
+  string kind = 2 [(buf.validate.field).string.const = "revision"];
+}
+
+// Distinct role identity.
+message RoleId {
+  option (core_value).base = "Identity";
+  string root = 1 [(buf.validate.field).string = {min_len: 1, pattern: "^\\S+$"}];
+  string kind = 2 [(buf.validate.field).string.const = "role"];
+}
+
+// Distinct pool identity.
+message PoolId {
+  option (core_value).base = "Identity";
+  string root = 1 [(buf.validate.field).string = {min_len: 1, pattern: "^\\S+$"}];
+  string kind = 2 [(buf.validate.field).string.const = "pool"];
+}
+
+// Distinct charge identity.
+message ChargeId {
+  option (core_value).base = "Identity";
+  string root = 1 [(buf.validate.field).string = {min_len: 1, pattern: "^\\S+$"}];
+  string kind = 2 [(buf.validate.field).string.const = "charge"];
+}
+
+// Distinct control identity.
+message ControlId {
+  option (core_value).base = "Identity";
+  string root = 1 [(buf.validate.field).string = {min_len: 1, pattern: "^\\S+$"}];
+  string kind = 2 [(buf.validate.field).string.const = "control"];
+}
+
+// Distinct host identity.
+message HostId {
+  option (core_value).base = "Identity";
+  string root = 1 [(buf.validate.field).string = {min_len: 1, pattern: "^\\S+$"}];
+  string kind = 2 [(buf.validate.field).string.const = "host"];
+}
+
+// Schema ref lifecycle contract.
+message SchemaRef {
+  string name = 1 [(buf.validate.field).string.min_len = 1];
+  string version = 2 [(buf.validate.field).string.pattern = "^[1-9][0-9]*$", (core_field).integer = true];
+}
+
+// Artifact ref lifecycle contract.
+message ArtifactRef {
+  ArtifactId artifact_id = 1 [(buf.validate.field).required = true];
+  string digest = 2 [(buf.validate.field).string.min_len = 1];
+  SchemaRef schema_ref = 3;
+}
+
+// The owner of a scope is a run or an attempt, retaining its tagged JSON union.
+message ScopeOwner {
+  option (core_value) = {union: true, discriminator: "kind"};
+  oneof owner {
+    option (buf.validate.oneof).required = true;
+    RunId run = 1;
+    AttemptId attempt = 2;
+  }
+}
+
+// Scope lifecycle contract.
+message Scope {
+  ScopeOwner owner = 1 [(buf.validate.field).required = true];
+  string generation = 2 [(buf.validate.field).string.pattern = "^(0|[1-9][0-9]*)$", (core_field).integer = true];
+}
+
+// Invocation ref lifecycle contract.
+message InvocationRef {
+  SessionId session_id = 1 [(buf.validate.field).required = true];
+  InvocationId invocation_id = 2 [(buf.validate.field).required = true];
+  string generation = 3 [(buf.validate.field).string.pattern = "^(0|[1-9][0-9]*)$", (core_field).integer = true];
+}
+
+// Input for a scope, permitted before any invocation exists.
+message ScopeInputTarget {
+  string kind = 1 [(buf.validate.field).string.const = "scope"];
+  Scope scope = 2 [(buf.validate.field).required = true];
+}
+
+// Input for an item, permitted before any invocation exists.
+message ItemInputTarget {
+  string kind = 1 [(buf.validate.field).string.const = "item"];
+  ItemId item_id = 2 [(buf.validate.field).required = true];
+}
+
+// Input for one exact invocation, never silently retargeted.
+message InvocationInputTarget {
+  string kind = 1 [(buf.validate.field).string.const = "invocation"];
+  InvocationRef invocation = 2 [(buf.validate.field).required = true];
+}
+
+// Input for the next session turn of one role the search declares.
+//
+// The role is the session's ``role_id``; core rejects a role its search does not declare.
+message RoleInputTarget {
+  string kind = 1 [(buf.validate.field).string.const = "role"];
+  RoleId role_id = 2 [(buf.validate.field).required = true];
+}
+
+message InputTarget {
+  option (core_value) = {union: true, discriminator: "kind"};
+  oneof target {
+    option (buf.validate.oneof).required = true;
+    ScopeInputTarget scope = 1;
+    ItemInputTarget item = 2;
+    InvocationInputTarget invocation = 3;
+    RoleInputTarget role = 4;
+  }
+}
+
+// Scheduling-owned bound for one named capacity pool.
+//
+// Unconfigured pools retain exclusive capacity one. Global max_parallel is
+// always an additional bound; a pool capacity never grants unbounded slots.
+message PoolCapacity {
+  PoolId pool_id = 1 [(buf.validate.field).required = true];
+  string capacity = 2 [(buf.validate.field).string.pattern = "^[1-9][0-9]*$", (core_field).integer = true];
+}
+
+// How core re-sends a request its executor said it did not run. Declared by the backend.
+//
+// ``limit`` re-sends follow the first attempt, the n-th after ``backoff * 2**(n-1)`` seconds
+// of core time, never more than ``backoff_cap``. Core holds no default for any field and
+// refuses a ``limit`` above ``MAX_REQUEST_RETRIES``.
+message RequestRetries {
+  option (core_value).constants = {name: "MAX_REQUEST_RETRIES", rule: "RequestRetries.limit"};
+  option (buf.validate.message).cel = {
+    id: "RequestRetries.limit"
+    message: "limit above the hard cap 10"
+    expression: "this.limit <= 10"
+  };
+  option (core_value).mixin = "vs_core._retry_policy.RequestRetryPolicy";
+  option (buf.validate.message).cel = {
+    id: "RequestRetries.cap"
+    message: "backoff_cap below backoff"
+    expression: "this.backoff_cap >= this.backoff"
+  };
+  int64 limit = 1 [(buf.validate.field).int64.gte = 0];
+  double backoff = 2 [(buf.validate.field).double = {gt: 0, finite: true}];
+  double backoff_cap = 3 [(buf.validate.field).double = {gt: 0, finite: true}];
+}
+
+// Run bounds; every field is explicit, one field per meaning, no default.
+//
+// Budget (the run's own): ``max_attempts``, ``max_turns``, ``max_parallel``,
+// ``pool_capacities``, ``max_refunds`` and ``max_adoption_rounds``. How often a reply is corrected or a lost turn
+// asked again is the role's (`Role.corrections`, `Role.lost_turns`); core keeps only
+// `MAX_REASK_CHAIN`.
+// Declared by the backend and applied by core: ``request_retries``. Core's own bounds on its
+// waits and cleanup: the remaining ``*_bound`` and ``observe_*`` fields.
+message Limits {
+  option (buf.validate.message).cel = {
+    id: "Limits.observe_cap"
+    message: "observe_backoff_cap below observe_interval"
+    expression: "this.observe_backoff_cap >= this.observe_interval"
+  };
+  option (buf.validate.message).cel = {
+    id: "Limits.pools"
+    message: "pool_capacities duplicate pool_id"
+    expression: "this.pool_capacities.map(p, p.pool_id.root).unique()"
+  };
+  string max_attempts = 1 [(buf.validate.field).string.pattern = "^(0|[1-9][0-9]*)$", (core_field).integer = true, (core_field).explicit = true];
+  string max_turns = 2 [(buf.validate.field).string.pattern = "^(0|[1-9][0-9]*)$", (core_field).integer = true, (core_field).explicit = true];
+  string max_parallel = 3 [(buf.validate.field).string.pattern = "^[1-9][0-9]*$", (core_field).integer = true, (core_field).explicit = true];
+  repeated PoolCapacity pool_capacities = 4 [(core_field).explicit = true];
+  string max_refunds = 5 [(buf.validate.field).string.pattern = "^(0|[1-9][0-9]*)$", (core_field).integer = true, (core_field).explicit = true];
+  string max_adoption_rounds = 6 [(buf.validate.field).string.pattern = "^[1-9][0-9]*$", (core_field).integer = true, (core_field).explicit = true];
+  RequestRetries request_retries = 7 [(buf.validate.field).required = true, (core_field).explicit = true];
+  double cancellation_bound = 8 [(buf.validate.field).double = {gte: 0, finite: true}, (core_field).explicit = true];
+  double cleanup_bound = 9 [(buf.validate.field).double = {gt: 0, finite: true}, (core_field).explicit = true];
+  double reconciliation_bound = 10 [(buf.validate.field).double = {gte: 0, finite: true}, (core_field).explicit = true];
+  double observe_interval = 11 [(buf.validate.field).double = {gt: 0, finite: true}, (core_field).explicit = true];
+  double observe_backoff_cap = 12 [(buf.validate.field).double = {gt: 0, finite: true}, (core_field).explicit = true];
+  double queue_wait_budget = 13 [(buf.validate.field).double = {gt: 0, finite: true}, (core_field).explicit = true];
+  double queue_notice_interval = 14 [(buf.validate.field).double = {gt: 0, finite: true}, (core_field).explicit = true];
+}
+
+// Why a paused run is paused, and whether the operator asked it to resume itself.
+message RunPause {
+  PauseOwner owner = 1 [(buf.validate.field).enum = {defined_only: true, not_in: [0]}];
+  bool capacity_wait = 2;
+}
+
+// Control input lifecycle contract.
+message ControlInput {
+  option (buf.validate.message).cel = {
+    id: "ControlInput.notice"
+    message: "artifact only for a steer or operator action, and required for operator actions"
+    expression: "(!has(this.artifact) || this.action in [4, 6, 7, 8]) && (!(this.action in [6, 7, 8]) || has(this.artifact))"
+  };
+  option (buf.validate.message).cel = {
+    id: "ControlInput.mode"
+    message: "mode required for its action and only for it"
+    expression: "(this.action == 3) == (this.mode != 0)"
+  };
+  option (buf.validate.message).cel = {
+    id: "ControlInput.withdraws"
+    message: "withdraws required for its action and only for it"
+    expression: "(this.action == 5) == (has(this.withdraws))"
+  };
+  option (buf.validate.message).cel = {
+    id: "ControlInput.owner"
+    message: "owner required for its action and only for it"
+    expression: "(this.action == 1) == (this.owner != 0)"
+  };
+  option (buf.validate.message).cel = {
+    id: "ControlInput.when"
+    message: "when required for its action and only for it"
+    expression: "(this.action == 2) == (this.when != 0)"
+  };
+  option (buf.validate.message).cel = {
+    id: "ControlInput.attempt"
+    message: "attempt required for its action and only for it"
+    expression: "(this.action == 6) == (has(this.attempt))"
+  };
+  option (buf.validate.message).cel = {
+    id: "ControlInput.item"
+    message: "item required for its action and only for it"
+    expression: "(this.action == 7) == (has(this.item))"
+  };
+  option (buf.validate.message).cel = {
+    id: "ControlInput.max_parallel"
+    message: "max_parallel required for its action and only for it"
+    expression: "(this.action == 8) == (has(this.max_parallel))"
+  };
+  option (buf.validate.message).cel = {
+    id: "ControlInput.target"
+    message: "target: only a steer has a target"
+    expression: "!has(this.target) || this.action == 4"
+  };
+  option (buf.validate.message).cel = {
+    id: "ControlInput.input_mode"
+    message: "input_mode only for steer"
+    expression: "this.input_mode == 0 || this.action == 4"
+  };
+  option (buf.validate.message).cel = {
+    id: "ControlInput.invocation_mode"
+    message: "input_mode interrupt or standing cannot target an invocation"
+    expression: "!(this.input_mode in [2, 3]) || !has(this.target) || !has(this.target.invocation)"
+  };
+  option (buf.validate.message).cel = {
+    id: "ControlInput.when_flags"
+    message: "when only immediate resume switches or keeps"
+    expression: "!(this.fallback || this.capacity_wait_stands) || this.when == 1"
+  };
+  option (buf.validate.message).cel = {
+    id: "ControlInput.capacity_wait_stands"
+    message: "capacity_wait_stands fallback ends wait"
+    expression: "!(this.fallback && this.capacity_wait_stands)"
+  };
+  ControlId control_id = 1 [(buf.validate.field).required = true];
+  ControlAction action = 2 [(buf.validate.field).enum = {defined_only: true, not_in: [0]}];
+  StopMode mode = 3 [(buf.validate.field).enum.defined_only = true];
+  ArtifactRef artifact = 4;
+  InputTarget target = 5;
+  InputMode input_mode = 6 [(buf.validate.field).enum.defined_only = true];
+  InputId withdraws = 7;
+  PauseOwner owner = 8 [(buf.validate.field).enum.defined_only = true];
+  ResumeWhen when = 9 [(buf.validate.field).enum.defined_only = true];
+  bool fallback = 10;
+  bool capacity_wait_stands = 11;
+  AttemptId attempt = 12;
+  ItemId item = 13;
+  optional string max_parallel = 14 [(buf.validate.field).string.pattern = "^[1-9][0-9]*$", (core_field).integer = true];
+}

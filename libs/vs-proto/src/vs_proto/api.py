@@ -10,6 +10,7 @@ from protobuf import Oneof
 from protobuf.wkt.google.protobuf.timestamp_pb import Timestamp
 from protovalidate import ValidationError, validate
 
+from vs_proto._generated.buf.validate import validate_pb as validation_rules
 from vs_proto._generated.framing import RUN_LOG_MAGIC, RUN_LOG_MAX_RECORD_BYTES
 from vs_proto._generated.vibesys.api.v1.host_pb import (
     BlobResult,
@@ -27,6 +28,8 @@ from vs_proto._generated.vibesys.api.v1.host_pb import (
     WatchRunsRequest,
     WatchRunsResponse,
 )
+from vs_proto._generated.vibesys.core.v1 import control_pb as core_state
+from vs_proto._generated.vibesys.core.v1 import value_options_pb as core_value_options
 from vs_proto._generated.vibesys.search.v1.attrs_pb import (
     AdoptionAttrs,
     BaselineAttrs,
@@ -281,6 +284,9 @@ __all__ = [
     "WorkstreamAttrs",
     "WorkstreamFailure",
     "WorkstreamFailureKind",
+    "core_state",
+    "core_value_options",
     "schema_hash",
     "validate",
+    "validation_rules",
 ]

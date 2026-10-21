@@ -596,7 +596,7 @@ depends_on = ["vs_decode.api", "vs_evaluation", "vs_evaluation.api", "vs_evaluat
 [[modules]]
 path = "vs_runtime"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_async_ops.api", "vs_core", "vs_decode.api", "vs_agent", "vs_github", "vs_issue_tracker", "vs_evaluation.api", "vs_evaluation.api.tools", "vs_evaluation.api.testing", "vs_evaluator_protocol", "vs_project", "vs_prompts", "vs_redaction.api", "vs_sandbox", "vs_slurm", "vs_runtime._runs", "vs_mcp", "vs_sim.api", "vs_sim.api.testing"]
+depends_on = ["vs_proto", "vs_async_ops.api", "vs_core", "vs_decode.api", "vs_agent", "vs_github", "vs_issue_tracker", "vs_evaluation.api", "vs_evaluation.api.tools", "vs_evaluation.api.testing", "vs_evaluator_protocol", "vs_project", "vs_prompts", "vs_redaction.api", "vs_sandbox", "vs_slurm", "vs_runtime._runs", "vs_mcp", "vs_sim.api", "vs_sim.api.testing"]
 
 [[modules]]
 path = "vs_agent"
@@ -1427,7 +1427,7 @@ expose = ["NativeProfilerPreflight", "ProfilerPreflight", "SessionAgents", "Sess
 [[modules]]
 path = "vs_core"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_core._dispatch_episode", "vs_core._session_checkpoints", "vs_core._session_rows", "vs_core._session_scope", "vs_core._turn_outcomes", "vs_core._proofs", "vs_core._waits", "vs_core.types", "vs_core.types.common", "vs_core._values", "vs_core._outcomes"]
+depends_on = ["vs_core._corevalue", "vs_core._generated", "vs_core._dispatch_episode", "vs_core._session_checkpoints", "vs_core._session_rows", "vs_core._session_scope", "vs_core._turn_outcomes", "vs_core._proofs", "vs_core._waits", "vs_core.types", "vs_core.types.common", "vs_core._values", "vs_core._outcomes"]
 
 [[interfaces]]
 from = ["vs_core"]
@@ -1490,7 +1490,7 @@ expose = ["[a-z_]+\\.[A-Z].*", "sessions\\.(session_waits|session_may_wait|turn_
 [[modules]]
 path = "vs_core.types.common"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_core._values"]
+depends_on = ["vs_core._generated", "vs_core._values"]
 
 [[interfaces]]
 from = ["vs_core.types.common"]
@@ -1499,7 +1499,7 @@ expose = ["[A-Z].*", "escalate_stop", "unset", "validate_setup_failure"]
 [[modules]]
 path = "vs_core._values"
 layer = "prompts_and_lower_libs"
-depends_on = []
+depends_on = ["vs_core._corevalue"]
 
 [[interfaces]]
 from = ["vs_core._values"]
@@ -1953,3 +1953,30 @@ depends_on = ["vibesys", "vibesys.records", "vs_decode.api", "vs_runlog"]
 [[interfaces]]
 from = ["vibesys.run.runlog_tee"]
 expose = ["RunLogTee", "JOURNAL_EVENT_MAX_BYTES"]
+
+[[modules]]
+path = "vs_core._generated"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_core._corevalue", "vs_core._retry_policy"]
+
+[[interfaces]]
+from = ["vs_core._generated"]
+expose = ["vibesys\\.core\\.v1\\.control_cv\\.[A-Z].*"]
+
+[[modules]]
+path = "vs_core._corevalue"
+layer = "prompts_and_lower_libs"
+depends_on = []
+
+[[interfaces]]
+from = ["vs_core._corevalue"]
+expose = ["CoreValue", "FrozenMap", "TimestampValue", "bounded_integer"]
+
+[[modules]]
+path = "vs_core._retry_policy"
+layer = "prompts_and_lower_libs"
+depends_on = []
+
+[[interfaces]]
+from = ["vs_core._retry_policy"]
+expose = ["RequestRetryPolicy"]

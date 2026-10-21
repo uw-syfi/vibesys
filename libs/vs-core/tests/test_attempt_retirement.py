@@ -1,9 +1,10 @@
-from typing import ClassVar, Literal
+from collections.abc import Mapping
+from typing import ClassVar, Literal, Protocol, Self
 
 import pytest
 from hypothesis import example, given, settings
 from hypothesis import strategies as st
-from pydantic import BaseModel, ValidationError
+from pydantic import ValidationError
 
 import vs_core.api as core
 from vs_core.api import ObservationStatus, SessionPhase
@@ -15,7 +16,11 @@ from .reopen_facts import released_job
 from .restart import restarts
 
 
-def changed[T: BaseModel](value: T, **fields: object) -> T:
+class _Copyable(Protocol):
+    def model_copy(self, *, update: Mapping[str, object] | None = None) -> Self: ...
+
+
+def changed[T: _Copyable](value: T, **fields: object) -> T:
     return value.model_copy(update=fields)
 
 

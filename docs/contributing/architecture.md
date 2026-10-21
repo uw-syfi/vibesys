@@ -228,6 +228,7 @@ graph TD
     vs_runtime --> vs_mcp
     vs_runtime --> vs_project
     vs_runtime --> vs_prompts
+    vs_runtime --> vs_proto
     vs_runtime --> vs_redaction
     vs_runtime --> vs_sandbox
     vs_runtime --> vs_sim

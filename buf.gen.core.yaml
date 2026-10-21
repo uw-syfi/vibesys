@@ -1,0 +1,10 @@
+version: v2
+inputs:
+  - directory: proto
+    paths: [proto/vibesys/core/v1/control.proto]
+plugins:
+  - local: [uv, run, --locked, --group, proto, python, -m, scripts.protoc_gen_corevalue]
+    out: libs/vs-core/src/vs_core/_generated
+  - local: [uv, run, --locked, --group, proto, python, -m, scripts.protoc_gen_corevalue]
+    out: libs/vs-runtime/src/vs_runtime/_core_values
+    opt: [boundary=true]

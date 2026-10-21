@@ -743,22 +743,27 @@ def test_unknown_span_kind_is_descriptor_driven() -> None:
     assert p.Record.from_binary(record.to_binary()) == record
 
 
-def test_store_schema_cannot_import_search_strategy_contracts() -> None:
-    pending = [message.desc().file for message in _MESSAGES.values()]
+@pytest.mark.parametrize("package", ["store", "core"])
+def test_store_schema_cannot_import_search_strategy_contracts(package: str) -> None:
+    pending = (
+        [message.desc().file for message in _MESSAGES.values()]
+        if package == "store"
+        else [p.core_state.ControlInput.desc().file]
+    )
     seen: set[str] = set()
     while pending:
         file = pending.pop()
         if file.name in seen:
             continue
         seen.add(file.name)
-        if file.proto.package == "vibesys.store.v1":
+        if file.proto.package == f"vibesys.{package}.v1":
             assert not any(
                 dependency.name.startswith("vibesys/search/") for dependency in file.dependencies
-            ), f"{file.name}: store must carry search types through descriptor-backed Any"
+            ), f"{file.name}: {package} must not import strategy contracts"
         pending.extend(file.dependencies)
     store_files = {
         str(path.relative_to(_ROOT / "proto"))
-        for path in (_ROOT / "proto/vibesys/store/v1").glob("*.proto")
+        for path in (_ROOT / f"proto/vibesys/{package}/v1").glob("*.proto")
     }
     assert store_files <= seen, "Export store contracts so every proto dependency is checked"
 

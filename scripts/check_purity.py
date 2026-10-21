@@ -119,7 +119,7 @@ PURE_EXPORTS = {
     # Scope managers that only run the code they wrap; they open nothing themselves.
     "contextlib": frozenset({"asynccontextmanager", "contextmanager", "suppress"}),
     "dataclasses": frozenset(
-        {"asdict", "astuple", "dataclass", "field", "fields", "is_dataclass", "replace"}
+        {"asdict", "astuple", "dataclass", "Field", "field", "fields", "is_dataclass", "replace"}
     ),
     "enum": frozenset({"Enum", "IntEnum", "IntFlag", "Flag", "StrEnum", "auto", "unique"}),
     "functools": frozenset(
@@ -275,6 +275,7 @@ PURE_EXPORTS = {
             "Field",
             "FiniteFloat",
             "InstanceOf",
+            "GetCoreSchemaHandler",
             "Json",
             "JsonValue",
             "NonNegativeFloat",
@@ -300,6 +301,7 @@ PURE_EXPORTS = {
             "model_validator",
         }
     ),
+    "pydantic.fields": frozenset({"FieldInfo"}),
     "pydantic.dataclasses": frozenset({"dataclass"}),
     "pydantic.json_schema": frozenset({"GenerateJsonSchema", "JsonSchemaValue"}),
     "re": frozenset(
@@ -357,6 +359,7 @@ PURE_EXPORTS = {
             "Union",
             "Unpack",
             "assert_never",
+            "final",
             "cast",
             "get_args",
             "get_origin",
@@ -365,7 +368,7 @@ PURE_EXPORTS = {
             "runtime_checkable",
         }
     ),
-    "types": frozenset({"MappingProxyType", "NoneType", "UnionType"}),
+    "types": frozenset({"GenericAlias", "MappingProxyType", "NoneType", "UnionType"}),
     "unicodedata": frozenset(
         {
             "category",
