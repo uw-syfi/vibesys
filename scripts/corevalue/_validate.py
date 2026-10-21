@@ -115,6 +115,12 @@ def _field(field: object) -> None:
     config = extension(field, options.ext_core_field)
     if config and config.frozen_set and not isinstance(field.value, DescFieldValueList):
         raise GenerationError(path, "immutable set requires a repeated field")
+    if config and config.frozen_set and isinstance(field.value, DescFieldValueList):
+        element = field.value.element
+        if isinstance(element, DescMessage) or element in (ScalarType.FLOAT, ScalarType.DOUBLE):
+            raise GenerationError(
+                path, "immutable set requires canonically sortable scalar or enum elements"
+            )
     _null_presence(field)
     rule = rule_of(field)
     if rule is None:

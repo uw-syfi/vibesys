@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
-from protobuf import Oneof
+from protobuf import Oneof, ScalarType
 
 from scripts.corevalue.api import (
     GenerationError,
@@ -272,4 +272,28 @@ def test_null_representations_cannot_lose_wire_presence(
         field = replace(field, value=replace(field.value, message=core_contracts.NullValue.desc()))
     message = replace(original, fields=[original.fields[0], field])
     with pytest.raises(GenerationError, match="null"):
+        compiler(replace(original.file, messages=[message]))
+
+
+@pytest.mark.parametrize("compiler", [compile_values, compile_boundary])
+@pytest.mark.parametrize(
+    ("element", "diagnostic"),
+    [
+        (ScalarType.FLOAT, "labels: float32 cannot preserve"),
+        (ScalarType.DOUBLE, "labels: immutable set requires canonically sortable"),
+        (compiler_values.Ordinal.desc(), "labels: immutable set requires canonically sortable"),
+    ],
+)
+def test_immutable_sets_reject_elements_without_a_canonical_sort_order(
+    compiler: Callable[[DescFile], str],
+    element: object,
+    diagnostic: str,
+) -> None:
+    original = compiler_values.OrderedValues.desc()
+    field = next(f for f in original.fields if f.name == "labels")
+    modified = replace(field, value=replace(field.value, element=element))
+    message = replace(
+        original, fields=[modified if f.name == field.name else f for f in original.fields]
+    )
+    with pytest.raises(GenerationError, match=diagnostic):
         compiler(replace(original.file, messages=[message]))
