@@ -10,7 +10,14 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
-from vibesys.api.chat import ChatRuntime, ChatSession, SessionAction, SessionLifecycle
+from vibesys.api import (
+    AgentOutputChunkData,
+    CoreEvent,
+    CoreEventType,
+    JsonResultPayload,
+    ToolResultData,
+)
+from vibesys.api.chat import ChatRuntime, ChatSession, SessionAction, SessionLifecycle, run_head
 from vibesys.api.host import host_call
 from vibesys.api.testing import FakeManagedAgent
 from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord
@@ -201,6 +208,7 @@ def test_tokens_and_proposals_are_session_data_and_never_intents(chat: ChatMessa
 
     threads.run(serve)
     observed = events(chat)
+    assert not observed[-1].value.failed, observed[-1].value
     assert [event.field for event in observed] == [
         "created",
         "message",
@@ -258,3 +266,115 @@ def test_conflicting_id_and_missing_launcher_are_typed_failures(chat: ChatMessag
     refused = HostCallResponse.from_binary(host_call(payload, start_chat=lambda _request: None))
     assert refused.result is not None
     assert refused.result.field == "configuration_failed"
+
+
+def test_stream_callbacks_validate_proposals_and_keep_large_answers(
+    chat: ChatMessageRequest,
+) -> None:
+
+    threads = SimThreads()
+    post(chat)
+    answer = "evidence " * 10000
+
+    def serve() -> None:
+        session = ChatSession(chat, ChatRuntime(threads.clock, threads, idle_seconds=0))
+        session.token("unowned")
+
+        def respond(_text: str, invocation: str | None) -> str:
+            session.observe(
+                CoreEvent(
+                    type=CoreEventType.AGENT_OUTPUT_CHUNK,
+                    timestamp=datetime(2026, 1, 1, tzinfo=UTC),
+                    execution_id=invocation,
+                    data=AgentOutputChunkData(channel="assistant", content="answer"),
+                )
+            )
+            for value in [
+                [],
+                {"kind": "steer_proposal"},
+                {
+                    "kind": "steer_proposal",
+                    "proposal": {"text": "compare", "target": {"kind": "run"}, "mode": "next_turn"},
+                    "note": "Operator decides.",
+                },
+            ]:
+                session.observe(
+                    CoreEvent(
+                        type=CoreEventType.TOOL_RESULT,
+                        timestamp=datetime(2026, 1, 1, tzinfo=UTC),
+                        execution_id=invocation,
+                        data=ToolResultData(
+                            tool="propose_steer",
+                            call_id="tool-a",
+                            content="result",
+                            payload=JsonResultPayload(value=value),
+                        ),
+                    )
+                )
+            return answer
+
+        agent = FakeManagedAgent(respond)
+        try:
+            session.serve(
+                ChatSessionCreated(id="default", provider="test", model="test"), lambda: agent
+            )
+        finally:
+            session.close()
+
+    threads.run(serve)
+    observed = events(chat)
+    assert not observed[-1].value.failed, observed[-1].value
+    assert [event.field for event in observed] == [
+        "created",
+        "message",
+        "token",
+        "proposed_steer",
+        "message",
+    ]
+    blob = observed[-1].value.content.value
+    directory = Project.chat_session_directory_for(chat.project_root, chat.run_id, chat.session_id)
+    assert (directory / "blobs" / blob.sha256).read_text() == answer
+    # Restoration keeps complete bounded exchanges; a larger single turn is omitted whole.
+    second = ChatMessageRequest.from_binary(chat.to_binary())
+    second.request_id = "q-2"
+    post(second)
+    restored = run(second, lambda text, _invocation: text)
+    assert restored.messages[0][0] == chat.text
+
+
+def test_failed_turn_is_durable_and_does_not_repeat_on_retry(chat: ChatMessageRequest) -> None:
+    post(chat)
+
+    def failed(_text: str, _invocation: str | None) -> str:
+        message = "model unavailable"
+        raise RuntimeError(message)
+
+    run(chat, failed)
+    observed = events(chat)
+    assert observed[-1].value.failed
+    assert observed[-1].value.content.value == "model unavailable"
+    post(chat)
+    assert run(chat, failed).messages == []
+
+
+def test_invalid_inbox_routes_are_rejected_without_answering(chat: ChatMessageRequest) -> None:
+    inbox = Project.open(chat.project_root).state.session_inbox(chat.run_id, chat.session_id)
+    invalid = ChatMessageRequest.from_binary(chat.to_binary())
+    invalid.session_id = "other"
+    inbox.post(invalid.request_id, invalid.to_binary(), ended=lambda: None)
+    inbox.post("invalid", b"not protobuf", ended=lambda: None)
+    assert run(chat, lambda text, _invocation: text).messages == []
+    assert inbox.pending() == ()
+    assert (
+        inbox.status(invalid.request_id, ended=None).reason
+        == "chat message routing does not match its inbox"
+    )
+
+
+def test_reading_an_incomplete_native_head_is_refused(chat: ChatMessageRequest) -> None:
+    path = Project.run_log_path_for(chat.project_root, chat.run_id).parent / "run.head"
+    head = RunHead.from_binary(path.read_bytes())
+    head.process = None
+    path.write_bytes(head.to_binary())
+    with pytest.raises(ValueError, match="process and lifecycle"):
+        run_head(path)

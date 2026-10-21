@@ -235,7 +235,7 @@ class ChatSession:
                     text=proposal.text,
                     target=SteerTarget(
                         kind=SteerTargetKind[proposal.target.kind.upper()],
-                        id=proposal.target.id or "",
+                        id=proposal.target.id,
                     ),
                     mode=SteerMode[proposal.mode.upper()],
                 )
