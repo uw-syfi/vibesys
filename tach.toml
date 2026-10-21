@@ -1638,7 +1638,7 @@ expose = ["DynamicLaunch"]
 [[modules]]
 path = "vibesys.orchestration.dynamic.core_policy"
 layer = "loops"
-depends_on = ["vs_core", "vs_prompts", "vs_runtime", "vibesys.hypothesis", "vibesys.hypothesis.readmodel", "vibesys.orchestration.dynamic.models", "vibesys.orchestration.dynamic.search", "vibesys.run.contracts", "vibesys.candidates"]
+depends_on = ["vs_core", "vs_prompts", "vs_runtime", "vibesys.hypothesis", "vibesys.hypothesis.readmodel", "vibesys.orchestration.dynamic.models", "vibesys.orchestration.dynamic.search", "vibesys.run.contracts", "vibesys.candidates", "vibesys"]
 
 [[interfaces]]
 from = ["vibesys.orchestration.dynamic.core_policy"]
