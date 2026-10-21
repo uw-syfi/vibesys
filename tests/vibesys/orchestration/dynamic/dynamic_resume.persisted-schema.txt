@@ -323,11 +323,11 @@ Queued {"additionalProperties":false,"type":"object"}
 Queued.order required {"exclusiveMinimum":0,"type":"integer"}
 Queued.submission required {"$ref":"#/$defs/Submission"}
 Reading {"additionalProperties":false,"type":"object"}
-Reading.direction optional {"anyOf":[{"$ref":"#/$defs/Direction"},{"type":"null"}],"default":null}
+Reading.direction optional {"anyOf":[{"enum":["max","min"],"type":"string"},{"type":"null"}],"default":null}
 Reading.metric required {"minLength":1,"type":"string"}
 Reading.repetitions optional {"default":1,"minimum":1,"type":"integer"}
 Reading.unit optional {"anyOf":[{"type":"string"},{"type":"null"}],"default":null}
-Reading.value required {"$ref":"#/$defs/Finite"}
+Reading.value required {"type":"number"}
 RecordState {"additionalProperties":false,"type":"object"}
 RecordState.accepted required {"items":{"$ref":"#/$defs/WorkPlan"},"type":"array"}
 RecordState.baseline required {"anyOf":[{"$ref":"#/$defs/Baseline"},{"type":"null"}]}
@@ -359,8 +359,9 @@ RejectionCode {"enum":["stale-view","identity-conflict","unknown-kind","unknown-
 ReplyError {"additionalProperties":false,"type":"object"}
 ReplyError.code required {"$ref":"#/$defs/ReplyErrorCode"}
 ReplyError.message optional {"default":"","maxLength":500,"type":"string"}
-ReplyError.path required {"items":{"anyOf":[{"type":"string"},{"type":"integer"}]},"type":"array"}
+ReplyError.path required {"items":{"$ref":"#/$defs/ReplyPathPart"},"type":"array"}
 ReplyErrorCode {"enum":["missing","unexpected","wrong-type","invalid-value","not-json"],"type":"string"}
+ReplyPathPart {"anyOf":[{"type":"string"},{"type":"integer"}]}
 RequestId {"additionalProperties":false,"type":"object"}
 RequestId.kind optional {"const":"request","default":"request","type":"string"}
 RequestId.root required {"minLength":1,"pattern":"^\\S+$","type":"string"}

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import FrozenInstanceError, fields
 from pathlib import Path
 from typing import TYPE_CHECKING, get_args
@@ -211,6 +212,43 @@ def test_shared_value_differential_fixtures_preserve_old_acceptance_and_json() -
         else:
             with pytest.raises(ValidationError):
                 TypeAdapter(cls).validate_json(case["source"])
+
+
+@pytest.mark.parametrize(
+    ("name", "field", "nonnegative"),
+    [
+        ("Reading", "value", False),
+        ("Comparison", "candidate_value", False),
+        ("Comparison", "base_value", False),
+        ("Comparison", "ratio", False),
+        ("Comparison", "noise", True),
+        ("Sample", "observed_at", True),
+        ("TaskStage", "execution_seconds", True),
+        ("PureOption", "value", False),
+    ],
+)
+@given(number=st.floats())
+@example(number=float("nan"))
+@example(number=float("inf"))
+@example(number=float("-inf"))
+@example(number=-1.0)
+@example(number=0.0)
+def test_inlined_numeric_schemas_keep_finiteness_and_bounds(
+    name: str, field: str, *, nonnegative: bool, number: float
+) -> None:
+    """JSON Schema cannot express finiteness; its inlining must not lose the validator."""
+    cls = getattr(shared_values, name)
+    payload = dict(_shared_seeds()[name])
+    payload[field] = number
+    source = json.dumps(payload)
+    if not math.isfinite(number) or (nonnegative and number < 0):
+        with pytest.raises(ValidationError, match=field):
+            TypeAdapter(cls).validate_json(source)
+    else:
+        value = TypeAdapter(cls).validate_json(source)
+        assert getattr(value, field) == number
+        assert TypeAdapter(cls).validate_json(value.model_dump_json()) == value
+        assert from_proto(to_proto(value)) == value
 
 
 @given(
