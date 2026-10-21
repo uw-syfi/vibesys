@@ -254,6 +254,7 @@ def test_epoch_records_checkout_provenance_at_attachment(
     tree_hash = "ab" * 20
 
     def script(spec: ProcessSpec) -> ProcessScript:
+        assert not (tmp_path / "home/runs/run-1").exists()
         if spec.argv[1:] == ("rev-parse", "HEAD^{tree}"):
             return ProcessScript(stdout=f"{tree_hash}\n".encode())
         assert spec.argv[1:] == ("status", "--porcelain", "--untracked-files=normal")

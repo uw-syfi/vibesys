@@ -89,11 +89,11 @@ class EventJournal(DurableEventJournal[CoreEvent]):
         try:
             path = project.run_log_path_for(project.root, run_id)
             path.parent.mkdir(parents=True, exist_ok=True)
-            project.publish_run_for(project.root, run_id)
             tree_hash, dirty = _checkout_provenance(git, checkout_root)
             self._runlog = LegacyRunLogTee(
                 path, run_id, self._runlog_timestamp, tree_hash=tree_hash, dirty=dirty
             )
+            project.publish_run_for(project.root, run_id)
             self.set_append_sink(self._runlog.append)
         except Exception:
             self.close()
