@@ -23,6 +23,6 @@ if [[ -n "$(git ls-files --others --exclude-standard -- "${generated[@]}")" ]]; 
   echo 'Untracked generated bindings; run scripts/generate_proto.sh and commit all outputs.' >&2
   exit 1
 fi
-uv run --locked pytest libs/vs-proto/tests --no-cov -q
+uv run --locked pytest libs/vs-proto/tests libs/vs-runlog/tests --no-cov -q
 pnpm --dir clients --filter @vibesys/proto check
 (cd gateway && go build ./gen/... && go vet ./gen/...)

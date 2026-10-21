@@ -32,7 +32,7 @@ def schema_hash(image: bytes, package: str) -> str:
 
 
 def generate(image: bytes, root: Path) -> None:
-    """Write Python, TypeScript, and Go constants from the same two digests."""
+    """Write schema identities and run.log framing constants in all three languages."""
     api = schema_hash(image, "vibesys.api.v1")
     store = schema_hash(image, "vibesys.store.v1")
     (root / "libs/vs-proto/src/vs_proto/_generated/schema_hashes.py").write_text(
