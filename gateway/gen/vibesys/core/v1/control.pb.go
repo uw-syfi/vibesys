@@ -829,6 +829,59 @@ func (x *ControlInput) GetMaxParallel() string {
 	return ""
 }
 
+// Durable drain authority. A parked run can resume only in a later host epoch.
+type RunPark struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ControlId     *ControlId             `protobuf:"bytes,1,opt,name=control_id,json=controlId,proto3" json:"control_id,omitempty"`
+	Epoch         string                 `protobuf:"bytes,2,opt,name=epoch,proto3" json:"epoch,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RunPark) Reset() {
+	*x = RunPark{}
+	mi := &file_vibesys_core_v1_control_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RunPark) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RunPark) ProtoMessage() {}
+
+func (x *RunPark) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_core_v1_control_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RunPark.ProtoReflect.Descriptor instead.
+func (*RunPark) Descriptor() ([]byte, []int) {
+	return file_vibesys_core_v1_control_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *RunPark) GetControlId() *ControlId {
+	if x != nil {
+		return x.ControlId
+	}
+	return nil
+}
+
+func (x *RunPark) GetEpoch() string {
+	if x != nil {
+		return x.Epoch
+	}
+	return ""
+}
+
 var File_vibesys_core_v1_control_proto protoreflect.FileDescriptor
 
 const file_vibesys_core_v1_control_proto_rawDesc = "" +
@@ -927,7 +980,11 @@ const file_vibesys_core_v1_control_proto_rawDesc = "" +
 	"\x1cControlInput.invocation_mode\x12<input_mode interrupt or standing cannot target an invocation\x1aQ!(this.input_mode in [2, 3]) || !has(this.target) || !has(this.target.invocation)\x1a\x88\x01\n" +
 	"\x17ControlInput.when_flags\x12,when only immediate resume switches or keeps\x1a?!(this.fallback || this.capacity_wait_stands) || this.when == 1\x1a{\n" +
 	"!ControlInput.capacity_wait_stands\x12'capacity_wait_stands fallback ends wait\x1a-!(this.fallback && this.capacity_wait_stands)B\x0f\n" +
-	"\r_max_parallelB?Z=github.com/uw-syfi/vibesys/gateway/gen/vibesys/core/v1;corev1b\x06proto3"
+	"\r_max_parallel\"\x82\x01\n" +
+	"\aRunPark\x12A\n" +
+	"\n" +
+	"control_id\x18\x01 \x01(\v2\x1a.vibesys.core.v1.ControlIdB\x06\xbaH\x03\xc8\x01\x01R\tcontrolId\x124\n" +
+	"\x05epoch\x18\x02 \x01(\tB\x1e\xbaH\x15r\x132\x11^(0|[1-9][0-9]*)$\xca\xf3\x18\x02\x10\x01R\x05epochB?Z=github.com/uw-syfi/vibesys/gateway/gen/vibesys/core/v1;corev1b\x06proto3"
 
 var (
 	file_vibesys_core_v1_control_proto_rawDescOnce sync.Once
@@ -941,7 +998,7 @@ func file_vibesys_core_v1_control_proto_rawDescGZIP() []byte {
 	return file_vibesys_core_v1_control_proto_rawDescData
 }
 
-var file_vibesys_core_v1_control_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
+var file_vibesys_core_v1_control_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
 var file_vibesys_core_v1_control_proto_goTypes = []any{
 	(*ScopeInputTarget)(nil),      // 0: vibesys.core.v1.ScopeInputTarget
 	(*ItemInputTarget)(nil),       // 1: vibesys.core.v1.ItemInputTarget
@@ -953,50 +1010,52 @@ var file_vibesys_core_v1_control_proto_goTypes = []any{
 	(*Limits)(nil),                // 7: vibesys.core.v1.Limits
 	(*RunPause)(nil),              // 8: vibesys.core.v1.RunPause
 	(*ControlInput)(nil),          // 9: vibesys.core.v1.ControlInput
-	(*Scope)(nil),                 // 10: vibesys.core.v1.Scope
-	(*ItemId)(nil),                // 11: vibesys.core.v1.ItemId
-	(*InvocationRef)(nil),         // 12: vibesys.core.v1.InvocationRef
-	(*RoleId)(nil),                // 13: vibesys.core.v1.RoleId
-	(*PoolId)(nil),                // 14: vibesys.core.v1.PoolId
-	(PauseOwner)(0),               // 15: vibesys.core.v1.PauseOwner
-	(*ControlId)(nil),             // 16: vibesys.core.v1.ControlId
-	(ControlAction)(0),            // 17: vibesys.core.v1.ControlAction
-	(StopMode)(0),                 // 18: vibesys.core.v1.StopMode
-	(*ArtifactRef)(nil),           // 19: vibesys.core.v1.ArtifactRef
-	(InputMode)(0),                // 20: vibesys.core.v1.InputMode
-	(*InputId)(nil),               // 21: vibesys.core.v1.InputId
-	(ResumeWhen)(0),               // 22: vibesys.core.v1.ResumeWhen
-	(*AttemptId)(nil),             // 23: vibesys.core.v1.AttemptId
+	(*RunPark)(nil),               // 10: vibesys.core.v1.RunPark
+	(*Scope)(nil),                 // 11: vibesys.core.v1.Scope
+	(*ItemId)(nil),                // 12: vibesys.core.v1.ItemId
+	(*InvocationRef)(nil),         // 13: vibesys.core.v1.InvocationRef
+	(*RoleId)(nil),                // 14: vibesys.core.v1.RoleId
+	(*PoolId)(nil),                // 15: vibesys.core.v1.PoolId
+	(PauseOwner)(0),               // 16: vibesys.core.v1.PauseOwner
+	(*ControlId)(nil),             // 17: vibesys.core.v1.ControlId
+	(ControlAction)(0),            // 18: vibesys.core.v1.ControlAction
+	(StopMode)(0),                 // 19: vibesys.core.v1.StopMode
+	(*ArtifactRef)(nil),           // 20: vibesys.core.v1.ArtifactRef
+	(InputMode)(0),                // 21: vibesys.core.v1.InputMode
+	(*InputId)(nil),               // 22: vibesys.core.v1.InputId
+	(ResumeWhen)(0),               // 23: vibesys.core.v1.ResumeWhen
+	(*AttemptId)(nil),             // 24: vibesys.core.v1.AttemptId
 }
 var file_vibesys_core_v1_control_proto_depIdxs = []int32{
-	10, // 0: vibesys.core.v1.ScopeInputTarget.scope:type_name -> vibesys.core.v1.Scope
-	11, // 1: vibesys.core.v1.ItemInputTarget.item_id:type_name -> vibesys.core.v1.ItemId
-	12, // 2: vibesys.core.v1.InvocationInputTarget.invocation:type_name -> vibesys.core.v1.InvocationRef
-	13, // 3: vibesys.core.v1.RoleInputTarget.role_id:type_name -> vibesys.core.v1.RoleId
+	11, // 0: vibesys.core.v1.ScopeInputTarget.scope:type_name -> vibesys.core.v1.Scope
+	12, // 1: vibesys.core.v1.ItemInputTarget.item_id:type_name -> vibesys.core.v1.ItemId
+	13, // 2: vibesys.core.v1.InvocationInputTarget.invocation:type_name -> vibesys.core.v1.InvocationRef
+	14, // 3: vibesys.core.v1.RoleInputTarget.role_id:type_name -> vibesys.core.v1.RoleId
 	0,  // 4: vibesys.core.v1.InputTarget.scope:type_name -> vibesys.core.v1.ScopeInputTarget
 	1,  // 5: vibesys.core.v1.InputTarget.item:type_name -> vibesys.core.v1.ItemInputTarget
 	2,  // 6: vibesys.core.v1.InputTarget.invocation:type_name -> vibesys.core.v1.InvocationInputTarget
 	3,  // 7: vibesys.core.v1.InputTarget.role:type_name -> vibesys.core.v1.RoleInputTarget
-	14, // 8: vibesys.core.v1.PoolCapacity.pool_id:type_name -> vibesys.core.v1.PoolId
+	15, // 8: vibesys.core.v1.PoolCapacity.pool_id:type_name -> vibesys.core.v1.PoolId
 	5,  // 9: vibesys.core.v1.Limits.pool_capacities:type_name -> vibesys.core.v1.PoolCapacity
 	6,  // 10: vibesys.core.v1.Limits.request_retries:type_name -> vibesys.core.v1.RequestRetries
-	15, // 11: vibesys.core.v1.RunPause.owner:type_name -> vibesys.core.v1.PauseOwner
-	16, // 12: vibesys.core.v1.ControlInput.control_id:type_name -> vibesys.core.v1.ControlId
-	17, // 13: vibesys.core.v1.ControlInput.action:type_name -> vibesys.core.v1.ControlAction
-	18, // 14: vibesys.core.v1.ControlInput.mode:type_name -> vibesys.core.v1.StopMode
-	19, // 15: vibesys.core.v1.ControlInput.artifact:type_name -> vibesys.core.v1.ArtifactRef
+	16, // 11: vibesys.core.v1.RunPause.owner:type_name -> vibesys.core.v1.PauseOwner
+	17, // 12: vibesys.core.v1.ControlInput.control_id:type_name -> vibesys.core.v1.ControlId
+	18, // 13: vibesys.core.v1.ControlInput.action:type_name -> vibesys.core.v1.ControlAction
+	19, // 14: vibesys.core.v1.ControlInput.mode:type_name -> vibesys.core.v1.StopMode
+	20, // 15: vibesys.core.v1.ControlInput.artifact:type_name -> vibesys.core.v1.ArtifactRef
 	4,  // 16: vibesys.core.v1.ControlInput.target:type_name -> vibesys.core.v1.InputTarget
-	20, // 17: vibesys.core.v1.ControlInput.input_mode:type_name -> vibesys.core.v1.InputMode
-	21, // 18: vibesys.core.v1.ControlInput.withdraws:type_name -> vibesys.core.v1.InputId
-	15, // 19: vibesys.core.v1.ControlInput.owner:type_name -> vibesys.core.v1.PauseOwner
-	22, // 20: vibesys.core.v1.ControlInput.when:type_name -> vibesys.core.v1.ResumeWhen
-	23, // 21: vibesys.core.v1.ControlInput.attempt:type_name -> vibesys.core.v1.AttemptId
-	11, // 22: vibesys.core.v1.ControlInput.item:type_name -> vibesys.core.v1.ItemId
-	23, // [23:23] is the sub-list for method output_type
-	23, // [23:23] is the sub-list for method input_type
-	23, // [23:23] is the sub-list for extension type_name
-	23, // [23:23] is the sub-list for extension extendee
-	0,  // [0:23] is the sub-list for field type_name
+	21, // 17: vibesys.core.v1.ControlInput.input_mode:type_name -> vibesys.core.v1.InputMode
+	22, // 18: vibesys.core.v1.ControlInput.withdraws:type_name -> vibesys.core.v1.InputId
+	16, // 19: vibesys.core.v1.ControlInput.owner:type_name -> vibesys.core.v1.PauseOwner
+	23, // 20: vibesys.core.v1.ControlInput.when:type_name -> vibesys.core.v1.ResumeWhen
+	24, // 21: vibesys.core.v1.ControlInput.attempt:type_name -> vibesys.core.v1.AttemptId
+	12, // 22: vibesys.core.v1.ControlInput.item:type_name -> vibesys.core.v1.ItemId
+	17, // 23: vibesys.core.v1.RunPark.control_id:type_name -> vibesys.core.v1.ControlId
+	24, // [24:24] is the sub-list for method output_type
+	24, // [24:24] is the sub-list for method input_type
+	24, // [24:24] is the sub-list for extension type_name
+	24, // [24:24] is the sub-list for extension extendee
+	0,  // [0:24] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_core_v1_control_proto_init() }
@@ -1019,7 +1078,7 @@ func file_vibesys_core_v1_control_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_vibesys_core_v1_control_proto_rawDesc), len(file_vibesys_core_v1_control_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   10,
+			NumMessages:   11,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from dataclasses import FrozenInstanceError, fields
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, get_args
 
 import pytest
 from hypothesis import example, given
@@ -49,6 +49,7 @@ def _sample(cls: type[core.CoreValue], root: str, count: int) -> core.CoreValue:
         ),
         core.RequestRetries: lambda: sample_retries(count % 11),
         core.Limits: lambda: sample_limits(max_parallel=count + 1),
+        core.RunPark: lambda: core.RunPark(control_id=identity, epoch=count),
         core.RunPause: lambda: core.RunPause(
             owner=core.PauseOwner.OPERATOR, capacity_wait=bool(count % 2)
         ),
@@ -97,22 +98,12 @@ def test_differential_acceptance_and_json_against_the_pre_migration_validators(
 
 @given(
     root=_ROOT,
-    action=st.sampled_from(
-        [
-            "pause",
-            "resume",
-            "stop",
-            "steer",
-            "withdraw",
-            "cancel_attempt",
-            "cancel_item",
-            "set_max_parallel",
-        ]
-    ),
+    action=st.sampled_from(get_args(core.ControlAction.__value__)),
 )
 def test_every_control_action_roundtrips(root: str, action: core.ControlAction) -> None:
     notice = core.ArtifactRef(artifact_id=core.ArtifactId(root=root), digest=root)
     choices: dict[str, dict[str, object]] = {
+        "park": {},
         "pause": {"owner": core.PauseOwner.OPERATOR},
         "resume": {"when": "now"},
         "stop": {"mode": core.StopMode.CANCEL},

@@ -1228,6 +1228,7 @@
       "enum": [
         "steer",
         "pause",
+        "park",
         "resume",
         "stop",
         "withdraw",
@@ -1285,6 +1286,7 @@
         "mapping": {
           "cancel_attempt": "#/$defs/CancelAttemptRequest",
           "cancel_item": "#/$defs/CancelItemRequest",
+          "park": "#/$defs/ParkRequest",
           "pause": "#/$defs/PauseRequest",
           "resume": "#/$defs/ResumeRequest",
           "set_max_parallel": "#/$defs/SetMaxParallelRequest",
@@ -1300,6 +1302,9 @@
         },
         {
           "$ref": "#/$defs/PauseRequest"
+        },
+        {
+          "$ref": "#/$defs/ParkRequest"
         },
         {
           "$ref": "#/$defs/ResumeRequest"
@@ -4327,6 +4332,29 @@
         "content"
       ],
       "title": "OutputData",
+      "type": "object"
+    },
+    "ParkRequest": {
+      "additionalProperties": false,
+      "description": "Finish turns in flight, release evaluation jobs, save and exit for relaunch.",
+      "properties": {
+        "control_id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+          "title": "Control Id",
+          "type": "string"
+        },
+        "action": {
+          "const": "park",
+          "default": "park",
+          "title": "Action",
+          "type": "string"
+        }
+      },
+      "required": [
+        "control_id",
+        "action"
+      ],
+      "title": "ParkRequest",
       "type": "object"
     },
     "PauseCommand": {

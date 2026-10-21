@@ -6,6 +6,7 @@ import {
   HostCallRequestSchema,
   HostCallResponseSchema,
   IntentAction,
+  LifecycleSchema,
   type PostIntentRequest,
   RecordSchema,
   TailResponseSchema,
@@ -22,6 +23,19 @@ interface GatewayWindow {
   fakeHost: {calls: unknown[][]};
 }
 
+function appliedState(action: IntentAction) {
+  return create(LifecycleSchema, {
+    state:
+      action === IntentAction.PARK
+        ? {case: 'parked', value: {}}
+        : {
+            case: 'running',
+            value:
+              action === IntentAction.PAUSE ? {hold: {reason: {case: 'operator', value: {}}}} : {},
+          },
+  }).state;
+}
+
 async function openIntents(page: Page) {
   const fixture = storeRunFixture('live');
   const requests: {host: string; request: PostIntentRequest}[] = [];
@@ -30,10 +44,7 @@ async function openIntents(page: Page) {
     const envelope = fromBinary(HostCallRequestSchema, new Uint8Array(bytes));
     if (envelope.method.case !== 'postIntent') throw new Error('Expected PostIntent');
     requests.push({host, request: envelope.method.value});
-    const replay = intentReplay(
-      envelope.method.value.intent.case === 'park' ? 'park-refused' : 'pending',
-      envelope.method.value.requestId,
-    );
+    const replay = intentReplay('pending', envelope.method.value.requestId);
     return [...toBinary(HostCallResponseSchema, replay.admission)];
   });
   await page.addInitScript(installGateway, wire(fixture));
@@ -48,7 +59,12 @@ async function openIntents(page: Page) {
   const outcome = async (index: number, result: 'applied' | 'refused'): Promise<void> => {
     const request = requests[index]?.request;
     if (!request) throw new Error('No posted intent');
-    const action = request.intent.case === 'resume' ? IntentAction.RESUME : IntentAction.PAUSE;
+    const action =
+      request.intent.case === 'park'
+        ? IntentAction.PARK
+        : request.intent.case === 'resume'
+          ? IntentAction.RESUME
+          : IntentAction.PAUSE;
     const {records} = intentReplay(result, request.requestId, ++sequence, action);
     if (result === 'applied') {
       records.push(
@@ -59,13 +75,7 @@ async function openIntents(page: Page) {
           body: {
             case: 'lifecycle',
             value: {
-              state: {
-                case: 'running',
-                value:
-                  action === IntentAction.PAUSE
-                    ? {hold: {reason: {case: 'operator', value: {}}}}
-                    : {},
-              },
+              state: appliedState(action),
             },
           },
         }),
@@ -144,20 +154,19 @@ for (const kind of INTENT_REPLAYS) {
     test(`intent ${kind} at ${width}px`, async ({page}) => {
       await page.setViewportSize({width, height: 900});
       const {outcome, requests} = await openIntents(page);
-      const action = kind === 'park-refused' ? 'Park' : 'Pause';
+      const action = kind === 'park-applied' ? 'Park' : 'Pause';
       await page.getByRole('button', {name: action, exact: true}).click();
-      if (kind === 'applied' || kind === 'refused') {
-        await expect(page.getByText('Pause · Pending', {exact: true})).toBeVisible();
-        await outcome(0, kind);
+      if (kind !== 'pending') {
+        await expect(page.getByText(`${action} · Pending`, {exact: true})).toBeVisible();
+        await outcome(0, kind === 'park-applied' ? 'applied' : kind);
       }
-      const status = kind === 'pending' ? 'Pending' : kind === 'applied' ? 'Applied' : 'Refused';
+      const status = kind === 'pending' ? 'Pending' : kind === 'refused' ? 'Refused' : 'Applied';
       const result = page.getByText(`${action} · ${status}`, {exact: true});
       await expect(result).toBeVisible();
       expect(requests).toHaveLength(1);
-      if (kind === 'park-refused') {
+      if (kind === 'park-applied') {
         expect(requests[0]?.request.intent.case).toBe('park');
-        await expect(result).toHaveAttribute('title', /not supported/);
-        await expect(page.getByRole('button', {name: 'Retry request'})).toHaveCount(0);
+        await expect(page.getByText('Parked', {exact: true}).first()).toBeVisible();
       }
       await capture(page, `intent-${kind}-${width}`);
     });

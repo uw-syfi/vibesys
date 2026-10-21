@@ -277,6 +277,7 @@ class ControlInput(CoreValue):
                     "cancel_attempt": 6,
                     "cancel_item": 7,
                     "set_max_parallel": 8,
+                    "park": 9,
                 }.get(self.action, 0)
                 in [4, 6, 7, 8]
             )
@@ -291,6 +292,7 @@ class ControlInput(CoreValue):
                         "cancel_attempt": 6,
                         "cancel_item": 7,
                         "set_max_parallel": 8,
+                        "park": 9,
                     }.get(self.action, 0)
                     in [6, 7, 8]
                 )
@@ -311,6 +313,7 @@ class ControlInput(CoreValue):
                     "cancel_attempt": 6,
                     "cancel_item": 7,
                     "set_max_parallel": 8,
+                    "park": 9,
                 }.get(self.action, 0)
                 == 3
             )
@@ -328,6 +331,7 @@ class ControlInput(CoreValue):
                     "cancel_attempt": 6,
                     "cancel_item": 7,
                     "set_max_parallel": 8,
+                    "park": 9,
                 }.get(self.action, 0)
                 == 5
             )
@@ -345,6 +349,7 @@ class ControlInput(CoreValue):
                     "cancel_attempt": 6,
                     "cancel_item": 7,
                     "set_max_parallel": 8,
+                    "park": 9,
                 }.get(self.action, 0)
                 == 1
             )
@@ -362,6 +367,7 @@ class ControlInput(CoreValue):
                     "cancel_attempt": 6,
                     "cancel_item": 7,
                     "set_max_parallel": 8,
+                    "park": 9,
                 }.get(self.action, 0)
                 == 2
             )
@@ -379,6 +385,7 @@ class ControlInput(CoreValue):
                     "cancel_attempt": 6,
                     "cancel_item": 7,
                     "set_max_parallel": 8,
+                    "park": 9,
                 }.get(self.action, 0)
                 == 6
             )
@@ -396,6 +403,7 @@ class ControlInput(CoreValue):
                     "cancel_attempt": 6,
                     "cancel_item": 7,
                     "set_max_parallel": 8,
+                    "park": 9,
                 }.get(self.action, 0)
                 == 7
             )
@@ -413,6 +421,7 @@ class ControlInput(CoreValue):
                     "cancel_attempt": 6,
                     "cancel_item": 7,
                     "set_max_parallel": 8,
+                    "park": 9,
                 }.get(self.action, 0)
                 == 8
             )
@@ -430,6 +439,7 @@ class ControlInput(CoreValue):
                 "cancel_attempt": 6,
                 "cancel_item": 7,
                 "set_max_parallel": 8,
+                "park": 9,
             }.get(self.action, 0)
             == 4
         ):
@@ -445,6 +455,7 @@ class ControlInput(CoreValue):
                 "cancel_attempt": 6,
                 "cancel_item": 7,
                 "set_max_parallel": 8,
+                "park": 9,
             }.get(self.action, 0)
             == 4
         ):
@@ -462,5 +473,22 @@ class ControlInput(CoreValue):
             raise ValueError("when only immediate resume switches or keeps")
         if not (not (self.fallback and self.capacity_wait_stands)):
             raise ValueError("capacity_wait_stands fallback ends wait")
+
+    __hash__ = CoreValue.cached_hash
+
+
+@final
+@dataclass(
+    frozen=True,
+    slots=True,
+    kw_only=True,
+    config=ConfigDict(extra="forbid", strict=True, validate_default=True),
+)
+class RunPark(CoreValue):
+    "Durable drain authority. A parked run can resume only in a later host epoch."
+
+    model_fields: ClassVar[tuple[str, ...]] = ("control_id", "epoch")
+    control_id: ControlId
+    epoch: Annotated[int, Field(ge=0)]
 
     __hash__ = CoreValue.cached_hash

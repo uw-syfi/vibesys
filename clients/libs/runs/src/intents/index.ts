@@ -55,6 +55,8 @@ export function runIntent(
   }
 }
 
+export type RunIntentAction = Parameters<typeof runIntent>[1];
+
 /** Take ownership before a mutable generated request enters control state. */
 export function copyIntent(request: PostIntentRequest): PostIntentRequest {
   return clone(PostIntentRequestSchema, request);

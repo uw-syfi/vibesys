@@ -1,3 +1,4 @@
+import type {RunIntentAction} from '@vibesys/runs/intents';
 import {Button, Dialog, Field, Row, Stack, Text, TextInput} from '@vibesys/ui';
 import type {JSX} from 'react';
 import type {IntentEntry} from '../../state/index.js';
@@ -30,7 +31,7 @@ export function IntentControls(props: {
   readonly showGuidance: (open: boolean) => void;
   readonly text: string;
   readonly edit: (text: string) => void;
-  readonly send: (action: 'pause' | 'park' | 'resume' | 'stop' | 'steer') => void;
+  readonly send: (action: RunIntentAction) => void;
   readonly retry: (requestId: string) => void;
 }): JSX.Element {
   return (

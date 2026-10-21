@@ -48,7 +48,9 @@ def deferred(core: CoreState, decision: Decision) -> bool:
     if core.records.recovery.phase != RecoveryPhase.READY:
         return True
     command = decision.request if isinstance(decision, Wait) else decision
-    return core.run.status == RunStatus.PAUSED and not takes_command(core.run, command)
+    return core.run.status in (RunStatus.DRAINING, RunStatus.PARKED) or (
+        core.run.status == RunStatus.PAUSED and not takes_command(core.run, command)
+    )
 
 
 def check_decisions(decisions: object) -> tuple[Decision, ...]:

@@ -103,6 +103,9 @@ func committed(dir string) (uint64, bool, error) {
 }
 
 func liveness(dir string, head *storev1.RunHead) (apiv1.RunLiveness, error) {
+	if head != nil && head.GetLifecycle().GetParked() != nil {
+		return apiv1.RunLiveness_RUN_LIVENESS_PARKED, nil
+	}
 	if head != nil && head.GetLifecycle().GetEnded() != nil {
 		return apiv1.RunLiveness_RUN_LIVENESS_ENDED, nil
 	}

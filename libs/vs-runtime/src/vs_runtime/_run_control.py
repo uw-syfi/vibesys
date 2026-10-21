@@ -9,7 +9,13 @@ from typing import TYPE_CHECKING, Literal, Protocol
 from pydantic import BaseModel, ConfigDict, model_validator
 
 from vs_core.api import PauseOwner, RunPause, StopMode, escalate_stop
-from vs_runtime._operator_control import ControlAction, SteerMode, SteerTarget, action_summary
+from vs_runtime._operator_control import (
+    ControlAction,
+    ParkRequest,
+    SteerMode,
+    SteerTarget,
+    action_summary,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -26,6 +32,7 @@ class RunControlTransitionKind(StrEnum):
     GUIDANCE_QUEUED = "guidance_queued"
     """A standing steer was queued: guidance in force until withdrawn, not one turn's."""
     PAUSE_REQUESTED = "pause_requested"
+    PARK_REQUESTED = "park_requested"
     RESUMED = "resumed"
     STOP_REQUESTED = "stop_requested"
     STEER_CONSUMED = "steer_consumed"
@@ -420,7 +427,7 @@ class RunControlChannel(Protocol):
         """Drain queued withdrawals exactly once."""
         ...
 
-    def queue_action(self, request: ActionRequest) -> None:
+    def queue_action(self, request: ActionRequest | ParkRequest) -> None:
         """Queue an operator action for the run loop to take at its next control poll.
 
         The run loop drains actions (:meth:`take_pending_actions`) in the order they were
@@ -431,8 +438,12 @@ class RunControlChannel(Protocol):
         """
         ...
 
-    def take_pending_actions(self) -> list[ActionRequest]:
+    def take_pending_actions(self) -> list[ActionRequest | ParkRequest]:
         """Drain queued operator actions exactly once."""
+        ...
+
+    def land_park(self) -> None:
+        """Report that core committed a park drain."""
         ...
 
     def notify_action_applied(self, summary: str) -> None:
@@ -664,7 +675,7 @@ class RuntimeRunControlChannel:
         self._lock = threads.condition(threads.rlock())
         self._pending_steer: list[QueuedSteer] = []
         self._pending_withdrawals: list[QueuedWithdraw] = []
-        self._pending_actions: list[ActionRequest] = []
+        self._pending_actions: list[ActionRequest | ParkRequest] = []
         self._held = False
         self._quota_paused = False
         self._stop_requested = False
@@ -972,17 +983,23 @@ class RuntimeRunControlChannel:
             pending, self._pending_withdrawals = self._pending_withdrawals, []
         return pending
 
-    def queue_action(self, request: ActionRequest) -> None:
+    def queue_action(self, request: ActionRequest | ParkRequest) -> None:
         """Queue an operator action for the run loop to take at its next control poll."""
         with self._lock:
             self._pending_actions.append(request)
-            self._emit(RunControlTransitionKind.ACTION_QUEUED, text=action_summary(request))
+            if not isinstance(request, ParkRequest):
+                self._emit(RunControlTransitionKind.ACTION_QUEUED, text=action_summary(request))
 
-    def take_pending_actions(self) -> list[ActionRequest]:
+    def take_pending_actions(self) -> list[ActionRequest | ParkRequest]:
         """Drain operator actions queued since the previous control poll."""
         with self._lock:
             pending, self._pending_actions = self._pending_actions, []
         return pending
+
+    def land_park(self) -> None:
+        """Report core's accepted drain, after it is persisted."""
+        with self._lock:
+            self._emit(RunControlTransitionKind.PARK_REQUESTED)
 
     def notify_action_applied(self, summary: str) -> None:
         """Record that core recorded an operator action, so it applied."""

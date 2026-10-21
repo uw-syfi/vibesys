@@ -91,6 +91,7 @@ def _parser() -> argparse.ArgumentParser:
         "withdraw", help="end standing guidance sent earlier as a standing steer"
     )
     withdraw.add_argument("withdraws", metavar="CONTROL_ID", help="the standing steer's id")
+    actions.add_parser("park", help="finish agent turns, save and exit for relaunch")
     actions.add_parser("pause", help="hold the run at its next safe boundary")
     resume = actions.add_parser("resume", help="continue a paused run")
     how = resume.add_mutually_exclusive_group()

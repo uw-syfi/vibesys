@@ -32,6 +32,8 @@ const (
 	RunStatus_RUN_STATUS_CLOSING     RunStatus = 3
 	RunStatus_RUN_STATUS_TERMINAL    RunStatus = 4
 	RunStatus_RUN_STATUS_BLOCKED     RunStatus = 5
+	RunStatus_RUN_STATUS_DRAINING    RunStatus = 6
+	RunStatus_RUN_STATUS_PARKED      RunStatus = 7
 )
 
 // Enum value maps for RunStatus.
@@ -43,6 +45,8 @@ var (
 		3: "RUN_STATUS_CLOSING",
 		4: "RUN_STATUS_TERMINAL",
 		5: "RUN_STATUS_BLOCKED",
+		6: "RUN_STATUS_DRAINING",
+		7: "RUN_STATUS_PARKED",
 	}
 	RunStatus_value = map[string]int32{
 		"RUN_STATUS_UNSPECIFIED": 0,
@@ -51,6 +55,8 @@ var (
 		"RUN_STATUS_CLOSING":     3,
 		"RUN_STATUS_TERMINAL":    4,
 		"RUN_STATUS_BLOCKED":     5,
+		"RUN_STATUS_DRAINING":    6,
+		"RUN_STATUS_PARKED":      7,
 	}
 )
 
@@ -303,6 +309,7 @@ const (
 	ControlAction_CONTROL_ACTION_CANCEL_ATTEMPT   ControlAction = 6
 	ControlAction_CONTROL_ACTION_CANCEL_ITEM      ControlAction = 7
 	ControlAction_CONTROL_ACTION_SET_MAX_PARALLEL ControlAction = 8
+	ControlAction_CONTROL_ACTION_PARK             ControlAction = 9
 )
 
 // Enum value maps for ControlAction.
@@ -317,6 +324,7 @@ var (
 		6: "CONTROL_ACTION_CANCEL_ATTEMPT",
 		7: "CONTROL_ACTION_CANCEL_ITEM",
 		8: "CONTROL_ACTION_SET_MAX_PARALLEL",
+		9: "CONTROL_ACTION_PARK",
 	}
 	ControlAction_value = map[string]int32{
 		"CONTROL_ACTION_UNSPECIFIED":      0,
@@ -328,6 +336,7 @@ var (
 		"CONTROL_ACTION_CANCEL_ATTEMPT":   6,
 		"CONTROL_ACTION_CANCEL_ITEM":      7,
 		"CONTROL_ACTION_SET_MAX_PARALLEL": 8,
+		"CONTROL_ACTION_PARK":             9,
 	}
 )
 
@@ -2041,14 +2050,16 @@ const file_vibesys_core_v1_common_proto_rawDesc = "" +
 	"\rinvocation_id\x18\x02 \x01(\v2\x1d.vibesys.core.v1.InvocationIdB\x06\xbaH\x03\xc8\x01\x01R\finvocationId\x12>\n" +
 	"\n" +
 	"generation\x18\x03 \x01(\tB\x1e\xbaH\x15r\x132\x11^(0|[1-9][0-9]*)$\xca\xf3\x18\x02\x10\x01R\n" +
-	"generation*\x9f\x01\n" +
+	"generation*\xcf\x01\n" +
 	"\tRunStatus\x12\x1a\n" +
 	"\x16RUN_STATUS_UNSPECIFIED\x10\x00\x12\x16\n" +
 	"\x12RUN_STATUS_RUNNING\x10\x01\x12\x15\n" +
 	"\x11RUN_STATUS_PAUSED\x10\x02\x12\x16\n" +
 	"\x12RUN_STATUS_CLOSING\x10\x03\x12\x17\n" +
 	"\x13RUN_STATUS_TERMINAL\x10\x04\x12\x16\n" +
-	"\x12RUN_STATUS_BLOCKED\x10\x05*Z\n" +
+	"\x12RUN_STATUS_BLOCKED\x10\x05\x12\x17\n" +
+	"\x13RUN_STATUS_DRAINING\x10\x06\x12\x15\n" +
+	"\x11RUN_STATUS_PARKED\x10\a*Z\n" +
 	"\n" +
 	"PauseOwner\x12\x1b\n" +
 	"\x17PAUSE_OWNER_UNSPECIFIED\x10\x00\x12\x18\n" +
@@ -2068,7 +2079,7 @@ const file_vibesys_core_v1_common_proto_rawDesc = "" +
 	"\x14INPUT_MODE_NEXT_TURN\x10\x01\x1a\x0f\xda\xf3\x18\v\n" +
 	"\tnext-turn\x12\x18\n" +
 	"\x14INPUT_MODE_INTERRUPT\x10\x02\x12\x17\n" +
-	"\x13INPUT_MODE_STANDING\x10\x03*\xa4\x02\n" +
+	"\x13INPUT_MODE_STANDING\x10\x03*\xbd\x02\n" +
 	"\rControlAction\x12\x1e\n" +
 	"\x1aCONTROL_ACTION_UNSPECIFIED\x10\x00\x12\x18\n" +
 	"\x14CONTROL_ACTION_PAUSE\x10\x01\x12\x19\n" +
@@ -2078,7 +2089,8 @@ const file_vibesys_core_v1_common_proto_rawDesc = "" +
 	"\x17CONTROL_ACTION_WITHDRAW\x10\x05\x12!\n" +
 	"\x1dCONTROL_ACTION_CANCEL_ATTEMPT\x10\x06\x12\x1e\n" +
 	"\x1aCONTROL_ACTION_CANCEL_ITEM\x10\a\x12#\n" +
-	"\x1fCONTROL_ACTION_SET_MAX_PARALLEL\x10\b\x1a\x06\xd2\xf3\x18\x02\b\x01B?Z=github.com/uw-syfi/vibesys/gateway/gen/vibesys/core/v1;corev1b\x06proto3"
+	"\x1fCONTROL_ACTION_SET_MAX_PARALLEL\x10\b\x12\x17\n" +
+	"\x13CONTROL_ACTION_PARK\x10\t\x1a\x06\xd2\xf3\x18\x02\b\x01B?Z=github.com/uw-syfi/vibesys/gateway/gen/vibesys/core/v1;corev1b\x06proto3"
 
 var (
 	file_vibesys_core_v1_common_proto_rawDescOnce sync.Once
