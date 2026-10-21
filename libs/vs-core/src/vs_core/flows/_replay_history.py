@@ -126,14 +126,6 @@ class PolicyDrift:
     roles: tuple[str, ...]
     templates: tuple[str, ...]
 
-    @property
-    def message(self) -> str:
-        message = "Earlier answers kept; your edits apply to new work."
-        if self.roles:
-            message += " Changed roles: " + ", ".join(self.roles) + "."
-        if self.templates:
-            message += " Changed templates: " + ", ".join(self.templates) + "."
-        return message
 
 
 @dataclass(frozen=True)

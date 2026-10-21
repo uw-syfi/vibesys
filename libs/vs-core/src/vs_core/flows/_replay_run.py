@@ -305,8 +305,6 @@ class ReplayScheduler:
         if reply is None or reply.type_url.rsplit("/", 1)[-1] != pending.reply.desc().type_name:
             problem = "historical reply consumer is incompatible; bump the semantic data contract"
             raise ReplayConsumerError(problem)
-        value = pending.reply.from_binary(reply.value)
-        validate(value)
         policy = pb.ReplayPolicy.from_binary(pending.policy_bytes)
         if operation.policy is None:
             problem = "historical operation has no policy"
@@ -314,6 +312,8 @@ class ReplayScheduler:
         if policy.reply_schema_digest != operation.policy.reply_schema_digest:
             problem = "historical reply schema is incompatible; bump the semantic data contract"
             raise ReplayConsumerError(problem)
+        value = pending.reply.from_binary(reply.value)
+        validate(value)
         self._policy_drift(pending, operation.policy)
         self.clock = accepted.clock
         if operation.allowance is None:

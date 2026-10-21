@@ -80,9 +80,10 @@ def finish(run: ReplayScheduler, values: list[str]) -> list[AcceptedReplay]:
 @given(
     values=st.lists(st.sampled_from(["a", "b", "c"]), min_size=1, max_size=25),
     fresh=st.integers(min_value=0, max_value=100),
+    allowances=st.lists(st.integers(min_value=0, max_value=100), min_size=1, max_size=25),
 )
 def test_fold_history_reuses_after_prompt_allowance_and_helper_edits(
-    values: list[str], fresh: int
+    values: list[str], fresh: int, allowances: list[int]
 ) -> None:
     def root(policy: bytes) -> Root:
         async def helper(ctx: ReplayFlow, i: int) -> Reply:
@@ -98,7 +99,14 @@ def test_fold_history_reuses_after_prompt_allowance_and_helper_edits(
         return flow
 
     live = ReplayScheduler(root(b"old"), (), settings())
-    history = finish(live, values)
+    history = []
+    for index, value in enumerate(values):
+        (start,) = live.dispatches()
+        remaining = allowances[index % len(allowances)]
+        start.allowance = replay.ReplayAllowance(remaining=remaining)
+        observation = accepted(start, index + 1, value)
+        history.append(observation)
+        live.accept(observation)
     replayed = ReplayScheduler(root(b"new prompt"), history, settings(fresh))
     assert replayed.result == live.result
     assert replayed.dispatches() == ()
@@ -106,8 +114,6 @@ def test_fold_history_reuses_after_prompt_allowance_and_helper_edits(
     assert replayed.frontier().drift.count == len(values)
     assert replayed.frontier().drift.roles == ("planner",)
     assert replayed.frontier().drift.templates == ("plan.j2",)
-    assert "Changed roles: planner." in replayed.frontier().drift.message
-    assert "Changed templates: plan.j2." in replayed.frontier().drift.message
     assert replayed.allowance_bytes == settings(fresh).fresh_allowance
 
 

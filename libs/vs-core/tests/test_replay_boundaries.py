@@ -413,11 +413,17 @@ def test_unset_latch_read_tracks_the_released_knowledge_frontier() -> None:
     changed.close()
 
 
-def test_same_reply_name_with_a_different_retained_schema_is_not_reinterpreted() -> None:
+@pytest.mark.parametrize("obsolete_wire", [False, True])
+def test_same_reply_name_with_a_different_retained_schema_is_not_reinterpreted(
+    obsolete_wire: bool,
+) -> None:
     (item,) = history()
     operation = item.operation()
     assert operation.policy is not None
     operation.policy.reply_schema_digest = b"x" * 32
+    if obsolete_wire:
+        assert operation.outcome is not None
+        operation.outcome.value = b"\xff"
     incompatible = AcceptedReplay(item.sequence, item.clock, operation.to_binary())
     with pytest.raises(ReplayConsumerError, match="historical reply schema is incompatible"):
         ReplayScheduler(one, [incompatible], settings())
