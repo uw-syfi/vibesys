@@ -37,7 +37,6 @@ from pydantic import (
 import vs_project._paths as project_paths
 from vs_decode.api import Unreadable, ValidationOptions, decode_json
 from vs_project._control_inbox import FileControlInbox, validate_request_id
-from vs_project._fingerprint import _is_excluded, _update_fingerprint
 from vs_project._framework_writes import FRAMEWORK_WRITES
 from vs_project._manifests import (
     _IDENTIFIER_PATTERN,
@@ -1083,6 +1082,11 @@ class ProjectState:
 
     def input_fingerprint(self) -> str:
         """Hash the portable project input, excluding metadata, secrets, and caches."""
+        # lint-waiver: LW-337001 [PLC0415]; hello never fingerprints project inputs.
+        # > An eager import exceeds the host helper module budget; a dynamic loader
+        # > hides this dependency from tach and adds indirection to its only caller.
+        from vs_project._fingerprint import _is_excluded, _update_fingerprint  # noqa: PLC0415
+
         digest = hashlib.sha256(b"vs-project-input-v1\0")
         paths = sorted(
             self.project_root.rglob("*"),
