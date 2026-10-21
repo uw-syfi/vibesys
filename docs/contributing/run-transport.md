@@ -37,8 +37,8 @@ read path and journal projection from the native core and control work still to 
 | `Skeleton`, `GetBlobs`, `TailStream`, `WatchRuns`; new Run screen | RPCs, client skeleton/cache and opt-in raw record panel built; complete native Run screen remains unbuilt | 2 |
 | Conversion of existing JSONL runs and `store.json` envelopes | typed journal conversion and bulk project/host-index conversion built, including blobs, final keyframes, head publication and repair; pre-trace and unsupported journals are reported as skipped; core envelopes remain the resume authority until phase 3 | 2 |
 | Core state as generated types, `state.pb`, native `run.log` writes | unbuilt; typed journal projection does not replace native core commits | 3 |
-| Intents as records (`IntentState`), pause/park, relaunch epochs | inbox outcomes and relaunch epochs built over the current saved-state resume path; park and native state recovery remain unbuilt | 3 |
-| Chat sessions as processes with their own log; `HostCall` | unbuilt | 3 |
+| Intents as records (`IntentState`), pause/park, relaunch epochs | inbox outcomes, park and relaunch epochs built over the current saved-state resume path; native state recovery remains unbuilt | 3 |
+| Typed `HostCall` for intents and relaunch; chat sessions as processes | HostCall built; chat sessions remain unbuilt | 3 |
 | Generated frozen value classes from `.proto` (our own protoc plugin) | prototype only | 3 |
 | Control inbox (files, ordered, durable, idempotent by request id) | built | |
 | Log streams (`vs_logs`) | built; moves under the run directory | 2 |
@@ -65,6 +65,7 @@ One directory per run, opened only through `vs-project`'s `Project`.
 | `streams/<id>` | log streams (build output, stage output, narration) | the run | append-only |
 | `keyframes/<seq>.pb` | the skeleton at a log sequence | the run, at its checkpoints | immutable |
 | `run.head` | tiny status and headline for dashboards, and `committed_seq` | the run | replaced atomically |
+| `launch.lock` | serializes host relaunch admission until the new epoch is observed | the host command | held only during launch |
 | `run.lock` | an advisory lock the live run holds; no content | the run | held while the process lives |
 | `state.pb` | core's snapshot; records the last log sequence it covers | the run | compare-and-swap |
 | `inbox/` | intents posted by viewers | the gateway | one file per request |
@@ -181,6 +182,22 @@ pending requests again. New records carry `Record.clock`, excluding downtime; ol
 derive elapsed time within each epoch from their wall timestamps. Span times retain the epoch
 in which each transition occurred, including spans that remain open across a relaunch.
 
+The launch operation for an existing run is the typed HostCall relaunch method, not a second
+Launch RPC. Both would dispatch the same host operation; HostCall keeps checkout selection and
+bounded subprocess ownership in one place, with no run policy in the gateway. The host command
+uses the existing detached launcher; its server resumes through `vibesys.api.relaunch`. The
+command returns the epoch actually observed in `run.log`, or a typed refusal: locked, ended,
+checkout missing, or epoch changed. An unexpected launch failure or an unconfirmed epoch uses
+HostCall's configuration diagnostic. It is uncertain whether a timed-out call launched, so the
+client never retries it automatically. Requests name the observed epoch; a retry against a later
+epoch is refused. The host command holds a separate launch lock across admission and epoch
+confirmation, so concurrent app calls cannot both admit the same observed epoch. The writer
+still acquires the lifetime lock atomically.
+
+The app currently validates and selects a host checkout but offers no safe update operation.
+The operator updates that checkout before relaunching. No update-checkout method is exposed.
+The new epoch records the checkout's tree hash and dirty flag, including operator edits.
+
 **Chat sessions** belong to the run and outlive relaunches as data. They are separate processes
 with their own `session.log` and inbox, started on demand and exiting when idle or at park. The
 default session id is `default`, and sessions are kept as long as the run is. They are not the
@@ -214,8 +231,7 @@ connect; a release build later downloads the released binary instead. It is stat
 | `GetBlobs` | unary | blobs by hash |
 | `TailStream` | stream | a log stream from an offset, then live |
 | `PostIntent` | unary | writes the run's (or session's) inbox |
-| `Launch` | unary | starts or relaunches a run |
-| `HostCall` | unary | `vibesys host <method>` subprocess; protobuf on stdin and stdout |
+| `HostCall` | unary | typed host operations, including `relaunch` of an existing run; `vibesys host <method>` with protobuf on stdin and stdout |
 | `Attach` | bidi | reserved |
 
 The gateway reads records as framed bytes; it reads protos only for `run.head` and its own API.
@@ -234,8 +250,9 @@ runs from each. A semantic break bumps the package version and ships one upgrade
 writer is refused by name, never read as if it were older.
 
 **Development mode.** The laptop tree builds the UI and the gateway; the host checkout runs the
-runs. They may diverge as long as store changes stay additive. Sync pushes the laptop tree,
-including uncommitted edits, to the host checkout.
+runs. They may diverge as long as store changes stay additive. The operator updates the host
+checkout, including any intended uncommitted edits, before relaunching. The app does not
+currently sync or pull it.
 
 ## Contracts
 

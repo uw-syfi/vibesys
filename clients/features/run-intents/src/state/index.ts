@@ -6,3 +6,5 @@ export {
   type RunIntentsInput,
   runIntentsMachine,
 } from './machine.js';
+
+export {type RelaunchEvent, relaunchMachine} from './relaunch.js';

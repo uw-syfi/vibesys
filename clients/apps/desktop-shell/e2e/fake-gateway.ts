@@ -4,31 +4,56 @@ import {
   GetBlobsResponseSchema,
   HostService,
   RecordSchema,
+  RunLiveness,
   SkeletonResponseSchema,
   TailResponseSchema,
   TailStreamResponseSchema,
+  WatchRunsResponseSchema,
 } from '@vibesys/proto';
 import type {StoreRunFixture} from '@vibesys/run-fixtures';
 
 export interface WireFixture {
-  methods: Record<'skeleton' | 'tail' | 'blobs' | 'log' | 'hostCall', string>;
+  methods: Record<'skeleton' | 'tail' | 'blobs' | 'log' | 'hostCall' | 'watchRuns', string>;
   skeleton: number[];
   tail: number[];
   blobs: Record<string, number[]>;
   log: number[];
+  watchRuns: number[];
 }
-export function wire(fixture: StoreRunFixture): WireFixture {
+export function wire(fixture: StoreRunFixture, liveness?: RunLiveness): WireFixture {
   const encoded = fixture.records.map(record => toBinary(RecordSchema, record));
   const prefix = fixture.records.slice(0, fixture.initialCount);
   const method = (name: keyof typeof HostService.method): string =>
     `/${HostService.typeName}/${HostService.method[name].name}`;
+  const last = fixture.records.filter(record => record.body.case === 'lifecycle').at(-1);
+  const lifecycle = last?.body.case === 'lifecycle' ? last.body.value : undefined;
+  const epoch = fixture.records.at(-1)?.epoch ?? 1;
   return {
+    watchRuns: [
+      ...toBinary(
+        WatchRunsResponseSchema,
+        create(WatchRunsResponseSchema, {
+          runId: 'run-a',
+          liveness:
+            liveness ??
+            (lifecycle?.state.case === 'ended' || lifecycle?.state.case === 'parked'
+              ? RunLiveness.ENDED
+              : RunLiveness.ALIVE),
+          head: {
+            strategy: 'fixture',
+            lifecycle,
+            process: {pid: 1, epoch, startedAt: {seconds: 1700000000n}},
+          },
+        }),
+      ),
+    ],
     methods: {
       skeleton: method('skeleton'),
       tail: method('tail'),
       blobs: method('getBlobs'),
       log: method('tailStream'),
       hostCall: method('hostCall'),
+      watchRuns: method('watchRuns'),
     },
     skeleton: [
       ...toBinary(
@@ -81,6 +106,7 @@ export function wire(fixture: StoreRunFixture): WireFixture {
 export function installGateway(input: WireFixture): void {
   const calls: string[] = [];
   const streams = new Set<(bytes: Uint8Array) => void>();
+  const watchers = new Set<(bytes: Uint8Array) => void>();
   let active = 0;
   Object.assign(window, {
     vibesysGateway: {
@@ -116,6 +142,9 @@ export function installGateway(input: WireFixture): void {
         if (method === input.methods.tail) {
           streams.add(receive);
           receive(new Uint8Array(input.tail));
+        } else if (method === input.methods.watchRuns) {
+          watchers.add(receive);
+          receive(new Uint8Array(input.watchRuns));
         } else if (method === input.methods.log) receive(new Uint8Array(input.log));
         else throw new Error('Unknown stream');
         return {
@@ -124,6 +153,7 @@ export function installGateway(input: WireFixture): void {
               closed = true;
               active -= 1;
               streams.delete(receive);
+              watchers.delete(receive);
             }
           },
         };
@@ -132,6 +162,9 @@ export function installGateway(input: WireFixture): void {
     fakeGateway: {
       calls: () => calls,
       active: () => active,
+      observe: (bytes: number[]) => {
+        for (const receive of watchers) receive(new Uint8Array(bytes));
+      },
       append: (bytes: number[]) => {
         for (const receive of streams) receive(new Uint8Array(bytes));
       },

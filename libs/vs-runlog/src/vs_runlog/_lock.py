@@ -1,6 +1,8 @@
 """The writer's lifetime lock, shared with the gateway's nonblocking probe."""
 
 import fcntl
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 
@@ -30,3 +32,26 @@ class RunLock:
     def close(self) -> None:
         """Close releases the lock, including after partial writer initialization."""
         self._stream.close()
+
+
+class RunLaunchLockedError(RuntimeError):
+    """Another launcher is still admitting this run."""
+
+
+@contextmanager
+def exclusive_run_launch(log_path: Path) -> Iterator[None]:
+    """Serialize launch admission until a writer publishes its new epoch.
+
+    Distinct from run.lock: the child must acquire the writer lock while its
+    launcher still owns admission. Contention raises RunLaunchLockedError; close or
+    process exit releases ownership, including an interrupted launch.
+    """
+    try:
+        lock = RunLock(log_path.parent / "launch.lock")
+    except BlockingIOError as error:
+        message = "another launch holds launch.lock"
+        raise RunLaunchLockedError(message) from error
+    try:
+        yield
+    finally:
+        lock.close()

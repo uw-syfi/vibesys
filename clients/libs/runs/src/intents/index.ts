@@ -105,3 +105,23 @@ export function intentTailResponse(bytes: Uint8Array): readonly IntentState[] {
     return record.body.case === 'intent' ? [record.body.value] : [];
   });
 }
+
+export {
+  copyRelaunch,
+  copyRelaunchObservation,
+  hostRelaunchRequest,
+  hostRelaunchResponse,
+  livenessRequest,
+  livenessResponse,
+  type RelaunchLiveness,
+  type RelaunchObservation,
+  RelaunchRefusal,
+  type RelaunchRequest,
+  type RelaunchResponse,
+  type RelaunchTarget,
+  RUN_LIVENESS_METHOD,
+  RunLiveness,
+  relaunchLabel,
+  relaunchRequest,
+  relaunchTarget,
+} from './relaunch.js';

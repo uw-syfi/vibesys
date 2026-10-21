@@ -6,8 +6,10 @@ import {type GatewayRunPorts, RunScreen, useGatewayRun} from '@vibesys/feature-r
 import type {RunPageSeed} from '@vibesys/feature-run-page/state';
 import type {GatewayBridge, WelcomeBridge} from '@vibesys/ipc';
 import type {ScheduleTimeout} from '@vibesys/machine';
+import type {Skeleton} from '@vibesys/run-skeleton';
 import {gatewayContentCache} from '@vibesys/run-skeleton/cache';
 import {gatewayReader} from '@vibesys/run-skeleton/reader';
+import type {RelaunchObservation} from '@vibesys/runs/intents';
 import {Card, EmptyState, Page, Switch, Text} from '@vibesys/ui';
 import {type JSX, type ReactNode, useMemo} from 'react';
 import {gatewayTransport} from './gateway-transport.js';
@@ -63,6 +65,7 @@ export function GatewayRun(props: {
       </Page>
     );
   }
+  const observation = observationOf(snapshot.context.load?.skeleton);
   return (
     <RunScreen
       state={page.state}
@@ -84,6 +87,7 @@ export function GatewayRun(props: {
               projectRoot={page.state.record.run.projectRoot}
               enabled={snapshot.context.enabled}
               schedule={schedule}
+              {...(observation ? {relaunch: observation} : {})}
             />
           ) : null}
         </>
@@ -93,4 +97,16 @@ export function GatewayRun(props: {
       }
     />
   );
+}
+
+function observationOf(skeleton: Skeleton | undefined): RelaunchObservation | undefined {
+  const latest = skeleton?.epochs.at(-1);
+  if (!latest?.epoch) return undefined;
+  const lifecycle = skeleton?.lifecycles.at(-1);
+  return {
+    epoch: BigInt(latest.epoch.epoch),
+    ...(lifecycle?.lifecycle && lifecycle.seq >= latest.seq
+      ? {lifecycle: lifecycle.lifecycle}
+      : {}),
+  };
 }
