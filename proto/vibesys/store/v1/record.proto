@@ -3,7 +3,14 @@ syntax = "proto3";
 package vibesys.store.v1;
 
 import "buf/validate/validate.proto";
+import "google/protobuf/descriptor.proto";
 import "google/protobuf/timestamp.proto";
+import "vibesys/store/v1/content.proto";
+import "vibesys/store/v1/epoch.proto";
+import "vibesys/store/v1/intent.proto";
+import "vibesys/store/v1/lifecycle.proto";
+import "vibesys/store/v1/notice.proto";
+import "vibesys/store/v1/span.proto";
 
 option go_package = "github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1";
 
@@ -12,6 +19,12 @@ option go_package = "github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;sto
 // a uvarint payload length, a four-byte little-endian CRC32C of the payload,
 // and the payload: one encoded vibesys.store.v1.Record.
 message Record {
+  // Phase 1 records keep their validation behavior during the seven-day bridge.
+  option (buf.validate.message).cel = {
+    id: "record.identity"
+    message: "seq, epoch and at are required for typed records"
+    expression: "!(has(this.lifecycle) || has(this.span) || has(this.metric) || has(this.stream) || has(this.blob) || has(this.intent) || has(this.notice)) || (this.seq > 0u && this.epoch > 0u && has(this.at))"
+  };
   uint64 seq = 1;
   google.protobuf.Timestamp at = 2;
   uint32 epoch = 3;
@@ -19,6 +32,13 @@ message Record {
     option (buf.validate.oneof).required = true;
     EpochStarted epoch_started = 4;
     LegacyEvent legacy_event = 5;
+    Lifecycle lifecycle = 11;
+    SpanRecord span = 12;
+    MetricPoint metric = 13;
+    StreamRef stream = 14;
+    BlobAttached blob = 15;
+    IntentState intent = 16;
+    Notice notice = 17;
   }
 }
 
@@ -30,11 +50,17 @@ message EpochStarted {
   bool dirty = 4;
   string api_schema_hash = 5;
   string store_schema_hash = 6;
+  // Existing checkout fields stay authoritative; no duplicate Checkout message.
+  string vibesys_version = 7 [(buf.validate.field).string.max_bytes = 65536];
+  RunDescription run = 8;
+  repeated SpanKindDecl span_kinds = 9;
+  repeated MetricSeriesDecl series = 10;
+  google.protobuf.FileDescriptorSet descriptors = 11;
 }
 
 // LegacyEvent is an interim bridge carrying one current JSONL run event verbatim.
-// Phase 2 replaces this body when the event inventory is implemented. Its field
-// number remains reserved after removal; existing store records remain readable.
+// Retained for the seven-day read window after phase 2 lands. Its field
+// number must be reserved after removal; existing store records remain readable.
 message LegacyEvent {
   string json = 1;
 }

@@ -1,0 +1,32 @@
+syntax = "proto3";
+
+package vibesys.store.v1;
+
+import "buf/validate/validate.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1";
+
+enum Direction {
+  DIRECTION_UNSPECIFIED = 0;
+  DIRECTION_MAX = 1;
+  DIRECTION_MIN = 2;
+  DIRECTION_NONE = 3;
+}
+
+enum SeriesRole {
+  SERIES_ROLE_UNSPECIFIED = 0;
+  SERIES_ROLE_OBJECTIVE = 1;
+  SERIES_ROLE_RESOURCE = 2;
+  SERIES_ROLE_REFERENCE = 3;
+}
+
+message Progress {
+  option (buf.validate.message).cel = {
+    id: "progress.total"
+    message: "total must be positive and at least done"
+    expression: "!has(this.total) || (this.total > 0u && this.done <= this.total)"
+  };
+  uint64 done = 1;
+  optional uint64 total = 2;
+  string label = 3 [(buf.validate.field).string.max_bytes = 65536];
+}

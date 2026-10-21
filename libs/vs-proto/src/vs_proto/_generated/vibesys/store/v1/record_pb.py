@@ -10,16 +10,25 @@ from typing import Literal, TYPE_CHECKING, TypeAlias
 
 from protobuf import Message
 from protobuf._codegen import file_desc
-from protobuf.wkt.google.protobuf import timestamp_pb
+from protobuf.wkt.google.protobuf import descriptor_pb, timestamp_pb
 
+from . import content_pb, epoch_pb, intent_pb, lifecycle_pb, notice_pb, span_pb
 from ....buf.validate import validate_pb
 
 if TYPE_CHECKING:
     from protobuf import DescFile, Oneof
+    from protobuf.wkt.google.protobuf.descriptor_pb import FileDescriptorSet
     from protobuf.wkt.google.protobuf.timestamp_pb import Timestamp
 
+    from .content_pb import BlobAttached, MetricPoint, StreamRef
+    from .epoch_pb import MetricSeriesDecl, RunDescription, SpanKindDecl
+    from .intent_pb import IntentState
+    from .lifecycle_pb import Lifecycle
+    from .notice_pb import Notice
+    from .span_pb import SpanRecord
 
-_RecordFields: TypeAlias = Literal["seq", "at", "epoch", "epoch_started", "legacy_event"]
+
+_RecordFields: TypeAlias = Literal["seq", "at", "epoch", "epoch_started", "legacy_event", "lifecycle", "span", "metric", "stream", "blob", "intent", "notice"]
 
 class Record(Message[_RecordFields]):
     """
@@ -61,16 +70,16 @@ class Record(Message[_RecordFields]):
             seq: int = 0,
             at: Timestamp | None = None,
             epoch: int = 0,
-            body: Oneof[Literal["epoch_started"], EpochStarted] | Oneof[Literal["legacy_event"], LegacyEvent] | None = None,
+            body: Oneof[Literal["epoch_started"], EpochStarted] | Oneof[Literal["legacy_event"], LegacyEvent] | Oneof[Literal["lifecycle"], Lifecycle] | Oneof[Literal["span"], SpanRecord] | Oneof[Literal["metric"], MetricPoint] | Oneof[Literal["stream"], StreamRef] | Oneof[Literal["blob"], BlobAttached] | Oneof[Literal["intent"], IntentState] | Oneof[Literal["notice"], Notice] | None = None,
         ) -> None:
             pass
 
         seq: int
         at: Timestamp | None
         epoch: int
-        body: Oneof[Literal["epoch_started"], EpochStarted] | Oneof[Literal["legacy_event"], LegacyEvent] | None
+        body: Oneof[Literal["epoch_started"], EpochStarted] | Oneof[Literal["legacy_event"], LegacyEvent] | Oneof[Literal["lifecycle"], Lifecycle] | Oneof[Literal["span"], SpanRecord] | Oneof[Literal["metric"], MetricPoint] | Oneof[Literal["stream"], StreamRef] | Oneof[Literal["blob"], BlobAttached] | Oneof[Literal["intent"], IntentState] | Oneof[Literal["notice"], Notice] | None
 
-_EpochStartedFields: TypeAlias = Literal["run_id", "epoch", "tree_hash", "dirty", "api_schema_hash", "store_schema_hash"]
+_EpochStartedFields: TypeAlias = Literal["run_id", "epoch", "tree_hash", "dirty", "api_schema_hash", "store_schema_hash", "vibesys_version", "run", "span_kinds", "series", "descriptors"]
 
 class EpochStarted(Message[_EpochStartedFields]):
     """
@@ -105,9 +114,31 @@ class EpochStarted(Message[_EpochStartedFields]):
             ```proto
             string store_schema_hash = 6;
             ```
+        vibesys_version:
+            Existing checkout fields stay authoritative; no duplicate Checkout message.
+
+            ```proto
+            string vibesys_version = 7;
+            ```
+        run:
+            ```proto
+            optional vibesys.store.v1.RunDescription run = 8;
+            ```
+        span_kinds:
+            ```proto
+            repeated vibesys.store.v1.SpanKindDecl span_kinds = 9;
+            ```
+        series:
+            ```proto
+            repeated vibesys.store.v1.MetricSeriesDecl series = 10;
+            ```
+        descriptors:
+            ```proto
+            optional google.protobuf.FileDescriptorSet descriptors = 11;
+            ```
     """
 
-    __slots__ = ("run_id", "epoch", "tree_hash", "dirty", "api_schema_hash", "store_schema_hash")
+    __slots__ = ("run_id", "epoch", "tree_hash", "dirty", "api_schema_hash", "store_schema_hash", "vibesys_version", "run", "span_kinds", "series", "descriptors")
 
     if TYPE_CHECKING:
 
@@ -120,6 +151,11 @@ class EpochStarted(Message[_EpochStartedFields]):
             dirty: bool = False,
             api_schema_hash: str = "",
             store_schema_hash: str = "",
+            vibesys_version: str = "",
+            run: RunDescription | None = None,
+            span_kinds: list[SpanKindDecl] | None = None,
+            series: list[MetricSeriesDecl] | None = None,
+            descriptors: FileDescriptorSet | None = None,
         ) -> None:
             pass
 
@@ -129,14 +165,19 @@ class EpochStarted(Message[_EpochStartedFields]):
         dirty: bool
         api_schema_hash: str
         store_schema_hash: str
+        vibesys_version: str
+        run: RunDescription | None
+        span_kinds: list[SpanKindDecl]
+        series: list[MetricSeriesDecl]
+        descriptors: FileDescriptorSet | None
 
 _LegacyEventFields: TypeAlias = Literal["json"]
 
 class LegacyEvent(Message[_LegacyEventFields]):
     """
     LegacyEvent is an interim bridge carrying one current JSONL run event verbatim.
-    Phase 2 replaces this body when the event inventory is implemented. Its field
-    number remains reserved after removal; existing store records remain readable.
+    Retained for the seven-day read window after phase 2 lands. Its field
+    number must be reserved after removal; existing store records remain readable.
 
     ```proto
     message vibesys.store.v1.LegacyEvent
@@ -164,10 +205,17 @@ class LegacyEvent(Message[_LegacyEventFields]):
 
 
 _DESC = file_desc(
-    b'\n\x1dvibesys/store/v1/record.proto\x12\x10vibesys.store.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto"\xf6\x01\n\x06Record\x12\x10\n\x03seq\x18\x01 \x01(\x04R\x03seq\x12*\n\x02at\x18\x02 \x01(\x0b2\x1a.google.protobuf.TimestampR\x02at\x12\x14\n\x05epoch\x18\x03 \x01(\rR\x05epoch\x12E\n\repoch_started\x18\x04 \x01(\x0b2\x1e.vibesys.store.v1.EpochStartedH\x00R\x0cepochStarted\x12B\n\x0clegacy_event\x18\x05 \x01(\x0b2\x1d.vibesys.store.v1.LegacyEventH\x00R\x0blegacyEventB\r\n\x04body\x12\x05\xbaH\x02\x08\x01"\xc2\x01\n\x0cEpochStarted\x12\x15\n\x06run_id\x18\x01 \x01(\tR\x05runId\x12\x14\n\x05epoch\x18\x02 \x01(\rR\x05epoch\x12\x1b\n\ttree_hash\x18\x03 \x01(\tR\x08treeHash\x12\x14\n\x05dirty\x18\x04 \x01(\x08R\x05dirty\x12&\n\x0fapi_schema_hash\x18\x05 \x01(\tR\rapiSchemaHash\x12*\n\x11store_schema_hash\x18\x06 \x01(\tR\x0fstoreSchemaHash"!\n\x0bLegacyEvent\x12\x12\n\x04json\x18\x01 \x01(\tR\x04jsonB\xc6\x01\n\x14com.vibesys.store.v1B\x0bRecordProtoP\x01Z?github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1\xa2\x02\x03VSX\xaa\x02\x10Vibesys.Store.V1\xca\x02\x10Vibesys\\Store\\V1\xe2\x02\x1cVibesys\\Store\\V1\\GPBMetadata\xea\x02\x12Vibesys::Store::V1b\x06proto3',
+    b'\n\x1dvibesys/store/v1/record.proto\x12\x10vibesys.store.v1\x1a\x1bbuf/validate/validate.proto\x1a google/protobuf/descriptor.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1evibesys/store/v1/content.proto\x1a\x1cvibesys/store/v1/epoch.proto\x1a\x1dvibesys/store/v1/intent.proto\x1a vibesys/store/v1/lifecycle.proto\x1a\x1dvibesys/store/v1/notice.proto\x1a\x1bvibesys/store/v1/span.proto"\x8a\x07\n\x06Record\x12\x10\n\x03seq\x18\x01 \x01(\x04R\x03seq\x12*\n\x02at\x18\x02 \x01(\x0b2\x1a.google.protobuf.TimestampR\x02at\x12\x14\n\x05epoch\x18\x03 \x01(\rR\x05epoch\x12E\n\repoch_started\x18\x04 \x01(\x0b2\x1e.vibesys.store.v1.EpochStartedH\x00R\x0cepochStarted\x12B\n\x0clegacy_event\x18\x05 \x01(\x0b2\x1d.vibesys.store.v1.LegacyEventH\x00R\x0blegacyEvent\x12;\n\tlifecycle\x18\x0b \x01(\x0b2\x1b.vibesys.store.v1.LifecycleH\x00R\tlifecycle\x122\n\x04span\x18\x0c \x01(\x0b2\x1c.vibesys.store.v1.SpanRecordH\x00R\x04span\x127\n\x06metric\x18\r \x01(\x0b2\x1d.vibesys.store.v1.MetricPointH\x00R\x06metric\x125\n\x06stream\x18\x0e \x01(\x0b2\x1b.vibesys.store.v1.StreamRefH\x00R\x06stream\x124\n\x04blob\x18\x0f \x01(\x0b2\x1e.vibesys.store.v1.BlobAttachedH\x00R\x04blob\x127\n\x06intent\x18\x10 \x01(\x0b2\x1d.vibesys.store.v1.IntentStateH\x00R\x06intent\x122\n\x06notice\x18\x11 \x01(\x0b2\x18.vibesys.store.v1.NoticeH\x00R\x06noticeB\r\n\x04body\x12\x05\xbaH\x02\x08\x01:\x8d\x02\xbaH\x89\x02\x1a\x86\x02\n\x0frecord.identity\x120seq, epoch and at are required for typed records\x1a\xc0\x01!(has(this.lifecycle) || has(this.span) || has(this.metric) || has(this.stream) || has(this.blob) || has(this.intent) || has(this.notice)) || (this.seq > 0u && this.epoch > 0u && has(this.at))"\xeb\x03\n\x0cEpochStarted\x12\x15\n\x06run_id\x18\x01 \x01(\tR\x05runId\x12\x14\n\x05epoch\x18\x02 \x01(\rR\x05epoch\x12\x1b\n\ttree_hash\x18\x03 \x01(\tR\x08treeHash\x12\x14\n\x05dirty\x18\x04 \x01(\x08R\x05dirty\x12&\n\x0fapi_schema_hash\x18\x05 \x01(\tR\rapiSchemaHash\x12*\n\x11store_schema_hash\x18\x06 \x01(\tR\x0fstoreSchemaHash\x122\n\x0fvibesys_version\x18\x07 \x01(\tR\x0evibesysVersionB\t\xbaH\x06r\x04(\x80\x80\x04\x122\n\x03run\x18\x08 \x01(\x0b2 .vibesys.store.v1.RunDescriptionR\x03run\x12=\n\nspan_kinds\x18\t \x03(\x0b2\x1e.vibesys.store.v1.SpanKindDeclR\tspanKinds\x12:\n\x06series\x18\n \x03(\x0b2".vibesys.store.v1.MetricSeriesDeclR\x06series\x12D\n\x0bdescriptors\x18\x0b \x01(\x0b2".google.protobuf.FileDescriptorSetR\x0bdescriptors"!\n\x0bLegacyEvent\x12\x12\n\x04json\x18\x01 \x01(\tR\x04jsonB\xc6\x01\n\x14com.vibesys.store.v1B\x0bRecordProtoP\x01Z?github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1\xa2\x02\x03VSX\xaa\x02\x10Vibesys.Store.V1\xca\x02\x10Vibesys\\Store\\V1\xe2\x02\x1cVibesys\\Store\\V1\\GPBMetadata\xea\x02\x12Vibesys::Store::V1b\x06proto3',
     [
         validate_pb.desc(),
+        descriptor_pb.desc(),
         timestamp_pb.desc(),
+        content_pb.desc(),
+        epoch_pb.desc(),
+        intent_pb.desc(),
+        lifecycle_pb.desc(),
+        notice_pb.desc(),
+        span_pb.desc(),
     ],
     {
         "Record": Record,

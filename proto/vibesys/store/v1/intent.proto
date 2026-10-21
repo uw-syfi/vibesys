@@ -1,0 +1,91 @@
+syntax = "proto3";
+
+package vibesys.store.v1;
+
+import "buf/validate/validate.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1";
+
+enum IntentAction {
+  INTENT_ACTION_UNSPECIFIED = 0;
+  INTENT_ACTION_STEER = 1;
+  INTENT_ACTION_WITHDRAW = 2;
+  INTENT_ACTION_PAUSE = 3;
+  INTENT_ACTION_PARK = 4;
+  INTENT_ACTION_RESUME = 5;
+  INTENT_ACTION_STOP = 6;
+  INTENT_ACTION_CANCEL_ATTEMPT = 7;
+  INTENT_ACTION_CANCEL_ITEM = 8;
+  INTENT_ACTION_SET_MAX_PARALLEL = 9;
+}
+
+enum IntentStep {
+  INTENT_STEP_UNSPECIFIED = 0;
+  INTENT_STEP_APPLIED = 1;
+  INTENT_STEP_REFUSED = 2;
+}
+
+enum SteerMode {
+  STEER_MODE_UNSPECIFIED = 0;
+  STEER_MODE_NEXT_TURN = 1;
+  STEER_MODE_STANDING = 2;
+  STEER_MODE_INTERRUPT = 3;
+}
+
+enum SteerTargetKind {
+  STEER_TARGET_KIND_UNSPECIFIED = 0;
+  STEER_TARGET_KIND_RUN = 1;
+  STEER_TARGET_KIND_ROLE = 2;
+  STEER_TARGET_KIND_ATTEMPT = 3;
+  STEER_TARGET_KIND_ITEM = 4;
+}
+
+message IntentState {
+  option (buf.validate.message).cel = {
+    id: "intent.reason"
+    message: "reason is required when step is refused"
+    expression: "this.step != 2 || (has(this.reason) && this.reason != '')"
+  };
+  string control_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 65536
+  }];
+  IntentAction action = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  IntentStep step = 3 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  optional string reason_code = 4 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 65536
+  }];
+  optional string reason = 5 [(buf.validate.field).string.max_bytes = 65536];
+  optional SteerTarget target = 7;
+  optional SteerMode mode = 8 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  optional string withdraws = 9 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 65536
+  }];
+}
+
+message SteerTarget {
+  option (buf.validate.message).cel = {
+    id: "target.id"
+    message: "id is absent exactly when kind is run"
+    expression: "has(this.id) == (this.kind != 1)"
+  };
+  SteerTargetKind kind = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  optional string id = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 65536
+  }];
+}

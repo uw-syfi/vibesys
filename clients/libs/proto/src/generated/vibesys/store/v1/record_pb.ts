@@ -5,15 +5,27 @@
 import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
 import { file_buf_validate_validate } from "../../../buf/validate/validate_pb.js";
-import type { Timestamp } from "@bufbuild/protobuf/wkt";
-import { file_google_protobuf_timestamp } from "@bufbuild/protobuf/wkt";
+import type { FileDescriptorSet, Timestamp } from "@bufbuild/protobuf/wkt";
+import { file_google_protobuf_descriptor, file_google_protobuf_timestamp } from "@bufbuild/protobuf/wkt";
+import type { BlobAttached, MetricPoint, StreamRef } from "./content_pb.js";
+import { file_vibesys_store_v1_content } from "./content_pb.js";
+import type { MetricSeriesDecl, RunDescription, SpanKindDecl } from "./epoch_pb.js";
+import { file_vibesys_store_v1_epoch } from "./epoch_pb.js";
+import type { IntentState } from "./intent_pb.js";
+import { file_vibesys_store_v1_intent } from "./intent_pb.js";
+import type { Lifecycle } from "./lifecycle_pb.js";
+import { file_vibesys_store_v1_lifecycle } from "./lifecycle_pb.js";
+import type { Notice } from "./notice_pb.js";
+import { file_vibesys_store_v1_notice } from "./notice_pb.js";
+import type { SpanRecord } from "./span_pb.js";
+import { file_vibesys_store_v1_span } from "./span_pb.js";
 import type { Message } from "@bufbuild/protobuf";
 
 /**
  * Describes the file vibesys/store/v1/record.proto.
  */
 export const file_vibesys_store_v1_record: GenFile = /*@__PURE__*/
-  fileDesc("Ch12aWJlc3lzL3N0b3JlL3YxL3JlY29yZC5wcm90bxIQdmliZXN5cy5zdG9yZS52MSLLAQoGUmVjb3JkEgsKA3NlcRgBIAEoBBImCgJhdBgCIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASDQoFZXBvY2gYAyABKA0SNwoNZXBvY2hfc3RhcnRlZBgEIAEoCzIeLnZpYmVzeXMuc3RvcmUudjEuRXBvY2hTdGFydGVkSAASNQoMbGVnYWN5X2V2ZW50GAUgASgLMh0udmliZXN5cy5zdG9yZS52MS5MZWdhY3lFdmVudEgAQg0KBGJvZHkSBbpIAggBIoMBCgxFcG9jaFN0YXJ0ZWQSDgoGcnVuX2lkGAEgASgJEg0KBWVwb2NoGAIgASgNEhEKCXRyZWVfaGFzaBgDIAEoCRINCgVkaXJ0eRgEIAEoCBIXCg9hcGlfc2NoZW1hX2hhc2gYBSABKAkSGQoRc3RvcmVfc2NoZW1hX2hhc2gYBiABKAkiGwoLTGVnYWN5RXZlbnQSDAoEanNvbhgBIAEoCULGAQoUY29tLnZpYmVzeXMuc3RvcmUudjFCC1JlY29yZFByb3RvUAFaP2dpdGh1Yi5jb20vdXctc3lmaS92aWJlc3lzL2dhdGV3YXkvZ2VuL3ZpYmVzeXMvc3RvcmUvdjE7c3RvcmV2MaICA1ZTWKoCEFZpYmVzeXMuU3RvcmUuVjHKAhBWaWJlc3lzXFN0b3JlXFYx4gIcVmliZXN5c1xTdG9yZVxWMVxHUEJNZXRhZGF0YeoCElZpYmVzeXM6OlN0b3JlOjpWMWIGcHJvdG8z", [file_buf_validate_validate, file_google_protobuf_timestamp]);
+  fileDesc("Ch12aWJlc3lzL3N0b3JlL3YxL3JlY29yZC5wcm90bxIQdmliZXN5cy5zdG9yZS52MSKoBgoGUmVjb3JkEgsKA3NlcRgBIAEoBBImCgJhdBgCIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASDQoFZXBvY2gYAyABKA0SNwoNZXBvY2hfc3RhcnRlZBgEIAEoCzIeLnZpYmVzeXMuc3RvcmUudjEuRXBvY2hTdGFydGVkSAASNQoMbGVnYWN5X2V2ZW50GAUgASgLMh0udmliZXN5cy5zdG9yZS52MS5MZWdhY3lFdmVudEgAEjAKCWxpZmVjeWNsZRgLIAEoCzIbLnZpYmVzeXMuc3RvcmUudjEuTGlmZWN5Y2xlSAASLAoEc3BhbhgMIAEoCzIcLnZpYmVzeXMuc3RvcmUudjEuU3BhblJlY29yZEgAEi8KBm1ldHJpYxgNIAEoCzIdLnZpYmVzeXMuc3RvcmUudjEuTWV0cmljUG9pbnRIABItCgZzdHJlYW0YDiABKAsyGy52aWJlc3lzLnN0b3JlLnYxLlN0cmVhbVJlZkgAEi4KBGJsb2IYDyABKAsyHi52aWJlc3lzLnN0b3JlLnYxLkJsb2JBdHRhY2hlZEgAEi8KBmludGVudBgQIAEoCzIdLnZpYmVzeXMuc3RvcmUudjEuSW50ZW50U3RhdGVIABIqCgZub3RpY2UYESABKAsyGC52aWJlc3lzLnN0b3JlLnYxLk5vdGljZUgAOo0CukiJAhqGAgoPcmVjb3JkLmlkZW50aXR5EjBzZXEsIGVwb2NoIGFuZCBhdCBhcmUgcmVxdWlyZWQgZm9yIHR5cGVkIHJlY29yZHMawAEhKGhhcyh0aGlzLmxpZmVjeWNsZSkgfHwgaGFzKHRoaXMuc3BhbikgfHwgaGFzKHRoaXMubWV0cmljKSB8fCBoYXModGhpcy5zdHJlYW0pIHx8IGhhcyh0aGlzLmJsb2IpIHx8IGhhcyh0aGlzLmludGVudCkgfHwgaGFzKHRoaXMubm90aWNlKSkgfHwgKHRoaXMuc2VxID4gMHUgJiYgdGhpcy5lcG9jaCA+IDB1ICYmIGhhcyh0aGlzLmF0KSlCDQoEYm9keRIFukgCCAEi9wIKDEVwb2NoU3RhcnRlZBIOCgZydW5faWQYASABKAkSDQoFZXBvY2gYAiABKA0SEQoJdHJlZV9oYXNoGAMgASgJEg0KBWRpcnR5GAQgASgIEhcKD2FwaV9zY2hlbWFfaGFzaBgFIAEoCRIZChFzdG9yZV9zY2hlbWFfaGFzaBgGIAEoCRIiCg92aWJlc3lzX3ZlcnNpb24YByABKAlCCbpIBnIEKICABBItCgNydW4YCCABKAsyIC52aWJlc3lzLnN0b3JlLnYxLlJ1bkRlc2NyaXB0aW9uEjIKCnNwYW5fa2luZHMYCSADKAsyHi52aWJlc3lzLnN0b3JlLnYxLlNwYW5LaW5kRGVjbBIyCgZzZXJpZXMYCiADKAsyIi52aWJlc3lzLnN0b3JlLnYxLk1ldHJpY1Nlcmllc0RlY2wSNwoLZGVzY3JpcHRvcnMYCyABKAsyIi5nb29nbGUucHJvdG9idWYuRmlsZURlc2NyaXB0b3JTZXQiGwoLTGVnYWN5RXZlbnQSDAoEanNvbhgBIAEoCULGAQoUY29tLnZpYmVzeXMuc3RvcmUudjFCC1JlY29yZFByb3RvUAFaP2dpdGh1Yi5jb20vdXctc3lmaS92aWJlc3lzL2dhdGV3YXkvZ2VuL3ZpYmVzeXMvc3RvcmUvdjE7c3RvcmV2MaICA1ZTWKoCEFZpYmVzeXMuU3RvcmUuVjHKAhBWaWJlc3lzXFN0b3JlXFYx4gIcVmliZXN5c1xTdG9yZVxWMVxHUEJNZXRhZGF0YeoCElZpYmVzeXM6OlN0b3JlOjpWMWIGcHJvdG8z", [file_buf_validate_validate, file_google_protobuf_descriptor, file_google_protobuf_timestamp, file_vibesys_store_v1_content, file_vibesys_store_v1_epoch, file_vibesys_store_v1_intent, file_vibesys_store_v1_lifecycle, file_vibesys_store_v1_notice, file_vibesys_store_v1_span]);
 
 /**
  * Record is the append-only run log envelope. Store changes are additive only.
@@ -54,6 +66,48 @@ export type Record = Message<"vibesys.store.v1.Record"> & {
      */
     value: LegacyEvent;
     case: "legacyEvent";
+  } | {
+    /**
+     * @generated from field: vibesys.store.v1.Lifecycle lifecycle = 11;
+     */
+    value: Lifecycle;
+    case: "lifecycle";
+  } | {
+    /**
+     * @generated from field: vibesys.store.v1.SpanRecord span = 12;
+     */
+    value: SpanRecord;
+    case: "span";
+  } | {
+    /**
+     * @generated from field: vibesys.store.v1.MetricPoint metric = 13;
+     */
+    value: MetricPoint;
+    case: "metric";
+  } | {
+    /**
+     * @generated from field: vibesys.store.v1.StreamRef stream = 14;
+     */
+    value: StreamRef;
+    case: "stream";
+  } | {
+    /**
+     * @generated from field: vibesys.store.v1.BlobAttached blob = 15;
+     */
+    value: BlobAttached;
+    case: "blob";
+  } | {
+    /**
+     * @generated from field: vibesys.store.v1.IntentState intent = 16;
+     */
+    value: IntentState;
+    case: "intent";
+  } | {
+    /**
+     * @generated from field: vibesys.store.v1.Notice notice = 17;
+     */
+    value: Notice;
+    case: "notice";
   } | { case: undefined; value?: undefined };
 };
 
@@ -99,6 +153,33 @@ export type EpochStarted = Message<"vibesys.store.v1.EpochStarted"> & {
    * @generated from field: string store_schema_hash = 6;
    */
   storeSchemaHash: string;
+
+  /**
+   * Existing checkout fields stay authoritative; no duplicate Checkout message.
+   *
+   * @generated from field: string vibesys_version = 7;
+   */
+  vibesysVersion: string;
+
+  /**
+   * @generated from field: vibesys.store.v1.RunDescription run = 8;
+   */
+  run?: RunDescription | undefined;
+
+  /**
+   * @generated from field: repeated vibesys.store.v1.SpanKindDecl span_kinds = 9;
+   */
+  spanKinds: SpanKindDecl[];
+
+  /**
+   * @generated from field: repeated vibesys.store.v1.MetricSeriesDecl series = 10;
+   */
+  series: MetricSeriesDecl[];
+
+  /**
+   * @generated from field: google.protobuf.FileDescriptorSet descriptors = 11;
+   */
+  descriptors?: FileDescriptorSet | undefined;
 };
 
 /**
@@ -110,8 +191,8 @@ export const EpochStartedSchema: GenMessage<EpochStarted> = /*@__PURE__*/
 
 /**
  * LegacyEvent is an interim bridge carrying one current JSONL run event verbatim.
- * Phase 2 replaces this body when the event inventory is implemented. Its field
- * number remains reserved after removal; existing store records remain readable.
+ * Retained for the seven-day read window after phase 2 lands. Its field
+ * number must be reserved after removal; existing store records remain readable.
  *
  * @generated from message vibesys.store.v1.LegacyEvent
  */

@@ -1,0 +1,137 @@
+syntax = "proto3";
+
+package vibesys.store.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1";
+
+enum ProbeState {
+  PROBE_STATE_UNSPECIFIED = 0;
+  PROBE_STATE_QUEUED = 1;
+  PROBE_STATE_RETRYING = 2;
+  PROBE_STATE_PROVEN = 3;
+  PROBE_STATE_FAILED = 4;
+}
+
+enum CapacityCondition {
+  CAPACITY_CONDITION_UNSPECIFIED = 0;
+  CAPACITY_CONDITION_QUOTA_EXHAUSTED = 1;
+  CAPACITY_CONDITION_RATE_LIMITED = 2;
+  CAPACITY_CONDITION_UNAVAILABLE = 3;
+}
+
+enum CapacityPolicy {
+  CAPACITY_POLICY_UNSPECIFIED = 0;
+  CAPACITY_POLICY_PAUSE = 1;
+  CAPACITY_POLICY_WAIT = 2;
+  CAPACITY_POLICY_FAIL = 3;
+  CAPACITY_POLICY_FALLBACK = 4;
+}
+
+enum ProviderSwitchReason {
+  PROVIDER_SWITCH_REASON_UNSPECIFIED = 0;
+  PROVIDER_SWITCH_REASON_POLICY = 1;
+  PROVIDER_SWITCH_REASON_OPERATOR = 2;
+}
+
+message EnvironmentProbeAttrs {
+  option (buf.validate.message).cel = {
+    id: "probe.job_id"
+    message: "job_id and waited_seconds are present exactly when state is queued"
+    expression: "has(this.job_id) == (this.state == 1) && has(this.waited_seconds) == (this.state == 1)"
+  };
+  option (buf.validate.message).cel = {
+    id: "probe.failure"
+    message: "failure is present exactly when state is retrying or failed"
+    expression: "has(this.failure) == (this.state == 2 || this.state == 4)"
+  };
+  option (buf.validate.message).cel = {
+    id: "probe.attempt"
+    message: "attempt and retry_in_seconds are present exactly when retrying; attempt is at least 2"
+    expression: "has(this.attempt) == (this.state == 2) && has(this.retry_in_seconds) == (this.state == 2) && (!has(this.attempt) || this.attempt >= 2u)"
+  };
+  ProbeState state = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  optional string job_id = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 65536
+  }];
+  optional string pending_reason = 3 [(buf.validate.field).string.max_bytes = 65536];
+  optional double waited_seconds = 4 [(buf.validate.field).double = {
+    gte: 0
+    finite: true
+  }];
+  optional double queue_timeout_seconds = 5 [(buf.validate.field).double = {
+    gte: 0
+    finite: true
+  }];
+  optional string failure = 6 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 65536
+  }];
+  optional uint32 attempt = 7;
+  optional double retry_in_seconds = 8 [(buf.validate.field).double = {
+    gte: 0
+    finite: true
+  }];
+}
+
+message CapacityWaitAttrs {
+  option (buf.validate.message).cel = {
+    id: "capacity.fallback"
+    message: "fallback_provider and fallback_model must be paired, and required for fallback policy"
+    expression: "has(this.fallback_provider) == has(this.fallback_model) && (this.policy != 4 || has(this.fallback_provider))"
+  };
+  string provider = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 65536
+  }];
+  CapacityCondition condition = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  string detail = 3 [(buf.validate.field).string.max_bytes = 65536];
+  optional google.protobuf.Timestamp resets_at = 4;
+  optional google.protobuf.Timestamp resumes_at = 5;
+  CapacityPolicy policy = 6 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  optional string fallback_provider = 7 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 65536
+  }];
+  optional string fallback_model = 8 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 65536
+  }];
+  optional google.protobuf.Timestamp wait_resumes_at = 9;
+  optional string reason = 10 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 65536
+  }];
+}
+
+message ProviderSwitchAttrs {
+  string from_provider = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 65536
+  }];
+  string to_provider = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 65536
+  }];
+  string to_model = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 65536
+  }];
+  ProviderSwitchReason reason = 4 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  string detail = 5 [(buf.validate.field).string.max_bytes = 65536];
+}

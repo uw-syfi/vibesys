@@ -1,0 +1,288 @@
+syntax = "proto3";
+
+package vibesys.store.v1;
+
+import "buf/validate/validate.proto";
+import "vibesys/store/v1/common.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1";
+
+enum GateStage {
+  GATE_STAGE_UNSPECIFIED = 0;
+  GATE_STAGE_BUILD = 1;
+  GATE_STAGE_ACCURACY = 2;
+  GATE_STAGE_BENCHMARK = 3;
+  GATE_STAGE_VALIDATION = 4;
+}
+
+enum GateSubject {
+  GATE_SUBJECT_UNSPECIFIED = 0;
+  GATE_SUBJECT_INPUT = 1;
+  GATE_SUBJECT_CANDIDATE = 2;
+}
+
+enum FrameworkSource {
+  FRAMEWORK_SOURCE_UNSPECIFIED = 0;
+  FRAMEWORK_SOURCE_GATES = 1;
+  FRAMEWORK_SOURCE_GIT_TRACKING = 2;
+  FRAMEWORK_SOURCE_LOOP = 3;
+  FRAMEWORK_SOURCE_GPU = 4;
+  FRAMEWORK_SOURCE_SKYPILOT = 5;
+  FRAMEWORK_SOURCE_OTHER = 6;
+}
+
+enum EvidenceKind {
+  EVIDENCE_KIND_UNSPECIFIED = 0;
+  EVIDENCE_KIND_CORRECTNESS = 1;
+  EVIDENCE_KIND_BENCHMARK = 2;
+}
+
+enum Selection {
+  SELECTION_UNSPECIFIED = 0;
+  SELECTION_CANDIDATE = 1;
+  SELECTION_BASELINE = 2;
+}
+
+enum ComparisonVerdict {
+  COMPARISON_VERDICT_UNSPECIFIED = 0;
+  COMPARISON_VERDICT_BETTER = 1;
+  COMPARISON_VERDICT_WITHIN_NOISE = 2;
+  COMPARISON_VERDICT_WORSE = 3;
+  COMPARISON_VERDICT_INCONCLUSIVE = 4;
+}
+
+enum BaselineStatus {
+  BASELINE_STATUS_UNSPECIFIED = 0;
+  BASELINE_STATUS_MEASURED = 1;
+  BASELINE_STATUS_FAILED = 2;
+  BASELINE_STATUS_NOT_CONFIGURED = 3;
+  BASELINE_STATUS_NOT_MEASURED = 4;
+}
+
+enum InputFailureKind {
+  INPUT_FAILURE_KIND_UNSPECIFIED = 0;
+  INPUT_FAILURE_KIND_NO_EVIDENCE = 1;
+  INPUT_FAILURE_KIND_READINGS_REFUSED = 2;
+  INPUT_FAILURE_KIND_READINGS_UNDECODABLE = 3;
+  INPUT_FAILURE_KIND_ACCURACY_FAILED = 4;
+  INPUT_FAILURE_KIND_BENCHMARK_FAILED = 5;
+  INPUT_FAILURE_KIND_WAIT_ENDED = 6;
+}
+
+enum WorkstreamFailureKind {
+  WORKSTREAM_FAILURE_KIND_UNSPECIFIED = 0;
+  WORKSTREAM_FAILURE_KIND_STOPPED = 1;
+  WORKSTREAM_FAILURE_KIND_PARENT_UNVERIFIED = 2;
+  WORKSTREAM_FAILURE_KIND_REFUSED = 3;
+  WORKSTREAM_FAILURE_KIND_ENDED = 4;
+  WORKSTREAM_FAILURE_KIND_OUT_OF_BUDGET = 5;
+  WORKSTREAM_FAILURE_KIND_TURN_FAILED = 6;
+  WORKSTREAM_FAILURE_KIND_INVALID_REPLY = 7;
+  WORKSTREAM_FAILURE_KIND_RENDER_FAILED = 8;
+  WORKSTREAM_FAILURE_KIND_WAIT_REFUSED = 9;
+  WORKSTREAM_FAILURE_KIND_CHECKPOINT_DECLINED = 10;
+  WORKSTREAM_FAILURE_KIND_NO_CHANGED_CANDIDATE = 11;
+  WORKSTREAM_FAILURE_KIND_IMPLEMENTATION_FAILED = 12;
+  WORKSTREAM_FAILURE_KIND_REVIEW_REJECTED = 13;
+  WORKSTREAM_FAILURE_KIND_NO_TRUSTED_EVIDENCE = 14;
+  WORKSTREAM_FAILURE_KIND_EVIDENCE_REFUSED = 15;
+  WORKSTREAM_FAILURE_KIND_EVIDENCE_UNDECODABLE = 16;
+  WORKSTREAM_FAILURE_KIND_PROFILE_CAPTURE_UNAVAILABLE = 17;
+  WORKSTREAM_FAILURE_KIND_TURN_LIMIT = 18;
+  WORKSTREAM_FAILURE_KIND_REPEATED_TURN = 19;
+}
+
+message PlanningAttrs {
+  uint32 call = 1;
+}
+
+message WorkstreamAttrs {
+  optional string hypothesis_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 65536
+  }];
+  optional string parent_revision = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 65536
+  }];
+  optional uint32 base_round = 3;
+  optional uint32 round = 4;
+  optional string idea = 5 [(buf.validate.field).string.max_bytes = 65536];
+  optional string revision = 6 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 65536
+  }];
+  optional string outcome = 7 [(buf.validate.field).string.max_bytes = 65536];
+  optional string summary = 8 [(buf.validate.field).string.max_bytes = 65536];
+  bool probe = 9;
+  optional WorkstreamFailure failure = 10;
+  repeated FileChange files = 11;
+  optional uint32 attempts = 12;
+  optional bool profile_skipped = 13;
+  optional string judge_verdict = 14 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 65536
+  }];
+  bool repeated_error = 15;
+}
+
+message WorkstreamFailure {
+  WorkstreamFailureKind kind = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  optional string role = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 65536
+  }];
+  optional uint32 turns = 3;
+  optional uint32 limit = 4;
+  string text = 5 [(buf.validate.field).string.max_bytes = 65536];
+}
+
+message FileChange {
+  string path = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 65536
+  }];
+  uint64 diff_offset = 2;
+  uint64 diff_length = 3;
+}
+
+message GateAttrs {
+  option (buf.validate.message).cel = {
+    id: "gate.input_failure"
+    message: "input_failure belongs only to an input gate"
+    expression: "!has(this.input_failure) || this.subject == 1"
+  };
+  GateStage stage = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  GateSubject subject = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  optional string recipe = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 65536
+  }];
+  optional string command = 4 [(buf.validate.field).string.max_bytes = 65536];
+  bool reused = 5;
+  optional FailedCheck failed = 6;
+  optional InputFailure input_failure = 7;
+  optional FrameworkSource source = 8 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  optional string source_label = 9 [(buf.validate.field).string.max_bytes = 65536];
+}
+
+message FailedCheck {
+  option (buf.validate.message).cel = {
+    id: "failed_check.completed"
+    message: "completed must not exceed required"
+    expression: "!has(this.completed) || !has(this.required) || this.completed <= this.required"
+  };
+  EvidenceKind check = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  optional uint64 completed = 2;
+  optional uint64 required = 3;
+  optional string unit = 4 [(buf.validate.field).string.max_bytes = 65536];
+}
+
+message InputFailure {
+  InputFailureKind kind = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  optional GateStage stage = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  uint32 attempts = 3 [(buf.validate.field).uint32.gt = 0];
+  bool compared = 4;
+}
+
+message AdoptionAttrs {
+  option (buf.validate.message).cel = {
+    id: "adoption.candidate"
+    message: "candidate is required for candidate selection"
+    expression: "this.selection != 1 || has(this.candidate)"
+  };
+  optional string candidate = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 65536
+  }];
+  Selection selection = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  optional string settlement_id = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 65536
+  }];
+}
+
+message ComparisonAttrs {
+  option (buf.validate.message).cel = {
+    id: "comparison.direction"
+    message: "direction must be max or min for a comparison"
+    expression: "this.direction != 3"
+  };
+  string metric = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 65536
+  }];
+  string unit = 2 [(buf.validate.field).string.max_bytes = 65536];
+  Direction direction = 3 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  double ratio = 4 [(buf.validate.field).double.finite = true];
+  double noise = 5 [(buf.validate.field).double = {
+    gte: 0
+    finite: true
+  }];
+  ComparisonVerdict verdict = 6 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  double candidate_value = 7 [(buf.validate.field).double.finite = true];
+  double base_value = 8 [(buf.validate.field).double.finite = true];
+  uint32 candidate_samples = 9 [(buf.validate.field).uint32.gt = 0];
+  uint32 base_samples = 10 [(buf.validate.field).uint32.gt = 0];
+}
+
+message BaselineAttrs {
+  string label = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 65536
+  }];
+  BaselineStatus status = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  optional string metric = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 65536
+  }];
+  optional string unit = 4 [(buf.validate.field).string.max_bytes = 65536];
+  optional Direction direction = 5 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  optional double value = 6 [(buf.validate.field).double.finite = true];
+  optional double spread = 7 [(buf.validate.field).double = {
+    gte: 0
+    finite: true
+  }];
+  optional uint32 samples = 8 [(buf.validate.field).uint32.gt = 0];
+  repeated string hosts = 9 [(buf.validate.field).repeated.items.string = {
+    min_len: 1
+    max_bytes: 65536
+  }];
+  optional string reason = 10 [(buf.validate.field).string.max_bytes = 65536];
+}
