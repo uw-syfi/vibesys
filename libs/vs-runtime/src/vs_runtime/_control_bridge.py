@@ -695,8 +695,12 @@ class RunControlBridge:
                 withdraws=withdrawal.withdraws,
             )
         for request in self._channel.take_pending_actions():
-            change = _Change(
-                request.action.value, control_id=request.control_id, action_request=request
+            change = (
+                _Change("park", control_id=request.control_id)
+                if isinstance(request, ParkRequest)
+                else _Change(
+                    request.action.value, control_id=request.control_id, action_request=request
+                )
             )
             self._refuse(change, ending, request_id=None)
         inbox = self._inbox

@@ -549,7 +549,9 @@ def test_park_records_a_drain_goal_then_a_readable_parked_lifecycle() -> None:
         for record in result.records
         if record.body is not None and record.body.field == "lifecycle"
     ]
-    assert [item.state.field for item in lifecycle] == ["draining", "parked"]
-    assert lifecycle[0].state.value.goal == p.DrainGoal.PARK
+    assert lifecycle == [
+        p.Lifecycle(state=p.Oneof("draining", p.Draining(goal=p.DrainGoal.PARK))),
+        p.Lifecycle(state=p.Oneof("parked", p.Parked())),
+    ]
     assert_valid(draining)
     assert_valid(parked)

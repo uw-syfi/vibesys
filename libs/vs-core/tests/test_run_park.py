@@ -34,14 +34,17 @@ def test_an_idle_park_is_terminal_for_the_epoch_and_idempotent(ticks: int) -> No
         after = core.step(result.state, core.ClockAdvanced(now_at=float(index)))
         assert after.state == result.state
         assert not after.requests
-    for action, fields in (
-        ("pause", {"owner": core.PauseOwner.OPERATOR}),
-        ("resume", {"when": "now"}),
-        ("park", {}),
+    for control in (
+        core.ControlInput(
+            control_id=core.ControlId(root="other-pause"),
+            action="pause",
+            owner=core.PauseOwner.OPERATOR,
+        ),
+        core.ControlInput(
+            control_id=core.ControlId(root="other-resume"), action="resume", when="now"
+        ),
+        core.ControlInput(control_id=core.ControlId(root="other-park"), action="park"),
     ):
-        control = core.ControlInput(
-            control_id=core.ControlId(root=f"other-{action}"), action=action, **fields
-        )
         with pytest.raises(core.ControlRefusedError, match="epoch"):
             core.step(result.state, core.RunControlEvent(control=control, now_at=0))
 
@@ -95,8 +98,11 @@ def test_park_cancels_each_job_once_and_keeps_its_measurement_pending(ticks: int
     assert not completed.requests
 
 
-def test_a_turn_in_flight_finishes_and_its_revision_is_saved_before_park() -> None:
-    state, turn = write_turn_world()
+@given(access=st.sampled_from([core.Access.READ_ONLY, core.Access.WRITE_CANDIDATE]))
+def test_a_turn_in_flight_finishes_and_its_revision_is_saved_before_park(
+    access: core.Access,
+) -> None:
+    state, turn = write_turn_world(access=access)
     draining = park(state)
     assert draining.state.run.status == core.RunStatus.DRAINING
     assert not any(isinstance(request, core.CancelTurn) for request in draining.requests)
@@ -104,10 +110,41 @@ def test_a_turn_in_flight_finishes_and_its_revision_is_saved_before_park() -> No
     state = core.step(draining.state, core.RequestObserved(observation=ended.observation)).state
     assert state.run.status == core.RunStatus.DRAINING
     completed = core.step(state, ended)
-    [snapshot] = snapshots(completed)
-    assert completed.state.run.status == core.RunStatus.DRAINING
-    finished = answer(
-        completed.state, snapshot, core.ObservationStatus.SUCCEEDED, state.run.facts.baseline
-    )
+    checkpoints = snapshots(completed)
+    assert len(checkpoints) == int(access == core.Access.WRITE_CANDIDATE)
+    finished = completed
+    if checkpoints:
+        assert completed.state.run.status == core.RunStatus.DRAINING
+        finished = answer(
+            completed.state,
+            checkpoints[0],
+            core.ObservationStatus.SUCCEEDED,
+            state.run.facts.baseline,
+        )
     assert finished.state.run.status == core.RunStatus.PARKED
     assert finished.state.run.result is None
+
+
+def test_a_prepared_turn_is_saved_without_starting_or_holding_the_drain() -> None:
+    state, turn = write_turn_world()
+    state = state.model_copy(
+        update={
+            "records": state.records.model_copy(
+                update={
+                    "records": tuple(
+                        row.model_copy(update={"phase": core.RequestPhase.PREPARED})
+                        if row.request_id == turn.request_id
+                        else row
+                        for row in state.records.records
+                    )
+                }
+            )
+        }
+    )
+    result = park(state)
+    assert result.state.run.status == core.RunStatus.PARKED
+    assert result.state.sessions == state.sessions
+    assert not result.requests
+    assert turn.request_id is not None
+    with pytest.raises(core.ContractError, match="park"):
+        core.step(result.state, core.DispatchAuthorized(request_id=turn.request_id))

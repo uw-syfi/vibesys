@@ -77,6 +77,8 @@ enum RunLiveness {
   RUN_LIVENESS_ALIVE = 1;
   RUN_LIVENESS_INTERRUPTED = 2;
   RUN_LIVENESS_ENDED = 3;
+  // A cleanly drained epoch. The saved run can be relaunched.
+  RUN_LIVENESS_PARKED = 4;
 }
 
 message GetBlobsRequest {

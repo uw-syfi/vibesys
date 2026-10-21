@@ -29,6 +29,8 @@ const (
 	RunLiveness_RUN_LIVENESS_ALIVE       RunLiveness = 1
 	RunLiveness_RUN_LIVENESS_INTERRUPTED RunLiveness = 2
 	RunLiveness_RUN_LIVENESS_ENDED       RunLiveness = 3
+	// A cleanly drained epoch. The saved run can be relaunched.
+	RunLiveness_RUN_LIVENESS_PARKED RunLiveness = 4
 )
 
 // Enum value maps for RunLiveness.
@@ -38,12 +40,14 @@ var (
 		1: "RUN_LIVENESS_ALIVE",
 		2: "RUN_LIVENESS_INTERRUPTED",
 		3: "RUN_LIVENESS_ENDED",
+		4: "RUN_LIVENESS_PARKED",
 	}
 	RunLiveness_value = map[string]int32{
 		"RUN_LIVENESS_UNSPECIFIED": 0,
 		"RUN_LIVENESS_ALIVE":       1,
 		"RUN_LIVENESS_INTERRUPTED": 2,
 		"RUN_LIVENESS_ENDED":       3,
+		"RUN_LIVENESS_PARKED":      4,
 	}
 )
 
@@ -848,12 +852,13 @@ const file_vibesys_api_v1_host_proto_rawDesc = "" +
 	"\x12TailStreamResponse\x12\x12\n" +
 	"\x04data\x18\x01 \x01(\fR\x04data\x12\x1f\n" +
 	"\vnext_offset\x18\x02 \x01(\x04R\n" +
-	"nextOffset*y\n" +
+	"nextOffset*\x92\x01\n" +
 	"\vRunLiveness\x12\x1c\n" +
 	"\x18RUN_LIVENESS_UNSPECIFIED\x10\x00\x12\x16\n" +
 	"\x12RUN_LIVENESS_ALIVE\x10\x01\x12\x1c\n" +
 	"\x18RUN_LIVENESS_INTERRUPTED\x10\x02\x12\x16\n" +
-	"\x12RUN_LIVENESS_ENDED\x10\x032\xe1\x03\n" +
+	"\x12RUN_LIVENESS_ENDED\x10\x03\x12\x17\n" +
+	"\x13RUN_LIVENESS_PARKED\x10\x042\xe1\x03\n" +
 	"\vHostService\x12D\n" +
 	"\x05Hello\x12\x1c.vibesys.api.v1.HelloRequest\x1a\x1d.vibesys.api.v1.HelloResponse\x12C\n" +
 	"\x04Tail\x12\x1b.vibesys.api.v1.TailRequest\x1a\x1c.vibesys.api.v1.TailResponse0\x01\x12M\n" +

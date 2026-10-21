@@ -19,6 +19,7 @@ from vs_runtime.api.infrastructure import (
     ControlAck,
     ControlAction,
     ControlStatus,
+    ParkRequest,
     PauseRequest,
     RefusalReason,
     ResumeRequest,
@@ -46,6 +47,7 @@ _IDS = st.sampled_from(["a", "b", "c", "d"])
 def _requests(ids: st.SearchStrategy[str]) -> st.SearchStrategy[ControlRequest]:
     return st.one_of(
         st.builds(SteerRequest, control_id=ids, text=_TEXT),
+        st.builds(ParkRequest, control_id=ids),
         st.builds(PauseRequest, control_id=ids),
         st.builds(ResumeRequest, control_id=ids, fallback=st.booleans()),
         st.builds(ResumeRequest, control_id=ids, when=st.just("capacity_returns")),
@@ -287,7 +289,7 @@ def _queued(request: ControlRequest, expected: _Expected) -> bool:
             expected.steers.append(text)
         case WithdrawRequest(withdraws=withdraws):
             expected.withdrawals.append(withdraws)
-        case CancelAttemptRequest() | CancelItemRequest() | SetMaxParallelRequest():
+        case ParkRequest() | CancelAttemptRequest() | CancelItemRequest() | SetMaxParallelRequest():
             expected.actions.append(request)
         case _:
             return False

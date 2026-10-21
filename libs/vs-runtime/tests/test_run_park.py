@@ -7,12 +7,22 @@ from typing import TYPE_CHECKING
 from tests.support.skeleton_strategy import SkeletonStrategy
 from tests.support.skeleton_world import open_skeleton_world
 
-from vs_core.api import RunStatus
-from vs_runtime.api.core import CoreRunHost, RunControlBridge, RunLoopConfig, drive_core, start_core
+from vs_core.api import ObservationStatus, RequestId, RunStatus, Scope, SubmitMeasurement
+from vs_runtime.api.core import (
+    CoreRunHost,
+    MeasurementRequests,
+    ReceiptStore,
+    RunControlBridge,
+    RunLoopConfig,
+    drive_core,
+    start_core,
+)
 from vs_runtime.api.infrastructure import ChannelRunControl, ParkRequest, RuntimeRunControlChannel
 from vs_runtime.api.testing import FakeRunControlEventSink, ProbedRunClock
 from vs_sim.api.testing import SimThreads, clock_from
 from vs_slurm.api import SlurmJobStatus
+
+from .test_evaluation_requests import context_for
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -76,4 +86,21 @@ async def test_park_cancels_the_live_job_exits_and_resume_reruns_it(tmp_path: Pa
         assert finished.status == RunStatus.TERMINAL
         assert len(world.cluster.submissions) > before
         assert resumed.shell.record.envelope.core.evaluation.jobs[0].terminal
+        source = saved.evaluation.jobs[0]
+        reuse = SubmitMeasurement(
+            request_id=RequestId(root="reuse-after-park"),
+            scope=Scope(owner=source.scope.owner, generation=source.scope.generation + 1),
+            plan=source.plan,
+            reuses=source.submission_id,
+        )
+        adapter = MeasurementRequests(
+            world.evaluations[-1], ReceiptStore(world.env.receipts_namespace(), threads=threads)
+        )
+        context = context_for(reuse, epoch=resumed.shell.record.envelope.fence.epoch).model_copy(
+            update={"fence": resumed.shell.record.envelope.fence}
+        )
+        submitted = len(world.cluster.submissions)
+        reused = await adapter.execute(reuse, context)
+        assert reused.observation.observation.status is ObservationStatus.SUCCEEDED
+        assert len(world.cluster.submissions) == submitted
         resumed.shell.release_lease(now_at=clock.now())

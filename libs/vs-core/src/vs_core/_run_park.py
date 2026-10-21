@@ -21,7 +21,9 @@ from .types.records import BlockRequest, RequestPhase, Scheduled
 from .types.sessions import (
     CancelTurn,
     CloseSession,
+    DispatchTurn,
     EnsureSession,
+    ResumeSessionTurn,
     SessionPhase,
     SnapshotAndRetainRun,
 )
@@ -59,6 +61,8 @@ def _unfinished(state: CoreState, record: RequestRecord) -> bool:
     if record.phase not in (RequestPhase.DISPATCHED, RequestPhase.RECONCILING):
         return False
     if isinstance(record.request, EnsureSession) and record.observation is not None:
+        if not record.observation.accepted or record.observation.resource_id is None:
+            return True
         return not any(
             session.resource_id == record.observation.resource_id
             for session in state.sessions.sessions
@@ -68,6 +72,21 @@ def _unfinished(state: CoreState, record: RequestRecord) -> bool:
     return not (
         isinstance(record.request, SubmitMeasurement)
         and any(job.submission_id == record.request_id for job in state.evaluation.jobs)
+    )
+
+
+def _turns_in_flight(state: CoreState) -> bool:
+    """A prepared dispatch marks its invocation executing before I/O actually starts."""
+    return any(
+        turn.phase in (SessionPhase.EXECUTING, SessionPhase.UNKNOWN)
+        and any(
+            isinstance(row.request, DispatchTurn | ResumeSessionTurn)
+            and row.request.turn == turn.turn
+            and row.request.scope == turn.scope
+            and row.phase != RequestPhase.PREPARED
+            for row in state.records.records
+        )
+        for turn in state.sessions.invocations
     )
 
 
@@ -115,10 +134,7 @@ def advance(state: CoreState) -> tuple[CoreState, tuple[Scheduled, ...]]:
     if (
         not released
         or any(_unfinished(state, row) for row in state.records.records)
-        or any(
-            turn.phase in (SessionPhase.EXECUTING, SessionPhase.UNKNOWN)
-            for turn in state.sessions.invocations
-        )
+        or _turns_in_flight(state)
     ):
         return state, ()
     if any(

@@ -2,6 +2,7 @@ package server_test
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
 	"syscall"
@@ -158,5 +159,37 @@ func TestPhase1SequenceZeroRemainsReadable(t *testing.T) {
 	skeleton, err := c.Skeleton(f.ctx, &apiv1.SkeletonRequest{RunId: "run-1"})
 	if err != nil || len(skeleton.GetRecords()) != 2 || !bytes.Equal(skeleton.Records[0], zero) || !bytes.Equal(skeleton.Records[1], one) {
 		t.Fatalf("phase 1 Skeleton = %v,%v", skeleton, err)
+	}
+}
+
+func TestWatchRunsParkedEpochIsReadableAfterWriterReleasesLock(t *testing.T) {
+	for _, lockExists := range []bool{false, true} {
+		t.Run(fmt.Sprintf("lock-file-%t", lockExists), func(t *testing.T) {
+			f := start(t)
+			if lockExists {
+				lock, err := os.OpenFile(filepath.Join(f.run, "run.lock"), os.O_CREATE|os.O_RDWR, 0600)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := lock.Close(); err != nil {
+					t.Fatal(err)
+				}
+			}
+			parked := head(proto.Uint64(0))
+			parked.Lifecycle = &storev1.Lifecycle{State: &storev1.Lifecycle_Parked{Parked: &storev1.Parked{}}}
+			publishHead(t, f, parked)
+			c := client(t, f, false)
+			stream, err := c.WatchRuns(f.ctx, &apiv1.WatchRunsRequest{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := watchEntry(t, stream)
+			if got.Liveness != apiv1.RunLiveness_RUN_LIVENESS_PARKED || got.Head.GetLifecycle().GetParked() == nil {
+				t.Fatalf("parked epoch = %v", got)
+			}
+			if _, err := c.Skeleton(f.ctx, &apiv1.SkeletonRequest{RunId: "run-1"}); err != nil {
+				t.Fatalf("read parked epoch: %v", err)
+			}
+		})
 	}
 }

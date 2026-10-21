@@ -123,15 +123,13 @@ class JobRecord(BaseModel):
     admission_id: DecisionId | None = None
     plan: MeasurementPlan
     reuses: RequestId | None = None
+    """The submission whose ended job this one reads, when it reuses an earlier run."""
     parked: bool = False
     relaunch: int = Field(default=0, ge=0)
-    """The submission whose ended job this one reads, when it reuses an earlier run."""
 
     @property
     def executor_handle(self) -> str:
         """The executor job this record's observations read."""
-        if self.reuses is not None:
-            return handle_for(self.reuses)
         return (
             self.handle_id if self.relaunch == 0 else f"{self.handle_id}-relaunch-{self.relaunch}"
         )
@@ -272,6 +270,20 @@ class MeasurementRequests:
     def _record(self, handle_id: str) -> JobRecord | None:
         return self._store.load(_JOBS, "job", handle_id, JobRecord)
 
+    def _executor_handle(self, record: JobRecord) -> str:
+        """Resolve reuse through the source's durable physical identity, including relaunches."""
+        seen: set[str] = set()
+        while record.reuses is not None:
+            source = handle_for(record.reuses)
+            if source in seen:
+                raise ContractError(("evaluation", "reuses"), "cyclic measurement reuse")
+            seen.add(source)
+            earlier = self._record(source)
+            if earlier is None:
+                raise ContractError(("evaluation", "reuses"), "missing measurement reuse source")
+            record = earlier
+        return record.executor_handle
+
     def _owned(self, request: RequestBase, resource: ResourceId) -> JobRecord | None:
         """The registered job this request may touch, or None for foreign and unknown ones."""
         record = self._record(resource.root)
@@ -372,7 +384,7 @@ class MeasurementRequests:
         subject = ObservationSubject(
             core_named(RequestId(root=record.request_id)), record.scope, record.admission_id
         )
-        polled = await self._poll(record.executor_handle)
+        polled = await self._poll(self._executor_handle(record))
         if cancelled and polled.phase is PollPhase.UNSUBMITTED:
             polled = ExecutorPoll(
                 phase=PollPhase.ENDED,
@@ -639,7 +651,11 @@ class MeasurementRequests:
 
         The refusal is an infrastructure failure, so core's next submission measures afresh.
         """
-        if (await self._poll(handle_for(source))).phase is PollPhase.ENDED:
+        earlier = self._record(handle_for(source))
+        if (
+            earlier is not None
+            and (await self._poll(self._executor_handle(earlier))).phase is PollPhase.ENDED
+        ):
             return None
         self._forget(request.scope, request.admission_id, handle)
         return self._rejected(
@@ -788,14 +804,14 @@ class MeasurementRequests:
                     return self._unknown(request, context, str(error))
             record = record.model_copy(update={"parked": True})
             self._store.replace(_JOBS, "job", record.handle_id, record)
-        polled = await self._poll(record.executor_handle)
+        polled = await self._poll(self._executor_handle(record))
         released = record.reuses is not None or polled.phase in (
             PollPhase.ENDED,
             PollPhase.UNSUBMITTED,
         )
         while not released:
             await self._jobs.wait_for_change(record.executor_handle, 1.0)
-            polled = await self._poll(record.executor_handle)
+            polled = await self._poll(self._executor_handle(record))
             released = polled.phase in (PollPhase.ENDED, PollPhase.UNSUBMITTED)
         own = self._own(
             request,
@@ -869,7 +885,10 @@ class MeasurementRequests:
             if record is None or record.reuses is None:
                 # A reusing job launched nothing; the executor holds no job under its handle.
                 await self._cancel_for_close(handle)
-            phase = (await self._poll(handle)).phase
+            physical = (
+                record.executor_handle if record is not None and record.reuses is None else handle
+            )
+            phase = (await self._poll(physical)).phase
             ended.append(
                 phase is PollPhase.ENDED or (phase is PollPhase.UNSUBMITTED and not submitting)
             )
