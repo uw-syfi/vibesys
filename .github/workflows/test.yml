@@ -39,6 +39,7 @@ jobs:
     outputs:
       python: ${{ steps.filter.outputs.python }}
       clients: ${{ steps.filter.outputs.clients }}
+      proto: ${{ steps.filter.outputs.proto }}
       examples: ${{ steps.filter.outputs.examples }}
       agent_image: ${{ steps.filter.outputs.agent_image }}
       real_tiers: ${{ steps.filter.outputs.real_tiers }}
@@ -226,7 +227,7 @@ jobs:
   # Required PR CI lists all four.
   clients-quality:
     needs: changes
-    if: needs.changes.outputs.clients == 'true'
+    if: needs.changes.outputs.clients == 'true' || needs.changes.outputs.proto == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -237,7 +238,13 @@ jobs:
         uses: ./.github/actions/setup-clients
 
       - name: Check TypeScript packages
+        if: needs.changes.outputs.clients == 'true'
         run: ./support/repoctl/repoctl run-checks --group clients_quality
+
+      # Reuse this job's Node, Python and Go setup rather than adding a runner.
+      - name: Check protobuf contracts
+        if: needs.changes.outputs.proto == 'true'
+        run: ./support/repoctl/repoctl run-checks --group proto
 
   clients-tests:
     needs: changes

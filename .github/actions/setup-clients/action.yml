@@ -68,4 +68,6 @@ runs:
       uses: actions/setup-go@v5
       with:
         go-version-file: support/repoctl/go.mod
-        cache-dependency-path: support/repoctl/go.sum
+        cache-dependency-path: |
+          support/repoctl/go.sum
+          gateway/go.sum

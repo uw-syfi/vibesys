@@ -75,7 +75,7 @@ func TestLocalTestSelectionNarrowsHeavyGroups(t *testing.T) {
 		{
 			name:        "repoctl only (f39d7eb8c)",
 			paths:       []string{"support/repoctl/test.go", "support/repoctl/test_test.go"},
-			wantCI:      []string{"agent_image", "clients", "evaluators", "examples", "impact", "python", "real_tiers", "stitch"},
+			wantCI:      []string{"agent_image", "clients", "evaluators", "examples", "impact", "proto", "python", "real_tiers", "stitch"},
 			wantGroups:  []string{"repoctl_tests"},
 			wantSkipped: []string{},
 			wantTargets: 0,
@@ -109,6 +109,14 @@ func TestLocalTestSelectionNarrowsHeavyGroups(t *testing.T) {
 			paths:       []string{"examples/model-serving/qwen3.5-9b-mi210/.vibesys/tasks/default/cpu_check/scoring.py"},
 			wantCI:      []string{"examples", "python"},
 			wantGroups:  []string{"examples_cpu_check_shard", "examples_native_evaluator_tests", "examples_tests", "python_tests"},
+			wantSkipped: []string{},
+			wantTargets: -1,
+		},
+		{
+			name:        "proto source selects only the contract check",
+			paths:       []string{"proto/vibesys/store/v1/record.proto"},
+			wantCI:      []string{"proto"},
+			wantGroups:  []string{"proto"},
 			wantSkipped: []string{},
 			wantTargets: -1,
 		},
