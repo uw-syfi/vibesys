@@ -2,23 +2,23 @@
 
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import logging
 import os
 import re
-from contextlib import suppress
+from contextlib import contextmanager
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, BinaryIO, Self
 
 if TYPE_CHECKING:
+    import asyncio
     from collections.abc import Iterator
     from pathlib import Path
     from types import TracebackType
 
-    from vs_proto.api import Record
     from vs_sim.api import SleepingClock, Threads
-from vs_proto.api import RUN_LOG_MAGIC, Keyframe, RunHead, RunProcess, validate
-from vs_runlog._atomic import publish, sync_directory, write_keyframe
+from vs_proto.api import RUN_LOG_MAGIC, Keyframe, Record, RunHead, RunProcess, validate
+from vs_runlog._atomic import FileSync, OsFileSync, publish, sync_directory, write_keyframe
 from vs_runlog._fold import append_skeleton
 from vs_runlog._framing import ReadStop, RunLogStopReason, encode_frame, read_frame
 from vs_runlog._head import project_head
@@ -29,6 +29,55 @@ CHECKPOINT_RECORDS = 256
 COMMIT_INTERVAL = 0.1
 
 _STREAM_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,255}")
+
+
+@dataclass(frozen=True)
+class _WaitCommit:
+    delay: float | None = None
+
+
+@dataclass(frozen=True)
+class _CommitBatch:
+    checkpoint: bool
+
+
+@dataclass(frozen=True)
+class _CommitIntent:
+    """Pure deadline and boundary policy; the shell owns buffers and I/O."""
+
+    due: float | None = None
+    urgent_seq: int = 0
+    checkpoint_seq: int = 0
+    closing: bool = False
+
+    def queued(self, at: float) -> Self:
+        return self if self.due is not None else replace(self, due=at + COMMIT_INTERVAL)
+
+    def requested(self, target: int, *, checkpoint: bool, closing: bool) -> Self:
+        return replace(
+            self,
+            urgent_seq=max(self.urgent_seq, target),
+            checkpoint_seq=max(self.checkpoint_seq, target if checkpoint else 0),
+            closing=self.closing or closing,
+        )
+
+    def taken(self) -> Self:
+        return replace(self, due=None)
+
+    def next(
+        self, now: float, committed_seq: int, checkpoint_seq: int, *, failed: bool
+    ) -> _WaitCommit | _CommitBatch | None:
+        if failed:
+            return None
+        checkpoint = self.checkpoint_seq > checkpoint_seq
+        if self.due is None:
+            if checkpoint:
+                return _CommitBatch(checkpoint=True)
+            return None if self.closing else _WaitCommit()
+        delay = max(0.0, self.due - now)
+        if delay and not checkpoint and self.urgent_seq <= committed_seq:
+            return _WaitCommit(delay)
+        return _CommitBatch(checkpoint)
 
 
 class RunLogReader:
@@ -71,11 +120,11 @@ class FileRunLogWriter:
     """Append dense sequences, recovering only an incomplete final frame on open.
 
     One process owns a file. Complete corruption is never repaired implicitly.
-    Appends write immediately; commit makes the pending suffix durable before
-    publishing run.head. With a running event loop, the first pending append
-    schedules a commit within 100 ms (plus scheduling and storage latency).
-    Synchronous/offline callers must commit explicitly or close. Lifecycle and
-    epoch boundaries commit immediately. state.pb transactions are not wired yet.
+    Appends write immediately; a dedicated committer fsyncs and publishes the
+    pending prefix outside the append lock. The first pending append sets a
+    100 ms deadline independent of the caller's event loop. Storage and worker
+    scheduling can delay completion. Lifecycle and epoch boundaries wait for
+    durability. state.pb transactions are not wired yet.
     """
 
     def __init__(
@@ -85,23 +134,22 @@ class FileRunLogWriter:
         clock: SleepingClock,
         threads: Threads,
         loop: asyncio.AbstractEventLoop | None = None,
+        sync: FileSync | None = None,
     ) -> None:
-        """Recover a log; pass the owning ``loop`` when constructing off-loop.
+        """Recover and own a committer; ``loop`` is retained for caller compatibility.
 
-        ``clock`` drives deferred commits and ``threads`` supplies the lock that
-        serializes worker appends with commits. Otherwise the current loop is
-        used; offline writers commit explicitly.
+        ``clock`` sets deadlines; condition timeouts use the injected ``threads``
+        timeline. ``sync`` is the log durability operation (also used in recovery).
         """
-        self._mutex = threads.rlock()
+        del loop
+        self._condition = threads.condition()
         self._clock = clock
-        self._timer: asyncio.Task[None] | None = None
-        self._generation = 0
+        self._sync = OsFileSync() if sync is None else sync
+        self._pending: list[tuple[Record, int]] = []
+        self._intent = _CommitIntent()
+        self._done = False
         self._failure: BaseException | None = None
         self._committed_seq = 0
-        self._loop = loop
-        if self._loop is None:
-            with suppress(RuntimeError):
-                self._loop = asyncio.get_running_loop()
         self.sequence = 0
         self.epoch = 0
         self._path = path
@@ -110,6 +158,7 @@ class FileRunLogWriter:
         self._process: RunProcess | None = None
         self._resources = ReleaseStack()
         self._close = CloseOnce()
+        self._cleanup_lock = threads.lock()
         try:
             lock = RunLock(path.parent / "run.lock")
             self._resources.callback(lock.close)
@@ -117,8 +166,8 @@ class FileRunLogWriter:
                 with path.open("xb") as stream:
                     stream.write(RUN_LOG_MAGIC)
                     stream.flush()
-                    os.fsync(stream.fileno())
-                sync_directory(path.parent)
+                    self._sync(stream.fileno())
+                sync_directory(path.parent, sync=self._sync)
             else:
                 self._recover(path)
             self._stream = path.open("ab", buffering=0)
@@ -127,6 +176,7 @@ class FileRunLogWriter:
                 self._publish_head()
                 self._publish_keyframe()
                 self._committed_seq = self.sequence
+            self._worker = threads.spawn(self._run_committer, name="run-log-committer")
         except BaseException:
             self._resources.close()
             raise
@@ -160,124 +210,152 @@ class FileRunLogWriter:
                     stream.write(RUN_LOG_MAGIC)
 
             stream.flush()
-            os.fsync(stream.fileno())
+            self._sync(stream.fileno())
             self._skeleton.log_offset = reader.stop.offset or len(RUN_LOG_MAGIC)
 
     def append(self, record: Record) -> None:
-        """Write the next dense record; durability is acknowledged by ``commit``.
-
-        A lifecycle or epoch header is an explicit commit boundary. Ordinary
-        appends neither fsync nor publish projections, including at keyframe thresholds.
-        """
-        with self._mutex:
+        """Append without waiting for commit I/O; boundaries wait for durability."""
+        frame = encode_frame(record)
+        # The caller may reuse or mutate its protobuf after append returns.
+        owned = Record.from_binary(record.to_binary())
+        boundary = _is_boundary(owned)
+        with self._condition:
             self._check_open()
-            if record.seq != self.sequence + 1:
-                message = f"expected run.log seq {self.sequence + 1}, got {record.seq}"
+            if owned.seq != self.sequence + 1:
+                message = f"expected run.log seq {self.sequence + 1}, got {owned.seq}"
                 raise ValueError(message)
-            frame = encode_frame(record)
             try:
                 written = self._stream.write(frame)
                 _check_write(written, len(frame))
-                append_skeleton(self._skeleton, record)
-                self._skeleton.log_offset = self._stream.tell()
-                self.sequence = record.seq
-                self.epoch = max(self.epoch, record.epoch)
-                body = record.body
-                if body and body.field == "epoch_started" and record.at is not None:
-                    self._process = RunProcess(
-                        pid=os.getpid(), epoch=record.epoch, started_at=record.at
-                    )
-                if body and body.field in {"lifecycle", "epoch_started"}:
-                    self._commit(checkpoint=True)
-                elif self.sequence == self._committed_seq + 1:
-                    self._schedule_commit()
+                offset = self._stream.tell()
             except BaseException as error:
-                self._abort(error)
+                self._failure = error
+                self._condition.notify_all()
                 raise
+            self._intent = self._intent.queued(self._clock.now())
+            self._pending.append((owned, offset))
+            self.sequence = owned.seq
+            self.epoch = max(self.epoch, owned.epoch)
+            if boundary:
+                self._request_commit(owned.seq, checkpoint=True)
+            self._condition.notify_all()
+            if boundary:
+                self._wait_committed(owned.seq, checkpoint=True)
 
     def commit(self) -> None:
-        """Durably flush pending records, then publish head and any due keyframe.
+        """Wait for the current prefix to become durable, including its published head.
 
-        No pending records means no I/O. Failures close the writer and propagate;
-        recovery fsyncs the complete surviving prefix before publishing it again.
-        This is a log-only transaction, not a state.pb compare-and-swap.
+        An empty commit does no I/O. Failures abort the writer and propagate;
+        recovery fsyncs the surviving prefix before publishing it again.
         """
-        with self._mutex:
+        with self._condition:
             self._check_open()
+            target = self.sequence
+            self._request_commit(target)
+            self._wait_committed(target)
+
+    def _request_commit(
+        self, target: int, *, checkpoint: bool = False, closing: bool = False
+    ) -> None:
+        self._intent = self._intent.requested(target, checkpoint=checkpoint, closing=closing)
+        self._condition.notify_all()
+
+    def _wait_committed(self, target: int, *, checkpoint: bool = False) -> None:
+        while self._failure is None and (
+            self._committed_seq < target or (checkpoint and self._checkpoint_seq < target)
+        ):
+            self._condition.wait()
+        if self._failure is not None:
+            while not self._done:
+                self._condition.wait()
+            raise self._failure
+
+    def _take_batch(self) -> tuple[list[tuple[Record, int]], bool] | None:
+        """Execute the pure policy's requests under the handoff lock."""
+        with self._condition:
+            while True:
+                action = self._intent.next(
+                    self._clock.now(),
+                    self._committed_seq,
+                    self._checkpoint_seq,
+                    failed=self._failure is not None,
+                )
+                match action:
+                    case None:
+                        return None
+                    case _WaitCommit(delay):
+                        self._condition.wait(delay)
+                    case _CommitBatch(checkpoint):
+                        batch, self._pending = self._pending, []
+                        self._intent = self._intent.taken()
+                        return batch, checkpoint
+
+    def _run_committer(self) -> None:
+        try:
+            with self._capture_failure():
+                while (work := self._take_batch()) is not None:
+                    batch, checkpoint = work
+                    self._commit_batch(batch, checkpoint=checkpoint)
+                    with self._condition:
+                        self._committed_seq = self._skeleton.through_seq
+                        self._condition.notify_all()
+        finally:
             try:
-                self._commit()
-            except BaseException as error:
-                self._abort(error)
-                raise
+                with self._capture_failure():
+                    self._close.run(self._resources.close)
+            finally:
+                with self._condition:
+                    self._done = True
+                    self._condition.notify_all()
 
-    def _commit(self, *, checkpoint: bool = False) -> None:
-        self._cancel_commit()
-        if self.sequence == self._committed_seq:
-            if checkpoint and self.sequence > self._checkpoint_seq:
-                self._publish_keyframe()
-            return
-        os.fsync(self._stream.fileno())
-        if checkpoint or self.sequence - self._checkpoint_seq >= CHECKPOINT_RECORDS:
-            self._publish_keyframe()
-        self._publish_head()
-        self._committed_seq = self.sequence
-
-    def _schedule_commit(self) -> None:
-        if self._loop is None:
-            try:
-                self._loop = asyncio.get_running_loop()
-            except RuntimeError:
-                return  # Offline producers commit explicitly and at close.
-        due = self._clock.now() + COMMIT_INTERVAL
-        self._loop.call_soon_threadsafe(self._start_timer, self._generation, due)
-
-    def _start_timer(self, generation: int, due: float) -> None:
-        with self._mutex:
-            if generation == self._generation and not self._close.started:
-                self._timer = asyncio.create_task(self._commit_after(generation, due))
-
-    async def _commit_after(self, generation: int, due: float) -> None:
-        await self._clock.sleep(max(0.0, due - self._clock.now()))
-        with self._mutex:
-            if generation != self._generation:
-                return
-            self._timer = None
-            try:
-                self.commit()
-            except Exception:
+    @contextmanager
+    def _capture_failure(self) -> Iterator[None]:
+        try:
+            yield
+        except BaseException as error:
+            with self._condition:
+                first_failure = self._failure is None
+                if first_failure:
+                    self._failure = error
+            if first_failure:
                 logging.getLogger(__name__).exception("Deferred run.log commit failed")
 
-    def _cancel_commit(self) -> None:
-        self._generation += 1
-        if self._timer is not None:
-            if self._loop is not None:
-                # The owner may close after its loop has already shut down.
-                # Generation fencing still prevents a stale timer from committing.
-                with suppress(RuntimeError):
-                    self._loop.call_soon_threadsafe(self._timer.cancel)
-            self._timer = None
+    def _commit_batch(self, batch: list[tuple[Record, int]], *, checkpoint: bool) -> None:
+        if batch:
+            self._sync(self._stream.fileno())
+        for record, offset in batch:
+            append_skeleton(self._skeleton, record)
+            self._skeleton.log_offset = offset
+            if record.body and record.body.field == "epoch_started" and record.at is not None:
+                self._process = RunProcess(
+                    pid=os.getpid(), epoch=record.epoch, started_at=record.at
+                )
+            if _is_boundary(record):
+                self._publish_keyframe()
+        through = self._skeleton.through_seq
+        if (checkpoint and through > self._checkpoint_seq) or (
+            through - self._checkpoint_seq >= CHECKPOINT_RECORDS
+        ):
+            self._publish_keyframe()
+        if batch:
+            self._publish_head()
 
     def _check_open(self) -> None:
         if self._failure is not None:
             raise self._failure
-        if self._close.started:
+        if self._intent.closing:
             message = "run.log writer is closed"
             raise ValueError(message)
-
-    def _abort(self, error: BaseException) -> None:
-        self._failure = error
-        self._cancel_commit()
-        self._close.run(self._resources.close)
 
     def _publish_head(self) -> None:
         head = project_head(self._skeleton, self._process)
         if head is not None:
             validate(head)
-            publish(self._path.parent / "run.head", head.to_binary())
+            publish(self._path.parent / "run.head", head.to_binary(), sync=self._sync)
 
     def _publish_keyframe(self) -> None:
-        write_keyframe(self._path.parent / "keyframes", self._skeleton)
-        self._checkpoint_seq = self.sequence
+        write_keyframe(self._path.parent / "keyframes", self._skeleton, sync=self._sync)
+        self._checkpoint_seq = self._skeleton.through_seq
 
     def checkpoint(self) -> None:
         """Commit and checkpoint the current prefix, including a final conversion.
@@ -285,28 +363,23 @@ class FileRunLogWriter:
         Unlike periodic checkpoints this is explicit: callers can finish a batch
         at an arbitrary record and still open it without replaying its suffix.
         """
-        with self._mutex:
+        with self._condition:
             self._check_open()
-            try:
-                self._commit(checkpoint=True)
-            except BaseException as error:
-                self._abort(error)
-                raise
+            target = self.sequence
+            self._request_commit(target, checkpoint=True)
+            self._wait_committed(target, checkpoint=True)
 
     def close(self) -> None:
-        """Commit the final suffix and release ownership, even when commit fails."""
-        with self._mutex:
-            if self._failure is not None:
-                self._close.run(self._resources.close)
-                raise self._failure
-            if self._close.started:
-                self._close.run(self._resources.close)
-                return
-            try:
-                self._commit(checkpoint=True)
-            finally:
-                self._cancel_commit()
-                self._close.run(self._resources.close)
+        """Drain and join the committer, releasing ownership even after a failure."""
+        with self._condition:
+            self._request_commit(self.sequence, checkpoint=True, closing=True)
+            while not self._done:
+                self._condition.wait()
+        self._worker.join()
+        with self._cleanup_lock:
+            self._close.run(self._resources.close)
+        if self._failure is not None:
+            raise self._failure
 
     def __enter__(self) -> Self:
         """Own the append handle for a lexical scope."""
@@ -349,6 +422,10 @@ def install_run_log(staged: Path, destination: Path) -> None:
         sync_directory(destination.parent)
     finally:
         lock.close()
+
+
+def _is_boundary(record: Record) -> bool:
+    return bool(record.body and record.body.field in {"lifecycle", "epoch_started"})
 
 
 def _check_write(written: int | None, expected: int) -> None:
