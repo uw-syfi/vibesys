@@ -1,6 +1,7 @@
 """Real inbox requests are answered durably through the typed journal."""
 
 from datetime import UTC, datetime
+from functools import partial
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -65,8 +66,17 @@ def test_outcomes_are_idempotent_over_request_sequences(
         assert_outcomes(Path(directory), actions, crash_before_ack=crash_before_ack)
 
 
+def test_outcome_recovery_uses_typed_records_after_a_crash_before_mirroring(tmp_path: Path) -> None:
+    assert_outcomes(tmp_path, [0, 1, 2, 3], crash_before_ack=True, mirror_gap=True)
+
+
 def assert_outcomes(
-    root: Path, actions: list[int], *, crash_before_ack: bool, post_all: bool = False
+    root: Path,
+    actions: list[int],
+    *,
+    crash_before_ack: bool,
+    post_all: bool = False,
+    mirror_gap: bool = False,
 ) -> None:
     project = Project.open(root)
     run_id = "run-outcomes"
@@ -90,14 +100,7 @@ def assert_outcomes(
     core = initial_state()
     texts = StoredSteerArtifacts(ArtifactStore(project.state.local_namespace(run_id, "core")))
 
-    def journal() -> EventJournal:
-        result = EventJournal(clock, SimThreads())
-        result.enable_runlog(project, run_id)
-        result.attach(Project.log_directory_for(root, run_id), run_id)
-        result.emit(
-            CoreEventType.RUN_STARTED, data=RunStartedData(outer_loop="test", input="input")
-        )
-        return result
+    journal = partial(open_journal, project, run_id, clock)
 
     def bridge(events: EventJournal) -> RunControlBridge:
         threads = SimThreads()
@@ -128,6 +131,9 @@ def assert_outcomes(
             core = step(core, change).state
         if crash_before_ack and changes:
             # Durable prefix: core and the outcome committed, inbox marker did not.
+            if mirror_gap:
+                events.close()
+                events = journal(mirror=False)
             events.intent_outcome(request, None)
             events.close()
             clock.advance(1000)
@@ -145,6 +151,17 @@ def assert_outcomes(
         assert inbox.pending() == pending
     events.close()
     assert_recorded_outcomes(project, run_id, expected_ids)
+
+
+def open_journal(
+    project: Project, run_id: str, clock: ManualClock, *, mirror: bool = True
+) -> EventJournal:
+    result = EventJournal(clock, SimThreads())
+    if mirror:
+        result.enable_runlog(project, run_id)
+    result.attach(Project.log_directory_for(project.root, run_id), run_id)
+    result.emit(CoreEventType.RUN_STARTED, data=RunStartedData(outer_loop="test", input="input"))
+    return result
 
 
 def assert_recorded_outcomes(project: Project, run_id: str, expected_ids: list[str]) -> None:

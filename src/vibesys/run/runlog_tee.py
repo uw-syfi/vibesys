@@ -77,6 +77,11 @@ class RunLogTee:
             self._write_content(result)
             state = result.state
         records = self._writer.read()
+        intents = {
+            record.body.value.control_id: record.body.value.to_binary()
+            for record in records
+            if record.body is not None and record.body.field == "intent"
+        }
         last = records[-1] if records else None
         ended = any(
             r.epoch == self._writer.epoch
@@ -124,6 +129,7 @@ class RunLogTee:
             dirty=self._dirty,
             wall_span_clock=self._live,
             clock_epochs=(*epochs, (event.timestamp.timestamp(), clock)),
+            intents=tuple(intents.items()),
             spans=tuple(
                 (key, history.versions[-1].span.to_binary())
                 for key, history in fold_skeleton(records, log_offset=0).spans.items()
