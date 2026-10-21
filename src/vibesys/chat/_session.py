@@ -208,6 +208,12 @@ class ChatSession:
 
     def observe(self, event: CoreEvent) -> None:
         """Consume the same streamed events and proposal receipts as legacy chat."""
+        with self._lock:
+            if self._current is None or event.execution_id != self._current:
+                return
+            self._observe(event)
+
+    def _observe(self, event: CoreEvent) -> None:
         data = event.data
         if isinstance(data, AgentOutputChunkData) and data.channel == "assistant":
             self.token(data.content)
@@ -270,7 +276,8 @@ class ChatSession:
         open_agent: Callable[[], ManagedAgent],
         question: ChatMessageRequest,
     ) -> ManagedAgent | None:
-        self._current = question.request_id
+        with self._lock:
+            self._current = question.request_id
         self._append(
             ChatRecord(
                 event=Oneof(

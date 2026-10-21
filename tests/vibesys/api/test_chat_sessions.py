@@ -285,6 +285,14 @@ def test_stream_callbacks_validate_proposals_and_keep_large_answers(
                 CoreEvent(
                     type=CoreEventType.AGENT_OUTPUT_CHUNK,
                     timestamp=datetime(2026, 1, 1, tzinfo=UTC),
+                    execution_id="previous-question",
+                    data=AgentOutputChunkData(channel="assistant", content="obsolete"),
+                )
+            )
+            session.observe(
+                CoreEvent(
+                    type=CoreEventType.AGENT_OUTPUT_CHUNK,
+                    timestamp=datetime(2026, 1, 1, tzinfo=UTC),
                     execution_id=invocation,
                     data=AgentOutputChunkData(channel="assistant", content="answer"),
                 )
