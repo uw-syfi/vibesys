@@ -80,6 +80,10 @@ class RunLogTee:
         for stream in result.streams:
             self._content.append_stream(stream.id, stream.offset, stream.content)
 
+    def commit(self) -> None:
+        """Durably commit pending typed records at an explicit run boundary."""
+        self._writer.commit()
+
     def close(self) -> None:
         """Release the mirror's append handle; safe after a failed append."""
         self._writer.close()

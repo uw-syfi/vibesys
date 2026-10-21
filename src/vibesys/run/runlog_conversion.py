@@ -23,6 +23,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
 
     from vs_project.api import Project
+    from vs_sim.api import SleepingClock, Threads
 
 
 class RunLogConversionError(ValueError):
@@ -76,7 +77,9 @@ def _already_complete(path: Path) -> bool:
     return reader.stop.reason is RunLogStopReason.END and not legacy and typed
 
 
-def convert_run(project: Project, run_id: str) -> ConversionResult:
+def convert_run(
+    project: Project, run_id: str, *, clock: SleepingClock, threads: Threads
+) -> ConversionResult:
     """Atomically convert a quiescent run with trace events, preserving the JSONL source.
 
     Callers stop the run before converting. A complete destination is left byte
@@ -109,7 +112,9 @@ def convert_run(project: Project, run_id: str) -> ConversionResult:
             project.run_blobs_directory_for(project.root, run_id),
             project.log_streams_directory_for(project.root, run_id),
         )
-        with RunLogTee(FileRunLogWriter(staged), content, run_id) as tee:
+        with RunLogTee(
+            FileRunLogWriter(staged, clock=clock, threads=threads), content, run_id
+        ) as tee:
             for line, _ in _events(journal):
                 tee.append(line)
         install_run_log(staged, destination)

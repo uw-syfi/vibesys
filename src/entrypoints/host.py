@@ -8,6 +8,7 @@ from pathlib import Path
 
 from vibesys.api.transport import convert_run
 from vs_project.api import Project, ProjectError
+from vs_sim.api import OsThreads, SystemClock
 
 
 def run(argv: list[str], *, cwd: Path) -> tuple[int, str, str]:
@@ -20,7 +21,7 @@ def run(argv: list[str], *, cwd: Path) -> tuple[int, str, str]:
     args = parser.parse_args(argv)
     root = args.project if args.project.is_absolute() else cwd / args.project
     try:
-        result = convert_run(Project.open(root), args.run)
+        result = convert_run(Project.open(root), args.run, clock=SystemClock(), threads=OsThreads())
     except (OSError, ValueError, ProjectError) as exc:
         return 1, "", f"vibesys host convert-run: {exc}\n"
     return 0, f"{result.status}: {result.reason}\n", ""

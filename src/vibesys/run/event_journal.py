@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import TYPE_CHECKING
 
@@ -9,7 +10,7 @@ from vibesys.events import CoreEvent, CoreEventData, CoreEventType, make_core_ev
 from vibesys.run.runlog_tee import RunLogTee
 from vs_runlog.api import FileRunContent, FileRunLogWriter
 from vs_runtime.api.infrastructure import DurableEventJournal, EventCodec
-from vs_sim.api import Clock, Threads, utc_datetime
+from vs_sim.api import SleepingClock, Threads, utc_datetime
 
 if TYPE_CHECKING:
     from vs_project.api import Project
@@ -38,10 +39,15 @@ class _CoreEventCodec(EventCodec[CoreEvent]):
 class EventJournal(DurableEventJournal[CoreEvent]):
     """Persist VibeSys core events using runtime-owned journal mechanics."""
 
-    def __init__(self, clock: Clock, threads: Threads) -> None:
+    def __init__(self, clock: SleepingClock, threads: Threads) -> None:
         """Create an unattached journal for ``core-events.jsonl`` stamped by epoch ``clock``."""
         super().__init__(_CoreEventCodec(), filename="core-events.jsonl", threads=threads)
+        self._threads = threads
         self._clock = clock
+        try:
+            self._loop: asyncio.AbstractEventLoop | None = asyncio.get_running_loop()
+        except RuntimeError:
+            self._loop = None
         self._runlog_configured = False
         self._runlog: RunLogTee | None = None
 
@@ -56,7 +62,7 @@ class EventJournal(DurableEventJournal[CoreEvent]):
             # Phase 1 has no checkout provenance at launch. Leave it unknown;
             # phase 3 (#3332) records provenance in EpochStarted at the launch boundary.
             self._runlog = RunLogTee(
-                FileRunLogWriter(path),
+                FileRunLogWriter(path, clock=self._clock, loop=self._loop, threads=self._threads),
                 FileRunContent(
                     project.run_blobs_directory_for(project.root, run_id),
                     project.log_streams_directory_for(project.root, run_id),
@@ -73,8 +79,12 @@ class EventJournal(DurableEventJournal[CoreEvent]):
     def close(self) -> None:
         """Release the additive transport's append handle on run teardown."""
         if self._runlog is not None:
-            self._runlog.close()
-            self._runlog = None
+            try:
+                self._runlog.close()
+            except Exception:
+                logging.getLogger(__name__).exception("Run log tee failed during final commit")
+            finally:
+                self._runlog = None
 
     def emit(
         self,

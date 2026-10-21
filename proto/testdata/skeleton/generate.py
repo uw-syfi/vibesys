@@ -42,6 +42,7 @@ from vs_proto.api import (
     Timestamp,
 )
 from vs_runlog.api import FileRunLogWriter, encode_frame
+from vs_sim.api.testing import ManualClock, SimThreads
 
 
 def scenarios() -> dict[str, tuple[list[Record], Keyframe]]:
@@ -140,7 +141,9 @@ def fixtures() -> dict[str, bytes]:
         output[f"{name}/expected.json"] = expected.to_json().encode() + b"\n"
         with TemporaryDirectory() as temporary:
             root = Path(temporary)
-            with FileRunLogWriter(root / "run.log") as writer:
+            with FileRunLogWriter(
+                root / "run.log", clock=ManualClock(), threads=SimThreads()
+            ) as writer:
                 for record in records:
                     writer.append(record)
             for path in sorted(root.rglob("*")):

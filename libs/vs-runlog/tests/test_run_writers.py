@@ -20,8 +20,8 @@ from vs_proto.api import (
     Hold,
     Keyframe,
     Label,
-    LegacyEvent,
     Lifecycle,
+    MetricPoint,
     Oneof,
     OperatorHold,
     Record,
@@ -33,6 +33,7 @@ from vs_proto.api import (
     validate,
 )
 from vs_runlog.api import FileRunLogWriter, RunLogReader, encode_frame, fold_skeleton
+from vs_sim.api.testing import ManualClock, SimThreads
 
 _FIXTURES = Path(__file__).resolve().parents[3] / "proto/testdata/skeleton"
 
@@ -71,9 +72,12 @@ def test_fixtures_regenerate_identically() -> None:
 
 def test_writer_publishes_head_and_lifecycle_keyframes(tmp_path: Path) -> None:
     records, expected = scenarios()["core"]
-    with FileRunLogWriter(tmp_path / "run.log") as writer:
+    with FileRunLogWriter(
+        tmp_path / "run.log", clock=ManualClock(), threads=SimThreads()
+    ) as writer:
         for record in records:
             writer.append(record)
+            writer.commit()
             if record.seq == 1:
                 assert not (tmp_path / "run.head").exists()
                 continue
@@ -103,13 +107,22 @@ def test_record_bound_and_recovery_preserve_immutable_checkpoints(count: int) ->
         root = Path(temporary)
         path = root / "run.log"
         first = scenarios()["core"][0][:2]
-        with FileRunLogWriter(path) as writer:
+        with FileRunLogWriter(path, clock=ManualClock(), threads=SimThreads()) as writer:
             for record in first:
                 writer.append(record)
             for seq in range(3, count + 3):
                 writer.append(
-                    Record(seq=seq, epoch=1, body=Oneof("legacy_event", LegacyEvent(json="x")))
+                    Record(
+                        seq=seq,
+                        epoch=1,
+                        at=Timestamp(seconds=seq),
+                        body=Oneof("metric", MetricPoint(series="progress", value=float(seq))),
+                    )
                 )
+                # Exercise checkpoint cadence with batches rather than one
+                # storage barrier for every generated record.
+                if (seq - 2) % 32 == 0:
+                    writer.commit()
         files = {p.name: p.read_bytes() for p in (root / "keyframes").iterdir()}
         sequences = sorted(int(name.removesuffix(".pb")) for name in files)
         assert (
@@ -118,10 +131,15 @@ def test_record_bound_and_recovery_preserve_immutable_checkpoints(count: int) ->
         # A failed append's complete prefix is recovered; a torn tail is dropped.
         with path.open("ab") as stream:
             stream.write(b"\x80")
-        with FileRunLogWriter(path) as writer:
+        with FileRunLogWriter(path, clock=ManualClock(), threads=SimThreads()) as writer:
             assert writer.sequence == count + 2
             writer.append(
-                Record(seq=count + 3, epoch=1, body=Oneof("legacy_event", LegacyEvent(json="last")))
+                Record(
+                    seq=count + 3,
+                    epoch=1,
+                    at=Timestamp(seconds=count + 3),
+                    body=Oneof("metric", MetricPoint(series="progress", value=float(count))),
+                )
             )
         for name, payload in files.items():
             assert (root / "keyframes" / name).read_bytes() == payload
@@ -130,32 +148,34 @@ def test_record_bound_and_recovery_preserve_immutable_checkpoints(count: int) ->
 
 def test_exclusive_lock_covers_open_recovery_and_release(tmp_path: Path) -> None:
     path = tmp_path / "run.log"
-    with FileRunLogWriter(path):
+    with FileRunLogWriter(path, clock=ManualClock(), threads=SimThreads()):
         with pytest.raises(BlockingIOError):
-            FileRunLogWriter(path)
+            FileRunLogWriter(path, clock=ManualClock(), threads=SimThreads())
         # All log names in a run share one lifetime lock.
         with pytest.raises(BlockingIOError):
-            FileRunLogWriter(tmp_path / "other.log")
-    with FileRunLogWriter(path):
+            FileRunLogWriter(tmp_path / "other.log", clock=ManualClock(), threads=SimThreads())
+    with FileRunLogWriter(path, clock=ManualClock(), threads=SimThreads()):
         pass
     path.write_bytes(b"corrupt")
     with pytest.raises(ValueError, match="corrupt"):
-        FileRunLogWriter(path)
+        FileRunLogWriter(path, clock=ManualClock(), threads=SimThreads())
     path.unlink()
-    with FileRunLogWriter(path):
+    with FileRunLogWriter(path, clock=ManualClock(), threads=SimThreads()):
         pass
 
 
 def test_failed_publication_releases_lock_and_recovery_republishes(tmp_path: Path) -> None:
     records, _ = scenarios()["core"]
     (tmp_path / "run.head").mkdir()
-    writer = FileRunLogWriter(tmp_path / "run.log")
+    writer = FileRunLogWriter(tmp_path / "run.log", clock=ManualClock(), threads=SimThreads())
     writer.append(records[0])
     with pytest.raises(OSError, match=r"run.head"):
         writer.append(records[1])
     (tmp_path / "run.head").rmdir()
     assert not list(tmp_path.glob(".run.head.*"))
-    with FileRunLogWriter(tmp_path / "run.log") as recovered:
+    with FileRunLogWriter(
+        tmp_path / "run.log", clock=ManualClock(), threads=SimThreads()
+    ) as recovered:
         assert recovered.sequence == 2
         assert RunHead.from_binary((tmp_path / "run.head").read_bytes()).committed_seq == 2
         checkpoint = Keyframe.from_binary((tmp_path / "keyframes/2.pb").read_bytes())
@@ -202,10 +222,13 @@ def test_usage_replacement_presence_and_operator_hold(tmp_path: Path) -> None:
             ).to_binary(),
         ),
     )
-    with FileRunLogWriter(tmp_path / "run.log") as writer:
+    with FileRunLogWriter(
+        tmp_path / "run.log", clock=ManualClock(), threads=SimThreads()
+    ) as writer:
         for record in first:
             writer.append(record)
         writer.append(records[2])
+        writer.commit()
         head = RunHead.from_binary((tmp_path / "run.head").read_bytes())
         assert head.span_counts == {"agent_turn": 1}
         assert head.usage is not None
@@ -244,14 +267,16 @@ def test_usage_replacement_presence_and_operator_hold(tmp_path: Path) -> None:
 def test_recovery_publishes_the_exact_durable_prefix(tmp_path: Path, tail: bytes) -> None:
     records, _ = scenarios()["core"]
     prefix = records[:4]
-    with FileRunLogWriter(tmp_path / "run.log") as writer:
+    with FileRunLogWriter(
+        tmp_path / "run.log", clock=ManualClock(), threads=SimThreads()
+    ) as writer:
         for record in prefix:
             writer.append(record)
     boundary = (tmp_path / "run.log").stat().st_size
     with (tmp_path / "run.log").open("ab") as stream:
         stream.write(tail)
     (tmp_path / "run.head").unlink()
-    with FileRunLogWriter(tmp_path / "run.log"):
+    with FileRunLogWriter(tmp_path / "run.log", clock=ManualClock(), threads=SimThreads()):
         expected = fold_skeleton(prefix, log_offset=boundary)
         actual = Keyframe.from_binary((tmp_path / "keyframes/4.pb").read_bytes())
         assert actual == expected
@@ -261,15 +286,17 @@ def test_recovery_publishes_the_exact_durable_prefix(tmp_path: Path, tail: bytes
 
 def test_conflicting_checkpoint_is_preserved_and_releases_lock(tmp_path: Path) -> None:
     records, _ = scenarios()["core"]
-    with FileRunLogWriter(tmp_path / "run.log") as writer:
+    with FileRunLogWriter(
+        tmp_path / "run.log", clock=ManualClock(), threads=SimThreads()
+    ) as writer:
         writer.append(records[0])
     checkpoint = tmp_path / "keyframes/1.pb"
     checkpoint.write_bytes(b"conflict")
     with pytest.raises(ValueError, match="immutable keyframe conflicts"):
-        FileRunLogWriter(tmp_path / "run.log")
+        FileRunLogWriter(tmp_path / "run.log", clock=ManualClock(), threads=SimThreads())
     assert checkpoint.read_bytes() == b"conflict"
     checkpoint.unlink()
-    with FileRunLogWriter(tmp_path / "run.log"):
+    with FileRunLogWriter(tmp_path / "run.log", clock=ManualClock(), threads=SimThreads()):
         assert Keyframe.from_binary(checkpoint.read_bytes()).through_seq == 1
 
 

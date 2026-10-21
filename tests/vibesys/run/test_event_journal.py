@@ -26,7 +26,16 @@ from vs_runtime.api.infrastructure import (
     AgentExecutionStatus,
 )
 from vs_runtime.api.testing import idle_environment_system
-from vs_sim.api.testing import FakeProcesses, ManualClock, ProcessScript, SimThreads
+from vs_sim.api.testing import (
+    FakeProcesses,
+    ManualClock,
+    ProcessScript,
+    SimBlockingRunner,
+    SimThreads,
+    VirtualClock,
+    loop_threads,
+    run_virtual,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -346,3 +355,46 @@ def test_live_content_replay_after_reattachment_is_lossless(
     path = Project.log_streams_directory_for(root, "run-1") / streams[0].id
     assert b"later" in path.read_bytes()
     assert len(Project.event_journal_path_for(root, "run-1").read_text().splitlines()) == 2
+
+
+@pytest.mark.parametrize("fail_commit", [False, True])
+def test_live_tee_commits_worker_bursts_on_its_runs_clock(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    fail_commit: bool,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    monkeypatch.setenv("VIBESYS_STATE_HOME", str(tmp_path / "home"))
+    root = tmp_path / "project"
+    root.mkdir()
+    project = Project.open(root)
+    clock = VirtualClock()
+
+    async def exercise() -> None:
+        threads = loop_threads()
+        runner = SimBlockingRunner(threads)
+        journal = EventJournal(clock, threads)
+
+        def burst() -> None:
+            journal.enable_runlog(project, "run-1")
+            journal.attach(Project.log_directory_for(project.root, "run-1"), "run-1")
+            for _ in range(300):
+                journal.emit(CoreEventType.FRAMEWORK_WARNING, text="progress")
+
+        await runner.run(burst)
+        checkpoint = Project.run_log_path_for(project.root, "run-1").parent / "keyframes/301.pb"
+        assert not checkpoint.exists()
+        if fail_commit:
+            checkpoint.mkdir()
+        await clock.sleep(0.11)
+        if fail_commit:
+            assert "Deferred run.log commit failed" in caplog.text
+        else:
+            assert checkpoint.is_file()
+        journal.emit(CoreEventType.RUN_FINISHED)
+        journal.close()
+        journal.close()
+        assert len(journal.read()) == 301
+
+    run_virtual(clock, exercise())
