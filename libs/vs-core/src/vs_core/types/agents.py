@@ -12,6 +12,9 @@ from typing import Annotated, Literal
 
 from pydantic import Field, model_validator
 
+from vs_core._generated.vibesys.core.v1.leaves_cv import ChargeClass
+from vs_core._generated.vibesys.core.v1.vocabulary_cv import Charge
+
 from .common import (
     CheckpointDecline,
     ContractValidationError,
@@ -38,19 +41,7 @@ class Backoff(Value):
         return min(self.cap, self.first * 2**drops)
 
 
-type ChargeClass = Literal["free", "paid", "correction", "resume"]
 """The charge class of a turn request: a role's own (free or paid), a correction or a resume."""
-
-
-class Charge(StrEnum):
-    """What a role's first turn in a session costs the run's budget.
-
-    A turn that works on a candidate costs one ``ATTEMPT`` (and a turn); a turn that does not
-    (a judge, a planner) costs only a ``TURN``. Corrections and resumes cost a turn.
-    """
-
-    ATTEMPT = "paid"
-    TURN = "free"
 
 
 class Correctable(StrEnum):
@@ -159,3 +150,20 @@ class Declined(Value):
 
 
 type Checkpoint = Annotated[Retained | Declined, Field(discriminator="kind")]
+
+
+__all__ = [
+    "Backoff",
+    "Charge",
+    "ChargeClass",
+    "Checkpoint",
+    "Correctable",
+    "Correction",
+    "Declined",
+    "Exchanges",
+    "ProtocolContext",
+    "ReplyCorrection",
+    "ResumeFacts",
+    "Retained",
+    "WaitUnrecorded",
+]

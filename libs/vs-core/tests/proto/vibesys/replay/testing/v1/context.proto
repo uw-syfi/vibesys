@@ -3,7 +3,7 @@ package vibesys.replay.testing.v1;
 
 import "vibesys/store/v1/replay.proto";
 import "google/protobuf/any.proto";
-import "vibesys/core/v1/common.proto";
+import "vibesys/core/v1/leaves.proto";
 
 // Test-only typed renderer input. Production strategies own their context schema.
 message Context {
@@ -50,6 +50,6 @@ message RepeatedMapIdentity {
 
 message SharedContext {
   option (vibesys.store.v1.replay_context) = true;
-  vibesys.core.v1.Identity candidate = 1 [(vibesys.store.v1.replay_field) = REPLAY_FIELD_KIND_IDENTITY];
+  vibesys.core.v1.RevisionRef candidate = 1 [(vibesys.store.v1.replay_field) = REPLAY_FIELD_KIND_IDENTITY];
   vibesys.store.v1.ReplayAllowance allowance = 2 [(vibesys.store.v1.replay_field) = REPLAY_FIELD_KIND_POLICY];
 }

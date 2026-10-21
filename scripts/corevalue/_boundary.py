@@ -9,14 +9,18 @@ from protobuf import (
     DescFieldValueList,
     DescFieldValueMap,
     DescFieldValueMessage,
+    DescFieldValueScalar,
     DescFile,
     DescMessage,
+    ScalarType,
 )
 
 from scripts.corevalue._imports import imports as converter_imports
 from scripts.corevalue._schema import (
     Options,
+    enum_subset,
     extension,
+    is_null,
     is_union,
     members,
     name,
@@ -57,7 +61,11 @@ def boundary_file(file: DescFile, settings: Options | None = None) -> str:
     for message in messages:
         lines.extend(_message(message))
     lines.append("ENCODERS: dict[type, Callable[..., Message]] = {")
-    lines.extend(f"    values.{name(m)}: encode_{name(m)}," for m in messages if not is_union(m))
+    lines.extend(
+        f"    values.{name(m)}: encode_{name(m)},"
+        for m in messages
+        if not is_union(m) and not is_null(m)
+    )
     lines.extend(["}", "DECODERS: dict[type, Callable[..., object]] = {"])
     lines.extend(f"    pb.{name(m)}: decode_{name(m)}," for m in messages)
     lines.append("}")
@@ -106,11 +114,20 @@ def field_expr(f: DescField, *, encode: bool) -> str:
         case DescFieldValueEnum(enum=enum):
             expr = convert(enum, attr)
             rule = rule_of(f)
-            required = rule and rule.type and 0 in rule.type.value.not_in
+            required = (
+                rule and rule.type and (0 in rule.type.value.not_in or bool(rule.type.value.in_))
+            )
+            subset = enum_subset(f)
+            if not encode and subset is not None:
+                opts = extension(enum, options.ext_core_enum)
+                selected = [
+                    repr(spelling) if opts and opts.literal else f"values.{name(enum)}.{member}"
+                    for member, spelling, _ in subset
+                ]
+                expr = f"cast(Literal[{', '.join(selected)}], {expr})"
             return expr if encode or required else f"None if {attr} == 0 else {expr}"
         case DescFieldValueList(element=kind):
-            expr = convert(kind, "x")
-            return f"{'[' if encode else 'tuple('}{expr} for x in {attr}{']' if encode else ')'}"
+            return _sequence_expr(f, kind, attr, encode=encode)
         case DescFieldValueMap(key=_, value=kind):
             expr = convert(kind, f"{attr}[k]")
             content = f"{{k: {expr} for k in sorted({attr})}}"
@@ -137,8 +154,17 @@ def _message(message: DescMessage) -> list[str]:
     """Generate both conversions of one message or closed union."""
     lines = []
     n = name(message)
+    if is_null(message):
+        return [
+            f"def encode_{n}(v: None) -> pb.{n}:",
+            f"    return pb.{n}()",
+            "",
+            f"def decode_{n}(m: pb.{n}) -> None:",
+            "    return None",
+            "",
+        ]
     annotation = (
-        " | ".join(f"values.{type_of(f)}" for f in union_members(message))
+        " | ".join(_union_type(f) for f in union_members(message))
         if is_union(message)
         else f"values.{n}"
     )
@@ -148,8 +174,8 @@ def _message(message: DescMessage) -> list[str]:
         for f in union_members(message):
             lines.extend(
                 [
-                    f"    if type(v) is values.{type_of(f)}:",
-                    f"        return pb.{n}({union}=Oneof({f.local_name!r}, encode_{type_of(f)}(v)))",
+                    f"    if type(v) is {_union_class(f)}:",
+                    f"        return pb.{n}({union}=Oneof({f.local_name!r}, {_union_expr(f, 'v', encode=True)}))",
                 ]
             )
         lines.append(f"    raise TypeError('Invalid {n} member: ' + type(v).__name__)")
@@ -164,7 +190,7 @@ def _message(message: DescMessage) -> list[str]:
             lines.extend(
                 [
                     f"        case Oneof({f.local_name!r}, value):",
-                    f"            return decode_{type_of(f)}(value)",
+                    f"            return {_union_expr(f, 'value', encode=False)}",
                 ]
             )
         lines.extend(["        case _:", f"            raise ValueError('Missing {n} member')"])
@@ -200,13 +226,65 @@ def _enum(enum: DescEnum) -> list[str]:
     decoded = repr({number: spelling for _, spelling, number in entries})
     opts = extension(enum, options.ext_core_enum)
     result = (
-        f"cast(values.{n}, {decoded}[v])" if opts and opts.literal else f"values.{n}({decoded}[v])"
+        f"cast(Literal[{', '.join(repr(v) for _, v, _ in entries)}], {decoded}[v])"
+        if opts and opts.literal
+        else f"values.{n}({decoded}[v])"
+    )
+    annotation = (
+        f"Literal[{', '.join(repr(v) for _, v, _ in entries)}]"
+        if opts and opts.literal
+        else f"values.{n}"
     )
     return [
-        f"def encode_{n}(v: values.{n} | None) -> pb.{n}:",
+        f"def encode_{n}(v: {annotation} | None) -> pb.{n}:",
         f"    return {encoded}.get(v, pb.{n}.UNSPECIFIED)",
         "",
-        f"def decode_{n}(v: pb.{n}) -> values.{n}:",
+        f"def decode_{n}(v: pb.{n}) -> {annotation}:",
         f"    return {result}",
         "",
     ]
+
+
+def _union_type(field: DescField) -> str:
+    """A union's nominal member or exact primitive domain."""
+    if isinstance(field.value, DescFieldValueMessage):
+        return "None" if is_null(field.value.message) else f"values.{type_of(field)}"
+    config = extension(field, options.ext_core_field)
+    if config and config.integer:
+        return "int"
+    if isinstance(field.value, DescFieldValueScalar):
+        return {
+            ScalarType.STRING: "str",
+            ScalarType.BYTES: "bytes",
+            ScalarType.BOOL: "bool",
+            ScalarType.FLOAT: "float",
+            ScalarType.DOUBLE: "float",
+        }.get(field.value.scalar, "int")
+    raise TypeError(field.name)
+
+
+def _union_class(field: DescField) -> str:
+    """None has a value domain, but its runtime type is NoneType."""
+    value = _union_type(field)
+    return "type(None)" if value == "None" else value
+
+
+def _union_expr(field: DescField, value: str, *, encode: bool) -> str:
+    """Convert scalar members without inventing a Python wrapper record."""
+    config = extension(field, options.ext_core_field)
+    if config and config.integer:
+        return f"{'str' if encode else 'int'}({value})"
+    if isinstance(field.value, DescFieldValueMessage):
+        return f"{'encode' if encode else 'decode'}_{name(field.value.message)}({value})"
+    return value
+
+
+def _sequence_expr(field: DescField, kind: object, attr: str, *, encode: bool) -> str:
+    """Sets sort before encoding and regain their immutable collection on decode."""
+    config = extension(field, options.ext_core_field)
+    as_set = bool(config and config.frozen_set)
+    collection = f"sorted({attr})" if encode and as_set else attr
+    expression = (enc_element if encode else dec_element)(kind, "x")
+    if encode:
+        return f"[{expression} for x in {collection}]"
+    return f"{'frozenset' if as_set else 'tuple'}({expression} for x in {collection})"

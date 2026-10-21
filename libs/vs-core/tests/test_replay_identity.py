@@ -18,7 +18,7 @@ from vs_core.api.replay import (
     classify_context,
     encode_identity,
 )
-from vs_proto.api import core_common, replay
+from vs_proto.api import core_common, core_leaves, replay
 
 from .generated.vibesys.replay.testing.v1.context_pb import (
     Context,
@@ -180,17 +180,23 @@ def test_policy_inside_repeated_identity_context_does_not_change_identity() -> N
 
 def test_typed_context_inherits_classification_for_shared_facts() -> None:
     before = SharedContext(
-        candidate=core_common.Identity(root="candidate-a"),
+        candidate=core_leaves.RevisionRef(
+            revision_id=core_common.RevisionId(root="candidate-a", kind="revision"),
+            digest="git-commit:candidate-a",
+        ),
         allowance=replay.ReplayAllowance(remaining=1),
     )
     after = SharedContext(
-        candidate=core_common.Identity(root="candidate-a"),
+        candidate=core_leaves.RevisionRef(
+            revision_id=core_common.RevisionId(root="candidate-a", kind="revision"),
+            digest="git-commit:candidate-a",
+        ),
         allowance=replay.ReplayAllowance(remaining=99),
     )
     identity = classify_context(before, contract="plan.v1").identity
     assert identity == classify_context(after, contract="plan.v1").identity
     assert after.candidate is not None
-    after.candidate.root = "candidate-b"
+    after.candidate.digest = "git-commit:candidate-b"
     assert identity != classify_context(after, contract="plan.v1").identity
 
 

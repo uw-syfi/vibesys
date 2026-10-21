@@ -12,7 +12,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file vibesys/core/v1/value_options.proto.
  */
 export const file_vibesys_core_v1_value_options: GenFile = /*@__PURE__*/
-  fileDesc("CiN2aWJlc3lzL2NvcmUvdjEvdmFsdWVfb3B0aW9ucy5wcm90bxIPdmliZXN5cy5jb3JlLnYxIo8BChNWYWx1ZU1lc3NhZ2VPcHRpb25zEg0KBXVuaW9uGAEgASgIEhUKDWRpc2NyaW1pbmF0b3IYAiABKAkSDQoFbWl4aW4YAyABKAkSDAoEYmFzZRgEIAEoCRI1Cgljb25zdGFudHMYBSADKAsyIi52aWJlc3lzLmNvcmUudjEuVmFsdWVSdWxlQ29uc3RhbnQiLwoRVmFsdWVSdWxlQ29uc3RhbnQSDAoEbmFtZRgBIAEoCRIMCgRydWxlGAIgASgJImQKEVZhbHVlRmllbGRPcHRpb25zEhAKCGV4cGxpY2l0GAEgASgIEg8KB2ludGVnZXIYAiABKAgSFQoNY29uc3RhbnRfbmFtZRgDIAEoCRIVCg1jb25zdGFudF9ydWxlGAQgASgJIjMKEFZhbHVlRW51bU9wdGlvbnMSDwoHbGl0ZXJhbBgBIAEoCBIOCgZpbmxpbmUYAiABKAgiKgoWVmFsdWVFbnVtTWVtYmVyT3B0aW9ucxIQCghzcGVsbGluZxgBIAEoCTpmCgpjb3JlX3ZhbHVlEh8uZ29vZ2xlLnByb3RvYnVmLk1lc3NhZ2VPcHRpb25zGLiOAyABKAsyJC52aWJlc3lzLmNvcmUudjEuVmFsdWVNZXNzYWdlT3B0aW9uc1IJY29yZVZhbHVlOmIKCmNvcmVfZmllbGQSHS5nb29nbGUucHJvdG9idWYuRmllbGRPcHRpb25zGLmOAyABKAsyIi52aWJlc3lzLmNvcmUudjEuVmFsdWVGaWVsZE9wdGlvbnNSCWNvcmVGaWVsZDpeCgljb3JlX2VudW0SHC5nb29nbGUucHJvdG9idWYuRW51bU9wdGlvbnMYuo4DIAEoCzIhLnZpYmVzeXMuY29yZS52MS5WYWx1ZUVudW1PcHRpb25zUghjb3JlRW51bTptCgtjb3JlX21lbWJlchIhLmdvb2dsZS5wcm90b2J1Zi5FbnVtVmFsdWVPcHRpb25zGLuOAyABKAsyJy52aWJlc3lzLmNvcmUudjEuVmFsdWVFbnVtTWVtYmVyT3B0aW9uc1IKY29yZU1lbWJlckI/Wj1naXRodWIuY29tL3V3LXN5ZmkvdmliZXN5cy9nYXRld2F5L2dlbi92aWJlc3lzL2NvcmUvdjE7Y29yZXYxYgZwcm90bzM", [file_google_protobuf_descriptor]);
+  fileDesc("CiN2aWJlc3lzL2NvcmUvdjEvdmFsdWVfb3B0aW9ucy5wcm90bxIPdmliZXN5cy5jb3JlLnYxIrgBChNWYWx1ZU1lc3NhZ2VPcHRpb25zEg0KBXVuaW9uGAEgASgIEhUKDWRpc2NyaW1pbmF0b3IYAiABKAkSDQoFbWl4aW4YAyABKAkSDAoEYmFzZRgEIAEoCRI1Cgljb25zdGFudHMYBSADKAsyIi52aWJlc3lzLmNvcmUudjEuVmFsdWVSdWxlQ29uc3RhbnQSGQoRbmFycm93X3N1YmNsYXNzZXMYBiABKAgSDAoEbnVsbBgHIAEoCCIvChFWYWx1ZVJ1bGVDb25zdGFudBIMCgRuYW1lGAEgASgJEgwKBHJ1bGUYAiABKAkiyQEKEVZhbHVlRmllbGRPcHRpb25zEhAKCGV4cGxpY2l0GAEgASgIEg8KB2ludGVnZXIYAiABKAgSFQoNY29uc3RhbnRfbmFtZRgDIAEoCRIVCg1jb25zdGFudF9ydWxlGAQgASgJEhkKDGRlZmF1bHRfanNvbhgFIAEoCUgAiAEBEhIKCm9taXRfdW5zZXQYBiABKAgSDwoHYWxpYXNlcxgHIAMoCRISCgpmcm96ZW5fc2V0GAggASgIQg8KDV9kZWZhdWx0X2pzb24iQgoQVmFsdWVFbnVtT3B0aW9ucxIPCgdsaXRlcmFsGAEgASgIEg4KBmlubGluZRgCIAEoCBINCgVtaXhpbhgDIAEoCSIqChZWYWx1ZUVudW1NZW1iZXJPcHRpb25zEhAKCHNwZWxsaW5nGAEgASgJOmYKCmNvcmVfdmFsdWUSHy5nb29nbGUucHJvdG9idWYuTWVzc2FnZU9wdGlvbnMYuI4DIAEoCzIkLnZpYmVzeXMuY29yZS52MS5WYWx1ZU1lc3NhZ2VPcHRpb25zUgljb3JlVmFsdWU6YgoKY29yZV9maWVsZBIdLmdvb2dsZS5wcm90b2J1Zi5GaWVsZE9wdGlvbnMYuY4DIAEoCzIiLnZpYmVzeXMuY29yZS52MS5WYWx1ZUZpZWxkT3B0aW9uc1IJY29yZUZpZWxkOl4KCWNvcmVfZW51bRIcLmdvb2dsZS5wcm90b2J1Zi5FbnVtT3B0aW9ucxi6jgMgASgLMiEudmliZXN5cy5jb3JlLnYxLlZhbHVlRW51bU9wdGlvbnNSCGNvcmVFbnVtOm0KC2NvcmVfbWVtYmVyEiEuZ29vZ2xlLnByb3RvYnVmLkVudW1WYWx1ZU9wdGlvbnMYu44DIAEoCzInLnZpYmVzeXMuY29yZS52MS5WYWx1ZUVudW1NZW1iZXJPcHRpb25zUgpjb3JlTWVtYmVyQj9aPWdpdGh1Yi5jb20vdXctc3lmaS92aWJlc3lzL2dhdGV3YXkvZ2VuL3ZpYmVzeXMvY29yZS92MTtjb3JldjFiBnByb3RvMw", [file_google_protobuf_descriptor]);
 
 /**
  * Representation metadata only. Validation belongs to buf.validate rules.
@@ -54,6 +54,20 @@ export type ValueMessageOptions = Message<"vibesys.core.v1.ValueMessageOptions">
    * @generated from field: repeated vibesys.core.v1.ValueRuleConstant constants = 5;
    */
   constants: ValueRuleConstant[];
+
+  /**
+   * Rebuild a subclass as this base when a field promises the base representation.
+   *
+   * @generated from field: bool narrow_subclasses = 6;
+   */
+  narrowSubclasses: boolean;
+
+  /**
+   * An empty wire marker represented as Python None inside a scalar union.
+   *
+   * @generated from field: bool null = 7;
+   */
+  null: boolean;
 };
 
 /**
@@ -115,6 +129,34 @@ export type ValueFieldOptions = Message<"vibesys.core.v1.ValueFieldOptions"> & {
    * @generated from field: string constant_rule = 4;
    */
   constantRule: string;
+
+  /**
+   * An explicit legacy constructor default, encoded as JSON and validated by the field.
+   *
+   * @generated from field: optional string default_json = 5;
+   */
+  defaultJson?: string | undefined;
+
+  /**
+   * Preserve omission of absent optional fields in the persisted JSON envelope.
+   *
+   * @generated from field: bool omit_unset = 6;
+   */
+  omitUnset: boolean;
+
+  /**
+   * Export scalar aliases from this field's authoritative validation.
+   *
+   * @generated from field: repeated string aliases = 7;
+   */
+  aliases: string[];
+
+  /**
+   * Immutable set semantics, including canonical JSON and wire ordering.
+   *
+   * @generated from field: bool frozen_set = 8;
+   */
+  frozenSet: boolean;
 };
 
 /**
@@ -141,6 +183,13 @@ export type ValueEnumOptions = Message<"vibesys.core.v1.ValueEnumOptions"> & {
    * @generated from field: bool inline = 2;
    */
   inline: boolean;
+
+  /**
+   * Pure enum behavior, with no schema or validation rules.
+   *
+   * @generated from field: string mixin = 3;
+   */
+  mixin: string;
 };
 
 /**

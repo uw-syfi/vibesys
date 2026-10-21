@@ -1,0 +1,105 @@
+syntax = "proto3";
+package vibesys.core.v1;
+
+import "vibesys/core/v1/value_options.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/gateway/gen/vibesys/core/v1;corev1";
+
+// Closed set of revision digest schemes; a digest is `<scheme>:<value>`.
+enum DigestScheme {
+  DIGEST_SCHEME_UNSPECIFIED = 0;
+  DIGEST_SCHEME_GIT_COMMIT = 1 [(core_member).spelling = "git-commit"];
+}
+
+// Lifecycle class lifecycle contract.
+enum LifecycleClass {
+  LIFECYCLE_CLASS_UNSPECIFIED = 0;
+  LIFECYCLE_CLASS_QUERY = 1;
+  LIFECYCLE_CLASS_IDEMPOTENT_WRITE = 2 [(core_member).spelling = "idempotent_external_write"];
+  LIFECYCLE_CLASS_OWNED_JOB = 3 [(core_member).spelling = "owned_long_running_job"];
+  LIFECYCLE_CLASS_SESSION_TURN = 4;
+}
+
+// Closed measurement kinds used for eligibility requirements.
+enum EvidenceKind {
+  EVIDENCE_KIND_UNSPECIFIED = 0;
+  EVIDENCE_KIND_CORRECTNESS = 1;
+  EVIDENCE_KIND_BENCHMARK = 2;
+  EVIDENCE_KIND_PROFILING = 3;
+}
+
+// Closed semantic assessment kinds, distinct from evidence production.
+enum AssessmentKind {
+  ASSESSMENT_KIND_UNSPECIFIED = 0;
+  ASSESSMENT_KIND_CORRECTNESS = 1;
+  ASSESSMENT_KIND_BENCHMARK = 2;
+  ASSESSMENT_KIND_PROFILING = 3;
+  ASSESSMENT_KIND_LOCAL_VALIDATION = 4 [(core_member).spelling = "local-validation"];
+}
+
+// Observation status lifecycle contract.
+enum ObservationStatus {
+  OBSERVATION_STATUS_UNSPECIFIED = 0;
+  OBSERVATION_STATUS_SUCCEEDED = 1;
+  OBSERVATION_STATUS_PENDING = 2;
+  OBSERVATION_STATUS_CANCELLED = 3;
+  OBSERVATION_STATUS_REJECTED = 4;
+  OBSERVATION_STATUS_FAILED = 5;
+  OBSERVATION_STATUS_UNKNOWN = 6;
+}
+
+// Separate currencies with different admission and refund semantics.
+//
+// ADMISSION charges accepted registration including queued starts. ATTEMPT
+// charges a paid invocation or failed setup cycle without an existing paid
+// charge. TURN charges one logical invocation, regardless of max_turns or
+// charge class, and never refunds.
+enum ChargeKind {
+  CHARGE_KIND_UNSPECIFIED = 0;
+  CHARGE_KIND_ADMISSION = 1;
+  CHARGE_KIND_ATTEMPT = 2;
+  CHARGE_KIND_TURN = 3;
+}
+
+// Which side of the noise a candidate's result falls on, against its base.
+//
+// ``INCONCLUSIVE`` is no side: the samples held give no estimate of the noise (too few runs a
+// side, or runs that all read alike), so the ratio is neither a gain nor within the noise.
+enum ComparisonVerdict {
+  COMPARISON_VERDICT_UNSPECIFIED = 0;
+  COMPARISON_VERDICT_BETTER = 1;
+  COMPARISON_VERDICT_WITHIN_NOISE = 2;
+  COMPARISON_VERDICT_WORSE = 3;
+  COMPARISON_VERDICT_INCONCLUSIVE = 4;
+}
+
+// What a comparison says of a plan's expected effect, a minimum ratio over the base.
+//
+// The framework derives it (`vs_core._comparison.effect_verdict`); no agent states it.
+enum EffectVerdict {
+  EFFECT_VERDICT_UNSPECIFIED = 0;
+  EFFECT_VERDICT_SUPPORTED = 1;
+  EFFECT_VERDICT_WITHIN_NOISE = 2;
+  EFFECT_VERDICT_DISPROVEN = 3;
+  EFFECT_VERDICT_INCONCLUSIVE = 4;
+}
+
+// What a role's first turn in a session costs the run's budget.
+//
+// A turn that works on a candidate costs one ``ATTEMPT`` (and a turn); a turn that does not
+// (a judge, a planner) costs only a ``TURN``. Corrections and resumes cost a turn.
+enum Charge {
+  CHARGE_UNSPECIFIED = 0;
+  CHARGE_ATTEMPT = 1 [(core_member).spelling = "paid"];
+  CHARGE_TURN = 2 [(core_member).spelling = "free"];
+}
+
+// Why a reply did not validate against the agent's reply model. Closed.
+enum ReplyErrorCode {
+  REPLY_ERROR_CODE_UNSPECIFIED = 0;
+  REPLY_ERROR_CODE_MISSING = 1;
+  REPLY_ERROR_CODE_UNEXPECTED = 2;
+  REPLY_ERROR_CODE_WRONG_TYPE = 3 [(core_member).spelling = "wrong-type"];
+  REPLY_ERROR_CODE_INVALID_VALUE = 4 [(core_member).spelling = "invalid-value"];
+  REPLY_ERROR_CODE_NOT_JSON = 5 [(core_member).spelling = "not-json"];
+}
