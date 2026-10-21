@@ -14,6 +14,7 @@ import {
   reduceEventBatch,
 } from '@vibesys/run-state';
 import type {RunRef} from '@vibesys/runs';
+import {createMachine, getInitialSnapshot, getNextSnapshot, type SnapshotFrom} from 'xstate';
 import {type HistoryPage, type HistoryPager, receivePage, startHistory} from './history-pager.js';
 import type {IdeasLayout} from './ideas-tree.js';
 import {IDEAS_FILTER_DEFAULT, type IdeasFilter} from './ideas-view.js';
@@ -181,7 +182,36 @@ export type SpanDetailReply =
   | {readonly kind: 'failed'; readonly message: string};
 
 /** Confirmation for cancellation; the backend record remains the lifecycle authority. */
-type PauseNowFlow = {readonly kind: 'idle' | 'confirming' | 'sent'};
+const pauseNowMachine = createMachine({
+  types: {} as {events: {type: 'ask' | 'cancel' | 'confirm' | 'failed'; allowed: boolean}},
+  initial: 'idle',
+  on: {failed: '.idle'},
+  states: {
+    idle: {on: {ask: {target: 'confirming', guard: ({event}) => event.allowed}}},
+    confirming: {
+      on: {
+        cancel: 'idle',
+        confirm: {target: 'sent', guard: ({event}) => event.allowed},
+      },
+    },
+    sent: {on: {ask: {target: 'confirming', guard: ({event}) => event.allowed}}},
+  },
+});
+
+type PauseNowFlow = {readonly kind: SnapshotFrom<typeof pauseNowMachine>['value']};
+
+function pauseNowNext(
+  state: PauseNowFlow,
+  type: 'ask' | 'cancel' | 'confirm' | 'failed',
+  allowed = true,
+): PauseNowFlow {
+  return {
+    kind: getNextSnapshot(pauseNowMachine, pauseNowMachine.resolveState({value: state.kind}), {
+      type,
+      allowed,
+    }).value,
+  };
+}
 
 /** Where the scrubber stands: following the newest event, or at one event's sequence. */
 export type RunView = {readonly at: 'live'} | {readonly at: number};
@@ -390,7 +420,7 @@ export function runPageInitial(seed: RunPageSeed): RunPageState {
     record: {kind: 'unlisted', why: 'machine'},
     locate: {kind: 'idle'},
     followingLogs: false,
-    pauseNow: {kind: 'idle'},
+    pauseNow: PAUSE_NOW_IDLE,
     logs: {kind: 'idle'},
     views: {},
     selected: null,
@@ -418,7 +448,7 @@ export function runPageInitial(seed: RunPageSeed): RunPageState {
   };
 }
 
-const PAUSE_NOW_IDLE: PauseNowFlow = {kind: 'idle'};
+const PAUSE_NOW_IDLE: PauseNowFlow = {kind: getInitialSnapshot(pauseNowMachine).value};
 
 /** The phase the record reports, before the page's own stop is laid over it. */
 function recordPhase(record: RunRecord): RunPhase {
@@ -978,19 +1008,27 @@ function confirmStep(state: RunPageState, action: RunPageAction): RunPageStep | 
   const phase = runPhase(state);
   switch (action.type) {
     case 'ask-pause-now':
-      return isLive(state) && phase.kind !== 'ended' && state.pauseNow.kind !== 'confirming'
-        ? {state: {...state, pauseNow: {kind: 'confirming'}}, requests: []}
-        : unchanged(state);
+      return {
+        state: {
+          ...state,
+          pauseNow: pauseNowNext(state.pauseNow, 'ask', isLive(state) && phase.kind !== 'ended'),
+        },
+        requests: [],
+      };
     case 'cancel-pause-now':
-      return state.pauseNow.kind === 'confirming'
-        ? {state: {...state, pauseNow: PAUSE_NOW_IDLE}, requests: []}
-        : unchanged(state);
-    case 'confirm-pause-now':
-      return state.pauseNow.kind === 'confirming' && commandable(state)
-        ? {state: {...state, pauseNow: {kind: 'sent'}}, requests: [{kind: 'pause-now'}]}
-        : unchanged(state);
+      return {state: {...state, pauseNow: pauseNowNext(state.pauseNow, 'cancel')}, requests: []};
+    case 'confirm-pause-now': {
+      const pauseNow = pauseNowNext(state.pauseNow, 'confirm', commandable(state));
+      return {
+        state: {...state, pauseNow},
+        requests:
+          state.pauseNow.kind === 'confirming' && pauseNow.kind === 'sent'
+            ? [{kind: 'pause-now'}]
+            : [],
+      };
+    }
     case 'pause-now-failed':
-      return {state: {...state, pauseNow: PAUSE_NOW_IDLE}, requests: []};
+      return {state: {...state, pauseNow: pauseNowNext(state.pauseNow, 'failed')}, requests: []};
     case 'bound-elapsed':
       return state.locate.kind === 'waiting' && state.locate.bound === action.token
         ? {state: {...state, locate: {kind: 'unresolved'}}, requests: []}
