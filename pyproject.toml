@@ -107,7 +107,7 @@ test = [
 ]
 
 [tool.pytest.ini_options]
-testpaths = ["tests", "libs/vs-evaluator-protocol/tests", "libs/vs-decode/tests", "libs/vs-redaction/tests", "libs/vs-evaluation/tests", "libs/vs-async-ops/tests", "libs/vs-github/tests", "libs/vs-issue-tracker/tests", "libs/vs-core/tests", "libs/vs-project/tests", "libs/vs-prompts/tests", "libs/vs-runtime/tests", "libs/vs-sandbox/tests", "libs/vs-agent/tests", "libs/vs-slurm/tests", "libs/vs-mcp/tests", "libs/vs-faults/tests", "libs/vs-sim/tests", "libs/vs-dst/tests", "libs/vs-logs/tests", "libs/vs-proto/tests", "libs/vs-runlog/tests", "sdk/vs-bench/tests"]
+testpaths = ["tests", "scripts/corevalue/tests", "libs/vs-evaluator-protocol/tests", "libs/vs-decode/tests", "libs/vs-redaction/tests", "libs/vs-evaluation/tests", "libs/vs-async-ops/tests", "libs/vs-github/tests", "libs/vs-issue-tracker/tests", "libs/vs-core/tests", "libs/vs-project/tests", "libs/vs-prompts/tests", "libs/vs-runtime/tests", "libs/vs-sandbox/tests", "libs/vs-agent/tests", "libs/vs-slurm/tests", "libs/vs-mcp/tests", "libs/vs-faults/tests", "libs/vs-sim/tests", "libs/vs-dst/tests", "libs/vs-logs/tests", "libs/vs-proto/tests", "libs/vs-runlog/tests", "sdk/vs-bench/tests"]
 # Directories whose `slow` tests still run one case each in a pull request (see the vs-sim plugin).
 sim_smoke_slow = ["tests/system/chaos", "tests/system/skeleton", "libs/vs-core/tests"]
 # Bare `--cov` measures the packages listed in `[tool.coverage.run] source`
@@ -163,7 +163,7 @@ markers = [
 
 [tool.coverage.run]
 branch = true
-source = ["entrypoints", "launch", "server", "vibesys", "vs_evaluator_protocol", "vs_decode", "vs_redaction", "vs_evaluation", "vs_async_ops", "vs_github", "vs_issue_tracker", "vs_core", "vs_project", "vs_prompts", "vs_runtime", "vs_sandbox", "vs_agent", "vs_slurm", "vs_mcp", "vs_faults", "vs_sim", "vs_dst", "vs_logs", "vs_proto", "vs_runlog", "vs_bench"]
+source = ["entrypoints", "launch", "server", "vibesys", "vs_evaluator_protocol", "vs_decode", "vs_redaction", "vs_evaluation", "vs_async_ops", "vs_github", "vs_issue_tracker", "vs_core", "vs_project", "vs_prompts", "vs_runtime", "vs_sandbox", "vs_agent", "vs_slurm", "vs_mcp", "vs_faults", "vs_sim", "vs_dst", "vs_logs", "vs_proto", "vs_runlog", "vs_bench", "scripts.corevalue"]
 relative_files = true
 omit = [
     # Module execution stubs contain only a guarded call into a measured
@@ -171,6 +171,7 @@ omit = [
     "*/__main__.py",
     # Generated bindings are verified byte-for-byte by the proto check.
     "*/vs_proto/_generated/*",
+    "scripts/corevalue/tests/*",
 ]
 
 [tool.coverage.report]
@@ -237,7 +238,7 @@ roots = ["src", "libs", "scripts", "packaging", "sdk", "support"]
 # Glob patterns of directories scanned for Python tests and `*.test.ts`.
 # Python roots mirror `[tool.pytest.ini_options] testpaths`; `clients` adds the
 # TypeScript workspaces. `__pycache__` and `fixtures` directories are skipped.
-roots = ["tests", "libs/*/tests", "sdk/*/tests", "clients"]
+roots = ["tests", "libs/*/tests", "sdk/*/tests", "scripts/corevalue/tests", "clients"]
 
 # Repo-relative JSONL baseline, one {"path", "rule", "count"} entry per line.
 baseline = "tests/quality/isolation_baseline.jsonl"
@@ -252,6 +253,11 @@ src = ["src", "tests", "resources/evaluators/microservice", "libs/vs-evaluator-p
 extend-exclude = [
     # Tool-owned output: edits are rejected by the proto regenerate-and-diff check.
     "libs/vs-proto/src/vs_proto/_generated",
+    "libs/vs-core/src/vs_core/_generated",
+    "libs/vs-runtime/src/vs_runtime/_core_values",
+    "scripts/corevalue/tests/generated_pb",
+    "scripts/corevalue/tests/generated_values",
+    "scripts/corevalue/tests/generated_boundary",
     "resources/skills",
     "examples/microservices/repositories/deathstarbench",
     "examples/microservices/repositories/masa",
@@ -328,6 +334,8 @@ runtime-evaluated-base-classes = ["pydantic.BaseModel", "server.control_envelope
 "libs/*/tests/**" = ["S101", "PLR2004", "D", "INP001"]
 "sdk/*/tests/**" = ["S101", "PLR2004", "D", "INP001"]
 "support/*/tests/**" = ["S101", "PLR2004", "D", "INP001"]
+# Build-tool tests live beside their tool, with the same assertion rules as library tests.
+"scripts/*/tests/**" = ["S101", "PLR2004", "D", "INP001"]
 # The contract suites are test code shipped in the library so every implementation runs them:
 # their assertions are the output, as in a test module.
 "libs/vs-sandbox/src/vs_sandbox/*_contracts.py" = ["S101", "PLR2004"]
