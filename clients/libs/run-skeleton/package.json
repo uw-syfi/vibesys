@@ -1,0 +1,47 @@
+{
+  "name": "@vibesys/run-skeleton",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "vibesys": {
+    "layer": "domain",
+    "entries": {
+      ".": "neutral",
+      "./cache": "dom"
+    }
+  },
+  "exports": {
+    ".": {
+      "@vibesys/source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./cache": {
+      "@vibesys/source": "./src/cache/index.ts",
+      "types": "./dist/cache/index.d.ts",
+      "default": "./dist/cache/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "!dist/.*.tsbuildinfo"
+  ],
+  "scripts": {
+    "build": "tsc -b tsconfig.lib.json tsconfig.cache.json",
+    "check": "tsc -b",
+    "test": "node ../../tools/scripts/run_bun_tests.mjs ./src"
+  },
+  "devDependencies": {
+    "@types/bun": "1.4.2",
+    "fake-indexeddb": "^6.2.6",
+    "typescript": "^5.8.3"
+  },
+  "dependencies": {
+    "@bufbuild/protobuf": "2.16.0",
+    "@vibesys/machine": "workspace:*",
+    "@vibesys/proto": "workspace:*",
+    "@vibesys/store": "workspace:*",
+    "@vibesys/transport": "workspace:*",
+    "xstate": "5.33.2"
+  }
+}
