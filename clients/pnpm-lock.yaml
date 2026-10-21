@@ -76,6 +76,9 @@ importers:
         specifier: workspace:*
         version: link:../../libs/ui
     devDependencies:
+      '@bufbuild/protobuf':
+        specifier: 2.16.0
+        version: 2.16.0
       '@playwright/test':
         specifier: 1.55.0
         version: 1.55.0
@@ -85,6 +88,9 @@ importers:
       '@types/node':
         specifier: ^24.0.0
         version: 24.13.3
+      '@vibesys/proto':
+        specifier: workspace:*
+        version: link:../../libs/proto
       '@vibesys/store':
         specifier: workspace:*
         version: link:../../libs/store
@@ -661,6 +667,9 @@ importers:
 
   libs/connection:
     dependencies:
+      '@bufbuild/protobuf':
+        specifier: 2.16.0
+        version: 2.16.0
       '@vibesys/contracts':
         specifier: workspace:*
         version: link:../contracts
@@ -751,6 +760,9 @@ importers:
       '@vibesys/store':
         specifier: workspace:*
         version: link:../store
+      expect:
+        specifier: 30.5.2
+        version: 30.5.2
       typescript:
         specifier: ^5.8.3
         version: 5.9.3
@@ -763,6 +775,9 @@ importers:
       '@vibesys/machine':
         specifier: workspace:*
         version: link:../machine
+      '@vibesys/proto':
+        specifier: workspace:*
+        version: link:../proto
       '@vibesys/transport':
         specifier: workspace:*
         version: link:../transport

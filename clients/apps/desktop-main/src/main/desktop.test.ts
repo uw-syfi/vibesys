@@ -1,4 +1,5 @@
 import {describe, expect, test} from 'bun:test';
+import {hostKey} from '@vibesys/hosts';
 import {WELCOME_CHANNELS, type WelcomeEvent, type WelcomeResult} from '@vibesys/ipc';
 import {RunHistoryStore} from '@vibesys/run-history';
 import {FakeHistorySource} from '@vibesys/run-history/testing';
@@ -244,7 +245,13 @@ function desktopWorld(cleanups: RetirementCleanups = {}, skipped: SkippedRecent[
     releaseSurfaceRun: () => undefined,
     sendWelcome: <T>(_channel: string, _event: WelcomeEvent<T>): void => undefined,
   };
+  const gatewaySettings = new Map<string, boolean>();
   const desktop = new Desktop({
+    gatewaySetting: async (host, enabled) => {
+      const key = hostKey(host);
+      if (enabled !== undefined) gatewaySettings.set(key, enabled);
+      return gatewaySettings.get(key) ?? false;
+    },
     window,
     welcome: new WelcomeFeed(),
     hosts,

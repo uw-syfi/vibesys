@@ -18,6 +18,14 @@ export {
   parsePageMessage,
   WAKE_CHANNEL,
 } from './bridge.js';
+export {
+  GATEWAY_CHANNEL,
+  type GatewayBridge,
+  type GatewayCall,
+  type GatewayReply,
+  type GatewayRequest,
+  parseGatewayRequest,
+} from './gateway.js';
 export {openPortSocket, type PagePort} from './port-socket.js';
 export {
   parseRunLogsRequest,

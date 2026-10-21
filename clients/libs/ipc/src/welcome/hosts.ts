@@ -11,6 +11,7 @@ import type {PathCompletion, WelcomeResult} from './types.js';
 import {type ChannelOf, operationToken} from './values.js';
 
 export const HOSTS_CHANNELS = {
+  runTransportV2: 'vibesys:welcome:run-transport-v2',
   setCheckout: 'vibesys:welcome:set-checkout',
   cancelCheckout: 'vibesys:welcome:cancel-checkout',
   signIn: 'vibesys:welcome:sign-in',
@@ -21,6 +22,7 @@ export const HOSTS_CHANNELS = {
 
 /** The welcome bridge's requests the hosts feature makes. */
 export interface HostsWelcomeBridge {
+  runTransportV2(host: HostKey, enabled?: boolean): Promise<WelcomeResult<boolean>>;
   /** Change a checkout under `change`, so losing renderer intent can cancel the main-process work. */
   setCheckout(host: HostKey, path: string, change: number): Promise<WelcomeResult<string>>;
   cancelCheckout(change: number): Promise<WelcomeResult<null>>;
@@ -42,6 +44,11 @@ export interface HostsWelcomeBridge {
 }
 
 export type HostsRequest =
+  | {
+      readonly kind: 'run-transport-v2';
+      readonly host: HostId;
+      readonly enabled: boolean | undefined;
+    }
   | {
       readonly kind: 'set-checkout';
       readonly host: HostId;
@@ -93,6 +100,10 @@ export function parseHostsRequest(
 ): HostsRequest {
   const [first, second, third] = args;
   switch (channel) {
+    case HOSTS_CHANNELS.runTransportV2:
+      if (second !== undefined && typeof second !== 'boolean')
+        throw new Error('runTransportV2 must be boolean');
+      return {kind: 'run-transport-v2', host: hostFromKey(first), enabled: second};
     case HOSTS_CHANNELS.setCheckout:
       return {
         kind: 'set-checkout',

@@ -73,12 +73,19 @@ export class ConnectionManager implements AsyncDisposable {
   readonly #releasing = new Set<Promise<void>>();
   /** A host cannot be reopened until its prior ssh control master has finished exiting. */
   readonly #retiring = new Map<HostKey, Promise<void>>();
+  readonly #disposalListeners = new Set<() => void>();
   readonly #created = new Set<(host: HostKey, connection: HostConnection) => void>();
   #disposed = false;
   #disposing: Promise<void> | null = null;
 
   constructor(options: ConnectionManagerOptions) {
     this.#options = options;
+  }
+
+  /** Retire any additional transport owners before this manager releases its host links. */
+  onDisposing(listener: () => void): void {
+    if (this.#disposed) listener();
+    else this.#disposalListeners.add(listener);
   }
 
   /**
@@ -195,6 +202,31 @@ export class ConnectionManager implements AsyncDisposable {
       managed.operations -= 1;
       await this.#releaseUnused(key, managed);
     }
+  }
+
+  /** Hold the existing host link while a second transport owns a channel on it. */
+  async leaseLink(host: HostId): Promise<{readonly link: Link; release(): Promise<void>}> {
+    const key = hostKey(host);
+    for (
+      let retiring = this.#retiring.get(key);
+      retiring !== undefined;
+      retiring = this.#retiring.get(key)
+    ) {
+      await retiring;
+    }
+    this.#active();
+    const managed = this.#managedLink(host);
+    managed.operations += 1;
+    let released = false;
+    return {
+      link: managed.link,
+      release: async () => {
+        if (released) return;
+        released = true;
+        managed.operations -= 1;
+        await this.#releaseUnused(key, managed);
+      },
+    };
   }
 
   /** The machine woke, or the network came back: every connection checks what it waits on. */
@@ -344,6 +376,14 @@ export class ConnectionManager implements AsyncDisposable {
 
   async #dispose(): Promise<void> {
     this.#disposed = true;
+    for (const listener of this.#disposalListeners) {
+      try {
+        listener();
+      } catch (error) {
+        this.#log(`could not retire a transport: ${errorMessage(error)}`);
+      }
+    }
+    this.#disposalListeners.clear();
     this.#shown.clear();
     this.#replaced.clear();
     this.#leases.clear();

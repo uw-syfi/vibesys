@@ -53,6 +53,8 @@
     "@types/node": "^24.0.0",
     "@vibesys/store": "workspace:*",
     "electron": "44.6.0",
-    "typescript": "^5.8.3"
+    "typescript": "^5.8.3",
+    "@bufbuild/protobuf": "2.16.0",
+    "@vibesys/proto": "workspace:*"
   }
 }

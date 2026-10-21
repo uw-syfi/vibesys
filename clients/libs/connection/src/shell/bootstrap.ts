@@ -100,6 +100,12 @@ export function remoteBootstrap(checkout: string, uv: string | null): string {
   return ['sh', '-c', `'${BOOTSTRAP_SCRIPT}'`, ROLE, datum(checkout), datum(uv ?? '')].join(' ');
 }
 
+/** Carry a POSIX command through any login shell using the bootstrap's existing hex codec. */
+export function remoteCommand(script: string): string {
+  if (script.includes('\0')) throw new Error('a remote command contains a NUL');
+  return ['sh', '-c', `'${DECODE} exec /bin/sh -c "$1"'`, 'vibesys-command', hex(script)].join(' ');
+}
+
 /** The local argument vector (for `/bin/sh`) that starts the helper from `checkout`. */
 export function localBootstrap(checkout: string, uv: string | null): readonly string[] {
   return ['-c', BOOTSTRAP_SCRIPT, ROLE, datum(checkout), datum(uv ?? '')];

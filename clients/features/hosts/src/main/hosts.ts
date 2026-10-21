@@ -336,7 +336,7 @@ export class Hosts {
       await operation.closeCandidate();
       operation.assertCurrent();
       const outcome = await this.#deps.settings.updateHosts(
-        current => withHostSettings(current, id, {checkout}),
+        current => withHostSettings(current, id, {...settingsFor(current, id), checkout}),
         operation.isCurrent,
       );
       if (outcome === 'cancelled') operation.assertCurrent();

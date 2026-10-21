@@ -26,6 +26,7 @@ export interface HostSettings {
    * The app starts the host helper from it (`uv run --project <checkout>`).
    */
   readonly checkout: string;
+  readonly runTransportV2?: boolean;
 }
 
 export interface SettingsFile {
@@ -38,8 +39,16 @@ export const EMPTY_SETTINGS: SettingsFile = {version: 2, hosts: {}};
 /** Validate one host's settings, rejecting unknown keys. */
 function parseHostSettings(value: unknown, path: string): HostSettings {
   const record = object(value, path);
-  onlyKeys(record, ['checkout'], path);
-  return {checkout: validHostPath(record['checkout'], `${path}.checkout`)};
+  onlyKeys(record, ['checkout', 'runTransportV2'], path);
+  if (record['runTransportV2'] !== undefined && typeof record['runTransportV2'] !== 'boolean') {
+    throw new SettingsError(`${path}.runTransportV2 must be a boolean`);
+  }
+  return {
+    checkout: validHostPath(record['checkout'], `${path}.checkout`),
+    ...(record['runTransportV2'] === undefined
+      ? {}
+      : {runTransportV2: record['runTransportV2'] as boolean}),
+  };
 }
 
 /**
@@ -87,7 +96,7 @@ export function withHostSettings(
     version: 2,
     hosts: {
       ...file.hosts,
-      [hostKey(id)]: {checkout: validHostPath(settings.checkout, 'the checkout')},
+      [hostKey(id)]: parseHostSettings(settings, 'the host'),
     },
   };
 }

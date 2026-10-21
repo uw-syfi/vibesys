@@ -8,6 +8,8 @@
  * barrel (an Electron main-process E2E harness included) must not have that import forced onto it.
  * Its one consumer, this package's own `host-connection.test.ts`, imports it by its relative path.
  */
+
+export {FakeGateway, type FakeTail} from './fake-gateway.js';
 export {
   ECHO_SERVER,
   FAKE_HARNESSES,

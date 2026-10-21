@@ -279,3 +279,34 @@ describe('host settings', () => {
     }
   });
 });
+
+describe('Run transport v2 per-host switch', () => {
+  test('is absent by default, round-trips both boolean states and rejects invalid or unknown values', () => {
+    const host = hostFromKey('ssh:host-a');
+    expect(
+      settingsFor(withHostSettings(EMPTY_SETTINGS, host, {checkout: '~/vibesys'}), host)
+        ?.runTransportV2,
+    ).toBeUndefined();
+    for (const enabled of [true, false]) {
+      const file = withHostSettings(EMPTY_SETTINGS, host, {
+        checkout: '~/vibesys',
+        runTransportV2: enabled,
+      });
+      expect(settingsFor(parseSettings(file), host)?.runTransportV2).toBe(enabled);
+    }
+    for (const invalid of [null, 0, 1, '', 'true', [], {}]) {
+      expect(() =>
+        parseSettings({
+          version: 2,
+          hosts: {'ssh:host-a': {checkout: '~/vibesys', runTransportV2: invalid}},
+        }),
+      ).toThrow('runTransportV2');
+    }
+    expect(() =>
+      parseSettings({
+        version: 2,
+        hosts: {'ssh:host-a': {checkout: '~/vibesys', transportV3: true}},
+      }),
+    ).toThrow('transportV3');
+  });
+});

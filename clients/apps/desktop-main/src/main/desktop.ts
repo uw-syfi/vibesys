@@ -31,6 +31,10 @@ import {
 import type {AppWindow} from './window.js';
 
 export interface DesktopDeps {
+  readonly gatewaySetting: (
+    host: import('@vibesys/hosts').HostId,
+    enabled: boolean | undefined,
+  ) => Promise<boolean>;
   readonly window: Pick<
     AppWindow,
     'focus' | 'openSettings' | 'releaseSurfaceRun' | 'sendWelcome' | 'welcome'
@@ -93,6 +97,7 @@ type ScreenRequest = Extract<
   WelcomeRequest,
   {
     readonly kind:
+      | 'run-transport-v2'
       | 'machines'
       | 'machine'
       | 'inspect-checkout'
@@ -335,6 +340,8 @@ export class Desktop {
   #screen(request: ScreenRequest): Promise<unknown> {
     const {machines} = this.#deps;
     switch (request.kind) {
+      case 'run-transport-v2':
+        return this.#deps.gatewaySetting(request.host, request.enabled);
       case 'machines':
         return machines.machines();
       case 'machine':

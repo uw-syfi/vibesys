@@ -42,6 +42,7 @@ import {
 } from './app-security.js';
 import {AppStartup} from './app-startup.js';
 import {Desktop} from './desktop.js';
+import {gatewaySetting, installGatewayIpc} from './gateway-ipc.js';
 import {type LaunchPlan, userDataOverride} from './launch-args.js';
 import {planFromSecondInstance, prepareLaunchHandoff} from './launch-handoff.js';
 import {RunWindows} from './run-windows.js';
@@ -99,6 +100,37 @@ function installApplicationMenu(main: () => AppWindow): void {
   );
 }
 
+function installFirstPaint(preferences: PreferencesMain): void {
+  ipcMain.on(FIRST_PAINT_CHANNEL, event => {
+    const firstPaint: FirstPaint = {
+      theme: preferences.theme(),
+      chromeInset: chromeInset(process.platform),
+    };
+    event.returnValue = firstPaint;
+  });
+}
+
+function runNotifier(preferences: PreferencesMain, focus: () => void): RunNotifier {
+  return new RunNotifier({
+    enabled: () => preferences.notificationsEnabled(),
+    notify: notice => {
+      const notification = new Notification({title: notice.title, body: notice.body});
+      notification.on('click', () => focus());
+      notification.show();
+    },
+  });
+}
+
+function installGateway(manager: ConnectionManager, settings: SettingsStore) {
+  return installGatewayIpc(
+    ipcMain,
+    manager,
+    settings,
+    fileURLToPath(new URL('../gateway/', import.meta.url)),
+    realTimers,
+  );
+}
+
 async function openWindow(
   manager: ConnectionManager,
   fatal: (error: Error) => void,
@@ -113,6 +145,7 @@ async function openWindow(
     preferencesPath: join(userData, 'preferences.json'),
     log,
   });
+  const disableGateway = installGateway(manager, settings);
   const welcome = new WelcomeFeed();
   const preferences = new PreferencesMain({
     store: settings,
@@ -122,21 +155,8 @@ async function openWindow(
   await preferences.load();
   // The preload asks for this before the page's scripts run, so the first paint is in the theme
   // and clear of the window controls.
-  ipcMain.on(FIRST_PAINT_CHANNEL, event => {
-    const firstPaint: FirstPaint = {
-      theme: preferences.theme(),
-      chromeInset: chromeInset(process.platform),
-    };
-    event.returnValue = firstPaint;
-  });
-  const notifier = new RunNotifier({
-    enabled: () => preferences.notificationsEnabled(),
-    notify: notice => {
-      const notification = new Notification({title: notice.title, body: notice.body});
-      notification.on('click', () => windows.main.focus());
-      notification.show();
-    },
-  });
+  installFirstPaint(preferences);
+  const notifier = runNotifier(preferences, () => windows.main.focus());
   // The one copy of every ended run's recorded events, shared by all windows. It reads the host
   // through `hosts` (below), and forgets a run the host lists as live again or a host that goes.
   const history = new RunHistoryStore({
@@ -186,6 +206,7 @@ async function openWindow(
     settings,
     preferences,
     newRun: newRunMain(hosts, settings),
+    gatewaySetting: gatewaySetting(settings, host => hosts.checkout(host), disableGateway),
     runWindows: windows.runs,
     shellUrl: SHELL_URL,
     openExternal: url => shell.openExternal(url),

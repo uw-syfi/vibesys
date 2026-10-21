@@ -109,6 +109,7 @@ function cases(random: Seeded): Case[] {
     dark: random.pick(['ink', 'midnight', 'terminal'] as const),
   };
   return [
+    [bridge => bridge.runTransportV2(key, force), {kind: 'run-transport-v2', host, enabled: force}],
     [bridge => bridge.overview(), {kind: 'overview'}],
     [
       bridge => bridge.setCheckout(key, path, token),
