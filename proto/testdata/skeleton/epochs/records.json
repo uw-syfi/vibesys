@@ -123,9 +123,11 @@
     "seq": "10",
     "at": "1970-01-01T00:00:10Z",
     "epoch": 1,
+    "clock": 5,
     "lifecycle": {
       "ended": {
-        "outcome": "OUTCOME_FINISHED"
+        "outcome": "OUTCOME_INTERRUPTED",
+        "resumable": true
       }
     }
   },
@@ -133,6 +135,7 @@
     "seq": "11",
     "at": "1970-01-01T00:01:40Z",
     "epoch": 2,
+    "clock": 5,
     "epochStarted": {
       "runId": "run-fixture",
       "epoch": 2,
@@ -167,6 +170,7 @@
     "seq": "12",
     "at": "1970-01-01T00:01:41Z",
     "epoch": 2,
+    "clock": 6,
     "lifecycle": {
       "running": {}
     }

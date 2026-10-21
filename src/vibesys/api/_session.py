@@ -170,6 +170,7 @@ class _LocalRunSession:
             system=implementations.system,
         )
         self._control = self._integration.run_control
+        self._integration.events.checkout = implementations.checkout
         self._integration.add_committed_state_listener(self._handle_committed_state)
         self._integration.add_resource_listener(self._handle_resources)
         self._committed_view_listener: Callable[[RunView, tuple[str, ...] | None], None] | None = (

@@ -39,7 +39,9 @@ class Projection:
         self.state = state
         self.event = event
         self.origin = event.timestamp.timestamp() if state.origin is None else state.origin
-        self.clock = max(0.0, event.timestamp.timestamp() - self.origin)
+        self.clock = max(
+            state.clock, state.clock_offset + event.timestamp.timestamp() - self.origin
+        )
         self.spans = {key: p.Span.from_binary(value) for key, value in state.spans}
         self.invocations = dict(state.invocations)
         self.lengths = dict(state.streams)
@@ -52,6 +54,7 @@ class Projection:
         self.ending = state.ending
         self.pending = list(state.pending)
         self.final = False
+        self.epoch_ended = state.epoch_ended
         self.header = (
             None if state.epoch_header is None else p.EpochStarted.from_binary(state.epoch_header)
         )
@@ -107,6 +110,14 @@ class Projection:
             self.emit("metric", point)
 
     def emit(self, field: str, value: Message) -> None:
+        if (
+            isinstance(value, p.Lifecycle)
+            and value.state is not None
+            and value.state.field == "ended"
+        ):
+            if self.epoch_ended:
+                return
+            self.epoch_ended = True
         self.bound(value, "run")
         if isinstance(value, p.EpochStarted):
             if self.header is not None:
@@ -123,6 +134,7 @@ class Projection:
         record = p.Record(
             seq=self.state.sequence + len(self.records) + 1,
             epoch=self.state.epoch,
+            clock=self.clock,
             at=p.Timestamp.from_datetime(self.event.timestamp),
         )
         descriptor = next(f for f in record.desc().fields if f.name == field)
@@ -158,6 +170,8 @@ class Projection:
             self.state,
             sequence=self.state.sequence + len(self.records),
             origin=self.origin,
+            clock=self.clock,
+            epoch_ended=self.epoch_ended,
             header_written=True,
             epoch_header=None if self.header is None else self.header.to_binary(),
             spans=tuple((key, value.to_binary()) for key, value in self.spans.items()),

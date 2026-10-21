@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Protocol
 
+from vs_project.api import Project
+from vs_runlog.api import assert_run_unlocked
 from vs_runtime.api.infrastructure import StopMode
 
 if TYPE_CHECKING:
@@ -75,4 +77,17 @@ class Runs(Protocol):
         ...
 
 
-__all__ = ["RunHandle", "Runs"]
+def relaunch(request: RunRequest, runs: Runs) -> RunHandle:
+    """Resume the saved run as a new epoch using this host's run implementation.
+
+    Refuse a live writer before starting any work. The writer rechecks the lock
+    atomically when it opens the log, so concurrent relaunches cannot both write.
+    """
+    if request.resume is None:
+        message = "relaunch requires an existing run (--resume)"
+        raise ValueError(message)
+    assert_run_unlocked(Project.run_log_path_for(request.project_root, request.resume.run_id))
+    return runs.resume(request)
+
+
+__all__ = ["RunHandle", "Runs", "relaunch"]

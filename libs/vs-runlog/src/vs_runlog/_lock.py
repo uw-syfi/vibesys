@@ -4,6 +4,18 @@ import fcntl
 from pathlib import Path
 
 
+def assert_run_unlocked(log_path: Path) -> None:
+    """Probe a run without blocking; the writer must still acquire its lifetime lock."""
+    if not log_path.parent.exists():
+        return
+    try:
+        lock = RunLock(log_path.parent / "run.lock")
+    except BlockingIOError as error:
+        message = "cannot relaunch: run.lock is held by a live writer"
+        raise RuntimeError(message) from error
+    lock.close()
+
+
 class RunLock:
     """Own an exclusive advisory lock without replacing or deleting its inode."""
 

@@ -44,8 +44,9 @@ def header(projection: Projection, run: p.RunDescription | None = None) -> None:
         p.EpochStarted(
             run_id=projection.state.run_id,
             epoch=projection.state.epoch,
-            tree_hash="",
-            provenance_known=False,
+            tree_hash=projection.state.tree_hash,
+            dirty=projection.state.dirty,
+            provenance_known=bool(projection.state.tree_hash),
             vibesys_version=projection.state.vibesys_version,
             api_schema_hash=p.API_SCHEMA_HASH,
             store_schema_hash=p.STORE_SCHEMA_HASH,

@@ -4,8 +4,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from entrypoints.launcher import source_checkout_root
 from launch import LaunchSettings, default_run_readers, default_runs
 from server.runtime import UrlWebHealthProbe, WebDiscovery
+from vibesys.api.request import checkout_identity
+from vs_project.api import Git
 from vs_runtime.api.core import PRODUCTION_LEASE_SECONDS, RunTiming
 from vs_sim.api import (
     OsProcesses,
@@ -35,9 +38,12 @@ def production_timing() -> RunTiming:
 
 
 def _production_settings() -> LaunchSettings:
+    processes = OsProcesses()
+    checkout = source_checkout_root()
     return LaunchSettings(
+        checkout=("", False) if checkout is None else checkout_identity(checkout, Git(processes)),
         timing=production_timing(),
-        processes=OsProcesses(),
+        processes=processes,
         piped_processes=SubprocessPipedProcessLauncher(),
         blocking=ThreadBlockingRunner(),
         network=UnixNetwork(),

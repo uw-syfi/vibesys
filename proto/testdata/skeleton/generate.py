@@ -119,6 +119,15 @@ def scenarios() -> dict[str, tuple[list[Record], Keyframe]]:
     expected_resumed.through_seq = 12
     expected_resumed.epochs.append(EpochVersion(seq=11, epoch=next_epoch))
     expected_resumed.lifecycles.append(LifecycleVersion(seq=12, lifecycle=running))
+    interrupted = Lifecycle(
+        state=Oneof("ended", Ended(outcome=Outcome.INTERRUPTED, resumable=True))
+    )
+    resumed[9] = Record(
+        seq=10, epoch=1, at=Timestamp(seconds=10), clock=5, body=Oneof("lifecycle", interrupted)
+    )
+    resumed[10].clock = 5
+    resumed[11].clock = 6
+    expected_resumed.lifecycles[1] = LifecycleVersion(seq=10, lifecycle=interrupted)
     legacy = [Record(seq=1, epoch=1, body=Oneof("legacy_event", LegacyEvent(json="legacy")))]
     cases = {
         "core": (records, expected),

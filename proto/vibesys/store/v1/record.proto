@@ -35,6 +35,11 @@ message Record {
   uint64 seq = 1;
   google.protobuf.Timestamp at = 2;
   uint32 epoch = 3;
+  // Monotone run seconds, excluding downtime between epochs. Absent in older logs.
+  optional double clock = 18 [(buf.validate.field).double = {
+    gte: 0
+    finite: true
+  }];
   oneof body {
     option (buf.validate.oneof).required = true;
     EpochStarted epoch_started = 4;

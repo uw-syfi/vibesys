@@ -67,6 +67,8 @@ class LaunchSettings:
     """Runs the run's blocking calls off the event loop."""
     network: Network
     """Opens the run's sockets."""
+    checkout: tuple[str, bool] = ("", False)
+    """The source tree and dirty state, or unknown for an installed distribution."""
     registry: OrchestrationRegistry | None = None
     agent_client_factory: Callable[..., AgentClientProtocol] | None = None
     backend_factory: Callable[..., ComputeBackendImpl] | None = None
@@ -158,6 +160,7 @@ def _implementations(
     )
 
     return SessionImplementations(
+        checkout=settings.checkout,
         agent_client_factory=client_factory,
         backend_factory=backend_factory,
         profiler_preflight=(

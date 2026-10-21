@@ -66,7 +66,7 @@ from vibesys.api.contracts import (
 from vibesys.api.domains import domain_modalities
 from vibesys.api.entry import load_config
 from vibesys.api.reader import RunReader, RunReaders
-from vibesys.api.runs import RunHandle, Runs
+from vibesys.api.runs import RunHandle, Runs, relaunch
 from vibesys.api.session import RunControl, RunSession, create_session
 from vibesys.api.store import (
     RunDocument,
@@ -329,5 +329,6 @@ __all__ = [
     "load_config",
     "open_run_store",
     "recorded_ending",
+    "relaunch",
     "vetted_models",
 ]

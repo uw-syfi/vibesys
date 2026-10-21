@@ -87,6 +87,7 @@ class SessionImplementations:
     """The host's threads, sockets and processes the run's environments and evaluations run on."""
     profiler_preflight: ProfilerPreflight
     """Checks native profiler availability on the host."""
+    checkout: tuple[str, bool] = ("", False)
     stateless_tool_servers: Mapping[str, Callable[[object], ToolServerDescriptor | None]] | None = (
         None
     )

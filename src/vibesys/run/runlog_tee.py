@@ -6,6 +6,7 @@ from dataclasses import replace
 from importlib.metadata import version
 from typing import TYPE_CHECKING, Self
 
+import vs_proto.api as p
 from vibesys.events import CoreEvent
 from vibesys.records.api import MappedEvent, MappingState, map_event
 from vs_decode.api import Unreadable, decode_json
@@ -38,6 +39,7 @@ class RunLogTee:
         run_id: str,
         *,
         history: Callable[[], Iterable[CoreEvent]] = tuple,
+        checkout: tuple[str, bool] = ("", False),
     ) -> None:
         """Own a writer; delay replay until the journal has attached its history."""
         self._writer = writer
@@ -45,26 +47,59 @@ class RunLogTee:
         self._run_id = run_id
         self._history = history
         self._state: MappingState | None = None
+        self._tree_hash, self._dirty = checkout
 
-    def _initialize(self) -> MappingState:
+    def _initialize(self, event: CoreEvent) -> MappingState:
         state = MappingState(self._run_id, vibesys_version=version("vibesys"))
-        for event in self._history():
-            result = map_event(state, event)
+        for historical in self._history():
+            result = map_event(state, historical)
             self._write_content(result)
             state = result.state
+        last = self._writer.last_record
+        clock = 0 if last is None else (last.clock or 0)
+        if last is not None and not self._writer.epoch_ended:
+            self._writer.append(
+                p.Record(
+                    seq=self._writer.sequence + 1,
+                    epoch=self._writer.epoch,
+                    at=p.Timestamp.from_datetime(event.timestamp),
+                    clock=clock,
+                    body=p.Oneof(
+                        "lifecycle",
+                        p.Lifecycle(
+                            state=p.Oneof(
+                                "ended",
+                                p.Ended(
+                                    outcome=p.Outcome.INTERRUPTED,
+                                    resumable=True,
+                                    interruption_reason="previous writer exited without ending its epoch",
+                                ),
+                            )
+                        ),
+                    ),
+                )
+            )
         return replace(
             state,
             sequence=self._writer.sequence,
             epoch=self._writer.epoch + 1,
             header_written=False,
+            epoch_header=None,
+            epoch_ended=False,
+            ending=None,
+            origin=event.timestamp.timestamp(),
+            clock=clock,
+            clock_offset=clock,
+            tree_hash=self._tree_hash,
+            dirty=self._dirty,
         )
 
     def append(self, payload: bytes) -> None:
         """Project committed JSONL bytes, writing referenced content before records."""
         try:
-            if self._state is None:
-                self._state = self._initialize()
             event = _decode(payload)
+            if self._state is None:
+                self._state = self._initialize(event)
             result = map_event(self._state, event)
             self._write_content(result)
             for record in result.records:
