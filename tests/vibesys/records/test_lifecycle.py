@@ -140,9 +140,15 @@ def test_ended_run_has_no_running_waiting_or_pending_spans(terminal: e.CoreEvent
 
 
 @pytest.mark.regression
-@example(text="ValueError: unsupported failure kind", stopped=True)
-@given(text=st.text(alphabet="failure abc123:", max_size=40), stopped=st.booleans())
-def test_unstructured_failure_overrides_the_provisional_ending(text: str, *, stopped: bool) -> None:
+@example(text="ValueError: unsupported failure kind", stopped=True, already_stopped=True)
+@given(
+    text=st.text(alphabet="failure abc123:", max_size=40),
+    stopped=st.booleans(),
+    already_stopped=st.booleans(),
+)
+def test_unstructured_failure_overrides_the_provisional_ending(
+    text: str, *, stopped: bool, already_stopped: bool
+) -> None:
     state = MappingState("run-a")
     if stopped:
         state = map_event(
@@ -157,9 +163,13 @@ def test_unstructured_failure_overrides_the_provisional_ending(text: str, *, sto
                 ),
             ),
         ).state
+    if already_stopped:
+        state = map_event(state, event(e.CoreEventType.STOPPED)).state
     failed = event(e.CoreEventType.RUN_FAILED).model_copy(update={"text": text})
     result = map_event(state, failed)
     lifecycle = next(r.body.value for r in result.records if r.body and r.body.field == "lifecycle")
     assert lifecycle.state is not None
     assert lifecycle.state.field == "ended"
     assert lifecycle.state.value.outcome == p.Outcome.FAILED
+    assert lifecycle.state.value.failure is not None
+    assert lifecycle.state.value.failure.reason == text
