@@ -15,7 +15,7 @@ from pydantic import TypeAdapter, ValidationError
 import vs_core.api as core
 from vs_core.api import values as shared_values
 from vs_core.api.testing import sample_limits, sample_retries
-from vs_proto.api import LegacyEvent, core_common
+from vs_proto.api import LegacyEvent, core_agent_facts, core_common
 from vs_proto.api import ValidationError as ProtoValidationError
 from vs_proto.api import core_control as core_state
 from vs_runtime.api.core_values import from_proto, to_proto, value_types
@@ -211,3 +211,44 @@ def test_shared_value_differential_fixtures_preserve_old_acceptance_and_json() -
         else:
             with pytest.raises(ValidationError):
                 TypeAdapter(cls).validate_json(case["source"])
+
+
+@given(
+    field=st.sampled_from(["source_request", "scope", "observation_sequence", "status"]),
+    sequence=st.integers(min_value=1, max_value=10**100),
+)
+@example(field="observation_sequence", sequence=2**100)
+def test_immutable_acceptance_proof_stays_bound_to_its_original_evidence(
+    field: str, sequence: int
+) -> None:
+    value = shared_values.EvidenceRef.model_validate_json(
+        json.dumps(_shared_seeds()["EvidenceRef"])
+    )
+    message = to_proto(value)
+    assert isinstance(message, core_agent_facts.EvidenceRef)
+    receipt = message.acceptance_receipt
+    assert receipt is not None
+    if field == "source_request":
+        assert receipt.source_request is not None
+        receipt.source_request.root = "other-source"
+    elif field == "scope":
+        assert receipt.scope is not None
+        receipt.scope.generation = str(sequence)
+    elif field == "observation_sequence":
+        receipt.observation_sequence = str(value.observation_sequence + sequence)
+    else:
+        receipt.status = type(receipt.status).FAILED
+    with pytest.raises(ProtoValidationError):
+        from_proto(message)
+    payload = json.loads(value.model_dump_json())
+    changed = payload["acceptance_receipt"]
+    if field == "source_request":
+        changed[field]["root"] = "other-source"
+    elif field == "scope":
+        changed[field]["generation"] = sequence
+    elif field == "observation_sequence":
+        changed[field] += sequence
+    else:
+        changed[field] = "failed"
+    with pytest.raises(ValidationError, match="acceptance_receipt"):
+        shared_values.EvidenceRef.model_validate_json(json.dumps(payload))
