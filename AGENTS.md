@@ -57,8 +57,11 @@ Architecture:
 
 Data and validation:
 
-- Use Pydantic models for external contracts and `StrEnum` or `Literal` for
-  closed sets. No raw strings where an enum or registry exists.
+- Anything that crosses a process or is persisted is a `.proto` message, validated
+  with protovalidate in the same file; the `.proto` is the single source of truth.
+  Existing Pydantic contracts migrate during the transport migration
+  ([run-transport.md](docs/contributing/run-transport.md)); a new contract starts as a `.proto`.
+  Use `StrEnum` or `Literal` for closed sets. No raw strings where an enum or registry exists.
 - Never commit private server names, internal hostnames, personal paths, or keys and tokens;
   use generic placeholders such as `host-a`. No repository check can hold this, because the
   names themselves are private.

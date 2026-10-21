@@ -1,3 +1,5 @@
+> This page describes the stack that [`run-transport.md`](run-transport.md) replaces. Read that page for the target design.
+
 # Transport wire contract
 
 This document is the single owner of the framing and connection semantics that every transport

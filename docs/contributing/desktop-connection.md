@@ -1,3 +1,5 @@
+> This page describes the stack that [`run-transport.md`](run-transport.md) replaces. Read that page for the target design.
+
 # Desktop connection architecture
 
 This document owns how the desktop app (`clients/apps/desktop-main`) reaches VibeSys on a host:
