@@ -6,6 +6,7 @@ import {
   HostCallRequestSchema,
   HostCallResponseSchema,
   IntentAction,
+  LifecycleSchema,
   type PostIntentRequest,
   RecordSchema,
   TailResponseSchema,
@@ -23,12 +24,16 @@ interface GatewayWindow {
 }
 
 function appliedState(action: IntentAction) {
-  if (action === IntentAction.PARK) return {case: 'parked' as const, value: {}};
-  return {
-    case: 'running' as const,
-    value:
-      action === IntentAction.PAUSE ? {hold: {reason: {case: 'operator' as const, value: {}}}} : {},
-  };
+  return create(LifecycleSchema, {
+    state:
+      action === IntentAction.PARK
+        ? {case: 'parked', value: {}}
+        : {
+            case: 'running',
+            value:
+              action === IntentAction.PAUSE ? {hold: {reason: {case: 'operator', value: {}}}} : {},
+          },
+  }).state;
 }
 
 async function openIntents(page: Page) {
