@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
 
 	apiv1 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/api/v1"
@@ -96,6 +97,44 @@ func TestWatchRunsIndexCreatedAfterSubscription(t *testing.T) {
 	}
 	publishHead(t, f, head(proto.Uint64(0)))
 	if got := watchEntry(t, stream); got.Head == nil || got.Liveness != apiv1.RunLiveness_RUN_LIVENESS_INTERRUPTED {
+		t.Fatal(got)
+	}
+}
+
+func TestSkeletonBeforeLogCreation(t *testing.T) {
+	for _, committed := range []*uint64{nil, proto.Uint64(0), proto.Uint64(1)} {
+		f := start(t)
+		if committed != nil {
+			publishHead(t, f, head(committed))
+		}
+		got, err := client(t, f, false).Skeleton(f.ctx, &apiv1.SkeletonRequest{RunId: "run-1"})
+		if committed != nil && *committed > 0 {
+			if status.Code(err) != codes.DataLoss {
+				t.Fatalf("missing committed log = %v", err)
+			}
+		} else if err != nil || got.GetCommittedSeq() != 0 || len(got.GetRecords()) != 0 || len(got.GetKeyframe()) != 0 {
+			t.Fatalf("empty Skeleton = %v,%v", got, err)
+		}
+	}
+}
+
+func TestWatchRunsDoesNotMistakeAnotherProbeForWriter(t *testing.T) {
+	f := start(t)
+	lock, err := os.OpenFile(filepath.Join(f.run, "run.lock"), os.O_CREATE|os.O_RDWR, 0600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Close()
+	// A shared lock models a concurrent gateway probe; the writer uses LOCK_EX.
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_SH|syscall.LOCK_NB); err != nil {
+		t.Fatal(err)
+	}
+	publishHead(t, f, head(proto.Uint64(0)))
+	stream, err := client(t, f, false).WatchRuns(f.ctx, &apiv1.WatchRunsRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := watchEntry(t, stream); got.Liveness != apiv1.RunLiveness_RUN_LIVENESS_INTERRUPTED {
 		t.Fatal(got)
 	}
 }

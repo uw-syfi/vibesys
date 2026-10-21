@@ -32,8 +32,11 @@ func (h *host) Skeleton(ctx context.Context, request *apiv1.SkeletonRequest) (*a
 		response.CommittedSeq = cap
 	}
 	f, err := openRegular(dir, "run.log")
-	if errors.Is(err, os.ErrNotExist) && cap == 0 {
-		return response, nil
+	if errors.Is(err, os.ErrNotExist) {
+		if (!bounded || cap == 0) && position.ThroughSeq == 0 {
+			return response, nil
+		}
+		return nil, status.Error(codes.DataLoss, "committed run.log is missing")
 	}
 	if err != nil {
 		return nil, rpcError(err)

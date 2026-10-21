@@ -114,7 +114,10 @@ func liveness(dir string, head *storev1.RunHead) (apiv1.RunLiveness, error) {
 		return 0, err
 	}
 	defer f.Close()
-	err = syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
+	// Writers hold LOCK_EX. Shared probes do not contend with one another, so
+	// concurrent gateway readers cannot be mistaken for a live writer. They also
+	// work with a read-only descriptor on filesystems that emulate flock via fcntl.
+	err = syscall.Flock(int(f.Fd()), syscall.LOCK_SH|syscall.LOCK_NB)
 	if errors.Is(err, syscall.EWOULDBLOCK) || errors.Is(err, syscall.EAGAIN) {
 		return apiv1.RunLiveness_RUN_LIVENESS_ALIVE, nil
 	}

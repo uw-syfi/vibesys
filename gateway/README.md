@@ -78,7 +78,7 @@ is process-local and never writes into a run directory.
 WatchRuns sends every linked run, an initial_complete marker, then replacements
 and removal tombstones by run_id. It watches the index and run directories so
 atomic head replacement is visible. Liveness probes run.lock with a nonblocking
-flock and leaves the persisted head unchanged. A run with an ended lifecycle is
+shared flock probe against the writer's exclusive lock and leaves the persisted head unchanged. A run with an ended lifecycle is
 ended; otherwise a held lock means alive and an unheld lock means interrupted.
 A phase 1 run without a head or lock has unknown liveness. Probes happen on
 subscription and filesystem changes: flock unlock alone has no portable
