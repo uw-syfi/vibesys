@@ -394,11 +394,15 @@ jobs:
           NATIVE_TARGETS: ${{ needs.changes.outputs.native_targets }}
         run: ./support/repoctl/repoctl run-native --targets-json "$NATIVE_TARGETS"
 
+  # Runs on every push to main, not only when the gateway changed: a cache is
+  # readable only from its own ref and the default branch, so the module and build
+  # caches that pull-request and merge-queue runs restore are the ones a passing
+  # main run saved. Without it a merge-queue run always starts cold.
   gateway:
     needs: changes
-    if: needs.changes.outputs.gateway == 'true'
+    if: needs.changes.outputs.gateway == 'true' || github.event_name == 'push'
     runs-on: ubuntu-latest
-    timeout-minutes: 2
+    timeout-minutes: 4
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
