@@ -15,7 +15,7 @@ import (
 // File contents are never polled. Bounded lock probes are the exception: a
 // crashed writer releases flock without any portable filesystem notification.
 func (h *host) WatchRuns(_ *apiv1.WatchRunsRequest, stream apiv1.HostService_WatchRunsServer) error {
-	watch, err := fsnotify.NewWatcher()
+	watch, err := newRunWatcher()
 	if err != nil {
 		return rpcError(err)
 	}
