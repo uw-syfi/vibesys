@@ -217,17 +217,20 @@ def _create_context(
     plugin = registration.plugin
     agent_roles = options.get("agent_roles", plugin.agents)
     ownership = ReleaseStack()
+    integration = options.get("integration")
+    if integration is None:
+        integration = LocalRunIntegration(
+            clock=ManualClock(),
+            git=REAL_GIT,
+            github=NO_GITHUB,
+            threads=SimThreads(),
+            system=idle_environment_system(),
+        )
+    ownership.callback(integration.close)
     try:
         prepared = open_run_resources(
             request,
-            options.get("integration")
-            or LocalRunIntegration(
-                clock=ManualClock(),
-                git=REAL_GIT,
-                github=NO_GITHUB,
-                threads=SimThreads(),
-                system=idle_environment_system(),
-            ),
+            integration,
             ownership=ownership,
             agent_specs=resolve_agent_specs(
                 request.config,
