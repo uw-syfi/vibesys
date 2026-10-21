@@ -6,7 +6,7 @@ from copy import deepcopy
 
 from vs_project.api import StoreFence
 from vs_proto.api import Span, validate
-from vs_runtime._replay_runtime import ReplayAbsent, ReplayResult, ReplayUnresolved
+from vs_runtime._replay_runtime import ReplayAbsent, ReplayPending, ReplayResult, ReplayUnknown
 
 
 class FakeReplayExecutor:
@@ -51,7 +51,7 @@ class FakeReplayExecutor:
 
     async def inspect(
         self, span: Span, fence: StoreFence
-    ) -> ReplayResult | ReplayAbsent | ReplayUnresolved:
+    ) -> ReplayResult | ReplayAbsent | ReplayPending | ReplayUnknown:
         """The run-scoped invocation journal survives a host's disposable runtime."""
         validate(span)
         if fence.epoch < self._epoch:
@@ -66,12 +66,12 @@ class FakeReplayExecutor:
             problem = f"replay invocation payload conflict: {span.id}"
             raise ValueError(problem)
         if not task.done():
-            return ReplayUnresolved("invocation is still running")
+            return ReplayPending()
         if task.cancelled():
-            return ReplayUnresolved("invocation was interrupted without an outcome")
+            return ReplayUnknown("invocation was interrupted without an outcome")
         error = task.exception()
         if error is not None:
-            return ReplayUnresolved(str(error))
+            return ReplayUnknown(f"{type(error).__name__}: {error}")
         return deepcopy(task.result())
 
     @staticmethod

@@ -65,10 +65,11 @@ class ReplayCommitError(RuntimeError):
 class ReplayRecoveryRequiredError(RuntimeError):
     """An unfinished start needs inspection by its owning executor before dispatch."""
 
-    def __init__(self, spans: tuple[Span, ...]) -> None:
-        self.spans = spans
+    def __init__(self, spans: tuple[Span, ...], reasons: tuple[str, ...] = ()) -> None:
+        self.spans, self.reasons = spans, reasons
+        detail = "; ".join(reasons)
         super().__init__(
-            f"reconcile unfinished replay operations: {', '.join(s.id for s in spans)}"
+            f"reconcile unfinished replay operations: {', '.join(s.id for s in spans)}; {detail}"
         )
 
 
@@ -87,8 +88,13 @@ class ReplayAbsent:
 
 
 @dataclass(frozen=True)
-class ReplayUnresolved:
-    """The invocation may still exist. Neither a retry nor an answer is authorized."""
+class ReplayPending:
+    """The owner found the invocation still running. Its eventual result remains inspectable."""
+
+
+@dataclass(frozen=True)
+class ReplayUnknown:
+    """The owner cannot prove completion or absence. Blind redispatch is forbidden."""
 
     reason: str
 
@@ -104,7 +110,7 @@ class ReplayExecutor(Protocol):
 
     async def inspect(
         self, span: Span, fence: StoreFence
-    ) -> ReplayResult | ReplayAbsent | ReplayUnresolved:
+    ) -> ReplayResult | ReplayAbsent | ReplayPending | ReplayUnknown:
         """Classify the exact durable invocation; Unknown must never be reported as absent."""
         ...
 
@@ -454,7 +460,7 @@ class ReplayRuntime:
 
     async def inspect(
         self, span_id: str, executor: ReplayExecutor, *, now: float
-    ) -> ReplayResult | ReplayAbsent | ReplayUnresolved:
+    ) -> ReplayResult | ReplayAbsent | ReplayPending | ReplayUnknown:
         """Inspect under the current fence; the caller timestamps the returned observation."""
         _ = self._active_scheduler
         if self._known_starts or self._fence is None or not self._store.verify(self._fence, now):

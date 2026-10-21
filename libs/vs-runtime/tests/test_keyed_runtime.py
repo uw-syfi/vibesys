@@ -1,5 +1,6 @@
 """Native record prefixes survive interruption at every public recorder boundary."""
 
+import asyncio
 from collections.abc import Callable, Coroutine
 from copy import deepcopy
 
@@ -10,16 +11,20 @@ from protobuf.wkt.google.protobuf.timestamp_pb import Timestamp
 
 from vs_core.api.replay import ReplayCall, ReplayFlow, SemanticKey
 from vs_project.api import CommitFault, FakeStateStore, StoredEnvelope, StoreFence
-from vs_proto.api import EpochStarted, ReplayStore, core_common, replay
+from vs_proto.api import EpochStarted, ReplayStore, Span, core_common, replay
 from vs_runtime.api.replay import (
     REPLAY_STORE_SCHEMA_VERSION,
     FakeReplayExecutor,
+    ReplayAbsent,
     ReplayCommitError,
     ReplayLaunch,
+    ReplayPending,
     ReplayRecoveryRequiredError,
     ReplayResult,
     ReplayRuntime,
+    ReplayUnknown,
 )
+from vs_sim.api.testing import Gate
 
 Reply = core_common.Identity
 Root = Callable[[ReplayFlow], Coroutine[object, object, object]]
@@ -422,4 +427,38 @@ async def test_executor_inspection_ignores_changed_presentation_labels() -> None
     assert await executor.inspect(span, fence) == result
     assert await executor.execute(span, fence) == result
     assert executor.invocations == (span.id,)
+    shell.close(now=0)
+
+
+async def test_executor_inspection_distinguishes_absent_pending_completed_and_unknown() -> None:
+    shell = start(FakeStateStore())
+    (span,) = shell.prepare(now=0, at=AT)
+    fence = StoreFence(host_id="host-a", epoch=1, expires_at=100)
+    entered, released = Gate(), Gate()
+
+    async def perform(span: Span) -> ReplayResult:
+        entered.open()
+        await released.wait()
+        return ReplayResult(Reply(root=span.name), paid=True)
+
+    executor = FakeReplayExecutor(perform)
+    assert await executor.inspect(span, fence) == ReplayAbsent()
+    invocation = asyncio.create_task(executor.execute(span, fence))
+    await entered.wait(invocation)
+    assert await executor.inspect(span, fence) == ReplayPending()
+    released.open()
+    result = await invocation
+    assert await executor.inspect(span, fence) == result
+
+    interrupted = FakeReplayExecutor(perform)
+    # Use a new gate for an invocation that will not produce an outcome.
+    entered, released = Gate(), Gate()
+    invocation = asyncio.create_task(interrupted.execute(span, fence))
+    await entered.wait(invocation)
+    invocation.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await invocation
+    inspection = await interrupted.inspect(span, fence)
+    assert isinstance(inspection, ReplayUnknown)
+    assert inspection.reason
     shell.close(now=0)

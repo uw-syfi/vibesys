@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 
 from protobuf.wkt.google.protobuf.timestamp_pb import Timestamp
 
-from vs_runtime._replay_runtime import ReplayUnresolved
+from vs_runtime._replay_runtime import ReplayPending, ReplayRecoveryRequiredError, ReplayUnknown
 
 if TYPE_CHECKING:
     from vs_proto.api import Span
@@ -129,6 +129,7 @@ class _LiveEpoch:
 
     async def recover(self) -> None:
         shell, clock = self.host.runtime, self.host.clock
+        reasons = []
         for span in shell.recovery:
             inspection = asyncio.create_task(
                 shell.inspect(span.id, self.host.executor, now=clock.now())
@@ -147,11 +148,17 @@ class _LiveEpoch:
                         sleeper.cancel()
                         await asyncio.gather(sleeper, return_exceptions=True)
                 result = inspection.result()
-                if not isinstance(result, ReplayUnresolved):
+                if isinstance(result, ReplayPending):
+                    reasons.append(f"{span.id}: invocation is still pending")
+                elif isinstance(result, ReplayUnknown):
+                    reasons.append(f"{span.id}: unknown: {result.reason}")
+                else:
                     shell.recover(span.id, result, now=clock.now(), at=_at(clock.now()))
             finally:
                 inspection.cancel()
                 await asyncio.gather(inspection, return_exceptions=True)
+        if shell.recovery:
+            raise ReplayRecoveryRequiredError(shell.recovery, tuple(reasons))
         shell.finish_recovery()
         self.wall_origin, self.flow_origin = clock.now(), shell.archive.clock
 

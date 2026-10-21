@@ -14,10 +14,11 @@ from vs_runtime._replay_runtime import (
     ReplayCommitError,
     ReplayExecutor,
     ReplayLaunch,
+    ReplayPending,
     ReplayRecoveryRequiredError,
     ReplayResult,
     ReplayRuntime,
-    ReplayUnresolved,
+    ReplayUnknown,
 )
 
 __all__ = [
@@ -29,12 +30,13 @@ __all__ = [
     "ReplayExecutor",
     "ReplayLaunch",
     "ReplayParked",
+    "ReplayPending",
     "ReplayPrompt",
     "ReplayPromptRenderer",
     "ReplayRecoveryRequiredError",
     "ReplayResult",
     "ReplayRunHost",
     "ReplayRuntime",
-    "ReplayUnresolved",
+    "ReplayUnknown",
     "drive_replay",
 ]
