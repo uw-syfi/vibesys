@@ -438,7 +438,9 @@ def test_process_refreshes_after_relaunch_without_stranding_admitted_messages(
     readers: list[FakeRunReader] = []
     agents: list[FakeManagedAgent] = []
 
-    def open_reader(_request: object) -> FakeRunReader:
+    def open_reader(request: object) -> FakeRunReader:
+        del request
+
         def respond(text: str, _invocation: str | None) -> str:
             if len(readers) == 1:
                 publish(chat, epoch=2)
