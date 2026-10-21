@@ -35,10 +35,9 @@ def test_owner_loop_work_cannot_starve_commit_deadline(tmp_path: Path) -> None:
             for record in declarations():
                 writer.append(record)
             writer.append(event(3))
-            # Advance the public timeline and drive only workers, without yielding
-            # this event loop. The old owner-loop timer cannot run here.
-            threads.advance(1.0)
-            threads.run_until_blocked()
+            # Model synchronous owner-loop work by advancing only the public
+            # timeline, exactly as in the measured reproduction. Do not yield.
+            clock.at += 1.0
             writer.append(event(4))
             assert head(tmp_path) >= 3
 
