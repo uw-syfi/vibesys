@@ -165,10 +165,10 @@ test('Relaunch header action, results and new epoch survive Tail before acknowle
       const world = await openRelaunch(page, state);
       await capture(page, `${state}-${width}-ready`);
       await page.getByRole('button', {name: 'Relaunch', exact: true}).click();
-      await expect(page.getByRole('button', {name: 'Relaunching'})).toBeDisabled();
+      await expect(page.getByRole('button', {name: 'Relaunch', exact: true})).toBeDisabled();
       await capture(page, `${state}-${width}-launching`);
       await newEpoch(page, world.fixture);
-      await expect(page.getByRole('button', {name: 'Relaunching'})).toBeVisible();
+      await expect(page.getByRole('button', {name: 'Relaunch', exact: true})).toBeVisible();
       world.release();
       await expect(page.getByText('Epoch 2', {exact: true})).toBeVisible();
       await capture(page, `${state}-${width}-epoch`);

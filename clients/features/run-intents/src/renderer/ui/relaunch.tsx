@@ -9,7 +9,7 @@ export interface RelaunchView {
 export function RelaunchAction(props: RelaunchView): JSX.Element {
   return (
     <Button
-      text={props.state === 'launching' ? 'Relaunching' : 'Relaunch'}
+      text="Relaunch"
       variant="secondary"
       quietReason
       press={props.launch}
