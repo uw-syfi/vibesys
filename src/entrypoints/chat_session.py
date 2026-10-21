@@ -81,11 +81,7 @@ def serve(request: ChatMessageRequest, runtime: ChatRuntime, readers: RunReaders
     with ExitStack() as owned:
         session = ChatSession(request, runtime)
         owned.callback(session.close)
-        run_request = cli.build_run_request(
-            cli.parse_cli_invocation(
-                ["--project", request.project_root, "--resume", request.run_id]
-            )
-        )
+        run_request = cli.build_reader_request(Path(request.project_root), request.run_id)
         reader = readers(run_request)
         owned.callback(reader.close)
         ready = reader.ready()

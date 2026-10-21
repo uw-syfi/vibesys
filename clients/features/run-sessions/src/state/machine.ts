@@ -14,6 +14,7 @@ export interface ChatContext {
   readonly current: ChatMessageRequest | null;
   readonly error: string | null;
   readonly uncertain: boolean;
+  readonly contentFailed: boolean;
 }
 export type ChatEvent =
   | {readonly type: 'send'; readonly request: ChatMessageRequest}
@@ -40,6 +41,7 @@ export const runSessionsMachine = setup({
     current: null,
     error: null,
     uncertain: false,
+    contentFailed: false,
   }),
   initial: 'routing',
   states: {
@@ -47,7 +49,9 @@ export const runSessionsMachine = setup({
       always: [{guard: ({context}) => context.enabled, target: 'closed'}, {target: 'disabled'}],
     },
     disabled: {},
-    closed: {on: {toggle: 'active'}},
+    closed: {
+      on: {toggle: {target: 'active', actions: assign({contentFailed: false, error: null})}},
+    },
     active: {
       type: 'parallel',
       on: {
@@ -58,9 +62,17 @@ export const runSessionsMachine = setup({
             uncertain: context.current !== null || context.uncertain,
           })),
         },
-        records: {
-          actions: assign(({context, event}) => ({queue: [...context.queue, event.records]})),
-        },
+        records: [
+          {guard: ({context}) => context.contentFailed},
+          {
+            guard: ({context}) => context.queue.length < 64,
+            actions: assign(({context, event}) => ({queue: [...context.queue, event.records]})),
+          },
+          {
+            target: '.content.failed',
+            actions: assign({contentFailed: true, queue: [], error: 'History unavailable'}),
+          },
+        ],
       },
       states: {
         connection: {
@@ -146,14 +158,26 @@ export const runSessionsMachine = setup({
                       queue: context.queue.slice(1),
                     })),
                   },
-                  {target: 'failed', actions: assign({error: 'History unavailable'})},
+                  {
+                    target: 'failed',
+                    actions: assign({contentFailed: true, queue: [], error: 'History unavailable'}),
+                  },
                 ],
                 onError: {
                   target: 'failed',
-                  actions: assign(({event}) => ({error: String(event.error)})),
+                  actions: assign(({event}) => ({
+                    contentFailed: true,
+                    queue: [],
+                    error: String(event.error),
+                  })),
                 },
               },
-              after: {deadline: {target: 'failed', actions: assign({error: 'Unavailable'})}},
+              after: {
+                deadline: {
+                  target: 'failed',
+                  actions: assign({contentFailed: true, queue: [], error: 'Unavailable'}),
+                },
+              },
             },
             failed: {},
           },

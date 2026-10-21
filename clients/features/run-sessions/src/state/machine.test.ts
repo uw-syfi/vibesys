@@ -120,3 +120,20 @@ test('fold replaces streamed tokens with the terminal answer and ignores replay'
   expect(foldChat(final, batch)).toEqual(final);
   expect(() => foldChat(emptyHistory, {...batch, records: records.slice(1)})).toThrow('gap');
 });
+
+test('a stalled content read has a bounded queue and can reopen from its last fold', () => {
+  let snapshot = getNextSnapshot(
+    runSessionsMachine,
+    getInitialSnapshot(runSessionsMachine, {enabled: true}),
+    {type: 'toggle'},
+  );
+  for (let index = 0; index < 200; index++) {
+    snapshot = getNextSnapshot(runSessionsMachine, snapshot, {type: 'records', records: []});
+    expect(snapshot.context.queue.length).toBeLessThanOrEqual(64);
+  }
+  expect(snapshot.context.contentFailed).toBe(true);
+  expect(snapshot.context.queue).toEqual([]);
+  snapshot = getNextSnapshot(runSessionsMachine, snapshot, {type: 'toggle'});
+  snapshot = getNextSnapshot(runSessionsMachine, snapshot, {type: 'toggle'});
+  expect(snapshot.context.contentFailed).toBe(false);
+});

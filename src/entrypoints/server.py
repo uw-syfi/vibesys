@@ -275,7 +275,7 @@ def _chat_reader_opener(
         return None
 
     def open_reader() -> RunReader:
-        request = cli.build_run_request(cli.parse_cli_invocation(["--resume", run_id]))
+        request = cli.build_reader_request(Path.cwd(), run_id)
         return run_readers(request)
 
     return open_reader
