@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, cast
@@ -235,19 +236,25 @@ def _restore_evolve_objectives(
     return []
 
 
-def _restore_descriptor_options(
-    args: argparse.Namespace, manifest: OrchestrationRunManifest, *, loop_kind: str
-) -> None:
-    """Restore omitted flags from the single active descriptor format."""
+def _recorded_loop(manifest: OrchestrationRunManifest) -> tuple[str, str | None]:
+    """The CLI strategy selection corresponding to one validated saved descriptor."""
     descriptor = manifest.orchestration
     try:
-        recorded_loop, inner_loop = _POLICY_CLI_SELECTION[descriptor.id]
+        return _POLICY_CLI_SELECTION[descriptor.id]
     except KeyError:
         _configuration_error(
             f"The CLI cannot resume orchestration {descriptor.id!r}",
             code="project_resume_configuration_invalid",
             stage="resume_resolution",
         )
+
+
+def _restore_descriptor_options(
+    args: argparse.Namespace, manifest: OrchestrationRunManifest, *, loop_kind: str
+) -> None:
+    """Restore omitted flags from the single active descriptor format."""
+    descriptor = manifest.orchestration
+    recorded_loop, inner_loop = _recorded_loop(manifest)
     if recorded_loop != loop_kind:
         _configuration_error(
             f"Run uses --outer-loop {recorded_loop}, not {loop_kind}",
@@ -326,9 +333,17 @@ def _requested_resume(args: argparse.Namespace, *, direct: bool) -> str | None:
     return None if args.run_id is None else str(args.run_id)
 
 
-def _resolve_resume_args(args: argparse.Namespace, *, loop_kind: str) -> None:
+@dataclass(frozen=True)
+class _ResumeSelection:
+    project_root: Path
+    run_id: str
+    manifest: OrchestrationRunManifest
+
+
+def _load_resume_selection(args: argparse.Namespace) -> _ResumeSelection | None:
+    """Read saved identity and settings once, before choosing a strategy parser."""
     if args.resume is None:
-        return
+        return None
     if args.repo is not None:
         _configuration_error(
             "--repo creates a remote for a new experiment and cannot be combined with --resume",
@@ -375,6 +390,19 @@ def _resolve_resume_args(args: argparse.Namespace, *, loop_kind: str) -> None:
     # Refuse a run that cannot go on where its reference is resolved, so every entrypoint (the
     # detached launcher included, which spawns its server before any request is built) says why.
     ensure_resumable(project_root, run_id)
+    return _ResumeSelection(project_root, run_id, manifest)
+
+
+def _resolve_resume_args(
+    args: argparse.Namespace,
+    *,
+    loop_kind: str,
+    selection: _ResumeSelection | None = None,
+) -> None:
+    selected = selection or _load_resume_selection(args)
+    if selected is None:
+        return
+    project_root, run_id, manifest = selected.project_root, selected.run_id, selected.manifest
     args.resume = run_id
     args.run_id = run_id
     args.exp_name = run_id
