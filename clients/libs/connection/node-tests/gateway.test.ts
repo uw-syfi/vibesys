@@ -249,7 +249,7 @@ test('closing the bridge cancels calls waiting on settings and live Tail calls',
   fake.close();
 });
 
-for (const fault of ['malformed protobuf', 'consumer failure'] as const) {
+for (const fault of ['malformed protobuf', 'schema violation', 'consumer failure'] as const) {
   test(`${fault} fails a Tail call without reconnecting a healthy host`, {
     timeout: 15000,
   }, async () => {
@@ -263,9 +263,15 @@ for (const fault of ['malformed protobuf', 'consumer failure'] as const) {
       .catch(error => String(error));
     try {
       const tail = await fake.nextTail();
-      tail.send(fault === 'malformed protobuf' ? new Uint8Array([255]) : response(1n));
+      tail.send(
+        fault === 'malformed protobuf'
+          ? new Uint8Array([255])
+          : fault === 'schema violation'
+            ? toBinary(TailResponseSchema, create(TailResponseSchema, {throughSeq: 1n}))
+            : response(1n),
+      );
       expect(await result).toContain(
-        fault === 'malformed protobuf' ? 'invalid Tail response' : 'consumer failed',
+        fault === 'consumer failure' ? 'consumer failed' : 'invalid Tail response',
       );
       expect(fake.forces).toEqual([false]);
       expect(clock.pendingDelays()).toEqual([]);
@@ -285,12 +291,18 @@ for (const [method, deadline] of [
     const clock = new FakeClock();
     const connection = new GatewayConnection(fake, clock.schedule);
     const request = create(HostCallRequestSchema, {
+      checkout: '/checkout',
       method:
         method === 'relaunch'
           ? {case: 'relaunch', value: {projectRoot: '/project', runId: 'run-a', expectedEpoch: 1n}}
           : {
               case: 'postIntent',
-              value: {projectRoot: '/project', runId: 'run-a', requestId: 'id-a'},
+              value: {
+                projectRoot: '/project',
+                runId: 'run-a',
+                requestId: 'id-a',
+                intent: {case: 'pause', value: {}},
+              },
             },
     });
     const pending = connection

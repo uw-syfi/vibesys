@@ -132,7 +132,7 @@ func Serve(ctx context.Context, listener net.Listener, config Config) error {
 	if config.Clock == nil {
 		config.Clock = SystemClock{}
 	}
-	server := grpc.NewServer(grpc.MaxSendMsgSize(maxMessageBytes))
+	server := grpc.NewServer(grpc.MaxSendMsgSize(maxMessageBytes), grpc.UnaryInterceptor(validateUnary), grpc.StreamInterceptor(validateStream))
 	apiv1.RegisterHostServiceServer(server, &host{config: config})
 	stop := context.AfterFunc(ctx, server.Stop)
 	defer stop()

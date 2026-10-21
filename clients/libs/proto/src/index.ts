@@ -4,6 +4,7 @@ export {descriptorRegistry} from './descriptor-registry.js';
 export {RUN_LOG_MAGIC, RUN_LOG_MAX_RECORD_BYTES} from './generated/framing.js';
 export * from './generated/vibesys/api/v1/host_call_pb.js';
 export {
+  BlobResultSchema,
   GetBlobsRequestSchema,
   GetBlobsResponseSchema,
   type HelloRequest,
@@ -46,3 +47,4 @@ export * from './generated/vibesys/store/v1/skeleton_pb.js';
 export * from './generated/vibesys/store/v1/span_pb.js';
 export * from './generated/vibesys/store/v1/transcript_pb.js';
 export {API_SCHEMA_HASH, STORE_SCHEMA_HASH, schemaHash} from './schema-hashes.js';
+export {validatedFromBinary, validateHostPayload} from './validation.js';

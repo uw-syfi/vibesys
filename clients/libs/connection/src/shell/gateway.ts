@@ -10,6 +10,8 @@ import {
   HostService,
   TailRequestSchema,
   TailResponseSchema,
+  validatedFromBinary,
+  validateHostPayload,
 } from '@vibesys/proto';
 import {registerAbort, type ScheduleTimeout} from '@vibesys/transport';
 import {createActor, fromPromise} from 'xstate';
@@ -122,6 +124,11 @@ export class GatewayConnection {
     if (this.#closed || this.#actor.getSnapshot().status === 'done')
       return Promise.reject(new Error('gateway closed'));
     if (signal.aborted) return Promise.reject(signal.reason);
+    try {
+      validateHostPayload(method, 'input', bytes);
+    } catch (error) {
+      return Promise.reject(error);
+    }
     return new Promise((resolve, reject) => {
       let detach = (): void => {};
       const call: LiveCall = {
@@ -193,7 +200,7 @@ function unaryDeadline(method: string, bytes: Uint8Array): number {
 }
 
 async function hello(session: GatewaySession, signal: AbortSignal): Promise<void> {
-  const response = fromBinary(
+  const response = validatedFromBinary(
     HelloResponseSchema,
     await session.unary(
       HELLO_METHOD,
@@ -237,16 +244,18 @@ async function openSession(
 /** Validate before publishing, then advance only after the consumer accepts the complete batch. */
 function acceptResponse(call: LiveCall, bytes: Uint8Array): void {
   let resumed: Uint8Array | undefined;
-  if (call.method === TAIL_METHOD) {
-    try {
+  try {
+    validateHostPayload(call.method, 'output', bytes);
+    if (call.method === TAIL_METHOD) {
       const response = fromBinary(TailResponseSchema, bytes);
       const request = fromBinary(TailRequestSchema, call.bytes);
       if (response.throughSeq < request.fromSeq)
         throw new Error('sequence precedes requested cursor');
       resumed = toBinary(TailRequestSchema, {...request, fromSeq: response.throughSeq + 1n});
-    } catch (cause) {
-      throw new GrpcError(15, `invalid Tail response: ${String(cause)}`);
     }
+  } catch (cause) {
+    const name = call.method.split('/').at(-1);
+    throw new GrpcError(15, `invalid ${name} response: ${String(cause)}`);
   }
   try {
     call.receive(bytes);

@@ -103,7 +103,7 @@ export class FakeGateway implements GatewayDialer {
       grpcFrame(
         toBinary(
           HelloResponseSchema,
-          create(HelloResponseSchema, {apiSchemaHash: this.schemaHash}),
+          create(HelloResponseSchema, {apiSchemaHash: this.schemaHash, gatewayVersion: 'test'}),
         ),
       ),
     );

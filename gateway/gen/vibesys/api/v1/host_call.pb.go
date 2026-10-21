@@ -7,7 +7,7 @@
 package apiv1
 
 import (
-	_ "github.com/uw-syfi/vibesys/gateway/gen/buf/validate"
+	_ "buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go/buf/validate"
 	v1 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
