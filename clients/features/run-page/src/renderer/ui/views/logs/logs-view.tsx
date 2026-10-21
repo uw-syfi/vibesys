@@ -118,9 +118,13 @@ export function LogsView(props: LogsViewProps): JSX.Element {
   );
   const logs = scopedLogs(state, scope, ideas);
   const {shown} = logs;
-  if (logs.notice !== null) return <EmptyState title="No logs to show" body={logs.notice} />;
+  if (logs.notice !== null)
+    return <EmptyState title="No logs to show" body={props.emptyLabelsOnly ? '' : logs.notice} />;
   const stream = logs.streams.find(item => item.id === shown);
-  if (stream === undefined) return <EmptyState title="No logs to show" body="Choose a stream." />;
+  if (stream === undefined)
+    return (
+      <EmptyState title="No logs to show" body={props.emptyLabelsOnly ? '' : 'Choose a stream.'} />
+    );
   const pane = (
     <LogPane
       key={stream.id}

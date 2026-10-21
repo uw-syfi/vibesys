@@ -63,6 +63,7 @@ import {sameRun} from '@vibesys/runs';
 import type {Store} from '@vibesys/store';
 import {applyTheme, Card, EmptyState, Page, type ThemeTarget, WindowFrame} from '@vibesys/ui';
 import {type JSX, useEffect, useMemo, useState, useSyncExternalStore} from 'react';
+import {GatewayRun} from './gateway-run.js';
 import {RunWithChat} from './run-chat.js';
 import {runCounts, runInput} from './shell-runs.js';
 
@@ -279,22 +280,59 @@ function RunRoute(props: {
   const project =
     recent?.project ??
     (record.kind === 'live' || record.kind === 'ended' ? record.run.projectRoot : '');
-  const seed = {
-    identity: run,
-    title: {project, task: recent?.task ?? null},
-    hostLabel: hostLabel(hostFromKey(run.host)),
-    unavailable: place.unavailable,
-  };
-  const navigation = place.navigation(run);
+  const unavailableWindow = place.unavailable['open-window'];
+  const seed = useMemo(
+    () => ({
+      identity: {host: run.host, runId: run.runId},
+      title: {project, task: recent?.task ?? null},
+      hostLabel: hostLabel(hostFromKey(run.host)),
+      unavailable: unavailableWindow === undefined ? {} : {'open-window': unavailableWindow},
+    }),
+    [run.host, run.runId, project, recent?.task, unavailableWindow],
+  );
+  const gateway = typeof window === 'undefined' ? undefined : window.vibesysGateway;
+  const legacy = (toggle?: import('react').ReactNode) => (
+    <LegacyRunRoute
+      seed={seed}
+      record={record}
+      stores={stores}
+      place={place}
+      supplemental={toggle}
+    />
+  );
+  return gateway === undefined ? (
+    legacy()
+  ) : (
+    <GatewayRun
+      key={`${run.host}/${run.runId}`}
+      seed={seed}
+      bridge={gateway}
+      settings={stores.bridge}
+      schedule={stores.schedule}
+      address={stores.page.address}
+      legacy={legacy}
+    />
+  );
+}
+
+function LegacyRunRoute(props: {
+  readonly seed: import('@vibesys/feature-run-page/state').RunPageSeed;
+  readonly record: import('@vibesys/feature-run-page/state').RunRecord;
+  readonly stores: ShellStores;
+  readonly place: RunPlace;
+  readonly supplemental?: import('react').ReactNode;
+}): JSX.Element {
+  const {seed, record, stores, place} = props;
+  const run = seed.identity;
   const page = useRunPage({
     seed,
     record,
     bridge: stores.bridge,
-    navigation,
+    navigation: place.navigation(run),
     schedule: stores.schedule,
     page: stores.page,
   });
-  if (page === null) {
+  if (page === null)
     return (
       <Page>
         <Card>
@@ -302,8 +340,9 @@ function RunRoute(props: {
         </Card>
       </Page>
     );
-  }
-  return <RunWithChat page={page} run={run} bridge={stores.bridge} schedule={stores.schedule} />;
+  return (
+    <RunWithChat page={page} run={run} bridge={stores.bridge} supplemental={props.supplemental} />
+  );
 }
 
 /** The unfinished New run the dashboard offers, or null when there is not one. */

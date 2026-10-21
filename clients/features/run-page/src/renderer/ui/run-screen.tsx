@@ -170,6 +170,7 @@ function Header(props: {
   readonly names: ModelNames;
   readonly dispatch: Dispatch;
   readonly chat: RunChatSlot | undefined;
+  readonly toolbar?: ReactNode;
 }): JSX.Element {
   const {state, dispatch, chat} = props;
   const header = headerView(state, props.names);
@@ -192,6 +193,7 @@ function Header(props: {
         <RunFacts header={header} />
       </Stack>
       <Row gap="space-2">
+        {props.toolbar}
         {chat === undefined ? null : (
           <Button
             variant={chat.open ? 'primary' : 'secondary'}
@@ -226,7 +228,9 @@ function Header(props: {
             {...reason(header.stop)}
           />
         ) : null}
-        <Menu icon="more" label="More actions" variant="quiet" align="end" items={items} />
+        {state.readOnly === true ? null : (
+          <Menu icon="more" label="More actions" variant="quiet" align="end" items={items} />
+        )}
       </Row>
     </Row>
   );
@@ -237,6 +241,7 @@ function StopBanner(props: {
   readonly dispatch: Dispatch;
 }): JSX.Element | null {
   const {state, dispatch} = props;
+  if (state.readOnly === true) return null;
   const banner = stopBannerView(state);
   if (banner.kind === 'none') return null;
   if (banner.kind === 'confirm') {
@@ -340,6 +345,12 @@ function EndedBanner(props: {
   const ended = endedView(state);
   // The header already says Finished. Logs and Run again remain in the run controls.
   if (ended === null || ended.title === 'Finished') return null;
+  if (state.readOnly === true) {
+    const reason = state.record.kind === 'ended' ? state.record.run.reason : null;
+    return reason ? (
+      <Banner tone={ended.tone} title={state.lifecycleWord ?? ended.title} body={reason} />
+    ) : null;
+  }
   return (
     <Banner
       tone={ended.tone}
@@ -456,10 +467,8 @@ function pendingRunScreen(
   dispatch: Dispatch,
   zoom: Zoom,
   route: Route,
-  chat: RunChatSlot | undefined,
-  names: ModelNames,
+  header: ReactNode,
 ): JSX.Element | null {
-  const header = <Header state={state} names={names} dispatch={dispatch} chat={chat} />;
   if (state.record.kind === 'unlisted') {
     const blocked = machineBlockWords(state);
     const unplaced = unplacedRun(state);
@@ -539,6 +548,7 @@ export function RunScreen(props: {
   /** The host's names for the run's models; absent or without a model: its id shows. */
   readonly modelNames?: ModelNames;
   /** App-owned run diagnostics, in the page’s scrolling body. */
+  readonly toolbar?: ReactNode;
   readonly supplemental?: ReactNode;
 }): JSX.Element {
   const {chat, ...rest} = props;
@@ -546,6 +556,28 @@ export function RunScreen(props: {
     <Dock label="Chat" side={chat?.open === true ? chat.panel : null}>
       <RunScreenBody {...rest} chat={chat} />
     </Dock>
+  );
+}
+
+function RunHeader(
+  props: Parameters<typeof Header>[0] & {readonly scrubber: boolean},
+): JSX.Element {
+  const {scrubber, ...header} = props;
+  const {state, dispatch} = props;
+  return (
+    <Stack gap="space-2">
+      <Header {...header} />
+      {scrubber ? (
+        <RunScrubber
+          log={state.run.trace}
+          view={state.view}
+          ended={runHasEnded(state)}
+          wall={runWallNow(state)}
+          position={state.positionWord}
+          change={view => dispatch({type: 'view', view})}
+        />
+      ) : null}
+    </Stack>
   );
 }
 
@@ -561,11 +593,13 @@ function RunScreenBody(props: {
   readonly chat: RunChatSlot | undefined;
   readonly modelNames?: ModelNames;
   /** App-owned run diagnostics, in the page’s scrolling body. */
+  readonly toolbar?: ReactNode;
   readonly supplemental?: ReactNode;
 }): JSX.Element {
   const {state, model, route, zoom, dispatch} = props;
   const names = props.modelNames ?? NO_MODEL_NAMES;
   const base: ViewBase = {
+    emptyLabelsOnly: state.readOnly === true,
     names,
     model,
     // The run's own start, read from the whole run: a scrubbed model before its first span has no
@@ -575,7 +609,19 @@ function RunScreenBody(props: {
     who: whoBySpan(usageRecords(state), names),
     zoom,
   };
-  const pending = pendingRunScreen(state, dispatch, zoom, route, props.chat, names);
+  const pending = pendingRunScreen(
+    state,
+    dispatch,
+    zoom,
+    route,
+    <Header
+      state={state}
+      names={names}
+      dispatch={dispatch}
+      chat={props.chat}
+      toolbar={props.toolbar}
+    />,
+  );
   if (pending !== null) return pending;
   const problem = historyProblem(state);
   const transcript = transcriptLoading(state);
@@ -600,18 +646,14 @@ function RunScreenBody(props: {
     <Screen
       density="compact"
       header={
-        <Stack gap="space-2">
-          <Header state={state} names={names} dispatch={dispatch} chat={props.chat} />
-          {traceArrival(state) === 'arrived' && before === null ? (
-            <RunScrubber
-              log={state.run.trace}
-              view={state.view}
-              ended={runHasEnded(state)}
-              wall={runWallNow(state)}
-              change={view => dispatch({type: 'view', view})}
-            />
-          ) : null}
-        </Stack>
+        <RunHeader
+          state={state}
+          names={names}
+          dispatch={dispatch}
+          chat={props.chat}
+          toolbar={props.toolbar}
+          scrubber={traceArrival(state) === 'arrived' && before === null}
+        />
       }
     >
       <StopBanner state={state} dispatch={dispatch} />

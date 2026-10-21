@@ -8,6 +8,7 @@ import {API_SCHEMA_HASH as apiHash} from '@vibesys/proto';
 
 const root = fileURLToPath(new URL('../../../../', import.meta.url));
 const gateway = join(root, 'gateway');
+const buildFlags = ['-trimpath', '-ldflags', '-s -w'];
 const output = join(root, 'clients/apps/desktop-main/dist/gateway', apiHash.slice(0, 16));
 
 async function sources(directory) {
@@ -27,7 +28,7 @@ if (version.error?.code === 'ENOENT') {
   console.warn('Gateway resources skipped: Go is absent. Run transport v2 must remain off; install Go and rebuild before enabling it.');
 } else {
   if (version.status !== 0) throw new Error(version.stderr || 'go version failed');
-  const digest = createHash('sha256').update(version.stdout).update(apiHash);
+  const digest = createHash('sha256').update(version.stdout).update(apiHash).update(JSON.stringify(buildFlags));
   for (const source of await sources(gateway)) digest.update(source);
   const fingerprint = digest.digest('hex');
   await mkdir(output, {recursive: true});
@@ -42,7 +43,7 @@ if (version.error?.code === 'ENOENT') {
     if (cached) continue;
     const [GOOS, GOARCH] = target.split('-');
     console.info(`Building gateway ${target} (${apiHash.slice(0, 16)})`);
-    const result = spawnSync('go', ['build', '-trimpath', '-o', `${binary}.tmp`, './cmd/vibesysd'], {
+    const result = spawnSync('go', ['build', ...buildFlags, '-o', `${binary}.tmp`, './cmd/vibesysd'], {
       cwd: gateway, env: {...process.env, CGO_ENABLED: '0', GOOS, GOARCH}, stdio: 'inherit',
     });
     if (result.status !== 0) throw new Error(`gateway build failed: ${target}`);

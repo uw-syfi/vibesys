@@ -915,6 +915,7 @@ export const STRICT_WORKSPACE_IMPORTS = {
   '@vibesys/store': null,
   '@vibesys/machine': null,
   '@vibesys/run-state': null,
+  '@vibesys/run-skeleton': null,
   '@vibesys/run-session': null,
   '@vibesys/run-history': null,
   '@vibesys/transport': null,

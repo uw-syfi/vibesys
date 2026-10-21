@@ -41,7 +41,10 @@ function RunTimeline(props: ViewBase): JSX.Element {
   const shown = timelineRows(model, range, clock, expanded);
   if (shown.total === 0) {
     return (
-      <EmptyState title="No ideas yet" body="Each idea the run tries shows on the timeline." />
+      <EmptyState
+        title="No ideas yet"
+        body={props.emptyLabelsOnly ? '' : 'Each idea the run tries shows on the timeline.'}
+      />
     );
   }
   const open = (row: TimelineRow): void => {

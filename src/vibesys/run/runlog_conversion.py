@@ -11,12 +11,13 @@ from typing import TYPE_CHECKING
 from vibesys.events import CoreEvent, CoreEventType
 from vs_decode.api import Unreadable, decode_json
 from vs_proto.api import RUN_LOG_MAX_RECORD_BYTES, Timestamp
-from vs_runlog.api import LegacyRunLogTee, RunLogReader, RunLogStopReason
+from vs_runlog.api import FileRunLogWriter, LegacyRunLogTee, RunLogReader, RunLogStopReason
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
     from vs_project.api import Project
+    from vs_sim.api import SleepingClock, Threads
 
 
 class RunLogConversionError(ValueError):
@@ -63,7 +64,9 @@ def _already_complete(path: Path) -> bool:
     return reader.stop.reason is RunLogStopReason.END
 
 
-def convert_run(project: Project, run_id: str) -> ConversionResult:
+def convert_run(
+    project: Project, run_id: str, *, clock: SleepingClock, threads: Threads
+) -> ConversionResult:
     """Atomically convert a quiescent run with trace events, preserving JSON verbatim.
 
     Callers stop the run before converting. A complete destination is left byte
@@ -93,7 +96,9 @@ def convert_run(project: Project, run_id: str) -> ConversionResult:
     at = Timestamp.from_datetime(first.timestamp)
     with TemporaryDirectory(prefix=".convert-run-", dir=destination.parent) as temporary:
         staged = Path(temporary) / "run.log"
-        with LegacyRunLogTee(staged, run_id, lambda: at) as tee:
+        with LegacyRunLogTee(
+            FileRunLogWriter(staged, clock=clock, threads=threads), run_id, lambda: at
+        ) as tee:
             for line, event in _events(journal):
                 at = Timestamp.from_datetime(event.timestamp)
                 tee.append(line)

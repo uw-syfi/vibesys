@@ -27,6 +27,7 @@ interface RunClock {
 
 /** What every view gets. */
 export interface ViewBase {
+  readonly emptyLabelsOnly?: boolean;
   readonly model: RunModel;
   readonly clock: RunClock;
   /** The tokens the run's turns spent, by turn span (empty before any turn finished). */

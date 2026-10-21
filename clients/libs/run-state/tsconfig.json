@@ -33,6 +33,9 @@
     },
     {
       "path": "./tsconfig.records.json"
+    },
+    {
+      "path": "./tsconfig.skeleton.json"
     }
   ]
 }

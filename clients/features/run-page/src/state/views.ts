@@ -19,6 +19,7 @@ import {
   quotaPause,
   type RunPageState,
   runPhase,
+  type StageView,
   type StopFlow,
   type Unavailable,
 } from './run-page.js';
@@ -139,24 +140,34 @@ export function headerView(state: RunPageState, names: ModelNames = NO_MODEL_NAM
   return {
     title: task === null ? name : `${name} · ${task}`,
     subtitle: `${state.hostLabel} · ${state.identity.runId}`,
-    status: status(state),
+    status: {
+      ...status(state),
+      ...(state.lifecycleWord === undefined ? {} : {label: state.lifecycleWord}),
+    },
     // Tokens counted over a prefix of the history are not what the run spent.
     spent: historyLoading(state) === null ? tokensReading(state.run.core?.tokens.total) : null,
     agents: roleAgents(usageRecords(state), names).map(each => ({
       role: each.role,
       ran: each.ran.flatMap(who => whoWords(who) ?? []),
     })),
-    pause: offer(phase.kind === 'running' && !phase.pausing, commandReason(state)),
+    pause: offer(
+      state.readOnly !== true && phase.kind === 'running' && !phase.pausing,
+      commandReason(state),
+    ),
     // A run paused by a usage limit is resumed from its banner, which also offers to wait.
-    resume: offer(phase.kind === 'paused' && phase.by === 'user', commandReason(state)),
+    resume: offer(
+      state.readOnly !== true && phase.kind === 'paused' && phase.by === 'user',
+      commandReason(state),
+    ),
     // Stop stays while its confirmation is open, unavailable, so the header does not lose a control.
     stop: offer(
-      (phase.kind === 'starting' || phase.kind === 'running' || phase.kind === 'paused') &&
+      state.readOnly !== true &&
+        (phase.kind === 'starting' || phase.kind === 'running' || phase.kind === 'paused') &&
         (state.stop.kind === 'idle' || state.stop.kind === 'confirming'),
       state.stop.kind === 'confirming' ? 'Confirm or cancel in the banner below' : undefined,
     ),
     openWindow: offer(true, unavailable['open-window']),
-    archive: offer(phase.kind === 'ended'),
+    archive: offer(state.readOnly !== true && phase.kind === 'ended'),
   };
 }
 
@@ -255,15 +266,6 @@ export function stopBannerView(state: RunPageState): StopBannerView {
   };
 }
 
-/** One startup stage of the timeline, in `Timeline`'s terms. */
-export interface StageView {
-  readonly id: string;
-  readonly state: 'done' | 'active' | 'waiting' | 'failed';
-  readonly label: string;
-  /** The stream whose lines the stage's body shows, when it wrote one. */
-  readonly streamId: string | null;
-}
-
 const STAGES = [
   {id: 'building_image', label: 'Building the agent image'},
   {id: 'starting_container', label: 'Starting the agent container'},
@@ -287,6 +289,7 @@ function streamState(stream: LogStream | undefined, starting: boolean): StageVie
 
 /** The startup timeline: resolving, then each startup step the run's logs record. */
 export function timelineView(state: RunPageState): readonly StageView[] {
+  if (state.startupStages !== undefined) return state.startupStages;
   const starting = runPhase(state).kind === 'starting';
   const streams = streamsOf(state);
   const stages: StageView[] = STAGES.map(stage => {

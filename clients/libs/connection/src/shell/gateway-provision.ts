@@ -1,11 +1,16 @@
 /** Artifact verification and atomic installation over the existing SSH command channel. */
 import {createHash, randomUUID} from 'node:crypto';
 import {readFile} from 'node:fs/promises';
-import {Duplex} from 'node:stream';
+import {Duplex, type Writable} from 'node:stream';
+import {promisify} from 'node:util';
+import {gzip} from 'node:zlib';
 import {API_SCHEMA_HASH} from '@vibesys/proto';
 import {registerAbort, type ScheduleTimeout} from '@vibesys/transport';
+import {GATEWAY_COMMAND_TIMEOUT_MS, GATEWAY_UPLOAD_TIMEOUT_MS} from '../state/gateway.js';
 import type {SshLink} from './link.js';
 import {retireProcess, type SpawnedProcess} from './process.js';
+
+const compress = promisify(gzip);
 
 export type GatewayTarget = 'linux-amd64' | 'linux-arm64' | 'darwin-arm64';
 export const GATEWAY_DIRECTORY = `.vibesys/gateway/${API_SCHEMA_HASH.slice(0, 16)}`;
@@ -33,18 +38,20 @@ export async function provisionGateway(
   const bytes = await artifact(target);
   const digest = createHash('sha256').update(bytes).digest('hex');
   const binary = `"$HOME/${GATEWAY_DIRECTORY}/vibesysd"`;
-  const matches =
-    `[ -f ${binary} ] && [ "$(wc -c < ${binary} | tr -d ' ')" = '${bytes.length}' ] && ` +
-    `[ "$(if command -v sha256sum >/dev/null 2>&1; then sha256sum ${binary}; else shasum -a 256 ${binary}; fi | cut -d ' ' -f 1)" = '${digest}' ]`;
-  if (!force && (await run(`if ${matches}; then printf match; fi`)) === 'match') return;
+  const matches = (path: string) =>
+    `[ -f ${path} ] && [ "$(wc -c < ${path} | tr -d ' ')" = '${bytes.length}' ] && ` +
+    `[ "$(if command -v sha256sum >/dev/null 2>&1; then sha256sum ${path}; else shasum -a 256 ${path}; fi | cut -d ' ' -f 1)" = '${digest}' ]`;
+  if (!force && (await run(`if ${matches(binary)}; then printf match; fi`)) === 'match') return;
   const temporary = `"$HOME/${GATEWAY_DIRECTORY}/.vibesysd-${randomUUID()}"`;
   await run(
     `umask 077; mkdir -p "$HOME/${GATEWAY_DIRECTORY}" && ` +
       `trap 'rm -f ${temporary}' EXIT HUP INT TERM; ` +
-      `cat > ${temporary} && chmod 700 ${temporary} && mv -f ${temporary} ${binary}`,
-    bytes,
+      `command -v gzip >/dev/null 2>&1 || { printf 'gateway provisioning requires gzip\\n' >&2; exit 1; }; ` +
+      `gzip -dc > ${temporary} && ${matches(temporary)} && ` +
+      `chmod 700 ${temporary} && mv -f ${temporary} ${binary}`,
+    await compress(bytes),
   );
-  if ((await run(`if ${matches}; then printf match; fi`)) !== 'match') {
+  if ((await run(`if ${matches(binary)}; then printf match; fi`)) !== 'match') {
     throw new Error(`gateway artifact verification failed for ${target}`);
   }
 }
@@ -89,10 +96,12 @@ function command(
     let settled = false;
     let cancel = (): void => {};
     let detach = (): void => {};
+    let cancelInput = (): void => {};
     const finish = (error?: unknown): void => {
       if (settled) return;
       settled = true;
       cancel();
+      cancelInput();
       detach();
       if (error !== undefined) {
         void retireProcess(process, schedule).outcome;
@@ -120,8 +129,53 @@ function command(
     detach = registration.detach;
     if (registration.aborted) finish(new Error('cancelled'));
     if (!settled) {
-      cancel = schedule(() => finish(new Error('gateway command timed out')), 30_000);
-      process.stdin.end(input);
+      cancel = schedule(
+        () => finish(new Error('gateway command timed out')),
+        input === undefined ? GATEWAY_COMMAND_TIMEOUT_MS : GATEWAY_UPLOAD_TIMEOUT_MS,
+      );
+      if (input === undefined) process.stdin.end();
+      else cancelInput = upload(process.stdin, input, schedule, finish);
     }
   });
+}
+
+// Pace cold uploads conservatively: bursts can reset SSH jump connections.
+const UPLOAD_BYTES_PER_SECOND = 512 * 1024;
+const UPLOAD_CHUNK_BYTES = 32 * 1024;
+
+/** One outstanding write at a time: pipe backpressure can only make the transfer slower. */
+function upload(
+  stdin: Writable,
+  bytes: Uint8Array,
+  schedule: ScheduleTimeout,
+  failed: (error: unknown) => void,
+): () => void {
+  let offset = 0;
+  let cancelled = false;
+  let cancel = (): void => {};
+  const next = (): void => {
+    if (cancelled) return;
+    if (offset === bytes.length) {
+      stdin.end();
+      return;
+    }
+    const chunk = bytes.subarray(offset, offset + UPLOAD_CHUNK_BYTES);
+    cancel = schedule(
+      () => {
+        if (cancelled) return;
+        offset += chunk.length;
+        stdin.write(chunk, error => {
+          if (error) failed(error);
+          else next();
+        });
+      },
+      // Node truncates fractional timer delays; round up to preserve the rate cap.
+      Math.ceil((1000 * chunk.length) / UPLOAD_BYTES_PER_SECOND),
+    );
+  };
+  next();
+  return () => {
+    cancelled = true;
+    cancel();
+  };
 }

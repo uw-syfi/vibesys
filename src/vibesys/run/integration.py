@@ -74,7 +74,7 @@ if TYPE_CHECKING:
         RunEnvironmentSession,
     )
     from vs_sandbox.api import HostResource
-    from vs_sim.api import Clock, Threads
+    from vs_sim.api import Clock, SleepingClock, Threads
 
 
 def run_log_emitter(events: AgentEventSink) -> Callable[[str, TextIO], None]:
@@ -670,7 +670,7 @@ class LocalRunIntegration:
         git_repository: GitRepositoryFactory | None = None,
         state_stores: StateStoreFactory | None = None,
         *,
-        clock: Clock,
+        clock: SleepingClock,
         git: Git,
         github: GitHubCLI,
         threads: Threads,

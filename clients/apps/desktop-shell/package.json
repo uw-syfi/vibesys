@@ -39,7 +39,8 @@
     "@vibesys/ui": "workspace:*",
     "react": "19.1.1",
     "react-dom": "19.1.1",
-    "@vibesys/feature-gateway-records": "workspace:*"
+    "@vibesys/machine": "workspace:*",
+    "@vibesys/run-skeleton": "workspace:*"
   },
   "devDependencies": {
     "@axe-core/playwright": "4.10.2",

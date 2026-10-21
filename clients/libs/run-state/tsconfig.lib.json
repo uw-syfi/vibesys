@@ -22,7 +22,8 @@
     "src/candidates/**",
     "src/agents/**",
     "src/usage/**",
-    "src/records/**"
+    "src/records/**",
+    "src/skeleton/**"
   ],
   "references": [
     {

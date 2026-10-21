@@ -171,7 +171,13 @@ function TurnBody(props: StepViewProps): JSX.Element {
   if (narrative.blocks.length === 0) {
     return (
       <EmptyState
-        title={LIVE.has(step.status) ? 'Waiting for the agent' : 'Nothing recorded for this step'}
+        title={
+          props.emptyLabelsOnly
+            ? 'No transcript'
+            : LIVE.has(step.status)
+              ? 'Waiting for the agent'
+              : 'Nothing recorded for this step'
+        }
       />
     );
   }

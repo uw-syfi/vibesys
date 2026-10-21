@@ -2,6 +2,11 @@
 import {unprovided} from '@vibesys/machine';
 import {assign, setup} from 'xstate';
 
+// Cold provisioning may transfer a multi-megabyte artifact before Hello can begin.
+export const GATEWAY_COMMAND_TIMEOUT_MS = 30_000;
+export const GATEWAY_UPLOAD_TIMEOUT_MS = 90_000;
+const GATEWAY_DIAL_TIMEOUT_MS = GATEWAY_UPLOAD_TIMEOUT_MS + 3 * GATEWAY_COMMAND_TIMEOUT_MS;
+
 export const gatewayMachine = setup({
   types: {
     context: {} as {attempt: number; error: string},
@@ -11,7 +16,10 @@ export const gatewayMachine = setup({
     dial: unprovided<{ok: true} | {ok: false; fatal: boolean; error: string}>('gateway dial'),
   },
   actions: {connected: () => {}, disconnected: () => {}},
-  delays: {backoff: ({context}) => Math.min(250 * 2 ** context.attempt, 4_000)},
+  delays: {
+    dialDeadline: GATEWAY_DIAL_TIMEOUT_MS,
+    backoff: ({context}) => Math.min(250 * 2 ** context.attempt, 4_000),
+  },
 }).createMachine({
   id: 'gateway',
   initial: 'dialing',
@@ -39,7 +47,7 @@ export const gatewayMachine = setup({
           actions: assign({error: ({event}) => String(event.error)}),
         },
       },
-      after: {30000: {target: 'failed', actions: assign({error: 'gateway dial timed out'})}},
+      after: {dialDeadline: {target: 'failed', actions: assign({error: 'gateway dial timed out'})}},
     },
     ready: {entry: [assign({attempt: 0}), 'connected'], exit: 'disconnected', on: {lost: 'failed'}},
     failed: {

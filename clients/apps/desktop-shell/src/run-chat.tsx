@@ -1,4 +1,3 @@
-import {GatewayRecords} from '@vibesys/feature-gateway-records/renderer';
 /**
  * The Run screen with its chat: composition of the run page and the run chat, which are peers.
  * The chat reaches the run through the page's attached session (`page.chat`) and the host's
@@ -9,7 +8,7 @@ import {RunScreen, type useRunPage} from '@vibesys/feature-run-page/renderer';
 import {ideaOfAttempt, runHasEnded} from '@vibesys/feature-run-page/state';
 import {settled, type WelcomeBridge} from '@vibesys/ipc';
 import type {RunRef} from '@vibesys/runs';
-import {type JSX, useEffect, useMemo, useState} from 'react';
+import {type JSX, type ReactNode, useEffect, useMemo, useState} from 'react';
 
 type RunPageView = NonNullable<ReturnType<typeof useRunPage>>;
 
@@ -66,7 +65,7 @@ export function RunWithChat(props: {
   readonly page: RunPageView;
   readonly run: RunRef;
   readonly bridge: WelcomeBridge;
-  readonly schedule: (callback: () => void, delayMs: number) => () => void;
+  readonly supplemental?: ReactNode;
 }): JSX.Element {
   const {page, run, bridge} = props;
   const ports = useMemo(() => chatPorts(page.chat, bridge, run), [page.chat, bridge, run]);
@@ -89,7 +88,6 @@ export function RunWithChat(props: {
   }, [dispatch, chat.open]);
   const unsupported =
     ended && (chatsEnded?.reads === false || page.state.reader.link.kind === 'unsupported');
-  const gateway = typeof window === 'undefined' ? undefined : window.vibesysGateway;
   return (
     <RunScreen
       state={page.state}
@@ -106,18 +104,7 @@ export function RunWithChat(props: {
         panel: chat.panel === null ? null : <ChatPanel {...chat.panel} />,
         ...(unsupported ? {unavailable: NEEDS_UPDATE} : {}),
       }}
-      supplemental={
-        gateway === undefined ? null : (
-          <GatewayRecords
-            key={`${run.host}/${run.runId}`}
-            bridge={gateway}
-            schedule={props.schedule}
-            settings={bridge}
-            host={run.host}
-            runId={run.runId}
-          />
-        )
-      }
+      supplemental={props.supplemental}
     />
   );
 }

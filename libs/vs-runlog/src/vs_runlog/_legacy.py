@@ -12,14 +12,13 @@ from vs_proto.api import (
     Oneof,
     Record,
 )
-from vs_runlog._file import FileRunLogWriter
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-    from pathlib import Path
     from types import TracebackType
 
     from vs_proto.api import Timestamp
+    from vs_runlog._file import FileRunLogWriter
 
 
 class LegacyRunLogTee:
@@ -27,15 +26,19 @@ class LegacyRunLogTee:
 
     def __init__(
         self,
-        path: Path,
+        writer: FileRunLogWriter,
         run_id: str,
         timestamp: Callable[[], Timestamp],
         *,
         tree_hash: str = "",
         dirty: bool = False,
     ) -> None:
-        """Recover the file and commit this process's epoch header."""
-        self._writer = FileRunLogWriter(path)
+        """Own ``writer`` and commit this process's epoch header.
+
+        The caller configures the writer's clock and owning event loop before
+        handing it to the tee. The tee closes it on every exit.
+        """
+        self._writer = writer
         self._epoch = self._writer.epoch + 1
         self._timestamp = timestamp
         try:
@@ -78,6 +81,10 @@ class LegacyRunLogTee:
         except BaseException:
             self.close()
             raise
+
+    def commit(self) -> None:
+        """Durably commit the pending legacy suffix at an explicit run boundary."""
+        self._writer.commit()
 
     def close(self) -> None:
         """Release this epoch's append handle."""

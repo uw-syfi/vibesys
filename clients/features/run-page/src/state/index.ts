@@ -8,6 +8,13 @@
 export type {UsageRecord} from '@vibesys/contracts/host-helper';
 export {ideaOfAttempt} from './attempt-ideas.js';
 export {type BaselineColumns, baselineColumns} from './baselines.js';
+export {
+  type GatewayEvent,
+  type GatewayInput,
+  type GatewayLogInput,
+  type GatewayRunContext,
+  gatewayRunMachine,
+} from './gateway-machine.js';
 export {type HistoryLoadingView, historyLoadingView} from './history-words.js';
 export {type IdeaBase, type IdeaBases, ideaBases} from './idea-bases.js';
 export {effectWords, type IdeaEffect, type IdeaEffects, ideaEffects} from './idea-effects.js';
@@ -94,6 +101,7 @@ export {
 } from './run-page.js';
 export {type SummaryReply, summaryFacts, type WireSummary} from './run-summary.js';
 export {scrubberView, viewAtPosition} from './scrub.js';
+export {projectSkeleton, skeletonPositions, skeletonScreenState} from './skeleton-projection.js';
 export {spendOf, tokensByAgent, turnTokens} from './token-usage.js';
 export {
   type TokensCell,
