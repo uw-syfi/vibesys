@@ -29,8 +29,6 @@ from vs_sim.api.testing import FakeProcesses, ManualClock, ProcessScript, SimThr
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from vs_sim.api import ProcessSpec
-
 
 def test_current_round_event_requires_explicit_profile_outcome() -> None:
     with pytest.raises(ValidationError, match="profile_skipped"):
@@ -237,77 +235,29 @@ def test_tee_initialization_failure_is_additive(
     assert sum("tee disabled" in record.message for record in caplog.records) == 1
 
 
-@pytest.mark.parametrize("dirty", [False, True])
-def test_epoch_records_checkout_provenance_at_attachment(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    *,
-    dirty: bool,
+def test_attachment_records_unknown_provenance_without_checkout_processes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("VIBESYS_STATE_HOME", str(tmp_path / "home"))
     root = tmp_path / "project"
     root.mkdir()
-    checkout = tmp_path / "checkout"
-    checkout.mkdir()
-    (checkout / ".git").mkdir()
     project = Project.open(root)
-    tree_hash = "ab" * 20
-
-    def script(spec: ProcessSpec) -> ProcessScript:
-        assert not (tmp_path / "home/runs/run-1").exists()
-        if spec.argv[1:] == ("rev-parse", "HEAD^{tree}"):
-            return ProcessScript(stdout=f"{tree_hash}\n".encode())
-        assert spec.argv[1:] == (
-            "status",
-            "--porcelain",
-            "--untracked-files=normal",
-            "--ignore-submodules=none",
+    clock = ManualClock()
+    processes = FakeProcesses(lambda _: ProcessScript(), pass_time=clock.advance)
+    integration = LocalRunIntegration(
+        clock=clock,
+        git=Git(processes),
+        github=NO_GITHUB,
+        threads=SimThreads(),
+        system=idle_environment_system(),
+    )
+    try:
+        integration.attach(
+            Project.log_directory_for(root, "run-1"), project=project, run_id="run-1"
         )
-        return ProcessScript(stdout=b"?? new.py\n" if dirty else b"")
-
-    clock = ManualClock()
-    processes = FakeProcesses(script, pass_time=clock.advance)
-    journal = EventJournal(clock, SimThreads())
-    journal.enable_runlog(project, "run-1", git=Git(processes), checkout_root=checkout)
-    journal.enable_runlog(project, "run-1", git=Git(processes), checkout_root=checkout)
-    journal.close()
-    with Project.run_log_path_for(root, "run-1").open("rb") as stream:
-        header = next(iter(RunLogReader(stream))).body
-    assert header is not None
-    assert header.field == "epoch_started"
-    assert header.value.tree_hash == tree_hash
-    assert header.value.dirty is dirty
-    assert len(processes.ran) == 2
-
-
-@pytest.mark.parametrize("failure_stage", ["tree", "status"])
-@pytest.mark.parametrize("script", [ProcessScript(returncode=1), ProcessScript(duration_s=1)])
-def test_unavailable_checkout_metadata_does_not_disable_the_tee(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    script: ProcessScript,
-    failure_stage: str,
-) -> None:
-    monkeypatch.setenv("VIBESYS_STATE_HOME", str(tmp_path / "home"))
-    root = tmp_path / "project"
-    root.mkdir()
-    checkout = tmp_path / "checkout"
-    checkout.mkdir()
-    (checkout / ".git").mkdir()
-    project = Project.open(root)
-    clock = ManualClock()
-
-    def probe(spec: ProcessSpec) -> ProcessScript:
-        if failure_stage == "status" and spec.argv[1:] == ("rev-parse", "HEAD^{tree}"):
-            return ProcessScript(stdout=("ab" * 20).encode())
-        return script
-
-    processes = FakeProcesses(probe, pass_time=clock.advance)
-    journal = EventJournal(clock, SimThreads())
-    journal.enable_runlog(project, "run-1", git=Git(processes), checkout_root=checkout)
-    journal.attach(Project.log_directory_for(root, "run-1"), "run-1")
-    journal.emit(CoreEventType.RUN_STARTED)
-    journal.close()
+        integration.events.emit(CoreEventType.RUN_STARTED)
+    finally:
+        integration.close()
     with Project.run_log_path_for(root, "run-1").open("rb") as stream:
         records = list(RunLogReader(stream))
     assert len(records) == 2
@@ -316,3 +266,4 @@ def test_unavailable_checkout_metadata_does_not_disable_the_tee(
     assert header.field == "epoch_started"
     assert header.value.tree_hash == ""
     assert header.value.dirty is False
+    assert processes.ran == []
