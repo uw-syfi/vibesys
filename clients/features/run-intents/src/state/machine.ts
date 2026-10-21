@@ -78,7 +78,7 @@ export const runIntentsMachine = setup({
       invoke: {
         id: 'watch',
         src: 'watch',
-        onError: {actions: {type: 'fail', params: ({event}) => ({error: String(event.error)})}},
+        onError: {actions: assign(({event}) => ({error: String(event.error)}))},
       },
       on: {
         outcomes: {actions: 'apply'},

@@ -6,6 +6,9 @@ shell's new Run screen composition, beside the Run screen rather than inside
 
 - `bridge`: `window.vibesysGateway`, the existing generic unary/stream bridge.
 - `host`, `runId`, and `projectRoot`: the selected run and its project directory.
+  In the current shell, `page.state.record.run.projectRoot` is available when
+  the record is `live` or `ended`. Pass that host path without expanding it on
+  the laptop.
 - `enabled`: the host's `runTransportV2` setting.
 - `schedule`: the shell's injected timeout scheduler.
 

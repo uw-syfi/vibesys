@@ -51,7 +51,7 @@ func (h *host) HostCall(ctx context.Context, request *apiv1.HostCallRequest) (*a
 		return hostFailure("invalid_host_response", "vibesys host post-intent returned invalid protobuf", result.ExitCode, result.Stderr), nil
 	}
 	if failure := response.GetConfigurationFailed(); failure != nil {
-		failure.Stderr = safeDiagnostic(result.Stderr)
+		failure.Stderr = safeDiagnostic(strings.TrimSpace(failure.Stderr + "\n" + result.Stderr))
 	} else if response.GetPostIntent().GetRequestId() != request.GetPostIntent().GetRequestId() {
 		return hostFailure("invalid_host_response", "vibesys host post-intent returned a different request_id", result.ExitCode, result.Stderr), nil
 	}

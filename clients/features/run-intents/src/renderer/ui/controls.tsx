@@ -2,6 +2,25 @@ import {Button, Card, Field, Row, Stack, Text, TextInput} from '@vibesys/ui';
 import type {JSX} from 'react';
 import type {IntentEntry} from '../../state/index.js';
 
+const ACTION_LABELS: Record<NonNullable<IntentEntry['request']['intent']['case']>, string> = {
+  pause: 'Pause',
+  park: 'Park',
+  resume: 'Resume',
+  stop: 'Stop',
+  steer: 'Guidance',
+  withdraw: 'Withdraw guidance',
+  cancelAttempt: 'Cancel attempt',
+  cancelItem: 'Cancel item',
+  setParallelism: 'Change parallelism',
+};
+const STATUS_LABELS: Record<IntentEntry['status'], string> = {
+  sending: 'Sending',
+  pending: 'Pending',
+  applied: 'Applied',
+  refused: 'Refused',
+  uncertain: 'Not confirmed',
+};
+
 export function IntentControls(props: {
   readonly busy: boolean;
   readonly entries: readonly IntentEntry[];
@@ -19,6 +38,7 @@ export function IntentControls(props: {
           {(['pause', 'resume', 'stop'] as const).map(action => (
             <Button
               key={action}
+              quietReason
               {...(props.busy ? {disabledReason: 'Sending a request'} : {})}
               press={() => props.send(action)}
               text={action === 'pause' ? 'Pause' : action === 'resume' ? 'Resume' : 'Stop'}
@@ -36,12 +56,17 @@ export function IntentControls(props: {
           text="Send guidance"
         />
         <Text tone="muted">Requests stay pending until the run records their outcome.</Text>
-        {props.error ? <Text tone="err">{props.error}</Text> : null}
+        {props.error ? (
+          <Text tone="err" title={props.error}>
+            Request updates unavailable
+          </Text>
+        ) : null}
         {props.entries.map(entry => (
           <Stack key={entry.request.requestId} gap="space-1">
-            <Text>
-              {entry.request.intent.case}: {entry.status}
-              {entry.reason ? `: ${entry.reason}` : ''}
+            <Text {...(entry.reason ? {title: entry.reason} : {})}>
+              {entry.request.intent.case ? ACTION_LABELS[entry.request.intent.case] : 'Request'}:{' '}
+              {STATUS_LABELS[entry.status]}
+              {entry.status === 'refused' && entry.reason ? `: ${entry.reason}` : ''}
             </Text>
             {entry.status === 'uncertain' ? (
               <Button

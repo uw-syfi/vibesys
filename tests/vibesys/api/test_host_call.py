@@ -14,7 +14,8 @@ from hypothesis import strategies as st
 from entrypoints.host import main
 from vibesys.api import CONTROL_REQUEST
 from vibesys.api.host import host_call
-from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord
+from vs_core.api import RunResultProposal, RunStatus, initial_state
+from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord, StoredEnvelope
 from vs_project.api.testing import run_execution_record
 from vs_proto.api import (
     CancelAttemptIntent,
@@ -45,7 +46,9 @@ if TYPE_CHECKING:
 
 
 @pytest.fixture
-def project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Project, str]:
+def project(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest
+) -> tuple[Project, str]:
     monkeypatch.setenv("VIBESYS_STATE_HOME", str(tmp_path / "state-home"))
     root = tmp_path / "project"
     root.mkdir()
@@ -64,7 +67,8 @@ def project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Project, s
     project.state.create_run(manifest)
     with project.state.exclusive_run_host(manifest.run_id):
         pass
-    project.state.control_inbox(manifest.run_id).serve()
+    if getattr(request, "param", True):
+        project.state.control_inbox(manifest.run_id).serve()
     return project, manifest.run_id
 
 
@@ -177,6 +181,7 @@ def test_arbitrary_input_has_a_typed_result(payload: bytes) -> None:
     assert response.result.field == "configuration_failed"
 
 
+@pytest.mark.parametrize("project", [False], indirect=True)
 def test_no_ordered_reader_is_reported_without_claiming_application(
     project: tuple[Project, str],
 ) -> None:
@@ -184,6 +189,7 @@ def test_no_ordered_reader_is_reported_without_claiming_application(
     response = call(owner, run_id, Oneof("pause", PauseIntent()))
     assert response.result is not None
     assert response.result.field == "post_intent"
+    assert not response.result.value.ordered_reader
     assert owner.state.control_inbox(run_id).pending()
 
 
@@ -218,3 +224,45 @@ def test_oversized_input_has_a_typed_failure() -> None:
     assert response.result is not None
     assert response.result.field == "configuration_failed"
     assert response.result.value.code == "request_too_large"
+
+
+def test_ended_run_refuses_new_requests_but_accepts_an_applied_retry(
+    project: tuple[Project, str],
+) -> None:
+    owner, run_id = project
+    call(owner, run_id, Oneof("pause", PauseIntent()))
+    inbox = owner.state.control_inbox(run_id)
+    inbox.settle("r-1")
+    core = initial_state()
+    ended = core.model_copy(
+        update={
+            "run": core.run.model_copy(
+                update={
+                    "status": RunStatus.TERMINAL,
+                    "result": RunResultProposal(outcome="cancelled", reason="stopped: by request"),
+                }
+            )
+        }
+    )
+    store = owner.state_store(run_id)
+    fence = store.acquire("writer", now=0, duration=1)
+    assert fence is not None
+    store.commit(
+        None,
+        StoredEnvelope(
+            revision=0,
+            schema_version=1,
+            payload=json.dumps({"envelope": {"core": ended.model_dump(mode="json")}}).encode(),
+        ),
+        fence,
+        now=0,
+    )
+    accepted = call(owner, run_id, Oneof("pause", PauseIntent()))
+    assert accepted.result is not None
+    assert accepted.result.field == "post_intent"
+    refused = call(owner, run_id, Oneof("resume", ResumeIntent(when=ResumeWhen.NOW)), "new")
+    assert refused.result is not None
+    assert refused.result.field == "configuration_failed"
+    assert refused.result.value.code == "inbox_closed"
+    assert refused.result.value.exit_code == 3
+    assert inbox.status("new", ended="stopped") is None

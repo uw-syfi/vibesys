@@ -89,3 +89,21 @@ test('model: requests are unique and operations and deadlines are owned', () => 
         : ['duplicate request'],
   });
 });
+
+test('an outcome stream failure does not change an in-flight admission', () => {
+  const sending = getNextSnapshot(
+    runIntentsMachine,
+    getInitialSnapshot(runIntentsMachine, {enabled: true}),
+    {type: 'send', request},
+  );
+  const disconnected = getNextSnapshot(runIntentsMachine, sending, {
+    type: 'xstate.error.actor.watch',
+    error: new Error('stream failed'),
+  } as never);
+  expect(disconnected.context.entries[0]?.status).toBe('sending');
+  const admitted = getNextSnapshot(runIntentsMachine, disconnected, {
+    type: 'xstate.done.actor.post',
+    output: create(PostIntentResponseSchema, {requestId: 'r-1'}),
+  } as never);
+  expect(admitted.context.entries[0]?.status).toBe('pending');
+});
