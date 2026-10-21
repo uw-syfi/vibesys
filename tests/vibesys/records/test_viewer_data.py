@@ -161,6 +161,7 @@ def test_metric_and_span_durations_match_legacy_clock(events: list[e.CoreEvent])
     for raw in legacy.state().spans:
         source = e.SpanEndedData.model_validate({"span": raw}).span
         mapped = spans[source.id]
+        assert source.ended_at is not None
         assert mapped.started_at == pytest.approx(source.started_at - origin)
         assert mapped.ended_at == pytest.approx(source.ended_at - origin)
         assert mapped.ended_at - mapped.started_at == pytest.approx(
@@ -182,10 +183,16 @@ def test_metric_and_span_durations_match_legacy_clock(events: list[e.CoreEvent])
 def test_final_turn_models_match_legacy_fold(events: list[e.CoreEvent]) -> None:
     spans, _, legacy = project(events)
     for record in legacy.records:
+        assert record.span_id is not None
         span = spans[record.span_id]
+        assert span.label is not None
+        assert span.label.attrs is not None
         attrs = p.AgentTurnAttrs.from_binary(span.label.attrs.value)
         assert attrs.model == record.model
         assert attrs.provider == record.harness
+        assert attrs.usage is not None
+        assert attrs.started_at is not None
+        assert attrs.ended_at is not None
         assert attrs.usage.duration_ms == record.duration_ms
         assert attrs.started_at.to_datetime() == record.started_at
         assert attrs.ended_at.to_datetime() == record.ended_at
@@ -215,7 +222,9 @@ def test_gate_enrichment_retains_command_and_runtime_label(command: str) -> None
     gate = next(
         event.data.span
         for event in observations
-        if isinstance(event.data, e.SpanEndedData) and event.data.span.label.kind == "gate"
+        if isinstance(event.data, e.SpanEndedData)
+        and event.data.span.label is not None
+        and event.data.span.label.kind == "gate"
     )
     state = MappingState("run-a", wall_span_clock=True, clock_epochs=((1792599885, 0),))
     for event in observations:
@@ -237,6 +246,8 @@ def test_gate_enrichment_retains_command_and_runtime_label(command: str) -> None
         )
         state = map_event(state, event).state
     mapped = p.Span.from_binary(dict(state.spans)[gate.id])
+    assert mapped.label is not None
+    assert mapped.label.attrs is not None
     attrs = p.GateAttrs.from_binary(mapped.label.attrs.value)
     assert attrs.command == command
     assert mapped.ended_at == 4
