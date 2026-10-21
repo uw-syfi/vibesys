@@ -721,3 +721,37 @@ async function writeExternalPackage(root, name) {
   );
   await writeFile(join(packageDirectory, 'index.js'), 'export {};\n');
 }
+
+test('external package export maps resolve public subpaths and reject private ones', async t => {
+  const root = await scratchDirectory(t, 'vibesys-export-maps-');
+  await writeFile(join(root, 'tsconfig.json'), '{}');
+  const packageRoot = join(root, 'node_modules', 'exported-package');
+  await mkdir(packageRoot, {recursive: true});
+  await writeFile(
+    join(packageRoot, 'package.json'),
+    JSON.stringify({
+      name: 'exported-package',
+      type: 'module',
+      exports: {'./public': {import: {types: './public.d.ts', default: './public.js'}}},
+    }),
+  );
+  await writeFile(join(packageRoot, 'public.d.ts'), 'export declare const value: number;');
+  await writeFile(join(packageRoot, 'public.js'), 'export const value = 1;');
+  await writeFile(join(packageRoot, 'private.js'), 'export const secret = 2;');
+  await writeSource(
+    root,
+    'libs/proto',
+    'index.ts',
+    "import 'exported-package/public';\nimport 'exported-package/private';\n",
+  );
+  const options = await extractDepcruiseOptions(CONFIG);
+  const result = await cruise(['libs/proto/src'], {
+    ...options,
+    baseDir: root,
+    tsConfig: {fileName: join(root, 'tsconfig.json')},
+  });
+  const missing = result.output.summary.violations
+    .filter(violation => violation.rule.name === 'no-unresolvable-imports')
+    .map(violation => violation.to);
+  assert.deepEqual(missing, ['exported-package/private']);
+});

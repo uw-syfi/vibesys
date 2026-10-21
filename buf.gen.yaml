@@ -1,0 +1,22 @@
+version: v2
+clean: true
+inputs:
+  - directory: proto
+managed:
+  enabled: true
+  override:
+    - file_option: go_package
+      path: buf/validate/validate.proto
+      value: github.com/uw-syfi/vibesys/gateway/gen/buf/validate
+plugins:
+  - local: protoc-gen-py
+    out: libs/vs-proto/src/vs_proto/_generated
+  - local: clients/node_modules/.bin/protoc-gen-es
+    out: clients/libs/proto/src/generated
+    opt: [target=ts, import_extension=js]
+  - local: [go, run, google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.11]
+    out: gateway/gen
+    opt: paths=source_relative
+  - local: [go, run, google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.6.1]
+    out: gateway/gen
+    opt: paths=source_relative

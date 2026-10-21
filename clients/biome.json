@@ -17,7 +17,8 @@
       "libs/ui/src/**/*.css",
       "!libs/ui/src/tokens.css",
       "!**/dist",
-      "!libs/contracts/src/generated"
+      "!libs/contracts/src/generated",
+      "!libs/proto/src/generated"
     ]
   },
   "css": {

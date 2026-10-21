@@ -290,6 +290,7 @@ export default {
     preserveSymlinks: true,
     tsPreCompilationDeps: true,
     enhancedResolveOptions: {
+      exportsFields: ['exports'],
       conditionNames: ['types', 'import', 'node', 'default'],
       extensions: ['.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs', '.d.ts', '.json'],
     },

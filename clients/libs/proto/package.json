@@ -1,0 +1,34 @@
+{
+  "name": "@vibesys/proto",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "vibesys": {
+    "layer": "foundation",
+    "entries": {
+      ".": "neutral"
+    }
+  },
+  "exports": {
+    ".": {
+      "@vibesys/source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "!dist/.*.tsbuildinfo"
+  ],
+  "scripts": {
+    "build": "tsc -b tsconfig.lib.json",
+    "check": "tsc -b",
+    "test": "tsc -b"
+  },
+  "dependencies": {
+    "@bufbuild/protobuf": "2.16.0"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3"
+  }
+}

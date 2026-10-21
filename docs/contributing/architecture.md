@@ -132,6 +132,7 @@ Submodules such as `vibesys.orchestration` and `server.api` are collapsed into t
 
 ```mermaid
 graph TD
+    vs_proto
     entrypoints --> headless
     entrypoints --> launch
     entrypoints --> server

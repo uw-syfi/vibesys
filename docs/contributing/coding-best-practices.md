@@ -168,6 +168,8 @@ and the waiver becomes an error once it is no longer needed.
 | Parameters | ruff `PLR0913`, max 5 | biome `complexity/useMaxParams`, max 6 |
 | File length | `scripts/check_file_length.py`, 2,000 lines | biome `style/noExcessiveLinesPerFile`, warn at 1,500 and fail at 2,000 production lines; fail at 10,000 test lines |
 
+Generated output directories declared in `tool.vibesys.file_length.generated` are excluded; the `proto` regenerate-and-diff check guards the generated contracts instead.
+
 Python test files are exempt from the two length rules. TypeScript test files are
 exempt from function length and use the higher file cap above. Tests are still
 held to the complexity and parameter rules.

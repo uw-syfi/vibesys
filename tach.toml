@@ -62,6 +62,7 @@ source_roots = [
     "libs/vs-sim/src",
     "libs/vs-dst/src",
     "libs/vs-logs/src",
+    "libs/vs-proto/src",
 ]
 exclude = ["**/tests", "**/__pycache__", "docs", "examples", "sdk", "resources", "build", "dist", ".venv"]
 # Also freeze imports that exist only under TYPE_CHECKING.
@@ -1911,3 +1912,11 @@ depends_on = ["vs_core._proofs", "vs_core._session_rows", "vs_core._session_scop
 [[interfaces]]
 from = ["vs_core._session_checkpoints"]
 expose = ["advance", "checkpoint_matches", "turn_source_matches"]
+
+[[modules]]
+path = "vs_proto"
+depends_on = []
+
+[[interfaces]]
+from = ["vs_proto"]
+expose = ["api", "api\\..*"]

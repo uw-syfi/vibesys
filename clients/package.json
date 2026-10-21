@@ -26,6 +26,7 @@
     "knip": "6.37.0",
     "turbo": "2.11.4",
     "typescript": "5.9.3",
-    "vite": "7.1.5"
+    "vite": "7.1.5",
+    "@bufbuild/protoc-gen-es": "2.16.0"
   }
 }
