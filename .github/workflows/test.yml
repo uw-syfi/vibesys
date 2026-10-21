@@ -700,6 +700,7 @@ jobs:
           for iteration in range(3):
               for index,nodes in enumerate(sequences):
                   print("ORDER REPLAY", iteration, index + 1, flush=True)
+                  nodes = [*nodes, "tests/e2e/test_foreground_run_sigterm.py::test_sigterm_whose_first_wake_is_discarded_by_gc_still_interrupts_the_run"]
                   subprocess.run([sys.executable,"-m","pytest","-p","no:randomly","-v",*nodes],check=True)
           PYREPLAY
 

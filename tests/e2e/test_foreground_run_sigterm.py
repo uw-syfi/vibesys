@@ -51,6 +51,13 @@ def test_sigterm_taken_by_any_thread_interrupts_the_foreground_run(
 
 
 @requires_tgkill
+def test_sigterm_whose_first_wake_is_discarded_by_gc_still_interrupts_the_run() -> None:
+    cleanups, ended = run_in_child(partial(interrupted_run, 1, 0, discard_wake_in_gc=True))
+    assert ended == "interrupted"
+    assert cleanups == [True]
+
+
+@requires_tgkill
 def test_sigterm_taken_by_a_transport_thread_stops_the_real_server_process() -> None:
     """The one subprocess case: the real entrypoint process, signalled from outside."""
     child = subprocess.Popen(
