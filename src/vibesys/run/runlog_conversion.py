@@ -11,7 +11,13 @@ from typing import TYPE_CHECKING
 from vibesys.events import CoreEvent, CoreEventType
 from vibesys.run.runlog_tee import JOURNAL_EVENT_MAX_BYTES, RunLogTee
 from vs_decode.api import Unreadable, decode_json
-from vs_runlog.api import FileRunContent, FileRunLogWriter, RunLogReader, RunLogStopReason
+from vs_runlog.api import (
+    FileRunContent,
+    FileRunLogWriter,
+    RunLogReader,
+    RunLogStopReason,
+    install_run_log,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -56,12 +62,18 @@ def _already_complete(path: Path) -> bool:
     with path.open("rb") as stream:
         reader = RunLogReader(stream)
         legacy = False
+        typed = False
         for record in reader:
-            legacy |= record.body is not None and record.body.field == "legacy_event"
+            body = record.body
+            legacy |= body is not None and body.field == "legacy_event"
+            typed |= body is not None and (
+                body.field not in {"legacy_event", "epoch_started"}
+                or (body.field == "epoch_started" and body.value.run is not None)
+            )
     if reader.stop.reason is RunLogStopReason.CORRUPTION:
         message = f"corrupt run.log at byte {reader.stop.offset}: {reader.stop.detail}"
         raise ValueError(message)
-    return reader.stop.reason is RunLogStopReason.END and not legacy
+    return reader.stop.reason is RunLogStopReason.END and not legacy and typed
 
 
 def convert_run(project: Project, run_id: str) -> ConversionResult:
@@ -100,6 +112,6 @@ def convert_run(project: Project, run_id: str) -> ConversionResult:
         with RunLogTee(FileRunLogWriter(staged), content, run_id) as tee:
             for line, _ in _events(journal):
                 tee.append(line)
-        staged.replace(destination)
+        install_run_log(staged, destination)
     project.publish_run_for(project.root, run_id)
     return ConversionResult(ConversionStatus.CONVERTED, "converted journal to run.log")

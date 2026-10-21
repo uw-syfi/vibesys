@@ -32,3 +32,4 @@ export {
 } from './generated/vibesys/store/v1/record_pb.js';
 export * from './generated/vibesys/store/v1/skeleton_pb.js';
 export * from './generated/vibesys/store/v1/span_pb.js';
+export * from './generated/vibesys/store/v1/transcript_pb.js';

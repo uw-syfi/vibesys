@@ -14,7 +14,7 @@ from vibesys.events import AgentOutputChunkData, CoreEventType, RunStartedData, 
 from vibesys.run import EventJournal
 from vs_core.api import Span, SpanStatus, SpanType
 from vs_project.api import Project
-from vs_proto.api import RUN_LOG_MAGIC, LegacyEvent, Oneof, Record
+from vs_proto.api import RUN_LOG_MAGIC, EpochStarted, Keyframe, LegacyEvent, Oneof, Record, RunHead
 from vs_runlog.api import FileRunLogWriter, RunLogReader
 from vs_sim.api.testing import ManualClock, SimThreads
 
@@ -66,6 +66,12 @@ def test_conversion_preserves_source_and_timestamps_and_is_idempotent(
     assert convert_run(project, "run-1").status is ConversionStatus.CONVERTED
     destination = Project.run_log_path_for(project.root, "run-1")
     converted = destination.read_bytes()
+    head = RunHead.from_binary((destination.parent / "run.head").read_bytes())
+    keyframe = Keyframe.from_binary(
+        (destination.parent / "keyframes" / f"{head.committed_seq}.pb").read_bytes()
+    )
+    assert keyframe.through_seq == head.committed_seq
+    assert keyframe.log_offset == len(converted)
     with destination.open("rb") as stream:
         records = list(RunLogReader(stream))
     assert [record.seq for record in records] == [1, 2, 3]
@@ -86,6 +92,9 @@ def test_conversion_preserves_source_and_timestamps_and_is_idempotent(
     assert sorted(path.name for path in destination.parent.iterdir()) == [
         "blobs",
         "core-events.jsonl",
+        "keyframes",
+        "run.head",
+        "run.lock",
         "run.log",
     ]
 
@@ -149,7 +158,8 @@ def test_conversion_upgrades_legacy_records_and_externalizes_large_content(
     )
     destination = Project.run_log_path_for(project.root, "run-1")
     with FileRunLogWriter(destination) as writer:
-        writer.append(Record(seq=1, epoch=1, body=Oneof("legacy_event", LegacyEvent(json="old"))))
+        writer.append(Record(seq=1, epoch=1, body=Oneof("epoch_started", EpochStarted())))
+        writer.append(Record(seq=2, epoch=1, body=Oneof("legacy_event", LegacyEvent(json="old"))))
     original = Project.event_journal_path_for(project.root, "run-1").read_bytes()
     assert convert_run(project, "run-1").status is ConversionStatus.CONVERTED
     with destination.open("rb") as stream:
@@ -167,3 +177,19 @@ def test_conversion_upgrades_legacy_records_and_externalizes_large_content(
     assert path.read_bytes() == content.encode()
     assert Project.event_journal_path_for(project.root, "run-1").read_bytes() == original
     assert convert_run(project, "run-1").status is ConversionStatus.EXISTS
+
+
+@pytest.mark.parametrize("empty_header", [False, True])
+def test_conversion_repairs_a_tee_with_no_event_records(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, empty_header: bool
+) -> None:
+    project, journal = journal_at(tmp_path, monkeypatch)
+    record_trace(journal)
+    destination = Project.run_log_path_for(project.root, "run-1")
+    with FileRunLogWriter(destination) as writer:
+        if empty_header:
+            writer.append(Record(seq=1, epoch=1, body=Oneof("epoch_started", EpochStarted())))
+    assert convert_run(project, "run-1").status is ConversionStatus.CONVERTED
+    with destination.open("rb") as stream:
+        records = list(RunLogReader(stream))
+    assert any(record.body is not None and record.body.field == "span" for record in records)

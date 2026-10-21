@@ -179,6 +179,35 @@ class FileRunLogWriter:
         self.close()
 
 
+def install_run_log(staged: Path, destination: Path) -> None:
+    """Install a quiescent conversion with its head and keyframes.
+
+    The staged log lives in a disposable sibling directory. The authoritative
+    JSONL source is untouched; old derived keyframes must not survive a rewrite.
+    """
+    if staged.parent == destination.parent:
+        message = "staged run.log needs a separate disposable directory"
+        raise ValueError(message)
+    lock = RunLock(destination.parent / "run.lock")
+    try:
+        keyframes = destination.parent / "keyframes"
+        if keyframes.exists():
+            keyframes.replace(staged.parent / "previous-keyframes")
+        staged.replace(destination)
+        staged_keyframes = staged.parent / "keyframes"
+        if staged_keyframes.exists():
+            staged_keyframes.replace(keyframes)
+        head = destination.parent / "run.head"
+        staged_head = staged.parent / "run.head"
+        if staged_head.exists():
+            staged_head.replace(head)
+        else:
+            head.unlink(missing_ok=True)
+        sync_directory(destination.parent)
+    finally:
+        lock.close()
+
+
 def _check_write(written: int | None, expected: int) -> None:
     if written != expected:
         message = "incomplete run.log append"
@@ -208,10 +237,14 @@ class FileRunContent:
         try:
             with path.open("xb") as stream:
                 stream.write(content)
+                stream.flush()
+                os.fsync(stream.fileno())
         except FileExistsError:
             if path.read_bytes() != content:
                 message = f"blob {digest} conflicts with existing content"
                 raise ValueError(message) from None
+        sync_directory(self._blobs)
+        sync_directory(self._blobs.parent)
 
     def append_stream(self, stream_id: str, offset: int, content: bytes) -> None:
         """Append once at an exact offset, or verify a previously written prefix."""
@@ -232,3 +265,7 @@ class FileRunContent:
                 raise ValueError(message)
             stream.seek(0, 2)
             stream.write(content[len(existing) :])
+            stream.flush()
+            os.fsync(stream.fileno())
+        sync_directory(self._streams)
+        sync_directory(self._streams.parent)
