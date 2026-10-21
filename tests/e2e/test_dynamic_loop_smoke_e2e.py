@@ -61,7 +61,7 @@ from headless import run as render_run
 from launch import LaunchSettings
 from vibesys.api import ComputeBackend, ProfilerKind, RunStatus
 from vibesys.dynamic_roles import IMPLEMENTER, JUDGE, ORCHESTRATOR
-from vibesys.events import CoreEventType
+from vibesys.events import CoreEventType, MeasurementComparedData
 from vibesys.orchestration.dynamic import PLUGIN
 from vs_agent.api import AgentClient
 from vs_agent.api.testing import (
@@ -756,12 +756,15 @@ def _assert_headless_stream(
 class _RecordingRenderer(HeadlessRenderer):
     """The headless renderer, keeping every event it was handed."""
 
-    def __init__(self) -> None:
+    def __init__(self, on_event: Callable[[CoreEvent], None] | None = None) -> None:
         super().__init__()
         self.events: list[CoreEvent] = []
+        self._on_event = on_event
 
     def handle(self, event: CoreEvent) -> None:
         self.events.append(event)
+        if self._on_event is not None:
+            self._on_event(event)
         super().handle(event)
 
 
@@ -797,14 +800,18 @@ def _executing_cluster_input(base: Path) -> LoopInput:
 class _PendingCoreRuns:
     """Keep the fifth allocation pending and the sixth waiting for local admission.
 
-    The judge may finish once that allocation exists. The official check then reuses
-    samples because core's last candidate run is already spoken for; scope closure
+    The judge may finish once that allocation exists and core compared two samples
+    on each side. The official check then reuses the samples because core's last
+    candidate run is already spoken for; scope closure
     cancels that queued run before it ever submits to Slurm.
     """
 
     def __init__(self, loop_input: LoopInput) -> None:
         self._cluster = loop_input.cluster
-        self._accepted = OsThreads().event()
+        self._ready = OsThreads().event()
+        self._lock = OsThreads().lock()
+        self._accepted = False
+        self._compared = False
         self._submissions = 0
         loop_input.connector.intercept(self.intercept)
 
@@ -818,17 +825,34 @@ class _PendingCoreRuns:
             if self._submissions == 5:
                 (self._cluster / HOLD_FILE).touch()
                 response = answer(request)
-                self._accepted.set()
+                with self._lock:
+                    self._accepted = True
+                    self._release_judge()
                 return response
         return answer(request)
 
+    def observe(self, event: CoreEvent) -> None:
+        """Wait for core to record both sides' second samples, not just their execution."""
+        data = event.data
+        if (
+            isinstance(data, MeasurementComparedData)
+            and data.base_samples == data.candidate_samples == MIN_SAMPLES_WITHOUT_FLOOR - 1
+        ):
+            with self._lock:
+                self._compared = True
+                self._release_judge()
+
+    def _release_judge(self) -> None:
+        if self._accepted and self._compared:
+            self._ready.set()
+
     def before_judge(self) -> None:
         """Let core reserve its last sample before the strategy asks for the official check."""
-        wait_or_fail(self._accepted, "core's last baseline allocation")
+        wait_or_fail(self._ready, "core's second comparison and last baseline allocation")
 
 
 def _core_slurm_search(
-    loop_input: LoopInput, *, on_judge: Callable[[], None] | None = None
+    loop_input: LoopInput, *, interleaving: _PendingCoreRuns | None = None
 ) -> tuple[RunResult, _RecordingRenderer]:
     """Run the CLI-built search, optionally holding its judge at a cluster barrier."""
     request = build_run_request(
@@ -852,7 +876,7 @@ def _core_slurm_search(
                 "1",
                 "--max-in-flight",
                 # A held judge must leave a dispatch slot for core to observe its jobs.
-                "2" if on_judge is not None else "1",
+                "2" if interleaving is not None else "1",
             ]
         )
     )
@@ -865,14 +889,16 @@ def _core_slurm_search(
             processes=REAL_PROCESSES,
             piped_processes=SubprocessPipedProcessLauncher(),
             agent_client_factory=(
-                _core_agents if on_judge is None else partial(_core_agents, on_judge=on_judge)
+                _core_agents
+                if interleaving is None
+                else partial(_core_agents, on_judge=interleaving.before_judge)
             ),
-            slurm_processes=loop_input.connector if on_judge is not None else None,
+            slurm_processes=loop_input.connector if interleaving is not None else None,
             backend_factory=host_container_backend,
         )
     )
 
-    renderer = _RecordingRenderer()
+    renderer = _RecordingRenderer(None if interleaving is None else interleaving.observe)
     return _run_headless_recording(request, runs, renderer), renderer
 
 
@@ -979,7 +1005,7 @@ def test_core_run_cancelled_before_local_admission_never_submits(tmp_path: Path)
     """An official reuse can close a scope while core's final candidate run is still queued."""
     loop_input = _executing_cluster_input(tmp_path)
     interleaving = _PendingCoreRuns(loop_input)
-    result, _renderer = _core_slurm_search(loop_input, on_judge=interleaving.before_judge)
+    result, _renderer = _core_slurm_search(loop_input, interleaving=interleaving)
     assert result.succeeded is True
     run = Project.open(loop_input.root)
     stored = run.state_store(result.run_id).load()
