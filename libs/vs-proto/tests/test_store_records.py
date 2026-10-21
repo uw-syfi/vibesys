@@ -55,6 +55,7 @@ def skeleton_examples() -> list[Message]:
     assert isinstance(metric_record.value, p.MetricPoint)
     lifecycle = p.Lifecycle(state=p.Oneof("running", p.Running()))
     return [
+        p.ReplayStore(),
         p.RunHead(
             lifecycle=lifecycle,
             strategy="example",

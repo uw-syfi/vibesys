@@ -9,9 +9,10 @@ from hypothesis import strategies as st
 from protobuf.wkt.google.protobuf.timestamp_pb import Timestamp
 
 from vs_core.api.replay import ReplayCall, ReplayFlow, SemanticKey
-from vs_project.api import CommitFault, FakeStateStore
-from vs_proto.api import EpochStarted, core_common, replay
+from vs_project.api import CommitFault, FakeStateStore, StoredEnvelope
+from vs_proto.api import EpochStarted, ReplayStore, core_common, replay
 from vs_runtime.api.replay import (
+    REPLAY_STORE_SCHEMA_VERSION,
     FakeReplayExecutor,
     ReplayCommitError,
     ReplayLaunch,
@@ -218,3 +219,114 @@ def test_timer_only_progress_is_durable_and_replays_its_allowance() -> None:
     assert resumed.result == (4, 7)
     assert resumed.allowance == replay.ReplayAllowance(iterations=100)
     resumed.close(now=0)
+
+
+@given(count=st.integers(min_value=1, max_value=8))
+def test_early_input_edit_discloses_entire_unused_paid_suffix_once(count: int) -> None:
+    store = FakeStateStore()
+    shell = start(store, program(count=count))
+    for index in range(count):
+        finish(shell, str(index))
+    shell.close(now=0)
+    changed = start(store, program(candidate="changed", count=count), request_id="launch-b")
+    assert len(changed.frontier.unused) == count
+    assert changed.frontier.known_cost_usd == count * 0.5
+    assert changed.prepare(now=0, at=AT) == ()
+    changed.close(now=0)
+    resumed = start(store, program(candidate="changed", count=count), request_id="launch-c")
+    for index in range(count):
+        finish(resumed, str(index))
+    assert resumed.completed
+    assert len(resumed.archive.acknowledgements.notices) == 1
+    resumed.close(now=0)
+
+
+def test_live_fanout_dispatches_new_successors_while_sibling_is_in_flight() -> None:
+    async def branch(ctx: ReplayFlow, item: str) -> Reply:
+        return await ctx.call(
+            ReplayCall(
+                SemanticKey("implement").item(item),
+                Reply(root=item),
+                "implementation.v1",
+                replay.ReplayPolicy(reply_type=Reply.desc().type_name),
+                Reply,
+            )
+        )
+
+    async def root(ctx: ReplayFlow) -> object:
+        reports = ctx.channel()
+
+        async def child(ctx: ReplayFlow, item: str) -> None:
+            reports.send((await branch(ctx, item)).root)
+
+        group = ctx.group()
+        group.start(lambda ctx: child(ctx, "a"))
+        group.start(lambda ctx: child(ctx, "b"))
+        first = await reports
+        planned = await branch(ctx, "plan-after-" + first)
+        second = await reports
+        await group.all()
+        return first, planned.root, second
+
+    store = FakeStateStore()
+    shell = start(store, root)
+    a, b = shell.prepare(now=0, at=AT)
+    assert shell.prepare(now=0, at=AT) == ()
+    shell.observe(b.id, ReplayResult(Reply(root="b"), paid=True), now=0, at=AT, clock=8)
+    shell.accept(b.id, now=0, at=AT)
+    (planned,) = shell.prepare(now=0, at=AT)
+    shell.observe(planned.id, ReplayResult(Reply(root="planned"), paid=True), now=0, at=AT, clock=9)
+    shell.accept(planned.id, now=0, at=AT)
+    shell.observe(a.id, ReplayResult(Reply(root="a"), paid=True), now=0, at=AT, clock=11)
+    shell.accept(a.id, now=0, at=AT)
+    assert shell.result == ("b", "planned", "a")
+    shell.close(now=0)
+    resumed = start(store, root, request_id="launch-b")
+    assert resumed.result == ("b", "planned", "a")
+    assert resumed.prepare(now=0, at=AT) == ()
+    resumed.close(now=0)
+
+
+def test_every_record_prefix_including_recovery_notice_and_ack_is_recoverable() -> None:
+    store = FakeStateStore()
+    shell = start(store)
+    (span,) = shell.prepare(now=0, at=AT)
+    shell.observe(span.id, ReplayResult(Reply(root="answer"), paid=True), now=0, at=AT)
+    shell.close(now=0)
+    # Recovery itself contributes a header and acceptance, both of which are swept below.
+    recovered = start(store, program(candidate="edited"), request_id="launch-b")
+    assert recovered.prepare(now=0, at=AT) == ()
+    recovered.close(now=0)
+    acknowledged = start(store, program(candidate="edited"), request_id="launch-c")
+    finish(acknowledged, "edited-answer")
+    acknowledged.close(now=0)
+    saved = store.load()
+    assert isinstance(saved, StoredEnvelope)
+    records = ReplayStore.from_binary(saved.payload).records
+    for length in range(1, len(records) + 1):
+        prefix = FakeStateStore()
+        fence = prefix.acquire("seed-host", 0, 1)
+        assert fence is not None
+        prefix.commit(
+            None,
+            StoredEnvelope(
+                revision=0,
+                schema_version=REPLAY_STORE_SCHEMA_VERSION,
+                payload=ReplayStore(records=records[:length]).to_binary(),
+            ),
+            fence,
+            0,
+        )
+        assert prefix.release(fence, 0)
+        replayed = start(prefix, program(candidate="edited"), request_id="recovery-prefix")
+        accepted_before = tuple(item.sequence for item in replayed.archive.history)
+        assert len(set(accepted_before)) == len(accepted_before)
+        unresolved = replayed.archive.unresolved
+        if unresolved:
+            with pytest.raises(ReplayRecoveryRequiredError):
+                replayed.prepare(now=0, at=AT)
+        else:
+            replayed.prepare(now=0, at=AT)
+        accepted_after = tuple(item.sequence for item in replayed.archive.history)
+        assert accepted_after == accepted_before
+        replayed.close(now=0)

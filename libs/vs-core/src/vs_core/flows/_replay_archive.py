@@ -56,6 +56,9 @@ class ReplayArchive:
     def decode(cls, payload: bytes) -> ReplayArchive:
         store = ReplayStore.from_binary(payload)
         validate(store)
+        if store.to_binary() != store.to_binary(write_unknown_fields=False):
+            problem = "replay store contains unknown envelope fields; a newer reader is required"
+            raise ReplayError(problem)
         result = cls()
         for record in store.records:
             result.append(record)

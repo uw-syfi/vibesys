@@ -84,7 +84,7 @@ class ReplayExecutor(Protocol):
     """Execute a durable start under its fence; do not invent absence on recovery.
 
     A repeated physical invocation must be inspected by its owning library.
-    ``run_one`` calls this only for a start it just confirmed in this process.
+    ``ReplayRuntime.dispatch`` calls this only for a start it just confirmed in this process.
     """
 
     async def execute(self, span: Span, fence: StoreFence) -> ReplayResult: ...
@@ -117,6 +117,8 @@ class ReplayRuntime:
         self._halted = False
         self._paused = False
         self._dispatchable: set[str] = set()
+        self._known_starts: set[str] = set()
+        self._prepared_occurrences: set[tuple[bytes, bytes, int]] = set()
 
     @property
     def archive(self) -> ReplayArchive:
@@ -286,7 +288,9 @@ class ReplayRuntime:
             )
             self._paused = True
             return ()
-        unresolved = self._archive.unresolved
+        unresolved = tuple(
+            span for span in self._archive.unresolved if span.id not in self._known_starts
+        )
         if unresolved:
             raise ReplayRecoveryRequiredError(unresolved)
         started = []
@@ -295,6 +299,9 @@ class ReplayRuntime:
             if key is None:
                 problem = "scheduler proposed a start without a semantic key"
                 raise ReplayError(problem)
+            occurrence = (key.to_binary(), operation.identity, operation.encoding_version)
+            if occurrence in self._prepared_occurrences:
+                continue
             span = Span(
                 id=f"operation/{self._archive.sequence + 1}",
                 runtime_type=RuntimeType.OPERATION,
@@ -307,6 +314,8 @@ class ReplayRuntime:
                 Oneof("span", SpanRecord(change=Change.STARTED, span=span)), now=now, at=at
             )
             self._dispatchable.add(span.id)
+            self._known_starts.add(span.id)
+            self._prepared_occurrences.add(occurrence)
             started.append(deepcopy(span))
         return tuple(started)
 
