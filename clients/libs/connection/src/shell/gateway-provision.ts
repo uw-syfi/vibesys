@@ -163,7 +163,8 @@ function upload(
           else next();
         });
       },
-      (1000 * chunk.length) / UPLOAD_BYTES_PER_SECOND,
+      // Node truncates fractional timer delays; round up to preserve the rate cap.
+      Math.ceil((1000 * chunk.length) / UPLOAD_BYTES_PER_SECOND),
     );
   };
   next();

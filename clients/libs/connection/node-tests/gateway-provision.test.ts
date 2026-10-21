@@ -70,7 +70,7 @@ function receive(upload: Command, clock: FakeClock) {
 
 async function send(clock: FakeClock, length: number): Promise<void> {
   for (let offset = 0; offset < length; offset += 32 * 1024) {
-    const delay = (1000 * Math.min(32 * 1024, length - offset)) / (512 * 1024);
+    const delay = Math.ceil((1000 * Math.min(32 * 1024, length - offset)) / (512 * 1024));
     await clock.waitUntilScheduled(delay);
     clock.advanceBy(delay);
   }
@@ -94,14 +94,16 @@ for (const length of lengths) {
     try {
       if (length > 0)
         expect(clock.pendingDelays()).toContain(
-          (1000 * Math.min(length, 32 * 1024)) / (512 * 1024),
+          Math.ceil((1000 * Math.min(length, 32 * 1024)) / (512 * 1024)),
         );
       const received = receive(upload, clock);
       await send(clock, length);
       (await commands.next()).end(0, 'match');
       expect(await outcome).toBe('ok');
       expect(Buffer.concat(received.chunks).equals(Buffer.from(bytes))).toBe(true);
-      expect(clock.now()).toBe((1000 * length) / (512 * 1024));
+      const minimumMs = (1000 * length) / (512 * 1024);
+      expect(clock.now()).toBeGreaterThanOrEqual(minimumMs);
+      expect(clock.now()).toBeLessThanOrEqual(minimumMs + received.chunks.length);
       expect(commands.count).toBe(4);
       expect(clock.pendingDelays()).toEqual([]);
     } finally {
@@ -136,7 +138,7 @@ test('a forced replacement uses the same paced transfer', {timeout: 15000}, asyn
     await send(clock, 64 * 1024);
     (await commands.next()).end(0, 'match');
     expect(await outcome).toBe('ok');
-    expect(received.arrivals).toEqual([62.5, 125]);
+    expect(received.arrivals).toEqual([63, 126]);
     expect(commands.count).toBe(3);
     expect(clock.pendingDelays()).toEqual([]);
   } finally {
@@ -152,13 +154,13 @@ test('pipe backpressure delays the next pacing timer until the write completes',
   try {
     // Do not read the pipe: its real in-memory high water mark eventually blocks the writer.
     for (let index = 0; index < 2; index += 1) {
-      await clock.waitUntilScheduled(62.5);
-      clock.advanceBy(62.5);
+      await clock.waitUntilScheduled(63);
+      clock.advanceBy(63);
     }
-    expect(clock.pendingDelays()).not.toContain(62.5);
+    expect(clock.pendingDelays()).not.toContain(63);
     upload.input.resume();
-    await clock.waitUntilScheduled(62.5);
-    expect(clock.pendingDelays()).toContain(62.5);
+    await clock.waitUntilScheduled(63);
+    expect(clock.pendingDelays()).toContain(63);
   } finally {
     abort.abort();
     expect(await outcome).toContain('Abort');
@@ -258,7 +260,7 @@ for (const mode of ['slow upload', 'reset then retry'] as const) {
         expect(first.process.running).toBe(false);
         expect(signals).toHaveLength(2);
         expect(commands.count).toBe(6);
-        expect(clock.pendingDelays()).toContain(62.5);
+        expect(clock.pendingDelays()).toContain(63);
       }
     } finally {
       abort.abort();
