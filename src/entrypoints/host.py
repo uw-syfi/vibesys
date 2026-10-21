@@ -24,7 +24,7 @@ def run(argv: list[str], *, cwd: Path) -> tuple[int, str, str]:
     """Run a host maintenance method and return exit code, stdout and stderr."""
     parser = argparse.ArgumentParser(
         prog="vibesys host",
-        epilog="post-intent and relaunch read a HostCallRequest from stdin and write a HostCallResponse to stdout.",
+        epilog="post-intent, relaunch and chat-message read a HostCallRequest from stdin and write a HostCallResponse to stdout.",
     )
     methods = parser.add_subparsers(dest="method", required=True)
     convert = methods.add_parser("convert-run", help="convert a stopped run's JSONL journal")
