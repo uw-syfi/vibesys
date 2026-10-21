@@ -2,15 +2,17 @@
 // @generated from file vibesys/api/v1/host.proto (package vibesys.api.v1, syntax proto3)
 /* eslint-disable */
 
-import type { GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegenv2";
-import { fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
+import type { GenEnum, GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegenv2";
+import { enumDesc, fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
+import type { RunHead } from "../../store/v1/skeleton_pb.js";
+import { file_vibesys_store_v1_skeleton } from "../../store/v1/skeleton_pb.js";
 import type { Message } from "@bufbuild/protobuf";
 
 /**
  * Describes the file vibesys/api/v1/host.proto.
  */
 export const file_vibesys_api_v1_host: GenFile = /*@__PURE__*/
-  fileDesc("Chl2aWJlc3lzL2FwaS92MS9ob3N0LnByb3RvEg52aWJlc3lzLmFwaS52MSInCgxIZWxsb1JlcXVlc3QSFwoPYXBpX3NjaGVtYV9oYXNoGAEgASgJIkEKDUhlbGxvUmVzcG9uc2USFwoPYXBpX3NjaGVtYV9oYXNoGAEgASgJEhcKD2dhdGV3YXlfdmVyc2lvbhgCIAEoCSIvCgtUYWlsUmVxdWVzdBIOCgZydW5faWQYASABKAkSEAoIZnJvbV9zZXEYAiABKAQiNAoMVGFpbFJlc3BvbnNlEg8KB3JlY29yZHMYASADKAwSEwoLdGhyb3VnaF9zZXEYAiABKAQymAEKC0hvc3RTZXJ2aWNlEkQKBUhlbGxvEhwudmliZXN5cy5hcGkudjEuSGVsbG9SZXF1ZXN0Gh0udmliZXN5cy5hcGkudjEuSGVsbG9SZXNwb25zZRJDCgRUYWlsEhsudmliZXN5cy5hcGkudjEuVGFpbFJlcXVlc3QaHC52aWJlc3lzLmFwaS52MS5UYWlsUmVzcG9uc2UwAUK2AQoSY29tLnZpYmVzeXMuYXBpLnYxQglIb3N0UHJvdG9QAVo7Z2l0aHViLmNvbS91dy1zeWZpL3ZpYmVzeXMvZ2F0ZXdheS9nZW4vdmliZXN5cy9hcGkvdjE7YXBpdjGiAgNWQViqAg5WaWJlc3lzLkFwaS5WMcoCDlZpYmVzeXNcQXBpXFYx4gIaVmliZXN5c1xBcGlcVjFcR1BCTWV0YWRhdGHqAhBWaWJlc3lzOjpBcGk6OlYxYgZwcm90bzM");
+  fileDesc("Chl2aWJlc3lzL2FwaS92MS9ob3N0LnByb3RvEg52aWJlc3lzLmFwaS52MSInCgxIZWxsb1JlcXVlc3QSFwoPYXBpX3NjaGVtYV9oYXNoGAEgASgJIkEKDUhlbGxvUmVzcG9uc2USFwoPYXBpX3NjaGVtYV9oYXNoGAEgASgJEhcKD2dhdGV3YXlfdmVyc2lvbhgCIAEoCSIvCgtUYWlsUmVxdWVzdBIOCgZydW5faWQYASABKAkSEAoIZnJvbV9zZXEYAiABKAQiNAoMVGFpbFJlc3BvbnNlEg8KB3JlY29yZHMYASADKAwSEwoLdGhyb3VnaF9zZXEYAiABKAQiIQoPU2tlbGV0b25SZXF1ZXN0Eg4KBnJ1bl9pZBgBIAEoCSJeChBTa2VsZXRvblJlc3BvbnNlEhUKCGtleWZyYW1lGAEgASgMSACIAQESDwoHcmVjb3JkcxgCIAMoDBIVCg1jb21taXR0ZWRfc2VxGAMgASgEQgsKCV9rZXlmcmFtZSISChBXYXRjaFJ1bnNSZXF1ZXN0IqYBChFXYXRjaFJ1bnNSZXNwb25zZRIOCgZydW5faWQYASABKAkSJwoEaGVhZBgCIAEoCzIZLnZpYmVzeXMuc3RvcmUudjEuUnVuSGVhZBItCghsaXZlbmVzcxgDIAEoDjIbLnZpYmVzeXMuYXBpLnYxLlJ1bkxpdmVuZXNzEg8KB3JlbW92ZWQYBCABKAgSGAoQaW5pdGlhbF9jb21wbGV0ZRgFIAEoCCIxCg9HZXRCbG9ic1JlcXVlc3QSDgoGcnVuX2lkGAEgASgJEg4KBnNoYTI1NhgCIAMoCSI9ChBHZXRCbG9ic1Jlc3BvbnNlEikKBWJsb2JzGAEgAygLMhoudmliZXN5cy5hcGkudjEuQmxvYlJlc3VsdCJVCgpCbG9iUmVzdWx0Eg4KBnNoYTI1NhgBIAEoCRIMCgRkYXRhGAIgASgMEhIKCmVycm9yX2NvZGUYAyABKAUSFQoNZXJyb3JfbWVzc2FnZRgEIAEoCSJLChFUYWlsU3RyZWFtUmVxdWVzdBIOCgZydW5faWQYASABKAkSEQoJc3RyZWFtX2lkGAIgASgJEhMKC2Zyb21fb2Zmc2V0GAMgASgEIjcKElRhaWxTdHJlYW1SZXNwb25zZRIMCgRkYXRhGAEgASgMEhMKC25leHRfb2Zmc2V0GAIgASgEKnkKC1J1bkxpdmVuZXNzEhwKGFJVTl9MSVZFTkVTU19VTlNQRUNJRklFRBAAEhYKElJVTl9MSVZFTkVTU19BTElWRRABEhwKGFJVTl9MSVZFTkVTU19JTlRFUlJVUFRFRBACEhYKElJVTl9MSVZFTkVTU19FTkRFRBADMuEDCgtIb3N0U2VydmljZRJECgVIZWxsbxIcLnZpYmVzeXMuYXBpLnYxLkhlbGxvUmVxdWVzdBodLnZpYmVzeXMuYXBpLnYxLkhlbGxvUmVzcG9uc2USQwoEVGFpbBIbLnZpYmVzeXMuYXBpLnYxLlRhaWxSZXF1ZXN0GhwudmliZXN5cy5hcGkudjEuVGFpbFJlc3BvbnNlMAESTQoIU2tlbGV0b24SHy52aWJlc3lzLmFwaS52MS5Ta2VsZXRvblJlcXVlc3QaIC52aWJlc3lzLmFwaS52MS5Ta2VsZXRvblJlc3BvbnNlElIKCVdhdGNoUnVucxIgLnZpYmVzeXMuYXBpLnYxLldhdGNoUnVuc1JlcXVlc3QaIS52aWJlc3lzLmFwaS52MS5XYXRjaFJ1bnNSZXNwb25zZTABEk0KCEdldEJsb2JzEh8udmliZXN5cy5hcGkudjEuR2V0QmxvYnNSZXF1ZXN0GiAudmliZXN5cy5hcGkudjEuR2V0QmxvYnNSZXNwb25zZRJVCgpUYWlsU3RyZWFtEiEudmliZXN5cy5hcGkudjEuVGFpbFN0cmVhbVJlcXVlc3QaIi52aWJlc3lzLmFwaS52MS5UYWlsU3RyZWFtUmVzcG9uc2UwAUK2AQoSY29tLnZpYmVzeXMuYXBpLnYxQglIb3N0UHJvdG9QAVo7Z2l0aHViLmNvbS91dy1zeWZpL3ZpYmVzeXMvZ2F0ZXdheS9nZW4vdmliZXN5cy9hcGkvdjE7YXBpdjGiAgNWQViqAg5WaWJlc3lzLkFwaS5WMcoCDlZpYmVzeXNcQXBpXFYx4gIaVmliZXN5c1xBcGlcVjFcR1BCTWV0YWRhdGHqAhBWaWJlc3lzOjpBcGk6OlYxYgZwcm90bzM", [file_vibesys_store_v1_skeleton]);
 
 /**
  * @generated from message vibesys.api.v1.HelloRequest
@@ -100,6 +102,261 @@ export const TailResponseSchema: GenMessage<TailResponse> = /*@__PURE__*/
   messageDesc(file_vibesys_api_v1_host, 3);
 
 /**
+ * @generated from message vibesys.api.v1.SkeletonRequest
+ */
+export type SkeletonRequest = Message<"vibesys.api.v1.SkeletonRequest"> & {
+  /**
+   * @generated from field: string run_id = 1;
+   */
+  runId: string;
+};
+
+/**
+ * Describes the message vibesys.api.v1.SkeletonRequest.
+ * Use `create(SkeletonRequestSchema)` to create a new message.
+ */
+export const SkeletonRequestSchema: GenMessage<SkeletonRequest> = /*@__PURE__*/
+  messageDesc(file_vibesys_api_v1_host, 4);
+
+/**
+ * One committed snapshot. No keyframe means replay records from the beginning.
+ * A response exceeding the gateway's 64 MiB cap fails RESOURCE_EXHAUSTED.
+ *
+ * @generated from message vibesys.api.v1.SkeletonResponse
+ */
+export type SkeletonResponse = Message<"vibesys.api.v1.SkeletonResponse"> & {
+  /**
+   * @generated from field: optional bytes keyframe = 1;
+   */
+  keyframe?: Uint8Array | undefined;
+
+  /**
+   * @generated from field: repeated bytes records = 2;
+   */
+  records: Uint8Array[];
+
+  /**
+   * @generated from field: uint64 committed_seq = 3;
+   */
+  committedSeq: bigint;
+};
+
+/**
+ * Describes the message vibesys.api.v1.SkeletonResponse.
+ * Use `create(SkeletonResponseSchema)` to create a new message.
+ */
+export const SkeletonResponseSchema: GenMessage<SkeletonResponse> = /*@__PURE__*/
+  messageDesc(file_vibesys_api_v1_host, 5);
+
+/**
+ * @generated from message vibesys.api.v1.WatchRunsRequest
+ */
+export type WatchRunsRequest = Message<"vibesys.api.v1.WatchRunsRequest"> & {
+};
+
+/**
+ * Describes the message vibesys.api.v1.WatchRunsRequest.
+ * Use `create(WatchRunsRequestSchema)` to create a new message.
+ */
+export const WatchRunsRequestSchema: GenMessage<WatchRunsRequest> = /*@__PURE__*/
+  messageDesc(file_vibesys_api_v1_host, 6);
+
+/**
+ * Initial entries precede an initial_complete marker. Later entries replace by
+ * run_id; removed is a tombstone. A phase 1 run has no head and UNKNOWN liveness.
+ *
+ * @generated from message vibesys.api.v1.WatchRunsResponse
+ */
+export type WatchRunsResponse = Message<"vibesys.api.v1.WatchRunsResponse"> & {
+  /**
+   * @generated from field: string run_id = 1;
+   */
+  runId: string;
+
+  /**
+   * @generated from field: vibesys.store.v1.RunHead head = 2;
+   */
+  head?: RunHead | undefined;
+
+  /**
+   * @generated from field: vibesys.api.v1.RunLiveness liveness = 3;
+   */
+  liveness: RunLiveness;
+
+  /**
+   * @generated from field: bool removed = 4;
+   */
+  removed: boolean;
+
+  /**
+   * @generated from field: bool initial_complete = 5;
+   */
+  initialComplete: boolean;
+};
+
+/**
+ * Describes the message vibesys.api.v1.WatchRunsResponse.
+ * Use `create(WatchRunsResponseSchema)` to create a new message.
+ */
+export const WatchRunsResponseSchema: GenMessage<WatchRunsResponse> = /*@__PURE__*/
+  messageDesc(file_vibesys_api_v1_host, 7);
+
+/**
+ * @generated from message vibesys.api.v1.GetBlobsRequest
+ */
+export type GetBlobsRequest = Message<"vibesys.api.v1.GetBlobsRequest"> & {
+  /**
+   * @generated from field: string run_id = 1;
+   */
+  runId: string;
+
+  /**
+   * @generated from field: repeated string sha256 = 2;
+   */
+  sha256: string[];
+};
+
+/**
+ * Describes the message vibesys.api.v1.GetBlobsRequest.
+ * Use `create(GetBlobsRequestSchema)` to create a new message.
+ */
+export const GetBlobsRequestSchema: GenMessage<GetBlobsRequest> = /*@__PURE__*/
+  messageDesc(file_vibesys_api_v1_host, 8);
+
+/**
+ * At most 16 MiB of blob content per response. Each requested hash has a result
+ * in request order, including duplicates and failures; retry omitted content in
+ * a smaller request. error_code is a google.rpc.Code number, zero on success.
+ *
+ * @generated from message vibesys.api.v1.GetBlobsResponse
+ */
+export type GetBlobsResponse = Message<"vibesys.api.v1.GetBlobsResponse"> & {
+  /**
+   * @generated from field: repeated vibesys.api.v1.BlobResult blobs = 1;
+   */
+  blobs: BlobResult[];
+};
+
+/**
+ * Describes the message vibesys.api.v1.GetBlobsResponse.
+ * Use `create(GetBlobsResponseSchema)` to create a new message.
+ */
+export const GetBlobsResponseSchema: GenMessage<GetBlobsResponse> = /*@__PURE__*/
+  messageDesc(file_vibesys_api_v1_host, 9);
+
+/**
+ * @generated from message vibesys.api.v1.BlobResult
+ */
+export type BlobResult = Message<"vibesys.api.v1.BlobResult"> & {
+  /**
+   * @generated from field: string sha256 = 1;
+   */
+  sha256: string;
+
+  /**
+   * @generated from field: bytes data = 2;
+   */
+  data: Uint8Array;
+
+  /**
+   * @generated from field: int32 error_code = 3;
+   */
+  errorCode: number;
+
+  /**
+   * @generated from field: string error_message = 4;
+   */
+  errorMessage: string;
+};
+
+/**
+ * Describes the message vibesys.api.v1.BlobResult.
+ * Use `create(BlobResultSchema)` to create a new message.
+ */
+export const BlobResultSchema: GenMessage<BlobResult> = /*@__PURE__*/
+  messageDesc(file_vibesys_api_v1_host, 10);
+
+/**
+ * @generated from message vibesys.api.v1.TailStreamRequest
+ */
+export type TailStreamRequest = Message<"vibesys.api.v1.TailStreamRequest"> & {
+  /**
+   * @generated from field: string run_id = 1;
+   */
+  runId: string;
+
+  /**
+   * @generated from field: string stream_id = 2;
+   */
+  streamId: string;
+
+  /**
+   * @generated from field: uint64 from_offset = 3;
+   */
+  fromOffset: bigint;
+};
+
+/**
+ * Describes the message vibesys.api.v1.TailStreamRequest.
+ * Use `create(TailStreamRequestSchema)` to create a new message.
+ */
+export const TailStreamRequestSchema: GenMessage<TailStreamRequest> = /*@__PURE__*/
+  messageDesc(file_vibesys_api_v1_host, 11);
+
+/**
+ * @generated from message vibesys.api.v1.TailStreamResponse
+ */
+export type TailStreamResponse = Message<"vibesys.api.v1.TailStreamResponse"> & {
+  /**
+   * @generated from field: bytes data = 1;
+   */
+  data: Uint8Array;
+
+  /**
+   * @generated from field: uint64 next_offset = 2;
+   */
+  nextOffset: bigint;
+};
+
+/**
+ * Describes the message vibesys.api.v1.TailStreamResponse.
+ * Use `create(TailStreamResponseSchema)` to create a new message.
+ */
+export const TailStreamResponseSchema: GenMessage<TailStreamResponse> = /*@__PURE__*/
+  messageDesc(file_vibesys_api_v1_host, 12);
+
+/**
+ * @generated from enum vibesys.api.v1.RunLiveness
+ */
+export enum RunLiveness {
+  /**
+   * @generated from enum value: RUN_LIVENESS_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * @generated from enum value: RUN_LIVENESS_ALIVE = 1;
+   */
+  ALIVE = 1,
+
+  /**
+   * @generated from enum value: RUN_LIVENESS_INTERRUPTED = 2;
+   */
+  INTERRUPTED = 2,
+
+  /**
+   * @generated from enum value: RUN_LIVENESS_ENDED = 3;
+   */
+  ENDED = 3,
+}
+
+/**
+ * Describes the enum vibesys.api.v1.RunLiveness.
+ */
+export const RunLivenessSchema: GenEnum<RunLiveness> = /*@__PURE__*/
+  enumDesc(file_vibesys_api_v1_host, 0);
+
+/**
  * HostService is a stateless view over a host user's run files.
  * API schemas require an exact hash match, with no compatibility negotiation.
  *
@@ -127,6 +384,38 @@ export const HostService: GenService<{
     methodKind: "server_streaming";
     input: typeof TailRequestSchema;
     output: typeof TailResponseSchema;
+  },
+  /**
+   * @generated from rpc vibesys.api.v1.HostService.Skeleton
+   */
+  skeleton: {
+    methodKind: "unary";
+    input: typeof SkeletonRequestSchema;
+    output: typeof SkeletonResponseSchema;
+  },
+  /**
+   * @generated from rpc vibesys.api.v1.HostService.WatchRuns
+   */
+  watchRuns: {
+    methodKind: "server_streaming";
+    input: typeof WatchRunsRequestSchema;
+    output: typeof WatchRunsResponseSchema;
+  },
+  /**
+   * @generated from rpc vibesys.api.v1.HostService.GetBlobs
+   */
+  getBlobs: {
+    methodKind: "unary";
+    input: typeof GetBlobsRequestSchema;
+    output: typeof GetBlobsResponseSchema;
+  },
+  /**
+   * @generated from rpc vibesys.api.v1.HostService.TailStream
+   */
+  tailStream: {
+    methodKind: "server_streaming";
+    input: typeof TailStreamRequestSchema;
+    output: typeof TailStreamResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_vibesys_api_v1_host, 0);

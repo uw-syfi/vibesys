@@ -2,5 +2,5 @@
 
 package gen
 
-const APISchemaHash = "ef8866b280f8c93dbb921a004a10712a7f9566179c5e9a268993e30460c9bfde"
-const StoreSchemaHash = "f9951121319550c554a4729a4e97f4665d25f10c4031e1d2d15a8f359f445abd"
+const APISchemaHash = "b66e22831dd14e921ca71df42712781c2a2975d78c1c9e713dc1fcdf22695c95"
+const StoreSchemaHash = "cdaacd6727c59fa70c17666f2a3b64e7b50e9e785e2665665e76cd39a5bdc8db"
