@@ -1,5 +1,7 @@
 /** Deterministic pipe/clock tests of the same provisioner Electron main calls. */
+import {createHash} from 'node:crypto';
 import {test} from 'node:test';
+import {gunzipSync, gzipSync} from 'node:zlib';
 import {Seeded} from '@vibesys/store/testing';
 import {FakeClock} from '@vibesys/transport/testing';
 import {expect} from 'expect';
@@ -13,8 +15,10 @@ class Commands {
   readonly #pending: Command[] = [];
   #arrived = (): void => {};
   count = 0;
+  readonly scripts: string[] = [];
 
-  readonly spawnCommand = (_script: string) => {
+  readonly spawnCommand = (script: string) => {
+    this.scripts.push(script);
     const child = fakeProcess();
     this.count += 1;
     this.#pending.push(child);
@@ -76,6 +80,11 @@ async function send(clock: FakeClock, length: number): Promise<void> {
   }
 }
 
+function randomBytes(length: number): Uint8Array {
+  const random = new Seeded(length + 1);
+  return Uint8Array.from({length}, () => random.int(256));
+}
+
 const random = new Seeded(1);
 const lengths = [
   0,
@@ -89,21 +98,30 @@ for (const length of lengths) {
   test(`cold upload of ${length} bytes stays paced on a burst-sensitive route`, {
     timeout: 15000,
   }, async () => {
-    const bytes = Uint8Array.from({length}, (_, index) => index % 251);
+    const bytes =
+      length === 16_780_479
+        ? Uint8Array.from({length}, (_, index) => index % 251)
+        : randomBytes(length);
+    const wireLength = gzipSync(bytes).length;
     const {commands, clock, abort, outcome, upload} = await cold(bytes);
     try {
-      if (length > 0)
+      if (wireLength > 0)
         expect(clock.pendingDelays()).toContain(
-          Math.ceil((1000 * Math.min(length, 32 * 1024)) / (512 * 1024)),
+          Math.ceil((1000 * Math.min(wireLength, 32 * 1024)) / (512 * 1024)),
         );
       const received = receive(upload, clock);
-      await send(clock, length);
+      await send(clock, wireLength);
       (await commands.next()).end(0, 'match');
       expect(await outcome).toBe('ok');
-      expect(Buffer.concat(received.chunks).equals(Buffer.from(bytes))).toBe(true);
-      const minimumMs = (1000 * length) / (512 * 1024);
+      expect(gunzipSync(Buffer.concat(received.chunks)).equals(Buffer.from(bytes))).toBe(true);
+      const minimumMs = (1000 * wireLength) / (512 * 1024);
       expect(clock.now()).toBeGreaterThanOrEqual(minimumMs);
       expect(clock.now()).toBeLessThanOrEqual(minimumMs + received.chunks.length);
+      expect(commands.scripts[2]).toContain('command -v gzip');
+      expect(commands.scripts[2]).toContain('gzip -dc >');
+      expect(commands.scripts[3]).toContain(String(bytes.length));
+      expect(commands.scripts[3]).toContain(createHash('sha256').update(bytes).digest('hex'));
+      if (length === 16_780_479) expect(wireLength).toBeLessThan(length / 100);
       expect(commands.count).toBe(4);
       expect(clock.pendingDelays()).toEqual([]);
     } finally {
@@ -132,13 +150,15 @@ test('warm provisioning opens no upload or pacing timer', {timeout: 15000}, asyn
 });
 
 test('a forced replacement uses the same paced transfer', {timeout: 15000}, async () => {
-  const {commands, clock, abort, outcome, upload} = await cold(new Uint8Array(64 * 1024), true);
+  const bytes = randomBytes(64 * 1024);
+  const {commands, clock, abort, outcome, upload} = await cold(bytes, true);
   try {
     const received = receive(upload, clock);
-    await send(clock, 64 * 1024);
+    await send(clock, gzipSync(bytes).length);
     (await commands.next()).end(0, 'match');
     expect(await outcome).toBe('ok');
-    expect(received.arrivals).toEqual([63, 126]);
+    expect(received.arrivals.slice(0, 2)).toEqual([63, 126]);
+    expect(gunzipSync(Buffer.concat(received.chunks))).toEqual(Buffer.from(bytes));
     expect(commands.count).toBe(3);
     expect(clock.pendingDelays()).toEqual([]);
   } finally {
@@ -150,7 +170,7 @@ test('a forced replacement uses the same paced transfer', {timeout: 15000}, asyn
 test('pipe backpressure delays the next pacing timer until the write completes', {
   timeout: 15000,
 }, async () => {
-  const {clock, abort, outcome, upload} = await cold(new Uint8Array(256 * 1024));
+  const {clock, abort, outcome, upload} = await cold(randomBytes(256 * 1024));
   try {
     // Do not read the pipe: its real in-memory high water mark eventually blocks the writer.
     for (let index = 0; index < 2; index += 1) {
@@ -173,7 +193,7 @@ for (const sent of [0, 1, 3]) {
   test(`cancellation after ${sent} chunks cancels pacing and retires the upload`, {
     timeout: 15000,
   }, async () => {
-    const {commands, clock, abort, outcome, upload} = await cold(new Uint8Array(256 * 1024));
+    const {commands, clock, abort, outcome, upload} = await cold(randomBytes(256 * 1024));
     const received = receive(upload, clock);
     await send(clock, sent * 32 * 1024);
     abort.abort();
@@ -190,7 +210,7 @@ for (const failure of ['pipe reset', 'SSH exit', 'timeout'] as const) {
   test(`${failure} stops writing and does not verify an unfinished upload`, {
     timeout: 15000,
   }, async () => {
-    const {commands, clock, abort, outcome, upload} = await cold(new Uint8Array(256 * 1024));
+    const {commands, clock, abort, outcome, upload} = await cold(randomBytes(256 * 1024));
     try {
       if (failure === 'pipe reset') upload.input.destroy(new Error('EPIPE'));
       else if (failure === 'SSH exit') upload.end(255, '', 'connection reset');
@@ -223,7 +243,7 @@ for (const mode of ['slow upload', 'reset then retry'] as const) {
           signals.push(signal);
           await provisionGateway(
             commands,
-            async () => new Uint8Array(1024 * 1024),
+            async () => randomBytes(1024 * 1024),
             force,
             signal,
             clock.schedule,
@@ -271,3 +291,25 @@ for (const mode of ['slow upload', 'reset then retry'] as const) {
     expect(clock.pendingDelays()).toEqual([]);
   });
 }
+
+for (const error of ['gateway provisioning requires gzip', 'gzip: unexpected end of file']) {
+  test(`remote decompression failure is reported: ${error}`, {timeout: 15000}, async () => {
+    const {commands, clock, outcome, upload} = await cold(new Uint8Array(1024));
+    upload.end(1, '', error);
+    expect(await outcome).toContain(error);
+    expect(commands.count).toBe(3);
+    expect(clock.pendingDelays()).toEqual([]);
+  });
+}
+
+test('verification rejects a decompressed artifact that fails the original digest', {
+  timeout: 15000,
+}, async () => {
+  const bytes = randomBytes(1024);
+  const {commands, clock, outcome, upload} = await cold(bytes);
+  receive(upload, clock);
+  await send(clock, gzipSync(bytes).length);
+  (await commands.next()).end(0);
+  expect(await outcome).toContain('gateway artifact verification failed');
+  expect(clock.pendingDelays()).toEqual([]);
+});

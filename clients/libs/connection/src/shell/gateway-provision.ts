@@ -2,11 +2,15 @@
 import {createHash, randomUUID} from 'node:crypto';
 import {readFile} from 'node:fs/promises';
 import {Duplex, type Writable} from 'node:stream';
+import {promisify} from 'node:util';
+import {gzip} from 'node:zlib';
 import {API_SCHEMA_HASH} from '@vibesys/proto';
 import {registerAbort, type ScheduleTimeout} from '@vibesys/transport';
 import {GATEWAY_COMMAND_TIMEOUT_MS, GATEWAY_UPLOAD_TIMEOUT_MS} from '../state/gateway.js';
 import type {SshLink} from './link.js';
 import {retireProcess, type SpawnedProcess} from './process.js';
+
+const compress = promisify(gzip);
 
 export type GatewayTarget = 'linux-amd64' | 'linux-arm64' | 'darwin-arm64';
 export const GATEWAY_DIRECTORY = `.vibesys/gateway/${API_SCHEMA_HASH.slice(0, 16)}`;
@@ -42,8 +46,9 @@ export async function provisionGateway(
   await run(
     `umask 077; mkdir -p "$HOME/${GATEWAY_DIRECTORY}" && ` +
       `trap 'rm -f ${temporary}' EXIT HUP INT TERM; ` +
-      `cat > ${temporary} && chmod 700 ${temporary} && mv -f ${temporary} ${binary}`,
-    bytes,
+      `command -v gzip >/dev/null 2>&1 || { printf 'gateway provisioning requires gzip\\n' >&2; exit 1; }; ` +
+      `gzip -dc > ${temporary} && chmod 700 ${temporary} && mv -f ${temporary} ${binary}`,
+    await compress(bytes),
   );
   if ((await run(`if ${matches}; then printf match; fi`)) !== 'match') {
     throw new Error(`gateway artifact verification failed for ${target}`);
