@@ -25,7 +25,15 @@ if TYPE_CHECKING:
 class LegacyRunLogTee:
     """A single epoch's live tee, called only after the JSONL append succeeds."""
 
-    def __init__(self, path: Path, run_id: str, timestamp: Callable[[], Timestamp]) -> None:
+    def __init__(
+        self,
+        path: Path,
+        run_id: str,
+        timestamp: Callable[[], Timestamp],
+        *,
+        tree_hash: str = "",
+        dirty: bool = False,
+    ) -> None:
         """Recover the file and commit this process's epoch header."""
         self._writer = FileRunLogWriter(path)
         self._epoch = self._writer.epoch + 1
@@ -41,6 +49,8 @@ class LegacyRunLogTee:
                         EpochStarted(
                             run_id=run_id,
                             epoch=self._epoch,
+                            tree_hash=tree_hash,
+                            dirty=dirty,
                             api_schema_hash=API_SCHEMA_HASH,
                             store_schema_hash=STORE_SCHEMA_HASH,
                         ),

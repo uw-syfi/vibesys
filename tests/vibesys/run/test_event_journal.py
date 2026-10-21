@@ -15,7 +15,7 @@ from vibesys.events import (
 )
 from vibesys.run import EventJournal
 from vibesys.run.integration import LocalRunIntegration
-from vs_project.api import Project
+from vs_project.api import Git, Project
 from vs_proto.api import API_SCHEMA_HASH, RUN_LOG_MAX_RECORD_BYTES, STORE_SCHEMA_HASH
 from vs_runlog.api import RunLogReader
 from vs_runtime.api.infrastructure import (
@@ -24,10 +24,12 @@ from vs_runtime.api.infrastructure import (
     AgentExecutionStatus,
 )
 from vs_runtime.api.testing import idle_environment_system
-from vs_sim.api.testing import ManualClock, SimThreads
+from vs_sim.api.testing import FakeProcesses, ManualClock, ProcessScript, SimThreads
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    from vs_sim.api import ProcessSpec
 
 
 def test_current_round_event_requires_explicit_profile_outcome() -> None:
@@ -233,3 +235,78 @@ def test_tee_initialization_failure_is_additive(
     assert len(journal.read()) == 1
     assert path.read_bytes() == b"corrupt!"
     assert sum("tee disabled" in record.message for record in caplog.records) == 1
+
+
+@pytest.mark.parametrize("dirty", [False, True])
+def test_epoch_records_checkout_provenance_at_attachment(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    dirty: bool,
+) -> None:
+    monkeypatch.setenv("VIBESYS_STATE_HOME", str(tmp_path / "home"))
+    root = tmp_path / "project"
+    root.mkdir()
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+    (checkout / ".git").mkdir()
+    project = Project.open(root)
+    tree_hash = "ab" * 20
+
+    def script(spec: ProcessSpec) -> ProcessScript:
+        if spec.argv[1:] == ("rev-parse", "HEAD^{tree}"):
+            return ProcessScript(stdout=f"{tree_hash}\n".encode())
+        assert spec.argv[1:] == ("status", "--porcelain", "--untracked-files=normal")
+        return ProcessScript(stdout=b"?? new.py\n" if dirty else b"")
+
+    clock = ManualClock()
+    processes = FakeProcesses(script, pass_time=clock.advance)
+    journal = EventJournal(clock, SimThreads())
+    journal.enable_runlog(project, "run-1", git=Git(processes), checkout_root=checkout)
+    journal.enable_runlog(project, "run-1", git=Git(processes), checkout_root=checkout)
+    journal.close()
+    with Project.run_log_path_for(root, "run-1").open("rb") as stream:
+        header = next(iter(RunLogReader(stream))).body
+    assert header is not None
+    assert header.field == "epoch_started"
+    assert header.value.tree_hash == tree_hash
+    assert header.value.dirty is dirty
+    assert len(processes.ran) == 2
+
+
+@pytest.mark.parametrize("failure_stage", ["tree", "status"])
+@pytest.mark.parametrize("script", [ProcessScript(returncode=1), ProcessScript(duration_s=1)])
+def test_unavailable_checkout_metadata_does_not_disable_the_tee(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    script: ProcessScript,
+    failure_stage: str,
+) -> None:
+    monkeypatch.setenv("VIBESYS_STATE_HOME", str(tmp_path / "home"))
+    root = tmp_path / "project"
+    root.mkdir()
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+    (checkout / ".git").mkdir()
+    project = Project.open(root)
+    clock = ManualClock()
+
+    def probe(spec: ProcessSpec) -> ProcessScript:
+        if failure_stage == "status" and spec.argv[1:] == ("rev-parse", "HEAD^{tree}"):
+            return ProcessScript(stdout=("ab" * 20).encode())
+        return script
+
+    processes = FakeProcesses(probe, pass_time=clock.advance)
+    journal = EventJournal(clock, SimThreads())
+    journal.enable_runlog(project, "run-1", git=Git(processes), checkout_root=checkout)
+    journal.attach(Project.log_directory_for(root, "run-1"), "run-1")
+    journal.emit(CoreEventType.RUN_STARTED)
+    journal.close()
+    with Project.run_log_path_for(root, "run-1").open("rb") as stream:
+        records = list(RunLogReader(stream))
+    assert len(records) == 2
+    header = records[0].body
+    assert header is not None
+    assert header.field == "epoch_started"
+    assert header.value.tree_hash == ""
+    assert header.value.dirty is False

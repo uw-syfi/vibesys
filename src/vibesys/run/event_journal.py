@@ -5,14 +5,43 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+from vibesys.constants import PROJECT_ROOT
 from vibesys.events import CoreEvent, CoreEventData, CoreEventType, make_core_event
+from vs_project.api import GitCommandError
 from vs_proto.api import Timestamp
 from vs_runlog.api import LegacyRunLogTee
 from vs_runtime.api.infrastructure import DurableEventJournal, EventCodec
-from vs_sim.api import Clock, Threads, utc_datetime
+from vs_sim.api import Clock, ProcessTimeoutError, Threads, utc_datetime
 
 if TYPE_CHECKING:
-    from vs_project.api import Project
+    from pathlib import Path
+
+    from vs_project.api import Git, Project
+
+
+_CHECKOUT_PROBE_SECONDS = 0.2
+
+
+def _checkout_provenance(git: Git | None, root: Path) -> tuple[str, bool]:
+    """An empty tree means unknown, including wheels, unborn repos and bounded probe failures."""
+    if git is None or not (root / ".git").exists():
+        return "", False
+    try:
+        tree = git.run_text(["rev-parse", "HEAD^{tree}"], cwd=root, timeout=_CHECKOUT_PROBE_SECONDS)
+        if tree.returncode != 0 or not tree.stdout.strip():
+            return "", False
+        status = git.run_text(
+            ["status", "--porcelain", "--untracked-files=normal"],
+            cwd=root,
+            timeout=_CHECKOUT_PROBE_SECONDS,
+        )
+    except (OSError, GitCommandError, ProcessTimeoutError):
+        return "", False
+    return (
+        (tree.stdout.strip(), bool(status.stdout.strip()))
+        if status.returncode == 0
+        else ("", False)
+    )
 
 
 class _CoreEventCodec(EventCodec[CoreEvent]):
@@ -45,7 +74,14 @@ class EventJournal(DurableEventJournal[CoreEvent]):
         self._runlog_configured = False
         self._runlog: LegacyRunLogTee | None = None
 
-    def enable_runlog(self, project: Project, run_id: str) -> None:
+    def enable_runlog(
+        self,
+        project: Project,
+        run_id: str,
+        *,
+        git: Git | None = None,
+        checkout_root: Path = PROJECT_ROOT,
+    ) -> None:
         """Enable the additive transport and publish discovery once for this process."""
         if self._runlog_configured:
             return
@@ -54,7 +90,10 @@ class EventJournal(DurableEventJournal[CoreEvent]):
             path = project.run_log_path_for(project.root, run_id)
             path.parent.mkdir(parents=True, exist_ok=True)
             project.publish_run_for(project.root, run_id)
-            self._runlog = LegacyRunLogTee(path, run_id, self._runlog_timestamp)
+            tree_hash, dirty = _checkout_provenance(git, checkout_root)
+            self._runlog = LegacyRunLogTee(
+                path, run_id, self._runlog_timestamp, tree_hash=tree_hash, dirty=dirty
+            )
             self.set_append_sink(self._runlog.append)
         except Exception:
             self.close()

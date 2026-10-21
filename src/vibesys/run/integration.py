@@ -716,7 +716,7 @@ class LocalRunIntegration:
         """Attach event persistence to the run's log directory."""
         identity = run_id or log_dir.parent.name
         if project is not None:
-            self.events.enable_runlog(project, identity)
+            self.events.enable_runlog(project, identity, git=self.git)
         self.events.attach(log_dir, identity)
 
     def close(self) -> None:
