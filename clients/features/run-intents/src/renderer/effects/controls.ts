@@ -10,7 +10,7 @@ import {
   intentTailResponse,
 } from '@vibesys/runs/intents';
 import {createActor, fromCallback, fromPromise} from 'xstate';
-import {type RunIntentsEvent, runIntentsMachine} from '../../state/index.js';
+import {intentWatchMachine, type RunIntentsEvent, runIntentsMachine} from '../../state/index.js';
 
 /** All I/O belongs to invoked actors, which cancel their bridge calls on exit. */
 export function intentsActor(input: {
@@ -36,21 +36,37 @@ export function intentsActor(input: {
           }
         }),
         watch: fromCallback<RunIntentsEvent>(({sendBack}) => {
-          const call = input.bridge.stream(
-            input.host,
-            INTENT_TAIL_METHOD,
-            intentTailRequest(input.runId),
-            bytes => {
-              try {
-                const outcomes = intentTailResponse(bytes);
-                sendBack({type: 'outcomes', outcomes});
-              } catch (error) {
-                sendBack({type: 'watchFailed', error: String(error)});
-              }
-            },
-            error => sendBack({type: 'watchFailed', error: error ?? 'Intent outcome stream ended'}),
-          );
-          return () => call.cancel();
+          const watcher = createActor(
+            intentWatchMachine.provide({
+              actors: {
+                read: fromCallback(({sendBack: ended}) => {
+                  const call = input.bridge.stream(
+                    input.host,
+                    INTENT_TAIL_METHOD,
+                    intentTailRequest(input.runId),
+                    bytes => {
+                      try {
+                        const outcomes = intentTailResponse(bytes);
+                        sendBack({type: 'outcomes', outcomes});
+                      } catch (error) {
+                        sendBack({type: 'watchFailed', error: String(error)});
+                      }
+                    },
+                    error => {
+                      sendBack({
+                        type: 'watchFailed',
+                        error: error ?? 'Intent outcome stream ended',
+                      });
+                      ended({type: 'ended'});
+                    },
+                  );
+                  return () => call.cancel();
+                }),
+              },
+            }),
+            {clock: clockFrom(input.schedule)},
+          ).start();
+          return () => watcher.stop();
         }),
       },
     }),
