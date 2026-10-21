@@ -88,7 +88,16 @@
       "path": "../../features/run-chat/tsconfig.state.json"
     },
     {
-      "path": "../../features/gateway-records/tsconfig.renderer.json"
+      "path": "../../libs/machine/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/run-skeleton/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/run-skeleton/tsconfig.reader.json"
+    },
+    {
+      "path": "../../libs/run-skeleton/tsconfig.cache.json"
     }
   ]
 }

@@ -96,7 +96,7 @@ def test_first_pending_append_sets_deadline_without_debouncing(tmp_path: Path) -
     run_virtual(clock, exercise())
 
 
-@pytest.mark.parametrize("boundary", ["commit", "lifecycle", "epoch", "close"])
+@pytest.mark.parametrize("boundary", ["commit", "checkpoint", "lifecycle", "epoch", "close"])
 def test_explicit_boundary_invalidates_old_timer(tmp_path: Path, boundary: str) -> None:
     clock = VirtualClock()
 
@@ -112,6 +112,10 @@ def test_explicit_boundary_invalidates_old_timer(tmp_path: Path, boundary: str) 
             ending.seq = 4
             writer.append(ending)
             assert head(tmp_path) == 4
+        elif boundary == "checkpoint":
+            writer.checkpoint()
+            assert head(tmp_path) == 3
+            assert (tmp_path / "keyframes/3.pb").is_file()
         elif boundary == "commit":
             writer.commit()
             assert head(tmp_path) == 3
@@ -252,7 +256,10 @@ def test_off_loop_construction_and_appends_use_the_supplied_loop(tmp_path: Path)
     run_virtual(clock, exercise())
 
 
-def test_checkpoint_failure_keeps_old_head_until_recovery(tmp_path: Path) -> None:
+@pytest.mark.parametrize("explicit_checkpoint", [False, True])
+def test_checkpoint_failure_keeps_old_head_until_recovery(
+    tmp_path: Path, *, explicit_checkpoint: bool
+) -> None:
     path = tmp_path / "run.log"
     writer = FileRunLogWriter(path, clock=ManualClock(), threads=SimThreads())
     expected = initial_records()
@@ -265,8 +272,9 @@ def test_checkpoint_failure_keeps_old_head_until_recovery(tmp_path: Path) -> Non
     old_head = (tmp_path / "run.head").read_bytes()
     checkpoint = tmp_path / "keyframes/302.pb"
     checkpoint.mkdir()
+    publish = writer.checkpoint if explicit_checkpoint else writer.commit
     with pytest.raises(OSError, match=r"302.pb"):
-        writer.commit()
+        publish()
     assert (tmp_path / "run.head").read_bytes() == old_head
     checkpoint.rmdir()
     with FileRunLogWriter(path, clock=ManualClock(), threads=SimThreads()) as recovered:

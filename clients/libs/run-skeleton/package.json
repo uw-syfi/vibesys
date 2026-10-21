@@ -7,7 +7,9 @@
     "layer": "domain",
     "entries": {
       ".": "neutral",
-      "./cache": "dom"
+      "./cache": "dom",
+      "./testing": "neutral",
+      "./reader": "dom"
     }
   },
   "exports": {
@@ -20,6 +22,16 @@
       "@vibesys/source": "./src/cache/index.ts",
       "types": "./dist/cache/index.d.ts",
       "default": "./dist/cache/index.js"
+    },
+    "./testing": {
+      "@vibesys/source": "./src/testing.ts",
+      "types": "./dist/testing.d.ts",
+      "default": "./dist/testing.js"
+    },
+    "./reader": {
+      "@vibesys/source": "./src/reader.ts",
+      "types": "./dist/reader.d.ts",
+      "default": "./dist/reader.js"
     }
   },
   "files": [
@@ -27,7 +39,7 @@
     "!dist/.*.tsbuildinfo"
   ],
   "scripts": {
-    "build": "tsc -b tsconfig.lib.json tsconfig.cache.json",
+    "build": "tsc -b tsconfig.lib.json tsconfig.cache.json tsconfig.testing.json tsconfig.reader.json",
     "check": "tsc -b",
     "test": "node ../../tools/scripts/run_bun_tests.mjs ./src"
   },

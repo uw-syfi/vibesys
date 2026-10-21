@@ -42,6 +42,9 @@
     },
     {
       "path": "../../libs/proto/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/run-skeleton/tsconfig.testing.json"
     }
   ]
 }

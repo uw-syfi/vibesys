@@ -286,6 +286,20 @@ class FileRunLogWriter:
         write_keyframe(self._path.parent / "keyframes", self._skeleton)
         self._checkpoint_seq = self.sequence
 
+    def checkpoint(self) -> None:
+        """Commit and checkpoint the current prefix, including a final conversion.
+
+        Unlike periodic checkpoints this is explicit: callers can finish a batch
+        at an arbitrary record and still open it without replaying its suffix.
+        """
+        with self._mutex:
+            self._check_open()
+            try:
+                self._commit(checkpoint=True)
+            except BaseException as error:
+                self._abort(error)
+                raise
+
     def close(self) -> None:
         """Commit the final suffix and release ownership, even when commit fails."""
         with self._mutex:

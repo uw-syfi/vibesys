@@ -44,6 +44,7 @@ import {
 } from '../../../../state/index.js';
 
 export interface UsageViewProps {
+  readonly emptyLabelsOnly?: boolean;
   readonly records: readonly UsageRecord[];
   readonly context: UsageContext;
   readonly controls: UsageControls;
@@ -210,7 +211,12 @@ export function UsageView(props: UsageViewProps): JSX.Element {
   const {controls, change} = props;
   const view = usageView(props.records, controls, props.context);
   if (view.empty) {
-    return <EmptyState title="No usage yet" body="Each agent turn's tokens and cost show here." />;
+    return (
+      <EmptyState
+        title="No usage yet"
+        body={props.emptyLabelsOnly ? '' : "Each agent turn's tokens and cost show here."}
+      />
+    );
   }
   return (
     <Stack gap="space-4">

@@ -170,3 +170,12 @@ jobs = ["python", "real_tiers"]
 native_languages = []
 native_targets = []
 pnpm_packages = []
+
+[[cases]]
+name = "saved run conversion selects Python checks"
+paths = ["src/vibesys/run/runlog_conversion.py"]
+jobs = ["python", "real_tiers"]
+[cases.collections]
+native_languages = []
+native_targets = []
+pnpm_packages = []

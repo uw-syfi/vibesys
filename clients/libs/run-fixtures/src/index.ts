@@ -49,4 +49,5 @@ export {
   scrubText,
   scrubValue,
 } from './scrub.js';
+export {type StoreRunFixture, storeRunFixture} from './store-records.js';
 export {weeksRun} from './weeks.js';

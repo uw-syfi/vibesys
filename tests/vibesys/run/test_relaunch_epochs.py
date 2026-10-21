@@ -90,7 +90,7 @@ def test_crash_at_every_epoch_write_prefix_has_one_end(cut: int) -> None:
         assert_crash_prefix(Path(directory), cut)
 
 
-def assert_crash_prefix(tmp_path: Path, cut: int) -> None:
+def assert_crash_prefix(tmp_path: Path, cut: int | None) -> None:
     # Prefixes include a crash between Ended and EpochStarted and torn frames.
     at = datetime(2026, 1, 1, tzinfo=UTC)
     first = p.Record(
@@ -118,6 +118,8 @@ def assert_crash_prefix(tmp_path: Path, cut: int) -> None:
     )
     path = tmp_path / "run.log"
     suffix = encode_frame(ended) + encode_frame(second)
+    if cut is None:
+        cut = len(encode_frame(ended))
     path.write_bytes(p.RUN_LOG_MAGIC + encode_frame(first) + suffix[:cut])
     with RunLogTee(
         FileRunLogWriter(path, clock=ManualClock(), threads=SimThreads()),
@@ -142,6 +144,42 @@ def assert_crash_prefix(tmp_path: Path, cut: int) -> None:
         ]
         assert len(ends) == 1
     assert all(r.clock == 7 for r in records)
+
+
+def test_crash_between_the_two_epoch_writes_does_not_duplicate_the_end(tmp_path: Path) -> None:
+    assert_crash_prefix(tmp_path, None)
+
+
+def test_relaunch_reads_older_records_without_a_clock_field(tmp_path: Path) -> None:
+    path = tmp_path / "run.log"
+    records = [
+        p.Record(
+            seq=1,
+            epoch=1,
+            at=p.Timestamp(seconds=100),
+            body=p.Oneof("epoch_started", p.EpochStarted(epoch=1, run_id="run-a")),
+        ),
+        p.Record(
+            seq=2,
+            epoch=1,
+            at=p.Timestamp(seconds=105),
+            body=p.Oneof("lifecycle", p.Lifecycle(state=p.Oneof("running", p.Running()))),
+        ),
+    ]
+    path.write_bytes(p.RUN_LOG_MAGIC + b"".join(encode_frame(r) for r in records))
+    with RunLogTee(
+        FileRunLogWriter(path, clock=ManualClock(), threads=SimThreads()),
+        FileRunContent(tmp_path / "blobs", tmp_path / "streams"),
+        "run-a",
+        checkout=("tree-a", False),
+    ) as tee:
+        tee.append(
+            make_core_event(CoreEventType.RESUMED, timestamp=datetime.fromtimestamp(1105, tz=UTC))
+            .model_dump_json()
+            .encode()
+        )
+    resumed = read(path)
+    assert [r.clock for r in resumed[2:]] == [5, 5, 5]
 
 
 def test_live_writer_refuses_relaunch_without_mutating_log(tmp_path: Path) -> None:

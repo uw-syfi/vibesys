@@ -2,21 +2,33 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from pathlib import Path
+import gzip
+import json
+import runpy
+from importlib.metadata import version
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 import pytest
+from hypothesis import example, given
+from hypothesis import strategies as st
 
-from vibesys.api.transport import ConversionStatus, convert_run
+from vibesys.api.transport import ConversionStatus, convert_run, convert_runs
 from vibesys.events import AgentOutputChunkData, CoreEventType, RunStartedData, SpanStartedData
+from vibesys.records.api import MappingState, map_event
 from vibesys.run import EventJournal
 from vibesys.run.runlog_tee import RunLogTee
-from vs_core.api import Span, SpanStatus, SpanType
-from vs_project.api import Project
+from vs_core.api import ENVELOPE_SCHEMA_VERSION, FlowState, RunEnvelope, Span, SpanStatus, SpanType
+from vs_core.api.testing import FAKE_REGISTRY
+from vs_project.api import Project, StoredEnvelope
 from vs_proto.api import RUN_LOG_MAGIC, EpochStarted, Keyframe, LegacyEvent, Oneof, Record, RunHead
-from vs_runlog.api import FileRunContent, FileRunLogWriter, RunLogReader
+from vs_runlog.api import (
+    FileRunContent,
+    FileRunLogWriter,
+    RunLogReader,
+    encode_frame,
+    fold_skeleton,
+)
 from vs_sim.api.testing import ManualClock, SimThreads
 
 
@@ -212,6 +224,276 @@ def test_conversion_repairs_a_tee_with_no_event_records(
     with destination.open("rb") as stream:
         records = list(RunLogReader(stream))
     assert any(record.body is not None and record.body.field == "span" for record in records)
+
+
+@pytest.mark.regression
+@given(
+    names=st.lists(st.text(alphabet="abcXYZ012", min_size=1, max_size=12), min_size=1, max_size=30)
+)
+@example(names=["last-span"])
+def test_conversion_fold_and_every_keyframe_suffix_equal_the_typed_mapping(
+    names: list[str],
+) -> None:
+    with TemporaryDirectory() as temporary, pytest.MonkeyPatch.context() as patch:
+        project, journal = journal_at(Path(temporary), patch)
+        journal.emit(
+            CoreEventType.RUN_STARTED,
+            data=RunStartedData(outer_loop="single-agent", input="input"),
+        )
+        for i, name in enumerate(names):
+            journal.emit(
+                CoreEventType.SPAN_STARTED,
+                data=SpanStartedData(
+                    span=Span(
+                        id=f"flow:{i}",
+                        name=name,
+                        parent=None,
+                        type=SpanType.FLOW,
+                        status=SpanStatus.RUNNING,
+                        started_at=float(i),
+                    )
+                ),
+            )
+        source = Project.event_journal_path_for(project.root, "run-1")
+        before = source.read_bytes()
+        assert (
+            convert_run(project, "run-1", clock=ManualClock(), threads=SimThreads()).status
+            is ConversionStatus.CONVERTED
+        )
+        destination = Project.run_log_path_for(project.root, "run-1")
+        with destination.open("rb") as stream:
+            records = list(RunLogReader(stream))
+        state = MappingState("run-1", vibesys_version=version("vibesys"))
+        expected = []
+        for event in journal.read():
+            mapped = map_event(state, event)
+            expected.extend(mapped.records)
+            state = mapped.state
+        size = destination.stat().st_size
+        full = fold_skeleton(records, log_offset=size)
+        assert full == fold_skeleton(expected, log_offset=size)
+        checkpoints = sorted((destination.parent / "keyframes").glob("*.pb"))
+        assert checkpoints
+        assert (destination.parent / "keyframes" / f"{records[-1].seq}.pb").exists()
+        for path in checkpoints:
+            seed = Keyframe.from_binary(path.read_bytes())
+            with destination.open("rb") as stream:
+                suffix = list(RunLogReader(stream, offset=seed.log_offset))
+            assert fold_skeleton(suffix, seed=seed, log_offset=size) == full
+        files = {
+            p.relative_to(destination.parent): p.read_bytes()
+            for p in destination.parent.rglob("*")
+            if p.is_file()
+        }
+        assert (
+            convert_run(project, "run-1", clock=ManualClock(), threads=SimThreads()).status
+            is ConversionStatus.EXISTS
+        )
+        assert {
+            p.relative_to(destination.parent): p.read_bytes()
+            for p in destination.parent.rglob("*")
+            if p.is_file()
+        } == files
+        assert source.read_bytes() == before
+
+
+@pytest.mark.parametrize("missing", ["head", "keyframes", "both"])
+def test_conversion_repairs_old_complete_log_without_rewriting_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, missing: str
+) -> None:
+    project, journal = journal_at(tmp_path, monkeypatch)
+    journal.emit(
+        CoreEventType.RUN_STARTED, data=RunStartedData(outer_loop="single-agent", input="input")
+    )
+    record_trace(journal)
+    journal.emit(CoreEventType.RUN_FINISHED)
+    convert_run(project, "run-1", clock=ManualClock(), threads=SimThreads())
+    directory = Project.log_directory_for(project.root, "run-1")
+    original = (directory / "run.log").read_bytes()
+    if missing in {"head", "both"}:
+        (directory / "run.head").unlink()
+    if missing in {"keyframes", "both"}:
+        for path in (directory / "keyframes").iterdir():
+            path.unlink()
+    result = convert_run(project, "run-1", clock=ManualClock(), threads=SimThreads())
+    assert result.status is ConversionStatus.CONVERTED
+    assert "repaired" in result.reason
+    head = RunHead.from_binary((directory / "run.head").read_bytes())
+    seed = Keyframe.from_binary((directory / "keyframes" / f"{head.committed_seq}.pb").read_bytes())
+    assert seed.log_offset == len(original)
+    assert (directory / "run.log").read_bytes() == original
+    assert (
+        convert_run(project, "run-1", clock=ManualClock(), threads=SimThreads()).status
+        is ConversionStatus.EXISTS
+    )
+
+
+@pytest.mark.parametrize(
+    "path",
+    sorted((Path(__file__).parents[3] / "libs/vs-core/tests/envelopes").glob("v*-*.json")),
+    ids=lambda p: p.stem,
+)
+def test_phase_two_conversion_preserves_saved_core_envelopes_and_their_resume_migrations(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, path: Path
+) -> None:
+    """Golden saves remain resumable; phase 2 never invents a state.pb commit fence."""
+    project, journal = journal_at(tmp_path, monkeypatch)
+    record_trace(journal)
+    envelope = path.read_text()
+    # The store owns an opaque runtime payload, not the core schema version.
+    payload = json.dumps({"schema_version": 1, "envelope": json.loads(envelope)})
+    record = StoredEnvelope(revision=4, schema_version=1, payload=payload.encode())
+    original = json.dumps({"version": 1, "record": record.model_dump(mode="json")}).encode()
+    namespace = project.state.state_store_namespace("run-1")
+    namespace.write_bytes("store.json", original)
+    result = convert_run(project, "run-1", clock=ManualClock(), threads=SimThreads())
+    assert result.status is ConversionStatus.CONVERTED
+    assert "state.pb conversion is phase 3" in result.reason
+    assert namespace.read_bytes("store.json") == original
+    assert project.stored_record("run-1") == record
+    decoded = FAKE_REGISTRY.decode_envelope(RunEnvelope[FlowState], envelope)
+    assert decoded.schema_version == ENVELOPE_SCHEMA_VERSION
+    assert not (Project.log_directory_for(project.root, "run-1") / "state.pb").exists()
+
+
+def test_bulk_reports_every_project_and_index_outcome_and_continues_after_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project, journal = journal_at(tmp_path, monkeypatch)
+    record_trace(journal)
+    # Project source and its existing host index alias are both reported.
+    Project.publish_run_for(project.root, "run-1")
+    for run_id, content in {
+        "bad": b"{malformed}",
+        "empty": b"",
+        "old": b'{"type":"retired_event","timestamp":"2026-01-01T00:00:00Z"}',
+    }.items():
+        directory = Project.log_directory_for(project.root, run_id)
+        directory.mkdir(parents=True)
+        (directory / "core-events.jsonl").write_bytes(content)
+    pretrace = EventJournal(ManualClock(start=100), SimThreads())
+    pretrace.attach(Project.log_directory_for(project.root, "pretrace"), "pretrace")
+    pretrace.emit(CoreEventType.RUN_FINISHED)
+    other = tmp_path / "other"
+    other.mkdir()
+    external = EventJournal(ManualClock(start=100), SimThreads())
+    external.attach(Project.log_directory_for(other, "external"), "external")
+    record_trace(external)
+    external_link = Project.publish_run_for(other, "external")
+    index = external_link.parent
+    (index / "broken").symlink_to(tmp_path / "absent")
+    (index / "unsupported").write_bytes(b"keep")
+    rows = {
+        row.run: row.result
+        for row in convert_runs(project, clock=ManualClock(), threads=SimThreads())
+    }
+    assert rows["run-1"].status is ConversionStatus.CONVERTED
+    assert rows["bad"].status is ConversionStatus.FAILED
+    assert rows["empty"].status is ConversionStatus.SKIPPED
+    assert rows["old"].status is ConversionStatus.SKIPPED
+    assert "unsupported journal event" in rows["old"].reason
+    assert "predates" in rows["pretrace"].reason
+    assert rows[str(external_link)].status is ConversionStatus.CONVERTED
+    assert rows[str(index / "broken")].status is ConversionStatus.FAILED
+    assert rows[str(index / "unsupported")].status is ConversionStatus.SKIPPED
+    assert "already processed" in rows[str(index / "run-1")].reason
+    assert len(rows) == 9
+    second = {
+        row.run: row.result
+        for row in convert_runs(project, clock=ManualClock(), threads=SimThreads())
+    }
+    assert second["run-1"].status is ConversionStatus.SKIPPED
+    assert second["run-1"].reason == "already converted"
+    assert second[str(external_link)].reason == "already converted"
+    assert (index / "unsupported").read_bytes() == b"keep"
+
+
+def test_bulk_reports_a_store_only_run_as_unsupported_in_phase_two(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("VIBESYS_STATE_HOME", str(tmp_path / "home"))
+    root = tmp_path / "project"
+    root.mkdir()
+    project = Project.open(root)
+    namespace = project.state.state_store_namespace("store-only")
+    namespace.write_bytes("store.json", b"original core state")
+    rows = convert_runs(project, clock=ManualClock(), threads=SimThreads())
+    assert len(rows) == 1
+    assert rows[0].run == "store-only"
+    assert rows[0].result.status is ConversionStatus.SKIPPED
+    assert "state.pb" in rows[0].result.reason
+    assert namespace.read_bytes("store.json") == b"original core state"
+
+
+def test_gateway_conversion_fixture_regenerates_identically(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project, _ = journal_at(tmp_path, monkeypatch)
+    directory = Path(__file__).parents[3] / "proto/testdata/conversion"
+    generated = runpy.run_path(str(directory / "generate.py"))["fixtures"](project)
+    for name, payload in generated.items():
+        saved = (directory / name).read_bytes()
+        if name.endswith(".gz"):
+            assert gzip.decompress(saved) == gzip.decompress(payload), name
+        else:
+            assert saved == payload, name
+
+
+@pytest.mark.parametrize("damage", ["log-sequence", "keyframe-offset", "stale-head"])
+def test_conversion_reports_or_repairs_damaged_derived_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, damage: str
+) -> None:
+    project, journal = journal_at(tmp_path, monkeypatch)
+    journal.emit(
+        CoreEventType.RUN_STARTED, data=RunStartedData(outer_loop="single-agent", input="input")
+    )
+    record_trace(journal)
+    journal.emit(CoreEventType.RUN_FINISHED)
+    convert_run(project, "run-1", clock=ManualClock(), threads=SimThreads())
+    directory = Project.log_directory_for(project.root, "run-1")
+    head = RunHead.from_binary((directory / "run.head").read_bytes())
+    if damage == "log-sequence":
+        with (directory / "run.log").open("rb") as stream:
+            records = list(RunLogReader(stream))
+        records[-1].seq += 1
+        (directory / "run.log").write_bytes(
+            RUN_LOG_MAGIC + b"".join(encode_frame(r) for r in records)
+        )
+        with pytest.raises(ValueError, match="non-dense"):
+            convert_run(project, "run-1", clock=ManualClock(), threads=SimThreads())
+    elif damage == "keyframe-offset":
+        path = directory / "keyframes" / f"{head.committed_seq}.pb"
+        seed = Keyframe.from_binary(path.read_bytes())
+        seed.log_offset += 1
+        path.write_bytes(seed.to_binary())
+        with pytest.raises(ValueError, match="checkpoint does not match"):
+            convert_run(project, "run-1", clock=ManualClock(), threads=SimThreads())
+    else:
+        head.committed_seq -= 1
+        (directory / "run.head").write_bytes(head.to_binary())
+        assert (
+            convert_run(project, "run-1", clock=ManualClock(), threads=SimThreads()).status
+            is ConversionStatus.CONVERTED
+        )
+        assert (
+            convert_run(project, "run-1", clock=ManualClock(), threads=SimThreads()).status
+            is ConversionStatus.EXISTS
+        )
+
+
+def test_bulk_reports_index_publication_failure_and_preserves_the_entry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project, journal = journal_at(tmp_path, monkeypatch)
+    record_trace(journal)
+    home = tmp_path / "home"
+    (home / "runs").mkdir()
+    (home / "runs/run-1").write_bytes(b"keep")
+    results = convert_runs(project, clock=ManualClock(), threads=SimThreads())
+    assert results[0].result.status is ConversionStatus.FAILED
+    assert "not a symlink" in results[0].result.reason
+    assert results[1].result.status is ConversionStatus.SKIPPED
+    assert (home / "runs/run-1").read_bytes() == b"keep"
 
 
 def test_typed_tee_explicit_commit_publishes_pending_checkpoint(

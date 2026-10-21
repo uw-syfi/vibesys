@@ -12,6 +12,7 @@ export function RunScrubber(props: {
   readonly ended: boolean;
   /** The host's wall time now (see `runWallNow`); null when the run has no live clock. */
   readonly wall: number | null;
+  readonly position?: string | undefined;
   readonly change: (view: RunView) => void;
 }): JSX.Element | null {
   const {log, view, ended, change} = props;
@@ -26,7 +27,7 @@ export function RunScrubber(props: {
       pastLabel="Replay"
       latestLabel={shown.latestLabel}
       backLabel={shown.backLabel}
-      position={shown.position}
+      position={props.position ?? shown.position}
       ticks={shown.ticks}
       tickWord="Call"
       change={index => change(viewAtPosition(log, index))}

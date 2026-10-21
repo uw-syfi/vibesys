@@ -9,6 +9,12 @@
     },
     {
       "path": "./tsconfig.test.json"
+    },
+    {
+      "path": "./tsconfig.testing.json"
+    },
+    {
+      "path": "./tsconfig.reader.json"
     }
   ]
 }

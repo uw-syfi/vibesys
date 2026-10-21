@@ -35,7 +35,7 @@ read path and journal projection from the native core and control work still to 
 | Store records for every event kind ([inventory](#event-inventory)) | schemas and typed journal projection built; the native core producer remains unbuilt | 2 |
 | Skeleton keyframes, `run.head`, `~/.vibesys/runs/<run_id>` link | writers, discovery and converted head/keyframe publication built; legacy-only epochs have no native headline | 2 |
 | `Skeleton`, `GetBlobs`, `TailStream`, `WatchRuns`; new Run screen | RPCs, client skeleton/cache and opt-in raw record panel built; complete native Run screen remains unbuilt | 2 |
-| Conversion of existing JSONL runs and `store.json` envelopes | typed JSONL conversion built, including blob storage for large events and repair of incomplete mirrors; pre-trace journals are skipped, unsupported historical events are rejected, and `store.json` migration remains unbuilt | 2 |
+| Conversion of existing JSONL runs and `store.json` envelopes | typed journal conversion and bulk project/host-index conversion built, including blobs, final keyframes, head publication and repair; pre-trace and unsupported journals are reported as skipped; core envelopes remain the resume authority until phase 3 | 2 |
 | Core state as generated types, `state.pb`, native `run.log` writes | unbuilt; typed journal projection does not replace native core commits | 3 |
 | Intents as records (`IntentState`), pause/park, relaunch epochs | schemas built; native execution and recovery remain unbuilt | 3 |
 | Chat sessions as processes with their own log; `HostCall` | unbuilt | 3 |
@@ -519,8 +519,27 @@ Notes on the records:
 | 3. Write path | core state as generated types and `state.pb`; the run writes `run.log` natively; intents, pause and park, relaunch epochs; chat sessions; `HostCall` |
 | 4. Cutover | delete the run protocol, its service and transports, the relay and run sockets, the helper protocol and its features, the reader server, registry tombstones and record versions, the dual summary fold, the conformance corpus, the strategy-specific event kinds, the Pydantic contract models and JSON Schema pipeline, the envelope JSON migration chain and the persisted-shape snapshots |
 
-Existing JSONL runs, and `store.json` core envelopes, are converted to the new format. The
-originals are kept for a week.
+Existing JSONL runs are converted to the typed store read model in phase 2. The converter
+publishes the log, its final skeleton keyframe and, when the journal declares a run and
+lifecycle, its head through the run-log writer's durable publication mechanism. A previous
+conversion missing these derived files is repaired without rewriting its complete log.
+Bulk conversion covers the selected project's saved runs and every entry in the host run
+index, reports each outcome and reason, and continues after individual failures. A run
+without trace events is explicitly skipped (OQ14); unsupported historical event kinds and
+index entries are reported rather than silently ignored. Runs must be stopped first.
+
+`store.json` has a storage envelope around an opaque runtime record, whose `envelope` holds
+core and strategy state. The core JSON migration chain remains authoritative for resume
+until phase 3 generates core state types and writes `state.pb` with its log commit fence.
+Phase 2 converts the journal projection alongside these envelopes without changing their
+bytes or manufacturing a `state.pb` sequence. A store-only run has no phase 2 read history
+and is explicitly reported as unsupported, with core conversion deferred to phase 3.
+The golden envelope conversion tests preserve saved stores and check their existing core
+migration chain; the generated-journal properties and gateway conversion fixture check the
+read projection and keyframe opening.
+
+Original journals and core envelopes are retained for at least seven days. Conversion
+never deletes them; retention cleanup is separate from conversion.
 
 ## Decisions and alternatives
 

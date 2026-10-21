@@ -53,18 +53,25 @@ class RunLogTee:
         run_id: str,
         *,
         history: Callable[[], Iterable[CoreEvent]] = tuple,
-        checkout: tuple[str, bool] = ("", False),
+        checkout: tuple[str, bool] | None = None,
     ) -> None:
-        """Own a writer; delay replay until the journal has attached its history."""
+        """Own a writer; delay replay until the journal has attached its history.
+
+        A live journal supplies its checkout (an empty hash explicitly means
+        unknown). Offline conversion preserves the journal's span clock values.
+        """
         self._writer = writer
         self._content = content
         self._run_id = run_id
         self._history = history
         self._state: MappingState | None = None
-        self._tree_hash, self._dirty = checkout
+        self._live = checkout is not None
+        self._tree_hash, self._dirty = ("", False) if checkout is None else checkout
 
     def _initialize(self, event: CoreEvent) -> MappingState:
-        state = MappingState(self._run_id, vibesys_version=version("vibesys"), native_intents=True)
+        state = MappingState(
+            self._run_id, vibesys_version=version("vibesys"), native_intents=self._live
+        )
         for historical in self._history():
             result = map_event(state, historical)
             self._write_content(result)
@@ -115,7 +122,7 @@ class RunLogTee:
             clock_offset=clock,
             tree_hash=self._tree_hash,
             dirty=self._dirty,
-            wall_span_clock=True,
+            wall_span_clock=self._live,
             clock_epochs=(*epochs, (event.timestamp.timestamp(), clock)),
             spans=tuple(
                 (key, history.versions[-1].span.to_binary())
