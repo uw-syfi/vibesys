@@ -2,6 +2,7 @@
 
 export {descriptorRegistry} from './descriptor-registry.js';
 export {RUN_LOG_MAGIC, RUN_LOG_MAX_RECORD_BYTES} from './generated/framing.js';
+export * from './generated/vibesys/api/v1/host_call_pb.js';
 export {
   GetBlobsRequestSchema,
   GetBlobsResponseSchema,
@@ -26,6 +27,7 @@ export * from './generated/vibesys/store/v1/common_pb.js';
 export * from './generated/vibesys/store/v1/content_pb.js';
 export * from './generated/vibesys/store/v1/environment_attrs_pb.js';
 export * from './generated/vibesys/store/v1/epoch_pb.js';
+export * from './generated/vibesys/store/v1/intent_pb.js';
 export * from './generated/vibesys/store/v1/lifecycle_pb.js';
 export {
   type EpochStarted,

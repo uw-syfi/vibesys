@@ -3,6 +3,7 @@ syntax = "proto3";
 package vibesys.api.v1;
 
 import "vibesys/store/v1/skeleton.proto";
+import "vibesys/api/v1/host_call.proto";
 
 option go_package = "github.com/uw-syfi/vibesys/gateway/gen/vibesys/api/v1;apiv1";
 
@@ -11,6 +12,7 @@ option go_package = "github.com/uw-syfi/vibesys/gateway/gen/vibesys/api/v1;apiv1
 service HostService {
   // Hello compares the client and gateway API schema hashes. A mismatch fails
   // with gRPC FAILED_PRECONDITION and a message naming both hashes.
+  rpc HostCall(HostCallRequest) returns (HostCallResponse);
   rpc Hello(HelloRequest) returns (HelloResponse);
   // Tail follows the log live until the client cancels, starting at from_seq
   // (inclusive). Record bytes pass through unchanged; only seq is decoded.

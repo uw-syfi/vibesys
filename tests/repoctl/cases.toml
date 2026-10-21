@@ -181,6 +181,15 @@ native_targets = []
 pnpm_packages = []
 
 [[cases]]
+name = "intent control changes select their mountable feature"
+paths = ["clients/features/run-intents/src/state/machine.ts"]
+jobs = ["clients"]
+[cases.collections]
+native_languages = []
+native_targets = []
+pnpm_packages = ["@vibesys/feature-run-intents"]
+
+[[cases]]
 name = "core value compiler and generated values select regeneration and Python checks"
 paths = ["scripts/corevalue/_emit.py", "libs/vs-core/src/vs_core/_generated/vibesys/core/v1/control_cv.py", "libs/vs-runtime/src/vs_runtime/_core_values/vibesys/core/v1/control_boundary.py"]
 jobs = ["proto", "python", "real_tiers"]

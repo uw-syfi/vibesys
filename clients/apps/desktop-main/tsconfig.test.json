@@ -11,10 +11,14 @@
       "node"
     ],
     "noEmit": true,
-    "tsBuildInfoFile": ".tsbuild/test.tsbuildinfo"
+    "tsBuildInfoFile": ".tsbuild/test.tsbuildinfo",
+    "allowJs": true
   },
   "include": [
-    "src/**/*.test.ts"
+    "src/**/*.test.ts",
+    "e2e/gateway-app.mjs",
+    "e2e/first-load.mjs",
+    "e2e/pin-performance-global.mjs"
   ],
   "references": [
     {

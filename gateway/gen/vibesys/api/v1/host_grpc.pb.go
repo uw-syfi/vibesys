@@ -19,6 +19,7 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
+	HostService_HostCall_FullMethodName   = "/vibesys.api.v1.HostService/HostCall"
 	HostService_Hello_FullMethodName      = "/vibesys.api.v1.HostService/Hello"
 	HostService_Tail_FullMethodName       = "/vibesys.api.v1.HostService/Tail"
 	HostService_Skeleton_FullMethodName   = "/vibesys.api.v1.HostService/Skeleton"
@@ -36,6 +37,7 @@ const (
 type HostServiceClient interface {
 	// Hello compares the client and gateway API schema hashes. A mismatch fails
 	// with gRPC FAILED_PRECONDITION and a message naming both hashes.
+	HostCall(ctx context.Context, in *HostCallRequest, opts ...grpc.CallOption) (*HostCallResponse, error)
 	Hello(ctx context.Context, in *HelloRequest, opts ...grpc.CallOption) (*HelloResponse, error)
 	// Tail follows the log live until the client cancels, starting at from_seq
 	// (inclusive). Record bytes pass through unchanged; only seq is decoded.
@@ -52,6 +54,16 @@ type hostServiceClient struct {
 
 func NewHostServiceClient(cc grpc.ClientConnInterface) HostServiceClient {
 	return &hostServiceClient{cc}
+}
+
+func (c *hostServiceClient) HostCall(ctx context.Context, in *HostCallRequest, opts ...grpc.CallOption) (*HostCallResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(HostCallResponse)
+	err := c.cc.Invoke(ctx, HostService_HostCall_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (c *hostServiceClient) Hello(ctx context.Context, in *HelloRequest, opts ...grpc.CallOption) (*HelloResponse, error) {
@@ -150,6 +162,7 @@ type HostService_TailStreamClient = grpc.ServerStreamingClient[TailStreamRespons
 type HostServiceServer interface {
 	// Hello compares the client and gateway API schema hashes. A mismatch fails
 	// with gRPC FAILED_PRECONDITION and a message naming both hashes.
+	HostCall(context.Context, *HostCallRequest) (*HostCallResponse, error)
 	Hello(context.Context, *HelloRequest) (*HelloResponse, error)
 	// Tail follows the log live until the client cancels, starting at from_seq
 	// (inclusive). Record bytes pass through unchanged; only seq is decoded.
@@ -168,6 +181,9 @@ type HostServiceServer interface {
 // pointer dereference when methods are called.
 type UnimplementedHostServiceServer struct{}
 
+func (UnimplementedHostServiceServer) HostCall(context.Context, *HostCallRequest) (*HostCallResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method HostCall not implemented")
+}
 func (UnimplementedHostServiceServer) Hello(context.Context, *HelloRequest) (*HelloResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Hello not implemented")
 }
@@ -205,6 +221,24 @@ func RegisterHostServiceServer(s grpc.ServiceRegistrar, srv HostServiceServer) {
 		t.testEmbeddedByValue()
 	}
 	s.RegisterService(&HostService_ServiceDesc, srv)
+}
+
+func _HostService_HostCall_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(HostCallRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServiceServer).HostCall(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: HostService_HostCall_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServiceServer).HostCall(ctx, req.(*HostCallRequest))
+	}
+	return interceptor(ctx, in, info, handler)
 }
 
 func _HostService_Hello_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
@@ -301,6 +335,10 @@ var HostService_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "vibesys.api.v1.HostService",
 	HandlerType: (*HostServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "HostCall",
+			Handler:    _HostService_HostCall_Handler,
+		},
 		{
 			MethodName: "Hello",
 			Handler:    _HostService_Hello_Handler,

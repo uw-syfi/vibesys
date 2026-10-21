@@ -41,6 +41,10 @@ func start(t *testing.T) fixture {
 }
 
 func startWithClock(t *testing.T, clock server.Clock) fixture {
+	return startWithConfig(t, server.Config{Clock: clock})
+}
+
+func startWithConfig(t *testing.T, config server.Config) fixture {
 	t.Helper()
 	// Keep Unix socket paths short even on hosts with long temporary roots.
 	root, err := os.MkdirTemp("/tmp", "g")
@@ -56,7 +60,9 @@ func startWithClock(t *testing.T, clock server.Clock) fixture {
 	}
 	done := make(chan error, 1)
 	go func() {
-		done <- server.Serve(ctx, endpoint.Listener, server.Config{Root: root, Version: "test-version", Clock: clock})
+		config.Root = root
+		config.Version = "test-version"
+		done <- server.Serve(ctx, endpoint.Listener, config)
 	}()
 	t.Cleanup(func() {
 		cancel()
