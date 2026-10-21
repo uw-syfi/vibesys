@@ -564,7 +564,9 @@ function RunScreenBody(props: {
   const base: ViewBase = {
     names,
     model,
-    clock: {start: clockStart(model), now: clockAt(model, runNow(state))},
+    // The run's own start, read from the whole run: a scrubbed model before its first span has no
+    // start to give, and every face measures its times from the same origin at every position.
+    clock: {start: clockStart(props.whole), now: clockAt(model, runNow(state))},
     tokens: props.core?.tokens ?? EMPTY_LEDGER,
     who: whoBySpan(usageRecords(state), names),
     zoom,

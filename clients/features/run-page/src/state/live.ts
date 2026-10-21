@@ -179,14 +179,28 @@ function replacing(next: TraceLog, previous: TraceLog, handoff: number): TraceLo
 
 export const EMPTY_TRACE_LOG: TraceLog = traceLog(EMPTY_TRACE, null, []);
 
-/** The events the slice keeps: the trace's span events, the overview's declaration and the gates that finished. */
-const SPAN_EVENTS: ReadonlySet<string> = new Set([
+/**
+ * The events the slice keeps: the trace's span events, the overview's declaration and the gates
+ * that finished. The host selects the same events when asked for the `trace` kind of a history
+ * read (`RUN_EVENT_TYPES_BY_KINDS`, which `live.test.ts` holds this set to).
+ */
+export const SPAN_EVENTS: ReadonlySet<string> = new Set([
   'span_started',
   'span_updated',
   'span_ended',
   'run_started',
   'gate_finished',
 ]);
+
+/** The events of `events` the trace slice keeps (`SPAN_EVENTS`), in their order. */
+export function traceEventsOf(events: readonly RunEvent[]): RunEvent[] {
+  return events.filter(event => SPAN_EVENTS.has(event.type));
+}
+
+/** Whether an event of this type is one the trace slice keeps: the rest need not be read to scrub. */
+export function isTraceEventType(type: unknown): boolean {
+  return typeof type === 'string' && SPAN_EVENTS.has(type);
+}
 
 /** What the session folded into its run, as the trace slice needs it. */
 export type RunData =

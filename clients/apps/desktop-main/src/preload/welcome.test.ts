@@ -140,6 +140,10 @@ function cases(random: Seeded): Case[] {
       {kind: 'read-events', host, project: path, runId: name, from: token, max: 1 + (token % 1000)},
     ],
     [
+      bridge => bridge.readTrace(key, path, name, token, 1 + (token % 1000)),
+      {kind: 'read-trace', host, project: path, runId: name, from: token, max: 1 + (token % 1000)},
+    ],
+    [
       bridge => bridge.readSummary(key, path, name),
       {kind: 'read-summary', host, project: path, runId: name},
     ],

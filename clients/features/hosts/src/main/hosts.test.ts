@@ -2,7 +2,7 @@ import {describe, expect, test} from 'bun:test';
 import {join} from 'node:path';
 import {type ConnectionLease, ConnectionManager} from '@vibesys/connection';
 import {FAKE_MODEL_CATALOGUE, FakeLink, record} from '@vibesys/connection/testing';
-import type {RunSummary} from '@vibesys/contracts/host-helper';
+import {RUN_EVENT_TYPES_BY_KINDS, type RunSummary} from '@vibesys/contracts/host-helper';
 import {type HostId, type HostListing, hostKey} from '@vibesys/hosts';
 import {remember, SettingsStore, settingsFor, withHostSettings} from '@vibesys/settings';
 import {FakeSettingsFilesystem} from '@vibesys/settings/testing';
@@ -497,6 +497,86 @@ describe('Hosts.readEvents page size', () => {
     const [request] = await asked('without');
     expect(request).toMatchObject({max: 500});
     expect(request).not.toHaveProperty('with_totals');
+  });
+});
+
+describe('Hosts.readEvents of one kind', () => {
+  const OTHER = ['control', 'agent_output_chunk', 'turn_usage_recorded'];
+  const TRACE = RUN_EVENT_TYPES_BY_KINDS.trace;
+
+  /** `length` events numbered from 1 whose types a `seed` picks from the trace's and from the rest. */
+  function journalOf(seed: number, length: number): Record<string, unknown>[] {
+    const types = [...TRACE, ...OTHER, ...OTHER, ...OTHER];
+    let state = seed;
+    return Array.from({length}, (_, index) => {
+      state = (state * 1_103_515_245 + 12_345) % 2_147_483_648;
+      return {sequence: index + 1, type: types[Math.floor(state / 65_536) % types.length]};
+    });
+  }
+
+  /** The host's pages of `journal`, `max` events at most, and the requests the host received. */
+  async function readAll(
+    journal: Record<string, unknown>[],
+    max: number,
+    options: {readonly trace: boolean; readonly feature: boolean},
+  ) {
+    const link = new FakeLink();
+    link.helper.host.projects.set('/srv/project', ['mpmc']);
+    link.helper.host.journals.set('/srv/project run-1', journal);
+    if (!options.feature) link.helper.features.delete('run_trace_events');
+    const subject = completionSubject(link);
+    await using _manager = subject.manager;
+    const events: unknown[] = [];
+    for (let from = 1, pages = 0; pages <= journal.length + 2; pages += 1) {
+      const page = await subject.hosts.readEvents(
+        LOCAL,
+        '/srv/project',
+        'run-1',
+        from,
+        max,
+        options.trace ? 'trace' : undefined,
+      );
+      if (page.kind !== 'page') throw new Error('the host serves no history');
+      events.push(...page.events);
+      if (page.complete) break;
+      expect(page.next).toBeGreaterThan(from);
+      from = page.next;
+    }
+    const asked = link.helper.requests.filter(request => request.type === 'runs.read_events');
+    return {events, asked};
+  }
+
+  test('asks a helper with run_trace_events to select them, and sends only those', async () => {
+    const journal = journalOf(3, 60);
+    const {events, asked} = await readAll(journal, 7, {trace: true, feature: true});
+    expect(events).toEqual(journal.filter(event => TRACE.includes(String(event['type']))));
+    expect(asked.every(request => 'kinds' in request && request.kinds === 'trace')).toBe(true);
+  });
+
+  test('selects them itself from an older helper, which is sent no kinds', async () => {
+    const journal = journalOf(3, 60);
+    const {events, asked} = await readAll(journal, 7, {trace: true, feature: false});
+    expect(events).toEqual(journal.filter(event => TRACE.includes(String(event['type']))));
+    expect(asked.some(request => 'kinds' in request)).toBe(false);
+  });
+
+  test('reads the same events from either helper, in fewer requests from the one that selects', async () => {
+    for (const seed of [1, 2, 3, 5, 8, 13, 21, 34]) {
+      const journal = journalOf(seed, 20 + seed * 9);
+      for (const max of [1, 4, 25, 2000]) {
+        const selecting = await readAll(journal, max, {trace: true, feature: true});
+        const older = await readAll(journal, max, {trace: true, feature: false});
+        expect(selecting.events).toEqual(older.events);
+        expect(selecting.asked.length).toBeLessThanOrEqual(older.asked.length);
+      }
+    }
+  });
+
+  test('a read of every event sends no kinds whatever the helper offers', async () => {
+    const journal = journalOf(9, 30);
+    const {events, asked} = await readAll(journal, 10, {trace: false, feature: true});
+    expect(events).toEqual(journal);
+    expect(asked.some(request => 'kinds' in request)).toBe(false);
   });
 });
 

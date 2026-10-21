@@ -69,6 +69,9 @@ class HelperFeature(StrEnum):
     """``runs.events_for_span``: the recorded events of one span and the spans beneath it."""
     RUN_TAIL = "run_tail"
     """``runs.read_tail``: the newest recorded events before a sequence, in bounded pages."""
+    RUN_TRACE_EVENTS = "run_trace_events"
+    """``runs.read_events``'s ``kinds``: only the events of one kind, such as the trace's, read from
+    the journal's span index so the rest of a long journal is neither read nor sent."""
     MACHINE_DESCRIBE = "machine_describe"
     """``machine.describe``: the host's checkout, hardware, Docker, harness CLIs and run counts."""
     CHECKOUT_INSPECT = "checkout_inspect"

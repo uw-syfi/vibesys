@@ -67,11 +67,13 @@ from server.host_helper_requests import (
     event_page,
 )
 from server.host_preflight import PreflightReport
+from server.host_run_events import EVENT_TYPES_BY_KINDS, RunEventKinds
 from server.run_digest import digest_journal
 from server.span_index import (
     Entry,
     JournalIndex,
     StaleIndexError,
+    kind_page,
     load_journal_index,
     read_documents,
     span_page,
@@ -315,6 +317,32 @@ class FileProjects:
             nothing = EventPage((), from_sequence, complete=True)
             return replace(nothing, total_events=0, total_bytes=0) if with_totals else nothing
         return replace(page, total_events=tally.lines, total_bytes=tally.size)
+
+    def run_kind_events(
+        self, project: Path, run_id: str, kinds: RunEventKinds, from_sequence: int, limit: int
+    ) -> EventPage:
+        """A page of the events ``kinds`` selects, from the journal's span index (``kind_page``).
+
+        The events carry the cursor the index gives them, as the span and tail reads' do, so they
+        are the same whether the index came from its sidecar or from a scan of the journal.
+        """
+
+        def ask(index: JournalIndex) -> tuple[list[Entry], tuple[int, int, int, bool]]:
+            entries, events, size, complete, next_sequence = kind_page(
+                index, EVENT_TYPES_BY_KINDS[kinds], from_sequence, limit, RUN_EVENTS_READ_MAX_BYTES
+            )
+            return entries, (next_sequence, events, size, complete)
+
+        (next_sequence, events, size, complete), documents = self._indexed_read(
+            self._journal(project, run_id), ask
+        )
+        return EventPage(
+            tuple(documents),
+            next_sequence,
+            complete=complete,
+            total_events=events,
+            total_bytes=size,
+        )
 
     def _journal(self, project: Path, run_id: str) -> Path:
         """The journal of ``run_id``, found through the project's run history once per channel.

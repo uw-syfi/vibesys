@@ -33,6 +33,7 @@ import {
   type MachineDescription,
   type PathEntry,
   parseHelperRequest,
+  RUN_EVENT_TYPES_BY_KINDS,
   type RunSummary,
   type TaskGoal,
   type UnreadableRecord,
@@ -119,6 +120,14 @@ export interface FakeHost {
   readonly directories: Map<string, readonly string[]>;
   /** The runs each project records (`runs.list`), with the digests it can read. */
   readonly runHistory: Map<string, readonly RunSummary[]>;
+  /**
+   * The journals `runs.read_events` serves per `PROJECT RUN_ID` (a space between): each event a
+   * JSON document with its `sequence` (increasing) and `type`. A run not named here, or a request
+   * for another page kind, is an unknown run.
+   */
+  readonly journals: Map<string, readonly Readonly<Record<string, unknown>>[]>;
+  /** The most bytes of events (their JSON) one `runs.read_events` page holds, one event at least. */
+  journalPageBytes: number;
   /** How each live run answers its run channel. */
   readonly runs: Map<string, RunServer>;
   /** How a read-only server (`run.reader`) answers its run channel. */
@@ -399,6 +408,8 @@ export class FakeHelper {
     summaries: new Map(),
     directories: new Map(),
     runHistory: new Map(),
+    journals: new Map(),
+    journalPageBytes: Number.POSITIVE_INFINITY,
     runs: new Map(),
     readerServer: ECHO_SERVER,
     readers: new Map(),
@@ -457,6 +468,7 @@ export class FakeHelper {
     'run_history',
     'run_span_events',
     'run_tail',
+    'run_trace_events',
     'run_summary',
     'run_trace',
     'run_ending',
@@ -1360,6 +1372,13 @@ class HelperSession {
       this.#usage(request);
       return;
     }
+    if (request.type === 'runs.read_events') {
+      const journal = this.#helper.host.journals.get(`${request.project} ${request.run_id}`);
+      if (journal !== undefined) {
+        this.#send(this.#eventsPage(request, journal));
+        return;
+      }
+    }
     if (request.type === 'runs.summary') {
       const served = this.#helper.host.summaries
         .get(`${request.project} ${request.run_id}`)
@@ -1373,6 +1392,52 @@ class HelperSession {
       ...this.#error(id, 'unknown_run', `${request.project} has no run '${request.run_id}'`),
       path: request.project,
     });
+  }
+
+  /**
+   * A page of `journal` as the real helper cuts one: the events from `from_sequence` (of the
+   * request's `kinds` only), at most `max` and `journalPageBytes`, one at least; an incomplete
+   * page's `next_sequence` follows its last event and a complete one's the journal's last.
+   */
+  #eventsPage(
+    request: Extract<HelperRequest, {type: 'runs.read_events'}>,
+    journal: readonly Readonly<Record<string, unknown>>[],
+  ): Reply {
+    const types = request.kinds == null ? null : new Set(RUN_EVENT_TYPES_BY_KINDS[request.kinds]);
+    const selected = journal.filter(
+      event => types === null || (typeof event['type'] === 'string' && types.has(event['type'])),
+    );
+    const sequenceOf = (event: Readonly<Record<string, unknown>>): number =>
+      Number(event['sequence']);
+    const rest = selected.filter(event => sequenceOf(event) >= request.from_sequence);
+    const page: Readonly<Record<string, unknown>>[] = [];
+    let bytes = 0;
+    for (const event of rest) {
+      const size = JSON.stringify(event).length;
+      if (page.length >= request.max) break;
+      if (page.length > 0 && bytes + size > this.#helper.host.journalPageBytes) break;
+      page.push(event);
+      bytes += size;
+    }
+    const complete = page.length === rest.length;
+    const last = journal.reduce((newest, event) => Math.max(newest, sequenceOf(event)), 0);
+    const totals =
+      request.with_totals === true
+        ? {
+            total_events: selected.length,
+            total_bytes: selected.reduce((sum, event) => sum + JSON.stringify(event).length + 1, 0),
+          }
+        : {};
+    return {
+      type: 'runs.read_events',
+      request_id: request.request_id,
+      events: page,
+      next_sequence: complete
+        ? Math.max(request.from_sequence, last + 1)
+        : sequenceOf(page[page.length - 1] ?? {}) + 1,
+      complete,
+      ...totals,
+    };
   }
 
   #taskGoal(request: Extract<HelperRequest, {type: 'project.task_goal'}>): void {

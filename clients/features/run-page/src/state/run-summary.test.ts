@@ -194,7 +194,8 @@ describe('an ended run opened from its summary', () => {
 
   test('is final and interactive at once: spans, spend and replies, with no history asked', () => {
     const {state} = opened();
-    expect(state.requests).toEqual([]);
+    // Only the span events before the summary are read, for the scrubber's positions.
+    expect(state.requests.map(each => each.kind)).toEqual(['read-trace']);
     expect(state.state.history).toEqual({kind: 'idle'});
     expect(traceArrival(state.state)).toBe('arrived');
     expect(historyLoading(state.state)).toBeNull();

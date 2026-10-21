@@ -295,7 +295,22 @@ function summaryAction(random: Seeded, issued: readonly number[]): RunPageAction
 }
 
 function randomAction(random: Seeded, issued: readonly number[]): RunPageAction {
-  switch (random.int(11)) {
+  switch (random.int(12)) {
+    case 11:
+      return {
+        type: 'trace-page',
+        token: random.pick(issued),
+        reply: random.pick([
+          {kind: 'unsupported'} as const,
+          {kind: 'failed', message: 'channel closed'} as const,
+          {
+            kind: 'page',
+            events: Array.from({length: random.int(4)}, () => runEvent(random, random.int(30))),
+            next: random.int(40),
+            complete: random.bool(),
+          } as const,
+        ]),
+      };
     case 9:
       return summaryAction(random, issued);
     case 10:
@@ -330,6 +345,7 @@ function issues(request: RunPageRequest): number | null {
     case 'list-logs':
     case 'attach':
     case 'read-history':
+    case 'read-trace':
     case 'read-summary':
       return request.token;
     default:
@@ -351,6 +367,7 @@ function awaited(state: RunPageState) {
     // Each page in flight is its own slot: a reply is awaited by the token it was asked under.
     ...Object.fromEntries(historyAwaiting(state.history).map(token => [`history:${token}`, token])),
     summary: state.summary.kind === 'reading' ? state.summary.token : null,
+    trace: state.traceHistory.kind === 'reading' ? state.traceHistory.token : null,
   };
 }
 
@@ -360,6 +377,7 @@ function reply(action: RunPageAction) {
   if (action.type === 'attached') return {slot: 'attach', token: action.token};
   if (action.type === 'history') return {slot: `history:${action.token}`, token: action.token};
   if (action.type === 'summary') return {slot: 'summary', token: action.token};
+  if (action.type === 'trace-page') return {slot: 'trace', token: action.token};
   return null;
 }
 

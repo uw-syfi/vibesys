@@ -12,11 +12,13 @@ import {
   type HostConnection,
   type LogsLease,
 } from '@vibesys/connection';
-import type {
-  HarnessesListReply,
-  HelperMessage,
-  PathsCompleteReply,
-  UsageRecord,
+import {
+  type HarnessesListReply,
+  type HelperMessage,
+  type PathsCompleteReply,
+  RUN_EVENT_TYPES_BY_KINDS,
+  type RunEventKinds,
+  type UsageRecord,
 } from '@vibesys/contracts/host-helper';
 import {
   digestEntries,
@@ -61,6 +63,19 @@ import {discoverSshConfigAliases, type SshConfigFilesystem} from './ssh-config.j
 
 /** The most events a helper without `run_history_pages` serves in one `runs.read_events` page. */
 const LEGACY_HISTORY_PAGE_EVENTS = 500;
+
+/** The events of `events` whose `type` `kinds` selects (`RUN_EVENT_TYPES_BY_KINDS`), in their order. */
+function ofKinds(events: readonly unknown[], kinds: RunEventKinds): unknown[] {
+  const types = new Set(RUN_EVENT_TYPES_BY_KINDS[kinds]);
+  return events.filter(
+    event =>
+      typeof event === 'object' &&
+      event !== null &&
+      'type' in event &&
+      typeof event.type === 'string' &&
+      types.has(event.type),
+  );
+}
 
 export interface HostsDeps {
   readonly manager: ConnectionManager;
@@ -428,6 +443,12 @@ export class Hosts {
   /**
    * One page of run `runId`'s recorded events in `project` on `id` (`runs.read_events`), from
    * `from`; `unsupported` when the host's VibeSys does not serve history (`run_history`).
+   *
+   * With `kinds` the page holds only the events of that kind, whichever helper serves it: a helper
+   * with `run_trace_events` selects them from the journal's index and sends only those; an older
+   * one sends every event of the page and they are selected here. Either way the page's `next` and
+   * `complete` are the helper's, so the pages of a read join to the same events. The totals of a
+   * page that an older helper selects here are the journal's, not the selection's.
    */
   async readEvents(
     id: HostId,
@@ -435,6 +456,7 @@ export class Hosts {
     runId: string,
     from: number,
     max: number,
+    kinds?: RunEventKinds,
   ): Promise<RunHistoryPage> {
     await using lease = await this.connection(id);
     try {
@@ -442,6 +464,7 @@ export class Hosts {
       // the feature, and does not name the journal's totals.
       await lease.connection.ready();
       const pages = lease.connection.features?.includes('run_history_pages') === true;
+      const selects = lease.connection.features?.includes('run_trace_events') === true;
       const reply = await lease.connection.request({
         type: 'runs.read_events',
         project,
@@ -449,10 +472,11 @@ export class Hosts {
         from_sequence: from,
         max: pages ? max : Math.min(max, LEGACY_HISTORY_PAGE_EVENTS),
         ...(pages ? {with_totals: true} : {}),
+        ...(kinds !== undefined && selects ? {kinds} : {}),
       });
       return {
         kind: 'page',
-        events: reply.events,
+        events: kinds !== undefined && !selects ? ofKinds(reply.events, kinds) : reply.events,
         next: reply.next_sequence,
         complete: reply.complete,
         ...(typeof reply.total_events === 'number' ? {totalEvents: reply.total_events} : {}),

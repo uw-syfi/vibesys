@@ -18,10 +18,13 @@ under an older store restarts its sequences, and an event whose sequence does no
 predecessor's is read as the one after it. The events a page returns carry that sequence.
 
 The sidecar is an append-only log: a header line, then one line per event,
-``[offset, length, crc, sequence, span, execution, link]``, where ``offset`` and ``length``
+``[offset, length, crc, sequence, span, execution, link, kind]``, where ``offset`` and ``length``
 are the event's bytes in the journal without its newline, ``crc`` is their CRC-32,
-``sequence`` is its repaired cursor, and
-``link`` is ``[span, parent, invocation]`` for a span event and ``null`` otherwise. The
+``sequence`` is its repaired cursor, ``link`` is ``[span, parent, invocation]`` for a span event
+and ``null`` otherwise, and ``kind`` is the event's ``type`` (``null`` when it names none), which
+is how a read selects events by kind without reading the journal. A sidecar of another version
+(the version is in its header) is not trusted: the reader scans the journal, and the next run
+writer to open it rewrites it. The
 run's writer (``SpanIndexLog``) appends a line right after it appends the event, so the
 sidecar is never ahead of the journal except by an unflushed journal. A reader trusts the
 longest valid prefix of the sidecar whose first and last entries still match the journal
@@ -31,13 +34,14 @@ sidecar, while an append-only extension needs only a suffix scan. A missing or d
 causes a full scan.
 
 Public surface: ``SpanLink``, ``Entry``, ``entry_from_line``, ``JournalIndex``,
-``load_journal_index``, ``span_page``, ``read_documents``, ``StaleIndexError``,
+``load_journal_index``, ``span_page``, ``kind_page``, ``read_documents``, ``StaleIndexError``,
 ``SpanIndexLog`` and ``sidecar_path``.
 """
 
 from __future__ import annotations
 
 import json
+import sys
 import zlib
 from bisect import bisect_left
 from dataclasses import dataclass, field, replace
@@ -47,7 +51,7 @@ from typing import TYPE_CHECKING, Final
 from server.host_api import HELPER_LINE_MAX_BYTES
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Collection, Sequence
     from pathlib import Path
 
     from pydantic import JsonValue
@@ -55,9 +59,9 @@ if TYPE_CHECKING:
 SIDECAR_SUFFIX: Final = ".spans"
 _IDENTITY_SUFFIX: Final = ".source"
 _FORMAT: Final = "vibesys-span-index"
-_VERSION: Final = 1
+_VERSION: Final = 2
 _HEADER: Final = (json.dumps([_FORMAT, _VERSION], separators=(",", ":")) + "\n").encode()
-_ENTRY_FIELDS: Final = 7
+_ENTRY_FIELDS: Final = 8
 _LINK_FIELDS: Final = 3
 _SPAN_EVENT_KINDS: Final = frozenset({"span_started", "span_updated", "span_ended"})
 _NEWLINE: Final = b"\n"
@@ -168,6 +172,8 @@ class Entry:
     span: str | None
     execution: str | None
     link: SpanLink | None
+    kind: str | None
+    """The event's ``type``, or ``None`` when it names none."""
 
 
 def entry_from_line(offset: int, line: bytes) -> Entry | None:
@@ -198,11 +204,17 @@ def entry_from_line(offset: int, line: bytes) -> Entry | None:
         span=_text(document.get("span_id")),
         execution=execution,
         link=_span_link(document.get("data")),
+        kind=_kind(document.get("type")),
     )
 
 
 def _text(value: object) -> str | None:
     return value if isinstance(value, str) else None
+
+
+def _kind(value: object) -> str | None:
+    """The event type, shared between entries: a journal has a few dozen types and millions of events."""
+    return sys.intern(value) if isinstance(value, str) else None
 
 
 def _span_link(data: object) -> SpanLink | None:
@@ -388,6 +400,38 @@ def span_page(
     return entries[first:stop], len(entries), stop == len(entries)
 
 
+def kind_page(
+    index: JournalIndex, kinds: Collection[str], from_sequence: int, count: int, max_bytes: int
+) -> tuple[list[Entry], int, int, bool, int]:
+    """One page of the entries whose event type is in ``kinds``, from ``from_sequence``.
+
+    Returns the page's entries, how many entries of those kinds the journal holds and their bytes
+    (every page, so a reader can show progress), whether the page reaches the journal's end, and
+    the ``from_sequence`` of the next page.
+
+    A page holds at most ``count`` entries and ``max_bytes`` of journal, but always one when
+    there is one, so every read makes progress. A page that fills stops after its last entry;
+    one that does not has scanned to the journal's end, so its next page starts after the last
+    entry the index holds (a stretch of other kinds is never read twice, nor stalls a reader).
+    """
+    selected = [entry for entry in index.entries if entry.kind in kinds]
+    first = bisect_left(selected, from_sequence, key=_sequence_of)
+    size = 0
+    stop = first
+    while stop < len(selected) and stop - first < count:
+        length = selected[stop].length + 1
+        if stop > first and size + length > max_bytes:
+            break
+        size += length
+        stop += 1
+    page = selected[first:stop]
+    complete = stop == len(selected)
+    next_sequence = (
+        max(from_sequence, index.last_sequence + 1) if complete else page[-1].sequence + 1
+    )
+    return page, len(selected), sum(entry.length + 1 for entry in selected), complete, next_sequence
+
+
 class StaleIndexError(Exception):
     """The journal no longer holds the bytes an index entry names."""
 
@@ -539,6 +583,7 @@ def _encode_entry(entry: Entry) -> bytes:
         entry.span,
         entry.execution,
         link,
+        entry.kind,
     ]
     return json.dumps(fields, separators=(",", ":")).encode() + _NEWLINE
 
@@ -546,7 +591,7 @@ def _encode_entry(entry: Entry) -> bytes:
 def _decode_entry(fields: object) -> Entry | None:
     if not isinstance(fields, list) or len(fields) != _ENTRY_FIELDS:
         return None
-    offset, length, crc, sequence, span, execution, link = fields
+    offset, length, crc, sequence, span, execution, link, kind = fields
     if (
         type(offset) is not int
         or type(length) is not int
@@ -556,14 +601,16 @@ def _decode_entry(fields: object) -> Entry | None:
         or length == 0
         or not (span is None or isinstance(span, str))
         or not (execution is None or isinstance(execution, str))
+        or not (kind is None or isinstance(kind, str))
     ):
         return None
+    kind = _kind(kind)
     if link is None:
-        return Entry(offset, length, crc, sequence, span, execution, None)
+        return Entry(offset, length, crc, sequence, span, execution, None, kind)
     decoded = _decode_link(link)
-    return (
-        None if decoded is None else Entry(offset, length, crc, sequence, span, execution, decoded)
-    )
+    if decoded is None:
+        return None
+    return Entry(offset, length, crc, sequence, span, execution, decoded, kind)
 
 
 def _decode_link(link: object) -> SpanLink | None:

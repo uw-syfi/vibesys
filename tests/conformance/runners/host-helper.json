@@ -16,6 +16,7 @@
       "helper-run-summary-gated",
       "helper-run-summary-trace-gated",
       "helper-run-summary-ending-gated",
+      "helper-run-events-kinds-gated",
       "helper-compute-gated",
       "helper-agent-logins-gated",
       "helper-usage-window-gated",

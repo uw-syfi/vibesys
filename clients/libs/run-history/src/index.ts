@@ -8,6 +8,7 @@
 export {
   DEFAULT_MAX_BYTES,
   type HistoryChunk,
+  type HistoryKinds,
   type HistoryRead,
   type HistoryRunKey,
   type HistorySource,

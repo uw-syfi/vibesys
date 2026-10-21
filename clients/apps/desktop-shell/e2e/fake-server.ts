@@ -8,7 +8,9 @@
  * Resume when capacity returns is followed by `quota_waiting`, and a Pause or a Resume now while it
  * waits by `quota_wait_cancelled`. What the page asked is recorded in order on
  * `window.fakeHost.commands` (a Resume names a `when` other than `now`); `window.fakeHost.send`
- * posts a message to the subscribed stream (see `installFakeLive`).
+ * posts a message to the subscribed stream (see `installFakeLive`). The fake records no history:
+ * an ended run reads that its host serves none, and its helper offers nothing beyond the run's own
+ * server (`helperFeatures`), so Chat is off once it ends.
  * `installFakeServer` runs in the page after `installFakeBridge`, so it is self-contained.
  */
 
@@ -26,8 +28,7 @@ export function installFakeServer(seed: FakeServerSeed): void {
   const commands: string[] = [];
   const encoder = new TextEncoder();
   const ok = (value: unknown) => Promise.resolve({ok: true, value});
-  let sequence = 1;
-  let waiting = false;
+  let [sequence, waiting] = [1, false];
   /** Sends to the page's subscribed stream, where the run's events go (not the command channel). */
   let stream: ((message: unknown) => void) | null = null;
   /** One event the run emits after the seeded batch, as its own batch. */
@@ -117,10 +118,9 @@ export function installFakeServer(seed: FakeServerSeed): void {
       window.postMessage({type: 'vibesys:run-port', id}, '*', [channel.port1]);
     },
     onWake: () => undefined,
-    // This host's helper offers nothing beyond the run's own server: Chat is off once it ends.
     helperFeatures: () => ok([]),
-    // This fake records no history: an ended run reads that its host does not serve one.
     readEvents: () => ok({kind: 'unsupported'}),
+    readTrace: () => ok({kind: 'unsupported'}),
     readSummary: () => ok({kind: 'unsupported'}),
     readSpan: () => ok({kind: 'unsupported'}),
   });

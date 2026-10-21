@@ -17,6 +17,25 @@ function storeOver(source: FakeHistorySource, maxBytes?: number): RunHistoryStor
   return new RunHistoryStore({source, ...(maxBytes === undefined ? {} : {maxBytes})});
 }
 
+describe('a page of only some kinds of events', () => {
+  test('is held apart from the page of every event that starts at the same place', async () => {
+    const source = new FakeHistorySource();
+    source.setJournal(RUN, journal(10));
+    source.setKind('trace', event => event.sequence % 5 === 0);
+    const store = storeOver(source);
+    const whole = await store.read(RUN, 1, 10);
+    const trace = await store.read(RUN, 1, 10, 'trace');
+    expect(whole.kind === 'page' && whole.events).toHaveLength(10);
+    expect(
+      trace.kind === 'page' && trace.events.map(event => (event as FakeEvent).sequence),
+    ).toEqual([5, 10]);
+    // Each is held: reading either again asks the host nothing.
+    expect(await store.read(RUN, 1, 10)).toEqual(whole);
+    expect(await store.read(RUN, 1, 10, 'trace')).toEqual(trace);
+    expect(source.requests.map(request => request.kinds)).toEqual([undefined, 'trace']);
+  });
+});
+
 describe('a page read twice', () => {
   test('is asked of the host once, and both readers get the same page', async () => {
     const source = new FakeHistorySource();

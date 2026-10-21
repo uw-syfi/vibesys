@@ -525,7 +525,7 @@ function emphasisField(emphasis: 'focus' | 'related' | 'dim' | undefined): {
  * `model` is the whole run to its live end, never the run at a scrubbed sequence: what the chart
  * shows and the range of both axes depend on the run alone. `scrub` is the run-clock time the
  * reader scrubbed to (null at the live end); it is drawn as the cursor and dims the points after
- * it. `now` is the live clock, else the run's latest time bounds the x-axis.
+ * it. `now` is the live clock, else the run's latest time bounds the x-axis (always the latter when scrubbed).
  *
  * `lit` is the set of ideas on the chain the reader points at (`ideaAncestry`); their dots are ringed. `focus` is the id of the idea the reader has open, or null. It only changes how the same points
  * are drawn (`emphasis`) and adds the idea's time span; the points, steps, ticks and both axes'
@@ -554,7 +554,8 @@ export function stripChartView(
     lit: lit.has(point.id),
     ...emphasisField(open.emphasisOf(point.id)),
   }));
-  const reached = now ?? model.latest;
+  // A scrubbed view keeps the axis of the whole run: the cursor moves, the range does not.
+  const reached = scrub === null ? (now ?? model.latest) : model.latest;
   const end = Math.max(reached === null ? 0 : minutes(reached), ...points.map(point => point.x));
   const steps = fold.best.map(step => ({x: minutes(step.at), y: step.value}));
   const last = steps.at(-1);

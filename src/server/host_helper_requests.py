@@ -148,6 +148,7 @@ from server.host_preflight import BackendUnavailable, CheckId
 from server.host_run_dashboard import IdeaVerdict
 from server.host_run_events import (
     RunEventDocument,
+    RunEventKinds,
     RunsEventsForSpanReply,
     RunsEventsForSpanRequest,
     RunsReadEventsReply,
@@ -289,6 +290,19 @@ class Projects(Protocol):
         ``ProjectLookupError`` with ``unknown_run`` when the project has no such run, or has it
         recorded and this machine holds no journal of it (not an empty page, which would call it a
         run with no events); a run found once is not looked up again while this helper serves.
+        """
+        ...
+
+    def run_kind_events(
+        self, project: Path, run_id: str, kinds: RunEventKinds, from_sequence: int, limit: int
+    ) -> EventPage:
+        """A page of the events of run ``run_id``'s journal that ``kinds`` selects, with totals.
+
+        Read through the journal's span index (``span_index.kind_page``), so the others are
+        neither read nor returned. The page is as ``run_events``' with the totals counting the
+        selected events alone; ``next_sequence`` of an incomplete page is the sequence after its
+        last event and of a complete one the sequence after the journal's last, and an incomplete
+        page is never empty. Raises as ``run_events`` does.
         """
         ...
 
@@ -1273,20 +1287,22 @@ def _run_summary_reply(request: RunsSummaryRequest, host: HelperHost) -> RunsSum
 def _run_events_reply(request: RunsReadEventsRequest, host: HelperHost) -> RunsReadEventsReply:
     """Answer one page of a run's recorded events."""
     project = Path(_host_path(request.project, host.directories))
-    page = host.projects.run_events(
-        project,
-        request.run_id,
-        request.from_sequence,
-        request.max,
-        with_totals=bool(request.with_totals),
-    )
+    with_totals = bool(request.with_totals)
+    if request.kinds is None:
+        page = host.projects.run_events(
+            project, request.run_id, request.from_sequence, request.max, with_totals=with_totals
+        )
+    else:
+        page = host.projects.run_kind_events(
+            project, request.run_id, request.kinds, request.from_sequence, request.max
+        )
     return RunsReadEventsReply(
         request_id=request.request_id,
         events=page.events,
         next_sequence=page.next_sequence,
         complete=page.complete,
-        total_events=page.total_events,
-        total_bytes=page.total_bytes,
+        total_events=page.total_events if with_totals else None,
+        total_bytes=page.total_bytes if with_totals else None,
     )
 
 

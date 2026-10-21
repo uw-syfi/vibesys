@@ -141,8 +141,8 @@ async function openWindow(
   // through `hosts` (below), and forgets a run the host lists as live again or a host that goes.
   const history = new RunHistoryStore({
     source: {
-      read: (run, from, max) =>
-        hosts.readEvents(hostFromKey(run.host), run.project, run.runId, from, max),
+      read: (run, from, max, kinds) =>
+        hosts.readEvents(hostFromKey(run.host), run.project, run.runId, from, max, kinds),
     },
   });
   const hosts = new Hosts({

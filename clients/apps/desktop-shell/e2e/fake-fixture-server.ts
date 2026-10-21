@@ -15,6 +15,7 @@ export type FixtureServerMethods =
   | 'connectRun'
   | 'onWake'
   | 'readEvents'
+  | 'readTrace'
   | 'readSummary'
   | 'readSpan';
 
@@ -116,6 +117,9 @@ export function installFakeFixtureServer(seed: FixtureServerSeed): void {
     },
     onWake: () => undefined,
     readEvents: (_h: string, _p: string, _r: string, from: number, max: number) =>
+      history(from, max),
+    // The page keeps the trace's events itself, so this host serves every event of the history.
+    readTrace: (_h: string, _p: string, _r: string, from: number, max: number) =>
       history(from, max),
     readSummary: () => Promise.resolve({ok: true, value: {kind: 'unsupported'}}),
     readSpan: (...ask: [string, string, string, string, number, number]) =>

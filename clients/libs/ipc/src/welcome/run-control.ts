@@ -24,6 +24,7 @@ export const RUN_CONTROL_CHANNELS = {
   stopConfirmed: 'vibesys:welcome:stop-confirmed',
   releaseRun: 'vibesys:welcome:release-run',
   readEvents: 'vibesys:welcome:read-events',
+  readTrace: 'vibesys:welcome:read-trace',
   readSummary: 'vibesys:welcome:read-summary',
   readSpan: 'vibesys:welcome:read-span',
   runDigests: 'vibesys:welcome:run-digests',
@@ -191,6 +192,19 @@ export interface RunControlWelcomeBridge {
     fromSequence: number,
     max: number,
   ): Promise<WelcomeResult<RunHistoryPage>>;
+  /**
+   * One page of run `runId`'s recorded events as `readEvents` reads it, with only the events the
+   * run trace folds (its spans, its declaration and its gates) kept: all the Run screen needs to
+   * place an ended run's scrubber, and a small part of a journal. The page's `next` and `complete`
+   * are the host's whatever it kept, and a page may hold few events or none and not be complete.
+   */
+  readTrace(
+    host: HostKey,
+    project: string,
+    runId: string,
+    fromSequence: number,
+    max: number,
+  ): Promise<WelcomeResult<RunHistoryPage>>;
   /** Run `runId`'s summary in `project` on `host`: its run level without its history. */
   readSummary(
     host: HostKey,
@@ -254,6 +268,14 @@ export type RunControlRequest =
   | {readonly kind: 'release-run'}
   | {
       readonly kind: 'read-events';
+      readonly host: HostId;
+      readonly project: string;
+      readonly runId: string;
+      readonly from: number;
+      readonly max: number;
+    }
+  | {
+      readonly kind: 'read-trace';
       readonly host: HostId;
       readonly project: string;
       readonly runId: string;
@@ -373,6 +395,15 @@ export function parseRunControlRequest(
     case RUN_CONTROL_CHANNELS.readEvents:
       return {
         kind: 'read-events',
+        host: hostFromKey(first),
+        project: project(second),
+        runId: exactResumeRunId(third),
+        from: sequence(fourth),
+        max: pageSize(fifth),
+      };
+    case RUN_CONTROL_CHANNELS.readTrace:
+      return {
+        kind: 'read-trace',
         host: hostFromKey(first),
         project: project(second),
         runId: exactResumeRunId(third),

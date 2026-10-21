@@ -55,6 +55,7 @@ import {
   reconcileReader,
 } from './reader.js';
 import type {RunSummaryState, SummaryReply} from './run-summary.js';
+import {receiveTracePage, startTraceHistory, type TraceHistory} from './trace-history.js';
 import {USAGE_CONTROLS_DEFAULT, type UsageControls} from './usage-view.js';
 
 /** When a Resume takes effect: now, or once the provider's capacity returns. */
@@ -280,6 +281,8 @@ export interface RunPageState {
   readonly wantsHistory: boolean;
   /** An ended run's recorded events, read into `run` for its transcript. */
   readonly history: RunHistory;
+  /** An ended run's earlier span events, read into its trace so the scrubber has positions. */
+  readonly traceHistory: TraceHistory;
   readonly detail: SpanDetail;
   /** Why the attached run refused to wait for its quota; the wait is not offered again for it. */
   readonly waitRefused: string | null;
@@ -330,6 +333,8 @@ export type RunPageAction =
   | {readonly type: 'wait-refused'; readonly message: string}
   | {readonly type: 'view'; readonly view: RunView}
   | {readonly type: 'history'; readonly token: number; readonly reply: HistoryReply}
+  /** A page of the ended run's earlier span events arrived (or did not). */
+  | {readonly type: 'trace-page'; readonly token: number; readonly reply: HistoryReply}
   /** The run's summary arrived (or did not) at `wallMs` on this window's clock. */
   | {
       readonly type: 'summary';
@@ -365,6 +370,13 @@ export type RunPageRequest =
   /** Read the ended run's recorded events from `from`, answering `history` with `token`. */
   | {
       readonly kind: 'read-history';
+      readonly token: number;
+      readonly from: number;
+      readonly max: number;
+    }
+  /** Read a page of the ended run's events and keep its span events, answering `trace-page` with `token`. */
+  | {
+      readonly kind: 'read-trace';
       readonly token: number;
       readonly from: number;
       readonly max: number;
@@ -416,6 +428,7 @@ export function runPageInitial(seed: RunPageSeed): RunPageState {
     summary: {kind: 'idle'},
     wantsHistory: false,
     history: {kind: 'idle'},
+    traceHistory: {kind: 'idle'},
     detail: {kind: 'idle'},
     waitRefused: null,
     next: 1,
@@ -547,6 +560,8 @@ function startReading(state: RunPageState): RunPageStep {
     state: {
       ...state,
       next: started.nextToken,
+      // The history read feeds the trace every event in order, so the trace read has no use.
+      traceHistory: {kind: 'done'},
       history: {kind: 'reading', pager: started.pager, progress: NO_PROGRESS, core: null},
     },
     requests: started.requests.map(asked => ({kind: 'read-history', ...asked})),
@@ -559,6 +574,11 @@ export function historyAwaiting(history: RunHistory): readonly number[] {
   return history.pager.spans.flatMap(span =>
     span.token !== null && span.page === null ? [span.token] : [],
   );
+}
+
+/** `state` with a read of the trace's earlier events let go: a late page for it is dropped. */
+function withoutTraceRead(state: RunPageState): RunPageState {
+  return state.traceHistory.kind === 'reading' ? {...state, traceHistory: {kind: 'idle'}} : state;
 }
 
 /** Whether the run fold holds anything yet: a session's snapshot or events, or a summary. */
@@ -586,8 +606,9 @@ function historyFor(state: RunPageState): RunPageStep {
   switch (state.record.kind) {
     case 'live': {
       const idle: RunHistory = {kind: 'idle'};
-      const cleared: RunPageState =
-        state.history.kind === 'idle' ? state : {...state, history: idle};
+      const cleared: RunPageState = withoutTraceRead(
+        state.history.kind === 'idle' ? state : {...state, history: idle},
+      );
       // Asked even when the session folded the run first: only the summary knows the gates that
       // failed before the first idea.
       return cleared.summary.kind === 'idle'
@@ -596,8 +617,8 @@ function historyFor(state: RunPageState): RunPageStep {
     }
     case 'unlisted':
       return state.history.kind === 'reading'
-        ? {state: {...state, history: {kind: 'idle'}}, requests: []}
-        : {state, requests: []};
+        ? {state: withoutTraceRead({...state, history: {kind: 'idle'}}), requests: []}
+        : {state: withoutTraceRead(state), requests: []};
     case 'historical':
       // The tombstone no longer supplies a terminal status. The header stays neutral; this
       // fallback only fills the snapshot contract until a persisted status is available.
@@ -783,9 +804,47 @@ function withSummary(
       heard: heardAfter(state.run.heard, data, wallMs),
     },
   };
-  return isEndedRecord(ready.record) && ready.wantsHistory
-    ? startReading(ready)
-    : {state: ready, requests: []};
+  if (!isEndedRecord(ready.record)) return {state: ready, requests: []};
+  return ready.wantsHistory ? startReading(ready) : startTraceRead(ready, reply.through);
+}
+
+/**
+ * An ended run opened from its summary has one position to scrub to: read the span events before
+ * it, one page at a time (`trace-history.ts`), unless the history read does it.
+ */
+function startTraceRead(state: RunPageState, through: number): RunPageStep {
+  if (state.traceHistory.kind !== 'idle' || state.history.kind === 'reading') {
+    return {state, requests: []};
+  }
+  const token = state.next;
+  const started = startTraceHistory(through, HISTORY_PAGE_EVENTS, token);
+  return {
+    state: {...state, next: token + 1, traceHistory: started.load},
+    requests: started.request === null ? [] : [{kind: 'read-trace', ...started.request}],
+  };
+}
+
+/** A page of the trace's earlier span events arrived: fold it, and ask for the next. */
+function withTracePage(state: RunPageState, token: number, reply: HistoryReply): RunPageStep {
+  const step = receiveTracePage(
+    state.traceHistory,
+    state.run.trace,
+    token,
+    reply,
+    HISTORY_PAGE_EVENTS,
+    state.next,
+  );
+  // A reply for a read that is over (or one page twice) is dropped.
+  if (step === null) return {state, requests: []};
+  return {
+    state: {
+      ...state,
+      next: step.nextToken,
+      run: step.trace === state.run.trace ? state.run : {...state.run, trace: step.trace},
+      traceHistory: step.load,
+    },
+    requests: step.request === null ? [] : [{kind: 'read-trace', ...step.request}],
+  };
 }
 
 /**
@@ -1230,6 +1289,8 @@ function liveStep(state: RunPageState, action: RunPageAction): RunPageStep | nul
       return {state: {...state, view: action.view}, requests: []};
     case 'history':
       return withHistory(state, action.token, action.reply);
+    case 'trace-page':
+      return withTracePage(state, action.token, action.reply);
     case 'summary':
       return withSummary(state, action.token, action.reply, action.wallMs);
     case 'retry-load':
@@ -1253,6 +1314,12 @@ function liveProblems(state: RunPageState): string[] {
   if (held !== live) problems.push(`the link holds ${held} while the live server is ${live}`);
   if (state.history.kind === 'reading' && !isEndedRecord(state.record)) {
     problems.push('history is read for a run that is not ended');
+  }
+  if (state.traceHistory.kind === 'reading' && !isEndedRecord(state.record)) {
+    problems.push('the trace history is read for a run that is not ended');
+  }
+  if (state.traceHistory.kind === 'reading' && state.history.kind === 'reading') {
+    problems.push('the trace history and the history are both being read');
   }
   if (state.session !== null && state.link.kind !== 'attached') {
     problems.push('a session reports without an attached run');

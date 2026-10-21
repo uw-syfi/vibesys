@@ -13,7 +13,7 @@
  * ## What it holds, and what it does not
  *
  * Raw typed pages exactly as the host answered them (`HistoryRead`), keyed by the request that
- * produced them (`from` and `max`), never view models and never folds: each window folds with the
+ * produced them (`from`, `max` and `kinds`), never view models and never folds: each window folds with the
  * same pure `@vibesys/run-state` code. Windows run the same code, so they ask the same pages
  * and hit each other's entries; a window that asks differently just misses and reads the host.
  * Only an ended run's history is immutable, so only it belongs here: callers read a run's history
@@ -55,12 +55,19 @@ export interface HistoryChunk {
   readonly totalBytes?: number;
 }
 
+/**
+ * The events a read keeps, when it keeps only some: the host's `runs.read_events` `kinds`. `trace`
+ * is the events the run trace folds, a small part of a journal. A read without kinds holds
+ * every event; the two never share a held page.
+ */
+export type HistoryKinds = 'trace';
+
 /** A page, or that the host's VibeSys does not serve history. */
 export type HistoryRead = ({readonly kind: 'page'} & HistoryChunk) | {readonly kind: 'unsupported'};
 
 /** Where pages come from when the store has none: the host, read through its connection. */
 export interface HistorySource {
-  read(run: HistoryRunKey, from: number, max: number): Promise<HistoryRead>;
+  read(run: HistoryRunKey, from: number, max: number, kinds?: HistoryKinds): Promise<HistoryRead>;
 }
 
 /** What the store is built from. */
@@ -105,8 +112,8 @@ function runId(run: HistoryRunKey): string {
   return [run.host, run.runId, run.project].join(SEPARATOR);
 }
 
-function pageId(from: number, max: number): string {
-  return `${from}:${max}`;
+function pageId(from: number, max: number, kinds: HistoryKinds | undefined): string {
+  return `${from}:${max}:${kinds ?? ''}`;
 }
 
 /** A page's size: the length of its events' JSON, which is the bytes they were read as. */
@@ -136,13 +143,13 @@ export class RunHistoryStore {
   }
 
   /**
-   * The page of `run`'s history of up to `max` events from sequence `from`: a held page, else the
-   * host's (read once for every caller that asks while it is in flight, then held). Rejects with
-   * the source's failure, which is not held.
+   * The page of `run`'s history of up to `max` events from sequence `from` (only the events of
+   * `kinds`, when given): a held page, else the host's (read once for every caller that asks while
+   * it is in flight, then held). Rejects with the source's failure, which is not held.
    */
-  read(run: HistoryRunKey, from: number, max: number): Promise<HistoryRead> {
+  read(run: HistoryRunKey, from: number, max: number, kinds?: HistoryKinds): Promise<HistoryRead> {
     const id = runId(run);
-    const page = pageId(from, max);
+    const page = pageId(from, max, kinds);
     const held = this.#runs.get(id)?.pages.get(page);
     if (held !== undefined) {
       this.#hits += 1;
@@ -154,7 +161,7 @@ export class RunHistoryStore {
     const flying = this.#flights.get(flightId);
     if (flying !== undefined) return flying;
     const generation = this.#generations.get(id) ?? 0;
-    const flight = this.#source.read(run, from, max).then(
+    const flight = this.#source.read(run, from, max, kinds).then(
       read => {
         this.#flights.delete(flightId);
         if (read.kind === 'page' && (this.#generations.get(id) ?? 0) === generation) {

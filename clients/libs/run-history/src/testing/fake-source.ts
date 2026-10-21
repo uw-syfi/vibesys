@@ -5,7 +5,7 @@
  * was asked. A read can be held until released, to test reads that overlap, and a read can fail.
  */
 
-import type {HistoryRead, HistoryRunKey, HistorySource} from '../store.js';
+import type {HistoryKinds, HistoryRead, HistoryRunKey, HistorySource} from '../store.js';
 
 /** A recorded event as the fake serves it: only its sequence matters to paging. */
 export interface FakeEvent {
@@ -24,6 +24,7 @@ export interface FakeRequest {
   readonly run: HistoryRunKey;
   readonly from: number;
   readonly max: number;
+  readonly kinds?: HistoryKinds;
 }
 
 function keyOf(run: HistoryRunKey): string {
@@ -35,6 +36,7 @@ export class FakeHistorySource implements HistorySource {
   readonly requests: FakeRequest[] = [];
   readonly #journals = new Map<string, readonly FakeEvent[]>();
   readonly #options: FakeSourceOptions;
+  readonly #kinds = new Map<HistoryKinds, (event: FakeEvent) => boolean>();
   #held: Promise<void> | null = null;
   #release: () => void = () => undefined;
   #failure: Error | null = null;
@@ -47,6 +49,14 @@ export class FakeHistorySource implements HistorySource {
   /** Serve `events` (sequences from 1, increasing) as `run`'s journal. */
   setJournal(run: HistoryRunKey, events: readonly FakeEvent[]): void {
     this.#journals.set(keyOf(run), events);
+  }
+
+  /**
+   * Serve only the events `selects` keeps to reads of `kinds`, as a host that selects by kind does;
+   * a read of kinds not set here is served every event.
+   */
+  setKind(kinds: HistoryKinds, selects: (event: FakeEvent) => boolean): void {
+    this.#kinds.set(kinds, selects);
   }
 
   /** Answer every read as a host without history does. */
@@ -71,8 +81,13 @@ export class FakeHistorySource implements HistorySource {
     this.#held = null;
   }
 
-  async read(run: HistoryRunKey, from: number, max: number): Promise<HistoryRead> {
-    this.requests.push({run, from, max});
+  async read(
+    run: HistoryRunKey,
+    from: number,
+    max: number,
+    kinds?: HistoryKinds,
+  ): Promise<HistoryRead> {
+    this.requests.push({run, from, max, ...(kinds === undefined ? {} : {kinds})});
     if (this.#held !== null) await this.#held;
     if (this.#failure !== null) {
       const failure = this.#failure;
@@ -80,7 +95,9 @@ export class FakeHistorySource implements HistorySource {
       throw failure;
     }
     if (this.#unsupported) return {kind: 'unsupported'};
-    const journal = this.#journals.get(keyOf(run)) ?? [];
+    const whole = this.#journals.get(keyOf(run)) ?? [];
+    const selects = kinds === undefined ? undefined : this.#kinds.get(kinds);
+    const journal = selects === undefined ? whole : whole.filter(selects);
     const rest = journal.filter(event => event.sequence >= from);
     const page: FakeEvent[] = [];
     let bytes = 0;

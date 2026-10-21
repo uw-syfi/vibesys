@@ -290,6 +290,10 @@ export class Desktop {
         const {host, project, runId, from, max} = request;
         return this.#deps.history.read({host: hostKey(host), project, runId}, from, max);
       }
+      case 'read-trace': {
+        const {host, project, runId, from, max} = request;
+        return this.#deps.history.read({host: hostKey(host), project, runId}, from, max, 'trace');
+      }
       case 'read-summary':
         return hosts.readSummary(request.host, request.project, request.runId);
       case 'read-span':

@@ -17,11 +17,9 @@ registry.
 Public surface: ``PROTOCOL_VERSION``, ``RECORD_VERSION``, ``InstanceId``,
 ``RunId``, ``RunStatus``, ``StartupStage``, ``StartupProgress``, ``StartupFact``, ``FailureReason``,
 ``RunPhase``, ``InstanceStatus``, ``RunEndOutcome``, ``EndRecord``, ``RunEndingFact``, ``RunClosing``,
-``RunDigest``, ``RunDigestUnreadable``, ``one_line``,
-``END_REASON_MAX_CHARACTERS``, ``PauseCause``,
-``LiveInstanceRecord``, ``UnreadableRecord``, ``parse_record``,
-``InstanceList``, ``StopOutcome``, ``StopRoute``, ``InstanceStopResult``,
-``DetachedLaunchErrorCode``, ``DetachedLaunchFailure``,
+``RunDigest``, ``RunDigestUnreadable``, ``one_line``, ``END_REASON_MAX_CHARACTERS``, ``PauseCause``,
+``LiveInstanceRecord``, ``UnreadableRecord``, ``parse_record``, ``InstanceList``, ``StopOutcome``,
+``StopRoute``, ``InstanceStopResult``, ``DetachedLaunchErrorCode``, ``DetachedLaunchFailure``,
 the inspection documents, and the host helper's messages:
 the log streams' ``LogStream``, ``LogStreamOutcome``, ``LogChunk``, ``LogPipeSpan``,
 ``LogPipe``, ``LogOffset``, ``LogTail`` and limits
@@ -32,9 +30,8 @@ members, the run history read's limit (``RUN_EVENTS_READ_MAX_BYTES``), ``RUN_EVE
 history's messages (``server.host_run_events``), the run reader's (``server.host_run_reader``), the run summary's messages
 (``server.host_run_summary``, which also holds the usage window's), the run tile's dashboard
 (``server.host_run_dashboard``), the machine facts (``server.host_machine_facts``: ``Accelerator``,
-``Gpu``, ``Hardware``,
-``DockerReachable``, ``DockerUnreachable``, ``MachineCheckout``, ``RunCounts``,
-``MachineDescription``) and checkout inspection (``MIN_CHECKOUT_VERSION``, ``CheckoutFound``,
+``Gpu``, ``Hardware``, ``DockerReachable``, ``DockerUnreachable``, ``MachineCheckout``,
+``RunCounts``, ``MachineDescription``) and checkout inspection (``MIN_CHECKOUT_VERSION``, ``CheckoutFound``,
 ``CheckoutNotFound``, ``CheckoutTooOld``, ``CheckoutInspection``), ``HelperMessage`` and its
 members, ``HelperErrorCode``, the harness choice (``HarnessOption``, ``HarnessChoice``,
 ``RoleAgents``, and the run flags ``CLI_PROVIDER_FLAG``, ``MODEL_FLAG``, ``ROLE_PROVIDER_FLAG``,
@@ -1199,7 +1196,10 @@ HELPER_FIELD_FEATURES: Final[Mapping[type[HelperRequestBase], Mapping[str, Helpe
     },
     HarnessesListRequest: {"with_generations": HelperFeature.HARNESS_GENERATIONS},
     LogsListRequest: {"span_id": HelperFeature.LOGS_BY_SPAN},
-    RunsReadEventsRequest: {"with_totals": HelperFeature.RUN_HISTORY_PAGES},
+    RunsReadEventsRequest: {
+        "with_totals": HelperFeature.RUN_HISTORY_PAGES,
+        "kinds": HelperFeature.RUN_TRACE_EVENTS,
+    },
     RunsSummaryRequest: {
         "offset": HelperFeature.RUN_SUMMARY,
         "with_ending": HelperFeature.RUN_ENDING,

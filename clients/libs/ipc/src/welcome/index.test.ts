@@ -62,6 +62,7 @@ const VALID_ARGUMENTS: Readonly<
   [WELCOME_CHANNELS.stopConfirmed]: ['local', '0123456789ab', false],
   [WELCOME_CHANNELS.releaseRun]: [],
   [WELCOME_CHANNELS.readEvents]: ['local', '/srv/project', 'run-1', 0, 100],
+  [WELCOME_CHANNELS.readTrace]: ['local', '/srv/project', 'run-1', 0, 100],
   [WELCOME_CHANNELS.readSummary]: ['local', '/srv/project', 'run-1'],
   [WELCOME_CHANNELS.readSpan]: ['local', '/srv/project', 'run-1', 'op:turn', 1, 100],
   [WELCOME_CHANNELS.runDigests]: ['local', '/srv/project', ['run-1']],

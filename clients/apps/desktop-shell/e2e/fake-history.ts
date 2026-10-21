@@ -36,6 +36,6 @@ export function installFakeHistory(seed: FakeHistorySeed): void {
     return {ok: true, value: {kind: 'page', events: page, next, complete: next > last, ...known}};
   };
   const target = window as unknown as {vibesysWelcome: object; fakeHost: object};
-  Object.assign(target.vibesysWelcome, {readEvents});
+  Object.assign(target.vibesysWelcome, {readEvents, readTrace: readEvents});
   Object.assign(target.fakeHost, {releaseHistory: () => open()});
 }

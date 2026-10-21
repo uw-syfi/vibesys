@@ -13,13 +13,14 @@ import json
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from hypothesis import HealthCheck, given, settings
+from hypothesis import HealthCheck, assume, given, settings
 from hypothesis import strategies as st
 from tests.server.host_helper_support import fake_host, project_with_run
 from tests.server.support import build_server_parts
 from tests.server.test_run_trace import run_to_end
 
 from server.host_api import (
+    HELPER_FIELD_FEATURES,
     HELPER_LINE_MAX_BYTES,
     HELPER_REQUEST_FEATURES,
     RUN_EVENTS_FILE,
@@ -31,17 +32,23 @@ from server.host_api import (
     HelperRequest,
     request_features,
 )
+from server.host_helper import ChannelState, Execute, Received, Send, step
 from server.host_helper_os import FileProjects
 from server.host_helper_requests import answer
 from server.host_run_events import (
+    EVENT_TYPES_BY_KINDS,
     RUN_EVENTS_READ_MAX,
+    RunEventKinds,
     RunsEventsForSpanReply,
     RunsEventsForSpanRequest,
+    RunsReadEventsReply,
+    RunsReadEventsRequest,
     RunsReadTailReply,
     RunsReadTailRequest,
 )
 from server.span_index import (
     SpanIndexLog,
+    kind_page,
     load_journal_index,
     read_documents,
     sidecar_path,
@@ -724,3 +731,383 @@ def test_a_real_runs_spans_read_back_as_the_journal_filtered_by_span(
         assert total == len(entries) == len(owned)
     for span in spans:
         assert len(_owned_by(documents, span.id)) == len(words)
+
+
+# ----- runs.read_events with ``kinds``: the trace's events, selected through the index -----
+
+_TRACE_TYPES = ("span_started", "span_updated", "span_ended", "run_started", "gate_finished")
+_OTHER_TYPES = ("agent_output_chunk", "tool_call", "turn_usage_recorded")
+
+
+@st.composite
+def _typed_journals(draw: st.DrawFn, *, nonce: str = "") -> list[_Document]:
+    """``_journals`` with every event given a type from the trace's and from the rest."""
+    documents: list[_Document] = []
+    for plain in draw(_journals(nonce=nonce)):
+        data = plain.get("data")
+        if isinstance(data, dict):
+            kind = draw(st.sampled_from(_SPAN_EVENT_TYPES))
+            documents.append({**plain, "type": kind, "data": {**data, "kind": kind}})
+        else:
+            kind = draw(st.sampled_from((*_OTHER_TYPES, "run_started", "gate_finished")))
+            documents.append({**plain, "type": kind})
+    return documents
+
+
+def _trace_events(documents: list[_Document]) -> list[_Document]:
+    """The trace's events of the journal as a reader sees it, from the documents alone."""
+    return [document for document in _as_read(documents) if document["type"] in _TRACE_TYPES]
+
+
+def _sequence(document: _Document) -> int:
+    sequence = document["sequence"]
+    assert isinstance(sequence, int)
+    return sequence
+
+
+def _readable(path: Path) -> list[_Document]:
+    """The events a reader gets from the journal's bytes: up to the first line that is not one."""
+    if not path.exists():
+        return []
+    documents: list[_Document] = []
+    pieces = path.read_bytes().split(b"\n")
+    for piece in pieces[:-1] if pieces[-1] == b"" else pieces:
+        try:
+            document = json.loads(piece)
+        except ValueError:
+            break
+        if not isinstance(document, dict) or type(document.get("sequence")) is not int:
+            break
+        documents.append(document)
+    return documents
+
+
+def _file_projects() -> FileProjects:
+    return FileProjects(FakeGitRepositories().repository, SimThreads())
+
+
+def _trace_pages(
+    projects: FileProjects, project: Path, limit: int, bound: int
+) -> tuple[list[_Document], list[tuple[int | None, int | None]]]:
+    """Page the trace events from sequence 1 to the end, holding every page to the read's contract."""
+    events: list[_Document] = []
+    totals: list[tuple[int | None, int | None]] = []
+    from_sequence = 1
+    for _page in range(bound + 2):
+        page = projects.run_kind_events(project, _RUN_ID, RunEventKinds.TRACE, from_sequence, limit)
+        assert len(page.events) <= limit
+        assert bool(page.events) or page.complete
+        assert page.complete or page.next_sequence > from_sequence
+        events.extend(page.events)
+        totals.append((page.total_events, page.total_bytes))
+        if page.complete:
+            return events, totals
+        from_sequence = page.next_sequence
+    message = "a trace read never completed"
+    raise AssertionError(message)
+
+
+@_SLOW
+@given(documents=_typed_journals(), limit=st.integers(1, 6))
+def test_the_trace_read_paged_to_the_end_is_the_trace_events_of_the_journal_in_order(
+    tmp_path_factory: pytest.TempPathFactory, documents: list[_Document], limit: int
+) -> None:
+    project = _project_with_journal(tmp_path_factory.mktemp("host"), documents)
+
+    events, _ = _trace_pages(_file_projects(), project, limit, len(documents))
+
+    assert events == _trace_events(documents)
+
+
+@_SLOW
+@given(documents=_typed_journals(), count=st.integers(1, 6), max_bytes=st.integers(1, 700))
+def test_a_trace_page_holds_to_its_bounds_and_its_cursor_never_stalls_or_repeats(
+    tmp_path_factory: pytest.TempPathFactory, documents: list[_Document], count: int, max_bytes: int
+) -> None:
+    path = tmp_path_factory.mktemp("journal") / RUN_EVENTS_FILE
+    _write(path, documents)
+    index = load_journal_index(path)
+    expected = _trace_events(documents)
+
+    read: list[_Document] = []
+    from_sequence = 1
+    for _page in range(len(documents) + 2):
+        entries, events, size, complete, next_sequence = kind_page(
+            index, EVENT_TYPES_BY_KINDS[RunEventKinds.TRACE], from_sequence, count, max_bytes
+        )
+        assert len(entries) <= count
+        assert len(entries) <= 1 or sum(entry.length + 1 for entry in entries) <= max_bytes
+        assert bool(entries) or complete
+        assert events == len(expected)
+        assert size == sum(len(_line(d)) + 1 for d in documents if d["type"] in _TRACE_TYPES)
+        read.extend(read_documents(path, entries))
+        if complete:
+            # The next page of a followed run starts after everything this one scanned.
+            assert next_sequence == max(from_sequence, index.last_sequence + 1)
+            break
+        assert next_sequence == entries[-1].sequence + 1 > from_sequence
+        from_sequence = next_sequence
+    assert read == expected
+
+
+@_SLOW
+@given(documents=_typed_journals(), limit=st.integers(1, 6), start=st.integers(1, 40))
+def test_a_trace_read_from_any_sequence_is_the_events_from_there(
+    tmp_path_factory: pytest.TempPathFactory, documents: list[_Document], limit: int, start: int
+) -> None:
+    project = _project_with_journal(tmp_path_factory.mktemp("host"), documents)
+    projects = _file_projects()
+
+    read: list[_Document] = []
+    from_sequence = start
+    for _page in range(len(documents) + 2):
+        page = projects.run_kind_events(project, _RUN_ID, RunEventKinds.TRACE, from_sequence, limit)
+        read.extend(page.events)
+        if page.complete:
+            break
+        from_sequence = page.next_sequence
+
+    assert read == [d for d in _trace_events(documents) if _sequence(d) >= start]
+
+
+@_SLOW
+@given(documents=_typed_journals(), limit=st.integers(1, 6))
+def test_the_trace_read_is_the_whole_read_with_other_events_dropped(
+    tmp_path_factory: pytest.TempPathFactory, documents: list[_Document], limit: int
+) -> None:
+    """On a journal whose numbering never restarted, the two reads agree on every event."""
+    journal = [{**document, "sequence": 2 * n + 1} for n, document in enumerate(documents)]
+    project = _project_with_journal(tmp_path_factory.mktemp("host"), journal)
+    projects = _file_projects()
+
+    whole: list[_Document] = []
+    from_sequence = 1
+    for _page in range(len(journal) + 2):
+        page = projects.run_events(project, _RUN_ID, from_sequence, limit, with_totals=False)
+        whole.extend(page.events)
+        if page.complete:
+            break
+        from_sequence = page.next_sequence
+    trace, _ = _trace_pages(projects, project, limit, len(journal))
+
+    assert whole == journal
+    assert trace == [document for document in whole if document["type"] in _TRACE_TYPES]
+
+
+@_SLOW
+@given(documents=_typed_journals(), limit=st.integers(1, 6))
+def test_the_totals_of_a_trace_read_count_the_trace_events_whatever_the_page(
+    tmp_path_factory: pytest.TempPathFactory, documents: list[_Document], limit: int
+) -> None:
+    project = _project_with_journal(tmp_path_factory.mktemp("host"), documents)
+    selected = [d for d in documents if d["type"] in _TRACE_TYPES]
+
+    _, totals = _trace_pages(_file_projects(), project, limit, len(documents))
+
+    assert set(totals) == {(len(selected), sum(len(_line(d)) + 1 for d in selected))}
+
+
+@_SLOW
+@given(
+    documents=_typed_journals(),
+    other=_typed_journals(nonce="other"),
+    crash=st.tuples(st.integers(0, 40), st.sampled_from(_DAMAGES), st.integers(1, 10_000)),
+    limit=st.integers(1, 6),
+)
+def test_whatever_a_crash_leaves_beside_the_journal_a_trace_read_is_what_its_bytes_say(
+    tmp_path_factory: pytest.TempPathFactory,
+    documents: list[_Document],
+    other: list[_Document],
+    crash: tuple[int, str, int],
+    limit: int,
+) -> None:
+    """The index path, a missing, cut, foreign or garbled sidecar, and a torn journal agree."""
+    crash_after, damage, cut = crash
+    project = project_with_run(tmp_path_factory.mktemp("host") / "proj", _RUN_ID)
+    path = Project.log_directory_for(project.resolve(), _RUN_ID) / RUN_EVENTS_FILE
+    path.parent.mkdir(parents=True, exist_ok=True)
+    journal = _Journal.open(path)
+    for document in documents[:crash_after]:
+        journal.append(document)
+    _damage_index_or_journal(damage, path, sidecar_path(path), other, cut)
+
+    def check() -> None:
+        if path.exists():
+            read, _ = _trace_pages(_file_projects(), project, limit, 2 * len(documents) + 2)
+            readable = _readable(path)
+            assert read == [d for d in _as_read(readable) if d["type"] in _TRACE_TYPES]
+
+    check()
+    journal = journal.resume()
+    for document in documents[crash_after:]:
+        journal.append(document)
+    check()
+
+
+@_SLOW
+@given(documents=_typed_journals(), limit=st.integers(1, 6))
+def test_a_sidecar_of_the_previous_format_is_not_trusted_and_the_next_writer_upgrades_it(
+    tmp_path_factory: pytest.TempPathFactory, documents: list[_Document], limit: int
+) -> None:
+    assume(documents)
+    project = _project_with_journal(tmp_path_factory.mktemp("host"), documents)
+    path = Project.log_directory_for(project.resolve(), _RUN_ID) / RUN_EVENTS_FILE
+    sidecar = sidecar_path(path)
+    header, *rows = sidecar.read_bytes().splitlines()
+    previous = [json.dumps(["vibesys-span-index", 1], separators=(",", ":")).encode()]
+    previous += [json.dumps(json.loads(row)[:7], separators=(",", ":")).encode() for row in rows]
+    sidecar.write_bytes(b"\n".join(previous) + b"\n")
+
+    events, _ = _trace_pages(_file_projects(), project, limit, len(documents))
+    assert events == _trace_events(documents)
+
+    SpanIndexLog(path)
+    assert sidecar.read_bytes().splitlines()[0] == header
+    events, _ = _trace_pages(_file_projects(), project, limit, len(documents))
+    assert events == _trace_events(documents)
+
+
+def test_an_event_that_names_no_type_or_a_non_text_one_is_in_no_kind(tmp_path: Path) -> None:
+    documents: list[_Document] = [
+        {"sequence": 1, "execution_id": "e1"},
+        {"sequence": 2, "type": 7},
+        {"sequence": 3, "type": None},
+        {"sequence": 4, "type": "gate_finished"},
+        {"sequence": 5, "type": "SPAN_STARTED"},
+    ]
+    project = _project_with_journal(tmp_path, documents)
+
+    events, _ = _trace_pages(_file_projects(), project, 10, len(documents))
+
+    assert [event["sequence"] for event in events] == [4]
+
+
+def test_the_trace_kind_selects_exactly_the_declared_event_types_of_a_real_runs_journal() -> None:
+    assert dict(EVENT_TYPES_BY_KINDS) == {RunEventKinds.TRACE: _TRACE_TYPES}
+    assert {kind.value for kind in RunEventKinds} == {"trace"}
+    assert set(_TRACE_TYPES) <= {event.value for event in CoreEventType}
+
+
+@settings(max_examples=examples(pr=4, nightly=30), deadline=None)
+@given(turns=st.integers(1, 3), order=st.randoms(use_true_random=False))
+def test_a_real_runs_trace_read_is_the_span_events_its_writer_recorded(
+    tmp_path_factory: pytest.TempPathFactory, turns: int, order: Random
+) -> None:
+    parts = build_server_parts()
+    directory = tmp_path_factory.mktemp("run")
+    run_to_end(parts, directory, turns, order)
+    parts.core_events.emit(
+        CoreEventType.AGENT_OUTPUT_CHUNK,
+        execution_id="e1",
+        data=AgentOutputChunkData(channel="assistant", content="between"),
+    )
+    path = directory / RUN_EVENTS_FILE
+    documents = _documents_of(path)
+
+    index = load_journal_index(path)
+    entries, events, _, complete, _ = kind_page(
+        index, EVENT_TYPES_BY_KINDS[RunEventKinds.TRACE], 1, 10_000, 1 << 30
+    )
+
+    expected = [d for d in documents if d["type"] in _TRACE_TYPES]
+    assert complete
+    assert events == len(expected) == len(entries)
+    assert {d["type"] for d in expected} >= {"span_started"}
+    assert read_documents(path, entries) == expected
+
+
+def _read_events_message(**fields: object) -> dict[str, object]:
+    return {
+        "type": "runs.read_events",
+        "request_id": "r",
+        "deadline_ms": 5000,
+        "project": "/p",
+        "run_id": _RUN_ID,
+        "from_sequence": 1,
+        "max": 10,
+        **fields,
+    }
+
+
+def _hello_with(features: list[str]) -> ChannelState:
+    hello = {
+        "type": "hello",
+        "request_id": "h",
+        "deadline_ms": 5000,
+        "client_versions": [1, 1],
+        "features": features,
+        "app_version": "test",
+    }
+    state, _ = step(ChannelState(), Received(json.dumps(hello).encode(), 0.0), "v")
+    return state
+
+
+def _outputs(state: ChannelState, message: dict[str, object]) -> list[object]:
+    return list(step(state, Received(json.dumps(message).encode(), 0.0), "v")[1])
+
+
+def test_selecting_a_kind_needs_the_feature_that_serves_it() -> None:
+    kinds = {"kinds": "trace"}
+    asked = RunsReadEventsRequest(
+        request_id="r",
+        deadline_ms=5000,
+        project="/p",
+        run_id=_RUN_ID,
+        from_sequence=1,
+        max=10,
+        kinds=RunEventKinds.TRACE,
+    )
+    plain = asked.model_copy(update={"kinds": None})
+
+    assert HELPER_FIELD_FEATURES[RunsReadEventsRequest]["kinds"] is HelperFeature.RUN_TRACE_EVENTS
+    assert request_features(asked) == (HelperFeature.RUN_HISTORY, HelperFeature.RUN_TRACE_EVENTS)
+    assert request_features(plain) == (HelperFeature.RUN_HISTORY,)
+
+    without = _hello_with(["run_history", "run_history_pages"])
+    refusals = [o for o in _outputs(without, _read_events_message(**kinds)) if isinstance(o, Send)]
+    (refusal,) = refusals
+    assert isinstance(refusal.message, HelperError)
+    assert refusal.message.code is HelperErrorCode.FEATURE_NOT_NEGOTIATED
+    assert any(isinstance(o, Execute) for o in _outputs(without, _read_events_message()))
+
+    served = _hello_with(["run_history", "run_trace_events"])
+    assert any(isinstance(o, Execute) for o in _outputs(served, _read_events_message(**kinds)))
+
+
+def test_a_kind_the_helper_does_not_define_is_refused_not_ignored() -> None:
+    served = _hello_with(["run_history", "run_trace_events"])
+
+    for kinds in ("span", "", "TRACE", 1, ["trace"]):
+        outputs = _outputs(served, _read_events_message(kinds=kinds))
+        assert not any(isinstance(o, Execute) for o in outputs)
+        (sent,) = [o for o in outputs if isinstance(o, Send)]
+        assert isinstance(sent.message, HelperError)
+
+
+@_SLOW
+@given(documents=_typed_journals(), asked=st.booleans())
+def test_the_reply_to_a_trace_read_names_the_totals_of_the_trace_events_only_when_asked(
+    tmp_path_factory: pytest.TempPathFactory, documents: list[_Document], *, asked: bool
+) -> None:
+    project = _project_with_journal(tmp_path_factory.mktemp("host"), documents)
+    selected = [d for d in documents if d["type"] in _TRACE_TYPES]
+
+    reply = _ask(
+        RunsReadEventsRequest(
+            request_id="r",
+            deadline_ms=5000,
+            project=str(project),
+            run_id=_RUN_ID,
+            from_sequence=1,
+            max=2000,
+            with_totals=asked or None,
+            kinds=RunEventKinds.TRACE,
+        )
+    )
+
+    assert isinstance(reply, RunsReadEventsReply)
+    assert reply.complete
+    assert list(reply.events) == _trace_events(documents)
+    expected = (len(selected), sum(len(_line(d)) + 1 for d in selected)) if asked else (None, None)
+    assert (reply.total_events, reply.total_bytes) == expected
+    assert ("total_events" in reply.model_dump_json()) is asked

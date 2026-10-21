@@ -51,6 +51,12 @@ export interface RunPagePorts {
   readonly openSession: OpenSession;
   /** One page of the ended run's recorded events from `from`. */
   readHistory(from: number, max: number): Promise<HistoryReply>;
+  /**
+   * One page of the ended run's recorded events from `from`, with only the events the trace folds
+   * kept: the scrubber's earlier positions come from them (`trace-history.ts`), and the rest of a
+   * journal (most of its bytes) is dropped as the page is read.
+   */
+  readTrace(from: number, max: number): Promise<HistoryReply>;
   /** The run's summary: its run level without its history. */
   readSummary(status: RunStatus): Promise<SummaryReply>;
   readSpan(spanId: string, from: number, max: number): Promise<SpanDetailReply>;
@@ -188,6 +194,29 @@ function readHistory(
   };
   void ports
     .readHistory(request.from, request.max)
+    .then(settle, (error: unknown) => settle({kind: 'failed', message: String(error)}));
+}
+
+/** Read one page of the trace's earlier events; a read that throws settles as a failed page. */
+function readTrace(
+  ports: RunPagePorts,
+  request: Extract<RunPageRequest, {readonly kind: 'read-trace'}>,
+  dispatch: Dispatch,
+  schedule: ScheduleTimeout,
+  cancels: Set<() => void>,
+): void {
+  const cancel = schedule(() => settle({kind: 'failed', message: 'The read timed out.'}), 30_000);
+  cancels.add(cancel);
+  let settled = false;
+  const settle = (reply: HistoryReply): void => {
+    if (settled) return;
+    settled = true;
+    cancel();
+    cancels.delete(cancel);
+    dispatch({type: 'trace-page', token: request.token, reply});
+  };
+  void ports
+    .readTrace(request.from, request.max)
     .then(settle, (error: unknown) => settle({kind: 'failed', message: String(error)}));
 }
 
@@ -413,6 +442,9 @@ export function createRunPageStore(
         return;
       case 'read-history':
         readHistory(ports, request, dispatch, schedule, cancels);
+        return;
+      case 'read-trace':
+        readTrace(ports, request, dispatch, schedule, cancels);
         return;
       case 'read-summary':
         readSummary(ports, request, dispatch, schedule, cancels);

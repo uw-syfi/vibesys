@@ -30,6 +30,7 @@ import {
 import type {LiveSession, SessionObserver} from './live-session.js';
 import {type PortMessages, welcomeRunBridge} from './run-connection.js';
 import type {RunPagePorts} from './store.js';
+import {sharedTracePages, type TracePageCache, traceReader} from './trace-pages.js';
 import type {RunPageAddress} from './use-zoom.js';
 
 /** The welcome bridge's calls the Run screen makes. */
@@ -46,6 +47,7 @@ export type RunPageBridge = Pick<
   | 'connectRun'
   | 'onWake'
   | 'readEvents'
+  | 'readTrace'
   | 'readSummary'
   | 'readSpan'
   | 'harnesses'
@@ -234,6 +236,7 @@ export function welcomeRunPorts(
   target: RunPageTarget,
   navigation: RunPageNavigation,
   page: RunPagePage,
+  traces: TracePageCache = sharedTracePages,
 ): RunPagePorts & {releaseLogs(): void} {
   const {host} = target.run;
   return {
@@ -258,6 +261,11 @@ export function welcomeRunPorts(
       );
       return result.ok ? historyReply(result.value) : {kind: 'failed', message: result.error};
     },
+    readTrace: traceReader(
+      () => [host, target.project, target.run.runId, target.instance() ?? ''].join('\0'),
+      traces,
+      (from, max) => settled(bridge.readTrace(host, target.project, target.run.runId, from, max)),
+    ),
     readSummary: async status => {
       const result = await settled(bridge.readSummary(host, target.project, target.run.runId));
       return summaryReply(result, target.run.runId, status);

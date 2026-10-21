@@ -407,6 +407,44 @@ describe('Desktop history reads', () => {
   });
 });
 
+describe('Desktop trace reads', () => {
+  test('ask the host for the trace events only, and keep them apart from a read of every event', async () => {
+    const w = desktopWorld();
+    const run = {host: 'ssh:host-b', runId: '20261015-163047'};
+    const key = {host: run.host, project: '/p', runId: run.runId};
+    w.historySource.setJournal(
+      key,
+      Array.from({length: 6}, (_, index) => ({sequence: index + 1})),
+    );
+    w.historySource.setKind('trace', event => event.sequence % 2 === 0);
+
+    const trace = await w.ipc.invoke(
+      '10:100',
+      WELCOME_CHANNELS.readTrace,
+      run.host,
+      '/p',
+      run.runId,
+      1,
+      10,
+    );
+    const whole = await w.ipc.invoke(
+      '10:100',
+      WELCOME_CHANNELS.readEvents,
+      run.host,
+      '/p',
+      run.runId,
+      1,
+      10,
+    );
+
+    expect(trace).toMatchObject({ok: true, value: {kind: 'page', complete: true}});
+    expect(JSON.stringify(trace)).toContain('"sequence":4');
+    expect(JSON.stringify(trace)).not.toContain('"sequence":3');
+    expect(JSON.stringify(whole)).toContain('"sequence":3');
+    expect(w.historySource.requests.map(request => request.kinds)).toEqual(['trace', undefined]);
+  });
+});
+
 describe('Desktop external addresses', () => {
   test('opens a web or mail address from either window, and refuses every other one', async () => {
     const w = desktopWorld();

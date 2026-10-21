@@ -14,6 +14,7 @@ import type {
   HelperFeature,
   Message,
   Request,
+  RunEventKinds,
   RunStartCompensationFailure,
 } from './generated/host-helper.generated.js';
 import hostHelperSchema from './generated/host-helper.schema.js';
@@ -97,6 +98,7 @@ export type {
   RunDigest,
   RunDigestUnreadable,
   RunEndingFact,
+  RunEventKinds,
   RunList,
   RunOption,
   RunPhase,
@@ -171,6 +173,14 @@ export function helperFeaturesForRequest(request: {
   }
   return [...features];
 }
+
+/**
+ * The event `type`s each kind a `runs.read_events` can select holds (its `kinds`): the one
+ * definition, from Python's contract. A client keeps no second list of them.
+ */
+export const RUN_EVENT_TYPES_BY_KINDS = hostHelperSchema[
+  'x-vibesys-event-types-by-kinds'
+] as Readonly<Record<RunEventKinds, readonly string[]>>;
 
 const logsRead = definitions['LogsReadRequest'] as Schema;
 const logsReadProperties = logsRead['properties'] as Record<string, Schema>;

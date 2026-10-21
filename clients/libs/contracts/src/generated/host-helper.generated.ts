@@ -155,6 +155,10 @@ export type RunId1 = string;
 export type FromSequence = number;
 export type Max = number;
 export type WithTotals = boolean | null;
+/**
+ * A closed set of event types ``runs.read_events`` can select (``EVENT_TYPES_BY_KINDS``).
+ */
+export type RunEventKinds = "trace";
 export type RequestId17 = string;
 export type DeadlineMs17 = number;
 export type Type17 = "runs.events_for_span";
@@ -338,6 +342,7 @@ export type HelperFeature =
   | "run_history_pages"
   | "run_span_events"
   | "run_tail"
+  | "run_trace_events"
   | "machine_describe"
   | "checkout_inspect"
   | "preflight"
@@ -1348,6 +1353,7 @@ export interface RunsReadEventsRequest {
   from_sequence: FromSequence;
   max: Max;
   with_totals?: WithTotals;
+  kinds?: RunEventKinds | null;
 }
 /**
  * A page of the recorded events of one run-trace span, from its journal on disk.

@@ -27,6 +27,7 @@ from server.host_api import (
     HelperRequest,
     RunStartCompensationFailure,
 )
+from server.host_run_events import EVENT_TYPES_BY_KINDS
 from vibesys.api import (
     IterationKind,
     IterationMetric,
@@ -139,6 +140,9 @@ def host_helper_json_schema() -> dict[str, Any]:
     document = require_tagged_union_discriminants(HostHelperDocument.model_json_schema())
     document["x-vibesys-feature-by-request"] = _host_helper_feature_by_request(document)
     document["x-vibesys-feature-by-field"] = _host_helper_feature_by_field(document)
+    document["x-vibesys-event-types-by-kinds"] = {
+        kinds.value: list(types) for kinds, types in EVENT_TYPES_BY_KINDS.items()
+    }
     return document
 
 
@@ -209,6 +213,8 @@ _HOST_HELPER_DESCRIPTOR_KEYWORDS = frozenset(
         "x-vibesys-feature-by-request",
         # Generated from HELPER_FIELD_FEATURES; both helper implementations consume it.
         "x-vibesys-feature-by-field",
+        # Generated from EVENT_TYPES_BY_KINDS: the event types a `runs.read_events` kind selects.
+        "x-vibesys-event-types-by-kinds",
     }
 )
 """What the TypeScript walker's strict mode enforces (``contracts/src/schema-walker.ts``)."""
