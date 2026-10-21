@@ -88,7 +88,16 @@ export class IntentRefused extends Error {
 export function hostIntentResponse(bytes: Uint8Array, requestId: string): PostIntentResponse {
   const response = fromBinary(HostCallResponseSchema, bytes);
   if (response.result.case === 'configurationFailed') {
-    throw new IntentRefused(response.result.value);
+    const failure = response.result.value;
+    if (
+      ['admission_unconfirmed', 'host_command_failed', 'invalid_host_response'].includes(
+        failure.code,
+      )
+    )
+      throw new Error(
+        `${failure.message} Admission is not confirmed; retry uses the same request id.`,
+      );
+    throw new IntentRefused(failure);
   }
   if (response.result.case !== 'postIntent' || response.result.value.requestId !== requestId)
     throw new Error('HostCall returned an invalid admission reply');

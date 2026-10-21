@@ -11,16 +11,15 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Final
 
-from ._operator_actions import ACTION_REFUSAL_TEXT, action_refusal_kind
+from ._operator_actions import action_refusal_kind
 from ._registry import ContractError
-from .types.common import OPERATOR_ACTIONS, PauseOwner, RunPause, RunStatus
+from .types.common import ACTION_REFUSAL_TEXT, OPERATOR_ACTIONS, PauseOwner, RunPause, RunStatus
 from .types.strategy import Finish
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from ._operator_actions import ActionRefusal
-    from .types.common import ControlInput
+    from .types.common import ActionRefusal, ControlInput
     from .types.kernel import CoreState, RunState
     from .types.settlement import RunResultProposal
 

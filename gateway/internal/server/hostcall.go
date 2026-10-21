@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -14,7 +15,8 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-const hostCallDeadline = 30 * time.Second
+// Leave the 15 second client RPC deadline room to receive an admission outcome.
+const hostCallDeadline = 10 * time.Second
 
 // HostCall dispatches typed methods and carries opaque protobuf across stdin and
 // stdout. Python owns all validation and product policy, including inbox writes.
@@ -39,6 +41,9 @@ func (h *host) HostCall(ctx context.Context, request *apiv1.HostCallRequest) (*a
 		Executable: filepath.Join(checkout, ".venv", "bin", "vibesys"),
 		Args:       []string{"host", "post-intent"}, Input: input, StateRoot: h.config.Root,
 	})
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		return hostFailure("admission_unconfirmed", "The host did not confirm admission. Check the run status or retry with the same request id.", result.ExitCode, result.Stderr), nil
+	}
 	if err != nil || result.ExitCode != 0 {
 		message := fmt.Sprintf("vibesys host post-intent exited %d", result.ExitCode)
 		if err != nil {

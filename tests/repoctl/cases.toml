@@ -197,3 +197,12 @@ jobs = ["proto", "python", "real_tiers"]
 native_languages = []
 native_targets = []
 pnpm_packages = []
+
+[[cases]]
+name = "control admission facade selects Python and real process checks"
+paths = ["libs/vs-runtime/src/vs_runtime/api/control.py"]
+jobs = ["python", "real_tiers"]
+[cases.collections]
+native_languages = []
+native_targets = []
+pnpm_packages = []

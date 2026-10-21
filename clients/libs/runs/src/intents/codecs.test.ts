@@ -105,3 +105,23 @@ test('typed HostCall refusals remain distinct from malformed or unconfirmed repl
     }
   }
 });
+
+test('a host process loss or deadline remains unconfirmed rather than refused', () => {
+  for (const code of ['admission_unconfirmed', 'host_command_failed', 'invalid_host_response']) {
+    const bytes = toBinary(
+      HostCallResponseSchema,
+      create(HostCallResponseSchema, {
+        result: {case: 'configurationFailed', value: {code, message: 'Connection lost'}},
+      }),
+    );
+    let failure: unknown;
+    try {
+      hostIntentResponse(bytes, 'r-1');
+    } catch (error) {
+      failure = error;
+    }
+    expect(failure).toBeInstanceOf(Error);
+    expect(failure).not.toBeInstanceOf(IntentRefused);
+    expect(String(failure)).toContain('same request id');
+  }
+});

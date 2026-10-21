@@ -198,6 +198,10 @@ class DyingStore:
     inner: StateStore
     scenario: Scenario
 
+    def observe(self) -> StoreRecord | None:
+        """The inner store's atomic observation."""
+        return self.inner.observe()
+
     def load(self) -> StoreRecord | None:
         """The inner store's record."""
         return self.inner.load()
