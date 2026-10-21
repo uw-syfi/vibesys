@@ -36,6 +36,13 @@ func TestConnectCLI(t *testing.T) {
 	if output, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build: %v\n%s", err, output)
 	}
+	t.Run("Tail", func(t *testing.T) { testTailCLI(t, binary) })
+	t.Run("closed-output", func(t *testing.T) { testClosedOutput(t, binary) })
+}
+
+func testTailCLI(t *testing.T, binary string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 	root, err := os.MkdirTemp("/tmp", "g")
 	if err != nil {
 		t.Fatal(err)
@@ -167,4 +174,65 @@ func (c *processConnection) SetReadDeadline(deadline time.Time) error {
 }
 func (c *processConnection) SetWriteDeadline(deadline time.Time) error {
 	return c.input.SetWriteDeadline(deadline)
+}
+
+func testClosedOutput(t *testing.T, binary string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	root, err := os.MkdirTemp("/tmp", "g")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(root)
+	endpoint, err := lifecycle.Listen(root, gen.APISchemaHash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer endpoint.Close()
+	endpoint.Listener.SetDeadline(time.Now().Add(10 * time.Second))
+	inputReader, inputWriter, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer inputReader.Close()
+	defer inputWriter.Close()
+	outputReader, outputWriter, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	outputReader.Close()
+	defer outputWriter.Close()
+	command := exec.CommandContext(ctx, binary, "connect", "--root", root)
+	command.Stdin = inputReader
+	command.Stdout = outputWriter
+	var stderr bytes.Buffer
+	command.Stderr = &stderr
+	if err := command.Start(); err != nil {
+		t.Fatal(err)
+	}
+	inputReader.Close()
+	outputWriter.Close()
+	done := make(chan error, 1)
+	go func() { done <- command.Wait() }()
+	connection, err := endpoint.Listener.Accept()
+	if err != nil {
+		command.Process.Kill()
+		t.Fatal(err)
+	}
+	defer connection.Close()
+	connection.SetDeadline(time.Now().Add(10 * time.Second))
+	// stdin stays open, so only this downstream write can terminate Copy.
+	// With default SIGPIPE handling, writing fd 1 kills connect here.
+	if _, err := connection.Write([]byte("downstream")); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("closed output: %v, stderr: %s", err, stderr.String())
+		}
+	case <-ctx.Done():
+		command.Process.Kill()
+		t.Fatal(ctx.Err())
+	}
 }

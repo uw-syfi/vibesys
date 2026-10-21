@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"net"
+	"syscall"
 )
 
 // Copy returns only after both copy workers have settled. Closing each endpoint
@@ -32,7 +33,7 @@ func Copy(ctx context.Context, client io.ReadWriteCloser, upstream net.Conn) err
 		<-results
 	}
 	<-results
-	if errors.Is(first, net.ErrClosed) || errors.Is(first, io.ErrClosedPipe) {
+	if errors.Is(first, net.ErrClosed) || errors.Is(first, io.ErrClosedPipe) || errors.Is(first, syscall.EPIPE) {
 		return nil
 	}
 	return first

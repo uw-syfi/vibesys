@@ -23,6 +23,9 @@ import (
 const version = "0.1.0"
 
 func main() {
+	// A closed SSH/stdout pipe is a normal disconnect. Let Copy observe EPIPE
+	// and settle both workers instead of the runtime terminating on fd 1.
+	signal.Ignore(syscall.SIGPIPE)
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 	if err := run(ctx, os.Args[1:]); err != nil {
