@@ -19,6 +19,10 @@ def owner(projection: Projection) -> str:
     identity = event.execution_id
     if identity is not None:
         return projection.invocations.get(identity, "turn:" + identity)
+    if event.agent_kind is None and isinstance(
+        data, (e.AgentOutputChunkData, e.ToolCallData, e.ToolResultData)
+    ):
+        return "run"
     # Old events have no invocation identity. Keep a distinct, explicit owner
     # rather than attributing a concurrent turn's content by arrival order.
     return f"unattributed:{event.agent_kind or 'run'}:{event.round_label or 'run'}"
@@ -55,6 +59,7 @@ def started(projection: Projection) -> None:
         message = "agent_execution_started requires AgentExecutionStartedData"
         raise TypeError(message)
     span, attrs = turn(projection)
+    attrs.started_at = p.Timestamp.from_datetime(projection.event.timestamp)
     for name in ("stage", "attempt", "provider", "model", "reasoning_effort", "harness_version"):
         value = getattr(data, name)
         if value is not None:
@@ -97,6 +102,7 @@ def finished(projection: Projection) -> None:
         projection.event.status, p.SpanStatus.FAILED if data.error else p.SpanStatus.DONE
     )
     span.ended_at = max(span.started_at, projection.clock)
+    attrs.ended_at = p.Timestamp.from_datetime(projection.event.timestamp)
     attrs.transcript_length = projection.lengths.get(stream_id(span.id), 0)
     update_turn(projection, span, attrs)
 
@@ -107,6 +113,7 @@ def usage(projection: Projection) -> None:
         message = "turn_usage_recorded requires TurnUsageData"
         raise TypeError(message)
     span, attrs = turn(projection)
+    attrs.ended_at = p.Timestamp.from_datetime(projection.event.timestamp)
     attrs.usage = p.TokenUsage(
         input=data.input_tokens,
         cache_read=data.cache_read_input_tokens,
@@ -134,10 +141,28 @@ def content(projection: Projection, span: str, role: str, text: str) -> p.Transc
 
 def transcript(projection: Projection) -> None:
     data = projection.event.data
+    if isinstance(data, e.AgentOutputChunkData) and data.channel == "tool":
+        return  # OQ13: typed tool_call/tool_result entries own tool content.
     span_id = owner(projection)
+    if span_id == "run" and isinstance(
+        data, (e.AgentOutputChunkData, e.ToolCallData, e.ToolResultData)
+    ):
+        stream(
+            projection,
+            p.StreamRef(
+                id="run-output",
+                kind=p.StreamKind.LOG,
+                state=p.StreamState.OPENED,
+                title="Run output",
+            ),
+            (
+                data.content
+                if isinstance(data, e.AgentOutputChunkData)
+                else data.model_dump_json() + "\n"
+            ).encode(),
+        )
+        return
     if isinstance(data, e.AgentOutputChunkData):
-        if data.channel == "tool":
-            return  # OQ13: typed tool_call/tool_result entries own tool content.
         entry = p.TranscriptEntry(
             entry=p.Oneof(
                 "text",

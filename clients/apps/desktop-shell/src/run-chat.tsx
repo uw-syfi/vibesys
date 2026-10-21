@@ -65,7 +65,7 @@ export function RunWithChat(props: {
   readonly page: RunPageView;
   readonly run: RunRef;
   readonly bridge: WelcomeBridge;
-  readonly supplemental?: ReactNode;
+  readonly toolbar?: ReactNode;
 }): JSX.Element {
   const {page, run, bridge} = props;
   const ports = useMemo(() => chatPorts(page.chat, bridge, run), [page.chat, bridge, run]);
@@ -104,7 +104,7 @@ export function RunWithChat(props: {
         panel: chat.panel === null ? null : <ChatPanel {...chat.panel} />,
         ...(unsupported ? {unavailable: NEEDS_UPDATE} : {}),
       }}
-      supplemental={props.supplemental}
+      toolbar={props.toolbar}
     />
   );
 }

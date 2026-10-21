@@ -105,8 +105,9 @@ class Projection:
             )
             self.emit("epoch_started", header)
         key = (point.series, point.span)
-        if self.metric_values.get(key) != point.value:
-            self.metric_values[key] = point.value
+        value = (point.value, point.clock)
+        if self.metric_values.get(key) != value:
+            self.metric_values[key] = value
             self.emit("metric", point)
 
     def emit(self, field: str, value: Message) -> None:

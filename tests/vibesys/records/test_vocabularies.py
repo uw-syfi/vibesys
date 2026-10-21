@@ -77,12 +77,16 @@ def test_profiling_is_not_a_pass_fail_check() -> None:
 @pytest.mark.parametrize(
     "channel", vocabulary(e.AgentOutputChunkData.model_fields["channel"].annotation)
 )
-def test_every_output_channel_has_a_native_disposition(channel: str) -> None:
+@pytest.mark.parametrize("execution_id", [None, "execution-a"])
+def test_every_output_channel_has_a_native_disposition(
+    channel: str, execution_id: str | None
+) -> None:
     result = map_event(
         MappingState("run-a"),
         e.CoreEvent(
             type=e.CoreEventType.AGENT_OUTPUT_CHUNK,
             timestamp=datetime(2026, 1, 1, tzinfo=UTC),
+            execution_id=execution_id,
             data=e.AgentOutputChunkData.model_validate({"channel": channel, "content": "output"}),
         ),
     )
