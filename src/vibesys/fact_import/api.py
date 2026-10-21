@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from pydantic import TypeAdapter
+from pydantic import JsonValue, TypeAdapter
 
 from vs_agent.api import AgentSessionState
 from vs_core.api import FlowState, OperationRegistry, OperationResult, RunEnvelope
@@ -23,8 +23,6 @@ from vs_runtime.api.retained import decode_receipt
 from ._controls import import_control
 from ._events import import_events
 from ._facts import FactSet, content
-from ._legacy_dynamic import DynamicState, HypothesisState
-from ._legacy_lower import lower_legacy
 from ._rounds import import_round
 from ._snapshots import SnapshotDecoder
 from ._source import MAX_SOURCE_BYTES, FactImportError, ImportSource, SourceFormat, decode
@@ -61,7 +59,7 @@ class _Importer:
             self.state(source)
 
     def events(self, source: ImportSource) -> None:
-        import_events(source, self.registry, self.facts)
+        import_events(source, self.registry, self.facts, self.run_id)
 
     def control(self, source: ImportSource) -> None:
         import_control(source, self.registry, self.facts)
@@ -96,12 +94,9 @@ class _Importer:
                 self.facts.project(source, "$", state)
                 self.flow(source, "$", state)
             case SourceFormat.LEGACY_DYNAMIC:
-                state = decode(source, TypeAdapter(DynamicState), self.registry)
-                self.facts.project(source, "$", state)
-                lower_legacy(source, state, self.facts)
+                self.snapshots.read(source, "$", source.data, "legacy")
             case SourceFormat.HYPOTHESES:
-                state = decode(source, TypeAdapter(HypothesisState), self.registry)
-                self.facts.project(source, "$", state)
+                self.snapshots.read(source, "$", source.data, "hypotheses")
             case _:
                 raise FactImportError(source.path, f"unsupported retained format {source.format}")
 
@@ -116,6 +111,10 @@ class _Importer:
             raise FactImportError(source.path, str(error)) from error
         if stored is None:
             return
+        if stored.schema_version != 1:
+            raise FactImportError(
+                f"{source.path}:$.record.schema_version", "unknown runtime record version"
+            )
         if not isinstance(stored, StoredEnvelope):
             raise FactImportError(source.path, f"quarantined source: {stored.reason}")
         record = decode(
@@ -165,7 +164,7 @@ class _Importer:
         self.snapshots.read(
             source,
             "$.orchestration.options",
-            TypeAdapter(dict[str, object]).dump_json(manifest.orchestration.options).decode(),
+            TypeAdapter(dict[str, JsonValue]).dump_json(manifest.orchestration.options).decode(),
             "launch",
         )
         self.facts.add(
@@ -179,6 +178,10 @@ class _Importer:
         )
 
     def flow(self, source: ImportSource, path: str, state: FlowState) -> None:
+        if state.schema_version != 1:
+            raise FactImportError(
+                f"{source.path}:{path}.schema_version", "unknown retained FlowState version"
+            )
         for section_name, section in (("live", state.live), ("base", state.base)):
             if section is None:
                 continue

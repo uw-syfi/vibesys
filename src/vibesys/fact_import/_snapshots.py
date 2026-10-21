@@ -9,9 +9,10 @@ from jsonschema import Draft202012Validator
 from pydantic import JsonValue, TypeAdapter
 
 from vs_core.api import ChargeReceipt, EvidenceRef, InputRecord, RunFacts
-from vs_core.api.values import RevisionRef, Sample
+from vs_core.api.values import ArtifactRef, RevisionRef, Sample
 from vs_decode.api import Unreadable, decode_json
 
+from ._legacy_lower import lower_legacy_value
 from ._rounds import lower_round, read_round
 from ._snapshot_data import SCHEMAS
 from ._source import FactImportError, decode
@@ -25,6 +26,7 @@ if TYPE_CHECKING:
 _JSON = TypeAdapter(JsonValue)
 _SCHEMA = TypeAdapter(dict[str, JsonValue])
 _TYPES: dict[str, TypeAdapter[Any]] = {
+    "ArtifactRef": TypeAdapter(ArtifactRef),
     "RevisionRef": TypeAdapter(RevisionRef),
     "Sample": TypeAdapter(Sample),
     "EvidenceRef": TypeAdapter(EvidenceRef),
@@ -66,7 +68,9 @@ class SnapshotDecoder:
         self.facts = facts
         self.strategy = strategy
 
-    def read(self, source: ImportSource, selector: str, data: str, name: str | None) -> None:
+    def read(
+        self, source: ImportSource, selector: str, data: bytes | str, name: str | None
+    ) -> None:
         if name is None:
             decode(source, TypeAdapter(type(None)), self.registry, selector=selector, data=data)
             return
@@ -115,6 +119,10 @@ class SnapshotDecoder:
                 self._visit(source, path, value, branch, root)
 
     def _fact(self, source: ImportSource, path: str, name: str, value: JsonValue) -> None:
+        if source.format in (source.format.LEGACY_DYNAMIC, source.format.HYPOTHESES) and isinstance(
+            value, dict
+        ):
+            lower_legacy_value(source, path, name, value, self.facts)
         data = _JSON.dump_json(value)
         if name == "RoundRecord":
             # Embedded round bytes have the same permanent boundary as standalone records.

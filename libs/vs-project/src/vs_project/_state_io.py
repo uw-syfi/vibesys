@@ -26,6 +26,24 @@ STATE_DOCUMENT_MAX_BYTES = 256 * 1024 * 1024
 """The largest state document read; far past any the framework writes."""
 
 
+def read_retained_bytes(path: Path, *, max_bytes: int) -> bytes | None:
+    """Read a bounded regular retained file without following its final symlink."""
+    if max_bytes < 1:
+        message = "max_bytes must be positive"
+        raise ValueError(message)
+    if path.is_symlink():
+        raise StateDocumentDamagedError.invalid(path, "regular retained file required")
+    if not path.exists():
+        return None
+    if not path.is_file():
+        raise StateDocumentDamagedError.invalid(path, "regular retained file required")
+    with path.open("rb") as stream:
+        data = stream.read(max_bytes + 1)
+    if len(data) > max_bytes:
+        raise StateDocumentDamagedError.invalid(path, "retained document exceeds byte limit")
+    return data
+
+
 def publish_run_link(link: Path, directory: Path) -> Path:
     """Publish a run's absolute discovery target, replacing only an existing symlink."""
     index = link.parent

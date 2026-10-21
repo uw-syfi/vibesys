@@ -23,7 +23,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file vibesys/core/v1/imported_facts.proto.
  */
 export const file_vibesys_core_v1_imported_facts: GenFile = /*@__PURE__*/
-  fileDesc("CiR2aWJlc3lzL2NvcmUvdjEvaW1wb3J0ZWRfZmFjdHMucHJvdG8SD3ZpYmVzeXMuY29yZS52MSKiAQoMSW1wb3J0ZWRGcm9tEhUKBHBhdGgYASABKAlCB7pIBHICEAESJQoGc2hhMjU2GAIgASgJQhW6SBJyEDIOXlswLTlhLWZdezY0fSQSGQoIc2VsZWN0b3IYAyABKAlCB7pIBHICEAESOQoGZm9ybWF0GAQgASgOMh0udmliZXN5cy5jb3JlLnYxLkltcG9ydEZvcm1hdEIKukgHggEEEAEgACJjCg9JbXBvcnRlZENvbnRlbnQSJQoGc2hhMjU2GAEgASgJQhW6SBJyEDIOXlswLTlhLWZdezY0fSQSDAoEZGF0YRgCIAEoDBIbCgptZWRpYV90eXBlGAMgASgJQge6SARyAhABIvgCCg1JbXBvcnRlZElucHV0EiIKEWJhc2VsaW5lX3JldmlzaW9uGAEgASgJQge6SARyAhABEiIKEWlucHV0X2ZpbmdlcnByaW50GAIgASgJQge6SARyAhABEhEKCW9iamVjdGl2ZRgDIAEoCRIwCgZjb25maWcYBCADKAsyIC52aWJlc3lzLmNvcmUudjEuSW1wb3J0ZWRDb250ZW50EhgKEGV2YWx1YXRvcl9kaWdlc3QYBSABKAkSFwoPd29ya2xvYWRfZGlnZXN0GAYgASgJEhoKEmVudmlyb25tZW50X2RpZ2VzdBgHIAEoCRIsCgdvcHRpb25zGAggAygLMhsudmliZXN5cy5jb3JlLnYxLlB1cmVPcHRpb24SMAoLY29uc3RyYWludHMYCSADKAsyGy52aWJlc3lzLmNvcmUudjEuUHVyZU9wdGlvbhIrCgR0YXNrGAogASgLMh0udmliZXN5cy5jb3JlLnYxLkltcG9ydGVkVGFzayLTBAoMSW1wb3J0ZWRUYXNrEjQKBnJlY2lwZRgBIAEoCzIcLnZpYmVzeXMuY29yZS52MS5BcnRpZmFjdFJlZkIGukgDyAEBEioKBnN0YWdlcxgCIAMoCzIaLnZpYmVzeXMuY29yZS52MS5UYXNrU3RhZ2USEAoIbWVhc3VyZWQYAyADKAkSKQoPcXVldWVfYWxsb3dhbmNlGAQgASgBQhC6SA0SC0ABKQAAAAAAAAAAEhsKDmFjY3VyYWN5X3N0YWdlGAUgASgJSACIAQESHAoPYmVuY2htYXJrX3N0YWdlGAYgASgJSAGIAQESRgoOYWNjdXJhY3lfZ2F0ZWQYByADKA4yHS52aWJlc3lzLmNvcmUudjEuRXZpZGVuY2VLaW5kQg+6SAySAQkiB4IBBBABIAASKwoRb3BlcmF0aW9uX3NlY29uZHMYCCABKAFCELpIDRILQAEhAAAAAAAAAAASMgoKb2JqZWN0aXZlcxgJIAMoCzIeLnZpYmVzeXMuY29yZS52MS5UYXNrT2JqZWN0aXZlEjEKDnJlbGF0aXZlX25vaXNlGAogASgBQhm6SBYSFEABEQAAAAAAAPA/KQAAAAAAAAAAEigKDmJhc2Vfc3RhbGVuZXNzGAsgASgBQhC6SA0SC0ABIQAAAAAAAAAAEiQKE3J1bmF3YXlfZXZhbHVhdGlvbnMYDCABKA1CB7pIBCoCKAESFgoOcHJvZmlsZV9maWVsZHMYDSADKAlCEQoPX2FjY3VyYWN5X3N0YWdlQhIKEF9iZW5jaG1hcmtfc3RhZ2UilQIKEUltcG9ydGVkQ2FuZGlkYXRlEi4KCHJldmlzaW9uGAEgASgLMhwudmliZXN5cy5jb3JlLnYxLlJldmlzaW9uUmVmEiAKCmdpdF9jb21taXQYAiABKAlCB7pIBHICEAFIAIgBARIvCglhcnRpZmFjdHMYAyADKAsyHC52aWJlc3lzLmNvcmUudjEuQXJ0aWZhY3RSZWY6brpIaxppChpJbXBvcnRlZENhbmRpZGF0ZS5pZGVudGl0eRIfcmV2aXNpb24gb3IgZ2l0X2NvbW1pdCByZXF1aXJlZBoqaGFzKHRoaXMucmV2aXNpb24pIHx8IGhhcyh0aGlzLmdpdF9jb21taXQpQg0KC19naXRfY29tbWl0ItwFChNJbXBvcnRlZE1lYXN1cmVtZW50Ei4KCGV2aWRlbmNlGAEgASgLMhwudmliZXN5cy5jb3JlLnYxLkV2aWRlbmNlUmVmEicKBnNhbXBsZRgCIAEoCzIXLnZpYmVzeXMuY29yZS52MS5TYW1wbGUSNAoSaGlzdG9yaWNhbF9yZWFkaW5nGAMgASgLMhgudmliZXN5cy5jb3JlLnYxLlJlYWRpbmcSJwoRaGlzdG9yaWNhbF9jb21taXQYBCABKAlCB7pIBHICEAFIAIgBARIpChNoaXN0b3JpY2FsX2FydGlmYWN0GAUgASgJQge6SARyAhABSAGIAQE6swO6SK8DGq4CChpJbXBvcnRlZE1lYXN1cmVtZW50LnNvdXJjZRInZXhhY3RseSBvbmUgbWVhc3VyZW1lbnQgc291cmNlIHJlcXVpcmVkGuYBKGhhcyh0aGlzLmV2aWRlbmNlKSAmJiAhaGFzKHRoaXMuc2FtcGxlKSAmJiAhaGFzKHRoaXMuaGlzdG9yaWNhbF9yZWFkaW5nKSkgfHwgKCFoYXModGhpcy5ldmlkZW5jZSkgJiYgaGFzKHRoaXMuc2FtcGxlKSAmJiAhaGFzKHRoaXMuaGlzdG9yaWNhbF9yZWFkaW5nKSkgfHwgKCFoYXModGhpcy5ldmlkZW5jZSkgJiYgIWhhcyh0aGlzLnNhbXBsZSkgJiYgaGFzKHRoaXMuaGlzdG9yaWNhbF9yZWFkaW5nKSkafAobSW1wb3J0ZWRNZWFzdXJlbWVudC50cnVzdGVkEidldmlkZW5jZSBtdXN0IHJldGFpbiB0cnVzdGVkIHByb3ZlbmFuY2UaNCFoYXModGhpcy5ldmlkZW5jZSkgfHwgdGhpcy5ldmlkZW5jZS5wcm92ZW5hbmNlID09IDFCFAoSX2hpc3RvcmljYWxfY29tbWl0QhYKFF9oaXN0b3JpY2FsX2FydGlmYWN0IpwCChBJbXBvcnRlZEd1aWRhbmNlEhkKCGlkZW50aXR5GAEgASgJQge6SARyAhABEgwKBHRleHQYAiABKAkSLgoIYXJ0aWZhY3QYAyABKAsyHC52aWJlc3lzLmNvcmUudjEuQXJ0aWZhY3RSZWYSEQoJZGVsaXZlcmVkGAQgASgIEhEKCXdpdGhkcmF3bhgFIAEoCBIVCg1wb3NzaWJseV9yZWFkGAYgASgIEiwKBnRhcmdldBgHIAEoCzIcLnZpYmVzeXMuY29yZS52MS5JbnB1dFRhcmdldBIyCgRtb2RlGAggASgOMhoudmliZXN5cy5jb3JlLnYxLklucHV0TW9kZUIIukgFggECEAESEAoIZGlzcG9zZWQYCSABKAgiqgIKDUltcG9ydGVkVXNhZ2USGQoIaWRlbnRpdHkYASABKAlCB7pIBHICEAESFQoEdW5pdBgCIAEoCUIHukgEcgIQARIiCgZhbW91bnQYAyABKAFCELpIDRILQAEpAAAAAAAAAABIABIpCgVjb3VudBgFIAEoCUIYukgVchMyEV4oMHxbMS05XVswLTldKikkSAASGgoHdW5rbm93bhgHIAEoCEIHukgEagIIAUgAEjAKDnJlZnVuZGVkX2NvdW50GAYgASgJQhi6SBVyEzIRXigwfFsxLTldWzAtOV0qKSQSJAoOc291cmNlX3JlcXVlc3QYBCABKAlCB7pIBHICEAFIAYgBAUIRCghxdWFudGl0eRIFukgCCAFCEQoPX3NvdXJjZV9yZXF1ZXN0IqwBChhJbXBvcnRlZEV4dGVybmFsSWRlbnRpdHkSFQoEa2luZBgBIAEoCUIHukgEcgIQARIZCghpZGVudGl0eRgCIAEoCUIHukgEcgIQARIkCg5zb3VyY2VfcmVxdWVzdBgDIAEoCUIHukgEcgIQAUgAiAEBEhsKBW93bmVyGAQgASgJQge6SARyAhABSAGIAQFCEQoPX3NvdXJjZV9yZXF1ZXN0QggKBl9vd25lciLqAwoMSW1wb3J0ZWRGYWN0Ej4KDWltcG9ydGVkX2Zyb20YASADKAsyHS52aWJlc3lzLmNvcmUudjEuSW1wb3J0ZWRGcm9tQgi6SAWSAQIIARIvCgVpbnB1dBgCIAEoCzIeLnZpYmVzeXMuY29yZS52MS5JbXBvcnRlZElucHV0SAASNwoJY2FuZGlkYXRlGAMgASgLMiIudmliZXN5cy5jb3JlLnYxLkltcG9ydGVkQ2FuZGlkYXRlSAASOwoLbWVhc3VyZW1lbnQYBCABKAsyJC52aWJlc3lzLmNvcmUudjEuSW1wb3J0ZWRNZWFzdXJlbWVudEgAEjUKCGd1aWRhbmNlGAUgASgLMiEudmliZXN5cy5jb3JlLnYxLkltcG9ydGVkR3VpZGFuY2VIABIvCgV1c2FnZRgGIAEoCzIeLnZpYmVzeXMuY29yZS52MS5JbXBvcnRlZFVzYWdlSAASRgoRZXh0ZXJuYWxfaWRlbnRpdHkYByABKAsyKS52aWJlc3lzLmNvcmUudjEuSW1wb3J0ZWRFeHRlcm5hbElkZW50aXR5SAASMwoHY29udGVudBgIIAEoCzIgLnZpYmVzeXMuY29yZS52MS5JbXBvcnRlZENvbnRlbnRIAEIOCgV2YWx1ZRIFukgCCAEihAEKEEltcG9ydGVkUnVuRmFjdHMSHwoOc2NoZW1hX3ZlcnNpb24YASABKA1CB7pIBCoCCAESFwoGcnVuX2lkGAIgASgJQge6SARyAhABEjYKBWZhY3RzGAMgAygLMh0udmliZXN5cy5jb3JlLnYxLkltcG9ydGVkRmFjdEIIukgFkgECCAEquQMKDEltcG9ydEZvcm1hdBIdChlJTVBPUlRfRk9STUFUX1VOU1BFQ0lGSUVEEAASGgoWSU1QT1JUX0ZPUk1BVF9NQU5JRkVTVBABEh8KG0lNUE9SVF9GT1JNQVRfUFJPSkVDVF9TVE9SRRACEhkKFUlNUE9SVF9GT1JNQVRfUlVOVElNRRADEhoKFklNUE9SVF9GT1JNQVRfRU5WRUxPUEUQBBIWChJJTVBPUlRfRk9STUFUX0ZMT1cQBRIeChpJTVBPUlRfRk9STUFUX1BVQkxJQ0FUSU9OUxAGEhcKE0lNUE9SVF9GT1JNQVRfUk9VTkQQBxIgChxJTVBPUlRfRk9STUFUX0xFR0FDWV9EWU5BTUlDEAgSGQoVSU1QT1JUX0ZPUk1BVF9DT05URU5UEAkSGQoVSU1QT1JUX0ZPUk1BVF9SRUNFSVBUEAoSHAoYSU1QT1JUX0ZPUk1BVF9IWVBPVEhFU0VTEAsSGAoUSU1QT1JUX0ZPUk1BVF9FVkVOVFMQDBIaChZJTVBPUlRfRk9STUFUX1NFU1NJT05TEA0SGQoVSU1QT1JUX0ZPUk1BVF9DT05UUk9MEA5CP1o9Z2l0aHViLmNvbS91dy1zeWZpL3ZpYmVzeXMvZ2F0ZXdheS9nZW4vdmliZXN5cy9jb3JlL3YxO2NvcmV2MWIGcHJvdG8z", [file_buf_validate_validate, file_vibesys_core_v1_common, file_vibesys_core_v1_leaves, file_vibesys_core_v1_agent_facts, file_vibesys_core_v1_contracts, file_vibesys_core_v1_control, file_vibesys_core_v1_vocabulary]);
+  fileDesc("CiR2aWJlc3lzL2NvcmUvdjEvaW1wb3J0ZWRfZmFjdHMucHJvdG8SD3ZpYmVzeXMuY29yZS52MSKiAQoMSW1wb3J0ZWRGcm9tEhUKBHBhdGgYASABKAlCB7pIBHICEAESJQoGc2hhMjU2GAIgASgJQhW6SBJyEDIOXlswLTlhLWZdezY0fSQSGQoIc2VsZWN0b3IYAyABKAlCB7pIBHICEAESOQoGZm9ybWF0GAQgASgOMh0udmliZXN5cy5jb3JlLnYxLkltcG9ydEZvcm1hdEIKukgHggEEEAEgACJjCg9JbXBvcnRlZENvbnRlbnQSJQoGc2hhMjU2GAEgASgJQhW6SBJyEDIOXlswLTlhLWZdezY0fSQSDAoEZGF0YRgCIAEoDBIbCgptZWRpYV90eXBlGAMgASgJQge6SARyAhABIvgCCg1JbXBvcnRlZElucHV0EiIKEWJhc2VsaW5lX3JldmlzaW9uGAEgASgJQge6SARyAhABEiIKEWlucHV0X2ZpbmdlcnByaW50GAIgASgJQge6SARyAhABEhEKCW9iamVjdGl2ZRgDIAEoCRIwCgZjb25maWcYBCADKAsyIC52aWJlc3lzLmNvcmUudjEuSW1wb3J0ZWRDb250ZW50EhgKEGV2YWx1YXRvcl9kaWdlc3QYBSABKAkSFwoPd29ya2xvYWRfZGlnZXN0GAYgASgJEhoKEmVudmlyb25tZW50X2RpZ2VzdBgHIAEoCRIsCgdvcHRpb25zGAggAygLMhsudmliZXN5cy5jb3JlLnYxLlB1cmVPcHRpb24SMAoLY29uc3RyYWludHMYCSADKAsyGy52aWJlc3lzLmNvcmUudjEuUHVyZU9wdGlvbhIrCgR0YXNrGAogASgLMh0udmliZXN5cy5jb3JlLnYxLkltcG9ydGVkVGFzayLgBAoMSW1wb3J0ZWRUYXNrEjQKBnJlY2lwZRgBIAEoCzIcLnZpYmVzeXMuY29yZS52MS5BcnRpZmFjdFJlZkIGukgDyAEBEioKBnN0YWdlcxgCIAMoCzIaLnZpYmVzeXMuY29yZS52MS5UYXNrU3RhZ2USEAoIbWVhc3VyZWQYAyADKAkSKQoPcXVldWVfYWxsb3dhbmNlGAQgASgBQhC6SA0SC0ABKQAAAAAAAAAAEhsKDmFjY3VyYWN5X3N0YWdlGAUgASgJSACIAQESHAoPYmVuY2htYXJrX3N0YWdlGAYgASgJSAGIAQESRgoOYWNjdXJhY3lfZ2F0ZWQYByADKA4yHS52aWJlc3lzLmNvcmUudjEuRXZpZGVuY2VLaW5kQg+6SAySAQkiB4IBBBABIAASKwoRb3BlcmF0aW9uX3NlY29uZHMYCCABKAFCELpIDRILQAEhAAAAAAAAAAASMgoKb2JqZWN0aXZlcxgJIAMoCzIeLnZpYmVzeXMuY29yZS52MS5UYXNrT2JqZWN0aXZlEjEKDnJlbGF0aXZlX25vaXNlGAogASgBQhm6SBYSFEABEQAAAAAAAPA/KQAAAAAAAAAAEigKDmJhc2Vfc3RhbGVuZXNzGAsgASgBQhC6SA0SC0ABIQAAAAAAAAAAEjEKE3J1bmF3YXlfZXZhbHVhdGlvbnMYDCABKAlCFLpIEXIPMg1eWzEtOV1bMC05XSokEhYKDnByb2ZpbGVfZmllbGRzGA0gAygJQhEKD19hY2N1cmFjeV9zdGFnZUISChBfYmVuY2htYXJrX3N0YWdlIpUCChFJbXBvcnRlZENhbmRpZGF0ZRIuCghyZXZpc2lvbhgBIAEoCzIcLnZpYmVzeXMuY29yZS52MS5SZXZpc2lvblJlZhIgCgpnaXRfY29tbWl0GAIgASgJQge6SARyAhABSACIAQESLwoJYXJ0aWZhY3RzGAMgAygLMhwudmliZXN5cy5jb3JlLnYxLkFydGlmYWN0UmVmOm66SGsaaQoaSW1wb3J0ZWRDYW5kaWRhdGUuaWRlbnRpdHkSH3JldmlzaW9uIG9yIGdpdF9jb21taXQgcmVxdWlyZWQaKmhhcyh0aGlzLnJldmlzaW9uKSB8fCBoYXModGhpcy5naXRfY29tbWl0KUINCgtfZ2l0X2NvbW1pdCLCBQoTSW1wb3J0ZWRNZWFzdXJlbWVudBIuCghldmlkZW5jZRgBIAEoCzIcLnZpYmVzeXMuY29yZS52MS5FdmlkZW5jZVJlZhInCgZzYW1wbGUYAiABKAsyFy52aWJlc3lzLmNvcmUudjEuU2FtcGxlEjQKEmhpc3RvcmljYWxfcmVhZGluZxgDIAEoCzIYLnZpYmVzeXMuY29yZS52MS5SZWFkaW5nEicKEWhpc3RvcmljYWxfY29tbWl0GAQgASgJQge6SARyAhABSACIAQESKQoTaGlzdG9yaWNhbF9hcnRpZmFjdBgFIAEoCUIHukgEcgIQAUgBiAEBEj4KDnN0YWdlX2V2aWRlbmNlGAYgASgLMiYudmliZXN5cy5jb3JlLnYxLkltcG9ydGVkU3RhZ2VFdmlkZW5jZTrZArpI1QIa1AEKGkltcG9ydGVkTWVhc3VyZW1lbnQuc291cmNlEidleGFjdGx5IG9uZSBtZWFzdXJlbWVudCBzb3VyY2UgcmVxdWlyZWQajAEoaGFzKHRoaXMuZXZpZGVuY2UpID8gMSA6IDApICsgKGhhcyh0aGlzLnNhbXBsZSkgPyAxIDogMCkgKyAoaGFzKHRoaXMuaGlzdG9yaWNhbF9yZWFkaW5nKSA/IDEgOiAwKSArIChoYXModGhpcy5zdGFnZV9ldmlkZW5jZSkgPyAxIDogMCkgPT0gMRp8ChtJbXBvcnRlZE1lYXN1cmVtZW50LnRydXN0ZWQSJ2V2aWRlbmNlIG11c3QgcmV0YWluIHRydXN0ZWQgcHJvdmVuYW5jZRo0IWhhcyh0aGlzLmV2aWRlbmNlKSB8fCB0aGlzLmV2aWRlbmNlLnByb3ZlbmFuY2UgPT0gMUIUChJfaGlzdG9yaWNhbF9jb21taXRCFgoUX2hpc3RvcmljYWxfYXJ0aWZhY3QiqgcKFUltcG9ydGVkU3RhZ2VFdmlkZW5jZRIcCgtldmlkZW5jZV9pZBgBIAEoCUIHukgEcgIQARIeCg1ldmFsdWF0aW9uX2lkGAIgASgJQge6SARyAhABEhsKCnN0YWdlX25hbWUYAyABKAlCB7pIBHICEAESOAoEa2luZBgEIAEoCUIqukgnciVSBWJ1aWxkUghhY2N1cmFjeVIJYmVuY2htYXJrUgdwcm9maWxlEkUKB3B1cnBvc2UYBSABKAlCNLpIMXIvUghiYXNlbGluZVIQbG9jYWwtdmFsaWRhdGlvblIIb2ZmaWNpYWxSB3Byb2ZpbGUSLwoQY2FuZGlkYXRlX2RpZ2VzdBgGIAEoCUIVukgSchAyDl5bMC05YS1mXXs2NH0kEi8KEGV2YWx1YXRvcl9kaWdlc3QYByABKAlCFbpIEnIQMg5eWzAtOWEtZl17NjR9JBIuCg93b3JrbG9hZF9kaWdlc3QYCCABKAlCFbpIEnIQMg5eWzAtOWEtZl17NjR9JBIxChJlbnZpcm9ubWVudF9kaWdlc3QYCSABKAlCFbpIEnIQMg5eWzAtOWEtZl17NjR9JBI0ChV0cnVzdGVkX2lucHV0c19kaWdlc3QYCiABKAlCFbpIEnIQMg5eWzAtOWEtZl17NjR9JBIwCgdvdXRjb21lGAsgASgJQh+6SBxyGlIGcGFzc2VkUgZmYWlsZWRSCG9ic2VydmVkEioKCHJlYWRpbmdzGAwgAygLMhgudmliZXN5cy5jb3JlLnYxLlJlYWRpbmcSFAoHc3VtbWFyeRgNIAEoCUgAiAEBEjwKCWFydGlmYWN0cxgOIAMoCzIpLnZpYmVzeXMuY29yZS52MS5JbXBvcnRlZEV2aWRlbmNlQXJ0aWZhY3QSPAoHcGFydGlhbBgPIAEoCzIrLnZpYmVzeXMuY29yZS52MS5JbXBvcnRlZFBhcnRpYWxNZWFzdXJlbWVudBJFCgxmYWlsdXJlX2tpbmQYECABKAlCKrpIJ3IlUgh3b3JrbG9hZFIOaW5mcmFzdHJ1Y3R1cmVSCWFtYmlndW91c0gBiAEBEh4KEXVubWV0X3JlcXVpcmVtZW50GBEgASgJSAKIAQESMAoOYWNjZXB0ZWRfcm91bmQYEiABKAlCGLpIFXITMhFeKDB8WzEtOV1bMC05XSopJEIKCghfc3VtbWFyeUIPCg1fZmFpbHVyZV9raW5kQhQKEl91bm1ldF9yZXF1aXJlbWVudCJYChhJbXBvcnRlZEV2aWRlbmNlQXJ0aWZhY3QSFQoEcGF0aBgBIAEoCUIHukgEcgIQARIlCgZzaGEyNTYYAiABKAlCFbpIEnIQMg5eWzAtOWEtZl17NjR9JCKOAgoaSW1wb3J0ZWRQYXJ0aWFsTWVhc3VyZW1lbnQSMQoHcmVhZGluZxgBIAEoCzIYLnZpYmVzeXMuY29yZS52MS5SZWFkaW5nQga6SAPIAQESHAoGdGFyZ2V0GAIgASgBQge6SAQSAkABSACIAQESMAoJY29tcGxldGVkGAMgASgJQhi6SBVyEzIRXigwfFsxLTldWzAtOV0qKSRIAYgBARIrCghyZXF1aXJlZBgEIAEoCUIUukgRcg8yDV5bMS05XVswLTldKiRIAogBARIRCgR1bml0GAUgASgJSAOIAQFCCQoHX3RhcmdldEIMCgpfY29tcGxldGVkQgsKCV9yZXF1aXJlZEIHCgVfdW5pdCLCAwoQSW1wb3J0ZWRHdWlkYW5jZRIZCghpZGVudGl0eRgBIAEoCUIHukgEcgIQARIMCgR0ZXh0GAIgASgJEi4KCGFydGlmYWN0GAMgASgLMhwudmliZXN5cy5jb3JlLnYxLkFydGlmYWN0UmVmEhEKCWRlbGl2ZXJlZBgEIAEoCBIRCgl3aXRoZHJhd24YBSABKAgSFQoNcG9zc2libHlfcmVhZBgGIAEoCBIsCgZ0YXJnZXQYByABKAsyHC52aWJlc3lzLmNvcmUudjEuSW5wdXRUYXJnZXQSMgoEbW9kZRgIIAEoDjIaLnZpYmVzeXMuY29yZS52MS5JbnB1dE1vZGVCCLpIBYIBAhABEhAKCGRpc3Bvc2VkGAkgASgIEkQKFmhpc3RvcmljYWxfdGFyZ2V0X2tpbmQYCiABKAlCH7pIHHIaUgNydW5SBHJvbGVSB2F0dGVtcHRSBGl0ZW1IAIgBARIqChRoaXN0b3JpY2FsX3RhcmdldF9pZBgLIAEoCUIHukgEcgIQAUgBiAEBQhkKF19oaXN0b3JpY2FsX3RhcmdldF9raW5kQhcKFV9oaXN0b3JpY2FsX3RhcmdldF9pZCKqAgoNSW1wb3J0ZWRVc2FnZRIZCghpZGVudGl0eRgBIAEoCUIHukgEcgIQARIVCgR1bml0GAIgASgJQge6SARyAhABEiIKBmFtb3VudBgDIAEoAUIQukgNEgtAASkAAAAAAAAAAEgAEikKBWNvdW50GAUgASgJQhi6SBVyEzIRXigwfFsxLTldWzAtOV0qKSRIABIaCgd1bmtub3duGAcgASgIQge6SARqAggBSAASMAoOcmVmdW5kZWRfY291bnQYBiABKAlCGLpIFXITMhFeKDB8WzEtOV1bMC05XSopJBIkCg5zb3VyY2VfcmVxdWVzdBgEIAEoCUIHukgEcgIQAUgBiAEBQhEKCHF1YW50aXR5EgW6SAIIAUIRCg9fc291cmNlX3JlcXVlc3QirAEKGEltcG9ydGVkRXh0ZXJuYWxJZGVudGl0eRIVCgRraW5kGAEgASgJQge6SARyAhABEhkKCGlkZW50aXR5GAIgASgJQge6SARyAhABEiQKDnNvdXJjZV9yZXF1ZXN0GAMgASgJQge6SARyAhABSACIAQESGwoFb3duZXIYBCABKAlCB7pIBHICEAFIAYgBAUIRCg9fc291cmNlX3JlcXVlc3RCCAoGX293bmVyIqUECgxJbXBvcnRlZEZhY3QSPgoNaW1wb3J0ZWRfZnJvbRgBIAMoCzIdLnZpYmVzeXMuY29yZS52MS5JbXBvcnRlZEZyb21CCLpIBZIBAggBEi8KBWlucHV0GAIgASgLMh4udmliZXN5cy5jb3JlLnYxLkltcG9ydGVkSW5wdXRIABI3CgljYW5kaWRhdGUYAyABKAsyIi52aWJlc3lzLmNvcmUudjEuSW1wb3J0ZWRDYW5kaWRhdGVIABI7CgttZWFzdXJlbWVudBgEIAEoCzIkLnZpYmVzeXMuY29yZS52MS5JbXBvcnRlZE1lYXN1cmVtZW50SAASNQoIZ3VpZGFuY2UYBSABKAsyIS52aWJlc3lzLmNvcmUudjEuSW1wb3J0ZWRHdWlkYW5jZUgAEi8KBXVzYWdlGAYgASgLMh4udmliZXN5cy5jb3JlLnYxLkltcG9ydGVkVXNhZ2VIABJGChFleHRlcm5hbF9pZGVudGl0eRgHIAEoCzIpLnZpYmVzeXMuY29yZS52MS5JbXBvcnRlZEV4dGVybmFsSWRlbnRpdHlIABIzCgdjb250ZW50GAggASgLMiAudmliZXN5cy5jb3JlLnYxLkltcG9ydGVkQ29udGVudEgAEjkKEWNvbnRlbnRfcmVmZXJlbmNlGAkgASgLMhwudmliZXN5cy5jb3JlLnYxLkFydGlmYWN0UmVmSABCDgoFdmFsdWUSBbpIAggBIoQBChBJbXBvcnRlZFJ1bkZhY3RzEh8KDnNjaGVtYV92ZXJzaW9uGAEgASgNQge6SAQqAggBEhcKBnJ1bl9pZBgCIAEoCUIHukgEcgIQARI2CgVmYWN0cxgDIAMoCzIdLnZpYmVzeXMuY29yZS52MS5JbXBvcnRlZEZhY3RCCLpIBZIBAggBKrkDCgxJbXBvcnRGb3JtYXQSHQoZSU1QT1JUX0ZPUk1BVF9VTlNQRUNJRklFRBAAEhoKFklNUE9SVF9GT1JNQVRfTUFOSUZFU1QQARIfChtJTVBPUlRfRk9STUFUX1BST0pFQ1RfU1RPUkUQAhIZChVJTVBPUlRfRk9STUFUX1JVTlRJTUUQAxIaChZJTVBPUlRfRk9STUFUX0VOVkVMT1BFEAQSFgoSSU1QT1JUX0ZPUk1BVF9GTE9XEAUSHgoaSU1QT1JUX0ZPUk1BVF9QVUJMSUNBVElPTlMQBhIXChNJTVBPUlRfRk9STUFUX1JPVU5EEAcSIAocSU1QT1JUX0ZPUk1BVF9MRUdBQ1lfRFlOQU1JQxAIEhkKFUlNUE9SVF9GT1JNQVRfQ09OVEVOVBAJEhkKFUlNUE9SVF9GT1JNQVRfUkVDRUlQVBAKEhwKGElNUE9SVF9GT1JNQVRfSFlQT1RIRVNFUxALEhgKFElNUE9SVF9GT1JNQVRfRVZFTlRTEAwSGgoWSU1QT1JUX0ZPUk1BVF9TRVNTSU9OUxANEhkKFUlNUE9SVF9GT1JNQVRfQ09OVFJPTBAOQj9aPWdpdGh1Yi5jb20vdXctc3lmaS92aWJlc3lzL2dhdGV3YXkvZ2VuL3ZpYmVzeXMvY29yZS92MTtjb3JldjFiBnByb3RvMw", [file_buf_validate_validate, file_vibesys_core_v1_common, file_vibesys_core_v1_leaves, file_vibesys_core_v1_agent_facts, file_vibesys_core_v1_contracts, file_vibesys_core_v1_control, file_vibesys_core_v1_vocabulary]);
 
 /**
  * Permanent semantic import contract. Neither P2's store nor P3's log owns it.
@@ -213,9 +213,9 @@ export type ImportedTask = Message<"vibesys.core.v1.ImportedTask"> & {
   baseStaleness: number;
 
   /**
-   * @generated from field: uint32 runaway_evaluations = 12;
+   * @generated from field: string runaway_evaluations = 12;
    */
-  runawayEvaluations: number;
+  runawayEvaluations: string;
 
   /**
    * @generated from field: repeated string profile_fields = 13;
@@ -292,6 +292,11 @@ export type ImportedMeasurement = Message<"vibesys.core.v1.ImportedMeasurement">
    * @generated from field: optional string historical_artifact = 5;
    */
   historicalArtifact?: string | undefined;
+
+  /**
+   * @generated from field: vibesys.core.v1.ImportedStageEvidence stage_evidence = 6;
+   */
+  stageEvidence?: ImportedStageEvidence | undefined;
 };
 
 /**
@@ -300,6 +305,171 @@ export type ImportedMeasurement = Message<"vibesys.core.v1.ImportedMeasurement">
  */
 export const ImportedMeasurementSchema: GenMessage<ImportedMeasurement> = /*@__PURE__*/
   messageDesc(file_vibesys_core_v1_imported_facts, 5);
+
+/**
+ * Accepted legacy stage payload, including the measured content and environment identities.
+ *
+ * @generated from message vibesys.core.v1.ImportedStageEvidence
+ */
+export type ImportedStageEvidence = Message<"vibesys.core.v1.ImportedStageEvidence"> & {
+  /**
+   * @generated from field: string evidence_id = 1;
+   */
+  evidenceId: string;
+
+  /**
+   * @generated from field: string evaluation_id = 2;
+   */
+  evaluationId: string;
+
+  /**
+   * @generated from field: string stage_name = 3;
+   */
+  stageName: string;
+
+  /**
+   * @generated from field: string kind = 4;
+   */
+  kind: string;
+
+  /**
+   * @generated from field: string purpose = 5;
+   */
+  purpose: string;
+
+  /**
+   * @generated from field: string candidate_digest = 6;
+   */
+  candidateDigest: string;
+
+  /**
+   * @generated from field: string evaluator_digest = 7;
+   */
+  evaluatorDigest: string;
+
+  /**
+   * @generated from field: string workload_digest = 8;
+   */
+  workloadDigest: string;
+
+  /**
+   * @generated from field: string environment_digest = 9;
+   */
+  environmentDigest: string;
+
+  /**
+   * @generated from field: string trusted_inputs_digest = 10;
+   */
+  trustedInputsDigest: string;
+
+  /**
+   * @generated from field: string outcome = 11;
+   */
+  outcome: string;
+
+  /**
+   * @generated from field: repeated vibesys.core.v1.Reading readings = 12;
+   */
+  readings: Reading[];
+
+  /**
+   * @generated from field: optional string summary = 13;
+   */
+  summary?: string | undefined;
+
+  /**
+   * @generated from field: repeated vibesys.core.v1.ImportedEvidenceArtifact artifacts = 14;
+   */
+  artifacts: ImportedEvidenceArtifact[];
+
+  /**
+   * @generated from field: vibesys.core.v1.ImportedPartialMeasurement partial = 15;
+   */
+  partial?: ImportedPartialMeasurement | undefined;
+
+  /**
+   * @generated from field: optional string failure_kind = 16;
+   */
+  failureKind?: string | undefined;
+
+  /**
+   * @generated from field: optional string unmet_requirement = 17;
+   */
+  unmetRequirement?: string | undefined;
+
+  /**
+   * @generated from field: string accepted_round = 18;
+   */
+  acceptedRound: string;
+};
+
+/**
+ * Describes the message vibesys.core.v1.ImportedStageEvidence.
+ * Use `create(ImportedStageEvidenceSchema)` to create a new message.
+ */
+export const ImportedStageEvidenceSchema: GenMessage<ImportedStageEvidence> = /*@__PURE__*/
+  messageDesc(file_vibesys_core_v1_imported_facts, 6);
+
+/**
+ * @generated from message vibesys.core.v1.ImportedEvidenceArtifact
+ */
+export type ImportedEvidenceArtifact = Message<"vibesys.core.v1.ImportedEvidenceArtifact"> & {
+  /**
+   * @generated from field: string path = 1;
+   */
+  path: string;
+
+  /**
+   * @generated from field: string sha256 = 2;
+   */
+  sha256: string;
+};
+
+/**
+ * Describes the message vibesys.core.v1.ImportedEvidenceArtifact.
+ * Use `create(ImportedEvidenceArtifactSchema)` to create a new message.
+ */
+export const ImportedEvidenceArtifactSchema: GenMessage<ImportedEvidenceArtifact> = /*@__PURE__*/
+  messageDesc(file_vibesys_core_v1_imported_facts, 7);
+
+/**
+ * Partial evidence remains partial; it cannot masquerade as a conclusive Sample.
+ *
+ * @generated from message vibesys.core.v1.ImportedPartialMeasurement
+ */
+export type ImportedPartialMeasurement = Message<"vibesys.core.v1.ImportedPartialMeasurement"> & {
+  /**
+   * @generated from field: vibesys.core.v1.Reading reading = 1;
+   */
+  reading?: Reading | undefined;
+
+  /**
+   * @generated from field: optional double target = 2;
+   */
+  target?: number | undefined;
+
+  /**
+   * @generated from field: optional string completed = 3;
+   */
+  completed?: string | undefined;
+
+  /**
+   * @generated from field: optional string required = 4;
+   */
+  required?: string | undefined;
+
+  /**
+   * @generated from field: optional string unit = 5;
+   */
+  unit?: string | undefined;
+};
+
+/**
+ * Describes the message vibesys.core.v1.ImportedPartialMeasurement.
+ * Use `create(ImportedPartialMeasurementSchema)` to create a new message.
+ */
+export const ImportedPartialMeasurementSchema: GenMessage<ImportedPartialMeasurement> = /*@__PURE__*/
+  messageDesc(file_vibesys_core_v1_imported_facts, 8);
 
 /**
  * @generated from message vibesys.core.v1.ImportedGuidance
@@ -349,6 +519,16 @@ export type ImportedGuidance = Message<"vibesys.core.v1.ImportedGuidance"> & {
    * @generated from field: bool disposed = 9;
    */
   disposed: boolean;
+
+  /**
+   * @generated from field: optional string historical_target_kind = 10;
+   */
+  historicalTargetKind?: string | undefined;
+
+  /**
+   * @generated from field: optional string historical_target_id = 11;
+   */
+  historicalTargetId?: string | undefined;
 };
 
 /**
@@ -356,7 +536,7 @@ export type ImportedGuidance = Message<"vibesys.core.v1.ImportedGuidance"> & {
  * Use `create(ImportedGuidanceSchema)` to create a new message.
  */
 export const ImportedGuidanceSchema: GenMessage<ImportedGuidance> = /*@__PURE__*/
-  messageDesc(file_vibesys_core_v1_imported_facts, 6);
+  messageDesc(file_vibesys_core_v1_imported_facts, 9);
 
 /**
  * @generated from message vibesys.core.v1.ImportedUsage
@@ -411,7 +591,7 @@ export type ImportedUsage = Message<"vibesys.core.v1.ImportedUsage"> & {
  * Use `create(ImportedUsageSchema)` to create a new message.
  */
 export const ImportedUsageSchema: GenMessage<ImportedUsage> = /*@__PURE__*/
-  messageDesc(file_vibesys_core_v1_imported_facts, 7);
+  messageDesc(file_vibesys_core_v1_imported_facts, 10);
 
 /**
  * Retained obligations require inspection by the new epoch, never redispatch authority.
@@ -445,7 +625,7 @@ export type ImportedExternalIdentity = Message<"vibesys.core.v1.ImportedExternal
  * Use `create(ImportedExternalIdentitySchema)` to create a new message.
  */
 export const ImportedExternalIdentitySchema: GenMessage<ImportedExternalIdentity> = /*@__PURE__*/
-  messageDesc(file_vibesys_core_v1_imported_facts, 8);
+  messageDesc(file_vibesys_core_v1_imported_facts, 11);
 
 /**
  * @generated from message vibesys.core.v1.ImportedFact
@@ -501,6 +681,12 @@ export type ImportedFact = Message<"vibesys.core.v1.ImportedFact"> & {
      */
     value: ImportedContent;
     case: "content";
+  } | {
+    /**
+     * @generated from field: vibesys.core.v1.ArtifactRef content_reference = 9;
+     */
+    value: ArtifactRef;
+    case: "contentReference";
   } | { case: undefined; value?: undefined };
 };
 
@@ -509,7 +695,7 @@ export type ImportedFact = Message<"vibesys.core.v1.ImportedFact"> & {
  * Use `create(ImportedFactSchema)` to create a new message.
  */
 export const ImportedFactSchema: GenMessage<ImportedFact> = /*@__PURE__*/
-  messageDesc(file_vibesys_core_v1_imported_facts, 9);
+  messageDesc(file_vibesys_core_v1_imported_facts, 12);
 
 /**
  * @generated from message vibesys.core.v1.ImportedRunFacts
@@ -536,7 +722,7 @@ export type ImportedRunFacts = Message<"vibesys.core.v1.ImportedRunFacts"> & {
  * Use `create(ImportedRunFactsSchema)` to create a new message.
  */
 export const ImportedRunFactsSchema: GenMessage<ImportedRunFacts> = /*@__PURE__*/
-  messageDesc(file_vibesys_core_v1_imported_facts, 10);
+  messageDesc(file_vibesys_core_v1_imported_facts, 13);
 
 /**
  * @generated from enum vibesys.core.v1.ImportFormat

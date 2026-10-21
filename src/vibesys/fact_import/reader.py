@@ -70,11 +70,7 @@ def read_run_facts(
                 f"control/inbox/{entry.request_id}.json", SourceFormat.CONTROL, entry.payload
             )
         )
-    journal = project.event_journal_path_for(project.root, run_id)
-    if journal.exists():
-        if journal.is_symlink() or not journal.is_file():
-            raise FactImportError("core-events.jsonl", "regular retained journal required")
-        with journal.open("rb") as stream:
-            data = stream.read(MAX_SOURCE_BYTES + 1)
+    data = project.retained_event_journal(run_id, max_bytes=MAX_SOURCE_BYTES)
+    if data is not None:
         sources.append(ImportSource("core-events.jsonl", SourceFormat.EVENTS, data))
     return import_run_facts(run_id, sources, strategy=manifest.orchestration.id, registry=registry)

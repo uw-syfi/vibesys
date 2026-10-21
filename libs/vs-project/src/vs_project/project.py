@@ -15,7 +15,7 @@ from vs_project._layout import (
     TasksRoot,
 )
 from vs_project._state import ProjectState, _state_home, validate_run_id
-from vs_project._state_io import publish_run_link
+from vs_project._state_io import publish_run_link, read_retained_bytes
 from vs_project._state_store import LocalStateStore
 from vs_sim.api import ProcessTimeoutError
 
@@ -209,6 +209,12 @@ class Project:
     def event_journal_path_for(cls, project_root: Path | str, run_id: str) -> Path:
         """Return the authoritative core-event journal for one run."""
         return cls.log_directory_for(project_root, run_id) / "core-events.jsonl"
+
+    def retained_event_journal(self, run_id: str, *, max_bytes: int) -> bytes | None:
+        """Read the original bounded JSONL journal for a semantic restart, without writing."""
+        return read_retained_bytes(
+            self.event_journal_path_for(self.root, run_id), max_bytes=max_bytes
+        )
 
     @classmethod
     def publish_run_for(cls, project_root: Path | str, run_id: str) -> Path:

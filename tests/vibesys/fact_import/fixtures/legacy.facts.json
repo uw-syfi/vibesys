@@ -1,0 +1,149 @@
+{
+  "facts": [
+    {
+      "candidate": {
+        "gitCommit": "fake-revision"
+      },
+      "importedFrom": [
+        {
+          "format": "IMPORT_FORMAT_LEGACY_DYNAMIC",
+          "path": "dynamic/state.json",
+          "selector": "$.baseline",
+          "sha256": "d70d45bb87cc927f70f3335abaecf0cce082fda7fb6e44888ff8622932b892e0"
+        }
+      ]
+    },
+    {
+      "candidate": {
+        "gitCommit": "fake-revision-1"
+      },
+      "importedFrom": [
+        {
+          "format": "IMPORT_FORMAT_LEGACY_DYNAMIC",
+          "path": "dynamic/state.json",
+          "selector": "$.workstreams[0].parent_revision",
+          "sha256": "d70d45bb87cc927f70f3335abaecf0cce082fda7fb6e44888ff8622932b892e0"
+        }
+      ]
+    },
+    {
+      "candidate": {
+        "gitCommit": "candidate-1-revision-3"
+      },
+      "importedFrom": [
+        {
+          "format": "IMPORT_FORMAT_LEGACY_DYNAMIC",
+          "path": "dynamic/state.json",
+          "selector": "$.search.hypotheses[0].rounds[0].commit",
+          "sha256": "d70d45bb87cc927f70f3335abaecf0cce082fda7fb6e44888ff8622932b892e0"
+        },
+        {
+          "format": "IMPORT_FORMAT_LEGACY_DYNAMIC",
+          "path": "dynamic/state.json",
+          "selector": "$.workstreams[0].candidate_revision",
+          "sha256": "d70d45bb87cc927f70f3335abaecf0cce082fda7fb6e44888ff8622932b892e0"
+        },
+        {
+          "format": "IMPORT_FORMAT_LEGACY_DYNAMIC",
+          "path": "dynamic/state.json",
+          "selector": "$.workstreams[0].evaluation",
+          "sha256": "d70d45bb87cc927f70f3335abaecf0cce082fda7fb6e44888ff8622932b892e0"
+        }
+      ]
+    },
+    {
+      "importedFrom": [
+        {
+          "format": "IMPORT_FORMAT_LEGACY_DYNAMIC",
+          "path": "dynamic/state.json",
+          "selector": "$.baseline.metrics.latency",
+          "sha256": "d70d45bb87cc927f70f3335abaecf0cce082fda7fb6e44888ff8622932b892e0"
+        }
+      ],
+      "measurement": {
+        "historicalCommit": "fake-revision",
+        "historicalReading": {
+          "metric": "latency",
+          "repetitions": "1",
+          "value": 100.0
+        }
+      }
+    },
+    {
+      "importedFrom": [
+        {
+          "format": "IMPORT_FORMAT_LEGACY_DYNAMIC",
+          "path": "dynamic/state.json",
+          "selector": "$.workstreams[0].evaluation",
+          "sha256": "d70d45bb87cc927f70f3335abaecf0cce082fda7fb6e44888ff8622932b892e0"
+        }
+      ],
+      "measurement": {
+        "historicalCommit": "candidate-1-revision-3",
+        "historicalReading": {
+          "direction": "DIRECTION_MAX",
+          "metric": "throughput",
+          "repetitions": "1",
+          "value": 2.0
+        }
+      }
+    },
+    {
+      "importedFrom": [
+        {
+          "format": "IMPORT_FORMAT_LEGACY_DYNAMIC",
+          "path": "dynamic/state.json",
+          "selector": "$.baseline",
+          "sha256": "d70d45bb87cc927f70f3335abaecf0cce082fda7fb6e44888ff8622932b892e0"
+        }
+      ],
+      "measurement": {
+        "historicalCommit": "fake-revision",
+        "historicalReading": {
+          "direction": "DIRECTION_MAX",
+          "metric": "throughput",
+          "repetitions": "1",
+          "value": 1.0
+        }
+      }
+    },
+    {
+      "importedFrom": [
+        {
+          "format": "IMPORT_FORMAT_LEGACY_DYNAMIC",
+          "path": "dynamic/state.json",
+          "selector": "$.search.hypotheses[0].rounds[0].perf_metric",
+          "sha256": "d70d45bb87cc927f70f3335abaecf0cce082fda7fb6e44888ff8622932b892e0"
+        }
+      ],
+      "measurement": {
+        "historicalCommit": "candidate-1-revision-3",
+        "historicalReading": {
+          "direction": "DIRECTION_MAX",
+          "metric": "headline",
+          "repetitions": "1",
+          "unit": "throughput",
+          "value": 2.0
+        }
+      }
+    },
+    {
+      "importedFrom": [
+        {
+          "format": "IMPORT_FORMAT_LEGACY_DYNAMIC",
+          "path": "dynamic/state.json",
+          "selector": "$.workstreams[0]",
+          "sha256": "d70d45bb87cc927f70f3335abaecf0cce082fda7fb6e44888ff8622932b892e0"
+        }
+      ],
+      "usage": {
+        "count": "1",
+        "identity": "workstream:1",
+        "refundedCount": "0",
+        "unit": "attempt"
+      }
+    }
+  ],
+  "runId": "run",
+  "schemaVersion": 1
+}

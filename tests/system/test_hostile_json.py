@@ -44,8 +44,10 @@ from server.host_api import (
 )
 from server.host_helper import ChannelState, Received, Send, step
 from server.transport.discovery import WebInstanceRecord
+from vibesys.api.importing import FactImportError, ImportSource, SourceFormat, import_run_facts
 from vibesys.api.transport import convert_run
 from vibesys.run import CoreAgentEventSink
+from vs_core.api.testing import FAKE_REGISTRY
 from vs_decode.api import Unreadable, decode_json, read_json
 from vs_evaluator_protocol.api import ProtocolError, parse_records
 from vs_project.api import Project
@@ -326,7 +328,17 @@ def _convert_run_journal(frame: bytes, directory: Path) -> None:
         convert_run(Project.open(project_root), "run-1", clock=ManualClock(), threads=SimThreads())
 
 
+def _retained_facts(frame: bytes, _: Path) -> None:
+    import_run_facts(
+        "run",
+        (ImportSource("retained.json", SourceFormat.RUNTIME, frame),),
+        strategy="single",
+        registry=FAKE_REGISTRY,
+    )
+
+
 _DECODERS = {
+    "retained-facts": _Decoder(_retained_facts, (FactImportError,)),
     "decode-json": _Decoder(_decode_json_file),
     "runlog-conversion": _Decoder(_convert_run_journal, (ValueError,)),
     "slurm-connector-broker": _Decoder(_connector_broker_request, (PermissionError,)),

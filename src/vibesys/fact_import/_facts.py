@@ -16,8 +16,8 @@ from vs_core.api import (
     InputDelivered,
     InputDropped,
     InputRecord,
-    Observation,
     OwnedJob,
+    RegisteredOwnedJob,
     RequestRecord,
     RunFacts,
     TaskTerms,
@@ -34,10 +34,13 @@ from vs_proto.api import (
     validate,
 )
 from vs_proto.api import imported_facts as pb
+from vs_runtime.api.core import EvidenceEntry
 from vs_runtime.api.core_values import to_proto
 
+from ._guidance import consolidate_guidance
 from ._rounds import lower_round
-from ._source import FactImportError, ImportSource
+from ._source import FactImportError, ImportSource, ensure_finite
+from ._stage import stage_measurement
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -51,6 +54,7 @@ class FactSet:
         self._identities: dict[tuple[str, str], bytes] = {}
         self._released_resources: set[str] = set()
         self._released_requests: set[str] = set()
+        self._released_children: set[str] = set()
 
     def add(
         self, source: ImportSource, selector: str, value: FactValue, *, identity: str | None = None
@@ -78,6 +82,7 @@ class FactSet:
         facts = [
             self._facts[key] for key in sorted(self._facts) if not self._released(self._facts[key])
         ]
+        facts = consolidate_guidance(facts)
         for fact in facts:
             fact.imported_from.sort(
                 key=lambda origin: (origin.path, origin.selector, origin.sha256)
@@ -91,12 +96,15 @@ class FactSet:
 
     def project(self, source: ImportSource, selector: str, value: object) -> None:
         """Visit schema-validated fields only; strings are never scanned for plausible facts."""
+        ensure_finite(source, selector, value)
         for path, item in walk(selector, value):
             self._project_value(source, path, item)
 
     def _project_value(self, source: ImportSource, path: str, item: object) -> None:
         if isinstance(item, RoundRecord):
             lower_round(source, path, item, self)
+        elif isinstance(item, values.ArtifactRef):
+            self.add(source, path, cast("core_common.ArtifactRef", to_proto(item)))
         elif isinstance(item, values.RevisionRef):
             self.add(
                 source,
@@ -131,6 +139,13 @@ class FactSet:
                     else item.source_request.root,
                 ),
                 identity=item.charge_id.root,
+            )
+        elif isinstance(item, EvidenceEntry):
+            self.add(
+                source,
+                path,
+                stage_measurement(item),
+                identity=f"stage:{item.evidence.evaluation_id}:{item.evidence.evidence_id}",
             )
         elif isinstance(item, InputRecord):
             self._guidance(source, path, item)
@@ -167,14 +182,23 @@ class FactSet:
                 self.external(
                     source, path, "evaluation", item.resource_id.root, item.submission_id.root
                 )
+        elif isinstance(item, RegisteredOwnedJob):
+            self._registered_job(source, path, item)
         elif isinstance(item, ChildLease):
             self._child(source, path, item)
-        elif isinstance(item, Observation) and item.released:
-            self._released_requests.add(item.request_id.root)
-            if item.resource_id is not None:
-                self._released_resources.add(item.resource_id.root)
         elif isinstance(item, RequestRecord) and item.dispatched_in is not None:
             self._request(source, path, item)
+
+    def _registered_job(self, source: ImportSource, path: str, item: RegisteredOwnedJob) -> None:
+        if item.released:
+            if item.resource_id is not None:
+                self._released_resources.add(item.resource_id.root)
+            return
+        self.external(source, path, "registered-job", item.operation_id.root, item.request_id.root)
+        if item.resource_id is not None:
+            self.external(source, path, "resource", item.resource_id.root, item.request_id.root)
+        for child in item.children:
+            self.external(source, path, "child-resource", child.root, item.request_id.root)
 
     def _request(self, source: ImportSource, path: str, item: RequestRecord) -> None:
         observation = item.observation
@@ -193,6 +217,8 @@ class FactSet:
         if fact.value is None or fact.value.field != "external_identity":
             return False
         identity = fact.value.value
+        if identity.kind == "child-resource":
+            return identity.identity in self._released_children
         return (
             identity.identity in self._released_resources
             or identity.source_request in self._released_requests
@@ -202,7 +228,9 @@ class FactSet:
         released = item.watermark_history_complete and all(
             mark.observation.released for mark in item.observation_watermarks
         )
-        if not released:
+        if released:
+            self._released_children.add(item.resource_id.root)
+        else:
             for request in item.source_requests:
                 self.external(source, path, "child-resource", item.resource_id.root, request.root)
 
@@ -309,7 +337,7 @@ def task(value: TaskTerms) -> pb.ImportedTask:
         ],
         relative_noise=value.relative_noise,
         base_staleness=value.base_staleness,
-        runaway_evaluations=value.runaway_evaluations,
+        runaway_evaluations=str(value.runaway_evaluations),
         profile_fields=list(value.profile_fields),
     )
 
@@ -370,6 +398,7 @@ type FactValue = (
     | pb.ImportedUsage
     | pb.ImportedExternalIdentity
     | pb.ImportedContent
+    | core_common.ArtifactRef
 )
 
 
@@ -387,6 +416,8 @@ def fact_value(value: FactValue) -> pb.ImportedFact:
             result = pb.ImportedFact(value=Oneof("usage", value))
         case pb.ImportedExternalIdentity():
             result = pb.ImportedFact(value=Oneof("external_identity", value))
+        case core_common.ArtifactRef():
+            result = pb.ImportedFact(value=Oneof("content_reference", value))
         case pb.ImportedContent():
             result = pb.ImportedFact(value=Oneof("content", value))
     return result

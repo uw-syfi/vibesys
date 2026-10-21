@@ -71,7 +71,7 @@ message ImportedTask {
   repeated TaskObjective objectives = 9;
   double relative_noise = 10 [(buf.validate.field).double = {finite: true, gte: 0, lt: 1}];
   double base_staleness = 11 [(buf.validate.field).double = {finite: true, gt: 0}];
-  uint32 runaway_evaluations = 12 [(buf.validate.field).uint32.gte = 1];
+  string runaway_evaluations = 12 [(buf.validate.field).string.pattern = "^[1-9][0-9]*$"];
   repeated string profile_fields = 13;
 }
 
@@ -95,14 +95,51 @@ message ImportedMeasurement {
   Reading historical_reading = 3;
   optional string historical_commit = 4 [(buf.validate.field).string.min_len = 1];
   optional string historical_artifact = 5 [(buf.validate.field).string.min_len = 1];
+  ImportedStageEvidence stage_evidence = 6;
   option (buf.validate.message).cel = {
     id: "ImportedMeasurement.source", message: "exactly one measurement source required",
-    expression: "(has(this.evidence) && !has(this.sample) && !has(this.historical_reading)) || (!has(this.evidence) && has(this.sample) && !has(this.historical_reading)) || (!has(this.evidence) && !has(this.sample) && has(this.historical_reading))"
+    expression: "(has(this.evidence) ? 1 : 0) + (has(this.sample) ? 1 : 0) + (has(this.historical_reading) ? 1 : 0) + (has(this.stage_evidence) ? 1 : 0) == 1"
   };
   option (buf.validate.message).cel = {
     id: "ImportedMeasurement.trusted", message: "evidence must retain trusted provenance",
     expression: "!has(this.evidence) || this.evidence.provenance == 1"
   };
+}
+
+// Accepted legacy stage payload, including the measured content and environment identities.
+message ImportedStageEvidence {
+  string evidence_id = 1 [(buf.validate.field).string.min_len = 1];
+  string evaluation_id = 2 [(buf.validate.field).string.min_len = 1];
+  string stage_name = 3 [(buf.validate.field).string.min_len = 1];
+  string kind = 4 [(buf.validate.field).string = {in: ["build", "accuracy", "benchmark", "profile"]}];
+  string purpose = 5 [(buf.validate.field).string = {in: ["baseline", "local-validation", "official", "profile"]}];
+  string candidate_digest = 6 [(buf.validate.field).string.pattern = "^[0-9a-f]{64}$"];
+  string evaluator_digest = 7 [(buf.validate.field).string.pattern = "^[0-9a-f]{64}$"];
+  string workload_digest = 8 [(buf.validate.field).string.pattern = "^[0-9a-f]{64}$"];
+  string environment_digest = 9 [(buf.validate.field).string.pattern = "^[0-9a-f]{64}$"];
+  string trusted_inputs_digest = 10 [(buf.validate.field).string.pattern = "^[0-9a-f]{64}$"];
+  string outcome = 11 [(buf.validate.field).string = {in: ["passed", "failed", "observed"]}];
+  repeated Reading readings = 12;
+  optional string summary = 13;
+  repeated ImportedEvidenceArtifact artifacts = 14;
+  ImportedPartialMeasurement partial = 15;
+  optional string failure_kind = 16 [(buf.validate.field).string = {in: ["workload", "infrastructure", "ambiguous"]}];
+  optional string unmet_requirement = 17;
+  string accepted_round = 18 [(buf.validate.field).string.pattern = "^(0|[1-9][0-9]*)$"];
+}
+
+message ImportedEvidenceArtifact {
+  string path = 1 [(buf.validate.field).string.min_len = 1];
+  string sha256 = 2 [(buf.validate.field).string.pattern = "^[0-9a-f]{64}$"];
+}
+
+// Partial evidence remains partial; it cannot masquerade as a conclusive Sample.
+message ImportedPartialMeasurement {
+  Reading reading = 1 [(buf.validate.field).required = true];
+  optional double target = 2 [(buf.validate.field).double.finite = true];
+  optional string completed = 3 [(buf.validate.field).string.pattern = "^(0|[1-9][0-9]*)$"];
+  optional string required = 4 [(buf.validate.field).string.pattern = "^[1-9][0-9]*$"];
+  optional string unit = 5;
 }
 
 message ImportedGuidance {
@@ -115,6 +152,8 @@ message ImportedGuidance {
   InputTarget target = 7;
   InputMode mode = 8 [(buf.validate.field).enum.defined_only = true];
   bool disposed = 9;
+  optional string historical_target_kind = 10 [(buf.validate.field).string = {in: ["run", "role", "attempt", "item"]}];
+  optional string historical_target_id = 11 [(buf.validate.field).string.min_len = 1];
 }
 
 message ImportedUsage {
@@ -149,6 +188,7 @@ message ImportedFact {
     ImportedUsage usage = 6;
     ImportedExternalIdentity external_identity = 7;
     ImportedContent content = 8;
+    ArtifactRef content_reference = 9;
   }
 }
 

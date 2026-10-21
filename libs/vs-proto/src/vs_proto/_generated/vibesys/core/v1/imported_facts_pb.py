@@ -255,7 +255,7 @@ class ImportedTask(Message[_ImportedTaskFields]):
             ```
         runaway_evaluations:
             ```proto
-            uint32 runaway_evaluations = 12;
+            string runaway_evaluations = 12;
             ```
         profile_fields:
             ```proto
@@ -281,7 +281,7 @@ class ImportedTask(Message[_ImportedTaskFields]):
             objectives: list[TaskObjective] | None = None,
             relative_noise: float = 0,
             base_staleness: float = 0,
-            runaway_evaluations: int = 0,
+            runaway_evaluations: str = "",
             profile_fields: list[str] | None = None,
         ) -> None:
             pass
@@ -297,7 +297,7 @@ class ImportedTask(Message[_ImportedTaskFields]):
         objectives: list[TaskObjective]
         relative_noise: float
         base_staleness: float
-        runaway_evaluations: int
+        runaway_evaluations: str
         profile_fields: list[str]
 
 _ImportedCandidateFields: TypeAlias = Literal["revision", "git_commit", "artifacts"]
@@ -342,7 +342,7 @@ class ImportedCandidate(Message[_ImportedCandidateFields]):
         git_commit: str
         artifacts: list[ArtifactRef]
 
-_ImportedMeasurementFields: TypeAlias = Literal["evidence", "sample", "historical_reading", "historical_commit", "historical_artifact"]
+_ImportedMeasurementFields: TypeAlias = Literal["evidence", "sample", "historical_reading", "historical_commit", "historical_artifact", "stage_evidence"]
 
 class ImportedMeasurement(Message[_ImportedMeasurementFields]):
     """
@@ -376,9 +376,13 @@ class ImportedMeasurement(Message[_ImportedMeasurementFields]):
             ```proto
             optional string historical_artifact = 5;
             ```
+        stage_evidence:
+            ```proto
+            optional vibesys.core.v1.ImportedStageEvidence stage_evidence = 6;
+            ```
     """
 
-    __slots__ = ("evidence", "sample", "historical_reading", "historical_commit", "historical_artifact")
+    __slots__ = ("evidence", "sample", "historical_reading", "historical_commit", "historical_artifact", "stage_evidence")
 
     if TYPE_CHECKING:
 
@@ -390,6 +394,7 @@ class ImportedMeasurement(Message[_ImportedMeasurementFields]):
             historical_reading: Reading | None = None,
             historical_commit: str | None = None,
             historical_artifact: str | None = None,
+            stage_evidence: ImportedStageEvidence | None = None,
         ) -> None:
             pass
 
@@ -398,8 +403,229 @@ class ImportedMeasurement(Message[_ImportedMeasurementFields]):
         historical_reading: Reading | None
         historical_commit: str
         historical_artifact: str
+        stage_evidence: ImportedStageEvidence | None
 
-_ImportedGuidanceFields: TypeAlias = Literal["identity", "text", "artifact", "delivered", "withdrawn", "possibly_read", "target", "mode", "disposed"]
+_ImportedStageEvidenceFields: TypeAlias = Literal["evidence_id", "evaluation_id", "stage_name", "kind", "purpose", "candidate_digest", "evaluator_digest", "workload_digest", "environment_digest", "trusted_inputs_digest", "outcome", "readings", "summary", "artifacts", "partial", "failure_kind", "unmet_requirement", "accepted_round"]
+
+class ImportedStageEvidence(Message[_ImportedStageEvidenceFields]):
+    """
+    Accepted legacy stage payload, including the measured content and environment identities.
+
+    ```proto
+    message vibesys.core.v1.ImportedStageEvidence
+    ```
+
+    Attributes:
+        evidence_id:
+            ```proto
+            string evidence_id = 1;
+            ```
+        evaluation_id:
+            ```proto
+            string evaluation_id = 2;
+            ```
+        stage_name:
+            ```proto
+            string stage_name = 3;
+            ```
+        kind:
+            ```proto
+            string kind = 4;
+            ```
+        purpose:
+            ```proto
+            string purpose = 5;
+            ```
+        candidate_digest:
+            ```proto
+            string candidate_digest = 6;
+            ```
+        evaluator_digest:
+            ```proto
+            string evaluator_digest = 7;
+            ```
+        workload_digest:
+            ```proto
+            string workload_digest = 8;
+            ```
+        environment_digest:
+            ```proto
+            string environment_digest = 9;
+            ```
+        trusted_inputs_digest:
+            ```proto
+            string trusted_inputs_digest = 10;
+            ```
+        outcome:
+            ```proto
+            string outcome = 11;
+            ```
+        readings:
+            ```proto
+            repeated vibesys.core.v1.Reading readings = 12;
+            ```
+        summary:
+            ```proto
+            optional string summary = 13;
+            ```
+        artifacts:
+            ```proto
+            repeated vibesys.core.v1.ImportedEvidenceArtifact artifacts = 14;
+            ```
+        partial:
+            ```proto
+            optional vibesys.core.v1.ImportedPartialMeasurement partial = 15;
+            ```
+        failure_kind:
+            ```proto
+            optional string failure_kind = 16;
+            ```
+        unmet_requirement:
+            ```proto
+            optional string unmet_requirement = 17;
+            ```
+        accepted_round:
+            ```proto
+            string accepted_round = 18;
+            ```
+    """
+
+    __slots__ = ("evidence_id", "evaluation_id", "stage_name", "kind", "purpose", "candidate_digest", "evaluator_digest", "workload_digest", "environment_digest", "trusted_inputs_digest", "outcome", "readings", "summary", "artifacts", "partial", "failure_kind", "unmet_requirement", "accepted_round")
+
+    if TYPE_CHECKING:
+
+        def __init__(
+            self,
+            *,
+            evidence_id: str = "",
+            evaluation_id: str = "",
+            stage_name: str = "",
+            kind: str = "",
+            purpose: str = "",
+            candidate_digest: str = "",
+            evaluator_digest: str = "",
+            workload_digest: str = "",
+            environment_digest: str = "",
+            trusted_inputs_digest: str = "",
+            outcome: str = "",
+            readings: list[Reading] | None = None,
+            summary: str | None = None,
+            artifacts: list[ImportedEvidenceArtifact] | None = None,
+            partial: ImportedPartialMeasurement | None = None,
+            failure_kind: str | None = None,
+            unmet_requirement: str | None = None,
+            accepted_round: str = "",
+        ) -> None:
+            pass
+
+        evidence_id: str
+        evaluation_id: str
+        stage_name: str
+        kind: str
+        purpose: str
+        candidate_digest: str
+        evaluator_digest: str
+        workload_digest: str
+        environment_digest: str
+        trusted_inputs_digest: str
+        outcome: str
+        readings: list[Reading]
+        summary: str
+        artifacts: list[ImportedEvidenceArtifact]
+        partial: ImportedPartialMeasurement | None
+        failure_kind: str
+        unmet_requirement: str
+        accepted_round: str
+
+_ImportedEvidenceArtifactFields: TypeAlias = Literal["path", "sha256"]
+
+class ImportedEvidenceArtifact(Message[_ImportedEvidenceArtifactFields]):
+    """
+    ```proto
+    message vibesys.core.v1.ImportedEvidenceArtifact
+    ```
+
+    Attributes:
+        path:
+            ```proto
+            string path = 1;
+            ```
+        sha256:
+            ```proto
+            string sha256 = 2;
+            ```
+    """
+
+    __slots__ = ("path", "sha256")
+
+    if TYPE_CHECKING:
+
+        def __init__(
+            self,
+            *,
+            path: str = "",
+            sha256: str = "",
+        ) -> None:
+            pass
+
+        path: str
+        sha256: str
+
+_ImportedPartialMeasurementFields: TypeAlias = Literal["reading", "target", "completed", "required", "unit"]
+
+class ImportedPartialMeasurement(Message[_ImportedPartialMeasurementFields]):
+    """
+    Partial evidence remains partial; it cannot masquerade as a conclusive Sample.
+
+    ```proto
+    message vibesys.core.v1.ImportedPartialMeasurement
+    ```
+
+    Attributes:
+        reading:
+            ```proto
+            optional vibesys.core.v1.Reading reading = 1;
+            ```
+        target:
+            ```proto
+            optional double target = 2;
+            ```
+        completed:
+            ```proto
+            optional string completed = 3;
+            ```
+        required:
+            ```proto
+            optional string required = 4;
+            ```
+        unit:
+            ```proto
+            optional string unit = 5;
+            ```
+    """
+
+    __slots__ = ("reading", "target", "completed", "required", "unit")
+
+    if TYPE_CHECKING:
+
+        def __init__(
+            self,
+            *,
+            reading: Reading | None = None,
+            target: float | None = None,
+            completed: str | None = None,
+            required: str | None = None,
+            unit: str | None = None,
+        ) -> None:
+            pass
+
+        reading: Reading | None
+        target: float
+        completed: str
+        required: str
+        unit: str
+
+_ImportedGuidanceFields: TypeAlias = Literal["identity", "text", "artifact", "delivered", "withdrawn", "possibly_read", "target", "mode", "disposed", "historical_target_kind", "historical_target_id"]
 
 class ImportedGuidance(Message[_ImportedGuidanceFields]):
     """
@@ -444,9 +670,17 @@ class ImportedGuidance(Message[_ImportedGuidanceFields]):
             ```proto
             bool disposed = 9;
             ```
+        historical_target_kind:
+            ```proto
+            optional string historical_target_kind = 10;
+            ```
+        historical_target_id:
+            ```proto
+            optional string historical_target_id = 11;
+            ```
     """
 
-    __slots__ = ("identity", "text", "artifact", "delivered", "withdrawn", "possibly_read", "target", "mode", "disposed")
+    __slots__ = ("identity", "text", "artifact", "delivered", "withdrawn", "possibly_read", "target", "mode", "disposed", "historical_target_kind", "historical_target_id")
 
     if TYPE_CHECKING:
 
@@ -462,6 +696,8 @@ class ImportedGuidance(Message[_ImportedGuidanceFields]):
             target: InputTarget | None = None,
             mode: InputMode | None = None,
             disposed: bool = False,
+            historical_target_kind: str | None = None,
+            historical_target_id: str | None = None,
         ) -> None:
             pass
 
@@ -474,6 +710,8 @@ class ImportedGuidance(Message[_ImportedGuidanceFields]):
         target: InputTarget | None
         mode: InputMode
         disposed: bool
+        historical_target_kind: str
+        historical_target_id: str
 
 _ImportedUsageFields: TypeAlias = Literal["identity", "unit", "amount", "count", "unknown", "refunded_count", "source_request"]
 
@@ -575,7 +813,7 @@ class ImportedExternalIdentity(Message[_ImportedExternalIdentityFields]):
         source_request: str
         owner: str
 
-_ImportedFactFields: TypeAlias = Literal["imported_from", "input", "candidate", "measurement", "guidance", "usage", "external_identity", "content"]
+_ImportedFactFields: TypeAlias = Literal["imported_from", "input", "candidate", "measurement", "guidance", "usage", "external_identity", "content", "content_reference"]
 
 class ImportedFact(Message[_ImportedFactFields]):
     """
@@ -602,12 +840,12 @@ class ImportedFact(Message[_ImportedFactFields]):
             self,
             *,
             imported_from: list[ImportedFrom] | None = None,
-            value: Oneof[Literal["input"], ImportedInput] | Oneof[Literal["candidate"], ImportedCandidate] | Oneof[Literal["measurement"], ImportedMeasurement] | Oneof[Literal["guidance"], ImportedGuidance] | Oneof[Literal["usage"], ImportedUsage] | Oneof[Literal["external_identity"], ImportedExternalIdentity] | Oneof[Literal["content"], ImportedContent] | None = None,
+            value: Oneof[Literal["input"], ImportedInput] | Oneof[Literal["candidate"], ImportedCandidate] | Oneof[Literal["measurement"], ImportedMeasurement] | Oneof[Literal["guidance"], ImportedGuidance] | Oneof[Literal["usage"], ImportedUsage] | Oneof[Literal["external_identity"], ImportedExternalIdentity] | Oneof[Literal["content"], ImportedContent] | Oneof[Literal["content_reference"], ArtifactRef] | None = None,
         ) -> None:
             pass
 
         imported_from: list[ImportedFrom]
-        value: Oneof[Literal["input"], ImportedInput] | Oneof[Literal["candidate"], ImportedCandidate] | Oneof[Literal["measurement"], ImportedMeasurement] | Oneof[Literal["guidance"], ImportedGuidance] | Oneof[Literal["usage"], ImportedUsage] | Oneof[Literal["external_identity"], ImportedExternalIdentity] | Oneof[Literal["content"], ImportedContent] | None
+        value: Oneof[Literal["input"], ImportedInput] | Oneof[Literal["candidate"], ImportedCandidate] | Oneof[Literal["measurement"], ImportedMeasurement] | Oneof[Literal["guidance"], ImportedGuidance] | Oneof[Literal["usage"], ImportedUsage] | Oneof[Literal["external_identity"], ImportedExternalIdentity] | Oneof[Literal["content"], ImportedContent] | Oneof[Literal["content_reference"], ArtifactRef] | None
 
 _ImportedRunFactsFields: TypeAlias = Literal["schema_version", "run_id", "facts"]
 
@@ -736,7 +974,7 @@ class ImportFormat(Enum):
 
 
 _DESC = file_desc(
-    b'\n$vibesys/core/v1/imported_facts.proto\x12\x0fvibesys.core.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1cvibesys/core/v1/common.proto\x1a\x1cvibesys/core/v1/leaves.proto\x1a!vibesys/core/v1/agent_facts.proto\x1a\x1fvibesys/core/v1/contracts.proto\x1a\x1dvibesys/core/v1/control.proto\x1a vibesys/core/v1/vocabulary.proto"\xc2\x01\n\x0cImportedFrom\x12\x1b\n\x04path\x18\x01 \x01(\tR\x04pathB\x07\xbaH\x04r\x02\x10\x01\x12-\n\x06sha256\x18\x02 \x01(\tR\x06sha256B\x15\xbaH\x12r\x102\x0e^[0-9a-f]{64}$\x12#\n\x08selector\x18\x03 \x01(\tR\x08selectorB\x07\xbaH\x04r\x02\x10\x01\x12A\n\x06format\x18\x04 \x01(\x0e2\x1d.vibesys.core.v1.ImportFormatR\x06formatB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00"|\n\x0fImportedContent\x12-\n\x06sha256\x18\x01 \x01(\tR\x06sha256B\x15\xbaH\x12r\x102\x0e^[0-9a-f]{64}$\x12\x12\n\x04data\x18\x02 \x01(\x0cR\x04data\x12&\n\nmedia_type\x18\x03 \x01(\tR\tmediaTypeB\x07\xbaH\x04r\x02\x10\x01"\xff\x03\n\rImportedInput\x124\n\x11baseline_revision\x18\x01 \x01(\tR\x10baselineRevisionB\x07\xbaH\x04r\x02\x10\x01\x124\n\x11input_fingerprint\x18\x02 \x01(\tR\x10inputFingerprintB\x07\xbaH\x04r\x02\x10\x01\x12\x1c\n\tobjective\x18\x03 \x01(\tR\tobjective\x128\n\x06config\x18\x04 \x03(\x0b2 .vibesys.core.v1.ImportedContentR\x06config\x12)\n\x10evaluator_digest\x18\x05 \x01(\tR\x0fevaluatorDigest\x12\'\n\x0fworkload_digest\x18\x06 \x01(\tR\x0eworkloadDigest\x12-\n\x12environment_digest\x18\x07 \x01(\tR\x11environmentDigest\x125\n\x07options\x18\x08 \x03(\x0b2\x1b.vibesys.core.v1.PureOptionR\x07options\x12=\n\x0bconstraints\x18\t \x03(\x0b2\x1b.vibesys.core.v1.PureOptionR\x0bconstraints\x121\n\x04task\x18\n \x01(\x0b2\x1d.vibesys.core.v1.ImportedTaskR\x04task"\x8a\x06\n\x0cImportedTask\x12<\n\x06recipe\x18\x01 \x01(\x0b2\x1c.vibesys.core.v1.ArtifactRefR\x06recipeB\x06\xbaH\x03\xc8\x01\x01\x122\n\x06stages\x18\x02 \x03(\x0b2\x1a.vibesys.core.v1.TaskStageR\x06stages\x12\x1a\n\x08measured\x18\x03 \x03(\tR\x08measured\x129\n\x0fqueue_allowance\x18\x04 \x01(\x01R\x0equeueAllowanceB\x10\xbaH\r\x12\x0b@\x01)\x00\x00\x00\x00\x00\x00\x00\x00\x12*\n\x0eaccuracy_stage\x18\x05 \x01(\tH\x00R\raccuracyStage\x88\x01\x01\x12,\n\x0fbenchmark_stage\x18\x06 \x01(\tH\x01R\x0ebenchmarkStage\x88\x01\x01\x12U\n\x0eaccuracy_gated\x18\x07 \x03(\x0e2\x1d.vibesys.core.v1.EvidenceKindR\raccuracyGatedB\x0f\xbaH\x0c\x92\x01\t"\x07\x82\x01\x04\x10\x01 \x00\x12=\n\x11operation_seconds\x18\x08 \x01(\x01R\x10operationSecondsB\x10\xbaH\r\x12\x0b@\x01!\x00\x00\x00\x00\x00\x00\x00\x00\x12>\n\nobjectives\x18\t \x03(\x0b2\x1e.vibesys.core.v1.TaskObjectiveR\nobjectives\x12@\n\x0erelative_noise\x18\n \x01(\x01R\rrelativeNoiseB\x19\xbaH\x16\x12\x14@\x01\x11\x00\x00\x00\x00\x00\x00\xf0?)\x00\x00\x00\x00\x00\x00\x00\x00\x127\n\x0ebase_staleness\x18\x0b \x01(\x01R\rbaseStalenessB\x10\xbaH\r\x12\x0b@\x01!\x00\x00\x00\x00\x00\x00\x00\x00\x128\n\x13runaway_evaluations\x18\x0c \x01(\rR\x12runawayEvaluationsB\x07\xbaH\x04*\x02(\x01\x12%\n\x0eprofile_fields\x18\r \x03(\tR\rprofileFieldsB\x11\n\x0f_accuracy_stageB\x12\n\x10_benchmark_stage"\xb5\x02\n\x11ImportedCandidate\x128\n\x08revision\x18\x01 \x01(\x0b2\x1c.vibesys.core.v1.RevisionRefR\x08revision\x12+\n\ngit_commit\x18\x02 \x01(\tH\x00R\tgitCommitB\x07\xbaH\x04r\x02\x10\x01\x88\x01\x01\x12:\n\tartifacts\x18\x03 \x03(\x0b2\x1c.vibesys.core.v1.ArtifactRefR\tartifactsB\r\n\x0b_git_commit:n\xbaHk\x1ai\n\x1aImportedCandidate.identity\x12\x1frevision or git_commit required\x1a*has(this.revision) || has(this.git_commit)"\xa7\x06\n\x13ImportedMeasurement\x128\n\x08evidence\x18\x01 \x01(\x0b2\x1c.vibesys.core.v1.EvidenceRefR\x08evidence\x12/\n\x06sample\x18\x02 \x01(\x0b2\x17.vibesys.core.v1.SampleR\x06sample\x12G\n\x12historical_reading\x18\x03 \x01(\x0b2\x18.vibesys.core.v1.ReadingR\x11historicalReading\x129\n\x11historical_commit\x18\x04 \x01(\tH\x00R\x10historicalCommitB\x07\xbaH\x04r\x02\x10\x01\x88\x01\x01\x12=\n\x13historical_artifact\x18\x05 \x01(\tH\x01R\x12historicalArtifactB\x07\xbaH\x04r\x02\x10\x01\x88\x01\x01B\x14\n\x12_historical_commitB\x16\n\x14_historical_artifact:\xb3\x03\xbaH\xaf\x03\x1a\xae\x02\n\x1aImportedMeasurement.source\x12\'exactly one measurement source required\x1a\xe6\x01(has(this.evidence) && !has(this.sample) && !has(this.historical_reading)) || (!has(this.evidence) && has(this.sample) && !has(this.historical_reading)) || (!has(this.evidence) && !has(this.sample) && has(this.historical_reading))\x1a|\n\x1bImportedMeasurement.trusted\x12\'evidence must retain trusted provenance\x1a4!has(this.evidence) || this.evidence.provenance == 1"\xf2\x02\n\x10ImportedGuidance\x12#\n\x08identity\x18\x01 \x01(\tR\x08identityB\x07\xbaH\x04r\x02\x10\x01\x12\x12\n\x04text\x18\x02 \x01(\tR\x04text\x128\n\x08artifact\x18\x03 \x01(\x0b2\x1c.vibesys.core.v1.ArtifactRefR\x08artifact\x12\x1c\n\tdelivered\x18\x04 \x01(\x08R\tdelivered\x12\x1c\n\twithdrawn\x18\x05 \x01(\x08R\twithdrawn\x12#\n\rpossibly_read\x18\x06 \x01(\x08R\x0cpossiblyRead\x124\n\x06target\x18\x07 \x01(\x0b2\x1c.vibesys.core.v1.InputTargetR\x06target\x128\n\x04mode\x18\x08 \x01(\x0e2\x1a.vibesys.core.v1.InputModeR\x04modeB\x08\xbaH\x05\x82\x01\x02\x10\x01\x12\x1a\n\x08disposed\x18\t \x01(\x08R\x08disposed"\xf0\x02\n\rImportedUsage\x12#\n\x08identity\x18\x01 \x01(\tR\x08identityB\x07\xbaH\x04r\x02\x10\x01\x12\x1b\n\x04unit\x18\x02 \x01(\tR\x04unitB\x07\xbaH\x04r\x02\x10\x01\x12*\n\x06amount\x18\x03 \x01(\x01H\x00R\x06amountB\x10\xbaH\r\x12\x0b@\x01)\x00\x00\x00\x00\x00\x00\x00\x00\x120\n\x05count\x18\x05 \x01(\tH\x00R\x05countB\x18\xbaH\x15r\x132\x11^(0|[1-9][0-9]*)$\x12#\n\x07unknown\x18\x07 \x01(\x08H\x00R\x07unknownB\x07\xbaH\x04j\x02\x08\x01\x12?\n\x0erefunded_count\x18\x06 \x01(\tR\rrefundedCountB\x18\xbaH\x15r\x132\x11^(0|[1-9][0-9]*)$\x123\n\x0esource_request\x18\x04 \x01(\tH\x01R\rsourceRequestB\x07\xbaH\x04r\x02\x10\x01\x88\x01\x01B\x11\n\x08quantity\x12\x05\xbaH\x02\x08\x01B\x11\n\x0f_source_request"\xd2\x01\n\x18ImportedExternalIdentity\x12\x1b\n\x04kind\x18\x01 \x01(\tR\x04kindB\x07\xbaH\x04r\x02\x10\x01\x12#\n\x08identity\x18\x02 \x01(\tR\x08identityB\x07\xbaH\x04r\x02\x10\x01\x123\n\x0esource_request\x18\x03 \x01(\tH\x00R\rsourceRequestB\x07\xbaH\x04r\x02\x10\x01\x88\x01\x01\x12"\n\x05owner\x18\x04 \x01(\tH\x01R\x05ownerB\x07\xbaH\x04r\x02\x10\x01\x88\x01\x01B\x11\n\x0f_source_requestB\x08\n\x06_owner"\xc3\x04\n\x0cImportedFact\x12L\n\rimported_from\x18\x01 \x03(\x0b2\x1d.vibesys.core.v1.ImportedFromR\x0cimportedFromB\x08\xbaH\x05\x92\x01\x02\x08\x01\x126\n\x05input\x18\x02 \x01(\x0b2\x1e.vibesys.core.v1.ImportedInputH\x00R\x05input\x12B\n\tcandidate\x18\x03 \x01(\x0b2".vibesys.core.v1.ImportedCandidateH\x00R\tcandidate\x12H\n\x0bmeasurement\x18\x04 \x01(\x0b2$.vibesys.core.v1.ImportedMeasurementH\x00R\x0bmeasurement\x12?\n\x08guidance\x18\x05 \x01(\x0b2!.vibesys.core.v1.ImportedGuidanceH\x00R\x08guidance\x126\n\x05usage\x18\x06 \x01(\x0b2\x1e.vibesys.core.v1.ImportedUsageH\x00R\x05usage\x12X\n\x11external_identity\x18\x07 \x01(\x0b2).vibesys.core.v1.ImportedExternalIdentityH\x00R\x10externalIdentity\x12<\n\x07content\x18\x08 \x01(\x0b2 .vibesys.core.v1.ImportedContentH\x00R\x07contentB\x0e\n\x05value\x12\x05\xbaH\x02\x08\x01"\xa1\x01\n\x10ImportedRunFacts\x12.\n\x0eschema_version\x18\x01 \x01(\rR\rschemaVersionB\x07\xbaH\x04*\x02\x08\x01\x12\x1e\n\x06run_id\x18\x02 \x01(\tR\x05runIdB\x07\xbaH\x04r\x02\x10\x01\x12=\n\x05facts\x18\x03 \x03(\x0b2\x1d.vibesys.core.v1.ImportedFactR\x05factsB\x08\xbaH\x05\x92\x01\x02\x08\x01*\xb9\x03\n\x0cImportFormat\x12\x1d\n\x19IMPORT_FORMAT_UNSPECIFIED\x10\x00\x12\x1a\n\x16IMPORT_FORMAT_MANIFEST\x10\x01\x12\x1f\n\x1bIMPORT_FORMAT_PROJECT_STORE\x10\x02\x12\x19\n\x15IMPORT_FORMAT_RUNTIME\x10\x03\x12\x1a\n\x16IMPORT_FORMAT_ENVELOPE\x10\x04\x12\x16\n\x12IMPORT_FORMAT_FLOW\x10\x05\x12\x1e\n\x1aIMPORT_FORMAT_PUBLICATIONS\x10\x06\x12\x17\n\x13IMPORT_FORMAT_ROUND\x10\x07\x12 \n\x1cIMPORT_FORMAT_LEGACY_DYNAMIC\x10\x08\x12\x19\n\x15IMPORT_FORMAT_CONTENT\x10\t\x12\x19\n\x15IMPORT_FORMAT_RECEIPT\x10\n\x12\x1c\n\x18IMPORT_FORMAT_HYPOTHESES\x10\x0b\x12\x18\n\x14IMPORT_FORMAT_EVENTS\x10\x0c\x12\x1a\n\x16IMPORT_FORMAT_SESSIONS\x10\r\x12\x19\n\x15IMPORT_FORMAT_CONTROL\x10\x0eB?Z=github.com/uw-syfi/vibesys/gateway/gen/vibesys/core/v1;corev1b\x06proto3',
+    b'\n$vibesys/core/v1/imported_facts.proto\x12\x0fvibesys.core.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1cvibesys/core/v1/common.proto\x1a\x1cvibesys/core/v1/leaves.proto\x1a!vibesys/core/v1/agent_facts.proto\x1a\x1fvibesys/core/v1/contracts.proto\x1a\x1dvibesys/core/v1/control.proto\x1a vibesys/core/v1/vocabulary.proto"\xc2\x01\n\x0cImportedFrom\x12\x1b\n\x04path\x18\x01 \x01(\tR\x04pathB\x07\xbaH\x04r\x02\x10\x01\x12-\n\x06sha256\x18\x02 \x01(\tR\x06sha256B\x15\xbaH\x12r\x102\x0e^[0-9a-f]{64}$\x12#\n\x08selector\x18\x03 \x01(\tR\x08selectorB\x07\xbaH\x04r\x02\x10\x01\x12A\n\x06format\x18\x04 \x01(\x0e2\x1d.vibesys.core.v1.ImportFormatR\x06formatB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00"|\n\x0fImportedContent\x12-\n\x06sha256\x18\x01 \x01(\tR\x06sha256B\x15\xbaH\x12r\x102\x0e^[0-9a-f]{64}$\x12\x12\n\x04data\x18\x02 \x01(\x0cR\x04data\x12&\n\nmedia_type\x18\x03 \x01(\tR\tmediaTypeB\x07\xbaH\x04r\x02\x10\x01"\xff\x03\n\rImportedInput\x124\n\x11baseline_revision\x18\x01 \x01(\tR\x10baselineRevisionB\x07\xbaH\x04r\x02\x10\x01\x124\n\x11input_fingerprint\x18\x02 \x01(\tR\x10inputFingerprintB\x07\xbaH\x04r\x02\x10\x01\x12\x1c\n\tobjective\x18\x03 \x01(\tR\tobjective\x128\n\x06config\x18\x04 \x03(\x0b2 .vibesys.core.v1.ImportedContentR\x06config\x12)\n\x10evaluator_digest\x18\x05 \x01(\tR\x0fevaluatorDigest\x12\'\n\x0fworkload_digest\x18\x06 \x01(\tR\x0eworkloadDigest\x12-\n\x12environment_digest\x18\x07 \x01(\tR\x11environmentDigest\x125\n\x07options\x18\x08 \x03(\x0b2\x1b.vibesys.core.v1.PureOptionR\x07options\x12=\n\x0bconstraints\x18\t \x03(\x0b2\x1b.vibesys.core.v1.PureOptionR\x0bconstraints\x121\n\x04task\x18\n \x01(\x0b2\x1d.vibesys.core.v1.ImportedTaskR\x04task"\x97\x06\n\x0cImportedTask\x12<\n\x06recipe\x18\x01 \x01(\x0b2\x1c.vibesys.core.v1.ArtifactRefR\x06recipeB\x06\xbaH\x03\xc8\x01\x01\x122\n\x06stages\x18\x02 \x03(\x0b2\x1a.vibesys.core.v1.TaskStageR\x06stages\x12\x1a\n\x08measured\x18\x03 \x03(\tR\x08measured\x129\n\x0fqueue_allowance\x18\x04 \x01(\x01R\x0equeueAllowanceB\x10\xbaH\r\x12\x0b@\x01)\x00\x00\x00\x00\x00\x00\x00\x00\x12*\n\x0eaccuracy_stage\x18\x05 \x01(\tH\x00R\raccuracyStage\x88\x01\x01\x12,\n\x0fbenchmark_stage\x18\x06 \x01(\tH\x01R\x0ebenchmarkStage\x88\x01\x01\x12U\n\x0eaccuracy_gated\x18\x07 \x03(\x0e2\x1d.vibesys.core.v1.EvidenceKindR\raccuracyGatedB\x0f\xbaH\x0c\x92\x01\t"\x07\x82\x01\x04\x10\x01 \x00\x12=\n\x11operation_seconds\x18\x08 \x01(\x01R\x10operationSecondsB\x10\xbaH\r\x12\x0b@\x01!\x00\x00\x00\x00\x00\x00\x00\x00\x12>\n\nobjectives\x18\t \x03(\x0b2\x1e.vibesys.core.v1.TaskObjectiveR\nobjectives\x12@\n\x0erelative_noise\x18\n \x01(\x01R\rrelativeNoiseB\x19\xbaH\x16\x12\x14@\x01\x11\x00\x00\x00\x00\x00\x00\xf0?)\x00\x00\x00\x00\x00\x00\x00\x00\x127\n\x0ebase_staleness\x18\x0b \x01(\x01R\rbaseStalenessB\x10\xbaH\r\x12\x0b@\x01!\x00\x00\x00\x00\x00\x00\x00\x00\x12E\n\x13runaway_evaluations\x18\x0c \x01(\tR\x12runawayEvaluationsB\x14\xbaH\x11r\x0f2\r^[1-9][0-9]*$\x12%\n\x0eprofile_fields\x18\r \x03(\tR\rprofileFieldsB\x11\n\x0f_accuracy_stageB\x12\n\x10_benchmark_stage"\xb5\x02\n\x11ImportedCandidate\x128\n\x08revision\x18\x01 \x01(\x0b2\x1c.vibesys.core.v1.RevisionRefR\x08revision\x12+\n\ngit_commit\x18\x02 \x01(\tH\x00R\tgitCommitB\x07\xbaH\x04r\x02\x10\x01\x88\x01\x01\x12:\n\tartifacts\x18\x03 \x03(\x0b2\x1c.vibesys.core.v1.ArtifactRefR\tartifactsB\r\n\x0b_git_commit:n\xbaHk\x1ai\n\x1aImportedCandidate.identity\x12\x1frevision or git_commit required\x1a*has(this.revision) || has(this.git_commit)"\x9c\x06\n\x13ImportedMeasurement\x128\n\x08evidence\x18\x01 \x01(\x0b2\x1c.vibesys.core.v1.EvidenceRefR\x08evidence\x12/\n\x06sample\x18\x02 \x01(\x0b2\x17.vibesys.core.v1.SampleR\x06sample\x12G\n\x12historical_reading\x18\x03 \x01(\x0b2\x18.vibesys.core.v1.ReadingR\x11historicalReading\x129\n\x11historical_commit\x18\x04 \x01(\tH\x00R\x10historicalCommitB\x07\xbaH\x04r\x02\x10\x01\x88\x01\x01\x12=\n\x13historical_artifact\x18\x05 \x01(\tH\x01R\x12historicalArtifactB\x07\xbaH\x04r\x02\x10\x01\x88\x01\x01\x12M\n\x0estage_evidence\x18\x06 \x01(\x0b2&.vibesys.core.v1.ImportedStageEvidenceR\rstageEvidenceB\x14\n\x12_historical_commitB\x16\n\x14_historical_artifact:\xd9\x02\xbaH\xd5\x02\x1a\xd4\x01\n\x1aImportedMeasurement.source\x12\'exactly one measurement source required\x1a\x8c\x01(has(this.evidence) ? 1 : 0) + (has(this.sample) ? 1 : 0) + (has(this.historical_reading) ? 1 : 0) + (has(this.stage_evidence) ? 1 : 0) == 1\x1a|\n\x1bImportedMeasurement.trusted\x12\'evidence must retain trusted provenance\x1a4!has(this.evidence) || this.evidence.provenance == 1"\x96\t\n\x15ImportedStageEvidence\x12(\n\x0bevidence_id\x18\x01 \x01(\tR\nevidenceIdB\x07\xbaH\x04r\x02\x10\x01\x12,\n\revaluation_id\x18\x02 \x01(\tR\x0cevaluationIdB\x07\xbaH\x04r\x02\x10\x01\x12&\n\nstage_name\x18\x03 \x01(\tR\tstageNameB\x07\xbaH\x04r\x02\x10\x01\x12>\n\x04kind\x18\x04 \x01(\tR\x04kindB*\xbaH\'r%R\x05buildR\x08accuracyR\tbenchmarkR\x07profile\x12N\n\x07purpose\x18\x05 \x01(\tR\x07purposeB4\xbaH1r/R\x08baselineR\x10local-validationR\x08officialR\x07profile\x12@\n\x10candidate_digest\x18\x06 \x01(\tR\x0fcandidateDigestB\x15\xbaH\x12r\x102\x0e^[0-9a-f]{64}$\x12@\n\x10evaluator_digest\x18\x07 \x01(\tR\x0fevaluatorDigestB\x15\xbaH\x12r\x102\x0e^[0-9a-f]{64}$\x12>\n\x0fworkload_digest\x18\x08 \x01(\tR\x0eworkloadDigestB\x15\xbaH\x12r\x102\x0e^[0-9a-f]{64}$\x12D\n\x12environment_digest\x18\t \x01(\tR\x11environmentDigestB\x15\xbaH\x12r\x102\x0e^[0-9a-f]{64}$\x12I\n\x15trusted_inputs_digest\x18\n \x01(\tR\x13trustedInputsDigestB\x15\xbaH\x12r\x102\x0e^[0-9a-f]{64}$\x129\n\x07outcome\x18\x0b \x01(\tR\x07outcomeB\x1f\xbaH\x1cr\x1aR\x06passedR\x06failedR\x08observed\x124\n\x08readings\x18\x0c \x03(\x0b2\x18.vibesys.core.v1.ReadingR\x08readings\x12\x1d\n\x07summary\x18\r \x01(\tH\x00R\x07summary\x88\x01\x01\x12G\n\tartifacts\x18\x0e \x03(\x0b2).vibesys.core.v1.ImportedEvidenceArtifactR\tartifacts\x12E\n\x07partial\x18\x0f \x01(\x0b2+.vibesys.core.v1.ImportedPartialMeasurementR\x07partial\x12R\n\x0cfailure_kind\x18\x10 \x01(\tH\x01R\x0bfailureKindB*\xbaH\'r%R\x08workloadR\x0einfrastructureR\tambiguous\x88\x01\x01\x120\n\x11unmet_requirement\x18\x11 \x01(\tH\x02R\x10unmetRequirement\x88\x01\x01\x12?\n\x0eaccepted_round\x18\x12 \x01(\tR\racceptedRoundB\x18\xbaH\x15r\x132\x11^(0|[1-9][0-9]*)$B\n\n\x08_summaryB\x0f\n\r_failure_kindB\x14\n\x12_unmet_requirement"f\n\x18ImportedEvidenceArtifact\x12\x1b\n\x04path\x18\x01 \x01(\tR\x04pathB\x07\xbaH\x04r\x02\x10\x01\x12-\n\x06sha256\x18\x02 \x01(\tR\x06sha256B\x15\xbaH\x12r\x102\x0e^[0-9a-f]{64}$"\xba\x02\n\x1aImportedPartialMeasurement\x12:\n\x07reading\x18\x01 \x01(\x0b2\x18.vibesys.core.v1.ReadingR\x07readingB\x06\xbaH\x03\xc8\x01\x01\x12$\n\x06target\x18\x02 \x01(\x01H\x00R\x06targetB\x07\xbaH\x04\x12\x02@\x01\x88\x01\x01\x12;\n\tcompleted\x18\x03 \x01(\tH\x01R\tcompletedB\x18\xbaH\x15r\x132\x11^(0|[1-9][0-9]*)$\x88\x01\x01\x125\n\x08required\x18\x04 \x01(\tH\x02R\x08requiredB\x14\xbaH\x11r\x0f2\r^[1-9][0-9]*$\x88\x01\x01\x12\x17\n\x04unit\x18\x05 \x01(\tH\x03R\x04unit\x88\x01\x01B\t\n\x07_targetB\x0c\n\n_completedB\x0b\n\t_requiredB\x07\n\x05_unit"\xc2\x04\n\x10ImportedGuidance\x12#\n\x08identity\x18\x01 \x01(\tR\x08identityB\x07\xbaH\x04r\x02\x10\x01\x12\x12\n\x04text\x18\x02 \x01(\tR\x04text\x128\n\x08artifact\x18\x03 \x01(\x0b2\x1c.vibesys.core.v1.ArtifactRefR\x08artifact\x12\x1c\n\tdelivered\x18\x04 \x01(\x08R\tdelivered\x12\x1c\n\twithdrawn\x18\x05 \x01(\x08R\twithdrawn\x12#\n\rpossibly_read\x18\x06 \x01(\x08R\x0cpossiblyRead\x124\n\x06target\x18\x07 \x01(\x0b2\x1c.vibesys.core.v1.InputTargetR\x06target\x128\n\x04mode\x18\x08 \x01(\x0e2\x1a.vibesys.core.v1.InputModeR\x04modeB\x08\xbaH\x05\x82\x01\x02\x10\x01\x12\x1a\n\x08disposed\x18\t \x01(\x08R\x08disposed\x12Z\n\x16historical_target_kind\x18\n \x01(\tH\x00R\x14historicalTargetKindB\x1f\xbaH\x1cr\x1aR\x03runR\x04roleR\x07attemptR\x04item\x88\x01\x01\x12>\n\x14historical_target_id\x18\x0b \x01(\tH\x01R\x12historicalTargetIdB\x07\xbaH\x04r\x02\x10\x01\x88\x01\x01B\x19\n\x17_historical_target_kindB\x17\n\x15_historical_target_id"\xf0\x02\n\rImportedUsage\x12#\n\x08identity\x18\x01 \x01(\tR\x08identityB\x07\xbaH\x04r\x02\x10\x01\x12\x1b\n\x04unit\x18\x02 \x01(\tR\x04unitB\x07\xbaH\x04r\x02\x10\x01\x12*\n\x06amount\x18\x03 \x01(\x01H\x00R\x06amountB\x10\xbaH\r\x12\x0b@\x01)\x00\x00\x00\x00\x00\x00\x00\x00\x120\n\x05count\x18\x05 \x01(\tH\x00R\x05countB\x18\xbaH\x15r\x132\x11^(0|[1-9][0-9]*)$\x12#\n\x07unknown\x18\x07 \x01(\x08H\x00R\x07unknownB\x07\xbaH\x04j\x02\x08\x01\x12?\n\x0erefunded_count\x18\x06 \x01(\tR\rrefundedCountB\x18\xbaH\x15r\x132\x11^(0|[1-9][0-9]*)$\x123\n\x0esource_request\x18\x04 \x01(\tH\x01R\rsourceRequestB\x07\xbaH\x04r\x02\x10\x01\x88\x01\x01B\x11\n\x08quantity\x12\x05\xbaH\x02\x08\x01B\x11\n\x0f_source_request"\xd2\x01\n\x18ImportedExternalIdentity\x12\x1b\n\x04kind\x18\x01 \x01(\tR\x04kindB\x07\xbaH\x04r\x02\x10\x01\x12#\n\x08identity\x18\x02 \x01(\tR\x08identityB\x07\xbaH\x04r\x02\x10\x01\x123\n\x0esource_request\x18\x03 \x01(\tH\x00R\rsourceRequestB\x07\xbaH\x04r\x02\x10\x01\x88\x01\x01\x12"\n\x05owner\x18\x04 \x01(\tH\x01R\x05ownerB\x07\xbaH\x04r\x02\x10\x01\x88\x01\x01B\x11\n\x0f_source_requestB\x08\n\x06_owner"\x90\x05\n\x0cImportedFact\x12L\n\rimported_from\x18\x01 \x03(\x0b2\x1d.vibesys.core.v1.ImportedFromR\x0cimportedFromB\x08\xbaH\x05\x92\x01\x02\x08\x01\x126\n\x05input\x18\x02 \x01(\x0b2\x1e.vibesys.core.v1.ImportedInputH\x00R\x05input\x12B\n\tcandidate\x18\x03 \x01(\x0b2".vibesys.core.v1.ImportedCandidateH\x00R\tcandidate\x12H\n\x0bmeasurement\x18\x04 \x01(\x0b2$.vibesys.core.v1.ImportedMeasurementH\x00R\x0bmeasurement\x12?\n\x08guidance\x18\x05 \x01(\x0b2!.vibesys.core.v1.ImportedGuidanceH\x00R\x08guidance\x126\n\x05usage\x18\x06 \x01(\x0b2\x1e.vibesys.core.v1.ImportedUsageH\x00R\x05usage\x12X\n\x11external_identity\x18\x07 \x01(\x0b2).vibesys.core.v1.ImportedExternalIdentityH\x00R\x10externalIdentity\x12<\n\x07content\x18\x08 \x01(\x0b2 .vibesys.core.v1.ImportedContentH\x00R\x07content\x12K\n\x11content_reference\x18\t \x01(\x0b2\x1c.vibesys.core.v1.ArtifactRefH\x00R\x10contentReferenceB\x0e\n\x05value\x12\x05\xbaH\x02\x08\x01"\xa1\x01\n\x10ImportedRunFacts\x12.\n\x0eschema_version\x18\x01 \x01(\rR\rschemaVersionB\x07\xbaH\x04*\x02\x08\x01\x12\x1e\n\x06run_id\x18\x02 \x01(\tR\x05runIdB\x07\xbaH\x04r\x02\x10\x01\x12=\n\x05facts\x18\x03 \x03(\x0b2\x1d.vibesys.core.v1.ImportedFactR\x05factsB\x08\xbaH\x05\x92\x01\x02\x08\x01*\xb9\x03\n\x0cImportFormat\x12\x1d\n\x19IMPORT_FORMAT_UNSPECIFIED\x10\x00\x12\x1a\n\x16IMPORT_FORMAT_MANIFEST\x10\x01\x12\x1f\n\x1bIMPORT_FORMAT_PROJECT_STORE\x10\x02\x12\x19\n\x15IMPORT_FORMAT_RUNTIME\x10\x03\x12\x1a\n\x16IMPORT_FORMAT_ENVELOPE\x10\x04\x12\x16\n\x12IMPORT_FORMAT_FLOW\x10\x05\x12\x1e\n\x1aIMPORT_FORMAT_PUBLICATIONS\x10\x06\x12\x17\n\x13IMPORT_FORMAT_ROUND\x10\x07\x12 \n\x1cIMPORT_FORMAT_LEGACY_DYNAMIC\x10\x08\x12\x19\n\x15IMPORT_FORMAT_CONTENT\x10\t\x12\x19\n\x15IMPORT_FORMAT_RECEIPT\x10\n\x12\x1c\n\x18IMPORT_FORMAT_HYPOTHESES\x10\x0b\x12\x18\n\x14IMPORT_FORMAT_EVENTS\x10\x0c\x12\x1a\n\x16IMPORT_FORMAT_SESSIONS\x10\r\x12\x19\n\x15IMPORT_FORMAT_CONTROL\x10\x0eB?Z=github.com/uw-syfi/vibesys/gateway/gen/vibesys/core/v1;corev1b\x06proto3',
     [
         validate_pb.desc(),
         common_pb.desc(),
@@ -753,6 +991,9 @@ _DESC = file_desc(
         "ImportedTask": ImportedTask,
         "ImportedCandidate": ImportedCandidate,
         "ImportedMeasurement": ImportedMeasurement,
+        "ImportedStageEvidence": ImportedStageEvidence,
+        "ImportedEvidenceArtifact": ImportedEvidenceArtifact,
+        "ImportedPartialMeasurement": ImportedPartialMeasurement,
         "ImportedGuidance": ImportedGuidance,
         "ImportedUsage": ImportedUsage,
         "ImportedExternalIdentity": ImportedExternalIdentity,

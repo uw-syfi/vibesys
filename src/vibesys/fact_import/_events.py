@@ -42,7 +42,9 @@ _USAGE_FIELDS = (
 )
 
 
-def import_events(source: ImportSource, registry: OperationRegistry, facts: FactSet) -> None:
+def import_events(
+    source: ImportSource, registry: OperationRegistry, facts: FactSet, run_id: str
+) -> None:
     rows = [
         decode(source, TypeAdapter(CoreEvent), registry, selector=f"line[{index}]", data=line)
         for index, line in enumerate(source.data.splitlines(), start=1)
@@ -56,6 +58,21 @@ def import_events(source: ImportSource, registry: OperationRegistry, facts: Fact
         if row.type in (CoreEventType.INVOCATION_FINISHED, CoreEventType.AGENT_EXECUTION_FINISHED)
     }
     for index, row in enumerate(rows, start=1):
+        if row.run_id and row.run_id != run_id:
+            raise FactImportError(
+                f"{source.path}:line[{index}].run_id", "source belongs to another run"
+            )
+        if (
+            isinstance(
+                row.data,
+                TurnUsageData
+                | WorkspaceSnapshotData
+                | WinnerSelectedData
+                | MeasurementComparedData,
+            )
+            and row.type.value != row.data.kind
+        ):
+            raise FactImportError(f"{source.path}:line[{index}].type", "does not match data.kind")
         _event(source, f"line[{index}]", row, facts)
         if (
             isinstance(row.data, AgentExecutionStartedData | InvocationStartedData)
@@ -72,7 +89,7 @@ def _event(source: ImportSource, path: str, row: CoreEvent, facts: FactSet) -> N
         for name in _USAGE_FIELDS:
             facts.add(
                 source,
-                path,
+                f"{path}.data.{name}",
                 usage(identity=identity, unit=name, amount=getattr(value, name)),
                 identity=f"{identity}:{name}",
             )

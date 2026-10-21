@@ -11,6 +11,7 @@ from typing import Any
 import pytest
 from hypothesis import given
 from hypothesis import strategies as st
+from tests.vibesys.golden.helpers import assert_exact_text
 
 from vibesys.api.importing import (
     FactImportError,
@@ -21,16 +22,26 @@ from vibesys.api.importing import (
 )
 from vs_core.api import FlowState, RunEnvelope
 from vs_core.api.testing import FAKE_REGISTRY
+from vs_evaluation.api import (
+    ContentDigest,
+    EvidenceFingerprints,
+    EvidenceMetric,
+    EvidenceOutcome,
+    TrustedEvidence,
+)
+from vs_evaluation.api import EvidenceKind as StageKind
+from vs_evaluator_protocol.api import PartialMeasurement, Progress
 from vs_project.api import (
     OrchestrationDescriptor,
     Project,
     RunEnvironmentRecord,
+    StateDocumentDamagedError,
     StoredEnvelope,
 )
 from vs_project.api.testing import run_execution_record
 from vs_proto.api import imported_facts as pb
 from vs_proto.api import validate
-from vs_runtime.api.core import RuntimeRecord
+from vs_runtime.api.core import EvidenceEntry, RuntimeRecord
 
 _FIXTURES = Path(__file__).with_name("fixtures")
 
@@ -216,3 +227,338 @@ def test_project_shell_reads_original_content_and_does_not_modify_the_store(tmp_
     assert all(content.data != b"An edited task." for content in _payloads(result, "content"))
     assert project.state.portable_run_export("run").files == before
     assert namespace.read_bytes("state.json") == legacy
+
+
+def _receipt(family: str, part: str, data: dict[str, Any], key: str = "request-a") -> ImportSource:
+    path = f"receipts/{family}/{sha256(key.encode()).hexdigest()}.{part}.json"
+    return ImportSource(path, SourceFormat.RECEIPT, json.dumps(data).encode())
+
+
+def test_receipts_preserve_unsealed_effects_and_reject_arbitrary_python_type_tags() -> None:
+    begun = _receipt("executions", "execution", {"payload_digest": "digest", "phase": "begun"})
+    imported = _import(begun)
+    assert _payloads(imported, "external_identity")[0].kind == "unsealed-execution"
+    done = _receipt(
+        "executions",
+        "execution",
+        {
+            "payload_digest": "digest",
+            "phase": "done",
+            "result_json": '{"sequence":1}',
+            "result_type": None,
+        },
+    )
+    _import(_sources()[0], done)
+    for tag in ("arbitrary.Module", "os.system"):
+        invalid = json.loads(done.data)
+        invalid["result_type"] = tag
+        source = _receipt("executions", "execution", invalid)
+        with pytest.raises(FactImportError, match="result_type"):
+            _import(source)
+
+
+def test_settled_usage_keeps_unknowns_and_does_not_count_live_usage_updates() -> None:
+    timestamp = "2026-01-01T00:00:00Z"
+    rows = [
+        {
+            "type": "usage_update",
+            "sequence": 1,
+            "timestamp": timestamp,
+            "data": {"kind": "usage_update", "input_tokens": 9999, "context_window": 100000},
+        },
+        {
+            "type": "turn_usage_recorded",
+            "sequence": 2,
+            "timestamp": timestamp,
+            "execution_id": "invocation-7",
+            "data": {
+                "kind": "turn_usage_recorded",
+                "input_tokens": 1234,
+                "output_tokens": 90,
+                "total_cost_usd": 0.42,
+                "duration_ms": 1500,
+            },
+        },
+    ]
+    source = ImportSource(
+        "core-events.jsonl",
+        SourceFormat.EVENTS,
+        b"\n".join(json.dumps(row).encode() for row in rows) + b"\n",
+    )
+    result = _import(source)
+    usage = {row.unit: row.quantity for row in _payloads(result, "usage")}
+    assert usage["input_tokens"].value == "1234"
+    assert usage["total_cost_usd"].value == 0.42
+    assert usage["cache_read_input_tokens"].field == "unknown"
+    assert len(usage) == 7
+
+
+def test_guidance_retains_disposition_target_and_standing_mode() -> None:
+    source = ImportSource(
+        "control/inbox/advice.json",
+        SourceFormat.CONTROL,
+        b'{"control_id":"advice","action":"steer","text":"Focus on latency.","target":{"kind":"role","id":"planner"},"mode":"standing"}',
+    )
+    result = _import(source)
+    guidance = _payloads(result, "guidance")[0]
+    assert guidance.text == "Focus on latency."
+    assert guidance.historical_target_kind == "role"
+    assert guidance.historical_target_id == "planner"
+    assert guidance.mode.name == "STANDING"
+    assert not guidance.delivered
+
+
+@pytest.mark.parametrize("version", list(range(1, 10)))
+def test_legacy_versions_keep_fact_semantics_without_changing_the_source_version(
+    version: int,
+) -> None:
+    value = json.loads((_FIXTURES / "legacy-v6-completed.json").read_bytes())
+    value["schema_version"] = version
+    source = ImportSource(
+        "dynamic/state.json", SourceFormat.LEGACY_DYNAMIC, json.dumps(value).encode()
+    )
+    result = _import(source, strategy="dynamic")
+    assert _payloads(result, "measurement")
+    assert json.loads(source.data)["schema_version"] == version
+
+
+@pytest.mark.parametrize(
+    "fixture", sorted(Path("libs/vs-core/tests/envelopes").glob("v*.json")), ids=lambda p: p.stem
+)
+def test_every_retained_envelope_fixture_lowers_without_an_upgrade(fixture: Path) -> None:
+    value = json.loads(fixture.read_bytes())
+    for section in (value["strategy"]["live"], value["strategy"].get("base")):
+        if section is not None:
+            for flow in section["flows"]:
+                if flow["name"] == "root":
+                    flow["snapshot_json"] = '{"max_rounds":2}'
+    source = ImportSource(fixture.name, SourceFormat.ENVELOPE, json.dumps(value).encode())
+    result = _import(source)
+    samples = [row.sample for row in _payloads(result, "measurement") if row.sample is not None]
+    expected = {sample["run"]["root"] for sample in value["core"]["evaluation"].get("samples", [])}
+    assert {sample.run.root for sample in samples} == expected
+    assert json.loads(source.data)["schema_version"] == value["schema_version"]
+
+
+def test_frozen_snapshot_schema_keeps_properties_named_title_and_the_original_provenance() -> None:
+    value = _envelope()
+    published = json.loads((_FIXTURES / "legacy-v6-completed.json").read_bytes())["search"]
+    # This fixture exercises the permanent legacy search reader, including the plan's title.
+    source = ImportSource(
+        "single/state.json", SourceFormat.HYPOTHESES, json.dumps(published).encode()
+    )
+    result = _import(source)
+    assert _payloads(result, "candidate")
+    assert all(
+        origin.sha256 == sha256(source.data).hexdigest()
+        for fact in result.facts
+        for origin in fact.imported_from
+    )
+    assert value["schema_version"] == 42
+
+
+def test_unknown_envelope_version_and_cross_run_input_are_prerequisites() -> None:
+    value = _envelope()
+    value["schema_version"] = 999
+    with pytest.raises(FactImportError, match="schema_version"):
+        _import(ImportSource("future.json", SourceFormat.ENVELOPE, json.dumps(value).encode()))
+    with pytest.raises(FactImportError, match="another run"):
+        import_run_facts("another", [_sources()[0]], strategy="single", registry=FAKE_REGISTRY)
+
+
+def test_accepted_stage_ledger_keeps_fingerprints_all_readings_and_partial_progress() -> None:
+
+    digest = ContentDigest(value="1" * 64)
+    evidence = TrustedEvidence(
+        evidence_id="2" * 64,
+        evaluation_id="evaluation",
+        stage_name="benchmark",
+        kind=StageKind.BENCHMARK,
+        fingerprints=EvidenceFingerprints(
+            candidate=digest, evaluator=digest, workload=digest, environment=digest
+        ),
+        trusted_inputs=digest,
+        outcome=EvidenceOutcome.FAILED,
+        metrics=(EvidenceMetric(name="throughput", value=1.0, direction="max"),),
+        partial_measurement=PartialMeasurement(
+            name="warmup",
+            value=2.0,
+            direction="max",
+            target=4.0,
+            progress=Progress(completed=2, required=4, unit="rounds"),
+        ),
+        accepted_round=0,
+    )
+    entry = EvidenceEntry(evidence=evidence, purpose="official")
+    result = _import(_receipt("evidence-ledger", "evidence", entry.model_dump(mode="json")))
+    stage = _payloads(result, "measurement")[0].stage_evidence
+    assert stage.candidate_digest == "1" * 64
+    assert stage.environment_digest == "1" * 64
+    assert stage.readings[0].value == 1.0
+    assert stage.partial.reading.value == 2.0
+    assert stage.partial.completed == "2"
+    assert stage.outcome == "failed"
+    assert stage.purpose == "official"
+
+
+@given(count=st.integers(min_value=0, max_value=2**100))
+def test_usage_counts_remain_exact_above_machine_integer_and_float_precision(count: int) -> None:
+    value = _envelope()
+    value["core"]["sessions"]["run_charges"] = [
+        {"charge_id": {"kind": "charge", "root": "charge-a"}, "kind": "turn", "charged": count}
+    ]
+    result = _import(
+        ImportSource("envelope.json", SourceFormat.ENVELOPE, json.dumps(value).encode())
+    )
+    usage = _payloads(result, "usage")[0]
+    assert usage.quantity.field == "count"
+    assert usage.quantity.value == str(count)
+
+
+def test_current_guidance_preserves_the_exact_shared_target_and_content_reference() -> None:
+    value = _envelope()
+    artifact = {"artifact_id": {"kind": "artifact", "root": "note"}, "digest": "note-digest"}
+    value["core"]["sessions"]["inputs"] = [
+        {
+            "input": {
+                "input_id": {"kind": "input", "root": "advice"},
+                "target": {"kind": "role", "role_id": {"kind": "role", "root": "planner"}},
+                "artifact": artifact,
+                "received_at": 1.0,
+                "sequence": 1,
+                "mode": "standing",
+            }
+        }
+    ]
+    result = _import(
+        ImportSource("envelope.json", SourceFormat.ENVELOPE, json.dumps(value).encode())
+    )
+    guidance = _payloads(result, "guidance")[0]
+    assert guidance.target.target.field == "role"
+    assert guidance.artifact.digest == "note-digest"
+    assert any(ref.digest == "note-digest" for ref in _payloads(result, "content_reference"))
+
+
+@pytest.mark.parametrize(
+    ("strategy", "config"),
+    [
+        ("dynamic", {"max_rounds": 2}),
+        ("single-agent", {"max_rounds": 2}),
+        ("multi-agent", {"max_rounds": 2}),
+        ("plain", {"max_rounds": 2, "max_attempts_per_issue": 1, "max_issues_per_perf_eval": 1}),
+        (
+            "evolve",
+            {
+                "max_generations": 1,
+                "children_per_generation": 2,
+                "k_top_inspirations": 1,
+                "k_random_inspirations": 0,
+                "selection_temperature": 1.0,
+                "frontier_bias": 0.5,
+                "bootstrap_max_attempts": 2,
+            },
+        ),
+    ],
+)
+def test_all_five_retained_root_snapshot_families_are_read_only(
+    strategy: str, config: dict[str, Any]
+) -> None:
+    value = _envelope()["strategy"]
+    value["live"]["flows"][0]["snapshot_json"] = json.dumps(config)
+    source = ImportSource("flow.json", SourceFormat.FLOW, json.dumps(value).encode())
+    result = _import(source, strategy=strategy)
+    validate(result)
+    assert json.loads(source.data)["live"]["flows"][0]["snapshot_json"] == json.dumps(config)
+
+
+def test_current_store_and_legacy_fixtures_match_shared_fact_goldens() -> None:
+
+    cases = {
+        "current": _import(*_sources()),
+        "legacy": _import(
+            ImportSource(
+                "dynamic/state.json",
+                SourceFormat.LEGACY_DYNAMIC,
+                (_FIXTURES / "legacy-v6-completed.json").read_bytes(),
+            ),
+            strategy="dynamic",
+        ),
+    }
+    for name, result in cases.items():
+        assert_exact_text(
+            _FIXTURES / f"{name}.facts.json",
+            json.dumps(json.loads(result.to_json()), sort_keys=True, indent=2) + "\n",
+        )
+
+
+def test_guidance_occurrences_coalesce_with_withdrawal_instead_of_redelivering_old_advice() -> None:
+    advice = ImportSource(
+        "control/inbox/advice.json",
+        SourceFormat.CONTROL,
+        b'{"control_id":"advice","action":"steer","text":"Focus on latency."}',
+    )
+    withdrawal = ImportSource(
+        "control/inbox/withdraw.json",
+        SourceFormat.CONTROL,
+        b'{"control_id":"withdraw","action":"withdraw","withdraws":"advice"}',
+    )
+    result = _import(advice, withdrawal)
+    guidance = _payloads(result, "guidance")
+    assert len(guidance) == 1
+    assert guidance[0].text == "Focus on latency."
+    assert guidance[0].withdrawn
+    assert guidance[0].disposed
+    fact = next(
+        fact for fact in result.facts if fact.value is not None and fact.value.field == "guidance"
+    )
+    assert {origin.path for origin in fact.imported_from} == {advice.path, withdrawal.path}
+
+
+def test_parent_release_never_erases_a_childs_independent_ownership() -> None:
+    value = _envelope()
+    request = value["core"]["records"]["records"][0]["request_id"]
+    scope = {"owner": {"kind": "run", "root": "run"}, "generation": 0}
+    value["core"]["records"]["children"] = [
+        {
+            "resource_id": {"kind": "resource", "root": "child-live"},
+            "scope": scope,
+            "source_requests": [request],
+        }
+    ]
+    result = _import(
+        ImportSource("envelope.json", SourceFormat.ENVELOPE, json.dumps(value).encode())
+    )
+    assert any(
+        identity.identity == "child-live" for identity in _payloads(result, "external_identity")
+    )
+
+
+def test_project_retained_journal_is_bounded_and_keeps_original_bytes(tmp_path: Path) -> None:
+    project = Project.open(tmp_path)
+    path = project.event_journal_path_for(project.root, "run")
+    path.parent.mkdir(parents=True)
+    path.write_bytes(b"retained\n")
+    assert project.retained_event_journal("run", max_bytes=100) == b"retained\n"
+    with pytest.raises(StateDocumentDamagedError, match="byte limit"):
+        project.retained_event_journal("run", max_bytes=1)
+    assert path.read_bytes() == b"retained\n"
+
+
+def test_registered_jobs_keep_physical_and_independent_child_identities() -> None:
+    value = _envelope()
+    value["core"]["evaluation"]["registered_jobs"] = [
+        {
+            "operation_id": {"kind": "operation", "root": "operation-a"},
+            "request_id": {"kind": "request", "root": "request-a"},
+            "scope": {"owner": {"kind": "run", "root": "run"}, "generation": 0},
+            "resource_pool": {"kind": "pool", "root": "jobs"},
+            "resource_id": {"kind": "resource", "root": "job-a"},
+            "terminal": True,
+            "children": [{"kind": "resource", "root": "child-a"}],
+        }
+    ]
+    result = _import(
+        ImportSource("envelope.json", SourceFormat.ENVELOPE, json.dumps(value).encode())
+    )
+    identities = {row.identity for row in _payloads(result, "external_identity")}
+    assert identities >= {"operation-a", "job-a", "child-a"}
