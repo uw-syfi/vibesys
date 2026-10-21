@@ -87,23 +87,34 @@ sequence, so the history never shows something core does not hold. After each sw
 `committed_seq` in `run.head`, and the gateway's `Tail` and `Skeleton` serve only records up to it,
 so a viewer never sees a record that recovery would drop. The phase 1 converter has no `state.pb`
 and recovers every complete surviving record, syncing that prefix before publishing
-it. Its writer groups ordinary appends: the first pending append schedules a commit
-on the owning event loop after 100 ms, using the `vs-sim` clock/sleeper abstraction.
-The deadline is not reset by later appends. A commit fsyncs the log once, writes any
-due keyframe, then atomically publishes `run.head` with the new `committed_seq`.
-Lifecycle changes, epoch headers and close commit immediately. The 100 ms interval
-keeps live tailing responsive while amortizing sync costs across bursts; scheduling
-and storage stalls can delay completion beyond that interval.
+it. Its writer groups ordinary appends: the first pending append wakes a dedicated
+committer with a deadline 100 ms after the batch handoff, using the injected clock
+and thread condition. Later appends do not reset that deadline. The committer
+swaps out the pending batch under the append lock, then folds its projection,
+fsyncs the log, writes any due keyframe and atomically publishes `run.head` outside
+that lock. Ordinary appends never wait for fsync or projection publication.
+Lifecycle changes, epoch headers and close request an immediate commit and wait
+for durability.
+
+The deadline does not depend on the owner event loop being free. Subject to
+committer scheduling, an append handed off without a commit in flight becomes
+durable within 100 ms plus its commit duration. An append handed off during a
+commit becomes durable within the greater of 100 ms and the remaining in-flight
+commit time, plus its own commit duration. Thus a storage stall longer than the
+interval can contribute to two successive batches' lag; there is no fixed
+completion bound without a storage-latency bound. Encoding and stream-write time
+before the handoff are outside this bound.
 
 `FileRunLogWriter` takes the run's clock and threads interfaces explicitly;
 entrypoints supply the real implementations and tests supply simulated ones.
-`FileRunLogWriter.append` retains its signature and now acknowledges a write, not
-durability. `commit()` is the explicit durability boundary, including for an epoch
+`FileRunLogWriter.append` retains its signature and acknowledges a write; ordinary
+records await a later durability fence. `commit()` is the explicit durability boundary, including for an epoch
 end not represented by a lifecycle record. `LegacyRunLogTee.commit()` forwards that
 boundary. The tee takes ownership of a configured `FileRunLogWriter`, so the
-live journal can supply its run's clock, loop and locks even when preparation
-runs off-loop. Synchronous offline producers have no event loop and must commit
-explicitly or close; close commits the final suffix and checkpoints the epoch. Keyframes are written only
+live journal can supply its run's clock and threads even when preparation
+runs off-loop. Offline producers use the same committer. Close drains the final
+suffix, checkpoints the epoch and joins the committer before releasing ownership.
+Keyframes are written only
 at commit time, at lifecycle/epoch boundaries or when the committed batch crosses
 the record-count checkpoint threshold. Legacy-only logs still have no native
 headline and retain their existing unfenced gateway compatibility path. The

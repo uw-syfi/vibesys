@@ -131,6 +131,7 @@ class _SimThread:
         self.joiners: list[_SimThread] = []
         self.poison: BaseException | None = None
         self.waiting_in: list[_SimThread] | None = None
+        self.external = False
 
 
 class SimWorker:
@@ -243,7 +244,7 @@ class SimLock:
     def _hand_off(self) -> None:
         if self._waiters:
             waiter = self._waiters.pop(0)
-            self._owner, self._depth = waiter, 1
+            self._owner, self._depth = (_OUTSIDE if waiter.external else waiter), 1
             self.sim.wake(waiter)
         else:
             self._owner = None
@@ -420,6 +421,7 @@ class SimThreads:
         self._yield_to_driver = threading.Semaphore(0)
         self._closed = False
         self._driven = False
+        self._driving_external = False
         self._outside_ident = threading.get_ident()
         self._executor = _SimExecutor(self)
         self.errors: list[BaseException] = []
@@ -683,7 +685,12 @@ class SimThreads:
 
     def switch_point(self, me: _SimThread | _OutsideThread) -> None:
         """Let the seed hand the baton to another runnable thread."""
-        if self._rng is None or isinstance(me, _OutsideThread) or not self._runnable:
+        if isinstance(me, _OutsideThread):
+            if self._driven and not self._driving_external:
+                self.advance_to(self.clock.now())
+                self.run_until_blocked()
+            return
+        if self._rng is None or not self._runnable:
             return
         if self._rng.randint(0, len(self._runnable)) == 0:
             return
@@ -695,7 +702,8 @@ class SimThreads:
         thread.blocked_on = None
         thread.waiting_in = None
         thread.timer_token += 1
-        self._runnable.append(thread)
+        if not thread.external:
+            self._runnable.append(thread)
 
     def wake(self, thread: _SimThread) -> None:
         """Wake ``thread`` because what it waited for happened."""
@@ -710,8 +718,7 @@ class SimThreads:
     ) -> bool:
         """Park until woken (``True``) or until ``timeout`` virtual seconds pass (``False``)."""
         if me is _OUTSIDE:
-            message = f"a thread that is not simulated cannot block on {what}"
-            raise RuntimeError(message)
+            return self._block_external(what, waiters, timeout)
         me = cast("_SimThread", me)
         me.signalled = False
         me.timer_token += 1
@@ -726,6 +733,59 @@ class SimThreads:
         self._park(me, what)
         return me.signalled
 
+    def _block_external(
+        self, what: str, waiters: list[_SimThread] | None, timeout: float | None
+    ) -> bool:
+        """Drive a synchronous caller's wait without running its owning event loop."""
+        self._adopt_external()
+        waiter = _SimThread("<external wait>", lambda: None, daemon=True)
+        waiter.external = True
+        waiter.blocked_on = what
+        waiter.waiting_in = waiters
+        if waiters is not None:
+            waiters.append(waiter)
+        if timeout is not None:
+            heapq.heappush(
+                self._timers,
+                (self.clock.at + max(timeout, 0.0), next(self._sequence), waiter, 0),
+            )
+        self._driving_external = True
+        try:
+            while waiter.blocked_on is not None:
+                self.run_until_blocked()
+                if waiter.blocked_on is None:
+                    break
+                due = self.next_timer()
+                if due is None:
+                    raise SimDeadlockError(self.describe())
+                if self.clock.limit is not None and due > self.clock.limit:
+                    raise VirtualTimeLimitError(self.describe())
+                self.advance_to(due)
+        finally:
+            self._driving_external = False
+            if waiter.waiting_in is not None and waiter in waiter.waiting_in:
+                waiter.waiting_in.remove(waiter)
+            waiter.blocked_on = None
+            waiter.timer_token += 1
+        return waiter.signalled
+
+    def _adopt_external(self) -> None:
+        self._driven = True
+        try:
+            loop = current_virtual_loop()
+        except RuntimeError:
+            return
+        if loop.driver is self:
+            return
+        if loop.driver is None:
+            loop.adopt(_BorrowedThreads(self))
+        elif isinstance(loop.driver, _BorrowedThreads):
+            loop.driver.add(self)
+        else:
+            return
+        if not self._timers:
+            self.clock = loop.clock
+
     def _park(self, me: _SimThread, what: str) -> None:
         me.blocked_on = what
         self._yield_to_driver.release()
@@ -733,6 +793,46 @@ class SimThreads:
         me.blocked_on = None
         if me.poison is not None:
             raise me.poison
+
+
+class _BorrowedThreads:
+    """Let a virtual loop drive external callers' simulators without owning them.
+
+    Their synchronous owners may close resources after the loop has shut down.
+    The normal test teardown still closes every simulator through ``undriven_threads``.
+    """
+
+    def __init__(self, threads: SimThreads) -> None:
+        self._threads = [threads]
+
+    def add(self, threads: SimThreads) -> None:
+        if threads not in self._threads:
+            self._threads.append(threads)
+
+    @property
+    def executor(self) -> concurrent.futures.Executor:
+        return self._threads[0].executor
+
+    def attach(self) -> None:
+        pass
+
+    def run_until_blocked(self) -> None:
+        for threads in self._threads:
+            threads.run_until_blocked()
+
+    def next_timer(self) -> float | None:
+        timers = [due for threads in self._threads if (due := threads.next_timer()) is not None]
+        return min(timers, default=None)
+
+    def advance_to(self, instant: float) -> None:
+        for threads in self._threads:
+            threads.advance_to(instant)
+
+    def describe(self) -> str:
+        return "; ".join(threads.describe() for threads in self._threads)
+
+    def close(self) -> None:
+        pass
 
 
 class _LoopWake:
