@@ -216,15 +216,11 @@ class ReplayRuntime:
             raise
 
     def _open_epoch(self, launch: ReplayLaunch, *, now: float, at: Timestamp) -> None:
-        epochs = self._archive.epochs
-        if any(
-            e.replay_acknowledgement is not None
-            and e.replay_acknowledgement.launch_request_id == launch.request_id
-            for e in epochs
-        ):
+        acks = self._archive.acknowledgements.resume(launch.request_id)
+        if acks == self._archive.acknowledgements:
             problem = "Resume launch already recorded; inspect its epoch instead of relaunching"
             raise ReplayCommitError(problem)
-        if epochs and not self._archive.epoch_closed:
+        if self._archive.epoch and not self._archive.epoch_closed:
             self._append(
                 Oneof(
                     "lifecycle",
@@ -243,9 +239,8 @@ class ReplayRuntime:
                 now=now,
                 at=at,
             )
-        acks = self._archive.acknowledgements.resume(launch.request_id)
         epoch = deepcopy(launch.header)
-        epoch.epoch = len(epochs) + 1
+        epoch.epoch = self._archive.epoch + 1
         epoch.identity_encoding_version = ENCODING_VERSION
         epoch.initial_allowance = pb.ReplayAllowance.from_binary(self._allowance)
         epoch.replay_acknowledgement = pb.ReplayAcknowledgement.from_binary(

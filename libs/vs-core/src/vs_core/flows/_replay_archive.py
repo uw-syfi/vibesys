@@ -311,7 +311,7 @@ class ReplayArchive:
             )
             raise ReplayError(problem)
         if self._epochs:
-            original = self.epochs[0]
+            original = EpochStarted.from_binary(self._epochs[0])
             if epoch.run_id != original.run_id:
                 problem = "a Resume epoch cannot change the original run identity"
                 raise ReplayError(problem)
