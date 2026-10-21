@@ -687,12 +687,11 @@ export function clockAt(model: RunModel, live: number | null): number | null {
   return live ?? model.latest;
 }
 
-/** The run clock's start: the first span's start. */
+/** The run clock's start: the earliest span, independent of map serialization order. */
 export function clockStart(model: RunModel): number {
   let start: number | null = null;
   for (const span of model.trace.spans.values()) {
-    start = span.started_at;
-    break;
+    start = start === null ? span.started_at : Math.min(start, span.started_at);
   }
   return start ?? 0;
 }
