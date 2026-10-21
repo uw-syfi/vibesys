@@ -55,6 +55,7 @@ class ReplayArchive:
     acknowledgements: ReplayAcknowledgements = field(default_factory=ReplayAcknowledgements)
     clock: float = 0.0
     _policy_drift: bytes | None = field(default=None, init=False, repr=False)
+    _observed: str | None = field(default=None, init=False, repr=False)
 
     @classmethod
     def decode(cls, payload: bytes) -> ReplayArchive:
@@ -84,6 +85,7 @@ class ReplayArchive:
         result.acknowledgements = self.acknowledgements
         result.clock = self.clock
         result._policy_drift = self._policy_drift
+        result._observed = self._observed
         return result
 
     @property
@@ -127,6 +129,11 @@ class ReplayArchive:
             span for span in self.spans if span.replay is not None and span.replay.outcome is None
         )
 
+    @property
+    def pending_observation(self) -> Span | None:
+        """The serial observation whose acceptance must precede further clock progress."""
+        return None if self._observed is None else Span.from_binary(self._spans[self._observed])
+
     def append(self, record: Record) -> None:
         """Fold one validated next record; callers discard the index on failure."""
         validate(record)
@@ -138,6 +145,11 @@ class ReplayArchive:
             raise ReplayError(problem)
         if record.clock < self.clock:
             problem = "replay Record.clock must be monotone"
+            raise ReplayError(problem)
+        if self._observed is not None and (
+            record.clock != self.clock or record.replay_clock is not None
+        ):
+            problem = "accept the pending observation before advancing the replay clock"
             raise ReplayError(problem)
         self._body(record)
         if record.replay_clock is not None:
@@ -247,14 +259,8 @@ class ReplayArchive:
             ):
                 problem = "replay observation cannot be replaced or removed"
                 raise ReplayError(problem)
+        self._observation(span)
         observed = span.replay_observation
-        if observed is not None and (
-            observed.outcome is None
-            or operation.policy is None
-            or observed.outcome.type_url.rsplit("/", 1)[-1] != operation.policy.reply_type
-        ):
-            problem = "observation does not match the operation's reply contract"
-            raise ReplayError(problem)
         if operation.outcome is not None:
             if (
                 previous_bytes is None
@@ -270,7 +276,25 @@ class ReplayArchive:
                 problem = "acceptance requires its previously durable observation"
                 raise ReplayError(problem)
             self._history.append(AcceptedReplay.from_record(record))
+            self._observed = None
         self._spans[span.id] = span.to_binary()
+
+    def _observation(self, span: Span) -> None:
+        if span.replay is None:
+            return
+        observed = span.replay_observation
+        if observed is not None:
+            if self._observed is not None and self._observed != span.id:
+                problem = "accept the pending observation before recording another observation"
+                raise ReplayError(problem)
+            self._observed = span.id
+        if observed is not None and (
+            observed.outcome is None
+            or span.replay.policy is None
+            or observed.outcome.type_url.rsplit("/", 1)[-1] != span.replay.policy.reply_type
+        ):
+            problem = "observation does not match the operation's reply contract"
+            raise ReplayError(problem)
 
     def _plain_span(self, span: Span) -> None:
         previous = self._spans.get(span.id)

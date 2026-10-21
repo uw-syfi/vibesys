@@ -4,7 +4,7 @@ from collections.abc import Callable, Coroutine
 from copy import deepcopy
 
 import pytest
-from hypothesis import given
+from hypothesis import example, given
 from hypothesis import strategies as st
 from protobuf.wkt.google.protobuf.timestamp_pb import Timestamp
 
@@ -330,3 +330,48 @@ def test_every_record_prefix_including_recovery_notice_and_ack_is_recoverable() 
         accepted_after = tuple(item.sequence for item in replayed.archive.history)
         assert accepted_after == accepted_before
         replayed.close(now=0)
+
+
+@pytest.mark.regression
+@given(second_clock=st.integers(min_value=9, max_value=100))
+@example(second_clock=11)
+def test_observation_must_be_accepted_before_another_clock_or_result(second_clock: int) -> None:
+    async def child(ctx: ReplayFlow, item: str) -> Reply:
+        return await ctx.call(
+            ReplayCall(
+                SemanticKey("implement").item(item),
+                Reply(root=item),
+                "implementation.v1",
+                replay.ReplayPolicy(reply_type=Reply.desc().type_name),
+                Reply,
+            )
+        )
+
+    async def root(ctx: ReplayFlow) -> object:
+        group = ctx.group()
+        group.start(lambda ctx: child(ctx, "a"))
+        group.start(lambda ctx: child(ctx, "b"))
+        return (await group).root, ctx.clock(), (await group).root, ctx.clock()
+
+    store = FakeStateStore()
+    shell = start(store, root)
+    a, b = shell.prepare(now=0, at=AT)
+    shell.observe(b.id, ReplayResult(Reply(root="b"), paid=True), now=0, at=AT, clock=8)
+    retained = store.load()
+    with pytest.raises(ValueError, match=r"accept.*observation"):
+        shell.observe(
+            a.id, ReplayResult(Reply(root="a"), paid=True), now=0, at=AT, clock=second_clock
+        )
+    with pytest.raises(ValueError, match=r"accept.*observation"):
+        shell.advance_clock(second_clock, now=0, at=AT)
+    assert store.load() == retained
+    shell.close(now=0)
+    recovered = start(store, root, request_id="launch-b")
+    assert len(recovered.archive.history) == 1
+    assert recovered.clock == 8
+    recovered.observe(
+        a.id, ReplayResult(Reply(root="a"), paid=True), now=0, at=AT, clock=second_clock
+    )
+    recovered.accept(a.id, now=0, at=AT)
+    assert recovered.result == ("b", 8, "a", second_clock)
+    recovered.close(now=0)

@@ -266,6 +266,9 @@ class ReplayRuntime:
         scheduler = self._active_scheduler
         if self._paused:
             return ()
+        if self._archive.pending_observation is not None:
+            problem = "accept the pending observation before preparing more work"
+            raise ReplayError(problem)
         self._record_drift(now=now, at=at)
         notice = scheduler.frontier().notice()
         if notice is not None:
