@@ -365,10 +365,9 @@ def test_invalid_inbox_routes_are_rejected_without_answering(chat: ChatMessageRe
     inbox.post("invalid", b"not protobuf", ended=lambda: None)
     assert run(chat, lambda text, _invocation: text).messages == []
     assert inbox.pending() == ()
-    assert (
-        inbox.status(invalid.request_id, ended=None).reason
-        == "chat message routing does not match its inbox"
-    )
+    status = inbox.status(invalid.request_id, ended=None)
+    assert status is not None
+    assert status.reason == "chat message routing does not match its inbox"
 
 
 def test_reading_an_incomplete_native_head_is_refused(chat: ChatMessageRequest) -> None:
