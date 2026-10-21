@@ -60,6 +60,9 @@
     },
     {
       "path": "../../libs/ui/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/runs/tsconfig.intents.json"
     }
   ]
 }
