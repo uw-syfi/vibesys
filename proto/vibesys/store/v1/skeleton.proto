@@ -1,0 +1,102 @@
+syntax = "proto3";
+
+package vibesys.store.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
+import "vibesys/store/v1/agent_attrs.proto";
+import "vibesys/store/v1/content.proto";
+import "vibesys/store/v1/epoch.proto";
+import "vibesys/store/v1/lifecycle.proto";
+import "vibesys/store/v1/record.proto";
+import "vibesys/store/v1/span.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1";
+
+// Writer-computed dashboard projection. Absence of committed_seq retains the
+// phase 1 rule: every complete record is committed. A present zero commits none.
+message RunHead {
+  option (buf.validate.message).cel = {
+    id: "run_head.chart_points"
+    message: "chart_points must contain at most 256 points"
+    expression: "this.chart_points.size() <= 256"
+  };
+  Lifecycle lifecycle = 1 [(buf.validate.field).required = true];
+  string strategy = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 65536
+  }];
+  HeadlineObjective objective = 3;
+  map<string, uint64> span_counts = 4 [(buf.validate.field).map.keys.string = {
+    min_len: 1
+    max_bytes: 65536
+  }];
+  TokenUsage usage = 5;
+  repeated MetricPoint chart_points = 6;
+  bool needs_user = 7;
+  optional uint64 committed_seq = 8;
+  RunProcess process = 9;
+}
+
+// Values are absent until reported. The declaration supplies unit and direction.
+message HeadlineObjective {
+  MetricSeriesDecl series = 1 [(buf.validate.field).required = true];
+  optional double best_value = 2 [(buf.validate.field).double.finite = true];
+  optional double input_value = 3 [(buf.validate.field).double.finite = true];
+}
+
+// Informational process identity, never a substitute for probing run.lock.
+message RunProcess {
+  uint32 pid = 1 [(buf.validate.field).uint32.gt = 0];
+  uint32 epoch = 2 [(buf.validate.field).uint32.gt = 0];
+  google.protobuf.Timestamp started_at = 3 [(buf.validate.field).required = true];
+}
+
+// Immutable skeleton through through_seq. log_offset is the byte immediately
+// after that record in run.log, including magic and framing. It lets readers
+// seek without parsing old records. The gateway reads only these two headers;
+// it passes the entire encoded keyframe through without interpreting its body.
+message Keyframe {
+  uint64 through_seq = 1 [(buf.validate.field).uint64.gt = 0];
+  uint64 log_offset = 2 [(buf.validate.field).uint64 = {
+    gte: 8
+    lte: 9223372036854775807
+  }];
+  map<string, SpanHistory> spans = 3;
+  repeated MetricHistory metrics = 4;
+  repeated StreamRef streams = 5;
+  repeated EpochVersion epochs = 6;
+  repeated LifecycleVersion lifecycles = 7;
+}
+
+message SpanHistory {
+  repeated SpanVersion versions = 1;
+}
+
+message SpanVersion {
+  uint64 seq = 1 [(buf.validate.field).uint64.gt = 0];
+  Span span = 2 [(buf.validate.field).required = true];
+}
+
+message MetricHistory {
+  string series = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 65536
+  }];
+  repeated MetricVersion points = 2;
+}
+
+message MetricVersion {
+  uint64 seq = 1 [(buf.validate.field).uint64.gt = 0];
+  MetricPoint point = 2 [(buf.validate.field).required = true];
+}
+
+message EpochVersion {
+  uint64 seq = 1 [(buf.validate.field).uint64.gt = 0];
+  EpochStarted epoch = 2 [(buf.validate.field).required = true];
+}
+
+message LifecycleVersion {
+  uint64 seq = 1 [(buf.validate.field).uint64.gt = 0];
+  Lifecycle lifecycle = 2 [(buf.validate.field).required = true];
+}

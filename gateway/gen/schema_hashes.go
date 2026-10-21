@@ -2,7 +2,7 @@
 
 package gen
 
-const APISchemaHash = "ef8866b280f8c93dbb921a004a10712a7f9566179c5e9a268993e30460c9bfde"
-const StoreSchemaHash = "f9951121319550c554a4729a4e97f4665d25f10c4031e1d2d15a8f359f445abd"
+const APISchemaHash = "dd7d6a62cb53729b5d15493b3fd2860b24237e31d2b7d68d33fcd5978727d16c"
+const StoreSchemaHash = "cdaacd6727c59fa70c17666f2a3b64e7b50e9e785e2665665e76cd39a5bdc8db"
 const RunLogMaxRecordBytes = 1048576
 const RunLogMagic = "VSRLOG01"

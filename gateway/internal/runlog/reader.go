@@ -35,15 +35,16 @@ func (e *Corruption) Error() string {
 // Reader advances only after a complete, checksum-verified record. The source
 // must retain its existing bytes; concurrent appends are supported.
 type Reader struct {
-	source io.ReaderAt
-	offset int64
+	source    io.ReaderAt
+	offset    int64
+	magicRead bool
 }
 
 func NewReader(source io.ReaderAt) *Reader { return &Reader{source: source} }
 
 // Next returns the original payload, io.EOF for an incomplete tail, or an error.
 func (r *Reader) Next() ([]byte, error) {
-	if r.offset == 0 {
+	if !r.magicRead {
 		var magic [len(Magic)]byte
 		if _, err := r.source.ReadAt(magic[:], 0); err != nil {
 			return nil, err
@@ -51,7 +52,10 @@ func (r *Reader) Next() ([]byte, error) {
 		if !bytes.Equal(magic[:], []byte(Magic)) {
 			return nil, r.corrupt("invalid magic")
 		}
-		r.offset = int64(len(Magic))
+		r.magicRead = true
+		if r.offset == 0 {
+			r.offset = int64(len(Magic))
+		}
 	}
 	var prefix [binary.MaxVarintLen64]byte
 	n, err := r.source.ReadAt(prefix[:], r.offset)

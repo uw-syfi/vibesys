@@ -422,7 +422,13 @@ def test_an_in_place_same_size_rewrite_cannot_make_a_span_look_empty(
     assert len(rewritten_bytes) == len(original_bytes)
     assert rewritten_bytes.splitlines()[0] == original_bytes.splitlines()[0]
     assert rewritten_bytes.splitlines()[-1] == original_bytes.splitlines()[-1]
+    stale_sidecar = sidecar_path(journal).read_bytes()
     journal.write_bytes(rewritten_bytes)
+    # A rewrite inside one file timestamp tick leaves the journal's size, modification and
+    # change times as they were. The file system cannot be made to do that on demand, so build
+    # its outcome: the identity stamp of the rewritten journal beside the sidecar of the old one.
+    SpanIndexLog(journal)
+    sidecar_path(journal).write_bytes(stale_sidecar)
 
     reply = _ask(
         RunsEventsForSpanRequest(

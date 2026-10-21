@@ -34,16 +34,68 @@ def walk(message: Message) -> Iterator[Message]:
         value = message[field]
         if isinstance(value, Message):
             yield from walk(value)
-        elif isinstance(value, list):
-            for item in value:
+        elif isinstance(value, (list, dict)):
+            for item in value.values() if isinstance(value, dict) else value:
                 if isinstance(item, Message):
                     yield from walk(item)
+
+
+def skeleton_examples() -> list[Message]:
+    span_record = _RECORDS["span"].body
+    epoch_record = _RECORDS["epoch_started"].body
+    metric_record = _RECORDS["metric"].body
+    assert span_record is not None
+    assert isinstance(span_record.value, p.SpanRecord)
+    assert epoch_record is not None
+    assert isinstance(epoch_record.value, p.EpochStarted)
+    assert metric_record is not None
+    assert isinstance(metric_record.value, p.MetricPoint)
+    lifecycle = p.Lifecycle(state=p.Oneof("running", p.Running()))
+    return [
+        p.RunHead(
+            lifecycle=lifecycle,
+            strategy="example",
+            objective=p.HeadlineObjective(
+                series=p.MetricSeriesDecl(
+                    name="throughput",
+                    unit="req/s",
+                    direction=p.Direction.MAX,
+                    role=p.SeriesRole.OBJECTIVE,
+                ),
+                best_value=2.0,
+                input_value=1.0,
+            ),
+            span_counts={"work": 1},
+            usage=p.TokenUsage(input=1, cost_usd=0.1),
+            chart_points=[metric_record.value],
+            needs_user=True,
+            committed_seq=1,
+            process=p.RunProcess(pid=12, epoch=1, started_at=p.Timestamp(seconds=1)),
+        ),
+        p.Keyframe(
+            through_seq=1,
+            log_offset=8,
+            spans={
+                "span": p.SpanHistory(versions=[p.SpanVersion(seq=1, span=span_record.value.span)])
+            },
+            metrics=[
+                p.MetricHistory(
+                    series="throughput", points=[p.MetricVersion(seq=1, point=metric_record.value)]
+                )
+            ],
+            streams=[
+                p.StreamRef(id="narration", kind=p.StreamKind.LOG, state=p.StreamState.OPENED)
+            ],
+            epochs=[p.EpochVersion(seq=1, epoch=epoch_record.value)],
+            lifecycles=[p.LifecycleVersion(seq=1, lifecycle=lifecycle)],
+        ),
+    ]
 
 
 def message_examples() -> dict[str, Message]:
     examples = {
         message.desc().name: message
-        for root in [*_RECORDS.values(), *_ATTRS.values(), *_DETAILS.values()]
+        for root in [*_RECORDS.values(), *_ATTRS.values(), *_DETAILS.values(), *skeleton_examples()]
         for message in walk(root)
     }
     examples["Failure"] = p.Failure(kind=p.SpanFailureKind.OUTCOME, message="Gate failed")

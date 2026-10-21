@@ -6,13 +6,17 @@
 
 from __future__ import annotations
 
-from typing import Literal, TYPE_CHECKING, TypeAlias
+from typing import Literal, NoReturn, TYPE_CHECKING, TypeAlias
 
-from protobuf import Message
+from protobuf import Enum, Message
 from protobuf._codegen import file_desc
+
+from ...store.v1 import skeleton_pb
 
 if TYPE_CHECKING:
     from protobuf import DescFile
+
+    from ...store.v1.skeleton_pb import RunHead
 
 
 _HelloRequestFields: TypeAlias = Literal["api_schema_hash"]
@@ -149,15 +153,406 @@ class TailResponse(Message[_TailResponseFields]):
         records: list[bytes]
         through_seq: int
 
+_SkeletonRequestFields: TypeAlias = Literal["run_id"]
+
+class SkeletonRequest(Message[_SkeletonRequestFields]):
+    """
+    ```proto
+    message vibesys.api.v1.SkeletonRequest
+    ```
+
+    Attributes:
+        run_id:
+            ```proto
+            string run_id = 1;
+            ```
+    """
+
+    __slots__ = ("run_id",)
+
+    if TYPE_CHECKING:
+
+        def __init__(
+            self,
+            *,
+            run_id: str = "",
+        ) -> None:
+            pass
+
+        run_id: str
+
+_SkeletonResponseFields: TypeAlias = Literal["keyframe", "records", "committed_seq", "next_seq", "complete"]
+
+class SkeletonResponse(Message[_SkeletonResponseFields]):
+    """
+    A bounded committed prefix, at most 1 MiB encoded. No keyframe means replay
+    from the beginning; a keyframe larger than the budget is omitted. Records that
+    do not fit (including a single large record) are delivered through Tail.
+
+    ```proto
+    message vibesys.api.v1.SkeletonResponse
+    ```
+
+    Attributes:
+        keyframe:
+            ```proto
+            optional bytes keyframe = 1;
+            ```
+        records:
+            ```proto
+            repeated bytes records = 2;
+            ```
+        committed_seq:
+            Published boundary, or the last included sequence for a phase 1 run.
+
+            ```proto
+            uint64 committed_seq = 3;
+            ```
+        next_seq:
+            First sequence not included. Continue with Tail(from_seq = next_seq).
+
+            ```proto
+            uint64 next_seq = 4;
+            ```
+        complete:
+            True when the frozen readable prefix was included in full.
+
+            ```proto
+            bool complete = 5;
+            ```
+    """
+
+    __slots__ = ("keyframe", "records", "committed_seq", "next_seq", "complete")
+
+    if TYPE_CHECKING:
+
+        def __init__(
+            self,
+            *,
+            keyframe: bytes | None = None,
+            records: list[bytes] | None = None,
+            committed_seq: int = 0,
+            next_seq: int = 0,
+            complete: bool = False,
+        ) -> None:
+            pass
+
+        keyframe: bytes
+        records: list[bytes]
+        committed_seq: int
+        next_seq: int
+        complete: bool
+
+_WatchRunsRequestFields: TypeAlias = NoReturn
+
+class WatchRunsRequest(Message[_WatchRunsRequestFields]):
+    """
+    ```proto
+    message vibesys.api.v1.WatchRunsRequest
+    ```
+    """
+
+    __slots__ = ()
+
+    if TYPE_CHECKING:
+
+        def __init__(
+            self,
+        ) -> None:
+            pass
+
+_WatchRunsResponseFields: TypeAlias = Literal["run_id", "head", "liveness", "removed", "initial_complete"]
+
+class WatchRunsResponse(Message[_WatchRunsResponseFields]):
+    """
+    Initial entries precede an initial_complete marker. Later entries replace by
+    run_id; removed is a tombstone. A phase 1 run has no head and UNKNOWN liveness.
+
+    ```proto
+    message vibesys.api.v1.WatchRunsResponse
+    ```
+
+    Attributes:
+        run_id:
+            ```proto
+            string run_id = 1;
+            ```
+        head:
+            ```proto
+            optional vibesys.store.v1.RunHead head = 2;
+            ```
+        liveness:
+            ```proto
+            vibesys.api.v1.RunLiveness liveness = 3;
+            ```
+        removed:
+            ```proto
+            bool removed = 4;
+            ```
+        initial_complete:
+            ```proto
+            bool initial_complete = 5;
+            ```
+    """
+
+    __slots__ = ("run_id", "head", "liveness", "removed", "initial_complete")
+
+    if TYPE_CHECKING:
+
+        def __init__(
+            self,
+            *,
+            run_id: str = "",
+            head: RunHead | None = None,
+            liveness: RunLiveness | None = None,
+            removed: bool = False,
+            initial_complete: bool = False,
+        ) -> None:
+            pass
+
+        run_id: str
+        head: RunHead | None
+        liveness: RunLiveness
+        removed: bool
+        initial_complete: bool
+
+_GetBlobsRequestFields: TypeAlias = Literal["run_id", "sha256"]
+
+class GetBlobsRequest(Message[_GetBlobsRequestFields]):
+    """
+    ```proto
+    message vibesys.api.v1.GetBlobsRequest
+    ```
+
+    Attributes:
+        run_id:
+            ```proto
+            string run_id = 1;
+            ```
+        sha256:
+            ```proto
+            repeated string sha256 = 2;
+            ```
+    """
+
+    __slots__ = ("run_id", "sha256")
+
+    if TYPE_CHECKING:
+
+        def __init__(
+            self,
+            *,
+            run_id: str = "",
+            sha256: list[str] | None = None,
+        ) -> None:
+            pass
+
+        run_id: str
+        sha256: list[str]
+
+_GetBlobsResponseFields: TypeAlias = Literal["blobs"]
+
+class GetBlobsResponse(Message[_GetBlobsResponseFields]):
+    """
+    At most 16 MiB of blob content per response. Each requested hash has a result
+    in request order, including duplicates and failures; retry omitted content in
+    a smaller request. error_code is a google.rpc.Code number, zero on success.
+
+    ```proto
+    message vibesys.api.v1.GetBlobsResponse
+    ```
+
+    Attributes:
+        blobs:
+            ```proto
+            repeated vibesys.api.v1.BlobResult blobs = 1;
+            ```
+    """
+
+    __slots__ = ("blobs",)
+
+    if TYPE_CHECKING:
+
+        def __init__(
+            self,
+            *,
+            blobs: list[BlobResult] | None = None,
+        ) -> None:
+            pass
+
+        blobs: list[BlobResult]
+
+_BlobResultFields: TypeAlias = Literal["sha256", "data", "error_code", "error_message"]
+
+class BlobResult(Message[_BlobResultFields]):
+    """
+    ```proto
+    message vibesys.api.v1.BlobResult
+    ```
+
+    Attributes:
+        sha256:
+            ```proto
+            string sha256 = 1;
+            ```
+        data:
+            ```proto
+            bytes data = 2;
+            ```
+        error_code:
+            ```proto
+            int32 error_code = 3;
+            ```
+        error_message:
+            ```proto
+            string error_message = 4;
+            ```
+    """
+
+    __slots__ = ("sha256", "data", "error_code", "error_message")
+
+    if TYPE_CHECKING:
+
+        def __init__(
+            self,
+            *,
+            sha256: str = "",
+            data: bytes = b"",
+            error_code: int = 0,
+            error_message: str = "",
+        ) -> None:
+            pass
+
+        sha256: str
+        data: bytes
+        error_code: int
+        error_message: str
+
+_TailStreamRequestFields: TypeAlias = Literal["run_id", "stream_id", "from_offset"]
+
+class TailStreamRequest(Message[_TailStreamRequestFields]):
+    """
+    ```proto
+    message vibesys.api.v1.TailStreamRequest
+    ```
+
+    Attributes:
+        run_id:
+            ```proto
+            string run_id = 1;
+            ```
+        stream_id:
+            ```proto
+            string stream_id = 2;
+            ```
+        from_offset:
+            ```proto
+            uint64 from_offset = 3;
+            ```
+    """
+
+    __slots__ = ("run_id", "stream_id", "from_offset")
+
+    if TYPE_CHECKING:
+
+        def __init__(
+            self,
+            *,
+            run_id: str = "",
+            stream_id: str = "",
+            from_offset: int = 0,
+        ) -> None:
+            pass
+
+        run_id: str
+        stream_id: str
+        from_offset: int
+
+_TailStreamResponseFields: TypeAlias = Literal["data", "next_offset"]
+
+class TailStreamResponse(Message[_TailStreamResponseFields]):
+    """
+    ```proto
+    message vibesys.api.v1.TailStreamResponse
+    ```
+
+    Attributes:
+        data:
+            ```proto
+            bytes data = 1;
+            ```
+        next_offset:
+            ```proto
+            uint64 next_offset = 2;
+            ```
+    """
+
+    __slots__ = ("data", "next_offset")
+
+    if TYPE_CHECKING:
+
+        def __init__(
+            self,
+            *,
+            data: bytes = b"",
+            next_offset: int = 0,
+        ) -> None:
+            pass
+
+        data: bytes
+        next_offset: int
+
+class RunLiveness(Enum):
+    """
+    ```proto
+    enum vibesys.api.v1.RunLiveness
+    ```
+
+    Attributes:
+        UNSPECIFIED:
+            ```proto
+            RUN_LIVENESS_UNSPECIFIED = 0
+            ```
+        ALIVE:
+            ```proto
+            RUN_LIVENESS_ALIVE = 1
+            ```
+        INTERRUPTED:
+            ```proto
+            RUN_LIVENESS_INTERRUPTED = 2
+            ```
+        ENDED:
+            ```proto
+            RUN_LIVENESS_ENDED = 3
+            ```
+    """
+
+    UNSPECIFIED = 0
+    ALIVE = 1
+    INTERRUPTED = 2
+    ENDED = 3
+
 
 _DESC = file_desc(
-    b'\n\x19vibesys/api/v1/host.proto\x12\x0evibesys.api.v1"6\n\x0cHelloRequest\x12&\n\x0fapi_schema_hash\x18\x01 \x01(\tR\rapiSchemaHash"`\n\rHelloResponse\x12&\n\x0fapi_schema_hash\x18\x01 \x01(\tR\rapiSchemaHash\x12\'\n\x0fgateway_version\x18\x02 \x01(\tR\x0egatewayVersion"?\n\x0bTailRequest\x12\x15\n\x06run_id\x18\x01 \x01(\tR\x05runId\x12\x19\n\x08from_seq\x18\x02 \x01(\x04R\x07fromSeq"I\n\x0cTailResponse\x12\x18\n\x07records\x18\x01 \x03(\x0cR\x07records\x12\x1f\n\x0bthrough_seq\x18\x02 \x01(\x04R\nthroughSeq2\x98\x01\n\x0bHostService\x12D\n\x05Hello\x12\x1c.vibesys.api.v1.HelloRequest\x1a\x1d.vibesys.api.v1.HelloResponse\x12C\n\x04Tail\x12\x1b.vibesys.api.v1.TailRequest\x1a\x1c.vibesys.api.v1.TailResponse0\x01B\xb6\x01\n\x12com.vibesys.api.v1B\tHostProtoP\x01Z;github.com/uw-syfi/vibesys/gateway/gen/vibesys/api/v1;apiv1\xa2\x02\x03VAX\xaa\x02\x0eVibesys.Api.V1\xca\x02\x0eVibesys\\Api\\V1\xe2\x02\x1aVibesys\\Api\\V1\\GPBMetadata\xea\x02\x10Vibesys::Api::V1b\x06proto3',
-    [],
+    b'\n\x19vibesys/api/v1/host.proto\x12\x0evibesys.api.v1\x1a\x1fvibesys/store/v1/skeleton.proto"6\n\x0cHelloRequest\x12&\n\x0fapi_schema_hash\x18\x01 \x01(\tR\rapiSchemaHash"`\n\rHelloResponse\x12&\n\x0fapi_schema_hash\x18\x01 \x01(\tR\rapiSchemaHash\x12\'\n\x0fgateway_version\x18\x02 \x01(\tR\x0egatewayVersion"?\n\x0bTailRequest\x12\x15\n\x06run_id\x18\x01 \x01(\tR\x05runId\x12\x19\n\x08from_seq\x18\x02 \x01(\x04R\x07fromSeq"I\n\x0cTailResponse\x12\x18\n\x07records\x18\x01 \x03(\x0cR\x07records\x12\x1f\n\x0bthrough_seq\x18\x02 \x01(\x04R\nthroughSeq"(\n\x0fSkeletonRequest\x12\x15\n\x06run_id\x18\x01 \x01(\tR\x05runId"\xb6\x01\n\x10SkeletonResponse\x12\x1f\n\x08keyframe\x18\x01 \x01(\x0cH\x00R\x08keyframe\x88\x01\x01\x12\x18\n\x07records\x18\x02 \x03(\x0cR\x07records\x12#\n\rcommitted_seq\x18\x03 \x01(\x04R\x0ccommittedSeq\x12\x19\n\x08next_seq\x18\x04 \x01(\x04R\x07nextSeq\x12\x1a\n\x08complete\x18\x05 \x01(\x08R\x08completeB\x0b\n\t_keyframe"\x12\n\x10WatchRunsRequest"\xd7\x01\n\x11WatchRunsResponse\x12\x15\n\x06run_id\x18\x01 \x01(\tR\x05runId\x12-\n\x04head\x18\x02 \x01(\x0b2\x19.vibesys.store.v1.RunHeadR\x04head\x127\n\x08liveness\x18\x03 \x01(\x0e2\x1b.vibesys.api.v1.RunLivenessR\x08liveness\x12\x18\n\x07removed\x18\x04 \x01(\x08R\x07removed\x12)\n\x10initial_complete\x18\x05 \x01(\x08R\x0finitialComplete"@\n\x0fGetBlobsRequest\x12\x15\n\x06run_id\x18\x01 \x01(\tR\x05runId\x12\x16\n\x06sha256\x18\x02 \x03(\tR\x06sha256"D\n\x10GetBlobsResponse\x120\n\x05blobs\x18\x01 \x03(\x0b2\x1a.vibesys.api.v1.BlobResultR\x05blobs"|\n\nBlobResult\x12\x16\n\x06sha256\x18\x01 \x01(\tR\x06sha256\x12\x12\n\x04data\x18\x02 \x01(\x0cR\x04data\x12\x1d\n\nerror_code\x18\x03 \x01(\x05R\terrorCode\x12#\n\rerror_message\x18\x04 \x01(\tR\x0cerrorMessage"h\n\x11TailStreamRequest\x12\x15\n\x06run_id\x18\x01 \x01(\tR\x05runId\x12\x1b\n\tstream_id\x18\x02 \x01(\tR\x08streamId\x12\x1f\n\x0bfrom_offset\x18\x03 \x01(\x04R\nfromOffset"I\n\x12TailStreamResponse\x12\x12\n\x04data\x18\x01 \x01(\x0cR\x04data\x12\x1f\n\x0bnext_offset\x18\x02 \x01(\x04R\nnextOffset*y\n\x0bRunLiveness\x12\x1c\n\x18RUN_LIVENESS_UNSPECIFIED\x10\x00\x12\x16\n\x12RUN_LIVENESS_ALIVE\x10\x01\x12\x1c\n\x18RUN_LIVENESS_INTERRUPTED\x10\x02\x12\x16\n\x12RUN_LIVENESS_ENDED\x10\x032\xe1\x03\n\x0bHostService\x12D\n\x05Hello\x12\x1c.vibesys.api.v1.HelloRequest\x1a\x1d.vibesys.api.v1.HelloResponse\x12C\n\x04Tail\x12\x1b.vibesys.api.v1.TailRequest\x1a\x1c.vibesys.api.v1.TailResponse0\x01\x12M\n\x08Skeleton\x12\x1f.vibesys.api.v1.SkeletonRequest\x1a .vibesys.api.v1.SkeletonResponse\x12R\n\tWatchRuns\x12 .vibesys.api.v1.WatchRunsRequest\x1a!.vibesys.api.v1.WatchRunsResponse0\x01\x12M\n\x08GetBlobs\x12\x1f.vibesys.api.v1.GetBlobsRequest\x1a .vibesys.api.v1.GetBlobsResponse\x12U\n\nTailStream\x12!.vibesys.api.v1.TailStreamRequest\x1a".vibesys.api.v1.TailStreamResponse0\x01B\xb6\x01\n\x12com.vibesys.api.v1B\tHostProtoP\x01Z;github.com/uw-syfi/vibesys/gateway/gen/vibesys/api/v1;apiv1\xa2\x02\x03VAX\xaa\x02\x0eVibesys.Api.V1\xca\x02\x0eVibesys\\Api\\V1\xe2\x02\x1aVibesys\\Api\\V1\\GPBMetadata\xea\x02\x10Vibesys::Api::V1b\x06proto3',
+    [
+        skeleton_pb.desc(),
+    ],
     {
         "HelloRequest": HelloRequest,
         "HelloResponse": HelloResponse,
         "TailRequest": TailRequest,
         "TailResponse": TailResponse,
+        "SkeletonRequest": SkeletonRequest,
+        "SkeletonResponse": SkeletonResponse,
+        "WatchRunsRequest": WatchRunsRequest,
+        "WatchRunsResponse": WatchRunsResponse,
+        "GetBlobsRequest": GetBlobsRequest,
+        "GetBlobsResponse": GetBlobsResponse,
+        "BlobResult": BlobResult,
+        "TailStreamRequest": TailStreamRequest,
+        "TailStreamResponse": TailStreamResponse,
+        "RunLiveness": RunLiveness,
     },
 )
 
