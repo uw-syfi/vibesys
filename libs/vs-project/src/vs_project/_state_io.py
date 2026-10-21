@@ -26,6 +26,21 @@ STATE_DOCUMENT_MAX_BYTES = 256 * 1024 * 1024
 """The largest state document read; far past any the framework writes."""
 
 
+def publish_run_link(link: Path, directory: Path) -> Path:
+    """Publish a run's absolute discovery target, replacing only an existing symlink."""
+    index = link.parent
+    index.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if link.exists() and not link.is_symlink():
+        message = f"run index entry is not a symlink: {link}"
+        raise ProjectStateError(message)
+    directory.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix=".publish-", dir=index) as temporary:
+        staged = Path(temporary) / "link"
+        staged.symlink_to(directory.resolve(), target_is_directory=True)
+        staged.replace(link)
+    return link
+
+
 def _serialize_state_model(model: BaseModel) -> bytes:
     """Return canonical JSON bytes for a typed state model."""
     try:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -49,6 +50,7 @@ class DurableEventJournal[EventT]:
         if not filename or Path(filename).name != filename:
             message = "journal filename must be one non-empty path component"
             raise ValueError(message)
+        self._append_sink: Callable[[bytes], None] | None = None
         self._codec = codec
         self._filename = filename
         self._condition = threads.condition(threads.rlock())
@@ -58,6 +60,18 @@ class DurableEventJournal[EventT]:
         self._pending: list[EventT] = []
         self._pending_write: _PendingWrite | None = None
         self._subscribers: tuple[EventSubscriber[EventT], ...] = ()
+
+    def set_append_sink(self, sink: Callable[[bytes], None]) -> None:
+        """Install an additive byte sink before attachment, including buffered events.
+
+        A sink failure is diagnosed once and disables it without affecting the
+        authoritative JSONL journal, its subscriptions or its retry behavior.
+        """
+        with self._condition:
+            if self._path is not None:
+                message = "append sink must be installed before journal attachment"
+                raise RuntimeError(message)
+            self._append_sink = sink
 
     @property
     def path(self) -> Path | None:
@@ -186,6 +200,12 @@ class DurableEventJournal[EventT]:
             if written != len(payload):
                 message = f"incomplete event journal write: {written} of {len(payload)} bytes"
                 raise OSError(message)
+        if self._append_sink is not None:
+            try:
+                self._append_sink(payload)
+            except Exception:
+                self._append_sink = None
+                logging.getLogger(__name__).exception("Run log tee disabled after append failure")
         self._events.append(recorded)
         if notify:
             self._condition.notify_all()

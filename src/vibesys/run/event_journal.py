@@ -2,9 +2,17 @@
 
 from __future__ import annotations
 
+import logging
+from typing import TYPE_CHECKING
+
 from vibesys.events import CoreEvent, CoreEventData, CoreEventType, make_core_event
+from vs_proto.api import Timestamp
+from vs_runlog.api import LegacyRunLogTee
 from vs_runtime.api.infrastructure import DurableEventJournal, EventCodec
 from vs_sim.api import Clock, Threads, utc_datetime
+
+if TYPE_CHECKING:
+    from vs_project.api import Project
 
 
 class _CoreEventCodec(EventCodec[CoreEvent]):
@@ -34,6 +42,34 @@ class EventJournal(DurableEventJournal[CoreEvent]):
         """Create an unattached journal for ``core-events.jsonl`` stamped by epoch ``clock``."""
         super().__init__(_CoreEventCodec(), filename="core-events.jsonl", threads=threads)
         self._clock = clock
+        self._runlog_configured = False
+        self._runlog: LegacyRunLogTee | None = None
+
+    def enable_runlog(self, project: Project, run_id: str) -> None:
+        """Enable the additive transport and publish discovery once for this process."""
+        if self._runlog_configured:
+            return
+        self._runlog_configured = True
+        try:
+            path = project.run_log_path_for(project.root, run_id)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            # Phase 1 has no checkout provenance at launch. Leave it unknown;
+            # phase 3 (#3332) records provenance in EpochStarted at the launch boundary.
+            self._runlog = LegacyRunLogTee(path, run_id, self._runlog_timestamp)
+            project.publish_run_for(project.root, run_id)
+            self.set_append_sink(self._runlog.append)
+        except Exception:
+            self.close()
+            logging.getLogger(__name__).exception("Run log tee disabled during initialization")
+
+    def close(self) -> None:
+        """Release the additive transport's append handle on run teardown."""
+        if self._runlog is not None:
+            self._runlog.close()
+            self._runlog = None
+
+    def _runlog_timestamp(self) -> Timestamp:
+        return Timestamp.from_datetime(utc_datetime(self._clock))
 
     def emit(
         self,

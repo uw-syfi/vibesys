@@ -63,6 +63,7 @@ source_roots = [
     "libs/vs-dst/src",
     "libs/vs-logs/src",
     "libs/vs-proto/src",
+    "libs/vs-runlog/src",
 ]
 exclude = ["**/tests", "**/__pycache__", "docs", "examples", "sdk", "resources", "build", "dist", ".venv"]
 # Also freeze imports that exist only under TYPE_CHECKING.
@@ -88,7 +89,7 @@ layers_explicit_depends_on = true
 
 [[modules]]
 path = "entrypoints"
-depends_on = ["server.api", "vs_decode.api", "vs_logs", "vs_sim.api", "vs_project", "vs_slurm", "vs_github", "vs_issue_tracker", "vs_runtime", "vs_sandbox", "vibesys.api", "vibesys.api.evolve", "vibesys.api.hypothesis", "vibesys.api.metrics", "vibesys.api.profilers", "vs_agent", "server.runtime", "server.instances", "server.host_api", "server.registry", "headless", "launch", "vs_mcp", "server.relay", "server.host_helper", "server.host_helper_requests", "server.host_helper_os", "server.host_helper_logs", "server.host_helper_machine", "server.host_helper_compute", "server.host_helper_readers", "server.host_agent_logins", "server.host_preflight", "server.host_examples", "server.host_harness", "vibesys.comparisons"]
+depends_on = ["vibesys.api.transport", "server.api", "vs_decode.api", "vs_logs", "vs_sim.api", "vs_project", "vs_slurm", "vs_github", "vs_issue_tracker", "vs_runtime", "vs_sandbox", "vibesys.api", "vibesys.api.evolve", "vibesys.api.hypothesis", "vibesys.api.metrics", "vibesys.api.profilers", "vs_agent", "server.runtime", "server.instances", "server.host_api", "server.registry", "headless", "launch", "vs_mcp", "server.relay", "server.host_helper", "server.host_helper_requests", "server.host_helper_os", "server.host_helper_logs", "server.host_helper_machine", "server.host_helper_compute", "server.host_helper_readers", "server.host_agent_logins", "server.host_preflight", "server.host_examples", "server.host_harness", "vibesys.comparisons"]
 
 [[modules]]
 path = "headless"
@@ -477,7 +478,7 @@ depends_on = []
 [[modules]]
 path = "vibesys.run"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_core", "vs_decode.api", "vibesys", "vibesys.errors", "vs_agent", "vs_runtime", "vibesys.inputs", "vs_github", "vs_sandbox", "vs_project", "vs_slurm", "vs_sim.api", "vs_redaction.api"]
+depends_on = ["vs_runlog", "vs_proto", "vs_core", "vs_decode.api", "vibesys", "vibesys.errors", "vs_agent", "vs_runtime", "vibesys.inputs", "vs_github", "vs_sandbox", "vs_project", "vs_slurm", "vs_sim.api", "vs_redaction.api"]
 
 [[modules]]
 path = "vibesys.run.evaluation_identity"
@@ -1920,3 +1921,19 @@ depends_on = []
 [[interfaces]]
 from = ["vs_proto"]
 expose = ["api", "api\\..*"]
+
+[[modules]]
+path = "vs_runlog"
+depends_on = ["vs_proto"]
+
+[[interfaces]]
+from = ["vs_runlog"]
+expose = ["api", "api\\..*"]
+
+[[modules]]
+path = "vibesys.api.transport"
+depends_on = ["vibesys.run"]
+
+[[interfaces]]
+from = ["vibesys.api.transport"]
+expose = ["ConversionResult", "ConversionStatus", "convert_run"]

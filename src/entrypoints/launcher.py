@@ -127,6 +127,7 @@ async def run_child(
 
 
 _LIGHT_COMMANDS: dict[str, str] = {
+    "host": "entrypoints.host",
     "evals": "entrypoints.evals",
     "example": "entrypoints.examples",
     "instances": "entrypoints.instances",

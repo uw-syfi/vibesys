@@ -102,7 +102,10 @@ func TestSkeletonBoundedPrefixContinuesThroughTail(t *testing.T) {
 				}
 				size := 128 << 10
 				if kind == "large-first-record" && i == 0 {
-					size = 2 << 20
+					// A maximum legal record fits Tail, but its response
+					// framing exceeds the unary Skeleton byte budget.
+					size = runlog.MaxRecordBytes
+					size -= len(payload(t, seq, strings.Repeat("x", size))) - runlog.MaxRecordBytes
 				}
 				records[i] = payload(t, seq, strings.Repeat("x", size))
 				data = append(data, frame(records[i])...)

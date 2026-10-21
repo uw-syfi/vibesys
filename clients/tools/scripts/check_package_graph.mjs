@@ -151,6 +151,7 @@ export const MACHINE_PACKAGES = [
   '@vibesys/connection',
   '@vibesys/run-session',
   '@vibesys/logs',
+  '@vibesys/run-skeleton',
 ];
 const ALL_RUNTIMES = Object.keys(RUNTIMES);
 

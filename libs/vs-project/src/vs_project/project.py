@@ -14,7 +14,8 @@ from vs_project._layout import (
     TaskName,
     TasksRoot,
 )
-from vs_project._state import ProjectState
+from vs_project._state import ProjectState, _state_home, validate_run_id
+from vs_project._state_io import publish_run_link
 from vs_project._state_store import LocalStateStore
 from vs_sim.api import ProcessTimeoutError
 
@@ -186,6 +187,24 @@ class Project:
     def log_directory_for(cls, project_root: Path | str, run_id: str) -> Path:
         """Return a run log destination, including before a root is materialized."""
         return ProjectState.log_directory_for(project_root, run_id)
+
+    @classmethod
+    def run_log_path_for(cls, project_root: Path | str, run_id: str) -> Path:
+        """Return the transport log beside the authoritative JSONL journal."""
+        return cls.log_directory_for(project_root, run_id) / "run.log"
+
+    @classmethod
+    def event_journal_path_for(cls, project_root: Path | str, run_id: str) -> Path:
+        """Return the authoritative core-event journal for one run."""
+        return cls.log_directory_for(project_root, run_id) / "core-events.jsonl"
+
+    @classmethod
+    def publish_run_for(cls, project_root: Path | str, run_id: str) -> Path:
+        """Atomically publish a host discovery link to this run's log directory."""
+        validate_run_id(run_id)
+        return publish_run_link(
+            _state_home() / "runs" / run_id, cls.log_directory_for(project_root, run_id)
+        )
 
     @classmethod
     def logged_run_ids_for(cls, project_root: Path | str) -> tuple[str, ...]:

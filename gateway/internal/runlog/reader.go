@@ -7,12 +7,14 @@ import (
 	"fmt"
 	"hash/crc32"
 	"io"
+
+	"github.com/uw-syfi/vibesys/gateway/gen"
 )
 
-const Magic = "VSRLOG01"
+const Magic = gen.RunLogMagic
 
 // MaxRecordBytes bounds memory even when a damaged prefix declares a huge length.
-const MaxRecordBytes = 16 << 20
+const MaxRecordBytes = gen.RunLogMaxRecordBytes
 
 var castagnoli = crc32.MakeTable(crc32.Castagnoli)
 
@@ -71,7 +73,7 @@ func (r *Reader) Next() ([]byte, error) {
 		return nil, r.corrupt("length varint overflow")
 	}
 	if length > MaxRecordBytes {
-		return nil, r.corrupt("record exceeds 16 MiB limit")
+		return nil, r.corrupt(fmt.Sprintf("record exceeds %d byte limit", MaxRecordBytes))
 	}
 	frame := make([]byte, 4+int(length))
 	if _, err := r.source.ReadAt(frame, r.offset+int64(width)); err != nil {
