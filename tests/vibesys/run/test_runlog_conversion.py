@@ -433,10 +433,14 @@ def test_gateway_conversion_fixture_regenerates_identically(
     generated = runpy.run_path(str(directory / "generate.py"))["fixtures"](project)
     for name, payload in generated.items():
         saved = (directory / name).read_bytes()
+        message = (
+            f"proto/testdata/conversion/{name} differs; inspect the difference, then regenerate "
+            "with: uv run --locked python proto/testdata/conversion/generate.py"
+        )
         if name.endswith(".gz"):
-            assert gzip.decompress(saved) == gzip.decompress(payload), name
+            assert gzip.decompress(saved) == gzip.decompress(payload), message
         else:
-            assert saved == payload, name
+            assert saved == payload, message
 
 
 @pytest.mark.parametrize("damage", ["log-sequence", "keyframe-offset", "stale-head"])

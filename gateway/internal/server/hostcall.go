@@ -21,8 +21,14 @@ const hostCallDeadline = 10 * time.Second
 // HostCall dispatches typed methods and carries opaque protobuf across stdin and
 // stdout. Python owns all validation and product policy, including inbox writes.
 func (h *host) HostCall(ctx context.Context, request *apiv1.HostCallRequest) (*apiv1.HostCallResponse, error) {
-	if request.GetPostIntent() == nil {
-		return hostFailure("invalid_method", "HostCall.method must be post_intent", -1, ""), nil
+	method := ""
+	switch request.Method.(type) {
+	case *apiv1.HostCallRequest_PostIntent:
+		method = "post-intent"
+	case *apiv1.HostCallRequest_Relaunch:
+		method = "relaunch"
+	default:
+		return hostFailure("invalid_method", "HostCall.method is required", -1, ""), nil
 	}
 	checkout, err := checkoutPath(request.GetCheckout())
 	if err != nil {
@@ -39,13 +45,16 @@ func (h *host) HostCall(ctx context.Context, request *apiv1.HostCallRequest) (*a
 	defer cancel()
 	result, err := h.config.HostRunner.Run(callCtx, hostcommand.Command{
 		Executable: filepath.Join(checkout, ".venv", "bin", "vibesys"),
-		Args:       []string{"host", "post-intent"}, Input: input, StateRoot: h.config.Root,
+		Args:       []string{"host", method}, Input: input, StateRoot: h.config.Root,
 	})
 	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
 		return hostFailure("admission_unconfirmed", "The host did not confirm admission. Check the run status or retry with the same request id.", result.ExitCode, result.Stderr), nil
 	}
+	if request.GetRelaunch() != nil && errors.Is(err, os.ErrNotExist) {
+		return &apiv1.HostCallResponse{Result: &apiv1.HostCallResponse_Relaunch{Relaunch: &apiv1.RelaunchResponse{Outcome: &apiv1.RelaunchResponse_Refusal{Refusal: apiv1.RelaunchRefusal_RELAUNCH_REFUSAL_CHECKOUT_MISSING}}}}, nil
+	}
 	if err != nil || result.ExitCode != 0 {
-		message := fmt.Sprintf("vibesys host post-intent exited %d", result.ExitCode)
+		message := fmt.Sprintf("vibesys host %s exited %d", method, result.ExitCode)
 		if err != nil {
 			message += ": " + err.Error()
 		}
@@ -53,12 +62,12 @@ func (h *host) HostCall(ctx context.Context, request *apiv1.HostCallRequest) (*a
 	}
 	response := &apiv1.HostCallResponse{}
 	if err := proto.Unmarshal(result.Output, response); err != nil || response.Result == nil {
-		return hostFailure("invalid_host_response", "vibesys host post-intent returned invalid protobuf", result.ExitCode, result.Stderr), nil
+		return hostFailure("invalid_host_response", "vibesys host "+method+" returned invalid protobuf", result.ExitCode, result.Stderr), nil
 	}
 	if failure := response.GetConfigurationFailed(); failure != nil {
 		failure.Stderr = safeDiagnostic(strings.TrimSpace(failure.Stderr + "\n" + result.Stderr))
-	} else if response.GetPostIntent().GetRequestId() != request.GetPostIntent().GetRequestId() {
-		return hostFailure("invalid_host_response", "vibesys host post-intent returned a different request_id", result.ExitCode, result.Stderr), nil
+	} else if (method == "post-intent" && (response.GetPostIntent() == nil || response.GetPostIntent().GetRequestId() != request.GetPostIntent().GetRequestId())) || (method == "relaunch" && response.GetRelaunch() == nil) {
+		return hostFailure("invalid_host_response", "vibesys host "+method+" returned a different method or request_id", result.ExitCode, result.Stderr), nil
 	}
 	return response, nil
 }

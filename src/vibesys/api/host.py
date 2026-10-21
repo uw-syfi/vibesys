@@ -1,7 +1,8 @@
-"""Protobuf host command boundary over the existing, reviewed control inbox.
+"""Typed host commands for control inbox writes and detached relaunch admission.
 
-The command acknowledges persistence only. The run owns applying a request and
-publishing its IntentState. No CLI or gateway implementation enters this module.
+PostIntent acknowledges persistence; the run owns applying the request and
+publishing its IntentState. Relaunch confirms the new writer epoch. No CLI or
+gateway implementation enters this module.
 """
 
 from __future__ import annotations
@@ -10,7 +11,8 @@ from typing import TYPE_CHECKING
 
 from pydantic import ValidationError as ControlValidationError
 
-from vibesys.api import CONTROL_REQUEST, ControlAction, recorded_ending
+from vibesys.api import CONTROL_REQUEST, ConfigurationError, ControlAction, recorded_ending
+from vibesys.api.host_relaunch import relaunch_host
 from vs_project.api import INBOX_FORMAT, InboxClosedError, Project, ProjectError
 from vs_proto.api import (
     ConfigurationFailed,
@@ -25,11 +27,12 @@ from vs_proto.api import (
 
 if TYPE_CHECKING:
     from vs_proto.api import PostIntentRequest, SteerIntent
+    from vs_sim.api import Processes, Threads
 
 __all__ = ["host_call"]
 
 
-def host_call(payload: bytes) -> bytes:
+def host_call(payload: bytes, *, processes: Processes, threads: Threads) -> bytes:
     """Validate and execute one HostCall envelope, returning a typed response.
 
     Invalid input, unsupported intents and closed inboxes return the documented
@@ -45,8 +48,14 @@ def host_call(payload: bytes) -> bytes:
             case Oneof("post_intent", request):
                 result = _post_intent(request)
                 response = HostCallResponse(result=Oneof("post_intent", result))
+            case Oneof("relaunch", request):
+                result = relaunch_host(request, call.checkout, processes=processes, threads=threads)
+                response = HostCallResponse(result=Oneof("relaunch", result))
             case _:
                 return _failure("invalid_method", "HostCall.method is required")
+    except ConfigurationError as error:
+        diagnostic = error.diagnostic
+        return _failure(diagnostic.code, diagnostic.message, exit_code=diagnostic.exit_code)
     except InboxClosedError as error:
         return _failure("inbox_closed", str(error), exit_code=3)
     except (ValueError, OSError, ProjectError, ControlValidationError, ValidationError) as error:
@@ -58,9 +67,7 @@ def _failure(code: str, message: str, *, exit_code: int = 2) -> bytes:
     return HostCallResponse(
         result=Oneof(
             "configuration_failed",
-            ConfigurationFailed(
-                code=code, stage="post_intent", message=message, exit_code=exit_code
-            ),
+            ConfigurationFailed(code=code, stage="host_call", message=message, exit_code=exit_code),
         )
     ).to_binary()
 

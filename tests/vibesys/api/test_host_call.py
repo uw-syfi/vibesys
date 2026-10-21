@@ -11,10 +11,13 @@ import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
+import vs_proto.api as p
 from entrypoints.control import control_main
 from entrypoints.host import main
 from vibesys.api import CONTROL_REQUEST
 from vibesys.api.host import host_call
+from vibesys.events import CoreEventType, RunStartedData
+from vibesys.run import EventJournal
 from vs_core.api import RunResultProposal, RunStatus, initial_state
 from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecord, StoredEnvelope
 from vs_project.api.testing import run_execution_record
@@ -27,6 +30,8 @@ from vs_proto.api import (
     ParkIntent,
     PauseIntent,
     PostIntentRequest,
+    RelaunchRefusal,
+    RelaunchRequest,
     ResumeIntent,
     ResumeWhen,
     SetParallelismIntent,
@@ -39,11 +44,15 @@ from vs_proto.api import (
     WithdrawIntent,
     validate,
 )
+from vs_runlog.api import FileRunLogWriter, RunLogReader, encode_frame
+from vs_sim.api.testing import FakeProcesses, ManualClock, ProcessScript, SimThreads
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     from protobuf import Message
+
+    from vs_sim.api import ProcessSpec
 
 
 @pytest.fixture
@@ -73,6 +82,14 @@ def project(
     return project, manifest.run_id
 
 
+def inbox_call(payload: bytes) -> bytes:
+    threads = SimThreads()
+    processes = FakeProcesses(lambda _: ProcessScript(), pass_time=threads.sleep)
+    response = host_call(payload, processes=processes, threads=threads)
+    assert not processes.ran
+    return response
+
+
 def call(project: Project, run_id: str, intent: Oneof, request_id: str = "r-1") -> HostCallResponse:
     request = HostCallRequest(
         checkout="/src/vibesys",
@@ -83,7 +100,7 @@ def call(project: Project, run_id: str, intent: Oneof, request_id: str = "r-1") 
             ),
         ),
     )
-    response = HostCallResponse.from_binary(host_call(request.to_binary()))
+    response = HostCallResponse.from_binary(inbox_call(request.to_binary()))
     validate(response)
     return response
 
@@ -176,7 +193,7 @@ def test_invalid_or_unsupported_intents_never_write(
 
 @given(st.binary(max_size=500))
 def test_arbitrary_input_has_a_typed_result(payload: bytes) -> None:
-    response = HostCallResponse.from_binary(host_call(payload))
+    response = HostCallResponse.from_binary(inbox_call(payload))
     validate(response)
     assert response.result is not None
     assert response.result.field == "configuration_failed"
@@ -220,7 +237,7 @@ def test_host_command_uses_binary_stdin_stdout_and_the_real_inbox(
 
 
 def test_oversized_input_has_a_typed_failure() -> None:
-    response = HostCallResponse.from_binary(host_call(b"x" * ((1 << 20) + 1)))
+    response = HostCallResponse.from_binary(inbox_call(b"x" * ((1 << 20) + 1)))
     validate(response)
     assert response.result is not None
     assert response.result.field == "configuration_failed"
@@ -314,3 +331,197 @@ def test_legacy_cli_and_host_call_share_byte_identical_request_ids(
     if not cli_first:
         cli()
     assert len(owner.state.control_inbox(run_id).pending()) == 1
+
+
+def host_executable(checkout: Path) -> Path:
+    executable = checkout / ".venv" / "bin" / "vibesys"
+    executable.parent.mkdir(parents=True)
+    executable.touch()
+    return executable
+
+
+def relaunch_call(owner: Project, run_id: str, checkout: Path) -> HostCallRequest:
+
+    return HostCallRequest(
+        checkout=str(checkout),
+        method=Oneof(
+            "relaunch",
+            RelaunchRequest(project_root=str(owner.root), run_id=run_id, expected_epoch=1),
+        ),
+    )
+
+
+@pytest.mark.parametrize("ending", ["interrupted", "stopped"])
+def test_host_relaunch_round_trip_confirms_the_new_epoch(
+    project: tuple[Project, str], tmp_path: Path, ending: str
+) -> None:
+
+    owner, run_id = project
+    executable = host_executable(tmp_path / "checkout")
+    threads = SimThreads()
+    clock = ManualClock()
+    journal = EventJournal(clock, threads)
+    journal.checkout = ("tree-a", False)
+    journal.enable_runlog(owner, run_id)
+    journal.attach(Project.log_directory_for(owner.root, run_id), run_id)
+    journal.emit(CoreEventType.RUN_STARTED, data=RunStartedData(outer_loop="test", input="input"))
+    if ending == "stopped":
+        journal.emit(CoreEventType.STOPPED)
+    journal.close()
+    path = Project.run_log_path_for(owner.root, run_id)
+    request = relaunch_call(owner, run_id, executable.parents[2])
+
+    def launch(spec: ProcessSpec) -> ProcessScript:
+        if len(processes.ran) > 1:
+            return ProcessScript(returncode=1)
+        concurrent = HostCallResponse.from_binary(
+            host_call(request.to_binary(), processes=processes, threads=threads)
+        )
+        assert concurrent.result is not None
+        assert concurrent.result.field == "relaunch"
+        assert concurrent.result.value.outcome == Oneof("refusal", RelaunchRefusal.LOCKED)
+        assert spec.argv == (str(executable), "--resume", run_id, "--detach", str(owner.root))
+        resumed = EventJournal(clock, threads)
+        resumed.checkout = ("tree-b", True)
+        resumed.enable_runlog(owner, run_id)
+        resumed.attach(Project.log_directory_for(owner.root, run_id), run_id)
+        resumed.emit(
+            CoreEventType.RUN_STARTED, data=RunStartedData(outer_loop="test", input="input")
+        )
+        resumed.close()
+        return ProcessScript()
+
+    processes = FakeProcesses(launch, pass_time=threads.sleep)
+    with FileRunLogWriter(path, clock=clock, threads=threads):
+        response = HostCallResponse.from_binary(
+            host_call(request.to_binary(), processes=processes, threads=threads)
+        )
+        assert response.result is not None
+        assert response.result.field == "relaunch"
+        assert response.result.value.outcome == Oneof("refusal", RelaunchRefusal.LOCKED)
+        assert not processes.ran
+    output = BytesIO()
+    assert (
+        main(
+            ["relaunch"],
+            stdin=BytesIO(request.to_binary()),
+            stdout=output,
+            processes=processes,
+            threads=threads,
+        )
+        == 0
+    )
+    response = HostCallResponse.from_binary(output.getvalue())
+    validate(response)
+    assert response.result is not None
+    assert response.result.field == "relaunch"
+    assert response.result.value.outcome == Oneof("epoch", 2)
+    with path.open("rb") as stream:
+        records = list(RunLogReader(stream))
+    headers = [r.body.value for r in records if r.body and r.body.field == "epoch_started"]
+    assert [(h.epoch, h.tree_hash, h.dirty) for h in headers] == [
+        (1, "tree-a", False),
+        (2, "tree-b", True),
+    ]
+    response = HostCallResponse.from_binary(
+        host_call(request.to_binary(), processes=processes, threads=threads)
+    )
+    assert response.result is not None
+    assert response.result.field == "relaunch"
+    assert response.result.value.outcome == Oneof("refusal", RelaunchRefusal.EPOCH_CHANGED)
+    assert len(processes.ran) == 1
+
+
+def test_host_relaunch_missing_checkout_refuses_without_spawning(
+    project: tuple[Project, str], tmp_path: Path
+) -> None:
+
+    owner, run_id = project
+    processes = FakeProcesses(lambda _spec: ProcessScript(), pass_time=lambda _seconds: None)
+    response = HostCallResponse.from_binary(
+        host_call(
+            relaunch_call(owner, run_id, tmp_path / "absent").to_binary(),
+            processes=processes,
+            threads=SimThreads(),
+        )
+    )
+    validate(response)
+    assert response.result is not None
+    assert response.result.field == "relaunch"
+    assert response.result.value.outcome == Oneof("refusal", RelaunchRefusal.CHECKOUT_MISSING)
+    assert not processes.ran
+
+
+@pytest.mark.parametrize("mode", ["ended", "nonzero", "unconfirmed", "corrupt", "missing-log"])
+def test_host_relaunch_failure_paths_never_claim_an_epoch(
+    project: tuple[Project, str], tmp_path: Path, mode: str
+) -> None:
+    owner, run_id = project
+    executable = tmp_path / "checkout" / ".venv" / "bin" / "vibesys"
+    executable.parent.mkdir(parents=True)
+    executable.touch()
+    path = Project.run_log_path_for(owner.root, run_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(
+        p.RUN_LOG_MAGIC
+        + encode_frame(
+            p.Record(
+                seq=1,
+                epoch=1,
+                at=p.Timestamp(seconds=1),
+                body=p.Oneof("epoch_started", p.EpochStarted(epoch=1, run_id=run_id)),
+            )
+        )
+    )
+    if mode == "ended":
+        core = initial_state()
+        ended = core.model_copy(
+            update={
+                "run": core.run.model_copy(
+                    update={
+                        "status": RunStatus.TERMINAL,
+                        "result": RunResultProposal(outcome="success", reason="finished"),
+                    }
+                )
+            }
+        )
+        store = owner.state_store(run_id)
+        fence = store.acquire("writer", now=0, duration=1)
+        assert fence is not None
+        store.commit(
+            None,
+            StoredEnvelope(
+                revision=0,
+                schema_version=1,
+                payload=json.dumps({"envelope": {"core": ended.model_dump(mode="json")}}).encode(),
+            ),
+            fence,
+            now=0,
+        )
+    elif mode == "corrupt":
+        path.write_bytes(b"invalid magic")
+    elif mode == "missing-log":
+        path.unlink()
+    threads = SimThreads()
+    processes = FakeProcesses(
+        lambda _spec: ProcessScript(returncode=1 if mode == "nonzero" else 0),
+        pass_time=threads.sleep,
+    )
+    request = relaunch_call(owner, run_id, executable.parents[2])
+    response = threads.run(
+        lambda: HostCallResponse.from_binary(
+            host_call(request.to_binary(), processes=processes, threads=threads)
+        )
+    )
+    validate(response)
+    assert response.result is not None
+    if mode in {"ended", "missing-log"}:
+        assert response.result.field == "relaunch"
+        assert response.result.value.outcome == Oneof(
+            "refusal", RelaunchRefusal.ENDED if mode == "ended" else RelaunchRefusal.EPOCH_CHANGED
+        )
+        assert not processes.ran
+    else:
+        assert response.result.field == "configuration_failed"
+        assert response.result.value.code == "invalid_input"
+        assert len(processes.ran) == (0 if mode == "corrupt" else 1)
