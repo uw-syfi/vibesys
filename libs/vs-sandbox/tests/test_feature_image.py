@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
-from hypothesis import given
+from hypothesis import example, given
 from hypothesis import strategies as st
 
 from vs_sandbox.api import (
@@ -367,3 +367,101 @@ def test_a_nonpositive_timeout_is_rejected() -> None:
             command_runner=_Runner(),
             timeout=0,
         )
+
+
+@pytest.mark.parametrize("sources", [(), ("cache:first",), ("cache:first", "cache:second")])
+def test_explicit_cache_sources_are_imported_and_the_result_exports_inline_cache(
+    tmp_path: Path, sources: tuple[str, ...]
+) -> None:
+    runner = _Runner()
+    build_feature_image(
+        "base:1",
+        [_local(tmp_path, "tool-a", {})],
+        FinalImage(
+            user="agent", workdir="/workspace", image_repository="demo-build", cache_from=sources
+        ),
+        command_runner=runner,
+        timeout=7,
+    )
+    (build,) = [call for call in runner.calls if call[1] == "build"]
+    assert [build[i + 1] for i, arg in enumerate(build) if arg == "--cache-from"] == list(sources)
+    assert "BUILDKIT_INLINE_CACHE=1" in build
+
+
+@pytest.mark.parametrize("source", ["", "-bad", "cache:with space", "cache:with\nnewline"])
+def test_malformed_cache_sources_fail_before_any_docker_command(
+    tmp_path: Path, source: str
+) -> None:
+    runner = _Runner()
+    with pytest.raises(ValueError, match="cache_from"):
+        build_feature_image(
+            "base:1",
+            [_local(tmp_path, "tool-a", {})],
+            FinalImage(
+                user="agent",
+                workdir="/workspace",
+                image_repository="demo-build",
+                cache_from=(source,),
+            ),
+            command_runner=runner,
+            timeout=7,
+        )
+    assert runner.calls == []
+
+
+@pytest.mark.regression
+@given(
+    changed=st.sampled_from(
+        ["none", "base_digest", "script", "nested_file", "option", "dockerfile"]
+    )
+)
+@example(changed="base_digest")
+@example(changed="none")
+def test_restored_images_rebuild_exactly_when_an_install_input_changes(changed: str) -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        feature = _local(Path(directory), "tool-a", {"v": "1"})
+        final = FinalImage(user="agent", workdir="/workspace", image_repository="demo-build")
+        first = _Runner()
+        built = build_feature_image("base:1", [feature], final, command_runner=first, timeout=7)
+        restored = _Runner(
+            image_ids={"base:1": "sha256:" + "e" * 64} if changed == "base_digest" else {}
+        )
+        restored.built.update(first.built)
+        if changed == "script":
+            (feature.directory / "install.sh").write_text("#!/bin/sh\necho changed\n")
+        if changed == "nested_file":
+            (feature.directory / "data").mkdir()
+            (feature.directory / "data" / "packages.txt").write_text("package-a\n")
+        if changed == "option":
+            feature = LocalFeature(feature.directory, options={"v": "2"})
+        if changed == "dockerfile":
+            final = FinalImage(user="root", workdir="/workspace", image_repository="demo-build")
+        result = build_feature_image("base:1", [feature], final, command_runner=restored, timeout=7)
+        assert (result.tag == built.tag) == (changed == "none")
+        assert len(restored.seen) == (0 if changed == "none" else 1)
+
+
+def test_cache_source_selection_does_not_invalidate_a_restored_result(tmp_path: Path) -> None:
+    runner = _Runner()
+    feature = _local(tmp_path, "tool-a", {})
+    first = build_feature_image(
+        "base:1",
+        [feature],
+        FinalImage(user="agent", workdir="/workspace", image_repository="demo-build"),
+        command_runner=runner,
+        timeout=7,
+    )
+    second = build_feature_image(
+        "base:1",
+        [feature],
+        FinalImage(
+            user="agent",
+            workdir="/workspace",
+            image_repository="demo-build",
+            cache_from=("cache:new",),
+        ),
+        command_runner=runner,
+        timeout=7,
+    )
+    assert first == second
+    assert len(runner.seen) == 1

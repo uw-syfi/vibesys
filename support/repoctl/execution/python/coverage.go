@@ -15,6 +15,10 @@ import (
 // files. It uses CI's coverage configuration and floor checker. It never selects
 // a suite or guesses which tests cover a module. Deleted files need no coverage.
 func CoverageChecks(root string, changed, tests []string, floor, patch execution.Suite) ([]execution.Check, error) {
+	scope, err := readCoverageScope(root)
+	if err != nil {
+		return nil, err
+	}
 	modules := []string{}
 	seen := map[string]bool{}
 	for _, path := range changed {
@@ -35,7 +39,7 @@ func CoverageChecks(root string, changed, tests []string, floor, patch execution
 		if !info.Mode().IsRegular() {
 			return nil, fmt.Errorf("coverage module %q is not a regular file", path)
 		}
-		if !seen[path] {
+		if scope.includes(path) && !seen[path] {
 			modules = append(modules, path)
 			seen[path] = true
 		}

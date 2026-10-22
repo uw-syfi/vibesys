@@ -219,7 +219,12 @@ def _slurm_config(directory: Path) -> Path:
 
 
 @contextmanager
-def open_editor(base: Base, directory: Path) -> Iterator[Editor]:
+def open_editor(
+    base: Base,
+    directory: Path,
+    *,
+    image_cache_from: tuple[str, ...] = (),
+) -> Iterator[Editor]:
     """Build the agent image on *base*'s default image, open the editor, and close it."""
     run_id = f"{RUN_ID_PREFIX}{secrets.token_hex(5)}"
     workspace = directory / "workspace"
@@ -256,7 +261,10 @@ def open_editor(base: Base, directory: Path) -> Iterator[Editor]:
     )
     environment = SlurmEnvironment(
         load_slurm_operator_settings(_slurm_config(directory)),
-        docker=DockerEnvironmentConfig(image_build_timeout_seconds=IMAGE_BUILD_BUDGET_SECONDS),
+        docker=DockerEnvironmentConfig(
+            image_build_timeout_seconds=IMAGE_BUILD_BUDGET_SECONDS,
+            image_cache_from=image_cache_from,
+        ),
         job_confinement=PassThroughConfinement(),
     )
     session = open_run_environment(environment, request)

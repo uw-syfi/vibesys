@@ -84,6 +84,16 @@ def test_native_replay_record_validation_is_pure_but_unreviewed_exports_are_reje
     assert scan_source(path, "from vs_proto.api import FileStore\n")
 
 
+def test_only_pure_epoch_exports_are_allowed_in_core() -> None:
+    path = f"{PURE_SCOPE}/flows/example.py"
+    source = (
+        "from vs_runlog.api import CurrentEpoch, epoch_has_ended\n"
+        "closed = epoch_has_ended(CurrentEpoch(1, lifecycle))\n"
+    )
+    assert scan_source(path, source) == ()
+    assert scan_source(path, "from vs_runlog.api import RunLogReader\n")
+
+
 @pytest.mark.parametrize("operation", ["is_pydantic_dataclass", "rebuild_dataclass"])
 def test_generated_dataclass_schema_operations_are_pure(operation: str) -> None:
     source = f"from pydantic.dataclasses import {operation}\n{operation}(Record)"
