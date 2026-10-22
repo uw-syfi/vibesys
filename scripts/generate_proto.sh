@@ -9,7 +9,7 @@ uv run --locked --group proto buf build --as-file-descriptor-set --exclude-sourc
 uv run --locked --group proto python -m scripts.host_operations.generate "$image"
 uv run --locked --group proto buf format -w --path proto/vibesys/host --path proto/vibesys/api/v1/host_operations.proto
 uv run --locked --group proto buf generate
-uv run --locked --group proto python -m scripts.host_operations.generate "$image"
+uv run --locked --group proto python -m scripts.host_operations.generate "$image" --bindings
 uv run --locked ruff check --select I --fix libs/vs-proto/src/vs_proto/_generated/host_operations.py src/server/host_operation_types_generated.py
 uv run --locked ruff format libs/vs-proto/src/vs_proto/_generated/host_operations.py src/server/host_operation_types_generated.py
 gofmt -w gateway/internal/hostoperations/registry_generated.go

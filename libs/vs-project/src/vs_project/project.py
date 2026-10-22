@@ -129,8 +129,9 @@ class Project:
     @staticmethod
     def admissions(*, home: Path | None = None) -> FileAdmissionStore:
         """Open this host user's retained admissions, independent of any project root."""
+        user_home = home or Path.home()
         return import_module("vs_project._admission").FileAdmissionStore(
-            (home or Path.home()) / ".vibesys" / "admissions" / "v1"
+            user_home / ".vibesys" / "admissions" / "v1", durable_root=user_home
         )
 
     def is_initialized(self) -> bool:

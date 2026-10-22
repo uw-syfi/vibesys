@@ -869,7 +869,8 @@ def answer(
     try:
         if is_registry_read(request):
             return read_reply(
-                request, HelperReadSource(host, describe=describe_machine, preflight=_preflight)
+                request,
+                HelperReadSource(host, request, describe=describe_machine, preflight=_preflight),
             )
         return _answer(request, host, withdrawal)
     except (ProjectLookupError, ComputeError) as error:
@@ -1490,12 +1491,14 @@ class HelperReadSource:
     def __init__(
         self,
         host: HelperHost,
+        legacy_request: HelperRequest,
         *,
         describe: Callable[[HelperHost], MachineDescription],
         preflight: Callable[[RunPreflightRequest, HelperHost], RunPreflightReply | HelperError],
     ) -> None:
         """Bind host I/O and the existing machine/preflight probe adapters."""
         self._host = host
+        self._legacy_request = legacy_request
         self._describe = describe
         self._preflight = preflight
 
@@ -1556,6 +1559,17 @@ class HelperReadSource:
     def preflight(self, request: pb.PreflightRunRequest) -> pb.PreflightRunResponse:
         """Revalidate the temporary legacy projection before invoking its probe owner."""
         payload = _wire().to_mapping(request)
+        # Legacy diagnostics choose the first role in insertion order. Protobuf
+        # maps have no ordering, so retain only that display preference here.
+        if (
+            isinstance(self._legacy_request, RunPreflightRequest)
+            and self._legacy_request.agents is not None
+        ):
+            agents = payload["agents"]
+            if not isinstance(agents, dict):
+                message = "agents: expected a projected role mapping"
+                raise TypeError(message)
+            payload["agents"] = {role: agents[role] for role in self._legacy_request.agents}
         legacy = RunPreflightRequest.model_validate(
             {**payload, "deadline_ms": _wire().host_operations.PreflightRun.total_ms}
         )

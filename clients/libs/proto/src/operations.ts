@@ -3,6 +3,7 @@ import {
   create,
   type DescMessage,
   fromBinary,
+  isMessage,
   type MessageInitShape,
   type MessageShape,
   toBinary,
@@ -28,10 +29,17 @@ export interface OperationTransport {
 }
 const payloads = new WeakMap<object, Uint8Array>();
 
-function checked<Schema extends DescMessage>(schema: Schema, message: MessageShape<Schema>): Uint8Array {
+function checked<Schema extends DescMessage>(
+  schema: Schema,
+  message: MessageShape<Schema>,
+): Uint8Array {
   const result = validator.validate(schema, message);
-  if (result.kind !== 'valid') throw new Error(result.kind === 'invalid' ? result.error.message : 'invalid operation schema');
+  if (result.kind !== 'valid')
+    throw new Error(result.kind === 'invalid' ? result.error.message : 'invalid operation schema');
   const payload = toBinary(schema, message);
+  if (payload.byteLength !== toBinary(schema, message, {writeUnknownFields: false}).byteLength) {
+    throw new Error('operation contains unknown fields');
+  }
   if (payload.byteLength > maxBytes) throw new Error('operation payload exceeds 1 MiB');
   return payload;
 }
@@ -41,6 +49,7 @@ export function accept<const Policy extends OperationPolicy, Schema extends Desc
   schema: Schema,
   input: MessageInitShape<Schema>,
 ): Accepted<Policy['name']> {
+  if (isMessage(input, schema)) checked(schema, input);
   const payload = checked(schema, create(schema, input));
   const accepted = Object.freeze({[acceptedBrand]: policy.name});
   payloads.set(accepted, payload.slice());
@@ -55,7 +64,11 @@ function field(value: unknown, path: readonly string[]): unknown {
   return value;
 }
 
-export async function call<Policy extends OperationPolicy, Request extends DescMessage, Response extends DescMessage>(
+export async function call<
+  Policy extends OperationPolicy,
+  Request extends DescMessage,
+  Response extends DescMessage,
+>(
   transport: OperationTransport,
   policy: Policy,
   requestSchema: Request,
@@ -64,7 +77,8 @@ export async function call<Policy extends OperationPolicy, Request extends DescM
   correlations: readonly (readonly [readonly string[], readonly string[]])[],
 ): Promise<MessageShape<Response>> {
   const bytes = payloads.get(request);
-  if (!bytes || request[acceptedBrand] !== policy.name) throw new Error('unaccepted operation request');
+  if (!bytes || request[acceptedBrand] !== policy.name)
+    throw new Error('unaccepted operation request');
   const input = fromBinary(requestSchema, bytes);
   checked(requestSchema, input);
   const payload = await transport.invoke(policy.id, bytes.slice(), policy.totalMs);
@@ -72,7 +86,8 @@ export async function call<Policy extends OperationPolicy, Request extends DescM
   const response = fromBinary(responseSchema, payload);
   checked(responseSchema, response);
   for (const [left, right] of correlations) {
-    if (field(input, left) !== field(response, right)) throw new Error('response correlation mismatch');
+    if (field(input, left) !== field(response, right))
+      throw new Error('response correlation mismatch');
   }
   return response;
 }

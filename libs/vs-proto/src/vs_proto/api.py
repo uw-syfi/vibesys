@@ -203,10 +203,17 @@ from vs_proto._generated.vibesys.store.v1.transcript_pb import (
 )
 from vs_proto._operation_projection import from_mapping, to_mapping
 from vs_proto._operations import Accepted, Operation
-from vs_proto._schema_hashes import API_SCHEMA_HASH, STORE_SCHEMA_HASH, schema_hash
+from vs_proto._operations import checked as validated_operation_bytes
+from vs_proto._schema_hashes import (
+    API_SCHEMA_HASH,
+    HOST_SCHEMA_HASH,
+    STORE_SCHEMA_HASH,
+    schema_hash,
+)
 
 __all__ = [
     "API_SCHEMA_HASH",
+    "HOST_SCHEMA_HASH",
     "RUN_LOG_MAGIC",
     "RUN_LOG_MAX_RECORD_BYTES",
     "STORE_SCHEMA_HASH",
@@ -379,5 +386,6 @@ __all__ = [
     "schema_hash",
     "to_mapping",
     "validate",
+    "validated_operation_bytes",
     "validation_rules",
 ]

@@ -18,7 +18,7 @@ from vs_project.api import (
     Project,
 )
 from vs_project.api.testing import FakeAdmissionStore
-from vs_proto.api import Oneof, admission
+from vs_proto.api import FailureCategory, Oneof, OperationFailure, admission
 from vs_proto.api import host_payloads as pb
 
 if TYPE_CHECKING:
@@ -241,3 +241,74 @@ def test_project_admissions_survive_project_rename_and_need_no_project(tmp_path:
     with store.claim(_identity(), (str(tmp_path / "project"),), _request()):
         pass
     assert Project.admissions(home=tmp_path).lookup(_identity()) is not None
+
+
+def test_reconciliation_keeps_unknown_effects_and_fences_proven_absence(
+    reopen: Callable[[], AdmissionStore],
+) -> None:
+    with reopen().claim(_identity(), ("/target",), _request()) as claim:
+        claim.record_intent(admission.PublicationEvidence(effect_id="effect-a"))
+        first = claim.observe()
+        assert first.intent is not None
+        assert first.intent.fence == first.fence
+        claim.reconcile(
+            admission.PublicationObservation(
+                observation=Oneof("unknown", admission.PublicationUnknown(effect_id="effect-a"))
+            )
+        )
+        assert claim.observe().status == admission.AdmissionStatus.UNCONFIRMED
+        with pytest.raises(AdmissionUnconfirmedError):
+            claim.record_intent(admission.PublicationEvidence(effect_id="effect-b"))
+    with reopen().claim(_identity(), ("/target",), _request()) as recovered:
+        with pytest.raises(AdmissionConflictError, match="original intent"):
+            recovered.reconcile(
+                admission.PublicationObservation(
+                    observation=Oneof("absent", admission.PublicationAbsent(effect_id="other"))
+                )
+            )
+        recovered.reconcile(
+            admission.PublicationObservation(
+                observation=Oneof("absent", admission.PublicationAbsent(effect_id="effect-a"))
+            )
+        )
+        assert recovered.observe().fence == first.fence + 1
+        recovered.record_intent(admission.PublicationEvidence(effect_id="effect-b"))
+        recovered.reconcile(
+            admission.PublicationObservation(
+                observation=Oneof(
+                    "published",
+                    admission.PublicationPublished(effect_id="effect-b", result=_result()),
+                )
+            )
+        )
+    final = reopen().lookup(_identity())
+    assert final is not None
+    assert final.status == admission.AdmissionStatus.CONFIRMED
+    with (
+        reopen().claim(_identity(), ("/target",), _request()) as terminal,
+        pytest.raises(AdmissionConflictError, match="terminal"),
+    ):
+        terminal.reconcile(
+            admission.PublicationObservation(
+                observation=Oneof("absent", admission.PublicationAbsent(effect_id="effect-b"))
+            )
+        )
+
+
+def test_unconfirmed_and_refused_results_are_typed_and_never_start_an_effect(
+    reopen: Callable[[], AdmissionStore],
+) -> None:
+    refusal = admission.OperationResult(
+        result=Oneof(
+            "failure",
+            OperationFailure(
+                category=FailureCategory.PERMISSION_DENIED, message="read-only source"
+            ),
+        )
+    )
+    with reopen().claim(_identity(), ("/settings",), _request()) as claim:
+        claim.settle(admission.AdmissionStatus.REFUSED, refusal)
+    with reopen().claim(_identity(), ("/settings",), _request()) as retried:
+        assert retried.observe().result == refusal
+        with pytest.raises(AdmissionUnconfirmedError):
+            retried.record_intent(admission.PublicationEvidence(effect_id="forbidden"))

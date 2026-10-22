@@ -57,7 +57,7 @@ def python_registry(operations: tuple[Operation, ...], failures: tuple[str, ...]
     for op in operations:
         lines += [
             f"            case {op.policy.operation_id}:",
-            f"                return {op.name}.validate_response(request, self.{op.slot}(request.decode()))",
+            f"                return {op.name}.validate_response(request, self.{op.slot}({op.name}.request_value(request)))",
         ]
     lines += [
         "            case _:",
@@ -100,7 +100,7 @@ def receipt_schema(operations: tuple[Operation, ...]) -> str:
         "message OperationResult {",
         "  oneof result {",
         "    option (buf.validate.oneof).required = true;",
-        "    OperationFailure failure = 1;",
+        "    OperationFailure failure = 2;",
     ]
     lines += [f"    {op.response} {op.slot} = {op.policy.response_tag};" for op in operations]
     lines += [
@@ -265,15 +265,9 @@ def typescript_registry(operations: tuple[Operation, ...], failures: tuple[str, 
     return "\n".join(lines)
 
 
-def helper_types(root: object, operations: tuple[Operation, ...]) -> str:
+def helper_types(sources: tuple[str, ...], operations: tuple[Operation, ...]) -> str:
     """Derive temporary adapter type narrowing from its existing closed request union."""
-    paths = (
-        root / "src/server/host_api.py",
-        *sorted(
-            path for path in (root / "src/server").glob("host_*.py") if path.name != "host_api.py"
-        ),
-    )
-    trees = [ast.parse(path.read_text()) for path in paths]
+    trees = [ast.parse(source) for source in sources]
     requests = next(
         node.value.slice.elts[0]
         for node in trees[0].body

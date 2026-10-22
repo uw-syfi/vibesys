@@ -37,3 +37,5 @@ def embedded_hash(package: str) -> str:
 
 API_SCHEMA_HASH = embedded_hash("vibesys.api.v1")
 STORE_SCHEMA_HASH = embedded_hash("vibesys.store.v1")
+
+HOST_SCHEMA_HASH = embedded_hash("vibesys.host.v1")

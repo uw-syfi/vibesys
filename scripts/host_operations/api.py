@@ -11,6 +11,14 @@ from dataclasses import dataclass
 
 from google.protobuf import descriptor_pb2, descriptor_pool, message_factory
 
+from scripts.host_operations._emit import (
+    go_registry,
+    helper_types,
+    python_registry,
+    receipt_schema,
+    typescript_registry,
+)
+
 _RESERVED_TAG_START = 19000
 _RESERVED_TAG_END = 19999
 _MAX_CAP_MS = 600000
@@ -21,6 +29,7 @@ _RECONCILE = 3
 _BOUNDED_READ = 2
 _STREAM = 2
 _FILESYSTEM = 3
+_FAILURE_RESPONSE_TAG = 2
 
 
 class GenerationError(ValueError):
@@ -70,6 +79,8 @@ def _policy(policy: object, method: object) -> None:
         _fail(name, "operation_id must be positive")
     for field in ("request_tag", "response_tag"):
         value = getattr(policy, field)
+        if field == "response_tag" and value == _FAILURE_RESPONSE_TAG:
+            _fail(name, "response_tag is reserved for typed failure")
         if not 0 < value < 2**29 or _RESERVED_TAG_START <= value <= _RESERVED_TAG_END:
             _fail(name, f"invalid {field}: {value}")
     if not 0 < policy.cap_ms <= _MAX_CAP_MS or not 0 < policy.grace_ms <= _MAX_GRACE_MS:
@@ -147,3 +158,28 @@ def compile_registry(image: bytes, handlers: tuple[str, ...]) -> tuple[Operation
             f"missing, duplicate or unknown handlers: expected {sorted(expected)}, got {sorted(handlers)}",
         )
     return tuple(operations)
+
+
+def compile_outputs(
+    image: bytes, handlers: tuple[str, ...], helper_sources: tuple[str, ...]
+) -> dict[str, str]:
+    """Compile every projection atomically in memory after validating the complete registry."""
+    operations = compile_registry(image, handlers)
+    files = descriptor_pb2.FileDescriptorSet.FromString(image)
+    failure_file = next(file for file in files.file if file.name == "vibesys/host/v1/failure.proto")
+    failures = tuple(
+        value.name.removeprefix("FAILURE_CATEGORY_")
+        for value in failure_file.enum_type[0].value
+        if value.number
+    )
+    return {
+        "src/server/host_operation_types_generated.py": helper_types(helper_sources, operations),
+        "proto/vibesys/host/v1/admission_receipt_generated.proto": receipt_schema(operations),
+        "libs/vs-proto/src/vs_proto/_generated/host_operations.py": python_registry(
+            operations, failures
+        ),
+        "gateway/internal/hostoperations/registry_generated.go": go_registry(operations, failures),
+        "clients/libs/proto/src/generated/host-operations.ts": typescript_registry(
+            operations, failures
+        ),
+    }

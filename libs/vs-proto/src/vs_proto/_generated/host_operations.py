@@ -199,23 +199,33 @@ class Handlers:
     def dispatch(self, request: Accepted) -> bytes:
         match request.operation.operation_id:
             case 10:
-                return ListTasks.validate_response(request, self.list_tasks(request.decode()))
+                return ListTasks.validate_response(
+                    request, self.list_tasks(ListTasks.request_value(request))
+                )
             case 11:
                 return ListHarnesses.validate_response(
-                    request, self.list_harnesses(request.decode())
+                    request, self.list_harnesses(ListHarnesses.request_value(request))
                 )
             case 12:
-                return ListExamples.validate_response(request, self.list_examples(request.decode()))
+                return ListExamples.validate_response(
+                    request, self.list_examples(ListExamples.request_value(request))
+                )
             case 13:
-                return GetTaskGoal.validate_response(request, self.get_task_goal(request.decode()))
+                return GetTaskGoal.validate_response(
+                    request, self.get_task_goal(GetTaskGoal.request_value(request))
+                )
             case 14:
                 return DescribeMachine.validate_response(
-                    request, self.describe_machine(request.decode())
+                    request, self.describe_machine(DescribeMachine.request_value(request))
                 )
             case 15:
-                return ListCompute.validate_response(request, self.list_compute(request.decode()))
+                return ListCompute.validate_response(
+                    request, self.list_compute(ListCompute.request_value(request))
+                )
             case 16:
-                return PreflightRun.validate_response(request, self.preflight_run(request.decode()))
+                return PreflightRun.validate_response(
+                    request, self.preflight_run(PreflightRun.request_value(request))
+                )
             case _:
                 raise ValueError("unknown operation id")
 

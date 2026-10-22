@@ -371,7 +371,7 @@ type isOperationResult_Result interface {
 }
 
 type OperationResult_Failure struct {
-	Failure *OperationFailure `protobuf:"bytes,1,opt,name=failure,proto3,oneof"`
+	Failure *OperationFailure `protobuf:"bytes,2,opt,name=failure,proto3,oneof"`
 }
 
 type OperationResult_ListTasks struct {
@@ -957,7 +957,7 @@ const file_vibesys_host_v1_admission_receipt_generated_proto_rawDesc = "" +
 	"\rpreflight_run\x18\x10 \x01(\v2$.vibesys.host.v1.PreflightRunRequestH\x00R\fpreflightRunB\x10\n" +
 	"\arequest\x12\x05\xbaH\x02\b\x01\"\x81\x05\n" +
 	"\x0fOperationResult\x12=\n" +
-	"\afailure\x18\x01 \x01(\v2!.vibesys.host.v1.OperationFailureH\x00R\afailure\x12C\n" +
+	"\afailure\x18\x02 \x01(\v2!.vibesys.host.v1.OperationFailureH\x00R\afailure\x12C\n" +
 	"\n" +
 	"list_tasks\x18\n" +
 	" \x01(\v2\".vibesys.host.v1.ListTasksResponseH\x00R\tlistTasks\x12O\n" +

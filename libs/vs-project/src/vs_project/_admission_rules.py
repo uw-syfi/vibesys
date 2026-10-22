@@ -12,6 +12,7 @@ from vs_proto.api import (
     admission,
     host_operations,
     validate,
+    validated_operation_bytes,
 )
 
 _STATUS = admission.AdmissionStatus
@@ -29,10 +30,15 @@ def checked_receipt(payload: bytes) -> admission.AdmissionReceipt:
         message = "admission receipt is missing accepted input or identity"
         raise ValueError(message)
     check_input(receipt.identity, accepted)
-    encoded = accepted.to_binary()
+    encoded = validated_operation_bytes(accepted)
     if receipt.input_bytes != encoded or receipt.input_digest != hashlib.sha256(encoded).digest():
         message = "admission receipt input bytes/digest mismatch"
         raise ValueError(message)
+    if receipt.intent is not None and receipt.intent.fence != receipt.fence:
+        message = "admission intent fence does not match receipt"
+        raise ValueError(message)
+    if receipt.result is not None:
+        check_result(receipt, receipt.status, receipt.result)
     return receipt
 
 
@@ -62,13 +68,13 @@ def initial_receipt(
 ) -> admission.AdmissionReceipt:
     """Create the durable pending state before callers can record an effect intent."""
     check_input(identity, accepted)
-    encoded = accepted.to_binary()
+    encoded = validated_operation_bytes(accepted)
     receipt = admission.AdmissionReceipt(
         version=1,
         fence=1,
         identity=identity,
         targets=list(targets),
-        accepted=accepted,
+        accepted=admission.AcceptedOperation.from_binary(encoded),
         input_bytes=encoded,
         input_digest=hashlib.sha256(encoded).digest(),
         status=_STATUS.PENDING,
@@ -93,6 +99,9 @@ def record_intent(
 ) -> admission.AdmissionReceipt:
     """An existing intent is uncertainty, including after caller death or lost ack."""
     validate(evidence)
+    if evidence.fence not in (0, receipt.fence):
+        message = "publication evidence has a stale admission fence"
+        raise AdmissionConflictError(message)
     if receipt.status != _STATUS.PENDING or receipt.intent is not None:
         message = "admission intent already exists; reconcile the original effect"
         raise AdmissionUnconfirmedError(message)
@@ -121,6 +130,20 @@ def settle(
     if status != _STATUS.REFUSED and receipt.intent is None:
         message = "admission effect requires durable intent before settlement"
         raise ValueError(message)
+    check_result(receipt, status, result)
+    updated = admission.AdmissionReceipt.from_binary(receipt.to_binary())
+    updated.status = status
+    updated.result = result
+    validate(updated)
+    return updated
+
+
+def check_result(
+    receipt: admission.AdmissionReceipt,
+    status: admission.AdmissionStatus,
+    result: admission.OperationResult,
+) -> None:
+    """Terminal classification and operation identity agree with the typed result."""
     response = result.result
     if receipt.identity is None or receipt.accepted is None or receipt.accepted.request is None:
         message = "admission receipt is incomplete"
@@ -134,14 +157,18 @@ def settle(
     if response.field != "failure":
         accepted = operation.accept(receipt.accepted.request.value)
         operation.validate_response(accepted, response.value)
+        if status != _STATUS.CONFIRMED:
+            message = "nonconfirmed admission must contain a typed failure"
+            raise ValueError(message)
     elif status == _STATUS.CONFIRMED:
         message = "confirmed admission cannot contain a failure"
         raise ValueError(message)
-    updated = admission.AdmissionReceipt.from_binary(receipt.to_binary())
-    updated.status = status
-    updated.result = result
-    validate(updated)
-    return updated
+    if response.field == "failure" and (
+        (status == _STATUS.UNCONFIRMED)
+        != (response.value.category == FailureCategory.ADMISSION_UNCONFIRMED)
+    ):
+        message = "unconfirmed admission requires ADMISSION_UNCONFIRMED failure"
+        raise ValueError(message)
 
 
 def reconcile(

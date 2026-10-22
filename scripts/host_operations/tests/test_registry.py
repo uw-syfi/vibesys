@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
+import ast
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
 from google.protobuf import descriptor_pb2, descriptor_pool, message_factory
 from hypothesis import given
 from hypothesis import strategies as st
-from scripts.host_operations.api import GenerationError, compile_registry
+from scripts.host_operations.api import GenerationError, compile_outputs, compile_registry
 
-from vs_proto.api import host_operation_descriptors, host_operations
+from vs_proto.api import OperationFailure, host_operation_descriptors, host_operations
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -28,6 +30,7 @@ def _image() -> descriptor_pb2.FileDescriptorSet:
         seen[file.name] = descriptor_pb2.FileDescriptorProto.FromString(file.proto.to_binary())
 
     add(host_operation_descriptors.desc())
+    add(OperationFailure.desc().file)
     return descriptor_pb2.FileDescriptorSet(file=list(seen.values()))
 
 
@@ -116,3 +119,25 @@ def test_a_correlation_cannot_cross_a_scalar_even_with_repeated_field_numbers() 
 
     with pytest.raises(GenerationError, match="correlation crosses a scalar"):
         compile_registry(_changed(change), _slots())
+
+
+def test_the_descriptor_pass_compiles_all_language_outputs_before_publication() -> None:
+    root = Path(__file__).resolve().parents[3]
+    sources = tuple(
+        path.read_text()
+        for path in (
+            root / "src/server/host_api.py",
+            *sorted(
+                path
+                for path in (root / "src/server").glob("host_*.py")
+                if path.name != "host_api.py"
+            ),
+        )
+    )
+    image = _image().SerializeToString()
+    outputs = compile_outputs(image, _slots(), sources)
+    assert len(outputs) == 5
+    for path, content in outputs.items():
+        if path.endswith(".py"):
+            ast.parse(content)
+    assert compile_outputs(image, _slots(), sources) == outputs

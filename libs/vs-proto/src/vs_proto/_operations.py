@@ -7,13 +7,18 @@ from dataclasses import dataclass
 from protobuf import Message
 from protovalidate import validate
 
+from vs_proto._canonical_operation import canonical_message
+
 MAX_OPERATION_BYTES = 1 << 20
 
 
 def checked(message: Message) -> bytes:
     """Validate a boundary message and return its bounded canonical wire bytes."""
     validate(message)
-    payload = message.to_binary()
+    if message.to_binary() != message.to_binary(write_unknown_fields=False):
+        message_text = "operation contains unknown fields"
+        raise ValueError(message_text)
+    payload = canonical_message(message).to_binary()
     if len(payload) > MAX_OPERATION_BYTES:
         message_text = "operation payload exceeds 1 MiB"
         raise ValueError(message_text)
@@ -34,7 +39,10 @@ class Accepted[Request: Message]:
         if len(self.payload) > MAX_OPERATION_BYTES:
             message = "operation payload exceeds 1 MiB"
             raise ValueError(message)
-        checked(self.operation.request.from_binary(self.payload))
+        canonical = checked(self.operation.request.from_binary(self.payload))
+        if canonical != self.payload:
+            message = "accepted operation bytes are not canonical"
+            raise ValueError(message)
 
     def decode(self) -> Request:
         """Decode a fresh copy so callers cannot mutate this accepted value."""
@@ -71,6 +79,17 @@ class Operation[Request: Message, Response: Message]:
             message = f"{self.name}: wrong request type"
             raise TypeError(message)
         return Accepted(self, checked(request))
+
+    def request_value(self, accepted: Accepted[Request]) -> Request:
+        """Check the registry identity before a handler may perform any work."""
+        if accepted.operation != self:
+            message = f"{self.name}: accepted request belongs to a different registry entry"
+            raise ValueError(message)
+        value = self.request.from_binary(accepted.payload)
+        if checked(value) != accepted.payload:
+            message = f"{self.name}: accepted bytes are not canonical"
+            raise ValueError(message)
+        return value
 
     def validate_response(self, request: Accepted[Request], response: Response) -> bytes:
         """Validate pairing and every declared identity correlation before delivery."""

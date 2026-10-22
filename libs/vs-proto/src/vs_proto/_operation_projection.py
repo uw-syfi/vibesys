@@ -85,13 +85,13 @@ def _message_field(kind: DescMessage, value: object) -> object:
     return _element(kind, value)
 
 
-def _tag_constant(field: DescField) -> str | None:
+def _tag_constant(field: DescField) -> str | int | bool | None:
     opts = field.proto.options
     rule = opts[rules.ext_field] if opts is not None and rules.ext_field in opts else None
     if rule is not None:
         match rule.type:
-            case Oneof("string", value):
-                return value.const
+            case Oneof("string", value) | Oneof("bool", value) | Oneof("int64", value):
+                return value.const if value.has_field("const") else None
     return None
 
 
@@ -100,8 +100,12 @@ def _union(kind: DescMessage, value: Mapping[str, object]) -> Message:
         if not isinstance(field.value, DescFieldValueMessage):
             continue
         member = field.value.message
-        tag = next((f for f in member.fields if f.name == "kind"), None)
-        if tag is not None and value.get("kind") == _tag_constant(tag):
+        tags = [
+            (tag.name, constant)
+            for tag in member.fields
+            if (constant := _tag_constant(tag)) is not None
+        ]
+        if tags and all(value.get(name) == constant for name, constant in tags):
             return kind.type(value=Oneof(field.name, from_mapping(member.type, value)))
     message = f"{kind.type_name}: unknown union kind {value.get('kind')!r}"
     raise ValueError(message)

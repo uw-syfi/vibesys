@@ -38,6 +38,10 @@ class AdmissionClaim(Protocol):
         """Persist evidence before dispatch; reject every repeated dispatch intent."""
         ...
 
+    def reconcile(self, observation: admission.PublicationObservation) -> None:
+        """Confirm original publication, fence proven absence, or retain uncertainty."""
+        ...
+
     def settle(self, status: admission.AdmissionStatus, result: admission.OperationResult) -> None:
         """Durably retain the typed original result, allowing identical replay only."""
         ...

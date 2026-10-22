@@ -241,14 +241,14 @@ enum Accelerator {
 }
 
 message DockerReachable {
-  bool reachable = 1;
+  bool reachable = 1 [(buf.validate.field).bool.const = true];
   string version = 2 [(buf.validate.field) = {
     string: {max_bytes: 131072}
   }];
 }
 
 message DockerUnreachable {
-  bool reachable = 1;
+  bool reachable = 1 [(buf.validate.field).bool.const = false];
   string reason = 2 [(buf.validate.field) = {
     string: {max_bytes: 131072}
   }];

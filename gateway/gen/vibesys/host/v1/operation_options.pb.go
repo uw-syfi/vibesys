@@ -449,7 +449,7 @@ var File_vibesys_host_v1_operation_options_proto protoreflect.FileDescriptor
 
 const file_vibesys_host_v1_operation_options_proto_rawDesc = "" +
 	"\n" +
-	"'vibesys/host/v1/operation_options.proto\x12\x0fvibesys.host.v1\x1a\x1bbuf/validate/validate.proto\x1a google/protobuf/descriptor.proto\"\xb7\x05\n" +
+	"'vibesys/host/v1/operation_options.proto\x12\x0fvibesys.host.v1\x1a\x1bbuf/validate/validate.proto\x1a google/protobuf/descriptor.proto\"\xb9\x05\n" +
 	"\x0fOperationPolicy\x12=\n" +
 	"\x0eadapter_method\x18\f \x01(\tB\x16\xbaH\x13r\x112\x0f^[a-z][a-z_.]*$R\radapterMethod\x12*\n" +
 	"\foperation_id\x18\x01 \x01(\rB\a\xbaH\x04*\x02 \x00R\voperationId\x12\"\n" +
@@ -468,9 +468,9 @@ const file_vibesys_host_v1_operation_options_proto_rawDesc = "" +
 	"\vrequest_tag\x18\n" +
 	" \x01(\rB\r\xbaH\n" +
 	"*\b\x18\xff\xff\xff\xff\x01 \x00R\n" +
-	"requestTag\x120\n" +
-	"\fresponse_tag\x18\v \x01(\rB\r\xbaH\n" +
-	"*\b\x18\xff\xff\xff\xff\x01 \x00R\vresponseTagB\x11\n" +
+	"requestTag\x122\n" +
+	"\fresponse_tag\x18\v \x01(\rB\x0f\xbaH\f*\n" +
+	"8\x02\x18\xff\xff\xff\xff\x01 \x00R\vresponseTagB\x11\n" +
 	"\x0f_first_event_ms\"u\n" +
 	"\vCorrelation\x121\n" +
 	"\frequest_path\x18\x01 \x03(\rB\x0e\xbaH\v\x92\x01\b\b\x01\"\x04*\x02 \x00R\vrequestPath\x123\n" +

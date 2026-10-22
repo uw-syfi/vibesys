@@ -43,6 +43,7 @@ message OperationPolicy {
   }];
   uint32 response_tag = 11 [(buf.validate.field).uint32 = {
     gt: 0
+    not_in: [2]
     lte: 536870911
   }];
 }

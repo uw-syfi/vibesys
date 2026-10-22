@@ -13,6 +13,7 @@ from vs_project._admission_rules import (
     checked_receipt,
     compare,
     initial_receipt,
+    reconcile,
     record_intent,
     settle,
 )
@@ -56,6 +57,10 @@ class _Claim:
         self._require_owner()
         return checked_receipt(self._receipt.to_binary())
 
+    def reconcile(self, observation: admission.PublicationObservation) -> None:
+        self._require_owner()
+        self._publish(reconcile(self._receipt, observation))
+
     def _publish(self, receipt: admission.AdmissionReceipt) -> None:
         self._require_owner()
         try:
@@ -82,9 +87,20 @@ class FileAdmissionStore:
     Atomic replacement syncs both receipt bytes and their containing directory.
     """
 
-    def __init__(self, root: Path, *, effects: AtomicWriteEffects | None = None) -> None:
+    def __init__(
+        self,
+        root: Path,
+        *,
+        effects: AtomicWriteEffects | None = None,
+        durable_root: Path | None = None,
+    ) -> None:
         """Open the Project-owned admission root, with injectable durability effects."""
-        self._root = root
+        self._root = root.resolve()
+        self._durable_root = (durable_root or root.parent).resolve()
+        self._root.relative_to(self._durable_root)
+        if not self._durable_root.is_dir():
+            message = f"admission durable root does not exist: {self._durable_root}"
+            raise ValueError(message)
         self._effects = effects or LocalAtomicWriteEffects()
 
     def _path(self, identity: admission.AdmissionIdentity) -> Path:
@@ -148,4 +164,4 @@ class FileAdmissionStore:
 
     def _persist(self, path: Path, payload: bytes) -> None:
         atomic_write_bytes(path, payload, effects=self._effects)
-        sync_directory_chain(path.parent, self._root, effects=self._effects)
+        sync_directory_chain(path.parent, self._durable_root, effects=self._effects)

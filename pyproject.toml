@@ -164,7 +164,7 @@ markers = [
 
 [tool.coverage.run]
 branch = true
-source = ["entrypoints", "launch", "server", "vibesys", "vs_evaluator_protocol", "vs_decode", "vs_redaction", "vs_evaluation", "vs_async_ops", "vs_github", "vs_issue_tracker", "vs_core", "vs_project", "vs_prompts", "vs_runtime", "vs_sandbox", "vs_agent", "vs_slurm", "vs_mcp", "vs_faults", "vs_sim", "vs_dst", "vs_logs", "vs_proto", "vs_runlog", "vs_bench", "scripts.corevalue"]
+source = ["entrypoints", "launch", "server", "vibesys", "vs_evaluator_protocol", "vs_decode", "vs_redaction", "vs_evaluation", "vs_async_ops", "vs_github", "vs_issue_tracker", "vs_core", "vs_project", "vs_prompts", "vs_runtime", "vs_sandbox", "vs_agent", "vs_slurm", "vs_mcp", "vs_faults", "vs_sim", "vs_dst", "vs_logs", "vs_proto", "vs_runlog", "vs_bench", "scripts.corevalue", "scripts.host_operations"]
 relative_files = true
 omit = [
     # Module execution stubs contain only a guarded call into a measured

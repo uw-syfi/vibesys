@@ -6092,12 +6092,12 @@ const file_vibesys_host_v1_operations_proto_rawDesc = "" +
 	"objectives\x12!\n" +
 	"\x04goal\x18\x03 \x01(\tB\r\xbaH\n" +
 	"r\b\x18\x80\xfa\x01(\x80\x80\bR\x04goal\x12%\n" +
-	"\x0egoal_truncated\x18\x04 \x01(\bR\rgoalTruncated\"T\n" +
-	"\x0fDockerReachable\x12\x1c\n" +
-	"\treachable\x18\x01 \x01(\bR\treachable\x12#\n" +
-	"\aversion\x18\x02 \x01(\tB\t\xbaH\x06r\x04(\x80\x80\bR\aversion\"T\n" +
-	"\x11DockerUnreachable\x12\x1c\n" +
-	"\treachable\x18\x01 \x01(\bR\treachable\x12!\n" +
+	"\x0egoal_truncated\x18\x04 \x01(\bR\rgoalTruncated\"]\n" +
+	"\x0fDockerReachable\x12%\n" +
+	"\treachable\x18\x01 \x01(\bB\a\xbaH\x04j\x02\b\x01R\treachable\x12#\n" +
+	"\aversion\x18\x02 \x01(\tB\t\xbaH\x06r\x04(\x80\x80\bR\aversion\"]\n" +
+	"\x11DockerUnreachable\x12%\n" +
+	"\treachable\x18\x01 \x01(\bB\a\xbaH\x04j\x02\b\x00R\treachable\x12!\n" +
 	"\x06reason\x18\x02 \x01(\tB\t\xbaH\x06r\x04(\x80\x80\bR\x06reason\"I\n" +
 	"\x03Gpu\x12!\n" +
 	"\x06vendor\x18\x01 \x01(\tB\t\xbaH\x06r\x04(\x80\x80\bR\x06vendor\x12\x1f\n" +

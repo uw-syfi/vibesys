@@ -55,6 +55,9 @@ func (op Operation) Decode(payload []byte) (proto.Message, error) {
 	if err := proto.Unmarshal(payload, request); err != nil {
 		return nil, err
 	}
+	if err := knownFields(request.ProtoReflect()); err != nil {
+		return nil, err
+	}
 	if err := protovalidate.Validate(request); err != nil {
 		return nil, err
 	}
@@ -65,6 +68,9 @@ func (op Operation) Decode(payload []byte) (proto.Message, error) {
 func (op Operation) ValidateResponse(request, response proto.Message) error {
 	if request.ProtoReflect().Descriptor().FullName() != op.NewRequest().ProtoReflect().Descriptor().FullName() || response.ProtoReflect().Descriptor().FullName() != op.NewResponse().ProtoReflect().Descriptor().FullName() {
 		return fmt.Errorf("%s: wrong response method", op.Name)
+	}
+	if err := knownFields(response.ProtoReflect()); err != nil {
+		return err
 	}
 	if err := protovalidate.Validate(response); err != nil {
 		return err
@@ -108,11 +114,12 @@ func Execute(ctx context.Context, id uint32, payload []byte, invoke func(context
 	}
 	bounded, cancel := context.WithTimeout(ctx, op.Cap)
 	defer cancel()
+	original := proto.Clone(request)
 	response, err := invoke(bounded, op, request)
 	if err != nil {
 		return nil, err
 	}
-	if err := op.ValidateResponse(request, response); err != nil {
+	if err := op.ValidateResponse(original, response); err != nil {
 		return nil, err
 	}
 	output, err := proto.Marshal(response)
@@ -120,4 +127,30 @@ func Execute(ctx context.Context, id uint32, payload []byte, invoke func(context
 		return nil, fmt.Errorf("%s: response exceeds 1 MiB", op.Name)
 	}
 	return output, err
+}
+
+func knownFields(message protoreflect.Message) error {
+	if !message.IsValid() {
+		return fmt.Errorf("missing operation message")
+	}
+	if len(message.GetUnknown()) != 0 {
+		return fmt.Errorf("%s: unknown fields", message.Descriptor().FullName())
+	}
+	var result error
+	message.Range(func(field protoreflect.FieldDescriptor, value protoreflect.Value) bool {
+		if field.IsMap() && field.MapValue().Message() != nil {
+			value.Map().Range(func(_ protoreflect.MapKey, entry protoreflect.Value) bool {
+				result = knownFields(entry.Message())
+				return result == nil
+			})
+		} else if field.IsList() && field.Message() != nil {
+			for i := 0; i < value.List().Len() && result == nil; i++ {
+				result = knownFields(value.List().Get(i).Message())
+			}
+		} else if field.Message() != nil {
+			result = knownFields(value.Message())
+		}
+		return result == nil
+	})
+	return result
 }
