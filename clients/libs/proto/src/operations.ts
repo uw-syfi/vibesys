@@ -9,7 +9,6 @@ import {
   toBinary,
 } from '@bufbuild/protobuf';
 import {createValidator} from '@bufbuild/protovalidate';
-import {FailureCategory} from './generated/vibesys/host/v1/failure_pb.js';
 
 const validator = createValidator();
 const maxBytes = 1 << 20;
@@ -34,28 +33,6 @@ export interface OperationSignal {
 function checkCancellation(signal: OperationSignal): void {
   if (signal.aborted) throw new Error('operation cancelled', {cause: signal.reason});
 }
-/** What every client says of a host whose VibeSys lacks an operation; the host's own text is dropped. */
-export const HOST_UNSUPPORTED_MESSAGE = "This host's VibeSys needs an update";
-
-/**
- * A typed registry failure. Callers branch on category, never on diagnostic text. An unsupported
- * operation (the host's checkout predates it) carries `HOST_UNSUPPORTED_MESSAGE` and nothing the
- * host wrote, so no screen can show that host's usage dump.
- */
-export class OperationFailed extends Error {
-  readonly category: number;
-  constructor(category: number, message: string) {
-    super(category === FailureCategory.UNSUPPORTED ? HOST_UNSUPPORTED_MESSAGE : message);
-    this.name = 'OperationFailed';
-    this.category = category;
-  }
-
-  /** Whether the host's VibeSys does not provide the operation. */
-  get unsupported(): boolean {
-    return this.category === FailureCategory.UNSUPPORTED;
-  }
-}
-
 export interface OperationTransport {
   /** Dial and queue time consume totalMs; the shell owns cancellation. */
   invoke(
