@@ -9,22 +9,30 @@ set -euo pipefail
 # a stalled connection ends in a failure that names the step instead of hanging
 # the image build until the caller's budget runs out. Only operations that are
 # safe to repeat are retried: downloads to a path and package installs.
-NET_ATTEMPTS=5
+NET_ATTEMPTS=3
+NET_DEADLINE=120
 retry() {
-    local attempt=1
-    until "$@"; do
+    local attempt=1 status
+    while true; do
+        echo "network start ${attempt}/${NET_ATTEMPTS} (limit ${NET_DEADLINE}s): $*" >&2
+        if timeout --kill-after=5 "${NET_DEADLINE}" "$@"; then
+            echo "network done: $*" >&2
+            return 0
+        else
+            status=$?
+        fi
+        echo "network failed (exit ${status}): $*" >&2
         if [ "${attempt}" -ge "${NET_ATTEMPTS}" ]; then
             echo "giving up after ${attempt} attempts: $*" >&2
-            return 1
+            return "${status}"
         fi
-        echo "retry ${attempt}/${NET_ATTEMPTS} after failure: $*" >&2
         sleep $((attempt * 5))
         attempt=$((attempt + 1))
     done
 }
-# Fail a transfer that stalls (under 10 KB/s for 30 s) or runs over 10 minutes.
+# Bound connection setup, stalled transfers, and total download time.
 fetch() {
-    retry curl -fsSL --connect-timeout 20 --speed-limit 10240 --speed-time 30 --max-time 600 "$@"
+    retry curl -fsSL --connect-timeout 20 --speed-limit 10240 --speed-time 30 --max-time "${NET_DEADLINE}" "$@"
 }
 # Per-request cap. A transfer that keeps sending stays under it, so the update
 # also has a total deadline (APT_UPDATE_DEADLINE).
@@ -32,7 +40,11 @@ APT_BOUNDS=(-o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquir
 # GPU bases ship NVIDIA CUDA or AMD ROCm lists. Their indexes are large, and a
 # slow transfer never trips Acquire::http::Timeout, so one update can run until
 # the CI job is cancelled. Features install only distribution packages.
-APT_UPDATE_DEADLINE=60
+# Two update attempts (30s each), two install attempts (45s each), one 5s
+# backoff per phase, and four 5s kill graces fit within 180s in total.
+APT_ATTEMPTS=2
+APT_UPDATE_DEADLINE=30
+APT_INSTALL_DEADLINE=45
 drop_vendor_apt_sources() {
     local dir=/etc/apt/sources.list.d
     [ -d "${dir}" ] || return 0
@@ -43,19 +55,35 @@ drop_vendor_apt_sources() {
 }
 apt_update_and_install() {
     drop_vendor_apt_sources
-    timeout "${APT_UPDATE_DEADLINE}" apt-get update -qq "${APT_BOUNDS[@]}" &&
-        apt-get install -y -qq --no-install-recommends "${APT_BOUNDS[@]}" "$@"
+    NET_ATTEMPTS="${APT_ATTEMPTS}" NET_DEADLINE="${APT_UPDATE_DEADLINE}" \
+        retry apt-get update -qq "${APT_BOUNDS[@]}" &&
+        NET_ATTEMPTS="${APT_ATTEMPTS}" NET_DEADLINE="${APT_INSTALL_DEADLINE}" \
+        retry apt-get install -y -qq --no-install-recommends "${APT_BOUNDS[@]}" "$@"
 }
 apt_install() {
-    retry apt_update_and_install "$@"
+    local package missing=()
+    for package in "$@"; do
+        if [ "$(dpkg-query -W -f='${Status}' "${package}" 2>/dev/null)" != 'install ok installed' ]; then
+            missing+=("${package}")
+        fi
+    done
+    if [ "${#missing[@]}" -eq 0 ]; then
+        echo "apt packages already installed; skipping update and install: $*" >&2
+        return 0
+    fi
+    apt_update_and_install "${missing[@]}"
 }
 # npm's own defaults (a 300 s request timeout, 2 retries) outlast a CI job's budget.
 npm_install_global() {
-    retry npm install -g --include=optional --fetch-retries=3 --fetch-timeout=60000 \
-        --fetch-retry-mintimeout=5000 --fetch-retry-maxtimeout=30000 "$@"
+    local package
+    for package in "$@"; do
+        retry npm install -g --include=optional --prefer-offline --no-audit --no-fund \
+            --fetch-retries=1 --fetch-timeout=30000 \
+            --fetch-retry-mintimeout=5000 --fetch-retry-maxtimeout=10000 "${package}" || return $?
+    done
 }
 pip_install() {
-    retry pip install --no-cache-dir --retries 5 --timeout 30 "$@"
+    retry pip install --retries 1 --timeout 30 "$@"
 }
 # <<< vibesys network helpers
 
@@ -75,8 +103,8 @@ require_option python_version "${PYTHON_VERSION:-}"
 require_option python_home "${PYTHON_HOME:-}"
 
 export DEBIAN_FRONTEND=noninteractive
-# uv's own request timeout is 30 s; state it so the bound is visible here.
-export UV_HTTP_TIMEOUT=60
+# Bound uv connection/read waits as well as the whole command in retry.
+export UV_HTTP_CONNECT_TIMEOUT=20 UV_HTTP_TIMEOUT=30 UV_HTTP_RETRIES=1
 
 # Archive mirrors reachable from our hosts fail transiently often enough to
 # abort a single-shot `apt-get update`, so retry.
@@ -104,10 +132,10 @@ npm_install_global \
 
 PIP_BREAK_SYSTEM_PACKAGES=1 pip_install uv
 
-UV_PYTHON_INSTALL_DIR=/opt/vibesys-python-install retry uv python install --no-cache "${PYTHON_VERSION}"
-UV_PYTHON_INSTALL_DIR=/opt/vibesys-python-install uv venv --no-cache \
+UV_PYTHON_INSTALL_DIR=/opt/vibesys-python-install retry uv python install "${PYTHON_VERSION}"
+UV_PYTHON_INSTALL_DIR=/opt/vibesys-python-install uv venv --offline \
     --python "${PYTHON_VERSION}" --python-preference only-managed "${PYTHON_HOME}"
-retry uv pip install --no-cache --python "${PYTHON_HOME}/bin/python" 'mcp>=1.0,<2'
+retry uv pip install --python "${PYTHON_HOME}/bin/python" 'mcp>=1.0,<2'
 chmod -R a+rX /opt/vibesys-python-install "${PYTHON_HOME}"
 "${PYTHON_HOME}/bin/python" -c 'import mcp, pydantic, sys; print(sys.version)'
 
