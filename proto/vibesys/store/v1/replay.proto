@@ -73,6 +73,9 @@ message ReplayPolicy {
   // external requests that omit a bound for a constrained dimension. Free
   // operations explicitly reserve zero.
   ReplayResources reservation = 7;
+  // Execution owners may opt additional request families into physical children.
+  // Agent turns always derive this bound from their retained typed request.
+  optional double physical_within_seconds = 8 [(buf.validate.field).double = {gt: 0, finite: true}];
 }
 
 // Immutable execution metadata, separate from mutable span labels. Outcome Any
@@ -86,7 +89,7 @@ message OperationReplay {
   option (buf.validate.message).cel = {
     id: "operation_replay.acceptance"
     message: "an outcome requires its immutable acceptance sequence"
-    expression: "has(this.outcome) == has(this.accepted_sequence)"
+    expression: "has(this.outcome) == has(this.accepted_sequence) && (!has(this.accepted_child) || has(this.outcome))"
   };
   OperationKey key = 1 [(buf.validate.field).required = true];
   uint32 encoding_version = 2 [(buf.validate.field).uint32.const = 1];
@@ -113,6 +116,12 @@ message ReplayPhysical {
   double deadline = 4 [(buf.validate.field).double = {gte: 0, finite: true}];
   uint64 ordinal = 5;
   optional uint64 withdrawn_sequence = 6 [(buf.validate.field).uint64.gt = 0];
+  optional uint64 observed_sequence = 7 [(buf.validate.field).uint64.gt = 0];
+  optional bytes termination_proof_digest = 8 [(buf.validate.field).bytes.len = 32];
+  // Positive owner inspection of a fenced invocation that never began.
+  bool confirmed_absent = 9;
+  // W8a: proof-backed intent before releasing access or restoring retained input.
+  optional uint64 settlement_sequence = 10 [(buf.validate.field).uint64.gt = 0];
 }
 
 // The environment records every writable grant before execution, including
@@ -160,8 +169,8 @@ enum WriterReconciliationStatus {
 message WriterReconciliation {
   option (buf.validate.message).cel = {
     id: "writer_reconciliation.proof"
-    message: "only ProvenStopped carries termination proof"
-    expression: "(this.status == 1) == has(this.proof)"
+    message: "ProvenStopped requires termination proof for the exact reconciliation manifest"
+    expression: "(this.status == 1) == has(this.proof) && (!has(this.proof) || this.proof.manifest == this.manifest)"
   };
   WriterManifest manifest = 1 [(buf.validate.field).required = true];
   WriterReconciliationStatus status = 2 [(buf.validate.field).enum = {defined_only: true, not_in: [0]}];
@@ -169,6 +178,11 @@ message WriterReconciliation {
   string detail = 4;
 }
 message WriterRegistryState {
+  option (buf.validate.message).cel = {
+    id: "writer_registry.proof"
+    message: "registry proof must bind its exact manifest"
+    expression: "!has(this.proof) || this.proof.manifest == this.manifest"
+  };
   WriterManifest manifest = 1 [(buf.validate.field).required = true];
   WriterTerminationProof proof = 2;
 }

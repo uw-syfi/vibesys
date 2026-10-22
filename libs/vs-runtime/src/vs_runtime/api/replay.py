@@ -26,6 +26,7 @@ from vs_runtime._replay_runtime import (
     ReplayPending,
     ReplayRecoveryRequiredError,
     ReplayResult,
+    ReplayRetirement,
     ReplayRuntime,
     ReplayUnknown,
 )
@@ -71,6 +72,7 @@ __all__ = [
     "ReplayPromptRenderer",
     "ReplayRecoveryRequiredError",
     "ReplayResult",
+    "ReplayRetirement",
     "ReplayRunHost",
     "ReplayRuntime",
     "ReplaySessionServices",

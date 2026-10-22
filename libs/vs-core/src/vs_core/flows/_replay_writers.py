@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from protobuf import Message
+
 from vs_proto.api import replay as pb
 from vs_proto.api import validate
 
@@ -16,6 +18,15 @@ if TYPE_CHECKING:
     from vs_proto.api import Record
 
 
+def _decode[T: Message](kind: type[T], payload: bytes) -> T:
+    value = kind.from_binary(payload)
+    validate(value)
+    if value.to_binary() != value.to_binary(write_unknown_fields=False):
+        problem = "writer evidence contains unknown fields"
+        raise ReplayError(problem)
+    return value
+
+
 @dataclass(frozen=True)
 class ReplayRootReuse:
     """A release/reuse request carries durable environment proof, never a released receipt."""
@@ -23,7 +34,7 @@ class ReplayRootReuse:
     proof_bytes: bytes
 
     def proof(self) -> pb.WriterTerminationProof:
-        return pb.WriterTerminationProof.from_binary(self.proof_bytes)
+        return _decode(pb.WriterTerminationProof, self.proof_bytes)
 
 
 @dataclass(frozen=True)
@@ -44,7 +55,7 @@ class ReplayWriterRecovery:
                 continue
             name = detail.type_url.rsplit("/", 1)[-1]
             if name == pb.WriterManifest.desc().type_name:
-                manifest = pb.WriterManifest.from_binary(detail.value)
+                manifest = _decode(pb.WriterManifest, detail.value)
                 validate(manifest)
                 key = _intent_key(manifest)
                 if key in intents and intents[key] != manifest.to_binary():
@@ -52,7 +63,7 @@ class ReplayWriterRecovery:
                     raise ReplayError(problem)
                 intents[key] = manifest.to_binary()
             elif name == pb.WriterReconciliation.desc().type_name:
-                result = pb.WriterReconciliation.from_binary(detail.value)
+                result = _decode(pb.WriterReconciliation, detail.value)
                 validate(result)
                 manifest = result.manifest
                 if manifest is None or manifest.backing is None:
@@ -62,16 +73,13 @@ class ReplayWriterRecovery:
                 if intents.get(key) != manifest.to_binary():
                     problem = "writer reconciliation requires its previously durable intent"
                     raise ReplayError(problem)
-                if result.proof is not None and result.proof.manifest != manifest:
-                    problem = "writer proof must cover the exact reconciliation manifest"
-                    raise ReplayError(problem)
                 results[key] = result.to_binary()
         return cls(tuple(results.values()))
 
     def require(self, backing: pb.WriterBacking) -> ReplayRootReuse:
         """Authorize root release/reuse only after the matching environment proof was committed."""
         for payload in self.results:
-            result = pb.WriterReconciliation.from_binary(payload)
+            result = _decode(pb.WriterReconciliation, payload)
             if result.manifest is not None and result.manifest.backing == backing:
                 if result.proof is not None:
                     return ReplayRootReuse(result.proof.to_binary())
@@ -85,7 +93,7 @@ class ReplayWriterRecovery:
 
 
 def _intent_key(manifest: pb.WriterManifest) -> bytes:
-    if manifest.backing is None or not manifest.closed:
-        problem = "reconciliation intent needs a complete closed writer manifest"
+    if manifest.backing is None:
+        problem = "reconciliation intent needs its backing identity"
         raise ReplayError(problem)
     return manifest.backing.to_binary()

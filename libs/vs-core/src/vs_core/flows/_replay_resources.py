@@ -78,7 +78,14 @@ class ReplayResourceAccounting:
         reported = ReplayResourceTotals()
         epoch_reported = ReplayResourceTotals()
         committed = ReplayResourceTotals()
+        parents = {
+            span.replay_physical.logical
+            for _, span in spans.values()
+            if span.replay_physical is not None
+        }
         for started_epoch, span in spans.values():
+            if span.id in parents:
+                continue
             known, debit = _usage(span)
             reported = _add(reported, known)
             if started_epoch == epoch:

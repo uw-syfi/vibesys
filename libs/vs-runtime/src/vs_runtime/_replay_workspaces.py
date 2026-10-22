@@ -24,11 +24,11 @@ from vs_core.api import (
     WorkspaceMode,
     WorkspacePlan,
 )
-from vs_core.api.replay import ReplayWriterRecovery
+from vs_core.api.replay import ReplayArchive, ReplayWriterRecovery, proof_covers
 from vs_decode.api import Unreadable
 from vs_project.api import StoredEnvelope
 from vs_proto.api import ReplayStore as ReplayRecords
-from vs_proto.api import core_leaves, validate
+from vs_proto.api import core_leaves, replay_agent, validate
 from vs_proto.api import replay_workspace as pb
 from vs_runtime._replay_evidence import adoption_evidence
 from vs_runtime._replay_operations import ReplayOperationError, ReplayOperationHost
@@ -41,7 +41,7 @@ from vs_runtime.api.core_values import from_proto, to_proto
 if TYPE_CHECKING:
     from vs_core.api import InvocationRef
     from vs_project.api import StoreFence
-    from vs_proto.api import Span
+    from vs_proto.api import Span, replay
     from vs_runtime._core_requests import ExecutionResult, WorkspaceRequests, WorkspaceRoleRequest
     from vs_runtime._receipt_store import ReceiptStore
     from vs_runtime._writer_reconciliation import WriterRegistry
@@ -150,9 +150,42 @@ class WorkspaceReplayExecutor:
         request = ReplayWriterRecovery.from_records(
             ReplayRecords.from_binary(stored.payload).records
         ).require(proof.manifest.backing)
+        self._cover_root_writers(ReplayRecords.from_binary(stored.payload), proof)
         if request.proof() != proof:
             problem = "durable root reuse proof differs from environment evidence"
             raise WriterProofError(problem)
+
+    def _cover_root_writers(
+        self, records: ReplayRecords, proof: replay.WriterTerminationProof
+    ) -> None:
+        """A previously empty proof cannot authorize reuse after a new writable grant."""
+        for child in ReplayArchive.decode(records.to_binary()).spans:
+            physical = child.replay_physical
+            if (
+                physical is None
+                or physical.confirmed_absent
+                or physical.has_field("termination_proof_digest")
+            ):
+                continue
+            operation = child.replay
+            if operation is None or operation.policy is None or operation.policy.request is None:
+                continue
+            payload = operation.policy.request
+            if payload.type_url != replay_agent.ReplayAgentRequest.desc().type_name:
+                proof_covers(child, proof, run_id=self._host.run_id)
+                continue
+            agent = replay_agent.ReplayAgentRequest.from_binary(payload.value)
+            if agent.action is None or agent.action.field != "turn":
+                continue
+            turn = agent.action.value
+            scope = None if turn.workspace is None else from_proto(turn.workspace)
+            binding = None
+            if isinstance(scope, Scope) and isinstance(scope.owner, AttemptId):
+                binding = self._workspace_receipts.load_binding(
+                    AttemptRef(attempt_id=scope.owner, generation=scope.generation)
+                )
+            if binding is None or binding.mode is WorkspaceMode.EXCLUSIVE_ROOT:
+                proof_covers(child, proof, run_id=self._host.run_id)
 
     @staticmethod
     def _native(span: Span) -> pb.ReplayWorkspaceRequest:

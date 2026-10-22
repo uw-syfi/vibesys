@@ -230,6 +230,27 @@ class AccessSettlement:
         """
         self._in_flight.discard(key)
 
+    async def restore_interrupted(self, key: AccessKey) -> None:
+        """Restore the retained input of a writer the environment proved terminated.
+
+        The original access receipt retains the pre-dispatch content. Repeating
+        this after an interrupted restoration uses that same baseline, never the
+        unknown invocation's partially modified tree. Callers keep the physical
+        child unfinished until this operation returns.
+        """
+        receipt = self.receipt(key)
+        if receipt is None:
+            return
+        workspace = await self._workspace_for(receipt.workspace)
+        if workspace is None:
+            problem = "the interrupted turn's retained workspace is unavailable"
+            raise AccessSettlementError(problem)
+        await self.settle(key)
+        await workspace.restore_for_agent(receipt.baseline, preserve_paths=())
+        if await workspace.pending_changes():
+            problem = "the interrupted turn's retained input could not be restored"
+            raise AccessSettlementError(problem)
+
     async def settle(self, key: AccessKey) -> AccessViolation | None:
         """Revert the unauthorized writes of a writer proven ended; its violation, if any.
 

@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from vs_core.api import HostFence, HostId, RequestId, Until
+from vs_core.api.replay import physical_identity
 from vs_runtime._core_requests import ExecutionContext, ExecutionResult
 from vs_runtime._effect_fence import EffectFences, Entered, MayHold
 from vs_runtime._operation_requests import operation_fence
@@ -52,7 +53,7 @@ class ReceiptReplayExecutor[RequestT]:
         self._within, self._dispatch_check = codec.within, codec.dispatch_check
         self._fences = EffectFences(receipts)
 
-    def _context(self, span: Span, fence: StoreFence) -> ExecutionContext:
+    def context(self, span: Span, fence: StoreFence) -> ExecutionContext:
         if span.replay is None:
             problem = "owner replay requires immutable metadata"
             raise ReplayOperationError(problem)
@@ -60,8 +61,12 @@ class ReceiptReplayExecutor[RequestT]:
         return ExecutionContext(
             fence=HostFence(host_id=HostId(root=fence.host_id), epoch=fence.epoch),
             now_at=now,
-            payload_digest=hashlib.sha256(span.replay.to_binary()).hexdigest(),
-            until=Until(at=now + self._within(span)),
+            payload_digest=hashlib.sha256(physical_identity(span)).hexdigest(),
+            until=Until(
+                at=now + self._within(span)
+                if span.replay_physical is None
+                else span.replay_physical.deadline
+            ),
             lease=_Lease(self._host.store, fence, self._host.clock),
         )
 
@@ -82,7 +87,7 @@ class ReceiptReplayExecutor[RequestT]:
 
     async def execute(self, span: Span, fence: StoreFence) -> ReplayResult:
         request = self._request(span)
-        context = self._context(span, fence)
+        context = self.context(span, fence)
         if context.lease is None or not context.lease.verify(now_at=context.now_at):
             problem = "owner replay writer lease was lost"
             raise ReplayOperationError(problem)
@@ -108,7 +113,7 @@ class ReceiptReplayExecutor[RequestT]:
         self, span: Span, fence: StoreFence
     ) -> ReplayResult | ReplayAbsent | ReplayPending | ReplayUnknown:
         request = self._request(span)
-        context = self._context(span, fence)
+        context = self.context(span, fence)
         if context.lease is None or not context.lease.verify(now_at=context.now_at):
             return ReplayUnknown("owner replay writer lease was lost")
         try:

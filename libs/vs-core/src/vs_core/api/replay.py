@@ -24,6 +24,12 @@ from vs_core.flows._replay_identity import (
     encode_identity,
 )
 from vs_core.flows._replay_iterations import ReplayAccounting, ReplayIterationBlocked
+from vs_core.flows._replay_physical import (
+    physical_identity,
+    physical_start,
+    proof_covers,
+    proof_digest,
+)
 from vs_core.flows._replay_resources import (
     ReplayResourceAccounting,
     ReplayResourcesBlocked,
@@ -88,6 +94,10 @@ __all__ = [
     "chain_dependency",
     "classify_context",
     "encode_identity",
+    "physical_identity",
+    "physical_start",
+    "proof_covers",
+    "proof_digest",
     "replay_descriptors",
     "reply_schema_digest",
 ]

@@ -438,9 +438,12 @@ type ReplayPolicy struct {
 	// An upper bound enforced by the execution owner. A bounded epoch rejects
 	// external requests that omit a bound for a constrained dimension. Free
 	// operations explicitly reserve zero.
-	Reservation   *ReplayResources `protobuf:"bytes,7,opt,name=reservation,proto3" json:"reservation,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Reservation *ReplayResources `protobuf:"bytes,7,opt,name=reservation,proto3" json:"reservation,omitempty"`
+	// Execution owners may opt additional request families into physical children.
+	// Agent turns always derive this bound from their retained typed request.
+	PhysicalWithinSeconds *float64 `protobuf:"fixed64,8,opt,name=physical_within_seconds,json=physicalWithinSeconds,proto3,oneof" json:"physical_within_seconds,omitempty"`
+	unknownFields         protoimpl.UnknownFields
+	sizeCache             protoimpl.SizeCache
 }
 
 func (x *ReplayPolicy) Reset() {
@@ -520,6 +523,13 @@ func (x *ReplayPolicy) GetReservation() *ReplayResources {
 		return x.Reservation
 	}
 	return nil
+}
+
+func (x *ReplayPolicy) GetPhysicalWithinSeconds() float64 {
+	if x != nil && x.PhysicalWithinSeconds != nil {
+		return *x.PhysicalWithinSeconds
+	}
+	return 0
 }
 
 // Immutable execution metadata, separate from mutable span labels. Outcome Any
@@ -661,15 +671,21 @@ func (x *OperationReplay) GetAcceptedChild() string {
 
 // A child is execution evidence, never another semantic operation.
 type ReplayPhysical struct {
-	state             protoimpl.MessageState `protogen:"open.v1"`
-	Logical           string                 `protobuf:"bytes,1,opt,name=logical,proto3" json:"logical,omitempty"`
-	ExternalId        string                 `protobuf:"bytes,2,opt,name=external_id,json=externalId,proto3" json:"external_id,omitempty"`
-	HostIncarnation   string                 `protobuf:"bytes,3,opt,name=host_incarnation,json=hostIncarnation,proto3" json:"host_incarnation,omitempty"`
-	Deadline          float64                `protobuf:"fixed64,4,opt,name=deadline,proto3" json:"deadline,omitempty"`
-	Ordinal           uint64                 `protobuf:"varint,5,opt,name=ordinal,proto3" json:"ordinal,omitempty"`
-	WithdrawnSequence *uint64                `protobuf:"varint,6,opt,name=withdrawn_sequence,json=withdrawnSequence,proto3,oneof" json:"withdrawn_sequence,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	state                  protoimpl.MessageState `protogen:"open.v1"`
+	Logical                string                 `protobuf:"bytes,1,opt,name=logical,proto3" json:"logical,omitempty"`
+	ExternalId             string                 `protobuf:"bytes,2,opt,name=external_id,json=externalId,proto3" json:"external_id,omitempty"`
+	HostIncarnation        string                 `protobuf:"bytes,3,opt,name=host_incarnation,json=hostIncarnation,proto3" json:"host_incarnation,omitempty"`
+	Deadline               float64                `protobuf:"fixed64,4,opt,name=deadline,proto3" json:"deadline,omitempty"`
+	Ordinal                uint64                 `protobuf:"varint,5,opt,name=ordinal,proto3" json:"ordinal,omitempty"`
+	WithdrawnSequence      *uint64                `protobuf:"varint,6,opt,name=withdrawn_sequence,json=withdrawnSequence,proto3,oneof" json:"withdrawn_sequence,omitempty"`
+	ObservedSequence       *uint64                `protobuf:"varint,7,opt,name=observed_sequence,json=observedSequence,proto3,oneof" json:"observed_sequence,omitempty"`
+	TerminationProofDigest []byte                 `protobuf:"bytes,8,opt,name=termination_proof_digest,json=terminationProofDigest,proto3,oneof" json:"termination_proof_digest,omitempty"`
+	// Positive owner inspection of a fenced invocation that never began.
+	ConfirmedAbsent bool `protobuf:"varint,9,opt,name=confirmed_absent,json=confirmedAbsent,proto3" json:"confirmed_absent,omitempty"`
+	// W8a: proof-backed intent before releasing access or restoring retained input.
+	SettlementSequence *uint64 `protobuf:"varint,10,opt,name=settlement_sequence,json=settlementSequence,proto3,oneof" json:"settlement_sequence,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *ReplayPhysical) Reset() {
@@ -740,6 +756,34 @@ func (x *ReplayPhysical) GetOrdinal() uint64 {
 func (x *ReplayPhysical) GetWithdrawnSequence() uint64 {
 	if x != nil && x.WithdrawnSequence != nil {
 		return *x.WithdrawnSequence
+	}
+	return 0
+}
+
+func (x *ReplayPhysical) GetObservedSequence() uint64 {
+	if x != nil && x.ObservedSequence != nil {
+		return *x.ObservedSequence
+	}
+	return 0
+}
+
+func (x *ReplayPhysical) GetTerminationProofDigest() []byte {
+	if x != nil {
+		return x.TerminationProofDigest
+	}
+	return nil
+}
+
+func (x *ReplayPhysical) GetConfirmedAbsent() bool {
+	if x != nil {
+		return x.ConfirmedAbsent
+	}
+	return false
+}
+
+func (x *ReplayPhysical) GetSettlementSequence() uint64 {
+	if x != nil && x.SettlementSequence != nil {
+		return *x.SettlementSequence
 	}
 	return 0
 }
@@ -1477,7 +1521,7 @@ const file_vibesys_store_v1_replay_proto_rawDesc = "" +
 	"\n" +
 	"_money_usdB\x0f\n" +
 	"\r_input_tokensB\x10\n" +
-	"\x0e_output_tokens\"\xcb\x02\n" +
+	"\x0e_output_tokens\"\xb6\x03\n" +
 	"\fReplayPolicy\x12\x12\n" +
 	"\x04role\x18\x01 \x01(\tR\x04role\x12\x1a\n" +
 	"\btemplate\x18\x02 \x01(\tR\btemplate\x12\x18\n" +
@@ -1486,8 +1530,10 @@ const file_vibesys_store_v1_replay_proto_rawDesc = "" +
 	"reply_type\x18\x04 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\treplyType\x12<\n" +
 	"\x13reply_schema_digest\x18\x05 \x01(\fB\a\xbaH\x04z\x02h H\x00R\x11replySchemaDigest\x88\x01\x01\x12.\n" +
 	"\arequest\x18\x06 \x01(\v2\x14.google.protobuf.AnyR\arequest\x12C\n" +
-	"\vreservation\x18\a \x01(\v2!.vibesys.store.v1.ReplayResourcesR\vreservationB\x16\n" +
-	"\x14_reply_schema_digest\"\xd1\a\n" +
+	"\vreservation\x18\a \x01(\v2!.vibesys.store.v1.ReplayResourcesR\vreservation\x12M\n" +
+	"\x17physical_within_seconds\x18\b \x01(\x01B\x10\xbaH\r\x12\v@\x01!\x00\x00\x00\x00\x00\x00\x00\x00H\x01R\x15physicalWithinSeconds\x88\x01\x01B\x16\n" +
+	"\x14_reply_schema_digestB\x1a\n" +
+	"\x18_physical_within_seconds\"\x85\b\n" +
 	"\x0fOperationReplay\x128\n" +
 	"\x03key\x18\x01 \x01(\v2\x1e.vibesys.store.v1.OperationKeyB\x06\xbaH\x03\xc8\x01\x01R\x03key\x122\n" +
 	"\x10encoding_version\x18\x02 \x01(\rB\a\xbaH\x04*\x02\b\x01R\x0fencodingVersion\x12#\n" +
@@ -1501,12 +1547,12 @@ const file_vibesys_store_v1_replay_proto_rawDesc = "" +
 	"\tallowance\x18\n" +
 	" \x01(\v2!.vibesys.store.v1.ReplayAllowanceB\x06\xbaH\x03\xc8\x01\x01R\tallowance\x129\n" +
 	"\x11accepted_sequence\x18\v \x01(\x04B\a\xbaH\x042\x02 \x00H\x01R\x10acceptedSequence\x88\x01\x01\x123\n" +
-	"\x0eaccepted_child\x18\f \x01(\tB\a\xbaH\x04r\x02\x10\x01H\x02R\racceptedChild\x88\x01\x01:\xa6\x02\xbaH\xa2\x02\x1a\x96\x01\n" +
-	"\x1doperation_replay.reply_schema\x12;recorded operations require the writer's reply schema proof\x1a8has(this.policy) && has(this.policy.reply_schema_digest)\x1a\x86\x01\n" +
-	"\x1boperation_replay.acceptance\x125an outcome requires its immutable acceptance sequence\x1a0has(this.outcome) == has(this.accepted_sequence)B\v\n" +
+	"\x0eaccepted_child\x18\f \x01(\tB\a\xbaH\x04r\x02\x10\x01H\x02R\racceptedChild\x88\x01\x01:\xda\x02\xbaH\xd6\x02\x1a\x96\x01\n" +
+	"\x1doperation_replay.reply_schema\x12;recorded operations require the writer's reply schema proof\x1a8has(this.policy) && has(this.policy.reply_schema_digest)\x1a\xba\x01\n" +
+	"\x1boperation_replay.acceptance\x125an outcome requires its immutable acceptance sequence\x1adhas(this.outcome) == has(this.accepted_sequence) && (!has(this.accepted_child) || has(this.outcome))B\v\n" +
 	"\t_cost_usdB\x14\n" +
 	"\x12_accepted_sequenceB\x11\n" +
-	"\x0f_accepted_child\"\xad\x02\n" +
+	"\x0f_accepted_child\"\xe5\x04\n" +
 	"\x0eReplayPhysical\x12!\n" +
 	"\alogical\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\alogical\x12(\n" +
 	"\vexternal_id\x18\x02 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\n" +
@@ -1514,8 +1560,16 @@ const file_vibesys_store_v1_replay_proto_rawDesc = "" +
 	"\x10host_incarnation\x18\x03 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x0fhostIncarnation\x12,\n" +
 	"\bdeadline\x18\x04 \x01(\x01B\x10\xbaH\r\x12\v@\x01)\x00\x00\x00\x00\x00\x00\x00\x00R\bdeadline\x12\x18\n" +
 	"\aordinal\x18\x05 \x01(\x04R\aordinal\x12;\n" +
-	"\x12withdrawn_sequence\x18\x06 \x01(\x04B\a\xbaH\x042\x02 \x00H\x00R\x11withdrawnSequence\x88\x01\x01B\x15\n" +
-	"\x13_withdrawn_sequence\"\xa6\x01\n" +
+	"\x12withdrawn_sequence\x18\x06 \x01(\x04B\a\xbaH\x042\x02 \x00H\x00R\x11withdrawnSequence\x88\x01\x01\x129\n" +
+	"\x11observed_sequence\x18\a \x01(\x04B\a\xbaH\x042\x02 \x00H\x01R\x10observedSequence\x88\x01\x01\x12F\n" +
+	"\x18termination_proof_digest\x18\b \x01(\fB\a\xbaH\x04z\x02h H\x02R\x16terminationProofDigest\x88\x01\x01\x12)\n" +
+	"\x10confirmed_absent\x18\t \x01(\bR\x0fconfirmedAbsent\x12=\n" +
+	"\x13settlement_sequence\x18\n" +
+	" \x01(\x04B\a\xbaH\x042\x02 \x00H\x03R\x12settlementSequence\x88\x01\x01B\x15\n" +
+	"\x13_withdrawn_sequenceB\x14\n" +
+	"\x12_observed_sequenceB\x1b\n" +
+	"\x19_termination_proof_digestB\x16\n" +
+	"\x14_settlement_sequence\"\xa6\x01\n" +
 	"\rWriterBacking\x12)\n" +
 	"\venvironment\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\venvironment\x12#\n" +
 	"\bidentity\x18\x02 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\bidentity\x12\x1e\n" +
@@ -1537,17 +1591,18 @@ const file_vibesys_store_v1_replay_proto_rawDesc = "" +
 	"\x16WriterTerminationProof\x12D\n" +
 	"\bmanifest\x18\x01 \x01(\v2 .vibesys.store.v1.WriterManifestB\x06\xbaH\x03\xc8\x01\x01R\bmanifest\x12/\n" +
 	"\x0eabsent_domains\x18\x02 \x03(\tB\b\xbaH\x05\x92\x01\x02\x18\x01R\rabsentDomains:\xaa\x02\xbaH\xa6\x02\x1a\xa3\x02\n" +
-	"\x13writer_proof.closed\x12Jtermination proof needs a closed manifest and every domain verified absent\x1a\xbf\x01has(this.manifest) && this.manifest.closed && this.manifest.writers.all(x, x.domain_id in this.absent_domains) && this.absent_domains.all(x, this.manifest.writers.exists(w, w.domain_id == x))\"\xff\x02\n" +
+	"\x13writer_proof.closed\x12Jtermination proof needs a closed manifest and every domain verified absent\x1a\xbf\x01has(this.manifest) && this.manifest.closed && this.manifest.writers.all(x, x.domain_id in this.absent_domains) && this.absent_domains.all(x, this.manifest.writers.exists(w, w.domain_id == x))\"\xe2\x03\n" +
 	"\x14WriterReconciliation\x12D\n" +
 	"\bmanifest\x18\x01 \x01(\v2 .vibesys.store.v1.WriterManifestB\x06\xbaH\x03\xc8\x01\x01R\bmanifest\x12P\n" +
 	"\x06status\x18\x02 \x01(\x0e2,.vibesys.store.v1.WriterReconciliationStatusB\n" +
 	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x06status\x12>\n" +
 	"\x05proof\x18\x03 \x01(\v2(.vibesys.store.v1.WriterTerminationProofR\x05proof\x12\x16\n" +
-	"\x06detail\x18\x04 \x01(\tR\x06detail:w\xbaHt\x1ar\n" +
-	"\x1bwriter_reconciliation.proof\x12,only ProvenStopped carries termination proof\x1a%(this.status == 1) == has(this.proof)\"\x9b\x01\n" +
+	"\x06detail\x18\x04 \x01(\tR\x06detail:\xd9\x01\xbaH\xd5\x01\x1a\xd2\x01\n" +
+	"\x1bwriter_reconciliation.proof\x12NProvenStopped requires termination proof for the exact reconciliation manifest\x1ac(this.status == 1) == has(this.proof) && (!has(this.proof) || this.proof.manifest == this.manifest)\"\xa2\x02\n" +
 	"\x13WriterRegistryState\x12D\n" +
 	"\bmanifest\x18\x01 \x01(\v2 .vibesys.store.v1.WriterManifestB\x06\xbaH\x03\xc8\x01\x01R\bmanifest\x12>\n" +
-	"\x05proof\x18\x02 \x01(\v2(.vibesys.store.v1.WriterTerminationProofR\x05proof\"V\n" +
+	"\x05proof\x18\x02 \x01(\v2(.vibesys.store.v1.WriterTerminationProofR\x05proof:\x84\x01\xbaH\x80\x01\x1a~\n" +
+	"\x15writer_registry.proof\x12+registry proof must bind its exact manifest\x1a8!has(this.proof) || this.proof.manifest == this.manifest\"V\n" +
 	"\vReplayClock\x12G\n" +
 	"\tallowance\x18\x01 \x01(\v2!.vibesys.store.v1.ReplayAllowanceB\x06\xbaH\x03\xc8\x01\x01R\tallowance\"\xad\x02\n" +
 	"\fReplayNotice\x12\x17\n" +

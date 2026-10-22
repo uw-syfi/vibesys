@@ -8,12 +8,20 @@ from typing import TYPE_CHECKING
 
 from protobuf.wkt.google.protobuf.timestamp_pb import Timestamp
 
-from vs_runtime._replay_runtime import ReplayPending, ReplayRecoveryRequiredError, ReplayUnknown
+from vs_core.api.replay import ReplayWriterRecovery
+from vs_proto.api import ReplayStore as ReplayRecords
+from vs_runtime._replay_runtime import (
+    ReplayAbsent,
+    ReplayPending,
+    ReplayRecoveryRequiredError,
+    ReplayRetirement,
+    ReplayUnknown,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from vs_proto.api import Span
+    from vs_proto.api import Span, replay
     from vs_runtime._replay_runtime import (
         ReplayEnding,
         ReplayExecutor,
@@ -139,36 +147,73 @@ class _LiveEpoch:
         )
         self.host.runtime.accept(completed.span_id, now=now, at=_at(now))
 
+    async def _inspect(
+        self, span: Span
+    ) -> ReplayResult | ReplayAbsent | ReplayPending | ReplayUnknown:
+        shell, clock = self.host.runtime, self.host.clock
+        inspection = asyncio.create_task(
+            shell.inspect(span.id, self.host.executor, now=clock.now())
+        )
+        try:
+            while not inspection.done():
+                sleeper = asyncio.create_task(clock.sleep(max(0, self.renew_at - clock.now())))
+                try:
+                    await asyncio.wait((inspection, sleeper), return_when=asyncio.FIRST_COMPLETED)
+                    if not inspection.done():
+                        shell.renew(now=clock.now(), duration=self.launch.lease_duration)
+                        self.renew_at = clock.now() + self.launch.lease_duration / 3
+                finally:
+                    sleeper.cancel()
+                    await asyncio.gather(sleeper, return_exceptions=True)
+            return inspection.result()
+        finally:
+            inspection.cancel()
+            await asyncio.gather(inspection, return_exceptions=True)
+
+    async def _retire(self, identities: list[str], manifest: replay.WriterManifest) -> None:
+        shell, clock = self.host.runtime, self.host.clock
+        executor = self.host.executor
+        if not isinstance(executor, ReplayRetirement) or manifest.backing is None:
+            raise ReplayRecoveryRequiredError(
+                shell.recovery, ("execution owner cannot settle withdrawn children",)
+            )
+        reuse = ReplayWriterRecovery.from_records(
+            ReplayRecords.from_binary(shell.archive.encode()).records
+        ).require(manifest.backing)
+        for identity in identities:
+            await shell.retire(identity, executor, reuse, now=clock.now(), at=_at(clock.now()))
+
     async def recover(self) -> None:
         shell, clock = self.host.runtime, self.host.clock
         reasons = []
+        barrier = self.host.writer_barrier
+        manifest = (
+            None if barrier is None else barrier.begin(shell, now=clock.now(), at=_at(clock.now()))
+        )
+        withdrawn = []
         for span in shell.recovery:
-            inspection = asyncio.create_task(
-                shell.inspect(span.id, self.host.executor, now=clock.now())
-            )
-            try:
-                while not inspection.done():
-                    sleeper = asyncio.create_task(clock.sleep(max(0, self.renew_at - clock.now())))
-                    try:
-                        await asyncio.wait(
-                            (inspection, sleeper), return_when=asyncio.FIRST_COMPLETED
-                        )
-                        if not inspection.done():
-                            shell.renew(now=clock.now(), duration=self.launch.lease_duration)
-                            self.renew_at = clock.now() + self.launch.lease_duration / 3
-                    finally:
-                        sleeper.cancel()
-                        await asyncio.gather(sleeper, return_exceptions=True)
-                result = inspection.result()
-                if isinstance(result, ReplayPending):
-                    reasons.append(f"{span.id}: invocation is still pending")
-                elif isinstance(result, ReplayUnknown):
-                    reasons.append(f"{span.id}: unknown: {result.reason}")
+            result = await self._inspect(span)
+            if isinstance(result, (ReplayPending, ReplayUnknown)):
+                if span.replay_physical is not None and barrier is not None:
+                    shell.withdraw(span.id, now=clock.now(), at=_at(clock.now()))
+                    withdrawn.append(span.id)
                 else:
-                    shell.recover(span.id, result, now=clock.now(), at=_at(clock.now()))
-            finally:
-                inspection.cancel()
-                await asyncio.gather(inspection, return_exceptions=True)
+                    detail = (
+                        "invocation is still pending"
+                        if isinstance(result, ReplayPending)
+                        else result.reason
+                    )
+                    reasons.append(f"{span.id}: {detail}")
+            else:
+                shell.recover(span.id, result, now=clock.now(), at=_at(clock.now()))
+                if span.replay_physical is not None and span.replay_physical.has_field(
+                    "withdrawn_sequence"
+                ):
+                    withdrawn.append(span.id)
+        if barrier is not None and manifest is not None:
+            await barrier.finish(shell, manifest, now=clock.now(), at=_at(clock.now()))
+            if withdrawn:
+                await self._retire(withdrawn, manifest)
         if shell.recovery:
             raise ReplayRecoveryRequiredError(shell.recovery, tuple(reasons))
         shell.finish_recovery()
@@ -218,8 +263,6 @@ async def drive_replay(host: ReplayRunHost, launch: ReplayLaunch) -> ReplayCompl
         now = host.clock.now()
         host.runtime.start(launch, now=now, at=_at(now))
         epoch = _LiveEpoch(host, launch)
-        if host.writer_barrier is not None:
-            await host.writer_barrier.reconcile(host.runtime, now=now, at=_at(now))
         await epoch.recover()
         return await epoch.run()
     finally:

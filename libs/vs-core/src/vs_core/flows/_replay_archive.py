@@ -28,20 +28,16 @@ from ._replay_history import (
     ReplayFrontier,
 )
 from ._replay_identity import ENCODING_VERSION, EncodedIdentity, SemanticKey
+from ._replay_physical import execution_metadata, proof_covers, proof_digest, validate_physical
 from ._replay_sources import ReplayError
+from ._replay_writers import ReplayWriterRecovery
 
 if TYPE_CHECKING:
     from protobuf.wkt.google.protobuf.any_pb import Any
 
 
 def _execution(span: Span) -> bytes:
-    operation = deepcopy(span.replay)
-    if operation is None:
-        problem = "keyed span requires replay metadata"
-        raise ReplayError(problem)
-    for name in ("outcome", "accepted_sequence", "paid", "cost_usd"):
-        operation.clear_field(name)
-    return operation.to_binary()
+    return execution_metadata(span)
 
 
 def _check_identity(operation: pb.OperationReplay) -> None:
@@ -83,6 +79,10 @@ class ReplayArchive:
     _policy_drift: bytes | None = field(default=None, init=False, repr=False)
     _observed: str | None = field(default=None, init=False, repr=False)
     _epoch_closed: bool = field(default=False, init=False, repr=False)
+    _children: dict[str, tuple[str, ...]] = field(default_factory=dict, init=False, repr=False)
+    _logical: dict[tuple[bytes, bytes, int], str] = field(
+        default_factory=dict, init=False, repr=False
+    )
 
     @classmethod
     def decode(cls, payload: bytes) -> ReplayArchive:
@@ -117,6 +117,8 @@ class ReplayArchive:
         result._policy_drift = self._policy_drift
         result._observed = self._observed
         result._epoch_closed = self._epoch_closed
+        result._children = self._children.copy()
+        result._logical = self._logical.copy()
         return result
 
     @property
@@ -180,7 +182,35 @@ class ReplayArchive:
 
     @property
     def unresolved(self) -> tuple[Span, ...]:
-        return tuple(self.span(span_id) for span_id in self._unfinished)
+        return tuple(
+            self.span(span_id) for span_id in self._unfinished if span_id not in self._children
+        )
+
+    def children(self, logical: str) -> tuple[Span, ...]:
+        """Execution evidence for one semantic operation, in durable start order."""
+        return tuple(self.span(identity) for identity in self._children.get(logical, ()))
+
+    def pending_logical(self, operation: pb.OperationReplay) -> Span | None:
+        identity = self._logical.get(self._occurrence(operation))
+        return None if identity is None else self.span(identity)
+
+    @staticmethod
+    def _occurrence(operation: pb.OperationReplay) -> tuple[bytes, bytes, int]:
+        if operation.key is None:
+            problem = "logical replay requires its semantic key"
+            raise ReplayError(problem)
+        return operation.key.to_binary(), operation.identity, operation.encoding_version
+
+    def eligible_child(self, logical: str) -> Span | None:
+        eligible = [
+            (physical.observed_sequence, child)
+            for child in self.children(logical)
+            if (physical := child.replay_physical) is not None
+            and not physical.has_field("withdrawn_sequence")
+            and child.replay_observation is not None
+        ]
+        winner = min(eligible, key=lambda pair: pair[0], default=None)
+        return None if winner is None else winner[1]
 
     @property
     def pending_observation(self) -> Span | None:
@@ -241,12 +271,10 @@ class ReplayArchive:
             case Oneof("declaration_amended", epoch):
                 self._amend_epoch(epoch)
             case Oneof("span", body) if body.span is not None:
-                if body.span.replay is None:
-                    self._plain_span(body.span)
-                else:
-                    self._span(record, body.change, body.span)
+                self._span_record(record, body.change, body.span)
             case Oneof("notice", notice):
                 self._notice(notice.detail)
+                self._writer_notice(record)
             case Oneof("lifecycle", lifecycle):
                 if lifecycle.state is not None and lifecycle.state.field in {"parked", "ended"}:
                     self._epoch_closed = True
@@ -255,6 +283,14 @@ class ReplayArchive:
             case _:
                 problem = "unsupported record in keyed replay archive"
                 raise ReplayError(problem)
+
+    def _span_record(self, record: Record, change: Change, span: Span) -> None:
+        if span.replay_physical is not None:
+            self._physical(record, change, span)
+        elif span.replay is None:
+            self._plain_span(span)
+        else:
+            self._span(record, change, span)
 
     def _notice(self, detail: Any | None) -> None:
         if detail is None:
@@ -270,6 +306,18 @@ class ReplayArchive:
             notice = _metadata(detail, pb.ReplayNotice)
             self._validate_notice(notice)
             self.acknowledgements = self.acknowledgements.record_notice(notice)
+
+    def _writer_notice(self, record: Record) -> None:
+        if record.body is None or record.body.field != "notice":
+            return
+        detail = record.body.value.detail
+        if detail is not None and detail.type_url.rsplit("/", 1)[-1] in {
+            pb.WriterManifest.desc().type_name,
+            pb.WriterReconciliation.desc().type_name,
+        }:
+            ReplayWriterRecovery.from_records(
+                (*[Record.from_binary(value) for value in self._records], record)
+            )
 
     def _validate_notice(self, notice: pb.ReplayNotice) -> None:
         if self._epoch_closed:
@@ -378,14 +426,15 @@ class ReplayArchive:
             problem = "keyed span requires replay metadata"
             raise ReplayError(problem)
         if previous_bytes is None:
-            _check_identity(operation)
+            self._new_logical(operation)
             if change != Change.STARTED or operation.outcome is not None or span.replay_observation:
                 problem = "replay operation must start before observation or outcome"
                 raise ReplayError(problem)
         else:
             previous = Span.from_binary(previous_bytes)
             if (
-                change == Change.STARTED
+                previous.replay_physical is not None
+                or change == Change.STARTED
                 or _execution(previous) != _execution(span)
                 or previous.started_at != span.started_at
                 or previous.parent != span.parent
@@ -404,12 +453,16 @@ class ReplayArchive:
             ):
                 problem = "replay observation cannot be replaced or removed"
                 raise ReplayError(problem)
-        self._observation(span)
+        self._logical_observation(span)
         observed = span.replay_observation
         if operation.outcome is not None:
+            self._acceptance_child(span)
             if (
                 previous_bytes is None
-                or Span.from_binary(previous_bytes).replay_observation is None
+                or (
+                    not operation.has_field("accepted_child")
+                    and Span.from_binary(previous_bytes).replay_observation is None
+                )
                 or observed is None
                 or observed.outcome is None
                 or operation.outcome.to_binary() != observed.outcome.to_binary()
@@ -433,6 +486,25 @@ class ReplayArchive:
             raise ReplayError(problem)
         self._index_span(span)
 
+    def _logical_observation(self, span: Span) -> None:
+        operation = span.replay
+        if operation is None:
+            return
+        if (
+            self.children(span.id)
+            and span.replay_observation is not None
+            and not operation.has_field("accepted_child")
+        ):
+            problem = "logical parents accept only retained physical-child evidence"
+            raise ReplayError(problem)
+        self._observation(span)
+
+    def _new_logical(self, operation: pb.OperationReplay) -> None:
+        if self.pending_logical(operation) is not None:
+            problem = "one logical occurrence cannot have multiple unfinished parents"
+            raise ReplayError(problem)
+        _check_identity(operation)
+
     def _check_epoch_open(self, previous_bytes: bytes | None) -> None:
         if self._epoch_closed and (
             previous_bytes is None or not Span.from_binary(previous_bytes).has_field("ended_at")
@@ -446,13 +518,83 @@ class ReplayArchive:
             self._unfinished.pop(span.id, None)
         else:
             self._unfinished[span.id] = None
+        if span.replay is not None and span.replay_physical is None:
+            key = self._occurrence(span.replay)
+            if span.has_field("ended_at"):
+                self._logical.pop(key, None)
+            else:
+                self._logical[key] = span.id
+
+    def _acceptance_child(self, span: Span) -> None:
+        operation = span.replay
+        if operation is None:
+            return
+        children = self.children(span.id)
+        if not children and not operation.has_field("accepted_child"):
+            return
+        winner = self.eligible_child(span.id)
+        if (
+            winner is None
+            or operation.accepted_child != winner.id
+            or winner.replay_observation != span.replay_observation
+        ):
+            problem = "logical acceptance must reference its first eligible physical observation"
+            raise ReplayError(problem)
+
+    def _physical(self, record: Record, change: Change, span: Span) -> None:
+        physical = span.replay_physical
+        if physical is None:
+            problem = "physical child metadata is missing"
+            raise ReplayError(problem)
+        previous_bytes = self._spans.get(span.id)
+        self._check_epoch_open(previous_bytes)
+        previous = None if previous_bytes is None else Span.from_binary(previous_bytes)
+        parent = self.span(physical.logical)
+        validate_physical(previous, span, parent, sequence=record.seq, change=change)
+        if previous is None:
+            children = self._children.get(parent.id, ())
+            if any(not self.span(identity).has_field("ended_at") for identity in children):
+                problem = "replacement cannot start before every earlier child has ended"
+                raise ReplayError(problem)
+            if physical.ordinal != len(children):
+                problem = "physical child ordinals must be contiguous"
+                raise ReplayError(problem)
+            self._children[parent.id] = (*children, span.id)
+        if physical.has_field("termination_proof_digest"):
+            self._termination_proof(span)
+        if span.replay_observation is not None and not physical.has_field("withdrawn_sequence"):
+            if parent.replay is not None and parent.replay.outcome is None:
+                self._observation(span)
+        elif self._observed == span.id:
+            self._observed = None
+        self._index_span(span)
+
+    def _termination_proof(self, child: Span) -> None:
+        physical = child.replay_physical
+        if physical is None:
+            return
+        records = (Record.from_binary(payload) for payload in self._records)
+        recovery = ReplayWriterRecovery.from_records(records)
+        for payload in recovery.results:
+            result = pb.WriterReconciliation.from_binary(payload)
+            if (
+                result.proof is not None
+                and proof_digest(result.proof) == physical.termination_proof_digest
+            ):
+                proof_covers(child, result.proof, run_id=self.current_epoch.run_id)
+                return
+        problem = "physical termination requires its previously committed environment proof"
+        raise ReplayError(problem)
 
     def _observation(self, span: Span) -> None:
         if span.replay is None:
             return
         observed = span.replay_observation
         if observed is not None:
-            if self._observed is not None and self._observed != span.id:
+            if self._observed is not None and self._observed not in {
+                span.id,
+                span.replay.accepted_child,
+            }:
                 problem = "accept the pending observation before recording another observation"
                 raise ReplayError(problem)
             self._observed = span.id

@@ -71,6 +71,10 @@ class WriterRegistry:
         self._lock = ReceiptStore(namespace, threads)
         self._path = "writers/" + hashlib.sha256(backing.to_binary()).hexdigest() + ".pb"
 
+    @property
+    def backing(self) -> pb.WriterBacking:
+        return deepcopy(self._backing)
+
     def _load(self) -> pb.WriterRegistryState:
         payload = self._namespace.read_bytes(self._path)
         if payload is None:
@@ -136,9 +140,6 @@ class WriterRegistry:
                 problem = "termination evidence does not cover the complete current writer manifest"
                 raise WriterProofError(problem)
             if result.proof is not None:
-                if result.proof.manifest != state.manifest:
-                    problem = "termination proof manifest differs from reconciliation"
-                    raise WriterProofError(problem)
                 state.proof = deepcopy(result.proof)
                 self._save(state)
 
@@ -164,17 +165,37 @@ class ReplayWriterBarrier:
     reconciler: WriterReconciler
     blocking: BlockingRunner
 
-    async def reconcile(
-        self, runtime: ReplayRuntime, *, now: float, at: Timestamp
-    ) -> pb.WriterReconciliation:
-        manifest = self.registry.close()
+    def begin(self, runtime: ReplayRuntime, *, now: float, at: Timestamp) -> pb.WriterManifest:
+        try:
+            manifest = self.registry.close()
+        except WriterProofError as error:
+            manifest = pb.WriterManifest(backing=self.registry.backing)
+            runtime.writer_intent(manifest, now=now, at=at)
+            result = pb.WriterReconciliation(
+                manifest=manifest,
+                status=pb.WriterReconciliationStatus.UNKNOWN,
+                detail=str(error),
+            )
+            runtime.writer_observation(result, now=now, at=at)
+            raise ReplayWriterBlockedError(result) from error
         runtime.writer_intent(manifest, now=now, at=at)
+        return manifest
+
+    async def finish(
+        self, runtime: ReplayRuntime, manifest: pb.WriterManifest, *, now: float, at: Timestamp
+    ) -> pb.WriterReconciliation:
         result = await self.blocking.run(self.reconciler.reconcile_writers, manifest)
         self.registry.record(result)
         runtime.writer_observation(result, now=now, at=at)
         if result.proof is None:
             raise ReplayWriterBlockedError(result)
         return result
+
+    async def reconcile(
+        self, runtime: ReplayRuntime, *, now: float, at: Timestamp
+    ) -> pb.WriterReconciliation:
+        manifest = self.begin(runtime, now=now, at=at)
+        return await self.finish(runtime, manifest, now=now, at=at)
 
 
 class WriterReconciler(Protocol):
@@ -224,6 +245,11 @@ class DockerWriterReconciler:
             raise WriterProofError(problem)
         return result.stdout.strip()
 
+    def _verify_daemon(self, authority: str) -> None:
+        if self._run("info", "--format", "{{.ID}}") != authority:
+            problem = "recorded Docker daemon is unavailable or has changed identity"
+            raise WriterProofError(problem)
+
     def reconcile_writers(self, manifest: pb.WriterManifest) -> pb.WriterReconciliation:
         _checked(manifest)
         backing = manifest.backing
@@ -240,16 +266,12 @@ class DockerWriterReconciler:
                 detail="Docker writer domains require full immutable container IDs",
             )
         try:
-            if self._run("info", "--format", "{{.ID}}") != backing.authority:
-                return pb.WriterReconciliation(
-                    manifest=deepcopy(manifest),
-                    status=pb.WriterReconciliationStatus.UNKNOWN,
-                    detail="recorded Docker daemon is unavailable or has changed identity",
-                )
+            self._verify_daemon(backing.authority)
             domains = tuple(sorted({w.domain_id for w in manifest.writers}))
             before = set(self._run("ps", "-aq", "--no-trunc").splitlines())
             self.reap(tuple(domain for domain in domains if domain in before))
             after = set(self._run("ps", "-aq", "--no-trunc").splitlines())
+            self._verify_daemon(backing.authority)
             pending = sorted(after.intersection(domains))
             if pending:
                 return pb.WriterReconciliation(
