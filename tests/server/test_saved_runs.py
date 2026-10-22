@@ -3,18 +3,21 @@
 from __future__ import annotations
 
 import gzip
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
+from tests.server.host_helper_support import fake_host
 
 from server.host_helper_os import FileProjects
+from server.host_helper_requests import answer_registered_read
 from server.host_saved_runs import page_saved_runs
 from vs_project.api import Project
 from vs_project.api.testing import FakeGitRepositories
-from vs_proto.api import Timestamp
+from vs_proto.api import Oneof, ReadRequest, ReadResponse, Timestamp, validate
 from vs_proto.api import host_payloads as pb
 from vs_runlog.api import RunLock
-from vs_sim.api.testing import ManualClock, SimThreads
+from vs_sim.api.testing import ManualClock, SimNetwork, SimThreads
 
 
 def _run(index: int, name: str = "Saved run") -> pb.SavedRun:
@@ -135,3 +138,44 @@ def test_discovery_includes_native_only_runs_with_no_portable_manifest(
     )
     assert [run.run_id for run in response.runs] == ["run-1"]
     assert response.runs[0].imported == pb.SavedRunImport.AVAILABLE
+
+
+@pytest.mark.parametrize("live", [False, True])
+def test_registry_read_discovers_native_history_through_the_public_host_handler(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, live: bool
+) -> None:
+    monkeypatch.setenv("VIBESYS_STATE_HOME", str(tmp_path / "state"))
+    root = tmp_path / "project"
+    root.mkdir()
+    path = Project.run_log_path_for(root, "run-1")
+    path.parent.mkdir(parents=True)
+    fixture = Path(__file__).resolve().parents[2] / "proto/testdata/conversion/run.log.gz"
+    original = gzip.decompress(fixture.read_bytes())
+    path.write_bytes(original)
+    threads = SimThreads()
+    host = replace(
+        fake_host(threads, SimNetwork(threads)),
+        projects=FileProjects(FakeGitRepositories().repository, threads, clock=ManualClock()),
+    )
+    request = ReadRequest(
+        checkout="/checkout",
+        method=Oneof(
+            "list_saved_runs", pb.ListSavedRunsRequest(request_id="discovery-a", project=str(root))
+        ),
+    )
+    lock = RunLock(path.parent / "run.lock") if live else None
+    try:
+        encoded = answer_registered_read("list-saved-runs", request.to_binary(), host)
+    finally:
+        if lock is not None:
+            lock.close()
+    response = ReadResponse.from_binary(encoded)
+    validate(response)
+    assert response.result is not None
+    assert response.result.field == "list_saved_runs"
+    listing = response.result.value
+    assert listing.request_id == "discovery-a"
+    assert listing.project_root == str(root)
+    assert [row.run_id for row in listing.runs] == ["run-1"]
+    assert listing.runs[0].imported == pb.SavedRunImport.AVAILABLE
+    assert path.read_bytes() == original
