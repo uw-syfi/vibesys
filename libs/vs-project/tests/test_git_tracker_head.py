@@ -1,9 +1,9 @@
-"""``GitTracker.current_sha`` always equals ``git rev-parse HEAD``.
+"""``GitTracker.current_sha`` follows its selected Git reference.
 
 The tracker never caches ``HEAD``. These properties drive real Git through
 tracker-owned writes, writes by other processes, ref packing, detached heads and
 tracker restarts, on every Git backend, and require the answer to match Git
-after every step. A stale answer would be worse than a slow one.
+after every step. Resume selects the run branch without moving operator HEAD.
 """
 
 from __future__ import annotations
@@ -89,6 +89,7 @@ def test_current_sha_matches_git_after_any_operation_sequence(
     root.mkdir()
     (root / "main.py").write_text("VALUE = 0\n", encoding="utf-8")
     tracker = _fresh_tracker(root, existing=False)
+    selected = "HEAD"
     assert tracker.current_sha() == _real_head(root)
 
     for step, operation in enumerate(operations):
@@ -110,7 +111,9 @@ def test_current_sha_matches_git_after_any_operation_sequence(
         else:
             _git(root, "reset", "-q", "--hard")
             tracker = _fresh_tracker(root, existing=True)
-        assert tracker.current_sha() == _real_head(root), operation
+            selected = tracker.project_branch
+        expected = _git(root, "rev-parse", selected).stdout.strip()
+        assert tracker.current_sha() == expected, operation
 
 
 def test_current_sha_is_none_before_the_first_commit(tmp_path: Path) -> None:

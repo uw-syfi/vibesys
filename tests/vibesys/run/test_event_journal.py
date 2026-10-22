@@ -494,7 +494,7 @@ class _ControlTexts:
 def test_a_journal_without_a_published_epoch_cannot_authorize_recovery_or_controls() -> None:
     journal = EventJournal(ManualClock(), SimThreads())
     try:
-        with pytest.raises(RuntimeError, match="run.log has no published epoch"):
+        with pytest.raises(RuntimeError, match=r"run\.log has no published epoch"):
             _ = journal.epoch
     finally:
         journal.close()

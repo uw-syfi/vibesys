@@ -521,3 +521,58 @@ class FileRunContent:
             os.fsync(stream.fileno())
         sync_directory(self._streams)
         sync_directory(self._streams.parent)
+
+
+def read_current_epoch(path: Path) -> CurrentEpoch | None:
+    """Derive an external reader's epoch from exactly the head's committed prefix.
+
+    A complete frame can precede its fsync and head publication. Native readers
+    cannot treat that frame as a published epoch. Phase 1 logs without a head
+    retain their legacy complete-record rule.
+    """
+    head_path = path.parent / "run.head"
+    head = RunHead.from_binary(head_path.read_bytes()) if head_path.exists() else None
+    if head is not None:
+        validate(head)
+    if not path.exists():
+        if head is not None:
+            message = f"{path}: run.head exists without run.log"
+            raise ValueError(message)
+        return None
+    with path.open("rb") as stream:
+        return _read_epoch_prefix(RunLogReader(stream), head, path)
+
+
+def _read_epoch_prefix(reader: RunLogReader, head: RunHead | None, path: Path) -> CurrentEpoch:
+    limit = None if head is None or not head.has_field("committed_seq") else head.committed_seq
+    if limit == 0:
+        return CurrentEpoch()
+    facts = CurrentEpoch()
+    through = 0
+    for record in reader:
+        if limit is not None and record.seq > limit:
+            break
+        if head is None and not _legacy_epoch_record(record):
+            return CurrentEpoch()
+        facts = current_epoch((record,), facts)
+        through = record.seq
+        if through == limit:
+            break
+    if reader.stop.reason is RunLogStopReason.CORRUPTION:
+        message = f"{path}: {reader.stop.detail}"
+        raise ValueError(message)
+    if limit is not None and through < limit:
+        message = f"{path}: committed sequence {limit} exceeds log sequence {through}"
+        raise ValueError(message)
+    return facts
+
+
+def _legacy_epoch_record(record: Record) -> bool:
+    body = record.body
+    return bool(
+        body
+        and (
+            body.field == "legacy_event"
+            or (body.field == "epoch_started" and body.value.run is None)
+        )
+    )

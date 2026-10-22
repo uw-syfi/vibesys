@@ -572,7 +572,7 @@ def test_a_native_recovery_requires_a_published_successor_before_taking_authorit
         config=CounterConfig(),
         bindings=bindings,
     )
-    with pytest.raises(ContractError, match="run.log must publish a successor"):
+    with pytest.raises(ContractError, match=r"run\.log must publish a successor"):
         successor.start("host", now_at=1, lease_duration=1)
     assert store.load() == before
     assert store.acquire("other", now=1, duration=1) is not None

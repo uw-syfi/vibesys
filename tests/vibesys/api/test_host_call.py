@@ -346,6 +346,15 @@ def relaunch_call(owner: Project, run_id: str, checkout: Path) -> HostCallReques
 
 
 def _store_observed_epoch(owner: Project, run_id: str) -> None:
+    journal = EventJournal(ManualClock(), SimThreads())
+    journal.enable_runlog(owner, run_id)
+    journal.attach(Project.log_directory_for(owner.root, run_id), run_id)
+    try:
+        journal.emit(
+            CoreEventType.RUN_STARTED, data=RunStartedData(outer_loop="test", input="input")
+        )
+    finally:
+        journal.close()
     core = initial_state()
     core = core.model_copy(
         update={

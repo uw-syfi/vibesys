@@ -8,6 +8,7 @@ from vs_runlog._file import (
     RunLogReader,
     install_run_log,
     open_run_log,
+    read_current_epoch,
 )
 from vs_runlog._fold import fold_skeleton
 from vs_runlog._framing import ReadStop, RunLogStopReason, encode_frame
@@ -31,4 +32,5 @@ __all__ = [
     "fold_skeleton",
     "install_run_log",
     "open_run_log",
+    "read_current_epoch",
 ]
