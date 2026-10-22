@@ -34,7 +34,7 @@ def read_manifest(
         options = manifest.orchestration.options
         config_version = manifest.orchestration.config_version
     elif version in (3, 4):
-        reader = _reader("single", f"manifest-v{version}")
+        reader = _reader("single", f"manifest-v{version}", None)
         error = next(reader.iter_errors(value), None)
         if error is not None:
             path = ".".join(str(part) for part in error.absolute_path)

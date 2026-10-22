@@ -51,7 +51,7 @@ vibesys = "entrypoints.launcher:main"
 vibesys-host-helper = "entrypoints.host_helper:main"
 
 [tool.setuptools.package-data]
-vibesys = ["prompts/*.j2", "prompts/**/*.j2", "prompts/**/*.md", "orchestration/*/prompts/*.j2", "orchestration/*/prompts/**/*.j2", "domains/README.md", "domains/*/prompts/*.md", "inputs/prompts/*.j2", "run/prompts/*.j2", "_resources/**/*", "_sdk/**/*"]
+vibesys = ["prompts/*.j2", "prompts/**/*.j2", "prompts/**/*.md", "orchestration/*/prompts/*.j2", "orchestration/*/prompts/**/*.j2", "domains/README.md", "domains/*/prompts/*.md", "inputs/prompts/*.j2", "run/prompts/*.j2", "_resources/**/*", "_sdk/**/*", "fact_import/descriptors/*.json"]
 entrypoints = ["py.typed"]
 server = ["py.typed", "chat/prompts/*.j2"]
 launch = ["py.typed"]

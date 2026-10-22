@@ -6,6 +6,7 @@ from typing import Any
 
 from vs_agent.api import AgentSessionKey
 
+from ._descriptors import OLDEST_ENVELOPE_VERSION, envelope_versions
 from ._source import FactImportError, ImportSource
 
 
@@ -59,7 +60,7 @@ def _sessions(source: ImportSource, path: str, value: dict[str, Any]) -> None:
 def _envelope(
     source: ImportSource, path: str, value: dict[str, Any], run_id: str, strategy: str
 ) -> None:
-    if value["schema_version"] not in range(34, 43):
+    if value["schema_version"] not in range(OLDEST_ENVELOPE_VERSION, envelope_versions()[-1] + 1):
         raise FactImportError(
             f"{source.path}:{path}.schema_version", "unknown retained envelope version"
         )

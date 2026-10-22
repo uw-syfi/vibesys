@@ -15,8 +15,9 @@ from vs_project._layout import (
     TaskName,
     TasksRoot,
 )
+from vs_project._retained import read_retained_bytes
 from vs_project._state import ProjectState, _state_home, validate_run_id
-from vs_project._state_io import publish_run_link, read_retained_bytes
+from vs_project._state_io import publish_run_link
 from vs_project._state_store import LocalStateStore
 from vs_sim.api import ProcessTimeoutError
 

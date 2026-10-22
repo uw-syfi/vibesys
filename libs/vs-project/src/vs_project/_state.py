@@ -47,6 +47,7 @@ from vs_project._manifests import (
     RunEnvironmentRecord,
     RunExecutionRecord,
 )
+from vs_project._retained import RetainedFile, list_retained
 from vs_project._state_io import (
     STATE_DOCUMENT_MAX_BYTES,
     _atomic_write_model,
@@ -606,17 +607,9 @@ class StateNamespace:
         """Return an ordered immutable snapshot of this portable namespace."""
         if not self._portable:
             raise ProjectStateError.local_state_cannot_snapshot()
-        return StateSnapshot._create(self._namespace_root, self.documents())  # noqa: SLF001  # lint-waiver: LW-008222 [SLF001]; same-module state code keeps opaque storage private instead of exposing representation accessors.
-
-    def documents(self) -> tuple[StateFile, ...]:
-        """Read every namespace file by relative path, including local retained receipts.
-
-        Unlike a portable snapshot, this grants no authority to commit local files.
-        Symlinks and special files fail before any contents are returned.
-        """
         root = self._validated_root()
         if not root.exists():
-            return ()
+            return StateSnapshot._create(self._namespace_root, ())  # noqa: SLF001  # lint-waiver: LW-008221 [SLF001]; same-module state code keeps opaque storage private instead of exposing representation accessors.
 
         files: list[StateFile] = []
         try:
@@ -637,7 +630,7 @@ class StateNamespace:
                 )
         except OSError as exc:
             raise ProjectStateError.namespace_snapshot_failed(self._kind, root, exc) from exc
-        return tuple(files)
+        return StateSnapshot._create(self._namespace_root, tuple(files))  # noqa: SLF001  # lint-waiver: LW-008222 [SLF001]; same-module state code keeps opaque storage private instead of exposing representation accessors.
 
     def agent_visible_path(self, relative_path: str | PurePosixPath | None = None) -> str:
         """Return a safe project-relative location for an agent-facing prompt.
@@ -1081,21 +1074,13 @@ class ProjectState:
             project_root=self.project_root, root=self._contained_run_dir(run_id)
         )
 
-    def retained_run_documents(
+    def retained_run_files(
         self, run_id: str, *, local_namespace: str | None = None
-    ) -> tuple[StateFile, ...]:
-        """Read originals without requiring today's manifest schema or writing state."""
+    ) -> tuple[RetainedFile, ...]:
+        """List originals with their sizes, without requiring today's manifest schema."""
         if local_namespace is None:
-            return _snapshot_directory(
-                project_root=self.project_root, root=self._contained_run_dir(run_id)
-            ).files
-        return StateNamespace(
-            project_root=self.project_root,
-            root=self._local_state_dir(run_id, local_namespace),
-            portable=False,
-            containment_root=self._state_home,
-            namespace_root=_STATE_DIRECTORY_POSIX / "local" / "runs" / run_id / local_namespace,
-        ).documents()
+            return list_retained(self._contained_run_dir(run_id))
+        return list_retained(self._local_state_dir(run_id, local_namespace))
 
     def git_integration(self, run_id: str) -> ProjectGitIntegration:
         """Return opaque Git integration capabilities for one run."""

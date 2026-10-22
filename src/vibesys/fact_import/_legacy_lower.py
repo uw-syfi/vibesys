@@ -16,6 +16,10 @@ if TYPE_CHECKING:
     from ._source import ImportSource
 
 
+_RETRY_BUDGET_UNIT = "retry_budget_spent"
+"""A legacy workstream's retry-budget counter, distinct from any usage or attempt unit."""
+
+
 def lower_legacy_value(
     source: ImportSource, path: str, name: str, item: dict[str, Any], facts: FactSet
 ) -> None:
@@ -29,16 +33,20 @@ def _workstream(source: ImportSource, path: str, item: dict[str, Any], facts: Fa
     for key in ("parent_revision", "candidate_revision", "prior_revision"):
         if revision := item.get(key):
             facts.add(source, f"{path}.{key}", pb.ImportedCandidate(git_commit=revision))
+    # The counter is the workstream's retry budget: some versions charge it for a failure
+    # without a turn, and it stops at the budget. It is never an observed attempt count.
+    budget = item.get("budget") or {}
     amount = item.get("attempts")
-    if amount is None and item.get("budget") is not None:
-        amount = item["budget"].get("spent")
+    if amount is None:
+        amount = budget.get("spent")
     facts.add(
         source,
         path,
         usage(
             identity=f"workstream:{item['sequence']}",
-            unit="attempt",
+            unit=_RETRY_BUDGET_UNIT,
             amount=amount,
+            refunded=budget.get("refunded", 0),
             scope=pb.ImportedUsageScope.AGGREGATE,
         ),
     )

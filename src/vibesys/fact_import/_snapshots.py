@@ -20,12 +20,11 @@ from vs_core.api import (
     RunFacts,
 )
 from vs_core.api.values import ArtifactRef, RevisionRef, Sample
-from vs_decode.api import Unreadable, decode_json
 
+from ._descriptors import descriptor
 from ._envelopes import validate_container
 from ._legacy_lower import lower_legacy_value
 from ._rounds import lower_round, read_round
-from ._snapshot_data import SCHEMAS
 from ._source import FactImportError, decode
 
 if TYPE_CHECKING:
@@ -35,7 +34,6 @@ if TYPE_CHECKING:
     from ._source import ImportSource
 
 _JSON = TypeAdapter(JsonValue)
-_SCHEMA = TypeAdapter(dict[str, JsonValue])
 _FORMATS = FormatChecker()
 
 
@@ -72,18 +70,19 @@ _STRATEGIES = {
 
 
 @cache
-def _reader(strategy: str, name: str) -> Draft202012Validator:
-    schema = decode_json(
-        SCHEMAS[
-            f"shared:{name}" if f"shared:{name}" in SCHEMAS else f"{_STRATEGIES[strategy]}:{name}"
-        ],
-        _SCHEMA,
-        source="retained snapshot descriptor",
-        max_bytes=4 * 1024 * 1024,
-    )
-    if isinstance(schema, Unreadable):
-        raise FactImportError("descriptor", schema.details())
+def _reader(strategy: str, name: str, envelope_version: int | None) -> Draft202012Validator:
+    try:
+        schema = descriptor(f"shared:{name}", envelope_version)
+    except KeyError:
+        schema = descriptor(f"{_STRATEGIES[strategy]}:{name}", envelope_version)
     return Draft202012Validator(schema, format_checker=_FORMATS)
+
+
+def _envelope_version(name: str, value: JsonValue) -> int | None:
+    """The envelope version a container names, before its descriptor validates it."""
+    envelope = value.get("envelope") if name == "runtime" and isinstance(value, dict) else value
+    version = envelope.get("schema_version") if isinstance(envelope, dict) else None
+    return version if name in ("envelope", "runtime") and isinstance(version, int) else None
 
 
 class SnapshotDecoder:
@@ -103,13 +102,13 @@ class SnapshotDecoder:
         if name is None:
             decode(source, TypeAdapter(type(None)), self.registry, selector=selector, data=data)
             return
+        value = decode(source, _JSON, self.registry, selector=selector, data=data)
         try:
-            reader = _reader(self.strategy, name)
+            reader = _reader(self.strategy, name, _envelope_version(name, value))
         except KeyError as error:
             raise FactImportError(
                 f"{source.path}:{selector}", f"unknown retained snapshot {self.strategy}/{name}"
             ) from error
-        value = decode(source, _JSON, self.registry, selector=selector, data=data)
         error = next(reader.iter_errors(value), None)
         if error is not None:
             path = ".".join(str(part) for part in error.absolute_path)

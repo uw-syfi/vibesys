@@ -16,6 +16,7 @@ from tests.vibesys.golden.helpers import assert_exact_text
 from vibesys.api.importing import (
     FactImportError,
     ImportSource,
+    RetainedReadLimits,
     SourceFormat,
     import_run_facts,
     read_run_facts,
@@ -287,8 +288,8 @@ def test_unknown_snapshot_and_corrupt_embedded_json_name_their_path() -> None:
             )
 
 
-def test_project_shell_reads_original_content_and_does_not_modify_the_store(tmp_path: Path) -> None:
-    project = Project.open(tmp_path)
+def _project_run(root: Path) -> Project:
+    project = Project.open(root)
     now = datetime(2026, 1, 1, tzinfo=UTC)
     project.state.create_project("example", now=now)
     manifest = project.state.new_run_manifest(
@@ -307,6 +308,11 @@ def test_project_shell_reads_original_content_and_does_not_modify_the_store(tmp_
         now=now,
     )
     project.state.create_run(manifest)
+    return project
+
+
+def test_project_shell_reads_original_content_and_does_not_modify_the_store(tmp_path: Path) -> None:
+    project = _project_run(tmp_path)
     namespace = project.state.portable_namespace("run", "dynamic")
     legacy = (_FIXTURES / "legacy-v6-completed.json").read_bytes()
     namespace.write_bytes("state.json", legacy)
@@ -320,6 +326,58 @@ def test_project_shell_reads_original_content_and_does_not_modify_the_store(tmp_
     assert all(content.data != b"An edited task." for content in _payloads(result, "content"))
     assert project.state.portable_run_export("run").files == before
     assert namespace.read_bytes("state.json") == legacy
+
+
+_LIMITS = RetainedReadLimits(document_bytes=64 * 1024, run_bytes=128 * 1024)
+
+
+@pytest.mark.parametrize(
+    ("files", "failure"),
+    [
+        # A namespace no format imports is ignored unread, at any size.
+        ({("logs", "profile.bin"): 10 * _LIMITS.run_bytes}, None),
+        ({("artifacts", "trace.bin"): _LIMITS.document_bytes}, None),
+        ({("artifacts", "trace.bin"): _LIMITS.document_bytes + 1}, "artifacts/trace.bin"),
+        (
+            {("artifacts", f"part-{index}.bin"): _LIMITS.document_bytes for index in range(2)},
+            "<run>",
+        ),
+    ],
+)
+def test_project_shell_reads_only_imported_files_within_their_byte_limits(
+    tmp_path: Path, files: dict[tuple[str, str], int], failure: str | None
+) -> None:
+    project = _project_run(tmp_path)
+    for (namespace, name), size in files.items():
+        project.state.portable_namespace("run", namespace).write_bytes(name, b"x" * size)
+    if failure is None:
+        result = read_run_facts(project, "run", registry=FAKE_REGISTRY, limits=_LIMITS)
+        sizes = {len(content.data) for content in _payloads(result, "content")}
+        assert sizes <= {size for (namespace, _), size in files.items() if namespace != "logs"}
+    else:
+        with pytest.raises(FactImportError) as error:
+            read_run_facts(project, "run", registry=FAKE_REGISTRY, limits=_LIMITS)
+        assert error.value.path == failure
+
+
+def test_project_shell_bounds_the_retained_journal_by_the_document_limit(tmp_path: Path) -> None:
+    project = _project_run(tmp_path)
+    path = project.event_journal_path_for(project.root, "run")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"x" * (_LIMITS.document_bytes + 1))
+    with pytest.raises(FactImportError) as error:
+        read_run_facts(project, "run", registry=FAKE_REGISTRY, limits=_LIMITS)
+    assert error.value.path == "core-events.jsonl"
+
+
+@pytest.mark.parametrize(
+    ("document", "run"), [(0, 1), (2, 1), (RetainedReadLimits().document_bytes + 1, 2**40)]
+)
+def test_read_limits_reject_a_document_limit_outside_the_run_and_source_limits(
+    document: int, run: int
+) -> None:
+    with pytest.raises(ValueError, match="document_bytes"):
+        RetainedReadLimits(document_bytes=document, run_bytes=run)
 
 
 @pytest.mark.parametrize(("version", "strategy"), [(3, "multi-agent"), (4, "single-agent")])
@@ -416,6 +474,41 @@ def test_settled_usage_keeps_unknowns_and_does_not_count_live_usage_updates() ->
     assert len(usage) == 7
 
 
+@given(
+    turns=st.lists(
+        st.tuples(st.sampled_from(["invocation-a", "invocation-b"]), st.integers(0, 10**9)),
+        min_size=1,
+        max_size=8,
+    ),
+    sequenced=st.booleans(),
+)
+def test_every_settled_turn_of_a_reinvoked_invocation_is_conserved(
+    turns: list[tuple[str, int]], *, sequenced: bool
+) -> None:
+    # A provider-session change re-invokes one invocation id; each turn settles its own usage.
+    rows = [
+        {
+            "type": "turn_usage_recorded",
+            "timestamp": "2026-01-01T00:00:00Z",
+            "execution_id": invocation,
+            "data": {"kind": "turn_usage_recorded", "input_tokens": amount, "total_cost_usd": 0.5},
+            **({"sequence": index} if sequenced else {}),
+        }
+        for index, (invocation, amount) in enumerate(turns, start=1)
+    ]
+    source = ImportSource(
+        "core-events.jsonl",
+        SourceFormat.EVENTS,
+        b"\n".join(json.dumps(row).encode() for row in rows),
+    )
+    usage = _payloads(_import(source), "usage")
+    tokens = [int(row.quantity.value) for row in usage if row.unit == "input_tokens"]
+    costs = [row.quantity.value for row in usage if row.unit == "total_cost_usd"]
+    assert sorted(tokens) == sorted(amount for _, amount in turns)
+    assert costs == [0.5] * len(turns)
+    assert {row.scope.name for row in usage} == {"INVOCATION"}
+
+
 def test_guidance_retains_disposition_target_and_standing_mode() -> None:
     source = ImportSource(
         "control/inbox/advice.json",
@@ -477,18 +570,61 @@ def test_charge_and_invocation_identifiers_have_separate_accounting_domains() ->
     assert any(row.scope.name == "INVOCATION" and row.quantity.value == "3" for row in usage)
 
 
-@pytest.mark.parametrize("version", list(range(1, 10)))
-def test_legacy_versions_keep_fact_semantics_without_changing_the_source_version(
-    version: int,
+# Each fixture was written by the dynamic loop's own models at the last commit of its
+# version (v1 1ff29600b ... v9 6499f2333); legacy-v1-oldest-writer.json by the first one,
+# 0bdcbefe0. One evaluated workstream measured two metrics; another failed after retries.
+_LEGACY_WRITERS = sorted(_FIXTURES.glob("legacy-v*-writer.json"))
+
+
+@pytest.mark.parametrize("fixture", _LEGACY_WRITERS, ids=lambda path: path.stem)
+def test_every_legacy_dynamic_version_lowers_the_facts_its_own_release_wrote(
+    fixture: Path,
 ) -> None:
-    value = json.loads((_FIXTURES / "legacy-v6-completed.json").read_bytes())
-    value["schema_version"] = version
+    source = ImportSource("dynamic/state.json", SourceFormat.LEGACY_DYNAMIC, fixture.read_bytes())
+    result = _import(source, strategy="dynamic")
+    readings = {
+        (row.historical_commit, row.historical_reading.metric, row.historical_reading.value)
+        for row in _payloads(result, "measurement")
+    }
+    assert readings == {
+        ("candidate-1-revision-3", "throughput", 2.0),
+        ("candidate-1-revision-3", "latency_ms", 7.5),
+    }
+    assert {row.git_commit for row in _payloads(result, "candidate")} == {
+        "fake-revision-1",
+        "candidate-1-revision-3",
+    }
+    budget = {row.identity: row.quantity.value for row in _payloads(result, "usage")}
+    assert budget == {"workstream:1": "1", "workstream:2": "3"}
+
+
+def test_legacy_writers_cover_the_oldest_and_every_later_version() -> None:
+    versions = {json.loads(path.read_bytes())["schema_version"] for path in _LEGACY_WRITERS}
+    assert versions == set(range(1, 10))
+
+
+@given(
+    fixture=st.sampled_from(["legacy-v1-oldest-writer.json", "legacy-v4-writer.json"]),
+    spent=st.integers(min_value=0, max_value=2**40),
+    refunded=st.integers(min_value=0, max_value=50),
+)
+def test_legacy_retry_budget_is_a_budget_marker_and_never_an_attempt_count(
+    fixture: str, spent: int, refunded: int
+) -> None:
+    value = json.loads((_FIXTURES / fixture).read_bytes())
+    workstream = value["workstreams"][1]
+    if "budget" in workstream:
+        workstream["budget"] = {"spent": spent, "refunded": refunded}
+    else:
+        workstream["attempts"] = spent
     source = ImportSource(
         "dynamic/state.json", SourceFormat.LEGACY_DYNAMIC, json.dumps(value).encode()
     )
-    result = _import(source, strategy="dynamic")
-    assert _payloads(result, "measurement")
-    assert json.loads(source.data)["schema_version"] == version
+    usage = {row.identity: row for row in _payloads(_import(source, strategy="dynamic"), "usage")}
+    marker = usage["workstream:2"]
+    assert all(row.unit == "retry_budget_spent" for row in usage.values())
+    assert marker.quantity.value == str(spent)
+    assert marker.refunded_count == str(refunded if "budget" in workstream else 0)
 
 
 @pytest.mark.parametrize(

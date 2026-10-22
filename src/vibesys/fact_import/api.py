@@ -30,7 +30,14 @@ if TYPE_CHECKING:
     from vs_core.api import OperationRegistry
     from vs_proto.api import imported_facts as pb
 
-__all__ = ["FactImportError", "ImportSource", "SourceFormat", "import_run_facts"]
+__all__ = [
+    "MAX_SOURCE_BYTES",
+    "FactImportError",
+    "ImportSource",
+    "SourceFormat",
+    "import_run_facts",
+    "manifest_strategy",
+]
 
 
 class _Importer:
@@ -159,3 +166,9 @@ def import_run_facts(
     if not documents:
         raise FactImportError(run_id, "no retained content; original input is required")
     return importer.facts.finish(run_id)
+
+
+def manifest_strategy(source: ImportSource, *, registry: OperationRegistry) -> str:
+    """Return the strategy an original run manifest names, in any retained manifest version."""
+    strategy, _, _ = read_manifest(source, registry)
+    return strategy

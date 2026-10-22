@@ -2058,11 +2058,21 @@ depends_on = ["vibesys", "vs_agent", "vs_core", "vs_project", "vs_proto", "vs_de
 
 [[interfaces]]
 from = ["vibesys.fact_import"]
-expose = ["api", "api\\..*", "reader", "reader\\..*"]
+expose = ["api", "api\\..*"]
+
+# The only fact_import code that reads a Project; the importer itself is pure.
+[[modules]]
+path = "vibesys.fact_import.reader"
+layer = "loops"
+depends_on = ["vibesys.fact_import", "vs_core", "vs_project", "vs_proto"]
+
+[[interfaces]]
+from = ["vibesys.fact_import.reader"]
+expose = ["RetainedReadLimits", "read_run_facts"]
 
 [[modules]]
 path = "vibesys.api.importing"
-depends_on = ["vibesys.fact_import"]
+depends_on = ["vibesys.fact_import", "vibesys.fact_import.reader"]
 
 [[modules]]
 path = "vibesys.api.host_operations"

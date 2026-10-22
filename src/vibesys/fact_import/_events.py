@@ -73,7 +73,7 @@ def import_events(
             and row.type.value != row.data.kind
         ):
             raise FactImportError(f"{source.path}:line[{index}].type", "does not match data.kind")
-        _event(source, f"line[{index}]", row, facts)
+        _event(source, f"line[{index}]", index, row, facts)
         if (
             isinstance(row.data, AgentExecutionStartedData | InvocationStartedData)
             and row.execution_id
@@ -82,10 +82,13 @@ def import_events(
             facts.external(source, f"line[{index}]", "invocation", row.execution_id)
 
 
-def _event(source: ImportSource, path: str, row: CoreEvent, facts: FactSet) -> None:
+def _event(source: ImportSource, path: str, position: int, row: CoreEvent, facts: FactSet) -> None:
     value = row.data
     if isinstance(value, TurnUsageData):
-        identity = row.execution_id or value.span_id or f"{source.path}:{path}"
+        # One invocation can settle several turns (a provider-session change re-invokes it),
+        # so each settled turn is its own observation, named by its journal position: its
+        # line number, which import_events has checked equals any recorded sequence.
+        identity = f"{row.execution_id or 'run'}@event:{position}"
         for name in _USAGE_FIELDS:
             facts.add(
                 source,
