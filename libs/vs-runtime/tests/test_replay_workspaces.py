@@ -315,8 +315,9 @@ def test_workspace_inspection_fences_absence_and_preserves_physical_payload(
 
 
 @pytest.mark.parametrize("with_receipt", [False, True])
+@pytest.mark.parametrize("protect_adoption", [False, True])
 def test_adoption_consumes_native_evidence_without_fabricating_legacy_observations(
-    tmp_path: Path, sim: Sim, *, with_receipt: bool
+    tmp_path: Path, sim: Sim, *, with_receipt: bool, protect_adoption: bool
 ) -> None:
     with _env(tmp_path) as env:
         resources = env.hosts[0]
@@ -363,6 +364,11 @@ def test_adoption_consumes_native_evidence_without_fabricating_legacy_observatio
             return await step(ctx, asked)
 
         owner, receipts = _executor(resources)
+        if protect_adoption:
+            owner.protect_adoption()
+            (resources.root.path / "candidate.py").write_text("VALUE = 9\n", encoding="utf-8")
+            (resources.root.path / "operator-note.txt").write_text("Keep this.\n", encoding="utf-8")
+        original_commits = _commits(resources)
         store = FakeStateStore()
         executor = WorkspaceReplayExecutor(
             owner, receipts, ReplayOperationHost(env.run_id, store, sim.clock), within_seconds=100
@@ -381,7 +387,15 @@ def test_adoption_consumes_native_evidence_without_fabricating_legacy_observatio
             completed = await drive_replay(run_host, launch("first"))
             assert isinstance(completed, ReplayCompleted)
             assert isinstance(completed.value, pb.ReplayWorkspaceResult)
-            assert completed.value.status is pb.ReplayWorkspaceStatus.SUCCEEDED
+            assert completed.value.status is (
+                pb.ReplayWorkspaceStatus.REJECTED
+                if protect_adoption
+                else pb.ReplayWorkspaceStatus.SUCCEEDED
+            )
+            if protect_adoption:
+                assert (resources.root.path / "candidate.py").read_text() == "VALUE = 9\n"
+                assert (resources.root.path / "operator-note.txt").read_text() == "Keep this.\n"
+                assert _commits(resources) == original_commits
             (span,) = runtime.archive.spans
             assert span.replay is not None
             assert span.replay.policy is not None
