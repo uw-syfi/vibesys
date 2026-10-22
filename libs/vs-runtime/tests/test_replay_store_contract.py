@@ -2,6 +2,7 @@
 
 from collections.abc import Iterator
 from contextlib import AbstractContextManager, contextmanager, suppress
+from functools import partial
 from pathlib import Path
 from typing import Protocol
 
@@ -9,10 +10,11 @@ import pytest
 from protobuf.wkt.google.protobuf.timestamp_pb import Timestamp
 
 from vs_core.api.replay import ReplayCall, ReplayFlow, SemanticKey
+from vs_faults.api import Boundary, FaultGate, FaultPlan, FaultRule, HostCrashError, HostFault
 from vs_project.api import CommitFault, Conflict, FakeStateStore, Project, StoredEnvelope
 from vs_proto.api import Ended, EpochStarted, Outcome, core_common, replay
 from vs_proto.api import ReplayStore as Records
-from vs_runlog.api import FileRunLogWriter, open_run_log
+from vs_runlog.api import FileRunLogWriter, OsFileSync, open_run_log
 from vs_runtime.api.replay import (
     FakeReplayExecutor,
     ReplayCommitError,
@@ -69,6 +71,63 @@ def composed(store: ReplayStore, executor: FakeReplayExecutor, sim: Sim) -> Repl
             Ended(outcome=Outcome.FINISHED, summary="Measured.", resumable=True)
         ),
     )
+
+
+async def test_native_fsync_crashes_reconcile_publication_without_repeating_paid_work(
+    tmp_path: Path, sim: Sim
+) -> None:
+    async def once(
+        project: Project, gate: FaultGate, executor: FakeReplayExecutor, request_id: str
+    ) -> ReplayRunHost:
+        path = project.run_log_path_for(project.root, "run-a")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        real = OsFileSync()
+
+        def sync(descriptor: int, /) -> None:
+            gate.around(Boundary.DURABLE_WRITE, "fsync", partial(real, descriptor))
+
+        threads = sim.threads()
+        with FileRunLogWriter(path, clock=sim.clock, threads=threads, sync=sync) as writer:
+            binding = RunLogReplayStore(writer, project.state_store("run-a"))
+            host = composed(binding, executor, sim)
+            assert await drive_replay(host, launch(request_id)) == ReplayCompleted("measured")
+            return host
+
+    def executor() -> FakeReplayExecutor:
+        return FakeReplayExecutor(
+            lambda _: ReplayResult(core_common.Identity(root="measured"), paid=True, cost_usd=2)
+        )
+
+    baseline = tmp_path / "baseline"
+    baseline.mkdir()
+    gate = FaultGate(FaultPlan(seed=0))
+    await once(Project.open(baseline), gate, executor(), "baseline")
+    boundaries = len(gate.calls)
+    for offset in swept(boundaries, sample=3):
+        root = tmp_path / f"case-{offset}"
+        root.mkdir()
+        project = Project.open(root)
+        gate = FaultGate(
+            FaultPlan(
+                seed=0,
+                rules=(
+                    FaultRule(
+                        boundary=Boundary.DURABLE_WRITE,
+                        target="fsync",
+                        at=offset + 1,
+                        fault=HostFault.CRASH_AFTER,
+                    ),
+                ),
+            )
+        )
+        owner = executor()
+        with suppress(HostCrashError):
+            await once(project, gate, owner, "first")
+        gate.heal()
+        resumed = await once(project, gate, owner, "resume")
+        assert len(owner.invocations) == 1
+        assert resumed.runtime.accounting.lifetime_completed == 1
+        assert resumed.runtime.accounting.reported_cost_usd == 2
 
 
 @pytest.mark.parametrize("fault", list(CommitFault))

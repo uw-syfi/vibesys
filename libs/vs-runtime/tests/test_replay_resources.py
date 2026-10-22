@@ -180,3 +180,26 @@ async def test_bounded_request_requires_an_explicit_reservation(sim: Sim) -> Non
     with pytest.raises(ReplayError, match=r"policy.reservation.money_usd"):
         await drive_replay(composed, launch("first"))
     assert not executor.invocations
+
+
+async def test_explicitly_free_work_can_finish_with_zero_resource_allowance(sim: Sim) -> None:
+    store = FakeStateStore()
+    zero = replay.ReplayResources(money_usd=0, input_tokens=0, output_tokens=0)
+
+    async def root(ctx: ReplayFlow) -> None:
+        await request(ctx, 1, zero)
+
+    executor = FakeReplayExecutor(
+        lambda _: ReplayResult(
+            Reply(root="free"),
+            usage=TokenUsage(cost_usd=0, input=0, cache_read=0, cache_creation=0, output=0),
+        )
+    )
+    composed = replace(
+        host(store, root, executor, sim),
+        runtime=ReplayRuntime(store, root, replay.ReplayAllowance(resources=zero)),
+    )
+    assert await drive_replay(composed, launch("first")) == ReplayCompleted(None)
+    assert len(executor.invocations) == 1
+    assert composed.runtime.accounting.paid_operations == 0
+    assert composed.runtime.accounting.unreported_cost_operations == 0

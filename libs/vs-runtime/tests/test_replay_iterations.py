@@ -4,8 +4,9 @@ from contextlib import suppress
 from dataclasses import replace
 
 import pytest
-from hypothesis import given
+from hypothesis import example, given
 from hypothesis import strategies as st
+from protobuf.wkt.google.protobuf.timestamp_pb import Timestamp
 
 from vs_core.api.replay import ReplayFlow
 from vs_project.api import CommitFault, FakeStateStore
@@ -25,7 +26,32 @@ from vs_sim.api.testing import Sim, swept
 from .test_replay_run import Reply, call, host, launch
 
 
-@given(first=st.integers(min_value=1, max_value=4), second=st.integers(min_value=0, max_value=4))
+async def test_unfinished_unit_retries_before_the_fresh_additional_unit_allowance(sim: Sim) -> None:
+    store = FakeStateStore()
+    allowance = replay.ReplayAllowance(iterations=1)
+
+    async def root(ctx: ReplayFlow) -> None:
+        for number in range(1, 4):
+            async with ctx.iteration("round", number):
+                await call(ctx, f"work/{number}")
+
+    original = ReplayRuntime(store, root, allowance)
+    original.start(launch("first"), now=0, at=Timestamp())
+    assert len(original.prepare(now=0, at=Timestamp())) == 1
+    original.close(now=0)
+    executor = FakeReplayExecutor(lambda _: ReplayResult(Reply(root="paid"), paid=True, cost_usd=1))
+    resumed = replace(
+        host(store, root, executor, sim), runtime=ReplayRuntime(store, root, allowance)
+    )
+    assert await drive_replay(resumed, launch("resume")) == ReplayParked()
+    assert len(executor.invocations) == 2
+    assert resumed.runtime.accounting.lifetime_completed == 2
+    assert resumed.runtime.accounting.fresh_completed == 1
+    assert resumed.runtime.accounting.fresh_pending == 0
+
+
+@example(first=0, second=2)
+@given(first=st.integers(min_value=0, max_value=4), second=st.integers(min_value=0, max_value=4))
 def test_raised_and_lowered_allowances_reconstruct_without_spending_again(
     first: int, second: int
 ) -> None:
