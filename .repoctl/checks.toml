@@ -373,8 +373,16 @@ commands = [
     "bash", "-c",
     'uv run --no-sync coverage report --fail-under=75 & a=$!; uv run --no-sync coverage xml & b=$!; uv run --no-sync coverage json & c=$!; s=0; for p in $a $b $c; do wait $p || s=1; done; exit $s',
   ],
-  ["uv", "run", "--no-sync", "python", "scripts/check_coverage_floor.py", "coverage.json"],
+  ["./support/repoctl/repoctl", "run-checks", "--group", "python_coverage_floor"],
 ]
+
+# Shared by the combined CI report and repoctl's touched-test coverage mode.
+[[check_groups]]
+name = "python_coverage_floor"
+language = "python"
+directory = "."
+timeout_seconds = 60
+commands = [["uv", "run", "--no-sync", "python", "scripts/check_coverage_floor.py", "coverage.json"]]
 
 [[check_groups]]
 name = "patch_coverage"

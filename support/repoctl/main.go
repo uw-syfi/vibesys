@@ -170,6 +170,10 @@ func snapshotConfigPath(root, snapshotRoot, configPath string) (string, error) {
 }
 
 func cli(args []string) error {
+	return cliWithRunner(args, execution.OSRunner{})
+}
+
+func cliWithRunner(args []string, runner execution.Runner) error {
 	configPath := ".repoctl"
 	filtered := make([]string, 0, len(args))
 	for i := 0; i < len(args); i++ {
@@ -222,7 +226,7 @@ func cli(args []string) error {
 		if collectionProvided && *collection == "" {
 			return fmt.Errorf("--collection-json must be a JSON array of strings")
 		}
-		return runCheckGroup(root, g, *group, *collection, *dryRun, execution.OSRunner{})
+		return runCheckGroup(root, g, *group, *collection, *dryRun, runner)
 	case "test":
 		fs := flag.NewFlagSet("test", flag.ContinueOnError)
 		base := fs.String("base", g.DefaultBase, "Base revision")
@@ -230,11 +234,20 @@ func cli(args []string) error {
 		event := fs.String("event", "pull_request", "Event type")
 		dryRun := fs.Bool("dry-run", false, "Print selected commands without running them")
 		checksOnly := fs.Bool("checks-only", false, "Run quality checks and always-on scripts, not test groups")
+		coverageOnly := fs.Bool("coverage-only", false, "Check touched Python modules and patch coverage using only --coverage-test files")
+		var coverageTests []string
+		fs.Func("coverage-test", "Own test file to run for touched modules; repeat for multiple files", func(value string) error {
+			coverageTests = append(coverageTests, value)
+			return nil
+		})
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
 		}
 		if fs.NArg() != 0 {
 			return fmt.Errorf("unexpected test arguments")
+		}
+		if (*coverageOnly && *checksOnly) || (len(coverageTests) > 0 && !*coverageOnly) {
+			return fmt.Errorf("--coverage-only cannot combine with --checks-only; --coverage-test requires --coverage-only")
 		}
 		g = g.forLocalTest()
 		p, err := planAtRevisions(root, configPath, g, *base, *head, *event, true)
@@ -260,7 +273,15 @@ func cli(args []string) error {
 		if err := emit(p, false); err != nil {
 			return err
 		}
-		return runSelectedTests(root, g, p, *dryRun, *checksOnly, execution.OSRunner{}, runNativeCommand)
+		if *coverageOnly {
+			checks, err := localCoverageChecks(root, g, p.ChangedPaths, coverageTests)
+			if err != nil {
+				return err
+			}
+			fmt.Println("Partial-suite coverage: only the supplied test files run; CI combines all shards.")
+			return runChecks(root, checks, *dryRun, runner)
+		}
+		return runSelectedTests(root, g, p, *dryRun, *checksOnly, runner, runNativeCommand)
 	case "run-native":
 		fs := flag.NewFlagSet("run-native", flag.ContinueOnError)
 		targets := fs.String("targets-json", "", "Selected native roots as a JSON array")
