@@ -179,6 +179,10 @@ class _LiveEpoch:
             if not self.running:
                 if shell.paused:
                     return ReplayParked()
+                if shell.admission_limited:
+                    now = self.host.clock.now()
+                    shell.park_admission_limit(now=now, at=_at(now))
+                    return ReplayParked()
                 if shell.completed:
                     now = self.host.clock.now()
                     shell.finish(self.host.ending(shell.result), now=now, at=_at(now))

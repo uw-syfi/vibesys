@@ -53,15 +53,16 @@ def launch(request: str) -> ReplayLaunch:
 
 
 async def root(ctx: ReplayFlow) -> str:
-    result = await ctx.call(
-        ReplayCall(
-            SemanticKey("measure"),
-            core_common.Identity(root="candidate"),
-            "test.v1",
-            replay.ReplayPolicy(reply_type=core_common.Identity.desc().type_name),
-            core_common.Identity,
+    async with ctx.iteration("round", 1):
+        result = await ctx.call(
+            ReplayCall(
+                SemanticKey("measure"),
+                core_common.Identity(root="candidate"),
+                "test.v1",
+                replay.ReplayPolicy(reply_type=core_common.Identity.desc().type_name),
+                core_common.Identity,
+            )
         )
-    )
     return result.root
 
 

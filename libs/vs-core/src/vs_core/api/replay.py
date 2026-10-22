@@ -23,6 +23,12 @@ from vs_core.flows._replay_identity import (
     classify_context,
     encode_identity,
 )
+from vs_core.flows._replay_iterations import ReplayAccounting, ReplayIterationBlocked
+from vs_core.flows._replay_resources import (
+    ReplayResourceAccounting,
+    ReplayResourcesBlocked,
+    ReplayResourceTotals,
+)
 from vs_core.flows._replay_run import ReplayScheduler, ReplaySettings
 from vs_core.flows._replay_schema import replay_descriptors, reply_schema_digest
 from vs_core.flows._replay_sources import (
@@ -35,6 +41,7 @@ from vs_core.flows._replay_sources import (
     ReplayError,
     ReplayFlow,
     ReplayGroup,
+    ReplayIteration,
     ReplayLatch,
     ReplaySource,
     ReplayTask,
@@ -49,6 +56,7 @@ __all__ = [
     "ClassifiedContext",
     "EncodedIdentity",
     "PolicyDrift",
+    "ReplayAccounting",
     "ReplayAcknowledgements",
     "ReplayArchive",
     "ReplayCall",
@@ -62,7 +70,12 @@ __all__ = [
     "ReplayFrontier",
     "ReplayGroup",
     "ReplayIdentityError",
+    "ReplayIteration",
+    "ReplayIterationBlocked",
     "ReplayLatch",
+    "ReplayResourceAccounting",
+    "ReplayResourceTotals",
+    "ReplayResourcesBlocked",
     "ReplayScheduler",
     "ReplaySettings",
     "ReplaySource",

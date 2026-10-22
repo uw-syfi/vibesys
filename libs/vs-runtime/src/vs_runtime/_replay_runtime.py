@@ -13,8 +13,11 @@ from vs_core.api.replay import (
     ENCODING_VERSION,
     AcceptedClock,
     AcceptedReplay,
+    ReplayAccounting,
     ReplayArchive,
     ReplayError,
+    ReplayIterationBlocked,
+    ReplayResourcesBlocked,
     ReplayScheduler,
     ReplaySettings,
     replay_descriptors,
@@ -37,7 +40,11 @@ from vs_proto.api import (
     SpanRecord,
     SpanStatus,
     Stop,
+    TokenUsage,
     validate,
+)
+from vs_proto.api import (
+    ReplayStore as ReplayRecords,
 )
 from vs_proto.api import replay as pb
 from vs_runtime._replay_store import REPLAY_STORE_SCHEMA_VERSION
@@ -83,6 +90,7 @@ class ReplayResult:
     outcome: Message
     paid: bool = False
     cost_usd: float | None = None
+    usage: TokenUsage | None = None
 
 
 @dataclass(frozen=True)
@@ -157,6 +165,7 @@ class ReplayRuntime:
         self._prepared_occurrences: set[tuple[bytes, bytes, int]] = set()
         self._recovery_dirty = False
         self._schema_types: set[type[Message]] = set()
+        self._admission_limited = False
 
     @property
     def archive(self) -> ReplayArchive:
@@ -189,6 +198,12 @@ class ReplayRuntime:
     @property
     def frontier(self) -> ReplayFrontier:
         return self._active_scheduler.frontier()
+
+    @property
+    def accounting(self) -> ReplayAccounting:
+        """Actual usage and iteration grants derived from the confirmed native prefix."""
+        records = tuple(ReplayRecords.from_binary(self._archive.encode()).records)
+        return ReplayAccounting.from_records(records, epoch=self._archive.epoch)
 
     def start(
         self,
@@ -260,6 +275,7 @@ class ReplayRuntime:
             raise ReplayCommitError(problem)
         self._archive = ReplayArchive.decode(stored.payload)
         self._revision = stored.revision
+        _ = self.accounting
 
     def _append(
         self,
@@ -316,35 +332,84 @@ class ReplayRuntime:
         unresolved = self.recovery
         if unresolved:
             raise ReplayRecoveryRequiredError(unresolved)
-        self._record_schemas(scheduler.schema_types, now=now, at=at)
-        self._record_drift(now=now, at=at)
-        if self._disclose_unused(now=now, at=at):
-            return ()
-        started = []
-        for operation in scheduler.dispatches():
-            key = operation.key
-            if key is None:
+        started: list[Span] = []
+        while True:
+            self._record_schemas(scheduler.schema_types, now=now, at=at)
+            self._record_drift(now=now, at=at)
+            if self.frontier.unused and started:
+                return tuple(started)
+            if self._disclose_unused(now=now, at=at):
+                return tuple(started)
+            changed = self._prepare_operations(started, now=now, at=at)
+            if not changed:
+                break
+        return tuple(started)
+
+    def _prepare_operations(self, started: list[Span], *, now: float, at: Timestamp) -> bool:
+        changed = False
+        self._admission_limited = False
+        for operation in self._active_scheduler.dispatches():
+            if operation.key is None:
                 problem = "scheduler proposed a start without a semantic key"
                 raise ReplayError(problem)
-            occurrence = (key.to_binary(), operation.identity, operation.encoding_version)
+            occurrence = (operation.key.to_binary(), operation.identity, operation.encoding_version)
             if occurrence in self._prepared_occurrences:
                 continue
-            span = Span(
-                id=f"operation/{self._archive.sequence + 1}",
-                runtime_type=RuntimeType.OPERATION,
-                name=key.operation,
-                status=SpanStatus.RUNNING,
-                started_at=self._archive.clock,
-                replay=operation,
-            )
-            self._append(
-                Oneof("span", SpanRecord(change=Change.STARTED, span=span)), now=now, at=at
-            )
-            self._dispatchable.add(span.id)
-            self._known_starts.add(span.id)
+            outcome = self.accounting.decide(operation, self.allowance)
+            if isinstance(outcome, (ReplayIterationBlocked, ReplayResourcesBlocked)):
+                self._admission_limited = True
+                continue
+            span = self._start_operation(operation, now=now, at=at)
             self._prepared_occurrences.add(occurrence)
-            started.append(deepcopy(span))
-        return tuple(started)
+            if outcome is None:
+                started.append(span)
+            else:
+                self.observe(span.id, ReplayResult(outcome), now=now, at=at)
+                self.accept(span.id, now=now, at=at)
+                changed = True
+        return changed
+
+    def _start_operation(self, operation: pb.OperationReplay, *, now: float, at: Timestamp) -> Span:
+        key = operation.key
+        if key is None:
+            problem = "operation requires a semantic key"
+            raise ReplayError(problem)
+        span = Span(
+            id=f"operation/{self._archive.sequence + 1}",
+            runtime_type=RuntimeType.OPERATION,
+            name=key.operation,
+            status=SpanStatus.RUNNING,
+            started_at=self._archive.clock,
+            replay=operation,
+        )
+        self._append(Oneof("span", SpanRecord(change=Change.STARTED, span=span)), now=now, at=at)
+        self._dispatchable.add(span.id)
+        self._known_starts.add(span.id)
+        return deepcopy(span)
+
+    @property
+    def admission_limited(self) -> bool:
+        return self._admission_limited
+
+    def park_admission_limit(self, *, now: float, at: Timestamp) -> None:
+        """End at the unstarted admission frontier; denial is never a replayed answer."""
+        if not self._admission_limited or self._archive.unresolved:
+            problem = "admission limit can park only after admitted work settles"
+            raise ReplayError(problem)
+        self._append(
+            Oneof(
+                "notice",
+                Notice(
+                    severity=Severity.WARNING,
+                    code=NoticeCode.FRAMEWORK_WARNING,
+                    message="The epoch's allowance cannot admit the next operation. Resume with fresh allowances to continue.",
+                ),
+            ),
+            now=now,
+            at=at,
+        )
+        self._append(Oneof("lifecycle", Lifecycle(state=Oneof("parked", Parked()))), now=now, at=at)
+        self._paused = True
 
     def _disclose_unused(self, *, now: float, at: Timestamp) -> bool:
         notice = self.frontier.notice()
@@ -447,6 +512,14 @@ class ReplayRuntime:
     ) -> None:
         """Retain a validated observation before attempting logical acceptance."""
         validate(result.outcome)
+        cost = result.cost_usd
+        if result.usage is not None:
+            validate(result.usage)
+            if result.usage.has_field("cost_usd"):
+                if cost is not None and cost != result.usage.cost_usd:
+                    problem = "executor cost contradicts its reported token usage"
+                    raise ReplayError(problem)
+                cost = result.usage.cost_usd
         span = self._span(span_id)
         if (
             span.replay is None
@@ -461,7 +534,8 @@ class ReplayRuntime:
         span.replay_observation = pb.ReplayObservation(
             outcome=Any(type_url=result.outcome.desc().type_name, value=result.outcome.to_binary()),
             paid=result.paid,
-            cost_usd=result.cost_usd,
+            cost_usd=cost,
+            usage=deepcopy(result.usage),
         )
         self._append(
             Oneof("span", SpanRecord(change=Change.UPDATED, span=span)), now=now, at=at, clock=clock
@@ -533,7 +607,12 @@ class ReplayRuntime:
         if self._known_starts or self._fence is None or not self._store.verify(self._fence, now):
             problem = "recovery requires a current fence before preparing live work"
             raise ReplayCommitError(problem)
-        return await executor.inspect(self._span(span_id), self._fence)
+        span = self._span(span_id)
+        if span.replay is not None:
+            internal = self.accounting.recover(span.replay)
+            if internal is not None:
+                return ReplayResult(internal)
+        return await executor.inspect(span, self._fence)
 
     def recover(
         self, span_id: str, result: ReplayResult | ReplayAbsent, *, now: float, at: Timestamp
