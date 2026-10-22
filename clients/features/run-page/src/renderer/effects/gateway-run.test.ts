@@ -2,8 +2,10 @@ import {expect, test} from 'bun:test';
 import {create, fromBinary} from '@bufbuild/protobuf';
 import {checkMachine} from '@vibesys/machine/testing';
 import {
+  NoticeCode,
   RecordSchema,
   RunLiveness,
+  Severity,
   TailRequestSchema,
   WatchRunsResponseSchema,
 } from '@vibesys/proto';
@@ -100,7 +102,11 @@ test('Skeleton then Tail, local seek, verified cached content, logs and cancella
     snapshot =>
       snapshot.context.load?.complete === true && Object.keys(snapshot.context.text).length === 2,
   );
-  const tail = transport.calls.find(call => call.method === `${SERVICE}Tail`);
+  const tail = transport.calls.find(
+    call =>
+      call.method === `${SERVICE}Tail` &&
+      fromBinary(TailRequestSchema, call.request).fromSeq === 4n,
+  );
   if (!tail) throw new Error('Tail required');
   expect(fromBinary(TailRequestSchema, tail.request).fromSeq).toBe(4n);
   expect(transport.calls.filter(call => call.method === `${SERVICE}Skeleton`)).toHaveLength(1);
@@ -115,7 +121,7 @@ test('Skeleton then Tail, local seek, verified cached content, logs and cancella
   expect(transport.calls).toHaveLength(calls);
   actor.send({type: 'ui', action: {type: 'select-stream', streamId: 'build-log'}});
   await reached(actor, snapshot => snapshot.context.ui.views['build-log']?.lines.length === 1);
-  expect(transport.activeStreams).toBe(3);
+  expect(transport.activeStreams).toBe(4);
   actor.send({type: 'toggle', enabled: false});
   await reached(actor, snapshot => snapshot.matches('off'));
   await Promise.resolve();
@@ -166,6 +172,68 @@ test('off is inert, live records append while scrubbed and switching streams can
   actor.send({type: 'ui', action: {type: 'select-stream', streamId: 'missing'}});
   await reached(actor, snapshot => snapshot.context.error === 'Log unavailable');
   actor.stop();
+});
+
+test('native record history owns its cursor and retries without losing startup or diagnostics', async () => {
+  const fixture = storeRunFixture('live');
+  const transport = new FakeRunTransport(fixture);
+  const clock = new FakeClock();
+  const actor = startGatewayRun(
+    {
+      reader: gatewayReader(transport, new FakeSkeletonCache(), clock.schedule),
+      watchSetting: () => () => {},
+      setting: async () => true,
+    },
+    clock.schedule,
+    {seed: SEED},
+  );
+  try {
+    await reached(
+      actor,
+      snapshot => snapshot.context.ui.recordLog?.length === fixture.records.length,
+    );
+    const seq = (fixture.records.at(-1)?.seq ?? 0n) + 1n;
+    transport.publish([
+      create(RecordSchema, {
+        seq,
+        epoch: 1,
+        body: {
+          case: 'notice',
+          value: {
+            severity: Severity.ERROR,
+            code: NoticeCode.INPUT_MEASUREMENT_FAILED,
+            message: 'Measurement unavailable',
+          },
+        },
+      }),
+    ]);
+    await reached(actor, snapshot => snapshot.context.ui.recordLog?.at(-1)?.seq === String(seq));
+    const {load, ui} = actor.getSnapshot().context;
+    if (!load) throw new Error('load required');
+    const model = projectSkeleton(load.skeleton, load.skeleton.throughSeq ?? 0n);
+    expect(skeletonScreenState(SEED, load.skeleton, model, ui).recordDiagnostic?.message).toBe(
+      'Measurement unavailable',
+    );
+    transport.fail(`${SERVICE}Tail`, new Error('Disconnected'));
+    await reached(
+      actor,
+      snapshot =>
+        snapshot.context.ui.recordLogError !== null &&
+        snapshot.context.ui.recordLogError !== undefined,
+    );
+    transport.recover(`${SERVICE}Tail`);
+    clock.advanceBy(1000);
+    await transport.called(`${SERVICE}Tail`);
+    await Promise.resolve();
+    expect(
+      transport.calls
+        .filter(call => call.method === `${SERVICE}Tail`)
+        .some(call => fromBinary(TailRequestSchema, call.request).fromSeq === seq + 1n),
+    ).toBe(true);
+    expect(actor.getSnapshot().context.ui.recordLog).toHaveLength(fixture.records.length + 1);
+  } finally {
+    actor.stop();
+  }
 });
 
 test('failed unary and corrupt content surface errors without using the legacy path', async () => {

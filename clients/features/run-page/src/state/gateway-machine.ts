@@ -2,6 +2,7 @@
 import {emptyLogView, foldChunk, type LogView} from '@vibesys/logs';
 import {unprovided} from '@vibesys/machine';
 import type {RunLivenessHint, SkeletonLoad} from '@vibesys/run-skeleton';
+import {type RecordRow, recordRows} from '@vibesys/run-state/records';
 import {assign, fromCallback, setup} from 'xstate';
 import {
   type RunPageAction,
@@ -19,12 +20,18 @@ export interface GatewayLogInput {
   readonly streamId: string;
   readonly receive: (event: GatewayEvent) => void;
 }
+export interface GatewayRecordsInput {
+  readonly runId: string;
+  readonly fromSeq: bigint;
+  readonly receive: (event: GatewayEvent) => void;
+}
 export type GatewayEvent =
   | {type: 'setting-changed'}
   | {type: 'toggle'; enabled: boolean}
   | {type: 'ui'; action: RunPageAction}
   | {type: 'log'; streamId: string; text: string; offset: number; next: number}
   | {type: 'log-failed'}
+  | {type: 'records'; rows: readonly RecordRow[]}
   | {type: 'loaded'; load: SkeletonLoad | undefined; failed: boolean; hint?: RunLivenessHint};
 export interface GatewayRunContext extends GatewayInput {
   enabled: boolean;
@@ -35,6 +42,7 @@ export interface GatewayRunContext extends GatewayInput {
   contentHash: string;
   attemptedContent: ReadonlySet<string>;
   error: string | null;
+  recordsNextSeq: bigint;
 }
 
 function nextContentHash(context: GatewayRunContext): string {
@@ -102,10 +110,22 @@ export const gatewayRunMachine = setup({
       'content by hash',
     ),
     log: unprovided<void, GatewayLogInput>('log transport'),
+    records: unprovided<void, GatewayRecordsInput>('run records'),
   },
   guards: {
     needsContent: ({context}) => nextContentHash(context) !== '',
     hasStream: ({context}) => context.ui.selected !== null,
+  },
+  actions: {
+    receivedRecords: assign(({context, event}) => {
+      if (event.type !== 'records') return {};
+      const rows = recordRows(context.ui.recordLog ?? [], event.rows);
+      const last = rows.at(-1);
+      return {
+        recordsNextSeq: last ? BigInt(last.seq) + 1n : context.recordsNextSeq,
+        ui: {...context.ui, recordLog: rows, recordLogError: null},
+      };
+    }),
   },
 }).createMachine({
   id: 'gatewayRun',
@@ -119,6 +139,7 @@ export const gatewayRunMachine = setup({
     contentHash: '',
     attemptedContent: new Set(),
     error: null,
+    recordsNextSeq: 0n,
   }),
   initial: 'checking',
   invoke: {id: 'watch-setting', src: 'watchSetting'},
@@ -190,6 +211,46 @@ export const gatewayRunMachine = setup({
         ui: {actions: assign({ui: ({context, event}) => uiStep(context.ui, event.action)})},
       },
       states: {
+        records: {
+          initial: 'reading',
+          states: {
+            reading: {
+              invoke: {
+                id: 'records',
+                src: 'records',
+                input: ({context, self}) => ({
+                  runId: context.seed.identity.runId,
+                  fromSeq: context.recordsNextSeq,
+                  receive: event => self.send(event),
+                }),
+                onDone: {target: 'retrying'},
+                onError: {
+                  target: 'retrying',
+                  actions: assign({
+                    ui: ({context}) => ({...context.ui, recordLogError: 'Run records unavailable'}),
+                  }),
+                },
+              },
+              initial: 'waiting',
+              states: {
+                waiting: {
+                  after: {
+                    30000: {
+                      target: '#gatewayRun.active.records.retrying',
+                      actions: assign({
+                        ui: ({context}) => ({...context.ui, recordLogError: 'Run records timeout'}),
+                      }),
+                    },
+                  },
+                  on: {records: {target: 'live', actions: 'receivedRecords'}},
+                },
+                live: {},
+              },
+              on: {records: {actions: 'receivedRecords'}},
+            },
+            retrying: {after: {1000: 'reading'}},
+          },
+        },
         content: {
           initial: 'idle',
           states: {

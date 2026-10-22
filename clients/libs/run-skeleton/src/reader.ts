@@ -5,6 +5,7 @@ import {
   GetBlobsRequestSchema,
   GetBlobsResponseSchema,
   HostService,
+  TailRequestSchema,
   TailStreamRequestSchema,
   TailStreamResponseSchema,
   WatchRunsRequestSchema,
@@ -35,6 +36,12 @@ export interface GatewayLogChunk {
   readonly next: number;
 }
 export interface GatewayReader {
+  records(
+    runId: string,
+    fromSeq: bigint,
+    signal: AbortSignalLike,
+    receive: (bytes: Uint8Array) => void,
+  ): Promise<void>;
   watch(
     runId: string,
     receive: (load: SkeletonLoad | undefined, failed: boolean, hint?: RunLivenessHint) => void,
@@ -88,8 +95,10 @@ async function log(
   signal: AbortSignalLike,
   receive: (chunk: GatewayLogChunk) => void,
 ): Promise<void> {
-  const decoder = new TextDecoder();
+  const decoder = new TextDecoder('utf-8', {fatal: true, ignoreBOM: true});
+  const encoder = new TextEncoder();
   let offset = 0n;
+  let decodedOffset = 0;
   for await (const bytes of transport.stream(
     `${SERVICE}${HostService.method.tailStream.name}`,
     toBinary(TailStreamRequestSchema, create(TailStreamRequestSchema, {runId, streamId})),
@@ -102,13 +111,13 @@ async function log(
       response.nextOffset > BigInt(Number.MAX_SAFE_INTEGER)
     )
       throw new Error('Stream offset mismatch');
-    receive({
-      text: decoder.decode(response.data, {stream: true}),
-      offset: Number(offset),
-      next: Number(response.nextOffset),
-    });
+    const text = decoder.decode(response.data, {stream: true});
+    const next = decodedOffset + encoder.encode(text).length;
+    if (text !== '') receive({text, offset: decodedOffset, next});
+    decodedOffset = next;
     offset = response.nextOffset;
   }
+  if (!signal.aborted) decoder.decode();
 }
 
 export function gatewayReader(
@@ -117,6 +126,16 @@ export function gatewayReader(
   schedule: ScheduleTimeout,
 ): GatewayReader {
   return {
+    async records(runId, fromSeq, signal, receive) {
+      for await (const bytes of transport.stream(
+        `${SERVICE}${HostService.method.tail.name}`,
+        toBinary(TailRequestSchema, create(TailRequestSchema, {runId, fromSeq})),
+        signal,
+      )) {
+        if (signal.aborted) return;
+        receive(bytes);
+      }
+    },
     watch(runId, receive) {
       const actor = createActor(
         runObservationMachine.provide({

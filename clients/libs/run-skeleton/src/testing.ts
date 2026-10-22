@@ -41,6 +41,7 @@ export class FakeRunTransport implements RunTransport {
   #initialCount: number;
   readonly #blobs: Readonly<Record<string, Uint8Array>>;
   readonly #streams: Readonly<Record<string, Uint8Array>>;
+  readonly #streamChunkBytes: number;
   readonly #started = new Map<string, Set<() => void>>();
   async called(method: string): Promise<void> {
     if (this.calls.some(call => call.method === method)) return;
@@ -63,11 +64,15 @@ export class FakeRunTransport implements RunTransport {
     initialCount?: number;
     blobs?: Readonly<Record<string, Uint8Array>>;
     streams?: Readonly<Record<string, Uint8Array>>;
+    streamChunkBytes?: number;
   }) {
     this.#records = [...input.records];
     this.#initialCount = input.initialCount ?? input.records.length;
     this.#blobs = input.blobs ?? {};
     this.#streams = input.streams ?? {};
+    this.#streamChunkBytes = input.streamChunkBytes ?? 65536;
+    if (!Number.isSafeInteger(this.#streamChunkBytes) || this.#streamChunkBytes < 1)
+      throw new Error('streamChunkBytes must be a positive safe integer');
   }
   get activeStreams(): number {
     return this.#subscribers.size;
@@ -216,8 +221,11 @@ export class FakeRunTransport implements RunTransport {
       const content = this.#streams[cursor.streamId];
       if (!content) throw new Error('Missing stream');
       if (cursor.offset < BigInt(content.length)) {
-        const data = content.slice(Number(cursor.offset));
-        cursor.offset = BigInt(content.length);
+        const data = content.slice(
+          Number(cursor.offset),
+          Number(cursor.offset) + this.#streamChunkBytes,
+        );
+        cursor.offset += BigInt(data.length);
         return toBinary(
           TailStreamResponseSchema,
           create(TailStreamResponseSchema, {data, nextOffset: cursor.offset}),

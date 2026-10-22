@@ -12,6 +12,7 @@ export {
   type GatewayEvent,
   type GatewayInput,
   type GatewayLogInput,
+  type GatewayRecordsInput,
   type GatewayRunContext,
   gatewayRunMachine,
 } from './gateway-machine.js';

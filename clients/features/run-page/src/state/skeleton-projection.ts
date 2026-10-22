@@ -86,6 +86,9 @@ export function skeletonScreenState(
   };
   return {
     ...ui,
+    recordDiagnostic: ui.recordLog
+      ?.filter(row => row.failure && row.epoch === observeRun(skeleton).epoch)
+      .at(-1),
     lifecycleWord: lifecycle.word,
     positionWord: reading.latest === null ? 'Start' : duration(reading.latest),
     startupStages: reading.startup.map(step => ({

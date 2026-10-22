@@ -355,6 +355,65 @@ test('regression: a saved run’s Logs face ends in a notice, not in "Looking fo
   expect(read).not.toContain('Looking for');
 });
 
+test('native startup and diagnostics remain visible in Logs without a log stream', async () => {
+  const state = runPageStep(attaching(), SNAPSHOT).state;
+  const recordLog = [
+    {
+      seq: '1',
+      epoch: 1,
+      body: 'lifecycle' as const,
+      event: '',
+      message: 'Starting: building tools',
+      failure: false,
+    },
+    {
+      seq: '2',
+      epoch: 1,
+      body: 'notice' as const,
+      event: '',
+      message: 'The input measurement failed',
+      failure: true,
+    },
+  ];
+  const read = await face({...state, recordLog}, 'logs');
+  for (const row of recordLog) expect(read).toContain(row.message);
+});
+
+test('the Run screen shows the same native failure diagnostic as Logs', async () => {
+  const diagnostic = {
+    seq: '2',
+    epoch: 1,
+    body: 'notice' as const,
+    event: '',
+    message: 'The input measurement failed',
+    failure: true,
+  };
+  const state = {...runPageStep(attaching(), SNAPSHOT).state, recordDiagnostic: diagnostic};
+  const model = namedRun(false);
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root = createRoot(container);
+  try {
+    await act(async () =>
+      root.render(
+        <RunScreen
+          state={state}
+          model={model}
+          whole={model}
+          core={null}
+          route={RUN_ROUTE}
+          zoom={() => undefined}
+          dispatch={() => undefined}
+        />,
+      ),
+    );
+    expect(container.textContent).toContain(diagnostic.message);
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+  }
+});
+
 test('the selected idea’s line words the objective’s unit, not its metric key', async () => {
   const model = measuredRun(null);
   const [first] = model.candidates.candidates;
