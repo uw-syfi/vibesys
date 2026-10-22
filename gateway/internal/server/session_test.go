@@ -13,6 +13,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/timestamppb"
 	"os"
 	"path/filepath"
 	"strings"
@@ -74,13 +75,22 @@ func TestSessionDiscoveryTailFenceAndBlobReads(t *testing.T) {
 
 func TestChatMessageHostCallRoundTrip(t *testing.T) {
 	request := &apiv1.HostCallRequest{Checkout: "/src/vibesys", Method: &apiv1.HostCallRequest_ChatMessage{ChatMessage: &apiv1.ChatMessageRequest{ProjectRoot: "/project", RunId: "run-1", SessionId: "default", RequestId: "q-1", Text: "Why?"}}}
-	runner := hostcommand.FakeRunner{Program: func(_ context.Context, c hostcommand.Command) (hostcommand.Result, error) {
+	runner := hostcommand.FakeRunner{Program: func(ctx context.Context, c hostcommand.Command) (hostcommand.Result, error) {
 		if len(c.Args) != 2 || c.Args[1] != "chat-message" {
 			t.Errorf("method: %v", c.Args)
 		}
 		decoded := &apiv1.HostCallRequest{}
-		if err := proto.Unmarshal(c.Input, decoded); err != nil || !proto.Equal(request, decoded) {
-			t.Errorf("input: %v %v", decoded, err)
+		if err := proto.Unmarshal(c.Input, decoded); err != nil {
+			t.Fatal(err)
+		}
+		deadline, ok := ctx.Deadline()
+		if !ok {
+			t.Fatal("missing runner deadline")
+		}
+		expected := proto.Clone(request).(*apiv1.HostCallRequest)
+		expected.Deadline = timestamppb.New(deadline)
+		if !proto.Equal(expected, decoded) {
+			t.Errorf("input: got %v, want %v", decoded, expected)
 		}
 		return hostcommand.Result{Output: encode(t, &apiv1.HostCallResponse{Result: &apiv1.HostCallResponse_ChatMessage{ChatMessage: &apiv1.ChatMessageResponse{SessionId: "default", RequestId: "q-1"}}})}, nil
 	}}
