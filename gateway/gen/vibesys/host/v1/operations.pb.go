@@ -9325,7 +9325,7 @@ const file_vibesys_host_v1_operations_proto_rawDesc = "" +
 	"\xd2\xf3\x18\x06absent\x12&\n" +
 	"\x17DESTINATION_STATE_EMPTY\x10\x02\x1a\t\xd2\xf3\x18\x05empty\x12:\n" +
 	"!DESTINATION_STATE_EXAMPLE_PROJECT\x10\x03\x1a\x13\xd2\xf3\x18\x0fexample_project\x12,\n" +
-	"\x1aDESTINATION_STATE_OCCUPIED\x10\x04\x1a\f\xd2\xf3\x18\boccupiedB?Z=github.com/uw-syfi/vibesys/gateway/gen/vibesys/host/v1;hostv1b\x06proto3"
+	"\x1aDESTINATION_STATE_OCCUPIED\x10\x04\x1a\f\xd2\xf3\x18\boccupiedBH\xda\xf3\x18\x050.1.1Z=github.com/uw-syfi/vibesys/gateway/gen/vibesys/host/v1;hostv1b\x06proto3"
 
 var (
 	file_vibesys_host_v1_operations_proto_rawDescOnce sync.Once

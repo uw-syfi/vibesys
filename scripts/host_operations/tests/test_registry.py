@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 from google.protobuf import descriptor_pb2, descriptor_pool, message_factory
-from hypothesis import given
+from hypothesis import example, given
 from hypothesis import strategies as st
 from scripts.host_operations.api import GenerationError, compile_outputs, compile_registry
 from scripts.host_operations.generate import generate
@@ -173,7 +173,7 @@ def test_the_descriptor_pass_compiles_all_language_outputs_before_publication() 
     root = Path(__file__).resolve().parents[3]
     image = _image().SerializeToString()
     outputs = compile_outputs(image, _slots(), _server_sources(root), _watches())
-    assert len(outputs) == 12
+    assert len(outputs) == 13
     for path, content in outputs.items():
         if path.endswith(".py"):
             ast.parse(content)
@@ -264,3 +264,55 @@ def test_generate_publishes_every_projection(tmp_path: Path) -> None:
     generate(tmp_path, image)
     for name, content in expected.items():
         assert (tmp_path / name).read_text(encoding="utf-8") == content
+
+
+def _with_minimum_version(version: str) -> bytes:
+    image = _image()
+    pool = descriptor_pool.DescriptorPool()
+    for file in image.file:
+        pool.Add(file)
+    extension = pool.FindExtensionByName("vibesys.host.v1.minimum_checkout_version")
+    options = message_factory.GetMessageClass(
+        pool.FindMessageTypeByName("google.protobuf.FileOptions")
+    )
+    file = next(file for file in image.file if file.name == "vibesys/host/v1/operations.proto")
+    opts = options.FromString(file.options.SerializeToString())
+    opts.Extensions[extension] = version
+    file.options.ParseFromString(opts.SerializeToString())
+    return image.SerializeToString()
+
+
+@given(st.tuples(*(st.integers(min_value=0, max_value=1000) for _ in range(3))))
+@example((0, 1, 1))
+def test_minimum_version_has_one_owner_for_every_language(release: tuple[int, int, int]) -> None:
+    root = Path(__file__).resolve().parents[3]
+    version = ".".join(map(str, release))
+    outputs = compile_outputs(
+        _with_minimum_version(version), _slots(), _server_sources(root), _watches()
+    )
+    for path in (
+        "src/server/host_compatibility_generated.py",
+        "libs/vs-proto/src/vs_proto/_generated/host_operations.py",
+    ):
+        tree = ast.parse(outputs[path])
+        values = [
+            ast.literal_eval(node.value)
+            for node in tree.body
+            if isinstance(node, ast.Assign)
+            if any(
+                isinstance(target, ast.Name) and target.id == "MIN_CHECKOUT_VERSION"
+                for target in node.targets
+            )
+        ]
+        assert values == [version]
+    assert (
+        f'const MinCheckoutVersion = "{version}"'
+        in outputs["gateway/internal/hostoperations/registry_generated.go"]
+    )
+
+
+@pytest.mark.parametrize("version", ["", "1.2", "1.2.3.4", "01.2.3", "v1.2.3", "1.2.3-dev"])
+def test_minimum_version_rejects_missing_or_invalid_policy(version: str) -> None:
+    root = Path(__file__).resolve().parents[3]
+    with pytest.raises(GenerationError, match="minimum_checkout_version"):
+        compile_outputs(_with_minimum_version(version), _slots(), _server_sources(root), _watches())

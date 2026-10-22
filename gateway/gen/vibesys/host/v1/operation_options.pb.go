@@ -416,6 +416,14 @@ func (x *Correlation) GetResponsePath() []uint32 {
 
 var file_vibesys_host_v1_operation_options_proto_extTypes = []protoimpl.ExtensionInfo{
 	{
+		ExtendedType:  (*descriptorpb.FileOptions)(nil),
+		ExtensionType: (*string)(nil),
+		Field:         51003,
+		Name:          "vibesys.host.v1.minimum_checkout_version",
+		Tag:           "bytes,51003,opt,name=minimum_checkout_version",
+		Filename:      "vibesys/host/v1/operation_options.proto",
+	},
+	{
 		ExtendedType:  (*descriptorpb.MethodOptions)(nil),
 		ExtensionType: (*OperationPolicy)(nil),
 		Field:         51001,
@@ -433,16 +441,22 @@ var file_vibesys_host_v1_operation_options_proto_extTypes = []protoimpl.Extensio
 	},
 }
 
+// Extension fields to descriptorpb.FileOptions.
+var (
+	// optional string minimum_checkout_version = 51003;
+	E_MinimumCheckoutVersion = &file_vibesys_host_v1_operation_options_proto_extTypes[0]
+)
+
 // Extension fields to descriptorpb.MethodOptions.
 var (
 	// optional vibesys.host.v1.OperationPolicy operation = 51001;
-	E_Operation = &file_vibesys_host_v1_operation_options_proto_extTypes[0]
+	E_Operation = &file_vibesys_host_v1_operation_options_proto_extTypes[1]
 )
 
 // Extension fields to descriptorpb.EnumValueOptions.
 var (
 	// optional string adapter_spelling = 51002;
-	E_AdapterSpelling = &file_vibesys_host_v1_operation_options_proto_extTypes[1]
+	E_AdapterSpelling = &file_vibesys_host_v1_operation_options_proto_extTypes[2]
 )
 
 var File_vibesys_host_v1_operation_options_proto protoreflect.FileDescriptor
@@ -494,7 +508,8 @@ const file_vibesys_host_v1_operation_options_proto_rawDesc = "" +
 	"\x14EXECUTOR_UNSPECIFIED\x10\x00\x12\x15\n" +
 	"\x11EXECUTOR_CHECKOUT\x10\x01\x12!\n" +
 	"\x1dEXECUTOR_CANDIDATE_INSPECTION\x10\x02\x12\x17\n" +
-	"\x13EXECUTOR_FILESYSTEM\x10\x03:`\n" +
+	"\x13EXECUTOR_FILESYSTEM\x10\x03:X\n" +
+	"\x18minimum_checkout_version\x12\x1c.google.protobuf.FileOptions\x18\xbb\x8e\x03 \x01(\tR\x16minimumCheckoutVersion:`\n" +
 	"\toperation\x12\x1e.google.protobuf.MethodOptions\x18\xb9\x8e\x03 \x01(\v2 .vibesys.host.v1.OperationPolicyR\toperation:N\n" +
 	"\x10adapter_spelling\x12!.google.protobuf.EnumValueOptions\x18\xba\x8e\x03 \x01(\tR\x0fadapterSpellingB?Z=github.com/uw-syfi/vibesys/gateway/gen/vibesys/host/v1;hostv1b\x06proto3"
 
@@ -519,8 +534,9 @@ var file_vibesys_host_v1_operation_options_proto_goTypes = []any{
 	(Executor)(0),                         // 3: vibesys.host.v1.Executor
 	(*OperationPolicy)(nil),               // 4: vibesys.host.v1.OperationPolicy
 	(*Correlation)(nil),                   // 5: vibesys.host.v1.Correlation
-	(*descriptorpb.MethodOptions)(nil),    // 6: google.protobuf.MethodOptions
-	(*descriptorpb.EnumValueOptions)(nil), // 7: google.protobuf.EnumValueOptions
+	(*descriptorpb.FileOptions)(nil),      // 6: google.protobuf.FileOptions
+	(*descriptorpb.MethodOptions)(nil),    // 7: google.protobuf.MethodOptions
+	(*descriptorpb.EnumValueOptions)(nil), // 8: google.protobuf.EnumValueOptions
 }
 var file_vibesys_host_v1_operation_options_proto_depIdxs = []int32{
 	0, // 0: vibesys.host.v1.OperationPolicy.effect:type_name -> vibesys.host.v1.OperationEffect
@@ -528,13 +544,14 @@ var file_vibesys_host_v1_operation_options_proto_depIdxs = []int32{
 	2, // 2: vibesys.host.v1.OperationPolicy.cardinality:type_name -> vibesys.host.v1.Cardinality
 	3, // 3: vibesys.host.v1.OperationPolicy.executor:type_name -> vibesys.host.v1.Executor
 	5, // 4: vibesys.host.v1.OperationPolicy.correlation:type_name -> vibesys.host.v1.Correlation
-	6, // 5: vibesys.host.v1.operation:extendee -> google.protobuf.MethodOptions
-	7, // 6: vibesys.host.v1.adapter_spelling:extendee -> google.protobuf.EnumValueOptions
-	4, // 7: vibesys.host.v1.operation:type_name -> vibesys.host.v1.OperationPolicy
-	8, // [8:8] is the sub-list for method output_type
-	8, // [8:8] is the sub-list for method input_type
-	7, // [7:8] is the sub-list for extension type_name
-	5, // [5:7] is the sub-list for extension extendee
+	6, // 5: vibesys.host.v1.minimum_checkout_version:extendee -> google.protobuf.FileOptions
+	7, // 6: vibesys.host.v1.operation:extendee -> google.protobuf.MethodOptions
+	8, // 7: vibesys.host.v1.adapter_spelling:extendee -> google.protobuf.EnumValueOptions
+	4, // 8: vibesys.host.v1.operation:type_name -> vibesys.host.v1.OperationPolicy
+	9, // [9:9] is the sub-list for method output_type
+	9, // [9:9] is the sub-list for method input_type
+	8, // [8:9] is the sub-list for extension type_name
+	5, // [5:8] is the sub-list for extension extendee
 	0, // [0:5] is the sub-list for field type_name
 }
 
@@ -551,7 +568,7 @@ func file_vibesys_host_v1_operation_options_proto_init() {
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_vibesys_host_v1_operation_options_proto_rawDesc), len(file_vibesys_host_v1_operation_options_proto_rawDesc)),
 			NumEnums:      4,
 			NumMessages:   2,
-			NumExtensions: 2,
+			NumExtensions: 3,
 			NumServices:   0,
 		},
 		GoTypes:           file_vibesys_host_v1_operation_options_proto_goTypes,

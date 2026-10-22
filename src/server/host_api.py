@@ -73,6 +73,7 @@ from pydantic import (
     model_validator,
 )
 
+from server import host_compatibility_generated
 from server.host_agent_logins import (
     AgentLoginsListReply,
     AgentLoginsListRequest,
@@ -1599,8 +1600,7 @@ class MachineDescribeReply(HelperReplyBase):
     machine: MachineDescription
 
 
-MIN_CHECKOUT_VERSION: Final = "0.1.1"
-"""The oldest VibeSys version a checkout may have for this app to use it."""
+MIN_CHECKOUT_VERSION: Final = host_compatibility_generated.MIN_CHECKOUT_VERSION
 
 
 class CheckoutFound(BaseModel):

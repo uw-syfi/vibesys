@@ -1,3 +1,4 @@
+import {newRequestId} from '@vibesys/request-identity';
 /** The app chooses one reader for a run, using the existing host setting. */
 
 import {useRunIntents} from '@vibesys/feature-run-intents/renderer';
@@ -69,7 +70,7 @@ export function GatewayRun(props: {
         request: proposalIntent(
           {
             ...runReference(projectRoot ?? '', seed.identity.runId),
-            requestId: crypto.randomUUID(),
+            requestId: newRequestId(),
             expectedEpoch: observation?.epoch ?? 0n,
           },
           proposal,

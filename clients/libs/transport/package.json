@@ -47,7 +47,8 @@
     "test:node": "node ../../tools/scripts/run_node_tests.mjs ./src"
   },
   "dependencies": {
-    "@vibesys/contracts": "workspace:*"
+    "@vibesys/contracts": "workspace:*",
+    "@vibesys/request-identity": "workspace:*"
   },
   "devDependencies": {
     "@types/bun": "1.4.2",

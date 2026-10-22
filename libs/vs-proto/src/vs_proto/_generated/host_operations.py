@@ -604,3 +604,5 @@ MUTATION_CALLS: tuple[HostCall, ...] = (
 )
 WATCHES: dict[str, Operation] = {"login": Login}
 WATCH_CALLS: tuple[HostCall, ...] = (HostCall("login", "login", 40, 40, 600000, 5000),)
+
+MIN_CHECKOUT_VERSION = "0.1.1"

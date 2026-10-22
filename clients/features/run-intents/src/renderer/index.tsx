@@ -1,6 +1,7 @@
 import type {HostKey, RecordedProjectRoot} from '@vibesys/hosts';
 import type {GatewayBridge} from '@vibesys/ipc';
 import type {ScheduleTimeout} from '@vibesys/machine';
+import {newRequestId} from '@vibesys/request-identity';
 import {
   type RelaunchObservation,
   type RunIntentAction,
@@ -64,7 +65,7 @@ export function useRunIntents(props: {
     const request = runIntent(
       {
         ...runReference(projectRoot, props.runId),
-        requestId: crypto.randomUUID(),
+        requestId: newRequestId(),
         expectedEpoch: props.relaunch?.epoch ?? 0n,
       },
       action,

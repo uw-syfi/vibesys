@@ -14,15 +14,15 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from vs_project.api import Project, ProjectLayoutError
-from vs_proto.api import API_SCHEMA_HASH
+from vs_proto.api import API_SCHEMA_HASH, host_operations
 from vs_proto.api import host_payloads as pb
 
 _RELEASE = re.compile(r"^(\d+(?:\.\d+)*)")
 _PYPROJECT_LIMIT_BYTES = 1 << 20
 _PATH_LIMIT_BYTES = 4096
 _COMMIT_HEX_LENGTH = 40
-_MINIMUM = (0, 1, 1)
-MINIMUM_VERSION = "0.1.1"
+MINIMUM_VERSION = host_operations.MIN_CHECKOUT_VERSION
+_MINIMUM = tuple(int(part) for part in MINIMUM_VERSION.split("."))
 _HELPER_ENTRY = Path("src") / "entrypoints" / "host_helper.py"
 
 

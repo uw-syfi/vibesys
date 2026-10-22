@@ -140,7 +140,7 @@ depends_on = ["server", "server.trace", "server.execution", "server.chat", "serv
 # the standard library only; tests/architecture/test_light_entrypoints.py keeps
 # the light entrypoints' import closure free of the engine.
 path = "server.host_api"
-depends_on = ["vs_decode.api", "server.host_agent_logins", "server.host_compute", "server.host_envelope", "server.host_examples", "server.host_harness", "server.host_machine_facts", "server.host_preflight", "server.host_run_dashboard", "server.host_run_events", "server.host_run_reader", "server.host_run_summary"]
+depends_on = ["server.host_compatibility_generated", "vs_decode.api", "server.host_agent_logins", "server.host_compute", "server.host_envelope", "server.host_examples", "server.host_harness", "server.host_machine_facts", "server.host_preflight", "server.host_run_dashboard", "server.host_run_events", "server.host_run_reader", "server.host_run_summary"]
 
 [[modules]]
 # The fields every helper request and reply carries. Pydantic only.
@@ -2094,3 +2094,11 @@ depends_on = ["server.host_api", "vs_proto"]
 [[interfaces]]
 from = ["server.host_operation_types_generated"]
 expose = ["is_registry_read", "RegistryReadRequest", "UnmigratedHelperRequest"]
+
+[[modules]]
+path = "server.host_compatibility_generated"
+depends_on = []
+
+[[interfaces]]
+from = ["server.host_compatibility_generated"]
+expose = ["MIN_CHECKOUT_VERSION"]

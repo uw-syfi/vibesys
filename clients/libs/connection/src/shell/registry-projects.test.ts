@@ -1,5 +1,6 @@
 import {expect, test} from 'bun:test';
 import {create, fromBinary, toBinary} from '@bufbuild/protobuf';
+import {registryProjects} from '@vibesys/connection';
 import type {HostId} from '@vibesys/hosts';
 import {
   CreateExampleResponseSchema,
@@ -10,7 +11,6 @@ import {
   ReadRequestSchema,
   ReadResponseSchema,
 } from '@vibesys/proto';
-import {registryProjects} from './registry-projects.js';
 
 const HOST: HostId = {kind: 'ssh', alias: 'host-a'};
 
@@ -26,7 +26,7 @@ test('a v2 destination read names the example and returns the host state', async
           result: {
             case: 'inspectDestination',
             value: create(InspectDestinationResponseSchema, {
-              requestId: 'project-1',
+              requestId: requestId(ReadRequestSchema, bytes),
               state: DestinationState.ABSENT,
             }),
           },
@@ -64,7 +64,7 @@ test('a v2 create keeps a taken destination', async () => {
           result: {
             case: 'createExample',
             value: create(CreateExampleResponseSchema, {
-              requestId: 'project-1',
+              requestId: requestId(MutateRequestSchema, bytes),
               result: {case: 'taken', value: {}},
             }),
           },
@@ -79,3 +79,12 @@ test('a v2 create keeps a taken destination', async () => {
   expect(created).toEqual({kind: 'taken'});
   expect(request.method.case).toBe('createExample');
 });
+
+function requestId(
+  schema: typeof ReadRequestSchema | typeof MutateRequestSchema,
+  bytes: Uint8Array,
+): string {
+  const method = fromBinary(schema, bytes).method;
+  if (method.case === undefined) throw new Error('missing method');
+  return method.value.requestId;
+}

@@ -6,6 +6,11 @@ import "google/protobuf/descriptor.proto";
 
 option go_package = "github.com/uw-syfi/vibesys/gateway/gen/vibesys/host/v1;hostv1";
 
+// Checkout compatibility is shared by the gateway, helper, and candidate inspector.
+extend google.protobuf.FileOptions {
+  string minimum_checkout_version = 51003;
+}
+
 // All executable operation policy lives on the method descriptor.
 message OperationPolicy {
   // Temporary adapter spelling, removed with the helper transport.

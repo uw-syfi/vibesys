@@ -61,6 +61,7 @@ function featureRules() {
           '^features/$1/src/renderer/(?!state/)',
           '(?:^|/)node_modules/(?:react|react-dom|electron)/',
           ...TRANSPORT,
+          '^libs/request-identity/',
         ],
         dependencyTypesNot: ['type-only'],
       },
@@ -145,7 +146,7 @@ function desktopRules() {
       severity: 'error',
       from: {path: CONNECTION_STATE, pathNot: TEST_FILE},
       to: {
-        path: [CONNECTION_SHELL, UI_RUNTIME, ...TRANSPORT, ...CONTRACTS],
+        path: [CONNECTION_SHELL, UI_RUNTIME, ...TRANSPORT, ...CONTRACTS, '^libs/request-identity/'],
         dependencyTypesNot: ['type-only'],
       },
     },

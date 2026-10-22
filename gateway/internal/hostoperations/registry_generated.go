@@ -8,6 +8,9 @@ import (
 	"time"
 )
 
+// MinCheckoutVersion is projected from the host payload descriptor's compatibility policy.
+const MinCheckoutVersion = "0.1.1"
+
 var registry = map[uint32]Operation{
 	10: {ID: 10, Name: "ListTasks", RequestTag: 10, ResponseTag: 10, Cap: 10000 * time.Millisecond, Grace: 5000 * time.Millisecond, Effect: hostv1.OperationEffect(1), Retry: hostv1.Retry(2), Executor: hostv1.Executor(1), Cardinality: hostv1.Cardinality(1), FirstEvent: 0 * time.Millisecond, NewRequest: func() proto.Message { return &hostv1.ListTasksRequest{} }, NewResponse: func() proto.Message { return &hostv1.ListTasksResponse{} }, Correlations: [][2][]string{{{"request_id"}, {"request_id"}}}},
 	11: {ID: 11, Name: "ListHarnesses", RequestTag: 11, ResponseTag: 11, Cap: 10000 * time.Millisecond, Grace: 5000 * time.Millisecond, Effect: hostv1.OperationEffect(1), Retry: hostv1.Retry(2), Executor: hostv1.Executor(1), Cardinality: hostv1.Cardinality(1), FirstEvent: 0 * time.Millisecond, NewRequest: func() proto.Message { return &hostv1.ListHarnessesRequest{} }, NewResponse: func() proto.Message { return &hostv1.ListHarnessesResponse{} }, Correlations: [][2][]string{{{"request_id"}, {"request_id"}}}},

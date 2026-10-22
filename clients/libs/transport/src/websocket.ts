@@ -7,6 +7,7 @@ import {
   ServerError,
   streamFailure,
 } from '@vibesys/contracts';
+import {newRequestId} from '@vibesys/request-identity';
 import {
   ControlChannel,
   type ControlChannelState,
@@ -132,7 +133,7 @@ export class WebSocketTransport implements ControlTransport {
 
   constructor(url: string, options: WebSocketTransportOptions = {}) {
     this.#url = url;
-    this.#clientId = options.clientId ?? globalThis.crypto.randomUUID();
+    this.#clientId = options.clientId ?? newRequestId();
     this.#connectTimeoutMs = options.connectTimeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS;
     this.#closeGraceMs = options.closeGraceMs ?? DEFAULT_CLOSE_GRACE_MS;
     this.#webSocket = options.webSocket ?? defaultWebSocket;
@@ -641,7 +642,7 @@ export class WebSocketTransport implements ControlTransport {
   #envelope(input: RequestInput): IssuedRequest {
     return {
       protocol_version: 1,
-      request_id: globalThis.crypto.randomUUID(),
+      request_id: newRequestId(),
       client_id: this.#clientId,
       timestamp: new Date().toISOString(),
       ...input,

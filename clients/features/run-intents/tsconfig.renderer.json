@@ -35,6 +35,9 @@
     },
     {
       "path": "../../libs/runs/tsconfig.intents.json"
+    },
+    {
+      "path": "../../libs/request-identity/tsconfig.lib.json"
     }
   ]
 }

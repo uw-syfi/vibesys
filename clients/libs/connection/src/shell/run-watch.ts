@@ -68,8 +68,8 @@ function open(hosts: Map<HostKey, HostRuns>, ports: RunWatchPorts, host: HostId)
   void ports
     .stream(host, bytes, opened.abort.signal, frame => accept(opened, frame))
     .then(
-      () => settle(opened),
-      () => settle(opened),
+      () => retire(hosts, key, opened),
+      () => retire(hosts, key, opened),
     );
   return opened;
 }
@@ -93,12 +93,16 @@ function settle(opened: HostRuns): void {
   opened.waiters.length = 0;
 }
 
+function retire(hosts: Map<HostKey, HostRuns>, key: HostKey, opened: HostRuns): void {
+  if (hosts.get(key) === opened) hosts.delete(key);
+  opened.abort.abort();
+  settle(opened);
+}
+
 function stop(hosts: Map<HostKey, HostRuns>, key: HostKey): void {
   const opened = hosts.get(key);
   if (opened === undefined) return;
-  hosts.delete(key);
-  opened.abort.abort();
-  settle(opened);
+  retire(hosts, key, opened);
 }
 
 function alive(opened: HostRuns): number {

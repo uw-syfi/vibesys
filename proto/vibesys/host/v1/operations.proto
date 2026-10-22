@@ -5,6 +5,7 @@ import "buf/validate/validate.proto";
 import "vibesys/host/v1/operation_options.proto";
 
 option go_package = "github.com/uw-syfi/vibesys/gateway/gen/vibesys/host/v1;hostv1";
+option (vibesys.host.v1.minimum_checkout_version) = "0.1.1";
 
 message TaskList {
   int64 version = 1 [(buf.validate.field).int64.const = 1];

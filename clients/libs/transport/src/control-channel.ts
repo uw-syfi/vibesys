@@ -5,6 +5,7 @@ import {
   responseError,
   streamFailure,
 } from '@vibesys/contracts';
+import {newRequestId} from '@vibesys/request-identity';
 import {BackoffSchedule, DEFAULT_RECONNECT_DELAYS_MS} from './backoff.js';
 import {
   type AbortSignalLike,
@@ -983,10 +984,6 @@ export class ControlChannel {
       this.#observerFailure ??= {reason};
     }
   }
-}
-
-function newRequestId(): string {
-  return globalThis.crypto.randomUUID();
 }
 
 /**

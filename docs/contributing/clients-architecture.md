@@ -33,6 +33,7 @@ read whole, and the build model below keeps a graph of thirty packages as fast a
 
 ```text
 clients/
+  libs/request-identity/ @vibesys/request-identity  UUID request identities across clients and restarts
   libs/contracts/   @vibesys/contracts        generated message types + the one runtime validator
   libs/ui/          @vibesys/ui               the design system: domain-free components + design tokens
   libs/store/       @vibesys/store            domain-free reducer kernel + fold model-test kit
@@ -108,7 +109,7 @@ cycles, and forbids feature-to-feature and app-to-app edges, because peers share
 
 | Layer | Rank | Packages | May depend on |
 | --- | --- | --- | --- |
-| `foundation` | 0 | `contracts`, `ui`, `store` | nothing in the workspace |
+| `foundation` | 0 | `contracts`, `ui`, `store`, `request-identity` | nothing in the workspace |
 | `core` | 1 | `run-state`, `transport`, `hosts`, `machine` | foundation |
 | `domain` | 2 | `runs`, `run-session`, `run-history`, `run-fixtures` | foundation, core |
 | `service` | 3 | `ipc`, `connection`, `settings` | foundation, core, domain |
