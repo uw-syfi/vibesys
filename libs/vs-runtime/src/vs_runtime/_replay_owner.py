@@ -125,9 +125,8 @@ class ReceiptReplayExecutor[RequestT]:
                     # The outer gate is closed, and an earlier writer cannot pass
                     # the owner's lease check to install a begun marker later.
                     return ReplayAbsent()
-                sealed = self._receipts.sealed(span.id, ExecutionResult)
-            if sealed is not None:
-                return await self._encode(request, sealed[1])
+            # The native owner's run_once replays sealed results and resumes
+            # begun effects through the same receipt lifecycle as execution.
             return await self._execute(request, context)
         except ReceiptCorruptError as error:
             return ReplayUnknown(str(error))
