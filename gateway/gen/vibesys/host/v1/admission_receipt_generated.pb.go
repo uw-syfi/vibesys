@@ -92,12 +92,14 @@ type AcceptedOperation struct {
 	//	*AcceptedOperation_InspectCandidate
 	//	*AcceptedOperation_CompletePaths
 	//	*AcceptedOperation_InspectDestination
+	//	*AcceptedOperation_ListSavedRuns
 	//	*AcceptedOperation_CreateExample
 	//	*AcceptedOperation_CopyProject
 	//	*AcceptedOperation_PutCluster
 	//	*AcceptedOperation_RemoveCluster
 	//	*AcceptedOperation_TestCluster
 	//	*AcceptedOperation_StartRun
+	//	*AcceptedOperation_TerminateRun
 	//	*AcceptedOperation_Login
 	Request       isAcceptedOperation_Request `protobuf_oneof:"request"`
 	unknownFields protoimpl.UnknownFields
@@ -231,6 +233,15 @@ func (x *AcceptedOperation) GetInspectDestination() *InspectDestinationRequest {
 	return nil
 }
 
+func (x *AcceptedOperation) GetListSavedRuns() *ListSavedRunsRequest {
+	if x != nil {
+		if x, ok := x.Request.(*AcceptedOperation_ListSavedRuns); ok {
+			return x.ListSavedRuns
+		}
+	}
+	return nil
+}
+
 func (x *AcceptedOperation) GetCreateExample() *CreateExampleRequest {
 	if x != nil {
 		if x, ok := x.Request.(*AcceptedOperation_CreateExample); ok {
@@ -280,6 +291,15 @@ func (x *AcceptedOperation) GetStartRun() *StartRunRequest {
 	if x != nil {
 		if x, ok := x.Request.(*AcceptedOperation_StartRun); ok {
 			return x.StartRun
+		}
+	}
+	return nil
+}
+
+func (x *AcceptedOperation) GetTerminateRun() *TerminateRunRequest {
+	if x != nil {
+		if x, ok := x.Request.(*AcceptedOperation_TerminateRun); ok {
+			return x.TerminateRun
 		}
 	}
 	return nil
@@ -338,6 +358,10 @@ type AcceptedOperation_InspectDestination struct {
 	InspectDestination *InspectDestinationRequest `protobuf:"bytes,23,opt,name=inspect_destination,json=inspectDestination,proto3,oneof"`
 }
 
+type AcceptedOperation_ListSavedRuns struct {
+	ListSavedRuns *ListSavedRunsRequest `protobuf:"bytes,37,opt,name=list_saved_runs,json=listSavedRuns,proto3,oneof"`
+}
+
 type AcceptedOperation_CreateExample struct {
 	CreateExample *CreateExampleRequest `protobuf:"bytes,34,opt,name=create_example,json=createExample,proto3,oneof"`
 }
@@ -360,6 +384,10 @@ type AcceptedOperation_TestCluster struct {
 
 type AcceptedOperation_StartRun struct {
 	StartRun *StartRunRequest `protobuf:"bytes,36,opt,name=start_run,json=startRun,proto3,oneof"`
+}
+
+type AcceptedOperation_TerminateRun struct {
+	TerminateRun *TerminateRunRequest `protobuf:"bytes,38,opt,name=terminate_run,json=terminateRun,proto3,oneof"`
 }
 
 type AcceptedOperation_Login struct {
@@ -386,6 +414,8 @@ func (*AcceptedOperation_CompletePaths) isAcceptedOperation_Request() {}
 
 func (*AcceptedOperation_InspectDestination) isAcceptedOperation_Request() {}
 
+func (*AcceptedOperation_ListSavedRuns) isAcceptedOperation_Request() {}
+
 func (*AcceptedOperation_CreateExample) isAcceptedOperation_Request() {}
 
 func (*AcceptedOperation_CopyProject) isAcceptedOperation_Request() {}
@@ -397,6 +427,8 @@ func (*AcceptedOperation_RemoveCluster) isAcceptedOperation_Request() {}
 func (*AcceptedOperation_TestCluster) isAcceptedOperation_Request() {}
 
 func (*AcceptedOperation_StartRun) isAcceptedOperation_Request() {}
+
+func (*AcceptedOperation_TerminateRun) isAcceptedOperation_Request() {}
 
 func (*AcceptedOperation_Login) isAcceptedOperation_Request() {}
 
@@ -415,12 +447,14 @@ type OperationResult struct {
 	//	*OperationResult_InspectCandidate
 	//	*OperationResult_CompletePaths
 	//	*OperationResult_InspectDestination
+	//	*OperationResult_ListSavedRuns
 	//	*OperationResult_CreateExample
 	//	*OperationResult_CopyProject
 	//	*OperationResult_PutCluster
 	//	*OperationResult_RemoveCluster
 	//	*OperationResult_TestCluster
 	//	*OperationResult_StartRun
+	//	*OperationResult_TerminateRun
 	//	*OperationResult_Login
 	Result        isOperationResult_Result `protobuf_oneof:"result"`
 	unknownFields protoimpl.UnknownFields
@@ -563,6 +597,15 @@ func (x *OperationResult) GetInspectDestination() *InspectDestinationResponse {
 	return nil
 }
 
+func (x *OperationResult) GetListSavedRuns() *ListSavedRunsResponse {
+	if x != nil {
+		if x, ok := x.Result.(*OperationResult_ListSavedRuns); ok {
+			return x.ListSavedRuns
+		}
+	}
+	return nil
+}
+
 func (x *OperationResult) GetCreateExample() *CreateExampleResponse {
 	if x != nil {
 		if x, ok := x.Result.(*OperationResult_CreateExample); ok {
@@ -612,6 +655,15 @@ func (x *OperationResult) GetStartRun() *StartRunResponse {
 	if x != nil {
 		if x, ok := x.Result.(*OperationResult_StartRun); ok {
 			return x.StartRun
+		}
+	}
+	return nil
+}
+
+func (x *OperationResult) GetTerminateRun() *TerminateRunResponse {
+	if x != nil {
+		if x, ok := x.Result.(*OperationResult_TerminateRun); ok {
+			return x.TerminateRun
 		}
 	}
 	return nil
@@ -674,6 +726,10 @@ type OperationResult_InspectDestination struct {
 	InspectDestination *InspectDestinationResponse `protobuf:"bytes,23,opt,name=inspect_destination,json=inspectDestination,proto3,oneof"`
 }
 
+type OperationResult_ListSavedRuns struct {
+	ListSavedRuns *ListSavedRunsResponse `protobuf:"bytes,37,opt,name=list_saved_runs,json=listSavedRuns,proto3,oneof"`
+}
+
 type OperationResult_CreateExample struct {
 	CreateExample *CreateExampleResponse `protobuf:"bytes,34,opt,name=create_example,json=createExample,proto3,oneof"`
 }
@@ -696,6 +752,10 @@ type OperationResult_TestCluster struct {
 
 type OperationResult_StartRun struct {
 	StartRun *StartRunResponse `protobuf:"bytes,36,opt,name=start_run,json=startRun,proto3,oneof"`
+}
+
+type OperationResult_TerminateRun struct {
+	TerminateRun *TerminateRunResponse `protobuf:"bytes,38,opt,name=terminate_run,json=terminateRun,proto3,oneof"`
 }
 
 type OperationResult_Login struct {
@@ -724,6 +784,8 @@ func (*OperationResult_CompletePaths) isOperationResult_Result() {}
 
 func (*OperationResult_InspectDestination) isOperationResult_Result() {}
 
+func (*OperationResult_ListSavedRuns) isOperationResult_Result() {}
+
 func (*OperationResult_CreateExample) isOperationResult_Result() {}
 
 func (*OperationResult_CopyProject) isOperationResult_Result() {}
@@ -735,6 +797,8 @@ func (*OperationResult_RemoveCluster) isOperationResult_Result() {}
 func (*OperationResult_TestCluster) isOperationResult_Result() {}
 
 func (*OperationResult_StartRun) isOperationResult_Result() {}
+
+func (*OperationResult_TerminateRun) isOperationResult_Result() {}
 
 func (*OperationResult_Login) isOperationResult_Result() {}
 
@@ -1264,8 +1328,7 @@ var File_vibesys_host_v1_admission_receipt_generated_proto protoreflect.FileDesc
 
 const file_vibesys_host_v1_admission_receipt_generated_proto_rawDesc = "" +
 	"\n" +
-	"1vibesys/host/v1/admission_receipt_generated.proto\x12\x0fvibesys.host.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1dvibesys/host/v1/failure.proto\x1a vibesys/host/v1/operations.proto\"\xb9\n" +
-	"\n" +
+	"1vibesys/host/v1/admission_receipt_generated.proto\x12\x0fvibesys.host.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1dvibesys/host/v1/failure.proto\x1a vibesys/host/v1/operations.proto\"\xd7\v\n" +
 	"\x11AcceptedOperation\x12B\n" +
 	"\n" +
 	"list_tasks\x18\n" +
@@ -1278,16 +1341,18 @@ const file_vibesys_host_v1_admission_receipt_generated_proto_rawDesc = "" +
 	"\rpreflight_run\x18\x10 \x01(\v2$.vibesys.host.v1.PreflightRunRequestH\x00R\fpreflightRun\x12W\n" +
 	"\x11inspect_candidate\x18\x11 \x01(\v2(.vibesys.host.v1.InspectCandidateRequestH\x00R\x10inspectCandidate\x12N\n" +
 	"\x0ecomplete_paths\x18\x12 \x01(\v2%.vibesys.host.v1.CompletePathsRequestH\x00R\rcompletePaths\x12]\n" +
-	"\x13inspect_destination\x18\x17 \x01(\v2*.vibesys.host.v1.InspectDestinationRequestH\x00R\x12inspectDestination\x12N\n" +
+	"\x13inspect_destination\x18\x17 \x01(\v2*.vibesys.host.v1.InspectDestinationRequestH\x00R\x12inspectDestination\x12O\n" +
+	"\x0flist_saved_runs\x18% \x01(\v2%.vibesys.host.v1.ListSavedRunsRequestH\x00R\rlistSavedRuns\x12N\n" +
 	"\x0ecreate_example\x18\" \x01(\v2%.vibesys.host.v1.CreateExampleRequestH\x00R\rcreateExample\x12H\n" +
 	"\fcopy_project\x18# \x01(\v2#.vibesys.host.v1.CopyProjectRequestH\x00R\vcopyProject\x12E\n" +
 	"\vput_cluster\x18\x1f \x01(\v2\".vibesys.host.v1.PutClusterRequestH\x00R\n" +
 	"putCluster\x12N\n" +
 	"\x0eremove_cluster\x18  \x01(\v2%.vibesys.host.v1.RemoveClusterRequestH\x00R\rremoveCluster\x12H\n" +
 	"\ftest_cluster\x18! \x01(\v2#.vibesys.host.v1.TestClusterRequestH\x00R\vtestCluster\x12?\n" +
-	"\tstart_run\x18$ \x01(\v2 .vibesys.host.v1.StartRunRequestH\x00R\bstartRun\x125\n" +
+	"\tstart_run\x18$ \x01(\v2 .vibesys.host.v1.StartRunRequestH\x00R\bstartRun\x12K\n" +
+	"\rterminate_run\x18& \x01(\v2$.vibesys.host.v1.TerminateRunRequestH\x00R\fterminateRun\x125\n" +
 	"\x05login\x18( \x01(\v2\x1d.vibesys.host.v1.LoginRequestH\x00R\x05loginB\x10\n" +
-	"\arequest\x12\x05\xbaH\x02\b\x01\"\x86\v\n" +
+	"\arequest\x12\x05\xbaH\x02\b\x01\"\xa6\f\n" +
 	"\x0fOperationResult\x12=\n" +
 	"\afailure\x18\x02 \x01(\v2!.vibesys.host.v1.OperationFailureH\x00R\afailure\x12C\n" +
 	"\n" +
@@ -1301,14 +1366,16 @@ const file_vibesys_host_v1_admission_receipt_generated_proto_rawDesc = "" +
 	"\rpreflight_run\x18\x10 \x01(\v2%.vibesys.host.v1.PreflightRunResponseH\x00R\fpreflightRun\x12X\n" +
 	"\x11inspect_candidate\x18\x11 \x01(\v2).vibesys.host.v1.InspectCandidateResponseH\x00R\x10inspectCandidate\x12O\n" +
 	"\x0ecomplete_paths\x18\x12 \x01(\v2&.vibesys.host.v1.CompletePathsResponseH\x00R\rcompletePaths\x12^\n" +
-	"\x13inspect_destination\x18\x17 \x01(\v2+.vibesys.host.v1.InspectDestinationResponseH\x00R\x12inspectDestination\x12O\n" +
+	"\x13inspect_destination\x18\x17 \x01(\v2+.vibesys.host.v1.InspectDestinationResponseH\x00R\x12inspectDestination\x12P\n" +
+	"\x0flist_saved_runs\x18% \x01(\v2&.vibesys.host.v1.ListSavedRunsResponseH\x00R\rlistSavedRuns\x12O\n" +
 	"\x0ecreate_example\x18\" \x01(\v2&.vibesys.host.v1.CreateExampleResponseH\x00R\rcreateExample\x12I\n" +
 	"\fcopy_project\x18# \x01(\v2$.vibesys.host.v1.CopyProjectResponseH\x00R\vcopyProject\x12F\n" +
 	"\vput_cluster\x18\x1f \x01(\v2#.vibesys.host.v1.PutClusterResponseH\x00R\n" +
 	"putCluster\x12O\n" +
 	"\x0eremove_cluster\x18  \x01(\v2&.vibesys.host.v1.RemoveClusterResponseH\x00R\rremoveCluster\x12I\n" +
 	"\ftest_cluster\x18! \x01(\v2$.vibesys.host.v1.TestClusterResponseH\x00R\vtestCluster\x12@\n" +
-	"\tstart_run\x18$ \x01(\v2!.vibesys.host.v1.StartRunResponseH\x00R\bstartRun\x126\n" +
+	"\tstart_run\x18$ \x01(\v2!.vibesys.host.v1.StartRunResponseH\x00R\bstartRun\x12L\n" +
+	"\rterminate_run\x18& \x01(\v2%.vibesys.host.v1.TerminateRunResponseH\x00R\fterminateRun\x126\n" +
 	"\x05login\x18( \x01(\v2\x1e.vibesys.host.v1.LoginResponseH\x00R\x05loginB\x0f\n" +
 	"\x06result\x12\x05\xbaH\x02\b\x01\"\xbf\x01\n" +
 	"\x11AdmissionIdentity\x12*\n" +
@@ -1400,31 +1467,35 @@ var file_vibesys_host_v1_admission_receipt_generated_proto_goTypes = []any{
 	(*InspectCandidateRequest)(nil),    // 17: vibesys.host.v1.InspectCandidateRequest
 	(*CompletePathsRequest)(nil),       // 18: vibesys.host.v1.CompletePathsRequest
 	(*InspectDestinationRequest)(nil),  // 19: vibesys.host.v1.InspectDestinationRequest
-	(*CreateExampleRequest)(nil),       // 20: vibesys.host.v1.CreateExampleRequest
-	(*CopyProjectRequest)(nil),         // 21: vibesys.host.v1.CopyProjectRequest
-	(*PutClusterRequest)(nil),          // 22: vibesys.host.v1.PutClusterRequest
-	(*RemoveClusterRequest)(nil),       // 23: vibesys.host.v1.RemoveClusterRequest
-	(*TestClusterRequest)(nil),         // 24: vibesys.host.v1.TestClusterRequest
-	(*StartRunRequest)(nil),            // 25: vibesys.host.v1.StartRunRequest
-	(*LoginRequest)(nil),               // 26: vibesys.host.v1.LoginRequest
-	(*OperationFailure)(nil),           // 27: vibesys.host.v1.OperationFailure
-	(*ListTasksResponse)(nil),          // 28: vibesys.host.v1.ListTasksResponse
-	(*ListHarnessesResponse)(nil),      // 29: vibesys.host.v1.ListHarnessesResponse
-	(*ListExamplesResponse)(nil),       // 30: vibesys.host.v1.ListExamplesResponse
-	(*GetTaskGoalResponse)(nil),        // 31: vibesys.host.v1.GetTaskGoalResponse
-	(*DescribeMachineResponse)(nil),    // 32: vibesys.host.v1.DescribeMachineResponse
-	(*ListComputeResponse)(nil),        // 33: vibesys.host.v1.ListComputeResponse
-	(*PreflightRunResponse)(nil),       // 34: vibesys.host.v1.PreflightRunResponse
-	(*InspectCandidateResponse)(nil),   // 35: vibesys.host.v1.InspectCandidateResponse
-	(*CompletePathsResponse)(nil),      // 36: vibesys.host.v1.CompletePathsResponse
-	(*InspectDestinationResponse)(nil), // 37: vibesys.host.v1.InspectDestinationResponse
-	(*CreateExampleResponse)(nil),      // 38: vibesys.host.v1.CreateExampleResponse
-	(*CopyProjectResponse)(nil),        // 39: vibesys.host.v1.CopyProjectResponse
-	(*PutClusterResponse)(nil),         // 40: vibesys.host.v1.PutClusterResponse
-	(*RemoveClusterResponse)(nil),      // 41: vibesys.host.v1.RemoveClusterResponse
-	(*TestClusterResponse)(nil),        // 42: vibesys.host.v1.TestClusterResponse
-	(*StartRunResponse)(nil),           // 43: vibesys.host.v1.StartRunResponse
-	(*LoginResponse)(nil),              // 44: vibesys.host.v1.LoginResponse
+	(*ListSavedRunsRequest)(nil),       // 20: vibesys.host.v1.ListSavedRunsRequest
+	(*CreateExampleRequest)(nil),       // 21: vibesys.host.v1.CreateExampleRequest
+	(*CopyProjectRequest)(nil),         // 22: vibesys.host.v1.CopyProjectRequest
+	(*PutClusterRequest)(nil),          // 23: vibesys.host.v1.PutClusterRequest
+	(*RemoveClusterRequest)(nil),       // 24: vibesys.host.v1.RemoveClusterRequest
+	(*TestClusterRequest)(nil),         // 25: vibesys.host.v1.TestClusterRequest
+	(*StartRunRequest)(nil),            // 26: vibesys.host.v1.StartRunRequest
+	(*TerminateRunRequest)(nil),        // 27: vibesys.host.v1.TerminateRunRequest
+	(*LoginRequest)(nil),               // 28: vibesys.host.v1.LoginRequest
+	(*OperationFailure)(nil),           // 29: vibesys.host.v1.OperationFailure
+	(*ListTasksResponse)(nil),          // 30: vibesys.host.v1.ListTasksResponse
+	(*ListHarnessesResponse)(nil),      // 31: vibesys.host.v1.ListHarnessesResponse
+	(*ListExamplesResponse)(nil),       // 32: vibesys.host.v1.ListExamplesResponse
+	(*GetTaskGoalResponse)(nil),        // 33: vibesys.host.v1.GetTaskGoalResponse
+	(*DescribeMachineResponse)(nil),    // 34: vibesys.host.v1.DescribeMachineResponse
+	(*ListComputeResponse)(nil),        // 35: vibesys.host.v1.ListComputeResponse
+	(*PreflightRunResponse)(nil),       // 36: vibesys.host.v1.PreflightRunResponse
+	(*InspectCandidateResponse)(nil),   // 37: vibesys.host.v1.InspectCandidateResponse
+	(*CompletePathsResponse)(nil),      // 38: vibesys.host.v1.CompletePathsResponse
+	(*InspectDestinationResponse)(nil), // 39: vibesys.host.v1.InspectDestinationResponse
+	(*ListSavedRunsResponse)(nil),      // 40: vibesys.host.v1.ListSavedRunsResponse
+	(*CreateExampleResponse)(nil),      // 41: vibesys.host.v1.CreateExampleResponse
+	(*CopyProjectResponse)(nil),        // 42: vibesys.host.v1.CopyProjectResponse
+	(*PutClusterResponse)(nil),         // 43: vibesys.host.v1.PutClusterResponse
+	(*RemoveClusterResponse)(nil),      // 44: vibesys.host.v1.RemoveClusterResponse
+	(*TestClusterResponse)(nil),        // 45: vibesys.host.v1.TestClusterResponse
+	(*StartRunResponse)(nil),           // 46: vibesys.host.v1.StartRunResponse
+	(*TerminateRunResponse)(nil),       // 47: vibesys.host.v1.TerminateRunResponse
+	(*LoginResponse)(nil),              // 48: vibesys.host.v1.LoginResponse
 }
 var file_vibesys_host_v1_admission_receipt_generated_proto_depIdxs = []int32{
 	10, // 0: vibesys.host.v1.AcceptedOperation.list_tasks:type_name -> vibesys.host.v1.ListTasksRequest
@@ -1437,48 +1508,52 @@ var file_vibesys_host_v1_admission_receipt_generated_proto_depIdxs = []int32{
 	17, // 7: vibesys.host.v1.AcceptedOperation.inspect_candidate:type_name -> vibesys.host.v1.InspectCandidateRequest
 	18, // 8: vibesys.host.v1.AcceptedOperation.complete_paths:type_name -> vibesys.host.v1.CompletePathsRequest
 	19, // 9: vibesys.host.v1.AcceptedOperation.inspect_destination:type_name -> vibesys.host.v1.InspectDestinationRequest
-	20, // 10: vibesys.host.v1.AcceptedOperation.create_example:type_name -> vibesys.host.v1.CreateExampleRequest
-	21, // 11: vibesys.host.v1.AcceptedOperation.copy_project:type_name -> vibesys.host.v1.CopyProjectRequest
-	22, // 12: vibesys.host.v1.AcceptedOperation.put_cluster:type_name -> vibesys.host.v1.PutClusterRequest
-	23, // 13: vibesys.host.v1.AcceptedOperation.remove_cluster:type_name -> vibesys.host.v1.RemoveClusterRequest
-	24, // 14: vibesys.host.v1.AcceptedOperation.test_cluster:type_name -> vibesys.host.v1.TestClusterRequest
-	25, // 15: vibesys.host.v1.AcceptedOperation.start_run:type_name -> vibesys.host.v1.StartRunRequest
-	26, // 16: vibesys.host.v1.AcceptedOperation.login:type_name -> vibesys.host.v1.LoginRequest
-	27, // 17: vibesys.host.v1.OperationResult.failure:type_name -> vibesys.host.v1.OperationFailure
-	28, // 18: vibesys.host.v1.OperationResult.list_tasks:type_name -> vibesys.host.v1.ListTasksResponse
-	29, // 19: vibesys.host.v1.OperationResult.list_harnesses:type_name -> vibesys.host.v1.ListHarnessesResponse
-	30, // 20: vibesys.host.v1.OperationResult.list_examples:type_name -> vibesys.host.v1.ListExamplesResponse
-	31, // 21: vibesys.host.v1.OperationResult.get_task_goal:type_name -> vibesys.host.v1.GetTaskGoalResponse
-	32, // 22: vibesys.host.v1.OperationResult.describe_machine:type_name -> vibesys.host.v1.DescribeMachineResponse
-	33, // 23: vibesys.host.v1.OperationResult.list_compute:type_name -> vibesys.host.v1.ListComputeResponse
-	34, // 24: vibesys.host.v1.OperationResult.preflight_run:type_name -> vibesys.host.v1.PreflightRunResponse
-	35, // 25: vibesys.host.v1.OperationResult.inspect_candidate:type_name -> vibesys.host.v1.InspectCandidateResponse
-	36, // 26: vibesys.host.v1.OperationResult.complete_paths:type_name -> vibesys.host.v1.CompletePathsResponse
-	37, // 27: vibesys.host.v1.OperationResult.inspect_destination:type_name -> vibesys.host.v1.InspectDestinationResponse
-	38, // 28: vibesys.host.v1.OperationResult.create_example:type_name -> vibesys.host.v1.CreateExampleResponse
-	39, // 29: vibesys.host.v1.OperationResult.copy_project:type_name -> vibesys.host.v1.CopyProjectResponse
-	40, // 30: vibesys.host.v1.OperationResult.put_cluster:type_name -> vibesys.host.v1.PutClusterResponse
-	41, // 31: vibesys.host.v1.OperationResult.remove_cluster:type_name -> vibesys.host.v1.RemoveClusterResponse
-	42, // 32: vibesys.host.v1.OperationResult.test_cluster:type_name -> vibesys.host.v1.TestClusterResponse
-	43, // 33: vibesys.host.v1.OperationResult.start_run:type_name -> vibesys.host.v1.StartRunResponse
-	44, // 34: vibesys.host.v1.OperationResult.login:type_name -> vibesys.host.v1.LoginResponse
-	4,  // 35: vibesys.host.v1.PublicationAbsent.intent:type_name -> vibesys.host.v1.PublicationEvidence
-	4,  // 36: vibesys.host.v1.PublicationPublished.intent:type_name -> vibesys.host.v1.PublicationEvidence
-	2,  // 37: vibesys.host.v1.PublicationPublished.result:type_name -> vibesys.host.v1.OperationResult
-	4,  // 38: vibesys.host.v1.PublicationUnknown.intent:type_name -> vibesys.host.v1.PublicationEvidence
-	5,  // 39: vibesys.host.v1.PublicationObservation.absent:type_name -> vibesys.host.v1.PublicationAbsent
-	6,  // 40: vibesys.host.v1.PublicationObservation.published:type_name -> vibesys.host.v1.PublicationPublished
-	7,  // 41: vibesys.host.v1.PublicationObservation.unknown:type_name -> vibesys.host.v1.PublicationUnknown
-	3,  // 42: vibesys.host.v1.AdmissionReceipt.identity:type_name -> vibesys.host.v1.AdmissionIdentity
-	1,  // 43: vibesys.host.v1.AdmissionReceipt.accepted:type_name -> vibesys.host.v1.AcceptedOperation
-	0,  // 44: vibesys.host.v1.AdmissionReceipt.status:type_name -> vibesys.host.v1.AdmissionStatus
-	4,  // 45: vibesys.host.v1.AdmissionReceipt.intent:type_name -> vibesys.host.v1.PublicationEvidence
-	2,  // 46: vibesys.host.v1.AdmissionReceipt.result:type_name -> vibesys.host.v1.OperationResult
-	47, // [47:47] is the sub-list for method output_type
-	47, // [47:47] is the sub-list for method input_type
-	47, // [47:47] is the sub-list for extension type_name
-	47, // [47:47] is the sub-list for extension extendee
-	0,  // [0:47] is the sub-list for field type_name
+	20, // 10: vibesys.host.v1.AcceptedOperation.list_saved_runs:type_name -> vibesys.host.v1.ListSavedRunsRequest
+	21, // 11: vibesys.host.v1.AcceptedOperation.create_example:type_name -> vibesys.host.v1.CreateExampleRequest
+	22, // 12: vibesys.host.v1.AcceptedOperation.copy_project:type_name -> vibesys.host.v1.CopyProjectRequest
+	23, // 13: vibesys.host.v1.AcceptedOperation.put_cluster:type_name -> vibesys.host.v1.PutClusterRequest
+	24, // 14: vibesys.host.v1.AcceptedOperation.remove_cluster:type_name -> vibesys.host.v1.RemoveClusterRequest
+	25, // 15: vibesys.host.v1.AcceptedOperation.test_cluster:type_name -> vibesys.host.v1.TestClusterRequest
+	26, // 16: vibesys.host.v1.AcceptedOperation.start_run:type_name -> vibesys.host.v1.StartRunRequest
+	27, // 17: vibesys.host.v1.AcceptedOperation.terminate_run:type_name -> vibesys.host.v1.TerminateRunRequest
+	28, // 18: vibesys.host.v1.AcceptedOperation.login:type_name -> vibesys.host.v1.LoginRequest
+	29, // 19: vibesys.host.v1.OperationResult.failure:type_name -> vibesys.host.v1.OperationFailure
+	30, // 20: vibesys.host.v1.OperationResult.list_tasks:type_name -> vibesys.host.v1.ListTasksResponse
+	31, // 21: vibesys.host.v1.OperationResult.list_harnesses:type_name -> vibesys.host.v1.ListHarnessesResponse
+	32, // 22: vibesys.host.v1.OperationResult.list_examples:type_name -> vibesys.host.v1.ListExamplesResponse
+	33, // 23: vibesys.host.v1.OperationResult.get_task_goal:type_name -> vibesys.host.v1.GetTaskGoalResponse
+	34, // 24: vibesys.host.v1.OperationResult.describe_machine:type_name -> vibesys.host.v1.DescribeMachineResponse
+	35, // 25: vibesys.host.v1.OperationResult.list_compute:type_name -> vibesys.host.v1.ListComputeResponse
+	36, // 26: vibesys.host.v1.OperationResult.preflight_run:type_name -> vibesys.host.v1.PreflightRunResponse
+	37, // 27: vibesys.host.v1.OperationResult.inspect_candidate:type_name -> vibesys.host.v1.InspectCandidateResponse
+	38, // 28: vibesys.host.v1.OperationResult.complete_paths:type_name -> vibesys.host.v1.CompletePathsResponse
+	39, // 29: vibesys.host.v1.OperationResult.inspect_destination:type_name -> vibesys.host.v1.InspectDestinationResponse
+	40, // 30: vibesys.host.v1.OperationResult.list_saved_runs:type_name -> vibesys.host.v1.ListSavedRunsResponse
+	41, // 31: vibesys.host.v1.OperationResult.create_example:type_name -> vibesys.host.v1.CreateExampleResponse
+	42, // 32: vibesys.host.v1.OperationResult.copy_project:type_name -> vibesys.host.v1.CopyProjectResponse
+	43, // 33: vibesys.host.v1.OperationResult.put_cluster:type_name -> vibesys.host.v1.PutClusterResponse
+	44, // 34: vibesys.host.v1.OperationResult.remove_cluster:type_name -> vibesys.host.v1.RemoveClusterResponse
+	45, // 35: vibesys.host.v1.OperationResult.test_cluster:type_name -> vibesys.host.v1.TestClusterResponse
+	46, // 36: vibesys.host.v1.OperationResult.start_run:type_name -> vibesys.host.v1.StartRunResponse
+	47, // 37: vibesys.host.v1.OperationResult.terminate_run:type_name -> vibesys.host.v1.TerminateRunResponse
+	48, // 38: vibesys.host.v1.OperationResult.login:type_name -> vibesys.host.v1.LoginResponse
+	4,  // 39: vibesys.host.v1.PublicationAbsent.intent:type_name -> vibesys.host.v1.PublicationEvidence
+	4,  // 40: vibesys.host.v1.PublicationPublished.intent:type_name -> vibesys.host.v1.PublicationEvidence
+	2,  // 41: vibesys.host.v1.PublicationPublished.result:type_name -> vibesys.host.v1.OperationResult
+	4,  // 42: vibesys.host.v1.PublicationUnknown.intent:type_name -> vibesys.host.v1.PublicationEvidence
+	5,  // 43: vibesys.host.v1.PublicationObservation.absent:type_name -> vibesys.host.v1.PublicationAbsent
+	6,  // 44: vibesys.host.v1.PublicationObservation.published:type_name -> vibesys.host.v1.PublicationPublished
+	7,  // 45: vibesys.host.v1.PublicationObservation.unknown:type_name -> vibesys.host.v1.PublicationUnknown
+	3,  // 46: vibesys.host.v1.AdmissionReceipt.identity:type_name -> vibesys.host.v1.AdmissionIdentity
+	1,  // 47: vibesys.host.v1.AdmissionReceipt.accepted:type_name -> vibesys.host.v1.AcceptedOperation
+	0,  // 48: vibesys.host.v1.AdmissionReceipt.status:type_name -> vibesys.host.v1.AdmissionStatus
+	4,  // 49: vibesys.host.v1.AdmissionReceipt.intent:type_name -> vibesys.host.v1.PublicationEvidence
+	2,  // 50: vibesys.host.v1.AdmissionReceipt.result:type_name -> vibesys.host.v1.OperationResult
+	51, // [51:51] is the sub-list for method output_type
+	51, // [51:51] is the sub-list for method input_type
+	51, // [51:51] is the sub-list for extension type_name
+	51, // [51:51] is the sub-list for extension extendee
+	0,  // [0:51] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_host_v1_admission_receipt_generated_proto_init() }
@@ -1499,12 +1574,14 @@ func file_vibesys_host_v1_admission_receipt_generated_proto_init() {
 		(*AcceptedOperation_InspectCandidate)(nil),
 		(*AcceptedOperation_CompletePaths)(nil),
 		(*AcceptedOperation_InspectDestination)(nil),
+		(*AcceptedOperation_ListSavedRuns)(nil),
 		(*AcceptedOperation_CreateExample)(nil),
 		(*AcceptedOperation_CopyProject)(nil),
 		(*AcceptedOperation_PutCluster)(nil),
 		(*AcceptedOperation_RemoveCluster)(nil),
 		(*AcceptedOperation_TestCluster)(nil),
 		(*AcceptedOperation_StartRun)(nil),
+		(*AcceptedOperation_TerminateRun)(nil),
 		(*AcceptedOperation_Login)(nil),
 	}
 	file_vibesys_host_v1_admission_receipt_generated_proto_msgTypes[1].OneofWrappers = []any{
@@ -1519,12 +1596,14 @@ func file_vibesys_host_v1_admission_receipt_generated_proto_init() {
 		(*OperationResult_InspectCandidate)(nil),
 		(*OperationResult_CompletePaths)(nil),
 		(*OperationResult_InspectDestination)(nil),
+		(*OperationResult_ListSavedRuns)(nil),
 		(*OperationResult_CreateExample)(nil),
 		(*OperationResult_CopyProject)(nil),
 		(*OperationResult_PutCluster)(nil),
 		(*OperationResult_RemoveCluster)(nil),
 		(*OperationResult_TestCluster)(nil),
 		(*OperationResult_StartRun)(nil),
+		(*OperationResult_TerminateRun)(nil),
 		(*OperationResult_Login)(nil),
 	}
 	file_vibesys_host_v1_admission_receipt_generated_proto_msgTypes[7].OneofWrappers = []any{

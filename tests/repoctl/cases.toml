@@ -38,7 +38,7 @@ pnpm_packages = []
 
 [[cases]]
 name = "repoctl code and policy changes select all checks"
-paths = ["support/repoctl/main.go", ".repoctl/components.toml", ".repoctl/checks.toml"]
+paths = ["support/repoctl/main.go", ".repoctl/components.toml", ".repoctl/checks.toml", ".github/actions/setup-runner-apt/action.yml"]
 jobs = ["agent_image", "evaluators", "examples", "impact", "python", "real_tiers", "stitch", "clients", "proto", "gateway"]
 [cases.collections]
 native_languages = "all"
@@ -356,6 +356,24 @@ pnpm_packages = []
 name = "proto compatibility entry and regression select contract verification"
 paths = ["scripts/check_proto_breaking.sh", "scripts/tests/test_proto_breaking.sh"]
 jobs = ["proto", "python"]
+[cases.collections]
+native_languages = []
+native_targets = []
+pnpm_packages = []
+
+[[cases]]
+name = "native saved-run metadata selects its consumers"
+paths = ["src/server/host_saved_runs.py"]
+jobs = ["python"]
+[cases.collections]
+native_languages = []
+native_targets = []
+pnpm_packages = []
+
+[[cases]]
+name = "Pause-now escalation selects its Python owners"
+paths = ["src/vibesys/api/host_terminate.py"]
+jobs = ["python"]
 [cases.collections]
 native_languages = []
 native_targets = []

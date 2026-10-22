@@ -13,10 +13,12 @@ from entrypoints.host import main
 from vs_project.api import Project
 from vs_proto.api import MutateRequest, MutateResponse, Oneof, ReadRequest, ReadResponse, validate
 from vs_proto.api import host_payloads as pb
-from vs_sim.api.testing import FakeProcesses, ProcessScript, SimThreads
+from vs_sim.api.testing import FakeProcesses, FakeProcessSignaller, ProcessScript
 
 if TYPE_CHECKING:
     from pathlib import Path
+
+    from vs_sim.api.testing import Sim
 
 
 @pytest.fixture
@@ -31,20 +33,29 @@ def host_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return tmp_path
 
 
-def invoke(command: str, payload: bytes) -> bytes:
+def invoke(command: str, payload: bytes, sim: Sim) -> bytes:
     """Exercise dispatch, framing and the command with simulated scheduling."""
-    threads = SimThreads()
+    threads = sim.threads()
     processes = FakeProcesses(lambda _: ProcessScript(), pass_time=threads.sleep)
     output = BytesIO()
     assert (
-        main([command], stdin=BytesIO(payload), stdout=output, processes=processes, threads=threads)
+        main(
+            [command],
+            stdin=BytesIO(payload),
+            stdout=output,
+            platform=sim.platform(
+                threads, processes=processes, signaller=FakeProcessSignaller(set())
+            ),
+        )
         == 0
     )
     assert not processes.ran
     return output.getvalue()
 
 
-def test_registered_read_returns_the_filesystem_answer_in_its_envelope(host_root: Path) -> None:
+def test_registered_read_returns_the_filesystem_answer_in_its_envelope(
+    host_root: Path, sim: Sim
+) -> None:
     folder = host_root / "projects"
     folder.mkdir()
     Project.open(folder).state.create_project("example", now=datetime(2026, 1, 1, tzinfo=UTC))
@@ -55,7 +66,7 @@ def test_registered_read_returns_the_filesystem_answer_in_its_envelope(host_root
         method=Oneof("list_tasks", pb.ListTasksRequest(request_id="tasks-a", project=str(folder))),
     )
     validate(request)
-    response = ReadResponse.from_binary(invoke("list-tasks", request.to_binary()))
+    response = ReadResponse.from_binary(invoke("list-tasks", request.to_binary(), sim))
     validate(response)
     assert response.result is not None
     assert response.result.field == "list_tasks"
@@ -63,7 +74,9 @@ def test_registered_read_returns_the_filesystem_answer_in_its_envelope(host_root
     assert [task.name for task in response.result.value.tasks.tasks] == ["alpha", "beta"]
 
 
-def test_project_refusal_replays_without_reapplying_a_now_available_source(host_root: Path) -> None:
+def test_project_refusal_replays_without_reapplying_a_now_available_source(
+    host_root: Path, sim: Sim
+) -> None:
     source = host_root / "source"
     destination = host_root / "destination"
     request = MutateRequest(
@@ -76,36 +89,38 @@ def test_project_refusal_replays_without_reapplying_a_now_available_source(host_
         ),
     )
     validate(request)
-    first = invoke("copy-project", request.to_binary())
+    first = invoke("copy-project", request.to_binary(), sim)
     response = MutateResponse.from_binary(first)
     validate(response)
     assert response.result is not None
     assert response.result.field == "failure"
     assert "no folder to copy out" in response.result.value.message
     source.mkdir()
-    assert invoke("copy-project", request.to_binary()) == first
+    assert invoke("copy-project", request.to_binary(), sim) == first
     assert not destination.exists()
 
 
-def test_cluster_refusal_is_typed_and_replayed(host_root: Path) -> None:
+def test_cluster_refusal_is_typed_and_replayed(host_root: Path, sim: Sim) -> None:
     del host_root
     request = MutateRequest(
         checkout="/src/checkout",
         method=Oneof("remove_cluster", pb.RemoveClusterRequest(request_id="remove-a", name="lab")),
     )
     validate(request)
-    first = invoke("remove-cluster", request.to_binary())
+    first = invoke("remove-cluster", request.to_binary(), sim)
     response = MutateResponse.from_binary(first)
     validate(response)
     assert response.result is not None
     assert response.result.field == "failure"
     assert "no cluster named" in response.result.value.message
-    assert invoke("remove-cluster", request.to_binary()) == first
+    assert invoke("remove-cluster", request.to_binary(), sim) == first
 
 
 @pytest.mark.regression
 @pytest.mark.parametrize("kind", ["missing", "file", "uninitialized"])
-def test_start_refusal_is_typed_and_replayed_without_launching(host_root: Path, kind: str) -> None:
+def test_start_refusal_is_typed_and_replayed_without_launching(
+    host_root: Path, kind: str, sim: Sim
+) -> None:
     project = host_root / "unavailable-project"
     if kind == "file":
         project.touch()
@@ -119,18 +134,18 @@ def test_start_refusal_is_typed_and_replayed_without_launching(host_root: Path, 
         ),
     )
     validate(request)
-    first = invoke("start-run", request.to_binary())
+    first = invoke("start-run", request.to_binary(), sim)
     response = MutateResponse.from_binary(first)
     validate(response)
     assert response.result is not None
     assert response.result.field == "failure"
     assert str(project) in response.result.value.message
-    assert invoke("start-run", request.to_binary()) == first
+    assert invoke("start-run", request.to_binary(), sim) == first
 
 
 @pytest.mark.parametrize("state", ["absent", "empty", "occupied"])
 def test_destination_inspection_keeps_the_request_identity_and_filesystem_state(
-    host_root: Path, state: str
+    host_root: Path, sim: Sim, state: str
 ) -> None:
     destination = host_root / "destination"
     if state != "absent":
@@ -146,7 +161,7 @@ def test_destination_inspection_keeps_the_request_identity_and_filesystem_state(
             ),
         ),
     )
-    response = ReadResponse.from_binary(invoke("inspect-destination", request.to_binary()))
+    response = ReadResponse.from_binary(invoke("inspect-destination", request.to_binary(), sim))
     validate(response)
     assert response.result is not None
     assert response.result.field == "inspect_destination"
@@ -163,7 +178,7 @@ def test_destination_inspection_keeps_the_request_identity_and_filesystem_state(
         assert (destination / "keep.txt").read_text() == "existing content"
 
 
-def test_candidate_inspection_is_a_registered_binary_read(host_root: Path) -> None:
+def test_candidate_inspection_is_a_registered_binary_read(host_root: Path, sim: Sim) -> None:
     request = ReadRequest(
         checkout="/src/checkout",
         method=Oneof(
@@ -173,7 +188,7 @@ def test_candidate_inspection_is_a_registered_binary_read(host_root: Path) -> No
             ),
         ),
     )
-    response = ReadResponse.from_binary(invoke("inspect-candidate", request.to_binary()))
+    response = ReadResponse.from_binary(invoke("inspect-candidate", request.to_binary(), sim))
     validate(response)
     assert response.result is not None
     assert response.result.field == "inspect_candidate"

@@ -37,7 +37,7 @@ from vs_proto.api import (
 from vs_proto.api import (
     ValidationError as ProtoValidationError,
 )
-from vs_runlog.api import FileRunContent, FileRunLogWriter, RunLock
+from vs_runlog.api import FileRunContent, FileRunLogWriter, RunLock, read_run_head
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -71,8 +71,7 @@ def session_head(state: Keyframe, process: RunProcess | None) -> RunHead:
 
 def run_head(path: Path) -> tuple[int, bool]:
     """Read the run's published lifecycle, with no write access to run storage."""
-    head = RunHead.from_binary(path.read_bytes())
-    validate(head)
+    head = read_run_head(path.with_name("run.log"))
     if head.process is None or head.lifecycle is None or head.lifecycle.state is None:
         message = "chat requires a native run.head with process and lifecycle"
         raise ValueError(message)

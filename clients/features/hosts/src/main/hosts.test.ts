@@ -247,7 +247,17 @@ function subject(filesystem: SshConfigFilesystem): Hosts {
 }
 
 /** The public completion controller over one in-memory helper and settings store. */
-function completionSubject(link: FakeLink): {
+function completionSubject(
+  link: FakeLink,
+  native?: {
+    enabled: boolean;
+    list: (
+      host: HostId,
+      project: string,
+      signal: AbortSignal,
+    ) => Promise<readonly import('@vibesys/hosts').ListedRun[]>;
+  },
+): {
   readonly hosts: Hosts;
   readonly manager: ConnectionManager;
 } {
@@ -272,6 +282,7 @@ function completionSubject(link: FakeLink): {
       settings,
       localCheckout: '/bundled',
       sshConfigPath: '/missing',
+      ...(native ? {transportV2: async () => native.enabled, savedRuns: {list: native.list}} : {}),
       log: () => {},
       push: () => {},
       retire: () => {},
@@ -2737,5 +2748,29 @@ function inspectorHosts(manager: ConnectionManager): Hosts {
     log: () => {},
     push: () => {},
     retire: () => {},
+  });
+}
+
+for (const enabled of [false, true]) {
+  test(`saved-run discovery selects only the chosen transport (${enabled})`, async () => {
+    const link = new FakeLink();
+    link.helper.host.projects.set('/srv/project', ['mpmc']);
+    let calls = 0;
+    const subject = completionSubject(link, {
+      enabled,
+      list: async (_host, project, signal) => {
+        expect(project).toBe('/srv/project');
+        expect(signal.aborted).toBe(false);
+        calls += 1;
+        return [{runId: 'native-run', name: 'Native run', task: null, createdAt: 1}];
+      },
+    });
+    await using _manager = subject.manager;
+    const rows = await subject.hosts.projectRuns(LOCAL, '/srv/project');
+    expect(calls).toBe(enabled ? 1 : 0);
+    expect(link.helper.requests.filter(request => request.type === 'runs.list')).toHaveLength(
+      enabled ? 0 : 1,
+    );
+    if (enabled) expect(rows[0]?.runId).toBe('native-run');
   });
 }

@@ -8,6 +8,7 @@ import type {LogStream} from '@vibesys/contracts/host-helper';
 import type {HostRun, RunEnd} from '@vibesys/hosts';
 import type {LogListOutcome, LogView} from '@vibesys/logs';
 import {type CoreState, initialCoreState, reduceEventBatch} from '@vibesys/run-state';
+import type {RecordRow} from '@vibesys/run-state/records';
 import type {RunRef} from '@vibesys/runs';
 import {createMachine, getInitialSnapshot, getNextSnapshot, type SnapshotFrom} from 'xstate';
 import {type HistoryPage, type HistoryPager, receivePage, startHistory} from './history-pager.js';
@@ -229,6 +230,9 @@ export interface StageView {
 }
 
 export interface RunPageState {
+  readonly recordLog?: readonly RecordRow[];
+  readonly recordDiagnostic?: RecordRow | undefined;
+  readonly recordLogError?: string | null;
   readonly startupStages?: readonly StageView[];
   readonly readOnly?: boolean;
   readonly lifecycleWord?: string | undefined;

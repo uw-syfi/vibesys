@@ -10,17 +10,21 @@ from typing import Literal, NoReturn, TYPE_CHECKING, TypeAlias
 
 from protobuf import Enum, Message
 from protobuf._codegen import file_desc
+from protobuf.wkt.google.protobuf import timestamp_pb
 
 from ....buf.validate import validate_pb
+from ...host.v1 import operations_pb
 from ...store.v1 import intent_pb
 
 if TYPE_CHECKING:
     from protobuf import DescFile, Oneof
+    from protobuf.wkt.google.protobuf.timestamp_pb import Timestamp
 
+    from ...host.v1.operations_pb import TerminateRunResponse
     from ...store.v1.intent_pb import SteerMode, SteerTarget
 
 
-_HostCallRequestFields: TypeAlias = Literal["checkout", "post_intent", "relaunch", "chat_message"]
+_HostCallRequestFields: TypeAlias = Literal["deadline", "checkout", "post_intent", "relaunch", "chat_message"]
 
 class HostCallRequest(Message[_HostCallRequestFields]):
     """
@@ -32,6 +36,12 @@ class HostCallRequest(Message[_HostCallRequestFields]):
     ```
 
     Attributes:
+        deadline:
+            Set by the gateway from its execution context, including helper startup time.
+
+            ```proto
+            optional google.protobuf.Timestamp deadline = 5;
+            ```
         checkout:
             ```proto
             string checkout = 1;
@@ -42,18 +52,20 @@ class HostCallRequest(Message[_HostCallRequestFields]):
             ```
     """
 
-    __slots__ = ("checkout", "method")
+    __slots__ = ("deadline", "checkout", "method")
 
     if TYPE_CHECKING:
 
         def __init__(
             self,
             *,
+            deadline: Timestamp | None = None,
             checkout: str = "",
             method: Oneof[Literal["post_intent"], PostIntentRequest] | Oneof[Literal["relaunch"], RelaunchRequest] | Oneof[Literal["chat_message"], ChatMessageRequest] | None = None,
         ) -> None:
             pass
 
+        deadline: Timestamp | None
         checkout: str
         method: Oneof[Literal["post_intent"], PostIntentRequest] | Oneof[Literal["relaunch"], RelaunchRequest] | Oneof[Literal["chat_message"], ChatMessageRequest] | None
 
@@ -192,7 +204,7 @@ class PostIntentRequest(Message[_PostIntentRequestFields]):
         request_id: str
         intent: Oneof[Literal["pause"], PauseIntent] | Oneof[Literal["steer"], SteerIntent] | Oneof[Literal["withdraw"], WithdrawIntent] | Oneof[Literal["cancel_attempt"], CancelAttemptIntent] | Oneof[Literal["cancel_item"], CancelItemIntent] | Oneof[Literal["set_parallelism"], SetParallelismIntent] | Oneof[Literal["pause_now"], PauseNowIntent] | None
 
-_PostIntentResponseFields: TypeAlias = Literal["request_id", "ordered_reader"]
+_PostIntentResponseFields: TypeAlias = Literal["request_id", "ordered_reader", "termination"]
 
 class PostIntentResponse(Message[_PostIntentResponseFields]):
     """
@@ -212,9 +224,13 @@ class PostIntentResponse(Message[_PostIntentResponseFields]):
             ```proto
             bool ordered_reader = 2;
             ```
+        termination:
+            ```proto
+            optional vibesys.host.v1.TerminateRunResponse termination = 3;
+            ```
     """
 
-    __slots__ = ("request_id", "ordered_reader")
+    __slots__ = ("request_id", "ordered_reader", "termination")
 
     if TYPE_CHECKING:
 
@@ -223,11 +239,13 @@ class PostIntentResponse(Message[_PostIntentResponseFields]):
             *,
             request_id: str = "",
             ordered_reader: bool = False,
+            termination: TerminateRunResponse | None = None,
         ) -> None:
             pass
 
         request_id: str
         ordered_reader: bool
+        termination: TerminateRunResponse | None
 
 _PauseIntentFields: TypeAlias = NoReturn
 
@@ -608,10 +626,12 @@ class RelaunchRefusal(Enum):
 
 
 _DESC = file_desc(
-    b'\n\x1evibesys/api/v1/host_call.proto\x12\x0evibesys.api.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1dvibesys/store/v1/intent.proto"\x98\x02\n\x0fHostCallRequest\x12&\n\x08checkout\x18\x01 \x01(\tR\x08checkoutB\n\xbaH\x07r\x05\x10\x01(\x80 \x12D\n\x0bpost_intent\x18\x02 \x01(\x0b2!.vibesys.api.v1.PostIntentRequestH\x00R\npostIntent\x12=\n\x08relaunch\x18\x03 \x01(\x0b2\x1f.vibesys.api.v1.RelaunchRequestH\x00R\x08relaunch\x12G\n\x0cchat_message\x18\x04 \x01(\x0b2".vibesys.api.v1.ChatMessageRequestH\x00R\x0bchatMessageB\x0f\n\x06method\x12\x05\xbaH\x02\x08\x01"\xce\x02\n\x10HostCallResponse\x12E\n\x0bpost_intent\x18\x01 \x01(\x0b2".vibesys.api.v1.PostIntentResponseH\x00R\npostIntent\x12X\n\x14configuration_failed\x18\x02 \x01(\x0b2#.vibesys.api.v1.ConfigurationFailedH\x00R\x13configurationFailed\x12>\n\x08relaunch\x18\x03 \x01(\x0b2 .vibesys.api.v1.RelaunchResponseH\x00R\x08relaunch\x12H\n\x0cchat_message\x18\x04 \x01(\x0b2#.vibesys.api.v1.ChatMessageResponseH\x00R\x0bchatMessageB\x0f\n\x06result\x12\x05\xbaH\x02\x08\x01"\xc0\x01\n\x13ConfigurationFailed\x12\x1f\n\x04code\x18\x01 \x01(\tR\x04codeB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x12!\n\x05stage\x18\x02 \x01(\tR\x05stageB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x12%\n\x07message\x18\x03 \x01(\tR\x07messageB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x12\x1b\n\texit_code\x18\x04 \x01(\x05R\x08exitCode\x12!\n\x06stderr\x18\x05 \x01(\tR\x06stderrB\t\xbaH\x06r\x04(\x80\x80\x04"\x84\x07\n\x11PostIntentRequest\x12%\n\x0eexpected_epoch\x18\x0e \x01(\x04R\rexpectedEpoch\x12-\n\x0cproject_root\x18\x01 \x01(\tR\x0bprojectRootB\n\xbaH\x07r\x05\x10\x01(\x80 \x12?\n\x06run_id\x18\x02 \x01(\tR\x05runIdB(\xbaH%r#2!^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$\x12H\n\nrequest_id\x18\x03 \x01(\tR\trequestIdB)\xbaH&r$2"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$\x123\n\x05pause\x18\x04 \x01(\x0b2\x1b.vibesys.api.v1.PauseIntentH\x00R\x05pause\x123\n\x05steer\x18\x08 \x01(\x0b2\x1b.vibesys.api.v1.SteerIntentH\x00R\x05steer\x12<\n\x08withdraw\x18\t \x01(\x0b2\x1e.vibesys.api.v1.WithdrawIntentH\x00R\x08withdraw\x12L\n\x0ecancel_attempt\x18\n \x01(\x0b2#.vibesys.api.v1.CancelAttemptIntentH\x00R\rcancelAttempt\x12C\n\x0bcancel_item\x18\x0b \x01(\x0b2 .vibesys.api.v1.CancelItemIntentH\x00R\ncancelItem\x12O\n\x0fset_parallelism\x18\x0c \x01(\x0b2$.vibesys.api.v1.SetParallelismIntentH\x00R\x0esetParallelism\x12=\n\tpause_now\x18\r \x01(\x0b2\x1e.vibesys.api.v1.PauseNowIntentH\x00R\x08pauseNowB\x0f\n\x06intent\x12\x05\xbaH\x02\x08\x01:\x8b\x01\xbaH\x87\x01\x1a\x84\x01\n\x0cintent.epoch\x12.Pause and Pause now require the observed epoch\x1aD!(has(this.pause) || has(this.pause_now)) || this.expected_epoch > 0J\x04\x08\x05\x10\x06J\x04\x08\x06\x10\x07J\x04\x08\x07\x10\x08R\x04parkR\x06resumeR\x04stop"\x85\x01\n\x12PostIntentResponse\x12H\n\nrequest_id\x18\x01 \x01(\tR\trequestIdB)\xbaH&r$2"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$\x12%\n\x0eordered_reader\x18\x02 \x01(\x08R\rorderedReader"\r\n\x0bPauseIntent"\x10\n\x0ePauseNowIntent"\xaa\x01\n\x0bSteerIntent\x12\x1f\n\x04text\x18\x01 \x01(\tR\x04textB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x12=\n\x06target\x18\x02 \x01(\x0b2\x1d.vibesys.store.v1.SteerTargetR\x06targetB\x06\xbaH\x03\xc8\x01\x01\x12;\n\x04mode\x18\x03 \x01(\x0e2\x1b.vibesys.store.v1.SteerModeR\x04modeB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00"Y\n\x0eWithdrawIntent\x12G\n\twithdraws\x18\x01 \x01(\tR\twithdrawsB)\xbaH&r$2"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"E\n\x13CancelAttemptIntent\x12.\n\x07attempt\x18\x01 \x01(\tR\x07attemptB\x14\xbaH\x11r\x0f\x10\x01\x18\x80\x022\x08^[^\\s]+$"<\n\x10CancelItemIntent\x12(\n\x04item\x18\x01 \x01(\tR\x04itemB\x14\xbaH\x11r\x0f\x10\x01\x18\x80\x022\x08^[^\\s]+$"B\n\x14SetParallelismIntent\x12*\n\x0cmax_parallel\x18\x01 \x01(\rR\x0bmaxParallelB\x07\xbaH\x04*\x02(\x01"\xb1\x01\n\x0fRelaunchRequest\x12-\n\x0cproject_root\x18\x01 \x01(\tR\x0bprojectRootB\n\xbaH\x07r\x05\x10\x01(\x80 \x12?\n\x06run_id\x18\x02 \x01(\tR\x05runIdB(\xbaH%r#2!^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$\x12.\n\x0eexpected_epoch\x18\x03 \x01(\x04R\rexpectedEpochB\x07\xbaH\x042\x02(\x01"\x8e\x01\n\x10RelaunchResponse\x12\x1f\n\x05epoch\x18\x01 \x01(\x04H\x00R\x05epochB\x07\xbaH\x042\x02(\x01\x12G\n\x07refusal\x18\x02 \x01(\x0e2\x1f.vibesys.api.v1.RelaunchRefusalH\x00R\x07refusalB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00B\x10\n\x07outcome\x12\x05\xbaH\x02\x08\x01"\xb8\x02\n\x12ChatMessageRequest\x12-\n\x0cproject_root\x18\x01 \x01(\tR\x0bprojectRootB\n\xbaH\x07r\x05\x10\x01(\x80 \x12?\n\x06run_id\x18\x02 \x01(\tR\x05runIdB(\xbaH%r#2!^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$\x12G\n\nsession_id\x18\x03 \x01(\tR\tsessionIdB(\xbaH%r#2!^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$\x12H\n\nrequest_id\x18\x04 \x01(\tR\trequestIdB)\xbaH&r$2"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$\x12\x1f\n\x04text\x18\x05 \x01(\tR\x04textB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04"\xa8\x01\n\x13ChatMessageResponse\x12G\n\nsession_id\x18\x01 \x01(\tR\tsessionIdB(\xbaH%r#2!^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$\x12H\n\nrequest_id\x18\x02 \x01(\tR\trequestIdB)\xbaH&r$2"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$*\xb9\x01\n\x0fRelaunchRefusal\x12 \n\x1cRELAUNCH_REFUSAL_UNSPECIFIED\x10\x00\x12\x1b\n\x17RELAUNCH_REFUSAL_LOCKED\x10\x01\x12%\n!RELAUNCH_REFUSAL_CHECKOUT_MISSING\x10\x03\x12"\n\x1eRELAUNCH_REFUSAL_EPOCH_CHANGED\x10\x04"\x04\x08\x02\x10\x02*\x16RELAUNCH_REFUSAL_ENDEDB=Z;github.com/uw-syfi/vibesys/gateway/gen/vibesys/api/v1;apiv1b\x06proto3',
+    b'\n\x1evibesys/api/v1/host_call.proto\x12\x0evibesys.api.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1dvibesys/store/v1/intent.proto\x1a vibesys/host/v1/operations.proto"\xd0\x02\n\x0fHostCallRequest\x126\n\x08deadline\x18\x05 \x01(\x0b2\x1a.google.protobuf.TimestampR\x08deadline\x12&\n\x08checkout\x18\x01 \x01(\tR\x08checkoutB\n\xbaH\x07r\x05\x10\x01(\x80 \x12D\n\x0bpost_intent\x18\x02 \x01(\x0b2!.vibesys.api.v1.PostIntentRequestH\x00R\npostIntent\x12=\n\x08relaunch\x18\x03 \x01(\x0b2\x1f.vibesys.api.v1.RelaunchRequestH\x00R\x08relaunch\x12G\n\x0cchat_message\x18\x04 \x01(\x0b2".vibesys.api.v1.ChatMessageRequestH\x00R\x0bchatMessageB\x0f\n\x06method\x12\x05\xbaH\x02\x08\x01"\xce\x02\n\x10HostCallResponse\x12E\n\x0bpost_intent\x18\x01 \x01(\x0b2".vibesys.api.v1.PostIntentResponseH\x00R\npostIntent\x12X\n\x14configuration_failed\x18\x02 \x01(\x0b2#.vibesys.api.v1.ConfigurationFailedH\x00R\x13configurationFailed\x12>\n\x08relaunch\x18\x03 \x01(\x0b2 .vibesys.api.v1.RelaunchResponseH\x00R\x08relaunch\x12H\n\x0cchat_message\x18\x04 \x01(\x0b2#.vibesys.api.v1.ChatMessageResponseH\x00R\x0bchatMessageB\x0f\n\x06result\x12\x05\xbaH\x02\x08\x01"\xc0\x01\n\x13ConfigurationFailed\x12\x1f\n\x04code\x18\x01 \x01(\tR\x04codeB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x12!\n\x05stage\x18\x02 \x01(\tR\x05stageB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x12%\n\x07message\x18\x03 \x01(\tR\x07messageB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x12\x1b\n\texit_code\x18\x04 \x01(\x05R\x08exitCode\x12!\n\x06stderr\x18\x05 \x01(\tR\x06stderrB\t\xbaH\x06r\x04(\x80\x80\x04"\x84\x07\n\x11PostIntentRequest\x12%\n\x0eexpected_epoch\x18\x0e \x01(\x04R\rexpectedEpoch\x12-\n\x0cproject_root\x18\x01 \x01(\tR\x0bprojectRootB\n\xbaH\x07r\x05\x10\x01(\x80 \x12?\n\x06run_id\x18\x02 \x01(\tR\x05runIdB(\xbaH%r#2!^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$\x12H\n\nrequest_id\x18\x03 \x01(\tR\trequestIdB)\xbaH&r$2"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$\x123\n\x05pause\x18\x04 \x01(\x0b2\x1b.vibesys.api.v1.PauseIntentH\x00R\x05pause\x123\n\x05steer\x18\x08 \x01(\x0b2\x1b.vibesys.api.v1.SteerIntentH\x00R\x05steer\x12<\n\x08withdraw\x18\t \x01(\x0b2\x1e.vibesys.api.v1.WithdrawIntentH\x00R\x08withdraw\x12L\n\x0ecancel_attempt\x18\n \x01(\x0b2#.vibesys.api.v1.CancelAttemptIntentH\x00R\rcancelAttempt\x12C\n\x0bcancel_item\x18\x0b \x01(\x0b2 .vibesys.api.v1.CancelItemIntentH\x00R\ncancelItem\x12O\n\x0fset_parallelism\x18\x0c \x01(\x0b2$.vibesys.api.v1.SetParallelismIntentH\x00R\x0esetParallelism\x12=\n\tpause_now\x18\r \x01(\x0b2\x1e.vibesys.api.v1.PauseNowIntentH\x00R\x08pauseNowB\x0f\n\x06intent\x12\x05\xbaH\x02\x08\x01:\x8b\x01\xbaH\x87\x01\x1a\x84\x01\n\x0cintent.epoch\x12.Pause and Pause now require the observed epoch\x1aD!(has(this.pause) || has(this.pause_now)) || this.expected_epoch > 0J\x04\x08\x05\x10\x06J\x04\x08\x06\x10\x07J\x04\x08\x07\x10\x08R\x04parkR\x06resumeR\x04stop"\xce\x01\n\x12PostIntentResponse\x12H\n\nrequest_id\x18\x01 \x01(\tR\trequestIdB)\xbaH&r$2"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$\x12%\n\x0eordered_reader\x18\x02 \x01(\x08R\rorderedReader\x12G\n\x0btermination\x18\x03 \x01(\x0b2%.vibesys.host.v1.TerminateRunResponseR\x0btermination"\r\n\x0bPauseIntent"\x10\n\x0ePauseNowIntent"\xaa\x01\n\x0bSteerIntent\x12\x1f\n\x04text\x18\x01 \x01(\tR\x04textB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x12=\n\x06target\x18\x02 \x01(\x0b2\x1d.vibesys.store.v1.SteerTargetR\x06targetB\x06\xbaH\x03\xc8\x01\x01\x12;\n\x04mode\x18\x03 \x01(\x0e2\x1b.vibesys.store.v1.SteerModeR\x04modeB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00"Y\n\x0eWithdrawIntent\x12G\n\twithdraws\x18\x01 \x01(\tR\twithdrawsB)\xbaH&r$2"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"E\n\x13CancelAttemptIntent\x12.\n\x07attempt\x18\x01 \x01(\tR\x07attemptB\x14\xbaH\x11r\x0f\x10\x01\x18\x80\x022\x08^[^\\s]+$"<\n\x10CancelItemIntent\x12(\n\x04item\x18\x01 \x01(\tR\x04itemB\x14\xbaH\x11r\x0f\x10\x01\x18\x80\x022\x08^[^\\s]+$"B\n\x14SetParallelismIntent\x12*\n\x0cmax_parallel\x18\x01 \x01(\rR\x0bmaxParallelB\x07\xbaH\x04*\x02(\x01"\xb1\x01\n\x0fRelaunchRequest\x12-\n\x0cproject_root\x18\x01 \x01(\tR\x0bprojectRootB\n\xbaH\x07r\x05\x10\x01(\x80 \x12?\n\x06run_id\x18\x02 \x01(\tR\x05runIdB(\xbaH%r#2!^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$\x12.\n\x0eexpected_epoch\x18\x03 \x01(\x04R\rexpectedEpochB\x07\xbaH\x042\x02(\x01"\x8e\x01\n\x10RelaunchResponse\x12\x1f\n\x05epoch\x18\x01 \x01(\x04H\x00R\x05epochB\x07\xbaH\x042\x02(\x01\x12G\n\x07refusal\x18\x02 \x01(\x0e2\x1f.vibesys.api.v1.RelaunchRefusalH\x00R\x07refusalB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00B\x10\n\x07outcome\x12\x05\xbaH\x02\x08\x01"\xb8\x02\n\x12ChatMessageRequest\x12-\n\x0cproject_root\x18\x01 \x01(\tR\x0bprojectRootB\n\xbaH\x07r\x05\x10\x01(\x80 \x12?\n\x06run_id\x18\x02 \x01(\tR\x05runIdB(\xbaH%r#2!^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$\x12G\n\nsession_id\x18\x03 \x01(\tR\tsessionIdB(\xbaH%r#2!^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$\x12H\n\nrequest_id\x18\x04 \x01(\tR\trequestIdB)\xbaH&r$2"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$\x12\x1f\n\x04text\x18\x05 \x01(\tR\x04textB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04"\xa8\x01\n\x13ChatMessageResponse\x12G\n\nsession_id\x18\x01 \x01(\tR\tsessionIdB(\xbaH%r#2!^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$\x12H\n\nrequest_id\x18\x02 \x01(\tR\trequestIdB)\xbaH&r$2"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$*\xb9\x01\n\x0fRelaunchRefusal\x12 \n\x1cRELAUNCH_REFUSAL_UNSPECIFIED\x10\x00\x12\x1b\n\x17RELAUNCH_REFUSAL_LOCKED\x10\x01\x12%\n!RELAUNCH_REFUSAL_CHECKOUT_MISSING\x10\x03\x12"\n\x1eRELAUNCH_REFUSAL_EPOCH_CHANGED\x10\x04"\x04\x08\x02\x10\x02*\x16RELAUNCH_REFUSAL_ENDEDB=Z;github.com/uw-syfi/vibesys/gateway/gen/vibesys/api/v1;apiv1b\x06proto3',
     [
         validate_pb.desc(),
+        timestamp_pb.desc(),
         intent_pb.desc(),
+        operations_pb.desc(),
     ],
     {
         "HostCallRequest": HostCallRequest,

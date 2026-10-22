@@ -1,11 +1,13 @@
 /** The feature supplies session operations to its machine; the session owns wire I/O. */
 import {clockFrom, type ScheduleTimeout} from '@vibesys/machine';
 import type {GatewayReader} from '@vibesys/run-skeleton/reader';
+import {tailRecordRows} from '@vibesys/run-state/records';
 import {createActor, fromCallback, fromPromise} from 'xstate';
 import {
   type GatewayEvent,
   type GatewayInput,
   type GatewayLogInput,
+  type GatewayRecordsInput,
   gatewayRunMachine,
 } from '../../state/index.js';
 
@@ -43,6 +45,11 @@ export function startGatewayRun(
             if (!signal.aborted) input.receive({type: 'log-failed'});
           }
         }),
+        records: fromPromise<void, GatewayRecordsInput>(({input, signal}) =>
+          ports.reader.records(input.runId, input.fromSeq, signal, bytes =>
+            input.receive({type: 'records', rows: tailRecordRows(bytes)}),
+          ),
+        ),
       },
     }),
     {input, clock: clockFrom(schedule)},

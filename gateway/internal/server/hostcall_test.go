@@ -11,10 +11,12 @@ import (
 
 	apiv1 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/api/v1"
 	hostv1 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/host/v1"
+	storev1 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1"
 	"github.com/uw-syfi/vibesys/gateway/internal/hostcommand"
 	"github.com/uw-syfi/vibesys/gateway/internal/hostoperations"
 	"github.com/uw-syfi/vibesys/gateway/internal/server"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 func intentRequest() *apiv1.HostCallRequest {
@@ -23,6 +25,7 @@ func intentRequest() *apiv1.HostCallRequest {
 
 func TestHostCallPassesTypedPipesAndConfiguredCheckout(t *testing.T) {
 	request := intentRequest()
+	request.Deadline = timestamppb.New(time.Unix(1, 0))
 	runner := hostcommand.FakeRunner{Program: func(ctx context.Context, c hostcommand.Command) (hostcommand.Result, error) {
 		if _, ok := ctx.Deadline(); !ok {
 			t.Error("missing deadline")
@@ -34,8 +37,16 @@ func TestHostCallPassesTypedPipesAndConfiguredCheckout(t *testing.T) {
 			t.Error("missing run index root")
 		}
 		decoded := &apiv1.HostCallRequest{}
-		if err := proto.Unmarshal(c.Input, decoded); err != nil || !proto.Equal(request, decoded) {
-			t.Errorf("stdin: %v %v", decoded, err)
+		if err := proto.Unmarshal(c.Input, decoded); err != nil {
+			t.Fatal(err)
+		}
+		deadline, _ := ctx.Deadline()
+		if decoded.Deadline == nil || !decoded.Deadline.AsTime().Equal(deadline) {
+			t.Fatalf("helper did not inherit runner deadline: %v", decoded.Deadline)
+		}
+		decoded.Deadline = request.Deadline
+		if !proto.Equal(request, decoded) {
+			t.Errorf("stdin: %v", decoded)
 		}
 		output, _ := proto.Marshal(&apiv1.HostCallResponse{Result: &apiv1.HostCallResponse_PostIntent{PostIntent: &apiv1.PostIntentResponse{RequestId: "r-1", OrderedReader: true}}})
 		return hostcommand.Result{Output: output}, nil
@@ -160,8 +171,16 @@ func TestHostCallRelaunchDispatchesWithoutRunPolicy(t *testing.T) {
 					t.Fatalf("command: %+v", c)
 				}
 				decoded := &apiv1.HostCallRequest{}
-				if err := proto.Unmarshal(c.Input, decoded); err != nil || !proto.Equal(decoded, request) {
-					t.Fatalf("stdin: %v %v", decoded, err)
+				if err := proto.Unmarshal(c.Input, decoded); err != nil {
+					t.Error(err)
+				}
+				deadline, _ := ctx.Deadline()
+				if decoded.Deadline == nil || !decoded.Deadline.AsTime().Equal(deadline) {
+					t.Errorf("helper deadline differs from runner: %v", decoded.Deadline)
+				}
+				decoded.Deadline = nil
+				if !proto.Equal(decoded, request) {
+					t.Errorf("stdin: %v", decoded)
 				}
 				if mode == "missing" {
 					return hostcommand.Result{ExitCode: -1}, os.ErrNotExist
@@ -317,5 +336,32 @@ func TestHostReadRejectsAMismatchedIdentity(t *testing.T) {
 	missing, err := client(t, gateway, false).Read(gateway.ctx, &apiv1.ReadRequest{Checkout: "/src/checkout"})
 	if err != nil || spawned || missing.GetFailure().GetCategory() != hostv1.FailureCategory_FAILURE_CATEGORY_INVALID_INPUT {
 		t.Fatalf("missing method spawned or failed open: %v %v %v", missing, err, spawned)
+	}
+}
+
+func TestTerminateRunInheritsRunnerDeadline(t *testing.T) {
+	request := &apiv1.MutateRequest{Checkout: "/src/checkout", Method: &apiv1.MutateRequest_TerminateRun{TerminateRun: &hostv1.TerminateRunRequest{
+		RequestId: "r-1", ProjectRoot: "/project", RunId: "run-1", ExpectedProcess: &storev1.RunProcess{Pid: 42, Epoch: 1, StartedAt: timestamppb.New(time.Unix(1, 0))}, Deadline: timestamppb.New(time.Unix(1, 0)),
+	}}}
+	runner := hostcommand.FakeRunner{Program: func(ctx context.Context, c hostcommand.Command) (hostcommand.Result, error) {
+		decoded := &apiv1.MutateRequest{}
+		if err := proto.Unmarshal(c.Input, decoded); err != nil {
+			return hostcommand.Result{}, err
+		}
+		deadline, ok := ctx.Deadline()
+		if !ok || decoded.GetTerminateRun().GetDeadline() == nil || !decoded.GetTerminateRun().GetDeadline().AsTime().Equal(deadline) {
+			t.Errorf("helper did not inherit runner deadline: %v", decoded)
+		}
+		decoded.GetTerminateRun().Deadline = request.GetTerminateRun().Deadline
+		if !proto.Equal(decoded, request) {
+			t.Errorf("stdin: %v", decoded)
+		}
+		output, err := proto.Marshal(&apiv1.MutateResponse{Result: &apiv1.MutateResponse_TerminateRun{TerminateRun: &hostv1.TerminateRunResponse{RequestId: "r-1", Outcome: hostv1.TerminateRunOutcome_TERMINATE_RUN_OUTCOME_REQUESTED_UNCONFIRMED}}})
+		return hostcommand.Result{Output: output}, err
+	}}
+	f := startWithConfig(t, server.Config{HostRunner: runner})
+	response, err := client(t, f, false).Mutate(f.ctx, request)
+	if err != nil || response.GetTerminateRun().GetOutcome() != hostv1.TerminateRunOutcome_TERMINATE_RUN_OUTCOME_REQUESTED_UNCONFIRMED {
+		t.Fatalf("Mutate: %v %v", response, err)
 	}
 }

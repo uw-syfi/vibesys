@@ -21,6 +21,7 @@ import re
 from contextlib import suppress
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
+from importlib import import_module
 from pathlib import Path
 from typing import TYPE_CHECKING, BinaryIO
 
@@ -95,11 +96,13 @@ if TYPE_CHECKING:
     from server.run_summary_cache import SummaryReader
     from vs_logs.read import LogReader as StoreReader
     from vs_project.api import GitRepositoryFactory, TaskDirectory
+    from vs_proto.api import host_payloads as pb
     from vs_sim.api import (
         CommandProbe,
         PipedProcess,
         PipedProcessLauncher,
         ProcessLauncher,
+        SleepingClock,
         Threads,
     )
 
@@ -111,6 +114,26 @@ _KEPT_INDEXES = 4
 
 _TALLY_CHUNK_BYTES = 1 << 20
 _EVENT: TypeAdapter[dict[str, JsonValue]] = TypeAdapter(dict[str, JsonValue])
+
+
+def _run_began(project_root: Path, run_id: str) -> datetime:
+    """Use the native creation epoch; read the legacy journal only for a legacy run."""
+    path = Project.run_log_path_for(project_root, run_id)
+    if not path.is_file():
+        return _journal_began(Project.log_directory_for(project_root, run_id))
+    try:
+        with import_module("vs_runlog.api").open_run_log(path) as records:
+            first = next(iter(records), None)
+    except OSError:
+        return datetime.fromtimestamp(0, UTC)
+    if (
+        first is not None
+        and first.body is not None
+        and first.body.field == "epoch_started"
+        and first.at is not None
+    ):
+        return datetime.fromtimestamp(first.at.to_seconds(), UTC)
+    return datetime.fromtimestamp(0, UTC)
 
 
 def _journal_began(log_directory: Path) -> datetime:
@@ -199,8 +222,15 @@ class FileProjects:
     project has checked out.
     """
 
-    def __init__(self, repositories: GitRepositoryFactory, threads: Threads) -> None:
+    def __init__(
+        self,
+        repositories: GitRepositoryFactory,
+        threads: Threads,
+        *,
+        clock: SleepingClock | None = None,
+    ) -> None:
         """Read run branches through the repositories ``repositories`` opens."""
+        self._clock = clock
         self._repositories = repositories
         self._threads = threads
         self._journals: dict[tuple[Path, str], Path] = {}
@@ -208,6 +238,29 @@ class FileProjects:
         self._digests: dict[Path, tuple[tuple[int, int], RunDigest]] = {}
         self._indexes: dict[Path, JournalIndex] = {}
         self._summary_reader: SummaryReader | None = None
+
+    def saved_runs(self, request: pb.ListSavedRunsRequest) -> pb.ListSavedRunsResponse:
+        """Reuse catalog metadata and the transport's retained-format importer."""
+        if self._clock is None:
+            message = "saved-run import clock was not supplied"
+            raise ValueError(message)
+        wire = import_module("vs_proto.api")
+        pb = wire.host_payloads
+
+        root, runs = self.runs(Path(request.project))
+        entries = [
+            pb.SavedRun(
+                run_id=run.run_id,
+                task=run.task,
+                display_name=run.display_name,
+                created_at=wire.Timestamp.from_datetime(run.created_at),
+                imported=pb.SavedRunImport.AVAILABLE,
+            )
+            for run in runs
+        ]
+        return import_module("server.host_saved_runs").page_saved_runs(
+            request, root, entries, clock=self._clock, threads=self._threads
+        )
 
     def tasks(self, project: Path) -> TaskList:
         """The project's tasks, ordered by name."""
@@ -264,11 +317,14 @@ class FileProjects:
                 run_id=run_id,
                 task=None,
                 display_name=run_id,
-                created_at=_journal_began(Project.log_directory_for(opened.root, run_id)),
+                created_at=_run_began(opened.root, run_id),
             )
             for run_id in logged
             if run_id not in known
-            and (Project.log_directory_for(opened.root, run_id) / RUN_EVENTS_FILE).is_file()
+            and (
+                (Project.log_directory_for(opened.root, run_id) / RUN_EVENTS_FILE).is_file()
+                or Project.run_log_path_for(opened.root, run_id).is_file()
+            )
         ]
         runs = sorted([*recorded, *journaled], key=lambda run: (run.created_at, run.run_id))
         return opened.root, tuple(runs)

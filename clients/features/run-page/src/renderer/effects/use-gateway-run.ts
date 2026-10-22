@@ -38,7 +38,7 @@ export function useGatewayRun(options: {
     };
   }, [ports, schedule, host, runId]);
   const {route, zoom} = useZoom(`${seed.identity.host}/${seed.identity.runId}`, address);
-  const {load, ui, text, hint} = snapshot.context;
+  const {load, ui, text, hint, replies} = snapshot.context;
   const skeleton = load?.complete ? load.skeleton : undefined;
   const at = ui.view.at === 'live' ? (skeleton?.throughSeq ?? 0n) : BigInt(ui.view.at);
   const epoch = skeleton?.epochs.filter(item => item.seq <= at).at(-1)?.epoch;
@@ -48,25 +48,34 @@ export function useGatewayRun(options: {
   const wholeRead = useMemo(
     () =>
       project(() =>
-        skeleton ? projectSkeleton(skeleton, skeleton.throughSeq ?? 0n, wholeText) : null,
+        skeleton
+          ? projectSkeleton(skeleton, skeleton.throughSeq ?? 0n, wholeText, {
+              head: hint?.head,
+              content: {text, replies},
+            })
+          : null,
       ),
-    [skeleton, wholeText],
+    [skeleton, wholeText, hint?.head, text, replies],
   );
   const modelRead = useMemo(
     () =>
       at === skeleton?.throughSeq
         ? wholeRead
-        : project(() => (skeleton ? projectSkeleton(skeleton, at, objective) : null)),
-    [skeleton, at, objective, wholeRead],
+        : project(() =>
+            skeleton ? projectSkeleton(skeleton, at, objective, {content: {text, replies}}) : null,
+          ),
+    [skeleton, at, objective, wholeRead, text, replies],
   );
   const {value: whole} = wholeRead;
   const {value: model} = modelRead;
   const stateRead = useMemo(
     () =>
       project(() =>
-        skeleton && whole ? skeletonScreenState(seed, skeleton, whole, ui, hint) : null,
+        skeleton && whole
+          ? skeletonScreenState(seed, skeleton, whole, ui, hint, {text, replies})
+          : null,
       ),
-    [skeleton, whole, seed, ui, hint],
+    [skeleton, whole, seed, ui, hint, text, replies],
   );
   const {value: state} = stateRead;
   const projectionError = wholeRead.error ?? modelRead.error ?? stateRead.error;

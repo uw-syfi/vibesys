@@ -3,6 +3,7 @@ import {
   KeyframeSchema,
   type Lifecycle,
   RecordSchema,
+  type RunHead,
   RunLiveness,
   type SkeletonResponse,
   type TailResponse,
@@ -13,6 +14,7 @@ import {foldSkeleton, type Skeleton, seedSkeleton} from './model.js';
 export interface RunLivenessHint {
   readonly epoch: number;
   readonly value: RunLiveness;
+  readonly head?: RunHead | undefined;
 }
 
 export interface SkeletonLoad {

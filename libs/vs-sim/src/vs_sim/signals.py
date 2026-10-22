@@ -8,11 +8,14 @@ import os
 import signal
 import sys
 import threading
+from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+
+_FLOCK_FIELDS = 9
 
 Signals = signal.Signals
 """Signal numbers (``Signals.SIGTERM``), so callers name them without importing ``signal``."""
@@ -85,6 +88,19 @@ class ProcessSignaller(Protocol):
         ...
 
 
+class WriterProcessSignaller(ProcessSignaller, Protocol):
+    """Signal a writer only with proof that it owns its exclusive lifetime flock."""
+
+    def owns_lock(self, pid: int, path: Path) -> bool:
+        """Whether ``pid`` holds an exclusive flock on this exact file inode.
+
+        A held lock elsewhere or a matching numeric PID is insufficient. Raises
+        ``NotImplementedError`` without kernel ownership inspection, and ``OSError``
+        if ownership cannot be observed. Call after pinning the process handle.
+        """
+        ...
+
+
 class PidfdProcessSignaller:
     """Linux pidfd-backed signalling that cannot target a reused process ID.
 
@@ -105,6 +121,30 @@ class PidfdProcessSignaller:
         except PermissionError:
             return True
         return True
+
+    def owns_lock(self, pid: int, path: Path) -> bool:
+        """Bind the writer's lifetime flock to the process visible through procfs."""
+        if not sys.platform.startswith("linux"):
+            raise NotImplementedError("process lock ownership requires Linux procfs")
+        expected = path.stat()
+        identity = (
+            f"{os.major(expected.st_dev):02x}:{os.minor(expected.st_dev):02x}:{expected.st_ino}"
+        )
+        for info in (Path("/proc") / str(pid) / "fdinfo").iterdir():
+            try:
+                lines = info.read_text().splitlines()
+            except FileNotFoundError:
+                continue  # A descriptor closed during inspection supplies no proof.
+            for line in lines:
+                parts = line.split()
+                if (
+                    len(parts) == _FLOCK_FIELDS
+                    and parts[0] == "lock:"
+                    and parts[2:6] == ["FLOCK", "ADVISORY", "WRITE", str(pid)]
+                    and parts[6:] == [identity, "0", "EOF"]
+                ):
+                    return True
+        return False
 
     def terminate_if_current(self, pid: int, current: Callable[[], bool]) -> bool:
         """Open ``pid``, revalidate caller identity, and send SIGTERM through its pidfd."""

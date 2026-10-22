@@ -11,6 +11,10 @@ if TYPE_CHECKING:
 class ReadSource(Protocol):
     """Fresh host facts; the caller owns I/O and remaining-budget enforcement."""
 
+    def saved_runs(self, request: pb.ListSavedRunsRequest) -> pb.ListSavedRunsResponse:
+        """Discover and import retained runs through their existing owners."""
+        ...
+
     def tasks(self, project: str) -> pb.TaskList:
         """The canonical project's task catalog."""
         ...

@@ -1,9 +1,56 @@
 """The writer's lifetime lock, shared with the gateway's nonblocking probe."""
 
+from __future__ import annotations
+
 import fcntl
-from collections.abc import Iterator
+import hashlib
 from contextlib import contextmanager
-from pathlib import Path
+from enum import StrEnum
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+    from pathlib import Path
+
+    from vs_proto.api import RunProcess
+
+
+class WriterIdentityState(StrEnum):
+    """Observation of the lifetime lock for one published writer identity."""
+
+    HELD = "held"
+    RELEASED = "released"
+    UNKNOWN = "unknown"
+
+
+def writer_identity_path(log_path: Path, process: RunProcess) -> Path:
+    """The canonical lifetime-lock inode for one published writer identity."""
+    identity = hashlib.sha256(process.to_binary()).hexdigest()
+    return log_path.parent / f"writer-{identity}.lock"
+
+
+def hold_writer_identity(log_path: Path, process: RunProcess) -> RunLock:
+    """Pin this published identity until its writer releases all resources."""
+    return RunLock(writer_identity_path(log_path, process))
+
+
+def observe_writer_identity(log_path: Path, process: RunProcess) -> WriterIdentityState:
+    """Probe only this writer's lock; a successor cannot prove its predecessor alive.
+
+    Older writers lack the lock, which is unknown rather than evidence of exit.
+    Lock files stay in place, so probing never replaces a held inode.
+    """
+    if not process.pid or not process.epoch or process.started_at is None:
+        return WriterIdentityState.UNKNOWN
+    path = writer_identity_path(log_path, process)
+    if not path.is_file():
+        return WriterIdentityState.UNKNOWN
+    try:
+        lock = RunLock(path)
+    except BlockingIOError:
+        return WriterIdentityState.HELD
+    lock.close()
+    return WriterIdentityState.RELEASED
 
 
 def assert_run_unlocked(log_path: Path) -> None:

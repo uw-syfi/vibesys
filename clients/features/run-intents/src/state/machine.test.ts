@@ -7,6 +7,7 @@ import {
   IntentStep,
   PostIntentRequestSchema,
   PostIntentResponseSchema,
+  TerminateRunOutcome,
 } from '@vibesys/proto';
 import {getInitialSnapshot, getNextSnapshot} from 'xstate';
 import {runIntentsMachine} from './index.js';
@@ -147,4 +148,59 @@ test('an undeclared ordered reader is visible without claiming application', () 
   } as never);
   expect(admitted.context.entries[0]?.status).toBe('pending');
   expect(admitted.context.warning).toContain('Posting order has not been confirmed');
+});
+
+test('process observations stay pending until a canonical control outcome arrives', () => {
+  for (const outcome of [
+    TerminateRunOutcome.WRITER_RELEASED,
+    TerminateRunOutcome.IDENTITY_CHANGED,
+    TerminateRunOutcome.UNSUPPORTED,
+    TerminateRunOutcome.REQUESTED_UNCONFIRMED,
+    TerminateRunOutcome.OBSERVATION_UNKNOWN,
+    TerminateRunOutcome.PROCESS_ABSENT,
+  ]) {
+    const sending = getNextSnapshot(
+      runIntentsMachine,
+      getInitialSnapshot(runIntentsMachine, {enabled: true}),
+      {type: 'send', request},
+    );
+    const output = create(PostIntentResponseSchema, {
+      requestId: 'r-1',
+      orderedReader: true,
+      termination: {requestId: 'r-1', outcome},
+    });
+    const admitted = getNextSnapshot(runIntentsMachine, sending, {
+      type: 'xstate.done.actor.post',
+      output,
+    } as never);
+    expect(admitted.context.entries[0]?.status).toBe('pending');
+    expect(admitted.context.warning).not.toBeNull();
+    const applied = getNextSnapshot(runIntentsMachine, admitted, {
+      type: 'outcomes',
+      outcomes: [
+        create(IntentStateSchema, {
+          controlId: 'r-1',
+          action: IntentAction.PAUSE_NOW,
+          step: IntentStep.APPLIED,
+        }),
+      ],
+    });
+    expect(applied.context.entries[0]?.status).toBe('applied');
+    expect(applied.context.warning).toBeNull();
+    const earlier = getNextSnapshot(runIntentsMachine, sending, {
+      type: 'outcomes',
+      outcomes: [
+        create(IntentStateSchema, {
+          controlId: 'r-1',
+          action: IntentAction.PAUSE_NOW,
+          step: IntentStep.APPLIED,
+        }),
+      ],
+    });
+    const late = getNextSnapshot(runIntentsMachine, earlier, {
+      type: 'xstate.done.actor.post',
+      output,
+    } as never);
+    expect(late.context.warning).toBeNull();
+  }
 });

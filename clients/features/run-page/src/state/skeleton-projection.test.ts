@@ -1,31 +1,41 @@
 import {expect, test} from 'bun:test';
-import {clone, create, toBinary} from '@bufbuild/protobuf';
+import {readFileSync} from 'node:fs';
+import {clone, create, fromBinary, toBinary} from '@bufbuild/protobuf';
 import {AnySchema} from '@bufbuild/protobuf/wkt';
+import type {UsageRecord} from '@vibesys/contracts/host-helper';
 import {recordedProjectRoot} from '@vibesys/hosts';
 import {
   AgentTurnAttrsSchema,
   AttemptOutcome,
   Change,
+  Direction,
   DrainGoal,
   KeyframeSchema,
   LifecycleSchema,
+  MetricSeriesDeclSchema,
+  ObjectiveSchema,
   Outcome,
   RecordSchema,
+  RunHeadSchema,
   RunLiveness,
   RuntimeType,
+  SkeletonResponseSchema,
   SpanFailureKind,
   SpanSchema,
   SpanStatus,
   StageState,
   StartupStage,
+  TokenUsageSchema,
   WaitKind,
 } from '@vibesys/proto';
 import {storeRunFixture} from '@vibesys/run-fixtures';
-import {foldSkeleton, seedSkeleton, seekSkeleton} from '@vibesys/run-skeleton';
-import {usageOverTime} from '@vibesys/run-state/usage';
+import {foldSkeleton, ingestSkeleton, seedSkeleton, seekSkeleton} from '@vibesys/run-skeleton';
+import {readSkeleton} from '@vibesys/run-state/skeleton';
+import {totalUsage, usageOverTime} from '@vibesys/run-state/usage';
 import {
   clockStart,
   headerView,
+  heroView,
   projectSkeleton,
   recordedRunRoot,
   runPageInitial,
@@ -409,5 +419,221 @@ test('a run with no recorded root does not use the path the window remembered', 
   expect(recordedRunRoot(skeleton)).toBeUndefined();
   if (state.record.kind === 'live' || state.record.kind === 'ended') {
     expect(state.record.run.projectRoot).toBe('');
+  }
+});
+
+test('a native metric headlines the writer fact even without candidate-shaped spans', () => {
+  const first = storeRunFixture('short', 1).records[0];
+  if (!first) throw new Error('fixture');
+  const skeleton = foldSkeleton(seedSkeleton(), [
+    first,
+    create(RecordSchema, {
+      seq: 2n,
+      epoch: 1,
+      body: {case: 'metric', value: {series: 'throughput', value: 321, clock: 1}},
+    }),
+  ]);
+  expect(skeleton.metrics[0]?.points[0]?.point?.value).toBe(321);
+  const head = create(RunHeadSchema, {
+    epoch: 1,
+    committedSeq: 2n,
+    objective: {
+      series: {name: 'throughput', unit: 'ops/s', direction: Direction.MAX},
+      bestValue: 321,
+      inputValue: 100,
+    },
+  });
+  const model = projectSkeleton(skeleton, 2n, '', {head});
+  expect(model.candidates.candidates).toHaveLength(0);
+  expect(heroView(model).tiles[0]?.figure).toBe('3.21×');
+  expect(heroView(model).tiles[0]?.detail).toContain('321 ops/s');
+  for (const committedSeq of [1n, 3n]) {
+    expect(
+      projectSkeleton(skeleton, 2n, '', {head: {...head, committedSeq}}).headline,
+    ).toBeUndefined();
+  }
+});
+
+for (const reversed of [false, true]) {
+  test(`native event fold preserves objective tiles and trends with a writer headline (${reversed})`, () => {
+    const records = storeRunFixture('facts', 2).records.map(record => clone(RecordSchema, record));
+    const epoch = records[0]?.body;
+    if (epoch?.case !== 'epochStarted' || !epoch.value.run) throw new Error('fixture');
+    epoch.value.run.objectives.push(
+      create(ObjectiveSchema, {series: 'latency', direction: Direction.MIN}),
+    );
+    if (reversed) epoch.value.run.objectives.reverse();
+    epoch.value.series.push(
+      create(MetricSeriesDeclSchema, {
+        ...epoch.value.series[0],
+        name: 'latency',
+        unit: 'ms',
+        direction: Direction.MIN,
+      }),
+    );
+    const events = records
+      .flatMap(record => {
+        if (record.body.case !== 'metric' || record.body.value.series !== 'throughput')
+          return [record];
+        return [
+          record,
+          create(RecordSchema, {
+            ...record,
+            body: {
+              case: 'metric',
+              value: {
+                ...record.body.value,
+                series: 'latency',
+                value: 1000 / record.body.value.value,
+              },
+            },
+          }),
+        ];
+      })
+      .map((record, index) => create(RecordSchema, {...record, seq: BigInt(index + 1)}));
+    const skeleton = foldSkeleton(seedSkeleton(), events);
+    const seq = skeleton.throughSeq ?? 0n;
+    const original = heroView(projectSkeleton(skeleton, seq)).tiles;
+    const head = create(RunHeadSchema, {
+      epoch: 1,
+      committedSeq: seq,
+      objective: {
+        series: {name: 'throughput', unit: 'ops/s', direction: Direction.MAX},
+        inputValue: 100,
+        bestValue: 320,
+      },
+    });
+    const tiles = heroView(projectSkeleton(skeleton, seq, '', {head})).tiles;
+    expect(tiles.map(tile => tile.id)).toEqual(original.map(tile => tile.id));
+    expect(tiles).toHaveLength(2);
+    for (const tile of original) {
+      const updated = tiles.find(each => each.id === tile.id);
+      if (tile.id === 'throughput') {
+        expect(updated?.figure).toBe('3.20×');
+        expect(updated?.detail).toBe('320 ops/s · input 100 ops/s');
+        expect(tile.trend).not.toBeNull();
+        expect(updated?.trend).toEqual(tile.trend);
+      } else {
+        expect(updated).toEqual(tile);
+      }
+    }
+  });
+}
+
+test('native turn costs, cache tokens and inline or attached typed replies survive keyframes', () => {
+  for (const attached of [false, true]) {
+    const fixture = storeRunFixture('short', 1);
+    const initial = foldSkeleton(seedSkeleton(), fixture.records);
+    const span = Object.values(seekSkeleton(initial, initial.throughSeq ?? 0n).spans).find(
+      each => each.label?.kind === 'agent_turn',
+    );
+    if (!span?.label?.attrs) throw new Error('fixture');
+    const reply = {
+      kind: 'Result',
+      json_schema: {type: 'object'},
+      value: {answer: attached ? 'x'.repeat(65537) : 'yes'},
+    };
+    const attrs = fromBinary(AgentTurnAttrsSchema, span.label.attrs.value);
+    attrs.replyJson = attached ? '' : JSON.stringify(reply);
+    attrs.usage = create(TokenUsageSchema, {
+      input: 3n,
+      cacheRead: 7n,
+      cacheCreation: 11n,
+      output: 5n,
+      costUsd: 1.25,
+    });
+    const seq = (initial.throughSeq ?? 0n) + 1n;
+    const updated = clone(SpanSchema, span);
+    if (!updated.label) throw new Error('fixture');
+    updated.label.attrs = create(AnySchema, {
+      typeUrl: `type.googleapis.com/${AgentTurnAttrsSchema.typeName}`,
+      value: toBinary(AgentTurnAttrsSchema, attrs),
+    });
+    const skeleton = foldSkeleton(initial, [
+      create(RecordSchema, {
+        seq,
+        epoch: 1,
+        body: {case: 'span', value: {change: Change.UPDATED, span: updated}},
+      }),
+    ]);
+    const hash = 'a'.repeat(64);
+    const content = {text: {[hash]: JSON.stringify(reply)}, replies: {[span.id]: [{seq, hash}]}};
+    for (const history of [
+      skeleton,
+      seedSkeleton(create(KeyframeSchema, {...skeleton, throughSeq: seq, logOffset: 8n})),
+    ]) {
+      const model = projectSkeleton(history, seq, '', {content});
+      const state = skeletonScreenState(
+        SEED,
+        history,
+        model,
+        runPageInitial(SEED),
+        undefined,
+        content,
+      );
+      const usage = state.run.core?.usageRecords.find(row => row.span_id === span.id);
+      expect(usage?.cost_usd).toBe(1.25);
+      expect(usage?.tokens.cache_read).toBe(7);
+      expect(usage?.tokens.cache_write).toBe(11);
+      expect(state.run.core?.transcript.find(row => row.spanId === span.id)?.reply).toEqual(reply);
+      const before = skeletonScreenState(
+        SEED,
+        history,
+        model,
+        {...runPageInitial(SEED), view: {at: Number(seq - 1n)}},
+        undefined,
+        content,
+      );
+      expect(before.run.core?.transcript.find(row => row.spanId === span.id)).toBeUndefined();
+    }
+  }
+});
+
+test('retained real usage and cache costs match the old projection through replay and a saved keyframe', () => {
+  const source = JSON.parse(
+    readFileSync(
+      new URL(
+        '../../../../../tests/conformance/fixtures/usage-records/codex-ten-rounds-trimmed.json',
+        import.meta.url,
+      ),
+      'utf8',
+    ),
+  ) as {records: UsageRecord[]};
+  const root = new URL('../../../../../proto/testdata/conversion/usage/', import.meta.url);
+  const frame = fromBinary(KeyframeSchema, readFileSync(new URL('expected.pb', root)));
+  const values: string[] = JSON.parse(readFileSync(new URL('records.base64.json', root), 'utf8'));
+  const records = values.map(value => Uint8Array.from(Buffer.from(value, 'base64')));
+  const expected = totalUsage(source.records);
+  expect(expected.turns).toBe(8);
+  expect(expected.tokens.cacheRead).toBeGreaterThan(0);
+  expect(expected.costUsd).toBeGreaterThan(0);
+  const spend = (row: UsageRecord) => ({
+    tokens: row.tokens,
+    cost: row.cost_usd,
+    duration: row.duration_ms,
+    harness: row.harness,
+    model: row.model,
+    client: row.client,
+    effort: row.reasoning_effort,
+    version: row.harness_version,
+  });
+  for (const checkpoint of [false, true]) {
+    const load = ingestSkeleton(
+      create(SkeletonResponseSchema, {
+        ...(checkpoint ? {keyframe: toBinary(KeyframeSchema, frame)} : {records}),
+        committedSeq: frame.throughSeq,
+        nextSeq: frame.throughSeq + 1n,
+        complete: true,
+      }),
+    );
+    const reading = readSkeleton(load.skeleton, seekSkeleton(load.skeleton, frame.throughSeq));
+    const actual = totalUsage(reading.core.usageRecords);
+    expect(actual.tokens).toEqual(expected.tokens);
+    expect(actual.turns).toBe(expected.turns);
+    // A keyframe's maps may enumerate turns in another order, changing only floating-point rounding.
+    expect(actual.costUsd).toBeCloseTo(expected.costUsd ?? Number.NaN, 14);
+    const ordered = (rows: readonly UsageRecord[]) =>
+      rows.map(spend).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
+    expect(ordered(reading.core.usageRecords)).toEqual(ordered(source.records));
   }
 });

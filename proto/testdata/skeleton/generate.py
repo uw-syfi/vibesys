@@ -172,7 +172,7 @@ def fixtures() -> dict[str, bytes]:
                 for record in records:
                     writer.append(record)
             for path in sorted(root.rglob("*")):
-                if path.is_file() and path.name != "run.lock":
+                if path.is_file() and path.suffix != ".lock":
                     payload = path.read_bytes()
                     if path.name == "run.head":
                         head = RunHead.from_binary(payload)

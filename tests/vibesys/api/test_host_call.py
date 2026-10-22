@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from datetime import UTC, datetime
 from io import BytesIO, StringIO
 from pathlib import Path
@@ -42,8 +43,25 @@ from vs_proto.api import (
     WithdrawIntent,
     validate,
 )
-from vs_runlog.api import FileRunLogWriter, RunLogReader, encode_frame
-from vs_sim.api.testing import FakeProcesses, ManualClock, ProcessScript, SimThreads, examples
+from vs_runlog.api import (
+    FileRunLogWriter,
+    RunLock,
+    RunLogReader,
+    encode_frame,
+    epoch_has_ended,
+    read_current_epoch,
+    writer_identity_path,
+)
+from vs_sim.api.testing import (
+    HANG_GUARD_S,
+    FakeProcesses,
+    FakeProcessSignaller,
+    ManualClock,
+    ProcessScript,
+    Sim,
+    SimThreads,
+    examples,
+)
 
 if TYPE_CHECKING:
     from protobuf import Message
@@ -81,7 +99,15 @@ def project(
 def inbox_call(payload: bytes) -> bytes:
     threads = SimThreads()
     processes = FakeProcesses(lambda _: ProcessScript(), pass_time=threads.sleep)
-    response = host_call(payload, processes=processes, threads=threads)
+    response = host_call(
+        payload,
+        platform=replace(
+            Sim(seed=0).platform(
+                threads, processes=processes, signaller=FakeProcessSignaller(set())
+            ),
+            writer_signaller=None,
+        ),
+    )
     assert not processes.ran
     return response
 
@@ -417,12 +443,12 @@ def _store_ending(owner: Project, run_id: str, ending: str) -> None:
     "ending", ["interrupted", "stopped", "success", "failure", "blocked", "deadline", "environment"]
 )
 def test_host_relaunch_round_trip_confirms_the_new_epoch(
-    project: tuple[Project, str], tmp_path: Path, ending: str
+    project: tuple[Project, str], tmp_path: Path, ending: str, sim: Sim
 ) -> None:
 
     owner, run_id = project
     executable = host_executable(tmp_path / "checkout")
-    threads, clock = SimThreads(), ManualClock()
+    threads, clock = sim.threads(), sim.wall_clock
     journal = EventJournal(clock, threads)
     journal.checkout = ("tree-a", False)
     journal.enable_runlog(owner, run_id)
@@ -439,7 +465,15 @@ def test_host_relaunch_round_trip_confirms_the_new_epoch(
         if len(processes.ran) > 1:
             return ProcessScript(returncode=1)
         concurrent = HostCallResponse.from_binary(
-            host_call(request.to_binary(), processes=processes, threads=threads)
+            host_call(
+                request.to_binary(),
+                platform=replace(
+                    Sim(seed=0).platform(
+                        threads, processes=processes, signaller=FakeProcessSignaller(set())
+                    ),
+                    writer_signaller=None,
+                ),
+            )
         )
         assert concurrent.result is not None
         assert concurrent.result.field == "relaunch"
@@ -465,7 +499,15 @@ def test_host_relaunch_round_trip_confirms_the_new_epoch(
     processes = FakeProcesses(launch, pass_time=threads.sleep)
     with FileRunLogWriter(path, clock=clock, threads=threads):
         response = HostCallResponse.from_binary(
-            host_call(request.to_binary(), processes=processes, threads=threads)
+            host_call(
+                request.to_binary(),
+                platform=replace(
+                    Sim(seed=0).platform(
+                        threads, processes=processes, signaller=FakeProcessSignaller(set())
+                    ),
+                    writer_signaller=None,
+                ),
+            )
         )
         assert response.result is not None
         assert response.result.field == "relaunch"
@@ -477,8 +519,9 @@ def test_host_relaunch_round_trip_confirms_the_new_epoch(
             ["relaunch"],
             stdin=BytesIO(request.to_binary()),
             stdout=output,
-            processes=processes,
-            threads=threads,
+            platform=sim.platform(
+                threads, processes=processes, signaller=FakeProcessSignaller(set())
+            ),
         )
         == 0
     )
@@ -497,7 +540,15 @@ def test_host_relaunch_round_trip_confirms_the_new_epoch(
         (2, "tree-b", True),
     ]
     response = HostCallResponse.from_binary(
-        host_call(request.to_binary(), processes=processes, threads=threads)
+        host_call(
+            request.to_binary(),
+            platform=replace(
+                Sim(seed=0).platform(
+                    threads, processes=processes, signaller=FakeProcessSignaller(set())
+                ),
+                writer_signaller=None,
+            ),
+        )
     )
     assert response.result is not None
     assert response.result.field == "relaunch"
@@ -514,8 +565,12 @@ def test_host_relaunch_missing_checkout_refuses_without_spawning(
     response = HostCallResponse.from_binary(
         host_call(
             relaunch_call(owner, run_id, tmp_path / "absent").to_binary(),
-            processes=processes,
-            threads=SimThreads(),
+            platform=replace(
+                Sim(seed=0).platform(
+                    SimThreads(), processes=processes, signaller=FakeProcessSignaller(set())
+                ),
+                writer_signaller=None,
+            ),
         )
     )
     validate(response)
@@ -558,7 +613,15 @@ def test_host_relaunch_failure_paths_never_claim_an_epoch(
     request = relaunch_call(owner, run_id, executable.parents[2])
     response = threads.run(
         lambda: HostCallResponse.from_binary(
-            host_call(request.to_binary(), processes=processes, threads=threads)
+            host_call(
+                request.to_binary(),
+                platform=replace(
+                    Sim(seed=0).platform(
+                        threads, processes=processes, signaller=FakeProcessSignaller(set())
+                    ),
+                    writer_signaller=None,
+                ),
+            )
         )
     )
     validate(response)
@@ -651,14 +714,30 @@ def _resume_during_environment_open_in(
 
         processes = FakeProcesses(launch, pass_time=threads.sleep)
         response = HostCallResponse.from_binary(
-            host_call(request.to_binary(), processes=processes, threads=threads)
+            host_call(
+                request.to_binary(),
+                platform=replace(
+                    Sim(seed=0).platform(
+                        threads, processes=processes, signaller=FakeProcessSignaller(set())
+                    ),
+                    writer_signaller=None,
+                ),
+            )
         )
         validate(response)
         assert response.result is not None
         assert response.result.field == "relaunch", response.result
         assert response.result.value.outcome == Oneof("epoch", 2)
         second = HostCallResponse.from_binary(
-            host_call(request.to_binary(), processes=processes, threads=threads)
+            host_call(
+                request.to_binary(),
+                platform=replace(
+                    Sim(seed=0).platform(
+                        threads, processes=processes, signaller=FakeProcessSignaller(set())
+                    ),
+                    writer_signaller=None,
+                ),
+            )
         )
         validate(second)
         assert second.result is not None
@@ -711,3 +790,332 @@ def test_resume_confirms_or_records_failure_for_any_environment_open(
     """A successor either confirms and runs, or ends the epoch it already published."""
     with TemporaryDirectory() as directory:
         _resume_during_environment_open(Path(directory), delay=delay, fail=fail)
+
+
+def native_journal(project: tuple[Project, str], sim: Sim) -> tuple[EventJournal, SimThreads]:
+    owner, run_id = project
+    threads = sim.threads()
+    journal = EventJournal(sim.wall_clock, threads)
+    journal.checkout = ("tree-a", False)
+    journal.enable_runlog(owner, run_id)
+    journal.attach(Project.log_directory_for(owner.root, run_id), run_id)
+    journal.emit(CoreEventType.RUN_STARTED, data=RunStartedData(outer_loop="test", input="input"))
+    return journal, threads
+
+
+def pause_payload(project: tuple[Project, str], epoch: int = 1) -> bytes:
+    owner, run_id = project
+    return HostCallRequest(
+        checkout="/src/vibesys",
+        method=Oneof(
+            "post_intent",
+            PostIntentRequest(
+                project_root=str(owner.root),
+                run_id=run_id,
+                request_id="pause-1",
+                expected_epoch=epoch,
+                intent=Oneof("pause_now", PauseNowIntent()),
+            ),
+        ),
+    ).to_binary()
+
+
+@pytest.mark.parametrize("mode", ["held", "unsupported", "absent", "unknown", "changed", "foreign"])
+def test_pause_now_keeps_process_outcomes_distinct_without_ending_the_run(
+    project: tuple[Project, str], sim: Sim, mode: str
+) -> None:
+    owner, run_id = project
+    journal, threads = native_journal(project, sim)
+    head = p.RunHead.from_binary(Project.run_head_path_for(owner.root, run_id).read_bytes())
+    assert head.process is not None
+    signaller = FakeProcessSignaller(
+        set() if mode == "absent" else {head.process.pid},
+        held_locks={
+            head.process.pid: {
+                writer_identity_path(Project.run_log_path_for(owner.root, run_id), head.process)
+            }
+        }
+        if mode != "foreign"
+        else {},
+    )
+    if mode == "unknown":
+        assert head.process.started_at is not None
+        head.process.started_at.seconds += 1
+        Project.run_head_path_for(owner.root, run_id).write_bytes(head.to_binary())
+    before = threads.now()
+    processes = FakeProcesses(lambda _: ProcessScript(), pass_time=threads.sleep)
+    try:
+        response = HostCallResponse.from_binary(
+            host_call(
+                pause_payload(project, 2 if mode == "changed" else 1),
+                platform=replace(
+                    Sim(seed=0).platform(
+                        threads, processes=processes, signaller=FakeProcessSignaller(set())
+                    ),
+                    writer_signaller=None if mode == "unsupported" else signaller,
+                ),
+            )
+        )
+        validate(response)
+        assert response.result is not None
+        assert response.result.field == "post_intent"
+        result = response.result.value.termination
+        assert result is not None
+        assert (
+            result.outcome
+            is {
+                "held": p.host_payloads.TerminateRunOutcome.REQUESTED_UNCONFIRMED,
+                "unsupported": p.host_payloads.TerminateRunOutcome.UNSUPPORTED,
+                "absent": p.host_payloads.TerminateRunOutcome.PROCESS_ABSENT,
+                "unknown": p.host_payloads.TerminateRunOutcome.OBSERVATION_UNKNOWN,
+                "changed": p.host_payloads.TerminateRunOutcome.IDENTITY_CHANGED,
+                "foreign": p.host_payloads.TerminateRunOutcome.IDENTITY_CHANGED,
+            }[mode]
+        )
+        assert signaller.terminated == ([head.process.pid] if mode == "held" else [])
+        assert owner.state.control_inbox(run_id).pending()[0].request_id == "pause-1"
+        if mode == "held":
+            assert threads.now() - before == pytest.approx(9.75)
+        if mode != "unknown":
+            current = read_current_epoch(Project.run_log_path_for(owner.root, run_id))
+            assert current is not None
+            assert not epoch_has_ended(current)
+        assert not processes.ran
+    finally:
+        journal.close()
+
+
+@pytest.mark.parametrize("release_at", [1, 6])
+def test_pause_now_gives_the_owner_cleanup_grace_and_observes_release(
+    project: tuple[Project, str], sim: Sim, release_at: int
+) -> None:
+    owner, run_id = project
+    journal, threads = native_journal(project, sim)
+    head = p.RunHead.from_binary(Project.run_head_path_for(owner.root, run_id).read_bytes())
+    assert head.process is not None
+    signaller = FakeProcessSignaller(
+        {head.process.pid},
+        held_locks={
+            head.process.pid: {
+                writer_identity_path(Project.run_log_path_for(owner.root, run_id), head.process)
+            }
+        },
+    )
+
+    def release() -> None:
+        threads.sleep(release_at)
+        journal.close()
+
+    worker = threads.spawn(release, name="writer-cleanup")
+    try:
+        response = HostCallResponse.from_binary(
+            host_call(
+                pause_payload(project),
+                platform=replace(
+                    Sim(seed=0).platform(
+                        threads,
+                        processes=FakeProcesses(lambda _: ProcessScript(), pass_time=threads.sleep),
+                        signaller=FakeProcessSignaller(set()),
+                    ),
+                    writer_signaller=signaller,
+                ),
+            )
+        )
+        assert response.result is not None
+        assert response.result.field == "post_intent"
+        result = response.result.value.termination
+        assert result is not None
+        assert result.outcome is p.host_payloads.TerminateRunOutcome.WRITER_RELEASED
+        assert signaller.terminated == ([] if release_at == 1 else [head.process.pid])
+    finally:
+        worker.join(HANG_GUARD_S)
+        journal.close()
+
+
+def test_pause_now_refuses_a_reused_pid_while_a_successor_holds_the_run_lock(
+    project: tuple[Project, str], sim: Sim
+) -> None:
+    owner, run_id = project
+    journal, threads = native_journal(project, sim)
+    head = p.RunHead.from_binary(Project.run_head_path_for(owner.root, run_id).read_bytes())
+    assert head.process is not None
+    journal.close()
+    successor = RunLock(Project.run_log_path_for(owner.root, run_id).parent / "run.lock")
+    signaller = FakeProcessSignaller(
+        {head.process.pid},
+        held_locks={
+            head.process.pid: {
+                writer_identity_path(Project.run_log_path_for(owner.root, run_id), head.process)
+            }
+        },
+    )
+    try:
+        response = HostCallResponse.from_binary(
+            host_call(
+                pause_payload(project),
+                platform=replace(
+                    Sim(seed=0).platform(
+                        threads,
+                        processes=FakeProcesses(lambda _: ProcessScript(), pass_time=threads.sleep),
+                        signaller=FakeProcessSignaller(set()),
+                    ),
+                    writer_signaller=signaller,
+                ),
+            )
+        )
+        assert response.result is not None
+        assert response.result.field == "post_intent"
+        result = response.result.value.termination
+        assert result is not None
+        assert result.outcome is p.host_payloads.TerminateRunOutcome.IDENTITY_CHANGED
+        assert signaller.opened == []
+        assert signaller.terminated == []
+    finally:
+        successor.close()
+
+
+def test_internal_terminate_operation_uses_the_same_pause_now_owner(
+    project: tuple[Project, str], sim: Sim
+) -> None:
+    owner, run_id = project
+    journal, threads = native_journal(project, sim)
+    head = p.RunHead.from_binary(Project.run_head_path_for(owner.root, run_id).read_bytes())
+    assert head.process is not None
+    signaller = FakeProcessSignaller(
+        {head.process.pid},
+        held_locks={
+            head.process.pid: {
+                writer_identity_path(Project.run_log_path_for(owner.root, run_id), head.process)
+            }
+        },
+    )
+    request = p.MutateRequest(
+        checkout="/src/vibesys",
+        method=Oneof(
+            "terminate_run",
+            p.host_payloads.TerminateRunRequest(
+                request_id="pause-1",
+                project_root=str(owner.root),
+                run_id=run_id,
+                expected_process=head.process,
+            ),
+        ),
+    )
+    output = BytesIO()
+    try:
+        assert (
+            main(
+                ["terminate-run"],
+                stdin=BytesIO(request.to_binary()),
+                stdout=output,
+                platform=replace(
+                    sim.platform(
+                        threads,
+                        processes=FakeProcesses(lambda _: ProcessScript(), pass_time=threads.sleep),
+                        signaller=signaller,
+                    ),
+                    writer_signaller=signaller,
+                ),
+            )
+            == 0
+        )
+        response = p.MutateResponse.from_binary(output.getvalue())
+        validate(response)
+        assert response.result is not None
+        assert response.result.field == "terminate_run"
+        assert response.result.value.request_id == "pause-1"
+        assert (
+            response.result.value.outcome
+            is p.host_payloads.TerminateRunOutcome.REQUESTED_UNCONFIRMED
+        )
+        assert signaller.terminated == [head.process.pid]
+        assert owner.state.control_inbox(run_id).pending()[0].request_id == "pause-1"
+    finally:
+        journal.close()
+
+
+@pytest.mark.parametrize("operation", ["post-intent", "terminate-run"])
+@pytest.mark.parametrize("startup", [0, 1, 4, 8, 11])
+@pytest.mark.parametrize("release", [False, True])
+def test_gateway_pause_reply_preserves_admission_with_the_remaining_budget(
+    project: tuple[Project, str], sim: Sim, startup: int, operation: str, *, release: bool
+) -> None:
+    owner, run_id = project
+    journal, threads = native_journal(project, sim)
+    head = p.RunHead.from_binary(Project.run_head_path_for(owner.root, run_id).read_bytes())
+    assert head.process is not None
+    signaller = FakeProcessSignaller(
+        {head.process.pid},
+        held_locks={
+            head.process.pid: {
+                writer_identity_path(Project.run_log_path_for(owner.root, run_id), head.process)
+            }
+        },
+    )
+    request = HostCallRequest.from_binary(pause_payload(project))
+    cap = next(op.cap_ms / 1000 for op in p.host_operations.HOST_CALLS if op.slot == "post_intent")
+    outer_deadline = sim.wall_clock.now() + cap
+    request.deadline = p.Timestamp.from_seconds(outer_deadline)
+    payload = (
+        request.to_binary()
+        if operation == "post-intent"
+        else p.MutateRequest(
+            checkout=request.checkout,
+            method=Oneof(
+                "terminate_run",
+                p.host_payloads.TerminateRunRequest(
+                    request_id="pause-1",
+                    project_root=str(owner.root),
+                    run_id=run_id,
+                    expected_process=head.process,
+                    deadline=request.deadline,
+                ),
+            ),
+        ).to_binary()
+    )
+    threads.sleep(startup)
+    if release:
+        journal.close()
+    output = BytesIO()
+    try:
+        assert (
+            main(
+                [operation],
+                stdin=BytesIO(payload),
+                stdout=output,
+                platform=replace(
+                    sim.platform(
+                        threads,
+                        processes=FakeProcesses(lambda _: ProcessScript(), pass_time=threads.sleep),
+                        signaller=signaller,
+                    ),
+                    writer_signaller=signaller,
+                ),
+            )
+            == 0
+        )
+        response = (
+            HostCallResponse if operation == "post-intent" else p.MutateResponse
+        ).from_binary(output.getvalue())
+        validate(response)
+        assert response.result is not None
+        assert owner.state.control_inbox(run_id).pending()[0].request_id == "pause-1"
+        if response.result.field == "post_intent":
+            assert response.result.value.request_id == "pause-1"
+            result = response.result.value.termination
+        else:
+            assert response.result.field == "terminate_run"
+            result = response.result.value
+        assert result is not None
+        assert result.outcome is (
+            p.host_payloads.TerminateRunOutcome.WRITER_RELEASED
+            if release
+            else p.host_payloads.TerminateRunOutcome.OBSERVATION_UNKNOWN
+            if startup >= 8
+            else p.host_payloads.TerminateRunOutcome.REQUESTED_UNCONFIRMED
+        )
+        assert signaller.terminated == ([head.process.pid] if not release and startup < 8 else [])
+        if startup < cap:
+            assert sim.wall_clock.now() < outer_deadline
+    finally:
+        journal.close()

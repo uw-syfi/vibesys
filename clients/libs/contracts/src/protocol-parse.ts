@@ -3,6 +3,7 @@ import responsePayloadSchema from './generated/response-payload.schema.js';
 import runEventSchema from './generated/run-event.schema.js';
 import type {
   ActiveExecutions,
+  AgentReply,
   Diagnostic,
   ProtocolResponse,
   RunEvent,
@@ -57,6 +58,12 @@ export function parseProtocolResponse(line: string): ProtocolResponse {
 /** Validate an event from a non-transport boundary and return its typed value. */
 export function validateRunEvent(value: unknown): RunEvent {
   return validateRunEventAt(value, 'run event');
+}
+
+/** Validate a retained typed reply without reconstructing an event around it. */
+export function validateAgentReply(value: unknown): AgentReply {
+  validateSchema(value, {$ref: '#/$defs/AgentReply'}, 'agent reply', {...OPEN_WALK, strict: true});
+  return value as AgentReply;
 }
 
 /**

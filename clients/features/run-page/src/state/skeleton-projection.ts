@@ -3,7 +3,13 @@ import {type HostRun, recordedProjectRoot} from '@vibesys/hosts';
 import {observeRun, type RunLivenessHint, type Skeleton, seekSkeleton} from '@vibesys/run-skeleton';
 import {agentGraph} from '@vibesys/run-state/agents';
 import {candidateTree} from '@vibesys/run-state/candidates';
-import {lifecycleState, readSkeleton, skeletonPositions} from '@vibesys/run-state/skeleton';
+import {
+  lifecycleState,
+  readHeadline,
+  readSkeleton,
+  type SkeletonContent,
+  skeletonPositions,
+} from '@vibesys/run-state/skeleton';
 import {AppendLog} from './append-log.js';
 import {EMPTY_TRACE_LOG} from './live.js';
 import {withLiveBest} from './live-best.js';
@@ -24,9 +30,20 @@ export function recordedRunRoot(skeleton: Skeleton | undefined) {
   return undefined;
 }
 
-export function projectSkeleton(skeleton: Skeleton, seq: bigint, objectiveText = ''): RunModel {
-  const reading = readSkeleton(skeleton, seekSkeleton(skeleton, seq), objectiveText);
+export function projectSkeleton(
+  skeleton: Skeleton,
+  seq: bigint,
+  objectiveText = '',
+  options: {head?: RunLivenessHint['head']; content?: SkeletonContent} = {},
+): RunModel {
+  const reading = readSkeleton(
+    skeleton,
+    seekSkeleton(skeleton, seq),
+    objectiveText,
+    options.content,
+  );
   return {
+    headline: readHeadline(options.head, seq),
     at: Number(seq),
     trace: {spans: new Map(reading.spans.map(span => [span.id, span])), sequence: Number(seq)},
     overview: reading.overview,
@@ -49,6 +66,7 @@ export function skeletonScreenState(
   whole: RunModel,
   ui: RunPageState,
   hint?: RunLivenessHint,
+  content?: SkeletonContent,
 ): RunPageState {
   const reading = readSkeleton(
     skeleton,
@@ -56,6 +74,8 @@ export function skeletonScreenState(
       skeleton,
       ui.view.at === 'live' ? (skeleton.throughSeq ?? 0n) : BigInt(ui.view.at),
     ),
+    '',
+    content,
   );
   const lifecycle = observedLifecycle(skeleton, hint);
   const status = lifecycle.status;
@@ -86,6 +106,9 @@ export function skeletonScreenState(
   };
   return {
     ...ui,
+    recordDiagnostic: ui.recordLog
+      ?.filter(row => row.failure && row.epoch === observeRun(skeleton).epoch)
+      .at(-1),
     lifecycleWord: lifecycle.word,
     positionWord: reading.latest === null ? 'Start' : duration(reading.latest),
     startupStages: reading.startup.map(step => ({
