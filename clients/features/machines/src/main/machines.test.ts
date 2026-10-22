@@ -128,6 +128,42 @@ describe('MachinesMain', () => {
     expect(await machines.inspect(HOST_B, '/nowhere')).toEqual({state: 'not_found'});
   });
 
+  test('transport v2 inspects through the registry and a moved revision is stale', async () => {
+    let revision = 3n;
+    let release: () => void = () => {};
+    const gate = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    let started: () => void = () => {};
+    const startedPromise = new Promise<void>(resolve => {
+      started = resolve;
+    });
+    const {machines, manager} = await subject(new Map(), {
+      transportV2: async () => true,
+      selectionRevision: () => revision,
+      setup: {
+        completePaths: async () => {
+          throw new Error('unused');
+        },
+        inspectCandidate: async () => {
+          started();
+          await gate;
+          return {state: 'too_old', version: '0.0.9', min: '0.1.1'};
+        },
+      },
+    });
+    await using _ = manager;
+    const pending = machines.inspect(HOST_B, '/home/me/vibesys-old', 3n);
+    await startedPromise;
+    revision = 4n;
+    release();
+    await expect(pending).rejects.toThrow('stale selection');
+    revision = 4n;
+    await expect(machines.inspect(HOST_B, '/home/me/vibesys-old', 3n)).rejects.toThrow(
+      'stale selection',
+    );
+  });
+
   test('removing a machine forgets only it; This Mac stays on the app’s own checkout', async () => {
     const {machines, settings, manager} = await subject(new Map());
     await using _ = manager;

@@ -135,6 +135,48 @@ service HostOperationsService {
       }
     };
   }
+  // Setup reads. They do not require a saved checkout: the candidate path or
+  // typed prefix is the input, and Hello remains the gateway schema handshake.
+  rpc InspectCandidate(vibesys.host.v1.InspectCandidateRequest) returns (vibesys.host.v1.InspectCandidateResponse) {
+    option (vibesys.host.v1.operation) = {
+      adapter_method: "inspect.candidate"
+      operation_id: 17
+      request_tag: 17
+      response_tag: 17
+      cap_ms: 10000
+      grace_ms: 5000
+      effect: OPERATION_EFFECT_READ
+      retry: RETRY_BOUNDED_READ
+      cardinality: CARDINALITY_UNARY
+      executor: EXECUTOR_CANDIDATE_INSPECTION
+      correlation: {
+        request_path: 1
+        response_path: 1
+      }
+      correlation: {
+        request_path: 3
+        response_path: 2
+      }
+    };
+  }
+  rpc CompletePaths(vibesys.host.v1.CompletePathsRequest) returns (vibesys.host.v1.CompletePathsResponse) {
+    option (vibesys.host.v1.operation) = {
+      adapter_method: "paths.complete_registry"
+      operation_id: 18
+      request_tag: 18
+      response_tag: 18
+      cap_ms: 5000
+      grace_ms: 5000
+      effect: OPERATION_EFFECT_READ
+      retry: RETRY_BOUNDED_READ
+      cardinality: CARDINALITY_UNARY
+      executor: EXECUTOR_FILESYSTEM
+      correlation: {
+        request_path: 1
+        response_path: 1
+      }
+    };
+  }
   // HostCall dispatch. The runner deadline is cap_ms. The client budget is
   // cap_ms plus grace_ms, so it stays strictly above that cap. Relaunch confirms
   // an epoch for up to 25s inside its runner cap. Request and response tags are

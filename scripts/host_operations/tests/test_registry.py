@@ -66,13 +66,19 @@ def _changed(change: Callable[[object], None], index: int = 0) -> bytes:
 
 def test_every_method_has_one_typed_handler_and_canonical_budget() -> None:
     compiled = compile_registry(_image().SerializeToString(), _slots())
-    assert [op.name for op in compiled if op.is_read()] == list(_HANDLERS)
+    reads = [op for op in compiled if op.is_read()]
+    assert [op.name for op in reads if op.policy.executor == 1] == list(_HANDLERS)
+    assert [op.name for op in reads if op.policy.executor != 1] == [
+        "InspectCandidate",
+        "CompletePaths",
+    ]
     assert [(op.slot, op.policy.cap_ms) for op in compiled if op.is_admission()] == [
         ("post_intent", 10000),
         ("relaunch", 30000),
         ("chat_message", 10000),
     ]
     assert {op.policy.cap_ms + op.policy.grace_ms for op in compiled} == {
+        10000,
         15000,
         30000,
         35000,

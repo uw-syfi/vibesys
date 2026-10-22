@@ -1228,3 +1228,102 @@ message PreflightRunResponseRoles {
     }
   }];
 }
+
+// A candidate checkout inspection. The executable and argv are fixed by the
+// gateway; this payload only names the path and the caller's selection revision.
+enum CandidateState {
+  CANDIDATE_STATE_UNSPECIFIED = 0;
+  CANDIDATE_STATE_FOUND = 1;
+  CANDIDATE_STATE_NOT_FOUND = 2;
+  CANDIDATE_STATE_TOO_OLD = 3;
+}
+
+message CandidateIdentity {
+  string root = 1 [(buf.validate.field).string = {max_bytes: 4096}];
+  string version = 2 [(buf.validate.field).string = {max_bytes: 128}];
+  optional string commit = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 128
+  }];
+  optional bool dirty = 4;
+  bool compatible = 5;
+  bool vibesys_project = 6;
+  bool git_repository = 7;
+}
+
+message InspectCandidateRequest {
+  string request_id = 1 [(buf.validate.field).string = {
+    max_bytes: 131072
+    min_len: 1
+    max_len: 128
+  }];
+  string path = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 4096
+  }];
+  uint64 selection_revision = 3 [(buf.validate.field).uint64.gt = 0];
+}
+
+message InspectCandidateResponse {
+  option (buf.validate.message).cel = {
+    id: "inspect.identity"
+    message: "found and too-old candidates include a versioned identity"
+    expression: "(this.state != 1 && this.state != 3) || (has(this.identity) && (this.state != 1 || (this.identity.root != '' && this.identity.version != '')))"
+  };
+  string request_id = 1 [(buf.validate.field).string = {
+    max_bytes: 131072
+    min_len: 1
+    max_len: 128
+  }];
+  uint64 selection_revision = 2 [(buf.validate.field).uint64.gt = 0];
+  string schema_hash = 3 [(buf.validate.field).string.pattern = "^[0-9a-f]{64}$"];
+  CandidateState state = 4 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  CandidateIdentity identity = 5;
+  string minimum_version = 6 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 128
+  }];
+  bool vibesys_checkout = 7;
+  bool vibesys_project = 8;
+  bool git_repository = 9;
+}
+
+message CompletedPath {
+  string name = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 255
+  }];
+  string path = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 4096
+  }];
+  bool vibesys_checkout = 3;
+  bool vibesys_project = 4;
+  bool git_repository = 5;
+}
+
+message CompletePathsRequest {
+  string request_id = 1 [(buf.validate.field).string = {
+    max_bytes: 131072
+    min_len: 1
+    max_len: 128
+  }];
+  string prefix = 2 [(buf.validate.field).string.max_bytes = 4096];
+}
+
+message CompletePathsResponse {
+  string request_id = 1 [(buf.validate.field).string = {
+    max_bytes: 131072
+    min_len: 1
+    max_len: 128
+  }];
+  string directory = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 4096
+  }];
+  repeated CompletedPath entries = 3 [(buf.validate.field).repeated.max_items = 200];
+  bool truncated = 4;
+}

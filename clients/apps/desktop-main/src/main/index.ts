@@ -14,6 +14,7 @@ import {
   LocalLink,
   READ_METHOD,
   registryReads,
+  registrySetup,
   SshLink,
 } from '@vibesys/connection';
 import {RunNotifier} from '@vibesys/feature-app-shell/main';
@@ -22,7 +23,7 @@ import {MachinesMain} from '@vibesys/feature-machines/main';
 import {NewRunMain} from '@vibesys/feature-new-run/main';
 import {type RelayPort, RunControl} from '@vibesys/feature-run-control/main';
 import {PreferencesMain} from '@vibesys/feature-settings/main';
-import {type HostId, hostFromKey, hostKey} from '@vibesys/hosts';
+import {type HostId, type HostListing, hostFromKey, hostKey} from '@vibesys/hosts';
 import {
   FIRST_PAINT_CHANNEL,
   type FirstPaint,
@@ -166,23 +167,14 @@ async function openWindow(
         hosts.readEvents(hostFromKey(run.host), run.project, run.runId, from, max, kinds),
     },
   });
-  const hosts = new Hosts({
+  const {hosts, setup} = listedHosts({
     manager,
     settings,
-    localCheckout: REPOSITORY_ROOT,
-    sshConfigPath: join(homedir(), '.ssh', 'config'),
-    log,
-    push: listing => {
-      notifier.listing(listing);
-      if (listing.kind === 'listed') {
-        for (const run of listing.live) history.runsLive(listing.host, [run.runId]);
-      }
-      windows.broadcast(WELCOME_EVENTS.listing, welcome.listing(listing));
-    },
-    retire: host => {
-      history.invalidateHost(host);
-      welcome.retireHost(host);
-    },
+    gateway,
+    history,
+    notifier,
+    welcome,
+    broadcast: listing => windows.broadcast(WELCOME_EVENTS.listing, welcome.listing(listing)),
   });
   const runs: RunControl = new RunControl({
     connection: id => hosts.connection(id),
@@ -200,7 +192,7 @@ async function openWindow(
     welcome,
     hosts,
     history,
-    machines: machinesOver(settings, hosts, gateway),
+    machines: machinesOver(settings, hosts, gateway, setup),
     runs,
     settings,
     preferences,
@@ -274,11 +266,62 @@ function appWindows(runs: RunControl, fatal: (error: Error) => void) {
   };
 }
 
+function listedHosts(parts: {
+  readonly manager: ConnectionManager;
+  readonly settings: SettingsStore;
+  readonly gateway: ReturnType<typeof installGateway>;
+  readonly history: RunHistoryStore;
+  readonly notifier: RunNotifier;
+  readonly welcome: WelcomeFeed;
+  readonly broadcast: (listing: HostListing) => void;
+}): {readonly hosts: Hosts; readonly setup: ReturnType<typeof registrySetup>} {
+  const {manager, settings, gateway, history, notifier, welcome, broadcast} = parts;
+  const {transportV2, setup} = hostTransport(settings, gateway);
+  return {
+    setup,
+    hosts: new Hosts({
+      manager,
+      settings,
+      localCheckout: REPOSITORY_ROOT,
+      sshConfigPath: join(homedir(), '.ssh', 'config'),
+      transportV2,
+      setup,
+      log,
+      push: listing => {
+        notifier.listing(listing);
+        if (listing.kind === 'listed') {
+          for (const run of listing.live) history.runsLive(listing.host, [run.runId]);
+        }
+        broadcast(listing);
+      },
+      retire: host => {
+        history.invalidateHost(host);
+        welcome.retireHost(host);
+      },
+    }),
+  };
+}
+
+/** The per-host switch and the setup reads that do not need a saved checkout. */
+function hostTransport(settings: SettingsStore, gateway: ReturnType<typeof installGateway>) {
+  return {
+    transportV2: async (id: HostId) => {
+      const {settings: file} = await settings.hosts();
+      return settingsFor(file, id)?.runTransportV2 === true;
+    },
+    setup: registrySetup({
+      unary: (id: HostId, bytes: Uint8Array, signal: AbortSignal) =>
+        gateway.unary(hostKey(id), READ_METHOD, bytes, signal),
+    }),
+  };
+}
+
 /** The machines, over the settings store and the hosts' checkouts and connections. */
 function machinesOver(
   settings: SettingsStore,
   hosts: Hosts,
   gateway: ReturnType<typeof installGateway>,
+  setup: ReturnType<typeof registrySetup>,
 ): MachinesMain {
   return new MachinesMain({
     settings,
@@ -293,6 +336,7 @@ function machinesOver(
       checkout: id => hosts.checkout(id),
       unary: (id, bytes, signal) => gateway.unary(hostKey(id), READ_METHOD, bytes, signal),
     }),
+    setup,
   });
 }
 

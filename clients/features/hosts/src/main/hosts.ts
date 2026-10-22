@@ -11,6 +11,7 @@ import {
   HelperRequestError,
   type HostConnection,
   type LogsLease,
+  type RegistrySetup,
 } from '@vibesys/connection';
 import {
   type HarnessesListReply,
@@ -91,6 +92,10 @@ export interface HostsDeps {
   readonly push: (listing: HostListing) => void;
   /** Forget a host's retained listing when it leaves the desired set. */
   readonly retire: (host: HostKey) => void;
+  /** Per host. Absent or false keeps the helper JSON channel. */
+  readonly transportV2?: (id: HostId) => Promise<boolean>;
+  /** Required when `transportV2` is true. Missing it throws; it does not fall back. */
+  readonly setup?: RegistrySetup;
 }
 
 /** How many times a summary is read again when its pages disagree on where the run stood. */
@@ -328,13 +333,16 @@ export class Hosts {
     if (this.#removing.has(host)) throw new Error(`${hostLabel(id)} is being removed`);
     const key = checkoutChangeKey(change);
     if (this.#checkoutChanges.has(key)) throw new Error('the checkout change is already active');
-    const operation = new CheckoutChange(host, this.#deps.manager.candidate(id, checkout));
+    const v2 = await this.#transportV2(id);
+    const operation = new CheckoutChange(
+      host,
+      v2 ? null : this.#deps.manager.candidate(id, checkout),
+    );
     this.#checkoutChanges.set(key, operation);
     try {
-      const candidate = await operation.ready();
-      const root = candidate.checkoutRoot;
-      await operation.closeCandidate();
-      operation.assertCurrent();
+      const root = v2
+        ? await this.#inspectForCheckout(id, checkout, change.sequence, operation)
+        : await this.#inspectWithHelper(operation);
       const outcome = await this.#deps.settings.updateHosts(
         current => withHostSettings(current, id, {...settingsFor(current, id), checkout}),
         operation.isCurrent,
@@ -662,6 +670,15 @@ export class Hosts {
 
   /** The directories in `directory` (a path ending in `/`, or `~/`) on `id`. */
   async complete(id: HostId, directory: string): Promise<PathCompletion> {
+    if (await this.#transportV2(id)) {
+      const listed = await this.#setup().completePaths(id, directory, new AbortController().signal);
+      return {
+        kind: 'listed',
+        directory: listed.directory,
+        entries: listed.entries,
+        truncated: listed.truncated,
+      };
+    }
     await using lease = await this.connection(id);
     let reply: PathsCompleteReply;
     try {
@@ -1063,6 +1080,47 @@ export class Hosts {
     }
     return true;
   }
+
+  async #transportV2(id: HostId): Promise<boolean> {
+    return (await this.#deps.transportV2?.(id)) === true;
+  }
+
+  /** The setup port. A missing one is a wiring error, not a reason to use the helper. */
+  #setup(): RegistrySetup {
+    const setup = this.#deps.setup;
+    if (setup === undefined) {
+      throw new Error('run transport v2 is on and the registry setup is missing');
+    }
+    return setup;
+  }
+
+  async #inspectWithHelper(operation: CheckoutChange): Promise<string | null> {
+    const candidate = await operation.ready();
+    const root = candidate.checkoutRoot;
+    await operation.closeCandidate();
+    operation.assertCurrent();
+    return root;
+  }
+
+  async #inspectForCheckout(
+    id: HostId,
+    checkout: string,
+    sequence: number,
+    operation: CheckoutChange,
+  ): Promise<string> {
+    if (sequence <= 0) throw new Error('stale selection');
+    const inspected = await this.#setup().inspectCandidate(
+      id,
+      checkout,
+      BigInt(sequence),
+      operation.signal,
+    );
+    operation.assertCurrent();
+    if (inspected.state === 'not_found') throw new Error('the checkout was not found');
+    if (inspected.state === 'too_old') throw new Error('the checkout is too old');
+    if (!inspected.compatible) throw new Error('the checkout is incompatible');
+    return inspected.root;
+  }
 }
 
 /** One inspector's hold on a host's logs channel: its connection lease, then its logs lease. */
@@ -1152,12 +1210,14 @@ type CheckoutRevision = WatchIntent | {readonly removed: true};
 class CheckoutChange {
   readonly host: HostKey;
   readonly settled: Promise<void>;
-  readonly #candidate: Promise<HostConnection>;
   #resolveSettled: () => void = () => undefined;
   #state: 'current' | 'cancelled' | 'committed' = 'current';
   #closing: Promise<void> | null = null;
 
-  constructor(host: HostKey, candidate: Promise<HostConnection>) {
+  readonly #abort = new AbortController();
+  readonly #candidate: Promise<HostConnection> | null;
+
+  constructor(host: HostKey, candidate: Promise<HostConnection> | null) {
     this.host = host;
     this.#candidate = candidate;
     this.settled = new Promise(resolve => {
@@ -1167,9 +1227,14 @@ class CheckoutChange {
 
   readonly isCurrent = (): boolean => this.#state === 'current';
 
+  get signal(): AbortSignal {
+    return this.#abort.signal;
+  }
+
   cancel(): boolean {
     if (this.#state !== 'current') return false;
     this.#state = 'cancelled';
+    this.#abort.abort();
     return true;
   }
 
@@ -1190,6 +1255,7 @@ class CheckoutChange {
   }
 
   async ready(): Promise<HostConnection> {
+    if (this.#candidate === null) throw new Error('the checkout change has no candidate');
     const candidate = await this.#candidate;
     this.assertCurrent();
     await candidate.ready();
@@ -1198,6 +1264,7 @@ class CheckoutChange {
   }
 
   closeCandidate(): Promise<void> {
+    if (this.#candidate === null) return Promise.resolve();
     // Acquisition itself may reject when the manager is closing. Cleanup must not replace the
     // primary error from `ready`, but a candidate that was built always remains this operation's.
     this.#closing ??= this.#candidate.then(

@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from vibesys.api.host import host_call
+from vibesys.api.host_operations.api import execute_inspect_candidate
 from vs_project.api import Project, ProjectError
 from vs_proto.api import host_operations
 from vs_sim.api import OsProcesses, OsThreads, SystemClock
@@ -70,6 +71,16 @@ def main(
 ) -> int:
     """Run one host method from the current directory."""
     arguments = sys.argv[1:] if argv is None else argv
+    if arguments and arguments[0] == "inspect-candidate":
+        parser = argparse.ArgumentParser(
+            prog="vibesys host inspect-candidate",
+            description="Read a binary HostReadRequest from stdin; write a binary HostReadResponse to stdout.",
+        )
+        parser.parse_args(arguments[1:])
+        source = sys.stdin.buffer if stdin is None else stdin
+        destination = sys.stdout.buffer if stdout is None else stdout
+        destination.write(execute_inspect_candidate(source.read((1 << 20) + 1)))
+        return 0
     if arguments and arguments[0] in _READ_COMMANDS:
         parser = argparse.ArgumentParser(
             prog=f"vibesys host {arguments[0]}",

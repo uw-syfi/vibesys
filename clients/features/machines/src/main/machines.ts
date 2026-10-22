@@ -6,7 +6,13 @@
  * completing paths are the hosts feature's (its `setCheckout` checks a checkout by starting its
  * helper there before it saves it).
  */
-import {ConnectionError, type ConnectionLease, HelperRequestError} from '@vibesys/connection';
+import {
+  ConnectionError,
+  type ConnectionLease,
+  HelperRequestError,
+  type InspectedCandidate,
+  type RegistrySetup,
+} from '@vibesys/connection';
 import type {MachineDescription} from '@vibesys/hosts';
 import {
   type HostId,
@@ -55,6 +61,10 @@ export interface MachinesMainDeps {
   readonly transportV2?: (id: HostId) => Promise<boolean>;
   /** Required when `transportV2` is true. Missing it throws; it does not fall back. */
   readonly registry?: RegistryCatalog;
+  /** Setup reads. Required when `transportV2` is true for inspect. */
+  readonly setup?: RegistrySetup;
+  /** The selection the caller still owns. A change across the await is stale. */
+  readonly selectionRevision?: (id: HostId) => bigint;
 }
 
 const LOCAL: HostId = {kind: 'local'};
@@ -68,6 +78,24 @@ function unreachable(error: unknown): MachineReport {
     return {kind: 'checkout-not-found', detail};
   }
   return {kind: 'unavailable', detail};
+}
+
+function inspectionOf(inspected: InspectedCandidate): CheckoutInspection {
+  switch (inspected.state) {
+    case 'found':
+      return {
+        state: 'found',
+        root: inspected.root,
+        version: inspected.version,
+        commit: inspected.commit,
+        dirty: inspected.dirty,
+        compatible: inspected.compatible,
+      };
+    case 'not_found':
+      return {state: 'not_found'};
+    case 'too_old':
+      return {state: 'too_old', version: inspected.version, min: inspected.min};
+  }
 }
 
 function notNegotiated(error: unknown): boolean {
@@ -146,7 +174,23 @@ export class MachinesMain {
   }
 
   /** What `path` on `id` holds, by its helper's own inspection. */
-  async inspect(id: HostId, path: string): Promise<CheckoutInspection> {
+  async inspect(
+    id: HostId,
+    path: string,
+    revision: bigint | null = null,
+  ): Promise<CheckoutInspection> {
+    if (await this.#v2(id)) {
+      const current = this.#deps.selectionRevision;
+      if (revision !== null && current?.(id) !== revision) throw new Error('stale selection');
+      const inspected = await this.#setup().inspectCandidate(
+        id,
+        path,
+        revision ?? 1n,
+        new AbortController().signal,
+      );
+      if (revision !== null && current?.(id) !== revision) throw new Error('stale selection');
+      return inspectionOf(inspected);
+    }
     await using lease = await this.#deps.connection(id);
     try {
       const reply = await lease.connection.request({type: 'checkout.inspect', path});
@@ -251,6 +295,15 @@ export class MachinesMain {
 
   async #v2(id: HostId): Promise<boolean> {
     return (await this.#deps.transportV2?.(id)) === true;
+  }
+
+  /** The setup port. A missing one is a wiring error, not a reason to use the helper. */
+  #setup(): RegistrySetup {
+    const setup = this.#deps.setup;
+    if (setup === undefined) {
+      throw new Error('run transport v2 is on and the registry setup is missing');
+    }
+    return setup;
   }
 
   /** The registry port. A missing one is a wiring error, not a reason to use the helper. */

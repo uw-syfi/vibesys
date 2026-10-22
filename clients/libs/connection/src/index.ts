@@ -43,4 +43,11 @@ export {
   registryTransport,
   requireCheckout,
 } from './shell/registry-reads.js';
+export {
+  type CompletedPaths,
+  type InspectedCandidate,
+  type RegistrySetup,
+  type RegistrySetupPorts,
+  registrySetup,
+} from './shell/registry-setup.js';
 export type {CheckoutProblem, Phase} from './state/host-connection.js';

@@ -89,7 +89,7 @@ layers_explicit_depends_on = true
 
 [[modules]]
 path = "entrypoints"
-depends_on = ["server.chat", "vibesys.api.chat", "vs_proto", "vs_runlog", "vibesys.api.host", "vibesys.api.transport", "server.api", "vs_decode.api", "vs_logs", "vs_sim.api", "vs_project", "vs_slurm", "vs_github", "vs_issue_tracker", "vs_runtime", "vs_sandbox", "vibesys.api", "vibesys.api.evolve", "vibesys.api.hypothesis", "vibesys.api.metrics", "vibesys.api.profilers", "vs_agent", "server.runtime", "server.instances", "server.host_api", "server.registry", "headless", "launch", "vs_mcp", "server.relay", "server.host_helper", "server.host_helper_requests", "server.host_helper_os", "server.host_helper_logs", "server.host_helper_machine", "server.host_helper_compute", "server.host_helper_readers", "server.host_agent_logins", "server.host_preflight", "server.host_examples", "server.host_harness", "vibesys.comparisons"]
+depends_on = ["server.chat", "vibesys.api.chat", "vs_proto", "vs_runlog", "vibesys.api.host", "vibesys.api.host_operations", "vibesys.api.transport", "server.api", "vs_decode.api", "vs_logs", "vs_sim.api", "vs_project", "vs_slurm", "vs_github", "vs_issue_tracker", "vs_runtime", "vs_sandbox", "vibesys.api", "vibesys.api.evolve", "vibesys.api.hypothesis", "vibesys.api.metrics", "vibesys.api.profilers", "vs_agent", "server.runtime", "server.instances", "server.host_api", "server.registry", "headless", "launch", "vs_mcp", "server.relay", "server.host_helper", "server.host_helper_requests", "server.host_helper_os", "server.host_helper_logs", "server.host_helper_machine", "server.host_helper_compute", "server.host_helper_readers", "server.host_agent_logins", "server.host_preflight", "server.host_examples", "server.host_harness", "vibesys.comparisons"]
 
 [[modules]]
 path = "headless"
@@ -2044,11 +2044,15 @@ expose = ["[A-Z].*"]
 
 [[modules]]
 path = "vibesys.api.host_operations"
-depends_on = ["vs_proto", "vibesys.api.host_operations._handlers", "vibesys.api.host_operations._reads"]
+depends_on = ["vs_proto", "vibesys.api.host_operations._candidate", "vibesys.api.host_operations._handlers", "vibesys.api.host_operations._reads"]
 
 [[interfaces]]
 from = ["vibesys.api.host_operations"]
 expose = ["api", "api\\..*"]
+
+[[modules]]
+path = "vibesys.api.host_operations._candidate"
+depends_on = ["vs_proto"]
 
 [[modules]]
 path = "vibesys.api.host_operations._handlers"

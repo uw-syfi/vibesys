@@ -18,6 +18,8 @@ message AcceptedOperation {
     DescribeMachineRequest describe_machine = 14;
     ListComputeRequest list_compute = 15;
     PreflightRunRequest preflight_run = 16;
+    InspectCandidateRequest inspect_candidate = 17;
+    CompletePathsRequest complete_paths = 18;
   }
 }
 message OperationResult {
@@ -31,6 +33,8 @@ message OperationResult {
     DescribeMachineResponse describe_machine = 14;
     ListComputeResponse list_compute = 15;
     PreflightRunResponse preflight_run = 16;
+    InspectCandidateResponse inspect_candidate = 17;
+    CompletePathsResponse complete_paths = 18;
   }
 }
 

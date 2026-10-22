@@ -3,22 +3,24 @@ package hostoperations
 
 import (
 	apiv1 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/api/v1"
+	hostv1 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/host/v1"
 	"time"
 )
 
 type HostCall struct {
 	CLI      string
 	Deadline time.Duration
+	Executor hostv1.Executor
 }
 
 func DispatchHostCall(request *apiv1.HostCallRequest) (HostCall, bool) {
 	switch {
 	case request.GetPostIntent() != nil:
-		return HostCall{CLI: "post-intent", Deadline: 10000 * time.Millisecond}, true
+		return HostCall{CLI: "post-intent", Deadline: 10000 * time.Millisecond, Executor: 1}, true
 	case request.GetRelaunch() != nil:
-		return HostCall{CLI: "relaunch", Deadline: 30000 * time.Millisecond}, true
+		return HostCall{CLI: "relaunch", Deadline: 30000 * time.Millisecond, Executor: 1}, true
 	case request.GetChatMessage() != nil:
-		return HostCall{CLI: "chat-message", Deadline: 10000 * time.Millisecond}, true
+		return HostCall{CLI: "chat-message", Deadline: 10000 * time.Millisecond, Executor: 1}, true
 	default:
 		return HostCall{}, false
 	}

@@ -160,8 +160,9 @@ def go_host_call(admissions: tuple[Operation, ...]) -> str:
         "import (",
         '"time"',
         'apiv1 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/api/v1"',
+        'hostv1 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/host/v1"',
         ")",
-        "type HostCall struct { CLI string; Deadline time.Duration }",
+        "type HostCall struct { CLI string; Deadline time.Duration; Executor hostv1.Executor }",
         "func DispatchHostCall(request *apiv1.HostCallRequest) (HostCall, bool) {",
         "switch {",
     ]
@@ -169,7 +170,7 @@ def go_host_call(admissions: tuple[Operation, ...]) -> str:
         getter = _go_getter(op.slot)
         lines += [
             f"case request.{getter}() != nil:",
-            f'return HostCall{{CLI: "{op.slot.replace("_", "-")}", Deadline: {op.policy.cap_ms} * time.Millisecond}}, true',
+            f'return HostCall{{CLI: "{op.slot.replace("_", "-")}", Deadline: {op.policy.cap_ms} * time.Millisecond, Executor: {op.policy.executor}}}, true',
         ]
     lines += [
         "default:",
@@ -216,7 +217,7 @@ def go_host_read(operations: tuple[Operation, ...]) -> str:
         getter = _go_getter(op.slot)
         lines += [
             f"case request.{getter}() != nil:",
-            f'return HostCall{{CLI: "{op.slot.replace("_", "-")}", Deadline: {op.policy.cap_ms} * time.Millisecond}}, true',
+            f'return HostCall{{CLI: "{op.slot.replace("_", "-")}", Deadline: {op.policy.cap_ms} * time.Millisecond, Executor: {op.policy.executor}}}, true',
         ]
     lines += [
         "default:",

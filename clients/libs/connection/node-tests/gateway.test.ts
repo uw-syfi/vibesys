@@ -2,6 +2,7 @@ import {describe, test} from 'node:test';
 import {create, toBinary} from '@bufbuild/protobuf';
 import {
   API_SCHEMA_HASH,
+  CompletePathsRequestSchema,
   DescribeMachineRequestSchema,
   encodeHostRead,
   GetBlobsResponseSchema,
@@ -11,6 +12,7 @@ import {
   HostCallRequestSchema,
   HostService,
   hostCallBudgets,
+  InspectCandidateRequestSchema,
   ListComputeRequestSchema,
   ListExamplesRequestSchema,
   ListHarnessesRequestSchema,
@@ -404,6 +406,22 @@ for (const [method, budget] of Object.entries(hostCallBudgets)) {
 
 function readRequest(name: string): Uint8Array {
   const requestId = 'request-a';
+  if (name === 'InspectCandidate') {
+    return toBinary(
+      InspectCandidateRequestSchema,
+      create(InspectCandidateRequestSchema, {
+        requestId,
+        path: '/candidate',
+        selectionRevision: 1n,
+      }),
+    );
+  }
+  if (name === 'CompletePaths') {
+    return toBinary(
+      CompletePathsRequestSchema,
+      create(CompletePathsRequestSchema, {requestId, prefix: '/manual/'}),
+    );
+  }
   if (name === 'ListTasks') {
     return toBinary(
       ListTasksRequestSchema,

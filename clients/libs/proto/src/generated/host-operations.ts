@@ -12,6 +12,8 @@ export const operationPolicies = Object.freeze({
   DescribeMachine: Object.freeze({name: 'DescribeMachine', id: 14, requestTag: 14, responseTag: 14, capMs: 25000, graceMs: 5000, totalMs: 30000, effect: 1, retry: 2, executor: 1, cardinality: 1, firstEventMs: undefined} as const),
   ListCompute: Object.freeze({name: 'ListCompute', id: 15, requestTag: 15, responseTag: 15, capMs: 10000, graceMs: 5000, totalMs: 15000, effect: 1, retry: 2, executor: 1, cardinality: 1, firstEventMs: undefined} as const),
   PreflightRun: Object.freeze({name: 'PreflightRun', id: 16, requestTag: 16, responseTag: 16, capMs: 65000, graceMs: 5000, totalMs: 70000, effect: 1, retry: 2, executor: 1, cardinality: 1, firstEventMs: undefined} as const),
+  InspectCandidate: Object.freeze({name: 'InspectCandidate', id: 17, requestTag: 17, responseTag: 17, capMs: 10000, graceMs: 5000, totalMs: 15000, effect: 1, retry: 2, executor: 2, cardinality: 1, firstEventMs: undefined} as const),
+  CompletePaths: Object.freeze({name: 'CompletePaths', id: 18, requestTag: 18, responseTag: 18, capMs: 5000, graceMs: 5000, totalMs: 10000, effect: 1, retry: 2, executor: 3, cardinality: 1, firstEventMs: undefined} as const),
 });
 export const hostCallBudgets = Object.freeze({
   postIntent: Object.freeze({capMs: 10000, graceMs: 5000, totalMs: 15000} as const),
@@ -60,6 +62,18 @@ export function acceptPreflightRun(input: MessageInitShape<typeof pb.PreflightRu
 export async function callPreflightRun(transport: OperationTransport, request: Accepted<"PreflightRun">, signal: OperationSignal): Promise<pb.PreflightRunResponse> {
   return call(transport, {policy: operationPolicies.PreflightRun, requestSchema: pb.PreflightRunRequestSchema, responseSchema: pb.PreflightRunResponseSchema, correlations: [[['requestId'], ['requestId']]]}, request, signal);
 }
+export function acceptInspectCandidate(input: MessageInitShape<typeof pb.InspectCandidateRequestSchema>): Accepted<"InspectCandidate"> {
+  return accept(operationPolicies.InspectCandidate, pb.InspectCandidateRequestSchema, input);
+}
+export async function callInspectCandidate(transport: OperationTransport, request: Accepted<"InspectCandidate">, signal: OperationSignal): Promise<pb.InspectCandidateResponse> {
+  return call(transport, {policy: operationPolicies.InspectCandidate, requestSchema: pb.InspectCandidateRequestSchema, responseSchema: pb.InspectCandidateResponseSchema, correlations: [[['requestId'], ['requestId']], [['selectionRevision'], ['selectionRevision']]]}, request, signal);
+}
+export function acceptCompletePaths(input: MessageInitShape<typeof pb.CompletePathsRequestSchema>): Accepted<"CompletePaths"> {
+  return accept(operationPolicies.CompletePaths, pb.CompletePathsRequestSchema, input);
+}
+export async function callCompletePaths(transport: OperationTransport, request: Accepted<"CompletePaths">, signal: OperationSignal): Promise<pb.CompletePathsResponse> {
+  return call(transport, {policy: operationPolicies.CompletePaths, requestSchema: pb.CompletePathsRequestSchema, responseSchema: pb.CompletePathsResponseSchema, correlations: [[['requestId'], ['requestId']]]}, request, signal);
+}
 export interface FailureVisitor<T> {
   invalid_input(failure: OperationFailure): T;
   configuration(failure: OperationFailure): T;
@@ -99,6 +113,8 @@ export const readBudgets = Object.freeze({
   describeMachine: Object.freeze({capMs: 25000, graceMs: 5000, totalMs: 30000} as const),
   listCompute: Object.freeze({capMs: 10000, graceMs: 5000, totalMs: 15000} as const),
   preflightRun: Object.freeze({capMs: 65000, graceMs: 5000, totalMs: 70000} as const),
+  inspectCandidate: Object.freeze({capMs: 10000, graceMs: 5000, totalMs: 15000} as const),
+  completePaths: Object.freeze({capMs: 5000, graceMs: 5000, totalMs: 10000} as const),
 } as const);
 export function encodeHostRead(checkout: string, name: string, payload: Uint8Array): Uint8Array {
   switch (name) {
@@ -116,6 +132,10 @@ export function encodeHostRead(checkout: string, name: string, payload: Uint8Arr
       return toBinary(HostReadRequestSchema, create(HostReadRequestSchema, {checkout, method: {case: 'listCompute', value: fromBinary(pb.ListComputeRequestSchema, payload)}}));
     case 'PreflightRun':
       return toBinary(HostReadRequestSchema, create(HostReadRequestSchema, {checkout, method: {case: 'preflightRun', value: fromBinary(pb.PreflightRunRequestSchema, payload)}}));
+    case 'InspectCandidate':
+      return toBinary(HostReadRequestSchema, create(HostReadRequestSchema, {checkout, method: {case: 'inspectCandidate', value: fromBinary(pb.InspectCandidateRequestSchema, payload)}}));
+    case 'CompletePaths':
+      return toBinary(HostReadRequestSchema, create(HostReadRequestSchema, {checkout, method: {case: 'completePaths', value: fromBinary(pb.CompletePathsRequestSchema, payload)}}));
     default: throw new Error("unknown read");
   }
 }
@@ -146,6 +166,12 @@ export function decodeHostRead(name: string, payload: Uint8Array): Uint8Array {
     case 'PreflightRun':
       if (result.case !== 'preflightRun') throw new Error('response correlation mismatch');
       return toBinary(pb.PreflightRunResponseSchema, result.value);
+    case 'InspectCandidate':
+      if (result.case !== 'inspectCandidate') throw new Error('response correlation mismatch');
+      return toBinary(pb.InspectCandidateResponseSchema, result.value);
+    case 'CompletePaths':
+      if (result.case !== 'completePaths') throw new Error('response correlation mismatch');
+      return toBinary(pb.CompletePathsResponseSchema, result.value);
     default: throw new Error("unknown read");
   }
 }

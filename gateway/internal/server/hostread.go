@@ -22,6 +22,12 @@ func (h *host) Read(ctx context.Context, request *apiv1.HostReadRequest) (*apiv1
 	if !ok {
 		return readFailure(hostv1.FailureCategory_FAILURE_CATEGORY_INVALID_INPUT, "HostRead.method is required"), nil
 	}
+	switch dispatched.Executor {
+	case hostv1.Executor_EXECUTOR_FILESYSTEM:
+		return h.completePaths(ctx, request, dispatched.Deadline)
+	case hostv1.Executor_EXECUTOR_CANDIDATE_INSPECTION:
+		return h.inspectCandidate(ctx, request, dispatched.Deadline)
+	}
 	checkout, err := checkoutPath(request.GetCheckout())
 	if err != nil {
 		return readFailure(hostv1.FailureCategory_FAILURE_CATEGORY_INVALID_INPUT, err.Error()), nil

@@ -7,7 +7,7 @@ import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
 import { file_buf_validate_validate } from "../../../buf/validate/validate_pb.js";
 import type { OperationFailure } from "../../host/v1/failure_pb.js";
 import { file_vibesys_host_v1_failure } from "../../host/v1/failure_pb.js";
-import type { DescribeMachineRequest, DescribeMachineResponse, GetTaskGoalRequest, GetTaskGoalResponse, ListComputeRequest, ListComputeResponse, ListExamplesRequest, ListExamplesResponse, ListHarnessesRequest, ListHarnessesResponse, ListTasksRequest, ListTasksResponse, PreflightRunRequest, PreflightRunResponse } from "../../host/v1/operations_pb.js";
+import type { CompletePathsRequest, CompletePathsResponse, DescribeMachineRequest, DescribeMachineResponse, GetTaskGoalRequest, GetTaskGoalResponse, InspectCandidateRequest, InspectCandidateResponse, ListComputeRequest, ListComputeResponse, ListExamplesRequest, ListExamplesResponse, ListHarnessesRequest, ListHarnessesResponse, ListTasksRequest, ListTasksResponse, PreflightRunRequest, PreflightRunResponse } from "../../host/v1/operations_pb.js";
 import { file_vibesys_host_v1_operations } from "../../host/v1/operations_pb.js";
 import type { Message } from "@bufbuild/protobuf";
 
@@ -15,7 +15,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file vibesys/api/v1/host_read_generated.proto.
  */
 export const file_vibesys_api_v1_host_read_generated: GenFile = /*@__PURE__*/
-  fileDesc("Cih2aWJlc3lzL2FwaS92MS9ob3N0X3JlYWRfZ2VuZXJhdGVkLnByb3RvEg52aWJlc3lzLmFwaS52MSL4AwoPSG9zdFJlYWRSZXF1ZXN0EhwKCGNoZWNrb3V0GAEgASgJQgq6SAdyBRABKIAgEjcKCmxpc3RfdGFza3MYCiABKAsyIS52aWJlc3lzLmhvc3QudjEuTGlzdFRhc2tzUmVxdWVzdEgAEj8KDmxpc3RfaGFybmVzc2VzGAsgASgLMiUudmliZXN5cy5ob3N0LnYxLkxpc3RIYXJuZXNzZXNSZXF1ZXN0SAASPQoNbGlzdF9leGFtcGxlcxgMIAEoCzIkLnZpYmVzeXMuaG9zdC52MS5MaXN0RXhhbXBsZXNSZXF1ZXN0SAASPAoNZ2V0X3Rhc2tfZ29hbBgNIAEoCzIjLnZpYmVzeXMuaG9zdC52MS5HZXRUYXNrR29hbFJlcXVlc3RIABJDChBkZXNjcmliZV9tYWNoaW5lGA4gASgLMicudmliZXN5cy5ob3N0LnYxLkRlc2NyaWJlTWFjaGluZVJlcXVlc3RIABI7CgxsaXN0X2NvbXB1dGUYDyABKAsyIy52aWJlc3lzLmhvc3QudjEuTGlzdENvbXB1dGVSZXF1ZXN0SAASPQoNcHJlZmxpZ2h0X3J1bhgQIAEoCzIkLnZpYmVzeXMuaG9zdC52MS5QcmVmbGlnaHRSdW5SZXF1ZXN0SABCDwoGbWV0aG9kEgW6SAIIASKYBAoQSG9zdFJlYWRSZXNwb25zZRI0CgdmYWlsdXJlGAIgASgLMiEudmliZXN5cy5ob3N0LnYxLk9wZXJhdGlvbkZhaWx1cmVIABI4CgpsaXN0X3Rhc2tzGAogASgLMiIudmliZXN5cy5ob3N0LnYxLkxpc3RUYXNrc1Jlc3BvbnNlSAASQAoObGlzdF9oYXJuZXNzZXMYCyABKAsyJi52aWJlc3lzLmhvc3QudjEuTGlzdEhhcm5lc3Nlc1Jlc3BvbnNlSAASPgoNbGlzdF9leGFtcGxlcxgMIAEoCzIlLnZpYmVzeXMuaG9zdC52MS5MaXN0RXhhbXBsZXNSZXNwb25zZUgAEj0KDWdldF90YXNrX2dvYWwYDSABKAsyJC52aWJlc3lzLmhvc3QudjEuR2V0VGFza0dvYWxSZXNwb25zZUgAEkQKEGRlc2NyaWJlX21hY2hpbmUYDiABKAsyKC52aWJlc3lzLmhvc3QudjEuRGVzY3JpYmVNYWNoaW5lUmVzcG9uc2VIABI8CgxsaXN0X2NvbXB1dGUYDyABKAsyJC52aWJlc3lzLmhvc3QudjEuTGlzdENvbXB1dGVSZXNwb25zZUgAEj4KDXByZWZsaWdodF9ydW4YECABKAsyJS52aWJlc3lzLmhvc3QudjEuUHJlZmxpZ2h0UnVuUmVzcG9uc2VIAEIPCgZyZXN1bHQSBbpIAggBQj1aO2dpdGh1Yi5jb20vdXctc3lmaS92aWJlc3lzL2dhdGV3YXkvZ2VuL3ZpYmVzeXMvYXBpL3YxO2FwaXYxYgZwcm90bzM", [file_buf_validate_validate, file_vibesys_host_v1_failure, file_vibesys_host_v1_operations]);
+  fileDesc("Cih2aWJlc3lzL2FwaS92MS9ob3N0X3JlYWRfZ2VuZXJhdGVkLnByb3RvEg52aWJlc3lzLmFwaS52MSKABQoPSG9zdFJlYWRSZXF1ZXN0EhwKCGNoZWNrb3V0GAEgASgJQgq6SAdyBRABKIAgEjcKCmxpc3RfdGFza3MYCiABKAsyIS52aWJlc3lzLmhvc3QudjEuTGlzdFRhc2tzUmVxdWVzdEgAEj8KDmxpc3RfaGFybmVzc2VzGAsgASgLMiUudmliZXN5cy5ob3N0LnYxLkxpc3RIYXJuZXNzZXNSZXF1ZXN0SAASPQoNbGlzdF9leGFtcGxlcxgMIAEoCzIkLnZpYmVzeXMuaG9zdC52MS5MaXN0RXhhbXBsZXNSZXF1ZXN0SAASPAoNZ2V0X3Rhc2tfZ29hbBgNIAEoCzIjLnZpYmVzeXMuaG9zdC52MS5HZXRUYXNrR29hbFJlcXVlc3RIABJDChBkZXNjcmliZV9tYWNoaW5lGA4gASgLMicudmliZXN5cy5ob3N0LnYxLkRlc2NyaWJlTWFjaGluZVJlcXVlc3RIABI7CgxsaXN0X2NvbXB1dGUYDyABKAsyIy52aWJlc3lzLmhvc3QudjEuTGlzdENvbXB1dGVSZXF1ZXN0SAASPQoNcHJlZmxpZ2h0X3J1bhgQIAEoCzIkLnZpYmVzeXMuaG9zdC52MS5QcmVmbGlnaHRSdW5SZXF1ZXN0SAASRQoRaW5zcGVjdF9jYW5kaWRhdGUYESABKAsyKC52aWJlc3lzLmhvc3QudjEuSW5zcGVjdENhbmRpZGF0ZVJlcXVlc3RIABI/Cg5jb21wbGV0ZV9wYXRocxgSIAEoCzIlLnZpYmVzeXMuaG9zdC52MS5Db21wbGV0ZVBhdGhzUmVxdWVzdEgAQg8KBm1ldGhvZBIFukgCCAEiogUKEEhvc3RSZWFkUmVzcG9uc2USNAoHZmFpbHVyZRgCIAEoCzIhLnZpYmVzeXMuaG9zdC52MS5PcGVyYXRpb25GYWlsdXJlSAASOAoKbGlzdF90YXNrcxgKIAEoCzIiLnZpYmVzeXMuaG9zdC52MS5MaXN0VGFza3NSZXNwb25zZUgAEkAKDmxpc3RfaGFybmVzc2VzGAsgASgLMiYudmliZXN5cy5ob3N0LnYxLkxpc3RIYXJuZXNzZXNSZXNwb25zZUgAEj4KDWxpc3RfZXhhbXBsZXMYDCABKAsyJS52aWJlc3lzLmhvc3QudjEuTGlzdEV4YW1wbGVzUmVzcG9uc2VIABI9Cg1nZXRfdGFza19nb2FsGA0gASgLMiQudmliZXN5cy5ob3N0LnYxLkdldFRhc2tHb2FsUmVzcG9uc2VIABJEChBkZXNjcmliZV9tYWNoaW5lGA4gASgLMigudmliZXN5cy5ob3N0LnYxLkRlc2NyaWJlTWFjaGluZVJlc3BvbnNlSAASPAoMbGlzdF9jb21wdXRlGA8gASgLMiQudmliZXN5cy5ob3N0LnYxLkxpc3RDb21wdXRlUmVzcG9uc2VIABI+Cg1wcmVmbGlnaHRfcnVuGBAgASgLMiUudmliZXN5cy5ob3N0LnYxLlByZWZsaWdodFJ1blJlc3BvbnNlSAASRgoRaW5zcGVjdF9jYW5kaWRhdGUYESABKAsyKS52aWJlc3lzLmhvc3QudjEuSW5zcGVjdENhbmRpZGF0ZVJlc3BvbnNlSAASQAoOY29tcGxldGVfcGF0aHMYEiABKAsyJi52aWJlc3lzLmhvc3QudjEuQ29tcGxldGVQYXRoc1Jlc3BvbnNlSABCDwoGcmVzdWx0EgW6SAIIAUI9WjtnaXRodWIuY29tL3V3LXN5ZmkvdmliZXN5cy9nYXRld2F5L2dlbi92aWJlc3lzL2FwaS92MTthcGl2MWIGcHJvdG8z", [file_buf_validate_validate, file_vibesys_host_v1_failure, file_vibesys_host_v1_operations]);
 
 /**
  * Generated by scripts/generate_proto.sh; do not edit.
@@ -74,6 +74,18 @@ export type HostReadRequest = Message<"vibesys.api.v1.HostReadRequest"> & {
      */
     value: PreflightRunRequest;
     case: "preflightRun";
+  } | {
+    /**
+     * @generated from field: vibesys.host.v1.InspectCandidateRequest inspect_candidate = 17;
+     */
+    value: InspectCandidateRequest;
+    case: "inspectCandidate";
+  } | {
+    /**
+     * @generated from field: vibesys.host.v1.CompletePathsRequest complete_paths = 18;
+     */
+    value: CompletePathsRequest;
+    case: "completePaths";
   } | { case: undefined; value?: undefined };
 };
 
@@ -141,6 +153,18 @@ export type HostReadResponse = Message<"vibesys.api.v1.HostReadResponse"> & {
      */
     value: PreflightRunResponse;
     case: "preflightRun";
+  } | {
+    /**
+     * @generated from field: vibesys.host.v1.InspectCandidateResponse inspect_candidate = 17;
+     */
+    value: InspectCandidateResponse;
+    case: "inspectCandidate";
+  } | {
+    /**
+     * @generated from field: vibesys.host.v1.CompletePathsResponse complete_paths = 18;
+     */
+    value: CompletePathsResponse;
+    case: "completePaths";
   } | { case: undefined; value?: undefined };
 };
 

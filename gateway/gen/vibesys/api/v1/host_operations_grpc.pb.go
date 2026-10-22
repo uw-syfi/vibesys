@@ -20,16 +20,18 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	HostOperationsService_ListTasks_FullMethodName       = "/vibesys.api.v1.HostOperationsService/ListTasks"
-	HostOperationsService_ListHarnesses_FullMethodName   = "/vibesys.api.v1.HostOperationsService/ListHarnesses"
-	HostOperationsService_ListExamples_FullMethodName    = "/vibesys.api.v1.HostOperationsService/ListExamples"
-	HostOperationsService_GetTaskGoal_FullMethodName     = "/vibesys.api.v1.HostOperationsService/GetTaskGoal"
-	HostOperationsService_DescribeMachine_FullMethodName = "/vibesys.api.v1.HostOperationsService/DescribeMachine"
-	HostOperationsService_ListCompute_FullMethodName     = "/vibesys.api.v1.HostOperationsService/ListCompute"
-	HostOperationsService_PreflightRun_FullMethodName    = "/vibesys.api.v1.HostOperationsService/PreflightRun"
-	HostOperationsService_PostIntent_FullMethodName      = "/vibesys.api.v1.HostOperationsService/PostIntent"
-	HostOperationsService_Relaunch_FullMethodName        = "/vibesys.api.v1.HostOperationsService/Relaunch"
-	HostOperationsService_ChatMessage_FullMethodName     = "/vibesys.api.v1.HostOperationsService/ChatMessage"
+	HostOperationsService_ListTasks_FullMethodName        = "/vibesys.api.v1.HostOperationsService/ListTasks"
+	HostOperationsService_ListHarnesses_FullMethodName    = "/vibesys.api.v1.HostOperationsService/ListHarnesses"
+	HostOperationsService_ListExamples_FullMethodName     = "/vibesys.api.v1.HostOperationsService/ListExamples"
+	HostOperationsService_GetTaskGoal_FullMethodName      = "/vibesys.api.v1.HostOperationsService/GetTaskGoal"
+	HostOperationsService_DescribeMachine_FullMethodName  = "/vibesys.api.v1.HostOperationsService/DescribeMachine"
+	HostOperationsService_ListCompute_FullMethodName      = "/vibesys.api.v1.HostOperationsService/ListCompute"
+	HostOperationsService_PreflightRun_FullMethodName     = "/vibesys.api.v1.HostOperationsService/PreflightRun"
+	HostOperationsService_InspectCandidate_FullMethodName = "/vibesys.api.v1.HostOperationsService/InspectCandidate"
+	HostOperationsService_CompletePaths_FullMethodName    = "/vibesys.api.v1.HostOperationsService/CompletePaths"
+	HostOperationsService_PostIntent_FullMethodName       = "/vibesys.api.v1.HostOperationsService/PostIntent"
+	HostOperationsService_Relaunch_FullMethodName         = "/vibesys.api.v1.HostOperationsService/Relaunch"
+	HostOperationsService_ChatMessage_FullMethodName      = "/vibesys.api.v1.HostOperationsService/ChatMessage"
 )
 
 // HostOperationsServiceClient is the client API for HostOperationsService service.
@@ -45,6 +47,10 @@ type HostOperationsServiceClient interface {
 	DescribeMachine(ctx context.Context, in *v1.DescribeMachineRequest, opts ...grpc.CallOption) (*v1.DescribeMachineResponse, error)
 	ListCompute(ctx context.Context, in *v1.ListComputeRequest, opts ...grpc.CallOption) (*v1.ListComputeResponse, error)
 	PreflightRun(ctx context.Context, in *v1.PreflightRunRequest, opts ...grpc.CallOption) (*v1.PreflightRunResponse, error)
+	// Setup reads. They do not require a saved checkout: the candidate path or
+	// typed prefix is the input, and Hello remains the gateway schema handshake.
+	InspectCandidate(ctx context.Context, in *v1.InspectCandidateRequest, opts ...grpc.CallOption) (*v1.InspectCandidateResponse, error)
+	CompletePaths(ctx context.Context, in *v1.CompletePathsRequest, opts ...grpc.CallOption) (*v1.CompletePathsResponse, error)
 	// HostCall dispatch. The runner deadline is cap_ms. The client budget is
 	// cap_ms plus grace_ms, so it stays strictly above that cap. Relaunch confirms
 	// an epoch for up to 25s inside its runner cap. Request and response tags are
@@ -132,6 +138,26 @@ func (c *hostOperationsServiceClient) PreflightRun(ctx context.Context, in *v1.P
 	return out, nil
 }
 
+func (c *hostOperationsServiceClient) InspectCandidate(ctx context.Context, in *v1.InspectCandidateRequest, opts ...grpc.CallOption) (*v1.InspectCandidateResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(v1.InspectCandidateResponse)
+	err := c.cc.Invoke(ctx, HostOperationsService_InspectCandidate_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostOperationsServiceClient) CompletePaths(ctx context.Context, in *v1.CompletePathsRequest, opts ...grpc.CallOption) (*v1.CompletePathsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(v1.CompletePathsResponse)
+	err := c.cc.Invoke(ctx, HostOperationsService_CompletePaths_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *hostOperationsServiceClient) PostIntent(ctx context.Context, in *PostIntentRequest, opts ...grpc.CallOption) (*PostIntentResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(PostIntentResponse)
@@ -175,6 +201,10 @@ type HostOperationsServiceServer interface {
 	DescribeMachine(context.Context, *v1.DescribeMachineRequest) (*v1.DescribeMachineResponse, error)
 	ListCompute(context.Context, *v1.ListComputeRequest) (*v1.ListComputeResponse, error)
 	PreflightRun(context.Context, *v1.PreflightRunRequest) (*v1.PreflightRunResponse, error)
+	// Setup reads. They do not require a saved checkout: the candidate path or
+	// typed prefix is the input, and Hello remains the gateway schema handshake.
+	InspectCandidate(context.Context, *v1.InspectCandidateRequest) (*v1.InspectCandidateResponse, error)
+	CompletePaths(context.Context, *v1.CompletePathsRequest) (*v1.CompletePathsResponse, error)
 	// HostCall dispatch. The runner deadline is cap_ms. The client budget is
 	// cap_ms plus grace_ms, so it stays strictly above that cap. Relaunch confirms
 	// an epoch for up to 25s inside its runner cap. Request and response tags are
@@ -212,6 +242,12 @@ func (UnimplementedHostOperationsServiceServer) ListCompute(context.Context, *v1
 }
 func (UnimplementedHostOperationsServiceServer) PreflightRun(context.Context, *v1.PreflightRunRequest) (*v1.PreflightRunResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method PreflightRun not implemented")
+}
+func (UnimplementedHostOperationsServiceServer) InspectCandidate(context.Context, *v1.InspectCandidateRequest) (*v1.InspectCandidateResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method InspectCandidate not implemented")
+}
+func (UnimplementedHostOperationsServiceServer) CompletePaths(context.Context, *v1.CompletePathsRequest) (*v1.CompletePathsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CompletePaths not implemented")
 }
 func (UnimplementedHostOperationsServiceServer) PostIntent(context.Context, *PostIntentRequest) (*PostIntentResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method PostIntent not implemented")
@@ -369,6 +405,42 @@ func _HostOperationsService_PreflightRun_Handler(srv interface{}, ctx context.Co
 	return interceptor(ctx, in, info, handler)
 }
 
+func _HostOperationsService_InspectCandidate_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(v1.InspectCandidateRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostOperationsServiceServer).InspectCandidate(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: HostOperationsService_InspectCandidate_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostOperationsServiceServer).InspectCandidate(ctx, req.(*v1.InspectCandidateRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _HostOperationsService_CompletePaths_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(v1.CompletePathsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostOperationsServiceServer).CompletePaths(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: HostOperationsService_CompletePaths_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostOperationsServiceServer).CompletePaths(ctx, req.(*v1.CompletePathsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _HostOperationsService_PostIntent_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(PostIntentRequest)
 	if err := dec(in); err != nil {
@@ -457,6 +529,14 @@ var HostOperationsService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "PreflightRun",
 			Handler:    _HostOperationsService_PreflightRun_Handler,
+		},
+		{
+			MethodName: "InspectCandidate",
+			Handler:    _HostOperationsService_InspectCandidate_Handler,
+		},
+		{
+			MethodName: "CompletePaths",
+			Handler:    _HostOperationsService_CompletePaths_Handler,
 		},
 		{
 			MethodName: "PostIntent",

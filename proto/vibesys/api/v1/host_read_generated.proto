@@ -24,6 +24,8 @@ message HostReadRequest {
     vibesys.host.v1.DescribeMachineRequest describe_machine = 14;
     vibesys.host.v1.ListComputeRequest list_compute = 15;
     vibesys.host.v1.PreflightRunRequest preflight_run = 16;
+    vibesys.host.v1.InspectCandidateRequest inspect_candidate = 17;
+    vibesys.host.v1.CompletePathsRequest complete_paths = 18;
   }
 }
 
@@ -39,5 +41,7 @@ message HostReadResponse {
     vibesys.host.v1.DescribeMachineResponse describe_machine = 14;
     vibesys.host.v1.ListComputeResponse list_compute = 15;
     vibesys.host.v1.PreflightRunResponse preflight_run = 16;
+    vibesys.host.v1.InspectCandidateResponse inspect_candidate = 17;
+    vibesys.host.v1.CompletePathsResponse complete_paths = 18;
   }
 }

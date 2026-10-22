@@ -749,6 +749,60 @@ func (RunOption) EnumDescriptor() ([]byte, []int) {
 	return file_vibesys_host_v1_operations_proto_rawDescGZIP(), []int{12}
 }
 
+// A candidate checkout inspection. The executable and argv are fixed by the
+// gateway; this payload only names the path and the caller's selection revision.
+type CandidateState int32
+
+const (
+	CandidateState_CANDIDATE_STATE_UNSPECIFIED CandidateState = 0
+	CandidateState_CANDIDATE_STATE_FOUND       CandidateState = 1
+	CandidateState_CANDIDATE_STATE_NOT_FOUND   CandidateState = 2
+	CandidateState_CANDIDATE_STATE_TOO_OLD     CandidateState = 3
+)
+
+// Enum value maps for CandidateState.
+var (
+	CandidateState_name = map[int32]string{
+		0: "CANDIDATE_STATE_UNSPECIFIED",
+		1: "CANDIDATE_STATE_FOUND",
+		2: "CANDIDATE_STATE_NOT_FOUND",
+		3: "CANDIDATE_STATE_TOO_OLD",
+	}
+	CandidateState_value = map[string]int32{
+		"CANDIDATE_STATE_UNSPECIFIED": 0,
+		"CANDIDATE_STATE_FOUND":       1,
+		"CANDIDATE_STATE_NOT_FOUND":   2,
+		"CANDIDATE_STATE_TOO_OLD":     3,
+	}
+)
+
+func (x CandidateState) Enum() *CandidateState {
+	p := new(CandidateState)
+	*p = x
+	return p
+}
+
+func (x CandidateState) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (CandidateState) Descriptor() protoreflect.EnumDescriptor {
+	return file_vibesys_host_v1_operations_proto_enumTypes[13].Descriptor()
+}
+
+func (CandidateState) Type() protoreflect.EnumType {
+	return &file_vibesys_host_v1_operations_proto_enumTypes[13]
+}
+
+func (x CandidateState) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use CandidateState.Descriptor instead.
+func (CandidateState) EnumDescriptor() ([]byte, []int) {
+	return file_vibesys_host_v1_operations_proto_rawDescGZIP(), []int{13}
+}
+
 type TaskList struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Version       int64                  `protobuf:"varint,1,opt,name=version,proto3" json:"version,omitempty"`
@@ -6003,6 +6057,462 @@ func (x *PreflightRunResponseRoles) GetItems() []string {
 	return nil
 }
 
+type CandidateIdentity struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	Root           string                 `protobuf:"bytes,1,opt,name=root,proto3" json:"root,omitempty"`
+	Version        string                 `protobuf:"bytes,2,opt,name=version,proto3" json:"version,omitempty"`
+	Commit         *string                `protobuf:"bytes,3,opt,name=commit,proto3,oneof" json:"commit,omitempty"`
+	Dirty          *bool                  `protobuf:"varint,4,opt,name=dirty,proto3,oneof" json:"dirty,omitempty"`
+	Compatible     bool                   `protobuf:"varint,5,opt,name=compatible,proto3" json:"compatible,omitempty"`
+	VibesysProject bool                   `protobuf:"varint,6,opt,name=vibesys_project,json=vibesysProject,proto3" json:"vibesys_project,omitempty"`
+	GitRepository  bool                   `protobuf:"varint,7,opt,name=git_repository,json=gitRepository,proto3" json:"git_repository,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *CandidateIdentity) Reset() {
+	*x = CandidateIdentity{}
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[81]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CandidateIdentity) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CandidateIdentity) ProtoMessage() {}
+
+func (x *CandidateIdentity) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[81]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CandidateIdentity.ProtoReflect.Descriptor instead.
+func (*CandidateIdentity) Descriptor() ([]byte, []int) {
+	return file_vibesys_host_v1_operations_proto_rawDescGZIP(), []int{81}
+}
+
+func (x *CandidateIdentity) GetRoot() string {
+	if x != nil {
+		return x.Root
+	}
+	return ""
+}
+
+func (x *CandidateIdentity) GetVersion() string {
+	if x != nil {
+		return x.Version
+	}
+	return ""
+}
+
+func (x *CandidateIdentity) GetCommit() string {
+	if x != nil && x.Commit != nil {
+		return *x.Commit
+	}
+	return ""
+}
+
+func (x *CandidateIdentity) GetDirty() bool {
+	if x != nil && x.Dirty != nil {
+		return *x.Dirty
+	}
+	return false
+}
+
+func (x *CandidateIdentity) GetCompatible() bool {
+	if x != nil {
+		return x.Compatible
+	}
+	return false
+}
+
+func (x *CandidateIdentity) GetVibesysProject() bool {
+	if x != nil {
+		return x.VibesysProject
+	}
+	return false
+}
+
+func (x *CandidateIdentity) GetGitRepository() bool {
+	if x != nil {
+		return x.GitRepository
+	}
+	return false
+}
+
+type InspectCandidateRequest struct {
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	RequestId         string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Path              string                 `protobuf:"bytes,2,opt,name=path,proto3" json:"path,omitempty"`
+	SelectionRevision uint64                 `protobuf:"varint,3,opt,name=selection_revision,json=selectionRevision,proto3" json:"selection_revision,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
+}
+
+func (x *InspectCandidateRequest) Reset() {
+	*x = InspectCandidateRequest{}
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[82]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *InspectCandidateRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*InspectCandidateRequest) ProtoMessage() {}
+
+func (x *InspectCandidateRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[82]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use InspectCandidateRequest.ProtoReflect.Descriptor instead.
+func (*InspectCandidateRequest) Descriptor() ([]byte, []int) {
+	return file_vibesys_host_v1_operations_proto_rawDescGZIP(), []int{82}
+}
+
+func (x *InspectCandidateRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *InspectCandidateRequest) GetPath() string {
+	if x != nil {
+		return x.Path
+	}
+	return ""
+}
+
+func (x *InspectCandidateRequest) GetSelectionRevision() uint64 {
+	if x != nil {
+		return x.SelectionRevision
+	}
+	return 0
+}
+
+type InspectCandidateResponse struct {
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	RequestId         string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	SelectionRevision uint64                 `protobuf:"varint,2,opt,name=selection_revision,json=selectionRevision,proto3" json:"selection_revision,omitempty"`
+	SchemaHash        string                 `protobuf:"bytes,3,opt,name=schema_hash,json=schemaHash,proto3" json:"schema_hash,omitempty"`
+	State             CandidateState         `protobuf:"varint,4,opt,name=state,proto3,enum=vibesys.host.v1.CandidateState" json:"state,omitempty"`
+	Identity          *CandidateIdentity     `protobuf:"bytes,5,opt,name=identity,proto3" json:"identity,omitempty"`
+	MinimumVersion    string                 `protobuf:"bytes,6,opt,name=minimum_version,json=minimumVersion,proto3" json:"minimum_version,omitempty"`
+	VibesysCheckout   bool                   `protobuf:"varint,7,opt,name=vibesys_checkout,json=vibesysCheckout,proto3" json:"vibesys_checkout,omitempty"`
+	VibesysProject    bool                   `protobuf:"varint,8,opt,name=vibesys_project,json=vibesysProject,proto3" json:"vibesys_project,omitempty"`
+	GitRepository     bool                   `protobuf:"varint,9,opt,name=git_repository,json=gitRepository,proto3" json:"git_repository,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
+}
+
+func (x *InspectCandidateResponse) Reset() {
+	*x = InspectCandidateResponse{}
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[83]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *InspectCandidateResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*InspectCandidateResponse) ProtoMessage() {}
+
+func (x *InspectCandidateResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[83]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use InspectCandidateResponse.ProtoReflect.Descriptor instead.
+func (*InspectCandidateResponse) Descriptor() ([]byte, []int) {
+	return file_vibesys_host_v1_operations_proto_rawDescGZIP(), []int{83}
+}
+
+func (x *InspectCandidateResponse) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *InspectCandidateResponse) GetSelectionRevision() uint64 {
+	if x != nil {
+		return x.SelectionRevision
+	}
+	return 0
+}
+
+func (x *InspectCandidateResponse) GetSchemaHash() string {
+	if x != nil {
+		return x.SchemaHash
+	}
+	return ""
+}
+
+func (x *InspectCandidateResponse) GetState() CandidateState {
+	if x != nil {
+		return x.State
+	}
+	return CandidateState_CANDIDATE_STATE_UNSPECIFIED
+}
+
+func (x *InspectCandidateResponse) GetIdentity() *CandidateIdentity {
+	if x != nil {
+		return x.Identity
+	}
+	return nil
+}
+
+func (x *InspectCandidateResponse) GetMinimumVersion() string {
+	if x != nil {
+		return x.MinimumVersion
+	}
+	return ""
+}
+
+func (x *InspectCandidateResponse) GetVibesysCheckout() bool {
+	if x != nil {
+		return x.VibesysCheckout
+	}
+	return false
+}
+
+func (x *InspectCandidateResponse) GetVibesysProject() bool {
+	if x != nil {
+		return x.VibesysProject
+	}
+	return false
+}
+
+func (x *InspectCandidateResponse) GetGitRepository() bool {
+	if x != nil {
+		return x.GitRepository
+	}
+	return false
+}
+
+type CompletedPath struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	Name            string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Path            string                 `protobuf:"bytes,2,opt,name=path,proto3" json:"path,omitempty"`
+	VibesysCheckout bool                   `protobuf:"varint,3,opt,name=vibesys_checkout,json=vibesysCheckout,proto3" json:"vibesys_checkout,omitempty"`
+	VibesysProject  bool                   `protobuf:"varint,4,opt,name=vibesys_project,json=vibesysProject,proto3" json:"vibesys_project,omitempty"`
+	GitRepository   bool                   `protobuf:"varint,5,opt,name=git_repository,json=gitRepository,proto3" json:"git_repository,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *CompletedPath) Reset() {
+	*x = CompletedPath{}
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[84]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CompletedPath) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CompletedPath) ProtoMessage() {}
+
+func (x *CompletedPath) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[84]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CompletedPath.ProtoReflect.Descriptor instead.
+func (*CompletedPath) Descriptor() ([]byte, []int) {
+	return file_vibesys_host_v1_operations_proto_rawDescGZIP(), []int{84}
+}
+
+func (x *CompletedPath) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *CompletedPath) GetPath() string {
+	if x != nil {
+		return x.Path
+	}
+	return ""
+}
+
+func (x *CompletedPath) GetVibesysCheckout() bool {
+	if x != nil {
+		return x.VibesysCheckout
+	}
+	return false
+}
+
+func (x *CompletedPath) GetVibesysProject() bool {
+	if x != nil {
+		return x.VibesysProject
+	}
+	return false
+}
+
+func (x *CompletedPath) GetGitRepository() bool {
+	if x != nil {
+		return x.GitRepository
+	}
+	return false
+}
+
+type CompletePathsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Prefix        string                 `protobuf:"bytes,2,opt,name=prefix,proto3" json:"prefix,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CompletePathsRequest) Reset() {
+	*x = CompletePathsRequest{}
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[85]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CompletePathsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CompletePathsRequest) ProtoMessage() {}
+
+func (x *CompletePathsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[85]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CompletePathsRequest.ProtoReflect.Descriptor instead.
+func (*CompletePathsRequest) Descriptor() ([]byte, []int) {
+	return file_vibesys_host_v1_operations_proto_rawDescGZIP(), []int{85}
+}
+
+func (x *CompletePathsRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *CompletePathsRequest) GetPrefix() string {
+	if x != nil {
+		return x.Prefix
+	}
+	return ""
+}
+
+type CompletePathsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Directory     string                 `protobuf:"bytes,2,opt,name=directory,proto3" json:"directory,omitempty"`
+	Entries       []*CompletedPath       `protobuf:"bytes,3,rep,name=entries,proto3" json:"entries,omitempty"`
+	Truncated     bool                   `protobuf:"varint,4,opt,name=truncated,proto3" json:"truncated,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CompletePathsResponse) Reset() {
+	*x = CompletePathsResponse{}
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[86]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CompletePathsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CompletePathsResponse) ProtoMessage() {}
+
+func (x *CompletePathsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[86]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CompletePathsResponse.ProtoReflect.Descriptor instead.
+func (*CompletePathsResponse) Descriptor() ([]byte, []int) {
+	return file_vibesys_host_v1_operations_proto_rawDescGZIP(), []int{86}
+}
+
+func (x *CompletePathsResponse) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *CompletePathsResponse) GetDirectory() string {
+	if x != nil {
+		return x.Directory
+	}
+	return ""
+}
+
+func (x *CompletePathsResponse) GetEntries() []*CompletedPath {
+	if x != nil {
+		return x.Entries
+	}
+	return nil
+}
+
+func (x *CompletePathsResponse) GetTruncated() bool {
+	if x != nil {
+		return x.Truncated
+	}
+	return false
+}
+
 var File_vibesys_host_v1_operations_proto protoreflect.FileDescriptor
 
 const file_vibesys_host_v1_operations_proto_rawDesc = "" +
@@ -6472,7 +6982,60 @@ const file_vibesys_host_v1_operations_proto_rawDesc = "" +
 	"\fmodal_target\x18\x03 \x01(\v2\x1c.vibesys.host.v1.ModalTargetH\x00R\vmodalTargetB\x0e\n" +
 	"\x05value\x12\x05\xbaH\x02\b\x01\"^\n" +
 	"\x19PreflightRunResponseRoles\x12A\n" +
-	"\x05items\x18\x01 \x03(\tB+\xbaH(\x92\x01%\x10\x90N\" r\x1e\x18@(\x80\x80\b2\x16^[a-z0-9][a-z0-9._-]*$R\x05items*~\n" +
+	"\x05items\x18\x01 \x03(\tB+\xbaH(\x92\x01%\x10\x90N\" r\x1e\x18@(\x80\x80\b2\x16^[a-z0-9][a-z0-9._-]*$R\x05items\"\x9e\x02\n" +
+	"\x11CandidateIdentity\x12\x1c\n" +
+	"\x04root\x18\x01 \x01(\tB\b\xbaH\x05r\x03(\x80 R\x04root\x12\"\n" +
+	"\aversion\x18\x02 \x01(\tB\b\xbaH\x05r\x03(\x80\x01R\aversion\x12'\n" +
+	"\x06commit\x18\x03 \x01(\tB\n" +
+	"\xbaH\ar\x05\x10\x01(\x80\x01H\x00R\x06commit\x88\x01\x01\x12\x19\n" +
+	"\x05dirty\x18\x04 \x01(\bH\x01R\x05dirty\x88\x01\x01\x12\x1e\n" +
+	"\n" +
+	"compatible\x18\x05 \x01(\bR\n" +
+	"compatible\x12'\n" +
+	"\x0fvibesys_project\x18\x06 \x01(\bR\x0evibesysProject\x12%\n" +
+	"\x0egit_repository\x18\a \x01(\bR\rgitRepositoryB\t\n" +
+	"\a_commitB\b\n" +
+	"\x06_dirty\"\xa0\x01\n" +
+	"\x17InspectCandidateRequest\x12-\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB\x0e\xbaH\vr\t\x10\x01\x18\x80\x01(\x80\x80\bR\trequestId\x12\x1e\n" +
+	"\x04path\x18\x02 \x01(\tB\n" +
+	"\xbaH\ar\x05\x10\x01(\x80 R\x04path\x126\n" +
+	"\x12selection_revision\x18\x03 \x01(\x04B\a\xbaH\x042\x02 \x00R\x11selectionRevision\"\xd4\x05\n" +
+	"\x18InspectCandidateResponse\x12-\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB\x0e\xbaH\vr\t\x10\x01\x18\x80\x01(\x80\x80\bR\trequestId\x126\n" +
+	"\x12selection_revision\x18\x02 \x01(\x04B\a\xbaH\x042\x02 \x00R\x11selectionRevision\x126\n" +
+	"\vschema_hash\x18\x03 \x01(\tB\x15\xbaH\x12r\x102\x0e^[0-9a-f]{64}$R\n" +
+	"schemaHash\x12A\n" +
+	"\x05state\x18\x04 \x01(\x0e2\x1f.vibesys.host.v1.CandidateStateB\n" +
+	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x05state\x12>\n" +
+	"\bidentity\x18\x05 \x01(\v2\".vibesys.host.v1.CandidateIdentityR\bidentity\x123\n" +
+	"\x0fminimum_version\x18\x06 \x01(\tB\n" +
+	"\xbaH\ar\x05\x10\x01(\x80\x01R\x0eminimumVersion\x12)\n" +
+	"\x10vibesys_checkout\x18\a \x01(\bR\x0fvibesysCheckout\x12'\n" +
+	"\x0fvibesys_project\x18\b \x01(\bR\x0evibesysProject\x12%\n" +
+	"\x0egit_repository\x18\t \x01(\bR\rgitRepository:\xe5\x01\xbaH\xe1\x01\x1a\xde\x01\n" +
+	"\x10inspect.identity\x129found and too-old candidates include a versioned identity\x1a\x8e\x01(this.state != 1 && this.state != 3) || (has(this.identity) && (this.state != 1 || (this.identity.root != '' && this.identity.version != '')))\"\xca\x01\n" +
+	"\rCompletedPath\x12\x1e\n" +
+	"\x04name\x18\x01 \x01(\tB\n" +
+	"\xbaH\ar\x05\x10\x01(\xff\x01R\x04name\x12\x1e\n" +
+	"\x04path\x18\x02 \x01(\tB\n" +
+	"\xbaH\ar\x05\x10\x01(\x80 R\x04path\x12)\n" +
+	"\x10vibesys_checkout\x18\x03 \x01(\bR\x0fvibesysCheckout\x12'\n" +
+	"\x0fvibesys_project\x18\x04 \x01(\bR\x0evibesysProject\x12%\n" +
+	"\x0egit_repository\x18\x05 \x01(\bR\rgitRepository\"g\n" +
+	"\x14CompletePathsRequest\x12-\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB\x0e\xbaH\vr\t\x10\x01\x18\x80\x01(\x80\x80\bR\trequestId\x12 \n" +
+	"\x06prefix\x18\x02 \x01(\tB\b\xbaH\x05r\x03(\x80 R\x06prefix\"\xd3\x01\n" +
+	"\x15CompletePathsResponse\x12-\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB\x0e\xbaH\vr\t\x10\x01\x18\x80\x01(\x80\x80\bR\trequestId\x12(\n" +
+	"\tdirectory\x18\x02 \x01(\tB\n" +
+	"\xbaH\ar\x05\x10\x01(\x80 R\tdirectory\x12C\n" +
+	"\aentries\x18\x03 \x03(\v2\x1e.vibesys.host.v1.CompletedPathB\t\xbaH\x06\x92\x01\x03\x10\xc8\x01R\aentries\x12\x1c\n" +
+	"\ttruncated\x18\x04 \x01(\bR\ttruncated*~\n" +
 	"\x05Maker\x12\x15\n" +
 	"\x11MAKER_UNSPECIFIED\x10\x00\x12\"\n" +
 	"\x0fMAKER_ANTHROPIC\x10\x01\x1a\r\xd2\xf3\x18\tanthropic\x12\x1c\n" +
@@ -6567,7 +7130,12 @@ const file_vibesys_host_v1_operations_proto_rawDesc = "" +
 	"role_model\x12?\n" +
 	" RUN_OPTION_ROLE_REASONING_EFFORT\x10\x05\x1a\x19\xd2\xf3\x18\x15role_reasoning_effort\x12)\n" +
 	"\x15RUN_OPTION_ROLE_AGENT\x10\x06\x1a\x0e\xd2\xf3\x18\n" +
-	"role_agentB?Z=github.com/uw-syfi/vibesys/gateway/gen/vibesys/host/v1;hostv1b\x06proto3"
+	"role_agent*\x88\x01\n" +
+	"\x0eCandidateState\x12\x1f\n" +
+	"\x1bCANDIDATE_STATE_UNSPECIFIED\x10\x00\x12\x19\n" +
+	"\x15CANDIDATE_STATE_FOUND\x10\x01\x12\x1d\n" +
+	"\x19CANDIDATE_STATE_NOT_FOUND\x10\x02\x12\x1b\n" +
+	"\x17CANDIDATE_STATE_TOO_OLD\x10\x03B?Z=github.com/uw-syfi/vibesys/gateway/gen/vibesys/host/v1;hostv1b\x06proto3"
 
 var (
 	file_vibesys_host_v1_operations_proto_rawDescOnce sync.Once
@@ -6581,8 +7149,8 @@ func file_vibesys_host_v1_operations_proto_rawDescGZIP() []byte {
 	return file_vibesys_host_v1_operations_proto_rawDescData
 }
 
-var file_vibesys_host_v1_operations_proto_enumTypes = make([]protoimpl.EnumInfo, 13)
-var file_vibesys_host_v1_operations_proto_msgTypes = make([]protoimpl.MessageInfo, 83)
+var file_vibesys_host_v1_operations_proto_enumTypes = make([]protoimpl.EnumInfo, 14)
+var file_vibesys_host_v1_operations_proto_msgTypes = make([]protoimpl.MessageInfo, 89)
 var file_vibesys_host_v1_operations_proto_goTypes = []any{
 	(Maker)(0),                                   // 0: vibesys.host.v1.Maker
 	(AcceleratorVendor)(0),                       // 1: vibesys.host.v1.AcceleratorVendor
@@ -6597,193 +7165,203 @@ var file_vibesys_host_v1_operations_proto_goTypes = []any{
 	(CheckId)(0),                                 // 10: vibesys.host.v1.CheckId
 	(CheckState)(0),                              // 11: vibesys.host.v1.CheckState
 	(RunOption)(0),                               // 12: vibesys.host.v1.RunOption
-	(*TaskList)(nil),                             // 13: vibesys.host.v1.TaskList
-	(*TaskSummary)(nil),                          // 14: vibesys.host.v1.TaskSummary
-	(*HarnessDisplay)(nil),                       // 15: vibesys.host.v1.HarnessDisplay
-	(*HarnessOption)(nil),                        // 16: vibesys.host.v1.HarnessOption
-	(*ModelGeneration)(nil),                      // 17: vibesys.host.v1.ModelGeneration
-	(*ExampleHardware)(nil),                      // 18: vibesys.host.v1.ExampleHardware
-	(*ExampleList)(nil),                          // 19: vibesys.host.v1.ExampleList
-	(*ExampleModel)(nil),                         // 20: vibesys.host.v1.ExampleModel
-	(*ExampleObjective)(nil),                     // 21: vibesys.host.v1.ExampleObjective
-	(*ExampleSummary)(nil),                       // 22: vibesys.host.v1.ExampleSummary
-	(*ExampleTask)(nil),                          // 23: vibesys.host.v1.ExampleTask
-	(*ExampleWorkload)(nil),                      // 24: vibesys.host.v1.ExampleWorkload
-	(*TaskGoal)(nil),                             // 25: vibesys.host.v1.TaskGoal
-	(*DockerReachable)(nil),                      // 26: vibesys.host.v1.DockerReachable
-	(*DockerUnreachable)(nil),                    // 27: vibesys.host.v1.DockerUnreachable
-	(*Gpu)(nil),                                  // 28: vibesys.host.v1.Gpu
-	(*Hardware)(nil),                             // 29: vibesys.host.v1.Hardware
-	(*MachineCheckout)(nil),                      // 30: vibesys.host.v1.MachineCheckout
-	(*MachineDescription)(nil),                   // 31: vibesys.host.v1.MachineDescription
-	(*RunCounts)(nil),                            // 32: vibesys.host.v1.RunCounts
-	(*ClusterHardware)(nil),                      // 33: vibesys.host.v1.ClusterHardware
-	(*ComputeSettings)(nil),                      // 34: vibesys.host.v1.ComputeSettings
-	(*ListedCluster)(nil),                        // 35: vibesys.host.v1.ListedCluster
-	(*LoginNodeReach)(nil),                       // 36: vibesys.host.v1.LoginNodeReach
-	(*ModalStatus)(nil),                          // 37: vibesys.host.v1.ModalStatus
-	(*SlurmClusterSettings)(nil),                 // 38: vibesys.host.v1.SlurmClusterSettings
-	(*SshReach)(nil),                             // 39: vibesys.host.v1.SshReach
-	(*HarnessChoice)(nil),                        // 40: vibesys.host.v1.HarnessChoice
-	(*ModalTarget)(nil),                          // 41: vibesys.host.v1.ModalTarget
-	(*RoleOption)(nil),                           // 42: vibesys.host.v1.RoleOption
-	(*RunOptions)(nil),                           // 43: vibesys.host.v1.RunOptions
-	(*SameMachine)(nil),                          // 44: vibesys.host.v1.SameMachine
-	(*SlurmTarget)(nil),                          // 45: vibesys.host.v1.SlurmTarget
-	(*ArgumentsRejected)(nil),                    // 46: vibesys.host.v1.ArgumentsRejected
-	(*ArgumentsUnrecognized)(nil),                // 47: vibesys.host.v1.ArgumentsUnrecognized
-	(*BackendUnavailable)(nil),                   // 48: vibesys.host.v1.BackendUnavailable
-	(*Check)(nil),                                // 49: vibesys.host.v1.Check
-	(*ChooseCheckout)(nil),                       // 50: vibesys.host.v1.ChooseCheckout
-	(*ConfigInvalid)(nil),                        // 51: vibesys.host.v1.ConfigInvalid
-	(*ConfigureCompute)(nil),                     // 52: vibesys.host.v1.ConfigureCompute
-	(*CopyOut)(nil),                              // 53: vibesys.host.v1.CopyOut
-	(*DeclareBuild)(nil),                         // 54: vibesys.host.v1.DeclareBuild
-	(*EditSetting)(nil),                          // 55: vibesys.host.v1.EditSetting
-	(*GitHubUnavailable)(nil),                    // 56: vibesys.host.v1.GitHubUnavailable
-	(*MeasurementTargetMisfit)(nil),              // 57: vibesys.host.v1.MeasurementTargetMisfit
-	(*MeasurementTargetNotConfigured)(nil),       // 58: vibesys.host.v1.MeasurementTargetNotConfigured
-	(*ModelNotVetted)(nil),                       // 59: vibesys.host.v1.ModelNotVetted
-	(*OptionNotAccepted)(nil),                    // 60: vibesys.host.v1.OptionNotAccepted
-	(*ProjectDirty)(nil),                         // 61: vibesys.host.v1.ProjectDirty
-	(*RolesNotDeclared)(nil),                     // 62: vibesys.host.v1.RolesNotDeclared
-	(*StartDocker)(nil),                          // 63: vibesys.host.v1.StartDocker
-	(*SysboxMissing)(nil),                        // 64: vibesys.host.v1.SysboxMissing
-	(*TaskImageUnsupported)(nil),                 // 65: vibesys.host.v1.TaskImageUnsupported
-	(*TaskNeedsProvisioning)(nil),                // 66: vibesys.host.v1.TaskNeedsProvisioning
-	(*TaskNotFound)(nil),                         // 67: vibesys.host.v1.TaskNotFound
-	(*TaskUnusable)(nil),                         // 68: vibesys.host.v1.TaskUnusable
-	(*ListTasksRequest)(nil),                     // 69: vibesys.host.v1.ListTasksRequest
-	(*ListTasksResponse)(nil),                    // 70: vibesys.host.v1.ListTasksResponse
-	(*ListHarnessesRequest)(nil),                 // 71: vibesys.host.v1.ListHarnessesRequest
-	(*ListHarnessesResponse)(nil),                // 72: vibesys.host.v1.ListHarnessesResponse
-	(*ListExamplesRequest)(nil),                  // 73: vibesys.host.v1.ListExamplesRequest
-	(*ListExamplesResponse)(nil),                 // 74: vibesys.host.v1.ListExamplesResponse
-	(*GetTaskGoalRequest)(nil),                   // 75: vibesys.host.v1.GetTaskGoalRequest
-	(*GetTaskGoalResponse)(nil),                  // 76: vibesys.host.v1.GetTaskGoalResponse
-	(*DescribeMachineRequest)(nil),               // 77: vibesys.host.v1.DescribeMachineRequest
-	(*DescribeMachineResponse)(nil),              // 78: vibesys.host.v1.DescribeMachineResponse
-	(*ListComputeRequest)(nil),                   // 79: vibesys.host.v1.ListComputeRequest
-	(*ListComputeResponse)(nil),                  // 80: vibesys.host.v1.ListComputeResponse
-	(*PreflightRunRequest)(nil),                  // 81: vibesys.host.v1.PreflightRunRequest
-	(*PreflightRunResponse)(nil),                 // 82: vibesys.host.v1.PreflightRunResponse
-	(*ExampleSummaryTaskDetails)(nil),            // 83: vibesys.host.v1.ExampleSummaryTaskDetails
-	(*MachineDescriptionDocker)(nil),             // 84: vibesys.host.v1.MachineDescriptionDocker
-	(*SlurmClusterSettingsReach)(nil),            // 85: vibesys.host.v1.SlurmClusterSettingsReach
-	(*CheckFix)(nil),                             // 86: vibesys.host.v1.CheckFix
-	(*CheckCause)(nil),                           // 87: vibesys.host.v1.CheckCause
-	(*ConfigureComputeTarget)(nil),               // 88: vibesys.host.v1.ConfigureComputeTarget
-	(*MeasurementTargetMisfitTarget)(nil),        // 89: vibesys.host.v1.MeasurementTargetMisfitTarget
-	(*MeasurementTargetNotConfiguredTarget)(nil), // 90: vibesys.host.v1.MeasurementTargetNotConfiguredTarget
-	(*PreflightRunRequestAgents)(nil),            // 91: vibesys.host.v1.PreflightRunRequestAgents
-	(*PreflightRunRequestMeasureOn)(nil),         // 92: vibesys.host.v1.PreflightRunRequestMeasureOn
-	(*PreflightRunResponseRoles)(nil),            // 93: vibesys.host.v1.PreflightRunResponseRoles
-	nil,                                          // 94: vibesys.host.v1.MachineDescription.HarnessCliNamesEntry
-	nil,                                          // 95: vibesys.host.v1.PreflightRunRequestAgents.ItemsEntry
+	(CandidateState)(0),                          // 13: vibesys.host.v1.CandidateState
+	(*TaskList)(nil),                             // 14: vibesys.host.v1.TaskList
+	(*TaskSummary)(nil),                          // 15: vibesys.host.v1.TaskSummary
+	(*HarnessDisplay)(nil),                       // 16: vibesys.host.v1.HarnessDisplay
+	(*HarnessOption)(nil),                        // 17: vibesys.host.v1.HarnessOption
+	(*ModelGeneration)(nil),                      // 18: vibesys.host.v1.ModelGeneration
+	(*ExampleHardware)(nil),                      // 19: vibesys.host.v1.ExampleHardware
+	(*ExampleList)(nil),                          // 20: vibesys.host.v1.ExampleList
+	(*ExampleModel)(nil),                         // 21: vibesys.host.v1.ExampleModel
+	(*ExampleObjective)(nil),                     // 22: vibesys.host.v1.ExampleObjective
+	(*ExampleSummary)(nil),                       // 23: vibesys.host.v1.ExampleSummary
+	(*ExampleTask)(nil),                          // 24: vibesys.host.v1.ExampleTask
+	(*ExampleWorkload)(nil),                      // 25: vibesys.host.v1.ExampleWorkload
+	(*TaskGoal)(nil),                             // 26: vibesys.host.v1.TaskGoal
+	(*DockerReachable)(nil),                      // 27: vibesys.host.v1.DockerReachable
+	(*DockerUnreachable)(nil),                    // 28: vibesys.host.v1.DockerUnreachable
+	(*Gpu)(nil),                                  // 29: vibesys.host.v1.Gpu
+	(*Hardware)(nil),                             // 30: vibesys.host.v1.Hardware
+	(*MachineCheckout)(nil),                      // 31: vibesys.host.v1.MachineCheckout
+	(*MachineDescription)(nil),                   // 32: vibesys.host.v1.MachineDescription
+	(*RunCounts)(nil),                            // 33: vibesys.host.v1.RunCounts
+	(*ClusterHardware)(nil),                      // 34: vibesys.host.v1.ClusterHardware
+	(*ComputeSettings)(nil),                      // 35: vibesys.host.v1.ComputeSettings
+	(*ListedCluster)(nil),                        // 36: vibesys.host.v1.ListedCluster
+	(*LoginNodeReach)(nil),                       // 37: vibesys.host.v1.LoginNodeReach
+	(*ModalStatus)(nil),                          // 38: vibesys.host.v1.ModalStatus
+	(*SlurmClusterSettings)(nil),                 // 39: vibesys.host.v1.SlurmClusterSettings
+	(*SshReach)(nil),                             // 40: vibesys.host.v1.SshReach
+	(*HarnessChoice)(nil),                        // 41: vibesys.host.v1.HarnessChoice
+	(*ModalTarget)(nil),                          // 42: vibesys.host.v1.ModalTarget
+	(*RoleOption)(nil),                           // 43: vibesys.host.v1.RoleOption
+	(*RunOptions)(nil),                           // 44: vibesys.host.v1.RunOptions
+	(*SameMachine)(nil),                          // 45: vibesys.host.v1.SameMachine
+	(*SlurmTarget)(nil),                          // 46: vibesys.host.v1.SlurmTarget
+	(*ArgumentsRejected)(nil),                    // 47: vibesys.host.v1.ArgumentsRejected
+	(*ArgumentsUnrecognized)(nil),                // 48: vibesys.host.v1.ArgumentsUnrecognized
+	(*BackendUnavailable)(nil),                   // 49: vibesys.host.v1.BackendUnavailable
+	(*Check)(nil),                                // 50: vibesys.host.v1.Check
+	(*ChooseCheckout)(nil),                       // 51: vibesys.host.v1.ChooseCheckout
+	(*ConfigInvalid)(nil),                        // 52: vibesys.host.v1.ConfigInvalid
+	(*ConfigureCompute)(nil),                     // 53: vibesys.host.v1.ConfigureCompute
+	(*CopyOut)(nil),                              // 54: vibesys.host.v1.CopyOut
+	(*DeclareBuild)(nil),                         // 55: vibesys.host.v1.DeclareBuild
+	(*EditSetting)(nil),                          // 56: vibesys.host.v1.EditSetting
+	(*GitHubUnavailable)(nil),                    // 57: vibesys.host.v1.GitHubUnavailable
+	(*MeasurementTargetMisfit)(nil),              // 58: vibesys.host.v1.MeasurementTargetMisfit
+	(*MeasurementTargetNotConfigured)(nil),       // 59: vibesys.host.v1.MeasurementTargetNotConfigured
+	(*ModelNotVetted)(nil),                       // 60: vibesys.host.v1.ModelNotVetted
+	(*OptionNotAccepted)(nil),                    // 61: vibesys.host.v1.OptionNotAccepted
+	(*ProjectDirty)(nil),                         // 62: vibesys.host.v1.ProjectDirty
+	(*RolesNotDeclared)(nil),                     // 63: vibesys.host.v1.RolesNotDeclared
+	(*StartDocker)(nil),                          // 64: vibesys.host.v1.StartDocker
+	(*SysboxMissing)(nil),                        // 65: vibesys.host.v1.SysboxMissing
+	(*TaskImageUnsupported)(nil),                 // 66: vibesys.host.v1.TaskImageUnsupported
+	(*TaskNeedsProvisioning)(nil),                // 67: vibesys.host.v1.TaskNeedsProvisioning
+	(*TaskNotFound)(nil),                         // 68: vibesys.host.v1.TaskNotFound
+	(*TaskUnusable)(nil),                         // 69: vibesys.host.v1.TaskUnusable
+	(*ListTasksRequest)(nil),                     // 70: vibesys.host.v1.ListTasksRequest
+	(*ListTasksResponse)(nil),                    // 71: vibesys.host.v1.ListTasksResponse
+	(*ListHarnessesRequest)(nil),                 // 72: vibesys.host.v1.ListHarnessesRequest
+	(*ListHarnessesResponse)(nil),                // 73: vibesys.host.v1.ListHarnessesResponse
+	(*ListExamplesRequest)(nil),                  // 74: vibesys.host.v1.ListExamplesRequest
+	(*ListExamplesResponse)(nil),                 // 75: vibesys.host.v1.ListExamplesResponse
+	(*GetTaskGoalRequest)(nil),                   // 76: vibesys.host.v1.GetTaskGoalRequest
+	(*GetTaskGoalResponse)(nil),                  // 77: vibesys.host.v1.GetTaskGoalResponse
+	(*DescribeMachineRequest)(nil),               // 78: vibesys.host.v1.DescribeMachineRequest
+	(*DescribeMachineResponse)(nil),              // 79: vibesys.host.v1.DescribeMachineResponse
+	(*ListComputeRequest)(nil),                   // 80: vibesys.host.v1.ListComputeRequest
+	(*ListComputeResponse)(nil),                  // 81: vibesys.host.v1.ListComputeResponse
+	(*PreflightRunRequest)(nil),                  // 82: vibesys.host.v1.PreflightRunRequest
+	(*PreflightRunResponse)(nil),                 // 83: vibesys.host.v1.PreflightRunResponse
+	(*ExampleSummaryTaskDetails)(nil),            // 84: vibesys.host.v1.ExampleSummaryTaskDetails
+	(*MachineDescriptionDocker)(nil),             // 85: vibesys.host.v1.MachineDescriptionDocker
+	(*SlurmClusterSettingsReach)(nil),            // 86: vibesys.host.v1.SlurmClusterSettingsReach
+	(*CheckFix)(nil),                             // 87: vibesys.host.v1.CheckFix
+	(*CheckCause)(nil),                           // 88: vibesys.host.v1.CheckCause
+	(*ConfigureComputeTarget)(nil),               // 89: vibesys.host.v1.ConfigureComputeTarget
+	(*MeasurementTargetMisfitTarget)(nil),        // 90: vibesys.host.v1.MeasurementTargetMisfitTarget
+	(*MeasurementTargetNotConfiguredTarget)(nil), // 91: vibesys.host.v1.MeasurementTargetNotConfiguredTarget
+	(*PreflightRunRequestAgents)(nil),            // 92: vibesys.host.v1.PreflightRunRequestAgents
+	(*PreflightRunRequestMeasureOn)(nil),         // 93: vibesys.host.v1.PreflightRunRequestMeasureOn
+	(*PreflightRunResponseRoles)(nil),            // 94: vibesys.host.v1.PreflightRunResponseRoles
+	(*CandidateIdentity)(nil),                    // 95: vibesys.host.v1.CandidateIdentity
+	(*InspectCandidateRequest)(nil),              // 96: vibesys.host.v1.InspectCandidateRequest
+	(*InspectCandidateResponse)(nil),             // 97: vibesys.host.v1.InspectCandidateResponse
+	(*CompletedPath)(nil),                        // 98: vibesys.host.v1.CompletedPath
+	(*CompletePathsRequest)(nil),                 // 99: vibesys.host.v1.CompletePathsRequest
+	(*CompletePathsResponse)(nil),                // 100: vibesys.host.v1.CompletePathsResponse
+	nil,                                          // 101: vibesys.host.v1.MachineDescription.HarnessCliNamesEntry
+	nil,                                          // 102: vibesys.host.v1.PreflightRunRequestAgents.ItemsEntry
 }
 var file_vibesys_host_v1_operations_proto_depIdxs = []int32{
-	14, // 0: vibesys.host.v1.TaskList.tasks:type_name -> vibesys.host.v1.TaskSummary
-	0,  // 1: vibesys.host.v1.HarnessDisplay.maker:type_name -> vibesys.host.v1.Maker
-	17, // 2: vibesys.host.v1.HarnessDisplay.generation:type_name -> vibesys.host.v1.ModelGeneration
-	15, // 3: vibesys.host.v1.HarnessOption.display:type_name -> vibesys.host.v1.HarnessDisplay
-	1,  // 4: vibesys.host.v1.ExampleHardware.vendor:type_name -> vibesys.host.v1.AcceleratorVendor
-	2,  // 5: vibesys.host.v1.ExampleHardware.backend:type_name -> vibesys.host.v1.Backend
-	22, // 6: vibesys.host.v1.ExampleList.examples:type_name -> vibesys.host.v1.ExampleSummary
-	4,  // 7: vibesys.host.v1.ExampleModel.maker:type_name -> vibesys.host.v1.ModelMaker
-	83, // 8: vibesys.host.v1.ExampleSummary.task_details:type_name -> vibesys.host.v1.ExampleSummaryTaskDetails
-	21, // 9: vibesys.host.v1.ExampleTask.objectives:type_name -> vibesys.host.v1.ExampleObjective
-	3,  // 10: vibesys.host.v1.ExampleTask.domain:type_name -> vibesys.host.v1.ExampleDomain
-	18, // 11: vibesys.host.v1.ExampleTask.hardware:type_name -> vibesys.host.v1.ExampleHardware
-	20, // 12: vibesys.host.v1.ExampleTask.model:type_name -> vibesys.host.v1.ExampleModel
-	24, // 13: vibesys.host.v1.ExampleTask.workload:type_name -> vibesys.host.v1.ExampleWorkload
-	21, // 14: vibesys.host.v1.TaskGoal.objectives:type_name -> vibesys.host.v1.ExampleObjective
-	28, // 15: vibesys.host.v1.Hardware.gpus:type_name -> vibesys.host.v1.Gpu
-	5,  // 16: vibesys.host.v1.Hardware.accelerator:type_name -> vibesys.host.v1.Accelerator
-	30, // 17: vibesys.host.v1.MachineDescription.checkout:type_name -> vibesys.host.v1.MachineCheckout
-	29, // 18: vibesys.host.v1.MachineDescription.hardware:type_name -> vibesys.host.v1.Hardware
-	84, // 19: vibesys.host.v1.MachineDescription.docker:type_name -> vibesys.host.v1.MachineDescriptionDocker
-	94, // 20: vibesys.host.v1.MachineDescription.harness_cli_names:type_name -> vibesys.host.v1.MachineDescription.HarnessCliNamesEntry
-	32, // 21: vibesys.host.v1.MachineDescription.runs:type_name -> vibesys.host.v1.RunCounts
-	5,  // 22: vibesys.host.v1.ClusterHardware.accelerator:type_name -> vibesys.host.v1.Accelerator
-	35, // 23: vibesys.host.v1.ComputeSettings.clusters:type_name -> vibesys.host.v1.ListedCluster
-	37, // 24: vibesys.host.v1.ComputeSettings.modal:type_name -> vibesys.host.v1.ModalStatus
-	38, // 25: vibesys.host.v1.ListedCluster.cluster:type_name -> vibesys.host.v1.SlurmClusterSettings
-	6,  // 26: vibesys.host.v1.ListedCluster.source:type_name -> vibesys.host.v1.ClusterSource
-	7,  // 27: vibesys.host.v1.ModalStatus.source:type_name -> vibesys.host.v1.ModalTokenSource
-	85, // 28: vibesys.host.v1.SlurmClusterSettings.reach:type_name -> vibesys.host.v1.SlurmClusterSettingsReach
-	33, // 29: vibesys.host.v1.SlurmClusterSettings.hardware:type_name -> vibesys.host.v1.ClusterHardware
-	8,  // 30: vibesys.host.v1.RoleOption.reasoning_effort:type_name -> vibesys.host.v1.ReasoningEffort
-	9,  // 31: vibesys.host.v1.RunOptions.results:type_name -> vibesys.host.v1.RunResults
-	42, // 32: vibesys.host.v1.RunOptions.roles:type_name -> vibesys.host.v1.RoleOption
-	2,  // 33: vibesys.host.v1.BackendUnavailable.backend:type_name -> vibesys.host.v1.Backend
-	2,  // 34: vibesys.host.v1.BackendUnavailable.declared:type_name -> vibesys.host.v1.Backend
-	10, // 35: vibesys.host.v1.Check.id:type_name -> vibesys.host.v1.CheckId
-	11, // 36: vibesys.host.v1.Check.state:type_name -> vibesys.host.v1.CheckState
-	86, // 37: vibesys.host.v1.Check.fix:type_name -> vibesys.host.v1.CheckFix
-	87, // 38: vibesys.host.v1.Check.cause:type_name -> vibesys.host.v1.CheckCause
-	88, // 39: vibesys.host.v1.ConfigureCompute.target:type_name -> vibesys.host.v1.ConfigureComputeTarget
-	89, // 40: vibesys.host.v1.MeasurementTargetMisfit.target:type_name -> vibesys.host.v1.MeasurementTargetMisfitTarget
-	2,  // 41: vibesys.host.v1.MeasurementTargetMisfit.backend:type_name -> vibesys.host.v1.Backend
-	5,  // 42: vibesys.host.v1.MeasurementTargetMisfit.offered:type_name -> vibesys.host.v1.Accelerator
-	90, // 43: vibesys.host.v1.MeasurementTargetNotConfigured.target:type_name -> vibesys.host.v1.MeasurementTargetNotConfiguredTarget
-	12, // 44: vibesys.host.v1.OptionNotAccepted.option:type_name -> vibesys.host.v1.RunOption
-	13, // 45: vibesys.host.v1.ListTasksResponse.tasks:type_name -> vibesys.host.v1.TaskList
-	16, // 46: vibesys.host.v1.ListHarnessesResponse.harnesses:type_name -> vibesys.host.v1.HarnessOption
-	19, // 47: vibesys.host.v1.ListExamplesResponse.listing:type_name -> vibesys.host.v1.ExampleList
-	25, // 48: vibesys.host.v1.GetTaskGoalResponse.goal:type_name -> vibesys.host.v1.TaskGoal
-	31, // 49: vibesys.host.v1.DescribeMachineResponse.machine:type_name -> vibesys.host.v1.MachineDescription
-	34, // 50: vibesys.host.v1.ListComputeResponse.settings:type_name -> vibesys.host.v1.ComputeSettings
-	40, // 51: vibesys.host.v1.PreflightRunRequest.harness:type_name -> vibesys.host.v1.HarnessChoice
-	43, // 52: vibesys.host.v1.PreflightRunRequest.options:type_name -> vibesys.host.v1.RunOptions
-	91, // 53: vibesys.host.v1.PreflightRunRequest.agents:type_name -> vibesys.host.v1.PreflightRunRequestAgents
-	92, // 54: vibesys.host.v1.PreflightRunRequest.measure_on:type_name -> vibesys.host.v1.PreflightRunRequestMeasureOn
-	49, // 55: vibesys.host.v1.PreflightRunResponse.checks:type_name -> vibesys.host.v1.Check
-	93, // 56: vibesys.host.v1.PreflightRunResponse.roles:type_name -> vibesys.host.v1.PreflightRunResponseRoles
-	2,  // 57: vibesys.host.v1.PreflightRunResponse.backend:type_name -> vibesys.host.v1.Backend
-	23, // 58: vibesys.host.v1.ExampleSummaryTaskDetails.items:type_name -> vibesys.host.v1.ExampleTask
-	26, // 59: vibesys.host.v1.MachineDescriptionDocker.docker_reachable:type_name -> vibesys.host.v1.DockerReachable
-	27, // 60: vibesys.host.v1.MachineDescriptionDocker.docker_unreachable:type_name -> vibesys.host.v1.DockerUnreachable
-	39, // 61: vibesys.host.v1.SlurmClusterSettingsReach.ssh_reach:type_name -> vibesys.host.v1.SshReach
-	36, // 62: vibesys.host.v1.SlurmClusterSettingsReach.login_node_reach:type_name -> vibesys.host.v1.LoginNodeReach
-	50, // 63: vibesys.host.v1.CheckFix.choose_checkout:type_name -> vibesys.host.v1.ChooseCheckout
-	53, // 64: vibesys.host.v1.CheckFix.copy_out:type_name -> vibesys.host.v1.CopyOut
-	55, // 65: vibesys.host.v1.CheckFix.edit_setting:type_name -> vibesys.host.v1.EditSetting
-	63, // 66: vibesys.host.v1.CheckFix.start_docker:type_name -> vibesys.host.v1.StartDocker
-	54, // 67: vibesys.host.v1.CheckFix.declare_build:type_name -> vibesys.host.v1.DeclareBuild
-	52, // 68: vibesys.host.v1.CheckFix.configure_compute:type_name -> vibesys.host.v1.ConfigureCompute
-	48, // 69: vibesys.host.v1.CheckCause.backend_unavailable:type_name -> vibesys.host.v1.BackendUnavailable
-	61, // 70: vibesys.host.v1.CheckCause.project_dirty:type_name -> vibesys.host.v1.ProjectDirty
-	67, // 71: vibesys.host.v1.CheckCause.task_not_found:type_name -> vibesys.host.v1.TaskNotFound
-	68, // 72: vibesys.host.v1.CheckCause.task_unusable:type_name -> vibesys.host.v1.TaskUnusable
-	66, // 73: vibesys.host.v1.CheckCause.task_needs_provisioning:type_name -> vibesys.host.v1.TaskNeedsProvisioning
-	65, // 74: vibesys.host.v1.CheckCause.task_image_unsupported:type_name -> vibesys.host.v1.TaskImageUnsupported
-	64, // 75: vibesys.host.v1.CheckCause.sysbox_missing:type_name -> vibesys.host.v1.SysboxMissing
-	51, // 76: vibesys.host.v1.CheckCause.config_invalid:type_name -> vibesys.host.v1.ConfigInvalid
-	62, // 77: vibesys.host.v1.CheckCause.roles_not_declared:type_name -> vibesys.host.v1.RolesNotDeclared
-	59, // 78: vibesys.host.v1.CheckCause.model_not_vetted:type_name -> vibesys.host.v1.ModelNotVetted
-	46, // 79: vibesys.host.v1.CheckCause.arguments_rejected:type_name -> vibesys.host.v1.ArgumentsRejected
-	47, // 80: vibesys.host.v1.CheckCause.arguments_unrecognized:type_name -> vibesys.host.v1.ArgumentsUnrecognized
-	60, // 81: vibesys.host.v1.CheckCause.option_not_accepted:type_name -> vibesys.host.v1.OptionNotAccepted
-	56, // 82: vibesys.host.v1.CheckCause.git_hub_unavailable:type_name -> vibesys.host.v1.GitHubUnavailable
-	58, // 83: vibesys.host.v1.CheckCause.measurement_target_not_configured:type_name -> vibesys.host.v1.MeasurementTargetNotConfigured
-	57, // 84: vibesys.host.v1.CheckCause.measurement_target_misfit:type_name -> vibesys.host.v1.MeasurementTargetMisfit
-	45, // 85: vibesys.host.v1.ConfigureComputeTarget.slurm_target:type_name -> vibesys.host.v1.SlurmTarget
-	41, // 86: vibesys.host.v1.ConfigureComputeTarget.modal_target:type_name -> vibesys.host.v1.ModalTarget
-	44, // 87: vibesys.host.v1.MeasurementTargetMisfitTarget.same_machine:type_name -> vibesys.host.v1.SameMachine
-	45, // 88: vibesys.host.v1.MeasurementTargetMisfitTarget.slurm_target:type_name -> vibesys.host.v1.SlurmTarget
-	41, // 89: vibesys.host.v1.MeasurementTargetMisfitTarget.modal_target:type_name -> vibesys.host.v1.ModalTarget
-	45, // 90: vibesys.host.v1.MeasurementTargetNotConfiguredTarget.slurm_target:type_name -> vibesys.host.v1.SlurmTarget
-	41, // 91: vibesys.host.v1.MeasurementTargetNotConfiguredTarget.modal_target:type_name -> vibesys.host.v1.ModalTarget
-	95, // 92: vibesys.host.v1.PreflightRunRequestAgents.items:type_name -> vibesys.host.v1.PreflightRunRequestAgents.ItemsEntry
-	44, // 93: vibesys.host.v1.PreflightRunRequestMeasureOn.same_machine:type_name -> vibesys.host.v1.SameMachine
-	45, // 94: vibesys.host.v1.PreflightRunRequestMeasureOn.slurm_target:type_name -> vibesys.host.v1.SlurmTarget
-	41, // 95: vibesys.host.v1.PreflightRunRequestMeasureOn.modal_target:type_name -> vibesys.host.v1.ModalTarget
-	40, // 96: vibesys.host.v1.PreflightRunRequestAgents.ItemsEntry.value:type_name -> vibesys.host.v1.HarnessChoice
-	97, // [97:97] is the sub-list for method output_type
-	97, // [97:97] is the sub-list for method input_type
-	97, // [97:97] is the sub-list for extension type_name
-	97, // [97:97] is the sub-list for extension extendee
-	0,  // [0:97] is the sub-list for field type_name
+	15,  // 0: vibesys.host.v1.TaskList.tasks:type_name -> vibesys.host.v1.TaskSummary
+	0,   // 1: vibesys.host.v1.HarnessDisplay.maker:type_name -> vibesys.host.v1.Maker
+	18,  // 2: vibesys.host.v1.HarnessDisplay.generation:type_name -> vibesys.host.v1.ModelGeneration
+	16,  // 3: vibesys.host.v1.HarnessOption.display:type_name -> vibesys.host.v1.HarnessDisplay
+	1,   // 4: vibesys.host.v1.ExampleHardware.vendor:type_name -> vibesys.host.v1.AcceleratorVendor
+	2,   // 5: vibesys.host.v1.ExampleHardware.backend:type_name -> vibesys.host.v1.Backend
+	23,  // 6: vibesys.host.v1.ExampleList.examples:type_name -> vibesys.host.v1.ExampleSummary
+	4,   // 7: vibesys.host.v1.ExampleModel.maker:type_name -> vibesys.host.v1.ModelMaker
+	84,  // 8: vibesys.host.v1.ExampleSummary.task_details:type_name -> vibesys.host.v1.ExampleSummaryTaskDetails
+	22,  // 9: vibesys.host.v1.ExampleTask.objectives:type_name -> vibesys.host.v1.ExampleObjective
+	3,   // 10: vibesys.host.v1.ExampleTask.domain:type_name -> vibesys.host.v1.ExampleDomain
+	19,  // 11: vibesys.host.v1.ExampleTask.hardware:type_name -> vibesys.host.v1.ExampleHardware
+	21,  // 12: vibesys.host.v1.ExampleTask.model:type_name -> vibesys.host.v1.ExampleModel
+	25,  // 13: vibesys.host.v1.ExampleTask.workload:type_name -> vibesys.host.v1.ExampleWorkload
+	22,  // 14: vibesys.host.v1.TaskGoal.objectives:type_name -> vibesys.host.v1.ExampleObjective
+	29,  // 15: vibesys.host.v1.Hardware.gpus:type_name -> vibesys.host.v1.Gpu
+	5,   // 16: vibesys.host.v1.Hardware.accelerator:type_name -> vibesys.host.v1.Accelerator
+	31,  // 17: vibesys.host.v1.MachineDescription.checkout:type_name -> vibesys.host.v1.MachineCheckout
+	30,  // 18: vibesys.host.v1.MachineDescription.hardware:type_name -> vibesys.host.v1.Hardware
+	85,  // 19: vibesys.host.v1.MachineDescription.docker:type_name -> vibesys.host.v1.MachineDescriptionDocker
+	101, // 20: vibesys.host.v1.MachineDescription.harness_cli_names:type_name -> vibesys.host.v1.MachineDescription.HarnessCliNamesEntry
+	33,  // 21: vibesys.host.v1.MachineDescription.runs:type_name -> vibesys.host.v1.RunCounts
+	5,   // 22: vibesys.host.v1.ClusterHardware.accelerator:type_name -> vibesys.host.v1.Accelerator
+	36,  // 23: vibesys.host.v1.ComputeSettings.clusters:type_name -> vibesys.host.v1.ListedCluster
+	38,  // 24: vibesys.host.v1.ComputeSettings.modal:type_name -> vibesys.host.v1.ModalStatus
+	39,  // 25: vibesys.host.v1.ListedCluster.cluster:type_name -> vibesys.host.v1.SlurmClusterSettings
+	6,   // 26: vibesys.host.v1.ListedCluster.source:type_name -> vibesys.host.v1.ClusterSource
+	7,   // 27: vibesys.host.v1.ModalStatus.source:type_name -> vibesys.host.v1.ModalTokenSource
+	86,  // 28: vibesys.host.v1.SlurmClusterSettings.reach:type_name -> vibesys.host.v1.SlurmClusterSettingsReach
+	34,  // 29: vibesys.host.v1.SlurmClusterSettings.hardware:type_name -> vibesys.host.v1.ClusterHardware
+	8,   // 30: vibesys.host.v1.RoleOption.reasoning_effort:type_name -> vibesys.host.v1.ReasoningEffort
+	9,   // 31: vibesys.host.v1.RunOptions.results:type_name -> vibesys.host.v1.RunResults
+	43,  // 32: vibesys.host.v1.RunOptions.roles:type_name -> vibesys.host.v1.RoleOption
+	2,   // 33: vibesys.host.v1.BackendUnavailable.backend:type_name -> vibesys.host.v1.Backend
+	2,   // 34: vibesys.host.v1.BackendUnavailable.declared:type_name -> vibesys.host.v1.Backend
+	10,  // 35: vibesys.host.v1.Check.id:type_name -> vibesys.host.v1.CheckId
+	11,  // 36: vibesys.host.v1.Check.state:type_name -> vibesys.host.v1.CheckState
+	87,  // 37: vibesys.host.v1.Check.fix:type_name -> vibesys.host.v1.CheckFix
+	88,  // 38: vibesys.host.v1.Check.cause:type_name -> vibesys.host.v1.CheckCause
+	89,  // 39: vibesys.host.v1.ConfigureCompute.target:type_name -> vibesys.host.v1.ConfigureComputeTarget
+	90,  // 40: vibesys.host.v1.MeasurementTargetMisfit.target:type_name -> vibesys.host.v1.MeasurementTargetMisfitTarget
+	2,   // 41: vibesys.host.v1.MeasurementTargetMisfit.backend:type_name -> vibesys.host.v1.Backend
+	5,   // 42: vibesys.host.v1.MeasurementTargetMisfit.offered:type_name -> vibesys.host.v1.Accelerator
+	91,  // 43: vibesys.host.v1.MeasurementTargetNotConfigured.target:type_name -> vibesys.host.v1.MeasurementTargetNotConfiguredTarget
+	12,  // 44: vibesys.host.v1.OptionNotAccepted.option:type_name -> vibesys.host.v1.RunOption
+	14,  // 45: vibesys.host.v1.ListTasksResponse.tasks:type_name -> vibesys.host.v1.TaskList
+	17,  // 46: vibesys.host.v1.ListHarnessesResponse.harnesses:type_name -> vibesys.host.v1.HarnessOption
+	20,  // 47: vibesys.host.v1.ListExamplesResponse.listing:type_name -> vibesys.host.v1.ExampleList
+	26,  // 48: vibesys.host.v1.GetTaskGoalResponse.goal:type_name -> vibesys.host.v1.TaskGoal
+	32,  // 49: vibesys.host.v1.DescribeMachineResponse.machine:type_name -> vibesys.host.v1.MachineDescription
+	35,  // 50: vibesys.host.v1.ListComputeResponse.settings:type_name -> vibesys.host.v1.ComputeSettings
+	41,  // 51: vibesys.host.v1.PreflightRunRequest.harness:type_name -> vibesys.host.v1.HarnessChoice
+	44,  // 52: vibesys.host.v1.PreflightRunRequest.options:type_name -> vibesys.host.v1.RunOptions
+	92,  // 53: vibesys.host.v1.PreflightRunRequest.agents:type_name -> vibesys.host.v1.PreflightRunRequestAgents
+	93,  // 54: vibesys.host.v1.PreflightRunRequest.measure_on:type_name -> vibesys.host.v1.PreflightRunRequestMeasureOn
+	50,  // 55: vibesys.host.v1.PreflightRunResponse.checks:type_name -> vibesys.host.v1.Check
+	94,  // 56: vibesys.host.v1.PreflightRunResponse.roles:type_name -> vibesys.host.v1.PreflightRunResponseRoles
+	2,   // 57: vibesys.host.v1.PreflightRunResponse.backend:type_name -> vibesys.host.v1.Backend
+	24,  // 58: vibesys.host.v1.ExampleSummaryTaskDetails.items:type_name -> vibesys.host.v1.ExampleTask
+	27,  // 59: vibesys.host.v1.MachineDescriptionDocker.docker_reachable:type_name -> vibesys.host.v1.DockerReachable
+	28,  // 60: vibesys.host.v1.MachineDescriptionDocker.docker_unreachable:type_name -> vibesys.host.v1.DockerUnreachable
+	40,  // 61: vibesys.host.v1.SlurmClusterSettingsReach.ssh_reach:type_name -> vibesys.host.v1.SshReach
+	37,  // 62: vibesys.host.v1.SlurmClusterSettingsReach.login_node_reach:type_name -> vibesys.host.v1.LoginNodeReach
+	51,  // 63: vibesys.host.v1.CheckFix.choose_checkout:type_name -> vibesys.host.v1.ChooseCheckout
+	54,  // 64: vibesys.host.v1.CheckFix.copy_out:type_name -> vibesys.host.v1.CopyOut
+	56,  // 65: vibesys.host.v1.CheckFix.edit_setting:type_name -> vibesys.host.v1.EditSetting
+	64,  // 66: vibesys.host.v1.CheckFix.start_docker:type_name -> vibesys.host.v1.StartDocker
+	55,  // 67: vibesys.host.v1.CheckFix.declare_build:type_name -> vibesys.host.v1.DeclareBuild
+	53,  // 68: vibesys.host.v1.CheckFix.configure_compute:type_name -> vibesys.host.v1.ConfigureCompute
+	49,  // 69: vibesys.host.v1.CheckCause.backend_unavailable:type_name -> vibesys.host.v1.BackendUnavailable
+	62,  // 70: vibesys.host.v1.CheckCause.project_dirty:type_name -> vibesys.host.v1.ProjectDirty
+	68,  // 71: vibesys.host.v1.CheckCause.task_not_found:type_name -> vibesys.host.v1.TaskNotFound
+	69,  // 72: vibesys.host.v1.CheckCause.task_unusable:type_name -> vibesys.host.v1.TaskUnusable
+	67,  // 73: vibesys.host.v1.CheckCause.task_needs_provisioning:type_name -> vibesys.host.v1.TaskNeedsProvisioning
+	66,  // 74: vibesys.host.v1.CheckCause.task_image_unsupported:type_name -> vibesys.host.v1.TaskImageUnsupported
+	65,  // 75: vibesys.host.v1.CheckCause.sysbox_missing:type_name -> vibesys.host.v1.SysboxMissing
+	52,  // 76: vibesys.host.v1.CheckCause.config_invalid:type_name -> vibesys.host.v1.ConfigInvalid
+	63,  // 77: vibesys.host.v1.CheckCause.roles_not_declared:type_name -> vibesys.host.v1.RolesNotDeclared
+	60,  // 78: vibesys.host.v1.CheckCause.model_not_vetted:type_name -> vibesys.host.v1.ModelNotVetted
+	47,  // 79: vibesys.host.v1.CheckCause.arguments_rejected:type_name -> vibesys.host.v1.ArgumentsRejected
+	48,  // 80: vibesys.host.v1.CheckCause.arguments_unrecognized:type_name -> vibesys.host.v1.ArgumentsUnrecognized
+	61,  // 81: vibesys.host.v1.CheckCause.option_not_accepted:type_name -> vibesys.host.v1.OptionNotAccepted
+	57,  // 82: vibesys.host.v1.CheckCause.git_hub_unavailable:type_name -> vibesys.host.v1.GitHubUnavailable
+	59,  // 83: vibesys.host.v1.CheckCause.measurement_target_not_configured:type_name -> vibesys.host.v1.MeasurementTargetNotConfigured
+	58,  // 84: vibesys.host.v1.CheckCause.measurement_target_misfit:type_name -> vibesys.host.v1.MeasurementTargetMisfit
+	46,  // 85: vibesys.host.v1.ConfigureComputeTarget.slurm_target:type_name -> vibesys.host.v1.SlurmTarget
+	42,  // 86: vibesys.host.v1.ConfigureComputeTarget.modal_target:type_name -> vibesys.host.v1.ModalTarget
+	45,  // 87: vibesys.host.v1.MeasurementTargetMisfitTarget.same_machine:type_name -> vibesys.host.v1.SameMachine
+	46,  // 88: vibesys.host.v1.MeasurementTargetMisfitTarget.slurm_target:type_name -> vibesys.host.v1.SlurmTarget
+	42,  // 89: vibesys.host.v1.MeasurementTargetMisfitTarget.modal_target:type_name -> vibesys.host.v1.ModalTarget
+	46,  // 90: vibesys.host.v1.MeasurementTargetNotConfiguredTarget.slurm_target:type_name -> vibesys.host.v1.SlurmTarget
+	42,  // 91: vibesys.host.v1.MeasurementTargetNotConfiguredTarget.modal_target:type_name -> vibesys.host.v1.ModalTarget
+	102, // 92: vibesys.host.v1.PreflightRunRequestAgents.items:type_name -> vibesys.host.v1.PreflightRunRequestAgents.ItemsEntry
+	45,  // 93: vibesys.host.v1.PreflightRunRequestMeasureOn.same_machine:type_name -> vibesys.host.v1.SameMachine
+	46,  // 94: vibesys.host.v1.PreflightRunRequestMeasureOn.slurm_target:type_name -> vibesys.host.v1.SlurmTarget
+	42,  // 95: vibesys.host.v1.PreflightRunRequestMeasureOn.modal_target:type_name -> vibesys.host.v1.ModalTarget
+	13,  // 96: vibesys.host.v1.InspectCandidateResponse.state:type_name -> vibesys.host.v1.CandidateState
+	95,  // 97: vibesys.host.v1.InspectCandidateResponse.identity:type_name -> vibesys.host.v1.CandidateIdentity
+	98,  // 98: vibesys.host.v1.CompletePathsResponse.entries:type_name -> vibesys.host.v1.CompletedPath
+	41,  // 99: vibesys.host.v1.PreflightRunRequestAgents.ItemsEntry.value:type_name -> vibesys.host.v1.HarnessChoice
+	100, // [100:100] is the sub-list for method output_type
+	100, // [100:100] is the sub-list for method input_type
+	100, // [100:100] is the sub-list for extension type_name
+	100, // [100:100] is the sub-list for extension extendee
+	0,   // [0:100] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_host_v1_operations_proto_init() }
@@ -6859,13 +7437,14 @@ func file_vibesys_host_v1_operations_proto_init() {
 		(*PreflightRunRequestMeasureOn_SlurmTarget)(nil),
 		(*PreflightRunRequestMeasureOn_ModalTarget)(nil),
 	}
+	file_vibesys_host_v1_operations_proto_msgTypes[81].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_vibesys_host_v1_operations_proto_rawDesc), len(file_vibesys_host_v1_operations_proto_rawDesc)),
-			NumEnums:      13,
-			NumMessages:   83,
+			NumEnums:      14,
+			NumMessages:   89,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

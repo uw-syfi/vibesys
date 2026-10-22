@@ -37,6 +37,8 @@ type HostReadRequest struct {
 	//	*HostReadRequest_DescribeMachine
 	//	*HostReadRequest_ListCompute
 	//	*HostReadRequest_PreflightRun
+	//	*HostReadRequest_InspectCandidate
+	//	*HostReadRequest_CompletePaths
 	Method        isHostReadRequest_Method `protobuf_oneof:"method"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -149,6 +151,24 @@ func (x *HostReadRequest) GetPreflightRun() *v1.PreflightRunRequest {
 	return nil
 }
 
+func (x *HostReadRequest) GetInspectCandidate() *v1.InspectCandidateRequest {
+	if x != nil {
+		if x, ok := x.Method.(*HostReadRequest_InspectCandidate); ok {
+			return x.InspectCandidate
+		}
+	}
+	return nil
+}
+
+func (x *HostReadRequest) GetCompletePaths() *v1.CompletePathsRequest {
+	if x != nil {
+		if x, ok := x.Method.(*HostReadRequest_CompletePaths); ok {
+			return x.CompletePaths
+		}
+	}
+	return nil
+}
+
 type isHostReadRequest_Method interface {
 	isHostReadRequest_Method()
 }
@@ -181,6 +201,14 @@ type HostReadRequest_PreflightRun struct {
 	PreflightRun *v1.PreflightRunRequest `protobuf:"bytes,16,opt,name=preflight_run,json=preflightRun,proto3,oneof"`
 }
 
+type HostReadRequest_InspectCandidate struct {
+	InspectCandidate *v1.InspectCandidateRequest `protobuf:"bytes,17,opt,name=inspect_candidate,json=inspectCandidate,proto3,oneof"`
+}
+
+type HostReadRequest_CompletePaths struct {
+	CompletePaths *v1.CompletePathsRequest `protobuf:"bytes,18,opt,name=complete_paths,json=completePaths,proto3,oneof"`
+}
+
 func (*HostReadRequest_ListTasks) isHostReadRequest_Method() {}
 
 func (*HostReadRequest_ListHarnesses) isHostReadRequest_Method() {}
@@ -195,6 +223,10 @@ func (*HostReadRequest_ListCompute) isHostReadRequest_Method() {}
 
 func (*HostReadRequest_PreflightRun) isHostReadRequest_Method() {}
 
+func (*HostReadRequest_InspectCandidate) isHostReadRequest_Method() {}
+
+func (*HostReadRequest_CompletePaths) isHostReadRequest_Method() {}
+
 // The matching read result, or a typed failure. Tag 2 stays reserved for failure.
 type HostReadResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -208,6 +240,8 @@ type HostReadResponse struct {
 	//	*HostReadResponse_DescribeMachine
 	//	*HostReadResponse_ListCompute
 	//	*HostReadResponse_PreflightRun
+	//	*HostReadResponse_InspectCandidate
+	//	*HostReadResponse_CompletePaths
 	Result        isHostReadResponse_Result `protobuf_oneof:"result"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -322,6 +356,24 @@ func (x *HostReadResponse) GetPreflightRun() *v1.PreflightRunResponse {
 	return nil
 }
 
+func (x *HostReadResponse) GetInspectCandidate() *v1.InspectCandidateResponse {
+	if x != nil {
+		if x, ok := x.Result.(*HostReadResponse_InspectCandidate); ok {
+			return x.InspectCandidate
+		}
+	}
+	return nil
+}
+
+func (x *HostReadResponse) GetCompletePaths() *v1.CompletePathsResponse {
+	if x != nil {
+		if x, ok := x.Result.(*HostReadResponse_CompletePaths); ok {
+			return x.CompletePaths
+		}
+	}
+	return nil
+}
+
 type isHostReadResponse_Result interface {
 	isHostReadResponse_Result()
 }
@@ -358,6 +410,14 @@ type HostReadResponse_PreflightRun struct {
 	PreflightRun *v1.PreflightRunResponse `protobuf:"bytes,16,opt,name=preflight_run,json=preflightRun,proto3,oneof"`
 }
 
+type HostReadResponse_InspectCandidate struct {
+	InspectCandidate *v1.InspectCandidateResponse `protobuf:"bytes,17,opt,name=inspect_candidate,json=inspectCandidate,proto3,oneof"`
+}
+
+type HostReadResponse_CompletePaths struct {
+	CompletePaths *v1.CompletePathsResponse `protobuf:"bytes,18,opt,name=complete_paths,json=completePaths,proto3,oneof"`
+}
+
 func (*HostReadResponse_Failure) isHostReadResponse_Result() {}
 
 func (*HostReadResponse_ListTasks) isHostReadResponse_Result() {}
@@ -374,11 +434,15 @@ func (*HostReadResponse_ListCompute) isHostReadResponse_Result() {}
 
 func (*HostReadResponse_PreflightRun) isHostReadResponse_Result() {}
 
+func (*HostReadResponse_InspectCandidate) isHostReadResponse_Result() {}
+
+func (*HostReadResponse_CompletePaths) isHostReadResponse_Result() {}
+
 var File_vibesys_api_v1_host_read_generated_proto protoreflect.FileDescriptor
 
 const file_vibesys_api_v1_host_read_generated_proto_rawDesc = "" +
 	"\n" +
-	"(vibesys/api/v1/host_read_generated.proto\x12\x0evibesys.api.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1dvibesys/host/v1/failure.proto\x1a vibesys/host/v1/operations.proto\"\xe3\x04\n" +
+	"(vibesys/api/v1/host_read_generated.proto\x12\x0evibesys.api.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1dvibesys/host/v1/failure.proto\x1a vibesys/host/v1/operations.proto\"\x8c\x06\n" +
 	"\x0fHostReadRequest\x12&\n" +
 	"\bcheckout\x18\x01 \x01(\tB\n" +
 	"\xbaH\ar\x05\x10\x01(\x80 R\bcheckout\x12B\n" +
@@ -390,8 +454,10 @@ const file_vibesys_api_v1_host_read_generated_proto_rawDesc = "" +
 	"\rget_task_goal\x18\r \x01(\v2#.vibesys.host.v1.GetTaskGoalRequestH\x00R\vgetTaskGoal\x12T\n" +
 	"\x10describe_machine\x18\x0e \x01(\v2'.vibesys.host.v1.DescribeMachineRequestH\x00R\x0fdescribeMachine\x12H\n" +
 	"\flist_compute\x18\x0f \x01(\v2#.vibesys.host.v1.ListComputeRequestH\x00R\vlistCompute\x12K\n" +
-	"\rpreflight_run\x18\x10 \x01(\v2$.vibesys.host.v1.PreflightRunRequestH\x00R\fpreflightRunB\x0f\n" +
-	"\x06method\x12\x05\xbaH\x02\b\x01\"\x82\x05\n" +
+	"\rpreflight_run\x18\x10 \x01(\v2$.vibesys.host.v1.PreflightRunRequestH\x00R\fpreflightRun\x12W\n" +
+	"\x11inspect_candidate\x18\x11 \x01(\v2(.vibesys.host.v1.InspectCandidateRequestH\x00R\x10inspectCandidate\x12N\n" +
+	"\x0ecomplete_paths\x18\x12 \x01(\v2%.vibesys.host.v1.CompletePathsRequestH\x00R\rcompletePathsB\x0f\n" +
+	"\x06method\x12\x05\xbaH\x02\b\x01\"\xad\x06\n" +
 	"\x10HostReadResponse\x12=\n" +
 	"\afailure\x18\x02 \x01(\v2!.vibesys.host.v1.OperationFailureH\x00R\afailure\x12C\n" +
 	"\n" +
@@ -402,7 +468,9 @@ const file_vibesys_api_v1_host_read_generated_proto_rawDesc = "" +
 	"\rget_task_goal\x18\r \x01(\v2$.vibesys.host.v1.GetTaskGoalResponseH\x00R\vgetTaskGoal\x12U\n" +
 	"\x10describe_machine\x18\x0e \x01(\v2(.vibesys.host.v1.DescribeMachineResponseH\x00R\x0fdescribeMachine\x12I\n" +
 	"\flist_compute\x18\x0f \x01(\v2$.vibesys.host.v1.ListComputeResponseH\x00R\vlistCompute\x12L\n" +
-	"\rpreflight_run\x18\x10 \x01(\v2%.vibesys.host.v1.PreflightRunResponseH\x00R\fpreflightRunB\x0f\n" +
+	"\rpreflight_run\x18\x10 \x01(\v2%.vibesys.host.v1.PreflightRunResponseH\x00R\fpreflightRun\x12X\n" +
+	"\x11inspect_candidate\x18\x11 \x01(\v2).vibesys.host.v1.InspectCandidateResponseH\x00R\x10inspectCandidate\x12O\n" +
+	"\x0ecomplete_paths\x18\x12 \x01(\v2&.vibesys.host.v1.CompletePathsResponseH\x00R\rcompletePathsB\x0f\n" +
 	"\x06result\x12\x05\xbaH\x02\b\x01B=Z;github.com/uw-syfi/vibesys/gateway/gen/vibesys/api/v1;apiv1b\x06proto3"
 
 var (
@@ -419,23 +487,27 @@ func file_vibesys_api_v1_host_read_generated_proto_rawDescGZIP() []byte {
 
 var file_vibesys_api_v1_host_read_generated_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
 var file_vibesys_api_v1_host_read_generated_proto_goTypes = []any{
-	(*HostReadRequest)(nil),            // 0: vibesys.api.v1.HostReadRequest
-	(*HostReadResponse)(nil),           // 1: vibesys.api.v1.HostReadResponse
-	(*v1.ListTasksRequest)(nil),        // 2: vibesys.host.v1.ListTasksRequest
-	(*v1.ListHarnessesRequest)(nil),    // 3: vibesys.host.v1.ListHarnessesRequest
-	(*v1.ListExamplesRequest)(nil),     // 4: vibesys.host.v1.ListExamplesRequest
-	(*v1.GetTaskGoalRequest)(nil),      // 5: vibesys.host.v1.GetTaskGoalRequest
-	(*v1.DescribeMachineRequest)(nil),  // 6: vibesys.host.v1.DescribeMachineRequest
-	(*v1.ListComputeRequest)(nil),      // 7: vibesys.host.v1.ListComputeRequest
-	(*v1.PreflightRunRequest)(nil),     // 8: vibesys.host.v1.PreflightRunRequest
-	(*v1.OperationFailure)(nil),        // 9: vibesys.host.v1.OperationFailure
-	(*v1.ListTasksResponse)(nil),       // 10: vibesys.host.v1.ListTasksResponse
-	(*v1.ListHarnessesResponse)(nil),   // 11: vibesys.host.v1.ListHarnessesResponse
-	(*v1.ListExamplesResponse)(nil),    // 12: vibesys.host.v1.ListExamplesResponse
-	(*v1.GetTaskGoalResponse)(nil),     // 13: vibesys.host.v1.GetTaskGoalResponse
-	(*v1.DescribeMachineResponse)(nil), // 14: vibesys.host.v1.DescribeMachineResponse
-	(*v1.ListComputeResponse)(nil),     // 15: vibesys.host.v1.ListComputeResponse
-	(*v1.PreflightRunResponse)(nil),    // 16: vibesys.host.v1.PreflightRunResponse
+	(*HostReadRequest)(nil),             // 0: vibesys.api.v1.HostReadRequest
+	(*HostReadResponse)(nil),            // 1: vibesys.api.v1.HostReadResponse
+	(*v1.ListTasksRequest)(nil),         // 2: vibesys.host.v1.ListTasksRequest
+	(*v1.ListHarnessesRequest)(nil),     // 3: vibesys.host.v1.ListHarnessesRequest
+	(*v1.ListExamplesRequest)(nil),      // 4: vibesys.host.v1.ListExamplesRequest
+	(*v1.GetTaskGoalRequest)(nil),       // 5: vibesys.host.v1.GetTaskGoalRequest
+	(*v1.DescribeMachineRequest)(nil),   // 6: vibesys.host.v1.DescribeMachineRequest
+	(*v1.ListComputeRequest)(nil),       // 7: vibesys.host.v1.ListComputeRequest
+	(*v1.PreflightRunRequest)(nil),      // 8: vibesys.host.v1.PreflightRunRequest
+	(*v1.InspectCandidateRequest)(nil),  // 9: vibesys.host.v1.InspectCandidateRequest
+	(*v1.CompletePathsRequest)(nil),     // 10: vibesys.host.v1.CompletePathsRequest
+	(*v1.OperationFailure)(nil),         // 11: vibesys.host.v1.OperationFailure
+	(*v1.ListTasksResponse)(nil),        // 12: vibesys.host.v1.ListTasksResponse
+	(*v1.ListHarnessesResponse)(nil),    // 13: vibesys.host.v1.ListHarnessesResponse
+	(*v1.ListExamplesResponse)(nil),     // 14: vibesys.host.v1.ListExamplesResponse
+	(*v1.GetTaskGoalResponse)(nil),      // 15: vibesys.host.v1.GetTaskGoalResponse
+	(*v1.DescribeMachineResponse)(nil),  // 16: vibesys.host.v1.DescribeMachineResponse
+	(*v1.ListComputeResponse)(nil),      // 17: vibesys.host.v1.ListComputeResponse
+	(*v1.PreflightRunResponse)(nil),     // 18: vibesys.host.v1.PreflightRunResponse
+	(*v1.InspectCandidateResponse)(nil), // 19: vibesys.host.v1.InspectCandidateResponse
+	(*v1.CompletePathsResponse)(nil),    // 20: vibesys.host.v1.CompletePathsResponse
 }
 var file_vibesys_api_v1_host_read_generated_proto_depIdxs = []int32{
 	2,  // 0: vibesys.api.v1.HostReadRequest.list_tasks:type_name -> vibesys.host.v1.ListTasksRequest
@@ -445,19 +517,23 @@ var file_vibesys_api_v1_host_read_generated_proto_depIdxs = []int32{
 	6,  // 4: vibesys.api.v1.HostReadRequest.describe_machine:type_name -> vibesys.host.v1.DescribeMachineRequest
 	7,  // 5: vibesys.api.v1.HostReadRequest.list_compute:type_name -> vibesys.host.v1.ListComputeRequest
 	8,  // 6: vibesys.api.v1.HostReadRequest.preflight_run:type_name -> vibesys.host.v1.PreflightRunRequest
-	9,  // 7: vibesys.api.v1.HostReadResponse.failure:type_name -> vibesys.host.v1.OperationFailure
-	10, // 8: vibesys.api.v1.HostReadResponse.list_tasks:type_name -> vibesys.host.v1.ListTasksResponse
-	11, // 9: vibesys.api.v1.HostReadResponse.list_harnesses:type_name -> vibesys.host.v1.ListHarnessesResponse
-	12, // 10: vibesys.api.v1.HostReadResponse.list_examples:type_name -> vibesys.host.v1.ListExamplesResponse
-	13, // 11: vibesys.api.v1.HostReadResponse.get_task_goal:type_name -> vibesys.host.v1.GetTaskGoalResponse
-	14, // 12: vibesys.api.v1.HostReadResponse.describe_machine:type_name -> vibesys.host.v1.DescribeMachineResponse
-	15, // 13: vibesys.api.v1.HostReadResponse.list_compute:type_name -> vibesys.host.v1.ListComputeResponse
-	16, // 14: vibesys.api.v1.HostReadResponse.preflight_run:type_name -> vibesys.host.v1.PreflightRunResponse
-	15, // [15:15] is the sub-list for method output_type
-	15, // [15:15] is the sub-list for method input_type
-	15, // [15:15] is the sub-list for extension type_name
-	15, // [15:15] is the sub-list for extension extendee
-	0,  // [0:15] is the sub-list for field type_name
+	9,  // 7: vibesys.api.v1.HostReadRequest.inspect_candidate:type_name -> vibesys.host.v1.InspectCandidateRequest
+	10, // 8: vibesys.api.v1.HostReadRequest.complete_paths:type_name -> vibesys.host.v1.CompletePathsRequest
+	11, // 9: vibesys.api.v1.HostReadResponse.failure:type_name -> vibesys.host.v1.OperationFailure
+	12, // 10: vibesys.api.v1.HostReadResponse.list_tasks:type_name -> vibesys.host.v1.ListTasksResponse
+	13, // 11: vibesys.api.v1.HostReadResponse.list_harnesses:type_name -> vibesys.host.v1.ListHarnessesResponse
+	14, // 12: vibesys.api.v1.HostReadResponse.list_examples:type_name -> vibesys.host.v1.ListExamplesResponse
+	15, // 13: vibesys.api.v1.HostReadResponse.get_task_goal:type_name -> vibesys.host.v1.GetTaskGoalResponse
+	16, // 14: vibesys.api.v1.HostReadResponse.describe_machine:type_name -> vibesys.host.v1.DescribeMachineResponse
+	17, // 15: vibesys.api.v1.HostReadResponse.list_compute:type_name -> vibesys.host.v1.ListComputeResponse
+	18, // 16: vibesys.api.v1.HostReadResponse.preflight_run:type_name -> vibesys.host.v1.PreflightRunResponse
+	19, // 17: vibesys.api.v1.HostReadResponse.inspect_candidate:type_name -> vibesys.host.v1.InspectCandidateResponse
+	20, // 18: vibesys.api.v1.HostReadResponse.complete_paths:type_name -> vibesys.host.v1.CompletePathsResponse
+	19, // [19:19] is the sub-list for method output_type
+	19, // [19:19] is the sub-list for method input_type
+	19, // [19:19] is the sub-list for extension type_name
+	19, // [19:19] is the sub-list for extension extendee
+	0,  // [0:19] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_api_v1_host_read_generated_proto_init() }
@@ -473,6 +549,8 @@ func file_vibesys_api_v1_host_read_generated_proto_init() {
 		(*HostReadRequest_DescribeMachine)(nil),
 		(*HostReadRequest_ListCompute)(nil),
 		(*HostReadRequest_PreflightRun)(nil),
+		(*HostReadRequest_InspectCandidate)(nil),
+		(*HostReadRequest_CompletePaths)(nil),
 	}
 	file_vibesys_api_v1_host_read_generated_proto_msgTypes[1].OneofWrappers = []any{
 		(*HostReadResponse_Failure)(nil),
@@ -483,6 +561,8 @@ func file_vibesys_api_v1_host_read_generated_proto_init() {
 		(*HostReadResponse_DescribeMachine)(nil),
 		(*HostReadResponse_ListCompute)(nil),
 		(*HostReadResponse_PreflightRun)(nil),
+		(*HostReadResponse_InspectCandidate)(nil),
+		(*HostReadResponse_CompletePaths)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{

@@ -9,19 +9,23 @@ import (
 func DispatchHostRead(request *apiv1.HostReadRequest) (HostCall, bool) {
 	switch {
 	case request.GetListTasks() != nil:
-		return HostCall{CLI: "list-tasks", Deadline: 10000 * time.Millisecond}, true
+		return HostCall{CLI: "list-tasks", Deadline: 10000 * time.Millisecond, Executor: 1}, true
 	case request.GetListHarnesses() != nil:
-		return HostCall{CLI: "list-harnesses", Deadline: 10000 * time.Millisecond}, true
+		return HostCall{CLI: "list-harnesses", Deadline: 10000 * time.Millisecond, Executor: 1}, true
 	case request.GetListExamples() != nil:
-		return HostCall{CLI: "list-examples", Deadline: 10000 * time.Millisecond}, true
+		return HostCall{CLI: "list-examples", Deadline: 10000 * time.Millisecond, Executor: 1}, true
 	case request.GetGetTaskGoal() != nil:
-		return HostCall{CLI: "get-task-goal", Deadline: 10000 * time.Millisecond}, true
+		return HostCall{CLI: "get-task-goal", Deadline: 10000 * time.Millisecond, Executor: 1}, true
 	case request.GetDescribeMachine() != nil:
-		return HostCall{CLI: "describe-machine", Deadline: 25000 * time.Millisecond}, true
+		return HostCall{CLI: "describe-machine", Deadline: 25000 * time.Millisecond, Executor: 1}, true
 	case request.GetListCompute() != nil:
-		return HostCall{CLI: "list-compute", Deadline: 10000 * time.Millisecond}, true
+		return HostCall{CLI: "list-compute", Deadline: 10000 * time.Millisecond, Executor: 1}, true
 	case request.GetPreflightRun() != nil:
-		return HostCall{CLI: "preflight-run", Deadline: 65000 * time.Millisecond}, true
+		return HostCall{CLI: "preflight-run", Deadline: 65000 * time.Millisecond, Executor: 1}, true
+	case request.GetInspectCandidate() != nil:
+		return HostCall{CLI: "inspect-candidate", Deadline: 10000 * time.Millisecond, Executor: 2}, true
+	case request.GetCompletePaths() != nil:
+		return HostCall{CLI: "complete-paths", Deadline: 5000 * time.Millisecond, Executor: 3}, true
 	default:
 		return HostCall{}, false
 	}
@@ -50,6 +54,12 @@ func HostReadResponseValid(request *apiv1.HostReadRequest, response *apiv1.HostR
 	case request.GetPreflightRun() != nil:
 		got := response.GetPreflightRun()
 		return got != nil && got.GetRequestId() == request.GetPreflightRun().GetRequestId()
+	case request.GetInspectCandidate() != nil:
+		got := response.GetInspectCandidate()
+		return got != nil && got.GetRequestId() == request.GetInspectCandidate().GetRequestId() && got.GetSelectionRevision() == request.GetInspectCandidate().GetSelectionRevision()
+	case request.GetCompletePaths() != nil:
+		got := response.GetCompletePaths()
+		return got != nil && got.GetRequestId() == request.GetCompletePaths().GetRequestId()
 	default:
 		return false
 	}
