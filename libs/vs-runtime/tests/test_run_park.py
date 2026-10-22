@@ -99,6 +99,13 @@ class _Operator(ProbedRunClock):
         await super().sleep(seconds)
 
 
+async def _assert_parked_writer_recovery(host: CoreRunHost, config: RunLoopConfig) -> None:
+    start_core(host, config)
+    outcome = await drive_core(host, config)
+    assert outcome.status == RunStatus.PARKED
+    host.shell.release_lease(now_at=host.clock.now())
+
+
 async def test_pause_drain_cancels_the_queued_job_exits_and_relaunch_reruns_it(
     tmp_path: Path,
 ) -> None:
@@ -133,8 +140,16 @@ async def test_pause_drain_cancels_the_queued_job_exits_and_relaunch_reruns_it(
         process.shell.release_lease(now_at=clock.now())
 
         world.cluster.states = (SlurmJobStatus.COMPLETED,)
+        recovered = world.runtime()
+        await _assert_parked_writer_recovery(
+            CoreRunHost(recovered.shell, recovered.delivery, clock), config
+        )
+        assert len(world.cluster.submissions) == before
+
         resumed = world.runtime()
-        host = CoreRunHost(resumed.shell, resumed.delivery, clock)
+        resumed_channel = RuntimeRunControlChannel(FakeRunControlEventSink(), threads)
+        controls = RunControlBridge(resumed_channel, Steers(), lifts_standing_stop=True)
+        host = CoreRunHost(resumed.shell, resumed.delivery, clock, controls)
         start_core(host, config)
         finished = await drive_core(host, config)
         assert finished.status == RunStatus.TERMINAL

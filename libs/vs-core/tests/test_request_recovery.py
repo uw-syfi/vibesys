@@ -397,6 +397,8 @@ def test_recovery_inspects_unfinished_authority_without_replaying_payload(
     assert reload(result.state) == result.state
 
 
+@pytest.mark.regression
+@example(events=[(1, 0), (2, 0)])
 @example(events=[(0, 0), (1, 0)])
 @given(st.lists(st.tuples(st.integers(0, 5), st.integers(0, 99)), min_size=1, max_size=30))
 def test_startup_sequences_preserve_ownership_and_deduplicate_inspection(
@@ -421,11 +423,7 @@ def test_startup_sequences_preserve_ownership_and_deduplicate_inspection(
         kept = unaddressed(result.state.records.records[0])
         assert kept.model_copy(update={"until": original.until}) == original
         assert kept.until.at >= original.until.at
-        assert result.state.run.status == (
-            RunStatus.RUNNING
-            if sum(host.epoch > 0 for host in result.state.records.hosts) > 1
-            else RunStatus.PAUSED
-        )
+        assert result.state.run.status == RunStatus.PAUSED
         assert result.events == ()
         for request in result.requests:
             assert isinstance(request, InspectRequest)
@@ -723,11 +721,7 @@ def test_recovery_deadline_sequences_bound_requests_without_terminal_receipts(
         moved = original.model_copy(update={"until": kept.until})
         assert kept == (timed_out(moved) if ended else moved)
         assert result.state.records.recovery.phase != RecoveryPhase.READY
-        assert result.state.run.status == (
-            RunStatus.RUNNING
-            if sum(host.epoch > 0 for host in result.state.records.hosts) > 1
-            else RunStatus.PAUSED
-        )
+        assert result.state.run.status == RunStatus.PAUSED
         assert not non_diagnostic(result)
         assert result.state.run.receipts == state.run.receipts
         assert result.state.scheduling == state.scheduling
@@ -2043,11 +2037,7 @@ def test_scope_reopen_unknown_outcome_preserves_fences_without_resume(admission:
         assert result.state.records.records[0].outcome == outcome
         assert all(isinstance(request, InspectRequest) for request in result.requests)
         assert result.events == ()
-        assert result.state.run.status == (
-            RunStatus.RUNNING
-            if sum(host.epoch > 0 for host in result.state.records.hosts) > 1
-            else RunStatus.PAUSED
-        )
+        assert result.state.run.status == RunStatus.PAUSED
         state = reload(result.state)
 
 

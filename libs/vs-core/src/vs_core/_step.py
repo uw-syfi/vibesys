@@ -112,6 +112,7 @@ from .types.kernel import (
     DecisionCompleted,
     DecisionReceipt,
     DecisionSubmitted,
+    EpochResumed,
     EvaluationContext,
     ProposalSubmitted,
     RecordsContext,
@@ -1818,23 +1819,41 @@ def _advance_run_time(state: CoreState, now_at: float) -> CoreState:
     return state.model_copy(update={"run": state.run.model_copy(update={"now_at": now_at})})
 
 
-def _start_epoch(state: CoreState, event: RecoveryStarted, dispatch: Dispatch) -> Transition:
-    """Reconcile retained work in a freshly constructed epoch, never a copied closure."""
+def _recover_writer(state: CoreState, event: RecoveryStarted, dispatch: Dispatch) -> Transition:
+    """Reconcile a replacement writer without reopening the run or its flow journal."""
+    park = state.run.park
+    if park is not None and event.epoch > state.records.recovery.epoch:
+        state = state.model_copy(
+            update={
+                "run": state.run.model_copy(
+                    update={"park": park.model_copy(update={"epoch": event.epoch})}
+                )
+            }
+        )
+    opened = records.open_host_epoch(state.records, state.run, event)
+    credit = downtime(opened.hosts) if opened.hosts != state.records.hosts else 0.0
+    waits = evaluation.credit_downtime(state.evaluation, state.run, credit)
+    state = state.model_copy(update={"records": opened, "evaluation": waits})
+    state = _advance_event_time(state, event)
+    return propagate(state, (event,), dispatch, _event_cause(state, event))
+
+
+def _resume_epoch(state: CoreState, event: EpochResumed, dispatch: Dispatch) -> Transition:
+    """Construct fresh run authority only for an explicit operator Resume."""
     previous_epoch = state.records.recovery.epoch
     restart_search = (
         state.run.park is not None or state.run.result is not None or stop_standing(state.run)
     )
-    # Before the clock moves, while ``run.now_at`` is still the dead host's last commit.
-    opened = records.open_host_epoch(state.records, state.run, event)
-    # The downtime the new epoch proves moves open waits' limits as it moves open
-    # records' limits, so the two agree.
-    credit = downtime(opened.hosts) if opened.hosts != state.records.hosts else 0.0
-    waits = evaluation.credit_downtime(state.evaluation, state.run, credit)
     successor = previous_epoch > 0 and event.epoch > previous_epoch
+    control = ControlInput(
+        control_id=ControlId(root=f"epoch:{event.epoch}"), action="resume", when="now"
+    )
     if successor:
         state = state.model_copy(
             update={
-                "run": EpochFacts.of(state.run).new_run(),
+                "run": EpochFacts.of(state.run)
+                .new_run()
+                .model_copy(update={"controls": (control,)}),
                 "scheduling": type(state.scheduling)(
                     queue=state.scheduling.queue,
                     slots=state.scheduling.slots,
@@ -1843,20 +1862,16 @@ def _start_epoch(state: CoreState, event: RecoveryStarted, dispatch: Dispatch) -
                 "settlement": reopen_adoption(state.settlement),
             }
         )
-    state = state.model_copy(update={"records": opened, "evaluation": waits})
-    state = _advance_event_time(state, event)
-    result = propagate(state, (event,), dispatch, _event_cause(state, event))
-    if successor and previous_epoch > 0 and restart_search:
+    result = _recover_writer(
+        state, RecoveryStarted(epoch=event.epoch, now_at=event.now_at), dispatch
+    )
+    if successor and restart_search:
         result = result.model_copy(
             update={
                 "events": (
                     *result.events,
                     StopLiftRecorded(
-                        control=ControlInput(
-                            control_id=ControlId(root=f"epoch:{event.epoch}"),
-                            action="resume",
-                            when="now",
-                        ),
+                        control=control,
                         new_epoch=True,
                     ),
                 )
@@ -1889,6 +1904,7 @@ def consume(
         and not isinstance(
             event,
             RecoveryStarted
+            | EpochResumed
             | RunControlEvent
             | DispatchAuthorized
             | DecisionSubmitted
@@ -1909,7 +1925,9 @@ def consume(
     elif isinstance(event, RunControlEvent):
         result = _control(state, event, dispatch)
     elif isinstance(event, RecoveryStarted):
-        result = _start_epoch(state, event, dispatch)
+        result = _recover_writer(state, event, dispatch)
+    elif isinstance(event, EpochResumed):
+        result = _resume_epoch(state, event, dispatch)
     else:
         state = _advance_event_time(state, event)
         result = propagate(state, (event,), dispatch, _event_cause(state, event))

@@ -528,6 +528,7 @@ if TYPE_CHECKING:
         DecisionCompleted,
         DecisionReceipt,
         DecisionSubmitted,
+        EpochResumed,
         EvaluationContext,
         ProposalSubmitted,
         RecordsContext,
@@ -993,7 +994,7 @@ _MODULES: dict[str, str] = {
             "vs_core.types.kernel",
             (
                 "AreaChange AreaContext AttemptsContext ControlChanged CoreEvent CoreState CoreView "
-                "DecisionCompleted DecisionReceipt DecisionSubmitted EvaluationContext "
+                "DecisionCompleted DecisionReceipt DecisionSubmitted EpochResumed EvaluationContext "
                 "ProposalSubmitted RecordsContext RunControlEvent RunEnded RunEnvelope RunState "
                 "RunSummary SchedulingContext SessionsContext SettlementContext Signal "
                 "StopLiftRecorded StrategyEvent Transition "
@@ -1322,6 +1323,7 @@ __all__ = [
     "EndReason",
     "EnsureSession",
     "EnsureWorkspace",
+    "EpochResumed",
     "EvaluationChange",
     "EvaluationContext",
     "EvaluationEvent",

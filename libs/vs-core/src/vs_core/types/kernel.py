@@ -234,6 +234,18 @@ class RunControlEvent(Value):
         return self
 
 
+class EpochResumed(Value):
+    """An operator opens fresh run authority, then reconciles retained work.
+
+    Writer recovery uses ``RecoveryStarted`` and preserves the run's closure and
+    journal. Only this input authorizes constructing a successor run.
+    """
+
+    kind: Literal["epoch_resumed"] = "epoch_resumed"
+    epoch: Count
+    now_at: Seconds
+
+
 class ControlChanged(Value):
     """Control changed lifecycle contract."""
 
@@ -275,7 +287,8 @@ type CoreEvent = Annotated[
     | EvaluationEvent
     | SettlementEvent
     | RecordsEvent
-    | RunControlEvent,
+    | RunControlEvent
+    | EpochResumed,
     Field(discriminator="kind"),
 ]
 type StrategyEvent = Annotated[

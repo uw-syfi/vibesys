@@ -227,7 +227,7 @@ def test_successor_resume_clears_an_interrupted_drain(epoch: int, *, immediate: 
         core.step(paused, resume)
     opening = core.step(
         paused,
-        core.RecoveryStarted(
+        core.EpochResumed(
             epoch=epoch + 1,
             now_at=paused.run.now_at,
         ),

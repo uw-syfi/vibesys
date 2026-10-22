@@ -140,21 +140,8 @@ def _close_after(
             state, core.ReconciliationDeadline(request_id=record.request_id, now_at=late)
         )
         state = _settle(result.state, result.requests, late)
-    if not stop_first or restart:
-        # The successor asks for its own close; the previous epoch's close is history.
-        close = (
-            _STOP.model_copy(
-                update={
-                    "now_at": late,
-                    "control": _STOP.control.model_copy(
-                        update={"control_id": core.ControlId(root="successor-close")}
-                    ),
-                }
-            )
-            if restart
-            else _STOP
-        )
-        result = core.step(state, close)
+    if not stop_first:
+        result = core.step(state, _STOP)
         state = _settle(result.state, result.requests, late)
     for tick in (late + 1.0, late + 100.0):
         result = core.step(state, core.ClockAdvanced(now_at=tick))
@@ -306,7 +293,7 @@ def test_a_job_whose_poll_blocked_while_the_host_was_down_is_polled_again(down_f
 
 @settings(max_examples=examples(pr=4, nightly=100))
 @given(case=_CASES)
-def test_successor_reopens_admission_without_replaying_a_closed_blocked_request(
+def test_a_closed_blocked_request_survives_writer_recovery_and_operator_resume(
     case: _Case,
 ) -> None:
     """A new epoch opens admission; the old record's forced outcome remains history."""
@@ -316,7 +303,12 @@ def test_successor_reopens_admission_without_replaying_a_closed_blocked_request(
     )
     if closed.run.status != core.RunStatus.TERMINAL:
         return
-    restarted = core.step(closed, core.RecoveryStarted(epoch=3, now_at=BOUND + case.late_by + 200))
+    recovered = core.step(closed, core.RecoveryStarted(epoch=3, now_at=BOUND + case.late_by + 200))
+    assert recovered.requests == ()
+    assert recovered.state.run.status == core.RunStatus.TERMINAL
+    restarted = core.step(
+        recovered.state, core.EpochResumed(epoch=4, now_at=BOUND + case.late_by + 201)
+    )
     assert all(isinstance(request, core.InspectRequest) for request in restarted.requests)
     assert restarted.state.run.status == core.RunStatus.RUNNING
     assert restarted.state.run.park is None
