@@ -9,8 +9,8 @@ from hypothesis import example, given
 from hypothesis import strategies as st
 from protobuf.wkt.google.protobuf.timestamp_pb import Timestamp
 
-from vs_core.api.replay import ReplayCall, ReplayFlow, SemanticKey
-from vs_project.api import CommitFault, FakeStateStore, StoredEnvelope, StoreFence
+from vs_core.api.replay import ReplayArchive, ReplayCall, ReplayFlow, SemanticKey
+from vs_project.api import CommitFault, Committed, FakeStateStore, StoredEnvelope, StoreFence
 from vs_proto.api import EpochStarted, ReplayStore, Span, core_common, replay
 from vs_runtime.api.replay import (
     REPLAY_STORE_SCHEMA_VERSION,
@@ -220,6 +220,51 @@ async def test_durable_observation_retires_an_unused_dispatch_authorization() ->
     assert executor.invocations == ()
     shell.accept(span.id, now=0, at=AT)
     shell.close(now=0)
+
+
+@given(count=st.integers(min_value=1, max_value=4))
+def test_completed_prototype_records_without_typed_requests_replay_without_dispatch(
+    count: int,
+) -> None:
+    original = FakeStateStore()
+    shell = start(original, program(count=count))
+    for number in range(count):
+        finish(shell, str(number))
+    shell.close(now=0)
+    stored = original.load()
+    assert isinstance(stored, StoredEnvelope)
+    prototype = ReplayStore.from_binary(stored.payload)
+    for record in prototype.records:
+        if (
+            record.body is not None
+            and record.body.field == "span"
+            and record.body.value.span is not None
+            and record.body.value.span.replay is not None
+        ):
+            policy = record.body.value.span.replay.policy
+            assert policy is not None
+            policy.clear_field("request")
+    store = FakeStateStore()
+    fence = store.acquire("seed-host", now=0, duration=1)
+    assert fence is not None
+    assert isinstance(
+        store.commit(
+            None,
+            StoredEnvelope(
+                revision=0, schema_version=stored.schema_version, payload=prototype.to_binary()
+            ),
+            fence,
+            now=0,
+        ),
+        Committed,
+    )
+    assert store.release(fence, now=0)
+    replayed = start(store, program(count=count, wording=b"new"), request_id="new")
+    assert replayed.result == tuple(str(number) for number in range(count))
+    assert replayed.prepare(now=0, at=AT) == ()
+    assert replayed.frontier.drift.count == count
+    assert replayed.archive.history == ReplayArchive.decode(prototype.to_binary()).history
+    replayed.close(now=0)
 
 
 def test_timer_only_progress_is_durable_and_replays_its_allowance() -> None:
