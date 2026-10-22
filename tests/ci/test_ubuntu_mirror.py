@@ -62,10 +62,12 @@ def test_only_cuda_feature_builds_use_the_runner_mirror() -> None:
     assert '--build-arg "UBUNTU_MIRROR=${mirror}"' in prepare["run"]
     assert '--build-arg "BASE_IMAGE=${BASE_IMAGE}"' in prepare["run"]
     assert "--tag vibesys-feature-base:ci" in prepare["run"]
+    assert "steps.image-bases.outputs.base" in prepare["env"]["BASE_IMAGE"]
     test = next(step for step in steps if "test_features.sh" in step.get("run", ""))
     assert steps.index(prepare) < steps.index(test)
     assert test["env"]["FEATURE_BASE"] == (
-        "${{ matrix.family == 'cuda-ubuntu' && 'vibesys-feature-base:ci' || matrix.base }}"
+        "${{ matrix.family == 'cuda-ubuntu' && 'vibesys-feature-base:ci' || "
+        "format('{0}@{1}', matrix.base, steps.image-bases.outputs.base) }}"
     )
     assert 'test_features.sh "$FEATURE_BASE"' in test["run"]
     cache = next(step for step in steps if step.get("id") == "docker-cache")

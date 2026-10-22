@@ -354,3 +354,13 @@ def test_a_full_log_disk_never_fails_the_image_build(tmp_path: Path) -> None:
     assert build.owner == StartupStep(stage=EnvironmentStartupStage.BUILDING_IMAGE)
     assert b"exporting to image" not in _read_all(reader, build)
     assert warnings
+
+
+def test_public_environment_cache_configuration_reaches_the_image_builder(tmp_path: Path) -> None:
+    runner = FakeDockerBuildRunner()
+    environment, request = _environment(tmp_path, runner, [])
+    sources = ("cache:first", "cache:second")
+    configured = DockerEnvironment(replace(environment.config, image_cache_from=sources))
+    open_run_environment(configured, request).close()
+    (build,) = [argv for argv, _, _ in runner.calls if argv[1] == "build"]
+    assert tuple(build[i + 1] for i, arg in enumerate(build) if arg == "--cache-from") == sources

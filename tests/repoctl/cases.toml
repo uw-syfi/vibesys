@@ -342,3 +342,12 @@ jobs = ["proto", "python"]
 native_languages = []
 native_targets = []
 pnpm_packages = []
+
+[[cases]]
+name = "shared image cache changes exercise every builder consumer"
+paths = ["scripts/ci_image_cache.py", "scripts/ci_registry_image_cache.sh", ".github/actions/docker-image-cache/action.yml"]
+jobs = ["agent_image", "python", "real_tiers"]
+[cases.collections]
+native_languages = []
+native_targets = []
+pnpm_packages = []
