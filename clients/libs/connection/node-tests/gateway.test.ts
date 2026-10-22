@@ -7,6 +7,7 @@ import {
   HOST_API_MAX_MESSAGE_BYTES,
   HostCallRequestSchema,
   HostService,
+  hostCallBudgets,
   TailRequestSchema,
   TailResponseSchema,
   validatedFromBinary,
@@ -319,41 +320,69 @@ for (const fault of ['malformed protobuf', 'schema violation', 'consumer failure
   });
 }
 
-for (const [method, deadline] of [
-  ['postIntent', 15_000],
-  ['relaunch', 35_000],
-] as const) {
-  test(`host ${method} leaves room for its inner admission deadline`, async () => {
+function hostCallRequest(method: string): Uint8Array {
+  const project = {projectRoot: '/project', runId: 'run-a'};
+  if (method === 'postIntent') {
+    return toBinary(
+      HostCallRequestSchema,
+      create(HostCallRequestSchema, {
+        checkout: '/checkout',
+        method: {
+          case: 'postIntent',
+          value: {
+            ...project,
+            requestId: 'id-a',
+            expectedEpoch: 1n,
+            intent: {case: 'pause', value: {}},
+          },
+        },
+      }),
+    );
+  }
+  if (method === 'relaunch') {
+    return toBinary(
+      HostCallRequestSchema,
+      create(HostCallRequestSchema, {
+        checkout: '/checkout',
+        method: {case: 'relaunch', value: {...project, expectedEpoch: 1n}},
+      }),
+    );
+  }
+  if (method === 'chatMessage') {
+    return toBinary(
+      HostCallRequestSchema,
+      create(HostCallRequestSchema, {
+        checkout: '/checkout',
+        method: {
+          case: 'chatMessage',
+          value: {...project, sessionId: 'default', requestId: 'q-1', text: 'Why?'},
+        },
+      }),
+    );
+  }
+  throw new Error(`no host-call payload for ${method}`);
+}
+
+for (const [method, budget] of Object.entries(hostCallBudgets)) {
+  test(`host ${method} waits for the registry budget above the runner cap`, {
+    timeout: 15000,
+  }, async () => {
+    expect(budget.totalMs).toBeGreaterThan(budget.capMs);
+    expect(budget.totalMs).toBe(budget.capMs + budget.graceMs);
     const fake = new FakeGateway();
     const clock = new FakeClock();
     const connection = new GatewayConnection(fake, clock.schedule);
-    const request = create(HostCallRequestSchema, {
-      checkout: '/checkout',
-      method:
-        method === 'relaunch'
-          ? {case: 'relaunch', value: {projectRoot: '/project', runId: 'run-a', expectedEpoch: 1n}}
-          : {
-              case: 'postIntent',
-              value: {
-                projectRoot: '/project',
-                runId: 'run-a',
-                requestId: 'id-a',
-                expectedEpoch: 1n,
-                intent: {case: 'pause', value: {}},
-              },
-            },
-    });
     const pending = connection
       .unary(
         `/${HostService.typeName}/${HostService.method.hostCall.name}`,
-        toBinary(HostCallRequestSchema, request),
+        hostCallRequest(method),
         new AbortController().signal,
       )
       .catch(error => String(error));
     try {
       await fake.nextHostCall();
-      await clock.waitUntilScheduled(deadline);
-      clock.advanceBy(deadline);
+      await clock.waitUntilScheduled(budget.totalMs);
+      clock.advanceBy(budget.totalMs);
       expect(await pending).toContain('deadline');
     } finally {
       connection.close();

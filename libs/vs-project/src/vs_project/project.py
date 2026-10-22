@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from importlib import import_module
 from pathlib import Path
 from typing import TYPE_CHECKING, Self
 
@@ -22,6 +23,7 @@ from vs_sim.api import ProcessTimeoutError
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
+    from vs_project._admission import FileAdmissionStore
     from vs_project._git_process import Git
     from vs_project._state_io import StoreDurabilityEffects
     from vs_project.api.state_store import (
@@ -123,6 +125,14 @@ class Project:
         ):
             return None
         return self.state_store(run_id).load()
+
+    @staticmethod
+    def admissions(*, home: Path | None = None) -> FileAdmissionStore:
+        """Open this host user's retained admissions, independent of any project root."""
+        user_home = home or Path.home()
+        return import_module("vs_project._admission").FileAdmissionStore(
+            user_home / ".vibesys" / "admissions" / "v1", durable_root=user_home
+        )
 
     def is_initialized(self) -> bool:
         """Return whether this project has repository-native task configuration."""

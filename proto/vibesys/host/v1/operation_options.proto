@@ -1,0 +1,94 @@
+syntax = "proto3";
+package vibesys.host.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/descriptor.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/gateway/gen/vibesys/host/v1;hostv1";
+
+// All executable operation policy lives on the method descriptor.
+message OperationPolicy {
+  // Temporary adapter spelling, removed with the helper transport.
+  string adapter_method = 12 [(buf.validate.field).string.pattern = "^[a-z][a-z_.]*$"];
+  uint32 operation_id = 1 [(buf.validate.field).uint32.gt = 0];
+  uint32 cap_ms = 2 [(buf.validate.field).uint32 = {
+    gt: 0
+    lte: 600000
+  }];
+  uint32 grace_ms = 3 [(buf.validate.field).uint32 = {
+    gt: 0
+    lte: 30000
+  }];
+  OperationEffect effect = 4 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  Retry retry = 5 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  Cardinality cardinality = 6 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  Executor executor = 7 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  optional uint32 first_event_ms = 8 [(buf.validate.field).uint32.gt = 0];
+  repeated Correlation correlation = 9;
+  uint32 request_tag = 10 [(buf.validate.field).uint32 = {
+    gt: 0
+    lte: 536870911
+  }];
+  uint32 response_tag = 11 [(buf.validate.field).uint32 = {
+    gt: 0
+    not_in: [2]
+    lte: 536870911
+  }];
+}
+message Correlation {
+  repeated uint32 request_path = 1 [(buf.validate.field).repeated = {
+    min_items: 1
+    items: {
+      uint32: {gt: 0}
+    }
+  }];
+  repeated uint32 response_path = 2 [(buf.validate.field).repeated = {
+    min_items: 1
+    items: {
+      uint32: {gt: 0}
+    }
+  }];
+}
+enum OperationEffect {
+  OPERATION_EFFECT_UNSPECIFIED = 0;
+  OPERATION_EFFECT_READ = 1;
+  OPERATION_EFFECT_IDEMPOTENT_MUTATION = 2;
+  OPERATION_EFFECT_ADMISSION = 3;
+}
+enum Retry {
+  RETRY_UNSPECIFIED = 0;
+  RETRY_NONE = 1;
+  RETRY_BOUNDED_READ = 2;
+  RETRY_RECONCILE_SAME_ID = 3;
+}
+enum Cardinality {
+  CARDINALITY_UNSPECIFIED = 0;
+  CARDINALITY_UNARY = 1;
+  CARDINALITY_SERVER_STREAM = 2;
+}
+enum Executor {
+  EXECUTOR_UNSPECIFIED = 0;
+  EXECUTOR_CHECKOUT = 1;
+  EXECUTOR_CANDIDATE_INSPECTION = 2;
+  EXECUTOR_FILESYSTEM = 3;
+}
+extend google.protobuf.MethodOptions {
+  OperationPolicy operation = 51001;
+}
+
+// Exact legacy display spellings used only by temporary adapter projections.
+extend google.protobuf.EnumValueOptions {
+  string adapter_spelling = 51002;
+}

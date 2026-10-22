@@ -18,7 +18,7 @@ else
   echo "No store schema at $base; establishing the initial additive baseline."
 fi
 ./scripts/generate_proto.sh
-generated=(libs/vs-runtime/tests/generated libs/vs-core/tests/generated libs/vs-proto/src/vs_proto/_generated clients/libs/proto/src/generated gateway/gen
+generated=(proto/vibesys/host/v1/admission_receipt_generated.proto gateway/internal/hostoperations/registry_generated.go src/server/host_operation_types_generated.py libs/vs-runtime/tests/generated libs/vs-core/tests/generated libs/vs-proto/src/vs_proto/_generated clients/libs/proto/src/generated gateway/gen
   libs/vs-core/src/vs_core/_generated libs/vs-runtime/src/vs_runtime/_core_values
   scripts/corevalue/tests/generated_pb scripts/corevalue/tests/generated_values scripts/corevalue/tests/generated_boundary)
 git diff --exit-code -- "${generated[@]}"
@@ -26,7 +26,7 @@ if [[ -n "$(git ls-files --others --exclude-standard -- "${generated[@]}")" ]]; 
   echo 'Untracked generated bindings; run scripts/generate_proto.sh and commit all outputs.' >&2
   exit 1
 fi
-uv run --locked pytest libs/vs-proto/tests libs/vs-runlog/tests scripts/corevalue/tests --no-cov -q
+uv run --locked pytest libs/vs-proto/tests libs/vs-runlog/tests scripts/corevalue/tests scripts/host_operations/tests --no-cov -q
 pnpm --dir clients --filter @vibesys/proto check
 (cd gateway && go build ./gen/... && go vet ./gen/...)
 ./scripts/check_schema_hashes.sh

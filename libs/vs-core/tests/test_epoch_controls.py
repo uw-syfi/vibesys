@@ -270,3 +270,39 @@ def test_writer_recovery_keeps_the_completed_epoch_and_never_lifts_its_stop(
     assert resumed.state.run.result is None
     assert [control.action for control in resumed.state.run.controls] == ["resume"]
     assert core.requested_stop_mode(resumed.state.run) is None
+
+
+def test_a_parked_epoch_records_the_delivery_of_a_steer_it_already_holds() -> None:
+    """A steer admitted while parked keeps the input the next turn will read.
+
+    The control and its delivery are separate events, so a poll can commit the
+    control after the epoch has parked and the delivery on the next step. The
+    epoch still ignores an input that delivers no steer it holds.
+    """
+    paused = core.step(
+        core.initial_state(),
+        core.RunControlEvent(control=control("pause", 1), now_at=1),
+    ).state
+    assert paused.run.status is core.RunStatus.PARKED
+    artifact = core.ArtifactRef(artifact_id=core.ArtifactId(root="steer-text"), digest="abc")
+    steer = core.ControlInput(
+        control_id=core.ControlId(root="op-s1"), action="steer", artifact=artifact
+    )
+    held = core.step(paused, core.RunControlEvent(control=steer, now_at=2)).state
+    assert held.sessions.inputs == ()
+    run = core.Scope(owner=held.run.run_id, generation=held.run.generation)
+    delivery = core.SessionInput(
+        input_id=core.InputId(root="steer-op-s1"),
+        target=core.ScopeInputTarget(scope=run),
+        artifact=artifact,
+        received_at=2,
+        sequence=2,
+    )
+    restored = core.step(held, core.SessionInputReceived(input=delivery)).state
+    assert [row.input for row in restored.sessions.inputs] == [delivery]
+    other = delivery.model_copy(
+        update={"input_id": core.InputId(root="input-other"), "sequence": 3}
+    )
+    ignored = core.step(restored, core.SessionInputReceived(input=other))
+    assert ignored.state.sessions.inputs == restored.sessions.inputs
+    assert ignored.state.revision == restored.revision

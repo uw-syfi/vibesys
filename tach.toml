@@ -234,7 +234,7 @@ depends_on = ["vs_decode.api", "server.host_api", "server.host_helper_requests",
 [[modules]]
 # The host helper's request answering: one request through the host's interfaces.
 path = "server.host_helper_requests"
-depends_on = ["vs_decode.api", "server.host_agent_logins", "server.host_api", "server.host_compute", "server.host_examples", "server.host_helper_compute", "server.host_helper_logs", "server.host_helper_preflight", "server.host_machine_facts", "server.host_preflight", "server.host_run_dashboard", "server.host_run_events", "server.host_run_reader", "server.host_run_summary", "server.host_helper_readers", "server.registry", "server.relay", "server.run_digest", "server.run_summary", "server.usage_window", "vs_project", "vs_sim.api"]
+depends_on = ["server.host_operation_types_generated", "vibesys.api.host_operations", "vs_proto", "vs_decode.api", "server.host_agent_logins", "server.host_api", "server.host_compute", "server.host_examples", "server.host_helper_compute", "server.host_helper_logs", "server.host_helper_preflight", "server.host_machine_facts", "server.host_preflight", "server.host_run_dashboard", "server.host_run_events", "server.host_run_reader", "server.host_run_summary", "server.host_helper_readers", "server.registry", "server.relay", "server.run_digest", "server.run_summary", "server.usage_window", "vs_project", "vs_sim.api"]
 
 [[modules]]
 # The read-only servers Chat reads ended runs through: found by run, started on demand.
@@ -606,7 +606,7 @@ depends_on = ["vs_decode.api", "vs_sandbox", "vs_project", "vs_prompts", "vs_mcp
 [[modules]]
 path = "vs_project"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_decode.api", "vs_sim.api"]
+depends_on = ["vs_decode.api", "vs_sim.api", "vs_proto"]
 
 [[modules]]
 path = "vs_issue_tracker"
@@ -2050,3 +2050,27 @@ depends_on = ["vs_core._corevalue"]
 [[interfaces]]
 from = ["vs_core._generated.vibesys.core.v1.vocabulary_cv"]
 expose = ["[A-Z].*"]
+
+[[modules]]
+path = "vibesys.api.host_operations"
+depends_on = ["vs_proto", "vibesys.api.host_operations._handlers", "vibesys.api.host_operations._reads"]
+
+[[interfaces]]
+from = ["vibesys.api.host_operations"]
+expose = ["api", "api\\..*"]
+
+[[modules]]
+path = "vibesys.api.host_operations._handlers"
+depends_on = ["vs_proto", "vibesys.api.host_operations._reads"]
+
+[[modules]]
+path = "vibesys.api.host_operations._reads"
+depends_on = ["vs_proto"]
+
+[[modules]]
+path = "server.host_operation_types_generated"
+depends_on = ["server.host_api", "vs_proto"]
+
+[[interfaces]]
+from = ["server.host_operation_types_generated"]
+expose = ["is_registry_read", "RegistryReadRequest", "UnmigratedHelperRequest"]

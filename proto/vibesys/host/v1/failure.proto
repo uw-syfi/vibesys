@@ -1,0 +1,33 @@
+syntax = "proto3";
+package vibesys.host.v1;
+
+import "buf/validate/validate.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/gateway/gen/vibesys/host/v1;hostv1";
+
+// Diagnostics are display text; callers branch only on category.
+message OperationFailure {
+  FailureCategory category = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  string message = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 65536
+  }];
+}
+enum FailureCategory {
+  FAILURE_CATEGORY_UNSPECIFIED = 0;
+  FAILURE_CATEGORY_INVALID_INPUT = 1;
+  FAILURE_CATEGORY_CONFIGURATION = 2;
+  FAILURE_CATEGORY_CONFLICT = 3;
+  FAILURE_CATEGORY_NOT_FOUND = 4;
+  FAILURE_CATEGORY_PERMISSION_DENIED = 5;
+  FAILURE_CATEGORY_UNSUPPORTED = 6;
+  FAILURE_CATEGORY_RESOURCE_EXHAUSTED = 7;
+  FAILURE_CATEGORY_TRANSIENT = 8;
+  FAILURE_CATEGORY_CANCELLED = 9;
+  FAILURE_CATEGORY_DEADLINE_EXCEEDED = 10;
+  FAILURE_CATEGORY_ADMISSION_UNCONFIRMED = 11;
+  FAILURE_CATEGORY_INTERNAL = 12;
+}

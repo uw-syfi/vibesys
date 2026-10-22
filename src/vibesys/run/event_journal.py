@@ -7,7 +7,17 @@ import logging
 from typing import TYPE_CHECKING
 
 import vs_proto.api as p
-from vibesys.events import CoreEvent, CoreEventData, CoreEventType, IntentStateData, make_core_event
+from vibesys.events import (
+    CoreEvent,
+    CoreEventData,
+    CoreEventType,
+    EventStatus,
+    IntentStateData,
+    RunFailedData,
+    RunFailure,
+    RunFailureKind,
+    make_core_event,
+)
 from vibesys.run.runlog_tee import RunLogTee
 from vs_runlog.api import FileRunContent, FileRunLogWriter
 from vs_runtime.api.infrastructure import (
@@ -19,6 +29,8 @@ from vs_runtime.api.infrastructure import (
 from vs_sim.api import SleepingClock, Threads, utc_datetime
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from vs_project.api import Project
     from vs_runtime.api.infrastructure import ControlRequest
 
@@ -86,6 +98,43 @@ class EventJournal(DurableEventJournal[CoreEvent]):
         except Exception:
             self.close()
             logging.getLogger(__name__).exception("Run log tee disabled during initialization")
+
+    def attach(self, directory: Path, stream_id: str) -> None:
+        """Attach the JSONL journal, then publish this writer's epoch if it is live.
+
+        The epoch record is the first fact written after the writer lock, before
+        the caller opens the run environment. A buffered event flushed by
+        attachment may already have opened it.
+        """
+        super().attach(directory, stream_id)
+        if self._runlog is not None:
+            self._runlog.publish_successor(utc_datetime(self._clock))
+
+    def fail_open_epoch(self, reason: str) -> None:
+        """End this process's open epoch the way a running epoch fails.
+
+        Startup that fails after the epoch was published must leave a typed
+        failure. A crash that never reaches this call stays an interrupted
+        epoch for the next writer.
+        """
+        if self._runlog is None or not self._runlog.has_open_epoch():
+            return
+        if not reason:
+            reason = "environment startup failed"
+        self.emit(
+            CoreEventType.RUN_FAILED,
+            reason,
+            status=EventStatus.FAILED,
+            data=RunFailedData(
+                failure=RunFailure(
+                    kind=RunFailureKind.RUN_ENVIRONMENT_UNAVAILABLE,
+                    reason=reason,
+                    workstreams_started=0,
+                    workstream_budget=0,
+                    candidates_kept=0,
+                )
+            ),
+        )
 
     def close(self) -> None:
         """Release the additive transport's append handle on run teardown."""

@@ -9,6 +9,7 @@ import {
   HelloResponseSchema,
   HostCallRequestSchema,
   HostService,
+  hostCallBudgets,
   TailRequestSchema,
   TailResponseSchema,
   validatedFromBinary,
@@ -194,12 +195,16 @@ export class GatewayConnection {
   }
 }
 
+const HOST_CALL_METHOD = `/${HostService.typeName}/${HostService.method.hostCall.name}`;
+
+/** Unary RPCs that are not host calls. Host-call budgets come from the registry. */
+const UNARY_DEADLINE_MS = 15_000;
+
 function unaryDeadline(method: string, bytes: Uint8Array): number {
-  const hostCall = `/${HostService.typeName}/${HostService.method.hostCall.name}`;
-  // Relaunch confirms a writer epoch for up to 25 seconds inside the host.
-  return method === hostCall && fromBinary(HostCallRequestSchema, bytes).method.case === 'relaunch'
-    ? 35_000
-    : 15_000;
+  if (method !== HOST_CALL_METHOD) return UNARY_DEADLINE_MS;
+  const slot = fromBinary(HostCallRequestSchema, bytes).method.case;
+  if (slot === undefined) throw new Error('host call has no method');
+  return hostCallBudgets[slot].totalMs;
 }
 
 async function hello(session: GatewaySession, signal: AbortSignal): Promise<void> {

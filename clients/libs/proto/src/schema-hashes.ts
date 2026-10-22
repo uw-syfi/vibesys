@@ -32,3 +32,5 @@ const embeddedImage = toBinary(
 );
 export const API_SCHEMA_HASH = schemaHash(embeddedImage, 'vibesys.api.v1');
 export const STORE_SCHEMA_HASH = schemaHash(embeddedImage, 'vibesys.store.v1');
+
+export const HOST_SCHEMA_HASH = schemaHash(embeddedImage, 'vibesys.host.v1');

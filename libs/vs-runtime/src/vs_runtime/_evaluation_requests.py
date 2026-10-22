@@ -635,7 +635,7 @@ class MeasurementRequests:
                 # Fenced while the executor held nothing: the job never will exist.
                 return self._rejected(request, context, _FENCED)
             if self._control is not None and request.decision_id is None:
-                self._control.prepare_evaluation(handle, request.scope)
+                self._control.prepare_evaluation(handle, request.scope, permit=context.permit)
             try:
                 await self._jobs.submit(eval_request, handle_id=handle)
             except ExecutorRejectedError as error:
@@ -804,8 +804,9 @@ class MeasurementRequests:
         if problem is not None:
             return self._unknown(request, context, problem)
         polled = await self._poll(self._executor_handle(record))
-        dependency = self._control is not None and self._control.evaluation_is_dependency(
-            record.handle_id
+        dependency = self._control is not None and (
+            self._control.holds_permit(record.handle_id)
+            or self._control.evaluation_is_dependency(record.handle_id)
         )
         finishing = not request.immediate and (polled.phase is PollPhase.RUNNING or dependency)
         if not finishing and not record.parked:

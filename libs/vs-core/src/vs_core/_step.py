@@ -9,7 +9,16 @@ from typing import TYPE_CHECKING, Literal, assert_never
 
 from pydantic import TypeAdapter
 
-from . import _run_park, attempts, evaluation, records, scheduling, sessions, settlement
+from . import (
+    _run_park,
+    _turn_permit,
+    attempts,
+    evaluation,
+    records,
+    scheduling,
+    sessions,
+    settlement,
+)
 from ._adoption import reopen as reopen_adoption
 from ._continuations import (
     SuspensionRefusal,
@@ -31,6 +40,7 @@ from ._inspection import validate_inspection_target, validate_registered_owner
 from ._ledger_compaction import compact_ledger
 from ._operator_actions import cancellations, notice, reopen_retirements
 from ._ownership import cleanup_pending
+from ._parked_admission import parked_epoch_drops
 from ._proofs import (
     Proven,
     accepted_receipt_for,
@@ -354,7 +364,12 @@ def _started(state: CoreState, decision: DecisionId | None) -> RequestRecord | N
 
 
 def _resolve(state: CoreState, outbound: Outbound, cause: DecisionId | None) -> Scheduled:
-    """Resolve an outbound request's ``until`` to the absolute form stored on its record."""
+    """Resolve an outbound request's ``until``, capped at the logical-turn permit."""
+    return _turn_permit.cap_scheduled(state, _scheduled(state, outbound, cause))
+
+
+def _scheduled(state: CoreState, outbound: Outbound, cause: DecisionId | None) -> Scheduled:
+    """The absolute until, before the logical-turn permit caps it."""
     match outbound.until:
         case Inherited():
             # A request of its own ends with the decision it names (an agent's or core's own
@@ -1463,6 +1478,8 @@ def _control(state: CoreState, event: RunControlEvent, dispatch: Dispatch) -> Tr
     )
     run = _park_authority(state, run, event.control)
     updated = state.model_copy(update={"run": run})
+    if run.status is RunStatus.DRAINING and run.park is not None:
+        updated = _turn_permit.cap_to_permits(updated)
     if event.control.action == "steer" or waits:
         result = Transition(state=updated)
     elif event.control.action in OPERATOR_ACTIONS:
@@ -1897,20 +1914,7 @@ def consume(
     text) has never seen. One owner at the exit keeps that true for all of them.
     """
     given = state
-    if (
-        state.run.status == RunStatus.PARKED
-        and state.run.park is not None
-        and state.records.recovery.epoch == state.run.park.epoch
-        and not isinstance(
-            event,
-            RecoveryStarted
-            | EpochResumed
-            | RunControlEvent
-            | DispatchAuthorized
-            | DecisionSubmitted
-            | ProposalSubmitted,
-        )
-    ):
+    if parked_epoch_drops(state, event):
         return Transition(state=state)
     _validate_observation_ingress(state, event)
     _validate_authorization(state, event)

@@ -346,7 +346,7 @@ def _git(path: Path, *args: str) -> str:
 
 
 def _executor(
-    workspaces: RuntimeWorkspaces, store: ReceiptStore | None = None, *, allow_adoption: bool = True
+    workspaces: RuntimeWorkspaces, store: ReceiptStore | None = None
 ) -> tuple[RuntimeWorkspaceRequests, ReceiptStore]:
     """A host's executor over the run's durable receipts (a new one models a restart)."""
     chosen = store or _ENVS[workspaces].store()
@@ -357,8 +357,6 @@ def _executor(
         blocking=InlineBlockingRunner(),
         evidence=ReceiptEvidenceLedger(chosen),
     )
-    if not allow_adoption:
-        executor.protect_adoption()
     return executor, chosen
 
 
@@ -887,7 +885,7 @@ def test_identity_conflicts_stale_hosts_and_unowned_requests(tmp_path: Path) -> 
         asyncio.run(exercise(workspaces))
 
 
-def test_adoption_applies_inspects_and_verifies_the_selected_revision(tmp_path: Path) -> None:
+def test_adoption_publishes_and_legacy_verification_reads_publication(tmp_path: Path) -> None:
     async def exercise(workspaces: RuntimeWorkspaces) -> None:
         executor, _ = _executor(workspaces)
         attempt = _attempt()
@@ -911,9 +909,10 @@ def test_adoption_applies_inspects_and_verifies_the_selected_revision(tmp_path: 
             return VerifyAdoption(request_id=_rid(name), scope=run_scope, selection=selection)
 
         before = await _run(executor, verify("verify-0"))
-        assert before.observation.observation.status is ObservationStatus.FAILED
+        assert before.observation.observation.status is ObservationStatus.SUCCEEDED
         assert before.observation.observation.terminal
-        assert before.observation.revision is None
+        assert before.observation.revision == winner
+        assert (workspaces.root.path / "candidate.py").read_text() == "VALUE = 1\n"
         adopt = AdoptRevision(request_id=_rid("adopt-1"), scope=run_scope, selection=selection)
         applied = await _run(executor, adopt)
         assert applied.observation.observation.status is ObservationStatus.SUCCEEDED
@@ -930,19 +929,22 @@ def test_adoption_applies_inspects_and_verifies_the_selected_revision(tmp_path: 
         proof = await _run(executor, verify("verify-1"), epoch=2)
         assert proof.observation.observation.status is ObservationStatus.SUCCEEDED
         assert proof.observation.revision == winner
-        # A new adoption in a resumed epoch is guarded until project-edit protection lands.
+        # Interrupted after publication: the source receipt proves the same commit,
+        # so the retry never restores the root or creates a second publication.
         again = AdoptRevision(request_id=_rid("adopt-2"), scope=run_scope, selection=selection)
-        root_file.write_text("VALUE = 3\n", encoding="utf-8")
-        resumed, _ = _executor(workspaces, allow_adoption=False)
-        refused = await _run(resumed, again, epoch=3)
-        assert refused.observation.observation.status is ObservationStatus.REJECTED
-        assert "project-edit protection" in refused.observation.observation.diagnostic
-        assert root_file.read_text(encoding="utf-8") == "VALUE = 3\n"
-        # Drift after adoption is never reported as verified.
+        crashing = _failing(_ENVS[workspaces])
+        flaky, _ = _executor(workspaces, crashing)
+        crashing.fail_done = True
+        with pytest.raises(OSError, match="host died"):
+            await _run(flaky, again, epoch=3)
+        resumed = await _run(executor, again, epoch=3)
+        assert resumed.observation.observation.status is ObservationStatus.SUCCEEDED
+        # Checkout drift does not invalidate a durable publication.
         root_file.write_text("VALUE = 3\n", encoding="utf-8")
         drifted = await _run(executor, verify("verify-2"), epoch=3)
-        assert drifted.observation.observation.status is ObservationStatus.FAILED
+        assert drifted.observation.observation.status is ObservationStatus.SUCCEEDED
         assert drifted.observation.observation.terminal
+        assert root_file.read_text() == "VALUE = 3\n"
 
     with _workspaces(tmp_path) as workspaces:
         asyncio.run(exercise(workspaces))
@@ -1232,8 +1234,8 @@ def test_root_adopt_and_restore_never_delete_ignored_user_files(tmp_path: Path) 
 
         adopted = await _run(executor, _adopt("ad", revision, AdoptRevision))
         assert _status(adopted) is ObservationStatus.SUCCEEDED
-        assert (root.path / "candidate.py").read_text(encoding="utf-8") == "VALUE = 2\n"
-        assert not (root.path / "untracked.txt").exists()
+        assert (root.path / "candidate.py").read_text(encoding="utf-8") == "VALUE = 1\n"
+        assert (root.path / "untracked.txt").read_text() == "leftover"
         assert _ignored_snapshot(root.path) == user_files
 
         (root.path / "candidate.py").write_text("VALUE = 3\n", encoding="utf-8")
@@ -1247,7 +1249,7 @@ def test_root_adopt_and_restore_never_delete_ignored_user_files(tmp_path: Path) 
         asyncio.run(exercise(workspaces))
 
 
-def test_root_verification_compares_tracked_content_not_ignored_files(tmp_path: Path) -> None:
+def test_legacy_verification_preserves_all_checkout_content(tmp_path: Path) -> None:
     async def exercise(workspaces: RuntimeWorkspaces) -> None:
         executor, _ = _executor(workspaces)
         root = workspaces.root.path
@@ -1265,8 +1267,9 @@ def test_root_verification_compares_tracked_content_not_ignored_files(tmp_path: 
             assert _status(verified) is ObservationStatus.SUCCEEDED
         (root / "candidate.py").write_text("VALUE = 9\n", encoding="utf-8")
         drifted = await _run(executor, _adopt("vd", revision, VerifyAdoption))
-        assert _status(drifted) is ObservationStatus.FAILED
+        assert _status(drifted) is ObservationStatus.SUCCEEDED
         assert drifted.observation.observation.terminal
+        assert (root / "candidate.py").read_text() == "VALUE = 9\n"
 
     with _workspaces(tmp_path) as workspaces:
         asyncio.run(exercise(workspaces))

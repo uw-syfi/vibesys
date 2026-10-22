@@ -103,3 +103,14 @@ enum ReplyErrorCode {
   REPLY_ERROR_CODE_INVALID_VALUE = 4 [(core_member).spelling = "invalid-value"];
   REPLY_ERROR_CODE_NOT_JSON = 5 [(core_member).spelling = "not-json"];
 }
+
+// Why the optional checkout update advanced or skipped the checkout.
+enum CheckoutStatus {
+  CHECKOUT_STATUS_UNSPECIFIED = 0;
+  CHECKOUT_STATUS_FAST_FORWARDED = 1;
+  CHECKOUT_STATUS_OTHER_BRANCH = 2;
+  CHECKOUT_STATUS_DIRTY_TREE = 3;
+  CHECKOUT_STATUS_DIVERGED = 4;
+  CHECKOUT_STATUS_GIT_REFUSED = 5;
+  CHECKOUT_STATUS_OPERATOR_CHANGED_CHECKOUT = 6;
+}

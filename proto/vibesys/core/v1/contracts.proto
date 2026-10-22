@@ -38,3 +38,15 @@ message OperationSchemaRef {
   SchemaRef outcome_schema = 3 [(buf.validate.field).required = true];
   LifecycleClass lifecycle = 4 [(buf.validate.field).enum = {defined_only: true, not_in: 0}];
 }
+
+// A retained revision published without changing the operator checkout.
+message AdoptionPublication {
+  string revision = 1 [(buf.validate.field).string.min_len = 1];
+  string commit = 2 [(buf.validate.field).string.pattern = "^[0-9a-f]{40}$"];
+  string branch = 3 [(buf.validate.field).string.min_len = 1];
+}
+
+// The independent, optional checkout step never changes publication success.
+message CheckoutUpdate {
+  CheckoutStatus status = 1 [(buf.validate.field).enum = {defined_only: true, not_in: 0}];
+}

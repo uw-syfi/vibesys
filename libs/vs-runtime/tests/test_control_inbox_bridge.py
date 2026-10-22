@@ -218,6 +218,18 @@ _PAUSE_AGAIN_AFTER_RESUME_AND_RESTART = [
     ("poll",),
     ("socket", "k0", {"action": "pause", "expected_epoch": 0}),
 ]
+# Pause parks the epoch before the steer's delivery is committed.
+_PAUSE_THEN_STEER = [
+    ("post", None, {"action": "pause", "expected_epoch": 0}),
+    ("post", None, {"action": "steer", "text": "t"}),
+    ("poll",),
+]
+_PAUSE_THEN_STEER_AFTER_A_POLL = [
+    ("post", None, {"action": "pause", "expected_epoch": 0}),
+    ("poll",),
+    ("post", None, {"action": "steer", "text": "t"}),
+    ("poll",),
+]
 _OTHER_CONTROL_UNDER_A_RECORDED_ID = [
     ("post", "k0", {"action": "pause", "expected_epoch": 0}),
     ("poll",),
@@ -277,6 +289,8 @@ _REFUSED_ON_THE_SOCKET_THEN_POSTED = [
 @example(_STEER_AGAIN_AFTER_RESTART)
 @example(_PAUSE_AGAIN_AFTER_RESUME_AND_RESTART)
 @example(_OTHER_CONTROL_UNDER_A_RECORDED_ID)
+@example(_PAUSE_THEN_STEER)
+@example(_PAUSE_THEN_STEER_AFTER_A_POLL)
 def test_every_control_is_recorded_once_whichever_way_it_was_sent(
     history: list[tuple[object, ...]],
 ) -> None:

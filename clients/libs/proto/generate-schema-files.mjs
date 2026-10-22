@@ -4,7 +4,7 @@ import {readdirSync, writeFileSync} from 'node:fs';
 const generated = new URL('./src/generated/vibesys/', import.meta.url);
 const imports = [];
 const names = [];
-for (const pkg of ['api', 'store']) {
+for (const pkg of ['api', 'store', 'host']) {
   const directory = new URL(`${pkg}/v1/`, generated);
   for (const file of readdirSync(directory)
     .filter(name => name.endsWith('_pb.ts'))

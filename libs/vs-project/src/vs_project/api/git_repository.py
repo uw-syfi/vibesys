@@ -326,6 +326,10 @@ class GitRepository(Protocol):
         """
         ...
 
+    def has_ref_pointing_at(self, commit: str, prefix: str) -> bool:
+        """Whether a ref under ``prefix`` points exactly at ``commit`` (portable)."""
+        ...
+
     def has_ref_containing(self, commit: str, prefix: str) -> bool:
         """Whether any ref under ``prefix`` points at a commit that reaches ``commit`` (portable)."""
         ...
@@ -356,6 +360,55 @@ class GitRepository(Protocol):
 
         Raises ``GitCommandError`` when ``commit`` is not an existing object
         (portable).
+        """
+        ...
+
+    def create_ref(self, ref: str, commit: str) -> str:
+        """Atomically retain ``commit`` if ``ref`` is absent, returning the winning commit.
+
+        An existing ref is never moved. The call never writes through a symbolic ref;
+        failures other than a concurrent creator raise GitCommandError (cli-only).
+        """
+        ...
+
+    def create_commit(
+        self,
+        revision: Revision,
+        parents: Sequence[str],
+        message: str,
+        *,
+        preserve_from: Revision,
+        preserve_paths: Sequence[str] = (),
+    ) -> str:
+        """Create an unreferenced commit without reading or changing the worktree or index.
+
+        Its tree is ``revision`` with ``preserve_paths`` (literal repository-relative
+        paths) taken from ``preserve_from``.
+        The supplied parents determine ancestry; no branch or HEAD moves (cli-only).
+        """
+        ...
+
+    def advance_branch(self, branch: str, commit: str) -> bool:
+        """Fast-forward or create a branch without touching any checkout.
+
+        Return False if Git refuses, including a branch checked out in any worktree
+        or a non-fast-forward. Never force an update (cli-only).
+        """
+        ...
+
+    def fast_forward_checkout(
+        self,
+        branch: str,
+        commit: str,
+        *,
+        untracked_exclusions: Sequence[str] = (),
+    ) -> bool:
+        """Fast-forward the clean checkout of ``branch`` using Git's conflict checks.
+
+        Return False on another/detached branch, dirty tree, divergence or conflict.
+        Ignored and untracked files must never be overwritten. ``untracked_exclusions``
+        exempts framework-owned namespaces from the clean-tree test, never tracked edits
+        or Git's final conflict checks (cli-only).
         """
         ...
 

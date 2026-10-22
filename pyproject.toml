@@ -17,6 +17,7 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
 ]
 dependencies = [
+    "typing-extensions>=4.12",
     "google-crc32c>=1.7,<2",
     "protobuf-py==0.6.0",
     "protobuf==6.33.5",
@@ -108,7 +109,7 @@ test = [
 ]
 
 [tool.pytest.ini_options]
-testpaths = ["tests", "scripts/corevalue/tests", "libs/vs-evaluator-protocol/tests", "libs/vs-decode/tests", "libs/vs-redaction/tests", "libs/vs-evaluation/tests", "libs/vs-async-ops/tests", "libs/vs-github/tests", "libs/vs-issue-tracker/tests", "libs/vs-core/tests", "libs/vs-project/tests", "libs/vs-prompts/tests", "libs/vs-runtime/tests", "libs/vs-sandbox/tests", "libs/vs-agent/tests", "libs/vs-slurm/tests", "libs/vs-mcp/tests", "libs/vs-faults/tests", "libs/vs-sim/tests", "libs/vs-dst/tests", "libs/vs-logs/tests", "libs/vs-proto/tests", "libs/vs-runlog/tests", "sdk/vs-bench/tests"]
+testpaths = ["tests", "scripts/corevalue/tests", "scripts/host_operations/tests", "libs/vs-evaluator-protocol/tests", "libs/vs-decode/tests", "libs/vs-redaction/tests", "libs/vs-evaluation/tests", "libs/vs-async-ops/tests", "libs/vs-github/tests", "libs/vs-issue-tracker/tests", "libs/vs-core/tests", "libs/vs-project/tests", "libs/vs-prompts/tests", "libs/vs-runtime/tests", "libs/vs-sandbox/tests", "libs/vs-agent/tests", "libs/vs-slurm/tests", "libs/vs-mcp/tests", "libs/vs-faults/tests", "libs/vs-sim/tests", "libs/vs-dst/tests", "libs/vs-logs/tests", "libs/vs-proto/tests", "libs/vs-runlog/tests", "sdk/vs-bench/tests"]
 # Directories whose `slow` tests still run one case each in a pull request (see the vs-sim plugin).
 sim_smoke_slow = ["tests/system/chaos", "tests/system/skeleton", "libs/vs-core/tests"]
 # Bare `--cov` measures the packages listed in `[tool.coverage.run] source`
@@ -128,20 +129,23 @@ pythonpath = [".", "packaging", "libs/vs-sim/pytest_plugin"]
 # segfault the worker (a script with eight busy threads and one dump crashed 26 of 100 runs;
 # CI run 39144616313 lost a worker 10 s after such a dump). The hard bound below dumps the same
 # stacks from Python with the GIL held and fails the test.
-# Hard bound for a hung test, not a test condition: no test may rely on it to
-# pass (a test synchronizes on the thing it waits for). CI's slowest legitimate
-# test takes about 93 s and a whole 16-way shard finishes in 2 to 2.5 minutes, so
-# 300 s is over three times the slowest test. `signal` raises in the main thread,
-# which a blocked lock, join or read does not stop (CPython runs the handler after
-# the system call is interrupted), and xdist then reports one failed test and goes
-# on. `thread` was rejected: it kills the worker, and `--dist loadgroup` then
+# Hard bound for a hung deterministic-tier test, not a test condition: no test
+# may rely on it to pass (a test synchronizes on the thing it waits for). It
+# stays under half the `test` job's cancel time
+# (tests/quality/test_hang_backstop.py), so a hang is named before that job is
+# cancelled. Tests in sim_real_tiers, and tests marked e2e, real_contract or
+# slow, keep a longer bound from the root conftest.py.
+# `signal` raises in the main thread, which a blocked lock, join or read does
+# not stop (CPython runs the handler after the system call is interrupted), and
+# xdist then reports one failed test and goes on. `thread` was rejected: it
+# kills the worker, and `--dist loadgroup` then
 # stalls with no replacement worker until the job timeout (reproduced with
 # xdist 3.8.0; `--dist load` recovers). The same stall follows any worker crash, so
 # `--max-worker-restart=0` (in addopts) ends the session at once with the crash reported
 # (`tests/support/worker_exit.py` adds the exit code or signal) instead of waiting for
 # the job timeout. Tests marked e2e, real_contract or slow get a higher bound from
 # the root conftest.py.
-timeout = 300
+timeout = 200
 timeout_method = "signal"
 markers = [
     # Applied by `pytest_collection_modifyitems` in the root conftest.py, which
@@ -164,7 +168,7 @@ markers = [
 
 [tool.coverage.run]
 branch = true
-source = ["entrypoints", "launch", "server", "vibesys", "vs_evaluator_protocol", "vs_decode", "vs_redaction", "vs_evaluation", "vs_async_ops", "vs_github", "vs_issue_tracker", "vs_core", "vs_project", "vs_prompts", "vs_runtime", "vs_sandbox", "vs_agent", "vs_slurm", "vs_mcp", "vs_faults", "vs_sim", "vs_dst", "vs_logs", "vs_proto", "vs_runlog", "vs_bench", "scripts.corevalue"]
+source = ["entrypoints", "launch", "server", "vibesys", "vs_evaluator_protocol", "vs_decode", "vs_redaction", "vs_evaluation", "vs_async_ops", "vs_github", "vs_issue_tracker", "vs_core", "vs_project", "vs_prompts", "vs_runtime", "vs_sandbox", "vs_agent", "vs_slurm", "vs_mcp", "vs_faults", "vs_sim", "vs_dst", "vs_logs", "vs_proto", "vs_runlog", "vs_bench", "scripts.corevalue", "scripts.host_operations"]
 relative_files = true
 omit = [
     # Module execution stubs contain only a guarded call into a measured

@@ -12,7 +12,9 @@ from vs_runtime._core_values.vibesys.core.v1.common_boundary import (
     encode_SchemaRef,
 )
 from vs_runtime._core_values.vibesys.core.v1.vocabulary_boundary import (
+    decode_CheckoutStatus,
     decode_LifecycleClass,
+    encode_CheckoutStatus,
     encode_LifecycleClass,
 )
 from vs_runtime._corevalue_wkt import decode_timestamp, encode_timestamp
@@ -88,13 +90,33 @@ def decode_OperationSchemaRef(m: pb.OperationSchemaRef) -> values.OperationSchem
     )
 
 
+def encode_AdoptionPublication(v: values.AdoptionPublication) -> pb.AdoptionPublication:
+    return pb.AdoptionPublication(revision=v.revision, commit=v.commit, branch=v.branch)
+
+
+def decode_AdoptionPublication(m: pb.AdoptionPublication) -> values.AdoptionPublication:
+    return values.AdoptionPublication(revision=m.revision, commit=m.commit, branch=m.branch)
+
+
+def encode_CheckoutUpdate(v: values.CheckoutUpdate) -> pb.CheckoutUpdate:
+    return pb.CheckoutUpdate(status=encode_CheckoutStatus(v.status))
+
+
+def decode_CheckoutUpdate(m: pb.CheckoutUpdate) -> values.CheckoutUpdate:
+    return values.CheckoutUpdate(status=decode_CheckoutStatus(m.status))
+
+
 ENCODERS: dict[type, Callable[..., Message]] = {
     values.PureOption: encode_PureOption,
     values.OperationSchemaRef: encode_OperationSchemaRef,
+    values.AdoptionPublication: encode_AdoptionPublication,
+    values.CheckoutUpdate: encode_CheckoutUpdate,
 }
 DECODERS: dict[type, Callable[..., object]] = {
     pb.NullValue: decode_NullValue,
     pb.PureOptionValue: decode_PureOptionValue,
     pb.PureOption: decode_PureOption,
     pb.OperationSchemaRef: decode_OperationSchemaRef,
+    pb.AdoptionPublication: decode_AdoptionPublication,
+    pb.CheckoutUpdate: decode_CheckoutUpdate,
 }
