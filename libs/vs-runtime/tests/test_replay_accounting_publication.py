@@ -21,7 +21,6 @@ from vs_faults.api import (
     InjectedIOError,
 )
 from vs_project.api import (
-    AtomicWriteStream,
     LocalAtomicWriteEffects,
     Project,
     StoredEnvelope,
@@ -78,33 +77,22 @@ LATE = replay.AccountingEvidence(
 
 
 class _GatedStoreEffects(LocalAtomicWriteEffects):
-    """The state store's real file operations, crossing the shared fault gate.
+    """The state store's real publications, crossing the shared fault gate by file name.
 
-    A fault is injected at the gate, so a sync has nothing left to prove on the disk
-    and is not performed: no test process crashes, and the files stay readable.
+    A rename publishes each store file; a fault in the sync before it publishes nothing,
+    exactly like a fault before the rename, so the rename is the one crash point.
     """
 
     def __init__(self, gate: FaultGate) -> None:
         self._gate = gate
 
-    def sync_file(self, stream: AtomicWriteStream) -> None:
-        self._gate.around(Boundary.DURABLE_WRITE, "store-sync", partial(_no_sync, stream))
-
-    def sync_existing_file(self, path: Path) -> None:
-        pass
-
-    def sync_directory(self, directory: Path) -> None:
-        pass
-
     def replace(self, temporary: Path, destination: Path) -> None:
         replace = super().replace
         self._gate.around(
-            Boundary.DURABLE_WRITE, "store-rename", partial(replace, temporary, destination)
+            Boundary.DURABLE_WRITE,
+            f"publish-{destination.stem}",
+            partial(replace, temporary, destination),
         )
-
-
-def _no_sync(*_: object) -> None:
-    """Stands for a sync that the injected faults replace; the data is already visible."""
 
 
 def _session(
@@ -118,7 +106,7 @@ def _session(
         if gate is None:
             real(descriptor)
         else:
-            gate.around(Boundary.DURABLE_WRITE, "fsync", partial(_no_sync, descriptor))
+            gate.around(Boundary.DURABLE_WRITE, "fsync", partial(real, descriptor))
 
     store = (
         project.state_store("run-a")
@@ -155,28 +143,26 @@ def _publications(project: Project) -> int:
     return published
 
 
-def _crash_points(tmp_path: Path) -> list[Crossing]:
-    """Sampled durable writes of a fault-free run, plus every store write up to the first record.
+@pytest.fixture(scope="module")
+def crash_points(tmp_path_factory: pytest.TempPathFactory) -> list[Crossing]:
+    """Sampled durable writes of a fault-free run, plus every record-store publication.
 
-    The lease and the format fence are the atomic store's writes before run.log's first record.
+    The format fence is the record store's only content; it precedes run.log's first record.
     """
-    baseline = tmp_path / "baseline"
-    baseline.mkdir()
     gate = FaultGate(FaultPlan(seed=0))
-    assert _session(Project.open(baseline), "first", gate) == AccountingAmount(Fraction(110))
-    targets = [call.target for call in gate.calls]
-    leased = targets.index("store-sync")
-    first_record = targets.index("fsync", leased)
-    sampled = {*swept(len(gate.calls), sample=4), *range(leased, first_record + 1)}
+    project = Project.open(tmp_path_factory.mktemp("baseline"))
+    assert _session(project, "first", gate) == AccountingAmount(Fraction(110))
+    fence = {index for index, call in enumerate(gate.calls) if call.target == "publish-store"}
+    sampled = {*swept(len(gate.calls), sample=4), *fence}
     return [gate.calls[index] for index in sorted(sampled)]
 
 
 @pytest.mark.parametrize("fault", list(HostFault))
 def test_repeated_import_and_recovery_publish_and_charge_once(
-    tmp_path: Path, fault: HostFault
+    tmp_path: Path, fault: HostFault, crash_points: list[Crossing]
 ) -> None:
     """A crash or failed sync at any durable write, including the fence, charges once."""
-    for case, crossing in enumerate(_crash_points(tmp_path)):
+    for case, crossing in enumerate(crash_points):
         root = tmp_path / f"case-{case}"
         root.mkdir()
         project = Project.open(root)
