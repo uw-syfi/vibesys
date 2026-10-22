@@ -56,6 +56,7 @@ from .types.kernel import (
     CoreEvent,
     DecisionCompleted,
     DecisionSubmitted,
+    EpochResumed,
     ProposalSubmitted,
     RunControlEvent,
     Signal,
@@ -265,7 +266,7 @@ def event_area(event: CoreEvent | Signal) -> Area:
             | DecisionCompleted()
         ):
             return Area.RECORDS
-        case DecisionSubmitted() | ProposalSubmitted() | RunControlEvent():
+        case DecisionSubmitted() | ProposalSubmitted() | RunControlEvent() | EpochResumed():
             raise ContractError(("event",), "kernel event requires translation")
         case _:
             assert_never(event)

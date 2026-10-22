@@ -316,7 +316,7 @@ def test_successor_reopens_admission_without_replaying_a_closed_blocked_request(
     )
     if closed.run.status != core.RunStatus.TERMINAL:
         return
-    restarted = core.step(closed, core.RecoveryStarted(epoch=3, now_at=BOUND + case.late_by + 200))
+    restarted = core.step(closed, core.EpochResumed(epoch=3, now_at=BOUND + case.late_by + 200))
     assert all(isinstance(request, core.InspectRequest) for request in restarted.requests)
     assert restarted.state.run.status == core.RunStatus.RUNNING
     assert restarted.state.run.park is None

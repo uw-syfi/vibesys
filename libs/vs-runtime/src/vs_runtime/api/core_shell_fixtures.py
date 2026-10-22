@@ -13,6 +13,7 @@ from vs_core.api import (
     DecisionId,
     DispatchAuthorized,
     EnsureSession,
+    EpochResumed,
     Flow,
     FlowState,
     InputRecord,
@@ -72,7 +73,8 @@ class ShellTraceTransitions:
 
     def step(self, state: CoreState, event: CoreEvent) -> Transition:
         frames = []
-        if isinstance(event, RecoveryStarted):
+        if isinstance(event, RecoveryStarted | EpochResumed):
+            recovery = RecoveryStarted(epoch=event.epoch, now_at=event.now_at)
             change = recover(
                 state.records,
                 RecordsContext(
@@ -82,10 +84,12 @@ class ShellTraceTransitions:
                     sessions=state.sessions,
                     evaluation=state.evaluation,
                 ),
-                event,
+                recovery,
             )
             frames.append(
-                TraceFrame(signal=event, change=RecordsChange(**change.model_dump(mode="python")))
+                TraceFrame(
+                    signal=recovery, change=RecordsChange(**change.model_dump(mode="python"))
+                )
             )
             if change.signals:
                 frames.append(

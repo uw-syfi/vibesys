@@ -22,6 +22,7 @@ from vs_core.api import (
     Decision,
     Discarded,
     DispatchAuthorized,
+    EpochResumed,
     EventCursor,
     HostFence,
     HostId,
@@ -579,7 +580,10 @@ class CoreRuntime[S: StrategyState]:
     def start(
         self, host_id: str, *, now_at: float, lease_duration: float, resume: bool = False
     ) -> None:
-        """Validate before lease acquisition, then commit new-epoch recovery.
+        """Validate before lease acquisition, then reconcile the writer.
+
+        Only ``resume`` constructs fresh run authority; crash recovery retains
+        the run's closure and replays its existing flow journal.
 
         No backend setup or execution occurs here. Unfinished identities produce
         inspection requests; core gates ordinary admission until reconciled.
@@ -613,7 +617,9 @@ class CoreRuntime[S: StrategyState]:
         try:
             self._consume(
                 _Input[S](
-                    event=RecoveryStarted(epoch=epoch, now_at=now_at),
+                    event=EpochResumed(epoch=epoch, now_at=now_at)
+                    if resume
+                    else RecoveryStarted(epoch=epoch, now_at=now_at),
                     now_at=now_at,
                 )
             )

@@ -208,7 +208,7 @@ class CoreRunHost:
 
 
 def start_core(host: CoreRunHost, config: RunLoopConfig) -> None:
-    """Take the lease and commit the new-epoch recovery, at the clock's time after decoding."""
+    """Take the lease and commit writer recovery, at the clock's time after decoding."""
     host.shell.prepare_start(config.host_id)
     _take_lease(host, config)
 
