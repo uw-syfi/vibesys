@@ -951,7 +951,9 @@ def new_run[S: StrategyState](search: SearchDriver[S, Any], harness: Harness) ->
     capabilities = validate_startup(declaration, offered)
     return base.model_copy(
         update={
-            "registry": registry.descriptors,
+            # The selection, as production stores it. The codec lists an optional
+            # operation before an owned one; the declaration selects owned first.
+            "registry": capabilities.operations,
             "run": base.run.model_copy(
                 update={
                     "facts": harness.facts,

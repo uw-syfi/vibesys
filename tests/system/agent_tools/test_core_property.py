@@ -455,6 +455,12 @@ class Agent:
                 self.budget_refused.append(self.workspaces.edits[-1])
             return False
         if step[0] in ("submit", "timeout_retry") and "handle_id" in reply.result:  # type: ignore[operator]
+            assert self.shell is not None
+            assert any(
+                call.request_id is not None
+                and handle_for(call.request_id) == reply.result["handle_id"]  # type: ignore[index]
+                for call in self.shell.record.envelope.core.evaluation.agent_calls
+            ), "the charge must be durable before the agent reads its handle"
             self.handles.append(reply.result["handle_id"])  # type: ignore[index]
             self.read.append((self.workspaces.edits[-1], reply.result["handle_id"]))  # type: ignore[index]
         elif count:
