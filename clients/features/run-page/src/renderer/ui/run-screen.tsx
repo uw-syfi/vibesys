@@ -22,6 +22,7 @@ import {
 } from '@vibesys/ui';
 import type {JSX, ReactNode} from 'react';
 import {
+  adoptionTitles,
   clockAt,
   clockStart,
   endedView,
@@ -34,8 +35,8 @@ import {
   machineBlockWords,
   NO_MODEL_NAMES,
   type Offer,
+  pauseNowBannerView,
   predatesTraceWords,
-  quotaBannerView,
   type ResolvedZoom,
   type Route,
   RUN_ROUTE,
@@ -52,7 +53,6 @@ import {
   runPhase,
   runWallNow,
   stepLabel,
-  stopBannerView,
   streamLines,
   timelineView,
   traceArrival,
@@ -213,20 +213,12 @@ function Header(props: {
             {...reason(header.pause)}
           />
         ) : null}
-        {header.resume.shown ? (
-          <Button
-            variant="primary"
-            text="Resume"
-            press={() => dispatch({type: 'resume'})}
-            {...reason(header.resume)}
-          />
-        ) : null}
-        {header.stop.shown ? (
+        {header.pauseNow.shown ? (
           <Button
             variant="danger"
-            text="Stop"
-            press={() => dispatch({type: 'ask-stop'})}
-            {...reason(header.stop)}
+            text="Pause now"
+            press={() => dispatch({type: 'ask-pause-now'})}
+            {...reason(header.pauseNow)}
           />
         ) : null}
         {state.readOnly === true ? null : (
@@ -237,13 +229,13 @@ function Header(props: {
   );
 }
 
-function StopBanner(props: {
+function PauseNowBanner(props: {
   readonly state: RunPageState;
   readonly dispatch: Dispatch;
 }): JSX.Element | null {
   const {state, dispatch} = props;
   if (state.readOnly === true) return null;
-  const banner = stopBannerView(state);
+  const banner = pauseNowBannerView(state);
   if (banner.kind === 'none') return null;
   if (banner.kind === 'confirm') {
     return (
@@ -255,86 +247,20 @@ function StopBanner(props: {
           <>
             <Button
               variant="danger"
-              text="Stop run"
-              press={() => dispatch({type: 'confirm-stop'})}
+              text="Pause now"
+              press={() => dispatch({type: 'confirm-pause-now'})}
             />
             <Button
               variant="secondary"
               text="Keep running"
-              press={() => dispatch({type: 'cancel-stop'})}
+              press={() => dispatch({type: 'cancel-pause-now'})}
             />
           </>
         }
       />
     );
   }
-  return (
-    <Banner
-      tone="warn"
-      title={banner.title}
-      body={banner.body}
-      {...(banner.forceOffered
-        ? {
-            actions: (
-              <Button
-                variant="danger"
-                text="Force stop"
-                press={() => dispatch({type: 'force-stop'})}
-              />
-            ),
-          }
-        : {})}
-    />
-  );
-}
-
-/** Words an epoch second as the user's local weekday and time; reads no clock. */
-const QUOTA_TIME = new Intl.DateTimeFormat(undefined, {
-  weekday: 'short',
-  hour: '2-digit',
-  minute: '2-digit',
-});
-
-function QuotaBanner(props: {
-  readonly state: RunPageState;
-  readonly dispatch: Dispatch;
-}): JSX.Element | null {
-  const {state, dispatch} = props;
-  const banner = quotaBannerView(state, seconds => QUOTA_TIME.format(seconds * 1000));
-  if (banner === null) return null;
-  return (
-    <Banner
-      tone="warn"
-      title={banner.title}
-      body={banner.body}
-      actions={
-        <>
-          <Button
-            variant="primary"
-            text="Resume now"
-            press={() => dispatch({type: 'resume'})}
-            {...reason(banner.resumeNow)}
-          />
-          {banner.wait.shown ? (
-            <Button
-              variant="secondary"
-              text="Wait and resume when quota is back"
-              press={() => dispatch({type: 'wait-for-quota'})}
-              {...reason(banner.wait)}
-            />
-          ) : null}
-          {banner.stopWaiting.shown ? (
-            <Button
-              variant="secondary"
-              text="Stop waiting"
-              press={() => dispatch({type: 'stop-waiting'})}
-              {...reason(banner.stopWaiting)}
-            />
-          ) : null}
-        </>
-      }
-    />
-  );
+  return null;
 }
 
 function EndedBanner(props: {
@@ -612,6 +538,7 @@ function RunScreenBody(props: {
     clock: {start: clockStart(props.whole), now: clockAt(model, runNow(state))},
     tokens: props.core?.tokens ?? EMPTY_LEDGER,
     who: whoBySpan(usageRecords(state), names),
+    adoptionTitles: adoptionTitles(model.trace.spans),
     zoom,
   };
   const pending = pendingRunScreen(
@@ -661,8 +588,7 @@ function RunScreenBody(props: {
         />
       }
     >
-      <StopBanner state={state} dispatch={dispatch} />
-      <QuotaBanner state={state} dispatch={dispatch} />
+      <PauseNowBanner state={state} dispatch={dispatch} />
       {state.notice === null ? null : (
         <Banner tone="err" title="The run did not take the command" body={state.notice} />
       )}

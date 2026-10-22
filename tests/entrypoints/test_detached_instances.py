@@ -45,6 +45,7 @@ from server.host_api import (
     StartupStage,
     StopOutcome,
 )
+from server.host_helper_requests import ProjectRun, run_summaries
 from server.instances import ControlSocketStopRequester
 from server.registry import (
     INSTANCES_DIRECTORY,
@@ -833,11 +834,12 @@ def test_a_detached_server_record_follows_its_run_and_names_it_throughout() -> N
 
 
 def test_resolved_project_replaces_the_launch_directory_before_listening(tmp_path: Path) -> None:
-    """A live inspection sees the parsed project in both identity contracts."""
+    """A live inspection stores the opened project's root in both identity contracts."""
     launch_directory = tmp_path / "launcher-cwd"
     project = tmp_path / "selected-project"
     launch_directory.mkdir()
     project.mkdir()
+    opened = Project.open(project)
     store = FakeInstanceStore()
     metadata = FakeInstanceMetadataStore()
     clock = ManualClock()
@@ -848,7 +850,7 @@ def test_resolved_project_replaces_the_launch_directory_before_listening(tmp_pat
 
     with registry.register(INSTANCE) as hold:
         publisher = RecordPublisher(hold, starting, clock, metadata=metadata, threads=SimThreads())
-        publisher.resolved(project_root=project, task="latency")
+        publisher.resolved(project_root=opened.root, task="latency")
         publisher.listening()
 
         inspection = InstanceInspector(store, FakeInstanceLogs(), metadata, ManualClock()).inspect(
@@ -857,9 +859,50 @@ def test_resolved_project_replaces_the_launch_directory_before_listening(tmp_pat
         assert inspection.state.value == "live"
         assert inspection.record is not None
         assert inspection.metadata is not None
-        assert inspection.record.project_root == str(project.resolve())
-        assert inspection.metadata.project_root == str(project.resolve())
+        assert inspection.record.project_root == str(opened.root)
+        assert inspection.metadata.project_root == str(opened.root)
         publisher.end()
+
+
+def test_a_tilde_path_and_a_symlink_publish_the_opened_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """One directory: ``Project.root`` after open, for a ``~`` spelling and a symlink."""
+    home = tmp_path / "home"
+    real = home / "proj"
+    real.mkdir(parents=True)
+    link = tmp_path / "link"
+    link.symlink_to(real, target_is_directory=True)
+    monkeypatch.setenv("HOME", str(home))
+    opened = Project.open("~/proj")
+    assert Project.open(link).root == opened.root
+
+    store = FakeInstanceStore()
+    metadata = FakeInstanceMetadataStore()
+    clock = ManualClock()
+    registry = LiveRegistry(store, clock)
+    with registry.register(INSTANCE) as hold:
+        publisher = RecordPublisher(
+            hold, _starting(INSTANCE), clock, metadata=metadata, threads=SimThreads()
+        )
+        publisher.resolved(project_root=opened.root, task="latency")
+        record = registry.find(INSTANCE)
+        assert record is not None
+        assert record.project_root == str(opened.root)
+        publisher.end()
+
+    listing = InstanceList(instances=(record,))
+    run = ProjectRun(
+        run_id=record.run_id,
+        task="latency",
+        display_name="latency",
+        created_at=datetime(2026, 1, 1, tzinfo=UTC),
+    )
+    joined = run_summaries(opened.root, (run,), listing)
+    assert joined.project_root == str(opened.root)
+    assert joined.runs[0].instance_id == INSTANCE
+    missed = run_summaries(link, (run,), listing)
+    assert missed.runs[0].instance_id is None
 
 
 _EARLY_FAILURE = FailureReason(

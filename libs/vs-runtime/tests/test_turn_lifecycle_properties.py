@@ -19,7 +19,15 @@ from vs_agent.api import (
     AgentTurnRequest,
 )
 from vs_agent.api.testing import FakeProvider, FakeTurnScript
-from vs_core.api import CancelOwnedJob, RunId, Scope
+from vs_core.api import (
+    CancelOwnedJob,
+    InvocationId,
+    InvocationRef,
+    RunId,
+    Scope,
+    SessionId,
+    TurnPermit,
+)
 from vs_evaluation.api import EvaluationState, PollPhase
 from vs_runtime.api import AccuracyEvaluation, PollingEvaluationExecutor
 from vs_runtime.api.core import report_turns
@@ -209,7 +217,15 @@ async def test_pause_drain_allows_the_evaluation_an_executing_turn_is_waiting_fo
         FakeAgentExecutionLifecycleSink(),
         control=control,
     )
-    control.prepare_execution("waiting-turn", owner)
+    permit = TurnPermit(
+        turn=InvocationRef(
+            session_id=SessionId(root="waiting"),
+            invocation_id=InvocationId(root="waiting-turn"),
+            generation=0,
+        ),
+        deadline_at=100.0,
+    )
+    control.prepare_execution("waiting-turn", owner, permit=permit)
     agent = asyncio.create_task(
         SimBlockingRunner(threads).run(
             client.run,
@@ -230,7 +246,7 @@ async def test_pause_drain_allows_the_evaluation_an_executing_turn_is_waiting_fo
     request = _request(snapshot).model_copy(
         update={"owner_scope": "run:run", "owner_generation": 0}
     )
-    control.prepare_evaluation(request.key, owner)
+    control.prepare_evaluation(request.key, owner, permit=permit)
     await executor.submit(request, handle_id=_HANDLE)
     assert (await _terminal(executor)).state is EvaluationState.SUCCEEDED
     assert len(evaluation.benchmark_calls) == 1
@@ -272,19 +288,48 @@ def test_pause_drain_job_confirmation_never_requests_a_stop() -> None:
     assert not channel.stop_requested()
 
 
+def _permit(invocation: str) -> TurnPermit:
+    return TurnPermit(
+        turn=InvocationRef(
+            session_id=SessionId(root="session"),
+            invocation_id=InvocationId(root=invocation),
+            generation=0,
+        ),
+        deadline_at=100.0,
+    )
+
+
 def test_pause_drain_does_not_transfer_queued_evaluations_to_a_later_turn() -> None:
+    """An evaluation starts only on the permit that requested it."""
     channel = create_run_control_channel(FakeRunControlEventSink(), threads=SimThreads())
     scope = Scope(owner=RunId(root="run"), generation=0)
+    later = _permit("later-turn")
     channel.prepare_execution("earlier-turn", scope)
     channel.start_execution(lambda: None, execution_id="earlier-turn")
     channel.prepare_evaluation("queued-evaluation", scope)
     channel.finish_execution("earlier-turn")
-    channel.prepare_execution("later-turn", scope)
+    channel.prepare_execution("later-turn", scope, permit=later)
     channel.start_execution(lambda: None, execution_id="later-turn")
-    channel.prepare_evaluation("queued-evaluation", scope)
-    channel.prepare_evaluation("later-evaluation", scope)
+    channel.prepare_evaluation("queued-evaluation", scope, permit=later)
+    channel.prepare_evaluation("later-evaluation", scope, permit=later)
     channel.land_park()
     assert not channel.evaluation_is_dependency("queued-evaluation")
     with pytest.raises(AgentExecutionCancelledError):
         channel.start_execution(lambda: None, evaluation_id="queued-evaluation")
     channel.start_execution(lambda: None, evaluation_id="later-evaluation")
+
+
+@pytest.mark.regression
+def test_a_continuation_starts_after_the_pause_drain() -> None:
+    """Core's permit lets the successor start; the channel does not refuse it."""
+    channel = create_run_control_channel(FakeRunControlEventSink(), threads=SimThreads())
+    scope = Scope(owner=RunId(root="run"), generation=0)
+    permit = _permit("turn")
+    channel.prepare_execution("turn", scope, permit=permit)
+    channel.start_execution(lambda: None, execution_id="turn")
+    channel.land_park()
+    channel.finish_execution("turn")
+    channel.prepare_execution("continuation", scope, permit=permit)
+    started: list[str] = []
+    channel.start_execution(lambda: started.append("continuation"), execution_id="continuation")
+    assert started == ["continuation"]

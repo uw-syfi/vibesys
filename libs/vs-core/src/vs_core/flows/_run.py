@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any
 from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from vs_core._registry import ContractError
-from vs_core._run_pause import FINAL_STOPS
+from vs_core._run_pause import DEADLINE_STOP, ENVIRONMENT_STOP
 from vs_core.types.common import THIS_RUN, AttemptRef, DecisionId, InvocationRef, RunFacts, Seconds
 from vs_core.types.kinds import EventKind
 from vs_core.types.measurement import ComparisonSettled
@@ -852,12 +852,13 @@ class _Run:
 def _overrides(control: ControlInput, taken: StopRequested) -> bool:
     """Whether ``control``, a later stop, names the run's ending over the stop already taken.
 
-    Only one of the host's own stops (``FINAL_STOPS``) does, over an operator's: the operator's
-    stop is a pause, the host's a verdict. Between two of the host's stops the first stands.
+    A host deadline or environment failure overrides an earlier operator shutdown.
+    Between two host causes, the first determines this epoch's result.
     """
-    return (
-        control.control_id.root in FINAL_STOPS and taken.control.control_id.root not in FINAL_STOPS
-    )
+    return control.control_id.root.partition(":")[0] in {
+        DEADLINE_STOP,
+        ENVIRONMENT_STOP,
+    } and taken.control.control_id.root.partition(":")[0] not in {DEADLINE_STOP, ENVIRONMENT_STOP}
 
 
 def _same_plan(old: Measure, new: Measure) -> bool:

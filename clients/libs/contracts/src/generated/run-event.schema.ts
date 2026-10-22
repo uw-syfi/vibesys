@@ -177,6 +177,22 @@ const runEventSchema: Record<string, unknown> = {
           ],
           "default": null,
           "title": "Harness Version"
+        },
+        "client": {
+          "anyOf": [
+            {
+              "enum": [
+                "scripted",
+                "provider"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Client"
         }
       },
       "required": [
@@ -467,6 +483,19 @@ const runEventSchema: Record<string, unknown> = {
       "maxLength": 128,
       "minLength": 1,
       "pattern": "^(?!(?:aux|con|nul|prn|com[1-9]|lpt[1-9])(?:\\.|$))(?!.*\\.$)[a-z0-9][a-z0-9._-]*$(?![\\s\\S])",
+      "type": "string"
+    },
+    "CheckoutStatus": {
+      "description": "Why the optional checkout update advanced or skipped the checkout.",
+      "enum": [
+        "fast_forwarded",
+        "other_branch",
+        "dirty_tree",
+        "diverged",
+        "git_refused",
+        "operator_changed_checkout"
+      ],
+      "title": "CheckoutStatus",
       "type": "string"
     },
     "CommandResultPayload": {
@@ -3927,6 +3956,17 @@ const runEventSchema: Record<string, unknown> = {
           ],
           "default": null,
           "title": "Settlement Id"
+        },
+        "checkout_status": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CheckoutStatus"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [

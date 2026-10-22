@@ -29,11 +29,16 @@ from __future__ import annotations
 import json
 import logging
 import re
+import shutil
+import tempfile
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import pytest
+from hypothesis import HealthCheck, example, given, settings
+from hypothesis import strategies as st
 from tests.server.support import CONTROL_KEY, REQUEST_TIME, operator_dialer
 from tests.support.core_plugins import capability_plugin
 from tests.support.skeleton_strategy import (
@@ -62,6 +67,7 @@ from vs_core.api import AttemptBudget, ItemId, MeasurementFailure, WorkspaceMode
 from vs_core.api.search import Flow, NotOpened, NoWinner, search
 from vs_project.api import OrchestrationDescriptor, Project
 from vs_project.api.testing import FakeGitRepositories
+from vs_runlog.api import RunLogReader
 from vs_runtime.api.core import RunTiming
 from vs_sandbox.api import DockerSandbox, SandboxKind, SubprocessDockerCli
 from vs_sandbox.api.testing import FakeComputeBackend
@@ -82,11 +88,11 @@ from vs_sim.api.testing import (
     Sim,
     SimNetwork,
     SimThreads,
+    examples,
 )
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator, Sequence
-    from pathlib import Path
 
     from vs_sandbox.api import CommandRunner, DockerCli, HostResource
     from vs_sim.api import Connection, Event, Network, ProcessSpec
@@ -417,14 +423,18 @@ class _Client:
     def follow(self, runtime: ServerRuntime) -> None:
         assert runtime.transport_listening.wait(HANG_GUARD_S)
         while not self.ended:
-            assert self.connections < _MAX_CONNECTIONS, self
+            assert self.connections < _MAX_CONNECTIONS, (
+                f"client exhausted {_MAX_CONNECTIONS} connection attempts without a terminal event"
+            )
+            self.connections += 1
             try:
                 connection = operator_dialer(self.network).connect(
                     str(self.socket_path), HANG_GUARD_S
                 )
             except ConnectionRefusedError:
                 return  # the server closed between connections: read_log takes over
-            self.connections += 1
+            except ConnectionError:
+                continue  # the hello itself failed: retry within the same attempt bound
             try:
                 self._read_until_end(connection)
             except ConnectionError:
@@ -460,6 +470,55 @@ class _Client:
     @property
     def ended(self) -> bool:
         return any(event["type"] in _TERMINAL for event in self.events)
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize("kind", [LinkFaultKind.RESET, LinkFaultKind.DROP])
+def test_client_bounds_persistent_hello_failures(
+    tmp_path: Path, sim: Sim, kind: LinkFaultKind
+) -> None:
+    threads = SimThreads(sim.clock)
+
+    def main() -> None:
+        platform = sim.platform(
+            threads,
+            processes=FakeProcesses(_no_git_remote, pass_time=threads.sleep),
+            signaller=FakeProcessSignaller(set()),
+            network_faults=tuple(
+                LinkFault(kind, connection=attempt, before_send=1)
+                for attempt in range(1, _MAX_CONNECTIONS + 2)
+            ),
+        )
+        socket_path = tmp_path / "control.sock"
+        listener = platform.network.listen(str(socket_path))
+        runs = default_runs(
+            LaunchSettings(
+                timing=RunTiming(platform.clock, _LEASE_S, threads),
+                processes=platform.processes,
+                piped_processes=FakePipedProcessLauncher(),
+                blocking=platform.blocking,
+                network=platform.network,
+            )
+        )
+        runtime = ServerRuntime(
+            run_id=_RUN_ID,
+            runs=runs,
+            socket_path=socket_path,
+            control_key=CONTROL_KEY,
+            platform=platform,
+        )
+        runtime.transport_listening.set()
+        client = _Client(platform.network, socket_path)
+        try:
+            with pytest.raises(AssertionError, match=r"exhausted .* connection attempts"):
+                client.follow(runtime)
+            assert client.connections == _MAX_CONNECTIONS
+            assert not client.ended
+        finally:
+            listener.close()
+            runtime.integration.close()
+
+    threads.run(main)
 
 
 _SMALL_BUFFER_BYTES = 4096
@@ -680,6 +739,16 @@ def _assert_invariants(outcome: _Outcome, sim: Sim, faults: _Faults) -> None:
     # Every container the run created is gone, and the run's host lease is free.
     assert outcome.daemon.containers == {}, context
     project = Project.open(outcome.root)
+    with Project.run_log_path_for(project.root, _RUN_ID).open("rb") as stream:
+        endings = [
+            record.body.value.state.value
+            for record in RunLogReader(stream)
+            if record.body is not None
+            and record.body.field == "lifecycle"
+            and record.body.value.state is not None
+            and record.body.value.state.field == "ended"
+        ]
+    assert len(endings) == 1, (context, endings)
     with project.state.exclusive_run_host(_RUN_ID):
         pass
     assert not outcome.socket_path.exists(), context
@@ -700,6 +769,55 @@ def test_a_whole_run_ends_and_releases_everything_despite_dead_processes_and_a_n
     # The agent container receives the provider credential, so the run needs one to open.
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     _check(tmp_path, sim)
+
+
+@pytest.mark.regression
+@settings(
+    max_examples=examples(pr=8, nightly=100),
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
+)
+@example(seed=11857852065211445892)
+@given(seed=st.integers(min_value=0, max_value=2**64 - 1))
+def test_whole_run_faults_produce_one_ending(
+    tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch, seed: int
+) -> None:
+    # The agent container receives the provider credential, so the run needs one to open.
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    case = tmp_path_factory.mktemp("whole")
+    monkeypatch.setenv("VIBESYS_STATE_HOME", str(case / "state"))
+    try:
+        _check(case, Sim(seed=seed, schedule_seed=seed))
+    finally:
+        shutil.rmtree(case)
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize(
+    ("kind", "end"),
+    [
+        (LinkFaultKind.DROP, End.ACCEPTOR),
+        (LinkFaultKind.DROP, End.DIALER),
+        (LinkFaultKind.RESET, End.DIALER),
+    ],
+)
+def test_a_fault_on_the_hello_reconnects(
+    monkeypatch: pytest.MonkeyPatch, kind: LinkFaultKind, end: End
+) -> None:
+    """The dialer's hello is the connection's first send. A drop or reset there is the
+    connection breaking, and the client resumes from its cursor.
+
+    Nightly seeds 0 and 15 dropped the acceptor (``BrokenPipeError``), 17, 18 and 20
+    dropped the dialer (``ConnectionAbortedError``), and 24, 51 and 53 reset the
+    connection (``ConnectionResetError``). Each of those killed the client thread.
+    """
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    # pytest's tmp path plus macOS's ``$TMPDIR`` exceeds the Unix socket path limit.
+    root = Path(tempfile.mkdtemp(prefix="vs-", dir="/tmp")).resolve()
+    try:
+        fault = LinkFault(kind, end=end, connection=1, before_send=1, seconds=1.0)
+        _check(root, Sim(seed=0), _Faults(deaths=(), link=fault))
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
 
 
 @pytest.mark.slow

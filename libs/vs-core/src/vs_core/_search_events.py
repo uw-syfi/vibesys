@@ -281,7 +281,7 @@ def _control(core: CoreState, event: ControlChanged) -> Event:
 
 def _stop_lifted(core: CoreState, event: StopLiftRecorded) -> Event:
     del core
-    return StopLifted(control=event.control)
+    return StopLifted(control=event.control, new_epoch=event.new_epoch)
 
 
 def _delivered(core: CoreState, event: InputDelivered) -> Event:

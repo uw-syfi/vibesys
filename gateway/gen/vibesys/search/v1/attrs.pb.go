@@ -7,8 +7,9 @@
 package searchv1
 
 import (
-	_ "github.com/uw-syfi/vibesys/gateway/gen/buf/validate"
-	v1 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1"
+	_ "buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go/buf/validate"
+	v1 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/core/v1"
+	v11 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
@@ -1178,12 +1179,14 @@ func (x *InputFailure) GetStageId() string {
 }
 
 type AdoptionAttrs struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Candidate     *string                `protobuf:"bytes,1,opt,name=candidate,proto3,oneof" json:"candidate,omitempty"`
-	Selection     Selection              `protobuf:"varint,2,opt,name=selection,proto3,enum=vibesys.search.v1.Selection" json:"selection,omitempty"`
-	SettlementId  *string                `protobuf:"bytes,3,opt,name=settlement_id,json=settlementId,proto3,oneof" json:"settlement_id,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state        protoimpl.MessageState `protogen:"open.v1"`
+	Candidate    *string                `protobuf:"bytes,1,opt,name=candidate,proto3,oneof" json:"candidate,omitempty"`
+	Selection    Selection              `protobuf:"varint,2,opt,name=selection,proto3,enum=vibesys.search.v1.Selection" json:"selection,omitempty"`
+	SettlementId *string                `protobuf:"bytes,3,opt,name=settlement_id,json=settlementId,proto3,oneof" json:"settlement_id,omitempty"`
+	// The checkout publication status (vibesys.core.v1.CheckoutStatus), when the run recorded one.
+	CheckoutStatus *v1.CheckoutStatus `protobuf:"varint,4,opt,name=checkout_status,json=checkoutStatus,proto3,enum=vibesys.core.v1.CheckoutStatus,oneof" json:"checkout_status,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *AdoptionAttrs) Reset() {
@@ -1237,13 +1240,20 @@ func (x *AdoptionAttrs) GetSettlementId() string {
 	return ""
 }
 
+func (x *AdoptionAttrs) GetCheckoutStatus() v1.CheckoutStatus {
+	if x != nil && x.CheckoutStatus != nil {
+		return *x.CheckoutStatus
+	}
+	return v1.CheckoutStatus(0)
+}
+
 // Links named candidate and base identify the compared spans. No commit-hash
 // join keys are copied here. ratio and noise describe their sampled comparison.
 type ComparisonAttrs struct {
 	state            protoimpl.MessageState `protogen:"open.v1"`
 	Metric           string                 `protobuf:"bytes,1,opt,name=metric,proto3" json:"metric,omitempty"`
 	Unit             string                 `protobuf:"bytes,2,opt,name=unit,proto3" json:"unit,omitempty"`
-	Direction        v1.Direction           `protobuf:"varint,3,opt,name=direction,proto3,enum=vibesys.store.v1.Direction" json:"direction,omitempty"`
+	Direction        v11.Direction          `protobuf:"varint,3,opt,name=direction,proto3,enum=vibesys.store.v1.Direction" json:"direction,omitempty"`
 	Ratio            float64                `protobuf:"fixed64,4,opt,name=ratio,proto3" json:"ratio,omitempty"`
 	Noise            float64                `protobuf:"fixed64,5,opt,name=noise,proto3" json:"noise,omitempty"`
 	Verdict          ComparisonVerdict      `protobuf:"varint,6,opt,name=verdict,proto3,enum=vibesys.search.v1.ComparisonVerdict" json:"verdict,omitempty"`
@@ -1299,11 +1309,11 @@ func (x *ComparisonAttrs) GetUnit() string {
 	return ""
 }
 
-func (x *ComparisonAttrs) GetDirection() v1.Direction {
+func (x *ComparisonAttrs) GetDirection() v11.Direction {
 	if x != nil {
 		return x.Direction
 	}
-	return v1.Direction(0)
+	return v11.Direction(0)
 }
 
 func (x *ComparisonAttrs) GetRatio() float64 {
@@ -1363,7 +1373,7 @@ type BaselineAttrs struct {
 	Status        BaselineStatus         `protobuf:"varint,2,opt,name=status,proto3,enum=vibesys.search.v1.BaselineStatus" json:"status,omitempty"`
 	Metric        *string                `protobuf:"bytes,3,opt,name=metric,proto3,oneof" json:"metric,omitempty"`
 	Unit          *string                `protobuf:"bytes,4,opt,name=unit,proto3,oneof" json:"unit,omitempty"`
-	Direction     *v1.Direction          `protobuf:"varint,5,opt,name=direction,proto3,enum=vibesys.store.v1.Direction,oneof" json:"direction,omitempty"`
+	Direction     *v11.Direction         `protobuf:"varint,5,opt,name=direction,proto3,enum=vibesys.store.v1.Direction,oneof" json:"direction,omitempty"`
 	Value         *float64               `protobuf:"fixed64,6,opt,name=value,proto3,oneof" json:"value,omitempty"`
 	Spread        *float64               `protobuf:"fixed64,7,opt,name=spread,proto3,oneof" json:"spread,omitempty"`
 	Samples       *uint32                `protobuf:"varint,8,opt,name=samples,proto3,oneof" json:"samples,omitempty"`
@@ -1431,11 +1441,11 @@ func (x *BaselineAttrs) GetUnit() string {
 	return ""
 }
 
-func (x *BaselineAttrs) GetDirection() v1.Direction {
+func (x *BaselineAttrs) GetDirection() v11.Direction {
 	if x != nil && x.Direction != nil {
 		return *x.Direction
 	}
-	return v1.Direction(0)
+	return v11.Direction(0)
 }
 
 func (x *BaselineAttrs) GetValue() float64 {
@@ -1477,7 +1487,7 @@ var File_vibesys_search_v1_attrs_proto protoreflect.FileDescriptor
 
 const file_vibesys_search_v1_attrs_proto_rawDesc = "" +
 	"\n" +
-	"\x1dvibesys/search/v1/attrs.proto\x12\x11vibesys.search.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1dvibesys/store/v1/common.proto\"#\n" +
+	"\x1dvibesys/search/v1/attrs.proto\x12\x11vibesys.search.v1\x1a\x1bbuf/validate/validate.proto\x1a vibesys/core/v1/vocabulary.proto\x1a\x1dvibesys/store/v1/common.proto\"#\n" +
 	"\rPlanningAttrs\x12\x12\n" +
 	"\x04call\x18\x01 \x01(\rR\x04call\"\xff\x06\n" +
 	"\x0fWorkstreamAttrs\x125\n" +
@@ -1577,16 +1587,19 @@ const file_vibesys_search_v1_attrs_proto_rawDesc = "" +
 	"\bcompared\x18\x04 \x01(\bR\bcompared\x12)\n" +
 	"\bstage_id\x18\x05 \x01(\tB\t\xbaH\x06r\x04(\x80\x80\x04H\x01R\astageId\x88\x01\x01B\b\n" +
 	"\x06_stageB\v\n" +
-	"\t_stage_id\"\xd4\x02\n" +
+	"\t_stage_id\"\xc3\x03\n" +
 	"\rAdoptionAttrs\x12.\n" +
 	"\tcandidate\x18\x01 \x01(\tB\v\xbaH\br\x06\x10\x01(\x80\x80\x04H\x00R\tcandidate\x88\x01\x01\x12F\n" +
 	"\tselection\x18\x02 \x01(\x0e2\x1c.vibesys.search.v1.SelectionB\n" +
 	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\tselection\x125\n" +
-	"\rsettlement_id\x18\x03 \x01(\tB\v\xbaH\br\x06\x10\x01(\x80\x80\x04H\x01R\fsettlementId\x88\x01\x01:t\xbaHq\x1ao\n" +
+	"\rsettlement_id\x18\x03 \x01(\tB\v\xbaH\br\x06\x10\x01(\x80\x80\x04H\x01R\fsettlementId\x88\x01\x01\x12Y\n" +
+	"\x0fcheckout_status\x18\x04 \x01(\x0e2\x1f.vibesys.core.v1.CheckoutStatusB\n" +
+	"\xbaH\a\x82\x01\x04\x10\x01 \x00H\x02R\x0echeckoutStatus\x88\x01\x01:t\xbaHq\x1ao\n" +
 	"\x12adoption.candidate\x12-candidate is required for candidate selection\x1a*this.selection != 1 || has(this.candidate)B\f\n" +
 	"\n" +
 	"_candidateB\x10\n" +
-	"\x0e_settlement_id\"\xcc\x04\n" +
+	"\x0e_settlement_idB\x12\n" +
+	"\x10_checkout_status\"\xcc\x04\n" +
 	"\x0fComparisonAttrs\x12#\n" +
 	"\x06metric\x18\x01 \x01(\tB\v\xbaH\br\x06\x10\x01(\x80\x80\x04R\x06metric\x12\x1d\n" +
 	"\x04unit\x18\x02 \x01(\tB\t\xbaH\x06r\x04(\x80\x80\x04R\x04unit\x12E\n" +
@@ -1732,7 +1745,8 @@ var file_vibesys_search_v1_attrs_proto_goTypes = []any{
 	(*AdoptionAttrs)(nil),      // 16: vibesys.search.v1.AdoptionAttrs
 	(*ComparisonAttrs)(nil),    // 17: vibesys.search.v1.ComparisonAttrs
 	(*BaselineAttrs)(nil),      // 18: vibesys.search.v1.BaselineAttrs
-	(v1.Direction)(0),          // 19: vibesys.store.v1.Direction
+	(v1.CheckoutStatus)(0),     // 19: vibesys.core.v1.CheckoutStatus
+	(v11.Direction)(0),         // 20: vibesys.store.v1.Direction
 }
 var file_vibesys_search_v1_attrs_proto_depIdxs = []int32{
 	11, // 0: vibesys.search.v1.WorkstreamAttrs.failure:type_name -> vibesys.search.v1.WorkstreamFailure
@@ -1747,15 +1761,16 @@ var file_vibesys_search_v1_attrs_proto_depIdxs = []int32{
 	7,  // 9: vibesys.search.v1.InputFailure.kind:type_name -> vibesys.search.v1.InputFailureKind
 	0,  // 10: vibesys.search.v1.InputFailure.stage:type_name -> vibesys.search.v1.GateStage
 	4,  // 11: vibesys.search.v1.AdoptionAttrs.selection:type_name -> vibesys.search.v1.Selection
-	19, // 12: vibesys.search.v1.ComparisonAttrs.direction:type_name -> vibesys.store.v1.Direction
-	5,  // 13: vibesys.search.v1.ComparisonAttrs.verdict:type_name -> vibesys.search.v1.ComparisonVerdict
-	6,  // 14: vibesys.search.v1.BaselineAttrs.status:type_name -> vibesys.search.v1.BaselineStatus
-	19, // 15: vibesys.search.v1.BaselineAttrs.direction:type_name -> vibesys.store.v1.Direction
-	16, // [16:16] is the sub-list for method output_type
-	16, // [16:16] is the sub-list for method input_type
-	16, // [16:16] is the sub-list for extension type_name
-	16, // [16:16] is the sub-list for extension extendee
-	0,  // [0:16] is the sub-list for field type_name
+	19, // 12: vibesys.search.v1.AdoptionAttrs.checkout_status:type_name -> vibesys.core.v1.CheckoutStatus
+	20, // 13: vibesys.search.v1.ComparisonAttrs.direction:type_name -> vibesys.store.v1.Direction
+	5,  // 14: vibesys.search.v1.ComparisonAttrs.verdict:type_name -> vibesys.search.v1.ComparisonVerdict
+	6,  // 15: vibesys.search.v1.BaselineAttrs.status:type_name -> vibesys.search.v1.BaselineStatus
+	20, // 16: vibesys.search.v1.BaselineAttrs.direction:type_name -> vibesys.store.v1.Direction
+	17, // [17:17] is the sub-list for method output_type
+	17, // [17:17] is the sub-list for method input_type
+	17, // [17:17] is the sub-list for extension type_name
+	17, // [17:17] is the sub-list for extension extendee
+	0,  // [0:17] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_search_v1_attrs_proto_init() }

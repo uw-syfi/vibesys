@@ -1667,7 +1667,7 @@ const hostHelperSchema: Record<string, unknown> = {
     },
     "EndRecord": {
       "additionalProperties": false,
-      "description": "How a run ended, as its tombstone reports it: the sidebar's Recent row and the ended banner.\n\n``resumable`` says whether a resume continues the run: its durable record exists and is not\nterminal. ``resume_from_round`` is the round that resume starts at, when the server knew it\n(a crashed server did not say). ``uncompared``: the run adopted a candidate never compared\nwith the input (it failed its own measurement), whichever ``outcome`` ended it.",
+      "description": "How a run ended, as its tombstone reports it: the sidebar's Recent row and the ended banner.\n\n``resumable`` is retained for older readers; current controls permit every ending.\nLaunch checks storage and writer exclusion; ``resume_from_round`` is the next round\n(a crashed server did not say). ``uncompared``: the run adopted a candidate never compared\nwith the input (it failed its own measurement), whichever ``outcome`` ended it.",
       "properties": {
         "outcome": {
           "$ref": "#/$defs/RunEndOutcome"
@@ -8058,6 +8058,22 @@ const hostHelperSchema: Record<string, unknown> = {
             }
           ],
           "title": "Model"
+        },
+        "client": {
+          "anyOf": [
+            {
+              "enum": [
+                "scripted",
+                "provider"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Client"
         },
         "reasoning_effort": {
           "anyOf": [

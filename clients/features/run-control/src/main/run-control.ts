@@ -34,7 +34,6 @@ import {
   type ConnectionStatus,
   type HostId,
   type HostKey,
-  hostFromKey,
   hostKey,
   hostLabel,
   instanceObservation,
@@ -44,7 +43,6 @@ import type {ResumeRunId} from '@vibesys/runs';
 import type {StoredRecentRun} from '@vibesys/settings';
 import {LiveFanout} from './live-fanout.js';
 import {type RelayPort, relay} from './relay.js';
-import {StopController} from './stop-controller.js';
 
 /** How a start ended: attached, or cancelled (and its run stopped). */
 export type StartOutcome = 'started' | 'cancelled';
@@ -77,7 +75,6 @@ export interface RunControlDeps {
     title: {readonly hostLabel: string; readonly task: string | null},
   ): RunPage;
   /** Ask the user; resolves true on "yes". */
-  confirm(text: string): Promise<boolean>;
   /** Record a run only while `current` says this selection still owns navigation. */
   remember(run: StoredRecentRun, current: () => boolean): Promise<void>;
   /** The window's state changed: send it again. */
@@ -156,7 +153,6 @@ interface Launch {
 export class RunControl {
   readonly #liveFanout = new LiveFanout();
   readonly #deps: RunControlDeps;
-  readonly #stops: StopController;
   /** Every run bound to a window, by `run_id`. */
   readonly #bindings = new Map<string, Binding>();
   /** The claim currently navigating toward (or already bound to) each target, by `targetKey`. */
@@ -172,30 +168,6 @@ export class RunControl {
 
   constructor(deps: RunControlDeps) {
     this.#deps = deps;
-    this.#stops = new StopController({
-      stop: async (host, instanceId, force, current) => {
-        await using lease = await deps.connection(hostFromKey(host));
-        const attempt = await lease.connection.requestIfCurrent(
-          {type: 'run.stop', instance_id: instanceId, force},
-          current,
-        );
-        switch (attempt.kind) {
-          case 'not-written':
-            return attempt;
-          case 'answered':
-            return {kind: 'answered', result: attempt.reply.result};
-          case 'failed':
-            return {
-              kind: 'failed',
-              written: attempt.written,
-              message:
-                attempt.error instanceof Error ? attempt.error.message : String(attempt.error),
-            };
-        }
-      },
-      confirm: text => deps.confirm(text),
-      changed: () => deps.changed(),
-    });
   }
 
   /** The most recently bound run, or null when none is bound. */
@@ -337,17 +309,6 @@ export class RunControl {
   async resume(id: HostId, project: string, run: ResumeRunId): Promise<void> {
     const launch: Launch = {task: null, args: [], resume: {run_id: run}, harness: null};
     await this.#launch(id, project, launch, this.#newClaim());
-  }
-
-  /** Stop `instanceId` on `id` after asking, unless the view that asked was already `confirmed`. */
-  async stop(id: HostId, instanceId: string, force: boolean, confirmed: boolean): Promise<void> {
-    const run = this.#bindingFor(id, instanceId);
-    const label = run?.task ?? run?.runId ?? instanceId;
-    await this.#stops.request(
-      {host: hostKey(id), hostLabel: hostLabel(id), instanceId, label},
-      force,
-      confirmed,
-    );
   }
 
   /**
@@ -493,20 +454,33 @@ export class RunControl {
       const current = (): boolean => !this.#isTargeted(id, record.id);
       if (!current()) continue;
       this.#deps.log(`${reason}; stopping run ${record.id}`);
-      const result = await this.#stops.stopConfirmed(
-        {
-          host: hostKey(id),
-          hostLabel: hostLabel(id),
-          instanceId: record.id,
-          label: record.run_id,
-        },
-        current,
-      );
-      if (result.kind === 'withdrawn') continue;
-      if (result.kind === 'failed')
-        this.#deps.log(`could not stop superseded run ${record.id}: ${result.message}`);
+      if (!(await this.#cancelUnattached(id, record.id, current))) continue;
       return;
     }
+  }
+
+  /** Cancel only while no newer claim owns the target; a written failure is still settled. */
+  async #cancelUnattached(
+    id: HostId,
+    instanceId: string,
+    current: () => boolean,
+  ): Promise<boolean> {
+    try {
+      await using lease = await this.#deps.connection(id);
+      const result = await lease.connection.requestIfCurrent(
+        {type: 'run.stop', instance_id: instanceId, force: false},
+        current,
+      );
+      if (result.kind === 'not-written') return false;
+      if (result.kind === 'failed') throw result.error;
+      if (!['stopped', 'stopping', 'not_running'].includes(result.reply.result.outcome)) {
+        throw new Error(result.reply.result.outcome);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.#deps.log(`could not stop superseded run ${instanceId}: ${message}`);
+    }
+    return true;
   }
 
   /** True when a target is bound, or a live claim is still navigating toward it. */
@@ -737,8 +711,6 @@ export class RunControl {
   }
 
   #listing(binding: Binding, listing: InstanceList): void {
-    const host = hostKey(binding.id);
-    this.#stops.observeListing(host, listing);
     if (this.#bindings.get(binding.runId) !== binding) return;
     const observation = instanceObservation(listing, binding.instanceId);
     switch (observation.kind) {
@@ -762,7 +734,6 @@ export class RunControl {
       return;
     }
     binding.status = {kind: 'run-ended'};
-    this.#stops.runEnded(hostKey(binding.id), binding.instanceId);
     this.#deps.changed();
   }
 

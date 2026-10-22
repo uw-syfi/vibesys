@@ -21,19 +21,22 @@ import sys
 from pathlib import Path
 from vs_proto.api import schema_hash
 image = Path(sys.argv[1]).read_bytes()
-for package in ("vibesys.api.v1", "vibesys.store.v1"):
+for package in ("vibesys.api.v1", "vibesys.store.v1", "vibesys.host.v1"):
     print(schema_hash(image, package))
 PYTHON
 uv run --locked python - <<'PYTHON' > "$work/python"
-from vs_proto.api import API_SCHEMA_HASH, STORE_SCHEMA_HASH
+from vs_proto.api import API_SCHEMA_HASH, STORE_SCHEMA_HASH, HOST_SCHEMA_HASH
 print(API_SCHEMA_HASH)
 print(STORE_SCHEMA_HASH)
+print(HOST_SCHEMA_HASH)
 PYTHON
-pnpm --dir clients --filter @vibesys/proto build
+# The solution config references the library build; check and emit it once.
+pnpm --dir clients --filter @vibesys/proto check
 node --input-type=module - <<'JS' > "$work/typescript"
-import {API_SCHEMA_HASH, STORE_SCHEMA_HASH} from './clients/libs/proto/dist/index.js';
+import {API_SCHEMA_HASH, STORE_SCHEMA_HASH, HOST_SCHEMA_HASH} from './clients/libs/proto/dist/index.js';
 console.log(API_SCHEMA_HASH);
 console.log(STORE_SCHEMA_HASH);
+console.log(HOST_SCHEMA_HASH);
 JS
 (cd gateway && go run ./cmd/schema-hashes) > "$work/go"
 for language in python typescript go; do

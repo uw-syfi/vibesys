@@ -203,6 +203,8 @@ message ControlInput {
 
 // Durable drain authority. A parked run can resume only in a later host epoch.
 message RunPark {
+  repeated InvocationRef admitted_turns = 4;
+  bool immediate = 3;
   ControlId control_id = 1 [(buf.validate.field).required = true];
   string epoch = 2 [(buf.validate.field).string.pattern = "^(0|[1-9][0-9]*)$", (core_field).integer = true];
 }

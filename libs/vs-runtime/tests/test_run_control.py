@@ -28,7 +28,6 @@ from vs_runtime.api.infrastructure import (
     CapacityWake,
     ChannelRunControl,
     ControlStatus,
-    PauseRequest,
     PauseWake,
     RefusalReason,
     ResumeRequest,
@@ -39,7 +38,6 @@ from vs_runtime.api.infrastructure import (
     SteerDeliveryState,
     SteerMode,
     SteerTurn,
-    StopRequest,
     create_run_control_channel,
 )
 from vs_runtime.api.testing import FakeRunControlEventSink
@@ -704,7 +702,7 @@ def test_a_stop_only_escalates_and_every_escalation_reaches_core(
     for op in [*ops, ("poll",)]:
         match op:
             case ("stop", StopMode() as mode):
-                control.submit(StopRequest(control_id=f"stop-{len(asked)}", mode=mode))
+                control.stop(mode)
                 asked.append(mode)
             case _:
                 for event in bridge.poll(core, core.run.now_at):
@@ -734,6 +732,7 @@ _STOP_RESUME_OPS = st.lists(
 @example(ops=[("stop", StopMode.CANCEL), ("poll",), ("resume",)])
 @example(ops=[("stop", StopMode.CANCEL), ("resume",), ("poll",)])
 @example(ops=[("pause",), ("stop", StopMode.DRAIN), ("resume",)])
+@example(ops=[("pause",), ("poll",), ("resume",), ("stop", StopMode.DRAIN)])
 @given(ops=_STOP_RESUME_OPS)
 def test_no_resume_ever_weakens_a_pending_stop(
     ops: list[tuple[str, StopMode] | tuple[str]],
@@ -754,7 +753,7 @@ def test_no_resume_ever_weakens_a_pending_stop(
         held, recorded = channel.stop_mode(), stop_mode(core.run)
         match op:
             case ("stop", StopMode() as mode):
-                control.submit(StopRequest(control_id=f"op-{number}", mode=mode))
+                control.stop(mode)
                 asked.append(mode)
             case ("resume",):
                 ack = control.submit(ResumeRequest(control_id=f"op-{number}"))
@@ -764,7 +763,7 @@ def test_no_resume_ever_weakens_a_pending_stop(
                         RefusalReason.STOPPING,
                     )
             case ("pause",):
-                control.submit(PauseRequest(control_id=f"op-{number}"))
+                channel.pause_for_quota()
             case _:
                 for event in bridge.poll(core, core.run.now_at):
                     core = step(core, event).state
@@ -847,7 +846,7 @@ def test_a_stop_core_recorded_stays_in_force_across_a_runtime_restart(
     for number, op in enumerate([*ops, ("poll",)]):
         match op:
             case ("stop", StopMode() as mode):
-                process.control.submit(StopRequest(control_id=f"op-{number}", mode=mode))
+                process.control.stop(mode)
             case ("resume",):
                 ack = process.control.submit(ResumeRequest(control_id=f"op-{number}"))
                 if polled and stop_mode(core.run) is not None:

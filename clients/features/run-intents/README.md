@@ -17,7 +17,7 @@ fills HostCall's checkout from the host's current saved configuration. The
 feature never chooses an executable. Its actor cancels every owned call when
 unmounted or disabled. The legacy controls stay on the legacy path.
 
-Pause, resume, stop (drain), park, and guidance are visible controls. The typed host
+Pause, Pause now, Resume and Guidance are the visible run controls. The typed host
 surface also accepts withdraw, cancel-attempt, cancel-item, and set-parallelism.
 The command uses the existing inbox's validation, posting order, idempotence,
 local-run guard, and ended-run rules. Retrying after an uncertain result sends

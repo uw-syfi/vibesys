@@ -22,6 +22,7 @@ from vs_core.api import (
     Decision,
     Discarded,
     DispatchAuthorized,
+    EpochResumed,
     EventCursor,
     HostFence,
     HostId,
@@ -47,6 +48,8 @@ from vs_core.api import (
     deferred,
     encode_json,
     orphan_waits,
+    pause_withdraws,
+    permit_for_request,
     run_view,
     share_unchanged,
     step,
@@ -71,7 +74,7 @@ from vs_runtime._core_requests import (
 from vs_runtime._evaluation_jobs import awaits_submissions
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator
+    from collections.abc import Callable, Iterator, Sequence
 
     from vs_core.api import OpenWait, Request
     from vs_project.api import Project
@@ -305,6 +308,15 @@ class _Flight:
 
 
 @dataclass(frozen=True)
+class _Delivery:
+    """One publication whose bytes are in flight; only the shell writer commits its cursor."""
+
+    publication: Publication
+    now_at: float
+    task: asyncio.Task[PublicationAcknowledgement]
+
+
+@dataclass(frozen=True)
 class CoreRuntimeBindings:
     """Closed composition choices, separate from durable shell state."""
 
@@ -312,6 +324,8 @@ class CoreRuntimeBindings:
     executors: RequestExecutors = field(default_factory=RequestExecutors)
     transitions: CoreTransitions = field(default_factory=ProductionCoreTransitions)
     commits: CommitObserver = field(default_factory=IgnoreCommits)
+    epoch: Callable[[], int | None] = lambda: None
+    """Native writer identity derived from run.log; absent for an unjournaled host."""
     check_liveness: bool = False
     """Check ``orphan_waits`` after every commit, not only at start. Linear in state size."""
     steering: TurnSteering | None = None
@@ -346,6 +360,7 @@ class CoreRuntime[S: StrategyState]:
         self._config = config
         self._initial = initial
         selected = bindings or CoreRuntimeBindings()
+        self._epoch = selected.epoch
         self._registry = selected.registry
         self._executors = selected.executors
         self._transitions = selected.transitions
@@ -375,6 +390,8 @@ class CoreRuntime[S: StrategyState]:
         self._kinds: dict[str, int] = {}
         # A delivery failure waits here, with publishing paused, until nothing is running.
         self._publication_failure: OSError | ContractError | None = None
+        # The publication whose delivery is in flight. Its cursor commits on this thread.
+        self._delivery: _Delivery | None = None
         # Latest time a lease renewal or check supplied; commits never use an earlier time.
         self._time_floor = 0.0
         # When the store last granted this host its lease (acquired or renewed), and the
@@ -386,9 +403,6 @@ class CoreRuntime[S: StrategyState]:
         self._held: list[_Input[S]] = []
         # Operator controls core refused since the run loop last took them (``take_refused``).
         self._refused: list[ControlRefusedError] = []
-        # State after the admitted inputs still queued, valid while core stays at one revision
-        # (a publication or lease commit changes the storage revision, not core).
-        self._tail: tuple[int, CoreState] | None = None
         # The (run, registry) values `_check_identity` last accepted. Both are frozen, so
         # the same objects always give the same verdict.
         self._identity_verified: tuple[object, object] | None = None
@@ -501,7 +515,7 @@ class CoreRuntime[S: StrategyState]:
             self._start_checked = (self._record, host_id)
 
     def _provisional(
-        self, host_id: str, *, now_at: float
+        self, host_id: str, *, now_at: float, resume: bool = False
     ) -> tuple[RunEnvelope[S], tuple[Decision, ...]]:
         """The envelope a start by ``host_id`` would commit, validated, and a new run's decisions.
 
@@ -512,6 +526,18 @@ class CoreRuntime[S: StrategyState]:
             if self._record is None
             else self.record.envelope.core
         )
+        duration = core.run.duration_seconds or self._initial.run.duration_seconds
+        if duration is not None and (self._record is None or resume):
+            core = core.model_copy(
+                update={
+                    "run": core.run.model_copy(
+                        update={
+                            "duration_seconds": duration,
+                            "deadline_at": max(core.run.now_at, now_at) + duration,
+                        }
+                    )
+                }
+            )
         if not core.run.declaration.resumable_as(self._search.declaration):
             raise ContractError(("declaration",), "initial strategy declaration mismatch")
         selected = validate_startup(self._search.declaration, core.run.capabilities)
@@ -560,8 +586,13 @@ class CoreRuntime[S: StrategyState]:
             # A resumed run's start never reads its time before taking the lease.
             self._provisional(host_id, now_at=self.record.envelope.core.run.now_at)
 
-    def start(self, host_id: str, *, now_at: float, lease_duration: float) -> None:
-        """Validate before lease acquisition, then commit new-epoch recovery.
+    def start(
+        self, host_id: str, *, now_at: float, lease_duration: float, resume: bool = False
+    ) -> None:
+        """Validate before lease acquisition, then reconcile the writer.
+
+        Only ``resume`` constructs fresh run authority; crash recovery retains
+        the run's closure and replays its existing flow journal.
 
         No backend setup or execution occurs here. Unfinished identities produce
         inspection requests; core gates ordinary admission until reconciled.
@@ -570,15 +601,20 @@ class CoreRuntime[S: StrategyState]:
             message = "runtime already started"
             raise RuntimeError(message)
         self._load()
-        provisional, decisions = self._provisional(host_id, now_at=now_at)
+        provisional, decisions = self._provisional(host_id, now_at=now_at, resume=resume)
+        published_epoch = self._epoch()
         fence = self._store.acquire(host_id, now=now_at, duration=lease_duration)
         if fence is None:
             message = "runtime lease unavailable"
             raise LeaseUnavailableError(message)
+        epoch = fence.epoch if published_epoch is None else published_epoch
+        if published_epoch is not None and epoch <= provisional.core.records.recovery.epoch:
+            self._store.release(fence, now=now_at)
+            raise ContractError(("epoch",), "run.log must publish a successor before recovery")
         self._fence = fence
         self._renewed_at = now_at
         provisional = provisional.model_copy(
-            update={"fence": HostFence(host_id=HostId(root=fence.host_id), epoch=fence.epoch)}
+            update={"fence": HostFence(host_id=HostId(root=fence.host_id), epoch=epoch)}
         )
         previous_record = self._record
         previous_revision = self._storage_revision
@@ -590,7 +626,9 @@ class CoreRuntime[S: StrategyState]:
         try:
             self._consume(
                 _Input[S](
-                    event=RecoveryStarted(epoch=fence.epoch, now_at=now_at),
+                    event=EpochResumed(epoch=epoch, now_at=now_at)
+                    if resume
+                    else RecoveryStarted(epoch=epoch, now_at=now_at),
                     now_at=now_at,
                 )
             )
@@ -665,7 +703,10 @@ class CoreRuntime[S: StrategyState]:
         ):
             return
         self._renewal_queued_at = renewed_at
-        self.submit(HostRenewed(epoch=self._fence.epoch, now_at=renewed_at), now_at=renewed_at)
+        self.submit(
+            HostRenewed(epoch=self.record.envelope.fence.epoch, now_at=renewed_at),
+            now_at=renewed_at,
+        )
 
     def release_lease(self, *, now_at: float) -> None:
         """Give the lease back so a restart need not wait for it to expire.
@@ -707,39 +748,25 @@ class CoreRuntime[S: StrategyState]:
         self._queue.append(_Input[S](event=event, now_at=now_at))
 
     def admit(self, event: CoreEvent, *, now_at: float) -> Transition:
-        """Queue an input and return the transition core will commit for it.
+        """Commit an admitted input before returning core's answer.
 
-        An agent tool call arrives while a turn holds the shell, so its answer cannot
-        wait for the next commit. Core's step is pure: this runs it against the state
-        after every admitted input still queued and returns the result, which the
-        later commit reproduces because nothing else commits during a turn. A rejected
-        event raises ``ContractError`` and queues nothing. Admission needs an idle
-        queue, or only admitted inputs in it, and says so loudly otherwise.
+        A tool may expose the answer immediately and acknowledge its owed receipt, so
+        the charge cannot wait for the turn or a publication to finish. This synchronous
+        write shares the loop's writer and cannot interleave with another commit.
+        An earlier queued input must be consumed first by the loop; a rejected event
+        raises ``ContractError`` without committing it.
         """
         self._require_active(queue_only=True)
-        tail = self._tail
-        if tail is not None and tail[0] == self.record.envelope.core.revision:
-            base = tail[1]
-        elif self._queue:
+        if self._queue:
             raise AdmissionBusyError
-        else:
-            base = self.record.envelope.core
-        transition = self._transitions.step(base, event)
-        self._queue.append(_Input[S](event=event, now_at=now_at))
-        self._tail = (self.record.envelope.core.revision, transition.state)
+        transition = self._transitions.step(self.record.envelope.core, event)
+        self._consume(_Input[S](event=event, now_at=now_at), transition)
         return transition
 
     @property
     def admitted_core(self) -> CoreState:
-        """Core's state after the admitted inputs still queued, or the committed state.
-
-        An agent's tool call is admitted while the loop keeps committing, so what the call
-        asked for (a submission, which owns a job) may not be committed yet. A caller that
-        asks core whether a later call is valid asks this state.
-        """
-        core = self.record.envelope.core
-        tail = self._tail
-        return tail[1] if tail is not None and tail[0] == core.revision else core
+        """The committed core, including every admission that returned successfully."""
+        return self.record.envelope.core
 
     @property
     def next_wake_at(self) -> float | None:
@@ -1108,12 +1135,14 @@ class CoreRuntime[S: StrategyState]:
             raise ContractError(
                 ("dispatch_authorized",), "exact canonical request must be durably authorized"
             )
+        core = self.record.envelope.core
         context = ExecutionContext(
             fence=self.record.envelope.fence,
             now_at=now_at,
             payload_digest=record.payload_digest,
             until=authorized_record.until,
             lease=_ShellLease(self),
+            permit=permit_for_request(core, authorized_record.request),
         )
         self._authorizations += 1
         return _Flight(
@@ -1191,33 +1220,17 @@ class CoreRuntime[S: StrategyState]:
     async def publish_one(self, delivery: PublicationDelivery, *, now_at: float) -> bool:
         """Append with stable ID, then acknowledge using only a storage revision."""
         self._require_active()
-        if not self.record.pending_publications:
+        self._begin_delivery(delivery, now_at)
+        current = self._delivery
+        if current is None:
             return False
-        if self._fence is None or not self._store.verify(
-            self._fence, now=max(now_at, self._time_floor)
-        ):
-            self._halted = True
-            message = "runtime fence lost before publication"
-            raise RuntimeCommitError(message)
-        publication = self.record.pending_publications[0]
-        self._time_floor = max(self._time_floor, now_at)
         self._busy = True
         try:
-            await delivery.publish(
-                publication, PublicationContext(now_at=self._time_floor, lease=_ShellLease(self))
-            )
-            self._commit(
-                self.record.model_copy(
-                    update={
-                        "pending_publications": self.record.pending_publications[1:],
-                        "delivery_cursor": publication.sequence,
-                    }
-                ),
-                now_at,
-            )
+            await current.task
+            return self._finish_delivery()
         finally:
+            self._delivery = None
             self._busy = False
-        return True
 
     def _check_cap(self, cap: int | None) -> None:
         if cap is not None and self._dispatched + len(self._flights) > cap:
@@ -1306,12 +1319,80 @@ class CoreRuntime[S: StrategyState]:
             raise publication_error
         return None
 
+    def _begin_delivery(self, delivery: PublicationDelivery, now_at: float) -> None:
+        """Start delivering the next publication, without committing it."""
+        if self._delivery is not None or not self.record.pending_publications:
+            return
+        self._require_active()
+        if self._fence is None or not self._store.verify(
+            self._fence, now=max(now_at, self._time_floor)
+        ):
+            self._halted = True
+            message = "runtime fence lost before publication"
+            raise RuntimeCommitError(message)
+        publication = self.record.pending_publications[0]
+        self._time_floor = max(self._time_floor, now_at)
+        context = PublicationContext(now_at=self._time_floor, lease=_ShellLease(self))
+        # Preserve the synchronous prefix of the old direct await. Scheduling even an
+        # immediate delivery later lets executor/tool callbacks run before its cursor
+        # commits, moving crash boundaries and the loop's control-observation points.
+        self._delivery = _Delivery(
+            publication,
+            now_at,
+            asyncio.Task(
+                delivery.publish(publication, context),
+                loop=asyncio.get_running_loop(),
+                name=f"publication:{publication.sequence}",
+                eager_start=True,
+            ),
+        )
+
+    def _finish_delivery(self) -> bool:
+        """Commit a finished delivery on the writer; propagate its failure."""
+        current = self._delivery
+        if current is None or not current.task.done():
+            return False
+        self._delivery = None
+        current.task.result()
+        pending = self.record.pending_publications
+        if not pending or pending[0].sequence != current.publication.sequence:
+            message = "publication delivery finished for a publication that is no longer next"
+            raise RuntimeCommitError(message)
+        self._commit(
+            self.record.model_copy(
+                update={
+                    "pending_publications": pending[1:],
+                    "delivery_cursor": current.publication.sequence,
+                }
+            ),
+            current.now_at,
+        )
+        return True
+
+    async def _await_publication(self, delivery: PublicationDelivery, now_at: float) -> bool:
+        """Deliver one publication, returning when it commits or a running request finishes.
+
+        The delivery keeps running when a request finishes first, so the caller can commit
+        that request before the delivery ends. False when nothing is pending and no running
+        request finished.
+        """
+        self._begin_delivery(delivery, now_at)
+        current = self._delivery
+        if current is None:
+            return False
+        if not current.task.done() and not any(f.task.done() for f in self._flights):
+            await asyncio.wait(
+                [current.task, *(flight.task for flight in self._flights)],
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+        return self._finish_delivery() or any(f.task.done() for f in self._flights)
+
     async def _try_publish(
         self, delivery: PublicationDelivery, now_at: float
     ) -> tuple[bool, OSError | ContractError | None]:
-        """Publish one pending event; a delivery failure is returned, not raised."""
+        """Advance delivery, deferring a publication failure until requests are idle."""
         try:
-            return await self.publish_one(delivery, now_at=now_at), None
+            return await self._await_publication(delivery, now_at), None
         except (OSError, ContractError) as error:
             return False, error
 
@@ -1326,7 +1407,15 @@ class CoreRuntime[S: StrategyState]:
         self._flights.clear()
         for flight in flights:
             flight.task.cancel()
-        await asyncio.gather(*(f.task for f in flights), return_exceptions=True)
+        delivery = self._delivery
+        self._delivery = None
+        if delivery is not None:
+            delivery.task.cancel()
+        await asyncio.gather(
+            *(flight.task for flight in flights),
+            *(() if delivery is None else (delivery.task,)),
+            return_exceptions=True,
+        )
 
     def _ended_by_core(self, flight: _Flight) -> bool:
         """Whether core has ended this request.
@@ -1348,11 +1437,23 @@ class CoreRuntime[S: StrategyState]:
         fired. A cancelled request returns no observation; core already reported it.
         """
         ended = [f for f in self._flights if not f.task.done() and self._ended_by_core(f)]
-        for flight in ended:
+        return await self._cancel_flights(ended)
+
+    async def _cancel_withdrawn(self) -> bool:
+        return await self._cancel_flights(
+            [
+                flight
+                for flight in self._flights
+                if pause_withdraws(self.record.envelope.core, flight.record.request)
+            ]
+        )
+
+    async def _cancel_flights(self, flights: Sequence[_Flight]) -> bool:
+        for flight in flights:
             self._flights.remove(flight)
             flight.task.cancel()
-        await asyncio.gather(*(f.task for f in ended), return_exceptions=True)
-        return bool(ended)
+        await asyncio.gather(*(flight.task for flight in flights), return_exceptions=True)
+        return bool(flights)
 
     async def wait_for_flight(self) -> None:
         """Return once a running request has finished (at once when one already has).
@@ -1384,13 +1485,15 @@ class CoreRuntime[S: StrategyState]:
         role) is returned; passing a refusal already hit starts nothing more.
 
         Publication is diagnostic, so it never blocks dispatch: prepared requests start
-        before each publication is delivered, and a slow delivery holds a request back by at
-        most its own length, never by the whole backlog (cancellations and closes must still
-        go out before the run deadline). Publishing stops after the first failure and that
+        before each publication is delivered, and a delivery in flight yields when a running
+        request finishes, so that request's observation and what it prepares commit before
+        the delivery ends. Request authorization order and core's limits still govern
+        cancellations and closes. Publishing stops after the first failure and that
         failure is re-raised once nothing is running.
 
-        Only this method authorizes, commits and queues observations, so the record has
-        one writer; observations commit in completion order, same-tick completions in
+        Only this method authorizes and queues executor observations. Admissions may
+        commit synchronously on the same loop while delivery awaits; observations
+        commit in completion order, same-tick completions in
         authorization order. A failure cancels the requests still running (see
         ``_finish_done``). ``max_dispatches`` bounds the requests executed from now on:
         a cycle that keeps issuing requests raises ``DispatchCapExceededError`` naming the
@@ -1406,7 +1509,12 @@ class CoreRuntime[S: StrategyState]:
         try:
             while True:
                 # A failed request surfaces before anything else commits.
-                if self._finish_done() or await self.cancel_ended() or self.advance():
+                if (
+                    await self._cancel_withdrawn()
+                    or self._finish_done()
+                    or await self.cancel_ended()
+                    or self.advance()
+                ):
                     upkeep()
                     continue
                 if refusal is None:
@@ -1417,8 +1525,6 @@ class CoreRuntime[S: StrategyState]:
                 if self._publication_failure is None:
                     published, self._publication_failure = await self._try_publish(delivery, now_at)
                     if published or self._publication_failure is not None:
-                        # The await let requests finish, tools admit inputs and heartbeats
-                        # commit: consume them before the next request starts.
                         upkeep()
                         continue
                 if self._flights:

@@ -16,12 +16,13 @@ from vibesys.run.core_run import CoreRunRefusedError, drive_core_run
 from vibesys.run.core_services import ClosableEvaluation, CoreServices
 from vibesys.run.environment_failure import RunEnvironmentFailure
 from vibesys.run.host import CoreHost
-from vs_core.api import RunResultProposal, RunStatus, initial_state
+from vs_core.api import Flow, RunResultProposal, RunStatus, initial_state
+from vs_core.api.search import search
 from vs_project.api import FakeStateStore, Project
 from vs_project.api.testing import FakeControlInbox
 from vs_runtime.api import ArtifactStore
-from vs_runtime.api.core import CoreRuntimeBindings, RunTiming
-from vs_runtime.api.core_shell_fixtures import CounterConfig, ShellTraceTransitions, counter
+from vs_runtime.api.core import CoreRuntimeBindings, RunStalledError, RunTiming
+from vs_runtime.api.core_shell_fixtures import CounterConfig, ShellTraceTransitions
 from vs_runtime.api.infrastructure import (
     PauseRequest,
     RunControlTransitionKind,
@@ -47,6 +48,13 @@ if TYPE_CHECKING:
         RunControlTransition,
         WorkspaceHolds,
     )
+
+
+@search("startup-ownership", config=CounterConfig)
+async def counter(ctx: Flow, config: CounterConfig) -> None:
+    """A checkpointed idle search can reopen after an earlier epoch ended."""
+    ctx.checkpoint(config)
+    await ctx.first(ctx.stopped)
 
 
 class BridgeStartError(RuntimeError):
@@ -144,7 +152,6 @@ def _startup_host(
     tmp_path: Path,
     bridge: _FailingBridge | None,
     *,
-    stop_requested: bool = False,
     ended: _Ended | None = None,
 ) -> tuple[CoreHost, LocalRunIntegration, VirtualClock]:
     """Build the public product boundary around the configured bridge fault.
@@ -155,10 +162,9 @@ def _startup_host(
     clock = VirtualClock(at=1.0)
     threads = SimThreads(clock)
     store = FakeStateStore()
-    # The trace fixture takes no control input; a run that must commit a stop uses core's own.
     bindings = (
         CoreRuntimeBindings()
-        if stop_requested
+        if ended is not None
         else CoreRuntimeBindings(transitions=ShellTraceTransitions())
     )
     namespace = project.state.state_store_namespace("startup-ownership")
@@ -176,7 +182,6 @@ def _startup_host(
         artifacts=ArtifactStore(namespace),
         clock=clock,
         agent_evaluation=None if bridge is None else cast("AgentEvaluationBridge", bridge),
-        stop_requested=stop_requested,
         control_inbox=None if ended is None else ended.inbox,
     )
     workspaces = _FollowingWorkspaces()
@@ -249,33 +254,6 @@ def test_a_bridge_startup_interruption_survives_a_close_failure(
     assert not bridge.shell.holds_lease(now_at=clock.now())
 
 
-def test_a_run_force_stopped_before_starts_no_new_work_and_goes_straight_to_its_end(
-    tmp_path: Path,
-) -> None:
-    """A resume of a force-stopped run commits the recorded stop before asking its search.
-
-    Core then ends the run as a stop does, by adopting its last choice: the only request
-    the run makes is that adoption (refused here, where no workspace executor is bound),
-    never an agent turn or an evaluation.
-    """
-    host, integration, clock = _startup_host(tmp_path, None, stop_requested=True)
-
-    async def exercise() -> CoreRunRefusedError:
-        with pytest.raises(CoreRunRefusedError) as refused:
-            await drive_core_run(host, integration)
-        return refused.value
-
-    refusal = run_virtual(clock, exercise()).refusal
-
-    assert refusal.request_id.root.startswith("adopt:")
-    events = cast("_Integration", integration).events
-    assert [e.type for e in events.history()] == [CoreEventType.RUN_ENDING]
-    (event,) = events.history()
-    ending = event.data
-    assert isinstance(ending, RunEndingData)
-    assert ending.rounds_finished == 0
-
-
 class SinkError(OSError):
     """The run's control journal could not be written."""
 
@@ -319,7 +297,9 @@ def test_an_ended_run_rejects_what_its_inbox_still_holds(
     host, integration, clock = _startup_host(tmp_path, bridge, ended=ended)
 
     async def exercise() -> None:
-        with contextlib.suppress(BridgeStartError, CoreRunRefusedError, RunStopped):
+        with contextlib.suppress(
+            BridgeStartError, CoreRunRefusedError, RunStopped, RunStalledError
+        ):
             await drive_core_run(host, integration)
 
     run_virtual(clock, exercise())

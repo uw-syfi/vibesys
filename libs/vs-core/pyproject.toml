@@ -7,10 +7,11 @@ name = "vs-core"
 version = "0.1.0"
 description = "Pure strategy-neutral lifecycle kernel"
 requires-python = ">=3.12"
-dependencies = ["pydantic>=2", "protobuf-py==0.6.0", "protovalidate==2.0.0", "vs-proto"]
+dependencies = ["pydantic>=2", "protobuf-py==0.6.0", "vs-proto", "vs-runlog"]
 
 [tool.uv.sources]
 vs-proto = { workspace = true }
+vs-runlog = { workspace = true }
 
 [tool.setuptools.packages.find]
 where = ["src"]

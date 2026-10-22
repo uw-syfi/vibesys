@@ -46,6 +46,7 @@ from vibesys.api import (
     ControlAction,
     ControlRequest,
     ControlStatus,
+    PauseNowRequest,
     PauseRequest,
     RefusalReason,
     RunStopped,
@@ -57,7 +58,6 @@ from vibesys.api import (
     SteerTarget,
     SteerTargetKind,
     SteerTurn,
-    StopRequest,
     WithdrawRequest,
 )
 from vibesys.events import CoreEventType
@@ -188,7 +188,7 @@ def test_waiting_for_capacity_is_refused_for_a_run_not_paused_on_a_capacity_limi
         parts.api.execute(ResumeCommand(timestamp=REQUEST_TIME, when="capacity_returns"))
 
     assert refused.value.diagnostic_code == "capacity_wait_unavailable"
-    assert parts.control.pause_requested()
+    assert len(parts.control.take_pending_actions()) == 1
 
 
 def test_the_fallback_is_refused_for_a_run_not_paused_on_a_capacity_limit(
@@ -200,7 +200,7 @@ def test_the_fallback_is_refused_for_a_run_not_paused_on_a_capacity_limit(
     with pytest.raises(CapacityWaitUnavailableError):
         parts.api.execute(ResumeCommand(timestamp=REQUEST_TIME, fallback=True))
 
-    assert parts.control.pause_requested()
+    assert len(parts.control.take_pending_actions()) == 1
     assert parts.control.consume_fallback_request() is False
 
 
@@ -211,7 +211,7 @@ def test_a_capacity_resume_for_a_stopping_run_answers_that_it_is_stopping(
     parts = build_server_parts(tmp_path)
     parts.control.enter_capacity()
     parts.control.pause_for_quota()
-    parts.api.execute(StopCommand(timestamp=REQUEST_TIME))
+    parts.control.request_stop(StopMode.CANCEL)
 
     with pytest.raises(RunStoppingError) as refused:
         parts.api.execute(ResumeCommand(timestamp=REQUEST_TIME, fallback=when == "now", when=when))
@@ -246,16 +246,15 @@ def test_finish_is_idempotent_and_interrupts_controlled_executions(tmp_path: Pat
     assert finished.status is EventStatus.INTERRUPTED
 
 
-def test_pause_is_pending_until_the_invocation_boundary(tmp_path: Path) -> None:
-    """`/pause` is a request: the call in flight keeps running until it ends."""
+def test_pause_waits_for_the_core_drain_boundary(tmp_path: Path) -> None:
     parts = build_server_parts(tmp_path)
-    execution = parts.start_execution("implementer", "round 1", "work")
-
-    parts.api.execute(PauseCommand(timestamp=REQUEST_TIME))
-
-    assert parts.api.snapshot().status is RunStatus.PAUSING
-    parts.controller.after_agent("implementer", "round 1", execution_id=execution.execution_id)
-    assert parts.api.snapshot().status is RunStatus.PAUSED
+    parts.start_execution("implementer", "round 1", "work")
+    reply = parts.api.execute(PauseCommand(timestamp=REQUEST_TIME))
+    assert reply.ack is not None
+    assert (reply.ack.action, reply.ack.status) == ("pause", "pending")
+    (request,) = parts.control.take_pending_actions()
+    assert request.action == "pause"
+    assert parts.api.snapshot().status is RunStatus.RUNNING
 
 
 def test_every_transition_publishes_exactly_one_status_event(tmp_path: Path) -> None:
@@ -333,32 +332,15 @@ def test_snapshot_status_agrees_with_the_fold_at_the_terminal_event(tmp_path: Pa
     assert [event.type for event in parts.journal.read()].count(EventType.RUN_FINISHED) == 1
 
 
-def test_stop_is_pending_until_the_invocation_boundary(tmp_path: Path) -> None:
-    """`/stop` is a request: the call in flight keeps running until it ends."""
+def test_legacy_host_shutdown_reaches_the_process_stop_boundary(tmp_path: Path) -> None:
     parts = build_server_parts(tmp_path)
-    execution = parts.start_execution("implementer", "round 1", "work")
-
-    stop = parts.api.execute(StopCommand(timestamp=REQUEST_TIME))
-
-    assert stop.ack is not None
-    assert (stop.ack.action, stop.ack.status) == ("stop", "pending")
+    parts.start_execution("implementer", "round 1", "work")
+    reply = parts.api.execute(StopCommand(timestamp=REQUEST_TIME))
+    assert reply.ack is not None
+    assert (reply.ack.action, reply.ack.status) == ("pause_now", "pending")
+    assert parts.control.stop_mode() is StopMode.DRAIN
+    assert parts.control.take_pending_actions() == []
     assert parts.api.snapshot().status is RunStatus.STOPPING
-    parts.controller.after_agent("implementer", "round 1", execution_id=execution.execution_id)
-    assert parts.api.snapshot().status is RunStatus.STOPPED
-    assert _status_changes(parts) == [
-        (RunStatus.STARTING, RunStatus.RUNNING),
-        (RunStatus.RUNNING, RunStatus.STOPPING),
-        (RunStatus.STOPPING, RunStatus.STOPPED),
-    ]
-    controls = [
-        (event.text, event.status)
-        for event in parts.journal.read()
-        if event.type is EventType.CONTROL
-    ]
-    assert controls == [
-        ("/stop", EventStatus.PENDING),
-        ("/stop", EventStatus.CONSUMED),
-    ]
 
 
 def test_stopped_run_refuses_the_next_controlled_invocation(tmp_path: Path) -> None:
@@ -509,7 +491,6 @@ _SINGLE_ACTION_COMMANDS = st.one_of(
         timestamp=st.just(REQUEST_TIME),
         text=st.text(min_size=1, max_size=20).filter(str.strip),
     ),
-    st.builds(StopCommand, timestamp=st.just(REQUEST_TIME)),
 )
 
 
@@ -519,6 +500,7 @@ def _channel_state(parts: ServerParts) -> tuple[object, ...]:
         parts.control.pause_requested(),
         parts.control.stop_mode(),
         parts.control.consume_fallback_request(),
+        parts.control.take_pending_actions(),
     )
 
 
@@ -613,7 +595,7 @@ class _RefusingControl(ChannelRunControl):
     before=st.lists(st.sampled_from(StopMode), max_size=3),
     after=st.lists(st.one_of(st.sampled_from(StopMode), st.just("resume")), max_size=4),
 )
-def test_a_runs_stop_is_the_strongest_asked_before_or_after_its_control_is_installed(
+def test_host_stop_remains_strongest_after_installing_pending_pause_now(
     before: list[StopMode], after: list[StopMode | Literal["resume"]]
 ) -> None:
     """periodic-1330 MED-2: the slot kept the last stop sent before the run started, so a
@@ -627,8 +609,8 @@ def test_a_runs_stop_is_the_strongest_asked_before_or_after_its_control_is_insta
     channel = create_run_control_channel(_ignore, threads=threads)
     slot = RunControlSlot(threads.condition(threads.rlock()))
     assert not slot.stop(StopMode.CANCEL)
-    for index, mode in enumerate(before):
-        stop = StopRequest(control_id=f"before-{index}", mode=mode)
+    for index, _mode in enumerate(before):
+        stop = PauseNowRequest(control_id=f"before-{index}")
         slot.execute(ControlCommand(timestamp=REQUEST_TIME, control=stop))
     slot.install(ChannelRunControl(channel, threads))
     for item in after:
@@ -642,7 +624,7 @@ def test_a_runs_stop_is_the_strongest_asked_before_or_after_its_control_is_insta
         else:
             assert slot.stop(item)
 
-    asked = [*before, *(item for item in after if item != "resume")]
+    asked = [item for item in after if item != "resume"]
     expected = (
         None if not asked else StopMode.CANCEL if StopMode.CANCEL in asked else StopMode.DRAIN
     )
@@ -902,3 +884,13 @@ def test_each_steer_step_reaches_the_wire_as_a_typed_event_with_the_control_id(
     assert isinstance(reached.data, SteerDeliveryData)
     assert (reached.agent_kind, reached.execution_id) == ("implementer", "exec-1")
     assert reached.data.delivery.attempt_id == "attempt-3"
+
+
+def test_pause_now_uses_the_core_queue_instead_of_the_host_shutdown_flag(tmp_path: Path) -> None:
+    parts = build_server_parts(tmp_path)
+    request = PauseNowRequest(control_id="immediate-pause")
+    response = parts.api.execute(ControlCommand(timestamp=REQUEST_TIME, control=request))
+    assert response.ack is not None
+    assert response.ack.action is ControlAction.PAUSE_NOW
+    assert not parts.control.stop_requested()
+    assert parts.control.take_pending_actions() == [request]

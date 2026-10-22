@@ -1,8 +1,18 @@
 name: Set up the client workspace
 description: >-
-  Node, pnpm with its store cache, verified Bun, uv with the Python dev
-  environment, the `clients/` workspace install, and Go for repoctl. Every
-  client job of test.yml starts from this, so the legs cannot drift apart.
+  Node, a cached pnpm binary and store, the cached Electron binary, verified
+  Bun, uv with the Python dev environment, the `clients/` workspace install,
+  and Go for repoctl. Every client job of test.yml starts from this, so the
+  legs cannot drift apart. Set `playwright` to install cached Chromium using
+  the runner-provided system libraries for end-to-end jobs.
+
+inputs:
+  playwright:
+    description: >-
+      Install the cached Chromium browser using the runner system libraries. Client
+      end-to-end jobs set this; other client jobs leave it off.
+    required: false
+    default: "false"
 
 runs:
   using: composite
@@ -12,11 +22,32 @@ runs:
       with:
         node-version: 24
 
+    # pnpm's store cache does not hold the pnpm binary. corepack installs that
+    # from the npm registry into COREPACK_HOME. Electron's postinstall reads
+    # the two cache variables below; the pnpm store does not hold that zip.
+    - name: Pin client download locations
+      shell: bash
+      run: |
+        echo "PNPM_VERSION=11.11.0" >> "$GITHUB_ENV"
+        echo "COREPACK_HOME=$HOME/.cache/node/corepack" >> "$GITHUB_ENV"
+        echo "ELECTRON_CACHE=$HOME/.cache/electron" >> "$GITHUB_ENV"
+        echo "electron_config_cache=$HOME/.cache/electron" >> "$GITHUB_ENV"
+
+    - name: Cache the pnpm binary
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ env.COREPACK_HOME }}
+        key: pnpm-binary-${{ runner.os }}-${{ env.PNPM_VERSION }}
+
+    # An exact version already present under COREPACK_HOME is reused with no
+    # registry request. After that, corepack must not reach the network again.
     - name: Enable pnpm
       shell: bash
       run: |
         corepack enable
-        corepack install --global pnpm@11.11.0
+        bash "$GITHUB_WORKSPACE/.github/actions/setup-clients/retry-download.sh" \
+          corepack install --global "pnpm@${PNPM_VERSION}"
+        echo "COREPACK_ENABLE_NETWORK=0" >> "$GITHUB_ENV"
 
     # Resolved after pnpm exists rather than hardcoded: the store location is
     # pnpm's to choose, and a wrong path caches an empty directory silently.
@@ -36,7 +67,8 @@ runs:
     - name: Set up verified Bun 1.4.2 for client tests
       shell: bash
       run: |
-        python3 packaging/fetch_bun.py --target linux-x86_64 --output "$RUNNER_TEMP/bun/bin/bun"
+        bash "$GITHUB_WORKSPACE/.github/actions/setup-clients/retry-download.sh" \
+          python3 packaging/fetch_bun.py --target linux-x86_64 --output "$RUNNER_TEMP/bun/bin/bun"
         echo "$RUNNER_TEMP/bun/bin" >> "$GITHUB_PATH"
 
     - name: Install uv
@@ -47,16 +79,35 @@ runs:
 
     - name: Set up Python
       shell: bash
-      run: uv python install 3.12
+      run: |
+        bash "$GITHUB_WORKSPACE/.github/actions/setup-clients/retry-download.sh" \
+          uv python install 3.12
 
     - name: Install Python dependencies
       shell: bash
-      run: uv sync --dev
+      run: |
+        bash "$GITHUB_WORKSPACE/.github/actions/setup-clients/retry-download.sh" \
+          uv sync --dev
+
+    - name: Resolve the Electron version
+      id: electron
+      shell: bash
+      run: |
+        version="$(python3 scripts/client_ci_downloads.py clients/pnpm-lock.yaml)"
+        echo "version=$version" >> "$GITHUB_OUTPUT"
+
+    - name: Cache the Electron binary
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ env.ELECTRON_CACHE }}
+        key: electron-${{ runner.os }}-${{ steps.electron.outputs.version }}
 
     - name: Install client dependencies
       shell: bash
       working-directory: clients
-      run: pnpm install --frozen-lockfile
+      run: |
+        bash "$GITHUB_WORKSPACE/.github/actions/setup-clients/retry-download.sh" \
+          pnpm install --frozen-lockfile
 
     # The workspace scripts run through Turborepo; CI keeps no Turborepo cache
     # between runs and sends it no telemetry.
@@ -71,3 +122,30 @@ runs:
         cache-dependency-path: |
           support/repoctl/go.sum
           gateway/go.sum
+
+    - name: Resolve the Playwright version
+      id: playwright
+      if: inputs.playwright == 'true'
+      shell: bash
+      working-directory: clients
+      run: echo "version=$(pnpm --filter @vibesys/app-desktop-main exec playwright --version | awk '{print $2}')" >> "$GITHUB_OUTPUT"
+
+    # Ubuntu runners already provide Chromium runtime libraries and Xvfb.
+    # Cache the browser separately by the resolved Playwright version.
+    - name: Cache the Playwright browsers
+      if: inputs.playwright == 'true'
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ~/.cache/ms-playwright
+        key: playwright-chromium-${{ runner.os }}-${{ steps.playwright.outputs.version }}
+
+    - name: Install Chromium for client end-to-end tests
+      if: inputs.playwright == 'true'
+      shell: bash
+      working-directory: clients
+      run: |
+        # The green clients-e2e job 119777039202 confirmed runtime libraries
+        # were preinstalled; apt only added fonts and upgraded existing packages.
+        # Avoid refreshing and downloading those packages on every e2e shard.
+        bash "$GITHUB_WORKSPACE/.github/actions/setup-clients/retry-download.sh" \
+          timeout --kill-after=5s 60s pnpm --filter @vibesys/app-desktop-main exec playwright install chromium

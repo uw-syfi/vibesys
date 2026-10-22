@@ -7,6 +7,7 @@ import {
   LifecycleSchema,
   Outcome,
   RecordSchema,
+  RunLiveness,
   RuntimeType,
   SkeletonResponseSchema,
   SpanStatus,
@@ -16,7 +17,15 @@ import {
   TailResponseSchema,
 } from '@vibesys/proto';
 import {SEEDS, Seeded} from '@vibesys/store/testing';
-import {foldSkeleton, ingestSkeleton, ingestTail, seedSkeleton, seekSkeleton} from './index.js';
+import {
+  epochHasEnded,
+  foldSkeleton,
+  ingestSkeleton,
+  ingestTail,
+  observeRun,
+  seedSkeleton,
+  seekSkeleton,
+} from './index.js';
 
 function recordsFor(seed: number): StoreRecord[] {
   const random = new Seeded(seed);
@@ -249,3 +258,64 @@ test('keyframe ingestion preserves history and rejects invalid indexes before se
   });
   expect(() => seedSkeleton(invalid)).toThrow('seq');
 });
+
+for (const kind of ['running', 'draining', 'parked', 'ended'] as const)
+  test(`same-epoch declarations preserve ${kind} at every keyframe cut`, () => {
+    for (const seed of SEEDS) {
+      const random = new Seeded(seed);
+      const epoch = random.int(100) + 1;
+      const lifecycle = create(LifecycleSchema, {
+        state:
+          kind === 'ended'
+            ? {case: kind, value: {outcome: Outcome.FINISHED}}
+            : kind === 'draining'
+              ? {case: kind, value: {goal: DrainGoal.PARK}}
+              : {case: kind, value: {}},
+      });
+      const bodies = [
+        {case: 'epochStarted', value: {runId: 'run-a', epoch}},
+        {case: 'lifecycle', value: lifecycle},
+        ...Array.from(
+          {length: random.int(5) + 1},
+          () =>
+            ({
+              case: random.pick(['epochStarted', 'declarationAmended'] as const),
+              value: {runId: 'run-a', epoch},
+            }) as const,
+        ),
+      ] as const;
+      const records = bodies.map((body, index) =>
+        create(RecordSchema, {
+          seq: BigInt(index + 1),
+          epoch,
+          body,
+        }),
+      );
+      for (let cut = 0; cut <= records.length; cut++) {
+        const prefix = foldSkeleton(seedSkeleton(), records.slice(0, cut));
+        const cached =
+          cut === 0
+            ? prefix
+            : seedSkeleton(
+                create(KeyframeSchema, {
+                  ...prefix,
+                  throughSeq: prefix.throughSeq ?? 0n,
+                  logOffset: 1n,
+                }),
+              );
+        const full = foldSkeleton(cached, records.slice(cut));
+        const observed = observeRun(full, {epoch, value: RunLiveness.INTERRUPTED});
+        expect(observed.lifecycle).toEqual(lifecycle);
+        expect(epochHasEnded(lifecycle)).toBe(kind === 'parked' || kind === 'ended');
+        expect(observed.final).toBe(epochHasEnded(lifecycle));
+        const successor = foldSkeleton(full, [
+          create(RecordSchema, {
+            seq: BigInt(records.length + 1),
+            epoch: epoch + 1,
+            body: {case: 'epochStarted', value: {runId: 'run-a', epoch: epoch + 1}},
+          }),
+        ]);
+        expect(observeRun(successor).lifecycle).toBeUndefined();
+      }
+    }
+  });

@@ -58,6 +58,14 @@ def _sample(cls: type[core.CoreValue], root: str, count: int) -> core.CoreValue:
         core.ControlInput: lambda: core.ControlInput(
             control_id=identity, action="pause", owner=core.PauseOwner.QUOTA
         ),
+        core.AdoptionPublication: lambda: core.AdoptionPublication(
+            revision=root,
+            commit=f"{count:040x}",
+            branch=root,
+        ),
+        core.CheckoutUpdate: lambda: core.CheckoutUpdate(
+            status=tuple(core.CheckoutStatus)[count % len(core.CheckoutStatus)]
+        ),
     }
     if issubclass(cls, core.Identity):
         return cls(root=root)
@@ -108,6 +116,7 @@ def test_every_control_action_roundtrips(root: str, action: core.ControlAction) 
     notice = core.ArtifactRef(artifact_id=core.ArtifactId(root=root), digest=root)
     choices: dict[str, dict[str, object]] = {
         "park": {},
+        "pause_now": {},
         "pause": {"owner": core.PauseOwner.OPERATOR},
         "resume": {"when": "now"},
         "stop": {"mode": core.StopMode.CANCEL},

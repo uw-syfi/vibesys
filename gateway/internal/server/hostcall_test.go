@@ -10,13 +10,15 @@ import (
 	"time"
 
 	apiv1 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/api/v1"
+	hostv1 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/host/v1"
 	"github.com/uw-syfi/vibesys/gateway/internal/hostcommand"
+	"github.com/uw-syfi/vibesys/gateway/internal/hostoperations"
 	"github.com/uw-syfi/vibesys/gateway/internal/server"
 	"google.golang.org/protobuf/proto"
 )
 
 func intentRequest() *apiv1.HostCallRequest {
-	return &apiv1.HostCallRequest{Checkout: "/src/host checkout", Method: &apiv1.HostCallRequest_PostIntent{PostIntent: &apiv1.PostIntentRequest{ProjectRoot: "/project", RunId: "run-1", RequestId: "r-1", Intent: &apiv1.PostIntentRequest_Pause{Pause: &apiv1.PauseIntent{}}}}}
+	return &apiv1.HostCallRequest{Checkout: "/src/host checkout", Method: &apiv1.HostCallRequest_PostIntent{PostIntent: &apiv1.PostIntentRequest{ExpectedEpoch: 1, ProjectRoot: "/project", RunId: "run-1", RequestId: "r-1", Intent: &apiv1.PostIntentRequest_Pause{Pause: &apiv1.PauseIntent{}}}}}
 }
 
 func TestHostCallPassesTypedPipesAndConfiguredCheckout(t *testing.T) {
@@ -150,7 +152,7 @@ func TestHostCallCancellationReachesRunner(t *testing.T) {
 }
 
 func TestHostCallRelaunchDispatchesWithoutRunPolicy(t *testing.T) {
-	for _, mode := range []string{"epoch", "locked", "ended", "checkout", "wrong-method", "missing"} {
+	for _, mode := range []string{"epoch", "locked", "checkout", "wrong-method", "missing"} {
 		t.Run(mode, func(t *testing.T) {
 			request := &apiv1.HostCallRequest{Checkout: "/src/checkout", Method: &apiv1.HostCallRequest_Relaunch{Relaunch: &apiv1.RelaunchRequest{ProjectRoot: "/project", RunId: "run-1", ExpectedEpoch: 1}}}
 			runner := hostcommand.FakeRunner{Program: func(ctx context.Context, c hostcommand.Command) (hostcommand.Result, error) {
@@ -168,8 +170,6 @@ func TestHostCallRelaunchDispatchesWithoutRunPolicy(t *testing.T) {
 				switch mode {
 				case "locked":
 					result.Outcome = &apiv1.RelaunchResponse_Refusal{Refusal: apiv1.RelaunchRefusal_RELAUNCH_REFUSAL_LOCKED}
-				case "ended":
-					result.Outcome = &apiv1.RelaunchResponse_Refusal{Refusal: apiv1.RelaunchRefusal_RELAUNCH_REFUSAL_ENDED}
 				case "checkout":
 					result.Outcome = &apiv1.RelaunchResponse_Refusal{Refusal: apiv1.RelaunchRefusal_RELAUNCH_REFUSAL_CHECKOUT_MISSING}
 				}
@@ -202,6 +202,28 @@ func TestHostCallRelaunchDispatchesWithoutRunPolicy(t *testing.T) {
 	}
 }
 
+func TestHostCallCapsComeFromTheRegistry(t *testing.T) {
+	intent, ok := hostoperations.DispatchHostCall(intentRequest())
+	if !ok || intent.CLI != "post-intent" || intent.Deadline != 10*time.Second {
+		t.Fatalf("post-intent: %+v %v", intent, ok)
+	}
+	relaunch, ok := hostoperations.DispatchHostCall(&apiv1.HostCallRequest{Method: &apiv1.HostCallRequest_Relaunch{Relaunch: &apiv1.RelaunchRequest{}}})
+	if !ok || relaunch.CLI != "relaunch" || relaunch.Deadline != 30*time.Second {
+		t.Fatalf("relaunch: %+v %v", relaunch, ok)
+	}
+	chat, ok := hostoperations.DispatchHostCall(&apiv1.HostCallRequest{Method: &apiv1.HostCallRequest_ChatMessage{ChatMessage: &apiv1.ChatMessageRequest{RequestId: "r-1", SessionId: "s-1"}}})
+	if !ok || chat.CLI != "chat-message" || chat.Deadline != 10*time.Second {
+		t.Fatalf("chat-message: %+v %v", chat, ok)
+	}
+	if _, ok := hostoperations.DispatchHostCall(&apiv1.HostCallRequest{}); ok {
+		t.Fatal("missing method dispatched")
+	}
+	response := &apiv1.HostCallResponse{Result: &apiv1.HostCallResponse_ChatMessage{ChatMessage: &apiv1.ChatMessageResponse{RequestId: "r-1", SessionId: "other"}}}
+	if hostoperations.HostCallResponseValid(&apiv1.HostCallRequest{Method: &apiv1.HostCallRequest_ChatMessage{ChatMessage: &apiv1.ChatMessageRequest{RequestId: "r-1", SessionId: "s-1"}}}, response) {
+		t.Fatal("stale session accepted")
+	}
+}
+
 func TestHostCallLostAdmissionIsExplicitlyUnconfirmed(t *testing.T) {
 	for _, failure := range []error{context.DeadlineExceeded, context.Canceled} {
 		t.Run(failure.Error(), func(t *testing.T) {
@@ -214,5 +236,86 @@ func TestHostCallLostAdmissionIsExplicitlyUnconfirmed(t *testing.T) {
 				t.Fatalf("lost admission reported as a refusal: %v %v", response, err)
 			}
 		})
+	}
+}
+
+func readRequest() *apiv1.ReadRequest {
+	return &apiv1.ReadRequest{Checkout: "/src/checkout", Method: &apiv1.ReadRequest_ListTasks{ListTasks: &hostv1.ListTasksRequest{RequestId: "request-a", Project: "/project"}}}
+}
+
+func TestHostReadUsesTheRegistryCommandAndCap(t *testing.T) {
+	request := readRequest()
+	dispatched, ok := hostoperations.DispatchHostRead(request)
+	if !ok || dispatched.CLI != "list-tasks" || dispatched.Deadline != 10*time.Second {
+		t.Fatalf("list-tasks: %+v %v", dispatched, ok)
+	}
+	machine := &apiv1.ReadRequest{Method: &apiv1.ReadRequest_DescribeMachine{DescribeMachine: &hostv1.DescribeMachineRequest{RequestId: "request-a"}}}
+	described, ok := hostoperations.DispatchHostRead(machine)
+	if !ok || described.CLI != "describe-machine" || described.Deadline != 25*time.Second {
+		t.Fatalf("describe-machine: %+v %v", described, ok)
+	}
+	runner := hostcommand.FakeRunner{Program: func(ctx context.Context, c hostcommand.Command) (hostcommand.Result, error) {
+		if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+			t.Error("missing deadline")
+		}
+		if c.Executable != filepath.Join(request.Checkout, ".venv", "bin", "vibesys") || strings.Join(c.Args, " ") != "host list-tasks" {
+			t.Errorf("wrong command: %+v", c)
+		}
+		if !filepath.IsAbs(c.StateRoot) {
+			t.Error("missing run index root")
+		}
+		decoded := &apiv1.ReadRequest{}
+		if err := proto.Unmarshal(c.Input, decoded); err != nil || !proto.Equal(request, decoded) {
+			t.Errorf("stdin: %v %v", decoded, err)
+		}
+		output, _ := proto.Marshal(&apiv1.ReadResponse{Result: &apiv1.ReadResponse_ListTasks{ListTasks: &hostv1.ListTasksResponse{RequestId: "request-a", Tasks: &hostv1.TaskList{Version: 1}}}})
+		return hostcommand.Result{Output: output}, nil
+	}}
+	f := startWithConfig(t, server.Config{HostRunner: runner})
+	response, err := client(t, f, false).Read(f.ctx, request)
+	if err != nil || response.GetListTasks().GetRequestId() != "request-a" {
+		t.Fatalf("Read: %v %v", response, err)
+	}
+}
+
+func TestHostReadDeadlineIsNotAnUnconfirmedAdmission(t *testing.T) {
+	for _, failure := range []error{context.DeadlineExceeded, context.Canceled} {
+		t.Run(failure.Error(), func(t *testing.T) {
+			runner := hostcommand.FakeRunner{Program: func(ctx context.Context, c hostcommand.Command) (hostcommand.Result, error) {
+				return hostcommand.Result{ExitCode: -1}, failure
+			}}
+			f := startWithConfig(t, server.Config{HostRunner: runner})
+			response, err := client(t, f, false).Read(f.ctx, readRequest())
+			got := response.GetFailure().GetCategory()
+			want := hostv1.FailureCategory_FAILURE_CATEGORY_DEADLINE_EXCEEDED
+			if errors.Is(failure, context.Canceled) {
+				want = hostv1.FailureCategory_FAILURE_CATEGORY_CANCELLED
+			}
+			if err != nil || got != want || response.GetFailure().GetMessage() == "" {
+				t.Fatalf("read failure: %v %v", response, err)
+			}
+		})
+	}
+}
+
+func TestHostReadRejectsAMismatchedIdentity(t *testing.T) {
+	runner := hostcommand.FakeRunner{Program: func(ctx context.Context, c hostcommand.Command) (hostcommand.Result, error) {
+		output, _ := proto.Marshal(&apiv1.ReadResponse{Result: &apiv1.ReadResponse_ListTasks{ListTasks: &hostv1.ListTasksResponse{RequestId: "other"}}})
+		return hostcommand.Result{Output: output}, nil
+	}}
+	f := startWithConfig(t, server.Config{HostRunner: runner})
+	response, err := client(t, f, false).Read(f.ctx, readRequest())
+	if err != nil || response.GetFailure().GetCategory() != hostv1.FailureCategory_FAILURE_CATEGORY_INVALID_INPUT {
+		t.Fatalf("mismatch: %v %v", response, err)
+	}
+	spawned := false
+	refusing := hostcommand.FakeRunner{Program: func(ctx context.Context, c hostcommand.Command) (hostcommand.Result, error) {
+		spawned = true
+		return hostcommand.Result{}, nil
+	}}
+	gateway := startWithConfig(t, server.Config{HostRunner: refusing})
+	missing, err := client(t, gateway, false).Read(gateway.ctx, &apiv1.ReadRequest{Checkout: "/src/checkout"})
+	if err != nil || spawned || missing.GetFailure().GetCategory() != hostv1.FailureCategory_FAILURE_CATEGORY_INVALID_INPUT {
+		t.Fatalf("missing method spawned or failed open: %v %v %v", missing, err, spawned)
 	}
 }

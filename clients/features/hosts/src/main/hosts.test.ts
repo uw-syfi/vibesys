@@ -346,6 +346,180 @@ describe('Hosts.complete', () => {
       1,
     );
   });
+
+  test('uses the registry when transport v2 is on and does not open the helper', async () => {
+    const manager = new ConnectionManager({
+      linkFor: () => {
+        throw new Error('the helper must stay closed');
+      },
+      appVersion: 'test',
+      scheduleTimeout: new FakeClock().scheduleTimeout,
+      log: () => {},
+    });
+    const hosts = new Hosts({
+      manager,
+      settings: new SettingsStore({
+        settingsPath: '/settings/hosts.json',
+        recentPath: '/settings/recent.json',
+        preferencesPath: '/settings/preferences.json',
+        filesystem: new FakeSettingsFilesystem(),
+        log: () => {},
+      }),
+      localCheckout: '/bundled',
+      sshConfigPath: '/missing',
+      log: () => {},
+      push: () => {},
+      retire: () => {},
+      transportV2: async () => true,
+      setup: {
+        inspectCandidate: async () => {
+          throw new Error('unused');
+        },
+        completePaths: async () => ({
+          directory: '/manual',
+          truncated: false,
+          entries: [{name: 'project', path: '/manual/project', checkout: true, project: false}],
+        }),
+      },
+    });
+    await using _manager = manager;
+    await expect(hosts.complete(LOCAL, '/manual/')).resolves.toEqual({
+      kind: 'listed',
+      directory: '/manual',
+      entries: [{name: 'project', path: '/manual/project', checkout: true, project: false}],
+      truncated: false,
+    });
+  });
+
+  test('refuses setup when transport v2 is on and the registry setup is missing', async () => {
+    const manager = new ConnectionManager({
+      linkFor: () => {
+        throw new Error('the helper must stay closed');
+      },
+      appVersion: 'test',
+      scheduleTimeout: new FakeClock().scheduleTimeout,
+      log: () => {},
+    });
+    const hosts = new Hosts({
+      manager,
+      settings: new SettingsStore({
+        settingsPath: '/settings/hosts.json',
+        recentPath: '/settings/recent.json',
+        preferencesPath: '/settings/preferences.json',
+        filesystem: new FakeSettingsFilesystem(),
+        log: () => {},
+      }),
+      localCheckout: '/bundled',
+      sshConfigPath: '/missing',
+      log: () => {},
+      push: () => {},
+      retire: () => {},
+      transportV2: async () => true,
+    });
+    await using _manager = manager;
+    await expect(hosts.complete(LOCAL, '/manual/')).rejects.toThrow(
+      'run transport v2 is on and the registry setup is missing',
+    );
+  });
+});
+
+describe('Hosts.setCheckout transport v2', () => {
+  function v2Hosts(setup: NonNullable<ConstructorParameters<typeof Hosts>[0]['setup']>): {
+    readonly hosts: Hosts;
+    readonly settings: SettingsStore;
+    readonly manager: ConnectionManager;
+  } {
+    const settings = new SettingsStore({
+      settingsPath: '/settings/hosts.json',
+      recentPath: '/settings/recent.json',
+      preferencesPath: '/settings/preferences.json',
+      filesystem: new FakeSettingsFilesystem(),
+      log: () => {},
+    });
+    const manager = new ConnectionManager({
+      linkFor: () => {
+        throw new Error('the helper must stay closed');
+      },
+      appVersion: 'test',
+      scheduleTimeout: new FakeClock().scheduleTimeout,
+      log: () => {},
+    });
+    return {
+      settings,
+      manager,
+      hosts: new Hosts({
+        manager,
+        settings,
+        localCheckout: '/bundled',
+        sshConfigPath: '/missing',
+        log: () => {},
+        push: () => {},
+        retire: () => {},
+        transportV2: async () => true,
+        setup,
+      }),
+    };
+  }
+
+  test('saves a found compatible checkout without starting the helper', async () => {
+    const {hosts, settings, manager} = v2Hosts({
+      completePaths: async () => {
+        throw new Error('unused');
+      },
+      inspectCandidate: async (_id, path, revision) => {
+        if (revision !== 1n) throw new Error('stale selection');
+        return {
+          state: 'found',
+          root: path,
+          version: '0.1.1',
+          commit: null,
+          dirty: null,
+          compatible: true,
+        };
+      },
+    });
+    await using _manager = manager;
+    await expect(hosts.setCheckout(LOCAL, '/candidate', {owner: 'doc', sequence: 1})).resolves.toBe(
+      '/candidate',
+    );
+    expect((await settings.hosts()).settings.hosts['local']?.checkout).toBe('/candidate');
+  });
+
+  test('a cancel during inspection does not save the checkout', async () => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    let started: () => void = () => {};
+    const startedPromise = new Promise<void>(resolve => {
+      started = resolve;
+    });
+    const {hosts, settings, manager} = v2Hosts({
+      completePaths: async () => {
+        throw new Error('unused');
+      },
+      inspectCandidate: async (_id, _path, _revision, signal) => {
+        started();
+        await gate;
+        if (signal.aborted) throw new Error('operation cancelled');
+        return {
+          state: 'found',
+          root: '/candidate',
+          version: '0.1.1',
+          commit: null,
+          dirty: null,
+          compatible: true,
+        };
+      },
+    });
+    await using _manager = manager;
+    const pending = hosts.setCheckout(LOCAL, '/candidate', {owner: 'doc', sequence: 1});
+    await startedPromise;
+    await hosts.cancelCheckout({owner: 'doc', sequence: 1});
+    release();
+    await expect(pending).rejects.toThrow('the checkout change was cancelled');
+    expect((await settings.hosts()).settings.hosts['local']).toBeUndefined();
+  });
 });
 
 describe('Hosts.harnesses', () => {
@@ -629,6 +803,7 @@ describe('Hosts.readSummary', () => {
     harness: 'codex',
     model: null,
     reasoning_effort: null,
+    client: null,
     harness_version: null,
     started_at: null,
     ended_at: null,

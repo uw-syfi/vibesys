@@ -11,8 +11,13 @@ decisions it needs (:func:`negotiate`, :func:`select_completions`,
 Light like the channel: the standard library, Pydantic, ``vs_sim.api`` and light
 ``server`` modules only.
 
-Public surface: ``answer``, ``connect``, ``negotiate``, ``Negotiated``,
-``HelperHost``; the interfaces ``Projects``, ``Directories``, ``RunLauncher`` and
+Public surface: ``answer``, ``answer_registered_read``, ``apply_registered_cluster``,
+``RegisteredClusterHost``, ``apply_registered_project``, ``RegisteredProjectHost``,
+``launch_registered_run``, ``registry_start_request``,
+``read_failure_category``,
+``registry_read_source``, ``connect``, ``negotiate``, ``Negotiated``,
+``HelperHost``; the interfaces ``Projects``, ``Directories``, ``ClusterCompute``,
+``ProjectMutationExamples``, ``ProjectMutationDirectories``, ``RunLauncher`` and
 ``CheckoutProbe`` with the values they exchange (``ProjectRun``,
 ``ProjectLookupError``, ``ScannedEntry``, ``Scan``, ``PathHints``);
 ``home_relative``, ``without_home``, ``complete_path``, ``select_completions``, ``split_prefix``, ``run_summaries``,
@@ -27,8 +32,9 @@ import posixpath
 import re
 from dataclasses import dataclass
 from datetime import datetime
+from importlib import import_module
 from pathlib import Path
-from typing import TYPE_CHECKING, Final, Protocol, assert_never
+from typing import TYPE_CHECKING, Final, Literal, Protocol, assert_never, overload
 
 from pydantic import TypeAdapter
 
@@ -52,17 +58,11 @@ from server.host_api import (
     CheckoutInspectRequest,
     ComputeAddClusterReply,
     ComputeAddClusterRequest,
-    ComputeListReply,
-    ComputeListRequest,
     ComputeRemoveClusterReply,
     ComputeRemoveClusterRequest,
     ComputeTestClusterReply,
     ComputeTestClusterRequest,
     DetachedLaunchFailure,
-    ExamplesListReply,
-    ExamplesListRequest,
-    HarnessesListReply,
-    HarnessesListRequest,
     HarnessOption,
     HelloReply,
     HelloRequest,
@@ -82,8 +82,6 @@ from server.host_api import (
     LogsCancelRequest,
     LogsListRequest,
     LogsReadRequest,
-    MachineDescribeReply,
-    MachineDescribeRequest,
     PathEntry,
     PathsCompleteReply,
     PathsCompleteRequest,
@@ -111,16 +109,14 @@ from server.host_api import (
     RunStopRequest,
     RunSummary,
 )
-from server.host_compute import MeasurementTarget, ModalTarget, SameMachine, SlurmTarget
-from server.host_examples import (
-    ExampleDestination,
-    ExamplesDestinationReply,
-    ExamplesDestinationRequest,
-    ProjectTaskGoalReply,
-    ProjectTaskGoalRequest,
-    TaskList,
-    TasksListReply,
-    TasksListRequest,
+from server.host_compute import (
+    ClusterTestResult,
+    ComputeSettings,
+    MeasurementTarget,
+    ModalTarget,
+    SameMachine,
+    SlurmClusterSettings,
+    SlurmTarget,
 )
 from server.host_helper_compute import ComputeError, MachineCompute
 from server.host_helper_logs import HelperLogs, ReadWithdrawal, list_logs, read_log
@@ -144,7 +140,6 @@ from server.host_machine_facts import (
     MachineDescription,
     RunCounts,
 )
-from server.host_preflight import BackendUnavailable, CheckId
 from server.host_run_dashboard import IdeaVerdict
 from server.host_run_events import (
     RunEventDocument,
@@ -170,16 +165,29 @@ from vs_decode.api import Unreadable, decode_json
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable, Mapping
     from datetime import tzinfo
+    from types import ModuleType
+
+    from typing_extensions import TypeIs
 
     from server.host_agent_logins import AgentLogin, LoginStarted, LoginUnavailable
-    from server.host_api import RunDigestUnreadable
-    from server.host_examples import CreatedProject, ExampleList, TaskGoal
+    from server.host_api import HarnessChoice, RunDigestUnreadable
+    from server.host_compute import MeasurementTarget
+    from server.host_examples import (
+        CreatedProject,
+        ExampleDestination,
+        ExampleList,
+        TaskGoal,
+        TaskList,
+    )
     from server.host_helper_readers import Readers
-    from server.host_preflight import PreflightReport
+    from server.host_operation_types_generated import RegistryReadRequest, UnmigratedHelperRequest
+    from server.host_preflight import PreflightReport, RoleOption, RunOptions
     from server.registry import InstanceInspector, LiveRegistry, StopEffects
     from server.run_summary import Summarized
     from server.usage_window import RunUsage
     from vs_project.api import OperatorDialer
+    from vs_proto.api import FailureCategory
+    from vs_proto.api import host_payloads as pb
     from vs_sim.api import Clock, Connection
 
 SCAN_LIMIT: Final = 10_000
@@ -860,7 +868,19 @@ def without_home(reply: HelperReply | HelperError, host: HelperHost) -> HelperRe
     return reply.model_copy(update={"message": message})
 
 
-def _host_path(text: str, directories: Directories) -> str:
+class ProjectMutationDirectories(Protocol):
+    """The path expansion a registered project mutation uses."""
+
+    def home(self) -> str:
+        """This user's home directory."""
+        ...
+
+    def expand(self, path: str) -> str:
+        """``path`` with a leading ``~`` or ``~user`` expanded."""
+        ...
+
+
+def _host_path(text: str, directories: ProjectMutationDirectories) -> str:
     expanded = directories.expand(text)
     return expanded if posixpath.isabs(expanded) else posixpath.join(directories.home(), expanded)
 
@@ -874,6 +894,15 @@ def answer(
     """
     request_id = request.request_id
     try:
+        if isinstance(request, HelloRequest):
+            return _answer(request, host, withdrawal)
+        if is_registry_read(request):
+            return read_reply(
+                request,
+                HelperReadSource(
+                    host, request, describe=describe_machine, preflight=_preflight_facts
+                ),
+            )
         return _answer(request, host, withdrawal)
     except (ProjectLookupError, ComputeError) as error:
         return HelperError(
@@ -881,8 +910,13 @@ def answer(
         )
 
 
+def is_registry_read(request: HelperRequest) -> TypeIs[RegistryReadRequest]:
+    """Load the generated narrowing only when a caller goes beyond hello."""
+    return import_module("server.host_operation_types_generated").is_registry_read(request)
+
+
 def _answer(
-    request: HelperRequest, host: HelperHost, withdrawal: ReadWithdrawal
+    request: UnmigratedHelperRequest, host: HelperHost, withdrawal: ReadWithdrawal
 ) -> HelperReply | HelperError:
     request_id = request.request_id
     reply: HelperReply | HelperError
@@ -902,7 +936,7 @@ def _answer(
             )
         case InstancesListRequest() | InstancesInspectRequest():
             reply = _instances_reply(request, host)
-        case TasksListRequest() | RunsListRequest() | ProjectTaskGoalRequest():
+        case RunsListRequest():
             reply = _project_reply(request, host)
         case (
             RunsReadEventsRequest()
@@ -913,13 +947,9 @@ def _answer(
         ):
             reply = _run_history_reply(request, host)
         case (
-            MachineDescribeRequest()
-            | CheckoutInspectRequest()
-            | ExamplesListRequest()
-            | ExamplesDestinationRequest()
+            CheckoutInspectRequest()
             | ProjectCreateFromExampleRequest()
             | ProjectCopyOutRequest()
-            | ComputeListRequest()
             | ComputeTestClusterRequest()
             | ComputeAddClusterRequest()
             | ComputeRemoveClusterRequest()
@@ -927,18 +957,12 @@ def _answer(
             | AgentLoginsStartRequest()
         ):
             reply = _machine_reply(request, host)
-        case RunStartRequest() | RunPreflightRequest() | RunReaderRequest():
+        case RunStartRequest() | RunReaderRequest():
             reply = _launching_reply(request, host)
         case RunStopRequest(instance_id=instance_id, force=force):
             result = host.registry.stop(instance_id, host.stop_effects, force=force)
             reply = RunStopReply(request_id=request_id, result=result)
-        case (
-            PingRequest()
-            | PathsCompleteRequest()
-            | HarnessesListRequest()
-            | LogsListRequest()
-            | LogsReadRequest()
-        ):
+        case PingRequest() | PathsCompleteRequest() | LogsListRequest() | LogsReadRequest():
             reply = _host_read_reply(request, host, withdrawal)
         case (
             InstancesWatchRequest()
@@ -953,18 +977,10 @@ def _answer(
     return reply
 
 
-def _project_reply(
-    request: TasksListRequest | RunsListRequest | ProjectTaskGoalRequest, host: HelperHost
-) -> TasksListReply | RunsListReply | ProjectTaskGoalReply:
-    """Answer one read of a project's tasks, runs or a task's goal."""
+def _project_reply(request: RunsListRequest, host: HelperHost) -> RunsListReply:
+    """Answer a project's saved-run listing."""
     project = Path(_host_path(request.project, host.directories))
     match request:
-        case ProjectTaskGoalRequest(request_id=request_id, task=task):
-            return ProjectTaskGoalReply(
-                request_id=request_id, goal=host.projects.task_goal(project, task)
-            )
-        case TasksListRequest(request_id=request_id):
-            return TasksListReply(request_id=request_id, tasks=host.projects.tasks(project))
         case RunsListRequest(
             request_id=request_id, digest_runs=digest_runs, with_dashboard=with_dashboard
         ):
@@ -1013,17 +1029,12 @@ def _logins_reply(
 
 
 def _compute_reply(
-    request: ComputeListRequest
-    | ComputeTestClusterRequest
-    | ComputeAddClusterRequest
-    | ComputeRemoveClusterRequest,
+    request: ComputeTestClusterRequest | ComputeAddClusterRequest | ComputeRemoveClusterRequest,
     compute: MachineCompute,
 ) -> HelperReply:
     """Answer one read or change of this machine's compute settings."""
     request_id = request.request_id
     match request:
-        case ComputeListRequest():
-            return ComputeListReply(request_id=request_id, settings=compute.settings())
         case ComputeTestClusterRequest(cluster=cluster):
             return ComputeTestClusterReply(request_id=request_id, result=compute.test(cluster))
         case ComputeAddClusterRequest(cluster=cluster):
@@ -1033,29 +1044,11 @@ def _compute_reply(
 
 
 def _examples_reply(
-    request: ExamplesListRequest
-    | ExamplesDestinationRequest
-    | ProjectCreateFromExampleRequest
-    | ProjectCopyOutRequest,
+    request: ProjectCreateFromExampleRequest | ProjectCopyOutRequest,
     host: HelperHost,
-) -> (
-    ExamplesListReply
-    | ExamplesDestinationReply
-    | ProjectCreateFromExampleReply
-    | ProjectCopyOutReply
-):
-    """Answer one read of the example catalog or a destination, or make one new project."""
+) -> ProjectCreateFromExampleReply | ProjectCopyOutReply:
+    """Answer making one new project from an example, or copying one out."""
     match request:
-        case ExamplesDestinationRequest(
-            request_id=request_id, example=example, destination=destination
-        ):
-            state, project = host.examples.destination(
-                example, Path(_host_path(destination, host.directories))
-            )
-            return ExamplesDestinationReply(request_id=request_id, state=state, project=project)
-        case ExamplesListRequest(request_id=request_id, with_catalogue=with_catalogue):
-            listing = host.examples.list(with_catalogue=with_catalogue is True)
-            return ExamplesListReply(request_id=request_id, listing=listing)
         case ProjectCreateFromExampleRequest(
             request_id=request_id, example=example, destination=destination
         ):
@@ -1070,13 +1063,9 @@ def _examples_reply(
 
 
 def _machine_reply(
-    request: MachineDescribeRequest
-    | CheckoutInspectRequest
-    | ExamplesListRequest
-    | ExamplesDestinationRequest
+    request: CheckoutInspectRequest
     | ProjectCreateFromExampleRequest
     | ProjectCopyOutRequest
-    | ComputeListRequest
     | ComputeTestClusterRequest
     | ComputeAddClusterRequest
     | ComputeRemoveClusterRequest
@@ -1089,36 +1078,14 @@ def _machine_reply(
         case AgentLoginsListRequest() | AgentLoginsStartRequest():
             return _logins_reply(request, host.logins)
         case (
-            ComputeListRequest()
-            | ComputeTestClusterRequest()
-            | ComputeAddClusterRequest()
-            | ComputeRemoveClusterRequest()
+            ComputeTestClusterRequest() | ComputeAddClusterRequest() | ComputeRemoveClusterRequest()
         ):
             return _compute_reply(request, host.compute)
-        case (
-            ExamplesListRequest()
-            | ExamplesDestinationRequest()
-            | ProjectCreateFromExampleRequest()
-            | ProjectCopyOutRequest()
-        ):
+        case ProjectCreateFromExampleRequest() | ProjectCopyOutRequest():
             return _examples_reply(request, host)
-        case MachineDescribeRequest(request_id=request_id):
-            return MachineDescribeReply(request_id=request_id, machine=describe_machine(host))
         case CheckoutInspectRequest(request_id=request_id, path=path):
             inspection = host.machine.inspect_checkout(Path(_host_path(path, host.directories)))
             return CheckoutInspectReply(request_id=request_id, inspection=inspection)
-
-
-def installed_first(
-    harnesses: tuple[HarnessOption, ...], installed: tuple[str, ...]
-) -> tuple[HarnessOption, ...]:
-    """``harnesses`` with the providers whose CLI is installed on this machine first.
-
-    A client starts a run on the first provider listed, so a machine without the first
-    provider's CLI would otherwise default to a run that cannot start its agent. Order is
-    otherwise kept: each provider's options stay together, its default first.
-    """
-    return tuple(sorted(harnesses, key=lambda option: option.provider not in installed))
 
 
 def describe_machine(host: HelperHost) -> MachineDescription:
@@ -1327,14 +1294,12 @@ def _start(request: RunStartRequest, host: HelperHost) -> RunStartReply | Helper
 
 
 def _launching_reply(
-    request: RunStartRequest | RunPreflightRequest | RunReaderRequest, host: HelperHost
+    request: RunStartRequest | RunReaderRequest, host: HelperHost
 ) -> RunStartReply | RunPreflightReply | RunReaderReply | HelperError:
     """Answer a request that starts a run, checks that one could start, or reads one with a server."""
     match request:
         case RunStartRequest():
             return _start(request, host)
-        case RunPreflightRequest():
-            return _preflight(request, host)
         case RunReaderRequest():
             return _reader(request, host)
 
@@ -1389,7 +1354,9 @@ def _unconfigured_target(request_id: str | None, target: SlurmTarget | ModalTarg
     )
 
 
-def _preflight(request: RunPreflightRequest, host: HelperHost) -> RunPreflightReply | HelperError:
+def _preflight_facts(
+    request: RunPreflightRequest, host: HelperHost
+) -> RunPreflightReply | HelperError:
     """Check whether the run ``run.start`` would launch with these inputs can start."""
     refusal = _refusal(request, host)
     if refusal is not None:
@@ -1407,30 +1374,21 @@ def _preflight(request: RunPreflightRequest, host: HelperHost) -> RunPreflightRe
     undeclared = undeclared_agent(request.agents, report)
     if undeclared is not None:
         return _error(request.request_id, HelperErrorCode.INVALID_REQUEST, undeclared)
-    checks = tuple(
-        check
-        for check in preflight_checks(
-            facts,
-            report,
-            options=request.options,
-            agents=request.agents,
-            with_causes=bool(request.with_causes),
-        )
-        if request.with_project_clean or check.id is not CheckId.PROJECT_CLEAN
+    checks = preflight_checks(
+        facts,
+        report,
+        options=request.options,
+        agents=request.agents,
+        with_causes=bool(request.with_causes),
     )
     if request.measure_on is not None:
         measured = measurement_check(request.measure_on, host.compute.settings(), report.backend)
         checks = (*checks, measured)
     return RunPreflightReply(
         request_id=request.request_id,
-        checks=tuple(
-            check.model_copy(update={"cause": None})
-            if isinstance(check.cause, BackendUnavailable) and not request.with_backend
-            else check
-            for check in checks
-        ),
-        roles=report.roles if request.with_roles else None,
-        backend=report.backend if request.with_backend else None,
+        checks=checks,
+        roles=report.roles,
+        backend=report.backend,
     )
 
 
@@ -1464,11 +1422,7 @@ def _instances_reply(
 
 
 def _host_read_reply(
-    request: PingRequest
-    | PathsCompleteRequest
-    | HarnessesListRequest
-    | LogsListRequest
-    | LogsReadRequest,
+    request: PingRequest | PathsCompleteRequest | LogsListRequest | LogsReadRequest,
     host: HelperHost,
     withdrawal: ReadWithdrawal,
 ) -> HelperReply | HelperError:
@@ -1482,14 +1436,6 @@ def _host_read_reply(
             return PingReply(request_id=request_id)
         case PathsCompleteRequest():
             return complete_path(request, host.directories)
-        case HarnessesListRequest(request_id=request_id, with_generations=with_generations):
-            listed = installed_first(host.harnesses(), host.machine.harness_clis())
-            return HarnessesListReply(
-                request_id=request_id,
-                harnesses=(
-                    listed if with_generations else tuple(o.without_generations() for o in listed)
-                ),
-            )
         case LogsListRequest() | LogsReadRequest() if host.logs is None:
             message = f"{request.type} needs a log store, which this host does not have"
             return _error(request.request_id, HelperErrorCode.INTERNAL, message)
@@ -1527,3 +1473,520 @@ def connect(
 
 def _error(request_id: str | None, code: HelperErrorCode, message: str) -> HelperError:
     return HelperError(request_id=request_id, code=code, message=message)
+
+
+_REPLY: TypeAdapter[HelperReply] = TypeAdapter(HelperReply)
+
+
+class _ReadRefusedError(Exception):
+    def __init__(self, refusal: HelperError) -> None:
+        self.refusal = refusal
+        super().__init__(refusal.message)
+
+
+class HelperReadSource:
+    """Translate existing host I/O results at the adapter boundary only."""
+
+    def __init__(
+        self,
+        host: HelperHost,
+        legacy_request: HelperRequest | None,
+        *,
+        describe: Callable[[HelperHost], MachineDescription],
+        preflight: Callable[[RunPreflightRequest, HelperHost], RunPreflightReply | HelperError],
+    ) -> None:
+        """Bind host I/O and the existing machine/preflight probe adapters."""
+        self._host = host
+        self._legacy_request = legacy_request
+        self._describe = describe
+        self._preflight = preflight
+
+    def _path(self, text: str) -> Path:
+        expanded = Path(self._host.directories.expand(text))
+        return (
+            expanded if expanded.is_absolute() else Path(self._host.directories.home()) / expanded
+        )
+
+    def tasks(self, project: str) -> pb.TaskList:
+        """Read through the existing project's task owner."""
+        return _wire().from_mapping(
+            _wire().host_payloads.TaskList,
+            self._host.projects.tasks(self._path(project)).model_dump(mode="json"),
+        )
+
+    def harnesses(self) -> list[pb.HarnessOption]:
+        """Project vetted harness facts; ordering belongs to the product handler."""
+        return [
+            _wire().from_mapping(
+                _wire().host_payloads.HarnessOption, option.model_dump(mode="json")
+            )
+            for option in self._host.harnesses()
+        ]
+
+    def installed_harnesses(self) -> tuple[str, ...]:
+        """Observe the installed providers once for display ordering."""
+        return self._host.machine.harness_clis()
+
+    def inspect_destination(self, example: str, destination: str) -> pb.InspectDestinationResponse:
+        """What creating ``example`` would find at ``destination``."""
+        models = import_module("server.host_examples")
+        state, project = self._host.examples.destination(
+            example, Path(_host_path(destination, self._host.directories))
+        )
+        payloads = _wire().host_payloads
+        states = {
+            models.ExampleDestination.ABSENT: payloads.DestinationState.ABSENT,
+            models.ExampleDestination.EMPTY: payloads.DestinationState.EMPTY,
+            models.ExampleDestination.EXAMPLE_PROJECT: payloads.DestinationState.EXAMPLE_PROJECT,
+            models.ExampleDestination.OCCUPIED: payloads.DestinationState.OCCUPIED,
+        }
+        return payloads.InspectDestinationResponse(
+            state=states[state],
+            **({} if project is None else {"project": project}),
+        )
+
+    def examples(self, *, with_catalogue: bool) -> pb.ExampleList:
+        """Project the checkout owner's example metadata without dropping details."""
+        return _wire().from_mapping(
+            _wire().host_payloads.ExampleList,
+            self._host.examples.list(with_catalogue=with_catalogue).model_dump(mode="json"),
+        )
+
+    def task_goal(self, project: str, task: str) -> pb.TaskGoal:
+        """Read the bounded authored task goal."""
+        return _wire().from_mapping(
+            _wire().host_payloads.TaskGoal,
+            self._host.projects.task_goal(self._path(project), task).model_dump(mode="json"),
+        )
+
+    def machine(self) -> pb.MachineDescription:
+        """Project the current machine probe snapshot."""
+        return _wire().from_mapping(
+            _wire().host_payloads.MachineDescription,
+            self._describe(self._host).model_dump(mode="json"),
+        )
+
+    def compute(self) -> pb.ComputeSettings:
+        """Project source-aware settings; this operation performs no mutation."""
+        return _wire().from_mapping(
+            _wire().host_payloads.ComputeSettings,
+            self._host.compute.settings().model_dump(mode="json"),
+        )
+
+    def preflight(self, request: pb.PreflightRunRequest) -> pb.PreflightRunResponse:
+        """Revalidate the temporary legacy projection before invoking its probe owner."""
+        payload = _wire().to_mapping(request)
+        # Legacy diagnostics choose the first role in insertion order. Protobuf
+        # maps have no ordering, so retain only that display preference here.
+        if (
+            isinstance(self._legacy_request, RunPreflightRequest)
+            and self._legacy_request.agents is not None
+        ):
+            agents = payload["agents"]
+            if not isinstance(agents, dict):
+                message = "agents: expected a projected role mapping"
+                raise TypeError(message)
+            payload["agents"] = {role: agents[role] for role in self._legacy_request.agents}
+        legacy = RunPreflightRequest.model_validate(
+            {**payload, "deadline_ms": _wire().host_operations.PreflightRun.total_ms}
+        )
+        result = self._preflight(legacy, self._host)
+        if isinstance(result, HelperError):
+            raise _ReadRefusedError(result)
+        return _wire().from_mapping(
+            _wire().host_payloads.PreflightRunResponse,
+            result.model_dump(mode="json", exclude={"type"}),
+        )
+
+
+def read_reply(request: HelperRequest, source: HelperReadSource) -> HelperReply | HelperError:
+    """Execute a registered helper read; pairing and routing come from descriptors."""
+    operation = _wire().host_operations.ADAPTER_OPERATIONS[request.type]
+    payload = request.model_dump(mode="json", exclude={"type", "deadline_ms"})
+    accepted = operation.accept(_wire().from_mapping(operation.request, payload))
+    try:
+        encoded = import_module("vibesys.api.host_operations.api").execute_read(accepted, source)
+    except _ReadRefusedError as error:
+        return error.refusal
+    response = operation.response.from_binary(encoded)
+    return _REPLY.validate_python({"type": request.type, **_wire().to_mapping(response)})
+
+
+def _wire() -> ModuleType:
+    """Load protobuf contracts only when a migrated read executes, preserving light startup."""
+    return import_module("vs_proto.api")
+
+
+def registry_read_source(host: HelperHost) -> HelperReadSource:
+    """Temporary adapter owned by PR4, shared by the helper channel and ``vibesys host``.
+
+    A registry read has no legacy JSON request, so preflight keeps protobuf map order.
+    """
+    return HelperReadSource(host, None, describe=describe_machine, preflight=_preflight_facts)
+
+
+def read_failure_category(code: HelperErrorCode) -> FailureCategory:
+    """Map one helper refusal onto the closed failure category.
+
+    Callers branch on the category. ``CLUSTER_READ_ONLY`` is permission denied:
+    the file's owner is not this helper.
+    """
+    failure = _wire().FailureCategory
+    categories = {
+        HelperErrorCode.INVALID_REQUEST: failure.INVALID_INPUT,
+        HelperErrorCode.TASK_INVALID: failure.INVALID_INPUT,
+        HelperErrorCode.PATH_NOT_DIRECTORY: failure.INVALID_INPUT,
+        HelperErrorCode.UNVETTED_HARNESS: failure.INVALID_INPUT,
+        HelperErrorCode.CLUSTER_INVALID: failure.INVALID_INPUT,
+        HelperErrorCode.INCOMPATIBLE: failure.CONFIGURATION,
+        HelperErrorCode.EXAMPLES_UNAVAILABLE: failure.CONFIGURATION,
+        HelperErrorCode.COMPUTE_CONFIG_UNREADABLE: failure.CONFIGURATION,
+        HelperErrorCode.MODAL_NOT_CONFIGURED: failure.CONFIGURATION,
+        HelperErrorCode.DUPLICATE_REQUEST_ID: failure.CONFLICT,
+        HelperErrorCode.DESTINATION_EXISTS: failure.CONFLICT,
+        HelperErrorCode.DESTINATION_NESTED: failure.CONFLICT,
+        HelperErrorCode.NOT_NESTED: failure.CONFLICT,
+        HelperErrorCode.CLUSTER_EXISTS: failure.CONFLICT,
+        HelperErrorCode.UNKNOWN_WATCH: failure.NOT_FOUND,
+        HelperErrorCode.PROJECT_MISSING: failure.NOT_FOUND,
+        HelperErrorCode.PROJECT_UNINITIALIZED: failure.NOT_FOUND,
+        HelperErrorCode.PATH_MISSING: failure.NOT_FOUND,
+        HelperErrorCode.RUN_GONE: failure.NOT_FOUND,
+        HelperErrorCode.UNKNOWN_INSTANCE: failure.NOT_FOUND,
+        HelperErrorCode.UNKNOWN_LOG_STREAM: failure.NOT_FOUND,
+        HelperErrorCode.UNKNOWN_EXAMPLE: failure.NOT_FOUND,
+        HelperErrorCode.UNKNOWN_RUN: failure.NOT_FOUND,
+        HelperErrorCode.UNKNOWN_CLUSTER: failure.NOT_FOUND,
+        HelperErrorCode.UNKNOWN_PROVIDER: failure.NOT_FOUND,
+        HelperErrorCode.PERMISSION_DENIED: failure.PERMISSION_DENIED,
+        HelperErrorCode.CONNECT_DENIED: failure.PERMISSION_DENIED,
+        HelperErrorCode.CLUSTER_READ_ONLY: failure.PERMISSION_DENIED,
+        HelperErrorCode.HANDSHAKE_REQUIRED: failure.UNSUPPORTED,
+        HelperErrorCode.FEATURE_NOT_NEGOTIATED: failure.UNSUPPORTED,
+        HelperErrorCode.CHANNEL_BUSY: failure.RESOURCE_EXHAUSTED,
+        HelperErrorCode.CONNECT_FAILED: failure.TRANSIENT,
+        HelperErrorCode.DEADLINE_EXCEEDED: failure.DEADLINE_EXCEEDED,
+        HelperErrorCode.LOG_STORE_CORRUPT: failure.INTERNAL,
+        HelperErrorCode.PROJECT_CREATE_FAILED: failure.INTERNAL,
+        HelperErrorCode.CLUSTER_TEST_FAILED: failure.INTERNAL,
+        HelperErrorCode.READER_FAILED: failure.INTERNAL,
+        HelperErrorCode.INTERNAL: failure.INTERNAL,
+    }
+    found = categories.get(code)
+    if found is None:
+        message = f"unmapped helper code {code}"
+        raise ValueError(message)
+    return found
+
+
+def answer_registered_read(cli: str, payload: bytes, host: HelperHost) -> bytes:
+    """Run one registered read for ``vibesys host`` and return the envelope bytes."""
+    operations = import_module("vibesys.api.host_operations.api")
+    try:
+        return operations.execute_host_read(payload, registry_read_source(host), cli=cli)
+    except _ReadRefusedError as error:
+        category = read_failure_category(error.refusal.code)
+        return operations.host_read_failure(category, error.refusal.message)
+    except (ProjectLookupError, ComputeError) as error:
+        return operations.host_read_failure(read_failure_category(error.code), str(error))
+
+
+def launch_registered_run(
+    request: RunStartRequest, host: HelperHost
+) -> RunStartReply | HelperError:
+    """Launch one already-admitted start through the helper's launcher."""
+    return _start(request, host)
+
+
+class ClusterCompute(Protocol):
+    """The cluster changes one registered mutation asks of a host."""
+
+    def add(self, cluster: SlurmClusterSettings) -> ComputeSettings:
+        """Save ``cluster`` and return the machine's settings."""
+        ...
+
+    def remove(self, name: str) -> ComputeSettings:
+        """Forget the cluster ``name`` and return the machine's settings."""
+        ...
+
+    def test(self, cluster: SlurmClusterSettings) -> ClusterTestResult:
+        """How far ``cluster`` can be used from this machine."""
+        ...
+
+
+class RegisteredClusterHost(Protocol):
+    """A host whose compute surface can put, remove, or test one cluster."""
+
+    @property
+    def compute(self) -> ClusterCompute:
+        """The machine's clusters."""
+        ...
+
+
+@overload
+def apply_registered_cluster(
+    slot: Literal["remove_cluster"],
+    request: pb.RemoveClusterRequest,
+    host: RegisteredClusterHost,
+) -> pb.RemoveClusterResponse: ...
+
+
+@overload
+def apply_registered_cluster(
+    slot: Literal["put_cluster"],
+    request: pb.PutClusterRequest,
+    host: RegisteredClusterHost,
+) -> pb.PutClusterResponse: ...
+
+
+@overload
+def apply_registered_cluster(
+    slot: Literal["test_cluster"],
+    request: pb.TestClusterRequest,
+    host: RegisteredClusterHost,
+) -> pb.TestClusterResponse: ...
+
+
+@overload
+def apply_registered_cluster(
+    slot: str,
+    request: pb.PutClusterRequest | pb.RemoveClusterRequest | pb.TestClusterRequest,
+    host: RegisteredClusterHost,
+) -> pb.PutClusterResponse | pb.RemoveClusterResponse | pb.TestClusterResponse: ...
+
+
+def apply_registered_cluster(
+    slot: str,
+    request: pb.PutClusterRequest | pb.RemoveClusterRequest | pb.TestClusterRequest,
+    host: RegisteredClusterHost,
+) -> pb.PutClusterResponse | pb.RemoveClusterResponse | pb.TestClusterResponse:
+    """Change or test one cluster and return that slot's registry response.
+
+    ``ComputeError`` and ``ValueError`` stay with the caller, which stores a refusal.
+    """
+    wire = _wire()
+    payloads = wire.host_payloads
+    if slot == "remove_cluster" and isinstance(request, payloads.RemoveClusterRequest):
+        settings = host.compute.remove(request.name)
+        return payloads.RemoveClusterResponse(
+            request_id=request.request_id, settings=_registry_settings(settings)
+        )
+    if slot == "put_cluster" and isinstance(request, payloads.PutClusterRequest):
+        saved = host.compute.add(_registry_cluster(request.cluster))
+        return payloads.PutClusterResponse(
+            request_id=request.request_id, settings=_registry_settings(saved)
+        )
+    if slot == "test_cluster" and isinstance(request, payloads.TestClusterRequest):
+        found = host.compute.test(_registry_cluster(request.cluster))
+        return payloads.TestClusterResponse(
+            request_id=request.request_id, result=_registry_test(found)
+        )
+    message = f"cluster slot {slot} does not match its request"
+    raise ValueError(message)
+
+
+def _registry_cluster(cluster: pb.SlurmClusterSettings | None) -> SlurmClusterSettings:
+    if cluster is None:
+        message = "cluster is required"
+        raise ValueError(message)
+    model = import_module("server.host_compute").SlurmClusterSettings
+    return model.model_validate(_wire().to_mapping(cluster))
+
+
+def _registry_settings(settings: ComputeSettings) -> pb.ComputeSettings:
+    wire = _wire()
+    return wire.from_mapping(wire.host_payloads.ComputeSettings, settings.model_dump(mode="json"))
+
+
+def _registry_test(result: ClusterTestResult) -> object:
+    models = import_module("server.host_compute")
+    wire = _wire()
+    payloads = wire.host_payloads
+    if isinstance(result, models.ClusterTestPassed):
+        hardware = wire.from_mapping(
+            payloads.ClusterHardware, result.hardware.model_dump(mode="json")
+        )
+        passed = payloads.ClusterTestPassed(hardware=hardware, partitions=list(result.partitions))
+        return wire.Oneof("passed", passed)
+    stages = {
+        models.ClusterTestStage.REACH: payloads.ClusterTestStage.REACH,
+        models.ClusterTestStage.SCHEDULER: payloads.ClusterTestStage.SCHEDULER,
+        models.ClusterTestStage.WORKSPACE: payloads.ClusterTestStage.WORKSPACE,
+    }
+    failed = payloads.ClusterTestFailed(stage=stages[result.stage], detail=result.detail)
+    return wire.Oneof("failed", failed)
+
+
+class ProjectMutationExamples(Protocol):
+    """The project changes one registered mutation asks of a host."""
+
+    def create(self, example: str, destination: Path) -> CreatedProject:
+        """Copy ``example`` into a new repository at ``destination``."""
+        ...
+
+    def copy_out(self, source: Path, destination: Path) -> CreatedProject:
+        """Copy ``source`` into a new repository at ``destination``."""
+        ...
+
+
+class RegisteredProjectHost(Protocol):
+    """A host that can create or copy one project."""
+
+    @property
+    def examples(self) -> ProjectMutationExamples:
+        """The example catalog and project copies."""
+        ...
+
+    @property
+    def directories(self) -> ProjectMutationDirectories:
+        """How a destination path is expanded."""
+        ...
+
+
+@overload
+def apply_registered_project(
+    slot: Literal["create_example"],
+    request: pb.CreateExampleRequest,
+    host: RegisteredProjectHost,
+) -> pb.CreateExampleResponse: ...
+
+
+@overload
+def apply_registered_project(
+    slot: Literal["copy_project"],
+    request: pb.CopyProjectRequest,
+    host: RegisteredProjectHost,
+) -> pb.CopyProjectResponse: ...
+
+
+@overload
+def apply_registered_project(
+    slot: str,
+    request: pb.CreateExampleRequest | pb.CopyProjectRequest,
+    host: RegisteredProjectHost,
+) -> pb.CreateExampleResponse | pb.CopyProjectResponse: ...
+
+
+def apply_registered_project(
+    slot: str,
+    request: pb.CreateExampleRequest | pb.CopyProjectRequest,
+    host: RegisteredProjectHost,
+) -> pb.CreateExampleResponse | pb.CopyProjectResponse:
+    """Create or copy one project and return that slot's registry response.
+
+    A destination that already holds something is the create answer ``taken``.
+    Every other ``ProjectLookupError`` stays with the caller, which stores a refusal.
+    """
+    wire = _wire()
+    payloads = wire.host_payloads
+    if slot == "create_example" and isinstance(request, payloads.CreateExampleRequest):
+        try:
+            created = host.examples.create(
+                request.example, Path(_host_path(request.destination, host.directories))
+            )
+        except ProjectLookupError as exc:
+            if exc.code is not HelperErrorCode.DESTINATION_EXISTS:
+                raise
+            return payloads.CreateExampleResponse(
+                request_id=request.request_id,
+                result=wire.Oneof("taken", payloads.DestinationTaken()),
+            )
+        return payloads.CreateExampleResponse(
+            request_id=request.request_id,
+            result=wire.Oneof("created", _registry_created(created)),
+        )
+    if slot == "copy_project" and isinstance(request, payloads.CopyProjectRequest):
+        created = host.examples.copy_out(
+            Path(_host_path(request.source, host.directories)),
+            Path(_host_path(request.destination, host.directories)),
+        )
+        return payloads.CopyProjectResponse(
+            request_id=request.request_id, created=_registry_created(created)
+        )
+    message = f"project slot {slot} does not match its request"
+    raise ValueError(message)
+
+
+def _registry_created(created: CreatedProject) -> pb.CreatedProject:
+    wire = _wire()
+    return wire.from_mapping(wire.host_payloads.CreatedProject, created.model_dump(mode="json"))
+
+
+def registry_start_request(request: pb.StartRunRequest) -> RunStartRequest:
+    """The helper start body for one registry ``StartRunRequest``."""
+    agents = _start_agents(request.agents)
+    return RunStartRequest(
+        request_id=request.request_id,
+        deadline_ms=60_000,
+        project=request.project,
+        task=request.task or None,
+        args=tuple(request.args),
+        harness=_start_harness(request.harness),
+        options=_start_options(request.options),
+        agents=agents,
+        measure_on=_start_measure(request.measure_on),
+    )
+
+
+def _start_harness(harness: pb.StartRunHarness | None) -> HarnessChoice | None:
+    if harness is None:
+        return None
+    choice = import_module("server.host_harness").HarnessChoice
+    return choice(provider=harness.provider, model=harness.model)
+
+
+def _start_agents(agents: Iterable[pb.StartRunAgent]) -> dict[str, HarnessChoice] | None:
+    choice = import_module("server.host_harness").HarnessChoice
+    mapped = {}
+    for agent in agents:
+        harness = agent.harness
+        if harness is None:
+            message = f"agents.{agent.role} has no harness"
+            raise ValueError(message)
+        mapped[agent.role] = choice(provider=harness.provider, model=harness.model)
+    return mapped or None
+
+
+def _start_options(options: pb.StartRunOptions | None) -> RunOptions | None:
+    if options is None:
+        return None
+    preflight = import_module("server.host_preflight")
+    payloads = import_module("vs_proto.api").host_payloads
+    rounds = options.rounds or None
+    limit = options.time_limit_s or None
+    chosen = {
+        payloads.StartRunResults.KEEP: preflight.RunResults.KEEP,
+        payloads.StartRunResults.PUBLISH_GITHUB: preflight.RunResults.PUBLISH_GITHUB,
+    }.get(options.results)
+    roles = tuple(_start_role(role) for role in options.roles)
+    if rounds is None and limit is None and chosen is None and not roles:
+        return None
+    return preflight.RunOptions(rounds=rounds, time_limit_s=limit, results=chosen, roles=roles)
+
+
+def _start_role(role: pb.StartRunRole) -> RoleOption:
+    preflight = import_module("server.host_preflight")
+    payloads = import_module("vs_proto.api").host_payloads
+    effort = {
+        payloads.StartRunReasoning.DEFAULT: preflight.ReasoningEffort.DEFAULT,
+        payloads.StartRunReasoning.LOW: preflight.ReasoningEffort.LOW,
+        payloads.StartRunReasoning.MEDIUM: preflight.ReasoningEffort.MEDIUM,
+        payloads.StartRunReasoning.HIGH: preflight.ReasoningEffort.HIGH,
+    }.get(role.reasoning, preflight.ReasoningEffort.DEFAULT)
+    return preflight.RoleOption(role=role.role, model=role.model or None, reasoning_effort=effort)
+
+
+def _start_measure(measure: pb.StartRunMeasure | None) -> MeasurementTarget | None:
+    compute = import_module("server.host_compute")
+    if measure is None or measure.target is None:
+        return None
+    match measure.target.field:
+        case "same_machine":
+            return compute.SameMachine()
+        case "slurm_cluster":
+            return compute.SlurmTarget(cluster=measure.target.value)
+        case "modal":
+            return compute.ModalTarget()
+        case _:
+            message = "unknown measure target"
+            raise ValueError(message)

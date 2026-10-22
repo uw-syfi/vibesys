@@ -17,6 +17,7 @@ interface ExecutionStart {
   readonly role: string | null;
   readonly harness: string | null;
   readonly model: string | null;
+  readonly client: 'scripted' | 'provider' | null;
   readonly reasoningEffort: string | null;
   readonly harnessVersion: string | null;
   readonly startedAt: string | null;
@@ -46,12 +47,14 @@ export function startsWith(starts: ExecutionStarts, event: RunEvent): ExecutionS
   const data = event.data;
   const id = event.execution_id;
   if (data?.kind !== 'agent_execution_started' || id == null) return starts;
+  const client = data.client === 'scripted' || data.client === 'provider' ? data.client : null;
   return {
     ...starts,
     [id]: {
       role: text(event.agent_kind),
       harness: text(data.provider),
       model: text(data.model),
+      client,
       reasoningEffort: text(data.reasoning_effort),
       harnessVersion: text(data.harness_version),
       startedAt: time(event.timestamp),
@@ -73,6 +76,7 @@ export function recordOf(starts: ExecutionStarts, event: RunEvent): UsageRecord 
     role: start?.role ?? null,
     harness: start?.harness ?? null,
     model: start?.model ?? null,
+    client: start?.client ?? null,
     reasoning_effort: start?.reasoningEffort ?? null,
     harness_version: start?.harnessVersion ?? null,
     started_at: start?.startedAt ?? null,

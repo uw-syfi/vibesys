@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, Never, TypeAlias, TypeVar
@@ -12,7 +13,10 @@ from pydantic import BaseModel
 from vs_agent.api import (
     NULL_SKILL_SELECTION,
 )
-from vs_project.api import Git
+from vs_core.api import AdoptionPublication, CheckoutStatus, CheckoutUpdate
+from vs_project.api import Git, adoption_branch
+from vs_proto.api import evaluation_receipts as evaluation_receipts_pb
+from vs_runtime._evaluation_recovery import EvaluationRecoveryBlockedError
 from vs_runtime._local_validation import LocalValidationRecipeError, check_recipe_artifact_path
 from vs_runtime._trusted_evaluation import (
     TrustedAccuracyResult,
@@ -57,6 +61,34 @@ if TYPE_CHECKING:
     from vs_runtime._workspace_holds import WorkspaceHolds
     from vs_sandbox.api import CommandRunner, HostResource, ProjectPathPolicy
     from vs_sim.api import OutputSink, ProcessSpec, Threads
+
+
+class FakeEvaluationWriterReconciliation:
+    """A closed Fake execution domain with explicit authoritative writer-stop evidence."""
+
+    def __init__(self) -> None:
+        """Start with no inherited writer-stop evidence in the closed Fake domain."""
+        self._stopped: dict[str, set[str]] = {}
+        self.requests: list[tuple[str, tuple[str, ...]]] = []
+
+    def confirm_stopped(self, backing: str, *handles: str) -> None:
+        """The Fake environment observes every writer belonging to these handles ending."""
+        self._stopped.setdefault(backing, set()).update(handles)
+
+    async def require_stopped(self, backing: str, outstanding: tuple[str, ...]) -> None:
+        """Permit acquisition only when every requested writer has authoritative evidence."""
+        self.requests.append((backing, outstanding))
+        if missing := tuple(
+            handle for handle in outstanding if handle not in self._stopped.get(backing, set())
+        ):
+            raise EvaluationRecoveryBlockedError(
+                evaluation_receipts_pb.EvaluationRecoveryBlock(
+                    environment="fake",
+                    backing=backing,
+                    outstanding=list(missing),
+                    prerequisite="the Fake environment has not observed every inherited writer stop",
+                )
+            )
 
 
 class FakeAgentExecutionEnvironment:
@@ -510,20 +542,32 @@ class FakeWorkspaces:
         """The candidates opened to evaluate (``create_measured_candidate``), in order."""
         return tuple(self._measured)
 
-    async def adopt(self, revision: str) -> None:
-        """Adopt a retained revision even after its candidate was discarded."""
-        if not self._root.knows_revision(revision):
-            message = f"candidate revision is not retained by this run: {revision!r}"
+    async def adopt(
+        self, revision: str, *, message: str = "vibesys: adopt revision"
+    ) -> AdoptionPublication:
+        """Publish a retained revision, without changing the root tree or index."""
+        return self._root.publish(revision, message)
+
+    async def update_checkout(self, publication: AdoptionPublication) -> CheckoutUpdate:
+        """The Fake models its own run branch; pending edits refuse checkout changes."""
+        if not self._root.has_publication(publication):
+            message = "publication does not belong to this run"
             raise RuntimeContractError(message)
-        await self._root.restore(revision)
+        if await self._root.pending_changes():
+            return CheckoutUpdate(status=CheckoutStatus.DIRTY_TREE)
+        if not self._root.can_fast_forward(publication):
+            return CheckoutUpdate(status=CheckoutStatus.DIVERGED)
+        self._root.apply_checkout(publication)
+        return CheckoutUpdate(status=CheckoutStatus.FAST_FORWARDED)
 
     async def export_patch(self, revision: str) -> str:
         """Export one retained revision against the fake trusted baseline."""
         if not self._root.knows_revision(revision):
             raise _UnknownWorkspaceRevisionError(revision)
         self.export_patch_calls.append(revision)
-        default = self._default_patch or f"patch for {revision}"
-        return self._patches.get(revision, default)
+        source = self._root.tree_identity(revision) or revision
+        default = self._default_patch or f"patch for {source}"
+        return self._patches.get(revision, self._patches.get(source, default))
 
     async def retains(self, revision: str) -> bool:
         """Return whether the revision is retained, as opposed to merely present."""
@@ -682,6 +726,9 @@ class FakeWorkspace:
         self._id = workspace_id
         self._revision = revision
         self._tree_revision = revision
+        self._tree_aliases: dict[str, str] = {}
+        self._publications: dict[str, AdoptionPublication] = {}
+        self._publication_parents: dict[str, tuple[str, ...]] = {}
         self._trusted_input_baseline = (
             revision if trusted_input_baseline is None else trusted_input_baseline
         )
@@ -736,6 +783,55 @@ class FakeWorkspace:
         self._tree_revision = revision
         self.add_retained_revision(revision)
         return revision
+
+    def publish(self, revision: str, message: str) -> AdoptionPublication:
+        """Keep publication history with the repository, across collection restarts."""
+        if not self.retains(revision):
+            detail = f"candidate revision is not retained by this run: {revision!r}"
+            raise RuntimeContractError(detail)
+        existing = self._publications.get(revision)
+        if existing is not None:
+            return existing
+        commit = hashlib.sha1(
+            f"{revision}:{message}:{len(self._publications)}".encode(),
+            usedforsecurity=False,
+        ).hexdigest()
+        result = AdoptionPublication(
+            revision=revision, commit=commit, branch=adoption_branch("fake-run")
+        )
+        parents = [self.revision]
+        if self._publications:
+            parents.append(tuple(self._publications.values())[-1].commit)
+        self._publication_parents[commit] = tuple(
+            parent for parent in parents if parent is not None
+        )
+        self._publications[revision] = result
+        self.add_retained_revision(commit)
+        self._tree_aliases[commit] = self.tree_identity(revision) or revision
+        return result
+
+    def has_publication(self, publication: AdoptionPublication) -> bool:
+        """Whether this repository owns exactly this publication receipt."""
+        return self._publications.get(publication.revision) == publication
+
+    def can_fast_forward(self, publication: AdoptionPublication) -> bool:
+        """Whether the current run head is in the publication's ancestry."""
+        pending = [publication.commit]
+        ancestors: set[str] = set()
+        while pending:
+            current = pending.pop()
+            if current not in ancestors:
+                ancestors.add(current)
+                pending.extend(self._publication_parents.get(current, ()))
+        return self._revision in ancestors
+
+    def apply_checkout(self, publication: AdoptionPublication) -> None:
+        """Advance the Fake's clean run checkout after a publication."""
+        self._revision = publication.commit
+        self._tree_revision = publication.commit
+        self._tree_aliases[publication.commit] = (
+            self.tree_identity(publication.revision) or publication.revision
+        )
 
     async def restore(self, revision: str, *, clean: bool = True) -> None:
         """Materialize a known tree while leaving recorded history unchanged."""
@@ -814,7 +910,11 @@ class FakeWorkspace:
 
     async def matches_revision(self, revision: str) -> bool:
         """Return whether the fake tree is exactly the revision's tree."""
-        return self._tree_revision == revision
+        return self.tree_identity(self._tree_revision) == self.tree_identity(revision)
+
+    def tree_identity(self, revision: str | None) -> str | None:
+        """The shared tree identity of a source and every publication of it."""
+        return None if revision is None else self._tree_aliases.get(revision, revision)
 
     async def find_snapshot(self, label: str) -> str | None:
         """Return the revision the snapshot with this label recorded."""
@@ -826,7 +926,10 @@ class FakeWorkspace:
 
     async def measured_input(self, revision: str) -> str:
         """The scripted digest of *revision*, else one of its own."""
-        return self._measured_inputs.get(revision, f"input:{revision}")
+        source = self.tree_identity(revision) or revision
+        return self._measured_inputs.get(
+            revision, self._measured_inputs.get(source, f"input:{source}")
+        )
 
     def knows_revision(self, revision: str) -> bool:
         """Return whether this fake can materialize a revision, retained or dangling."""
@@ -871,6 +974,10 @@ class FakeCandidateWorkspace(FakeWorkspace):
         self._discarded = False
         self.orphaned = False
         self._revision_prefix = config.revision_prefix
+
+    def tree_identity(self, revision: str | None) -> str | None:
+        """Resolve publication trees through this run's shared repository."""
+        return self._owner.root.tree_identity(revision)
 
     def knows_revision(self, revision: str) -> bool:
         """Resolve revisions through the owning run's shared repository."""

@@ -9,10 +9,20 @@ import {
   type HostCallRequest,
   HostCallRequestSchema,
   HostService,
+  type MutateRequest,
+  MutateRequestSchema,
+  type ReadRequest,
+  ReadRequestSchema,
   TailRequestSchema,
 } from '@vibesys/proto';
-import {type GatewayDialer, HELLO_METHOD, TAIL_METHOD} from '../shell/gateway.js';
-import {GrpcDecoder, grpcFrame} from '../shell/grpc.js';
+import {
+  type GatewayDialer,
+  HELLO_METHOD,
+  MUTATE_METHOD,
+  READ_METHOD,
+  TAIL_METHOD,
+} from '../shell/gateway.js';
+import {GrpcDecoder, GrpcError, grpcFrame} from '../shell/grpc.js';
 
 export interface FakeTail {
   readonly fromSeq: bigint;
@@ -27,14 +37,30 @@ export interface FakeHostCall {
   end(code?: number, detail?: string): void;
 }
 
+export interface FakeRead {
+  readonly request: ReadRequest;
+  end(code?: number, detail?: string): void;
+}
+
+export interface FakeMutate {
+  readonly request: MutateRequest;
+  end(code?: number, detail?: string): void;
+}
+
 export class FakeGateway implements GatewayDialer {
   readonly forces: boolean[] = [];
   schemaHash = API_SCHEMA_HASH;
+  /** Peer fault input, like FakeTail.send: override the handshake bytes or status. */
+  helloFault: Uint8Array | GrpcError | undefined;
   readonly #server = createServer();
   readonly #sessions = new Set<ServerHttp2Session>();
   readonly #tails: FakeTail[] = [];
   readonly #hostCalls: FakeHostCall[] = [];
   readonly #hostWaiters: Array<(call: FakeHostCall) => void> = [];
+  readonly #mutations: FakeMutate[] = [];
+  readonly #mutateWaiters: Array<(call: FakeMutate) => void> = [];
+  readonly #reads: FakeRead[] = [];
+  readonly #readWaiters: Array<(call: FakeRead) => void> = [];
   readonly #waiters: Array<(tail: FakeTail) => void> = [];
 
   constructor() {
@@ -72,11 +98,27 @@ export class FakeGateway implements GatewayDialer {
           const waiter = this.#waiters.shift();
           if (waiter === undefined) this.#tails.push(tail);
           else waiter(tail);
-        } else if (method === `/${HostService.typeName}/${HostService.method.hostCall.name}`) {
-          this.#hostCall(stream, messages[0] as Uint8Array);
-        } else end(stream, 12, 'unknown method');
+        } else if (!this.#held(method, stream, messages[0] as Uint8Array)) {
+          end(stream, 12, 'unknown method');
+        }
       });
     });
+  }
+
+  #held(method: string | undefined, stream: ServerHttp2Stream, bytes: Uint8Array): boolean {
+    if (method === `/${HostService.typeName}/${HostService.method.hostCall.name}`) {
+      this.#hostCall(stream, bytes);
+      return true;
+    }
+    if (method === MUTATE_METHOD) {
+      this.#mutate(stream, bytes);
+      return true;
+    }
+    if (method === READ_METHOD) {
+      this.#read(stream, bytes);
+      return true;
+    }
+    return false;
   }
 
   #hostCall(stream: ServerHttp2Stream, bytes: Uint8Array): void {
@@ -86,6 +128,26 @@ export class FakeGateway implements GatewayDialer {
     };
     const waiter = this.#hostWaiters.shift();
     if (waiter === undefined) this.#hostCalls.push(call);
+    else waiter(call);
+  }
+
+  #mutate(stream: ServerHttp2Stream, bytes: Uint8Array): void {
+    const call: FakeMutate = {
+      request: fromBinary(MutateRequestSchema, bytes),
+      end: (code, detail) => end(stream, code, detail),
+    };
+    const waiter = this.#mutateWaiters.shift();
+    if (waiter === undefined) this.#mutations.push(call);
+    else waiter(call);
+  }
+
+  #read(stream: ServerHttp2Stream, bytes: Uint8Array): void {
+    const call: FakeRead = {
+      request: fromBinary(ReadRequestSchema, bytes),
+      end: (code, detail) => end(stream, code, detail),
+    };
+    const waiter = this.#readWaiters.shift();
+    if (waiter === undefined) this.#reads.push(call);
     else waiter(call);
   }
 
@@ -99,12 +161,18 @@ export class FakeGateway implements GatewayDialer {
       );
       return;
     }
+    const fault = this.helloFault;
+    if (fault instanceof GrpcError) {
+      end(stream, fault.code, fault.message);
+      return;
+    }
     stream.write(
       grpcFrame(
-        toBinary(
-          HelloResponseSchema,
-          create(HelloResponseSchema, {apiSchemaHash: this.schemaHash}),
-        ),
+        fault ??
+          toBinary(
+            HelloResponseSchema,
+            create(HelloResponseSchema, {apiSchemaHash: this.schemaHash, gatewayVersion: 'test'}),
+          ),
       ),
     );
     end(stream);
@@ -134,6 +202,20 @@ export class FakeGateway implements GatewayDialer {
     const call = this.#hostCalls.shift();
     return call === undefined
       ? new Promise(resolve => this.#hostWaiters.push(resolve))
+      : Promise.resolve(call);
+  }
+
+  nextMutate(): Promise<FakeMutate> {
+    const call = this.#mutations.shift();
+    return call === undefined
+      ? new Promise(resolve => this.#mutateWaiters.push(resolve))
+      : Promise.resolve(call);
+  }
+
+  nextRead(): Promise<FakeRead> {
+    const call = this.#reads.shift();
+    return call === undefined
+      ? new Promise(resolve => this.#readWaiters.push(resolve))
       : Promise.resolve(call);
   }
 

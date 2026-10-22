@@ -1,6 +1,6 @@
 import {afterAll, beforeAll, expect, test} from 'bun:test';
 import {create, fromBinary, toBinary} from '@bufbuild/protobuf';
-import type {HostKey} from '@vibesys/hosts';
+import {type HostKey, recordedProjectRoot} from '@vibesys/hosts';
 import type {GatewayBridge, GatewayCall} from '@vibesys/ipc';
 import {HostCallRequestSchema, HostCallResponseSchema} from '@vibesys/proto';
 import {FakeClock} from '@vibesys/transport/testing';
@@ -46,7 +46,7 @@ class FakeBridge implements GatewayBridge {
   }
 }
 
-test('Park is enabled on the new path and sends the typed host intent', async () => {
+test('Pause is enabled on the new path and sends the typed host intent', async () => {
   const bridge = new FakeBridge();
   const clock = new FakeClock();
   const container = document.createElement('div');
@@ -58,15 +58,16 @@ test('Park is enabled on the new path and sends the typed host intent', async ()
         <RunIntents
           bridge={bridge}
           host={'local' as HostKey}
-          projectRoot="/project"
+          projectRoot={recordedProjectRoot('/project')}
           runId="run-1"
           enabled
+          relaunch={{epoch: 1n}}
           schedule={clock.schedule}
         />,
       ),
     );
     const park = [...container.querySelectorAll('button')].find(
-      button => button.textContent === 'Park',
+      button => button.textContent === 'Pause',
     );
     expect(park).toBeDefined();
     expect(park?.disabled).toBe(false);
@@ -77,7 +78,7 @@ test('Park is enabled on the new path and sends the typed host intent', async ()
     const envelope = fromBinary(HostCallRequestSchema, call.bytes);
     if (envelope.method.case !== 'postIntent') throw new Error('wrong host method');
     const requestId = envelope.method.value.requestId;
-    expect(envelope.method.value.intent.case).toBe('park');
+    expect(envelope.method.value.intent.case).toBe('pause');
     expect(envelope.method.value.runId).toBe('run-1');
     await act(async () =>
       call.admit(
@@ -92,7 +93,7 @@ test('Park is enabled on the new path and sends the typed host intent', async ()
         ),
       ),
     );
-    expect(container.textContent).toContain('Park · Pending');
+    expect(container.textContent).toContain('Pause · Pending');
   } finally {
     await act(async () => root.unmount());
     container.remove();

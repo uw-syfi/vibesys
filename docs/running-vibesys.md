@@ -530,46 +530,45 @@ directory (or `--project PATH`):
 ```bash
 vibesys control <run-id> steer "prefer latency over throughput"
 vibesys control <run-id> pause
-vibesys control <run-id> resume
-vibesys control <run-id> resume --fallback
-vibesys control <run-id> resume --when capacity_returns
-vibesys control <run-id> stop --mode cancel
+vibesys --resume <run-id>
+vibesys control <run-id> pause-now
 ```
 
 The command validates the control, writes it, and prints its id. The run applies it at its next
 control poll, about once a second, or when it resumes if it is not running. Controls apply in the
-order they were sent, whatever their ids. A control the run cannot apply, such as a pause after
-a stop, is rejected: the run records a `request_rejected` event that names the control and the
+order they were sent, whatever their ids. A control the run cannot apply, such as a closing request for an older
+epoch, is rejected: the run records a `request_rejected` event that names the control and the
 reason. Each control is applied once, even across a crash or when the same control also arrives
 over a client's socket: pass `--control-id ID` to resend the same control safely. An id, once
 used, keeps its control: sending a different control under it is refused.
 
-A stop only escalates. `stop` drains the run: work already in flight finishes, and nothing new
-starts. `stop --mode cancel` cancels the work in flight at once, such as evaluations and
-cluster jobs, and also turns a drain already under way into a cancel. A later drain never
-weakens a cancel. While a stop is pending in a running process, `resume` is rejected with the
-reason `the run is stopping`.
+The run has four operator controls: Pause, Pause now, Resume and Guidance.
 
-A stop is a pause you can lift. `vibesys --resume` opens the same run, lifts the stop and goes on
-with the run's rounds and history; the stop and its lift are both in the run's record. This holds
-whether the process ended before the run committed its ending (a drain that outlived its grace
-bound, a crash during it) or the stop ended the run: the resume reopens a run the operator's stop
-ended, with the best it had and its record, and what the ending closed (agent sessions, jobs) is
-started afresh. A run that ended for a reason of its own (a result, a failure, the deadline), and a
-run ended by `force stop`, stay ended. Only an explicit resume lifts a stop: nothing else does.
+Pause closes admission of new turns and independent evaluations, finishes the turns already
+in flight, and exits. Evaluations requested by those turns still run within the turns' original
+deadlines, including requests made after Pause. Queued work outside that closure waits for Resume.
 
-In the terminal that started the run, with or without `--web`, Ctrl-C asks for a cancelling
-stop, and a second Ctrl-C ends the run at once, through its teardown. Ctrl-Z suspends only the
-`vibesys` command; the run keeps going and keeps writing to the terminal. If the `vibesys`
-command itself dies, for example by `kill -9`, the run reacts as it would to its terminal
-closing: it cancels its work and ends.
+Pause now cancels unfinished work and exits. **Unfinished work may need repeating and may still
+incur charges.** It is available immediately while Pause drains. Completed results and actual
+usage remain recorded; operator interruption does not count as a failed round or consume a retry.
 
-`vibesys control <run-id> status ID` prints what became of a control: `pending`, `applied`, or
-`rejected: <reason>`. A run has ended when its core record says so, which is final, except for a
-run the operator's stop ended (see above). It then takes no more controls: `vibesys control` refuses a new one before writing anything and exits
-with status 3, and a control the run never applied before it ended reads as
-`rejected: the run ended before applying it: ...`. Sending again, with `--control-id`, a control
-the run applied before it ended succeeds and prints its id, so a retry stays one control.
+Resume starts the same run as a new epoch after any ending: pause, crash, success, failure,
+deadline or environment failure. Its fresh duration defaults to the original duration. Resume
+preserves saved results and the operator's current project checkout. It never inherits a prior
+epoch's closing intent. Today's loader still needs a current core record; an older retained
+format that it cannot load produces a prerequisite diagnostic. Importing those older formats
+is a separate change. Until project-edit protection lands, root restores and snapshots of edits
+present at Resume fail with a prerequisite diagnostic and preserve those edits. Resumed adoption retains the candidate instead of replacing the checkout.
+
+Use `vibesys --resume <run-id>` to start the new epoch. A live writer must exit before another
+can launch. Guidance remains durable advice for upcoming work.
+
+In the terminal that started the run, Ctrl-C requests cancellation; a second Ctrl-C exits
+through teardown. Ctrl-Z suspends only the command while its run continues.
+
+`vibesys control <run-id> status ID` prints `pending`, `applied`, or `rejected: <reason>`.
+Controls targeting an epoch that already exited cannot affect its successor. Retrying a
+request with `--control-id ID` preserves its original disposition.
 
 Posting order needs a run started with a VibeSys that keeps it; such a run declares it in its
 inbox when its loop starts. When a run has not declared it (it has not started yet, or runs an

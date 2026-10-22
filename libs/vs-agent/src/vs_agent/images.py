@@ -1070,11 +1070,12 @@ def _resolvable_base(base_image: str, build: _BuildRun) -> str:
     return tag
 
 
-def agent_image(  # noqa: PLR0913  # lint-waiver: LW-011126 [PLR0913]; Base/task image, Features, injected runner, timeout, progress sink, and output sink independently affect build layers, execution, or observation; callers use this public builder directly.
+def agent_image(  # noqa: PLR0913  # lint-waiver: LW-011126 [PLR0913]; Base/task image, Features, cache sources, injected runner, timeout, progress sink, and output sink independently affect build layers, execution, or observation; callers use this public builder directly.
     base_image: str,
     *,
     task_dockerfile: Path | None = None,
     features: Sequence[FeatureRef] = (),
+    cache_from: Sequence[str] = (),
     command_runner: DockerBuildRunner | None = None,
     timeout: float = _DEFAULT_BUILD_TIMEOUT_SECONDS,
     on_progress: BuildProgressSink | None = None,
@@ -1101,6 +1102,10 @@ def agent_image(  # noqa: PLR0913  # lint-waiver: LW-011126 [PLR0913]; Base/task
     no caller: rebuilding with an unchanged selection resolves to the same image
     from Docker's per-Feature layer cache.
 
+    ``cache_from`` names existing Docker images carrying inline build-cache
+    metadata. Docker validates each layer's inputs before reusing it; the
+    sources do not change the resulting image's identity.
+
     ``on_progress``, when given, receives each build's step observations
     (the task image's, then the agent layer's), parsed from Docker's
     progress output. ``output`` receives every chunk each Docker command of
@@ -1116,6 +1121,13 @@ def agent_image(  # noqa: PLR0913  # lint-waiver: LW-011126 [PLR0913]; Base/task
     if timeout <= 0:
         message = "agent image build timeout must be positive"
         raise ValueError(message)
+
+    final = FinalImage(
+        user=AGENT_USER,
+        workdir=AGENT_WORKDIR,
+        image_repository=AGENT_IMAGE_REPOSITORY,
+        cache_from=tuple(cache_from),
+    )
 
     runner = command_runner or SubprocessDockerBuildRunner()
     build = _BuildRun(
@@ -1136,9 +1148,7 @@ def agent_image(  # noqa: PLR0913  # lint-waiver: LW-011126 [PLR0913]; Base/task
         built = build_feature_image(
             base,
             (agent_feature(), *features),
-            final=FinalImage(
-                user=AGENT_USER, workdir=AGENT_WORKDIR, image_repository=AGENT_IMAGE_REPOSITORY
-            ),
+            final=final,
             command_runner=commands,
             timeout=timeout,
         )

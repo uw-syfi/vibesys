@@ -3,17 +3,17 @@ import {create, toBinary} from '@bufbuild/protobuf';
 import {LifecycleSchema, Outcome, RunLiveness, WatchRunsResponseSchema} from '@vibesys/proto';
 import {livenessResponse, relaunchTarget} from './index.js';
 
-test('only parked, stopped-resumable and interrupted observations offer relaunch', () => {
+test('every ended observation offers Resume while a live writer never does', () => {
   for (let epoch = 1; epoch <= 5; epoch += 1) {
     const observed = BigInt(epoch);
     for (const [state, lifecycle] of [
       ['parked', create(LifecycleSchema, {state: {case: 'parked', value: {}}})],
       [
-        'stopped-resumable',
+        'ended',
         create(LifecycleSchema, {state: {case: 'ended', value: {outcome: Outcome.STOPPED}}}),
       ],
       [
-        'interrupted',
+        'ended',
         create(LifecycleSchema, {state: {case: 'ended', value: {outcome: Outcome.INTERRUPTED}}}),
       ],
     ] as const) {
@@ -27,7 +27,9 @@ test('only parked, stopped-resumable and interrupted observations offer relaunch
     for (const outcome of [Outcome.FINISHED, Outcome.FAILED]) {
       const lifecycle = create(LifecycleSchema, {state: {case: 'ended', value: {outcome}}});
       for (const value of [RunLiveness.ALIVE, RunLiveness.ENDED, RunLiveness.INTERRUPTED])
-        expect(relaunchTarget({epoch: observed, lifecycle}, {epoch: observed, value})).toBeNull();
+        expect(relaunchTarget({epoch: observed, lifecycle}, {epoch: observed, value})).toEqual(
+          value === RunLiveness.ALIVE ? null : {epoch: observed, state: 'ended'},
+        );
     }
     const lifecycle = create(LifecycleSchema, {state: {case: 'running', value: {}}});
     expect(

@@ -7,7 +7,7 @@
 package storev1
 
 import (
-	_ "github.com/uw-syfi/vibesys/gateway/gen/buf/validate"
+	_ "buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go/buf/validate"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
@@ -23,7 +23,58 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+// Who ran a turn: a scripted agent, or a provider. Absence is an older turn.
+type AgentClient int32
+
+const (
+	AgentClient_AGENT_CLIENT_UNSPECIFIED AgentClient = 0
+	AgentClient_AGENT_CLIENT_SCRIPTED    AgentClient = 1
+	AgentClient_AGENT_CLIENT_PROVIDER    AgentClient = 2
+)
+
+// Enum value maps for AgentClient.
+var (
+	AgentClient_name = map[int32]string{
+		0: "AGENT_CLIENT_UNSPECIFIED",
+		1: "AGENT_CLIENT_SCRIPTED",
+		2: "AGENT_CLIENT_PROVIDER",
+	}
+	AgentClient_value = map[string]int32{
+		"AGENT_CLIENT_UNSPECIFIED": 0,
+		"AGENT_CLIENT_SCRIPTED":    1,
+		"AGENT_CLIENT_PROVIDER":    2,
+	}
+)
+
+func (x AgentClient) Enum() *AgentClient {
+	p := new(AgentClient)
+	*p = x
+	return p
+}
+
+func (x AgentClient) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (AgentClient) Descriptor() protoreflect.EnumDescriptor {
+	return file_vibesys_store_v1_agent_attrs_proto_enumTypes[0].Descriptor()
+}
+
+func (AgentClient) Type() protoreflect.EnumType {
+	return &file_vibesys_store_v1_agent_attrs_proto_enumTypes[0]
+}
+
+func (x AgentClient) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use AgentClient.Descriptor instead.
+func (AgentClient) EnumDescriptor() ([]byte, []int) {
+	return file_vibesys_store_v1_agent_attrs_proto_rawDescGZIP(), []int{0}
+}
+
 // Attrs for agent_turn, including the final usage and transcript byte length.
+// `client` names the executor. The provider and model stay the role's selection.
 type AgentTurnAttrs struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
 	Agent           string                 `protobuf:"bytes,1,opt,name=agent,proto3" json:"agent,omitempty"`
@@ -44,6 +95,7 @@ type AgentTurnAttrs struct {
 	// Wall timestamps reported by execution events, independent of elapsed span clocks.
 	StartedAt     *timestamppb.Timestamp `protobuf:"bytes,13,opt,name=started_at,json=startedAt,proto3" json:"started_at,omitempty"`
 	EndedAt       *timestamppb.Timestamp `protobuf:"bytes,14,opt,name=ended_at,json=endedAt,proto3" json:"ended_at,omitempty"`
+	Client        *AgentClient           `protobuf:"varint,15,opt,name=client,proto3,enum=vibesys.store.v1.AgentClient,oneof" json:"client,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -176,6 +228,13 @@ func (x *AgentTurnAttrs) GetEndedAt() *timestamppb.Timestamp {
 	return nil
 }
 
+func (x *AgentTurnAttrs) GetClient() AgentClient {
+	if x != nil && x.Client != nil {
+		return *x.Client
+	}
+	return AgentClient_AGENT_CLIENT_UNSPECIFIED
+}
+
 // Absence means unreported. A reported zero stays present on the wire.
 type TokenUsage struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -273,7 +332,7 @@ var File_vibesys_store_v1_agent_attrs_proto protoreflect.FileDescriptor
 
 const file_vibesys_store_v1_agent_attrs_proto_rawDesc = "" +
 	"\n" +
-	"\"vibesys/store/v1/agent_attrs.proto\x12\x10vibesys.store.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\x88\x06\n" +
+	"\"vibesys/store/v1/agent_attrs.proto\x12\x10vibesys.store.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xdb\x06\n" +
 	"\x0eAgentTurnAttrs\x12!\n" +
 	"\x05agent\x18\x01 \x01(\tB\v\xbaH\br\x06\x10\x01(\x80\x80\x04R\x05agent\x12\x1f\n" +
 	"\x04role\x18\x02 \x01(\tB\v\xbaH\br\x06\x10\x01(\x80\x80\x04R\x04role\x12&\n" +
@@ -293,7 +352,9 @@ const file_vibesys_store_v1_agent_attrs_proto_rawDesc = "" +
 	"\x11transcript_length\x18\f \x01(\x04H\x06R\x10transcriptLength\x88\x01\x01\x129\n" +
 	"\n" +
 	"started_at\x18\r \x01(\v2\x1a.google.protobuf.TimestampR\tstartedAt\x125\n" +
-	"\bended_at\x18\x0e \x01(\v2\x1a.google.protobuf.TimestampR\aendedAtB\b\n" +
+	"\bended_at\x18\x0e \x01(\v2\x1a.google.protobuf.TimestampR\aendedAt\x12F\n" +
+	"\x06client\x18\x0f \x01(\x0e2\x1d.vibesys.store.v1.AgentClientB\n" +
+	"\xbaH\a\x82\x01\x04\x10\x01 \x00H\aR\x06client\x88\x01\x01B\b\n" +
 	"\x06_modelB\n" +
 	"\n" +
 	"\b_attemptB\v\n" +
@@ -301,7 +362,8 @@ const file_vibesys_store_v1_agent_attrs_proto_rawDesc = "" +
 	"\x11_reasoning_effortB\x12\n" +
 	"\x10_harness_versionB\b\n" +
 	"\x06_usageB\x14\n" +
-	"\x12_transcript_length\"\xf1\x02\n" +
+	"\x12_transcript_lengthB\t\n" +
+	"\a_client\"\xf1\x02\n" +
 	"\n" +
 	"TokenUsage\x12\x19\n" +
 	"\x05input\x18\x01 \x01(\x04H\x00R\x05input\x88\x01\x01\x12\"\n" +
@@ -320,7 +382,11 @@ const file_vibesys_store_v1_agent_attrs_proto_rawDesc = "" +
 	"\n" +
 	"_reasoningB\v\n" +
 	"\t_cost_usdB\x0e\n" +
-	"\f_duration_msBAZ?github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1b\x06proto3"
+	"\f_duration_ms*a\n" +
+	"\vAgentClient\x12\x1c\n" +
+	"\x18AGENT_CLIENT_UNSPECIFIED\x10\x00\x12\x19\n" +
+	"\x15AGENT_CLIENT_SCRIPTED\x10\x01\x12\x19\n" +
+	"\x15AGENT_CLIENT_PROVIDER\x10\x02BAZ?github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1b\x06proto3"
 
 var (
 	file_vibesys_store_v1_agent_attrs_proto_rawDescOnce sync.Once
@@ -334,21 +400,24 @@ func file_vibesys_store_v1_agent_attrs_proto_rawDescGZIP() []byte {
 	return file_vibesys_store_v1_agent_attrs_proto_rawDescData
 }
 
+var file_vibesys_store_v1_agent_attrs_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
 var file_vibesys_store_v1_agent_attrs_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
 var file_vibesys_store_v1_agent_attrs_proto_goTypes = []any{
-	(*AgentTurnAttrs)(nil),        // 0: vibesys.store.v1.AgentTurnAttrs
-	(*TokenUsage)(nil),            // 1: vibesys.store.v1.TokenUsage
-	(*timestamppb.Timestamp)(nil), // 2: google.protobuf.Timestamp
+	(AgentClient)(0),              // 0: vibesys.store.v1.AgentClient
+	(*AgentTurnAttrs)(nil),        // 1: vibesys.store.v1.AgentTurnAttrs
+	(*TokenUsage)(nil),            // 2: vibesys.store.v1.TokenUsage
+	(*timestamppb.Timestamp)(nil), // 3: google.protobuf.Timestamp
 }
 var file_vibesys_store_v1_agent_attrs_proto_depIdxs = []int32{
-	1, // 0: vibesys.store.v1.AgentTurnAttrs.usage:type_name -> vibesys.store.v1.TokenUsage
-	2, // 1: vibesys.store.v1.AgentTurnAttrs.started_at:type_name -> google.protobuf.Timestamp
-	2, // 2: vibesys.store.v1.AgentTurnAttrs.ended_at:type_name -> google.protobuf.Timestamp
-	3, // [3:3] is the sub-list for method output_type
-	3, // [3:3] is the sub-list for method input_type
-	3, // [3:3] is the sub-list for extension type_name
-	3, // [3:3] is the sub-list for extension extendee
-	0, // [0:3] is the sub-list for field type_name
+	2, // 0: vibesys.store.v1.AgentTurnAttrs.usage:type_name -> vibesys.store.v1.TokenUsage
+	3, // 1: vibesys.store.v1.AgentTurnAttrs.started_at:type_name -> google.protobuf.Timestamp
+	3, // 2: vibesys.store.v1.AgentTurnAttrs.ended_at:type_name -> google.protobuf.Timestamp
+	0, // 3: vibesys.store.v1.AgentTurnAttrs.client:type_name -> vibesys.store.v1.AgentClient
+	4, // [4:4] is the sub-list for method output_type
+	4, // [4:4] is the sub-list for method input_type
+	4, // [4:4] is the sub-list for extension type_name
+	4, // [4:4] is the sub-list for extension extendee
+	0, // [0:4] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_store_v1_agent_attrs_proto_init() }
@@ -363,13 +432,14 @@ func file_vibesys_store_v1_agent_attrs_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_vibesys_store_v1_agent_attrs_proto_rawDesc), len(file_vibesys_store_v1_agent_attrs_proto_rawDesc)),
-			NumEnums:      0,
+			NumEnums:      1,
 			NumMessages:   2,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
 		GoTypes:           file_vibesys_store_v1_agent_attrs_proto_goTypes,
 		DependencyIndexes: file_vibesys_store_v1_agent_attrs_proto_depIdxs,
+		EnumInfos:         file_vibesys_store_v1_agent_attrs_proto_enumTypes,
 		MessageInfos:      file_vibesys_store_v1_agent_attrs_proto_msgTypes,
 	}.Build()
 	File_vibesys_store_v1_agent_attrs_proto = out.File

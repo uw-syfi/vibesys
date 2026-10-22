@@ -44,6 +44,8 @@ from vs_core._generated.vibesys.core.v1.common_cv import (
     StrategyId,
 )
 from vs_core._generated.vibesys.core.v1.contracts_cv import (
+    AdoptionPublication,
+    CheckoutUpdate,
     NullValue,
     OperationSchemaRef,
     PureOption,
@@ -83,6 +85,7 @@ from vs_core._generated.vibesys.core.v1.vocabulary_cv import (
     AssessmentKind,
     Charge,
     ChargeKind,
+    CheckoutStatus,
     ComparisonVerdict,
     DigestScheme,
     EffectVerdict,
@@ -93,6 +96,7 @@ from vs_core._generated.vibesys.core.v1.vocabulary_cv import (
 )
 
 __all__ = [
+    "AdoptionPublication",
     "ArtifactId",
     "ArtifactRef",
     "AssessmentKind",
@@ -102,6 +106,8 @@ __all__ = [
     "ChargeClass",
     "ChargeId",
     "ChargeKind",
+    "CheckoutStatus",
+    "CheckoutUpdate",
     "Comparison",
     "ComparisonVerdict",
     "ContinuationId",

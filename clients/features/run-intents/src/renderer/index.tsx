@@ -1,7 +1,12 @@
-import type {HostKey} from '@vibesys/hosts';
+import type {HostKey, RecordedProjectRoot} from '@vibesys/hosts';
 import type {GatewayBridge} from '@vibesys/ipc';
 import type {ScheduleTimeout} from '@vibesys/machine';
-import {type RelaunchObservation, type RunIntentAction, runIntent} from '@vibesys/runs/intents';
+import {
+  type RelaunchObservation,
+  type RunIntentAction,
+  runIntent,
+  runReference,
+} from '@vibesys/runs/intents';
 import {type JSX, useEffect, useRef, useState} from 'react';
 import type {SnapshotFrom} from 'xstate';
 import type {runIntentsMachine} from '../state/index.js';
@@ -13,7 +18,7 @@ import {IntentControls} from './ui/controls.js';
 export function useRunIntents(props: {
   readonly bridge: GatewayBridge;
   readonly host: HostKey;
-  readonly projectRoot: string;
+  readonly projectRoot: RecordedProjectRoot | undefined;
   readonly runId: string;
   readonly enabled: boolean;
   readonly schedule: ScheduleTimeout;
@@ -40,15 +45,28 @@ export function useRunIntents(props: {
       actor.stop();
     };
   }, [props.bridge, props.host, props.runId, props.enabled, props.schedule]);
-  const relaunch = useRelaunch({...props, observation: props.enabled ? props.relaunch : undefined});
+  const projectRoot = props.projectRoot;
+  const relaunch = useRelaunch({
+    bridge: props.bridge,
+    host: props.host,
+    projectRoot: projectRoot ?? '',
+    runId: props.runId,
+    observation: props.enabled && projectRoot !== undefined ? props.relaunch : undefined,
+    schedule: props.schedule,
+  });
   const busy = snapshot?.matches({active: 'sending'}) ?? false;
   const sendRequest = (
     request: Parameters<NonNullable<typeof current.current>['send']>[0] & {type: 'send'},
   ) => current.current?.send(request);
-  if (!props.enabled || !snapshot) return {controls: null, busy, sendRequest};
+  if (!props.enabled || !snapshot || projectRoot === undefined)
+    return {controls: null, busy, sendRequest};
   const send = (action: RunIntentAction) => {
     const request = runIntent(
-      {projectRoot: props.projectRoot, runId: props.runId, requestId: crypto.randomUUID()},
+      {
+        ...runReference(projectRoot, props.runId),
+        requestId: crypto.randomUUID(),
+        expectedEpoch: props.relaunch?.epoch ?? 0n,
+      },
       action,
       text,
     );

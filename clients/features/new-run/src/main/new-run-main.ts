@@ -2,7 +2,13 @@
  * The New run feature in the main process: it answers the screen's requests with one host helper
  * method each, over the host's connection, and records a started run in Recent.
  */
-import {ConnectionError, type ConnectionLease, HelperRequestError} from '@vibesys/connection';
+import {
+  ConnectionError,
+  type ConnectionLease,
+  HelperRequestError,
+  type RegistryProjects,
+  type RunWatch,
+} from '@vibesys/connection';
 import type {
   Backend,
   Check,
@@ -50,6 +56,21 @@ export interface NewRunMainDeps {
   /** Record a started run in Recent (the settings store). */
   readonly remember: (run: StoredRecentRun) => Promise<void>;
   readonly now: () => number;
+  /** The per-host switch. Absent or false keeps the helper JSON start. */
+  readonly transportV2?: (host: HostId) => Promise<boolean>;
+  /**
+   * The registry start used when `transportV2` is on. The host keeps the
+   * admitted run after `signal` aborts.
+   */
+  readonly registryStart?: (
+    host: HostId,
+    inputs: RunInputs,
+    signal: AbortSignal,
+  ) => Promise<{readonly runId: string; readonly instanceId: string}>;
+  /** Create, copy, and destination checks when `transportV2` is on. */
+  readonly registryProjects?: RegistryProjects;
+  /** WatchRuns for the host a v2 start just launched on. */
+  readonly watchRuns?: Pick<RunWatch, 'start'>;
 }
 
 /** One helper request without the fields the connection fills in (`request_id`, `deadline_ms`). */
@@ -126,19 +147,7 @@ export class NewRunMain {
       case 'create-from-example':
         return this.#createFromExample(request.host, request.example, request.destination);
       case 'example-destination':
-        return this.#offered(
-          request.host,
-          {
-            type: 'examples.destination',
-            example: request.example,
-            destination: request.destination,
-          },
-          'Could not check the destination',
-          (reply): DestinationFound => {
-            const {state, project} = reply as DestinationFound;
-            return {state, project};
-          },
-        );
+        return this.#destination(request.host, request.example, request.destination);
       case 'copy-out':
         return this.#copyOut(request.host, request.source, request.destination);
       case 'start-run':
@@ -249,12 +258,53 @@ export class NewRunMain {
     }
   }
 
+  async #destination(
+    host: HostId,
+    example: string,
+    destination: string,
+  ): Promise<Offered<DestinationFound>> {
+    if ((await this.#deps.transportV2?.(host)) === true) {
+      try {
+        const found = await this.#projects().destination(
+          host,
+          example,
+          destination,
+          new AbortController().signal,
+        );
+        return {kind: 'offered', value: found};
+      } catch (error) {
+        throw plain(error, `Could not check the destination on ${hostLabel(host)}`);
+      }
+    }
+    return this.#offered(
+      host,
+      {type: 'examples.destination', example, destination},
+      'Could not check the destination',
+      (reply): DestinationFound => {
+        const {state, project} = reply as DestinationFound;
+        return {state, project};
+      },
+    );
+  }
+
   /** The new project, or `taken` when the destination holds something (it is not for the user to read). */
   async #createFromExample(
     host: HostId,
     example: string,
     destination: string,
   ): Promise<ExampleCreation> {
+    if ((await this.#deps.transportV2?.(host)) === true) {
+      try {
+        return await this.#projects().create(
+          host,
+          example,
+          destination,
+          new AbortController().signal,
+        );
+      } catch (error) {
+        throw plain(error, 'Could not create the project');
+      }
+    }
     try {
       const reply = (await this.#request(host, {
         type: 'project.create_from_example',
@@ -271,6 +321,13 @@ export class NewRunMain {
   }
 
   async #copyOut(host: HostId, source: string, destination: string): Promise<CreatedProject> {
+    if ((await this.#deps.transportV2?.(host)) === true) {
+      try {
+        return await this.#projects().copy(host, source, destination, new AbortController().signal);
+      } catch (error) {
+        throw plain(error, 'Could not copy the project out');
+      }
+    }
     try {
       const reply = (await this.#request(host, {
         type: 'project.copy_out',
@@ -284,6 +341,7 @@ export class NewRunMain {
   }
 
   async #start(host: HostId, inputs: RunInputs): Promise<StartedRun> {
+    if ((await this.#deps.transportV2?.(host)) === true) return this.#startRegistered(host, inputs);
     let launch: LiveInstanceRecord | DetachedLaunchFailure;
     try {
       await using lease = await this.#deps.connect(host);
@@ -299,12 +357,51 @@ export class NewRunMain {
       const log = launch.log_path == null ? '' : ` Its log is ${launch.log_path}.`;
       throw new Error(`${launch.message} (${launch.code} at ${launch.stage}).${log}`);
     }
+    await this.#remember(host, inputs, launch.run_id, launch.id);
+    return {runId: launch.run_id, instanceId: launch.id};
+  }
+
+  #projects(): RegistryProjects {
+    const projects = this.#deps.registryProjects;
+    if (projects === undefined) {
+      throw new Error('run transport v2 is on and the project registry is missing');
+    }
+    return projects;
+  }
+
+  async #startRegistered(host: HostId, inputs: RunInputs): Promise<StartedRun> {
+    const start = this.#deps.registryStart;
+    if (start === undefined) {
+      throw new Error('run transport v2 is on and the start registry is missing');
+    }
+    const controller = new AbortController();
+    let started: {runId: string; instanceId: string};
+    try {
+      started = await start(host, inputs, controller.signal);
+    } catch (error) {
+      throw plain(error, 'Could not start the run');
+    }
+    const watch = this.#deps.watchRuns;
+    if (watch === undefined) {
+      throw new Error('run transport v2 is on and the run watch is missing');
+    }
+    watch.start(host);
+    await this.#remember(host, inputs, started.runId, started.instanceId);
+    return started;
+  }
+
+  async #remember(
+    host: HostId,
+    inputs: RunInputs,
+    runId: string,
+    instanceId: string,
+  ): Promise<void> {
     await this.#deps.remember({
       host: hostKey(host),
       project: inputs.project,
       task: inputs.task,
-      runId: launch.run_id,
-      instanceId: launch.id,
+      runId,
+      instanceId,
       attachedAt: this.#deps.now(),
       start: {
         harness: inputs.harness,
@@ -314,6 +411,5 @@ export class NewRunMain {
         args: inputs.args,
       },
     });
-    return {runId: launch.run_id, instanceId: launch.id};
   }
 }

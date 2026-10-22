@@ -12,3 +12,7 @@ var testPlanners = map[string]execution.Planner{
 	"go": golang.Planner{}, "rust": rust.Planner{},
 	"python": python.Planner{}, "typescript": typescript.Planner{},
 }
+
+func localCoverageChecks(root string, g graph, changed, tests []string) ([]execution.Check, error) {
+	return python.CoverageChecks(root, changed, tests, g.CheckGroups["python_coverage_floor"], g.CheckGroups["patch_coverage"])
+}

@@ -1,17 +1,22 @@
 """Epoch recovery through the live journal and actual project files."""
 
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
 import pytest
-from hypothesis import given
+from hypothesis import example, given, settings
 from hypothesis import strategies as st
 from pydantic import TypeAdapter
 
 import vs_proto.api as p
 from vibesys.events import (
+    CoreEventData,
     CoreEventType,
+    RunFailedData,
+    RunFailure,
+    RunFailureKind,
     RunStartedData,
     SpanEndedData,
     SpanStartedData,
@@ -28,7 +33,143 @@ from vs_runlog.api import (
     assert_run_unlocked,
     encode_frame,
 )
-from vs_sim.api.testing import ManualClock, SimThreads
+from vs_sim.api.testing import ManualClock, SimThreads, examples
+
+_SYNTHETIC = "previous writer exited without ending its epoch"
+"""The interrupt a successor writes when the epoch it replaces never ended."""
+
+
+def _failure(kind: RunFailureKind) -> RunFailedData:
+    return RunFailedData(
+        failure=RunFailure(
+            kind=kind,
+            reason=kind.value,
+            workstreams_started=0,
+            workstream_budget=1,
+            candidates_kept=0,
+        )
+    )
+
+
+@dataclass(frozen=True)
+class _Close:
+    """How the first epoch stops, and whether that stop is an ending."""
+
+    name: str
+    ended: bool
+    events: tuple[tuple[CoreEventType, CoreEventData | None], ...]
+
+
+def _closes() -> tuple[_Close, ...]:
+    failures = tuple(
+        _Close(
+            kind.value,
+            ended=True,
+            events=((CoreEventType.RUN_FAILED, _failure(kind)),),
+        )
+        for kind in RunFailureKind
+    )
+    return (
+        _Close("parked", ended=True, events=((CoreEventType.PARKED, None),)),
+        _Close("finished", ended=True, events=((CoreEventType.RUN_FINISHED, None),)),
+        _Close("stopped", ended=True, events=((CoreEventType.STOPPED, None),)),
+        *failures,
+        _Close("running", ended=False, events=()),
+        _Close("draining", ended=False, events=((CoreEventType.PARK_REQUESTED, None),)),
+    )
+
+
+_CLOSES = {close.name: close for close in _closes()}
+
+
+def _turn(
+    root: Path, closing: tuple[tuple[CoreEventType, CoreEventData | None], ...]
+) -> list[p.Record]:
+    """Park or end ``closing``, then Resume and record one turn on the successor."""
+    project = Project.open(root)
+    clock = ManualClock(start=100)
+
+    def open_journal() -> EventJournal:
+        journal = EventJournal(clock, SimThreads())
+        journal.enable_runlog(project, "run-a")
+        journal.attach(Project.log_directory_for(root, "run-a"), "run-a")
+        return journal
+
+    journal = open_journal()
+    journal.emit(CoreEventType.RUN_STARTED, data=RunStartedData(outer_loop="test", input="input"))
+    for event_type, data in closing:
+        journal.emit(event_type, data=data)
+    journal.close()
+    clock.advance(1000)
+    journal = open_journal()
+    span = TypeAdapter(WireSpan).validate_python(
+        {
+            "id": "op:implementer.1",
+            "parent": None,
+            "type": "operation",
+            "name": "implementer",
+            "status": "running",
+            "started_at": 200,
+        }
+    )
+    journal.emit(CoreEventType.SPAN_STARTED, data=SpanStartedData(span=span))
+    journal.close()
+    return read(Project.run_log_path_for(root, "run-a"))
+
+
+def _synthetic(records: list[p.Record]) -> list[p.Record]:
+    found = []
+    for record in records:
+        body = record.body
+        if (
+            body is None
+            or body.field != "lifecycle"
+            or body.value.state is None
+            or body.value.state.field != "ended"
+        ):
+            continue
+        ending = body.value.state.value
+        if ending.interruption_reason == _SYNTHETIC:
+            found.append(record)
+    return found
+
+
+@pytest.mark.regression
+@example(name="parked")
+@example(name="deadline")
+@settings(max_examples=examples(pr=len(_CLOSES), nightly=len(_CLOSES)), deadline=None)
+@given(name=st.sampled_from(sorted(_CLOSES)))
+def test_resume_after_an_ending_opens_a_fresh_epoch_that_records_a_turn(name: str) -> None:
+    """Resume never invents an interrupt for an epoch that already ended.
+
+    A parked epoch and every ended outcome (finished, failed, including a deadline,
+    stopped) are endings. Starting, running and draining are not: a writer that
+    exits then still leaves one interrupt, and the successor still records its turn.
+    """
+    close = _CLOSES[name]
+    with TemporaryDirectory() as directory:
+        records = _turn(Path(directory), close.events)
+    synthetic = _synthetic(records)
+    spans = [
+        record
+        for record in records
+        if record.body is not None and record.body.field == "span" and record.body.value.span
+    ]
+    assert spans
+    last = spans[-1]
+    assert last.epoch == 2
+    body = last.body
+    assert body is not None
+    value = body.value
+    assert isinstance(value, p.SpanRecord)
+    span = value.span
+    assert span is not None
+    assert span.name == "implementer"
+    if close.ended:
+        assert synthetic == []
+        return
+    assert len(synthetic) == 1
+    assert synthetic[0].epoch == 1
 
 
 def read(path: Path) -> list[p.Record]:
@@ -62,11 +203,13 @@ def test_relaunch_freezes_clock_and_records_checkout(
     journal.emit(CoreEventType.RUN_FINISHED)
     journal.close()
     records = read(Project.run_log_path_for(root, "run-a"))
-    assert [r.clock for r in records] == [0, 0, 5, 5, 5, 5, 8]
+    assert [r.clock for r in records] == [0, 0, 0, 5, 5, 5, 5, 5, 8]
     assert [r.at.to_datetime().timestamp() for r in records if r.at is not None] == [
         100,
         100,
+        100,
         105,
+        1105,
         1105,
         1105,
         1105,
@@ -75,6 +218,8 @@ def test_relaunch_freezes_clock_and_records_checkout(
     headers = [r.body.value for r in records if r.body and r.body.field == "epoch_started"]
     assert [(h.epoch, h.tree_hash, h.dirty, h.provenance_known) for h in headers] == [
         (1, "tree-a", True, True),
+        (1, "tree-a", True, True),
+        (2, "tree-b", False, True),
         (2, "tree-b", False, True),
     ]
     ends = [

@@ -19,7 +19,12 @@ from tests.support.scratch_tree import remove_scratch_tree
 from vs_sim.api.testing import Depth
 
 # `--shard=I/N` splits the suite across CI runners (see tests/support/sharding.py).
+# The hang-dump plugin is first so its deadline timer is armed before other
+# plugins do work. The timer no-ops unless the workflow passed
+# VIBESYS_PYTEST_DUMP_AT. The same plugin names each quiet-mode failure when
+# the report arrives, so a cancelled session still shows the node id.
 pytest_plugins = [
+    "scripts.pytest_hang_dump",
     "vs_sim_pytest",
     "tests.support.isolated_environment",
     "tests.support.cwd_hygiene",
@@ -96,10 +101,14 @@ _SERIAL_GROUP = "serial"
 
 # Markers whose tests drive real processes, images or an exhaustive sweep and
 # carry their own, longer deadlines (the largest is a 1800 s image build). They
-# get a higher hard backstop than the 300 s default in pyproject.toml; a test
-# that sets `@pytest.mark.timeout` itself keeps its own value.
+# get a higher hard backstop than the deterministic default in pyproject.toml.
+# A test that sets `@pytest.mark.timeout` itself keeps its own value.
+# Real-tier tests, and deterministic tests at nightly depth, keep the previous
+# 300 s bound. Nightly example counts are several times the shard depth, and
+# that job's cancel is 60 minutes, so the shorter shard bound does not apply.
 _LONG_RUNNING_MARKERS = ("e2e", "real_contract", "slow")
 _LONG_RUNNING_TIMEOUT_S = 3600
+_PRESERVED_TIMEOUT_S = 300
 
 #: Fixtures that compile a real binary once per ``scope="session"`` and are
 #: consumed by more than one test. "Session" only means "this xdist worker's
@@ -142,6 +151,21 @@ _NATIVE_BUILD_FIXTURES = frozenset(
 )
 
 
+def _in_real_tier(item: pytest.Item) -> bool:
+    """True when ``item`` lives in a ``sim_real_tiers`` directory.
+
+    The directory list is the pytest ini the vs-sim plugin owns. The match is
+    the same prefix rule as that plugin: a test is real when its path is the
+    directory or a file inside it.
+    """
+    tiers = item.config.getini("sim_real_tiers")
+    try:
+        relative = item.path.relative_to(item.config.rootpath).as_posix()
+    except ValueError:
+        return False
+    return any(relative == tier or relative.startswith(f"{tier}/") for tier in tiers)
+
+
 @pytest.hookimpl(tryfirst=True)
 def pytest_collection_modifyitems(items: Iterable[pytest.Item]) -> None:
     """Pin every ``serial`` test, and every consumer of a shared build fixture, to one xdist worker.
@@ -172,10 +196,11 @@ def pytest_collection_modifyitems(items: Iterable[pytest.Item]) -> None:
     despite carrying the same group; with it, both landed on the same worker.
     """
     for item in items:
-        if item.get_closest_marker("timeout") is None and any(
-            item.get_closest_marker(name) is not None for name in _LONG_RUNNING_MARKERS
-        ):
-            item.add_marker(pytest.mark.timeout(_LONG_RUNNING_TIMEOUT_S))
+        if item.get_closest_marker("timeout") is None:
+            if any(item.get_closest_marker(name) is not None for name in _LONG_RUNNING_MARKERS):
+                item.add_marker(pytest.mark.timeout(_LONG_RUNNING_TIMEOUT_S))
+            elif _in_real_tier(item) or item.config.getoption("depth") == Depth.NIGHTLY.value:
+                item.add_marker(pytest.mark.timeout(_PRESERVED_TIMEOUT_S))
         if item.get_closest_marker(_SERIAL_GROUP) is not None:
             item.add_marker(pytest.mark.xdist_group(_SERIAL_GROUP))
             continue

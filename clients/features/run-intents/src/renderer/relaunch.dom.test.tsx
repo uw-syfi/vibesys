@@ -1,6 +1,6 @@
 import {afterAll, beforeAll, expect, test} from 'bun:test';
 import {create} from '@bufbuild/protobuf';
-import type {HostKey} from '@vibesys/hosts';
+import {type HostKey, recordedProjectRoot} from '@vibesys/hosts';
 import type {GatewayBridge, GatewayCall} from '@vibesys/ipc';
 import {LifecycleSchema} from '@vibesys/proto';
 import {FakeClock} from '@vibesys/transport/testing';
@@ -67,7 +67,7 @@ test('Relaunch starts when observation becomes available and cancels when disabl
         <RunIntents
           bridge={bridge}
           host={'local' as HostKey}
-          projectRoot="/project"
+          projectRoot={recordedProjectRoot('/project')}
           runId="run-1"
           enabled={enabled}
           schedule={clock.schedule}
@@ -89,7 +89,7 @@ test('Relaunch starts when observation becomes available and cancels when disabl
     expect(bridge.streams).toBe(1);
     await render(true, true);
     const relaunch = [...container.querySelectorAll('button')].find(
-      button => button.textContent === 'Relaunch',
+      button => button.textContent === 'Resume',
     );
     expect(relaunch).toBeDefined();
     expect(bridge.streams).toBe(2);

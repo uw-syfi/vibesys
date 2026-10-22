@@ -34,6 +34,11 @@ export interface ViewBase {
   readonly tokens: TokenLedger;
   /** The harness and model that ran each turn, by turn span, from the run's usage records. */
   readonly who: WhoBySpan;
+  /**
+   * Adoption span id to the headline the records name, including a checkout skip.
+   * Absent when the screen has not projected the trace; a step then uses its own title.
+   */
+  readonly adoptionTitles?: ReadonlyMap<string, string>;
   /** The names the host's catalogue gives the models; absent, or a model it lacks: the id. */
   readonly names?: ModelNames;
   readonly zoom: Zoom;

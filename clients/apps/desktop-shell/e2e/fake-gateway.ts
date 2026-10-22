@@ -12,6 +12,7 @@ import {
   WatchRunsResponseSchema,
 } from '@vibesys/proto';
 import type {StoreRunFixture} from '@vibesys/run-fixtures';
+import {epochHasEnded} from '@vibesys/run-skeleton';
 
 export interface WireFixture {
   methods: Record<'skeleton' | 'tail' | 'blobs' | 'log' | 'hostCall' | 'watchRuns', string>;
@@ -37,11 +38,7 @@ export function wire(fixture: StoreRunFixture, liveness?: RunLiveness): WireFixt
         WatchRunsResponseSchema,
         create(WatchRunsResponseSchema, {
           runId: 'run-a',
-          liveness:
-            liveness ??
-            (lifecycle?.state.case === 'ended' || lifecycle?.state.case === 'parked'
-              ? RunLiveness.ENDED
-              : RunLiveness.ALIVE),
+          liveness: liveness ?? (epochHasEnded(lifecycle) ? RunLiveness.ENDED : RunLiveness.ALIVE),
           head: {
             strategy: 'fixture',
             lifecycle,

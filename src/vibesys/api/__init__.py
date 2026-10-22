@@ -68,7 +68,7 @@ if TYPE_CHECKING:
         configuration_error,
     )
     from vibesys.api.domains import domain_modalities
-    from vibesys.api.entry import load_config
+    from vibesys.api.entry import load_config, load_host_allowed_models
     from vibesys.api.reader import RunReader, RunReaders
     from vibesys.api.runs import RunHandle, Runs, relaunch
     from vibesys.api.session import RunControl, RunSession, create_session
@@ -91,6 +91,7 @@ if TYPE_CHECKING:
         AgentOutputChunkData,
         AgentReply,
         AgentStatusData,
+        CheckoutStatus,
         CommandResultPayload,
         ComparisonReadingData,
         ComparisonsReadData,
@@ -143,7 +144,12 @@ if TYPE_CHECKING:
         vetted_models,
     )
     from vs_runtime.api import boot_trace
-    from vs_runtime.api.control import CONTROL_REQUEST, ControlAction, recorded_ending
+    from vs_runtime.api.control import (
+        CONTROL_REQUEST,
+        ControlAction,
+        recorded_ending,
+        recorded_epoch,
+    )
     from vs_runtime.api.infrastructure import (
         CONTROL_ID_PATTERN,
         REFUSAL_TEXT,
@@ -153,7 +159,7 @@ if TYPE_CHECKING:
         ControlAck,
         ControlRequest,
         ControlStatus,
-        ParkRequest,
+        PauseNowRequest,
         PauseRequest,
         RefusalReason,
         ResumeRequest,
@@ -170,7 +176,6 @@ if TYPE_CHECKING:
         SteerTargets,
         SteerTurn,
         StopMode,
-        StopRequest,
         WithdrawRequest,
         check_one_way_to_resume,
         describe_seconds,
@@ -180,7 +185,10 @@ if TYPE_CHECKING:
 _MODULES: dict[str, str] = {
     name: module
     for module, names in (
-        ("vs_runtime.api.control", ("CONTROL_REQUEST ControlAction recorded_ending ")),
+        (
+            "vs_runtime.api.control",
+            ("CONTROL_REQUEST ControlAction recorded_ending recorded_epoch "),
+        ),
         (
             "vibesys.api.auxiliary",
             (
@@ -203,7 +211,7 @@ _MODULES: dict[str, str] = {
         ),
         ("vibesys.errors", "ConfigurationDiagnostic ConfigurationError "),
         ("vibesys.api.domains", ("domain_modalities ")),
-        ("vibesys.api.entry", ("load_config ")),
+        ("vibesys.api.entry", ("load_config load_host_allowed_models ")),
         ("vibesys.api.reader", ("RunReader RunReaders ")),
         ("vibesys.api.runs", ("RunHandle Runs relaunch ")),
         ("vibesys.api.session", ("RunControl RunSession create_session ")),
@@ -220,7 +228,8 @@ _MODULES: dict[str, str] = {
             "vibesys.events",
             (
                 "AgentExecutionStartedData AgentOutputChannel AgentOutputChunkData AgentReply "
-                "AgentStatusData CommandResultPayload ComparisonReadingData ComparisonsReadData "
+                "AgentStatusData CheckoutStatus CommandResultPayload ComparisonReadingData "
+                "ComparisonsReadData "
                 "ComparisonStatus CoreEventType FrameworkWarningData GateFinishedData GateKind "
                 "GateStartedData InputMeasurementFailedData InputMeasurementFailureKind "
                 "JsonResultPayload MeasurementComparedData ProviderSwitchedData QuotaAbandonedData "
@@ -240,10 +249,10 @@ _MODULES: dict[str, str] = {
             "vs_runtime.api.infrastructure",
             (
                 "CONTROL_ID_PATTERN REFUSAL_TEXT ActionRequest CancelAttemptRequest CancelItemRequest "
-                "ControlAck ControlRequest ControlStatus ParkRequest PauseRequest RefusalReason "
+                "ControlAck ControlRequest ControlStatus PauseNowRequest PauseRequest RefusalReason "
                 "ResumeRequest ResumeWhen RunStopped SetMaxParallelRequest SteerableAttempt "
                 "SteerDelivery SteerDeliveryState SteerMode SteerRequest SteerTarget SteerTargetKind "
-                "SteerTargets SteerTurn StopMode StopRequest WithdrawRequest check_one_way_to_resume "
+                "SteerTargets SteerTurn StopMode WithdrawRequest check_one_way_to_resume "
                 "describe_seconds escalate_stop "
             ),
         ),
@@ -296,6 +305,7 @@ __all__ = [
     "AuxiliarySkills",
     "CancelAttemptRequest",
     "CancelItemRequest",
+    "CheckoutStatus",
     "CommandResultPayload",
     "ComparisonReadingData",
     "ComparisonStatus",
@@ -340,7 +350,7 @@ __all__ = [
     "ModelNotVetted",
     "OrchestrationDescriptor",
     "OrchestrationRegistry",
-    "ParkRequest",
+    "PauseNowRequest",
     "PauseRequest",
     "PluginProjection",
     "ProfilerKind",
@@ -400,7 +410,6 @@ __all__ = [
     "SteerTurn",
     "SteerableAttempt",
     "StopMode",
-    "StopRequest",
     "TaskImageUnsupported",
     "TaskNeedsProvisioning",
     "TaskNotFound",
@@ -430,8 +439,10 @@ __all__ = [
     "escalate_stop",
     "harnesses",
     "load_config",
+    "load_host_allowed_models",
     "open_run_store",
     "recorded_ending",
+    "recorded_epoch",
     "relaunch",
     "vetted_models",
 ]

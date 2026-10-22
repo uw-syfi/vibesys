@@ -368,3 +368,30 @@ def test_agent_image_tags_a_bare_base_image_id_before_building() -> None:
     tag = "vibesys-base:" + "a" * 64
     assert runner.calls[0][0] == ("docker", "tag", _TASK_IMAGE_ID, tag)
     assert _devcontainer_base(runner) == tag
+
+
+def test_agent_builder_accepts_explicit_cache_sources() -> None:
+    runner = _FakeRunner()
+    sources = ("cache:first", "cache:second")
+    agent_image(
+        "python:3.12-bookworm",
+        cache_from=sources,
+        command_runner=runner,
+        clock=ManualClock(),
+        output=DISCARD,
+    )
+    (build,) = [argv for argv, _, _ in runner.calls if argv[1] == "build"]
+    assert tuple(build[i + 1] for i, arg in enumerate(build) if arg == "--cache-from") == sources
+
+
+def test_invalid_cache_sources_fail_before_tagging_a_base_image() -> None:
+    runner = _FakeRunner()
+    with pytest.raises(ValueError, match="cache_from"):
+        agent_image(
+            _TASK_IMAGE_ID,
+            cache_from=("",),
+            command_runner=runner,
+            clock=ManualClock(),
+            output=DISCARD,
+        )
+    assert runner.calls == []

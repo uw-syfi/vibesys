@@ -13,11 +13,14 @@ from protobuf._codegen import file_desc
 from protobuf.wkt.google.protobuf import any_pb, descriptor_pb
 from protobuf.wkt.google.protobuf.descriptor_pb import FieldOptions, MessageOptions
 
+from . import agent_attrs_pb
 from ....buf.validate import validate_pb
 
 if TYPE_CHECKING:
     from protobuf import DescFile
     from protobuf.wkt.google.protobuf.any_pb import Any
+
+    from .agent_attrs_pb import TokenUsage
 
 
 _OperationKeyFields: TypeAlias = Literal["operation", "scope"]
@@ -90,7 +93,7 @@ class KeyComponent(Message[_KeyComponentFields]):
         kind: KeyComponentKind
         value: str
 
-_ReplayAllowanceFields: TypeAlias = Literal["iterations", "capacity", "remaining"]
+_ReplayAllowanceFields: TypeAlias = Literal["iterations", "capacity", "remaining", "resources"]
 
 class ReplayAllowance(Message[_ReplayAllowanceFields]):
     """
@@ -113,9 +116,16 @@ class ReplayAllowance(Message[_ReplayAllowanceFields]):
             ```proto
             double remaining = 3;
             ```
+        resources:
+            Absent dimensions are explicitly unbounded. Remaining is retained prompt
+            context; executable resource admission uses these named bounds.
+
+            ```proto
+            optional vibesys.store.v1.ReplayResources resources = 4;
+            ```
     """
 
-    __slots__ = ("iterations", "capacity", "remaining")
+    __slots__ = ("iterations", "capacity", "remaining", "resources")
 
     if TYPE_CHECKING:
 
@@ -125,14 +135,56 @@ class ReplayAllowance(Message[_ReplayAllowanceFields]):
             iterations: int = 0,
             capacity: int = 0,
             remaining: float = 0,
+            resources: ReplayResources | None = None,
         ) -> None:
             pass
 
         iterations: int
         capacity: int
         remaining: float
+        resources: ReplayResources | None
 
-_ReplayPolicyFields: TypeAlias = Literal["role", "template", "content", "reply_type", "reply_schema_digest"]
+_ReplayResourcesFields: TypeAlias = Literal["money_usd", "input_tokens", "output_tokens"]
+
+class ReplayResources(Message[_ReplayResourcesFields]):
+    """
+    ```proto
+    message vibesys.store.v1.ReplayResources
+    ```
+
+    Attributes:
+        money_usd:
+            ```proto
+            optional double money_usd = 1;
+            ```
+        input_tokens:
+            ```proto
+            optional uint64 input_tokens = 2;
+            ```
+        output_tokens:
+            ```proto
+            optional uint64 output_tokens = 3;
+            ```
+    """
+
+    __slots__ = ("money_usd", "input_tokens", "output_tokens")
+
+    if TYPE_CHECKING:
+
+        def __init__(
+            self,
+            *,
+            money_usd: float | None = None,
+            input_tokens: int | None = None,
+            output_tokens: int | None = None,
+        ) -> None:
+            pass
+
+        money_usd: float
+        input_tokens: int
+        output_tokens: int
+
+_ReplayPolicyFields: TypeAlias = Literal["role", "template", "content", "reply_type", "reply_schema_digest", "request", "reservation"]
 
 class ReplayPolicy(Message[_ReplayPolicyFields]):
     """
@@ -163,9 +215,25 @@ class ReplayPolicy(Message[_ReplayPolicyFields]):
             ```proto
             optional bytes reply_schema_digest = 5;
             ```
+        request:
+            The writer retains the complete typed request, including policy fields that
+            do not enter identity. Executors never decode the canonical identity framing.
+            Absent only in recorder prototypes predating typed request retention.
+
+            ```proto
+            optional google.protobuf.Any request = 6;
+            ```
+        reservation:
+            An upper bound enforced by the execution owner. A bounded epoch rejects
+            external requests that omit a bound for a constrained dimension. Free
+            operations explicitly reserve zero.
+
+            ```proto
+            optional vibesys.store.v1.ReplayResources reservation = 7;
+            ```
     """
 
-    __slots__ = ("role", "template", "content", "reply_type", "reply_schema_digest")
+    __slots__ = ("role", "template", "content", "reply_type", "reply_schema_digest", "request", "reservation")
 
     if TYPE_CHECKING:
 
@@ -177,6 +245,8 @@ class ReplayPolicy(Message[_ReplayPolicyFields]):
             content: bytes = b"",
             reply_type: str = "",
             reply_schema_digest: bytes | None = None,
+            request: Any | None = None,
+            reservation: ReplayResources | None = None,
         ) -> None:
             pass
 
@@ -185,6 +255,8 @@ class ReplayPolicy(Message[_ReplayPolicyFields]):
         content: bytes
         reply_type: str
         reply_schema_digest: bytes
+        request: Any | None
+        reservation: ReplayResources | None
 
 _OperationReplayFields: TypeAlias = Literal["key", "encoding_version", "identity", "identity_digest", "dependencies", "policy", "outcome", "paid", "cost_usd", "allowance", "accepted_sequence"]
 
@@ -387,6 +459,97 @@ class ReplayAcknowledgement(Message[_ReplayAcknowledgementFields]):
         notice_id: str
         launch_request_id: str
 
+_ReplayObservationFields: TypeAlias = Literal["outcome", "paid", "cost_usd", "usage"]
+
+class ReplayObservation(Message[_ReplayObservationFields]):
+    """
+    A surviving observation can complete its operation after a writer crash.
+    Recording this does not itself deliver an answer to a continuation.
+
+    ```proto
+    message vibesys.store.v1.ReplayObservation
+    ```
+
+    Attributes:
+        outcome:
+            ```proto
+            optional google.protobuf.Any outcome = 1;
+            ```
+        paid:
+            ```proto
+            bool paid = 2;
+            ```
+        cost_usd:
+            ```proto
+            optional double cost_usd = 3;
+            ```
+        usage:
+            ```proto
+            optional vibesys.store.v1.TokenUsage usage = 4;
+            ```
+    """
+
+    __slots__ = ("outcome", "paid", "cost_usd", "usage")
+
+    if TYPE_CHECKING:
+
+        def __init__(
+            self,
+            *,
+            outcome: Any | None = None,
+            paid: bool = False,
+            cost_usd: float | None = None,
+            usage: TokenUsage | None = None,
+        ) -> None:
+            pass
+
+        outcome: Any | None
+        paid: bool
+        cost_usd: float
+        usage: TokenUsage | None
+
+_ReplayPolicyDriftFields: TypeAlias = Literal["results", "roles", "templates"]
+
+class ReplayPolicyDrift(Message[_ReplayPolicyDriftFields]):
+    """
+    Earlier answers remain usable when only prompts or limits change.
+
+    ```proto
+    message vibesys.store.v1.ReplayPolicyDrift
+    ```
+
+    Attributes:
+        results:
+            ```proto
+            uint64 results = 1;
+            ```
+        roles:
+            ```proto
+            repeated string roles = 2;
+            ```
+        templates:
+            ```proto
+            repeated string templates = 3;
+            ```
+    """
+
+    __slots__ = ("results", "roles", "templates")
+
+    if TYPE_CHECKING:
+
+        def __init__(
+            self,
+            *,
+            results: int = 0,
+            roles: list[str] | None = None,
+            templates: list[str] | None = None,
+        ) -> None:
+            pass
+
+        results: int
+        roles: list[str]
+        templates: list[str]
+
 class ReplayFieldKind(Enum):
     """
     Every prompt-context field declares whether it changes semantic input or policy.
@@ -482,21 +645,25 @@ extend google.protobuf.FieldOptions { optional bool replay_set = 51101 [json_nam
 
 
 _DESC = file_desc(
-    b'\n\x1dvibesys/store/v1/replay.proto\x12\x10vibesys.store.v1\x1a\x1bbuf/validate/validate.proto\x1a\x19google/protobuf/any.proto\x1a google/protobuf/descriptor.proto"k\n\x0cOperationKey\x12%\n\toperation\x18\x01 \x01(\tR\toperationB\x07\xbaH\x04r\x02\x10\x01\x124\n\x05scope\x18\x02 \x03(\x0b2\x1e.vibesys.store.v1.KeyComponentR\x05scope"q\n\x0cKeyComponent\x12B\n\x04kind\x18\x01 \x01(\x0e2".vibesys.store.v1.KeyComponentKindR\x04kindB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x12\x1d\n\x05value\x18\x02 \x01(\tR\x05valueB\x07\xbaH\x04r\x02\x10\x01"}\n\x0fReplayAllowance\x12\x1e\n\niterations\x18\x01 \x01(\x04R\niterations\x12\x1a\n\x08capacity\x18\x02 \x01(\x04R\x08capacity\x12.\n\tremaining\x18\x03 \x01(\x01R\tremainingB\x10\xbaH\r\x12\x0b@\x01)\x00\x00\x00\x00\x00\x00\x00\x00"\xd6\x01\n\x0cReplayPolicy\x12\x12\n\x04role\x18\x01 \x01(\tR\x04role\x12\x1a\n\x08template\x18\x02 \x01(\tR\x08template\x12\x18\n\x07content\x18\x03 \x01(\x0cR\x07content\x12&\n\nreply_type\x18\x04 \x01(\tR\treplyTypeB\x07\xbaH\x04r\x02\x10\x01\x12<\n\x13reply_schema_digest\x18\x05 \x01(\x0cH\x00R\x11replySchemaDigestB\x07\xbaH\x04z\x02h \x88\x01\x01B\x16\n\x14_reply_schema_digest"\x89\x07\n\x0fOperationReplay\x128\n\x03key\x18\x01 \x01(\x0b2\x1e.vibesys.store.v1.OperationKeyR\x03keyB\x06\xbaH\x03\xc8\x01\x01\x122\n\x10encoding_version\x18\x02 \x01(\rR\x0fencodingVersionB\x07\xbaH\x04*\x02\x08\x01\x12#\n\x08identity\x18\x03 \x01(\x0cR\x08identityB\x07\xbaH\x04z\x02\x10\x01\x120\n\x0fidentity_digest\x18\x04 \x01(\x0cR\x0eidentityDigestB\x07\xbaH\x04z\x02h \x12+\n\x0cdependencies\x18\x05 \x01(\x0cR\x0cdependenciesB\x07\xbaH\x04z\x02h \x12>\n\x06policy\x18\x06 \x01(\x0b2\x1e.vibesys.store.v1.ReplayPolicyR\x06policyB\x06\xbaH\x03\xc8\x01\x01\x12.\n\x07outcome\x18\x07 \x01(\x0b2\x14.google.protobuf.AnyR\x07outcome\x12\x12\n\x04paid\x18\x08 \x01(\x08R\x04paid\x120\n\x08cost_usd\x18\t \x01(\x01H\x00R\x07costUsdB\x10\xbaH\r\x12\x0b@\x01)\x00\x00\x00\x00\x00\x00\x00\x00\x88\x01\x01\x12G\n\tallowance\x18\n \x01(\x0b2!.vibesys.store.v1.ReplayAllowanceR\tallowanceB\x06\xbaH\x03\xc8\x01\x01\x129\n\x11accepted_sequence\x18\x0b \x01(\x04H\x01R\x10acceptedSequenceB\x07\xbaH\x042\x02 \x00\x88\x01\x01B\x0b\n\t_cost_usdB\x14\n\x12_accepted_sequence:\xa6\x02\xbaH\xa2\x02\x1a\x96\x01\n\x1doperation_replay.reply_schema\x12;recorded operations require the writer\'s reply schema proof\x1a8has(this.policy) && has(this.policy.reply_schema_digest)\x1a\x86\x01\n\x1boperation_replay.acceptance\x125an outcome requires its immutable acceptance sequence\x1a0has(this.outcome) == has(this.accepted_sequence)"V\n\x0bReplayClock\x12G\n\tallowance\x18\x01 \x01(\x0b2!.vibesys.store.v1.ReplayAllowanceR\tallowanceB\x06\xbaH\x03\xc8\x01\x01"\xad\x02\n\x0cReplayNotice\x12\x17\n\x02id\x18\x01 \x01(\tR\x02idB\x07\xbaH\x04r\x02\x10\x01\x12C\n\x06unused\x18\x02 \x03(\x0b2!.vibesys.store.v1.OperationReplayR\x06unusedB\x08\xbaH\x05\x92\x01\x02\x08\x01\x128\n\x07pending\x18\x03 \x03(\x0b2\x1e.vibesys.store.v1.OperationKeyR\x07pending:\x84\x01\xbaH\x80\x01\x1a~\n\x1areplay_notice.paid_results\x122unused entries must identify accepted paid results\x1a,this.unused.all(x, x.paid && has(x.outcome))"\x85\x01\n\x15ReplayAcknowledgement\x12)\n\tnotice_id\x18\x01 \x01(\tH\x00R\x08noticeIdB\x07\xbaH\x04r\x02\x10\x01\x88\x01\x01\x123\n\x11launch_request_id\x18\x02 \x01(\tR\x0flaunchRequestIdB\x07\xbaH\x04r\x02\x10\x01B\x0c\n\n_notice_id*r\n\x0fReplayFieldKind\x12!\n\x1dREPLAY_FIELD_KIND_UNSPECIFIED\x10\x00\x12\x1e\n\x1aREPLAY_FIELD_KIND_IDENTITY\x10\x01\x12\x1c\n\x18REPLAY_FIELD_KIND_POLICY\x10\x02*\xdc\x01\n\x10KeyComponentKind\x12"\n\x1eKEY_COMPONENT_KIND_UNSPECIFIED\x10\x00\x12\x1d\n\x19KEY_COMPONENT_KIND_PARENT\x10\x01\x12\x1b\n\x17KEY_COMPONENT_KIND_ITEM\x10\x02\x12\x1d\n\x19KEY_COMPONENT_KIND_SAMPLE\x10\x03\x12\x1f\n\x1bKEY_COMPONENT_KIND_REVISION\x10\x04\x12(\n$KEY_COMPONENT_KIND_RECORDED_POSITION\x10\x05:H\n\x0ereplay_context\x18\x9e\x8f\x03 \x01(\x08\x12\x1f.google.protobuf.MessageOptionsR\rreplayContext:e\n\x0creplay_field\x18\x9c\x8f\x03 \x01(\x0e2!.vibesys.store.v1.ReplayFieldKind\x12\x1d.google.protobuf.FieldOptionsR\x0breplayField:>\n\nreplay_set\x18\x9d\x8f\x03 \x01(\x08\x12\x1d.google.protobuf.FieldOptionsR\treplaySetBAZ?github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1b\x06proto3',
+    b'\n\x1dvibesys/store/v1/replay.proto\x12\x10vibesys.store.v1\x1a\x1bbuf/validate/validate.proto\x1a\x19google/protobuf/any.proto\x1a google/protobuf/descriptor.proto\x1a"vibesys/store/v1/agent_attrs.proto"k\n\x0cOperationKey\x12%\n\toperation\x18\x01 \x01(\tR\toperationB\x07\xbaH\x04r\x02\x10\x01\x124\n\x05scope\x18\x02 \x03(\x0b2\x1e.vibesys.store.v1.KeyComponentR\x05scope"q\n\x0cKeyComponent\x12B\n\x04kind\x18\x01 \x01(\x0e2".vibesys.store.v1.KeyComponentKindR\x04kindB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x12\x1d\n\x05value\x18\x02 \x01(\tR\x05valueB\x07\xbaH\x04r\x02\x10\x01"\xbe\x01\n\x0fReplayAllowance\x12\x1e\n\niterations\x18\x01 \x01(\x04R\niterations\x12\x1a\n\x08capacity\x18\x02 \x01(\x04R\x08capacity\x12.\n\tremaining\x18\x03 \x01(\x01R\tremainingB\x10\xbaH\r\x12\x0b@\x01)\x00\x00\x00\x00\x00\x00\x00\x00\x12?\n\tresources\x18\x04 \x01(\x0b2!.vibesys.store.v1.ReplayResourcesR\tresources"\xc8\x01\n\x0fReplayResources\x122\n\tmoney_usd\x18\x01 \x01(\x01H\x00R\x08moneyUsdB\x10\xbaH\r\x12\x0b@\x01)\x00\x00\x00\x00\x00\x00\x00\x00\x88\x01\x01\x12&\n\x0cinput_tokens\x18\x02 \x01(\x04H\x01R\x0binputTokens\x88\x01\x01\x12(\n\routput_tokens\x18\x03 \x01(\x04H\x02R\x0coutputTokens\x88\x01\x01B\x0c\n\n_money_usdB\x0f\n\r_input_tokensB\x10\n\x0e_output_tokens"\xcb\x02\n\x0cReplayPolicy\x12\x12\n\x04role\x18\x01 \x01(\tR\x04role\x12\x1a\n\x08template\x18\x02 \x01(\tR\x08template\x12\x18\n\x07content\x18\x03 \x01(\x0cR\x07content\x12&\n\nreply_type\x18\x04 \x01(\tR\treplyTypeB\x07\xbaH\x04r\x02\x10\x01\x12<\n\x13reply_schema_digest\x18\x05 \x01(\x0cH\x00R\x11replySchemaDigestB\x07\xbaH\x04z\x02h \x88\x01\x01\x12.\n\x07request\x18\x06 \x01(\x0b2\x14.google.protobuf.AnyR\x07request\x12C\n\x0breservation\x18\x07 \x01(\x0b2!.vibesys.store.v1.ReplayResourcesR\x0breservationB\x16\n\x14_reply_schema_digest"\x89\x07\n\x0fOperationReplay\x128\n\x03key\x18\x01 \x01(\x0b2\x1e.vibesys.store.v1.OperationKeyR\x03keyB\x06\xbaH\x03\xc8\x01\x01\x122\n\x10encoding_version\x18\x02 \x01(\rR\x0fencodingVersionB\x07\xbaH\x04*\x02\x08\x01\x12#\n\x08identity\x18\x03 \x01(\x0cR\x08identityB\x07\xbaH\x04z\x02\x10\x01\x120\n\x0fidentity_digest\x18\x04 \x01(\x0cR\x0eidentityDigestB\x07\xbaH\x04z\x02h \x12+\n\x0cdependencies\x18\x05 \x01(\x0cR\x0cdependenciesB\x07\xbaH\x04z\x02h \x12>\n\x06policy\x18\x06 \x01(\x0b2\x1e.vibesys.store.v1.ReplayPolicyR\x06policyB\x06\xbaH\x03\xc8\x01\x01\x12.\n\x07outcome\x18\x07 \x01(\x0b2\x14.google.protobuf.AnyR\x07outcome\x12\x12\n\x04paid\x18\x08 \x01(\x08R\x04paid\x120\n\x08cost_usd\x18\t \x01(\x01H\x00R\x07costUsdB\x10\xbaH\r\x12\x0b@\x01)\x00\x00\x00\x00\x00\x00\x00\x00\x88\x01\x01\x12G\n\tallowance\x18\n \x01(\x0b2!.vibesys.store.v1.ReplayAllowanceR\tallowanceB\x06\xbaH\x03\xc8\x01\x01\x129\n\x11accepted_sequence\x18\x0b \x01(\x04H\x01R\x10acceptedSequenceB\x07\xbaH\x042\x02 \x00\x88\x01\x01B\x0b\n\t_cost_usdB\x14\n\x12_accepted_sequence:\xa6\x02\xbaH\xa2\x02\x1a\x96\x01\n\x1doperation_replay.reply_schema\x12;recorded operations require the writer\'s reply schema proof\x1a8has(this.policy) && has(this.policy.reply_schema_digest)\x1a\x86\x01\n\x1boperation_replay.acceptance\x125an outcome requires its immutable acceptance sequence\x1a0has(this.outcome) == has(this.accepted_sequence)"V\n\x0bReplayClock\x12G\n\tallowance\x18\x01 \x01(\x0b2!.vibesys.store.v1.ReplayAllowanceR\tallowanceB\x06\xbaH\x03\xc8\x01\x01"\xad\x02\n\x0cReplayNotice\x12\x17\n\x02id\x18\x01 \x01(\tR\x02idB\x07\xbaH\x04r\x02\x10\x01\x12C\n\x06unused\x18\x02 \x03(\x0b2!.vibesys.store.v1.OperationReplayR\x06unusedB\x08\xbaH\x05\x92\x01\x02\x08\x01\x128\n\x07pending\x18\x03 \x03(\x0b2\x1e.vibesys.store.v1.OperationKeyR\x07pending:\x84\x01\xbaH\x80\x01\x1a~\n\x1areplay_notice.paid_results\x122unused entries must identify accepted paid results\x1a,this.unused.all(x, x.paid && has(x.outcome))"\x85\x01\n\x15ReplayAcknowledgement\x12)\n\tnotice_id\x18\x01 \x01(\tH\x00R\x08noticeIdB\x07\xbaH\x04r\x02\x10\x01\x88\x01\x01\x123\n\x11launch_request_id\x18\x02 \x01(\tR\x0flaunchRequestIdB\x07\xbaH\x04r\x02\x10\x01B\x0c\n\n_notice_id"\xa0\x03\n\x11ReplayObservation\x126\n\x07outcome\x18\x01 \x01(\x0b2\x14.google.protobuf.AnyR\x07outcomeB\x06\xbaH\x03\xc8\x01\x01\x12\x12\n\x04paid\x18\x02 \x01(\x08R\x04paid\x120\n\x08cost_usd\x18\x03 \x01(\x01H\x00R\x07costUsdB\x10\xbaH\r\x12\x0b@\x01)\x00\x00\x00\x00\x00\x00\x00\x00\x88\x01\x01\x122\n\x05usage\x18\x04 \x01(\x0b2\x1c.vibesys.store.v1.TokenUsageR\x05usageB\x0b\n\t_cost_usd:\xcb\x01\xbaH\xc7\x01\x1a\xc4\x01\n\x1dreplay_observation.usage_cost\x124reported usage cost must agree with observation cost\x1am!has(this.usage) || !has(this.usage.cost_usd) || (has(this.cost_usd) && this.cost_usd == this.usage.cost_usd)"j\n\x11ReplayPolicyDrift\x12!\n\x07results\x18\x01 \x01(\x04R\x07resultsB\x07\xbaH\x042\x02 \x00\x12\x14\n\x05roles\x18\x02 \x03(\tR\x05roles\x12\x1c\n\ttemplates\x18\x03 \x03(\tR\ttemplates*r\n\x0fReplayFieldKind\x12!\n\x1dREPLAY_FIELD_KIND_UNSPECIFIED\x10\x00\x12\x1e\n\x1aREPLAY_FIELD_KIND_IDENTITY\x10\x01\x12\x1c\n\x18REPLAY_FIELD_KIND_POLICY\x10\x02*\xdc\x01\n\x10KeyComponentKind\x12"\n\x1eKEY_COMPONENT_KIND_UNSPECIFIED\x10\x00\x12\x1d\n\x19KEY_COMPONENT_KIND_PARENT\x10\x01\x12\x1b\n\x17KEY_COMPONENT_KIND_ITEM\x10\x02\x12\x1d\n\x19KEY_COMPONENT_KIND_SAMPLE\x10\x03\x12\x1f\n\x1bKEY_COMPONENT_KIND_REVISION\x10\x04\x12(\n$KEY_COMPONENT_KIND_RECORDED_POSITION\x10\x05:H\n\x0ereplay_context\x18\x9e\x8f\x03 \x01(\x08\x12\x1f.google.protobuf.MessageOptionsR\rreplayContext:e\n\x0creplay_field\x18\x9c\x8f\x03 \x01(\x0e2!.vibesys.store.v1.ReplayFieldKind\x12\x1d.google.protobuf.FieldOptionsR\x0breplayField:>\n\nreplay_set\x18\x9d\x8f\x03 \x01(\x08\x12\x1d.google.protobuf.FieldOptionsR\treplaySetBAZ?github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1b\x06proto3',
     [
         validate_pb.desc(),
         any_pb.desc(),
         descriptor_pb.desc(),
+        agent_attrs_pb.desc(),
     ],
     {
         "OperationKey": OperationKey,
         "KeyComponent": KeyComponent,
         "ReplayAllowance": ReplayAllowance,
+        "ReplayResources": ReplayResources,
         "ReplayPolicy": ReplayPolicy,
         "OperationReplay": OperationReplay,
         "ReplayClock": ReplayClock,
         "ReplayNotice": ReplayNotice,
         "ReplayAcknowledgement": ReplayAcknowledgement,
+        "ReplayObservation": ReplayObservation,
+        "ReplayPolicyDrift": ReplayPolicyDrift,
         "ReplayFieldKind": ReplayFieldKind,
         "KeyComponentKind": KeyComponentKind,
         "replay_context": ext_replay_context,

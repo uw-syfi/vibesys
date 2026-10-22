@@ -16,7 +16,7 @@ from vibesys.events import CoreEventType, EventStatus, RunFailedData, RunStarted
 from vibesys.orchestration.agent_options import attribution_command_of, objective_axes_of
 from vibesys.plugin_catalog import project_run
 from vibesys.run.core_run import (
-    OperatorParked,
+    OperatorPaused,
     OperatorStopped,
     RunEnd,
     drive_core_run,
@@ -337,9 +337,9 @@ class _LocalRunSession:
                 invocation_store_factory=self._implementations.invocation_store_factory,
             )
             succeeded = outcome.status.value == "succeeded"
-        except OperatorParked:
+        except OperatorPaused:
             self._status = RunStatus.PARKED
-            self._integration.events.emit(CoreEventType.PARKED, "Run saved for relaunch")
+            self._integration.events.emit(CoreEventType.PARKED, "Run paused")
             return RunResult(
                 run_id=self._run_id(),
                 loop=request.orchestration.id,
@@ -361,11 +361,14 @@ class _LocalRunSession:
             )
         except BaseException as exc:
             self._status = RunStatus.FAILED
-            self._integration.events.emit(
-                CoreEventType.RUN_FAILED,
-                f"{type(exc).__name__}: {exc}",
-                status=EventStatus.FAILED,
+            reason = f"{type(exc).__name__}: {exc}"
+            startup_recorded = self._resources is None and self._integration.events.fail_open_epoch(
+                reason
             )
+            if not startup_recorded:
+                self._integration.events.emit(
+                    CoreEventType.RUN_FAILED, reason, status=EventStatus.FAILED
+                )
             raise
         else:
             self._status = RunStatus.COMPLETED if succeeded else RunStatus.FAILED
@@ -505,6 +508,7 @@ def run_ready(
     )
     return RunReady(
         record=store.get_record(resources.run_id),
+        project_root=resources.project.root,
         log_directory=resources.environment_request.log_dir,
         frontend_state_directory=resources.project.state.local_namespace(
             resources.run_id, "server"

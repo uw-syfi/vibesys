@@ -8,6 +8,7 @@
  * relay (`run-connection.ts`); Pause and Resume are commands on that session.
  */
 import {type RunStatus, validateRunEvent} from '@vibesys/contracts';
+import {recordedProjectRoot} from '@vibesys/hosts';
 import {
   type DesktopBridge,
   type RunHistoryPage,
@@ -36,7 +37,6 @@ import type {RunPageAddress} from './use-zoom.js';
 /** The welcome bridge's calls the Run screen makes. */
 export type RunPageBridge = Pick<
   WelcomeBridge,
-  | 'stopConfirmed'
   | 'resume'
   | 'archive'
   | 'logs'
@@ -67,7 +67,8 @@ export interface RunPagePage {
 /** What the screen's run is, beyond its identity, at the moment a command is sent. */
 export interface RunPageTarget {
   readonly run: RunRef;
-  readonly project: string;
+  /** The recorded project root at the moment of the call, or '' when the run has none. */
+  project(): string;
   /** The server instance driving or last driving the run; null before the record is known. */
   instance(): string | null;
 }
@@ -173,11 +174,13 @@ function openWebSession(
       },
     },
     command: async command => {
-      const outcome = await session.command(
-        command.kind === 'pause'
-          ? {type: 'command.pause'}
-          : {type: 'command.resume', when: command.when},
-      );
+      const outcome = await session.command({
+        type: 'command.control',
+        control: {
+          control_id: crypto.randomUUID(),
+          action: command.kind === 'pause-now' ? 'pause_now' : 'pause',
+        },
+      });
       return outcome.kind === 'acknowledged'
         ? null
         : (outcome.message ?? `the run refused ${command.kind}`);
@@ -240,44 +243,42 @@ export function welcomeRunPorts(
 ): RunPagePorts & {releaseLogs(): void} {
   const {host} = target.run;
   return {
-    stop: async force => {
-      const instance = target.instance();
-      if (instance === null) return false;
-      return (await settled(bridge.stopConfirmed(host, instance, force))).ok;
-    },
     attach: async instance => {
       const result = await settled(bridge.attach(host, instance));
       return result.ok ? null : result.error;
     },
     release: () => void settled(bridge.releaseRun()),
     attachReader: async () => {
-      const result = await settled(bridge.attachReader(host, target.project, target.run.runId));
+      const result = await settled(bridge.attachReader(host, target.project(), target.run.runId));
       return result.ok ? result.value : {kind: 'failed', message: result.error};
     },
     openSession: observer => openWebSession(bridge, page, observer),
     readHistory: async (from, max) => {
       const result = await settled(
-        bridge.readEvents(host, target.project, target.run.runId, from, max),
+        bridge.readEvents(host, target.project(), target.run.runId, from, max),
       );
       return result.ok ? historyReply(result.value) : {kind: 'failed', message: result.error};
     },
     readTrace: traceReader(
-      () => [host, target.project, target.run.runId, target.instance() ?? ''].join('\0'),
+      () => [host, target.project(), target.run.runId, target.instance() ?? ''].join('\0'),
       traces,
-      (from, max) => settled(bridge.readTrace(host, target.project, target.run.runId, from, max)),
+      (from, max) => settled(bridge.readTrace(host, target.project(), target.run.runId, from, max)),
     ),
     readSummary: async status => {
-      const result = await settled(bridge.readSummary(host, target.project, target.run.runId));
+      const result = await settled(bridge.readSummary(host, target.project(), target.run.runId));
       return summaryReply(result, target.run.runId, status);
     },
     readSpan: async (spanId, from, max) => {
       const result = await settled(
-        bridge.readSpan(host, target.project, target.run.runId, spanId, from, max),
+        bridge.readSpan(host, target.project(), target.run.runId, spanId, from, max),
       );
       return result.ok ? spanReply(result.value) : {kind: 'failed', message: result.error};
     },
-    resumeEnded: () =>
-      void settled(bridge.resume(host, target.project, exactResumeRunId(target.run.runId))),
+    resumeEnded: () => {
+      const project = recordedProjectRoot(target.project());
+      if (project === undefined) return;
+      void settled(bridge.resume(host, project, exactResumeRunId(target.run.runId)));
+    },
     openWindow: () => navigation.openWindow(),
     now: () => page.now(),
     archive: () => void settled(bridge.archive(target.run, true)),

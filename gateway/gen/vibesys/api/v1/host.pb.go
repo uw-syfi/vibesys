@@ -7,6 +7,7 @@
 package apiv1
 
 import (
+	_ "buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go/buf/validate"
 	v1 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
@@ -174,6 +175,8 @@ func (x *HelloResponse) GetGatewayVersion() string {
 	return ""
 }
 
+// Sequence zero remains valid for phase 1 logs; signed bounds leave cursor
+// arithmetic and file offsets in the same domain in every implementation.
 type TailRequest struct {
 	state   protoimpl.MessageState `protogen:"open.v1"`
 	RunId   string                 `protobuf:"bytes,1,opt,name=run_id,json=runId,proto3" json:"run_id,omitempty"`
@@ -344,7 +347,8 @@ type SkeletonResponse struct {
 	CommittedSeq uint64 `protobuf:"varint,3,opt,name=committed_seq,json=committedSeq,proto3" json:"committed_seq,omitempty"`
 	// First sequence not included. Continue with Tail(from_seq = next_seq).
 	NextSeq uint64 `protobuf:"varint,4,opt,name=next_seq,json=nextSeq,proto3" json:"next_seq,omitempty"`
-	// True when the frozen readable prefix was included in full.
+	// True when the frozen readable prefix was included in full. Both bool
+	// values are valid, including an empty prefix requiring a Tail continuation.
 	Complete      bool     `protobuf:"varint,5,opt,name=complete,proto3" json:"complete,omitempty"`
 	Sessions      []string `protobuf:"bytes,6,rep,name=sessions,proto3" json:"sessions,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -460,14 +464,16 @@ func (*WatchRunsRequest) Descriptor() ([]byte, []int) {
 }
 
 // Initial entries precede an initial_complete marker. Later entries replace by
-// run_id; removed is a tombstone. A phase 1 run has no head and UNKNOWN liveness.
+// run_id; removed is a tombstone. A phase 1 run has no head and UNSPECIFIED liveness.
 type WatchRunsResponse struct {
-	state           protoimpl.MessageState `protogen:"open.v1"`
-	RunId           string                 `protobuf:"bytes,1,opt,name=run_id,json=runId,proto3" json:"run_id,omitempty"`
-	Head            *v1.RunHead            `protobuf:"bytes,2,opt,name=head,proto3" json:"head,omitempty"`
-	Liveness        RunLiveness            `protobuf:"varint,3,opt,name=liveness,proto3,enum=vibesys.api.v1.RunLiveness" json:"liveness,omitempty"`
-	Removed         bool                   `protobuf:"varint,4,opt,name=removed,proto3" json:"removed,omitempty"`
-	InitialComplete bool                   `protobuf:"varint,5,opt,name=initial_complete,json=initialComplete,proto3" json:"initial_complete,omitempty"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// head is absent for phase 1 runs, tombstones and the initial marker.
+	// UNSPECIFIED represents unknown phase 1 liveness and marker/tombstone absence.
+	RunId           string      `protobuf:"bytes,1,opt,name=run_id,json=runId,proto3" json:"run_id,omitempty"`
+	Head            *v1.RunHead `protobuf:"bytes,2,opt,name=head,proto3" json:"head,omitempty"`
+	Liveness        RunLiveness `protobuf:"varint,3,opt,name=liveness,proto3,enum=vibesys.api.v1.RunLiveness" json:"liveness,omitempty"`
+	Removed         bool        `protobuf:"varint,4,opt,name=removed,proto3" json:"removed,omitempty"`
+	InitialComplete bool        `protobuf:"varint,5,opt,name=initial_complete,json=initialComplete,proto3" json:"initial_complete,omitempty"`
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -537,6 +543,8 @@ func (x *WatchRunsResponse) GetInitialComplete() bool {
 	return false
 }
 
+// Malformed hashes reject the whole request before filesystem access. File
+// lookup/content failures for admitted hashes remain per-result errors.
 type GetBlobsRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	RunId         string                 `protobuf:"bytes,1,opt,name=run_id,json=runId,proto3" json:"run_id,omitempty"`
@@ -828,69 +836,83 @@ var File_vibesys_api_v1_host_proto protoreflect.FileDescriptor
 
 const file_vibesys_api_v1_host_proto_rawDesc = "" +
 	"\n" +
-	"\x19vibesys/api/v1/host.proto\x12\x0evibesys.api.v1\x1a\x1fvibesys/store/v1/skeleton.proto\x1a\x1evibesys/api/v1/host_call.proto\"6\n" +
-	"\fHelloRequest\x12&\n" +
-	"\x0fapi_schema_hash\x18\x01 \x01(\tR\rapiSchemaHash\"`\n" +
-	"\rHelloResponse\x12&\n" +
-	"\x0fapi_schema_hash\x18\x01 \x01(\tR\rapiSchemaHash\x12'\n" +
-	"\x0fgateway_version\x18\x02 \x01(\tR\x0egatewayVersion\"^\n" +
-	"\vTailRequest\x12\x15\n" +
-	"\x06run_id\x18\x01 \x01(\tR\x05runId\x12\x19\n" +
-	"\bfrom_seq\x18\x02 \x01(\x04R\afromSeq\x12\x1d\n" +
+	"\x19vibesys/api/v1/host.proto\x12\x0evibesys.api.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1evibesys/api/v1/host_call.proto\x1a(vibesys/api/v1/host_read_generated.proto\x1a*vibesys/api/v1/host_mutate_generated.proto\x1a)vibesys/api/v1/host_watch_generated.proto\x1a\x1fvibesys/store/v1/skeleton.proto\"M\n" +
+	"\fHelloRequest\x12=\n" +
+	"\x0fapi_schema_hash\x18\x01 \x01(\tB\x15\xbaH\x12r\x102\x0e^[0-9a-f]{64}$R\rapiSchemaHash\"\x83\x01\n" +
+	"\rHelloResponse\x12=\n" +
+	"\x0fapi_schema_hash\x18\x01 \x01(\tB\x15\xbaH\x12r\x102\x0e^[0-9a-f]{64}$R\rapiSchemaHash\x123\n" +
+	"\x0fgateway_version\x18\x02 \x01(\tB\n" +
+	"\xbaH\ar\x05\x10\x01(\x80\x02R\x0egatewayVersion\"\xc6\x01\n" +
+	"\vTailRequest\x12?\n" +
+	"\x06run_id\x18\x01 \x01(\tB(\xbaH%r#2!^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$R\x05runId\x12*\n" +
+	"\bfrom_seq\x18\x02 \x01(\x04B\x0f\xbaH\f2\n" +
+	"\x18\xff\xff\xff\xff\xff\xff\xff\xff\x7fR\afromSeq\x12J\n" +
 	"\n" +
-	"session_id\x18\x03 \x01(\tR\tsessionId\"I\n" +
-	"\fTailResponse\x12\x18\n" +
-	"\arecords\x18\x01 \x03(\fR\arecords\x12\x1f\n" +
-	"\vthrough_seq\x18\x02 \x01(\x04R\n" +
-	"throughSeq\"(\n" +
-	"\x0fSkeletonRequest\x12\x15\n" +
-	"\x06run_id\x18\x01 \x01(\tR\x05runId\"\xd2\x01\n" +
-	"\x10SkeletonResponse\x12\x1f\n" +
-	"\bkeyframe\x18\x01 \x01(\fH\x00R\bkeyframe\x88\x01\x01\x12\x18\n" +
-	"\arecords\x18\x02 \x03(\fR\arecords\x12#\n" +
-	"\rcommitted_seq\x18\x03 \x01(\x04R\fcommittedSeq\x12\x19\n" +
-	"\bnext_seq\x18\x04 \x01(\x04R\anextSeq\x12\x1a\n" +
-	"\bcomplete\x18\x05 \x01(\bR\bcomplete\x12\x1a\n" +
-	"\bsessions\x18\x06 \x03(\tR\bsessionsB\v\n" +
+	"session_id\x18\x03 \x01(\tB+\xbaH(r&2$^([A-Za-z0-9][A-Za-z0-9_-]{0,127})?$R\tsessionId\"r\n" +
+	"\fTailResponse\x120\n" +
+	"\arecords\x18\x01 \x03(\fB\x16\xbaH\x13\x92\x01\x10\b\x01\x10\x80\x80@\"\bz\x06\x10\x01\x18\x80\x80@R\arecords\x120\n" +
+	"\vthrough_seq\x18\x02 \x01(\x04B\x0f\xbaH\f2\n" +
+	"\x18\xfe\xff\xff\xff\xff\xff\xff\xff\x7fR\n" +
+	"throughSeq\"R\n" +
+	"\x0fSkeletonRequest\x12?\n" +
+	"\x06run_id\x18\x01 \x01(\tB(\xbaH%r#2!^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$R\x05runId\"\xcc\x02\n" +
+	"\x10SkeletonResponse\x12,\n" +
+	"\bkeyframe\x18\x01 \x01(\fB\v\xbaH\bz\x06\x10\x01\x18\x80\x80@H\x00R\bkeyframe\x88\x01\x01\x12.\n" +
+	"\arecords\x18\x02 \x03(\fB\x14\xbaH\x11\x92\x01\x0e\x10\x80\x80@\"\bz\x06\x10\x01\x18\x80\x80@R\arecords\x124\n" +
+	"\rcommitted_seq\x18\x03 \x01(\x04B\x0f\xbaH\f2\n" +
+	"\x18\xfe\xff\xff\xff\xff\xff\xff\xff\x7fR\fcommittedSeq\x12*\n" +
+	"\bnext_seq\x18\x04 \x01(\x04B\x0f\xbaH\f2\n" +
+	"\x18\xff\xff\xff\xff\xff\xff\xff\xff\x7fR\anextSeq\x12\x1a\n" +
+	"\bcomplete\x18\x05 \x01(\bR\bcomplete\x12O\n" +
+	"\bsessions\x18\x06 \x03(\tB3\xbaH0\x92\x01-\x10\x80\x80@\x18\x01\"%r#2!^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$R\bsessionsB\v\n" +
 	"\t_keyframe\"\x12\n" +
-	"\x10WatchRunsRequest\"\xd7\x01\n" +
-	"\x11WatchRunsResponse\x12\x15\n" +
-	"\x06run_id\x18\x01 \x01(\tR\x05runId\x12-\n" +
-	"\x04head\x18\x02 \x01(\v2\x19.vibesys.store.v1.RunHeadR\x04head\x127\n" +
-	"\bliveness\x18\x03 \x01(\x0e2\x1b.vibesys.api.v1.RunLivenessR\bliveness\x12\x18\n" +
+	"\x10WatchRunsRequest\"\xf4\x04\n" +
+	"\x11WatchRunsResponse\x12B\n" +
+	"\x06run_id\x18\x01 \x01(\tB+\xbaH(r&2$^([A-Za-z0-9][A-Za-z0-9_-]{0,127})?$R\x05runId\x12-\n" +
+	"\x04head\x18\x02 \x01(\v2\x19.vibesys.store.v1.RunHeadR\x04head\x12A\n" +
+	"\bliveness\x18\x03 \x01(\x0e2\x1b.vibesys.api.v1.RunLivenessB\b\xbaH\x05\x82\x01\x02\x10\x01R\bliveness\x12\x18\n" +
 	"\aremoved\x18\x04 \x01(\bR\aremoved\x12)\n" +
-	"\x10initial_complete\x18\x05 \x01(\bR\x0finitialComplete\"_\n" +
-	"\x0fGetBlobsRequest\x12\x15\n" +
-	"\x06run_id\x18\x01 \x01(\tR\x05runId\x12\x16\n" +
-	"\x06sha256\x18\x02 \x03(\tR\x06sha256\x12\x1d\n" +
+	"\x10initial_complete\x18\x05 \x01(\bR\x0finitialComplete:\xe3\x02\xbaH\xdf\x02\x1a\xdc\x02\n" +
+	"\x10watch_runs.shape\x12drun_id, head, liveness, removed and initial_complete must form an entry, tombstone or initial marker\x1a\xe1\x01this.initial_complete ? (this.run_id == '' && !has(this.head) && this.liveness == 0 && !this.removed) : (this.run_id != '' && (this.removed ? (!has(this.head) && this.liveness == 0) : (!has(this.head) || this.liveness != 0)))\"\xd5\x01\n" +
+	"\x0fGetBlobsRequest\x12?\n" +
+	"\x06run_id\x18\x01 \x01(\tB(\xbaH%r#2!^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$R\x05runId\x125\n" +
+	"\x06sha256\x18\x02 \x03(\tB\x1d\xbaH\x1a\x92\x01\x17\x10\x80\x02\"\x12r\x102\x0e^[0-9a-f]{64}$R\x06sha256\x12J\n" +
 	"\n" +
-	"session_id\x18\x03 \x01(\tR\tsessionId\"D\n" +
-	"\x10GetBlobsResponse\x120\n" +
-	"\x05blobs\x18\x01 \x03(\v2\x1a.vibesys.api.v1.BlobResultR\x05blobs\"|\n" +
+	"session_id\x18\x03 \x01(\tB+\xbaH(r&2$^([A-Za-z0-9][A-Za-z0-9_-]{0,127})?$R\tsessionId\"O\n" +
+	"\x10GetBlobsResponse\x12;\n" +
+	"\x05blobs\x18\x01 \x03(\v2\x1a.vibesys.api.v1.BlobResultB\t\xbaH\x06\x92\x01\x03\x10\x80\x02R\x05blobs\"\x80\x03\n" +
 	"\n" +
-	"BlobResult\x12\x16\n" +
-	"\x06sha256\x18\x01 \x01(\tR\x06sha256\x12\x12\n" +
-	"\x04data\x18\x02 \x01(\fR\x04data\x12\x1d\n" +
+	"BlobResult\x12-\n" +
+	"\x06sha256\x18\x01 \x01(\tB\x15\xbaH\x12r\x102\x0e^[0-9a-f]{64}$R\x06sha256\x12\x1e\n" +
+	"\x04data\x18\x02 \x01(\fB\n" +
+	"\xbaH\az\x05\x18\x80\x80\x80\bR\x04data\x12(\n" +
 	"\n" +
-	"error_code\x18\x03 \x01(\x05R\terrorCode\x12#\n" +
-	"\rerror_message\x18\x04 \x01(\tR\ferrorMessage\"h\n" +
-	"\x11TailStreamRequest\x12\x15\n" +
-	"\x06run_id\x18\x01 \x01(\tR\x05runId\x12\x1b\n" +
-	"\tstream_id\x18\x02 \x01(\tR\bstreamId\x12\x1f\n" +
-	"\vfrom_offset\x18\x03 \x01(\x04R\n" +
-	"fromOffset\"I\n" +
-	"\x12TailStreamResponse\x12\x12\n" +
-	"\x04data\x18\x01 \x01(\fR\x04data\x12\x1f\n" +
-	"\vnext_offset\x18\x02 \x01(\x04R\n" +
-	"nextOffset*\x92\x01\n" +
+	"error_code\x18\x03 \x01(\x05B\t\xbaH\x06\x1a\x04\x18\x10(\x00R\terrorCode\x12.\n" +
+	"\rerror_message\x18\x04 \x01(\tB\t\xbaH\x06r\x04(\x80\x80\x04R\ferrorMessage:\xc8\x01\xbaH\xc4\x01\x1a\xc1\x01\n" +
+	"\x13blob_result.outcome\x12Cerror_code, error_message and data must describe success or failure\x1aethis.error_code == 0 ? this.error_message == '' : (this.data.size() == 0 && this.error_message != '')\"\xce\x01\n" +
+	"\x11TailStreamRequest\x12?\n" +
+	"\x06run_id\x18\x01 \x01(\tB(\xbaH%r#2!^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$R\x05runId\x12F\n" +
+	"\tstream_id\x18\x02 \x01(\tB)\xbaH&r$2\"^[A-Za-z0-9][A-Za-z0-9_.-]{0,255}$R\bstreamId\x120\n" +
+	"\vfrom_offset\x18\x03 \x01(\x04B\x0f\xbaH\f2\n" +
+	"\x18\xff\xff\xff\xff\xff\xff\xff\xff\x7fR\n" +
+	"fromOffset\"\xcb\x01\n" +
+	"\x12TailStreamResponse\x12\x1f\n" +
+	"\x04data\x18\x01 \x01(\fB\v\xbaH\bz\x06\x10\x01\x18\x80\x80\x04R\x04data\x120\n" +
+	"\vnext_offset\x18\x02 \x01(\x04B\x0f\xbaH\f2\n" +
+	"\x18\xff\xff\xff\xff\xff\xff\xff\xff\x7fR\n" +
+	"nextOffset:b\xbaH_\x1a]\n" +
+	"\x12tail_stream.offset\x12\x1bnext_offset must cover data\x1a*this.next_offset >= uint(this.data.size())*\x92\x01\n" +
 	"\vRunLiveness\x12\x1c\n" +
 	"\x18RUN_LIVENESS_UNSPECIFIED\x10\x00\x12\x16\n" +
 	"\x12RUN_LIVENESS_ALIVE\x10\x01\x12\x1c\n" +
 	"\x18RUN_LIVENESS_INTERRUPTED\x10\x02\x12\x16\n" +
 	"\x12RUN_LIVENESS_ENDED\x10\x03\x12\x17\n" +
-	"\x13RUN_LIVENESS_PARKED\x10\x042\xb0\x04\n" +
+	"\x13RUN_LIVENESS_PARKED\x10\x042\x84\x06\n" +
 	"\vHostService\x12M\n" +
-	"\bHostCall\x12\x1f.vibesys.api.v1.HostCallRequest\x1a .vibesys.api.v1.HostCallResponse\x12D\n" +
+	"\bHostCall\x12\x1f.vibesys.api.v1.HostCallRequest\x1a .vibesys.api.v1.HostCallResponse\x12A\n" +
+	"\x04Read\x12\x1b.vibesys.api.v1.ReadRequest\x1a\x1c.vibesys.api.v1.ReadResponse\x12F\n" +
+	"\x05Watch\x12\x1c.vibesys.api.v1.WatchRequest\x1a\x1d.vibesys.api.v1.WatchResponse0\x01\x12G\n" +
+	"\x06Mutate\x12\x1d.vibesys.api.v1.MutateRequest\x1a\x1e.vibesys.api.v1.MutateResponse\x12D\n" +
 	"\x05Hello\x12\x1c.vibesys.api.v1.HelloRequest\x1a\x1d.vibesys.api.v1.HelloResponse\x12C\n" +
 	"\x04Tail\x12\x1b.vibesys.api.v1.TailRequest\x1a\x1c.vibesys.api.v1.TailResponse0\x01\x12M\n" +
 	"\bSkeleton\x12\x1f.vibesys.api.v1.SkeletonRequest\x1a .vibesys.api.v1.SkeletonResponse\x12R\n" +
@@ -930,28 +952,40 @@ var file_vibesys_api_v1_host_proto_goTypes = []any{
 	(*TailStreamResponse)(nil), // 13: vibesys.api.v1.TailStreamResponse
 	(*v1.RunHead)(nil),         // 14: vibesys.store.v1.RunHead
 	(*HostCallRequest)(nil),    // 15: vibesys.api.v1.HostCallRequest
-	(*HostCallResponse)(nil),   // 16: vibesys.api.v1.HostCallResponse
+	(*ReadRequest)(nil),        // 16: vibesys.api.v1.ReadRequest
+	(*WatchRequest)(nil),       // 17: vibesys.api.v1.WatchRequest
+	(*MutateRequest)(nil),      // 18: vibesys.api.v1.MutateRequest
+	(*HostCallResponse)(nil),   // 19: vibesys.api.v1.HostCallResponse
+	(*ReadResponse)(nil),       // 20: vibesys.api.v1.ReadResponse
+	(*WatchResponse)(nil),      // 21: vibesys.api.v1.WatchResponse
+	(*MutateResponse)(nil),     // 22: vibesys.api.v1.MutateResponse
 }
 var file_vibesys_api_v1_host_proto_depIdxs = []int32{
 	14, // 0: vibesys.api.v1.WatchRunsResponse.head:type_name -> vibesys.store.v1.RunHead
 	0,  // 1: vibesys.api.v1.WatchRunsResponse.liveness:type_name -> vibesys.api.v1.RunLiveness
 	11, // 2: vibesys.api.v1.GetBlobsResponse.blobs:type_name -> vibesys.api.v1.BlobResult
 	15, // 3: vibesys.api.v1.HostService.HostCall:input_type -> vibesys.api.v1.HostCallRequest
-	1,  // 4: vibesys.api.v1.HostService.Hello:input_type -> vibesys.api.v1.HelloRequest
-	3,  // 5: vibesys.api.v1.HostService.Tail:input_type -> vibesys.api.v1.TailRequest
-	5,  // 6: vibesys.api.v1.HostService.Skeleton:input_type -> vibesys.api.v1.SkeletonRequest
-	7,  // 7: vibesys.api.v1.HostService.WatchRuns:input_type -> vibesys.api.v1.WatchRunsRequest
-	9,  // 8: vibesys.api.v1.HostService.GetBlobs:input_type -> vibesys.api.v1.GetBlobsRequest
-	12, // 9: vibesys.api.v1.HostService.TailStream:input_type -> vibesys.api.v1.TailStreamRequest
-	16, // 10: vibesys.api.v1.HostService.HostCall:output_type -> vibesys.api.v1.HostCallResponse
-	2,  // 11: vibesys.api.v1.HostService.Hello:output_type -> vibesys.api.v1.HelloResponse
-	4,  // 12: vibesys.api.v1.HostService.Tail:output_type -> vibesys.api.v1.TailResponse
-	6,  // 13: vibesys.api.v1.HostService.Skeleton:output_type -> vibesys.api.v1.SkeletonResponse
-	8,  // 14: vibesys.api.v1.HostService.WatchRuns:output_type -> vibesys.api.v1.WatchRunsResponse
-	10, // 15: vibesys.api.v1.HostService.GetBlobs:output_type -> vibesys.api.v1.GetBlobsResponse
-	13, // 16: vibesys.api.v1.HostService.TailStream:output_type -> vibesys.api.v1.TailStreamResponse
-	10, // [10:17] is the sub-list for method output_type
-	3,  // [3:10] is the sub-list for method input_type
+	16, // 4: vibesys.api.v1.HostService.Read:input_type -> vibesys.api.v1.ReadRequest
+	17, // 5: vibesys.api.v1.HostService.Watch:input_type -> vibesys.api.v1.WatchRequest
+	18, // 6: vibesys.api.v1.HostService.Mutate:input_type -> vibesys.api.v1.MutateRequest
+	1,  // 7: vibesys.api.v1.HostService.Hello:input_type -> vibesys.api.v1.HelloRequest
+	3,  // 8: vibesys.api.v1.HostService.Tail:input_type -> vibesys.api.v1.TailRequest
+	5,  // 9: vibesys.api.v1.HostService.Skeleton:input_type -> vibesys.api.v1.SkeletonRequest
+	7,  // 10: vibesys.api.v1.HostService.WatchRuns:input_type -> vibesys.api.v1.WatchRunsRequest
+	9,  // 11: vibesys.api.v1.HostService.GetBlobs:input_type -> vibesys.api.v1.GetBlobsRequest
+	12, // 12: vibesys.api.v1.HostService.TailStream:input_type -> vibesys.api.v1.TailStreamRequest
+	19, // 13: vibesys.api.v1.HostService.HostCall:output_type -> vibesys.api.v1.HostCallResponse
+	20, // 14: vibesys.api.v1.HostService.Read:output_type -> vibesys.api.v1.ReadResponse
+	21, // 15: vibesys.api.v1.HostService.Watch:output_type -> vibesys.api.v1.WatchResponse
+	22, // 16: vibesys.api.v1.HostService.Mutate:output_type -> vibesys.api.v1.MutateResponse
+	2,  // 17: vibesys.api.v1.HostService.Hello:output_type -> vibesys.api.v1.HelloResponse
+	4,  // 18: vibesys.api.v1.HostService.Tail:output_type -> vibesys.api.v1.TailResponse
+	6,  // 19: vibesys.api.v1.HostService.Skeleton:output_type -> vibesys.api.v1.SkeletonResponse
+	8,  // 20: vibesys.api.v1.HostService.WatchRuns:output_type -> vibesys.api.v1.WatchRunsResponse
+	10, // 21: vibesys.api.v1.HostService.GetBlobs:output_type -> vibesys.api.v1.GetBlobsResponse
+	13, // 22: vibesys.api.v1.HostService.TailStream:output_type -> vibesys.api.v1.TailStreamResponse
+	13, // [13:23] is the sub-list for method output_type
+	3,  // [3:13] is the sub-list for method input_type
 	3,  // [3:3] is the sub-list for extension type_name
 	3,  // [3:3] is the sub-list for extension extendee
 	0,  // [0:3] is the sub-list for field type_name
@@ -963,6 +997,9 @@ func file_vibesys_api_v1_host_proto_init() {
 		return
 	}
 	file_vibesys_api_v1_host_call_proto_init()
+	file_vibesys_api_v1_host_read_generated_proto_init()
+	file_vibesys_api_v1_host_mutate_generated_proto_init()
+	file_vibesys_api_v1_host_watch_generated_proto_init()
 	file_vibesys_api_v1_host_proto_msgTypes[5].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{

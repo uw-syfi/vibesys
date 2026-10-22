@@ -100,7 +100,7 @@ def test_the_headless_entrypoint_exits_with_the_diagnostic(
     assert raised.value.code == 2
     error = capsys.readouterr().err
     assert _RUN_ID in error
-    assert "legacy loop" in error
+    assert "retained-facts importer" in error
     assert "Traceback" not in error
 
 
@@ -126,7 +126,7 @@ def test_the_server_entrypoint_exits_with_the_diagnostic(
     assert raised.value.code == 2
     error = capsys.readouterr().err
     assert _RUN_ID in error
-    assert "legacy loop" in error
+    assert "retained-facts importer" in error
 
 
 @pytest.mark.parametrize("state", [b"", b"not json", b'{"schema_version": 1}', b"[]"])

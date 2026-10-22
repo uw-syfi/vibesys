@@ -366,6 +366,22 @@
           ],
           "default": null,
           "title": "Harness Version"
+        },
+        "client": {
+          "anyOf": [
+            {
+              "enum": [
+                "scripted",
+                "provider"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Client"
         }
       },
       "required": [
@@ -944,6 +960,19 @@
       "title": "ChatThreadInfo",
       "type": "object"
     },
+    "CheckoutStatus": {
+      "description": "Why the optional checkout update advanced or skipped the checkout.",
+      "enum": [
+        "fast_forwarded",
+        "other_branch",
+        "dirty_tree",
+        "diverged",
+        "git_refused",
+        "operator_changed_checkout"
+      ],
+      "title": "CheckoutStatus",
+      "type": "string"
+    },
     "CommandAck": {
       "additionalProperties": false,
       "description": "Acknowledgment of a requested run command; ``action`` is the control's tag.",
@@ -1228,9 +1257,8 @@
       "enum": [
         "steer",
         "pause",
-        "park",
+        "pause_now",
         "resume",
-        "stop",
         "withdraw",
         "cancel_attempt",
         "cancel_item",
@@ -1286,12 +1314,11 @@
         "mapping": {
           "cancel_attempt": "#/$defs/CancelAttemptRequest",
           "cancel_item": "#/$defs/CancelItemRequest",
-          "park": "#/$defs/ParkRequest",
           "pause": "#/$defs/PauseRequest",
+          "pause_now": "#/$defs/PauseNowRequest",
           "resume": "#/$defs/ResumeRequest",
           "set_max_parallel": "#/$defs/SetMaxParallelRequest",
           "steer": "#/$defs/SteerRequest",
-          "stop": "#/$defs/StopRequest",
           "withdraw": "#/$defs/WithdrawRequest"
         },
         "propertyName": "action"
@@ -1304,13 +1331,10 @@
           "$ref": "#/$defs/PauseRequest"
         },
         {
-          "$ref": "#/$defs/ParkRequest"
+          "$ref": "#/$defs/PauseNowRequest"
         },
         {
           "$ref": "#/$defs/ResumeRequest"
-        },
-        {
-          "$ref": "#/$defs/StopRequest"
         },
         {
           "$ref": "#/$defs/WithdrawRequest"
@@ -4329,29 +4353,6 @@
       "title": "OutputData",
       "type": "object"
     },
-    "ParkRequest": {
-      "additionalProperties": false,
-      "description": "Finish turns in flight, release evaluation jobs, save and exit for relaunch.",
-      "properties": {
-        "control_id": {
-          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
-          "title": "Control Id",
-          "type": "string"
-        },
-        "action": {
-          "const": "park",
-          "default": "park",
-          "title": "Action",
-          "type": "string"
-        }
-      },
-      "required": [
-        "control_id",
-        "action"
-      ],
-      "title": "ParkRequest",
-      "type": "object"
-    },
     "PauseCommand": {
       "additionalProperties": false,
       "description": "Request pausing after the active agent call.",
@@ -4396,9 +4397,45 @@
       "title": "PauseCommand",
       "type": "object"
     },
+    "PauseNowRequest": {
+      "additionalProperties": false,
+      "description": "Cancel unfinished work and exit; saved work remains resumable.",
+      "properties": {
+        "control_id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+          "title": "Control Id",
+          "type": "string"
+        },
+        "action": {
+          "const": "pause_now",
+          "default": "pause_now",
+          "title": "Action",
+          "type": "string"
+        },
+        "expected_epoch": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Expected Epoch"
+        }
+      },
+      "required": [
+        "control_id",
+        "action"
+      ],
+      "title": "PauseNowRequest",
+      "type": "object"
+    },
     "PauseRequest": {
       "additionalProperties": false,
-      "description": "Reach the next safe boundary and hold the run there.",
+      "description": "Finish turns in flight, release evaluation jobs, save and exit for relaunch.",
       "properties": {
         "control_id": {
           "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
@@ -4410,6 +4447,19 @@
           "default": "pause",
           "title": "Action",
           "type": "string"
+        },
+        "expected_epoch": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Expected Epoch"
         }
       },
       "required": [
@@ -7688,7 +7738,7 @@
     },
     "StopCommand": {
       "additionalProperties": false,
-      "description": "Request stopping after the active agent call.",
+      "description": "Internal detached-host shutdown at its cooperative boundary.",
       "properties": {
         "protocol_version": {
           "const": 1,
@@ -7728,42 +7778,6 @@
         "type"
       ],
       "title": "StopCommand",
-      "type": "object"
-    },
-    "StopMode": {
-      "description": "How a stop treats work in flight: let it finish, or cancel it.",
-      "enum": [
-        "drain",
-        "cancel"
-      ],
-      "title": "StopMode",
-      "type": "string"
-    },
-    "StopRequest": {
-      "additionalProperties": false,
-      "description": "End the run, draining or cancelling the work in flight.",
-      "properties": {
-        "control_id": {
-          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
-          "title": "Control Id",
-          "type": "string"
-        },
-        "action": {
-          "const": "stop",
-          "default": "stop",
-          "title": "Action",
-          "type": "string"
-        },
-        "mode": {
-          "$ref": "#/$defs/StopMode",
-          "default": "drain"
-        }
-      },
-      "required": [
-        "control_id",
-        "action"
-      ],
-      "title": "StopRequest",
       "type": "object"
     },
     "SubjectId": {
@@ -8360,6 +8374,17 @@
           ],
           "default": null,
           "title": "Settlement Id"
+        },
+        "checkout_status": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CheckoutStatus"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [

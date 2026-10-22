@@ -89,7 +89,7 @@ layers_explicit_depends_on = true
 
 [[modules]]
 path = "entrypoints"
-depends_on = ["server.chat", "vibesys.api.chat", "vs_proto", "vs_runlog", "vibesys.api.host", "vibesys.api.transport", "server.api", "vs_decode.api", "vs_logs", "vs_sim.api", "vs_project", "vs_slurm", "vs_github", "vs_issue_tracker", "vs_runtime", "vs_sandbox", "vibesys.api", "vibesys.api.evolve", "vibesys.api.hypothesis", "vibesys.api.metrics", "vibesys.api.profilers", "vs_agent", "server.runtime", "server.instances", "server.host_api", "server.registry", "headless", "launch", "vs_mcp", "server.relay", "server.host_helper", "server.host_helper_requests", "server.host_helper_os", "server.host_helper_logs", "server.host_helper_machine", "server.host_helper_compute", "server.host_helper_readers", "server.host_agent_logins", "server.host_preflight", "server.host_examples", "server.host_harness", "vibesys.comparisons"]
+depends_on = ["server.chat", "vibesys.api.chat", "vs_proto", "vs_runlog", "vibesys.api.host", "vibesys.api.host_operations", "vibesys.api.transport", "server.api", "vs_decode.api", "vs_logs", "vs_sim.api", "vs_project", "vs_slurm", "vs_github", "vs_issue_tracker", "vs_runtime", "vs_sandbox", "vibesys.api", "vibesys.api.evolve", "vibesys.api.hypothesis", "vibesys.api.metrics", "vibesys.api.profilers", "vs_agent", "server.runtime", "server.instances", "server.host_api", "server.registry", "headless", "launch", "vs_mcp", "server.relay", "server.host_helper", "server.host_helper_requests", "server.host_helper_os", "server.host_helper_logs", "server.host_helper_machine", "server.host_helper_compute", "server.host_helper_readers", "server.host_agent_logins", "server.host_preflight", "server.host_examples", "server.host_harness", "vibesys.comparisons"]
 
 [[modules]]
 path = "headless"
@@ -234,7 +234,7 @@ depends_on = ["vs_decode.api", "server.host_api", "server.host_helper_requests",
 [[modules]]
 # The host helper's request answering: one request through the host's interfaces.
 path = "server.host_helper_requests"
-depends_on = ["vs_decode.api", "server.host_agent_logins", "server.host_api", "server.host_compute", "server.host_examples", "server.host_helper_compute", "server.host_helper_logs", "server.host_helper_preflight", "server.host_machine_facts", "server.host_preflight", "server.host_run_dashboard", "server.host_run_events", "server.host_run_reader", "server.host_run_summary", "server.host_helper_readers", "server.registry", "server.relay", "server.run_digest", "server.run_summary", "server.usage_window", "vs_project", "vs_sim.api"]
+depends_on = ["server.host_operation_types_generated", "vibesys.api.host_operations", "vs_proto", "vs_decode.api", "server.host_agent_logins", "server.host_api", "server.host_compute", "server.host_examples", "server.host_helper_compute", "server.host_helper_logs", "server.host_helper_preflight", "server.host_machine_facts", "server.host_preflight", "server.host_run_dashboard", "server.host_run_events", "server.host_run_reader", "server.host_run_summary", "server.host_helper_readers", "server.registry", "server.relay", "server.run_digest", "server.run_summary", "server.usage_window", "vs_project", "vs_sim.api"]
 
 [[modules]]
 # The read-only servers Chat reads ended runs through: found by run, started on demand.
@@ -596,7 +596,7 @@ depends_on = ["vs_decode.api", "vs_evaluation", "vs_evaluation.api", "vs_evaluat
 [[modules]]
 path = "vs_runtime"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_proto", "vs_async_ops.api", "vs_core", "vs_decode.api", "vs_agent", "vs_github", "vs_issue_tracker", "vs_evaluation.api", "vs_evaluation.api.tools", "vs_evaluation.api.testing", "vs_evaluator_protocol", "vs_project", "vs_prompts", "vs_redaction.api", "vs_sandbox", "vs_slurm", "vs_runtime._runs", "vs_mcp", "vs_sim.api", "vs_sim.api.testing"]
+depends_on = ["vs_runlog", "vs_proto", "vs_async_ops.api", "vs_core", "vs_decode.api", "vs_agent", "vs_github", "vs_issue_tracker", "vs_evaluation.api", "vs_evaluation.api.tools", "vs_evaluation.api.testing", "vs_evaluator_protocol", "vs_project", "vs_prompts", "vs_redaction.api", "vs_sandbox", "vs_slurm", "vs_runtime._runs", "vs_mcp", "vs_sim.api", "vs_sim.api.testing"]
 
 [[modules]]
 path = "vs_agent"
@@ -606,7 +606,7 @@ depends_on = ["vs_decode.api", "vs_sandbox", "vs_project", "vs_prompts", "vs_mcp
 [[modules]]
 path = "vs_project"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_decode.api", "vs_sim.api"]
+depends_on = ["vs_decode.api", "vs_sim.api", "vs_proto"]
 
 [[modules]]
 path = "vs_issue_tracker"
@@ -1427,7 +1427,7 @@ expose = ["NativeProfilerPreflight", "ProfilerPreflight", "SessionAgents", "Sess
 [[modules]]
 path = "vs_core"
 layer = "prompts_and_lower_libs"
-depends_on = ["vs_proto", "vs_core._corevalue", "vs_core._generated", "vs_core._dispatch_episode", "vs_core._session_checkpoints", "vs_core._session_rows", "vs_core._session_scope", "vs_core._turn_outcomes", "vs_core._proofs", "vs_core._waits", "vs_core.types", "vs_core.types.common", "vs_core._values", "vs_core._outcomes", "vs_core._generated.vibesys.core.v1.common_cv", "vs_core._generated.vibesys.core.v1.vocabulary_cv"]
+depends_on = ["vs_runlog", "vs_proto", "vs_core._corevalue", "vs_core._generated", "vs_core._dispatch_episode", "vs_core._session_checkpoints", "vs_core._session_rows", "vs_core._session_scope", "vs_core._turn_outcomes", "vs_core._proofs", "vs_core._waits", "vs_core.types", "vs_core.types.common", "vs_core._values", "vs_core._outcomes", "vs_core._generated.vibesys.core.v1.common_cv", "vs_core._generated.vibesys.core.v1.vocabulary_cv"]
 
 [[interfaces]]
 from = ["vs_core"]
@@ -1643,6 +1643,15 @@ depends_on = ["vs_core", "vs_prompts", "vs_runtime", "vibesys.hypothesis", "vibe
 [[interfaces]]
 from = ["vibesys.orchestration.dynamic.core_policy"]
 expose = ["api", "api\\..*"]
+
+[[modules]]
+path = "vibesys.serial_replay"
+layer = "loops"
+depends_on = ["vs_core", "vs_issue_tracker", "vs_proto", "vs_runtime"]
+
+[[interfaces]]
+from = ["vibesys.serial_replay"]
+expose = ["roadmap_item", "serial_replay_bindings"]
 
 [[modules]]
 # A serial run's roadmap: the owner of the roadmap operations over the run's `Roadmap`, kept in
@@ -2054,3 +2063,47 @@ expose = ["api", "api\\..*", "reader", "reader\\..*"]
 [[modules]]
 path = "vibesys.api.importing"
 depends_on = ["vibesys.fact_import"]
+
+[[modules]]
+path = "vibesys.api.host_operations"
+depends_on = ["vs_proto", "vibesys.api.host_operations._candidate", "vibesys.api.host_operations._compute", "vibesys.api.host_operations._handlers", "vibesys.api.host_operations._login", "vibesys.api.host_operations._project", "vibesys.api.host_operations._reads", "vibesys.api.host_operations._start"]
+
+[[interfaces]]
+from = ["vibesys.api.host_operations"]
+expose = ["api", "api\\..*"]
+
+[[modules]]
+path = "vibesys.api.host_operations._candidate"
+depends_on = ["vs_proto", "vs_project"]
+
+[[modules]]
+path = "vibesys.api.host_operations._handlers"
+depends_on = ["vs_proto", "vibesys.api.host_operations._reads"]
+
+[[modules]]
+path = "vibesys.api.host_operations._login"
+depends_on = ["vs_proto"]
+
+[[modules]]
+path = "vibesys.api.host_operations._start"
+depends_on = ["vs_proto", "vs_project"]
+
+[[modules]]
+path = "vibesys.api.host_operations._compute"
+depends_on = ["vs_proto", "vs_project"]
+
+[[modules]]
+path = "vibesys.api.host_operations._project"
+depends_on = ["vs_proto", "vs_project"]
+
+[[modules]]
+path = "vibesys.api.host_operations._reads"
+depends_on = ["vs_proto"]
+
+[[modules]]
+path = "server.host_operation_types_generated"
+depends_on = ["server.host_api", "vs_proto"]
+
+[[interfaces]]
+from = ["server.host_operation_types_generated"]
+expose = ["is_registry_read", "RegistryReadRequest", "UnmigratedHelperRequest"]

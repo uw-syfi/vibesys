@@ -12,6 +12,7 @@ from vs_evaluation.api import (
     EvidenceFingerprints,
     EvidenceKind,
     SemanticEvaluationStage,
+    evaluation_work_digest,
     same_work,
 )
 
@@ -43,6 +44,9 @@ def test_requests_that_differ_only_in_purpose_are_the_same_work(
     kinds: list[EvidenceKind], recorded: str | None, asked: str | None
 ) -> None:
     assert same_work(_request(kinds, recorded), _request(kinds, asked))
+    assert evaluation_work_digest(_request(kinds, recorded)) == evaluation_work_digest(
+        _request(kinds, asked)
+    )
 
 
 @given(kinds=_KINDS, other_kinds=_KINDS, purpose=_PURPOSES)
@@ -52,6 +56,9 @@ def test_another_snapshot_or_stage_list_is_other_work(
     request = _request(kinds, purpose)
 
     assert not same_work(request, _request(kinds, purpose, snapshot="other"))
+    assert evaluation_work_digest(request) != evaluation_work_digest(
+        _request(kinds, purpose, snapshot="other")
+    )
     assert same_work(request, _request(other_kinds, purpose)) == (kinds == other_kinds)
 
 

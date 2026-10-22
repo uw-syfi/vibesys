@@ -694,6 +694,7 @@ export type RoundLabel = string | null;
 export type Role1 = string | null;
 export type Harness = string | null;
 export type Model3 = string | null;
+export type Client = ("scripted" | "provider") | null;
 export type ReasoningEffort1 = string | null;
 export type HarnessVersion = string | null;
 export type StartedAt2 = string | null;
@@ -1701,8 +1702,8 @@ export interface FailureReason {
 /**
  * How a run ended, as its tombstone reports it: the sidebar's Recent row and the ended banner.
  *
- * ``resumable`` says whether a resume continues the run: its durable record exists and is not
- * terminal. ``resume_from_round`` is the round that resume starts at, when the server knew it
+ * ``resumable`` is retained for older readers; current controls permit every ending.
+ * Launch checks storage and writer exclusion; ``resume_from_round`` is the next round
  * (a crashed server did not say). ``uncompared``: the run adopted a candidate never compared
  * with the input (it failed its own measurement), whichever ``outcome`` ended it.
  */
@@ -2286,6 +2287,7 @@ export interface UsageRecord {
   role: Role1;
   harness: Harness;
   model: Model3;
+  client?: Client;
   reasoning_effort: ReasoningEffort1;
   harness_version: HarnessVersion;
   started_at: StartedAt2;

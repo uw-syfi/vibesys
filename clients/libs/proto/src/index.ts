@@ -1,9 +1,21 @@
 /** Host and store schemas generated from proto/. Encode using @bufbuild/protobuf. */
 
 export {descriptorRegistry} from './descriptor-registry.js';
-export {RUN_LOG_MAGIC, RUN_LOG_MAX_RECORD_BYTES} from './generated/framing.js';
+export {
+  HOST_API_MAX_MESSAGE_BYTES,
+  RUN_LOG_MAGIC,
+  RUN_LOG_MAX_RECORD_BYTES,
+} from './generated/framing.js';
+export * from './generated/host-operations.js';
 export * from './generated/vibesys/api/v1/host_call_pb.js';
 export {
+  type MutateRequest,
+  MutateRequestSchema,
+  type MutateResponse,
+  MutateResponseSchema,
+} from './generated/vibesys/api/v1/host_mutate_generated_pb.js';
+export {
+  BlobResultSchema,
   GetBlobsRequestSchema,
   GetBlobsResponseSchema,
   type HelloRequest,
@@ -25,6 +37,21 @@ export {
   type WatchRunsResponse,
   WatchRunsResponseSchema,
 } from './generated/vibesys/api/v1/host_pb.js';
+export {
+  type ReadRequest,
+  ReadRequestSchema,
+  type ReadResponse,
+  ReadResponseSchema,
+} from './generated/vibesys/api/v1/host_read_generated_pb.js';
+export {
+  type WatchRequest,
+  WatchRequestSchema,
+  type WatchResponse,
+  WatchResponseSchema,
+} from './generated/vibesys/api/v1/host_watch_generated_pb.js';
+export {CheckoutStatus} from './generated/vibesys/core/v1/vocabulary_pb.js';
+export * from './generated/vibesys/host/v1/failure_pb.js';
+export * from './generated/vibesys/host/v1/operations_pb.js';
 export * from './generated/vibesys/search/v1/attrs_pb.js';
 export * from './generated/vibesys/store/v1/agent_attrs_pb.js';
 export * from './generated/vibesys/store/v1/chat_pb.js';
@@ -45,4 +72,9 @@ export {
 export * from './generated/vibesys/store/v1/skeleton_pb.js';
 export * from './generated/vibesys/store/v1/span_pb.js';
 export * from './generated/vibesys/store/v1/transcript_pb.js';
-export {API_SCHEMA_HASH, STORE_SCHEMA_HASH, schemaHash} from './schema-hashes.js';
+export type {Accepted, OperationSignal, OperationTransport} from './operations.js';
+export {OperationFailed} from './operations.js';
+export {projectMessage} from './project.js';
+export {API_SCHEMA_HASH, HOST_SCHEMA_HASH, STORE_SCHEMA_HASH, schemaHash} from './schema-hashes.js';
+
+export {validatedFromBinary, validateHostPayload} from './validation.js';

@@ -8,9 +8,10 @@ from math import isfinite
 from typing import TYPE_CHECKING, TypeVar, cast
 
 from protobuf import Message
-from protovalidate import validate
+from protobuf.wkt.google.protobuf.any_pb import Any
 
 from vs_proto.api import replay as pb
+from vs_proto.api import validate
 
 from ._replay_causality import EMPTY_FRONTIER, CausalGraph, _Frontier
 from ._replay_history import (
@@ -26,10 +27,11 @@ from ._replay_identity import (
     EncodedIdentity,
     ReplayIdentityError,
     SemanticKey,
+    _normalize,
     classify_context,
     encode_identity,
 )
-from ._replay_schema import reply_schema_digest
+from ._replay_schema import replay_descriptors, reply_schema_digest
 from ._replay_sources import (
     ReplayCausalityError,
     ReplayChannel,
@@ -52,6 +54,8 @@ from ._replay_sources import (
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine, Iterable, Sequence
 
+    from protobuf.wkt.google.protobuf.descriptor_pb import FileDescriptorSet
+
     from ._replay_sources import ReplayCall
 
 
@@ -64,6 +68,31 @@ def _call_identity(call: ReplayCall, frontier: _Frontier) -> EncodedIdentity:
             call.identity.message(), contract=call.contract, dependencies=frontier.digest
         ).identity
     return encode_identity(call.identity, contract=call.contract, dependencies=frontier.digest)
+
+
+def _call_policy(call: ReplayCall) -> pb.ReplayPolicy:
+    if not isinstance(call.reply, type) or not issubclass(call.reply, Message):
+        problem = "replay reply must be a protobuf message type"
+        raise ReplayConsumerError(problem)
+    policy = deepcopy(call.policy)
+    request = _normalize(
+        call.identity.message() if isinstance(call.identity, ClassifiedContext) else call.identity
+    )
+    retained = Any(type_url=request.desc().type_name, value=request.to_binary())
+    if policy.request is not None and policy.request != retained:
+        problem = "retained request contradicts the typed operation input"
+        raise ReplayIdentityError(problem)
+    policy.request = retained
+    digest = reply_schema_digest(call.reply)
+    if policy.has_field("reply_schema_digest") and policy.reply_schema_digest != digest:
+        problem = "reply schema proof contradicts typed consumer"
+        raise ReplayConsumerError(problem)
+    policy.reply_schema_digest = digest
+    validate(policy)
+    if policy.reply_type != call.reply.desc().type_name:
+        problem = "replay policy reply type contradicts typed consumer"
+        raise ReplayConsumerError(problem)
+    return policy
 
 
 T = TypeVar("T")
@@ -125,6 +154,7 @@ class ReplayScheduler:
         self._current: ReplayTask | None = None
         self._timers: list[ReplayTimer] = []
         self._pending: dict[Occurrence, _Pending] = {}
+        self._schema_types: dict[type[Message], None] = {}
         self._sources: dict[_Operation, _Pending] = {}
         self._active: dict[SemanticKey, _Pending] = {}
         self._past: set[Occurrence] = set()
@@ -228,6 +258,16 @@ class ReplayScheduler:
         )
         return ReplayFrontier(unused, tuple(pending.key for pending in self._waiting()), drift)
 
+    @property
+    def schema_types(self) -> tuple[type[Message], ...]:
+        """Reached request and reply classes, in deterministic first-use order."""
+        return tuple(self._schema_types)
+
+    @property
+    def schemas(self) -> FileDescriptorSet:
+        """All typed inputs and consumers reached by this root, with transitive dependencies."""
+        return replay_descriptors(*self._schema_types)
+
     def dispatches(self) -> tuple[pb.OperationReplay, ...]:
         """Return starts only at a disclosed frontier; this method performs no I/O."""
         if self._reconstructing or self.frontier().unused:
@@ -277,9 +317,6 @@ class ReplayScheduler:
 
     def accept(self, accepted: AcceptedReplay | AcceptedClock) -> None:
         """Deliver a durably accepted live result using the same release step as replay."""
-        if self.frontier().unused:
-            problem = "unused paid work must be durably disclosed and acknowledged before new work"
-            raise ReplayError(problem)
         if isinstance(accepted, AcceptedClock):
             self._release(accepted)
             self._history = (*self._history, accepted)
@@ -405,19 +442,14 @@ class ReplayScheduler:
         if active is not None and active.identity != identity:
             problem = f"concurrent divergent identities for semantic key {call.key}"
             raise ReplayDivergenceError(problem)
-        if not isinstance(call.reply, type) or not issubclass(call.reply, Message):
-            problem = "replay reply must be a protobuf message type"
-            raise ReplayConsumerError(problem)
-        policy = deepcopy(call.policy)
-        digest = reply_schema_digest(call.reply)
-        if policy.has_field("reply_schema_digest") and policy.reply_schema_digest != digest:
-            problem = "reply schema proof contradicts typed consumer"
-            raise ReplayConsumerError(problem)
-        policy.reply_schema_digest = digest
-        validate(policy)
-        if policy.reply_type != call.reply.desc().type_name:
-            problem = "replay policy reply type contradicts typed consumer"
-            raise ReplayConsumerError(problem)
+        policy = _call_policy(call)
+        request = (
+            call.identity.message()
+            if isinstance(call.identity, ClassifiedContext)
+            else call.identity
+        )
+        self._schema_types[type(request)] = None
+        self._schema_types[call.reply] = None
         pending = self._pending.get(occurrence)
         if pending is None:
             pending = _Pending(

@@ -4,17 +4,24 @@
 
 import type { GenEnum, GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegenv2";
 import { enumDesc, fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
-import type { RunHead } from "../../store/v1/skeleton_pb.js";
-import { file_vibesys_store_v1_skeleton } from "../../store/v1/skeleton_pb.js";
+import { file_buf_validate_validate } from "../../../buf/validate/validate_pb.js";
 import type { HostCallRequestSchema, HostCallResponseSchema } from "./host_call_pb.js";
 import { file_vibesys_api_v1_host_call } from "./host_call_pb.js";
+import type { ReadRequestSchema, ReadResponseSchema } from "./host_read_generated_pb.js";
+import { file_vibesys_api_v1_host_read_generated } from "./host_read_generated_pb.js";
+import type { MutateRequestSchema, MutateResponseSchema } from "./host_mutate_generated_pb.js";
+import { file_vibesys_api_v1_host_mutate_generated } from "./host_mutate_generated_pb.js";
+import type { WatchRequestSchema, WatchResponseSchema } from "./host_watch_generated_pb.js";
+import { file_vibesys_api_v1_host_watch_generated } from "./host_watch_generated_pb.js";
+import type { RunHead } from "../../store/v1/skeleton_pb.js";
+import { file_vibesys_store_v1_skeleton } from "../../store/v1/skeleton_pb.js";
 import type { Message } from "@bufbuild/protobuf";
 
 /**
  * Describes the file vibesys/api/v1/host.proto.
  */
 export const file_vibesys_api_v1_host: GenFile = /*@__PURE__*/
-  fileDesc("Chl2aWJlc3lzL2FwaS92MS9ob3N0LnByb3RvEg52aWJlc3lzLmFwaS52MSInCgxIZWxsb1JlcXVlc3QSFwoPYXBpX3NjaGVtYV9oYXNoGAEgASgJIkEKDUhlbGxvUmVzcG9uc2USFwoPYXBpX3NjaGVtYV9oYXNoGAEgASgJEhcKD2dhdGV3YXlfdmVyc2lvbhgCIAEoCSJDCgtUYWlsUmVxdWVzdBIOCgZydW5faWQYASABKAkSEAoIZnJvbV9zZXEYAiABKAQSEgoKc2Vzc2lvbl9pZBgDIAEoCSI0CgxUYWlsUmVzcG9uc2USDwoHcmVjb3JkcxgBIAMoDBITCgt0aHJvdWdoX3NlcRgCIAEoBCIhCg9Ta2VsZXRvblJlcXVlc3QSDgoGcnVuX2lkGAEgASgJIpQBChBTa2VsZXRvblJlc3BvbnNlEhUKCGtleWZyYW1lGAEgASgMSACIAQESDwoHcmVjb3JkcxgCIAMoDBIVCg1jb21taXR0ZWRfc2VxGAMgASgEEhAKCG5leHRfc2VxGAQgASgEEhAKCGNvbXBsZXRlGAUgASgIEhAKCHNlc3Npb25zGAYgAygJQgsKCV9rZXlmcmFtZSISChBXYXRjaFJ1bnNSZXF1ZXN0IqYBChFXYXRjaFJ1bnNSZXNwb25zZRIOCgZydW5faWQYASABKAkSJwoEaGVhZBgCIAEoCzIZLnZpYmVzeXMuc3RvcmUudjEuUnVuSGVhZBItCghsaXZlbmVzcxgDIAEoDjIbLnZpYmVzeXMuYXBpLnYxLlJ1bkxpdmVuZXNzEg8KB3JlbW92ZWQYBCABKAgSGAoQaW5pdGlhbF9jb21wbGV0ZRgFIAEoCCJFCg9HZXRCbG9ic1JlcXVlc3QSDgoGcnVuX2lkGAEgASgJEg4KBnNoYTI1NhgCIAMoCRISCgpzZXNzaW9uX2lkGAMgASgJIj0KEEdldEJsb2JzUmVzcG9uc2USKQoFYmxvYnMYASADKAsyGi52aWJlc3lzLmFwaS52MS5CbG9iUmVzdWx0IlUKCkJsb2JSZXN1bHQSDgoGc2hhMjU2GAEgASgJEgwKBGRhdGEYAiABKAwSEgoKZXJyb3JfY29kZRgDIAEoBRIVCg1lcnJvcl9tZXNzYWdlGAQgASgJIksKEVRhaWxTdHJlYW1SZXF1ZXN0Eg4KBnJ1bl9pZBgBIAEoCRIRCglzdHJlYW1faWQYAiABKAkSEwoLZnJvbV9vZmZzZXQYAyABKAQiNwoSVGFpbFN0cmVhbVJlc3BvbnNlEgwKBGRhdGEYASABKAwSEwoLbmV4dF9vZmZzZXQYAiABKAQqkgEKC1J1bkxpdmVuZXNzEhwKGFJVTl9MSVZFTkVTU19VTlNQRUNJRklFRBAAEhYKElJVTl9MSVZFTkVTU19BTElWRRABEhwKGFJVTl9MSVZFTkVTU19JTlRFUlJVUFRFRBACEhYKElJVTl9MSVZFTkVTU19FTkRFRBADEhcKE1JVTl9MSVZFTkVTU19QQVJLRUQQBDKwBAoLSG9zdFNlcnZpY2USTQoISG9zdENhbGwSHy52aWJlc3lzLmFwaS52MS5Ib3N0Q2FsbFJlcXVlc3QaIC52aWJlc3lzLmFwaS52MS5Ib3N0Q2FsbFJlc3BvbnNlEkQKBUhlbGxvEhwudmliZXN5cy5hcGkudjEuSGVsbG9SZXF1ZXN0Gh0udmliZXN5cy5hcGkudjEuSGVsbG9SZXNwb25zZRJDCgRUYWlsEhsudmliZXN5cy5hcGkudjEuVGFpbFJlcXVlc3QaHC52aWJlc3lzLmFwaS52MS5UYWlsUmVzcG9uc2UwARJNCghTa2VsZXRvbhIfLnZpYmVzeXMuYXBpLnYxLlNrZWxldG9uUmVxdWVzdBogLnZpYmVzeXMuYXBpLnYxLlNrZWxldG9uUmVzcG9uc2USUgoJV2F0Y2hSdW5zEiAudmliZXN5cy5hcGkudjEuV2F0Y2hSdW5zUmVxdWVzdBohLnZpYmVzeXMuYXBpLnYxLldhdGNoUnVuc1Jlc3BvbnNlMAESTQoIR2V0QmxvYnMSHy52aWJlc3lzLmFwaS52MS5HZXRCbG9ic1JlcXVlc3QaIC52aWJlc3lzLmFwaS52MS5HZXRCbG9ic1Jlc3BvbnNlElUKClRhaWxTdHJlYW0SIS52aWJlc3lzLmFwaS52MS5UYWlsU3RyZWFtUmVxdWVzdBoiLnZpYmVzeXMuYXBpLnYxLlRhaWxTdHJlYW1SZXNwb25zZTABQj1aO2dpdGh1Yi5jb20vdXctc3lmaS92aWJlc3lzL2dhdGV3YXkvZ2VuL3ZpYmVzeXMvYXBpL3YxO2FwaXYxYgZwcm90bzM", [file_vibesys_store_v1_skeleton, file_vibesys_api_v1_host_call]);
+  fileDesc("Chl2aWJlc3lzL2FwaS92MS9ob3N0LnByb3RvEg52aWJlc3lzLmFwaS52MSI+CgxIZWxsb1JlcXVlc3QSLgoPYXBpX3NjaGVtYV9oYXNoGAEgASgJQhW6SBJyEDIOXlswLTlhLWZdezY0fSQiZAoNSGVsbG9SZXNwb25zZRIuCg9hcGlfc2NoZW1hX2hhc2gYASABKAlCFbpIEnIQMg5eWzAtOWEtZl17NjR9JBIjCg9nYXRld2F5X3ZlcnNpb24YAiABKAlCCrpIB3IFEAEogAIiqwEKC1RhaWxSZXF1ZXN0EjgKBnJ1bl9pZBgBIAEoCUIoukglciMyIV5bQS1aYS16MC05XVtBLVphLXowLTlfLV17MCwxMjd9JBIhCghmcm9tX3NlcRgCIAEoBEIPukgMMgoY//////////9/Ej8KCnNlc3Npb25faWQYAyABKAlCK7pIKHImMiReKFtBLVphLXowLTldW0EtWmEtejAtOV8tXXswLDEyN30pPyQiXQoMVGFpbFJlc3BvbnNlEicKB3JlY29yZHMYASADKAxCFrpIE5IBEAgBEICAQCIIegYQARiAgEASJAoLdGhyb3VnaF9zZXEYAiABKARCD7pIDDIKGP7/////////fyJLCg9Ta2VsZXRvblJlcXVlc3QSOAoGcnVuX2lkGAEgASgJQii6SCVyIzIhXltBLVphLXowLTldW0EtWmEtejAtOV8tXXswLDEyN30kIo4CChBTa2VsZXRvblJlc3BvbnNlEiIKCGtleWZyYW1lGAEgASgMQgu6SAh6BhABGICAQEgAiAEBEiUKB3JlY29yZHMYAiADKAxCFLpIEZIBDhCAgEAiCHoGEAEYgIBAEiYKDWNvbW1pdHRlZF9zZXEYAyABKARCD7pIDDIKGP7/////////fxIhCghuZXh0X3NlcRgEIAEoBEIPukgMMgoY//////////9/EhAKCGNvbXBsZXRlGAUgASgIEkUKCHNlc3Npb25zGAYgAygJQjO6SDCSAS0QgIBAGAEiJXIjMiFeW0EtWmEtejAtOV1bQS1aYS16MC05Xy1dezAsMTI3fSRCCwoJX2tleWZyYW1lIhIKEFdhdGNoUnVuc1JlcXVlc3QiwwQKEVdhdGNoUnVuc1Jlc3BvbnNlEjsKBnJ1bl9pZBgBIAEoCUIrukgociYyJF4oW0EtWmEtejAtOV1bQS1aYS16MC05Xy1dezAsMTI3fSk/JBInCgRoZWFkGAIgASgLMhkudmliZXN5cy5zdG9yZS52MS5SdW5IZWFkEjcKCGxpdmVuZXNzGAMgASgOMhsudmliZXN5cy5hcGkudjEuUnVuTGl2ZW5lc3NCCLpIBYIBAhABEg8KB3JlbW92ZWQYBCABKAgSGAoQaW5pdGlhbF9jb21wbGV0ZRgFIAEoCDrjArpI3wIa3AIKEHdhdGNoX3J1bnMuc2hhcGUSZHJ1bl9pZCwgaGVhZCwgbGl2ZW5lc3MsIHJlbW92ZWQgYW5kIGluaXRpYWxfY29tcGxldGUgbXVzdCBmb3JtIGFuIGVudHJ5LCB0b21ic3RvbmUgb3IgaW5pdGlhbCBtYXJrZXIa4QF0aGlzLmluaXRpYWxfY29tcGxldGUgPyAodGhpcy5ydW5faWQgPT0gJycgJiYgIWhhcyh0aGlzLmhlYWQpICYmIHRoaXMubGl2ZW5lc3MgPT0gMCAmJiAhdGhpcy5yZW1vdmVkKSA6ICh0aGlzLnJ1bl9pZCAhPSAnJyAmJiAodGhpcy5yZW1vdmVkID8gKCFoYXModGhpcy5oZWFkKSAmJiB0aGlzLmxpdmVuZXNzID09IDApIDogKCFoYXModGhpcy5oZWFkKSB8fCB0aGlzLmxpdmVuZXNzICE9IDApKSkiuwEKD0dldEJsb2JzUmVxdWVzdBI4CgZydW5faWQYASABKAlCKLpIJXIjMiFeW0EtWmEtejAtOV1bQS1aYS16MC05Xy1dezAsMTI3fSQSLQoGc2hhMjU2GAIgAygJQh26SBqSARcQgAIiEnIQMg5eWzAtOWEtZl17NjR9JBI/CgpzZXNzaW9uX2lkGAMgASgJQiu6SChyJjIkXihbQS1aYS16MC05XVtBLVphLXowLTlfLV17MCwxMjd9KT8kIkgKEEdldEJsb2JzUmVzcG9uc2USNAoFYmxvYnMYASADKAsyGi52aWJlc3lzLmFwaS52MS5CbG9iUmVzdWx0Qgm6SAaSAQMQgAIi2QIKCkJsb2JSZXN1bHQSJQoGc2hhMjU2GAEgASgJQhW6SBJyEDIOXlswLTlhLWZdezY0fSQSGAoEZGF0YRgCIAEoDEIKukgHegUYgICACBIdCgplcnJvcl9jb2RlGAMgASgFQgm6SAYaBBgQKAASIAoNZXJyb3JfbWVzc2FnZRgEIAEoCUIJukgGcgQogIAEOsgBukjEARrBAQoTYmxvYl9yZXN1bHQub3V0Y29tZRJDZXJyb3JfY29kZSwgZXJyb3JfbWVzc2FnZSBhbmQgZGF0YSBtdXN0IGRlc2NyaWJlIHN1Y2Nlc3Mgb3IgZmFpbHVyZRpldGhpcy5lcnJvcl9jb2RlID09IDAgPyB0aGlzLmVycm9yX21lc3NhZ2UgPT0gJycgOiAodGhpcy5kYXRhLnNpemUoKSA9PSAwICYmIHRoaXMuZXJyb3JfbWVzc2FnZSAhPSAnJykisQEKEVRhaWxTdHJlYW1SZXF1ZXN0EjgKBnJ1bl9pZBgBIAEoCUIoukglciMyIV5bQS1aYS16MC05XVtBLVphLXowLTlfLV17MCwxMjd9JBI8CglzdHJlYW1faWQYAiABKAlCKbpIJnIkMiJeW0EtWmEtejAtOV1bQS1aYS16MC05Xy4tXXswLDI1NX0kEiQKC2Zyb21fb2Zmc2V0GAMgASgEQg+6SAwyChj//////////38iuQEKElRhaWxTdHJlYW1SZXNwb25zZRIZCgRkYXRhGAEgASgMQgu6SAh6BhABGICABBIkCgtuZXh0X29mZnNldBgCIAEoBEIPukgMMgoY//////////9/OmK6SF8aXQoSdGFpbF9zdHJlYW0ub2Zmc2V0EhtuZXh0X29mZnNldCBtdXN0IGNvdmVyIGRhdGEaKnRoaXMubmV4dF9vZmZzZXQgPj0gdWludCh0aGlzLmRhdGEuc2l6ZSgpKSqSAQoLUnVuTGl2ZW5lc3MSHAoYUlVOX0xJVkVORVNTX1VOU1BFQ0lGSUVEEAASFgoSUlVOX0xJVkVORVNTX0FMSVZFEAESHAoYUlVOX0xJVkVORVNTX0lOVEVSUlVQVEVEEAISFgoSUlVOX0xJVkVORVNTX0VOREVEEAMSFwoTUlVOX0xJVkVORVNTX1BBUktFRBAEMoQGCgtIb3N0U2VydmljZRJNCghIb3N0Q2FsbBIfLnZpYmVzeXMuYXBpLnYxLkhvc3RDYWxsUmVxdWVzdBogLnZpYmVzeXMuYXBpLnYxLkhvc3RDYWxsUmVzcG9uc2USQQoEUmVhZBIbLnZpYmVzeXMuYXBpLnYxLlJlYWRSZXF1ZXN0GhwudmliZXN5cy5hcGkudjEuUmVhZFJlc3BvbnNlEkYKBVdhdGNoEhwudmliZXN5cy5hcGkudjEuV2F0Y2hSZXF1ZXN0Gh0udmliZXN5cy5hcGkudjEuV2F0Y2hSZXNwb25zZTABEkcKBk11dGF0ZRIdLnZpYmVzeXMuYXBpLnYxLk11dGF0ZVJlcXVlc3QaHi52aWJlc3lzLmFwaS52MS5NdXRhdGVSZXNwb25zZRJECgVIZWxsbxIcLnZpYmVzeXMuYXBpLnYxLkhlbGxvUmVxdWVzdBodLnZpYmVzeXMuYXBpLnYxLkhlbGxvUmVzcG9uc2USQwoEVGFpbBIbLnZpYmVzeXMuYXBpLnYxLlRhaWxSZXF1ZXN0GhwudmliZXN5cy5hcGkudjEuVGFpbFJlc3BvbnNlMAESTQoIU2tlbGV0b24SHy52aWJlc3lzLmFwaS52MS5Ta2VsZXRvblJlcXVlc3QaIC52aWJlc3lzLmFwaS52MS5Ta2VsZXRvblJlc3BvbnNlElIKCVdhdGNoUnVucxIgLnZpYmVzeXMuYXBpLnYxLldhdGNoUnVuc1JlcXVlc3QaIS52aWJlc3lzLmFwaS52MS5XYXRjaFJ1bnNSZXNwb25zZTABEk0KCEdldEJsb2JzEh8udmliZXN5cy5hcGkudjEuR2V0QmxvYnNSZXF1ZXN0GiAudmliZXN5cy5hcGkudjEuR2V0QmxvYnNSZXNwb25zZRJVCgpUYWlsU3RyZWFtEiEudmliZXN5cy5hcGkudjEuVGFpbFN0cmVhbVJlcXVlc3QaIi52aWJlc3lzLmFwaS52MS5UYWlsU3RyZWFtUmVzcG9uc2UwAUI9WjtnaXRodWIuY29tL3V3LXN5ZmkvdmliZXN5cy9nYXRld2F5L2dlbi92aWJlc3lzL2FwaS92MTthcGl2MWIGcHJvdG8z", [file_buf_validate_validate, file_vibesys_api_v1_host_call, file_vibesys_api_v1_host_read_generated, file_vibesys_api_v1_host_mutate_generated, file_vibesys_api_v1_host_watch_generated, file_vibesys_store_v1_skeleton]);
 
 /**
  * @generated from message vibesys.api.v1.HelloRequest
@@ -56,6 +63,9 @@ export const HelloResponseSchema: GenMessage<HelloResponse> = /*@__PURE__*/
   messageDesc(file_vibesys_api_v1_host, 1);
 
 /**
+ * Sequence zero remains valid for phase 1 logs; signed bounds leave cursor
+ * arithmetic and file offsets in the same domain in every implementation.
+ *
  * @generated from message vibesys.api.v1.TailRequest
  */
 export type TailRequest = Message<"vibesys.api.v1.TailRequest"> & {
@@ -160,7 +170,8 @@ export type SkeletonResponse = Message<"vibesys.api.v1.SkeletonResponse"> & {
   nextSeq: bigint;
 
   /**
-   * True when the frozen readable prefix was included in full.
+   * True when the frozen readable prefix was included in full. Both bool
+   * values are valid, including an empty prefix requiring a Tail continuation.
    *
    * @generated from field: bool complete = 5;
    */
@@ -194,12 +205,15 @@ export const WatchRunsRequestSchema: GenMessage<WatchRunsRequest> = /*@__PURE__*
 
 /**
  * Initial entries precede an initial_complete marker. Later entries replace by
- * run_id; removed is a tombstone. A phase 1 run has no head and UNKNOWN liveness.
+ * run_id; removed is a tombstone. A phase 1 run has no head and UNSPECIFIED liveness.
  *
  * @generated from message vibesys.api.v1.WatchRunsResponse
  */
 export type WatchRunsResponse = Message<"vibesys.api.v1.WatchRunsResponse"> & {
   /**
+   * head is absent for phase 1 runs, tombstones and the initial marker.
+   * UNSPECIFIED represents unknown phase 1 liveness and marker/tombstone absence.
+   *
    * @generated from field: string run_id = 1;
    */
   runId: string;
@@ -233,6 +247,9 @@ export const WatchRunsResponseSchema: GenMessage<WatchRunsResponse> = /*@__PURE_
   messageDesc(file_vibesys_api_v1_host, 7);
 
 /**
+ * Malformed hashes reject the whole request before filesystem access. File
+ * lookup/content failures for admitted hashes remain per-result errors.
+ *
  * @generated from message vibesys.api.v1.GetBlobsRequest
  */
 export type GetBlobsRequest = Message<"vibesys.api.v1.GetBlobsRequest"> & {
@@ -408,7 +425,7 @@ export const RunLivenessSchema: GenEnum<RunLiveness> = /*@__PURE__*/
 export const HostService: GenService<{
   /**
    * Hello compares the client and gateway API schema hashes. A mismatch fails
-   * with gRPC FAILED_PRECONDITION and a message naming both hashes.
+   * with gRPC FAILED_PRECONDITION and a message naming both well-formed hashes.
    *
    * @generated from rpc vibesys.api.v1.HostService.HostCall
    */
@@ -416,6 +433,38 @@ export const HostService: GenService<{
     methodKind: "unary";
     input: typeof HostCallRequestSchema;
     output: typeof HostCallResponseSchema;
+  },
+  /**
+   * Read runs one registered catalog operation. The runner deadline is that operation's cap.
+   *
+   * @generated from rpc vibesys.api.v1.HostService.Read
+   */
+  read: {
+    methodKind: "unary";
+    input: typeof ReadRequestSchema;
+    output: typeof ReadResponseSchema;
+  },
+  /**
+   * Watch runs one registered stream. The host keeps it until completion or cancellation.
+   * Closing a panel drops the client's subscription and does not cancel this stream.
+   *
+   * @generated from rpc vibesys.api.v1.HostService.Watch
+   */
+  watch: {
+    methodKind: "server_streaming";
+    input: typeof WatchRequestSchema;
+    output: typeof WatchResponseSchema;
+  },
+  /**
+   * Mutate runs one registered unary admission or idempotent write. An admission
+   * keeps running after the caller disconnects, until the operation cap.
+   *
+   * @generated from rpc vibesys.api.v1.HostService.Mutate
+   */
+  mutate: {
+    methodKind: "unary";
+    input: typeof MutateRequestSchema;
+    output: typeof MutateResponseSchema;
   },
   /**
    * @generated from rpc vibesys.api.v1.HostService.Hello

@@ -76,7 +76,7 @@ from .types.measurement import BaseClaim, BaseRef, Comparison, CoreRun, Sample
 from .types.until import FailureReason, Within
 
 if TYPE_CHECKING:
-    from .types.common import RequestId, Seconds
+    from .types.common import InvocationRef, RequestId, Seconds
     from .types.evaluation import (
         EvaluationState,
         EvidenceRef,
@@ -170,10 +170,19 @@ def with_base(
         return change
     within = origin.within or Within(limit=plan.time_bound)
     behalf = _Behalf(candidate, own)
-    return _measure_base(change, context, origin.scope, base_run, base, behalf, within)
+    return _measure_base(
+        change,
+        context,
+        origin.scope,
+        base_run,
+        base,
+        behalf,
+        within,
+        requested_by=origin.requested_by,
+    )
 
 
-def _measure_base(  # noqa: PLR0913  # lint-waiver: LW-310002 [PLR0913]; the change, the scope, the plan, the base, the candidate it serves and its limit are independent facts of one admission.
+def _measure_base(  # noqa: PLR0913  # lint-waiver: LW-310002 [PLR0913]; the change, the scope, the plan, the base, the candidate it serves, its limit and the turn that asked are independent facts of one admission.
     change: AreaChange[EvaluationState],
     context: EvaluationContext,
     scope: Scope,
@@ -181,6 +190,8 @@ def _measure_base(  # noqa: PLR0913  # lint-waiver: LW-310002 [PLR0913]; the cha
     base: BaseRef,
     behalf: _Behalf,
     within: Within,
+    *,
+    requested_by: InvocationRef | None = None,
 ) -> AreaChange[EvaluationState]:
     """``change`` plus one more sample of ``base`` on the way: the strategy's run, else core's.
 
@@ -191,7 +202,9 @@ def _measure_base(  # noqa: PLR0913  # lint-waiver: LW-310002 [PLR0913]; the cha
     awaited = running_baseline(change.state, base)
     if awaited is not None:
         return change.model_copy(update={"state": _claimed(change.state, awaited, base)})
-    return _core_run(change, context, Origin(scope, None, within), plan, behalf)
+    return _core_run(
+        change, context, Origin(scope, None, within, requested_by=requested_by), plan, behalf
+    )
 
 
 def _claimed(state: EvaluationState, running: RequestId, base: BaseRef) -> EvaluationState:
@@ -650,6 +663,17 @@ def _candidates_of(
     return tuple(latest.values())
 
 
+def _submission_requester(
+    context: EvaluationContext, request_id: RequestId
+) -> InvocationRef | None:
+    """The turn recorded on ``request_id``'s submission, when it has one."""
+    row = context.records.record(request_id)
+    request = None if row is None else row.request
+    if isinstance(request, SubmitMeasurement):
+        return request.requested_by
+    return None
+
+
 def _advance(
     change: AreaChange[EvaluationState], context: EvaluationContext, candidate: _Candidate
 ) -> AreaChange[EvaluationState]:
@@ -680,6 +704,7 @@ def _advance(
     moment = moment_of(context.run)
     scope = candidate.scope
     within = Within(limit=candidate.plan.time_bound)
+    requested_by = _submission_requester(context, candidate.request_id)
     plan = base_plan(candidate.plan, base)
     mine = Measured(evaluation, own)
     behalf = _Behalf(candidate.request_id, own)
@@ -689,11 +714,15 @@ def _advance(
         if (sampled or base_in_flight(state, mine, scope)) and base_missing(
             state, Measured(evaluation, base.measured_input), moment
         ):
-            return _measure_base(change, context, scope, plan, base, behalf, within)
+            return _measure_base(
+                change, context, scope, plan, base, behalf, within, requested_by=requested_by
+            )
         return change
     if remeasures_base(state, comparison, evaluation, moment):
-        change = _measure_base(change, context, scope, plan, base, behalf, within)
+        change = _measure_base(
+            change, context, scope, plan, base, behalf, within, requested_by=requested_by
+        )
     if remeasures_candidate(change.state, comparison, evaluation, moment):
-        again = Origin(scope, None, within, base=base)
+        again = Origin(scope, None, within, base=base, requested_by=requested_by)
         change = _core_run(change, context, again, candidate.plan, behalf)
     return change

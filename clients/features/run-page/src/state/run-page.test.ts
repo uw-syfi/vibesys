@@ -8,7 +8,6 @@ import {type CoreState, initialCoreState, reduceEvent} from '@vibesys/run-state'
 import {checkModel, type Seeded} from '@vibesys/store/testing';
 import {
   FIRST_HISTORY_SEQUENCE,
-  FORCE_STOP_BOUND_MS,
   HISTORY_PAGE_EVENTS,
   historyAwaiting,
   LOCATE_BOUND_MS,
@@ -20,7 +19,6 @@ import {
   runPageInitial,
   runPageInvariants,
   runPageStep,
-  runPhase,
   runWallNow,
   type Unavailable,
 } from './run-page.js';
@@ -31,9 +29,8 @@ import {
   followedStreams,
   headerView,
   logGroups,
-  quotaBannerView,
+  pauseNowBannerView,
   runGoneWords,
-  stopBannerView,
   streamLines,
   timelineView,
   viewedRun,
@@ -140,16 +137,11 @@ function snapshot(sequence: number, ids: readonly string[]): RunSnapshot {
 }
 
 const USER_ACTIONS: readonly RunPageAction[] = [
-  {type: 'ask-stop'},
-  {type: 'cancel-stop'},
-  {type: 'confirm-stop'},
-  {type: 'force-stop'},
-  {type: 'stop-failed'},
+  {type: 'ask-pause-now'},
+  {type: 'cancel-pause-now'},
+  {type: 'confirm-pause-now'},
+  {type: 'pause-now-failed'},
   {type: 'pause'},
-  {type: 'resume'},
-  {type: 'wait-for-quota'},
-  {type: 'stop-waiting'},
-  {type: 'wait-refused', message: "unknown field 'when'"},
   {type: 'resume-ended'},
   {type: 'open-window'},
   {type: 'archive'},
@@ -357,10 +349,9 @@ function awaited(state: RunPageState) {
   return {
     // Each armed bound (the stop's, the locate wait's) is its own slot, by its token.
     ...Object.fromEntries(
-      [
-        state.stop.kind === 'stopping' ? state.stop.bound : null,
-        state.locate.kind === 'waiting' ? state.locate.bound : null,
-      ].flatMap(token => (token === null ? [] : [[`bound:${token}`, token]])),
+      [state.locate.kind === 'waiting' ? state.locate.bound : null].flatMap(token =>
+        token === null ? [] : [[`bound:${token}`, token]],
+      ),
     ),
     logs: state.logs.kind === 'listing' ? state.logs.token : null,
     attach: state.link.kind === 'attaching' ? state.link.token : null,
@@ -381,40 +372,21 @@ function reply(action: RunPageAction) {
   return null;
 }
 
-/** Why a Pause or Resume was not on offer in `before` (header or quota banner), or null. */
-function commandNotOffered(
-  before: RunPageState,
-  request: Extract<RunPageRequest, {kind: 'pause' | 'resume'}>,
-): string | null {
-  const header = headerView(before);
-  const banner = quotaBannerView(before, String);
-  const offers =
-    request.kind === 'pause'
-      ? [header.pause, banner?.stopWaiting]
-      : request.when === 'now'
-        ? [header.resume, banner?.resumeNow]
-        : [banner?.wait];
-  const offered = offers.some(each => each?.shown === true && each.disabledReason === null);
-  return offered ? null : `${request.kind} was sent while not offered`;
-}
-
 /** Why `request` was not on offer in `before`, or null when it was. */
 function notOffered(before: RunPageState, request: RunPageRequest): string | null {
   switch (request.kind) {
     case 'pause':
-    case 'resume':
-      return commandNotOffered(before, request);
-    case 'stop': {
-      const banner = stopBannerView(before);
-      const offered = !request.force || (banner.kind === 'stopping' && banner.forceOffered);
-      return offered ? null : 'force stop was sent while not offered';
-    }
+      return headerView(before).pause.shown && headerView(before).pause.disabledReason === null
+        ? null
+        : 'pause was sent while not offered';
+    case 'pause-now':
+      return pauseNowBannerView(before).kind === 'confirm'
+        ? null
+        : 'cancellation was not confirmed';
     case 'resume-ended':
       return endedView(before)?.resume == null ? 'resume of a run that cannot resume' : null;
     case 'arm-bound':
-      return request.ms === FORCE_STOP_BOUND_MS || request.ms === LOCATE_BOUND_MS
-        ? null
-        : 'a bound is not a documented one';
+      return request.ms === LOCATE_BOUND_MS ? null : 'a bound is not a documented one';
     default:
       return null;
   }
@@ -424,13 +396,11 @@ function notOffered(before: RunPageState, request: RunPageRequest): string | nul
 function offeredOnly(
   before: RunPageState,
   _action: RunPageAction,
-  after: RunPageState,
+  _after: RunPageState,
   requests: readonly RunPageRequest[],
 ): void {
   const problems = requests.map(request => notOffered(before, request)).filter(Boolean);
   if (problems.length > 0) throw new Error(problems.join('; '));
-  if (stopBannerView(after).kind === 'stopping' && runPhase(after).kind !== 'stopping')
-    throw new Error('a stopping banner outside stopping');
 }
 
 describe('the run page store', () => {
@@ -449,48 +419,16 @@ describe('the run page store', () => {
     }
   });
 
-  test('a quota pause offers Resume now and the wait, and the wait offers Stop waiting', () => {
-    const at = (seconds: number) => `t${seconds}`;
-    const attached = fold(initial(), [
-      {type: 'record', record: {kind: 'live', run: server('paused', {paused: 'quota'})}},
-    ]);
-    const token = attached.requests.find(request => request.kind === 'attach');
-    const ready = fold(attached.state, [
-      {type: 'attached', token: token?.kind === 'attach' ? token.token : 0, error: null},
-      {type: 'session', session: {hasSnapshot: true, streaming: true, controls: true, error: null}},
-      {type: 'run-core', core: quotaCore(1)},
-    ]).state;
-    expect(headerView(ready).resume.shown).toBe(false);
-    expect(quotaBannerView(ready, at)).toMatchObject({
-      title: 'Paused: Claude hit its usage limit',
-      body: 'Claude usage limit reached. Claude expects capacity back at t1760580000.',
-      wait: {shown: true},
-      stopWaiting: {shown: false},
-    });
-    expect(fold(ready, [{type: 'wait-for-quota'}]).requests).toEqual([
-      {kind: 'resume', when: 'capacity_returns'},
-    ]);
-    expect(fold(ready, [{type: 'resume'}]).requests).toEqual([{kind: 'resume', when: 'now'}]);
-    // Stop waiting is not on offer before the run waits.
-    expect(fold(ready, [{type: 'stop-waiting'}]).requests).toEqual([]);
-
-    const waiting = fold(ready, [{type: 'run-core', core: quotaCore(2)}]).state;
-    expect(quotaBannerView(waiting, at)).toMatchObject({
-      title: "Waiting for Claude's quota",
-      body: 'The run resumes by itself at about t1760580120.',
-      wait: {shown: false},
-      stopWaiting: {shown: true},
-    });
-    expect(fold(waiting, [{type: 'stop-waiting'}]).requests).toEqual([{kind: 'pause'}]);
-    expect(fold(waiting, [{type: 'wait-for-quota'}]).requests).toEqual([]);
-
-    const cancelled = fold(waiting, [{type: 'run-core', core: quotaCore(3)}]).state;
-    expect(quotaBannerView(cancelled, at)?.wait.shown).toBe(true);
-    // A run paused by its user shows no quota banner.
-    const byUser = fold(cancelled, [
-      {type: 'record', record: {kind: 'live', run: server('paused')}},
-    ]).state;
-    expect(quotaBannerView(byUser, at)).toBeNull();
+  test('quota holds stay internal while Pause now remains available', () => {
+    for (const stage of [0, 1, 2, 3]) {
+      const state = fold(attached(), [
+        {type: 'record', record: {kind: 'live', run: server('paused', {paused: 'quota'})}},
+        {type: 'run-core', core: quotaCore(stage)},
+      ]).state;
+      expect(Object.keys(headerView(state))).not.toContain('resume');
+      expect(headerView(state).pauseNow.shown).toBe(true);
+      expect(fold(state, [{type: 'pause'}]).requests).toEqual([]);
+    }
   });
 
   test('same-store rebootstrap keeps the snapshot base and replaces the replay suffix', () => {
@@ -576,27 +514,16 @@ describe('the run page store', () => {
     expect(restored.run.trace.events.toArray()).toEqual([]);
   });
 
-  test('offers force stop only after the bound elapses while stopping', () => {
-    const live = {type: 'record', record: RECORDS[2]} as RunPageAction;
-    const asked = fold(initial(), [live, {type: 'ask-stop'}, {type: 'confirm-stop'}]);
-    expect(asked.requests).toContainEqual({kind: 'stop', force: false});
-    const arm = asked.requests.find(request => request.kind === 'arm-bound');
-    if (arm?.kind !== 'arm-bound') throw new Error('no bound armed');
-    expect(stopBannerView(asked.state)).toMatchObject({kind: 'stopping', forceOffered: false});
-    // A stale bound changes nothing.
-    expect(runPageStep(asked.state, {type: 'bound-elapsed', token: arm.token + 99}).state).toBe(
-      asked.state,
-    );
-    const elapsed = fold(asked.state, [{type: 'bound-elapsed', token: arm.token}]);
-    expect(stopBannerView(elapsed.state)).toMatchObject({kind: 'stopping', forceOffered: true});
-    const forced = fold(elapsed.state, [{type: 'force-stop'}]);
-    expect(forced.requests).toEqual([{kind: 'stop', force: true}]);
-    // The run ends: no stop flow survives, and a late bound is dropped.
-    const ended = fold(forced.state, [
-      {type: 'record', record: RECORDS[7] as RunRecord},
-      {type: 'bound-elapsed', token: arm.token},
-    ]);
-    expect(ended.state.stop).toEqual({kind: 'idle'});
+  test('Pause now is offered during a drain with the cancellation warning', () => {
+    const draining = fold(initial(), [{type: 'record', record: RECORDS[6] as RunRecord}]).state;
+    expect(headerView(draining).pauseNow.shown).toBe(true);
+    const asked = fold(draining, [{type: 'ask-pause-now'}]);
+    expect(pauseNowBannerView(asked.state)).toEqual({
+      kind: 'confirm',
+      title: 'Pause now?',
+      body: 'Unfinished work may need repeating and may still incur charges.',
+    });
+    expect(fold(asked.state, [{type: 'cancel-pause-now'}]).state.pauseNow.kind).toBe('idle');
   });
 
   test('the scrubber is page state that asks for no I/O', () => {
@@ -606,17 +533,11 @@ describe('the run page store', () => {
     expect(fold(state, [{type: 'view', view: {at: 'live'}}]).state.view).toEqual({at: 'live'});
   });
 
-  test('a stop seen in the record (from anywhere) arms the same bound', () => {
-    const {state, requests} = fold(initial(), [{type: 'record', record: RECORDS[6] as RunRecord}]);
-    expect(runPhase(state).kind).toBe('stopping');
-    expect(requests.some(request => request.kind === 'arm-bound')).toBe(true);
-  });
-
   test('the ended banner names the round to resume from only when resumable', () => {
     const stopped = fold(initial(), [{type: 'record', record: RECORDS[7] as RunRecord}]).state;
-    expect(endedView(stopped)).toMatchObject({title: 'Stopped', resume: null});
+    expect(endedView(stopped)).toMatchObject({title: 'Stopped', resume: 'Resume'});
     const failed = fold(initial(), [{type: 'record', record: RECORDS[8] as RunRecord}]).state;
-    expect(endedView(failed)).toMatchObject({title: 'Failed', resume: 'Resume from round 2'});
+    expect(endedView(failed)).toMatchObject({title: 'Failed', resume: 'Resume'});
     expect(fold(failed, [{type: 'resume-ended'}]).requests).toEqual([
       {kind: 'resume-ended', fromRound: 2},
     ]);

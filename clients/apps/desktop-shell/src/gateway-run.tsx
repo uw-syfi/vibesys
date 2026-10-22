@@ -3,15 +3,15 @@
 import {useRunIntents} from '@vibesys/feature-run-intents/renderer';
 import type {RunPageAddress} from '@vibesys/feature-run-page/renderer';
 import {type GatewayRunPorts, RunScreen, useGatewayRun} from '@vibesys/feature-run-page/renderer';
-import type {RunPageSeed} from '@vibesys/feature-run-page/state';
+import {type RunPageSeed, recordedRunRoot} from '@vibesys/feature-run-page/state';
 import {useRunSessions} from '@vibesys/feature-run-sessions/renderer';
 import type {GatewayBridge, WelcomeBridge} from '@vibesys/ipc';
 import type {ScheduleTimeout} from '@vibesys/machine';
-import type {Skeleton} from '@vibesys/run-skeleton';
+import {observeRun, type Skeleton} from '@vibesys/run-skeleton';
 import {gatewayContentCache} from '@vibesys/run-skeleton/cache';
 import {gatewayReader} from '@vibesys/run-skeleton/reader';
 import {proposalIntent} from '@vibesys/runs/chat';
-import type {RelaunchObservation} from '@vibesys/runs/intents';
+import {type RelaunchObservation, runReference} from '@vibesys/runs/intents';
 import {Card, EmptyState, Page, Stack, Switch, Text} from '@vibesys/ui';
 import {type JSX, type ReactNode, useMemo} from 'react';
 import {gatewayTransport} from './gateway-transport.js';
@@ -44,9 +44,7 @@ export function GatewayRun(props: {
   const page = useGatewayRun({seed, ports, schedule, address});
   const {snapshot} = page;
   const observation = observationOf(snapshot.context.load?.skeleton);
-  const record = page.state?.record;
-  const projectRoot =
-    record?.kind === 'live' || record?.kind === 'ended' ? record.run.projectRoot : '';
+  const projectRoot = recordedRunRoot(snapshot.context.load?.skeleton);
   const intents = useRunIntents({
     bridge,
     host: seed.identity.host,
@@ -61,15 +59,19 @@ export function GatewayRun(props: {
     host: seed.identity.host,
     runId: seed.identity.runId,
     sessionId: 'default',
-    projectRoot,
-    enabled: snapshot.matches('active') && projectRoot !== '',
+    projectRoot: projectRoot ?? '',
+    enabled: snapshot.matches('active') && projectRoot !== undefined,
     schedule,
     steerBusy: intents.busy,
     sendSteer: proposal =>
       intents.sendRequest({
         type: 'send',
         request: proposalIntent(
-          {projectRoot, runId: seed.identity.runId, requestId: crypto.randomUUID()},
+          {
+            ...runReference(projectRoot ?? '', seed.identity.runId),
+            requestId: crypto.randomUUID(),
+            expectedEpoch: observation?.epoch ?? 0n,
+          },
           proposal,
         ),
       }),
@@ -123,13 +125,8 @@ export function GatewayRun(props: {
 }
 
 function observationOf(skeleton: Skeleton | undefined): RelaunchObservation | undefined {
-  const latest = skeleton?.epochs.at(-1);
-  if (!latest?.epoch) return undefined;
-  const lifecycle = skeleton?.lifecycles.at(-1);
-  return {
-    epoch: BigInt(latest.epoch.epoch),
-    ...(lifecycle?.lifecycle && lifecycle.seq >= latest.seq
-      ? {lifecycle: lifecycle.lifecycle}
-      : {}),
-  };
+  if (!skeleton) return undefined;
+  const {epoch, lifecycle} = observeRun(skeleton);
+  if (epoch === 0) return undefined;
+  return {epoch: BigInt(epoch), ...(lifecycle ? {lifecycle} : {})};
 }

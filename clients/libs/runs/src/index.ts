@@ -31,14 +31,3 @@ export {
   type RunOptions,
   type RunStart,
 } from './run-start.js';
-export {
-  confirmText,
-  STOP_IDLE,
-  type StopEvent,
-  type StopState,
-  type StopStep,
-  type StopView,
-  stopKey,
-  stopStep,
-  stopView,
-} from './stop-run.js';

@@ -11,7 +11,8 @@ from typing import Literal, NoReturn, TYPE_CHECKING, TypeAlias
 from protobuf import Enum, Message
 from protobuf._codegen import file_desc
 
-from . import host_call_pb
+from . import host_call_pb, host_mutate_generated_pb, host_read_generated_pb, host_watch_generated_pb
+from ....buf.validate import validate_pb
 from ...store.v1 import skeleton_pb
 
 if TYPE_CHECKING:
@@ -86,6 +87,9 @@ _TailRequestFields: TypeAlias = Literal["run_id", "from_seq", "session_id"]
 
 class TailRequest(Message[_TailRequestFields]):
     """
+    Sequence zero remains valid for phase 1 logs; signed bounds leave cursor
+    arithmetic and file offsets in the same domain in every implementation.
+
     ```proto
     message vibesys.api.v1.TailRequest
     ```
@@ -224,7 +228,8 @@ class SkeletonResponse(Message[_SkeletonResponseFields]):
             uint64 next_seq = 4;
             ```
         complete:
-            True when the frozen readable prefix was included in full.
+            True when the frozen readable prefix was included in full. Both bool
+            values are valid, including an empty prefix requiring a Tail continuation.
 
             ```proto
             bool complete = 5;
@@ -281,7 +286,7 @@ _WatchRunsResponseFields: TypeAlias = Literal["run_id", "head", "liveness", "rem
 class WatchRunsResponse(Message[_WatchRunsResponseFields]):
     """
     Initial entries precede an initial_complete marker. Later entries replace by
-    run_id; removed is a tombstone. A phase 1 run has no head and UNKNOWN liveness.
+    run_id; removed is a tombstone. A phase 1 run has no head and UNSPECIFIED liveness.
 
     ```proto
     message vibesys.api.v1.WatchRunsResponse
@@ -289,6 +294,9 @@ class WatchRunsResponse(Message[_WatchRunsResponseFields]):
 
     Attributes:
         run_id:
+            head is absent for phase 1 runs, tombstones and the initial marker.
+            UNSPECIFIED represents unknown phase 1 liveness and marker/tombstone absence.
+
             ```proto
             string run_id = 1;
             ```
@@ -335,6 +343,9 @@ _GetBlobsRequestFields: TypeAlias = Literal["run_id", "sha256", "session_id"]
 
 class GetBlobsRequest(Message[_GetBlobsRequestFields]):
     """
+    Malformed hashes reject the whole request before filesystem access. File
+    lookup/content failures for admitted hashes remain per-result errors.
+
     ```proto
     message vibesys.api.v1.GetBlobsRequest
     ```
@@ -562,10 +573,14 @@ class RunLiveness(Enum):
 
 
 _DESC = file_desc(
-    b'\n\x19vibesys/api/v1/host.proto\x12\x0evibesys.api.v1\x1a\x1fvibesys/store/v1/skeleton.proto\x1a\x1evibesys/api/v1/host_call.proto"6\n\x0cHelloRequest\x12&\n\x0fapi_schema_hash\x18\x01 \x01(\tR\rapiSchemaHash"`\n\rHelloResponse\x12&\n\x0fapi_schema_hash\x18\x01 \x01(\tR\rapiSchemaHash\x12\'\n\x0fgateway_version\x18\x02 \x01(\tR\x0egatewayVersion"^\n\x0bTailRequest\x12\x15\n\x06run_id\x18\x01 \x01(\tR\x05runId\x12\x19\n\x08from_seq\x18\x02 \x01(\x04R\x07fromSeq\x12\x1d\n\nsession_id\x18\x03 \x01(\tR\tsessionId"I\n\x0cTailResponse\x12\x18\n\x07records\x18\x01 \x03(\x0cR\x07records\x12\x1f\n\x0bthrough_seq\x18\x02 \x01(\x04R\nthroughSeq"(\n\x0fSkeletonRequest\x12\x15\n\x06run_id\x18\x01 \x01(\tR\x05runId"\xd2\x01\n\x10SkeletonResponse\x12\x1f\n\x08keyframe\x18\x01 \x01(\x0cH\x00R\x08keyframe\x88\x01\x01\x12\x18\n\x07records\x18\x02 \x03(\x0cR\x07records\x12#\n\rcommitted_seq\x18\x03 \x01(\x04R\x0ccommittedSeq\x12\x19\n\x08next_seq\x18\x04 \x01(\x04R\x07nextSeq\x12\x1a\n\x08complete\x18\x05 \x01(\x08R\x08complete\x12\x1a\n\x08sessions\x18\x06 \x03(\tR\x08sessionsB\x0b\n\t_keyframe"\x12\n\x10WatchRunsRequest"\xd7\x01\n\x11WatchRunsResponse\x12\x15\n\x06run_id\x18\x01 \x01(\tR\x05runId\x12-\n\x04head\x18\x02 \x01(\x0b2\x19.vibesys.store.v1.RunHeadR\x04head\x127\n\x08liveness\x18\x03 \x01(\x0e2\x1b.vibesys.api.v1.RunLivenessR\x08liveness\x12\x18\n\x07removed\x18\x04 \x01(\x08R\x07removed\x12)\n\x10initial_complete\x18\x05 \x01(\x08R\x0finitialComplete"_\n\x0fGetBlobsRequest\x12\x15\n\x06run_id\x18\x01 \x01(\tR\x05runId\x12\x16\n\x06sha256\x18\x02 \x03(\tR\x06sha256\x12\x1d\n\nsession_id\x18\x03 \x01(\tR\tsessionId"D\n\x10GetBlobsResponse\x120\n\x05blobs\x18\x01 \x03(\x0b2\x1a.vibesys.api.v1.BlobResultR\x05blobs"|\n\nBlobResult\x12\x16\n\x06sha256\x18\x01 \x01(\tR\x06sha256\x12\x12\n\x04data\x18\x02 \x01(\x0cR\x04data\x12\x1d\n\nerror_code\x18\x03 \x01(\x05R\terrorCode\x12#\n\rerror_message\x18\x04 \x01(\tR\x0cerrorMessage"h\n\x11TailStreamRequest\x12\x15\n\x06run_id\x18\x01 \x01(\tR\x05runId\x12\x1b\n\tstream_id\x18\x02 \x01(\tR\x08streamId\x12\x1f\n\x0bfrom_offset\x18\x03 \x01(\x04R\nfromOffset"I\n\x12TailStreamResponse\x12\x12\n\x04data\x18\x01 \x01(\x0cR\x04data\x12\x1f\n\x0bnext_offset\x18\x02 \x01(\x04R\nnextOffset*\x92\x01\n\x0bRunLiveness\x12\x1c\n\x18RUN_LIVENESS_UNSPECIFIED\x10\x00\x12\x16\n\x12RUN_LIVENESS_ALIVE\x10\x01\x12\x1c\n\x18RUN_LIVENESS_INTERRUPTED\x10\x02\x12\x16\n\x12RUN_LIVENESS_ENDED\x10\x03\x12\x17\n\x13RUN_LIVENESS_PARKED\x10\x042\xb0\x04\n\x0bHostService\x12M\n\x08HostCall\x12\x1f.vibesys.api.v1.HostCallRequest\x1a .vibesys.api.v1.HostCallResponse\x12D\n\x05Hello\x12\x1c.vibesys.api.v1.HelloRequest\x1a\x1d.vibesys.api.v1.HelloResponse\x12C\n\x04Tail\x12\x1b.vibesys.api.v1.TailRequest\x1a\x1c.vibesys.api.v1.TailResponse0\x01\x12M\n\x08Skeleton\x12\x1f.vibesys.api.v1.SkeletonRequest\x1a .vibesys.api.v1.SkeletonResponse\x12R\n\tWatchRuns\x12 .vibesys.api.v1.WatchRunsRequest\x1a!.vibesys.api.v1.WatchRunsResponse0\x01\x12M\n\x08GetBlobs\x12\x1f.vibesys.api.v1.GetBlobsRequest\x1a .vibesys.api.v1.GetBlobsResponse\x12U\n\nTailStream\x12!.vibesys.api.v1.TailStreamRequest\x1a".vibesys.api.v1.TailStreamResponse0\x01B=Z;github.com/uw-syfi/vibesys/gateway/gen/vibesys/api/v1;apiv1b\x06proto3',
+    b'\n\x19vibesys/api/v1/host.proto\x12\x0evibesys.api.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1evibesys/api/v1/host_call.proto\x1a(vibesys/api/v1/host_read_generated.proto\x1a*vibesys/api/v1/host_mutate_generated.proto\x1a)vibesys/api/v1/host_watch_generated.proto\x1a\x1fvibesys/store/v1/skeleton.proto"M\n\x0cHelloRequest\x12=\n\x0fapi_schema_hash\x18\x01 \x01(\tR\rapiSchemaHashB\x15\xbaH\x12r\x102\x0e^[0-9a-f]{64}$"\x83\x01\n\rHelloResponse\x12=\n\x0fapi_schema_hash\x18\x01 \x01(\tR\rapiSchemaHashB\x15\xbaH\x12r\x102\x0e^[0-9a-f]{64}$\x123\n\x0fgateway_version\x18\x02 \x01(\tR\x0egatewayVersionB\n\xbaH\x07r\x05\x10\x01(\x80\x02"\xc6\x01\n\x0bTailRequest\x12?\n\x06run_id\x18\x01 \x01(\tR\x05runIdB(\xbaH%r#2!^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$\x12*\n\x08from_seq\x18\x02 \x01(\x04R\x07fromSeqB\x0f\xbaH\x0c2\n\x18\xff\xff\xff\xff\xff\xff\xff\xff\x7f\x12J\n\nsession_id\x18\x03 \x01(\tR\tsessionIdB+\xbaH(r&2$^([A-Za-z0-9][A-Za-z0-9_-]{0,127})?$"r\n\x0cTailResponse\x120\n\x07records\x18\x01 \x03(\x0cR\x07recordsB\x16\xbaH\x13\x92\x01\x10\x08\x01\x10\x80\x80@"\x08z\x06\x10\x01\x18\x80\x80@\x120\n\x0bthrough_seq\x18\x02 \x01(\x04R\nthroughSeqB\x0f\xbaH\x0c2\n\x18\xfe\xff\xff\xff\xff\xff\xff\xff\x7f"R\n\x0fSkeletonRequest\x12?\n\x06run_id\x18\x01 \x01(\tR\x05runIdB(\xbaH%r#2!^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$"\xcc\x02\n\x10SkeletonResponse\x12,\n\x08keyframe\x18\x01 \x01(\x0cH\x00R\x08keyframeB\x0b\xbaH\x08z\x06\x10\x01\x18\x80\x80@\x88\x01\x01\x12.\n\x07records\x18\x02 \x03(\x0cR\x07recordsB\x14\xbaH\x11\x92\x01\x0e\x10\x80\x80@"\x08z\x06\x10\x01\x18\x80\x80@\x124\n\rcommitted_seq\x18\x03 \x01(\x04R\x0ccommittedSeqB\x0f\xbaH\x0c2\n\x18\xfe\xff\xff\xff\xff\xff\xff\xff\x7f\x12*\n\x08next_seq\x18\x04 \x01(\x04R\x07nextSeqB\x0f\xbaH\x0c2\n\x18\xff\xff\xff\xff\xff\xff\xff\xff\x7f\x12\x1a\n\x08complete\x18\x05 \x01(\x08R\x08complete\x12O\n\x08sessions\x18\x06 \x03(\tR\x08sessionsB3\xbaH0\x92\x01-\x10\x80\x80@\x18\x01"%r#2!^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$B\x0b\n\t_keyframe"\x12\n\x10WatchRunsRequest"\xf4\x04\n\x11WatchRunsResponse\x12B\n\x06run_id\x18\x01 \x01(\tR\x05runIdB+\xbaH(r&2$^([A-Za-z0-9][A-Za-z0-9_-]{0,127})?$\x12-\n\x04head\x18\x02 \x01(\x0b2\x19.vibesys.store.v1.RunHeadR\x04head\x12A\n\x08liveness\x18\x03 \x01(\x0e2\x1b.vibesys.api.v1.RunLivenessR\x08livenessB\x08\xbaH\x05\x82\x01\x02\x10\x01\x12\x18\n\x07removed\x18\x04 \x01(\x08R\x07removed\x12)\n\x10initial_complete\x18\x05 \x01(\x08R\x0finitialComplete:\xe3\x02\xbaH\xdf\x02\x1a\xdc\x02\n\x10watch_runs.shape\x12drun_id, head, liveness, removed and initial_complete must form an entry, tombstone or initial marker\x1a\xe1\x01this.initial_complete ? (this.run_id == \'\' && !has(this.head) && this.liveness == 0 && !this.removed) : (this.run_id != \'\' && (this.removed ? (!has(this.head) && this.liveness == 0) : (!has(this.head) || this.liveness != 0)))"\xd5\x01\n\x0fGetBlobsRequest\x12?\n\x06run_id\x18\x01 \x01(\tR\x05runIdB(\xbaH%r#2!^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$\x125\n\x06sha256\x18\x02 \x03(\tR\x06sha256B\x1d\xbaH\x1a\x92\x01\x17\x10\x80\x02"\x12r\x102\x0e^[0-9a-f]{64}$\x12J\n\nsession_id\x18\x03 \x01(\tR\tsessionIdB+\xbaH(r&2$^([A-Za-z0-9][A-Za-z0-9_-]{0,127})?$"O\n\x10GetBlobsResponse\x12;\n\x05blobs\x18\x01 \x03(\x0b2\x1a.vibesys.api.v1.BlobResultR\x05blobsB\t\xbaH\x06\x92\x01\x03\x10\x80\x02"\x80\x03\n\nBlobResult\x12-\n\x06sha256\x18\x01 \x01(\tR\x06sha256B\x15\xbaH\x12r\x102\x0e^[0-9a-f]{64}$\x12\x1e\n\x04data\x18\x02 \x01(\x0cR\x04dataB\n\xbaH\x07z\x05\x18\x80\x80\x80\x08\x12(\n\nerror_code\x18\x03 \x01(\x05R\terrorCodeB\t\xbaH\x06\x1a\x04\x18\x10(\x00\x12.\n\rerror_message\x18\x04 \x01(\tR\x0cerrorMessageB\t\xbaH\x06r\x04(\x80\x80\x04:\xc8\x01\xbaH\xc4\x01\x1a\xc1\x01\n\x13blob_result.outcome\x12Cerror_code, error_message and data must describe success or failure\x1aethis.error_code == 0 ? this.error_message == \'\' : (this.data.size() == 0 && this.error_message != \'\')"\xce\x01\n\x11TailStreamRequest\x12?\n\x06run_id\x18\x01 \x01(\tR\x05runIdB(\xbaH%r#2!^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$\x12F\n\tstream_id\x18\x02 \x01(\tR\x08streamIdB)\xbaH&r$2"^[A-Za-z0-9][A-Za-z0-9_.-]{0,255}$\x120\n\x0bfrom_offset\x18\x03 \x01(\x04R\nfromOffsetB\x0f\xbaH\x0c2\n\x18\xff\xff\xff\xff\xff\xff\xff\xff\x7f"\xcb\x01\n\x12TailStreamResponse\x12\x1f\n\x04data\x18\x01 \x01(\x0cR\x04dataB\x0b\xbaH\x08z\x06\x10\x01\x18\x80\x80\x04\x120\n\x0bnext_offset\x18\x02 \x01(\x04R\nnextOffsetB\x0f\xbaH\x0c2\n\x18\xff\xff\xff\xff\xff\xff\xff\xff\x7f:b\xbaH_\x1a]\n\x12tail_stream.offset\x12\x1bnext_offset must cover data\x1a*this.next_offset >= uint(this.data.size())*\x92\x01\n\x0bRunLiveness\x12\x1c\n\x18RUN_LIVENESS_UNSPECIFIED\x10\x00\x12\x16\n\x12RUN_LIVENESS_ALIVE\x10\x01\x12\x1c\n\x18RUN_LIVENESS_INTERRUPTED\x10\x02\x12\x16\n\x12RUN_LIVENESS_ENDED\x10\x03\x12\x17\n\x13RUN_LIVENESS_PARKED\x10\x042\x84\x06\n\x0bHostService\x12M\n\x08HostCall\x12\x1f.vibesys.api.v1.HostCallRequest\x1a .vibesys.api.v1.HostCallResponse\x12A\n\x04Read\x12\x1b.vibesys.api.v1.ReadRequest\x1a\x1c.vibesys.api.v1.ReadResponse\x12F\n\x05Watch\x12\x1c.vibesys.api.v1.WatchRequest\x1a\x1d.vibesys.api.v1.WatchResponse0\x01\x12G\n\x06Mutate\x12\x1d.vibesys.api.v1.MutateRequest\x1a\x1e.vibesys.api.v1.MutateResponse\x12D\n\x05Hello\x12\x1c.vibesys.api.v1.HelloRequest\x1a\x1d.vibesys.api.v1.HelloResponse\x12C\n\x04Tail\x12\x1b.vibesys.api.v1.TailRequest\x1a\x1c.vibesys.api.v1.TailResponse0\x01\x12M\n\x08Skeleton\x12\x1f.vibesys.api.v1.SkeletonRequest\x1a .vibesys.api.v1.SkeletonResponse\x12R\n\tWatchRuns\x12 .vibesys.api.v1.WatchRunsRequest\x1a!.vibesys.api.v1.WatchRunsResponse0\x01\x12M\n\x08GetBlobs\x12\x1f.vibesys.api.v1.GetBlobsRequest\x1a .vibesys.api.v1.GetBlobsResponse\x12U\n\nTailStream\x12!.vibesys.api.v1.TailStreamRequest\x1a".vibesys.api.v1.TailStreamResponse0\x01B=Z;github.com/uw-syfi/vibesys/gateway/gen/vibesys/api/v1;apiv1b\x06proto3',
     [
-        skeleton_pb.desc(),
+        validate_pb.desc(),
         host_call_pb.desc(),
+        host_read_generated_pb.desc(),
+        host_mutate_generated_pb.desc(),
+        host_watch_generated_pb.desc(),
+        skeleton_pb.desc(),
     ],
     {
         "HelloRequest": HelloRequest,

@@ -1,6 +1,7 @@
 import {fromBinary} from '@bufbuild/protobuf';
 import {
   KeyframeSchema,
+  type Lifecycle,
   RecordSchema,
   RunLiveness,
   type SkeletonResponse,
@@ -70,13 +71,20 @@ export function ingestTail(state: SkeletonLoad, response: TailResponse): Skeleto
   };
 }
 
+/** Parked and every ended outcome close the epoch. Starting, running and draining do not. */
+export function epochHasEnded(lifecycle: Lifecycle | undefined): boolean {
+  return lifecycle?.state.case === 'parked' || lifecycle?.state.case === 'ended';
+}
+
 /** Read current-epoch writer facts with a transient hint; never mutate the recorded lifecycle. */
 export function observeRun(skeleton: Skeleton, hint?: RunLivenessHint) {
   const epoch = skeleton.epochs.at(-1);
   const latest = skeleton.lifecycles.at(-1);
-  const lifecycle = latest && (!epoch || latest.seq >= epoch.seq) ? latest.lifecycle : undefined;
-  const final = lifecycle?.state.case === 'ended' || lifecycle?.state.case === 'parked';
+  const start = skeleton.epochs.find(item => item.epoch?.epoch === epoch?.epoch?.epoch);
+  const lifecycle = latest && (!start || latest.seq >= start.seq) ? latest.lifecycle : undefined;
+  const final = epochHasEnded(lifecycle);
   return {
+    epoch: epoch?.epoch?.epoch ?? 0,
     lifecycle,
     final,
     interrupted:

@@ -1,6 +1,7 @@
 import {expect, test} from 'bun:test';
 import {clone, create, toBinary} from '@bufbuild/protobuf';
 import {AnySchema} from '@bufbuild/protobuf/wkt';
+import {recordedProjectRoot} from '@vibesys/hosts';
 import {
   AgentTurnAttrsSchema,
   AttemptOutcome,
@@ -26,6 +27,7 @@ import {
   clockStart,
   headerView,
   projectSkeleton,
+  recordedRunRoot,
   runPageInitial,
   skeletonPositions,
   skeletonScreenState,
@@ -149,7 +151,7 @@ test('startup reports only recorded stages and the gateway never offers legacy c
   expect(timelineView(state)).toEqual([
     {id: 'building_tools', label: 'Tools', state: 'active', streamId: null},
   ]);
-  expect(headerView(state).stop.shown).toBe(false);
+  expect(headerView(state).pauseNow.shown).toBe(false);
   expect(headerView(state).pause.shown).toBe(false);
   expect(headerView(state).status.label).toBe('Starting');
 });
@@ -157,8 +159,8 @@ test('startup reports only recorded stages and the gateway never offers legacy c
 test('park, drain and interruption keep their status words; past logs have no invented offsets', () => {
   const fixture = storeRunFixture('short');
   for (const [state, word] of [
-    [{case: 'parked', value: {}}, 'Parked'],
-    [{case: 'draining', value: {goal: DrainGoal.PARK}}, 'Parking'],
+    [{case: 'parked', value: {}}, 'Paused'],
+    [{case: 'draining', value: {goal: DrainGoal.PARK}}, 'Pausing'],
     [{case: 'ended', value: {outcome: Outcome.INTERRUPTED}}, 'Interrupted'],
   ] as const) {
     const records = [
@@ -378,3 +380,34 @@ for (let epoch = 1; epoch <= 8; epoch += 1)
         );
       }
   });
+
+test('a CLI window pause target is the recorded root, not the seed path', () => {
+  const {records} = storeRunFixture('short', 2, 3);
+  const skeleton = foldSkeleton(seedSkeleton(), records);
+  const epoch = skeleton.epochs.at(-1)?.epoch;
+  if (!epoch) throw new Error('epoch required');
+  epoch.projectRoot = '/canonical/project';
+  const seed = {...SEED, title: {project: '', task: null}};
+  const model = projectSkeleton(skeleton, skeleton.throughSeq ?? 0n);
+  const state = skeletonScreenState(seed, skeleton, model, runPageInitial(seed));
+  expect(recordedRunRoot(skeleton)).toBe(recordedProjectRoot('/canonical/project'));
+  if (state.record.kind !== 'live' && state.record.kind !== 'ended') {
+    throw new Error('fixture run required');
+  }
+  expect(state.record.run.projectRoot).toBe('/canonical/project');
+});
+
+test('a run with no recorded root does not use the path the window remembered', () => {
+  const {records} = storeRunFixture('short', 2, 3);
+  const skeleton = foldSkeleton(seedSkeleton(), records);
+  const epoch = skeleton.epochs.at(-1)?.epoch;
+  if (!epoch) throw new Error('epoch required');
+  epoch.projectRoot = '';
+  const seed = {...SEED, title: {project: '~/queue', task: null}};
+  const model = projectSkeleton(skeleton, skeleton.throughSeq ?? 0n);
+  const state = skeletonScreenState(seed, skeleton, model, runPageInitial(seed));
+  expect(recordedRunRoot(skeleton)).toBeUndefined();
+  if (state.record.kind === 'live' || state.record.kind === 'ended') {
+    expect(state.record.run.projectRoot).toBe('');
+  }
+});

@@ -6,7 +6,6 @@ import {
   HostService,
   type Lifecycle,
   LifecycleSchema,
-  Outcome,
   RelaunchRefusal,
   type RelaunchRequest,
   RelaunchRequestSchema,
@@ -22,7 +21,7 @@ export {RelaunchRefusal, RunLiveness} from '@vibesys/proto';
 /** Only these reader observations offer relaunch; the host rechecks admission. */
 export interface RelaunchTarget {
   readonly epoch: bigint;
-  readonly state: 'parked' | 'stopped-resumable' | 'interrupted';
+  readonly state: 'parked' | 'ended' | 'interrupted';
 }
 
 export function relaunchRequest(
@@ -55,7 +54,6 @@ export function hostRelaunchResponse(bytes: Uint8Array, expectedEpoch: bigint): 
     (result.outcome.case === 'refusal' &&
       [
         RelaunchRefusal.LOCKED,
-        RelaunchRefusal.ENDED,
         RelaunchRefusal.CHECKOUT_MISSING,
         RelaunchRefusal.EPOCH_CHANGED,
       ].includes(result.outcome.value))
@@ -70,8 +68,6 @@ export function relaunchLabel(result: RelaunchResponse | null): string | null {
   switch (result.outcome.value) {
     case RelaunchRefusal.LOCKED:
       return 'Refused: locked';
-    case RelaunchRefusal.ENDED:
-      return 'Refused: ended';
     case RelaunchRefusal.CHECKOUT_MISSING:
       return 'Refused: checkout missing';
     case RelaunchRefusal.EPOCH_CHANGED:
@@ -102,11 +98,7 @@ export function relaunchTarget(
   const state = observation.lifecycle?.state;
   if (state?.case === 'parked') return {epoch: observation.epoch, state: 'parked'};
   if (state?.case === 'ended') {
-    if (state.value.outcome === Outcome.STOPPED)
-      return {epoch: observation.epoch, state: 'stopped-resumable'};
-    if (state.value.outcome === Outcome.INTERRUPTED)
-      return {epoch: observation.epoch, state: 'interrupted'};
-    return null;
+    return {epoch: observation.epoch, state: 'ended'};
   }
   return live === RunLiveness.INTERRUPTED ? {epoch: observation.epoch, state: 'interrupted'} : null;
 }
@@ -119,7 +111,7 @@ export function livenessResponse(bytes: Uint8Array, runId: string): RelaunchLive
   const response = fromBinary(WatchRunsResponseSchema, bytes);
   if (response.runId !== runId) return null;
   return {
-    epoch: BigInt(response.head?.process?.epoch ?? 0),
+    epoch: BigInt(response.head?.epoch || response.head?.process?.epoch || 0),
     value: response.removed ? RunLiveness.UNSPECIFIED : response.liveness,
   };
 }

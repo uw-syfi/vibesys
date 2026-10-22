@@ -4,7 +4,7 @@ from math import inf, nan
 from typing import cast
 
 import pytest
-from hypothesis import given
+from hypothesis import example, given
 from hypothesis import strategies as st
 from protobuf import Message
 from protobuf.wkt.google.protobuf.any_pb import Any
@@ -12,13 +12,14 @@ from protobuf.wkt.google.protobuf.struct_pb import Struct
 
 from vs_core.api.replay import (
     EMPTY_CAUSALITY,
+    EncodedIdentity,
     ReplayIdentityError,
     SemanticKey,
     chain_dependency,
     classify_context,
     encode_identity,
 )
-from vs_proto.api import core_common, core_leaves, replay
+from vs_proto.api import ValidationError, core_common, core_leaves, replay
 
 from .generated.vibesys.replay.testing.v1.context_pb import (
     Context,
@@ -28,6 +29,7 @@ from .generated.vibesys.replay.testing.v1.context_pb import (
     RepeatedContext,
     RepeatedMapIdentity,
     RepeatedUnclassifiedPolicy,
+    RequiredPolicyContext,
     SharedContext,
     UnclassifiedPolicy,
 )
@@ -154,6 +156,37 @@ def test_writer_encoding_v1_is_pinned() -> None:
     assert value.canonical == expected
 
 
+def test_retained_writer_identity_rejects_every_truncated_frame() -> None:
+    encoded = encode_identity(core_common.Identity(root="x"), contract="candidate.v1")
+    for end in range(len(encoded.canonical)):
+        with pytest.raises(ReplayIdentityError):
+            EncodedIdentity(encoded.canonical[:end], encoded.dependencies)
+
+
+@given(extra=st.binary(min_size=1, max_size=64))
+def test_retained_writer_identity_rejects_trailing_content(extra: bytes) -> None:
+    encoded = encode_identity(core_common.Identity(root="x"), contract="candidate.v1")
+    with pytest.raises(ReplayIdentityError, match="trailing bytes"):
+        EncodedIdentity(encoded.canonical + extra, encoded.dependencies)
+
+
+@pytest.mark.parametrize("field", ["contract", "type"])
+@pytest.mark.parametrize("change", ["empty", "utf8"])
+def test_retained_identity_requires_valid_typed_contract_names(field: str, change: str) -> None:
+    encoded = encode_identity(core_common.Identity(root="x"), contract="candidate.v1")
+    name = (
+        b"candidate.v1" if field == "contract" else core_common.Identity.desc().type_name.encode()
+    )
+    offset = encoded.canonical.index(name)
+    value = bytearray(encoded.canonical)
+    if change == "empty":
+        value[offset - 8 : offset] = b"\x00" * 8
+    else:
+        value[offset] = 0xFF
+    with pytest.raises(ReplayIdentityError, match=r"contract.*type|UTF-8"):
+        EncodedIdentity(bytes(value), encoded.dependencies)
+
+
 @pytest.mark.parametrize("message", [OpaqueIdentity(), RepeatedMapIdentity()])
 def test_forbidden_schemas_nested_in_empty_repeated_fields_are_rejected(message: Message) -> None:
     with pytest.raises(ReplayIdentityError, match=r"Any|map"):
@@ -203,3 +236,18 @@ def test_typed_context_inherits_classification_for_shared_facts() -> None:
 def test_a_shared_value_alone_is_not_a_declared_prompt_context() -> None:
     with pytest.raises(ReplayIdentityError, match="must declare replay_context"):
         classify_context(core_common.Identity(root="candidate-a"), contract="plan.v1")
+
+
+@pytest.mark.regression
+@given(model=st.text(min_size=1, max_size=30, alphabet=st.characters(blacklist_categories=("Cs",))))
+@example(model="model-b")
+def test_required_policy_fields_validate_before_their_identity_projection(model: str) -> None:
+    before = RequiredPolicyContext(candidate="candidate-a", model="model-a")
+    after = RequiredPolicyContext(candidate="candidate-a", model=model)
+    identity = classify_context(before, contract="turn.v1").identity
+    assert identity == classify_context(after, contract="turn.v1").identity
+    after.candidate = "candidate-b"
+    assert identity != classify_context(after, contract="turn.v1").identity
+    before.model = ""
+    with pytest.raises(ValidationError, match="RequiredPolicyContext"):
+        classify_context(before, contract="turn.v1")

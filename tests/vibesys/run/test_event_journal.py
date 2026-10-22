@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING
 
 import pytest
@@ -17,15 +18,21 @@ from vibesys.events import (
 )
 from vibesys.run import EventJournal
 from vibesys.run.integration import LocalRunIntegration
-from vs_project.api import Git, Project
+from vs_core.api import RunControlEvent, initial_state
+from vs_project.api import Git, Project, RequestState
+from vs_project.api.testing import FakeControlInbox
 from vs_proto.api import API_SCHEMA_HASH, STORE_SCHEMA_HASH
 from vs_runlog.api import RunLogReader
+from vs_runtime.api.core import OperatorInbox, RunControlBridge
 from vs_runtime.api.infrastructure import (
+    CONTROL_REQUEST,
     AgentExecutionFinished,
     AgentExecutionStarted,
     AgentExecutionStatus,
+    ChannelRunControl,
+    RuntimeRunControlChannel,
 )
-from vs_runtime.api.testing import idle_environment_system
+from vs_runtime.api.testing import FakeRunControlEventSink, idle_environment_system
 from vs_sim.api.testing import (
     FakeProcesses,
     ManualClock,
@@ -188,18 +195,18 @@ def test_live_tee_includes_buffered_events_and_increments_epochs(
     restarted.close()
     with Project.run_log_path_for(project.root, "run-1").open("rb") as stream:
         records = list(RunLogReader(stream))
-    assert [record.seq for record in records] == [1, 2, 3, 4, 5]
+    assert [record.seq for record in records] == [1, 2, 3, 4, 5, 6]
     assert all(
         record.at is not None and record.at.to_datetime() == journal.read()[0].timestamp
         for record in records
     )
-    assert [record.epoch for record in records] == [1, 1, 1, 2, 2]
+    assert [record.epoch for record in records] == [1, 1, 1, 2, 2, 2]
     headers = [
         record.body.value
         for record in records
         if record.body is not None and record.body.field == "epoch_started"
     ]
-    assert [header.epoch for header in headers] == [1, 2]
+    assert [header.epoch for header in headers] == [1, 2, 2]
     assert all(header.run_id == "run-1" for header in headers)
     assert all(header.api_schema_hash == API_SCHEMA_HASH for header in headers)
     assert all(header.store_schema_hash == STORE_SCHEMA_HASH for header in headers)
@@ -297,8 +304,8 @@ def test_attachment_records_unknown_provenance_without_checkout_processes(
         integration.close()
     with Project.run_log_path_for(root, "run-1").open("rb") as stream:
         records = list(RunLogReader(stream))
-    assert len(records) == 2
-    lifecycle = records[1].body
+    assert len(records) == 3
+    lifecycle = records[2].body
     assert lifecycle is not None
     assert lifecycle.field == "lifecycle"
     assert lifecycle.value.state is not None
@@ -403,3 +410,91 @@ def test_live_tee_commits_worker_bursts_on_its_runs_clock(
         assert len(journal.read()) == 301
 
     run_virtual(clock, exercise())
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize("action", ["pause", "pause_now"])
+@pytest.mark.parametrize("epoch_count", [1, 2, 5])
+@pytest.mark.parametrize("ingress", ["inbox", "socket"])
+def test_closing_controls_target_the_published_epoch_after_startup_only_processes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    action: str,
+    epoch_count: int,
+    ingress: str,
+) -> None:
+    """A process can publish an epoch then die before taking the core lease (F14)."""
+    monkeypatch.setenv("VIBESYS_STATE_HOME", str(tmp_path / "home"))
+    root = tmp_path / "project"
+    root.mkdir()
+    project = Project.open(root)
+    clock = ManualClock()
+    threads = SimThreads()
+    for _ in range(epoch_count - 1):
+        previous = EventJournal(clock, threads)
+        previous.enable_runlog(project, "run-1")
+        previous.attach(Project.log_directory_for(root, "run-1"), "run-1")
+        previous.emit(
+            CoreEventType.RUN_STARTED, data=RunStartedData(outer_loop="dynamic", input="input")
+        )
+        previous.close()
+    journal = EventJournal(clock, threads)
+    journal.enable_runlog(project, "run-1")
+    journal.attach(Project.log_directory_for(root, "run-1"), "run-1")
+    journal.emit(
+        CoreEventType.RUN_STARTED, data=RunStartedData(outer_loop="dynamic", input="input")
+    )
+    channel = RuntimeRunControlChannel(FakeRunControlEventSink(), threads)
+    inbox = FakeControlInbox()
+    control = ChannelRunControl(channel, threads)
+    bridge = RunControlBridge(
+        channel, _ControlTexts(), inbox=OperatorInbox(inbox, control, journal)
+    )
+    core = initial_state()
+    core = core.model_copy(
+        update={
+            "records": core.records.model_copy(
+                update={
+                    "recovery": core.records.recovery.model_copy(update={"epoch": epoch_count - 1})
+                }
+            )
+        }
+    )
+    for identity, epoch in [("old", epoch_count - 1), ("current", epoch_count)]:
+        payload = json.dumps(
+            {"action": action, "control_id": identity, "expected_epoch": epoch}
+        ).encode()
+        if ingress == "socket":
+            control.submit(CONTROL_REQUEST.validate_json(payload))
+        else:
+            inbox.post(identity, payload, ended=lambda: None)
+    try:
+        events = bridge.poll(core, 1)
+        ids = {
+            event.control.control_id.root for event in events if isinstance(event, RunControlEvent)
+        }
+        assert "op-current" in ids
+        assert "op-old" not in ids
+        if ingress == "inbox":
+            old = inbox.status("old", ended=None)
+            assert old is not None
+            assert old.state is RequestState.REJECTED
+            current = inbox.status("current", ended=None)
+            assert current is not None
+            assert current.state is RequestState.PENDING
+    finally:
+        journal.close()
+
+
+class _ControlTexts:
+    def put(self, ref: object, text: str) -> None:
+        del ref, text
+
+
+def test_a_journal_without_a_published_epoch_cannot_authorize_recovery_or_controls() -> None:
+    journal = EventJournal(ManualClock(), SimThreads())
+    try:
+        with pytest.raises(RuntimeError, match=r"run\.log has no published epoch"):
+            _ = journal.epoch
+    finally:
+        journal.close()

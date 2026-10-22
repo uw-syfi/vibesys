@@ -3050,6 +3050,7 @@ dependencies = [
     { name = "mcp" },
     { name = "modal" },
     { name = "openevolve" },
+    { name = "protobuf" },
     { name = "protobuf-py" },
     { name = "protovalidate" },
     { name = "pydantic" },
@@ -3057,6 +3058,7 @@ dependencies = [
     { name = "pygit2" },
     { name = "python-dotenv" },
     { name = "pyyaml" },
+    { name = "typing-extensions" },
     { name = "websockets" },
 ]
 
@@ -3105,6 +3107,7 @@ requires-dist = [
     { name = "mcp", specifier = ">=1.0,<2" },
     { name = "modal", specifier = ">=1.4.2" },
     { name = "openevolve", specifier = "==0.3.1" },
+    { name = "protobuf", specifier = "==6.33.5" },
     { name = "protobuf-py", specifier = "==0.6.0" },
     { name = "protovalidate", specifier = "==2.0.0" },
     { name = "pydantic", specifier = ">=2" },
@@ -3112,6 +3115,7 @@ requires-dist = [
     { name = "pygit2", specifier = ">=1.18,<2" },
     { name = "python-dotenv", specifier = ">=1.0.1" },
     { name = "pyyaml", specifier = ">=6" },
+    { name = "typing-extensions", specifier = ">=4.12" },
     { name = "websockets", specifier = ">=14.2,<15" },
 ]
 
@@ -3224,17 +3228,17 @@ version = "0.1.0"
 source = { editable = "libs/vs-core" }
 dependencies = [
     { name = "protobuf-py" },
-    { name = "protovalidate" },
     { name = "pydantic" },
     { name = "vs-proto" },
+    { name = "vs-runlog" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "protobuf-py", specifier = "==0.6.0" },
-    { name = "protovalidate", specifier = "==2.0.0" },
     { name = "pydantic", specifier = ">=2" },
     { name = "vs-proto", editable = "libs/vs-proto" },
+    { name = "vs-runlog", editable = "libs/vs-runlog" },
 ]
 
 [[package]]
@@ -3404,6 +3408,7 @@ dependencies = [
     { name = "pydantic" },
     { name = "pygit2" },
     { name = "vs-decode" },
+    { name = "vs-proto" },
     { name = "vs-sim" },
 ]
 
@@ -3412,6 +3417,7 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2" },
     { name = "pygit2", specifier = ">=1.18,<2" },
     { name = "vs-decode", editable = "libs/vs-decode" },
+    { name = "vs-proto", editable = "libs/vs-proto" },
     { name = "vs-sim", editable = "libs/vs-sim" },
 ]
 
@@ -3431,12 +3437,14 @@ name = "vs-proto"
 version = "0.1.0"
 source = { editable = "libs/vs-proto" }
 dependencies = [
+    { name = "protobuf" },
     { name = "protobuf-py" },
     { name = "protovalidate" },
 ]
 
 [package.metadata]
 requires-dist = [
+    { name = "protobuf", specifier = "==6.33.5" },
     { name = "protobuf-py", specifier = "==0.6.0" },
     { name = "protovalidate", specifier = "==2.0.0" },
 ]
@@ -3485,6 +3493,7 @@ dependencies = [
     { name = "vs-prompts" },
     { name = "vs-proto" },
     { name = "vs-redaction" },
+    { name = "vs-runlog" },
     { name = "vs-sandbox" },
     { name = "vs-sim" },
     { name = "vs-slurm" },
@@ -3509,6 +3518,7 @@ requires-dist = [
     { name = "vs-prompts", editable = "libs/vs-prompts" },
     { name = "vs-proto", editable = "libs/vs-proto" },
     { name = "vs-redaction", editable = "libs/vs-redaction" },
+    { name = "vs-runlog", editable = "libs/vs-runlog" },
     { name = "vs-sandbox", editable = "libs/vs-sandbox" },
     { name = "vs-sim", editable = "libs/vs-sim" },
     { name = "vs-slurm", editable = "libs/vs-slurm" },

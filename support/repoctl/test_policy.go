@@ -25,6 +25,23 @@ func (g *graph) validateCheckGroups(groups []execution.Suite) error {
 		if suite.IncludeInTest && suite.TriggerJob == "" {
 			return fmt.Errorf("check_groups.%s: include_in_test requires trigger_job", suite.Name)
 		}
+		if suite.IncludeInTest && suite.IncludeInChecks {
+			return fmt.Errorf("check_groups.%s: include_in_test and include_in_checks are mutually exclusive", suite.Name)
+		}
+		if strings.TrimSpace(suite.LocalSkip) != suite.LocalSkip {
+			return fmt.Errorf("check_groups.%s: local_skip must not have surrounding whitespace", suite.Name)
+		}
+		if suite.LocalSkip != "" {
+			if suite.TriggerJob == "" {
+				return fmt.Errorf("check_groups.%s: local_skip requires trigger_job", suite.Name)
+			}
+			if suite.IncludeInTest || suite.IncludeInChecks {
+				return fmt.Errorf("check_groups.%s: local_skip cannot be combined with include_in_test or include_in_checks", suite.Name)
+			}
+			if len(suite.LocalPaths) > 0 || len(suite.LocalComponents) > 0 {
+				return fmt.Errorf("check_groups.%s: local_skip cannot be combined with local_paths or local_components", suite.Name)
+			}
+		}
 		for _, path := range suite.LocalPaths {
 			if !validPath(path) {
 				return fmt.Errorf("check_groups.%s: unsafe local_paths entry %q", suite.Name, path)

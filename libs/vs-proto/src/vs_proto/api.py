@@ -8,10 +8,12 @@ The two schema hashes identify the canonical descriptors, not generated code.
 
 from protobuf import Oneof
 from protobuf.wkt.google.protobuf.timestamp_pb import Timestamp
-from protovalidate import ValidationError, validate
+from protovalidate import ValidationError
 
+from vs_proto._generated import host_operations
 from vs_proto._generated.buf.validate import validate_pb as validation_rules
 from vs_proto._generated.framing import RUN_LOG_MAGIC, RUN_LOG_MAX_RECORD_BYTES
+from vs_proto._generated.vibesys.api.v1 import host_operations_pb as host_operation_descriptors
 from vs_proto._generated.vibesys.api.v1.host_call_pb import (
     CancelAttemptIntent,
     CancelItemIntent,
@@ -20,20 +22,20 @@ from vs_proto._generated.vibesys.api.v1.host_call_pb import (
     ConfigurationFailed,
     HostCallRequest,
     HostCallResponse,
-    ParkIntent,
     PauseIntent,
+    PauseNowIntent,
     PostIntentRequest,
     PostIntentResponse,
     RelaunchRefusal,
     RelaunchRequest,
     RelaunchResponse,
-    ResumeIntent,
-    ResumeWhen,
     SetParallelismIntent,
     SteerIntent,
-    StopIntent,
-    StopMode,
     WithdrawIntent,
+)
+from vs_proto._generated.vibesys.api.v1.host_mutate_generated_pb import (
+    MutateRequest,
+    MutateResponse,
 )
 from vs_proto._generated.vibesys.api.v1.host_pb import (
     BlobResult,
@@ -51,6 +53,14 @@ from vs_proto._generated.vibesys.api.v1.host_pb import (
     WatchRunsRequest,
     WatchRunsResponse,
 )
+from vs_proto._generated.vibesys.api.v1.host_read_generated_pb import (
+    ReadRequest,
+    ReadResponse,
+)
+from vs_proto._generated.vibesys.api.v1.host_watch_generated_pb import (
+    WatchRequest,
+    WatchResponse,
+)
 from vs_proto._generated.vibesys.core.testing.v1 import values_pb as compiler_values
 from vs_proto._generated.vibesys.core.v1 import agent_facts_pb as core_agent_facts
 from vs_proto._generated.vibesys.core.v1 import common_pb as core_common
@@ -58,9 +68,20 @@ from vs_proto._generated.vibesys.core.v1 import contracts_pb as core_contracts
 from vs_proto._generated.vibesys.core.v1 import control_pb as core_control
 from vs_proto._generated.vibesys.core.v1 import failures_pb as core_failures
 from vs_proto._generated.vibesys.core.v1 import imported_facts_pb as imported_facts
+from vs_proto._generated.vibesys.core.v1 import iterations_pb as core_iterations
 from vs_proto._generated.vibesys.core.v1 import leaves_pb as core_leaves
+from vs_proto._generated.vibesys.core.v1 import replay_agent_pb as replay_agent
+from vs_proto._generated.vibesys.core.v1 import replay_evaluation_pb as replay_evaluation
+from vs_proto._generated.vibesys.core.v1 import replay_workspace_pb as replay_workspace
 from vs_proto._generated.vibesys.core.v1 import value_options_pb as core_value_options
 from vs_proto._generated.vibesys.core.v1 import vocabulary_pb as core_vocabulary
+from vs_proto._generated.vibesys.core.v1.vocabulary_pb import CheckoutStatus
+from vs_proto._generated.vibesys.host.v1 import admission_receipt_generated_pb as admission
+from vs_proto._generated.vibesys.host.v1 import evaluation_receipts_pb as evaluation_receipts
+from vs_proto._generated.vibesys.host.v1 import operation_options_pb as operation_options
+from vs_proto._generated.vibesys.host.v1 import operations_pb as host_payloads
+from vs_proto._generated.vibesys.host.v1.failure_pb import FailureCategory, OperationFailure
+from vs_proto._generated.vibesys.search.v1 import serial_effects_pb as serial_effects
 from vs_proto._generated.vibesys.search.v1.attrs_pb import (
     AdoptionAttrs,
     BaselineAttrs,
@@ -90,6 +111,7 @@ from vs_proto._generated.vibesys.search.v1.run_pb import (
 )
 from vs_proto._generated.vibesys.store.v1 import replay_pb as replay
 from vs_proto._generated.vibesys.store.v1.agent_attrs_pb import (
+    AgentClient,
     AgentTurnAttrs,
     TokenUsage,
 )
@@ -160,7 +182,12 @@ from vs_proto._generated.vibesys.store.v1.notice_pb import (
     NoticeCode,
     Severity,
 )
-from vs_proto._generated.vibesys.store.v1.record_pb import EpochStarted, LegacyEvent, Record
+from vs_proto._generated.vibesys.store.v1.record_pb import (
+    EpochStarted,
+    LegacyEvent,
+    Record,
+    ReplayStore,
+)
 from vs_proto._generated.vibesys.store.v1.skeleton_pb import (
     EpochVersion,
     HeadlineObjective,
@@ -197,14 +224,26 @@ from vs_proto._generated.vibesys.store.v1.transcript_pb import (
     TranscriptToolCall,
     TranscriptToolResult,
 )
-from vs_proto._schema_hashes import API_SCHEMA_HASH, STORE_SCHEMA_HASH, schema_hash
+from vs_proto._operation_projection import from_mapping, to_mapping
+from vs_proto._operations import AcceptedRequest, Operation
+from vs_proto._operations import checked as validated_operation_bytes
+from vs_proto._schema_hashes import (
+    API_SCHEMA_HASH,
+    HOST_SCHEMA_HASH,
+    STORE_SCHEMA_HASH,
+    schema_hash,
+)
+from vs_proto._validation import validate
 
 __all__ = [
     "API_SCHEMA_HASH",
+    "HOST_SCHEMA_HASH",
     "RUN_LOG_MAGIC",
     "RUN_LOG_MAX_RECORD_BYTES",
     "STORE_SCHEMA_HASH",
+    "AcceptedRequest",
     "AdoptionAttrs",
+    "AgentClient",
     "AgentTurnAttrs",
     "Attempt",
     "AttemptOutcome",
@@ -227,6 +266,7 @@ __all__ = [
     "ChatSessionCreated",
     "ChatSteerProposed",
     "ChatToken",
+    "CheckoutStatus",
     "ComparisonAttrs",
     "ComparisonVerdict",
     "ConfigurationFailed",
@@ -242,6 +282,7 @@ __all__ = [
     "EvidenceKind",
     "FailedCheck",
     "Failure",
+    "FailureCategory",
     "FileChange",
     "FrameworkSource",
     "GateAttrs",
@@ -269,15 +310,19 @@ __all__ = [
     "MetricPoint",
     "MetricSeriesDecl",
     "MetricVersion",
+    "MutateRequest",
+    "MutateResponse",
     "Notice",
     "NoticeCode",
     "Objective",
     "Oneof",
+    "Operation",
+    "OperationFailure",
     "OperatorHold",
     "Outcome",
-    "ParkIntent",
     "Parked",
     "PauseIntent",
+    "PauseNowIntent",
     "PlanningAttrs",
     "PostIntentRequest",
     "PostIntentResponse",
@@ -285,12 +330,13 @@ __all__ = [
     "Progress",
     "ProviderSwitchAttrs",
     "ProviderSwitchReason",
+    "ReadRequest",
+    "ReadResponse",
     "Record",
     "RelaunchRefusal",
     "RelaunchRequest",
     "RelaunchResponse",
-    "ResumeIntent",
-    "ResumeWhen",
+    "ReplayStore",
     "RunDescription",
     "RunFailure",
     "RunFailureKind",
@@ -324,8 +370,6 @@ __all__ = [
     "SteerTarget",
     "SteerTargetKind",
     "Stop",
-    "StopIntent",
-    "StopMode",
     "StreamKind",
     "StreamRef",
     "StreamState",
@@ -345,24 +389,40 @@ __all__ = [
     "WaitCondition",
     "WaitKind",
     "WaitingOn",
+    "WatchRequest",
+    "WatchResponse",
     "WatchRunsRequest",
     "WatchRunsResponse",
     "WithdrawIntent",
     "WorkstreamAttrs",
     "WorkstreamFailure",
     "WorkstreamFailureKind",
+    "admission",
     "compiler_values",
     "core_agent_facts",
     "core_common",
     "core_contracts",
     "core_control",
     "core_failures",
+    "core_iterations",
     "core_leaves",
     "core_value_options",
     "core_vocabulary",
+    "evaluation_receipts",
+    "from_mapping",
+    "host_operation_descriptors",
+    "host_operations",
+    "host_payloads",
     "imported_facts",
+    "operation_options",
     "replay",
+    "replay_agent",
+    "replay_evaluation",
+    "replay_workspace",
     "schema_hash",
+    "serial_effects",
+    "to_mapping",
     "validate",
+    "validated_operation_bytes",
     "validation_rules",
 ]

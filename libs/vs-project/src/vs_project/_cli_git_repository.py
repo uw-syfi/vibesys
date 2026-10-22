@@ -128,9 +128,11 @@ class CliGitRepository:
     def _failure(args: Sequence[str], result: ProcessOutcome) -> GitCommandError:
         return GitCommandError(["git", *args], result.returncode, _text(result.stderr).strip())
 
-    def _run_checked(self, args: Sequence[str]) -> ProcessOutcome:
+    def _run_checked(
+        self, args: Sequence[str], *, index_file: Path | None = None
+    ) -> ProcessOutcome:
         """Run ``git <args>``; a nonzero exit is reported to the fault sink and raised."""
-        result = self._run(args)
+        result = self._run(args, index_file=index_file)
         if result.returncode != 0:
             error = self._failure(args, result)
             self._faults.warning(
@@ -279,6 +281,12 @@ class CliGitRepository:
         result = self._run(["cat-file", "blob", f"{revision}:{path}"])
         return None if result.returncode != 0 else result.stdout
 
+    def has_ref_pointing_at(self, commit: str, prefix: str) -> bool:
+        result = self._run(
+            ["for-each-ref", "--count=1", f"--points-at={commit}", "--format=%(refname)", prefix]
+        )
+        return result.returncode == 0 and bool(result.stdout.strip())
+
     def has_ref_containing(self, commit: str, prefix: str) -> bool:
         result = self._run(
             [
@@ -320,6 +328,115 @@ class CliGitRepository:
 
     def update_ref(self, ref: str, commit: str) -> None:
         self._run_checked(["update-ref", ref, commit])
+
+    def create_ref(self, ref: str, commit: str) -> str:
+        if not ref.startswith("refs/") or not self.is_valid_ref_name(ref):
+            raise GitCommandError(["update-ref", ref, commit], 1, f"invalid ref name: {ref}")
+        target = self.resolve_commit(commit)
+        args = ["update-ref", "--no-deref", ref, target or commit, "0" * len(target or commit)]
+        result = self._run(args)
+        if result.returncode == 0:
+            resolved = self.resolve_commit(ref)
+            if resolved is not None:
+                return resolved
+        elif target is not None and self._run(["symbolic-ref", "-q", ref]).returncode != 0:
+            winner = self.resolve_commit(ref)
+            if winner is not None:
+                return winner
+        raise self._failure(args, result)
+
+    def create_commit(
+        self,
+        revision: Revision,
+        parents: Sequence[str],
+        message: str,
+        *,
+        preserve_from: Revision,
+        preserve_paths: Sequence[str] = (),
+    ) -> str:
+        with tempfile.TemporaryDirectory(prefix="vibesys-publication-") as scratch:
+            index = Path(scratch) / "index"
+            self._run_checked(["read-tree", revision], index_file=index)
+            for path in preserve_paths:
+                # restore also removes source entries absent from preserve_from. A path
+                # absent from both trees has nothing to restore and is not a Git pathspec.
+                present = (
+                    self._run_checked(["ls-tree", "-r", "--name-only", revision, "--", path]).stdout
+                    or self._run_checked(
+                        ["ls-tree", "-r", "--name-only", preserve_from, "--", path]
+                    ).stdout
+                )
+                if present:
+                    self._run_checked(
+                        [
+                            "restore",
+                            "--source",
+                            preserve_from,
+                            "--staged",
+                            "--",
+                            f":(literal){path}",
+                        ],
+                        index_file=index,
+                    )
+            tree = _text(self._run_checked(["write-tree"], index_file=index).stdout).strip()
+            parent_args = [arg for parent in parents for arg in ("-p", parent)]
+            return _text(
+                self._run_checked(["commit-tree", tree, *parent_args, "-m", message]).stdout
+            ).strip()
+
+    def advance_branch(self, branch: str, commit: str) -> bool:
+        if not self.is_valid_branch_name(branch):
+            return False
+        target = self.resolve_commit(commit)
+        if target is None:
+            return False
+        # Local fetch owns both atomic ref locking and the checked-out-branch and
+        # fast-forward rules. update-ref bypasses the former; branch -f bypasses the latter.
+        repository = str(self._git_dir or self._root)
+        return (
+            self._run(
+                [
+                    "fetch",
+                    "--no-write-fetch-head",
+                    "--no-tags",
+                    "--no-recurse-submodules",
+                    "--",
+                    repository,
+                    f"{target}:refs/heads/{branch}",
+                ]
+            ).returncode
+            == 0
+        )
+
+    def fast_forward_checkout(
+        self,
+        branch: str,
+        commit: str,
+        *,
+        untracked_exclusions: Sequence[str] = (),
+    ) -> bool:
+        self.require_plain_work_tree(())
+        target = self.resolve_commit(commit)
+        if target is None:
+            return False
+        paths = [".", *(f":(exclude){path}" for path in untracked_exclusions)]
+        tracked_exclusions = (
+            self.tracked_changes_since_head(untracked_exclusions) if untracked_exclusions else ()
+        )
+        if self.current_branch() != branch or self.uncommitted_paths(paths) or tracked_exclusions:
+            return False
+        return (
+            self._run(
+                [
+                    "merge",
+                    "--ff-only",
+                    "--no-overwrite-ignore",
+                    "--no-edit",
+                    target,
+                ]
+            ).returncode
+            == 0
+        )
 
     def switch_branch(self, branch: str, *, create: bool = False) -> None:
         self._run_checked(["switch", *(["-c"] if create else []), branch])

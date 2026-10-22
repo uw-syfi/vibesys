@@ -284,6 +284,7 @@ function StepLevel(
             tokens={base.tokens}
             who={base.who}
             pauses={base.model.pauses}
+            {...(base.adoptionTitles === undefined ? {} : {adoptionTitles: base.adoptionTitles})}
             zoom={base.zoom}
           />
         </Pane>

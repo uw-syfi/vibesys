@@ -9,14 +9,18 @@ import (
 	"strings"
 
 	"github.com/BurntSushi/toml"
+	"repoctl/execution"
 )
 
 // Policy cases are independent expectations for the graph selected by changed paths.
 type policyCase struct {
-	Name        *string                           `toml:"name"`
-	Paths       *[]string                         `toml:"paths"`
-	Jobs        *[]string                         `toml:"jobs"`
-	Collections *map[string]collectionExpectation `toml:"collections"`
+	Name          *string                           `toml:"name"`
+	Paths         *[]string                         `toml:"paths"`
+	Jobs          *[]string                         `toml:"jobs"`
+	Collections   *map[string]collectionExpectation `toml:"collections"`
+	LocalGroups   *[]string                         `toml:"local_groups"`
+	ChecksGroups  *[]string                         `toml:"checks_groups"`
+	SkippedGroups *[]string                         `toml:"skipped_groups"`
 }
 
 // collectionExpectation accepts exact values or an intent resolved before verification.
@@ -180,8 +184,35 @@ func readPolicyCases(path string, g graph) ([]policyCase, error) {
 				return nil, fmt.Errorf("%s: missing collection %q", label, name)
 			}
 		}
+		for _, item := range []struct {
+			field string
+			names *[]string
+		}{
+			{"local_groups", c.LocalGroups},
+			{"checks_groups", c.ChecksGroups},
+			{"skipped_groups", c.SkippedGroups},
+		} {
+			if err := validateGroupList(g, label, item.field, item.names); err != nil {
+				return nil, err
+			}
+		}
 	}
 	return file.Cases, nil
+}
+
+func validateGroupList(g graph, label, field string, names *[]string) error {
+	if names == nil {
+		return nil
+	}
+	if err := unique(*names, label+" "+field); err != nil {
+		return err
+	}
+	for _, name := range *names {
+		if _, ok := g.CheckGroups[name]; !ok {
+			return fmt.Errorf("%s: unknown group %q in %s", label, name, field)
+		}
+	}
+	return nil
 }
 
 func sortedSelectedJobs(jobs map[string]bool) []string {
@@ -231,8 +262,73 @@ func verifyPolicyCases(g graph, cases []policyCase) error {
 				return fmt.Errorf("case %q: collection %q: missing %v; extra %v (got %v, want %v)", *c.Name, name, missing, extra, got, sortedWant)
 			}
 		}
+		if c.LocalGroups != nil || c.ChecksGroups != nil || c.SkippedGroups != nil {
+			if err := verifyLocalGroups(g, c); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
+}
+
+func verifyLocalGroups(g graph, c policyCase) error {
+	localGraph := g.forLocalTest()
+	localPlan, err := localGraph.selectPaths(*c.Paths)
+	if err != nil {
+		return fmt.Errorf("case %q: %w", *c.Name, err)
+	}
+	if c.LocalGroups != nil || c.SkippedGroups != nil {
+		checks, _, _, skipped, err := selectedTestChecks(localGraph, localPlan, false)
+		if err != nil {
+			return fmt.Errorf("case %q: %w", *c.Name, err)
+		}
+		if c.LocalGroups != nil {
+			if err := compareNames(fmt.Sprintf("case %q: local groups", *c.Name), checkGroupNames(checks), *c.LocalGroups); err != nil {
+				return err
+			}
+		}
+		if c.SkippedGroups != nil {
+			if err := compareNames(fmt.Sprintf("case %q: skipped groups", *c.Name), skipped, *c.SkippedGroups); err != nil {
+				return err
+			}
+		}
+	}
+	if c.ChecksGroups != nil {
+		checks, _, _, _, err := selectedTestChecks(localGraph, localPlan, true)
+		if err != nil {
+			return fmt.Errorf("case %q: %w", *c.Name, err)
+		}
+		if err := compareNames(fmt.Sprintf("case %q: checks-only groups", *c.Name), checkGroupNames(checks), *c.ChecksGroups); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func checkGroupNames(checks []execution.Check) []string {
+	seen := map[string]bool{}
+	names := []string{}
+	for _, check := range checks {
+		name := groupName(check.Label)
+		if seen[name] {
+			continue
+		}
+		seen[name] = true
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+func compareNames(label string, got, want []string) error {
+	sortedGot := slices.Clone(got)
+	sortedWant := slices.Clone(want)
+	sort.Strings(sortedGot)
+	sort.Strings(sortedWant)
+	if slices.Equal(sortedGot, sortedWant) {
+		return nil
+	}
+	return fmt.Errorf("%s = %v, want %v", label, sortedGot, sortedWant)
 }
 
 func runVerifyPolicy(root string, g graph, args []string) error {

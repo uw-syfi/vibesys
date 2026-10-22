@@ -3,10 +3,8 @@ package server
 import (
 	"errors"
 	"io"
-	"math"
 	"os"
 	"path/filepath"
-	"regexp"
 	"slices"
 
 	"github.com/fsnotify/fsnotify"
@@ -15,8 +13,6 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 )
-
-var streamID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]{0,255}$`)
 
 func waitChange(ctxDone <-chan struct{}, watch *fsnotify.Watcher) error {
 	select {
@@ -43,9 +39,6 @@ func (h *host) TailStream(request *apiv1.TailStreamRequest, stream apiv1.HostSer
 	dir, err := h.directory(request.GetRunId())
 	if err != nil {
 		return err
-	}
-	if !streamID.MatchString(request.GetStreamId()) || request.GetFromOffset() > math.MaxInt64 {
-		return status.Error(codes.InvalidArgument, "invalid stream_id or from_offset")
 	}
 	watch, err := fsnotify.NewWatcher()
 	if err != nil {

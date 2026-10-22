@@ -910,6 +910,10 @@ class DockerEnvironmentConfig:
     limit, such as a test tier, sets it below that limit so a stalled build
     ends in an error carrying the build output instead of in the caller's
     timeout.
+
+    ``image_cache_from`` supplies Docker images with inline build-cache metadata
+    to the image builder. It is explicit build configuration, independent of
+    the installed image's identity and the caller's process environment.
     """
 
     image: str | None = None
@@ -917,6 +921,7 @@ class DockerEnvironmentConfig:
     build_runner: DockerBuildRunner | None = None
     orphan_reaper: _OrphanReaper | None = None
     image_build_timeout_seconds: float | None = None
+    image_cache_from: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -1066,6 +1071,7 @@ class DockerEnvironment(NoCaptureRecovery):
                 base_image,
                 features=image_features(toolchains),
                 command_runner=self.config.build_runner,
+                cache_from=self.config.image_cache_from,
                 timeout=(
                     image_helpers.DEFAULT_IMAGE_BUILD_TIMEOUT_SECONDS
                     if self.config.image_build_timeout_seconds is None

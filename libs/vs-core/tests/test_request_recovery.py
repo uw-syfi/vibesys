@@ -397,6 +397,8 @@ def test_recovery_inspects_unfinished_authority_without_replaying_payload(
     assert reload(result.state) == result.state
 
 
+@pytest.mark.regression
+@example(events=[(1, 0), (2, 0)])
 @example(events=[(0, 0), (1, 0)])
 @given(st.lists(st.tuples(st.integers(0, 5), st.integers(0, 99)), min_size=1, max_size=30))
 def test_startup_sequences_preserve_ownership_and_deduplicate_inspection(

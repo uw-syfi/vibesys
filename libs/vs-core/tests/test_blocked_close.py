@@ -293,19 +293,28 @@ def test_a_job_whose_poll_blocked_while_the_host_was_down_is_polled_again(down_f
 
 @settings(max_examples=examples(pr=4, nightly=100))
 @given(case=_CASES)
-def test_a_host_that_restarts_a_run_closed_around_a_blocked_record_finds_nothing_to_do(
+def test_a_closed_blocked_request_survives_writer_recovery_and_operator_resume(
     case: _Case,
 ) -> None:
-    """The run ended, so the record's forced end is final: a new host only reloads the run."""
+    """A new epoch opens admission; the old record's forced outcome remains history."""
     state = _record(case.lifecycle, case.answer, accepted=case.accepted, named=case.named)
     closed = _close_after(
         state, restart=case.restart, late_by=case.late_by, stop_first=case.stop_first
     )
     if closed.run.status != core.RunStatus.TERMINAL:
         return
-    restarted = core.step(closed, core.RecoveryStarted(epoch=3, now_at=BOUND + case.late_by + 200))
-    assert restarted.requests == ()
-    assert restarted.state.run.status == core.RunStatus.TERMINAL
+    recovered = core.step(closed, core.RecoveryStarted(epoch=3, now_at=BOUND + case.late_by + 200))
+    assert recovered.requests == ()
+    assert recovered.state.run.status == core.RunStatus.TERMINAL
+    restarted = core.step(
+        recovered.state, core.EpochResumed(epoch=4, now_at=BOUND + case.late_by + 201)
+    )
+    assert all(isinstance(request, core.InspectRequest) for request in restarted.requests)
+    assert restarted.state.run.status == core.RunStatus.RUNNING
+    assert restarted.state.run.park is None
+    assert not restarted.state.scheduling.admission_closed
+    assert _original(restarted.state).request == _original(closed).request
+    assert _original(restarted.state).failure == _original(closed).failure
 
 
 @settings(max_examples=examples(pr=4, nightly=100))

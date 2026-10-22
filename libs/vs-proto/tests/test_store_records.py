@@ -11,6 +11,7 @@ from hypothesis import strategies as st
 from protobuf import DescFieldValueEnum, DescFieldValueScalar, Message, ScalarType
 from protobuf.wkt.google.protobuf.any_pb import Any as ProtoAny
 from protobuf.wkt.google.protobuf.descriptor_pb import FileDescriptorSet
+from protovalidate import validate as schema_validate
 from scripts.generate_record_goldens import (
     attrs_examples,
     detail_examples,
@@ -55,6 +56,7 @@ def skeleton_examples() -> list[Message]:
     assert isinstance(metric_record.value, p.MetricPoint)
     lifecycle = p.Lifecycle(state=p.Oneof("running", p.Running()))
     return [
+        p.ReplayStore(),
         p.RunHead(
             lifecycle=lifecycle,
             strategy="example",
@@ -275,6 +277,37 @@ def test_any_attrs_decode_using_only_the_generated_epoch_descriptors(
     descriptor = embedded_pool.FindMessageTypeByName(attrs.type_url.rsplit("/", 1)[1])
     decoded = message_factory.GetMessageClass(descriptor).FromString(attrs.value)
     assert json_format.MessageToDict(decoded) == json.loads(_ATTRS[kind].to_json())
+
+
+@pytest.mark.parametrize("valid", [True, False])
+def test_google_message_validation_keeps_the_public_adapter(
+    *, valid: bool, embedded_pool: descriptor_pool.DescriptorPool
+) -> None:
+    descriptor = embedded_pool.FindMessageTypeByName(p.AgentTurnAttrs.desc().type_name)
+    message = message_factory.GetMessageClass(descriptor).FromString(
+        p.AgentTurnAttrs(
+            agent="agent-a" if valid else "",
+            role="implementer",
+            stage="turn",
+        ).to_binary()
+    )
+    if valid:
+        p.validate(message)
+    else:
+        with pytest.raises(p.ValidationError):
+            p.validate(message)
+
+
+def test_public_validate_matches_schema_rules_for_current_records_and_receipts() -> None:
+    """Runlog records and admission receipts keep the schema rules they already use."""
+    for record in _RECORDS.values():
+        schema_validate(record)
+        p.validate(record)
+    invalid = p.admission.AdmissionReceipt()
+    with pytest.raises(p.ValidationError):
+        schema_validate(invalid)
+    with pytest.raises(p.ValidationError):
+        p.validate(invalid)
 
 
 def set_field(message: Message, name: str, value: object) -> None:
@@ -758,6 +791,10 @@ def test_store_schema_cannot_import_search_strategy_contracts(package: str) -> N
             p.core_agent_facts.EvidenceRef.desc().file,
             p.core_contracts.PureOption.desc().file,
             p.core_failures.ReplyError.desc().file,
+            p.core_iterations.IterationRequest.desc().file,
+            p.replay_workspace.ReplayWorkspaceRequest.desc().file,
+            p.replay_agent.ReplayAgentRequest.desc().file,
+            p.replay_evaluation.ReplayEvaluationRequest.desc().file,
             p.imported_facts.ImportedRunFacts.desc().file,
         ]
     )

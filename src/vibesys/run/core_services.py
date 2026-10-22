@@ -17,6 +17,7 @@ from pydantic import BaseModel
 
 from vibesys.run.evaluation_socket import prepare_evaluation_socket
 from vs_agent.api import (
+    AgentBackend,
     AgentExecutionPolicy,
     AgentSessionSpec,
     AgentTurnExecutor,
@@ -170,8 +171,11 @@ class CoreResources:
     measurement_decisions: MeasurementDecisions = field(default_factory=MeasurementDecisions)
     """Which decision each measurement answers; the same one names stage output by its gate."""
     """Hears each measurement stage start and end, for the host's event stream."""
+    epoch: Callable[[], int | None] = lambda: None
+    """Published writer identity; unjournaled hosts leave epoch selection to their runtime."""
     commit_observer: CommitObserver = field(default_factory=IgnoreCommits)
     """Hears each confirmed commit, for committed views and round events."""
+    resuming: bool = False
     control: RunControlChannel | None = None
     agent_lifecycle: AgentExecutionLifecycleSink = ignore_lifecycle
     """Receives the start and end of each provider turn, for the host's event stream."""
@@ -215,7 +219,6 @@ class CoreServices:
     """The in-turn evaluation tool service, when the plan offers one; the run loop serves it."""
     profile_capture_withheld: bool = False
     """The plan would offer profile work, but the run environment cannot capture a profile."""
-    stop_requested: bool = False
     """The operator force-stopped this run before (``record_stop_request``): it only ends."""
     control_inbox: ControlInbox | None = None
     """The run's durable control inbox, where ``vibesys control`` writes; the loop reads it."""
@@ -280,7 +283,7 @@ def build_core_services(policy: CorePolicy, resources: CoreResources) -> CoreSer
         search=plan.search,
         config=plan.config,
         state=state,
-        bindings=replace(bindings, commits=resources.commit_observer),
+        bindings=replace(bindings, commits=resources.commit_observer, epoch=resources.epoch),
         catalog=catalog,
         store=resources.project.state_store(run_id),
         publications=publications,
@@ -290,7 +293,6 @@ def build_core_services(policy: CorePolicy, resources: CoreResources) -> CoreSer
         clock=resources.clock,
         agent_evaluation=bridge,
         profile_capture_withheld=plan.profile_capture_withheld,
-        stop_requested=resources.project.state.stop_requested(run_id),
         control_inbox=resources.project.state.control_inbox(run_id),
     )
 
@@ -360,6 +362,7 @@ def _initial_state(
         offered=catalog,
         startup=CoreStartup(
             deadline_at=resources.clock.now() + plan.deadline_seconds,
+            duration_seconds=plan.deadline_seconds,
             limits=plan.limits,
             lifecycle=_lifecycle(resources, suspendable=suspendable),
             requirements=plan.requirements,
@@ -518,6 +521,7 @@ def agent_session_spec(
                 containerized=environment.use_docker,
             ),
             model=spec.model,
+            scripted=spec.backend is AgentBackend.SCRIPTED,
             mcp_servers=(),
             skills=environment.skill_source_dirs,
             environment=tuple(sorted(env.items())),

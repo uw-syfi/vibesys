@@ -283,6 +283,7 @@ def record_examples() -> dict[str, p.Record]:
     )
     bodies = {
         "epoch_started": epoch,
+        "declaration_amended": p.EpochStarted.from_binary(epoch.to_binary()),
         "legacy_event": p.LegacyEvent(json='{"type":"run_finished"}'),
         "lifecycle": p.Lifecycle(state=p.Oneof("running", p.Running())),
         "span": span_example("agent_turn", attrs["agent_turn"]),

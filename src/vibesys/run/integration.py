@@ -36,7 +36,7 @@ from vibesys.events import (
 from vibesys.run.agent_events import CoreAgentEventSink
 from vibesys.run.environment_failure import RunEnvironmentFailure
 from vibesys.run.event_journal import EventJournal
-from vs_core.api import FlowDriver, FlowState, RunTrace, SpanChange, span_changes
+from vs_core.api import CheckoutStatus, FlowDriver, FlowState, RunTrace, SpanChange, span_changes
 from vs_project.api import git_repositories
 from vs_redaction.api import redact_diagnostic_tail
 from vs_runtime.api.core import RuntimeRecord, new_comparisons, new_runaways, winner_selection
@@ -545,6 +545,36 @@ def _baseline_drift_detail(event: RootBaselineDrifted) -> str:
     return "; ".join(parts)
 
 
+def _emit_adoption_status(
+    events: AgentEventSink,
+    previous: BaseModel | None,
+    current: RuntimeRecord,
+) -> None:
+    """Project a confirmed publication to the diagnostic stream shared by app and CLI."""
+    adoption = current.envelope.core.settlement.adoption
+    before = (
+        previous.envelope.core.settlement.adoption if isinstance(previous, RuntimeRecord) else None
+    )
+    if (
+        adoption is None
+        or not adoption.verified
+        or adoption.publication is None
+        or adoption == before
+    ):
+        return
+    publication = adoption.publication
+    text = f"[result] published {publication.commit[:12]} on {publication.branch}"
+    if adoption.checkout is not None:
+        status = adoption.checkout.status
+        checkout = (
+            "updated"
+            if status is CheckoutStatus.FAST_FORWARDED
+            else f"skipped: {status.value.replace('_', ' ')}"
+        )
+        text += f"; checkout {checkout}"
+    events.agent_output(text + "\n", channel="diagnostic")
+
+
 class _CoreCommitObserver:
     """Publish a confirmed core commit: the committed-view hint, then its semantic events."""
 
@@ -593,6 +623,7 @@ class _CoreCommitObserver:
             winner_selection(current) if isinstance(current, RuntimeRecord) else None,
         )
         if isinstance(current, RuntimeRecord):
+            _emit_adoption_status(self._integration.agent_events, previous, current)
             _emit_comparisons(
                 self._integration.events,
                 new_comparisons(previous if isinstance(previous, RuntimeRecord) else None, current),
@@ -748,6 +779,7 @@ class LocalRunIntegration:
                     provider=event.provider,
                     model=event.model,
                     reasoning_effort=event.reasoning_effort,
+                    client=event.client,
                 ),
                 **fields,
             )

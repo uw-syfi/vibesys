@@ -29,6 +29,7 @@ from vs_evaluation.api import (
     ExecutorRejectedError,
     PollingEvaluationExecutor,
     PollPhase,
+    RecoverableEvaluationExecutor,
     TrustedEvidence,
     same_work,
 )
@@ -209,6 +210,21 @@ class RetryingEvaluationExecutor:
         self._namespace.save(self._path(handle_id), following)
         await self._submit_try(handle_id, following)
         return ExecutorPoll(phase=PollPhase.QUEUED, attempt=polled.attempt)
+
+    async def recover(self, handle_id: str) -> ExecutorPoll:
+        """Inspect the durable current try without advancing it or dispatching a retry.
+
+        Return this child's failure and evidence before a replay caller decides
+        whether to journal a successor. Legacy ``poll`` keeps its retry policy;
+        calling it here could start work without a durable child span.
+        An inner executor without authoritative inspection cannot prove absence.
+        """
+        if not isinstance(self._inner, RecoverableEvaluationExecutor):
+            return ExecutorPoll(
+                phase=PollPhase.UNKNOWN,
+                detail="the inner evaluation owner lacks authoritative recovery inspection",
+            )
+        return await self._inner.recover(self._current(handle_id))
 
     async def inspect_only(self, handle_id: str) -> ExecutorObservation | None:
         """The current try's observation, without dispatch."""

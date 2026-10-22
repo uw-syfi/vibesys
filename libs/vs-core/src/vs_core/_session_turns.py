@@ -1118,8 +1118,7 @@ def _apply_turn_observation(
             event.invocation,
             observation,
             reply=event,
-            lost=released_lost,
-            held=released_lost and _turn_holds.held_when_lost(context.records, invocation),
+            loss=_turn_holds.lost_failure(context, invocation) if released_lost else None,
         ),
     )
     cleanup = _after_turn_cleanup(state, context, invocation, session)

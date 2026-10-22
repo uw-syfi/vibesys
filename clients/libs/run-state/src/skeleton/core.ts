@@ -2,13 +2,31 @@
 import {fromBinary} from '@bufbuild/protobuf';
 import {timestampDate} from '@bufbuild/protobuf/wkt';
 import type {UsageRecord} from '@vibesys/contracts/host-helper';
-import {AgentTurnAttrsSchema} from '@vibesys/proto';
+import {AgentClient, type AgentTurnAttrs, AgentTurnAttrsSchema} from '@vibesys/proto';
 import {addTokens, type CoreState, initialCoreState, NO_TOKENS, type TokenTally} from '../index.js';
 import type {StoreView} from './types.js';
 
 function count(value: bigint | undefined): number | null {
   if (value === undefined || value > BigInt(Number.MAX_SAFE_INTEGER)) return null;
   return Number(value);
+}
+
+/** Who ran the turn: the selected harness and model, and which client executed it. */
+function recordedAgent(
+  turn: AgentTurnAttrs,
+): Pick<UsageRecord, 'client' | 'harness' | 'model' | 'reasoning_effort' | 'harness_version'> {
+  return {
+    client:
+      turn.client === AgentClient.SCRIPTED
+        ? 'scripted'
+        : turn.client === AgentClient.PROVIDER
+          ? 'provider'
+          : null,
+    harness: turn.provider ?? null,
+    model: turn.model ?? null,
+    reasoning_effort: turn.reasoningEffort ?? null,
+    harness_version: turn.harnessVersion ?? null,
+  };
 }
 
 export function skeletonCore(view: StoreView): CoreState {
@@ -34,10 +52,7 @@ export function skeletonCore(view: StoreView): CoreState {
       span_id: span.id,
       round_label: null,
       role: turn.role,
-      harness: turn.provider ?? null,
-      model: turn.model ?? null,
-      reasoning_effort: turn.reasoningEffort ?? null,
-      harness_version: turn.harnessVersion ?? null,
+      ...recordedAgent(turn),
       started_at: turn.startedAt ? timestampDate(turn.startedAt).toISOString() : null,
       ended_at: turn.endedAt ? timestampDate(turn.endedAt).toISOString() : null,
       cost_usd: usage?.costUsd ?? null,

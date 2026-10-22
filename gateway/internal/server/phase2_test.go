@@ -175,7 +175,7 @@ func TestGetBlobsHashesAndPerHashErrors(t *testing.T) {
 	if err := os.Symlink(private, filepath.Join(f.run, "blobs", escape)); err != nil {
 		t.Fatal(err)
 	}
-	hashes := []string{hash, mismatch, strings.Repeat("0", 64), "../escape", strings.ToUpper(hash), escape, hash}
+	hashes := []string{hash, mismatch, strings.Repeat("0", 64), escape, hash}
 	got, err := client(t, f, false).GetBlobs(f.ctx, &apiv1.GetBlobsRequest{RunId: "run-1", Sha256: hashes})
 	if err != nil {
 		t.Fatal(err)
@@ -183,7 +183,7 @@ func TestGetBlobsHashesAndPerHashErrors(t *testing.T) {
 	if len(got.Blobs) != len(hashes) {
 		t.Fatal(got)
 	}
-	want := []codes.Code{codes.OK, codes.DataLoss, codes.NotFound, codes.InvalidArgument, codes.InvalidArgument, codes.Internal, codes.OK}
+	want := []codes.Code{codes.OK, codes.DataLoss, codes.NotFound, codes.Internal, codes.OK}
 	for i, result := range got.Blobs {
 		if result.Sha256 != hashes[i] || codes.Code(result.ErrorCode) != want[i] {
 			t.Fatalf("blob %d = %v", i, result)
@@ -202,7 +202,7 @@ func TestGetBlobsResponseBudget(t *testing.T) {
 	if err := os.Mkdir(filepath.Join(f.run, "blobs"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	content := bytes.Repeat([]byte("x"), 9<<20)
+	content := bytes.Repeat([]byte("x"), 16<<20)
 	sum := sha256.Sum256(content)
 	hash := hex.EncodeToString(sum[:])
 	write(t, filepath.Join(f.run, "blobs", hash), false, content)

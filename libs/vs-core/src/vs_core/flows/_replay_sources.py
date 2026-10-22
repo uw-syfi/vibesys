@@ -6,19 +6,25 @@ from collections import deque
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Generic, TypeVar
 
+from vs_proto.api import core_iterations as units
 from vs_proto.api import replay as pb
 
 from ._replay_causality import EMPTY_FRONTIER, _Frontier
+from ._replay_identity import SemanticKey
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine, Generator
 
     from protobuf import Message
 
-    from ._replay_identity import ClassifiedContext, SemanticKey
+    from ._replay_identity import ClassifiedContext
     from ._replay_run import ReplayScheduler
 
 T = TypeVar("T")
+R = TypeVar("R", bound="Message")
+ADMIT_ITERATION = "framework.iteration.admit"
+COMPLETE_ITERATION = "framework.iteration.complete"
+ITERATION_CONTRACT = "vibesys.core.iteration.v1"
 
 
 class ReplayError(ValueError):
@@ -193,6 +199,43 @@ class ReplayGroup(ReplaySource[object]):
         return _All(tuple(self.tasks))
 
 
+@dataclass
+class ReplayIteration:
+    """One admitted logical unit, completed only when its body exits normally."""
+
+    flow: ReplayFlow
+    request: units.IterationRequest
+    grant: units.IterationGranted | None = None
+
+    async def __aenter__(self) -> units.IterationGranted:
+        self.grant = await self.flow.call(
+            self._call(ADMIT_ITERATION, self.request, units.IterationGranted)
+        )
+        return self.grant
+
+    async def __aexit__(self, exc_type: object, exc: object, tb: object) -> None:
+        if exc_type is None:
+            if self.grant is None:
+                problem = "iteration completion requires an admitted unit"
+                raise ReplayError(problem)
+            await self.flow.call(
+                self._call(
+                    COMPLETE_ITERATION,
+                    units.IterationCompletion(grant=self.grant),
+                    units.IterationCompleted,
+                )
+            )
+
+    def _call(self, operation: str, request: Message, reply: type[R]) -> ReplayCall[R]:
+        return ReplayCall(
+            SemanticKey(operation).item(self.request.scope).sample(str(self.request.number)),
+            request,
+            ITERATION_CONTRACT,
+            pb.ReplayPolicy(reply_type=reply.desc().type_name),
+            reply,
+        )
+
+
 @dataclass(frozen=True)
 class ReplayFlow:
     """Pure flow context. Reads observe the last released historical observation."""
@@ -207,6 +250,10 @@ class ReplayFlow:
 
     def allowance(self) -> pb.ReplayAllowance:
         return pb.ReplayAllowance.from_binary(self.scheduler.allowance_bytes)
+
+    def iteration(self, scope: str, number: int) -> ReplayIteration:
+        """Admit one stable lifetime unit; fresh allowance applies only at the frontier."""
+        return ReplayIteration(self, units.IterationRequest(scope=scope, number=number))
 
     def timer(self, deadline: float) -> ReplayTimer:
         return self.scheduler.timer(deadline)
