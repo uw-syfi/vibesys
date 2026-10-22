@@ -232,6 +232,7 @@ class RuntimeWorkspaceRequests:
         *blocking* runs the executor's own disk checks off the event loop. *evidence*
         reads back what an adopted revision measured, for the commit that records it.
         """
+        self._allow_adoption = True
         self._evidence = evidence
         self._blocking = blocking
         self._workspaces = workspaces
@@ -241,6 +242,10 @@ class RuntimeWorkspaceRequests:
         self._observations = ObservationFactory(store)
         self._fences = EffectFences(store)
         self._locks: dict[str, asyncio.Lock] = {}
+
+    def protect_adoption(self) -> None:
+        """Retain selections without replacing the root after an operator Resume."""
+        self._allow_adoption = False
 
     async def execute(self, request: Request, context: ExecutionContext) -> ExecutionOutcome:
         """Execute, replay or inspect one request under its canonical identity."""
@@ -494,6 +499,20 @@ class RuntimeWorkspaceRequests:
             return _rejected("selected revision is not a retained revision of this run")
         if isinstance(request.selection, TrustedBaseline) and commit != root.trusted_input_baseline:
             return _rejected("selected baseline is not the run's trusted input baseline")
+        if not self._allow_adoption:
+            # Resume keeps the operator's tree. Publication stays on the ordinary path.
+            applied = await root.matches_revision(commit)
+            if isinstance(request, AdoptRevision) and not applied:
+                return _rejected(
+                    "candidate retained; adoption in a resumed epoch requires project-edit protection"
+                )
+            if isinstance(request, VerifyAdoption) and not applied:
+                return _Facts(
+                    ObservationStatus.FAILED,
+                    accepted=True,
+                    diagnostic="root workspace content differs from the selected revision",
+                )
+            return _Facts(ObservationStatus.SUCCEEDED, accepted=True, revision=ref)
         # Legacy VerifyAdoption records are replayed as publication reads/retries,
         # never as permission to restore or compare the operator's working tree.
         message = (

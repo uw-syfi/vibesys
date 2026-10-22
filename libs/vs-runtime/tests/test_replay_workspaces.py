@@ -10,7 +10,7 @@ from protobuf.wkt.google.protobuf.timestamp_pb import Timestamp
 
 from vs_core.api import RevisionRef
 from vs_core.api.replay import ReplayCall, ReplayFlow, ReplaySource, SemanticKey, classify_context
-from vs_project.api import FakeStateStore, StateNamespace
+from vs_project.api import FakeStateStore, StateNamespace, adoption_branch
 from vs_proto.api import (
     Ended,
     EpochStarted,
@@ -40,7 +40,7 @@ from vs_runtime.api.replay import (
 )
 from vs_sim.api.testing import SimThreads, swept
 
-from .test_workspace_requests import _candidate_path, _commits, _env, _executor
+from .test_workspace_requests import _candidate_path, _commits, _env, _executor, _git
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine
@@ -251,7 +251,17 @@ def test_workspace_recovery_sweeps_real_owner_receipt_writes(tmp_path: Path, sim
                 assert isinstance(result, ReplayCompleted)
                 assert isinstance(result.value, pb.ReplayWorkspaceResult)
                 assert result.value.status is pb.ReplayWorkspaceStatus.SUCCEEDED
-                assert (initial.root.path / "candidate.py").read_text() == "VALUE = 2\n"
+                # Restoring the baseline leaves the run branch dirty, so publication
+                # records the candidate and the checkout stays untouched.
+                assert (initial.root.path / "candidate.py").read_text() == "VALUE = 1\n"
+                assert (
+                    _git(
+                        initial.root.path,
+                        "show",
+                        f"{adoption_branch(env.run_id)}:candidate.py",
+                    )
+                    == "VALUE = 2"
+                )
                 commits = _commits(initial)
                 assert await drive_replay(host(restarting=True), launch("again")) == result
                 assert _commits(initial) == commits

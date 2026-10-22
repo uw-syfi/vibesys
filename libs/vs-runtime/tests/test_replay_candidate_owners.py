@@ -23,7 +23,7 @@ from vs_agent.api import (
 from vs_agent.api.testing import FakeAgentClient
 from vs_core.api import ArtifactId, ArtifactRef, RevisionRef
 from vs_core.api.replay import ReplayCall, ReplayFlow, SemanticKey, classify_context
-from vs_project.api import FakeStateStore
+from vs_project.api import FakeStateStore, adoption_branch
 from vs_proto.api import (
     Ended,
     EpochStarted,
@@ -81,7 +81,7 @@ from .test_replay_sessions import encode
 from .test_replay_workspaces import request as workspace_request
 from .test_replay_workspaces import step as workspace_step
 from .test_session_resolver import role
-from .test_workspace_requests import _commits, _env
+from .test_workspace_requests import _commits, _env, _git
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine, Mapping
@@ -466,7 +466,17 @@ class CandidateWorld:
             assert isinstance(completed, ReplayCompleted)
             assert isinstance(completed.value, workspace.ReplayWorkspaceResult)
             assert completed.value.status is workspace.ReplayWorkspaceStatus.SUCCEEDED
-            assert (self.initial.root.path / "candidate.py").read_text() == "VALUE = 2\n"
+            # Untracked evaluation handles keep the checkout dirty, so publication
+            # records the candidate and the root file stays as the run left it.
+            assert (self.initial.root.path / "candidate.py").read_text() == "VALUE = 1\n"
+            assert (
+                _git(
+                    self.initial.root.path,
+                    "show",
+                    f"{adoption_branch(self.env.run_id)}:candidate.py",
+                )
+                == "VALUE = 2"
+            )
             assert len(self.client.calls_for("worker")) == 1
             assert len(self.cluster.submissions) == 1
             assert resumed.runtime.accounting.lifetime_completed == 1
