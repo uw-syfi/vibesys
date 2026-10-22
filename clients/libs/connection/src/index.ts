@@ -22,6 +22,7 @@ export {
   READ_METHOD,
   TAIL_METHOD,
   WATCH_METHOD,
+  WATCH_RUNS_METHOD,
 } from './shell/gateway.js';
 export {GatewayCalls} from './shell/gateway-calls.js';
 export {localGateway} from './shell/gateway-local.js';
@@ -68,4 +69,5 @@ export {
   type RegistryStartPorts,
   registryStart,
 } from './shell/registry-start.js';
+export {type RunWatch, type RunWatchPorts, runWatch} from './shell/run-watch.js';
 export type {CheckoutProblem, Phase} from './state/host-connection.js';

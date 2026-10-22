@@ -325,6 +325,7 @@ describe('MachinesMain', () => {
           },
           listCompute: async () => settings,
         },
+        runs: {live: async () => 0},
       });
       await using _ = manager;
       expect(await machines.report(HOST_B, '/mnt/data/vibesys')).toEqual({
@@ -333,6 +334,20 @@ describe('MachinesMain', () => {
       });
       expect(expected).toBe('/mnt/data/vibesys');
       expect(await machines.compute(HOST_B)).toEqual({kind: 'offered', value: settings});
+    });
+
+    test('an on switch counts live runs from WatchRuns', async () => {
+      const {machines, manager} = await subject(new Map(), {
+        transportV2: async () => true,
+        registry: {
+          describeMachine: async () => facts,
+          listCompute: async () => settings,
+        },
+        runs: {live: async () => 2},
+      });
+      await using _ = manager;
+      const report = await machines.report(HOST_B);
+      expect(report.kind === 'ready' && report.facts?.runs.live).toBe(2);
     });
 
     test('an on switch changes clusters through the registry and does not open the helper', async () => {

@@ -20,8 +20,10 @@ import {
   registryReads,
   registrySetup,
   registryStart,
+  runWatch,
   SshLink,
   WATCH_METHOD,
+  WATCH_RUNS_METHOD,
 } from '@vibesys/connection';
 import {RunNotifier} from '@vibesys/feature-app-shell/main';
 import {Hosts} from '@vibesys/feature-hosts/main';
@@ -91,6 +93,7 @@ function newRunMain(
   hosts: Hosts,
   settings: SettingsStore,
   gateway: ReturnType<typeof installGateway>,
+  runs: ReturnType<typeof runWatch>,
 ): NewRunMain {
   const starts = registryStart({
     checkout: id => hosts.checkout(id),
@@ -110,6 +113,7 @@ function newRunMain(
       read: (id, bytes, signal) => gateway.unary(hostKey(id), READ_METHOD, bytes, signal),
       mutate: (id, bytes, signal) => gateway.unary(hostKey(id), MUTATE_METHOD, bytes, signal),
     }),
+    watchRuns: runs,
   });
 }
 
@@ -148,6 +152,15 @@ function runNotifier(preferences: PreferencesMain, focus: () => void): RunNotifi
   });
 }
 
+function watchHostRuns(gateway: ReturnType<typeof installGateway>, manager: ConnectionManager) {
+  const runs = runWatch({
+    stream: (host, bytes, signal, receive) =>
+      gateway.stream(hostKey(host), WATCH_RUNS_METHOD, bytes, signal, receive),
+  });
+  manager.onDisposing(() => runs.close());
+  return runs;
+}
+
 function installGateway(manager: ConnectionManager, settings: SettingsStore) {
   return createGatewayCalls(
     manager,
@@ -172,6 +185,7 @@ async function openWindow(
     log,
   });
   const gateway = installGateway(manager, settings);
+  const watchedRuns = watchHostRuns(gateway, manager);
   const welcome = new WelcomeFeed();
   const preferences = new PreferencesMain({
     store: settings,
@@ -201,6 +215,7 @@ async function openWindow(
     welcome,
     broadcast: listing => windows.broadcast(WELCOME_EVENTS.listing, welcome.listing(listing)),
     endLogin: id => held.logins?.cancelHost(id),
+    runs: watchedRuns,
   });
   const logins = startLogins(hosts, gateway, manager);
   held.logins = logins;
@@ -220,11 +235,11 @@ async function openWindow(
     welcome,
     hosts,
     history,
-    machines: machinesOver(settings, hosts, gateway, setup, logins),
+    machines: machinesOver(settings, hosts, gateway, setup, logins, watchedRuns),
     runs,
     settings,
     preferences,
-    newRun: newRunMain(hosts, settings, gateway),
+    newRun: newRunMain(hosts, settings, gateway, watchedRuns),
     gatewaySetting: gatewaySetting(
       settings,
       host => hosts.checkout(host),
@@ -306,8 +321,9 @@ function listedHosts(parts: {
   readonly welcome: WelcomeFeed;
   readonly broadcast: (listing: HostListing) => void;
   readonly endLogin?: (id: HostId) => void;
+  readonly runs: ReturnType<typeof runWatch>;
 }): {readonly hosts: Hosts; readonly setup: ReturnType<typeof registrySetup>} {
-  const {manager, settings, gateway, history, notifier, welcome, broadcast, endLogin} = parts;
+  const {manager, settings, gateway, history, notifier, welcome, broadcast, endLogin, runs} = parts;
   const {transportV2, setup} = hostTransport(settings, gateway);
   return {
     setup,
@@ -319,6 +335,7 @@ function listedHosts(parts: {
       transportV2,
       setup,
       ...(endLogin === undefined ? {} : {endLogin}),
+      runs,
       log,
       push: listing => {
         notifier.listing(listing);
@@ -371,6 +388,7 @@ function machinesOver(
   gateway: ReturnType<typeof installGateway>,
   setup: ReturnType<typeof registrySetup>,
   logins: LoginActor,
+  runs: ReturnType<typeof runWatch>,
 ): MachinesMain {
   return new MachinesMain({
     settings,
@@ -391,6 +409,7 @@ function machinesOver(
     }),
     setup,
     logins,
+    runs,
   });
 }
 

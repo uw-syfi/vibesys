@@ -13,6 +13,7 @@ import {
   type InspectedCandidate,
   type RegistryClusters,
   type RegistrySetup,
+  type RunWatch,
 } from '@vibesys/connection';
 import type {MachineDescription} from '@vibesys/hosts';
 import {
@@ -66,6 +67,8 @@ export interface MachinesMainDeps {
   readonly setup?: RegistrySetup;
   /** Cluster changes. Required when `transportV2` is true for put, remove, and test. */
   readonly clusters?: RegistryClusters;
+  /** Live runs from WatchRuns. Required when `transportV2` is true for a report. */
+  readonly runs?: Pick<RunWatch, 'live'>;
   /** The selection the caller still owns. A change across the await is stale. */
   readonly selectionRevision?: (id: HostId) => bigint;
   /** Host logins when `transportV2` is on. The actor outlives the panel that started one. */
@@ -152,7 +155,8 @@ export class MachinesMain {
           expectedCheckout,
           new AbortController().signal,
         );
-        return {kind: 'ready', facts};
+        const live = await this.#runs().live(id);
+        return {kind: 'ready', facts: {...facts, runs: {...facts.runs, live}}};
       } catch (error) {
         return unreachable(error);
       }
@@ -340,6 +344,15 @@ export class MachinesMain {
       throw new Error('run transport v2 is on and the registry setup is missing');
     }
     return setup;
+  }
+
+  /** WatchRuns. A missing port is a wiring error, not a reason to use the helper's count. */
+  #runs(): Pick<RunWatch, 'live'> {
+    const runs = this.#deps.runs;
+    if (runs === undefined) {
+      throw new Error('run transport v2 is on and the run watch is missing');
+    }
+    return runs;
   }
 
   /** Cluster changes. A missing port is a wiring error, not a reason to use the helper. */

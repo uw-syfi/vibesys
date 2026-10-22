@@ -1,5 +1,6 @@
 import {describe, expect, test} from 'bun:test';
 import {ConnectionError, ConnectionManager} from '@vibesys/connection';
+import type {HostId} from '@vibesys/hosts';
 import {FakeLink} from '@vibesys/connection/testing';
 import type {ExampleCreation, RunInputs} from '@vibesys/ipc';
 import {exampleCatalogue} from '@vibesys/run-fixtures';
@@ -201,6 +202,7 @@ describe('NewRunMain', () => {
       log: () => {},
     });
     const remembered: StoredRecentRun[] = [];
+    const watched: HostId[] = [];
     const main = new NewRunMain({
       connect: host => manager.acquire(host, '/checkout'),
       remember: async run => {
@@ -209,6 +211,11 @@ describe('NewRunMain', () => {
       now: () => 42,
       transportV2: async () => true,
       registryStart: async () => ({runId: 'run-9', instanceId: 'inst-9'}),
+      watchRuns: {
+        start(host) {
+          watched.push(host);
+        },
+      },
     });
     const started = await main.answer({
       kind: 'start-run',
@@ -225,6 +232,7 @@ describe('NewRunMain', () => {
     });
     expect(started).toEqual({runId: 'run-9', instanceId: 'inst-9'});
     expect(link.helper.requests.some(request => request.type === 'run.start')).toBe(false);
+    expect(watched).toEqual([LOCAL]);
     expect(remembered[0]?.runId).toBe('run-9');
   });
 

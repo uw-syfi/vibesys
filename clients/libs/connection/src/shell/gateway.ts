@@ -203,6 +203,7 @@ const HOST_CALL_METHOD = `/${HostService.typeName}/${HostService.method.hostCall
 export const MUTATE_METHOD = `/${HostService.typeName}/${HostService.method.mutate.name}`;
 export const READ_METHOD = `/${HostService.typeName}/${HostService.method.read.name}`;
 export const WATCH_METHOD = `/${HostService.typeName}/${HostService.method.watch.name}`;
+export const WATCH_RUNS_METHOD = `/${HostService.typeName}/${HostService.method.watchRuns.name}`;
 
 /** Unary RPCs that are not host calls or registered reads. Those budgets come from the registry. */
 const UNARY_DEADLINE_MS = 15_000;

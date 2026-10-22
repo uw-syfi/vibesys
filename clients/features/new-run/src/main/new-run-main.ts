@@ -7,6 +7,7 @@ import {
   type ConnectionLease,
   HelperRequestError,
   type RegistryProjects,
+  type RunWatch,
 } from '@vibesys/connection';
 import type {
   Backend,
@@ -68,6 +69,8 @@ export interface NewRunMainDeps {
   ) => Promise<{readonly runId: string; readonly instanceId: string}>;
   /** Create, copy, and destination checks when `transportV2` is on. */
   readonly registryProjects?: RegistryProjects;
+  /** WatchRuns for the host a v2 start just launched on. */
+  readonly watchRuns?: Pick<RunWatch, 'start'>;
 }
 
 /** One helper request without the fields the connection fills in (`request_id`, `deadline_ms`). */
@@ -378,6 +381,11 @@ export class NewRunMain {
     } catch (error) {
       throw plain(error, 'Could not start the run');
     }
+    const watch = this.#deps.watchRuns;
+    if (watch === undefined) {
+      throw new Error('run transport v2 is on and the run watch is missing');
+    }
+    watch.start(host);
     await this.#remember(host, inputs, started.runId, started.instanceId);
     return started;
   }

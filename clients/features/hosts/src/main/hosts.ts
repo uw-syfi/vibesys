@@ -12,6 +12,7 @@ import {
   type HostConnection,
   type LogsLease,
   type RegistrySetup,
+  type RunWatch,
 } from '@vibesys/connection';
 import {
   type HarnessesListReply,
@@ -98,6 +99,8 @@ export interface HostsDeps {
   readonly setup?: RegistrySetup;
   /** Stop a host login when its checkout is replaced or the host is removed. */
   readonly endLogin?: (id: HostId) => void;
+  /** WatchRuns while this host is shown. Cancel reaps the stream. */
+  readonly runs?: Pick<RunWatch, 'start' | 'cancel'>;
 }
 
 /** How many times a summary is read again when its pages disagree on where the run stood. */
@@ -843,6 +846,16 @@ export class Hosts {
     };
   }
 
+  async #startRuns(key: HostKey, stopped: () => boolean): Promise<void> {
+    if ((await this.#deps.transportV2?.(hostFromKey(key))) !== true) return;
+    if (stopped()) return;
+    const runs = this.#deps.runs;
+    if (runs === undefined) {
+      throw new Error('run transport v2 is on and the run watch is missing');
+    }
+    runs.start(hostFromKey(key));
+  }
+
   #install(key: HostKey, checkout: string, lease: ConnectionLease): void {
     const connection = lease.connection;
     // A host returning to the set must overwrite any renderer cache before its old listing could
@@ -858,6 +871,11 @@ export class Hosts {
       });
     }
     const push = this.#deps.push;
+    let stopped = false;
+    void this.#startRuns(key, () => stopped).catch((error: unknown) => {
+      const detail = error instanceof Error ? error.message : String(error);
+      this.#deps.log(detail);
+    });
     const stopListing = connection.watchInstances(listing => push(hostListing(key, listing)));
     const stopPhase = connection.onPhase(phase => {
       if (phase.kind !== 'ready') {
@@ -868,8 +886,10 @@ export class Hosts {
       checkout,
       lease,
       stop: () => {
+        stopped = true;
         stopListing();
         stopPhase();
+        this.#deps.runs?.cancel(hostFromKey(key));
       },
     });
   }
