@@ -1204,8 +1204,10 @@ jobs:
       - name: Point Docker at the layer cache storage
         run: ./scripts/ci_docker_data_root.sh attach "${{ runner.temp }}/docker-data.tar.zst"
 
+      # ROCm's default archives completed cold package installs in seconds; the
+      # runner mirror stalled twice. CUDA passed with the runner mirror.
       - name: Use the runner's Ubuntu archive mirror
-        if: matrix.family != 'debian'
+        if: matrix.family == 'cuda-ubuntu'
         env:
           BASE_IMAGE: ${{ matrix.base }}
         run: |
@@ -1219,7 +1221,7 @@ jobs:
 
       - name: Test every Feature on ${{ matrix.base }}
         env:
-          FEATURE_BASE: ${{ matrix.family == 'debian' && matrix.base || 'vibesys-feature-base:ci' }}
+          FEATURE_BASE: ${{ matrix.family == 'cuda-ubuntu' && 'vibesys-feature-base:ci' || matrix.base }}
         run: >-
           libs/vs-sandbox/src/vs_sandbox/devcontainer-cli/test_features.sh "$FEATURE_BASE"
           libs/vs-sandbox/src/vs_sandbox/features

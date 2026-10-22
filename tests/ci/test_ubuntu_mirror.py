@@ -51,13 +51,13 @@ def test_missing_runner_archive_keeps_image_defaults(sources: str) -> None:
     assert ubuntu_mirror(sources) is None
 
 
-def test_ubuntu_feature_builds_use_the_runner_mirror_and_debian_keeps_its_base() -> None:
+def test_only_cuda_feature_builds_use_the_runner_mirror() -> None:
     jobs = yaml.safe_load((REPO / ".github/workflows/test.yml").read_text())["jobs"]
     steps = jobs["feature-tests"]["steps"]
     prepare = next(
         step for step in steps if step.get("name") == "Use the runner's Ubuntu archive mirror"
     )
-    assert prepare["if"] == "matrix.family != 'debian'"
+    assert prepare["if"] == "matrix.family == 'cuda-ubuntu'"
     assert "python3 scripts/ci_ubuntu_mirror.py" in prepare["run"]
     assert '--build-arg "UBUNTU_MIRROR=${mirror}"' in prepare["run"]
     assert '--build-arg "BASE_IMAGE=${BASE_IMAGE}"' in prepare["run"]
@@ -65,7 +65,7 @@ def test_ubuntu_feature_builds_use_the_runner_mirror_and_debian_keeps_its_base()
     test = next(step for step in steps if "test_features.sh" in step.get("run", ""))
     assert steps.index(prepare) < steps.index(test)
     assert test["env"]["FEATURE_BASE"] == (
-        "${{ matrix.family == 'debian' && matrix.base || 'vibesys-feature-base:ci' }}"
+        "${{ matrix.family == 'cuda-ubuntu' && 'vibesys-feature-base:ci' || matrix.base }}"
     )
     assert 'test_features.sh "$FEATURE_BASE"' in test["run"]
     cache = next(step for step in steps if step.get("id") == "docker-cache")
