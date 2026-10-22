@@ -238,6 +238,135 @@ func (ReplayControlStale) EnumDescriptor() ([]byte, []int) {
 	return file_vibesys_store_v1_replay_proto_rawDescGZIP(), []int{3}
 }
 
+// Closed accounting dimensions. vs_core's registry defines each dimension's
+// unit and which resource totals include it (input includes both cache kinds).
+type AccountingDimension int32
+
+const (
+	AccountingDimension_ACCOUNTING_DIMENSION_UNSPECIFIED           AccountingDimension = 0
+	AccountingDimension_ACCOUNTING_DIMENSION_MONEY_USD             AccountingDimension = 1
+	AccountingDimension_ACCOUNTING_DIMENSION_INPUT_TOKENS          AccountingDimension = 2
+	AccountingDimension_ACCOUNTING_DIMENSION_CACHE_READ_TOKENS     AccountingDimension = 3
+	AccountingDimension_ACCOUNTING_DIMENSION_CACHE_CREATION_TOKENS AccountingDimension = 4
+	AccountingDimension_ACCOUNTING_DIMENSION_OUTPUT_TOKENS         AccountingDimension = 5
+	AccountingDimension_ACCOUNTING_DIMENSION_REASONING_TOKENS      AccountingDimension = 6
+	AccountingDimension_ACCOUNTING_DIMENSION_DURATION_MS           AccountingDimension = 7
+	AccountingDimension_ACCOUNTING_DIMENSION_ADMISSIONS            AccountingDimension = 8
+	AccountingDimension_ACCOUNTING_DIMENSION_ATTEMPTS              AccountingDimension = 9
+	AccountingDimension_ACCOUNTING_DIMENSION_TURNS                 AccountingDimension = 10
+	AccountingDimension_ACCOUNTING_DIMENSION_RETRY_BUDGET          AccountingDimension = 11
+)
+
+// Enum value maps for AccountingDimension.
+var (
+	AccountingDimension_name = map[int32]string{
+		0:  "ACCOUNTING_DIMENSION_UNSPECIFIED",
+		1:  "ACCOUNTING_DIMENSION_MONEY_USD",
+		2:  "ACCOUNTING_DIMENSION_INPUT_TOKENS",
+		3:  "ACCOUNTING_DIMENSION_CACHE_READ_TOKENS",
+		4:  "ACCOUNTING_DIMENSION_CACHE_CREATION_TOKENS",
+		5:  "ACCOUNTING_DIMENSION_OUTPUT_TOKENS",
+		6:  "ACCOUNTING_DIMENSION_REASONING_TOKENS",
+		7:  "ACCOUNTING_DIMENSION_DURATION_MS",
+		8:  "ACCOUNTING_DIMENSION_ADMISSIONS",
+		9:  "ACCOUNTING_DIMENSION_ATTEMPTS",
+		10: "ACCOUNTING_DIMENSION_TURNS",
+		11: "ACCOUNTING_DIMENSION_RETRY_BUDGET",
+	}
+	AccountingDimension_value = map[string]int32{
+		"ACCOUNTING_DIMENSION_UNSPECIFIED":           0,
+		"ACCOUNTING_DIMENSION_MONEY_USD":             1,
+		"ACCOUNTING_DIMENSION_INPUT_TOKENS":          2,
+		"ACCOUNTING_DIMENSION_CACHE_READ_TOKENS":     3,
+		"ACCOUNTING_DIMENSION_CACHE_CREATION_TOKENS": 4,
+		"ACCOUNTING_DIMENSION_OUTPUT_TOKENS":         5,
+		"ACCOUNTING_DIMENSION_REASONING_TOKENS":      6,
+		"ACCOUNTING_DIMENSION_DURATION_MS":           7,
+		"ACCOUNTING_DIMENSION_ADMISSIONS":            8,
+		"ACCOUNTING_DIMENSION_ATTEMPTS":              9,
+		"ACCOUNTING_DIMENSION_TURNS":                 10,
+		"ACCOUNTING_DIMENSION_RETRY_BUDGET":          11,
+	}
+)
+
+func (x AccountingDimension) Enum() *AccountingDimension {
+	p := new(AccountingDimension)
+	*p = x
+	return p
+}
+
+func (x AccountingDimension) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (AccountingDimension) Descriptor() protoreflect.EnumDescriptor {
+	return file_vibesys_store_v1_replay_proto_enumTypes[4].Descriptor()
+}
+
+func (AccountingDimension) Type() protoreflect.EnumType {
+	return &file_vibesys_store_v1_replay_proto_enumTypes[4]
+}
+
+func (x AccountingDimension) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use AccountingDimension.Descriptor instead.
+func (AccountingDimension) EnumDescriptor() ([]byte, []int) {
+	return file_vibesys_store_v1_replay_proto_rawDescGZIP(), []int{4}
+}
+
+// A physical invocation for usage, or the original charge for admission,
+// attempt and turn counts. Import IDs, revisions and epochs never mint one.
+type AccountingOccurrenceKind int32
+
+const (
+	AccountingOccurrenceKind_ACCOUNTING_OCCURRENCE_KIND_UNSPECIFIED AccountingOccurrenceKind = 0
+	AccountingOccurrenceKind_ACCOUNTING_OCCURRENCE_KIND_INVOCATION  AccountingOccurrenceKind = 1
+	AccountingOccurrenceKind_ACCOUNTING_OCCURRENCE_KIND_CHARGE      AccountingOccurrenceKind = 2
+)
+
+// Enum value maps for AccountingOccurrenceKind.
+var (
+	AccountingOccurrenceKind_name = map[int32]string{
+		0: "ACCOUNTING_OCCURRENCE_KIND_UNSPECIFIED",
+		1: "ACCOUNTING_OCCURRENCE_KIND_INVOCATION",
+		2: "ACCOUNTING_OCCURRENCE_KIND_CHARGE",
+	}
+	AccountingOccurrenceKind_value = map[string]int32{
+		"ACCOUNTING_OCCURRENCE_KIND_UNSPECIFIED": 0,
+		"ACCOUNTING_OCCURRENCE_KIND_INVOCATION":  1,
+		"ACCOUNTING_OCCURRENCE_KIND_CHARGE":      2,
+	}
+)
+
+func (x AccountingOccurrenceKind) Enum() *AccountingOccurrenceKind {
+	p := new(AccountingOccurrenceKind)
+	*p = x
+	return p
+}
+
+func (x AccountingOccurrenceKind) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (AccountingOccurrenceKind) Descriptor() protoreflect.EnumDescriptor {
+	return file_vibesys_store_v1_replay_proto_enumTypes[5].Descriptor()
+}
+
+func (AccountingOccurrenceKind) Type() protoreflect.EnumType {
+	return &file_vibesys_store_v1_replay_proto_enumTypes[5]
+}
+
+func (x AccountingOccurrenceKind) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use AccountingOccurrenceKind.Descriptor instead.
+func (AccountingOccurrenceKind) EnumDescriptor() ([]byte, []int) {
+	return file_vibesys_store_v1_replay_proto_rawDescGZIP(), []int{5}
+}
+
 // Names are semantic, never source locations or live collection positions.
 type OperationKey struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -2287,6 +2416,454 @@ func (x *ReplayTurnWait) GetReplyIds() []string {
 	return nil
 }
 
+type AccountingOccurrence struct {
+	state         protoimpl.MessageState   `protogen:"open.v1"`
+	Kind          AccountingOccurrenceKind `protobuf:"varint,1,opt,name=kind,proto3,enum=vibesys.store.v1.AccountingOccurrenceKind" json:"kind,omitempty"`
+	Id            string                   `protobuf:"bytes,2,opt,name=id,proto3" json:"id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AccountingOccurrence) Reset() {
+	*x = AccountingOccurrence{}
+	mi := &file_vibesys_store_v1_replay_proto_msgTypes[30]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AccountingOccurrence) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AccountingOccurrence) ProtoMessage() {}
+
+func (x *AccountingOccurrence) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_store_v1_replay_proto_msgTypes[30]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AccountingOccurrence.ProtoReflect.Descriptor instead.
+func (*AccountingOccurrence) Descriptor() ([]byte, []int) {
+	return file_vibesys_store_v1_replay_proto_rawDescGZIP(), []int{30}
+}
+
+func (x *AccountingOccurrence) GetKind() AccountingOccurrenceKind {
+	if x != nil {
+		return x.Kind
+	}
+	return AccountingOccurrenceKind_ACCOUNTING_OCCURRENCE_KIND_UNSPECIFIED
+}
+
+func (x *AccountingOccurrence) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+// Exact integer counts, finite amounts, or an explicitly unknown quantity.
+type AccountingQuantity struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Value:
+	//
+	//	*AccountingQuantity_Count
+	//	*AccountingQuantity_Amount
+	//	*AccountingQuantity_Unknown
+	Value         isAccountingQuantity_Value `protobuf_oneof:"value"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AccountingQuantity) Reset() {
+	*x = AccountingQuantity{}
+	mi := &file_vibesys_store_v1_replay_proto_msgTypes[31]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AccountingQuantity) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AccountingQuantity) ProtoMessage() {}
+
+func (x *AccountingQuantity) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_store_v1_replay_proto_msgTypes[31]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AccountingQuantity.ProtoReflect.Descriptor instead.
+func (*AccountingQuantity) Descriptor() ([]byte, []int) {
+	return file_vibesys_store_v1_replay_proto_rawDescGZIP(), []int{31}
+}
+
+func (x *AccountingQuantity) GetValue() isAccountingQuantity_Value {
+	if x != nil {
+		return x.Value
+	}
+	return nil
+}
+
+func (x *AccountingQuantity) GetCount() uint64 {
+	if x != nil {
+		if x, ok := x.Value.(*AccountingQuantity_Count); ok {
+			return x.Count
+		}
+	}
+	return 0
+}
+
+func (x *AccountingQuantity) GetAmount() float64 {
+	if x != nil {
+		if x, ok := x.Value.(*AccountingQuantity_Amount); ok {
+			return x.Amount
+		}
+	}
+	return 0
+}
+
+func (x *AccountingQuantity) GetUnknown() bool {
+	if x != nil {
+		if x, ok := x.Value.(*AccountingQuantity_Unknown); ok {
+			return x.Unknown
+		}
+	}
+	return false
+}
+
+type isAccountingQuantity_Value interface {
+	isAccountingQuantity_Value()
+}
+
+type AccountingQuantity_Count struct {
+	Count uint64 `protobuf:"varint,1,opt,name=count,proto3,oneof"`
+}
+
+type AccountingQuantity_Amount struct {
+	Amount float64 `protobuf:"fixed64,2,opt,name=amount,proto3,oneof"`
+}
+
+type AccountingQuantity_Unknown struct {
+	Unknown bool `protobuf:"varint,3,opt,name=unknown,proto3,oneof"`
+}
+
+func (*AccountingQuantity_Count) isAccountingQuantity_Value() {}
+
+func (*AccountingQuantity_Amount) isAccountingQuantity_Value() {}
+
+func (*AccountingQuantity_Unknown) isAccountingQuantity_Value() {}
+
+// One cumulative reading of one chargeable occurrence. The owner's source
+// sequence is the revision: a higher revision replaces a lower one.
+type AccountingObservation struct {
+	state      protoimpl.MessageState `protogen:"open.v1"`
+	Occurrence *AccountingOccurrence  `protobuf:"bytes,1,opt,name=occurrence,proto3" json:"occurrence,omitempty"`
+	Dimension  AccountingDimension    `protobuf:"varint,2,opt,name=dimension,proto3,enum=vibesys.store.v1.AccountingDimension" json:"dimension,omitempty"`
+	Revision   uint64                 `protobuf:"varint,3,opt,name=revision,proto3" json:"revision,omitempty"`
+	Charged    *AccountingQuantity    `protobuf:"bytes,4,opt,name=charged,proto3" json:"charged,omitempty"`
+	Refunded   uint64                 `protobuf:"varint,5,opt,name=refunded,proto3" json:"refunded,omitempty"`
+	// Source-request and external identities that name the same occurrence.
+	Aliases []string `protobuf:"bytes,6,rep,name=aliases,proto3" json:"aliases,omitempty"`
+	// Zero is imported history; a native reading names the occurrence's start epoch.
+	OriginEpoch   uint32 `protobuf:"varint,7,opt,name=origin_epoch,json=originEpoch,proto3" json:"origin_epoch,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AccountingObservation) Reset() {
+	*x = AccountingObservation{}
+	mi := &file_vibesys_store_v1_replay_proto_msgTypes[32]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AccountingObservation) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AccountingObservation) ProtoMessage() {}
+
+func (x *AccountingObservation) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_store_v1_replay_proto_msgTypes[32]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AccountingObservation.ProtoReflect.Descriptor instead.
+func (*AccountingObservation) Descriptor() ([]byte, []int) {
+	return file_vibesys_store_v1_replay_proto_rawDescGZIP(), []int{32}
+}
+
+func (x *AccountingObservation) GetOccurrence() *AccountingOccurrence {
+	if x != nil {
+		return x.Occurrence
+	}
+	return nil
+}
+
+func (x *AccountingObservation) GetDimension() AccountingDimension {
+	if x != nil {
+		return x.Dimension
+	}
+	return AccountingDimension_ACCOUNTING_DIMENSION_UNSPECIFIED
+}
+
+func (x *AccountingObservation) GetRevision() uint64 {
+	if x != nil {
+		return x.Revision
+	}
+	return 0
+}
+
+func (x *AccountingObservation) GetCharged() *AccountingQuantity {
+	if x != nil {
+		return x.Charged
+	}
+	return nil
+}
+
+func (x *AccountingObservation) GetRefunded() uint64 {
+	if x != nil {
+		return x.Refunded
+	}
+	return 0
+}
+
+func (x *AccountingObservation) GetAliases() []string {
+	if x != nil {
+		return x.Aliases
+	}
+	return nil
+}
+
+func (x *AccountingObservation) GetOriginEpoch() uint32 {
+	if x != nil {
+		return x.OriginEpoch
+	}
+	return 0
+}
+
+// One declared cell of an aggregate: the occurrence's reading at the watermark.
+type AccountingCell struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Occurrence    *AccountingOccurrence  `protobuf:"bytes,1,opt,name=occurrence,proto3" json:"occurrence,omitempty"`
+	Baseline      *AccountingQuantity    `protobuf:"bytes,2,opt,name=baseline,proto3" json:"baseline,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AccountingCell) Reset() {
+	*x = AccountingCell{}
+	mi := &file_vibesys_store_v1_replay_proto_msgTypes[33]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AccountingCell) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AccountingCell) ProtoMessage() {}
+
+func (x *AccountingCell) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_store_v1_replay_proto_msgTypes[33]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AccountingCell.ProtoReflect.Descriptor instead.
+func (*AccountingCell) Descriptor() ([]byte, []int) {
+	return file_vibesys_store_v1_replay_proto_rawDescGZIP(), []int{33}
+}
+
+func (x *AccountingCell) GetOccurrence() *AccountingOccurrence {
+	if x != nil {
+		return x.Occurrence
+	}
+	return nil
+}
+
+func (x *AccountingCell) GetBaseline() *AccountingQuantity {
+	if x != nil {
+		return x.Baseline
+	}
+	return nil
+}
+
+// An aggregate total over declared disjoint cells and nested aggregates, at a
+// source watermark. It is never another occurrence.
+type AccountingCoverage struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Dimension     AccountingDimension    `protobuf:"varint,2,opt,name=dimension,proto3,enum=vibesys.store.v1.AccountingDimension" json:"dimension,omitempty"`
+	Watermark     uint64                 `protobuf:"varint,3,opt,name=watermark,proto3" json:"watermark,omitempty"`
+	Total         *AccountingQuantity    `protobuf:"bytes,4,opt,name=total,proto3" json:"total,omitempty"`
+	Cells         []*AccountingCell      `protobuf:"bytes,5,rep,name=cells,proto3" json:"cells,omitempty"`
+	Nested        []string               `protobuf:"bytes,6,rep,name=nested,proto3" json:"nested,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AccountingCoverage) Reset() {
+	*x = AccountingCoverage{}
+	mi := &file_vibesys_store_v1_replay_proto_msgTypes[34]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AccountingCoverage) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AccountingCoverage) ProtoMessage() {}
+
+func (x *AccountingCoverage) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_store_v1_replay_proto_msgTypes[34]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AccountingCoverage.ProtoReflect.Descriptor instead.
+func (*AccountingCoverage) Descriptor() ([]byte, []int) {
+	return file_vibesys_store_v1_replay_proto_rawDescGZIP(), []int{34}
+}
+
+func (x *AccountingCoverage) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *AccountingCoverage) GetDimension() AccountingDimension {
+	if x != nil {
+		return x.Dimension
+	}
+	return AccountingDimension_ACCOUNTING_DIMENSION_UNSPECIFIED
+}
+
+func (x *AccountingCoverage) GetWatermark() uint64 {
+	if x != nil {
+		return x.Watermark
+	}
+	return 0
+}
+
+func (x *AccountingCoverage) GetTotal() *AccountingQuantity {
+	if x != nil {
+		return x.Total
+	}
+	return nil
+}
+
+func (x *AccountingCoverage) GetCells() []*AccountingCell {
+	if x != nil {
+		return x.Cells
+	}
+	return nil
+}
+
+func (x *AccountingCoverage) GetNested() []string {
+	if x != nil {
+		return x.Nested
+	}
+	return nil
+}
+
+// Notice detail: published import history, or a delayed observation appended
+// through the run's single writer. Only an import publication declares coverage.
+type AccountingEvidence struct {
+	state         protoimpl.MessageState   `protogen:"open.v1"`
+	ImportId      *string                  `protobuf:"bytes,1,opt,name=import_id,json=importId,proto3,oneof" json:"import_id,omitempty"`
+	Observations  []*AccountingObservation `protobuf:"bytes,2,rep,name=observations,proto3" json:"observations,omitempty"`
+	Coverage      []*AccountingCoverage    `protobuf:"bytes,3,rep,name=coverage,proto3" json:"coverage,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AccountingEvidence) Reset() {
+	*x = AccountingEvidence{}
+	mi := &file_vibesys_store_v1_replay_proto_msgTypes[35]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AccountingEvidence) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AccountingEvidence) ProtoMessage() {}
+
+func (x *AccountingEvidence) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_store_v1_replay_proto_msgTypes[35]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AccountingEvidence.ProtoReflect.Descriptor instead.
+func (*AccountingEvidence) Descriptor() ([]byte, []int) {
+	return file_vibesys_store_v1_replay_proto_rawDescGZIP(), []int{35}
+}
+
+func (x *AccountingEvidence) GetImportId() string {
+	if x != nil && x.ImportId != nil {
+		return *x.ImportId
+	}
+	return ""
+}
+
+func (x *AccountingEvidence) GetObservations() []*AccountingObservation {
+	if x != nil {
+		return x.Observations
+	}
+	return nil
+}
+
+func (x *AccountingEvidence) GetCoverage() []*AccountingCoverage {
+	if x != nil {
+		return x.Coverage
+	}
+	return nil
+}
+
 var file_vibesys_store_v1_replay_proto_extTypes = []protoimpl.ExtensionInfo{
 	{
 		ExtendedType:  (*descriptorpb.MessageOptions)(nil),
@@ -2518,7 +3095,47 @@ const file_vibesys_store_v1_replay_proto_rawDesc = "" +
 	"\x0eReplayTurnWait\x12\x1b\n" +
 	"\x04turn\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x04turn\x12-\n" +
 	"\treply_ids\x18\x02 \x03(\tB\x10\xbaH\r\x92\x01\n" +
-	"\b\x01\x18\x01\"\x04r\x02\x10\x01R\breplyIds*r\n" +
+	"\b\x01\x18\x01\"\x04r\x02\x10\x01R\breplyIds\"{\n" +
+	"\x14AccountingOccurrence\x12J\n" +
+	"\x04kind\x18\x01 \x01(\x0e2*.vibesys.store.v1.AccountingOccurrenceKindB\n" +
+	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x04kind\x12\x17\n" +
+	"\x02id\x18\x02 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x02id\"\x8d\x01\n" +
+	"\x12AccountingQuantity\x12\x16\n" +
+	"\x05count\x18\x01 \x01(\x04H\x00R\x05count\x12*\n" +
+	"\x06amount\x18\x02 \x01(\x01B\x10\xbaH\r\x12\v@\x01)\x00\x00\x00\x00\x00\x00\x00\x00H\x00R\x06amount\x12#\n" +
+	"\aunknown\x18\x03 \x01(\bB\a\xbaH\x04j\x02\b\x01H\x00R\aunknownB\x0e\n" +
+	"\x05value\x12\x05\xbaH\x02\b\x01\"\x85\x03\n" +
+	"\x15AccountingObservation\x12N\n" +
+	"\n" +
+	"occurrence\x18\x01 \x01(\v2&.vibesys.store.v1.AccountingOccurrenceB\x06\xbaH\x03\xc8\x01\x01R\n" +
+	"occurrence\x12O\n" +
+	"\tdimension\x18\x02 \x01(\x0e2%.vibesys.store.v1.AccountingDimensionB\n" +
+	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\tdimension\x12\x1a\n" +
+	"\brevision\x18\x03 \x01(\x04R\brevision\x12F\n" +
+	"\acharged\x18\x04 \x01(\v2$.vibesys.store.v1.AccountingQuantityB\x06\xbaH\x03\xc8\x01\x01R\acharged\x12\x1a\n" +
+	"\brefunded\x18\x05 \x01(\x04R\brefunded\x12(\n" +
+	"\aaliases\x18\x06 \x03(\tB\x0e\xbaH\v\x92\x01\b\x18\x01\"\x04r\x02\x10\x01R\aaliases\x12!\n" +
+	"\forigin_epoch\x18\a \x01(\rR\voriginEpoch\"\xaa\x01\n" +
+	"\x0eAccountingCell\x12N\n" +
+	"\n" +
+	"occurrence\x18\x01 \x01(\v2&.vibesys.store.v1.AccountingOccurrenceB\x06\xbaH\x03\xc8\x01\x01R\n" +
+	"occurrence\x12H\n" +
+	"\bbaseline\x18\x02 \x01(\v2$.vibesys.store.v1.AccountingQuantityB\x06\xbaH\x03\xc8\x01\x01R\bbaseline\"\xc0\x02\n" +
+	"\x12AccountingCoverage\x12\x17\n" +
+	"\x02id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x02id\x12O\n" +
+	"\tdimension\x18\x02 \x01(\x0e2%.vibesys.store.v1.AccountingDimensionB\n" +
+	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\tdimension\x12\x1c\n" +
+	"\twatermark\x18\x03 \x01(\x04R\twatermark\x12B\n" +
+	"\x05total\x18\x04 \x01(\v2$.vibesys.store.v1.AccountingQuantityB\x06\xbaH\x03\xc8\x01\x01R\x05total\x126\n" +
+	"\x05cells\x18\x05 \x03(\v2 .vibesys.store.v1.AccountingCellR\x05cells\x12&\n" +
+	"\x06nested\x18\x06 \x03(\tB\x0e\xbaH\v\x92\x01\b\x18\x01\"\x04r\x02\x10\x01R\x06nested\"\xee\x02\n" +
+	"\x12AccountingEvidence\x12)\n" +
+	"\timport_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01H\x00R\bimportId\x88\x01\x01\x12K\n" +
+	"\fobservations\x18\x02 \x03(\v2'.vibesys.store.v1.AccountingObservationR\fobservations\x12@\n" +
+	"\bcoverage\x18\x03 \x03(\v2$.vibesys.store.v1.AccountingCoverageR\bcoverage:\x8f\x01\xbaH\x8b\x01\x1a\x88\x01\n" +
+	"\x1caccounting_evidence.coverage\x126only an import publication declares aggregate coverage\x1a0has(this.import_id) || this.coverage.size() == 0B\f\n" +
+	"\n" +
+	"_import_id*r\n" +
 	"\x0fReplayFieldKind\x12!\n" +
 	"\x1dREPLAY_FIELD_KIND_UNSPECIFIED\x10\x00\x12\x1e\n" +
 	"\x1aREPLAY_FIELD_KIND_IDENTITY\x10\x01\x12\x1c\n" +
@@ -2539,7 +3156,25 @@ const file_vibesys_store_v1_replay_proto_rawDesc = "" +
 	"\x12ReplayControlStale\x12$\n" +
 	" REPLAY_CONTROL_STALE_UNSPECIFIED\x10\x00\x12\x1e\n" +
 	"\x1aREPLAY_CONTROL_STALE_EPOCH\x10\x01\x12\x1d\n" +
-	"\x19REPLAY_CONTROL_STALE_TURN\x10\x02:H\n" +
+	"\x19REPLAY_CONTROL_STALE_TURN\x10\x02*\xea\x03\n" +
+	"\x13AccountingDimension\x12$\n" +
+	" ACCOUNTING_DIMENSION_UNSPECIFIED\x10\x00\x12\"\n" +
+	"\x1eACCOUNTING_DIMENSION_MONEY_USD\x10\x01\x12%\n" +
+	"!ACCOUNTING_DIMENSION_INPUT_TOKENS\x10\x02\x12*\n" +
+	"&ACCOUNTING_DIMENSION_CACHE_READ_TOKENS\x10\x03\x12.\n" +
+	"*ACCOUNTING_DIMENSION_CACHE_CREATION_TOKENS\x10\x04\x12&\n" +
+	"\"ACCOUNTING_DIMENSION_OUTPUT_TOKENS\x10\x05\x12)\n" +
+	"%ACCOUNTING_DIMENSION_REASONING_TOKENS\x10\x06\x12$\n" +
+	" ACCOUNTING_DIMENSION_DURATION_MS\x10\a\x12#\n" +
+	"\x1fACCOUNTING_DIMENSION_ADMISSIONS\x10\b\x12!\n" +
+	"\x1dACCOUNTING_DIMENSION_ATTEMPTS\x10\t\x12\x1e\n" +
+	"\x1aACCOUNTING_DIMENSION_TURNS\x10\n" +
+	"\x12%\n" +
+	"!ACCOUNTING_DIMENSION_RETRY_BUDGET\x10\v*\x98\x01\n" +
+	"\x18AccountingOccurrenceKind\x12*\n" +
+	"&ACCOUNTING_OCCURRENCE_KIND_UNSPECIFIED\x10\x00\x12)\n" +
+	"%ACCOUNTING_OCCURRENCE_KIND_INVOCATION\x10\x01\x12%\n" +
+	"!ACCOUNTING_OCCURRENCE_KIND_CHARGE\x10\x02:H\n" +
 	"\x0ereplay_context\x12\x1f.google.protobuf.MessageOptions\x18\x9e\x8f\x03 \x01(\bR\rreplayContext:e\n" +
 	"\freplay_field\x12\x1d.google.protobuf.FieldOptions\x18\x9c\x8f\x03 \x01(\x0e2!.vibesys.store.v1.ReplayFieldKindR\vreplayField:>\n" +
 	"\n" +
@@ -2557,93 +3192,112 @@ func file_vibesys_store_v1_replay_proto_rawDescGZIP() []byte {
 	return file_vibesys_store_v1_replay_proto_rawDescData
 }
 
-var file_vibesys_store_v1_replay_proto_enumTypes = make([]protoimpl.EnumInfo, 4)
-var file_vibesys_store_v1_replay_proto_msgTypes = make([]protoimpl.MessageInfo, 30)
+var file_vibesys_store_v1_replay_proto_enumTypes = make([]protoimpl.EnumInfo, 6)
+var file_vibesys_store_v1_replay_proto_msgTypes = make([]protoimpl.MessageInfo, 36)
 var file_vibesys_store_v1_replay_proto_goTypes = []any{
 	(ReplayFieldKind)(0),                // 0: vibesys.store.v1.ReplayFieldKind
 	(KeyComponentKind)(0),               // 1: vibesys.store.v1.KeyComponentKind
 	(WriterReconciliationStatus)(0),     // 2: vibesys.store.v1.WriterReconciliationStatus
 	(ReplayControlStale)(0),             // 3: vibesys.store.v1.ReplayControlStale
-	(*OperationKey)(nil),                // 4: vibesys.store.v1.OperationKey
-	(*KeyComponent)(nil),                // 5: vibesys.store.v1.KeyComponent
-	(*ReplayAllowance)(nil),             // 6: vibesys.store.v1.ReplayAllowance
-	(*ReplayResources)(nil),             // 7: vibesys.store.v1.ReplayResources
-	(*ReplayPolicy)(nil),                // 8: vibesys.store.v1.ReplayPolicy
-	(*OperationReplay)(nil),             // 9: vibesys.store.v1.OperationReplay
-	(*ReplayTurnObservation)(nil),       // 10: vibesys.store.v1.ReplayTurnObservation
-	(*ReplayTurnBound)(nil),             // 11: vibesys.store.v1.ReplayTurnBound
-	(*ReplayPhysical)(nil),              // 12: vibesys.store.v1.ReplayPhysical
-	(*WriterBacking)(nil),               // 13: vibesys.store.v1.WriterBacking
-	(*WriterIdentity)(nil),              // 14: vibesys.store.v1.WriterIdentity
-	(*WriterManifest)(nil),              // 15: vibesys.store.v1.WriterManifest
-	(*WriterTerminationProof)(nil),      // 16: vibesys.store.v1.WriterTerminationProof
-	(*WriterReconciliation)(nil),        // 17: vibesys.store.v1.WriterReconciliation
-	(*WriterRegistryState)(nil),         // 18: vibesys.store.v1.WriterRegistryState
-	(*ReplayClock)(nil),                 // 19: vibesys.store.v1.ReplayClock
-	(*ReplayNotice)(nil),                // 20: vibesys.store.v1.ReplayNotice
-	(*ReplayAcknowledgement)(nil),       // 21: vibesys.store.v1.ReplayAcknowledgement
-	(*ReplayObservation)(nil),           // 22: vibesys.store.v1.ReplayObservation
-	(*ReplayPolicyDrift)(nil),           // 23: vibesys.store.v1.ReplayPolicyDrift
-	(*ReplayToolSubmission)(nil),        // 24: vibesys.store.v1.ReplayToolSubmission
-	(*ReplayTurnPermit)(nil),            // 25: vibesys.store.v1.ReplayTurnPermit
-	(*ReplayControl)(nil),               // 26: vibesys.store.v1.ReplayControl
-	(*ReplayPause)(nil),                 // 27: vibesys.store.v1.ReplayPause
-	(*ReplayPauseNow)(nil),              // 28: vibesys.store.v1.ReplayPauseNow
-	(*ReplaySteer)(nil),                 // 29: vibesys.store.v1.ReplaySteer
-	(*ReplayControlDisposition)(nil),    // 30: vibesys.store.v1.ReplayControlDisposition
-	(*ReplayControlApplied)(nil),        // 31: vibesys.store.v1.ReplayControlApplied
-	(*ReplayToolAcknowledgement)(nil),   // 32: vibesys.store.v1.ReplayToolAcknowledgement
-	(*ReplayTurnWait)(nil),              // 33: vibesys.store.v1.ReplayTurnWait
-	(*anypb.Any)(nil),                   // 34: google.protobuf.Any
-	(*TokenUsage)(nil),                  // 35: vibesys.store.v1.TokenUsage
-	(*descriptorpb.MessageOptions)(nil), // 36: google.protobuf.MessageOptions
-	(*descriptorpb.FieldOptions)(nil),   // 37: google.protobuf.FieldOptions
+	(AccountingDimension)(0),            // 4: vibesys.store.v1.AccountingDimension
+	(AccountingOccurrenceKind)(0),       // 5: vibesys.store.v1.AccountingOccurrenceKind
+	(*OperationKey)(nil),                // 6: vibesys.store.v1.OperationKey
+	(*KeyComponent)(nil),                // 7: vibesys.store.v1.KeyComponent
+	(*ReplayAllowance)(nil),             // 8: vibesys.store.v1.ReplayAllowance
+	(*ReplayResources)(nil),             // 9: vibesys.store.v1.ReplayResources
+	(*ReplayPolicy)(nil),                // 10: vibesys.store.v1.ReplayPolicy
+	(*OperationReplay)(nil),             // 11: vibesys.store.v1.OperationReplay
+	(*ReplayTurnObservation)(nil),       // 12: vibesys.store.v1.ReplayTurnObservation
+	(*ReplayTurnBound)(nil),             // 13: vibesys.store.v1.ReplayTurnBound
+	(*ReplayPhysical)(nil),              // 14: vibesys.store.v1.ReplayPhysical
+	(*WriterBacking)(nil),               // 15: vibesys.store.v1.WriterBacking
+	(*WriterIdentity)(nil),              // 16: vibesys.store.v1.WriterIdentity
+	(*WriterManifest)(nil),              // 17: vibesys.store.v1.WriterManifest
+	(*WriterTerminationProof)(nil),      // 18: vibesys.store.v1.WriterTerminationProof
+	(*WriterReconciliation)(nil),        // 19: vibesys.store.v1.WriterReconciliation
+	(*WriterRegistryState)(nil),         // 20: vibesys.store.v1.WriterRegistryState
+	(*ReplayClock)(nil),                 // 21: vibesys.store.v1.ReplayClock
+	(*ReplayNotice)(nil),                // 22: vibesys.store.v1.ReplayNotice
+	(*ReplayAcknowledgement)(nil),       // 23: vibesys.store.v1.ReplayAcknowledgement
+	(*ReplayObservation)(nil),           // 24: vibesys.store.v1.ReplayObservation
+	(*ReplayPolicyDrift)(nil),           // 25: vibesys.store.v1.ReplayPolicyDrift
+	(*ReplayToolSubmission)(nil),        // 26: vibesys.store.v1.ReplayToolSubmission
+	(*ReplayTurnPermit)(nil),            // 27: vibesys.store.v1.ReplayTurnPermit
+	(*ReplayControl)(nil),               // 28: vibesys.store.v1.ReplayControl
+	(*ReplayPause)(nil),                 // 29: vibesys.store.v1.ReplayPause
+	(*ReplayPauseNow)(nil),              // 30: vibesys.store.v1.ReplayPauseNow
+	(*ReplaySteer)(nil),                 // 31: vibesys.store.v1.ReplaySteer
+	(*ReplayControlDisposition)(nil),    // 32: vibesys.store.v1.ReplayControlDisposition
+	(*ReplayControlApplied)(nil),        // 33: vibesys.store.v1.ReplayControlApplied
+	(*ReplayToolAcknowledgement)(nil),   // 34: vibesys.store.v1.ReplayToolAcknowledgement
+	(*ReplayTurnWait)(nil),              // 35: vibesys.store.v1.ReplayTurnWait
+	(*AccountingOccurrence)(nil),        // 36: vibesys.store.v1.AccountingOccurrence
+	(*AccountingQuantity)(nil),          // 37: vibesys.store.v1.AccountingQuantity
+	(*AccountingObservation)(nil),       // 38: vibesys.store.v1.AccountingObservation
+	(*AccountingCell)(nil),              // 39: vibesys.store.v1.AccountingCell
+	(*AccountingCoverage)(nil),          // 40: vibesys.store.v1.AccountingCoverage
+	(*AccountingEvidence)(nil),          // 41: vibesys.store.v1.AccountingEvidence
+	(*anypb.Any)(nil),                   // 42: google.protobuf.Any
+	(*TokenUsage)(nil),                  // 43: vibesys.store.v1.TokenUsage
+	(*descriptorpb.MessageOptions)(nil), // 44: google.protobuf.MessageOptions
+	(*descriptorpb.FieldOptions)(nil),   // 45: google.protobuf.FieldOptions
 }
 var file_vibesys_store_v1_replay_proto_depIdxs = []int32{
-	5,  // 0: vibesys.store.v1.OperationKey.scope:type_name -> vibesys.store.v1.KeyComponent
+	7,  // 0: vibesys.store.v1.OperationKey.scope:type_name -> vibesys.store.v1.KeyComponent
 	1,  // 1: vibesys.store.v1.KeyComponent.kind:type_name -> vibesys.store.v1.KeyComponentKind
-	7,  // 2: vibesys.store.v1.ReplayAllowance.resources:type_name -> vibesys.store.v1.ReplayResources
-	34, // 3: vibesys.store.v1.ReplayPolicy.request:type_name -> google.protobuf.Any
-	7,  // 4: vibesys.store.v1.ReplayPolicy.reservation:type_name -> vibesys.store.v1.ReplayResources
-	4,  // 5: vibesys.store.v1.OperationReplay.key:type_name -> vibesys.store.v1.OperationKey
-	8,  // 6: vibesys.store.v1.OperationReplay.policy:type_name -> vibesys.store.v1.ReplayPolicy
-	34, // 7: vibesys.store.v1.OperationReplay.outcome:type_name -> google.protobuf.Any
-	6,  // 8: vibesys.store.v1.OperationReplay.allowance:type_name -> vibesys.store.v1.ReplayAllowance
-	11, // 9: vibesys.store.v1.OperationReplay.turn_bound:type_name -> vibesys.store.v1.ReplayTurnBound
-	11, // 10: vibesys.store.v1.ReplayTurnObservation.bound:type_name -> vibesys.store.v1.ReplayTurnBound
-	33, // 11: vibesys.store.v1.ReplayTurnObservation.suspension:type_name -> vibesys.store.v1.ReplayTurnWait
-	13, // 12: vibesys.store.v1.WriterManifest.backing:type_name -> vibesys.store.v1.WriterBacking
-	14, // 13: vibesys.store.v1.WriterManifest.writers:type_name -> vibesys.store.v1.WriterIdentity
-	15, // 14: vibesys.store.v1.WriterTerminationProof.manifest:type_name -> vibesys.store.v1.WriterManifest
-	15, // 15: vibesys.store.v1.WriterReconciliation.manifest:type_name -> vibesys.store.v1.WriterManifest
+	9,  // 2: vibesys.store.v1.ReplayAllowance.resources:type_name -> vibesys.store.v1.ReplayResources
+	42, // 3: vibesys.store.v1.ReplayPolicy.request:type_name -> google.protobuf.Any
+	9,  // 4: vibesys.store.v1.ReplayPolicy.reservation:type_name -> vibesys.store.v1.ReplayResources
+	6,  // 5: vibesys.store.v1.OperationReplay.key:type_name -> vibesys.store.v1.OperationKey
+	10, // 6: vibesys.store.v1.OperationReplay.policy:type_name -> vibesys.store.v1.ReplayPolicy
+	42, // 7: vibesys.store.v1.OperationReplay.outcome:type_name -> google.protobuf.Any
+	8,  // 8: vibesys.store.v1.OperationReplay.allowance:type_name -> vibesys.store.v1.ReplayAllowance
+	13, // 9: vibesys.store.v1.OperationReplay.turn_bound:type_name -> vibesys.store.v1.ReplayTurnBound
+	13, // 10: vibesys.store.v1.ReplayTurnObservation.bound:type_name -> vibesys.store.v1.ReplayTurnBound
+	35, // 11: vibesys.store.v1.ReplayTurnObservation.suspension:type_name -> vibesys.store.v1.ReplayTurnWait
+	15, // 12: vibesys.store.v1.WriterManifest.backing:type_name -> vibesys.store.v1.WriterBacking
+	16, // 13: vibesys.store.v1.WriterManifest.writers:type_name -> vibesys.store.v1.WriterIdentity
+	17, // 14: vibesys.store.v1.WriterTerminationProof.manifest:type_name -> vibesys.store.v1.WriterManifest
+	17, // 15: vibesys.store.v1.WriterReconciliation.manifest:type_name -> vibesys.store.v1.WriterManifest
 	2,  // 16: vibesys.store.v1.WriterReconciliation.status:type_name -> vibesys.store.v1.WriterReconciliationStatus
-	16, // 17: vibesys.store.v1.WriterReconciliation.proof:type_name -> vibesys.store.v1.WriterTerminationProof
-	15, // 18: vibesys.store.v1.WriterRegistryState.manifest:type_name -> vibesys.store.v1.WriterManifest
-	16, // 19: vibesys.store.v1.WriterRegistryState.proof:type_name -> vibesys.store.v1.WriterTerminationProof
-	6,  // 20: vibesys.store.v1.ReplayClock.allowance:type_name -> vibesys.store.v1.ReplayAllowance
-	9,  // 21: vibesys.store.v1.ReplayNotice.unused:type_name -> vibesys.store.v1.OperationReplay
-	4,  // 22: vibesys.store.v1.ReplayNotice.pending:type_name -> vibesys.store.v1.OperationKey
-	34, // 23: vibesys.store.v1.ReplayObservation.outcome:type_name -> google.protobuf.Any
-	35, // 24: vibesys.store.v1.ReplayObservation.usage:type_name -> vibesys.store.v1.TokenUsage
-	10, // 25: vibesys.store.v1.ReplayObservation.turn:type_name -> vibesys.store.v1.ReplayTurnObservation
-	25, // 26: vibesys.store.v1.ReplayToolSubmission.permit:type_name -> vibesys.store.v1.ReplayTurnPermit
-	11, // 27: vibesys.store.v1.ReplayTurnPermit.bound:type_name -> vibesys.store.v1.ReplayTurnBound
-	27, // 28: vibesys.store.v1.ReplayControl.pause:type_name -> vibesys.store.v1.ReplayPause
-	28, // 29: vibesys.store.v1.ReplayControl.pause_now:type_name -> vibesys.store.v1.ReplayPauseNow
-	29, // 30: vibesys.store.v1.ReplayControl.steer:type_name -> vibesys.store.v1.ReplaySteer
-	26, // 31: vibesys.store.v1.ReplayControlDisposition.control:type_name -> vibesys.store.v1.ReplayControl
-	31, // 32: vibesys.store.v1.ReplayControlDisposition.applied:type_name -> vibesys.store.v1.ReplayControlApplied
+	18, // 17: vibesys.store.v1.WriterReconciliation.proof:type_name -> vibesys.store.v1.WriterTerminationProof
+	17, // 18: vibesys.store.v1.WriterRegistryState.manifest:type_name -> vibesys.store.v1.WriterManifest
+	18, // 19: vibesys.store.v1.WriterRegistryState.proof:type_name -> vibesys.store.v1.WriterTerminationProof
+	8,  // 20: vibesys.store.v1.ReplayClock.allowance:type_name -> vibesys.store.v1.ReplayAllowance
+	11, // 21: vibesys.store.v1.ReplayNotice.unused:type_name -> vibesys.store.v1.OperationReplay
+	6,  // 22: vibesys.store.v1.ReplayNotice.pending:type_name -> vibesys.store.v1.OperationKey
+	42, // 23: vibesys.store.v1.ReplayObservation.outcome:type_name -> google.protobuf.Any
+	43, // 24: vibesys.store.v1.ReplayObservation.usage:type_name -> vibesys.store.v1.TokenUsage
+	12, // 25: vibesys.store.v1.ReplayObservation.turn:type_name -> vibesys.store.v1.ReplayTurnObservation
+	27, // 26: vibesys.store.v1.ReplayToolSubmission.permit:type_name -> vibesys.store.v1.ReplayTurnPermit
+	13, // 27: vibesys.store.v1.ReplayTurnPermit.bound:type_name -> vibesys.store.v1.ReplayTurnBound
+	29, // 28: vibesys.store.v1.ReplayControl.pause:type_name -> vibesys.store.v1.ReplayPause
+	30, // 29: vibesys.store.v1.ReplayControl.pause_now:type_name -> vibesys.store.v1.ReplayPauseNow
+	31, // 30: vibesys.store.v1.ReplayControl.steer:type_name -> vibesys.store.v1.ReplaySteer
+	28, // 31: vibesys.store.v1.ReplayControlDisposition.control:type_name -> vibesys.store.v1.ReplayControl
+	33, // 32: vibesys.store.v1.ReplayControlDisposition.applied:type_name -> vibesys.store.v1.ReplayControlApplied
 	3,  // 33: vibesys.store.v1.ReplayControlDisposition.stale:type_name -> vibesys.store.v1.ReplayControlStale
-	25, // 34: vibesys.store.v1.ReplayControlApplied.draining:type_name -> vibesys.store.v1.ReplayTurnPermit
-	36, // 35: vibesys.store.v1.replay_context:extendee -> google.protobuf.MessageOptions
-	37, // 36: vibesys.store.v1.replay_field:extendee -> google.protobuf.FieldOptions
-	37, // 37: vibesys.store.v1.replay_set:extendee -> google.protobuf.FieldOptions
-	0,  // 38: vibesys.store.v1.replay_field:type_name -> vibesys.store.v1.ReplayFieldKind
-	39, // [39:39] is the sub-list for method output_type
-	39, // [39:39] is the sub-list for method input_type
-	38, // [38:39] is the sub-list for extension type_name
-	35, // [35:38] is the sub-list for extension extendee
-	0,  // [0:35] is the sub-list for field type_name
+	27, // 34: vibesys.store.v1.ReplayControlApplied.draining:type_name -> vibesys.store.v1.ReplayTurnPermit
+	5,  // 35: vibesys.store.v1.AccountingOccurrence.kind:type_name -> vibesys.store.v1.AccountingOccurrenceKind
+	36, // 36: vibesys.store.v1.AccountingObservation.occurrence:type_name -> vibesys.store.v1.AccountingOccurrence
+	4,  // 37: vibesys.store.v1.AccountingObservation.dimension:type_name -> vibesys.store.v1.AccountingDimension
+	37, // 38: vibesys.store.v1.AccountingObservation.charged:type_name -> vibesys.store.v1.AccountingQuantity
+	36, // 39: vibesys.store.v1.AccountingCell.occurrence:type_name -> vibesys.store.v1.AccountingOccurrence
+	37, // 40: vibesys.store.v1.AccountingCell.baseline:type_name -> vibesys.store.v1.AccountingQuantity
+	4,  // 41: vibesys.store.v1.AccountingCoverage.dimension:type_name -> vibesys.store.v1.AccountingDimension
+	37, // 42: vibesys.store.v1.AccountingCoverage.total:type_name -> vibesys.store.v1.AccountingQuantity
+	39, // 43: vibesys.store.v1.AccountingCoverage.cells:type_name -> vibesys.store.v1.AccountingCell
+	38, // 44: vibesys.store.v1.AccountingEvidence.observations:type_name -> vibesys.store.v1.AccountingObservation
+	40, // 45: vibesys.store.v1.AccountingEvidence.coverage:type_name -> vibesys.store.v1.AccountingCoverage
+	44, // 46: vibesys.store.v1.replay_context:extendee -> google.protobuf.MessageOptions
+	45, // 47: vibesys.store.v1.replay_field:extendee -> google.protobuf.FieldOptions
+	45, // 48: vibesys.store.v1.replay_set:extendee -> google.protobuf.FieldOptions
+	0,  // 49: vibesys.store.v1.replay_field:type_name -> vibesys.store.v1.ReplayFieldKind
+	50, // [50:50] is the sub-list for method output_type
+	50, // [50:50] is the sub-list for method input_type
+	49, // [49:50] is the sub-list for extension type_name
+	46, // [46:49] is the sub-list for extension extendee
+	0,  // [0:46] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_store_v1_replay_proto_init() }
@@ -2668,13 +3322,19 @@ func file_vibesys_store_v1_replay_proto_init() {
 		(*ReplayControlDisposition_Applied)(nil),
 		(*ReplayControlDisposition_Stale)(nil),
 	}
+	file_vibesys_store_v1_replay_proto_msgTypes[31].OneofWrappers = []any{
+		(*AccountingQuantity_Count)(nil),
+		(*AccountingQuantity_Amount)(nil),
+		(*AccountingQuantity_Unknown)(nil),
+	}
+	file_vibesys_store_v1_replay_proto_msgTypes[35].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_vibesys_store_v1_replay_proto_rawDesc), len(file_vibesys_store_v1_replay_proto_rawDesc)),
-			NumEnums:      4,
-			NumMessages:   30,
+			NumEnums:      6,
+			NumMessages:   36,
 			NumExtensions: 3,
 			NumServices:   0,
 		},

@@ -1382,6 +1382,281 @@ class ReplayTurnWait(Message[_ReplayTurnWaitFields]):
         turn: str
         reply_ids: list[str]
 
+_AccountingOccurrenceFields: TypeAlias = Literal["kind", "id"]
+
+class AccountingOccurrence(Message[_AccountingOccurrenceFields]):
+    """
+    ```proto
+    message vibesys.store.v1.AccountingOccurrence
+    ```
+
+    Attributes:
+        kind:
+            ```proto
+            vibesys.store.v1.AccountingOccurrenceKind kind = 1;
+            ```
+        id:
+            ```proto
+            string id = 2;
+            ```
+    """
+
+    __slots__ = ("kind", "id")
+
+    if TYPE_CHECKING:
+
+        def __init__(
+            self,
+            *,
+            kind: AccountingOccurrenceKind | None = None,
+            id: str = "",
+        ) -> None:
+            pass
+
+        kind: AccountingOccurrenceKind
+        id: str
+
+_AccountingQuantityFields: TypeAlias = Literal["count", "amount", "unknown"]
+
+class AccountingQuantity(Message[_AccountingQuantityFields]):
+    """
+    Exact integer counts, finite amounts, or an explicitly unknown quantity.
+
+    ```proto
+    message vibesys.store.v1.AccountingQuantity
+    ```
+
+    Attributes:
+        value:
+            ```proto
+            oneof value
+            ```
+    """
+
+    __slots__ = ("value",)
+
+    if TYPE_CHECKING:
+
+        def __init__(
+            self,
+            *,
+            value: Oneof[Literal["count"], int] | Oneof[Literal["amount"], float] | Oneof[Literal["unknown"], bool] | None = None,
+        ) -> None:
+            pass
+
+        value: Oneof[Literal["count"], int] | Oneof[Literal["amount"], float] | Oneof[Literal["unknown"], bool] | None
+
+_AccountingObservationFields: TypeAlias = Literal["occurrence", "dimension", "revision", "charged", "refunded", "aliases", "origin_epoch"]
+
+class AccountingObservation(Message[_AccountingObservationFields]):
+    """
+    One cumulative reading of one chargeable occurrence. The owner's source
+    sequence is the revision: a higher revision replaces a lower one.
+
+    ```proto
+    message vibesys.store.v1.AccountingObservation
+    ```
+
+    Attributes:
+        occurrence:
+            ```proto
+            optional vibesys.store.v1.AccountingOccurrence occurrence = 1;
+            ```
+        dimension:
+            ```proto
+            vibesys.store.v1.AccountingDimension dimension = 2;
+            ```
+        revision:
+            ```proto
+            uint64 revision = 3;
+            ```
+        charged:
+            ```proto
+            optional vibesys.store.v1.AccountingQuantity charged = 4;
+            ```
+        refunded:
+            ```proto
+            uint64 refunded = 5;
+            ```
+        aliases:
+            Source-request and external identities that name the same occurrence.
+
+            ```proto
+            repeated string aliases = 6;
+            ```
+        origin_epoch:
+            Zero is imported history; a native reading names the occurrence's start epoch.
+
+            ```proto
+            uint32 origin_epoch = 7;
+            ```
+    """
+
+    __slots__ = ("occurrence", "dimension", "revision", "charged", "refunded", "aliases", "origin_epoch")
+
+    if TYPE_CHECKING:
+
+        def __init__(
+            self,
+            *,
+            occurrence: AccountingOccurrence | None = None,
+            dimension: AccountingDimension | None = None,
+            revision: int = 0,
+            charged: AccountingQuantity | None = None,
+            refunded: int = 0,
+            aliases: list[str] | None = None,
+            origin_epoch: int = 0,
+        ) -> None:
+            pass
+
+        occurrence: AccountingOccurrence | None
+        dimension: AccountingDimension
+        revision: int
+        charged: AccountingQuantity | None
+        refunded: int
+        aliases: list[str]
+        origin_epoch: int
+
+_AccountingCellFields: TypeAlias = Literal["occurrence", "baseline"]
+
+class AccountingCell(Message[_AccountingCellFields]):
+    """
+    One declared cell of an aggregate: the occurrence's reading at the watermark.
+
+    ```proto
+    message vibesys.store.v1.AccountingCell
+    ```
+
+    Attributes:
+        occurrence:
+            ```proto
+            optional vibesys.store.v1.AccountingOccurrence occurrence = 1;
+            ```
+        baseline:
+            ```proto
+            optional vibesys.store.v1.AccountingQuantity baseline = 2;
+            ```
+    """
+
+    __slots__ = ("occurrence", "baseline")
+
+    if TYPE_CHECKING:
+
+        def __init__(
+            self,
+            *,
+            occurrence: AccountingOccurrence | None = None,
+            baseline: AccountingQuantity | None = None,
+        ) -> None:
+            pass
+
+        occurrence: AccountingOccurrence | None
+        baseline: AccountingQuantity | None
+
+_AccountingCoverageFields: TypeAlias = Literal["id", "dimension", "watermark", "total", "cells", "nested"]
+
+class AccountingCoverage(Message[_AccountingCoverageFields]):
+    """
+    An aggregate total over declared disjoint cells and nested aggregates, at a
+    source watermark. It is never another occurrence.
+
+    ```proto
+    message vibesys.store.v1.AccountingCoverage
+    ```
+
+    Attributes:
+        id:
+            ```proto
+            string id = 1;
+            ```
+        dimension:
+            ```proto
+            vibesys.store.v1.AccountingDimension dimension = 2;
+            ```
+        watermark:
+            ```proto
+            uint64 watermark = 3;
+            ```
+        total:
+            ```proto
+            optional vibesys.store.v1.AccountingQuantity total = 4;
+            ```
+        cells:
+            ```proto
+            repeated vibesys.store.v1.AccountingCell cells = 5;
+            ```
+        nested:
+            ```proto
+            repeated string nested = 6;
+            ```
+    """
+
+    __slots__ = ("id", "dimension", "watermark", "total", "cells", "nested")
+
+    if TYPE_CHECKING:
+
+        def __init__(
+            self,
+            *,
+            id: str = "",
+            dimension: AccountingDimension | None = None,
+            watermark: int = 0,
+            total: AccountingQuantity | None = None,
+            cells: list[AccountingCell] | None = None,
+            nested: list[str] | None = None,
+        ) -> None:
+            pass
+
+        id: str
+        dimension: AccountingDimension
+        watermark: int
+        total: AccountingQuantity | None
+        cells: list[AccountingCell]
+        nested: list[str]
+
+_AccountingEvidenceFields: TypeAlias = Literal["import_id", "observations", "coverage"]
+
+class AccountingEvidence(Message[_AccountingEvidenceFields]):
+    """
+    Notice detail: published import history, or a delayed observation appended
+    through the run's single writer. Only an import publication declares coverage.
+
+    ```proto
+    message vibesys.store.v1.AccountingEvidence
+    ```
+
+    Attributes:
+        import_id:
+            ```proto
+            optional string import_id = 1;
+            ```
+        observations:
+            ```proto
+            repeated vibesys.store.v1.AccountingObservation observations = 2;
+            ```
+        coverage:
+            ```proto
+            repeated vibesys.store.v1.AccountingCoverage coverage = 3;
+            ```
+    """
+
+    __slots__ = ("import_id", "observations", "coverage")
+
+    if TYPE_CHECKING:
+
+        def __init__(
+            self,
+            *,
+            import_id: str | None = None,
+            observations: list[AccountingObservation] | None = None,
+            coverage: list[AccountingCoverage] | None = None,
+        ) -> None:
+            pass
+
+        import_id: str
+        observations: list[AccountingObservation]
+        coverage: list[AccountingCoverage]
+
 class ReplayFieldKind(Enum):
     """
     Every prompt-context field declares whether it changes semantic input or policy.
@@ -1513,6 +1788,107 @@ class ReplayControlStale(Enum):
     EPOCH = 1
     TURN = 2
 
+class AccountingDimension(Enum):
+    """
+    Closed accounting dimensions. vs_core's registry defines each dimension's
+    unit and which resource totals include it (input includes both cache kinds).
+
+    ```proto
+    enum vibesys.store.v1.AccountingDimension
+    ```
+
+    Attributes:
+        UNSPECIFIED:
+            ```proto
+            ACCOUNTING_DIMENSION_UNSPECIFIED = 0
+            ```
+        MONEY_USD:
+            ```proto
+            ACCOUNTING_DIMENSION_MONEY_USD = 1
+            ```
+        INPUT_TOKENS:
+            ```proto
+            ACCOUNTING_DIMENSION_INPUT_TOKENS = 2
+            ```
+        CACHE_READ_TOKENS:
+            ```proto
+            ACCOUNTING_DIMENSION_CACHE_READ_TOKENS = 3
+            ```
+        CACHE_CREATION_TOKENS:
+            ```proto
+            ACCOUNTING_DIMENSION_CACHE_CREATION_TOKENS = 4
+            ```
+        OUTPUT_TOKENS:
+            ```proto
+            ACCOUNTING_DIMENSION_OUTPUT_TOKENS = 5
+            ```
+        REASONING_TOKENS:
+            ```proto
+            ACCOUNTING_DIMENSION_REASONING_TOKENS = 6
+            ```
+        DURATION_MS:
+            ```proto
+            ACCOUNTING_DIMENSION_DURATION_MS = 7
+            ```
+        ADMISSIONS:
+            ```proto
+            ACCOUNTING_DIMENSION_ADMISSIONS = 8
+            ```
+        ATTEMPTS:
+            ```proto
+            ACCOUNTING_DIMENSION_ATTEMPTS = 9
+            ```
+        TURNS:
+            ```proto
+            ACCOUNTING_DIMENSION_TURNS = 10
+            ```
+        RETRY_BUDGET:
+            ```proto
+            ACCOUNTING_DIMENSION_RETRY_BUDGET = 11
+            ```
+    """
+
+    UNSPECIFIED = 0
+    MONEY_USD = 1
+    INPUT_TOKENS = 2
+    CACHE_READ_TOKENS = 3
+    CACHE_CREATION_TOKENS = 4
+    OUTPUT_TOKENS = 5
+    REASONING_TOKENS = 6
+    DURATION_MS = 7
+    ADMISSIONS = 8
+    ATTEMPTS = 9
+    TURNS = 10
+    RETRY_BUDGET = 11
+
+class AccountingOccurrenceKind(Enum):
+    """
+    A physical invocation for usage, or the original charge for admission,
+    attempt and turn counts. Import IDs, revisions and epochs never mint one.
+
+    ```proto
+    enum vibesys.store.v1.AccountingOccurrenceKind
+    ```
+
+    Attributes:
+        UNSPECIFIED:
+            ```proto
+            ACCOUNTING_OCCURRENCE_KIND_UNSPECIFIED = 0
+            ```
+        INVOCATION:
+            ```proto
+            ACCOUNTING_OCCURRENCE_KIND_INVOCATION = 1
+            ```
+        CHARGE:
+            ```proto
+            ACCOUNTING_OCCURRENCE_KIND_CHARGE = 2
+            ```
+    """
+
+    UNSPECIFIED = 0
+    INVOCATION = 1
+    CHARGE = 2
+
 ext_replay_context: Final[Extension[MessageOptions, bool]] = Extension()
 """
 Contexts classify their own fields. Shared facts inherit the classification
@@ -1541,7 +1917,7 @@ extend google.protobuf.FieldOptions { optional bool replay_set = 51101 [json_nam
 
 
 _DESC = file_desc(
-    b'\n\x1dvibesys/store/v1/replay.proto\x12\x10vibesys.store.v1\x1a\x1bbuf/validate/validate.proto\x1a\x19google/protobuf/any.proto\x1a google/protobuf/descriptor.proto\x1a"vibesys/store/v1/agent_attrs.proto"k\n\x0cOperationKey\x12%\n\toperation\x18\x01 \x01(\tR\toperationB\x07\xbaH\x04r\x02\x10\x01\x124\n\x05scope\x18\x02 \x03(\x0b2\x1e.vibesys.store.v1.KeyComponentR\x05scope"q\n\x0cKeyComponent\x12B\n\x04kind\x18\x01 \x01(\x0e2".vibesys.store.v1.KeyComponentKindR\x04kindB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x12\x1d\n\x05value\x18\x02 \x01(\tR\x05valueB\x07\xbaH\x04r\x02\x10\x01"\xbe\x01\n\x0fReplayAllowance\x12\x1e\n\niterations\x18\x01 \x01(\x04R\niterations\x12\x1a\n\x08capacity\x18\x02 \x01(\x04R\x08capacity\x12.\n\tremaining\x18\x03 \x01(\x01R\tremainingB\x10\xbaH\r\x12\x0b@\x01)\x00\x00\x00\x00\x00\x00\x00\x00\x12?\n\tresources\x18\x04 \x01(\x0b2!.vibesys.store.v1.ReplayResourcesR\tresources"\xc8\x01\n\x0fReplayResources\x122\n\tmoney_usd\x18\x01 \x01(\x01H\x00R\x08moneyUsdB\x10\xbaH\r\x12\x0b@\x01)\x00\x00\x00\x00\x00\x00\x00\x00\x88\x01\x01\x12&\n\x0cinput_tokens\x18\x02 \x01(\x04H\x01R\x0binputTokens\x88\x01\x01\x12(\n\routput_tokens\x18\x03 \x01(\x04H\x02R\x0coutputTokens\x88\x01\x01B\x0c\n\n_money_usdB\x0f\n\r_input_tokensB\x10\n\x0e_output_tokens"\xb6\x03\n\x0cReplayPolicy\x12\x12\n\x04role\x18\x01 \x01(\tR\x04role\x12\x1a\n\x08template\x18\x02 \x01(\tR\x08template\x12\x18\n\x07content\x18\x03 \x01(\x0cR\x07content\x12&\n\nreply_type\x18\x04 \x01(\tR\treplyTypeB\x07\xbaH\x04r\x02\x10\x01\x12<\n\x13reply_schema_digest\x18\x05 \x01(\x0cH\x00R\x11replySchemaDigestB\x07\xbaH\x04z\x02h \x88\x01\x01\x12.\n\x07request\x18\x06 \x01(\x0b2\x14.google.protobuf.AnyR\x07request\x12C\n\x0breservation\x18\x07 \x01(\x0b2!.vibesys.store.v1.ReplayResourcesR\x0breservation\x12M\n\x17physical_within_seconds\x18\x08 \x01(\x01H\x01R\x15physicalWithinSecondsB\x10\xbaH\r\x12\x0b@\x01!\x00\x00\x00\x00\x00\x00\x00\x00\x88\x01\x01B\x16\n\x14_reply_schema_digestB\x1a\n\x18_physical_within_seconds"\xc7\x08\n\x0fOperationReplay\x128\n\x03key\x18\x01 \x01(\x0b2\x1e.vibesys.store.v1.OperationKeyR\x03keyB\x06\xbaH\x03\xc8\x01\x01\x122\n\x10encoding_version\x18\x02 \x01(\rR\x0fencodingVersionB\x07\xbaH\x04*\x02\x08\x01\x12#\n\x08identity\x18\x03 \x01(\x0cR\x08identityB\x07\xbaH\x04z\x02\x10\x01\x120\n\x0fidentity_digest\x18\x04 \x01(\x0cR\x0eidentityDigestB\x07\xbaH\x04z\x02h \x12+\n\x0cdependencies\x18\x05 \x01(\x0cR\x0cdependenciesB\x07\xbaH\x04z\x02h \x12>\n\x06policy\x18\x06 \x01(\x0b2\x1e.vibesys.store.v1.ReplayPolicyR\x06policyB\x06\xbaH\x03\xc8\x01\x01\x12.\n\x07outcome\x18\x07 \x01(\x0b2\x14.google.protobuf.AnyR\x07outcome\x12\x12\n\x04paid\x18\x08 \x01(\x08R\x04paid\x120\n\x08cost_usd\x18\t \x01(\x01H\x00R\x07costUsdB\x10\xbaH\r\x12\x0b@\x01)\x00\x00\x00\x00\x00\x00\x00\x00\x88\x01\x01\x12G\n\tallowance\x18\n \x01(\x0b2!.vibesys.store.v1.ReplayAllowanceR\tallowanceB\x06\xbaH\x03\xc8\x01\x01\x129\n\x11accepted_sequence\x18\x0b \x01(\x04H\x01R\x10acceptedSequenceB\x07\xbaH\x042\x02 \x00\x88\x01\x01\x123\n\x0eaccepted_child\x18\x0c \x01(\tH\x02R\racceptedChildB\x07\xbaH\x04r\x02\x10\x01\x88\x01\x01\x12@\n\nturn_bound\x18\r \x01(\x0b2!.vibesys.store.v1.ReplayTurnBoundR\tturnBoundB\x0b\n\t_cost_usdB\x14\n\x12_accepted_sequenceB\x11\n\x0f_accepted_child:\xda\x02\xbaH\xd6\x02\x1a\x96\x01\n\x1doperation_replay.reply_schema\x12;recorded operations require the writer\'s reply schema proof\x1a8has(this.policy) && has(this.policy.reply_schema_digest)\x1a\xba\x01\n\x1boperation_replay.acceptance\x125an outcome requires its immutable acceptance sequence\x1adhas(this.outcome) == has(this.accepted_sequence) && (!has(this.accepted_child) || has(this.outcome))"\xbc\x02\n\x15ReplayTurnObservation\x12?\n\x05bound\x18\x01 \x01(\x0b2!.vibesys.store.v1.ReplayTurnBoundR\x05boundB\x06\xbaH\x03\xc8\x01\x01\x12\x1c\n\tsucceeded\x18\x02 \x01(\x08R\tsucceeded\x12@\n\nsuspension\x18\x03 \x01(\x0b2 .vibesys.store.v1.ReplayTurnWaitR\nsuspension:\x81\x01\xbaH~\x1a|\n"replay_turn_observation.suspension\x12-only a succeeded turn yields its durable wait\x1a\'!has(this.suspension) || this.succeeded"\xa2\x01\n\x0fReplayTurnBound\x12\x1f\n\x06origin\x18\x01 \x01(\tR\x06originB\x07\xbaH\x04r\x02\x10\x01\x12,\n\x08deadline\x18\x02 \x01(\x01R\x08deadlineB\x10\xbaH\r\x12\x0b@\x01)\x00\x00\x00\x00\x00\x00\x00\x00\x12@\n\x13hold_credit_seconds\x18\x03 \x01(\x01R\x11holdCreditSecondsB\x10\xbaH\r\x12\x0b@\x01)\x00\x00\x00\x00\x00\x00\x00\x00"\x91\x05\n\x0eReplayPhysical\x12!\n\x07logical\x18\x01 \x01(\tR\x07logicalB\x07\xbaH\x04r\x02\x10\x01\x12(\n\x0bexternal_id\x18\x02 \x01(\tR\nexternalIdB\x07\xbaH\x04r\x02\x10\x01\x122\n\x10host_incarnation\x18\x03 \x01(\tR\x0fhostIncarnationB\x07\xbaH\x04r\x02\x10\x01\x12,\n\x08deadline\x18\x04 \x01(\x01R\x08deadlineB\x10\xbaH\r\x12\x0b@\x01)\x00\x00\x00\x00\x00\x00\x00\x00\x12\x18\n\x07ordinal\x18\x05 \x01(\x04R\x07ordinal\x12;\n\x12withdrawn_sequence\x18\x06 \x01(\x04H\x00R\x11withdrawnSequenceB\x07\xbaH\x042\x02 \x00\x88\x01\x01\x129\n\x11observed_sequence\x18\x07 \x01(\x04H\x01R\x10observedSequenceB\x07\xbaH\x042\x02 \x00\x88\x01\x01\x12F\n\x18termination_proof_digest\x18\x08 \x01(\x0cH\x02R\x16terminationProofDigestB\x07\xbaH\x04z\x02h \x88\x01\x01\x12)\n\x10confirmed_absent\x18\t \x01(\x08R\x0fconfirmedAbsent\x12=\n\x13settlement_sequence\x18\n \x01(\x04H\x03R\x12settlementSequenceB\x07\xbaH\x042\x02 \x00\x88\x01\x01\x12*\n\x08guidance\x18\x0b \x03(\tR\x08guidanceB\x0e\xbaH\x0b\x92\x01\x08\x18\x01"\x04r\x02\x10\x01B\x15\n\x13_withdrawn_sequenceB\x14\n\x12_observed_sequenceB\x1b\n\x19_termination_proof_digestB\x16\n\x14_settlement_sequence"\xa6\x01\n\rWriterBacking\x12)\n\x0benvironment\x18\x01 \x01(\tR\x0benvironmentB\x07\xbaH\x04r\x02\x10\x01\x12#\n\x08identity\x18\x02 \x01(\tR\x08identityB\x07\xbaH\x04r\x02\x10\x01\x12\x1e\n\ngeneration\x18\x03 \x01(\x04R\ngeneration\x12%\n\tauthority\x18\x04 \x01(\tR\tauthorityB\x07\xbaH\x04r\x02\x10\x01"\xb4\x01\n\x0eWriterIdentity\x12\x1e\n\x06run_id\x18\x01 \x01(\tR\x05runIdB\x07\xbaH\x04r\x02\x10\x01\x122\n\x10host_incarnation\x18\x02 \x01(\tR\x0fhostIncarnationB\x07\xbaH\x04r\x02\x10\x01\x12(\n\x0bphysical_id\x18\x03 \x01(\tR\nphysicalIdB\x07\xbaH\x04r\x02\x10\x01\x12$\n\tdomain_id\x18\x04 \x01(\tR\x08domainIdB\x07\xbaH\x04r\x02\x10\x01"\x9e\x02\n\x0eWriterManifest\x12A\n\x07backing\x18\x01 \x01(\x0b2\x1f.vibesys.store.v1.WriterBackingR\x07backingB\x06\xbaH\x03\xc8\x01\x01\x12:\n\x07writers\x18\x02 \x03(\x0b2 .vibesys.store.v1.WriterIdentityR\x07writers\x12\x16\n\x06closed\x18\x03 \x01(\x08R\x06closed:u\xbaHr\x1ap\n\x16writer_manifest.unique\x12)writer physical identities must be unique\x1a+this.writers.map(x, x.physical_id).unique()"\xbc\x03\n\x16WriterTerminationProof\x12D\n\x08manifest\x18\x01 \x01(\x0b2 .vibesys.store.v1.WriterManifestR\x08manifestB\x06\xbaH\x03\xc8\x01\x01\x12/\n\x0eabsent_domains\x18\x02 \x03(\tR\rabsentDomainsB\x08\xbaH\x05\x92\x01\x02\x18\x01:\xaa\x02\xbaH\xa6\x02\x1a\xa3\x02\n\x13writer_proof.closed\x12Jtermination proof needs a closed manifest and every domain verified absent\x1a\xbf\x01has(this.manifest) && this.manifest.closed && this.manifest.writers.all(x, x.domain_id in this.absent_domains) && this.absent_domains.all(x, this.manifest.writers.exists(w, w.domain_id == x))"\xe2\x03\n\x14WriterReconciliation\x12D\n\x08manifest\x18\x01 \x01(\x0b2 .vibesys.store.v1.WriterManifestR\x08manifestB\x06\xbaH\x03\xc8\x01\x01\x12P\n\x06status\x18\x02 \x01(\x0e2,.vibesys.store.v1.WriterReconciliationStatusR\x06statusB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x12>\n\x05proof\x18\x03 \x01(\x0b2(.vibesys.store.v1.WriterTerminationProofR\x05proof\x12\x16\n\x06detail\x18\x04 \x01(\tR\x06detail:\xd9\x01\xbaH\xd5\x01\x1a\xd2\x01\n\x1bwriter_reconciliation.proof\x12NProvenStopped requires termination proof for the exact reconciliation manifest\x1ac(this.status == 1) == has(this.proof) && (!has(this.proof) || this.proof.manifest == this.manifest)"\xa2\x02\n\x13WriterRegistryState\x12D\n\x08manifest\x18\x01 \x01(\x0b2 .vibesys.store.v1.WriterManifestR\x08manifestB\x06\xbaH\x03\xc8\x01\x01\x12>\n\x05proof\x18\x02 \x01(\x0b2(.vibesys.store.v1.WriterTerminationProofR\x05proof:\x84\x01\xbaH\x80\x01\x1a~\n\x15writer_registry.proof\x12+registry proof must bind its exact manifest\x1a8!has(this.proof) || this.proof.manifest == this.manifest"V\n\x0bReplayClock\x12G\n\tallowance\x18\x01 \x01(\x0b2!.vibesys.store.v1.ReplayAllowanceR\tallowanceB\x06\xbaH\x03\xc8\x01\x01"\xad\x02\n\x0cReplayNotice\x12\x17\n\x02id\x18\x01 \x01(\tR\x02idB\x07\xbaH\x04r\x02\x10\x01\x12C\n\x06unused\x18\x02 \x03(\x0b2!.vibesys.store.v1.OperationReplayR\x06unusedB\x08\xbaH\x05\x92\x01\x02\x08\x01\x128\n\x07pending\x18\x03 \x03(\x0b2\x1e.vibesys.store.v1.OperationKeyR\x07pending:\x84\x01\xbaH\x80\x01\x1a~\n\x1areplay_notice.paid_results\x122unused entries must identify accepted paid results\x1a,this.unused.all(x, x.paid && has(x.outcome))"\x85\x01\n\x15ReplayAcknowledgement\x12)\n\tnotice_id\x18\x01 \x01(\tH\x00R\x08noticeIdB\x07\xbaH\x04r\x02\x10\x01\x88\x01\x01\x123\n\x11launch_request_id\x18\x02 \x01(\tR\x0flaunchRequestIdB\x07\xbaH\x04r\x02\x10\x01B\x0c\n\n_notice_id"\xdd\x03\n\x11ReplayObservation\x126\n\x07outcome\x18\x01 \x01(\x0b2\x14.google.protobuf.AnyR\x07outcomeB\x06\xbaH\x03\xc8\x01\x01\x12\x12\n\x04paid\x18\x02 \x01(\x08R\x04paid\x120\n\x08cost_usd\x18\x03 \x01(\x01H\x00R\x07costUsdB\x10\xbaH\r\x12\x0b@\x01)\x00\x00\x00\x00\x00\x00\x00\x00\x88\x01\x01\x122\n\x05usage\x18\x04 \x01(\x0b2\x1c.vibesys.store.v1.TokenUsageR\x05usage\x12;\n\x04turn\x18\x05 \x01(\x0b2\'.vibesys.store.v1.ReplayTurnObservationR\x04turnB\x0b\n\t_cost_usd:\xcb\x01\xbaH\xc7\x01\x1a\xc4\x01\n\x1dreplay_observation.usage_cost\x124reported usage cost must agree with observation cost\x1am!has(this.usage) || !has(this.usage.cost_usd) || (has(this.cost_usd) && this.cost_usd == this.usage.cost_usd)"j\n\x11ReplayPolicyDrift\x12!\n\x07results\x18\x01 \x01(\x04R\x07resultsB\x07\xbaH\x042\x02 \x00\x12\x14\n\x05roles\x18\x02 \x03(\tR\x05roles\x12\x1c\n\ttemplates\x18\x03 \x03(\tR\ttemplates"\xe2\x01\n\x14ReplayToolSubmission\x12\x1b\n\x04turn\x18\x01 \x01(\tR\x04turnB\x07\xbaH\x04r\x02\x10\x01\x12 \n\x07call_id\x18\x02 \x01(\tR\x06callIdB\x07\xbaH\x04r\x02\x10\x01\x12"\n\x08reply_id\x18\x03 \x01(\tR\x07replyIdB\x07\xbaH\x04r\x02\x10\x01\x12#\n\x08producer\x18\x04 \x01(\tR\x08producerB\x07\xbaH\x04r\x02\x10\x01\x12B\n\x06permit\x18\x05 \x01(\x0b2".vibesys.store.v1.ReplayTurnPermitR\x06permitB\x06\xbaH\x03\xc8\x01\x01"\x8f\x01\n\x10ReplayTurnPermit\x12\x1d\n\x05epoch\x18\x01 \x01(\rR\x05epochB\x07\xbaH\x04*\x02 \x00\x12\x1b\n\x04turn\x18\x02 \x01(\tR\x04turnB\x07\xbaH\x04r\x02\x10\x01\x12?\n\x05bound\x18\x03 \x01(\x0b2!.vibesys.store.v1.ReplayTurnBoundR\x05boundB\x06\xbaH\x03\xc8\x01\x01"\x96\x02\n\rReplayControl\x12&\n\nrequest_id\x18\x01 \x01(\tR\trequestIdB\x07\xbaH\x04r\x02\x10\x01\x12\x1d\n\x05epoch\x18\x02 \x01(\rR\x05epochB\x07\xbaH\x04*\x02 \x00\x125\n\x05pause\x18\x03 \x01(\x0b2\x1d.vibesys.store.v1.ReplayPauseH\x00R\x05pause\x12?\n\tpause_now\x18\x04 \x01(\x0b2 .vibesys.store.v1.ReplayPauseNowH\x00R\x08pauseNow\x125\n\x05steer\x18\x05 \x01(\x0b2\x1d.vibesys.store.v1.ReplaySteerH\x00R\x05steerB\x0f\n\x06action\x12\x05\xbaH\x02\x08\x01"\r\n\x0bReplayPause"\x10\n\x0eReplayPauseNow"\\\n\x0bReplaySteer\x12"\n\x08input_id\x18\x01 \x01(\tR\x07inputIdB\x07\xbaH\x04r\x02\x10\x01\x12 \n\x04turn\x18\x02 \x01(\tH\x00R\x04turnB\x07\xbaH\x04r\x02\x10\x01\x88\x01\x01B\x07\n\x05_turn"\xfd\x01\n\x18ReplayControlDisposition\x12A\n\x07control\x18\x01 \x01(\x0b2\x1f.vibesys.store.v1.ReplayControlR\x07controlB\x06\xbaH\x03\xc8\x01\x01\x12B\n\x07applied\x18\x02 \x01(\x0b2&.vibesys.store.v1.ReplayControlAppliedH\x00R\x07applied\x12H\n\x05stale\x18\x03 \x01(\x0e2$.vibesys.store.v1.ReplayControlStaleH\x00R\x05staleB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00B\x10\n\x07outcome\x12\x05\xbaH\x02\x08\x01"\x84\x01\n\x14ReplayControlApplied\x12>\n\x08draining\x18\x01 \x03(\x0b2".vibesys.store.v1.ReplayTurnPermitR\x08draining\x12,\n\twithdrawn\x18\x02 \x03(\tR\twithdrawnB\x0e\xbaH\x0b\x92\x01\x08\x18\x01"\x04r\x02\x10\x01"\\\n\x19ReplayToolAcknowledgement\x12\x1b\n\x04turn\x18\x01 \x01(\tR\x04turnB\x07\xbaH\x04r\x02\x10\x01\x12"\n\x08reply_id\x18\x02 \x01(\tR\x07replyIdB\x07\xbaH\x04r\x02\x10\x01"\\\n\x0eReplayTurnWait\x12\x1b\n\x04turn\x18\x01 \x01(\tR\x04turnB\x07\xbaH\x04r\x02\x10\x01\x12-\n\treply_ids\x18\x02 \x03(\tR\x08replyIdsB\x10\xbaH\r\x92\x01\n\x08\x01\x18\x01"\x04r\x02\x10\x01*r\n\x0fReplayFieldKind\x12!\n\x1dREPLAY_FIELD_KIND_UNSPECIFIED\x10\x00\x12\x1e\n\x1aREPLAY_FIELD_KIND_IDENTITY\x10\x01\x12\x1c\n\x18REPLAY_FIELD_KIND_POLICY\x10\x02*\xdc\x01\n\x10KeyComponentKind\x12"\n\x1eKEY_COMPONENT_KIND_UNSPECIFIED\x10\x00\x12\x1d\n\x19KEY_COMPONENT_KIND_PARENT\x10\x01\x12\x1b\n\x17KEY_COMPONENT_KIND_ITEM\x10\x02\x12\x1d\n\x19KEY_COMPONENT_KIND_SAMPLE\x10\x03\x12\x1f\n\x1bKEY_COMPONENT_KIND_REVISION\x10\x04\x12(\n$KEY_COMPONENT_KIND_RECORDED_POSITION\x10\x05*\xfd\x01\n\x1aWriterReconciliationStatus\x12,\n(WRITER_RECONCILIATION_STATUS_UNSPECIFIED\x10\x00\x12/\n+WRITER_RECONCILIATION_STATUS_PROVEN_STOPPED\x10\x01\x12(\n$WRITER_RECONCILIATION_STATUS_PENDING\x10\x02\x12(\n$WRITER_RECONCILIATION_STATUS_UNKNOWN\x10\x03\x12,\n(WRITER_RECONCILIATION_STATUS_UNSUPPORTED\x10\x04*y\n\x12ReplayControlStale\x12$\n REPLAY_CONTROL_STALE_UNSPECIFIED\x10\x00\x12\x1e\n\x1aREPLAY_CONTROL_STALE_EPOCH\x10\x01\x12\x1d\n\x19REPLAY_CONTROL_STALE_TURN\x10\x02:H\n\x0ereplay_context\x18\x9e\x8f\x03 \x01(\x08\x12\x1f.google.protobuf.MessageOptionsR\rreplayContext:e\n\x0creplay_field\x18\x9c\x8f\x03 \x01(\x0e2!.vibesys.store.v1.ReplayFieldKind\x12\x1d.google.protobuf.FieldOptionsR\x0breplayField:>\n\nreplay_set\x18\x9d\x8f\x03 \x01(\x08\x12\x1d.google.protobuf.FieldOptionsR\treplaySetBAZ?github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1b\x06proto3',
+    b'\n\x1dvibesys/store/v1/replay.proto\x12\x10vibesys.store.v1\x1a\x1bbuf/validate/validate.proto\x1a\x19google/protobuf/any.proto\x1a google/protobuf/descriptor.proto\x1a"vibesys/store/v1/agent_attrs.proto"k\n\x0cOperationKey\x12%\n\toperation\x18\x01 \x01(\tR\toperationB\x07\xbaH\x04r\x02\x10\x01\x124\n\x05scope\x18\x02 \x03(\x0b2\x1e.vibesys.store.v1.KeyComponentR\x05scope"q\n\x0cKeyComponent\x12B\n\x04kind\x18\x01 \x01(\x0e2".vibesys.store.v1.KeyComponentKindR\x04kindB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x12\x1d\n\x05value\x18\x02 \x01(\tR\x05valueB\x07\xbaH\x04r\x02\x10\x01"\xbe\x01\n\x0fReplayAllowance\x12\x1e\n\niterations\x18\x01 \x01(\x04R\niterations\x12\x1a\n\x08capacity\x18\x02 \x01(\x04R\x08capacity\x12.\n\tremaining\x18\x03 \x01(\x01R\tremainingB\x10\xbaH\r\x12\x0b@\x01)\x00\x00\x00\x00\x00\x00\x00\x00\x12?\n\tresources\x18\x04 \x01(\x0b2!.vibesys.store.v1.ReplayResourcesR\tresources"\xc8\x01\n\x0fReplayResources\x122\n\tmoney_usd\x18\x01 \x01(\x01H\x00R\x08moneyUsdB\x10\xbaH\r\x12\x0b@\x01)\x00\x00\x00\x00\x00\x00\x00\x00\x88\x01\x01\x12&\n\x0cinput_tokens\x18\x02 \x01(\x04H\x01R\x0binputTokens\x88\x01\x01\x12(\n\routput_tokens\x18\x03 \x01(\x04H\x02R\x0coutputTokens\x88\x01\x01B\x0c\n\n_money_usdB\x0f\n\r_input_tokensB\x10\n\x0e_output_tokens"\xb6\x03\n\x0cReplayPolicy\x12\x12\n\x04role\x18\x01 \x01(\tR\x04role\x12\x1a\n\x08template\x18\x02 \x01(\tR\x08template\x12\x18\n\x07content\x18\x03 \x01(\x0cR\x07content\x12&\n\nreply_type\x18\x04 \x01(\tR\treplyTypeB\x07\xbaH\x04r\x02\x10\x01\x12<\n\x13reply_schema_digest\x18\x05 \x01(\x0cH\x00R\x11replySchemaDigestB\x07\xbaH\x04z\x02h \x88\x01\x01\x12.\n\x07request\x18\x06 \x01(\x0b2\x14.google.protobuf.AnyR\x07request\x12C\n\x0breservation\x18\x07 \x01(\x0b2!.vibesys.store.v1.ReplayResourcesR\x0breservation\x12M\n\x17physical_within_seconds\x18\x08 \x01(\x01H\x01R\x15physicalWithinSecondsB\x10\xbaH\r\x12\x0b@\x01!\x00\x00\x00\x00\x00\x00\x00\x00\x88\x01\x01B\x16\n\x14_reply_schema_digestB\x1a\n\x18_physical_within_seconds"\xc7\x08\n\x0fOperationReplay\x128\n\x03key\x18\x01 \x01(\x0b2\x1e.vibesys.store.v1.OperationKeyR\x03keyB\x06\xbaH\x03\xc8\x01\x01\x122\n\x10encoding_version\x18\x02 \x01(\rR\x0fencodingVersionB\x07\xbaH\x04*\x02\x08\x01\x12#\n\x08identity\x18\x03 \x01(\x0cR\x08identityB\x07\xbaH\x04z\x02\x10\x01\x120\n\x0fidentity_digest\x18\x04 \x01(\x0cR\x0eidentityDigestB\x07\xbaH\x04z\x02h \x12+\n\x0cdependencies\x18\x05 \x01(\x0cR\x0cdependenciesB\x07\xbaH\x04z\x02h \x12>\n\x06policy\x18\x06 \x01(\x0b2\x1e.vibesys.store.v1.ReplayPolicyR\x06policyB\x06\xbaH\x03\xc8\x01\x01\x12.\n\x07outcome\x18\x07 \x01(\x0b2\x14.google.protobuf.AnyR\x07outcome\x12\x12\n\x04paid\x18\x08 \x01(\x08R\x04paid\x120\n\x08cost_usd\x18\t \x01(\x01H\x00R\x07costUsdB\x10\xbaH\r\x12\x0b@\x01)\x00\x00\x00\x00\x00\x00\x00\x00\x88\x01\x01\x12G\n\tallowance\x18\n \x01(\x0b2!.vibesys.store.v1.ReplayAllowanceR\tallowanceB\x06\xbaH\x03\xc8\x01\x01\x129\n\x11accepted_sequence\x18\x0b \x01(\x04H\x01R\x10acceptedSequenceB\x07\xbaH\x042\x02 \x00\x88\x01\x01\x123\n\x0eaccepted_child\x18\x0c \x01(\tH\x02R\racceptedChildB\x07\xbaH\x04r\x02\x10\x01\x88\x01\x01\x12@\n\nturn_bound\x18\r \x01(\x0b2!.vibesys.store.v1.ReplayTurnBoundR\tturnBoundB\x0b\n\t_cost_usdB\x14\n\x12_accepted_sequenceB\x11\n\x0f_accepted_child:\xda\x02\xbaH\xd6\x02\x1a\x96\x01\n\x1doperation_replay.reply_schema\x12;recorded operations require the writer\'s reply schema proof\x1a8has(this.policy) && has(this.policy.reply_schema_digest)\x1a\xba\x01\n\x1boperation_replay.acceptance\x125an outcome requires its immutable acceptance sequence\x1adhas(this.outcome) == has(this.accepted_sequence) && (!has(this.accepted_child) || has(this.outcome))"\xbc\x02\n\x15ReplayTurnObservation\x12?\n\x05bound\x18\x01 \x01(\x0b2!.vibesys.store.v1.ReplayTurnBoundR\x05boundB\x06\xbaH\x03\xc8\x01\x01\x12\x1c\n\tsucceeded\x18\x02 \x01(\x08R\tsucceeded\x12@\n\nsuspension\x18\x03 \x01(\x0b2 .vibesys.store.v1.ReplayTurnWaitR\nsuspension:\x81\x01\xbaH~\x1a|\n"replay_turn_observation.suspension\x12-only a succeeded turn yields its durable wait\x1a\'!has(this.suspension) || this.succeeded"\xa2\x01\n\x0fReplayTurnBound\x12\x1f\n\x06origin\x18\x01 \x01(\tR\x06originB\x07\xbaH\x04r\x02\x10\x01\x12,\n\x08deadline\x18\x02 \x01(\x01R\x08deadlineB\x10\xbaH\r\x12\x0b@\x01)\x00\x00\x00\x00\x00\x00\x00\x00\x12@\n\x13hold_credit_seconds\x18\x03 \x01(\x01R\x11holdCreditSecondsB\x10\xbaH\r\x12\x0b@\x01)\x00\x00\x00\x00\x00\x00\x00\x00"\x91\x05\n\x0eReplayPhysical\x12!\n\x07logical\x18\x01 \x01(\tR\x07logicalB\x07\xbaH\x04r\x02\x10\x01\x12(\n\x0bexternal_id\x18\x02 \x01(\tR\nexternalIdB\x07\xbaH\x04r\x02\x10\x01\x122\n\x10host_incarnation\x18\x03 \x01(\tR\x0fhostIncarnationB\x07\xbaH\x04r\x02\x10\x01\x12,\n\x08deadline\x18\x04 \x01(\x01R\x08deadlineB\x10\xbaH\r\x12\x0b@\x01)\x00\x00\x00\x00\x00\x00\x00\x00\x12\x18\n\x07ordinal\x18\x05 \x01(\x04R\x07ordinal\x12;\n\x12withdrawn_sequence\x18\x06 \x01(\x04H\x00R\x11withdrawnSequenceB\x07\xbaH\x042\x02 \x00\x88\x01\x01\x129\n\x11observed_sequence\x18\x07 \x01(\x04H\x01R\x10observedSequenceB\x07\xbaH\x042\x02 \x00\x88\x01\x01\x12F\n\x18termination_proof_digest\x18\x08 \x01(\x0cH\x02R\x16terminationProofDigestB\x07\xbaH\x04z\x02h \x88\x01\x01\x12)\n\x10confirmed_absent\x18\t \x01(\x08R\x0fconfirmedAbsent\x12=\n\x13settlement_sequence\x18\n \x01(\x04H\x03R\x12settlementSequenceB\x07\xbaH\x042\x02 \x00\x88\x01\x01\x12*\n\x08guidance\x18\x0b \x03(\tR\x08guidanceB\x0e\xbaH\x0b\x92\x01\x08\x18\x01"\x04r\x02\x10\x01B\x15\n\x13_withdrawn_sequenceB\x14\n\x12_observed_sequenceB\x1b\n\x19_termination_proof_digestB\x16\n\x14_settlement_sequence"\xa6\x01\n\rWriterBacking\x12)\n\x0benvironment\x18\x01 \x01(\tR\x0benvironmentB\x07\xbaH\x04r\x02\x10\x01\x12#\n\x08identity\x18\x02 \x01(\tR\x08identityB\x07\xbaH\x04r\x02\x10\x01\x12\x1e\n\ngeneration\x18\x03 \x01(\x04R\ngeneration\x12%\n\tauthority\x18\x04 \x01(\tR\tauthorityB\x07\xbaH\x04r\x02\x10\x01"\xb4\x01\n\x0eWriterIdentity\x12\x1e\n\x06run_id\x18\x01 \x01(\tR\x05runIdB\x07\xbaH\x04r\x02\x10\x01\x122\n\x10host_incarnation\x18\x02 \x01(\tR\x0fhostIncarnationB\x07\xbaH\x04r\x02\x10\x01\x12(\n\x0bphysical_id\x18\x03 \x01(\tR\nphysicalIdB\x07\xbaH\x04r\x02\x10\x01\x12$\n\tdomain_id\x18\x04 \x01(\tR\x08domainIdB\x07\xbaH\x04r\x02\x10\x01"\x9e\x02\n\x0eWriterManifest\x12A\n\x07backing\x18\x01 \x01(\x0b2\x1f.vibesys.store.v1.WriterBackingR\x07backingB\x06\xbaH\x03\xc8\x01\x01\x12:\n\x07writers\x18\x02 \x03(\x0b2 .vibesys.store.v1.WriterIdentityR\x07writers\x12\x16\n\x06closed\x18\x03 \x01(\x08R\x06closed:u\xbaHr\x1ap\n\x16writer_manifest.unique\x12)writer physical identities must be unique\x1a+this.writers.map(x, x.physical_id).unique()"\xbc\x03\n\x16WriterTerminationProof\x12D\n\x08manifest\x18\x01 \x01(\x0b2 .vibesys.store.v1.WriterManifestR\x08manifestB\x06\xbaH\x03\xc8\x01\x01\x12/\n\x0eabsent_domains\x18\x02 \x03(\tR\rabsentDomainsB\x08\xbaH\x05\x92\x01\x02\x18\x01:\xaa\x02\xbaH\xa6\x02\x1a\xa3\x02\n\x13writer_proof.closed\x12Jtermination proof needs a closed manifest and every domain verified absent\x1a\xbf\x01has(this.manifest) && this.manifest.closed && this.manifest.writers.all(x, x.domain_id in this.absent_domains) && this.absent_domains.all(x, this.manifest.writers.exists(w, w.domain_id == x))"\xe2\x03\n\x14WriterReconciliation\x12D\n\x08manifest\x18\x01 \x01(\x0b2 .vibesys.store.v1.WriterManifestR\x08manifestB\x06\xbaH\x03\xc8\x01\x01\x12P\n\x06status\x18\x02 \x01(\x0e2,.vibesys.store.v1.WriterReconciliationStatusR\x06statusB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x12>\n\x05proof\x18\x03 \x01(\x0b2(.vibesys.store.v1.WriterTerminationProofR\x05proof\x12\x16\n\x06detail\x18\x04 \x01(\tR\x06detail:\xd9\x01\xbaH\xd5\x01\x1a\xd2\x01\n\x1bwriter_reconciliation.proof\x12NProvenStopped requires termination proof for the exact reconciliation manifest\x1ac(this.status == 1) == has(this.proof) && (!has(this.proof) || this.proof.manifest == this.manifest)"\xa2\x02\n\x13WriterRegistryState\x12D\n\x08manifest\x18\x01 \x01(\x0b2 .vibesys.store.v1.WriterManifestR\x08manifestB\x06\xbaH\x03\xc8\x01\x01\x12>\n\x05proof\x18\x02 \x01(\x0b2(.vibesys.store.v1.WriterTerminationProofR\x05proof:\x84\x01\xbaH\x80\x01\x1a~\n\x15writer_registry.proof\x12+registry proof must bind its exact manifest\x1a8!has(this.proof) || this.proof.manifest == this.manifest"V\n\x0bReplayClock\x12G\n\tallowance\x18\x01 \x01(\x0b2!.vibesys.store.v1.ReplayAllowanceR\tallowanceB\x06\xbaH\x03\xc8\x01\x01"\xad\x02\n\x0cReplayNotice\x12\x17\n\x02id\x18\x01 \x01(\tR\x02idB\x07\xbaH\x04r\x02\x10\x01\x12C\n\x06unused\x18\x02 \x03(\x0b2!.vibesys.store.v1.OperationReplayR\x06unusedB\x08\xbaH\x05\x92\x01\x02\x08\x01\x128\n\x07pending\x18\x03 \x03(\x0b2\x1e.vibesys.store.v1.OperationKeyR\x07pending:\x84\x01\xbaH\x80\x01\x1a~\n\x1areplay_notice.paid_results\x122unused entries must identify accepted paid results\x1a,this.unused.all(x, x.paid && has(x.outcome))"\x85\x01\n\x15ReplayAcknowledgement\x12)\n\tnotice_id\x18\x01 \x01(\tH\x00R\x08noticeIdB\x07\xbaH\x04r\x02\x10\x01\x88\x01\x01\x123\n\x11launch_request_id\x18\x02 \x01(\tR\x0flaunchRequestIdB\x07\xbaH\x04r\x02\x10\x01B\x0c\n\n_notice_id"\xdd\x03\n\x11ReplayObservation\x126\n\x07outcome\x18\x01 \x01(\x0b2\x14.google.protobuf.AnyR\x07outcomeB\x06\xbaH\x03\xc8\x01\x01\x12\x12\n\x04paid\x18\x02 \x01(\x08R\x04paid\x120\n\x08cost_usd\x18\x03 \x01(\x01H\x00R\x07costUsdB\x10\xbaH\r\x12\x0b@\x01)\x00\x00\x00\x00\x00\x00\x00\x00\x88\x01\x01\x122\n\x05usage\x18\x04 \x01(\x0b2\x1c.vibesys.store.v1.TokenUsageR\x05usage\x12;\n\x04turn\x18\x05 \x01(\x0b2\'.vibesys.store.v1.ReplayTurnObservationR\x04turnB\x0b\n\t_cost_usd:\xcb\x01\xbaH\xc7\x01\x1a\xc4\x01\n\x1dreplay_observation.usage_cost\x124reported usage cost must agree with observation cost\x1am!has(this.usage) || !has(this.usage.cost_usd) || (has(this.cost_usd) && this.cost_usd == this.usage.cost_usd)"j\n\x11ReplayPolicyDrift\x12!\n\x07results\x18\x01 \x01(\x04R\x07resultsB\x07\xbaH\x042\x02 \x00\x12\x14\n\x05roles\x18\x02 \x03(\tR\x05roles\x12\x1c\n\ttemplates\x18\x03 \x03(\tR\ttemplates"\xe2\x01\n\x14ReplayToolSubmission\x12\x1b\n\x04turn\x18\x01 \x01(\tR\x04turnB\x07\xbaH\x04r\x02\x10\x01\x12 \n\x07call_id\x18\x02 \x01(\tR\x06callIdB\x07\xbaH\x04r\x02\x10\x01\x12"\n\x08reply_id\x18\x03 \x01(\tR\x07replyIdB\x07\xbaH\x04r\x02\x10\x01\x12#\n\x08producer\x18\x04 \x01(\tR\x08producerB\x07\xbaH\x04r\x02\x10\x01\x12B\n\x06permit\x18\x05 \x01(\x0b2".vibesys.store.v1.ReplayTurnPermitR\x06permitB\x06\xbaH\x03\xc8\x01\x01"\x8f\x01\n\x10ReplayTurnPermit\x12\x1d\n\x05epoch\x18\x01 \x01(\rR\x05epochB\x07\xbaH\x04*\x02 \x00\x12\x1b\n\x04turn\x18\x02 \x01(\tR\x04turnB\x07\xbaH\x04r\x02\x10\x01\x12?\n\x05bound\x18\x03 \x01(\x0b2!.vibesys.store.v1.ReplayTurnBoundR\x05boundB\x06\xbaH\x03\xc8\x01\x01"\x96\x02\n\rReplayControl\x12&\n\nrequest_id\x18\x01 \x01(\tR\trequestIdB\x07\xbaH\x04r\x02\x10\x01\x12\x1d\n\x05epoch\x18\x02 \x01(\rR\x05epochB\x07\xbaH\x04*\x02 \x00\x125\n\x05pause\x18\x03 \x01(\x0b2\x1d.vibesys.store.v1.ReplayPauseH\x00R\x05pause\x12?\n\tpause_now\x18\x04 \x01(\x0b2 .vibesys.store.v1.ReplayPauseNowH\x00R\x08pauseNow\x125\n\x05steer\x18\x05 \x01(\x0b2\x1d.vibesys.store.v1.ReplaySteerH\x00R\x05steerB\x0f\n\x06action\x12\x05\xbaH\x02\x08\x01"\r\n\x0bReplayPause"\x10\n\x0eReplayPauseNow"\\\n\x0bReplaySteer\x12"\n\x08input_id\x18\x01 \x01(\tR\x07inputIdB\x07\xbaH\x04r\x02\x10\x01\x12 \n\x04turn\x18\x02 \x01(\tH\x00R\x04turnB\x07\xbaH\x04r\x02\x10\x01\x88\x01\x01B\x07\n\x05_turn"\xfd\x01\n\x18ReplayControlDisposition\x12A\n\x07control\x18\x01 \x01(\x0b2\x1f.vibesys.store.v1.ReplayControlR\x07controlB\x06\xbaH\x03\xc8\x01\x01\x12B\n\x07applied\x18\x02 \x01(\x0b2&.vibesys.store.v1.ReplayControlAppliedH\x00R\x07applied\x12H\n\x05stale\x18\x03 \x01(\x0e2$.vibesys.store.v1.ReplayControlStaleH\x00R\x05staleB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00B\x10\n\x07outcome\x12\x05\xbaH\x02\x08\x01"\x84\x01\n\x14ReplayControlApplied\x12>\n\x08draining\x18\x01 \x03(\x0b2".vibesys.store.v1.ReplayTurnPermitR\x08draining\x12,\n\twithdrawn\x18\x02 \x03(\tR\twithdrawnB\x0e\xbaH\x0b\x92\x01\x08\x18\x01"\x04r\x02\x10\x01"\\\n\x19ReplayToolAcknowledgement\x12\x1b\n\x04turn\x18\x01 \x01(\tR\x04turnB\x07\xbaH\x04r\x02\x10\x01\x12"\n\x08reply_id\x18\x02 \x01(\tR\x07replyIdB\x07\xbaH\x04r\x02\x10\x01"\\\n\x0eReplayTurnWait\x12\x1b\n\x04turn\x18\x01 \x01(\tR\x04turnB\x07\xbaH\x04r\x02\x10\x01\x12-\n\treply_ids\x18\x02 \x03(\tR\x08replyIdsB\x10\xbaH\r\x92\x01\n\x08\x01\x18\x01"\x04r\x02\x10\x01"{\n\x14AccountingOccurrence\x12J\n\x04kind\x18\x01 \x01(\x0e2*.vibesys.store.v1.AccountingOccurrenceKindR\x04kindB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x12\x17\n\x02id\x18\x02 \x01(\tR\x02idB\x07\xbaH\x04r\x02\x10\x01"\x8d\x01\n\x12AccountingQuantity\x12\x16\n\x05count\x18\x01 \x01(\x04H\x00R\x05count\x12*\n\x06amount\x18\x02 \x01(\x01H\x00R\x06amountB\x10\xbaH\r\x12\x0b@\x01)\x00\x00\x00\x00\x00\x00\x00\x00\x12#\n\x07unknown\x18\x03 \x01(\x08H\x00R\x07unknownB\x07\xbaH\x04j\x02\x08\x01B\x0e\n\x05value\x12\x05\xbaH\x02\x08\x01"\x85\x03\n\x15AccountingObservation\x12N\n\noccurrence\x18\x01 \x01(\x0b2&.vibesys.store.v1.AccountingOccurrenceR\noccurrenceB\x06\xbaH\x03\xc8\x01\x01\x12O\n\tdimension\x18\x02 \x01(\x0e2%.vibesys.store.v1.AccountingDimensionR\tdimensionB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x12\x1a\n\x08revision\x18\x03 \x01(\x04R\x08revision\x12F\n\x07charged\x18\x04 \x01(\x0b2$.vibesys.store.v1.AccountingQuantityR\x07chargedB\x06\xbaH\x03\xc8\x01\x01\x12\x1a\n\x08refunded\x18\x05 \x01(\x04R\x08refunded\x12(\n\x07aliases\x18\x06 \x03(\tR\x07aliasesB\x0e\xbaH\x0b\x92\x01\x08\x18\x01"\x04r\x02\x10\x01\x12!\n\x0corigin_epoch\x18\x07 \x01(\rR\x0boriginEpoch"\xaa\x01\n\x0eAccountingCell\x12N\n\noccurrence\x18\x01 \x01(\x0b2&.vibesys.store.v1.AccountingOccurrenceR\noccurrenceB\x06\xbaH\x03\xc8\x01\x01\x12H\n\x08baseline\x18\x02 \x01(\x0b2$.vibesys.store.v1.AccountingQuantityR\x08baselineB\x06\xbaH\x03\xc8\x01\x01"\xc0\x02\n\x12AccountingCoverage\x12\x17\n\x02id\x18\x01 \x01(\tR\x02idB\x07\xbaH\x04r\x02\x10\x01\x12O\n\tdimension\x18\x02 \x01(\x0e2%.vibesys.store.v1.AccountingDimensionR\tdimensionB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x12\x1c\n\twatermark\x18\x03 \x01(\x04R\twatermark\x12B\n\x05total\x18\x04 \x01(\x0b2$.vibesys.store.v1.AccountingQuantityR\x05totalB\x06\xbaH\x03\xc8\x01\x01\x126\n\x05cells\x18\x05 \x03(\x0b2 .vibesys.store.v1.AccountingCellR\x05cells\x12&\n\x06nested\x18\x06 \x03(\tR\x06nestedB\x0e\xbaH\x0b\x92\x01\x08\x18\x01"\x04r\x02\x10\x01"\xee\x02\n\x12AccountingEvidence\x12)\n\timport_id\x18\x01 \x01(\tH\x00R\x08importIdB\x07\xbaH\x04r\x02\x10\x01\x88\x01\x01\x12K\n\x0cobservations\x18\x02 \x03(\x0b2\'.vibesys.store.v1.AccountingObservationR\x0cobservations\x12@\n\x08coverage\x18\x03 \x03(\x0b2$.vibesys.store.v1.AccountingCoverageR\x08coverageB\x0c\n\n_import_id:\x8f\x01\xbaH\x8b\x01\x1a\x88\x01\n\x1caccounting_evidence.coverage\x126only an import publication declares aggregate coverage\x1a0has(this.import_id) || this.coverage.size() == 0*r\n\x0fReplayFieldKind\x12!\n\x1dREPLAY_FIELD_KIND_UNSPECIFIED\x10\x00\x12\x1e\n\x1aREPLAY_FIELD_KIND_IDENTITY\x10\x01\x12\x1c\n\x18REPLAY_FIELD_KIND_POLICY\x10\x02*\xdc\x01\n\x10KeyComponentKind\x12"\n\x1eKEY_COMPONENT_KIND_UNSPECIFIED\x10\x00\x12\x1d\n\x19KEY_COMPONENT_KIND_PARENT\x10\x01\x12\x1b\n\x17KEY_COMPONENT_KIND_ITEM\x10\x02\x12\x1d\n\x19KEY_COMPONENT_KIND_SAMPLE\x10\x03\x12\x1f\n\x1bKEY_COMPONENT_KIND_REVISION\x10\x04\x12(\n$KEY_COMPONENT_KIND_RECORDED_POSITION\x10\x05*\xfd\x01\n\x1aWriterReconciliationStatus\x12,\n(WRITER_RECONCILIATION_STATUS_UNSPECIFIED\x10\x00\x12/\n+WRITER_RECONCILIATION_STATUS_PROVEN_STOPPED\x10\x01\x12(\n$WRITER_RECONCILIATION_STATUS_PENDING\x10\x02\x12(\n$WRITER_RECONCILIATION_STATUS_UNKNOWN\x10\x03\x12,\n(WRITER_RECONCILIATION_STATUS_UNSUPPORTED\x10\x04*y\n\x12ReplayControlStale\x12$\n REPLAY_CONTROL_STALE_UNSPECIFIED\x10\x00\x12\x1e\n\x1aREPLAY_CONTROL_STALE_EPOCH\x10\x01\x12\x1d\n\x19REPLAY_CONTROL_STALE_TURN\x10\x02*\xea\x03\n\x13AccountingDimension\x12$\n ACCOUNTING_DIMENSION_UNSPECIFIED\x10\x00\x12"\n\x1eACCOUNTING_DIMENSION_MONEY_USD\x10\x01\x12%\n!ACCOUNTING_DIMENSION_INPUT_TOKENS\x10\x02\x12*\n&ACCOUNTING_DIMENSION_CACHE_READ_TOKENS\x10\x03\x12.\n*ACCOUNTING_DIMENSION_CACHE_CREATION_TOKENS\x10\x04\x12&\n"ACCOUNTING_DIMENSION_OUTPUT_TOKENS\x10\x05\x12)\n%ACCOUNTING_DIMENSION_REASONING_TOKENS\x10\x06\x12$\n ACCOUNTING_DIMENSION_DURATION_MS\x10\x07\x12#\n\x1fACCOUNTING_DIMENSION_ADMISSIONS\x10\x08\x12!\n\x1dACCOUNTING_DIMENSION_ATTEMPTS\x10\t\x12\x1e\n\x1aACCOUNTING_DIMENSION_TURNS\x10\n\x12%\n!ACCOUNTING_DIMENSION_RETRY_BUDGET\x10\x0b*\x98\x01\n\x18AccountingOccurrenceKind\x12*\n&ACCOUNTING_OCCURRENCE_KIND_UNSPECIFIED\x10\x00\x12)\n%ACCOUNTING_OCCURRENCE_KIND_INVOCATION\x10\x01\x12%\n!ACCOUNTING_OCCURRENCE_KIND_CHARGE\x10\x02:H\n\x0ereplay_context\x18\x9e\x8f\x03 \x01(\x08\x12\x1f.google.protobuf.MessageOptionsR\rreplayContext:e\n\x0creplay_field\x18\x9c\x8f\x03 \x01(\x0e2!.vibesys.store.v1.ReplayFieldKind\x12\x1d.google.protobuf.FieldOptionsR\x0breplayField:>\n\nreplay_set\x18\x9d\x8f\x03 \x01(\x08\x12\x1d.google.protobuf.FieldOptionsR\treplaySetBAZ?github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1b\x06proto3',
     [
         validate_pb.desc(),
         any_pb.desc(),
@@ -1579,10 +1955,18 @@ _DESC = file_desc(
         "ReplayControlApplied": ReplayControlApplied,
         "ReplayToolAcknowledgement": ReplayToolAcknowledgement,
         "ReplayTurnWait": ReplayTurnWait,
+        "AccountingOccurrence": AccountingOccurrence,
+        "AccountingQuantity": AccountingQuantity,
+        "AccountingObservation": AccountingObservation,
+        "AccountingCell": AccountingCell,
+        "AccountingCoverage": AccountingCoverage,
+        "AccountingEvidence": AccountingEvidence,
         "ReplayFieldKind": ReplayFieldKind,
         "KeyComponentKind": KeyComponentKind,
         "WriterReconciliationStatus": WriterReconciliationStatus,
         "ReplayControlStale": ReplayControlStale,
+        "AccountingDimension": AccountingDimension,
+        "AccountingOccurrenceKind": AccountingOccurrenceKind,
         "replay_context": ext_replay_context,
         "replay_field": ext_replay_field,
         "replay_set": ext_replay_set,

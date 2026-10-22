@@ -272,21 +272,32 @@ def test_revision_conflict_publishes_nothing(stores: StoreFactory) -> None:
         assert store.release(fence, 0)
 
 
-def test_native_log_is_rebuilt_from_the_authoritative_atomic_store(tmp_path: Path) -> None:
+def _written_run(tmp_path: Path) -> tuple[Project, Path, bytes]:
     project = Project.open(tmp_path)
     path = project.run_log_path_for(tmp_path, "run-a")
     path.parent.mkdir(parents=True, exist_ok=True)
-    leases = project.state_store("run-a")
     threads = SimThreads()
     with FileRunLogWriter(path, clock=threads.clock, threads=threads) as writer:
-        shell = runtime(RunLogReplayStore(writer, leases))
+        shell = runtime(RunLogReplayStore(writer, project.state_store("run-a")))
         shell.start(launch("first"), now=0, at=Timestamp())
         shell.prepare(now=0, at=Timestamp())
         expected = shell.archive.encode()
         shell.close(now=0)
-    committed = leases.load()
-    assert isinstance(committed, StoredEnvelope)
-    assert committed.payload == expected
+    return project, path, expected
+
+
+def _reload(project: Project, path: Path) -> StoredEnvelope | None:
+    threads = SimThreads()
+    with FileRunLogWriter(path, clock=threads.clock, threads=threads) as writer:
+        stored = RunLogReplayStore(writer, project.state_store("run-a")).load()
+    assert stored is None or isinstance(stored, StoredEnvelope)
+    return stored
+
+
+def test_run_log_alone_holds_the_records_and_survives_deleted_caches(tmp_path: Path) -> None:
+    project, path, expected = _written_run(tmp_path)
+    fence = project.state_store("run-a").load()
+    assert fence == StoredEnvelope(revision=0, schema_version=2, payload=b"")
     with open_run_log(path) as reader:
         assert Records(records=list(reader)).to_binary() == expected
     path.with_name("run.head").unlink(missing_ok=True)
@@ -296,9 +307,56 @@ def test_native_log_is_rebuilt_from_the_authoritative_atomic_store(tmp_path: Pat
     for keyframe in retained:
         keyframe.unlink()
     keyframes.rmdir()
-    path.unlink()
+    stored = _reload(project, path)
+    assert stored is not None
+    assert stored.payload == expected
+
+
+def test_a_corrupt_log_fails_and_the_atomic_store_cannot_repair_it(tmp_path: Path) -> None:
+    project, path, _ = _written_run(tmp_path)
+    data = bytearray(path.read_bytes())
+    data[12] ^= 0xFF
+    path.write_bytes(bytes(data))
+    with pytest.raises(ValueError, match=r"corrupt run\.log"):
+        _reload(project, path)
+    assert project.state_store("run-a").load() == StoredEnvelope(
+        revision=0, schema_version=2, payload=b""
+    )
+
+
+def test_a_torn_final_frame_recovers_the_complete_record_prefix(tmp_path: Path) -> None:
+    project, path, expected = _written_run(tmp_path)
+    with path.open("ab") as stream:
+        stream.write(b"\x05\x00")
+    stored = _reload(project, path)
+    assert stored is not None
+    assert stored.payload == expected
+
+
+def test_records_without_the_format_fence_grant_no_authority(tmp_path: Path) -> None:
+    written = tmp_path / "written"
+    written.mkdir()
+    _, path, _ = _written_run(written)
+    unfenced = Project.open(tmp_path)
+    copied = unfenced.run_log_path_for(tmp_path, "run-a")
+    copied.parent.mkdir(parents=True, exist_ok=True)
+    copied.write_bytes(path.read_bytes())
+    with pytest.raises(ValueError, match="format fence"):
+        _reload(unfenced, copied)
+
+
+def test_a_retained_positional_run_log_requires_facts_only_import(tmp_path: Path) -> None:
+    project, path, _ = _written_run(tmp_path)
+    store = project.state_store("run-a")
+    owner = store.acquire("host-a", 0, 30)
+    assert owner is not None
+    retained = StoredEnvelope(revision=1, schema_version=1, payload=b"positional")
+    assert isinstance(store.commit(0, retained, owner, 0), Committed)
+    assert store.release(owner, 0)
     threads = SimThreads()
-    with FileRunLogWriter(path, clock=threads.clock, threads=threads) as writer:
-        stored = RunLogReplayStore(writer, leases).load()
-        assert isinstance(stored, StoredEnvelope)
-        assert stored.payload == expected
+    with (
+        FileRunLogWriter(path, clock=threads.clock, threads=threads) as writer,
+        pytest.raises(ReplayCommitError, match="facts-only import"),
+    ):
+        runtime(RunLogReplayStore(writer, store)).start(launch("resume"), now=0, at=Timestamp())
+    assert store.load() == retained

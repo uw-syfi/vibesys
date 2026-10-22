@@ -331,3 +331,87 @@ message ReplayTurnWait {
   string turn = 1 [(buf.validate.field).string.min_len = 1];
   repeated string reply_ids = 2 [(buf.validate.field).repeated = {min_items: 1, unique: true, items: {string: {min_len: 1}}}];
 }
+
+// Closed accounting dimensions. vs_core's registry defines each dimension's
+// unit and which resource totals include it (input includes both cache kinds).
+enum AccountingDimension {
+  ACCOUNTING_DIMENSION_UNSPECIFIED = 0;
+  ACCOUNTING_DIMENSION_MONEY_USD = 1;
+  ACCOUNTING_DIMENSION_INPUT_TOKENS = 2;
+  ACCOUNTING_DIMENSION_CACHE_READ_TOKENS = 3;
+  ACCOUNTING_DIMENSION_CACHE_CREATION_TOKENS = 4;
+  ACCOUNTING_DIMENSION_OUTPUT_TOKENS = 5;
+  ACCOUNTING_DIMENSION_REASONING_TOKENS = 6;
+  ACCOUNTING_DIMENSION_DURATION_MS = 7;
+  ACCOUNTING_DIMENSION_ADMISSIONS = 8;
+  ACCOUNTING_DIMENSION_ATTEMPTS = 9;
+  ACCOUNTING_DIMENSION_TURNS = 10;
+  ACCOUNTING_DIMENSION_RETRY_BUDGET = 11;
+}
+
+// A physical invocation for usage, or the original charge for admission,
+// attempt and turn counts. Import IDs, revisions and epochs never mint one.
+enum AccountingOccurrenceKind {
+  ACCOUNTING_OCCURRENCE_KIND_UNSPECIFIED = 0;
+  ACCOUNTING_OCCURRENCE_KIND_INVOCATION = 1;
+  ACCOUNTING_OCCURRENCE_KIND_CHARGE = 2;
+}
+
+message AccountingOccurrence {
+  AccountingOccurrenceKind kind = 1 [(buf.validate.field).enum = {defined_only: true, not_in: 0}];
+  string id = 2 [(buf.validate.field).string.min_len = 1];
+}
+
+// Exact integer counts, finite amounts, or an explicitly unknown quantity.
+message AccountingQuantity {
+  oneof value {
+    option (buf.validate.oneof).required = true;
+    uint64 count = 1;
+    double amount = 2 [(buf.validate.field).double = {finite: true, gte: 0}];
+    bool unknown = 3 [(buf.validate.field).bool.const = true];
+  }
+}
+
+// One cumulative reading of one chargeable occurrence. The owner's source
+// sequence is the revision: a higher revision replaces a lower one.
+message AccountingObservation {
+  AccountingOccurrence occurrence = 1 [(buf.validate.field).required = true];
+  AccountingDimension dimension = 2 [(buf.validate.field).enum = {defined_only: true, not_in: 0}];
+  uint64 revision = 3;
+  AccountingQuantity charged = 4 [(buf.validate.field).required = true];
+  uint64 refunded = 5;
+  // Source-request and external identities that name the same occurrence.
+  repeated string aliases = 6 [(buf.validate.field).repeated = {unique: true, items: {string: {min_len: 1}}}];
+  // Zero is imported history; a native reading names the occurrence's start epoch.
+  uint32 origin_epoch = 7;
+}
+
+// One declared cell of an aggregate: the occurrence's reading at the watermark.
+message AccountingCell {
+  AccountingOccurrence occurrence = 1 [(buf.validate.field).required = true];
+  AccountingQuantity baseline = 2 [(buf.validate.field).required = true];
+}
+
+// An aggregate total over declared disjoint cells and nested aggregates, at a
+// source watermark. It is never another occurrence.
+message AccountingCoverage {
+  string id = 1 [(buf.validate.field).string.min_len = 1];
+  AccountingDimension dimension = 2 [(buf.validate.field).enum = {defined_only: true, not_in: 0}];
+  uint64 watermark = 3;
+  AccountingQuantity total = 4 [(buf.validate.field).required = true];
+  repeated AccountingCell cells = 5;
+  repeated string nested = 6 [(buf.validate.field).repeated = {unique: true, items: {string: {min_len: 1}}}];
+}
+
+// Notice detail: published import history, or a delayed observation appended
+// through the run's single writer. Only an import publication declares coverage.
+message AccountingEvidence {
+  option (buf.validate.message).cel = {
+    id: "accounting_evidence.coverage"
+    message: "only an import publication declares aggregate coverage"
+    expression: "has(this.import_id) || this.coverage.size() == 0"
+  };
+  optional string import_id = 1 [(buf.validate.field).string.min_len = 1];
+  repeated AccountingObservation observations = 2;
+  repeated AccountingCoverage coverage = 3;
+}

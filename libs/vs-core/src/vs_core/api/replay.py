@@ -5,6 +5,7 @@ accepted observations in log order; flow continuations use only this scheduler.
 """
 
 from vs_core._continuations import SuspensionRefusal
+from vs_core.flows._replay_accounting import AccountingAmount, AccountingLedger
 from vs_core.flows._replay_archive import ReplayArchive
 from vs_core.flows._replay_controls import (
     ControlView,
@@ -78,6 +79,8 @@ __all__ = [
     "ENCODING_VERSION",
     "AcceptedClock",
     "AcceptedReplay",
+    "AccountingAmount",
+    "AccountingLedger",
     "ClassifiedContext",
     "ControlView",
     "EncodedIdentity",

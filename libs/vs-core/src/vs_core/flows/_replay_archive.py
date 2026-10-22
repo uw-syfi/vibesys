@@ -21,6 +21,7 @@ from vs_proto.api import (
 from vs_proto.api import replay as pb
 from vs_runlog.api import CurrentEpoch, epoch_has_ended
 
+from ._replay_accounting import AccountingLedger
 from ._replay_controls import ControlView, ReplayControls, permit_refusal
 from ._replay_history import (
     AcceptedClock,
@@ -350,6 +351,7 @@ class ReplayArchive:
             case Oneof("notice", notice):
                 self._notice(notice.detail)
                 self._writer_notice(record)
+                self._accounting_notice(record)
             case Oneof("lifecycle", lifecycle):
                 if epoch_has_ended(CurrentEpoch(record.epoch, lifecycle)):
                     self._epoch_closed = True
@@ -399,6 +401,25 @@ class ReplayArchive:
             ReplayWriterRecovery.from_records(
                 (*[Record.from_binary(value) for value in self._records], record)
             )
+
+    def _accounting_notice(self, record: Record) -> None:
+        """Accounting evidence joins the one fold only from an open epoch's single writer."""
+        match record.body:
+            case Oneof("notice", notice):
+                detail = notice.detail
+            case _:
+                return
+        if detail is None or detail.type_url.rsplit("/", 1)[-1] != (
+            pb.AccountingEvidence.desc().type_name
+        ):
+            return
+        if self._epoch_closed:
+            problem = "a closed epoch cannot record accounting evidence"
+            raise ReplayError(problem)
+        _metadata(detail, pb.AccountingEvidence)
+        AccountingLedger.from_records(
+            (*[Record.from_binary(value) for value in self._records], record)
+        )
 
     def _validate_notice(self, notice: pb.ReplayNotice) -> None:
         if self._epoch_closed:

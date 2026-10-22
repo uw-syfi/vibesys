@@ -14,6 +14,7 @@ from vs_core.api.replay import (
     ENCODING_VERSION,
     AcceptedClock,
     AcceptedReplay,
+    AccountingLedger,
     ReplayAccounting,
     ReplayArchive,
     ReplayError,
@@ -841,6 +842,35 @@ class ReplayRuntime:
     ) -> None:
         """W7: persist proof or a typed blocked diagnostic before any hold release."""
         self._writer_fact(result, now=now, at=at)
+
+    def accounting_evidence(
+        self, evidence: pb.AccountingEvidence, *, now: float, at: Timestamp
+    ) -> None:
+        """Append import history or a delayed observation through this single writer.
+
+        Republishing an import already in the prefix appends nothing, so repeated
+        import or recovery never charges twice. Contradictory evidence fails before
+        commit; imported occurrences never debit this epoch's allowance.
+        """
+        validate(evidence)
+        if evidence.has_field("import_id"):
+            records = ReplayRecords.from_binary(self._archive.encode()).records
+            if AccountingLedger.from_records(records).published(evidence.import_id) == evidence:
+                return
+        self._record_schemas((type(evidence),), now=now, at=at)
+        self._append(
+            Oneof(
+                "notice",
+                Notice(
+                    severity=Severity.WARNING,
+                    code=NoticeCode.FRAMEWORK_WARNING,
+                    message="Accounting evidence retained.",
+                    detail=Any(type_url=evidence.desc().type_name, value=evidence.to_binary()),
+                ),
+            ),
+            now=now,
+            at=at,
+        )
 
     def _writer_fact(
         self, value: pb.WriterManifest | pb.WriterReconciliation, *, now: float, at: Timestamp

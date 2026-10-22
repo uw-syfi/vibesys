@@ -37,6 +37,13 @@ PURE_EXPORTS = {
             "ReplayFieldKind",
             "ReplayPolicyDrift",
             "ReplayResources",
+            "AccountingDimension",
+            "AccountingEvidence",
+            "AccountingObservation",
+            "AccountingOccurrence",
+            "AccountingOccurrenceKind",
+            "AccountingQuantity",
+            "AccountingCoverage",
             "ext_replay_field",
             "ext_replay_set",
             "ext_replay_context",
@@ -66,10 +73,19 @@ PURE_EXPORTS = {
             "ReplayControlApplied",
             "ReplayControlDisposition",
             "ReplaySteer",
+            "AccountingEvidence",
+            "AccountingObservation",
+            "AccountingCoverage",
         )
     },
     # Operator control dispositions are closed protobuf enums.
     "vs_proto.api.replay.ReplayControlStale": frozenset({"EPOCH", "TURN"}),
+    "vs_proto.api.replay.AccountingDimension": frozenset(
+        {"MONEY_USD", "INPUT_TOKENS", "CACHE_READ_TOKENS", "CACHE_CREATION_TOKENS", "OUTPUT_TOKENS"}
+    ),
+    "vs_proto.api.replay.AccountingOccurrenceKind": frozenset({"INVOCATION"}),
+    # Exact rational arithmetic over in-memory values.
+    "fractions": frozenset({"Fraction"}),
     # These generated request codecs only transform retained in-memory values.
     "vs_proto.api.replay_agent": frozenset({"ReplayAgentRequest"}),
     "vs_proto.api.replay_agent.ReplayAgentRequest": frozenset({"from_binary", "desc"}),
