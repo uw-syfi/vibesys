@@ -336,3 +336,37 @@ func TestWatchRunsAtomicHeadAndRealLock(t *testing.T) {
 		t.Fatal(got)
 	}
 }
+
+func TestTailStreamRejectsRotationAndTruncation(t *testing.T) {
+	for _, replacement := range []bool{false, true} {
+		t.Run(fmt.Sprint(replacement), func(t *testing.T) {
+			f := start(t)
+			path := filepath.Join(f.run, "streams", "output")
+			if err := os.Mkdir(filepath.Dir(path), 0700); err != nil {
+				t.Fatal(err)
+			}
+			write(t, path, false, []byte("original-content"))
+			stream, err := client(t, f, false).TailStream(f.ctx, &apiv1.TailStreamRequest{RunId: "run-1", StreamId: "output"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			first, err := stream.Recv()
+			if err != nil || string(first.GetData()) != "original-content" {
+				t.Fatalf("first=%v,%v", first, err)
+			}
+			if replacement {
+				next := path + ".next"
+				write(t, next, false, []byte("replacement-content"))
+				if err := os.Rename(next, path); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				write(t, path, false, []byte("short"))
+			}
+			_, err = stream.Recv()
+			if status.Code(err) != codes.DataLoss {
+				t.Fatalf("expected data loss for changed stream, got %v", err)
+			}
+		})
+	}
+}

@@ -71,3 +71,32 @@ test('writer heads retain their canonical epoch even without process metadata', 
       .every(call => call.signal.aborted),
   ).toBe(true);
 });
+
+test('UTF-8 tails preserve absolute byte offsets when reopened at any decoded boundary', async () => {
+  const text = 'aé中😀\nlast';
+  const data = new TextEncoder().encode(text);
+  let offset = 0;
+  for (const character of text) {
+    const transport = new FakeRunTransport({
+      records: [],
+      streams: {output: data},
+      streamChunkBytes: 1,
+    });
+    transport.close(METHOD);
+    const reader = gatewayReader(transport, new FakeSkeletonCache(), new FakeClock().schedule);
+    const chunks: {text: string; offset: number; next: number}[] = [];
+    await reader.log(
+      'run-a',
+      'output',
+      new AbortController().signal,
+      chunk => chunks.push(chunk),
+      BigInt(offset),
+    );
+    expect(chunks[0]?.offset).toBe(offset);
+    expect(chunks.map(chunk => chunk.text).join('')).toBe(
+      new TextDecoder().decode(data.slice(offset)),
+    );
+    expect(chunks.at(-1)?.next).toBe(data.length);
+    offset += new TextEncoder().encode(character).length;
+  }
+});

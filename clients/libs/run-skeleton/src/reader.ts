@@ -56,6 +56,7 @@ export interface GatewayReader {
     streamId: string,
     signal: AbortSignalLike,
     receive: (chunk: GatewayLogChunk) => void,
+    fromOffset?: bigint,
   ): Promise<void>;
 }
 const SERVICE = `/${HostService.typeName}/`;
@@ -94,14 +95,20 @@ async function log(
   streamId: string,
   signal: AbortSignalLike,
   receive: (chunk: GatewayLogChunk) => void,
+  fromOffset = 0n,
 ): Promise<void> {
+  if (fromOffset < 0n || fromOffset > BigInt(Number.MAX_SAFE_INTEGER))
+    throw new Error('Stream offset exceeds screen precision');
   const decoder = new TextDecoder('utf-8', {fatal: true, ignoreBOM: true});
   const encoder = new TextEncoder();
-  let offset = 0n;
-  let decodedOffset = 0;
+  let offset = fromOffset;
+  let decodedOffset = Number(fromOffset);
   for await (const bytes of transport.stream(
     `${SERVICE}${HostService.method.tailStream.name}`,
-    toBinary(TailStreamRequestSchema, create(TailStreamRequestSchema, {runId, streamId})),
+    toBinary(
+      TailStreamRequestSchema,
+      create(TailStreamRequestSchema, {runId, streamId, fromOffset}),
+    ),
     signal,
   )) {
     if (signal.aborted) return;
@@ -193,7 +200,8 @@ export function gatewayReader(
       };
     },
     content: (runId, hash, signal) => content(transport, cache, runId, hash, signal),
-    log: (runId, streamId, signal, receive) => log(transport, runId, streamId, signal, receive),
+    log: (runId, streamId, signal, receive, fromOffset) =>
+      log(transport, runId, streamId, signal, receive, fromOffset),
   };
 }
 
