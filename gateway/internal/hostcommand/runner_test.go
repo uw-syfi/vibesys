@@ -182,8 +182,26 @@ func TestStreamCancelReapsTheProcessGroup(t *testing.T) {
 	if pid == 0 {
 		t.Fatal("child pid was not reported")
 	}
-	if err := syscall.Kill(pid, 0); err == nil {
-		t.Fatalf("descendant %d is still running", pid)
+	// Stream waits for its direct child, but the kernel may still be reaping
+	// descendants after the process-group signal. Observe their disappearance;
+	// the deadline only guards a hang, rather than synchronizing cancellation.
+	guard := time.NewTimer(10 * time.Second)
+	defer guard.Stop()
+	poll := time.NewTicker(10 * time.Millisecond)
+	defer poll.Stop()
+	for {
+		err := syscall.Kill(pid, 0)
+		if errors.Is(err, syscall.ESRCH) {
+			break
+		}
+		if err != nil {
+			t.Fatalf("check descendant %d: %v", pid, err)
+		}
+		select {
+		case <-poll.C:
+		case <-guard.C:
+			t.Fatalf("descendant %d is still running after cancellation", pid)
+		}
 	}
 }
 
