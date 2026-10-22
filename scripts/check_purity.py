@@ -26,6 +26,8 @@ _GIT = Git(OsProcesses())
 # Each export is reviewed as deterministic value construction or transformation.
 # Approving a module does not approve future exports or its imported dependencies.
 PURE_EXPORTS = {
+    # Immutable epoch facts and the pure lifecycle predicate perform no I/O.
+    "vs_runlog.api": frozenset({"CurrentEpoch", "epoch_has_ended"}),
     # Reflection, immutable schema options and validation operate only on in-memory values.
     "copy": frozenset({"deepcopy"}),
     "vs_proto.api.replay": frozenset(

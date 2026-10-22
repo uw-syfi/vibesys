@@ -47,7 +47,7 @@ from vs_proto.api import (
     ReplayStore as ReplayRecords,
 )
 from vs_proto.api import replay as pb
-from vs_runlog.api import CurrentEpoch, current_epoch
+from vs_runlog.api import CurrentEpoch, current_epoch, epoch_has_ended
 from vs_runtime._replay_store import REPLAY_STORE_SCHEMA_VERSION
 
 if TYPE_CHECKING:
@@ -247,13 +247,7 @@ class ReplayRuntime:
         if acks == self._archive.acknowledgements:
             problem = "Resume launch already recorded; inspect its epoch instead of relaunching"
             raise ReplayCommitError(problem)
-        state = self._epoch.lifecycle
-        closed = (
-            state is not None
-            and state.state is not None
-            and state.state.field in {"ended", "parked"}
-        )
-        if self._epoch.number and not closed:
+        if self._epoch.number and not epoch_has_ended(self._epoch):
             self._append(
                 Oneof(
                     "lifecycle",
