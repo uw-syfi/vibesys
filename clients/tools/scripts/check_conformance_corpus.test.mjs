@@ -9,6 +9,11 @@ import {corpusErrors} from './check_conformance_corpus.mjs';
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 
 const SCHEMA = {
+  properties: {
+    request: {
+      discriminator: {mapping: {'query.snapshot': '#/$defs/SnapshotQuery'}},
+    },
+  },
   $defs: {
     EventType: {enum: ['run_started', 'run_finished']},
     RunEvent: {
@@ -18,6 +23,7 @@ const SCHEMA = {
     SubscribeRequest: {properties: {type: {const: 'subscribe'}}},
     SubscribedMessage: {properties: {type: {const: 'subscribed'}}},
     EventBatchMessage: {properties: {type: {const: 'event_batch'}}},
+    Response: {properties: {request_id: {}, timestamp: {}, snapshot: {}}},
   },
 };
 
@@ -71,11 +77,51 @@ function runnerInventory(id, scenarios) {
   return {id, description: `${id} runner`, groups: {steps: scenarios}};
 }
 
+function dispositionTable(frontend, schema = SCHEMA) {
+  return {
+    frontend,
+    events: schema.$defs.EventType.enum.map(kind => ({
+      kind,
+      disposition: 'rendered',
+      surface: `${frontend} test surface`,
+    })),
+    queries: Object.keys(schema.properties.request.discriminator.mapping)
+      .filter(kind => kind.startsWith('query.'))
+      .map(kind => ({kind, disposition: 'used', consumer: `${frontend} test consumer`})),
+    responses: Object.keys(schema.$defs.Response.properties).map(field => ({
+      field,
+      disposition: 'used',
+      consumer: `${frontend} test consumer`,
+    })),
+    campaign: [
+      ...Object.keys(schema.$defs ?? {}).filter(name => name.startsWith('Campaign')),
+      ...Object.keys(schema.properties ?? {}).filter(name => name.startsWith('campaign')),
+    ].map(dto => ({
+      dto,
+      disposition: 'used',
+      consumer: `${frontend} test consumer`,
+    })),
+    extensions:
+      Object.keys(schema.$defs ?? {}).some(name => name.startsWith('Campaign')) ||
+      Object.keys(schema.properties ?? {}).some(name => name.startsWith('campaign'))
+        ? []
+        : [
+            {
+              contract: 'campaign-projection',
+              disposition: 'deferred',
+              issue: 1761,
+              reason: 'The generated campaign contract does not exist in this fixture.',
+            },
+          ],
+  };
+}
+
 async function writeTree(spec) {
   const root = await mkdtemp(join(tmpdir(), 'vibesys-corpus-'));
   await mkdir(join(root, 'clients', 'libs', 'contracts', 'src', 'generated'), {recursive: true});
   await mkdir(join(root, 'docs', 'contributing'), {recursive: true});
   await mkdir(join(root, 'tests', 'conformance', 'events'), {recursive: true});
+  await mkdir(join(root, 'tests', 'conformance', 'rendering-dispositions'), {recursive: true});
   await mkdir(join(root, 'tests', 'conformance', 'scenarios'), {recursive: true});
   await mkdir(join(root, 'tests', 'conformance', 'runners'), {recursive: true});
   await writeFile(
@@ -92,6 +138,17 @@ async function writeTree(spec) {
   );
   for (const [name, data] of Object.entries(spec.events ?? {})) {
     await writeFile(join(root, 'tests', 'conformance', 'events', name), JSON.stringify(data));
+  }
+  const dispositions =
+    spec.dispositions ??
+    Object.fromEntries(
+      ['tui', 'web'].map(frontend => [`${frontend}.json`, dispositionTable(frontend)]),
+    );
+  for (const [name, data] of Object.entries(dispositions)) {
+    await writeFile(
+      join(root, 'tests', 'conformance', 'rendering-dispositions', name),
+      JSON.stringify(data),
+    );
   }
   for (const [name, data] of Object.entries(spec.scenarios ?? {})) {
     await writeFile(join(root, 'tests', 'conformance', 'scenarios', name), JSON.stringify(data));
@@ -153,6 +210,118 @@ test('a missing event fixture fails coverage', async () => {
   });
   const errors = await corpusErrors(root);
   assert.ok(errors.some(error => error.includes('EventType "run_finished" has no fixture')));
+});
+
+test('new generated protocol members need dispositions in both frontends', async () => {
+  const schema = structuredClone(SCHEMA);
+  schema.$defs.EventType.enum.push('new_event');
+  schema.properties.request.discriminator.mapping['query.new'] = '#/$defs/NewQuery';
+  schema.$defs.Response.properties.new_payload = {};
+  const dispositions = Object.fromEntries(
+    ['tui', 'web'].map(frontend => [`${frontend}.json`, dispositionTable(frontend)]),
+  );
+  const root = await writeTree({
+    schema,
+    dispositions,
+    events: fullEvents(),
+    scenarios: {'boot.json': validScenario('boot', ['WP-ALPHA', 'WP-BETA'])},
+  });
+  const errors = await corpusErrors(root);
+  for (const frontend of ['tui', 'web']) {
+    assert.ok(
+      errors.some(error =>
+        error.includes(
+          `rendering-dispositions/${frontend}.json: generated EventType "new_event" has no disposition`,
+        ),
+      ),
+    );
+    assert.ok(
+      errors.some(error =>
+        error.includes(
+          `rendering-dispositions/${frontend}.json: generated query "query.new" has no disposition`,
+        ),
+      ),
+    );
+    assert.ok(
+      errors.some(error =>
+        error.includes(
+          `rendering-dispositions/${frontend}.json: generated Response field "new_payload" has no disposition`,
+        ),
+      ),
+    );
+  }
+});
+
+test('disposition tables reject duplicates, unknown values, and malformed deferrals', async () => {
+  const tui = dispositionTable('tui');
+  tui.events.push({...tui.events[0]});
+  tui.queries.push({
+    kind: 'query.ghost',
+    disposition: 'deferred',
+    issue: 0,
+    reason: '',
+  });
+  const root = await writeTree({
+    dispositions: {'tui.json': tui, 'web.json': dispositionTable('web')},
+    events: fullEvents(),
+    scenarios: {'boot.json': validScenario('boot', ['WP-ALPHA', 'WP-BETA'])},
+  });
+  const errors = await corpusErrors(root);
+  assert.ok(errors.some(error => error.includes('kind "run_started" is listed more than once')));
+  assert.ok(
+    errors.some(error => error.includes('kind "query.ghost" is not in the generated query')),
+  );
+  assert.ok(errors.some(error => error.includes('needs a positive integer "issue"')));
+  assert.ok(errors.some(error => error.includes('needs a non-empty "reason"')));
+});
+
+test('a generated campaign contract requires every DTO and retires the extension deferral', async () => {
+  const schema = structuredClone(SCHEMA);
+  schema.$defs.CampaignProjection = {properties: {revision: {type: 'integer'}}};
+  schema.properties.campaign_summary = {type: 'object'};
+  const staleDispositions = Object.fromEntries(
+    ['tui', 'web'].map(frontend => [`${frontend}.json`, dispositionTable(frontend)]),
+  );
+  const root = await writeTree({
+    schema,
+    dispositions: staleDispositions,
+    events: fullEvents(),
+    scenarios: {'boot.json': validScenario('boot', ['WP-ALPHA', 'WP-BETA'])},
+  });
+  const errors = await corpusErrors(root);
+  for (const frontend of ['tui', 'web']) {
+    assert.ok(
+      errors.some(error =>
+        error.includes(
+          `rendering-dispositions/${frontend}.json: generated campaign DTO "CampaignProjection" has no disposition`,
+        ),
+      ),
+    );
+    assert.ok(
+      errors.some(error =>
+        error.includes(
+          `rendering-dispositions/${frontend}.json: generated campaign DTO "campaign_summary" has no disposition`,
+        ),
+      ),
+    );
+    assert.ok(
+      errors.some(error =>
+        error.includes(
+          `rendering-dispositions/${frontend}.json extensions entry 0: contract "campaign-projection" is not in the generated planned extension`,
+        ),
+      ),
+    );
+  }
+
+  const migratedRoot = await writeTree({
+    schema,
+    dispositions: Object.fromEntries(
+      ['tui', 'web'].map(frontend => [`${frontend}.json`, dispositionTable(frontend, schema)]),
+    ),
+    events: fullEvents(),
+    scenarios: {'boot.json': validScenario('boot', ['WP-ALPHA', 'WP-BETA'])},
+  });
+  assert.deepEqual(await corpusErrors(migratedRoot), []);
 });
 
 test('a malformed event fixture is rejected', async () => {

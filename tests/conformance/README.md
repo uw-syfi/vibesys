@@ -17,6 +17,7 @@ tests/conformance/
   README.md                 this file
   FORMAT.md                 the fixture and scenario file formats
   events/<kind>.json        one RunEvent fixture per EventType enum member
+  rendering-dispositions/   one generated-contract disposition table per frontend
   scenarios/<id>.json       one connection scenario per file
   runners/<id>.json         runner-owned executable scenario inventory
 ```
@@ -32,6 +33,12 @@ tests/conformance/
   duplicate what codegen owns. Their job is the two things codegen does not provide: a coverage
   checklist that forces every event kind to exist, and one representative instance per kind for the
   fold and scenario runners to replay.
+- `rendering-dispositions/` records what the TUI and Web frontend do with every generated event,
+  query, response field, and generated campaign DTO/section. Each member is rendered or used, explicitly inapplicable, or deferred
+  with an open owning issue. The Web table covers both browser and Electron renderers because they
+  compose the same feature packages. A whole-contract campaign-projection deferral points to #1761
+  until that backend-owned generated DTO exists; the gate then requires one disposition for every
+  `Campaign*` definition and campaign-prefixed top-level section and rejects the old extension deferral.
 - `scenarios/` holds the connection-level exchanges (bootstrap, resume, rebootstrap, capability
   probes, protocol error, and so on). Each scenario tags the wire-contract decisions it exercises,
   so every decision in the contract is covered by at least one scenario and no scenario references a
@@ -91,12 +98,16 @@ The gate checks, with no external dependency:
    that is not in the enum.
 2. Every event fixture is a structurally valid `RunEvent`: its `type` matches its filename and the
    enum, its required fields are present, and it carries no unknown top-level fields.
-3. Every scenario is structurally valid: its `id` matches its filename, its steps are well formed,
+3. The TUI and Web tables classify every schema-derived `EventType`, `query.*` request,
+   `Response` field, and campaign DTO/section exactly once. A new generated member therefore fails with an actionable missing
+   disposition in both frontends. Deferred entries carry a positive owning issue and a reason;
+   issue liveness is verified when the table is reviewed rather than by a network call in CI.
+4. Every scenario is structurally valid: its `id` matches its filename, its steps are well formed,
    and every frame it names is a known protocol message type.
-4. Every wire-contract decision token (`WP-*` in `wire-protocol.md`) is exercised by at least one
+5. Every wire-contract decision token (`WP-*` in `wire-protocol.md`) is exercised by at least one
    scenario, and every decision a scenario tags exists in the contract. This is what keeps the
    document and the corpus from drifting apart.
-5. Every scenario is registered by at least one runner or declares the setup capability still
+6. Every scenario is registered by at least one runner or declares the setup capability still
    required, never both. Runner inventories may name only checked-in scenarios and cannot register
    one scenario twice within the same runner.
 
