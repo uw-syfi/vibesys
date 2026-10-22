@@ -1,0 +1,12 @@
+syntax = "proto3";
+package vibesys.runtime.testing.v1;
+
+import "buf/validate/validate.proto";
+
+message Reply {
+  string value = 1;
+}
+
+message BoundedValue {
+  string value = 1 [(buf.validate.field).string.min_len = 1];
+}

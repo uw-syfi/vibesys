@@ -1645,6 +1645,15 @@ from = ["vibesys.orchestration.dynamic.core_policy"]
 expose = ["api", "api\\..*"]
 
 [[modules]]
+path = "vibesys.serial_replay"
+layer = "loops"
+depends_on = ["vs_core", "vs_issue_tracker", "vs_proto", "vs_runtime"]
+
+[[interfaces]]
+from = ["vibesys.serial_replay"]
+expose = ["roadmap_item", "serial_replay_bindings"]
+
+[[modules]]
 # A serial run's roadmap: the owner of the roadmap operations over the run's `Roadmap`, kept in
 # its portable state through `Project`.
 path = "vibesys.serial_roadmap"

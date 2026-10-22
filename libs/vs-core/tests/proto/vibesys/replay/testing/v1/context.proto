@@ -2,6 +2,7 @@ syntax = "proto3";
 package vibesys.replay.testing.v1;
 
 import "vibesys/store/v1/replay.proto";
+import "buf/validate/validate.proto";
 import "google/protobuf/any.proto";
 import "vibesys/core/v1/leaves.proto";
 
@@ -52,4 +53,10 @@ message SharedContext {
   option (vibesys.store.v1.replay_context) = true;
   vibesys.core.v1.RevisionRef candidate = 1 [(vibesys.store.v1.replay_field) = REPLAY_FIELD_KIND_IDENTITY];
   vibesys.store.v1.ReplayAllowance allowance = 2 [(vibesys.store.v1.replay_field) = REPLAY_FIELD_KIND_POLICY];
+}
+
+message RequiredPolicyContext {
+  option (vibesys.store.v1.replay_context) = true;
+  string candidate = 1 [(vibesys.store.v1.replay_field) = REPLAY_FIELD_KIND_IDENTITY, (buf.validate.field).string.min_len = 1];
+  string model = 2 [(vibesys.store.v1.replay_field) = REPLAY_FIELD_KIND_POLICY, (buf.validate.field).string.min_len = 1];
 }

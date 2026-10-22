@@ -4,6 +4,7 @@ package vibesys.store.v1;
 import "buf/validate/validate.proto";
 import "google/protobuf/any.proto";
 import "google/protobuf/descriptor.proto";
+import "vibesys/store/v1/agent_attrs.proto";
 
 option go_package = "github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1";
 
@@ -47,6 +48,15 @@ message ReplayAllowance {
   uint64 iterations = 1;
   uint64 capacity = 2;
   double remaining = 3 [(buf.validate.field).double = {gte: 0, finite: true}];
+  // Absent dimensions are explicitly unbounded. Remaining is retained prompt
+  // context; executable resource admission uses these named bounds.
+  ReplayResources resources = 4;
+}
+
+message ReplayResources {
+  optional double money_usd = 1 [(buf.validate.field).double = {gte: 0, finite: true}];
+  optional uint64 input_tokens = 2;
+  optional uint64 output_tokens = 3;
 }
 message ReplayPolicy {
   string role = 1;
@@ -55,6 +65,14 @@ message ReplayPolicy {
   string reply_type = 4 [(buf.validate.field).string.min_len = 1];
   // Derived by the writer from the reachable retained reply descriptors.
   optional bytes reply_schema_digest = 5 [(buf.validate.field).bytes.len = 32];
+  // The writer retains the complete typed request, including policy fields that
+  // do not enter identity. Executors never decode the canonical identity framing.
+  // Absent only in recorder prototypes predating typed request retention.
+  google.protobuf.Any request = 6;
+  // An upper bound enforced by the execution owner. A bounded epoch rejects
+  // external requests that omit a bound for a constrained dimension. Free
+  // operations explicitly reserve zero.
+  ReplayResources reservation = 7;
 }
 
 // Immutable execution metadata, separate from mutable span labels. Outcome Any
@@ -104,4 +122,25 @@ message ReplayAcknowledgement {
   // A launch without a preceding unacknowledged notice still records its id.
   optional string notice_id = 1 [(buf.validate.field).string.min_len = 1];
   string launch_request_id = 2 [(buf.validate.field).string.min_len = 1];
+}
+
+// A surviving observation can complete its operation after a writer crash.
+// Recording this does not itself deliver an answer to a continuation.
+message ReplayObservation {
+  option (buf.validate.message).cel = {
+    id: "replay_observation.usage_cost"
+    message: "reported usage cost must agree with observation cost"
+    expression: "!has(this.usage) || !has(this.usage.cost_usd) || (has(this.cost_usd) && this.cost_usd == this.usage.cost_usd)"
+  };
+  google.protobuf.Any outcome = 1 [(buf.validate.field).required = true];
+  bool paid = 2;
+  optional double cost_usd = 3 [(buf.validate.field).double = {gte: 0, finite: true}];
+  TokenUsage usage = 4;
+}
+
+// Earlier answers remain usable when only prompts or limits change.
+message ReplayPolicyDrift {
+  uint64 results = 1 [(buf.validate.field).uint64.gt = 0];
+  repeated string roles = 2;
+  repeated string templates = 3;
 }

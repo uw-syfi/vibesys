@@ -8,7 +8,7 @@ The two schema hashes identify the canonical descriptors, not generated code.
 
 from protobuf import Oneof
 from protobuf.wkt.google.protobuf.timestamp_pb import Timestamp
-from protovalidate import ValidationError, validate
+from protovalidate import ValidationError
 
 from vs_proto._generated import host_operations
 from vs_proto._generated.buf.validate import validate_pb as validation_rules
@@ -55,7 +55,11 @@ from vs_proto._generated.vibesys.core.v1 import common_pb as core_common
 from vs_proto._generated.vibesys.core.v1 import contracts_pb as core_contracts
 from vs_proto._generated.vibesys.core.v1 import control_pb as core_control
 from vs_proto._generated.vibesys.core.v1 import failures_pb as core_failures
+from vs_proto._generated.vibesys.core.v1 import iterations_pb as core_iterations
 from vs_proto._generated.vibesys.core.v1 import leaves_pb as core_leaves
+from vs_proto._generated.vibesys.core.v1 import replay_agent_pb as replay_agent
+from vs_proto._generated.vibesys.core.v1 import replay_evaluation_pb as replay_evaluation
+from vs_proto._generated.vibesys.core.v1 import replay_workspace_pb as replay_workspace
 from vs_proto._generated.vibesys.core.v1 import value_options_pb as core_value_options
 from vs_proto._generated.vibesys.core.v1 import vocabulary_pb as core_vocabulary
 from vs_proto._generated.vibesys.core.v1.vocabulary_pb import CheckoutStatus
@@ -63,6 +67,7 @@ from vs_proto._generated.vibesys.host.v1 import admission_receipt_generated_pb a
 from vs_proto._generated.vibesys.host.v1 import operation_options_pb as operation_options
 from vs_proto._generated.vibesys.host.v1 import operations_pb as host_payloads
 from vs_proto._generated.vibesys.host.v1.failure_pb import FailureCategory, OperationFailure
+from vs_proto._generated.vibesys.search.v1 import serial_effects_pb as serial_effects
 from vs_proto._generated.vibesys.search.v1.attrs_pb import (
     AdoptionAttrs,
     BaselineAttrs,
@@ -163,7 +168,12 @@ from vs_proto._generated.vibesys.store.v1.notice_pb import (
     NoticeCode,
     Severity,
 )
-from vs_proto._generated.vibesys.store.v1.record_pb import EpochStarted, LegacyEvent, Record
+from vs_proto._generated.vibesys.store.v1.record_pb import (
+    EpochStarted,
+    LegacyEvent,
+    Record,
+    ReplayStore,
+)
 from vs_proto._generated.vibesys.store.v1.skeleton_pb import (
     EpochVersion,
     HeadlineObjective,
@@ -209,6 +219,7 @@ from vs_proto._schema_hashes import (
     STORE_SCHEMA_HASH,
     schema_hash,
 )
+from vs_proto._validation import validate
 
 __all__ = [
     "API_SCHEMA_HASH",
@@ -307,6 +318,7 @@ __all__ = [
     "RelaunchRefusal",
     "RelaunchRequest",
     "RelaunchResponse",
+    "ReplayStore",
     "RunDescription",
     "RunFailure",
     "RunFailureKind",
@@ -372,6 +384,7 @@ __all__ = [
     "core_contracts",
     "core_control",
     "core_failures",
+    "core_iterations",
     "core_leaves",
     "core_value_options",
     "core_vocabulary",
@@ -381,7 +394,11 @@ __all__ = [
     "host_payloads",
     "operation_options",
     "replay",
+    "replay_agent",
+    "replay_evaluation",
+    "replay_workspace",
     "schema_hash",
+    "serial_effects",
     "to_mapping",
     "validate",
     "validated_operation_bytes",
