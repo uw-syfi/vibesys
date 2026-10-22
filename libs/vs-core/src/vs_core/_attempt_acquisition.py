@@ -21,7 +21,7 @@ from ._attempt_terminal import (
     unresolved_acceptance,
 )
 from ._checkpoint_events import declined, retained
-from ._deadlines import cleanup, from_dispatch, limit_to
+from ._deadlines import from_dispatch, limit_to
 from ._evaluation_history import produce_history
 from ._proofs import (
     Mismatch,
@@ -1164,12 +1164,9 @@ def _checkpoint_request(
         invocation=event.invocation,
     )
     updated = attempt.model_copy(update={"pending_records": (*attempt.pending_records, identity)})
-    # The retain is how the attempt closes. The time the run has left is zero once the
-    # deadline has passed, and a turn that ends during a publication is committed then:
-    # cleanup's own budget is what lets the snapshot still run.
     return AreaChange(
         state=_replace(state, updated),
-        requests=(cleanup(context.run, request),),
+        requests=(_within_run(context, request),),
         signals=(pending,),
     )
 
