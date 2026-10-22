@@ -1,0 +1,78 @@
+/** Opaque accepted requests own immutable bytes; builders never enter a transport. */
+import {
+  create,
+  type DescMessage,
+  fromBinary,
+  type MessageInitShape,
+  type MessageShape,
+  toBinary,
+} from '@bufbuild/protobuf';
+import {createValidator} from '@bufbuild/protovalidate';
+
+const validator = createValidator();
+const maxBytes = 1 << 20;
+const acceptedBrand: unique symbol = Symbol('accepted operation');
+export interface Accepted<Name extends string> {
+  readonly [acceptedBrand]: Name;
+}
+export interface OperationPolicy {
+  readonly name: string;
+  readonly id: number;
+  readonly capMs: number;
+  readonly graceMs: number;
+  readonly totalMs: number;
+}
+export interface OperationTransport {
+  /** Dial and queue time consume totalMs; the shell owns cancellation. */
+  invoke(id: number, payload: Uint8Array, totalMs: number): Promise<Uint8Array>;
+}
+const payloads = new WeakMap<object, Uint8Array>();
+
+function checked<Schema extends DescMessage>(schema: Schema, message: MessageShape<Schema>): Uint8Array {
+  const result = validator.validate(schema, message);
+  if (result.kind !== 'valid') throw new Error(result.kind === 'invalid' ? result.error.message : 'invalid operation schema');
+  const payload = toBinary(schema, message);
+  if (payload.byteLength > maxBytes) throw new Error('operation payload exceeds 1 MiB');
+  return payload;
+}
+
+export function accept<const Policy extends OperationPolicy, Schema extends DescMessage>(
+  policy: Policy,
+  schema: Schema,
+  input: MessageInitShape<Schema>,
+): Accepted<Policy['name']> {
+  const payload = checked(schema, create(schema, input));
+  const accepted = Object.freeze({[acceptedBrand]: policy.name});
+  payloads.set(accepted, payload.slice());
+  return accepted;
+}
+
+function field(value: unknown, path: readonly string[]): unknown {
+  for (const name of path) {
+    if (typeof value !== 'object' || value === null) throw new Error('invalid correlation path');
+    value = (value as Record<string, unknown>)[name];
+  }
+  return value;
+}
+
+export async function call<Policy extends OperationPolicy, Request extends DescMessage, Response extends DescMessage>(
+  transport: OperationTransport,
+  policy: Policy,
+  requestSchema: Request,
+  responseSchema: Response,
+  request: Accepted<Policy['name']>,
+  correlations: readonly (readonly [readonly string[], readonly string[]])[],
+): Promise<MessageShape<Response>> {
+  const bytes = payloads.get(request);
+  if (!bytes || request[acceptedBrand] !== policy.name) throw new Error('unaccepted operation request');
+  const input = fromBinary(requestSchema, bytes);
+  checked(requestSchema, input);
+  const payload = await transport.invoke(policy.id, bytes.slice(), policy.totalMs);
+  if (payload.byteLength > maxBytes) throw new Error('operation payload exceeds 1 MiB');
+  const response = fromBinary(responseSchema, payload);
+  checked(responseSchema, response);
+  for (const [left, right] of correlations) {
+    if (field(input, left) !== field(response, right)) throw new Error('response correlation mismatch');
+  }
+  return response;
+}

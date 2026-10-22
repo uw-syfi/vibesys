@@ -1,0 +1,137 @@
+syntax = "proto3";
+package vibesys.api.v1;
+
+import "vibesys/host/v1/operation_options.proto";
+import "vibesys/host/v1/operations.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/gateway/gen/vibesys/api/v1;apiv1";
+
+// Descriptor-only registry. No public gRPC endpoint is registered for this service.
+service HostOperationsService {
+  rpc ListTasks(vibesys.host.v1.ListTasksRequest) returns (vibesys.host.v1.ListTasksResponse) {
+    option (vibesys.host.v1.operation) = {
+      adapter_method: "tasks.list"
+      operation_id: 10
+      request_tag: 10
+      response_tag: 10
+      cap_ms: 10000
+      grace_ms: 5000
+      effect: EFFECT_READ
+      retry: RETRY_BOUNDED_READ
+      cardinality: CARDINALITY_UNARY
+      executor: EXECUTOR_CHECKOUT
+      correlation: {
+        request_path: 1
+        response_path: 1
+      }
+    };
+  }
+  rpc ListHarnesses(vibesys.host.v1.ListHarnessesRequest) returns (vibesys.host.v1.ListHarnessesResponse) {
+    option (vibesys.host.v1.operation) = {
+      adapter_method: "harnesses.list"
+      operation_id: 11
+      request_tag: 11
+      response_tag: 11
+      cap_ms: 10000
+      grace_ms: 5000
+      effect: EFFECT_READ
+      retry: RETRY_BOUNDED_READ
+      cardinality: CARDINALITY_UNARY
+      executor: EXECUTOR_CHECKOUT
+      correlation: {
+        request_path: 1
+        response_path: 1
+      }
+    };
+  }
+  rpc ListExamples(vibesys.host.v1.ListExamplesRequest) returns (vibesys.host.v1.ListExamplesResponse) {
+    option (vibesys.host.v1.operation) = {
+      adapter_method: "examples.list"
+      operation_id: 12
+      request_tag: 12
+      response_tag: 12
+      cap_ms: 10000
+      grace_ms: 5000
+      effect: EFFECT_READ
+      retry: RETRY_BOUNDED_READ
+      cardinality: CARDINALITY_UNARY
+      executor: EXECUTOR_CHECKOUT
+      correlation: {
+        request_path: 1
+        response_path: 1
+      }
+    };
+  }
+  rpc GetTaskGoal(vibesys.host.v1.GetTaskGoalRequest) returns (vibesys.host.v1.GetTaskGoalResponse) {
+    option (vibesys.host.v1.operation) = {
+      adapter_method: "project.task_goal"
+      operation_id: 13
+      request_tag: 13
+      response_tag: 13
+      cap_ms: 10000
+      grace_ms: 5000
+      effect: EFFECT_READ
+      retry: RETRY_BOUNDED_READ
+      cardinality: CARDINALITY_UNARY
+      executor: EXECUTOR_CHECKOUT
+      correlation: {
+        request_path: 1
+        response_path: 1
+      }
+    };
+  }
+  rpc DescribeMachine(vibesys.host.v1.DescribeMachineRequest) returns (vibesys.host.v1.DescribeMachineResponse) {
+    option (vibesys.host.v1.operation) = {
+      adapter_method: "machine.describe"
+      operation_id: 14
+      request_tag: 14
+      response_tag: 14
+      cap_ms: 25000
+      grace_ms: 5000
+      effect: EFFECT_READ
+      retry: RETRY_BOUNDED_READ
+      cardinality: CARDINALITY_UNARY
+      executor: EXECUTOR_CHECKOUT
+      correlation: {
+        request_path: 1
+        response_path: 1
+      }
+    };
+  }
+  rpc ListCompute(vibesys.host.v1.ListComputeRequest) returns (vibesys.host.v1.ListComputeResponse) {
+    option (vibesys.host.v1.operation) = {
+      adapter_method: "compute.list"
+      operation_id: 15
+      request_tag: 15
+      response_tag: 15
+      cap_ms: 10000
+      grace_ms: 5000
+      effect: EFFECT_READ
+      retry: RETRY_BOUNDED_READ
+      cardinality: CARDINALITY_UNARY
+      executor: EXECUTOR_CHECKOUT
+      correlation: {
+        request_path: 1
+        response_path: 1
+      }
+    };
+  }
+  rpc PreflightRun(vibesys.host.v1.PreflightRunRequest) returns (vibesys.host.v1.PreflightRunResponse) {
+    option (vibesys.host.v1.operation) = {
+      adapter_method: "run.preflight"
+      operation_id: 16
+      request_tag: 16
+      response_tag: 16
+      cap_ms: 65000
+      grace_ms: 5000
+      effect: EFFECT_READ
+      retry: RETRY_BOUNDED_READ
+      cardinality: CARDINALITY_UNARY
+      executor: EXECUTOR_CHECKOUT
+      correlation: {
+        request_path: 1
+        response_path: 1
+      }
+    };
+  }
+}

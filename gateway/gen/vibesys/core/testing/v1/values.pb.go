@@ -7,7 +7,7 @@
 package testingv1
 
 import (
-	_ "github.com/uw-syfi/vibesys/gateway/gen/buf/validate"
+	_ "buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go/buf/validate"
 	_ "github.com/uw-syfi/vibesys/gateway/gen/vibesys/core/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"

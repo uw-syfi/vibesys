@@ -10,8 +10,10 @@ from protobuf import Oneof
 from protobuf.wkt.google.protobuf.timestamp_pb import Timestamp
 from protovalidate import ValidationError, validate
 
+from vs_proto._generated import host_operations
 from vs_proto._generated.buf.validate import validate_pb as validation_rules
 from vs_proto._generated.framing import RUN_LOG_MAGIC, RUN_LOG_MAX_RECORD_BYTES
+from vs_proto._generated.vibesys.api.v1 import host_operations_pb as host_operation_descriptors
 from vs_proto._generated.vibesys.api.v1.host_call_pb import (
     CancelAttemptIntent,
     CancelItemIntent,
@@ -60,6 +62,10 @@ from vs_proto._generated.vibesys.core.v1 import failures_pb as core_failures
 from vs_proto._generated.vibesys.core.v1 import leaves_pb as core_leaves
 from vs_proto._generated.vibesys.core.v1 import value_options_pb as core_value_options
 from vs_proto._generated.vibesys.core.v1 import vocabulary_pb as core_vocabulary
+from vs_proto._generated.vibesys.host.v1 import admission_receipt_generated_pb as admission
+from vs_proto._generated.vibesys.host.v1 import operation_options_pb as operation_options
+from vs_proto._generated.vibesys.host.v1 import operations_pb as host_payloads
+from vs_proto._generated.vibesys.host.v1.failure_pb import FailureCategory, OperationFailure
 from vs_proto._generated.vibesys.search.v1.attrs_pb import (
     AdoptionAttrs,
     BaselineAttrs,
@@ -195,6 +201,8 @@ from vs_proto._generated.vibesys.store.v1.transcript_pb import (
     TranscriptToolCall,
     TranscriptToolResult,
 )
+from vs_proto._operation_projection import from_mapping, to_mapping
+from vs_proto._operations import Accepted, Operation
 from vs_proto._schema_hashes import API_SCHEMA_HASH, STORE_SCHEMA_HASH, schema_hash
 
 __all__ = [
@@ -202,6 +210,7 @@ __all__ = [
     "RUN_LOG_MAGIC",
     "RUN_LOG_MAX_RECORD_BYTES",
     "STORE_SCHEMA_HASH",
+    "Accepted",
     "AdoptionAttrs",
     "AgentTurnAttrs",
     "Attempt",
@@ -240,6 +249,7 @@ __all__ = [
     "EvidenceKind",
     "FailedCheck",
     "Failure",
+    "FailureCategory",
     "FileChange",
     "FrameworkSource",
     "GateAttrs",
@@ -271,6 +281,8 @@ __all__ = [
     "NoticeCode",
     "Objective",
     "Oneof",
+    "Operation",
+    "OperationFailure",
     "OperatorHold",
     "Outcome",
     "ParkIntent",
@@ -349,6 +361,7 @@ __all__ = [
     "WorkstreamAttrs",
     "WorkstreamFailure",
     "WorkstreamFailureKind",
+    "admission",
     "compiler_values",
     "core_agent_facts",
     "core_common",
@@ -358,7 +371,13 @@ __all__ = [
     "core_leaves",
     "core_value_options",
     "core_vocabulary",
+    "from_mapping",
+    "host_operation_descriptors",
+    "host_operations",
+    "host_payloads",
+    "operation_options",
     "schema_hash",
+    "to_mapping",
     "validate",
     "validation_rules",
 ]
