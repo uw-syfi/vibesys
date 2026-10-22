@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 from pydantic import BaseModel, ConfigDict
 
 from ._strategy_operations import RenderRoleArtifactsBase
-from .types.common import ExecuteRegisteredOperation, InvocationRef, RunStatus
+from .types.common import ExecuteRegisteredOperation, InvocationRef
 from .types.evaluation import EvaluationState, SubmitMeasurement
 from .types.records import RecordsState, RequestPhase, Scheduled
 from .types.sessions import (
@@ -281,11 +281,10 @@ def _invocation(sessions: SessionsState, ref: InvocationRef) -> Invocation | Non
 def _holds(facts: _Facts, invocation: Invocation) -> bool:
     park = facts.run.park
     records = facts.records
-    if (
-        park is not None
-        and park.epoch == records.recovery.epoch
-        and facts.run.status == RunStatus.DRAINING
-    ):
+    # A same-epoch Pause admits only the turns it captured, including once the
+    # drain has parked. An immediate pause admits none. The dispatch record
+    # below is a running turn, not a Pause.
+    if park is not None and park.epoch == records.recovery.epoch:
         return not park.immediate and invocation.invocation in park.admitted_turns
     return any(
         isinstance(row.request, DispatchTurn | ResumeSessionTurn)

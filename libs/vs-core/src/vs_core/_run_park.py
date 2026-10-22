@@ -70,7 +70,15 @@ def admitted_turns(state: CoreState) -> tuple[InvocationRef, ...]:
 
 
 def drain_bound(state: CoreState, command: Command) -> float | None:
-    """The original deadline authorizing a correction or evaluation-wait continuation."""
+    """The deadline of a non-immediate Pause, for a successor of a turn it admitted.
+
+    A running turn's permit caps that turn's deadlines. It does not admit drain
+    successors or move the run to draining: without this Pause, a successor is
+    admitted by the running run.
+    """
+    park = state.run.park
+    if park is None or park.immediate or park.epoch != state.records.recovery.epoch:
+        return None
     permit = permit_for_command(state, command)
     return None if permit is None else permit.deadline_at
 

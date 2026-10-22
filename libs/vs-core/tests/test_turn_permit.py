@@ -6,6 +6,7 @@ from hypothesis import strategies as st
 
 import vs_core.api as core
 from vs_agent.api import AgentExecutionCancelledError
+from vs_core.api.testing import sample_limits
 from vs_runtime.api.infrastructure import create_run_control_channel
 from vs_runtime.api.testing import FakeRunControlEventSink
 from vs_sim.api.testing import SimThreads, examples
@@ -139,3 +140,102 @@ def test_admitted_successors_start_inside_the_turn_deadline(
         assert answered.deadline_at <= permit.deadline_at
         channel.prepare_evaluation(request_id.root, turn.scope, permit=permit)
         channel.start_execution(lambda: None, evaluation_id=request_id.root)
+
+
+def _resume_without_a_pause(
+    *, now_at: float, limit: float
+) -> tuple[core.CoreState, core.Transition]:
+    """A suspended turn's resume, on a run that has no Pause."""
+    state, turn = write_turn_world(access=core.Access.READ_ONLY)
+    invocation = state.sessions.invocations[0]
+    session = state.sessions.sessions[0]
+    resume_id = core.InvocationId(root="resume")
+    continuation_id = core.ContinuationId(root="wait")
+    next_ref = invocation.invocation.model_copy(update={"invocation_id": resume_id})
+    state = state.model_copy(
+        update={
+            "run": state.run.model_copy(update={"limits": sample_limits(max_turns=10)}),
+            "sessions": state.sessions.model_copy(
+                update={
+                    "sessions": (
+                        session.model_copy(update={"phase": core.SessionPhase.SUSPENDED}),
+                    ),
+                    "invocations": (
+                        invocation.model_copy(update={"phase": core.SessionPhase.SUSPENDED}),
+                    ),
+                }
+            ),
+            "evaluation": core.EvaluationState(
+                continuations=(
+                    core.Continuation(
+                        continuation_id=continuation_id,
+                        invocation=invocation.invocation,
+                        next_invocation=next_ref,
+                        jobs=(),
+                        deadline_at=80.0,
+                        phase=core.ContinuationPhase.AUTHORIZED,
+                    ),
+                )
+            ),
+        }
+    )
+    state = _at(state, now_at)
+    spec = invocation.turn.model_copy(
+        update={
+            "invocation_id": resume_id,
+            "continuation_id": continuation_id,
+            "charge_class": "resume",
+            "predecessor": None,
+        }
+    )
+    decision = core.RequestTurn(
+        decision_id=core.DecisionId(root="resume"), scope=turn.scope, turn=spec
+    )
+    result = core.step(
+        state,
+        core.DecisionSubmitted(
+            decision=core.Wait(request=decision, until=core.Within(limit=limit)),
+            expected_revision=state.revision,
+        ),
+    )
+    return state, result
+
+
+@pytest.mark.regression
+@example(now_at=0, limit=50)
+@example(now_at=99, limit=100)
+@settings(max_examples=examples(pr=8, nightly=40), deadline=None)
+@given(now_at=st.integers(min_value=0, max_value=99), limit=st.integers(min_value=1, max_value=400))
+def test_without_a_pause_a_successor_is_admitted_on_the_running_run(
+    now_at: int, limit: int
+) -> None:
+    """No Pause is pending, so a resume is admitted and the run stays running.
+
+    The permit of the suspended turn used to open the drain. The resume was
+    accepted and the run entered draining with no park, so every later decision
+    waited for a drain that never finished.
+    """
+    state, result = _resume_without_a_pause(now_at=float(now_at), limit=float(limit))
+    assert state.run.park is None
+    assert state.run.status is core.RunStatus.RUNNING
+    accepted = [event for event in result.events if isinstance(event, core.Accepted)]
+    assert len(accepted) == 1
+    assert any(isinstance(request, core.ResumeSessionTurn) for request in result.requests)
+    assert result.state.run.park is None
+    assert result.state.run.status is core.RunStatus.RUNNING
+    finish = core.Finish(
+        decision_id=core.DecisionId(root="finish"),
+        scope=result.requests[0].scope,
+        mode="drain",
+        result=core.RunResultProposal(outcome="cancelled", reason="done"),
+    )
+    closed = core.step(
+        result.state,
+        core.DecisionSubmitted(decision=finish, expected_revision=result.state.revision),
+    )
+    assert not any(
+        isinstance(event, core.Rejected) and event.code == core.RejectionCode.CLOSED_SCOPE
+        for event in closed.events
+    )
+    assert closed.state.run.status is not core.RunStatus.DRAINING
+    assert closed.state.run.park is None
