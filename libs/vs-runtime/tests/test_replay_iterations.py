@@ -10,7 +10,8 @@ from protobuf.wkt.google.protobuf.timestamp_pb import Timestamp
 
 from vs_core.api.replay import ReplayFlow
 from vs_project.api import CommitFault, FakeStateStore
-from vs_proto.api import replay
+from vs_proto.api import ReplayStore, replay
+from vs_proto.api import core_iterations as units
 from vs_runtime.api.replay import (
     FakeReplayExecutor,
     ReplayCommitError,
@@ -48,6 +49,56 @@ async def test_unfinished_unit_retries_before_the_fresh_additional_unit_allowanc
     assert resumed.runtime.accounting.lifetime_completed == 2
     assert resumed.runtime.accounting.fresh_completed == 1
     assert resumed.runtime.accounting.fresh_pending == 0
+
+
+@pytest.mark.parametrize("fault", list(CommitFault))
+@pytest.mark.parametrize("fresh", [0, 1, 2])
+def test_interrupted_admission_keeps_its_original_epoch(fault: CommitFault, fresh: int) -> None:
+    async def root(ctx: ReplayFlow) -> None:
+        for number in range(1, 5):
+            async with ctx.iteration("round", number):
+                await call(ctx, f"work/{number}")
+
+    allowance = replay.ReplayAllowance(iterations=1)
+    baseline = ReplayRuntime(FakeStateStore(), root, allowance)
+    baseline.start(launch("baseline"), now=0, at=Timestamp())
+    baseline.prepare(now=0, at=Timestamp())
+    records = ReplayStore.from_binary(baseline.archive.encode()).records
+    boundaries = [
+        index
+        for index, record in enumerate(records)
+        if record.body is not None
+        and record.body.field == "span"
+        and (span := record.body.value.span) is not None
+        and span.replay is not None
+        and span.replay.policy is not None
+        and span.replay.policy.reply_type == units.IterationGranted.desc().type_name
+    ]
+    baseline.close(now=0)
+    assert len(boundaries) == 3
+
+    async def scenario(boundary: int) -> None:
+        store = FakeStateStore(fault_plan=(None,) * boundary + (fault,))
+        original = ReplayRuntime(store, root, allowance)
+        original.start(launch("first"), now=0, at=Timestamp())
+        with pytest.raises((ReplayCommitError, OSError)):
+            original.prepare(now=0, at=Timestamp())
+        original.close(now=0)
+        executor = FakeReplayExecutor(
+            lambda _: ReplayResult(Reply(root="paid"), paid=True, cost_usd=1)
+        )
+        resumed = replace(
+            host(store, root, executor, sim),
+            runtime=ReplayRuntime(store, root, replay.ReplayAllowance(iterations=fresh)),
+        )
+        assert await drive_replay(resumed, launch("resume")) == ReplayParked()
+        assert len(executor.invocations) == 1 + fresh
+        assert resumed.runtime.accounting.lifetime_completed == 1 + fresh
+        assert resumed.runtime.accounting.fresh_completed == fresh
+
+    sim = Sim(seed=0)
+    for boundary in boundaries[1:]:
+        sim.run(scenario(boundary))
 
 
 @example(first=0, second=2)

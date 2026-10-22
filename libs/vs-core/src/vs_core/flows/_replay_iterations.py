@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from vs_proto.api import Record, Span, replay, validate
+from vs_proto.api import Change, Record, Span, replay, validate
 from vs_proto.api import core_iterations as units
 
 from ._replay_resources import ReplayResourceAccounting, ReplayResourcesBlocked
@@ -116,9 +116,9 @@ class ReplayAccounting:
         admitted: dict[bytes, tuple[bytes, int]] = {}
         completed: set[bytes] = set()
         fresh_completed = 0
-        for expected, accepted_epoch in _accepted_units(records):
+        for expected, started_epoch in _accepted_units(records):
             if isinstance(expected, units.IterationGranted):
-                admitted[expected.admission_digest] = (expected.to_binary(), accepted_epoch)
+                admitted[expected.admission_digest] = (expected.to_binary(), started_epoch)
             else:
                 grant = expected.grant
                 if (
@@ -158,7 +158,14 @@ def _spans(records: tuple[Record, ...]) -> Iterator[tuple[Record, Span]]:
 def _accepted_units(
     records: tuple[Record, ...],
 ) -> Iterator[tuple[units.IterationGranted | units.IterationCompleted, int]]:
+    started_epochs: dict[str, int] = {}
     for record, span in _spans(records):
+        if (
+            record.body is not None
+            and record.body.field == "span"
+            and record.body.value.change == Change.STARTED
+        ):
+            started_epochs[span.id] = record.epoch
         operation = span.replay
         if (
             operation is None
@@ -176,7 +183,7 @@ def _accepted_units(
         ):
             problem = "iteration outcome contradicts its admission proof"
             raise ReplayError(problem)
-        yield expected, record.epoch
+        yield expected, started_epochs[span.id]
 
 
 def _paid_observations(records: tuple[Record, ...]) -> tuple[int, int]:
