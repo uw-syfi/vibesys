@@ -10,7 +10,7 @@ import json
 from datetime import UTC, datetime
 
 import pytest
-from hypothesis import assume, given, settings
+from hypothesis import assume, example, given, settings
 from hypothesis import strategies as st
 from pydantic import TypeAdapter, ValidationError
 from tests.support.event_models import JSON_SCALARS as _JSON_SCALARS
@@ -122,6 +122,7 @@ def test_a_core_event_payload_declares_no_field_the_wire_rejects() -> None:
 @pytest.mark.regression
 @settings(max_examples=examples(pr=8, nightly=40))
 @given(status=st.none() | st.sampled_from(tuple(CheckoutStatus)))
+@example(status=None)  # the reported case: null is dumped, and the wire model rejected the key
 def test_a_winner_selection_checkout_status_crosses_onto_the_wire(
     status: CheckoutStatus | None,
 ) -> None:
