@@ -93,3 +93,25 @@ echo 'proto breaking: shallow history fails with fetch guidance'
 git fetch -q --unshallow origin
 "$root/scripts/check_proto_breaking.sh"
 echo 'proto breaking: full history restores the check'
+
+# Keep historical blobs absent so the check must fetch them through the promisor.
+cat > "$work/repo/proto/vibesys/core/v1/record.proto" <<'PROTO'
+syntax = "proto3";
+package vibesys.core.v1;
+message Record { string original = 1; string added = 2; }
+PROTO
+git -C "$work/repo" add .
+git -C "$work/repo" commit -qm 'change head blob without breaking compatibility'
+git -C "$work/repo" config uploadpack.allowFilter true
+git -C "$work/repo" config uploadpack.allowAnySHA1InWant true
+git clone -q --filter=blob:none --branch pr "file://$work/repo" "$work/partial"
+cd "$work/partial"
+git branch base origin/base
+missing_before="$(git rev-list --objects --all --missing=print | grep '^?' || true)"
+baseline_blob="$(git rev-parse "$(git merge-base HEAD base):proto/vibesys/core/v1/record.proto")"
+if ! grep -q "^?$baseline_blob$" <<< "$missing_before"; then
+  echo 'Expected historical blobs to be absent in the partial clone' >&2
+  exit 1
+fi
+"$root/scripts/check_proto_breaking.sh"
+echo 'proto breaking: partial clone lazily fetches the merge-base schemas'
