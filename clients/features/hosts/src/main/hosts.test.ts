@@ -482,7 +482,7 @@ describe('Hosts.setCheckout transport v2', () => {
     await expect(hosts.setCheckout(LOCAL, '/candidate', {owner: 'doc', sequence: 1})).resolves.toBe(
       '/candidate',
     );
-    expect((await settings.hosts()).settings.hosts.local?.checkout).toBe('/candidate');
+    expect((await settings.hosts()).settings.hosts['local']?.checkout).toBe('/candidate');
   });
 
   test('a cancel during inspection does not save the checkout', async () => {
@@ -518,7 +518,7 @@ describe('Hosts.setCheckout transport v2', () => {
     await hosts.cancelCheckout({owner: 'doc', sequence: 1});
     release();
     await expect(pending).rejects.toThrow('the checkout change was cancelled');
-    expect((await settings.hosts()).settings.hosts.local).toBeUndefined();
+    expect((await settings.hosts()).settings.hosts['local']).toBeUndefined();
   });
 });
 
