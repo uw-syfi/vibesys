@@ -312,3 +312,80 @@ def test_unconfirmed_and_refused_results_are_typed_and_never_start_an_effect(
         assert retried.observe().result == refusal
         with pytest.raises(AdmissionUnconfirmedError):
             retried.record_intent(admission.PublicationEvidence(effect_id="forbidden"))
+
+
+def test_claims_own_identity_input_evidence_and_terminal_result_copies(
+    reopen: Callable[[], AdmissionStore],
+) -> None:
+    identity, request = _identity(), _request()
+    evidence = admission.PublicationEvidence(effect_id="effect-a")
+    result = _result()
+    with reopen().claim(identity, ("/target",), request) as claim:
+        identity.request_id = "changed"
+        assert request.request is not None
+        assert isinstance(request.request.value, pb.ListTasksRequest)
+        request.request.value.project = "/changed"
+        claim.record_intent(evidence)
+        evidence.effect_id = "changed"
+        claim.settle(admission.AdmissionStatus.CONFIRMED, result)
+        assert result.result is not None
+        assert isinstance(result.result.value, pb.ListTasksResponse)
+        result.result.value.request_id = "changed"
+        observed = claim.observe()
+        assert observed.identity == _identity()
+        assert observed.accepted == _request()
+        assert observed.intent is not None
+        assert observed.intent.effect_id == "effect-a"
+        assert observed.result == _result()
+    stored = reopen().lookup(_identity())
+    assert stored is not None
+    assert stored.result == _result()
+
+
+@pytest.mark.parametrize("crossing", ["intent", "effect", "confirmation"])
+def test_a_crash_after_an_admission_boundary_never_repeats_the_effect(
+    reopen: Callable[[], AdmissionStore], crossing: str
+) -> None:
+    gate = FaultGate(
+        FaultPlan(
+            seed=0,
+            rules=(
+                FaultRule(
+                    boundary=Boundary.EXECUTOR_REQUEST,
+                    target=crossing,
+                    at=1,
+                    fault=HostFault.CRASH_AFTER,
+                ),
+            ),
+        )
+    )
+    published = []
+    try:
+        with reopen().claim(_identity(), ("/target",), _request()) as claim:
+            gate.around(
+                Boundary.EXECUTOR_REQUEST,
+                "intent",
+                lambda: claim.record_intent(admission.PublicationEvidence(effect_id="effect-a")),
+            )
+            gate.around(Boundary.EXECUTOR_REQUEST, "effect", lambda: published.append("effect-a"))
+            gate.around(
+                Boundary.EXECUTOR_REQUEST,
+                "confirmation",
+                lambda: claim.settle(admission.AdmissionStatus.CONFIRMED, _result()),
+            )
+    except HostCrashError:
+        pass
+    with reopen().claim(_identity(), ("/target",), _request()) as recovered:
+        if recovered.observe().result is None:
+            observation = (
+                Oneof(
+                    "published",
+                    admission.PublicationPublished(effect_id="effect-a", result=_result()),
+                )
+                if published
+                else Oneof("unknown", admission.PublicationUnknown(effect_id="effect-a"))
+            )
+            recovered.reconcile(admission.PublicationObservation(observation=observation))
+        with pytest.raises(AdmissionUnconfirmedError):
+            recovered.record_intent(admission.PublicationEvidence(effect_id="effect-b"))
+    assert len(published) <= 1

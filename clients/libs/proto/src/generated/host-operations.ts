@@ -2,7 +2,7 @@
 import {type MessageInitShape} from '@bufbuild/protobuf';
 import * as pb from './vibesys/host/v1/operations_pb.js';
 import {FailureCategory, type OperationFailure} from './vibesys/host/v1/failure_pb.js';
-import {accept, call, type Accepted, type OperationTransport} from '../operations.js';
+import {accept, call, type Accepted, type OperationTransport, type OperationSignal} from '../operations.js';
 export const operationPolicies = {
   ListTasks: {name: 'ListTasks', id: 10, requestTag: 10, responseTag: 10, capMs: 10000, graceMs: 5000, totalMs: 15000, effect: 1, retry: 2, executor: 1, cardinality: 1, firstEventMs: undefined},
   ListHarnesses: {name: 'ListHarnesses', id: 11, requestTag: 11, responseTag: 11, capMs: 10000, graceMs: 5000, totalMs: 15000, effect: 1, retry: 2, executor: 1, cardinality: 1, firstEventMs: undefined},
@@ -15,44 +15,44 @@ export const operationPolicies = {
 export function acceptListTasks(input: MessageInitShape<typeof pb.ListTasksRequestSchema>): Accepted<"ListTasks"> {
   return accept(operationPolicies.ListTasks, pb.ListTasksRequestSchema, input);
 }
-export async function callListTasks(transport: OperationTransport, request: Accepted<"ListTasks">): Promise<pb.ListTasksResponse> {
-  return call(transport, operationPolicies.ListTasks, pb.ListTasksRequestSchema, pb.ListTasksResponseSchema, request, [[['requestId'], ['requestId']]]);
+export async function callListTasks(transport: OperationTransport, request: Accepted<"ListTasks">, signal: OperationSignal): Promise<pb.ListTasksResponse> {
+  return call(transport, {policy: operationPolicies.ListTasks, requestSchema: pb.ListTasksRequestSchema, responseSchema: pb.ListTasksResponseSchema, correlations: [[['requestId'], ['requestId']]]}, request, signal);
 }
 export function acceptListHarnesses(input: MessageInitShape<typeof pb.ListHarnessesRequestSchema>): Accepted<"ListHarnesses"> {
   return accept(operationPolicies.ListHarnesses, pb.ListHarnessesRequestSchema, input);
 }
-export async function callListHarnesses(transport: OperationTransport, request: Accepted<"ListHarnesses">): Promise<pb.ListHarnessesResponse> {
-  return call(transport, operationPolicies.ListHarnesses, pb.ListHarnessesRequestSchema, pb.ListHarnessesResponseSchema, request, [[['requestId'], ['requestId']]]);
+export async function callListHarnesses(transport: OperationTransport, request: Accepted<"ListHarnesses">, signal: OperationSignal): Promise<pb.ListHarnessesResponse> {
+  return call(transport, {policy: operationPolicies.ListHarnesses, requestSchema: pb.ListHarnessesRequestSchema, responseSchema: pb.ListHarnessesResponseSchema, correlations: [[['requestId'], ['requestId']]]}, request, signal);
 }
 export function acceptListExamples(input: MessageInitShape<typeof pb.ListExamplesRequestSchema>): Accepted<"ListExamples"> {
   return accept(operationPolicies.ListExamples, pb.ListExamplesRequestSchema, input);
 }
-export async function callListExamples(transport: OperationTransport, request: Accepted<"ListExamples">): Promise<pb.ListExamplesResponse> {
-  return call(transport, operationPolicies.ListExamples, pb.ListExamplesRequestSchema, pb.ListExamplesResponseSchema, request, [[['requestId'], ['requestId']]]);
+export async function callListExamples(transport: OperationTransport, request: Accepted<"ListExamples">, signal: OperationSignal): Promise<pb.ListExamplesResponse> {
+  return call(transport, {policy: operationPolicies.ListExamples, requestSchema: pb.ListExamplesRequestSchema, responseSchema: pb.ListExamplesResponseSchema, correlations: [[['requestId'], ['requestId']]]}, request, signal);
 }
 export function acceptGetTaskGoal(input: MessageInitShape<typeof pb.GetTaskGoalRequestSchema>): Accepted<"GetTaskGoal"> {
   return accept(operationPolicies.GetTaskGoal, pb.GetTaskGoalRequestSchema, input);
 }
-export async function callGetTaskGoal(transport: OperationTransport, request: Accepted<"GetTaskGoal">): Promise<pb.GetTaskGoalResponse> {
-  return call(transport, operationPolicies.GetTaskGoal, pb.GetTaskGoalRequestSchema, pb.GetTaskGoalResponseSchema, request, [[['requestId'], ['requestId']]]);
+export async function callGetTaskGoal(transport: OperationTransport, request: Accepted<"GetTaskGoal">, signal: OperationSignal): Promise<pb.GetTaskGoalResponse> {
+  return call(transport, {policy: operationPolicies.GetTaskGoal, requestSchema: pb.GetTaskGoalRequestSchema, responseSchema: pb.GetTaskGoalResponseSchema, correlations: [[['requestId'], ['requestId']]]}, request, signal);
 }
 export function acceptDescribeMachine(input: MessageInitShape<typeof pb.DescribeMachineRequestSchema>): Accepted<"DescribeMachine"> {
   return accept(operationPolicies.DescribeMachine, pb.DescribeMachineRequestSchema, input);
 }
-export async function callDescribeMachine(transport: OperationTransport, request: Accepted<"DescribeMachine">): Promise<pb.DescribeMachineResponse> {
-  return call(transport, operationPolicies.DescribeMachine, pb.DescribeMachineRequestSchema, pb.DescribeMachineResponseSchema, request, [[['requestId'], ['requestId']]]);
+export async function callDescribeMachine(transport: OperationTransport, request: Accepted<"DescribeMachine">, signal: OperationSignal): Promise<pb.DescribeMachineResponse> {
+  return call(transport, {policy: operationPolicies.DescribeMachine, requestSchema: pb.DescribeMachineRequestSchema, responseSchema: pb.DescribeMachineResponseSchema, correlations: [[['requestId'], ['requestId']]]}, request, signal);
 }
 export function acceptListCompute(input: MessageInitShape<typeof pb.ListComputeRequestSchema>): Accepted<"ListCompute"> {
   return accept(operationPolicies.ListCompute, pb.ListComputeRequestSchema, input);
 }
-export async function callListCompute(transport: OperationTransport, request: Accepted<"ListCompute">): Promise<pb.ListComputeResponse> {
-  return call(transport, operationPolicies.ListCompute, pb.ListComputeRequestSchema, pb.ListComputeResponseSchema, request, [[['requestId'], ['requestId']]]);
+export async function callListCompute(transport: OperationTransport, request: Accepted<"ListCompute">, signal: OperationSignal): Promise<pb.ListComputeResponse> {
+  return call(transport, {policy: operationPolicies.ListCompute, requestSchema: pb.ListComputeRequestSchema, responseSchema: pb.ListComputeResponseSchema, correlations: [[['requestId'], ['requestId']]]}, request, signal);
 }
 export function acceptPreflightRun(input: MessageInitShape<typeof pb.PreflightRunRequestSchema>): Accepted<"PreflightRun"> {
   return accept(operationPolicies.PreflightRun, pb.PreflightRunRequestSchema, input);
 }
-export async function callPreflightRun(transport: OperationTransport, request: Accepted<"PreflightRun">): Promise<pb.PreflightRunResponse> {
-  return call(transport, operationPolicies.PreflightRun, pb.PreflightRunRequestSchema, pb.PreflightRunResponseSchema, request, [[['requestId'], ['requestId']]]);
+export async function callPreflightRun(transport: OperationTransport, request: Accepted<"PreflightRun">, signal: OperationSignal): Promise<pb.PreflightRunResponse> {
+  return call(transport, {policy: operationPolicies.PreflightRun, requestSchema: pb.PreflightRunRequestSchema, responseSchema: pb.PreflightRunResponseSchema, correlations: [[['requestId'], ['requestId']]]}, request, signal);
 }
 export interface FailureVisitor<T> {
   invalid_input(failure: OperationFailure): T;

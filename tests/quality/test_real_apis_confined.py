@@ -911,6 +911,10 @@ REAL_API_EDGES: dict[Key, str] = {
             ("libs/vs-project/src/vs_project/_state.py", "the project state lock file"),
             ("libs/vs-project/src/vs_project/_state_io.py", "atomic state file replacement"),
             ("libs/vs-project/src/vs_project/_state_store.py", "LocalStateStore's lock file"),
+            (
+                "libs/vs-project/src/vs_project/_admission.py",
+                "FileAdmissionStore's identity and target locks",
+            ),
             ("libs/vs-runtime/src/vs_runtime/_artifact_store.py", "artifact files and receipts"),
             ("libs/vs-runtime/src/vs_runtime/_receipt_store.py", "the receipt namespace lock"),
             ("libs/vs-runtime/src/vs_runtime/_slot_meter.py", "the lease ledger"),
@@ -1319,6 +1323,10 @@ FILE_IO_EDGE_MODULES: dict[str, Edge] = {
         "atomic, durable state documents and atomic host run discovery links",
     ),
     "libs/vs-project/src/vs_project/_state_store.py": (EdgeKind.STORE, "the local StateStore"),
+    "libs/vs-project/src/vs_project/_admission.py": (
+        EdgeKind.STORE,
+        "retained admission receipts and scoped identity/target exclusion",
+    ),
     "libs/vs-project/src/vs_project/_workspace_tree.py": (
         EdgeKind.AGENT_WORKSPACE,
         "every host read or write of an agent-chosen path, walked by descriptor",

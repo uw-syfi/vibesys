@@ -40,5 +40,5 @@ class ReadSource(Protocol):
         ...
 
     def preflight(self, request: pb.PreflightRunRequest) -> pb.PreflightRunResponse:
-        """Read-only checks preserving typed causes, fixes, roles and backend."""
+        """Complete probe facts; the operation projects requested metadata."""
         ...

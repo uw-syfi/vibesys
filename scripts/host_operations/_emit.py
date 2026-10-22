@@ -223,7 +223,7 @@ def typescript_registry(operations: tuple[Operation, ...], failures: tuple[str, 
         "import {type MessageInitShape} from '@bufbuild/protobuf';",
         "import * as pb from './vibesys/host/v1/operations_pb.js';",
         "import {FailureCategory, type OperationFailure} from './vibesys/host/v1/failure_pb.js';",
-        "import {accept, call, type Accepted, type OperationTransport} from '../operations.js';",
+        "import {accept, call, type Accepted, type OperationTransport, type OperationSignal} from '../operations.js';",
         "export const operationPolicies = {",
     ]
     for op in operations:
@@ -247,8 +247,8 @@ def typescript_registry(operations: tuple[Operation, ...], failures: tuple[str, 
             f'export function accept{op.name}(input: MessageInitShape<typeof pb.{op.request}Schema>): Accepted<"{op.name}"> {{',
             f"  return accept(operationPolicies.{op.name}, pb.{op.request}Schema, input);",
             "}",
-            f'export async function call{op.name}(transport: OperationTransport, request: Accepted<"{op.name}">): Promise<pb.{op.response}> {{',
-            f"  return call(transport, operationPolicies.{op.name}, pb.{op.request}Schema, pb.{op.response}Schema, request, {correlation});",
+            f'export async function call{op.name}(transport: OperationTransport, request: Accepted<"{op.name}">, signal: OperationSignal): Promise<pb.{op.response}> {{',
+            f"  return call(transport, {{policy: operationPolicies.{op.name}, requestSchema: pb.{op.request}Schema, responseSchema: pb.{op.response}Schema, correlations: {correlation}}}, request, signal);",
             "}",
         ]
     lines += ["export interface FailureVisitor<T> {"]

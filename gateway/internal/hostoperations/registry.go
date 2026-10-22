@@ -101,6 +101,9 @@ func value(message protoreflect.Message, path []string) any {
 // Execute owns one bounded unary invocation. A shell supplies the executor;
 // this table determines both decoders and the deadline, never a second switch.
 func Execute(ctx context.Context, id uint32, payload []byte, invoke func(context.Context, Operation, proto.Message) (proto.Message, error)) ([]byte, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	op, err := Lookup(id)
 	if err != nil {
 		return nil, err
@@ -117,6 +120,9 @@ func Execute(ctx context.Context, id uint32, payload []byte, invoke func(context
 	original := proto.Clone(request)
 	response, err := invoke(bounded, op, request)
 	if err != nil {
+		return nil, err
+	}
+	if err := bounded.Err(); err != nil {
 		return nil, err
 	}
 	if err := op.ValidateResponse(original, response); err != nil {
@@ -138,16 +144,21 @@ func knownFields(message protoreflect.Message) error {
 	}
 	var result error
 	message.Range(func(field protoreflect.FieldDescriptor, value protoreflect.Value) bool {
-		if field.IsMap() && field.MapValue().Message() != nil {
-			value.Map().Range(func(_ protoreflect.MapKey, entry protoreflect.Value) bool {
-				result = knownFields(entry.Message())
-				return result == nil
-			})
-		} else if field.IsList() && field.Message() != nil {
-			for i := 0; i < value.List().Len() && result == nil; i++ {
-				result = knownFields(value.List().Get(i).Message())
+		switch {
+		case field.IsMap():
+			if field.MapValue().Message() != nil {
+				value.Map().Range(func(_ protoreflect.MapKey, entry protoreflect.Value) bool {
+					result = knownFields(entry.Message())
+					return result == nil
+				})
 			}
-		} else if field.Message() != nil {
+		case field.IsList():
+			if field.Message() != nil {
+				for i := 0; i < value.List().Len() && result == nil; i++ {
+					result = knownFields(value.List().Get(i).Message())
+				}
+			}
+		case field.Message() != nil:
 			result = knownFields(value.Message())
 		}
 		return result == nil

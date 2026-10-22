@@ -23,9 +23,24 @@ export interface OperationPolicy {
   readonly graceMs: number;
   readonly totalMs: number;
 }
+/** Structural cancellation contract keeps this foundation independent of DOM/Node types. */
+export interface OperationSignal {
+  readonly aborted: boolean;
+  readonly reason?: unknown;
+  addEventListener(type: 'abort', listener: () => void, options?: {once?: boolean}): void;
+  removeEventListener(type: 'abort', listener: () => void): void;
+}
+function checkCancellation(signal: OperationSignal): void {
+  if (signal.aborted) throw new Error('operation cancelled', {cause: signal.reason});
+}
 export interface OperationTransport {
   /** Dial and queue time consume totalMs; the shell owns cancellation. */
-  invoke(id: number, payload: Uint8Array, totalMs: number): Promise<Uint8Array>;
+  invoke(
+    id: number,
+    payload: Uint8Array,
+    totalMs: number,
+    signal: OperationSignal,
+  ): Promise<Uint8Array>;
 }
 const payloads = new WeakMap<object, Uint8Array>();
 
@@ -64,24 +79,36 @@ function field(value: unknown, path: readonly string[]): unknown {
   return value;
 }
 
+export interface CallDefinition<
+  Policy extends OperationPolicy,
+  Request extends DescMessage,
+  Response extends DescMessage,
+> {
+  readonly policy: Policy;
+  readonly requestSchema: Request;
+  readonly responseSchema: Response;
+  readonly correlations: readonly (readonly [readonly string[], readonly string[]])[];
+}
+
 export async function call<
   Policy extends OperationPolicy,
   Request extends DescMessage,
   Response extends DescMessage,
 >(
   transport: OperationTransport,
-  policy: Policy,
-  requestSchema: Request,
-  responseSchema: Response,
+  definition: CallDefinition<Policy, Request, Response>,
   request: Accepted<Policy['name']>,
-  correlations: readonly (readonly [readonly string[], readonly string[]])[],
+  signal: OperationSignal,
 ): Promise<MessageShape<Response>> {
+  const {policy, requestSchema, responseSchema, correlations} = definition;
+  checkCancellation(signal);
   const bytes = payloads.get(request);
   if (!bytes || request[acceptedBrand] !== policy.name)
     throw new Error('unaccepted operation request');
   const input = fromBinary(requestSchema, bytes);
   checked(requestSchema, input);
-  const payload = await transport.invoke(policy.id, bytes.slice(), policy.totalMs);
+  const payload = await transport.invoke(policy.id, bytes.slice(), policy.totalMs, signal);
+  checkCancellation(signal);
   if (payload.byteLength > maxBytes) throw new Error('operation payload exceeds 1 MiB');
   const response = fromBinary(responseSchema, payload);
   checked(responseSchema, response);

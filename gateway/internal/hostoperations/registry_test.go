@@ -77,3 +77,28 @@ func TestLookupCannotMutateTheRegistry(t *testing.T) {
 		t.Fatal("shared mutable registry")
 	}
 }
+
+func TestValidationNeverTreatsScalarMapsAsMessages(t *testing.T) {
+	op, err := hostoperations.Lookup(14)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := &hostv1.DescribeMachineRequest{RequestId: "request-a"}
+	response := &hostv1.DescribeMachineResponse{RequestId: "request-a", Machine: &hostv1.MachineDescription{HarnessCliNames: map[string]string{"codex": "Codex"}}}
+	if err := op.ValidateResponse(request, response); err == nil {
+		t.Fatal("missing required machine facts accepted")
+	}
+}
+
+func TestCancelledOwnersDoNotInvokeWork(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	calls := 0
+	_, err := hostoperations.Execute(ctx, 10, nil, func(context.Context, hostoperations.Operation, proto.Message) (proto.Message, error) {
+		calls++
+		return nil, nil
+	})
+	if err != context.Canceled || calls != 0 {
+		t.Fatalf("cancelled call: calls=%d error=%v", calls, err)
+	}
+}

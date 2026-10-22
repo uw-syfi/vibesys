@@ -57,7 +57,24 @@ class _Reads:
         )
 
     def preflight_run(self, request: pb.PreflightRunRequest) -> pb.PreflightRunResponse:
-        return self._source.preflight(request)
+        response = self._source.preflight(request)
+        response.checks = [
+            check
+            for check in response.checks
+            if request.with_project_clean or check.id != pb.CheckId.PROJECT_CLEAN
+        ]
+        if not request.with_roles:
+            response.clear_field("roles")
+        if not request.with_backend:
+            response.clear_field("backend")
+            for check in response.checks:
+                if (
+                    check.cause is not None
+                    and check.cause.value is not None
+                    and check.cause.value.field == "backend_unavailable"
+                ):
+                    check.clear_field("cause")
+        return response
 
 
 def handlers(source: ReadSource) -> host_operations.Handlers:

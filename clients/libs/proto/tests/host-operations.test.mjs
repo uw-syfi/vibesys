@@ -23,18 +23,20 @@ for (const sample of requests) {
 }
 
 test('accepted bytes survive mutation and calls check correlation', async () => {
+  const signal = new AbortController().signal;
   const builder = {requestId:'request-a',project:'/project'};
   const accepted = host.acceptListTasks(builder);
   builder.project = '/changed';
-  const transport = {async invoke(id,bytes,totalMs) {
+  const transport = {async invoke(id,bytes,totalMs, receivedSignal) {
+    assert.equal(receivedSignal,signal);
     assert.equal(id,10);assert.equal(totalMs,15000);
     assert.equal(fromBinary(host.ListTasksRequestSchema,bytes).project,'/project');
     return toBinary(host.ListTasksResponseSchema,create(host.ListTasksResponseSchema,{requestId:'request-a',tasks:{version:1n,projectRoot:'/project'}}));
   }};
-  assert.equal((await host.callListTasks(transport,accepted)).requestId,'request-a');
+  assert.equal((await host.callListTasks(transport,accepted,signal)).requestId,'request-a');
   const wrong = {async invoke() {return toBinary(host.ListTasksResponseSchema,create(host.ListTasksResponseSchema,{requestId:'wrong',tasks:{version:1n}}));}};
-  await assert.rejects(host.callListTasks(wrong,accepted),/correlation/);
-  await assert.rejects(host.callListTasks(transport,{}),/unaccepted/);
+  await assert.rejects(host.callListTasks(wrong,accepted,signal),/correlation/);
+  await assert.rejects(host.callListTasks(transport,{},signal),/unaccepted/);
 });
 
 test('failure categories are closed', () => {
@@ -44,4 +46,18 @@ test('failure categories are closed', () => {
   }
   const failure = create(host.OperationFailureSchema,{category:999,message:'diagnostic'});
   assert.equal(validator.validate(host.OperationFailureSchema,failure).kind,'invalid');
+});
+
+
+test('aborted owners cannot start or receive a late call', async () => {
+  const controller = new AbortController();
+  const accepted = host.acceptListTasks({requestId:'request-a',project:'/project'});
+  let finish;
+  const pending = new Promise(resolve => {finish = resolve;});
+  const transport = {async invoke() {await pending;return toBinary(host.ListTasksResponseSchema,create(host.ListTasksResponseSchema,{requestId:'request-a',tasks:{version:1n}}));}};
+  const call = host.callListTasks(transport,accepted,controller.signal);
+  controller.abort();
+  finish();
+  await assert.rejects(call);
+  await assert.rejects(host.callListTasks(transport,accepted,controller.signal));
 });

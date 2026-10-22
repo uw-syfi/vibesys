@@ -5,6 +5,7 @@ from __future__ import annotations
 import fcntl
 import hashlib
 import os
+import stat
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -44,7 +45,7 @@ class _Claim:
     def __init__(
         self, receipt: admission.AdmissionReceipt, persist: Callable[[bytes], None]
     ) -> None:
-        self._receipt = receipt
+        self._receipt = checked_receipt(receipt.to_binary())
         self._persist = persist
         self.active = True
 
@@ -63,12 +64,14 @@ class _Claim:
 
     def _publish(self, receipt: admission.AdmissionReceipt) -> None:
         self._require_owner()
+        payload = receipt.to_binary()
+        owned = checked_receipt(payload)
         try:
-            self._persist(receipt.to_binary())
+            self._persist(payload)
         except BaseException:
             self.active = False
             raise
-        self._receipt = receipt
+        self._receipt = owned
 
     def record_intent(self, evidence: admission.PublicationEvidence) -> None:
         self._require_owner()
@@ -110,7 +113,11 @@ class FileAdmissionStore:
     @contextmanager
     def _lock(self, path: Path) -> Iterator[None]:
         path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        with path.open("ab") as stream:
+        descriptor = os.open(path, os.O_RDWR | os.O_CREAT | os.O_NONBLOCK | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(descriptor, "r+b") as stream:
+            if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+                message = f"admission lock is not a regular file: {path}"
+                raise ValueError(message)
             try:
                 fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError as error:
@@ -125,7 +132,11 @@ class FileAdmissionStore:
         """Read a complete atomic publication, treating damage as an error."""
         path = self._path(identity)
         try:
-            with path.open("rb") as stream:
+            descriptor = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW)
+            with os.fdopen(descriptor, "rb") as stream:
+                if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+                    message = f"admission receipt is not a regular file: {path}"
+                    raise ValueError(message)
                 receipt = checked_receipt(stream.read((4 << 20) + 1))
         except FileNotFoundError:
             return None

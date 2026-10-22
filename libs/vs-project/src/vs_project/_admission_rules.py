@@ -72,7 +72,7 @@ def initial_receipt(
     receipt = admission.AdmissionReceipt(
         version=1,
         fence=1,
-        identity=identity,
+        identity=admission.AdmissionIdentity.from_binary(identity.to_binary()),
         targets=list(targets),
         accepted=admission.AcceptedOperation.from_binary(encoded),
         input_bytes=encoded,
@@ -133,7 +133,7 @@ def settle(
     check_result(receipt, status, result)
     updated = admission.AdmissionReceipt.from_binary(receipt.to_binary())
     updated.status = status
-    updated.result = result
+    updated.result = admission.OperationResult.from_binary(validated_operation_bytes(result))
     validate(updated)
     return updated
 

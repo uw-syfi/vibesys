@@ -135,7 +135,6 @@ from server.host_machine_facts import (
     RunCounts,
 )
 from server.host_operation_types_generated import UnmigratedHelperRequest, is_registry_read
-from server.host_preflight import BackendUnavailable, CheckId
 from server.host_run_dashboard import IdeaVerdict
 from server.host_run_events import (
     RunEventDocument,
@@ -870,7 +869,9 @@ def answer(
         if is_registry_read(request):
             return read_reply(
                 request,
-                HelperReadSource(host, request, describe=describe_machine, preflight=_preflight),
+                HelperReadSource(
+                    host, request, describe=describe_machine, preflight=_preflight_facts
+                ),
             )
         return _answer(request, host, withdrawal)
     except (ProjectLookupError, ComputeError) as error:
@@ -1348,7 +1349,9 @@ def _unconfigured_target(request_id: str | None, target: SlurmTarget | ModalTarg
     )
 
 
-def _preflight(request: RunPreflightRequest, host: HelperHost) -> RunPreflightReply | HelperError:
+def _preflight_facts(
+    request: RunPreflightRequest, host: HelperHost
+) -> RunPreflightReply | HelperError:
     """Check whether the run ``run.start`` would launch with these inputs can start."""
     refusal = _refusal(request, host)
     if refusal is not None:
@@ -1366,30 +1369,21 @@ def _preflight(request: RunPreflightRequest, host: HelperHost) -> RunPreflightRe
     undeclared = undeclared_agent(request.agents, report)
     if undeclared is not None:
         return _error(request.request_id, HelperErrorCode.INVALID_REQUEST, undeclared)
-    checks = tuple(
-        check
-        for check in preflight_checks(
-            facts,
-            report,
-            options=request.options,
-            agents=request.agents,
-            with_causes=bool(request.with_causes),
-        )
-        if request.with_project_clean or check.id is not CheckId.PROJECT_CLEAN
+    checks = preflight_checks(
+        facts,
+        report,
+        options=request.options,
+        agents=request.agents,
+        with_causes=bool(request.with_causes),
     )
     if request.measure_on is not None:
         measured = measurement_check(request.measure_on, host.compute.settings(), report.backend)
         checks = (*checks, measured)
     return RunPreflightReply(
         request_id=request.request_id,
-        checks=tuple(
-            check.model_copy(update={"cause": None})
-            if isinstance(check.cause, BackendUnavailable) and not request.with_backend
-            else check
-            for check in checks
-        ),
-        roles=report.roles if request.with_roles else None,
-        backend=report.backend if request.with_backend else None,
+        checks=checks,
+        roles=report.roles,
+        backend=report.backend,
     )
 
 
