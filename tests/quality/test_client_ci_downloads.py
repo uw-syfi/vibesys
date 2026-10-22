@@ -3,8 +3,7 @@
 The setup-clients action is the only place a client job prepares Node, pnpm,
 Electron, and Playwright. These tests hold that contract: the Electron binary
 and the pnpm binary are cached by version, download steps retry through one
-helper, and ``playwright install --with-deps`` cannot run until the
-``packages.microsoft.com`` apt source is removed.
+helper. Chromium uses the runner system libraries without apt.
 """
 
 from __future__ import annotations
@@ -14,34 +13,24 @@ from pathlib import Path
 
 import pytest
 import yaml
-from hypothesis import given
-from hypothesis import strategies as st
 from scripts.client_ci_downloads import (
     EXIT_LOCKFILE,
     EXIT_OK,
-    PLAYWRIGHT_WITH_DEPS,
     electron_version,
     main,
-    violations_in_document,
 )
 
 REPO = Path(__file__).resolve().parents[2]
 SETUP_ACTION = REPO / ".github" / "actions" / "setup-clients" / "action.yml"
 RETRY_HELPER = REPO / ".github" / "actions" / "setup-clients" / "retry-download.sh"
 LOCKFILE = REPO / "clients" / "pnpm-lock.yaml"
-_FILL = st.text(alphabet="abcxyz012", max_size=24)
-_GUARD = (
-    "grep -l packages.microsoft.com /etc/apt/sources.list.d\n"
-    "sudo rm -f /etc/apt/sources.list.d/microsoft.list\n"
-)
-_COMMAND = "pnpm exec playwright install --with-deps chromium\n"
 _DOWNLOADS = (
     "corepack install --global",
     "packaging/fetch_bun.py",
     "uv python install",
     "uv sync --dev",
     "pnpm install --frozen-lockfile",
-    PLAYWRIGHT_WITH_DEPS,
+    "playwright install chromium",
 )
 
 
@@ -56,17 +45,6 @@ def _mapping(value: object) -> dict[str, object]:
         assert isinstance(key, str)
         mapped[key] = item
     return mapped
-
-
-def _ci_documents() -> list[tuple[str, object]]:
-    roots = (REPO / ".github" / "workflows", REPO / ".github" / "actions")
-    paths = sorted(
-        path
-        for root in roots
-        for path in root.rglob("*")
-        if path.suffix in {".yml", ".yaml"} and path.is_file()
-    )
-    return [(str(path.relative_to(REPO)), _load(path)) for path in paths]
 
 
 def _steps(document: object) -> list[dict[str, object]]:
@@ -154,15 +132,6 @@ def test_download_steps_use_the_three_attempt_helper() -> None:
         assert matches[0].index("retry-download.sh") < matches[0].index(command)
 
 
-def test_workflows_do_not_install_playwright_with_deps() -> None:
-    hits = [
-        str(path.relative_to(REPO))
-        for path in (REPO / ".github" / "workflows").glob("*")
-        if path.is_file() and PLAYWRIGHT_WITH_DEPS in path.read_text(encoding="utf-8")
-    ]
-    assert hits == []
-
-
 def test_only_the_e2e_job_asks_setup_clients_for_playwright() -> None:
     # PyYAML reads the workflow's `on` key as a boolean, so the root mapping
     # is not string-keyed. Job names are.
@@ -189,62 +158,9 @@ def test_only_the_e2e_job_asks_setup_clients_for_playwright() -> None:
     assert seen
 
 
-def test_checked_in_ci_removes_the_microsoft_apt_source_before_playwright() -> None:
-    violations = [
-        item
-        for source, document in _ci_documents()
-        for item in violations_in_document(source, document)
-    ]
-    assert violations == []
-
-
-def test_a_job_without_the_guard_is_named_in_the_violation() -> None:
-    document = {
-        "jobs": {
-            "clients-e2e": {
-                "steps": [
-                    {"name": "Install Chromium", "run": "playwright install --with-deps chromium"},
-                ]
-            }
-        }
-    }
-    violations = violations_in_document(".github/workflows/test.yml", document)
-    assert len(violations) == 1
-    assert "clients-e2e" in violations[0]
-    assert "Install Chromium" in violations[0]
-    assert "packages.microsoft.com" in violations[0]
-
-
-def test_a_guard_in_an_earlier_step_covers_the_install() -> None:
-    document = {
-        "runs": {
-            "using": "composite",
-            "steps": [
-                {
-                    "name": "drop",
-                    "run": _GUARD,
-                },
-                {"name": "install", "run": _COMMAND},
-            ],
-        }
-    }
-    assert violations_in_document(".github/actions/setup-clients/action.yml", document) == []
-
-
-def test_documents_without_jobs_or_composite_steps_have_no_violations() -> None:
-    assert violations_in_document("notes.md", None) == []
-    assert violations_in_document("notes.md", {"on": "push"}) == []
-
-
-@given(fill=_FILL, place=st.sampled_from(["before", "after", "missing"]))
-def test_with_deps_is_guarded_only_when_the_source_is_removed_first(fill: str, place: str) -> None:
-    if place == "before":
-        run = f"{fill}\n{_GUARD}{_COMMAND}"
-    elif place == "after":
-        run = f"{fill}\n{_COMMAND}{_GUARD}"
-    else:
-        run = f"{fill}\n{_COMMAND}"
-    violations = violations_in_document(
-        "job", {"runs": {"using": "composite", "steps": [{"run": run}]}}
+def test_browser_download_attempts_are_bounded() -> None:
+    runs = [step.get("run", "") for step in _steps(_load(SETUP_ACTION))]
+    install = next(
+        run for run in runs if isinstance(run, str) and "playwright install chromium" in run
     )
-    assert (violations == []) is (place == "before")
+    assert "timeout --kill-after=5s 60s pnpm" in install
