@@ -8,6 +8,10 @@ import (
 
 func DispatchHostMutate(request *apiv1.HostMutateRequest) (HostCall, bool) {
 	switch {
+	case request.GetCreateExample() != nil:
+		return HostCall{CLI: "create-example", Deadline: 120000 * time.Millisecond, Executor: 1, Effect: 2}, true
+	case request.GetCopyProject() != nil:
+		return HostCall{CLI: "copy-project", Deadline: 120000 * time.Millisecond, Executor: 1, Effect: 2}, true
 	case request.GetPutCluster() != nil:
 		return HostCall{CLI: "put-cluster", Deadline: 65000 * time.Millisecond, Executor: 1, Effect: 2}, true
 	case request.GetRemoveCluster() != nil:
@@ -23,6 +27,12 @@ func DispatchHostMutate(request *apiv1.HostMutateRequest) (HostCall, bool) {
 
 func HostMutateResponseValid(request *apiv1.HostMutateRequest, response *apiv1.HostMutateResponse) bool {
 	switch {
+	case request.GetCreateExample() != nil:
+		got := response.GetCreateExample()
+		return got != nil && got.GetRequestId() == request.GetCreateExample().GetRequestId()
+	case request.GetCopyProject() != nil:
+		got := response.GetCopyProject()
+		return got != nil && got.GetRequestId() == request.GetCopyProject().GetRequestId()
 	case request.GetPutCluster() != nil:
 		got := response.GetPutCluster()
 		return got != nil && got.GetRequestId() == request.GetPutCluster().GetRequestId()

@@ -30,6 +30,8 @@ type HostMutateRequest struct {
 	Checkout string                 `protobuf:"bytes,1,opt,name=checkout,proto3" json:"checkout,omitempty"`
 	// Types that are valid to be assigned to Method:
 	//
+	//	*HostMutateRequest_CreateExample
+	//	*HostMutateRequest_CopyProject
 	//	*HostMutateRequest_PutCluster
 	//	*HostMutateRequest_RemoveCluster
 	//	*HostMutateRequest_TestCluster
@@ -83,6 +85,24 @@ func (x *HostMutateRequest) GetMethod() isHostMutateRequest_Method {
 	return nil
 }
 
+func (x *HostMutateRequest) GetCreateExample() *v1.CreateExampleRequest {
+	if x != nil {
+		if x, ok := x.Method.(*HostMutateRequest_CreateExample); ok {
+			return x.CreateExample
+		}
+	}
+	return nil
+}
+
+func (x *HostMutateRequest) GetCopyProject() *v1.CopyProjectRequest {
+	if x != nil {
+		if x, ok := x.Method.(*HostMutateRequest_CopyProject); ok {
+			return x.CopyProject
+		}
+	}
+	return nil
+}
+
 func (x *HostMutateRequest) GetPutCluster() *v1.PutClusterRequest {
 	if x != nil {
 		if x, ok := x.Method.(*HostMutateRequest_PutCluster); ok {
@@ -123,6 +143,14 @@ type isHostMutateRequest_Method interface {
 	isHostMutateRequest_Method()
 }
 
+type HostMutateRequest_CreateExample struct {
+	CreateExample *v1.CreateExampleRequest `protobuf:"bytes,34,opt,name=create_example,json=createExample,proto3,oneof"`
+}
+
+type HostMutateRequest_CopyProject struct {
+	CopyProject *v1.CopyProjectRequest `protobuf:"bytes,35,opt,name=copy_project,json=copyProject,proto3,oneof"`
+}
+
 type HostMutateRequest_PutCluster struct {
 	PutCluster *v1.PutClusterRequest `protobuf:"bytes,31,opt,name=put_cluster,json=putCluster,proto3,oneof"`
 }
@@ -139,6 +167,10 @@ type HostMutateRequest_StartRun struct {
 	StartRun *v1.StartRunRequest `protobuf:"bytes,36,opt,name=start_run,json=startRun,proto3,oneof"`
 }
 
+func (*HostMutateRequest_CreateExample) isHostMutateRequest_Method() {}
+
+func (*HostMutateRequest_CopyProject) isHostMutateRequest_Method() {}
+
 func (*HostMutateRequest_PutCluster) isHostMutateRequest_Method() {}
 
 func (*HostMutateRequest_RemoveCluster) isHostMutateRequest_Method() {}
@@ -153,6 +185,8 @@ type HostMutateResponse struct {
 	// Types that are valid to be assigned to Result:
 	//
 	//	*HostMutateResponse_Failure
+	//	*HostMutateResponse_CreateExample
+	//	*HostMutateResponse_CopyProject
 	//	*HostMutateResponse_PutCluster
 	//	*HostMutateResponse_RemoveCluster
 	//	*HostMutateResponse_TestCluster
@@ -208,6 +242,24 @@ func (x *HostMutateResponse) GetFailure() *v1.OperationFailure {
 	return nil
 }
 
+func (x *HostMutateResponse) GetCreateExample() *v1.CreateExampleResponse {
+	if x != nil {
+		if x, ok := x.Result.(*HostMutateResponse_CreateExample); ok {
+			return x.CreateExample
+		}
+	}
+	return nil
+}
+
+func (x *HostMutateResponse) GetCopyProject() *v1.CopyProjectResponse {
+	if x != nil {
+		if x, ok := x.Result.(*HostMutateResponse_CopyProject); ok {
+			return x.CopyProject
+		}
+	}
+	return nil
+}
+
 func (x *HostMutateResponse) GetPutCluster() *v1.PutClusterResponse {
 	if x != nil {
 		if x, ok := x.Result.(*HostMutateResponse_PutCluster); ok {
@@ -252,6 +304,14 @@ type HostMutateResponse_Failure struct {
 	Failure *v1.OperationFailure `protobuf:"bytes,2,opt,name=failure,proto3,oneof"`
 }
 
+type HostMutateResponse_CreateExample struct {
+	CreateExample *v1.CreateExampleResponse `protobuf:"bytes,34,opt,name=create_example,json=createExample,proto3,oneof"`
+}
+
+type HostMutateResponse_CopyProject struct {
+	CopyProject *v1.CopyProjectResponse `protobuf:"bytes,35,opt,name=copy_project,json=copyProject,proto3,oneof"`
+}
+
 type HostMutateResponse_PutCluster struct {
 	PutCluster *v1.PutClusterResponse `protobuf:"bytes,31,opt,name=put_cluster,json=putCluster,proto3,oneof"`
 }
@@ -270,6 +330,10 @@ type HostMutateResponse_StartRun struct {
 
 func (*HostMutateResponse_Failure) isHostMutateResponse_Result() {}
 
+func (*HostMutateResponse_CreateExample) isHostMutateResponse_Result() {}
+
+func (*HostMutateResponse_CopyProject) isHostMutateResponse_Result() {}
+
 func (*HostMutateResponse_PutCluster) isHostMutateResponse_Result() {}
 
 func (*HostMutateResponse_RemoveCluster) isHostMutateResponse_Result() {}
@@ -282,18 +346,22 @@ var File_vibesys_api_v1_host_mutate_generated_proto protoreflect.FileDescriptor
 
 const file_vibesys_api_v1_host_mutate_generated_proto_rawDesc = "" +
 	"\n" +
-	"*vibesys/api/v1/host_mutate_generated.proto\x12\x0evibesys.api.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1dvibesys/host/v1/failure.proto\x1a vibesys/host/v1/operations.proto\"\xee\x02\n" +
+	"*vibesys/api/v1/host_mutate_generated.proto\x12\x0evibesys.api.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1dvibesys/host/v1/failure.proto\x1a vibesys/host/v1/operations.proto\"\x88\x04\n" +
 	"\x11HostMutateRequest\x12&\n" +
 	"\bcheckout\x18\x01 \x01(\tB\n" +
-	"\xbaH\ar\x05\x10\x01(\x80 R\bcheckout\x12E\n" +
+	"\xbaH\ar\x05\x10\x01(\x80 R\bcheckout\x12N\n" +
+	"\x0ecreate_example\x18\" \x01(\v2%.vibesys.host.v1.CreateExampleRequestH\x00R\rcreateExample\x12H\n" +
+	"\fcopy_project\x18# \x01(\v2#.vibesys.host.v1.CopyProjectRequestH\x00R\vcopyProject\x12E\n" +
 	"\vput_cluster\x18\x1f \x01(\v2\".vibesys.host.v1.PutClusterRequestH\x00R\n" +
 	"putCluster\x12N\n" +
 	"\x0eremove_cluster\x18  \x01(\v2%.vibesys.host.v1.RemoveClusterRequestH\x00R\rremoveCluster\x12H\n" +
 	"\ftest_cluster\x18! \x01(\v2#.vibesys.host.v1.TestClusterRequestH\x00R\vtestCluster\x12?\n" +
 	"\tstart_run\x18$ \x01(\v2 .vibesys.host.v1.StartRunRequestH\x00R\bstartRunB\x0f\n" +
-	"\x06method\x12\x05\xbaH\x02\b\x01\"\x8a\x03\n" +
+	"\x06method\x12\x05\xbaH\x02\b\x01\"\xa6\x04\n" +
 	"\x12HostMutateResponse\x12=\n" +
-	"\afailure\x18\x02 \x01(\v2!.vibesys.host.v1.OperationFailureH\x00R\afailure\x12F\n" +
+	"\afailure\x18\x02 \x01(\v2!.vibesys.host.v1.OperationFailureH\x00R\afailure\x12O\n" +
+	"\x0ecreate_example\x18\" \x01(\v2&.vibesys.host.v1.CreateExampleResponseH\x00R\rcreateExample\x12I\n" +
+	"\fcopy_project\x18# \x01(\v2$.vibesys.host.v1.CopyProjectResponseH\x00R\vcopyProject\x12F\n" +
 	"\vput_cluster\x18\x1f \x01(\v2#.vibesys.host.v1.PutClusterResponseH\x00R\n" +
 	"putCluster\x12O\n" +
 	"\x0eremove_cluster\x18  \x01(\v2&.vibesys.host.v1.RemoveClusterResponseH\x00R\rremoveCluster\x12I\n" +
@@ -317,31 +385,39 @@ var file_vibesys_api_v1_host_mutate_generated_proto_msgTypes = make([]protoimpl.
 var file_vibesys_api_v1_host_mutate_generated_proto_goTypes = []any{
 	(*HostMutateRequest)(nil),        // 0: vibesys.api.v1.HostMutateRequest
 	(*HostMutateResponse)(nil),       // 1: vibesys.api.v1.HostMutateResponse
-	(*v1.PutClusterRequest)(nil),     // 2: vibesys.host.v1.PutClusterRequest
-	(*v1.RemoveClusterRequest)(nil),  // 3: vibesys.host.v1.RemoveClusterRequest
-	(*v1.TestClusterRequest)(nil),    // 4: vibesys.host.v1.TestClusterRequest
-	(*v1.StartRunRequest)(nil),       // 5: vibesys.host.v1.StartRunRequest
-	(*v1.OperationFailure)(nil),      // 6: vibesys.host.v1.OperationFailure
-	(*v1.PutClusterResponse)(nil),    // 7: vibesys.host.v1.PutClusterResponse
-	(*v1.RemoveClusterResponse)(nil), // 8: vibesys.host.v1.RemoveClusterResponse
-	(*v1.TestClusterResponse)(nil),   // 9: vibesys.host.v1.TestClusterResponse
-	(*v1.StartRunResponse)(nil),      // 10: vibesys.host.v1.StartRunResponse
+	(*v1.CreateExampleRequest)(nil),  // 2: vibesys.host.v1.CreateExampleRequest
+	(*v1.CopyProjectRequest)(nil),    // 3: vibesys.host.v1.CopyProjectRequest
+	(*v1.PutClusterRequest)(nil),     // 4: vibesys.host.v1.PutClusterRequest
+	(*v1.RemoveClusterRequest)(nil),  // 5: vibesys.host.v1.RemoveClusterRequest
+	(*v1.TestClusterRequest)(nil),    // 6: vibesys.host.v1.TestClusterRequest
+	(*v1.StartRunRequest)(nil),       // 7: vibesys.host.v1.StartRunRequest
+	(*v1.OperationFailure)(nil),      // 8: vibesys.host.v1.OperationFailure
+	(*v1.CreateExampleResponse)(nil), // 9: vibesys.host.v1.CreateExampleResponse
+	(*v1.CopyProjectResponse)(nil),   // 10: vibesys.host.v1.CopyProjectResponse
+	(*v1.PutClusterResponse)(nil),    // 11: vibesys.host.v1.PutClusterResponse
+	(*v1.RemoveClusterResponse)(nil), // 12: vibesys.host.v1.RemoveClusterResponse
+	(*v1.TestClusterResponse)(nil),   // 13: vibesys.host.v1.TestClusterResponse
+	(*v1.StartRunResponse)(nil),      // 14: vibesys.host.v1.StartRunResponse
 }
 var file_vibesys_api_v1_host_mutate_generated_proto_depIdxs = []int32{
-	2,  // 0: vibesys.api.v1.HostMutateRequest.put_cluster:type_name -> vibesys.host.v1.PutClusterRequest
-	3,  // 1: vibesys.api.v1.HostMutateRequest.remove_cluster:type_name -> vibesys.host.v1.RemoveClusterRequest
-	4,  // 2: vibesys.api.v1.HostMutateRequest.test_cluster:type_name -> vibesys.host.v1.TestClusterRequest
-	5,  // 3: vibesys.api.v1.HostMutateRequest.start_run:type_name -> vibesys.host.v1.StartRunRequest
-	6,  // 4: vibesys.api.v1.HostMutateResponse.failure:type_name -> vibesys.host.v1.OperationFailure
-	7,  // 5: vibesys.api.v1.HostMutateResponse.put_cluster:type_name -> vibesys.host.v1.PutClusterResponse
-	8,  // 6: vibesys.api.v1.HostMutateResponse.remove_cluster:type_name -> vibesys.host.v1.RemoveClusterResponse
-	9,  // 7: vibesys.api.v1.HostMutateResponse.test_cluster:type_name -> vibesys.host.v1.TestClusterResponse
-	10, // 8: vibesys.api.v1.HostMutateResponse.start_run:type_name -> vibesys.host.v1.StartRunResponse
-	9,  // [9:9] is the sub-list for method output_type
-	9,  // [9:9] is the sub-list for method input_type
-	9,  // [9:9] is the sub-list for extension type_name
-	9,  // [9:9] is the sub-list for extension extendee
-	0,  // [0:9] is the sub-list for field type_name
+	2,  // 0: vibesys.api.v1.HostMutateRequest.create_example:type_name -> vibesys.host.v1.CreateExampleRequest
+	3,  // 1: vibesys.api.v1.HostMutateRequest.copy_project:type_name -> vibesys.host.v1.CopyProjectRequest
+	4,  // 2: vibesys.api.v1.HostMutateRequest.put_cluster:type_name -> vibesys.host.v1.PutClusterRequest
+	5,  // 3: vibesys.api.v1.HostMutateRequest.remove_cluster:type_name -> vibesys.host.v1.RemoveClusterRequest
+	6,  // 4: vibesys.api.v1.HostMutateRequest.test_cluster:type_name -> vibesys.host.v1.TestClusterRequest
+	7,  // 5: vibesys.api.v1.HostMutateRequest.start_run:type_name -> vibesys.host.v1.StartRunRequest
+	8,  // 6: vibesys.api.v1.HostMutateResponse.failure:type_name -> vibesys.host.v1.OperationFailure
+	9,  // 7: vibesys.api.v1.HostMutateResponse.create_example:type_name -> vibesys.host.v1.CreateExampleResponse
+	10, // 8: vibesys.api.v1.HostMutateResponse.copy_project:type_name -> vibesys.host.v1.CopyProjectResponse
+	11, // 9: vibesys.api.v1.HostMutateResponse.put_cluster:type_name -> vibesys.host.v1.PutClusterResponse
+	12, // 10: vibesys.api.v1.HostMutateResponse.remove_cluster:type_name -> vibesys.host.v1.RemoveClusterResponse
+	13, // 11: vibesys.api.v1.HostMutateResponse.test_cluster:type_name -> vibesys.host.v1.TestClusterResponse
+	14, // 12: vibesys.api.v1.HostMutateResponse.start_run:type_name -> vibesys.host.v1.StartRunResponse
+	13, // [13:13] is the sub-list for method output_type
+	13, // [13:13] is the sub-list for method input_type
+	13, // [13:13] is the sub-list for extension type_name
+	13, // [13:13] is the sub-list for extension extendee
+	0,  // [0:13] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_api_v1_host_mutate_generated_proto_init() }
@@ -350,6 +426,8 @@ func file_vibesys_api_v1_host_mutate_generated_proto_init() {
 		return
 	}
 	file_vibesys_api_v1_host_mutate_generated_proto_msgTypes[0].OneofWrappers = []any{
+		(*HostMutateRequest_CreateExample)(nil),
+		(*HostMutateRequest_CopyProject)(nil),
 		(*HostMutateRequest_PutCluster)(nil),
 		(*HostMutateRequest_RemoveCluster)(nil),
 		(*HostMutateRequest_TestCluster)(nil),
@@ -357,6 +435,8 @@ func file_vibesys_api_v1_host_mutate_generated_proto_init() {
 	}
 	file_vibesys_api_v1_host_mutate_generated_proto_msgTypes[1].OneofWrappers = []any{
 		(*HostMutateResponse_Failure)(nil),
+		(*HostMutateResponse_CreateExample)(nil),
+		(*HostMutateResponse_CopyProject)(nil),
 		(*HostMutateResponse_PutCluster)(nil),
 		(*HostMutateResponse_RemoveCluster)(nil),
 		(*HostMutateResponse_TestCluster)(nil),

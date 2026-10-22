@@ -16,6 +16,7 @@ import {
   MUTATE_METHOD,
   READ_METHOD,
   registryClusters,
+  registryProjects,
   registryReads,
   registrySetup,
   registryStart,
@@ -104,6 +105,11 @@ function newRunMain(
       return settingsFor(file, id)?.runTransportV2 === true;
     },
     registryStart: (host, inputs, signal) => starts.start(host, inputs, signal),
+    registryProjects: registryProjects({
+      checkout: id => hosts.checkout(id),
+      read: (id, bytes, signal) => gateway.unary(hostKey(id), READ_METHOD, bytes, signal),
+      mutate: (id, bytes, signal) => gateway.unary(hostKey(id), MUTATE_METHOD, bytes, signal),
+    }),
   });
 }
 

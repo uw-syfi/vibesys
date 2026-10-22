@@ -198,6 +198,60 @@ service HostOperationsService {
       }
     };
   }
+  rpc InspectDestination(vibesys.host.v1.InspectDestinationRequest) returns (vibesys.host.v1.InspectDestinationResponse) {
+    option (vibesys.host.v1.operation) = {
+      adapter_method: "examples.destination"
+      operation_id: 23
+      request_tag: 23
+      response_tag: 23
+      cap_ms: 10000
+      grace_ms: 5000
+      effect: OPERATION_EFFECT_READ
+      retry: RETRY_BOUNDED_READ
+      cardinality: CARDINALITY_UNARY
+      executor: EXECUTOR_CHECKOUT
+      correlation: {
+        request_path: 1
+        response_path: 1
+      }
+    };
+  }
+  rpc CreateExample(vibesys.host.v1.CreateExampleRequest) returns (vibesys.host.v1.CreateExampleResponse) {
+    option (vibesys.host.v1.operation) = {
+      adapter_method: "create.example"
+      operation_id: 34
+      request_tag: 34
+      response_tag: 34
+      cap_ms: 120000
+      grace_ms: 5000
+      effect: OPERATION_EFFECT_IDEMPOTENT_MUTATION
+      retry: RETRY_RECONCILE_SAME_ID
+      cardinality: CARDINALITY_UNARY
+      executor: EXECUTOR_CHECKOUT
+      correlation: {
+        request_path: 1
+        response_path: 1
+      }
+    };
+  }
+  rpc CopyProject(vibesys.host.v1.CopyProjectRequest) returns (vibesys.host.v1.CopyProjectResponse) {
+    option (vibesys.host.v1.operation) = {
+      adapter_method: "copy.project"
+      operation_id: 35
+      request_tag: 35
+      response_tag: 35
+      cap_ms: 120000
+      grace_ms: 5000
+      effect: OPERATION_EFFECT_IDEMPOTENT_MUTATION
+      retry: RETRY_RECONCILE_SAME_ID
+      cardinality: CARDINALITY_UNARY
+      executor: EXECUTOR_CHECKOUT
+      correlation: {
+        request_path: 1
+        response_path: 1
+      }
+    };
+  }
   rpc PutCluster(vibesys.host.v1.PutClusterRequest) returns (vibesys.host.v1.PutClusterResponse) {
     option (vibesys.host.v1.operation) = {
       adapter_method: "put.cluster"

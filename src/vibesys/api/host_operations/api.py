@@ -14,6 +14,11 @@ from vibesys.api.host_operations._compute import (
 )
 from vibesys.api.host_operations._handlers import handlers
 from vibesys.api.host_operations._login import LoginRefusedFact, LoginStartedFact, serve_login
+from vibesys.api.host_operations._project import (
+    ProjectRefusedError,
+    ProjectUnknownError,
+    serve_project,
+)
 from vibesys.api.host_operations._reads import ReadSource
 from vibesys.api.host_operations._start import StartRefusedError, StartUnknownError, serve_start
 from vs_proto.api import (
@@ -33,6 +38,8 @@ __all__ = [
     "ClusterUnknownError",
     "LoginRefusedFact",
     "LoginStartedFact",
+    "ProjectRefusedError",
+    "ProjectUnknownError",
     "ReadSource",
     "StartRefusedError",
     "StartUnknownError",
@@ -42,6 +49,7 @@ __all__ = [
     "host_read_failure",
     "serve_cluster",
     "serve_login",
+    "serve_project",
     "serve_start",
 ]
 

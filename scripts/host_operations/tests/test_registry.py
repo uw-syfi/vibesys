@@ -43,10 +43,13 @@ def _slots() -> tuple[str, ...]:
         "get_task_goal",
         "describe_machine",
         "list_compute",
+        "inspect_destination",
         "preflight_run",
         "put_cluster",
         "remove_cluster",
         "test_cluster",
+        "create_example",
+        "copy_project",
         "start_run",
     )
 
@@ -95,6 +98,7 @@ def test_every_method_has_one_typed_handler_and_canonical_budget() -> None:
         35000,
         70000,
         65000,
+        125000,
         605000,
     }
 

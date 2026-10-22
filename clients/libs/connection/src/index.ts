@@ -45,6 +45,11 @@ export {
   registryClusters,
 } from './shell/registry-clusters.js';
 export {
+  type RegistryProjectPorts,
+  type RegistryProjects,
+  registryProjects,
+} from './shell/registry-projects.js';
+export {
   type RegistryCatalog,
   type RegistryReadPorts,
   registryReads,

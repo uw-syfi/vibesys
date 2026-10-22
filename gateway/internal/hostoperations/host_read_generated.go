@@ -26,6 +26,8 @@ func DispatchHostRead(request *apiv1.HostReadRequest) (HostCall, bool) {
 		return HostCall{CLI: "inspect-candidate", Deadline: 10000 * time.Millisecond, Executor: 2, Effect: 1}, true
 	case request.GetCompletePaths() != nil:
 		return HostCall{CLI: "complete-paths", Deadline: 5000 * time.Millisecond, Executor: 3, Effect: 1}, true
+	case request.GetInspectDestination() != nil:
+		return HostCall{CLI: "inspect-destination", Deadline: 10000 * time.Millisecond, Executor: 1, Effect: 1}, true
 	default:
 		return HostCall{}, false
 	}
@@ -60,6 +62,9 @@ func HostReadResponseValid(request *apiv1.HostReadRequest, response *apiv1.HostR
 	case request.GetCompletePaths() != nil:
 		got := response.GetCompletePaths()
 		return got != nil && got.GetRequestId() == request.GetCompletePaths().GetRequestId()
+	case request.GetInspectDestination() != nil:
+		got := response.GetInspectDestination()
+		return got != nil && got.GetRequestId() == request.GetInspectDestination().GetRequestId()
 	default:
 		return false
 	}

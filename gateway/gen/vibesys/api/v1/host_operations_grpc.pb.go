@@ -20,23 +20,26 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	HostOperationsService_ListTasks_FullMethodName        = "/vibesys.api.v1.HostOperationsService/ListTasks"
-	HostOperationsService_ListHarnesses_FullMethodName    = "/vibesys.api.v1.HostOperationsService/ListHarnesses"
-	HostOperationsService_ListExamples_FullMethodName     = "/vibesys.api.v1.HostOperationsService/ListExamples"
-	HostOperationsService_GetTaskGoal_FullMethodName      = "/vibesys.api.v1.HostOperationsService/GetTaskGoal"
-	HostOperationsService_DescribeMachine_FullMethodName  = "/vibesys.api.v1.HostOperationsService/DescribeMachine"
-	HostOperationsService_ListCompute_FullMethodName      = "/vibesys.api.v1.HostOperationsService/ListCompute"
-	HostOperationsService_PreflightRun_FullMethodName     = "/vibesys.api.v1.HostOperationsService/PreflightRun"
-	HostOperationsService_InspectCandidate_FullMethodName = "/vibesys.api.v1.HostOperationsService/InspectCandidate"
-	HostOperationsService_CompletePaths_FullMethodName    = "/vibesys.api.v1.HostOperationsService/CompletePaths"
-	HostOperationsService_Login_FullMethodName            = "/vibesys.api.v1.HostOperationsService/Login"
-	HostOperationsService_PutCluster_FullMethodName       = "/vibesys.api.v1.HostOperationsService/PutCluster"
-	HostOperationsService_RemoveCluster_FullMethodName    = "/vibesys.api.v1.HostOperationsService/RemoveCluster"
-	HostOperationsService_TestCluster_FullMethodName      = "/vibesys.api.v1.HostOperationsService/TestCluster"
-	HostOperationsService_StartRun_FullMethodName         = "/vibesys.api.v1.HostOperationsService/StartRun"
-	HostOperationsService_PostIntent_FullMethodName       = "/vibesys.api.v1.HostOperationsService/PostIntent"
-	HostOperationsService_Relaunch_FullMethodName         = "/vibesys.api.v1.HostOperationsService/Relaunch"
-	HostOperationsService_ChatMessage_FullMethodName      = "/vibesys.api.v1.HostOperationsService/ChatMessage"
+	HostOperationsService_ListTasks_FullMethodName          = "/vibesys.api.v1.HostOperationsService/ListTasks"
+	HostOperationsService_ListHarnesses_FullMethodName      = "/vibesys.api.v1.HostOperationsService/ListHarnesses"
+	HostOperationsService_ListExamples_FullMethodName       = "/vibesys.api.v1.HostOperationsService/ListExamples"
+	HostOperationsService_GetTaskGoal_FullMethodName        = "/vibesys.api.v1.HostOperationsService/GetTaskGoal"
+	HostOperationsService_DescribeMachine_FullMethodName    = "/vibesys.api.v1.HostOperationsService/DescribeMachine"
+	HostOperationsService_ListCompute_FullMethodName        = "/vibesys.api.v1.HostOperationsService/ListCompute"
+	HostOperationsService_PreflightRun_FullMethodName       = "/vibesys.api.v1.HostOperationsService/PreflightRun"
+	HostOperationsService_InspectCandidate_FullMethodName   = "/vibesys.api.v1.HostOperationsService/InspectCandidate"
+	HostOperationsService_CompletePaths_FullMethodName      = "/vibesys.api.v1.HostOperationsService/CompletePaths"
+	HostOperationsService_Login_FullMethodName              = "/vibesys.api.v1.HostOperationsService/Login"
+	HostOperationsService_InspectDestination_FullMethodName = "/vibesys.api.v1.HostOperationsService/InspectDestination"
+	HostOperationsService_CreateExample_FullMethodName      = "/vibesys.api.v1.HostOperationsService/CreateExample"
+	HostOperationsService_CopyProject_FullMethodName        = "/vibesys.api.v1.HostOperationsService/CopyProject"
+	HostOperationsService_PutCluster_FullMethodName         = "/vibesys.api.v1.HostOperationsService/PutCluster"
+	HostOperationsService_RemoveCluster_FullMethodName      = "/vibesys.api.v1.HostOperationsService/RemoveCluster"
+	HostOperationsService_TestCluster_FullMethodName        = "/vibesys.api.v1.HostOperationsService/TestCluster"
+	HostOperationsService_StartRun_FullMethodName           = "/vibesys.api.v1.HostOperationsService/StartRun"
+	HostOperationsService_PostIntent_FullMethodName         = "/vibesys.api.v1.HostOperationsService/PostIntent"
+	HostOperationsService_Relaunch_FullMethodName           = "/vibesys.api.v1.HostOperationsService/Relaunch"
+	HostOperationsService_ChatMessage_FullMethodName        = "/vibesys.api.v1.HostOperationsService/ChatMessage"
 )
 
 // HostOperationsServiceClient is the client API for HostOperationsService service.
@@ -59,6 +62,9 @@ type HostOperationsServiceClient interface {
 	// Login is owned by the host until completion or an explicit cancel. Closing a
 	// panel drops the client's subscription and does not abort this stream.
 	Login(ctx context.Context, in *v1.LoginRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[v1.LoginEvent], error)
+	InspectDestination(ctx context.Context, in *v1.InspectDestinationRequest, opts ...grpc.CallOption) (*v1.InspectDestinationResponse, error)
+	CreateExample(ctx context.Context, in *v1.CreateExampleRequest, opts ...grpc.CallOption) (*v1.CreateExampleResponse, error)
+	CopyProject(ctx context.Context, in *v1.CopyProjectRequest, opts ...grpc.CallOption) (*v1.CopyProjectResponse, error)
 	PutCluster(ctx context.Context, in *v1.PutClusterRequest, opts ...grpc.CallOption) (*v1.PutClusterResponse, error)
 	RemoveCluster(ctx context.Context, in *v1.RemoveClusterRequest, opts ...grpc.CallOption) (*v1.RemoveClusterResponse, error)
 	TestCluster(ctx context.Context, in *v1.TestClusterRequest, opts ...grpc.CallOption) (*v1.TestClusterResponse, error)
@@ -192,6 +198,36 @@ func (c *hostOperationsServiceClient) Login(ctx context.Context, in *v1.LoginReq
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type HostOperationsService_LoginClient = grpc.ServerStreamingClient[v1.LoginEvent]
 
+func (c *hostOperationsServiceClient) InspectDestination(ctx context.Context, in *v1.InspectDestinationRequest, opts ...grpc.CallOption) (*v1.InspectDestinationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(v1.InspectDestinationResponse)
+	err := c.cc.Invoke(ctx, HostOperationsService_InspectDestination_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostOperationsServiceClient) CreateExample(ctx context.Context, in *v1.CreateExampleRequest, opts ...grpc.CallOption) (*v1.CreateExampleResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(v1.CreateExampleResponse)
+	err := c.cc.Invoke(ctx, HostOperationsService_CreateExample_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostOperationsServiceClient) CopyProject(ctx context.Context, in *v1.CopyProjectRequest, opts ...grpc.CallOption) (*v1.CopyProjectResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(v1.CopyProjectResponse)
+	err := c.cc.Invoke(ctx, HostOperationsService_CopyProject_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *hostOperationsServiceClient) PutCluster(ctx context.Context, in *v1.PutClusterRequest, opts ...grpc.CallOption) (*v1.PutClusterResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(v1.PutClusterResponse)
@@ -282,6 +318,9 @@ type HostOperationsServiceServer interface {
 	// Login is owned by the host until completion or an explicit cancel. Closing a
 	// panel drops the client's subscription and does not abort this stream.
 	Login(*v1.LoginRequest, grpc.ServerStreamingServer[v1.LoginEvent]) error
+	InspectDestination(context.Context, *v1.InspectDestinationRequest) (*v1.InspectDestinationResponse, error)
+	CreateExample(context.Context, *v1.CreateExampleRequest) (*v1.CreateExampleResponse, error)
+	CopyProject(context.Context, *v1.CopyProjectRequest) (*v1.CopyProjectResponse, error)
 	PutCluster(context.Context, *v1.PutClusterRequest) (*v1.PutClusterResponse, error)
 	RemoveCluster(context.Context, *v1.RemoveClusterRequest) (*v1.RemoveClusterResponse, error)
 	TestCluster(context.Context, *v1.TestClusterRequest) (*v1.TestClusterResponse, error)
@@ -335,6 +374,15 @@ func (UnimplementedHostOperationsServiceServer) CompletePaths(context.Context, *
 }
 func (UnimplementedHostOperationsServiceServer) Login(*v1.LoginRequest, grpc.ServerStreamingServer[v1.LoginEvent]) error {
 	return status.Error(codes.Unimplemented, "method Login not implemented")
+}
+func (UnimplementedHostOperationsServiceServer) InspectDestination(context.Context, *v1.InspectDestinationRequest) (*v1.InspectDestinationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method InspectDestination not implemented")
+}
+func (UnimplementedHostOperationsServiceServer) CreateExample(context.Context, *v1.CreateExampleRequest) (*v1.CreateExampleResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CreateExample not implemented")
+}
+func (UnimplementedHostOperationsServiceServer) CopyProject(context.Context, *v1.CopyProjectRequest) (*v1.CopyProjectResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CopyProject not implemented")
 }
 func (UnimplementedHostOperationsServiceServer) PutCluster(context.Context, *v1.PutClusterRequest) (*v1.PutClusterResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method PutCluster not implemented")
@@ -551,6 +599,60 @@ func _HostOperationsService_Login_Handler(srv interface{}, stream grpc.ServerStr
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type HostOperationsService_LoginServer = grpc.ServerStreamingServer[v1.LoginEvent]
 
+func _HostOperationsService_InspectDestination_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(v1.InspectDestinationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostOperationsServiceServer).InspectDestination(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: HostOperationsService_InspectDestination_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostOperationsServiceServer).InspectDestination(ctx, req.(*v1.InspectDestinationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _HostOperationsService_CreateExample_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(v1.CreateExampleRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostOperationsServiceServer).CreateExample(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: HostOperationsService_CreateExample_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostOperationsServiceServer).CreateExample(ctx, req.(*v1.CreateExampleRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _HostOperationsService_CopyProject_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(v1.CopyProjectRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostOperationsServiceServer).CopyProject(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: HostOperationsService_CopyProject_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostOperationsServiceServer).CopyProject(ctx, req.(*v1.CopyProjectRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _HostOperationsService_PutCluster_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(v1.PutClusterRequest)
 	if err := dec(in); err != nil {
@@ -719,6 +821,18 @@ var HostOperationsService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "CompletePaths",
 			Handler:    _HostOperationsService_CompletePaths_Handler,
+		},
+		{
+			MethodName: "InspectDestination",
+			Handler:    _HostOperationsService_InspectDestination_Handler,
+		},
+		{
+			MethodName: "CreateExample",
+			Handler:    _HostOperationsService_CreateExample_Handler,
+		},
+		{
+			MethodName: "CopyProject",
+			Handler:    _HostOperationsService_CopyProject_Handler,
 		},
 		{
 			MethodName: "PutCluster",

@@ -2044,7 +2044,7 @@ expose = ["[A-Z].*"]
 
 [[modules]]
 path = "vibesys.api.host_operations"
-depends_on = ["vs_proto", "vibesys.api.host_operations._candidate", "vibesys.api.host_operations._compute", "vibesys.api.host_operations._handlers", "vibesys.api.host_operations._login", "vibesys.api.host_operations._reads", "vibesys.api.host_operations._start"]
+depends_on = ["vs_proto", "vibesys.api.host_operations._candidate", "vibesys.api.host_operations._compute", "vibesys.api.host_operations._handlers", "vibesys.api.host_operations._login", "vibesys.api.host_operations._project", "vibesys.api.host_operations._reads", "vibesys.api.host_operations._start"]
 
 [[interfaces]]
 from = ["vibesys.api.host_operations"]
@@ -2068,6 +2068,10 @@ depends_on = ["vs_proto", "vs_project"]
 
 [[modules]]
 path = "vibesys.api.host_operations._compute"
+depends_on = ["vs_proto", "vs_project"]
+
+[[modules]]
+path = "vibesys.api.host_operations._project"
 depends_on = ["vs_proto", "vs_project"]
 
 [[modules]]

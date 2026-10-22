@@ -16,6 +16,9 @@ export const operationPolicies = Object.freeze({
   PreflightRun: Object.freeze({name: 'PreflightRun', id: 16, requestTag: 16, responseTag: 16, capMs: 65000, graceMs: 5000, totalMs: 70000, effect: 1, retry: 2, executor: 1, cardinality: 1, firstEventMs: undefined} as const),
   InspectCandidate: Object.freeze({name: 'InspectCandidate', id: 17, requestTag: 17, responseTag: 17, capMs: 10000, graceMs: 5000, totalMs: 15000, effect: 1, retry: 2, executor: 2, cardinality: 1, firstEventMs: undefined} as const),
   CompletePaths: Object.freeze({name: 'CompletePaths', id: 18, requestTag: 18, responseTag: 18, capMs: 5000, graceMs: 5000, totalMs: 10000, effect: 1, retry: 2, executor: 3, cardinality: 1, firstEventMs: undefined} as const),
+  InspectDestination: Object.freeze({name: 'InspectDestination', id: 23, requestTag: 23, responseTag: 23, capMs: 10000, graceMs: 5000, totalMs: 15000, effect: 1, retry: 2, executor: 1, cardinality: 1, firstEventMs: undefined} as const),
+  CreateExample: Object.freeze({name: 'CreateExample', id: 34, requestTag: 34, responseTag: 34, capMs: 120000, graceMs: 5000, totalMs: 125000, effect: 2, retry: 3, executor: 1, cardinality: 1, firstEventMs: undefined} as const),
+  CopyProject: Object.freeze({name: 'CopyProject', id: 35, requestTag: 35, responseTag: 35, capMs: 120000, graceMs: 5000, totalMs: 125000, effect: 2, retry: 3, executor: 1, cardinality: 1, firstEventMs: undefined} as const),
   PutCluster: Object.freeze({name: 'PutCluster', id: 31, requestTag: 31, responseTag: 31, capMs: 65000, graceMs: 5000, totalMs: 70000, effect: 2, retry: 3, executor: 1, cardinality: 1, firstEventMs: undefined} as const),
   RemoveCluster: Object.freeze({name: 'RemoveCluster', id: 32, requestTag: 32, responseTag: 32, capMs: 10000, graceMs: 5000, totalMs: 15000, effect: 2, retry: 3, executor: 1, cardinality: 1, firstEventMs: undefined} as const),
   TestCluster: Object.freeze({name: 'TestCluster', id: 33, requestTag: 33, responseTag: 33, capMs: 65000, graceMs: 5000, totalMs: 70000, effect: 2, retry: 3, executor: 1, cardinality: 1, firstEventMs: undefined} as const),
@@ -80,6 +83,24 @@ export function acceptCompletePaths(input: MessageInitShape<typeof pb.CompletePa
 }
 export async function callCompletePaths(transport: OperationTransport, request: Accepted<"CompletePaths">, signal: OperationSignal): Promise<pb.CompletePathsResponse> {
   return call(transport, {policy: operationPolicies.CompletePaths, requestSchema: pb.CompletePathsRequestSchema, responseSchema: pb.CompletePathsResponseSchema, correlations: [[['requestId'], ['requestId']]]}, request, signal);
+}
+export function acceptInspectDestination(input: MessageInitShape<typeof pb.InspectDestinationRequestSchema>): Accepted<"InspectDestination"> {
+  return accept(operationPolicies.InspectDestination, pb.InspectDestinationRequestSchema, input);
+}
+export async function callInspectDestination(transport: OperationTransport, request: Accepted<"InspectDestination">, signal: OperationSignal): Promise<pb.InspectDestinationResponse> {
+  return call(transport, {policy: operationPolicies.InspectDestination, requestSchema: pb.InspectDestinationRequestSchema, responseSchema: pb.InspectDestinationResponseSchema, correlations: [[['requestId'], ['requestId']]]}, request, signal);
+}
+export function acceptCreateExample(input: MessageInitShape<typeof pb.CreateExampleRequestSchema>): Accepted<"CreateExample"> {
+  return accept(operationPolicies.CreateExample, pb.CreateExampleRequestSchema, input);
+}
+export async function callCreateExample(transport: OperationTransport, request: Accepted<"CreateExample">, signal: OperationSignal): Promise<pb.CreateExampleResponse> {
+  return call(transport, {policy: operationPolicies.CreateExample, requestSchema: pb.CreateExampleRequestSchema, responseSchema: pb.CreateExampleResponseSchema, correlations: [[['requestId'], ['requestId']]]}, request, signal);
+}
+export function acceptCopyProject(input: MessageInitShape<typeof pb.CopyProjectRequestSchema>): Accepted<"CopyProject"> {
+  return accept(operationPolicies.CopyProject, pb.CopyProjectRequestSchema, input);
+}
+export async function callCopyProject(transport: OperationTransport, request: Accepted<"CopyProject">, signal: OperationSignal): Promise<pb.CopyProjectResponse> {
+  return call(transport, {policy: operationPolicies.CopyProject, requestSchema: pb.CopyProjectRequestSchema, responseSchema: pb.CopyProjectResponseSchema, correlations: [[['requestId'], ['requestId']]]}, request, signal);
 }
 export function acceptPutCluster(input: MessageInitShape<typeof pb.PutClusterRequestSchema>): Accepted<"PutCluster"> {
   return accept(operationPolicies.PutCluster, pb.PutClusterRequestSchema, input);
@@ -149,6 +170,7 @@ export const readBudgets = Object.freeze({
   preflightRun: Object.freeze({capMs: 65000, graceMs: 5000, totalMs: 70000} as const),
   inspectCandidate: Object.freeze({capMs: 10000, graceMs: 5000, totalMs: 15000} as const),
   completePaths: Object.freeze({capMs: 5000, graceMs: 5000, totalMs: 10000} as const),
+  inspectDestination: Object.freeze({capMs: 10000, graceMs: 5000, totalMs: 15000} as const),
 } as const);
 export function encodeHostRead(checkout: string, name: string, payload: Uint8Array): Uint8Array {
   switch (name) {
@@ -170,6 +192,8 @@ export function encodeHostRead(checkout: string, name: string, payload: Uint8Arr
       return toBinary(HostReadRequestSchema, create(HostReadRequestSchema, {checkout, method: {case: 'inspectCandidate', value: fromBinary(pb.InspectCandidateRequestSchema, payload)}}));
     case 'CompletePaths':
       return toBinary(HostReadRequestSchema, create(HostReadRequestSchema, {checkout, method: {case: 'completePaths', value: fromBinary(pb.CompletePathsRequestSchema, payload)}}));
+    case 'InspectDestination':
+      return toBinary(HostReadRequestSchema, create(HostReadRequestSchema, {checkout, method: {case: 'inspectDestination', value: fromBinary(pb.InspectDestinationRequestSchema, payload)}}));
     default: throw new Error("unknown read");
   }
 }
@@ -206,12 +230,19 @@ export function decodeHostRead(name: string, payload: Uint8Array): Uint8Array {
     case 'CompletePaths':
       if (result.case !== 'completePaths') throw new Error('response correlation mismatch');
       return toBinary(pb.CompletePathsResponseSchema, result.value);
+    case 'InspectDestination':
+      if (result.case !== 'inspectDestination') throw new Error('response correlation mismatch');
+      return toBinary(pb.InspectDestinationResponseSchema, result.value);
     default: throw new Error("unknown read");
   }
 }
 
 export function encodeHostMutate(checkout: string, name: string, payload: Uint8Array): Uint8Array {
   switch (name) {
+    case 'CreateExample':
+      return toBinary(HostMutateRequestSchema, create(HostMutateRequestSchema, {checkout, method: {case: 'createExample', value: fromBinary(pb.CreateExampleRequestSchema, payload)}}));
+    case 'CopyProject':
+      return toBinary(HostMutateRequestSchema, create(HostMutateRequestSchema, {checkout, method: {case: 'copyProject', value: fromBinary(pb.CopyProjectRequestSchema, payload)}}));
     case 'PutCluster':
       return toBinary(HostMutateRequestSchema, create(HostMutateRequestSchema, {checkout, method: {case: 'putCluster', value: fromBinary(pb.PutClusterRequestSchema, payload)}}));
     case 'RemoveCluster':
@@ -229,6 +260,12 @@ export function decodeHostMutate(name: string, payload: Uint8Array): Uint8Array 
   if (result.case === undefined) throw new Error('unknown mutation');
   if (result.case === 'failure') throw new OperationFailed(result.value.category, result.value.message);
   switch (name) {
+    case 'CreateExample':
+      if (result.case !== 'createExample') throw new Error('response correlation mismatch');
+      return toBinary(pb.CreateExampleResponseSchema, result.value);
+    case 'CopyProject':
+      if (result.case !== 'copyProject') throw new Error('response correlation mismatch');
+      return toBinary(pb.CopyProjectResponseSchema, result.value);
     case 'PutCluster':
       if (result.case !== 'putCluster') throw new Error('response correlation mismatch');
       return toBinary(pb.PutClusterResponseSchema, result.value);
@@ -264,6 +301,8 @@ export function decodeHostWatch(name: string, payload: Uint8Array): Uint8Array {
   }
 }
 export const mutateBudgets = Object.freeze({
+  createExample: Object.freeze({capMs: 120000, graceMs: 5000, totalMs: 125000} as const),
+  copyProject: Object.freeze({capMs: 120000, graceMs: 5000, totalMs: 125000} as const),
   putCluster: Object.freeze({capMs: 65000, graceMs: 5000, totalMs: 70000} as const),
   removeCluster: Object.freeze({capMs: 10000, graceMs: 5000, totalMs: 15000} as const),
   testCluster: Object.freeze({capMs: 65000, graceMs: 5000, totalMs: 70000} as const),

@@ -1470,6 +1470,86 @@ message ClusterTestFailed {
   }];
 }
 
+enum DestinationState {
+  DESTINATION_STATE_UNSPECIFIED = 0;
+  DESTINATION_STATE_ABSENT = 1 [(vibesys.host.v1.adapter_spelling) = "absent"];
+  DESTINATION_STATE_EMPTY = 2 [(vibesys.host.v1.adapter_spelling) = "empty"];
+  DESTINATION_STATE_EXAMPLE_PROJECT = 3 [(vibesys.host.v1.adapter_spelling) = "example_project"];
+  DESTINATION_STATE_OCCUPIED = 4 [(vibesys.host.v1.adapter_spelling) = "occupied"];
+}
+
+message InspectDestinationRequest {
+  string request_id = 1 [(buf.validate.field).string.pattern = "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"];
+  string example = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 256
+  }];
+  string destination = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 4096
+  }];
+}
+
+message InspectDestinationResponse {
+  string request_id = 1 [(buf.validate.field).string.pattern = "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"];
+  DestinationState state = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  optional string project = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 4096
+  }];
+}
+
+message CreatedProject {
+  string project = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 4096
+  }];
+  repeated string tasks = 2 [(buf.validate.field).repeated.max_items = 256];
+}
+
+message DestinationTaken {}
+
+message CreateExampleRequest {
+  string request_id = 1 [(buf.validate.field).string.pattern = "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"];
+  string example = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 256
+  }];
+  string destination = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 4096
+  }];
+}
+
+message CreateExampleResponse {
+  string request_id = 1 [(buf.validate.field).string.pattern = "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"];
+  oneof result {
+    option (buf.validate.oneof).required = true;
+    CreatedProject created = 2;
+    DestinationTaken taken = 3;
+  }
+}
+
+message CopyProjectRequest {
+  string request_id = 1 [(buf.validate.field).string.pattern = "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"];
+  string source = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 4096
+  }];
+  string destination = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 4096
+  }];
+}
+
+message CopyProjectResponse {
+  string request_id = 1 [(buf.validate.field).string.pattern = "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"];
+  CreatedProject created = 2 [(buf.validate.field).required = true];
+}
+
 message PutClusterRequest {
   string request_id = 1 [(buf.validate.field).string.pattern = "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"];
   SlurmClusterSettings cluster = 2 [(buf.validate.field).required = true];

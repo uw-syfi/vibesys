@@ -2,7 +2,12 @@
  * The New run feature in the main process: it answers the screen's requests with one host helper
  * method each, over the host's connection, and records a started run in Recent.
  */
-import {ConnectionError, type ConnectionLease, HelperRequestError} from '@vibesys/connection';
+import {
+  ConnectionError,
+  type ConnectionLease,
+  HelperRequestError,
+  type RegistryProjects,
+} from '@vibesys/connection';
 import type {
   Backend,
   Check,
@@ -61,6 +66,8 @@ export interface NewRunMainDeps {
     inputs: RunInputs,
     signal: AbortSignal,
   ) => Promise<{readonly runId: string; readonly instanceId: string}>;
+  /** Create, copy, and destination checks when `transportV2` is on. */
+  readonly registryProjects?: RegistryProjects;
 }
 
 /** One helper request without the fields the connection fills in (`request_id`, `deadline_ms`). */
@@ -137,19 +144,7 @@ export class NewRunMain {
       case 'create-from-example':
         return this.#createFromExample(request.host, request.example, request.destination);
       case 'example-destination':
-        return this.#offered(
-          request.host,
-          {
-            type: 'examples.destination',
-            example: request.example,
-            destination: request.destination,
-          },
-          'Could not check the destination',
-          (reply): DestinationFound => {
-            const {state, project} = reply as DestinationFound;
-            return {state, project};
-          },
-        );
+        return this.#destination(request.host, request.example, request.destination);
       case 'copy-out':
         return this.#copyOut(request.host, request.source, request.destination);
       case 'start-run':
@@ -260,12 +255,53 @@ export class NewRunMain {
     }
   }
 
+  async #destination(
+    host: HostId,
+    example: string,
+    destination: string,
+  ): Promise<Offered<DestinationFound>> {
+    if ((await this.#deps.transportV2?.(host)) === true) {
+      try {
+        const found = await this.#projects().destination(
+          host,
+          example,
+          destination,
+          new AbortController().signal,
+        );
+        return {kind: 'offered', value: found};
+      } catch (error) {
+        throw plain(error, `Could not check the destination on ${hostLabel(host)}`);
+      }
+    }
+    return this.#offered(
+      host,
+      {type: 'examples.destination', example, destination},
+      'Could not check the destination',
+      (reply): DestinationFound => {
+        const {state, project} = reply as DestinationFound;
+        return {state, project};
+      },
+    );
+  }
+
   /** The new project, or `taken` when the destination holds something (it is not for the user to read). */
   async #createFromExample(
     host: HostId,
     example: string,
     destination: string,
   ): Promise<ExampleCreation> {
+    if ((await this.#deps.transportV2?.(host)) === true) {
+      try {
+        return await this.#projects().create(
+          host,
+          example,
+          destination,
+          new AbortController().signal,
+        );
+      } catch (error) {
+        throw plain(error, 'Could not create the project');
+      }
+    }
     try {
       const reply = (await this.#request(host, {
         type: 'project.create_from_example',
@@ -282,6 +318,13 @@ export class NewRunMain {
   }
 
   async #copyOut(host: HostId, source: string, destination: string): Promise<CreatedProject> {
+    if ((await this.#deps.transportV2?.(host)) === true) {
+      try {
+        return await this.#projects().copy(host, source, destination, new AbortController().signal);
+      } catch (error) {
+        throw plain(error, 'Could not copy the project out');
+      }
+    }
     try {
       const reply = (await this.#request(host, {
         type: 'project.copy_out',
@@ -313,6 +356,14 @@ export class NewRunMain {
     }
     await this.#remember(host, inputs, launch.run_id, launch.id);
     return {runId: launch.run_id, instanceId: launch.id};
+  }
+
+  #projects(): RegistryProjects {
+    const projects = this.#deps.registryProjects;
+    if (projects === undefined) {
+      throw new Error('run transport v2 is on and the project registry is missing');
+    }
+    return projects;
   }
 
   async #startRegistered(host: HostId, inputs: RunInputs): Promise<StartedRun> {

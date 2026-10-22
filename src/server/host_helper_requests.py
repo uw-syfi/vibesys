@@ -12,6 +12,7 @@ Light like the channel: the standard library, Pydantic, ``vs_sim.api`` and light
 ``server`` modules only.
 
 Public surface: ``answer``, ``answer_registered_read``, ``apply_registered_cluster``,
+``apply_registered_project``,
 ``launch_registered_run``, ``registry_start_request``,
 ``read_failure_category``,
 ``registry_read_source``, ``connect``, ``negotiate``, ``Negotiated``,
@@ -1526,6 +1527,24 @@ class HelperReadSource:
         """Observe the installed providers once for display ordering."""
         return self._host.machine.harness_clis()
 
+    def inspect_destination(self, example: str, destination: str) -> pb.InspectDestinationResponse:
+        """What creating ``example`` would find at ``destination``."""
+        models = import_module("server.host_examples")
+        state, project = self._host.examples.destination(
+            example, Path(_host_path(destination, self._host.directories))
+        )
+        payloads = _wire().host_payloads
+        states = {
+            models.ExampleDestination.ABSENT: payloads.DestinationState.ABSENT,
+            models.ExampleDestination.EMPTY: payloads.DestinationState.EMPTY,
+            models.ExampleDestination.EXAMPLE_PROJECT: payloads.DestinationState.EXAMPLE_PROJECT,
+            models.ExampleDestination.OCCUPIED: payloads.DestinationState.OCCUPIED,
+        }
+        return payloads.InspectDestinationResponse(
+            state=states[state],
+            **({} if project is None else {"project": project}),
+        )
+
     def examples(self, *, with_catalogue: bool) -> pb.ExampleList:
         """Project the checkout owner's example metadata without dropping details."""
         return _wire().from_mapping(
@@ -1739,6 +1758,51 @@ def _registry_test(result: ClusterTestResult) -> object:
     }
     failed = payloads.ClusterTestFailed(stage=stages[result.stage], detail=result.detail)
     return wire.Oneof("failed", failed)
+
+
+def apply_registered_project(
+    slot: str,
+    request: pb.CreateExampleRequest | pb.CopyProjectRequest,
+    host: HelperHost,
+) -> pb.CreateExampleResponse | pb.CopyProjectResponse:
+    """Create or copy one project and return that slot's registry response.
+
+    A destination that already holds something is the create answer ``taken``.
+    Every other ``ProjectLookupError`` stays with the caller, which stores a refusal.
+    """
+    wire = _wire()
+    payloads = wire.host_payloads
+    if slot == "create_example" and isinstance(request, payloads.CreateExampleRequest):
+        try:
+            created = host.examples.create(
+                request.example, Path(_host_path(request.destination, host.directories))
+            )
+        except ProjectLookupError as exc:
+            if exc.code is not HelperErrorCode.DESTINATION_EXISTS:
+                raise
+            return payloads.CreateExampleResponse(
+                request_id=request.request_id,
+                result=wire.Oneof("taken", payloads.DestinationTaken()),
+            )
+        return payloads.CreateExampleResponse(
+            request_id=request.request_id,
+            result=wire.Oneof("created", _registry_created(created)),
+        )
+    if slot == "copy_project" and isinstance(request, payloads.CopyProjectRequest):
+        created = host.examples.copy_out(
+            Path(_host_path(request.source, host.directories)),
+            Path(_host_path(request.destination, host.directories)),
+        )
+        return payloads.CopyProjectResponse(
+            request_id=request.request_id, created=_registry_created(created)
+        )
+    message = f"project slot {slot} does not match its request"
+    raise ValueError(message)
+
+
+def _registry_created(created: CreatedProject) -> pb.CreatedProject:
+    wire = _wire()
+    return wire.from_mapping(wire.host_payloads.CreatedProject, created.model_dump(mode="json"))
 
 
 def registry_start_request(request: pb.StartRunRequest) -> RunStartRequest:

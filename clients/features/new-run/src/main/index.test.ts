@@ -228,6 +228,64 @@ describe('NewRunMain', () => {
     expect(remembered[0]?.runId).toBe('run-9');
   });
 
+  test('a v2 create, copy, and destination use the registry and do not ask the helper', async () => {
+    const link = new FakeLink();
+    const manager = new ConnectionManager({
+      linkFor: () => link,
+      appVersion: 'test',
+      scheduleTimeout: new FakeClock().scheduleTimeout,
+      config: {delaysMs: [1], deadlineMs: 60_000, heartbeatMs: 15_000},
+      log: () => {},
+    });
+    const calls: string[] = [];
+    const main = new NewRunMain({
+      connect: host => manager.acquire(host, '/checkout'),
+      remember: async () => {},
+      now: () => 1,
+      transportV2: async () => true,
+      registryProjects: {
+        destination: async () => {
+          calls.push('destination');
+          return {state: 'absent', project: null};
+        },
+        create: async () => {
+          calls.push('create');
+          return {kind: 'created', created: {project: '/work/queue', tasks: ['a']}};
+        },
+        copy: async () => {
+          calls.push('copy');
+          return {project: '/own', tasks: ['a']};
+        },
+      },
+    });
+    expect(
+      await main.answer({
+        kind: 'example-destination',
+        host: LOCAL,
+        example: 'queue',
+        destination: '/work/queue',
+      }),
+    ).toEqual({kind: 'offered', value: {state: 'absent', project: null}});
+    expect(
+      await main.answer({
+        kind: 'create-from-example',
+        host: LOCAL,
+        example: 'queue',
+        destination: '/work/queue',
+      }),
+    ).toEqual({kind: 'created', created: {project: '/work/queue', tasks: ['a']}});
+    expect(
+      await main.answer({
+        kind: 'copy-out',
+        host: LOCAL,
+        source: '/nested',
+        destination: '/own',
+      }),
+    ).toEqual({project: '/own', tasks: ['a']});
+    expect(calls).toEqual(['destination', 'create', 'copy']);
+    expect(link.helper.requests).toEqual([]);
+  });
+
   test('starts a run with typed options and records it in Recent', async () => {
     const {link, main, remembered} = subject();
     link.helper.host.projects.set('/p', ['mpmc']);

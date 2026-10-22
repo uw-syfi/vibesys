@@ -16,10 +16,12 @@ from vibesys.api.host_operations.api import (
     ClusterRefusedError,
     LoginRefusedFact,
     LoginStartedFact,
+    ProjectRefusedError,
     StartRefusedError,
     execute_inspect_candidate,
     serve_cluster,
     serve_login,
+    serve_project,
     serve_start,
 )
 from vs_project.api import Project, ProjectError
@@ -155,11 +157,7 @@ def main(
         source = sys.stdin.buffer if stdin is None else stdin
         destination = sys.stdout.buffer if stdout is None else stdout
         owned = OsThreads() if threads is None else threads
-        payload = source.read((1 << 20) + 1)
-        if _MUTATION_COMMANDS[arguments[0]] == "start_run":
-            destination.write(_serve_start(payload, owned))
-        else:
-            destination.write(_serve_cluster(payload, owned))
+        destination.write(_serve_mutation(arguments[0], source.read((1 << 20) + 1), owned))
         return 0
     if arguments and arguments[0] in _HOST_CALL_COMMANDS:
         parser = argparse.ArgumentParser(
@@ -225,6 +223,38 @@ def _serve_login(
         destination.write(chunk)
 
     serve_login(payload, cli=cli, start=start, write=write, wait=wait)
+
+
+def _serve_mutation(cli: str, payload: bytes, threads: Threads) -> bytes:
+    """Dispatch one mutation command. Cluster and project changes are not starts."""
+    slot = _MUTATION_COMMANDS[cli]
+    if slot == "start_run":
+        return _serve_start(payload, threads)
+    if slot in {"put_cluster", "remove_cluster", "test_cluster"}:
+        return _serve_cluster(payload, threads)
+    return _serve_project(payload, threads)
+
+
+def _serve_project(payload: bytes, threads: Threads) -> bytes:
+    """Admit one project change, then apply it. Replay does not apply it again."""
+    requests = import_module("server.host_helper_requests")
+    host = import_module("entrypoints.host_helper").real_host(os.environ, os.getuid(), threads)
+
+    def apply(slot: str, request: object) -> object:
+        if not isinstance(request, pb.CreateExampleRequest | pb.CopyProjectRequest):
+            message = "project request is not a project mutation"
+            raise ProjectRefusedError(message)
+        try:
+            return requests.apply_registered_project(slot, request, host)
+        except (requests.ProjectLookupError, TypeError, ValueError) as exc:
+            raise ProjectRefusedError(str(exc)) from exc
+
+    return serve_project(
+        payload,
+        store=Project.admissions(),
+        host_user=str(os.getuid()),
+        apply=apply,
+    )
 
 
 def _serve_cluster(payload: bytes, threads: Threads) -> bytes:
