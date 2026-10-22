@@ -93,7 +93,7 @@ class RevisionPublisher:
             raise PublicationError(self._branch)
         try:
             return self._update_checkout(publication)
-        except GitError:
+        except (GitError, OSError):
             return CheckoutOutcome.GIT_REFUSED
 
     def _update_checkout(self, publication: PublishedRevision) -> CheckoutOutcome:

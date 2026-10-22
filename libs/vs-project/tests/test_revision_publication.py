@@ -7,7 +7,13 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from vs_project.api import CheckoutOutcome, GitTracker, NullGitTrackerEvents, PublicationError
+from vs_project.api import (
+    CheckoutOutcome,
+    GitCommandError,
+    GitTracker,
+    NullGitTrackerEvents,
+    PublicationError,
+)
 from vs_project.api.testing import ContractProject, FakeGitRepositories
 
 if TYPE_CHECKING:
@@ -123,3 +129,15 @@ def test_resume_on_an_operator_branch_publishes_without_moving_its_files_or_inde
     assert world.project.repo.has_staged_changes()
     assert (world.project.root / "code.py").read_text() == "operator unstaged"
     assert world.project.repo.read_blob(publication.commit, "code.py") == b"winner"
+
+
+def test_git_checkout_refusal_keeps_publication_and_can_be_retried(world: _World) -> None:
+    publication = world.tracker.publish_revision(world.winner("winner"), "winner")
+    disk = world.project.factory
+    assert isinstance(disk, FakeGitRepositories)
+    before = world.project.repo.head()
+    disk.fail_next("fast_forward_checkout", GitCommandError(["merge"], 1, "checkout refused"))
+    assert world.tracker.update_checkout(publication) is CheckoutOutcome.GIT_REFUSED
+    assert world.project.repo.head() == before
+    assert world.project.repo.resolve_commit(publication.branch) == publication.commit
+    assert world.tracker.update_checkout(publication) is CheckoutOutcome.FAST_FORWARDED
