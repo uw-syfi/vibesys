@@ -91,6 +91,7 @@ if TYPE_CHECKING:
         AgentOutputChunkData,
         AgentReply,
         AgentStatusData,
+        CheckoutStatus,
         CommandResultPayload,
         ComparisonReadingData,
         ComparisonsReadData,
@@ -227,7 +228,8 @@ _MODULES: dict[str, str] = {
             "vibesys.events",
             (
                 "AgentExecutionStartedData AgentOutputChannel AgentOutputChunkData AgentReply "
-                "AgentStatusData CommandResultPayload ComparisonReadingData ComparisonsReadData "
+                "AgentStatusData CheckoutStatus CommandResultPayload ComparisonReadingData "
+                "ComparisonsReadData "
                 "ComparisonStatus CoreEventType FrameworkWarningData GateFinishedData GateKind "
                 "GateStartedData InputMeasurementFailedData InputMeasurementFailureKind "
                 "JsonResultPayload MeasurementComparedData ProviderSwitchedData QuotaAbandonedData "
@@ -303,6 +305,7 @@ __all__ = [
     "AuxiliarySkills",
     "CancelAttemptRequest",
     "CancelItemRequest",
+    "CheckoutStatus",
     "CommandResultPayload",
     "ComparisonReadingData",
     "ComparisonStatus",

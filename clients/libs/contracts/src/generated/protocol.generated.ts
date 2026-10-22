@@ -711,6 +711,11 @@ export type Kind47 = "winner_selected";
 export type Selection = "candidate" | "baseline";
 export type Revision3 = string;
 export type SettlementId = string | null;
+/**
+ * Why the optional checkout update advanced or skipped the checkout.
+ */
+export type CheckoutStatus =
+  "fast_forwarded" | "other_branch" | "dirty_tree" | "diverged" | "git_refused" | "operator_changed_checkout";
 export type Kind48 = "input_measurement_failed";
 /**
  * Why the run's input failed its own trusted measurement. Closed.
@@ -2327,6 +2332,7 @@ export interface WinnerSelectedData {
   selection: Selection;
   revision: Revision3;
   settlement_id?: SettlementId;
+  checkout_status?: CheckoutStatus | null;
 }
 /**
  * The run's input failed its trusted measurement, so the run has no trusted baseline.

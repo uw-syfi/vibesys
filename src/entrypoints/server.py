@@ -1019,10 +1019,14 @@ def _opened_project_root(request: RunRequest) -> Path | None:
 
     A fresh collection destination does not exist until the run provisions it.
     The server publishes that root from the run-ready fact, which is
-    ``Project.root`` after ``Project.open``.
+    ``Project.root`` after ``Project.open``. ``resolved_project_root`` is the
+    request's root, including None when a caller has not named one.
     """
+    root = request.resolved_project_root
+    if root is None:
+        return None
     try:
-        return Project.open(request.project_root_for(request.resolved_run_id)).root
+        return Project.open(root).root
     except ProjectRootNotFoundError:
         return None
 
@@ -1122,7 +1126,7 @@ def _serve(  # noqa: C901, PLR0912, PLR0915  # lint-waiver: LW-101031 [C901, PLR
             if request is None
             else opened_root
             if opened_root is not None
-            else request.project_root_for(request.resolved_run_id)
+            else request.resolved_project_root
         )
         server_runtime = import_module("server.runtime").ServerRuntime
         open_reader = (

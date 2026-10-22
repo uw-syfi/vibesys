@@ -12,16 +12,19 @@ from datetime import UTC, datetime
 import pytest
 from hypothesis import assume, given, settings
 from hypothesis import strategies as st
-from pydantic import ValidationError
+from pydantic import TypeAdapter, ValidationError
 from tests.support.event_models import JSON_SCALARS as _JSON_SCALARS
 from tests.support.event_models import payload_models as _kinds
 from tests.support.event_models import payloads as _payloads
 
 from server.events import EventData, EventType, RunEvent
 from server.events import InputMeasurementFailedData as ServerInputFailed
+from server.events import WinnerSelectedData as WireWinnerSelected
 from vibesys.api import (
+    CheckoutStatus,
     CoreEvent,
     CoreEventType,
+    WinnerSelectedData,
 )
 from vibesys.events import (
     CoreEventData,
@@ -97,3 +100,34 @@ def test_a_retired_payload_key_replays_and_is_never_written_again(
 
     assert replayed.data == payload
     assert key not in replayed.model_dump(mode="json")["data"]
+
+
+def test_a_core_event_payload_declares_no_field_the_wire_rejects() -> None:
+    """A core payload is revalidated as the wire payload, so every field must be declared there.
+
+    ``project_event`` dumps the core payload, including an explicit None, and the wire model
+    forbids keys it does not declare.
+    """
+    wire = {model.model_fields["kind"].default: model for model in _kinds(EventData)}
+    missing = {
+        model.model_fields["kind"].default: sorted(
+            set(model.model_fields) - set(wire[model.model_fields["kind"].default].model_fields)
+        )
+        for model in _kinds(CoreEventData)
+        if model.model_fields["kind"].default in wire
+    }
+    assert {kind: fields for kind, fields in missing.items() if fields} == {}
+
+
+@pytest.mark.regression
+@settings(max_examples=examples(pr=8, nightly=40))
+@given(status=st.none() | st.sampled_from(tuple(CheckoutStatus)))
+def test_a_winner_selection_checkout_status_crosses_onto_the_wire(
+    status: CheckoutStatus | None,
+) -> None:
+    """None is recorded as null, and every checkout status is a wire value."""
+    payload = WinnerSelectedData(selection="baseline", revision="input", checkout_status=status)
+    wire = TypeAdapter(EventData).validate_python(payload.model_dump(mode="python"))
+
+    assert isinstance(wire, WireWinnerSelected)
+    assert wire.checkout_status == status

@@ -960,6 +960,19 @@
       "title": "ChatThreadInfo",
       "type": "object"
     },
+    "CheckoutStatus": {
+      "description": "Why the optional checkout update advanced or skipped the checkout.",
+      "enum": [
+        "fast_forwarded",
+        "other_branch",
+        "dirty_tree",
+        "diverged",
+        "git_refused",
+        "operator_changed_checkout"
+      ],
+      "title": "CheckoutStatus",
+      "type": "string"
+    },
     "CommandAck": {
       "additionalProperties": false,
       "description": "Acknowledgment of a requested run command; ``action`` is the control's tag.",
@@ -8361,6 +8374,17 @@
           ],
           "default": null,
           "title": "Settlement Id"
+        },
+        "checkout_status": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CheckoutStatus"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [

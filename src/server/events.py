@@ -47,6 +47,7 @@ from vibesys.api import (
     AgentOutputChannel,
     AgentReply,
     AgentStatusData,
+    CheckoutStatus,
     GateKind,
     QuotaWaitCancelledData,
     QuotaWaitingData,
@@ -814,6 +815,8 @@ class WinnerSelectedData(EventPayload):
     selection: Literal["candidate", "baseline"]
     revision: str
     settlement_id: str | None = None
+    checkout_status: CheckoutStatus | None = None
+    """The checkout publication status, when this selection recorded one."""
 
 
 class InputMeasurementFailureKind(StrEnum):

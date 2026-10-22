@@ -485,6 +485,19 @@ const runEventSchema: Record<string, unknown> = {
       "pattern": "^(?!(?:aux|con|nul|prn|com[1-9]|lpt[1-9])(?:\\.|$))(?!.*\\.$)[a-z0-9][a-z0-9._-]*$(?![\\s\\S])",
       "type": "string"
     },
+    "CheckoutStatus": {
+      "description": "Why the optional checkout update advanced or skipped the checkout.",
+      "enum": [
+        "fast_forwarded",
+        "other_branch",
+        "dirty_tree",
+        "diverged",
+        "git_refused",
+        "operator_changed_checkout"
+      ],
+      "title": "CheckoutStatus",
+      "type": "string"
+    },
     "CommandResultPayload": {
       "additionalProperties": false,
       "description": "Structured result of a command-style tool execution.",
@@ -3943,6 +3956,17 @@ const runEventSchema: Record<string, unknown> = {
           ],
           "default": null,
           "title": "Settlement Id"
+        },
+        "checkout_status": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CheckoutStatus"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
