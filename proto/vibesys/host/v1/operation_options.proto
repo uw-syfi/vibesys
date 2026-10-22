@@ -19,7 +19,7 @@ message OperationPolicy {
     gt: 0
     lte: 30000
   }];
-  Effect effect = 4 [(buf.validate.field).enum = {
+  OperationEffect effect = 4 [(buf.validate.field).enum = {
     defined_only: true
     not_in: [0]
   }];
@@ -61,11 +61,11 @@ message Correlation {
     }
   }];
 }
-enum Effect {
-  EFFECT_UNSPECIFIED = 0;
-  EFFECT_READ = 1;
-  EFFECT_IDEMPOTENT_MUTATION = 2;
-  EFFECT_ADMISSION = 3;
+enum OperationEffect {
+  OPERATION_EFFECT_UNSPECIFIED = 0;
+  OPERATION_EFFECT_READ = 1;
+  OPERATION_EFFECT_IDEMPOTENT_MUTATION = 2;
+  OPERATION_EFFECT_ADMISSION = 3;
 }
 enum Retry {
   RETRY_UNSPECIFIED = 0;

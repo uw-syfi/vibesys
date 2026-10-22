@@ -26,7 +26,7 @@ def checked(message: Message) -> bytes:
 
 
 @dataclass(frozen=True)
-class Accepted[Request: Message]:
+class AcceptedRequest[Request: Message]:
     """An immutable accepted request; decoding returns an independent mutable copy."""
 
     operation: Operation
@@ -73,14 +73,14 @@ class Operation[Request: Message, Response: Message]:
         """The end-to-end budget, including dial, queue and cleanup."""
         return self.cap_ms + self.grace_ms
 
-    def accept(self, request: Request) -> Accepted[Request]:
+    def accept(self, request: Request) -> AcceptedRequest[Request]:
         """Copy and validate, keeping no reference to a mutable builder."""
         if not isinstance(request, self.request):
             message = f"{self.name}: wrong request type"
             raise TypeError(message)
-        return Accepted(self, checked(request))
+        return AcceptedRequest(self, checked(request))
 
-    def request_value(self, accepted: Accepted[Request]) -> Request:
+    def request_value(self, accepted: AcceptedRequest[Request]) -> Request:
         """Check the registry identity before a handler may perform any work."""
         if accepted.operation != self:
             message = f"{self.name}: accepted request belongs to a different registry entry"
@@ -91,7 +91,7 @@ class Operation[Request: Message, Response: Message]:
             raise ValueError(message)
         return value
 
-    def validate_response(self, request: Accepted[Request], response: Response) -> bytes:
+    def validate_response(self, request: AcceptedRequest[Request], response: Response) -> bytes:
         """Validate pairing and every declared identity correlation before delivery."""
         if request.operation != self or not isinstance(response, self.response):
             message = f"{self.name}: wrong response method"

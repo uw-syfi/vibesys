@@ -13,7 +13,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file vibesys/host/v1/operation_options.proto.
  */
 export const file_vibesys_host_v1_operation_options: GenFile = /*@__PURE__*/
-  fileDesc("Cid2aWJlc3lzL2hvc3QvdjEvb3BlcmF0aW9uX29wdGlvbnMucHJvdG8SD3ZpYmVzeXMuaG9zdC52MSKzBAoPT3BlcmF0aW9uUG9saWN5Ei4KDmFkYXB0ZXJfbWV0aG9kGAwgASgJQha6SBNyETIPXlthLXpdW2Etel8uXSokEh0KDG9wZXJhdGlvbl9pZBgBIAEoDUIHukgEKgIgABIbCgZjYXBfbXMYAiABKA1CC7pICCoGGMDPJCAAEh0KCGdyYWNlX21zGAMgASgNQgu6SAgqBhiw6gEgABIzCgZlZmZlY3QYBCABKA4yFy52aWJlc3lzLmhvc3QudjEuRWZmZWN0Qgq6SAeCAQQQASAAEjEKBXJldHJ5GAUgASgOMhYudmliZXN5cy5ob3N0LnYxLlJldHJ5Qgq6SAeCAQQQASAAEj0KC2NhcmRpbmFsaXR5GAYgASgOMhwudmliZXN5cy5ob3N0LnYxLkNhcmRpbmFsaXR5Qgq6SAeCAQQQASAAEjcKCGV4ZWN1dG9yGAcgASgOMhkudmliZXN5cy5ob3N0LnYxLkV4ZWN1dG9yQgq6SAeCAQQQASAAEiQKDmZpcnN0X2V2ZW50X21zGAggASgNQge6SAQqAiAASACIAQESMQoLY29ycmVsYXRpb24YCSADKAsyHC52aWJlc3lzLmhvc3QudjEuQ29ycmVsYXRpb24SIgoLcmVxdWVzdF90YWcYCiABKA1CDbpICioIGP////8BIAASJQoMcmVzcG9uc2VfdGFnGAsgASgNQg+6SAwqCjgCGP////8BIABCEQoPX2ZpcnN0X2V2ZW50X21zIloKC0NvcnJlbGF0aW9uEiQKDHJlcXVlc3RfcGF0aBgBIAMoDUIOukgLkgEICAEiBCoCIAASJQoNcmVzcG9uc2VfcGF0aBgCIAMoDUIOukgLkgEICAEiBCoCIAAqZwoGRWZmZWN0EhYKEkVGRkVDVF9VTlNQRUNJRklFRBAAEg8KC0VGRkVDVF9SRUFEEAESHgoaRUZGRUNUX0lERU1QT1RFTlRfTVVUQVRJT04QAhIUChBFRkZFQ1RfQURNSVNTSU9OEAMqYwoFUmV0cnkSFQoRUkVUUllfVU5TUEVDSUZJRUQQABIOCgpSRVRSWV9OT05FEAESFgoSUkVUUllfQk9VTkRFRF9SRUFEEAISGwoXUkVUUllfUkVDT05DSUxFX1NBTUVfSUQQAypgCgtDYXJkaW5hbGl0eRIbChdDQVJESU5BTElUWV9VTlNQRUNJRklFRBAAEhUKEUNBUkRJTkFMSVRZX1VOQVJZEAESHQoZQ0FSRElOQUxJVFlfU0VSVkVSX1NUUkVBTRACKncKCEV4ZWN1dG9yEhgKFEVYRUNVVE9SX1VOU1BFQ0lGSUVEEAASFQoRRVhFQ1VUT1JfQ0hFQ0tPVVQQARIhCh1FWEVDVVRPUl9DQU5ESURBVEVfSU5TUEVDVElPThACEhcKE0VYRUNVVE9SX0ZJTEVTWVNURU0QAzpgCglvcGVyYXRpb24SHi5nb29nbGUucHJvdG9idWYuTWV0aG9kT3B0aW9ucxi5jgMgASgLMiAudmliZXN5cy5ob3N0LnYxLk9wZXJhdGlvblBvbGljeVIJb3BlcmF0aW9uOk4KEGFkYXB0ZXJfc3BlbGxpbmcSIS5nb29nbGUucHJvdG9idWYuRW51bVZhbHVlT3B0aW9ucxi6jgMgASgJUg9hZGFwdGVyU3BlbGxpbmdCP1o9Z2l0aHViLmNvbS91dy1zeWZpL3ZpYmVzeXMvZ2F0ZXdheS9nZW4vdmliZXN5cy9ob3N0L3YxO2hvc3R2MWIGcHJvdG8z", [file_buf_validate_validate, file_google_protobuf_descriptor]);
+  fileDesc("Cid2aWJlc3lzL2hvc3QvdjEvb3BlcmF0aW9uX29wdGlvbnMucHJvdG8SD3ZpYmVzeXMuaG9zdC52MSK8BAoPT3BlcmF0aW9uUG9saWN5Ei4KDmFkYXB0ZXJfbWV0aG9kGAwgASgJQha6SBNyETIPXlthLXpdW2Etel8uXSokEh0KDG9wZXJhdGlvbl9pZBgBIAEoDUIHukgEKgIgABIbCgZjYXBfbXMYAiABKA1CC7pICCoGGMDPJCAAEh0KCGdyYWNlX21zGAMgASgNQgu6SAgqBhiw6gEgABI8CgZlZmZlY3QYBCABKA4yIC52aWJlc3lzLmhvc3QudjEuT3BlcmF0aW9uRWZmZWN0Qgq6SAeCAQQQASAAEjEKBXJldHJ5GAUgASgOMhYudmliZXN5cy5ob3N0LnYxLlJldHJ5Qgq6SAeCAQQQASAAEj0KC2NhcmRpbmFsaXR5GAYgASgOMhwudmliZXN5cy5ob3N0LnYxLkNhcmRpbmFsaXR5Qgq6SAeCAQQQASAAEjcKCGV4ZWN1dG9yGAcgASgOMhkudmliZXN5cy5ob3N0LnYxLkV4ZWN1dG9yQgq6SAeCAQQQASAAEiQKDmZpcnN0X2V2ZW50X21zGAggASgNQge6SAQqAiAASACIAQESMQoLY29ycmVsYXRpb24YCSADKAsyHC52aWJlc3lzLmhvc3QudjEuQ29ycmVsYXRpb24SIgoLcmVxdWVzdF90YWcYCiABKA1CDbpICioIGP////8BIAASJQoMcmVzcG9uc2VfdGFnGAsgASgNQg+6SAwqCjgCGP////8BIABCEQoPX2ZpcnN0X2V2ZW50X21zIloKC0NvcnJlbGF0aW9uEiQKDHJlcXVlc3RfcGF0aBgBIAMoDUIOukgLkgEICAEiBCoCIAASJQoNcmVzcG9uc2VfcGF0aBgCIAMoDUIOukgLkgEICAEiBCoCIAAqmAEKD09wZXJhdGlvbkVmZmVjdBIgChxPUEVSQVRJT05fRUZGRUNUX1VOU1BFQ0lGSUVEEAASGQoVT1BFUkFUSU9OX0VGRkVDVF9SRUFEEAESKAokT1BFUkFUSU9OX0VGRkVDVF9JREVNUE9URU5UX01VVEFUSU9OEAISHgoaT1BFUkFUSU9OX0VGRkVDVF9BRE1JU1NJT04QAypjCgVSZXRyeRIVChFSRVRSWV9VTlNQRUNJRklFRBAAEg4KClJFVFJZX05PTkUQARIWChJSRVRSWV9CT1VOREVEX1JFQUQQAhIbChdSRVRSWV9SRUNPTkNJTEVfU0FNRV9JRBADKmAKC0NhcmRpbmFsaXR5EhsKF0NBUkRJTkFMSVRZX1VOU1BFQ0lGSUVEEAASFQoRQ0FSRElOQUxJVFlfVU5BUlkQARIdChlDQVJESU5BTElUWV9TRVJWRVJfU1RSRUFNEAIqdwoIRXhlY3V0b3ISGAoURVhFQ1VUT1JfVU5TUEVDSUZJRUQQABIVChFFWEVDVVRPUl9DSEVDS09VVBABEiEKHUVYRUNVVE9SX0NBTkRJREFURV9JTlNQRUNUSU9OEAISFwoTRVhFQ1VUT1JfRklMRVNZU1RFTRADOmAKCW9wZXJhdGlvbhIeLmdvb2dsZS5wcm90b2J1Zi5NZXRob2RPcHRpb25zGLmOAyABKAsyIC52aWJlc3lzLmhvc3QudjEuT3BlcmF0aW9uUG9saWN5UglvcGVyYXRpb246TgoQYWRhcHRlcl9zcGVsbGluZxIhLmdvb2dsZS5wcm90b2J1Zi5FbnVtVmFsdWVPcHRpb25zGLqOAyABKAlSD2FkYXB0ZXJTcGVsbGluZ0I/Wj1naXRodWIuY29tL3V3LXN5ZmkvdmliZXN5cy9nYXRld2F5L2dlbi92aWJlc3lzL2hvc3QvdjE7aG9zdHYxYgZwcm90bzM", [file_buf_validate_validate, file_google_protobuf_descriptor]);
 
 /**
  * All executable operation policy lives on the method descriptor.
@@ -44,9 +44,9 @@ export type OperationPolicy = Message<"vibesys.host.v1.OperationPolicy"> & {
   graceMs: number;
 
   /**
-   * @generated from field: vibesys.host.v1.Effect effect = 4;
+   * @generated from field: vibesys.host.v1.OperationEffect effect = 4;
    */
-  effect: Effect;
+  effect: OperationEffect;
 
   /**
    * @generated from field: vibesys.host.v1.Retry retry = 5;
@@ -114,34 +114,34 @@ export const CorrelationSchema: GenMessage<Correlation> = /*@__PURE__*/
   messageDesc(file_vibesys_host_v1_operation_options, 1);
 
 /**
- * @generated from enum vibesys.host.v1.Effect
+ * @generated from enum vibesys.host.v1.OperationEffect
  */
-export enum Effect {
+export enum OperationEffect {
   /**
-   * @generated from enum value: EFFECT_UNSPECIFIED = 0;
+   * @generated from enum value: OPERATION_EFFECT_UNSPECIFIED = 0;
    */
   UNSPECIFIED = 0,
 
   /**
-   * @generated from enum value: EFFECT_READ = 1;
+   * @generated from enum value: OPERATION_EFFECT_READ = 1;
    */
   READ = 1,
 
   /**
-   * @generated from enum value: EFFECT_IDEMPOTENT_MUTATION = 2;
+   * @generated from enum value: OPERATION_EFFECT_IDEMPOTENT_MUTATION = 2;
    */
   IDEMPOTENT_MUTATION = 2,
 
   /**
-   * @generated from enum value: EFFECT_ADMISSION = 3;
+   * @generated from enum value: OPERATION_EFFECT_ADMISSION = 3;
    */
   ADMISSION = 3,
 }
 
 /**
- * Describes the enum vibesys.host.v1.Effect.
+ * Describes the enum vibesys.host.v1.OperationEffect.
  */
-export const EffectSchema: GenEnum<Effect> = /*@__PURE__*/
+export const OperationEffectSchema: GenEnum<OperationEffect> = /*@__PURE__*/
   enumDesc(file_vibesys_host_v1_operation_options, 0);
 
 /**

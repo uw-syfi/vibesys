@@ -16,7 +16,7 @@ service HostOperationsService {
       response_tag: 10
       cap_ms: 10000
       grace_ms: 5000
-      effect: EFFECT_READ
+      effect: OPERATION_EFFECT_READ
       retry: RETRY_BOUNDED_READ
       cardinality: CARDINALITY_UNARY
       executor: EXECUTOR_CHECKOUT
@@ -34,7 +34,7 @@ service HostOperationsService {
       response_tag: 11
       cap_ms: 10000
       grace_ms: 5000
-      effect: EFFECT_READ
+      effect: OPERATION_EFFECT_READ
       retry: RETRY_BOUNDED_READ
       cardinality: CARDINALITY_UNARY
       executor: EXECUTOR_CHECKOUT
@@ -52,7 +52,7 @@ service HostOperationsService {
       response_tag: 12
       cap_ms: 10000
       grace_ms: 5000
-      effect: EFFECT_READ
+      effect: OPERATION_EFFECT_READ
       retry: RETRY_BOUNDED_READ
       cardinality: CARDINALITY_UNARY
       executor: EXECUTOR_CHECKOUT
@@ -70,7 +70,7 @@ service HostOperationsService {
       response_tag: 13
       cap_ms: 10000
       grace_ms: 5000
-      effect: EFFECT_READ
+      effect: OPERATION_EFFECT_READ
       retry: RETRY_BOUNDED_READ
       cardinality: CARDINALITY_UNARY
       executor: EXECUTOR_CHECKOUT
@@ -88,7 +88,7 @@ service HostOperationsService {
       response_tag: 14
       cap_ms: 25000
       grace_ms: 5000
-      effect: EFFECT_READ
+      effect: OPERATION_EFFECT_READ
       retry: RETRY_BOUNDED_READ
       cardinality: CARDINALITY_UNARY
       executor: EXECUTOR_CHECKOUT
@@ -106,7 +106,7 @@ service HostOperationsService {
       response_tag: 15
       cap_ms: 10000
       grace_ms: 5000
-      effect: EFFECT_READ
+      effect: OPERATION_EFFECT_READ
       retry: RETRY_BOUNDED_READ
       cardinality: CARDINALITY_UNARY
       executor: EXECUTOR_CHECKOUT
@@ -124,7 +124,7 @@ service HostOperationsService {
       response_tag: 16
       cap_ms: 65000
       grace_ms: 5000
-      effect: EFFECT_READ
+      effect: OPERATION_EFFECT_READ
       retry: RETRY_BOUNDED_READ
       cardinality: CARDINALITY_UNARY
       executor: EXECUTOR_CHECKOUT

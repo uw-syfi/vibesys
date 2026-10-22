@@ -18,7 +18,7 @@ def python_registry(operations: tuple[Operation, ...], failures: tuple[str, ...]
         "from dataclasses import dataclass",
         "from collections.abc import Callable",
         "from typing import Protocol",
-        "from vs_proto._operations import Accepted, Operation",
+        "from vs_proto._operations import AcceptedRequest, Operation",
         "from vs_proto._generated.vibesys.host.v1 import operations_pb as pb",
         "from vs_proto._generated.vibesys.host.v1.failure_pb import FailureCategory, OperationFailure",
         "",
@@ -31,7 +31,7 @@ def python_registry(operations: tuple[Operation, ...], failures: tuple[str, ...]
             f"    {p.effect}, {p.retry}, {p.executor}, {p.cardinality}, {p.first_event_ms if p.HasField('first_event_ms') else None!r},",
             f"    pb.{op.request}, pb.{op.response}, {op.correlations!r},",
             ")",
-            f"def accept_{op.slot}(request: pb.{op.request}) -> Accepted[pb.{op.request}]:",
+            f"def accept_{op.slot}(request: pb.{op.request}) -> AcceptedRequest[pb.{op.request}]:",
             f"    return {op.name}.accept(request)",
             "",
         ]
@@ -51,7 +51,7 @@ def python_registry(operations: tuple[Operation, ...], failures: tuple[str, ...]
         lines += [f"    {op.slot}: Callable[[pb.{op.request}], pb.{op.response}]"]
     lines += [
         "",
-        "    def dispatch(self, request: Accepted) -> bytes:",
+        "    def dispatch(self, request: AcceptedRequest) -> bytes:",
         "        match request.operation.operation_id:",
     ]
     for op in operations:
@@ -191,7 +191,7 @@ def go_registry(operations: tuple[Operation, ...], failures: tuple[str, ...]) ->
             for left, right in op.correlations
         )
         lines += [
-            f'{p.operation_id}: {{ID: {p.operation_id}, Name: "{op.name}", RequestTag: {p.request_tag}, ResponseTag: {p.response_tag}, Cap: {p.cap_ms}*time.Millisecond, Grace: {p.grace_ms}*time.Millisecond, Effect: hostv1.Effect({p.effect}), Retry: hostv1.Retry({p.retry}), Executor: hostv1.Executor({p.executor}), Cardinality: hostv1.Cardinality({p.cardinality}), FirstEvent: {p.first_event_ms}*time.Millisecond, NewRequest: func() proto.Message {{return &hostv1.{op.request}{{}}}}, NewResponse: func() proto.Message {{return &hostv1.{op.response}{{}}}}, Correlations: [][2][]string{{{correlations}}}}},'
+            f'{p.operation_id}: {{ID: {p.operation_id}, Name: "{op.name}", RequestTag: {p.request_tag}, ResponseTag: {p.response_tag}, Cap: {p.cap_ms}*time.Millisecond, Grace: {p.grace_ms}*time.Millisecond, Effect: hostv1.OperationEffect({p.effect}), Retry: hostv1.Retry({p.retry}), Executor: hostv1.Executor({p.executor}), Cardinality: hostv1.Cardinality({p.cardinality}), FirstEvent: {p.first_event_ms}*time.Millisecond, NewRequest: func() proto.Message {{return &hostv1.{op.request}{{}}}}, NewResponse: func() proto.Message {{return &hostv1.{op.response}{{}}}}, Correlations: [][2][]string{{{correlations}}}}},'
         ]
     lines += ["}", "type FailureVisitor[T any] interface {"]
     for name in failures:

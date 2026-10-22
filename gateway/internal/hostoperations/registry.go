@@ -18,7 +18,7 @@ type Operation struct {
 	ID, RequestTag, ResponseTag uint32
 	Name                        string
 	Cap, Grace, FirstEvent      time.Duration
-	Effect                      hostv1.Effect
+	Effect                      hostv1.OperationEffect
 	Retry                       hostv1.Retry
 	Executor                    hostv1.Executor
 	Cardinality                 hostv1.Cardinality

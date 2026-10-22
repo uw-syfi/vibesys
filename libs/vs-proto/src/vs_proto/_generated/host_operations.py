@@ -6,7 +6,7 @@ from typing import Protocol
 
 from vs_proto._generated.vibesys.host.v1 import operations_pb as pb
 from vs_proto._generated.vibesys.host.v1.failure_pb import FailureCategory, OperationFailure
-from vs_proto._operations import Accepted, Operation
+from vs_proto._operations import AcceptedRequest, Operation
 
 ListTasks = Operation(
     "ListTasks",
@@ -26,7 +26,7 @@ ListTasks = Operation(
 )
 
 
-def accept_list_tasks(request: pb.ListTasksRequest) -> Accepted[pb.ListTasksRequest]:
+def accept_list_tasks(request: pb.ListTasksRequest) -> AcceptedRequest[pb.ListTasksRequest]:
     return ListTasks.accept(request)
 
 
@@ -48,7 +48,9 @@ ListHarnesses = Operation(
 )
 
 
-def accept_list_harnesses(request: pb.ListHarnessesRequest) -> Accepted[pb.ListHarnessesRequest]:
+def accept_list_harnesses(
+    request: pb.ListHarnessesRequest,
+) -> AcceptedRequest[pb.ListHarnessesRequest]:
     return ListHarnesses.accept(request)
 
 
@@ -70,7 +72,9 @@ ListExamples = Operation(
 )
 
 
-def accept_list_examples(request: pb.ListExamplesRequest) -> Accepted[pb.ListExamplesRequest]:
+def accept_list_examples(
+    request: pb.ListExamplesRequest,
+) -> AcceptedRequest[pb.ListExamplesRequest]:
     return ListExamples.accept(request)
 
 
@@ -92,7 +96,7 @@ GetTaskGoal = Operation(
 )
 
 
-def accept_get_task_goal(request: pb.GetTaskGoalRequest) -> Accepted[pb.GetTaskGoalRequest]:
+def accept_get_task_goal(request: pb.GetTaskGoalRequest) -> AcceptedRequest[pb.GetTaskGoalRequest]:
     return GetTaskGoal.accept(request)
 
 
@@ -116,7 +120,7 @@ DescribeMachine = Operation(
 
 def accept_describe_machine(
     request: pb.DescribeMachineRequest,
-) -> Accepted[pb.DescribeMachineRequest]:
+) -> AcceptedRequest[pb.DescribeMachineRequest]:
     return DescribeMachine.accept(request)
 
 
@@ -138,7 +142,7 @@ ListCompute = Operation(
 )
 
 
-def accept_list_compute(request: pb.ListComputeRequest) -> Accepted[pb.ListComputeRequest]:
+def accept_list_compute(request: pb.ListComputeRequest) -> AcceptedRequest[pb.ListComputeRequest]:
     return ListCompute.accept(request)
 
 
@@ -160,7 +164,9 @@ PreflightRun = Operation(
 )
 
 
-def accept_preflight_run(request: pb.PreflightRunRequest) -> Accepted[pb.PreflightRunRequest]:
+def accept_preflight_run(
+    request: pb.PreflightRunRequest,
+) -> AcceptedRequest[pb.PreflightRunRequest]:
     return PreflightRun.accept(request)
 
 
@@ -196,7 +202,7 @@ class Handlers:
     list_compute: Callable[[pb.ListComputeRequest], pb.ListComputeResponse]
     preflight_run: Callable[[pb.PreflightRunRequest], pb.PreflightRunResponse]
 
-    def dispatch(self, request: Accepted) -> bytes:
+    def dispatch(self, request: AcceptedRequest) -> bytes:
         match request.operation.operation_id:
             case 10:
                 return ListTasks.validate_response(

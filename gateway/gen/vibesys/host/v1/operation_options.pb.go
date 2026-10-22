@@ -23,55 +23,55 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
-type Effect int32
+type OperationEffect int32
 
 const (
-	Effect_EFFECT_UNSPECIFIED         Effect = 0
-	Effect_EFFECT_READ                Effect = 1
-	Effect_EFFECT_IDEMPOTENT_MUTATION Effect = 2
-	Effect_EFFECT_ADMISSION           Effect = 3
+	OperationEffect_OPERATION_EFFECT_UNSPECIFIED         OperationEffect = 0
+	OperationEffect_OPERATION_EFFECT_READ                OperationEffect = 1
+	OperationEffect_OPERATION_EFFECT_IDEMPOTENT_MUTATION OperationEffect = 2
+	OperationEffect_OPERATION_EFFECT_ADMISSION           OperationEffect = 3
 )
 
-// Enum value maps for Effect.
+// Enum value maps for OperationEffect.
 var (
-	Effect_name = map[int32]string{
-		0: "EFFECT_UNSPECIFIED",
-		1: "EFFECT_READ",
-		2: "EFFECT_IDEMPOTENT_MUTATION",
-		3: "EFFECT_ADMISSION",
+	OperationEffect_name = map[int32]string{
+		0: "OPERATION_EFFECT_UNSPECIFIED",
+		1: "OPERATION_EFFECT_READ",
+		2: "OPERATION_EFFECT_IDEMPOTENT_MUTATION",
+		3: "OPERATION_EFFECT_ADMISSION",
 	}
-	Effect_value = map[string]int32{
-		"EFFECT_UNSPECIFIED":         0,
-		"EFFECT_READ":                1,
-		"EFFECT_IDEMPOTENT_MUTATION": 2,
-		"EFFECT_ADMISSION":           3,
+	OperationEffect_value = map[string]int32{
+		"OPERATION_EFFECT_UNSPECIFIED":         0,
+		"OPERATION_EFFECT_READ":                1,
+		"OPERATION_EFFECT_IDEMPOTENT_MUTATION": 2,
+		"OPERATION_EFFECT_ADMISSION":           3,
 	}
 )
 
-func (x Effect) Enum() *Effect {
-	p := new(Effect)
+func (x OperationEffect) Enum() *OperationEffect {
+	p := new(OperationEffect)
 	*p = x
 	return p
 }
 
-func (x Effect) String() string {
+func (x OperationEffect) String() string {
 	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
 }
 
-func (Effect) Descriptor() protoreflect.EnumDescriptor {
+func (OperationEffect) Descriptor() protoreflect.EnumDescriptor {
 	return file_vibesys_host_v1_operation_options_proto_enumTypes[0].Descriptor()
 }
 
-func (Effect) Type() protoreflect.EnumType {
+func (OperationEffect) Type() protoreflect.EnumType {
 	return &file_vibesys_host_v1_operation_options_proto_enumTypes[0]
 }
 
-func (x Effect) Number() protoreflect.EnumNumber {
+func (x OperationEffect) Number() protoreflect.EnumNumber {
 	return protoreflect.EnumNumber(x)
 }
 
-// Deprecated: Use Effect.Descriptor instead.
-func (Effect) EnumDescriptor() ([]byte, []int) {
+// Deprecated: Use OperationEffect.Descriptor instead.
+func (OperationEffect) EnumDescriptor() ([]byte, []int) {
 	return file_vibesys_host_v1_operation_options_proto_rawDescGZIP(), []int{0}
 }
 
@@ -232,18 +232,18 @@ func (Executor) EnumDescriptor() ([]byte, []int) {
 type OperationPolicy struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Temporary adapter spelling, removed with the helper transport.
-	AdapterMethod string         `protobuf:"bytes,12,opt,name=adapter_method,json=adapterMethod,proto3" json:"adapter_method,omitempty"`
-	OperationId   uint32         `protobuf:"varint,1,opt,name=operation_id,json=operationId,proto3" json:"operation_id,omitempty"`
-	CapMs         uint32         `protobuf:"varint,2,opt,name=cap_ms,json=capMs,proto3" json:"cap_ms,omitempty"`
-	GraceMs       uint32         `protobuf:"varint,3,opt,name=grace_ms,json=graceMs,proto3" json:"grace_ms,omitempty"`
-	Effect        Effect         `protobuf:"varint,4,opt,name=effect,proto3,enum=vibesys.host.v1.Effect" json:"effect,omitempty"`
-	Retry         Retry          `protobuf:"varint,5,opt,name=retry,proto3,enum=vibesys.host.v1.Retry" json:"retry,omitempty"`
-	Cardinality   Cardinality    `protobuf:"varint,6,opt,name=cardinality,proto3,enum=vibesys.host.v1.Cardinality" json:"cardinality,omitempty"`
-	Executor      Executor       `protobuf:"varint,7,opt,name=executor,proto3,enum=vibesys.host.v1.Executor" json:"executor,omitempty"`
-	FirstEventMs  *uint32        `protobuf:"varint,8,opt,name=first_event_ms,json=firstEventMs,proto3,oneof" json:"first_event_ms,omitempty"`
-	Correlation   []*Correlation `protobuf:"bytes,9,rep,name=correlation,proto3" json:"correlation,omitempty"`
-	RequestTag    uint32         `protobuf:"varint,10,opt,name=request_tag,json=requestTag,proto3" json:"request_tag,omitempty"`
-	ResponseTag   uint32         `protobuf:"varint,11,opt,name=response_tag,json=responseTag,proto3" json:"response_tag,omitempty"`
+	AdapterMethod string          `protobuf:"bytes,12,opt,name=adapter_method,json=adapterMethod,proto3" json:"adapter_method,omitempty"`
+	OperationId   uint32          `protobuf:"varint,1,opt,name=operation_id,json=operationId,proto3" json:"operation_id,omitempty"`
+	CapMs         uint32          `protobuf:"varint,2,opt,name=cap_ms,json=capMs,proto3" json:"cap_ms,omitempty"`
+	GraceMs       uint32          `protobuf:"varint,3,opt,name=grace_ms,json=graceMs,proto3" json:"grace_ms,omitempty"`
+	Effect        OperationEffect `protobuf:"varint,4,opt,name=effect,proto3,enum=vibesys.host.v1.OperationEffect" json:"effect,omitempty"`
+	Retry         Retry           `protobuf:"varint,5,opt,name=retry,proto3,enum=vibesys.host.v1.Retry" json:"retry,omitempty"`
+	Cardinality   Cardinality     `protobuf:"varint,6,opt,name=cardinality,proto3,enum=vibesys.host.v1.Cardinality" json:"cardinality,omitempty"`
+	Executor      Executor        `protobuf:"varint,7,opt,name=executor,proto3,enum=vibesys.host.v1.Executor" json:"executor,omitempty"`
+	FirstEventMs  *uint32         `protobuf:"varint,8,opt,name=first_event_ms,json=firstEventMs,proto3,oneof" json:"first_event_ms,omitempty"`
+	Correlation   []*Correlation  `protobuf:"bytes,9,rep,name=correlation,proto3" json:"correlation,omitempty"`
+	RequestTag    uint32          `protobuf:"varint,10,opt,name=request_tag,json=requestTag,proto3" json:"request_tag,omitempty"`
+	ResponseTag   uint32          `protobuf:"varint,11,opt,name=response_tag,json=responseTag,proto3" json:"response_tag,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -306,11 +306,11 @@ func (x *OperationPolicy) GetGraceMs() uint32 {
 	return 0
 }
 
-func (x *OperationPolicy) GetEffect() Effect {
+func (x *OperationPolicy) GetEffect() OperationEffect {
 	if x != nil {
 		return x.Effect
 	}
-	return Effect_EFFECT_UNSPECIFIED
+	return OperationEffect_OPERATION_EFFECT_UNSPECIFIED
 }
 
 func (x *OperationPolicy) GetRetry() Retry {
@@ -449,13 +449,13 @@ var File_vibesys_host_v1_operation_options_proto protoreflect.FileDescriptor
 
 const file_vibesys_host_v1_operation_options_proto_rawDesc = "" +
 	"\n" +
-	"'vibesys/host/v1/operation_options.proto\x12\x0fvibesys.host.v1\x1a\x1bbuf/validate/validate.proto\x1a google/protobuf/descriptor.proto\"\xb9\x05\n" +
+	"'vibesys/host/v1/operation_options.proto\x12\x0fvibesys.host.v1\x1a\x1bbuf/validate/validate.proto\x1a google/protobuf/descriptor.proto\"\xc2\x05\n" +
 	"\x0fOperationPolicy\x12=\n" +
 	"\x0eadapter_method\x18\f \x01(\tB\x16\xbaH\x13r\x112\x0f^[a-z][a-z_.]*$R\radapterMethod\x12*\n" +
 	"\foperation_id\x18\x01 \x01(\rB\a\xbaH\x04*\x02 \x00R\voperationId\x12\"\n" +
 	"\x06cap_ms\x18\x02 \x01(\rB\v\xbaH\b*\x06\x18\xc0\xcf$ \x00R\x05capMs\x12&\n" +
-	"\bgrace_ms\x18\x03 \x01(\rB\v\xbaH\b*\x06\x18\xb0\xea\x01 \x00R\agraceMs\x12;\n" +
-	"\x06effect\x18\x04 \x01(\x0e2\x17.vibesys.host.v1.EffectB\n" +
+	"\bgrace_ms\x18\x03 \x01(\rB\v\xbaH\b*\x06\x18\xb0\xea\x01 \x00R\agraceMs\x12D\n" +
+	"\x06effect\x18\x04 \x01(\x0e2 .vibesys.host.v1.OperationEffectB\n" +
 	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x06effect\x128\n" +
 	"\x05retry\x18\x05 \x01(\x0e2\x16.vibesys.host.v1.RetryB\n" +
 	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x05retry\x12J\n" +
@@ -474,12 +474,12 @@ const file_vibesys_host_v1_operation_options_proto_rawDesc = "" +
 	"\x0f_first_event_ms\"u\n" +
 	"\vCorrelation\x121\n" +
 	"\frequest_path\x18\x01 \x03(\rB\x0e\xbaH\v\x92\x01\b\b\x01\"\x04*\x02 \x00R\vrequestPath\x123\n" +
-	"\rresponse_path\x18\x02 \x03(\rB\x0e\xbaH\v\x92\x01\b\b\x01\"\x04*\x02 \x00R\fresponsePath*g\n" +
-	"\x06Effect\x12\x16\n" +
-	"\x12EFFECT_UNSPECIFIED\x10\x00\x12\x0f\n" +
-	"\vEFFECT_READ\x10\x01\x12\x1e\n" +
-	"\x1aEFFECT_IDEMPOTENT_MUTATION\x10\x02\x12\x14\n" +
-	"\x10EFFECT_ADMISSION\x10\x03*c\n" +
+	"\rresponse_path\x18\x02 \x03(\rB\x0e\xbaH\v\x92\x01\b\b\x01\"\x04*\x02 \x00R\fresponsePath*\x98\x01\n" +
+	"\x0fOperationEffect\x12 \n" +
+	"\x1cOPERATION_EFFECT_UNSPECIFIED\x10\x00\x12\x19\n" +
+	"\x15OPERATION_EFFECT_READ\x10\x01\x12(\n" +
+	"$OPERATION_EFFECT_IDEMPOTENT_MUTATION\x10\x02\x12\x1e\n" +
+	"\x1aOPERATION_EFFECT_ADMISSION\x10\x03*c\n" +
 	"\x05Retry\x12\x15\n" +
 	"\x11RETRY_UNSPECIFIED\x10\x00\x12\x0e\n" +
 	"\n" +
@@ -513,7 +513,7 @@ func file_vibesys_host_v1_operation_options_proto_rawDescGZIP() []byte {
 var file_vibesys_host_v1_operation_options_proto_enumTypes = make([]protoimpl.EnumInfo, 4)
 var file_vibesys_host_v1_operation_options_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
 var file_vibesys_host_v1_operation_options_proto_goTypes = []any{
-	(Effect)(0),                           // 0: vibesys.host.v1.Effect
+	(OperationEffect)(0),                  // 0: vibesys.host.v1.OperationEffect
 	(Retry)(0),                            // 1: vibesys.host.v1.Retry
 	(Cardinality)(0),                      // 2: vibesys.host.v1.Cardinality
 	(Executor)(0),                         // 3: vibesys.host.v1.Executor
@@ -523,7 +523,7 @@ var file_vibesys_host_v1_operation_options_proto_goTypes = []any{
 	(*descriptorpb.EnumValueOptions)(nil), // 7: google.protobuf.EnumValueOptions
 }
 var file_vibesys_host_v1_operation_options_proto_depIdxs = []int32{
-	0, // 0: vibesys.host.v1.OperationPolicy.effect:type_name -> vibesys.host.v1.Effect
+	0, // 0: vibesys.host.v1.OperationPolicy.effect:type_name -> vibesys.host.v1.OperationEffect
 	1, // 1: vibesys.host.v1.OperationPolicy.retry:type_name -> vibesys.host.v1.Retry
 	2, // 2: vibesys.host.v1.OperationPolicy.cardinality:type_name -> vibesys.host.v1.Cardinality
 	3, // 3: vibesys.host.v1.OperationPolicy.executor:type_name -> vibesys.host.v1.Executor
