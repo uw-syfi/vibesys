@@ -20,6 +20,7 @@ class MappingState:
     clock_offset: float = 0
     tree_hash: str = ""
     dirty: bool = False
+    project_root: str = ""
     epoch_ended: bool = False
     native_intents: bool = False
     wall_span_clock: bool = False

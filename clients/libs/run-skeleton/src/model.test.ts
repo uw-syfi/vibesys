@@ -18,6 +18,7 @@ import {
 } from '@vibesys/proto';
 import {SEEDS, Seeded} from '@vibesys/store/testing';
 import {
+  epochHasEnded,
   foldSkeleton,
   ingestSkeleton,
   ingestTail,
@@ -305,7 +306,8 @@ for (const kind of ['running', 'draining', 'parked', 'ended'] as const)
         const full = foldSkeleton(cached, records.slice(cut));
         const observed = observeRun(full, {epoch, value: RunLiveness.INTERRUPTED});
         expect(observed.lifecycle).toEqual(lifecycle);
-        expect(observed.final).toBe(kind === 'parked' || kind === 'ended');
+        expect(epochHasEnded(lifecycle)).toBe(kind === 'parked' || kind === 'ended');
+        expect(observed.final).toBe(epochHasEnded(lifecycle));
         const successor = foldSkeleton(full, [
           create(RecordSchema, {
             seq: BigInt(records.length + 1),

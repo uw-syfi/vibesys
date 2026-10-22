@@ -22,6 +22,7 @@ import {
 } from '@vibesys/ui';
 import type {JSX, ReactNode} from 'react';
 import {
+  adoptionTitles,
   clockAt,
   clockStart,
   endedView,
@@ -537,6 +538,7 @@ function RunScreenBody(props: {
     clock: {start: clockStart(props.whole), now: clockAt(model, runNow(state))},
     tokens: props.core?.tokens ?? EMPTY_LEDGER,
     who: whoBySpan(usageRecords(state), names),
+    adoptionTitles: adoptionTitles(model.trace.spans),
     zoom,
   };
   const pending = pendingRunScreen(

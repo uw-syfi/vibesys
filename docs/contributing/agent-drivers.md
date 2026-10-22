@@ -130,6 +130,15 @@ opt-out flag in a start's arguments, so a run started from the desktop app
 cannot leave the list
 ([desktop-connection.md](desktop-connection.md#methods)).
 
+The same construction also applies the host allow-list
+(`~/.config/vibesys/host.toml`, key `allowed_models`; see
+[cli-flags.md](../cli-flags.md)). A missing file or an empty list adds no
+restriction. A non-empty list refuses a CLI model outside it, including on
+resume, relaunch, and a chat thread, and `allow_unvetted_model` does not
+bypass it. The refusal is a configuration error whose message names the key,
+the role, the model, and the list, so the app shows it as a start or resume
+refusal. Scripted runs and any other non-CLI backend are not checked.
+
 ## Provider readiness
 
 A missing CLI or a logged-out account would otherwise surface as the first

@@ -485,8 +485,8 @@ describe('token usage', () => {
 
 describe('who ran the agents', () => {
   const who = new Map([
-    ['turn:boss:1', {harness: 'codex', model: 'gpt-6-luna'}],
-    ['turn:impl:2', {harness: 'claude', model: 'sonnet-5'}],
+    ['turn:boss:1', {harness: 'codex', model: 'gpt-6-luna', client: null}],
+    ['turn:impl:2', {harness: 'claude', model: 'sonnet-5', client: null}],
   ]);
 
   test('each row says the harness and model that ran its turns, from the records', async () => {

@@ -133,6 +133,7 @@ class LifecycleReportingExecutor:
             provider=session_spec.provider,
             model=session_spec.model,
             reasoning_effort=session_spec.reasoning_effort,
+            client="scripted" if session_spec.scripted else "provider",
         )
 
         def publish_start() -> None:

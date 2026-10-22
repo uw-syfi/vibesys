@@ -56,6 +56,7 @@ export {
   mostUrgentProblem,
   problemWord,
 } from './machine-status.js';
+export {type RecordedProjectRoot, recordedProjectRoot} from './recorded-root.js';
 export {missingRequiredFeatures, REQUIRED_HELPER_FEATURES} from './required-features.js';
 export {
   digestEntries,

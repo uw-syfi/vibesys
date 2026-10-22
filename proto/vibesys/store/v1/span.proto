@@ -4,6 +4,7 @@ package vibesys.store.v1;
 
 import "buf/validate/validate.proto";
 import "google/protobuf/any.proto";
+import "vibesys/store/v1/replay.proto";
 
 option go_package = "github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1";
 
@@ -106,6 +107,7 @@ message Span {
   optional Failure failure = 10;
   optional Stop stop = 11;
   optional Label label = 12;
+  optional OperationReplay replay = 13;
 }
 
 message WaitingOn {

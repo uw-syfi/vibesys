@@ -26,6 +26,48 @@ _GIT = Git(OsProcesses())
 # Each export is reviewed as deterministic value construction or transformation.
 # Approving a module does not approve future exports or its imported dependencies.
 PURE_EXPORTS = {
+    # Reflection, immutable schema options and validation operate only on in-memory values.
+    "copy": frozenset({"deepcopy"}),
+    "vs_proto.api.replay": frozenset(
+        {
+            "OperationKey",
+            "KeyComponent",
+            "ReplayFieldKind",
+            "ext_replay_field",
+            "ext_replay_set",
+            "ext_replay_context",
+        }
+    ),
+    **{
+        f"vs_proto.api.replay.{name}": frozenset({"from_binary"})
+        for name in (
+            "OperationReplay",
+            "ReplayAllowance",
+            "ReplayPolicy",
+            "ReplayNotice",
+            "ReplayAcknowledgement",
+        )
+    },
+    "vs_proto.api.replay.KeyComponentKind": frozenset(
+        {"PARENT", "ITEM", "SAMPLE", "REVISION", "RECORDED_POSITION"}
+    ),
+    "vs_proto.api.replay.ReplayFieldKind": frozenset({"IDENTITY", "POLICY"}),
+    "protobuf": frozenset(
+        {
+            "Message",
+            "DescMessage",
+            "DescEnum",
+            "DescFieldValue",
+            "DescFieldValueEnum",
+            "Oneof",
+            "DescFieldValueList",
+            "DescFieldValueMap",
+            "DescFieldValueMessage",
+        }
+    ),
+    "protobuf.wkt.google.protobuf.descriptor_pb": frozenset({"DescriptorProto"}),
+    "protovalidate": frozenset({"validate"}),
+    "vs_proto.api": frozenset({"replay", "Record"}),
     # Decoding bytes already in memory is a pure function of them; ``read_json`` reads a file
     # and stays out of this list.
     "vs_decode.api": frozenset(

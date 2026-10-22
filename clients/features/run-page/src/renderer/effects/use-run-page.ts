@@ -3,6 +3,8 @@
  * run's record as the host's watch pushes it, and disposed (followers stopped, the bound cancelled,
  * the logs channel let go) when it unmounts or shows another run.
  */
+
+import {recordedProjectRoot} from '@vibesys/hosts';
 import {settled} from '@vibesys/ipc';
 import type {ScheduleTimeout} from '@vibesys/machine';
 import type {CoreState} from '@vibesys/run-state';
@@ -81,9 +83,16 @@ export function useRunPage(options: RunPageOptions): {
         ? null
         : current.run.id;
     };
+    const project = (): string => {
+      const current = created?.getState().record;
+      if (current !== undefined && (current.kind === 'live' || current.kind === 'ended')) {
+        return recordedProjectRoot(current.run.projectRoot) ?? '';
+      }
+      return '';
+    };
     const ports = welcomeRunPorts(
       bridge,
-      {run: seed.identity, project: seed.title.project, instance},
+      {run: seed.identity, project, instance},
       navigation,
       page,
     );

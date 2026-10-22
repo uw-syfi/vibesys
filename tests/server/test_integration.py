@@ -166,6 +166,7 @@ def _attach_test_run(
         cast("RunSession", _FakeRunSession(auxiliary)),
         RunReady(
             record=run_record(project, run_id),
+            project_root=project.root,
             log_directory=log_dir,
             frontend_state_directory=project.state.local_namespace(
                 run_id, "server"
@@ -940,6 +941,7 @@ def test_partially_started_chat_cleanup_survives_a_diagnostic_write_failure(
     auxiliary = TrackingAuxiliaryAgents()
     ready = RunReady(
         record=run_record(project, run_id),
+        project_root=project.root,
         log_directory=log_dir,
         frontend_state_directory=project.state.local_namespace(
             run_id, "server"

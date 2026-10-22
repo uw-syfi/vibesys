@@ -448,6 +448,7 @@ def test_process_refreshes_after_relaunch_without_stranding_admitted_messages(
             RunView(run_id=chat.run_id, loop="dynamic", status=RunStatus.ACTIVE),
             RunRecordFacts(trusted_input_baseline="a" * 40),
         ),
+        project_root=project.root,
         log_directory=Project.run_log_path_for(chat.project_root, chat.run_id).parent,
         frontend_state_directory=project.root / "frontend",
         agent_provider="codex",

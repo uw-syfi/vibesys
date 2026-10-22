@@ -1,6 +1,6 @@
 import {afterAll, beforeAll, expect, test} from 'bun:test';
 import {create, fromBinary, toBinary} from '@bufbuild/protobuf';
-import type {HostKey} from '@vibesys/hosts';
+import {type HostKey, recordedProjectRoot} from '@vibesys/hosts';
 import type {GatewayBridge, GatewayCall} from '@vibesys/ipc';
 import {HostCallRequestSchema, HostCallResponseSchema} from '@vibesys/proto';
 import {FakeClock} from '@vibesys/transport/testing';
@@ -58,7 +58,7 @@ test('Pause is enabled on the new path and sends the typed host intent', async (
         <RunIntents
           bridge={bridge}
           host={'local' as HostKey}
-          projectRoot="/project"
+          projectRoot={recordedProjectRoot('/project')}
           runId="run-1"
           enabled
           relaunch={{epoch: 1n}}

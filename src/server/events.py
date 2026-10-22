@@ -47,6 +47,7 @@ from vibesys.api import (
     AgentOutputChannel,
     AgentReply,
     AgentStatusData,
+    CheckoutStatus,
     GateKind,
     QuotaWaitCancelledData,
     QuotaWaitingData,
@@ -347,6 +348,8 @@ class AgentExecutionStartedData(EventPayload):
     """The reasoning effort the session was configured with; ``None`` when the provider's default."""
     harness_version: str | None = None
     """The provider CLI's version when a driver reported it; ``None`` when unknown."""
+    client: Literal["scripted", "provider"] | None = None
+    """Who executed the turn. The provider and model stay the role's selection."""
 
 
 class AgentExecutionFinishedData(EventPayload):
@@ -812,6 +815,8 @@ class WinnerSelectedData(EventPayload):
     selection: Literal["candidate", "baseline"]
     revision: str
     settlement_id: str | None = None
+    checkout_status: CheckoutStatus | None = None
+    """The checkout publication status, when this selection recorded one."""
 
 
 class InputMeasurementFailureKind(StrEnum):

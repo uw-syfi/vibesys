@@ -12,7 +12,7 @@ from protobuf import Message
 from protobuf._codegen import file_desc
 from protobuf.wkt.google.protobuf import descriptor_pb, timestamp_pb
 
-from . import chat_pb, content_pb, epoch_pb, intent_pb, lifecycle_pb, notice_pb, span_pb
+from . import chat_pb, content_pb, epoch_pb, intent_pb, lifecycle_pb, notice_pb, replay_pb, span_pb
 from ....buf.validate import validate_pb
 
 if TYPE_CHECKING:
@@ -26,10 +26,11 @@ if TYPE_CHECKING:
     from .intent_pb import IntentState
     from .lifecycle_pb import Lifecycle
     from .notice_pb import Notice
+    from .replay_pb import ReplayAcknowledgement, ReplayAllowance, ReplayClock
     from .span_pb import SpanRecord
 
 
-_RecordFields: TypeAlias = Literal["seq", "at", "epoch", "clock", "epoch_started", "legacy_event", "lifecycle", "span", "metric", "stream", "blob", "intent", "notice", "chat", "declaration_amended"]
+_RecordFields: TypeAlias = Literal["seq", "at", "epoch", "clock", "replay_clock", "epoch_started", "legacy_event", "lifecycle", "span", "metric", "stream", "blob", "intent", "notice", "chat", "declaration_amended"]
 
 class Record(Message[_RecordFields]):
     """
@@ -63,13 +64,19 @@ class Record(Message[_RecordFields]):
             ```proto
             optional double clock = 18;
             ```
+        replay_clock:
+            A timer-only boundary uses the enclosing Record.clock and serial sequence.
+
+            ```proto
+            optional vibesys.store.v1.ReplayClock replay_clock = 21;
+            ```
         body:
             ```proto
             oneof body
             ```
     """
 
-    __slots__ = ("seq", "at", "epoch", "clock", "body")
+    __slots__ = ("seq", "at", "epoch", "clock", "replay_clock", "body")
 
     if TYPE_CHECKING:
 
@@ -80,6 +87,7 @@ class Record(Message[_RecordFields]):
             at: Timestamp | None = None,
             epoch: int = 0,
             clock: float | None = None,
+            replay_clock: ReplayClock | None = None,
             body: Oneof[Literal["epoch_started"], EpochStarted] | Oneof[Literal["legacy_event"], LegacyEvent] | Oneof[Literal["lifecycle"], Lifecycle] | Oneof[Literal["span"], SpanRecord] | Oneof[Literal["metric"], MetricPoint] | Oneof[Literal["stream"], StreamRef] | Oneof[Literal["blob"], BlobAttached] | Oneof[Literal["intent"], IntentState] | Oneof[Literal["notice"], Notice] | Oneof[Literal["chat"], ChatRecord] | Oneof[Literal["declaration_amended"], EpochStarted] | None = None,
         ) -> None:
             pass
@@ -88,9 +96,10 @@ class Record(Message[_RecordFields]):
         at: Timestamp | None
         epoch: int
         clock: float
+        replay_clock: ReplayClock | None
         body: Oneof[Literal["epoch_started"], EpochStarted] | Oneof[Literal["legacy_event"], LegacyEvent] | Oneof[Literal["lifecycle"], Lifecycle] | Oneof[Literal["span"], SpanRecord] | Oneof[Literal["metric"], MetricPoint] | Oneof[Literal["stream"], StreamRef] | Oneof[Literal["blob"], BlobAttached] | Oneof[Literal["intent"], IntentState] | Oneof[Literal["notice"], Notice] | Oneof[Literal["chat"], ChatRecord] | Oneof[Literal["declaration_amended"], EpochStarted] | None
 
-_EpochStartedFields: TypeAlias = Literal["run_id", "epoch", "tree_hash", "dirty", "api_schema_hash", "store_schema_hash", "vibesys_version", "run", "span_kinds", "series", "descriptors", "provenance_known"]
+_EpochStartedFields: TypeAlias = Literal["run_id", "epoch", "tree_hash", "dirty", "api_schema_hash", "store_schema_hash", "vibesys_version", "run", "span_kinds", "series", "descriptors", "provenance_known", "identity_encoding_version", "initial_allowance", "replay_acknowledgement", "project_root"]
 
 class EpochStarted(Message[_EpochStartedFields]):
     """
@@ -156,9 +165,31 @@ class EpochStarted(Message[_EpochStartedFields]):
             ```proto
             optional bool provenance_known = 12;
             ```
+        identity_encoding_version:
+            Present only for keyed epochs. Retain this writer encoding indefinitely.
+
+            ```proto
+            optional uint32 identity_encoding_version = 13;
+            ```
+        initial_allowance:
+            ```proto
+            optional vibesys.store.v1.ReplayAllowance initial_allowance = 14;
+            ```
+        replay_acknowledgement:
+            ```proto
+            optional vibesys.store.v1.ReplayAcknowledgement replay_acknowledgement = 15;
+            ```
+        project_root:
+            Canonical absolute directory recorded when the run is created. Windows,
+            controls and resume read this and no path the client remembered. Absence
+            on older logs means the run has no recorded root.
+
+            ```proto
+            optional string project_root = 16;
+            ```
     """
 
-    __slots__ = ("run_id", "epoch", "tree_hash", "dirty", "api_schema_hash", "store_schema_hash", "vibesys_version", "run", "span_kinds", "series", "descriptors", "provenance_known")
+    __slots__ = ("run_id", "epoch", "tree_hash", "dirty", "api_schema_hash", "store_schema_hash", "vibesys_version", "run", "span_kinds", "series", "descriptors", "provenance_known", "identity_encoding_version", "initial_allowance", "replay_acknowledgement", "project_root")
 
     if TYPE_CHECKING:
 
@@ -177,6 +208,10 @@ class EpochStarted(Message[_EpochStartedFields]):
             series: list[MetricSeriesDecl] | None = None,
             descriptors: FileDescriptorSet | None = None,
             provenance_known: bool | None = None,
+            identity_encoding_version: int | None = None,
+            initial_allowance: ReplayAllowance | None = None,
+            replay_acknowledgement: ReplayAcknowledgement | None = None,
+            project_root: str | None = None,
         ) -> None:
             pass
 
@@ -192,6 +227,10 @@ class EpochStarted(Message[_EpochStartedFields]):
         series: list[MetricSeriesDecl]
         descriptors: FileDescriptorSet | None
         provenance_known: bool
+        identity_encoding_version: int
+        initial_allowance: ReplayAllowance | None
+        replay_acknowledgement: ReplayAcknowledgement | None
+        project_root: str
 
 _LegacyEventFields: TypeAlias = Literal["json"]
 
@@ -227,7 +266,7 @@ class LegacyEvent(Message[_LegacyEventFields]):
 
 
 _DESC = file_desc(
-    b'\n\x1dvibesys/store/v1/record.proto\x12\x10vibesys.store.v1\x1a\x1bbuf/validate/validate.proto\x1a google/protobuf/descriptor.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1evibesys/store/v1/content.proto\x1a\x1bvibesys/store/v1/chat.proto\x1a\x1cvibesys/store/v1/epoch.proto\x1a\x1dvibesys/store/v1/intent.proto\x1a vibesys/store/v1/lifecycle.proto\x1a\x1dvibesys/store/v1/notice.proto\x1a\x1bvibesys/store/v1/span.proto"\x9d\x0c\n\x06Record\x12\x10\n\x03seq\x18\x01 \x01(\x04R\x03seq\x12*\n\x02at\x18\x02 \x01(\x0b2\x1a.google.protobuf.TimestampR\x02at\x12\x14\n\x05epoch\x18\x03 \x01(\rR\x05epoch\x12+\n\x05clock\x18\x12 \x01(\x01H\x01R\x05clockB\x10\xbaH\r\x12\x0b@\x01)\x00\x00\x00\x00\x00\x00\x00\x00\x88\x01\x01\x12E\n\repoch_started\x18\x04 \x01(\x0b2\x1e.vibesys.store.v1.EpochStartedH\x00R\x0cepochStarted\x12F\n\x0clegacy_event\x18\x05 \x01(\x0b2\x1d.vibesys.store.v1.LegacyEventH\x00R\x0blegacyEventB\x02\x18\x01\x12;\n\tlifecycle\x18\x0b \x01(\x0b2\x1b.vibesys.store.v1.LifecycleH\x00R\tlifecycle\x122\n\x04span\x18\x0c \x01(\x0b2\x1c.vibesys.store.v1.SpanRecordH\x00R\x04span\x127\n\x06metric\x18\r \x01(\x0b2\x1d.vibesys.store.v1.MetricPointH\x00R\x06metric\x125\n\x06stream\x18\x0e \x01(\x0b2\x1b.vibesys.store.v1.StreamRefH\x00R\x06stream\x124\n\x04blob\x18\x0f \x01(\x0b2\x1e.vibesys.store.v1.BlobAttachedH\x00R\x04blob\x127\n\x06intent\x18\x10 \x01(\x0b2\x1d.vibesys.store.v1.IntentStateH\x00R\x06intent\x122\n\x06notice\x18\x11 \x01(\x0b2\x18.vibesys.store.v1.NoticeH\x00R\x06notice\x122\n\x04chat\x18\x13 \x01(\x0b2\x1c.vibesys.store.v1.ChatRecordH\x00R\x04chat\x12Q\n\x13declaration_amended\x18\x14 \x01(\x0b2\x1e.vibesys.store.v1.EpochStartedH\x00R\x12declarationAmendedB\r\n\x04body\x12\x05\xbaH\x02\x08\x01B\x08\n\x06_clock:\xde\x05\xbaH\xda\x05\x1a\xb9\x02\n\x0frecord.identity\x120seq, epoch and at are required for typed records\x1a\xf3\x01!(has(this.lifecycle) || has(this.span) || has(this.metric) || has(this.stream) || has(this.blob) || has(this.intent) || has(this.notice) || has(this.chat) || has(this.declaration_amended)) || (this.seq > 0u && this.epoch > 0u && has(this.at))\x1a\xf6\x01\n\x14record.epoch_started\x12Vepoch_started epoch must match epoch and seq and at must be present for a typed header\x1a\x85\x01!has(this.epoch_started) || !has(this.epoch_started.run) || (this.epoch == this.epoch_started.epoch && this.seq > 0u && has(this.at))\x1a\xa2\x01\n\x1arecord.declaration_amended\x124declaration amendment must name the containing epoch\x1aN!has(this.declaration_amended) || this.declaration_amended.epoch == this.epoch"\xd5\x0e\n\x0cEpochStarted\x12\x15\n\x06run_id\x18\x01 \x01(\tR\x05runId\x12\x14\n\x05epoch\x18\x02 \x01(\rR\x05epoch\x12\x1b\n\ttree_hash\x18\x03 \x01(\tR\x08treeHash\x12\x14\n\x05dirty\x18\x04 \x01(\x08R\x05dirty\x12&\n\x0fapi_schema_hash\x18\x05 \x01(\tR\rapiSchemaHash\x12*\n\x11store_schema_hash\x18\x06 \x01(\tR\x0fstoreSchemaHash\x122\n\x0fvibesys_version\x18\x07 \x01(\tR\x0evibesysVersionB\t\xbaH\x06r\x04(\x80\x80\x04\x122\n\x03run\x18\x08 \x01(\x0b2 .vibesys.store.v1.RunDescriptionR\x03run\x12=\n\nspan_kinds\x18\t \x03(\x0b2\x1e.vibesys.store.v1.SpanKindDeclR\tspanKinds\x12:\n\x06series\x18\n \x03(\x0b2".vibesys.store.v1.MetricSeriesDeclR\x06series\x12D\n\x0bdescriptors\x18\x0b \x01(\x0b2".google.protobuf.FileDescriptorSetR\x0bdescriptors\x12.\n\x10provenance_known\x18\x0c \x01(\x08H\x00R\x0fprovenanceKnown\x88\x01\x01B\x13\n\x11_provenance_known:\xa2\n\xbaH\x9e\n\x1a\x8f\x02\n\x0eepoch.identity\x12Prun_id, epoch, tree_hash and vibesys_version are required for a typed run header\x1a\xaa\x01!has(this.run) || (this.run_id != \'\' && this.epoch > 0u && (this.tree_hash != \'\' || (has(this.provenance_known) && !this.provenance_known)) && this.vibesys_version != \'\')\x1a\x8a\x02\n\x10epoch.span_kinds\x12Dspan_kinds must have unique kind names and descriptors when nonempty\x1a\xaf\x01this.span_kinds.all(x, this.span_kinds.filter(y, y.kind == x.kind).size() == 1) && (this.span_kinds.size() == 0 || (has(this.descriptors) && this.descriptors.file.size() > 0))\x1a\xaf\x01\n\x1cepoch.run_detail_descriptors\x12\'descriptors are required for run detail\x1af!has(this.run) || !has(this.run.detail) || (has(this.descriptors) && this.descriptors.file.size() > 0)\x1av\n\x0cepoch.series\x12\x1dseries must have unique names\x1aGthis.series.all(x, this.series.filter(y, y.name == x.name).size() == 1)\x1a\xee\x01\n\x10epoch.objectives\x12Srun objectives must name series declared with the same direction and objective role\x1a\x84\x01!has(this.run) || this.run.objectives.all(o, this.series.exists(s, s.name == o.series && s.direction == o.direction && s.role == 1))\x1a\xe1\x01\n\x13epoch.schema_hashes\x12Rapi_schema_hash and store_schema_hash must be lowercase SHA-256 for a typed header\x1av!has(this.run) || (this.api_schema_hash.matches(\'^[0-9a-f]{64}$\') && this.store_schema_hash.matches(\'^[0-9a-f]{64}$\'))"%\n\x0bLegacyEvent\x12\x12\n\x04json\x18\x01 \x01(\tR\x04json:\x02\x18\x01BAZ?github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1b\x06proto3',
+    b'\n\x1dvibesys/store/v1/record.proto\x12\x10vibesys.store.v1\x1a\x1bbuf/validate/validate.proto\x1a google/protobuf/descriptor.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1evibesys/store/v1/content.proto\x1a\x1bvibesys/store/v1/chat.proto\x1a\x1cvibesys/store/v1/epoch.proto\x1a\x1dvibesys/store/v1/intent.proto\x1a vibesys/store/v1/lifecycle.proto\x1a\x1dvibesys/store/v1/notice.proto\x1a\x1bvibesys/store/v1/span.proto\x1a\x1dvibesys/store/v1/replay.proto"\xf5\x0c\n\x06Record\x12\x10\n\x03seq\x18\x01 \x01(\x04R\x03seq\x12*\n\x02at\x18\x02 \x01(\x0b2\x1a.google.protobuf.TimestampR\x02at\x12\x14\n\x05epoch\x18\x03 \x01(\rR\x05epoch\x12+\n\x05clock\x18\x12 \x01(\x01H\x01R\x05clockB\x10\xbaH\r\x12\x0b@\x01)\x00\x00\x00\x00\x00\x00\x00\x00\x88\x01\x01\x12E\n\x0creplay_clock\x18\x15 \x01(\x0b2\x1d.vibesys.store.v1.ReplayClockH\x02R\x0breplayClock\x88\x01\x01\x12E\n\repoch_started\x18\x04 \x01(\x0b2\x1e.vibesys.store.v1.EpochStartedH\x00R\x0cepochStarted\x12F\n\x0clegacy_event\x18\x05 \x01(\x0b2\x1d.vibesys.store.v1.LegacyEventH\x00R\x0blegacyEventB\x02\x18\x01\x12;\n\tlifecycle\x18\x0b \x01(\x0b2\x1b.vibesys.store.v1.LifecycleH\x00R\tlifecycle\x122\n\x04span\x18\x0c \x01(\x0b2\x1c.vibesys.store.v1.SpanRecordH\x00R\x04span\x127\n\x06metric\x18\r \x01(\x0b2\x1d.vibesys.store.v1.MetricPointH\x00R\x06metric\x125\n\x06stream\x18\x0e \x01(\x0b2\x1b.vibesys.store.v1.StreamRefH\x00R\x06stream\x124\n\x04blob\x18\x0f \x01(\x0b2\x1e.vibesys.store.v1.BlobAttachedH\x00R\x04blob\x127\n\x06intent\x18\x10 \x01(\x0b2\x1d.vibesys.store.v1.IntentStateH\x00R\x06intent\x122\n\x06notice\x18\x11 \x01(\x0b2\x18.vibesys.store.v1.NoticeH\x00R\x06notice\x122\n\x04chat\x18\x13 \x01(\x0b2\x1c.vibesys.store.v1.ChatRecordH\x00R\x04chat\x12Q\n\x13declaration_amended\x18\x14 \x01(\x0b2\x1e.vibesys.store.v1.EpochStartedH\x00R\x12declarationAmendedB\r\n\x04body\x12\x05\xbaH\x02\x08\x01B\x08\n\x06_clockB\x0f\n\r_replay_clock:\xde\x05\xbaH\xda\x05\x1a\xb9\x02\n\x0frecord.identity\x120seq, epoch and at are required for typed records\x1a\xf3\x01!(has(this.lifecycle) || has(this.span) || has(this.metric) || has(this.stream) || has(this.blob) || has(this.intent) || has(this.notice) || has(this.chat) || has(this.declaration_amended)) || (this.seq > 0u && this.epoch > 0u && has(this.at))\x1a\xf6\x01\n\x14record.epoch_started\x12Vepoch_started epoch must match epoch and seq and at must be present for a typed header\x1a\x85\x01!has(this.epoch_started) || !has(this.epoch_started.run) || (this.epoch == this.epoch_started.epoch && this.seq > 0u && has(this.at))\x1a\xa2\x01\n\x1arecord.declaration_amended\x124declaration amendment must name the containing epoch\x1aN!has(this.declaration_amended) || this.declaration_amended.epoch == this.epoch"\xe8\x12\n\x0cEpochStarted\x12\x15\n\x06run_id\x18\x01 \x01(\tR\x05runId\x12\x14\n\x05epoch\x18\x02 \x01(\rR\x05epoch\x12\x1b\n\ttree_hash\x18\x03 \x01(\tR\x08treeHash\x12\x14\n\x05dirty\x18\x04 \x01(\x08R\x05dirty\x12&\n\x0fapi_schema_hash\x18\x05 \x01(\tR\rapiSchemaHash\x12*\n\x11store_schema_hash\x18\x06 \x01(\tR\x0fstoreSchemaHash\x122\n\x0fvibesys_version\x18\x07 \x01(\tR\x0evibesysVersionB\t\xbaH\x06r\x04(\x80\x80\x04\x122\n\x03run\x18\x08 \x01(\x0b2 .vibesys.store.v1.RunDescriptionR\x03run\x12=\n\nspan_kinds\x18\t \x03(\x0b2\x1e.vibesys.store.v1.SpanKindDeclR\tspanKinds\x12:\n\x06series\x18\n \x03(\x0b2".vibesys.store.v1.MetricSeriesDeclR\x06series\x12D\n\x0bdescriptors\x18\x0b \x01(\x0b2".google.protobuf.FileDescriptorSetR\x0bdescriptors\x12.\n\x10provenance_known\x18\x0c \x01(\x08H\x00R\x0fprovenanceKnown\x88\x01\x01\x12H\n\x19identity_encoding_version\x18\r \x01(\rH\x01R\x17identityEncodingVersionB\x07\xbaH\x04*\x02\x08\x01\x88\x01\x01\x12S\n\x11initial_allowance\x18\x0e \x01(\x0b2!.vibesys.store.v1.ReplayAllowanceH\x02R\x10initialAllowance\x88\x01\x01\x12c\n\x16replay_acknowledgement\x18\x0f \x01(\x0b2\'.vibesys.store.v1.ReplayAcknowledgementH\x03R\x15replayAcknowledgement\x88\x01\x01\x122\n\x0cproject_root\x18\x10 \x01(\tH\x04R\x0bprojectRootB\n\xbaH\x07r\x05\x10\x01(\x80 \x88\x01\x01B\x13\n\x11_provenance_knownB\x1c\n\x1a_identity_encoding_versionB\x14\n\x12_initial_allowanceB\x19\n\x17_replay_acknowledgementB\x0f\n\r_project_root:\x9d\x0b\xbaH\x99\x0b\x1a\x8f\x02\n\x0eepoch.identity\x12Prun_id, epoch, tree_hash and vibesys_version are required for a typed run header\x1a\xaa\x01!has(this.run) || (this.run_id != \'\' && this.epoch > 0u && (this.tree_hash != \'\' || (has(this.provenance_known) && !this.provenance_known)) && this.vibesys_version != \'\')\x1a\x8a\x02\n\x10epoch.span_kinds\x12Dspan_kinds must have unique kind names and descriptors when nonempty\x1a\xaf\x01this.span_kinds.all(x, this.span_kinds.filter(y, y.kind == x.kind).size() == 1) && (this.span_kinds.size() == 0 || (has(this.descriptors) && this.descriptors.file.size() > 0))\x1a\xaf\x01\n\x1cepoch.run_detail_descriptors\x12\'descriptors are required for run detail\x1af!has(this.run) || !has(this.run.detail) || (has(this.descriptors) && this.descriptors.file.size() > 0)\x1av\n\x0cepoch.series\x12\x1dseries must have unique names\x1aGthis.series.all(x, this.series.filter(y, y.name == x.name).size() == 1)\x1a\xee\x01\n\x10epoch.objectives\x12Srun objectives must name series declared with the same direction and objective role\x1a\x84\x01!has(this.run) || this.run.objectives.all(o, this.series.exists(s, s.name == o.series && s.direction == o.direction && s.role == 1))\x1a\xe1\x01\n\x13epoch.schema_hashes\x12Rapi_schema_hash and store_schema_hash must be lowercase SHA-256 for a typed header\x1av!has(this.run) || (this.api_schema_hash.matches(\'^[0-9a-f]{64}$\') && this.store_schema_hash.matches(\'^[0-9a-f]{64}$\'))\x1ay\n\x12epoch.project_root\x12%project_root must be an absolute path\x1a<!has(this.project_root) || this.project_root.startsWith(\'/\')"%\n\x0bLegacyEvent\x12\x12\n\x04json\x18\x01 \x01(\tR\x04json:\x02\x18\x01BAZ?github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1b\x06proto3',
     [
         validate_pb.desc(),
         descriptor_pb.desc(),
@@ -239,6 +278,7 @@ _DESC = file_desc(
         lifecycle_pb.desc(),
         notice_pb.desc(),
         span_pb.desc(),
+        replay_pb.desc(),
     ],
     {
         "Record": Record,

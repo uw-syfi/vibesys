@@ -17,7 +17,14 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, Self
 
 from dotenv import load_dotenv
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 from vibesys.constants import DEFAULT_COMPUTE_BACKEND, PROJECT_ROOT, ComputeBackend
 from vibesys.repository import REPOSITORY_COMPONENT, RepositoryVisibility
@@ -514,6 +521,75 @@ def _load_dotenv_file(path: Path = PROJECT_ROOT / ".env") -> None:
     values for free.
     """
     load_dotenv(path, override=False)
+
+
+class _HostSettings(_Strict):
+    """The host file that names which models live runs on this machine may use.
+
+    ``allowed_models`` is the only key. Missing, or an empty list, means no
+    restriction. Unknown keys are rejected and the key is named.
+    """
+
+    allowed_models: tuple[str, ...] = Field(default=(), description="Model ids live runs may use.")
+
+    @field_validator("allowed_models")
+    @classmethod
+    def _named_models(cls, models: tuple[str, ...]) -> tuple[str, ...]:
+        blank = [index for index, model in enumerate(models) if not model.strip()]
+        if blank:
+            message = "allowed_models entries must be non-empty model ids"
+            raise ValueError(message)
+        return models
+
+
+def host_settings_path() -> Path:
+    """``~/.config/vibesys/host.toml``, the machine-wide file of allowed models.
+
+    The directory is the user's VibeSys configuration directory, the same one
+    that holds the machine's other settings. A missing file means no restriction.
+    """
+    return Path.home() / ".config" / "vibesys" / "host.toml"
+
+
+def load_host_allowed_models(path: Path | None = None) -> frozenset[str]:
+    """The models ``path`` allows, or none when the file is missing.
+
+    ``path`` defaults to :func:`host_settings_path`. An empty list is no
+    restriction. A file that cannot be parsed, or that names an unknown key,
+    raises ``ValueError`` naming that key or the file.
+    """
+    location = host_settings_path() if path is None else path
+    if not location.exists():
+        return frozenset()
+    if not location.is_file():
+        message = f"{location.name}: expected a file"
+        raise ValueError(message)
+    try:
+        document = tomllib.loads(location.read_text(encoding="utf-8"))
+    except OSError as error:
+        message = f"{location.name}: {error.strerror or error}"
+        raise ValueError(message) from error
+    except tomllib.TOMLDecodeError as error:
+        message = f"{location.name}: {error}"
+        raise ValueError(message) from error
+    try:
+        settings = _HostSettings.model_validate(document)
+    except ValidationError as error:
+        keys = _host_setting_keys(error)
+        message = f"{location.name}: {keys}"
+        raise ValueError(message) from error
+    return frozenset(settings.allowed_models)
+
+
+def _host_setting_keys(error: ValidationError) -> str:
+    """The keys ``error`` names, in the order reported, each once."""
+    named: list[str] = []
+    for item in error.errors():
+        loc = item.get("loc") or ()
+        key = "allowed_models" if not loc else str(loc[0])
+        if key not in named:
+            named.append(key)
+    return ", ".join(named)
 
 
 def load_config(path: Path, *, ignored_sections: frozenset[str] = frozenset()) -> Config:

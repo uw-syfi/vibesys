@@ -694,6 +694,7 @@ export type RoundLabel = string | null;
 export type Role1 = string | null;
 export type Harness = string | null;
 export type Model3 = string | null;
+export type Client = ("scripted" | "provider") | null;
 export type ReasoningEffort1 = string | null;
 export type HarnessVersion = string | null;
 export type StartedAt2 = string | null;
@@ -2286,6 +2287,7 @@ export interface UsageRecord {
   role: Role1;
   harness: Harness;
   model: Model3;
+  client?: Client;
   reasoning_effort: ReasoningEffort1;
   harness_version: HarnessVersion;
   started_at: StartedAt2;

@@ -10,7 +10,7 @@ import vs_proto.api as p
 from vibesys.events import CoreEvent
 from vibesys.records.api import MappedEvent, MappingState, epoch_header, map_event
 from vs_decode.api import Unreadable, decode_json
-from vs_runlog.api import fold_skeleton
+from vs_runlog.api import current_epoch, epoch_has_ended, fold_skeleton
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
@@ -68,7 +68,12 @@ class RunLogTee:
         self._history = history
         self._state: MappingState | None = None
         self._live = checkout is not None
+        self._project_root = ""
         self._tree_hash, self._dirty = ("", False) if checkout is None else checkout
+
+    def remember_project_root(self, project_root: str) -> None:
+        """Record the canonical project root before the first event is mirrored."""
+        self._project_root = project_root
 
     def publish_successor(self, at: datetime) -> None:
         """Publish this live writer's epoch before any later observation.
@@ -91,7 +96,10 @@ class RunLogTee:
 
     def _initialize(self, at: datetime) -> MappingState:
         state = MappingState(
-            self._run_id, vibesys_version=version("vibesys"), native_intents=self._live
+            self._run_id,
+            vibesys_version=version("vibesys"),
+            native_intents=self._live,
+            project_root=self._project_root,
         )
         for historical in self._history():
             result = map_event(state, historical)
@@ -104,14 +112,7 @@ class RunLogTee:
             if record.body is not None and record.body.field == "intent"
         }
         last = records[-1] if records else None
-        ended = any(
-            r.epoch == self._writer.epoch
-            and r.body is not None
-            and r.body.field == "lifecycle"
-            and r.body.value.state is not None
-            and r.body.value.state.field == "ended"
-            for r in records
-        )
+        ended = epoch_has_ended(current_epoch(records))
         clock, epochs = _epoch_clocks(records)
         if last is not None and not ended:
             self._writer.append(

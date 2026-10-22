@@ -803,6 +803,7 @@ describe('Hosts.readSummary', () => {
     harness: 'codex',
     model: null,
     reasoning_effort: null,
+    client: null,
     harness_version: null,
     started_at: null,
     ended_at: null,
