@@ -1,7 +1,7 @@
 import {describe, expect, test} from 'bun:test';
 import {ConnectionError, ConnectionManager} from '@vibesys/connection';
-import type {HostId} from '@vibesys/hosts';
 import {FakeLink} from '@vibesys/connection/testing';
+import type {HostId} from '@vibesys/hosts';
 import type {ExampleCreation, RunInputs} from '@vibesys/ipc';
 import {exampleCatalogue} from '@vibesys/run-fixtures';
 import type {StoredRecentRun} from '@vibesys/settings';

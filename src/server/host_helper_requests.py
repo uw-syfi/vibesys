@@ -12,11 +12,12 @@ Light like the channel: the standard library, Pydantic, ``vs_sim.api`` and light
 ``server`` modules only.
 
 Public surface: ``answer``, ``answer_registered_read``, ``apply_registered_cluster``,
-``apply_registered_project``,
+``RegisteredClusterHost``, ``apply_registered_project``, ``RegisteredProjectHost``,
 ``launch_registered_run``, ``registry_start_request``,
 ``read_failure_category``,
 ``registry_read_source``, ``connect``, ``negotiate``, ``Negotiated``,
-``HelperHost``; the interfaces ``Projects``, ``Directories``, ``RunLauncher`` and
+``HelperHost``; the interfaces ``Projects``, ``Directories``, ``ClusterCompute``,
+``ProjectMutationExamples``, ``ProjectMutationDirectories``, ``RunLauncher`` and
 ``CheckoutProbe`` with the values they exchange (``ProjectRun``,
 ``ProjectLookupError``, ``ScannedEntry``, ``Scan``, ``PathHints``);
 ``home_relative``, ``without_home``, ``complete_path``, ``select_completions``, ``split_prefix``, ``run_summaries``,
@@ -33,7 +34,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from importlib import import_module
 from pathlib import Path
-from typing import TYPE_CHECKING, Final, Protocol, assert_never
+from typing import TYPE_CHECKING, Final, Literal, Protocol, assert_never, overload
 
 from pydantic import TypeAdapter
 
@@ -867,7 +868,19 @@ def without_home(reply: HelperReply | HelperError, host: HelperHost) -> HelperRe
     return reply.model_copy(update={"message": message})
 
 
-def _host_path(text: str, directories: Directories) -> str:
+class ProjectMutationDirectories(Protocol):
+    """The path expansion a registered project mutation uses."""
+
+    def home(self) -> str:
+        """This user's home directory."""
+        ...
+
+    def expand(self, path: str) -> str:
+        """``path`` with a leading ``~`` or ``~user`` expanded."""
+        ...
+
+
+def _host_path(text: str, directories: ProjectMutationDirectories) -> str:
     expanded = directories.expand(text)
     return expanded if posixpath.isabs(expanded) else posixpath.join(directories.home(), expanded)
 
@@ -1685,10 +1698,67 @@ def launch_registered_run(
     return _start(request, host)
 
 
+class ClusterCompute(Protocol):
+    """The cluster changes one registered mutation asks of a host."""
+
+    def add(self, cluster: SlurmClusterSettings) -> ComputeSettings:
+        """Save ``cluster`` and return the machine's settings."""
+        ...
+
+    def remove(self, name: str) -> ComputeSettings:
+        """Forget the cluster ``name`` and return the machine's settings."""
+        ...
+
+    def test(self, cluster: SlurmClusterSettings) -> ClusterTestResult:
+        """How far ``cluster`` can be used from this machine."""
+        ...
+
+
+class RegisteredClusterHost(Protocol):
+    """A host whose compute surface can put, remove, or test one cluster."""
+
+    @property
+    def compute(self) -> ClusterCompute:
+        """The machine's clusters."""
+        ...
+
+
+@overload
+def apply_registered_cluster(
+    slot: Literal["remove_cluster"],
+    request: pb.RemoveClusterRequest,
+    host: RegisteredClusterHost,
+) -> pb.RemoveClusterResponse: ...
+
+
+@overload
+def apply_registered_cluster(
+    slot: Literal["put_cluster"],
+    request: pb.PutClusterRequest,
+    host: RegisteredClusterHost,
+) -> pb.PutClusterResponse: ...
+
+
+@overload
+def apply_registered_cluster(
+    slot: Literal["test_cluster"],
+    request: pb.TestClusterRequest,
+    host: RegisteredClusterHost,
+) -> pb.TestClusterResponse: ...
+
+
+@overload
 def apply_registered_cluster(
     slot: str,
     request: pb.PutClusterRequest | pb.RemoveClusterRequest | pb.TestClusterRequest,
-    host: HelperHost,
+    host: RegisteredClusterHost,
+) -> pb.PutClusterResponse | pb.RemoveClusterResponse | pb.TestClusterResponse: ...
+
+
+def apply_registered_cluster(
+    slot: str,
+    request: pb.PutClusterRequest | pb.RemoveClusterRequest | pb.TestClusterRequest,
+    host: RegisteredClusterHost,
 ) -> pb.PutClusterResponse | pb.RemoveClusterResponse | pb.TestClusterResponse:
     """Change or test one cluster and return that slot's registry response.
 
@@ -1747,10 +1817,60 @@ def _registry_test(result: ClusterTestResult) -> object:
     return wire.Oneof("failed", failed)
 
 
+class ProjectMutationExamples(Protocol):
+    """The project changes one registered mutation asks of a host."""
+
+    def create(self, example: str, destination: Path) -> CreatedProject:
+        """Copy ``example`` into a new repository at ``destination``."""
+        ...
+
+    def copy_out(self, source: Path, destination: Path) -> CreatedProject:
+        """Copy ``source`` into a new repository at ``destination``."""
+        ...
+
+
+class RegisteredProjectHost(Protocol):
+    """A host that can create or copy one project."""
+
+    @property
+    def examples(self) -> ProjectMutationExamples:
+        """The example catalog and project copies."""
+        ...
+
+    @property
+    def directories(self) -> ProjectMutationDirectories:
+        """How a destination path is expanded."""
+        ...
+
+
+@overload
+def apply_registered_project(
+    slot: Literal["create_example"],
+    request: pb.CreateExampleRequest,
+    host: RegisteredProjectHost,
+) -> pb.CreateExampleResponse: ...
+
+
+@overload
+def apply_registered_project(
+    slot: Literal["copy_project"],
+    request: pb.CopyProjectRequest,
+    host: RegisteredProjectHost,
+) -> pb.CopyProjectResponse: ...
+
+
+@overload
 def apply_registered_project(
     slot: str,
     request: pb.CreateExampleRequest | pb.CopyProjectRequest,
-    host: HelperHost,
+    host: RegisteredProjectHost,
+) -> pb.CreateExampleResponse | pb.CopyProjectResponse: ...
+
+
+def apply_registered_project(
+    slot: str,
+    request: pb.CreateExampleRequest | pb.CopyProjectRequest,
+    host: RegisteredProjectHost,
 ) -> pb.CreateExampleResponse | pb.CopyProjectResponse:
     """Create or copy one project and return that slot's registry response.
 

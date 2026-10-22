@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from server.host_compute import (
     ClusterTestFailed,
+    ClusterTestResult,
     ClusterTestStage,
     ComputeSettings,
     ModalStatus,
@@ -24,45 +25,63 @@ def _cluster() -> pb.SlurmClusterSettings:
     )
 
 
-class _Host:
-    """The compute surface ``apply_registered_cluster`` uses."""
+def _settings() -> ComputeSettings:
+    return ComputeSettings(
+        config_path="/settings",
+        clusters=(),
+        modal=ModalStatus(token_present=False),
+    )
 
-    def __init__(self, compute: object) -> None:
+
+class _Compute:
+    """The compute surface ``apply_registered_cluster`` calls."""
+
+    def __init__(self, *, failure: ClusterTestFailed | None = None) -> None:
+        self.seen: list[SlurmClusterSettings] = []
+        self.removed: list[str] = []
+        self._failure = failure
+
+    def add(self, cluster: SlurmClusterSettings) -> ComputeSettings:
+        self.seen.append(cluster)
+        return _settings()
+
+    def remove(self, name: str) -> ComputeSettings:
+        self.removed.append(name)
+        return _settings()
+
+    def test(self, cluster: SlurmClusterSettings) -> ClusterTestResult:
+        if self._failure is None:
+            message = f"{cluster.name} was tested without a scripted failure"
+            raise AssertionError(message)
+        return self._failure
+
+
+class _Host:
+    """A host whose compute surface is the test's."""
+
+    def __init__(self, compute: _Compute) -> None:
         self.compute = compute
 
 
 def test_a_registry_put_keeps_the_helper_cluster() -> None:
-    seen: list[SlurmClusterSettings] = []
-
-    class _Compute:
-        def add(self, cluster: SlurmClusterSettings) -> ComputeSettings:
-            seen.append(cluster)
-            return ComputeSettings(
-                config_path="/settings",
-                clusters=(),
-                modal=ModalStatus(token_present=False),
-            )
-
+    compute = _Compute()
     request = pb.PutClusterRequest(request_id="request-a", cluster=_cluster())
-    response = apply_registered_cluster("put_cluster", request, _Host(_Compute()))
+    response = apply_registered_cluster("put_cluster", request, _Host(compute))
 
-    assert len(seen) == 1
-    assert seen[0].name == "lab"
-    assert seen[0].reach.kind == "ssh"
-    assert seen[0].reach.host == "host-a"
-    assert seen[0].workspace == "/work"
+    assert len(compute.seen) == 1
+    assert compute.seen[0].name == "lab"
+    assert compute.seen[0].reach.kind == "ssh"
+    assert compute.seen[0].reach.host == "host-a"
+    assert compute.seen[0].workspace == "/work"
     assert response.request_id == "request-a"
     assert response.settings is not None
     assert response.settings.config_path == "/settings"
 
 
 def test_a_registry_test_keeps_the_helper_failure() -> None:
-    class _Compute:
-        def test(self, _cluster: SlurmClusterSettings) -> ClusterTestFailed:
-            return ClusterTestFailed(stage=ClusterTestStage.REACH, detail="could not reach host-a")
-
+    failure = ClusterTestFailed(stage=ClusterTestStage.REACH, detail="could not reach host-a")
     request = pb.TestClusterRequest(request_id="request-b", cluster=_cluster())
-    response = apply_registered_cluster("test_cluster", request, _Host(_Compute()))
+    response = apply_registered_cluster("test_cluster", request, _Host(_Compute(failure=failure)))
 
     assert response.result is not None
     assert response.result.field == "failed"

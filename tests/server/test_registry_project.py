@@ -12,8 +12,8 @@ from vs_sim.api.testing import SimNetwork, SimThreads
 
 
 class _Directories:
-    def expand(self, text: str) -> str:
-        return text
+    def expand(self, path: str) -> str:
+        return path
 
     def home(self) -> str:
         return "/home"
@@ -30,6 +30,10 @@ class _Examples:
             raise ProjectLookupError(HelperErrorCode.DESTINATION_EXISTS, str(destination), message)
         self.created.append((example, destination))
         return CreatedProject(project=str(destination), tasks=("a",))
+
+    def copy_out(self, source: Path, destination: Path) -> CreatedProject:
+        message = f"copy is not the call under test ({source} -> {destination})"
+        raise AssertionError(message)
 
 
 class _Host:
