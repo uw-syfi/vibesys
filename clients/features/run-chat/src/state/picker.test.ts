@@ -89,6 +89,8 @@ describe('picker', () => {
       role,
       harness,
       model,
+      // These cases name a role and a harness pair. They do not record which executor ran the turn.
+      client: null,
       reasoningEffort: null,
       harnessVersion: null,
       startedAt: null,

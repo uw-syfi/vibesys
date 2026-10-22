@@ -354,8 +354,8 @@ test('an agent turn’s step shows its tokens beside its duration; a gate shows 
 test('the implementer and judge rows say what ran them; a turn the records do not name says nothing', async () => {
   const candidate = idea('mpmc', 'passed', 100, 300);
   const who = new Map([
-    ['mpmc-a-t', {harness: 'codex', model: 'gpt-6-luna'}],
-    ['mpmc-a-j', {harness: 'claude', model: 'sonnet-5'}],
+    ['mpmc-a-t', {harness: 'codex', model: 'gpt-6-luna', client: null}],
+    ['mpmc-a-j', {harness: 'claude', model: 'sonnet-5', client: null}],
   ]);
   const {container, unmount} = await mount(<IdeaView {...{...view(candidate, () => {}), who}} />);
   const steps = options(container, 'mpmc steps').map(row => row.textContent ?? '');
