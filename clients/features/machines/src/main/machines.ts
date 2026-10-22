@@ -155,7 +155,6 @@ export class MachinesMain {
         const live = await this.#runs().live(id);
         return {kind: 'ready', facts: {...facts, runs: {...facts.runs, live}}};
       } catch (error) {
-        if (isHostUnsupported(error)) return {kind: 'needs-update', facts: null};
         return unreachable(error);
       }
     }
@@ -213,7 +212,6 @@ export class MachinesMain {
         const value = await registry.listCompute(id, null, new AbortController().signal);
         return {kind: 'offered', value};
       } catch (error) {
-        if (isHostUnsupported(error)) return {kind: 'unsupported'};
         throw explained(error, 'read the clusters and clouds', id);
       }
     }

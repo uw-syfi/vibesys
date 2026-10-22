@@ -1,7 +1,6 @@
 import {describe, expect, test} from 'bun:test';
 import {
   ConnectionManager,
-  HOST_UNSUPPORTED_MESSAGE,
   registryClusters,
   registryReads,
   registrySetup,
@@ -397,7 +396,7 @@ describe('MachinesMain', () => {
       expect(calls).toEqual(['test', 'put', 'remove:lab']);
     });
 
-    test('a host whose VibeSys predates the registry is "needs-update" on every machine read, with no usage dump', async () => {
+    test('folder inspection on a host whose VibeSys predates the handshake is unsupported; every other read fails as the host failed it', async () => {
       const checkout = async () => '/src/checkout';
       const {machines, manager} = await subject(new Map(), {
         transportV2: async () => true,
@@ -407,23 +406,15 @@ describe('MachinesMain', () => {
         runs: {live: async () => 0},
       });
       await using _ = manager;
-      expect(await machines.report(HOST_B)).toEqual({kind: 'needs-update', facts: null});
-      expect(await machines.compute(HOST_B)).toEqual({kind: 'unsupported'});
       expect(await machines.inspect(HOST_B, '/src/checkout')).toEqual({state: 'unsupported'});
-      const cluster = {
-        name: 'lab',
-        reach: {kind: 'ssh' as const, host: 'host-a'},
-        workspace: '/work',
-      };
-      for (const change of [
-        () => machines.testCluster(HOST_B, cluster),
-        () => machines.addCluster(HOST_B, cluster),
-        () => machines.removeCluster(HOST_B, 'lab'),
-      ]) {
-        const error = await change().catch((caught: unknown) => caught);
-        expect((error as Error).message).toContain(HOST_UNSUPPORTED_MESSAGE);
-        expect((error as Error).message).not.toContain(USAGE_DUMP);
-      }
+      // The gateway types only the handshake as unsupported: the screens word an older host as
+      // "needs an update" from the host's version check, and these reads keep the host's text.
+      const report = await machines.report(HOST_B);
+      expect(report).toEqual({
+        kind: 'unavailable',
+        detail: `vibesys host describe-machine exited 2\n${USAGE_DUMP}`,
+      });
+      await expect(machines.compute(HOST_B)).rejects.toThrow(USAGE_DUMP);
     });
 
     test('an on switch without the registry throws instead of using the helper', async () => {

@@ -42,6 +42,12 @@
       "path": "../../libs/settings/tsconfig.testing.json"
     },
     {
+      "path": "../../libs/proto/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/store/tsconfig.testing.json"
+    },
+    {
       "path": "../../libs/transport/tsconfig.testing.json"
     },
     {

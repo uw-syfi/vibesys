@@ -5,8 +5,7 @@ import {MutateRequestSchema, MutateResponseSchema} from './vibesys/api/v1/host_m
 import {WatchRequestSchema, WatchResponseSchema} from './vibesys/api/v1/host_watch_generated_pb.js';
 import * as pb from './vibesys/host/v1/operations_pb.js';
 import {FailureCategory, type OperationFailure} from './vibesys/host/v1/failure_pb.js';
-import {OperationFailed} from '../operation-failure.js';
-import {accept, call, type Accepted, type OperationTransport, type OperationSignal} from '../operations.js';
+import {accept, call, OperationFailed, type Accepted, type OperationTransport, type OperationSignal} from '../operations.js';
 export const operationPolicies = Object.freeze({
   ListTasks: Object.freeze({name: 'ListTasks', id: 10, requestTag: 10, responseTag: 10, capMs: 10000, graceMs: 5000, totalMs: 15000, effect: 1, retry: 2, executor: 1, cardinality: 1, firstEventMs: undefined} as const),
   ListHarnesses: Object.freeze({name: 'ListHarnesses', id: 11, requestTag: 11, responseTag: 11, capMs: 10000, graceMs: 5000, totalMs: 15000, effect: 1, retry: 2, executor: 1, cardinality: 1, firstEventMs: undefined} as const),

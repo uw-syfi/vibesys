@@ -311,6 +311,12 @@ importers:
       '@types/node':
         specifier: ^24.0.0
         version: 24.13.3
+      '@vibesys/proto':
+        specifier: workspace:*
+        version: link:../../libs/proto
+      '@vibesys/store':
+        specifier: workspace:*
+        version: link:../../libs/store
       '@vibesys/transport':
         specifier: workspace:*
         version: link:../../libs/transport

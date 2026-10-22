@@ -118,33 +118,6 @@ describe('Hosts on an older v2 host', () => {
     });
     expect(JSON.stringify([pushed, logged])).not.toContain(USAGE_DUMP);
   });
-
-  test('folder completion answers unsupported, not the host text', async () => {
-    await using manager = new ConnectionManager({
-      linkFor: () => new FakeLink(),
-      appVersion: 'test',
-      scheduleTimeout: new FakeClock().scheduleTimeout,
-      log: () => {},
-    });
-    const hosts = new Hosts({
-      manager,
-      settings: new SettingsStore({
-        settingsPath: '/settings/hosts.json',
-        recentPath: '/settings/recent.json',
-        preferencesPath: '/settings/preferences.json',
-        filesystem: new FakeSettingsFilesystem(),
-        log: () => {},
-      }),
-      localCheckout: '/bundled',
-      sshConfigPath: '/missing',
-      transportV2: async () => true,
-      setup: registrySetup({unary: olderHost.read}),
-      log: () => {},
-      push: () => {},
-      retire: () => {},
-    });
-    expect(await hosts.complete(ALPHA, '/work/')).toEqual({kind: 'unsupported'});
-  });
 });
 
 const HOST_KEY = hostKey(ALPHA);

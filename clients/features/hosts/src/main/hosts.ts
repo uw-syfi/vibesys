@@ -5,7 +5,6 @@
  * action goes through the host's one connection; nothing here retries or polls.
  */
 import {
-  type CompletedPaths,
   type ConnectionLease,
   type ConnectionManager,
   connectionStatus,
@@ -688,13 +687,7 @@ export class Hosts {
   /** The directories in `directory` (a path ending in `/`, or `~/`) on `id`. */
   async complete(id: HostId, directory: string): Promise<PathCompletion> {
     if (await this.#transportV2(id)) {
-      let listed: CompletedPaths;
-      try {
-        listed = await this.#setup().completePaths(id, directory, new AbortController().signal);
-      } catch (error) {
-        if (isHostUnsupported(error)) return {kind: 'unsupported'};
-        throw error;
-      }
+      const listed = await this.#setup().completePaths(id, directory, new AbortController().signal);
       return {
         kind: 'listed',
         directory: listed.directory,
