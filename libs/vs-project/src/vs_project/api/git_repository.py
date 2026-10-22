@@ -326,6 +326,10 @@ class GitRepository(Protocol):
         """
         ...
 
+    def has_ref_pointing_at(self, commit: str, prefix: str) -> bool:
+        """Whether a ref under ``prefix`` points exactly at ``commit`` (portable)."""
+        ...
+
     def has_ref_containing(self, commit: str, prefix: str) -> bool:
         """Whether any ref under ``prefix`` points at a commit that reaches ``commit`` (portable)."""
         ...

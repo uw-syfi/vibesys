@@ -155,14 +155,20 @@ def encode_CheckoutStatus(v: values.CheckoutStatus | None) -> pb.CheckoutStatus:
         "dirty_tree": pb.CheckoutStatus.DIRTY_TREE,
         "diverged": pb.CheckoutStatus.DIVERGED,
         "git_refused": pb.CheckoutStatus.GIT_REFUSED,
+        "operator_changed_checkout": pb.CheckoutStatus.OPERATOR_CHANGED_CHECKOUT,
     }.get(v, pb.CheckoutStatus.UNSPECIFIED)
 
 
 def decode_CheckoutStatus(v: pb.CheckoutStatus) -> values.CheckoutStatus:
     return values.CheckoutStatus(
-        {1: "fast_forwarded", 2: "other_branch", 3: "dirty_tree", 4: "diverged", 5: "git_refused"}[
-            v
-        ]
+        {
+            1: "fast_forwarded",
+            2: "other_branch",
+            3: "dirty_tree",
+            4: "diverged",
+            5: "git_refused",
+            6: "operator_changed_checkout",
+        }[v]
     )
 
 

@@ -91,7 +91,7 @@ def test_checkout_refusals_do_not_change_the_published_result(world: _World) -> 
     assert world.tracker.update_checkout(publication) is CheckoutOutcome.FAST_FORWARDED
     world.project.write("code.py", "operator commit")
     operator = world.project.commit_all("operator")
-    assert world.tracker.update_checkout(publication) is CheckoutOutcome.DIVERGED
+    assert world.tracker.update_checkout(publication) is CheckoutOutcome.OPERATOR_CHANGED_CHECKOUT
     assert world.project.repo.head() == operator
     assert world.project.repo.resolve_commit(publication.branch) == publication.commit
     assert world.tracker.publish_revision(publication.revision, "retry") == publication
@@ -141,3 +141,16 @@ def test_git_checkout_refusal_keeps_publication_and_can_be_retried(world: _World
     assert world.project.repo.head() == before
     assert world.project.repo.resolve_commit(publication.branch) == publication.commit
     assert world.tracker.update_checkout(publication) is CheckoutOutcome.FAST_FORWARDED
+
+
+def test_operator_commits_on_publication_branch_are_not_used_as_parents(world: _World) -> None:
+    first = world.tracker.publish_revision(world.winner("first"), "first")
+    world.project.repo.switch_branch(first.branch)
+    world.project.write("code.py", "operator publication edit")
+    operator = world.project.commit_all("operator publication edit")
+    world.project.repo.switch_branch(world.tracker.project_branch)
+    revision = world.winner("second")
+    with pytest.raises(PublicationError):
+        world.tracker.publish_revision(revision, "second")
+    assert world.project.repo.resolve_commit(first.branch) == operator
+    assert world.project.repo.read_blob(operator, "code.py") == b"operator publication edit"

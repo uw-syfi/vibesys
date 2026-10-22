@@ -120,8 +120,7 @@ def test_adoption_resume_histories_preserve_every_operator_edit(
             world = env.hosts[0]
             repository = disk.repository(world.root.path)
             path = world.root.path
-            (path / ".gitignore").write_text("cache.txt\n", encoding="utf-8")
-            await world.root.snapshot("declare ignored cache")
+            repository.add_excludes(["cache.txt"])
             try:
                 for index, (action, resume) in enumerate(history):
                     _edit(repository, path, action, index)

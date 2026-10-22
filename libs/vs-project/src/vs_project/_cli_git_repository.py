@@ -281,6 +281,12 @@ class CliGitRepository:
         result = self._run(["cat-file", "blob", f"{revision}:{path}"])
         return None if result.returncode != 0 else result.stdout
 
+    def has_ref_pointing_at(self, commit: str, prefix: str) -> bool:
+        result = self._run(
+            ["for-each-ref", "--count=1", f"--points-at={commit}", "--format=%(refname)", prefix]
+        )
+        return result.returncode == 0 and bool(result.stdout.strip())
+
     def has_ref_containing(self, commit: str, prefix: str) -> bool:
         result = self._run(
             [

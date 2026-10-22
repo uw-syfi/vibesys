@@ -586,12 +586,13 @@ func (ReplyErrorCode) EnumDescriptor() ([]byte, []int) {
 type CheckoutStatus int32
 
 const (
-	CheckoutStatus_CHECKOUT_STATUS_UNSPECIFIED    CheckoutStatus = 0
-	CheckoutStatus_CHECKOUT_STATUS_FAST_FORWARDED CheckoutStatus = 1
-	CheckoutStatus_CHECKOUT_STATUS_OTHER_BRANCH   CheckoutStatus = 2
-	CheckoutStatus_CHECKOUT_STATUS_DIRTY_TREE     CheckoutStatus = 3
-	CheckoutStatus_CHECKOUT_STATUS_DIVERGED       CheckoutStatus = 4
-	CheckoutStatus_CHECKOUT_STATUS_GIT_REFUSED    CheckoutStatus = 5
+	CheckoutStatus_CHECKOUT_STATUS_UNSPECIFIED               CheckoutStatus = 0
+	CheckoutStatus_CHECKOUT_STATUS_FAST_FORWARDED            CheckoutStatus = 1
+	CheckoutStatus_CHECKOUT_STATUS_OTHER_BRANCH              CheckoutStatus = 2
+	CheckoutStatus_CHECKOUT_STATUS_DIRTY_TREE                CheckoutStatus = 3
+	CheckoutStatus_CHECKOUT_STATUS_DIVERGED                  CheckoutStatus = 4
+	CheckoutStatus_CHECKOUT_STATUS_GIT_REFUSED               CheckoutStatus = 5
+	CheckoutStatus_CHECKOUT_STATUS_OPERATOR_CHANGED_CHECKOUT CheckoutStatus = 6
 )
 
 // Enum value maps for CheckoutStatus.
@@ -603,14 +604,16 @@ var (
 		3: "CHECKOUT_STATUS_DIRTY_TREE",
 		4: "CHECKOUT_STATUS_DIVERGED",
 		5: "CHECKOUT_STATUS_GIT_REFUSED",
+		6: "CHECKOUT_STATUS_OPERATOR_CHANGED_CHECKOUT",
 	}
 	CheckoutStatus_value = map[string]int32{
-		"CHECKOUT_STATUS_UNSPECIFIED":    0,
-		"CHECKOUT_STATUS_FAST_FORWARDED": 1,
-		"CHECKOUT_STATUS_OTHER_BRANCH":   2,
-		"CHECKOUT_STATUS_DIRTY_TREE":     3,
-		"CHECKOUT_STATUS_DIVERGED":       4,
-		"CHECKOUT_STATUS_GIT_REFUSED":    5,
+		"CHECKOUT_STATUS_UNSPECIFIED":               0,
+		"CHECKOUT_STATUS_FAST_FORWARDED":            1,
+		"CHECKOUT_STATUS_OTHER_BRANCH":              2,
+		"CHECKOUT_STATUS_DIRTY_TREE":                3,
+		"CHECKOUT_STATUS_DIVERGED":                  4,
+		"CHECKOUT_STATUS_GIT_REFUSED":               5,
+		"CHECKOUT_STATUS_OPERATOR_CHANGED_CHECKOUT": 6,
 	}
 )
 
@@ -716,14 +719,15 @@ const file_vibesys_core_v1_vocabulary_proto_rawDesc = "" +
 	"\rinvalid-value\x12-\n" +
 	"\x19REPLY_ERROR_CODE_NOT_JSON\x10\x05\x1a\x0e\xda\xf3\x18\n" +
 	"\n" +
-	"\bnot-json*\xd6\x01\n" +
+	"\bnot-json*\x85\x02\n" +
 	"\x0eCheckoutStatus\x12\x1f\n" +
 	"\x1bCHECKOUT_STATUS_UNSPECIFIED\x10\x00\x12\"\n" +
 	"\x1eCHECKOUT_STATUS_FAST_FORWARDED\x10\x01\x12 \n" +
 	"\x1cCHECKOUT_STATUS_OTHER_BRANCH\x10\x02\x12\x1e\n" +
 	"\x1aCHECKOUT_STATUS_DIRTY_TREE\x10\x03\x12\x1c\n" +
 	"\x18CHECKOUT_STATUS_DIVERGED\x10\x04\x12\x1f\n" +
-	"\x1bCHECKOUT_STATUS_GIT_REFUSED\x10\x05B?Z=github.com/uw-syfi/vibesys/gateway/gen/vibesys/core/v1;corev1b\x06proto3"
+	"\x1bCHECKOUT_STATUS_GIT_REFUSED\x10\x05\x12-\n" +
+	")CHECKOUT_STATUS_OPERATOR_CHANGED_CHECKOUT\x10\x06B?Z=github.com/uw-syfi/vibesys/gateway/gen/vibesys/core/v1;corev1b\x06proto3"
 
 var (
 	file_vibesys_core_v1_vocabulary_proto_rawDescOnce sync.Once

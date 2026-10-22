@@ -30,6 +30,7 @@ class CheckoutOutcome(StrEnum):
     DIRTY_TREE = "dirty_tree"
     DIVERGED = "diverged"
     GIT_REFUSED = "git_refused"
+    OPERATOR_CHANGED_CHECKOUT = "operator_changed_checkout"
 
 
 class PublicationError(RuntimeError):
@@ -48,11 +49,15 @@ class RevisionPublisher:
         run_id: str,
         metadata_path: str,
         preserve_paths: tuple[str, ...] = (),
+        *,
+        input_revision: str | None,
     ) -> None:
         self._git = repository
+        self._input = input_revision
         self._branch = adoption_branch(run_id)
         self._run_branch = run_branch(run_id)
         self._run_id = run_id
+        self._receipts = adoption_revision_ref(run_id, "")
         self._metadata = metadata_path
         self._preserve_paths = tuple(dict.fromkeys((metadata_path, *preserve_paths)))
 
@@ -60,13 +65,17 @@ class RevisionPublisher:
         """Record before advancing the branch, so interrupted publication reuses its commit."""
         source = self._git.resolve_commit(revision)
         tip = self._git.resolve_commit(f"refs/heads/{self._run_branch}")
-        if source is None or tip is None:
+        if source is None or tip is None or self._input is None:
             raise PublicationError(self._branch)
         receipt = adoption_revision_ref(self._run_id, source)
         publication = self._git.resolve_commit(receipt)
         previous = self._git.resolve_commit(f"refs/heads/{self._branch}")
+        if previous is not None and not self._git.has_ref_pointing_at(previous, self._receipts):
+            raise PublicationError(self._branch)
         if publication is None:
-            parents = tuple(dict.fromkeys(p for p in (previous, tip) if p is not None))
+            # Only the immutable input, our previous publication and the retained
+            # source supply ancestry. A clean operator commit grants no authority.
+            parents = tuple(dict.fromkeys((previous or self._input, source)))
             publication = self._git.create_commit(
                 source,
                 parents,
@@ -103,6 +112,8 @@ class RevisionPublisher:
             [".", f":(exclude){self._metadata}"]
         ) or self._git.tracked_changes_since_head([self._metadata]):
             return CheckoutOutcome.DIRTY_TREE
+        if not self._matches_expected_tree():
+            return CheckoutOutcome.OPERATOR_CHANGED_CHECKOUT
         head = self._git.head()
         if head is None or not self._git.is_ancestor(head, publication.commit):
             return CheckoutOutcome.DIVERGED
@@ -113,3 +124,16 @@ class RevisionPublisher:
         ):
             return CheckoutOutcome.GIT_REFUSED
         return CheckoutOutcome.FAST_FORWARDED
+
+    def _matches_expected_tree(self) -> bool:
+        head = self._git.head()
+        expected = [self._input]
+        if head is not None and self._git.has_ref_pointing_at(head, self._receipts):
+            expected.append(head)
+        return any(
+            revision is not None
+            and self._git.worktree_matches(
+                revision, [".", f":(exclude){self._metadata}"], include_ignored=False
+            )
+            for revision in expected
+        )

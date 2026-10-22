@@ -378,6 +378,18 @@ class FakeGitRepository:
             entry = None if snapshot is None else snapshot.get(path)
             return None if entry is None else found.repo.objects.blob(entry.blob)
 
+    def has_ref_pointing_at(self, commit: str, prefix: str) -> bool:
+        with self._operation("has_ref_pointing_at"):
+            found = self._find()
+            if found is None:
+                return False
+            target = found.repo.resolve(found, commit)
+            stem = prefix.rstrip("/")
+            return target is not None and any(
+                (name == stem or name.startswith(f"{stem}/")) and tip == target
+                for name, tip in found.repo.refs.items()
+            )
+
     def has_ref_containing(self, commit: str, prefix: str) -> bool:
         with self._operation("has_ref_containing"):
             found = self._find()

@@ -232,6 +232,7 @@ class GitTracker:
             self.run_id,
             self._state_integration.metadata_pathspec,
             preserve_paths,
+            input_revision=self._trusted_input_baseline,
         )
 
     def retain_candidate(self, candidate_id: str, commit: str) -> str:

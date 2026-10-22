@@ -319,6 +319,9 @@ class Pygit2GitRepository:
         except _LIBGIT2_ERRORS:
             return None
 
+    def has_ref_pointing_at(self, commit: str, prefix: str) -> bool:
+        return self._cli.has_ref_pointing_at(commit, prefix)
+
     def has_ref_containing(self, commit: str, prefix: str) -> bool:
         if not prefix or _REF_WILDCARDS & set(prefix):
             return self._cli.has_ref_containing(commit, prefix)

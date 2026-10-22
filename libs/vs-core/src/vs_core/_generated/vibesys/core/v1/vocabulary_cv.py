@@ -113,3 +113,4 @@ class CheckoutStatus(StrEnum):
     DIRTY_TREE = "dirty_tree"
     DIVERGED = "diverged"
     GIT_REFUSED = "git_refused"
+    OPERATOR_CHANGED_CHECKOUT = "operator_changed_checkout"
