@@ -110,6 +110,19 @@ export function titleOf(span: Span): string {
   }
 }
 
+/** Adoption span id to the headline the records name, including a checkout skip. */
+export function adoptionTitles(
+  spans: ReadonlyMap<string, Span> | undefined,
+): ReadonlyMap<string, string> {
+  const titles = new Map<string, string>();
+  if (spans === undefined) return titles;
+  for (const span of spans.values()) {
+    if (span.label?.kind !== 'adoption') continue;
+    titles.set(span.id, titleOf(span));
+  }
+  return titles;
+}
+
 /**
  * What the span waits on that is worth saying. Every live flow also awaits the operator's stop, so
  * the run records a `stop` wait on each from the start; it is something the flow waits on only

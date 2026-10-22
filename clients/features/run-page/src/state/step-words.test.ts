@@ -1,7 +1,7 @@
 import {describe, expect, test} from 'bun:test';
 import type {Span} from '@vibesys/contracts';
 import {stepName} from './span-reading.js';
-import {openWaits, titleOf, verdictWords} from './span-words.js';
+import {adoptionTitles, openWaits, titleOf, verdictWords} from './span-words.js';
 
 /**
  * How the plumbing around a search's labelled steps reads: operations and flows the search did not
@@ -114,6 +114,20 @@ describe('an adoption step', () => {
       'not_adopted',
     );
     expect(titleOf(changed)).toBe('Adopt the input · Operator changed checkout');
+  });
+
+  test('projects that headline by span id and leaves other spans out', () => {
+    const dirty = adoption({candidate: 'abc1234def5678', checkout_status: 'dirty_tree'}, 'adopted');
+    const turn = span('turn', 'flow:root#1', {name: 'implementer'});
+    expect(
+      adoptionTitles(
+        new Map([
+          [dirty.id, dirty],
+          [turn.id, turn],
+        ]),
+      ),
+    ).toEqual(new Map([['op:adopt', 'Adopt candidate abc1234 · Dirty tree']]));
+    expect(adoptionTitles(undefined).size).toBe(0);
   });
 });
 

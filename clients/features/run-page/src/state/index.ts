@@ -106,6 +106,7 @@ export {
   skeletonPositions,
   skeletonScreenState,
 } from './skeleton-projection.js';
+export {adoptionTitles} from './span-words.js';
 export {spendOf, tokensByAgent, turnTokens} from './token-usage.js';
 export {
   type TokensCell,

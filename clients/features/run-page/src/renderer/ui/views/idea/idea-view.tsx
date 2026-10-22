@@ -5,7 +5,6 @@
  * steps (agent turns and gates, each marked by its role's color and named by its role and headline), each opening the step; and the
  * compact step list beside an opened step.
  */
-import type {Span} from '@vibesys/contracts';
 import type {TokenLedger} from '@vibesys/run-state';
 import type {Candidate, CandidateStep} from '@vibesys/run-state/candidates';
 import {
@@ -46,7 +45,7 @@ import {
   workedWords,
 } from '../../../../state/quota-pauses.js';
 import {roleSeries} from '../../../../state/role-series.js';
-import {plain, statusWords, titleOf} from '../../../../state/span-words.js';
+import {plain, statusWords} from '../../../../state/span-words.js';
 import {type AttemptLine, attemptLines, endOf} from '../../../../state/timeline-rows.js';
 import type {ViewBase, ViewHeader, Zoom} from '../props.js';
 import {StepStrip} from '../timeline/step-strip.js';
@@ -238,7 +237,7 @@ export function IdeaView(props: IdeaViewProps): JSX.Element {
         tokens={props.tokens}
         who={props.who}
         pauses={props.model.pauses}
-        {...(props.model.trace?.spans === undefined ? {} : {spans: props.model.trace.spans})}
+        {...(props.adoptionTitles === undefined ? {} : {adoptionTitles: props.adoptionTitles})}
         zoom={zoom}
         size="default"
       />
@@ -256,7 +255,8 @@ export interface StepListProps {
   readonly who: WhoBySpan;
   /** Where turns were stopped on a capacity limit, left out of each step's duration. */
   readonly pauses: readonly QuotaPauseSpan[];
-  readonly spans?: ReadonlyMap<string, Span>;
+  /** Adoption span id to the headline the records name, including a checkout skip. */
+  readonly adoptionTitles?: ReadonlyMap<string, string>;
   readonly zoom: Zoom;
 }
 
@@ -300,9 +300,9 @@ function tookOf(step: CandidateStep, pauses: readonly QuotaPauseSpan[]): string 
   return step.endedAt === null ? undefined : workedWords(pauses, step.startedAt, step.endedAt);
 }
 
-function headlineOf(step: CandidateStep, spans: ReadonlyMap<string, Span> | undefined): string {
-  const span = step.kind === 'adoption' ? spans?.get(step.span) : undefined;
-  return span === undefined ? stepTitle(step) : titleOf(span);
+function headlineOf(step: CandidateStep, titles: ReadonlyMap<string, string> | undefined): string {
+  const recorded = step.kind === 'adoption' ? titles?.get(step.span) : undefined;
+  return recorded ?? stepTitle(step);
 }
 
 function StepRows(props: {
@@ -312,7 +312,7 @@ function StepRows(props: {
   readonly tokens: TokenLedger;
   readonly who: WhoBySpan;
   readonly pauses: readonly QuotaPauseSpan[];
-  readonly spans?: ReadonlyMap<string, Span>;
+  readonly adoptionTitles?: ReadonlyMap<string, string>;
   readonly zoom: Zoom;
   readonly size: 'default' | 'fill';
 }): JSX.Element {
@@ -335,7 +335,7 @@ function StepRows(props: {
         const name = step.role === null ? plain(step.kind) : stepLabel(step);
         // Every row reads alike: its mark, its name (the role, or the kind for a gate), then the
         // step's headline after it when it has one beyond the name.
-        const headline = headlineOf(step, props.spans);
+        const headline = headlineOf(step, props.adoptionTitles);
         const titled = headline !== '' && headline !== name;
         const measure = cells[index] ?? null;
         return (
@@ -368,7 +368,7 @@ export function StepList(props: StepListProps): JSX.Element {
       tokens={props.tokens}
       who={props.who}
       pauses={props.pauses}
-      {...(props.spans === undefined ? {} : {spans: props.spans})}
+      {...(props.adoptionTitles === undefined ? {} : {adoptionTitles: props.adoptionTitles})}
       zoom={props.zoom}
       size="fill"
     />
