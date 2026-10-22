@@ -31,7 +31,8 @@ def python_registry(
         HEADER,
         "from dataclasses import dataclass",
         "from collections.abc import Callable",
-        "from typing import Protocol, cast",
+        "from typing import Literal, Protocol, TypeAlias, cast",
+        "from protobuf import Oneof",
         "from vs_proto._operations import AcceptedRequest, Operation",
         "from vs_proto._generated.vibesys.api.v1 import host_call_pb as host_call",
         "from vs_proto._generated.vibesys.host.v1 import operations_pb as pb",
@@ -110,6 +111,9 @@ def python_registry(
             f"{op.policy.request_tag}, {op.policy.response_tag}, "
             f"{op.policy.cap_ms}, {op.policy.grace_ms}),"
         ]
+    parts = [f"Oneof[Literal[{op.slot!r}], host_call.{op.response}]" for op in admissions]
+    lines += [")", "", "HostCallResult: TypeAlias = ("]
+    lines += [("    " if index == 0 else "    | ") + part for index, part in enumerate(parts)]
     lines += [
         ")",
         "",
@@ -121,14 +125,14 @@ def python_registry(
     for op in admissions:
         lines.append(f"    {op.slot}: Callable[[host_call.{op.request}], host_call.{op.response}],")
     lines += [
-        ") -> object | None:",
+        ") -> HostCallResult | None:",
         '    """Run the handler registered for one generated HostCall slot."""',
         "    match field:",
     ]
     for op in admissions:
         lines += [
             f"        case {op.slot!r}:",
-            f"            return {op.slot}(cast(host_call.{op.request}, request))",
+            f"            return Oneof({op.slot!r}, {op.slot}(cast(host_call.{op.request}, request)))",
         ]
     lines += ["        case _:", "            return None", ""]
     return "\n".join(lines)

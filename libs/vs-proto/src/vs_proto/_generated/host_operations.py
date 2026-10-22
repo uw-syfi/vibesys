@@ -2,7 +2,9 @@
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Protocol, cast
+from typing import Literal, Protocol, TypeAlias, cast
+
+from protobuf import Oneof
 
 from vs_proto._generated.vibesys.api.v1 import host_call_pb as host_call
 from vs_proto._generated.vibesys.host.v1 import operations_pb as pb
@@ -300,6 +302,12 @@ HOST_CALLS: tuple[HostCall, ...] = (
     HostCall("chat_message", "chat-message", 4, 4, 10000, 5000),
 )
 
+HostCallResult: TypeAlias = (
+    Oneof[Literal["post_intent"], host_call.PostIntentResponse]
+    | Oneof[Literal["relaunch"], host_call.RelaunchResponse]
+    | Oneof[Literal["chat_message"], host_call.ChatMessageResponse]
+)
+
 
 def dispatch_host_call(
     field: str,
@@ -308,14 +316,14 @@ def dispatch_host_call(
     post_intent: Callable[[host_call.PostIntentRequest], host_call.PostIntentResponse],
     relaunch: Callable[[host_call.RelaunchRequest], host_call.RelaunchResponse],
     chat_message: Callable[[host_call.ChatMessageRequest], host_call.ChatMessageResponse],
-) -> object | None:
+) -> HostCallResult | None:
     """Run the handler registered for one generated HostCall slot."""
     match field:
         case "post_intent":
-            return post_intent(cast(host_call.PostIntentRequest, request))
+            return Oneof("post_intent", post_intent(cast(host_call.PostIntentRequest, request)))
         case "relaunch":
-            return relaunch(cast(host_call.RelaunchRequest, request))
+            return Oneof("relaunch", relaunch(cast(host_call.RelaunchRequest, request)))
         case "chat_message":
-            return chat_message(cast(host_call.ChatMessageRequest, request))
+            return Oneof("chat_message", chat_message(cast(host_call.ChatMessageRequest, request)))
         case _:
             return None

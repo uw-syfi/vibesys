@@ -14,6 +14,7 @@ from vs_proto.api import (
     ChatMessageRequest,
     ChatMessageResponse,
     FailureCategory,
+    Oneof,
     OperationFailure,
     PostIntentRequest,
     PostIntentResponse,
@@ -145,25 +146,44 @@ def test_host_call_dispatch_uses_the_registered_slot_and_cap() -> None:
     assert all(op.cap_ms + op.grace_ms > op.cap_ms for op in host_operations.HOST_CALLS)
     seen: list[object] = []
 
+    posted = PostIntentResponse(request_id="posted", ordered_reader=True)
+    relaunched = RelaunchResponse(outcome=Oneof("epoch", 2))
+    chatted = ChatMessageResponse(request_id="posted", session_id="session")
+
     def post_intent(request: PostIntentRequest) -> PostIntentResponse:
         seen.append(request)
-        return PostIntentResponse(request_id="posted", ordered_reader=True)
+        return posted
 
     def relaunch(request: RelaunchRequest) -> RelaunchResponse:
-        raise AssertionError(request)
+        seen.append(request)
+        return relaunched
 
     def chat_message(request: ChatMessageRequest) -> ChatMessageResponse:
-        raise AssertionError(request)
+        seen.append(request)
+        return chatted
 
-    result = host_operations.dispatch_host_call(
+    assert host_operations.dispatch_host_call(
         "post_intent",
         "request",
         post_intent=post_intent,
         relaunch=relaunch,
         chat_message=chat_message,
-    )
-    assert result == PostIntentResponse(request_id="posted", ordered_reader=True)
-    assert seen == ["request"]
+    ) == Oneof("post_intent", posted)
+    assert host_operations.dispatch_host_call(
+        "relaunch",
+        "request",
+        post_intent=post_intent,
+        relaunch=relaunch,
+        chat_message=chat_message,
+    ) == Oneof("relaunch", relaunched)
+    assert host_operations.dispatch_host_call(
+        "chat_message",
+        "request",
+        post_intent=post_intent,
+        relaunch=relaunch,
+        chat_message=chat_message,
+    ) == Oneof("chat_message", chatted)
+    assert seen == ["request", "request", "request"]
     assert (
         host_operations.dispatch_host_call(
             "unknown",

@@ -83,7 +83,7 @@ def host_call(
             )
         if result is None:
             return _failure("invalid_method", "HostCall.method is required")
-        response = HostCallResponse(result=Oneof(method.field, result))
+        response = HostCallResponse(result=result)
     except ConfigurationError as error:
         diagnostic = error.diagnostic
         return _failure(diagnostic.code, diagnostic.message, exit_code=diagnostic.exit_code)
