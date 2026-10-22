@@ -203,6 +203,7 @@ async def test_confirmed_absence_withdraws_the_old_physical_invocation(
     assert await executor.inspect(span, fence) == ReplayAbsent()
     with pytest.raises(ValueError, match=r"withdrawn|no conclusive typed outcome"):
         await given.executor().execute(span, fence)
+    assert await executor.inspect(span, fence) == ReplayAbsent()
     assert given.effects() == 0
     assert given.store.release(fence, sim.clock.now())
 

@@ -96,7 +96,7 @@ class ReplayResult:
 
 @dataclass(frozen=True)
 class ReplayAbsent:
-    """The owning executor proved that the invocation never crossed its boundary."""
+    """The owner proved absence and fenced off later delivery of this invocation."""
 
 
 @dataclass(frozen=True)

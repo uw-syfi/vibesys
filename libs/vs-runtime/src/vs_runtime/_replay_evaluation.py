@@ -23,6 +23,7 @@ from vs_core.api import (
     Scope,
     SubmitMeasurement,
 )
+from vs_decode.api import Unreadable
 from vs_evaluation.api import RecoverableEvaluationExecutor
 from vs_proto.api import core_agent_facts, core_common, core_leaves, core_vocabulary, validate
 from vs_proto.api import replay_evaluation as pb
@@ -296,13 +297,19 @@ class EvaluationReplayExecutor:
         job = None
         if jobs:
             current = jobs[0]
+            evidence = []
+            for item in current.evidence:
+                encoded = encode_evidence(item)
+                if isinstance(encoded, Unreadable):
+                    return ReplayUnknown(str(encoded))
+                evidence.append(encoded)
             job = pb.ReplayEvaluationJob(
                 resource=current.resource_id.root,
                 status=core_vocabulary.ObservationStatus[current.observation.status.name],
                 terminal=current.observation.terminal,
                 released=current.observation.released,
                 observation_sequence=current.observation.sequence,
-                evidence=[encode_evidence(item) for item in current.evidence],
+                evidence=evidence,
                 failure=_failure(current.failure),
                 detail=current.observation.diagnostic,
             )

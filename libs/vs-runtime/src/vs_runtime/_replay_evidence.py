@@ -10,14 +10,27 @@ stays in the immutable replay request.
 
 from typing import cast
 
+from pydantic import TypeAdapter
+
 from vs_core.api import EvidenceRef, values
+from vs_decode.api import Unreadable, decode_json
 from vs_proto.api import core_agent_facts, core_common, core_vocabulary, validate
 from vs_runtime.api.core_values import from_proto, to_proto
 
+_MAX_EVIDENCE_BYTES = 1024 * 1024
+_NATIVE_EVIDENCE = TypeAdapter(values.EvidenceRef)
 
-def encode_evidence(value: EvidenceRef) -> core_agent_facts.EvidenceRef:
+
+def encode_evidence(value: EvidenceRef) -> core_agent_facts.EvidenceRef | Unreadable:
     projected = value.model_copy(update={"acceptance_receipt": None})
-    native = values.EvidenceRef.model_validate_json(projected.model_dump_json())
+    native = decode_json(
+        projected.model_dump_json(),
+        _NATIVE_EVIDENCE,
+        source="legacy replay evidence",
+        max_bytes=_MAX_EVIDENCE_BYTES,
+    )
+    if isinstance(native, Unreadable):
+        return native
     message = cast("core_agent_facts.EvidenceRef", to_proto(native))
     if value.acceptance_receipt is not None:
         source = value.acceptance_receipt.observation
@@ -31,8 +44,13 @@ def encode_evidence(value: EvidenceRef) -> core_agent_facts.EvidenceRef:
     return message
 
 
-def adoption_evidence(message: core_agent_facts.EvidenceRef) -> EvidenceRef:
+def adoption_evidence(message: core_agent_facts.EvidenceRef) -> EvidenceRef | Unreadable:
     """The legacy workspace owner's commit-message ref, carrying no fabricated receipt."""
     native = cast("values.EvidenceRef", from_proto(message))
     projected = native.model_copy(update={"acceptance_receipt": None})
-    return EvidenceRef.model_validate_json(projected.model_dump_json())
+    return decode_json(
+        projected.model_dump_json(),
+        EvidenceRef,
+        source="native replay evidence",
+        max_bytes=_MAX_EVIDENCE_BYTES,
+    )

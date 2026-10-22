@@ -29,6 +29,7 @@ from vs_core.api import (
     TurnObserved,
     TurnSpec,
 )
+from vs_decode.api import Unreadable, decode_json
 from vs_proto.api import TokenUsage, core_vocabulary, validate
 from vs_proto.api import replay_agent as pb
 from vs_runtime._replay_operations import ReplayOperationError
@@ -339,8 +340,15 @@ class SessionReplayExecutor:
         value = (
             None
             if events[0].output_json is None
-            else codec.value.model_validate_json(events[0].output_json)
+            else decode_json(
+                events[0].output_json,
+                codec.value,
+                source=f"replay agent output {request.request_id}",
+                max_bytes=1024 * 1024,
+            )
         )
+        if isinstance(value, Unreadable):
+            return ReplayUnknown(str(value))
         outcome_value = codec.encode(native, value)
         if type(outcome_value) is not codec.native:
             problem = "agent native output type differs"

@@ -24,6 +24,7 @@ from vs_core.api import (
     WorkspaceMode,
     WorkspacePlan,
 )
+from vs_decode.api import Unreadable
 from vs_proto.api import core_leaves, validate
 from vs_proto.api import replay_workspace as pb
 from vs_runtime._replay_evidence import adoption_evidence
@@ -141,11 +142,17 @@ class WorkspaceReplayExecutor:
                     settlement_id=SettlementId(root=asked.settlement_id), revision=revision
                 )
             )
+            evidence = []
+            for item in asked.evidence:
+                decoded = adoption_evidence(item)
+                if isinstance(decoded, Unreadable):
+                    raise ReplayOperationError(str(decoded))
+                evidence.append(decoded)
             return AdoptRevision(
                 request_id=identity,
                 scope=Scope(owner=RunId(root=self._host.run_id), generation=0),
                 selection=selection,
-                evidence=tuple(adoption_evidence(item) for item in asked.evidence),
+                evidence=tuple(evidence),
             )
         attempt = AttemptRef(
             attempt_id=AttemptId(root=native.attempt), generation=native.generation

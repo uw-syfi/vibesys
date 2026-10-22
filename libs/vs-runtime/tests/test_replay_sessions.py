@@ -13,12 +13,13 @@ from tests.support.session_world import SCHEMA, FakeSessionResolver, Reply
 
 from vs_agent.api import AgentCapabilities, AgentInvocationState, AgentUsage, ClientAgentSessions
 from vs_agent.api.testing import FakeAgentClient, FakeAgentInvocationStore, FakeAgentSessions
+from vs_core.api import TurnObserved
 from vs_core.api.replay import ReplayCall, ReplayFlow, SemanticKey, classify_context
 from vs_project.api import FakeStateStore, Project
 from vs_prompts.api import TemplateRenderer
 from vs_proto.api import EpochStarted, core_common, core_vocabulary, replay
 from vs_proto.api import replay_agent as pb
-from vs_runtime.api.core import ReceiptStore
+from vs_runtime.api.core import ExecutionResult, ReceiptStore
 from vs_runtime.api.executor_contracts import FaultingNamespace, ProcessKilledError
 from vs_runtime.api.replay import (
     ReplayAgentReply,
@@ -418,5 +419,60 @@ def test_explicit_session_reuse_keeps_the_recorded_physical_conversation(
             ReplayLaunch(EpochStarted(run_id="run"), "first", "host-a", 100),
         ) == ReplayCompleted(7)
         assert len(given.client.calls_for("worker")) == 1
+
+    sim.run(scenario(), threads=given.threads)
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize(
+    "output", ["{", '{"value":7,"value":8}', '{"value":"wrong"}', '{"extra":7}']
+)
+def test_recovery_reports_unreadable_sealed_agent_output(
+    tmp_path: Path, sim: Sim, output: str
+) -> None:
+    given = world(tmp_path, sim, "fake")
+    receipts = ReceiptStore(given.namespace, given.threads)
+
+    async def scenario() -> None:
+        executor = given.executor(receipts)
+        runtime = ReplayRuntime(given.store, program, replay.ReplayAllowance())
+        runtime.start(
+            ReplayLaunch(EpochStarted(run_id="run"), "first", "host-a", 100),
+            now=sim.clock.now(),
+            at=Timestamp(),
+        )
+        (ensure,) = runtime.prepare(now=sim.clock.now(), at=Timestamp())
+        result = await runtime.dispatch(ensure.id, executor, now=sim.clock.now())
+        runtime.observe(ensure.id, result, now=sim.clock.now(), at=Timestamp())
+        runtime.accept(ensure.id, now=sim.clock.now(), at=Timestamp())
+        (turn,) = runtime.prepare(now=sim.clock.now(), at=Timestamp())
+        await runtime.dispatch(turn.id, executor, now=sim.clock.now())
+        sealed = receipts.sealed(turn.id, ExecutionResult)
+        assert sealed is not None
+        digest, result = sealed
+        damaged = result.model_copy(
+            update={
+                "owner_events": tuple(
+                    event.model_copy(update={"output_json": output})
+                    if isinstance(event, TurnObserved)
+                    else event
+                    for event in result.owner_events
+                )
+            }
+        )
+        (tmp_path / "retained").mkdir()
+        retained = ReceiptStore(
+            Project.open(tmp_path / "retained").state.state_store_namespace("run"),
+            given.threads,
+        )
+        retained.seal(turn.id, digest, damaged)
+        runtime.close(now=sim.clock.now())
+        fence = given.store.acquire("host-a", sim.clock.now(), 100)
+        assert fence is not None
+        outcome = await given.executor(retained).inspect(turn, fence)
+        assert isinstance(outcome, ReplayUnknown)
+        assert "replay agent output" in outcome.reason
+        assert len(given.client.calls_for("worker")) == 1
+        assert given.store.release(fence, sim.clock.now())
 
     sim.run(scenario(), threads=given.threads)

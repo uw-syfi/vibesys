@@ -316,6 +316,7 @@ def test_workspace_inspection_fences_absence_and_preserves_physical_payload(
                 assert await executor.inspect(span, fence) == ReplayAbsent()
                 with pytest.raises(ReplayOperationError, match="withdrawn"):
                     await executor.execute(span, fence)
+                assert await executor.inspect(span, fence) == ReplayAbsent()
             assert store.release(fence, sim.clock.now())
             assert isinstance(await executor.inspect(span, fence), ReplayUnknown)
             with pytest.raises(ReplayOperationError, match="lease was lost"):

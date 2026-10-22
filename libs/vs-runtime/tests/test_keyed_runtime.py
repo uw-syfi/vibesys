@@ -500,6 +500,11 @@ async def test_executor_inspection_distinguishes_absent_pending_completed_and_un
 
     executor = FakeReplayExecutor(perform)
     assert await executor.inspect(span, fence) == ReplayAbsent()
+    with pytest.raises(ValueError, match="withdrawn replay invocation"):
+        await executor.execute(span, fence)
+    assert await executor.inspect(span, fence) == ReplayAbsent()
+
+    executor = FakeReplayExecutor(perform)
     invocation = asyncio.create_task(executor.execute(span, fence))
     await entered.wait(invocation)
     assert await executor.inspect(span, fence) == ReplayPending()
