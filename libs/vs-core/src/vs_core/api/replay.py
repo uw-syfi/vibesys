@@ -4,6 +4,7 @@ Identity is validated before matching. Shells retain protobuf records and drive
 accepted observations in log order; flow continuations use only this scheduler.
 """
 
+from vs_core._continuations import SuspensionRefusal
 from vs_core.flows._replay_archive import ReplayArchive
 from vs_core.flows._replay_history import (
     AcceptedClock,
@@ -59,6 +60,7 @@ from vs_core.flows._replay_turns import (
     ReplayToolRefusal,
     ReplayToolRefused,
     ReplayTurnDependencies,
+    effective_deadline,
 )
 from vs_core.flows._replay_writers import ReplayRootReuse, ReplayWriterRecovery
 
@@ -103,8 +105,10 @@ __all__ = [
     "ReplayTurnDependencies",
     "ReplayWriterRecovery",
     "SemanticKey",
+    "SuspensionRefusal",
     "chain_dependency",
     "classify_context",
+    "effective_deadline",
     "encode_identity",
     "physical_identity",
     "physical_start",

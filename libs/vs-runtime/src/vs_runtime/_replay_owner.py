@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from vs_core.api import HostFence, HostId, RequestId, Until
-from vs_core.api.replay import physical_identity
+from vs_core.api.replay import effective_deadline, physical_identity
 from vs_runtime._core_requests import ExecutionContext, ExecutionResult
 from vs_runtime._effect_fence import EffectFences, Entered, MayHold
 from vs_runtime._operation_requests import operation_fence
@@ -64,7 +64,7 @@ class ReceiptReplayExecutor[RequestT]:
             now_at=now,
             payload_digest=hashlib.sha256(physical_identity(span)).hexdigest(),
             until=Until(
-                at=bound.deadline
+                at=effective_deadline(bound)
                 if bound is not None
                 else now + self._within(span)
                 if span.replay_physical is None

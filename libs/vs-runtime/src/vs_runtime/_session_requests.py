@@ -471,14 +471,16 @@ class _Call:
     context: ExecutionContext
 
 
-class TurnYields(Protocol):
+class TurnYields[TurnT, WaitT](Protocol):
     """Where a turn that asked to wait gets its continuation.
 
-    Asked once when a dispatched turn ends. A returned continuation becomes the turn's
-    ``suspension``; core validates it and publishes it after the checkpoint.
+    Asked once when a dispatched turn ends. The positional core binds a
+    ``DispatchTurn`` to a ``Continuation`` that core validates and publishes after
+    the checkpoint. The native replay log binds a physical turn's span identity to
+    its durable ``ReplayTurnWait``, which the archive checks against the log.
     """
 
-    def yielded(self, request: DispatchTurn) -> Continuation | None:
+    def yielded(self, request: TurnT, /) -> WaitT | None:
         """The continuation this turn yielded, or None when it did not wait."""
         ...
 
@@ -491,7 +493,7 @@ class RuntimeSessionRequests:
         sessions: ClientAgentSessions,
         resolver: SessionResolver,
         store: ReceiptStore,
-        yields: TurnYields | None = None,
+        yields: TurnYields[DispatchTurn, Continuation] | None = None,
         *,
         blocking: BlockingRunner,
     ) -> None:

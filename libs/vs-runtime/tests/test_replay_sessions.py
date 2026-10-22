@@ -30,7 +30,7 @@ from vs_runtime.api.replay import (
     ReplayRecoveryRequiredError,
     ReplayRuntime,
     ReplaySessionServices,
-    ReplayTurnTools,
+    ReplayTurnYields,
     ReplayUnknown,
     SessionReplayExecutor,
     drive_replay,
@@ -149,6 +149,16 @@ async def program(ctx: ReplayFlow) -> object:
     return 7
 
 
+class LateYields:
+    """The native yields of a runtime bound after its executors, or none before it is."""
+
+    def __init__(self) -> None:
+        self.runtime: ReplayRuntime | None = None
+
+    def yielded(self, turn: str, /) -> replay.ReplayTurnWait | None:
+        return None if self.runtime is None else self.runtime.archive.dependencies.yielded(turn)
+
+
 @dataclass(frozen=True)
 class AgentWorld:
     store: FakeStateStore
@@ -164,7 +174,7 @@ def world(
     sim: Sim,
     implementation: str,
     *,
-    yielded: Callable[[str], replay.ReplayTurnWait | None] | None = None,
+    yields: LateYields | None = None,
 ) -> AgentWorld:
     project = Project.open(tmp_path)
     namespace = project.state.state_store_namespace("run")
@@ -194,7 +204,7 @@ def world(
                 factory(client, journal, threads=threads),
                 resolver,
                 SimBlockingRunner(threads),
-                yielded=yielded,
+                LateYields() if yields is None else yields,
             ),
             ReceiptStore(namespace, threads) if receipts is None else receipts,
             ReplayOperationHost("run", store, sim.clock),
@@ -497,12 +507,8 @@ def test_session_recovery_preserves_yields_only_for_successful_turns(
     tmp_path: Path, sim: Sim, implementation: str, *, invalid: bool
 ) -> None:
     runtime: ReplayRuntime | None = None
-
-    def yielded(identity: str) -> replay.ReplayTurnWait | None:
-        assert runtime is not None
-        return runtime.archive.dependencies.yielded(identity)
-
-    given = world(tmp_path, sim, implementation, yielded=yielded)
+    yields = LateYields()
+    given = world(tmp_path, sim, implementation, yields=yields)
     if invalid:
         given.client.enqueue_parse_failure("worker")
 
@@ -548,9 +554,10 @@ def test_session_recovery_preserves_yields_only_for_successful_turns(
             runtime.observe(ensure.id, ensured, now=sim.clock.now(), at=Timestamp())
             runtime.accept(ensure.id, now=sim.clock.now(), at=Timestamp())
             (turn,) = runtime.prepare(now=sim.clock.now(), at=Timestamp())
-            tools = ReplayTurnTools(runtime, turn.id, sim.clock)
-            tools.submit("measurement", producer.id)
-            wait = tools.wait("measurement")
+            yields.runtime = runtime
+            tools = ReplayTurnYields(runtime, sim.clock)
+            tools.submit(turn.id, "measurement", producer.id)
+            wait = tools.wait(turn.id, "measurement")
             observed = await runtime.dispatch(turn.id, executor, now=sim.clock.now())
             assert isinstance(observed.outcome, AgentReplayResult)
             facts = observed.outcome.facts
@@ -565,6 +572,7 @@ def test_session_recovery_preserves_yields_only_for_successful_turns(
                 now=sim.clock.now(),
                 at=Timestamp(),
             )
+            yields.runtime = runtime
             recovered = await runtime.inspect(turn.id, given.executor(None), now=sim.clock.now())
             assert recovered == observed
             assert runtime.archive.dependencies.yielded(turn.id) == wait

@@ -22,6 +22,8 @@ from vs_core.api.replay import (
     ReplayScheduler,
     ReplaySettings,
     ReplayWriterRecovery,
+    SuspensionRefusal,
+    effective_deadline,
     physical_start,
     proof_covers,
     proof_digest,
@@ -98,6 +100,8 @@ class ReplayResult:
     paid: bool = False
     cost_usd: float | None = None
     usage: TokenUsage | None = None
+    turn: pb.ReplayTurnObservation | None = None
+    """A bound turn's bound and accepted yield; the archive checks both against the log."""
 
 
 @dataclass(frozen=True)
@@ -483,7 +487,7 @@ class ReplayRuntime:
         prior = None if not children else children[0].replay_physical
         bound = None if parent.replay is None else parent.replay.turn_bound
         deadline = (
-            bound.deadline
+            effective_deadline(bound)
             if bound is not None
             else now + within
             if prior is None
@@ -649,6 +653,7 @@ class ReplayRuntime:
             paid=result.paid,
             cost_usd=cost,
             usage=deepcopy(result.usage),
+            turn=deepcopy(result.turn),
         )
         if span.replay_observation is not None:
             if span.replay_observation == observed:
@@ -715,10 +720,11 @@ class ReplayRuntime:
         *,
         now: float,
         at: Timestamp,
-    ) -> None:
+    ) -> SuspensionRefusal | None:
         """Retain authenticated obligations before tool replies or yield acceptance.
 
-        Only the active physical turn may create submissions and waits. Reply
+        Only the active physical turn may create submissions and waits. A wait the
+        suspension gate refuses is not recorded; its typed reason is returned. Reply
         acknowledgements can settle retained obligations after a host restart.
         """
         _ = self._active_scheduler
@@ -731,10 +737,14 @@ class ReplayRuntime:
         ):
             problem = "tool submission or wait belongs to another host incarnation"
             raise ReplayError(problem)
+        if isinstance(fact, pb.ReplayTurnWait):
+            refusal = self._archive.dependencies.refusal(fact, self._archive.span, now=now)
+            if refusal is not None and self._archive.dependencies.yielded(fact.turn) != fact:
+                return refusal
         detail = Any(type_url=fact.desc().type_name, value=fact.to_binary())
         dependencies = self._archive.dependencies.record(detail, self._archive.span)
         if dependencies == self._archive.dependencies:
-            return
+            return None
         self._record_schemas((type(fact),), now=now, at=at)
         self._append(
             Oneof(
@@ -749,6 +759,7 @@ class ReplayRuntime:
             now=now,
             at=at,
         )
+        return None
 
     def writer_observation(
         self, result: pb.WriterReconciliation, *, now: float, at: Timestamp

@@ -37,6 +37,8 @@ if TYPE_CHECKING:
     from vs_agent.api import AgentInvocationStore, AgentSessionSpec, AgentTurnExecutor
     from vs_core.api import (
         ArtifactRef,
+        Continuation,
+        DispatchTurn,
         RoleId,
         SchemaRef,
         SessionInput,
@@ -272,7 +274,7 @@ def open_session_requests(  # noqa: PLR0913  # lint-waiver: LW-260142 [PLR0913];
     store: ReceiptStore,
     threads: Threads,
     blocking: BlockingRunner,
-    yields: TurnYields | None = None,
+    yields: TurnYields[DispatchTurn, Continuation] | None = None,
 ) -> SessionExecutors:
     """The session executors over the run's agent client, journal slot and receipt store.
 
@@ -296,7 +298,7 @@ def session_executors(
     sessions: ClientAgentSessions,
     resolver: SessionResolver,
     store: ReceiptStore,
-    yields: TurnYields | None,
+    yields: TurnYields[DispatchTurn, Continuation] | None,
     blocking: BlockingRunner,
 ) -> SessionExecutors:
     """Both session executors over one access settlement, for any resolver.

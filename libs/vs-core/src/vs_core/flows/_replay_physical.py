@@ -9,6 +9,7 @@ from vs_proto.api import Change, Span, SpanStatus
 from vs_proto.api import replay as pb
 
 from ._replay_sources import ReplayError
+from ._replay_turns import effective_deadline
 
 
 def physical_start(
@@ -79,9 +80,9 @@ def validate_physical(
     if (
         parent.replay is not None
         and parent.replay.turn_bound is not None
-        and physical.deadline != parent.replay.turn_bound.deadline
+        and physical.deadline != effective_deadline(parent.replay.turn_bound)
     ):
-        problem = "physical deadline differs from its immutable turn bound"
+        problem = "physical deadline differs from its immutable credited turn bound"
         raise ReplayError(problem)
     if span.has_field("ended_at"):
         observed = span.replay_observation is not None

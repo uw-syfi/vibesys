@@ -8,6 +8,9 @@ from typing import TYPE_CHECKING
 
 from protobuf.wkt.google.protobuf.any_pb import Any
 
+from vs_core._continuations import SuspensionRefusal, suspension_gate
+from vs_core._wait_clock import held_turn_bound
+from vs_core.types.records import CapacityHold
 from vs_proto.api import replay as pb
 from vs_proto.api import replay_agent, replay_evaluation, validate
 
@@ -42,9 +45,37 @@ def agent_turn(span: Span) -> replay_agent.ReplayAgentRequest:
     return native
 
 
+def effective_deadline(bound: pb.ReplayTurnBound) -> float:
+    """The stated limit plus its credited hold, by the positional turn-bound rule.
+
+    A native run has no run deadline, so the credited bound is never capped.
+    """
+    # Native turns record only ended holds' credit; no hold is current, so no budget applies.
+    hold = CapacityHold(credit=bound.hold_credit_seconds, budget=0.0)
+    return held_turn_bound(bound.deadline, hold, None).at
+
+
+def _continues(span: Span) -> bool:
+    operation = span.replay
+    request = None if operation is None or operation.policy is None else operation.policy.request
+    if request is None or request.type_url != replay_agent.ReplayAgentRequest.desc().type_name:
+        return False
+    native = replay_agent.ReplayAgentRequest.from_binary(request.value)
+    return (
+        native.action is not None
+        and native.action.field == "turn"
+        and native.action.value.continuation_of is not None
+    )
+
+
 def validate_turn_bound(span: Span, lookup: Callable[[str], Span]) -> None:
     operation = span.replay
-    if operation is None or operation.turn_bound is None:
+    if operation is None:
+        return
+    if operation.turn_bound is None:
+        if _continues(span):
+            problem = "continuation requires its original recorded turn bound"
+            raise ReplayError(problem)
         return
     bound = operation.turn_bound
     native = agent_turn(span)
@@ -74,6 +105,23 @@ def validate_turn_bound(span: Span, lookup: Callable[[str], Span]) -> None:
             raise ReplayError(problem)
     elif bound.origin != span.id or bound.hold_credit_seconds != turn.value.hold_credit_seconds:
         problem = "original turn bound must name its logical start and recorded hold credit"
+        raise ReplayError(problem)
+
+
+def validate_turn_observation(
+    child: Span, parent: Span, yielded: Callable[[str], pb.ReplayTurnWait | None]
+) -> None:
+    """A bound turn's observation names its own bound and exactly its durable wait."""
+    bound = None if parent.replay is None else parent.replay.turn_bound
+    observation = child.replay_observation
+    if bound is None or observation is None:
+        return
+    turn = observation.turn
+    if turn is None or turn.bound != bound:
+        problem = "turn observation must name its immutable recorded bound"
+        raise ReplayError(problem)
+    if turn.suspension != (yielded(child.id) if turn.succeeded else None):
+        problem = "turn observation differs from its durable yield"
         raise ReplayError(problem)
 
 
@@ -108,7 +156,7 @@ class ReplayTurnDependencies:
 
     Producers are logical starts in the same scope. Acknowledgement cannot erase
     the dependency. Every wait references this exact physical turn's durable
-    submission; a lost reply remains owed across epochs until acknowledged.
+    submission; a lost reply stays owed across epochs while its turn lives.
     """
 
     _submissions: dict[str, bytes] = field(default_factory=dict, repr=False)
@@ -152,12 +200,20 @@ class ReplayTurnDependencies:
         payload = self._submissions.get(reply_id)
         return None if payload is None else pb.ReplayToolSubmission.from_binary(payload)
 
-    @property
-    def owed(self) -> tuple[pb.ReplayToolSubmission, ...]:
+    def owed(self, lookup: Callable[[str], Span]) -> tuple[pb.ReplayToolSubmission, ...]:
+        """Replies still owed to a live physical turn.
+
+        A reply to a turn that ended is settled by that ending: a replacement starts a
+        fresh conversation from retained content and never receives it, and the
+        producer's outcome stays reachable through ``lookup``. Only the live turn's
+        owner acknowledges, so no reply is owed forever.
+        """
         return tuple(
-            pb.ReplayToolSubmission.from_binary(payload)
+            submission
             for key, payload in self._submissions.items()
             if key not in self._acknowledged
+            for submission in (pb.ReplayToolSubmission.from_binary(payload),)
+            if _live(lookup(submission.turn))
         )
 
     def yielded(self, turn: str) -> pb.ReplayTurnWait | None:
@@ -192,9 +248,7 @@ class ReplayTurnDependencies:
             None if operation is None or operation.policy is None else operation.policy.request
         )
         if (
-            turn.replay_physical is None
-            or turn.has_field("ended_at")
-            or turn.replay_physical.has_field("withdrawn_sequence")
+            not _live(turn)
             or turn.replay_observation is not None
             or fact.turn in self._waits
             or prior is not None
@@ -221,25 +275,56 @@ class ReplayTurnDependencies:
             self._waits,
         )
 
+    def refusal(
+        self, fact: pb.ReplayTurnWait, lookup: Callable[[str], Span], *, now: float | None
+    ) -> SuspensionRefusal | None:
+        """Why ``fact`` cannot suspend its turn, by the one suspension gate.
+
+        The log cannot know the writer's clock, so a recorded wait is checked with
+        ``now`` None; the writer checks the time left before recording it. A wait is
+        capped at its turn's effective bound and claims its scope while a reply is pending.
+        """
+        turn = lookup(fact.turn)
+        scope = agent_turn(turn).scope
+        bound = None if turn.replay is None else turn.replay.turn_bound
+
+        def claimed() -> bool:
+            return any(
+                other != fact.turn
+                and agent_turn(lookup(other)).scope == scope
+                and any(
+                    isinstance(self.lookup(other, reply, lookup), ReplayToolPending)
+                    for reply in pb.ReplayTurnWait.from_binary(payload).reply_ids
+                )
+                for other, payload in self._waits.items()
+            )
+
+        return suspension_gate(
+            active=lambda: _live(turn),
+            claimed=claimed,
+            owned=lambda: (
+                not any(
+                    isinstance(self.lookup(fact.turn, reply, lookup), ReplayToolRefused)
+                    for reply in fact.reply_ids
+                )
+            ),
+            remains=None
+            if now is None or bound is None
+            else lambda: now < effective_deadline(bound),
+        )
+
     def _wait(
         self, fact: pb.ReplayTurnWait, lookup: Callable[[str], Span]
     ) -> ReplayTurnDependencies:
         prior = self._waits.get(fact.turn)
         if prior == fact.to_binary():
             return self
-        turn = lookup(fact.turn)
-        agent_turn(turn)
-        if (
-            prior is not None
-            or turn.replay_physical is None
-            or turn.has_field("ended_at")
-            or turn.replay_physical.has_field("withdrawn_sequence")
-            or any(
-                isinstance(self.lookup(fact.turn, reply, lookup), ReplayToolRefused)
-                for reply in fact.reply_ids
-            )
-        ):
-            problem = "turn wait has no owned producer or changed its durable dependencies"
+        if prior is not None:
+            problem = "turn wait changed its durable dependencies"
+            raise ReplayError(problem)
+        refusal = self.refusal(fact, lookup, now=None)
+        if refusal is not None:
+            problem = f"turn wait was refused by the suspension gate: {refusal.value}"
             raise ReplayError(problem)
         return ReplayTurnDependencies(
             self._submissions,
@@ -247,3 +332,12 @@ class ReplayTurnDependencies:
             self._acknowledged,
             {**self._waits, fact.turn: fact.to_binary()},
         )
+
+
+def _live(turn: Span) -> bool:
+    physical = turn.replay_physical
+    return (
+        physical is not None
+        and not turn.has_field("ended_at")
+        and not physical.has_field("withdrawn_sequence")
+    )

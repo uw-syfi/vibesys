@@ -77,7 +77,7 @@ from .test_replay_evaluation import step as evaluation_step
 from .test_replay_executor_routing import echo
 from .test_replay_executor_routing import program as routing_program
 from .test_replay_executor_routing import role as echo_role
-from .test_replay_sessions import encode
+from .test_replay_sessions import LateYields, encode
 from .test_replay_workspaces import request as workspace_request
 from .test_replay_workspaces import step as workspace_step
 from .test_session_resolver import role
@@ -411,7 +411,9 @@ class CandidateWorld:
             ReplayOwnerServices(
                 writer_registry=self.barrier.registry,
                 workspaces=resources,
-                sessions=ReplaySessionServices(sessions, resolver, InlineBlockingRunner()),
+                sessions=ReplaySessionServices(
+                    sessions, resolver, InlineBlockingRunner(), LateYields()
+                ),
                 evaluation=measured,
                 workspace_within_seconds=100,
                 evaluation_within_seconds=100,

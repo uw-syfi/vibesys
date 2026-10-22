@@ -31,7 +31,11 @@ from ._replay_history import (
 from ._replay_identity import ENCODING_VERSION, EncodedIdentity, SemanticKey
 from ._replay_physical import execution_metadata, proof_covers, proof_digest, validate_physical
 from ._replay_sources import ReplayError
-from ._replay_turns import ReplayTurnDependencies, validate_turn_bound
+from ._replay_turns import (
+    ReplayTurnDependencies,
+    validate_turn_bound,
+    validate_turn_observation,
+)
 from ._replay_writers import ReplayWriterRecovery
 
 if TYPE_CHECKING:
@@ -575,6 +579,10 @@ class ReplayArchive:
             self._children[parent.id] = (*children, span.id)
         if physical.has_field("termination_proof_digest"):
             self._termination_proof(span)
+        if span.replay_observation is not None and (
+            previous is None or previous.replay_observation is None
+        ):
+            validate_turn_observation(span, parent, self.dependencies.yielded)
         if span.replay_observation is not None and not physical.has_field("withdrawn_sequence"):
             if parent.replay is not None and parent.replay.outcome is None:
                 self._observation(span)

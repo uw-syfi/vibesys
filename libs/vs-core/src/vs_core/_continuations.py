@@ -65,6 +65,8 @@ from .types.sessions import Access, DispatchTurn, InspectTurn, ResumeSessionTurn
 from .types.strategy import Accepted, Operation
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from .types.attempts import AttemptsState, AttemptView
     from .types.common import EvidenceKey, InvocationRef, Observation, ResourceId
     from .types.evaluation import (
@@ -251,17 +253,46 @@ def suspension_refusal_in(
     scope is refused while the first holds the claim. ``holder`` is the invocation asking:
     its own claim is not a reason to refuse it.
     """
-    if not _active(context, scope):
-        return SuspensionRefusal.SCOPE_NOT_ACTIVE
-    claimed = any(
+    return suspension_gate(
+        active=lambda: _active(context, scope),
+        claimed=lambda: _claimed(context, state, scope, holder),
+    )
+
+
+def _claimed(
+    context: EvaluationContext, state: EvaluationState, scope: Scope, holder: InvocationRef | None
+) -> bool:
+    return any(
         row.pending_suspension is not None and row.scope == scope and row.invocation != holder
         for row in context.sessions.invocations
-    )
-    if claimed or any(
+    ) or any(
         _open(context, row) and _invocation(context, row).scope == scope
         for row in state.continuations
-    ):
+    )
+
+
+def suspension_gate(
+    *,
+    active: Callable[[], bool],
+    claimed: Callable[[], bool],
+    owned: Callable[[], bool] | None = None,
+    remains: Callable[[], bool] | None = None,
+) -> SuspensionRefusal | None:
+    """The one ordering of suspension refusals, whichever state supplies the facts.
+
+    The positional core and the native replay log each answer the same questions: is the
+    scope active, does another wait already claim it, does it own every job it waits on,
+    and is time left before the wait's capped bound. Each is asked only if the earlier
+    ones pass. ``owned`` and ``remains`` are None when no continuation is checked yet.
+    """
+    if not active():
+        return SuspensionRefusal.SCOPE_NOT_ACTIVE
+    if claimed():
         return SuspensionRefusal.OPEN_CONTINUATION
+    if owned is not None and not owned():
+        return SuspensionRefusal.JOB_NOT_OWNED
+    if remains is not None and not remains():
+        return SuspensionRefusal.DEADLINE_EXCEEDED
     return None
 
 
@@ -278,18 +309,30 @@ def commit_refusal_in(
     malformed continuation. With ``wait`` it also checks the continuation's jobs and
     deadline.
     """
-    refusal = suspension_refusal_in(context, state, invocation.scope, holder=invocation.invocation)
-    if refusal is not None or wait is None:
-        return refusal
-    owned = (*state.jobs, *state.registered_jobs)
+    scope, jobs = invocation.scope, (*state.jobs, *state.registered_jobs)
+
+    def active() -> bool:
+        return _active(context, scope)
+
+    def claimed() -> bool:
+        return _claimed(context, state, scope, invocation.invocation)
+
+    if wait is None:
+        return suspension_gate(active=active, claimed=claimed)
+    checked: Continuation = wait
+
     # An empty or repeating job list is a malformed continuation, not a refusal: it halts.
-    for identity in wait.jobs:
-        matching = tuple(row for row in owned if row.resource_id == identity)
-        if len(matching) != 1 or matching[0].scope != invocation.scope:
-            return SuspensionRefusal.JOB_NOT_OWNED
-    if not time_remains(context.run, wait_deadline(state, context, wait).at):
-        return SuspensionRefusal.DEADLINE_EXCEEDED
-    return None
+    def owned() -> bool:
+        for identity in checked.jobs:
+            matching = tuple(row for row in jobs if row.resource_id == identity)
+            if len(matching) != 1 or matching[0].scope != scope:
+                return False
+        return True
+
+    def remains() -> bool:
+        return time_remains(context.run, wait_deadline(state, context, checked).at)
+
+    return suspension_gate(active=active, claimed=claimed, owned=owned, remains=remains)
 
 
 def _inspection(context: EvaluationContext, request: Request) -> Outbound:

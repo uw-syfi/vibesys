@@ -57,7 +57,7 @@ if TYPE_CHECKING:
     from vs_runtime._core_requests import ExecutionContext, ExecutionOutcome
     from vs_runtime._receipt_store import ReceiptStore
     from vs_runtime._replay_operations import ReplayOperationHost
-    from vs_runtime._session_requests import SessionResolver
+    from vs_runtime._session_requests import SessionResolver, TurnYields
     from vs_sim.api import BlockingRunner
 
     type AgentRequest = EnsureSession | DispatchTurn | CancelTurn | CloseSession
@@ -142,7 +142,8 @@ class ReplaySessionServices:
     sessions: ClientAgentSessions
     resolver: SessionResolver
     blocking: BlockingRunner
-    yielded: Callable[[str], replay.ReplayTurnWait | None] | None = None
+    yields: TurnYields[str, replay.ReplayTurnWait]
+    """Required: a yielding turn's wait is part of its observation, never omitted."""
 
 
 class SessionReplayExecutor:
@@ -212,7 +213,7 @@ class SessionReplayExecutor:
                 delivery.request,
                 result,
                 delivery.bound,
-                None if services.yielded is None else services.yielded(delivery.identity),
+                services.yields.yielded(delivery.identity),
             )
 
         executor = ReceiptReplayExecutor(
@@ -462,6 +463,15 @@ class SessionReplayExecutor:
         validate(native)
         if not isinstance(request, DispatchTurn):
             return ReplayResult(native)
+        turn = (
+            None
+            if bound is None
+            else replay.ReplayTurnObservation(
+                bound=bound,
+                succeeded=seen.status is ObservationStatus.SUCCEEDED,
+                suspension=native.suspension,
+            )
+        )
         codec = self._replies[request.turn.output_schema]
         events = [event for event in result.owner_events if isinstance(event, TurnObserved)]
         if len(events) != 1:
@@ -488,14 +498,14 @@ class SessionReplayExecutor:
             self._receipts, scope_binding_key(request.scope, request.turn.session.session_id)
         )
         if binding is None:
-            return ReplayResult(outcome_value, paid=seen.accepted)
+            return ReplayResult(outcome_value, paid=seen.accepted, turn=turn)
         outcome = await self._blocking.run(
             self._sessions.inspect,
             AgentSessionKey.parse(binding.session_key),
             request.turn.invocation_id.root,
         )
         if not isinstance(outcome, Completed):
-            return ReplayResult(outcome_value, paid=seen.accepted)
+            return ReplayResult(outcome_value, paid=seen.accepted, turn=turn)
         usage = outcome.result.usage
         tokens = TokenUsage(
             input=usage.input_tokens,
@@ -507,4 +517,6 @@ class SessionReplayExecutor:
             duration_ms=usage.duration_ms,
         )
         validate(tokens)
-        return ReplayResult(outcome_value, paid=True, cost_usd=usage.total_cost_usd, usage=tokens)
+        return ReplayResult(
+            outcome_value, paid=True, cost_usd=usage.total_cost_usd, usage=tokens, turn=turn
+        )

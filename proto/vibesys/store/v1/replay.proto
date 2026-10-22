@@ -110,6 +110,20 @@ message OperationReplay {
   ReplayTurnBound turn_bound = 13;
 }
 
+// A turn's observation names its immutable bound and the durable wait it yielded.
+message ReplayTurnObservation {
+  option (buf.validate.message).cel = {
+    id: "replay_turn_observation.suspension"
+    message: "only a succeeded turn yields its durable wait"
+    expression: "!has(this.suspension) || this.succeeded"
+  };
+  ReplayTurnBound bound = 1 [(buf.validate.field).required = true];
+  bool succeeded = 2;
+  ReplayTurnWait suspension = 3;
+}
+
+// deadline is the stated limit. The turn ends at that limit plus its credited hold,
+// by the same rule as the positional turn bound.
 message ReplayTurnBound {
   string origin = 1 [(buf.validate.field).string.min_len = 1];
   double deadline = 2 [(buf.validate.field).double = {gte: 0, finite: true}];
@@ -228,6 +242,8 @@ message ReplayObservation {
   bool paid = 2;
   optional double cost_usd = 3 [(buf.validate.field).double = {gte: 0, finite: true}];
   TokenUsage usage = 4;
+  // Required for a physical child of a bound turn; the archive checks it against the log.
+  ReplayTurnObservation turn = 5;
 }
 
 // Earlier answers remain usable when only prompts or limits change.

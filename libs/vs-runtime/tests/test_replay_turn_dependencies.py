@@ -24,6 +24,7 @@ from vs_core.api.replay import (
     ReplayToolRefused,
     ReplayTurnDependencies,
     SemanticKey,
+    SuspensionRefusal,
     classify_context,
 )
 from vs_faults.api import Boundary, FaultGate, FaultPlan, FaultRule, HostCrashError, HostFault
@@ -49,7 +50,7 @@ from vs_runtime.api.replay import (
     ReplayCompleted,
     ReplayResult,
     ReplayRuntime,
-    ReplayTurnTools,
+    ReplayTurnYields,
     drive_replay,
     replay_measurement_plan,
 )
@@ -140,14 +141,18 @@ def prepared(store: FakeStateStore | None = None) -> tuple[ReplayRuntime, Span, 
     return runtime, turn, producer
 
 
-def result(span: Span) -> ReplayResult:
+def result(span: Span, suspension: replay.ReplayTurnWait | None = None) -> ReplayResult:
     if span.replay_physical is not None:
         assert span.replay is not None
+        bound = span.replay.turn_bound
+        assert bound is not None
         return ReplayResult(
             agent.ReplayAgentResult(
                 status=core_vocabulary.ObservationStatus.SUCCEEDED,
-                turn_bound=span.replay.turn_bound,
-            )
+                turn_bound=bound,
+                suspension=suspension,
+            ),
+            turn=replay.ReplayTurnObservation(bound=bound, succeeded=True, suspension=suspension),
         )
     return ReplayResult(
         evaluation.ReplayEvaluationResult(
@@ -167,58 +172,95 @@ def result(span: Span) -> ReplayResult:
 )
 def test_tool_replies_and_waits_recover_without_core_state(call_ids: list[str]) -> None:
     runtime, turn, producer = prepared()
-    tools = ReplayTurnTools(runtime, turn.id, ManualClock())
+    tools = ReplayTurnYields(runtime, ManualClock())
     try:
         for call in call_ids:
-            assert tools.submit(call, producer.id) == ReplayToolPending(producer.id)
-            assert tools.submit(call, producer.id) == ReplayToolPending(producer.id)
-        assert len(runtime.archive.dependencies.owed) == len(call_ids)
-        tools.acknowledge(call_ids[0])
-        tools.acknowledge(call_ids[0])
-        wait = tools.wait(*call_ids)
-        assert tools.yielded() == wait
+            assert tools.submit(turn.id, call, producer.id) == ReplayToolPending(producer.id)
+            assert tools.submit(turn.id, call, producer.id) == ReplayToolPending(producer.id)
+        assert len(runtime.archive.dependencies.owed(runtime.archive.span)) == len(call_ids)
+        tools.acknowledge(turn.id, call_ids[0])
+        tools.acknowledge(turn.id, call_ids[0])
+        wait = tools.wait(turn.id, *call_ids)
+        assert tools.yielded(turn.id) == wait
         archive = ReplayArchive.decode(runtime.archive.encode())
         assert archive.dependencies == ReplayTurnDependencies.from_records(
             ReplayStore.from_binary(archive.encode()).records
         )
         assert archive.dependencies.yielded(turn.id) == wait
-        assert len(archive.dependencies.owed) == len(call_ids) - 1
+        assert len(archive.dependencies.owed(archive.span)) == len(call_ids) - 1
         runtime.observe(producer.id, result(producer), now=0, at=Timestamp())
         runtime.accept(producer.id, now=0, at=Timestamp())
         for call in call_ids:
-            ready = tools.lookup(call)
+            ready = tools.lookup(turn.id, call)
             assert isinstance(ready, ReplayToolReady)
             assert ready.outcome().type_url == evaluation.ReplayEvaluationResult.desc().type_name
-        assert tools.lookup("unknown") == ReplayToolRefused(ReplayToolRefusal.UNKNOWN_REPLY)
+        assert tools.lookup(turn.id, "unknown") == ReplayToolRefused(
+            ReplayToolRefusal.UNKNOWN_REPLY
+        )
     finally:
         runtime.close(now=0)
 
 
 @pytest.mark.parametrize(
     "invalid",
-    ["unknown", "other-turn", "no-producer", "changed-call", "changed-wait", "after-yield"],
+    ["other-turn", "no-producer", "changed-call", "changed-wait", "after-yield"],
 )
-def test_tool_waits_reject_unowned_producers_and_changed_dependencies(invalid: str) -> None:
+def test_tool_waits_reject_malformed_and_changed_dependencies(invalid: str) -> None:
     runtime, turn, producer = prepared()
-    tools = ReplayTurnTools(runtime, turn.id, ManualClock())
+    tools = ReplayTurnYields(runtime, ManualClock())
     try:
-        tools.submit("call", producer.id)
+        tools.submit(turn.id, "call", producer.id)
         operations = {
-            "unknown": partial(tools.wait, "unknown"),
             "other-turn": partial(
-                ReplayTurnTools(runtime, producer.id, ManualClock()).wait, "call"
+                ReplayTurnYields(runtime, ManualClock()).wait, producer.id, "call"
             ),
-            "no-producer": partial(tools.submit, "other", "missing"),
-            "changed-call": partial(tools.submit, "call", turn.id),
-            "changed-wait": partial(tools.wait, "other"),
-            "after-yield": partial(tools.submit, "other", producer.id),
+            "no-producer": partial(tools.submit, turn.id, "other", "missing"),
+            "changed-call": partial(tools.submit, turn.id, "call", turn.id),
+            "changed-wait": partial(tools.wait, turn.id, "other"),
+            "after-yield": partial(tools.submit, turn.id, "other", producer.id),
         }
         if invalid == "changed-wait":
-            tools.submit("other", producer.id)
+            tools.submit(turn.id, "other", producer.id)
         if invalid in {"changed-wait", "after-yield"}:
-            tools.wait("call")
+            tools.wait(turn.id, "call")
         with pytest.raises(ReplayError):
             operations[invalid]()
+    finally:
+        runtime.close(now=0)
+
+
+@pytest.mark.regression
+@example(elapsed=31.0)
+@given(elapsed=st.floats(min_value=0, max_value=100))
+def test_waits_go_through_the_one_suspension_gate(elapsed: float) -> None:
+    """An unowned reply or a wait past the credited bound is refused by type, never recorded."""
+    runtime, turn, producer = prepared()
+    clock = ManualClock()
+    tools = ReplayTurnYields(runtime, clock)
+    try:
+        runtime.renew(now=0, duration=1000)
+        tools.submit(turn.id, "call", producer.id)
+        assert tools.wait(turn.id, "unknown") == SuspensionRefusal.JOB_NOT_OWNED
+        assert tools.yielded(turn.id) is None
+        clock.advance(elapsed)
+        outcome = tools.wait(turn.id, "call")
+        # The bound credits the recorded hold: stated 30 seconds plus 3 seconds of credit.
+        if elapsed >= 33:
+            assert outcome == SuspensionRefusal.DEADLINE_EXCEEDED
+            assert tools.yielded(turn.id) is None
+        else:
+            assert outcome == tools.yielded(turn.id)
+    finally:
+        runtime.close(now=0)
+
+
+def test_a_recorded_wait_the_gate_refuses_cannot_load() -> None:
+    runtime, turn, _ = prepared()
+    try:
+        wait = replay.ReplayTurnWait(turn=turn.id, reply_ids=["unknown"])
+        forged = fact_record(runtime, wait)
+        with pytest.raises(ReplayError, match="suspension gate: job_not_owned"):
+            runtime.archive.append(forged)
     finally:
         runtime.close(now=0)
 
@@ -270,7 +312,7 @@ def test_crash_between_logical_and_physical_start_keeps_the_original_bound(
         assert replacement.replay.turn_bound is not None
         assert replacement.replay.turn_bound.deadline == within
         assert replacement.replay_physical is not None
-        assert replacement.replay_physical.deadline == within
+        assert replacement.replay_physical.deadline == within + 3
     finally:
         resumed.close(now=recovered_at)
 
@@ -293,7 +335,7 @@ async def test_continuation_and_correction_keep_the_original_deadline_and_credit
             runtime.renew(now=now, duration=100)
             (span,) = runtime.prepare(now=now, at=Timestamp())
             assert span.replay_physical is not None
-            assert span.replay_physical.deadline == 30
+            assert span.replay_physical.deadline == 33
             observed = await runtime.dispatch(span.id, owner, now=now)
             runtime.observe(span.id, observed, now=now, at=Timestamp())
             runtime.accept(span.id, now=now, at=Timestamp())
@@ -362,13 +404,13 @@ def tool_crash_case(crash: int | None, *, before: bool) -> int:
     try:
         runtime.start(launch("first"), now=0, at=Timestamp())
         turn, producer = runtime.prepare(now=0, at=Timestamp())
-        tools = ReplayTurnTools(runtime, turn.id, ManualClock())
-        tools.submit("call", producer.id)
-        tools.acknowledge("call")
-        tools.wait("call")
+        tools = ReplayTurnYields(runtime, ManualClock())
+        tools.submit(turn.id, "call", producer.id)
+        tools.acknowledge(turn.id, "call")
+        tools.wait(turn.id, "call")
         runtime.observe(producer.id, result(producer), now=0, at=Timestamp())
         runtime.accept(producer.id, now=0, at=Timestamp())
-        runtime.observe(turn.id, result(turn), now=0, at=Timestamp())
+        runtime.observe(turn.id, result(turn, tools.yielded(turn.id)), now=0, at=Timestamp())
         runtime.accept(turn.id, now=0, at=Timestamp())
     except HostCrashError:
         assert crash is not None
@@ -391,7 +433,7 @@ def tool_crash_case(crash: int | None, *, before: bool) -> int:
         fresh = ReplayRuntime(store, root, replay.ReplayAllowance())
         fresh.start(launch(f"resume-{epoch}"), now=0, at=Timestamp())
         try:
-            for owed in fresh.archive.dependencies.owed:
+            for owed in fresh.archive.dependencies.owed(fresh.archive.span):
                 fresh.tool_fact(
                     replay.ReplayToolAcknowledgement(turn=owed.turn, reply_id=owed.reply_id),
                     now=0,
@@ -399,10 +441,10 @@ def tool_crash_case(crash: int | None, *, before: bool) -> int:
                 )
             for span in fresh.archive.spans:
                 if span.replay_physical is not None and not span.has_field("ended_at"):
-                    tools = ReplayTurnTools(fresh, span.id, ManualClock())
+                    tools = ReplayTurnYields(fresh, ManualClock())
                     with pytest.raises(ReplayError, match="host incarnation"):
-                        tools.wait("new-call")
-            assert not fresh.archive.dependencies.owed
+                        tools.wait(span.id, "new-call")
+            assert not fresh.archive.dependencies.owed(fresh.archive.span)
         finally:
             fresh.close(now=0)
     return writes
@@ -459,6 +501,12 @@ def submission_record(
     fact = replay.ReplayToolSubmission(
         turn=turn, producer=producer, call_id="call", reply_id="reply"
     )
+    return fact_record(runtime, fact, prefix=prefix, unknown=unknown)
+
+
+def fact_record(
+    runtime: ReplayRuntime, fact: Message, *, prefix: str = "", unknown: bool = False
+) -> Record:
     archive = runtime.archive
     return Record(
         seq=archive.sequence + 1,
@@ -494,7 +542,7 @@ def test_tool_metadata_type_urls_cannot_hide_dependency_validation(*, unknown: b
                 archive.append(record)
         else:
             archive.append(record)
-            assert len(archive.dependencies.owed) == 1
+            assert len(archive.dependencies.owed(archive.span)) == 1
     finally:
         runtime.close(now=0)
 
@@ -515,5 +563,86 @@ def test_opaque_tool_requests_reject_unknown_routing_fields(family: type[Message
         records.append(submission_record(runtime, turn.id, producer.id))
         with pytest.raises(ReplayError, match="unknown"):
             ReplayArchive.decode(ReplayStore(records=records).to_binary())
+    finally:
+        runtime.close(now=0)
+
+
+@pytest.mark.regression
+def test_a_continuation_without_its_original_bound_cannot_load() -> None:
+    async def flow(ctx: ReplayFlow) -> object:
+        first = await turn_call(ctx, "first")
+        assert first.turn_bound is not None
+        await turn_call(ctx, "continuation", origin=first.turn_bound.origin)
+        return "complete"
+
+    runtime = ReplayRuntime(FakeStateStore(), flow, replay.ReplayAllowance())
+    runtime.start(launch("first"), now=0, at=Timestamp())
+    try:
+        (first,) = runtime.prepare(now=0, at=Timestamp())
+        runtime.observe(first.id, result(first), now=0, at=Timestamp())
+        runtime.accept(first.id, now=0, at=Timestamp())
+        runtime.prepare(now=0, at=Timestamp())
+        records = ReplayStore.from_binary(runtime.archive.encode()).records
+        logical = next(
+            r.body.value.span
+            for r in reversed(records)
+            if r.body is not None
+            and r.body.field == "span"
+            and r.body.value.span is not None
+            and r.body.value.span.replay_physical is None
+            and r.body.value.span.replay is not None
+            and r.body.value.span.replay.turn_bound is not None
+        )
+        assert logical.replay is not None
+        logical.replay.clear_field("turn_bound")
+        with pytest.raises(ReplayError, match="continuation requires"):
+            ReplayArchive.decode(ReplayStore(records=records).to_binary())
+    finally:
+        runtime.close(now=0)
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize("change", ["omitted", "unyielded", "other-bound", "other-wait"])
+def test_turn_observations_must_match_their_bound_and_durable_yield(change: str) -> None:
+    runtime, turn, producer = prepared()
+    tools = ReplayTurnYields(runtime, ManualClock())
+    try:
+        tools.submit(turn.id, "call", producer.id)
+        wait = tools.wait(turn.id, "call")
+        assert isinstance(wait, replay.ReplayTurnWait)
+        observed = result(turn, wait)
+        assert observed.turn is not None
+        bad = deepcopy(observed.turn)
+        if change == "omitted":
+            bad = None
+        elif change == "unyielded":
+            bad.clear_field("suspension")
+        elif change == "other-bound":
+            assert bad.bound is not None
+            bad.bound.hold_credit_seconds += 1
+        else:
+            bad.suspension = replay.ReplayTurnWait(turn=turn.id, reply_ids=["other"])
+        with pytest.raises(ReplayError, match="turn observation"):
+            runtime.observe(
+                turn.id,
+                ReplayResult(observed.outcome, turn=bad),
+                now=0,
+                at=Timestamp(),
+            )
+    finally:
+        runtime.close(now=0)
+
+
+def test_a_reply_owed_to_an_ended_turn_is_settled_by_its_ending() -> None:
+    runtime, turn, producer = prepared()
+    tools = ReplayTurnYields(runtime, ManualClock())
+    try:
+        tools.submit(turn.id, "call", producer.id)
+        archive = runtime.archive
+        assert len(archive.dependencies.owed(archive.span)) == 1
+        runtime.withdraw(turn.id, now=0, at=Timestamp())
+        archive = runtime.archive
+        assert not archive.dependencies.owed(archive.span)
+        assert tools.lookup(turn.id, "call") == ReplayToolPending(producer.id)
     finally:
         runtime.close(now=0)

@@ -49,7 +49,7 @@ if TYPE_CHECKING:
     from .types.common import Limits, Observation, RequestId
     from .types.evaluation import Continuation, EvaluationState
     from .types.kernel import RunState
-    from .types.records import HostEpoch, RecordsState, RequestRecord
+    from .types.records import CapacityHold, HostEpoch, RecordsState, RequestRecord
 
 type Job = OwnedJob | RegisteredOwnedJob
 
@@ -197,11 +197,20 @@ def turn_bound(record: RequestRecord, run: RunState) -> Bound:
     The rules are ``_turn_holds.held_limit``'s; a bound past the run deadline ends with the run,
     and a parked hold lasts until the run ends. A record with no hold ends at its ``until``.
     """
-    stated = record.until.at
-    if record.capacity_hold is None:
+    return held_turn_bound(record.until.at, record.capacity_hold, run.deadline_at)
+
+
+def held_turn_bound(stated: float, hold: CapacityHold | None, run_deadline: float | None) -> Bound:
+    """The one turn-bound rule: ``stated`` plus its credited hold, capped at the run's end.
+
+    ``run_deadline`` is None for a run with no deadline, whose credited bound is never capped.
+    """
+    if hold is None:
         return Bound(at=stated, by=WaitEnd.LIMIT)
-    ceiling = Bound(at=max(run.deadline_at, stated), by=WaitEnd.RUN_END)
-    at = held_limit(stated, record.capacity_hold)
+    at = held_limit(stated, hold)
+    if run_deadline is None:
+        return Bound(at=at, by=WaitEnd.LIMIT)
+    ceiling = Bound(at=max(run_deadline, stated), by=WaitEnd.RUN_END)
     return Bound(at=at, by=WaitEnd.LIMIT) if at <= ceiling.at else ceiling
 
 

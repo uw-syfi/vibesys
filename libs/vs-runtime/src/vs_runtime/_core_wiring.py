@@ -49,7 +49,7 @@ from vs_runtime._workspace_requests import RuntimeWorkspaceRequests
 
 if TYPE_CHECKING:
     from vs_agent.api import ClientAgentSessions
-    from vs_core.api import LifecycleCapability
+    from vs_core.api import Continuation, DispatchTurn, LifecycleCapability
     from vs_evaluation.api import PollingEvaluationExecutor
     from vs_project.api import StateNamespace
     from vs_runtime._run_control import RunControlChannel
@@ -80,7 +80,7 @@ class SessionServices:
 
     agent_sessions: ClientAgentSessions
     resolver: SessionResolver
-    yields: TurnYields | None = None
+    yields: TurnYields[DispatchTurn, Continuation] | None = None
     """Turns that asked to wait; None when no tool lets an agent yield."""
 
 
