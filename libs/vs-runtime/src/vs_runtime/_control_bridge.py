@@ -45,6 +45,7 @@ from vs_core.api import (
     control_refusal,
     escalate_stop,
     pause_after,
+    pending_requests,
     requested_stop_mode,
     run_pause,
     stands_after,
@@ -875,10 +876,10 @@ class RunControlBridge:
         control core refused is refused (``_refuse``) with core's reason, so none waits for a
         poll that a run that just ended never makes.
 
-        Core takes no new work while paused, but a request already running (an agent turn,
-        a job poll) finishes first; ``running`` says one still is. The pause is reported once
-        per stretch of committed ``PAUSED`` status, so the operator sees the run paused when
-        it is, not only at an agent turn's end.
+        Core takes no new work while paused, but admitted work drains first. ``running``
+        covers local calls; the durable outbox and owned jobs also cover requests waiting
+        for a retry or an external job's next poll. Report the pause only after all of them
+        settle, once per stretch of committed ``PAUSED`` status.
         """
         for error in refused:
             change = self._asked.get(error.control.control_id)
@@ -928,7 +929,14 @@ class RunControlBridge:
         self._stands = capacity_wait_stands(core.run)
         if core.run.status != RunStatus.PAUSED:
             self._landed = False
-        elif not running and not self._landed:
+        elif (
+            not running
+            and not self._landed
+            and not pending_requests(core.records)
+            and all(
+                job.terminal for job in (*core.evaluation.jobs, *core.evaluation.registered_jobs)
+            )
+        ):
             self._landed = True
             self._channel.land_pause()
 
