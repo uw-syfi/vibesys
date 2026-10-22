@@ -3,7 +3,7 @@ import {HelperRequestError} from './helper-channel.js';
 
 /**
  * Whether `error` says the host's VibeSys cannot do what was asked: the helper did not negotiate
- * the feature, or the registry answered UNSUPPORTED (its checkout predates the command). Callers
+ * the feature, or the registry answered UNSUPPORTED (its checkout lacks the version handshake or speaks another schema). Callers
  * answer their screen's `unsupported` reply or `needs-update` status instead of the host's text.
  */
 export function isHostUnsupported(error: unknown): boolean {

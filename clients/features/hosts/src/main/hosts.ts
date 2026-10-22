@@ -10,7 +10,6 @@ import {
   type ConnectionManager,
   connectionStatus,
   HelperRequestError,
-  HOST_UNSUPPORTED_MESSAGE,
   type HostConnection,
   isHostUnsupported,
   type LogsLease,
@@ -65,7 +64,7 @@ import {
   withHostSettings,
   withoutHost,
 } from '@vibesys/settings';
-import {checkHostVersion} from './host-version.js';
+import {checkHostVersion, type HostVersion, HostVersionGate} from './host-version.js';
 import {discoverSshConfigAliases, type SshConfigFilesystem} from './ssh-config.js';
 
 /** The most events a helper without `run_history_pages` serves in one `runs.read_events` page. */
@@ -247,8 +246,6 @@ export class Hosts {
   readonly #watchIntents = new Map<HostKey, WatchIntent>();
   /** Advances before desired-set changes, fencing reads against the desired-host union. */
   #generation = 0;
-  /** v2 hosts whose checkout answered that it cannot serve this app. */
-  readonly #outOfDate = new Set<HostKey>();
 
   constructor(deps: HostsDeps) {
     this.#deps = deps;
@@ -449,6 +446,7 @@ export class Hosts {
   /** Sign in to `id` now, prompting when the host asks (the user's own action). */
   async signIn(id: HostId): Promise<void> {
     await this.#deps.manager.signIn(id);
+    this.#watched.get(hostKey(id))?.recheck();
   }
 
   /** The tasks `project` defines on `id`. */
@@ -894,22 +892,35 @@ export class Hosts {
       const detail = error instanceof Error ? error.message : String(error);
       this.#deps.log(detail);
     });
-    const stopListing = connection.watchInstances(listing => {
-      if (!this.#outOfDate.has(key)) push(hostListing(key, listing));
+    const gate = new HostVersionGate({
+      host: key,
+      check: signal => this.#checkVersion(key, checkout, signal),
+      push,
+      log: reason =>
+        this.#deps.log(`could not check the VibeSys of ${hostLabel(hostFromKey(key))}: ${reason}`),
     });
+    const recheck = () => {
+      if (connection.phase.kind === 'ready') gate.recheck();
+    };
+    const stopListing = connection.watchInstances(listing =>
+      gate.listing(hostListing(key, listing)),
+    );
     const stopPhase = connection.onPhase(phase => {
-      if (phase.kind !== 'ready') {
-        push({kind: 'unavailable', host: key, connection: connectionStatus(phase)});
-      } else {
-        this.#checkVersion(key, checkout, () => stopped);
+      if (phase.kind === 'ready') {
+        recheck();
+        return;
       }
+      gate.invalidate();
+      push({kind: 'unavailable', host: key, connection: connectionStatus(phase)});
     });
-    if (connection.phase.kind === 'ready') this.#checkVersion(key, checkout, () => stopped);
+    recheck();
     this.#watched.set(key, {
       checkout,
       lease,
+      recheck,
       stop: () => {
         stopped = true;
+        gate.invalidate();
         stopListing();
         stopPhase();
         this.#deps.runs?.cancel(hostFromKey(key));
@@ -917,37 +928,11 @@ export class Hosts {
     });
   }
 
-  /**
-   * Ask a v2 host's checkout once whether it can serve this app, each time its connection becomes
-   * ready. An old one is shown as `incompatible` (the status every screen words "needs an update")
-   * and its helper listing is withheld until a later check passes.
-   */
-  #checkVersion(key: HostKey, checkout: string, stopped: () => boolean): void {
+  /** Whether a v2 host's checkout can serve this app; a v1 host has no such check and is current. */
+  async #checkVersion(key: HostKey, checkout: string, signal: AbortSignal): Promise<HostVersion> {
     const id = hostFromKey(key);
-    void (async () => {
-      if (!(await this.#transportV2(id))) return;
-      const verdict = await checkHostVersion(
-        this.#setup(),
-        id,
-        checkout,
-        new AbortController().signal,
-      );
-      if (stopped()) return;
-      if (verdict === 'current') {
-        this.#outOfDate.delete(key);
-        return;
-      }
-      this.#outOfDate.add(key);
-      this.#deps.push({
-        kind: 'unavailable',
-        host: key,
-        connection: {kind: 'incompatible', detail: HOST_UNSUPPORTED_MESSAGE},
-      });
-    })().catch((error: unknown) => {
-      this.#deps.log(
-        `could not check the VibeSys of ${hostLabel(id)}: ${error instanceof Error ? error.message : String(error)}`,
-      );
-    });
+    if (!(await this.#transportV2(id))) return 'current';
+    return checkHostVersion(this.#setup(), id, checkout, signal);
   }
 
   #desired(): Set<HostKey> {
@@ -980,7 +965,6 @@ export class Hosts {
 
   /** Attempt every retirement step even when presentation cleanup itself reports a failure. */
   #retireWatched(key: HostKey, watched: WatchedHost): void {
-    this.#outOfDate.delete(key);
     try {
       watched.stop();
     } catch (error) {
@@ -1276,6 +1260,8 @@ interface WatchedHost {
   /** The configured checkout this watch represents, not the helper's normalized physical root. */
   readonly checkout: string;
   readonly lease: ConnectionLease;
+  /** Ask the host's checkout again whether it can serve this app (the user's retry). */
+  readonly recheck: () => void;
   readonly stop: () => void;
 }
 

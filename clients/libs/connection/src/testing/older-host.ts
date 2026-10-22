@@ -13,9 +13,9 @@ export const USAGE_DUMP =
 const failure = {category: FailureCategory.UNSUPPORTED, message: USAGE_DUMP};
 
 /**
- * A host whose VibeSys predates every registry operation, answering at the gateway's ports. Each
- * Read, Mutate and Watch answers UNSUPPORTED and carries the usage dump in its diagnostic, which is
- * what a gateway that forwarded the checkout's stderr would send: a client must not show it.
+ * A host whose VibeSys answers UNSUPPORTED to every registry operation, at the gateway's ports, with
+ * the usage dump in its diagnostic. The real gateway sends this only for the version handshake; the
+ * fake is broader so each client's handling of the category is exercised. A client must not show the dump.
  */
 export const olderHost = {
   read: async (): Promise<Uint8Array> =>
