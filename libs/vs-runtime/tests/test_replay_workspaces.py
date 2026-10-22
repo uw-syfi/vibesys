@@ -11,7 +11,16 @@ from protobuf.wkt.google.protobuf.timestamp_pb import Timestamp
 from vs_core.api import RevisionRef
 from vs_core.api.replay import ReplayCall, ReplayFlow, ReplaySource, SemanticKey, classify_context
 from vs_project.api import FakeStateStore, StateNamespace
-from vs_proto.api import Ended, EpochStarted, Outcome, core_leaves, replay
+from vs_proto.api import (
+    Ended,
+    EpochStarted,
+    Outcome,
+    core_agent_facts,
+    core_common,
+    core_leaves,
+    core_vocabulary,
+    replay,
+)
 from vs_proto.api import replay_workspace as pb
 from vs_runtime.api.core import ReceiptStore
 from vs_runtime.api.core_values import to_proto
@@ -292,5 +301,83 @@ def test_workspace_inspection_fences_absence_and_preserves_physical_payload(
             assert isinstance(await executor.inspect(span, fence), ReplayUnknown)
             with pytest.raises(ReplayOperationError, match="lease was lost"):
                 await executor.execute(span, fence)
+
+        sim.run(scenario())
+
+
+@pytest.mark.parametrize("with_receipt", [False, True])
+def test_adoption_consumes_native_evidence_without_fabricating_legacy_observations(
+    tmp_path: Path, sim: Sim, *, with_receipt: bool
+) -> None:
+    with _env(tmp_path) as env:
+        resources = env.hosts[0]
+        revision = resources.root.trusted_input_baseline
+        assert revision is not None
+        base = to_proto(RevisionRef.of_git_commit(revision))
+        assert isinstance(base, core_leaves.RevisionRef)
+        scope = core_common.Scope(
+            owner=core_common.ScopeOwner(
+                owner=Oneof("run", core_common.RunId(root=env.run_id, kind="run"))
+            ),
+            generation="0",
+        )
+        source = core_common.RequestId(root="measurement-1", kind="request")
+        evidence = core_agent_facts.EvidenceRef(
+            evidence_id=core_common.EvidenceId(root="evidence-1", kind="evidence"),
+            kind=core_vocabulary.EvidenceKind.CORRECTNESS,
+            purpose=core_agent_facts.EvidencePurpose.OFFICIAL,
+            scope=scope,
+            source_request=source,
+            candidate=base,
+            observation_sequence="1",
+            evaluator_digest="evaluator",
+            workload_digest="workload",
+            environment_digest="environment",
+            provenance=core_agent_facts.EvidenceProvenance.TRUSTED,
+            status=core_vocabulary.ObservationStatus.SUCCEEDED,
+            acceptance_receipt=None
+            if not with_receipt
+            else core_agent_facts.EvidenceAcceptanceReceipt(
+                source_request=source,
+                scope=scope,
+                observation_sequence="1",
+                status=core_vocabulary.ObservationStatus.SUCCEEDED,
+            ),
+        )
+        asked = pb.ReplayWorkspaceRequest(
+            action=Oneof(
+                "adopt", pb.ReplayAdoptWorkspace(revision=base, baseline=True, evidence=[evidence])
+            )
+        )
+
+        async def root(ctx: ReplayFlow) -> object:
+            return await step(ctx, asked)
+
+        owner, receipts = _executor(resources)
+        store = FakeStateStore()
+        executor = WorkspaceReplayExecutor(
+            owner, receipts, ReplayOperationHost(env.run_id, store, sim.clock), within_seconds=100
+        )
+        runtime = ReplayRuntime(store, root, replay.ReplayAllowance())
+
+        async def scenario() -> None:
+            run_host = ReplayRunHost(
+                runtime,
+                executor,
+                sim.clock,
+                lambda _: ReplayEnding(
+                    Ended(outcome=Outcome.FINISHED, summary="Done.", resumable=True)
+                ),
+            )
+            completed = await drive_replay(run_host, launch("first"))
+            assert isinstance(completed, ReplayCompleted)
+            assert isinstance(completed.value, pb.ReplayWorkspaceResult)
+            assert completed.value.status is pb.ReplayWorkspaceStatus.SUCCEEDED
+            (span,) = runtime.archive.spans
+            assert span.replay is not None
+            assert span.replay.policy is not None
+            assert span.replay.policy.request is not None
+            recorded = pb.ReplayWorkspaceRequest.from_binary(span.replay.policy.request.value)
+            assert recorded == asked
 
         sim.run(scenario())

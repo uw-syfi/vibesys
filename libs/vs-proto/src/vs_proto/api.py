@@ -56,6 +56,7 @@ from vs_proto._generated.vibesys.core.v1 import failures_pb as core_failures
 from vs_proto._generated.vibesys.core.v1 import iterations_pb as core_iterations
 from vs_proto._generated.vibesys.core.v1 import leaves_pb as core_leaves
 from vs_proto._generated.vibesys.core.v1 import replay_agent_pb as replay_agent
+from vs_proto._generated.vibesys.core.v1 import replay_evaluation_pb as replay_evaluation
 from vs_proto._generated.vibesys.core.v1 import replay_workspace_pb as replay_workspace
 from vs_proto._generated.vibesys.core.v1 import value_options_pb as core_value_options
 from vs_proto._generated.vibesys.core.v1 import vocabulary_pb as core_vocabulary
@@ -365,6 +366,7 @@ __all__ = [
     "core_vocabulary",
     "replay",
     "replay_agent",
+    "replay_evaluation",
     "replay_workspace",
     "schema_hash",
     "serial_effects",

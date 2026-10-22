@@ -781,6 +781,7 @@ def test_store_schema_cannot_import_search_strategy_contracts(package: str) -> N
             p.core_iterations.IterationRequest.desc().file,
             p.replay_workspace.ReplayWorkspaceRequest.desc().file,
             p.replay_agent.ReplayAgentRequest.desc().file,
+            p.replay_evaluation.ReplayEvaluationRequest.desc().file,
         ]
     )
     seen: set[str] = set()

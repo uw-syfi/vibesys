@@ -26,13 +26,14 @@ from vs_core.api import (
 )
 from vs_proto.api import core_leaves, validate
 from vs_proto.api import replay_workspace as pb
+from vs_runtime._replay_evidence import adoption_evidence
 from vs_runtime._replay_operations import ReplayOperationError, ReplayOperationHost
 from vs_runtime._replay_owner import ReceiptReplayExecutor, ReplayOwnerCodec
 from vs_runtime._replay_runtime import ReplayAbsent, ReplayPending, ReplayResult, ReplayUnknown
 from vs_runtime.api.core_values import from_proto, to_proto
 
 if TYPE_CHECKING:
-    from vs_core.api import EvidenceRef, InvocationRef
+    from vs_core.api import InvocationRef
     from vs_project.api import StoreFence
     from vs_proto.api import Span
     from vs_runtime._core_requests import ExecutionResult, WorkspaceRequests, WorkspaceRoleRequest
@@ -144,7 +145,7 @@ class WorkspaceReplayExecutor:
                 request_id=identity,
                 scope=Scope(owner=RunId(root=self._host.run_id), generation=0),
                 selection=selection,
-                evidence=tuple(cast("EvidenceRef", from_proto(item)) for item in asked.evidence),
+                evidence=tuple(adoption_evidence(item) for item in asked.evidence),
             )
         attempt = AttemptRef(
             attempt_id=AttemptId(root=native.attempt), generation=native.generation
