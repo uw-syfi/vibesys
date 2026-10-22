@@ -80,6 +80,17 @@ def test_publication_checked_out_by_operator_is_never_moved_and_retry_reuses_com
     assert world.tracker.publish_revision(second_revision, "retry") == second
 
 
+def test_a_framework_metadata_commit_still_fast_forwards_the_candidate(world: _World) -> None:
+    world.project.write(".vibesys/state/note", "framework\n")
+    framework = world.project.commit_all("framework metadata")
+    revision = world.winner("winner")
+    publication = world.tracker.publish_revision(revision, "winner")
+    assert world.project.repo.is_ancestor(framework, publication.commit)
+    assert world.tracker.update_checkout(publication) is CheckoutOutcome.FAST_FORWARDED
+    assert (world.project.root / "code.py").read_text() == "winner"
+    assert world.project.repo.head() == publication.commit
+
+
 def test_checkout_refusals_do_not_change_the_published_result(world: _World) -> None:
     publication = world.tracker.publish_revision(world.winner("winner"), "winner")
     world.project.repo.switch_branch("main")

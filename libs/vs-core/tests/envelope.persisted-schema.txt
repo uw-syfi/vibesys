@@ -230,7 +230,7 @@ ChargeReceipt.kind required {"$ref":"#/$defs/ChargeKind"}
 ChargeReceipt.refund_sources optional {"default":[],"items":{"$ref":"#/$defs/RequestId"},"type":"array"}
 ChargeReceipt.refunded optional {"$ref":"#/$defs/Count","default":0}
 ChargeReceipt.source_request optional {"anyOf":[{"$ref":"#/$defs/RequestId"},{"type":"null"}],"default":null}
-CheckoutStatus {"enum":["fast_forwarded","other_branch","dirty_tree","diverged","git_refused"],"type":"string"}
+CheckoutStatus {"enum":["fast_forwarded","other_branch","dirty_tree","diverged","git_refused","operator_changed_checkout"],"type":"string"}
 CheckoutUpdate {"additionalProperties":false,"type":"object"}
 CheckoutUpdate.status required {"$ref":"#/$defs/CheckoutStatus"}
 Checkpoint {"discriminator":{"mapping":{"declined":"#/$defs/Declined","retained":"#/$defs/Retained"},"propertyName":"kind"},"oneOf":[{"$ref":"#/$defs/Retained"},{"$ref":"#/$defs/Declined"}]}

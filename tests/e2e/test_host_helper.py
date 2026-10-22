@@ -79,7 +79,8 @@ _SCENARIOS = tuple(
 # server.host_run_reader (the run.reader messages) and server.host_helper_readers (finding or
 # starting the read-only server Chat reads an ended run through) add 2: the standard library,
 # Pydantic and light server modules only.
-_MODULE_CEILING = 359
+# vs_project._revision_publication (the project API's publication types) adds 1.
+_MODULE_CEILING = 360
 """The most modules a helper may load to answer ``hello``; lower it as the helper sheds imports."""
 _HELLO = {
     "type": "hello",

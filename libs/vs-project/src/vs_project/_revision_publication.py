@@ -73,9 +73,12 @@ class RevisionPublisher:
         if previous is not None and not self._git.has_ref_pointing_at(previous, self._receipts):
             raise PublicationError(self._branch)
         if publication is None:
-            # Only the immutable input, our previous publication and the retained
-            # source supply ancestry. A clean operator commit grants no authority.
-            parents = tuple(dict.fromkeys((previous or self._input, source)))
+            # Operator commits grant no ancestry. A run-branch tip that only
+            # extends the base inside the metadata path is the run's own commit,
+            # and the checkout can fast-forward through it.
+            parents = tuple(
+                dict.fromkeys((self._metadata_descendant(previous or self._input, tip), source))
+            )
             publication = self._git.create_commit(
                 source,
                 parents,
@@ -124,6 +127,16 @@ class RevisionPublisher:
         ):
             return CheckoutOutcome.GIT_REFUSED
         return CheckoutOutcome.FAST_FORWARDED
+
+    def _metadata_descendant(self, base: str, tip: str) -> str:
+        """``tip`` when it descends from ``base`` and changes nothing outside metadata."""
+        if tip == base or not self._git.is_ancestor(base, tip):
+            return base
+        try:
+            operator_changes = self._git.diff_patch(base, tip, [".", f":(exclude){self._metadata}"])
+        except GitError:
+            return base
+        return tip if operator_changes == "" else base
 
     def _matches_expected_tree(self) -> bool:
         head = self._git.head()
