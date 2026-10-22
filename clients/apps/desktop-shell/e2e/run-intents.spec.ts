@@ -37,8 +37,21 @@ function appliedState(action: IntentAction) {
   }).state;
 }
 
-async function openIntents(page: Page) {
-  const fixture = storeRunFixture('live');
+async function openIntents(page: Page, amendment = false) {
+  const source = storeRunFixture('live');
+  const fixture = {...source, records: [...source.records]};
+  if (amendment) {
+    const header = fixture.records.find(record => record.body.case === 'epochStarted');
+    if (header?.body.case !== 'epochStarted') throw new Error('fixture header required');
+    fixture.records.push(
+      create(RecordSchema, {
+        seq: (fixture.records.at(-1)?.seq ?? 0n) + 1n,
+        epoch: header.epoch,
+        at: {seconds: 1700000200n},
+        body: {case: 'declarationAmended', value: header.body.value},
+      }),
+    );
+  }
   const requests: {host: string; request: PostIntentRequest}[] = [];
   let sequence = fixture.records.at(-1)?.seq ?? 0n;
   await page.exposeFunction('postIntent', (host: string, bytes: number[]) => {
@@ -92,6 +105,23 @@ async function openIntents(page: Page) {
     );
   };
   return {requests, outcome, toggle};
+}
+
+for (const width of [800, 1440]) {
+  test(`declaration amendments keep lifecycle and addressed Pause at ${width}px`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({width, height: 900});
+    const {requests} = await openIntents(page, true);
+    await expect(page.getByText('Saved run', {exact: true})).toHaveCount(0);
+    await expect(page.getByRole('button', {name: 'Resume', exact: true})).toHaveCount(0);
+    await page.getByRole('button', {name: 'Pause', exact: true}).click();
+    await expect(page.getByText('Pause · Pending', {exact: true})).toBeVisible();
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.request.projectRoot).toBe('/work/queue-rs');
+    expect(requests[0]?.request.expectedEpoch).toBe(1n);
+    await capture(page, `amendment-pause-${width}`);
+  });
 }
 
 const shots = process.env['SCREENS_DIR'];

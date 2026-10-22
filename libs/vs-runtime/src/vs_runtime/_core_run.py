@@ -345,17 +345,6 @@ class _Loop:
         self._stall_notes = stall_notes
         self._time = self._core().run.now_at
         self._deadline_stop = False
-        self._resume_pending = (
-            self._controls is not None
-            and self._controls.resumes_run
-            and self._core().run.status
-            in (
-                RunStatus.TERMINAL,
-                RunStatus.PARKED,
-                RunStatus.CLOSING,
-                RunStatus.BLOCKED,
-            )
-        )
         self._first_dispatch = self._shell.dispatched
         self._lease: asyncio.Task[None] | None = None
         # Set when the operator asks to stop, so a wait that has requests running ends now.
@@ -396,33 +385,7 @@ class _Loop:
             if not heartbeat.cancelled() and (failure := heartbeat.exception()) is not None:
                 raise failure
 
-    async def _reopen(self) -> None:
-        """Open the successor epoch after the previous ending's cleanup has settled."""
-        core = self._core()
-        if not self._resume_pending or core.run.status not in (
-            RunStatus.TERMINAL,
-            RunStatus.PARKED,
-        ):
-            return
-        now = self._read()
-        self._shell.submit(
-            RunControlEvent(
-                control=ControlInput(
-                    control_id=ControlId(root=f"resume:{core.records.recovery.epoch}"),
-                    action="resume",
-                    when="now",
-                ),
-                now_at=now,
-            ),
-            now_at=now,
-        )
-        self._resume_pending = False
-        await self._settle(now)
-        self._settle_controls()
-
     async def _iterate(self) -> RunOutcome:
-        if self._core().run.status in (RunStatus.TERMINAL, RunStatus.PARKED):
-            await self._reopen()
         while self._core().run.status not in (RunStatus.TERMINAL, RunStatus.PARKED):
             self._raise_if_lease_lost()
             now = self._read()
@@ -449,9 +412,6 @@ class _Loop:
             # answered now, since no later poll will see it.
             self._settle_controls()
             if self._core().run.status in (RunStatus.TERMINAL, RunStatus.PARKED):
-                if self._resume_pending:
-                    await self._reopen()
-                    continue
                 break
             if self._signature() == before:
                 await self._wait(now)

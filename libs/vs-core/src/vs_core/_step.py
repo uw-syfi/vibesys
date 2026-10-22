@@ -46,7 +46,7 @@ from ._proofs import (
 from ._quota_pause_clock import credit_quota_pause
 from ._registry import ContractError
 from ._routing import SIGNAL_ORDER, event_area
-from ._run_pause import control_refusal, reopened, stop_standing
+from ._run_pause import EpochFacts, control_refusal, reopened, stop_standing
 from ._session_inputs import check_declared_target, may_have_been_read
 from ._session_inputs import mid_turn_offers as _mid_turn_offers
 from ._validation import validate_decision
@@ -74,6 +74,7 @@ from .types.common import (
     Area,
     AttemptId,
     AttemptRef,
+    ControlId,
     ControlInput,
     DecisionId,
     DependencyStatus,
@@ -1817,6 +1818,53 @@ def _advance_run_time(state: CoreState, now_at: float) -> CoreState:
     return state.model_copy(update={"run": state.run.model_copy(update={"now_at": now_at})})
 
 
+def _start_epoch(state: CoreState, event: RecoveryStarted, dispatch: Dispatch) -> Transition:
+    """Reconcile retained work in a freshly constructed epoch, never a copied closure."""
+    previous_epoch = state.records.recovery.epoch
+    restart_search = (
+        state.run.park is not None or state.run.result is not None or stop_standing(state.run)
+    )
+    # Before the clock moves, while ``run.now_at`` is still the dead host's last commit.
+    opened = records.open_host_epoch(state.records, state.run, event)
+    # The downtime the new epoch proves moves open waits' limits as it moves open
+    # records' limits, so the two agree.
+    credit = downtime(opened.hosts) if opened.hosts != state.records.hosts else 0.0
+    waits = evaluation.credit_downtime(state.evaluation, state.run, credit)
+    successor = previous_epoch > 0 and event.epoch > previous_epoch
+    if successor:
+        state = state.model_copy(
+            update={
+                "run": EpochFacts.of(state.run).new_run(),
+                "scheduling": type(state.scheduling)(
+                    queue=state.scheduling.queue,
+                    slots=state.scheduling.slots,
+                    released_slot_seconds=state.scheduling.released_slot_seconds,
+                ),
+                "settlement": reopen_adoption(state.settlement),
+            }
+        )
+    state = state.model_copy(update={"records": opened, "evaluation": waits})
+    state = _advance_event_time(state, event)
+    result = propagate(state, (event,), dispatch, _event_cause(state, event))
+    if successor and previous_epoch > 0 and restart_search:
+        result = result.model_copy(
+            update={
+                "events": (
+                    *result.events,
+                    StopLiftRecorded(
+                        control=ControlInput(
+                            control_id=ControlId(root=f"epoch:{event.epoch}"),
+                            action="resume",
+                            when="now",
+                        ),
+                        new_epoch=True,
+                    ),
+                )
+            }
+        )
+    return result
+
+
 def consume(
     state: CoreState,
     event: CoreEvent,
@@ -1860,15 +1908,9 @@ def consume(
         result = _submitted(state, event, dispatch)
     elif isinstance(event, RunControlEvent):
         result = _control(state, event, dispatch)
+    elif isinstance(event, RecoveryStarted):
+        result = _start_epoch(state, event, dispatch)
     else:
-        if isinstance(event, RecoveryStarted):
-            # Before the clock moves, while ``run.now_at`` is still the dead host's last commit.
-            opened = records.open_host_epoch(state.records, state.run, event)
-            # The downtime the new epoch proves moves open waits' limits as it moves open
-            # records' limits, so the two agree.
-            credit = downtime(opened.hosts) if opened.hosts != state.records.hosts else 0.0
-            waits = evaluation.credit_downtime(state.evaluation, state.run, credit)
-            state = state.model_copy(update={"records": opened, "evaluation": waits})
         state = _advance_event_time(state, event)
         result = propagate(state, (event,), dispatch, _event_cause(state, event))
     parked, cancellations = _run_park.advance(result.state)

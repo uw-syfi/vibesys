@@ -9,16 +9,28 @@ under, and any immediate resume ends the pause.
 
 from __future__ import annotations
 
+from dataclasses import dataclass, fields
 from typing import TYPE_CHECKING, Final
 
 from ._operator_actions import action_refusal_kind
 from ._registry import ContractError
 from .types.common import ACTION_REFUSAL_TEXT, OPERATOR_ACTIONS, PauseOwner, RunPause, RunStatus
+from .types.kernel import RunState
 from .types.strategy import Finish
 
 if TYPE_CHECKING:
-    from .types.common import ActionRefusal, ControlInput
-    from .types.kernel import CoreState, RunState
+    from .types.common import (
+        ActionRefusal,
+        ArtifactRef,
+        Capabilities,
+        ControlInput,
+        Limits,
+        RunFacts,
+        RunId,
+    )
+    from .types.kernel import CoreState, DecisionReceipt
+    from .types.settlement import EvidenceRequirements
+    from .types.strategy import SearchDeclaration
 
 
 DEADLINE_STOP: Final = "deadline"
@@ -211,3 +223,47 @@ def _pause_refusal(run: RunState, control: ControlInput) -> ControlRefusedError 
             control, ("control", "when"), "only a paused run waits for capacity"
         )
     return None
+
+
+@dataclass(frozen=True)
+class EpochFacts:
+    """The only inputs to an epoch constructor; closure and control state are unrepresentable.
+
+    Work receipts and artifacts are durable facts. Status, operator controls, park
+    authority and a previous result belong to the previous epoch, never these inputs.
+    """
+
+    run_id: RunId
+    generation: int
+    now_at: float
+    deadline_at: float
+    duration_seconds: float | None
+    facts: RunFacts
+    capabilities: Capabilities
+    limits: Limits
+    requirements: EvidenceRequirements
+    declaration: SearchDeclaration
+    artifacts: tuple[ArtifactRef, ...]
+    receipts: tuple[DecisionReceipt, ...]
+
+    @classmethod
+    def of(cls, run: RunState) -> EpochFacts:
+        """Extract durable facts, excluding the previous epoch's Finish receipt."""
+        return cls(
+            run_id=run.run_id,
+            generation=run.generation,
+            now_at=run.now_at,
+            deadline_at=run.deadline_at,
+            duration_seconds=run.duration_seconds,
+            facts=run.facts,
+            capabilities=run.capabilities,
+            limits=run.limits,
+            requirements=run.requirements,
+            declaration=run.declaration,
+            artifacts=run.artifacts,
+            receipts=tuple(row for row in run.receipts if not isinstance(row.decision, Finish)),
+        )
+
+    def new_run(self) -> RunState:
+        """Construct fresh admission authority; there is no previous closure to copy."""
+        return RunState(**{field.name: getattr(self, field.name) for field in fields(self)})

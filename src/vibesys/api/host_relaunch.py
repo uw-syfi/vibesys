@@ -12,6 +12,7 @@ from vs_runlog.api import (
     RunLaunchLockedError,
     RunLogStopReason,
     assert_run_unlocked,
+    current_epoch,
     exclusive_run_launch,
     open_run_log,
 )
@@ -103,14 +104,7 @@ def _epoch(path: Path, offset: int = 0) -> tuple[int, int]:
     if not path.exists():
         return 0, 0
     with open_run_log(path, offset) as reader:
-        epoch = max(
-            (
-                record.epoch
-                for record in reader
-                if record.body and record.body.field == "epoch_started"
-            ),
-            default=0,
-        )
+        epoch = current_epoch(reader).number
         if reader.stop.reason == RunLogStopReason.CORRUPTION:
             raise ValueError(reader.stop.detail)
         return epoch, reader.stop.offset

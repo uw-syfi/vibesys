@@ -26,16 +26,20 @@ const (
 // Writer-computed dashboard projection. Absence of committed_seq retains the
 // phase 1 rule: every complete record is committed. A present zero commits none.
 type RunHead struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Lifecycle     *Lifecycle             `protobuf:"bytes,1,opt,name=lifecycle,proto3" json:"lifecycle,omitempty"`
-	Strategy      string                 `protobuf:"bytes,2,opt,name=strategy,proto3" json:"strategy,omitempty"`
-	Objective     *HeadlineObjective     `protobuf:"bytes,3,opt,name=objective,proto3" json:"objective,omitempty"`
-	SpanCounts    map[string]uint64      `protobuf:"bytes,4,rep,name=span_counts,json=spanCounts,proto3" json:"span_counts,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"varint,2,opt,name=value"`
-	Usage         *TokenUsage            `protobuf:"bytes,5,opt,name=usage,proto3" json:"usage,omitempty"`
-	ChartPoints   []*MetricPoint         `protobuf:"bytes,6,rep,name=chart_points,json=chartPoints,proto3" json:"chart_points,omitempty"`
-	NeedsUser     bool                   `protobuf:"varint,7,opt,name=needs_user,json=needsUser,proto3" json:"needs_user,omitempty"`
-	CommittedSeq  *uint64                `protobuf:"varint,8,opt,name=committed_seq,json=committedSeq,proto3,oneof" json:"committed_seq,omitempty"`
-	Process       *RunProcess            `protobuf:"bytes,9,opt,name=process,proto3" json:"process,omitempty"`
+	state        protoimpl.MessageState `protogen:"open.v1"`
+	Lifecycle    *Lifecycle             `protobuf:"bytes,1,opt,name=lifecycle,proto3" json:"lifecycle,omitempty"`
+	Strategy     string                 `protobuf:"bytes,2,opt,name=strategy,proto3" json:"strategy,omitempty"`
+	Objective    *HeadlineObjective     `protobuf:"bytes,3,opt,name=objective,proto3" json:"objective,omitempty"`
+	SpanCounts   map[string]uint64      `protobuf:"bytes,4,rep,name=span_counts,json=spanCounts,proto3" json:"span_counts,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"varint,2,opt,name=value"`
+	Usage        *TokenUsage            `protobuf:"bytes,5,opt,name=usage,proto3" json:"usage,omitempty"`
+	ChartPoints  []*MetricPoint         `protobuf:"bytes,6,rep,name=chart_points,json=chartPoints,proto3" json:"chart_points,omitempty"`
+	NeedsUser    bool                   `protobuf:"varint,7,opt,name=needs_user,json=needsUser,proto3" json:"needs_user,omitempty"`
+	CommittedSeq *uint64                `protobuf:"varint,8,opt,name=committed_seq,json=committedSeq,proto3,oneof" json:"committed_seq,omitempty"`
+	Process      *RunProcess            `protobuf:"bytes,9,opt,name=process,proto3" json:"process,omitempty"`
+	// The current epoch header is committed, but its first lifecycle record is not.
+	AwaitingLifecycle bool `protobuf:"varint,10,opt,name=awaiting_lifecycle,json=awaitingLifecycle,proto3" json:"awaiting_lifecycle,omitempty"`
+	// Canonical writer epoch, derived from run.log independently of process metadata.
+	Epoch         uint32 `protobuf:"varint,11,opt,name=epoch,proto3" json:"epoch,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -131,6 +135,20 @@ func (x *RunHead) GetProcess() *RunProcess {
 		return x.Process
 	}
 	return nil
+}
+
+func (x *RunHead) GetAwaitingLifecycle() bool {
+	if x != nil {
+		return x.AwaitingLifecycle
+	}
+	return false
+}
+
+func (x *RunHead) GetEpoch() uint32 {
+	if x != nil {
+		return x.Epoch
+	}
+	return 0
 }
 
 // Values are absent until reported. The declaration supplies unit and direction.
@@ -659,9 +677,9 @@ var File_vibesys_store_v1_skeleton_proto protoreflect.FileDescriptor
 
 const file_vibesys_store_v1_skeleton_proto_rawDesc = "" +
 	"\n" +
-	"\x1fvibesys/store/v1/skeleton.proto\x12\x10vibesys.store.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\"vibesys/store/v1/agent_attrs.proto\x1a\x1evibesys/store/v1/content.proto\x1a\x1cvibesys/store/v1/epoch.proto\x1a vibesys/store/v1/lifecycle.proto\x1a\x1dvibesys/store/v1/record.proto\x1a\x1bvibesys/store/v1/span.proto\"\xcb\x05\n" +
-	"\aRunHead\x12A\n" +
-	"\tlifecycle\x18\x01 \x01(\v2\x1b.vibesys.store.v1.LifecycleB\x06\xbaH\x03\xc8\x01\x01R\tlifecycle\x12'\n" +
+	"\x1fvibesys/store/v1/skeleton.proto\x12\x10vibesys.store.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\"vibesys/store/v1/agent_attrs.proto\x1a\x1evibesys/store/v1/content.proto\x1a\x1cvibesys/store/v1/epoch.proto\x1a vibesys/store/v1/lifecycle.proto\x1a\x1dvibesys/store/v1/record.proto\x1a\x1bvibesys/store/v1/span.proto\"\xdc\a\n" +
+	"\aRunHead\x129\n" +
+	"\tlifecycle\x18\x01 \x01(\v2\x1b.vibesys.store.v1.LifecycleR\tlifecycle\x12'\n" +
 	"\bstrategy\x18\x02 \x01(\tB\v\xbaH\br\x06\x10\x01(\x80\x80\x04R\bstrategy\x12A\n" +
 	"\tobjective\x18\x03 \x01(\v2#.vibesys.store.v1.HeadlineObjectiveR\tobjective\x12\\\n" +
 	"\vspan_counts\x18\x04 \x03(\v2).vibesys.store.v1.RunHead.SpanCountsEntryB\x10\xbaH\r\x9a\x01\n" +
@@ -672,11 +690,15 @@ const file_vibesys_store_v1_skeleton_proto_rawDesc = "" +
 	"\n" +
 	"needs_user\x18\a \x01(\bR\tneedsUser\x12(\n" +
 	"\rcommitted_seq\x18\b \x01(\x04H\x00R\fcommittedSeq\x88\x01\x01\x126\n" +
-	"\aprocess\x18\t \x01(\v2\x1c.vibesys.store.v1.RunProcessR\aprocess\x1a=\n" +
+	"\aprocess\x18\t \x01(\v2\x1c.vibesys.store.v1.RunProcessR\aprocess\x12-\n" +
+	"\x12awaiting_lifecycle\x18\n" +
+	" \x01(\bR\x11awaitingLifecycle\x12\x14\n" +
+	"\x05epoch\x18\v \x01(\rR\x05epoch\x1a=\n" +
 	"\x0fSpanCountsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\x04R\x05value:\x028\x01:k\xbaHh\x1af\n" +
-	"\x15run_head.chart_points\x12,chart_points must contain at most 256 points\x1a\x1fthis.chart_points.size() <= 256B\x10\n" +
+	"\x05value\x18\x02 \x01(\x04R\x05value:\x028\x01:\xbe\x02\xbaH\xba\x02\x1af\n" +
+	"\x15run_head.chart_points\x12,chart_points must contain at most 256 points\x1a\x1fthis.chart_points.size() <= 256\x1a\xcf\x01\n" +
+	"\x12run_head.lifecycle\x12;head has either a lifecycle or an explicitly awaiting epoch\x1a|has(this.lifecycle) != this.awaiting_lifecycle && (!this.awaiting_lifecycle || (this.epoch > 0u && has(this.committed_seq)))B\x10\n" +
 	"\x0e_committed_seq\"\xd2\x01\n" +
 	"\x11HeadlineObjective\x12B\n" +
 	"\x06series\x18\x01 \x01(\v2\".vibesys.store.v1.MetricSeriesDeclB\x06\xbaH\x03\xc8\x01\x01R\x06series\x12+\n" +

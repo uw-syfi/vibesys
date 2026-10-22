@@ -14,6 +14,7 @@ from pydantic import JsonValue, TypeAdapter
 from vs_core.api import RunStatus
 from vs_decode.api import Unreadable, decode_json
 from vs_project.api import ProjectStateError, StoredEnvelope
+from vs_runlog.api import CurrentEpoch, RunLogStopReason, current_epoch, open_run_log
 
 if TYPE_CHECKING:
     from vs_core.api import CoreState
@@ -74,12 +75,18 @@ def _core_record(project: Project, run_id: str) -> JsonValue:
 
 def recorded_epoch(project: Project, run_id: str) -> int:
     """Current durable host epoch, or zero before the first writer starts."""
-    epoch = _member(_core_record(project, run_id), "records", "recovery", "epoch")
-    if epoch is None:
-        return 0
-    if isinstance(epoch, bool) or not isinstance(epoch, int) or epoch < 0:
-        message = "the core record has an invalid recovery epoch"
-        raise ProjectStateError(message)
+    epoch = _log_epoch(project, run_id)
+    return 0 if epoch is None else epoch.number
+
+
+def _log_epoch(project: Project, run_id: str) -> CurrentEpoch | None:
+    path = project.run_log_path_for(project.root, run_id)
+    if not path.exists():
+        return None
+    with open_run_log(path) as reader:
+        epoch = current_epoch(reader)
+        if reader.stop.reason is RunLogStopReason.CORRUPTION:
+            raise ProjectStateError(reader.stop.detail)
     return epoch
 
 
@@ -113,6 +120,14 @@ def recorded_ending(project: Project, run_id: str) -> str | None:
 
     Raises ``ProjectStateError`` when the record cannot be read (see `recorded_end`).
     """
+    epoch = _log_epoch(project, run_id)
+    if epoch is not None:
+        lifecycle = epoch.lifecycle
+        if lifecycle is None or lifecycle.state is None:
+            return None
+        if lifecycle.state.field in {"parked", "ended"}:
+            return "the epoch ended; Resume starts another"
+        return None
     end = recorded_end(project, run_id)
     return None if end is None else _ending(end.reason)
 

@@ -78,12 +78,13 @@ def test_writer_publishes_head_and_lifecycle_keyframes(tmp_path: Path) -> None:
         for record in records:
             writer.append(record)
             writer.commit()
-            if record.seq == 1:
-                assert not (tmp_path / "run.head").exists()
-                continue
             head = RunHead.from_binary((tmp_path / "run.head").read_bytes())
             validate(head)
             assert head.committed_seq == record.seq
+            if record.seq == 1:
+                assert head.awaiting_lifecycle
+                assert head.lifecycle is None
+                assert head.epoch == record.epoch
             assert record.body is not None
             if record.body.field in {"lifecycle", "epoch_started"}:
                 path = tmp_path / "keyframes" / f"{record.seq}.pb"
@@ -168,18 +169,20 @@ def test_failed_publication_releases_lock_and_recovery_republishes(tmp_path: Pat
     records, _ = scenarios()["core"]
     (tmp_path / "run.head").mkdir()
     writer = FileRunLogWriter(tmp_path / "run.log", clock=ManualClock(), threads=SimThreads())
-    writer.append(records[0])
     with pytest.raises(OSError, match=r"run.head"):
-        writer.append(records[1])
+        writer.append(records[0])
     (tmp_path / "run.head").rmdir()
     assert not list(tmp_path.glob(".run.head.*"))
     with FileRunLogWriter(
         tmp_path / "run.log", clock=ManualClock(), threads=SimThreads()
     ) as recovered:
-        assert recovered.sequence == 2
-        assert RunHead.from_binary((tmp_path / "run.head").read_bytes()).committed_seq == 2
-        checkpoint = Keyframe.from_binary((tmp_path / "keyframes/2.pb").read_bytes())
+        assert recovered.sequence == 1
+        head = RunHead.from_binary((tmp_path / "run.head").read_bytes())
+        assert head.committed_seq == 1
+        assert head.awaiting_lifecycle
+        checkpoint = Keyframe.from_binary((tmp_path / "keyframes/1.pb").read_bytes())
         assert checkpoint.log_offset == (tmp_path / "run.log").stat().st_size
+        recovered.append(records[1])
         recovered.append(records[2])
     assert RunHead.from_binary((tmp_path / "run.head").read_bytes()).committed_seq == 3
 

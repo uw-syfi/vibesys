@@ -51,3 +51,30 @@ def test_keyframe_seek_header_round_trips(seq: int, offset: int) -> None:
 def test_keyframe_rejects_invalid_seek_header(value: p.Keyframe) -> None:
     with pytest.raises(p.ValidationError):
         p.validate(value)
+
+
+@given(
+    has_lifecycle=st.booleans(),
+    awaiting=st.booleans(),
+    epoch=st.integers(0, 5),
+    committed=st.one_of(st.none(), st.integers(0, 5)),
+)
+def test_epoch_awaiting_its_lifecycle_is_an_explicit_exclusive_state(
+    *,
+    has_lifecycle: bool,
+    awaiting: bool,
+    epoch: int,
+    committed: int | None,
+) -> None:
+    value = p.RunHead(strategy="example", epoch=epoch, awaiting_lifecycle=awaiting)
+    if has_lifecycle:
+        value.lifecycle = head().lifecycle
+    if committed is not None:
+        value.committed_seq = committed
+    valid = has_lifecycle != awaiting and (not awaiting or (epoch > 0 and committed is not None))
+    if valid:
+        p.validate(value)
+        assert p.RunHead.from_binary(value.to_binary()) == value
+    else:
+        with pytest.raises(p.ValidationError):
+            p.validate(value)

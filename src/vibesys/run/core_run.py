@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import os
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
@@ -145,7 +145,7 @@ async def drive_core_run(host: CoreHost, integration: LocalRunIntegration) -> Ru
         services.search.driver(services.config, services.bindings.registry),
         services.state,
         config=services.config,
-        bindings=services.bindings,
+        bindings=replace(services.bindings, epoch=lambda: integration.events.epoch),
     )
     delivery = JournalPublicationDelivery(services.publications, services.bindings.registry)
     controls = RunControlBridge(

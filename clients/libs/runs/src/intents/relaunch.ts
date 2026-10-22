@@ -111,7 +111,7 @@ export function livenessResponse(bytes: Uint8Array, runId: string): RelaunchLive
   const response = fromBinary(WatchRunsResponseSchema, bytes);
   if (response.runId !== runId) return null;
   return {
-    epoch: BigInt(response.head?.process?.epoch ?? 0),
+    epoch: BigInt(response.head?.epoch || response.head?.process?.epoch || 0),
     value: response.removed ? RunLiveness.UNSPECIFIED : response.liveness,
   };
 }

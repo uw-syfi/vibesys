@@ -313,6 +313,8 @@ class CoreRuntimeBindings:
     executors: RequestExecutors = field(default_factory=RequestExecutors)
     transitions: CoreTransitions = field(default_factory=ProductionCoreTransitions)
     commits: CommitObserver = field(default_factory=IgnoreCommits)
+    epoch: Callable[[], int | None] = lambda: None
+    """Native writer identity derived from run.log; absent for an unjournaled host."""
     check_liveness: bool = False
     """Check ``orphan_waits`` after every commit, not only at start. Linear in state size."""
     steering: TurnSteering | None = None
@@ -347,6 +349,7 @@ class CoreRuntime[S: StrategyState]:
         self._config = config
         self._initial = initial
         selected = bindings or CoreRuntimeBindings()
+        self._epoch = selected.epoch
         self._registry = selected.registry
         self._executors = selected.executors
         self._transitions = selected.transitions
@@ -590,10 +593,15 @@ class CoreRuntime[S: StrategyState]:
         if fence is None:
             message = "runtime lease unavailable"
             raise LeaseUnavailableError(message)
+        published_epoch = self._epoch()
+        epoch = fence.epoch if published_epoch is None else published_epoch
+        if published_epoch is not None and epoch <= provisional.core.records.recovery.epoch:
+            self._store.release(fence, now=now_at)
+            raise ContractError(("epoch",), "run.log must publish a successor before recovery")
         self._fence = fence
         self._renewed_at = now_at
         provisional = provisional.model_copy(
-            update={"fence": HostFence(host_id=HostId(root=fence.host_id), epoch=fence.epoch)}
+            update={"fence": HostFence(host_id=HostId(root=fence.host_id), epoch=epoch)}
         )
         previous_record = self._record
         previous_revision = self._storage_revision
@@ -605,7 +613,7 @@ class CoreRuntime[S: StrategyState]:
         try:
             self._consume(
                 _Input[S](
-                    event=RecoveryStarted(epoch=fence.epoch, now_at=now_at),
+                    event=RecoveryStarted(epoch=epoch, now_at=now_at),
                     now_at=now_at,
                 )
             )
@@ -680,7 +688,10 @@ class CoreRuntime[S: StrategyState]:
         ):
             return
         self._renewal_queued_at = renewed_at
-        self.submit(HostRenewed(epoch=self._fence.epoch, now_at=renewed_at), now_at=renewed_at)
+        self.submit(
+            HostRenewed(epoch=self.record.envelope.fence.epoch, now_at=renewed_at),
+            now_at=renewed_at,
+        )
 
     def release_lease(self, *, now_at: float) -> None:
         """Give the lease back so a restart need not wait for it to expire.

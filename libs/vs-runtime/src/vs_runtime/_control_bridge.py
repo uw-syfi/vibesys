@@ -549,15 +549,38 @@ class RunControlBridge:
                     action_request=request,
                 )
             )
-            refusal = control_refusal(state, change.control(_identity(request.control_id)))
+            refusal = self._action_refusal(request, state, change)
             if refusal is None:
                 emitted = self._event(core, now_at, change)
                 events += () if emitted is None else (emitted,)
             elif request.control_id == inbox_id:
-                refused_inbox = f"refused by the run: {refusal.detail}"
+                refused_inbox = f"refused by the run: {refusal}"
             else:
-                self._refuse(change, refusal.detail, request_id=None)
+                self._refuse(change, refusal, request_id=None)
         return refused_inbox
+
+    def _action_refusal(
+        self, request: ControlRequest, core: CoreState, change: _Change
+    ) -> str | None:
+        """Both socket and durable closing requests use the current writer's authority."""
+        if isinstance(request, PauseRequest | PauseNowRequest) and (
+            request.expected_epoch is not None
+            or (self._inbox is not None and self._inbox.journal is not None)
+        ):
+            refusal = self._closing_refusal(request, core)
+            if refusal is not None:
+                return refusal
+        refusal = control_refusal(core, change.control(_identity(request.control_id)))
+        return None if refusal is None else refusal.detail
+
+    def _closing_refusal(self, request: ControlRequest, core: CoreState) -> str | None:
+        if not isinstance(request, PauseRequest | PauseNowRequest):
+            return None
+        journal = None if self._inbox is None else self._inbox.journal
+        epoch = core.records.recovery.epoch if journal is None else journal.epoch
+        if request.expected_epoch != epoch:
+            return "closing request targets another epoch; refresh the run"
+        return None
 
     def _reject_withdrawal(self, control_id: str, reason: str) -> None:
         """Set aside an inbox withdrawal that ended nothing: it must not apply after a restart.
@@ -789,11 +812,9 @@ class RunControlBridge:
             return f"not a control request: {request.details()}"
         if request.control_id != entry.request_id:
             return f"its control_id {request.control_id!r} is not its name in the inbox"
-        if (
-            isinstance(request, PauseRequest | PauseNowRequest)
-            and request.expected_epoch != core.records.recovery.epoch
-        ):
-            return "closing request targets another epoch; refresh the run"
+        refusal = self._closing_refusal(request, core)
+        if refusal is not None:
+            return refusal
         # A control refused when the socket's copy of it was taken has its answer already.
         refused = self._told.get(request.control_id)
         refusal = None if refused is not None else self._refusal(request, core)
@@ -985,6 +1006,11 @@ class RunControlBridge:
 
 class IntentJournal(Protocol):
     """Persist and recover decisions before the inbox acknowledges them."""
+
+    @property
+    def epoch(self) -> int:
+        """Public writer epoch derived from records; fails if none has been published."""
+        ...
 
     def intent_decision(self, control_id: str) -> tuple[bool, str | None] | None:
         """Return (applied, reason), or None; a refusal must carry its reason."""

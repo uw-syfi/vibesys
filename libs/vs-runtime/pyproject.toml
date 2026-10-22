@@ -12,6 +12,7 @@ dependencies = [
     "pydantic>=2",
     "protobuf-py==0.6.0",
     "vs-proto",
+    "vs-runlog",
     "pyyaml>=6",
     "vs-agent",
     "vs-async-ops",
@@ -48,6 +49,7 @@ vs-issue-tracker = { workspace = true }
 vs-mcp = { workspace = true }
 vs-project = { workspace = true }
 vs-proto = { workspace = true }
+vs-runlog = { workspace = true }
 vs-prompts = { workspace = true }
 vs-redaction = { workspace = true }
 vs-sandbox = { workspace = true }
