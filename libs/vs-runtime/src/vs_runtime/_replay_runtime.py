@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Protocol, assert_never, runtime_checkable
 
 from protobuf import Message, Oneof
 from protobuf.wkt.google.protobuf.any_pb import Any
+from protobuf.wkt.google.protobuf.timestamp_pb import Timestamp
 
 from vs_core.api.replay import (
     ENCODING_VERSION,
@@ -58,11 +59,10 @@ from vs_runtime._replay_store import REPLAY_STORE_SCHEMA_VERSION
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine
 
-    from protobuf.wkt.google.protobuf.timestamp_pb import Timestamp
-
     from vs_core.api.replay import ReplayFlow, ReplayFrontier, ReplayRootReuse
     from vs_runtime._replay_store import ReplayStore
     from vs_runtime._writer_reconciliation import WriterRegistry
+    from vs_sim.api import Clock
 
 
 @dataclass(frozen=True)
@@ -841,20 +841,18 @@ class ReplayRuntime:
         executor: ReplayRetirement,
         writers: WriterRegistry,
         *,
-        now: float,
-        at: Timestamp,
+        clock: Clock,
     ) -> None:
         """Settle access under backing exclusion after its committed environment proof."""
+        now = clock.now()
+        at = Timestamp(seconds=int(now), nanos=int((now - int(now)) * 1_000_000_000))
         if self._fence is None or not self._store.verify(self._fence, now):
             problem = "retirement requires current host exclusion"
             raise ReplayCommitError(problem)
-        with writers.reuse(run_id=self._archive.current_epoch.run_id, fence=self._fence) as active:
-            reuse = ReplayWriterRecovery.from_records(
-                ReplayRecords.from_binary(self._archive.encode()).records
-            ).require(writers.backing)
-            if active != reuse.proof():
-                problem = "retirement proof differs from the active backing registry"
-                raise ReplayError(problem)
+        reuse = ReplayWriterRecovery.from_records(
+            ReplayRecords.from_binary(self._archive.encode()).records
+        ).require(writers.backing)
+        with writers.acquire(reuse, run_id=self._archive.current_epoch.run_id, fence=self._fence):
             span = self._span(span_id)
             self._reuse_for(span, reuse)
             if span.replay_physical is None or not span.replay_physical.has_field(
@@ -870,6 +868,8 @@ class ReplayRuntime:
                 )
             try:
                 await executor.retire(span, self._fence, reuse)
+                now = clock.now()
+                at = Timestamp(seconds=int(now), nanos=int((now - int(now)) * 1_000_000_000))
                 self._confirm_stopped(span_id, reuse, now=now, at=at)
             except BaseException:
                 self._halted = True
@@ -884,14 +884,10 @@ class ReplayRuntime:
         if physical is None or not physical.has_field("withdrawn_sequence"):
             problem = "commit withdrawal before confirming writer termination"
             raise ReplayError(problem)
-        digest = proof_digest(reuse.proof())
-        if (
-            span.has_field("ended_at")
-            and physical.has_field("termination_proof_digest")
-            and physical.termination_proof_digest == digest
-        ):
+        # The settlement intent retains its historical death witness. Current
+        # reuse authority was checked above and may belong to a later generation.
+        if span.has_field("ended_at"):
             return
-        physical.termination_proof_digest = digest
         span.status = SpanStatus.STOPPED
         if not span.has_field("ended_at"):
             span.ended_at = self._archive.clock

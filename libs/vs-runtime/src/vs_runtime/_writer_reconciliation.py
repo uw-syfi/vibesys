@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
 
 from protobuf import Message
+from protobuf.wkt.google.protobuf.timestamp_pb import Timestamp
 
 from vs_agent.api import OrphanReapError, reap_recorded_agents
 from vs_core.api.replay import ReplayWriterRecovery
@@ -28,11 +29,11 @@ from vs_sim.api import DISCARD, ProcessTimeoutError
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
 
+    from vs_core.api.replay import ReplayRootReuse
     from vs_project.api import StateNamespace, StoreFence
-    from vs_proto.api import Timestamp
     from vs_runtime._replay_runtime import ReplayRuntime
     from vs_sandbox.api import DockerCli
-    from vs_sim.api import BlockingRunner, Threads
+    from vs_sim.api import BlockingRunner, Clock, Threads
 
 
 class WriterProofError(ValueError):
@@ -99,6 +100,22 @@ class WriterRegistry:
                 yield self.require_proof()
             finally:
                 self._reuse_owner = previous
+
+    @contextmanager
+    def acquire(
+        self, request: ReplayRootReuse, *, run_id: str, fence: StoreFence
+    ) -> Iterator[ReplayRootReuse]:
+        """Hold a committed reuse request's backing exclusion through acquisition.
+
+        The caller derives ``request`` from the durable log. Keep this scope open
+        across the awaited acquisition effect; checking proof and returning first
+        would allow another generation to acquire the backing in between.
+        """
+        with self.reuse(run_id=run_id, fence=fence) as proof:
+            if request.proof() != proof:
+                problem = "acquisition proof differs from the active backing registry"
+                raise WriterProofError(problem)
+            yield request
 
     @property
     def backing(self) -> pb.WriterBacking:
@@ -238,20 +255,22 @@ class ReplayWriterBarrier:
         return manifest
 
     async def finish(
-        self, runtime: ReplayRuntime, manifest: pb.WriterManifest, *, now: float, at: Timestamp
+        self, runtime: ReplayRuntime, manifest: pb.WriterManifest, *, clock: Clock
     ) -> pb.WriterReconciliation:
         result = await self.blocking.run(self.reconciler.reconcile_writers, manifest)
         self.registry.record(result)
+        now = clock.now()
+        at = Timestamp(seconds=int(now), nanos=int((now - int(now)) * 1_000_000_000))
         runtime.writer_observation(result, now=now, at=at)
         if result.proof is None:
             raise ReplayWriterBlockedError(result)
         return result
 
-    async def reconcile(
-        self, runtime: ReplayRuntime, *, now: float, at: Timestamp
-    ) -> pb.WriterReconciliation:
+    async def reconcile(self, runtime: ReplayRuntime, *, clock: Clock) -> pb.WriterReconciliation:
+        now = clock.now()
+        at = Timestamp(seconds=int(now), nanos=int((now - int(now)) * 1_000_000_000))
         manifest = self.begin(runtime, now=now, at=at)
-        return await self.finish(runtime, manifest, now=now, at=at)
+        return await self.finish(runtime, manifest, clock=clock)
 
 
 class WriterReconciler(Protocol):

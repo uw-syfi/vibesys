@@ -34,7 +34,13 @@ from vs_runtime.api.replay import (
 )
 from vs_sandbox.api.testing import FakeDockerEngine
 from vs_sim.api import DISCARD
-from vs_sim.api.testing import FakePipedProcessLauncher, InlineBlockingRunner, Sim, SimThreads
+from vs_sim.api.testing import (
+    FakePipedProcessLauncher,
+    InlineBlockingRunner,
+    ManualClock,
+    Sim,
+    SimThreads,
+)
 
 from .test_replay_run import host, launch
 from .test_writer_reconciliation import BACKING, owner
@@ -141,8 +147,8 @@ async def test_unknown_child_requires_proof_and_replacement_keeps_parent_and_dea
     with pytest.raises(ReplayRecoveryRequiredError):
         resumed.prepare(now=0, at=Timestamp())
     assert not resumed.archive.span(old.id).has_field("ended_at")
-    await barrier.reconcile(resumed, now=0, at=Timestamp())
-    await resumed.retire(old.id, executor, barrier.registry, now=0, at=Timestamp())
+    await barrier.reconcile(resumed, clock=ManualClock())
+    await resumed.retire(old.id, executor, barrier.registry, clock=ManualClock())
     resumed.finish_recovery()
     (new,) = resumed.prepare(now=1, at=Timestamp(seconds=1))
     assert old.replay_physical is not None
@@ -289,8 +295,8 @@ async def test_replacement_retains_original_policy_and_reservation_after_edit(
     try:
         assert isinstance(await resumed.inspect(old.id, executor, now=0), ReplayUnknown)
         resumed.withdraw(old.id, now=0, at=Timestamp())
-        await barrier.reconcile(resumed, now=0, at=Timestamp())
-        await resumed.retire(old.id, executor, barrier.registry, now=0, at=Timestamp())
+        await barrier.reconcile(resumed, clock=ManualClock())
+        await resumed.retire(old.id, executor, barrier.registry, clock=ManualClock())
         resumed.finish_recovery()
         prepared = resumed.prepare(now=0, at=Timestamp())
         if credit < 1:

@@ -22,7 +22,7 @@ from vs_runtime.api.replay import (
     WriterProofError,
     WriterRegistry,
 )
-from vs_sim.api.testing import SimThreads
+from vs_sim.api.testing import ManualClock, SimThreads
 
 from .test_replay_physical import proof_barrier, shell
 from .test_writer_reconciliation import BACKING
@@ -116,7 +116,7 @@ async def test_retirement_requires_exact_committed_environment_coverage(
             runtime.writer_observation(result, now=0, at=Timestamp())
         executor = FakeReplayExecutor(lambda _: ReplayResult(core_common.Identity(root="answer")))
         with pytest.raises(ReplayError, match=r"proof|cover"):
-            await runtime.retire(child.id, executor, barrier.registry, now=0, at=Timestamp())
+            await runtime.retire(child.id, executor, barrier.registry, clock=ManualClock())
         retained = runtime.archive.span(child.id)
         assert not retained.has_field("ended_at")
         assert retained.replay_physical is not None
@@ -171,7 +171,7 @@ async def test_stale_registry_blocks_with_durable_identities_and_can_rebind_curr
         runtime.withdraw(child.id, now=0, at=Timestamp())
         project = Project.open(tmp_path)
         old = proof_barrier(project, child)
-        await old.reconcile(runtime, now=0, at=Timestamp())
+        await old.reconcile(runtime, clock=ManualClock())
         backing = deepcopy(BACKING)
         backing.generation += 1
         current = WriterRegistry(
@@ -179,7 +179,7 @@ async def test_stale_registry_blocks_with_durable_identities_and_can_rebind_curr
         )
         current.create()
         with pytest.raises(ReplayWriterBlockedError, match="another active") as blocked:
-            await old.reconcile(runtime, now=0, at=Timestamp())
+            await old.reconcile(runtime, clock=ManualClock())
         manifest = blocked.value.reconciliation.manifest
         assert manifest is not None
         assert manifest.writers[0].physical_id == child.id
@@ -189,9 +189,9 @@ async def test_stale_registry_blocks_with_durable_identities_and_can_rebind_curr
         with pytest.raises(ReplayError, match="another active"):
             stored.require(BACKING)
         active = replace(old, registry=current)
-        await active.reconcile(runtime, now=0, at=Timestamp())
+        await active.reconcile(runtime, clock=ManualClock())
         executor = FakeReplayExecutor(lambda _: ReplayResult(core_common.Identity(root="answer")))
-        await runtime.retire(child.id, executor, current, now=0, at=Timestamp())
+        await runtime.retire(child.id, executor, current, clock=ManualClock())
         assert runtime.archive.span(child.id).has_field("ended_at")
     finally:
         runtime.close(now=0)
@@ -216,7 +216,7 @@ async def test_retirement_excludes_new_grants_and_keeps_historical_proof_for_lat
         runtime.withdraw(child.id, now=0, at=Timestamp())
         project = Project.open(tmp_path)
         barrier = proof_barrier(project, child)
-        await barrier.reconcile(runtime, now=0, at=Timestamp())
+        await barrier.reconcile(runtime, clock=ManualClock())
         backing = deepcopy(BACKING)
         backing.generation += 1
         successor = WriterRegistry(
@@ -230,7 +230,7 @@ async def test_retirement_excludes_new_grants_and_keeps_historical_proof_for_lat
                     successor.create()
                 await executor.retire(span, fence, reuse)
 
-        await runtime.retire(child.id, CheckedRetirement(), barrier.registry, now=0, at=Timestamp())
+        await runtime.retire(child.id, CheckedRetirement(), barrier.registry, clock=ManualClock())
         successor.create()
         manifest = barrier.registry.backing
         previous = ReplayWriterRecovery.from_records(

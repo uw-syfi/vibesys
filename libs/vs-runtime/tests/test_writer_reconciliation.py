@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 from copy import deepcopy
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 import pytest
 from hypothesis import example, given
@@ -11,6 +12,7 @@ from hypothesis import strategies as st
 
 from vs_agent.api import reap_recorded_agents
 from vs_agent.api.testing import FakeConfinement
+from vs_core.api.replay import ReplayRootReuse
 from vs_project.api import FakeStateStore, Project
 from vs_proto.api import ValidationError, replay, validate
 from vs_runtime.api.infrastructure import RunEnvironmentSpec, build_run_environment
@@ -24,7 +26,12 @@ from vs_runtime.api.replay import (
 from vs_runtime.api.testing import idle_environment_system
 from vs_sandbox.api.testing import FakeDockerEngine
 from vs_sim.api import DISCARD
-from vs_sim.api.testing import FakePipedProcessLauncher, InlineBlockingRunner, SimThreads
+from vs_sim.api.testing import (
+    FakePipedProcessLauncher,
+    GatedBlockingRunner,
+    InlineBlockingRunner,
+    SimThreads,
+)
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -314,3 +321,53 @@ def test_reuse_holds_nonblocking_cross_run_exclusion_until_effect_finishes(tmp_p
     successor.create()
     with pytest.raises(WriterProofError, match="another active"):
         ledger.require_proof()
+
+
+@pytest.mark.parametrize("ending", ["completed", "failed", "cancelled"])
+async def test_reuse_request_holds_exclusion_across_awaited_acquisition(
+    tmp_path: Path, ending: Literal["completed", "failed", "cancelled"]
+) -> None:
+    ledger = registry(tmp_path)
+    ledger.create()
+    ledger.record(UnsupportedWriterReconciler("host").reconcile_writers(ledger.close()))
+    request = ReplayRootReuse(ledger.require_proof().to_binary())
+    other = registry(tmp_path)
+    fence = FakeStateStore().acquire("host-a", 0, 10)
+    assert fence is not None
+    gate = GatedBlockingRunner(held=True)
+
+    async def acquire() -> None:
+        with ledger.acquire(request, run_id="run-a", fence=fence) as authorized:
+            assert authorized == request
+            await gate.run(lambda: None)
+            if ending == "failed":
+                raise LookupError(ending)
+
+    task = asyncio.create_task(acquire())
+    try:
+        await gate.wait_in_flight(1, task)
+        with pytest.raises(WriterProofError, match="held by another"):
+            other.require_proof()
+        if ending == "cancelled":
+            task.cancel()
+        else:
+            gate.release()
+        if ending == "completed":
+            await task
+        else:
+            with pytest.raises(asyncio.CancelledError if ending == "cancelled" else LookupError):
+                await task
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+    assert other.require_proof() == request.proof()
+    wrong = deepcopy(request.proof())
+    assert wrong.manifest is not None
+    assert wrong.manifest.backing is not None
+    wrong.manifest.backing.generation += 1
+    with (
+        pytest.raises(WriterProofError, match="differs from the active"),
+        ledger.acquire(ReplayRootReuse(wrong.to_binary()), run_id="run-a", fence=fence),
+    ):
+        pytest.fail("another generation's proof authorized acquisition")
+    assert other.require_proof() == request.proof()

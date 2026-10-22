@@ -440,7 +440,7 @@ class CandidateWorld:
                 now=self.sim.clock.now(),
                 at=Timestamp(),
             )
-            await self.barrier.reconcile(first.runtime, now=self.sim.clock.now(), at=Timestamp())
+            await self.barrier.reconcile(first.runtime, clock=self.sim.clock)
             while True:
                 ready = first.runtime.prepare(now=self.sim.clock.now(), at=Timestamp())
                 if not ready:

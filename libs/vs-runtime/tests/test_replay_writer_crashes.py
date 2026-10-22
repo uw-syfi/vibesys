@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass, replace
 from functools import partial
 from typing import TYPE_CHECKING
@@ -9,9 +10,9 @@ from typing import TYPE_CHECKING
 import pytest
 from protobuf.wkt.google.protobuf.timestamp_pb import Timestamp
 
-from vs_core.api.replay import ReplayWriterRecovery
+from vs_core.api.replay import ReplayArchive, ReplayWriterRecovery
 from vs_faults.api import Boundary, FaultGate, FaultPlan, FaultRule, HostCrashError, HostFault
-from vs_project.api import FakeStateStore, Project
+from vs_project.api import FakeStateStore, Project, StoredEnvelope
 from vs_proto.api import Change, ReplayStore, SpanStatus, core_common, replay
 from vs_runtime.api.replay import (
     DockerWriterReconciler,
@@ -22,8 +23,10 @@ from vs_runtime.api.replay import (
     ReplayResult,
     ReplayRuntime,
     ReplayUnknown,
+    WriterRegistry,
     drive_replay,
 )
+from vs_sim.api.testing import SimThreads
 
 from .test_replay_physical import physical_root, proof_barrier
 from .test_replay_run import host, launch
@@ -32,7 +35,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from vs_core.api.replay import ReplayRootReuse
-    from vs_project.api import CommitOutcome, StoredEnvelope, StoreFence
+    from vs_project.api import CommitOutcome, StoreFence
     from vs_proto.api import Span
     from vs_runtime.api.replay import ReplayWriterBarrier
     from vs_sim.api.testing import Sim
@@ -123,11 +126,33 @@ class CrossingReconciler:
 
 
 @pytest.mark.parametrize(
-    "row",
-    ["W1", "W2", "W3", "W4", "W5", "W6", "W7", "W8a", "W8b", "W10", "W11", "W12", "W13", "W14"],
+    ("row", "advance_generation"),
+    [
+        *[
+            (row, False)
+            for row in (
+                "W1",
+                "W2",
+                "W3",
+                "W4",
+                "W5",
+                "W6",
+                "W7",
+                "W8a",
+                "W8b",
+                "W10",
+                "W11",
+                "W12",
+                "W13",
+                "W14",
+            )
+        ],
+        ("W8a", True),
+        ("W8b", True),
+    ],
 )
 async def test_recovery_crash_rows_preserve_identity_proof_usage_and_winner(
-    tmp_path: Path, sim: Sim, row: str
+    tmp_path: Path, sim: Sim, row: str, *, advance_generation: bool
 ) -> None:
     store = CrossingStore()
     baseline: ReplayWriterBarrier | None = None
@@ -183,16 +208,19 @@ async def test_recovery_crash_rows_preserve_identity_proof_usage_and_winner(
     with pytest.raises(HostCrashError, match=row):
         await run("crash")
     gate.heal()
+    historical = None
+    if advance_generation:
+        barrier, historical = next_generation(store, barrier, Project.open(tmp_path), old.id)
     # A crash immediately after acquiring exclusion may lose its lease response.
     await sim.clock.sleep(4)
     assert await run("healed") == ReplayCompleted("answer")
     final = ReplayRuntime(store, physical_root, replay.ReplayAllowance())
     final.start(launch("inspect"), now=sim.clock.now(), at=Timestamp())
     try:
-        assert_recovered(final, old, owner)
+        assert_recovered(final, old, owner, historical)
         records = ReplayStore.from_binary(final.archive.encode()).records
-        reuse = ReplayWriterRecovery.from_records(records).require(baseline.registry.backing)
-        assert reuse.proof() == baseline.registry.require_proof()
+        reuse = ReplayWriterRecovery.from_records(records).require(barrier.registry.backing)
+        assert reuse.proof() == barrier.registry.require_proof()
         crossing_rows = [call.target for call in gate.calls]
         assert "W4" in crossing_rows
         assert "W7" in crossing_rows
@@ -203,7 +231,9 @@ async def test_recovery_crash_rows_preserve_identity_proof_usage_and_winner(
         final.close(now=sim.clock.now())
 
 
-def assert_recovered(final: ReplayRuntime, old: Span, owner: FakeReplayExecutor) -> None:
+def assert_recovered(
+    final: ReplayRuntime, old: Span, owner: FakeReplayExecutor, historical: bytes | None
+) -> None:
     children = final.archive.children(old.parent)
     assert len(children) in {2, 3}  # A lost W10 commit creates one positively absent child.
     assert len(owner.invocations) == 2
@@ -211,8 +241,28 @@ def assert_recovered(final: ReplayRuntime, old: Span, owner: FakeReplayExecutor)
     assert children[0].replay_physical is not None
     assert children[0].replay_physical.has_field("withdrawn_sequence")
     assert children[0].replay_physical.has_field("settlement_sequence")
+    if historical is not None:
+        assert children[0].replay_physical.termination_proof_digest == historical
     assert children[0].status is SpanStatus.STOPPED
     assert len(final.archive.history) == 1
     assert final.accounting.paid_operations == 1
     assert final.accounting.reported_cost_usd == 0.5
     assert final.archive.unresolved == ()
+
+
+def next_generation(
+    store: CrossingStore, barrier: ReplayWriterBarrier, project: Project, child_id: str
+) -> tuple[ReplayWriterBarrier, bytes]:
+    stored = store.load()
+    assert isinstance(stored, StoredEnvelope)
+    retained = ReplayArchive.decode(stored.payload).span(child_id)
+    assert retained.replay_physical is not None
+    historical = retained.replay_physical.termination_proof_digest
+    assert historical
+    backing = deepcopy(barrier.registry.backing)
+    backing.generation += 1
+    successor = WriterRegistry(
+        project.state.state_store_namespace("writers"), backing, SimThreads()
+    )
+    successor.create()
+    return replace(barrier, registry=successor), historical

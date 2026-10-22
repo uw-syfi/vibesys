@@ -171,7 +171,7 @@ def workspace_boundary_case(
         async def scenario() -> None:
             first = host()
             first.runtime.start(launch("first"), now=sim.clock.now(), at=Timestamp())
-            await barrier.reconcile(first.runtime, now=sim.clock.now(), at=Timestamp())
+            await barrier.reconcile(first.runtime, clock=sim.clock)
             for ordinal in range(effect + 1):
                 (span,) = first.runtime.prepare(now=sim.clock.now(), at=Timestamp())
                 if ordinal == effect and boundary == "prepared":
@@ -527,7 +527,7 @@ def test_backing_acquisition_crash_reconciles_intent_and_installed_content(
         async def scenario() -> None:
             first = binding()
             first.runtime.start(launch("first"), now=sim.clock.now(), at=Timestamp())
-            await barrier.reconcile(first.runtime, now=sim.clock.now(), at=Timestamp())
+            await barrier.reconcile(first.runtime, clock=sim.clock)
             (span,) = first.runtime.prepare(now=sim.clock.now(), at=Timestamp())
             try:
                 with pytest.raises(HostCrashError, match=row):

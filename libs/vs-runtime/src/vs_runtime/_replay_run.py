@@ -9,7 +9,6 @@ from typing import TYPE_CHECKING
 from protobuf.wkt.google.protobuf.timestamp_pb import Timestamp
 
 from vs_runtime._replay_runtime import (
-    ReplayAbsent,
     ReplayPending,
     ReplayRecoveryRequiredError,
     ReplayRetirement,
@@ -17,7 +16,7 @@ from vs_runtime._replay_runtime import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Coroutine
 
     from vs_proto.api import Span
     from vs_runtime._replay_runtime import (
@@ -79,8 +78,8 @@ class _LiveEpoch:
         return self.flow_origin + max(0, self.host.clock.now() - self.wall_origin)
 
     async def execute(self, span: Span) -> ReplayResult:
-        return await self.host.runtime.dispatch(
-            span.id, self.host.executor, now=self.host.clock.now()
+        return await self._owned(
+            self.host.runtime.dispatch(span.id, self.host.executor, now=self.host.clock.now())
         )
 
     def completed(self, task: asyncio.Task[ReplayResult]) -> None:
@@ -145,28 +144,25 @@ class _LiveEpoch:
         )
         self.host.runtime.accept(completed.span_id, now=now, at=_at(now))
 
-    async def _inspect(
-        self, span: Span
-    ) -> ReplayResult | ReplayAbsent | ReplayPending | ReplayUnknown:
+    async def _owned[T](self, operation: Coroutine[object, object, T]) -> T:
+        """Keep host exclusion across every awaited execution-owner operation."""
         shell, clock = self.host.runtime, self.host.clock
-        inspection = asyncio.create_task(
-            shell.inspect(span.id, self.host.executor, now=clock.now())
-        )
+        work = asyncio.create_task(operation)
         try:
-            while not inspection.done():
+            while not work.done():
                 sleeper = asyncio.create_task(clock.sleep(max(0, self.renew_at - clock.now())))
                 try:
-                    await asyncio.wait((inspection, sleeper), return_when=asyncio.FIRST_COMPLETED)
-                    if not inspection.done():
+                    await asyncio.wait((work, sleeper), return_when=asyncio.FIRST_COMPLETED)
+                    if clock.now() >= self.renew_at:
                         shell.renew(now=clock.now(), duration=self.launch.lease_duration)
                         self.renew_at = clock.now() + self.launch.lease_duration / 3
                 finally:
                     sleeper.cancel()
                     await asyncio.gather(sleeper, return_exceptions=True)
-            return inspection.result()
+            return work.result()
         finally:
-            inspection.cancel()
-            await asyncio.gather(inspection, return_exceptions=True)
+            work.cancel()
+            await asyncio.gather(work, return_exceptions=True)
 
     async def _retire(self, identities: list[str]) -> None:
         shell, clock = self.host.runtime, self.host.clock
@@ -176,9 +172,7 @@ class _LiveEpoch:
                 shell.recovery, ("execution owner cannot settle withdrawn children",)
             )
         for identity in identities:
-            await shell.retire(
-                identity, executor, barrier.registry, now=clock.now(), at=_at(clock.now())
-            )
+            await self._owned(shell.retire(identity, executor, barrier.registry, clock=clock))
 
     async def _recover_inspections(self, spans: tuple[Span, ...]) -> tuple[list[str], list[str]]:
         shell, clock = self.host.runtime, self.host.clock
@@ -186,7 +180,7 @@ class _LiveEpoch:
         barrier = self.host.writer_barrier
         withdrawn = []
         for span in spans:
-            result = await self._inspect(span)
+            result = await self._owned(shell.inspect(span.id, self.host.executor, now=clock.now()))
             if isinstance(result, (ReplayPending, ReplayUnknown)):
                 if span.replay_physical is not None and barrier is not None:
                     shell.withdraw(span.id, now=clock.now(), at=_at(clock.now()))
@@ -217,7 +211,7 @@ class _LiveEpoch:
             tuple(span for span in unfinished if span.replay_physical is not None)
         )
         if barrier is not None and manifest is not None:
-            await barrier.finish(shell, manifest, now=clock.now(), at=_at(clock.now()))
+            await self._owned(barrier.finish(shell, manifest, clock=clock))
             if withdrawn:
                 await self._retire(withdrawn)
         # Inspecting an old root acquisition may resume its owning effect. It
