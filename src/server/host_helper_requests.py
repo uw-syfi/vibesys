@@ -133,7 +133,6 @@ from server.host_machine_facts import (
     MachineDescription,
     RunCounts,
 )
-from server.host_operation_types_generated import UnmigratedHelperRequest, is_registry_read
 from server.host_run_dashboard import IdeaVerdict
 from server.host_run_events import (
     RunEventDocument,
@@ -161,10 +160,13 @@ if TYPE_CHECKING:
     from datetime import tzinfo
     from types import ModuleType
 
+    from typing_extensions import TypeIs
+
     from server.host_agent_logins import AgentLogin, LoginStarted, LoginUnavailable
     from server.host_api import RunDigestUnreadable
     from server.host_examples import CreatedProject, ExampleList, TaskGoal
     from server.host_helper_readers import Readers
+    from server.host_operation_types_generated import RegistryReadRequest, UnmigratedHelperRequest
     from server.host_preflight import PreflightReport
     from server.registry import InstanceInspector, LiveRegistry, StopEffects
     from server.run_summary import Summarized
@@ -865,6 +867,8 @@ def answer(
     """
     request_id = request.request_id
     try:
+        if isinstance(request, HelloRequest):
+            return _answer(request, host, withdrawal)
         if is_registry_read(request):
             return read_reply(
                 request,
@@ -877,6 +881,11 @@ def answer(
         return HelperError(
             request_id=request_id, code=error.code, message=str(error), path=error.path
         )
+
+
+def is_registry_read(request: HelperRequest) -> TypeIs[RegistryReadRequest]:
+    """Load the generated narrowing only when a caller goes beyond hello."""
+    return import_module("server.host_operation_types_generated").is_registry_read(request)
 
 
 def _answer(

@@ -136,13 +136,6 @@ from vs_project._task_files import (
     comparison_namespace,
     load_objectives,
 )
-from vs_project.api.admissions import (
-    AdmissionBusyError,
-    AdmissionClaim,
-    AdmissionConflictError,
-    AdmissionStore,
-    AdmissionUnconfirmedError,
-)
 from vs_project.api.git_repository import (
     COMMIT_IDENTITY_EMAIL,
     COMMIT_IDENTITY_NAME,
@@ -184,6 +177,13 @@ from vs_project.project import Project
 if TYPE_CHECKING:
     from vs_project._admission import FileAdmissionStore
     from vs_project._pygit2_git_repository import Pygit2GitRepository
+    from vs_project.api.admissions import (
+        AdmissionBusyError,
+        AdmissionClaim,
+        AdmissionConflictError,
+        AdmissionStore,
+        AdmissionUnconfirmedError,
+    )
 
 __all__ = [
     "COMMIT_IDENTITY_EMAIL",
@@ -349,6 +349,14 @@ def __getattr__(name: str) -> object:
     """Load ``Pygit2GitRepository`` on first use, so importing this package never needs ``pygit2``."""
     if name == "FileAdmissionStore":
         return import_module("vs_project._admission").FileAdmissionStore
+    if name in (
+        "AdmissionBusyError",
+        "AdmissionClaim",
+        "AdmissionConflictError",
+        "AdmissionStore",
+        "AdmissionUnconfirmedError",
+    ):
+        return getattr(import_module("vs_project.api.admissions"), name)
     if name == "Pygit2GitRepository":
         from vs_project._pygit2_git_repository import (  # noqa: PLC0415  # lint-waiver: LW-415571 [PLC0415]; the libgit2 implementation imports pygit2, which this package must not require just to be imported.
             Pygit2GitRepository,
