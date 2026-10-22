@@ -27,7 +27,7 @@ if TYPE_CHECKING:
     from .span_pb import Span
 
 
-_RunHeadFields: TypeAlias = Literal["lifecycle", "strategy", "objective", "span_counts", "usage", "chart_points", "needs_user", "committed_seq", "process"]
+_RunHeadFields: TypeAlias = Literal["lifecycle", "strategy", "objective", "span_counts", "usage", "chart_points", "needs_user", "committed_seq", "process", "awaiting_lifecycle", "epoch"]
 
 class RunHead(Message[_RunHeadFields]):
     """
@@ -75,9 +75,21 @@ class RunHead(Message[_RunHeadFields]):
             ```proto
             optional vibesys.store.v1.RunProcess process = 9;
             ```
+        awaiting_lifecycle:
+            The current epoch header is committed, but its first lifecycle record is not.
+
+            ```proto
+            bool awaiting_lifecycle = 10;
+            ```
+        epoch:
+            Canonical writer epoch, derived from run.log independently of process metadata.
+
+            ```proto
+            uint32 epoch = 11;
+            ```
     """
 
-    __slots__ = ("lifecycle", "strategy", "objective", "span_counts", "usage", "chart_points", "needs_user", "committed_seq", "process")
+    __slots__ = ("lifecycle", "strategy", "objective", "span_counts", "usage", "chart_points", "needs_user", "committed_seq", "process", "awaiting_lifecycle", "epoch")
 
     if TYPE_CHECKING:
 
@@ -93,6 +105,8 @@ class RunHead(Message[_RunHeadFields]):
             needs_user: bool = False,
             committed_seq: int | None = None,
             process: RunProcess | None = None,
+            awaiting_lifecycle: bool = False,
+            epoch: int = 0,
         ) -> None:
             pass
 
@@ -105,6 +119,8 @@ class RunHead(Message[_RunHeadFields]):
         needs_user: bool
         committed_seq: int
         process: RunProcess | None
+        awaiting_lifecycle: bool
+        epoch: int
 
 _HeadlineObjectiveFields: TypeAlias = Literal["series", "best_value", "input_value"]
 
@@ -459,7 +475,7 @@ class LifecycleVersion(Message[_LifecycleVersionFields]):
 
 
 _DESC = file_desc(
-    b'\n\x1fvibesys/store/v1/skeleton.proto\x12\x10vibesys.store.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a"vibesys/store/v1/agent_attrs.proto\x1a\x1evibesys/store/v1/content.proto\x1a\x1cvibesys/store/v1/epoch.proto\x1a vibesys/store/v1/lifecycle.proto\x1a\x1dvibesys/store/v1/record.proto\x1a\x1bvibesys/store/v1/span.proto"\xcb\x05\n\x07RunHead\x12A\n\tlifecycle\x18\x01 \x01(\x0b2\x1b.vibesys.store.v1.LifecycleR\tlifecycleB\x06\xbaH\x03\xc8\x01\x01\x12\'\n\x08strategy\x18\x02 \x01(\tR\x08strategyB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x12A\n\tobjective\x18\x03 \x01(\x0b2#.vibesys.store.v1.HeadlineObjectiveR\tobjective\x12\\\n\x0bspan_counts\x18\x04 \x03(\x0b2).vibesys.store.v1.RunHead.SpanCountsEntryR\nspanCountsB\x10\xbaH\r\x9a\x01\n"\x08r\x06\x10\x01(\x80\x80\x04\x122\n\x05usage\x18\x05 \x01(\x0b2\x1c.vibesys.store.v1.TokenUsageR\x05usage\x12@\n\x0cchart_points\x18\x06 \x03(\x0b2\x1d.vibesys.store.v1.MetricPointR\x0bchartPoints\x12\x1d\n\nneeds_user\x18\x07 \x01(\x08R\tneedsUser\x12(\n\rcommitted_seq\x18\x08 \x01(\x04H\x00R\x0ccommittedSeq\x88\x01\x01\x126\n\x07process\x18\t \x01(\x0b2\x1c.vibesys.store.v1.RunProcessR\x07process\x1a=\n\x0fSpanCountsEntry\x12\x10\n\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n\x05value\x18\x02 \x01(\x04R\x05value:\x028\x01B\x10\n\x0e_committed_seq:k\xbaHh\x1af\n\x15run_head.chart_points\x12,chart_points must contain at most 256 points\x1a\x1fthis.chart_points.size() <= 256"\xd2\x01\n\x11HeadlineObjective\x12B\n\x06series\x18\x01 \x01(\x0b2".vibesys.store.v1.MetricSeriesDeclR\x06seriesB\x06\xbaH\x03\xc8\x01\x01\x12+\n\nbest_value\x18\x02 \x01(\x01H\x00R\tbestValueB\x07\xbaH\x04\x12\x02@\x01\x88\x01\x01\x12-\n\x0binput_value\x18\x03 \x01(\x01H\x01R\ninputValueB\x07\xbaH\x04\x12\x02@\x01\x88\x01\x01B\r\n\x0b_best_valueB\x0e\n\x0c_input_value"\x89\x01\n\nRunProcess\x12\x19\n\x03pid\x18\x01 \x01(\rR\x03pidB\x07\xbaH\x04*\x02 \x00\x12\x1d\n\x05epoch\x18\x02 \x01(\rR\x05epochB\x07\xbaH\x04*\x02 \x00\x12A\n\nstarted_at\x18\x03 \x01(\x0b2\x1a.google.protobuf.TimestampR\tstartedAtB\x06\xbaH\x03\xc8\x01\x01"\xea\x03\n\x08Keyframe\x12(\n\x0bthrough_seq\x18\x01 \x01(\x04R\nthroughSeqB\x07\xbaH\x042\x02 \x00\x120\n\nlog_offset\x18\x02 \x01(\x04R\tlogOffsetB\x11\xbaH\x0e2\x0c\x18\xff\xff\xff\xff\xff\xff\xff\xff\x7f(\x08\x12;\n\x05spans\x18\x03 \x03(\x0b2%.vibesys.store.v1.Keyframe.SpansEntryR\x05spans\x129\n\x07metrics\x18\x04 \x03(\x0b2\x1f.vibesys.store.v1.MetricHistoryR\x07metrics\x125\n\x07streams\x18\x05 \x03(\x0b2\x1b.vibesys.store.v1.StreamRefR\x07streams\x126\n\x06epochs\x18\x06 \x03(\x0b2\x1e.vibesys.store.v1.EpochVersionR\x06epochs\x12B\n\nlifecycles\x18\x07 \x03(\x0b2".vibesys.store.v1.LifecycleVersionR\nlifecycles\x1aW\n\nSpansEntry\x12\x10\n\x03key\x18\x01 \x01(\tR\x03key\x123\n\x05value\x18\x02 \x01(\x0b2\x1d.vibesys.store.v1.SpanHistoryR\x05value:\x028\x01"H\n\x0bSpanHistory\x129\n\x08versions\x18\x01 \x03(\x0b2\x1d.vibesys.store.v1.SpanVersionR\x08versions"\\\n\x0bSpanVersion\x12\x19\n\x03seq\x18\x01 \x01(\x04R\x03seqB\x07\xbaH\x042\x02 \x00\x122\n\x04span\x18\x02 \x01(\x0b2\x16.vibesys.store.v1.SpanR\x04spanB\x06\xbaH\x03\xc8\x01\x01"m\n\rMetricHistory\x12#\n\x06series\x18\x01 \x01(\tR\x06seriesB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x127\n\x06points\x18\x02 \x03(\x0b2\x1f.vibesys.store.v1.MetricVersionR\x06points"g\n\rMetricVersion\x12\x19\n\x03seq\x18\x01 \x01(\x04R\x03seqB\x07\xbaH\x042\x02 \x00\x12;\n\x05point\x18\x02 \x01(\x0b2\x1d.vibesys.store.v1.MetricPointR\x05pointB\x06\xbaH\x03\xc8\x01\x01"g\n\x0cEpochVersion\x12\x19\n\x03seq\x18\x01 \x01(\x04R\x03seqB\x07\xbaH\x042\x02 \x00\x12<\n\x05epoch\x18\x02 \x01(\x0b2\x1e.vibesys.store.v1.EpochStartedR\x05epochB\x06\xbaH\x03\xc8\x01\x01"p\n\x10LifecycleVersion\x12\x19\n\x03seq\x18\x01 \x01(\x04R\x03seqB\x07\xbaH\x042\x02 \x00\x12A\n\tlifecycle\x18\x02 \x01(\x0b2\x1b.vibesys.store.v1.LifecycleR\tlifecycleB\x06\xbaH\x03\xc8\x01\x01BAZ?github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1b\x06proto3',
+    b'\n\x1fvibesys/store/v1/skeleton.proto\x12\x10vibesys.store.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a"vibesys/store/v1/agent_attrs.proto\x1a\x1evibesys/store/v1/content.proto\x1a\x1cvibesys/store/v1/epoch.proto\x1a vibesys/store/v1/lifecycle.proto\x1a\x1dvibesys/store/v1/record.proto\x1a\x1bvibesys/store/v1/span.proto"\xdc\x07\n\x07RunHead\x129\n\tlifecycle\x18\x01 \x01(\x0b2\x1b.vibesys.store.v1.LifecycleR\tlifecycle\x12\'\n\x08strategy\x18\x02 \x01(\tR\x08strategyB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x12A\n\tobjective\x18\x03 \x01(\x0b2#.vibesys.store.v1.HeadlineObjectiveR\tobjective\x12\\\n\x0bspan_counts\x18\x04 \x03(\x0b2).vibesys.store.v1.RunHead.SpanCountsEntryR\nspanCountsB\x10\xbaH\r\x9a\x01\n"\x08r\x06\x10\x01(\x80\x80\x04\x122\n\x05usage\x18\x05 \x01(\x0b2\x1c.vibesys.store.v1.TokenUsageR\x05usage\x12@\n\x0cchart_points\x18\x06 \x03(\x0b2\x1d.vibesys.store.v1.MetricPointR\x0bchartPoints\x12\x1d\n\nneeds_user\x18\x07 \x01(\x08R\tneedsUser\x12(\n\rcommitted_seq\x18\x08 \x01(\x04H\x00R\x0ccommittedSeq\x88\x01\x01\x126\n\x07process\x18\t \x01(\x0b2\x1c.vibesys.store.v1.RunProcessR\x07process\x12-\n\x12awaiting_lifecycle\x18\n \x01(\x08R\x11awaitingLifecycle\x12\x14\n\x05epoch\x18\x0b \x01(\rR\x05epoch\x1a=\n\x0fSpanCountsEntry\x12\x10\n\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n\x05value\x18\x02 \x01(\x04R\x05value:\x028\x01B\x10\n\x0e_committed_seq:\xbe\x02\xbaH\xba\x02\x1af\n\x15run_head.chart_points\x12,chart_points must contain at most 256 points\x1a\x1fthis.chart_points.size() <= 256\x1a\xcf\x01\n\x12run_head.lifecycle\x12;head has either a lifecycle or an explicitly awaiting epoch\x1a|has(this.lifecycle) != this.awaiting_lifecycle && (!this.awaiting_lifecycle || (this.epoch > 0u && has(this.committed_seq)))"\xd2\x01\n\x11HeadlineObjective\x12B\n\x06series\x18\x01 \x01(\x0b2".vibesys.store.v1.MetricSeriesDeclR\x06seriesB\x06\xbaH\x03\xc8\x01\x01\x12+\n\nbest_value\x18\x02 \x01(\x01H\x00R\tbestValueB\x07\xbaH\x04\x12\x02@\x01\x88\x01\x01\x12-\n\x0binput_value\x18\x03 \x01(\x01H\x01R\ninputValueB\x07\xbaH\x04\x12\x02@\x01\x88\x01\x01B\r\n\x0b_best_valueB\x0e\n\x0c_input_value"\x89\x01\n\nRunProcess\x12\x19\n\x03pid\x18\x01 \x01(\rR\x03pidB\x07\xbaH\x04*\x02 \x00\x12\x1d\n\x05epoch\x18\x02 \x01(\rR\x05epochB\x07\xbaH\x04*\x02 \x00\x12A\n\nstarted_at\x18\x03 \x01(\x0b2\x1a.google.protobuf.TimestampR\tstartedAtB\x06\xbaH\x03\xc8\x01\x01"\xea\x03\n\x08Keyframe\x12(\n\x0bthrough_seq\x18\x01 \x01(\x04R\nthroughSeqB\x07\xbaH\x042\x02 \x00\x120\n\nlog_offset\x18\x02 \x01(\x04R\tlogOffsetB\x11\xbaH\x0e2\x0c\x18\xff\xff\xff\xff\xff\xff\xff\xff\x7f(\x08\x12;\n\x05spans\x18\x03 \x03(\x0b2%.vibesys.store.v1.Keyframe.SpansEntryR\x05spans\x129\n\x07metrics\x18\x04 \x03(\x0b2\x1f.vibesys.store.v1.MetricHistoryR\x07metrics\x125\n\x07streams\x18\x05 \x03(\x0b2\x1b.vibesys.store.v1.StreamRefR\x07streams\x126\n\x06epochs\x18\x06 \x03(\x0b2\x1e.vibesys.store.v1.EpochVersionR\x06epochs\x12B\n\nlifecycles\x18\x07 \x03(\x0b2".vibesys.store.v1.LifecycleVersionR\nlifecycles\x1aW\n\nSpansEntry\x12\x10\n\x03key\x18\x01 \x01(\tR\x03key\x123\n\x05value\x18\x02 \x01(\x0b2\x1d.vibesys.store.v1.SpanHistoryR\x05value:\x028\x01"H\n\x0bSpanHistory\x129\n\x08versions\x18\x01 \x03(\x0b2\x1d.vibesys.store.v1.SpanVersionR\x08versions"\\\n\x0bSpanVersion\x12\x19\n\x03seq\x18\x01 \x01(\x04R\x03seqB\x07\xbaH\x042\x02 \x00\x122\n\x04span\x18\x02 \x01(\x0b2\x16.vibesys.store.v1.SpanR\x04spanB\x06\xbaH\x03\xc8\x01\x01"m\n\rMetricHistory\x12#\n\x06series\x18\x01 \x01(\tR\x06seriesB\x0b\xbaH\x08r\x06\x10\x01(\x80\x80\x04\x127\n\x06points\x18\x02 \x03(\x0b2\x1f.vibesys.store.v1.MetricVersionR\x06points"g\n\rMetricVersion\x12\x19\n\x03seq\x18\x01 \x01(\x04R\x03seqB\x07\xbaH\x042\x02 \x00\x12;\n\x05point\x18\x02 \x01(\x0b2\x1d.vibesys.store.v1.MetricPointR\x05pointB\x06\xbaH\x03\xc8\x01\x01"g\n\x0cEpochVersion\x12\x19\n\x03seq\x18\x01 \x01(\x04R\x03seqB\x07\xbaH\x042\x02 \x00\x12<\n\x05epoch\x18\x02 \x01(\x0b2\x1e.vibesys.store.v1.EpochStartedR\x05epochB\x06\xbaH\x03\xc8\x01\x01"p\n\x10LifecycleVersion\x12\x19\n\x03seq\x18\x01 \x01(\x04R\x03seqB\x07\xbaH\x042\x02 \x00\x12A\n\tlifecycle\x18\x02 \x01(\x0b2\x1b.vibesys.store.v1.LifecycleR\tlifecycleB\x06\xbaH\x03\xc8\x01\x01BAZ?github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1b\x06proto3',
     [
         validate_pb.desc(),
         timestamp_pb.desc(),

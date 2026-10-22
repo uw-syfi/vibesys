@@ -75,7 +75,7 @@ class ControlSocketStopRequester:
         )
         if isinstance(response, Unreadable):
             return False
-        return response.ok and response.ack is not None and response.ack.action == "stop"
+        return response.ok and response.ack is not None and response.ack.action == "pause_now"
 
     def _remaining(self, deadline: float) -> float:
         """Return time left on ``deadline``; fail once the whole call is out of time."""

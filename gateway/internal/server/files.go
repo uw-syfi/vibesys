@@ -22,8 +22,7 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// Tail permits one maximum-sized record; blobs have a 16 MiB content budget.
-const maxMessageBytes = 20 << 20
+// Blobs have a 16 MiB content budget, excluding response metadata.
 const blobBytes = 16 << 20
 
 func (h *host) directory(id string) (string, error) {
@@ -85,8 +84,9 @@ func readHead(dir string) (*storev1.RunHead, error) {
 	if err := proto.Unmarshal(data, head); err != nil {
 		return nil, status.Errorf(codes.DataLoss, "invalid run.head: %v", err)
 	}
-	if head.Lifecycle == nil || head.Lifecycle.State == nil {
-		return nil, status.Error(codes.DataLoss, "run.head lacks lifecycle")
+	hasLifecycle := head.Lifecycle != nil && head.Lifecycle.State != nil
+	if hasLifecycle == head.AwaitingLifecycle || (head.AwaitingLifecycle && (head.Epoch == 0 || head.CommittedSeq == nil)) {
+		return nil, status.Error(codes.DataLoss, "run.head requires lifecycle or an explicitly awaiting epoch")
 	}
 	return head, nil
 }

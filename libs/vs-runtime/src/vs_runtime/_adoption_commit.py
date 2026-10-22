@@ -1,10 +1,7 @@
-"""The commit message that records an adopted revision on the run's branch.
+"""The publication commit's description, derived from the selected revision's evidence.
 
-Adoption makes the root workspace hold the winner. The run then commits it on its own
-branch, so the project is clean when the run ends and the next run can start; the
-user's home branch is never touched. The message names what was adopted and what it
-measured, read from the measurements core embedded in the request. A measurement the
-evidence ledger never recorded is left out, never guessed.
+Publishing creates the commit before the independent optional checkout update. No file or
+index in the operator's checkout contributes bytes to the publication.
 """
 
 from __future__ import annotations

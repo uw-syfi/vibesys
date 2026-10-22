@@ -138,7 +138,7 @@ for (const state of ['parked', 'stopped'] as const)
       await captureSession(page, width, `${state}-history`);
       expect(requests).toHaveLength(0);
       await pane.getByRole('button', {name: 'Close chat'}).click();
-      await expect(page.getByRole('button', {name: 'Relaunch', exact: true})).toBeVisible();
+      await expect(page.getByRole('button', {name: 'Resume', exact: true})).toBeVisible();
     });
 
 test('session app-window contact sheet', async ({page}) => {

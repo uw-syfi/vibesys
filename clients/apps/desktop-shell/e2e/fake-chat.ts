@@ -11,6 +11,7 @@ export interface FakeChatSeed {
   readonly runId: string;
   /** The sequence a created thread's event takes: past every event of the run. */
   readonly firstSequence: number;
+  readonly refuseActions?: readonly string[];
 }
 
 interface ChatRequest {
@@ -32,6 +33,8 @@ export function installFakeChat(seed: FakeChatSeed): void {
     if (request.type === 'command.control') {
       const control = request.control ?? {};
       controls.push(control);
+      if (seed.refuseActions?.includes(control.action ?? ''))
+        return [{...envelope, ok: false, error: 'The run did not take the command'}];
       return [{...envelope, ok: true, ack: {action: control.action, status: 'pending'}}];
     }
     if (request.type === 'query.chat_thread_create') {

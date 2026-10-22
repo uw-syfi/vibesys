@@ -44,6 +44,9 @@ class ParsingMain {
     },
     on: (channel, listener) => {
       this.subscribed.set(channel, listener);
+      return () => {
+        this.subscribed.delete(channel);
+      };
     },
   });
 }
@@ -134,7 +137,6 @@ function cases(random: Seeded): Case[] {
       bridge => bridge.resume(key, path, exactResumeRunId(name)),
       {kind: 'resume', host, project: path, run: exactResumeRunId(name)},
     ],
-    [bridge => bridge.stopConfirmed(key, instance, force), {kind: 'stop', host, instance, force}],
     [bridge => bridge.releaseRun(), {kind: 'release-run'}],
     [
       bridge => bridge.readEvents(key, path, name, token, 1 + (token % 1000)),
@@ -253,13 +255,18 @@ describe('the welcome contract', () => {
     bridge.onRecent(event => heard.push([WELCOME_EVENTS.recent, event]));
     bridge.onListing(event => heard.push([WELCOME_EVENTS.listing, event]));
     bridge.onPreferences(event => heard.push([WELCOME_EVENTS.preferences, event]));
+    bridge.onHostSettingsChanged(() => heard.push([WELCOME_EVENTS.hostSettings, null]));
     expect([...main.subscribed.keys()].sort()).toEqual(Object.values(WELCOME_EVENTS).sort());
     for (const [index, channel] of Object.values(WELCOME_EVENTS).entries()) {
       main.subscribed.get(channel)?.({sequence: index, value: channel});
     }
     expect(heard).toEqual(
       Object.values(WELCOME_EVENTS).map(
-        (channel, index) => [channel, {sequence: index, value: channel}] as const,
+        (channel, index) =>
+          [
+            channel,
+            channel === WELCOME_EVENTS.hostSettings ? null : {sequence: index, value: channel},
+          ] as const,
       ),
     );
   });

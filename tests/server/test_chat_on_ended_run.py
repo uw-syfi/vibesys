@@ -38,11 +38,11 @@ from server.events import READER_APPENDABLE_EVENTS, EventType
 from server.host_api import RUN_EVENTS_FILE
 from vibesys.api import (
     AuxiliaryAgentLaunch,
+    PauseNowRequest,
     PauseRequest,
     ResumeRequest,
     RunReady,
     SteerRequest,
-    StopRequest,
 )
 from vibesys.api.request import load_task
 from vibesys.config import Config
@@ -211,7 +211,7 @@ def _commands(text: str, control_id: str) -> list[ProtocolRequest]:
         ),
         ControlCommand(timestamp=REQUEST_TIME, control=PauseRequest(control_id=control_id)),
         ControlCommand(timestamp=REQUEST_TIME, control=ResumeRequest(control_id=control_id)),
-        ControlCommand(timestamp=REQUEST_TIME, control=StopRequest(control_id=control_id)),
+        ControlCommand(timestamp=REQUEST_TIME, control=PauseNowRequest(control_id=control_id)),
     ]
 
 

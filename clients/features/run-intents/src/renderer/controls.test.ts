@@ -35,6 +35,7 @@ function fixture(enabled = true) {
 }
 const request = create(PostIntentRequestSchema, {
   projectRoot: '/project',
+  expectedEpoch: 1n,
   runId: 'run-1',
   requestId: 'r-1',
   intent: {case: 'pause', value: {}},
@@ -226,7 +227,6 @@ test('relaunch confirms an epoch or a typed refusal and owns every transport cal
   for (const outcome of [
     {case: 'epoch', value: 2n} as const,
     {case: 'refusal', value: RelaunchRefusal.LOCKED} as const,
-    {case: 'refusal', value: RelaunchRefusal.ENDED} as const,
     {case: 'refusal', value: RelaunchRefusal.CHECKOUT_MISSING} as const,
     {case: 'refusal', value: RelaunchRefusal.EPOCH_CHANGED} as const,
   ]) {

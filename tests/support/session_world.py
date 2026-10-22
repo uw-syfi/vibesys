@@ -50,6 +50,7 @@ from vs_core.api import (
     SessionSpec,
     SnapshotAndRetainRun,
     TurnObserved,
+    TurnPermit,
     TurnSpec,
     Until,
     WorkspaceRef,
@@ -228,6 +229,10 @@ class FakeSessionResolver:
             workspace=workspace.path,
             policy=AgentExecutionPolicy(require_enforcement=False),
         )
+
+    def hold_permit(self, execution_id: str, scope: Scope, permit: TurnPermit) -> None:
+        """This resolver has no control channel, so the permit is not a gate here."""
+        del execution_id, scope, permit
 
     def turn_timeout(self, role: RoleId) -> timedelta | None:
         """The one declared in-turn timeout of every role."""

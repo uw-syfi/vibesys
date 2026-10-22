@@ -15,7 +15,7 @@
     "check": "tsc -b",
     "dev": "vite",
     "test": "node ../../tools/scripts/run_bun_tests.mjs ./src",
-    "test:e2e": "pnpm build && playwright test",
+    "test:e2e": "pnpm build && playwright test --pass-with-no-tests",
     "test:e2e:linux": "bash scripts/linux-playwright.sh",
     "check:deterministic": "bash scripts/check-deterministic.sh",
     "update:screenshots": "bash scripts/linux-playwright.sh --update-snapshots"

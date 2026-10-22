@@ -5,10 +5,12 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 from io import BytesIO, StringIO
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING
 
 import pytest
-from hypothesis import given
+from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
 import vs_proto.api as p
@@ -27,29 +29,23 @@ from vs_proto.api import (
     HostCallRequest,
     HostCallResponse,
     Oneof,
-    ParkIntent,
     PauseIntent,
+    PauseNowIntent,
     PostIntentRequest,
     RelaunchRefusal,
     RelaunchRequest,
-    ResumeIntent,
-    ResumeWhen,
     SetParallelismIntent,
     SteerIntent,
     SteerMode,
     SteerTarget,
     SteerTargetKind,
-    StopIntent,
-    StopMode,
     WithdrawIntent,
     validate,
 )
 from vs_runlog.api import FileRunLogWriter, RunLogReader, encode_frame
-from vs_sim.api.testing import FakeProcesses, ManualClock, ProcessScript, SimThreads
+from vs_sim.api.testing import FakeProcesses, ManualClock, ProcessScript, SimThreads, examples
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from protobuf import Message
 
     from vs_sim.api import ProcessSpec
@@ -96,7 +92,11 @@ def call(project: Project, run_id: str, intent: Oneof, request_id: str = "r-1") 
         method=Oneof(
             "post_intent",
             PostIntentRequest(
-                project_root=str(project.root), run_id=run_id, request_id=request_id, intent=intent
+                project_root=str(project.root),
+                run_id=run_id,
+                request_id=request_id,
+                intent=intent,
+                expected_epoch=1,
             ),
         ),
     )
@@ -108,13 +108,8 @@ def call(project: Project, run_id: str, intent: Oneof, request_id: str = "r-1") 
 @pytest.mark.parametrize(
     ("name", "intent", "action"),
     [
-        ("park", ParkIntent(), "park"),
+        ("pause_now", PauseNowIntent(), "pause_now"),
         ("pause", PauseIntent(), "pause"),
-        ("resume", ResumeIntent(when=ResumeWhen.NOW), "resume"),
-        ("resume", ResumeIntent(when=ResumeWhen.CAPACITY_RETURNS), "resume"),
-        ("resume", ResumeIntent(when=ResumeWhen.NOW, fallback=True), "resume"),
-        ("stop", StopIntent(mode=StopMode.DRAIN), "stop"),
-        ("stop", StopIntent(mode=StopMode.CANCEL), "stop"),
         (
             "steer",
             SteerIntent(
@@ -161,9 +156,9 @@ def test_post_round_trips_into_reviewed_inbox(
 def test_order_and_request_id_conflicts_are_unchanged(project: tuple[Project, str]) -> None:
     owner, run_id = project
     call(owner, run_id, Oneof("pause", PauseIntent()), "z")
-    call(owner, run_id, Oneof("resume", ResumeIntent(when=ResumeWhen.NOW)), "a")
+    call(owner, run_id, Oneof("pause_now", PauseNowIntent()), "a")
     call(owner, run_id, Oneof("pause", PauseIntent()), "z")
-    response = call(owner, run_id, Oneof("stop", StopIntent(mode=StopMode.DRAIN)), "z")
+    response = call(owner, run_id, Oneof("pause_now", PauseNowIntent()), "z")
     assert response.result is not None
     assert response.result.field == "configuration_failed"
     assert "different request" in response.result.value.message
@@ -173,8 +168,6 @@ def test_order_and_request_id_conflicts_are_unchanged(project: tuple[Project, st
 @pytest.mark.parametrize(
     "intent",
     [
-        Oneof("resume", ResumeIntent()),
-        Oneof("resume", ResumeIntent(when=ResumeWhen.CAPACITY_RETURNS, fallback=True)),
         Oneof("steer", SteerIntent(text="guidance")),
         Oneof("withdraw", WithdrawIntent(withdraws="../bad")),
         Oneof("set_parallelism", SetParallelismIntent()),
@@ -223,6 +216,7 @@ def test_host_command_uses_binary_stdin_stdout_and_the_real_inbox(
                 project_root=str(owner.root),
                 run_id=run_id,
                 request_id="command-1",
+                expected_epoch=1,
                 intent=Oneof("pause", PauseIntent()),
             ),
         ),
@@ -278,7 +272,7 @@ def test_ended_run_refuses_new_requests_but_accepts_an_applied_retry(
     accepted = call(owner, run_id, Oneof("pause", PauseIntent()))
     assert accepted.result is not None
     assert accepted.result.field == "post_intent"
-    refused = call(owner, run_id, Oneof("resume", ResumeIntent(when=ResumeWhen.NOW)), "new")
+    refused = call(owner, run_id, Oneof("pause_now", PauseNowIntent()), "new")
     assert refused.result is not None
     assert refused.result.field == "configuration_failed"
     assert refused.result.value.code == "inbox_closed"
@@ -291,8 +285,7 @@ def test_ended_run_refuses_new_requests_but_accepts_an_applied_retry(
     ("arguments", "intent"),
     [
         (["pause"], Oneof("pause", PauseIntent())),
-        (["resume"], Oneof("resume", ResumeIntent(when=ResumeWhen.NOW))),
-        (["stop", "--mode", "cancel"], Oneof("stop", StopIntent(mode=StopMode.CANCEL))),
+        (["pause-now"], Oneof("pause_now", PauseNowIntent())),
         (
             ["steer", "look here", "--role", "planner", "--standing"],
             Oneof(
@@ -310,6 +303,7 @@ def test_legacy_cli_and_host_call_share_byte_identical_request_ids(
     project: tuple[Project, str], arguments: list[str], intent: Oneof, *, cli_first: bool
 ) -> None:
     owner, run_id = project
+    _store_observed_epoch(owner, run_id)
 
     def cli() -> None:
         assert (
@@ -351,15 +345,84 @@ def relaunch_call(owner: Project, run_id: str, checkout: Path) -> HostCallReques
     )
 
 
-@pytest.mark.parametrize("ending", ["interrupted", "stopped"])
+def _store_observed_epoch(owner: Project, run_id: str) -> None:
+    journal = EventJournal(ManualClock(), SimThreads())
+    journal.enable_runlog(owner, run_id)
+    journal.attach(Project.log_directory_for(owner.root, run_id), run_id)
+    try:
+        journal.emit(
+            CoreEventType.RUN_STARTED, data=RunStartedData(outer_loop="test", input="input")
+        )
+    finally:
+        journal.close()
+    core = initial_state()
+    core = core.model_copy(
+        update={
+            "records": core.records.model_copy(
+                update={"recovery": core.records.recovery.model_copy(update={"epoch": 1})}
+            )
+        }
+    )
+    store = owner.state_store(run_id)
+    fence = store.acquire("writer", now=0, duration=1)
+    assert fence is not None
+    store.commit(
+        None,
+        StoredEnvelope(
+            revision=0,
+            schema_version=1,
+            payload=json.dumps({"envelope": {"core": core.model_dump(mode="json")}}).encode(),
+        ),
+        fence,
+        now=0,
+    )
+
+
+def _store_ending(owner: Project, run_id: str, ending: str) -> None:
+    if ending not in {"interrupted", "stopped"}:
+        core = initial_state()
+        ended = core.model_copy(
+            update={
+                "run": core.run.model_copy(
+                    update={
+                        "status": RunStatus.TERMINAL,
+                        "result": RunResultProposal.model_validate(
+                            {
+                                "outcome": ending
+                                if ending in {"success", "failure", "blocked"}
+                                else "cancelled",
+                                "reason": ending,
+                            }
+                        ),
+                    }
+                )
+            }
+        )
+        store = owner.state_store(run_id)
+        fence = store.acquire("writer", now=0, duration=1)
+        assert fence is not None
+        store.commit(
+            None,
+            StoredEnvelope(
+                revision=0,
+                schema_version=1,
+                payload=json.dumps({"envelope": {"core": ended.model_dump(mode="json")}}).encode(),
+            ),
+            fence,
+            now=0,
+        )
+
+
+@pytest.mark.parametrize(
+    "ending", ["interrupted", "stopped", "success", "failure", "blocked", "deadline", "environment"]
+)
 def test_host_relaunch_round_trip_confirms_the_new_epoch(
     project: tuple[Project, str], tmp_path: Path, ending: str
 ) -> None:
 
     owner, run_id = project
     executable = host_executable(tmp_path / "checkout")
-    threads = SimThreads()
-    clock = ManualClock()
+    threads, clock = SimThreads(), ManualClock()
     journal = EventJournal(clock, threads)
     journal.checkout = ("tree-a", False)
     journal.enable_runlog(owner, run_id)
@@ -368,6 +431,7 @@ def test_host_relaunch_round_trip_confirms_the_new_epoch(
     if ending == "stopped":
         journal.emit(CoreEventType.STOPPED)
     journal.close()
+    _store_ending(owner, run_id, ending)
     path = Project.run_log_path_for(owner.root, run_id)
     request = relaunch_call(owner, run_id, executable.parents[2])
 
@@ -428,6 +492,8 @@ def test_host_relaunch_round_trip_confirms_the_new_epoch(
     headers = [r.body.value for r in records if r.body and r.body.field == "epoch_started"]
     assert [(h.epoch, h.tree_hash, h.dirty) for h in headers] == [
         (1, "tree-a", False),
+        (1, "tree-a", False),
+        (2, "tree-b", True),
         (2, "tree-b", True),
     ]
     response = HostCallResponse.from_binary(
@@ -480,32 +546,7 @@ def test_host_relaunch_failure_paths_never_claim_an_epoch(
             )
         )
     )
-    if mode == "ended":
-        core = initial_state()
-        ended = core.model_copy(
-            update={
-                "run": core.run.model_copy(
-                    update={
-                        "status": RunStatus.TERMINAL,
-                        "result": RunResultProposal(outcome="success", reason="finished"),
-                    }
-                )
-            }
-        )
-        store = owner.state_store(run_id)
-        fence = store.acquire("writer", now=0, duration=1)
-        assert fence is not None
-        store.commit(
-            None,
-            StoredEnvelope(
-                revision=0,
-                schema_version=1,
-                payload=json.dumps({"envelope": {"core": ended.model_dump(mode="json")}}).encode(),
-            ),
-            fence,
-            now=0,
-        )
-    elif mode == "corrupt":
+    if mode == "corrupt":
         path.write_bytes(b"invalid magic")
     elif mode == "missing-log":
         path.unlink()
@@ -522,13 +563,151 @@ def test_host_relaunch_failure_paths_never_claim_an_epoch(
     )
     validate(response)
     assert response.result is not None
-    if mode in {"ended", "missing-log"}:
+    if mode == "missing-log":
         assert response.result.field == "relaunch"
-        assert response.result.value.outcome == Oneof(
-            "refusal", RelaunchRefusal.ENDED if mode == "ended" else RelaunchRefusal.EPOCH_CHANGED
-        )
+        assert response.result.value.outcome == Oneof("refusal", RelaunchRefusal.EPOCH_CHANGED)
         assert not processes.ran
     else:
         assert response.result.field == "configuration_failed"
         assert response.result.value.code == "invalid_input"
         assert len(processes.ran) == (0 if mode == "corrupt" else 1)
+
+
+def _open_resumable(root: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Project, str]:
+    monkeypatch.setenv("VIBESYS_STATE_HOME", str(root / "state-home"))
+    project_root = root / "project"
+    project_root.mkdir(parents=True)
+    project = Project.open(project_root)
+    project.state.create_project("control", now=datetime(2026, 1, 1, tzinfo=UTC))
+    manifest = project.state.new_run_manifest(
+        "control",
+        branch="test",
+        vibesys_version="test",
+        run_environment=RunEnvironmentRecord(name="docker"),
+        execution=run_execution_record(),
+        orchestration=OrchestrationDescriptor(id="dynamic", config_version=1, options={}),
+        trusted_input_baseline="a" * 40,
+        now=datetime(2026, 1, 1, tzinfo=UTC),
+    )
+    project.state.create_run(manifest)
+    with project.state.exclusive_run_host(manifest.run_id):
+        pass
+    project.state.control_inbox(manifest.run_id).serve()
+    return project, manifest.run_id
+
+
+def _resume_during_environment_open(root: Path, *, delay: float, fail: bool) -> None:
+    """Resume while the successor holds the writer lock and its environment is still opening."""
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        _resume_during_environment_open_in(root, monkeypatch, delay=delay, fail=fail)
+
+
+def _resume_during_environment_open_in(
+    root: Path, monkeypatch: pytest.MonkeyPatch, *, delay: float, fail: bool
+) -> None:
+    owner, run_id = _open_resumable(root, monkeypatch)
+    executable = host_executable(root / "checkout")
+    threads, clock = SimThreads(), ManualClock()
+    logs = Project.log_directory_for(owner.root, run_id)
+    path = Project.run_log_path_for(owner.root, run_id)
+    request = relaunch_call(owner, run_id, executable.parents[2])
+
+    def exercise() -> None:
+        journal = EventJournal(clock, threads)
+        journal.checkout = ("tree-a", False)
+        journal.enable_runlog(owner, run_id)
+        journal.attach(logs, run_id)
+        journal.emit(
+            CoreEventType.RUN_STARTED, data=RunStartedData(outer_loop="test", input="input")
+        )
+        journal.close()
+
+        def launch(spec: ProcessSpec) -> ProcessScript:
+            def successor() -> None:
+                resumed = EventJournal(clock, threads)
+                resumed.checkout = ("tree-b", True)
+                resumed.enable_runlog(owner, run_id)
+                resumed.attach(logs, run_id)
+                threads.sleep(delay)
+                if fail:
+                    resumed.fail_open_epoch("environment did not open")
+                else:
+                    resumed.emit(
+                        CoreEventType.RUN_STARTED,
+                        data=RunStartedData(outer_loop="test", input="input"),
+                    )
+                resumed.close()
+
+            threads.spawn(successor, name="successor", daemon=False)
+            assert spec.argv == (
+                str(executable),
+                "--resume",
+                run_id,
+                "--detach",
+                "--project",
+                str(owner.root),
+            )
+            return ProcessScript()
+
+        processes = FakeProcesses(launch, pass_time=threads.sleep)
+        response = HostCallResponse.from_binary(
+            host_call(request.to_binary(), processes=processes, threads=threads)
+        )
+        validate(response)
+        assert response.result is not None
+        assert response.result.field == "relaunch", response.result
+        assert response.result.value.outcome == Oneof("epoch", 2)
+        second = HostCallResponse.from_binary(
+            host_call(request.to_binary(), processes=processes, threads=threads)
+        )
+        validate(second)
+        assert second.result is not None
+        assert second.result.field == "relaunch"
+        assert second.result.value.outcome in (
+            Oneof("refusal", RelaunchRefusal.LOCKED),
+            Oneof("refusal", RelaunchRefusal.EPOCH_CHANGED),
+        )
+        assert len(processes.ran) == 1
+
+    threads.run(exercise)
+    _assert_successor_outcome(path, failed=fail)
+
+
+def _assert_successor_outcome(path: Path, *, failed: bool) -> None:
+    with path.open("rb") as stream:
+        records = list(RunLogReader(stream))
+    lifecycles = [
+        (record.epoch, record.body.value.state.field, record.body.value.state.value)
+        for record in records
+        if record.body is not None
+        and record.body.field == "lifecycle"
+        and record.body.value.state is not None
+    ]
+    if failed:
+        ended = [value for epoch, field, value in lifecycles if epoch == 2 and field == "ended"]
+        assert len(ended) == 1
+        ending = ended[0]
+        assert isinstance(ending, p.Ended)
+        assert ending.outcome is p.Outcome.FAILED
+        assert ending.failure is not None
+        assert ending.failure.kind is p.RunFailureKind.ENVIRONMENT_UNAVAILABLE
+        return
+    assert any(epoch == 2 and field == "running" for epoch, field, _value in lifecycles)
+
+
+def test_resume_confirms_while_the_environment_opens_slowly(tmp_path: Path) -> None:
+    """The reported case: environment open outlasts the confirmation budget."""
+    _resume_during_environment_open(tmp_path / "slow", delay=30, fail=False)
+
+
+@pytest.mark.regression
+@settings(max_examples=examples(pr=6, nightly=24))
+@given(delay=st.integers(min_value=0, max_value=40), fail=st.booleans())
+@example(delay=30, fail=False)
+@example(delay=30, fail=True)
+def test_resume_confirms_or_records_failure_for_any_environment_open(
+    delay: int, *, fail: bool
+) -> None:
+    """A successor either confirms and runs, or ends the epoch it already published."""
+    with TemporaryDirectory() as directory:
+        _resume_during_environment_open(Path(directory), delay=delay, fail=fail)

@@ -36,6 +36,7 @@ from ._registry import ClosedRecordContradictionError, ContractError
 from ._request_forward import declaration, owner_signals, records_own
 from ._request_recovery import resent
 from ._session_scope import lost_turn_cancellation
+from ._turn_permit import cap_dispatch_until, facts_for
 from ._values import digest
 from .types.attempts import RevisionOperationRequested
 from .types.common import (
@@ -248,11 +249,20 @@ def _dispatched(
         update={"phase": RequestPhase.DISPATCHED, "dispatched_in": state.recovery.epoch}
     )
     if record.limit_from_dispatch is not None and record.dispatched_at is None:
+        until = started_until(context.run, record.limit_from_dispatch, record.until.watches)
+        at = cap_dispatch_until(
+            facts_for(
+                run=context.run,
+                sessions=context.sessions,
+                records=state,
+                evaluation=context.evaluation,
+            ),
+            record.request,
+            until.at,
+        )
         updated = updated.model_copy(
             update={
-                "until": started_until(
-                    context.run, record.limit_from_dispatch, record.until.watches
-                ),
+                "until": until.model_copy(update={"at": at}),
                 "dispatched_at": context.run.now_at,
             }
         )

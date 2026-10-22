@@ -287,10 +287,10 @@ jobs:
 
   # Every spec of the three Playwright apps, split across the runners in `matrix.shard`
   # (`VIBESYS_E2E_SHARD`, see clients/tools/e2e/shard.mts) so no job nears the 10-minute
-  # check limit. The desktop shell's ~530 specs were 7 of the unsharded job's 9 minutes; its
-  # specs are spread by test, and the other two apps' files land on shard 1. Each leg pays
-  # ~50 s of setup, so the shard count trades summed runner time against wall time: five keep
-  # every leg near 3 minutes. The count is the length of the list (`strategy.job-total`);
+  # check limit. One duration-weighted file plan spans all three apps, so the Electron and
+  # gallery files do not pile onto the shell's first slice. New specs join the plan even
+  # before they have a recorded timing. Each leg pays setup, so five trade summed runner
+  # time against wall time. The count is the length of the list (`strategy.job-total`);
   # `fail-fast: false` lets a red shard finish its siblings so one run lists every failure.
   clients-e2e:
     needs: changes
@@ -335,8 +335,8 @@ jobs:
         run: xvfb-run -a ./support/repoctl/repoctl run-checks --group clients_e2e
 
       # A gallery screenshot that differs from its baseline leaves the actual and the diff here, so
-      # a reviewer can see the change without rerunning it in the Linux image. The gallery's one spec
-      # file runs on shard 1, so only that leg has files; the others upload nothing.
+      # a reviewer can see the change without rerunning it in the Linux image. Only the shard
+      # assigned the gallery spec has files; the others upload nothing.
       - name: Upload the gallery's screenshot differences
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

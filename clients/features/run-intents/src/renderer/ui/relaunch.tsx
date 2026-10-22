@@ -9,7 +9,7 @@ export interface RelaunchView {
 export function RelaunchAction(props: RelaunchView): JSX.Element {
   return (
     <Button
-      text="Relaunch"
+      text="Resume"
       variant="secondary"
       quietReason
       press={props.launch}
@@ -19,8 +19,8 @@ export function RelaunchAction(props: RelaunchView): JSX.Element {
               props.state === 'launching'
                 ? 'Waiting for the host'
                 : props.state === 'unavailable'
-                  ? 'Relaunch unavailable'
-                  : 'Refresh the run before relaunching again',
+                  ? 'Resume unavailable'
+                  : 'Refresh the run before resuming again',
           }
         : {})}
     />
@@ -30,8 +30,6 @@ export function RelaunchStatus(props: RelaunchView): JSX.Element | null {
   if (props.result) return <Text>{props.result}</Text>;
   if (props.state === 'launching') return <Text tone="muted">Waiting for the host</Text>;
   if (props.state === 'uncertain')
-    return <Text tone="warn">Relaunch not confirmed. Check the timeline before trying again.</Text>;
-  return props.state === 'ready' ? (
-    <Text tone="muted">Update the host checkout before relaunching.</Text>
-  ) : null;
+    return <Text tone="warn">Resume not confirmed. Check the timeline before trying again.</Text>;
+  return null;
 }

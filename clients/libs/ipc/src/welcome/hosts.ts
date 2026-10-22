@@ -22,6 +22,7 @@ export const HOSTS_CHANNELS = {
 
 /** The welcome bridge's requests the hosts feature makes. */
 export interface HostsWelcomeBridge {
+  onHostSettingsChanged(listener: () => void): () => void;
   runTransportV2(host: HostKey, enabled?: boolean): Promise<WelcomeResult<boolean>>;
   /** Change a checkout under `change`, so losing renderer intent can cancel the main-process work. */
   setCheckout(host: HostKey, path: string, change: number): Promise<WelcomeResult<string>>;

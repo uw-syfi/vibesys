@@ -431,7 +431,7 @@ def test_unknown_kinds_keep_exact_json_with_a_declared_descriptor(number: int) -
     headers = [
         record.body.value
         for record in result.records
-        if record.body is not None and record.body.field == "epoch_started"
+        if record.body is not None and record.body.field == "declaration_amended"
     ]
     assert any(
         kind.kind == "custom_kind" and kind.attrs_type == "google.protobuf.StringValue"
@@ -468,7 +468,7 @@ def test_gate_metrics_are_declared_and_never_copied_into_attrs(value: float) -> 
     headers = [
         record.body.value
         for record in result.records
-        if record.body is not None and record.body.field == "epoch_started"
+        if record.body is not None and record.body.field == "declaration_amended"
     ]
     assert any(series.name == "speed" and series.unit == "ops/s" for series in headers[-1].series)
 

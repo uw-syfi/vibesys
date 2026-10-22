@@ -138,9 +138,7 @@ test('a run that has tried no idea yet says what will appear, not a guess', asyn
   await expect(page.getByText('nothing measured yet')).toBeVisible();
 });
 
-test('a live run pauses and resumes from the header over its session, and is let go', async ({
-  page,
-}) => {
+test('a live run drains from the header over its session, and is let go', async ({page}) => {
   await addInitScripts(page, [
     initScript(installFakeBridge, SEED),
     initScript(installFakeProjectRuns, SEED),
@@ -155,20 +153,18 @@ test('a live run pauses and resumes from the header over its session, and is let
     .getByRole('button', {name: /^queue-rs · mpmc/})
     .click();
 
-  const pause = page.getByRole('button', {name: 'Pause'});
+  const pause = page.getByRole('button', {name: 'Pause', exact: true});
   await expect(pause).toBeEnabled();
   await expect.poll(() => commands(page)).toEqual([`attach ${INSTANCE}`]);
   await pause.click();
-  await expect.poll(() => commands(page)).toContain('command.pause');
+  await expect.poll(() => commands(page)).toContain('command.control:pause');
 
   await push(page, listed([server('paused', 'user')]));
   await expect(page.getByRole('main').getByText('Paused by you')).toBeVisible();
-  const resume = page.getByRole('button', {name: 'Resume'});
-  await expect(resume).toBeEnabled();
+  await expect(page.getByRole('button', {name: 'Resume', exact: true})).toHaveCount(0);
+  await expect(page.getByRole('button', {name: 'Pause now', exact: true})).toBeEnabled();
   expect((await new AxeBuilder({page}).analyze()).violations).toEqual([]);
   if (shots !== undefined) await page.screenshot({path: `${shots}/ink-live-paused.png`});
-  await resume.click();
-  await expect.poll(() => commands(page)).toContain('command.resume');
 
   await nav.getByRole('button', {name: 'Settings'}).click();
   await expect.poll(() => commands(page)).toContain('release');

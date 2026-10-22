@@ -143,7 +143,12 @@ if TYPE_CHECKING:
         vetted_models,
     )
     from vs_runtime.api import boot_trace
-    from vs_runtime.api.control import CONTROL_REQUEST, ControlAction, recorded_ending
+    from vs_runtime.api.control import (
+        CONTROL_REQUEST,
+        ControlAction,
+        recorded_ending,
+        recorded_epoch,
+    )
     from vs_runtime.api.infrastructure import (
         CONTROL_ID_PATTERN,
         REFUSAL_TEXT,
@@ -153,7 +158,7 @@ if TYPE_CHECKING:
         ControlAck,
         ControlRequest,
         ControlStatus,
-        ParkRequest,
+        PauseNowRequest,
         PauseRequest,
         RefusalReason,
         ResumeRequest,
@@ -170,7 +175,6 @@ if TYPE_CHECKING:
         SteerTargets,
         SteerTurn,
         StopMode,
-        StopRequest,
         WithdrawRequest,
         check_one_way_to_resume,
         describe_seconds,
@@ -180,7 +184,10 @@ if TYPE_CHECKING:
 _MODULES: dict[str, str] = {
     name: module
     for module, names in (
-        ("vs_runtime.api.control", ("CONTROL_REQUEST ControlAction recorded_ending ")),
+        (
+            "vs_runtime.api.control",
+            ("CONTROL_REQUEST ControlAction recorded_ending recorded_epoch "),
+        ),
         (
             "vibesys.api.auxiliary",
             (
@@ -240,10 +247,10 @@ _MODULES: dict[str, str] = {
             "vs_runtime.api.infrastructure",
             (
                 "CONTROL_ID_PATTERN REFUSAL_TEXT ActionRequest CancelAttemptRequest CancelItemRequest "
-                "ControlAck ControlRequest ControlStatus ParkRequest PauseRequest RefusalReason "
+                "ControlAck ControlRequest ControlStatus PauseNowRequest PauseRequest RefusalReason "
                 "ResumeRequest ResumeWhen RunStopped SetMaxParallelRequest SteerableAttempt "
                 "SteerDelivery SteerDeliveryState SteerMode SteerRequest SteerTarget SteerTargetKind "
-                "SteerTargets SteerTurn StopMode StopRequest WithdrawRequest check_one_way_to_resume "
+                "SteerTargets SteerTurn StopMode WithdrawRequest check_one_way_to_resume "
                 "describe_seconds escalate_stop "
             ),
         ),
@@ -340,7 +347,7 @@ __all__ = [
     "ModelNotVetted",
     "OrchestrationDescriptor",
     "OrchestrationRegistry",
-    "ParkRequest",
+    "PauseNowRequest",
     "PauseRequest",
     "PluginProjection",
     "ProfilerKind",
@@ -400,7 +407,6 @@ __all__ = [
     "SteerTurn",
     "SteerableAttempt",
     "StopMode",
-    "StopRequest",
     "TaskImageUnsupported",
     "TaskNeedsProvisioning",
     "TaskNotFound",
@@ -432,6 +438,7 @@ __all__ = [
     "load_config",
     "open_run_store",
     "recorded_ending",
+    "recorded_epoch",
     "relaunch",
     "vetted_models",
 ]

@@ -30,6 +30,7 @@ from vs_proto.api import (
     PostIntentResponse,
     SteerTargetKind,
     ValidationError,
+    host_operations,
     validate,
 )
 from vs_runlog.api import RunLock
@@ -37,7 +38,7 @@ from vs_runlog.api import RunLock
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from vs_proto.api import PostIntentRequest, SteerIntent
+    from vs_proto.api import PostIntentRequest, RelaunchRequest, RelaunchResponse, SteerIntent
     from vs_sim.api import Processes, Threads
 
 __all__ = ["host_call"]
@@ -61,20 +62,28 @@ def host_call(
     try:
         call = HostCallRequest.from_binary(payload)
         validate(call)
-        match call.method:
-            case Oneof("post_intent", request):
-                result = _post_intent(request)
-                response = HostCallResponse(result=Oneof("post_intent", result))
-            case Oneof("relaunch", request):
-                result = import_module("vibesys.api.host_relaunch").relaunch_host(
+        method = call.method
+        result = None
+        if method is not None:
+
+            def relaunch(request: RelaunchRequest) -> RelaunchResponse:
+                return import_module("vibesys.api.host_relaunch").relaunch_host(
                     request, call.checkout, processes=processes, threads=threads
                 )
-                response = HostCallResponse(result=Oneof("relaunch", result))
-            case Oneof("chat_message", request):
-                result = _chat_message(request, start_chat)
-                response = HostCallResponse(result=Oneof("chat_message", result))
-            case _:
-                return _failure("invalid_method", "HostCall.method is required")
+
+            def chat_message(request: ChatMessageRequest) -> ChatMessageResponse:
+                return _chat_message(request, start_chat)
+
+            result = host_operations.dispatch_host_call(
+                method.field,
+                method.value,
+                post_intent=_post_intent,
+                relaunch=relaunch,
+                chat_message=chat_message,
+            )
+        if result is None:
+            return _failure("invalid_method", "HostCall.method is required")
+        response = HostCallResponse(result=result)
     except ConfigurationError as error:
         diagnostic = error.diagnostic
         return _failure(diagnostic.code, diagnostic.message, exit_code=diagnostic.exit_code)
@@ -113,18 +122,10 @@ def _post_intent(request: PostIntentRequest) -> PostIntentResponse:
 def _control_payload(request: PostIntentRequest) -> dict[str, object]:
     common: dict[str, object] = {"control_id": request.request_id}
     match request.intent:
-        case Oneof("park", _):
-            payload = {"action": ControlAction.PARK}
+        case Oneof("pause_now", _):
+            payload = {"action": "pause_now", "expected_epoch": request.expected_epoch}
         case Oneof("pause", _):
-            payload = {"action": ControlAction.PAUSE}
-        case Oneof("resume", value):
-            payload = {
-                "action": ControlAction.RESUME,
-                "fallback": value.fallback,
-                "when": value.when.name.lower(),
-            }
-        case Oneof("stop", value):
-            payload = {"action": ControlAction.STOP, "mode": value.mode.name.lower()}
+            payload = {"action": ControlAction.PAUSE, "expected_epoch": request.expected_epoch}
         case Oneof("steer", value):
             payload = _steer_payload(value)
         case Oneof("withdraw", value):

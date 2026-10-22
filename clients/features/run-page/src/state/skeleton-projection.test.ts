@@ -1,12 +1,16 @@
 import {expect, test} from 'bun:test';
-import {create} from '@bufbuild/protobuf';
+import {clone, create, toBinary} from '@bufbuild/protobuf';
+import {AnySchema} from '@bufbuild/protobuf/wkt';
 import {
+  AgentTurnAttrsSchema,
   AttemptOutcome,
   Change,
   DrainGoal,
   KeyframeSchema,
+  LifecycleSchema,
   Outcome,
   RecordSchema,
+  RunLiveness,
   RuntimeType,
   SpanFailureKind,
   SpanSchema,
@@ -17,12 +21,15 @@ import {
 } from '@vibesys/proto';
 import {storeRunFixture} from '@vibesys/run-fixtures';
 import {foldSkeleton, seedSkeleton, seekSkeleton} from '@vibesys/run-skeleton';
+import {usageOverTime} from '@vibesys/run-state/usage';
 import {
+  clockStart,
   headerView,
   projectSkeleton,
   runPageInitial,
   skeletonPositions,
   skeletonScreenState,
+  stripChartView,
   timelineView,
 } from './index.js';
 
@@ -142,7 +149,7 @@ test('startup reports only recorded stages and the gateway never offers legacy c
   expect(timelineView(state)).toEqual([
     {id: 'building_tools', label: 'Tools', state: 'active', streamId: null},
   ]);
-  expect(headerView(state).stop.shown).toBe(false);
+  expect(headerView(state).pauseNow.shown).toBe(false);
   expect(headerView(state).pause.shown).toBe(false);
   expect(headerView(state).status.label).toBe('Starting');
 });
@@ -150,8 +157,8 @@ test('startup reports only recorded stages and the gateway never offers legacy c
 test('park, drain and interruption keep their status words; past logs have no invented offsets', () => {
   const fixture = storeRunFixture('short');
   for (const [state, word] of [
-    [{case: 'parked', value: {}}, 'Parked'],
-    [{case: 'draining', value: {goal: DrainGoal.PARK}}, 'Parking'],
+    [{case: 'parked', value: {}}, 'Paused'],
+    [{case: 'draining', value: {goal: DrainGoal.PARK}}, 'Pausing'],
     [{case: 'ended', value: {outcome: Outcome.INTERRUPTED}}, 'Interrupted'],
   ] as const) {
     const records = [
@@ -255,3 +262,119 @@ test('the new scrubber reports monotone elapsed time without fabricating a wall-
   const state = skeletonScreenState(SEED, skeleton, model, runPageInitial(SEED));
   expect(state.positionWord).toBe('25h 01m');
 });
+
+test('usage retains recorded wall timestamps across elapsed-clock gaps and unknown values', () => {
+  for (const seed of [0, 1, 10, 1000]) {
+    const fixture = storeRunFixture('short', 1);
+    const records = fixture.records.map(record => {
+      const copied = clone(RecordSchema, record);
+      if (copied.body.case !== 'span') return copied;
+      const span = copied.body.value.span;
+      if (span?.label?.kind !== 'agent_turn') return copied;
+      span.startedAt = 1;
+      span.endedAt = 4;
+      span.label.attrs = create(AnySchema, {
+        typeUrl: `type.googleapis.com/${AgentTurnAttrsSchema.typeName}`,
+        value: toBinary(
+          AgentTurnAttrsSchema,
+          create(AgentTurnAttrsSchema, {
+            agent: 'agent-a',
+            role: 'implementer',
+            stage: 'implement',
+            model: 'model-a',
+            startedAt: {seconds: 1700000000n + BigInt(seed)},
+            ...(seed === 0 ? {} : {endedAt: {seconds: 1700000003n + BigInt(seed)}}),
+            usage: {input: 3n},
+          }),
+        ),
+      });
+      return copied;
+    });
+    const skeleton = foldSkeleton(seedSkeleton(), records);
+    const model = projectSkeleton(skeleton, skeleton.throughSeq ?? 0n);
+    const state = skeletonScreenState(SEED, skeleton, model, runPageInitial(SEED));
+    const usage = state.run.core?.usageRecords[0];
+    expect(usage?.started_at).toBe(new Date((1700000000 + seed) * 1000).toISOString());
+    expect(usage?.ended_at).toBe(
+      seed === 0 ? null : new Date((1700000003 + seed) * 1000).toISOString(),
+    );
+    expect(usage?.model).toBe('model-a');
+    const chart = usageOverTime(state.run.core?.usageRecords ?? [], 'model', 4);
+    expect(chart.undated.turns).toBe(seed === 0 ? 1 : 0);
+    expect(chart.buckets.length > 0).toBe(seed !== 0);
+  }
+});
+
+test('a keyframe map order cannot change the run origin or performance chart duration', () => {
+  for (let seed = 1; seed <= 12; seed += 1) {
+    const fixture = storeRunFixture('short', 1 + (seed % 4), seed);
+    const skeleton = foldSkeleton(seedSkeleton(), fixture.records);
+    const through = skeleton.throughSeq ?? 0n;
+    const fromRecords = projectSkeleton(skeleton, through);
+    const entries = Object.entries(skeleton.spans);
+    for (let offset = 1; offset < entries.length; offset += 1) {
+      const reordered = [...entries.slice(offset), ...entries.slice(0, offset)];
+      const keyframe = seedSkeleton(
+        create(KeyframeSchema, {
+          ...skeleton,
+          throughSeq: through,
+          logOffset: 8n,
+          spans: Object.fromEntries(reordered),
+        }),
+      );
+      const fromKeyframe = projectSkeleton(keyframe, through);
+      expect(clockStart(fromKeyframe)).toBe(clockStart(fromRecords));
+      expect(stripChartView(fromKeyframe, clockStart(fromKeyframe), fromKeyframe.latest)).toEqual(
+        stripChartView(fromRecords, clockStart(fromRecords), fromRecords.latest),
+      );
+    }
+  }
+});
+
+const HINT_STATES = [
+  {case: 'running', value: {}},
+  {case: 'running', value: {hold: {reason: {case: 'operator', value: {}}}}},
+  {case: 'parked', value: {}},
+  {case: 'ended', value: {outcome: Outcome.FINISHED}},
+  {case: 'ended', value: {outcome: Outcome.INTERRUPTED}},
+] as const;
+
+for (let epoch = 1; epoch <= 8; epoch += 1)
+  test.each([
+    ...HINT_STATES,
+  ])(`property: epoch ${epoch} lock hints affect only open current epochs: %p`, state => {
+    const first = storeRunFixture('live').records[0];
+    if (first?.body.case !== 'epochStarted') throw new Error('epoch required');
+    const started = create(RecordSchema, {
+      ...first,
+      epoch,
+      body: {case: 'epochStarted', value: {...first.body.value, epoch}},
+    });
+    const skeleton = foldSkeleton(seedSkeleton(), [
+      started,
+      create(RecordSchema, {
+        seq: started.seq + 1n,
+        epoch,
+        body: {case: 'lifecycle', value: {state}},
+      }),
+    ]);
+    const whole = projectSkeleton(skeleton, skeleton.throughSeq ?? 0n);
+    const ui = runPageInitial(SEED);
+    const before = skeletonScreenState(SEED, skeleton, whole, ui);
+    for (const observedEpoch of [epoch - 1, epoch, epoch + 1])
+      for (const value of [RunLiveness.ALIVE, RunLiveness.INTERRUPTED, RunLiveness.UNSPECIFIED]) {
+        const screen = skeletonScreenState(SEED, skeleton, whole, ui, {
+          epoch: observedEpoch,
+          value,
+        });
+        const interrupted =
+          state.case === 'running' && observedEpoch === epoch && value === RunLiveness.INTERRUPTED;
+        expect(headerView(screen).status.label).toBe(
+          interrupted ? 'Interrupted' : headerView(before).status.label,
+        );
+        expect(screen.record.kind).toBe(interrupted ? 'ended' : before.record.kind);
+        expect(skeleton.lifecycles.at(-1)?.lifecycle?.state).toEqual(
+          create(LifecycleSchema, {state}).state,
+        );
+      }
+  });

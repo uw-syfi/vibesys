@@ -16,7 +16,7 @@ from vibesys.events import CoreEventType, EventStatus, RunFailedData, RunStarted
 from vibesys.orchestration.agent_options import attribution_command_of, objective_axes_of
 from vibesys.plugin_catalog import project_run
 from vibesys.run.core_run import (
-    OperatorParked,
+    OperatorPaused,
     OperatorStopped,
     RunEnd,
     drive_core_run,
@@ -337,9 +337,9 @@ class _LocalRunSession:
                 invocation_store_factory=self._implementations.invocation_store_factory,
             )
             succeeded = outcome.status.value == "succeeded"
-        except OperatorParked:
+        except OperatorPaused:
             self._status = RunStatus.PARKED
-            self._integration.events.emit(CoreEventType.PARKED, "Run saved for relaunch")
+            self._integration.events.emit(CoreEventType.PARKED, "Run paused")
             return RunResult(
                 run_id=self._run_id(),
                 loop=request.orchestration.id,

@@ -166,6 +166,7 @@ graph TD
     server --> vs_logs
     server --> vs_project
     server --> vs_prompts
+    server --> vs_proto
     server --> vs_redaction
     server --> vs_sim
     server --> vs_slurm
@@ -217,6 +218,7 @@ graph TD
     vs_logs --> vs_decode
     vs_logs --> vs_sim
     vs_project --> vs_decode
+    vs_project --> vs_proto
     vs_project --> vs_sim
     vs_runlog --> vs_proto
     vs_runlog --> vs_sim
@@ -233,6 +235,7 @@ graph TD
     vs_runtime --> vs_prompts
     vs_runtime --> vs_proto
     vs_runtime --> vs_redaction
+    vs_runtime --> vs_runlog
     vs_runtime --> vs_sandbox
     vs_runtime --> vs_sim
     vs_runtime --> vs_slurm

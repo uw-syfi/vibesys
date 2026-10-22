@@ -11,13 +11,12 @@ import {
   HostCallRequestSchema,
   HostCallResponseSchema,
   HostService,
-  PostIntentRequestSchema,
   type Record,
   RecordSchema,
   TailRequestSchema,
   TailResponseSchema,
 } from '@vibesys/proto';
-import {IntentRefused} from '../intents/index.js';
+import {addressedIntent, IntentRefused, type RunReference} from '../intents/index.js';
 
 export type {
   ChatMessage,
@@ -92,19 +91,12 @@ export function chatBlobHashes(records: readonly Record[]): readonly string[] {
   ];
 }
 export function proposalIntent(
-  identity: {projectRoot: string; runId: string; requestId: string},
+  identity: RunReference & {requestId: string; expectedEpoch: bigint},
   proposal: ChatSteerProposed,
 ) {
-  return create(PostIntentRequestSchema, {
-    ...identity,
-    intent: {
-      case: 'steer',
-      value: {
-        text: proposal.text,
-        target: proposal.target,
-        mode: proposal.mode,
-      },
-    },
+  return addressedIntent(identity, identity.requestId, identity.expectedEpoch, {
+    case: 'steer',
+    value: {text: proposal.text, target: proposal.target, mode: proposal.mode},
   });
 }
 

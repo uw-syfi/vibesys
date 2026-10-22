@@ -1,5 +1,5 @@
 /** The protobuf boundary for run intents. UI code consumes values and opaque bytes. */
-import {clone, create, fromBinary, toBinary} from '@bufbuild/protobuf';
+import {clone, create, fromBinary, type MessageInitShape, toBinary} from '@bufbuild/protobuf';
 import {
   type ConfigurationFailed,
   HostCallRequestSchema,
@@ -10,10 +10,8 @@ import {
   PostIntentRequestSchema,
   type PostIntentResponse,
   RecordSchema,
-  ResumeWhen,
   SteerMode,
   SteerTargetKind,
-  StopMode,
   TailRequestSchema,
   TailResponseSchema,
 } from '@vibesys/proto';
@@ -24,33 +22,53 @@ export {IntentStep} from '@vibesys/proto';
 export const HOST_CALL_METHOD = `/${HostService.typeName}/${HostService.method.hostCall.name}`;
 export const INTENT_TAIL_METHOD = `/${HostService.typeName}/${HostService.method.tail.name}`;
 
+const referenceBrand: unique symbol = Symbol('RunReference');
+
+/** An addressed run; only the validating constructor can supply the project path. */
+export interface RunReference {
+  readonly [referenceBrand]: true;
+  readonly projectRoot: string;
+  readonly runId: string;
+}
+
+export function runReference(projectRoot: string, runId: string): RunReference {
+  if (projectRoot.trim() === '') throw new Error('run.projectRoot is required');
+  if (runId.trim() === '') throw new Error('run.runId is required');
+  return {[referenceBrand]: true, projectRoot, runId};
+}
+
+export function addressedIntent(
+  reference: RunReference,
+  requestId: string,
+  expectedEpoch: bigint,
+  intent: NonNullable<MessageInitShape<typeof PostIntentRequestSchema>['intent']>,
+): PostIntentRequest {
+  return create(PostIntentRequestSchema, {
+    projectRoot: reference.projectRoot,
+    runId: reference.runId,
+    requestId,
+    expectedEpoch,
+    intent,
+  });
+}
+
 /** The visible controls' defaults. The host surface accepts every typed intent. */
 export function runIntent(
-  identity: Pick<PostIntentRequest, 'projectRoot' | 'runId' | 'requestId'>,
-  action: 'pause' | 'park' | 'resume' | 'stop' | 'steer',
+  identity: RunReference & Pick<PostIntentRequest, 'requestId' | 'expectedEpoch'>,
+  action: 'pause' | 'pauseNow' | 'steer',
   text = '',
 ): PostIntentRequest {
   switch (action) {
     case 'pause':
-    case 'park':
-      return create(PostIntentRequestSchema, {...identity, intent: {case: action, value: {}}});
-    case 'resume':
-      return create(PostIntentRequestSchema, {
-        ...identity,
-        intent: {case: 'resume', value: {when: ResumeWhen.NOW}},
-      });
-    case 'stop':
-      return create(PostIntentRequestSchema, {
-        ...identity,
-        intent: {case: 'stop', value: {mode: StopMode.DRAIN}},
+    case 'pauseNow':
+      return addressedIntent(identity, identity.requestId, identity.expectedEpoch, {
+        case: action,
+        value: {},
       });
     case 'steer':
-      return create(PostIntentRequestSchema, {
-        ...identity,
-        intent: {
-          case: 'steer',
-          value: {text, mode: SteerMode.NEXT_TURN, target: {kind: SteerTargetKind.RUN}},
-        },
+      return addressedIntent(identity, identity.requestId, identity.expectedEpoch, {
+        case: 'steer',
+        value: {text, mode: SteerMode.NEXT_TURN, target: {kind: SteerTargetKind.RUN}},
       });
   }
 }

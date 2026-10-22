@@ -1,7 +1,7 @@
 /**
  * The Run screen's pure state: its store (`runPageStep`, a reducer with request tokens), the run
  * at the view (`createRunReader`), the zoom (`zoomMachine` over a `Route`), and the selectors the
- * screen renders: header, stop, quota and ended banners, the startup timeline, the run level's
+ * screen renders: header, pause and ended banners, the startup timeline, the run level's
  * hero, chart, ideas and Now, the logs, and the scrubber (`scrubberView`) over the trace log.
  */
 
@@ -84,7 +84,6 @@ export {createRunReader, type RunModel} from './run-model.js';
 export {
   type HistoryProgress,
   type HistoryReply,
-  type ResumeWhen,
   type RunPageAction,
   type RunPageRequest,
   type RunPageSeed,
@@ -156,10 +155,9 @@ export {
   historyProblem,
   machineBlockWords,
   type Offer,
-  quotaBannerView,
+  pauseNowBannerView,
   runEnding,
   runGoneWords,
-  stopBannerView,
   streamLines,
   type TraceArrival,
   timelineView,

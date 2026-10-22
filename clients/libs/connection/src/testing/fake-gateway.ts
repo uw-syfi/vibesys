@@ -12,7 +12,7 @@ import {
   TailRequestSchema,
 } from '@vibesys/proto';
 import {type GatewayDialer, HELLO_METHOD, TAIL_METHOD} from '../shell/gateway.js';
-import {GrpcDecoder, grpcFrame} from '../shell/grpc.js';
+import {GrpcDecoder, GrpcError, grpcFrame} from '../shell/grpc.js';
 
 export interface FakeTail {
   readonly fromSeq: bigint;
@@ -30,6 +30,8 @@ export interface FakeHostCall {
 export class FakeGateway implements GatewayDialer {
   readonly forces: boolean[] = [];
   schemaHash = API_SCHEMA_HASH;
+  /** Peer fault input, like FakeTail.send: override the handshake bytes or status. */
+  helloFault: Uint8Array | GrpcError | undefined;
   readonly #server = createServer();
   readonly #sessions = new Set<ServerHttp2Session>();
   readonly #tails: FakeTail[] = [];
@@ -99,12 +101,18 @@ export class FakeGateway implements GatewayDialer {
       );
       return;
     }
+    const fault = this.helloFault;
+    if (fault instanceof GrpcError) {
+      end(stream, fault.code, fault.message);
+      return;
+    }
     stream.write(
       grpcFrame(
-        toBinary(
-          HelloResponseSchema,
-          create(HelloResponseSchema, {apiSchemaHash: this.schemaHash}),
-        ),
+        fault ??
+          toBinary(
+            HelloResponseSchema,
+            create(HelloResponseSchema, {apiSchemaHash: this.schemaHash, gatewayVersion: 'test'}),
+          ),
       ),
     );
     end(stream);

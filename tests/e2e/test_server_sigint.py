@@ -25,7 +25,7 @@ import pytest
 from entrypoints import cli
 from entrypoints.server import main
 from server.host_api import RUN_EVENTS_FILE
-from vibesys.api import RunResult, RunStopped, StopMode, StopRequest
+from vibesys.api import PauseNowRequest, RunResult, RunStopped, StopMode
 from vibesys.api.testing import FakeRuns
 from vs_sim.api.testing import run_in_child
 
@@ -87,8 +87,8 @@ class _SelfInterruptingRun:
         self._stop(mode)
 
     def submit(self, request: object) -> None:
-        if isinstance(request, StopRequest):
-            self._stop(request.mode)
+        if isinstance(request, PauseNowRequest):
+            self._stop(StopMode.CANCEL)
 
 
 def _serve_interrupted_run(

@@ -6,10 +6,8 @@ import {
   IntentAction,
   IntentStep,
   RecordSchema,
-  ResumeWhen,
   SteerMode,
   SteerTargetKind,
-  StopMode,
   TailResponseSchema,
 } from '@vibesys/proto';
 import {
@@ -19,13 +17,18 @@ import {
   IntentRefused,
   intentTailResponse,
   runIntent,
+  runReference,
 } from '@vibesys/runs/intents';
 
-const identity = {runId: 'run-1', requestId: 'r-1', projectRoot: '/project'};
+const identity = {runId: 'run-1', requestId: 'r-1', projectRoot: '/project', expectedEpoch: 1n};
 
 test('all visible controls use typed defaults and preserve identity through the pipes', () => {
-  for (const action of ['pause', 'park', 'resume', 'stop', 'steer'] as const) {
-    const request = runIntent(identity, action, 'guidance');
+  for (const action of ['pause', 'pauseNow', 'steer'] as const) {
+    const request = runIntent(
+      {...identity, ...runReference(identity.projectRoot, identity.runId)},
+      action,
+      'guidance',
+    );
     const envelope = fromBinary(
       HostCallRequestSchema,
       configuredHostCall(hostIntentRequest(request), '/src/vibesys'),
@@ -35,8 +38,6 @@ test('all visible controls use typed defaults and preserve identity through the 
     if (envelope.method.case !== 'postIntent') throw new Error('wrong method');
     expect(envelope.method.value).toEqual(request);
     expect(request.intent.case).toBe(action);
-    if (request.intent.case === 'resume') expect(request.intent.value.when).toBe(ResumeWhen.NOW);
-    if (request.intent.case === 'stop') expect(request.intent.value.mode).toBe(StopMode.DRAIN);
     if (request.intent.case === 'steer') {
       expect(request.intent.value.mode).toBe(SteerMode.NEXT_TURN);
       expect(request.intent.value.target?.kind).toBe(SteerTargetKind.RUN);
@@ -124,4 +125,14 @@ test('a host process loss or deadline remains unconfirmed rather than refused', 
     expect(failure).not.toBeInstanceOf(IntentRefused);
     expect(String(failure)).toContain('same request id');
   }
+});
+
+test('a control reference requires both its project path and run identity', () => {
+  for (const project of ['', ' ', '\n'])
+    expect(() => runReference(project, 'run-1')).toThrow('projectRoot');
+  expect(() => runReference('/project', '')).toThrow('runId');
+  expect(runReference('/project', 'run-1')).toMatchObject({
+    projectRoot: '/project',
+    runId: 'run-1',
+  });
 });

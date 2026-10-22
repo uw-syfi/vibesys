@@ -11,6 +11,7 @@ import {
 
 export interface GatewayRunPorts {
   readonly reader: GatewayReader;
+  watchSetting(listener: () => void): () => void;
   setting(enabled: boolean | undefined): Promise<boolean>;
 }
 export function startGatewayRun(
@@ -21,10 +22,13 @@ export function startGatewayRun(
   return createActor(
     gatewayRunMachine.provide({
       actors: {
+        watchSetting: fromCallback(({sendBack}) =>
+          ports.watchSetting(() => sendBack({type: 'setting-changed'})),
+        ),
         setting: fromPromise(({input}) => ports.setting(input)),
         loader: fromCallback<GatewayEvent, {runId: string}>(({input, sendBack}) =>
-          ports.reader.watch(input.runId, (load, failed) =>
-            sendBack({type: 'loaded', load, failed}),
+          ports.reader.watch(input.runId, (load, failed, hint) =>
+            sendBack({type: 'loaded', load, failed, ...(hint ? {hint} : {})}),
           ),
         ),
         content: fromPromise(({input, signal}) =>

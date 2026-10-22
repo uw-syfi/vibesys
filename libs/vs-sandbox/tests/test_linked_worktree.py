@@ -168,4 +168,7 @@ def test_a_forged_registration_never_binds_what_its_symlinked_entries_name(
 
         paths = sandbox_api.linked_worktree_git_paths(workspace)
 
-        assert not any(path.resolve().is_relative_to(root / "secret") for path in paths)
+        # Resolve the secret too. On macOS the temporary directory is /var/...,
+        # and /var is a symlink to /private/var, so an unresolved base hides a hit.
+        secret = (root / "secret").resolve()
+        assert not any(path.resolve().is_relative_to(secret) for path in paths)

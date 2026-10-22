@@ -37,7 +37,7 @@ read path and journal projection from the native core and control work still to 
 | `Skeleton`, `GetBlobs`, `TailStream`, `WatchRuns`; new Run screen | RPCs, client skeleton/cache and opt-in raw record panel built; complete native Run screen remains unbuilt | 2 |
 | Conversion of existing JSONL runs and `store.json` envelopes | typed journal conversion and bulk project/host-index conversion built, including blobs, final keyframes, head publication and repair; pre-trace and unsupported journals are reported as skipped; core envelopes remain the resume authority until phase 3 | 2 |
 | Core state as generated types, `state.pb`, native `run.log` writes | unbuilt; typed journal projection does not replace native core commits | 3 |
-| Intents as records (`IntentState`), pause/park, relaunch epochs | inbox outcomes, park and relaunch epochs built over the current saved-state resume path; native state recovery remains unbuilt | 3 |
+| Intents as records (`IntentState`), Pause/Pause now, relaunch epochs | inbox outcomes, Pause and Resume epochs built over the current saved-state resume path; native state recovery remains unbuilt | 3 |
 | Chat sessions as processes with their own log; `HostCall` | built behind the per-host switch; reuses the existing auxiliary chat agent, prompts and read tools | 3 |
 | Generated frozen value classes from `.proto` (our own protoc plugin) | prototype only | 3 |
 | Control inbox (files, ordered, durable, idempotent by request id) | built | |
@@ -144,22 +144,23 @@ This deletes the second (Python) copy of the summary fold.
 
 ## Intents and epochs
 
-**Intents** are pause, park, resume, stop, steer, withdraw, cancel and set-parallelism, and chat
-messages. A viewer posts one to the run's inbox through the gateway. The run reads the inbox at
-its control poll, applies each request once, and records an `IntentState` (`applied` or `refused`,
-with the reason) in its log. A request posted while the run is parked or down is applied after it
-relaunches; commands are durable. The ordering, idempotence and rejection rules of the inbox
-are unchanged. Until phase 3, the inbox stays JSON with its reviewed field allow-list and
-`PostIntent` is a `HostCall` to `vibesys host post-intent`, which uses the existing Python inbox
-writer so the gateway holds no product logic. In phase 3 the inbox becomes protobuf together with
-intents as records, and the allow-list becomes proto validation. An `IntentState` is `applied` or
-`refused`; delivery of a steer is recorded as links from the turn span to the request id.
+**Operator controls** are Pause, Pause now, Resume and Guidance. A viewer posts a typed intent
+through `HostCall` to the existing ordered inbox. Admission acknowledges persistence; the run's
+`IntentState` records application or refusal. Request IDs retain their disposition across retries.
+Scoped guidance and work-item actions continue to use the same inbox.
 
-**Pause, park and stop.** Pause holds new work, keeps the process, and lets evaluations continue.
-Park drains: it finishes the agent turns in flight, starts no new work, cancels in-flight
-evaluations, and then exits with lifecycle `parked`. Evaluation jobs are idempotent, so they are
-rerun after relaunch. Stop is separate and ends the run. Pause and park are two intents because
-they cancel different things.
+**Pause** closes admission, drains every in-flight logical turn and its evaluation requests
+within the turn's original deadline, releases this run's evaluation interests, and exits.
+Independent queued evaluations do not start. **Pause now** cancels unfinished work and exits,
+including as escalation during a drain. It warns: "Unfinished work may need repeating and may
+still incur charges." Neither interruption becomes a policy failure or retry debit. Actual
+usage and accepted results remain saved. The quota hold is internal.
+
+**Resume** permits every prior ending and starts a new epoch with a fresh duration, defaulting
+to the original length. Prior closing intents cannot close the successor epoch. It leaves the
+operator's project checkout in place. P1 uses today's core store and loader; retained older
+formats that lack a loadable core envelope need the later facts importer. Their content stays
+retained, and the diagnostic names that prerequisite rather than refusing an ending kind.
 
 **Relaunch** starts the same run as a new epoch from the host checkout. The `EpochStarted` record
 records the tree hash and a dirty flag, so the timeline shows each epoch boundary and which code
@@ -199,7 +200,7 @@ The operator updates that checkout before relaunching. No update-checkout method
 The new epoch records the checkout's tree hash and dirty flag, including operator edits.
 
 **Chat sessions** belong to the run and outlive relaunches as data. They are separate processes
-with their own `session.log` and inbox, started on demand and exiting when idle or at park. The
+with their own `session.log` and inbox, started on demand and exiting when idle or when paused. The
 default session id is `default`, and sessions are kept as long as the run is. They are not the
 run: a session reads the run's files, its answers and token streaming are appends to its own log,
 and a steer it proposes is data in that log that the operator may send as an intent. A generic
@@ -561,7 +562,7 @@ Notes on the records:
 |---|---|
 | 1. Walking skeleton | protos, codegen and CI; Go gateway with `Hello` and `Tail`; Electron provisioning and one HTTP/2 connection behind a per-host switch; a Python converter that follows a live JSONL journal into `run.log` as `LegacyEvent{json}` records |
 | 2. Complete read path | the inventory above in the store model; keyframes and `run.head`; `Skeleton`, `GetBlobs`, `TailStream`, `WatchRuns`; the new Run screen; conversion of all existing runs |
-| 3. Write path | core state as generated types and `state.pb`; the run writes `run.log` natively; intents, pause and park, relaunch epochs; chat sessions; `HostCall` |
+| 3. Write path | core state as generated types and `state.pb`; the run writes `run.log` natively; intents, Pause and Pause now, Resume epochs; chat sessions; `HostCall` |
 | 4. Cutover | delete the run protocol, its service and transports, the relay and run sockets, the helper protocol and its features, the reader server, registry tombstones and record versions, the dual summary fold, the conformance corpus, the strategy-specific event kinds, the Pydantic contract models and JSON Schema pipeline, the envelope JSON migration chain and the persisted-shape snapshots |
 
 Existing JSONL runs are converted to the typed store read model in phase 2. The converter
@@ -599,7 +600,7 @@ never deletes them; retention cleanup is separate from conversion.
 | RPC framework | gRPC | Connect: the benefit is browser and curl access, and the browser is dropped. Bidirectional streams (`Attach`) need HTTP/2 either way, and Node `http2` over our duplex is enough. Revisit if a browser client returns. |
 | Order of log append and `state.pb` swap | Log first, then swap, with `committed_seq` bounding what is served | Writing `state.pb` before the log: state would name records not yet on disk. |
 | Transcript form | One stream; the turn span's end records its final length | A sealed content-addressed blob copy when the turn ends: two forms for one fact. |
-| Pause and park | Two intents: `pause` holds new work and keeps the process; `park` drains and exits | One intent with an exit flag: the two cancel different things (park cancels in-flight evaluations, pause does not). |
+| Run controls | Pause drains and exits; Pause now cancels and exits; Resume opens a new epoch; Guidance persists advice | A separate permanent ending control made useful completed runs impossible to continue. |
 | Turn reply typing | Proto messages in phase 3; JSON text in one reserved field until then | Descriptor-rendered `Any` from phase 1 would force every reply model into proto before the core types move. |
 | Run-level warnings | A `Notice` record | Lines in the narration stream are unstructured; a span status cannot hold a warning with no span. |
 | Browser support | Dropped | A browser cannot hold ssh. A future browser client is a local `vibesys ui` process that reuses the same bridge. |

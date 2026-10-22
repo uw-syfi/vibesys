@@ -1182,7 +1182,7 @@ def _reply_bytes(reply: _Reply, request_id: str) -> bytes:
             response = Response(
                 timestamp=REQUEST_TIME,
                 request_id=request_id,
-                ack=CommandAck(action=ControlAction.STOP, status="pending"),
+                ack=CommandAck(action=ControlAction.PAUSE_NOW, status="pending"),
             )
         case _Reply.ERROR:
             response = Response(

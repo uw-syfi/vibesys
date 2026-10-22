@@ -27,6 +27,7 @@ from tests.support.skeleton_world import (
 )
 
 from vs_core.api import (
+    AdoptRevision,
     ArtifactRef,
     AttemptBudget,
     AttemptId,
@@ -41,6 +42,7 @@ from vs_core.api import (
     RunStatus,
     SessionInputReceived,
     StopMode,
+    VerifyAdoption,
     WorkspaceMode,
     WorkspacePlan,
     escalate_stop,
@@ -58,7 +60,11 @@ from vs_runtime.api.core import (
     start_core,
     start_core_awaiting_lease,
 )
-from vs_runtime.api.infrastructure import RuntimeRunControlChannel
+from vs_runtime.api.infrastructure import (
+    RunControlTransition,
+    RunControlTransitionKind,
+    RuntimeRunControlChannel,
+)
 from vs_runtime.api.testing import ProbedRunClock
 from vs_sim.api import yield_now
 from vs_sim.api.testing import SimThreads, clock_from, examples
@@ -138,13 +144,36 @@ def _host(
     return process, host
 
 
+@pytest.mark.parametrize("explicit_resume", [False, True])
+async def test_reopening_a_finished_run_requires_operator_resume(
+    tmp_path: Path, *, explicit_resume: bool
+) -> None:
+    """Replacing a writer returns its result; only operator Resume reopens admission."""
+    clock = ProbedRunClock(clock_from(1.0))
+    with open_skeleton_world(tmp_path, BASELINE_ONLY) as world:
+        first, host = _host(world, clock)
+        start_core(host, _config())
+        ended = await drive_core(host, _config())
+        assert ended.status == RunStatus.TERMINAL
+        first.shell.release_lease(now_at=clock.now())
+        replacement = world.runtime()
+        bridge = RunControlBridge(_channel(), Steers(), lifts_standing_stop=explicit_resume)
+        restarted = CoreRunHost(replacement.shell, replacement.delivery, clock, bridge)
+        start_core(restarted, _config())
+        outcome = await drive_core(restarted, _config())
+        controls = replacement.shell.record.envelope.core.run.controls
+        assert any(control.action == "resume" for control in controls) is explicit_resume
+        assert outcome.status == RunStatus.TERMINAL
+        assert outcome.result == ended.result
+
+
 async def test_a_stop_control_ends_the_run_with_the_proposed_result(tmp_path: Path) -> None:
     channel = _channel()
     clock = ScriptedClock(clock_from(1.0))
     clock.actions[2] = lambda: channel.request_stop(StopMode.DRAIN)
     with open_skeleton_world(tmp_path, INERT) as world:
         process, host = _host(world, clock, channel)
-        channel.request_pause()
+        channel.pause_for_quota()
         start_core(host, _config())
         outcome = await drive_core(host, _config())
     assert outcome.status == RunStatus.TERMINAL
@@ -159,7 +188,7 @@ async def test_the_deadline_ends_an_otherwise_idle_paused_run(tmp_path: Path) ->
     clock = ProbedRunClock(clock_from(1.0))
     with open_skeleton_world(tmp_path, INERT) as world:
         process, host = _host(world, clock, channel)
-        channel.request_pause()
+        channel.pause_for_quota()
         start_core(host, _config(lease_duration=5000.0, control_poll_interval=300.0))
         outcome = await drive_core(
             host, _config(lease_duration=5000.0, control_poll_interval=300.0)
@@ -197,7 +226,7 @@ async def test_an_idle_run_is_woken_a_bounded_number_of_times(
         channel = _channel()
         clock = ProbedRunClock(clock_from(1.0))
         process, host = _host(world, clock, channel)
-        channel.request_pause()
+        channel.pause_for_quota()
         config = _config(control_poll_interval=poll, min_sleep=min_sleep)
         start_core(host, config)
         outcome = await drive_core(host, config)
@@ -215,32 +244,59 @@ async def test_an_idle_run_is_woken_a_bounded_number_of_times(
     )
 
 
+class _PauseTrace:
+    """Public control transitions and the dispatch count at every observed boundary."""
+
+    def __init__(self, dispatches: Callable[[], int]) -> None:
+        self.dispatches = dispatches
+        self.events: list[tuple[RunControlTransitionKind | None, int]] = []
+
+    def record(self, kind: RunControlTransitionKind | None = None) -> None:
+        self.events.append((kind, self.dispatches()))
+
+    def changed(self, transition: RunControlTransition) -> None:
+        self.record(transition.kind)
+
+    @property
+    def transitions(self) -> list[str]:
+        return [kind.value for kind, _ in self.events if kind is not None]
+
+    def assert_held(self) -> None:
+        """An acknowledged pause dispatches nothing until its matching resume."""
+        paused_at = None
+        for kind, dispatches in self.events:
+            if paused_at is not None:
+                assert dispatches == paused_at, (kind, self.events)
+            if kind is RunControlTransitionKind.PAUSED:
+                assert paused_at is None
+                paused_at = dispatches
+            elif kind is RunControlTransitionKind.RESUMED:
+                assert paused_at is not None, self.events
+                paused_at = None
+        assert paused_at is None, self.events
+
+
 class _Operator(ProbedRunClock):
-    """The loop's clock, with an operator who pauses at the n-th wait and resumes later.
+    """Request a quota hold; release after the public acknowledgement and hold."""
 
-    The operator acts as each wait begins (a wait the loop cancels never ends). The resume
-    comes ``held_for`` waits after core committed the pause, so the run sits paused for a
-    while first; a pause that never lands (the run ended first) is never resumed.
-    """
-
-    def __init__(self, inner: VirtualClock, channel: RuntimeRunControlChannel) -> None:
-        """Wrap the loop's clock; the operator acts on ``channel``."""
+    def __init__(
+        self, inner: VirtualClock, channel: RuntimeRunControlChannel, trace: _PauseTrace
+    ) -> None:
         super().__init__(inner)
         self.channel = channel
-        self.core: Callable[[], CoreState] | None = None
+        self.trace = trace
         self.pause_at = 0
         self.held_for = 0
         self.paused_waits = 0
-        self.statuses: list[RunStatus] = []
+        self.waits = 0
 
     async def sleep(self, seconds: float) -> None:
-        """Pause, or resume a run that has been paused long enough; then advance time."""
-        assert self.core is not None
-        status = self.core().run.status
-        self.statuses.append(status)
-        if len(self.statuses) == self.pause_at:
-            self.channel.request_pause()
-        elif status == RunStatus.PAUSED and self.channel.pause_requested():
+        """The operator responds to public events, never core's intermediate pause state."""
+        self.waits += 1
+        self.trace.record()
+        if self.waits == self.pause_at:
+            self.channel.pause_for_quota()
+        elif "paused" in self.trace.transitions and self.channel.pause_requested():
             self.paused_waits += 1
             if self.paused_waits >= self.held_for:
                 self.channel.resume()
@@ -248,22 +304,20 @@ class _Operator(ProbedRunClock):
 
 
 async def _operated_run(pause_at: int, held_for: int) -> tuple[_Operator, RunOutcome, list[str]]:
-    """The full skeleton run (baseline, one attempt, adoption) with a pause and a resume."""
-    transitions: list[str] = []
-    channel = RuntimeRunControlChannel(
-        lambda transition: transitions.append(transition.kind.value), threads=SimThreads()
-    )
-    clock = _Operator(clock_from(1.0), channel)
+    """The full skeleton run with an internal quota hold and its release."""
+    trace = _PauseTrace(lambda: process.shell.dispatched)
+    channel = RuntimeRunControlChannel(trace.changed, threads=SimThreads())
+    clock = _Operator(clock_from(1.0), channel, trace)
     clock.pause_at, clock.held_for = pause_at, held_for
     with (
         tempfile.TemporaryDirectory() as directory,
         open_skeleton_world(Path(directory), timed=(clock, 20.0)) as world,
     ):
         process, host = _host(world, clock, channel)
-        clock.core = lambda: process.shell.record.envelope.core
         start_core(host, _config())
         outcome = await drive_core(host, _config())
-    return clock, outcome, transitions
+        trace.record()
+    return clock, outcome, trace.transitions
 
 
 #: How the run ends with no pause: it adopts the candidate its one attempt kept.
@@ -271,29 +325,71 @@ _UNPAUSED_END = ("success", "adopted: settlement:settle.1")
 
 
 @settings(max_examples=examples(pr=4, nightly=40), deadline=None)
+@pytest.mark.regression
 # Pauses during the baseline measurement (the host-b case: a pause before the first step).
 @example(pause_at=7, held_for=20)
 @example(pause_at=40, held_for=5)
 @example(pause_at=4, held_for=1)
+@example(pause_at=27, held_for=1)
+@example(pause_at=59, held_for=1)
 @given(pause_at=st.integers(min_value=1, max_value=60), held_for=st.integers(1, 30))
-async def test_a_pause_holds_the_run_until_resumed_and_the_run_then_ends_as_it_would_have(
+async def test_a_quota_hold_waits_until_released_and_the_run_then_ends_as_it_would_have(
     pause_at: int, held_for: int
 ) -> None:
-    """A pause at any point holds the run, and after the resume the run ends unchanged.
+    """An internal quota hold waits, and after release the run ends unchanged.
 
     The search keeps deciding while the run is paused (a measurement in flight still
     finishes); core takes none of that work until the resume, and the search is never told
     its work was refused. Whenever core commits the pause with nothing running, the channel
     reports it landed (``paused``), so the operator sees Paused, then Running on the resume.
+    An adoption already dispatched may end the run before the pause lands; that pending
+    pause has no acknowledgement and is never resumed.
     """
     clock, outcome, transitions = await _operated_run(pause_at, held_for)
     assert outcome.status == RunStatus.TERMINAL
     assert outcome.result is not None
     assert (outcome.result.outcome, outcome.result.reason) == _UNPAUSED_END
-    if RunStatus.PAUSED in clock.statuses:
+    clock.trace.assert_held()
+    if "paused" in transitions:
         assert clock.paused_waits >= held_for
         assert transitions[:2] == ["pause_requested", "paused"]
         assert transitions[-1] == "resumed"
+    else:
+        assert transitions in ([], ["pause_requested"])
+
+
+@pytest.mark.parametrize("adoption", [AdoptRevision, VerifyAdoption])
+async def test_an_in_flight_adoption_finishes_while_a_pause_is_pending(
+    tmp_path: Path, adoption: type[AdoptRevision] | type[VerifyAdoption]
+) -> None:
+    """A graceful pause never abandons adoption, nor acknowledges a run that already ended."""
+    trace = _PauseTrace(lambda: process.shell.dispatched)
+    channel = RuntimeRunControlChannel(trace.changed, threads=SimThreads())
+
+    class AdoptionClock(ProbedRunClock):
+        requested = False
+
+        async def sleep(self, seconds: float) -> None:
+            trace.record()
+            if not self.requested and any(
+                isinstance(request, adoption) for request in process.shell.in_flight
+            ):
+                self.requested = True
+                channel.pause_for_quota()
+            await super().sleep(seconds)
+
+    clock = AdoptionClock(clock_from(1.0))
+    with open_skeleton_world(tmp_path) as world:
+        process, host = _host(world, clock, channel)
+        start_core(host, _config())
+        outcome = await drive_core(host, _config())
+        trace.record()
+    assert clock.requested, "the pause must arrive while the adoption request is in flight"
+    assert outcome.status == RunStatus.TERMINAL
+    assert outcome.result is not None
+    assert (outcome.result.outcome, outcome.result.reason) == _UNPAUSED_END
+    assert trace.transitions == ["pause_requested"]
+    trace.assert_held()
 
 
 async def _measure_a_job_running(tmp_path: Path, runtime: float) -> tuple[World, Process, bool]:
@@ -586,7 +682,7 @@ def test_the_control_bridge_emits_one_ordered_event_per_change(operations: list[
     events = []
     for operation in operations:
         if operation == "pause":
-            channel.request_pause()
+            channel.pause_for_quota()
         elif operation == "resume":
             channel.resume()
         elif operation.startswith("stop:"):

@@ -100,6 +100,7 @@ class CoreStartup:
 
     deadline_at: float
     limits: Limits
+    duration_seconds: float | None = None
     lifecycle: frozenset[LifecycleCapability] = frozenset()
     requirements: EvidenceRequirements = dataclasses.field(default_factory=EvidenceRequirements)
 
@@ -131,6 +132,7 @@ def new_core_state(
             run_id=RunId(root=run_id),
             now_at=0.0,
             deadline_at=startup.deadline_at,
+            duration_seconds=startup.duration_seconds,
             facts=facts,
             capabilities=selected,
             limits=startup.limits,

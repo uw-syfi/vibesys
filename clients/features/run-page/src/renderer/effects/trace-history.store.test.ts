@@ -97,7 +97,6 @@ function portsOver(host: FakeJournalHost, cache: TracePageCache): RunPagePorts {
   const ignore = (): void => {};
   const unsupported = () => Promise.resolve({kind: 'unsupported'} as const);
   return {
-    stop: () => Promise.resolve(true),
     attach: () => Promise.resolve(null),
     release: ignore,
     attachReader: () => Promise.resolve({kind: 'attached'}),

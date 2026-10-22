@@ -8,7 +8,7 @@ import { file_buf_validate_validate } from "../../../buf/validate/validate_pb.js
 import { file_vibesys_core_v1_value_options } from "./value_options_pb.js";
 import type { SchemaRef } from "./common_pb.js";
 import { file_vibesys_core_v1_common } from "./common_pb.js";
-import type { LifecycleClass } from "./vocabulary_pb.js";
+import type { CheckoutStatus, LifecycleClass } from "./vocabulary_pb.js";
 import { file_vibesys_core_v1_vocabulary } from "./vocabulary_pb.js";
 import type { Message } from "@bufbuild/protobuf";
 
@@ -16,7 +16,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file vibesys/core/v1/contracts.proto.
  */
 export const file_vibesys_core_v1_contracts: GenFile = /*@__PURE__*/
-  fileDesc("Ch92aWJlc3lzL2NvcmUvdjEvY29udHJhY3RzLnByb3RvEg92aWJlc3lzLmNvcmUudjEiEwoJTnVsbFZhbHVlOgbC8xgCOAEiwwEKD1B1cmVPcHRpb25WYWx1ZRIOCgR0ZXh0GAEgASgJSAASMwoHaW50ZWdlchgCIAEoCUIgukgXchUyE14oMHwtP1sxLTldWzAtOV0qKSTK8xgCEAFIABIXCgRyZWFsGAMgASgBQge6SAQSAkABSAASDgoEZmxhZxgEIAEoCEgAEioKBG51bGwYBSABKAsyGi52aWJlc3lzLmNvcmUudjEuTnVsbFZhbHVlSAA6BsLzGAIIAUIOCgV2YWx1ZRIFukgCCAEiWwoKUHVyZU9wdGlvbhIUCgNrZXkYASABKAlCB7pIBHICEAESNwoFdmFsdWUYAiABKAsyIC52aWJlc3lzLmNvcmUudjEuUHVyZU9wdGlvblZhbHVlQga6SAPIAQEi6wEKEk9wZXJhdGlvblNjaGVtYVJlZhIVCgRraW5kGAEgASgJQge6SARyAhABEjoKDnJlcXVlc3Rfc2NoZW1hGAIgASgLMhoudmliZXN5cy5jb3JlLnYxLlNjaGVtYVJlZkIGukgDyAEBEjoKDm91dGNvbWVfc2NoZW1hGAMgASgLMhoudmliZXN5cy5jb3JlLnYxLlNjaGVtYVJlZkIGukgDyAEBEj4KCWxpZmVjeWNsZRgEIAEoDjIfLnZpYmVzeXMuY29yZS52MS5MaWZlY3ljbGVDbGFzc0IKukgHggEEEAEgADoGwvMYAjABQj9aPWdpdGh1Yi5jb20vdXctc3lmaS92aWJlc3lzL2dhdGV3YXkvZ2VuL3ZpYmVzeXMvY29yZS92MTtjb3JldjFiBnByb3RvMw", [file_buf_validate_validate, file_vibesys_core_v1_value_options, file_vibesys_core_v1_common, file_vibesys_core_v1_vocabulary]);
+  fileDesc("Ch92aWJlc3lzL2NvcmUvdjEvY29udHJhY3RzLnByb3RvEg92aWJlc3lzLmNvcmUudjEiEwoJTnVsbFZhbHVlOgbC8xgCOAEiwwEKD1B1cmVPcHRpb25WYWx1ZRIOCgR0ZXh0GAEgASgJSAASMwoHaW50ZWdlchgCIAEoCUIgukgXchUyE14oMHwtP1sxLTldWzAtOV0qKSTK8xgCEAFIABIXCgRyZWFsGAMgASgBQge6SAQSAkABSAASDgoEZmxhZxgEIAEoCEgAEioKBG51bGwYBSABKAsyGi52aWJlc3lzLmNvcmUudjEuTnVsbFZhbHVlSAA6BsLzGAIIAUIOCgV2YWx1ZRIFukgCCAEiWwoKUHVyZU9wdGlvbhIUCgNrZXkYASABKAlCB7pIBHICEAESNwoFdmFsdWUYAiABKAsyIC52aWJlc3lzLmNvcmUudjEuUHVyZU9wdGlvblZhbHVlQga6SAPIAQEi6wEKEk9wZXJhdGlvblNjaGVtYVJlZhIVCgRraW5kGAEgASgJQge6SARyAhABEjoKDnJlcXVlc3Rfc2NoZW1hGAIgASgLMhoudmliZXN5cy5jb3JlLnYxLlNjaGVtYVJlZkIGukgDyAEBEjoKDm91dGNvbWVfc2NoZW1hGAMgASgLMhoudmliZXN5cy5jb3JlLnYxLlNjaGVtYVJlZkIGukgDyAEBEj4KCWxpZmVjeWNsZRgEIAEoDjIfLnZpYmVzeXMuY29yZS52MS5MaWZlY3ljbGVDbGFzc0IKukgHggEEEAEgADoGwvMYAjABInAKE0Fkb3B0aW9uUHVibGljYXRpb24SGQoIcmV2aXNpb24YASABKAlCB7pIBHICEAESJQoGY29tbWl0GAIgASgJQhW6SBJyEDIOXlswLTlhLWZdezQwfSQSFwoGYnJhbmNoGAMgASgJQge6SARyAhABIk0KDkNoZWNrb3V0VXBkYXRlEjsKBnN0YXR1cxgBIAEoDjIfLnZpYmVzeXMuY29yZS52MS5DaGVja291dFN0YXR1c0IKukgHggEEEAEgAEI/Wj1naXRodWIuY29tL3V3LXN5ZmkvdmliZXN5cy9nYXRld2F5L2dlbi92aWJlc3lzL2NvcmUvdjE7Y29yZXYxYgZwcm90bzM", [file_buf_validate_validate, file_vibesys_core_v1_value_options, file_vibesys_core_v1_common, file_vibesys_core_v1_vocabulary]);
 
 /**
  * @generated from message vibesys.core.v1.NullValue
@@ -135,3 +135,51 @@ export type OperationSchemaRef = Message<"vibesys.core.v1.OperationSchemaRef"> &
  */
 export const OperationSchemaRefSchema: GenMessage<OperationSchemaRef> = /*@__PURE__*/
   messageDesc(file_vibesys_core_v1_contracts, 3);
+
+/**
+ * A retained revision published without changing the operator checkout.
+ *
+ * @generated from message vibesys.core.v1.AdoptionPublication
+ */
+export type AdoptionPublication = Message<"vibesys.core.v1.AdoptionPublication"> & {
+  /**
+   * @generated from field: string revision = 1;
+   */
+  revision: string;
+
+  /**
+   * @generated from field: string commit = 2;
+   */
+  commit: string;
+
+  /**
+   * @generated from field: string branch = 3;
+   */
+  branch: string;
+};
+
+/**
+ * Describes the message vibesys.core.v1.AdoptionPublication.
+ * Use `create(AdoptionPublicationSchema)` to create a new message.
+ */
+export const AdoptionPublicationSchema: GenMessage<AdoptionPublication> = /*@__PURE__*/
+  messageDesc(file_vibesys_core_v1_contracts, 4);
+
+/**
+ * The independent, optional checkout step never changes publication success.
+ *
+ * @generated from message vibesys.core.v1.CheckoutUpdate
+ */
+export type CheckoutUpdate = Message<"vibesys.core.v1.CheckoutUpdate"> & {
+  /**
+   * @generated from field: vibesys.core.v1.CheckoutStatus status = 1;
+   */
+  status: CheckoutStatus;
+};
+
+/**
+ * Describes the message vibesys.core.v1.CheckoutUpdate.
+ * Use `create(CheckoutUpdateSchema)` to create a new message.
+ */
+export const CheckoutUpdateSchema: GenMessage<CheckoutUpdate> = /*@__PURE__*/
+  messageDesc(file_vibesys_core_v1_contracts, 5);

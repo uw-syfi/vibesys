@@ -9,17 +9,21 @@ from vs_proto.api import (
     RunProcess,
     TokenUsage,
 )
+from vs_runlog._epoch import current_epoch
 
 
 def project_head(state: Keyframe, process: RunProcess | None = None) -> RunHead | None:
     """Legacy-only logs have no strategy declaration and retain phase 1 reads."""
     epoch = next((v.epoch for v in reversed(state.epochs) if v.epoch and v.epoch.run), None)
-    if epoch is None or epoch.run is None or not state.lifecycles:
+    current = current_epoch(state)
+    lifecycle = current.lifecycle
+    if epoch is None or epoch.run is None:
         return None
-    lifecycle = state.lifecycles[-1].lifecycle
     head = RunHead(
         strategy=epoch.run.strategy,
+        epoch=current.number,
         lifecycle=lifecycle,
+        awaiting_lifecycle=lifecycle is None,
         committed_seq=state.through_seq,
         process=process,
     )

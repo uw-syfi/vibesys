@@ -7,7 +7,7 @@ from types import UnionType
 from typing import TYPE_CHECKING, Annotated, Any, get_args, get_origin
 
 import pytest
-from hypothesis import given
+from hypothesis import example, given
 from hypothesis import strategies as st
 from pydantic import ValidationError
 
@@ -492,3 +492,107 @@ def test_a_strategy_state_that_breaks_its_own_invariant_never_becomes_durable() 
     with pytest.raises(ValidationError):
         shell.advance()
     assert store.load() == before
+
+
+@example(duration=60, gap=100, resume=False)
+@example(duration=60, gap=100, resume=True)
+@given(
+    duration=st.integers(min_value=1, max_value=86400),
+    gap=st.integers(1, 100000),
+    resume=st.booleans(),
+)
+def test_only_operator_resume_renews_the_original_duration(
+    duration: int, gap: int, *, resume: bool
+) -> None:
+    store = FakeStateStore()
+    initial = declared(counter)
+    initial = initial.model_copy(
+        update={"run": initial.run.model_copy(update={"duration_seconds": float(duration)})}
+    )
+    for started in (0, gap, gap * 2):
+        shell = CoreRuntime(
+            store,
+            counter.driver(CounterConfig()),
+            initial,
+            config=CounterConfig(),
+            bindings=CoreRuntimeBindings(transitions=ShellTraceTransitions()),
+        )
+        shell.start("host", now_at=started, lease_duration=1, resume=resume)
+        expected = started + duration if resume else duration
+        assert shell.record.envelope.core.run.deadline_at == expected
+        assert shell.record.envelope.core.run.duration_seconds == duration
+        shell.release_lease(now_at=started)
+
+
+@pytest.mark.regression
+@example(epochs=[1, 5, 8])
+@given(epochs=st.lists(st.integers(1, 100), min_size=1, max_size=5, unique=True).map(sorted))
+def test_recovery_uses_published_epochs_even_when_startup_did_not_acquire_a_lease(
+    epochs: list[int],
+) -> None:
+    store = FakeStateStore()
+    initial = declared(counter)
+    for position, epoch in enumerate(epochs):
+        shell = CoreRuntime(
+            store,
+            counter.driver(CounterConfig()),
+            initial,
+            config=CounterConfig(),
+            bindings=CoreRuntimeBindings(
+                transitions=ShellTraceTransitions(),
+                epoch=lambda epoch=epoch: epoch,
+            ),
+        )
+        shell.start("host", now_at=float(position), lease_duration=1)
+        assert shell.record.envelope.core.records.recovery.epoch == epoch
+        assert shell.record.envelope.fence.epoch == epoch
+        shell.renew(now_at=float(position), lease_duration=1)
+        shell.record_renewal()
+        assert shell.record.envelope.core.records.recovery.epoch == epoch
+        shell.release_lease(now_at=float(position))
+
+
+def test_a_native_recovery_requires_a_published_successor_before_taking_authority() -> None:
+    store = FakeStateStore()
+    bindings = CoreRuntimeBindings(transitions=ShellTraceTransitions(), epoch=lambda: 1)
+    first = CoreRuntime(
+        store,
+        counter.driver(CounterConfig()),
+        declared(counter),
+        config=CounterConfig(),
+        bindings=bindings,
+    )
+    first.start("host", now_at=0, lease_duration=1)
+    first.release_lease(now_at=0)
+    before = store.load()
+    successor = CoreRuntime(
+        store,
+        counter.driver(CounterConfig()),
+        declared(counter),
+        config=CounterConfig(),
+        bindings=bindings,
+    )
+    with pytest.raises(ContractError, match=r"run\.log must publish a successor"):
+        successor.start("host", now_at=1, lease_duration=1)
+    assert store.load() == before
+    assert store.acquire("other", now=1, duration=1) is not None
+
+
+def test_an_unavailable_published_epoch_does_not_acquire_a_lease() -> None:
+    store = FakeStateStore()
+
+    def unavailable() -> int:
+        message = "published epoch unavailable"
+        raise ValueError(message)
+
+    shell = CoreRuntime(
+        store,
+        counter.driver(CounterConfig()),
+        declared(counter),
+        config=CounterConfig(),
+        bindings=CoreRuntimeBindings(transitions=ShellTraceTransitions(), epoch=unavailable),
+    )
+    with pytest.raises(ValueError, match="published epoch unavailable"):
+        shell.start("host", now_at=0, lease_duration=1)
+    assert store.load() is None
+    assert store.acquire("other", now=0, duration=1) is not None

@@ -9,11 +9,16 @@ from protobuf.wkt.google.protobuf.wrappers_pb import StringValue
 
 import vibesys.events as e
 import vs_proto.api as p
+from vibesys.events import CoreEventType, make_core_event
 from vibesys.records._common import Projection, enum_value
 from vibesys.records._spans import ATTRS_TYPES
 
 if TYPE_CHECKING:
+    from datetime import datetime
+
     from protobuf import DescFile
+
+    from vibesys.records._types import MappedEvent, MappingState
 
 
 def descriptors() -> FileDescriptorSet:
@@ -68,6 +73,17 @@ def header(projection: Projection, run: p.RunDescription | None = None) -> None:
             ],
         ),
     )
+
+
+def epoch_header(state: MappingState, at: datetime) -> MappedEvent:
+    """The epoch-open declaration ``state`` names, before a run description exists.
+
+    ``at`` supplies the declaration's clock. The carrier event is not stored;
+    a later ``run_started`` amends this same epoch with the run description.
+    """
+    projection = Projection(state, make_core_event(CoreEventType.RUN_CONFIGURED, timestamp=at))
+    header(projection)
+    return projection.result()
 
 
 def started(projection: Projection) -> None:

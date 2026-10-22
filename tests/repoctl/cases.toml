@@ -269,3 +269,12 @@ jobs = ["proto", "python"]
 native_languages = []
 native_targets = []
 pnpm_packages = []
+
+[[cases]]
+name = "host registry generator selects contract and Python checks"
+paths = ["scripts/host_operations/api.py"]
+jobs = ["proto", "python"]
+[cases.collections]
+native_languages = []
+native_targets = []
+pnpm_packages = []

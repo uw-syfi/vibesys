@@ -1,5 +1,6 @@
 """Explicit product composition for one canonical VibeSys run."""
 
+import logging
 import shlex
 import sys
 from collections.abc import Callable, Mapping
@@ -186,15 +187,28 @@ def open_run_resources(  # noqa: PLR0913  # lint-waiver: LW-731905 [PLR0913]; pr
     test injects ``vs_sandbox.api.testing.FakeComputeBackend`` here instead of
     monkeypatching the registry or a backend's internal sandbox constructor.
     """
-    return _assemble_run_resources(
-        ownership=ownership,
-        request=request,
-        integration=integration,
-        agent_specs=agent_specs,
-        resume_policy=resume_policy,
-        backend_factory=backend_factory,
-        profiler_preflight=profiler_preflight,
-    )
+    try:
+        return _assemble_run_resources(
+            ownership=ownership,
+            request=request,
+            integration=integration,
+            agent_specs=agent_specs,
+            resume_policy=resume_policy,
+            backend_factory=backend_factory,
+            profiler_preflight=profiler_preflight,
+        )
+    except BaseException as error:
+        _fail_started_epoch(integration, error)
+        raise
+
+
+def _fail_started_epoch(integration: LocalRunIntegration, error: BaseException) -> None:
+    """End an epoch this assembly already published when startup cannot continue."""
+    reason = f"{type(error).__name__}: {error}".strip() or "environment startup failed"
+    try:
+        integration.events.fail_open_epoch(reason)
+    except Exception:
+        logging.getLogger(__name__).exception("could not end the epoch after startup failed")
 
 
 def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-waiver: LW-008204 [C901, PLR0912, PLR0913, PLR0915]; ordered product setup and ownership registration share mutable lifecycle state, which helper boundaries would obscure.

@@ -11,9 +11,11 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import TYPE_CHECKING, Final, Literal
 
+from pydantic import Field
+
 from vs_core._registry import ContractError
 from vs_core._run_pause import DEADLINE_STOP, ENVIRONMENT_STOP
-from vs_core.types.common import THIS_RUN, DecisionId, ObservationStatus, RevisionRef, Value
+from vs_core.types.common import THIS_RUN, DecisionId, ObservationStatus, RevisionRef, Value, unset
 from vs_core.types.search import AdoptionFinished
 from vs_core.types.settlement import (
     AdoptionFailed,
@@ -121,6 +123,7 @@ class Adopted(Value):
     """The adoption of the chosen winner succeeded."""
 
     selection: Selection
+    checkout_status: str | None = Field(default=None, exclude_if=unset)
 
 
 class NotAdopted(Value):
@@ -148,7 +151,7 @@ async def adopt(kit: Kit, selection: Selection) -> Adopted | NotAdopted:
     kit.run.adopting(pending, None, None)
     outcome = _adoption_of(selection, await kit.settle(pending))
     if isinstance(outcome, Adopted):
-        kit.run.adopting(pending, ADOPTED, None)
+        kit.run.adopting(pending, ADOPTED, outcome.checkout_status)
     else:
         kit.run.adopting(pending, NOT_ADOPTED, outcome.reason.value)
     return outcome
@@ -158,7 +161,7 @@ def _adoption_of(selection: Selection, event: Event) -> Adopted | NotAdopted:
     match event:
         case AdoptionFinished(result=AdoptionResult(observation=seen)):
             if seen.status is ObservationStatus.SUCCEEDED:
-                return Adopted(selection=selection)
+                return Adopted(selection=selection, checkout_status=seen.diagnostic or None)
             return NotAdopted(selection=selection, reason=AdoptionFailureReason.VERIFY_FAILED)
         case AdoptionFinished(result=AdoptionFailed(reason=reason)):
             return NotAdopted(selection=selection, reason=reason)
@@ -177,11 +180,11 @@ def _stop_ending(kit: Kit) -> EndReason | None:
     stop = kit.run.stop
     if stop is None:
         return None
-    return _HOST_STOP_ENDINGS.get(stop.control.control_id.root, EndReason.STOPPED)
+    return _HOST_STOP_ENDINGS.get(stop.control.control_id.root.partition(":")[0], EndReason.STOPPED)
 
 
 _HOST_STOP_ENDINGS = {DEADLINE_STOP: EndReason.DEADLINE, ENVIRONMENT_STOP: EndReason.FAILED}
-"""The ending of each of the host's own stops (``FINAL_STOPS``); any other stop is a pause."""
+"""The current epoch result produced by each host shutdown cause."""
 
 
 def _stop_since(kit: Kit, stopped: EndReason | None) -> EndReason | None:
@@ -262,7 +265,7 @@ def _not_adopted(adopted: NotAdopted, stopped: EndReason | None) -> RunResultPro
     if stopped is EndReason.STOPPED:
         # The operator's stop is a pause, so what the adoption did is no verdict on the run:
         # core may refuse the proposal because the stop races it, or the restore may fail.
-        # The result says so, and the run stays resumable (`reopens_on_resume`): its next
+        # The result says so, and a successor epoch may resume: its next
         # ending adopts again.
         return RunResultProposal(outcome="cancelled", reason=reason_text(stopped, detail))
     if stopped is EndReason.FAILED:

@@ -182,7 +182,8 @@ def test_resume_selects_existing_run_branch_and_baseline(tmp_path: Path) -> None
     resumed = _tracker(tmp_path)
     resumed.init(existing=True, trusted_input_baseline=baseline)
 
-    assert _git(tmp_path, "branch", "--show-current") == "vibesys-runs/test-run"
+    assert _git(tmp_path, "branch", "--show-current") == "main"
+    assert resumed.project_branch == "vibesys-runs/test-run"
     assert resumed.current_sha() == expected
     assert resumed.trusted_input_baseline == baseline
 

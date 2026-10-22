@@ -54,7 +54,6 @@ from vs_runtime._core_preflight import (
     CoreResumeError,
     ResolvedCoreResume,
     ResumeDiagnostic,
-    reject_ended_resume,
     reject_legacy_resume,
     resolve_core_resume,
 )
@@ -466,7 +465,6 @@ __all__ = [
     "owner_key",
     "production_owners",
     "receipt_executor_kinds",
-    "reject_ended_resume",
     "reject_legacy_resume",
     "reply_variable",
     "report_turns",

@@ -40,7 +40,7 @@ export interface DesktopDeps {
     AppWindow,
     'focus' | 'openSettings' | 'releaseSurfaceRun' | 'sendWelcome' | 'welcome'
   >;
-  readonly welcome: Pick<WelcomeFeed, 'recent' | 'snapshot'>;
+  readonly welcome: Pick<WelcomeFeed, 'recent' | 'snapshot' | 'hostSettings'>;
   readonly hosts: Pick<
     Hosts,
     | 'cancelCheckout'
@@ -78,9 +78,9 @@ export interface DesktopDeps {
   >;
   readonly runs: Pick<
     RunControl,
-    'attach' | 'attachReader' | 'attached' | 'detach' | 'resume' | 'start' | 'stop'
+    'attach' | 'attachReader' | 'attached' | 'detach' | 'resume' | 'start'
   >;
-  readonly settings: Pick<SettingsStore, 'onRecentChanged' | 'recentSnapshot'>;
+  readonly settings: Pick<SettingsStore, 'onRecentChanged' | 'recentSnapshot' | 'onHostsChanged'>;
   readonly preferences: Pick<PreferencesMain, 'answer'>;
   readonly newRun: Pick<NewRunMain, 'answer'>;
   /** The app shell's page: the only one admitted to the main window's requests. */
@@ -144,6 +144,11 @@ export class Desktop {
 
   constructor(deps: DesktopDeps) {
     this.#deps = deps;
+    deps.settings.onHostsChanged(() => {
+      const event = deps.welcome.hostSettings();
+      deps.window.sendWelcome(WELCOME_EVENTS.hostSettings, event);
+      deps.runWindows.sendWelcome(WELCOME_EVENTS.hostSettings, event);
+    });
     deps.settings.onRecentChanged(recent => {
       const generation = ++this.#recentGeneration;
       const value = welcomeRecent(recent);
@@ -288,9 +293,6 @@ export class Desktop {
         return runs.attachReader(request.host, request.project, request.runId);
       case 'resume':
         await runs.resume(request.host, request.project, request.run);
-        return null;
-      case 'stop':
-        await runs.stop(request.host, request.instance, request.force, true);
         return null;
       case 'logs':
         return hosts.logs(request.host, request.instance, request.request, rendererGeneration);

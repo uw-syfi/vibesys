@@ -21,6 +21,7 @@ export type FixtureServerMethods =
 
 export interface FixtureServerSeed {
   readonly runId: string;
+  readonly summary?: 'gone' | 'unsupported';
   /** The events the first batch holds. */
   readonly first: readonly {readonly sequence?: number}[];
   /** A finished run's recorded events, which `readEvents` serves; absent: no history. */
@@ -121,7 +122,7 @@ export function installFakeFixtureServer(seed: FixtureServerSeed): void {
     // The page keeps the trace's events itself, so this host serves every event of the history.
     readTrace: (_h: string, _p: string, _r: string, from: number, max: number) =>
       history(from, max),
-    readSummary: () => Promise.resolve({ok: true, value: {kind: 'unsupported'}}),
+    readSummary: () => Promise.resolve({ok: true, value: {kind: seed.summary ?? 'unsupported'}}),
     readSpan: (...ask: [string, string, string, string, number, number]) =>
       history(ask[4], ask[5], ask[3]),
   } satisfies FakeProvides<FixtureServerMethods>);

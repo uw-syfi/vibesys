@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 from ._adoption import fences_root_mutation
 from ._operator_actions import cancelled_items
 from ._proofs import Proven, descriptor_matches
+from ._run_park import drain_bound
 from ._values import canonical_json, deeply_immutable
 from .types.attempts import AttemptPhase
 from .types.common import (
@@ -76,7 +77,7 @@ def validate_decision(
         return _reject(
             decision, RejectionCode.STALE_VIEW, ("expected_revision",), "view revision changed"
         )
-    if not takes_command(state.run, decision):
+    if not takes_command(state.run, decision) and drain_bound(state, decision) is None:
         return _reject(
             decision, RejectionCode.CLOSED_SCOPE, ("scope",), "run not accepting decisions"
         )
