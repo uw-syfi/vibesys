@@ -343,3 +343,80 @@ def test_unknown_provider_acceptance_is_never_redispatched(
         assert len(given.client.calls_for("worker")) == 1
 
     sim.run(scenario(), threads=given.threads)
+
+
+@pytest.mark.parametrize("implementation", ["fake", "client"])
+def test_explicit_session_reuse_keeps_the_recorded_physical_conversation(
+    tmp_path: Path, sim: Sim, implementation: str
+) -> None:
+    given = world(tmp_path, sim, implementation)
+
+    async def root(ctx: ReplayFlow) -> object:
+        ensured = await step(
+            ctx, Oneof("ensure", pb.ReplayEnsureAgent(session=SESSION)), pb.ReplayAgentResult
+        )
+        assert ensured.session is not None
+        session = deepcopy(SESSION)
+        session.id = ensured.session.root
+        turn = await step(
+            ctx,
+            Oneof(
+                "turn",
+                pb.ReplayAgentTurn(
+                    session=session,
+                    invocation="first",
+                    workspace=SCOPE,
+                    max_turns=1,
+                    prompts=[
+                        core_common.ArtifactRef(
+                            artifact_id=core_common.ArtifactId(root="prompt", kind="artifact"),
+                            digest="sha256:0",
+                        )
+                    ],
+                    artifact_dependencies=[
+                        core_common.ArtifactRef(
+                            artifact_id=core_common.ArtifactId(root="context", kind="artifact"),
+                            digest="sha256:context",
+                        )
+                    ],
+                    output_schema=core_common.SchemaRef(name="reply", version="1"),
+                ),
+            ),
+            AgentReplayResult,
+        )
+        assert turn.value == 7
+        session.acquisition = pb.ReplaySessionAcquisition.REUSE
+        reused = await ctx.call(
+            ReplayCall(
+                SemanticKey("agent.reattach").item("same-conversation"),
+                classify_context(
+                    pb.ReplayAgentRequest(
+                        scope=SCOPE,
+                        within_seconds=30,
+                        action=Oneof(
+                            "ensure",
+                            pb.ReplayEnsureAgent(
+                                session=session, required_resource=ensured.resource
+                            ),
+                        ),
+                    ),
+                    contract="agent.v1",
+                ),
+                "agent.v1",
+                replay.ReplayPolicy(reply_type=pb.ReplayAgentResult.desc().type_name),
+                pb.ReplayAgentResult,
+            )
+        )
+        assert reused.status is core_vocabulary.ObservationStatus.SUCCEEDED
+        assert reused.session == ensured.session
+        assert reused.resource == ensured.resource
+        return 7
+
+    async def scenario() -> None:
+        assert await drive_replay(
+            host(given.store, root, given.executor(None), sim),
+            ReplayLaunch(EpochStarted(run_id="run"), "first", "host-a", 100),
+        ) == ReplayCompleted(7)
+        assert len(given.client.calls_for("worker")) == 1
+
+    sim.run(scenario(), threads=given.threads)

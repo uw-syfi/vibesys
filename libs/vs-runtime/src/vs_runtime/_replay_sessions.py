@@ -67,12 +67,16 @@ class ReplayAgentReply:
     encode: Callable[[pb.ReplayAgentResult, BaseModel | None], Message]
 
 
-def _session(native: pb.ReplayAgentSession | None) -> SessionSpec:
+def _session(native: pb.ReplayAgentSession | None, *, fresh_id: str | None = None) -> SessionSpec:
     if native is None:
         problem = "agent replay is missing required message fields"
         raise ReplayOperationError(problem)
     return SessionSpec(
-        session_id=SessionId(root=native.id),
+        session_id=SessionId(
+            root=fresh_id
+            if native.acquisition is pb.ReplaySessionAcquisition.FRESH and fresh_id is not None
+            else native.id
+        ),
         role_id=RoleId(root=native.role),
         access={
             pb.ReplayAgentAccess.READ_ONLY: Access.READ_ONLY,
@@ -233,9 +237,7 @@ class SessionReplayExecutor:
                     request_id=identity,
                     scope=scope,
                     admission_id=admission,
-                    spec=_session(action.value.session).model_copy(
-                        update={"session_id": SessionId(root=span.id)}
-                    ),
+                    spec=_session(action.value.session, fresh_id=span.id),
                     required_resource=None
                     if not action.value.required_resource
                     else ResourceId(root=action.value.required_resource),
