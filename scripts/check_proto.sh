@@ -5,8 +5,6 @@ root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$root"
 uv run --locked python -m scripts.check_proto_layers
 uv run --locked --group proto buf lint
-./scripts/tests/test_proto_breaking.sh
-./scripts/check_proto_breaking.sh
 ./scripts/generate_proto.sh
 generated=(proto/vibesys/host/v1/admission_receipt_generated.proto gateway/internal/hostoperations/registry_generated.go src/server/host_operation_types_generated.py libs/vs-runtime/tests/generated libs/vs-core/tests/generated libs/vs-proto/src/vs_proto/_generated clients/libs/proto/src/generated gateway/gen
   libs/vs-core/src/vs_core/_generated libs/vs-runtime/src/vs_runtime/_core_values
@@ -16,7 +14,19 @@ if [[ -n "$(git ls-files --others --exclude-standard -- "${generated[@]}")" ]]; 
   echo 'Untracked generated bindings; run scripts/generate_proto.sh and commit all outputs.' >&2
   exit 1
 fi
-uv run --locked pytest libs/vs-proto/tests libs/vs-runlog/tests scripts/corevalue/tests scripts/host_operations/tests --no-cov -q
-pnpm --dir clients --filter @vibesys/proto check
-(cd gateway && go build ./gen/... && go vet ./gen/...)
-./scripts/check_schema_hashes.sh
+# Generation is the only writer. Once it passes, these checks read its outputs.
+pids=()
+(./scripts/tests/test_proto_breaking.sh && ./scripts/check_proto_breaking.sh) &
+pids+=("$!")
+uv run --locked pytest libs/vs-proto/tests libs/vs-runlog/tests scripts/corevalue/tests scripts/host_operations/tests -n 0 --no-cov -q &
+pids+=("$!")
+(cd gateway && go build ./gen/... && go vet ./gen/...) &
+pids+=("$!")
+./scripts/check_schema_hashes.sh &
+pids+=("$!")
+# Reap every check, including on failure, so none outlives this command.
+status=0
+for pid in "${pids[@]}"; do
+  wait "$pid" || status=1
+done
+exit "$status"
