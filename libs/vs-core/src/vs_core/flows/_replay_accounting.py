@@ -15,10 +15,8 @@ record's evidence, never a refold of the prefix.
 
 from __future__ import annotations
 
-from bisect import bisect_left
 from dataclasses import dataclass, field
 from fractions import Fraction
-from operator import attrgetter
 from typing import TYPE_CHECKING
 
 from protobuf import Oneof
@@ -346,7 +344,7 @@ def _check_series(key: Occurrence, series: tuple[_Reading, ...], reading: _Readi
     if series and series[0].origin_epoch != reading.origin_epoch:
         problem = f"occurrence {key[2]} changes its origin epoch"
         raise ReplayError(problem)
-    index = bisect_left(series, reading.revision, key=attrgetter("revision"))
+    index = sum(1 for earlier in series if earlier.revision < reading.revision)
     if index < len(series) and series[index].revision == reading.revision:
         if series[index] != reading:
             problem = f"conflicting accounting quantities for {key[2]} at one revision"
