@@ -5,7 +5,7 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import TYPE_CHECKING
 
-from protobuf import DescFile, Message, Registry
+from protobuf import Message
 from protovalidate import Validator
 
 if TYPE_CHECKING:
@@ -13,10 +13,11 @@ if TYPE_CHECKING:
 
 
 @lru_cache(maxsize=64)
-def _validator(file: object) -> Validator:
+def _validator(_file: object) -> Validator:
+    # Descriptor identity is the cache key; native message loading stays lazy.
     # A bounded cache retains schema versions without accumulating every version
     # a long-lived reader has encountered. Eviction only recompiles validators.
-    return Validator(Registry(file)) if isinstance(file, DescFile) else Validator()
+    return Validator()
 
 
 def validate(message: Message | GoogleMessage, *, fail_fast: bool = False) -> None:
