@@ -128,9 +128,8 @@ export type Type15 = "command.control";
 export type ControlRequest =
   | SteerRequest
   | PauseRequest
-  | ParkRequest
+  | PauseNowRequest
   | ResumeRequest
-  | StopRequest
   | WithdrawRequest
   | CancelAttemptRequest
   | CancelItemRequest
@@ -149,27 +148,23 @@ export type SubjectId = string;
 export type SteerMode = "next_turn" | "standing" | "interrupt";
 export type ControlId1 = string;
 export type Action1 = "pause";
+export type ExpectedEpoch = number | null;
 export type ControlId2 = string;
-export type Action2 = "park";
+export type Action2 = "pause_now";
+export type ExpectedEpoch1 = number | null;
 export type ControlId3 = string;
 export type Action3 = "resume";
 export type Fallback1 = boolean;
 export type When1 = "now" | "capacity_returns";
 export type ControlId4 = string;
-export type Action4 = "stop";
-/**
- * How a stop treats work in flight: let it finish, or cancel it.
- */
-export type StopMode = "drain" | "cancel";
-export type ControlId5 = string;
-export type Action5 = "withdraw";
+export type Action4 = "withdraw";
 export type Withdraws = string;
+export type ControlId5 = string;
+export type Action5 = "cancel_attempt";
 export type ControlId6 = string;
-export type Action6 = "cancel_attempt";
+export type Action6 = "cancel_item";
 export type ControlId7 = string;
-export type Action7 = "cancel_item";
-export type ControlId8 = string;
-export type Action8 = "set_max_parallel";
+export type Action7 = "set_max_parallel";
 export type MaxParallel = number;
 export type ProtocolVersion16 = 1;
 export type RequestId16 = string;
@@ -202,7 +197,7 @@ export type ValidationPaths = (string | number)[][] | null;
  * What a control request asks for; the tag of the ``ControlRequest`` union.
  */
 export type ControlAction =
-  "steer" | "pause" | "park" | "resume" | "stop" | "withdraw" | "cancel_attempt" | "cancel_item" | "set_max_parallel";
+  "steer" | "pause" | "pause_now" | "resume" | "withdraw" | "cancel_attempt" | "cancel_item" | "set_max_parallel";
 export type Status = "pending" | "consumed";
 export type Question = string;
 export type Answer = string;
@@ -588,8 +583,8 @@ export type Kind31 = "steer_delivery";
  */
 export type SteerDeliveryState =
   "queued" | "withdraw_queued" | "reached" | "reached_mid_turn" | "in_force" | "dropped" | "ended" | "refused";
-export type ControlId9 = string | null;
-export type Action9 = "steer" | "withdraw";
+export type ControlId8 = string | null;
+export type Action8 = "steer" | "withdraw";
 /**
  * How a steer reaches the turns of its target.
  */
@@ -830,7 +825,7 @@ export type HypothesisId = string;
 export type Identified = boolean;
 export type Title4 = string | null;
 export type Claim = string | null;
-export type Action10 = string | null;
+export type Action9 = string | null;
 export type FirstRound = number;
 export type LastRound = number;
 export type Round1 = number;
@@ -1089,7 +1084,7 @@ export interface SteerCommand {
   text: Text;
 }
 /**
- * Request stopping after the active agent call.
+ * Internal detached-host shutdown at its cooperative boundary.
  */
 export interface StopCommand {
   protocol_version?: ProtocolVersion3;
@@ -1313,18 +1308,20 @@ export interface SteerTarget {
   id?: SubjectId | null;
 }
 /**
- * Reach the next safe boundary and hold the run there.
+ * Finish turns in flight, release evaluation jobs, save and exit for relaunch.
  */
 export interface PauseRequest {
   control_id: ControlId1;
   action: Action1;
+  expected_epoch?: ExpectedEpoch;
 }
 /**
- * Finish turns in flight, release evaluation jobs, save and exit for relaunch.
+ * Cancel unfinished work and exit; saved work remains resumable.
  */
-export interface ParkRequest {
+export interface PauseNowRequest {
   control_id: ControlId2;
   action: Action2;
+  expected_epoch?: ExpectedEpoch1;
 }
 /**
  * Continue a paused run.
@@ -1341,22 +1338,14 @@ export interface ResumeRequest {
   when?: When1;
 }
 /**
- * End the run, draining or cancelling the work in flight.
- */
-export interface StopRequest {
-  control_id: ControlId4;
-  action: Action4;
-  mode?: StopMode;
-}
-/**
  * End standing guidance: the standing steer sent under ``withdraws``.
  *
  * Turns dispatched after the run takes the withdrawal no longer receive the guidance. A
  * withdrawal of a steer the run does not hold as standing guidance in force is refused.
  */
 export interface WithdrawRequest {
-  control_id: ControlId5;
-  action: Action5;
+  control_id: ControlId4;
+  action: Action4;
   withdraws: Withdraws;
 }
 /**
@@ -1369,8 +1358,8 @@ export interface WithdrawRequest {
  * request.
  */
 export interface CancelAttemptRequest {
-  control_id: ControlId6;
-  action: Action6;
+  control_id: ControlId5;
+  action: Action5;
   attempt: SubjectId;
 }
 /**
@@ -1385,8 +1374,8 @@ export interface CancelAttemptRequest {
  * hold is refused when the run takes the request.
  */
 export interface CancelItemRequest {
-  control_id: ControlId7;
-  action: Action7;
+  control_id: ControlId6;
+  action: Action6;
   item: SubjectId;
 }
 /**
@@ -1396,8 +1385,8 @@ export interface CancelItemRequest {
  * end. A higher one admits what now fits at once.
  */
 export interface SetMaxParallelRequest {
-  control_id: ControlId8;
-  action: Action8;
+  control_id: ControlId7;
+  action: Action7;
   max_parallel: MaxParallel;
 }
 /**
@@ -2075,8 +2064,8 @@ export interface SteerDeliveryData {
  */
 export interface SteerDelivery {
   state: SteerDeliveryState;
-  control_id?: ControlId9;
-  action?: Action9;
+  control_id?: ControlId8;
+  action?: Action8;
   mode?: SteerMode2 | null;
   target?: SteerTarget2 | null;
   withdraws?: Withdraws1;
@@ -2499,7 +2488,7 @@ export interface HypothesisEntry {
   identified?: Identified;
   title?: Title4;
   claim?: Claim;
-  action?: Action10;
+  action?: Action9;
   first_round: FirstRound;
   last_round: LastRound;
   rounds?: Rounds;

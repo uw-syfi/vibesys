@@ -236,6 +236,12 @@ def _load_registry() -> dict[str, object]:
     }
 
 
+def _load_run_park() -> dict[str, object]:
+    from vs_core._run_park import pause_withdraws
+
+    return {"pause_withdraws": pause_withdraws}
+
+
 def _load_run_pause() -> dict[str, object]:
     from vs_core._run_pause import (
         DEADLINE_STOP,
@@ -245,8 +251,6 @@ def _load_run_pause() -> dict[str, object]:
         control_refusal,
         pause_after,
         reopened,
-        reopens_after,
-        reopens_on_resume,
         run_pause,
         stands_after,
     )
@@ -259,8 +263,6 @@ def _load_run_pause() -> dict[str, object]:
         "control_refusal": control_refusal,
         "pause_after": pause_after,
         "reopened": reopened,
-        "reopens_after": reopens_after,
-        "reopens_on_resume": reopens_on_resume,
         "run_pause": run_pause,
         "stands_after": stands_after,
     }
@@ -1192,6 +1194,7 @@ def _load_types_kernel() -> dict[str, object]:
         DecisionCompleted,
         DecisionReceipt,
         DecisionSubmitted,
+        EpochResumed,
         EvaluationContext,
         ProposalSubmitted,
         RecordsContext,
@@ -1220,6 +1223,7 @@ def _load_types_kernel() -> dict[str, object]:
         "DecisionCompleted": DecisionCompleted,
         "DecisionReceipt": DecisionReceipt,
         "DecisionSubmitted": DecisionSubmitted,
+        "EpochResumed": EpochResumed,
         "EvaluationContext": EvaluationContext,
         "ProposalSubmitted": ProposalSubmitted,
         "RecordsContext": RecordsContext,
@@ -1815,6 +1819,7 @@ EXPORT_MODULES: dict[str, Callable[[], dict[str, object]]] = {
     "vs_core._projection": _load_projection,
     "vs_core._proofs": _load_proofs,
     "vs_core._registry": _load_registry,
+    "vs_core._run_park": _load_run_park,
     "vs_core._run_pause": _load_run_pause,
     "vs_core._search_events": _load_search_events,
     "vs_core._search_run": _load_search_run,

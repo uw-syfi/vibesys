@@ -288,7 +288,7 @@ def _hide_staging_from_the_node(
     return hide
 
 
-def test_a_run_its_probe_failed_ends_failed_and_no_resume_reopens_it(
+def test_a_run_its_probe_failed_ends_failed_and_allows_a_successor(
     tmp_path: Path, sim: Sim
 ) -> None:
     """Regression (sweep F2): the record said ``stopped``, resumable, while the CLI said failed.
@@ -306,7 +306,7 @@ def test_a_run_its_probe_failed_ends_failed_and_no_resume_reopens_it(
     (ending,) = [event.data for event in events if event.type is CoreEventType.RUN_ENDING]
     assert isinstance(ending, RunEndingData)
     assert ending.reason is EndReason.FAILED
-    assert not ending.resumable
+    assert ending.resumable
 
 
 def _preempt_first_job(

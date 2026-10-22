@@ -32,6 +32,7 @@ from vs_proto.api import (
     core_common,
     replay,
 )
+from vs_runlog.api import current_epoch
 from vs_runtime.api.replay import (
     FakeReplayExecutor,
     ReplayCommitError,
@@ -488,3 +489,34 @@ async def test_notice_and_ack_commit_crash_sweep_never_spends_before_disclosure(
             and record.body.value.span.name == "edited"
         )
         assert notice < edited_start
+
+
+async def test_replay_uses_p1_epoch_derivation_and_explicit_declaration_amendments(
+    sim: Sim,
+) -> None:
+    async def root(ctx: ReplayFlow) -> object:
+        return (await call(ctx, "work")).root
+
+    store = FakeStateStore()
+    executor = FakeReplayExecutor(lambda _: ReplayResult(Reply(root="answer"), paid=True))
+    for number in (1, 2):
+        runtime = host(store, root, executor, sim)
+        assert await drive_replay(runtime, launch(f"launch-{number}")) == ReplayCompleted("answer")
+        records = retained(store).records
+        assert runtime.runtime.epoch == number
+        assert runtime.runtime.epoch_state == current_epoch(records)
+        assert runtime.runtime.epoch_state.lifecycle is not None
+        assert runtime.runtime.epoch_state.lifecycle.state is not None
+        assert runtime.runtime.epoch_state.lifecycle.state.field == "ended"
+        headers = [
+            record for record in records if record.body and record.body.field == "epoch_started"
+        ]
+        amendments = [
+            record
+            for record in records
+            if record.body and record.body.field == "declaration_amended"
+        ]
+        assert [record.body.value.epoch for record in headers] == list(range(1, number + 1))
+        assert len(amendments) >= number
+        assert all(record.epoch == record.body.value.epoch for record in amendments)
+    assert len(executor.invocations) == 1

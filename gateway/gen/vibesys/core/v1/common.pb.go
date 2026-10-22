@@ -309,22 +309,24 @@ const (
 	ControlAction_CONTROL_ACTION_CANCEL_ATTEMPT   ControlAction = 6
 	ControlAction_CONTROL_ACTION_CANCEL_ITEM      ControlAction = 7
 	ControlAction_CONTROL_ACTION_SET_MAX_PARALLEL ControlAction = 8
-	ControlAction_CONTROL_ACTION_PARK             ControlAction = 9
+	ControlAction_CONTROL_ACTION_PARK             ControlAction = 9 // Retained for stored controls from earlier epochs.
+	ControlAction_CONTROL_ACTION_PAUSE_NOW        ControlAction = 10
 )
 
 // Enum value maps for ControlAction.
 var (
 	ControlAction_name = map[int32]string{
-		0: "CONTROL_ACTION_UNSPECIFIED",
-		1: "CONTROL_ACTION_PAUSE",
-		2: "CONTROL_ACTION_RESUME",
-		3: "CONTROL_ACTION_STOP",
-		4: "CONTROL_ACTION_STEER",
-		5: "CONTROL_ACTION_WITHDRAW",
-		6: "CONTROL_ACTION_CANCEL_ATTEMPT",
-		7: "CONTROL_ACTION_CANCEL_ITEM",
-		8: "CONTROL_ACTION_SET_MAX_PARALLEL",
-		9: "CONTROL_ACTION_PARK",
+		0:  "CONTROL_ACTION_UNSPECIFIED",
+		1:  "CONTROL_ACTION_PAUSE",
+		2:  "CONTROL_ACTION_RESUME",
+		3:  "CONTROL_ACTION_STOP",
+		4:  "CONTROL_ACTION_STEER",
+		5:  "CONTROL_ACTION_WITHDRAW",
+		6:  "CONTROL_ACTION_CANCEL_ATTEMPT",
+		7:  "CONTROL_ACTION_CANCEL_ITEM",
+		8:  "CONTROL_ACTION_SET_MAX_PARALLEL",
+		9:  "CONTROL_ACTION_PARK",
+		10: "CONTROL_ACTION_PAUSE_NOW",
 	}
 	ControlAction_value = map[string]int32{
 		"CONTROL_ACTION_UNSPECIFIED":      0,
@@ -337,6 +339,7 @@ var (
 		"CONTROL_ACTION_CANCEL_ITEM":      7,
 		"CONTROL_ACTION_SET_MAX_PARALLEL": 8,
 		"CONTROL_ACTION_PARK":             9,
+		"CONTROL_ACTION_PAUSE_NOW":        10,
 	}
 )
 
@@ -2079,7 +2082,7 @@ const file_vibesys_core_v1_common_proto_rawDesc = "" +
 	"\x14INPUT_MODE_NEXT_TURN\x10\x01\x1a\x0f\xda\xf3\x18\v\n" +
 	"\tnext-turn\x12\x18\n" +
 	"\x14INPUT_MODE_INTERRUPT\x10\x02\x12\x17\n" +
-	"\x13INPUT_MODE_STANDING\x10\x03*\xbd\x02\n" +
+	"\x13INPUT_MODE_STANDING\x10\x03*\xdb\x02\n" +
 	"\rControlAction\x12\x1e\n" +
 	"\x1aCONTROL_ACTION_UNSPECIFIED\x10\x00\x12\x18\n" +
 	"\x14CONTROL_ACTION_PAUSE\x10\x01\x12\x19\n" +
@@ -2090,7 +2093,9 @@ const file_vibesys_core_v1_common_proto_rawDesc = "" +
 	"\x1dCONTROL_ACTION_CANCEL_ATTEMPT\x10\x06\x12\x1e\n" +
 	"\x1aCONTROL_ACTION_CANCEL_ITEM\x10\a\x12#\n" +
 	"\x1fCONTROL_ACTION_SET_MAX_PARALLEL\x10\b\x12\x17\n" +
-	"\x13CONTROL_ACTION_PARK\x10\t\x1a\x06\xd2\xf3\x18\x02\b\x01B?Z=github.com/uw-syfi/vibesys/gateway/gen/vibesys/core/v1;corev1b\x06proto3"
+	"\x13CONTROL_ACTION_PARK\x10\t\x12\x1c\n" +
+	"\x18CONTROL_ACTION_PAUSE_NOW\x10\n" +
+	"\x1a\x06\xd2\xf3\x18\x02\b\x01B?Z=github.com/uw-syfi/vibesys/gateway/gen/vibesys/core/v1;corev1b\x06proto3"
 
 var (
 	file_vibesys_core_v1_common_proto_rawDescOnce sync.Once

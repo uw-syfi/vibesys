@@ -1,7 +1,7 @@
 """Park holds admission and preserves unfinished work for the next host epoch."""
 
 import pytest
-from hypothesis import given
+from hypothesis import example, given
 from hypothesis import strategies as st
 
 import vs_core.api as core
@@ -191,3 +191,54 @@ def test_pause_drain_admits_only_an_executing_turns_evaluation_dependency(
             result.state, core.DispatchAuthorized(request_id=submissions[0].request_id)
         )
         assert authorized.state.run.status is core.RunStatus.DRAINING
+
+
+@pytest.mark.regression
+@example(epoch=1, immediate=False)
+@given(epoch=st.integers(min_value=1, max_value=100), immediate=st.booleans())
+def test_successor_resume_clears_an_interrupted_drain(epoch: int, *, immediate: bool) -> None:
+    state, _ = write_turn_world(access=core.Access.READ_ONLY)
+    state = state.model_copy(
+        update={
+            "records": state.records.model_copy(
+                update={"recovery": state.records.recovery.model_copy(update={"epoch": epoch})}
+            )
+        }
+    )
+    paused = core.step(
+        state,
+        core.RunControlEvent(
+            control=core.ControlInput(
+                control_id=core.ControlId(root="pause-old"),
+                action="pause_now" if immediate else "pause",
+                owner=None if immediate else core.PauseOwner.OPERATOR,
+            ),
+            now_at=state.run.now_at,
+        ),
+    ).state
+    assert paused.run.status is core.RunStatus.DRAINING
+    resume = core.RunControlEvent(
+        control=core.ControlInput(
+            control_id=core.ControlId(root="resume-new"), action="resume", when="now"
+        ),
+        now_at=paused.run.now_at,
+    )
+    with pytest.raises(core.ControlRefusedError, match="epoch"):
+        core.step(paused, resume)
+    opening = core.step(
+        paused,
+        core.EpochResumed(
+            epoch=epoch + 1,
+            now_at=paused.run.now_at,
+        ),
+    )
+    successor = opening.state
+    assert successor.run.status is core.RunStatus.RUNNING
+    assert successor.run.park is None
+    reopened = core.step(successor, resume)
+    assert reopened.state.run.status is core.RunStatus.RUNNING
+    assert reopened.state.run.park is None
+    assert not reopened.state.scheduling.admission_closed
+    assert any(
+        isinstance(event, core.StopLiftRecorded) and event.new_epoch for event in opening.events
+    )

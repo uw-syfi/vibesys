@@ -436,7 +436,7 @@ Submission.key required {"type":"string"}
 Submission.kind required {"$ref":"#/$defs/WorkKind"}
 Submission.parent required {"$ref":"#/$defs/RevisionRef"}
 Submission.work_id required {"type":"string"}
-TurnFailureKind {"enum":["provider_failed","transport_lost","cancelled","provider_unavailable"],"type":"string"}
+TurnFailureKind {"enum":["provider_failed","transport_lost","cancelled","epoch_interrupted","provider_unavailable"],"type":"string"}
 UnappliedPart {"additionalProperties":false,"type":"object"}
 UnappliedPart.hypothesis_id required {"minLength":1,"type":"string"}
 UnappliedPart.part required {"minLength":1,"type":"string"}

@@ -51,8 +51,11 @@ def test_p1_declaration_amendment_decodes_without_becoming_a_replay_clock() -> N
     assert current.epoch == 2
     assert current.clock == 3
     assert current.replay_clock is None
-    # Until the P1 merge this is retained as an unknown body variant. Following
-    # that merge, the same bytes must decode as the declared amendment variant.
+    assert current.body is not None
+    assert current.body.field == "declaration_amended"
+    assert current.body.value.run_id == "run-a"
+    assert current.body.value.epoch == 2
+    validate(current)
     assert current.to_binary() == encoded
 
 

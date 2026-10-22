@@ -47,6 +47,7 @@ from vs_proto.api import (
     ReplayStore as ReplayRecords,
 )
 from vs_proto.api import replay as pb
+from vs_runlog.api import CurrentEpoch, current_epoch
 from vs_runtime._replay_store import REPLAY_STORE_SCHEMA_VERSION
 
 if TYPE_CHECKING:
@@ -155,6 +156,7 @@ class ReplayRuntime:
         self._root = root
         self._allowance = allowance.to_binary()
         self._archive = ReplayArchive()
+        self._epoch = CurrentEpoch()
         self._scheduler: ReplayScheduler | None = None
         self._fence: StoreFence | None = None
         self._revision: int | None = None
@@ -166,6 +168,16 @@ class ReplayRuntime:
         self._recovery_dirty = False
         self._schema_types: set[type[Message]] = set()
         self._admission_limited = False
+
+    @property
+    def epoch(self) -> int:
+        """The public writer epoch, derived by P1's shared committed-record fold."""
+        return self._epoch.number
+
+    @property
+    def epoch_state(self) -> CurrentEpoch:
+        """Detached native lifecycle facts, with amendments carrying no authority."""
+        return current_epoch((), self._epoch)
 
     @property
     def archive(self) -> ReplayArchive:
@@ -203,7 +215,7 @@ class ReplayRuntime:
     def accounting(self) -> ReplayAccounting:
         """Actual usage and iteration grants derived from the confirmed native prefix."""
         records = tuple(ReplayRecords.from_binary(self._archive.encode()).records)
-        return ReplayAccounting.from_records(records, epoch=self._archive.epoch)
+        return ReplayAccounting.from_records(records, epoch=self._epoch.number)
 
     def start(
         self,
@@ -235,7 +247,13 @@ class ReplayRuntime:
         if acks == self._archive.acknowledgements:
             problem = "Resume launch already recorded; inspect its epoch instead of relaunching"
             raise ReplayCommitError(problem)
-        if self._archive.epoch and not self._archive.epoch_closed:
+        state = self._epoch.lifecycle
+        closed = (
+            state is not None
+            and state.state is not None
+            and state.state.field in {"ended", "parked"}
+        )
+        if self._epoch.number and not closed:
             self._append(
                 Oneof(
                     "lifecycle",
@@ -255,7 +273,7 @@ class ReplayRuntime:
                 at=at,
             )
         epoch = deepcopy(launch.header)
-        epoch.epoch = self._archive.epoch + 1
+        epoch.epoch = self._epoch.number + 1
         epoch.identity_encoding_version = ENCODING_VERSION
         epoch.initial_allowance = pb.ReplayAllowance.from_binary(self._allowance)
         epoch.replay_acknowledgement = pb.ReplayAcknowledgement.from_binary(
@@ -274,6 +292,7 @@ class ReplayRuntime:
             problem = "keyed replay requires facts-only import of the retained store format"
             raise ReplayCommitError(problem)
         self._archive = ReplayArchive.decode(stored.payload)
+        self._epoch = current_epoch(ReplayRecords.from_binary(stored.payload).records)
         self._revision = stored.revision
         _ = self.accounting
 
@@ -291,7 +310,7 @@ class ReplayRuntime:
             raise ReplayCommitError(problem)
         record = Record(
             seq=self._archive.sequence + 1,
-            epoch=(body.value.epoch if body.field == "epoch_started" else self._archive.epoch),
+            epoch=(body.value.epoch if body.field == "epoch_started" else self._epoch.number),
             clock=self._archive.clock if clock is None else clock,
             replay_clock=replay_clock,
             at=at,
@@ -316,6 +335,7 @@ class ReplayRuntime:
             problem = f"replay commit not confirmed: {outcome.kind}; restart and inspect"
             raise ReplayCommitError(problem)
         self._archive, self._revision = candidate, stored.revision
+        self._epoch = current_epoch((record,), self._epoch)
         return record
 
     def prepare(self, *, now: float, at: Timestamp) -> tuple[Span, ...]:
@@ -457,10 +477,10 @@ class ReplayRuntime:
                 files[file.name] = file
                 added = True
         if added:
-            # The existing native header can grow declarations within its epoch;
-            # identity, allowance and launch acknowledgement stay immutable.
+            # P1 amendments extend declarations without opening an epoch or
+            # changing lifecycle, identity, allowance or launch acknowledgement.
             epoch.descriptors = type(schemas)(file=[files[name] for name in sorted(files)])
-            self._append(Oneof("epoch_started", epoch), now=now, at=at)
+            self._append(Oneof("declaration_amended", epoch), now=now, at=at)
         self._schema_types.update(messages)
 
     def _record_drift(self, *, now: float, at: Timestamp) -> None:

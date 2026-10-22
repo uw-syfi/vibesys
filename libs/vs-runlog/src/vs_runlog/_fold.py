@@ -62,7 +62,7 @@ def append_skeleton(state: Keyframe, record: Record) -> None:
                     state.streams.append(stream)
                 else:
                     state.streams[index] = stream
-            case "epoch_started":
+            case "epoch_started" | "declaration_amended":
                 state.epochs.append(EpochVersion(seq=record.seq, epoch=body.value))
             case "lifecycle":
                 state.lifecycles.append(LifecycleVersion(seq=record.seq, lifecycle=body.value))

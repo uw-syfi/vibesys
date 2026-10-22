@@ -228,11 +228,21 @@ def decode_ControlInput(m: pb.ControlInput) -> values.ControlInput:
 
 
 def encode_RunPark(v: values.RunPark) -> pb.RunPark:
-    return pb.RunPark(control_id=encode_ControlId(v.control_id), epoch=str(v.epoch))
+    return pb.RunPark(
+        admitted_turns=[encode_InvocationRef(x) for x in v.admitted_turns],
+        immediate=v.immediate,
+        control_id=encode_ControlId(v.control_id),
+        epoch=str(v.epoch),
+    )
 
 
 def decode_RunPark(m: pb.RunPark) -> values.RunPark:
-    return values.RunPark(control_id=decode_ControlId(_required(m.control_id)), epoch=int(m.epoch))
+    return values.RunPark(
+        admitted_turns=tuple(decode_InvocationRef(x) for x in m.admitted_turns),
+        immediate=m.immediate,
+        control_id=decode_ControlId(_required(m.control_id)),
+        epoch=int(m.epoch),
+    )
 
 
 ENCODERS: dict[type, Callable[..., Message]] = {

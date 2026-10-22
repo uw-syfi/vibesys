@@ -149,7 +149,7 @@ test('startup reports only recorded stages and the gateway never offers legacy c
   expect(timelineView(state)).toEqual([
     {id: 'building_tools', label: 'Tools', state: 'active', streamId: null},
   ]);
-  expect(headerView(state).stop.shown).toBe(false);
+  expect(headerView(state).pauseNow.shown).toBe(false);
   expect(headerView(state).pause.shown).toBe(false);
   expect(headerView(state).status.label).toBe('Starting');
 });
@@ -157,8 +157,8 @@ test('startup reports only recorded stages and the gateway never offers legacy c
 test('park, drain and interruption keep their status words; past logs have no invented offsets', () => {
   const fixture = storeRunFixture('short');
   for (const [state, word] of [
-    [{case: 'parked', value: {}}, 'Parked'],
-    [{case: 'draining', value: {goal: DrainGoal.PARK}}, 'Parking'],
+    [{case: 'parked', value: {}}, 'Paused'],
+    [{case: 'draining', value: {goal: DrainGoal.PARK}}, 'Pausing'],
     [{case: 'ended', value: {outcome: Outcome.INTERRUPTED}}, 'Interrupted'],
   ] as const) {
     const records = [

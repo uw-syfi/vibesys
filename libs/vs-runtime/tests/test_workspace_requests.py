@@ -346,17 +346,20 @@ def _git(path: Path, *args: str) -> str:
 
 
 def _executor(
-    workspaces: RuntimeWorkspaces, store: ReceiptStore | None = None
+    workspaces: RuntimeWorkspaces, store: ReceiptStore | None = None, *, allow_adoption: bool = True
 ) -> tuple[RuntimeWorkspaceRequests, ReceiptStore]:
     """A host's executor over the run's durable receipts (a new one models a restart)."""
     chosen = store or _ENVS[workspaces].store()
-    return RuntimeWorkspaceRequests(
+    executor = RuntimeWorkspaceRequests(
         workspaces,
         chosen,
         SettledRunInvocations(),
         blocking=InlineBlockingRunner(),
         evidence=ReceiptEvidenceLedger(chosen),
-    ), chosen
+    )
+    if not allow_adoption:
+        executor.protect_adoption()
+    return executor, chosen
 
 
 async def _run(
@@ -919,19 +922,22 @@ def test_adoption_applies_inspects_and_verifies_the_selected_revision(tmp_path: 
         root_file = workspaces.root.path / "candidate.py"
         assert root_file.read_text(encoding="utf-8") == "VALUE = 2\n"
         assert await _run(executor, adopt, epoch=2) == applied
+        before_head = workspaces.root.revision
+        same = AdoptRevision(request_id=_rid("adopt-same"), scope=run_scope, selection=selection)
+        checked = await _run(executor, same, epoch=2)
+        assert checked.observation.observation.status is ObservationStatus.SUCCEEDED
+        assert workspaces.root.revision == before_head
         proof = await _run(executor, verify("verify-1"), epoch=2)
         assert proof.observation.observation.status is ObservationStatus.SUCCEEDED
         assert proof.observation.revision == winner
-        # Interrupted before the result was recorded: the root already proves the
-        # content, so the retry reports success instead of applying again.
+        # A new adoption in a resumed epoch is guarded until project-edit protection lands.
         again = AdoptRevision(request_id=_rid("adopt-2"), scope=run_scope, selection=selection)
-        crashing = _failing(_ENVS[workspaces])
-        flaky, _ = _executor(workspaces, crashing)
-        crashing.fail_done = True
-        with pytest.raises(OSError, match="host died"):
-            await _run(flaky, again, epoch=3)
-        resumed = await _run(executor, again, epoch=3)
-        assert resumed.observation.observation.status is ObservationStatus.SUCCEEDED
+        root_file.write_text("VALUE = 3\n", encoding="utf-8")
+        resumed, _ = _executor(workspaces, allow_adoption=False)
+        refused = await _run(resumed, again, epoch=3)
+        assert refused.observation.observation.status is ObservationStatus.REJECTED
+        assert "project-edit protection" in refused.observation.observation.diagnostic
+        assert root_file.read_text(encoding="utf-8") == "VALUE = 3\n"
         # Drift after adoption is never reported as verified.
         root_file.write_text("VALUE = 3\n", encoding="utf-8")
         drifted = await _run(executor, verify("verify-2"), epoch=3)

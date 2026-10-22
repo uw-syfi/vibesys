@@ -8,7 +8,7 @@
 import type {FakeProvides} from './fake-bridge.js';
 
 /** What `installFakeRun` provides: the log streams and the run commands. */
-export type RunMethods = 'logs' | 'releaseLogs' | 'stopConfirmed' | 'resume';
+export type RunMethods = 'logs' | 'releaseLogs' | 'resume';
 
 export interface FakeRunSeed {
   readonly streams: readonly unknown[];
@@ -45,7 +45,6 @@ export function installFakeRun(seed: FakeRunSeed): void {
   Object.assign(target.vibesysWelcome, {
     logs,
     releaseLogs: () => ok(null),
-    stopConfirmed: record('stopConfirmed'),
     resume: record('resume'),
   } satisfies FakeProvides<RunMethods>);
   Object.assign(target.fakeHost, {calls});

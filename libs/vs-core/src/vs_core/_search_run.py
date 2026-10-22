@@ -15,6 +15,7 @@ from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Protocol
 
 from ._registry import ContractError
+from ._run_park import drain_bound
 from ._search_events import run_view, translate
 from ._validation import takes_command
 from .types.common import THIS_RUN, RunStatus, Scope
@@ -48,9 +49,10 @@ def deferred(core: CoreState, decision: Decision) -> bool:
     if core.records.recovery.phase != RecoveryPhase.READY:
         return True
     command = decision.request if isinstance(decision, Wait) else decision
-    return core.run.status in (RunStatus.DRAINING, RunStatus.PARKED) or (
-        core.run.status == RunStatus.PAUSED and not takes_command(core.run, command)
-    )
+    return (
+        core.run.status in (RunStatus.DRAINING, RunStatus.PARKED)
+        and drain_bound(core, command) is None
+    ) or (core.run.status == RunStatus.PAUSED and not takes_command(core.run, command))
 
 
 def check_decisions(decisions: object) -> tuple[Decision, ...]:

@@ -32,7 +32,6 @@ from vs_runtime.api.core import (
     CoreRuntime,
     CoreRuntimeBindings,
     RuntimeRecord,
-    reject_ended_resume,
     reject_legacy_resume,
     resolve_core_resume,
 )
@@ -468,38 +467,6 @@ def _ended(candidate: RuntimeRecord[FlowState]) -> RuntimeRecord[FlowState]:
     return RuntimeRecord[FlowState].fresh(ended)
 
 
-def test_resuming_an_ended_run_is_refused_naming_the_run(tmp_path: Path) -> None:
-    """Regression: resuming a stopped run reported it stopped again, with no error."""
-    project, run_id = project_run(tmp_path)
-    _commit(project, run_id, _ended(record(run_id)))
-    before = project.state.portable_run_export(run_id)
-
-    with pytest.raises(CoreResumeError) as failure:
-        resolve_core_resume(project, driver(), run_id=run_id)
-
-    diagnostic = failure.value.diagnostic
-    assert diagnostic.code == "run_ended"
-    assert diagnostic.message == (
-        f"cannot resume run {run_id!r}: it is already terminal (cancelled: stopped: by request); "
-        "start a new run"
-    )
-    assert project.state.portable_run_export(run_id) == before
-
-
-def test_the_cheap_resume_check_refuses_an_ended_run_with_the_same_words(tmp_path: Path) -> None:
-    """Request validation refuses before anything boots, as the full resolution would."""
-    project, run_id = project_run(tmp_path)
-    _commit(project, run_id, _ended(record(run_id)))
-
-    with pytest.raises(CoreResumeError) as cheap:
-        reject_ended_resume(project, run_id)
-    with pytest.raises(CoreResumeError) as full:
-        resolve_core_resume(project, driver(), run_id=run_id)
-
-    assert cheap.value.diagnostic.code == "run_ended"
-    assert cheap.value.diagnostic.message == full.value.diagnostic.message
-
-
 def _stopped(
     candidate: RuntimeRecord[FlowState],
     *controls: ControlInput,
@@ -536,7 +503,6 @@ def test_a_run_the_operators_stop_ended_resumes(tmp_path: Path) -> None:
     project, run_id = project_run(tmp_path)
     _commit(project, run_id, _stopped(record(run_id), _stop()))
 
-    reject_ended_resume(project, run_id)
     assert resolve_core_resume(project, driver(), run_id=run_id).run_id == run_id
 
 
@@ -549,7 +515,7 @@ def test_a_run_the_operators_stop_ended_resumes(tmp_path: Path) -> None:
         ((_stop(),), "success"),
     ],
 )
-def test_a_run_no_operator_stop_ended_is_still_refused(
+def test_every_ending_allows_resume_resolution(
     tmp_path: Path,
     controls: tuple[ControlInput, ...],
     outcome: Literal["success", "failure", "cancelled", "blocked"],
@@ -557,21 +523,7 @@ def test_a_run_no_operator_stop_ended_is_still_refused(
     project, run_id = project_run(tmp_path)
     _commit(project, run_id, _stopped(record(run_id), *controls, outcome=outcome))
 
-    with pytest.raises(CoreResumeError) as cheap:
-        reject_ended_resume(project, run_id)
-    with pytest.raises(CoreResumeError) as full:
-        resolve_core_resume(project, driver(), run_id=run_id)
-    assert cheap.value.diagnostic.code == full.value.diagnostic.code == "run_ended"
-
-
-def test_the_cheap_resume_check_leaves_an_open_or_missing_run_to_the_resume(
-    tmp_path: Path,
-) -> None:
-    project, run_id = project_run(tmp_path)
-    reject_ended_resume(project, run_id)  # nothing committed yet
-    reject_ended_resume(project, "no-such-run")
-    _commit(project, run_id, record(run_id))
-    reject_ended_resume(project, run_id)
+    assert resolve_core_resume(project, driver(), run_id=run_id).run_id == run_id
 
 
 def test_an_open_run_still_resumes(tmp_path: Path) -> None:

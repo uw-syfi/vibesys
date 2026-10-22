@@ -190,7 +190,6 @@ function desktopWorld(cleanups: RetirementCleanups = {}, skipped: SkippedRecent[
       bound = null;
     },
     resume: async () => undefined,
-    stop: async () => undefined,
   };
   const hosts: DesktopDeps['hosts'] = {
     setCheckout: async (_id, path, change) => {

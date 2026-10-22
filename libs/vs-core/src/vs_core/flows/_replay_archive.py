@@ -191,7 +191,10 @@ class ReplayArchive:
         """Fold one validated next record; callers discard the index on failure."""
         validate(record)
         envelope = deepcopy(record)
-        if envelope.body is not None and envelope.body.field == "epoch_started":
+        if envelope.body is not None and envelope.body.field in {
+            "epoch_started",
+            "declaration_amended",
+        }:
             # Descriptors retain arbitrary annotation extensions so historical
             # strategy messages stay independently decodable. They are content,
             # not executable record metadata.
@@ -235,6 +238,8 @@ class ReplayArchive:
             case _ if not self._epochs or record.epoch != self.epoch:
                 problem = "replay record belongs to no current epoch"
                 raise ReplayError(problem)
+            case Oneof("declaration_amended", epoch):
+                self._amend_epoch(epoch)
             case Oneof("span", body) if body.span is not None:
                 if body.span.replay is None:
                     self._plain_span(body.span)

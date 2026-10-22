@@ -74,9 +74,11 @@ export function ingestTail(state: SkeletonLoad, response: TailResponse): Skeleto
 export function observeRun(skeleton: Skeleton, hint?: RunLivenessHint) {
   const epoch = skeleton.epochs.at(-1);
   const latest = skeleton.lifecycles.at(-1);
-  const lifecycle = latest && (!epoch || latest.seq >= epoch.seq) ? latest.lifecycle : undefined;
+  const start = skeleton.epochs.find(item => item.epoch?.epoch === epoch?.epoch?.epoch);
+  const lifecycle = latest && (!start || latest.seq >= start.seq) ? latest.lifecycle : undefined;
   const final = lifecycle?.state.case === 'ended' || lifecycle?.state.case === 'parked';
   return {
+    epoch: epoch?.epoch?.epoch ?? 0,
     lifecycle,
     final,
     interrupted:

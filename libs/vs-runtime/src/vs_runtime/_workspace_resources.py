@@ -19,7 +19,7 @@ from vs_runtime._trusted_evaluation import (
 from vs_runtime._workspace_files import entry_kind, file_fingerprint
 from vs_runtime._workspace_receipts import BaselineEntry, BaselineEntryKind, RootBaselineDrift
 from vs_runtime._workspace_runtime import CommandExecutionResult, WorkspaceEvaluationSpec
-from vs_runtime.contracts import CaptureStopUnconfirmedError
+from vs_runtime.contracts import CaptureStopUnconfirmedError, RuntimeContractError
 from vs_sandbox.api import (
     CaptureExecutionIdentity,
     CommandStopUnconfirmedError,
@@ -331,6 +331,7 @@ class RuntimeWorkspaceResource:
         return self._project.git.trusted_input_baseline
 
     def snapshot(self, label: str) -> str:
+        self._require_root_write()
         self._project.git.snapshot(label)
         revision = self._project.git.current_sha()
         if revision is None:
@@ -350,6 +351,7 @@ class RuntimeWorkspaceResource:
         preserve_memory: bool = True,
         exact_keeping: tuple[str, ...] | None = None,
     ) -> bool:
+        self._require_root_write(restoring=True)
         if preserve_memory:
             preserve_paths = tuple(dict.fromkeys((*preserve_paths, *self._memory_paths)))
         restored = self._project.git.checkout_tree(
@@ -362,6 +364,13 @@ class RuntimeWorkspaceResource:
         if restored and self._id is not None:
             self._revision = revision
         return restored
+
+    def _require_root_write(self, *, restoring: bool = False) -> None:
+        if self._id is None and (
+            self._root_project.root_edits_on_resume or (restoring and self._root_project.resuming)
+        ):
+            message = "project content retained; resumed root work requires project-edit protection"
+            raise RuntimeContractError(message)
 
     def try_restore(self, revision: str, *, clean: bool) -> bool:
         restored = self.restore(revision, clean=clean)

@@ -32,7 +32,7 @@ from ._session_state import (
     _record,
     _run_reusable,
 )
-from ._turn_holds import lost_to_provider
+from ._turn_holds import lost_without_debit
 from ._turn_outcomes import (
     acceptance_unresolved,
     is_terminal,
@@ -188,13 +188,13 @@ def _validate_correction(
     # A re-ask after a turn lost to its provider is no link: the gate bounds an outage.
     chain = predecessor
     links = 1
-    depth = 0 if lost_to_provider(records, predecessor) else 1
+    depth = 0 if lost_without_debit(records, predecessor) else 1
     while chain.turn.charge_class == "correction":
         links += 1
         previous = _invocation(state, chain.turn.predecessor) if chain.turn.predecessor else None
         if previous is None or links > len(state.invocations):
             raise ContractValidationError("turn.predecessor", "invalid correction chain")
-        depth += 0 if lost_to_provider(records, previous) else 1
+        depth += 0 if lost_without_debit(records, previous) else 1
         chain = previous
     if depth > MAX_REASK_CHAIN:
         raise ContractValidationError("turn.predecessor", "correction retry bound exhausted")

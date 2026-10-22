@@ -6,9 +6,7 @@ import {RelaunchAction, RelaunchStatus, type RelaunchView} from './relaunch.js';
 
 const ACTION_LABELS: Record<NonNullable<IntentEntry['request']['intent']['case']>, string> = {
   pause: 'Pause',
-  park: 'Park',
-  resume: 'Resume',
-  stop: 'Stop',
+  pauseNow: 'Pause now',
   steer: 'Guidance',
   withdraw: 'Withdraw guidance',
   cancelAttempt: 'Cancel attempt',
@@ -39,10 +37,10 @@ export function IntentControls(props: {
   return (
     <Stack gap="space-1">
       <Row gap="space-2" wrap>
-        {(['pause', 'resume', 'stop', 'park'] as const).map(action => (
+        {(['pause', 'pauseNow'] as const).map(action => (
           <Button
             key={action}
-            variant={action === 'stop' ? 'danger' : 'secondary'}
+            variant={action === 'pauseNow' ? 'danger' : 'secondary'}
             quietReason
             {...(props.busy ? {disabledReason: 'Sending'} : {})}
             press={() => props.send(action)}
@@ -52,6 +50,7 @@ export function IntentControls(props: {
         {props.relaunch ? <RelaunchAction {...props.relaunch} /> : null}
         <Button text="Guidance" press={() => props.showGuidance(true)} />
       </Row>
+      <Text tone="muted">Unfinished work may need repeating and may still incur charges.</Text>
       {props.relaunch ? <RelaunchStatus {...props.relaunch} /> : null}
       {props.warning ? (
         <Text tone="warn" title={props.warning}>

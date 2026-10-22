@@ -88,7 +88,7 @@ class Projection:
             return
         header = p.EpochStarted.from_binary(self.header.to_binary())
         header.span_kinds.append(p.SpanKindDecl(kind=kind, attrs_type=attrs_type, timeline=True))
-        self.emit("epoch_started", header)
+        self.emit("declaration_amended", header)
 
     def metric(
         self,
@@ -103,7 +103,7 @@ class Projection:
             header.series.append(
                 p.MetricSeriesDecl(name=point.series, unit=unit, direction=direction, role=role)
             )
-            self.emit("epoch_started", header)
+            self.emit("declaration_amended", header)
         key = (point.series, point.span)
         value = (point.value, point.clock)
         if self.metric_values.get(key) != value:

@@ -38,7 +38,6 @@ from vs_runtime.api.infrastructure import (
     PauseRequest,
     RunControlTransitionKind,
     RuntimeRunControlChannel,
-    StopRequest,
 )
 from vs_runtime.api.testing import FakeRunControlEventSink, ProbedRunClock
 from vs_sim.api.testing import SimThreads, clock_from
@@ -148,7 +147,7 @@ def _ends_first(host: CoreRunHost) -> None:
 async def test_a_socket_pause_the_bridge_refuses_after_a_stop_is_answered(tmp_path: Path) -> None:
     """Regression (R1 of the #3091 re-check), the bridge refusing a socket control.
 
-    The operator stops the run while its baseline job runs, then pauses it through the
+    The host shuts down while its baseline job runs, then the operator pauses through the
     socket before the search has ended the run. Core takes no pause once it recorded a
     stop, so the bridge refuses the channel's hold: the operator hears core's reason and
     the hold is lifted. Before, the bridge ignored the channel's pause after a stop: the
@@ -163,12 +162,20 @@ async def test_a_socket_pause_the_bridge_refuses_after_a_stop_is_answered(tmp_pa
             return any(job.status == "pending" for job in core.evaluation.jobs)
 
         def stopped(core: CoreState) -> bool:
-            recorded = {control.control_id for control in core.run.controls}
-            return ControlId(root="op-s1") in recorded and core.run.status != RunStatus.TERMINAL
+            return (
+                any(control.action == "stop" for control in core.run.controls)
+                and core.run.status != RunStatus.TERMINAL
+            )
 
         clock.actions += [
-            (measuring, lambda: wiring.control.submit(StopRequest(control_id="s1"))),
-            (stopped, lambda: wiring.control.submit(PauseRequest(control_id="p1"))),
+            (
+                measuring,
+                lambda: wiring.channel.request_stop(StopMode.DRAIN),
+            ),
+            (
+                stopped,
+                lambda: wiring.control.submit(PauseRequest(control_id="p1", expected_epoch=1)),
+            ),
         ]
 
     core = await _run(tmp_path, SkeletonStrategy.baseline_only(), wiring, actions, timed=150.0)
@@ -192,7 +199,7 @@ async def test_a_socket_pause_core_refuses_at_the_commit_that_ends_the_run_is_an
 
     def actions(clock: _Operator, host: CoreRunHost) -> None:
         def operator_and_end() -> None:
-            wiring.control.submit(PauseRequest(control_id="p1"))
+            wiring.control.submit(PauseRequest(control_id="p1", expected_epoch=1))
             _ends_first(host)
 
         clock.actions.append((_always, operator_and_end))
@@ -201,7 +208,7 @@ async def test_a_socket_pause_core_refuses_at_the_commit_that_ends_the_run_is_an
 
     assert core.run.result is not None
     assert wiring.channel.pause_state() is None
-    assert wiring.refusals() == ["pause p1: terminal run rejects controls"]
+    assert wiring.refusals() == ["pause p1: the epoch ended; Resume starts another"]
 
 
 async def test_an_inbox_pause_refused_by_the_commit_that_ends_the_run_is_rejected(
@@ -219,7 +226,9 @@ async def test_an_inbox_pause_refused_by_the_commit_that_ends_the_run_is_rejecte
     def actions(clock: _Operator, host: CoreRunHost) -> None:
         def operator_and_end() -> None:
             wiring.inbox.post(
-                "p1", PauseRequest(control_id="p1").model_dump_json().encode(), ended=_live
+                "p1",
+                PauseRequest(control_id="p1", expected_epoch=1).model_dump_json().encode(),
+                ended=_live,
             )
             _ends_first(host)
 
@@ -229,7 +238,7 @@ async def test_an_inbox_pause_refused_by_the_commit_that_ends_the_run_is_rejecte
 
     assert wiring.inbox.pending() == ()
     assert [(entry.request_id, entry.reason) for entry in wiring.inbox.rejected()] == [
-        ("p1", "refused by the run: terminal run rejects controls")
+        ("p1", "refused by the run: the epoch ended; Resume starts another")
     ]
     assert wiring.refusals() == []  # the inbox's rejection is the operator's answer
     assert wiring.channel.pause_state() is None

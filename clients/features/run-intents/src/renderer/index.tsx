@@ -1,7 +1,12 @@
 import type {HostKey} from '@vibesys/hosts';
 import type {GatewayBridge} from '@vibesys/ipc';
 import type {ScheduleTimeout} from '@vibesys/machine';
-import {type RelaunchObservation, type RunIntentAction, runIntent} from '@vibesys/runs/intents';
+import {
+  type RelaunchObservation,
+  type RunIntentAction,
+  runIntent,
+  runReference,
+} from '@vibesys/runs/intents';
 import {type JSX, useEffect, useRef, useState} from 'react';
 import type {SnapshotFrom} from 'xstate';
 import type {runIntentsMachine} from '../state/index.js';
@@ -48,7 +53,11 @@ export function useRunIntents(props: {
   if (!props.enabled || !snapshot) return {controls: null, busy, sendRequest};
   const send = (action: RunIntentAction) => {
     const request = runIntent(
-      {projectRoot: props.projectRoot, runId: props.runId, requestId: crypto.randomUUID()},
+      {
+        ...runReference(props.projectRoot, props.runId),
+        requestId: crypto.randomUUID(),
+        expectedEpoch: props.relaunch?.epoch ?? 0n,
+      },
       action,
       text,
     );

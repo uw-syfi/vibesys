@@ -1,34 +1,15 @@
 /**
- * The Run screen's store: a pure reducer over what the app learns about one run (its registry
- * record, from the host's watch, and its log streams) and what the user does on the screen.
- *
- * The run's lifecycle is the record's: the page never guesses a phase the host did not report,
- * except that a Stop it sent shows as stopping until the record catches up. Stopping arms a bound
- * (`FORCE_STOP_BOUND_MS`) on the shell's injected clock through a request token; only when that
- * token comes back while the run is still stopping is "Force stop" offered, and a reply for an
- * earlier stop is dropped. Commands are requests the shell performs through the existing
- * run-control paths; the reducer does no I/O and reads no clock.
- *
- * A live run is attached under a token (`link`); once attached, the shell runs the run's session
- * (`@vibesys/run-session`) and reports what it says (`session`) and what it folded (`run`). Pause
- * and Resume are protocol commands, so they are offered only while the session can deliver one.
- * A run paused by a usage limit also offers to wait: Resume with `when: capacity_returns`, which the
- * run acknowledges with `quota_waiting` (folded into the pause by `@vibesys/run-state`), and "Stop
- * waiting" (Pause) once it waits. A server that refuses the wait (an older one rejects `when`) no
- * longer offers it for this run instance (`waitRefused`).
+ * Pure Run screen state and effects. Pause drains the epoch; Pause now confirms once,
+ * records its pending request, and remains pending until durable state catches up.
  */
 
 import type {RunEvent, RunStatus} from '@vibesys/contracts';
 import type {LogStream} from '@vibesys/contracts/host-helper';
 import type {HostRun, RunEnd} from '@vibesys/hosts';
 import type {LogListOutcome, LogView} from '@vibesys/logs';
-import {
-  type CoreState,
-  initialCoreState,
-  type QuotaPause,
-  reduceEventBatch,
-} from '@vibesys/run-state';
+import {type CoreState, initialCoreState, reduceEventBatch} from '@vibesys/run-state';
 import type {RunRef} from '@vibesys/runs';
+import {createMachine, getInitialSnapshot, getNextSnapshot, type SnapshotFrom} from 'xstate';
 import {type HistoryPage, type HistoryPager, receivePage, startHistory} from './history-pager.js';
 import type {IdeasLayout} from './ideas-tree.js';
 import {IDEAS_FILTER_DEFAULT, type IdeasFilter} from './ideas-view.js';
@@ -59,10 +40,6 @@ import {receiveTracePage, startTraceHistory, type TraceHistory} from './trace-hi
 import {USAGE_CONTROLS_DEFAULT, type UsageControls} from './usage-view.js';
 
 /** When a Resume takes effect: now, or once the provider's capacity returns. */
-export type ResumeWhen = 'now' | 'capacity_returns';
-
-/** How long a Stop may take before "Force stop" is offered. */
-export const FORCE_STOP_BOUND_MS = 2 * 60 * 1000;
 
 /** What the app could not do for this run, with why; an action named here is shown disabled. */
 type RunCapability = 'open-window' | 'logs';
@@ -198,17 +175,37 @@ export type SpanDetailReply =
   | {readonly kind: 'unsupported'}
   | {readonly kind: 'failed'; readonly message: string};
 
-/** The page's own stop flow: confirming, or a stop sent and waiting for the run to end. */
-export type StopFlow =
-  | {readonly kind: 'idle'}
-  | {readonly kind: 'confirming'}
-  | {
-      readonly kind: 'stopping';
-      /** The armed bound's token, until it fires or the stop ends. */
-      readonly bound: number | null;
-      readonly forceOffered: boolean;
-      readonly forced: boolean;
-    };
+/** Confirmation for cancellation; the backend record remains the lifecycle authority. */
+const pauseNowMachine = createMachine({
+  types: {} as {events: {type: 'ask' | 'cancel' | 'confirm' | 'failed'; allowed: boolean}},
+  initial: 'idle',
+  on: {failed: '.idle'},
+  states: {
+    idle: {on: {ask: {target: 'confirming', guard: ({event}) => event.allowed}}},
+    confirming: {
+      on: {
+        cancel: 'idle',
+        confirm: {target: 'sent', guard: ({event}) => event.allowed},
+      },
+    },
+    sent: {},
+  },
+});
+
+type PauseNowFlow = {readonly kind: SnapshotFrom<typeof pauseNowMachine>['value']};
+
+function pauseNowNext(
+  state: PauseNowFlow,
+  type: 'ask' | 'cancel' | 'confirm' | 'failed',
+  allowed = true,
+): PauseNowFlow {
+  return {
+    kind: getNextSnapshot(pauseNowMachine, pauseNowMachine.resolveState({value: state.kind}), {
+      type,
+      allowed,
+    }).value,
+  };
+}
 
 /** Where the scrubber stands: following the newest event, or at one event's sequence. */
 export type RunView = {readonly at: 'live'} | {readonly at: number};
@@ -249,7 +246,7 @@ export interface RunPageState {
    * picks a stream.
    */
   readonly followingLogs: boolean;
-  readonly stop: StopFlow;
+  readonly pauseNow: PauseNowFlow;
   readonly logs: RunLogs;
   /** The latest view of each followed stream, by stream id. */
   readonly views: Readonly<Record<string, LogView>>;
@@ -295,8 +292,6 @@ export interface RunPageState {
   /** An ended run's earlier span events, read into its trace so the scrubber has positions. */
   readonly traceHistory: TraceHistory;
   readonly detail: SpanDetail;
-  /** Why the attached run refused to wait for its quota; the wait is not offered again for it. */
-  readonly waitRefused: string | null;
   readonly next: number;
 }
 
@@ -311,22 +306,16 @@ export type RunPageAction =
   | {readonly type: 'ideas-hover'; readonly idea: string | null}
   | {readonly type: 'agents-open'; readonly id: string; readonly open: boolean}
   | {readonly type: 'view-logs'}
-  | {readonly type: 'ask-stop'}
-  | {readonly type: 'cancel-stop'}
-  | {readonly type: 'confirm-stop'}
-  | {readonly type: 'force-stop'}
-  | {readonly type: 'stop-failed'}
+  | {readonly type: 'ask-pause-now'}
+  | {readonly type: 'cancel-pause-now'}
+  | {readonly type: 'confirm-pause-now'}
+  | {readonly type: 'pause-now-failed'}
   | {readonly type: 'bound-elapsed'; readonly token: number}
   /** The page opened: start waiting for the listing to place the run. */
   | {readonly type: 'locate'}
   | {readonly type: 'streams'; readonly token: number; readonly outcome: LogListOutcome}
   | {readonly type: 'log-view'; readonly streamId: string; readonly view: LogView}
   | {readonly type: 'pause'}
-  | {readonly type: 'resume'}
-  /** Resume the quota-paused run when capacity returns. */
-  | {readonly type: 'wait-for-quota'}
-  /** End that wait: the run stays paused. */
-  | {readonly type: 'stop-waiting'}
   | {readonly type: 'resume-ended'}
   | {readonly type: 'open-window'}
   | {readonly type: 'archive'}
@@ -340,8 +329,6 @@ export type RunPageAction =
   /** This window's clock, ticked while the screen shows time passing on a live run. */
   | {readonly type: 'tick'; readonly wallMs: number}
   | {readonly type: 'command-refused'; readonly message: string}
-  /** The run refused a Resume when capacity returns (an older server rejects `when`). */
-  | {readonly type: 'wait-refused'; readonly message: string}
   | {readonly type: 'view'; readonly view: RunView}
   | {readonly type: 'history'; readonly token: number; readonly reply: HistoryReply}
   /** A page of the ended run's earlier span events arrived (or did not). */
@@ -360,13 +347,12 @@ export type RunPageAction =
   | {readonly type: 'span'; readonly token: number; readonly reply: SpanDetailReply};
 
 export type RunPageRequest =
-  | {readonly kind: 'stop'; readonly force: boolean}
+  | {readonly kind: 'pause-now'}
   | {readonly kind: 'arm-bound'; readonly token: number; readonly ms: number}
   /** Cancel the bound armed under `token`, when its wait ended first. */
   | {readonly kind: 'cancel-bound'; readonly token: number}
   | {readonly kind: 'list-logs'; readonly token: number; readonly instanceId: string}
   | {readonly kind: 'pause'}
-  | {readonly kind: 'resume'; readonly when: ResumeWhen}
   | {readonly kind: 'resume-ended'; readonly fromRound: number | null}
   | {readonly kind: 'open-window'}
   | {readonly kind: 'archive'}
@@ -418,7 +404,7 @@ export function runPageInitial(seed: RunPageSeed): RunPageState {
     record: {kind: 'unlisted', why: 'machine'},
     locate: {kind: 'idle'},
     followingLogs: false,
-    stop: {kind: 'idle'},
+    pauseNow: PAUSE_NOW_IDLE,
     logs: {kind: 'idle'},
     views: {},
     selected: null,
@@ -441,12 +427,11 @@ export function runPageInitial(seed: RunPageSeed): RunPageState {
     history: {kind: 'idle'},
     traceHistory: {kind: 'idle'},
     detail: {kind: 'idle'},
-    waitRefused: null,
     next: 1,
   };
 }
 
-const STOP_IDLE: StopFlow = {kind: 'idle'};
+const PAUSE_NOW_IDLE: PauseNowFlow = {kind: getInitialSnapshot(pauseNowMachine).value};
 
 /** The phase the record reports, before the page's own stop is laid over it. */
 function recordPhase(record: RunRecord): RunPhase {
@@ -494,24 +479,11 @@ export function runPhase(state: RunPageState): RunPhase {
   const phase = recordPhase(state.record);
   if (phase.kind === 'ended' || phase.kind === 'unlisted' || phase.kind === 'historical')
     return phase;
-  return state.stop.kind === 'stopping' ? {kind: 'stopping'} : phase;
+  return state.pauseNow.kind === 'sent' ? {kind: 'stopping'} : phase;
 }
 
 function isLive(state: RunPageState): boolean {
   return state.record.kind === 'live';
-}
-
-/** Arm the force bound for a stop that has none and has not offered force yet. */
-function armed(state: RunPageState, forced: boolean): RunPageStep {
-  const token = state.next;
-  return {
-    state: {
-      ...state,
-      next: token + 1,
-      stop: {kind: 'stopping', bound: token, forceOffered: false, forced},
-    },
-    requests: [{kind: 'arm-bound', token, ms: FORCE_STOP_BOUND_MS}],
-  };
 }
 
 /** Ask for the stream listing again, unless the app cannot read logs or one is in flight. */
@@ -558,7 +530,6 @@ function linked(state: RunPageState): RunPageStep {
       link: {kind: 'attaching', token, instance: wanted},
       session: null,
       run: EMPTY_RUN_FOLD,
-      waitRefused: null,
     },
     requests: [...release, {kind: 'attach', token, instance: wanted}],
   };
@@ -965,15 +936,10 @@ function withSpan(state: RunPageState, token: number, reply: SpanDetailReply): R
 function recordStep(next: RunPageState, record: RunRecord): RunPageStep {
   if (record.kind !== 'live') {
     // The run ended (or left the listing): no stop is pending and no force is offered.
-    const settled = {...next, stop: STOP_IDLE};
+    const settled = {...next, pauseNow: PAUSE_NOW_IDLE};
     return isEndedRecord(record) ? relisted(settled) : {state: settled, requests: []};
   }
   const listing = relisted(next);
-  // A stop sent by anyone (this page, another window, the CLI) gets the same bound.
-  if (record.run.phase === 'stopping' && listing.state.stop.kind !== 'stopping') {
-    const bound = armed(listing.state, false);
-    return {state: bound.state, requests: [...listing.requests, ...bound.requests]};
-  }
   return listing;
 }
 
@@ -1019,80 +985,49 @@ function unchanged(state: RunPageState): RunPageStep {
   return {state, requests: []};
 }
 
-/** Asking to stop, cancelling, and confirming; the confirmation states what is lost. */
+/** Pause now is available while Pause drains and cancels through the live session. */
 function confirmStep(state: RunPageState, action: RunPageAction): RunPageStep | null {
   const phase = runPhase(state);
-  const stoppable =
-    phase.kind === 'starting' || phase.kind === 'running' || phase.kind === 'paused';
   switch (action.type) {
-    case 'ask-stop':
-      return stoppable && state.stop.kind === 'idle'
-        ? {state: {...state, stop: {kind: 'confirming'}}, requests: []}
-        : unchanged(state);
-    case 'cancel-stop':
-      return state.stop.kind === 'confirming'
-        ? {state: {...state, stop: STOP_IDLE}, requests: []}
-        : unchanged(state);
-    case 'confirm-stop': {
-      if (state.stop.kind !== 'confirming' || !isLive(state)) return unchanged(state);
-      const bound = armed(state, false);
-      return {state: bound.state, requests: [{kind: 'stop', force: false}, ...bound.requests]};
-    }
-    default:
-      return null;
-  }
-}
-
-/** A stop under way: its bound elapsing, a force stop once offered, or the command failing. */
-function stoppingStep(state: RunPageState, action: RunPageAction): RunPageStep | null {
-  const {stop} = state;
-  switch (action.type) {
-    case 'force-stop':
-      if (stop.kind !== 'stopping' || !stop.forceOffered) return unchanged(state);
+    case 'ask-pause-now':
       return {
-        state: {...state, stop: {kind: 'stopping', bound: null, forceOffered: false, forced: true}},
-        requests: [{kind: 'stop', force: true}],
-      };
-    case 'stop-failed':
-      // The stop command could not run: the run goes on as the record says.
-      return stop.kind === 'stopping' && state.record.kind === 'live'
-        ? {state: {...state, stop: STOP_IDLE}, requests: []}
-        : unchanged(state);
-    case 'bound-elapsed':
-      if (state.locate.kind === 'waiting' && state.locate.bound === action.token) {
-        return {state: {...state, locate: {kind: 'unresolved'}}, requests: []};
-      }
-      if (stop.kind !== 'stopping' || stop.bound !== action.token) return unchanged(state);
-      return {
-        state: {...state, stop: {...stop, bound: null, forceOffered: !stop.forced}},
+        state: {
+          ...state,
+          pauseNow: pauseNowNext(state.pauseNow, 'ask', isLive(state) && phase.kind !== 'ended'),
+        },
         requests: [],
       };
+    case 'cancel-pause-now':
+      return {state: {...state, pauseNow: pauseNowNext(state.pauseNow, 'cancel')}, requests: []};
+    case 'confirm-pause-now': {
+      const pauseNow = pauseNowNext(state.pauseNow, 'confirm', commandable(state));
+      return {
+        state: {...state, pauseNow},
+        requests:
+          state.pauseNow.kind === 'confirming' && pauseNow.kind === 'sent'
+            ? [{kind: 'pause-now'}]
+            : [],
+      };
+    }
+    case 'pause-now-failed':
+      return {state: {...state, pauseNow: pauseNowNext(state.pauseNow, 'failed')}, requests: []};
+    case 'bound-elapsed':
+      return state.locate.kind === 'waiting' && state.locate.bound === action.token
+        ? {state: {...state, locate: {kind: 'unresolved'}}, requests: []}
+        : unchanged(state);
     default:
       return null;
   }
 }
 
-/** Whether a protocol command (Pause, Resume) can reach the run now: its session's controls are up. */
+/** Whether a live pause command can reach the run now: its session's controls are up. */
 export function commandable(state: RunPageState): boolean {
   return state.link.kind === 'attached' && state.session?.controls === true;
-}
-
-/** The usage-limit stop the run is paused on, while it is paused by quota; null otherwise. */
-export function quotaPause(state: RunPageState): QuotaPause | null {
-  const phase = runPhase(state);
-  if (phase.kind !== 'paused' || phase.by !== 'quota') return null;
-  return state.run.core?.quota.pause ?? null;
-}
-
-/** Whether the run waits for its quota now (it acknowledged a Resume when capacity returns). */
-function waitingForQuota(state: RunPageState): boolean {
-  return quotaPause(state)?.waiting != null;
 }
 
 /** A command the screen offers, sent only when the current state offers it. */
 function commandStep(state: RunPageState, action: RunPageAction): RunPageStep | null {
   const phase = runPhase(state);
-  const byQuota = phase.kind === 'paused' && phase.by === 'quota';
   // A command sent is a new attempt: what the last one reported no longer stands.
   const offered = (when: boolean, request: RunPageRequest): RunPageStep => ({
     state: when ? {...state, notice: null} : state,
@@ -1103,24 +1038,9 @@ function commandStep(state: RunPageState, action: RunPageAction): RunPageStep | 
       return offered(commandable(state) && phase.kind === 'running' && !phase.pausing, {
         kind: 'pause',
       });
-    case 'resume':
-      return offered(commandable(state) && phase.kind === 'paused', {
-        kind: 'resume',
-        when: 'now',
-      });
-    case 'wait-for-quota':
-      return offered(
-        commandable(state) && byQuota && !waitingForQuota(state) && state.waitRefused === null,
-        {
-          kind: 'resume',
-          when: 'capacity_returns',
-        },
-      );
-    case 'stop-waiting':
-      return offered(commandable(state) && waitingForQuota(state), {kind: 'pause'});
     case 'resume-ended': {
       const end = phase.kind === 'ended' ? phase.end : null;
-      return offered(end?.resumable === true, {
+      return offered(phase.kind === 'ended' || phase.kind === 'historical', {
         kind: 'resume-ended',
         fromRound: end?.resume_from_round ?? null,
       });
@@ -1156,8 +1076,8 @@ function toggled(
 }
 
 export function runPageStep(state: RunPageState, action: RunPageAction): RunPageStep {
-  const stop = confirmStep(state, action) ?? stoppingStep(state, action);
-  if (stop !== null) return stop;
+  const cancellation = confirmStep(state, action);
+  if (cancellation !== null) return cancellation;
   const command = commandStep(state, action);
   if (command !== null) return command;
   const live = liveStep(state, action);
@@ -1287,15 +1207,6 @@ function liveStep(state: RunPageState, action: RunPageAction): RunPageStep | nul
       return {state: {...state, clockMs: action.wallMs}, requests: []};
     case 'command-refused':
       return {state: {...state, notice: action.message}, requests: []};
-    case 'wait-refused':
-      return {
-        state: {
-          ...state,
-          notice: `The run cannot wait for its quota: ${action.message}`,
-          waitRefused: action.message,
-        },
-        requests: [],
-      };
     case 'view':
       return {state: {...state, view: action.view}, requests: []};
     case 'history':
@@ -1341,15 +1252,8 @@ function liveProblems(state: RunPageState): string[] {
 /** What must hold in every state; empty when all do. */
 export function runPageInvariants(state: RunPageState): string[] {
   const problems: string[] = liveProblems(state);
-  const phase = runPhase(state);
-  if (state.stop.kind === 'stopping' && state.stop.forceOffered && phase.kind !== 'stopping') {
-    problems.push('force stop is offered outside stopping');
-  }
-  if (state.stop.kind === 'stopping' && state.stop.forceOffered && state.stop.bound !== null) {
-    problems.push('force stop is offered before its bound elapsed');
-  }
-  if (state.stop.kind !== 'idle' && state.record.kind !== 'live') {
-    problems.push(`a ${state.stop.kind} stop outlives the live run`);
+  if (state.pauseNow.kind !== 'idle' && state.record.kind !== 'live') {
+    problems.push('a pending Pause now outlives the live run');
   }
   if (
     (state.logs.kind === 'listing' || state.logs.kind === 'listed') &&
