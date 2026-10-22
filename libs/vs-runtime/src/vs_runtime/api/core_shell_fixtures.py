@@ -39,6 +39,7 @@ from vs_core.api import (
     Value,
     initial_state,
     recover,
+    step,
     trace_step,
     within,
 )
@@ -72,9 +73,10 @@ class ShellTraceTransitions:
         self.with_requests = with_requests
 
     def step(self, state: CoreState, event: CoreEvent) -> Transition:
+        if isinstance(event, EpochResumed):
+            return step(state, event)
         frames = []
-        if isinstance(event, RecoveryStarted | EpochResumed):
-            recovery = RecoveryStarted(epoch=event.epoch, now_at=event.now_at)
+        if isinstance(event, RecoveryStarted):
             change = recover(
                 state.records,
                 RecordsContext(
@@ -84,12 +86,10 @@ class ShellTraceTransitions:
                     sessions=state.sessions,
                     evaluation=state.evaluation,
                 ),
-                recovery,
+                event,
             )
             frames.append(
-                TraceFrame(
-                    signal=recovery, change=RecordsChange(**change.model_dump(mode="python"))
-                )
+                TraceFrame(signal=event, change=RecordsChange(**change.model_dump(mode="python")))
             )
             if change.signals:
                 frames.append(
