@@ -172,3 +172,55 @@ def test_evaluation_acquisition_holds_the_recorded_proof_through_workspace_creat
             with pytest.raises(replay_api.WriterProofError, match="another writer"):
                 next_generation.create()
         next_generation.create()
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize("first_out", ["a", "b"])
+def test_overlapping_acquisitions_hold_exclusion_until_the_last_one_exits(
+    tmp_path: Path, first_out: str
+) -> None:
+    """Concurrent evaluation tasks exit in any order; none may release another's exclusion."""
+    namespace = Project.open(tmp_path).state.state_store_namespace("writers")
+    backing = replay.WriterBacking(
+        environment="local", identity="root-a", generation=1, authority="host-a"
+    )
+    threads = SimThreads()
+    registry = replay_api.WriterRegistry(namespace, backing, threads)
+    registry.create()
+    manifest = registry.close()
+    proof = replay.WriterTerminationProof(manifest=manifest)
+    registry.record(
+        replay.WriterReconciliation(
+            manifest=manifest, proof=proof, status=replay.WriterReconciliationStatus.PROVEN_STOPPED
+        )
+    )
+    request = ReplayRootReuse(proof.to_binary())
+    binding = replay_api.EvaluationWriterReconciliation(
+        registry, request, "run", StoreFence(host_id="host-a", epoch=1, expires_at=100)
+    )
+    acquired = replay_api.EvaluationWorkspaceAcquisitions(
+        InMemoryEvaluationNamespace(), "local", binding
+    )
+    competitor = replay_api.WriterRegistry(namespace, backing, threads)
+    other = StoreFence(host_id="host-b", epoch=2, expires_at=100)
+
+    def blocked() -> None:
+        with (
+            pytest.raises(replay_api.WriterProofError, match="another writer"),
+            competitor.acquire(request, run_id="other", fence=other),
+        ):
+            pytest.fail("a writer from another run entered while an acquisition was open")
+
+    scopes = {
+        "a": acquired.acquire("evaluation-a", "root-a", fresh=True, live=()),
+        "b": acquired.acquire("evaluation-b", "root-a", fresh=True, live=("evaluation-a",)),
+    }
+    scopes["a"].__enter__()
+    scopes["b"].__enter__()
+    scopes[first_out].__exit__(None, None, None)
+    blocked()
+    scopes["b" if first_out == "a" else "a"].__exit__(None, None, None)
+    with competitor.acquire(request, run_id="other", fence=other):
+        pass
+    with registry.acquire(request, run_id="run", fence=binding.fence):
+        pass

@@ -73,7 +73,10 @@ class WriterRegistry:
         self._namespace = namespace
         self._backing = _checked(deepcopy(backing))
         self._lock = ReceiptStore(namespace, threads)
-        self._reuse_owner: tuple[str, str, int] | None = None
+        # Overlapping reuse scopes are independent tasks that may exit in any order,
+        # so exclusion is held per acquisition token, never as a nesting stack.
+        self._reuses: dict[object, tuple[str, str, int]] = {}
+        self._reuse_hold = ExitStack()
         # One authoritative head per backing identity, across generations and authorities.
         self._path = "writers/" + hashlib.sha256(backing.identity.encode()).hexdigest() + ".pb"
 
@@ -91,15 +94,19 @@ class WriterRegistry:
     def reuse(self, *, run_id: str, fence: StoreFence) -> Iterator[pb.WriterTerminationProof]:
         """Keep backing exclusion from proof validation through the awaited reuse effect."""
         owner = run_id, fence.host_id, fence.epoch
-        with self._exclusive():
-            if self._reuse_owner is not None and self._reuse_owner != owner:
-                problem = "Recovery blocked: previous writers may still modify this workspace; backing is held by another writer"
-                raise WriterProofError(problem)
-            previous, self._reuse_owner = self._reuse_owner, owner
-            try:
-                yield self.require_proof()
-            finally:
-                self._reuse_owner = previous
+        if any(held != owner for held in self._reuses.values()):
+            problem = "Recovery blocked: previous writers may still modify this workspace; backing is held by another writer"
+            raise WriterProofError(problem)
+        if not self._reuses:
+            self._reuse_hold.enter_context(self._exclusive())
+        token = object()
+        self._reuses[token] = owner
+        try:
+            yield self.require_proof()
+        finally:
+            del self._reuses[token]
+            if not self._reuses:
+                self._reuse_hold.close()
 
     @contextmanager
     def acquire(
