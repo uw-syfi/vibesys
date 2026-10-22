@@ -58,7 +58,6 @@ from server.host_api import (
     ComputeTestClusterReply,
     ComputeTestClusterRequest,
     DetachedLaunchFailure,
-    ExamplesListReply,
     HarnessOption,
     HelloReply,
     HelloRequest,
@@ -944,7 +943,7 @@ def _answer(
 
 
 def _project_reply(request: RunsListRequest, host: HelperHost) -> RunsListReply:
-    """Answer one read of a project's tasks, runs or a task's goal."""
+    """Answer a project's saved-run listing."""
     project = Path(_host_path(request.project, host.directories))
     match request:
         case RunsListRequest(
@@ -1012,12 +1011,7 @@ def _compute_reply(
 def _examples_reply(
     request: ExamplesDestinationRequest | ProjectCreateFromExampleRequest | ProjectCopyOutRequest,
     host: HelperHost,
-) -> (
-    ExamplesListReply
-    | ExamplesDestinationReply
-    | ProjectCreateFromExampleReply
-    | ProjectCopyOutReply
-):
+) -> ExamplesDestinationReply | ProjectCreateFromExampleReply | ProjectCopyOutReply:
     """Answer one read of the example catalog or a destination, or make one new project."""
     match request:
         case ExamplesDestinationRequest(
@@ -1069,18 +1063,6 @@ def _machine_reply(
         case CheckoutInspectRequest(request_id=request_id, path=path):
             inspection = host.machine.inspect_checkout(Path(_host_path(path, host.directories)))
             return CheckoutInspectReply(request_id=request_id, inspection=inspection)
-
-
-def installed_first(
-    harnesses: tuple[HarnessOption, ...], installed: tuple[str, ...]
-) -> tuple[HarnessOption, ...]:
-    """``harnesses`` with the providers whose CLI is installed on this machine first.
-
-    A client starts a run on the first provider listed, so a machine without the first
-    provider's CLI would otherwise default to a run that cannot start its agent. Order is
-    otherwise kept: each provider's options stay together, its default first.
-    """
-    return tuple(sorted(harnesses, key=lambda option: option.provider not in installed))
 
 
 def describe_machine(host: HelperHost) -> MachineDescription:
