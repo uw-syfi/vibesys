@@ -30,8 +30,10 @@ AdoptRevision.request_id optional {"anyOf":[{"$ref":"#/$defs/RequestId"},{"type"
 AdoptRevision.scope required {"$ref":"#/$defs/Scope"}
 AdoptRevision.selection required {"$ref":"#/$defs/Selection"}
 Adoption {"additionalProperties":false,"type":"object"}
+Adoption.checkout optional {"anyOf":[{"$ref":"#/$defs/CheckoutUpdate"},{"type":"null"}],"default":null}
 Adoption.failure optional {"anyOf":[{"$ref":"#/$defs/AdoptionFailureReason"},{"type":"null"}],"default":null}
 Adoption.observation optional {"anyOf":[{"$ref":"#/$defs/Observation"},{"type":"null"}],"default":null}
+Adoption.publication optional {"anyOf":[{"$ref":"#/$defs/AdoptionPublication"},{"type":"null"}],"default":null}
 Adoption.selection required {"$ref":"#/$defs/Selection"}
 Adoption.verified optional {"default":false,"type":"boolean"}
 AdoptionFailed {"additionalProperties":false,"type":"object"}
@@ -45,10 +47,16 @@ AdoptionFinished {"additionalProperties":false,"type":"object"}
 AdoptionFinished.decision required {"anyOf":[{"$ref":"#/$defs/DecisionId"},{"type":"null"}]}
 AdoptionFinished.kind optional {"const":"adoption_finished","default":"adoption_finished","type":"string"}
 AdoptionFinished.result required {"anyOf":[{"$ref":"#/$defs/AdoptionResult"},{"$ref":"#/$defs/AdoptionFailed"}]}
+AdoptionPublication {"additionalProperties":false,"type":"object"}
+AdoptionPublication.branch required {"minLength":1,"type":"string"}
+AdoptionPublication.commit required {"pattern":"^[0-9a-f]{40}$","type":"string"}
+AdoptionPublication.revision required {"minLength":1,"type":"string"}
 AdoptionRequest {"discriminator":{"mapping":{"adopt_revision":"#/$defs/AdoptRevision","verify_adoption":"#/$defs/VerifyAdoption"},"propertyName":"kind"},"oneOf":[{"$ref":"#/$defs/AdoptRevision"},{"$ref":"#/$defs/VerifyAdoption"}]}
 AdoptionResult {"additionalProperties":false,"type":"object"}
+AdoptionResult.checkout optional {"anyOf":[{"$ref":"#/$defs/CheckoutUpdate"},{"type":"null"}],"default":null}
 AdoptionResult.kind optional {"const":"adoption_result","default":"adoption_result","type":"string"}
 AdoptionResult.observation required {"$ref":"#/$defs/Observation"}
+AdoptionResult.publication optional {"anyOf":[{"$ref":"#/$defs/AdoptionPublication"},{"type":"null"}],"default":null}
 AdoptionResult.selection required {"$ref":"#/$defs/Selection"}
 AgentCall {"additionalProperties":false,"type":"object"}
 AgentCall.call_id required {"type":"string"}
@@ -221,6 +229,9 @@ ChargeReceipt.kind required {"$ref":"#/$defs/ChargeKind"}
 ChargeReceipt.refund_sources optional {"default":[],"items":{"$ref":"#/$defs/RequestId"},"type":"array"}
 ChargeReceipt.refunded optional {"$ref":"#/$defs/Count","default":0}
 ChargeReceipt.source_request optional {"anyOf":[{"$ref":"#/$defs/RequestId"},{"type":"null"}],"default":null}
+CheckoutStatus {"enum":["fast_forwarded","other_branch","dirty_tree","diverged","git_refused"],"type":"string"}
+CheckoutUpdate {"additionalProperties":false,"type":"object"}
+CheckoutUpdate.status required {"$ref":"#/$defs/CheckoutStatus"}
 Checkpoint {"discriminator":{"mapping":{"declined":"#/$defs/Declined","retained":"#/$defs/Retained"},"propertyName":"kind"},"oneOf":[{"$ref":"#/$defs/Retained"},{"$ref":"#/$defs/Declined"}]}
 CheckpointDecline {"enum":["writer_active","unauthorized","uncharged","not_active","snapshot_failed"],"type":"string"}
 CheckpointDeclined {"additionalProperties":false,"type":"object"}

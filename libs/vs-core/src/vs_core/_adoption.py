@@ -1,30 +1,12 @@
-"""Adoption: make the winning revision the run's result in the root workspace.
+"""Winner publication with replay of the pre-publication adoption lifecycle.
 
-A winner is a retained eligible candidate or the run's trusted baseline. Adoption
-runs in rounds. Each round issues one AdoptRevision (restore the root to the
-selected revision) and, once that is applied or unknown, one VerifyAdoption (prove
-the root holds exactly that revision). Only a positive verification publishes
-AdoptionResult, and it publishes it once.
+A successful AdoptRevision carrying an AdoptionPublication completes adoption immediately:
+its commit is durable on a run-owned branch. The independent checkout outcome never gates
+success. Core neither restores nor verifies the operator's working tree.
 
-Request identities derive from the selection and a round number, and the round
-number is the count of AdoptRevision records already in the record ledger. The
-ledger is durable, so a restarted run recomputes the same identities, never
-re-adopts when a verification is merely outstanding, and a retry gets a fresh
-identity that the executor answers by inspecting the root before restoring it.
-
-Adoption stores its progress in ``SettlementState.adoption``:
-
-- no observation: the round's AdoptRevision is outstanding.
-- an adopt observation that is applied or unknown: VerifyAdoption is outstanding.
-- a verify observation that is pending: VerifyAdoption is outstanding.
-- ``verified``: complete. Later events change nothing, except that a resume which lifts the
-  stop the adoption answered takes it back (`reopen`): the run is not ending.
-- ``failure`` set: the adoption failed for good, AdoptionFailed was emitted once,
-  and the fence is released.
-
-Rounds are bounded in one place, ``_may_start_round``: the ledger holds at most
-``Limits.max_adoption_rounds`` AdoptRevision rounds per selection that did not verify,
-whether they came from an automatic retry or from the strategy proposing the winner again.
+The old two-request state machine remains only to recover persisted, unfinished adoptions
+whose observations lack a publication. VerifyAdoption is now a publication retry/read in the
+runtime. Its ledger identities, retry bounds and fences remain readable across upgrades.
 """
 
 from __future__ import annotations
@@ -160,7 +142,7 @@ def _observed_phase(
 
 
 def _awaits_inspection(observation: Observation) -> bool:
-    """Applied and unknown outcomes are settled by looking at the root."""
+    """Legacy applied and unknown outcomes need a publication read/retry."""
     return observation.status in (ObservationStatus.SUCCEEDED, ObservationStatus.UNKNOWN)
 
 
@@ -397,7 +379,7 @@ def _observe(
         ledger, observation.request_id, selection
     )
     if phase == _Phase.ADOPTING and adopting and not _stale(adoption, observation):
-        return _adopt_observed(state, context, adoption, observation, latest)
+        return _adopt_observed(state, context, adoption, event, latest)
     if phase == _Phase.VERIFYING and verifying and not _stale(adoption, observation):
         return _verify_observed(state, context, adoption, event, latest)
     if phase == _Phase.VERIFYING and adopting and not _stale(adoption, observation):
@@ -407,7 +389,7 @@ def _observe(
             and previous.request_id == observation.request_id
             and observation.status != ObservationStatus.PENDING
         ):
-            return _adopt_observed(state, context, adoption, observation, latest)
+            return _adopt_observed(state, context, adoption, event, latest)
     return AreaChange[SettlementState](state=state)
 
 
@@ -415,9 +397,22 @@ def _adopt_observed(
     state: SettlementState,
     context: SettlementContext,
     adoption: Adoption,
-    observation: Observation,
+    event: AdoptionObserved,
     round_: int,
 ) -> AreaChange[SettlementState]:
+    observation = event.observation
+    if observation.status == ObservationStatus.SUCCEEDED and event.publication is not None:
+        if (
+            event.revision == adoption.selection.revision
+            and event.publication.revision == adoption.selection.revision.revision_id.root
+        ):
+            return _published(state, context, adoption, event)
+        return _fail(
+            state,
+            context,
+            adoption.model_copy(update={"observation": observation}),
+            AdoptionFailureReason.CONTENT_MISMATCH,
+        )
     recorded = adoption.model_copy(update={"observation": observation})
     if observation.status == ObservationStatus.PENDING or observation.retryable:
         return _with_adoption(state, recorded)
@@ -441,12 +436,7 @@ def _verify_observed(
     if observation.status == ObservationStatus.PENDING or observation.retryable:
         return _with_adoption(state, adoption.model_copy(update={"observation": observation}))
     if observation.status == ObservationStatus.SUCCEEDED and event.revision == selection.revision:
-        done = Adoption(selection=selection, observation=observation, verified=True)
-        return AreaChange[SettlementState](
-            state=state.model_copy(update={"adoption": done}),
-            signals=_completion(context, selection, CompletionStatus.SUCCEEDED),
-            events=(AdoptionResult(selection=selection, observation=observation),),
-        )
+        return _published(state, context, adoption, event)
     recorded = adoption.model_copy(update={"observation": observation})
     if observation.status == ObservationStatus.SUCCEEDED:
         # Applied content differs from the selection: definite, so no retry.
@@ -458,6 +448,35 @@ def _verify_observed(
             state, Adoption(selection=selection), _adopt(context, selection, round_ + 1)
         )
     return _fail(state, context, recorded, AdoptionFailureReason.RETRIES_EXHAUSTED)
+
+
+def _published(
+    state: SettlementState,
+    context: SettlementContext,
+    adoption: Adoption,
+    event: AdoptionObserved,
+) -> AreaChange[SettlementState]:
+    """Publication is the adoption proof; the optional checkout cannot invalidate it."""
+    selection = adoption.selection
+    done = Adoption(
+        selection=selection,
+        observation=event.observation,
+        verified=True,
+        publication=event.publication,
+        checkout=event.checkout,
+    )
+    return AreaChange[SettlementState](
+        state=state.model_copy(update={"adoption": done}),
+        signals=_completion(context, selection, CompletionStatus.SUCCEEDED),
+        events=(
+            AdoptionResult(
+                selection=selection,
+                observation=event.observation,
+                publication=event.publication,
+                checkout=event.checkout,
+            ),
+        ),
+    )
 
 
 def _completion(

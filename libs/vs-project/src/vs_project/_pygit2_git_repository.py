@@ -373,6 +373,39 @@ class Pygit2GitRepository:
         except _LIBGIT2_ERRORS as error:
             self._fail(f"update-ref {ref} {commit}", error)
 
+    def create_commit(
+        self,
+        revision: Revision,
+        parents: Sequence[str],
+        message: str,
+        *,
+        preserve_from: Revision,
+        preserve_paths: Sequence[str] = (),
+    ) -> str:
+        return self._cli.create_commit(
+            revision,
+            parents,
+            message,
+            preserve_from=preserve_from,
+            preserve_paths=preserve_paths,
+        )
+
+    def advance_branch(self, branch: str, commit: str) -> bool:
+        return self._cli.advance_branch(branch, commit)
+
+    def fast_forward_checkout(
+        self,
+        branch: str,
+        commit: str,
+        *,
+        untracked_exclusions: Sequence[str] = (),
+    ) -> bool:
+        return self._cli.fast_forward_checkout(
+            branch,
+            commit,
+            untracked_exclusions=untracked_exclusions,
+        )
+
     def switch_branch(self, branch: str, *, create: bool = False) -> None:
         self._cli.switch_branch(branch, create=create)
 

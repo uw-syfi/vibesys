@@ -13,7 +13,8 @@ from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 
 from vs_project._framework_writes import FRAMEWORK_WRITES
-from vs_project._run_branches import RUN_BRANCH_PREFIX, run_branch, run_of_branch
+from vs_project._revision_publication import CheckoutOutcome, PublishedRevision, RevisionPublisher
+from vs_project._run_branches import adoption_branch, run_branch, run_of_branch
 from vs_project._state_io import STATE_DOCUMENT_MAX_BYTES
 from vs_project._workspace_tree import (
     EntryKind,
@@ -206,6 +207,32 @@ class GitTracker:
             shutil.rmtree(destination, ignore_errors=True)
         self._git.prune_worktrees()
 
+    def publish_revision(
+        self,
+        revision: str,
+        message: str,
+        *,
+        preserve_paths: tuple[str, ...] = (),
+    ) -> PublishedRevision:
+        """Publish a retained winner without reading or changing the operator checkout."""
+        if not self.is_retained(revision):
+            message = f"candidate revision is not retained by this run: {revision!r}"
+            raise ValueError(message)
+        paths = tuple(path.as_posix() for path in _normalize_project_paths(preserve_paths))
+        return self._publisher(paths).publish(revision, message)
+
+    def update_checkout(self, publication: PublishedRevision) -> CheckoutOutcome:
+        """Optionally fast-forward only this run's clean checked-out branch."""
+        return self._publisher().update_checkout(publication)
+
+    def _publisher(self, preserve_paths: tuple[str, ...] = ()) -> RevisionPublisher:
+        return RevisionPublisher(
+            self._git,
+            self.run_id,
+            self._state_integration.metadata_pathspec,
+            preserve_paths,
+        )
+
     def retain_candidate(self, candidate_id: str, commit: str) -> str:
         """Keep a candidate commit reachable after its worktree is removed."""
         if not self._CANDIDATE_ID.fullmatch(candidate_id):
@@ -225,7 +252,7 @@ class GitTracker:
     def is_retained(self, commit: str) -> bool:
         """Whether this run keeps ``commit`` reachable, as opposed to merely present.
 
-        A commit is retained when it is an ancestor of the root checkout's HEAD or
+        A commit is retained when it is an ancestor of this run's working or publication branch or
         of the trusted-input baseline, or of any candidate ref created by
         ``retain_candidate``. A commit that exists in the object database but that
         no ref reaches (a dangling commit) is not retained, and neither is an
@@ -237,7 +264,15 @@ class GitTracker:
         sha = self._git.resolve_commit(commit)
         if sha is None:
             return False
-        anchors = [anchor for anchor in ("HEAD", self._trusted_input_baseline) if anchor]
+        anchors = [
+            anchor
+            for anchor in (
+                self.project_branch,
+                adoption_branch(self.run_id),
+                self._trusted_input_baseline,
+            )
+            if anchor
+        ]
         if any(self._git.is_ancestor(sha, anchor) for anchor in anchors):
             return True
         return self._git.has_ref_containing(sha, f"refs/vibesys/{self.run_id}/candidates/")
@@ -967,7 +1002,7 @@ class GitTracker:
 
     def _is_home_candidate(self, name: str) -> bool:
         return (
-            not name.startswith(RUN_BRANCH_PREFIX)
+            run_of_branch(name) is None
             and self._git.is_valid_branch_name(name)
             and self._branch_exists(name)
         )

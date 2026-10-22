@@ -30,8 +30,11 @@ from typing import TYPE_CHECKING, Literal, Protocol, assert_never
 
 from vs_core.api import (
     AdoptionObserved,
+    AdoptionPublication,
     AdoptRevision,
     AttemptRef,
+    CheckoutStatus,
+    CheckoutUpdate,
     DiscardWorkspace,
     EnsureWorkspace,
     ObservationStatus,
@@ -133,6 +136,8 @@ class _Facts:
     measured_input: str | None = None
     diagnostic: str = ""
     setup_failure: SetupFailureKind = SetupFailureKind.UNKNOWN
+    publication: AdoptionPublication | None = None
+    checkout: CheckoutUpdate | None = None
     holding_nothing: ObservationFacts | None = None
     """The facts as ``refused`` or ``never_held`` built them, when the answer holds nothing."""
 
@@ -315,7 +320,14 @@ class RuntimeWorkspaceRequests:
                     ),
                 )
             case AdoptRevision() | VerifyAdoption():
-                events = (AdoptionObserved(observation=observation, revision=facts.revision),)
+                events = (
+                    AdoptionObserved(
+                        observation=observation,
+                        revision=facts.revision,
+                        publication=facts.publication,
+                        checkout=facts.checkout,
+                    ),
+                )
             case EnsureWorkspace() | RestoreRevision():
                 events = (
                     WorkspaceObserved(
@@ -482,41 +494,40 @@ class RuntimeWorkspaceRequests:
             return _rejected("selected revision is not a retained revision of this run")
         if isinstance(request.selection, TrustedBaseline) and commit != root.trusted_input_baseline:
             return _rejected("selected baseline is not the run's trusted input baseline")
-        applied = await root.matches_revision(commit)
-        if isinstance(request, VerifyAdoption):
-            if not applied:
-                # The root was read and its tracked content differs from the selection:
-                # a conclusive mismatch, which core treats as terminal FAILED. UNKNOWN
-                # stays for what could not be compared at all (a missing revision above).
-                return _Facts(
-                    ObservationStatus.FAILED,
-                    accepted=True,
-                    diagnostic="root workspace content differs from the selected revision",
-                )
-        else:
-            if not (resumed and applied):
-                failure = await self._materialize(root, commit)
-                if failure is not None:
-                    return failure
-            recorded = await self._record_adoption(root, request, commit)
-            if recorded is not None:
-                return recorded
-        return _Facts(ObservationStatus.SUCCEEDED, accepted=True, revision=ref)
-
-    async def _record_adoption(
-        self, root: RuntimeWorkspace, request: AdoptRevision, commit: str
-    ) -> _Facts | None:
-        """Commit the adopted tree on the run's branch, so the run leaves the project clean.
-
-        The tree already equals the selection, so verification still holds afterwards. A
-        repeated or resumed adoption finds nothing left to commit and commits nothing.
-        """
-        message = adoption_commit_message(request, commit, self._evidence)
+        # Legacy VerifyAdoption records are replayed as publication reads/retries,
+        # never as permission to restore or compare the operator's working tree.
+        del resumed
+        message = (
+            adoption_commit_message(request, commit, self._evidence)
+            if isinstance(request, AdoptRevision)
+            else "vibesys: adopt retained revision"
+        )
         try:
-            await root.snapshot(message)
-        except NestedRepositoryError as error:
+            publication = await self._workspaces.adopt(commit, message=message)
+        except RuntimeContractError as error:
             return _Facts(ObservationStatus.FAILED, accepted=True, diagnostic=str(error))
-        return None
+        if isinstance(request, VerifyAdoption):
+            return _Facts(
+                ObservationStatus.SUCCEEDED,
+                accepted=True,
+                revision=ref,
+                publication=publication,
+                diagnostic="published",
+            )
+        checkout = await self._workspaces.update_checkout(publication)
+        diagnostic = (
+            "checkout updated"
+            if checkout.status is CheckoutStatus.FAST_FORWARDED
+            else f"checkout skipped: {checkout.status.value.replace('_', ' ')}"
+        )
+        return _Facts(
+            ObservationStatus.SUCCEEDED,
+            accepted=True,
+            revision=ref,
+            publication=publication,
+            checkout=checkout,
+            diagnostic=diagnostic,
+        )
 
     @staticmethod
     async def _materialize(

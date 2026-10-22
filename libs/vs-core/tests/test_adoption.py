@@ -176,6 +176,7 @@ class Run:
         *,
         revision: core.RevisionRef | None = None,
         terminal: bool = True,
+        published: tuple[core.AdoptionPublication, core.CheckoutUpdate] | None = None,
     ) -> core.Transition:
         assert request.request_id is not None
         key = request.request_id.root
@@ -190,7 +191,12 @@ class Run:
             accepted=True,
             terminal=terminal,
         )
-        event = core.AdoptionObserved(observation=observation, revision=revision)
+        event = core.AdoptionObserved(
+            observation=observation,
+            revision=revision,
+            publication=None if published is None else published[0],
+            checkout=None if published is None else published[1],
+        )
         self.delivered.append(event)
         return self.feed(event)
 
@@ -947,3 +953,35 @@ def test_an_adoption_carries_exactly_the_winners_trusted_measurements(
         and ref.status is core.ObservationStatus.SUCCEEDED
         and ref.provenance == "trusted"
     )
+
+
+@pytest.mark.regression
+@given(status=st.sampled_from(tuple(core.CheckoutStatus)))
+@example(status=core.CheckoutStatus.DIRTY_TREE)
+def test_publication_adopts_without_root_verification_in_every_checkout_state(
+    status: core.CheckoutStatus,
+) -> None:
+    run = start()
+    selection = GOOD[0]
+    (request,) = new_requests(run.propose(selection))
+    publication = core.AdoptionPublication(
+        revision=selection.revision.revision_id.root,
+        commit="a" * 40,
+        branch="vibesys-adoptions/run",
+    )
+    checkout = core.CheckoutUpdate(status=status)
+    completed = run.answer(
+        request,
+        core.ObservationStatus.SUCCEEDED,
+        revision=selection.revision,
+        published=(publication, checkout),
+    )
+    assert new_requests(completed) == []
+    assert run.view().phase == "verified"
+    (result,) = run.results()
+    assert result.publication == publication
+    assert result.checkout == checkout
+    # Duplicate delivery and a persisted-state reload cannot publish another result.
+    run.state = reload(run.state)
+    run.feed(run.delivered[-1])
+    assert run.results() == [result]

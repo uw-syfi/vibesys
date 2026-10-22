@@ -310,6 +310,112 @@ func (x *OperationSchemaRef) GetLifecycle() LifecycleClass {
 	return LifecycleClass_LIFECYCLE_CLASS_UNSPECIFIED
 }
 
+// A retained revision published without changing the operator checkout.
+type AdoptionPublication struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Revision      string                 `protobuf:"bytes,1,opt,name=revision,proto3" json:"revision,omitempty"`
+	Commit        string                 `protobuf:"bytes,2,opt,name=commit,proto3" json:"commit,omitempty"`
+	Branch        string                 `protobuf:"bytes,3,opt,name=branch,proto3" json:"branch,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AdoptionPublication) Reset() {
+	*x = AdoptionPublication{}
+	mi := &file_vibesys_core_v1_contracts_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AdoptionPublication) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AdoptionPublication) ProtoMessage() {}
+
+func (x *AdoptionPublication) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_core_v1_contracts_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AdoptionPublication.ProtoReflect.Descriptor instead.
+func (*AdoptionPublication) Descriptor() ([]byte, []int) {
+	return file_vibesys_core_v1_contracts_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *AdoptionPublication) GetRevision() string {
+	if x != nil {
+		return x.Revision
+	}
+	return ""
+}
+
+func (x *AdoptionPublication) GetCommit() string {
+	if x != nil {
+		return x.Commit
+	}
+	return ""
+}
+
+func (x *AdoptionPublication) GetBranch() string {
+	if x != nil {
+		return x.Branch
+	}
+	return ""
+}
+
+// The independent, optional checkout step never changes publication success.
+type CheckoutUpdate struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Status        CheckoutStatus         `protobuf:"varint,1,opt,name=status,proto3,enum=vibesys.core.v1.CheckoutStatus" json:"status,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CheckoutUpdate) Reset() {
+	*x = CheckoutUpdate{}
+	mi := &file_vibesys_core_v1_contracts_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CheckoutUpdate) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CheckoutUpdate) ProtoMessage() {}
+
+func (x *CheckoutUpdate) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_core_v1_contracts_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CheckoutUpdate.ProtoReflect.Descriptor instead.
+func (*CheckoutUpdate) Descriptor() ([]byte, []int) {
+	return file_vibesys_core_v1_contracts_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *CheckoutUpdate) GetStatus() CheckoutStatus {
+	if x != nil {
+		return x.Status
+	}
+	return CheckoutStatus_CHECKOUT_STATUS_UNSPECIFIED
+}
+
 var File_vibesys_core_v1_contracts_proto protoreflect.FileDescriptor
 
 const file_vibesys_core_v1_contracts_proto_rawDesc = "" +
@@ -332,7 +438,14 @@ const file_vibesys_core_v1_contracts_proto_rawDesc = "" +
 	"\x0erequest_schema\x18\x02 \x01(\v2\x1a.vibesys.core.v1.SchemaRefB\x06\xbaH\x03\xc8\x01\x01R\rrequestSchema\x12I\n" +
 	"\x0eoutcome_schema\x18\x03 \x01(\v2\x1a.vibesys.core.v1.SchemaRefB\x06\xbaH\x03\xc8\x01\x01R\routcomeSchema\x12I\n" +
 	"\tlifecycle\x18\x04 \x01(\x0e2\x1f.vibesys.core.v1.LifecycleClassB\n" +
-	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\tlifecycle:\x06\xc2\xf3\x18\x020\x01B?Z=github.com/uw-syfi/vibesys/gateway/gen/vibesys/core/v1;corev1b\x06proto3"
+	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\tlifecycle:\x06\xc2\xf3\x18\x020\x01\"\x8a\x01\n" +
+	"\x13AdoptionPublication\x12#\n" +
+	"\brevision\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\brevision\x12-\n" +
+	"\x06commit\x18\x02 \x01(\tB\x15\xbaH\x12r\x102\x0e^[0-9a-f]{40}$R\x06commit\x12\x1f\n" +
+	"\x06branch\x18\x03 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x06branch\"U\n" +
+	"\x0eCheckoutUpdate\x12C\n" +
+	"\x06status\x18\x01 \x01(\x0e2\x1f.vibesys.core.v1.CheckoutStatusB\n" +
+	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x06statusB?Z=github.com/uw-syfi/vibesys/gateway/gen/vibesys/core/v1;corev1b\x06proto3"
 
 var (
 	file_vibesys_core_v1_contracts_proto_rawDescOnce sync.Once
@@ -346,26 +459,30 @@ func file_vibesys_core_v1_contracts_proto_rawDescGZIP() []byte {
 	return file_vibesys_core_v1_contracts_proto_rawDescData
 }
 
-var file_vibesys_core_v1_contracts_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
+var file_vibesys_core_v1_contracts_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
 var file_vibesys_core_v1_contracts_proto_goTypes = []any{
-	(*NullValue)(nil),          // 0: vibesys.core.v1.NullValue
-	(*PureOptionValue)(nil),    // 1: vibesys.core.v1.PureOptionValue
-	(*PureOption)(nil),         // 2: vibesys.core.v1.PureOption
-	(*OperationSchemaRef)(nil), // 3: vibesys.core.v1.OperationSchemaRef
-	(*SchemaRef)(nil),          // 4: vibesys.core.v1.SchemaRef
-	(LifecycleClass)(0),        // 5: vibesys.core.v1.LifecycleClass
+	(*NullValue)(nil),           // 0: vibesys.core.v1.NullValue
+	(*PureOptionValue)(nil),     // 1: vibesys.core.v1.PureOptionValue
+	(*PureOption)(nil),          // 2: vibesys.core.v1.PureOption
+	(*OperationSchemaRef)(nil),  // 3: vibesys.core.v1.OperationSchemaRef
+	(*AdoptionPublication)(nil), // 4: vibesys.core.v1.AdoptionPublication
+	(*CheckoutUpdate)(nil),      // 5: vibesys.core.v1.CheckoutUpdate
+	(*SchemaRef)(nil),           // 6: vibesys.core.v1.SchemaRef
+	(LifecycleClass)(0),         // 7: vibesys.core.v1.LifecycleClass
+	(CheckoutStatus)(0),         // 8: vibesys.core.v1.CheckoutStatus
 }
 var file_vibesys_core_v1_contracts_proto_depIdxs = []int32{
 	0, // 0: vibesys.core.v1.PureOptionValue.null:type_name -> vibesys.core.v1.NullValue
 	1, // 1: vibesys.core.v1.PureOption.value:type_name -> vibesys.core.v1.PureOptionValue
-	4, // 2: vibesys.core.v1.OperationSchemaRef.request_schema:type_name -> vibesys.core.v1.SchemaRef
-	4, // 3: vibesys.core.v1.OperationSchemaRef.outcome_schema:type_name -> vibesys.core.v1.SchemaRef
-	5, // 4: vibesys.core.v1.OperationSchemaRef.lifecycle:type_name -> vibesys.core.v1.LifecycleClass
-	5, // [5:5] is the sub-list for method output_type
-	5, // [5:5] is the sub-list for method input_type
-	5, // [5:5] is the sub-list for extension type_name
-	5, // [5:5] is the sub-list for extension extendee
-	0, // [0:5] is the sub-list for field type_name
+	6, // 2: vibesys.core.v1.OperationSchemaRef.request_schema:type_name -> vibesys.core.v1.SchemaRef
+	6, // 3: vibesys.core.v1.OperationSchemaRef.outcome_schema:type_name -> vibesys.core.v1.SchemaRef
+	7, // 4: vibesys.core.v1.OperationSchemaRef.lifecycle:type_name -> vibesys.core.v1.LifecycleClass
+	8, // 5: vibesys.core.v1.CheckoutUpdate.status:type_name -> vibesys.core.v1.CheckoutStatus
+	6, // [6:6] is the sub-list for method output_type
+	6, // [6:6] is the sub-list for method input_type
+	6, // [6:6] is the sub-list for extension type_name
+	6, // [6:6] is the sub-list for extension extendee
+	0, // [0:6] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_core_v1_contracts_proto_init() }
@@ -389,7 +506,7 @@ func file_vibesys_core_v1_contracts_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_vibesys_core_v1_contracts_proto_rawDesc), len(file_vibesys_core_v1_contracts_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   4,
+			NumMessages:   6,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

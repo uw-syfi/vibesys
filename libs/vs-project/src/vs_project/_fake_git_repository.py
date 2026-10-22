@@ -453,6 +453,89 @@ class FakeGitRepository:
                 )
             scope.repo.refs[ref] = target
 
+    def create_commit(
+        self,
+        revision: Revision,
+        parents: Sequence[str],
+        message: str,
+        *,
+        preserve_from: Revision,
+        preserve_paths: Sequence[str] = (),
+    ) -> str:
+        with self._operation("create_commit"):
+            command = ["commit-tree", revision]
+            scope = self._scope(command)
+            source, preserved = self._two_snapshots(scope, command, revision, preserve_from)
+            specs = self._specs([f":(literal){path}" for path in preserve_paths], command)
+            tree = dict(source)
+            if preserve_paths:
+                tree = {path: entry for path, entry in tree.items() if not specs.matches(path)}
+                tree.update(_only(preserved, specs))
+            resolved = tuple(self._commit_of(scope, parent) for parent in parents)
+            if any(parent is None for parent in resolved):
+                self._refuse(command, "invalid commit parent")
+            return scope.repo.objects.add_commit(
+                tree,
+                tuple(parent for parent in resolved if parent is not None),
+                clean_message(message),
+            ).id
+
+    def advance_branch(self, branch: str, commit: str) -> bool:
+        with self._operation("advance_branch"):
+            scope = self._scope(["fetch", branch, commit])
+            if not is_valid_branch_name(branch):
+                return False
+            target = self._commit_of(scope, commit)
+            ref = f"refs/heads/{branch}"
+            previous = scope.repo.refs.get(ref)
+            if target is None or any(co.head.branch == branch for co in scope.repo.checkouts):
+                return False
+            if previous is not None and not scope.repo.objects.reaches(target, previous):
+                return False
+            if scope.repo.conflicts_with_existing_ref(ref):
+                return False
+            scope.repo.refs[ref] = target
+            return True
+
+    def fast_forward_checkout(
+        self,
+        branch: str,
+        commit: str,
+        *,
+        untracked_exclusions: Sequence[str] = (),
+    ) -> bool:
+        with self._operation("fast_forward_checkout"):
+            command = ["merge", "--ff-only", "--no-overwrite-ignore", commit]
+            scope = self._scope(command)
+            self._require_plain_work_tree(scope, ())
+            target = self._commit_of(scope, commit)
+            paths = [".", *(f":(exclude){path}" for path in untracked_exclusions)]
+            dirty = self.uncommitted_paths(paths)
+            if untracked_exclusions:
+                dirty = (*dirty, *self.tracked_changes_since_head(untracked_exclusions))
+            if (
+                scope.co.head.branch != branch
+                or scope.head is None
+                or target is None
+                or dirty
+                or not scope.repo.objects.reaches(target, scope.head)
+            ):
+                return False
+            new = scope.repo.objects.snapshot_of(target)
+            changed = {path for path in new if new[path] != scope.head_snapshot.get(path)}
+            untracked = walk_untracked(self._walk(scope, None, descend_ignored=True))
+            if any(
+                path == found.path.rstrip("/")
+                or path.startswith(found.path.rstrip("/") + "/")
+                or found.path.startswith(path + "/")
+                for found in untracked
+                for path in changed
+            ):
+                return False
+            self._check_out(scope, command, scope.head, target)
+            scope.repo.advance_head(scope.co, target)
+            return True
+
     def switch_branch(self, branch: str, *, create: bool = False) -> None:
         with self._operation("switch_branch"):
             command = ["switch", *(["-c"] if create else []), branch]

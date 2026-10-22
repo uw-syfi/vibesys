@@ -25,6 +25,7 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Awaitable, Callable
     from pathlib import Path
 
+    from vs_core.api import AdoptionPublication, CheckoutUpdate
     from vs_runtime._agent_execution import AgentExecutionScope
     from vs_runtime._trusted_evaluation import (
         TrustedAccuracyResult,
@@ -55,6 +56,10 @@ class WorkspaceResource(Protocol):
     def trusted_input_baseline(self) -> str | None: ...
 
     def snapshot(self, label: str) -> str: ...
+
+    def publish(self, revision: str, message: str) -> AdoptionPublication: ...
+
+    def update_checkout(self, publication: AdoptionPublication) -> CheckoutUpdate: ...
 
     def restore(
         self,
@@ -579,8 +584,19 @@ class RuntimeWorkspaces:
         """Return the live candidate of one member, or ``None`` once released."""
         return self._candidates.get(member_workspace_id(member_id))
 
-    async def adopt(self, revision: str) -> None:
-        await self.root.restore(revision)
+    async def adopt(
+        self, revision: str, *, message: str = "vibesys: adopt revision"
+    ) -> AdoptionPublication:
+        async with self._root_lock:
+            return await run_sync(
+                self._runner, self.resource_for(self.root).publish, revision, message
+            )
+
+    async def update_checkout(self, publication: AdoptionPublication) -> CheckoutUpdate:
+        async with self._root_lock:
+            return await run_sync(
+                self._runner, self.resource_for(self.root).update_checkout, publication
+            )
 
     async def export_patch(self, revision: str) -> str:
         return await self.root.candidate_patch(revision)

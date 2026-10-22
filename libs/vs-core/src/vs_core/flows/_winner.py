@@ -11,9 +11,11 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import TYPE_CHECKING, Final, Literal
 
+from pydantic import Field
+
 from vs_core._registry import ContractError
 from vs_core._run_pause import DEADLINE_STOP, ENVIRONMENT_STOP
-from vs_core.types.common import THIS_RUN, DecisionId, ObservationStatus, RevisionRef, Value
+from vs_core.types.common import THIS_RUN, DecisionId, ObservationStatus, RevisionRef, Value, unset
 from vs_core.types.search import AdoptionFinished
 from vs_core.types.settlement import (
     AdoptionFailed,
@@ -121,6 +123,7 @@ class Adopted(Value):
     """The adoption of the chosen winner succeeded."""
 
     selection: Selection
+    checkout_status: str | None = Field(default=None, exclude_if=unset)
 
 
 class NotAdopted(Value):
@@ -148,7 +151,7 @@ async def adopt(kit: Kit, selection: Selection) -> Adopted | NotAdopted:
     kit.run.adopting(pending, None, None)
     outcome = _adoption_of(selection, await kit.settle(pending))
     if isinstance(outcome, Adopted):
-        kit.run.adopting(pending, ADOPTED, None)
+        kit.run.adopting(pending, ADOPTED, outcome.checkout_status)
     else:
         kit.run.adopting(pending, NOT_ADOPTED, outcome.reason.value)
     return outcome
@@ -158,7 +161,7 @@ def _adoption_of(selection: Selection, event: Event) -> Adopted | NotAdopted:
     match event:
         case AdoptionFinished(result=AdoptionResult(observation=seen)):
             if seen.status is ObservationStatus.SUCCEEDED:
-                return Adopted(selection=selection)
+                return Adopted(selection=selection, checkout_status=seen.diagnostic or None)
             return NotAdopted(selection=selection, reason=AdoptionFailureReason.VERIFY_FAILED)
         case AdoptionFinished(result=AdoptionFailed(reason=reason)):
             return NotAdopted(selection=selection, reason=reason)

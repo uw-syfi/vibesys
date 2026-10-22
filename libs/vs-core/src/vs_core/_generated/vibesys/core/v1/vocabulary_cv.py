@@ -103,3 +103,13 @@ class ReplyErrorCode(StrEnum):
     WRONG_TYPE = "wrong-type"
     INVALID_VALUE = "invalid-value"
     NOT_JSON = "not-json"
+
+
+class CheckoutStatus(StrEnum):
+    "Why the optional checkout update advanced or skipped the checkout."
+
+    FAST_FORWARDED = "fast_forwarded"
+    OTHER_BRANCH = "other_branch"
+    DIRTY_TREE = "dirty_tree"
+    DIVERGED = "diverged"
+    GIT_REFUSED = "git_refused"

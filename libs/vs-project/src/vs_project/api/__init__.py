@@ -79,6 +79,8 @@ from vs_project._private_directory import (
     ensure_private_directory,
     user_runtime_root,
 )
+from vs_project._revision_publication import CheckoutOutcome, PublicationError, PublishedRevision
+from vs_project._run_branches import adoption_branch, run_branch
 from vs_project._run_history import GitRunHistory
 from vs_project._socket import (
     MAX_SOCKET_PATH_BYTES,
@@ -197,6 +199,7 @@ __all__ = [
     "AtomicWriteEffects",
     "AtomicWriteStream",
     "CatalogueInput",
+    "CheckoutOutcome",
     "CliGitRepository",
     "CommitFault",
     "CommitOutcome",
@@ -265,6 +268,8 @@ __all__ = [
     "ProjectRootNotFoundError",
     "ProjectSandboxPaths",
     "ProjectStateError",
+    "PublicationError",
+    "PublishedRevision",
     "Pygit2GitRepository",
     "QuarantinedEnvelope",
     "RecordedRuns",
@@ -304,6 +309,7 @@ __all__ = [
     "Unknown",
     "UnsafeProjectPathError",
     "WorkloadInput",
+    "adoption_branch",
     "atomic_write_bytes",
     "check_comparisons_are_distinct",
     "comparison_directory",
@@ -320,6 +326,7 @@ __all__ = [
     "operator_key_path",
     "pygit2_installed",
     "read_operator_key",
+    "run_branch",
     "select_git_backend",
     "strip_ansi",
     "user_runtime_root",

@@ -7,6 +7,8 @@ from typing import Annotated, Literal
 
 from pydantic import Field, model_validator
 
+from vs_core._generated.vibesys.core.v1.contracts_cv import AdoptionPublication, CheckoutUpdate
+
 from .common import (
     AssessmentKind,
     AttemptRef,
@@ -144,6 +146,8 @@ class Adoption(Value):
     selection: Selection
     observation: Observation | None = None
     verified: bool = False
+    publication: AdoptionPublication | None = Field(default=None, exclude_if=unset)
+    checkout: CheckoutUpdate | None = Field(default=None, exclude_if=unset)
     failure: AdoptionFailureReason | None = None
     """Set once, when the adoption fails for good; the fence is released then."""
 
@@ -216,6 +220,8 @@ class AdoptionObserved(Value):
     kind: Literal["adoption_observed"] = "adoption_observed"
     observation: Observation
     revision: RevisionRef | None
+    publication: AdoptionPublication | None = Field(default=None, exclude_if=unset)
+    checkout: CheckoutUpdate | None = Field(default=None, exclude_if=unset)
 
 
 class AdoptionFailed(Value):
@@ -245,6 +251,8 @@ class AdoptionResult(Value):
     kind: Literal["adoption_result"] = "adoption_result"
     selection: Selection
     observation: Observation
+    publication: AdoptionPublication | None = Field(default=None, exclude_if=unset)
+    checkout: CheckoutUpdate | None = Field(default=None, exclude_if=unset)
 
 
 class AdoptRevision(RequestBase):

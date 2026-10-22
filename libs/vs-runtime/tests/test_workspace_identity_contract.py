@@ -18,7 +18,7 @@ from tests.support.evidence_proofs import RetainWithProof, accepted_accuracy_pro
 from tests.support.real_git import REAL_GIT
 
 from vs_agent.api import NULL_SKILL_SELECTION
-from vs_core.api import HostFence, HostId, Until
+from vs_core.api import CheckoutStatus, HostFence, HostId, Until
 from vs_project.api import (
     GitError,
     NullGitTrackerEvents,
@@ -539,6 +539,7 @@ def test_parent_verification_over_real_git_accepts_only_retained_commits() -> No
 
             retained = await workspaces.root.snapshot("retained")
             candidate = await workspaces.create_candidate(retained, member_id="parent")
+            candidate.path.mkdir(parents=True, exist_ok=True)
             (candidate.path / "candidate.py").write_text("VALUE = 5\n", encoding="utf-8")
             held = await candidate.snapshot("held")
             await candidate.discard()
@@ -580,5 +581,32 @@ def test_retention_over_real_git_keeps_a_proven_commit_and_refuses_the_rest() ->
                 accuracy_proof=accepted_accuracy_proof(revision_ref("0" * 40)),
             )
             assert (await owner.execute(missing, context))["retained"] is False
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("implementation", _IMPLEMENTATIONS)
+def test_adoption_publishes_without_checkout_authority(implementation: Implementation) -> None:
+    async def exercise() -> None:
+        async with _workspaces(implementation) as workspaces:
+            baseline = workspaces.root.revision
+            assert baseline is not None
+            candidate = await workspaces.create_candidate(baseline)
+            candidate.path.mkdir(parents=True, exist_ok=True)
+            (candidate.path / "candidate.py").write_text("VALUE = 5\n", encoding="utf-8")
+            winner = await candidate.snapshot_and_retain("winner", retention_label="candidate")
+            await candidate.discard()
+            result = await workspaces.adopt(winner)
+            assert result.revision == winner
+            assert result.commit
+            assert result.branch
+            assert workspaces.root.revision == baseline
+            assert await workspaces.root.matches_revision(baseline)
+            assert await workspaces.adopt(winner) == result
+            checkout = await workspaces.update_checkout(result)
+            assert checkout.status is CheckoutStatus.FAST_FORWARDED
+            assert workspaces.root.revision == result.commit
+            assert await workspaces.root.matches_revision(winner)
+            assert await workspaces.adopt(winner) == result
 
     asyncio.run(exercise())

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, Never, TypeAlias, TypeVar
@@ -12,7 +13,8 @@ from pydantic import BaseModel
 from vs_agent.api import (
     NULL_SKILL_SELECTION,
 )
-from vs_project.api import Git
+from vs_core.api import AdoptionPublication, CheckoutStatus, CheckoutUpdate
+from vs_project.api import Git, adoption_branch
 from vs_runtime._local_validation import LocalValidationRecipeError, check_recipe_artifact_path
 from vs_runtime._trusted_evaluation import (
     TrustedAccuracyResult,
@@ -427,6 +429,8 @@ class FakeWorkspaces:
         self._closed = False
         self._holds: Callable[[], WorkspaceHolds] | None = None
         self._measured: list[CandidateWorkspace] = []
+        self._publications: dict[str, AdoptionPublication] = {}
+        self._publication_parents: dict[str, tuple[str, ...]] = {}
 
     def script_candidate_retain(
         self, *results: BaseException | None, after_retention: bool = False
@@ -510,12 +514,51 @@ class FakeWorkspaces:
         """The candidates opened to evaluate (``create_measured_candidate``), in order."""
         return tuple(self._measured)
 
-    async def adopt(self, revision: str) -> None:
-        """Adopt a retained revision even after its candidate was discarded."""
-        if not self._root.knows_revision(revision):
-            message = f"candidate revision is not retained by this run: {revision!r}"
+    async def adopt(
+        self, revision: str, *, message: str = "vibesys: adopt revision"
+    ) -> AdoptionPublication:
+        """Publish a retained revision, without changing the root tree or index."""
+        if not self._root.retains(revision):
+            detail = f"candidate revision is not retained by this run: {revision!r}"
+            raise RuntimeContractError(detail)
+        existing = self._publications.get(revision)
+        if existing is not None:
+            return existing
+        commit = hashlib.sha1(
+            f"{revision}:{message}:{len(self._publications)}".encode(),
+            usedforsecurity=False,
+        ).hexdigest()
+        result = AdoptionPublication(
+            revision=revision, commit=commit, branch=adoption_branch("fake-run")
+        )
+        parents = [self._root.revision]
+        if self._publications:
+            parents.append(tuple(self._publications.values())[-1].commit)
+        self._publication_parents[commit] = tuple(
+            parent for parent in parents if parent is not None
+        )
+        self._publications[revision] = result
+        self._root.add_retained_revision(commit)
+        return result
+
+    async def update_checkout(self, publication: AdoptionPublication) -> CheckoutUpdate:
+        """The Fake models its own run branch; pending edits refuse checkout changes."""
+        if self._publications.get(publication.revision) != publication:
+            message = "publication does not belong to this run"
             raise RuntimeContractError(message)
-        await self._root.restore(revision)
+        if await self._root.pending_changes():
+            return CheckoutUpdate(status=CheckoutStatus.DIRTY_TREE)
+        pending = [publication.commit]
+        ancestors: set[str] = set()
+        while pending:
+            current = pending.pop()
+            if current not in ancestors:
+                ancestors.add(current)
+                pending.extend(self._publication_parents.get(current, ()))
+        if self._root.revision not in ancestors:
+            return CheckoutUpdate(status=CheckoutStatus.DIVERGED)
+        self._root.apply_checkout(publication)
+        return CheckoutUpdate(status=CheckoutStatus.FAST_FORWARDED)
 
     async def export_patch(self, revision: str) -> str:
         """Export one retained revision against the fake trusted baseline."""
@@ -682,6 +725,7 @@ class FakeWorkspace:
         self._id = workspace_id
         self._revision = revision
         self._tree_revision = revision
+        self._tree_aliases: dict[str, str] = {}
         self._trusted_input_baseline = (
             revision if trusted_input_baseline is None else trusted_input_baseline
         )
@@ -736,6 +780,12 @@ class FakeWorkspace:
         self._tree_revision = revision
         self.add_retained_revision(revision)
         return revision
+
+    def apply_checkout(self, publication: AdoptionPublication) -> None:
+        """Advance the Fake's clean run checkout after a publication."""
+        self._revision = publication.commit
+        self._tree_revision = publication.revision
+        self._tree_aliases[publication.commit] = publication.revision
 
     async def restore(self, revision: str, *, clean: bool = True) -> None:
         """Materialize a known tree while leaving recorded history unchanged."""
@@ -814,7 +864,7 @@ class FakeWorkspace:
 
     async def matches_revision(self, revision: str) -> bool:
         """Return whether the fake tree is exactly the revision's tree."""
-        return self._tree_revision == revision
+        return self._tree_revision == self._tree_aliases.get(revision, revision)
 
     async def find_snapshot(self, label: str) -> str | None:
         """Return the revision the snapshot with this label recorded."""

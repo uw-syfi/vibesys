@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
+from vs_core.api import AdoptionPublication, CheckoutStatus, CheckoutUpdate
+from vs_project.api import GitError, PublicationError, PublishedRevision
 from vs_project.api.workspace_tree import EntryKind
 from vs_runtime._agent_execution import (
     AgentExecutionConfiguration,
@@ -19,7 +21,7 @@ from vs_runtime._trusted_evaluation import (
 from vs_runtime._workspace_files import entry_kind, file_fingerprint
 from vs_runtime._workspace_receipts import BaselineEntry, BaselineEntryKind, RootBaselineDrift
 from vs_runtime._workspace_runtime import CommandExecutionResult, WorkspaceEvaluationSpec
-from vs_runtime.contracts import CaptureStopUnconfirmedError
+from vs_runtime.contracts import CaptureStopUnconfirmedError, RuntimeContractError
 from vs_sandbox.api import (
     CaptureExecutionIdentity,
     CommandStopUnconfirmedError,
@@ -329,6 +331,31 @@ class RuntimeWorkspaceResource:
     @property
     def trusted_input_baseline(self) -> str | None:
         return self._project.git.trusted_input_baseline
+
+    def publish(self, revision: str, message: str) -> AdoptionPublication:
+        try:
+            published = self._root_project.git.publish_revision(
+                revision,
+                message,
+                preserve_paths=self._memory_paths,
+            )
+        except (GitError, PublicationError, ValueError) as error:
+            raise RuntimeContractError(str(error)) from error
+        return AdoptionPublication(
+            revision=published.revision,
+            commit=published.commit,
+            branch=published.branch,
+        )
+
+    def update_checkout(self, publication: AdoptionPublication) -> CheckoutUpdate:
+        outcome = self._root_project.git.update_checkout(
+            PublishedRevision(
+                revision=publication.revision,
+                commit=publication.commit,
+                branch=publication.branch,
+            )
+        )
+        return CheckoutUpdate(status=CheckoutStatus(outcome.value))
 
     def snapshot(self, label: str) -> str:
         self._project.git.snapshot(label)
