@@ -66,6 +66,9 @@ func (op Operation) Decode(payload []byte) (proto.Message, error) {
 
 // ValidateResponse checks pairing, schema and correlation before delivery.
 func (op Operation) ValidateResponse(request, response proto.Message) error {
+	if request == nil || response == nil || !request.ProtoReflect().IsValid() || !response.ProtoReflect().IsValid() {
+		return fmt.Errorf("%s: missing operation message", op.Name)
+	}
 	if request.ProtoReflect().Descriptor().FullName() != op.NewRequest().ProtoReflect().Descriptor().FullName() || response.ProtoReflect().Descriptor().FullName() != op.NewResponse().ProtoReflect().Descriptor().FullName() {
 		return fmt.Errorf("%s: wrong response method", op.Name)
 	}

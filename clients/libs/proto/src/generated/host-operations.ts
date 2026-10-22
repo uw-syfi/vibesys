@@ -3,15 +3,15 @@ import {type MessageInitShape} from '@bufbuild/protobuf';
 import * as pb from './vibesys/host/v1/operations_pb.js';
 import {FailureCategory, type OperationFailure} from './vibesys/host/v1/failure_pb.js';
 import {accept, call, type Accepted, type OperationTransport, type OperationSignal} from '../operations.js';
-export const operationPolicies = {
-  ListTasks: {name: 'ListTasks', id: 10, requestTag: 10, responseTag: 10, capMs: 10000, graceMs: 5000, totalMs: 15000, effect: 1, retry: 2, executor: 1, cardinality: 1, firstEventMs: undefined},
-  ListHarnesses: {name: 'ListHarnesses', id: 11, requestTag: 11, responseTag: 11, capMs: 10000, graceMs: 5000, totalMs: 15000, effect: 1, retry: 2, executor: 1, cardinality: 1, firstEventMs: undefined},
-  ListExamples: {name: 'ListExamples', id: 12, requestTag: 12, responseTag: 12, capMs: 10000, graceMs: 5000, totalMs: 15000, effect: 1, retry: 2, executor: 1, cardinality: 1, firstEventMs: undefined},
-  GetTaskGoal: {name: 'GetTaskGoal', id: 13, requestTag: 13, responseTag: 13, capMs: 10000, graceMs: 5000, totalMs: 15000, effect: 1, retry: 2, executor: 1, cardinality: 1, firstEventMs: undefined},
-  DescribeMachine: {name: 'DescribeMachine', id: 14, requestTag: 14, responseTag: 14, capMs: 25000, graceMs: 5000, totalMs: 30000, effect: 1, retry: 2, executor: 1, cardinality: 1, firstEventMs: undefined},
-  ListCompute: {name: 'ListCompute', id: 15, requestTag: 15, responseTag: 15, capMs: 10000, graceMs: 5000, totalMs: 15000, effect: 1, retry: 2, executor: 1, cardinality: 1, firstEventMs: undefined},
-  PreflightRun: {name: 'PreflightRun', id: 16, requestTag: 16, responseTag: 16, capMs: 65000, graceMs: 5000, totalMs: 70000, effect: 1, retry: 2, executor: 1, cardinality: 1, firstEventMs: undefined},
-} as const;
+export const operationPolicies = Object.freeze({
+  ListTasks: Object.freeze({name: 'ListTasks', id: 10, requestTag: 10, responseTag: 10, capMs: 10000, graceMs: 5000, totalMs: 15000, effect: 1, retry: 2, executor: 1, cardinality: 1, firstEventMs: undefined} as const),
+  ListHarnesses: Object.freeze({name: 'ListHarnesses', id: 11, requestTag: 11, responseTag: 11, capMs: 10000, graceMs: 5000, totalMs: 15000, effect: 1, retry: 2, executor: 1, cardinality: 1, firstEventMs: undefined} as const),
+  ListExamples: Object.freeze({name: 'ListExamples', id: 12, requestTag: 12, responseTag: 12, capMs: 10000, graceMs: 5000, totalMs: 15000, effect: 1, retry: 2, executor: 1, cardinality: 1, firstEventMs: undefined} as const),
+  GetTaskGoal: Object.freeze({name: 'GetTaskGoal', id: 13, requestTag: 13, responseTag: 13, capMs: 10000, graceMs: 5000, totalMs: 15000, effect: 1, retry: 2, executor: 1, cardinality: 1, firstEventMs: undefined} as const),
+  DescribeMachine: Object.freeze({name: 'DescribeMachine', id: 14, requestTag: 14, responseTag: 14, capMs: 25000, graceMs: 5000, totalMs: 30000, effect: 1, retry: 2, executor: 1, cardinality: 1, firstEventMs: undefined} as const),
+  ListCompute: Object.freeze({name: 'ListCompute', id: 15, requestTag: 15, responseTag: 15, capMs: 10000, graceMs: 5000, totalMs: 15000, effect: 1, retry: 2, executor: 1, cardinality: 1, firstEventMs: undefined} as const),
+  PreflightRun: Object.freeze({name: 'PreflightRun', id: 16, requestTag: 16, responseTag: 16, capMs: 65000, graceMs: 5000, totalMs: 70000, effect: 1, retry: 2, executor: 1, cardinality: 1, firstEventMs: undefined} as const),
+});
 export function acceptListTasks(input: MessageInitShape<typeof pb.ListTasksRequestSchema>): Accepted<"ListTasks"> {
   return accept(operationPolicies.ListTasks, pb.ListTasksRequestSchema, input);
 }

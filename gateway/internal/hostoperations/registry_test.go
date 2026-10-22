@@ -102,3 +102,18 @@ func TestCancelledOwnersDoNotInvokeWork(t *testing.T) {
 		t.Fatalf("cancelled call: calls=%d error=%v", calls, err)
 	}
 }
+
+func TestMissingExecutorResponsesAreRefused(t *testing.T) {
+	op, err := hostoperations.Lookup(10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := &hostv1.ListTasksRequest{RequestId: "request-a", Project: "/project"}
+	if err := op.ValidateResponse(request, nil); err == nil {
+		t.Fatal("nil response accepted")
+	}
+	var response *hostv1.ListTasksResponse
+	if err := op.ValidateResponse(request, response); err == nil {
+		t.Fatal("typed nil response accepted")
+	}
+}

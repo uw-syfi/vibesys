@@ -170,7 +170,7 @@ func TestHello(t *testing.T) {
 	if err != nil || hello.GetApiSchemaHash() != schemahash.APISchemaHash || hello.GetGatewayVersion() != "test-version" {
 		t.Fatalf("Hello = %v, %v", hello, err)
 	}
-	for _, hash := range []string{"", "other-hash", schemahash.APISchemaHash[:lifecycle.HashPrefixLength] + strings.Repeat("0", 64-lifecycle.HashPrefixLength)} {
+	for _, hash := range []string{strings.Repeat("0", 64), strings.Repeat("f", 64), schemahash.APISchemaHash[:lifecycle.HashPrefixLength] + strings.Repeat("0", 64-lifecycle.HashPrefixLength)} {
 		_, err := c.Hello(f.ctx, &apiv1.HelloRequest{ApiSchemaHash: hash})
 		if status.Code(err) != codes.FailedPrecondition || !strings.Contains(err.Error(), schemahash.APISchemaHash) || !strings.Contains(err.Error(), `"`+hash+`"`) {
 			t.Fatalf("mismatch = %v", err)

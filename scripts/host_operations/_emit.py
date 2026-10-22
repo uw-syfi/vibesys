@@ -224,14 +224,14 @@ def typescript_registry(operations: tuple[Operation, ...], failures: tuple[str, 
         "import * as pb from './vibesys/host/v1/operations_pb.js';",
         "import {FailureCategory, type OperationFailure} from './vibesys/host/v1/failure_pb.js';",
         "import {accept, call, type Accepted, type OperationTransport, type OperationSignal} from '../operations.js';",
-        "export const operationPolicies = {",
+        "export const operationPolicies = Object.freeze({",
     ]
     for op in operations:
         p = op.policy
         lines += [
-            f"  {op.name}: {{name: '{op.name}', id: {p.operation_id}, requestTag: {p.request_tag}, responseTag: {p.response_tag}, capMs: {p.cap_ms}, graceMs: {p.grace_ms}, totalMs: {p.cap_ms + p.grace_ms}, effect: {p.effect}, retry: {p.retry}, executor: {p.executor}, cardinality: {p.cardinality}, firstEventMs: {p.first_event_ms if p.HasField('first_event_ms') else 'undefined'}}},"
+            f"  {op.name}: Object.freeze({{name: '{op.name}', id: {p.operation_id}, requestTag: {p.request_tag}, responseTag: {p.response_tag}, capMs: {p.cap_ms}, graceMs: {p.grace_ms}, totalMs: {p.cap_ms + p.grace_ms}, effect: {p.effect}, retry: {p.retry}, executor: {p.executor}, cardinality: {p.cardinality}, firstEventMs: {p.first_event_ms if p.HasField('first_event_ms') else 'undefined'}}} as const),"
         ]
-    lines += ["} as const;"]
+    lines += ["});"]
     for op in operations:
         # JS property names come from descriptor snake_case paths.
         def camel(name: str) -> str:

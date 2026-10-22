@@ -61,3 +61,9 @@ test('aborted owners cannot start or receive a late call', async () => {
   await assert.rejects(call);
   await assert.rejects(host.callListTasks(transport,accepted,controller.signal));
 });
+
+test('registry budgets and route identities cannot be changed by consumers', () => {
+  assert.equal(Reflect.set(host.operationPolicies.ListTasks,'id',999),false);
+  assert.equal(Reflect.set(host.operationPolicies.ListTasks,'totalMs',0),false);
+  assert.equal(host.operationPolicies.ListTasks.id,10);
+});
