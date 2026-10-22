@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math/rand"
@@ -17,6 +18,8 @@ import (
 	apiv1 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/api/v1"
 	hostv1 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/host/v1"
 	"github.com/uw-syfi/vibesys/gateway/internal/hostcommand"
+	"github.com/uw-syfi/vibesys/gateway/internal/hostoperations"
+	"google.golang.org/protobuf/proto"
 )
 
 // A failed host command, drawn from what hosts write in the field: any exit
@@ -274,5 +277,65 @@ func TestTheGeneratorReachesBothSidesOfTheEvidenceBoundary(t *testing.T) {
 	}
 	if lacking < 10 || nearMisses < 10 {
 		t.Fatalf("lacking %d, near misses %d of %d", lacking, nearMisses, propertyRun)
+	}
+}
+
+// hostCommands lists the CLI of every method of one request kind.
+func hostCommands[M proto.Message](empty M, dispatch func(M) (hostoperations.HostCall, bool)) []string {
+	fields := empty.ProtoReflect().Descriptor().Oneofs().ByName("method").Fields()
+	var commands []string
+	for i := range fields.Len() {
+		request := empty.ProtoReflect().New()
+		request.Set(fields.Get(i), request.NewField(fields.Get(i)))
+		if call, ok := dispatch(request.Interface().(M)); ok {
+			commands = append(commands, call.CLI)
+		}
+	}
+	return commands
+}
+
+// The commands whose absence the gateway reports as "needs an update" are
+// shared with the client Fake of an older host, which asserts the same file.
+func TestTheCommandsAnOlderHostLacksAreExactlyTheCorpusOnes(t *testing.T) {
+	payload, err := os.ReadFile("../../../proto/testdata/older_host/unsupported_commands.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var corpus struct{ Commands []string }
+	if err := json.Unmarshal(payload, &corpus); err != nil {
+		t.Fatal(err)
+	}
+	var all []string
+	all = append(all, hostCommands(&apiv1.ReadRequest{}, hostoperations.DispatchHostRead)...)
+	all = append(all, hostCommands(&apiv1.MutateRequest{}, hostoperations.DispatchHostMutate)...)
+	all = append(all, hostCommands(&apiv1.WatchRequest{}, hostoperations.DispatchHostWatch)...)
+	all = append(all, hostCommands(&apiv1.HostCallRequest{}, hostoperations.DispatchHostCall)...)
+	if len(all) < 20 {
+		t.Fatalf("only %d commands found", len(all))
+	}
+	for _, cli := range all {
+		older := hostCommandAbsentFrom(cli)
+		result, err := older.result()
+		category, _ := commandFailure(cli, result, err)
+		want := hostv1.FailureCategory_FAILURE_CATEGORY_INTERNAL
+		if slices.Contains(corpus.Commands, cli) {
+			want = hostv1.FailureCategory_FAILURE_CATEGORY_UNSUPPORTED
+		}
+		if category != want {
+			t.Errorf("%s on a checkout that lacks it: %v, want %v", cli, category, want)
+		}
+	}
+	for _, cli := range corpus.Commands {
+		if !slices.Contains(all, cli) {
+			t.Errorf("the corpus names %q, which no method runs", cli)
+		}
+	}
+}
+
+// hostCommandAbsentFrom is what an older checkout does for cli: argparse rejects it.
+func hostCommandAbsentFrom(cli string) failedCommand {
+	return failedCommand{
+		cli: cli, exitCode: usageExitStatus, rejected: []string{cli},
+		stderr: "vibesys: error: unrecognized arguments: host " + cli,
 	}
 }
