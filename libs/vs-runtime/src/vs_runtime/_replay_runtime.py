@@ -62,6 +62,7 @@ if TYPE_CHECKING:
 
     from vs_core.api.replay import ReplayFlow, ReplayFrontier, ReplayRootReuse
     from vs_runtime._replay_store import ReplayStore
+    from vs_runtime._writer_reconciliation import WriterRegistry
 
 
 @dataclass(frozen=True)
@@ -387,11 +388,15 @@ class ReplayRuntime:
             occurrence = (operation.key.to_binary(), operation.identity, operation.encoding_version)
             if occurrence in self._prepared_occurrences:
                 continue
-            outcome = self.accounting.decide(operation, self.allowance)
+            retained = self._archive.pending_logical(operation)
+            execution = (
+                operation if retained is None or retained.replay is None else retained.replay
+            )
+            outcome = self.accounting.decide(execution, self.allowance)
             if isinstance(outcome, (ReplayIterationBlocked, ReplayResourcesBlocked)):
                 self._admission_limited = True
                 continue
-            span = self._start_operation(operation, now=now, at=at)
+            span = self._start_operation(execution, now=now, at=at)
             self._prepared_occurrences.add(occurrence)
             if outcome is None:
                 started.append(span)
@@ -834,30 +839,43 @@ class ReplayRuntime:
         self,
         span_id: str,
         executor: ReplayRetirement,
-        reuse: ReplayRootReuse,
+        writers: WriterRegistry,
         *,
         now: float,
         at: Timestamp,
     ) -> None:
-        """Settle access after proof; an interrupted settlement retains the same child."""
-        span = self._span(span_id)
-        self._reuse_for(span, reuse)
+        """Settle access under backing exclusion after its committed environment proof."""
         if self._fence is None or not self._store.verify(self._fence, now):
             problem = "retirement requires current host exclusion"
             raise ReplayCommitError(problem)
-        if span.replay_physical is None or not span.replay_physical.has_field("withdrawn_sequence"):
-            problem = "commit withdrawal before stopping a writer"
-            raise ReplayError(problem)
-        if not span.replay_physical.has_field("settlement_sequence"):
-            span.replay_physical.settlement_sequence = self._archive.sequence + 1
-            span.replay_physical.termination_proof_digest = proof_digest(reuse.proof())
-            self._append(
-                Oneof("span", SpanRecord(change=Change.UPDATED, span=span)), now=now, at=at
-            )
-        await executor.retire(span, self._fence, reuse)
-        self.confirm_stopped(span_id, reuse, now=now, at=at)
+        with writers.reuse(run_id=self._archive.current_epoch.run_id, fence=self._fence) as active:
+            reuse = ReplayWriterRecovery.from_records(
+                ReplayRecords.from_binary(self._archive.encode()).records
+            ).require(writers.backing)
+            if active != reuse.proof():
+                problem = "retirement proof differs from the active backing registry"
+                raise ReplayError(problem)
+            span = self._span(span_id)
+            self._reuse_for(span, reuse)
+            if span.replay_physical is None or not span.replay_physical.has_field(
+                "withdrawn_sequence"
+            ):
+                problem = "commit withdrawal before stopping a writer"
+                raise ReplayError(problem)
+            if not span.replay_physical.has_field("settlement_sequence"):
+                span.replay_physical.settlement_sequence = self._archive.sequence + 1
+                span.replay_physical.termination_proof_digest = proof_digest(reuse.proof())
+                self._append(
+                    Oneof("span", SpanRecord(change=Change.UPDATED, span=span)), now=now, at=at
+                )
+            try:
+                await executor.retire(span, self._fence, reuse)
+                self._confirm_stopped(span_id, reuse, now=now, at=at)
+            except BaseException:
+                self._halted = True
+                raise
 
-    def confirm_stopped(
+    def _confirm_stopped(
         self, span_id: str, reuse: ReplayRootReuse, *, now: float, at: Timestamp
     ) -> None:
         span = self._span(span_id)

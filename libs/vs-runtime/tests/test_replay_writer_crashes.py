@@ -34,6 +34,7 @@ if TYPE_CHECKING:
     from vs_core.api.replay import ReplayRootReuse
     from vs_project.api import CommitOutcome, StoredEnvelope, StoreFence
     from vs_proto.api import Span
+    from vs_runtime.api.replay import ReplayWriterBarrier
     from vs_sim.api.testing import Sim
 
 
@@ -129,10 +130,13 @@ async def test_recovery_crash_rows_preserve_identity_proof_usage_and_winner(
     tmp_path: Path, sim: Sim, row: str
 ) -> None:
     store = CrossingStore()
+    baseline: ReplayWriterBarrier | None = None
 
     def perform(span: Span) -> ReplayResult:
+        nonlocal baseline
         assert span.replay_physical is not None
         if span.replay_physical.ordinal == 0:
+            baseline = proof_barrier(Project.open(tmp_path), span)
             problem = "provider lost acceptance"
             raise ConnectionError(problem)
         return ReplayResult(core_common.Identity(root="answer"), paid=True, cost_usd=0.5)
@@ -142,7 +146,7 @@ async def test_recovery_crash_rows_preserve_identity_proof_usage_and_winner(
     with pytest.raises(ConnectionError):
         await drive_replay(first, launch("first"))
     (old,) = first.runtime.archive.unresolved
-    baseline = proof_barrier(Project.open(tmp_path), old)
+    assert baseline is not None
     gate = FaultGate(
         FaultPlan(
             seed=0,

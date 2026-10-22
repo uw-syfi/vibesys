@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+from copy import deepcopy
 from dataclasses import dataclass
 from functools import partial
 from typing import TYPE_CHECKING, cast
@@ -78,7 +79,7 @@ class AtomicNamespace:
         return getattr(self.namespace, name)
 
 
-@pytest.mark.parametrize("step", ["grant", "close", "proof"])
+@pytest.mark.parametrize("step", ["grant", "close", "proof", "advance"])
 @pytest.mark.parametrize("boundary", ["write", "flush", "fsync", "replace", "directory"])
 def test_writer_registry_atomic_crashes_reload_complete_old_or_new_evidence(
     tmp_path: Path, step: str, boundary: str
@@ -96,24 +97,39 @@ def test_writer_registry_atomic_crashes_reload_complete_old_or_new_evidence(
     )
     if step != "grant":
         ledger.grant(writer)
-    manifest = ledger.close() if step == "proof" else None
+    manifest = ledger.close() if step in {"proof", "advance"} else None
+    result = (
+        None
+        if manifest is None
+        else replay.WriterReconciliation(
+            manifest=manifest,
+            status=replay.WriterReconciliationStatus.PROVEN_STOPPED,
+            proof=replay.WriterTerminationProof(
+                manifest=manifest, absent_domains=[writer.domain_id]
+            ),
+        )
+    )
+    backing = deepcopy(BACKING)
+    if step == "advance":
+        assert result is not None
+        ledger.record(result)
+        backing.generation += 1
+        ledger = WriterRegistry(
+            cast("StateNamespace", AtomicNamespace(namespace, CrossingAtomic(gate))),
+            backing,
+            SimThreads(),
+        )
 
     def perform(registry: WriterRegistry) -> None:
         if step == "grant":
             registry.grant(writer)
         elif step == "close":
             registry.close()
+        elif step == "advance":
+            registry.create()
         else:
-            assert manifest is not None
-            registry.record(
-                replay.WriterReconciliation(
-                    manifest=manifest,
-                    status=replay.WriterReconciliationStatus.PROVEN_STOPPED,
-                    proof=replay.WriterTerminationProof(
-                        manifest=manifest, absent_domains=[writer.domain_id]
-                    ),
-                )
-            )
+            assert result is not None
+            registry.record(result)
 
     gate.plan = FaultPlan(
         seed=0,
@@ -128,7 +144,7 @@ def test_writer_registry_atomic_crashes_reload_complete_old_or_new_evidence(
     )
     with pytest.raises(HostCrashError, match=boundary):
         perform(ledger)
-    reopened = WriterRegistry(namespace, BACKING, SimThreads())
+    reopened = WriterRegistry(namespace, backing, SimThreads())
     perform(reopened)
     perform(reopened)
     assert reopened.close().writers == [writer]

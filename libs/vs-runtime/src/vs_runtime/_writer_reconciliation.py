@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+from contextlib import ExitStack, contextmanager
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol
@@ -17,15 +18,17 @@ from typing import TYPE_CHECKING, Protocol
 from protobuf import Message
 
 from vs_agent.api import OrphanReapError, reap_recorded_agents
+from vs_core.api.replay import ReplayWriterRecovery
+from vs_proto.api import ReplayStore as ReplayRecords
 from vs_proto.api import replay as pb
 from vs_proto.api import validate
 from vs_runtime._receipt_store import ReceiptStore
 from vs_sim.api import DISCARD, ProcessTimeoutError
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterator
 
-    from vs_project.api import StateNamespace
+    from vs_project.api import StateNamespace, StoreFence
     from vs_proto.api import Timestamp
     from vs_runtime._replay_runtime import ReplayRuntime
     from vs_sandbox.api import DockerCli
@@ -69,20 +72,49 @@ class WriterRegistry:
         self._namespace = namespace
         self._backing = _checked(deepcopy(backing))
         self._lock = ReceiptStore(namespace, threads)
-        self._path = "writers/" + hashlib.sha256(backing.to_binary()).hexdigest() + ".pb"
+        self._reuse_owner: tuple[str, str, int] | None = None
+        # One authoritative head per backing identity, across generations and authorities.
+        self._path = "writers/" + hashlib.sha256(backing.identity.encode()).hexdigest() + ".pb"
+
+    @contextmanager
+    def _exclusive(self) -> Iterator[None]:
+        with ExitStack() as held:
+            try:
+                held.enter_context(self._lock.exclusive(blocking=False))
+            except BlockingIOError as error:
+                problem = "Recovery blocked: previous writers may still modify this workspace; backing is held by another writer"
+                raise WriterProofError(problem) from error
+            yield
+
+    @contextmanager
+    def reuse(self, *, run_id: str, fence: StoreFence) -> Iterator[pb.WriterTerminationProof]:
+        """Keep backing exclusion from proof validation through the awaited reuse effect."""
+        owner = run_id, fence.host_id, fence.epoch
+        with self._exclusive():
+            if self._reuse_owner is not None and self._reuse_owner != owner:
+                problem = "Recovery blocked: previous writers may still modify this workspace; backing is held by another writer"
+                raise WriterProofError(problem)
+            previous, self._reuse_owner = self._reuse_owner, owner
+            try:
+                yield self.require_proof()
+            finally:
+                self._reuse_owner = previous
 
     @property
     def backing(self) -> pb.WriterBacking:
         return deepcopy(self._backing)
 
-    def _load(self) -> pb.WriterRegistryState:
+    def _read(self) -> pb.WriterRegistryState | None:
         payload = self._namespace.read_bytes(self._path)
-        if payload is None:
-            problem = "writer manifest is absent; inherited grants cannot be enumerated"
+        return None if payload is None else _checked(pb.WriterRegistryState.from_binary(payload))
+
+    def _load(self) -> pb.WriterRegistryState:
+        state = self._read()
+        if state is None:
+            problem = "Recovery blocked: previous writers may still modify this workspace; writer manifest is absent and inherited grants cannot be enumerated"
             raise WriterProofError(problem)
-        state = _checked(pb.WriterRegistryState.from_binary(payload))
         if state.manifest is None or state.manifest.backing != self._backing:
-            problem = "writer manifest belongs to another backing generation"
+            problem = "Recovery blocked: previous writers may still modify this workspace; writer registry has another active backing generation"
             raise WriterProofError(problem)
         return state
 
@@ -90,19 +122,38 @@ class WriterRegistry:
         self._namespace.write_bytes(self._path, _checked(state).to_binary())
 
     def create(self) -> None:
-        """Initialize before the first grant to a newly owned native backing."""
-        with self._lock.exclusive():
-            if self._namespace.read_bytes(self._path) is None:
-                self._save(
-                    pb.WriterRegistryState(manifest=pb.WriterManifest(backing=self._backing))
-                )
+        """Initialize native backing or advance its proven, immutable domain generation."""
+        with self._exclusive():
+            previous = self._read()
+            if previous is None:
+                manifest = pb.WriterManifest(backing=self._backing)
+            elif previous.manifest is not None and previous.manifest.backing == self._backing:
+                return
             else:
-                self._load()
+                manifest = self._successor(previous)
+            self._save(pb.WriterRegistryState(manifest=manifest))
+
+    def _successor(self, previous: pb.WriterRegistryState) -> pb.WriterManifest:
+        manifest = previous.manifest
+        old = None if manifest is None else manifest.backing
+        if (
+            manifest is None
+            or old is None
+            or previous.proof is None
+            or self._backing.generation != old.generation + 1
+            or self._backing.environment != old.environment
+            or self._backing.authority != old.authority
+        ):
+            problem = "Recovery blocked: previous writers may still modify this workspace; the next backing generation requires its predecessor's proof and the same authority"
+            raise WriterProofError(problem)
+        # Keep every past grant. A new generation cannot hide other runs' writers,
+        # and its environment proof must verify their immutable domains again.
+        return pb.WriterManifest(backing=self._backing, writers=deepcopy(manifest.writers))
 
     def grant(self, writer: pb.WriterIdentity) -> None:
         """Durably register before dispatch, idempotently by immutable physical ID."""
         _checked(writer)
-        with self._lock.exclusive():
+        with self._exclusive():
             state = self._load()
             manifest = state.manifest
             if manifest is None:
@@ -122,7 +173,7 @@ class WriterRegistry:
 
     def close(self) -> pb.WriterManifest:
         """Commit reconciliation intent before inspection or stopping any writer."""
-        with self._lock.exclusive():
+        with self._exclusive():
             state = self._load()
             if state.manifest is None:
                 problem = "writer registry omitted its manifest"
@@ -134,7 +185,7 @@ class WriterRegistry:
     def record(self, result: pb.WriterReconciliation) -> None:
         """Retain only an environment's proof for this exact closed manifest."""
         _checked(result)
-        with self._lock.exclusive():
+        with self._exclusive():
             state = self._load()
             if state.manifest != result.manifest:
                 problem = "termination evidence does not cover the complete current writer manifest"
@@ -145,7 +196,7 @@ class WriterRegistry:
 
     def require_proof(self) -> pb.WriterTerminationProof:
         """Guard release, replacement, discard and import; receipts cannot supply proof."""
-        with self._lock.exclusive():
+        with self._exclusive():
             state = self._load()
             if state.proof is None or state.proof.manifest != state.manifest:
                 problem = "Recovery blocked: previous writers may still modify this workspace"
@@ -169,7 +220,12 @@ class ReplayWriterBarrier:
         try:
             manifest = self.registry.close()
         except WriterProofError as error:
-            manifest = pb.WriterManifest(backing=self.registry.backing)
+            recovery = ReplayWriterRecovery.from_records(
+                ReplayRecords.from_binary(runtime.archive.encode()).records
+            )
+            manifest = recovery.intent(self.registry.backing) or pb.WriterManifest(
+                backing=self.registry.backing
+            )
             runtime.writer_intent(manifest, now=now, at=at)
             result = pb.WriterReconciliation(
                 manifest=manifest,

@@ -11,7 +11,7 @@ from hypothesis import strategies as st
 
 from vs_agent.api import reap_recorded_agents
 from vs_agent.api.testing import FakeConfinement
-from vs_project.api import Project
+from vs_project.api import FakeStateStore, Project
 from vs_proto.api import ValidationError, replay, validate
 from vs_runtime.api.infrastructure import RunEnvironmentSpec, build_run_environment
 from vs_runtime.api.replay import (
@@ -209,3 +209,108 @@ def test_removal_in_progress_retains_writers_until_verified_absent(tmp_path: Pat
     assert stopped.status is replay.WriterReconciliationStatus.PROVEN_STOPPED
     ledger.record(stopped)
     assert ledger.require_proof() == stopped.proof
+
+
+@pytest.mark.regression
+@given(generation=st.integers(min_value=1, max_value=20))
+@example(generation=2)
+def test_unproven_generation_cannot_be_bypassed_by_recreating_registry(
+    tmp_path_factory: pytest.TempPathFactory, generation: int
+) -> None:
+    project = Project.open(tmp_path_factory.mktemp("backing-generation"))
+    namespace = project.state.state_store_namespace("backing")
+    first = WriterRegistry(namespace, BACKING, SimThreads())
+    first.create()
+    first.grant(
+        replay.WriterIdentity(
+            run_id="older-run",
+            host_incarnation="host-a/1",
+            physical_id="old-child",
+            domain_id="old-domain",
+        )
+    )
+    first.close()
+    replacement = deepcopy(BACKING)
+    replacement.generation = generation
+    other = WriterRegistry(namespace, replacement, SimThreads())
+    if generation == BACKING.generation:
+        other.create()  # The same closed head is idempotent, never fresh or empty.
+    else:
+        with pytest.raises(WriterProofError, match="predecessor"):
+            other.create()
+    with pytest.raises(WriterProofError, match="Recovery blocked"):
+        other.require_proof()
+    assert first.close().writers[0].physical_id == "old-child"
+
+
+def test_proven_generation_carries_all_old_runs_and_fences_old_proofs(tmp_path: Path) -> None:
+    namespace = Project.open(tmp_path).state.state_store_namespace("backing")
+    first = WriterRegistry(namespace, BACKING, SimThreads())
+    first.create()
+    engine = FakeDockerEngine(launcher=FakePipedProcessLauncher())
+    domain = engine.run(
+        ["docker", "run", "-d", "image"], timeout_seconds=1, output=DISCARD
+    ).stdout.strip()
+    first.grant(
+        replay.WriterIdentity(
+            run_id="old-run", host_incarnation="host-a/1", physical_id="old-child", domain_id=domain
+        )
+    )
+    first.record(owner(engine).reconcile_writers(first.close()))
+    successor = deepcopy(BACKING)
+    successor.generation += 1
+    current = WriterRegistry(namespace, successor, SimThreads())
+    current.create()
+    with pytest.raises(WriterProofError, match="another active"):
+        first.require_proof()
+    with pytest.raises(WriterProofError, match="Recovery blocked"):
+        current.require_proof()
+    new_domain = engine.run(
+        ["docker", "run", "-d", "image"], timeout_seconds=1, output=DISCARD
+    ).stdout.strip()
+    current.grant(
+        replay.WriterIdentity(
+            run_id="new-run",
+            host_incarnation="host-b/2",
+            physical_id="new-child",
+            domain_id=new_domain,
+        )
+    )
+    manifest = current.close()
+    assert {writer.run_id for writer in manifest.writers} == {"old-run", "new-run"}
+    current.record(owner(engine).reconcile_writers(manifest))
+    assert current.require_proof().manifest == manifest
+    forged = deepcopy(successor)
+    forged.generation += 1
+    forged.authority = "other-daemon"
+    with pytest.raises(WriterProofError, match="same authority"):
+        WriterRegistry(namespace, forged, SimThreads()).create()
+
+
+def test_reuse_holds_nonblocking_cross_run_exclusion_until_effect_finishes(tmp_path: Path) -> None:
+    namespace = Project.open(tmp_path).state.state_store_namespace("backing")
+    ledger = WriterRegistry(namespace, BACKING, SimThreads())
+    ledger.create()
+    ledger.record(UnsupportedWriterReconciler("host").reconcile_writers(ledger.close()))
+    other = WriterRegistry(namespace, BACKING, SimThreads())
+    backing = deepcopy(BACKING)
+    backing.generation += 1
+    successor = WriterRegistry(namespace, backing, SimThreads())
+    fence = FakeStateStore().acquire("host-a", 0, 10)
+    assert fence is not None
+    with ledger.reuse(run_id="run-a", fence=fence) as proof:
+        assert proof == ledger.require_proof()
+        with ledger.reuse(run_id="run-a", fence=fence):
+            assert ledger.require_proof() == proof
+        with pytest.raises(WriterProofError, match="held by another"):
+            other.require_proof()
+        with pytest.raises(WriterProofError, match="held by another"):
+            successor.create()
+        with (
+            pytest.raises(WriterProofError, match="held by another"),
+            ledger.reuse(run_id="run-b", fence=fence),
+        ):
+            pytest.fail("another run entered backing reuse")
+    successor.create()
+    with pytest.raises(WriterProofError, match="another active"):
+        ledger.require_proof()

@@ -64,6 +64,12 @@ if TYPE_CHECKING:
 
 
 @dataclass(frozen=True)
+class _AgentDelivery:
+    request: AgentRequest
+    replacement: bool
+
+
+@dataclass(frozen=True)
 class ReplayAgentReply:
     """One exact native output codec for a session resolver's declared reply schema."""
 
@@ -156,15 +162,12 @@ class SessionReplayExecutor:
         owners = session_executors(sessions, resolver, receipts, None, blocking)
         self._owners = owners
 
-        async def execute(request: AgentRequest, context: ExecutionContext) -> ExecutionOutcome:
+        async def execute(delivery: _AgentDelivery, context: ExecutionContext) -> ExecutionOutcome:
+            request = delivery.request
             if request.request_id is None:
                 problem = "replay session requests require physical identity"
                 raise ReplayOperationError(problem)
-            if (
-                isinstance(request, DispatchTurn)
-                and request.turn.session.session_id.root
-                == f"{request.request_id.root}/conversation"
-            ):
+            if delivery.replacement and isinstance(request, DispatchTurn):
                 ensured = await owners.turns.execute(
                     EnsureSession(
                         request_id=RequestId(root=f"{request.request_id.root}/ensure"),
@@ -184,13 +187,22 @@ class SessionReplayExecutor:
                 return await owners.turns.execute(request, context)
             return await owners.lifecycle.execute(request, context)
 
+        async def encode(
+            delivery: _AgentDelivery, result: ExecutionResult
+        ) -> ReplayResult | ReplayUnknown:
+            return await self._encode(delivery.request, result)
+
         executor = ReceiptReplayExecutor(
             execute,
             receipts,
             host,
-            ReplayOwnerCodec(self._request, self._encode, self._within, self._dispatch_check),
+            ReplayOwnerCodec(self._delivery, encode, self._within, self._dispatch_check),
         )
         self._executor = executor
+
+    def _delivery(self, span: Span) -> _AgentDelivery:
+        physical = span.replay_physical
+        return _AgentDelivery(self._request(span), physical is not None and physical.ordinal > 0)
 
     async def execute(self, span: Span, fence: StoreFence) -> ReplayResult:
         return await self._executor.execute(span, fence)

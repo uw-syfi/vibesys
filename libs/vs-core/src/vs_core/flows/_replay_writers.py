@@ -42,11 +42,14 @@ class ReplayWriterRecovery:
     """One immutable reconciliation per backing execution domain, folded from notices."""
 
     results: tuple[bytes, ...] = ()
+    manifests: tuple[bytes, ...] = ()
+    proofs: tuple[bytes, ...] = ()
 
     @classmethod
     def from_records(cls, records: Iterable[Record]) -> ReplayWriterRecovery:
         intents: dict[bytes, bytes] = {}
         results: dict[bytes, bytes] = {}
+        proofs: dict[bytes, None] = {}
         for record in records:
             if record.body is None or record.body.field != "notice":
                 continue
@@ -56,15 +59,17 @@ class ReplayWriterRecovery:
             name = detail.type_url.rsplit("/", 1)[-1]
             if name == pb.WriterManifest.desc().type_name:
                 manifest = _decode(pb.WriterManifest, detail.value)
-                validate(manifest)
                 key = _intent_key(manifest)
-                if key in intents and intents[key] != manifest.to_binary():
+                if (
+                    key in intents
+                    and intents[key] != manifest.to_binary()
+                    and _decode(pb.WriterManifest, intents[key]).closed
+                ):
                     problem = "a closed execution domain cannot change its writer manifest"
                     raise ReplayError(problem)
                 intents[key] = manifest.to_binary()
             elif name == pb.WriterReconciliation.desc().type_name:
                 result = _decode(pb.WriterReconciliation, detail.value)
-                validate(result)
                 manifest = result.manifest
                 if manifest is None or manifest.backing is None:
                     problem = "writer reconciliation omitted its manifest"
@@ -74,7 +79,17 @@ class ReplayWriterRecovery:
                     problem = "writer reconciliation requires its previously durable intent"
                     raise ReplayError(problem)
                 results[key] = result.to_binary()
-        return cls(tuple(results.values()))
+                if result.proof is not None:
+                    proofs[result.proof.to_binary()] = None
+        return cls(tuple(results.values()), tuple(intents.values()), tuple(proofs))
+
+    def intent(self, backing: pb.WriterBacking) -> pb.WriterManifest | None:
+        """Retain known identities when their backing-wide registry cannot be read."""
+        for payload in self.manifests:
+            manifest = _decode(pb.WriterManifest, payload)
+            if manifest.backing == backing:
+                return manifest
+        return None
 
     def require(self, backing: pb.WriterBacking) -> ReplayRootReuse:
         """Authorize root release/reuse only after the matching environment proof was committed."""

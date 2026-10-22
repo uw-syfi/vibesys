@@ -9,7 +9,7 @@ import pytest
 from protobuf import Oneof
 from protobuf.wkt.google.protobuf.timestamp_pb import Timestamp
 
-from vs_core.api import AttemptId, AttemptRef, RevisionRef
+from vs_core.api import AttemptId, AttemptRef, EnsureWorkspace, RevisionRef
 from vs_core.api.replay import ReplayCall, ReplayFlow, ReplaySource, SemanticKey, classify_context
 from vs_faults.api import Boundary, FaultGate, FaultPlan, FaultRule, HostCrashError, HostFault
 from vs_project.api import FakeStateStore, StateNamespace, adoption_branch
@@ -41,6 +41,8 @@ from vs_runtime.api.replay import (
     ReplayRuntime,
     ReplayUnknown,
     WorkspaceReplayExecutor,
+    WriterProofError,
+    WriterRegistry,
     drive_replay,
 )
 from vs_sim.api.testing import SimThreads, swept
@@ -55,6 +57,8 @@ if TYPE_CHECKING:
 
     from pydantic import BaseModel
 
+    from vs_core.api import RequestBase
+    from vs_runtime.api.core import ExecutionContext, ExecutionOutcome
     from vs_sim.api.testing import Sim
 
 
@@ -606,5 +610,74 @@ def test_old_empty_proof_cannot_release_root_after_new_physical_writers(
             assert StoreWorkspaceReceipts(receipts).root_holder() == AttemptRef(
                 attempt_id=AttemptId(root="round-1"), generation=0
             )
+
+        sim.run(scenario())
+
+
+def test_root_acquisition_holds_backing_exclusion_across_owner_awaits(
+    tmp_path: Path, sim: Sim
+) -> None:
+    with _env(tmp_path) as env:
+        resources = env.hosts[0]
+        revision = resources.root.revision
+        assert revision is not None
+        base = to_proto(RevisionRef.of_git_commit(revision))
+        assert isinstance(base, core_leaves.RevisionRef)
+        store = FakeStateStore()
+        barrier = empty_barrier(env.project)
+        backing = barrier.registry.backing
+        backing.generation += 1
+        successor = WriterRegistry(
+            env.project.state.state_store_namespace("backing-a"), backing, SimThreads()
+        )
+        owner, receipts = _executor(resources)
+
+        class CheckedAcquisition:
+            async def execute(
+                self, request: RequestBase, context: ExecutionContext
+            ) -> ExecutionOutcome:
+                assert isinstance(request, EnsureWorkspace)
+                await sim.clock.sleep(1)
+                with pytest.raises(WriterProofError, match="held by another"):
+                    successor.create()
+                return await owner.execute(request, context)
+
+        async def root(ctx: ReplayFlow) -> object:
+            return await step(
+                ctx,
+                request(
+                    Oneof(
+                        "open",
+                        pb.ReplayOpenWorkspace(
+                            mode=pb.ReplayWorkspaceMode.EXCLUSIVE_ROOT, base=base
+                        ),
+                    )
+                ),
+            )
+
+        async def scenario() -> None:
+            executor = WorkspaceReplayExecutor(
+                CheckedAcquisition(),
+                receipts,
+                ReplayOperationHost(env.run_id, store, sim.clock),
+                within_seconds=100,
+                writers=barrier.registry,
+            )
+            binding = ReplayRunHost(
+                ReplayRuntime(store, root, replay.ReplayAllowance()),
+                executor,
+                sim.clock,
+                lambda _: ReplayEnding(
+                    Ended(outcome=Outcome.FINISHED, summary="Acquired.", resumable=True)
+                ),
+                writer_barrier=barrier,
+            )
+            result = await drive_replay(binding, launch("first"))
+            assert isinstance(result, ReplayCompleted)
+            assert isinstance(result.value, pb.ReplayWorkspaceResult)
+            assert result.value.status is pb.ReplayWorkspaceStatus.SUCCEEDED
+            successor.create()
+            with pytest.raises(WriterProofError, match="another active"):
+                barrier.registry.require_proof()
 
         sim.run(scenario())

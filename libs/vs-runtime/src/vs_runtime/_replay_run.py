@@ -8,8 +8,6 @@ from typing import TYPE_CHECKING
 
 from protobuf.wkt.google.protobuf.timestamp_pb import Timestamp
 
-from vs_core.api.replay import ReplayWriterRecovery
-from vs_proto.api import ReplayStore as ReplayRecords
 from vs_runtime._replay_runtime import (
     ReplayAbsent,
     ReplayPending,
@@ -21,7 +19,7 @@ from vs_runtime._replay_runtime import (
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from vs_proto.api import Span, replay
+    from vs_proto.api import Span
     from vs_runtime._replay_runtime import (
         ReplayEnding,
         ReplayExecutor,
@@ -170,28 +168,24 @@ class _LiveEpoch:
             inspection.cancel()
             await asyncio.gather(inspection, return_exceptions=True)
 
-    async def _retire(self, identities: list[str], manifest: replay.WriterManifest) -> None:
+    async def _retire(self, identities: list[str]) -> None:
         shell, clock = self.host.runtime, self.host.clock
-        executor = self.host.executor
-        if not isinstance(executor, ReplayRetirement) or manifest.backing is None:
+        executor, barrier = self.host.executor, self.host.writer_barrier
+        if not isinstance(executor, ReplayRetirement) or barrier is None:
             raise ReplayRecoveryRequiredError(
                 shell.recovery, ("execution owner cannot settle withdrawn children",)
             )
-        reuse = ReplayWriterRecovery.from_records(
-            ReplayRecords.from_binary(shell.archive.encode()).records
-        ).require(manifest.backing)
         for identity in identities:
-            await shell.retire(identity, executor, reuse, now=clock.now(), at=_at(clock.now()))
+            await shell.retire(
+                identity, executor, barrier.registry, now=clock.now(), at=_at(clock.now())
+            )
 
-    async def recover(self) -> None:
+    async def _recover_inspections(self, spans: tuple[Span, ...]) -> tuple[list[str], list[str]]:
         shell, clock = self.host.runtime, self.host.clock
         reasons = []
         barrier = self.host.writer_barrier
-        manifest = (
-            None if barrier is None else barrier.begin(shell, now=clock.now(), at=_at(clock.now()))
-        )
         withdrawn = []
-        for span in shell.recovery:
+        for span in spans:
             result = await self._inspect(span)
             if isinstance(result, (ReplayPending, ReplayUnknown)):
                 if span.replay_physical is not None and barrier is not None:
@@ -210,10 +204,28 @@ class _LiveEpoch:
                     "withdrawn_sequence"
                 ):
                     withdrawn.append(span.id)
+        return withdrawn, reasons
+
+    async def recover(self) -> None:
+        shell, clock = self.host.runtime, self.host.clock
+        barrier = self.host.writer_barrier
+        manifest = (
+            None if barrier is None else barrier.begin(shell, now=clock.now(), at=_at(clock.now()))
+        )
+        unfinished = shell.recovery
+        withdrawn, reasons = await self._recover_inspections(
+            tuple(span for span in unfinished if span.replay_physical is not None)
+        )
         if barrier is not None and manifest is not None:
             await barrier.finish(shell, manifest, now=clock.now(), at=_at(clock.now()))
             if withdrawn:
-                await self._retire(withdrawn, manifest)
+                await self._retire(withdrawn)
+        # Inspecting an old root acquisition may resume its owning effect. It
+        # must follow proof and restoration, just like a fresh acquisition.
+        _, remaining = await self._recover_inspections(
+            tuple(span for span in unfinished if span.replay_physical is None)
+        )
+        reasons.extend(remaining)
         if shell.recovery:
             raise ReplayRecoveryRequiredError(shell.recovery, tuple(reasons))
         shell.finish_recovery()

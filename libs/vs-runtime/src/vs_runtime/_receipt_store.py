@@ -180,9 +180,12 @@ class ReceiptStore:
         return f"{family}/{hashlib.sha256(key.encode()).hexdigest()}.{part}.json"
 
     @contextmanager
-    def exclusive(self) -> Iterator[None]:
-        """Hold the cross-process lock; reentrant within one store instance."""
-        with self._guard:
+    def exclusive(self, *, blocking: bool = True) -> Iterator[None]:
+        """Hold cross-process exclusion; nonblocking admission raises BlockingIOError."""
+        if not self._guard.acquire(blocking=blocking):
+            problem = "receipt store is owned by another thread"
+            raise BlockingIOError(problem)
+        try:
             if self._depth:
                 self._depth += 1
                 try:
@@ -191,13 +194,15 @@ class ReceiptStore:
                     self._depth -= 1
                 return
             with self._lock_path.open("a") as stream:
-                fcntl.flock(stream.fileno(), fcntl.LOCK_EX)
+                fcntl.flock(stream.fileno(), fcntl.LOCK_EX | (0 if blocking else fcntl.LOCK_NB))
                 self._depth = 1
                 try:
                     yield
                 finally:
                     self._depth = 0
                     fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
+        finally:
+            self._guard.release()
 
     def load[ReceiptT: BaseModel](
         self, family: str, part: str, key: str, model: type[ReceiptT]

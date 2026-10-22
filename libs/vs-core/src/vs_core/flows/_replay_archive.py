@@ -36,10 +36,6 @@ if TYPE_CHECKING:
     from protobuf.wkt.google.protobuf.any_pb import Any
 
 
-def _execution(span: Span) -> bytes:
-    return execution_metadata(span)
-
-
 def _check_identity(operation: pb.OperationReplay) -> None:
     identity = EncodedIdentity(
         operation.identity, operation.dependencies, operation.encoding_version
@@ -435,7 +431,7 @@ class ReplayArchive:
             if (
                 previous.replay_physical is not None
                 or change == Change.STARTED
-                or _execution(previous) != _execution(span)
+                or execution_metadata(previous) != execution_metadata(span)
                 or previous.started_at != span.started_at
                 or previous.parent != span.parent
                 or previous.runtime_type != span.runtime_type
@@ -575,13 +571,10 @@ class ReplayArchive:
             return
         records = (Record.from_binary(payload) for payload in self._records)
         recovery = ReplayWriterRecovery.from_records(records)
-        for payload in recovery.results:
-            result = pb.WriterReconciliation.from_binary(payload)
-            if (
-                result.proof is not None
-                and proof_digest(result.proof) == physical.termination_proof_digest
-            ):
-                proof_covers(child, result.proof, run_id=self.current_epoch.run_id)
+        for payload in recovery.proofs:
+            proof = pb.WriterTerminationProof.from_binary(payload)
+            if proof_digest(proof) == physical.termination_proof_digest:
+                proof_covers(child, proof, run_id=self.current_epoch.run_id)
                 return
         problem = "physical termination requires its previously committed environment proof"
         raise ReplayError(problem)

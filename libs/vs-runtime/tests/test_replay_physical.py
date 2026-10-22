@@ -6,7 +6,7 @@ from dataclasses import replace
 from typing import TYPE_CHECKING
 
 import pytest
-from hypothesis import given
+from hypothesis import example, given
 from hypothesis import strategies as st
 from protobuf.wkt.google.protobuf.timestamp_pb import Timestamp
 
@@ -26,6 +26,7 @@ from vs_runtime.api.replay import (
     ReplayRecoveryRequiredError,
     ReplayResult,
     ReplayRuntime,
+    ReplayUnknown,
     ReplayWriterBarrier,
     UnsupportedWriterReconciler,
     WriterRegistry,
@@ -131,6 +132,7 @@ async def test_unknown_child_requires_proof_and_replacement_keeps_parent_and_dea
     executor = FakeReplayExecutor(fail)
     first = shell(store, "first")
     (old,) = first.prepare(now=0, at=Timestamp())
+    barrier = proof_barrier(Project.open(tmp_path), old)
     with pytest.raises(ConnectionError):
         await first.dispatch(old.id, executor, now=0)
     first.close(now=0)
@@ -139,12 +141,8 @@ async def test_unknown_child_requires_proof_and_replacement_keeps_parent_and_dea
     with pytest.raises(ReplayRecoveryRequiredError):
         resumed.prepare(now=0, at=Timestamp())
     assert not resumed.archive.span(old.id).has_field("ended_at")
-    barrier = proof_barrier(Project.open(tmp_path), old)
     await barrier.reconcile(resumed, now=0, at=Timestamp())
-    reuse = ReplayWriterRecovery.from_records(
-        Records.from_binary(resumed.archive.encode()).records
-    ).require(BACKING)
-    await resumed.retire(old.id, executor, reuse, now=0, at=Timestamp())
+    await resumed.retire(old.id, executor, barrier.registry, now=0, at=Timestamp())
     resumed.finish_recovery()
     (new,) = resumed.prepare(now=1, at=Timestamp(seconds=1))
     assert old.replay_physical is not None
@@ -185,6 +183,8 @@ async def test_unknown_child_requires_proof_and_replacement_keeps_parent_and_dea
     store.release(fence, 1)
 
 
+@pytest.mark.regression
+@example(costs=[0], copies=1)
 @given(
     costs=st.lists(st.integers(min_value=0, max_value=10), min_size=1, max_size=4),
     copies=st.integers(min_value=1, max_value=4),
@@ -246,3 +246,64 @@ async def test_blocked_recovery_persists_unknown_manifest_without_dispatch(
     assert len(recovery.results) == 1
     with pytest.raises(ReplayError, match="absent"):
         recovery.require(BACKING)
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize("credit", [0.5, 2])
+@pytest.mark.parametrize("within", [None, 5])
+async def test_replacement_retains_original_policy_and_reservation_after_edit(
+    tmp_path: Path, credit: float, within: float | None
+) -> None:
+    async def edited(ctx: ReplayFlow) -> object:
+        return await ctx.call(
+            ReplayCall(
+                SemanticKey("retryable"),
+                core_common.Identity(root="retained-input"),
+                "physical.v1",
+                replay.ReplayPolicy(
+                    content=b"edited",
+                    reply_type=core_common.Identity.desc().type_name,
+                    physical_within_seconds=within,
+                    reservation=replay.ReplayResources(money_usd=0),
+                ),
+                core_common.Identity,
+            )
+        )
+
+    async def failed(_: Span) -> ReplayResult:
+        problem = "provider lost acceptance"
+        raise ConnectionError(problem)
+
+    store = FakeStateStore()
+    executor = FakeReplayExecutor(failed)
+    first = shell(store, "first")
+    (old,) = first.prepare(now=0, at=Timestamp())
+    barrier = proof_barrier(Project.open(tmp_path), old)
+    with pytest.raises(ConnectionError):
+        await first.dispatch(old.id, executor, now=0)
+    first.close(now=0)
+    resumed = ReplayRuntime(
+        store, edited, replay.ReplayAllowance(resources=replay.ReplayResources(money_usd=credit))
+    )
+    resumed.start(launch("resume"), now=0, at=Timestamp())
+    try:
+        assert isinstance(await resumed.inspect(old.id, executor, now=0), ReplayUnknown)
+        resumed.withdraw(old.id, now=0, at=Timestamp())
+        await barrier.reconcile(resumed, now=0, at=Timestamp())
+        await resumed.retire(old.id, executor, barrier.registry, now=0, at=Timestamp())
+        resumed.finish_recovery()
+        prepared = resumed.prepare(now=0, at=Timestamp())
+        if credit < 1:
+            assert prepared == ()
+            assert resumed.admission_limited
+        else:
+            (new,) = prepared
+            assert new.replay is not None
+            assert old.replay is not None
+            assert new.replay.policy == old.replay.policy
+            assert new.replay_physical is not None
+            assert new.replay_physical.ordinal == 1
+            assert new.replay_physical.deadline == 30
+            assert resumed.accounting.resources.committed.money_usd == 1
+    finally:
+        resumed.close(now=0)

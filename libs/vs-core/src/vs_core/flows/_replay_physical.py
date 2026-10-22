@@ -207,7 +207,7 @@ def proof_covers(child: Span, proof: pb.WriterTerminationProof, *, run_id: str) 
             for writer in manifest.writers
         )
     ):
-        problem = "environment proof does not cover this physical writer and host incarnation"
+        problem = "Recovery blocked: previous writers may still modify this workspace; environment proof does not cover this physical writer and host incarnation"
         raise ReplayError(problem)
 
 
