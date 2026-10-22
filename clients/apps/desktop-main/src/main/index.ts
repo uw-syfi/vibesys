@@ -12,6 +12,8 @@ import {
   installAskpass,
   type Link,
   LocalLink,
+  READ_METHOD,
+  registryReads,
   SshLink,
 } from '@vibesys/connection';
 import {RunNotifier} from '@vibesys/feature-app-shell/main';
@@ -20,7 +22,7 @@ import {MachinesMain} from '@vibesys/feature-machines/main';
 import {NewRunMain} from '@vibesys/feature-new-run/main';
 import {type RelayPort, RunControl} from '@vibesys/feature-run-control/main';
 import {PreferencesMain} from '@vibesys/feature-settings/main';
-import {type HostId, hostFromKey} from '@vibesys/hosts';
+import {type HostId, hostFromKey, hostKey} from '@vibesys/hosts';
 import {
   FIRST_PAINT_CHANNEL,
   type FirstPaint,
@@ -28,7 +30,7 @@ import {
   type WelcomeEvent,
 } from '@vibesys/ipc';
 import {RunHistoryStore} from '@vibesys/run-history';
-import {remember, SettingsStore} from '@vibesys/settings';
+import {remember, SettingsStore, settingsFor} from '@vibesys/settings';
 import {app, ipcMain, Menu, Notification, nativeTheme, net, powerMonitor, shell} from 'electron';
 import {SHELL_URL} from './app-assets.js';
 import {AppLaunches} from './app-launches.js';
@@ -198,7 +200,7 @@ async function openWindow(
     welcome,
     hosts,
     history,
-    machines: machinesOver(settings, hosts),
+    machines: machinesOver(settings, hosts, gateway),
     runs,
     settings,
     preferences,
@@ -273,12 +275,24 @@ function appWindows(runs: RunControl, fatal: (error: Error) => void) {
 }
 
 /** The machines, over the settings store and the hosts' checkouts and connections. */
-function machinesOver(settings: SettingsStore, hosts: Hosts): MachinesMain {
+function machinesOver(
+  settings: SettingsStore,
+  hosts: Hosts,
+  gateway: ReturnType<typeof installGateway>,
+): MachinesMain {
   return new MachinesMain({
     settings,
     removeHost: id => hosts.remove(id),
     checkout: id => hosts.checkout(id),
     connection: id => hosts.connection(id),
+    transportV2: async id => {
+      const {settings: file} = await settings.hosts();
+      return settingsFor(file, id)?.runTransportV2 === true;
+    },
+    registry: registryReads({
+      checkout: id => hosts.checkout(id),
+      unary: (id, bytes, signal) => gateway.unary(hostKey(id), READ_METHOD, bytes, signal),
+    }),
   });
 }
 

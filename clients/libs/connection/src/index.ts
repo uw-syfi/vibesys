@@ -14,7 +14,13 @@ export {
   ConnectionManager,
   DEFAULT_CONNECTION_CONFIG,
 } from './shell/connection-manager.js';
-export {GatewayConnection, type GatewayDialer, HELLO_METHOD, TAIL_METHOD} from './shell/gateway.js';
+export {
+  GatewayConnection,
+  type GatewayDialer,
+  HELLO_METHOD,
+  READ_METHOD,
+  TAIL_METHOD,
+} from './shell/gateway.js';
 export {GatewayCalls} from './shell/gateway-calls.js';
 export {localGateway} from './shell/gateway-local.js';
 export {
@@ -30,4 +36,11 @@ export {ConnectionError, HelperRequestError} from './shell/helper-channel.js';
 export {HostConnection, type LogsLease} from './shell/host-connection.js';
 export {type Link, LocalLink, SshLink} from './shell/link.js';
 export {fromChild, type SpawnedProcess} from './shell/process.js';
+export {
+  type RegistryCatalog,
+  type RegistryReadPorts,
+  registryReads,
+  registryTransport,
+  requireCheckout,
+} from './shell/registry-reads.js';
 export type {CheckoutProblem, Phase} from './state/host-connection.js';

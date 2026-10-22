@@ -4,6 +4,7 @@ package vibesys.api.v1;
 
 import "buf/validate/validate.proto";
 import "vibesys/api/v1/host_call.proto";
+import "vibesys/api/v1/host_read_generated.proto";
 import "vibesys/store/v1/skeleton.proto";
 
 option go_package = "github.com/uw-syfi/vibesys/gateway/gen/vibesys/api/v1;apiv1";
@@ -14,6 +15,8 @@ service HostService {
   // Hello compares the client and gateway API schema hashes. A mismatch fails
   // with gRPC FAILED_PRECONDITION and a message naming both well-formed hashes.
   rpc HostCall(HostCallRequest) returns (HostCallResponse);
+  // Read runs one registered catalog operation. The runner deadline is that operation's cap.
+  rpc Read(HostReadRequest) returns (HostReadResponse);
   rpc Hello(HelloRequest) returns (HelloResponse);
   // Tail follows the log live until the client cancels, starting at from_seq
   // (inclusive). Record bytes pass through unchanged; only seq is decoded.

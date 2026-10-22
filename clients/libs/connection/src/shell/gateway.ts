@@ -8,8 +8,10 @@ import {
   type HelloResponse,
   HelloResponseSchema,
   HostCallRequestSchema,
+  HostReadRequestSchema,
   HostService,
   hostCallBudgets,
+  readBudgets,
   TailRequestSchema,
   TailResponseSchema,
   validatedFromBinary,
@@ -196,15 +198,23 @@ export class GatewayConnection {
 }
 
 const HOST_CALL_METHOD = `/${HostService.typeName}/${HostService.method.hostCall.name}`;
+export const READ_METHOD = `/${HostService.typeName}/${HostService.method.read.name}`;
 
-/** Unary RPCs that are not host calls. Host-call budgets come from the registry. */
+/** Unary RPCs that are not host calls or registered reads. Those budgets come from the registry. */
 const UNARY_DEADLINE_MS = 15_000;
 
 function unaryDeadline(method: string, bytes: Uint8Array): number {
-  if (method !== HOST_CALL_METHOD) return UNARY_DEADLINE_MS;
-  const slot = fromBinary(HostCallRequestSchema, bytes).method.case;
-  if (slot === undefined) throw new Error('host call has no method');
-  return hostCallBudgets[slot].totalMs;
+  if (method === HOST_CALL_METHOD) {
+    const slot = fromBinary(HostCallRequestSchema, bytes).method.case;
+    if (slot === undefined) throw new Error('host call has no method');
+    return hostCallBudgets[slot].totalMs;
+  }
+  if (method === READ_METHOD) {
+    const slot = fromBinary(HostReadRequestSchema, bytes).method.case;
+    if (slot === undefined || !(slot in readBudgets)) throw new Error('host read has no method');
+    return readBudgets[slot].totalMs;
+  }
+  return UNARY_DEADLINE_MS;
 }
 
 async function hello(session: GatewaySession, signal: AbortSignal): Promise<void> {

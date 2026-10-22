@@ -8,10 +8,12 @@ import {
   HelloResponseSchema,
   type HostCallRequest,
   HostCallRequestSchema,
+  type HostReadRequest,
+  HostReadRequestSchema,
   HostService,
   TailRequestSchema,
 } from '@vibesys/proto';
-import {type GatewayDialer, HELLO_METHOD, TAIL_METHOD} from '../shell/gateway.js';
+import {type GatewayDialer, HELLO_METHOD, READ_METHOD, TAIL_METHOD} from '../shell/gateway.js';
 import {GrpcDecoder, GrpcError, grpcFrame} from '../shell/grpc.js';
 
 export interface FakeTail {
@@ -27,6 +29,11 @@ export interface FakeHostCall {
   end(code?: number, detail?: string): void;
 }
 
+export interface FakeRead {
+  readonly request: HostReadRequest;
+  end(code?: number, detail?: string): void;
+}
+
 export class FakeGateway implements GatewayDialer {
   readonly forces: boolean[] = [];
   schemaHash = API_SCHEMA_HASH;
@@ -37,6 +44,8 @@ export class FakeGateway implements GatewayDialer {
   readonly #tails: FakeTail[] = [];
   readonly #hostCalls: FakeHostCall[] = [];
   readonly #hostWaiters: Array<(call: FakeHostCall) => void> = [];
+  readonly #reads: FakeRead[] = [];
+  readonly #readWaiters: Array<(call: FakeRead) => void> = [];
   readonly #waiters: Array<(tail: FakeTail) => void> = [];
 
   constructor() {
@@ -74,11 +83,23 @@ export class FakeGateway implements GatewayDialer {
           const waiter = this.#waiters.shift();
           if (waiter === undefined) this.#tails.push(tail);
           else waiter(tail);
-        } else if (method === `/${HostService.typeName}/${HostService.method.hostCall.name}`) {
-          this.#hostCall(stream, messages[0] as Uint8Array);
-        } else end(stream, 12, 'unknown method');
+        } else if (!this.#held(method, stream, messages[0] as Uint8Array)) {
+          end(stream, 12, 'unknown method');
+        }
       });
     });
+  }
+
+  #held(method: string | undefined, stream: ServerHttp2Stream, bytes: Uint8Array): boolean {
+    if (method === `/${HostService.typeName}/${HostService.method.hostCall.name}`) {
+      this.#hostCall(stream, bytes);
+      return true;
+    }
+    if (method === READ_METHOD) {
+      this.#read(stream, bytes);
+      return true;
+    }
+    return false;
   }
 
   #hostCall(stream: ServerHttp2Stream, bytes: Uint8Array): void {
@@ -88,6 +109,16 @@ export class FakeGateway implements GatewayDialer {
     };
     const waiter = this.#hostWaiters.shift();
     if (waiter === undefined) this.#hostCalls.push(call);
+    else waiter(call);
+  }
+
+  #read(stream: ServerHttp2Stream, bytes: Uint8Array): void {
+    const call: FakeRead = {
+      request: fromBinary(HostReadRequestSchema, bytes),
+      end: (code, detail) => end(stream, code, detail),
+    };
+    const waiter = this.#readWaiters.shift();
+    if (waiter === undefined) this.#reads.push(call);
     else waiter(call);
   }
 
@@ -142,6 +173,13 @@ export class FakeGateway implements GatewayDialer {
     const call = this.#hostCalls.shift();
     return call === undefined
       ? new Promise(resolve => this.#hostWaiters.push(resolve))
+      : Promise.resolve(call);
+  }
+
+  nextRead(): Promise<FakeRead> {
+    const call = this.#reads.shift();
+    return call === undefined
+      ? new Promise(resolve => this.#readWaiters.push(resolve))
       : Promise.resolve(call);
   }
 

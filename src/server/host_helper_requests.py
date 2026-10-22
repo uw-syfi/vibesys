@@ -11,7 +11,8 @@ decisions it needs (:func:`negotiate`, :func:`select_completions`,
 Light like the channel: the standard library, Pydantic, ``vs_sim.api`` and light
 ``server`` modules only.
 
-Public surface: ``answer``, ``connect``, ``negotiate``, ``Negotiated``,
+Public surface: ``answer``, ``answer_registered_read``, ``read_failure_category``,
+``registry_read_source``, ``connect``, ``negotiate``, ``Negotiated``,
 ``HelperHost``; the interfaces ``Projects``, ``Directories``, ``RunLauncher`` and
 ``CheckoutProbe`` with the values they exchange (``ProjectRun``,
 ``ProjectLookupError``, ``ScannedEntry``, ``Scan``, ``PathHints``);
@@ -172,6 +173,7 @@ if TYPE_CHECKING:
     from server.run_summary import Summarized
     from server.usage_window import RunUsage
     from vs_project.api import OperatorDialer
+    from vs_proto.api import FailureCategory
     from vs_proto.api import host_payloads as pb
     from vs_sim.api import Clock, Connection
 
@@ -1476,7 +1478,7 @@ class HelperReadSource:
     def __init__(
         self,
         host: HelperHost,
-        legacy_request: HelperRequest,
+        legacy_request: HelperRequest | None,
         *,
         describe: Callable[[HelperHost], MachineDescription],
         preflight: Callable[[RunPreflightRequest, HelperHost], RunPreflightReply | HelperError],
@@ -1583,3 +1585,77 @@ def read_reply(request: HelperRequest, source: HelperReadSource) -> HelperReply 
 def _wire() -> ModuleType:
     """Load protobuf contracts only when a migrated read executes, preserving light startup."""
     return import_module("vs_proto.api")
+
+
+def registry_read_source(host: HelperHost) -> HelperReadSource:
+    """Temporary adapter owned by PR4, shared by the helper channel and ``vibesys host``.
+
+    A registry read has no legacy JSON request, so preflight keeps protobuf map order.
+    """
+    return HelperReadSource(host, None, describe=describe_machine, preflight=_preflight_facts)
+
+
+def read_failure_category(code: HelperErrorCode) -> FailureCategory:
+    """Map one helper refusal onto the closed failure category.
+
+    Callers branch on the category. ``CLUSTER_READ_ONLY`` is permission denied:
+    the file's owner is not this helper.
+    """
+    failure = _wire().FailureCategory
+    categories = {
+        HelperErrorCode.INVALID_REQUEST: failure.INVALID_INPUT,
+        HelperErrorCode.TASK_INVALID: failure.INVALID_INPUT,
+        HelperErrorCode.PATH_NOT_DIRECTORY: failure.INVALID_INPUT,
+        HelperErrorCode.UNVETTED_HARNESS: failure.INVALID_INPUT,
+        HelperErrorCode.CLUSTER_INVALID: failure.INVALID_INPUT,
+        HelperErrorCode.INCOMPATIBLE: failure.CONFIGURATION,
+        HelperErrorCode.EXAMPLES_UNAVAILABLE: failure.CONFIGURATION,
+        HelperErrorCode.COMPUTE_CONFIG_UNREADABLE: failure.CONFIGURATION,
+        HelperErrorCode.MODAL_NOT_CONFIGURED: failure.CONFIGURATION,
+        HelperErrorCode.DUPLICATE_REQUEST_ID: failure.CONFLICT,
+        HelperErrorCode.DESTINATION_EXISTS: failure.CONFLICT,
+        HelperErrorCode.DESTINATION_NESTED: failure.CONFLICT,
+        HelperErrorCode.NOT_NESTED: failure.CONFLICT,
+        HelperErrorCode.CLUSTER_EXISTS: failure.CONFLICT,
+        HelperErrorCode.UNKNOWN_WATCH: failure.NOT_FOUND,
+        HelperErrorCode.PROJECT_MISSING: failure.NOT_FOUND,
+        HelperErrorCode.PROJECT_UNINITIALIZED: failure.NOT_FOUND,
+        HelperErrorCode.PATH_MISSING: failure.NOT_FOUND,
+        HelperErrorCode.RUN_GONE: failure.NOT_FOUND,
+        HelperErrorCode.UNKNOWN_INSTANCE: failure.NOT_FOUND,
+        HelperErrorCode.UNKNOWN_LOG_STREAM: failure.NOT_FOUND,
+        HelperErrorCode.UNKNOWN_EXAMPLE: failure.NOT_FOUND,
+        HelperErrorCode.UNKNOWN_RUN: failure.NOT_FOUND,
+        HelperErrorCode.UNKNOWN_CLUSTER: failure.NOT_FOUND,
+        HelperErrorCode.UNKNOWN_PROVIDER: failure.NOT_FOUND,
+        HelperErrorCode.PERMISSION_DENIED: failure.PERMISSION_DENIED,
+        HelperErrorCode.CONNECT_DENIED: failure.PERMISSION_DENIED,
+        HelperErrorCode.CLUSTER_READ_ONLY: failure.PERMISSION_DENIED,
+        HelperErrorCode.HANDSHAKE_REQUIRED: failure.UNSUPPORTED,
+        HelperErrorCode.FEATURE_NOT_NEGOTIATED: failure.UNSUPPORTED,
+        HelperErrorCode.CHANNEL_BUSY: failure.RESOURCE_EXHAUSTED,
+        HelperErrorCode.CONNECT_FAILED: failure.TRANSIENT,
+        HelperErrorCode.DEADLINE_EXCEEDED: failure.DEADLINE_EXCEEDED,
+        HelperErrorCode.LOG_STORE_CORRUPT: failure.INTERNAL,
+        HelperErrorCode.PROJECT_CREATE_FAILED: failure.INTERNAL,
+        HelperErrorCode.CLUSTER_TEST_FAILED: failure.INTERNAL,
+        HelperErrorCode.READER_FAILED: failure.INTERNAL,
+        HelperErrorCode.INTERNAL: failure.INTERNAL,
+    }
+    found = categories.get(code)
+    if found is None:
+        message = f"unmapped helper code {code}"
+        raise ValueError(message)
+    return found
+
+
+def answer_registered_read(cli: str, payload: bytes, host: HelperHost) -> bytes:
+    """Run one registered read for ``vibesys host`` and return the envelope bytes."""
+    operations = import_module("vibesys.api.host_operations.api")
+    try:
+        return operations.execute_host_read(payload, registry_read_source(host), cli=cli)
+    except _ReadRefusedError as error:
+        category = read_failure_category(error.refusal.code)
+        return operations.host_read_failure(category, error.refusal.message)
+    except (ProjectLookupError, ComputeError) as error:
+        return operations.host_read_failure(read_failure_category(error.code), str(error))

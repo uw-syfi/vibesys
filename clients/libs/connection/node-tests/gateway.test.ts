@@ -2,12 +2,22 @@ import {describe, test} from 'node:test';
 import {create, toBinary} from '@bufbuild/protobuf';
 import {
   API_SCHEMA_HASH,
+  DescribeMachineRequestSchema,
+  encodeHostRead,
   GetBlobsResponseSchema,
+  GetTaskGoalRequestSchema,
   HelloResponseSchema,
   HOST_API_MAX_MESSAGE_BYTES,
   HostCallRequestSchema,
   HostService,
   hostCallBudgets,
+  ListComputeRequestSchema,
+  ListExamplesRequestSchema,
+  ListHarnessesRequestSchema,
+  ListTasksRequestSchema,
+  operationPolicies,
+  PreflightRunRequestSchema,
+  readBudgets,
   TailRequestSchema,
   TailResponseSchema,
   validatedFromBinary,
@@ -22,6 +32,7 @@ import {
   GrpcError,
   grpcFrame,
   HELLO_METHOD,
+  READ_METHOD,
   TAIL_METHOD,
 } from '../src/index.js';
 // test-isolation: Node HTTP/2 needs the gateway Fake alone; legacy contract exports load bun:test.
@@ -381,6 +392,67 @@ for (const [method, budget] of Object.entries(hostCallBudgets)) {
       .catch(error => String(error));
     try {
       await fake.nextHostCall();
+      await clock.waitUntilScheduled(budget.totalMs);
+      clock.advanceBy(budget.totalMs);
+      expect(await pending).toContain('deadline');
+    } finally {
+      connection.close();
+      fake.close();
+    }
+  });
+}
+
+function readRequest(name: string): Uint8Array {
+  const requestId = 'request-a';
+  if (name === 'ListTasks') {
+    return toBinary(
+      ListTasksRequestSchema,
+      create(ListTasksRequestSchema, {requestId, project: '/project'}),
+    );
+  }
+  if (name === 'GetTaskGoal') {
+    return toBinary(
+      GetTaskGoalRequestSchema,
+      create(GetTaskGoalRequestSchema, {requestId, project: '/project', task: 'bench'}),
+    );
+  }
+  if (name === 'PreflightRun') {
+    return toBinary(
+      PreflightRunRequestSchema,
+      create(PreflightRunRequestSchema, {requestId, project: '/project'}),
+    );
+  }
+  const schema = {
+    ListHarnesses: ListHarnessesRequestSchema,
+    ListExamples: ListExamplesRequestSchema,
+    DescribeMachine: DescribeMachineRequestSchema,
+    ListCompute: ListComputeRequestSchema,
+  }[name];
+  if (schema === undefined) throw new Error(`no read payload for ${name}`);
+  return toBinary(schema, create(schema, {requestId}));
+}
+
+for (const policy of Object.values(operationPolicies)) {
+  const slot =
+    `${policy.name[0]?.toLowerCase() ?? ''}${policy.name.slice(1)}` as keyof typeof readBudgets;
+  const budget = readBudgets[slot];
+  test(`read ${policy.name} waits for the registry budget above the runner cap`, {
+    timeout: 15000,
+  }, async () => {
+    expect(budget.totalMs).toBeGreaterThan(budget.capMs);
+    expect(budget.totalMs).toBe(budget.capMs + budget.graceMs);
+    const fake = new FakeGateway();
+    const clock = new FakeClock();
+    const connection = new GatewayConnection(fake, clock.schedule);
+    const pending = connection
+      .unary(
+        READ_METHOD,
+        encodeHostRead('/checkout', policy.name, readRequest(policy.name)),
+        new AbortController().signal,
+      )
+      .catch(error => String(error));
+    try {
+      await fake.nextRead();
       await clock.waitUntilScheduled(budget.totalMs);
       clock.advanceBy(budget.totalMs);
       expect(await pending).toContain('deadline');

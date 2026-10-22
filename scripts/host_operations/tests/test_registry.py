@@ -150,7 +150,7 @@ def test_the_descriptor_pass_compiles_all_language_outputs_before_publication() 
     root = Path(__file__).resolve().parents[3]
     image = _image().SerializeToString()
     outputs = compile_outputs(image, _slots(), _server_sources(root))
-    assert len(outputs) == 6
+    assert len(outputs) == 8
     for path, content in outputs.items():
         if path.endswith(".py"):
             ast.parse(content)
@@ -186,9 +186,20 @@ def test_every_client_budget_exceeds_its_runner_cap() -> None:
                 in python
             )
         else:
+            case = op.slot.split("_", maxsplit=1)[0] + "".join(
+                part.title() for part in op.slot.split("_")[1:]
+            )
             assert f"totalMs: {client}" in typescript
+            assert (
+                f"{case}: Object.freeze({{capMs: {runner_cap}, graceMs: {op.policy.grace_ms}, totalMs: {client}}}"
+                in typescript
+            )
             assert f"Cap: {runner_cap}*time.Millisecond" in runner
             assert f"Grace: {op.policy.grace_ms}*time.Millisecond" in runner
+            assert (
+                f"Deadline: {runner_cap} * time.Millisecond"
+                in outputs["gateway/internal/hostoperations/host_read_generated.go"]
+            )
 
 
 def test_generate_publishes_every_projection(tmp_path: Path) -> None:

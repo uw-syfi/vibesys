@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from collections import Counter
 from importlib import import_module
@@ -15,6 +16,7 @@ from vs_proto.api import host_operations
 from vs_sim.api import OsProcesses, OsThreads, SystemClock
 
 _HOST_CALL_COMMANDS = {op.cli: op.slot for op in host_operations.HOST_CALLS}
+_READ_COMMANDS = {op.cli: op.slot for op in host_operations.READ_CALLS}
 
 if TYPE_CHECKING:
     from typing import BinaryIO
@@ -68,6 +70,20 @@ def main(
 ) -> int:
     """Run one host method from the current directory."""
     arguments = sys.argv[1:] if argv is None else argv
+    if arguments and arguments[0] in _READ_COMMANDS:
+        parser = argparse.ArgumentParser(
+            prog=f"vibesys host {arguments[0]}",
+            description="Read a binary HostReadRequest from stdin; write a binary HostReadResponse to stdout.",
+        )
+        parser.parse_args(arguments[1:])
+        source = sys.stdin.buffer if stdin is None else stdin
+        destination = sys.stdout.buffer if stdout is None else stdout
+        host = import_module("entrypoints.host_helper").real_host(
+            os.environ, os.getuid(), OsThreads() if threads is None else threads
+        )
+        reply = import_module("server.host_helper_requests").answer_registered_read
+        destination.write(reply(arguments[0], source.read((1 << 20) + 1), host))
+        return 0
     if arguments and arguments[0] in _HOST_CALL_COMMANDS:
         parser = argparse.ArgumentParser(
             prog=f"vibesys host {arguments[0]}",

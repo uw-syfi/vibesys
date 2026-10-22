@@ -7,6 +7,7 @@
  * helper there before it saves it).
  */
 import {ConnectionError, type ConnectionLease, HelperRequestError} from '@vibesys/connection';
+import type {MachineDescription} from '@vibesys/hosts';
 import {
   type HostId,
   hostFromKey,
@@ -27,6 +28,20 @@ import type {
 } from '@vibesys/ipc';
 import type {SettingsStore} from '@vibesys/settings';
 
+/** Catalog reads when `runTransportV2` is on. The connection shell owns the implementation. */
+export interface RegistryCatalog {
+  describeMachine(
+    host: HostId,
+    expectedCheckout: string | null,
+    signal: AbortSignal,
+  ): Promise<MachineDescription>;
+  listCompute(
+    host: HostId,
+    expectedCheckout: string | null,
+    signal: AbortSignal,
+  ): Promise<ComputeSettings>;
+}
+
 export interface MachinesMainDeps {
   /** Read the saved hosts; their owner performs all mutations. */
   readonly settings: Pick<SettingsStore, 'hosts'>;
@@ -36,6 +51,10 @@ export interface MachinesMainDeps {
   readonly checkout: (id: HostId) => Promise<string | null>;
   /** Lease `id`'s one connection, from its saved checkout. */
   readonly connection: (id: HostId) => Promise<ConnectionLease>;
+  /** Per host. Absent or false keeps the helper JSON channel. */
+  readonly transportV2?: (id: HostId) => Promise<boolean>;
+  /** Required when `transportV2` is true. Missing it throws; it does not fall back. */
+  readonly registry?: RegistryCatalog;
 }
 
 const LOCAL: HostId = {kind: 'local'};
@@ -88,7 +107,21 @@ export class MachinesMain {
   }
 
   /** What `id`'s facts say now: its connection's state, then what its helper describes. */
-  async report(id: HostId): Promise<MachineReport> {
+  async report(id: HostId, expectedCheckout: string | null = null): Promise<MachineReport> {
+    if (await this.#v2(id)) {
+      const registry = this.#registry();
+      try {
+        const facts = await registry.describeMachine(
+          id,
+          expectedCheckout,
+          new AbortController().signal,
+        );
+        return {kind: 'ready', facts};
+      } catch (error) {
+        return unreachable(error);
+      }
+    }
+    // Temporary adapter owned by PR4: the off switch keeps the helper JSON channel.
     let lease: ConnectionLease;
     try {
       lease = await this.#deps.connection(id);
@@ -131,6 +164,16 @@ export class MachinesMain {
    * helper predates machine compute settings.
    */
   async compute(id: HostId): Promise<Offered<ComputeSettings>> {
+    if (await this.#v2(id)) {
+      const registry = this.#registry();
+      try {
+        const value = await registry.listCompute(id, null, new AbortController().signal);
+        return {kind: 'offered', value};
+      } catch (error) {
+        throw explained(error, 'read the clusters and clouds', id);
+      }
+    }
+    // Temporary adapter owned by PR4: the off switch keeps the helper JSON channel.
     return this.#offered(id, 'read the clusters and clouds', async connection => {
       const reply = await connection.request({type: 'compute.list'});
       return reply.settings;
@@ -204,6 +247,19 @@ export class MachinesMain {
     } catch (error) {
       throw explained(error, doing, id);
     }
+  }
+
+  async #v2(id: HostId): Promise<boolean> {
+    return (await this.#deps.transportV2?.(id)) === true;
+  }
+
+  /** The registry port. A missing one is a wiring error, not a reason to use the helper. */
+  #registry(): RegistryCatalog {
+    const registry = this.#deps.registry;
+    if (registry === undefined) {
+      throw new Error('run transport v2 is on and the registry reads are missing');
+    }
+    return registry;
   }
 
   /** Forget `id`; This Mac stays, back on the app's own checkout. Answers the machines left. */

@@ -13,9 +13,11 @@ from google.protobuf import descriptor_pb2, descriptor_pool, message_factory
 
 from scripts.host_operations._emit import (
     go_host_call,
+    go_host_read,
     go_registry,
     helper_types,
     python_registry,
+    read_envelope,
     receipt_schema,
     typescript_registry,
 )
@@ -193,6 +195,8 @@ def compile_outputs(
         ),
         "gateway/internal/hostoperations/registry_generated.go": go_registry(reads, failures),
         "gateway/internal/hostoperations/host_call_generated.go": go_host_call(admissions),
+        "gateway/internal/hostoperations/host_read_generated.go": go_host_read(reads),
+        "proto/vibesys/api/v1/host_read_generated.proto": read_envelope(reads),
         "clients/libs/proto/src/generated/host-operations.ts": typescript_registry(
             reads, failures, admissions
         ),

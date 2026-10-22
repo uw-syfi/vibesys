@@ -327,3 +327,23 @@ def dispatch_host_call(
             return Oneof("chat_message", chat_message(cast(host_call.ChatMessageRequest, request)))
         case _:
             return None
+
+
+READS: dict[str, Operation] = {
+    "list_tasks": ListTasks,
+    "list_harnesses": ListHarnesses,
+    "list_examples": ListExamples,
+    "get_task_goal": GetTaskGoal,
+    "describe_machine": DescribeMachine,
+    "list_compute": ListCompute,
+    "preflight_run": PreflightRun,
+}
+READ_CALLS: tuple[HostCall, ...] = (
+    HostCall("list_tasks", "list-tasks", 10, 10, 10000, 5000),
+    HostCall("list_harnesses", "list-harnesses", 11, 11, 10000, 5000),
+    HostCall("list_examples", "list-examples", 12, 12, 10000, 5000),
+    HostCall("get_task_goal", "get-task-goal", 13, 13, 10000, 5000),
+    HostCall("describe_machine", "describe-machine", 14, 14, 25000, 5000),
+    HostCall("list_compute", "list-compute", 15, 15, 10000, 5000),
+    HostCall("preflight_run", "preflight-run", 16, 16, 65000, 5000),
+)

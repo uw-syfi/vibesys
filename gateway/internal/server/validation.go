@@ -5,6 +5,7 @@ import (
 
 	"buf.build/go/protovalidate"
 	apiv1 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/api/v1"
+	hostv1 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/host/v1"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -25,10 +26,11 @@ func validateMessage(value any, code codes.Code) error {
 }
 
 func validateUnary(ctx context.Context, request any, _ *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
-	// HostCall input validation belongs to its Python command so admission
-	// failures retain the typed configuration_failed result contract.
+	// HostCall and HostRead input validation belongs to the Python command so a
+	// bad envelope stays a typed failure instead of a transport error.
 	_, hostCall := request.(*apiv1.HostCallRequest)
-	if err := validateMessage(request, codes.InvalidArgument); err != nil && !hostCall {
+	_, hostRead := request.(*apiv1.HostReadRequest)
+	if err := validateMessage(request, codes.InvalidArgument); err != nil && !hostCall && !hostRead {
 		return nil, err
 	}
 	response, err := handler(ctx, request)
@@ -41,6 +43,9 @@ func validateUnary(ctx context.Context, request any, _ *grpc.UnaryServerInfo, ha
 			reply, _ := response.(*apiv1.HostCallResponse)
 			failure := reply.GetConfigurationFailed()
 			return hostFailure("invalid_host_response", err.Error(), int(failure.GetExitCode()), failure.GetStderr()), nil
+		}
+		if hostRead {
+			return readFailure(hostv1.FailureCategory_FAILURE_CATEGORY_INVALID_INPUT, err.Error()), nil
 		}
 		return nil, err
 	}

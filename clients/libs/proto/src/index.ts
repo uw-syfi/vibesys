@@ -31,6 +31,12 @@ export {
   type WatchRunsResponse,
   WatchRunsResponseSchema,
 } from './generated/vibesys/api/v1/host_pb.js';
+export {
+  type HostReadRequest,
+  HostReadRequestSchema,
+  type HostReadResponse,
+  HostReadResponseSchema,
+} from './generated/vibesys/api/v1/host_read_generated_pb.js';
 export * from './generated/vibesys/host/v1/failure_pb.js';
 export * from './generated/vibesys/host/v1/operations_pb.js';
 export * from './generated/vibesys/search/v1/attrs_pb.js';
@@ -54,6 +60,8 @@ export * from './generated/vibesys/store/v1/skeleton_pb.js';
 export * from './generated/vibesys/store/v1/span_pb.js';
 export * from './generated/vibesys/store/v1/transcript_pb.js';
 export type {Accepted, OperationSignal, OperationTransport} from './operations.js';
+export {OperationFailed} from './operations.js';
+export {projectMessage} from './project.js';
 export {API_SCHEMA_HASH, HOST_SCHEMA_HASH, STORE_SCHEMA_HASH, schemaHash} from './schema-hashes.js';
 
 export {validatedFromBinary, validateHostPayload} from './validation.js';
