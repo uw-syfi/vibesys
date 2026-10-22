@@ -111,15 +111,15 @@ class EventJournal(DurableEventJournal[CoreEvent]):
         if self._runlog is not None:
             self._runlog.publish_successor(utc_datetime(self._clock))
 
-    def fail_open_epoch(self, reason: str) -> None:
+    def fail_open_epoch(self, reason: str) -> bool:
         """End this process's open epoch the way a running epoch fails.
 
-        Startup that fails after the epoch was published must leave a typed
-        failure. A crash that never reaches this call stays an interrupted
-        epoch for the next writer.
+        Return whether a typed failure was recorded for a published epoch.
+        The session calls this when startup failed before resources were ready.
+        A crash that never reaches this call stays an interrupted epoch for the next writer.
         """
         if self._runlog is None or not self._runlog.has_open_epoch():
-            return
+            return False
         if not reason:
             reason = "environment startup failed"
         self.emit(
@@ -136,6 +136,7 @@ class EventJournal(DurableEventJournal[CoreEvent]):
                 )
             ),
         )
+        return True
 
     def close(self) -> None:
         """Release the additive transport's append handle on run teardown."""

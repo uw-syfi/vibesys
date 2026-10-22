@@ -582,19 +582,20 @@ class ServerRuntime:
                 record_event=False,
                 diagnostic=event_diagnostic,
             )
-            self.journal.record(
-                EventType.CONFIGURATION_FAILED,
-                event_diagnostic.summary,
-                status=EventStatus.FAILED,
-                data=ConfigurationFailedData(
-                    code=configuration_diagnostic.code,
-                    stage=configuration_diagnostic.stage,
-                    message=event_diagnostic.summary,
-                    usage=event_diagnostic.hint,
-                    exit_code=configuration_diagnostic.exit_code,
-                ),
-                diagnostic=event_diagnostic,
-            )
+            if not self._terminal_recorded_after(terminal_cursor):
+                self.journal.record(
+                    EventType.CONFIGURATION_FAILED,
+                    event_diagnostic.summary,
+                    status=EventStatus.FAILED,
+                    data=ConfigurationFailedData(
+                        code=configuration_diagnostic.code,
+                        stage=configuration_diagnostic.stage,
+                        message=event_diagnostic.summary,
+                        usage=event_diagnostic.hint,
+                        exit_code=configuration_diagnostic.exit_code,
+                    ),
+                    diagnostic=event_diagnostic,
+                )
             raise
         except BaseException as exc:
             self.controller.finish(

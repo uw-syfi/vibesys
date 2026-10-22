@@ -187,7 +187,7 @@
 {"path": "tests/server/test_experiments.py", "rule": "real_impl", "count": 6}
 {"path": "tests/server/test_lazy_event_store.py", "rule": "real_impl", "count": 21}
 {"path": "tests/server/test_runtime.py", "rule": "real_impl", "count": 16}
-{"path": "tests/server/test_runtime_on_sim.py", "rule": "real_impl", "count": 5}
+{"path": "tests/server/test_runtime_on_sim.py", "rule": "real_impl", "count": 4}
 {"path": "tests/server/test_startup_progress.py", "rule": "real_impl", "count": 2}
 {"path": "tests/server/test_transport_subscription.py", "rule": "real_impl", "count": 7}
 {"path": "tests/server/test_websocket_transport.py", "rule": "real_impl", "count": 68}

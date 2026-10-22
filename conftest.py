@@ -20,7 +20,9 @@ from vs_sim.api.testing import Depth
 
 # `--shard=I/N` splits the suite across CI runners (see tests/support/sharding.py).
 # The hang-dump plugin is first so its deadline timer is armed before other
-# plugins do work. It no-ops unless the workflow passed VIBESYS_PYTEST_DUMP_AT.
+# plugins do work. The timer no-ops unless the workflow passed
+# VIBESYS_PYTEST_DUMP_AT. The same plugin names each quiet-mode failure when
+# the report arrives, so a cancelled session still shows the node id.
 pytest_plugins = [
     "scripts.pytest_hang_dump",
     "vs_sim_pytest",
