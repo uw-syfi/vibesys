@@ -18,7 +18,7 @@ from pydantic import BaseModel, ConfigDict
 
 from ._strategy_operations import RenderRoleArtifactsBase
 from ._wait_clock import turn_bound
-from .types.common import ExecuteRegisteredOperation, InvocationRef
+from .types.common import ExecuteRegisteredOperation, InvocationRef, Scope
 from .types.evaluation import EvaluationState, SubmitMeasurement
 from .types.records import RecordsState, RequestPhase, Scheduled
 from .types.sessions import (
@@ -34,8 +34,6 @@ from .types.strategy import Command, Operation, RequestTurn
 
 if TYPE_CHECKING:
     from .types.kernel import CoreState, RunState
-
-_LIVE = (SessionPhase.EXECUTING, SessionPhase.UNKNOWN, SessionPhase.SUSPENDED)
 
 
 class TurnPermit(BaseModel):
@@ -186,7 +184,7 @@ def _for_request(facts: _Facts, request: object, *, live: bool) -> TurnPermit | 
     if isinstance(request, DispatchTurn | ResumeSessionTurn):
         return _for_turn(facts, request, live=live)
     if isinstance(request, SubmitMeasurement) and request.decision_id is None:
-        return _for_scope(facts, request.scope, live=live)
+        return _permit_for_turn(facts, request.requested_by, live=live)
     if not _operator_drain(facts):
         return None
     if isinstance(request, EnsureSession):
@@ -230,17 +228,30 @@ def _own_ref(request: DispatchTurn | ResumeSessionTurn) -> InvocationRef:
     )
 
 
-def _for_scope(facts: _Facts, scope: object, *, live: bool) -> TurnPermit | None:
-    found: list[TurnPermit] = []
-    for invocation in facts.sessions.invocations:
-        if invocation.scope != scope or invocation.phase not in _LIVE:
-            continue
-        permit = _lookup(facts, invocation.invocation, live=live)
-        if permit is not None:
-            found.append(permit)
-    if not found:
+def _executing_turn(sessions: SessionsState, scope: Scope) -> InvocationRef | None:
+    """The one turn running in ``scope``, or None when none is or more than one is."""
+    running = [
+        row.invocation
+        for row in sessions.invocations
+        if row.scope == scope and row.phase == SessionPhase.EXECUTING
+    ]
+    if len(running) != 1:
         return None
-    return min(found, key=lambda item: item.deadline_at)
+    return running[0]
+
+
+def _permit_for_turn(facts: _Facts, ref: InvocationRef | None, *, live: bool) -> TurnPermit | None:
+    """The permit ``ref`` consumes.
+
+    Outside an operator Pause drain of this epoch, only that turn's own bound
+    counts, hold credit included. The drain also accepts the ancestor the turn
+    continues. With no turn, there is no permit.
+    """
+    if ref is None:
+        return None
+    if not _operator_drain(facts):
+        return _own_holding(facts, ref, live=live)
+    return _lookup(facts, ref, live=live)
 
 
 def _for_session(facts: _Facts, session_id: object, *, live: bool) -> TurnPermit | None:
