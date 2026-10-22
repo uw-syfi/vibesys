@@ -15,9 +15,9 @@ import {baselineFacts, capacityIntervals, comparisonFacts, inputFailures} from '
 import {measuredSpans} from './readings.js';
 import {screenSpans} from './spans.js';
 import {type StartupStep, startupSteps} from './startup.js';
-import type {StoreHistory, StoreView} from './types.js';
+import type {SkeletonContent, StoreHistory, StoreView} from './types.js';
 
-export type {StoreHistory, StoreView} from './types.js';
+export type {SkeletonContent, StoreHistory, StoreView} from './types.js';
 
 export interface SkeletonReading {
   readonly spans: ReturnType<typeof screenSpans>;
@@ -87,6 +87,7 @@ export function readSkeleton(
   skeleton: StoreHistory,
   view: StoreView,
   objectiveText = '',
+  content?: SkeletonContent,
 ): SkeletonReading {
   screenSequence(view.seq);
   const epoch = view.epochs.at(-1)?.epoch;
@@ -146,7 +147,7 @@ export function readSkeleton(
       (last, time) => (last === null ? time : Math.max(last, time)),
       null,
     ),
-    core: skeletonCore(view),
+    core: skeletonCore(view, content),
     phase: lifecycleStatus(view.lifecycle),
     streams: skeleton.streams
       .filter(stream => stream.kind === StreamKind.LOG)

@@ -384,6 +384,24 @@ function objectiveTile(model: RunModel, best: CandidateMeasurement | null): Metr
   };
 }
 
+/** Format the writer-owned primary objective without reselecting a best candidate. */
+function writerObjectiveTile(model: RunModel): MetricTileView {
+  const headline = model.headline;
+  const metric = headline?.series?.name ?? 'metric';
+  const input = headline?.inputValue ?? null;
+  const value = headline?.bestValue ?? null;
+  const better =
+    value !== null && input !== null && input !== 0
+      ? improvement(value / input, model.direction)
+      : null;
+  return {
+    id: metric,
+    name: metricLabel(metric),
+    ...tileWords(model, value, input, ` ${unitLabel(headline?.series?.unit ?? '')}`, better),
+    trend: null,
+  };
+}
+
 /**
  * The performance row at `model`. `objectives` are the run's, read from the whole run: a scrubbed
  * model of the run's first moments has no overview yet, and the row must not change its tiles.
@@ -396,8 +414,9 @@ export function heroView(
   return {
     // A run that declares several objectives has a tile each (its gates carry a reading per
     // objective); any other run has the one tile of its objective metric.
-    tiles:
-      objectives.length >= 2
+    tiles: model.headline
+      ? [writerObjectiveTile(model)]
+      : objectives.length >= 2
         ? objectives.map(axis => axisTile(model, axis))
         : [objectiveTile(model, leader?.measurement ?? null)],
     measured: model.candidates.candidates.filter(item => item.measurement?.metricValue != null)

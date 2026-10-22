@@ -1,6 +1,7 @@
 /** The bounded raw record projection, independent of connection control state. */
 import {create, fromBinary, toBinary} from '@bufbuild/protobuf';
 import {
+  type BlobAttached,
   HostService,
   RecordSchema,
   Severity,
@@ -24,6 +25,7 @@ export interface RecordRow {
   readonly event: string;
   readonly message: string;
   readonly failure: boolean;
+  readonly attachment?: BlobAttached;
 }
 
 export function recordRows(
@@ -49,6 +51,7 @@ export function decodeRecordRows(bytes: readonly Uint8Array[]): readonly RecordR
         event = value.type;
     }
     return {
+      ...(record.body.case === 'blob' ? {attachment: record.body.value} : {}),
       seq: String(record.seq),
       epoch: record.epoch,
       body: record.body.case,

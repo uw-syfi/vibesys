@@ -3,6 +3,7 @@ import {emptyLogView, foldChunk, type LogView} from '@vibesys/logs';
 import {unprovided} from '@vibesys/machine';
 import type {RunLivenessHint, SkeletonLoad} from '@vibesys/run-skeleton';
 import {type RecordRow, recordRows} from '@vibesys/run-state/records';
+import type {SkeletonContent} from '@vibesys/run-state/skeleton';
 import {assign, fromCallback, setup} from 'xstate';
 import {
   type RunPageAction,
@@ -41,6 +42,7 @@ export interface GatewayRunContext extends GatewayInput {
   text: Readonly<Record<string, string>>;
   contentHash: string;
   attemptedContent: ReadonlySet<string>;
+  replies: NonNullable<SkeletonContent['replies']>;
   error: string | null;
   recordsNextSeq: bigint;
 }
@@ -52,7 +54,28 @@ function nextContentHash(context: GatewayRunContext): string {
     if (hash !== '' && context.text[hash] === undefined && !context.attemptedContent.has(hash))
       return hash;
   }
-  return '';
+  return (
+    Object.values(context.replies)
+      .flat()
+      .map(ref => ref.hash)
+      .find(hash => context.text[hash] === undefined && !context.attemptedContent.has(hash)) ?? ''
+  );
+}
+
+function replyAttachments(
+  previous: GatewayRunContext['replies'],
+  rows: readonly RecordRow[],
+): GatewayRunContext['replies'] {
+  const replies = {...previous};
+  for (const row of rows) {
+    const attachment = row.attachment;
+    if (attachment?.role !== 'reply' || !attachment.blob) continue;
+    replies[attachment.span] = [
+      ...(replies[attachment.span] ?? []),
+      {seq: BigInt(row.seq), hash: attachment.blob.sha256},
+    ];
+  }
+  return replies;
 }
 
 /** Presentation changes reuse the existing pure reducer; gateway commands never reach legacy ports. */
@@ -122,6 +145,7 @@ export const gatewayRunMachine = setup({
       const rows = recordRows(context.ui.recordLog ?? [], event.rows);
       const last = rows.at(-1);
       return {
+        replies: replyAttachments(context.replies, event.rows),
         recordsNextSeq: last ? BigInt(last.seq) + 1n : context.recordsNextSeq,
         ui: {...context.ui, recordLog: rows, recordLogError: null},
       };
@@ -138,6 +162,7 @@ export const gatewayRunMachine = setup({
     text: {},
     contentHash: '',
     attemptedContent: new Set(),
+    replies: {},
     error: null,
     recordsNextSeq: 0n,
   }),

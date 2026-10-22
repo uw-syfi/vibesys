@@ -1,16 +1,18 @@
 import {expect, test} from 'bun:test';
-import {clone, create, toBinary} from '@bufbuild/protobuf';
+import {clone, create, fromBinary, toBinary} from '@bufbuild/protobuf';
 import {AnySchema} from '@bufbuild/protobuf/wkt';
 import {recordedProjectRoot} from '@vibesys/hosts';
 import {
   AgentTurnAttrsSchema,
   AttemptOutcome,
   Change,
+  Direction,
   DrainGoal,
   KeyframeSchema,
   LifecycleSchema,
   Outcome,
   RecordSchema,
+  RunHeadSchema,
   RunLiveness,
   RuntimeType,
   SpanFailureKind,
@@ -18,6 +20,7 @@ import {
   SpanStatus,
   StageState,
   StartupStage,
+  TokenUsageSchema,
   WaitKind,
 } from '@vibesys/proto';
 import {storeRunFixture} from '@vibesys/run-fixtures';
@@ -26,6 +29,7 @@ import {usageOverTime} from '@vibesys/run-state/usage';
 import {
   clockStart,
   headerView,
+  heroView,
   projectSkeleton,
   recordedRunRoot,
   runPageInitial,
@@ -409,5 +413,106 @@ test('a run with no recorded root does not use the path the window remembered', 
   expect(recordedRunRoot(skeleton)).toBeUndefined();
   if (state.record.kind === 'live' || state.record.kind === 'ended') {
     expect(state.record.run.projectRoot).toBe('');
+  }
+});
+
+test('a native metric headlines the writer fact even without candidate-shaped spans', () => {
+  const first = storeRunFixture('short', 1).records[0];
+  if (!first) throw new Error('fixture');
+  const skeleton = foldSkeleton(seedSkeleton(), [
+    first,
+    create(RecordSchema, {
+      seq: 2n,
+      epoch: 1,
+      body: {case: 'metric', value: {series: 'throughput', value: 321, clock: 1}},
+    }),
+  ]);
+  expect(skeleton.metrics[0]?.points[0]?.point?.value).toBe(321);
+  const head = create(RunHeadSchema, {
+    epoch: 1,
+    committedSeq: 2n,
+    objective: {
+      series: {name: 'throughput', unit: 'ops/s', direction: Direction.MAX},
+      bestValue: 321,
+      inputValue: 100,
+    },
+  });
+  const model = projectSkeleton(skeleton, 2n, '', {head});
+  expect(model.candidates.candidates).toHaveLength(0);
+  expect(heroView(model).tiles[0]?.figure).toBe('3.21×');
+  expect(heroView(model).tiles[0]?.detail).toContain('321 ops/s');
+  for (const committedSeq of [1n, 3n]) {
+    expect(
+      projectSkeleton(skeleton, 2n, '', {head: {...head, committedSeq}}).headline,
+    ).toBeUndefined();
+  }
+});
+
+test('native turn costs, cache tokens and inline or attached typed replies survive keyframes', () => {
+  for (const attached of [false, true]) {
+    const fixture = storeRunFixture('short', 1);
+    const initial = foldSkeleton(seedSkeleton(), fixture.records);
+    const span = Object.values(seekSkeleton(initial, initial.throughSeq ?? 0n).spans).find(
+      each => each.label?.kind === 'agent_turn',
+    );
+    if (!span?.label?.attrs) throw new Error('fixture');
+    const reply = {
+      kind: 'Result',
+      json_schema: {type: 'object'},
+      value: {answer: attached ? 'x'.repeat(65537) : 'yes'},
+    };
+    const attrs = fromBinary(AgentTurnAttrsSchema, span.label.attrs.value);
+    attrs.replyJson = attached ? '' : JSON.stringify(reply);
+    attrs.usage = create(TokenUsageSchema, {
+      input: 3n,
+      cacheRead: 7n,
+      cacheCreation: 11n,
+      output: 5n,
+      costUsd: 1.25,
+    });
+    const seq = (initial.throughSeq ?? 0n) + 1n;
+    const updated = clone(SpanSchema, span);
+    if (!updated.label) throw new Error('fixture');
+    updated.label.attrs = create(AnySchema, {
+      typeUrl: `type.googleapis.com/${AgentTurnAttrsSchema.typeName}`,
+      value: toBinary(AgentTurnAttrsSchema, attrs),
+    });
+    const skeleton = foldSkeleton(initial, [
+      create(RecordSchema, {
+        seq,
+        epoch: 1,
+        body: {case: 'span', value: {change: Change.UPDATED, span: updated}},
+      }),
+    ]);
+    const hash = 'a'.repeat(64);
+    const content = {text: {[hash]: JSON.stringify(reply)}, replies: {[span.id]: [{seq, hash}]}};
+    for (const history of [
+      skeleton,
+      seedSkeleton(create(KeyframeSchema, {...skeleton, throughSeq: seq, logOffset: 8n})),
+    ]) {
+      const model = projectSkeleton(history, seq, '', {content});
+      const state = skeletonScreenState(
+        SEED,
+        history,
+        model,
+        runPageInitial(SEED),
+        undefined,
+        content,
+      );
+      const usage = state.run.core?.usageRecords.find(row => row.span_id === span.id);
+      expect(usage?.cost_usd).toBe(1.25);
+      expect(usage?.tokens.cache_read).toBe(7);
+      expect(usage?.tokens.cache_write).toBe(11);
+      expect(state.run.core?.transcript.find(row => row.spanId === span.id)?.reply).toEqual(reply);
+      const before = skeletonScreenState(
+        SEED,
+        history,
+        model,
+        {...runPageInitial(SEED), view: {at: Number(seq - 1n)}},
+        undefined,
+        content,
+      );
+      expect(before.run.core?.transcript.find(row => row.spanId === span.id)).toBeUndefined();
+    }
   }
 });

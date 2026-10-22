@@ -171,6 +171,7 @@ export function gatewayReader(
                     : {
                         epoch: observedEpoch(response),
                         value: response.liveness,
+                        head: response.head,
                       },
                 });
               }
@@ -197,5 +198,5 @@ export function gatewayReader(
 }
 
 function observedEpoch(response: WatchRunsResponse): number {
-  return response.head?.process?.epoch ?? 0;
+  return response.head?.epoch ?? 0;
 }

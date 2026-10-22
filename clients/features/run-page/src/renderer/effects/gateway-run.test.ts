@@ -479,14 +479,14 @@ test.each([
     create(WatchRunsResponseSchema, {
       runId: 'other',
       liveness: RunLiveness.INTERRUPTED,
-      head: {process: {epoch: 1}},
+      head: {epoch: 1, process: {epoch: 1}},
     }),
   );
   transport.observe(
     create(WatchRunsResponseSchema, {
       runId: 'run-a',
       liveness: RunLiveness.ALIVE,
-      head: {process: {epoch: 1}},
+      head: {epoch: 1, process: {epoch: 1}},
     }),
   );
   await reached(actor, snapshot => snapshot.context.hint?.value === RunLiveness.ALIVE);
@@ -494,7 +494,7 @@ test.each([
     create(WatchRunsResponseSchema, {
       runId: 'run-a',
       liveness: RunLiveness.INTERRUPTED,
-      head: {process: {epoch: 1}},
+      head: {epoch: 1, process: {epoch: 1}},
     }),
   );
   await reached(actor, snapshot => snapshot.context.hint?.value === RunLiveness.INTERRUPTED);
@@ -599,7 +599,7 @@ test.each([
     create(WatchRunsResponseSchema, {
       runId: 'run-a',
       liveness: RunLiveness.INTERRUPTED,
-      head: {process: {epoch: 1}},
+      head: {epoch: 1, process: {epoch: 1}},
     }),
   );
   await reached(actor, snapshot => snapshot.context.hint?.value === RunLiveness.INTERRUPTED);
@@ -608,4 +608,68 @@ test.each([
   actor.stop();
   expect(clock.pending).toBe(0);
   expect(transport.calls.filter(call => call.method.endsWith('WatchRuns'))).toHaveLength(2);
+});
+
+test('reply attachments load through the same verified content owner as objectives', async () => {
+  const fixture = storeRunFixture('short', 1);
+  const skeleton = foldSkeleton(seedSkeleton(), fixture.records);
+  const span = Object.values(skeleton.spans)
+    .find(history => history.versions.at(-1)?.span?.label?.kind === 'agent_turn')
+    ?.versions.at(-1)?.span;
+  if (!span) throw new Error('fixture');
+  const reply = {kind: 'Result', json_schema: {type: 'object'}, value: {answer: 'x'.repeat(65537)}};
+  const text = JSON.stringify(reply);
+  const data = new TextEncoder().encode(text);
+  const hash = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', data)))
+    .map(value => value.toString(16).padStart(2, '0'))
+    .join('');
+  const seq = (skeleton.throughSeq ?? 0n) + 1n;
+  const transport = new FakeRunTransport({
+    ...fixture,
+    records: [
+      ...fixture.records,
+      create(RecordSchema, {
+        seq,
+        epoch: 1,
+        body: {
+          case: 'blob',
+          value: {
+            span: span.id,
+            role: 'reply',
+            blob: {sha256: hash, size: BigInt(data.length), mediaType: 'application/json'},
+          },
+        },
+      }),
+    ],
+    blobs: {...fixture.blobs, [hash]: data},
+  });
+  const clock = new FakeClock();
+  const actor = startGatewayRun(
+    {
+      reader: gatewayReader(transport, new FakeSkeletonCache(), clock.schedule),
+      watchSetting: () => () => {},
+      setting: async () => true,
+    },
+    clock.schedule,
+    {seed: SEED},
+  );
+  try {
+    await reached(actor, snapshot => snapshot.context.text[hash] !== undefined);
+    const {load, ui, replies, text: content} = actor.getSnapshot().context;
+    if (!load) throw new Error('loaded history required');
+    const model = projectSkeleton(load.skeleton, seq, '', {content: {text: content, replies}});
+    const state = skeletonScreenState(SEED, load.skeleton, model, ui, undefined, {
+      text: content,
+      replies,
+    });
+    expect(state.run.core?.transcript.find(row => row.spanId === span.id)?.reply).toEqual(reply);
+    expect(replies[span.id]).toEqual([{seq, hash}]);
+  } finally {
+    actor.stop();
+  }
+  expect(
+    transport.calls
+      .filter(call => !call.method.endsWith('Skeleton') && !call.method.endsWith('GetBlobs'))
+      .every(call => call.signal.aborted),
+  ).toBe(true);
 });
