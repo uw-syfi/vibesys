@@ -7,6 +7,7 @@ import gzip
 import json
 import os
 from datetime import UTC, datetime
+from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -20,9 +21,36 @@ from vibesys.events import CoreEvent, CoreEventType, RunStartedData, SpanStarted
 from vibesys.run.runlog_tee import RunLogTee
 from vs_core.api import Span, SpanStatus, SpanType
 from vs_project.api import Project
-from vs_proto.api import Keyframe, RunHead
-from vs_runlog.api import FileRunContent, FileRunLogWriter, RunLogReader
+from vs_proto.api import RUN_LOG_MAGIC, EpochStarted, Keyframe, Record, RunHead
+from vs_runlog.api import FileRunContent, FileRunLogWriter, RunLogReader, encode_frame
 from vs_sim.api.testing import ManualClock, SimThreads
+
+# Epoch headers record the live API and store schema hashes, which change with every
+# unrelated .proto addition. The goldens pin conversion behavior, so they carry this
+# placeholder instead; tests assert the live hashes on a fresh conversion.
+PINNED_SCHEMA_HASH = "0" * 64
+
+
+def pin_schema_hashes(epoch: EpochStarted) -> None:
+    """Replace the live schema hashes with the placeholder, keeping the byte length."""
+    epoch.api_schema_hash = PINNED_SCHEMA_HASH
+    epoch.store_schema_hash = PINNED_SCHEMA_HASH
+
+
+def pinned_conversion(log: bytes, keyframe: bytes) -> tuple[bytes, list[Record], bytes]:
+    """Return a converted log, its records and its keyframe with schema hashes pinned."""
+    records = list(RunLogReader(BytesIO(log)))
+    if RUN_LOG_MAGIC + b"".join(encode_frame(record) for record in records) != log:
+        message = "converted log does not round-trip through its records"
+        raise ValueError(message)
+    for record in records:
+        if record.body is not None and record.body.field in {"epoch_started", "declaration_amended"}:
+            pin_schema_hashes(record.body.value)
+    frame = Keyframe.from_binary(keyframe)
+    for version in frame.epochs:
+        pin_schema_hashes(version.epoch)
+    pinned = RUN_LOG_MAGIC + b"".join(encode_frame(record) for record in records)
+    return pinned, records, frame.to_binary()
 
 
 def fixtures(project: Project) -> dict[str, bytes]:
@@ -70,19 +98,19 @@ def fixtures(project: Project) -> dict[str, bytes]:
     convert_run(project, run_id, clock=ManualClock(), threads=SimThreads())
     head = RunHead.from_binary((directory / "run.head").read_bytes())
     head.clear_field("process")
-    expected = (directory / "keyframes" / f"{head.committed_seq}.pb").read_bytes()
-    frame = Keyframe.from_binary(expected)
-    if frame.log_offset <= 1 << 20:
+    log, records, expected = pinned_conversion(
+        (directory / "run.log").read_bytes(),
+        (directory / "keyframes" / f"{head.committed_seq}.pb").read_bytes(),
+    )
+    if Keyframe.from_binary(expected).log_offset <= 1 << 20:
         message = "converted fixture must exceed the Skeleton replay budget"
         raise ValueError(message)
-    with (directory / "run.log").open("rb") as stream:
-        records = list(RunLogReader(stream))
     record_json = json.dumps(
         [base64.b64encode(record.to_binary()).decode("ascii") for record in records]
     ).encode()
     return {
         "records.base64.json.gz": gzip.compress(record_json, mtime=0),
-        "run.log.gz": gzip.compress((directory / "run.log").read_bytes(), mtime=0),
+        "run.log.gz": gzip.compress(log, mtime=0),
         "run.head": head.to_binary(),
         f"keyframes/{head.committed_seq}.pb": expected,
         "expected.pb": expected,
@@ -143,11 +171,12 @@ def usage_fixtures() -> dict[str, bytes]:
             writer.checkpoint()
         head = RunHead.from_binary((root / "run.head").read_bytes())
         head.clear_field("process")
-        expected = (root / "keyframes" / f"{head.committed_seq}.pb").read_bytes()
-        with (root / "run.log").open("rb") as stream:
-            records = list(RunLogReader(stream))
+        log, records, expected = pinned_conversion(
+            (root / "run.log").read_bytes(),
+            (root / "keyframes" / f"{head.committed_seq}.pb").read_bytes(),
+        )
         return {
-            "usage/run.log.gz": gzip.compress((root / "run.log").read_bytes(), mtime=0),
+            "usage/run.log.gz": gzip.compress(log, mtime=0),
             "usage/run.head": head.to_binary(),
             "usage/expected.pb": expected,
             "usage/records.base64.json": (
