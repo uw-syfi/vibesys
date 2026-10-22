@@ -1,0 +1,102 @@
+syntax = "proto3";
+package vibesys.core.v1;
+
+import "buf/validate/validate.proto";
+import "vibesys/core/v1/common.proto";
+import "vibesys/core/v1/control.proto";
+import "vibesys/core/v1/vocabulary.proto";
+import "vibesys/store/v1/replay.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/gateway/gen/vibesys/core/v1;corev1";
+
+enum ReplayAgentAccess {
+  REPLAY_AGENT_ACCESS_UNSPECIFIED = 0;
+  REPLAY_AGENT_ACCESS_READ_ONLY = 1;
+  REPLAY_AGENT_ACCESS_WRITE_ARTIFACTS = 2;
+  REPLAY_AGENT_ACCESS_WRITE_CANDIDATE = 3;
+}
+
+enum ReplaySessionAcquisition {
+  REPLAY_SESSION_ACQUISITION_UNSPECIFIED = 0;
+  REPLAY_SESSION_ACQUISITION_FRESH = 1;
+  REPLAY_SESSION_ACQUISITION_REUSE = 2;
+}
+
+enum ReplaySessionLifetime {
+  REPLAY_SESSION_LIFETIME_UNSPECIFIED = 0;
+  REPLAY_SESSION_LIFETIME_EPHEMERAL = 1;
+  REPLAY_SESSION_LIFETIME_OWNER = 2;
+}
+
+message ReplayAgentSession {
+  option (vibesys.store.v1.replay_context) = true;
+  string id = 1 [(buf.validate.field).string.min_len = 1, (vibesys.store.v1.replay_field) = REPLAY_FIELD_KIND_IDENTITY];
+  string role = 2 [(buf.validate.field).string.min_len = 1, (vibesys.store.v1.replay_field) = REPLAY_FIELD_KIND_IDENTITY];
+  ReplayAgentAccess access = 3 [(buf.validate.field).enum = {defined_only: true, not_in: [0]}, (vibesys.store.v1.replay_field) = REPLAY_FIELD_KIND_IDENTITY];
+  ReplaySessionAcquisition acquisition = 4 [(buf.validate.field).enum = {defined_only: true, not_in: [0]}, (vibesys.store.v1.replay_field) = REPLAY_FIELD_KIND_POLICY];
+  ReplaySessionLifetime lifetime = 5 [(buf.validate.field).enum = {defined_only: true, not_in: [0]}, (vibesys.store.v1.replay_field) = REPLAY_FIELD_KIND_IDENTITY];
+  optional string model = 6 [(buf.validate.field).string = {min_len: 1, max_len: 256}, (vibesys.store.v1.replay_field) = REPLAY_FIELD_KIND_POLICY];
+}
+
+message ReplayEnsureAgent {
+  option (vibesys.store.v1.replay_context) = true;
+  ReplayAgentSession session = 1 [(buf.validate.field).required = true, (vibesys.store.v1.replay_field) = REPLAY_FIELD_KIND_IDENTITY];
+  optional string required_resource = 2 [(buf.validate.field).string.min_len = 1, (vibesys.store.v1.replay_field) = REPLAY_FIELD_KIND_IDENTITY];
+}
+
+message ReplayAgentInput {
+  string id = 1 [(buf.validate.field).string.min_len = 1];
+  InputTarget target = 2 [(buf.validate.field).required = true];
+  ArtifactRef artifact = 3 [(buf.validate.field).required = true];
+  double received_at = 4 [(buf.validate.field).double = {gte: 0, finite: true}];
+  uint64 sequence = 5;
+  InputMode mode = 6 [(buf.validate.field).enum = {defined_only: true, not_in: [0]}];
+}
+
+message ReplayAgentTurn {
+  option (vibesys.store.v1.replay_context) = true;
+  ReplayAgentSession session = 1 [(buf.validate.field).required = true, (vibesys.store.v1.replay_field) = REPLAY_FIELD_KIND_IDENTITY];
+  string invocation = 2 [(buf.validate.field).string.min_len = 1, (vibesys.store.v1.replay_field) = REPLAY_FIELD_KIND_IDENTITY];
+  Scope workspace = 3 [(buf.validate.field).required = true, (vibesys.store.v1.replay_field) = REPLAY_FIELD_KIND_IDENTITY];
+  repeated ArtifactRef prompts = 4 [(buf.validate.field).repeated.min_items = 1, (vibesys.store.v1.replay_field) = REPLAY_FIELD_KIND_POLICY];
+  SchemaRef output_schema = 5 [(buf.validate.field).required = true, (vibesys.store.v1.replay_field) = REPLAY_FIELD_KIND_IDENTITY];
+  ArtifactRef tool_policy = 6 [(vibesys.store.v1.replay_field) = REPLAY_FIELD_KIND_POLICY];
+  // Typed fact artifacts that supply semantic input, distinct from rendered prompt policy.
+  repeated ArtifactRef artifact_dependencies = 7 [(buf.validate.field).repeated.min_items = 1, (vibesys.store.v1.replay_field) = REPLAY_FIELD_KIND_IDENTITY];
+  uint32 max_turns = 8 [(buf.validate.field).uint32.gte = 1, (vibesys.store.v1.replay_field) = REPLAY_FIELD_KIND_POLICY];
+  repeated ReplayAgentInput inputs = 9 [(vibesys.store.v1.replay_field) = REPLAY_FIELD_KIND_IDENTITY];
+  repeated ReplayAgentInput guidance = 10 [(vibesys.store.v1.replay_field) = REPLAY_FIELD_KIND_IDENTITY];
+}
+
+message ReplayCancelAgent {
+  InvocationRef invocation = 1 [(buf.validate.field).required = true];
+}
+
+message ReplayCloseAgent {
+  string session = 1 [(buf.validate.field).string.min_len = 1];
+  optional string resource = 2 [(buf.validate.field).string.min_len = 1];
+}
+
+message ReplayAgentRequest {
+  option (vibesys.store.v1.replay_context) = true;
+  Scope scope = 1 [(buf.validate.field).required = true, (vibesys.store.v1.replay_field) = REPLAY_FIELD_KIND_IDENTITY];
+  optional string admission = 2 [(buf.validate.field).string.min_len = 1, (vibesys.store.v1.replay_field) = REPLAY_FIELD_KIND_IDENTITY];
+  // Fixed before dispatch; inspection does not apply a newly tightened bound.
+  double within_seconds = 3 [(buf.validate.field).double = {gt: 0, finite: true}, (vibesys.store.v1.replay_field) = REPLAY_FIELD_KIND_POLICY];
+  oneof action {
+    option (buf.validate.oneof).required = true;
+    ReplayEnsureAgent ensure = 4 [(vibesys.store.v1.replay_field) = REPLAY_FIELD_KIND_IDENTITY];
+    ReplayAgentTurn turn = 5 [(vibesys.store.v1.replay_field) = REPLAY_FIELD_KIND_IDENTITY];
+    ReplayCancelAgent cancel = 6 [(vibesys.store.v1.replay_field) = REPLAY_FIELD_KIND_IDENTITY];
+    ReplayCloseAgent close = 7 [(vibesys.store.v1.replay_field) = REPLAY_FIELD_KIND_IDENTITY];
+  }
+}
+
+message ReplayAgentResult {
+  ObservationStatus status = 1 [(buf.validate.field).enum = {defined_only: true, in: [1, 3, 4, 5]}];
+  optional string resource = 2 [(buf.validate.field).string.min_len = 1];
+  bool released = 3;
+  string detail = 4;
+  SessionId session = 5;
+  InvocationRef invocation = 6;
+}

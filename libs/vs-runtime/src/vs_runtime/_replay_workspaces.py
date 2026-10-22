@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 from typing import TYPE_CHECKING, Literal, TypedDict, cast
 
 from vs_core.api import (
@@ -12,8 +11,6 @@ from vs_core.api import (
     DecisionId,
     DiscardWorkspace,
     EnsureWorkspace,
-    HostFence,
-    HostId,
     ObservationStatus,
     RequestId,
     RetainedCandidate,
@@ -24,17 +21,13 @@ from vs_core.api import (
     SettlementId,
     SnapshotAndRetain,
     TrustedBaseline,
-    Until,
     WorkspaceMode,
     WorkspacePlan,
 )
 from vs_proto.api import core_leaves, validate
 from vs_proto.api import replay_workspace as pb
-from vs_runtime._core_requests import ExecutionContext, ExecutionResult
-from vs_runtime._effect_fence import EffectFences, Entered, MayHold
-from vs_runtime._operation_requests import operation_fence
-from vs_runtime._receipt_store import NeverBegun, ReceiptCorruptError
-from vs_runtime._replay_operations import ReplayOperationError, ReplayOperationHost, _Lease
+from vs_runtime._replay_operations import ReplayOperationError, ReplayOperationHost
+from vs_runtime._replay_owner import ReceiptReplayExecutor, ReplayOwnerCodec
 from vs_runtime._replay_runtime import ReplayAbsent, ReplayPending, ReplayResult, ReplayUnknown
 from vs_runtime.api.core_values import from_proto, to_proto
 
@@ -42,8 +35,8 @@ if TYPE_CHECKING:
     from vs_core.api import EvidenceRef, InvocationRef
     from vs_project.api import StoreFence
     from vs_proto.api import Span
-    from vs_runtime._core_requests import WorkspaceRequests, WorkspaceRoleRequest
-    from vs_runtime._receipt_store import ExecutionHistory, ReceiptStore
+    from vs_runtime._core_requests import ExecutionResult, WorkspaceRequests, WorkspaceRoleRequest
+    from vs_runtime._receipt_store import ReceiptStore
 
 
 _RETENTION: dict[pb.ReplayRetention, Literal["wip", "candidate"]] = {
@@ -96,9 +89,22 @@ class WorkspaceReplayExecutor:
         if not 0 < within_seconds < float("inf"):
             problem = "workspace replay within_seconds must be finite and positive"
             raise ReplayOperationError(problem)
-        self._owner, self._receipts, self._host = owner, receipts, host
-        self._within = within_seconds
-        self._fences = EffectFences(receipts)
+        self._host = host
+        executor = ReceiptReplayExecutor(
+            owner.execute,
+            receipts,
+            host,
+            ReplayOwnerCodec(self._request, self._encode, lambda _: within_seconds, lambda _: None),
+        )
+        self._executor = executor
+
+    async def execute(self, span: Span, fence: StoreFence) -> ReplayResult:
+        return await self._executor.execute(span, fence)
+
+    async def inspect(
+        self, span: Span, fence: StoreFence
+    ) -> ReplayResult | ReplayAbsent | ReplayPending | ReplayUnknown:
+        return await self._executor.inspect(span, fence)
 
     @staticmethod
     def _native(span: Span) -> pb.ReplayWorkspaceRequest:
@@ -184,19 +190,6 @@ class WorkspaceReplayExecutor:
                 problem = "workspace replay action is not supported"
                 raise ReplayOperationError(problem)
 
-    def _context(self, span: Span, fence: StoreFence) -> ExecutionContext:
-        if span.replay is None:
-            problem = "workspace replay requires immutable metadata"
-            raise ReplayOperationError(problem)
-        now = self._host.clock.now()
-        return ExecutionContext(
-            fence=HostFence(host_id=HostId(root=fence.host_id), epoch=fence.epoch),
-            now_at=now,
-            payload_digest=hashlib.sha256(span.replay.to_binary()).hexdigest(),
-            until=Until(at=now + self._within),
-            lease=_Lease(self._host.store, fence, self._host.clock),
-        )
-
     @staticmethod
     def _result(result: ExecutionResult) -> ReplayResult | ReplayUnknown:
         observed = result.observation
@@ -215,68 +208,9 @@ class WorkspaceReplayExecutor:
         validate(value)
         return ReplayResult(value)
 
-    async def _execute(
-        self, request: WorkspaceRoleRequest, context: ExecutionContext
+    @classmethod
+    async def _encode(
+        cls, request: WorkspaceRoleRequest, result: ExecutionResult
     ) -> ReplayResult | ReplayUnknown:
-        result = await self._owner.execute(request, context)
-        if not isinstance(result, ExecutionResult):
-            return ReplayUnknown(result.detail)
-        return self._result(result)
-
-    def _history(self, span_id: str, context: ExecutionContext) -> ExecutionHistory:
-        history = self._receipts.history(span_id)
-        if not isinstance(history, NeverBegun) and history.payload_digest != context.payload_digest:
-            problem = f"replay invocation payload conflict: {span_id}"
-            raise ReplayOperationError(problem)
-        return history
-
-    async def execute(self, span: Span, fence: StoreFence) -> ReplayResult:
-        request = self._request(span)
-        context = self._context(span, fence)
-        if context.lease is None or not context.lease.verify(now_at=context.now_at):
-            problem = "workspace replay writer lease was lost"
-            raise ReplayOperationError(problem)
-        identity = RequestId(root=span.id)
-        key = operation_fence(identity)
-        with self._receipts.exclusive():
-            self._history(span.id, context)
-            admission = self._fences.enter(key, by=identity, host=context.fence)
-        if not isinstance(admission, Entered):
-            problem = f"withdrawn replay invocation: {span.id}"
-            raise ReplayOperationError(problem)
-        try:
-            result = await self._execute(request, context)
-            if isinstance(result, ReplayUnknown):
-                problem = f"workspace replay outcome remains unknown: {result.reason}"
-                raise ReplayOperationError(problem)
-            return result
-        finally:
-            self._fences.leave(key, by=identity)
-
-    async def inspect(
-        self, span: Span, fence: StoreFence
-    ) -> ReplayResult | ReplayAbsent | ReplayPending | ReplayUnknown:
-        request = self._request(span)
-        context = self._context(span, fence)
-        if context.lease is None or not context.lease.verify(now_at=context.now_at):
-            return ReplayUnknown("workspace replay writer lease was lost")
-        try:
-            with self._receipts.exclusive():
-                history = self._history(span.id, context)
-                closure = self._fences.close(
-                    operation_fence(RequestId(root=span.id)),
-                    by=RequestId(root=f"inspect/{fence.epoch}/{span.id}"),
-                    host=context.fence,
-                )
-                if isinstance(closure, MayHold) and closure.live:
-                    return ReplayPending()
-                if isinstance(history, NeverBegun):
-                    # The outer gate is closed, and an earlier writer cannot pass
-                    # the owner's lease check to install a begun marker later.
-                    return ReplayAbsent()
-                sealed = self._receipts.sealed(span.id, ExecutionResult)
-            if sealed is not None:
-                return self._result(sealed[1])
-            return await self._execute(request, context)
-        except ReceiptCorruptError as error:
-            return ReplayUnknown(str(error))
+        del request
+        return cls._result(result)

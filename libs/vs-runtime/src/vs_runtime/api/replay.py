@@ -27,6 +27,11 @@ from vs_runtime._replay_runtime import (
     ReplayRuntime,
     ReplayUnknown,
 )
+from vs_runtime._replay_sessions import (
+    ReplayAgentReply,
+    ReplaySessionServices,
+    SessionReplayExecutor,
+)
 from vs_runtime._replay_store import ReplayStore, RunLogReplayStore
 from vs_runtime._replay_workspaces import WorkspaceReplayExecutor
 
@@ -35,6 +40,7 @@ __all__ = [
     "FakeReplayExecutor",
     "RegisteredReplayExecutor",
     "ReplayAbsent",
+    "ReplayAgentReply",
     "ReplayCommitError",
     "ReplayCompleted",
     "ReplayEnding",
@@ -51,9 +57,11 @@ __all__ = [
     "ReplayResult",
     "ReplayRunHost",
     "ReplayRuntime",
+    "ReplaySessionServices",
     "ReplayStore",
     "ReplayUnknown",
     "RunLogReplayStore",
+    "SessionReplayExecutor",
     "WorkspaceReplayExecutor",
     "drive_replay",
 ]
