@@ -322,15 +322,21 @@ type EpochStarted struct {
 	// Absence preserves the validation of previously published typed headers.
 	ProvenanceKnown *bool `protobuf:"varint,12,opt,name=provenance_known,json=provenanceKnown,proto3,oneof" json:"provenance_known,omitempty"`
 	// Present only for keyed epochs. Retain this writer encoding indefinitely.
-	IdentityEncodingVersion *uint32                `protobuf:"varint,13,opt,name=identity_encoding_version,json=identityEncodingVersion,proto3,oneof" json:"identity_encoding_version,omitempty"`
-	InitialAllowance        *ReplayAllowance       `protobuf:"bytes,14,opt,name=initial_allowance,json=initialAllowance,proto3,oneof" json:"initial_allowance,omitempty"`
-	ReplayAcknowledgement   *ReplayAcknowledgement `protobuf:"bytes,15,opt,name=replay_acknowledgement,json=replayAcknowledgement,proto3,oneof" json:"replay_acknowledgement,omitempty"`
+	IdentityEncodingVersion *uint32          `protobuf:"varint,13,opt,name=identity_encoding_version,json=identityEncodingVersion,proto3,oneof" json:"identity_encoding_version,omitempty"`
+	InitialAllowance        *ReplayAllowance `protobuf:"bytes,14,opt,name=initial_allowance,json=initialAllowance,proto3,oneof" json:"initial_allowance,omitempty"`
+	// Decode-only: earlier keyed epochs acknowledged at most one notice here.
+	// Writers record replay_acknowledgements instead.
+	ReplayAcknowledgement *ReplayAcknowledgement `protobuf:"bytes,15,opt,name=replay_acknowledgement,json=replayAcknowledgement,proto3,oneof" json:"replay_acknowledgement,omitempty"`
 	// Canonical absolute directory recorded when the run is created. Windows,
 	// controls and resume read this and no path the client remembered. Absence
 	// on older logs means the run has no recorded root.
-	ProjectRoot   *string `protobuf:"bytes,16,opt,name=project_root,json=projectRoot,proto3,oneof" json:"project_root,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	ProjectRoot *string `protobuf:"bytes,16,opt,name=project_root,json=projectRoot,proto3,oneof" json:"project_root,omitempty"`
+	// One launch acknowledges every outstanding notice in this one batch, committed
+	// atomically with the epoch. A launch with no outstanding notice records one
+	// entry without notice_id.
+	ReplayAcknowledgements []*ReplayAcknowledgement `protobuf:"bytes,17,rep,name=replay_acknowledgements,json=replayAcknowledgements,proto3" json:"replay_acknowledgements,omitempty"`
+	unknownFields          protoimpl.UnknownFields
+	sizeCache              protoimpl.SizeCache
 }
 
 func (x *EpochStarted) Reset() {
@@ -475,6 +481,13 @@ func (x *EpochStarted) GetProjectRoot() string {
 	return ""
 }
 
+func (x *EpochStarted) GetReplayAcknowledgements() []*ReplayAcknowledgement {
+	if x != nil {
+		return x.ReplayAcknowledgements
+	}
+	return nil
+}
+
 // LegacyEvent is an interim bridge carrying one current JSONL run event verbatim.
 // Retained for the seven-day read window after phase 2 lands. Its field
 // number must be reserved after removal; existing store records remain readable.
@@ -597,7 +610,7 @@ const file_vibesys_store_v1_record_proto_rawDesc = "" +
 	"\x1arecord.declaration_amended\x124declaration amendment must name the containing epoch\x1aN!has(this.declaration_amended) || this.declaration_amended.epoch == this.epochB\r\n" +
 	"\x04body\x12\x05\xbaH\x02\b\x01B\b\n" +
 	"\x06_clockB\x0f\n" +
-	"\r_replay_clock\"\xbd\x14\n" +
+	"\r_replay_clock\"\xa4\x19\n" +
 	"\fEpochStarted\x12\x15\n" +
 	"\x06run_id\x18\x01 \x01(\tR\x05runId\x12\x14\n" +
 	"\x05epoch\x18\x02 \x01(\rR\x05epoch\x12\x1b\n" +
@@ -617,14 +630,16 @@ const file_vibesys_store_v1_record_proto_rawDesc = "" +
 	"\x11initial_allowance\x18\x0e \x01(\v2!.vibesys.store.v1.ReplayAllowanceH\x02R\x10initialAllowance\x88\x01\x01\x12c\n" +
 	"\x16replay_acknowledgement\x18\x0f \x01(\v2'.vibesys.store.v1.ReplayAcknowledgementH\x03R\x15replayAcknowledgement\x88\x01\x01\x122\n" +
 	"\fproject_root\x18\x10 \x01(\tB\n" +
-	"\xbaH\ar\x05\x10\x01(\x80 H\x04R\vprojectRoot\x88\x01\x01:\xf2\f\xbaH\xee\f\x1a\x8f\x02\n" +
+	"\xbaH\ar\x05\x10\x01(\x80 H\x04R\vprojectRoot\x88\x01\x01\x12`\n" +
+	"\x17replay_acknowledgements\x18\x11 \x03(\v2'.vibesys.store.v1.ReplayAcknowledgementR\x16replayAcknowledgements:\xf7\x10\xbaH\xf3\x10\x1a\x8f\x02\n" +
 	"\x0eepoch.identity\x12Prun_id, epoch, tree_hash and vibesys_version are required for a typed run header\x1a\xaa\x01!has(this.run) || (this.run_id != '' && this.epoch > 0u && (this.tree_hash != '' || (has(this.provenance_known) && !this.provenance_known)) && this.vibesys_version != '')\x1a\x8a\x02\n" +
 	"\x10epoch.span_kinds\x12Dspan_kinds must have unique kind names and descriptors when nonempty\x1a\xaf\x01this.span_kinds.all(x, this.span_kinds.filter(y, y.kind == x.kind).size() == 1) && (this.span_kinds.size() == 0 || (has(this.descriptors) && this.descriptors.file.size() > 0))\x1a\xd2\x01\n" +
 	"\x16epoch.descriptor_files\x120descriptor files must have nonempty unique names\x1a\x85\x01!has(this.descriptors) || this.descriptors.file.all(x, x.name != '' && this.descriptors.file.filter(y, y.name == x.name).size() == 1)\x1a\xaf\x01\n" +
 	"\x1cepoch.run_detail_descriptors\x12'descriptors are required for run detail\x1af!has(this.run) || !has(this.run.detail) || (has(this.descriptors) && this.descriptors.file.size() > 0)\x1av\n" +
 	"\fepoch.series\x12\x1dseries must have unique names\x1aGthis.series.all(x, this.series.filter(y, y.name == x.name).size() == 1)\x1a\xee\x01\n" +
 	"\x10epoch.objectives\x12Srun objectives must name series declared with the same direction and objective role\x1a\x84\x01!has(this.run) || this.run.objectives.all(o, this.series.exists(s, s.name == o.series && s.direction == o.direction && s.role == 1))\x1a\xe1\x01\n" +
-	"\x13epoch.schema_hashes\x12Rapi_schema_hash and store_schema_hash must be lowercase SHA-256 for a typed header\x1av!has(this.run) || (this.api_schema_hash.matches('^[0-9a-f]{64}$') && this.store_schema_hash.matches('^[0-9a-f]{64}$'))\x1ay\n" +
+	"\x13epoch.schema_hashes\x12Rapi_schema_hash and store_schema_hash must be lowercase SHA-256 for a typed header\x1av!has(this.run) || (this.api_schema_hash.matches('^[0-9a-f]{64}$') && this.store_schema_hash.matches('^[0-9a-f]{64}$'))\x1a\x82\x04\n" +
+	"\x1depoch.replay_acknowledgements\x12`an epoch records its acknowledgement batch in one field, for one launch, naming each notice once\x1a\xfe\x02(!has(this.replay_acknowledgement) || size(this.replay_acknowledgements) == 0) && this.replay_acknowledgements.all(a, a.launch_request_id == this.replay_acknowledgements[0].launch_request_id) && this.replay_acknowledgements.filter(a, has(a.notice_id)).map(a, a.notice_id).unique() && (size(this.replay_acknowledgements) <= 1 || this.replay_acknowledgements.all(a, has(a.notice_id)))\x1ay\n" +
 	"\x12epoch.project_root\x12%project_root must be an absolute path\x1a<!has(this.project_root) || this.project_root.startsWith('/')B\x13\n" +
 	"\x11_provenance_knownB\x1c\n" +
 	"\x1a_identity_encoding_versionB\x14\n" +
@@ -691,12 +706,13 @@ var file_vibesys_store_v1_record_proto_depIdxs = []int32{
 	17, // 16: vibesys.store.v1.EpochStarted.descriptors:type_name -> google.protobuf.FileDescriptorSet
 	18, // 17: vibesys.store.v1.EpochStarted.initial_allowance:type_name -> vibesys.store.v1.ReplayAllowance
 	19, // 18: vibesys.store.v1.EpochStarted.replay_acknowledgement:type_name -> vibesys.store.v1.ReplayAcknowledgement
-	0,  // 19: vibesys.store.v1.ReplayStore.records:type_name -> vibesys.store.v1.Record
-	20, // [20:20] is the sub-list for method output_type
-	20, // [20:20] is the sub-list for method input_type
-	20, // [20:20] is the sub-list for extension type_name
-	20, // [20:20] is the sub-list for extension extendee
-	0,  // [0:20] is the sub-list for field type_name
+	19, // 19: vibesys.store.v1.EpochStarted.replay_acknowledgements:type_name -> vibesys.store.v1.ReplayAcknowledgement
+	0,  // 20: vibesys.store.v1.ReplayStore.records:type_name -> vibesys.store.v1.Record
+	21, // [21:21] is the sub-list for method output_type
+	21, // [21:21] is the sub-list for method input_type
+	21, // [21:21] is the sub-list for extension type_name
+	21, // [21:21] is the sub-list for extension extendee
+	0,  // [0:21] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_store_v1_record_proto_init() }

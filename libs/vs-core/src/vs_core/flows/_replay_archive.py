@@ -373,7 +373,7 @@ class ReplayArchive:
             or epoch.epoch != record.epoch
             or epoch.identity_encoding_version != ENCODING_VERSION
             or epoch.initial_allowance is None
-            or epoch.replay_acknowledgement is None
+            or not _acknowledgement_batch(epoch)
         ):
             problem = (
                 "keyed epoch needs sequential identity, encoding, allowance and launch relation"
@@ -392,10 +392,13 @@ class ReplayArchive:
             ):
                 problem = "a Resume epoch cannot replace the original task or source input"
                 raise ReplayError(problem)
-        ack = epoch.replay_acknowledgement
-        resumed = self.acknowledgements.resume(ack.launch_request_id)
-        if resumed == self.acknowledgements or resumed.acknowledgements[-1] != ack.to_binary():
-            problem = "epoch repeats a launch or contradicts the preceding notice acknowledgement"
+        batch = _acknowledgement_batch(epoch)
+        launch = batch[0].launch_request_id
+        resumed = self.acknowledgements.resume(launch)
+        if resumed == self.acknowledgements or resumed.batch(launch) != batch:
+            problem = (
+                "epoch repeats a launch or contradicts its outstanding notice acknowledgements"
+            )
             raise ReplayError(problem)
         self.acknowledgements = resumed
         self._epochs.append(epoch.to_binary())
@@ -645,3 +648,10 @@ class ReplayArchive:
         ):
             problem = "presentation update changed accepted execution metadata"
             raise ReplayError(problem)
+
+
+def _acknowledgement_batch(epoch: EpochStarted) -> tuple[pb.ReplayAcknowledgement, ...]:
+    """The launch's batch; field 15 is decode-only for epochs written before batches."""
+    if epoch.replay_acknowledgement is not None:
+        return (epoch.replay_acknowledgement,)
+    return tuple(epoch.replay_acknowledgements)

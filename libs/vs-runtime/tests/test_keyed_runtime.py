@@ -1,6 +1,7 @@
 """Native record prefixes survive interruption at every public recorder boundary."""
 
 import asyncio
+import contextlib
 from collections.abc import Callable, Coroutine
 from copy import deepcopy
 
@@ -170,6 +171,63 @@ def test_uncertain_epoch_commit_never_authorizes_dispatch(fault: CommitFault) ->
         shell.start(launch(), now=0, at=AT)
     with pytest.raises(ReplayCommitError):
         shell.prepare(now=0, at=AT)
+
+
+def seeded(source: FakeStateStore, faults: tuple[CommitFault | None, ...]) -> FakeStateStore:
+    """A store holding ``source``'s record whose later commits follow ``faults``."""
+    stored = source.load()
+    assert isinstance(stored, StoredEnvelope)
+    store = FakeStateStore(fault_plan=(None, *faults))
+    fence = store.acquire("host-seed", 0, 1)
+    assert fence is not None
+    seed = StoredEnvelope(revision=0, schema_version=stored.schema_version, payload=stored.payload)
+    assert isinstance(store.commit(None, seed, fence, 0), Committed)
+    assert store.release(fence, 0)
+    return store
+
+
+def launched(store: FakeStateStore, request_id: str) -> bool:
+    stored = store.load()
+    assert isinstance(stored, StoredEnvelope)
+    return bool(ReplayArchive.decode(stored.payload).acknowledgements.batch(request_id))
+
+
+@pytest.mark.parametrize("fault", list(CommitFault))
+@pytest.mark.parametrize("boundary", range(3))
+def test_resume_acknowledges_its_notice_with_its_epoch_or_not_at_all(
+    fault: CommitFault, boundary: int
+) -> None:
+    source = FakeStateStore()
+    shell = start(source)
+    finish(shell)
+    shell.close(now=0)
+    noticed = start(source, program(key="renamed"), request_id="launch-b")
+    assert noticed.prepare(now=0, at=AT) == ()
+    noticed.close(now=0)
+    (notice,) = noticed.archive.acknowledgements.notices
+    store = seeded(source, (None,) * boundary + (fault,))
+    with contextlib.suppress(ReplayCommitError, OSError):
+        start(store, program(key="renamed"), request_id="launch-c").close(now=0)
+    if launched(store, "launch-c"):
+        with pytest.raises(ReplayCommitError, match="already recorded"):
+            start(store, program(key="renamed"), request_id="launch-c")
+    else:
+        start(store, program(key="renamed"), request_id="launch-c").close(now=0)
+    stored = store.load()
+    assert isinstance(stored, StoredEnvelope)
+    archive = ReplayArchive.decode(stored.payload)
+    (ack,) = archive.acknowledgements.batch("launch-c")
+    assert ack.notice_id == replay.ReplayNotice.from_binary(notice).id
+    epochs = [
+        record.body.value
+        for record in ReplayStore.from_binary(stored.payload).records
+        if record.body is not None and isinstance(record.body.value, EpochStarted)
+    ]
+    assert [
+        list(epoch.replay_acknowledgements)
+        for epoch in epochs
+        if any(item.launch_request_id == "launch-c" for item in epoch.replay_acknowledgements)
+    ] == [[ack]]
 
 
 def test_retried_launch_neither_acknowledges_nor_opens_another_epoch() -> None:

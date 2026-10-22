@@ -241,7 +241,7 @@ class ReplayRuntime:
         now: float,
         at: Timestamp,
     ) -> None:
-        """Acquire, validate, acknowledge the preceding notice and reconstruct the root."""
+        """Acquire, validate, acknowledge every outstanding notice and reconstruct the root."""
         if self._fence is not None or self._halted:
             problem = "start requires a fresh shell"
             raise ReplayCommitError(problem)
@@ -287,9 +287,7 @@ class ReplayRuntime:
         epoch.epoch = self._epoch.number + 1
         epoch.identity_encoding_version = ENCODING_VERSION
         epoch.initial_allowance = pb.ReplayAllowance.from_binary(self._allowance)
-        epoch.replay_acknowledgement = pb.ReplayAcknowledgement.from_binary(
-            acks.acknowledgements[-1]
-        )
+        epoch.replay_acknowledgements = list(acks.batch(launch.request_id))
         self._append(Oneof("epoch_started", epoch), now=now, at=at)
 
     def _load(self) -> None:
