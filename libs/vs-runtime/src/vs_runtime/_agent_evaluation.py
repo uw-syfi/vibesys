@@ -436,7 +436,7 @@ class _Record(Protocol):
 
 
 class AdmissionShell(Protocol):
-    """The shell as the bridge sees it: ask core, and queue the event for commit."""
+    """The shell as the bridge sees it: commit an input before exposing its answer."""
 
     @property
     def record(self) -> _Record:
@@ -445,11 +445,11 @@ class AdmissionShell(Protocol):
 
     @property
     def admitted_core(self) -> CoreState:
-        """Core's state including the admitted inputs not yet committed."""
+        """The committed core, including every successful admission."""
         ...
 
     def admit(self, event: CoreEvent, *, now_at: float) -> Transition:
-        """Run core's step on the event and queue it; ``ContractError`` queues nothing."""
+        """Commit core's step before return; ``ContractError`` commits nothing."""
         ...
 
 
@@ -868,24 +868,20 @@ class AgentEvaluationBridge:
             # RequestRecord first: if the host dies after the charge commits, the entry names it.
             owed = OwedSubmission(key=key, call_id=f"agent:{uuid.uuid4().hex}", submitted_at=now)
             self._owed.record(owed)
-            try:
-                event = AgentMeasurementRequested(
-                    scope=scope,
-                    plan=policy.plan(
-                        revision_ref(revision), measured_input=measured_input, now_at=now
-                    ),
-                    within=Within(limit=policy.measurement.budget()),
-                    call_id=owed.call_id,
-                )
-                transition = self._admit(shell, event, now)
-                call = self._call_of(transition.state, owed.call_id)
-                if call.request_id is None:
-                    reply = self._refusal(call)
-                    self._owed.clear(key, owed.call_id)
-                    return reply, _nothing
-            except BaseException:
+            event = AgentMeasurementRequested(
+                scope=scope,
+                plan=policy.plan(revision_ref(revision), measured_input=measured_input, now_at=now),
+                within=Within(limit=policy.measurement.budget()),
+                call_id=owed.call_id,
+            )
+            # A failed admission may have committed its charge before losing the
+            # acknowledgement. Only a conclusive refusal can clear the owed receipt.
+            transition = self._admit(shell, event, now)
+            call = self._call_of(transition.state, owed.call_id)
+            if call.request_id is None:
+                reply = self._refusal(call)
                 self._owed.clear(key, owed.call_id)
-                raise
+                return reply, _nothing
             return self._answer(shell, scoped, call), self._acknowledger(owed)
 
     def _answer(self, shell: AdmissionShell, scoped: _Scoped, call: AgentCall) -> SubmittedReply:
