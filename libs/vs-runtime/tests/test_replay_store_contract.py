@@ -96,7 +96,7 @@ async def test_crash_sweep_keeps_one_paid_observation_across_every_store(
             assert len(executor.invocations) == 1
             assert resumed.runtime.accounting.lifetime_completed == 1
             assert resumed.runtime.accounting.paid_operations == 1
-            assert resumed.runtime.accounting.cost_usd == 2
+            assert resumed.runtime.accounting.reported_cost_usd == 2
 
 
 def launch(request: str) -> ReplayLaunch:

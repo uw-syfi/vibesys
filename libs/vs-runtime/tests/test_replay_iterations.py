@@ -65,8 +65,8 @@ def test_raised_and_lowered_allowances_reconstruct_without_spending_again(
         assert totals.fresh_completed == second
         assert totals.fresh_pending == 0
         assert totals.paid_operations == first + second
-        assert totals.cost_usd == first + second
-        assert totals.epoch_cost_usd == second
+        assert totals.reported_cost_usd == first + second
+        assert totals.epoch_reported_cost_usd == second
         assert after.runtime.archive.epoch_closed
 
     sim.run(scenario())
@@ -99,7 +99,7 @@ def test_crashes_at_iteration_boundaries_never_recharge_history(fault: CommitFau
         totals = resumed.runtime.accounting
         assert totals.lifetime_completed == 1
         assert totals.paid_operations == 1
-        assert totals.cost_usd == 1
+        assert totals.reported_cost_usd == 1
         assert len(executor.invocations) == 1
 
     for boundary in swept(count, sample=3):

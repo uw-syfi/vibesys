@@ -3,6 +3,8 @@
 from dataclasses import replace
 
 import pytest
+from hypothesis import given
+from hypothesis import strategies as st
 
 from vs_core.api.replay import ReplayCall, ReplayError, ReplayFlow, ReplaySource, SemanticKey
 from vs_project.api import FakeStateStore
@@ -32,6 +34,50 @@ def request(
             Reply,
         )
     )
+
+
+@pytest.mark.parametrize("dimension", ["money_usd", "input_tokens", "output_tokens"])
+@given(limit=st.integers(0, 20), reservation=st.integers(1, 6), data=st.data())
+def test_admission_matches_resource_arithmetic_across_fresh_epochs(
+    dimension: str, limit: int, reservation: int, data: st.DataObject
+) -> None:
+    actual = data.draw(st.integers(0, reservation))
+    sim = Sim(seed=0)
+    store = FakeStateStore()
+    bound = replay.ReplayResources(**{dimension: limit})
+    reserve = replay.ReplayResources(**{dimension: reservation})
+
+    async def root(ctx: ReplayFlow) -> None:
+        for number in range(6):
+            await request(ctx, number, reserve)
+
+    executor = FakeReplayExecutor(
+        lambda _: ReplayResult(
+            Reply(root="paid"),
+            paid=True,
+            usage=TokenUsage(
+                cost_usd=actual, input=actual, cache_read=0, cache_creation=0, output=actual
+            ),
+        )
+    )
+    admitted = 0
+    while admitted < 6 and admitted * actual + reservation <= limit:
+        admitted += 1
+
+    async def scenario() -> None:
+        for epoch in range(1, 3):
+            composed = replace(
+                host(store, root, executor, sim),
+                runtime=ReplayRuntime(store, root, replay.ReplayAllowance(resources=bound)),
+            )
+            result = await drive_replay(composed, launch(f"epoch-{epoch}"))
+            expected = min(6, admitted * epoch)
+            assert len(executor.invocations) == expected
+            assert result == (ReplayCompleted(None) if expected == 6 else ReplayParked())
+            totals = composed.runtime.accounting.resources.reported
+            assert getattr(totals, dimension) == expected * actual
+
+    sim.run(scenario())
 
 
 @pytest.mark.parametrize(
@@ -67,8 +113,8 @@ async def test_resource_bounds_apply_only_to_fresh_work(
     assert await drive_replay(after, launch("resume")) == ReplayParked()
     assert len(executor.invocations) == completed * 2
     totals = after.runtime.accounting
-    assert totals.cost_usd == completed * 2
-    assert totals.epoch_cost_usd == completed
+    assert totals.reported_cost_usd == completed * 2
+    assert totals.epoch_reported_cost_usd == completed
     assert totals.resources.reported.input_tokens == completed * 6
     assert totals.resources.epoch_reported.input_tokens == completed * 3
 
@@ -85,6 +131,7 @@ async def test_unreported_paid_usage_holds_its_reservation(sim: Sim) -> None:
     composed = replace(host(store, root, executor, sim), runtime=ReplayRuntime(store, root, bound))
     assert await drive_replay(composed, launch("first")) == ReplayParked()
     assert len(executor.invocations) == 1
+    assert composed.runtime.accounting.unreported_cost_operations == 1
     totals = composed.runtime.accounting.resources
     assert totals.committed.money_usd == 2
     assert totals.committed.input_tokens == 10

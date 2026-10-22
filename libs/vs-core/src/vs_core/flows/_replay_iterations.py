@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from vs_proto.api import Change, Record, Span, replay, validate
+from vs_proto.api import Record, Span, replay, validate
 from vs_proto.api import core_iterations as units
 
 from ._replay_resources import ReplayResourceAccounting, ReplayResourcesBlocked
@@ -66,11 +66,18 @@ class ReplayAccounting:
     fresh_completed: int
     fresh_pending: int
     paid_operations: int
-    cost_usd: float
-    epoch_cost_usd: float
+    unreported_cost_operations: int
     resources: ReplayResourceAccounting
     _grants: tuple[bytes, ...]
     _completed: frozenset[bytes]
+
+    @property
+    def reported_cost_usd(self) -> float:
+        return self.resources.reported.money_usd
+
+    @property
+    def epoch_reported_cost_usd(self) -> float:
+        return self.resources.epoch_reported.money_usd
 
     def decide(
         self, operation: replay.OperationReplay, allowance: replay.ReplayAllowance
@@ -127,14 +134,13 @@ class ReplayAccounting:
             admitted_epoch == epoch and digest not in completed
             for digest, (_, admitted_epoch) in admitted.items()
         )
-        paid, cost, epoch_cost = _usage(records, epoch)
+        paid, unknown_cost = _paid_observations(records)
         return cls(
             lifetime_completed=len(completed),
             fresh_completed=fresh_completed,
             fresh_pending=pending,
             paid_operations=paid,
-            cost_usd=cost,
-            epoch_cost_usd=epoch_cost,
+            unreported_cost_operations=unknown_cost,
             resources=ReplayResourceAccounting.from_records(records, epoch=epoch),
             _grants=tuple(value for value, _ in admitted.values()),
             _completed=frozenset(completed),
@@ -173,25 +179,14 @@ def _accepted_units(
         yield expected, record.epoch
 
 
-def _usage(records: tuple[Record, ...], epoch: int) -> tuple[int, float, float]:
+def _paid_observations(records: tuple[Record, ...]) -> tuple[int, int]:
     seen: set[str] = set()
-    started: dict[str, int] = {}
-    paid = 0
-    cost = epoch_cost = 0.0
-    for record, span in _spans(records):
-        if (
-            record.body is not None
-            and record.body.field == "span"
-            and record.body.value.change == Change.STARTED
-        ):
-            started[span.id] = record.epoch
+    paid = unknown = 0
+    for _, span in _spans(records):
         observation = span.replay_observation
         if observation is None or span.id in seen:
             continue
         seen.add(span.id)
         paid += int(observation.paid)
-        amount = observation.cost_usd if observation.has_field("cost_usd") else 0.0
-        cost += amount
-        if started.get(span.id) == epoch:
-            epoch_cost += amount
-    return paid, cost, epoch_cost
+        unknown += int(observation.paid and not observation.has_field("cost_usd"))
+    return paid, unknown
