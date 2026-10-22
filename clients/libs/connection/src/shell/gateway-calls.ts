@@ -2,6 +2,7 @@
 import type {HostKey} from '@vibesys/hosts';
 import {registerAbort, type ScheduleTimeout} from '@vibesys/transport';
 import {GatewayConnection, type GatewayDialer} from './gateway.js';
+import {failureDiagnostic} from './gateway-failures.js';
 
 export class GatewayCalls {
   #closed = false;
@@ -12,6 +13,8 @@ export class GatewayCalls {
     private readonly enabled: (host: HostKey) => Promise<boolean>,
     private readonly dialer: (host: HostKey) => GatewayDialer,
     private readonly schedule: ScheduleTimeout,
+    /** Told what the host wrote about a failed call, which no screen shows. */
+    private readonly failed: (host: HostKey, diagnostic: string) => void = () => {},
   ) {}
 
   unary(
@@ -20,7 +23,11 @@ export class GatewayCalls {
     bytes: Uint8Array,
     signal: AbortSignal,
   ): Promise<Uint8Array> {
-    return this.#use(host, signal, (connection, owned) => connection.unary(method, bytes, owned));
+    return this.#use(host, signal, async (connection, owned) => {
+      const reply = await connection.unary(method, bytes, owned);
+      this.#observe(host, method, reply);
+      return reply;
+    });
   }
 
   stream(
@@ -31,8 +38,16 @@ export class GatewayCalls {
     receive: (bytes: Uint8Array) => void,
   ): Promise<void> {
     return this.#use(host, signal, (connection, owned) =>
-      connection.stream(method, bytes, owned, receive),
+      connection.stream(method, bytes, owned, event => {
+        this.#observe(host, method, event);
+        receive(event);
+      }),
     );
+  }
+
+  #observe(host: HostKey, method: string, reply: Uint8Array): void {
+    const diagnostic = failureDiagnostic(method, reply);
+    if (diagnostic !== null) this.failed(host, diagnostic);
   }
 
   close(): void {

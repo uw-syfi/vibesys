@@ -274,6 +274,7 @@ export class NewRunMain {
         );
         return {kind: 'offered', value: found};
       } catch (error) {
+        if (isHostUnsupported(error)) return {kind: 'unsupported'};
         throw plain(error, `Could not check the destination on ${hostLabel(host)}`);
       }
     }

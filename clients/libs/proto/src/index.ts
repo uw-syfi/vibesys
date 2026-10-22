@@ -74,7 +74,7 @@ export * from './generated/vibesys/store/v1/skeleton_pb.js';
 export * from './generated/vibesys/store/v1/span_pb.js';
 export * from './generated/vibesys/store/v1/transcript_pb.js';
 export type {Accepted, OperationSignal, OperationTransport} from './operations.js';
-export {OperationFailed} from './operations.js';
+export {HOST_UNSUPPORTED_MESSAGE, OperationFailed} from './operation-failure.js';
 export {projectMessage} from './project.js';
 export {API_SCHEMA_HASH, HOST_SCHEMA_HASH, STORE_SCHEMA_HASH, schemaHash} from './schema-hashes.js';
 

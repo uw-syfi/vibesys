@@ -14,6 +14,7 @@ import {
   WatchRunsRequestSchema,
   WatchRunsResponseSchema,
 } from '@vibesys/proto';
+import {refusalMessage} from './refusal.js';
 
 export type {RelaunchRequest, RelaunchResponse} from '@vibesys/proto';
 export {RelaunchRefusal, RunLiveness} from '@vibesys/proto';
@@ -46,7 +47,7 @@ export function hostRelaunchRequest(request: RelaunchRequest): Uint8Array {
 export function hostRelaunchResponse(bytes: Uint8Array, expectedEpoch: bigint): RelaunchResponse {
   const response = fromBinary(HostCallResponseSchema, bytes);
   if (response.result.case === 'configurationFailed')
-    throw new Error(response.result.value.message);
+    throw new Error(refusalMessage(response.result.value));
   if (response.result.case !== 'relaunch') throw new Error('Invalid relaunch response');
   const result = response.result.value;
   if (

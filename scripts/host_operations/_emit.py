@@ -677,7 +677,8 @@ def typescript_registry(
         ),
         "import * as pb from './vibesys/host/v1/operations_pb.js';",
         "import {FailureCategory, type OperationFailure} from './vibesys/host/v1/failure_pb.js';",
-        "import {accept, call, OperationFailed, type Accepted, type OperationTransport, type OperationSignal} from '../operations.js';",
+        "import {OperationFailed} from '../operation-failure.js';",
+        "import {accept, call, type Accepted, type OperationTransport, type OperationSignal} from '../operations.js';",
         "export const operationPolicies = Object.freeze({",
     ]
     for op in (*operations, *mutations, *watches):

@@ -687,13 +687,22 @@ export class Hosts {
   /** The directories in `directory` (a path ending in `/`, or `~/`) on `id`. */
   async complete(id: HostId, directory: string): Promise<PathCompletion> {
     if (await this.#transportV2(id)) {
-      const listed = await this.#setup().completePaths(id, directory, new AbortController().signal);
-      return {
-        kind: 'listed',
-        directory: listed.directory,
-        entries: listed.entries,
-        truncated: listed.truncated,
-      };
+      try {
+        const listed = await this.#setup().completePaths(
+          id,
+          directory,
+          new AbortController().signal,
+        );
+        return {
+          kind: 'listed',
+          directory: listed.directory,
+          entries: listed.entries,
+          truncated: listed.truncated,
+        };
+      } catch (error) {
+        if (isHostUnsupported(error)) return {kind: 'unsupported'};
+        throw error;
+      }
     }
     await using lease = await this.connection(id);
     let reply: PathsCompleteReply;

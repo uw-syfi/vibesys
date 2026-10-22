@@ -33,15 +33,6 @@ export interface OperationSignal {
 function checkCancellation(signal: OperationSignal): void {
   if (signal.aborted) throw new Error('operation cancelled', {cause: signal.reason});
 }
-/** A typed registry failure. Callers branch on category, never on diagnostic text. */
-export class OperationFailed extends Error {
-  readonly category: number;
-  constructor(category: number, message: string) {
-    super(message);
-    this.name = 'OperationFailed';
-    this.category = category;
-  }
-}
 
 export interface OperationTransport {
   /** Dial and queue time consume totalMs; the shell owns cancellation. */

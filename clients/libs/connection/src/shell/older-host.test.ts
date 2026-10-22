@@ -1,13 +1,15 @@
 /**
  * A host whose VibeSys predates the registry operations, seen through every registry client the
- * app has. The gateway types only the version handshake as unsupported; any other command fails as
- * an ordinary failure with the host's own diagnostic. The Fake host answers as the gateway does,
- * and both are asserted against the shared corpus of the commands an older host is reported to lack.
+ * app has. The gateway types every command an older checkout rejects as unsupported; the Fake host
+ * answers as the gateway does, and both are asserted against the recorded argparse output of a real
+ * older checkout (`proto/testdata/older_host/older_host.json`). No failure carries the host's own
+ * text in its message.
  */
 import {expect, test} from 'bun:test';
 import {readFileSync} from 'node:fs';
 import {fromBinary, fromJson, toBinary} from '@bufbuild/protobuf';
 import {
+  HOST_UNSUPPORTED_MESSAGE,
   isHostUnsupported,
   LoginActor,
   registryClusters,
@@ -17,15 +19,11 @@ import {
   registrySetup,
   registryStart,
 } from '@vibesys/connection';
-import {
-  COMMANDS_REPORTED_UNSUPPORTED,
-  commandOf,
-  olderHost,
-  USAGE_DUMP,
-} from '@vibesys/connection/testing';
+import {commandOf, olderHost} from '@vibesys/connection/testing';
 import type {HostId} from '@vibesys/hosts';
 import {
   FailureCategory,
+  HostCallRequestSchema,
   MutateRequestSchema,
   type MutateResponse,
   MutateResponseSchema,
@@ -78,13 +76,17 @@ const starts = registryStart({checkout, unary: olderHost.mutate});
 const savedRuns = registrySavedRuns({checkout, unary});
 const logins = new LoginActor({checkout, stream: olderHost.watch});
 
-/** The commands the gateway's classifier reports as unsupported when a checkout lacks them. */
-const corpus: {commands: string[]} = JSON.parse(
+/** What a real older checkout wrote for every host command the gateway runs. */
+const corpus: {
+  rejected: {command: string; exit_code: number; stderr: string}[];
+  provided: string[];
+} = JSON.parse(
   readFileSync(
-    new URL('../../../../../proto/testdata/older_host/unsupported_commands.json', import.meta.url),
+    new URL('../../../../../proto/testdata/older_host/older_host.json', import.meta.url),
     'utf8',
   ),
 );
+const rejected = corpus.rejected.map(entry => entry.command);
 
 const CALLS: readonly (readonly [string, string, () => Promise<unknown>])[] = [
   ['describe machine', 'describe-machine', () => reads.describeMachine(HOST, null, signal())],
@@ -111,42 +113,39 @@ const CALLS: readonly (readonly [string, string, () => Promise<unknown>])[] = [
 ];
 
 for (const [name, command, call] of CALLS) {
-  test(`${name} on an older host fails as the gateway types it, never as a bare usage dump`, async () => {
+  test(`${name} on an older host fails as needing an update, never with the host's text`, async () => {
     const error = await failureOf(call);
     expect(error).toBeInstanceOf(OperationFailed);
     const failed = error as OperationFailed;
-    if (corpus.commands.includes(command)) {
-      expect(isHostUnsupported(error)).toBe(true);
-      expect(failed.category).toBe(FailureCategory.UNSUPPORTED);
-      expect(failed.message).toContain('update it');
-    } else {
-      expect(isHostUnsupported(error)).toBe(false);
-      expect(failed.category).toBe(FailureCategory.INTERNAL);
-      expect(failed.message).toContain(`vibesys host`);
-    }
-    expect(failed.message).not.toBe(USAGE_DUMP);
+    expect(rejected).toContain(command);
+    expect(isHostUnsupported(error)).toBe(true);
+    expect(failed.category).toBe(FailureCategory.UNSUPPORTED);
+    expect(failed.message).toBe(HOST_UNSUPPORTED_MESSAGE);
+    expect(failed.diagnostic).toContain(command);
   });
 }
 
-test('the Fake host reports unsupported exactly the corpus commands, for every method', async () => {
-  expect([...COMMANDS_REPORTED_UNSUPPORTED].sort()).toEqual([...corpus.commands].sort());
-  const answered: [string, FailureCategory][] = [];
-  const failureOf = (response: ReadResponse | MutateResponse | WatchResponse): FailureCategory => {
+test('the Fake host answers exactly the commands a real older checkout rejects, for every method', async () => {
+  const answered: string[] = [];
+  const unsupported = (response: ReadResponse | MutateResponse | WatchResponse): boolean => {
     if (response.result.case !== 'failure') throw new Error('the older host did not fail');
-    return response.result.value.category;
+    return response.result.value.category === FailureCategory.UNSUPPORTED;
   };
-  const request = (schema: typeof ReadRequestSchema, name: string): Uint8Array =>
-    toBinary(schema, fromJson(schema, {[name]: {}}));
   for (const field of ReadRequestSchema.oneofs[0]?.fields ?? []) {
-    const bytes = await olderHost.read(HOST, request(ReadRequestSchema, field.jsonName));
-    answered.push([commandOf(field.name), failureOf(fromBinary(ReadResponseSchema, bytes))]);
+    const bytes = await olderHost.read(
+      HOST,
+      toBinary(ReadRequestSchema, fromJson(ReadRequestSchema, {[field.jsonName]: {}})),
+    );
+    expect(unsupported(fromBinary(ReadResponseSchema, bytes))).toBe(true);
+    answered.push(commandOf(field.name));
   }
   for (const field of MutateRequestSchema.oneofs[0]?.fields ?? []) {
     const bytes = await olderHost.mutate(
       HOST,
       toBinary(MutateRequestSchema, fromJson(MutateRequestSchema, {[field.jsonName]: {}})),
     );
-    answered.push([commandOf(field.name), failureOf(fromBinary(MutateResponseSchema, bytes))]);
+    expect(unsupported(fromBinary(MutateResponseSchema, bytes))).toBe(true);
+    answered.push(commandOf(field.name));
   }
   for (const field of WatchRequestSchema.oneofs[0]?.fields ?? []) {
     const payloads: Uint8Array[] = [];
@@ -158,38 +157,34 @@ test('the Fake host reports unsupported exactly the corpus commands, for every m
         payloads.push(bytes);
       },
     );
-    answered.push([
-      commandOf(field.name),
-      failureOf(fromBinary(WatchResponseSchema, payloads[0] ?? new Uint8Array())),
-    ]);
+    expect(unsupported(fromBinary(WatchResponseSchema, payloads[0] ?? new Uint8Array()))).toBe(
+      true,
+    );
+    answered.push(commandOf(field.name));
   }
-  expect(answered.length).toBeGreaterThan(18);
-  for (const [command, category] of answered) {
-    const reported = corpus.commands.includes(command);
-    expect([command, category]).toEqual([
-      command,
-      reported ? FailureCategory.UNSUPPORTED : FailureCategory.INTERNAL,
-    ]);
-  }
-  for (const command of corpus.commands) {
-    expect(answered.some(([answeredCommand]) => answeredCommand === command)).toBe(true);
-  }
+  expect([...answered].sort()).toEqual([...rejected].sort());
+  // The commands the older checkout provides are the host-call ones, which the Fake does not serve.
+  const hostCalls = (HostCallRequestSchema.oneofs[0]?.fields ?? []).map(field =>
+    commandOf(field.name),
+  );
+  expect([...hostCalls].sort()).toEqual([...corpus.provided].sort());
 });
 
-test('only the unsupported category, or a feature the helper did not negotiate, is unsupported', () => {
-  const others = [
-    FailureCategory.INVALID_INPUT,
-    FailureCategory.CONFIGURATION,
-    FailureCategory.NOT_FOUND,
-    FailureCategory.INTERNAL,
+test('no failure message carries what the host wrote, whatever its category', () => {
+  const texts = [
+    ...corpus.rejected.map(entry => entry.stderr),
+    'vibesys host list-compute exited 2\nusage: vibesys host [-h] ...',
+    'Traceback (most recent call last):',
+    '',
   ];
-  for (const category of others) {
-    const error = new OperationFailed(category, 'the host said so');
-    expect(error.message).toBe('the host said so');
-    expect(isHostUnsupported(error)).toBe(false);
+  for (const category of Object.values(FailureCategory).filter(value => typeof value === 'number')) {
+    for (const text of texts) {
+      const error = new OperationFailed(category as number, text);
+      expect(error.diagnostic).toBe(text);
+      if (text !== '') expect(error.message).not.toContain(text);
+      expect(error.message).not.toMatch(/usage|invalid choice|Traceback/i);
+      expect(isHostUnsupported(error)).toBe(category === FailureCategory.UNSUPPORTED);
+    }
   }
-  expect(isHostUnsupported(new OperationFailed(FailureCategory.UNSUPPORTED, 'update it'))).toBe(
-    true,
-  );
   expect(isHostUnsupported(new Error('gateway closed'))).toBe(false);
 });

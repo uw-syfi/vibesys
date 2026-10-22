@@ -199,7 +199,7 @@ export class GatewayConnection {
   }
 }
 
-const HOST_CALL_METHOD = `/${HostService.typeName}/${HostService.method.hostCall.name}`;
+export const HOST_CALL_METHOD = `/${HostService.typeName}/${HostService.method.hostCall.name}`;
 export const MUTATE_METHOD = `/${HostService.typeName}/${HostService.method.mutate.name}`;
 export const READ_METHOD = `/${HostService.typeName}/${HostService.method.read.name}`;
 export const WATCH_METHOD = `/${HostService.typeName}/${HostService.method.watch.name}`;

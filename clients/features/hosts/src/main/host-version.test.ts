@@ -5,7 +5,7 @@ import {
   type RegistrySetup,
   registrySetup,
 } from '@vibesys/connection';
-import {FakeLink, olderHost, USAGE_DUMP} from '@vibesys/connection/testing';
+import {FakeLink, olderHost} from '@vibesys/connection/testing';
 import {type HostId, type HostListing, hostKey} from '@vibesys/hosts';
 import {SettingsStore, withHostSettings} from '@vibesys/settings';
 import {FakeSettingsFilesystem} from '@vibesys/settings/testing';
@@ -116,7 +116,7 @@ describe('Hosts on an older v2 host', () => {
       host: hostKey(ALPHA),
       connection: {kind: 'incompatible'},
     });
-    expect(JSON.stringify([pushed, logged])).not.toContain(USAGE_DUMP);
+    expect(JSON.stringify([pushed, logged])).not.toMatch(/usage|invalid choice|does not provide/i);
   });
 });
 
