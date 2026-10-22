@@ -24,7 +24,7 @@ from vs_proto.api import ReplayStore as ReplayRecords
 from vs_proto.api import replay as pb
 from vs_proto.api import validate
 from vs_runtime._receipt_store import ReceiptStore
-from vs_sim.api import DISCARD, ProcessTimeoutError
+from vs_sim.api import DISCARD, ProcessTimeoutError, ReleaseStack
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
@@ -76,7 +76,7 @@ class WriterRegistry:
         # Overlapping reuse scopes are independent tasks that may exit in any order,
         # so exclusion is held per acquisition token, never as a nesting stack.
         self._reuses: dict[object, tuple[str, str, int]] = {}
-        self._reuse_hold = ExitStack()
+        self._reuse_hold = ReleaseStack()
         # One authoritative head per backing identity, across generations and authorities.
         self._path = "writers/" + hashlib.sha256(backing.identity.encode()).hexdigest() + ".pb"
 
@@ -98,6 +98,8 @@ class WriterRegistry:
             problem = "Recovery blocked: previous writers may still modify this workspace; backing is held by another writer"
             raise WriterProofError(problem)
         if not self._reuses:
+            # A release that failed earlier is retried, and refuses, before exclusion is retaken.
+            self._reuse_hold.close()
             self._reuse_hold.enter_context(self._exclusive())
         token = object()
         self._reuses[token] = owner

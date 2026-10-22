@@ -60,6 +60,7 @@ PURE_EXPORTS = {
             "ReplayToolSubmission",
             "ReplayToolAcknowledgement",
             "ReplayTurnWait",
+            "ReplayTurnBound",
         )
     },
     # These generated request codecs only transform retained in-memory values.
