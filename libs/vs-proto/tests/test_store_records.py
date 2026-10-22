@@ -278,6 +278,25 @@ def test_any_attrs_decode_using_only_the_generated_epoch_descriptors(
     assert json_format.MessageToDict(decoded) == json.loads(_ATTRS[kind].to_json())
 
 
+@pytest.mark.parametrize("valid", [True, False])
+def test_google_message_validation_keeps_the_public_adapter(
+    *, valid: bool, embedded_pool: descriptor_pool.DescriptorPool
+) -> None:
+    descriptor = embedded_pool.FindMessageTypeByName(p.AgentTurnAttrs.desc().type_name)
+    message = message_factory.GetMessageClass(descriptor).FromString(
+        p.AgentTurnAttrs(
+            agent="agent-a" if valid else "",
+            role="implementer",
+            stage="turn",
+        ).to_binary()
+    )
+    if valid:
+        p.validate(message)
+    else:
+        with pytest.raises(p.ValidationError):
+            p.validate(message)
+
+
 def set_field(message: Message, name: str, value: object) -> None:
     if value is None:
         message.clear_field(name)

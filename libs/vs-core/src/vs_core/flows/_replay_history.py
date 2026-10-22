@@ -8,9 +8,8 @@ from hashlib import sha256
 from math import isfinite
 
 from protobuf import Oneof
-from protovalidate import validate
 
-from vs_proto.api import Record
+from vs_proto.api import Record, validate
 from vs_proto.api import replay as pb
 
 from ._replay_identity import ENCODING_VERSION, EncodedIdentity, SemanticKey

@@ -8,7 +8,7 @@ The two schema hashes identify the canonical descriptors, not generated code.
 
 from protobuf import Oneof
 from protobuf.wkt.google.protobuf.timestamp_pb import Timestamp
-from protovalidate import ValidationError, validate
+from protovalidate import ValidationError
 
 from vs_proto._generated.buf.validate import validate_pb as validation_rules
 from vs_proto._generated.framing import RUN_LOG_MAGIC, RUN_LOG_MAX_RECORD_BYTES
@@ -202,6 +202,7 @@ from vs_proto._generated.vibesys.store.v1.transcript_pb import (
     TranscriptToolResult,
 )
 from vs_proto._schema_hashes import API_SCHEMA_HASH, STORE_SCHEMA_HASH, schema_hash
+from vs_proto._validation import validate
 
 __all__ = [
     "API_SCHEMA_HASH",

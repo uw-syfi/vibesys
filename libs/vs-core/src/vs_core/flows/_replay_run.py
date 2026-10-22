@@ -9,9 +9,9 @@ from typing import TYPE_CHECKING, TypeVar, cast
 
 from protobuf import Message
 from protobuf.wkt.google.protobuf.any_pb import Any
-from protovalidate import validate
 
 from vs_proto.api import replay as pb
+from vs_proto.api import validate
 
 from ._replay_causality import EMPTY_FRONTIER, CausalGraph, _Frontier
 from ._replay_history import (

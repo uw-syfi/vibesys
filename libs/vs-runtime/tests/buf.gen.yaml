@@ -4,3 +4,4 @@ plugins:
     out: libs/vs-runtime/tests/generated
     opt:
       - map_imports=vibesys/store/**:vs_proto._generated
+      - map_imports=buf/**:vs_proto._generated

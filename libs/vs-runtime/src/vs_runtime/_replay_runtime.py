@@ -18,6 +18,7 @@ from vs_core.api.replay import (
     ReplayScheduler,
     ReplaySettings,
     replay_descriptors,
+    reply_schema_digest,
 )
 from vs_project.api import Committed, StateStore, StoredEnvelope, StoreFence
 from vs_proto.api import (
@@ -452,10 +453,12 @@ class ReplayRuntime:
             span.replay is None
             or span.replay.policy is None
             or result.outcome.desc().type_name != span.replay.policy.reply_type
+            or reply_schema_digest(type(result.outcome)) != span.replay.policy.reply_schema_digest
         ):
             problem = "observation does not match the operation's reply contract"
             raise ReplayError(problem)
-        self._record_schemas((type(result.outcome),), now=now, at=at)
+        # The start owns the retained reply descriptors. A compatible recovered
+        # reply may belong to a file whose unrelated declarations have changed.
         span.replay_observation = pb.ReplayObservation(
             outcome=Any(type_url=result.outcome.desc().type_name, value=result.outcome.to_binary()),
             paid=result.paid,

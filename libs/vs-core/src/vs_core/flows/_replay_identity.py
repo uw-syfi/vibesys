@@ -15,9 +15,9 @@ from protobuf import (
     DescMessage,
     Message,
 )
-from protovalidate import validate
 
 from vs_proto.api import replay as pb
+from vs_proto.api import validate
 
 ENCODING_VERSION = 1
 DIGEST_BYTES = 32
