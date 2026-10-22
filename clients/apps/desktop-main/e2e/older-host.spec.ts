@@ -5,11 +5,13 @@
  * real older checkout printed for each command (`proto/testdata/older_host/older_host.json`, argparse
  * output recorded offline), so the classifier meets the argparse text of the field, not a Fake.
  */
-import {execFileSync} from 'node:child_process';
+import {execFileSync, spawn} from 'node:child_process';
+import {watch} from 'node:fs';
 import {chmod, mkdir, mkdtemp, readFile, rm, writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {type ElectronApplication, _electron as electron, expect, test} from '@playwright/test';
+import {API_SCHEMA_HASH} from '@vibesys/proto';
 import {electronRuntimeArgs} from './electron-launch-policy.mjs';
 
 const repository = fileURLToPath(new URL('../../../../', import.meta.url));
@@ -108,29 +110,47 @@ test('a host whose VibeSys predates the registry needs an update on Machines and
   await mkdir(join(root, 'settings'));
   await writeFile(join(checkout, '.venv', 'bin', 'vibesys'), olderVibesys(corpus));
   await chmod(join(checkout, '.venv', 'bin', 'vibesys'), 0o755);
-  const app = await electron.launch({
-    args: [APP, ...electronRuntimeArgs()],
-    env: {
-      ...process.env,
-      VIBESYS_GATEWAY_ROOT: root,
-      VIBESYS_GATEWAY_BINARY: binary,
-      VIBESYS_OLDER_CHECKOUT: checkout,
-    },
+  // The gateway daemon is started here, with its stdio ignored, as `gateway.spec.ts` does. If the
+  // app's `connect` started it, the daemon would inherit the app's open descriptors, including
+  // Playwright's channel, and closing the app would wait on them for as long as the daemon lives.
+  const gatewayDirectory = join(root, 'gateway', API_SCHEMA_HASH.slice(0, 16));
+  await mkdir(gatewayDirectory, {recursive: true});
+  const socketBound = new Promise<void>(resolve => {
+    const watcher = watch(gatewayDirectory, (_event, name) => {
+      if (String(name) === 'sock') {
+        watcher.close();
+        resolve();
+      }
+    });
   });
+  const serve = spawn(binary, ['serve', '--root', root], {stdio: 'ignore'});
+  const serveEnded = new Promise<void>(resolve => serve.once('close', () => resolve()));
+  let app: ElectronApplication | null = null;
   try {
-    await control(app, 'loaded');
-    const screen = () => control(app, 'evaluate', SCREEN_TEXT) as Promise<string>;
+    await socketBound;
+    const running = await electron.launch({
+      args: [APP, ...electronRuntimeArgs()],
+      env: {
+        ...process.env,
+        VIBESYS_GATEWAY_ROOT: root,
+        VIBESYS_GATEWAY_BINARY: binary,
+        VIBESYS_OLDER_CHECKOUT: checkout,
+      },
+    });
+    app = running;
+    await control(running, 'loaded');
+    const screen = () => control(running, 'evaluate', SCREEN_TEXT) as Promise<string>;
 
-    expect(await control(app, 'evaluate', press('nav[aria-label="VibeSys"]', 'Machines'))).toBe(
+    expect(await control(running, 'evaluate', press('nav[aria-label="VibeSys"]', 'Machines'))).toBe(
       true,
     );
     await expect.poll(screen).toContain('Needs an update');
     expect(await screen()).not.toMatch(HOST_WORDS);
 
-    expect(await control(app, 'evaluate', press('body', 'Settings'))).toBe(true);
+    expect(await control(running, 'evaluate', press('body', 'Settings'))).toBe(true);
     expect(
       await control(
-        app,
+        running,
         'evaluate',
         press('nav[aria-label="Settings sections"]', 'Clusters and clouds'),
       ),
@@ -139,13 +159,15 @@ test('a host whose VibeSys predates the registry needs an update on Machines and
     expect(await screen()).not.toMatch(HOST_WORDS);
 
     // What the host wrote is in the main process's log, not on a screen.
-    expect(await control(app, 'logs')).toEqual(
+    expect(await control(running, 'logs')).toEqual(
       expect.arrayContaining([expect.stringContaining('describe-machine')]),
     );
   } finally {
     try {
-      await app.close();
+      await app?.close();
     } finally {
+      serve.kill();
+      await serveEnded;
       await rm(root, {recursive: true, force: true});
     }
   }
