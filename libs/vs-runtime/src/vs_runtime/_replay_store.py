@@ -61,6 +61,13 @@ class RunLogReplayStore:
 
     def load(self) -> StoreRecord | None:
         stored = self._store.load()
+        if (
+            isinstance(stored, StoredEnvelope)
+            and stored.schema_version == REPLAY_STORE_SCHEMA_VERSION
+            and stored != _FORMAT_FENCE
+        ):
+            problem = "the atomic store holds keyed replay records; only run.log may hold them"
+            raise ValueError(problem)
         if stored is not None and stored != _FORMAT_FENCE:
             # A retained positional run, whose run.log is not a keyed prefix either.
             return stored

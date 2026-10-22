@@ -360,3 +360,16 @@ def test_a_retained_positional_run_log_requires_facts_only_import(tmp_path: Path
     ):
         runtime(RunLogReplayStore(writer, store)).start(launch("resume"), now=0, at=Timestamp())
     assert store.load() == retained
+
+
+def test_a_keyed_archive_in_the_atomic_store_grants_no_authority(tmp_path: Path) -> None:
+    """Regression: an old P2 store archive must never replace run.log as the record authority."""
+    project, path, expected = _written_run(tmp_path)
+    store = project.state_store("run-a")
+    owner = store.acquire("host-a", 0, 30)
+    assert owner is not None
+    archived = StoredEnvelope(revision=1, schema_version=2, payload=expected)
+    assert isinstance(store.commit(0, archived, owner, 0), Committed)
+    assert store.release(owner, 0)
+    with pytest.raises(ValueError, match="only run.log may hold them"):
+        _reload(project, path)
