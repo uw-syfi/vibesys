@@ -209,6 +209,26 @@ func TestStitchWorkspaceChangesSelectItsChecks(t *testing.T) {
 	}
 }
 
+func TestEveryProtoPathSelectsChecksOnlyVerification(t *testing.T) {
+	for _, path := range []string{
+		"proto/vibesys/api/v1/host.proto",
+		"proto/vibesys/store/v1/record.proto",
+		"proto/buf/validate/validate.proto",
+		"proto/new_package/deeply/nested/contract.proto",
+		"proto/new.proto",
+	} {
+		t.Run(path, func(t *testing.T) {
+			groups, skipped, targets := localSelection(t, []string{path}, true)
+			if want := []string{"always_on", "proto"}; !reflect.DeepEqual(groups, want) {
+				t.Fatalf("checks-only groups = %v, want %v", groups, want)
+			}
+			if len(skipped) != 0 || len(targets) != 0 {
+				t.Fatalf("unexpected skipped groups %v or native targets %v", skipped, targets)
+			}
+		})
+	}
+}
+
 func TestChecksOnlyExcludesTestGroups(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -217,7 +237,7 @@ func TestChecksOnlyExcludesTestGroups(t *testing.T) {
 	}{
 		{"python", []string{"src/vibesys/records/api.py"}, []string{"always_on", "python_guards", "python_quality", "python_types"}},
 		{"clients", []string{"clients/features/run-intents/src/state/machine.ts"}, []string{"always_on", "clients_build", "clients_quality"}},
-		{"proto", []string{"proto/vibesys/store/v1/record.proto"}, []string{"always_on"}},
+		{"proto", []string{"proto/vibesys/store/v1/record.proto"}, []string{"always_on", "proto"}},
 		{"docs", []string{"docs/contributing/development.md"}, []string{"always_on"}},
 	}
 	for _, tc := range cases {
@@ -230,7 +250,7 @@ func TestChecksOnlyExcludesTestGroups(t *testing.T) {
 				t.Errorf("checks-only ran native targets %v", targets)
 			}
 			for _, name := range groups {
-				if name == "python_tests" || name == "clients_tests" || name == "proto" || name == "repoctl_tests" {
+				if name == "python_tests" || name == "clients_tests" || name == "repoctl_tests" {
 					t.Errorf("checks-only included test group %s", name)
 				}
 			}

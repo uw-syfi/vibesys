@@ -253,7 +253,7 @@ name = "a proto change selects the contract check"
 paths = ["proto/vibesys/store/v1/record.proto"]
 jobs = ["proto"]
 local_groups = ["always_on", "proto"]
-checks_groups = ["always_on"]
+checks_groups = ["always_on", "proto"]
 [cases.collections]
 native_languages = []
 native_targets = []

@@ -372,9 +372,10 @@ root = "resources/evaluators/microservice"
 env = { VIBESYS_REQUIRE_MANAGED_CANDIDATE_TESTS = "1" }
 
 [[check_groups]]
+# Contract lint and regeneration are required even for --checks-only.
 name = "proto"
 trigger_job = "proto"
-include_in_test = true
+include_in_checks = true
 language = "python"
 directory = "."
 timeout_seconds = 60
