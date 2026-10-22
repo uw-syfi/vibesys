@@ -203,6 +203,9 @@ func (h *host) inspectCandidate(ctx context.Context, request *apiv1.ReadRequest,
 		return readFailure(hostv1.FailureCategory_FAILURE_CATEGORY_CANCELLED, "host read cancelled"), nil
 	}
 	if err != nil || result.ExitCode != 0 {
+		if exitFailureCategory(result, err) == hostv1.FailureCategory_FAILURE_CATEGORY_UNSUPPORTED {
+			return readFailure(hostv1.FailureCategory_FAILURE_CATEGORY_UNSUPPORTED, unsupportedMessage("inspect-candidate")), nil
+		}
 		return readFailure(hostv1.FailureCategory_FAILURE_CATEGORY_INTERNAL, "vibesys host inspect-candidate failed"), nil
 	}
 	response := &apiv1.ReadResponse{}
@@ -213,7 +216,7 @@ func (h *host) inspectCandidate(ctx context.Context, request *apiv1.ReadRequest,
 		return response, nil
 	}
 	if response.GetInspectCandidate().GetSchemaHash() != schemahash.APISchemaHash {
-		return readFailure(hostv1.FailureCategory_FAILURE_CATEGORY_CONFIGURATION, "incompatible schema hash"), nil
+		return readFailure(hostv1.FailureCategory_FAILURE_CATEGORY_UNSUPPORTED, "this host's VibeSys speaks another API schema; update it"), nil
 	}
 	if !hostoperations.HostReadResponseValid(request, response) {
 		return readFailure(hostv1.FailureCategory_FAILURE_CATEGORY_INVALID_INPUT, "inspect-candidate returned a different identity"), nil

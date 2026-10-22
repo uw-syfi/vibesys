@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	apiv1 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/api/v1"
+	hostv1 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/host/v1"
 	"github.com/uw-syfi/vibesys/gateway/internal/hostcommand"
 	"github.com/uw-syfi/vibesys/gateway/internal/hostoperations"
 	"google.golang.org/protobuf/proto"
@@ -51,6 +52,9 @@ func (h *host) HostCall(ctx context.Context, request *apiv1.HostCallRequest) (*a
 		return &apiv1.HostCallResponse{Result: &apiv1.HostCallResponse_Relaunch{Relaunch: &apiv1.RelaunchResponse{Outcome: &apiv1.RelaunchResponse_Refusal{Refusal: apiv1.RelaunchRefusal_RELAUNCH_REFUSAL_CHECKOUT_MISSING}}}}, nil
 	}
 	if err != nil || result.ExitCode != 0 {
+		if exitFailureCategory(result, err) == hostv1.FailureCategory_FAILURE_CATEGORY_UNSUPPORTED {
+			return hostFailure("host_unsupported", unsupportedMessage(dispatched.CLI), result.ExitCode, ""), nil
+		}
 		message := fmt.Sprintf("vibesys host %s exited %d", dispatched.CLI, result.ExitCode)
 		if err != nil {
 			message += ": " + err.Error()

@@ -3,7 +3,6 @@ package server
 import (
 	"context"
 	"errors"
-	"fmt"
 	"path/filepath"
 	"strings"
 
@@ -52,11 +51,8 @@ func (h *host) Read(ctx context.Context, request *apiv1.ReadRequest) (*apiv1.Rea
 		return readFailure(hostv1.FailureCategory_FAILURE_CATEGORY_CANCELLED, "host read cancelled"), nil
 	}
 	if err != nil || result.ExitCode != 0 {
-		message := fmt.Sprintf("vibesys host %s exited %d", dispatched.CLI, result.ExitCode)
-		if err != nil {
-			message += ": " + err.Error()
-		}
-		return readFailure(hostv1.FailureCategory_FAILURE_CATEGORY_INTERNAL, message+"\n"+result.Stderr), nil
+		category, message := commandFailure(dispatched.CLI, result, err)
+		return readFailure(category, message), nil
 	}
 	response := &apiv1.ReadResponse{}
 	if err := proto.Unmarshal(result.Output, response); err != nil || response.Result == nil {

@@ -3,7 +3,6 @@ package server
 import (
 	"context"
 	"errors"
-	"fmt"
 	"path/filepath"
 	"strings"
 
@@ -56,11 +55,8 @@ func (h *host) Mutate(ctx context.Context, request *apiv1.MutateRequest) (*apiv1
 		return mutateFailure(hostv1.FailureCategory_FAILURE_CATEGORY_CANCELLED, "host mutate cancelled"), nil
 	}
 	if err != nil || result.ExitCode != 0 {
-		message := fmt.Sprintf("vibesys host %s exited %d", dispatched.CLI, result.ExitCode)
-		if err != nil {
-			message += ": " + err.Error()
-		}
-		return mutateFailure(hostv1.FailureCategory_FAILURE_CATEGORY_INTERNAL, message+"\n"+result.Stderr), nil
+		category, message := commandFailure(dispatched.CLI, result, err)
+		return mutateFailure(category, message), nil
 	}
 	response := &apiv1.MutateResponse{}
 	if err := proto.Unmarshal(result.Output, response); err != nil || response.Result == nil {

@@ -90,7 +90,7 @@ func TestInspectCandidateRefusesADifferentSchemaHash(t *testing.T) {
 			RequestId: "request-a", Path: root, SelectionRevision: 1,
 		}},
 	})
-	if err != nil || response.GetFailure().GetCategory() != hostv1.FailureCategory_FAILURE_CATEGORY_CONFIGURATION {
+	if err != nil || response.GetFailure().GetCategory() != hostv1.FailureCategory_FAILURE_CATEGORY_UNSUPPORTED {
 		t.Fatalf("hash: %v %v", response, err)
 	}
 }

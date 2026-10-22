@@ -126,10 +126,21 @@ func (ExecRunner) Stream(ctx context.Context, command Command, emit func([]byte)
 		return streamErr
 	}
 	if waitErr != nil {
-		return fmt.Errorf("%w\n%s", waitErr, stderr.buffer.String())
+		return &ExitError{Err: waitErr, Code: cmd.ProcessState.ExitCode(), Stderr: stderr.buffer.String()}
 	}
 	return nil
 }
+
+// ExitError is a streamed command that ended with a failing status. Its text is
+// the process error followed by the command's stderr.
+type ExitError struct {
+	Err    error
+	Code   int
+	Stderr string
+}
+
+func (e *ExitError) Error() string { return e.Err.Error() + "\n" + e.Stderr }
+func (e *ExitError) Unwrap() error { return e.Err }
 
 func readFrame(reader io.Reader) ([]byte, error) {
 	var header [4]byte
