@@ -333,6 +333,7 @@ class CandidateWorld:
         self.cluster = cluster
         self.store = store
         self.root = program(base, prompt, facts)
+        self.drifted_root = program(base, artifact(b"Work using revised policy."), facts)
 
     def host(self, *, restart: bool = False, iterations: int = 1) -> ReplayRunHost:
         resources = self.env.start_host() if restart else self.initial
@@ -457,14 +458,20 @@ class CandidateWorld:
             assert resumed.runtime.accounting.lifetime_completed == 1
             assert resumed.runtime.accounting.reported_cost_usd == pytest.approx(0.1)
             commits = _commits(self.initial)
+            self.root = self.drifted_root
+            replayed = self.host(restart=True, iterations=0)
             assert (
                 await drive_replay(
-                    self.host(restart=True, iterations=0),
+                    replayed,
                     ReplayLaunch(EpochStarted(run_id=self.env.run_id), "again", "host-a", 100),
                 )
                 == completed
             )
             assert _commits(self.initial) == commits
+            assert len(self.client.calls_for("worker")) == 1
+            assert len(self.cluster.submissions) == 1
+            assert replayed.runtime.accounting.lifetime_completed == 1
+            assert replayed.runtime.accounting.reported_cost_usd == pytest.approx(0.1)
         finally:
             for executor in self.jobs:
                 await executor.close()
