@@ -218,7 +218,8 @@ def test_a_scripted_run_pauses_then_resumes_without_overwriting_the_project(tmp_
     original = (loop_input.root / "queue.py").read_bytes()
 
     def pause_on_start(handle: RunHandle) -> None:
-        handle.session.submit(PauseRequest(control_id="pause-before-start"))
+        # This fresh run has no predecessor. Closing controls explicitly target its first epoch.
+        handle.session.submit(PauseRequest(control_id="pause-before-start", expected_epoch=1))
 
     parked = run_request(
         request,
