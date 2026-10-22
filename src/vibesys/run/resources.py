@@ -1,6 +1,5 @@
 """Explicit product composition for one canonical VibeSys run."""
 
-import logging
 import shlex
 import sys
 from collections.abc import Callable, Mapping
@@ -163,7 +162,7 @@ def _coerce_dir_path(raw: str | None, label: str) -> str | None:
     return str(path) if path is not None else None
 
 
-def open_run_resources(  # noqa: PLR0913  # lint-waiver: LW-731905 [PLR0913]; private run composition receives independent policy bindings and effect factories explicitly instead of hiding them in a service container.
+def open_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-waiver: LW-008204 [C901, PLR0912, PLR0913, PLR0915]; ordered product setup and ownership registration share mutable lifecycle state, which helper boundaries would obscure.
     request: RunRequest,
     integration: LocalRunIntegration,
     *,
@@ -187,43 +186,6 @@ def open_run_resources(  # noqa: PLR0913  # lint-waiver: LW-731905 [PLR0913]; pr
     test injects ``vs_sandbox.api.testing.FakeComputeBackend`` here instead of
     monkeypatching the registry or a backend's internal sandbox constructor.
     """
-    try:
-        return _assemble_run_resources(
-            ownership=ownership,
-            request=request,
-            integration=integration,
-            agent_specs=agent_specs,
-            resume_policy=resume_policy,
-            backend_factory=backend_factory,
-            profiler_preflight=profiler_preflight,
-        )
-    except BaseException as error:
-        _fail_started_epoch(integration, error)
-        raise
-
-
-def _fail_started_epoch(integration: LocalRunIntegration, error: BaseException) -> None:
-    """End an epoch this assembly already published when startup cannot continue."""
-    reason = f"{type(error).__name__}: {error}".strip() or "environment startup failed"
-    try:
-        integration.events.fail_open_epoch(reason)
-    except Exception:
-        logging.getLogger(__name__).exception("could not end the epoch after startup failed")
-
-
-def _assemble_run_resources(  # noqa: C901, PLR0912, PLR0913, PLR0915  # lint-waiver: LW-008204 [C901, PLR0912, PLR0913, PLR0915]; ordered product setup and ownership registration share mutable lifecycle state, which helper boundaries would obscure.
-    *,
-    ownership: ReleaseStack,
-    request: RunRequest,
-    integration: LocalRunIntegration,
-    agent_specs: Mapping[str, AgentSpec],
-    resume_policy: (
-        Callable[[OrchestrationDescriptor, OrchestrationDescriptor], OrchestrationResumeDecision]
-        | None
-    ) = None,
-    backend_factory: Callable[..., ComputeBackendImpl],
-    profiler_preflight: ProfilerPreflight,
-) -> "_PreparedRun":
     validate_run_request(request, git=integration.git)
     bundle = request.input_bundle
     exp_name = request.exp_name or request.resolved_run_id

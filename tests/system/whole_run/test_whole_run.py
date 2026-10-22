@@ -37,6 +37,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import pytest
+from hypothesis import HealthCheck, example, given, settings
+from hypothesis import strategies as st
 from tests.server.support import CONTROL_KEY, REQUEST_TIME, operator_dialer
 from tests.support.core_plugins import capability_plugin
 from tests.support.skeleton_strategy import (
@@ -65,6 +67,7 @@ from vs_core.api import AttemptBudget, ItemId, MeasurementFailure, WorkspaceMode
 from vs_core.api.search import Flow, NotOpened, NoWinner, search
 from vs_project.api import OrchestrationDescriptor, Project
 from vs_project.api.testing import FakeGitRepositories
+from vs_runlog.api import RunLogReader
 from vs_runtime.api.core import RunTiming
 from vs_sandbox.api import DockerSandbox, SandboxKind, SubprocessDockerCli
 from vs_sandbox.api.testing import FakeComputeBackend
@@ -85,6 +88,7 @@ from vs_sim.api.testing import (
     Sim,
     SimNetwork,
     SimThreads,
+    examples,
 )
 
 if TYPE_CHECKING:
@@ -684,6 +688,16 @@ def _assert_invariants(outcome: _Outcome, sim: Sim, faults: _Faults) -> None:
     # Every container the run created is gone, and the run's host lease is free.
     assert outcome.daemon.containers == {}, context
     project = Project.open(outcome.root)
+    with Project.run_log_path_for(project.root, _RUN_ID).open("rb") as stream:
+        endings = [
+            record.body.value.state.value
+            for record in RunLogReader(stream)
+            if record.body is not None
+            and record.body.field == "lifecycle"
+            and record.body.value.state is not None
+            and record.body.value.state.field == "ended"
+        ]
+    assert len(endings) == 1, (context, endings)
     with project.state.exclusive_run_host(_RUN_ID):
         pass
     assert not outcome.socket_path.exists(), context
@@ -704,6 +718,26 @@ def test_a_whole_run_ends_and_releases_everything_despite_dead_processes_and_a_n
     # The agent container receives the provider credential, so the run needs one to open.
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     _check(tmp_path, sim)
+
+
+@pytest.mark.regression
+@settings(
+    max_examples=examples(pr=8, nightly=100),
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
+)
+@example(seed=11857852065211445892)
+@given(seed=st.integers(min_value=0, max_value=2**64 - 1))
+def test_whole_run_faults_produce_one_ending(
+    tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch, seed: int
+) -> None:
+    # The agent container receives the provider credential, so the run needs one to open.
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    case = tmp_path_factory.mktemp("whole")
+    monkeypatch.setenv("VIBESYS_STATE_HOME", str(case / "state"))
+    try:
+        _check(case, Sim(seed=seed, schedule_seed=seed))
+    finally:
+        shutil.rmtree(case)
 
 
 @pytest.mark.regression

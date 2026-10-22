@@ -596,7 +596,7 @@ def test_dispatch_preamble_spans_reach_run_log(tmp_path: Path) -> None:
 
     ``_dispatch`` and ``_run_agent`` (main.py) do substantial work before a
     ``RunLogger`` exists and record ``boot_trace`` spans as they go.
-    ``_assemble_run_resources`` must drain that buffer at entry, so the
+    ``open_run_resources`` must drain that buffer at entry, so the
     preamble's spans reach the persistent run log ahead of assembly's own.
     """
     project = tmp_path / "queue"

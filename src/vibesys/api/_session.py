@@ -361,11 +361,14 @@ class _LocalRunSession:
             )
         except BaseException as exc:
             self._status = RunStatus.FAILED
-            self._integration.events.emit(
-                CoreEventType.RUN_FAILED,
-                f"{type(exc).__name__}: {exc}",
-                status=EventStatus.FAILED,
+            reason = f"{type(exc).__name__}: {exc}"
+            startup_recorded = self._resources is None and self._integration.events.fail_open_epoch(
+                reason
             )
+            if not startup_recorded:
+                self._integration.events.emit(
+                    CoreEventType.RUN_FAILED, reason, status=EventStatus.FAILED
+                )
             raise
         else:
             self._status = RunStatus.COMPLETED if succeeded else RunStatus.FAILED
