@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import importlib
 import json
 import os
 import re
@@ -13,7 +14,6 @@ from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING
 
 from vs_project._framework_writes import FRAMEWORK_WRITES
-from vs_project._revision_publication import CheckoutOutcome, PublishedRevision, RevisionPublisher
 from vs_project._run_branches import adoption_branch, run_branch, run_of_branch
 from vs_project._state_io import STATE_DOCUMENT_MAX_BYTES
 from vs_project._workspace_tree import (
@@ -30,6 +30,11 @@ if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
 
     from vs_project._git_events import GitTrackerEvents
+    from vs_project._revision_publication import (
+        CheckoutOutcome,
+        PublishedRevision,
+        RevisionPublisher,
+    )
     from vs_project._state import GitSnapshotPlan, ProjectGitIntegration, StateSnapshot
     from vs_project._workspace_tree import WorkspaceTree
     from vs_project.api.git_repository import GitRepository, RepositoryLocation
@@ -227,7 +232,9 @@ class GitTracker:
         return self._publisher().update_checkout(publication)
 
     def _publisher(self, preserve_paths: tuple[str, ...] = ()) -> RevisionPublisher:
-        return RevisionPublisher(
+        """Build a publisher when a revision is published, not when the tracker is imported."""
+        publisher = importlib.import_module("vs_project._revision_publication").RevisionPublisher
+        return publisher(
             self._git,
             self.run_id,
             self._state_integration.metadata_pathspec,

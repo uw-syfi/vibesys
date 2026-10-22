@@ -79,8 +79,7 @@ _SCENARIOS = tuple(
 # server.host_run_reader (the run.reader messages) and server.host_helper_readers (finding or
 # starting the read-only server Chat reads an ended run through) add 2: the standard library,
 # Pydantic and light server modules only.
-# vs_project._revision_publication (the project API's publication types) adds 1.
-_MODULE_CEILING = 360
+_MODULE_CEILING = 359
 """The most modules a helper may load to answer ``hello``; lower it as the helper sheds imports."""
 _HELLO = {
     "type": "hello",
@@ -196,6 +195,8 @@ def test_hello_loads_no_engine_and_reports_its_start_up_time(
     assert [name for name in loaded if name.split(".")[0] == "vs_logs"] == []
     # Run indexing shares Project's state I/O boundary, with no extra eager module.
     assert "vs_project._run_index" not in loaded
+    # Publication loads when a run publishes a revision, never for hello.
+    assert "vs_project._revision_publication" not in loaded
     # Transport dependencies load only when a run publishes or reads a log.
     assert {"vs_runlog", "vs_proto", "google_crc32c", "google.protobuf"}.isdisjoint(loaded)
     # The launcher's light commands load on dispatch: hello pays for none of them, so the
