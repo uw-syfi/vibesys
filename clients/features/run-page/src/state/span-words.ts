@@ -34,7 +34,7 @@ const VERDICTS: Readonly<Record<string, {readonly label: string; readonly tone: 
 };
 
 /** A recorded agent client, or null when the turn did not name one. */
-export function clientWord(value: string | null): 'scripted' | 'provider' | null {
+function clientWord(value: string | null): 'scripted' | 'provider' | null {
   if (value === null) return null;
   const word = value.replace(/^AGENT_CLIENT_/, '').toLowerCase();
   if (word === 'scripted' || word === 'provider') return word;
@@ -42,7 +42,7 @@ export function clientWord(value: string | null): 'scripted' | 'provider' | null
 }
 
 /** The checkout skip the adoption recorded, as a status word. */
-export function checkoutWords(value: string | null): string | null {
+function checkoutWords(value: string | null): string | null {
   if (value === null) return null;
   const word = value.replace(/^CHECKOUT_STATUS_/, '').toLowerCase();
   if (word === '' || word === 'unspecified') return null;
