@@ -229,6 +229,7 @@ func cli(args []string) error {
 		head := fs.String("head", "HEAD", "Head revision")
 		event := fs.String("event", "pull_request", "Event type")
 		dryRun := fs.Bool("dry-run", false, "Print selected commands without running them")
+		checksOnly := fs.Bool("checks-only", false, "Run quality checks and always-on scripts, not test groups")
 		if err := fs.Parse(args[1:]); err != nil {
 			return err
 		}
@@ -259,7 +260,7 @@ func cli(args []string) error {
 		if err := emit(p, false); err != nil {
 			return err
 		}
-		return runSelectedTests(root, g, p, *dryRun, execution.OSRunner{}, runNativeCommand)
+		return runSelectedTests(root, g, p, *dryRun, *checksOnly, execution.OSRunner{}, runNativeCommand)
 	case "run-native":
 		fs := flag.NewFlagSet("run-native", flag.ContinueOnError)
 		targets := fs.String("targets-json", "", "Selected native roots as a JSON array")

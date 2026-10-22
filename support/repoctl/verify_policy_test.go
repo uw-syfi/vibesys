@@ -27,6 +27,8 @@ func TestVerifyPolicyCases(t *testing.T) {
 name = "python service"
 paths = ["python/service/handler.py"]
 jobs = ["unit"]
+local_groups = ["unit"]
+checks_groups = []
 [cases.collections]
 native_targets = []
 native_languages = []
@@ -77,6 +79,7 @@ packages = []
 		{"missing jobs", strings.Replace(base, "jobs = [\"unit\"]\n", "", 1), "jobs is required"},
 		{"missing collection", strings.Replace(base, "packages = []\n", "", 1), "missing collection"},
 		{"unknown job", strings.Replace(base, "jobs = [\"unit\"]", "jobs = [\"missing\"]", 1), "unknown job"},
+		{"unknown local group", strings.Replace(base, "[cases.collections]", "local_groups = [\"missing\"]\n[cases.collections]", 1), "unknown group"},
 		{"unsafe path", strings.Replace(base, "python/service/handler.py", "../outside", 1), "unsafe path"},
 		{"duplicate path", strings.Replace(base, `"python/service/handler.py"`, `"python/service/handler.py", "python/service/handler.py"`, 1), "duplicate entry"},
 		{"unknown intent", strings.Replace(base, "packages = []", `packages = "everything"`, 1), "unknown collection intent"},

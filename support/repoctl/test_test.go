@@ -46,7 +46,7 @@ func testFixture() (graph, plan) {
 
 func TestSelectedTestChecksUsePackagesAndNativeTargets(t *testing.T) {
 	g, p := testFixture()
-	checks, targets, _, _, err := selectedTestChecks(g, p)
+	checks, targets, _, _, err := selectedTestChecks(g, p, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,7 +63,7 @@ func TestSelectedTestChecksUsePackagesAndNativeTargets(t *testing.T) {
 		t.Fatalf("commands = %v, targets = %v", got, targets)
 	}
 	delete(p.Collections, "pnpm_packages")
-	checks, _, _, _, err = selectedTestChecks(g, p)
+	checks, _, _, _, err = selectedTestChecks(g, p, false)
 	if err != nil || !reflect.DeepEqual(checks[0].Args, []string{"pnpm", "test:clients"}) {
 		t.Fatalf("fallback command = %v, err = %v", checks, err)
 	}
@@ -77,13 +77,13 @@ func TestSelectedTestsRunAndDryRun(t *testing.T) {
 		nativeCalls++
 		return nil
 	}
-	if err := runSelectedTests(t.TempDir(), g, p, true, runner, nativeRun); err != nil {
+	if err := runSelectedTests(t.TempDir(), g, p, true, false, runner, nativeRun); err != nil {
 		t.Fatal(err)
 	}
 	if len(runner.checks) != 0 || nativeCalls != 0 {
 		t.Fatalf("dry-run executed %d suite checks and %d native checks", len(runner.checks), nativeCalls)
 	}
-	if err := runSelectedTests(t.TempDir(), g, p, false, runner, nativeRun); err != nil {
+	if err := runSelectedTests(t.TempDir(), g, p, false, false, runner, nativeRun); err != nil {
 		t.Fatal(err)
 	}
 	if len(runner.checks) != 3 || nativeCalls != 1 {
@@ -96,7 +96,7 @@ func TestSelectedTestChecksRejectsUnknownLanguage(t *testing.T) {
 	suite := g.CheckGroups["python"]
 	suite.Language = "unknown"
 	g.CheckGroups["python"] = suite
-	if _, _, _, _, err := selectedTestChecks(g, p); err == nil || !strings.Contains(err.Error(), `unknown language "unknown"`) {
+	if _, _, _, _, err := selectedTestChecks(g, p, false); err == nil || !strings.Contains(err.Error(), `unknown language "unknown"`) {
 		t.Fatalf("error = %v", err)
 	}
 }
@@ -111,6 +111,8 @@ func TestInvalidTestSuiteConfiguration(t *testing.T) {
 		{Name: "python", Language: "python", Directory: ".", TimeoutSeconds: 0, Commands: [][]string{{"pytest"}}},
 		{Name: "clients", Language: "typescript", Directory: "clients", Collection: "missing", TimeoutSeconds: 1, Commands: [][]string{{"pnpm"}}, PackageCommands: [][]string{{"pnpm", "{package}"}}},
 		{Name: "python", Language: "python", Directory: ".", TimeoutSeconds: 1, Commands: [][]string{{"pytest"}}, Env: map[string]string{"BAD-KEY": "value"}},
+		{Name: "both", TriggerJob: "python", IncludeInTest: true, IncludeInChecks: true, Language: "python", Directory: ".", TimeoutSeconds: 1, Commands: [][]string{{"pytest"}}},
+		{Name: "skip", LocalSkip: "needs Docker", Language: "python", Directory: ".", TimeoutSeconds: 1, Commands: [][]string{{"pytest"}}},
 	}
 	for _, suite := range tests {
 		g.CheckGroups = map[string]execution.Suite{}
@@ -223,11 +225,11 @@ func TestSelectedJobWithoutLocalTargetIsSkipped(t *testing.T) {
 				nativeCalls++
 				return nil
 			}
-			_, _, skipped, _, err := selectedTestChecks(g, p)
+			_, _, skipped, _, err := selectedTestChecks(g, p, false)
 			if err != nil || !reflect.DeepEqual(skipped, tc.wantSkipped) {
 				t.Fatalf("skipped = %v, err = %v, want %v", skipped, err, tc.wantSkipped)
 			}
-			if err := runSelectedTests(t.TempDir(), g, p, false, runner, nativeRun); err != nil {
+			if err := runSelectedTests(t.TempDir(), g, p, false, false, runner, nativeRun); err != nil {
 				t.Fatalf("run failed: %v", err)
 			}
 			if len(runner.checks) != tc.wantChecks || nativeCalls != tc.wantNative {
@@ -241,7 +243,7 @@ func TestSkippedJobDoesNotMaskRunnableFailure(t *testing.T) {
 	g, p := testFixture()
 	p.Jobs["real_tiers"] = true
 	runner := &failingRunner{}
-	if err := runSelectedTests(t.TempDir(), g, p, false, runner, nil); err == nil {
+	if err := runSelectedTests(t.TempDir(), g, p, false, false, runner, nil); err == nil {
 		t.Fatal("failing runnable group reported success")
 	}
 }
