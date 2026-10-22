@@ -4,6 +4,7 @@ package vibesys.host.v1;
 import "buf/validate/validate.proto";
 import "google/protobuf/timestamp.proto";
 import "vibesys/host/v1/operation_options.proto";
+import "vibesys/store/v1/skeleton.proto";
 
 option go_package = "github.com/uw-syfi/vibesys/gateway/gen/vibesys/host/v1;hostv1";
 
@@ -1671,4 +1672,45 @@ message ListSavedRunsResponse {
   repeated SavedRun runs = 3 [(buf.validate.field).repeated.max_items = 200];
   string revision = 4 [(buf.validate.field).string.pattern = "^[0-9a-f]{64}$"];
   optional uint32 next_offset = 5;
+}
+
+// Internal Pause-now escalation, never another operator control.
+message TerminateRunRequest {
+  option (buf.validate.message).cel = {
+    id: "terminate_run.identity"
+    message: "expected_process requires a pid, epoch and start identity"
+    expression: "has(this.expected_process) && this.expected_process.pid > 0u && this.expected_process.epoch > 0u && has(this.expected_process.started_at)"
+  };
+  string request_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 128
+    pattern: "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+  }];
+  string project_root = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 4096
+  }];
+  string run_id = 3 [(buf.validate.field).string.pattern = "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$"];
+  vibesys.store.v1.RunProcess expected_process = 4 [(buf.validate.field).required = true];
+}
+// No outcome asserts a run lifecycle. Only the writer/recovery records that.
+message TerminateRunResponse {
+  string request_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 128
+  }];
+  TerminateRunOutcome outcome = 2 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  string detail = 3 [(buf.validate.field).string.max_bytes = 65536];
+}
+enum TerminateRunOutcome {
+  TERMINATE_RUN_OUTCOME_UNSPECIFIED = 0;
+  TERMINATE_RUN_OUTCOME_WRITER_RELEASED = 1;
+  TERMINATE_RUN_OUTCOME_IDENTITY_CHANGED = 2;
+  TERMINATE_RUN_OUTCOME_UNSUPPORTED = 3;
+  TERMINATE_RUN_OUTCOME_REQUESTED_UNCONFIRMED = 4;
+  TERMINATE_RUN_OUTCOME_OBSERVATION_UNKNOWN = 5;
+  TERMINATE_RUN_OUTCOME_PROCESS_ABSENT = 6;
 }

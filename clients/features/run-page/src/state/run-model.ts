@@ -15,10 +15,10 @@
  * model is a function of the log and the sequence.
  */
 import type {RunEvent, RunOverview} from '@vibesys/contracts';
-import type {HeadlineObjective} from '@vibesys/proto';
 import type {ComparisonBaseline, CoreState} from '@vibesys/run-state';
 import {AgentFold, type AgentGraph, agentGraph} from '@vibesys/run-state/agents';
 import {CandidateFold, type CandidateTree, candidateTree} from '@vibesys/run-state/candidates';
+import type {HeadlineReading} from '@vibesys/run-state/skeleton';
 import {closeSpans, type RunEnding, type RunTrace, traceSpans} from '@vibesys/run-state/trace';
 import type {AppendLog} from './append-log.js';
 import type {Direction} from './direction.js';
@@ -57,7 +57,7 @@ function sameFacts(a: RunFacts, b: RunFacts): boolean {
 /** The run at one sequence. */
 export interface RunModel {
   /** The writer's headline at exactly this committed prefix, when available. */
-  readonly headline?: HeadlineObjective | undefined;
+  readonly headline?: HeadlineReading | undefined;
   /** The sequence shown; null at the live end. */
   readonly at: number | null;
   readonly trace: RunTrace;

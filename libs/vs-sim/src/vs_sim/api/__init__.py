@@ -106,6 +106,7 @@ if TYPE_CHECKING:
         ProcessSignaller,
         Signals,
         SignalSource,
+        WriterProcessSignaller,
     )
     from vs_sim.streaming import StreamingCommand, SubprocessStreamingCommand
     from vs_sim.sync import sync_descriptor
@@ -200,6 +201,7 @@ _MODULES: dict[str, str] = {
     "UrllibLoopbackHttp": "vs_sim.loopback_http",
     "PidfdProcessSignaller": "vs_sim.signals",
     "ProcessSignaller": "vs_sim.signals",
+    "WriterProcessSignaller": "vs_sim.signals",
     "SignalSource": "vs_sim.signals",
     "Signals": "vs_sim.signals",
     "StreamingCommand": "vs_sim.streaming",
@@ -311,6 +313,7 @@ __all__ = [
     "WorkerReservation",
     "WorkerReservationStateError",
     "WorkerStartRefusedError",
+    "WriterProcessSignaller",
     "check_read",
     "derive_seed",
     "follow_launcher",

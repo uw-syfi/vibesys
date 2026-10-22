@@ -1966,11 +1966,11 @@ expose = ["RunLogTee", "JOURNAL_EVENT_MAX_BYTES"]
 [[modules]]
 path = "vibesys.api.host"
 layer = "prompts_and_lower_libs"
-depends_on = ["vibesys.api", "vibesys.api.chat", "vibesys.api.host_relaunch", "vs_project", "vs_proto", "vs_runlog", "vs_sim.api"]
+depends_on = ["vibesys.api.host_terminate", "vibesys.api", "vibesys.api.chat", "vibesys.api.host_relaunch", "vs_project", "vs_proto", "vs_runlog", "vs_sim.api"]
 
 [[interfaces]]
 from = ["vibesys.api.host"]
-expose = ["host_call"]
+expose = ["host_call", "terminate_host"]
 
 [[modules]]
 path = "vs_core._generated"
@@ -2102,3 +2102,12 @@ depends_on = ["server.host_api", "vibesys.api.transport", "vs_project", "vs_prot
 [[interfaces]]
 from = ["server.host_saved_runs"]
 expose = ["page_saved_runs", "without_dashboards"]
+
+[[modules]]
+path = "vibesys.api.host_terminate"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_project", "vs_proto", "vs_runlog", "vs_sim.api"]
+
+[[interfaces]]
+from = ["vibesys.api.host_terminate"]
+expose = ["pause_now", "serve_terminate", "terminate_run"]

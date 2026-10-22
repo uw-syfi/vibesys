@@ -403,4 +403,21 @@ service HostOperationsService {
       }
     };
   }
+  rpc TerminateRun(vibesys.host.v1.TerminateRunRequest) returns (vibesys.host.v1.TerminateRunResponse) {
+    option (vibesys.host.v1.operation) = {
+      operation_id: 38
+      request_tag: 38
+      response_tag: 38
+      cap_ms: 10000
+      grace_ms: 5000
+      effect: OPERATION_EFFECT_IDEMPOTENT_MUTATION
+      retry: RETRY_RECONCILE_SAME_ID
+      cardinality: CARDINALITY_UNARY
+      executor: EXECUTOR_CHECKOUT
+      correlation: {
+        request_path: 1
+        response_path: 1
+      }
+    };
+  }
 }

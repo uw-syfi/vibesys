@@ -93,6 +93,7 @@ class _Reads:
 WATCH_SLOTS = ("login",)
 # Mutation slots are not read handlers. The generator requires each one.
 MUTATION_SLOTS = (
+    "terminate_run",
     "put_cluster",
     "remove_cluster",
     "test_cluster",

@@ -7,6 +7,7 @@ gateway implementation enters this module.
 
 from __future__ import annotations
 
+from functools import partial
 from importlib import import_module
 from typing import TYPE_CHECKING
 
@@ -39,9 +40,9 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from vs_proto.api import PostIntentRequest, RelaunchRequest, RelaunchResponse, SteerIntent
-    from vs_sim.api import Processes, Threads
+    from vs_sim.api import Processes, Threads, WriterProcessSignaller
 
-__all__ = ["host_call"]
+__all__ = ["host_call", "terminate_host"]
 
 
 def host_call(
@@ -49,6 +50,7 @@ def host_call(
     *,
     processes: Processes,
     threads: Threads,
+    signaller: WriterProcessSignaller | None = None,
     start_chat: Callable[[ChatMessageRequest], None] | None = None,
 ) -> bytes:
     """Validate and execute one HostCall envelope, returning a typed response.
@@ -77,7 +79,7 @@ def host_call(
             result = host_operations.dispatch_host_call(
                 method.field,
                 method.value,
-                post_intent=_post_intent,
+                post_intent=partial(_apply_intent, signaller=signaller, threads=threads),
                 relaunch=relaunch,
                 chat_message=chat_message,
             )
@@ -101,6 +103,16 @@ def _failure(code: str, message: str, *, exit_code: int = 2) -> bytes:
             ConfigurationFailed(code=code, stage="host_call", message=message, exit_code=exit_code),
         )
     ).to_binary()
+
+
+def _apply_intent(
+    request: PostIntentRequest, *, signaller: WriterProcessSignaller | None, threads: Threads
+) -> PostIntentResponse:
+    if request.intent is not None and request.intent.field == "pause_now":
+        return import_module("vibesys.api.host_terminate").pause_now(
+            request, persist=_post_intent, signaller=signaller, threads=threads
+        )
+    return _post_intent(request)
 
 
 def _post_intent(request: PostIntentRequest) -> PostIntentResponse:
@@ -173,7 +185,7 @@ def _chat_message(
     project.state.load_run(request.run_id)
     project.state.require_local_run(request.run_id)
     import_module("vibesys.api.chat").run_head(
-        Project.run_log_path_for(request.project_root, request.run_id).parent / "run.head"
+        Project.run_head_path_for(request.project_root, request.run_id)
     )
     directory = Project.chat_session_directory_for(
         request.project_root, request.run_id, request.session_id
@@ -187,3 +199,12 @@ def _chat_message(
     finally:
         gate.close()
     return ChatMessageResponse(request_id=request.request_id, session_id=request.session_id)
+
+
+def terminate_host(
+    payload: bytes, *, signaller: WriterProcessSignaller | None, threads: Threads
+) -> bytes:
+    """Serve internal escalation with the same durable Pause-now inbox owner."""
+    return import_module("vibesys.api.host_terminate").serve_terminate(
+        payload, persist=_post_intent, signaller=signaller, threads=threads
+    )

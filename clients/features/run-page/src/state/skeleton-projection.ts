@@ -1,11 +1,11 @@
 /** Skeleton readings are projected into the existing Run screen props; seeking is local. */
 import {type HostRun, recordedProjectRoot} from '@vibesys/hosts';
-import type {RunHead} from '@vibesys/proto';
 import {observeRun, type RunLivenessHint, type Skeleton, seekSkeleton} from '@vibesys/run-skeleton';
 import {agentGraph} from '@vibesys/run-state/agents';
 import {candidateTree} from '@vibesys/run-state/candidates';
 import {
   lifecycleState,
+  readHeadline,
   readSkeleton,
   type SkeletonContent,
   skeletonPositions,
@@ -34,7 +34,7 @@ export function projectSkeleton(
   skeleton: Skeleton,
   seq: bigint,
   objectiveText = '',
-  options: {head?: RunHead | undefined; content?: SkeletonContent} = {},
+  options: {head?: RunLivenessHint['head']; content?: SkeletonContent} = {},
 ): RunModel {
   const reading = readSkeleton(
     skeleton,
@@ -43,7 +43,7 @@ export function projectSkeleton(
     options.content,
   );
   return {
-    headline: options.head?.committedSeq === seq ? options.head.objective : undefined,
+    headline: readHeadline(options.head, seq),
     at: Number(seq),
     trace: {spans: new Map(reading.spans.map(span => [span.id, span])), sequence: Number(seq)},
     overview: reading.overview,

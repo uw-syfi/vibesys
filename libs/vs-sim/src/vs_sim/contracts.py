@@ -38,7 +38,7 @@ if TYPE_CHECKING:
     from vs_sim.loopback_http import LoopbackHttp
     from vs_sim.probes import CommandProbe
     from vs_sim.processes import ForegroundLauncher, PipedProcess, Processes, ProcessLauncher
-    from vs_sim.signals import ProcessSignaller, SignalSource
+    from vs_sim.signals import ProcessSignaller, SignalSource, WriterProcessSignaller
     from vs_sim.streaming import StreamingCommand
 from vs_sim.output import DISCARD
 
@@ -439,6 +439,43 @@ class ProcessSignallerContract:
             subject.assert_live()
 
         self._case(case)
+
+
+@dataclass(frozen=True)
+class LockOwnershipUnderTest:
+    """One exclusive flock owned by a process and a way to release it."""
+
+    signaller: WriterProcessSignaller
+    pid: int
+    path: Path
+    release: Callable[[], None]
+    close: Callable[[], None]
+
+
+class LockOwnershipContract:
+    """Exclusive flock ownership is specific to a process and an inode."""
+
+    def lock_ownership_under_test(self) -> LockOwnershipUnderTest:
+        """Return a fresh owner with one held exclusive flock."""
+        raise NotImplementedError
+
+    def test_only_the_exact_process_and_file_prove_ownership(self) -> None:
+        """An unrelated inode cannot authorize signalling the same numeric PID."""
+        subject = self.lock_ownership_under_test()
+        try:
+            assert subject.signaller.owns_lock(subject.pid, subject.path)
+            assert not subject.signaller.owns_lock(subject.pid, subject.path.with_name("other"))
+        finally:
+            subject.close()
+
+    def test_release_removes_the_ownership_proof(self) -> None:
+        """A released flock no longer identifies the process as its owner."""
+        subject = self.lock_ownership_under_test()
+        try:
+            subject.release()
+            assert not subject.signaller.owns_lock(subject.pid, subject.path)
+        finally:
+            subject.close()
 
 
 @dataclass(frozen=True)

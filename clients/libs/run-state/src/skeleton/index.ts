@@ -6,6 +6,7 @@ import {
   DrainGoal,
   type Lifecycle,
   Outcome,
+  type RunHead,
   StreamKind,
   StreamState,
 } from '@vibesys/proto';
@@ -18,6 +19,25 @@ import {type StartupStep, startupSteps} from './startup.js';
 import type {SkeletonContent, StoreHistory, StoreView} from './types.js';
 
 export type {SkeletonContent, StoreHistory, StoreView} from './types.js';
+
+/** Scalar screen values copied from the writer's committed primary measurement. */
+export interface HeadlineReading {
+  readonly series: {readonly name: string; readonly unit: string} | undefined;
+  readonly inputValue: number | undefined;
+  readonly bestValue: number | undefined;
+}
+
+export function readHeadline(head: RunHead | undefined, seq: bigint): HeadlineReading | undefined {
+  if (head?.committedSeq !== seq || head.objective === undefined) return undefined;
+  const objective = head.objective;
+  return {
+    series: objective.series
+      ? {name: objective.series.name, unit: objective.series.unit}
+      : undefined,
+    inputValue: objective.inputValue,
+    bestValue: objective.bestValue,
+  };
+}
 
 export interface SkeletonReading {
   readonly spans: ReturnType<typeof screenSpans>;

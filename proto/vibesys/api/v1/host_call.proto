@@ -4,6 +4,7 @@ package vibesys.api.v1;
 
 import "buf/validate/validate.proto";
 import "vibesys/store/v1/intent.proto";
+import "vibesys/host/v1/operations.proto";
 
 option go_package = "github.com/uw-syfi/vibesys/gateway/gen/vibesys/api/v1;apiv1";
 
@@ -68,6 +69,7 @@ message PostIntentRequest {
 message PostIntentResponse {
   string request_id = 1 [(buf.validate.field).string.pattern = "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"];
   bool ordered_reader = 2;
+  vibesys.host.v1.TerminateRunResponse termination = 3;
 }
 message PauseIntent {}
 message PauseNowIntent {}

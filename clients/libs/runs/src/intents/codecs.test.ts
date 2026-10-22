@@ -9,12 +9,14 @@ import {
   SteerMode,
   SteerTargetKind,
   TailResponseSchema,
+  TerminateRunOutcome,
 } from '@vibesys/proto';
 import {
   configuredHostCall,
   hostIntentRequest,
   hostIntentResponse,
   IntentRefused,
+  intentAdmissionWarning,
   intentTailResponse,
   runIntent,
   runReference,
@@ -135,4 +137,51 @@ test('a control reference requires both its project path and run identity', () =
     projectRoot: '/project',
     runId: 'run-1',
   });
+});
+
+test('every process outcome remains distinct and never confirms control application', () => {
+  const warnings = new Set<string | null>();
+  for (const outcome of [
+    TerminateRunOutcome.WRITER_RELEASED,
+    TerminateRunOutcome.IDENTITY_CHANGED,
+    TerminateRunOutcome.UNSUPPORTED,
+    TerminateRunOutcome.REQUESTED_UNCONFIRMED,
+    TerminateRunOutcome.OBSERVATION_UNKNOWN,
+    TerminateRunOutcome.PROCESS_ABSENT,
+  ]) {
+    const bytes = toBinary(
+      HostCallResponseSchema,
+      create(HostCallResponseSchema, {
+        result: {
+          case: 'postIntent',
+          value: {requestId: 'r-1', orderedReader: true, termination: {requestId: 'r-1', outcome}},
+        },
+      }),
+    );
+    const response = hostIntentResponse(bytes, 'r-1');
+    const warning = intentAdmissionWarning(response);
+    expect(warning).not.toBeNull();
+    expect(warning).not.toMatch(/\bstopped\b|\bapplied\b/);
+    warnings.add(warning);
+  }
+  expect(warnings.size).toBe(6);
+  for (const [outcome, requestId] of [
+    [TerminateRunOutcome.UNSPECIFIED, 'r-1'],
+    [999, 'r-1'],
+    [TerminateRunOutcome.UNSUPPORTED, 'another'],
+  ] as const) {
+    const bytes = toBinary(
+      HostCallResponseSchema,
+      create(HostCallResponseSchema, {
+        result: {
+          case: 'postIntent',
+          value: {
+            requestId: 'r-1',
+            termination: {requestId, outcome: outcome as TerminateRunOutcome},
+          },
+        },
+      }),
+    );
+    expect(() => hostIntentResponse(bytes, 'r-1')).toThrow();
+  }
 });

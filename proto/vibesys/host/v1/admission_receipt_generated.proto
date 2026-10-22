@@ -28,6 +28,7 @@ message AcceptedOperation {
     RemoveClusterRequest remove_cluster = 32;
     TestClusterRequest test_cluster = 33;
     StartRunRequest start_run = 36;
+    TerminateRunRequest terminate_run = 38;
     LoginRequest login = 40;
   }
 }
@@ -52,6 +53,7 @@ message OperationResult {
     RemoveClusterResponse remove_cluster = 32;
     TestClusterResponse test_cluster = 33;
     StartRunResponse start_run = 36;
+    TerminateRunResponse terminate_run = 38;
     LoginResponse login = 40;
   }
 }

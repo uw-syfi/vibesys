@@ -407,6 +407,7 @@ const cluster = {
 };
 const deadlineInputs = {
   listTasks: {project: '/project'},
+  listSavedRuns: {project: '/project'},
   listHarnesses: {},
   listExamples: {},
   getTaskGoal: {project: '/project', task: 'bench'},
@@ -422,6 +423,11 @@ const deadlineInputs = {
   removeCluster: {name: 'cluster-a'},
   testCluster: {cluster},
   startRun: {project: '/project'},
+  terminateRun: {
+    projectRoot: '/project',
+    runId: 'run-a',
+    expectedProcess: {pid: 42, epoch: 1, startedAt: {seconds: 1n, nanos: 0}},
+  },
 } satisfies Record<keyof typeof readBudgets | keyof typeof mutateBudgets, object>;
 
 for (const {kind, schema, budgets, method, encode, nextCall} of [

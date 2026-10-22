@@ -41,6 +41,7 @@ const (
 	HostOperationsService_Relaunch_FullMethodName           = "/vibesys.api.v1.HostOperationsService/Relaunch"
 	HostOperationsService_ChatMessage_FullMethodName        = "/vibesys.api.v1.HostOperationsService/ChatMessage"
 	HostOperationsService_ListSavedRuns_FullMethodName      = "/vibesys.api.v1.HostOperationsService/ListSavedRuns"
+	HostOperationsService_TerminateRun_FullMethodName       = "/vibesys.api.v1.HostOperationsService/TerminateRun"
 )
 
 // HostOperationsServiceClient is the client API for HostOperationsService service.
@@ -82,6 +83,7 @@ type HostOperationsServiceClient interface {
 	ChatMessage(ctx context.Context, in *ChatMessageRequest, opts ...grpc.CallOption) (*ChatMessageResponse, error)
 	// Native discovery does not migrate the helper's runs.list summary contract.
 	ListSavedRuns(ctx context.Context, in *v1.ListSavedRunsRequest, opts ...grpc.CallOption) (*v1.ListSavedRunsResponse, error)
+	TerminateRun(ctx context.Context, in *v1.TerminateRunRequest, opts ...grpc.CallOption) (*v1.TerminateRunResponse, error)
 }
 
 type hostOperationsServiceClient struct {
@@ -311,6 +313,16 @@ func (c *hostOperationsServiceClient) ListSavedRuns(ctx context.Context, in *v1.
 	return out, nil
 }
 
+func (c *hostOperationsServiceClient) TerminateRun(ctx context.Context, in *v1.TerminateRunRequest, opts ...grpc.CallOption) (*v1.TerminateRunResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(v1.TerminateRunResponse)
+	err := c.cc.Invoke(ctx, HostOperationsService_TerminateRun_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // HostOperationsServiceServer is the server API for HostOperationsService service.
 // All implementations must embed UnimplementedHostOperationsServiceServer
 // for forward compatibility.
@@ -350,6 +362,7 @@ type HostOperationsServiceServer interface {
 	ChatMessage(context.Context, *ChatMessageRequest) (*ChatMessageResponse, error)
 	// Native discovery does not migrate the helper's runs.list summary contract.
 	ListSavedRuns(context.Context, *v1.ListSavedRunsRequest) (*v1.ListSavedRunsResponse, error)
+	TerminateRun(context.Context, *v1.TerminateRunRequest) (*v1.TerminateRunResponse, error)
 	mustEmbedUnimplementedHostOperationsServiceServer()
 }
 
@@ -422,6 +435,9 @@ func (UnimplementedHostOperationsServiceServer) ChatMessage(context.Context, *Ch
 }
 func (UnimplementedHostOperationsServiceServer) ListSavedRuns(context.Context, *v1.ListSavedRunsRequest) (*v1.ListSavedRunsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListSavedRuns not implemented")
+}
+func (UnimplementedHostOperationsServiceServer) TerminateRun(context.Context, *v1.TerminateRunRequest) (*v1.TerminateRunResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method TerminateRun not implemented")
 }
 func (UnimplementedHostOperationsServiceServer) mustEmbedUnimplementedHostOperationsServiceServer() {}
 func (UnimplementedHostOperationsServiceServer) testEmbeddedByValue()                               {}
@@ -815,6 +831,24 @@ func _HostOperationsService_ListSavedRuns_Handler(srv interface{}, ctx context.C
 	return interceptor(ctx, in, info, handler)
 }
 
+func _HostOperationsService_TerminateRun_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(v1.TerminateRunRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostOperationsServiceServer).TerminateRun(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: HostOperationsService_TerminateRun_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostOperationsServiceServer).TerminateRun(ctx, req.(*v1.TerminateRunRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // HostOperationsService_ServiceDesc is the grpc.ServiceDesc for HostOperationsService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -901,6 +935,10 @@ var HostOperationsService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListSavedRuns",
 			Handler:    _HostOperationsService_ListSavedRuns_Handler,
+		},
+		{
+			MethodName: "TerminateRun",
+			Handler:    _HostOperationsService_TerminateRun_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

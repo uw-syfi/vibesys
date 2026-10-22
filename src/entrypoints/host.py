@@ -10,7 +10,7 @@ from importlib import import_module
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
-from vibesys.api.host import host_call
+from vibesys.api.host import host_call, terminate_host
 from vibesys.api.host_operations.api import (
     ClusterRefusedError,
     LoginRefusedFact,
@@ -26,7 +26,13 @@ from vibesys.api.host_operations.api import (
 from vs_project.api import Project, ProjectError
 from vs_proto.api import host_operations
 from vs_proto.api import host_payloads as pb
-from vs_sim.api import OsProcesses, OsThreads, Signals, SystemClock, WakeupFdSignalRelay
+from vs_sim.api import (
+    OsThreads,
+    Platform,
+    Signals,
+    SystemClock,
+    WakeupFdSignalRelay,
+)
 
 _HOST_CALL_COMMANDS = {op.cli: op.slot for op in host_operations.HOST_CALLS}
 _READ_COMMANDS = {op.cli: op.slot for op in host_operations.READ_CALLS}
@@ -58,10 +64,10 @@ class LoginLibrary(Protocol):
 if TYPE_CHECKING:
     from typing import BinaryIO
 
-    from vs_sim.api import Processes, SignalRelay, Threads
+    from vs_sim.api import SignalRelay, SleepingClock, Threads
 
 
-def run(argv: list[str], *, cwd: Path) -> tuple[int, str, str]:
+def run(argv: list[str], *, cwd: Path, clock: SleepingClock | None = None) -> tuple[int, str, str]:
     """Run a host maintenance method and return exit code, stdout and stderr."""
     parser = argparse.ArgumentParser(
         prog="vibesys host",
@@ -78,11 +84,12 @@ def run(argv: list[str], *, cwd: Path) -> tuple[int, str, str]:
     bulk.add_argument("--project", type=Path, default=cwd, help="project directory")
     args = parser.parse_args(argv)
     conversion = import_module("vibesys.api.transport")
+    clock = SystemClock() if clock is None else clock
     root = args.project if args.project.is_absolute() else cwd / args.project
     try:
         project = Project.open(root)
         if args.method == "convert-runs":
-            rows = conversion.convert_runs(project, clock=SystemClock(), threads=OsThreads())
+            rows = conversion.convert_runs(project, clock=clock, threads=OsThreads())
             counts = Counter(row.result.status for row in rows)
             output = "".join(
                 f"{row.run}: {row.result.status}: {row.result.reason}\n" for row in rows
@@ -91,7 +98,7 @@ def run(argv: list[str], *, cwd: Path) -> tuple[int, str, str]:
                 f"{status}={counts[status]}" for status in conversion.ConversionStatus
             )
             return int(counts[conversion.ConversionStatus.FAILED] > 0), output + summary + "\n", ""
-        result = conversion.convert_run(project, args.run, clock=SystemClock(), threads=OsThreads())
+        result = conversion.convert_run(project, args.run, clock=clock, threads=OsThreads())
     except (OSError, ValueError, TypeError, ProjectError) as exc:
         return 1, "", f"vibesys host {args.method}: {exc}\n"
     return 0, f"{result.status}: {result.reason}\n", ""
@@ -102,10 +109,11 @@ def main(
     *,
     stdin: BinaryIO | None = None,
     stdout: BinaryIO | None = None,
-    processes: Processes | None = None,
-    threads: Threads | None = None,
+    platform: Platform | None = None,
 ) -> int:
     """Run one host method from the current directory."""
+    runtime = Platform.real() if platform is None else platform
+    threads, processes, signaller = runtime.threads, runtime.processes, runtime.writer_signaller
     arguments = sys.argv[1:] if argv is None else argv
     if arguments and arguments[0] == "inspect-candidate":
         parser = argparse.ArgumentParser(
@@ -125,9 +133,7 @@ def main(
         parser.parse_args(arguments[1:])
         source = sys.stdin.buffer if stdin is None else stdin
         destination = sys.stdout.buffer if stdout is None else stdout
-        host = import_module("entrypoints.host_helper").real_host(
-            os.environ, os.getuid(), OsThreads() if threads is None else threads
-        )
+        host = import_module("entrypoints.host_helper").real_host(os.environ, os.getuid(), threads)
         reply = import_module("server.host_helper_requests").answer_registered_read
         destination.write(reply(arguments[0], source.read((1 << 20) + 1), host))
         return 0
@@ -139,7 +145,7 @@ def main(
         parser.parse_args(arguments[1:])
         source = sys.stdin.buffer if stdin is None else stdin
         destination = sys.stdout.buffer if stdout is None else stdout
-        owned = OsThreads() if threads is None else threads
+        owned = threads
         host = import_module("entrypoints.host_helper").real_host(os.environ, os.getuid(), owned)
         library = import_module("entrypoints.host_helper").AgentLibraryLogins
         if not isinstance(host.logins, library):
@@ -157,8 +163,16 @@ def main(
         parser.parse_args(arguments[1:])
         source = sys.stdin.buffer if stdin is None else stdin
         destination = sys.stdout.buffer if stdout is None else stdout
-        owned = OsThreads() if threads is None else threads
-        destination.write(_serve_mutation(arguments[0], source.read((1 << 20) + 1), owned))
+        owned = threads
+        destination.write(
+            terminate_host(
+                source.read((1 << 20) + 1),
+                signaller=signaller,
+                threads=owned,
+            )
+            if _MUTATION_COMMANDS[arguments[0]] == "terminate_run"
+            else _serve_mutation(arguments[0], source.read((1 << 20) + 1), owned)
+        )
         return 0
     if arguments and arguments[0] in _HOST_CALL_COMMANDS:
         parser = argparse.ArgumentParser(
@@ -174,12 +188,13 @@ def main(
                 start_chat=import_module("entrypoints.chat_session").start_chat
                 if _HOST_CALL_COMMANDS[arguments[0]] == "chat_message"
                 else None,
-                processes=OsProcesses() if processes is None else processes,
-                threads=OsThreads() if threads is None else threads,
+                processes=processes,
+                threads=threads,
+                signaller=signaller,
             )
         )
         return 0
-    code, output, error = run(arguments, cwd=Path.cwd())
+    code, output, error = run(arguments, cwd=Path.cwd(), clock=runtime.clock)
     sys.stdout.write(output)
     sys.stderr.write(error)
     return code

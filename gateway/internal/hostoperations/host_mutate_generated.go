@@ -20,6 +20,8 @@ func DispatchHostMutate(request *apiv1.MutateRequest) (HostCall, bool) {
 		return HostCall{CLI: "test-cluster", Deadline: 65000 * time.Millisecond, Executor: 1, Effect: 2}, true
 	case request.GetStartRun() != nil:
 		return HostCall{CLI: "start-run", Deadline: 60000 * time.Millisecond, Executor: 1, Effect: 3}, true
+	case request.GetTerminateRun() != nil:
+		return HostCall{CLI: "terminate-run", Deadline: 10000 * time.Millisecond, Executor: 1, Effect: 2}, true
 	default:
 		return HostCall{}, false
 	}
@@ -45,6 +47,9 @@ func HostMutateResponseValid(request *apiv1.MutateRequest, response *apiv1.Mutat
 	case request.GetStartRun() != nil:
 		got := response.GetStartRun()
 		return got != nil && got.GetRequestId() == request.GetStartRun().GetRequestId()
+	case request.GetTerminateRun() != nil:
+		got := response.GetTerminateRun()
+		return got != nil && got.GetRequestId() == request.GetTerminateRun().GetRequestId()
 	default:
 		return false
 	}

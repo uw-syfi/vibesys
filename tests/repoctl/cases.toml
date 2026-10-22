@@ -360,3 +360,12 @@ jobs = ["python"]
 native_languages = []
 native_targets = []
 pnpm_packages = []
+
+[[cases]]
+name = "Pause-now escalation selects its Python owners"
+paths = ["src/vibesys/api/host_terminate.py"]
+jobs = ["python"]
+[cases.collections]
+native_languages = []
+native_targets = []
+pnpm_packages = []
