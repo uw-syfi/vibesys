@@ -55,7 +55,10 @@ class RunLogReplayStore:
 
     def load(self) -> StoreRecord | None:
         stored = self._store.load()
-        if isinstance(stored, StoredEnvelope):
+        if (
+            isinstance(stored, StoredEnvelope)
+            and stored.schema_version == REPLAY_STORE_SCHEMA_VERSION
+        ):
             self._publish(stored)
         elif stored is None and self._writer.read():
             problem = "run.log has records but its authoritative replay store is missing"

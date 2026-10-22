@@ -1,7 +1,7 @@
 """The recorder's persistence contract against memory, local CAS and native log."""
 
 from collections.abc import Iterator
-from contextlib import AbstractContextManager, contextmanager, suppress
+from contextlib import AbstractContextManager, ExitStack, contextmanager, suppress
 from functools import partial
 from pathlib import Path
 from typing import Protocol
@@ -11,7 +11,15 @@ from protobuf.wkt.google.protobuf.timestamp_pb import Timestamp
 
 from vs_core.api.replay import ReplayCall, ReplayFlow, SemanticKey
 from vs_faults.api import Boundary, FaultGate, FaultPlan, FaultRule, HostCrashError, HostFault
-from vs_project.api import CommitFault, Conflict, FakeStateStore, Project, StoredEnvelope
+from vs_project.api import (
+    CommitFault,
+    Committed,
+    Conflict,
+    FakeStateStore,
+    Project,
+    StateStore,
+    StoredEnvelope,
+)
 from vs_proto.api import Ended, EpochStarted, Outcome, core_common, replay
 from vs_proto.api import ReplayStore as Records
 from vs_runlog.api import FileRunLogWriter, OsFileSync, open_run_log
@@ -178,6 +186,32 @@ async def root(ctx: ReplayFlow) -> str:
 
 def runtime(store: ReplayStore) -> ReplayRuntime:
     return ReplayRuntime(store, root, replay.ReplayAllowance(iterations=2))
+
+
+@pytest.mark.parametrize("kind", ["fake", "local", "runlog"])
+def test_retained_formats_have_the_same_import_prerequisite(
+    kind: str, tmp_path: Path, sim: Sim
+) -> None:
+    project = Project.open(tmp_path)
+    authority: StateStore = FakeStateStore() if kind == "fake" else project.state_store("run-a")
+    fence = authority.acquire("host-a", 0, 30)
+    assert fence is not None
+    old = StoredEnvelope(revision=0, schema_version=1, payload=b"retained-format")
+    assert isinstance(authority.commit(None, old, fence, 0), Committed)
+    assert authority.release(fence, 0)
+    with ExitStack() as resources:
+        store: ReplayStore = authority
+        if kind == "runlog":
+            path = project.run_log_path_for(tmp_path, "run-a")
+            path.parent.mkdir(parents=True, exist_ok=True)
+            threads = sim.threads()
+            writer = resources.enter_context(
+                FileRunLogWriter(path, clock=sim.clock, threads=threads)
+            )
+            store = RunLogReplayStore(writer, authority)
+        with pytest.raises(ReplayCommitError, match="facts-only import"):
+            runtime(store).start(launch("resume"), now=0, at=Timestamp())
+        assert authority.load() == old
 
 
 async def test_confirmed_prefix_replays_without_reexecuting(stores: StoreFactory, sim: Sim) -> None:
