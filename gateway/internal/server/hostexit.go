@@ -3,7 +3,8 @@ package server
 import (
 	"errors"
 	"os/exec"
-	"regexp"
+	"slices"
+	"strings"
 
 	hostv1 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/host/v1"
 	"github.com/uw-syfi/vibesys/gateway/internal/hostcommand"
@@ -31,11 +32,20 @@ func exitFailureCategory(cli string, result hostcommand.Result, err error) hostv
 }
 
 // unknownCommand reports whether a failed run is argparse rejecting the
-// versioned command cli.
+// versioned command cli: its name as an invalid choice, or as a whole token of
+// the unrecognized arguments. A longer word, an option or a path that merely
+// contains the name is not the command.
 func unknownCommand(cli string, exitCode, outputLength int, stderr string) bool {
 	if !versionedCommands[cli] || exitCode != usageExitStatus || outputLength != 0 {
 		return false
 	}
-	name := regexp.QuoteMeta(cli)
-	return regexp.MustCompile(`invalid choice: '` + name + `'|unrecognized arguments:[^\n]*\b` + name + `\b`).MatchString(stderr)
+	for _, line := range strings.Split(stderr, "\n") {
+		if strings.Contains(line, "invalid choice: '"+cli+"'") {
+			return true
+		}
+		if _, listed, found := strings.Cut(line, "unrecognized arguments:"); found && slices.Contains(strings.Fields(listed), cli) {
+			return true
+		}
+	}
+	return false
 }
