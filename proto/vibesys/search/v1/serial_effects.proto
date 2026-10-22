@@ -1,0 +1,96 @@
+syntax = "proto3";
+package vibesys.search.v1;
+
+import "buf/validate/validate.proto";
+import "vibesys/core/v1/leaves.proto";
+import "vibesys/store/v1/replay.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/gateway/gen/vibesys/search/v1;searchv1";
+
+// The native boundary of the existing serial-search operation owners.
+enum SerialEffectStatus {
+  SERIAL_EFFECT_STATUS_UNSPECIFIED = 0;
+  SERIAL_EFFECT_STATUS_SUCCEEDED = 1;
+  SERIAL_EFFECT_STATUS_REJECTED = 2;
+  SERIAL_EFFECT_STATUS_FAILED = 3;
+}
+
+enum RoadmapKind {
+  ROADMAP_KIND_UNSPECIFIED = 0;
+  ROADMAP_KIND_MAJOR = 1;
+  ROADMAP_KIND_MINOR = 2;
+}
+
+enum RoadmapProgress {
+  ROADMAP_PROGRESS_UNSPECIFIED = 0;
+  ROADMAP_PROGRESS_TODO = 1;
+  ROADMAP_PROGRESS_IN_PROGRESS = 2;
+  ROADMAP_PROGRESS_DONE = 3;
+  ROADMAP_PROGRESS_PARKED = 4;
+  ROADMAP_PROGRESS_ABANDONED = 5;
+}
+
+message SerialRoadmapItem {
+  option (buf.validate.message).cel = {
+    id: "roadmap_item.parent"
+    message: "a minor must name its major; a major cannot name a parent"
+    expression: "(this.kind == 2) == has(this.major)"
+  };
+  string id = 1 [(buf.validate.field).string.pattern = "^[a-z0-9][a-z0-9-]{0,47}$"];
+  RoadmapKind kind = 2 [(buf.validate.field).enum = {defined_only: true, not_in: [0]}];
+  string title = 3 [(buf.validate.field).string = {min_len: 1, max_len: 200}];
+  RoadmapProgress status = 4 [(buf.validate.field).enum = {defined_only: true, not_in: [0]}];
+  optional string major = 5 [(buf.validate.field).string.pattern = "^[a-z0-9][a-z0-9-]{0,47}$"];
+  string note = 6 [(buf.validate.field).string.max_len = 1000];
+}
+
+message ReadSerialRoadmap {
+  option (vibesys.store.v1.replay_context) = true;
+}
+
+message PutSerialRoadmap {
+  option (vibesys.store.v1.replay_context) = true;
+  repeated SerialRoadmapItem items = 1 [
+    (buf.validate.field).repeated.min_items = 1,
+    (vibesys.store.v1.replay_field) = REPLAY_FIELD_KIND_IDENTITY
+  ];
+}
+
+message SerialRoadmapRead {
+  SerialEffectStatus status = 1 [(buf.validate.field).enum = {defined_only: true, not_in: [0]}];
+  repeated SerialRoadmapItem items = 2;
+  string detail = 3;
+}
+
+message SerialRoadmapPut {
+  SerialEffectStatus status = 1 [(buf.validate.field).enum = {defined_only: true, not_in: [0]}];
+  string detail = 2;
+}
+
+message CaptureSerialAttribution {
+  option (vibesys.store.v1.replay_context) = true;
+  vibesys.core.v1.RevisionRef revision = 1 [
+    (buf.validate.field).required = true,
+    (vibesys.store.v1.replay_field) = REPLAY_FIELD_KIND_IDENTITY
+  ];
+  repeated string argv = 2 [
+    (buf.validate.field).repeated.min_items = 1,
+    (vibesys.store.v1.replay_field) = REPLAY_FIELD_KIND_IDENTITY
+  ];
+  string output_argument = 3 [
+    (buf.validate.field).string.min_len = 1,
+    (vibesys.store.v1.replay_field) = REPLAY_FIELD_KIND_IDENTITY
+  ];
+  uint32 timeout_seconds = 4 [
+    (buf.validate.field).uint32.gt = 0,
+    (vibesys.store.v1.replay_field) = REPLAY_FIELD_KIND_POLICY
+  ];
+}
+
+message SerialAttributionCaptured {
+  SerialEffectStatus status = 1 [(buf.validate.field).enum = {defined_only: true, not_in: [0]}];
+  optional int32 exit_code = 2;
+  string output = 3;
+  bool truncated = 4;
+  string detail = 5;
+}

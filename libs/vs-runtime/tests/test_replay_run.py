@@ -37,6 +37,7 @@ from vs_runtime.api.replay import (
     ReplayCommitError,
     ReplayCompleted,
     ReplayEnding,
+    ReplayExecutor,
     ReplayLaunch,
     ReplayParked,
     ReplayRecoveryRequiredError,
@@ -67,9 +68,7 @@ def launch(request: str) -> ReplayLaunch:
     return ReplayLaunch(EpochStarted(run_id="run-a"), request, "host-a", 3)
 
 
-def host(
-    store: FakeStateStore, root: Root, executor: FakeReplayExecutor, sim: Sim
-) -> ReplayRunHost:
+def host(store: FakeStateStore, root: Root, executor: ReplayExecutor, sim: Sim) -> ReplayRunHost:
     return ReplayRunHost(
         ReplayRuntime(store, root, replay.ReplayAllowance(iterations=10)),
         executor,

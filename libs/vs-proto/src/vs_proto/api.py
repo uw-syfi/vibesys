@@ -61,6 +61,7 @@ from vs_proto._generated.vibesys.core.v1 import iterations_pb as core_iterations
 from vs_proto._generated.vibesys.core.v1 import leaves_pb as core_leaves
 from vs_proto._generated.vibesys.core.v1 import value_options_pb as core_value_options
 from vs_proto._generated.vibesys.core.v1 import vocabulary_pb as core_vocabulary
+from vs_proto._generated.vibesys.search.v1 import serial_effects_pb as serial_effects
 from vs_proto._generated.vibesys.search.v1.attrs_pb import (
     AdoptionAttrs,
     BaselineAttrs,
@@ -370,6 +371,7 @@ __all__ = [
     "core_vocabulary",
     "replay",
     "schema_hash",
+    "serial_effects",
     "validate",
     "validation_rules",
 ]

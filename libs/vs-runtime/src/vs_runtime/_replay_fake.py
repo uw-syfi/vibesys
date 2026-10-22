@@ -21,6 +21,7 @@ class FakeReplayExecutor:
         self._perform = perform
         self._invocations: dict[str, tuple[bytes, asyncio.Task[ReplayResult]]] = {}
         self._epoch = 0
+        self._withdrawn: set[str] = set()
 
     @property
     def invocations(self) -> tuple[str, ...]:
@@ -33,6 +34,9 @@ class FakeReplayExecutor:
             raise ValueError(problem)
         self._epoch = fence.epoch
         content = self._request(span)
+        if span.id in self._withdrawn:
+            problem = f"withdrawn replay invocation: {span.id}"
+            raise ValueError(problem)
         previous = self._invocations.get(span.id)
         if previous is not None:
             if previous[0] != content:
@@ -60,6 +64,7 @@ class FakeReplayExecutor:
         self._epoch = fence.epoch
         previous = self._invocations.get(span.id)
         if previous is None:
+            self._withdrawn.add(span.id)
             return ReplayAbsent()
         content, task = previous
         if content != self._request(span):
