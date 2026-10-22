@@ -153,7 +153,6 @@ from server.host_run_events import (
 )
 from server.host_run_reader import RunReaderReply, RunReaderRequest
 from server.host_run_summary import UsageWindowReply, UsageWindowRequest
-from server.host_saved_runs import without_dashboards
 from server.registry import driving
 from server.relay import (
     BridgeResult,
@@ -997,12 +996,17 @@ def _project_reply(request: RunsListRequest, host: HelperHost) -> RunsListReply:
                 if run_id in known
                 and (digest := host.projects.run_digest(root, run_id)) is not None
             }
+            if not with_dashboard:
+                digests = {
+                    run_id: digest.model_copy(update={"dashboard": None})
+                    if isinstance(digest, RunDigest)
+                    else digest
+                    for run_id, digest in digests.items()
+                }
             now = host.clock.now()
             summaries = run_summaries(
                 root, runs, host.registry.list(), digests, now=now if with_dashboard else None
             )
-            if not with_dashboard:  # a client that did not ask never sees the dashboard
-                summaries = without_dashboards(summaries)
             return RunsListReply(request_id=request_id, runs=summaries)
 
 

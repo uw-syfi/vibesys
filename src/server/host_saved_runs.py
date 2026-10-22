@@ -2,7 +2,7 @@
 
 The project catalog supplies metadata; this module never derives run facts.
 ``page_saved_runs`` fences pages by that catalog and publishes readable runs in
-its existing host index. ``without_dashboards`` preserves the helper projection.
+its existing host index. This command module loads only for saved-run discovery.
 """
 
 from __future__ import annotations
@@ -11,33 +11,14 @@ import hashlib
 from importlib import import_module
 from typing import TYPE_CHECKING
 
-from server.host_api import RunDigest
-
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from server.host_api import RunList
     from vs_project.api import Project
     from vs_proto.api import host_payloads as pb
     from vs_sim.api import SleepingClock, Threads
 
-# Like the helper's _wire boundary, native dependencies load only on a native
-# request; the legacy dashboard projection must keep entrypoint imports light.
-__all__ = ["page_saved_runs", "without_dashboards"]
-
-
-def without_dashboards(listing: RunList) -> RunList:
-    """Preserve the legacy omission for clients that did not request dashboards."""
-    return listing.model_copy(
-        update={
-            "runs": tuple(
-                run.model_copy(update={"digest": run.digest.model_copy(update={"dashboard": None})})
-                if isinstance(run.digest, RunDigest)
-                else run
-                for run in listing.runs
-            )
-        }
-    )
+__all__ = ["page_saved_runs"]
 
 
 def _import(project: Project, run: pb.SavedRun, clock: SleepingClock, threads: Threads) -> None:

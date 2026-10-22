@@ -69,7 +69,6 @@ from server.host_helper_requests import (
 )
 from server.host_preflight import PreflightReport
 from server.host_run_events import EVENT_TYPES_BY_KINDS, RunEventKinds
-from server.host_saved_runs import page_saved_runs
 from server.run_digest import digest_journal
 from server.span_index import (
     Entry,
@@ -259,7 +258,9 @@ class FileProjects:
             )
             for run in runs
         ]
-        return page_saved_runs(request, root, entries, clock=self._clock, threads=self._threads)
+        return import_module("server.host_saved_runs").page_saved_runs(
+            request, root, entries, clock=self._clock, threads=self._threads
+        )
 
     def tasks(self, project: Path) -> TaskList:
         """The project's tasks, ordered by name."""
