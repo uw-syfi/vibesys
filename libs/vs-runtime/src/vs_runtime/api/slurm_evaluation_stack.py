@@ -33,6 +33,7 @@ from vs_runtime.api.infrastructure import (
     TrustedBenchmarkContract,
     TrustedEvaluationPlan,
 )
+from vs_runtime.api.replay import EvaluationWorkspaceAcquisitions
 from vs_runtime.api.testing import FakeWorkspace, FakeWorkspaces
 from vs_sandbox.api.slurm import (
     PROFILE_END,
@@ -59,6 +60,7 @@ if TYPE_CHECKING:
     from vs_evaluation.api import EvaluationStateNamespace
     from vs_runtime.api.core import StageOutputOpener
     from vs_runtime.api.infrastructure import RunControlChannel
+    from vs_runtime.api.replay import EvaluationWriterReconciliation
     from vs_runtime.contracts import CandidateWorkspace
     from vs_sandbox.api.slurm import SlurmLedgerAttachment
     from vs_sim.api import Sleeper
@@ -209,6 +211,8 @@ async def build_stack(  # noqa: PLR0913  # lint-waiver: LW-455560 [PLR0913]; eac
     root_proof: WorkspaceRootProof | None = None,
     control: RunControlChannel | None = None,
     namespace: EvaluationStateNamespace | None = None,
+    writer_reconciliation: EvaluationWriterReconciliation | None = None,
+    replay_recovery: bool = False,
 ) -> Stack:
     """Build the semantic Slurm executor over ``cluster``, reusing durable state under root.
 
@@ -259,6 +263,9 @@ async def build_stack(  # noqa: PLR0913  # lint-waiver: LW-455560 [PLR0913]; eac
         ledger=ledger,
         root_proof=root_proof,
         control=control,
+        recovery=EvaluationWorkspaceAcquisitions(namespace, "slurm", writer_reconciliation)
+        if replay_recovery
+        else None,
     )
     return Stack(executor, cluster, snapshot, workspaces)
 

@@ -15,6 +15,8 @@ from vs_agent.api import (
 )
 from vs_core.api import AdoptionPublication, CheckoutStatus, CheckoutUpdate
 from vs_project.api import Git, adoption_branch
+from vs_proto.api import evaluation_receipts as evaluation_receipts_pb
+from vs_runtime._evaluation_recovery import EvaluationRecoveryBlockedError
 from vs_runtime._local_validation import LocalValidationRecipeError, check_recipe_artifact_path
 from vs_runtime._trusted_evaluation import (
     TrustedAccuracyResult,
@@ -59,6 +61,34 @@ if TYPE_CHECKING:
     from vs_runtime._workspace_holds import WorkspaceHolds
     from vs_sandbox.api import CommandRunner, HostResource, ProjectPathPolicy
     from vs_sim.api import OutputSink, ProcessSpec, Threads
+
+
+class FakeEvaluationWriterReconciliation:
+    """A closed Fake execution domain with explicit authoritative writer-stop evidence."""
+
+    def __init__(self) -> None:
+        """Start with no inherited writer-stop evidence in the closed Fake domain."""
+        self._stopped: dict[str, set[str]] = {}
+        self.requests: list[tuple[str, tuple[str, ...]]] = []
+
+    def confirm_stopped(self, backing: str, *handles: str) -> None:
+        """The Fake environment observes every writer belonging to these handles ending."""
+        self._stopped.setdefault(backing, set()).update(handles)
+
+    async def require_stopped(self, backing: str, outstanding: tuple[str, ...]) -> None:
+        """Permit acquisition only when every requested writer has authoritative evidence."""
+        self.requests.append((backing, outstanding))
+        if missing := tuple(
+            handle for handle in outstanding if handle not in self._stopped.get(backing, set())
+        ):
+            raise EvaluationRecoveryBlockedError(
+                evaluation_receipts_pb.EvaluationRecoveryBlock(
+                    environment="fake",
+                    backing=backing,
+                    outstanding=list(missing),
+                    prerequisite="the Fake environment has not observed every inherited writer stop",
+                )
+            )
 
 
 class FakeAgentExecutionEnvironment:

@@ -31,6 +31,14 @@ class EvaluationStateNamespace(Protocol):
         """Atomically replace one model at a safe relative path."""
         ...
 
+    def read_bytes(self, relative_path: str | PurePosixPath) -> bytes | None:
+        """Read a subsystem-owned protobuf receipt; absence alone returns None."""
+        ...
+
+    def write_bytes(self, relative_path: str | PurePosixPath, contents: bytes) -> None:
+        """Atomically and durably replace subsystem-owned protobuf bytes."""
+        ...
+
     def delete(self, relative_path: str | PurePosixPath) -> bool:
         """Delete an existing model, returning whether it was present."""
         ...

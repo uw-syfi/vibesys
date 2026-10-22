@@ -64,6 +64,7 @@ from vs_proto._generated.vibesys.core.v1 import value_options_pb as core_value_o
 from vs_proto._generated.vibesys.core.v1 import vocabulary_pb as core_vocabulary
 from vs_proto._generated.vibesys.core.v1.vocabulary_pb import CheckoutStatus
 from vs_proto._generated.vibesys.host.v1 import admission_receipt_generated_pb as admission
+from vs_proto._generated.vibesys.host.v1 import evaluation_receipts_pb as evaluation_receipts
 from vs_proto._generated.vibesys.host.v1 import operation_options_pb as operation_options
 from vs_proto._generated.vibesys.host.v1 import operations_pb as host_payloads
 from vs_proto._generated.vibesys.host.v1.failure_pb import FailureCategory, OperationFailure
@@ -388,6 +389,7 @@ __all__ = [
     "core_leaves",
     "core_value_options",
     "core_vocabulary",
+    "evaluation_receipts",
     "from_mapping",
     "host_operation_descriptors",
     "host_operations",

@@ -78,6 +78,7 @@ from vs_evaluation.ports import (
 from vs_evaluation.semantic_stage import (
     EvidenceResultIdentity,
     SemanticEvaluationStage,
+    evaluation_work_digest,
     evidence_identity,
     same_work,
 )
@@ -146,6 +147,7 @@ __all__ = [
     "TrustedEvidence",
     "WaitCall",
     "WaitReply",
+    "evaluation_work_digest",
     "evidence_identity",
     "failure_signature",
     "is_finished",

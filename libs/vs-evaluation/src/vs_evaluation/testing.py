@@ -407,7 +407,7 @@ class InMemoryEvaluationNamespace:
 
     def __init__(self) -> None:
         """Start with no external operational state."""
-        self._values: dict[str, str] = {}
+        self._values: dict[str, bytes] = {}
 
     def load[ModelT: BaseModel](
         self, relative_path: str | PurePosixPath, model_type: type[ModelT]
@@ -442,7 +442,15 @@ class InMemoryEvaluationNamespace:
             serialized = json.dumps(model.model_dump(mode="json", round_trip=True), allow_nan=False)
         except (TypeError, ValueError) as error:
             raise ProjectStateError.state_serialization_failed() from error
-        self._values[key] = serialized
+        self._values[key] = serialized.encode()
+
+    def read_bytes(self, relative_path: str | PurePosixPath) -> bytes | None:
+        """Read detached subsystem bytes through the same safe path boundary."""
+        return self._values.get(self._key(relative_path))
+
+    def write_bytes(self, relative_path: str | PurePosixPath, contents: bytes) -> None:
+        """Atomically replace one subsystem-owned receipt."""
+        self._values[self._key(relative_path)] = contents
 
     def delete(self, relative_path: str | PurePosixPath) -> bool:
         """Delete an existing model, reporting whether it was present."""

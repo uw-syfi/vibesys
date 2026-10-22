@@ -4,10 +4,17 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from vs_core.api import CancelOwnedJob, ObservationStatus, ObserveOwnedJob, SubmitMeasurement
+from vs_core.api import (
+    CancelOwnedJob,
+    ContractError,
+    ObservationStatus,
+    ObserveOwnedJob,
+    SubmitMeasurement,
+)
 from vs_evaluation.api import ExecutorCancellationUnknownError, ExecutorPoll, PollPhase
 from vs_runtime._core_requests import ExecutorRefusal, ExecutorRole
 from vs_runtime._evaluation_jobs import handle_for
+from vs_runtime._evaluation_recovery import EvaluationRecoveryBlockedError
 from vs_runtime._evaluation_requests import MeasurementRequests
 from vs_runtime._receipt_store import NeverBegun, SealedExecution
 
@@ -128,6 +135,18 @@ class RecoveringMeasurementRequests:
         return result
 
     async def execute(
+        self, request: EvaluationRoleRequest, context: ExecutionContext
+    ) -> ExecutionOutcome:
+        try:
+            return await self._execute(request, context)
+        except EvaluationRecoveryBlockedError as error:
+            if request.request_id is None:
+                raise ContractError(("request_id",), "canonical identity required") from error
+            return ExecutorRefusal(
+                request_id=request.request_id, role=ExecutorRole.EVALUATION, detail=str(error)
+            )
+
+    async def _execute(
         self, request: EvaluationRoleRequest, context: ExecutionContext
     ) -> ExecutionOutcome:
         history = (

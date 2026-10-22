@@ -35,6 +35,7 @@ from vs_runtime.api.slurm_evaluation_stack import plan
 from vs_sim.api.testing import ManualClock, SimThreads, yield_until
 
 from .test_evaluation_executor_contract import _local, _Script
+from .test_local_evaluation_receipts import executor as durable_local
 from .test_replay_evaluation import SCOPE, program
 from .test_replay_run import host
 from .test_retrying_evaluation import Outcome, _terminal
@@ -283,3 +284,65 @@ async def test_sealed_local_submission_survives_lost_delivery_to_the_replay_log(
         runtime.close(now=sim.clock.now())
         await fresh.executor.close()
         await old.executor.close()
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize("retrying", [False, True])
+async def test_local_stage_results_survive_crash_before_measurement_owner_seals(
+    tmp_path: Path, sim: Sim, *, retrying: bool
+) -> None:
+    namespace = Project.open(tmp_path).state.state_store_namespace("run")
+    local_state = InMemoryEvaluationNamespace()
+    old, _, workspaces = durable_local(local_state)
+    fresh, evaluation, replacements = durable_local(local_state)
+    snapshot = await workspaces.root.snapshot("candidate")
+    old_jobs: RecoverableEvaluationExecutor = old
+    fresh_jobs: RecoverableEvaluationExecutor = fresh
+    if retrying:
+        policy = EvaluationRetries(infrastructure_attempts=3, ambiguous_attempts=2)
+        old_jobs = RetryingEvaluationExecutor(old, policy, local_state)
+        fresh_jobs = RetryingEvaluationExecutor(fresh, policy, local_state)
+    store = FakeStateStore()
+    timing = ReplayOperationHost("run", store, sim.clock)
+    runtime = ReplayRuntime(
+        store, program(replay_measurement_plan(plan(candidate=snapshot))), replay.ReplayAllowance()
+    )
+    crashing = EvaluationReplayExecutor(
+        old_jobs, CrashOnReplace(namespace, SimThreads()), timing, within_seconds=100
+    )
+    try:
+        runtime.start(
+            ReplayLaunch(EpochStarted(run_id="run"), "first", "host-a", 100),
+            now=sim.clock.now(),
+            at=Timestamp(),
+        )
+        (span,) = runtime.prepare(now=sim.clock.now(), at=Timestamp())
+        with pytest.raises(SystemExit):
+            await runtime.dispatch(span.id, crashing, now=sim.clock.now())
+        handle = handle_for(RequestId(root=span.id))
+        await yield_until(
+            lambda: old.recover(handle),
+            lambda p: p.phase is PollPhase.ENDED,
+            "the local results before owner sealing",
+        )
+        runtime.close(now=sim.clock.now())
+        fence = store.acquire("host-a", sim.clock.now(), 100)
+        assert fence is not None
+        recovered = EvaluationReplayExecutor(
+            fresh_jobs, ReceiptStore(namespace, SimThreads()), timing, within_seconds=100
+        )
+        result = await recovered.inspect(span, fence)
+        assert isinstance(result, ReplayResult)
+        assert isinstance(result.outcome, pb.ReplayEvaluationResult)
+        assert result.outcome.job is not None
+        assert result.outcome.job.terminal
+        assert result.outcome.job.released
+        assert len(result.outcome.job.evidence) == 2
+        assert await recovered.inspect(span, fence) == result
+        assert not evaluation.accuracy_calls
+        assert not replacements.candidates
+        assert store.release(fence, sim.clock.now())
+    finally:
+        runtime.close(now=sim.clock.now())
+        await old.close()
+        await fresh.close()
