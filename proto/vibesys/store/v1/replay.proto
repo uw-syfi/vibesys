@@ -1,0 +1,107 @@
+syntax = "proto3";
+package vibesys.store.v1;
+
+import "buf/validate/validate.proto";
+import "google/protobuf/any.proto";
+import "google/protobuf/descriptor.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1";
+
+// Every prompt-context field declares whether it changes semantic input or policy.
+enum ReplayFieldKind {
+  REPLAY_FIELD_KIND_UNSPECIFIED = 0;
+  REPLAY_FIELD_KIND_IDENTITY = 1;
+  REPLAY_FIELD_KIND_POLICY = 2;
+}
+extend google.protobuf.MessageOptions {
+  // Contexts classify their own fields. Shared facts inherit the classification
+  // of the enclosing context field and need no replay-specific annotations.
+  bool replay_context = 51102;
+}
+extend google.protobuf.FieldOptions {
+  ReplayFieldKind replay_field = 51100;
+  // Only repeated fields may be sets. The writer sorts and deduplicates them.
+  bool replay_set = 51101;
+}
+
+// Names are semantic, never source locations or live collection positions.
+message OperationKey {
+  string operation = 1 [(buf.validate.field).string.min_len = 1];
+  repeated KeyComponent scope = 2;
+}
+enum KeyComponentKind {
+  KEY_COMPONENT_KIND_UNSPECIFIED = 0;
+  KEY_COMPONENT_KIND_PARENT = 1;
+  KEY_COMPONENT_KIND_ITEM = 2;
+  KEY_COMPONENT_KIND_SAMPLE = 3;
+  KEY_COMPONENT_KIND_REVISION = 4;
+  KEY_COMPONENT_KIND_RECORDED_POSITION = 5;
+}
+message KeyComponent {
+  KeyComponentKind kind = 1 [(buf.validate.field).enum = {defined_only: true, not_in: [0]}];
+  string value = 2 [(buf.validate.field).string.min_len = 1];
+}
+
+// All historical budget arithmetic reads this observation's value during replay.
+message ReplayAllowance {
+  uint64 iterations = 1;
+  uint64 capacity = 2;
+  double remaining = 3 [(buf.validate.field).double = {gte: 0, finite: true}];
+}
+message ReplayPolicy {
+  string role = 1;
+  string template = 2;
+  bytes content = 3;
+  string reply_type = 4 [(buf.validate.field).string.min_len = 1];
+  // Derived by the writer from the reachable retained reply descriptors.
+  optional bytes reply_schema_digest = 5 [(buf.validate.field).bytes.len = 32];
+}
+
+// Immutable execution metadata, separate from mutable span labels. Outcome Any
+// is decoded with the epoch's retained descriptors, never the current reply type.
+message OperationReplay {
+  option (buf.validate.message).cel = {
+    id: "operation_replay.reply_schema"
+    message: "recorded operations require the writer's reply schema proof"
+    expression: "has(this.policy) && has(this.policy.reply_schema_digest)"
+  };
+  option (buf.validate.message).cel = {
+    id: "operation_replay.acceptance"
+    message: "an outcome requires its immutable acceptance sequence"
+    expression: "has(this.outcome) == has(this.accepted_sequence)"
+  };
+  OperationKey key = 1 [(buf.validate.field).required = true];
+  uint32 encoding_version = 2 [(buf.validate.field).uint32.const = 1];
+  bytes identity = 3 [(buf.validate.field).bytes.min_len = 1];
+  bytes identity_digest = 4 [(buf.validate.field).bytes.len = 32];
+  bytes dependencies = 5 [(buf.validate.field).bytes.len = 32];
+  ReplayPolicy policy = 6 [(buf.validate.field).required = true];
+  google.protobuf.Any outcome = 7;
+  // seq and clock come exclusively from the accepting Record envelope.
+  bool paid = 8;
+  optional double cost_usd = 9 [(buf.validate.field).double = {gte: 0, finite: true}];
+  ReplayAllowance allowance = 10 [(buf.validate.field).required = true];
+  // Later span updates retain this sequence; they are not new acceptances.
+  optional uint64 accepted_sequence = 11 [(buf.validate.field).uint64.gt = 0];
+}
+
+// Timer-only progress is an observation, not a keyed paid operation.
+message ReplayClock {
+  ReplayAllowance allowance = 1 [(buf.validate.field).required = true];
+}
+
+message ReplayNotice {
+  option (buf.validate.message).cel = {
+    id: "replay_notice.paid_results"
+    message: "unused entries must identify accepted paid results"
+    expression: "this.unused.all(x, x.paid && has(x.outcome))"
+  };
+  string id = 1 [(buf.validate.field).string.min_len = 1];
+  repeated OperationReplay unused = 2 [(buf.validate.field).repeated.min_items = 1];
+  repeated OperationKey pending = 3;
+}
+message ReplayAcknowledgement {
+  // A launch without a preceding unacknowledged notice still records its id.
+  optional string notice_id = 1 [(buf.validate.field).string.min_len = 1];
+  string launch_request_id = 2 [(buf.validate.field).string.min_len = 1];
+}

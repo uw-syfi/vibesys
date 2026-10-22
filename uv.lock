@@ -3223,11 +3223,19 @@ name = "vs-core"
 version = "0.1.0"
 source = { editable = "libs/vs-core" }
 dependencies = [
+    { name = "protobuf-py" },
+    { name = "protovalidate" },
     { name = "pydantic" },
+    { name = "vs-proto" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "pydantic", specifier = ">=2" }]
+requires-dist = [
+    { name = "protobuf-py", specifier = "==0.6.0" },
+    { name = "protovalidate", specifier = "==2.0.0" },
+    { name = "pydantic", specifier = ">=2" },
+    { name = "vs-proto", editable = "libs/vs-proto" },
+]
 
 [[package]]
 name = "vs-decode"

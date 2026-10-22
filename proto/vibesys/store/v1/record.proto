@@ -12,6 +12,7 @@ import "vibesys/store/v1/intent.proto";
 import "vibesys/store/v1/lifecycle.proto";
 import "vibesys/store/v1/notice.proto";
 import "vibesys/store/v1/span.proto";
+import "vibesys/store/v1/replay.proto";
 
 option go_package = "github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1";
 
@@ -46,6 +47,8 @@ message Record {
     gte: 0
     finite: true
   }];
+  // A timer-only boundary uses the enclosing Record.clock and serial sequence.
+  optional ReplayClock replay_clock = 21;
   oneof body {
     option (buf.validate.oneof).required = true;
     EpochStarted epoch_started = 4;
@@ -118,10 +121,14 @@ message EpochStarted {
   // False explicitly records that the journal has no checkout fingerprint.
   // Absence preserves the validation of previously published typed headers.
   optional bool provenance_known = 12;
+  // Present only for keyed epochs. Retain this writer encoding indefinitely.
+  optional uint32 identity_encoding_version = 13 [(buf.validate.field).uint32.const = 1];
+  optional ReplayAllowance initial_allowance = 14;
+  optional ReplayAcknowledgement replay_acknowledgement = 15;
   // Canonical absolute directory recorded when the run is created. Windows,
   // controls and resume read this and no path the client remembered. Absence
   // on older logs means the run has no recorded root.
-  optional string project_root = 13 [(buf.validate.field).string = {
+  optional string project_root = 16 [(buf.validate.field).string = {
     min_len: 1
     max_bytes: 4096
   }];
