@@ -3,6 +3,7 @@ syntax = "proto3";
 package vibesys.search.v1;
 
 import "buf/validate/validate.proto";
+import "vibesys/core/v1/vocabulary.proto";
 import "vibesys/store/v1/common.proto";
 
 option go_package = "github.com/uw-syfi/vibesys/gateway/gen/vibesys/search/v1;searchv1";
@@ -45,18 +46,6 @@ enum Selection {
   SELECTION_UNSPECIFIED = 0;
   SELECTION_CANDIDATE = 1;
   SELECTION_BASELINE = 2;
-}
-
-// Why an optional checkout update advanced or skipped. The names match the
-// checkout publication status; this package records the fact the run shows.
-enum CheckoutStatus {
-  CHECKOUT_STATUS_UNSPECIFIED = 0;
-  CHECKOUT_STATUS_FAST_FORWARDED = 1;
-  CHECKOUT_STATUS_OTHER_BRANCH = 2;
-  CHECKOUT_STATUS_DIRTY_TREE = 3;
-  CHECKOUT_STATUS_DIVERGED = 4;
-  CHECKOUT_STATUS_GIT_REFUSED = 5;
-  CHECKOUT_STATUS_OPERATOR_CHANGED_CHECKOUT = 6;
 }
 
 enum ComparisonVerdict {
@@ -254,7 +243,8 @@ message AdoptionAttrs {
     min_len: 1
     max_bytes: 65536
   }];
-  optional CheckoutStatus checkout_status = 4 [(buf.validate.field).enum = {
+  // The checkout publication status (vibesys.core.v1.CheckoutStatus), when the run recorded one.
+  optional vibesys.core.v1.CheckoutStatus checkout_status = 4 [(buf.validate.field).enum = {
     defined_only: true
     not_in: [0]
   }];

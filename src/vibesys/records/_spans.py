@@ -10,6 +10,7 @@ import vibesys.search_spans.api as search
 import vs_proto.api as p
 from vibesys.records._agents import stream_id
 from vibesys.records._common import Projection, enum_value
+from vs_core.api import CheckoutStatus
 from vs_decode.api import Unreadable, decode_json
 
 if TYPE_CHECKING:
@@ -173,12 +174,27 @@ def _merge_prior(kind: str, attrs: Message, merged: Message) -> Message:
     return merged
 
 
+def _checkout_from_reason(reason: str | None) -> p.CheckoutStatus | None:
+    """The checkout status a span reason names, when it is one of the core statuses."""
+    if reason is None:
+        return None
+    try:
+        status = CheckoutStatus(reason)
+    except ValueError:
+        return None
+    return enum_value(p.CheckoutStatus, status.value)
+
+
 def _span_label(projection: Projection, source: CoreSpan) -> p.Label | None:
     previous = projection.spans.get(source.id)
     label = source.label
     mapped_label = previous.label if previous is not None else None
     if label is not None:
         attrs = _label_attrs(projection, source)
+        if label.kind == "adoption" and isinstance(attrs, p.AdoptionAttrs):
+            status = _checkout_from_reason(label.reason)
+            if status is not None:
+                attrs.checkout_status = status
         if previous is not None and previous.label is not None:
             prior = previous.label.attrs
             if prior is not None and prior.type_url.endswith("/" + attrs.desc().type_name):

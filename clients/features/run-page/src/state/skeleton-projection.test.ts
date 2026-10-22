@@ -399,6 +399,9 @@ test('a CLI window pause target is the recorded root, not the seed path', () => 
 test('a run with no recorded root does not use the path the window remembered', () => {
   const {records} = storeRunFixture('short', 2, 3);
   const skeleton = foldSkeleton(seedSkeleton(), records);
+  const epoch = skeleton.epochs.at(-1)?.epoch;
+  if (!epoch) throw new Error('epoch required');
+  epoch.projectRoot = '';
   const seed = {...SEED, title: {project: '~/queue', task: null}};
   const model = projectSkeleton(skeleton, skeleton.throughSeq ?? 0n);
   const state = skeletonScreenState(seed, skeleton, model, runPageInitial(seed));

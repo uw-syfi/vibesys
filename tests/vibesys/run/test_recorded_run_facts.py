@@ -11,6 +11,7 @@ import vs_proto.api as p
 from server.run_usage import UsageFold
 from vibesys.records.api import MappingState, map_event
 from vibesys.run import EventJournal
+from vs_core.api import CheckoutStatus
 from vs_project.api import Project
 from vs_runlog.api import RunLogReader
 from vs_sim.api.testing import ManualClock, SimThreads
@@ -69,7 +70,11 @@ def test_adoption_records_the_checkout_skip() -> None:
                 "name": "adopt",
                 "status": "running",
                 "started_at": 0,
-                "label": {"kind": "adoption", "attrs_json": json.dumps({})},
+                "label": {
+                    "kind": "adoption",
+                    "attrs_json": json.dumps({}),
+                    "reason": CheckoutStatus.OPERATOR_CHANGED_CHECKOUT.value,
+                },
             }
         }
     )
@@ -78,11 +83,7 @@ def test_adoption_records_the_checkout_skip() -> None:
         state,
         _event(
             e.CoreEventType.WINNER_SELECTED,
-            e.WinnerSelectedData(
-                selection="baseline",
-                revision="input",
-                checkout_status="operator_changed_checkout",
-            ),
+            e.WinnerSelectedData(selection="baseline", revision="input"),
         ),
     )
     spans = [
@@ -96,7 +97,8 @@ def test_adoption_records_the_checkout_skip() -> None:
     ]
     assert spans
     label = spans[-1].label
-    assert label is not None and label.attrs is not None
+    assert label is not None
+    assert label.attrs is not None
     attrs = p.AdoptionAttrs.from_binary(label.attrs.value)
     assert attrs.checkout_status == p.CheckoutStatus.OPERATOR_CHANGED_CHECKOUT
 
@@ -152,7 +154,8 @@ def test_scripted_turn_records_no_configured_model() -> None:
     ]
     assert turns
     label = turns[-1].label
-    assert label is not None and label.attrs is not None
+    assert label is not None
+    assert label.attrs is not None
     attrs = p.AgentTurnAttrs.from_binary(label.attrs.value)
     assert attrs.client == p.AgentClient.SCRIPTED
     assert not attrs.has_field("model")
@@ -206,7 +209,8 @@ def test_scripted_turn_records_no_configured_model() -> None:
     ]
     assert kept
     kept_label = kept[-1].label
-    assert kept_label is not None and kept_label.attrs is not None
+    assert kept_label is not None
+    assert kept_label.attrs is not None
     kept_attrs = p.AgentTurnAttrs.from_binary(kept_label.attrs.value)
     assert kept_attrs.client == p.AgentClient.SCRIPTED
     assert not kept_attrs.has_field("model")

@@ -30,7 +30,14 @@ from vs_agent.api import (
     TodoItemData,
     ToolResultPayload,
 )
-from vs_core.api import ComparisonVerdict, EndReason, SpanId, TaskObjective, WireSpan
+from vs_core.api import (
+    CheckoutStatus,
+    ComparisonVerdict,
+    EndReason,
+    SpanId,
+    TaskObjective,
+    WireSpan,
+)
 from vs_redaction.api import redact_diagnostic_text
 from vs_runtime.api.infrastructure import (
     AgentReply,
@@ -895,18 +902,8 @@ class WinnerSelectedData(EventPayload):
     selection: Literal["candidate", "baseline"]
     revision: str
     settlement_id: str | None = None
-    checkout_status: (
-        Literal[
-            "fast_forwarded",
-            "other_branch",
-            "dirty_tree",
-            "diverged",
-            "git_refused",
-            "operator_changed_checkout",
-        ]
-        | None
-    ) = None
-    """Why the checkout update advanced or skipped, when the run recorded one."""
+    checkout_status: CheckoutStatus | None = None
+    """The checkout publication status, when this selection recorded one."""
 
 
 class InputMeasurementFailureKind(StrEnum):
