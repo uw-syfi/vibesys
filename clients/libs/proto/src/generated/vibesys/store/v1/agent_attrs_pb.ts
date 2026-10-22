@@ -2,8 +2,8 @@
 // @generated from file vibesys/store/v1/agent_attrs.proto (package vibesys.store.v1, syntax proto3)
 /* eslint-disable */
 
-import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
-import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
+import type { GenEnum, GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
+import { enumDesc, fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
 import { file_buf_validate_validate } from "../../../buf/validate/validate_pb.js";
 import type { Timestamp } from "@bufbuild/protobuf/wkt";
 import { file_google_protobuf_timestamp } from "@bufbuild/protobuf/wkt";
@@ -13,7 +13,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file vibesys/store/v1/agent_attrs.proto.
  */
 export const file_vibesys_store_v1_agent_attrs: GenFile = /*@__PURE__*/
-  fileDesc("CiJ2aWJlc3lzL3N0b3JlL3YxL2FnZW50X2F0dHJzLnByb3RvEhB2aWJlc3lzLnN0b3JlLnYxIvYECg5BZ2VudFR1cm5BdHRycxIaCgVhZ2VudBgBIAEoCUILukgIcgYQASiAgAQSGQoEcm9sZRgCIAEoCUILukgIcgYQASiAgAQSHwoFbW9kZWwYAyABKAlCC7pICHIGEAEogIAESACIAQESJAoKc3RhcnRlZF9ieRgEIAMoCUIQukgNkgEKIghyBhABKICABBIaCgVzdGFnZRgFIAEoCUILukgIcgYQASiAgAQSFAoHYXR0ZW1wdBgGIAEoDUgBiAEBEiIKCHByb3ZpZGVyGAcgASgJQgu6SAhyBhABKICABEgCiAEBEioKEHJlYXNvbmluZ19lZmZvcnQYCCABKAlCC7pICHIGEAEogIAESAOIAQESKQoPaGFybmVzc192ZXJzaW9uGAkgASgJQgu6SAhyBhABKICABEgEiAEBEjAKBXVzYWdlGAogASgLMhwudmliZXN5cy5zdG9yZS52MS5Ub2tlblVzYWdlSAWIAQESHQoKcmVwbHlfanNvbhgLIAEoCUIJukgGcgQogIAEEh4KEXRyYW5zY3JpcHRfbGVuZ3RoGAwgASgESAaIAQESLgoKc3RhcnRlZF9hdBgNIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASLAoIZW5kZWRfYXQYDiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wQggKBl9tb2RlbEIKCghfYXR0ZW1wdEILCglfcHJvdmlkZXJCEwoRX3JlYXNvbmluZ19lZmZvcnRCEgoQX2hhcm5lc3NfdmVyc2lvbkIICgZfdXNhZ2VCFAoSX3RyYW5zY3JpcHRfbGVuZ3RoIqgCCgpUb2tlblVzYWdlEhIKBWlucHV0GAEgASgESACIAQESFwoKY2FjaGVfcmVhZBgCIAEoBEgBiAEBEhsKDmNhY2hlX2NyZWF0aW9uGAMgASgESAKIAQESEwoGb3V0cHV0GAQgASgESAOIAQESFgoJcmVhc29uaW5nGAUgASgESASIAQESJwoIY29zdF91c2QYBiABKAFCELpIDRILQAEpAAAAAAAAAABIBYgBARIYCgtkdXJhdGlvbl9tcxgHIAEoBEgGiAEBQggKBl9pbnB1dEINCgtfY2FjaGVfcmVhZEIRCg9fY2FjaGVfY3JlYXRpb25CCQoHX291dHB1dEIMCgpfcmVhc29uaW5nQgsKCV9jb3N0X3VzZEIOCgxfZHVyYXRpb25fbXNCQVo/Z2l0aHViLmNvbS91dy1zeWZpL3ZpYmVzeXMvZ2F0ZXdheS9nZW4vdmliZXN5cy9zdG9yZS92MTtzdG9yZXYxYgZwcm90bzM", [file_buf_validate_validate, file_google_protobuf_timestamp]);
+  fileDesc("CiJ2aWJlc3lzL3N0b3JlL3YxL2FnZW50X2F0dHJzLnByb3RvEhB2aWJlc3lzLnN0b3JlLnYxIs0GCg5BZ2VudFR1cm5BdHRycxIaCgVhZ2VudBgBIAEoCUILukgIcgYQASiAgAQSGQoEcm9sZRgCIAEoCUILukgIcgYQASiAgAQSHwoFbW9kZWwYAyABKAlCC7pICHIGEAEogIAESACIAQESJAoKc3RhcnRlZF9ieRgEIAMoCUIQukgNkgEKIghyBhABKICABBIaCgVzdGFnZRgFIAEoCUILukgIcgYQASiAgAQSFAoHYXR0ZW1wdBgGIAEoDUgBiAEBEiIKCHByb3ZpZGVyGAcgASgJQgu6SAhyBhABKICABEgCiAEBEioKEHJlYXNvbmluZ19lZmZvcnQYCCABKAlCC7pICHIGEAEogIAESAOIAQESKQoPaGFybmVzc192ZXJzaW9uGAkgASgJQgu6SAhyBhABKICABEgEiAEBEjAKBXVzYWdlGAogASgLMhwudmliZXN5cy5zdG9yZS52MS5Ub2tlblVzYWdlSAWIAQESHQoKcmVwbHlfanNvbhgLIAEoCUIJukgGcgQogIAEEh4KEXRyYW5zY3JpcHRfbGVuZ3RoGAwgASgESAaIAQESLgoKc3RhcnRlZF9hdBgNIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASLAoIZW5kZWRfYXQYDiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEj4KBmNsaWVudBgPIAEoDjIdLnZpYmVzeXMuc3RvcmUudjEuQWdlbnRDbGllbnRCCrpIB4IBBBABIABIB4gBATqJAbpIhQEaggEKE2FnZW50X3R1cm4uc2NyaXB0ZWQSLGEgc2NyaXB0ZWQgdHVybiByZWNvcmRzIG5vIHByb3ZpZGVyIG9yIG1vZGVsGj10aGlzLmNsaWVudCAhPSAxIHx8ICghaGFzKHRoaXMubW9kZWwpICYmICFoYXModGhpcy5wcm92aWRlcikpQggKBl9tb2RlbEIKCghfYXR0ZW1wdEILCglfcHJvdmlkZXJCEwoRX3JlYXNvbmluZ19lZmZvcnRCEgoQX2hhcm5lc3NfdmVyc2lvbkIICgZfdXNhZ2VCFAoSX3RyYW5zY3JpcHRfbGVuZ3RoQgkKB19jbGllbnQiqAIKClRva2VuVXNhZ2USEgoFaW5wdXQYASABKARIAIgBARIXCgpjYWNoZV9yZWFkGAIgASgESAGIAQESGwoOY2FjaGVfY3JlYXRpb24YAyABKARIAogBARITCgZvdXRwdXQYBCABKARIA4gBARIWCglyZWFzb25pbmcYBSABKARIBIgBARInCghjb3N0X3VzZBgGIAEoAUIQukgNEgtAASkAAAAAAAAAAEgFiAEBEhgKC2R1cmF0aW9uX21zGAcgASgESAaIAQFCCAoGX2lucHV0Qg0KC19jYWNoZV9yZWFkQhEKD19jYWNoZV9jcmVhdGlvbkIJCgdfb3V0cHV0QgwKCl9yZWFzb25pbmdCCwoJX2Nvc3RfdXNkQg4KDF9kdXJhdGlvbl9tcyphCgtBZ2VudENsaWVudBIcChhBR0VOVF9DTElFTlRfVU5TUEVDSUZJRUQQABIZChVBR0VOVF9DTElFTlRfU0NSSVBURUQQARIZChVBR0VOVF9DTElFTlRfUFJPVklERVIQAkJBWj9naXRodWIuY29tL3V3LXN5ZmkvdmliZXN5cy9nYXRld2F5L2dlbi92aWJlc3lzL3N0b3JlL3YxO3N0b3JldjFiBnByb3RvMw", [file_buf_validate_validate, file_google_protobuf_timestamp]);
 
 /**
  * Attrs for agent_turn, including the final usage and transcript byte length.
@@ -97,6 +97,11 @@ export type AgentTurnAttrs = Message<"vibesys.store.v1.AgentTurnAttrs"> & {
    * @generated from field: google.protobuf.Timestamp ended_at = 14;
    */
   endedAt?: Timestamp | undefined;
+
+  /**
+   * @generated from field: optional vibesys.store.v1.AgentClient client = 15;
+   */
+  client?: AgentClient | undefined;
 };
 
 /**
@@ -154,3 +159,31 @@ export type TokenUsage = Message<"vibesys.store.v1.TokenUsage"> & {
  */
 export const TokenUsageSchema: GenMessage<TokenUsage> = /*@__PURE__*/
   messageDesc(file_vibesys_store_v1_agent_attrs, 1);
+
+/**
+ * Who ran a turn: a scripted agent, or a provider. Absence is an older turn.
+ *
+ * @generated from enum vibesys.store.v1.AgentClient
+ */
+export enum AgentClient {
+  /**
+   * @generated from enum value: AGENT_CLIENT_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * @generated from enum value: AGENT_CLIENT_SCRIPTED = 1;
+   */
+  SCRIPTED = 1,
+
+  /**
+   * @generated from enum value: AGENT_CLIENT_PROVIDER = 2;
+   */
+  PROVIDER = 2,
+}
+
+/**
+ * Describes the enum vibesys.store.v1.AgentClient.
+ */
+export const AgentClientSchema: GenEnum<AgentClient> = /*@__PURE__*/
+  enumDesc(file_vibesys_store_v1_agent_attrs, 0);

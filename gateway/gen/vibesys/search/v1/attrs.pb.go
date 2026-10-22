@@ -294,6 +294,69 @@ func (Selection) EnumDescriptor() ([]byte, []int) {
 	return file_vibesys_search_v1_attrs_proto_rawDescGZIP(), []int{4}
 }
 
+// Why an optional checkout update advanced or skipped. The names match the
+// checkout publication status; this package records the fact the run shows.
+type CheckoutStatus int32
+
+const (
+	CheckoutStatus_CHECKOUT_STATUS_UNSPECIFIED               CheckoutStatus = 0
+	CheckoutStatus_CHECKOUT_STATUS_FAST_FORWARDED            CheckoutStatus = 1
+	CheckoutStatus_CHECKOUT_STATUS_OTHER_BRANCH              CheckoutStatus = 2
+	CheckoutStatus_CHECKOUT_STATUS_DIRTY_TREE                CheckoutStatus = 3
+	CheckoutStatus_CHECKOUT_STATUS_DIVERGED                  CheckoutStatus = 4
+	CheckoutStatus_CHECKOUT_STATUS_GIT_REFUSED               CheckoutStatus = 5
+	CheckoutStatus_CHECKOUT_STATUS_OPERATOR_CHANGED_CHECKOUT CheckoutStatus = 6
+)
+
+// Enum value maps for CheckoutStatus.
+var (
+	CheckoutStatus_name = map[int32]string{
+		0: "CHECKOUT_STATUS_UNSPECIFIED",
+		1: "CHECKOUT_STATUS_FAST_FORWARDED",
+		2: "CHECKOUT_STATUS_OTHER_BRANCH",
+		3: "CHECKOUT_STATUS_DIRTY_TREE",
+		4: "CHECKOUT_STATUS_DIVERGED",
+		5: "CHECKOUT_STATUS_GIT_REFUSED",
+		6: "CHECKOUT_STATUS_OPERATOR_CHANGED_CHECKOUT",
+	}
+	CheckoutStatus_value = map[string]int32{
+		"CHECKOUT_STATUS_UNSPECIFIED":               0,
+		"CHECKOUT_STATUS_FAST_FORWARDED":            1,
+		"CHECKOUT_STATUS_OTHER_BRANCH":              2,
+		"CHECKOUT_STATUS_DIRTY_TREE":                3,
+		"CHECKOUT_STATUS_DIVERGED":                  4,
+		"CHECKOUT_STATUS_GIT_REFUSED":               5,
+		"CHECKOUT_STATUS_OPERATOR_CHANGED_CHECKOUT": 6,
+	}
+)
+
+func (x CheckoutStatus) Enum() *CheckoutStatus {
+	p := new(CheckoutStatus)
+	*p = x
+	return p
+}
+
+func (x CheckoutStatus) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (CheckoutStatus) Descriptor() protoreflect.EnumDescriptor {
+	return file_vibesys_search_v1_attrs_proto_enumTypes[5].Descriptor()
+}
+
+func (CheckoutStatus) Type() protoreflect.EnumType {
+	return &file_vibesys_search_v1_attrs_proto_enumTypes[5]
+}
+
+func (x CheckoutStatus) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use CheckoutStatus.Descriptor instead.
+func (CheckoutStatus) EnumDescriptor() ([]byte, []int) {
+	return file_vibesys_search_v1_attrs_proto_rawDescGZIP(), []int{5}
+}
+
 type ComparisonVerdict int32
 
 const (
@@ -333,11 +396,11 @@ func (x ComparisonVerdict) String() string {
 }
 
 func (ComparisonVerdict) Descriptor() protoreflect.EnumDescriptor {
-	return file_vibesys_search_v1_attrs_proto_enumTypes[5].Descriptor()
+	return file_vibesys_search_v1_attrs_proto_enumTypes[6].Descriptor()
 }
 
 func (ComparisonVerdict) Type() protoreflect.EnumType {
-	return &file_vibesys_search_v1_attrs_proto_enumTypes[5]
+	return &file_vibesys_search_v1_attrs_proto_enumTypes[6]
 }
 
 func (x ComparisonVerdict) Number() protoreflect.EnumNumber {
@@ -346,7 +409,7 @@ func (x ComparisonVerdict) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use ComparisonVerdict.Descriptor instead.
 func (ComparisonVerdict) EnumDescriptor() ([]byte, []int) {
-	return file_vibesys_search_v1_attrs_proto_rawDescGZIP(), []int{5}
+	return file_vibesys_search_v1_attrs_proto_rawDescGZIP(), []int{6}
 }
 
 type BaselineStatus int32
@@ -388,11 +451,11 @@ func (x BaselineStatus) String() string {
 }
 
 func (BaselineStatus) Descriptor() protoreflect.EnumDescriptor {
-	return file_vibesys_search_v1_attrs_proto_enumTypes[6].Descriptor()
+	return file_vibesys_search_v1_attrs_proto_enumTypes[7].Descriptor()
 }
 
 func (BaselineStatus) Type() protoreflect.EnumType {
-	return &file_vibesys_search_v1_attrs_proto_enumTypes[6]
+	return &file_vibesys_search_v1_attrs_proto_enumTypes[7]
 }
 
 func (x BaselineStatus) Number() protoreflect.EnumNumber {
@@ -401,7 +464,7 @@ func (x BaselineStatus) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use BaselineStatus.Descriptor instead.
 func (BaselineStatus) EnumDescriptor() ([]byte, []int) {
-	return file_vibesys_search_v1_attrs_proto_rawDescGZIP(), []int{6}
+	return file_vibesys_search_v1_attrs_proto_rawDescGZIP(), []int{7}
 }
 
 type InputFailureKind int32
@@ -449,11 +512,11 @@ func (x InputFailureKind) String() string {
 }
 
 func (InputFailureKind) Descriptor() protoreflect.EnumDescriptor {
-	return file_vibesys_search_v1_attrs_proto_enumTypes[7].Descriptor()
+	return file_vibesys_search_v1_attrs_proto_enumTypes[8].Descriptor()
 }
 
 func (InputFailureKind) Type() protoreflect.EnumType {
-	return &file_vibesys_search_v1_attrs_proto_enumTypes[7]
+	return &file_vibesys_search_v1_attrs_proto_enumTypes[8]
 }
 
 func (x InputFailureKind) Number() protoreflect.EnumNumber {
@@ -462,7 +525,7 @@ func (x InputFailureKind) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use InputFailureKind.Descriptor instead.
 func (InputFailureKind) EnumDescriptor() ([]byte, []int) {
-	return file_vibesys_search_v1_attrs_proto_rawDescGZIP(), []int{7}
+	return file_vibesys_search_v1_attrs_proto_rawDescGZIP(), []int{8}
 }
 
 // Dynamic search vocabulary, carried by its workstream attrs, not core.
@@ -550,11 +613,11 @@ func (x WorkstreamFailureKind) String() string {
 }
 
 func (WorkstreamFailureKind) Descriptor() protoreflect.EnumDescriptor {
-	return file_vibesys_search_v1_attrs_proto_enumTypes[8].Descriptor()
+	return file_vibesys_search_v1_attrs_proto_enumTypes[9].Descriptor()
 }
 
 func (WorkstreamFailureKind) Type() protoreflect.EnumType {
-	return &file_vibesys_search_v1_attrs_proto_enumTypes[8]
+	return &file_vibesys_search_v1_attrs_proto_enumTypes[9]
 }
 
 func (x WorkstreamFailureKind) Number() protoreflect.EnumNumber {
@@ -563,7 +626,7 @@ func (x WorkstreamFailureKind) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use WorkstreamFailureKind.Descriptor instead.
 func (WorkstreamFailureKind) EnumDescriptor() ([]byte, []int) {
-	return file_vibesys_search_v1_attrs_proto_rawDescGZIP(), []int{8}
+	return file_vibesys_search_v1_attrs_proto_rawDescGZIP(), []int{9}
 }
 
 // The existing planning_call kind, shared by hypothesis searches.
@@ -1178,12 +1241,13 @@ func (x *InputFailure) GetStageId() string {
 }
 
 type AdoptionAttrs struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Candidate     *string                `protobuf:"bytes,1,opt,name=candidate,proto3,oneof" json:"candidate,omitempty"`
-	Selection     Selection              `protobuf:"varint,2,opt,name=selection,proto3,enum=vibesys.search.v1.Selection" json:"selection,omitempty"`
-	SettlementId  *string                `protobuf:"bytes,3,opt,name=settlement_id,json=settlementId,proto3,oneof" json:"settlement_id,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	Candidate      *string                `protobuf:"bytes,1,opt,name=candidate,proto3,oneof" json:"candidate,omitempty"`
+	Selection      Selection              `protobuf:"varint,2,opt,name=selection,proto3,enum=vibesys.search.v1.Selection" json:"selection,omitempty"`
+	SettlementId   *string                `protobuf:"bytes,3,opt,name=settlement_id,json=settlementId,proto3,oneof" json:"settlement_id,omitempty"`
+	CheckoutStatus *CheckoutStatus        `protobuf:"varint,4,opt,name=checkout_status,json=checkoutStatus,proto3,enum=vibesys.search.v1.CheckoutStatus,oneof" json:"checkout_status,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *AdoptionAttrs) Reset() {
@@ -1235,6 +1299,13 @@ func (x *AdoptionAttrs) GetSettlementId() string {
 		return *x.SettlementId
 	}
 	return ""
+}
+
+func (x *AdoptionAttrs) GetCheckoutStatus() CheckoutStatus {
+	if x != nil && x.CheckoutStatus != nil {
+		return *x.CheckoutStatus
+	}
+	return CheckoutStatus_CHECKOUT_STATUS_UNSPECIFIED
 }
 
 // Links named candidate and base identify the compared spans. No commit-hash
@@ -1577,16 +1648,19 @@ const file_vibesys_search_v1_attrs_proto_rawDesc = "" +
 	"\bcompared\x18\x04 \x01(\bR\bcompared\x12)\n" +
 	"\bstage_id\x18\x05 \x01(\tB\t\xbaH\x06r\x04(\x80\x80\x04H\x01R\astageId\x88\x01\x01B\b\n" +
 	"\x06_stageB\v\n" +
-	"\t_stage_id\"\xd4\x02\n" +
+	"\t_stage_id\"\xc5\x03\n" +
 	"\rAdoptionAttrs\x12.\n" +
 	"\tcandidate\x18\x01 \x01(\tB\v\xbaH\br\x06\x10\x01(\x80\x80\x04H\x00R\tcandidate\x88\x01\x01\x12F\n" +
 	"\tselection\x18\x02 \x01(\x0e2\x1c.vibesys.search.v1.SelectionB\n" +
 	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\tselection\x125\n" +
-	"\rsettlement_id\x18\x03 \x01(\tB\v\xbaH\br\x06\x10\x01(\x80\x80\x04H\x01R\fsettlementId\x88\x01\x01:t\xbaHq\x1ao\n" +
+	"\rsettlement_id\x18\x03 \x01(\tB\v\xbaH\br\x06\x10\x01(\x80\x80\x04H\x01R\fsettlementId\x88\x01\x01\x12[\n" +
+	"\x0fcheckout_status\x18\x04 \x01(\x0e2!.vibesys.search.v1.CheckoutStatusB\n" +
+	"\xbaH\a\x82\x01\x04\x10\x01 \x00H\x02R\x0echeckoutStatus\x88\x01\x01:t\xbaHq\x1ao\n" +
 	"\x12adoption.candidate\x12-candidate is required for candidate selection\x1a*this.selection != 1 || has(this.candidate)B\f\n" +
 	"\n" +
 	"_candidateB\x10\n" +
-	"\x0e_settlement_id\"\xcc\x04\n" +
+	"\x0e_settlement_idB\x12\n" +
+	"\x10_checkout_status\"\xcc\x04\n" +
 	"\x0fComparisonAttrs\x12#\n" +
 	"\x06metric\x18\x01 \x01(\tB\v\xbaH\br\x06\x10\x01(\x80\x80\x04R\x06metric\x12\x1d\n" +
 	"\x04unit\x18\x02 \x01(\tB\t\xbaH\x06r\x04(\x80\x80\x04R\x04unit\x12E\n" +
@@ -1654,7 +1728,15 @@ const file_vibesys_search_v1_attrs_proto_rawDesc = "" +
 	"\tSelection\x12\x19\n" +
 	"\x15SELECTION_UNSPECIFIED\x10\x00\x12\x17\n" +
 	"\x13SELECTION_CANDIDATE\x10\x01\x12\x16\n" +
-	"\x12SELECTION_BASELINE\x10\x02*\xbe\x01\n" +
+	"\x12SELECTION_BASELINE\x10\x02*\x85\x02\n" +
+	"\x0eCheckoutStatus\x12\x1f\n" +
+	"\x1bCHECKOUT_STATUS_UNSPECIFIED\x10\x00\x12\"\n" +
+	"\x1eCHECKOUT_STATUS_FAST_FORWARDED\x10\x01\x12 \n" +
+	"\x1cCHECKOUT_STATUS_OTHER_BRANCH\x10\x02\x12\x1e\n" +
+	"\x1aCHECKOUT_STATUS_DIRTY_TREE\x10\x03\x12\x1c\n" +
+	"\x18CHECKOUT_STATUS_DIVERGED\x10\x04\x12\x1f\n" +
+	"\x1bCHECKOUT_STATUS_GIT_REFUSED\x10\x05\x12-\n" +
+	")CHECKOUT_STATUS_OPERATOR_CHANGED_CHECKOUT\x10\x06*\xbe\x01\n" +
 	"\x11ComparisonVerdict\x12\"\n" +
 	"\x1eCOMPARISON_VERDICT_UNSPECIFIED\x10\x00\x12\x1d\n" +
 	"\x19COMPARISON_VERDICT_BETTER\x10\x01\x12#\n" +
@@ -1710,7 +1792,7 @@ func file_vibesys_search_v1_attrs_proto_rawDescGZIP() []byte {
 	return file_vibesys_search_v1_attrs_proto_rawDescData
 }
 
-var file_vibesys_search_v1_attrs_proto_enumTypes = make([]protoimpl.EnumInfo, 9)
+var file_vibesys_search_v1_attrs_proto_enumTypes = make([]protoimpl.EnumInfo, 10)
 var file_vibesys_search_v1_attrs_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
 var file_vibesys_search_v1_attrs_proto_goTypes = []any{
 	(GateStage)(0),             // 0: vibesys.search.v1.GateStage
@@ -1718,44 +1800,46 @@ var file_vibesys_search_v1_attrs_proto_goTypes = []any{
 	(FrameworkSource)(0),       // 2: vibesys.search.v1.FrameworkSource
 	(EvidenceKind)(0),          // 3: vibesys.search.v1.EvidenceKind
 	(Selection)(0),             // 4: vibesys.search.v1.Selection
-	(ComparisonVerdict)(0),     // 5: vibesys.search.v1.ComparisonVerdict
-	(BaselineStatus)(0),        // 6: vibesys.search.v1.BaselineStatus
-	(InputFailureKind)(0),      // 7: vibesys.search.v1.InputFailureKind
-	(WorkstreamFailureKind)(0), // 8: vibesys.search.v1.WorkstreamFailureKind
-	(*PlanningAttrs)(nil),      // 9: vibesys.search.v1.PlanningAttrs
-	(*WorkstreamAttrs)(nil),    // 10: vibesys.search.v1.WorkstreamAttrs
-	(*WorkstreamFailure)(nil),  // 11: vibesys.search.v1.WorkstreamFailure
-	(*FileChange)(nil),         // 12: vibesys.search.v1.FileChange
-	(*GateAttrs)(nil),          // 13: vibesys.search.v1.GateAttrs
-	(*FailedCheck)(nil),        // 14: vibesys.search.v1.FailedCheck
-	(*InputFailure)(nil),       // 15: vibesys.search.v1.InputFailure
-	(*AdoptionAttrs)(nil),      // 16: vibesys.search.v1.AdoptionAttrs
-	(*ComparisonAttrs)(nil),    // 17: vibesys.search.v1.ComparisonAttrs
-	(*BaselineAttrs)(nil),      // 18: vibesys.search.v1.BaselineAttrs
-	(v1.Direction)(0),          // 19: vibesys.store.v1.Direction
+	(CheckoutStatus)(0),        // 5: vibesys.search.v1.CheckoutStatus
+	(ComparisonVerdict)(0),     // 6: vibesys.search.v1.ComparisonVerdict
+	(BaselineStatus)(0),        // 7: vibesys.search.v1.BaselineStatus
+	(InputFailureKind)(0),      // 8: vibesys.search.v1.InputFailureKind
+	(WorkstreamFailureKind)(0), // 9: vibesys.search.v1.WorkstreamFailureKind
+	(*PlanningAttrs)(nil),      // 10: vibesys.search.v1.PlanningAttrs
+	(*WorkstreamAttrs)(nil),    // 11: vibesys.search.v1.WorkstreamAttrs
+	(*WorkstreamFailure)(nil),  // 12: vibesys.search.v1.WorkstreamFailure
+	(*FileChange)(nil),         // 13: vibesys.search.v1.FileChange
+	(*GateAttrs)(nil),          // 14: vibesys.search.v1.GateAttrs
+	(*FailedCheck)(nil),        // 15: vibesys.search.v1.FailedCheck
+	(*InputFailure)(nil),       // 16: vibesys.search.v1.InputFailure
+	(*AdoptionAttrs)(nil),      // 17: vibesys.search.v1.AdoptionAttrs
+	(*ComparisonAttrs)(nil),    // 18: vibesys.search.v1.ComparisonAttrs
+	(*BaselineAttrs)(nil),      // 19: vibesys.search.v1.BaselineAttrs
+	(v1.Direction)(0),          // 20: vibesys.store.v1.Direction
 }
 var file_vibesys_search_v1_attrs_proto_depIdxs = []int32{
-	11, // 0: vibesys.search.v1.WorkstreamAttrs.failure:type_name -> vibesys.search.v1.WorkstreamFailure
-	12, // 1: vibesys.search.v1.WorkstreamAttrs.files:type_name -> vibesys.search.v1.FileChange
-	8,  // 2: vibesys.search.v1.WorkstreamFailure.kind:type_name -> vibesys.search.v1.WorkstreamFailureKind
+	12, // 0: vibesys.search.v1.WorkstreamAttrs.failure:type_name -> vibesys.search.v1.WorkstreamFailure
+	13, // 1: vibesys.search.v1.WorkstreamAttrs.files:type_name -> vibesys.search.v1.FileChange
+	9,  // 2: vibesys.search.v1.WorkstreamFailure.kind:type_name -> vibesys.search.v1.WorkstreamFailureKind
 	0,  // 3: vibesys.search.v1.GateAttrs.stage:type_name -> vibesys.search.v1.GateStage
 	1,  // 4: vibesys.search.v1.GateAttrs.subject:type_name -> vibesys.search.v1.GateSubject
-	14, // 5: vibesys.search.v1.GateAttrs.failed:type_name -> vibesys.search.v1.FailedCheck
-	15, // 6: vibesys.search.v1.GateAttrs.input_failure:type_name -> vibesys.search.v1.InputFailure
+	15, // 5: vibesys.search.v1.GateAttrs.failed:type_name -> vibesys.search.v1.FailedCheck
+	16, // 6: vibesys.search.v1.GateAttrs.input_failure:type_name -> vibesys.search.v1.InputFailure
 	2,  // 7: vibesys.search.v1.GateAttrs.source:type_name -> vibesys.search.v1.FrameworkSource
 	3,  // 8: vibesys.search.v1.FailedCheck.check:type_name -> vibesys.search.v1.EvidenceKind
-	7,  // 9: vibesys.search.v1.InputFailure.kind:type_name -> vibesys.search.v1.InputFailureKind
+	8,  // 9: vibesys.search.v1.InputFailure.kind:type_name -> vibesys.search.v1.InputFailureKind
 	0,  // 10: vibesys.search.v1.InputFailure.stage:type_name -> vibesys.search.v1.GateStage
 	4,  // 11: vibesys.search.v1.AdoptionAttrs.selection:type_name -> vibesys.search.v1.Selection
-	19, // 12: vibesys.search.v1.ComparisonAttrs.direction:type_name -> vibesys.store.v1.Direction
-	5,  // 13: vibesys.search.v1.ComparisonAttrs.verdict:type_name -> vibesys.search.v1.ComparisonVerdict
-	6,  // 14: vibesys.search.v1.BaselineAttrs.status:type_name -> vibesys.search.v1.BaselineStatus
-	19, // 15: vibesys.search.v1.BaselineAttrs.direction:type_name -> vibesys.store.v1.Direction
-	16, // [16:16] is the sub-list for method output_type
-	16, // [16:16] is the sub-list for method input_type
-	16, // [16:16] is the sub-list for extension type_name
-	16, // [16:16] is the sub-list for extension extendee
-	0,  // [0:16] is the sub-list for field type_name
+	5,  // 12: vibesys.search.v1.AdoptionAttrs.checkout_status:type_name -> vibesys.search.v1.CheckoutStatus
+	20, // 13: vibesys.search.v1.ComparisonAttrs.direction:type_name -> vibesys.store.v1.Direction
+	6,  // 14: vibesys.search.v1.ComparisonAttrs.verdict:type_name -> vibesys.search.v1.ComparisonVerdict
+	7,  // 15: vibesys.search.v1.BaselineAttrs.status:type_name -> vibesys.search.v1.BaselineStatus
+	20, // 16: vibesys.search.v1.BaselineAttrs.direction:type_name -> vibesys.store.v1.Direction
+	17, // [17:17] is the sub-list for method output_type
+	17, // [17:17] is the sub-list for method input_type
+	17, // [17:17] is the sub-list for extension type_name
+	17, // [17:17] is the sub-list for extension extendee
+	0,  // [0:17] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_search_v1_attrs_proto_init() }
@@ -1775,7 +1859,7 @@ func file_vibesys_search_v1_attrs_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_vibesys_search_v1_attrs_proto_rawDesc), len(file_vibesys_search_v1_attrs_proto_rawDesc)),
-			NumEnums:      9,
+			NumEnums:      10,
 			NumMessages:   10,
 			NumExtensions: 0,
 			NumServices:   0,

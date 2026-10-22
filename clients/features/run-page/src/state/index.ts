@@ -100,7 +100,12 @@ export {
 } from './run-page.js';
 export {type SummaryReply, summaryFacts, type WireSummary} from './run-summary.js';
 export {scrubberView, viewAtPosition} from './scrub.js';
-export {projectSkeleton, skeletonPositions, skeletonScreenState} from './skeleton-projection.js';
+export {
+  projectSkeleton,
+  recordedRunRoot,
+  skeletonPositions,
+  skeletonScreenState,
+} from './skeleton-projection.js';
 export {spendOf, tokensByAgent, turnTokens} from './token-usage.js';
 export {
   type TokensCell,

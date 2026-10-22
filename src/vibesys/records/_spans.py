@@ -143,6 +143,36 @@ def _metric_rows(projection: Projection, source: CoreSpan, span: p.Span) -> None
         )
 
 
+def _merge_prior(kind: str, attrs: Message, merged: Message) -> Message:
+    """Fold a new label onto the recorded one, keeping a scripted turn free of a configured model."""
+    authoritative = (set(_MODELS[kind].model_fields) if kind in _MODELS else set()).difference(
+        {"model"} if kind == "agent_turn" else set()
+    )
+    for field in merged.desc().fields:
+        if field.name in authoritative and not attrs.has_field(field.name):
+            merged.clear_field(field.name)
+    scripted = (
+        kind == "agent_turn"
+        and isinstance(merged, p.AgentTurnAttrs)
+        and merged.client == p.AgentClient.SCRIPTED
+    )
+    for field in attrs:
+        if scripted and field.name in {"model", "provider", "reasoning_effort"}:
+            continue
+        if (
+            kind == "agent_turn"
+            and field.name in {"stage", "model"}
+            and merged.has_field(field.name)
+        ):
+            continue
+        merged[field] = attrs[field]
+    if scripted:
+        for name in ("model", "provider", "reasoning_effort"):
+            if merged.has_field(name):
+                merged.clear_field(name)
+    return merged
+
+
 def _span_label(projection: Projection, source: CoreSpan) -> p.Label | None:
     previous = projection.spans.get(source.id)
     label = source.label
@@ -152,22 +182,7 @@ def _span_label(projection: Projection, source: CoreSpan) -> p.Label | None:
         if previous is not None and previous.label is not None:
             prior = previous.label.attrs
             if prior is not None and prior.type_url.endswith("/" + attrs.desc().type_name):
-                merged = type(attrs).from_binary(prior.value)
-                authoritative = (
-                    set(_MODELS[label.kind].model_fields) if label.kind in _MODELS else set()
-                ).difference({"model"} if label.kind == "agent_turn" else set())
-                for field in merged.desc().fields:
-                    if field.name in authoritative and not attrs.has_field(field.name):
-                        merged.clear_field(field.name)
-                for field in attrs:
-                    if (
-                        label.kind == "agent_turn"
-                        and field.name in {"stage", "model"}
-                        and merged.has_field(field.name)
-                    ):
-                        continue
-                    merged[field] = attrs[field]
-                attrs = merged
+                attrs = _merge_prior(label.kind, attrs, type(attrs).from_binary(prior.value))
         projection.declare_kind(label.kind, attrs.desc().type_name)
         mapped_label = p.Label(
             kind=label.kind,

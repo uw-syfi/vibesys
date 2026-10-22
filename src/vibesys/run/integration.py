@@ -748,6 +748,7 @@ class LocalRunIntegration:
                     provider=event.provider,
                     model=event.model,
                     reasoning_effort=event.reasoning_effort,
+                    client=event.client,
                 ),
                 **fields,
             )

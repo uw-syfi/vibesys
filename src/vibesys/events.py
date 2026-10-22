@@ -254,6 +254,15 @@ class AgentExecutionStartedData(EventPayload):
     """The reasoning effort the session was configured with; ``None`` when the provider's default."""
     harness_version: str | None = None
     """The provider CLI's version when a driver reported it; ``None`` when unknown."""
+    client: Literal["scripted", "provider"] | None = None
+    """The agent that ran the turn. A scripted turn names no provider or model."""
+
+    @model_validator(mode="after")
+    def _scripted_records_no_provider(self) -> AgentExecutionStartedData:
+        if self.client == "scripted" and (self.provider is not None or self.model is not None):
+            message = "agent client scripted records no provider or model"
+            raise ValueError(message)
+        return self
 
 
 class AgentExecutionFinishedData(EventPayload):
@@ -886,6 +895,18 @@ class WinnerSelectedData(EventPayload):
     selection: Literal["candidate", "baseline"]
     revision: str
     settlement_id: str | None = None
+    checkout_status: (
+        Literal[
+            "fast_forwarded",
+            "other_branch",
+            "dirty_tree",
+            "diverged",
+            "git_refused",
+            "operator_changed_checkout",
+        ]
+        | None
+    ) = None
+    """Why the checkout update advanced or skipped, when the run recorded one."""
 
 
 class InputMeasurementFailureKind(StrEnum):

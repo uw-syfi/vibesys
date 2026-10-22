@@ -47,6 +47,18 @@ enum Selection {
   SELECTION_BASELINE = 2;
 }
 
+// Why an optional checkout update advanced or skipped. The names match the
+// checkout publication status; this package records the fact the run shows.
+enum CheckoutStatus {
+  CHECKOUT_STATUS_UNSPECIFIED = 0;
+  CHECKOUT_STATUS_FAST_FORWARDED = 1;
+  CHECKOUT_STATUS_OTHER_BRANCH = 2;
+  CHECKOUT_STATUS_DIRTY_TREE = 3;
+  CHECKOUT_STATUS_DIVERGED = 4;
+  CHECKOUT_STATUS_GIT_REFUSED = 5;
+  CHECKOUT_STATUS_OPERATOR_CHANGED_CHECKOUT = 6;
+}
+
 enum ComparisonVerdict {
   COMPARISON_VERDICT_UNSPECIFIED = 0;
   COMPARISON_VERDICT_BETTER = 1;
@@ -241,6 +253,10 @@ message AdoptionAttrs {
   optional string settlement_id = 3 [(buf.validate.field).string = {
     min_len: 1
     max_bytes: 65536
+  }];
+  optional CheckoutStatus checkout_status = 4 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
   }];
 }
 

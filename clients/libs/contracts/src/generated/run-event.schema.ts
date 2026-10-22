@@ -177,6 +177,22 @@ const runEventSchema: Record<string, unknown> = {
           ],
           "default": null,
           "title": "Harness Version"
+        },
+        "client": {
+          "anyOf": [
+            {
+              "enum": [
+                "scripted",
+                "provider"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Client"
         }
       },
       "required": [

@@ -17,6 +17,7 @@ from pydantic import BaseModel
 
 from vibesys.run.evaluation_socket import prepare_evaluation_socket
 from vs_agent.api import (
+    AgentBackend,
     AgentExecutionPolicy,
     AgentSessionSpec,
     AgentTurnExecutor,
@@ -520,7 +521,8 @@ def agent_session_spec(
                 require_enforcement=not environment.use_docker,
                 containerized=environment.use_docker,
             ),
-            model=spec.model,
+            model=None if spec.backend is AgentBackend.SCRIPTED else spec.model,
+            scripted=spec.backend is AgentBackend.SCRIPTED,
             mcp_servers=(),
             skills=environment.skill_source_dirs,
             environment=tuple(sorted(env.items())),

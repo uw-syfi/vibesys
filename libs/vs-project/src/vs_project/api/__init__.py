@@ -51,6 +51,8 @@ from vs_project._layout import (
     TaskNotFoundError,
     TasksRoot,
     UnsafeProjectPathError,
+    canonical_project_root,
+    resume_directory,
 )
 from vs_project._logger import LPRINT_LOGGER, RunLogger, strip_ansi
 from vs_project._manifests import (
@@ -305,6 +307,7 @@ __all__ = [
     "UnsafeProjectPathError",
     "WorkloadInput",
     "atomic_write_bytes",
+    "canonical_project_root",
     "check_comparisons_are_distinct",
     "comparison_directory",
     "comparison_namespace",
@@ -320,6 +323,7 @@ __all__ = [
     "operator_key_path",
     "pygit2_installed",
     "read_operator_key",
+    "resume_directory",
     "select_git_backend",
     "strip_ansi",
     "user_runtime_root",

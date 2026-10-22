@@ -105,6 +105,31 @@ describe('an adoption step', () => {
     expect(titleOf(input)).toBe('Adopt the input');
     expect(verdictWords(input)?.label).toBe('Not adopted');
   });
+
+  test('shows the recorded checkout skip', () => {
+    const dirty = adoption({candidate: 'abc1234def5678', checkout_status: 'dirty_tree'}, 'adopted');
+    expect(titleOf(dirty)).toBe('Adopt candidate abc1234 · Dirty tree');
+    const changed = adoption(
+      {checkout_status: 'CHECKOUT_STATUS_OPERATOR_CHANGED_CHECKOUT'},
+      'not_adopted',
+    );
+    expect(titleOf(changed)).toBe('Adopt the input · Operator changed checkout');
+  });
+});
+
+describe('an agent turn', () => {
+  test('a scripted turn does not show a configured model', () => {
+    const turn = span('turn', 'flow:root#1', {
+      name: 'implementer',
+      label: {
+        kind: 'agent_turn',
+        title: 'implementer',
+        attrs_json: JSON.stringify({model: 'configured-model', client: 'scripted'}),
+        links: [],
+      },
+    } as Partial<Span>);
+    expect(titleOf(turn)).toBe('Implementer');
+  });
 });
 
 describe('a gate step', () => {

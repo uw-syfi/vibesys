@@ -7,8 +7,20 @@ import "google/protobuf/timestamp.proto";
 
 option go_package = "github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1";
 
+// Who ran a turn: a scripted agent, or a provider. Absence is an older turn.
+enum AgentClient {
+  AGENT_CLIENT_UNSPECIFIED = 0;
+  AGENT_CLIENT_SCRIPTED = 1;
+  AGENT_CLIENT_PROVIDER = 2;
+}
+
 // Attrs for agent_turn, including the final usage and transcript byte length.
 message AgentTurnAttrs {
+  option (buf.validate.message).cel = {
+    id: "agent_turn.scripted"
+    message: "a scripted turn records no provider or model"
+    expression: "this.client != 1 || (!has(this.model) && !has(this.provider))"
+  };
   string agent = 1 [(buf.validate.field).string = {
     min_len: 1
     max_bytes: 65536
@@ -51,6 +63,10 @@ message AgentTurnAttrs {
   // Wall timestamps reported by execution events, independent of elapsed span clocks.
   google.protobuf.Timestamp started_at = 13;
   google.protobuf.Timestamp ended_at = 14;
+  optional AgentClient client = 15 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
 }
 
 // Absence means unreported. A reported zero stays present on the wire.

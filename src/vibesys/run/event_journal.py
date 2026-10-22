@@ -77,6 +77,7 @@ class EventJournal(DurableEventJournal[CoreEvent]):
                 history=self.read,
                 checkout=self.checkout,
             )
+            self._runlog.remember_project_root(str(project.root))
             project.publish_run_for(project.root, run_id)
             self.set_append_sink(self._runlog.append)
         except BlockingIOError as error:

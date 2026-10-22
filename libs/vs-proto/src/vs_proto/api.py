@@ -60,6 +60,7 @@ from vs_proto._generated.vibesys.search.v1.attrs_pb import (
     AdoptionAttrs,
     BaselineAttrs,
     BaselineStatus,
+    CheckoutStatus,
     ComparisonAttrs,
     ComparisonVerdict,
     EvidenceKind,
@@ -84,6 +85,7 @@ from vs_proto._generated.vibesys.search.v1.run_pb import (
     SearchRunFailure,
 )
 from vs_proto._generated.vibesys.store.v1.agent_attrs_pb import (
+    AgentClient,
     AgentTurnAttrs,
     TokenUsage,
 )
@@ -199,6 +201,7 @@ __all__ = [
     "RUN_LOG_MAX_RECORD_BYTES",
     "STORE_SCHEMA_HASH",
     "AdoptionAttrs",
+    "AgentClient",
     "AgentTurnAttrs",
     "Attempt",
     "AttemptOutcome",
@@ -221,6 +224,7 @@ __all__ = [
     "ChatSessionCreated",
     "ChatSteerProposed",
     "ChatToken",
+    "CheckoutStatus",
     "ComparisonAttrs",
     "ComparisonVerdict",
     "ConfigurationFailed",

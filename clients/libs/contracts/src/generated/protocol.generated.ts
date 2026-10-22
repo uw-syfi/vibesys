@@ -447,6 +447,7 @@ export type Provider4 = string | null;
 export type Model4 = string | null;
 export type ReasoningEffort = string | null;
 export type HarnessVersion = string | null;
+export type Client = ("scripted" | "provider") | null;
 export type Kind7 = "agent_execution_finished";
 export type Error2 = string | null;
 export type Kind8 = string;
@@ -1709,6 +1710,7 @@ export interface AgentExecutionStartedData {
   model?: Model4;
   reasoning_effort?: ReasoningEffort;
   harness_version?: HarnessVersion;
+  client?: Client;
 }
 /**
  * Terminal result for one agent execution.

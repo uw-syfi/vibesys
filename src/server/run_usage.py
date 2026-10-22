@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING, Final, Literal
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, JsonValue, TypeAdapter, ValidationError
 
@@ -44,6 +44,7 @@ class ExecutionStart(BaseModel):
     role: str | None
     harness: str | None
     model: str | None
+    client: Literal["scripted", "provider"] | None = None
     reasoning_effort: str | None
     harness_version: str | None
     started_at: AwareDatetime | None
@@ -82,13 +83,16 @@ class UsageFold:
         if kind == "agent_execution_started" and data.get("kind") == "agent_execution_started":
             execution_id = event.get("execution_id")
             if isinstance(execution_id, str):
+                client = _client(data.get("client"))
+                scripted = client == "scripted"
                 self._starts[execution_id] = ExecutionStart(
                     execution_id=execution_id,
                     role=_text(event.get("agent_kind")),
-                    harness=_text(data.get("provider")),
-                    model=_text(data.get("model")),
-                    reasoning_effort=_text(data.get("reasoning_effort")),
-                    harness_version=_text(data.get("harness_version")),
+                    harness=None if scripted else _text(data.get("provider")),
+                    model=None if scripted else _text(data.get("model")),
+                    client=client,
+                    reasoning_effort=None if scripted else _text(data.get("reasoning_effort")),
+                    harness_version=None if scripted else _text(data.get("harness_version")),
                     started_at=_time(event.get("timestamp")),
                 )
         elif kind == "turn_usage_recorded" and data.get("kind") == "turn_usage_recorded":
@@ -108,6 +112,7 @@ class UsageFold:
             role=None if start is None else start.role,
             harness=None if start is None else start.harness,
             model=None if start is None else start.model,
+            client=None if start is None else start.client,
             reasoning_effort=None if start is None else start.reasoning_effort,
             harness_version=None if start is None else start.harness_version,
             started_at=None if start is None else start.started_at,
@@ -143,6 +148,14 @@ def usage_records(events: Iterable[Mapping[str, JsonValue]]) -> list[UsageRecord
 
 def _text(value: JsonValue) -> str | None:
     return value if isinstance(value, str) and value else None
+
+
+def _client(value: JsonValue) -> Literal["scripted", "provider"] | None:
+    if value == "scripted":
+        return "scripted"
+    if value == "provider":
+        return "provider"
+    return None
 
 
 def _count(value: JsonValue) -> int | None:

@@ -56,7 +56,13 @@ import {
 } from '@vibesys/feature-settings/renderer';
 import {shownTheme} from '@vibesys/feature-settings/state';
 import {createUsageStore, type SpendRunRef, UsageScreen} from '@vibesys/feature-usage/renderer';
-import {type HostKey, hostFromKey, hostLabel, problemWord} from '@vibesys/hosts';
+import {
+  type HostKey,
+  hostFromKey,
+  hostLabel,
+  problemWord,
+  recordedProjectRoot,
+} from '@vibesys/hosts';
 import {settled, type WelcomeBridge} from '@vibesys/ipc';
 import type {RecentRun, RunRef} from '@vibesys/runs';
 import {sameRun} from '@vibesys/runs';
@@ -278,8 +284,9 @@ function RunRoute(props: {
     [sidebar.listings, run, recent],
   );
   const project =
-    recent?.project ??
-    (record.kind === 'live' || record.kind === 'ended' ? record.run.projectRoot : '');
+    record.kind === 'live' || record.kind === 'ended'
+      ? (recordedProjectRoot(record.run.projectRoot) ?? '')
+      : '';
   const unavailableWindow = place.unavailable['open-window'];
   const seed = useMemo(
     () => ({

@@ -544,6 +544,8 @@ class AgentSessionSpec:
     workspace: Path
     policy: AgentExecutionPolicy
     model: str | None = None
+    scripted: bool = False
+    """True when a scripted agent runs the turn. The recorded fact is then scripted, not this model."""
     mcp_servers: tuple[MCPServerSpec, ...] = ()
     skills: tuple[Path, ...] = ()
     environment: tuple[tuple[str, str], ...] = ()

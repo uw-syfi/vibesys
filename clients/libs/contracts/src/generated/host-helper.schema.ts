@@ -8059,6 +8059,22 @@ const hostHelperSchema: Record<string, unknown> = {
           ],
           "title": "Model"
         },
+        "client": {
+          "anyOf": [
+            {
+              "enum": [
+                "scripted",
+                "provider"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Client"
+        },
         "reasoning_effort": {
           "anyOf": [
             {
