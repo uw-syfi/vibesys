@@ -10,7 +10,7 @@ managed:
   override:
     - file_option: go_package
       path: buf/validate/validate.proto
-      value: github.com/uw-syfi/vibesys/gateway/gen/buf/validate
+      value: buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go/buf/validate
 plugins:
   - local: protoc-gen-py
     strategy: all

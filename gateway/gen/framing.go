@@ -4,3 +4,4 @@ package gen
 
 const RunLogMaxRecordBytes = 1048576
 const RunLogMagic = "VSRLOG01"
+const HostAPIMaxMessageBytes = 20971520
