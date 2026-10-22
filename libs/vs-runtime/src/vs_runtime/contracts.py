@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Annotated, Any, Protocol, TypeVar
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, FiniteFloat, model_validator
 
-from vs_core.api import EvidenceRequirements, SpanKind
+from vs_core.api import AdoptionPublication, CheckoutUpdate, EvidenceRequirements, SpanKind
 from vs_evaluation.api import EvidenceFailureKind
 from vs_evaluator_protocol.api import PartialMeasurement
 from vs_redaction.api import redact_diagnostic_text
@@ -402,8 +402,22 @@ class Workspaces(Protocol):
         """
         ...
 
-    async def adopt(self, revision: str) -> None:
-        """Materialize a retained candidate revision in the root workspace."""
+    async def adopt(
+        self, revision: str, *, message: str = "vibesys: adopt revision"
+    ) -> AdoptionPublication:
+        """Idempotently publish a retained revision on the run's publication branch.
+
+        Never changes a checkout or its index. The returned commit stays reachable
+        across resumes. Raises RuntimeContractError when publication is refused.
+        """
+        ...
+
+    async def update_checkout(self, publication: AdoptionPublication) -> CheckoutUpdate:
+        """Optionally fast-forward the run's own clean checked-out branch.
+
+        Another branch, dirty tree, divergence or Git's overwrite refusal is a typed
+        skip, and never invalidates the published adoption.
+        """
         ...
 
     async def export_patch(self, revision: str) -> str:

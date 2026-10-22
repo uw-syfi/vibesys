@@ -71,6 +71,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
+    from vs_core.api import AdoptionPublication, CheckoutUpdate
     from vs_runtime.api import CandidateWorkspace, Workspace, Workspaces
     from vs_sim.api import Event
 
@@ -158,8 +159,13 @@ class _TrackedWorkspaces:
     async def create_measured_candidate(self, revision: str) -> CandidateWorkspace:
         return await self.create_candidate(revision)
 
-    async def adopt(self, revision: str) -> None:
-        await self._inner.adopt(revision)
+    async def adopt(
+        self, revision: str, *, message: str = "vibesys: adopt revision"
+    ) -> AdoptionPublication:
+        return await self._inner.adopt(revision, message=message)
+
+    async def update_checkout(self, publication: AdoptionPublication) -> CheckoutUpdate:
+        return await self._inner.update_checkout(publication)
 
     async def export_patch(self, revision: str) -> str:
         return await self._inner.export_patch(revision)

@@ -47,8 +47,13 @@ Readers who know the product but not `vs-core` need these terms.
 - **Operation**: a strategy-declared request for I/O that is not a turn or a measurement
   (render a prompt, verify a revision, read evidence). An owner in a library executes it; the
   outcome returns as `OperationResult`.
-- **Adoption**: copying the selected retained candidate into the project root and verifying
-  it. Core runs it after `ProposeWinner` and reports `AdoptionResult`.
+- **Adoption**: publishing the selected retained candidate as a commit on a run-owned
+  publication branch. Core runs it after `ProposeWinner` and reports `AdoptionResult`,
+  including the published commit. Publication never changes the operator's files or index.
+  An independent optional step fast-forwards only the run's own clean checked-out branch;
+  another branch, dirty tree, divergence or Git's overwrite refusal produces a typed skip.
+  Git protects untracked and ignored files. Repeating adoption reuses its publication,
+  including after a resume. Shared Git and workspace contract suites enforce these rules.
 - **Suspension**: a turn that ends by waiting for an evaluation job. Core publishes
   `TurnSuspended`, later `ResumeAuthorized` once, and the strategy asks the resumed turn.
   If the turn's workspace checkpoint is declined or fails, core instead ends the turn with

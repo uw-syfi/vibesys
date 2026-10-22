@@ -1,13 +1,4 @@
-"""An adopted winner is committed on the run's branch, so the next run can start.
-
-Adoption makes the root workspace hold the winner. Left uncommitted, that tree makes the
-project dirty, and the next run refuses to start ("existing project repository must be
-clean"). The adoption therefore commits it on the run's own branch, with a message that
-names the candidate and what it measured, and touches no other branch. The next run is a
-new process, so the test starts its tracker afresh over the same repositories, which the
-Fake serves to every process alike. The message itself is a pure function of the request
-and the evidence ledger, tested on its own.
-"""
+"""Adoption publishes the winner before optionally advancing a clean run checkout."""
 
 from __future__ import annotations
 
@@ -46,7 +37,7 @@ from vs_evaluation.api import (
     TrustedEvidence,
 )
 from vs_evaluation.api import EvidenceKind as StageKind
-from vs_project.api import GitTracker, NullGitTrackerEvents
+from vs_project.api import GitTracker, NullGitTrackerEvents, adoption_branch
 from vs_project.api.testing import FakeGitRepositories, GitKind
 from vs_runtime.api.core import (
     ReceiptEvidenceLedger,
@@ -214,7 +205,10 @@ def test_an_adopted_winner_is_committed_on_the_run_branch_and_the_next_run_start
         assert _visible_files(workspaces.root.path) == tree
         assert _dirty(repository) == []
         after = _branches(repository)
-        assert {name for name in after if after[name] != before.get(name)} <= {branch}
+        assert {name for name in after if after[name] != before.get(name)} <= {
+            branch,
+            adoption_branch("workspace-requests"),
+        }
         commit = commit_of(revision)
         assert commit is not None
         message = adoption_commit_message(adopt, commit, ledger)

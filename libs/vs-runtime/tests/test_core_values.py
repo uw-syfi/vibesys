@@ -58,6 +58,14 @@ def _sample(cls: type[core.CoreValue], root: str, count: int) -> core.CoreValue:
         core.ControlInput: lambda: core.ControlInput(
             control_id=identity, action="pause", owner=core.PauseOwner.QUOTA
         ),
+        core.AdoptionPublication: lambda: core.AdoptionPublication(
+            revision=root,
+            commit=f"{count:040x}",
+            branch=root,
+        ),
+        core.CheckoutUpdate: lambda: core.CheckoutUpdate(
+            status=tuple(core.CheckoutStatus)[count % len(core.CheckoutStatus)]
+        ),
     }
     if issubclass(cls, core.Identity):
         return cls(root=root)

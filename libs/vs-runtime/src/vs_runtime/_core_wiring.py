@@ -154,7 +154,6 @@ def core_bindings(  # noqa: PLR0913  # lint-waiver: LW-260141 [PLR0913]; the run
     threads: Threads,
     blocking: BlockingRunner,
     operations: OperationCatalog | None = None,
-    allow_adoption: bool = True,
 ) -> CoreRuntimeBindings:
     """Bind every request role over one shared receipt store.
 
@@ -165,8 +164,6 @@ def core_bindings(  # noqa: PLR0913  # lint-waiver: LW-260141 [PLR0913]; the run
     writer ended (settled, or interrupted and released) before the run is snapshotted.
     ``operations`` defaults to the empty catalog, which serves a strategy that declares
     no registered operations; pass the same catalog to ``new_core_state(offered=)``.
-    ``allow_adoption=False`` protects the operator root after an explicit Resume; ordinary
-    writer recovery keeps publication authority.
     ``threads`` locks the receipt store; ``blocking`` runs the executors' synchronous
     journal, provider and disk calls off the event loop.
     """
@@ -182,13 +179,10 @@ def core_bindings(  # noqa: PLR0913  # lint-waiver: LW-260141 [PLR0913]; the run
     proof = ReleasedRunInvocations(
         JournalRunInvocations(sessions.agent_sessions, store), sessions.agent_sessions, store
     )
-    workspace_requests = RuntimeWorkspaceRequests(
-        workspaces, store, proof, blocking, ReceiptEvidenceLedger(store)
-    )
-    if not allow_adoption:
-        workspace_requests.protect_adoption()
     executors = RequestExecutors(
-        workspaces=workspace_requests,
+        workspaces=RuntimeWorkspaceRequests(
+            workspaces, store, proof, blocking, ReceiptEvidenceLedger(store)
+        ),
         sessions=SessionRequestRouter(session.turns, session.lifecycle),
         evaluation=MeasurementRequests(
             measurement.executor,

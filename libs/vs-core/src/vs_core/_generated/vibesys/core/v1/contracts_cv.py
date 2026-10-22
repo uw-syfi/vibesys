@@ -18,7 +18,7 @@ from vs_core._corevalue import (
     resolve_value,
 )
 from vs_core._generated.vibesys.core.v1.common_cv import SchemaRef
-from vs_core._generated.vibesys.core.v1.vocabulary_cv import LifecycleClass
+from vs_core._generated.vibesys.core.v1.vocabulary_cv import CheckoutStatus, LifecycleClass
 
 type NullValue = None
 
@@ -71,5 +71,41 @@ class OperationSchemaRef(CoreValue):
     __hash__ = CoreValue.cached_hash
 
 
+@final
+@dataclass(
+    frozen=True,
+    slots=True,
+    kw_only=True,
+    config=ConfigDict(extra="forbid", strict=True, validate_default=True),
+)
+class AdoptionPublication(CoreValue):
+    "A retained revision published without changing the operator checkout."
+
+    model_fields: ClassVar[tuple[str, ...]] = ("revision", "commit", "branch")
+    revision: Annotated[str, Field(min_length=1)]
+    commit: Annotated[str, Field(pattern="^[0-9a-f]{40}$")]
+    branch: Annotated[str, Field(min_length=1)]
+
+    __hash__ = CoreValue.cached_hash
+
+
+@final
+@dataclass(
+    frozen=True,
+    slots=True,
+    kw_only=True,
+    config=ConfigDict(extra="forbid", strict=True, validate_default=True),
+)
+class CheckoutUpdate(CoreValue):
+    "The independent, optional checkout step never changes publication success."
+
+    model_fields: ClassVar[tuple[str, ...]] = ("status",)
+    status: CheckoutStatus
+
+    __hash__ = CoreValue.cached_hash
+
+
 resolve_value(PureOption)
 resolve_value(OperationSchemaRef)
+resolve_value(AdoptionPublication)
+resolve_value(CheckoutUpdate)

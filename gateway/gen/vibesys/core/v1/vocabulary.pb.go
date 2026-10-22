@@ -582,6 +582,68 @@ func (ReplyErrorCode) EnumDescriptor() ([]byte, []int) {
 	return file_vibesys_core_v1_vocabulary_proto_rawDescGZIP(), []int{9}
 }
 
+// Why the optional checkout update advanced or skipped the checkout.
+type CheckoutStatus int32
+
+const (
+	CheckoutStatus_CHECKOUT_STATUS_UNSPECIFIED               CheckoutStatus = 0
+	CheckoutStatus_CHECKOUT_STATUS_FAST_FORWARDED            CheckoutStatus = 1
+	CheckoutStatus_CHECKOUT_STATUS_OTHER_BRANCH              CheckoutStatus = 2
+	CheckoutStatus_CHECKOUT_STATUS_DIRTY_TREE                CheckoutStatus = 3
+	CheckoutStatus_CHECKOUT_STATUS_DIVERGED                  CheckoutStatus = 4
+	CheckoutStatus_CHECKOUT_STATUS_GIT_REFUSED               CheckoutStatus = 5
+	CheckoutStatus_CHECKOUT_STATUS_OPERATOR_CHANGED_CHECKOUT CheckoutStatus = 6
+)
+
+// Enum value maps for CheckoutStatus.
+var (
+	CheckoutStatus_name = map[int32]string{
+		0: "CHECKOUT_STATUS_UNSPECIFIED",
+		1: "CHECKOUT_STATUS_FAST_FORWARDED",
+		2: "CHECKOUT_STATUS_OTHER_BRANCH",
+		3: "CHECKOUT_STATUS_DIRTY_TREE",
+		4: "CHECKOUT_STATUS_DIVERGED",
+		5: "CHECKOUT_STATUS_GIT_REFUSED",
+		6: "CHECKOUT_STATUS_OPERATOR_CHANGED_CHECKOUT",
+	}
+	CheckoutStatus_value = map[string]int32{
+		"CHECKOUT_STATUS_UNSPECIFIED":               0,
+		"CHECKOUT_STATUS_FAST_FORWARDED":            1,
+		"CHECKOUT_STATUS_OTHER_BRANCH":              2,
+		"CHECKOUT_STATUS_DIRTY_TREE":                3,
+		"CHECKOUT_STATUS_DIVERGED":                  4,
+		"CHECKOUT_STATUS_GIT_REFUSED":               5,
+		"CHECKOUT_STATUS_OPERATOR_CHANGED_CHECKOUT": 6,
+	}
+)
+
+func (x CheckoutStatus) Enum() *CheckoutStatus {
+	p := new(CheckoutStatus)
+	*p = x
+	return p
+}
+
+func (x CheckoutStatus) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (CheckoutStatus) Descriptor() protoreflect.EnumDescriptor {
+	return file_vibesys_core_v1_vocabulary_proto_enumTypes[10].Descriptor()
+}
+
+func (CheckoutStatus) Type() protoreflect.EnumType {
+	return &file_vibesys_core_v1_vocabulary_proto_enumTypes[10]
+}
+
+func (x CheckoutStatus) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use CheckoutStatus.Descriptor instead.
+func (CheckoutStatus) EnumDescriptor() ([]byte, []int) {
+	return file_vibesys_core_v1_vocabulary_proto_rawDescGZIP(), []int{10}
+}
+
 var File_vibesys_core_v1_vocabulary_proto protoreflect.FileDescriptor
 
 const file_vibesys_core_v1_vocabulary_proto_rawDesc = "" +
@@ -657,7 +719,15 @@ const file_vibesys_core_v1_vocabulary_proto_rawDesc = "" +
 	"\rinvalid-value\x12-\n" +
 	"\x19REPLY_ERROR_CODE_NOT_JSON\x10\x05\x1a\x0e\xda\xf3\x18\n" +
 	"\n" +
-	"\bnot-jsonB?Z=github.com/uw-syfi/vibesys/gateway/gen/vibesys/core/v1;corev1b\x06proto3"
+	"\bnot-json*\x85\x02\n" +
+	"\x0eCheckoutStatus\x12\x1f\n" +
+	"\x1bCHECKOUT_STATUS_UNSPECIFIED\x10\x00\x12\"\n" +
+	"\x1eCHECKOUT_STATUS_FAST_FORWARDED\x10\x01\x12 \n" +
+	"\x1cCHECKOUT_STATUS_OTHER_BRANCH\x10\x02\x12\x1e\n" +
+	"\x1aCHECKOUT_STATUS_DIRTY_TREE\x10\x03\x12\x1c\n" +
+	"\x18CHECKOUT_STATUS_DIVERGED\x10\x04\x12\x1f\n" +
+	"\x1bCHECKOUT_STATUS_GIT_REFUSED\x10\x05\x12-\n" +
+	")CHECKOUT_STATUS_OPERATOR_CHANGED_CHECKOUT\x10\x06B?Z=github.com/uw-syfi/vibesys/gateway/gen/vibesys/core/v1;corev1b\x06proto3"
 
 var (
 	file_vibesys_core_v1_vocabulary_proto_rawDescOnce sync.Once
@@ -671,7 +741,7 @@ func file_vibesys_core_v1_vocabulary_proto_rawDescGZIP() []byte {
 	return file_vibesys_core_v1_vocabulary_proto_rawDescData
 }
 
-var file_vibesys_core_v1_vocabulary_proto_enumTypes = make([]protoimpl.EnumInfo, 10)
+var file_vibesys_core_v1_vocabulary_proto_enumTypes = make([]protoimpl.EnumInfo, 11)
 var file_vibesys_core_v1_vocabulary_proto_goTypes = []any{
 	(DigestScheme)(0),      // 0: vibesys.core.v1.DigestScheme
 	(LifecycleClass)(0),    // 1: vibesys.core.v1.LifecycleClass
@@ -683,6 +753,7 @@ var file_vibesys_core_v1_vocabulary_proto_goTypes = []any{
 	(EffectVerdict)(0),     // 7: vibesys.core.v1.EffectVerdict
 	(Charge)(0),            // 8: vibesys.core.v1.Charge
 	(ReplyErrorCode)(0),    // 9: vibesys.core.v1.ReplyErrorCode
+	(CheckoutStatus)(0),    // 10: vibesys.core.v1.CheckoutStatus
 }
 var file_vibesys_core_v1_vocabulary_proto_depIdxs = []int32{
 	0, // [0:0] is the sub-list for method output_type
@@ -703,7 +774,7 @@ func file_vibesys_core_v1_vocabulary_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_vibesys_core_v1_vocabulary_proto_rawDesc), len(file_vibesys_core_v1_vocabulary_proto_rawDesc)),
-			NumEnums:      10,
+			NumEnums:      11,
 			NumMessages:   0,
 			NumExtensions: 0,
 			NumServices:   0,
