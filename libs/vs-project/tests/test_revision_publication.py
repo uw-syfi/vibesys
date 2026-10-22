@@ -96,3 +96,30 @@ def test_checkout_rejects_a_forged_publication(world: _World) -> None:
     forged = replace(publication, commit="0" * 40)
     with pytest.raises(PublicationError):
         world.tracker.update_checkout(forged)
+
+
+@pytest.mark.regression
+def test_resume_on_an_operator_branch_publishes_without_moving_its_files_or_index(
+    world: _World,
+) -> None:
+    revision = world.winner("winner")
+    baseline = world.tracker.trusted_input_baseline
+    world.project.repo.switch_branch("main")
+    world.project.write("code.py", "operator staged")
+    world.project.repo.stage_all(["code.py"])
+    world.project.write("code.py", "operator unstaged")
+    operator_head = world.project.repo.head()
+    resumed = GitTracker(
+        world.project.root,
+        run_id="run",
+        events=NullGitTrackerEvents(),
+        repository=world.project.repo,
+    )
+    resumed.init(existing=True, trusted_input_baseline=baseline)
+    publication = resumed.publish_revision(revision, "winner")
+    assert resumed.update_checkout(publication) is CheckoutOutcome.OTHER_BRANCH
+    assert world.project.repo.current_branch() == "main"
+    assert world.project.repo.head() == operator_head
+    assert world.project.repo.has_staged_changes()
+    assert (world.project.root / "code.py").read_text() == "operator unstaged"
+    assert world.project.repo.read_blob(publication.commit, "code.py") == b"winner"
