@@ -323,6 +323,22 @@ class CliGitRepository:
     def update_ref(self, ref: str, commit: str) -> None:
         self._run_checked(["update-ref", ref, commit])
 
+    def create_ref(self, ref: str, commit: str) -> str:
+        if not ref.startswith("refs/") or not self.is_valid_ref_name(ref):
+            raise GitCommandError(["update-ref", ref, commit], 1, f"invalid ref name: {ref}")
+        target = self.resolve_commit(commit)
+        args = ["update-ref", "--no-deref", ref, target or commit, "0" * len(target or commit)]
+        result = self._run(args)
+        if result.returncode == 0:
+            resolved = self.resolve_commit(ref)
+            if resolved is not None:
+                return resolved
+        elif target is not None and self._run(["symbolic-ref", "-q", ref]).returncode != 0:
+            winner = self.resolve_commit(ref)
+            if winner is not None:
+                return winner
+        raise self._failure(args, result)
+
     def create_commit(
         self,
         revision: Revision,

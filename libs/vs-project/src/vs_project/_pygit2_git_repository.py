@@ -373,6 +373,9 @@ class Pygit2GitRepository:
         except _LIBGIT2_ERRORS as error:
             self._fail(f"update-ref {ref} {commit}", error)
 
+    def create_ref(self, ref: str, commit: str) -> str:
+        return self._cli.create_ref(ref, commit)
+
     def create_commit(
         self,
         revision: Revision,

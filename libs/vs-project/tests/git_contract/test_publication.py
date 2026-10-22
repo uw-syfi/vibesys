@@ -6,6 +6,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from vs_project.api import GitCommandError
+
 if TYPE_CHECKING:
     from vs_project.api.testing import ContractProject
 
@@ -117,3 +119,32 @@ def test_publication_refuses_a_branch_checked_out_in_a_linked_worktree(
     assert not sandbox.repo.advance_branch("published", publication)
     assert linked.head() == baseline
     assert (other_path / "code.py").read_text() == "input"
+
+
+def test_publication_receipts_are_atomic_first_writer_wins(sandbox: ContractProject) -> None:
+    baseline, winner = _winner(sandbox)
+    ref = "refs/publication-receipts/source"
+    assert sandbox.repo.create_ref(ref, baseline) == baseline
+    assert sandbox.repo.create_ref(ref, winner) == baseline
+    assert sandbox.repo.resolve_commit(ref) == baseline
+    assert sandbox.repo.head() == baseline
+
+
+def test_create_ref_cannot_move_a_checked_out_branch(sandbox: ContractProject) -> None:
+    baseline, winner = _winner(sandbox)
+    assert sandbox.repo.create_ref("refs/heads/main", winner) == baseline
+    assert sandbox.repo.head() == baseline
+    assert (sandbox.root / "code.py").read_text() == "input"
+
+
+def test_invalid_receipt_inputs_cannot_be_hidden_by_an_existing_ref(
+    sandbox: ContractProject,
+) -> None:
+    baseline, _ = _winner(sandbox)
+    ref = "refs/publication-receipts/source"
+    assert sandbox.repo.create_ref(ref, baseline) == baseline
+    with pytest.raises(GitCommandError):
+        sandbox.repo.create_ref(ref, "0" * 40)
+    with pytest.raises(GitCommandError):
+        sandbox.repo.create_ref("HEAD", baseline)
+    assert sandbox.repo.head() == baseline

@@ -359,6 +359,14 @@ class GitRepository(Protocol):
         """
         ...
 
+    def create_ref(self, ref: str, commit: str) -> str:
+        """Atomically retain ``commit`` if ``ref`` is absent, returning the winning commit.
+
+        An existing ref is never moved. The call never writes through a symbolic ref;
+        failures other than a concurrent creator raise GitCommandError (cli-only).
+        """
+        ...
+
     def create_commit(
         self,
         revision: Revision,

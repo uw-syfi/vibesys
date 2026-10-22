@@ -453,6 +453,23 @@ class FakeGitRepository:
                 )
             scope.repo.refs[ref] = target
 
+    def create_ref(self, ref: str, commit: str) -> str:
+        with self._operation("create_ref"):
+            command = ["update-ref", "--no-deref", ref, commit]
+            scope = self._scope(command)
+            if not ref.startswith("refs/") or not is_valid_ref_name(ref):
+                self._refuse(command, f"invalid ref name: {ref}")
+            target = self._commit_of(scope, commit)
+            if target is None:
+                self._refuse(command, f"invalid commit: {commit}")
+            previous = scope.repo.refs.get(ref)
+            if previous is not None:
+                return previous
+            if scope.repo.conflicts_with_existing_ref(ref):
+                self._refuse(command, f"cannot create ref: {ref}")
+            scope.repo.refs[ref] = target
+            return target
+
     def create_commit(
         self,
         revision: Revision,

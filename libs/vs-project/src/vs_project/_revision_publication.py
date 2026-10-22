@@ -76,7 +76,7 @@ class RevisionPublisher:
             )
             # The immutable source receipt is also a reachability root. A crash before
             # advancing the branch retries the same commit instead of creating another.
-            self._git.update_ref(receipt, publication)
+            publication = self._git.create_ref(receipt, publication)
         if (
             previous is None or not self._git.is_ancestor(publication, previous)
         ) and not self._git.advance_branch(self._branch, publication):
