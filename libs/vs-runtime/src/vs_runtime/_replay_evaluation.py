@@ -23,10 +23,10 @@ from vs_core.api import (
     Scope,
     SubmitMeasurement,
 )
+from vs_evaluation.api import RecoverableEvaluationExecutor
 from vs_proto.api import core_agent_facts, core_common, core_leaves, core_vocabulary, validate
 from vs_proto.api import replay_evaluation as pb
-from vs_runtime._evaluation_jobs import handle_for
-from vs_runtime._evaluation_requests import MeasurementRequests
+from vs_runtime._replay_evaluation_jobs import RecoveringMeasurementRequests
 from vs_runtime._replay_evidence import encode_evidence
 from vs_runtime._replay_operations import ReplayOperationError
 from vs_runtime._replay_owner import ReceiptReplayExecutor, ReplayOwnerCodec
@@ -35,10 +35,12 @@ from vs_runtime.api.core_values import from_proto, to_proto
 
 if TYPE_CHECKING:
     from vs_core.api import ArtifactRef, BaseRef, EvidenceId, MeasurementFailure
-    from vs_evaluation.api import PollingEvaluationExecutor
     from vs_project.api import StoreFence
     from vs_proto.api import Span
-    from vs_runtime._core_requests import EvaluationRoleRequest, ExecutionContext, ExecutionResult
+    from vs_runtime._core_requests import (
+        EvaluationRoleRequest,
+        ExecutionResult,
+    )
     from vs_runtime._receipt_store import ReceiptStore
     from vs_runtime._replay_operations import ReplayOperationHost
     from vs_runtime._run_control import RunControlChannel
@@ -145,7 +147,7 @@ class EvaluationReplayExecutor:
 
     def __init__(
         self,
-        jobs: PollingEvaluationExecutor,
+        jobs: RecoverableEvaluationExecutor,
         receipts: ReceiptStore,
         host: ReplayOperationHost,
         *,
@@ -155,40 +157,14 @@ class EvaluationReplayExecutor:
         if not 0 < within_seconds < float("inf"):
             problem = "evaluation replay within_seconds must be finite and positive"
             raise ReplayOperationError(problem)
+        if not isinstance(jobs, RecoverableEvaluationExecutor):
+            problem = "evaluation owner lacks authoritative recovery inspection"
+            raise ReplayOperationError(problem)
         self._within_seconds = within_seconds
-        owner = MeasurementRequests(jobs, receipts, control=control)
-
-        async def execute(
-            request: EvaluationRoleRequest, context: ExecutionContext
-        ) -> ExecutionResult:
-            if isinstance(request, ObserveOwnedJob):
-                await jobs.wait_for_change(
-                    request.resource_id.root, min(1, max(0, context.until.at - host.clock.now()))
-                )
-            result = await owner.execute(request, context)
-            seen = result.observation.observation
-            awaiting_acceptance = (
-                isinstance(request, SubmitMeasurement) and seen.status is ObservationStatus.UNKNOWN
-            )
-            awaiting_release = isinstance(request, CancelOwnedJob) and not seen.released
-            if awaiting_acceptance or awaiting_release:
-                handles = (
-                    (handle_for(request.request_id),)
-                    if isinstance(request, SubmitMeasurement) and request.request_id is not None
-                    else tuple(item.root for item in seen.children)
-                )
-                if isinstance(request, CancelOwnedJob):
-                    handles = (request.resource_id.root,)
-                remaining = max(0.0, context.until.at - host.clock.now())
-                for handle in handles:
-                    await jobs.wait_for_change(handle, remaining / max(1, len(handles)))
-                result = await owner.execute(
-                    request, context.model_copy(update={"now_at": host.clock.now()})
-                )
-            return result
+        owner = RecoveringMeasurementRequests(jobs, receipts, host, control)
 
         self._executor = ReceiptReplayExecutor(
-            execute,
+            owner.execute,
             receipts,
             host,
             ReplayOwnerCodec(self._request, self._encode, self._within, self._dispatch_check),

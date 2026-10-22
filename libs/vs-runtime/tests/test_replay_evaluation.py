@@ -20,6 +20,7 @@ from vs_runtime.api.replay import (
     ReplayLaunch,
     ReplayOperationError,
     ReplayOperationHost,
+    ReplayRecoveryRequiredError,
     ReplayRuntime,
     drive_replay,
     replay_measurement_plan,
@@ -191,10 +192,20 @@ async def test_evaluation_recovery_sweeps_owner_receipts(
             else:
                 with pytest.raises(ProcessKilledError):
                     await drive_replay(first, launch)
-                result = await drive_replay(
-                    host(store, root_flow, executor(restarting=True), sim),
-                    ReplayLaunch(EpochStarted(run_id="run"), "resume", "host-a", 100),
-                )
+                unresolved = ()
+                try:
+                    result = await drive_replay(
+                        host(store, root_flow, executor(restarting=True), sim),
+                        ReplayLaunch(EpochStarted(run_id="run"), "resume", "host-a", 100),
+                    )
+                except ReplayRecoveryRequiredError as error:
+                    # No task exists in a local client when the crash precedes
+                    # dispatch. Its lack of durable absence proof must remain
+                    # unknown, rather than authorizing another submission.
+                    unresolved = error.spans
+                if unresolved:
+                    assert not world.workspaces.candidates
+                    return faulting.writes
             assert isinstance(result, ReplayCompleted)
             assert result.value
             assert len(world.workspaces.candidates) == 1

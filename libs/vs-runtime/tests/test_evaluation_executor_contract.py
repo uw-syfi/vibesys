@@ -33,7 +33,7 @@ from vs_evaluation.api import (
     TrustedEvidence,
 )
 from vs_evaluation.api import (
-    PollingEvaluationExecutor as PollingExecutorPort,
+    RecoverableEvaluationExecutor as PollingExecutorPort,
 )
 from vs_evaluation.api.testing import wait_until_executor_started
 from vs_runtime.api import (
@@ -428,3 +428,23 @@ async def test_every_candidate_an_executor_evaluates_is_opened_as_its_measured_i
     assert world.workspaces.candidates
     assert world.workspaces.measured_candidates == world.workspaces.candidates
     await world.executor.close()
+
+
+@pytest.mark.parametrize("build", BUILDERS)
+async def test_recovery_inspection_reads_owner_knowledge_without_new_work(
+    build: _Build, tmp_path: Path
+) -> None:
+    world = await build(tmp_path, _Script.SUCCEED, None)
+    try:
+        unseen = await world.executor.recover(_HANDLE)
+        assert unseen.phase in {PollPhase.UNSUBMITTED, PollPhase.UNKNOWN}
+        assert not world.workspaces.candidates
+        await world.executor.submit(_request(world.snapshot), handle_id=_HANDLE)
+        terminal = await _terminal(world.executor)
+        candidates = world.workspaces.candidates
+        observed = await world.executor.recover(_HANDLE)
+        assert observed.phase is PollPhase.ENDED
+        assert observed.terminal == terminal
+        assert world.workspaces.candidates == candidates
+    finally:
+        await world.executor.close()

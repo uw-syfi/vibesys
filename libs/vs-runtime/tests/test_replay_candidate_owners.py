@@ -57,6 +57,7 @@ from vs_runtime.api.replay import (
     ReplayExecutors,
     ReplayLaunch,
     ReplayOperationHost,
+    ReplayParked,
     ReplayRunHost,
     ReplayRuntime,
     ReplaySessionServices,
@@ -333,7 +334,7 @@ class CandidateWorld:
         self.store = store
         self.root = program(base, prompt, facts)
 
-    def host(self, *, restart: bool = False) -> ReplayRunHost:
+    def host(self, *, restart: bool = False, iterations: int = 1) -> ReplayRunHost:
         resources = self.env.start_host() if restart else self.initial
         owner, _ = _executor(resources, self.receipts)
         timing = ReplayOperationHost(self.env.run_id, self.store, self.sim.clock)
@@ -404,7 +405,7 @@ class CandidateWorld:
             }
         )
         return ReplayRunHost(
-            ReplayRuntime(self.store, self.root, replay.ReplayAllowance(iterations=1)),
+            ReplayRuntime(self.store, self.root, replay.ReplayAllowance(iterations=iterations)),
             executor,
             self.sim.clock,
             lambda _: ReplayEnding(
@@ -458,7 +459,7 @@ class CandidateWorld:
             commits = _commits(self.initial)
             assert (
                 await drive_replay(
-                    self.host(restart=True),
+                    self.host(restart=True, iterations=0),
                     ReplayLaunch(EpochStarted(run_id=self.env.run_id), "again", "host-a", 100),
                 )
                 == completed
@@ -479,3 +480,34 @@ def test_composed_candidate_recovers_with_real_content_and_evidence(
         with _env(tmp_path_factory.mktemp(f"candidate-{index}")) as env:
             world = CandidateWorld(env, sim)
             sim.run(world.exercise(index, boundary), threads=world.threads)
+
+
+def test_zero_fresh_iteration_budget_never_reaches_an_effect_owner(
+    tmp_path: Path, sim: Sim
+) -> None:
+    with _env(tmp_path) as env:
+        world = CandidateWorld(env, sim)
+
+        async def scenario() -> None:
+            try:
+                host = world.host(iterations=0)
+                result = await drive_replay(
+                    host, ReplayLaunch(EpochStarted(run_id=env.run_id), "first", "host-a", 100)
+                )
+                assert isinstance(result, ReplayParked)
+                assert not world.client.calls_for("worker")
+                assert not world.cluster.submissions
+                assert host.runtime.accounting.lifetime_completed == 0
+                assert host.runtime.accounting.paid_operations == 0
+                assert not [
+                    span
+                    for span in host.runtime.archive.spans
+                    if span.replay is not None
+                    and span.replay.key is not None
+                    and not span.replay.key.operation.startswith("framework.")
+                ]
+            finally:
+                for job in world.jobs:
+                    await job.close()
+
+        sim.run(scenario(), threads=world.threads)
