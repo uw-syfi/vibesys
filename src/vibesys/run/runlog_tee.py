@@ -8,12 +8,13 @@ from typing import TYPE_CHECKING, Self
 
 import vs_proto.api as p
 from vibesys.events import CoreEvent
-from vibesys.records.api import MappedEvent, MappingState, map_event
+from vibesys.records.api import MappedEvent, MappingState, epoch_header, map_event
 from vs_decode.api import Unreadable, decode_json
 from vs_runlog.api import fold_skeleton
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
+    from datetime import datetime
     from types import TracebackType
 
     from vs_runlog.api import FileRunContent, FileRunLogWriter
@@ -69,7 +70,26 @@ class RunLogTee:
         self._live = checkout is not None
         self._tree_hash, self._dirty = ("", False) if checkout is None else checkout
 
-    def _initialize(self, event: CoreEvent) -> MappingState:
+    def publish_successor(self, at: datetime) -> None:
+        """Publish this live writer's epoch before any later observation.
+
+        Relaunch confirms from this record. A journal replay leaves opening to
+        its first event, which already carries the declaration.
+        """
+        if not self._live or self._state is not None:
+            return
+        state = self._initialize(at)
+        declared = epoch_header(state, at)
+        self._write_content(declared)
+        for record in declared.records:
+            self._writer.append(record)
+        self._state = declared.state
+
+    def has_open_epoch(self) -> bool:
+        """Whether this process published an epoch it has not ended."""
+        return self._state is not None and not self._state.epoch_ended
+
+    def _initialize(self, at: datetime) -> MappingState:
         state = MappingState(
             self._run_id, vibesys_version=version("vibesys"), native_intents=self._live
         )
@@ -98,7 +118,7 @@ class RunLogTee:
                 p.Record(
                     seq=self._writer.sequence + 1,
                     epoch=self._writer.epoch,
-                    at=p.Timestamp.from_datetime(event.timestamp),
+                    at=p.Timestamp.from_datetime(at),
                     clock=clock,
                     body=p.Oneof(
                         "lifecycle",
@@ -123,13 +143,13 @@ class RunLogTee:
             epoch_header=None,
             epoch_ended=False,
             ending=None,
-            origin=event.timestamp.timestamp(),
+            origin=at.timestamp(),
             clock=clock,
             clock_offset=clock,
             tree_hash=self._tree_hash,
             dirty=self._dirty,
             wall_span_clock=self._live,
-            clock_epochs=(*epochs, (event.timestamp.timestamp(), clock)),
+            clock_epochs=(*epochs, (at.timestamp(), clock)),
             intents=tuple(intents.items()),
             spans=tuple(
                 (key, history.versions[-1].span.to_binary())
@@ -159,7 +179,7 @@ class RunLogTee:
         try:
             event = _decode(payload)
             if self._state is None:
-                self._state = self._initialize(event)
+                self._state = self._initialize(event.timestamp)
             result = map_event(self._state, event)
             self._write_content(result)
             for record in result.records:

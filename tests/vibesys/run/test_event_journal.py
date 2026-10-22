@@ -195,18 +195,18 @@ def test_live_tee_includes_buffered_events_and_increments_epochs(
     restarted.close()
     with Project.run_log_path_for(project.root, "run-1").open("rb") as stream:
         records = list(RunLogReader(stream))
-    assert [record.seq for record in records] == [1, 2, 3, 4, 5]
+    assert [record.seq for record in records] == [1, 2, 3, 4, 5, 6]
     assert all(
         record.at is not None and record.at.to_datetime() == journal.read()[0].timestamp
         for record in records
     )
-    assert [record.epoch for record in records] == [1, 1, 1, 2, 2]
+    assert [record.epoch for record in records] == [1, 1, 1, 2, 2, 2]
     headers = [
         record.body.value
         for record in records
         if record.body is not None and record.body.field == "epoch_started"
     ]
-    assert [header.epoch for header in headers] == [1, 2]
+    assert [header.epoch for header in headers] == [1, 2, 2]
     assert all(header.run_id == "run-1" for header in headers)
     assert all(header.api_schema_hash == API_SCHEMA_HASH for header in headers)
     assert all(header.store_schema_hash == STORE_SCHEMA_HASH for header in headers)
@@ -304,8 +304,8 @@ def test_attachment_records_unknown_provenance_without_checkout_processes(
         integration.close()
     with Project.run_log_path_for(root, "run-1").open("rb") as stream:
         records = list(RunLogReader(stream))
-    assert len(records) == 2
-    lifecycle = records[1].body
+    assert len(records) == 3
+    lifecycle = records[2].body
     assert lifecycle is not None
     assert lifecycle.field == "lifecycle"
     assert lifecycle.value.state is not None

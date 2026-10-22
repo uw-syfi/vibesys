@@ -5,10 +5,12 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 from io import BytesIO, StringIO
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING
 
 import pytest
-from hypothesis import given
+from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
 import vs_proto.api as p
@@ -41,11 +43,9 @@ from vs_proto.api import (
     validate,
 )
 from vs_runlog.api import FileRunLogWriter, RunLogReader, encode_frame
-from vs_sim.api.testing import FakeProcesses, ManualClock, ProcessScript, SimThreads
+from vs_sim.api.testing import FakeProcesses, ManualClock, ProcessScript, SimThreads, examples
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from protobuf import Message
 
     from vs_sim.api import ProcessSpec
@@ -492,6 +492,8 @@ def test_host_relaunch_round_trip_confirms_the_new_epoch(
     headers = [r.body.value for r in records if r.body and r.body.field == "epoch_started"]
     assert [(h.epoch, h.tree_hash, h.dirty) for h in headers] == [
         (1, "tree-a", False),
+        (1, "tree-a", False),
+        (2, "tree-b", True),
         (2, "tree-b", True),
     ]
     response = HostCallResponse.from_binary(
@@ -569,3 +571,143 @@ def test_host_relaunch_failure_paths_never_claim_an_epoch(
         assert response.result.field == "configuration_failed"
         assert response.result.value.code == "invalid_input"
         assert len(processes.ran) == (0 if mode == "corrupt" else 1)
+
+
+def _open_resumable(root: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Project, str]:
+    monkeypatch.setenv("VIBESYS_STATE_HOME", str(root / "state-home"))
+    project_root = root / "project"
+    project_root.mkdir(parents=True)
+    project = Project.open(project_root)
+    project.state.create_project("control", now=datetime(2026, 1, 1, tzinfo=UTC))
+    manifest = project.state.new_run_manifest(
+        "control",
+        branch="test",
+        vibesys_version="test",
+        run_environment=RunEnvironmentRecord(name="docker"),
+        execution=run_execution_record(),
+        orchestration=OrchestrationDescriptor(id="dynamic", config_version=1, options={}),
+        trusted_input_baseline="a" * 40,
+        now=datetime(2026, 1, 1, tzinfo=UTC),
+    )
+    project.state.create_run(manifest)
+    with project.state.exclusive_run_host(manifest.run_id):
+        pass
+    project.state.control_inbox(manifest.run_id).serve()
+    return project, manifest.run_id
+
+
+def _resume_during_environment_open(root: Path, *, delay: float, fail: bool) -> None:
+    """Resume while the successor holds the writer lock and its environment is still opening."""
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        _resume_during_environment_open_in(root, monkeypatch, delay=delay, fail=fail)
+
+
+def _resume_during_environment_open_in(
+    root: Path, monkeypatch: pytest.MonkeyPatch, *, delay: float, fail: bool
+) -> None:
+    owner, run_id = _open_resumable(root, monkeypatch)
+    executable = host_executable(root / "checkout")
+    threads, clock = SimThreads(), ManualClock()
+    logs = Project.log_directory_for(owner.root, run_id)
+    path = Project.run_log_path_for(owner.root, run_id)
+    request = relaunch_call(owner, run_id, executable.parents[2])
+
+    def exercise() -> None:
+        journal = EventJournal(clock, threads)
+        journal.checkout = ("tree-a", False)
+        journal.enable_runlog(owner, run_id)
+        journal.attach(logs, run_id)
+        journal.emit(
+            CoreEventType.RUN_STARTED, data=RunStartedData(outer_loop="test", input="input")
+        )
+        journal.close()
+
+        def launch(spec: ProcessSpec) -> ProcessScript:
+            def successor() -> None:
+                resumed = EventJournal(clock, threads)
+                resumed.checkout = ("tree-b", True)
+                resumed.enable_runlog(owner, run_id)
+                resumed.attach(logs, run_id)
+                threads.sleep(delay)
+                if fail:
+                    resumed.fail_open_epoch("environment did not open")
+                else:
+                    resumed.emit(
+                        CoreEventType.RUN_STARTED,
+                        data=RunStartedData(outer_loop="test", input="input"),
+                    )
+                resumed.close()
+
+            threads.spawn(successor, name="successor", daemon=False)
+            assert spec.argv == (
+                str(executable),
+                "--resume",
+                run_id,
+                "--detach",
+                "--project",
+                str(owner.root),
+            )
+            return ProcessScript()
+
+        processes = FakeProcesses(launch, pass_time=threads.sleep)
+        response = HostCallResponse.from_binary(
+            host_call(request.to_binary(), processes=processes, threads=threads)
+        )
+        validate(response)
+        assert response.result is not None
+        assert response.result.field == "relaunch", response.result
+        assert response.result.value.outcome == Oneof("epoch", 2)
+        second = HostCallResponse.from_binary(
+            host_call(request.to_binary(), processes=processes, threads=threads)
+        )
+        validate(second)
+        assert second.result is not None
+        assert second.result.field == "relaunch"
+        assert second.result.value.outcome in (
+            Oneof("refusal", RelaunchRefusal.LOCKED),
+            Oneof("refusal", RelaunchRefusal.EPOCH_CHANGED),
+        )
+        assert len(processes.ran) == 1
+
+    threads.run(exercise)
+    _assert_successor_outcome(path, failed=fail)
+
+
+def _assert_successor_outcome(path: Path, *, failed: bool) -> None:
+    with path.open("rb") as stream:
+        records = list(RunLogReader(stream))
+    lifecycles = [
+        (record.epoch, record.body.value.state.field, record.body.value.state.value)
+        for record in records
+        if record.body is not None
+        and record.body.field == "lifecycle"
+        and record.body.value.state is not None
+    ]
+    if failed:
+        ended = [value for epoch, field, value in lifecycles if epoch == 2 and field == "ended"]
+        assert len(ended) == 1
+        ending = ended[0]
+        assert isinstance(ending, p.Ended)
+        assert ending.outcome is p.Outcome.FAILED
+        assert ending.failure is not None
+        assert ending.failure.kind is p.RunFailureKind.ENVIRONMENT_UNAVAILABLE
+        return
+    assert any(epoch == 2 and field == "running" for epoch, field, _value in lifecycles)
+
+
+def test_resume_confirms_while_the_environment_opens_slowly(tmp_path: Path) -> None:
+    """The reported case: environment open outlasts the confirmation budget."""
+    _resume_during_environment_open(tmp_path / "slow", delay=30, fail=False)
+
+
+@pytest.mark.regression
+@settings(max_examples=examples(pr=6, nightly=24))
+@given(delay=st.integers(min_value=0, max_value=40), fail=st.booleans())
+@example(delay=30, fail=False)
+@example(delay=30, fail=True)
+def test_resume_confirms_or_records_failure_for_any_environment_open(
+    delay: int, *, fail: bool
+) -> None:
+    """A successor either confirms and runs, or ends the epoch it already published."""
+    with TemporaryDirectory() as directory:
+        _resume_during_environment_open(Path(directory), delay=delay, fail=fail)
