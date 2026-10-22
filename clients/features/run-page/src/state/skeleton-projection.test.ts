@@ -1,6 +1,8 @@
 import {expect, test} from 'bun:test';
+import {readFileSync} from 'node:fs';
 import {clone, create, fromBinary, toBinary} from '@bufbuild/protobuf';
 import {AnySchema} from '@bufbuild/protobuf/wkt';
+import type {UsageRecord} from '@vibesys/contracts/host-helper';
 import {recordedProjectRoot} from '@vibesys/hosts';
 import {
   AgentTurnAttrsSchema,
@@ -15,6 +17,7 @@ import {
   RunHeadSchema,
   RunLiveness,
   RuntimeType,
+  SkeletonResponseSchema,
   SpanFailureKind,
   SpanSchema,
   SpanStatus,
@@ -24,8 +27,9 @@ import {
   WaitKind,
 } from '@vibesys/proto';
 import {storeRunFixture} from '@vibesys/run-fixtures';
-import {foldSkeleton, seedSkeleton, seekSkeleton} from '@vibesys/run-skeleton';
-import {usageOverTime} from '@vibesys/run-state/usage';
+import {foldSkeleton, ingestSkeleton, seedSkeleton, seekSkeleton} from '@vibesys/run-skeleton';
+import {readSkeleton} from '@vibesys/run-state/skeleton';
+import {totalUsage, usageOverTime} from '@vibesys/run-state/usage';
 import {
   clockStart,
   headerView,
@@ -514,5 +518,54 @@ test('native turn costs, cache tokens and inline or attached typed replies survi
       );
       expect(before.run.core?.transcript.find(row => row.spanId === span.id)).toBeUndefined();
     }
+  }
+});
+
+test('retained real usage and cache costs match the old projection through replay and a saved keyframe', () => {
+  const source = JSON.parse(
+    readFileSync(
+      new URL(
+        '../../../../../tests/conformance/fixtures/usage-records/codex-ten-rounds-trimmed.json',
+        import.meta.url,
+      ),
+      'utf8',
+    ),
+  ) as {records: UsageRecord[]};
+  const root = new URL('../../../../../proto/testdata/conversion/usage/', import.meta.url);
+  const frame = fromBinary(KeyframeSchema, readFileSync(new URL('expected.pb', root)));
+  const values: string[] = JSON.parse(readFileSync(new URL('records.base64.json', root), 'utf8'));
+  const records = values.map(value => Uint8Array.from(Buffer.from(value, 'base64')));
+  const expected = totalUsage(source.records);
+  expect(expected.turns).toBe(8);
+  expect(expected.tokens.cacheRead).toBeGreaterThan(0);
+  expect(expected.costUsd).toBeGreaterThan(0);
+  const spend = (row: UsageRecord) => ({
+    tokens: row.tokens,
+    cost: row.cost_usd,
+    duration: row.duration_ms,
+    harness: row.harness,
+    model: row.model,
+    client: row.client,
+    effort: row.reasoning_effort,
+    version: row.harness_version,
+  });
+  for (const checkpoint of [false, true]) {
+    const load = ingestSkeleton(
+      create(SkeletonResponseSchema, {
+        ...(checkpoint ? {keyframe: toBinary(KeyframeSchema, frame)} : {records}),
+        committedSeq: frame.throughSeq,
+        nextSeq: frame.throughSeq + 1n,
+        complete: true,
+      }),
+    );
+    const reading = readSkeleton(load.skeleton, seekSkeleton(load.skeleton, frame.throughSeq));
+    const actual = totalUsage(reading.core.usageRecords);
+    expect(actual.tokens).toEqual(expected.tokens);
+    expect(actual.turns).toBe(expected.turns);
+    // A keyframe's maps may enumerate turns in another order, changing only floating-point rounding.
+    expect(actual.costUsd).toBeCloseTo(expected.costUsd ?? Number.NaN, 14);
+    const ordered = (rows: readonly UsageRecord[]) =>
+      rows.map(spend).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
+    expect(ordered(reading.core.usageRecords)).toEqual(ordered(source.records));
   }
 });

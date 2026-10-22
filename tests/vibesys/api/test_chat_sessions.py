@@ -32,11 +32,15 @@ from vs_proto.api import (
     ChatMessageRequest,
     ChatSessionCreated,
     ChatSteerProposed,
+    Ended,
     HostCallRequest,
     HostCallResponse,
     Lifecycle,
     Oneof,
+    Outcome,
     Parked,
+    RunFailure,
+    RunFailureKind,
     RunHead,
     Running,
     RunProcess,
@@ -497,3 +501,65 @@ def test_process_refreshes_after_relaunch_without_stranding_admitted_messages(
         scope.create_auxiliary_agent(scope.launches[0])
     with pytest.raises(RuntimeError, match="conversation is closed"):
         agents[0].turn("late")
+
+
+@pytest.mark.parametrize(
+    ("outcome", "failure"),
+    [
+        (Outcome.FINISHED, None),
+        (Outcome.STOPPED, None),
+        (Outcome.INTERRUPTED, None),
+        *[
+            (Outcome.FAILED, kind)
+            for kind in RunFailureKind
+            if kind is not RunFailureKind.UNSPECIFIED
+        ],
+    ],
+)
+def test_every_ending_uses_the_same_chat_admission_and_retained_history(
+    chat: ChatMessageRequest, outcome: Outcome, failure: RunFailureKind | None
+) -> None:
+    path = Project.run_head_path_for(chat.project_root, chat.run_id)
+    head = RunHead.from_binary(path.read_bytes())
+    head.lifecycle = Lifecycle(
+        state=Oneof(
+            "ended",
+            Ended(
+                outcome=outcome,
+                resumable=True,
+                failure=None
+                if failure is None
+                else RunFailure(kind=failure, reason="Recorded ending"),
+            ),
+        )
+    )
+    validate(head)
+    original = head.to_binary()
+    path.write_bytes(original)
+    starts: list[ChatMessageRequest] = []
+    for index in range(2):
+        question = ChatMessageRequest.from_binary(chat.to_binary())
+        question.request_id, question.text = f"q-{index + 1}", f"Question {index + 1}"
+        response = HostCallResponse.from_binary(
+            chat_call(
+                HostCallRequest(
+                    checkout="/src/checkout", method=Oneof("chat_message", question)
+                ).to_binary(),
+                start_chat=starts.append,
+            )
+        )
+        validate(response)
+        assert response.result is not None
+        assert response.result.field == "chat_message"
+        assert response.result.value.request_id == question.request_id
+        agent = run(question, lambda text, _invocation: f"answer to {text}")
+        if index:
+            prompt = json.loads(agent.messages[0][0])
+            assert prompt["question"] == question.text
+            prior = json.loads(prompt["untrusted_prior_chat_transcript_jsonl"])
+            assert prior["question"] == "Question 1"
+        else:
+            assert agent.messages[0][0] == question.text
+        assert path.read_bytes() == original
+    assert len(starts) == 2
+    assert len(events(chat)) == 5

@@ -1,6 +1,6 @@
 import {describe, expect, test} from 'bun:test';
 import {readdirSync, readFileSync} from 'node:fs';
-import {create, toBinary} from '@bufbuild/protobuf';
+import {create, fromJsonString, toBinary} from '@bufbuild/protobuf';
 import {RecordSchema} from '@vibesys/proto';
 import {decodeRecordRows, recordRows} from './index.js';
 
@@ -62,4 +62,22 @@ test('every retained record arm has a description, including startup and failure
   expect(() => decodeRecordRows([toBinary(RecordSchema, create(RecordSchema))])).toThrow(
     'body required',
   );
+});
+
+test('retained skeleton formats render every record, including opaque legacy text', () => {
+  const fixtures = new URL('../../../../../proto/testdata/skeleton/', import.meta.url);
+  for (const name of ['core', 'epochs', 'legacy']) {
+    const json: unknown[] = JSON.parse(
+      readFileSync(new URL(`${name}/records.json`, fixtures), 'utf8'),
+    );
+    const bytes = json.map(value =>
+      toBinary(RecordSchema, fromJsonString(RecordSchema, JSON.stringify(value))),
+    );
+    const rows = decodeRecordRows(bytes);
+    expect(rows).toHaveLength(json.length);
+    if (name === 'legacy') {
+      expect(rows[0]?.message).toBe('legacy');
+      expect(rows[0]?.event).toBe('');
+    }
+  }
 });

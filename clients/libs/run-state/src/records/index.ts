@@ -35,27 +35,32 @@ export function recordRows(
   return [...rows, ...next].slice(-1000);
 }
 
+function legacyType(json: string): string {
+  let value: unknown;
+  try {
+    value = JSON.parse(json);
+  } catch (error) {
+    if (error instanceof SyntaxError) return '';
+    throw error;
+  }
+  return typeof value === 'object' &&
+    value !== null &&
+    'type' in value &&
+    typeof value.type === 'string'
+    ? value.type
+    : '';
+}
+
 export function decodeRecordRows(bytes: readonly Uint8Array[]): readonly RecordRow[] {
   return bytes.map(value => {
     const record = fromBinary(RecordSchema, value);
     if (record.body.case === undefined) throw new Error(`record ${record.seq}: body required`);
-    let event = '';
-    if (record.body.case === 'legacyEvent') {
-      const value: unknown = JSON.parse(record.body.value.json);
-      if (
-        typeof value === 'object' &&
-        value !== null &&
-        'type' in value &&
-        typeof value.type === 'string'
-      )
-        event = value.type;
-    }
     return {
       ...(record.body.case === 'blob' ? {attachment: record.body.value} : {}),
       seq: String(record.seq),
       epoch: record.epoch,
       body: record.body.case,
-      event,
+      event: record.body.case === 'legacyEvent' ? legacyType(record.body.value.json) : '',
       message: recordMessage(record.body),
       failure:
         (record.body.case === 'notice' && record.body.value.severity >= Severity.ERROR) ||
