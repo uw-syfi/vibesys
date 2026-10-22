@@ -201,6 +201,88 @@ def _retryable(diagnostic: str, resource_id: ResourceId | None) -> _Facts:
     )
 
 
+@dataclass(frozen=True)
+class _AdoptionRefused:
+    """A sealed refusal: the request holds nothing and must not publish."""
+
+    diagnostic: str
+
+
+@dataclass(frozen=True)
+class _AdoptionFailed:
+    """A terminal unsuccessful observation after the request was accepted."""
+
+    diagnostic: str
+
+
+@dataclass(frozen=True)
+class _AdoptionSucceeded:
+    """The selected revision stands. Publication and checkout are present only when made."""
+
+    revision: RevisionRef
+    diagnostic: str = ""
+    publication: AdoptionPublication | None = None
+    checkout: CheckoutUpdate | None = None
+
+
+_AdoptionOutcome = _AdoptionRefused | _AdoptionFailed | _AdoptionSucceeded
+
+
+def _adoption_facts(outcome: _AdoptionOutcome) -> _Facts:
+    """Project one adoption decision onto the observation facts callers already receive."""
+    match outcome:
+        case _AdoptionRefused(diagnostic):
+            facts = _rejected(diagnostic)
+        case _AdoptionFailed(diagnostic):
+            facts = _Facts(ObservationStatus.FAILED, accepted=True, diagnostic=diagnostic)
+        case _AdoptionSucceeded() as succeeded:
+            facts = _Facts(
+                ObservationStatus.SUCCEEDED,
+                accepted=True,
+                revision=succeeded.revision,
+                publication=succeeded.publication,
+                checkout=succeeded.checkout,
+                diagnostic=succeeded.diagnostic,
+            )
+        case _ as unreachable:
+            assert_never(unreachable)
+    return facts
+
+
+def _adoption_target(
+    commit: str | None, *, baseline: bool, trusted: str | None
+) -> str | _AdoptionRefused:
+    """The commit adoption may use, or the refusal that the selection is not that commit."""
+    if commit is None:
+        return _AdoptionRefused("selected revision is not a retained revision of this run")
+    if baseline and commit != trusted:
+        return _AdoptionRefused("selected baseline is not the run's trusted input baseline")
+    return commit
+
+
+def _resume_adoption_outcome(
+    request: AdoptRevision | VerifyAdoption, *, applied: bool
+) -> _AdoptionOutcome:
+    """Resume keeps the operator's tree. A matching tree is success for either request."""
+    if applied:
+        return _AdoptionSucceeded(request.selection.revision)
+    if isinstance(request, AdoptRevision):
+        return _AdoptionRefused(
+            "candidate retained; adoption in a resumed epoch requires project-edit protection"
+        )
+    if isinstance(request, VerifyAdoption):
+        return _AdoptionFailed("root workspace content differs from the selected revision")
+    assert_never(request)
+
+
+def _checkout_diagnostic(checkout: CheckoutUpdate) -> str:
+    return (
+        "checkout updated"
+        if checkout.status is CheckoutStatus.FAST_FORWARDED
+        else f"checkout skipped: {checkout.status.value.replace('_', ' ')}"
+    )
+
+
 _RUN_OWNER = "run"
 _WITHDRAWN = "the attempt's workspace was withdrawn before any ensure bound it"
 _HANDLED = (EnsureWorkspace, RestoreRevision, SnapshotAndRetain, RetainRevision, DiscardWorkspace)
@@ -488,33 +570,33 @@ class RuntimeWorkspaceRequests:
         return commit if retained_by_any and owners else None
 
     async def _adoption(self, request: AdoptRevision | VerifyAdoption) -> _Facts:
+        return _adoption_facts(await self._adoption_outcome(request))
+
+    async def _adoption_outcome(self, request: AdoptRevision | VerifyAdoption) -> _AdoptionOutcome:
         root = self._workspaces.root
-        ref = request.selection.revision
         commit = await self._known_revision(
-            ref,
+            request.selection.revision,
             owner=None,
             retained_by_any=not isinstance(request.selection, TrustedBaseline),
         )
-        if commit is None:
-            return _rejected("selected revision is not a retained revision of this run")
-        if isinstance(request.selection, TrustedBaseline) and commit != root.trusted_input_baseline:
-            return _rejected("selected baseline is not the run's trusted input baseline")
+        target = _adoption_target(
+            commit,
+            baseline=isinstance(request.selection, TrustedBaseline),
+            trusted=root.trusted_input_baseline,
+        )
+        if isinstance(target, _AdoptionRefused):
+            return target
         if not self._allow_adoption:
             # Resume keeps the operator's tree. Publication stays on the ordinary path.
-            applied = await root.matches_revision(commit)
-            if isinstance(request, AdoptRevision) and not applied:
-                return _rejected(
-                    "candidate retained; adoption in a resumed epoch requires project-edit protection"
-                )
-            if isinstance(request, VerifyAdoption) and not applied:
-                return _Facts(
-                    ObservationStatus.FAILED,
-                    accepted=True,
-                    diagnostic="root workspace content differs from the selected revision",
-                )
-            return _Facts(ObservationStatus.SUCCEEDED, accepted=True, revision=ref)
+            applied = await root.matches_revision(target)
+            return _resume_adoption_outcome(request, applied=applied)
         # Legacy VerifyAdoption records are replayed as publication reads/retries,
         # never as permission to restore or compare the operator's working tree.
+        return await self._publication_outcome(request, target)
+
+    async def _publication_outcome(
+        self, request: AdoptRevision | VerifyAdoption, commit: str
+    ) -> _AdoptionOutcome:
         message = (
             adoption_commit_message(request, commit, self._evidence)
             if isinstance(request, AdoptRevision)
@@ -523,28 +605,16 @@ class RuntimeWorkspaceRequests:
         try:
             publication = await self._workspaces.adopt(commit, message=message)
         except RuntimeContractError as error:
-            return _Facts(ObservationStatus.FAILED, accepted=True, diagnostic=str(error))
+            return _AdoptionFailed(str(error))
+        ref = request.selection.revision
         if isinstance(request, VerifyAdoption):
-            return _Facts(
-                ObservationStatus.SUCCEEDED,
-                accepted=True,
-                revision=ref,
-                publication=publication,
-                diagnostic="published",
-            )
+            return _AdoptionSucceeded(ref, diagnostic="published", publication=publication)
         checkout = await self._workspaces.update_checkout(publication)
-        diagnostic = (
-            "checkout updated"
-            if checkout.status is CheckoutStatus.FAST_FORWARDED
-            else f"checkout skipped: {checkout.status.value.replace('_', ' ')}"
-        )
-        return _Facts(
-            ObservationStatus.SUCCEEDED,
-            accepted=True,
-            revision=ref,
+        return _AdoptionSucceeded(
+            ref,
+            diagnostic=_checkout_diagnostic(checkout),
             publication=publication,
             checkout=checkout,
-            diagnostic=diagnostic,
         )
 
     @staticmethod
