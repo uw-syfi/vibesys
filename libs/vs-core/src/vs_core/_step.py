@@ -1844,7 +1844,7 @@ def _resume_epoch(state: CoreState, event: EpochResumed, dispatch: Dispatch) -> 
     restart_search = (
         state.run.park is not None or state.run.result is not None or stop_standing(state.run)
     )
-    successor = event.epoch > previous_epoch
+    successor = previous_epoch > 0 and event.epoch > previous_epoch
     control = ControlInput(
         control_id=ControlId(root=f"epoch:{event.epoch}"), action="resume", when="now"
     )
