@@ -24,6 +24,8 @@ from vs_evaluation.models import (
     EvaluationState,
     EvaluationStepResult,
     ExecutorObservation,
+    ExecutorPoll,
+    PollPhase,
     ProfileField,
     ResourceRequirements,
     ReuseStatus,
@@ -297,6 +299,20 @@ class FakeEvaluationExecutor:
         if self._observations:
             return self._observations.popleft()
         return self.backend.inspect(handle_id)
+
+    async def poll(self, handle_id: str) -> ExecutorPoll:
+        """Read the shared backend without submitting or starting recovery tasks."""
+        observed = await self.inspect_only(handle_id)
+        if observed is None:
+            return ExecutorPoll(phase=PollPhase.UNSUBMITTED)
+        if is_finished(observed.state):
+            return ExecutorPoll(phase=PollPhase.ENDED, terminal=observed)
+        phase = PollPhase.QUEUED if observed.state is EvaluationState.QUEUED else PollPhase.RUNNING
+        return ExecutorPoll(phase=phase, current_stage=observed.current_stage)
+
+    async def recover(self, handle_id: str) -> ExecutorPoll:
+        """A reopened client reads authoritative state from its shared backend."""
+        return await self.poll(handle_id)
 
     async def wait_for_change(self, handle_id: str, timeout_s: float) -> None:
         """Wait for a deliberate test state change or advance fake time."""

@@ -56,6 +56,7 @@ from vs_slurm.api import (
 if TYPE_CHECKING:
     from pathlib import Path
 
+    from vs_evaluation.api import EvaluationStateNamespace
     from vs_runtime.api.core import StageOutputOpener
     from vs_runtime.api.infrastructure import RunControlChannel
     from vs_runtime.contracts import CandidateWorkspace
@@ -207,6 +208,7 @@ async def build_stack(  # noqa: PLR0913  # lint-waiver: LW-455560 [PLR0913]; eac
     benchmark_contract: TrustedBenchmarkContract | None = None,
     root_proof: WorkspaceRootProof | None = None,
     control: RunControlChannel | None = None,
+    namespace: EvaluationStateNamespace | None = None,
 ) -> Stack:
     """Build the semantic Slurm executor over ``cluster``, reusing durable state under root.
 
@@ -219,15 +221,17 @@ async def build_stack(  # noqa: PLR0913  # lint-waiver: LW-455560 [PLR0913]; eac
     evaluation ledger attachment. ``policy`` is the operator's execution policy, default none.
     ``benchmark_contract`` is how the benchmark's result is read, by default one scalar metric.
     With ``root_proof`` every evaluation waits for that workspace-root proof before it
-    reaches the cluster.
+    reaches the cluster. ``namespace`` may supply semantic receipts independently of
+    the provider handle store, including missing-receipt recovery scenarios.
     """
     cluster = cluster or ScenarioCluster()
     workspaces = _Candidates(
         FakeWorkspace(path=root / "workspace"), supports_parallel_candidates=True
     )
     snapshot = await workspaces.root.snapshot("candidate")
-    state = scratch_state_directory(root, "evaluation")
-    namespace = StateNamespace(project_root=root, root=state, portable=False)
+    if namespace is None:
+        state = scratch_state_directory(root, "evaluation")
+        namespace = StateNamespace(project_root=root, root=state, portable=False)
     executor = SemanticSlurmEvaluationExecutor(
         _config(),
         policy or SlurmExecutionPolicy(),
@@ -244,7 +248,7 @@ async def build_stack(  # noqa: PLR0913  # lint-waiver: LW-455560 [PLR0913]; eac
             or ScalarBenchmarkContract(output_argument="--output", metric="throughput"),
         ),
         workspaces,
-        namespace,  # type: ignore[arg-type]  # the evaluation namespace is a StateNamespace
+        namespace,
         root / "handles",
         stage_failure_text=render_stage_failure,
         clock=ManualClock(),

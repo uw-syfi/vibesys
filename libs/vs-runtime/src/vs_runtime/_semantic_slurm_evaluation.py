@@ -277,7 +277,15 @@ class SemanticSlurmEvaluationExecutor:
         )
 
     async def recover(self, handle_id: str) -> ExecutorPoll:
-        """The durable submission and provider identity make pure polling authoritative."""
+        """Inspect retained provider work without trusting a missing semantic request."""
+        if self._load(handle_id) is None:
+            provider = await self._availability.poll(handle_id)
+            if provider.phase is not PollPhase.UNSUBMITTED:
+                return ExecutorPoll(
+                    phase=PollPhase.UNKNOWN,
+                    detail="retained Slurm work is missing its semantic evaluation request",
+                )
+            return provider
         return await self.poll(handle_id)
 
     async def inspect(self, handle_id: str) -> ExecutorObservation | None:

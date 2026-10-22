@@ -5,18 +5,17 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from vs_core.api import CancelOwnedJob, ObservationStatus, ObserveOwnedJob, SubmitMeasurement
-from vs_evaluation.api import ExecutorCancellationUnknownError, PollPhase
+from vs_evaluation.api import ExecutorCancellationUnknownError, ExecutorPoll, PollPhase
 from vs_runtime._core_requests import ExecutorRefusal, ExecutorRole
 from vs_runtime._evaluation_jobs import handle_for
 from vs_runtime._evaluation_requests import MeasurementRequests
-from vs_runtime._receipt_store import NeverBegun
+from vs_runtime._receipt_store import NeverBegun, SealedExecution
 
 if TYPE_CHECKING:
     from vs_evaluation.api import (
         AvailabilitySnapshot,
         EvaluationRequest,
         ExecutorObservation,
-        ExecutorPoll,
         RecoverableEvaluationExecutor,
         ResourceRequirements,
     )
@@ -44,13 +43,16 @@ class ReplayEvaluationJobs:
         self.fresh: set[str] = set()
 
     async def poll(self, handle_id: str) -> ExecutorPoll:
-        return await (
-            self._inner.poll(handle_id)
-            if handle_id in self.fresh
-            else self._inner.recover(handle_id)
-        )
+        if handle_id in self.fresh:
+            # NeverBegun is the owner's durable permission for the first
+            # delivery. Even here a legacy retry wrapper's poll may dispatch.
+            return ExecutorPoll(phase=PollPhase.UNSUBMITTED)
+        return await self._inner.recover(handle_id)
 
     async def submit(self, request: EvaluationRequest, *, handle_id: str) -> None:
+        # Once delivery may escape, even this first request must inspect through
+        # recover. A wrapper's legacy poll can dispatch an unjournaled retry.
+        self.fresh.discard(handle_id)
         await self._inner.submit(request, handle_id=handle_id)
 
     async def cancel(self, handle_id: str) -> None:
@@ -128,11 +130,14 @@ class RecoveringMeasurementRequests:
     async def execute(
         self, request: EvaluationRoleRequest, context: ExecutionContext
     ) -> ExecutionOutcome:
-        fresh = (
-            isinstance(request, SubmitMeasurement)
-            and request.request_id is not None
-            and isinstance(self._receipts.history(request.request_id.root), NeverBegun)
+        history = (
+            None if request.request_id is None else self._receipts.history(request.request_id.root)
         )
+        if isinstance(history, SealedExecution):
+            # A durable result remains authoritative after the executor's local
+            # cache disappears. run_once validates and replays it without I/O.
+            return await self._owner.execute(request, context)
+        fresh = isinstance(request, SubmitMeasurement) and isinstance(history, NeverBegun)
         handle = (
             handle_for(request.request_id) if fresh and request.request_id is not None else None
         )
