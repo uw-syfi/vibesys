@@ -2,10 +2,13 @@
 
 from pathlib import Path
 
-from server.host_api import HelperErrorCode
+from tests.server.host_helper_support import fake_host
+
+from server.host_api import ExamplesDestinationRequest, HelperError, HelperErrorCode
 from server.host_examples import CreatedProject
-from server.host_helper_requests import ProjectLookupError, apply_registered_project
+from server.host_helper_requests import ProjectLookupError, answer, apply_registered_project
 from vs_proto.api import host_payloads as pb
+from vs_sim.api.testing import SimNetwork, SimThreads
 
 
 class _Directories:
@@ -51,6 +54,25 @@ def test_a_registry_create_keeps_the_helper_project() -> None:
     assert response.result.field == "created"
     assert response.result.value.project == "/work/queue"
     assert list(response.result.value.tasks) == ["a"]
+
+
+def test_a_destination_json_request_is_the_registry_read(tmp_path: Path) -> None:
+    threads = SimThreads()
+    host = fake_host(threads, SimNetwork(threads))
+
+    reply = answer(
+        ExamplesDestinationRequest(
+            request_id="d",
+            deadline_ms=1,
+            example="stack",
+            destination=str(tmp_path / "absent"),
+        ),
+        host,
+        threads.event(),
+    )
+
+    assert isinstance(reply, HelperError)
+    assert reply.code is HelperErrorCode.EXAMPLES_UNAVAILABLE
 
 
 def test_a_taken_destination_is_the_create_answer() -> None:

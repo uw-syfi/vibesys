@@ -117,12 +117,6 @@ from server.host_compute import (
     SlurmClusterSettings,
     SlurmTarget,
 )
-from server.host_examples import (
-    ExampleDestination,
-    ExamplesDestinationReply,
-    ExamplesDestinationRequest,
-    TaskList,
-)
 from server.host_helper_compute import ComputeError, MachineCompute
 from server.host_helper_logs import HelperLogs, ReadWithdrawal, list_logs, read_log
 from server.host_helper_preflight import (
@@ -177,7 +171,13 @@ if TYPE_CHECKING:
     from server.host_agent_logins import AgentLogin, LoginStarted, LoginUnavailable
     from server.host_api import HarnessChoice, RunDigestUnreadable
     from server.host_compute import MeasurementTarget
-    from server.host_examples import CreatedProject, ExampleList, TaskGoal
+    from server.host_examples import (
+        CreatedProject,
+        ExampleDestination,
+        ExampleList,
+        TaskGoal,
+        TaskList,
+    )
     from server.host_helper_readers import Readers
     from server.host_operation_types_generated import RegistryReadRequest, UnmigratedHelperRequest
     from server.host_preflight import PreflightReport, RoleOption, RunOptions
@@ -935,7 +935,6 @@ def _answer(
             reply = _run_history_reply(request, host)
         case (
             CheckoutInspectRequest()
-            | ExamplesDestinationRequest()
             | ProjectCreateFromExampleRequest()
             | ProjectCopyOutRequest()
             | ComputeTestClusterRequest()
@@ -1032,18 +1031,11 @@ def _compute_reply(
 
 
 def _examples_reply(
-    request: ExamplesDestinationRequest | ProjectCreateFromExampleRequest | ProjectCopyOutRequest,
+    request: ProjectCreateFromExampleRequest | ProjectCopyOutRequest,
     host: HelperHost,
-) -> ExamplesDestinationReply | ProjectCreateFromExampleReply | ProjectCopyOutReply:
-    """Answer one read of the example catalog or a destination, or make one new project."""
+) -> ProjectCreateFromExampleReply | ProjectCopyOutReply:
+    """Answer making one new project from an example, or copying one out."""
     match request:
-        case ExamplesDestinationRequest(
-            request_id=request_id, example=example, destination=destination
-        ):
-            state, project = host.examples.destination(
-                example, Path(_host_path(destination, host.directories))
-            )
-            return ExamplesDestinationReply(request_id=request_id, state=state, project=project)
         case ProjectCreateFromExampleRequest(
             request_id=request_id, example=example, destination=destination
         ):
@@ -1059,7 +1051,6 @@ def _examples_reply(
 
 def _machine_reply(
     request: CheckoutInspectRequest
-    | ExamplesDestinationRequest
     | ProjectCreateFromExampleRequest
     | ProjectCopyOutRequest
     | ComputeTestClusterRequest
@@ -1077,11 +1068,7 @@ def _machine_reply(
             ComputeTestClusterRequest() | ComputeAddClusterRequest() | ComputeRemoveClusterRequest()
         ):
             return _compute_reply(request, host.compute)
-        case (
-            ExamplesDestinationRequest()
-            | ProjectCreateFromExampleRequest()
-            | ProjectCopyOutRequest()
-        ):
+        case ProjectCreateFromExampleRequest() | ProjectCopyOutRequest():
             return _examples_reply(request, host)
         case CheckoutInspectRequest(request_id=request_id, path=path):
             inspection = host.machine.inspect_checkout(Path(_host_path(path, host.directories)))
