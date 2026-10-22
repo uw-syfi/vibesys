@@ -1,6 +1,6 @@
 import {describe, expect, test} from 'bun:test';
-import {ConnectionError, ConnectionManager} from '@vibesys/connection';
-import {FakeLink} from '@vibesys/connection/testing';
+import {ConnectionError, ConnectionManager, registryProjects} from '@vibesys/connection';
+import {FakeLink, olderHost} from '@vibesys/connection/testing';
 import type {HostId} from '@vibesys/hosts';
 import type {ExampleCreation, RunInputs} from '@vibesys/ipc';
 import {exampleCatalogue} from '@vibesys/run-fixtures';
@@ -292,6 +292,43 @@ describe('NewRunMain', () => {
     ).toEqual({project: '/own', tasks: ['a']});
     expect(calls).toEqual(['destination', 'create', 'copy']);
     expect(link.helper.requests).toEqual([]);
+  });
+
+  test('a v2 host whose VibeSys predates the registry needs an update on the destination check and on creating', async () => {
+    const manager = new ConnectionManager({
+      linkFor: () => new FakeLink(),
+      appVersion: 'test',
+      scheduleTimeout: new FakeClock().scheduleTimeout,
+      config: {delaysMs: [1], deadlineMs: 60_000, heartbeatMs: 15_000},
+      log: () => {},
+    });
+    const main = new NewRunMain({
+      connect: host => manager.acquire(host, '/checkout'),
+      remember: async () => {},
+      now: () => 1,
+      transportV2: async () => true,
+      registryProjects: registryProjects({
+        checkout: async () => '/checkout',
+        read: olderHost.read,
+        mutate: olderHost.mutate,
+      }),
+    });
+    expect(
+      await main.answer({
+        kind: 'example-destination',
+        host: LOCAL,
+        example: 'queue',
+        destination: '/work/queue',
+      }),
+    ).toEqual({kind: 'unsupported'});
+    await expect(
+      main.answer({
+        kind: 'create-from-example',
+        host: LOCAL,
+        example: 'queue',
+        destination: '/work/queue',
+      }),
+    ).rejects.toThrow("This host's VibeSys needs an update");
   });
 
   test('starts a run with typed options and records it in Recent', async () => {

@@ -13,7 +13,9 @@ export class OperationFailed extends Error {
   readonly category: number;
   readonly diagnostic: string;
   constructor(category: number, diagnostic: string) {
-    super(category === FailureCategory.UNSUPPORTED ? HOST_UNSUPPORTED_MESSAGE : 'host operation failed');
+    super(
+      category === FailureCategory.UNSUPPORTED ? HOST_UNSUPPORTED_MESSAGE : 'host operation failed',
+    );
     this.name = 'OperationFailed';
     this.category = category;
     this.diagnostic = diagnostic;

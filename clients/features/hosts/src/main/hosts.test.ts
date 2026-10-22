@@ -1,7 +1,7 @@
 import {describe, expect, test} from 'bun:test';
 import {join} from 'node:path';
-import {type ConnectionLease, ConnectionManager} from '@vibesys/connection';
-import {FAKE_MODEL_CATALOGUE, FakeLink, record} from '@vibesys/connection/testing';
+import {type ConnectionLease, ConnectionManager, registrySetup} from '@vibesys/connection';
+import {FAKE_MODEL_CATALOGUE, FakeLink, olderHost, record} from '@vibesys/connection/testing';
 import {RUN_EVENT_TYPES_BY_KINDS, type RunSummary} from '@vibesys/contracts/host-helper';
 import {type HostId, type HostListing, hostKey} from '@vibesys/hosts';
 import {remember, SettingsStore, settingsFor, withHostSettings} from '@vibesys/settings';
@@ -471,6 +471,15 @@ describe('Hosts.setCheckout transport v2', () => {
       }),
     };
   }
+
+  test('a host whose VibeSys predates the registry cannot complete paths or take a checkout, and says it needs an update', async () => {
+    const {hosts, manager} = v2Hosts(registrySetup({unary: olderHost.read}));
+    await using _manager = manager;
+    await expect(hosts.complete(LOCAL, '/manual/')).resolves.toEqual({kind: 'unsupported'});
+    await expect(
+      hosts.setCheckout(LOCAL, '/candidate', {owner: 'doc', sequence: 1}),
+    ).rejects.toThrow("This host's VibeSys needs an update");
+  });
 
   test('saves a found compatible checkout without starting the helper', async () => {
     const {hosts, settings, manager} = v2Hosts({

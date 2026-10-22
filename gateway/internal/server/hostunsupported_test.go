@@ -51,7 +51,7 @@ var registryCommands = func() []string {
 }()
 
 // olderHost is what a real older checkout wrote for each command it rejects,
-// recorded offline by proto/testdata/older_host/generate.py.
+// recorded offline by scripts/record_older_host.py.
 var olderHost = func() (corpus struct {
 	Checkout string
 	Rejected []struct {

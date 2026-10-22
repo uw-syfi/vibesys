@@ -1,12 +1,13 @@
 """Record how a real older VibeSys checkout answers every host command the gateway runs.
 
-Usage: python3 proto/testdata/older_host/generate.py <older-checkout>
+Usage: python3 scripts/record_older_host.py <older-checkout> <revision>
 
 <older-checkout> is a checkout of this repository from before the registry commands, with its
-virtualenv built (`uv sync`). Each command is run as `<checkout>/.venv/bin/vibesys host <command>`
-with an empty stdin, exactly as the gateway runs it. The output is committed as
-`older_host.json`, which the gateway's classifier and the client's older-host Fake are both asserted
-against, so neither test runs git or a subprocess. The recorded stderr names no path.
+virtualenv built (`uv sync`), and <revision> names the commit it is at. Each command runs as
+`<checkout>/.venv/bin/vibesys host <command>` with an empty stdin, exactly as the gateway runs
+it. The output is committed as `proto/testdata/older_host/older_host.json`, which the gateway's
+classifier and the client's older-host Fake are both asserted against, so neither test runs git
+or a subprocess. The recorded stderr names no path.
 """
 
 from __future__ import annotations
@@ -17,8 +18,9 @@ import subprocess
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[3]
+ROOT = Path(__file__).resolve().parents[1]
 OPERATIONS = ROOT / "gateway" / "internal" / "hostoperations"
+CORPUS = ROOT / "proto" / "testdata" / "older_host" / "older_host.json"
 USAGE_STATUS = 2
 
 
@@ -31,7 +33,12 @@ def commands() -> list[str]:
 
 
 def record(checkout: Path, command: str) -> dict[str, object]:
-    done = subprocess.run(
+    """Run one command on the older checkout and keep what it printed."""
+    # lint-waiver: LW-317002 [S603]; the executable is the older checkout's own, named by the caller.
+    # > A wrapper adds indirection around the one call this script exists to make; the argv is
+    # > fixed (`host <command>` from the gateway's own tables), runs without a shell, and a
+    # > recording must execute the checkout, so no executable can be a literal.
+    done = subprocess.run(  # noqa: S603
         [str(checkout / ".venv" / "bin" / "vibesys"), "host", command],
         input=b"",
         capture_output=True,
@@ -40,7 +47,7 @@ def record(checkout: Path, command: str) -> dict[str, object]:
     )
     stderr = done.stderr.decode()
     if str(checkout) in stderr:
-        raise SystemExit(f"{command}: stderr names the checkout path")
+        sys.exit(f"{command}: stderr names the checkout path")
     return {
         "command": command,
         "exit_code": done.returncode,
@@ -50,21 +57,15 @@ def record(checkout: Path, command: str) -> dict[str, object]:
 
 
 def main() -> None:
+    """Write the corpus."""
     checkout = Path(sys.argv[1]).resolve()
-    revision = subprocess.run(
-        ["git", "-C", str(checkout), "rev-parse", "--short=9", "HEAD"],
-        capture_output=True,
-        check=True,
-        text=True,
-    ).stdout.strip()
     runs = [record(checkout, command) for command in commands()]
     corpus = {
-        "checkout": revision,
+        "checkout": sys.argv[2],
         "rejected": [run for run in runs if run["exit_code"] == USAGE_STATUS],
         "provided": [run["command"] for run in runs if run["exit_code"] != USAGE_STATUS],
     }
-    target = Path(__file__).with_name("older_host.json")
-    target.write_text(json.dumps(corpus, indent=2) + "\n")
+    CORPUS.write_text(json.dumps(corpus, indent=2) + "\n")
 
 
 if __name__ == "__main__":

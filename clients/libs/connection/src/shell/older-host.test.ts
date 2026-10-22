@@ -177,7 +177,9 @@ test('no failure message carries what the host wrote, whatever its category', ()
     'Traceback (most recent call last):',
     '',
   ];
-  for (const category of Object.values(FailureCategory).filter(value => typeof value === 'number')) {
+  for (const category of Object.values(FailureCategory).filter(
+    value => typeof value === 'number',
+  )) {
     for (const text of texts) {
       const error = new OperationFailed(category as number, text);
       expect(error.diagnostic).toBe(text);

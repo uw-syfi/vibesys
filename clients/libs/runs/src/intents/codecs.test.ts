@@ -1,6 +1,7 @@
 import {expect, test} from 'bun:test';
 import {create, fromBinary, toBinary} from '@bufbuild/protobuf';
 import {
+  HOST_UNSUPPORTED_MESSAGE,
   HostCallRequestSchema,
   HostCallResponseSchema,
   IntentAction,
@@ -111,6 +112,17 @@ test('typed HostCall refusals remain distinct from malformed or unconfirmed repl
         }),
       );
       expect(() => hostIntentResponse(bytes, 'r-1')).toThrow(IntentRefused);
+      let refusal: IntentRefused | undefined;
+      try {
+        hostIntentResponse(bytes, 'r-1');
+      } catch (error) {
+        refusal = error as IntentRefused;
+      }
+      // The host's stderr is for logs; a host that lacks the command says it needs an update.
+      expect(refusal?.diagnostic).toBe(stderr);
+      expect(refusal?.message).toBe(
+        code === 'host_unsupported' ? HOST_UNSUPPORTED_MESSAGE : 'Request refused',
+      );
     }
   }
 });
