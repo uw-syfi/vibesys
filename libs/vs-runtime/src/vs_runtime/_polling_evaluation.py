@@ -26,6 +26,7 @@ from vs_evaluation.api import (
     EvidenceMetric,
     EvidenceOutcome,
     EvidenceResultIdentity,
+    ExecutorCancellationUnknownError,
     ExecutorObservation,
     ExecutorPoll,
     LifecyclePublisher,
@@ -41,6 +42,10 @@ from vs_evaluation.api import (
 )
 from vs_redaction.api import redact_diagnostic_tail
 from vs_runtime._evaluation_failure_text import render_evaluation_failure, render_stage_failure
+from vs_runtime._evaluation_recovery import (
+    EvaluationReceiptUnconfirmedError,
+    EvaluationRecoveryBlockedError,
+)
 from vs_runtime._failure_classification import is_unsettled
 from vs_runtime._measurement_progress import StageRun
 from vs_sim.api import DISCARD
@@ -48,6 +53,7 @@ from vs_sim.api import DISCARD
 if TYPE_CHECKING:
     from contextlib import AbstractContextManager
 
+    from vs_runtime._evaluation_recovery import LocalEvaluationReceipts
     from vs_runtime._measurement_progress import StageOutputOpener
     from vs_runtime._run_control import RunControlChannel
     from vs_runtime.contracts import CandidateWorkspace, Evaluation, Workspace, Workspaces
@@ -70,10 +76,10 @@ class PollingEvaluationExecutor:
 
     Each submitted request evaluates its candidate snapshot in a fresh candidate
     workspace through the trusted ``Evaluation`` effects, one stage at a time.
-    Observations are process-local: nothing survives a restart.
+    Optional receipts retain evidence and cleanup obligations for fresh replay owners.
     """
 
-    def __init__(
+    def __init__(  # noqa: PLR0913  # lint-waiver: LW-341001 [PLR0913]; receipts, execution effects, clock, output and control are independently owned interfaces; a carrier would couple unrelated owners and a mutable setter could enable durability after dispatch.
         self,
         evaluation: Evaluation,
         workspaces: Workspaces,
@@ -81,12 +87,14 @@ class PollingEvaluationExecutor:
         clock: Clock,
         stage_output: StageOutputOpener | None = None,
         control: RunControlChannel | None = None,
+        receipts: LocalEvaluationReceipts | None = None,
     ) -> None:
         """Evaluate through ``evaluation`` in candidate workspaces from ``workspaces``.
 
         ``clock`` stamps availability observations. ``stage_output`` opens the stream
         each stage's command writes its raw output to while it runs; ``None`` discards it.
         """
+        self._receipts = receipts
         self._control = control
         self._clock = clock
         self._stage_output = stage_output
@@ -115,6 +123,13 @@ class PollingEvaluationExecutor:
         )
 
     async def submit(self, request: EvaluationRequest, *, handle_id: str) -> None:
+        if self._receipts is not None:
+            first = SemanticEvaluationStage.model_validate(request.stages[0].payload)
+            if not self._receipts.begin(
+                handle_id, request, first.snapshot, str(self._workspaces.root.path)
+            ):
+                await self.recover(handle_id)
+                return
         if handle_id in self._tasks or self._lifecycle.observation(handle_id) is not None:
             return
         self._publish(handle_id, ExecutorObservation(state=EvaluationState.QUEUED))
@@ -122,11 +137,15 @@ class PollingEvaluationExecutor:
 
     async def inspect_only(self, handle_id: str) -> ExecutorObservation | None:
         """Read process-local evidence without starting recovery tasks."""
-        return self._lifecycle.observation(handle_id)
+        observed = self._lifecycle.observation(handle_id)
+        task = self._tasks.get(handle_id)
+        if self._receipts is not None and (task is None or task.done()):
+            return self._receipts.observation(handle_id)
+        return observed
 
     async def poll(self, handle_id: str) -> ExecutorPoll:
         """Inspect once from process-local state; never submits, cancels or creates a workspace."""
-        observed = self._lifecycle.observation(handle_id)
+        observed = await self.inspect_only(handle_id)
         if observed is None:
             return ExecutorPoll(phase=PollPhase.UNSUBMITTED)
         if is_finished(observed.state):
@@ -136,7 +155,9 @@ class PollingEvaluationExecutor:
 
     async def recover(self, handle_id: str) -> ExecutorPoll:
         """An empty new process cannot prove that an earlier delivery never began."""
-        if self._lifecycle.observation(handle_id) is None:
+        if await self.inspect_only(handle_id) is None:
+            if self._receipts is not None:
+                raise self._receipts.blocked(handle_id)
             return ExecutorPoll(
                 phase=PollPhase.UNKNOWN,
                 detail="the previous local execution is not present in this process",
@@ -144,13 +165,21 @@ class PollingEvaluationExecutor:
         return await self.poll(handle_id)
 
     async def inspect(self, handle_id: str) -> ExecutorObservation | None:
-        return self._lifecycle.observation(handle_id)
+        return await self.inspect_only(handle_id)
 
     async def wait_for_change(self, handle_id: str, timeout_s: float) -> None:
+        if handle_id not in self._tasks and self._receipts is not None:
+            await self.recover(handle_id)
+            return
         await self._lifecycle.wait_for_change(handle_id, timeout_s)
 
     async def cancel(self, handle_id: str) -> None:
         task = self._tasks.get(handle_id)
+        if self._receipts is not None and (task is None or task.done()):
+            observed = await self.inspect_only(handle_id)
+            if observed is None:
+                raise ExecutorCancellationUnknownError(handle_id)
+            return
         if task is not None and not task.done():
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
@@ -168,6 +197,7 @@ class PollingEvaluationExecutor:
         # never runs its own handler, so only cancel() ends it in a published state.
         active = tuple(handle_id for handle_id, task in self._tasks.items() if not task.done())
         await asyncio.gather(*(self.cancel(handle_id) for handle_id in active))
+        await asyncio.gather(*self._tasks.values(), return_exceptions=True)
 
     async def _run(self, handle_id: str, request: EvaluationRequest) -> None:
         first = SemanticEvaluationStage.model_validate(request.stages[0].payload)
@@ -175,23 +205,14 @@ class PollingEvaluationExecutor:
         results: list[EvaluationStepResult] = []
         failure: str | None = None
         operator_failure: str | None = None
+        interrupted = False
         try:
-            workspace = await self._workspaces.create_measured_candidate(first.snapshot)
+            workspace = await self._acquire_workspace(handle_id, first.snapshot)
 
-            def started() -> None:
-                self._publish(
-                    handle_id,
-                    ExecutorObservation(
-                        state=EvaluationState.RUNNING, current_stage=request.stages[0].name
-                    ),
-                )
-
-            if self._control is None:
-                started()
-            else:
-                self._control.start_execution(started, evaluation_id=request.key)
+            self._execution_started(handle_id, request)
             for step in request.stages:
                 stage = SemanticEvaluationStage.model_validate(step.payload)
+                self._stage_started(handle_id, step.name)
                 with self._open_output(
                     StageRun(handle_id, step.name, purpose=stage.purpose)
                 ) as output:
@@ -219,6 +240,14 @@ class PollingEvaluationExecutor:
                             )
                         ),
                     )
+                )
+                self._record_observation(
+                    handle_id,
+                    ExecutorObservation(
+                        state=EvaluationState.RUNNING,
+                        current_stage=step.name,
+                        stage_results=tuple(results),
+                    ),
                 )
                 if not observed.completed or (
                     evidence.kind in _GATING_KINDS and evidence.outcome is EvidenceOutcome.FAILED
@@ -257,6 +286,9 @@ class PollingEvaluationExecutor:
                     operator_failure=operator_failure,
                 ),
             )
+        except (EvaluationReceiptUnconfirmedError, EvaluationRecoveryBlockedError):
+            interrupted = True
+            raise
         except (asyncio.CancelledError, AgentExecutionCancelledError) as cancelled:
             self._publish(
                 handle_id,
@@ -284,8 +316,53 @@ class PollingEvaluationExecutor:
                 ),
             )
         finally:
-            if workspace is not None:
-                await workspace.discard()
+            if not interrupted:
+                await self._cleanup(handle_id, workspace)
+
+    def _execution_started(self, handle_id: str, request: EvaluationRequest) -> None:
+        def started() -> None:
+            self._publish(
+                handle_id,
+                ExecutorObservation(
+                    state=EvaluationState.RUNNING, current_stage=request.stages[0].name
+                ),
+            )
+
+        if self._control is None:
+            started()
+        else:
+            self._control.start_execution(started, evaluation_id=request.key)
+
+    async def _acquire_workspace(self, handle_id: str, snapshot: str) -> CandidateWorkspace:
+        if self._receipts is not None:
+            await self._receipts.require_acquisition(
+                handle_id,
+                str(self._workspaces.root.path),
+                tuple(self._tasks),
+            )
+            self._receipts.update(handle_id, cleanup_required=True)
+        workspace = await self._workspaces.create_measured_candidate(snapshot)
+        if self._receipts is not None:
+            self._receipts.update(handle_id, workspace=str(workspace.path))
+        return workspace
+
+    def _stage_started(self, handle_id: str, name: str) -> None:
+        if self._receipts is not None:
+            self._receipts.start_stage(handle_id, name)
+
+    async def _cleanup(self, handle_id: str, workspace: CandidateWorkspace | None) -> None:
+        if self._receipts is not None:
+            self._receipts.start_cleanup(handle_id)
+        if workspace is not None:
+            await workspace.discard()
+        if self._receipts is not None:
+            receipt = self._receipts.load(handle_id)
+            if workspace is None and receipt is not None and receipt.cleanup_required:
+                raise self._receipts.blocked(handle_id)
+            self._receipts.update(handle_id, cleaned=True)
+            observed = self._receipts.observation(handle_id)
+            if observed is not None:
+                self._lifecycle.publish(handle_id, observed)
 
     def _open_output(self, run: StageRun) -> AbstractContextManager[OutputSink]:
         if self._stage_output is None:
@@ -385,5 +462,16 @@ class PollingEvaluationExecutor:
             operator_summary=operator_summary,
         )
 
+    def _record_observation(self, handle_id: str, observation: ExecutorObservation) -> None:
+        if self._receipts is not None:
+            self._receipts.observe(handle_id, observation)
+
     def _publish(self, handle_id: str, observation: ExecutorObservation) -> None:
+        self._record_observation(handle_id, observation)
+        if self._receipts is not None and is_finished(observation.state):
+            receipt = self._receipts.load(handle_id)
+            if receipt is not None and not receipt.cleanup_required:
+                self._receipts.update(handle_id, cleaned=True)
+            else:
+                return
         self._lifecycle.publish(handle_id, observation)

@@ -13,11 +13,17 @@ from google.protobuf import descriptor_pb2, descriptor_pool, message_factory
 
 from scripts.host_operations._emit import (
     go_host_call,
+    go_host_mutate,
+    go_host_read,
+    go_host_watch,
     go_registry,
     helper_types,
+    mutate_envelope,
     python_registry,
+    read_envelope,
     receipt_schema,
     typescript_registry,
+    watch_envelope,
 )
 
 _RESERVED_TAG_START = 19000
@@ -25,12 +31,14 @@ _RESERVED_TAG_END = 19999
 _MAX_CAP_MS = 600000
 _MAX_GRACE_MS = 30000
 _READ = 1
+_MUTATION = 2
 _ADMISSION = 3
 _RECONCILE = 3
 _BOUNDED_READ = 2
 _STREAM = 2
-_FILESYSTEM = 3
+_CHECKOUT = 1
 _FAILURE_RESPONSE_TAG = 2
+_HOST_CALL_REQUESTS = frozenset({"PostIntentRequest", "RelaunchRequest", "ChatMessageRequest"})
 
 
 class GenerationError(ValueError):
@@ -56,9 +64,24 @@ class Operation:
         """Catalog reads use the helper handler slots and the neutral receipt union."""
         return self.policy.effect == _READ
 
+    def is_host_call(self) -> bool:
+        """The three HostCall methods keep their API messages and envelope."""
+        return self.request in _HOST_CALL_REQUESTS
+
     def is_admission(self) -> bool:
-        """HostCall methods keep their API messages and share one generated dispatch table."""
+        """Durable admission, whether it rides HostCall or a neutral envelope."""
         return self.policy.effect == _ADMISSION
+
+    def is_mutation(self) -> bool:
+        """Neutral unary writes. HostCall admissions keep their own envelope."""
+        unary = self.policy.cardinality != _STREAM
+        return unary and (
+            self.policy.effect == _MUTATION or (self.is_admission() and not self.is_host_call())
+        )
+
+    def is_watch(self) -> bool:
+        """A server stream. The client keeps it open independently of one panel."""
+        return self.policy.cardinality == _STREAM
 
 
 def _fail(path: str, message: str) -> None:
@@ -118,7 +141,9 @@ def _stream_policy(policy: object, method: object) -> None:
         _fail(name, "invalid first_event_ms")
 
 
-def compile_registry(image: bytes, handlers: tuple[str, ...]) -> tuple[Operation, ...]:
+def compile_registry(
+    image: bytes, handlers: tuple[str, ...], watches: tuple[str, ...] = ()
+) -> tuple[Operation, ...]:
     """Validate metadata, correlation paths and complete static handler registration."""
     files = descriptor_pb2.FileDescriptorSet.FromString(image)
     pool = descriptor_pool.DescriptorPool()
@@ -160,24 +185,40 @@ def compile_registry(image: bytes, handlers: tuple[str, ...]) -> tuple[Operation
                 tuple(correlations),
             )
         )
-    expected = {op.slot for op in operations if op.is_read() and op.policy.executor != _FILESYSTEM}
+    expected = {op.slot for op in operations if op.is_read() and op.policy.executor == _CHECKOUT}
+    expected |= {op.slot for op in operations if op.is_mutation()}
     if len(set(handlers)) != len(handlers) or set(handlers) != expected:
         _fail(
             service.full_name,
             f"missing, duplicate or unknown handlers: expected {sorted(expected)}, got {sorted(handlers)}",
         )
+    expected_watches = {op.slot for op in operations if op.is_watch()}
+    if len(set(watches)) != len(watches) or set(watches) != expected_watches:
+        _fail(
+            service.full_name,
+            f"missing, duplicate or unknown watches: expected {sorted(expected_watches)}, got {sorted(watches)}",
+        )
     return tuple(operations)
 
 
 def compile_outputs(
-    image: bytes, handlers: tuple[str, ...], helper_sources: tuple[str, ...]
+    image: bytes,
+    handlers: tuple[str, ...],
+    helper_sources: tuple[str, ...],
+    watches: tuple[str, ...] = (),
 ) -> dict[str, str]:
     """Compile every projection atomically in memory after validating the complete registry."""
-    operations = compile_registry(image, handlers)
+    operations = compile_registry(image, handlers, watches)
     reads = tuple(op for op in operations if op.is_read())
-    admissions = tuple(op for op in operations if op.is_admission())
-    if len(reads) + len(admissions) != len(operations):
-        _fail("HostOperationsService", "operation effect is neither a read nor a host call")
+    checkout_reads = tuple(op for op in reads if op.policy.executor == _CHECKOUT)
+    mutations = tuple(op for op in operations if op.is_mutation())
+    watch_ops = tuple(op for op in operations if op.is_watch())
+    host_calls = tuple(op for op in operations if op.is_host_call())
+    if len(reads) + len(mutations) + len(watch_ops) + len(host_calls) != len(operations):
+        _fail(
+            "HostOperationsService",
+            "operation effect is neither a read, mutation, watch, or host call",
+        )
     files = descriptor_pb2.FileDescriptorSet.FromString(image)
     failure_file = next(file for file in files.file if file.name == "vibesys/host/v1/failure.proto")
     failures = tuple(
@@ -185,15 +226,31 @@ def compile_outputs(
         for value in failure_file.enum_type[0].value
         if value.number
     )
-    return {
-        "src/server/host_operation_types_generated.py": helper_types(helper_sources, reads),
-        "proto/vibesys/host/v1/admission_receipt_generated.proto": receipt_schema(reads),
-        "libs/vs-proto/src/vs_proto/_generated/host_operations.py": python_registry(
-            reads, admissions, failures
+    neutral = reads + mutations + watch_ops
+    outputs = {
+        "src/server/host_operation_types_generated.py": helper_types(
+            helper_sources, checkout_reads
         ),
-        "gateway/internal/hostoperations/registry_generated.go": go_registry(reads, failures),
-        "gateway/internal/hostoperations/host_call_generated.go": go_host_call(admissions),
+        "proto/vibesys/host/v1/admission_receipt_generated.proto": receipt_schema(neutral),
+        "libs/vs-proto/src/vs_proto/_generated/host_operations.py": python_registry(
+            checkout_reads, host_calls, failures, mutations, watch_ops
+        ),
+        "gateway/internal/hostoperations/registry_generated.go": go_registry(neutral, failures),
+        "gateway/internal/hostoperations/host_call_generated.go": go_host_call(host_calls),
+        "gateway/internal/hostoperations/host_read_generated.go": go_host_read(reads),
+        "proto/vibesys/api/v1/host_read_generated.proto": read_envelope(reads),
         "clients/libs/proto/src/generated/host-operations.ts": typescript_registry(
-            reads, failures, admissions
+            reads, failures, host_calls, mutations, watch_ops
         ),
     }
+    if mutations:
+        outputs["proto/vibesys/api/v1/host_mutate_generated.proto"] = mutate_envelope(mutations)
+        outputs["gateway/internal/hostoperations/host_mutate_generated.go"] = go_host_mutate(
+            mutations
+        )
+    if watch_ops:
+        outputs["proto/vibesys/api/v1/host_watch_generated.proto"] = watch_envelope(watch_ops)
+        outputs["gateway/internal/hostoperations/host_watch_generated.go"] = go_host_watch(
+            watch_ops
+        )
+    return outputs

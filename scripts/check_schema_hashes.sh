@@ -30,7 +30,8 @@ print(API_SCHEMA_HASH)
 print(STORE_SCHEMA_HASH)
 print(HOST_SCHEMA_HASH)
 PYTHON
-pnpm --dir clients --filter @vibesys/proto build
+# The solution config references the library build; check and emit it once.
+pnpm --dir clients --filter @vibesys/proto check
 node --input-type=module - <<'JS' > "$work/typescript"
 import {API_SCHEMA_HASH, STORE_SCHEMA_HASH, HOST_SCHEMA_HASH} from './clients/libs/proto/dist/index.js';
 console.log(API_SCHEMA_HASH);

@@ -74,6 +74,7 @@ if TYPE_CHECKING:
     from contextlib import AbstractContextManager
     from pathlib import Path
 
+    from vs_runtime._evaluation_recovery import EvaluationWorkspaceAcquisitions
     from vs_runtime._measurement_progress import StageOutputOpener
     from vs_runtime._run_control import RunControlChannel
     from vs_runtime.contracts import Checkout, MeasuredCheckouts
@@ -160,6 +161,7 @@ class SemanticSlurmEvaluationExecutor:
         stage_output: StageOutputOpener | None = None,
         root_proof: WorkspaceRootProof | None = None,
         control: RunControlChannel | None = None,
+        recovery: EvaluationWorkspaceAcquisitions | None = None,
     ) -> None:
         """Bind external Slurm policy to semantic evaluation state.
 
@@ -175,7 +177,12 @@ class SemanticSlurmEvaluationExecutor:
 
         ``root_proof`` is the run's workspace-root probe; no evaluation is submitted
         before it proves the root, and none at all once it failed.
+
+        ``recovery`` is the dormant replay acquisition service. Its durable manifest
+        guards inherited backing before any acquisition; existing positional callers
+        keep their current lifecycle until the atomic production cutover.
         """
+        self._acquisitions = recovery
         self._control = control
         self._root_proof = root_proof
         self._stage_failure_text = stage_failure_text
@@ -243,7 +250,7 @@ class SemanticSlurmEvaluationExecutor:
                 message = f"candidate revision {record.snapshot!r} is not a commit of this run"
                 raise ExecutorRejectedError(message)
             self._namespace.save(self._path(handle_id), record)
-        execution = await self._execution(handle_id, record, submitting=True)
+        execution = await self._execution(handle_id, record, fresh=existing is None)
         await execution.executor.submit(provider_request, handle_id=handle_id)
 
     async def inspect_only(self, handle_id: str) -> ExecutorObservation | None:
@@ -251,9 +258,7 @@ class SemanticSlurmEvaluationExecutor:
         record = self._load(handle_id)
         if record is None:
             return None
-        execution = self._executions.get(handle_id)
-        executor = execution.executor if execution is not None else self._availability
-        observed = await executor.inspect_only(handle_id)
+        observed = await self._retained_executor(handle_id).inspect_only(handle_id)
         return (
             None
             if observed is None
@@ -265,9 +270,7 @@ class SemanticSlurmEvaluationExecutor:
         record = self._load(handle_id)
         if record is None:
             return ExecutorPoll(phase=PollPhase.UNSUBMITTED)
-        execution = self._executions.get(handle_id)
-        executor = execution.executor if execution is not None else self._availability
-        polled = await executor.poll(handle_id)
+        polled = await self._retained_executor(handle_id).poll(handle_id)
         if polled.terminal is None:
             return polled
         return polled.model_copy(
@@ -277,15 +280,26 @@ class SemanticSlurmEvaluationExecutor:
         )
 
     async def recover(self, handle_id: str) -> ExecutorPoll:
-        """The durable submission and provider identity make pure polling authoritative."""
+        """Inspect retained provider work without trusting a missing semantic request."""
+        if self._load(handle_id) is None:
+            provider = await self._availability.poll(handle_id)
+            if provider.phase is not PollPhase.UNSUBMITTED:
+                return ExecutorPoll(
+                    phase=PollPhase.UNKNOWN,
+                    detail="retained Slurm work is missing its semantic evaluation request",
+                )
+            return provider
         return await self.poll(handle_id)
 
     async def inspect(self, handle_id: str) -> ExecutorObservation | None:
-        """Recover the candidate worktree and provider handle on demand."""
+        """Inspect retained work by identity without reacquiring its backing."""
+        execution = self._executions.get(handle_id)
+        if execution is None:
+            polled = await self.poll(handle_id)
+            return polled.terminal or await self.inspect_only(handle_id)
         record = self._load(handle_id)
         if record is None:
             return None
-        execution = await self._execution(handle_id, record)
         observed = await execution.executor.inspect(handle_id)
         return (
             None
@@ -293,21 +307,23 @@ class SemanticSlurmEvaluationExecutor:
             else self._semantic_observation(handle_id, record.request, observed)
         )
 
+    def _retained_executor(self, handle_id: str) -> SlurmEvaluationExecutor:
+        execution = self._executions.get(handle_id)
+        return self._availability if execution is None else execution.executor
+
     async def wait_for_change(self, handle_id: str, timeout_s: float) -> None:
-        """Wait boundedly for provider progress when the handle is known."""
-        record = self._load(handle_id)
-        if record is None:
-            return
-        execution = await self._execution(handle_id, record)
-        await execution.executor.wait_for_change(handle_id, timeout_s)
+        """A bounded wait needs no writable candidate or new recovery task."""
+        execution = self._executions.get(handle_id)
+        if execution is None:
+            # Retained work has no process-local notification producer. The
+            # injected timer paces the caller's next authoritative inspection.
+            await self._sleeper.sleep(max(0, timeout_s))
+        else:
+            await execution.executor.wait_for_change(handle_id, timeout_s)
 
     async def cancel(self, handle_id: str) -> None:
-        """Cancel a provider job, recovering its durable handle if needed."""
-        record = self._load(handle_id)
-        if record is None:
-            return
-        execution = await self._execution(handle_id, record)
-        await execution.executor.cancel(handle_id)
+        """Cancel the recorded provider identity without acquiring candidate backing."""
+        await self._retained_executor(handle_id).cancel(handle_id)
 
     async def close(self) -> None:
         """Refuse new submissions, then release candidate worktrees once provider tasks settled.
@@ -346,16 +362,25 @@ class SemanticSlurmEvaluationExecutor:
         return _DurableSemanticSubmission(request=request, snapshot=next(iter(snapshots)))
 
     async def _execution(
-        self, handle_id: str, record: _DurableSemanticSubmission, *, submitting: bool = False
+        self,
+        handle_id: str,
+        record: _DurableSemanticSubmission,
+        *,
+        fresh: bool,
     ) -> _Execution:
         async with self._lock:
             existing = self._executions.get(handle_id)
             if existing is not None:
                 return existing
-            if submitting:
-                # ``close`` may have run while this submission awaited: an executor made
-                # now would never be closed, and its job never cancelled.
-                self._refuse_if_closing(handle_id)
+            # Closing during admission must not leave an unowned candidate executor.
+            self._refuse_if_closing(handle_id)
+            if self._acquisitions is not None:
+                await self._acquisitions.require(
+                    handle_id,
+                    str(self._workspaces.root.path),
+                    fresh=fresh,
+                    live=tuple(self._executions),
+                )
             workspace = await self._workspaces.create_measured_candidate(record.snapshot)
             executor = self._make_executor(
                 workspace.path,

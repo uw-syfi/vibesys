@@ -8,7 +8,7 @@ is light (``tests/architecture/test_light_entrypoints.py``).
 
 Public surface: ``FileProjects``, ``ProjectStopIntents``, ``OsDirectories``,
 ``SubprocessRunLauncher``,
-``SubprocessRunPreflight``, ``LoginStarter`` with ``LoginBounds`` and ``login_instruction``,
+``SubprocessRunPreflight``, ``LoginStarter`` and ``HeldLogin`` with ``LoginBounds`` and ``login_instruction``,
 ``read_task_goal``,
 ``GitCheckoutProbe``, ``OsConfigFiles``, and ``StoreLogReader`` with ``run_streams_directory``.
 """
@@ -841,6 +841,37 @@ class LoginBounds:
     """How long a login may stay open before it is ended."""
 
 
+class HeldLogin:
+    """A login that stays up until it ends or ``cancel`` stops its process group."""
+
+    def __init__(
+        self,
+        threads: Threads,
+        result: LoginStarted | LoginUnavailable,
+        process: PipedProcess | None,
+    ) -> None:
+        """Remember ``result`` and, when ``process`` is running, when it has been reaped."""
+        self.result = result
+        self._process = process
+        self._finished = threads.event()
+        if process is None:
+            self._finished.set()
+
+    def cancel(self) -> None:
+        """Stop the login's process group. A login that never started is unchanged."""
+        process = self._process
+        if process is not None:
+            process.terminate_group()
+
+    def wait(self) -> None:
+        """Block until the login process has been reaped."""
+        self._finished.wait()
+
+    def mark_finished(self) -> None:
+        """Record that the process group has been reaped."""
+        self._finished.set()
+
+
 class LoginStarter:
     """Runs a login command and reports what it asked the person to do."""
 
@@ -863,13 +894,27 @@ class LoginStarter:
 
     def start(self, argv: tuple[str, ...]) -> LoginStarted | LoginUnavailable:
         """Run ``argv`` and answer once it has shown its page and code, ended, or run out of time."""
+        return self.hold(argv).result
+
+    def refuse(self, result: LoginUnavailable) -> HeldLogin:
+        """A login that was not started, already finished."""
+        return HeldLogin(self._threads, result, None)
+
+    def hold(self, argv: tuple[str, ...]) -> HeldLogin:
+        """Start ``argv`` and keep the child until ``HeldLogin.cancel`` or its lifetime ends."""
         try:
             process = self._processes.start(argv, env=self._environment(), merge_stderr=True)
         except OSError as error:
-            return _failed(f"could not run {argv[0]}: {error.strerror or error}")
+            return HeldLogin(
+                self._threads, _failed(f"could not run {argv[0]}: {error.strerror or error}"), None
+            )
         output = _Output(self._threads)
+        held = HeldLogin(self._threads, LoginStarted(instruction=None), process)
         self._threads.spawn(lambda: _read(process, output), name="login-output")
-        self._threads.spawn(lambda: _reap(process, self._bounds.lifetime), name="login-reaper")
+        self._threads.spawn(
+            lambda: _reap(process, self._bounds.lifetime, held.mark_finished),
+            name="login-reaper",
+        )
         with output.condition:
             output.condition.wait_for(
                 lambda: output.url is not None or output.ended, self._bounds.page_wait
@@ -880,8 +925,10 @@ class LoginStarter:
                 )
             instruction = login_instruction(output.url, output.code)
             if instruction is None and output.url is None and output.ended and output.first_line:
-                return _failed(output.first_line)
-        return LoginStarted(instruction=instruction)
+                held.result = _failed(output.first_line)
+                return held
+        held.result = LoginStarted(instruction=instruction)
+        return held
 
 
 def _failed(detail: str) -> LoginUnavailable:
@@ -899,7 +946,7 @@ def _read(process: PipedProcess, output: _Output) -> None:
         output.end()
 
 
-def _reap(process: PipedProcess, lifetime: float) -> None:
+def _reap(process: PipedProcess, lifetime: float, finished: Callable[[], None]) -> None:
     """Wait for the child so it is reaped, and end its group if it outlives ``lifetime``."""
     try:
         process.wait(lifetime)
@@ -910,3 +957,5 @@ def _reap(process: PipedProcess, lifetime: float) -> None:
         except ProcessTimeoutError:
             process.kill_group()
             process.wait(5.0)
+    finally:
+        finished()

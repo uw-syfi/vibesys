@@ -1,5 +1,12 @@
 """Durable keyed replay on the current atomic store; no strategy-specific imports."""
 
+from vs_runtime._evaluation_recovery import (
+    EvaluationReceiptUnconfirmedError,
+    EvaluationRecoveryBlockedError,
+    EvaluationWorkspaceAcquisitions,
+    EvaluationWriterReconciliation,
+    LocalEvaluationReceipts,
+)
 from vs_runtime._replay_evaluation import EvaluationReplayExecutor, replay_measurement_plan
 from vs_runtime._replay_executors import ReplayExecutors
 from vs_runtime._replay_fake import FakeReplayExecutor
@@ -40,8 +47,13 @@ from vs_runtime._replay_workspaces import WorkspaceReplayExecutor
 
 __all__ = [
     "REPLAY_STORE_SCHEMA_VERSION",
+    "EvaluationReceiptUnconfirmedError",
+    "EvaluationRecoveryBlockedError",
     "EvaluationReplayExecutor",
+    "EvaluationWorkspaceAcquisitions",
+    "EvaluationWriterReconciliation",
     "FakeReplayExecutor",
+    "LocalEvaluationReceipts",
     "RegisteredReplayExecutor",
     "ReplayAbsent",
     "ReplayAgentReply",

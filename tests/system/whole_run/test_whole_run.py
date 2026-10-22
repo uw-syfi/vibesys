@@ -423,7 +423,10 @@ class _Client:
     def follow(self, runtime: ServerRuntime) -> None:
         assert runtime.transport_listening.wait(HANG_GUARD_S)
         while not self.ended:
-            assert self.connections < _MAX_CONNECTIONS, self
+            assert self.connections < _MAX_CONNECTIONS, (
+                f"client exhausted {_MAX_CONNECTIONS} connection attempts without a terminal event"
+            )
+            self.connections += 1
             try:
                 connection = operator_dialer(self.network).connect(
                     str(self.socket_path), HANG_GUARD_S
@@ -431,8 +434,7 @@ class _Client:
             except ConnectionRefusedError:
                 return  # the server closed between connections: read_log takes over
             except ConnectionError:
-                continue  # the hello itself failed: reconnect, this was not a live connection
-            self.connections += 1
+                continue  # the hello itself failed: retry within the same attempt bound
             try:
                 self._read_until_end(connection)
             except ConnectionError:
@@ -468,6 +470,55 @@ class _Client:
     @property
     def ended(self) -> bool:
         return any(event["type"] in _TERMINAL for event in self.events)
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize("kind", [LinkFaultKind.RESET, LinkFaultKind.DROP])
+def test_client_bounds_persistent_hello_failures(
+    tmp_path: Path, sim: Sim, kind: LinkFaultKind
+) -> None:
+    threads = SimThreads(sim.clock)
+
+    def main() -> None:
+        platform = sim.platform(
+            threads,
+            processes=FakeProcesses(_no_git_remote, pass_time=threads.sleep),
+            signaller=FakeProcessSignaller(set()),
+            network_faults=tuple(
+                LinkFault(kind, connection=attempt, before_send=1)
+                for attempt in range(1, _MAX_CONNECTIONS + 2)
+            ),
+        )
+        socket_path = tmp_path / "control.sock"
+        listener = platform.network.listen(str(socket_path))
+        runs = default_runs(
+            LaunchSettings(
+                timing=RunTiming(platform.clock, _LEASE_S, threads),
+                processes=platform.processes,
+                piped_processes=FakePipedProcessLauncher(),
+                blocking=platform.blocking,
+                network=platform.network,
+            )
+        )
+        runtime = ServerRuntime(
+            run_id=_RUN_ID,
+            runs=runs,
+            socket_path=socket_path,
+            control_key=CONTROL_KEY,
+            platform=platform,
+        )
+        runtime.transport_listening.set()
+        client = _Client(platform.network, socket_path)
+        try:
+            with pytest.raises(AssertionError, match=r"exhausted .* connection attempts"):
+                client.follow(runtime)
+            assert client.connections == _MAX_CONNECTIONS
+            assert not client.ended
+        finally:
+            listener.close()
+            runtime.integration.close()
+
+    threads.run(main)
 
 
 _SMALL_BUFFER_BYTES = 4096

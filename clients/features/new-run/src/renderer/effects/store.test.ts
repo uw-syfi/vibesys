@@ -453,7 +453,7 @@ function dirtyBridge(paths: readonly string[]): NewRunBridge {
   };
 }
 
-test('a dirty project is worded for this screen from the typed fact, naming the project and its paths, and offers Check again', async () => {
+test('a dirty project shows the host detail and the host fix, with no app-written sentence', async () => {
   const state = await checked(dirtyBridge(['a.py', 'b.py']));
 
   const item = readiness(state).find(each => each.id === 'project_clean');
@@ -462,11 +462,41 @@ test('a dirty project is worded for this screen from the typed fact, naming the 
     id: 'project_clean',
     state: 'fail',
     label: 'Project changes',
-    detail:
-      'queue-rs has uncommitted changes (a.py, b.py). Commit or discard them in the project, then check again.',
-    fix: {kind: 'recheck'},
+    detail: '2 uncommitted path(s) in the project',
   });
+  expect(item?.detail).not.toContain('Commit or discard');
   expect(startBlocked(state)).toBe('Fix the items marked above to start.');
+});
+
+test('a project the host accepts is startable from New run', async () => {
+  const bridge: NewRunBridge = {
+    ...fakeBridge(),
+    preflight: () =>
+      ok({
+        kind: 'offered',
+        value: {
+          checks: [
+            {
+              id: 'project_clean',
+              state: 'ok',
+              detail: '3 untracked path(s); the host accepts this project',
+            },
+          ],
+          roles: null,
+          backend: null,
+        },
+      }),
+  };
+
+  const state = await checked(bridge);
+
+  expect(readiness(state).find(item => item.id === 'project_clean')).toEqual({
+    id: 'project_clean',
+    state: 'ok',
+    label: 'Project changes',
+    detail: '3 untracked path(s); the host accepts this project',
+  });
+  expect(startBlocked(state)).toBeUndefined();
 });
 
 /** A New run whose project changes under it: `change` edits what the project declares. */
@@ -527,13 +557,14 @@ test('Check again clears a task the project no longer has, answering it when the
   expect(only.form.task).toBe('mpmc-cpu');
 });
 
-test('a long list of dirty paths is cut with a count of the rest', async () => {
+test('a dirty project shows the host detail unchanged', async () => {
   const paths = ['a', 'b', 'c', 'd', 'e', 'f', 'g'];
   const state = await checked(dirtyBridge(paths));
 
   const item = readiness(state).find(each => each.id === 'project_clean');
 
-  expect(item?.detail).toContain('(a, b, c, d, e, and 2 more)');
+  expect(item?.detail).toBe('7 uncommitted path(s) in the project');
+  expect(item?.detail).not.toContain('Commit or discard');
 });
 
 /** A bridge whose preflight fails the run's settings for `cause` (or none), as a helper reports it. */

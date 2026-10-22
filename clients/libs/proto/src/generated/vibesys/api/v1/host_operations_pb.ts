@@ -7,14 +7,14 @@ import { fileDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
 import type { ChatMessageRequestSchema, ChatMessageResponseSchema, PostIntentRequestSchema, PostIntentResponseSchema, RelaunchRequestSchema, RelaunchResponseSchema } from "./host_call_pb.js";
 import { file_vibesys_api_v1_host_call } from "./host_call_pb.js";
 import { file_vibesys_host_v1_operation_options } from "../../host/v1/operation_options_pb.js";
-import type { DescribeMachineRequestSchema, DescribeMachineResponseSchema, GetTaskGoalRequestSchema, GetTaskGoalResponseSchema, ListComputeRequestSchema, ListComputeResponseSchema, ListExamplesRequestSchema, ListExamplesResponseSchema, ListHarnessesRequestSchema, ListHarnessesResponseSchema, ListTasksRequestSchema, ListTasksResponseSchema, PreflightRunRequestSchema, PreflightRunResponseSchema } from "../../host/v1/operations_pb.js";
+import type { CompletePathsRequestSchema, CompletePathsResponseSchema, CopyProjectRequestSchema, CopyProjectResponseSchema, CreateExampleRequestSchema, CreateExampleResponseSchema, DescribeMachineRequestSchema, DescribeMachineResponseSchema, GetTaskGoalRequestSchema, GetTaskGoalResponseSchema, InspectCandidateRequestSchema, InspectCandidateResponseSchema, InspectDestinationRequestSchema, InspectDestinationResponseSchema, ListComputeRequestSchema, ListComputeResponseSchema, ListExamplesRequestSchema, ListExamplesResponseSchema, ListHarnessesRequestSchema, ListHarnessesResponseSchema, ListTasksRequestSchema, ListTasksResponseSchema, LoginRequestSchema, LoginResponseSchema, PreflightRunRequestSchema, PreflightRunResponseSchema, PutClusterRequestSchema, PutClusterResponseSchema, RemoveClusterRequestSchema, RemoveClusterResponseSchema, StartRunRequestSchema, StartRunResponseSchema, TestClusterRequestSchema, TestClusterResponseSchema } from "../../host/v1/operations_pb.js";
 import { file_vibesys_host_v1_operations } from "../../host/v1/operations_pb.js";
 
 /**
  * Describes the file vibesys/api/v1/host_operations.proto.
  */
 export const file_vibesys_api_v1_host_operations: GenFile = /*@__PURE__*/
-  fileDesc("CiR2aWJlc3lzL2FwaS92MS9ob3N0X29wZXJhdGlvbnMucHJvdG8SDnZpYmVzeXMuYXBpLnYxMo0LChVIb3N0T3BlcmF0aW9uc1NlcnZpY2USgAEKCUxpc3RUYXNrcxIhLnZpYmVzeXMuaG9zdC52MS5MaXN0VGFza3NSZXF1ZXN0GiIudmliZXN5cy5ob3N0LnYxLkxpc3RUYXNrc1Jlc3BvbnNlIizK8xgoCAoQkE4YiCcgASgCMAE4AUoGCgEBEgEBUApYCmIKdGFza3MubGlzdBKQAQoNTGlzdEhhcm5lc3NlcxIlLnZpYmVzeXMuaG9zdC52MS5MaXN0SGFybmVzc2VzUmVxdWVzdBomLnZpYmVzeXMuaG9zdC52MS5MaXN0SGFybmVzc2VzUmVzcG9uc2UiMMrzGCwICxCQThiIJyABKAIwATgBSgYKAQESAQFQC1gLYg5oYXJuZXNzZXMubGlzdBKMAQoMTGlzdEV4YW1wbGVzEiQudmliZXN5cy5ob3N0LnYxLkxpc3RFeGFtcGxlc1JlcXVlc3QaJS52aWJlc3lzLmhvc3QudjEuTGlzdEV4YW1wbGVzUmVzcG9uc2UiL8rzGCsIDBCQThiIJyABKAIwATgBSgYKAQESAQFQDFgMYg1leGFtcGxlcy5saXN0Eo0BCgtHZXRUYXNrR29hbBIjLnZpYmVzeXMuaG9zdC52MS5HZXRUYXNrR29hbFJlcXVlc3QaJC52aWJlc3lzLmhvc3QudjEuR2V0VGFza0dvYWxSZXNwb25zZSIzyvMYLwgNEJBOGIgnIAEoAjABOAFKBgoBARIBAVANWA1iEXByb2plY3QudGFza19nb2FsEpkBCg9EZXNjcmliZU1hY2hpbmUSJy52aWJlc3lzLmhvc3QudjEuRGVzY3JpYmVNYWNoaW5lUmVxdWVzdBooLnZpYmVzeXMuaG9zdC52MS5EZXNjcmliZU1hY2hpbmVSZXNwb25zZSIzyvMYLwgOEKjDARiIJyABKAIwATgBSgYKAQESAQFQDlgOYhBtYWNoaW5lLmRlc2NyaWJlEogBCgtMaXN0Q29tcHV0ZRIjLnZpYmVzeXMuaG9zdC52MS5MaXN0Q29tcHV0ZVJlcXVlc3QaJC52aWJlc3lzLmhvc3QudjEuTGlzdENvbXB1dGVSZXNwb25zZSIuyvMYKggPEJBOGIgnIAEoAjABOAFKBgoBARIBAVAPWA9iDGNvbXB1dGUubGlzdBKNAQoMUHJlZmxpZ2h0UnVuEiQudmliZXN5cy5ob3N0LnYxLlByZWZsaWdodFJ1blJlcXVlc3QaJS52aWJlc3lzLmhvc3QudjEuUHJlZmxpZ2h0UnVuUmVzcG9uc2UiMMrzGCwIEBDo+wMYiCcgASgCMAE4AUoGCgEBEgEBUBBYEGINcnVuLnByZWZsaWdodBKCAQoKUG9zdEludGVudBIhLnZpYmVzeXMuYXBpLnYxLlBvc3RJbnRlbnRSZXF1ZXN0GiIudmliZXN5cy5hcGkudjEuUG9zdEludGVudFJlc3BvbnNlIi3K8xgpCBQQkE4YiCcgAygDMAE4AUoGCgEDEgEBUAJYAWILcG9zdC5pbnRlbnQScgoIUmVsYXVuY2gSHy52aWJlc3lzLmFwaS52MS5SZWxhdW5jaFJlcXVlc3QaIC52aWJlc3lzLmFwaS52MS5SZWxhdW5jaFJlc3BvbnNlIiPK8xgfCBUQsOoBGIgnIAMoAzABOAFQA1gDYghyZWxhdW5jaBKOAQoLQ2hhdE1lc3NhZ2USIi52aWJlc3lzLmFwaS52MS5DaGF0TWVzc2FnZVJlcXVlc3QaIy52aWJlc3lzLmFwaS52MS5DaGF0TWVzc2FnZVJlc3BvbnNlIjbK8xgyCBYQkE4YiCcgAygDMAE4AUoGCgEEEgECSgYKAQMSAQFQBFgEYgxjaGF0Lm1lc3NhZ2VCPVo7Z2l0aHViLmNvbS91dy1zeWZpL3ZpYmVzeXMvZ2F0ZXdheS9nZW4vdmliZXN5cy9hcGkvdjE7YXBpdjFiBnByb3RvMw", [file_vibesys_api_v1_host_call, file_vibesys_host_v1_operation_options, file_vibesys_host_v1_operations]);
+  fileDesc("CiR2aWJlc3lzL2FwaS92MS9ob3N0X29wZXJhdGlvbnMucHJvdG8SDnZpYmVzeXMuYXBpLnYxMsQWChVIb3N0T3BlcmF0aW9uc1NlcnZpY2USgAEKCUxpc3RUYXNrcxIhLnZpYmVzeXMuaG9zdC52MS5MaXN0VGFza3NSZXF1ZXN0GiIudmliZXN5cy5ob3N0LnYxLkxpc3RUYXNrc1Jlc3BvbnNlIizK8xgoCAoQkE4YiCcgASgCMAE4AUoGCgEBEgEBUApYCmIKdGFza3MubGlzdBKQAQoNTGlzdEhhcm5lc3NlcxIlLnZpYmVzeXMuaG9zdC52MS5MaXN0SGFybmVzc2VzUmVxdWVzdBomLnZpYmVzeXMuaG9zdC52MS5MaXN0SGFybmVzc2VzUmVzcG9uc2UiMMrzGCwICxCQThiIJyABKAIwATgBSgYKAQESAQFQC1gLYg5oYXJuZXNzZXMubGlzdBKMAQoMTGlzdEV4YW1wbGVzEiQudmliZXN5cy5ob3N0LnYxLkxpc3RFeGFtcGxlc1JlcXVlc3QaJS52aWJlc3lzLmhvc3QudjEuTGlzdEV4YW1wbGVzUmVzcG9uc2UiL8rzGCsIDBCQThiIJyABKAIwATgBSgYKAQESAQFQDFgMYg1leGFtcGxlcy5saXN0Eo0BCgtHZXRUYXNrR29hbBIjLnZpYmVzeXMuaG9zdC52MS5HZXRUYXNrR29hbFJlcXVlc3QaJC52aWJlc3lzLmhvc3QudjEuR2V0VGFza0dvYWxSZXNwb25zZSIzyvMYLwgNEJBOGIgnIAEoAjABOAFKBgoBARIBAVANWA1iEXByb2plY3QudGFza19nb2FsEpkBCg9EZXNjcmliZU1hY2hpbmUSJy52aWJlc3lzLmhvc3QudjEuRGVzY3JpYmVNYWNoaW5lUmVxdWVzdBooLnZpYmVzeXMuaG9zdC52MS5EZXNjcmliZU1hY2hpbmVSZXNwb25zZSIzyvMYLwgOEKjDARiIJyABKAIwATgBSgYKAQESAQFQDlgOYhBtYWNoaW5lLmRlc2NyaWJlEogBCgtMaXN0Q29tcHV0ZRIjLnZpYmVzeXMuaG9zdC52MS5MaXN0Q29tcHV0ZVJlcXVlc3QaJC52aWJlc3lzLmhvc3QudjEuTGlzdENvbXB1dGVSZXNwb25zZSIuyvMYKggPEJBOGIgnIAEoAjABOAFKBgoBARIBAVAPWA9iDGNvbXB1dGUubGlzdBKNAQoMUHJlZmxpZ2h0UnVuEiQudmliZXN5cy5ob3N0LnYxLlByZWZsaWdodFJ1blJlcXVlc3QaJS52aWJlc3lzLmhvc3QudjEuUHJlZmxpZ2h0UnVuUmVzcG9uc2UiMMrzGCwIEBDo+wMYiCcgASgCMAE4AUoGCgEBEgEBUBBYEGINcnVuLnByZWZsaWdodBKkAQoQSW5zcGVjdENhbmRpZGF0ZRIoLnZpYmVzeXMuaG9zdC52MS5JbnNwZWN0Q2FuZGlkYXRlUmVxdWVzdBopLnZpYmVzeXMuaG9zdC52MS5JbnNwZWN0Q2FuZGlkYXRlUmVzcG9uc2UiO8rzGDcIERCQThiIJyABKAIwATgCSgYKAQESAQFKBgoBAxIBAlARWBFiEWluc3BlY3QuY2FuZGlkYXRlEpkBCg1Db21wbGV0ZVBhdGhzEiUudmliZXN5cy5ob3N0LnYxLkNvbXBsZXRlUGF0aHNSZXF1ZXN0GiYudmliZXN5cy5ob3N0LnYxLkNvbXBsZXRlUGF0aHNSZXNwb25zZSI5yvMYNQgSEIgnGIgnIAEoAjABOANKBgoBARIBAVASWBJiF3BhdGhzLmNvbXBsZXRlX3JlZ2lzdHJ5EoMBCgVMb2dpbhIdLnZpYmVzeXMuaG9zdC52MS5Mb2dpblJlcXVlc3QaHi52aWJlc3lzLmhvc3QudjEuTG9naW5SZXNwb25zZSI5yvMYNQgoEMDPJBiIJyADKAMwAjgBQKjDAUoGCgEBEgEBUChYKGISYWdlbnRfbG9naW5zLnN0YXJ0MAESpQEKEkluc3BlY3REZXN0aW5hdGlvbhIqLnZpYmVzeXMuaG9zdC52MS5JbnNwZWN0RGVzdGluYXRpb25SZXF1ZXN0GisudmliZXN5cy5ob3N0LnYxLkluc3BlY3REZXN0aW5hdGlvblJlc3BvbnNlIjbK8xgyCBcQkE4YiCcgASgCMAE4AUoGCgEBEgEBUBdYF2IUZXhhbXBsZXMuZGVzdGluYXRpb24SkQEKDUNyZWF0ZUV4YW1wbGUSJS52aWJlc3lzLmhvc3QudjEuQ3JlYXRlRXhhbXBsZVJlcXVlc3QaJi52aWJlc3lzLmhvc3QudjEuQ3JlYXRlRXhhbXBsZVJlc3BvbnNlIjHK8xgtCCIQwKkHGIgnIAIoAzABOAFKBgoBARIBAVAiWCJiDmNyZWF0ZS5leGFtcGxlEokBCgtDb3B5UHJvamVjdBIjLnZpYmVzeXMuaG9zdC52MS5Db3B5UHJvamVjdFJlcXVlc3QaJC52aWJlc3lzLmhvc3QudjEuQ29weVByb2plY3RSZXNwb25zZSIvyvMYKwgjEMCpBxiIJyACKAMwATgBSgYKAQESAQFQI1gjYgxjb3B5LnByb2plY3QShQEKClB1dENsdXN0ZXISIi52aWJlc3lzLmhvc3QudjEuUHV0Q2x1c3RlclJlcXVlc3QaIy52aWJlc3lzLmhvc3QudjEuUHV0Q2x1c3RlclJlc3BvbnNlIi7K8xgqCB8Q6PsDGIgnIAIoAzABOAFKBgoBARIBAVAfWB9iC3B1dC5jbHVzdGVyEpABCg1SZW1vdmVDbHVzdGVyEiUudmliZXN5cy5ob3N0LnYxLlJlbW92ZUNsdXN0ZXJSZXF1ZXN0GiYudmliZXN5cy5ob3N0LnYxLlJlbW92ZUNsdXN0ZXJSZXNwb25zZSIwyvMYLAggEJBOGIgnIAIoAzABOAFKBgoBARIBAVAgWCBiDnJlbW92ZS5jbHVzdGVyEokBCgtUZXN0Q2x1c3RlchIjLnZpYmVzeXMuaG9zdC52MS5UZXN0Q2x1c3RlclJlcXVlc3QaJC52aWJlc3lzLmhvc3QudjEuVGVzdENsdXN0ZXJSZXNwb25zZSIvyvMYKwghEOj7AxiIJyACKAMwATgBSgYKAQESAQFQIVghYgx0ZXN0LmNsdXN0ZXISfQoIU3RhcnRSdW4SIC52aWJlc3lzLmhvc3QudjEuU3RhcnRSdW5SZXF1ZXN0GiEudmliZXN5cy5ob3N0LnYxLlN0YXJ0UnVuUmVzcG9uc2UiLMrzGCgIJBDg1AMYiCcgAygDMAE4AUoGCgEBEgEBUCRYJGIJc3RhcnQucnVuEoIBCgpQb3N0SW50ZW50EiEudmliZXN5cy5hcGkudjEuUG9zdEludGVudFJlcXVlc3QaIi52aWJlc3lzLmFwaS52MS5Qb3N0SW50ZW50UmVzcG9uc2UiLcrzGCkIFBCQThiIJyADKAMwATgBSgYKAQMSAQFQAlgBYgtwb3N0LmludGVudBJyCghSZWxhdW5jaBIfLnZpYmVzeXMuYXBpLnYxLlJlbGF1bmNoUmVxdWVzdBogLnZpYmVzeXMuYXBpLnYxLlJlbGF1bmNoUmVzcG9uc2UiI8rzGB8IFRCw6gEYiCcgAygDMAE4AVADWANiCHJlbGF1bmNoEo4BCgtDaGF0TWVzc2FnZRIiLnZpYmVzeXMuYXBpLnYxLkNoYXRNZXNzYWdlUmVxdWVzdBojLnZpYmVzeXMuYXBpLnYxLkNoYXRNZXNzYWdlUmVzcG9uc2UiNsrzGDIIFhCQThiIJyADKAMwATgBSgYKAQQSAQJKBgoBAxIBAVAEWARiDGNoYXQubWVzc2FnZUI9WjtnaXRodWIuY29tL3V3LXN5ZmkvdmliZXN5cy9nYXRld2F5L2dlbi92aWJlc3lzL2FwaS92MTthcGl2MWIGcHJvdG8z", [file_vibesys_api_v1_host_call, file_vibesys_host_v1_operation_options, file_vibesys_host_v1_operations]);
 
 /**
  * Descriptor-only registry. No public gRPC endpoint is registered for this service.
@@ -77,6 +77,96 @@ export const HostOperationsService: GenService<{
     methodKind: "unary";
     input: typeof PreflightRunRequestSchema;
     output: typeof PreflightRunResponseSchema;
+  },
+  /**
+   * Setup reads. They do not require a saved checkout: the candidate path or
+   * typed prefix is the input, and Hello remains the gateway schema handshake.
+   *
+   * @generated from rpc vibesys.api.v1.HostOperationsService.InspectCandidate
+   */
+  inspectCandidate: {
+    methodKind: "unary";
+    input: typeof InspectCandidateRequestSchema;
+    output: typeof InspectCandidateResponseSchema;
+  },
+  /**
+   * @generated from rpc vibesys.api.v1.HostOperationsService.CompletePaths
+   */
+  completePaths: {
+    methodKind: "unary";
+    input: typeof CompletePathsRequestSchema;
+    output: typeof CompletePathsResponseSchema;
+  },
+  /**
+   * Login is owned by the host until completion or an explicit cancel. Closing a
+   * panel drops the client's subscription and does not abort this stream.
+   *
+   * @generated from rpc vibesys.api.v1.HostOperationsService.Login
+   */
+  login: {
+    methodKind: "server_streaming";
+    input: typeof LoginRequestSchema;
+    output: typeof LoginResponseSchema;
+  },
+  /**
+   * @generated from rpc vibesys.api.v1.HostOperationsService.InspectDestination
+   */
+  inspectDestination: {
+    methodKind: "unary";
+    input: typeof InspectDestinationRequestSchema;
+    output: typeof InspectDestinationResponseSchema;
+  },
+  /**
+   * @generated from rpc vibesys.api.v1.HostOperationsService.CreateExample
+   */
+  createExample: {
+    methodKind: "unary";
+    input: typeof CreateExampleRequestSchema;
+    output: typeof CreateExampleResponseSchema;
+  },
+  /**
+   * @generated from rpc vibesys.api.v1.HostOperationsService.CopyProject
+   */
+  copyProject: {
+    methodKind: "unary";
+    input: typeof CopyProjectRequestSchema;
+    output: typeof CopyProjectResponseSchema;
+  },
+  /**
+   * @generated from rpc vibesys.api.v1.HostOperationsService.PutCluster
+   */
+  putCluster: {
+    methodKind: "unary";
+    input: typeof PutClusterRequestSchema;
+    output: typeof PutClusterResponseSchema;
+  },
+  /**
+   * @generated from rpc vibesys.api.v1.HostOperationsService.RemoveCluster
+   */
+  removeCluster: {
+    methodKind: "unary";
+    input: typeof RemoveClusterRequestSchema;
+    output: typeof RemoveClusterResponseSchema;
+  },
+  /**
+   * @generated from rpc vibesys.api.v1.HostOperationsService.TestCluster
+   */
+  testCluster: {
+    methodKind: "unary";
+    input: typeof TestClusterRequestSchema;
+    output: typeof TestClusterResponseSchema;
+  },
+  /**
+   * Start admits one run. Disconnect does not cancel it: the gateway drops the
+   * caller's context and keeps the runner until the cap. Replay of the same
+   * request id returns the stored result and does not launch again.
+   *
+   * @generated from rpc vibesys.api.v1.HostOperationsService.StartRun
+   */
+  startRun: {
+    methodKind: "unary";
+    input: typeof StartRunRequestSchema;
+    output: typeof StartRunResponseSchema;
   },
   /**
    * HostCall dispatch. The runner deadline is cap_ms. The client budget is

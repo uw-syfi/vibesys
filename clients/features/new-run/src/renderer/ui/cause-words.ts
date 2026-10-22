@@ -57,10 +57,6 @@ const OPTION_CONTROLS: Readonly<
   },
 };
 
-function lastSegment(path: string): string {
-  return path.split('/').filter(Boolean).at(-1) ?? path;
-}
-
 function listed(items: readonly string[]): string {
   const shown = items.slice(0, SHOWN).join(', ');
   const more = items.length - SHOWN;
@@ -168,11 +164,8 @@ export function failureWords(check: Check, machine: string): FailureWords | null
   if (cause === null) return check.id === 'settings_valid' ? genericWords(check) : null;
   switch (cause.kind) {
     case 'project_dirty':
-      return words(
-        `${lastSegment(cause.project)} has uncommitted changes (${listed(cause.paths)}). Commit or discard them in the project, then check again.`,
-        null,
-        true,
-      );
+      // The host's detail and fix are the words. The app does not add its own.
+      return null;
     case 'backend_unavailable': {
       const wants =
         cause.declared.length > 1
