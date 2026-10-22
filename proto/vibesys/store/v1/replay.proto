@@ -415,7 +415,7 @@ message AccountingEvidence {
   option (buf.validate.message).cel = {
     id: "accounting_evidence.import_origin"
     message: "imported history originates in no native epoch"
-    expression: "!has(this.import_id) || this.observations.all(o, o.origin_epoch == 0)"
+    expression: "!has(this.import_id) || this.observations.all(o, o.origin_epoch == 0u)"
   };
   option (buf.validate.message).cel = {
     id: "accounting_evidence.content"

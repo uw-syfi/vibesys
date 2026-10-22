@@ -3129,13 +3129,13 @@ const file_vibesys_store_v1_replay_proto_rawDesc = "" +
 	"\twatermark\x18\x03 \x01(\x04R\twatermark\x12B\n" +
 	"\x05total\x18\x04 \x01(\v2$.vibesys.store.v1.AccountingQuantityB\x06\xbaH\x03\xc8\x01\x01R\x05total\x126\n" +
 	"\x05cells\x18\x05 \x03(\v2 .vibesys.store.v1.AccountingCellR\x05cells\x12&\n" +
-	"\x06nested\x18\x06 \x03(\tB\x0e\xbaH\v\x92\x01\b\x18\x01\"\x04r\x02\x10\x01R\x06nested\"\x9d\x05\n" +
+	"\x06nested\x18\x06 \x03(\tB\x0e\xbaH\v\x92\x01\b\x18\x01\"\x04r\x02\x10\x01R\x06nested\"\x9e\x05\n" +
 	"\x12AccountingEvidence\x12)\n" +
 	"\timport_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01H\x00R\bimportId\x88\x01\x01\x12K\n" +
 	"\fobservations\x18\x02 \x03(\v2'.vibesys.store.v1.AccountingObservationR\fobservations\x12@\n" +
-	"\bcoverage\x18\x03 \x03(\v2$.vibesys.store.v1.AccountingCoverageR\bcoverage:\xbe\x03\xbaH\xba\x03\x1a\x88\x01\n" +
-	"\x1caccounting_evidence.coverage\x126only an import publication declares aggregate coverage\x1a0has(this.import_id) || this.coverage.size() == 0\x1a\x9a\x01\n" +
-	"!accounting_evidence.import_origin\x12.imported history originates in no native epoch\x1aE!has(this.import_id) || this.observations.all(o, o.origin_epoch == 0)\x1a\x8f\x01\n" +
+	"\bcoverage\x18\x03 \x03(\v2$.vibesys.store.v1.AccountingCoverageR\bcoverage:\xbf\x03\xbaH\xbb\x03\x1a\x88\x01\n" +
+	"\x1caccounting_evidence.coverage\x126only an import publication declares aggregate coverage\x1a0has(this.import_id) || this.coverage.size() == 0\x1a\x9b\x01\n" +
+	"!accounting_evidence.import_origin\x12.imported history originates in no native epoch\x1aF!has(this.import_id) || this.observations.all(o, o.origin_epoch == 0u)\x1a\x8f\x01\n" +
 	"\x1baccounting_evidence.content\x126accounting evidence carries an observation or coverage\x1a8this.observations.size() > 0 || this.coverage.size() > 0B\f\n" +
 	"\n" +
 	"_import_id*r\n" +
