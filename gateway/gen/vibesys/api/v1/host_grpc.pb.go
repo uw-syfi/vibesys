@@ -36,7 +36,7 @@ const (
 // API schemas require an exact hash match, with no compatibility negotiation.
 type HostServiceClient interface {
 	// Hello compares the client and gateway API schema hashes. A mismatch fails
-	// with gRPC FAILED_PRECONDITION and a message naming both hashes.
+	// with gRPC FAILED_PRECONDITION and a message naming both well-formed hashes.
 	HostCall(ctx context.Context, in *HostCallRequest, opts ...grpc.CallOption) (*HostCallResponse, error)
 	Hello(ctx context.Context, in *HelloRequest, opts ...grpc.CallOption) (*HelloResponse, error)
 	// Tail follows the log live until the client cancels, starting at from_seq
@@ -161,7 +161,7 @@ type HostService_TailStreamClient = grpc.ServerStreamingClient[TailStreamRespons
 // API schemas require an exact hash match, with no compatibility negotiation.
 type HostServiceServer interface {
 	// Hello compares the client and gateway API schema hashes. A mismatch fails
-	// with gRPC FAILED_PRECONDITION and a message naming both hashes.
+	// with gRPC FAILED_PRECONDITION and a message naming both well-formed hashes.
 	HostCall(context.Context, *HostCallRequest) (*HostCallResponse, error)
 	Hello(context.Context, *HelloRequest) (*HelloResponse, error)
 	// Tail follows the log live until the client cancels, starting at from_seq

@@ -2,6 +2,8 @@
 import {createHash} from 'node:crypto';
 import {test} from 'node:test';
 import {gunzipSync, gzipSync} from 'node:zlib';
+import {create, toBinary} from '@bufbuild/protobuf';
+import {API_SCHEMA_HASH, HelloRequestSchema} from '@vibesys/proto';
 import {Seeded} from '@vibesys/store/testing';
 import {FakeClock} from '@vibesys/transport/testing';
 import {expect} from 'expect';
@@ -254,7 +256,11 @@ for (const mode of ['slow upload', 'reset then retry'] as const) {
       clock.schedule,
     );
     const result = connection
-      .unary(HELLO_METHOD, new Uint8Array(), abort.signal)
+      .unary(
+        HELLO_METHOD,
+        toBinary(HelloRequestSchema, create(HelloRequestSchema, {apiSchemaHash: API_SCHEMA_HASH})),
+        abort.signal,
+      )
       .catch(error => String(error));
     let upload: Command | undefined;
     try {

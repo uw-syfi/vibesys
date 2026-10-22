@@ -22,8 +22,7 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// Tail permits one maximum-sized record; blobs have a 16 MiB content budget.
-const maxMessageBytes = 20 << 20
+// Blobs have a 16 MiB content budget, excluding response metadata.
 const blobBytes = 16 << 20
 
 func (h *host) directory(id string) (string, error) {
