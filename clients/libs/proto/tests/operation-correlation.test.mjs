@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {create, toBinary} from '@bufbuild/protobuf';
 import {BytesValueSchema} from '@bufbuild/protobuf/wkt';
-import {accept, call} from '../src/operations.ts';
+import {accept, call} from '../dist/operations.js';
 
 const policy = {name: 'ByteCorrelation', id: 1, capMs: 10, graceMs: 5, totalMs: 15};
 const definition = {
