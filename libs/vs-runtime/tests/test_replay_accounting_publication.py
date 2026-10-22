@@ -88,7 +88,7 @@ class _GatedStoreEffects(LocalAtomicWriteEffects):
         self._gate = gate
 
     def sync_file(self, stream: AtomicWriteStream) -> None:
-        self._gate.around(Boundary.DURABLE_WRITE, "store-sync", _no_sync)
+        self._gate.around(Boundary.DURABLE_WRITE, "store-sync", partial(_no_sync, stream))
 
     def sync_existing_file(self, path: Path) -> None:
         pass
@@ -103,7 +103,7 @@ class _GatedStoreEffects(LocalAtomicWriteEffects):
         )
 
 
-def _no_sync() -> None:
+def _no_sync(*_: object) -> None:
     """Stands for a sync that the injected faults replace; the data is already visible."""
 
 
@@ -118,7 +118,7 @@ def _session(
         if gate is None:
             real(descriptor)
         else:
-            gate.around(Boundary.DURABLE_WRITE, "fsync", _no_sync)
+            gate.around(Boundary.DURABLE_WRITE, "fsync", partial(_no_sync, descriptor))
 
     store = (
         project.state_store("run-a")
