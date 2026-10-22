@@ -7,12 +7,24 @@ image="$(mktemp)"
 trap 'rm -f "$image"' EXIT
 uv run --locked --group proto buf build --as-file-descriptor-set --exclude-source-info -o "$image"
 uv run --locked --group proto python -m scripts.host_operations.generate "$image"
-uv run --locked --group proto buf format -w --path proto/vibesys/host --path proto/vibesys/api/v1/host_operations.proto
+format_args=()
+for path in proto/vibesys/host proto/vibesys/api/v1/host_operations.proto proto/vibesys/api/v1/host_read_generated.proto proto/vibesys/api/v1/host_watch_generated.proto proto/vibesys/api/v1/host_mutate_generated.proto; do
+  if [[ -e "$path" ]]; then
+    format_args+=(--path "$path")
+  fi
+done
+uv run --locked --group proto buf format -w "${format_args[@]}"
 uv run --locked --group proto buf generate
 uv run --locked --group proto python -m scripts.host_operations.generate "$image" --bindings
 uv run --locked ruff check --select I --fix libs/vs-proto/src/vs_proto/_generated/host_operations.py src/server/host_operation_types_generated.py
 uv run --locked ruff format libs/vs-proto/src/vs_proto/_generated/host_operations.py src/server/host_operation_types_generated.py
-gofmt -w gateway/internal/hostoperations/registry_generated.go gateway/internal/hostoperations/host_call_generated.go
+gofmt_paths=()
+for path in gateway/internal/hostoperations/registry_generated.go gateway/internal/hostoperations/host_call_generated.go gateway/internal/hostoperations/host_read_generated.go gateway/internal/hostoperations/host_watch_generated.go gateway/internal/hostoperations/host_mutate_generated.go; do
+  if [[ -f "$path" ]]; then
+    gofmt_paths+=("$path")
+  fi
+done
+gofmt -w "${gofmt_paths[@]}"
 uv run --locked --group proto python scripts/generate_proto_framing.py
 uv run --locked --group proto buf generate --template buf.gen.core.yaml
 uv run --locked --group proto buf generate --template scripts/corevalue/tests/buf.gen.yaml

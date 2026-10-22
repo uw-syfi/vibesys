@@ -173,6 +173,188 @@ def accept_preflight_run(
     return PreflightRun.accept(request)
 
 
+InspectDestination = Operation(
+    "InspectDestination",
+    23,
+    23,
+    23,
+    10000,
+    5000,
+    1,
+    2,
+    1,
+    1,
+    None,
+    pb.InspectDestinationRequest,
+    pb.InspectDestinationResponse,
+    ((("request_id",), ("request_id",)),),
+)
+
+
+def accept_inspect_destination(
+    request: pb.InspectDestinationRequest,
+) -> AcceptedRequest[pb.InspectDestinationRequest]:
+    return InspectDestination.accept(request)
+
+
+CreateExample = Operation(
+    "CreateExample",
+    34,
+    34,
+    34,
+    120000,
+    5000,
+    2,
+    3,
+    1,
+    1,
+    None,
+    pb.CreateExampleRequest,
+    pb.CreateExampleResponse,
+    ((("request_id",), ("request_id",)),),
+)
+
+
+def accept_create_example(
+    request: pb.CreateExampleRequest,
+) -> AcceptedRequest[pb.CreateExampleRequest]:
+    return CreateExample.accept(request)
+
+
+CopyProject = Operation(
+    "CopyProject",
+    35,
+    35,
+    35,
+    120000,
+    5000,
+    2,
+    3,
+    1,
+    1,
+    None,
+    pb.CopyProjectRequest,
+    pb.CopyProjectResponse,
+    ((("request_id",), ("request_id",)),),
+)
+
+
+def accept_copy_project(request: pb.CopyProjectRequest) -> AcceptedRequest[pb.CopyProjectRequest]:
+    return CopyProject.accept(request)
+
+
+PutCluster = Operation(
+    "PutCluster",
+    31,
+    31,
+    31,
+    65000,
+    5000,
+    2,
+    3,
+    1,
+    1,
+    None,
+    pb.PutClusterRequest,
+    pb.PutClusterResponse,
+    ((("request_id",), ("request_id",)),),
+)
+
+
+def accept_put_cluster(request: pb.PutClusterRequest) -> AcceptedRequest[pb.PutClusterRequest]:
+    return PutCluster.accept(request)
+
+
+RemoveCluster = Operation(
+    "RemoveCluster",
+    32,
+    32,
+    32,
+    10000,
+    5000,
+    2,
+    3,
+    1,
+    1,
+    None,
+    pb.RemoveClusterRequest,
+    pb.RemoveClusterResponse,
+    ((("request_id",), ("request_id",)),),
+)
+
+
+def accept_remove_cluster(
+    request: pb.RemoveClusterRequest,
+) -> AcceptedRequest[pb.RemoveClusterRequest]:
+    return RemoveCluster.accept(request)
+
+
+TestCluster = Operation(
+    "TestCluster",
+    33,
+    33,
+    33,
+    65000,
+    5000,
+    2,
+    3,
+    1,
+    1,
+    None,
+    pb.TestClusterRequest,
+    pb.TestClusterResponse,
+    ((("request_id",), ("request_id",)),),
+)
+
+
+def accept_test_cluster(request: pb.TestClusterRequest) -> AcceptedRequest[pb.TestClusterRequest]:
+    return TestCluster.accept(request)
+
+
+StartRun = Operation(
+    "StartRun",
+    36,
+    36,
+    36,
+    60000,
+    5000,
+    3,
+    3,
+    1,
+    1,
+    None,
+    pb.StartRunRequest,
+    pb.StartRunResponse,
+    ((("request_id",), ("request_id",)),),
+)
+
+
+def accept_start_run(request: pb.StartRunRequest) -> AcceptedRequest[pb.StartRunRequest]:
+    return StartRun.accept(request)
+
+
+Login = Operation(
+    "Login",
+    40,
+    40,
+    40,
+    600000,
+    5000,
+    3,
+    3,
+    1,
+    2,
+    25000,
+    pb.LoginRequest,
+    pb.LoginResponse,
+    ((("request_id",), ("request_id",)),),
+)
+
+
+def accept_login(request: pb.LoginRequest) -> AcceptedRequest[pb.LoginRequest]:
+    return Login.accept(request)
+
+
 ADAPTER_OPERATIONS: dict[str, Operation] = {
     "tasks.list": ListTasks,
     "harnesses.list": ListHarnesses,
@@ -181,6 +363,7 @@ ADAPTER_OPERATIONS: dict[str, Operation] = {
     "machine.describe": DescribeMachine,
     "compute.list": ListCompute,
     "run.preflight": PreflightRun,
+    "examples.destination": InspectDestination,
 }
 OPERATIONS: tuple[Operation, ...] = (
     ListTasks,
@@ -190,6 +373,14 @@ OPERATIONS: tuple[Operation, ...] = (
     DescribeMachine,
     ListCompute,
     PreflightRun,
+    InspectDestination,
+    CreateExample,
+    CopyProject,
+    PutCluster,
+    RemoveCluster,
+    TestCluster,
+    StartRun,
+    Login,
 )
 
 
@@ -204,6 +395,7 @@ class Handlers:
     describe_machine: Callable[[pb.DescribeMachineRequest], pb.DescribeMachineResponse]
     list_compute: Callable[[pb.ListComputeRequest], pb.ListComputeResponse]
     preflight_run: Callable[[pb.PreflightRunRequest], pb.PreflightRunResponse]
+    inspect_destination: Callable[[pb.InspectDestinationRequest], pb.InspectDestinationResponse]
 
     def dispatch(self, request: AcceptedRequest) -> bytes:
         match request.operation.operation_id:
@@ -234,6 +426,51 @@ class Handlers:
             case 16:
                 return PreflightRun.validate_response(
                     request, self.preflight_run(PreflightRun.request_value(request))
+                )
+            case 23:
+                return InspectDestination.validate_response(
+                    request, self.inspect_destination(InspectDestination.request_value(request))
+                )
+            case _:
+                raise ValueError("unknown operation id")
+
+
+@dataclass(frozen=True)
+class MutationHandlers:
+    """Required mutation slots. A read handler cannot satisfy one."""
+
+    create_example: Callable[[pb.CreateExampleRequest], pb.CreateExampleResponse]
+    copy_project: Callable[[pb.CopyProjectRequest], pb.CopyProjectResponse]
+    put_cluster: Callable[[pb.PutClusterRequest], pb.PutClusterResponse]
+    remove_cluster: Callable[[pb.RemoveClusterRequest], pb.RemoveClusterResponse]
+    test_cluster: Callable[[pb.TestClusterRequest], pb.TestClusterResponse]
+    start_run: Callable[[pb.StartRunRequest], pb.StartRunResponse]
+
+    def dispatch(self, request: AcceptedRequest) -> bytes:
+        match request.operation.operation_id:
+            case 34:
+                return CreateExample.validate_response(
+                    request, self.create_example(CreateExample.request_value(request))
+                )
+            case 35:
+                return CopyProject.validate_response(
+                    request, self.copy_project(CopyProject.request_value(request))
+                )
+            case 31:
+                return PutCluster.validate_response(
+                    request, self.put_cluster(PutCluster.request_value(request))
+                )
+            case 32:
+                return RemoveCluster.validate_response(
+                    request, self.remove_cluster(RemoveCluster.request_value(request))
+                )
+            case 33:
+                return TestCluster.validate_response(
+                    request, self.test_cluster(TestCluster.request_value(request))
+                )
+            case 36:
+                return StartRun.validate_response(
+                    request, self.start_run(StartRun.request_value(request))
                 )
             case _:
                 raise ValueError("unknown operation id")
@@ -327,3 +564,43 @@ def dispatch_host_call(
             return Oneof("chat_message", chat_message(cast(host_call.ChatMessageRequest, request)))
         case _:
             return None
+
+
+READS: dict[str, Operation] = {
+    "list_tasks": ListTasks,
+    "list_harnesses": ListHarnesses,
+    "list_examples": ListExamples,
+    "get_task_goal": GetTaskGoal,
+    "describe_machine": DescribeMachine,
+    "list_compute": ListCompute,
+    "preflight_run": PreflightRun,
+    "inspect_destination": InspectDestination,
+}
+READ_CALLS: tuple[HostCall, ...] = (
+    HostCall("list_tasks", "list-tasks", 10, 10, 10000, 5000),
+    HostCall("list_harnesses", "list-harnesses", 11, 11, 10000, 5000),
+    HostCall("list_examples", "list-examples", 12, 12, 10000, 5000),
+    HostCall("get_task_goal", "get-task-goal", 13, 13, 10000, 5000),
+    HostCall("describe_machine", "describe-machine", 14, 14, 25000, 5000),
+    HostCall("list_compute", "list-compute", 15, 15, 10000, 5000),
+    HostCall("preflight_run", "preflight-run", 16, 16, 65000, 5000),
+    HostCall("inspect_destination", "inspect-destination", 23, 23, 10000, 5000),
+)
+MUTATIONS: dict[str, Operation] = {
+    "create_example": CreateExample,
+    "copy_project": CopyProject,
+    "put_cluster": PutCluster,
+    "remove_cluster": RemoveCluster,
+    "test_cluster": TestCluster,
+    "start_run": StartRun,
+}
+MUTATION_CALLS: tuple[HostCall, ...] = (
+    HostCall("create_example", "create-example", 34, 34, 120000, 5000),
+    HostCall("copy_project", "copy-project", 35, 35, 120000, 5000),
+    HostCall("put_cluster", "put-cluster", 31, 31, 65000, 5000),
+    HostCall("remove_cluster", "remove-cluster", 32, 32, 10000, 5000),
+    HostCall("test_cluster", "test-cluster", 33, 33, 65000, 5000),
+    HostCall("start_run", "start-run", 36, 36, 60000, 5000),
+)
+WATCHES: dict[str, Operation] = {"login": Login}
+WATCH_CALLS: tuple[HostCall, ...] = (HostCall("login", "login", 40, 40, 600000, 5000),)

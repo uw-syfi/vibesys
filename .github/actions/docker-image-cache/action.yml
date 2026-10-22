@@ -1,0 +1,37 @@
+name: Shared Docker image cache
+description: >-
+  Store Docker image layers and BuildKit state by install inputs in GHCR, so
+  pull requests and merge groups share successful builds across GitHub refs.
+inputs:
+  mode:
+    description: restore or save
+    required: true
+  path:
+    description: Docker data-root archive to restore or publish
+    required: true
+  key:
+    description: Base digests and all install inputs
+    required: true
+  restore-keys:
+    description: Family/base aliases, one per line, checked by Docker's layer cache
+    default: ''
+outputs:
+  cache-hit:
+    description: Whether the exact input-addressed snapshot was restored
+    value: ${{ steps.cache.outputs.cache-hit }}
+  cache-primary-key:
+    description: The exact input key, also used when saving
+    value: ${{ inputs.key }}
+runs:
+  using: composite
+  steps:
+    - id: cache
+      shell: bash
+      env:
+        CACHE_MODE: ${{ inputs.mode }}
+        CACHE_PATH: ${{ inputs.path }}
+        CACHE_KEY: ${{ inputs.key }}
+        CACHE_RESTORE_KEYS: ${{ inputs.restore-keys }}
+        CACHE_TOKEN: ${{ github.token }}
+        CACHE_CAN_PUBLISH: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+      run: ./scripts/ci_registry_image_cache.sh

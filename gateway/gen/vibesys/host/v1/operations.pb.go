@@ -749,6 +749,326 @@ func (RunOption) EnumDescriptor() ([]byte, []int) {
 	return file_vibesys_host_v1_operations_proto_rawDescGZIP(), []int{12}
 }
 
+// A candidate checkout inspection. The executable and argv are fixed by the
+// gateway; this payload only names the path and the caller's selection revision.
+type CandidateState int32
+
+const (
+	CandidateState_CANDIDATE_STATE_UNSPECIFIED CandidateState = 0
+	CandidateState_CANDIDATE_STATE_FOUND       CandidateState = 1
+	CandidateState_CANDIDATE_STATE_NOT_FOUND   CandidateState = 2
+	CandidateState_CANDIDATE_STATE_TOO_OLD     CandidateState = 3
+)
+
+// Enum value maps for CandidateState.
+var (
+	CandidateState_name = map[int32]string{
+		0: "CANDIDATE_STATE_UNSPECIFIED",
+		1: "CANDIDATE_STATE_FOUND",
+		2: "CANDIDATE_STATE_NOT_FOUND",
+		3: "CANDIDATE_STATE_TOO_OLD",
+	}
+	CandidateState_value = map[string]int32{
+		"CANDIDATE_STATE_UNSPECIFIED": 0,
+		"CANDIDATE_STATE_FOUND":       1,
+		"CANDIDATE_STATE_NOT_FOUND":   2,
+		"CANDIDATE_STATE_TOO_OLD":     3,
+	}
+)
+
+func (x CandidateState) Enum() *CandidateState {
+	p := new(CandidateState)
+	*p = x
+	return p
+}
+
+func (x CandidateState) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (CandidateState) Descriptor() protoreflect.EnumDescriptor {
+	return file_vibesys_host_v1_operations_proto_enumTypes[13].Descriptor()
+}
+
+func (CandidateState) Type() protoreflect.EnumType {
+	return &file_vibesys_host_v1_operations_proto_enumTypes[13]
+}
+
+func (x CandidateState) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use CandidateState.Descriptor instead.
+func (CandidateState) EnumDescriptor() ([]byte, []int) {
+	return file_vibesys_host_v1_operations_proto_rawDescGZIP(), []int{13}
+}
+
+type LoginUnavailableReason int32
+
+const (
+	LoginUnavailableReason_LOGIN_UNAVAILABLE_REASON_UNSPECIFIED      LoginUnavailableReason = 0
+	LoginUnavailableReason_LOGIN_UNAVAILABLE_REASON_NOT_INSTALLED    LoginUnavailableReason = 1
+	LoginUnavailableReason_LOGIN_UNAVAILABLE_REASON_NO_LOGIN_COMMAND LoginUnavailableReason = 2
+	LoginUnavailableReason_LOGIN_UNAVAILABLE_REASON_NEEDS_TERMINAL   LoginUnavailableReason = 3
+	LoginUnavailableReason_LOGIN_UNAVAILABLE_REASON_START_FAILED     LoginUnavailableReason = 4
+)
+
+// Enum value maps for LoginUnavailableReason.
+var (
+	LoginUnavailableReason_name = map[int32]string{
+		0: "LOGIN_UNAVAILABLE_REASON_UNSPECIFIED",
+		1: "LOGIN_UNAVAILABLE_REASON_NOT_INSTALLED",
+		2: "LOGIN_UNAVAILABLE_REASON_NO_LOGIN_COMMAND",
+		3: "LOGIN_UNAVAILABLE_REASON_NEEDS_TERMINAL",
+		4: "LOGIN_UNAVAILABLE_REASON_START_FAILED",
+	}
+	LoginUnavailableReason_value = map[string]int32{
+		"LOGIN_UNAVAILABLE_REASON_UNSPECIFIED":      0,
+		"LOGIN_UNAVAILABLE_REASON_NOT_INSTALLED":    1,
+		"LOGIN_UNAVAILABLE_REASON_NO_LOGIN_COMMAND": 2,
+		"LOGIN_UNAVAILABLE_REASON_NEEDS_TERMINAL":   3,
+		"LOGIN_UNAVAILABLE_REASON_START_FAILED":     4,
+	}
+)
+
+func (x LoginUnavailableReason) Enum() *LoginUnavailableReason {
+	p := new(LoginUnavailableReason)
+	*p = x
+	return p
+}
+
+func (x LoginUnavailableReason) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (LoginUnavailableReason) Descriptor() protoreflect.EnumDescriptor {
+	return file_vibesys_host_v1_operations_proto_enumTypes[14].Descriptor()
+}
+
+func (LoginUnavailableReason) Type() protoreflect.EnumType {
+	return &file_vibesys_host_v1_operations_proto_enumTypes[14]
+}
+
+func (x LoginUnavailableReason) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use LoginUnavailableReason.Descriptor instead.
+func (LoginUnavailableReason) EnumDescriptor() ([]byte, []int) {
+	return file_vibesys_host_v1_operations_proto_rawDescGZIP(), []int{14}
+}
+
+type StartRunResults int32
+
+const (
+	StartRunResults_START_RUN_RESULTS_UNSPECIFIED    StartRunResults = 0
+	StartRunResults_START_RUN_RESULTS_KEEP           StartRunResults = 1
+	StartRunResults_START_RUN_RESULTS_PUBLISH_GITHUB StartRunResults = 2
+)
+
+// Enum value maps for StartRunResults.
+var (
+	StartRunResults_name = map[int32]string{
+		0: "START_RUN_RESULTS_UNSPECIFIED",
+		1: "START_RUN_RESULTS_KEEP",
+		2: "START_RUN_RESULTS_PUBLISH_GITHUB",
+	}
+	StartRunResults_value = map[string]int32{
+		"START_RUN_RESULTS_UNSPECIFIED":    0,
+		"START_RUN_RESULTS_KEEP":           1,
+		"START_RUN_RESULTS_PUBLISH_GITHUB": 2,
+	}
+)
+
+func (x StartRunResults) Enum() *StartRunResults {
+	p := new(StartRunResults)
+	*p = x
+	return p
+}
+
+func (x StartRunResults) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (StartRunResults) Descriptor() protoreflect.EnumDescriptor {
+	return file_vibesys_host_v1_operations_proto_enumTypes[15].Descriptor()
+}
+
+func (StartRunResults) Type() protoreflect.EnumType {
+	return &file_vibesys_host_v1_operations_proto_enumTypes[15]
+}
+
+func (x StartRunResults) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use StartRunResults.Descriptor instead.
+func (StartRunResults) EnumDescriptor() ([]byte, []int) {
+	return file_vibesys_host_v1_operations_proto_rawDescGZIP(), []int{15}
+}
+
+type StartRunReasoning int32
+
+const (
+	StartRunReasoning_START_RUN_REASONING_UNSPECIFIED StartRunReasoning = 0
+	StartRunReasoning_START_RUN_REASONING_DEFAULT     StartRunReasoning = 1
+	StartRunReasoning_START_RUN_REASONING_LOW         StartRunReasoning = 2
+	StartRunReasoning_START_RUN_REASONING_MEDIUM      StartRunReasoning = 3
+	StartRunReasoning_START_RUN_REASONING_HIGH        StartRunReasoning = 4
+)
+
+// Enum value maps for StartRunReasoning.
+var (
+	StartRunReasoning_name = map[int32]string{
+		0: "START_RUN_REASONING_UNSPECIFIED",
+		1: "START_RUN_REASONING_DEFAULT",
+		2: "START_RUN_REASONING_LOW",
+		3: "START_RUN_REASONING_MEDIUM",
+		4: "START_RUN_REASONING_HIGH",
+	}
+	StartRunReasoning_value = map[string]int32{
+		"START_RUN_REASONING_UNSPECIFIED": 0,
+		"START_RUN_REASONING_DEFAULT":     1,
+		"START_RUN_REASONING_LOW":         2,
+		"START_RUN_REASONING_MEDIUM":      3,
+		"START_RUN_REASONING_HIGH":        4,
+	}
+)
+
+func (x StartRunReasoning) Enum() *StartRunReasoning {
+	p := new(StartRunReasoning)
+	*p = x
+	return p
+}
+
+func (x StartRunReasoning) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (StartRunReasoning) Descriptor() protoreflect.EnumDescriptor {
+	return file_vibesys_host_v1_operations_proto_enumTypes[16].Descriptor()
+}
+
+func (StartRunReasoning) Type() protoreflect.EnumType {
+	return &file_vibesys_host_v1_operations_proto_enumTypes[16]
+}
+
+func (x StartRunReasoning) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use StartRunReasoning.Descriptor instead.
+func (StartRunReasoning) EnumDescriptor() ([]byte, []int) {
+	return file_vibesys_host_v1_operations_proto_rawDescGZIP(), []int{16}
+}
+
+type ClusterTestStage int32
+
+const (
+	ClusterTestStage_CLUSTER_TEST_STAGE_UNSPECIFIED ClusterTestStage = 0
+	ClusterTestStage_CLUSTER_TEST_STAGE_REACH       ClusterTestStage = 1
+	ClusterTestStage_CLUSTER_TEST_STAGE_SCHEDULER   ClusterTestStage = 2
+	ClusterTestStage_CLUSTER_TEST_STAGE_WORKSPACE   ClusterTestStage = 3
+)
+
+// Enum value maps for ClusterTestStage.
+var (
+	ClusterTestStage_name = map[int32]string{
+		0: "CLUSTER_TEST_STAGE_UNSPECIFIED",
+		1: "CLUSTER_TEST_STAGE_REACH",
+		2: "CLUSTER_TEST_STAGE_SCHEDULER",
+		3: "CLUSTER_TEST_STAGE_WORKSPACE",
+	}
+	ClusterTestStage_value = map[string]int32{
+		"CLUSTER_TEST_STAGE_UNSPECIFIED": 0,
+		"CLUSTER_TEST_STAGE_REACH":       1,
+		"CLUSTER_TEST_STAGE_SCHEDULER":   2,
+		"CLUSTER_TEST_STAGE_WORKSPACE":   3,
+	}
+)
+
+func (x ClusterTestStage) Enum() *ClusterTestStage {
+	p := new(ClusterTestStage)
+	*p = x
+	return p
+}
+
+func (x ClusterTestStage) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (ClusterTestStage) Descriptor() protoreflect.EnumDescriptor {
+	return file_vibesys_host_v1_operations_proto_enumTypes[17].Descriptor()
+}
+
+func (ClusterTestStage) Type() protoreflect.EnumType {
+	return &file_vibesys_host_v1_operations_proto_enumTypes[17]
+}
+
+func (x ClusterTestStage) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use ClusterTestStage.Descriptor instead.
+func (ClusterTestStage) EnumDescriptor() ([]byte, []int) {
+	return file_vibesys_host_v1_operations_proto_rawDescGZIP(), []int{17}
+}
+
+type DestinationState int32
+
+const (
+	DestinationState_DESTINATION_STATE_UNSPECIFIED     DestinationState = 0
+	DestinationState_DESTINATION_STATE_ABSENT          DestinationState = 1
+	DestinationState_DESTINATION_STATE_EMPTY           DestinationState = 2
+	DestinationState_DESTINATION_STATE_EXAMPLE_PROJECT DestinationState = 3
+	DestinationState_DESTINATION_STATE_OCCUPIED        DestinationState = 4
+)
+
+// Enum value maps for DestinationState.
+var (
+	DestinationState_name = map[int32]string{
+		0: "DESTINATION_STATE_UNSPECIFIED",
+		1: "DESTINATION_STATE_ABSENT",
+		2: "DESTINATION_STATE_EMPTY",
+		3: "DESTINATION_STATE_EXAMPLE_PROJECT",
+		4: "DESTINATION_STATE_OCCUPIED",
+	}
+	DestinationState_value = map[string]int32{
+		"DESTINATION_STATE_UNSPECIFIED":     0,
+		"DESTINATION_STATE_ABSENT":          1,
+		"DESTINATION_STATE_EMPTY":           2,
+		"DESTINATION_STATE_EXAMPLE_PROJECT": 3,
+		"DESTINATION_STATE_OCCUPIED":        4,
+	}
+)
+
+func (x DestinationState) Enum() *DestinationState {
+	p := new(DestinationState)
+	*p = x
+	return p
+}
+
+func (x DestinationState) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (DestinationState) Descriptor() protoreflect.EnumDescriptor {
+	return file_vibesys_host_v1_operations_proto_enumTypes[18].Descriptor()
+}
+
+func (DestinationState) Type() protoreflect.EnumType {
+	return &file_vibesys_host_v1_operations_proto_enumTypes[18]
+}
+
+func (x DestinationState) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use DestinationState.Descriptor instead.
+func (DestinationState) EnumDescriptor() ([]byte, []int) {
+	return file_vibesys_host_v1_operations_proto_rawDescGZIP(), []int{18}
+}
+
 type TaskList struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Version       int64                  `protobuf:"varint,1,opt,name=version,proto3" json:"version,omitempty"`
@@ -6003,6 +6323,2203 @@ func (x *PreflightRunResponseRoles) GetItems() []string {
 	return nil
 }
 
+type CandidateIdentity struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	Root           string                 `protobuf:"bytes,1,opt,name=root,proto3" json:"root,omitempty"`
+	Version        string                 `protobuf:"bytes,2,opt,name=version,proto3" json:"version,omitempty"`
+	Commit         *string                `protobuf:"bytes,3,opt,name=commit,proto3,oneof" json:"commit,omitempty"`
+	Dirty          *bool                  `protobuf:"varint,4,opt,name=dirty,proto3,oneof" json:"dirty,omitempty"`
+	Compatible     bool                   `protobuf:"varint,5,opt,name=compatible,proto3" json:"compatible,omitempty"`
+	VibesysProject bool                   `protobuf:"varint,6,opt,name=vibesys_project,json=vibesysProject,proto3" json:"vibesys_project,omitempty"`
+	GitRepository  bool                   `protobuf:"varint,7,opt,name=git_repository,json=gitRepository,proto3" json:"git_repository,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *CandidateIdentity) Reset() {
+	*x = CandidateIdentity{}
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[81]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CandidateIdentity) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CandidateIdentity) ProtoMessage() {}
+
+func (x *CandidateIdentity) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[81]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CandidateIdentity.ProtoReflect.Descriptor instead.
+func (*CandidateIdentity) Descriptor() ([]byte, []int) {
+	return file_vibesys_host_v1_operations_proto_rawDescGZIP(), []int{81}
+}
+
+func (x *CandidateIdentity) GetRoot() string {
+	if x != nil {
+		return x.Root
+	}
+	return ""
+}
+
+func (x *CandidateIdentity) GetVersion() string {
+	if x != nil {
+		return x.Version
+	}
+	return ""
+}
+
+func (x *CandidateIdentity) GetCommit() string {
+	if x != nil && x.Commit != nil {
+		return *x.Commit
+	}
+	return ""
+}
+
+func (x *CandidateIdentity) GetDirty() bool {
+	if x != nil && x.Dirty != nil {
+		return *x.Dirty
+	}
+	return false
+}
+
+func (x *CandidateIdentity) GetCompatible() bool {
+	if x != nil {
+		return x.Compatible
+	}
+	return false
+}
+
+func (x *CandidateIdentity) GetVibesysProject() bool {
+	if x != nil {
+		return x.VibesysProject
+	}
+	return false
+}
+
+func (x *CandidateIdentity) GetGitRepository() bool {
+	if x != nil {
+		return x.GitRepository
+	}
+	return false
+}
+
+type InspectCandidateRequest struct {
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	RequestId         string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Path              string                 `protobuf:"bytes,2,opt,name=path,proto3" json:"path,omitempty"`
+	SelectionRevision uint64                 `protobuf:"varint,3,opt,name=selection_revision,json=selectionRevision,proto3" json:"selection_revision,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
+}
+
+func (x *InspectCandidateRequest) Reset() {
+	*x = InspectCandidateRequest{}
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[82]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *InspectCandidateRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*InspectCandidateRequest) ProtoMessage() {}
+
+func (x *InspectCandidateRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[82]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use InspectCandidateRequest.ProtoReflect.Descriptor instead.
+func (*InspectCandidateRequest) Descriptor() ([]byte, []int) {
+	return file_vibesys_host_v1_operations_proto_rawDescGZIP(), []int{82}
+}
+
+func (x *InspectCandidateRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *InspectCandidateRequest) GetPath() string {
+	if x != nil {
+		return x.Path
+	}
+	return ""
+}
+
+func (x *InspectCandidateRequest) GetSelectionRevision() uint64 {
+	if x != nil {
+		return x.SelectionRevision
+	}
+	return 0
+}
+
+type InspectCandidateResponse struct {
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	RequestId         string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	SelectionRevision uint64                 `protobuf:"varint,2,opt,name=selection_revision,json=selectionRevision,proto3" json:"selection_revision,omitempty"`
+	SchemaHash        string                 `protobuf:"bytes,3,opt,name=schema_hash,json=schemaHash,proto3" json:"schema_hash,omitempty"`
+	State             CandidateState         `protobuf:"varint,4,opt,name=state,proto3,enum=vibesys.host.v1.CandidateState" json:"state,omitempty"`
+	Identity          *CandidateIdentity     `protobuf:"bytes,5,opt,name=identity,proto3" json:"identity,omitempty"`
+	MinimumVersion    string                 `protobuf:"bytes,6,opt,name=minimum_version,json=minimumVersion,proto3" json:"minimum_version,omitempty"`
+	VibesysCheckout   bool                   `protobuf:"varint,7,opt,name=vibesys_checkout,json=vibesysCheckout,proto3" json:"vibesys_checkout,omitempty"`
+	VibesysProject    bool                   `protobuf:"varint,8,opt,name=vibesys_project,json=vibesysProject,proto3" json:"vibesys_project,omitempty"`
+	GitRepository     bool                   `protobuf:"varint,9,opt,name=git_repository,json=gitRepository,proto3" json:"git_repository,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
+}
+
+func (x *InspectCandidateResponse) Reset() {
+	*x = InspectCandidateResponse{}
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[83]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *InspectCandidateResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*InspectCandidateResponse) ProtoMessage() {}
+
+func (x *InspectCandidateResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[83]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use InspectCandidateResponse.ProtoReflect.Descriptor instead.
+func (*InspectCandidateResponse) Descriptor() ([]byte, []int) {
+	return file_vibesys_host_v1_operations_proto_rawDescGZIP(), []int{83}
+}
+
+func (x *InspectCandidateResponse) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *InspectCandidateResponse) GetSelectionRevision() uint64 {
+	if x != nil {
+		return x.SelectionRevision
+	}
+	return 0
+}
+
+func (x *InspectCandidateResponse) GetSchemaHash() string {
+	if x != nil {
+		return x.SchemaHash
+	}
+	return ""
+}
+
+func (x *InspectCandidateResponse) GetState() CandidateState {
+	if x != nil {
+		return x.State
+	}
+	return CandidateState_CANDIDATE_STATE_UNSPECIFIED
+}
+
+func (x *InspectCandidateResponse) GetIdentity() *CandidateIdentity {
+	if x != nil {
+		return x.Identity
+	}
+	return nil
+}
+
+func (x *InspectCandidateResponse) GetMinimumVersion() string {
+	if x != nil {
+		return x.MinimumVersion
+	}
+	return ""
+}
+
+func (x *InspectCandidateResponse) GetVibesysCheckout() bool {
+	if x != nil {
+		return x.VibesysCheckout
+	}
+	return false
+}
+
+func (x *InspectCandidateResponse) GetVibesysProject() bool {
+	if x != nil {
+		return x.VibesysProject
+	}
+	return false
+}
+
+func (x *InspectCandidateResponse) GetGitRepository() bool {
+	if x != nil {
+		return x.GitRepository
+	}
+	return false
+}
+
+type CompletedPath struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	Name            string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Path            string                 `protobuf:"bytes,2,opt,name=path,proto3" json:"path,omitempty"`
+	VibesysCheckout bool                   `protobuf:"varint,3,opt,name=vibesys_checkout,json=vibesysCheckout,proto3" json:"vibesys_checkout,omitempty"`
+	VibesysProject  bool                   `protobuf:"varint,4,opt,name=vibesys_project,json=vibesysProject,proto3" json:"vibesys_project,omitempty"`
+	GitRepository   bool                   `protobuf:"varint,5,opt,name=git_repository,json=gitRepository,proto3" json:"git_repository,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *CompletedPath) Reset() {
+	*x = CompletedPath{}
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[84]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CompletedPath) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CompletedPath) ProtoMessage() {}
+
+func (x *CompletedPath) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[84]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CompletedPath.ProtoReflect.Descriptor instead.
+func (*CompletedPath) Descriptor() ([]byte, []int) {
+	return file_vibesys_host_v1_operations_proto_rawDescGZIP(), []int{84}
+}
+
+func (x *CompletedPath) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *CompletedPath) GetPath() string {
+	if x != nil {
+		return x.Path
+	}
+	return ""
+}
+
+func (x *CompletedPath) GetVibesysCheckout() bool {
+	if x != nil {
+		return x.VibesysCheckout
+	}
+	return false
+}
+
+func (x *CompletedPath) GetVibesysProject() bool {
+	if x != nil {
+		return x.VibesysProject
+	}
+	return false
+}
+
+func (x *CompletedPath) GetGitRepository() bool {
+	if x != nil {
+		return x.GitRepository
+	}
+	return false
+}
+
+type CompletePathsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Prefix        string                 `protobuf:"bytes,2,opt,name=prefix,proto3" json:"prefix,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CompletePathsRequest) Reset() {
+	*x = CompletePathsRequest{}
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[85]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CompletePathsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CompletePathsRequest) ProtoMessage() {}
+
+func (x *CompletePathsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[85]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CompletePathsRequest.ProtoReflect.Descriptor instead.
+func (*CompletePathsRequest) Descriptor() ([]byte, []int) {
+	return file_vibesys_host_v1_operations_proto_rawDescGZIP(), []int{85}
+}
+
+func (x *CompletePathsRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *CompletePathsRequest) GetPrefix() string {
+	if x != nil {
+		return x.Prefix
+	}
+	return ""
+}
+
+type CompletePathsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Directory     string                 `protobuf:"bytes,2,opt,name=directory,proto3" json:"directory,omitempty"`
+	Entries       []*CompletedPath       `protobuf:"bytes,3,rep,name=entries,proto3" json:"entries,omitempty"`
+	Truncated     bool                   `protobuf:"varint,4,opt,name=truncated,proto3" json:"truncated,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CompletePathsResponse) Reset() {
+	*x = CompletePathsResponse{}
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[86]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CompletePathsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CompletePathsResponse) ProtoMessage() {}
+
+func (x *CompletePathsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[86]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CompletePathsResponse.ProtoReflect.Descriptor instead.
+func (*CompletePathsResponse) Descriptor() ([]byte, []int) {
+	return file_vibesys_host_v1_operations_proto_rawDescGZIP(), []int{86}
+}
+
+func (x *CompletePathsResponse) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *CompletePathsResponse) GetDirectory() string {
+	if x != nil {
+		return x.Directory
+	}
+	return ""
+}
+
+func (x *CompletePathsResponse) GetEntries() []*CompletedPath {
+	if x != nil {
+		return x.Entries
+	}
+	return nil
+}
+
+func (x *CompletePathsResponse) GetTruncated() bool {
+	if x != nil {
+		return x.Truncated
+	}
+	return false
+}
+
+type LoginRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Provider      string                 `protobuf:"bytes,2,opt,name=provider,proto3" json:"provider,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *LoginRequest) Reset() {
+	*x = LoginRequest{}
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[87]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LoginRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LoginRequest) ProtoMessage() {}
+
+func (x *LoginRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[87]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LoginRequest.ProtoReflect.Descriptor instead.
+func (*LoginRequest) Descriptor() ([]byte, []int) {
+	return file_vibesys_host_v1_operations_proto_rawDescGZIP(), []int{87}
+}
+
+func (x *LoginRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *LoginRequest) GetProvider() string {
+	if x != nil {
+		return x.Provider
+	}
+	return ""
+}
+
+type LoginStartedBody struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Instruction   *string                `protobuf:"bytes,1,opt,name=instruction,proto3,oneof" json:"instruction,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *LoginStartedBody) Reset() {
+	*x = LoginStartedBody{}
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[88]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LoginStartedBody) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LoginStartedBody) ProtoMessage() {}
+
+func (x *LoginStartedBody) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[88]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LoginStartedBody.ProtoReflect.Descriptor instead.
+func (*LoginStartedBody) Descriptor() ([]byte, []int) {
+	return file_vibesys_host_v1_operations_proto_rawDescGZIP(), []int{88}
+}
+
+func (x *LoginStartedBody) GetInstruction() string {
+	if x != nil && x.Instruction != nil {
+		return *x.Instruction
+	}
+	return ""
+}
+
+type LoginUnavailableBody struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Reason        LoginUnavailableReason `protobuf:"varint,1,opt,name=reason,proto3,enum=vibesys.host.v1.LoginUnavailableReason" json:"reason,omitempty"`
+	Command       *string                `protobuf:"bytes,2,opt,name=command,proto3,oneof" json:"command,omitempty"`
+	Detail        string                 `protobuf:"bytes,3,opt,name=detail,proto3" json:"detail,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *LoginUnavailableBody) Reset() {
+	*x = LoginUnavailableBody{}
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[89]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LoginUnavailableBody) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LoginUnavailableBody) ProtoMessage() {}
+
+func (x *LoginUnavailableBody) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[89]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LoginUnavailableBody.ProtoReflect.Descriptor instead.
+func (*LoginUnavailableBody) Descriptor() ([]byte, []int) {
+	return file_vibesys_host_v1_operations_proto_rawDescGZIP(), []int{89}
+}
+
+func (x *LoginUnavailableBody) GetReason() LoginUnavailableReason {
+	if x != nil {
+		return x.Reason
+	}
+	return LoginUnavailableReason_LOGIN_UNAVAILABLE_REASON_UNSPECIFIED
+}
+
+func (x *LoginUnavailableBody) GetCommand() string {
+	if x != nil && x.Command != nil {
+		return *x.Command
+	}
+	return ""
+}
+
+func (x *LoginUnavailableBody) GetDetail() string {
+	if x != nil {
+		return x.Detail
+	}
+	return ""
+}
+
+// One sequenced login fact. The host process stays up until cancel or completion.
+type StartRunHarness struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Provider      string                 `protobuf:"bytes,1,opt,name=provider,proto3" json:"provider,omitempty"`
+	Model         string                 `protobuf:"bytes,2,opt,name=model,proto3" json:"model,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *StartRunHarness) Reset() {
+	*x = StartRunHarness{}
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[90]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StartRunHarness) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StartRunHarness) ProtoMessage() {}
+
+func (x *StartRunHarness) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[90]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use StartRunHarness.ProtoReflect.Descriptor instead.
+func (*StartRunHarness) Descriptor() ([]byte, []int) {
+	return file_vibesys_host_v1_operations_proto_rawDescGZIP(), []int{90}
+}
+
+func (x *StartRunHarness) GetProvider() string {
+	if x != nil {
+		return x.Provider
+	}
+	return ""
+}
+
+func (x *StartRunHarness) GetModel() string {
+	if x != nil {
+		return x.Model
+	}
+	return ""
+}
+
+type StartRunRole struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Role          string                 `protobuf:"bytes,1,opt,name=role,proto3" json:"role,omitempty"`
+	Model         string                 `protobuf:"bytes,2,opt,name=model,proto3" json:"model,omitempty"`
+	Reasoning     StartRunReasoning      `protobuf:"varint,3,opt,name=reasoning,proto3,enum=vibesys.host.v1.StartRunReasoning" json:"reasoning,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *StartRunRole) Reset() {
+	*x = StartRunRole{}
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[91]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StartRunRole) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StartRunRole) ProtoMessage() {}
+
+func (x *StartRunRole) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[91]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use StartRunRole.ProtoReflect.Descriptor instead.
+func (*StartRunRole) Descriptor() ([]byte, []int) {
+	return file_vibesys_host_v1_operations_proto_rawDescGZIP(), []int{91}
+}
+
+func (x *StartRunRole) GetRole() string {
+	if x != nil {
+		return x.Role
+	}
+	return ""
+}
+
+func (x *StartRunRole) GetModel() string {
+	if x != nil {
+		return x.Model
+	}
+	return ""
+}
+
+func (x *StartRunRole) GetReasoning() StartRunReasoning {
+	if x != nil {
+		return x.Reasoning
+	}
+	return StartRunReasoning_START_RUN_REASONING_UNSPECIFIED
+}
+
+type StartRunOptions struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Rounds        *int32                 `protobuf:"varint,1,opt,name=rounds,proto3,oneof" json:"rounds,omitempty"`
+	TimeLimitS    *int32                 `protobuf:"varint,2,opt,name=time_limit_s,json=timeLimitS,proto3,oneof" json:"time_limit_s,omitempty"`
+	Results       StartRunResults        `protobuf:"varint,3,opt,name=results,proto3,enum=vibesys.host.v1.StartRunResults" json:"results,omitempty"`
+	Roles         []*StartRunRole        `protobuf:"bytes,4,rep,name=roles,proto3" json:"roles,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *StartRunOptions) Reset() {
+	*x = StartRunOptions{}
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[92]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StartRunOptions) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StartRunOptions) ProtoMessage() {}
+
+func (x *StartRunOptions) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[92]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use StartRunOptions.ProtoReflect.Descriptor instead.
+func (*StartRunOptions) Descriptor() ([]byte, []int) {
+	return file_vibesys_host_v1_operations_proto_rawDescGZIP(), []int{92}
+}
+
+func (x *StartRunOptions) GetRounds() int32 {
+	if x != nil && x.Rounds != nil {
+		return *x.Rounds
+	}
+	return 0
+}
+
+func (x *StartRunOptions) GetTimeLimitS() int32 {
+	if x != nil && x.TimeLimitS != nil {
+		return *x.TimeLimitS
+	}
+	return 0
+}
+
+func (x *StartRunOptions) GetResults() StartRunResults {
+	if x != nil {
+		return x.Results
+	}
+	return StartRunResults_START_RUN_RESULTS_UNSPECIFIED
+}
+
+func (x *StartRunOptions) GetRoles() []*StartRunRole {
+	if x != nil {
+		return x.Roles
+	}
+	return nil
+}
+
+type StartRunAgent struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Role          string                 `protobuf:"bytes,1,opt,name=role,proto3" json:"role,omitempty"`
+	Harness       *StartRunHarness       `protobuf:"bytes,2,opt,name=harness,proto3" json:"harness,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *StartRunAgent) Reset() {
+	*x = StartRunAgent{}
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[93]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StartRunAgent) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StartRunAgent) ProtoMessage() {}
+
+func (x *StartRunAgent) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[93]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use StartRunAgent.ProtoReflect.Descriptor instead.
+func (*StartRunAgent) Descriptor() ([]byte, []int) {
+	return file_vibesys_host_v1_operations_proto_rawDescGZIP(), []int{93}
+}
+
+func (x *StartRunAgent) GetRole() string {
+	if x != nil {
+		return x.Role
+	}
+	return ""
+}
+
+func (x *StartRunAgent) GetHarness() *StartRunHarness {
+	if x != nil {
+		return x.Harness
+	}
+	return nil
+}
+
+type StartRunSameMachine struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *StartRunSameMachine) Reset() {
+	*x = StartRunSameMachine{}
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[94]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StartRunSameMachine) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StartRunSameMachine) ProtoMessage() {}
+
+func (x *StartRunSameMachine) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[94]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use StartRunSameMachine.ProtoReflect.Descriptor instead.
+func (*StartRunSameMachine) Descriptor() ([]byte, []int) {
+	return file_vibesys_host_v1_operations_proto_rawDescGZIP(), []int{94}
+}
+
+type StartRunModal struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *StartRunModal) Reset() {
+	*x = StartRunModal{}
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[95]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StartRunModal) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StartRunModal) ProtoMessage() {}
+
+func (x *StartRunModal) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[95]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use StartRunModal.ProtoReflect.Descriptor instead.
+func (*StartRunModal) Descriptor() ([]byte, []int) {
+	return file_vibesys_host_v1_operations_proto_rawDescGZIP(), []int{95}
+}
+
+type StartRunMeasure struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Target:
+	//
+	//	*StartRunMeasure_SameMachine
+	//	*StartRunMeasure_SlurmCluster
+	//	*StartRunMeasure_Modal
+	Target        isStartRunMeasure_Target `protobuf_oneof:"target"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *StartRunMeasure) Reset() {
+	*x = StartRunMeasure{}
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[96]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StartRunMeasure) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StartRunMeasure) ProtoMessage() {}
+
+func (x *StartRunMeasure) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[96]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use StartRunMeasure.ProtoReflect.Descriptor instead.
+func (*StartRunMeasure) Descriptor() ([]byte, []int) {
+	return file_vibesys_host_v1_operations_proto_rawDescGZIP(), []int{96}
+}
+
+func (x *StartRunMeasure) GetTarget() isStartRunMeasure_Target {
+	if x != nil {
+		return x.Target
+	}
+	return nil
+}
+
+func (x *StartRunMeasure) GetSameMachine() *StartRunSameMachine {
+	if x != nil {
+		if x, ok := x.Target.(*StartRunMeasure_SameMachine); ok {
+			return x.SameMachine
+		}
+	}
+	return nil
+}
+
+func (x *StartRunMeasure) GetSlurmCluster() string {
+	if x != nil {
+		if x, ok := x.Target.(*StartRunMeasure_SlurmCluster); ok {
+			return x.SlurmCluster
+		}
+	}
+	return ""
+}
+
+func (x *StartRunMeasure) GetModal() *StartRunModal {
+	if x != nil {
+		if x, ok := x.Target.(*StartRunMeasure_Modal); ok {
+			return x.Modal
+		}
+	}
+	return nil
+}
+
+type isStartRunMeasure_Target interface {
+	isStartRunMeasure_Target()
+}
+
+type StartRunMeasure_SameMachine struct {
+	SameMachine *StartRunSameMachine `protobuf:"bytes,1,opt,name=same_machine,json=sameMachine,proto3,oneof"`
+}
+
+type StartRunMeasure_SlurmCluster struct {
+	SlurmCluster string `protobuf:"bytes,2,opt,name=slurm_cluster,json=slurmCluster,proto3,oneof"`
+}
+
+type StartRunMeasure_Modal struct {
+	Modal *StartRunModal `protobuf:"bytes,3,opt,name=modal,proto3,oneof"`
+}
+
+func (*StartRunMeasure_SameMachine) isStartRunMeasure_Target() {}
+
+func (*StartRunMeasure_SlurmCluster) isStartRunMeasure_Target() {}
+
+func (*StartRunMeasure_Modal) isStartRunMeasure_Target() {}
+
+type ClusterTestPassed struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Hardware      *ClusterHardware       `protobuf:"bytes,1,opt,name=hardware,proto3" json:"hardware,omitempty"`
+	Partitions    []string               `protobuf:"bytes,2,rep,name=partitions,proto3" json:"partitions,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ClusterTestPassed) Reset() {
+	*x = ClusterTestPassed{}
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[97]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ClusterTestPassed) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ClusterTestPassed) ProtoMessage() {}
+
+func (x *ClusterTestPassed) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[97]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ClusterTestPassed.ProtoReflect.Descriptor instead.
+func (*ClusterTestPassed) Descriptor() ([]byte, []int) {
+	return file_vibesys_host_v1_operations_proto_rawDescGZIP(), []int{97}
+}
+
+func (x *ClusterTestPassed) GetHardware() *ClusterHardware {
+	if x != nil {
+		return x.Hardware
+	}
+	return nil
+}
+
+func (x *ClusterTestPassed) GetPartitions() []string {
+	if x != nil {
+		return x.Partitions
+	}
+	return nil
+}
+
+type ClusterTestFailed struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Stage         ClusterTestStage       `protobuf:"varint,1,opt,name=stage,proto3,enum=vibesys.host.v1.ClusterTestStage" json:"stage,omitempty"`
+	Detail        string                 `protobuf:"bytes,2,opt,name=detail,proto3" json:"detail,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ClusterTestFailed) Reset() {
+	*x = ClusterTestFailed{}
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[98]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ClusterTestFailed) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ClusterTestFailed) ProtoMessage() {}
+
+func (x *ClusterTestFailed) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[98]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ClusterTestFailed.ProtoReflect.Descriptor instead.
+func (*ClusterTestFailed) Descriptor() ([]byte, []int) {
+	return file_vibesys_host_v1_operations_proto_rawDescGZIP(), []int{98}
+}
+
+func (x *ClusterTestFailed) GetStage() ClusterTestStage {
+	if x != nil {
+		return x.Stage
+	}
+	return ClusterTestStage_CLUSTER_TEST_STAGE_UNSPECIFIED
+}
+
+func (x *ClusterTestFailed) GetDetail() string {
+	if x != nil {
+		return x.Detail
+	}
+	return ""
+}
+
+type InspectDestinationRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Example       string                 `protobuf:"bytes,2,opt,name=example,proto3" json:"example,omitempty"`
+	Destination   string                 `protobuf:"bytes,3,opt,name=destination,proto3" json:"destination,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *InspectDestinationRequest) Reset() {
+	*x = InspectDestinationRequest{}
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[99]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *InspectDestinationRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*InspectDestinationRequest) ProtoMessage() {}
+
+func (x *InspectDestinationRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[99]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use InspectDestinationRequest.ProtoReflect.Descriptor instead.
+func (*InspectDestinationRequest) Descriptor() ([]byte, []int) {
+	return file_vibesys_host_v1_operations_proto_rawDescGZIP(), []int{99}
+}
+
+func (x *InspectDestinationRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *InspectDestinationRequest) GetExample() string {
+	if x != nil {
+		return x.Example
+	}
+	return ""
+}
+
+func (x *InspectDestinationRequest) GetDestination() string {
+	if x != nil {
+		return x.Destination
+	}
+	return ""
+}
+
+type InspectDestinationResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	State         DestinationState       `protobuf:"varint,2,opt,name=state,proto3,enum=vibesys.host.v1.DestinationState" json:"state,omitempty"`
+	Project       *string                `protobuf:"bytes,3,opt,name=project,proto3,oneof" json:"project,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *InspectDestinationResponse) Reset() {
+	*x = InspectDestinationResponse{}
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[100]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *InspectDestinationResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*InspectDestinationResponse) ProtoMessage() {}
+
+func (x *InspectDestinationResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[100]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use InspectDestinationResponse.ProtoReflect.Descriptor instead.
+func (*InspectDestinationResponse) Descriptor() ([]byte, []int) {
+	return file_vibesys_host_v1_operations_proto_rawDescGZIP(), []int{100}
+}
+
+func (x *InspectDestinationResponse) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *InspectDestinationResponse) GetState() DestinationState {
+	if x != nil {
+		return x.State
+	}
+	return DestinationState_DESTINATION_STATE_UNSPECIFIED
+}
+
+func (x *InspectDestinationResponse) GetProject() string {
+	if x != nil && x.Project != nil {
+		return *x.Project
+	}
+	return ""
+}
+
+type CreatedProject struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Project       string                 `protobuf:"bytes,1,opt,name=project,proto3" json:"project,omitempty"`
+	Tasks         []string               `protobuf:"bytes,2,rep,name=tasks,proto3" json:"tasks,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CreatedProject) Reset() {
+	*x = CreatedProject{}
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[101]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CreatedProject) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CreatedProject) ProtoMessage() {}
+
+func (x *CreatedProject) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[101]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CreatedProject.ProtoReflect.Descriptor instead.
+func (*CreatedProject) Descriptor() ([]byte, []int) {
+	return file_vibesys_host_v1_operations_proto_rawDescGZIP(), []int{101}
+}
+
+func (x *CreatedProject) GetProject() string {
+	if x != nil {
+		return x.Project
+	}
+	return ""
+}
+
+func (x *CreatedProject) GetTasks() []string {
+	if x != nil {
+		return x.Tasks
+	}
+	return nil
+}
+
+type DestinationTaken struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DestinationTaken) Reset() {
+	*x = DestinationTaken{}
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[102]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DestinationTaken) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DestinationTaken) ProtoMessage() {}
+
+func (x *DestinationTaken) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[102]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DestinationTaken.ProtoReflect.Descriptor instead.
+func (*DestinationTaken) Descriptor() ([]byte, []int) {
+	return file_vibesys_host_v1_operations_proto_rawDescGZIP(), []int{102}
+}
+
+type CreateExampleRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Example       string                 `protobuf:"bytes,2,opt,name=example,proto3" json:"example,omitempty"`
+	Destination   string                 `protobuf:"bytes,3,opt,name=destination,proto3" json:"destination,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CreateExampleRequest) Reset() {
+	*x = CreateExampleRequest{}
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[103]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CreateExampleRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CreateExampleRequest) ProtoMessage() {}
+
+func (x *CreateExampleRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[103]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CreateExampleRequest.ProtoReflect.Descriptor instead.
+func (*CreateExampleRequest) Descriptor() ([]byte, []int) {
+	return file_vibesys_host_v1_operations_proto_rawDescGZIP(), []int{103}
+}
+
+func (x *CreateExampleRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *CreateExampleRequest) GetExample() string {
+	if x != nil {
+		return x.Example
+	}
+	return ""
+}
+
+func (x *CreateExampleRequest) GetDestination() string {
+	if x != nil {
+		return x.Destination
+	}
+	return ""
+}
+
+type CreateExampleResponse struct {
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	RequestId string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	// Types that are valid to be assigned to Result:
+	//
+	//	*CreateExampleResponse_Created
+	//	*CreateExampleResponse_Taken
+	Result        isCreateExampleResponse_Result `protobuf_oneof:"result"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CreateExampleResponse) Reset() {
+	*x = CreateExampleResponse{}
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[104]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CreateExampleResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CreateExampleResponse) ProtoMessage() {}
+
+func (x *CreateExampleResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[104]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CreateExampleResponse.ProtoReflect.Descriptor instead.
+func (*CreateExampleResponse) Descriptor() ([]byte, []int) {
+	return file_vibesys_host_v1_operations_proto_rawDescGZIP(), []int{104}
+}
+
+func (x *CreateExampleResponse) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *CreateExampleResponse) GetResult() isCreateExampleResponse_Result {
+	if x != nil {
+		return x.Result
+	}
+	return nil
+}
+
+func (x *CreateExampleResponse) GetCreated() *CreatedProject {
+	if x != nil {
+		if x, ok := x.Result.(*CreateExampleResponse_Created); ok {
+			return x.Created
+		}
+	}
+	return nil
+}
+
+func (x *CreateExampleResponse) GetTaken() *DestinationTaken {
+	if x != nil {
+		if x, ok := x.Result.(*CreateExampleResponse_Taken); ok {
+			return x.Taken
+		}
+	}
+	return nil
+}
+
+type isCreateExampleResponse_Result interface {
+	isCreateExampleResponse_Result()
+}
+
+type CreateExampleResponse_Created struct {
+	Created *CreatedProject `protobuf:"bytes,2,opt,name=created,proto3,oneof"`
+}
+
+type CreateExampleResponse_Taken struct {
+	Taken *DestinationTaken `protobuf:"bytes,3,opt,name=taken,proto3,oneof"`
+}
+
+func (*CreateExampleResponse_Created) isCreateExampleResponse_Result() {}
+
+func (*CreateExampleResponse_Taken) isCreateExampleResponse_Result() {}
+
+type CopyProjectRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Source        string                 `protobuf:"bytes,2,opt,name=source,proto3" json:"source,omitempty"`
+	Destination   string                 `protobuf:"bytes,3,opt,name=destination,proto3" json:"destination,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CopyProjectRequest) Reset() {
+	*x = CopyProjectRequest{}
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[105]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CopyProjectRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CopyProjectRequest) ProtoMessage() {}
+
+func (x *CopyProjectRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[105]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CopyProjectRequest.ProtoReflect.Descriptor instead.
+func (*CopyProjectRequest) Descriptor() ([]byte, []int) {
+	return file_vibesys_host_v1_operations_proto_rawDescGZIP(), []int{105}
+}
+
+func (x *CopyProjectRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *CopyProjectRequest) GetSource() string {
+	if x != nil {
+		return x.Source
+	}
+	return ""
+}
+
+func (x *CopyProjectRequest) GetDestination() string {
+	if x != nil {
+		return x.Destination
+	}
+	return ""
+}
+
+type CopyProjectResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Created       *CreatedProject        `protobuf:"bytes,2,opt,name=created,proto3" json:"created,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CopyProjectResponse) Reset() {
+	*x = CopyProjectResponse{}
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[106]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CopyProjectResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CopyProjectResponse) ProtoMessage() {}
+
+func (x *CopyProjectResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[106]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CopyProjectResponse.ProtoReflect.Descriptor instead.
+func (*CopyProjectResponse) Descriptor() ([]byte, []int) {
+	return file_vibesys_host_v1_operations_proto_rawDescGZIP(), []int{106}
+}
+
+func (x *CopyProjectResponse) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *CopyProjectResponse) GetCreated() *CreatedProject {
+	if x != nil {
+		return x.Created
+	}
+	return nil
+}
+
+type PutClusterRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Cluster       *SlurmClusterSettings  `protobuf:"bytes,2,opt,name=cluster,proto3" json:"cluster,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PutClusterRequest) Reset() {
+	*x = PutClusterRequest{}
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[107]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PutClusterRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PutClusterRequest) ProtoMessage() {}
+
+func (x *PutClusterRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[107]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PutClusterRequest.ProtoReflect.Descriptor instead.
+func (*PutClusterRequest) Descriptor() ([]byte, []int) {
+	return file_vibesys_host_v1_operations_proto_rawDescGZIP(), []int{107}
+}
+
+func (x *PutClusterRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *PutClusterRequest) GetCluster() *SlurmClusterSettings {
+	if x != nil {
+		return x.Cluster
+	}
+	return nil
+}
+
+type PutClusterResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Settings      *ComputeSettings       `protobuf:"bytes,2,opt,name=settings,proto3" json:"settings,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PutClusterResponse) Reset() {
+	*x = PutClusterResponse{}
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[108]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PutClusterResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PutClusterResponse) ProtoMessage() {}
+
+func (x *PutClusterResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[108]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PutClusterResponse.ProtoReflect.Descriptor instead.
+func (*PutClusterResponse) Descriptor() ([]byte, []int) {
+	return file_vibesys_host_v1_operations_proto_rawDescGZIP(), []int{108}
+}
+
+func (x *PutClusterResponse) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *PutClusterResponse) GetSettings() *ComputeSettings {
+	if x != nil {
+		return x.Settings
+	}
+	return nil
+}
+
+type RemoveClusterRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RemoveClusterRequest) Reset() {
+	*x = RemoveClusterRequest{}
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[109]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RemoveClusterRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RemoveClusterRequest) ProtoMessage() {}
+
+func (x *RemoveClusterRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[109]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RemoveClusterRequest.ProtoReflect.Descriptor instead.
+func (*RemoveClusterRequest) Descriptor() ([]byte, []int) {
+	return file_vibesys_host_v1_operations_proto_rawDescGZIP(), []int{109}
+}
+
+func (x *RemoveClusterRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *RemoveClusterRequest) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+type RemoveClusterResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Settings      *ComputeSettings       `protobuf:"bytes,2,opt,name=settings,proto3" json:"settings,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RemoveClusterResponse) Reset() {
+	*x = RemoveClusterResponse{}
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[110]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RemoveClusterResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RemoveClusterResponse) ProtoMessage() {}
+
+func (x *RemoveClusterResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[110]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RemoveClusterResponse.ProtoReflect.Descriptor instead.
+func (*RemoveClusterResponse) Descriptor() ([]byte, []int) {
+	return file_vibesys_host_v1_operations_proto_rawDescGZIP(), []int{110}
+}
+
+func (x *RemoveClusterResponse) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *RemoveClusterResponse) GetSettings() *ComputeSettings {
+	if x != nil {
+		return x.Settings
+	}
+	return nil
+}
+
+type TestClusterRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Cluster       *SlurmClusterSettings  `protobuf:"bytes,2,opt,name=cluster,proto3" json:"cluster,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TestClusterRequest) Reset() {
+	*x = TestClusterRequest{}
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[111]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TestClusterRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TestClusterRequest) ProtoMessage() {}
+
+func (x *TestClusterRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[111]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TestClusterRequest.ProtoReflect.Descriptor instead.
+func (*TestClusterRequest) Descriptor() ([]byte, []int) {
+	return file_vibesys_host_v1_operations_proto_rawDescGZIP(), []int{111}
+}
+
+func (x *TestClusterRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *TestClusterRequest) GetCluster() *SlurmClusterSettings {
+	if x != nil {
+		return x.Cluster
+	}
+	return nil
+}
+
+type TestClusterResponse struct {
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	RequestId string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	// Types that are valid to be assigned to Result:
+	//
+	//	*TestClusterResponse_Passed
+	//	*TestClusterResponse_Failed
+	Result        isTestClusterResponse_Result `protobuf_oneof:"result"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TestClusterResponse) Reset() {
+	*x = TestClusterResponse{}
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[112]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TestClusterResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TestClusterResponse) ProtoMessage() {}
+
+func (x *TestClusterResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[112]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TestClusterResponse.ProtoReflect.Descriptor instead.
+func (*TestClusterResponse) Descriptor() ([]byte, []int) {
+	return file_vibesys_host_v1_operations_proto_rawDescGZIP(), []int{112}
+}
+
+func (x *TestClusterResponse) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *TestClusterResponse) GetResult() isTestClusterResponse_Result {
+	if x != nil {
+		return x.Result
+	}
+	return nil
+}
+
+func (x *TestClusterResponse) GetPassed() *ClusterTestPassed {
+	if x != nil {
+		if x, ok := x.Result.(*TestClusterResponse_Passed); ok {
+			return x.Passed
+		}
+	}
+	return nil
+}
+
+func (x *TestClusterResponse) GetFailed() *ClusterTestFailed {
+	if x != nil {
+		if x, ok := x.Result.(*TestClusterResponse_Failed); ok {
+			return x.Failed
+		}
+	}
+	return nil
+}
+
+type isTestClusterResponse_Result interface {
+	isTestClusterResponse_Result()
+}
+
+type TestClusterResponse_Passed struct {
+	Passed *ClusterTestPassed `protobuf:"bytes,2,opt,name=passed,proto3,oneof"`
+}
+
+type TestClusterResponse_Failed struct {
+	Failed *ClusterTestFailed `protobuf:"bytes,3,opt,name=failed,proto3,oneof"`
+}
+
+func (*TestClusterResponse_Passed) isTestClusterResponse_Result() {}
+
+func (*TestClusterResponse_Failed) isTestClusterResponse_Result() {}
+
+type StartRunRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Project       string                 `protobuf:"bytes,2,opt,name=project,proto3" json:"project,omitempty"`
+	Task          string                 `protobuf:"bytes,3,opt,name=task,proto3" json:"task,omitempty"`
+	Args          []string               `protobuf:"bytes,4,rep,name=args,proto3" json:"args,omitempty"`
+	Harness       *StartRunHarness       `protobuf:"bytes,5,opt,name=harness,proto3" json:"harness,omitempty"`
+	Options       *StartRunOptions       `protobuf:"bytes,6,opt,name=options,proto3" json:"options,omitempty"`
+	Agents        []*StartRunAgent       `protobuf:"bytes,7,rep,name=agents,proto3" json:"agents,omitempty"`
+	MeasureOn     *StartRunMeasure       `protobuf:"bytes,8,opt,name=measure_on,json=measureOn,proto3" json:"measure_on,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *StartRunRequest) Reset() {
+	*x = StartRunRequest{}
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[113]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StartRunRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StartRunRequest) ProtoMessage() {}
+
+func (x *StartRunRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[113]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use StartRunRequest.ProtoReflect.Descriptor instead.
+func (*StartRunRequest) Descriptor() ([]byte, []int) {
+	return file_vibesys_host_v1_operations_proto_rawDescGZIP(), []int{113}
+}
+
+func (x *StartRunRequest) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *StartRunRequest) GetProject() string {
+	if x != nil {
+		return x.Project
+	}
+	return ""
+}
+
+func (x *StartRunRequest) GetTask() string {
+	if x != nil {
+		return x.Task
+	}
+	return ""
+}
+
+func (x *StartRunRequest) GetArgs() []string {
+	if x != nil {
+		return x.Args
+	}
+	return nil
+}
+
+func (x *StartRunRequest) GetHarness() *StartRunHarness {
+	if x != nil {
+		return x.Harness
+	}
+	return nil
+}
+
+func (x *StartRunRequest) GetOptions() *StartRunOptions {
+	if x != nil {
+		return x.Options
+	}
+	return nil
+}
+
+func (x *StartRunRequest) GetAgents() []*StartRunAgent {
+	if x != nil {
+		return x.Agents
+	}
+	return nil
+}
+
+func (x *StartRunRequest) GetMeasureOn() *StartRunMeasure {
+	if x != nil {
+		return x.MeasureOn
+	}
+	return nil
+}
+
+type StartRunResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	RunId         string                 `protobuf:"bytes,2,opt,name=run_id,json=runId,proto3" json:"run_id,omitempty"`
+	InstanceId    string                 `protobuf:"bytes,3,opt,name=instance_id,json=instanceId,proto3" json:"instance_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *StartRunResponse) Reset() {
+	*x = StartRunResponse{}
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[114]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StartRunResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StartRunResponse) ProtoMessage() {}
+
+func (x *StartRunResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[114]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use StartRunResponse.ProtoReflect.Descriptor instead.
+func (*StartRunResponse) Descriptor() ([]byte, []int) {
+	return file_vibesys_host_v1_operations_proto_rawDescGZIP(), []int{114}
+}
+
+func (x *StartRunResponse) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *StartRunResponse) GetRunId() string {
+	if x != nil {
+		return x.RunId
+	}
+	return ""
+}
+
+func (x *StartRunResponse) GetInstanceId() string {
+	if x != nil {
+		return x.InstanceId
+	}
+	return ""
+}
+
+type LoginResponse struct {
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	RequestId string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Sequence  uint64                 `protobuf:"varint,2,opt,name=sequence,proto3" json:"sequence,omitempty"`
+	// Types that are valid to be assigned to Body:
+	//
+	//	*LoginResponse_Started
+	//	*LoginResponse_Unavailable
+	Body          isLoginResponse_Body `protobuf_oneof:"body"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *LoginResponse) Reset() {
+	*x = LoginResponse{}
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[115]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LoginResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LoginResponse) ProtoMessage() {}
+
+func (x *LoginResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_host_v1_operations_proto_msgTypes[115]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LoginResponse.ProtoReflect.Descriptor instead.
+func (*LoginResponse) Descriptor() ([]byte, []int) {
+	return file_vibesys_host_v1_operations_proto_rawDescGZIP(), []int{115}
+}
+
+func (x *LoginResponse) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *LoginResponse) GetSequence() uint64 {
+	if x != nil {
+		return x.Sequence
+	}
+	return 0
+}
+
+func (x *LoginResponse) GetBody() isLoginResponse_Body {
+	if x != nil {
+		return x.Body
+	}
+	return nil
+}
+
+func (x *LoginResponse) GetStarted() *LoginStartedBody {
+	if x != nil {
+		if x, ok := x.Body.(*LoginResponse_Started); ok {
+			return x.Started
+		}
+	}
+	return nil
+}
+
+func (x *LoginResponse) GetUnavailable() *LoginUnavailableBody {
+	if x != nil {
+		if x, ok := x.Body.(*LoginResponse_Unavailable); ok {
+			return x.Unavailable
+		}
+	}
+	return nil
+}
+
+type isLoginResponse_Body interface {
+	isLoginResponse_Body()
+}
+
+type LoginResponse_Started struct {
+	Started *LoginStartedBody `protobuf:"bytes,3,opt,name=started,proto3,oneof"`
+}
+
+type LoginResponse_Unavailable struct {
+	Unavailable *LoginUnavailableBody `protobuf:"bytes,4,opt,name=unavailable,proto3,oneof"`
+}
+
+func (*LoginResponse_Started) isLoginResponse_Body() {}
+
+func (*LoginResponse_Unavailable) isLoginResponse_Body() {}
+
 var File_vibesys_host_v1_operations_proto protoreflect.FileDescriptor
 
 const file_vibesys_host_v1_operations_proto_rawDesc = "" +
@@ -6472,7 +8989,215 @@ const file_vibesys_host_v1_operations_proto_rawDesc = "" +
 	"\fmodal_target\x18\x03 \x01(\v2\x1c.vibesys.host.v1.ModalTargetH\x00R\vmodalTargetB\x0e\n" +
 	"\x05value\x12\x05\xbaH\x02\b\x01\"^\n" +
 	"\x19PreflightRunResponseRoles\x12A\n" +
-	"\x05items\x18\x01 \x03(\tB+\xbaH(\x92\x01%\x10\x90N\" r\x1e\x18@(\x80\x80\b2\x16^[a-z0-9][a-z0-9._-]*$R\x05items*~\n" +
+	"\x05items\x18\x01 \x03(\tB+\xbaH(\x92\x01%\x10\x90N\" r\x1e\x18@(\x80\x80\b2\x16^[a-z0-9][a-z0-9._-]*$R\x05items\"\x9e\x02\n" +
+	"\x11CandidateIdentity\x12\x1c\n" +
+	"\x04root\x18\x01 \x01(\tB\b\xbaH\x05r\x03(\x80 R\x04root\x12\"\n" +
+	"\aversion\x18\x02 \x01(\tB\b\xbaH\x05r\x03(\x80\x01R\aversion\x12'\n" +
+	"\x06commit\x18\x03 \x01(\tB\n" +
+	"\xbaH\ar\x05\x10\x01(\x80\x01H\x00R\x06commit\x88\x01\x01\x12\x19\n" +
+	"\x05dirty\x18\x04 \x01(\bH\x01R\x05dirty\x88\x01\x01\x12\x1e\n" +
+	"\n" +
+	"compatible\x18\x05 \x01(\bR\n" +
+	"compatible\x12'\n" +
+	"\x0fvibesys_project\x18\x06 \x01(\bR\x0evibesysProject\x12%\n" +
+	"\x0egit_repository\x18\a \x01(\bR\rgitRepositoryB\t\n" +
+	"\a_commitB\b\n" +
+	"\x06_dirty\"\xa0\x01\n" +
+	"\x17InspectCandidateRequest\x12-\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB\x0e\xbaH\vr\t\x10\x01\x18\x80\x01(\x80\x80\bR\trequestId\x12\x1e\n" +
+	"\x04path\x18\x02 \x01(\tB\n" +
+	"\xbaH\ar\x05\x10\x01(\x80 R\x04path\x126\n" +
+	"\x12selection_revision\x18\x03 \x01(\x04B\a\xbaH\x042\x02 \x00R\x11selectionRevision\"\xd4\x05\n" +
+	"\x18InspectCandidateResponse\x12-\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB\x0e\xbaH\vr\t\x10\x01\x18\x80\x01(\x80\x80\bR\trequestId\x126\n" +
+	"\x12selection_revision\x18\x02 \x01(\x04B\a\xbaH\x042\x02 \x00R\x11selectionRevision\x126\n" +
+	"\vschema_hash\x18\x03 \x01(\tB\x15\xbaH\x12r\x102\x0e^[0-9a-f]{64}$R\n" +
+	"schemaHash\x12A\n" +
+	"\x05state\x18\x04 \x01(\x0e2\x1f.vibesys.host.v1.CandidateStateB\n" +
+	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x05state\x12>\n" +
+	"\bidentity\x18\x05 \x01(\v2\".vibesys.host.v1.CandidateIdentityR\bidentity\x123\n" +
+	"\x0fminimum_version\x18\x06 \x01(\tB\n" +
+	"\xbaH\ar\x05\x10\x01(\x80\x01R\x0eminimumVersion\x12)\n" +
+	"\x10vibesys_checkout\x18\a \x01(\bR\x0fvibesysCheckout\x12'\n" +
+	"\x0fvibesys_project\x18\b \x01(\bR\x0evibesysProject\x12%\n" +
+	"\x0egit_repository\x18\t \x01(\bR\rgitRepository:\xe5\x01\xbaH\xe1\x01\x1a\xde\x01\n" +
+	"\x10inspect.identity\x129found and too-old candidates include a versioned identity\x1a\x8e\x01(this.state != 1 && this.state != 3) || (has(this.identity) && (this.state != 1 || (this.identity.root != '' && this.identity.version != '')))\"\xca\x01\n" +
+	"\rCompletedPath\x12\x1e\n" +
+	"\x04name\x18\x01 \x01(\tB\n" +
+	"\xbaH\ar\x05\x10\x01(\xff\x01R\x04name\x12\x1e\n" +
+	"\x04path\x18\x02 \x01(\tB\n" +
+	"\xbaH\ar\x05\x10\x01(\x80 R\x04path\x12)\n" +
+	"\x10vibesys_checkout\x18\x03 \x01(\bR\x0fvibesysCheckout\x12'\n" +
+	"\x0fvibesys_project\x18\x04 \x01(\bR\x0evibesysProject\x12%\n" +
+	"\x0egit_repository\x18\x05 \x01(\bR\rgitRepository\"g\n" +
+	"\x14CompletePathsRequest\x12-\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB\x0e\xbaH\vr\t\x10\x01\x18\x80\x01(\x80\x80\bR\trequestId\x12 \n" +
+	"\x06prefix\x18\x02 \x01(\tB\b\xbaH\x05r\x03(\x80 R\x06prefix\"\xd3\x01\n" +
+	"\x15CompletePathsResponse\x12-\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB\x0e\xbaH\vr\t\x10\x01\x18\x80\x01(\x80\x80\bR\trequestId\x12(\n" +
+	"\tdirectory\x18\x02 \x01(\tB\n" +
+	"\xbaH\ar\x05\x10\x01(\x80 R\tdirectory\x12C\n" +
+	"\aentries\x18\x03 \x03(\v2\x1e.vibesys.host.v1.CompletedPathB\t\xbaH\x06\x92\x01\x03\x10\xc8\x01R\aentries\x12\x1c\n" +
+	"\ttruncated\x18\x04 \x01(\bR\ttruncated\"i\n" +
+	"\fLoginRequest\x12-\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB\x0e\xbaH\vr\t\x10\x01\x18\x80\x01(\x80\x80\bR\trequestId\x12*\n" +
+	"\bprovider\x18\x02 \x01(\tB\x0e\xbaH\vr\t\x10\x01\x18\x80\x01(\x80\x80\bR\bprovider\"c\n" +
+	"\x10LoginStartedBody\x12?\n" +
+	"\vinstruction\x18\x01 \x01(\tB\x18\xbaH\x15r\x13\x18\xac\x02(\x80\x80\b2\n" +
+	"^[^\\n\\r]*$H\x00R\vinstruction\x88\x01\x01B\x0e\n" +
+	"\f_instruction\"\xda\x01\n" +
+	"\x14LoginUnavailableBody\x12K\n" +
+	"\x06reason\x18\x01 \x01(\x0e2'.vibesys.host.v1.LoginUnavailableReasonB\n" +
+	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x06reason\x127\n" +
+	"\acommand\x18\x02 \x01(\tB\x18\xbaH\x15r\x13\x18\xac\x02(\x80\x80\b2\n" +
+	"^[^\\n\\r]*$H\x00R\acommand\x88\x01\x01\x120\n" +
+	"\x06detail\x18\x03 \x01(\tB\x18\xbaH\x15r\x13\x18\xac\x02(\x80\x80\b2\n" +
+	"^[^\\n\\r]*$R\x06detailB\n" +
+	"\n" +
+	"\b_command\"[\n" +
+	"\x0fStartRunHarness\x12&\n" +
+	"\bprovider\x18\x01 \x01(\tB\n" +
+	"\xbaH\ar\x05\x10\x01(\x80\x01R\bprovider\x12 \n" +
+	"\x05model\x18\x02 \x01(\tB\n" +
+	"\xbaH\ar\x05\x10\x01(\x80\x02R\x05model\"\x9a\x01\n" +
+	"\fStartRunRole\x12\x1e\n" +
+	"\x04role\x18\x01 \x01(\tB\n" +
+	"\xbaH\ar\x05\x10\x01(\x80\x01R\x04role\x12\x1e\n" +
+	"\x05model\x18\x02 \x01(\tB\b\xbaH\x05r\x03(\x80\x02R\x05model\x12J\n" +
+	"\treasoning\x18\x03 \x01(\x0e2\".vibesys.host.v1.StartRunReasoningB\b\xbaH\x05\x82\x01\x02\x10\x01R\treasoning\"\x91\x02\n" +
+	"\x0fStartRunOptions\x12(\n" +
+	"\x06rounds\x18\x01 \x01(\x05B\v\xbaH\b\x1a\x06\x18\xc0\x84=(\x01H\x00R\x06rounds\x88\x01\x01\x123\n" +
+	"\ftime_limit_s\x18\x02 \x01(\x05B\f\xbaH\t\x1a\a\x18\x80\xac\x8f\x04(\x01H\x01R\n" +
+	"timeLimitS\x88\x01\x01\x12D\n" +
+	"\aresults\x18\x03 \x01(\x0e2 .vibesys.host.v1.StartRunResultsB\b\xbaH\x05\x82\x01\x02\x10\x01R\aresults\x12=\n" +
+	"\x05roles\x18\x04 \x03(\v2\x1d.vibesys.host.v1.StartRunRoleB\b\xbaH\x05\x92\x01\x02\x10 R\x05rolesB\t\n" +
+	"\a_roundsB\x0f\n" +
+	"\r_time_limit_s\"s\n" +
+	"\rStartRunAgent\x12\x1e\n" +
+	"\x04role\x18\x01 \x01(\tB\n" +
+	"\xbaH\ar\x05\x10\x01(\x80\x01R\x04role\x12B\n" +
+	"\aharness\x18\x02 \x01(\v2 .vibesys.host.v1.StartRunHarnessB\x06\xbaH\x03\xc8\x01\x01R\aharness\"\x15\n" +
+	"\x13StartRunSameMachine\"\x0f\n" +
+	"\rStartRunModal\"\xd8\x01\n" +
+	"\x0fStartRunMeasure\x12I\n" +
+	"\fsame_machine\x18\x01 \x01(\v2$.vibesys.host.v1.StartRunSameMachineH\x00R\vsameMachine\x121\n" +
+	"\rslurm_cluster\x18\x02 \x01(\tB\n" +
+	"\xbaH\ar\x05\x10\x01(\x80\x02H\x00R\fslurmCluster\x126\n" +
+	"\x05modal\x18\x03 \x01(\v2\x1e.vibesys.host.v1.StartRunModalH\x00R\x05modalB\x0f\n" +
+	"\x06target\x12\x05\xbaH\x02\b\x01\"\x84\x01\n" +
+	"\x11ClusterTestPassed\x12D\n" +
+	"\bhardware\x18\x01 \x01(\v2 .vibesys.host.v1.ClusterHardwareB\x06\xbaH\x03\xc8\x01\x01R\bhardware\x12)\n" +
+	"\n" +
+	"partitions\x18\x02 \x03(\tB\t\xbaH\x06\x92\x01\x03\x10\x80\x02R\n" +
+	"partitions\"\x88\x01\n" +
+	"\x11ClusterTestFailed\x12C\n" +
+	"\x05stage\x18\x01 \x01(\x0e2!.vibesys.host.v1.ClusterTestStageB\n" +
+	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x05stage\x12.\n" +
+	"\x06detail\x18\x02 \x01(\tB\x16\xbaH\x13r\x11\x10\x01(\xac\x022\n" +
+	"^[^\\n\\r]*$R\x06detail\"\xb9\x01\n" +
+	"\x19InspectDestinationRequest\x12H\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB)\xbaH&r$2\"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$R\trequestId\x12$\n" +
+	"\aexample\x18\x02 \x01(\tB\n" +
+	"\xbaH\ar\x05\x10\x01\x18\x80\x02R\aexample\x12,\n" +
+	"\vdestination\x18\x03 \x01(\tB\n" +
+	"\xbaH\ar\x05\x10\x01\x18\x80 R\vdestination\"\xe2\x01\n" +
+	"\x1aInspectDestinationResponse\x12H\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB)\xbaH&r$2\"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$R\trequestId\x12C\n" +
+	"\x05state\x18\x02 \x01(\x0e2!.vibesys.host.v1.DestinationStateB\n" +
+	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x05state\x12)\n" +
+	"\aproject\x18\x03 \x01(\tB\n" +
+	"\xbaH\ar\x05\x10\x01\x18\x80 H\x00R\aproject\x88\x01\x01B\n" +
+	"\n" +
+	"\b_project\"W\n" +
+	"\x0eCreatedProject\x12$\n" +
+	"\aproject\x18\x01 \x01(\tB\n" +
+	"\xbaH\ar\x05\x10\x01\x18\x80 R\aproject\x12\x1f\n" +
+	"\x05tasks\x18\x02 \x03(\tB\t\xbaH\x06\x92\x01\x03\x10\x80\x02R\x05tasks\"\x12\n" +
+	"\x10DestinationTaken\"\xb4\x01\n" +
+	"\x14CreateExampleRequest\x12H\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB)\xbaH&r$2\"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$R\trequestId\x12$\n" +
+	"\aexample\x18\x02 \x01(\tB\n" +
+	"\xbaH\ar\x05\x10\x01\x18\x80\x02R\aexample\x12,\n" +
+	"\vdestination\x18\x03 \x01(\tB\n" +
+	"\xbaH\ar\x05\x10\x01\x18\x80 R\vdestination\"\xea\x01\n" +
+	"\x15CreateExampleResponse\x12H\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB)\xbaH&r$2\"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$R\trequestId\x12;\n" +
+	"\acreated\x18\x02 \x01(\v2\x1f.vibesys.host.v1.CreatedProjectH\x00R\acreated\x129\n" +
+	"\x05taken\x18\x03 \x01(\v2!.vibesys.host.v1.DestinationTakenH\x00R\x05takenB\x0f\n" +
+	"\x06result\x12\x05\xbaH\x02\b\x01\"\xb0\x01\n" +
+	"\x12CopyProjectRequest\x12H\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB)\xbaH&r$2\"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$R\trequestId\x12\"\n" +
+	"\x06source\x18\x02 \x01(\tB\n" +
+	"\xbaH\ar\x05\x10\x01\x18\x80 R\x06source\x12,\n" +
+	"\vdestination\x18\x03 \x01(\tB\n" +
+	"\xbaH\ar\x05\x10\x01\x18\x80 R\vdestination\"\xa2\x01\n" +
+	"\x13CopyProjectResponse\x12H\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB)\xbaH&r$2\"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$R\trequestId\x12A\n" +
+	"\acreated\x18\x02 \x01(\v2\x1f.vibesys.host.v1.CreatedProjectB\x06\xbaH\x03\xc8\x01\x01R\acreated\"\xa6\x01\n" +
+	"\x11PutClusterRequest\x12H\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB)\xbaH&r$2\"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$R\trequestId\x12G\n" +
+	"\acluster\x18\x02 \x01(\v2%.vibesys.host.v1.SlurmClusterSettingsB\x06\xbaH\x03\xc8\x01\x01R\acluster\"\xa4\x01\n" +
+	"\x12PutClusterResponse\x12H\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB)\xbaH&r$2\"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$R\trequestId\x12D\n" +
+	"\bsettings\x18\x02 \x01(\v2 .vibesys.host.v1.ComputeSettingsB\x06\xbaH\x03\xc8\x01\x01R\bsettings\"\x9e\x01\n" +
+	"\x14RemoveClusterRequest\x12H\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB)\xbaH&r$2\"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$R\trequestId\x12<\n" +
+	"\x04name\x18\x02 \x01(\tB(\xbaH%r#2!^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$R\x04name\"\xa7\x01\n" +
+	"\x15RemoveClusterResponse\x12H\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB)\xbaH&r$2\"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$R\trequestId\x12D\n" +
+	"\bsettings\x18\x02 \x01(\v2 .vibesys.host.v1.ComputeSettingsB\x06\xbaH\x03\xc8\x01\x01R\bsettings\"\xa7\x01\n" +
+	"\x12TestClusterRequest\x12H\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB)\xbaH&r$2\"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$R\trequestId\x12G\n" +
+	"\acluster\x18\x02 \x01(\v2%.vibesys.host.v1.SlurmClusterSettingsB\x06\xbaH\x03\xc8\x01\x01R\acluster\"\xec\x01\n" +
+	"\x13TestClusterResponse\x12H\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB)\xbaH&r$2\"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$R\trequestId\x12<\n" +
+	"\x06passed\x18\x02 \x01(\v2\".vibesys.host.v1.ClusterTestPassedH\x00R\x06passed\x12<\n" +
+	"\x06failed\x18\x03 \x01(\v2\".vibesys.host.v1.ClusterTestFailedH\x00R\x06failedB\x0f\n" +
+	"\x06result\x12\x05\xbaH\x02\b\x01\"\xb9\x03\n" +
+	"\x0fStartRunRequest\x12H\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB)\xbaH&r$2\"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$R\trequestId\x12$\n" +
+	"\aproject\x18\x02 \x01(\tB\n" +
+	"\xbaH\ar\x05\x10\x01(\x80 R\aproject\x12\x1c\n" +
+	"\x04task\x18\x03 \x01(\tB\b\xbaH\x05r\x03(\x80\x02R\x04task\x12\x1d\n" +
+	"\x04args\x18\x04 \x03(\tB\t\xbaH\x06\x92\x01\x03\x10\x80\x02R\x04args\x12:\n" +
+	"\aharness\x18\x05 \x01(\v2 .vibesys.host.v1.StartRunHarnessR\aharness\x12:\n" +
+	"\aoptions\x18\x06 \x01(\v2 .vibesys.host.v1.StartRunOptionsR\aoptions\x12@\n" +
+	"\x06agents\x18\a \x03(\v2\x1e.vibesys.host.v1.StartRunAgentB\b\xbaH\x05\x92\x01\x02\x10 R\x06agents\x12?\n" +
+	"\n" +
+	"measure_on\x18\b \x01(\v2 .vibesys.host.v1.StartRunMeasureR\tmeasureOn\"\xac\x01\n" +
+	"\x10StartRunResponse\x12H\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB)\xbaH&r$2\"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$R\trequestId\x12!\n" +
+	"\x06run_id\x18\x02 \x01(\tB\n" +
+	"\xbaH\ar\x05\x10\x01(\x80\x01R\x05runId\x12+\n" +
+	"\vinstance_id\x18\x03 \x01(\tB\n" +
+	"\xbaH\ar\x05\x10\x01(\x80\x01R\n" +
+	"instanceId\"\xfc\x01\n" +
+	"\rLoginResponse\x12-\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB\x0e\xbaH\vr\t\x10\x01\x18\x80\x01(\x80\x80\bR\trequestId\x12#\n" +
+	"\bsequence\x18\x02 \x01(\x04B\a\xbaH\x042\x02 \x00R\bsequence\x12=\n" +
+	"\astarted\x18\x03 \x01(\v2!.vibesys.host.v1.LoginStartedBodyH\x00R\astarted\x12I\n" +
+	"\vunavailable\x18\x04 \x01(\v2%.vibesys.host.v1.LoginUnavailableBodyH\x00R\vunavailableB\r\n" +
+	"\x04body\x12\x05\xbaH\x02\b\x01*~\n" +
 	"\x05Maker\x12\x15\n" +
 	"\x11MAKER_UNSPECIFIED\x10\x00\x12\"\n" +
 	"\x0fMAKER_ANTHROPIC\x10\x01\x1a\r\xd2\xf3\x18\tanthropic\x12\x1c\n" +
@@ -6567,7 +9292,40 @@ const file_vibesys_host_v1_operations_proto_rawDesc = "" +
 	"role_model\x12?\n" +
 	" RUN_OPTION_ROLE_REASONING_EFFORT\x10\x05\x1a\x19\xd2\xf3\x18\x15role_reasoning_effort\x12)\n" +
 	"\x15RUN_OPTION_ROLE_AGENT\x10\x06\x1a\x0e\xd2\xf3\x18\n" +
-	"role_agentB?Z=github.com/uw-syfi/vibesys/gateway/gen/vibesys/host/v1;hostv1b\x06proto3"
+	"role_agent*\x88\x01\n" +
+	"\x0eCandidateState\x12\x1f\n" +
+	"\x1bCANDIDATE_STATE_UNSPECIFIED\x10\x00\x12\x19\n" +
+	"\x15CANDIDATE_STATE_FOUND\x10\x01\x12\x1d\n" +
+	"\x19CANDIDATE_STATE_NOT_FOUND\x10\x02\x12\x1b\n" +
+	"\x17CANDIDATE_STATE_TOO_OLD\x10\x03*\xc4\x02\n" +
+	"\x16LoginUnavailableReason\x12(\n" +
+	"$LOGIN_UNAVAILABLE_REASON_UNSPECIFIED\x10\x00\x12=\n" +
+	"&LOGIN_UNAVAILABLE_REASON_NOT_INSTALLED\x10\x01\x1a\x11\xd2\xf3\x18\rnot_installed\x12C\n" +
+	")LOGIN_UNAVAILABLE_REASON_NO_LOGIN_COMMAND\x10\x02\x1a\x14\xd2\xf3\x18\x10no_login_command\x12?\n" +
+	"'LOGIN_UNAVAILABLE_REASON_NEEDS_TERMINAL\x10\x03\x1a\x12\xd2\xf3\x18\x0eneeds_terminal\x12;\n" +
+	"%LOGIN_UNAVAILABLE_REASON_START_FAILED\x10\x04\x1a\x10\xd2\xf3\x18\fstart_failed*v\n" +
+	"\x0fStartRunResults\x12!\n" +
+	"\x1dSTART_RUN_RESULTS_UNSPECIFIED\x10\x00\x12\x1a\n" +
+	"\x16START_RUN_RESULTS_KEEP\x10\x01\x12$\n" +
+	" START_RUN_RESULTS_PUBLISH_GITHUB\x10\x02*\xb4\x01\n" +
+	"\x11StartRunReasoning\x12#\n" +
+	"\x1fSTART_RUN_REASONING_UNSPECIFIED\x10\x00\x12\x1f\n" +
+	"\x1bSTART_RUN_REASONING_DEFAULT\x10\x01\x12\x1b\n" +
+	"\x17START_RUN_REASONING_LOW\x10\x02\x12\x1e\n" +
+	"\x1aSTART_RUN_REASONING_MEDIUM\x10\x03\x12\x1c\n" +
+	"\x18START_RUN_REASONING_HIGH\x10\x04*\xc1\x01\n" +
+	"\x10ClusterTestStage\x12\"\n" +
+	"\x1eCLUSTER_TEST_STAGE_UNSPECIFIED\x10\x00\x12'\n" +
+	"\x18CLUSTER_TEST_STAGE_REACH\x10\x01\x1a\t\xd2\xf3\x18\x05reach\x12/\n" +
+	"\x1cCLUSTER_TEST_STAGE_SCHEDULER\x10\x02\x1a\r\xd2\xf3\x18\tscheduler\x12/\n" +
+	"\x1cCLUSTER_TEST_STAGE_WORKSPACE\x10\x03\x1a\r\xd2\xf3\x18\tworkspace*\xf1\x01\n" +
+	"\x10DestinationState\x12!\n" +
+	"\x1dDESTINATION_STATE_UNSPECIFIED\x10\x00\x12(\n" +
+	"\x18DESTINATION_STATE_ABSENT\x10\x01\x1a\n" +
+	"\xd2\xf3\x18\x06absent\x12&\n" +
+	"\x17DESTINATION_STATE_EMPTY\x10\x02\x1a\t\xd2\xf3\x18\x05empty\x12:\n" +
+	"!DESTINATION_STATE_EXAMPLE_PROJECT\x10\x03\x1a\x13\xd2\xf3\x18\x0fexample_project\x12,\n" +
+	"\x1aDESTINATION_STATE_OCCUPIED\x10\x04\x1a\f\xd2\xf3\x18\boccupiedB?Z=github.com/uw-syfi/vibesys/gateway/gen/vibesys/host/v1;hostv1b\x06proto3"
 
 var (
 	file_vibesys_host_v1_operations_proto_rawDescOnce sync.Once
@@ -6581,8 +9339,8 @@ func file_vibesys_host_v1_operations_proto_rawDescGZIP() []byte {
 	return file_vibesys_host_v1_operations_proto_rawDescData
 }
 
-var file_vibesys_host_v1_operations_proto_enumTypes = make([]protoimpl.EnumInfo, 13)
-var file_vibesys_host_v1_operations_proto_msgTypes = make([]protoimpl.MessageInfo, 83)
+var file_vibesys_host_v1_operations_proto_enumTypes = make([]protoimpl.EnumInfo, 19)
+var file_vibesys_host_v1_operations_proto_msgTypes = make([]protoimpl.MessageInfo, 118)
 var file_vibesys_host_v1_operations_proto_goTypes = []any{
 	(Maker)(0),                                   // 0: vibesys.host.v1.Maker
 	(AcceleratorVendor)(0),                       // 1: vibesys.host.v1.AcceleratorVendor
@@ -6597,193 +9355,262 @@ var file_vibesys_host_v1_operations_proto_goTypes = []any{
 	(CheckId)(0),                                 // 10: vibesys.host.v1.CheckId
 	(CheckState)(0),                              // 11: vibesys.host.v1.CheckState
 	(RunOption)(0),                               // 12: vibesys.host.v1.RunOption
-	(*TaskList)(nil),                             // 13: vibesys.host.v1.TaskList
-	(*TaskSummary)(nil),                          // 14: vibesys.host.v1.TaskSummary
-	(*HarnessDisplay)(nil),                       // 15: vibesys.host.v1.HarnessDisplay
-	(*HarnessOption)(nil),                        // 16: vibesys.host.v1.HarnessOption
-	(*ModelGeneration)(nil),                      // 17: vibesys.host.v1.ModelGeneration
-	(*ExampleHardware)(nil),                      // 18: vibesys.host.v1.ExampleHardware
-	(*ExampleList)(nil),                          // 19: vibesys.host.v1.ExampleList
-	(*ExampleModel)(nil),                         // 20: vibesys.host.v1.ExampleModel
-	(*ExampleObjective)(nil),                     // 21: vibesys.host.v1.ExampleObjective
-	(*ExampleSummary)(nil),                       // 22: vibesys.host.v1.ExampleSummary
-	(*ExampleTask)(nil),                          // 23: vibesys.host.v1.ExampleTask
-	(*ExampleWorkload)(nil),                      // 24: vibesys.host.v1.ExampleWorkload
-	(*TaskGoal)(nil),                             // 25: vibesys.host.v1.TaskGoal
-	(*DockerReachable)(nil),                      // 26: vibesys.host.v1.DockerReachable
-	(*DockerUnreachable)(nil),                    // 27: vibesys.host.v1.DockerUnreachable
-	(*Gpu)(nil),                                  // 28: vibesys.host.v1.Gpu
-	(*Hardware)(nil),                             // 29: vibesys.host.v1.Hardware
-	(*MachineCheckout)(nil),                      // 30: vibesys.host.v1.MachineCheckout
-	(*MachineDescription)(nil),                   // 31: vibesys.host.v1.MachineDescription
-	(*RunCounts)(nil),                            // 32: vibesys.host.v1.RunCounts
-	(*ClusterHardware)(nil),                      // 33: vibesys.host.v1.ClusterHardware
-	(*ComputeSettings)(nil),                      // 34: vibesys.host.v1.ComputeSettings
-	(*ListedCluster)(nil),                        // 35: vibesys.host.v1.ListedCluster
-	(*LoginNodeReach)(nil),                       // 36: vibesys.host.v1.LoginNodeReach
-	(*ModalStatus)(nil),                          // 37: vibesys.host.v1.ModalStatus
-	(*SlurmClusterSettings)(nil),                 // 38: vibesys.host.v1.SlurmClusterSettings
-	(*SshReach)(nil),                             // 39: vibesys.host.v1.SshReach
-	(*HarnessChoice)(nil),                        // 40: vibesys.host.v1.HarnessChoice
-	(*ModalTarget)(nil),                          // 41: vibesys.host.v1.ModalTarget
-	(*RoleOption)(nil),                           // 42: vibesys.host.v1.RoleOption
-	(*RunOptions)(nil),                           // 43: vibesys.host.v1.RunOptions
-	(*SameMachine)(nil),                          // 44: vibesys.host.v1.SameMachine
-	(*SlurmTarget)(nil),                          // 45: vibesys.host.v1.SlurmTarget
-	(*ArgumentsRejected)(nil),                    // 46: vibesys.host.v1.ArgumentsRejected
-	(*ArgumentsUnrecognized)(nil),                // 47: vibesys.host.v1.ArgumentsUnrecognized
-	(*BackendUnavailable)(nil),                   // 48: vibesys.host.v1.BackendUnavailable
-	(*Check)(nil),                                // 49: vibesys.host.v1.Check
-	(*ChooseCheckout)(nil),                       // 50: vibesys.host.v1.ChooseCheckout
-	(*ConfigInvalid)(nil),                        // 51: vibesys.host.v1.ConfigInvalid
-	(*ConfigureCompute)(nil),                     // 52: vibesys.host.v1.ConfigureCompute
-	(*CopyOut)(nil),                              // 53: vibesys.host.v1.CopyOut
-	(*DeclareBuild)(nil),                         // 54: vibesys.host.v1.DeclareBuild
-	(*EditSetting)(nil),                          // 55: vibesys.host.v1.EditSetting
-	(*GitHubUnavailable)(nil),                    // 56: vibesys.host.v1.GitHubUnavailable
-	(*MeasurementTargetMisfit)(nil),              // 57: vibesys.host.v1.MeasurementTargetMisfit
-	(*MeasurementTargetNotConfigured)(nil),       // 58: vibesys.host.v1.MeasurementTargetNotConfigured
-	(*ModelNotVetted)(nil),                       // 59: vibesys.host.v1.ModelNotVetted
-	(*OptionNotAccepted)(nil),                    // 60: vibesys.host.v1.OptionNotAccepted
-	(*ProjectDirty)(nil),                         // 61: vibesys.host.v1.ProjectDirty
-	(*RolesNotDeclared)(nil),                     // 62: vibesys.host.v1.RolesNotDeclared
-	(*StartDocker)(nil),                          // 63: vibesys.host.v1.StartDocker
-	(*SysboxMissing)(nil),                        // 64: vibesys.host.v1.SysboxMissing
-	(*TaskImageUnsupported)(nil),                 // 65: vibesys.host.v1.TaskImageUnsupported
-	(*TaskNeedsProvisioning)(nil),                // 66: vibesys.host.v1.TaskNeedsProvisioning
-	(*TaskNotFound)(nil),                         // 67: vibesys.host.v1.TaskNotFound
-	(*TaskUnusable)(nil),                         // 68: vibesys.host.v1.TaskUnusable
-	(*ListTasksRequest)(nil),                     // 69: vibesys.host.v1.ListTasksRequest
-	(*ListTasksResponse)(nil),                    // 70: vibesys.host.v1.ListTasksResponse
-	(*ListHarnessesRequest)(nil),                 // 71: vibesys.host.v1.ListHarnessesRequest
-	(*ListHarnessesResponse)(nil),                // 72: vibesys.host.v1.ListHarnessesResponse
-	(*ListExamplesRequest)(nil),                  // 73: vibesys.host.v1.ListExamplesRequest
-	(*ListExamplesResponse)(nil),                 // 74: vibesys.host.v1.ListExamplesResponse
-	(*GetTaskGoalRequest)(nil),                   // 75: vibesys.host.v1.GetTaskGoalRequest
-	(*GetTaskGoalResponse)(nil),                  // 76: vibesys.host.v1.GetTaskGoalResponse
-	(*DescribeMachineRequest)(nil),               // 77: vibesys.host.v1.DescribeMachineRequest
-	(*DescribeMachineResponse)(nil),              // 78: vibesys.host.v1.DescribeMachineResponse
-	(*ListComputeRequest)(nil),                   // 79: vibesys.host.v1.ListComputeRequest
-	(*ListComputeResponse)(nil),                  // 80: vibesys.host.v1.ListComputeResponse
-	(*PreflightRunRequest)(nil),                  // 81: vibesys.host.v1.PreflightRunRequest
-	(*PreflightRunResponse)(nil),                 // 82: vibesys.host.v1.PreflightRunResponse
-	(*ExampleSummaryTaskDetails)(nil),            // 83: vibesys.host.v1.ExampleSummaryTaskDetails
-	(*MachineDescriptionDocker)(nil),             // 84: vibesys.host.v1.MachineDescriptionDocker
-	(*SlurmClusterSettingsReach)(nil),            // 85: vibesys.host.v1.SlurmClusterSettingsReach
-	(*CheckFix)(nil),                             // 86: vibesys.host.v1.CheckFix
-	(*CheckCause)(nil),                           // 87: vibesys.host.v1.CheckCause
-	(*ConfigureComputeTarget)(nil),               // 88: vibesys.host.v1.ConfigureComputeTarget
-	(*MeasurementTargetMisfitTarget)(nil),        // 89: vibesys.host.v1.MeasurementTargetMisfitTarget
-	(*MeasurementTargetNotConfiguredTarget)(nil), // 90: vibesys.host.v1.MeasurementTargetNotConfiguredTarget
-	(*PreflightRunRequestAgents)(nil),            // 91: vibesys.host.v1.PreflightRunRequestAgents
-	(*PreflightRunRequestMeasureOn)(nil),         // 92: vibesys.host.v1.PreflightRunRequestMeasureOn
-	(*PreflightRunResponseRoles)(nil),            // 93: vibesys.host.v1.PreflightRunResponseRoles
-	nil,                                          // 94: vibesys.host.v1.MachineDescription.HarnessCliNamesEntry
-	nil,                                          // 95: vibesys.host.v1.PreflightRunRequestAgents.ItemsEntry
+	(CandidateState)(0),                          // 13: vibesys.host.v1.CandidateState
+	(LoginUnavailableReason)(0),                  // 14: vibesys.host.v1.LoginUnavailableReason
+	(StartRunResults)(0),                         // 15: vibesys.host.v1.StartRunResults
+	(StartRunReasoning)(0),                       // 16: vibesys.host.v1.StartRunReasoning
+	(ClusterTestStage)(0),                        // 17: vibesys.host.v1.ClusterTestStage
+	(DestinationState)(0),                        // 18: vibesys.host.v1.DestinationState
+	(*TaskList)(nil),                             // 19: vibesys.host.v1.TaskList
+	(*TaskSummary)(nil),                          // 20: vibesys.host.v1.TaskSummary
+	(*HarnessDisplay)(nil),                       // 21: vibesys.host.v1.HarnessDisplay
+	(*HarnessOption)(nil),                        // 22: vibesys.host.v1.HarnessOption
+	(*ModelGeneration)(nil),                      // 23: vibesys.host.v1.ModelGeneration
+	(*ExampleHardware)(nil),                      // 24: vibesys.host.v1.ExampleHardware
+	(*ExampleList)(nil),                          // 25: vibesys.host.v1.ExampleList
+	(*ExampleModel)(nil),                         // 26: vibesys.host.v1.ExampleModel
+	(*ExampleObjective)(nil),                     // 27: vibesys.host.v1.ExampleObjective
+	(*ExampleSummary)(nil),                       // 28: vibesys.host.v1.ExampleSummary
+	(*ExampleTask)(nil),                          // 29: vibesys.host.v1.ExampleTask
+	(*ExampleWorkload)(nil),                      // 30: vibesys.host.v1.ExampleWorkload
+	(*TaskGoal)(nil),                             // 31: vibesys.host.v1.TaskGoal
+	(*DockerReachable)(nil),                      // 32: vibesys.host.v1.DockerReachable
+	(*DockerUnreachable)(nil),                    // 33: vibesys.host.v1.DockerUnreachable
+	(*Gpu)(nil),                                  // 34: vibesys.host.v1.Gpu
+	(*Hardware)(nil),                             // 35: vibesys.host.v1.Hardware
+	(*MachineCheckout)(nil),                      // 36: vibesys.host.v1.MachineCheckout
+	(*MachineDescription)(nil),                   // 37: vibesys.host.v1.MachineDescription
+	(*RunCounts)(nil),                            // 38: vibesys.host.v1.RunCounts
+	(*ClusterHardware)(nil),                      // 39: vibesys.host.v1.ClusterHardware
+	(*ComputeSettings)(nil),                      // 40: vibesys.host.v1.ComputeSettings
+	(*ListedCluster)(nil),                        // 41: vibesys.host.v1.ListedCluster
+	(*LoginNodeReach)(nil),                       // 42: vibesys.host.v1.LoginNodeReach
+	(*ModalStatus)(nil),                          // 43: vibesys.host.v1.ModalStatus
+	(*SlurmClusterSettings)(nil),                 // 44: vibesys.host.v1.SlurmClusterSettings
+	(*SshReach)(nil),                             // 45: vibesys.host.v1.SshReach
+	(*HarnessChoice)(nil),                        // 46: vibesys.host.v1.HarnessChoice
+	(*ModalTarget)(nil),                          // 47: vibesys.host.v1.ModalTarget
+	(*RoleOption)(nil),                           // 48: vibesys.host.v1.RoleOption
+	(*RunOptions)(nil),                           // 49: vibesys.host.v1.RunOptions
+	(*SameMachine)(nil),                          // 50: vibesys.host.v1.SameMachine
+	(*SlurmTarget)(nil),                          // 51: vibesys.host.v1.SlurmTarget
+	(*ArgumentsRejected)(nil),                    // 52: vibesys.host.v1.ArgumentsRejected
+	(*ArgumentsUnrecognized)(nil),                // 53: vibesys.host.v1.ArgumentsUnrecognized
+	(*BackendUnavailable)(nil),                   // 54: vibesys.host.v1.BackendUnavailable
+	(*Check)(nil),                                // 55: vibesys.host.v1.Check
+	(*ChooseCheckout)(nil),                       // 56: vibesys.host.v1.ChooseCheckout
+	(*ConfigInvalid)(nil),                        // 57: vibesys.host.v1.ConfigInvalid
+	(*ConfigureCompute)(nil),                     // 58: vibesys.host.v1.ConfigureCompute
+	(*CopyOut)(nil),                              // 59: vibesys.host.v1.CopyOut
+	(*DeclareBuild)(nil),                         // 60: vibesys.host.v1.DeclareBuild
+	(*EditSetting)(nil),                          // 61: vibesys.host.v1.EditSetting
+	(*GitHubUnavailable)(nil),                    // 62: vibesys.host.v1.GitHubUnavailable
+	(*MeasurementTargetMisfit)(nil),              // 63: vibesys.host.v1.MeasurementTargetMisfit
+	(*MeasurementTargetNotConfigured)(nil),       // 64: vibesys.host.v1.MeasurementTargetNotConfigured
+	(*ModelNotVetted)(nil),                       // 65: vibesys.host.v1.ModelNotVetted
+	(*OptionNotAccepted)(nil),                    // 66: vibesys.host.v1.OptionNotAccepted
+	(*ProjectDirty)(nil),                         // 67: vibesys.host.v1.ProjectDirty
+	(*RolesNotDeclared)(nil),                     // 68: vibesys.host.v1.RolesNotDeclared
+	(*StartDocker)(nil),                          // 69: vibesys.host.v1.StartDocker
+	(*SysboxMissing)(nil),                        // 70: vibesys.host.v1.SysboxMissing
+	(*TaskImageUnsupported)(nil),                 // 71: vibesys.host.v1.TaskImageUnsupported
+	(*TaskNeedsProvisioning)(nil),                // 72: vibesys.host.v1.TaskNeedsProvisioning
+	(*TaskNotFound)(nil),                         // 73: vibesys.host.v1.TaskNotFound
+	(*TaskUnusable)(nil),                         // 74: vibesys.host.v1.TaskUnusable
+	(*ListTasksRequest)(nil),                     // 75: vibesys.host.v1.ListTasksRequest
+	(*ListTasksResponse)(nil),                    // 76: vibesys.host.v1.ListTasksResponse
+	(*ListHarnessesRequest)(nil),                 // 77: vibesys.host.v1.ListHarnessesRequest
+	(*ListHarnessesResponse)(nil),                // 78: vibesys.host.v1.ListHarnessesResponse
+	(*ListExamplesRequest)(nil),                  // 79: vibesys.host.v1.ListExamplesRequest
+	(*ListExamplesResponse)(nil),                 // 80: vibesys.host.v1.ListExamplesResponse
+	(*GetTaskGoalRequest)(nil),                   // 81: vibesys.host.v1.GetTaskGoalRequest
+	(*GetTaskGoalResponse)(nil),                  // 82: vibesys.host.v1.GetTaskGoalResponse
+	(*DescribeMachineRequest)(nil),               // 83: vibesys.host.v1.DescribeMachineRequest
+	(*DescribeMachineResponse)(nil),              // 84: vibesys.host.v1.DescribeMachineResponse
+	(*ListComputeRequest)(nil),                   // 85: vibesys.host.v1.ListComputeRequest
+	(*ListComputeResponse)(nil),                  // 86: vibesys.host.v1.ListComputeResponse
+	(*PreflightRunRequest)(nil),                  // 87: vibesys.host.v1.PreflightRunRequest
+	(*PreflightRunResponse)(nil),                 // 88: vibesys.host.v1.PreflightRunResponse
+	(*ExampleSummaryTaskDetails)(nil),            // 89: vibesys.host.v1.ExampleSummaryTaskDetails
+	(*MachineDescriptionDocker)(nil),             // 90: vibesys.host.v1.MachineDescriptionDocker
+	(*SlurmClusterSettingsReach)(nil),            // 91: vibesys.host.v1.SlurmClusterSettingsReach
+	(*CheckFix)(nil),                             // 92: vibesys.host.v1.CheckFix
+	(*CheckCause)(nil),                           // 93: vibesys.host.v1.CheckCause
+	(*ConfigureComputeTarget)(nil),               // 94: vibesys.host.v1.ConfigureComputeTarget
+	(*MeasurementTargetMisfitTarget)(nil),        // 95: vibesys.host.v1.MeasurementTargetMisfitTarget
+	(*MeasurementTargetNotConfiguredTarget)(nil), // 96: vibesys.host.v1.MeasurementTargetNotConfiguredTarget
+	(*PreflightRunRequestAgents)(nil),            // 97: vibesys.host.v1.PreflightRunRequestAgents
+	(*PreflightRunRequestMeasureOn)(nil),         // 98: vibesys.host.v1.PreflightRunRequestMeasureOn
+	(*PreflightRunResponseRoles)(nil),            // 99: vibesys.host.v1.PreflightRunResponseRoles
+	(*CandidateIdentity)(nil),                    // 100: vibesys.host.v1.CandidateIdentity
+	(*InspectCandidateRequest)(nil),              // 101: vibesys.host.v1.InspectCandidateRequest
+	(*InspectCandidateResponse)(nil),             // 102: vibesys.host.v1.InspectCandidateResponse
+	(*CompletedPath)(nil),                        // 103: vibesys.host.v1.CompletedPath
+	(*CompletePathsRequest)(nil),                 // 104: vibesys.host.v1.CompletePathsRequest
+	(*CompletePathsResponse)(nil),                // 105: vibesys.host.v1.CompletePathsResponse
+	(*LoginRequest)(nil),                         // 106: vibesys.host.v1.LoginRequest
+	(*LoginStartedBody)(nil),                     // 107: vibesys.host.v1.LoginStartedBody
+	(*LoginUnavailableBody)(nil),                 // 108: vibesys.host.v1.LoginUnavailableBody
+	(*StartRunHarness)(nil),                      // 109: vibesys.host.v1.StartRunHarness
+	(*StartRunRole)(nil),                         // 110: vibesys.host.v1.StartRunRole
+	(*StartRunOptions)(nil),                      // 111: vibesys.host.v1.StartRunOptions
+	(*StartRunAgent)(nil),                        // 112: vibesys.host.v1.StartRunAgent
+	(*StartRunSameMachine)(nil),                  // 113: vibesys.host.v1.StartRunSameMachine
+	(*StartRunModal)(nil),                        // 114: vibesys.host.v1.StartRunModal
+	(*StartRunMeasure)(nil),                      // 115: vibesys.host.v1.StartRunMeasure
+	(*ClusterTestPassed)(nil),                    // 116: vibesys.host.v1.ClusterTestPassed
+	(*ClusterTestFailed)(nil),                    // 117: vibesys.host.v1.ClusterTestFailed
+	(*InspectDestinationRequest)(nil),            // 118: vibesys.host.v1.InspectDestinationRequest
+	(*InspectDestinationResponse)(nil),           // 119: vibesys.host.v1.InspectDestinationResponse
+	(*CreatedProject)(nil),                       // 120: vibesys.host.v1.CreatedProject
+	(*DestinationTaken)(nil),                     // 121: vibesys.host.v1.DestinationTaken
+	(*CreateExampleRequest)(nil),                 // 122: vibesys.host.v1.CreateExampleRequest
+	(*CreateExampleResponse)(nil),                // 123: vibesys.host.v1.CreateExampleResponse
+	(*CopyProjectRequest)(nil),                   // 124: vibesys.host.v1.CopyProjectRequest
+	(*CopyProjectResponse)(nil),                  // 125: vibesys.host.v1.CopyProjectResponse
+	(*PutClusterRequest)(nil),                    // 126: vibesys.host.v1.PutClusterRequest
+	(*PutClusterResponse)(nil),                   // 127: vibesys.host.v1.PutClusterResponse
+	(*RemoveClusterRequest)(nil),                 // 128: vibesys.host.v1.RemoveClusterRequest
+	(*RemoveClusterResponse)(nil),                // 129: vibesys.host.v1.RemoveClusterResponse
+	(*TestClusterRequest)(nil),                   // 130: vibesys.host.v1.TestClusterRequest
+	(*TestClusterResponse)(nil),                  // 131: vibesys.host.v1.TestClusterResponse
+	(*StartRunRequest)(nil),                      // 132: vibesys.host.v1.StartRunRequest
+	(*StartRunResponse)(nil),                     // 133: vibesys.host.v1.StartRunResponse
+	(*LoginResponse)(nil),                        // 134: vibesys.host.v1.LoginResponse
+	nil,                                          // 135: vibesys.host.v1.MachineDescription.HarnessCliNamesEntry
+	nil,                                          // 136: vibesys.host.v1.PreflightRunRequestAgents.ItemsEntry
 }
 var file_vibesys_host_v1_operations_proto_depIdxs = []int32{
-	14, // 0: vibesys.host.v1.TaskList.tasks:type_name -> vibesys.host.v1.TaskSummary
-	0,  // 1: vibesys.host.v1.HarnessDisplay.maker:type_name -> vibesys.host.v1.Maker
-	17, // 2: vibesys.host.v1.HarnessDisplay.generation:type_name -> vibesys.host.v1.ModelGeneration
-	15, // 3: vibesys.host.v1.HarnessOption.display:type_name -> vibesys.host.v1.HarnessDisplay
-	1,  // 4: vibesys.host.v1.ExampleHardware.vendor:type_name -> vibesys.host.v1.AcceleratorVendor
-	2,  // 5: vibesys.host.v1.ExampleHardware.backend:type_name -> vibesys.host.v1.Backend
-	22, // 6: vibesys.host.v1.ExampleList.examples:type_name -> vibesys.host.v1.ExampleSummary
-	4,  // 7: vibesys.host.v1.ExampleModel.maker:type_name -> vibesys.host.v1.ModelMaker
-	83, // 8: vibesys.host.v1.ExampleSummary.task_details:type_name -> vibesys.host.v1.ExampleSummaryTaskDetails
-	21, // 9: vibesys.host.v1.ExampleTask.objectives:type_name -> vibesys.host.v1.ExampleObjective
-	3,  // 10: vibesys.host.v1.ExampleTask.domain:type_name -> vibesys.host.v1.ExampleDomain
-	18, // 11: vibesys.host.v1.ExampleTask.hardware:type_name -> vibesys.host.v1.ExampleHardware
-	20, // 12: vibesys.host.v1.ExampleTask.model:type_name -> vibesys.host.v1.ExampleModel
-	24, // 13: vibesys.host.v1.ExampleTask.workload:type_name -> vibesys.host.v1.ExampleWorkload
-	21, // 14: vibesys.host.v1.TaskGoal.objectives:type_name -> vibesys.host.v1.ExampleObjective
-	28, // 15: vibesys.host.v1.Hardware.gpus:type_name -> vibesys.host.v1.Gpu
-	5,  // 16: vibesys.host.v1.Hardware.accelerator:type_name -> vibesys.host.v1.Accelerator
-	30, // 17: vibesys.host.v1.MachineDescription.checkout:type_name -> vibesys.host.v1.MachineCheckout
-	29, // 18: vibesys.host.v1.MachineDescription.hardware:type_name -> vibesys.host.v1.Hardware
-	84, // 19: vibesys.host.v1.MachineDescription.docker:type_name -> vibesys.host.v1.MachineDescriptionDocker
-	94, // 20: vibesys.host.v1.MachineDescription.harness_cli_names:type_name -> vibesys.host.v1.MachineDescription.HarnessCliNamesEntry
-	32, // 21: vibesys.host.v1.MachineDescription.runs:type_name -> vibesys.host.v1.RunCounts
-	5,  // 22: vibesys.host.v1.ClusterHardware.accelerator:type_name -> vibesys.host.v1.Accelerator
-	35, // 23: vibesys.host.v1.ComputeSettings.clusters:type_name -> vibesys.host.v1.ListedCluster
-	37, // 24: vibesys.host.v1.ComputeSettings.modal:type_name -> vibesys.host.v1.ModalStatus
-	38, // 25: vibesys.host.v1.ListedCluster.cluster:type_name -> vibesys.host.v1.SlurmClusterSettings
-	6,  // 26: vibesys.host.v1.ListedCluster.source:type_name -> vibesys.host.v1.ClusterSource
-	7,  // 27: vibesys.host.v1.ModalStatus.source:type_name -> vibesys.host.v1.ModalTokenSource
-	85, // 28: vibesys.host.v1.SlurmClusterSettings.reach:type_name -> vibesys.host.v1.SlurmClusterSettingsReach
-	33, // 29: vibesys.host.v1.SlurmClusterSettings.hardware:type_name -> vibesys.host.v1.ClusterHardware
-	8,  // 30: vibesys.host.v1.RoleOption.reasoning_effort:type_name -> vibesys.host.v1.ReasoningEffort
-	9,  // 31: vibesys.host.v1.RunOptions.results:type_name -> vibesys.host.v1.RunResults
-	42, // 32: vibesys.host.v1.RunOptions.roles:type_name -> vibesys.host.v1.RoleOption
-	2,  // 33: vibesys.host.v1.BackendUnavailable.backend:type_name -> vibesys.host.v1.Backend
-	2,  // 34: vibesys.host.v1.BackendUnavailable.declared:type_name -> vibesys.host.v1.Backend
-	10, // 35: vibesys.host.v1.Check.id:type_name -> vibesys.host.v1.CheckId
-	11, // 36: vibesys.host.v1.Check.state:type_name -> vibesys.host.v1.CheckState
-	86, // 37: vibesys.host.v1.Check.fix:type_name -> vibesys.host.v1.CheckFix
-	87, // 38: vibesys.host.v1.Check.cause:type_name -> vibesys.host.v1.CheckCause
-	88, // 39: vibesys.host.v1.ConfigureCompute.target:type_name -> vibesys.host.v1.ConfigureComputeTarget
-	89, // 40: vibesys.host.v1.MeasurementTargetMisfit.target:type_name -> vibesys.host.v1.MeasurementTargetMisfitTarget
-	2,  // 41: vibesys.host.v1.MeasurementTargetMisfit.backend:type_name -> vibesys.host.v1.Backend
-	5,  // 42: vibesys.host.v1.MeasurementTargetMisfit.offered:type_name -> vibesys.host.v1.Accelerator
-	90, // 43: vibesys.host.v1.MeasurementTargetNotConfigured.target:type_name -> vibesys.host.v1.MeasurementTargetNotConfiguredTarget
-	12, // 44: vibesys.host.v1.OptionNotAccepted.option:type_name -> vibesys.host.v1.RunOption
-	13, // 45: vibesys.host.v1.ListTasksResponse.tasks:type_name -> vibesys.host.v1.TaskList
-	16, // 46: vibesys.host.v1.ListHarnessesResponse.harnesses:type_name -> vibesys.host.v1.HarnessOption
-	19, // 47: vibesys.host.v1.ListExamplesResponse.listing:type_name -> vibesys.host.v1.ExampleList
-	25, // 48: vibesys.host.v1.GetTaskGoalResponse.goal:type_name -> vibesys.host.v1.TaskGoal
-	31, // 49: vibesys.host.v1.DescribeMachineResponse.machine:type_name -> vibesys.host.v1.MachineDescription
-	34, // 50: vibesys.host.v1.ListComputeResponse.settings:type_name -> vibesys.host.v1.ComputeSettings
-	40, // 51: vibesys.host.v1.PreflightRunRequest.harness:type_name -> vibesys.host.v1.HarnessChoice
-	43, // 52: vibesys.host.v1.PreflightRunRequest.options:type_name -> vibesys.host.v1.RunOptions
-	91, // 53: vibesys.host.v1.PreflightRunRequest.agents:type_name -> vibesys.host.v1.PreflightRunRequestAgents
-	92, // 54: vibesys.host.v1.PreflightRunRequest.measure_on:type_name -> vibesys.host.v1.PreflightRunRequestMeasureOn
-	49, // 55: vibesys.host.v1.PreflightRunResponse.checks:type_name -> vibesys.host.v1.Check
-	93, // 56: vibesys.host.v1.PreflightRunResponse.roles:type_name -> vibesys.host.v1.PreflightRunResponseRoles
-	2,  // 57: vibesys.host.v1.PreflightRunResponse.backend:type_name -> vibesys.host.v1.Backend
-	23, // 58: vibesys.host.v1.ExampleSummaryTaskDetails.items:type_name -> vibesys.host.v1.ExampleTask
-	26, // 59: vibesys.host.v1.MachineDescriptionDocker.docker_reachable:type_name -> vibesys.host.v1.DockerReachable
-	27, // 60: vibesys.host.v1.MachineDescriptionDocker.docker_unreachable:type_name -> vibesys.host.v1.DockerUnreachable
-	39, // 61: vibesys.host.v1.SlurmClusterSettingsReach.ssh_reach:type_name -> vibesys.host.v1.SshReach
-	36, // 62: vibesys.host.v1.SlurmClusterSettingsReach.login_node_reach:type_name -> vibesys.host.v1.LoginNodeReach
-	50, // 63: vibesys.host.v1.CheckFix.choose_checkout:type_name -> vibesys.host.v1.ChooseCheckout
-	53, // 64: vibesys.host.v1.CheckFix.copy_out:type_name -> vibesys.host.v1.CopyOut
-	55, // 65: vibesys.host.v1.CheckFix.edit_setting:type_name -> vibesys.host.v1.EditSetting
-	63, // 66: vibesys.host.v1.CheckFix.start_docker:type_name -> vibesys.host.v1.StartDocker
-	54, // 67: vibesys.host.v1.CheckFix.declare_build:type_name -> vibesys.host.v1.DeclareBuild
-	52, // 68: vibesys.host.v1.CheckFix.configure_compute:type_name -> vibesys.host.v1.ConfigureCompute
-	48, // 69: vibesys.host.v1.CheckCause.backend_unavailable:type_name -> vibesys.host.v1.BackendUnavailable
-	61, // 70: vibesys.host.v1.CheckCause.project_dirty:type_name -> vibesys.host.v1.ProjectDirty
-	67, // 71: vibesys.host.v1.CheckCause.task_not_found:type_name -> vibesys.host.v1.TaskNotFound
-	68, // 72: vibesys.host.v1.CheckCause.task_unusable:type_name -> vibesys.host.v1.TaskUnusable
-	66, // 73: vibesys.host.v1.CheckCause.task_needs_provisioning:type_name -> vibesys.host.v1.TaskNeedsProvisioning
-	65, // 74: vibesys.host.v1.CheckCause.task_image_unsupported:type_name -> vibesys.host.v1.TaskImageUnsupported
-	64, // 75: vibesys.host.v1.CheckCause.sysbox_missing:type_name -> vibesys.host.v1.SysboxMissing
-	51, // 76: vibesys.host.v1.CheckCause.config_invalid:type_name -> vibesys.host.v1.ConfigInvalid
-	62, // 77: vibesys.host.v1.CheckCause.roles_not_declared:type_name -> vibesys.host.v1.RolesNotDeclared
-	59, // 78: vibesys.host.v1.CheckCause.model_not_vetted:type_name -> vibesys.host.v1.ModelNotVetted
-	46, // 79: vibesys.host.v1.CheckCause.arguments_rejected:type_name -> vibesys.host.v1.ArgumentsRejected
-	47, // 80: vibesys.host.v1.CheckCause.arguments_unrecognized:type_name -> vibesys.host.v1.ArgumentsUnrecognized
-	60, // 81: vibesys.host.v1.CheckCause.option_not_accepted:type_name -> vibesys.host.v1.OptionNotAccepted
-	56, // 82: vibesys.host.v1.CheckCause.git_hub_unavailable:type_name -> vibesys.host.v1.GitHubUnavailable
-	58, // 83: vibesys.host.v1.CheckCause.measurement_target_not_configured:type_name -> vibesys.host.v1.MeasurementTargetNotConfigured
-	57, // 84: vibesys.host.v1.CheckCause.measurement_target_misfit:type_name -> vibesys.host.v1.MeasurementTargetMisfit
-	45, // 85: vibesys.host.v1.ConfigureComputeTarget.slurm_target:type_name -> vibesys.host.v1.SlurmTarget
-	41, // 86: vibesys.host.v1.ConfigureComputeTarget.modal_target:type_name -> vibesys.host.v1.ModalTarget
-	44, // 87: vibesys.host.v1.MeasurementTargetMisfitTarget.same_machine:type_name -> vibesys.host.v1.SameMachine
-	45, // 88: vibesys.host.v1.MeasurementTargetMisfitTarget.slurm_target:type_name -> vibesys.host.v1.SlurmTarget
-	41, // 89: vibesys.host.v1.MeasurementTargetMisfitTarget.modal_target:type_name -> vibesys.host.v1.ModalTarget
-	45, // 90: vibesys.host.v1.MeasurementTargetNotConfiguredTarget.slurm_target:type_name -> vibesys.host.v1.SlurmTarget
-	41, // 91: vibesys.host.v1.MeasurementTargetNotConfiguredTarget.modal_target:type_name -> vibesys.host.v1.ModalTarget
-	95, // 92: vibesys.host.v1.PreflightRunRequestAgents.items:type_name -> vibesys.host.v1.PreflightRunRequestAgents.ItemsEntry
-	44, // 93: vibesys.host.v1.PreflightRunRequestMeasureOn.same_machine:type_name -> vibesys.host.v1.SameMachine
-	45, // 94: vibesys.host.v1.PreflightRunRequestMeasureOn.slurm_target:type_name -> vibesys.host.v1.SlurmTarget
-	41, // 95: vibesys.host.v1.PreflightRunRequestMeasureOn.modal_target:type_name -> vibesys.host.v1.ModalTarget
-	40, // 96: vibesys.host.v1.PreflightRunRequestAgents.ItemsEntry.value:type_name -> vibesys.host.v1.HarnessChoice
-	97, // [97:97] is the sub-list for method output_type
-	97, // [97:97] is the sub-list for method input_type
-	97, // [97:97] is the sub-list for extension type_name
-	97, // [97:97] is the sub-list for extension extendee
-	0,  // [0:97] is the sub-list for field type_name
+	20,  // 0: vibesys.host.v1.TaskList.tasks:type_name -> vibesys.host.v1.TaskSummary
+	0,   // 1: vibesys.host.v1.HarnessDisplay.maker:type_name -> vibesys.host.v1.Maker
+	23,  // 2: vibesys.host.v1.HarnessDisplay.generation:type_name -> vibesys.host.v1.ModelGeneration
+	21,  // 3: vibesys.host.v1.HarnessOption.display:type_name -> vibesys.host.v1.HarnessDisplay
+	1,   // 4: vibesys.host.v1.ExampleHardware.vendor:type_name -> vibesys.host.v1.AcceleratorVendor
+	2,   // 5: vibesys.host.v1.ExampleHardware.backend:type_name -> vibesys.host.v1.Backend
+	28,  // 6: vibesys.host.v1.ExampleList.examples:type_name -> vibesys.host.v1.ExampleSummary
+	4,   // 7: vibesys.host.v1.ExampleModel.maker:type_name -> vibesys.host.v1.ModelMaker
+	89,  // 8: vibesys.host.v1.ExampleSummary.task_details:type_name -> vibesys.host.v1.ExampleSummaryTaskDetails
+	27,  // 9: vibesys.host.v1.ExampleTask.objectives:type_name -> vibesys.host.v1.ExampleObjective
+	3,   // 10: vibesys.host.v1.ExampleTask.domain:type_name -> vibesys.host.v1.ExampleDomain
+	24,  // 11: vibesys.host.v1.ExampleTask.hardware:type_name -> vibesys.host.v1.ExampleHardware
+	26,  // 12: vibesys.host.v1.ExampleTask.model:type_name -> vibesys.host.v1.ExampleModel
+	30,  // 13: vibesys.host.v1.ExampleTask.workload:type_name -> vibesys.host.v1.ExampleWorkload
+	27,  // 14: vibesys.host.v1.TaskGoal.objectives:type_name -> vibesys.host.v1.ExampleObjective
+	34,  // 15: vibesys.host.v1.Hardware.gpus:type_name -> vibesys.host.v1.Gpu
+	5,   // 16: vibesys.host.v1.Hardware.accelerator:type_name -> vibesys.host.v1.Accelerator
+	36,  // 17: vibesys.host.v1.MachineDescription.checkout:type_name -> vibesys.host.v1.MachineCheckout
+	35,  // 18: vibesys.host.v1.MachineDescription.hardware:type_name -> vibesys.host.v1.Hardware
+	90,  // 19: vibesys.host.v1.MachineDescription.docker:type_name -> vibesys.host.v1.MachineDescriptionDocker
+	135, // 20: vibesys.host.v1.MachineDescription.harness_cli_names:type_name -> vibesys.host.v1.MachineDescription.HarnessCliNamesEntry
+	38,  // 21: vibesys.host.v1.MachineDescription.runs:type_name -> vibesys.host.v1.RunCounts
+	5,   // 22: vibesys.host.v1.ClusterHardware.accelerator:type_name -> vibesys.host.v1.Accelerator
+	41,  // 23: vibesys.host.v1.ComputeSettings.clusters:type_name -> vibesys.host.v1.ListedCluster
+	43,  // 24: vibesys.host.v1.ComputeSettings.modal:type_name -> vibesys.host.v1.ModalStatus
+	44,  // 25: vibesys.host.v1.ListedCluster.cluster:type_name -> vibesys.host.v1.SlurmClusterSettings
+	6,   // 26: vibesys.host.v1.ListedCluster.source:type_name -> vibesys.host.v1.ClusterSource
+	7,   // 27: vibesys.host.v1.ModalStatus.source:type_name -> vibesys.host.v1.ModalTokenSource
+	91,  // 28: vibesys.host.v1.SlurmClusterSettings.reach:type_name -> vibesys.host.v1.SlurmClusterSettingsReach
+	39,  // 29: vibesys.host.v1.SlurmClusterSettings.hardware:type_name -> vibesys.host.v1.ClusterHardware
+	8,   // 30: vibesys.host.v1.RoleOption.reasoning_effort:type_name -> vibesys.host.v1.ReasoningEffort
+	9,   // 31: vibesys.host.v1.RunOptions.results:type_name -> vibesys.host.v1.RunResults
+	48,  // 32: vibesys.host.v1.RunOptions.roles:type_name -> vibesys.host.v1.RoleOption
+	2,   // 33: vibesys.host.v1.BackendUnavailable.backend:type_name -> vibesys.host.v1.Backend
+	2,   // 34: vibesys.host.v1.BackendUnavailable.declared:type_name -> vibesys.host.v1.Backend
+	10,  // 35: vibesys.host.v1.Check.id:type_name -> vibesys.host.v1.CheckId
+	11,  // 36: vibesys.host.v1.Check.state:type_name -> vibesys.host.v1.CheckState
+	92,  // 37: vibesys.host.v1.Check.fix:type_name -> vibesys.host.v1.CheckFix
+	93,  // 38: vibesys.host.v1.Check.cause:type_name -> vibesys.host.v1.CheckCause
+	94,  // 39: vibesys.host.v1.ConfigureCompute.target:type_name -> vibesys.host.v1.ConfigureComputeTarget
+	95,  // 40: vibesys.host.v1.MeasurementTargetMisfit.target:type_name -> vibesys.host.v1.MeasurementTargetMisfitTarget
+	2,   // 41: vibesys.host.v1.MeasurementTargetMisfit.backend:type_name -> vibesys.host.v1.Backend
+	5,   // 42: vibesys.host.v1.MeasurementTargetMisfit.offered:type_name -> vibesys.host.v1.Accelerator
+	96,  // 43: vibesys.host.v1.MeasurementTargetNotConfigured.target:type_name -> vibesys.host.v1.MeasurementTargetNotConfiguredTarget
+	12,  // 44: vibesys.host.v1.OptionNotAccepted.option:type_name -> vibesys.host.v1.RunOption
+	19,  // 45: vibesys.host.v1.ListTasksResponse.tasks:type_name -> vibesys.host.v1.TaskList
+	22,  // 46: vibesys.host.v1.ListHarnessesResponse.harnesses:type_name -> vibesys.host.v1.HarnessOption
+	25,  // 47: vibesys.host.v1.ListExamplesResponse.listing:type_name -> vibesys.host.v1.ExampleList
+	31,  // 48: vibesys.host.v1.GetTaskGoalResponse.goal:type_name -> vibesys.host.v1.TaskGoal
+	37,  // 49: vibesys.host.v1.DescribeMachineResponse.machine:type_name -> vibesys.host.v1.MachineDescription
+	40,  // 50: vibesys.host.v1.ListComputeResponse.settings:type_name -> vibesys.host.v1.ComputeSettings
+	46,  // 51: vibesys.host.v1.PreflightRunRequest.harness:type_name -> vibesys.host.v1.HarnessChoice
+	49,  // 52: vibesys.host.v1.PreflightRunRequest.options:type_name -> vibesys.host.v1.RunOptions
+	97,  // 53: vibesys.host.v1.PreflightRunRequest.agents:type_name -> vibesys.host.v1.PreflightRunRequestAgents
+	98,  // 54: vibesys.host.v1.PreflightRunRequest.measure_on:type_name -> vibesys.host.v1.PreflightRunRequestMeasureOn
+	55,  // 55: vibesys.host.v1.PreflightRunResponse.checks:type_name -> vibesys.host.v1.Check
+	99,  // 56: vibesys.host.v1.PreflightRunResponse.roles:type_name -> vibesys.host.v1.PreflightRunResponseRoles
+	2,   // 57: vibesys.host.v1.PreflightRunResponse.backend:type_name -> vibesys.host.v1.Backend
+	29,  // 58: vibesys.host.v1.ExampleSummaryTaskDetails.items:type_name -> vibesys.host.v1.ExampleTask
+	32,  // 59: vibesys.host.v1.MachineDescriptionDocker.docker_reachable:type_name -> vibesys.host.v1.DockerReachable
+	33,  // 60: vibesys.host.v1.MachineDescriptionDocker.docker_unreachable:type_name -> vibesys.host.v1.DockerUnreachable
+	45,  // 61: vibesys.host.v1.SlurmClusterSettingsReach.ssh_reach:type_name -> vibesys.host.v1.SshReach
+	42,  // 62: vibesys.host.v1.SlurmClusterSettingsReach.login_node_reach:type_name -> vibesys.host.v1.LoginNodeReach
+	56,  // 63: vibesys.host.v1.CheckFix.choose_checkout:type_name -> vibesys.host.v1.ChooseCheckout
+	59,  // 64: vibesys.host.v1.CheckFix.copy_out:type_name -> vibesys.host.v1.CopyOut
+	61,  // 65: vibesys.host.v1.CheckFix.edit_setting:type_name -> vibesys.host.v1.EditSetting
+	69,  // 66: vibesys.host.v1.CheckFix.start_docker:type_name -> vibesys.host.v1.StartDocker
+	60,  // 67: vibesys.host.v1.CheckFix.declare_build:type_name -> vibesys.host.v1.DeclareBuild
+	58,  // 68: vibesys.host.v1.CheckFix.configure_compute:type_name -> vibesys.host.v1.ConfigureCompute
+	54,  // 69: vibesys.host.v1.CheckCause.backend_unavailable:type_name -> vibesys.host.v1.BackendUnavailable
+	67,  // 70: vibesys.host.v1.CheckCause.project_dirty:type_name -> vibesys.host.v1.ProjectDirty
+	73,  // 71: vibesys.host.v1.CheckCause.task_not_found:type_name -> vibesys.host.v1.TaskNotFound
+	74,  // 72: vibesys.host.v1.CheckCause.task_unusable:type_name -> vibesys.host.v1.TaskUnusable
+	72,  // 73: vibesys.host.v1.CheckCause.task_needs_provisioning:type_name -> vibesys.host.v1.TaskNeedsProvisioning
+	71,  // 74: vibesys.host.v1.CheckCause.task_image_unsupported:type_name -> vibesys.host.v1.TaskImageUnsupported
+	70,  // 75: vibesys.host.v1.CheckCause.sysbox_missing:type_name -> vibesys.host.v1.SysboxMissing
+	57,  // 76: vibesys.host.v1.CheckCause.config_invalid:type_name -> vibesys.host.v1.ConfigInvalid
+	68,  // 77: vibesys.host.v1.CheckCause.roles_not_declared:type_name -> vibesys.host.v1.RolesNotDeclared
+	65,  // 78: vibesys.host.v1.CheckCause.model_not_vetted:type_name -> vibesys.host.v1.ModelNotVetted
+	52,  // 79: vibesys.host.v1.CheckCause.arguments_rejected:type_name -> vibesys.host.v1.ArgumentsRejected
+	53,  // 80: vibesys.host.v1.CheckCause.arguments_unrecognized:type_name -> vibesys.host.v1.ArgumentsUnrecognized
+	66,  // 81: vibesys.host.v1.CheckCause.option_not_accepted:type_name -> vibesys.host.v1.OptionNotAccepted
+	62,  // 82: vibesys.host.v1.CheckCause.git_hub_unavailable:type_name -> vibesys.host.v1.GitHubUnavailable
+	64,  // 83: vibesys.host.v1.CheckCause.measurement_target_not_configured:type_name -> vibesys.host.v1.MeasurementTargetNotConfigured
+	63,  // 84: vibesys.host.v1.CheckCause.measurement_target_misfit:type_name -> vibesys.host.v1.MeasurementTargetMisfit
+	51,  // 85: vibesys.host.v1.ConfigureComputeTarget.slurm_target:type_name -> vibesys.host.v1.SlurmTarget
+	47,  // 86: vibesys.host.v1.ConfigureComputeTarget.modal_target:type_name -> vibesys.host.v1.ModalTarget
+	50,  // 87: vibesys.host.v1.MeasurementTargetMisfitTarget.same_machine:type_name -> vibesys.host.v1.SameMachine
+	51,  // 88: vibesys.host.v1.MeasurementTargetMisfitTarget.slurm_target:type_name -> vibesys.host.v1.SlurmTarget
+	47,  // 89: vibesys.host.v1.MeasurementTargetMisfitTarget.modal_target:type_name -> vibesys.host.v1.ModalTarget
+	51,  // 90: vibesys.host.v1.MeasurementTargetNotConfiguredTarget.slurm_target:type_name -> vibesys.host.v1.SlurmTarget
+	47,  // 91: vibesys.host.v1.MeasurementTargetNotConfiguredTarget.modal_target:type_name -> vibesys.host.v1.ModalTarget
+	136, // 92: vibesys.host.v1.PreflightRunRequestAgents.items:type_name -> vibesys.host.v1.PreflightRunRequestAgents.ItemsEntry
+	50,  // 93: vibesys.host.v1.PreflightRunRequestMeasureOn.same_machine:type_name -> vibesys.host.v1.SameMachine
+	51,  // 94: vibesys.host.v1.PreflightRunRequestMeasureOn.slurm_target:type_name -> vibesys.host.v1.SlurmTarget
+	47,  // 95: vibesys.host.v1.PreflightRunRequestMeasureOn.modal_target:type_name -> vibesys.host.v1.ModalTarget
+	13,  // 96: vibesys.host.v1.InspectCandidateResponse.state:type_name -> vibesys.host.v1.CandidateState
+	100, // 97: vibesys.host.v1.InspectCandidateResponse.identity:type_name -> vibesys.host.v1.CandidateIdentity
+	103, // 98: vibesys.host.v1.CompletePathsResponse.entries:type_name -> vibesys.host.v1.CompletedPath
+	14,  // 99: vibesys.host.v1.LoginUnavailableBody.reason:type_name -> vibesys.host.v1.LoginUnavailableReason
+	16,  // 100: vibesys.host.v1.StartRunRole.reasoning:type_name -> vibesys.host.v1.StartRunReasoning
+	15,  // 101: vibesys.host.v1.StartRunOptions.results:type_name -> vibesys.host.v1.StartRunResults
+	110, // 102: vibesys.host.v1.StartRunOptions.roles:type_name -> vibesys.host.v1.StartRunRole
+	109, // 103: vibesys.host.v1.StartRunAgent.harness:type_name -> vibesys.host.v1.StartRunHarness
+	113, // 104: vibesys.host.v1.StartRunMeasure.same_machine:type_name -> vibesys.host.v1.StartRunSameMachine
+	114, // 105: vibesys.host.v1.StartRunMeasure.modal:type_name -> vibesys.host.v1.StartRunModal
+	39,  // 106: vibesys.host.v1.ClusterTestPassed.hardware:type_name -> vibesys.host.v1.ClusterHardware
+	17,  // 107: vibesys.host.v1.ClusterTestFailed.stage:type_name -> vibesys.host.v1.ClusterTestStage
+	18,  // 108: vibesys.host.v1.InspectDestinationResponse.state:type_name -> vibesys.host.v1.DestinationState
+	120, // 109: vibesys.host.v1.CreateExampleResponse.created:type_name -> vibesys.host.v1.CreatedProject
+	121, // 110: vibesys.host.v1.CreateExampleResponse.taken:type_name -> vibesys.host.v1.DestinationTaken
+	120, // 111: vibesys.host.v1.CopyProjectResponse.created:type_name -> vibesys.host.v1.CreatedProject
+	44,  // 112: vibesys.host.v1.PutClusterRequest.cluster:type_name -> vibesys.host.v1.SlurmClusterSettings
+	40,  // 113: vibesys.host.v1.PutClusterResponse.settings:type_name -> vibesys.host.v1.ComputeSettings
+	40,  // 114: vibesys.host.v1.RemoveClusterResponse.settings:type_name -> vibesys.host.v1.ComputeSettings
+	44,  // 115: vibesys.host.v1.TestClusterRequest.cluster:type_name -> vibesys.host.v1.SlurmClusterSettings
+	116, // 116: vibesys.host.v1.TestClusterResponse.passed:type_name -> vibesys.host.v1.ClusterTestPassed
+	117, // 117: vibesys.host.v1.TestClusterResponse.failed:type_name -> vibesys.host.v1.ClusterTestFailed
+	109, // 118: vibesys.host.v1.StartRunRequest.harness:type_name -> vibesys.host.v1.StartRunHarness
+	111, // 119: vibesys.host.v1.StartRunRequest.options:type_name -> vibesys.host.v1.StartRunOptions
+	112, // 120: vibesys.host.v1.StartRunRequest.agents:type_name -> vibesys.host.v1.StartRunAgent
+	115, // 121: vibesys.host.v1.StartRunRequest.measure_on:type_name -> vibesys.host.v1.StartRunMeasure
+	107, // 122: vibesys.host.v1.LoginResponse.started:type_name -> vibesys.host.v1.LoginStartedBody
+	108, // 123: vibesys.host.v1.LoginResponse.unavailable:type_name -> vibesys.host.v1.LoginUnavailableBody
+	46,  // 124: vibesys.host.v1.PreflightRunRequestAgents.ItemsEntry.value:type_name -> vibesys.host.v1.HarnessChoice
+	125, // [125:125] is the sub-list for method output_type
+	125, // [125:125] is the sub-list for method input_type
+	125, // [125:125] is the sub-list for extension type_name
+	125, // [125:125] is the sub-list for extension extendee
+	0,   // [0:125] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_host_v1_operations_proto_init() }
@@ -6859,13 +9686,35 @@ func file_vibesys_host_v1_operations_proto_init() {
 		(*PreflightRunRequestMeasureOn_SlurmTarget)(nil),
 		(*PreflightRunRequestMeasureOn_ModalTarget)(nil),
 	}
+	file_vibesys_host_v1_operations_proto_msgTypes[81].OneofWrappers = []any{}
+	file_vibesys_host_v1_operations_proto_msgTypes[88].OneofWrappers = []any{}
+	file_vibesys_host_v1_operations_proto_msgTypes[89].OneofWrappers = []any{}
+	file_vibesys_host_v1_operations_proto_msgTypes[92].OneofWrappers = []any{}
+	file_vibesys_host_v1_operations_proto_msgTypes[96].OneofWrappers = []any{
+		(*StartRunMeasure_SameMachine)(nil),
+		(*StartRunMeasure_SlurmCluster)(nil),
+		(*StartRunMeasure_Modal)(nil),
+	}
+	file_vibesys_host_v1_operations_proto_msgTypes[100].OneofWrappers = []any{}
+	file_vibesys_host_v1_operations_proto_msgTypes[104].OneofWrappers = []any{
+		(*CreateExampleResponse_Created)(nil),
+		(*CreateExampleResponse_Taken)(nil),
+	}
+	file_vibesys_host_v1_operations_proto_msgTypes[112].OneofWrappers = []any{
+		(*TestClusterResponse_Passed)(nil),
+		(*TestClusterResponse_Failed)(nil),
+	}
+	file_vibesys_host_v1_operations_proto_msgTypes[115].OneofWrappers = []any{
+		(*LoginResponse_Started)(nil),
+		(*LoginResponse_Unavailable)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_vibesys_host_v1_operations_proto_rawDesc), len(file_vibesys_host_v1_operations_proto_rawDesc)),
-			NumEnums:      13,
-			NumMessages:   83,
+			NumEnums:      19,
+			NumMessages:   118,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

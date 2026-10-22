@@ -33,6 +33,10 @@ from vs_proto._generated.vibesys.api.v1.host_call_pb import (
     SteerIntent,
     WithdrawIntent,
 )
+from vs_proto._generated.vibesys.api.v1.host_mutate_generated_pb import (
+    MutateRequest,
+    MutateResponse,
+)
 from vs_proto._generated.vibesys.api.v1.host_pb import (
     BlobResult,
     GetBlobsRequest,
@@ -49,6 +53,14 @@ from vs_proto._generated.vibesys.api.v1.host_pb import (
     WatchRunsRequest,
     WatchRunsResponse,
 )
+from vs_proto._generated.vibesys.api.v1.host_read_generated_pb import (
+    ReadRequest,
+    ReadResponse,
+)
+from vs_proto._generated.vibesys.api.v1.host_watch_generated_pb import (
+    WatchRequest,
+    WatchResponse,
+)
 from vs_proto._generated.vibesys.core.testing.v1 import values_pb as compiler_values
 from vs_proto._generated.vibesys.core.v1 import agent_facts_pb as core_agent_facts
 from vs_proto._generated.vibesys.core.v1 import common_pb as core_common
@@ -64,6 +76,7 @@ from vs_proto._generated.vibesys.core.v1 import value_options_pb as core_value_o
 from vs_proto._generated.vibesys.core.v1 import vocabulary_pb as core_vocabulary
 from vs_proto._generated.vibesys.core.v1.vocabulary_pb import CheckoutStatus
 from vs_proto._generated.vibesys.host.v1 import admission_receipt_generated_pb as admission
+from vs_proto._generated.vibesys.host.v1 import evaluation_receipts_pb as evaluation_receipts
 from vs_proto._generated.vibesys.host.v1 import operation_options_pb as operation_options
 from vs_proto._generated.vibesys.host.v1 import operations_pb as host_payloads
 from vs_proto._generated.vibesys.host.v1.failure_pb import FailureCategory, OperationFailure
@@ -296,6 +309,8 @@ __all__ = [
     "MetricPoint",
     "MetricSeriesDecl",
     "MetricVersion",
+    "MutateRequest",
+    "MutateResponse",
     "Notice",
     "NoticeCode",
     "Objective",
@@ -314,6 +329,8 @@ __all__ = [
     "Progress",
     "ProviderSwitchAttrs",
     "ProviderSwitchReason",
+    "ReadRequest",
+    "ReadResponse",
     "Record",
     "RelaunchRefusal",
     "RelaunchRequest",
@@ -371,6 +388,8 @@ __all__ = [
     "WaitCondition",
     "WaitKind",
     "WaitingOn",
+    "WatchRequest",
+    "WatchResponse",
     "WatchRunsRequest",
     "WatchRunsResponse",
     "WithdrawIntent",
@@ -388,6 +407,7 @@ __all__ = [
     "core_leaves",
     "core_value_options",
     "core_vocabulary",
+    "evaluation_receipts",
     "from_mapping",
     "host_operation_descriptors",
     "host_operations",

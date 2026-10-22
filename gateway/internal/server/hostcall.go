@@ -91,7 +91,7 @@ func checkoutPath(value string) (string, error) {
 		value = filepath.Join(home, strings.TrimPrefix(strings.TrimPrefix(value, "~"), "/"))
 	}
 	if !filepath.IsAbs(value) || strings.ContainsAny(value, "\x00\n\r") || len(value) > 4096 {
-		return "", fmt.Errorf("HostCall.checkout must be an absolute path or ~/ path")
+		return "", fmt.Errorf("checkout must be an absolute path or ~/ path")
 	}
 	return filepath.Clean(value), nil
 }

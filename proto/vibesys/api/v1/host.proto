@@ -4,6 +4,9 @@ package vibesys.api.v1;
 
 import "buf/validate/validate.proto";
 import "vibesys/api/v1/host_call.proto";
+import "vibesys/api/v1/host_read_generated.proto";
+import "vibesys/api/v1/host_mutate_generated.proto";
+import "vibesys/api/v1/host_watch_generated.proto";
 import "vibesys/store/v1/skeleton.proto";
 
 option go_package = "github.com/uw-syfi/vibesys/gateway/gen/vibesys/api/v1;apiv1";
@@ -14,6 +17,14 @@ service HostService {
   // Hello compares the client and gateway API schema hashes. A mismatch fails
   // with gRPC FAILED_PRECONDITION and a message naming both well-formed hashes.
   rpc HostCall(HostCallRequest) returns (HostCallResponse);
+  // Read runs one registered catalog operation. The runner deadline is that operation's cap.
+  rpc Read(ReadRequest) returns (ReadResponse);
+  // Watch runs one registered stream. The host keeps it until completion or cancellation.
+  // Closing a panel drops the client's subscription and does not cancel this stream.
+  rpc Watch(WatchRequest) returns (stream WatchResponse);
+  // Mutate runs one registered unary admission or idempotent write. An admission
+  // keeps running after the caller disconnects, until the operation cap.
+  rpc Mutate(MutateRequest) returns (MutateResponse);
   rpc Hello(HelloRequest) returns (HelloResponse);
   // Tail follows the log live until the client cancels, starting at from_seq
   // (inclusive). Record bytes pass through unchanged; only seq is decoded.

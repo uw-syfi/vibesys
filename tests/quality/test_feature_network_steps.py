@@ -74,7 +74,8 @@ def test_apt_update_drops_gpu_vendor_indexes_and_is_deadline_bounded() -> None:
     update = block[block.index("apt_update_and_install() {") :]
     update = update[: update.index("\n}")]
     assert "drop_vendor_apt_sources" in update
-    assert 'timeout "${APT_UPDATE_DEADLINE}" apt-get update' in update
+    assert 'NET_DEADLINE="${APT_UPDATE_DEADLINE}"' in update
+    assert "retry apt-get update" in update
     dropped = block[block.index("drop_vendor_apt_sources() {") :]
     dropped = dropped[: dropped.index("\n}")]
     for marker in (
@@ -86,7 +87,7 @@ def test_apt_update_drops_gpu_vendor_indexes_and_is_deadline_bounded() -> None:
         "repo\\.radeon\\.com",
     ):
         assert marker in dropped
-    assert "APT_UPDATE_DEADLINE=60" in block
+    assert "APT_UPDATE_DEADLINE=30" in block
 
 
 @pytest.mark.parametrize("script", SCRIPTS, ids=lambda path: path.parent.name)
@@ -99,3 +100,92 @@ def test_no_network_command_runs_outside_the_helpers(script: Path) -> None:
         assert re.match(
             r"^(?:\w+=\S+ )*(?:retry|fetch|apt_install|pip_install|npm_install_global)\b", code
         ), f"{script.parent.name}: unbounded network command: {code}"
+
+
+def test_every_network_attempt_has_a_total_deadline_and_reports_its_result() -> None:
+    """A per-request timeout cannot stop a stream that keeps making progress."""
+    block = _split(SCRIPTS[0])[0]
+    retry = block[block.index("retry() {") :]
+    retry = retry[: retry.index("\n}")]
+    assert 'timeout --kill-after=5 "${NET_DEADLINE}" "$@"' in retry
+    assert "NET_ATTEMPTS=3" in block
+    assert "NET_DEADLINE=120" in block
+    assert retry.index("network start") < retry.index("if timeout")
+    assert retry.index("network done") > retry.index("if timeout")
+    assert "network failed (exit ${status})" in retry
+    assert 'return "${status}"' in retry
+
+
+@pytest.mark.parametrize(
+    ("helper", "command"),
+    [
+        ("fetch", "curl"),
+        ("apt_update_and_install", "apt-get update"),
+        ("apt_update_and_install", "apt-get install"),
+        ("npm_install_global", "npm install"),
+        ("pip_install", "pip install"),
+    ],
+)
+def test_package_fetches_use_the_logged_deadline(helper: str, command: str) -> None:
+    block = _split(SCRIPTS[0])[0]
+    function = block[block.index(f"{helper}() {{") :]
+    function = function[: function.index("\n}")]
+    assert f"retry {command}" in function, f"{helper}: wrap {command} in retry"
+
+
+def test_agent_python_fetches_are_bounded_and_venv_creation_is_offline() -> None:
+    agent = next(script for script in SCRIPTS if script.parent.name == "vibesys-agent")
+    text = agent.read_text(encoding="utf-8")
+    assert "UV_HTTP_CONNECT_TIMEOUT=20 UV_HTTP_TIMEOUT=30 UV_HTTP_RETRIES=1" in text
+    assert 'retry uv python install "${PYTHON_VERSION}"' in text
+    assert "retry uv pip install" in text
+    assert "uv venv --offline" in text
+
+
+def test_download_clients_bound_connection_waits_and_reuse_package_caches() -> None:
+    block = _split(SCRIPTS[0])[0]
+    for bound in (
+        "--connect-timeout 20",
+        '--max-time "${NET_DEADLINE}"',
+        "Acquire::http::Timeout=30",
+        "Acquire::https::Timeout=30",
+        "--fetch-timeout=30000",
+        "--timeout 30",
+    ):
+        assert bound in block
+    assert "--prefer-offline --no-audit --no-fund" in block
+    assert "--no-cache" not in block
+
+
+def test_apt_retries_including_backoff_and_kill_grace_fit_three_minutes() -> None:
+    block = _split(SCRIPTS[0])[0]
+    constants = {
+        name: int(value) for name, value in re.findall(r"^(APT_\w+)=(\d+)$", block, re.MULTILINE)
+    }
+    attempts = constants["APT_ATTEMPTS"]
+    grace = 5
+    backoff = sum(attempt * 5 for attempt in range(1, attempts))
+    budget = sum(
+        attempts * (constants[phase] + grace) + backoff
+        for phase in ("APT_UPDATE_DEADLINE", "APT_INSTALL_DEADLINE")
+    )
+    assert attempts == 2
+    assert "sleep $((attempt * 5))" in block
+    assert budget <= 180
+    update = block[block.index("apt_update_and_install() {") : block.index("apt_install() {")]
+    assert update.count('NET_ATTEMPTS="${APT_ATTEMPTS}"') == 2
+    assert 'NET_DEADLINE="${APT_INSTALL_DEADLINE}"' in update
+
+
+@pytest.mark.parametrize("script", SCRIPTS, ids=lambda path: path.parent.name)
+def test_apt_skips_network_for_installed_packages_and_installs_only_missing_ones(
+    script: Path,
+) -> None:
+    block = _split(script)[0]
+    install = block[block.index("apt_install() {") : block.index("npm_install_global() {")]
+    assert "dpkg-query -W -f='${Status}'" in install
+    assert "install ok installed" in install
+    assert 'missing+=("${package}")' in install
+    assert 'if [ "${#missing[@]}" -eq 0 ]; then' in install
+    assert install.index("return 0") < install.index("apt_update_and_install")
+    assert 'apt_update_and_install "${missing[@]}"' in install

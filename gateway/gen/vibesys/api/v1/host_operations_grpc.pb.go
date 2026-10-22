@@ -20,16 +20,26 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	HostOperationsService_ListTasks_FullMethodName       = "/vibesys.api.v1.HostOperationsService/ListTasks"
-	HostOperationsService_ListHarnesses_FullMethodName   = "/vibesys.api.v1.HostOperationsService/ListHarnesses"
-	HostOperationsService_ListExamples_FullMethodName    = "/vibesys.api.v1.HostOperationsService/ListExamples"
-	HostOperationsService_GetTaskGoal_FullMethodName     = "/vibesys.api.v1.HostOperationsService/GetTaskGoal"
-	HostOperationsService_DescribeMachine_FullMethodName = "/vibesys.api.v1.HostOperationsService/DescribeMachine"
-	HostOperationsService_ListCompute_FullMethodName     = "/vibesys.api.v1.HostOperationsService/ListCompute"
-	HostOperationsService_PreflightRun_FullMethodName    = "/vibesys.api.v1.HostOperationsService/PreflightRun"
-	HostOperationsService_PostIntent_FullMethodName      = "/vibesys.api.v1.HostOperationsService/PostIntent"
-	HostOperationsService_Relaunch_FullMethodName        = "/vibesys.api.v1.HostOperationsService/Relaunch"
-	HostOperationsService_ChatMessage_FullMethodName     = "/vibesys.api.v1.HostOperationsService/ChatMessage"
+	HostOperationsService_ListTasks_FullMethodName          = "/vibesys.api.v1.HostOperationsService/ListTasks"
+	HostOperationsService_ListHarnesses_FullMethodName      = "/vibesys.api.v1.HostOperationsService/ListHarnesses"
+	HostOperationsService_ListExamples_FullMethodName       = "/vibesys.api.v1.HostOperationsService/ListExamples"
+	HostOperationsService_GetTaskGoal_FullMethodName        = "/vibesys.api.v1.HostOperationsService/GetTaskGoal"
+	HostOperationsService_DescribeMachine_FullMethodName    = "/vibesys.api.v1.HostOperationsService/DescribeMachine"
+	HostOperationsService_ListCompute_FullMethodName        = "/vibesys.api.v1.HostOperationsService/ListCompute"
+	HostOperationsService_PreflightRun_FullMethodName       = "/vibesys.api.v1.HostOperationsService/PreflightRun"
+	HostOperationsService_InspectCandidate_FullMethodName   = "/vibesys.api.v1.HostOperationsService/InspectCandidate"
+	HostOperationsService_CompletePaths_FullMethodName      = "/vibesys.api.v1.HostOperationsService/CompletePaths"
+	HostOperationsService_Login_FullMethodName              = "/vibesys.api.v1.HostOperationsService/Login"
+	HostOperationsService_InspectDestination_FullMethodName = "/vibesys.api.v1.HostOperationsService/InspectDestination"
+	HostOperationsService_CreateExample_FullMethodName      = "/vibesys.api.v1.HostOperationsService/CreateExample"
+	HostOperationsService_CopyProject_FullMethodName        = "/vibesys.api.v1.HostOperationsService/CopyProject"
+	HostOperationsService_PutCluster_FullMethodName         = "/vibesys.api.v1.HostOperationsService/PutCluster"
+	HostOperationsService_RemoveCluster_FullMethodName      = "/vibesys.api.v1.HostOperationsService/RemoveCluster"
+	HostOperationsService_TestCluster_FullMethodName        = "/vibesys.api.v1.HostOperationsService/TestCluster"
+	HostOperationsService_StartRun_FullMethodName           = "/vibesys.api.v1.HostOperationsService/StartRun"
+	HostOperationsService_PostIntent_FullMethodName         = "/vibesys.api.v1.HostOperationsService/PostIntent"
+	HostOperationsService_Relaunch_FullMethodName           = "/vibesys.api.v1.HostOperationsService/Relaunch"
+	HostOperationsService_ChatMessage_FullMethodName        = "/vibesys.api.v1.HostOperationsService/ChatMessage"
 )
 
 // HostOperationsServiceClient is the client API for HostOperationsService service.
@@ -45,6 +55,23 @@ type HostOperationsServiceClient interface {
 	DescribeMachine(ctx context.Context, in *v1.DescribeMachineRequest, opts ...grpc.CallOption) (*v1.DescribeMachineResponse, error)
 	ListCompute(ctx context.Context, in *v1.ListComputeRequest, opts ...grpc.CallOption) (*v1.ListComputeResponse, error)
 	PreflightRun(ctx context.Context, in *v1.PreflightRunRequest, opts ...grpc.CallOption) (*v1.PreflightRunResponse, error)
+	// Setup reads. They do not require a saved checkout: the candidate path or
+	// typed prefix is the input, and Hello remains the gateway schema handshake.
+	InspectCandidate(ctx context.Context, in *v1.InspectCandidateRequest, opts ...grpc.CallOption) (*v1.InspectCandidateResponse, error)
+	CompletePaths(ctx context.Context, in *v1.CompletePathsRequest, opts ...grpc.CallOption) (*v1.CompletePathsResponse, error)
+	// Login is owned by the host until completion or an explicit cancel. Closing a
+	// panel drops the client's subscription and does not abort this stream.
+	Login(ctx context.Context, in *v1.LoginRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[v1.LoginResponse], error)
+	InspectDestination(ctx context.Context, in *v1.InspectDestinationRequest, opts ...grpc.CallOption) (*v1.InspectDestinationResponse, error)
+	CreateExample(ctx context.Context, in *v1.CreateExampleRequest, opts ...grpc.CallOption) (*v1.CreateExampleResponse, error)
+	CopyProject(ctx context.Context, in *v1.CopyProjectRequest, opts ...grpc.CallOption) (*v1.CopyProjectResponse, error)
+	PutCluster(ctx context.Context, in *v1.PutClusterRequest, opts ...grpc.CallOption) (*v1.PutClusterResponse, error)
+	RemoveCluster(ctx context.Context, in *v1.RemoveClusterRequest, opts ...grpc.CallOption) (*v1.RemoveClusterResponse, error)
+	TestCluster(ctx context.Context, in *v1.TestClusterRequest, opts ...grpc.CallOption) (*v1.TestClusterResponse, error)
+	// Start admits one run. Disconnect does not cancel it: the gateway drops the
+	// caller's context and keeps the runner until the cap. Replay of the same
+	// request id returns the stored result and does not launch again.
+	StartRun(ctx context.Context, in *v1.StartRunRequest, opts ...grpc.CallOption) (*v1.StartRunResponse, error)
 	// HostCall dispatch. The runner deadline is cap_ms. The client budget is
 	// cap_ms plus grace_ms, so it stays strictly above that cap. Relaunch confirms
 	// an epoch for up to 25s inside its runner cap. Request and response tags are
@@ -132,6 +159,115 @@ func (c *hostOperationsServiceClient) PreflightRun(ctx context.Context, in *v1.P
 	return out, nil
 }
 
+func (c *hostOperationsServiceClient) InspectCandidate(ctx context.Context, in *v1.InspectCandidateRequest, opts ...grpc.CallOption) (*v1.InspectCandidateResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(v1.InspectCandidateResponse)
+	err := c.cc.Invoke(ctx, HostOperationsService_InspectCandidate_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostOperationsServiceClient) CompletePaths(ctx context.Context, in *v1.CompletePathsRequest, opts ...grpc.CallOption) (*v1.CompletePathsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(v1.CompletePathsResponse)
+	err := c.cc.Invoke(ctx, HostOperationsService_CompletePaths_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostOperationsServiceClient) Login(ctx context.Context, in *v1.LoginRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[v1.LoginResponse], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &HostOperationsService_ServiceDesc.Streams[0], HostOperationsService_Login_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[v1.LoginRequest, v1.LoginResponse]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type HostOperationsService_LoginClient = grpc.ServerStreamingClient[v1.LoginResponse]
+
+func (c *hostOperationsServiceClient) InspectDestination(ctx context.Context, in *v1.InspectDestinationRequest, opts ...grpc.CallOption) (*v1.InspectDestinationResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(v1.InspectDestinationResponse)
+	err := c.cc.Invoke(ctx, HostOperationsService_InspectDestination_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostOperationsServiceClient) CreateExample(ctx context.Context, in *v1.CreateExampleRequest, opts ...grpc.CallOption) (*v1.CreateExampleResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(v1.CreateExampleResponse)
+	err := c.cc.Invoke(ctx, HostOperationsService_CreateExample_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostOperationsServiceClient) CopyProject(ctx context.Context, in *v1.CopyProjectRequest, opts ...grpc.CallOption) (*v1.CopyProjectResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(v1.CopyProjectResponse)
+	err := c.cc.Invoke(ctx, HostOperationsService_CopyProject_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostOperationsServiceClient) PutCluster(ctx context.Context, in *v1.PutClusterRequest, opts ...grpc.CallOption) (*v1.PutClusterResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(v1.PutClusterResponse)
+	err := c.cc.Invoke(ctx, HostOperationsService_PutCluster_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostOperationsServiceClient) RemoveCluster(ctx context.Context, in *v1.RemoveClusterRequest, opts ...grpc.CallOption) (*v1.RemoveClusterResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(v1.RemoveClusterResponse)
+	err := c.cc.Invoke(ctx, HostOperationsService_RemoveCluster_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostOperationsServiceClient) TestCluster(ctx context.Context, in *v1.TestClusterRequest, opts ...grpc.CallOption) (*v1.TestClusterResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(v1.TestClusterResponse)
+	err := c.cc.Invoke(ctx, HostOperationsService_TestCluster_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostOperationsServiceClient) StartRun(ctx context.Context, in *v1.StartRunRequest, opts ...grpc.CallOption) (*v1.StartRunResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(v1.StartRunResponse)
+	err := c.cc.Invoke(ctx, HostOperationsService_StartRun_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *hostOperationsServiceClient) PostIntent(ctx context.Context, in *PostIntentRequest, opts ...grpc.CallOption) (*PostIntentResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(PostIntentResponse)
@@ -175,6 +311,23 @@ type HostOperationsServiceServer interface {
 	DescribeMachine(context.Context, *v1.DescribeMachineRequest) (*v1.DescribeMachineResponse, error)
 	ListCompute(context.Context, *v1.ListComputeRequest) (*v1.ListComputeResponse, error)
 	PreflightRun(context.Context, *v1.PreflightRunRequest) (*v1.PreflightRunResponse, error)
+	// Setup reads. They do not require a saved checkout: the candidate path or
+	// typed prefix is the input, and Hello remains the gateway schema handshake.
+	InspectCandidate(context.Context, *v1.InspectCandidateRequest) (*v1.InspectCandidateResponse, error)
+	CompletePaths(context.Context, *v1.CompletePathsRequest) (*v1.CompletePathsResponse, error)
+	// Login is owned by the host until completion or an explicit cancel. Closing a
+	// panel drops the client's subscription and does not abort this stream.
+	Login(*v1.LoginRequest, grpc.ServerStreamingServer[v1.LoginResponse]) error
+	InspectDestination(context.Context, *v1.InspectDestinationRequest) (*v1.InspectDestinationResponse, error)
+	CreateExample(context.Context, *v1.CreateExampleRequest) (*v1.CreateExampleResponse, error)
+	CopyProject(context.Context, *v1.CopyProjectRequest) (*v1.CopyProjectResponse, error)
+	PutCluster(context.Context, *v1.PutClusterRequest) (*v1.PutClusterResponse, error)
+	RemoveCluster(context.Context, *v1.RemoveClusterRequest) (*v1.RemoveClusterResponse, error)
+	TestCluster(context.Context, *v1.TestClusterRequest) (*v1.TestClusterResponse, error)
+	// Start admits one run. Disconnect does not cancel it: the gateway drops the
+	// caller's context and keeps the runner until the cap. Replay of the same
+	// request id returns the stored result and does not launch again.
+	StartRun(context.Context, *v1.StartRunRequest) (*v1.StartRunResponse, error)
 	// HostCall dispatch. The runner deadline is cap_ms. The client budget is
 	// cap_ms plus grace_ms, so it stays strictly above that cap. Relaunch confirms
 	// an epoch for up to 25s inside its runner cap. Request and response tags are
@@ -212,6 +365,36 @@ func (UnimplementedHostOperationsServiceServer) ListCompute(context.Context, *v1
 }
 func (UnimplementedHostOperationsServiceServer) PreflightRun(context.Context, *v1.PreflightRunRequest) (*v1.PreflightRunResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method PreflightRun not implemented")
+}
+func (UnimplementedHostOperationsServiceServer) InspectCandidate(context.Context, *v1.InspectCandidateRequest) (*v1.InspectCandidateResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method InspectCandidate not implemented")
+}
+func (UnimplementedHostOperationsServiceServer) CompletePaths(context.Context, *v1.CompletePathsRequest) (*v1.CompletePathsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CompletePaths not implemented")
+}
+func (UnimplementedHostOperationsServiceServer) Login(*v1.LoginRequest, grpc.ServerStreamingServer[v1.LoginResponse]) error {
+	return status.Error(codes.Unimplemented, "method Login not implemented")
+}
+func (UnimplementedHostOperationsServiceServer) InspectDestination(context.Context, *v1.InspectDestinationRequest) (*v1.InspectDestinationResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method InspectDestination not implemented")
+}
+func (UnimplementedHostOperationsServiceServer) CreateExample(context.Context, *v1.CreateExampleRequest) (*v1.CreateExampleResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CreateExample not implemented")
+}
+func (UnimplementedHostOperationsServiceServer) CopyProject(context.Context, *v1.CopyProjectRequest) (*v1.CopyProjectResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CopyProject not implemented")
+}
+func (UnimplementedHostOperationsServiceServer) PutCluster(context.Context, *v1.PutClusterRequest) (*v1.PutClusterResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method PutCluster not implemented")
+}
+func (UnimplementedHostOperationsServiceServer) RemoveCluster(context.Context, *v1.RemoveClusterRequest) (*v1.RemoveClusterResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method RemoveCluster not implemented")
+}
+func (UnimplementedHostOperationsServiceServer) TestCluster(context.Context, *v1.TestClusterRequest) (*v1.TestClusterResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method TestCluster not implemented")
+}
+func (UnimplementedHostOperationsServiceServer) StartRun(context.Context, *v1.StartRunRequest) (*v1.StartRunResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method StartRun not implemented")
 }
 func (UnimplementedHostOperationsServiceServer) PostIntent(context.Context, *PostIntentRequest) (*PostIntentResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method PostIntent not implemented")
@@ -369,6 +552,179 @@ func _HostOperationsService_PreflightRun_Handler(srv interface{}, ctx context.Co
 	return interceptor(ctx, in, info, handler)
 }
 
+func _HostOperationsService_InspectCandidate_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(v1.InspectCandidateRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostOperationsServiceServer).InspectCandidate(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: HostOperationsService_InspectCandidate_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostOperationsServiceServer).InspectCandidate(ctx, req.(*v1.InspectCandidateRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _HostOperationsService_CompletePaths_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(v1.CompletePathsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostOperationsServiceServer).CompletePaths(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: HostOperationsService_CompletePaths_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostOperationsServiceServer).CompletePaths(ctx, req.(*v1.CompletePathsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _HostOperationsService_Login_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(v1.LoginRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(HostOperationsServiceServer).Login(m, &grpc.GenericServerStream[v1.LoginRequest, v1.LoginResponse]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type HostOperationsService_LoginServer = grpc.ServerStreamingServer[v1.LoginResponse]
+
+func _HostOperationsService_InspectDestination_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(v1.InspectDestinationRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostOperationsServiceServer).InspectDestination(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: HostOperationsService_InspectDestination_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostOperationsServiceServer).InspectDestination(ctx, req.(*v1.InspectDestinationRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _HostOperationsService_CreateExample_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(v1.CreateExampleRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostOperationsServiceServer).CreateExample(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: HostOperationsService_CreateExample_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostOperationsServiceServer).CreateExample(ctx, req.(*v1.CreateExampleRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _HostOperationsService_CopyProject_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(v1.CopyProjectRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostOperationsServiceServer).CopyProject(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: HostOperationsService_CopyProject_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostOperationsServiceServer).CopyProject(ctx, req.(*v1.CopyProjectRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _HostOperationsService_PutCluster_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(v1.PutClusterRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostOperationsServiceServer).PutCluster(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: HostOperationsService_PutCluster_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostOperationsServiceServer).PutCluster(ctx, req.(*v1.PutClusterRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _HostOperationsService_RemoveCluster_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(v1.RemoveClusterRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostOperationsServiceServer).RemoveCluster(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: HostOperationsService_RemoveCluster_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostOperationsServiceServer).RemoveCluster(ctx, req.(*v1.RemoveClusterRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _HostOperationsService_TestCluster_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(v1.TestClusterRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostOperationsServiceServer).TestCluster(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: HostOperationsService_TestCluster_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostOperationsServiceServer).TestCluster(ctx, req.(*v1.TestClusterRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _HostOperationsService_StartRun_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(v1.StartRunRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostOperationsServiceServer).StartRun(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: HostOperationsService_StartRun_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostOperationsServiceServer).StartRun(ctx, req.(*v1.StartRunRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _HostOperationsService_PostIntent_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(PostIntentRequest)
 	if err := dec(in); err != nil {
@@ -459,6 +815,42 @@ var HostOperationsService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _HostOperationsService_PreflightRun_Handler,
 		},
 		{
+			MethodName: "InspectCandidate",
+			Handler:    _HostOperationsService_InspectCandidate_Handler,
+		},
+		{
+			MethodName: "CompletePaths",
+			Handler:    _HostOperationsService_CompletePaths_Handler,
+		},
+		{
+			MethodName: "InspectDestination",
+			Handler:    _HostOperationsService_InspectDestination_Handler,
+		},
+		{
+			MethodName: "CreateExample",
+			Handler:    _HostOperationsService_CreateExample_Handler,
+		},
+		{
+			MethodName: "CopyProject",
+			Handler:    _HostOperationsService_CopyProject_Handler,
+		},
+		{
+			MethodName: "PutCluster",
+			Handler:    _HostOperationsService_PutCluster_Handler,
+		},
+		{
+			MethodName: "RemoveCluster",
+			Handler:    _HostOperationsService_RemoveCluster_Handler,
+		},
+		{
+			MethodName: "TestCluster",
+			Handler:    _HostOperationsService_TestCluster_Handler,
+		},
+		{
+			MethodName: "StartRun",
+			Handler:    _HostOperationsService_StartRun_Handler,
+		},
+		{
 			MethodName: "PostIntent",
 			Handler:    _HostOperationsService_PostIntent_Handler,
 		},
@@ -471,6 +863,12 @@ var HostOperationsService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _HostOperationsService_ChatMessage_Handler,
 		},
 	},
-	Streams:  []grpc.StreamDesc{},
+	Streams: []grpc.StreamDesc{
+		{
+			StreamName:    "Login",
+			Handler:       _HostOperationsService_Login_Handler,
+			ServerStreams: true,
+		},
+	},
 	Metadata: "vibesys/api/v1/host_operations.proto",
 }

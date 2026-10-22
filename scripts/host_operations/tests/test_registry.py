@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
 _SLOTS = tuple(host_operations.ADAPTER_OPERATIONS)
-_HANDLERS = tuple(op.name for op in host_operations.OPERATIONS)
+_HANDLERS = tuple(op.name for op in host_operations.OPERATIONS if op.effect == 1)
 
 
 def _image() -> descriptor_pb2.FileDescriptorSet:
@@ -43,8 +43,19 @@ def _slots() -> tuple[str, ...]:
         "get_task_goal",
         "describe_machine",
         "list_compute",
+        "inspect_destination",
         "preflight_run",
+        "put_cluster",
+        "remove_cluster",
+        "test_cluster",
+        "create_example",
+        "copy_project",
+        "start_run",
     )
+
+
+def _watches() -> tuple[str, ...]:
+    return ("login",)
 
 
 def _changed(change: Callable[[object], None], index: int = 0) -> bytes:
@@ -65,18 +76,30 @@ def _changed(change: Callable[[object], None], index: int = 0) -> bytes:
 
 
 def test_every_method_has_one_typed_handler_and_canonical_budget() -> None:
-    compiled = compile_registry(_image().SerializeToString(), _slots())
-    assert [op.name for op in compiled if op.is_read()] == list(_HANDLERS)
-    assert [(op.slot, op.policy.cap_ms) for op in compiled if op.is_admission()] == [
+    compiled = compile_registry(_image().SerializeToString(), _slots(), _watches())
+    reads = [op for op in compiled if op.is_read()]
+    assert [op.name for op in reads if op.policy.executor == 1] == list(_HANDLERS)
+    assert [op.name for op in reads if op.policy.executor != 1] == [
+        "InspectCandidate",
+        "CompletePaths",
+    ]
+    assert [(op.slot, op.policy.cap_ms) for op in compiled if op.is_host_call()] == [
         ("post_intent", 10000),
         ("relaunch", 30000),
         ("chat_message", 10000),
     ]
+    assert [(op.slot, op.policy.cap_ms) for op in compiled if op.is_watch()] == [
+        ("login", 600000),
+    ]
     assert {op.policy.cap_ms + op.policy.grace_ms for op in compiled} == {
+        10000,
         15000,
         30000,
         35000,
         70000,
+        65000,
+        125000,
+        605000,
     }
 
 
@@ -149,29 +172,29 @@ def _server_sources(root: Path) -> tuple[str, ...]:
 def test_the_descriptor_pass_compiles_all_language_outputs_before_publication() -> None:
     root = Path(__file__).resolve().parents[3]
     image = _image().SerializeToString()
-    outputs = compile_outputs(image, _slots(), _server_sources(root))
-    assert len(outputs) == 6
+    outputs = compile_outputs(image, _slots(), _server_sources(root), _watches())
+    assert len(outputs) == 12
     for path, content in outputs.items():
         if path.endswith(".py"):
             ast.parse(content)
-    assert compile_outputs(image, _slots(), _server_sources(root)) == outputs
+    assert compile_outputs(image, _slots(), _server_sources(root), _watches()) == outputs
 
 
 def test_every_client_budget_exceeds_its_runner_cap() -> None:
     root = Path(__file__).resolve().parents[3]
     image = _image().SerializeToString()
-    outputs = compile_outputs(image, _slots(), _server_sources(root))
+    outputs = compile_outputs(image, _slots(), _server_sources(root), _watches())
     typescript = outputs["clients/libs/proto/src/generated/host-operations.ts"]
     runner = outputs["gateway/internal/hostoperations/registry_generated.go"]
     calls = outputs["gateway/internal/hostoperations/host_call_generated.go"]
     python = outputs["libs/vs-proto/src/vs_proto/_generated/host_operations.py"]
-    compiled = compile_registry(image, _slots())
+    compiled = compile_registry(image, _slots(), _watches())
     assert compiled
     for op in compiled:
         client = op.policy.cap_ms + op.policy.grace_ms
         runner_cap = op.policy.cap_ms
         assert client > runner_cap
-        if op.is_admission():
+        if op.is_host_call():
             case = op.slot.split("_", maxsplit=1)[0] + "".join(
                 part.title() for part in op.slot.split("_")[1:]
             )
@@ -186,9 +209,32 @@ def test_every_client_budget_exceeds_its_runner_cap() -> None:
                 in python
             )
         else:
+            case = op.slot.split("_", maxsplit=1)[0] + "".join(
+                part.title() for part in op.slot.split("_")[1:]
+            )
             assert f"totalMs: {client}" in typescript
+            first = (
+                f", firstEventMs: {op.policy.first_event_ms}"
+                if op.policy.HasField("first_event_ms")
+                else ""
+            )
+            assert (
+                f"{case}: Object.freeze({{capMs: {runner_cap}, graceMs: {op.policy.grace_ms}, totalMs: {client}{first}}}"
+                in typescript
+            )
             assert f"Cap: {runner_cap}*time.Millisecond" in runner
             assert f"Grace: {op.policy.grace_ms}*time.Millisecond" in runner
+            dispatch = (
+                "host_watch_generated.go"
+                if op.is_watch()
+                else "host_mutate_generated.go"
+                if op.is_mutation()
+                else "host_read_generated.go"
+            )
+            assert (
+                f"Deadline: {runner_cap} * time.Millisecond"
+                in outputs[f"gateway/internal/hostoperations/{dispatch}"]
+            )
 
 
 def test_generate_publishes_every_projection(tmp_path: Path) -> None:
@@ -207,7 +253,7 @@ def test_generate_publishes_every_projection(tmp_path: Path) -> None:
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(path.read_bytes())
     image = _image().SerializeToString()
-    expected = compile_outputs(image, _slots(), _server_sources(root))
+    expected = compile_outputs(image, _slots(), _server_sources(root), _watches())
     generate(tmp_path, image, include_schema=False)
     for name, content in expected.items():
         published = tmp_path / name

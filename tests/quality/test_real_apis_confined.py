@@ -1544,6 +1544,10 @@ FILE_IO_EDGE_MODULES: dict[str, Edge] = {
         EdgeKind.AGENT_WORKSPACE,
         "the scripted implementer's source edits and the reads of the candidate it and the judge make",
     ),
+    "src/vibesys/api/host_operations/_candidate.py": (
+        EdgeKind.INPUT_LOADER,
+        "read-only loader of candidate checkout metadata (pyproject and git HEAD)",
+    ),
     "src/vibesys/config.py": (EdgeKind.INPUT_LOADER, "VibeSys configuration"),
     "src/vibesys/domains/rendering.py": (EdgeKind.PACKAGED_RESOURCE, "role templates"),
     "src/vibesys/inputs/_manifest.py": (EdgeKind.INPUT_LOADER, "the task manifest"),

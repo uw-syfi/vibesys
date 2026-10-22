@@ -109,11 +109,25 @@ class DockerCommandRunner(Protocol):
 
 @dataclass(frozen=True)
 class FinalImage:
-    """How the finished image starts and what its local tag is called."""
+    """The image to produce, and existing images whose layers it may reuse.
+
+    ``cache_from`` names Docker images with inline build-cache metadata. Cache
+    sources affect reuse only, never the resulting image's input-addressed tag.
+    """
 
     user: str
     workdir: str
     image_repository: str
+    cache_from: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        """Reject malformed cache sources before issuing any Docker command."""
+        if any(
+            not source or source.startswith("-") or any(c.isspace() for c in source)
+            for source in self.cache_from
+        ):
+            message = "cache_from must contain nonempty Docker image references without whitespace"
+            raise ValueError(message)
 
 
 @dataclass(frozen=True)
@@ -254,6 +268,9 @@ def build_feature_image(
                     str(dockerfile),
                     "--build-arg",
                     f"{BASE_IMAGE_ARG}={base_image}",
+                    "--build-arg",
+                    "BUILDKIT_INLINE_CACHE=1",
+                    *(arg for source in final.cache_from for arg in ("--cache-from", source)),
                     str(context),
                 ),
                 cwd=context,
