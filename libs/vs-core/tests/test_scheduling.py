@@ -1130,7 +1130,7 @@ def test_pause_resume_duplicate_controls_preserve_held_occupancy_and_receipts(
         control = core.ControlInput(
             control_id=core.ControlId(root=f"control-{index}"),
             action="pause" if index % 2 else "resume",
-            owner=core.PauseOwner.OPERATOR if index % 2 else None,
+            owner=core.PauseOwner.QUOTA if index % 2 else None,
             when=None if index % 2 else "now",
         )
         result = _step(state, core.RunControlEvent(control=control, now_at=float(supplied)))
@@ -1163,7 +1163,7 @@ def test_resuming_paused_queue_wakes_already_paid_fifo_head() -> None:
             control=core.ControlInput(
                 control_id=core.ControlId(root="pause"),
                 action="pause",
-                owner=core.PauseOwner.OPERATOR,
+                owner=core.PauseOwner.QUOTA,
             ),
             now_at=5.0,
         ),

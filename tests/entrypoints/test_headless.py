@@ -1707,7 +1707,7 @@ def test_collection_resume_requires_project_metadata(tmp_path: Path) -> None:
     assert "not a VibeSys project" in exc.value.diagnostic.message
 
 
-def test_resume_switches_to_the_recorded_run_branch(
+def test_resume_reads_the_recorded_run_without_switching_the_project_branch(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1753,10 +1753,11 @@ def test_resume_switches_to_the_recorded_run_branch(
     )
     _git(project, "switch", "-q", "main")
     monkeypatch.chdir(project)
+    original = (task_path(project) / "OBJECTIVE.md").read_text()
 
     invocation = parse_cli_invocation(["--resume", run_id])
 
-    assert invocation.args.input_bundle.objective == "Objective on the run branch.\n"
+    assert invocation.args.input_bundle.objective == original
     branch = run_test_command(
         ["git", "branch", "--show-current"],
         cwd=project,
@@ -1764,7 +1765,8 @@ def test_resume_switches_to_the_recorded_run_branch(
         capture_output=True,
         text=True,
     ).stdout.strip()
-    assert branch == f"vibesys-runs/{run_id}"
+    assert branch == "main"
+    assert (task_path(project) / "OBJECTIVE.md").read_text() == original
 
 
 def test_agent_resume_restores_its_configuration(

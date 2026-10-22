@@ -31,18 +31,27 @@ interface GatewayWindow {
 function appliedState(action: IntentAction) {
   return create(LifecycleSchema, {
     state:
-      action === IntentAction.PARK
+      action === IntentAction.PAUSE_NOW
         ? {case: 'parked', value: {}}
-        : {
-            case: 'running',
-            value:
-              action === IntentAction.PAUSE ? {hold: {reason: {case: 'operator', value: {}}}} : {},
-          },
+        : {case: 'draining', value: {}},
   }).state;
 }
 
-async function openIntents(page: Page) {
-  const fixture = storeRunFixture('live');
+async function openIntents(page: Page, amendment = false) {
+  const source = storeRunFixture('live');
+  const fixture = {...source, records: [...source.records]};
+  if (amendment) {
+    const header = fixture.records.find(record => record.body.case === 'epochStarted');
+    if (header?.body.case !== 'epochStarted') throw new Error('fixture header required');
+    fixture.records.push(
+      create(RecordSchema, {
+        seq: (fixture.records.at(-1)?.seq ?? 0n) + 1n,
+        epoch: header.epoch,
+        at: {seconds: 1700000200n},
+        body: {case: 'declarationAmended', value: header.body.value},
+      }),
+    );
+  }
   const requests: {host: string; request: PostIntentRequest}[] = [];
   let sequence = fixture.records.at(-1)?.seq ?? 0n;
   await page.exposeFunction('postIntent', (host: string, bytes: number[]) => {
@@ -64,12 +73,7 @@ async function openIntents(page: Page) {
   const outcome = async (index: number, result: 'applied' | 'refused'): Promise<void> => {
     const request = requests[index]?.request;
     if (!request) throw new Error('No posted intent');
-    const action =
-      request.intent.case === 'park'
-        ? IntentAction.PARK
-        : request.intent.case === 'resume'
-          ? IntentAction.RESUME
-          : IntentAction.PAUSE;
+    const action = request.intent.case === 'pauseNow' ? IntentAction.PAUSE_NOW : IntentAction.PAUSE;
     const {records} = intentReplay(result, request.requestId, ++sequence, action);
     if (result === 'applied') {
       records.push(
@@ -103,6 +107,23 @@ async function openIntents(page: Page) {
   return {requests, outcome, toggle};
 }
 
+for (const width of [800, 1440]) {
+  test(`declaration amendments keep lifecycle and addressed Pause at ${width}px`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({width, height: 900});
+    const {requests} = await openIntents(page, true);
+    await expect(page.getByText('Saved run', {exact: true})).toHaveCount(0);
+    await expect(page.getByRole('button', {name: 'Resume', exact: true})).toHaveCount(0);
+    await page.getByRole('button', {name: 'Pause', exact: true}).click();
+    await expect(page.getByText('Pause · Pending', {exact: true})).toBeVisible();
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.request.projectRoot).toBe('/work/queue-rs');
+    expect(requests[0]?.request.expectedEpoch).toBe(1n);
+    await capture(page, `amendment-pause-${width}`);
+  });
+}
+
 const shots = process.env['SCREENS_DIR'];
 const sheet: SheetEntry[] = [];
 async function capture(page: Page, name: string): Promise<void> {
@@ -115,7 +136,7 @@ async function capture(page: Page, name: string): Promise<void> {
   sheet.push({name, file});
 }
 
-test('pause then resume uses the host intent path and waits for journal outcomes', async ({
+test('Pause escalates to Pause now in the same epoch and waits for journal outcomes', async ({
   page,
 }) => {
   const {requests, outcome, toggle} = await openIntents(page);
@@ -131,19 +152,17 @@ test('pause then resume uses the host intent path and waits for journal outcomes
   });
   await outcome(0, 'applied');
   await expect(page.getByText('Pause · Applied', {exact: true})).toBeVisible();
-  await expect(page.getByText('Paused by you', {exact: true}).first()).toBeVisible();
-  await page.getByRole('button', {name: 'Resume', exact: true}).click();
-  await expect(page.getByText('Resume · Pending', {exact: true})).toBeVisible();
-  expect(requests[1]?.request.intent.case).toBe('resume');
+  await expect(page.getByText('Pausing', {exact: true}).first()).toBeVisible();
+  await page.getByRole('button', {name: 'Pause now', exact: true}).click();
+  await expect(page.getByText('Pause now · Pending', {exact: true})).toBeVisible();
+  expect(requests[1]?.request.intent.case).toBe('pauseNow');
   expect(requests[1]?.request.requestId).not.toBe(requests[0]?.request.requestId);
   await outcome(1, 'applied');
-  await expect(page.getByText('Resume · Applied', {exact: true})).toBeVisible();
-  await expect(page.getByText('Running', {exact: true}).first()).toBeVisible();
+  await expect(page.getByText('Pause now · Applied', {exact: true})).toBeVisible();
+  await expect(page.getByText('Paused', {exact: true}).first()).toBeVisible();
   expect(
     await page.evaluate(() =>
-      (window as unknown as GatewayWindow).fakeHost.calls.filter(
-        call => call[0] === 'resume' || call[0] === 'stopConfirmed',
-      ),
+      (window as unknown as GatewayWindow).fakeHost.calls.filter(call => call[0] === 'resume'),
     ),
   ).toEqual([]);
   await toggle.uncheck();
@@ -159,7 +178,7 @@ for (const kind of INTENT_REPLAYS) {
     test(`intent ${kind} at ${width}px`, async ({page}) => {
       await page.setViewportSize({width, height: 900});
       const {outcome, requests} = await openIntents(page);
-      const action = kind === 'park-applied' ? 'Park' : 'Pause';
+      const action = 'Pause';
       await page.getByRole('button', {name: action, exact: true}).click();
       if (kind !== 'pending') {
         await expect(page.getByText(`${action} · Pending`, {exact: true})).toBeVisible();
@@ -170,8 +189,8 @@ for (const kind of INTENT_REPLAYS) {
       await expect(result).toBeVisible();
       expect(requests).toHaveLength(1);
       if (kind === 'park-applied') {
-        expect(requests[0]?.request.intent.case).toBe('park');
-        await expect(page.getByText('Parked', {exact: true}).first()).toBeVisible();
+        expect(requests[0]?.request.intent.case).toBe('pause');
+        await expect(page.getByText('Pausing', {exact: true}).first()).toBeVisible();
       }
       await capture(page, `intent-${kind}-${width}`);
     });
@@ -205,15 +224,15 @@ test('intent controls app-window contact sheet', async ({page}) => {
 
 test('a pause drain confirmation survives the run reader reconnecting', async ({page}) => {
   const {requests, outcome} = await openIntents(page);
-  await page.getByRole('button', {name: 'Park', exact: true}).click();
-  await expect(page.getByText('Park · Pending', {exact: true})).toBeVisible();
+  await page.getByRole('button', {name: 'Pause', exact: true}).click();
+  await expect(page.getByText('Pause · Pending', {exact: true})).toBeVisible();
   await page.evaluate(() => {
     const world = window as unknown as GatewayWindow;
     world.fakeGateway.disconnect();
     world.fakeHost.recent([]);
   });
   await outcome(0, 'applied');
-  await expect(page.getByText('Park · Applied', {exact: true})).toBeVisible();
+  await expect(page.getByText('Pause · Applied', {exact: true})).toBeVisible();
   expect(requests).toHaveLength(1);
-  await expect(page.getByText('Parked', {exact: true}).first()).toBeVisible();
+  await expect(page.getByText('Pausing', {exact: true}).first()).toBeVisible();
 });

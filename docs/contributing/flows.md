@@ -540,18 +540,18 @@ workspaces, adoption) a toy search runs through the real core with scripted exec
   journaled, so they replay to the same value.
 - `Group.free` is a large constant when the group has no limit. `ctx.stopped` yields the
   `StopRequested` event itself. A stopped `Task` yields `TaskStopped(key)`.
-- A stop is a pause the operator can lift: an explicit resume while the run has not committed
-  its ending delivers `StopLifted`. `ctx.stop_requested` is false again, a flow the stop had not
-  yet interrupted goes on, and a flow it had interrupted stays ended. A root that must outlive the
-  stop's cleanup judges the stop after waiting for its tasks (`multi` and `single` do, so they play
-  the rounds that remain). A root that has already concluded (the stop's ending is committed) is
-  lifted by a restart: while the ending's cleanup runs core refuses the resume, and once the run is
-  terminal the resume reopens it (`reopens_on_resume`: the operator's stop ended it, so it is a
-  pause), and the driver starts every flow again from its latest checkpoint with the stop taken
-  back. The adoption the stop completed answered that stop, so the lift takes it back
-  (`vs_core._adoption.reopen`) and the ending the run reaches later adopts its own winner. A
-  search keeps no copy of the stop in its checkpoint: a flag saved there would end the search again
-  after the resume. The deadline's stop and every result of the run's own end the run for good.
+- Pause closes new admission while admitted logical turns finish their corrections,
+  evaluation waits, and continuations within the original deadline. Pause now withdraws
+  completion authority, cancels active invocations and releases evaluation interests with
+  bounded cleanup. Interrupted work stays unfinished without spending a role's correction
+  or lost-turn allowance.
+- Resume opens a new epoch after every ending. `StopLifted(new_epoch=True)` restarts flows
+  from their retained checkpoints with the old shutdown cleared. The duration is fresh;
+  lifetime usage and accepted results remain recorded. The original input baseline is fixed,
+  and resumed adoption is guarded until project-edit protection can prove it safe. Root
+  restores are guarded, and snapshots refuse edits present at Resume. Ordinary writer recovery
+  preserves its deadline and publication authority; it does not imply operator Resume. A search
+  keeps no copy of an epoch's shutdown in its own checkpoint.
 - Awaiting inside a `finally` while the run itself is being discarded is not supported; use
   `except Stopped` (or `@resource`) for cleanup that awaits.
 - A suspended turn's waits are bounded by the run deadline, so a turn that never resumes cannot

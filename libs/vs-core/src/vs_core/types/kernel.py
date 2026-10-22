@@ -121,6 +121,8 @@ class RunState(Value):
     park: RunPark | None = None
     now_at: Seconds
     deadline_at: Seconds
+    duration_seconds: Seconds | None = Field(default=None, gt=0)
+    """Original epoch duration; older records use the supplied run configuration once."""
     facts: RunFacts
     capabilities: Capabilities = Capabilities()
     limits: Limits
@@ -249,6 +251,7 @@ class StopLiftRecorded(Value):
 
     kind: Literal["stop_lift_recorded"] = "stop_lift_recorded"
     control: ControlInput
+    new_epoch: bool = Field(default=False, exclude_if=lambda value: not value)
 
 
 class RunEnded(Value):

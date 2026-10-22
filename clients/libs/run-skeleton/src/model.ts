@@ -71,6 +71,7 @@ function foldBody(state: Omit<Skeleton, 'throughSeq'>, record: StoreRecord): voi
       break;
     }
     case 'epochStarted':
+    case 'declarationAmended':
       state.epochs.push(create(EpochVersionSchema, {seq, epoch: body.value}));
       break;
     case 'lifecycle':

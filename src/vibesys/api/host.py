@@ -113,18 +113,10 @@ def _post_intent(request: PostIntentRequest) -> PostIntentResponse:
 def _control_payload(request: PostIntentRequest) -> dict[str, object]:
     common: dict[str, object] = {"control_id": request.request_id}
     match request.intent:
-        case Oneof("park", _):
-            payload = {"action": ControlAction.PARK}
+        case Oneof("pause_now", _):
+            payload = {"action": "pause_now", "expected_epoch": request.expected_epoch}
         case Oneof("pause", _):
-            payload = {"action": ControlAction.PAUSE}
-        case Oneof("resume", value):
-            payload = {
-                "action": ControlAction.RESUME,
-                "fallback": value.fallback,
-                "when": value.when.name.lower(),
-            }
-        case Oneof("stop", value):
-            payload = {"action": ControlAction.STOP, "mode": value.mode.name.lower()}
+            payload = {"action": ControlAction.PAUSE, "expected_epoch": request.expected_epoch}
         case Oneof("steer", value):
             payload = _steer_payload(value)
         case Oneof("withdraw", value):

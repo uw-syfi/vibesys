@@ -832,6 +832,8 @@ func (x *ControlInput) GetMaxParallel() string {
 // Durable drain authority. A parked run can resume only in a later host epoch.
 type RunPark struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
+	AdmittedTurns []*InvocationRef       `protobuf:"bytes,4,rep,name=admitted_turns,json=admittedTurns,proto3" json:"admitted_turns,omitempty"`
+	Immediate     bool                   `protobuf:"varint,3,opt,name=immediate,proto3" json:"immediate,omitempty"`
 	ControlId     *ControlId             `protobuf:"bytes,1,opt,name=control_id,json=controlId,proto3" json:"control_id,omitempty"`
 	Epoch         string                 `protobuf:"bytes,2,opt,name=epoch,proto3" json:"epoch,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -866,6 +868,20 @@ func (x *RunPark) ProtoReflect() protoreflect.Message {
 // Deprecated: Use RunPark.ProtoReflect.Descriptor instead.
 func (*RunPark) Descriptor() ([]byte, []int) {
 	return file_vibesys_core_v1_control_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *RunPark) GetAdmittedTurns() []*InvocationRef {
+	if x != nil {
+		return x.AdmittedTurns
+	}
+	return nil
+}
+
+func (x *RunPark) GetImmediate() bool {
+	if x != nil {
+		return x.Immediate
+	}
+	return false
 }
 
 func (x *RunPark) GetControlId() *ControlId {
@@ -980,8 +996,10 @@ const file_vibesys_core_v1_control_proto_rawDesc = "" +
 	"\x1cControlInput.invocation_mode\x12<input_mode interrupt or standing cannot target an invocation\x1aQ!(this.input_mode in [2, 3]) || !has(this.target) || !has(this.target.invocation)\x1a\x88\x01\n" +
 	"\x17ControlInput.when_flags\x12,when only immediate resume switches or keeps\x1a?!(this.fallback || this.capacity_wait_stands) || this.when == 1\x1a{\n" +
 	"!ControlInput.capacity_wait_stands\x12'capacity_wait_stands fallback ends wait\x1a-!(this.fallback && this.capacity_wait_stands)B\x0f\n" +
-	"\r_max_parallel\"\x82\x01\n" +
-	"\aRunPark\x12A\n" +
+	"\r_max_parallel\"\xe7\x01\n" +
+	"\aRunPark\x12E\n" +
+	"\x0eadmitted_turns\x18\x04 \x03(\v2\x1e.vibesys.core.v1.InvocationRefR\radmittedTurns\x12\x1c\n" +
+	"\timmediate\x18\x03 \x01(\bR\timmediate\x12A\n" +
 	"\n" +
 	"control_id\x18\x01 \x01(\v2\x1a.vibesys.core.v1.ControlIdB\x06\xbaH\x03\xc8\x01\x01R\tcontrolId\x124\n" +
 	"\x05epoch\x18\x02 \x01(\tB\x1e\xbaH\x15r\x132\x11^(0|[1-9][0-9]*)$\xca\xf3\x18\x02\x10\x01R\x05epochB?Z=github.com/uw-syfi/vibesys/gateway/gen/vibesys/core/v1;corev1b\x06proto3"
@@ -1050,12 +1068,13 @@ var file_vibesys_core_v1_control_proto_depIdxs = []int32{
 	23, // 20: vibesys.core.v1.ControlInput.when:type_name -> vibesys.core.v1.ResumeWhen
 	24, // 21: vibesys.core.v1.ControlInput.attempt:type_name -> vibesys.core.v1.AttemptId
 	12, // 22: vibesys.core.v1.ControlInput.item:type_name -> vibesys.core.v1.ItemId
-	17, // 23: vibesys.core.v1.RunPark.control_id:type_name -> vibesys.core.v1.ControlId
-	24, // [24:24] is the sub-list for method output_type
-	24, // [24:24] is the sub-list for method input_type
-	24, // [24:24] is the sub-list for extension type_name
-	24, // [24:24] is the sub-list for extension extendee
-	0,  // [0:24] is the sub-list for field type_name
+	13, // 23: vibesys.core.v1.RunPark.admitted_turns:type_name -> vibesys.core.v1.InvocationRef
+	17, // 24: vibesys.core.v1.RunPark.control_id:type_name -> vibesys.core.v1.ControlId
+	25, // [25:25] is the sub-list for method output_type
+	25, // [25:25] is the sub-list for method input_type
+	25, // [25:25] is the sub-list for extension type_name
+	25, // [25:25] is the sub-list for extension extendee
+	0,  // [0:25] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_core_v1_control_proto_init() }

@@ -89,6 +89,7 @@ def encode_ControlAction(
         "cancel_item",
         "set_max_parallel",
         "park",
+        "pause_now",
     ]
     | None,
 ) -> pb.ControlAction:
@@ -102,6 +103,7 @@ def encode_ControlAction(
         "cancel_item": pb.ControlAction.CANCEL_ITEM,
         "set_max_parallel": pb.ControlAction.SET_MAX_PARALLEL,
         "park": pb.ControlAction.PARK,
+        "pause_now": pb.ControlAction.PAUSE_NOW,
     }.get(v, pb.ControlAction.UNSPECIFIED)
 
 
@@ -117,6 +119,7 @@ def decode_ControlAction(
     "cancel_item",
     "set_max_parallel",
     "park",
+    "pause_now",
 ]:
     return cast(
         Literal[
@@ -129,6 +132,7 @@ def decode_ControlAction(
             "cancel_item",
             "set_max_parallel",
             "park",
+            "pause_now",
         ],
         {
             1: "pause",
@@ -140,6 +144,7 @@ def decode_ControlAction(
             7: "cancel_item",
             8: "set_max_parallel",
             9: "park",
+            10: "pause_now",
         }[v],
     )
 

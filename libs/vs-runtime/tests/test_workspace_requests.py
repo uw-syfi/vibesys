@@ -350,13 +350,14 @@ def _executor(
 ) -> tuple[RuntimeWorkspaceRequests, ReceiptStore]:
     """A host's executor over the run's durable receipts (a new one models a restart)."""
     chosen = store or _ENVS[workspaces].store()
-    return RuntimeWorkspaceRequests(
+    executor = RuntimeWorkspaceRequests(
         workspaces,
         chosen,
         SettledRunInvocations(),
         blocking=InlineBlockingRunner(),
         evidence=ReceiptEvidenceLedger(chosen),
-    ), chosen
+    )
+    return executor, chosen
 
 
 async def _run(
@@ -920,6 +921,11 @@ def test_adoption_publishes_and_legacy_verification_reads_publication(tmp_path: 
         root_file = workspaces.root.path / "candidate.py"
         assert root_file.read_text(encoding="utf-8") == "VALUE = 2\n"
         assert await _run(executor, adopt, epoch=2) == applied
+        before_head = workspaces.root.revision
+        same = AdoptRevision(request_id=_rid("adopt-same"), scope=run_scope, selection=selection)
+        checked = await _run(executor, same, epoch=2)
+        assert checked.observation.observation.status is ObservationStatus.SUCCEEDED
+        assert workspaces.root.revision == before_head
         proof = await _run(executor, verify("verify-1"), epoch=2)
         assert proof.observation.observation.status is ObservationStatus.SUCCEEDED
         assert proof.observation.revision == winner

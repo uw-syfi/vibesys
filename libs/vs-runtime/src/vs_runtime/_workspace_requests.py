@@ -358,7 +358,7 @@ class RuntimeWorkspaceRequests:
             case SnapshotAndRetainRun():
                 return await self._run_snapshot(request, resumed=resumed)
             case AdoptRevision() | VerifyAdoption():
-                return await self._adoption(request, resumed=resumed)
+                return await self._adoption(request)
             case RestoreRevision() | RetainRevision() | SnapshotAndRetain() | DiscardWorkspace():
                 return await self._attempt_request(request, context, resumed=resumed)
             case _:
@@ -482,7 +482,7 @@ class RuntimeWorkspaceRequests:
             return commit
         return commit if retained_by_any and owners else None
 
-    async def _adoption(self, request: AdoptRevision | VerifyAdoption, *, resumed: bool) -> _Facts:
+    async def _adoption(self, request: AdoptRevision | VerifyAdoption) -> _Facts:
         root = self._workspaces.root
         ref = request.selection.revision
         commit = await self._known_revision(
@@ -496,7 +496,6 @@ class RuntimeWorkspaceRequests:
             return _rejected("selected baseline is not the run's trusted input baseline")
         # Legacy VerifyAdoption records are replayed as publication reads/retries,
         # never as permission to restore or compare the operator's working tree.
-        del resumed
         message = (
             adoption_commit_message(request, commit, self._evidence)
             if isinstance(request, AdoptRevision)

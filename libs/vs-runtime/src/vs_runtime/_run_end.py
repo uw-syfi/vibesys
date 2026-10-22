@@ -1,25 +1,20 @@
-"""Whether a run has ended, as its core record says: the one fact for "no request applies now".
+"""Read the current epoch's ending and writer identity from the durable core record.
 
-Core's TERMINAL status is final except for a run the operator's stop ended, which a resume
-reopens (``RecordedEnd.reopens``); any other TERMINAL run never resumes (resume refuses it with
-``run_ended``). So a request posted to a TERMINAL run's inbox never applies while no process holds
-the run, and one it never applied before it ended never will. The run's own end of inbox (``RunControlBridge.end``) and
-``vibesys control``, which reads the record from outside the run, both judge the end by this
-status; neither keeps a copy of it.
+An ended epoch accepts no new inbox requests. Resume opens a successor epoch regardless
+of the previous result; queued closing controls retain their original writer identity.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from functools import cache
 from typing import TYPE_CHECKING
 
 from pydantic import JsonValue, TypeAdapter
 
-import vs_core.api as core
 from vs_core.api import RunStatus
 from vs_decode.api import Unreadable, decode_json
 from vs_project.api import ProjectStateError, StoredEnvelope
+from vs_runlog.api import CurrentEpoch, RunLogStopReason, current_epoch, open_run_log
 
 if TYPE_CHECKING:
     from vs_core.api import CoreState
@@ -59,16 +54,40 @@ def _member(value: JsonValue, *path: str) -> JsonValue:
 
 @dataclass(frozen=True)
 class RecordedEnd:
-    """How a run's durable core record says it ended: core's result outcome and reason.
-
-    Either is None when the record of an ended run does not carry it. ``reopens`` is whether a
-    resume reopens the run (``vs_core.api.reopens_on_resume``): the operator's stop ended it,
-    and a stop is a pause.
-    """
+    """An epoch's recorded ending, independent of successor launch eligibility."""
 
     outcome: str | None
     reason: str | None
-    reopens: bool = False
+
+
+def _core_record(project: Project, run_id: str) -> JsonValue:
+    if project.state.state_store_namespace(run_id).read_bytes(_STORE_DOCUMENT) is None:
+        # Probe first, as resume does, so a read never creates the store's lock or directory.
+        return None
+    stored = project.state_store(run_id).observe()
+    if not isinstance(stored, StoredEnvelope):
+        return None
+    record = decode_json(
+        stored.payload, _ANY_JSON, source=f"run {run_id!r} core record", max_bytes=_RECORD_MAX_BYTES
+    )
+    return None if isinstance(record, Unreadable) else _member(record, "envelope", "core")
+
+
+def recorded_epoch(project: Project, run_id: str) -> int:
+    """Current durable host epoch, or zero before the first writer starts."""
+    epoch = _log_epoch(project, run_id)
+    return 0 if epoch is None else epoch.number
+
+
+def _log_epoch(project: Project, run_id: str) -> CurrentEpoch | None:
+    path = project.run_log_path_for(project.root, run_id)
+    if not path.exists():
+        return None
+    with open_run_log(path) as reader:
+        epoch = current_epoch(reader)
+        if reader.stop.reason is RunLogStopReason.CORRUPTION:
+            raise ProjectStateError(reader.stop.detail)
+    return epoch
 
 
 def recorded_end(project: Project, run_id: str) -> RecordedEnd | None:
@@ -79,16 +98,9 @@ def recorded_end(project: Project, run_id: str) -> RecordedEnd | None:
 
     Raises ``ProjectStateError`` when the record cannot be read.
     """
-    if project.state.state_store_namespace(run_id).read_bytes(_STORE_DOCUMENT) is None:
-        # Probe first, as resume does, so a read never creates the store's lock or directory.
+    run = _member(_core_record(project, run_id), "run")
+    if run is None:
         return None
-    stored = project.state_store(run_id).observe()
-    if not isinstance(stored, StoredEnvelope):
-        return None
-    record = decode_json(
-        stored.payload, _ANY_JSON, source=f"run {run_id!r} core record", max_bytes=_RECORD_MAX_BYTES
-    )
-    run = None if isinstance(record, Unreadable) else _member(record, "envelope", "core", "run")
     status = _member(run, "status")
     if status not in {member.value for member in RunStatus}:
         message = f"run {run_id!r}: its core record does not say whether it ended"
@@ -100,43 +112,6 @@ def recorded_end(project: Project, run_id: str) -> RecordedEnd | None:
     return RecordedEnd(
         outcome=outcome if isinstance(outcome, str) else None,
         reason=reason if isinstance(reason, str) else None,
-        reopens=_reopens(run),
-    )
-
-
-@cache
-def _controls() -> TypeAdapter[tuple[core.ControlInput, ...]]:
-    return TypeAdapter(tuple[core.ControlInput, ...])
-
-
-def _reopens(run: JsonValue) -> bool:
-    """Whether a resume reopens the run its record holds: core's own rule over what it reads.
-
-    The rule reads the status, the result and the controls, which keep their shape across
-    envelope versions and need no operation registry to read, unlike the rest of the run
-    state. A record whose controls or result this version cannot read is not reopened here: the
-    resume itself names what it cannot read.
-    """
-    result_json = _member(run, "result")
-    if result_json is None:
-        return False
-    result = decode_json(
-        _ANY_JSON.dump_json(result_json),
-        core.RunResultProposal,
-        source="run result",
-        max_bytes=_RECORD_MAX_BYTES,
-    )
-    controls = decode_json(
-        _ANY_JSON.dump_json(_member(run, "controls") or []),
-        _controls(),
-        source="run controls",
-        max_bytes=_RECORD_MAX_BYTES,
-    )
-    status = _member(run, "status")
-    if isinstance(result, Unreadable) or isinstance(controls, Unreadable):
-        return False
-    return status in {member.value for member in RunStatus} and core.reopens_after(
-        RunStatus(status), result, controls
     )
 
 
@@ -145,8 +120,16 @@ def recorded_ending(project: Project, run_id: str) -> str | None:
 
     Raises ``ProjectStateError`` when the record cannot be read (see `recorded_end`).
     """
+    epoch = _log_epoch(project, run_id)
+    if epoch is not None:
+        lifecycle = epoch.lifecycle
+        if lifecycle is None or lifecycle.state is None:
+            return None
+        if lifecycle.state.field in {"parked", "ended"}:
+            return "the epoch ended; Resume starts another"
+        return None
     end = recorded_end(project, run_id)
     return None if end is None else _ending(end.reason)
 
 
-__all__ = ["RecordedEnd", "ending", "recorded_end", "recorded_ending"]
+__all__ = ["RecordedEnd", "ending", "recorded_end", "recorded_ending", "recorded_epoch"]

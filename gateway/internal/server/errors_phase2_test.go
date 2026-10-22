@@ -26,6 +26,25 @@ func TestSkeletonRejectsBrokenCommitAndKeyframe(t *testing.T) {
 		{"missing-lifecycle", func(t *testing.T, f fixture) {
 			write(t, filepath.Join(f.run, "run.head"), false, encode(t, &storev1.RunHead{}))
 		}, codes.DataLoss},
+		{"awaiting-with-lifecycle", func(t *testing.T, f fixture) {
+			value := head(proto.Uint64(0))
+			value.Epoch = 5
+			value.AwaitingLifecycle = true
+			publishHead(t, f, value)
+		}, codes.DataLoss},
+		{"awaiting-without-epoch", func(t *testing.T, f fixture) {
+			value := head(proto.Uint64(0))
+			value.Lifecycle = nil
+			value.AwaitingLifecycle = true
+			publishHead(t, f, value)
+		}, codes.DataLoss},
+		{"awaiting-without-commit", func(t *testing.T, f fixture) {
+			value := head(nil)
+			value.Epoch = 5
+			value.Lifecycle = nil
+			value.AwaitingLifecycle = true
+			publishHead(t, f, value)
+		}, codes.DataLoss},
 		{"commit-past-tail", func(t *testing.T, f fixture) { publishHead(t, f, head(proto.Uint64(2))) }, codes.DataLoss},
 		{"keyframe-mismatched-sequence", func(t *testing.T, f fixture) {
 			publishKeyframe(t, f, 1, 8)
@@ -159,6 +178,27 @@ func TestPhase1SequenceZeroRemainsReadable(t *testing.T) {
 	skeleton, err := c.Skeleton(f.ctx, &apiv1.SkeletonRequest{RunId: "run-1"})
 	if err != nil || len(skeleton.GetRecords()) != 2 || !bytes.Equal(skeleton.Records[0], zero) || !bytes.Equal(skeleton.Records[1], one) {
 		t.Fatalf("phase 1 Skeleton = %v,%v", skeleton, err)
+	}
+}
+
+func TestWatchRunsReadsAnEpochAwaitingItsFirstLifecycle(t *testing.T) {
+	f := start(t)
+	pending := head(proto.Uint64(0))
+	pending.Epoch = 5
+	pending.Lifecycle = nil
+	pending.AwaitingLifecycle = true
+	publishHead(t, f, pending)
+	c := client(t, f, false)
+	stream, err := c.WatchRuns(f.ctx, &apiv1.WatchRunsRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := watchEntry(t, stream)
+	if got.Head.GetEpoch() != 5 || !got.Head.GetAwaitingLifecycle() || got.Head.GetLifecycle() != nil {
+		t.Fatalf("pending epoch = %v", got)
+	}
+	if _, err := c.Skeleton(f.ctx, &apiv1.SkeletonRequest{RunId: "run-1"}); err != nil {
+		t.Fatalf("read epoch before lifecycle: %v", err)
 	}
 }
 

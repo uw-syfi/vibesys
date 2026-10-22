@@ -46,7 +46,7 @@ from ._proofs import (
 from ._quota_pause_clock import credit_quota_pause
 from ._registry import ContractError
 from ._routing import SIGNAL_ORDER, event_area
-from ._run_pause import control_refusal, reopened, reopens_on_resume, stop_standing
+from ._run_pause import EpochFacts, control_refusal, reopened, stop_standing
 from ._session_inputs import check_declared_target, may_have_been_read
 from ._session_inputs import mid_turn_offers as _mid_turn_offers
 from ._validation import validate_decision
@@ -74,6 +74,7 @@ from .types.common import (
     Area,
     AttemptId,
     AttemptRef,
+    ControlId,
     ControlInput,
     DecisionId,
     DependencyStatus,
@@ -83,6 +84,7 @@ from .types.common import (
     OperationId,
     OperationNormalizationKind,
     OperationRef,
+    PauseOwner,
     RejectionCode,
     RequestId,
     RevisionAuthority,
@@ -1211,6 +1213,9 @@ def _submitted(
         if rejection is None and isinstance(submission, Wait)
         else None
     )
+    bound = _run_park.drain_bound(state, decision)
+    if until is not None and bound is not None:
+        until = until.model_copy(update={"at": min(until.at, bound)})
     receipt = DecisionReceipt(
         decision_id=decision.decision_id,
         decision=None if rejection is not None else decision,
@@ -1224,6 +1229,10 @@ def _submitted(
     )
     if rejection is not None:
         return Transition(state=updated, events=(rejection,))
+    if bound is not None:
+        updated = updated.model_copy(
+            update={"run": updated.run.model_copy(update={"status": RunStatus.DRAINING})}
+        )
     if isinstance(decision, Finish):
         updated = updated.model_copy(
             update={
@@ -1397,15 +1406,14 @@ def _soft_stop(state: CoreState, event: RunControlEvent) -> Transition:
 def _lifted(state: CoreState, control: ControlInput) -> tuple[CoreState, bool]:
     """The state a resume starts from, and whether it lifts a standing stop.
 
-    A resume of a run the operator's stop ended reopens it (`reopens_on_resume`). Any resume
-    that lifts a stop takes back the adoption the stop completed: it answered that stop, not the
-    run's ending (`reopen_adoption`).
+    A successor clears the previous epoch's closure and ending. Adoption authority is
+    reopened independently; the workspace boundary guards writes to the operator root.
     """
     if control.action != "resume":
         return state, False
-    if reopens_on_resume(state.run):
+    lifting = stop_standing(state.run) or state.run.status in (RunStatus.TERMINAL, RunStatus.PARKED)
+    if state.run.status == RunStatus.TERMINAL:
         state = state.model_copy(update={"run": reopened(state.run)})
-    lifting = stop_standing(state.run)
     if lifting:
         state = state.model_copy(update={"settlement": reopen_adoption(state.settlement)})
     return state, lifting
@@ -1432,12 +1440,16 @@ def _control(state: CoreState, event: RunControlEvent, dispatch: Dispatch) -> Tr
     if refusal is not None:
         raise refusal
     check_declared_target(event.control.target, state.run.declaration)
+    new_epoch = state.run.status in (RunStatus.TERMINAL, RunStatus.PARKED)
     state, lifting = _lifted(state, event.control)
     # A capacity wait leaves the run paused: it only records when the run resumes itself.
     waits = event.control.when == "capacity_returns"
     # A stop returned above; park closes admission without ending the search.
     statuses = {
-        "pause": RunStatus.PAUSED,
+        "pause": (
+            RunStatus.PAUSED if event.control.owner is PauseOwner.QUOTA else RunStatus.DRAINING
+        ),
+        "pause_now": RunStatus.DRAINING,
         "park": RunStatus.DRAINING,
         "resume": state.run.status if waits else RunStatus.RUNNING,
     }
@@ -1461,22 +1473,34 @@ def _control(state: CoreState, event: RunControlEvent, dispatch: Dispatch) -> Tr
     else:
         # Park closes intake while preserving queued work for relaunch.
         actions: dict[str, Literal["pause", "drain", "resume"]] = {
-            "pause": "pause",
+            "pause": "pause" if event.control.owner is PauseOwner.QUOTA else "drain",
+            "pause_now": "drain",
             "park": "drain",
         }
         action = actions.get(event.control.action, "resume")
         result = propagate(updated, (AdmissionControl(action=action),), dispatch)
-    lifted = (StopLiftRecorded(control=event.control),) if lifting else ()
+    lifted = (StopLiftRecorded(control=event.control, new_epoch=new_epoch),) if lifting else ()
     return result.model_copy(
         update={"events": (*result.events, ControlChanged(control=event.control), *lifted)}
     )
 
 
 def _park_authority(state: CoreState, run: RunState, control: ControlInput) -> RunState:
-    if control.action == "park":
+    if control.action in ("park", "pause_now") or (
+        control.action == "pause" and control.owner is PauseOwner.OPERATOR
+    ):
         return run.model_copy(
             update={
-                "park": RunPark(control_id=control.control_id, epoch=state.records.recovery.epoch)
+                "park": RunPark(
+                    control_id=control.control_id,
+                    epoch=state.records.recovery.epoch,
+                    immediate=control.action == "pause_now",
+                    admitted_turns=(
+                        state.run.park.admitted_turns
+                        if state.run.park is not None
+                        else _run_park.admitted_turns(state)
+                    ),
+                )
             }
         )
     if control.action == "resume":
@@ -1794,6 +1818,53 @@ def _advance_run_time(state: CoreState, now_at: float) -> CoreState:
     return state.model_copy(update={"run": state.run.model_copy(update={"now_at": now_at})})
 
 
+def _start_epoch(state: CoreState, event: RecoveryStarted, dispatch: Dispatch) -> Transition:
+    """Reconcile retained work in a freshly constructed epoch, never a copied closure."""
+    previous_epoch = state.records.recovery.epoch
+    restart_search = (
+        state.run.park is not None or state.run.result is not None or stop_standing(state.run)
+    )
+    # Before the clock moves, while ``run.now_at`` is still the dead host's last commit.
+    opened = records.open_host_epoch(state.records, state.run, event)
+    # The downtime the new epoch proves moves open waits' limits as it moves open
+    # records' limits, so the two agree.
+    credit = downtime(opened.hosts) if opened.hosts != state.records.hosts else 0.0
+    waits = evaluation.credit_downtime(state.evaluation, state.run, credit)
+    successor = previous_epoch > 0 and event.epoch > previous_epoch
+    if successor:
+        state = state.model_copy(
+            update={
+                "run": EpochFacts.of(state.run).new_run(),
+                "scheduling": type(state.scheduling)(
+                    queue=state.scheduling.queue,
+                    slots=state.scheduling.slots,
+                    released_slot_seconds=state.scheduling.released_slot_seconds,
+                ),
+                "settlement": reopen_adoption(state.settlement),
+            }
+        )
+    state = state.model_copy(update={"records": opened, "evaluation": waits})
+    state = _advance_event_time(state, event)
+    result = propagate(state, (event,), dispatch, _event_cause(state, event))
+    if successor and previous_epoch > 0 and restart_search:
+        result = result.model_copy(
+            update={
+                "events": (
+                    *result.events,
+                    StopLiftRecorded(
+                        control=ControlInput(
+                            control_id=ControlId(root=f"epoch:{event.epoch}"),
+                            action="resume",
+                            when="now",
+                        ),
+                        new_epoch=True,
+                    ),
+                )
+            }
+        )
+    return result
+
+
 def consume(
     state: CoreState,
     event: CoreEvent,
@@ -1815,7 +1886,14 @@ def consume(
         state.run.status == RunStatus.PARKED
         and state.run.park is not None
         and state.records.recovery.epoch == state.run.park.epoch
-        and not isinstance(event, RecoveryStarted | RunControlEvent | DispatchAuthorized)
+        and not isinstance(
+            event,
+            RecoveryStarted
+            | RunControlEvent
+            | DispatchAuthorized
+            | DecisionSubmitted
+            | ProposalSubmitted,
+        )
     ):
         return Transition(state=state)
     _validate_observation_ingress(state, event)
@@ -1830,15 +1908,9 @@ def consume(
         result = _submitted(state, event, dispatch)
     elif isinstance(event, RunControlEvent):
         result = _control(state, event, dispatch)
+    elif isinstance(event, RecoveryStarted):
+        result = _start_epoch(state, event, dispatch)
     else:
-        if isinstance(event, RecoveryStarted):
-            # Before the clock moves, while ``run.now_at`` is still the dead host's last commit.
-            opened = records.open_host_epoch(state.records, state.run, event)
-            # The downtime the new epoch proves moves open waits' limits as it moves open
-            # records' limits, so the two agree.
-            credit = downtime(opened.hosts) if opened.hosts != state.records.hosts else 0.0
-            waits = evaluation.credit_downtime(state.evaluation, state.run, credit)
-            state = state.model_copy(update={"records": opened, "evaluation": waits})
         state = _advance_event_time(state, event)
         result = propagate(state, (event,), dispatch, _event_cause(state, event))
     parked, cancellations = _run_park.advance(result.state)

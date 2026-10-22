@@ -5,7 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from vibesys.api import ConfigurationError
 from vibesys.api.request import ensure_resumable
 from vs_project.api import Project
 from vs_proto.api import Oneof, RelaunchRefusal, RelaunchResponse
@@ -13,6 +12,7 @@ from vs_runlog.api import (
     RunLaunchLockedError,
     RunLogStopReason,
     assert_run_unlocked,
+    current_epoch,
     exclusive_run_launch,
     open_run_log,
 )
@@ -60,12 +60,7 @@ def _launch(
     epoch, offset = _epoch(path)
     if epoch != request.expected_epoch:
         return _refused(RelaunchRefusal.EPOCH_CHANGED)
-    try:
-        ensure_resumable(Path(request.project_root), request.run_id)
-    except ConfigurationError as error:
-        if error.diagnostic.code != "run_ended":
-            raise
-        return _refused(RelaunchRefusal.ENDED)
+    ensure_resumable(Path(request.project_root), request.run_id)
     deadline = threads.now() + 25
     result = processes.run(
         ProcessSpec(
@@ -109,14 +104,7 @@ def _epoch(path: Path, offset: int = 0) -> tuple[int, int]:
     if not path.exists():
         return 0, 0
     with open_run_log(path, offset) as reader:
-        epoch = max(
-            (
-                record.epoch
-                for record in reader
-                if record.body and record.body.field == "epoch_started"
-            ),
-            default=0,
-        )
+        epoch = current_epoch(reader).number
         if reader.stop.reason == RunLogStopReason.CORRUPTION:
             raise ValueError(reader.stop.detail)
         return epoch, reader.stop.offset

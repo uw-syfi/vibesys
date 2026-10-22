@@ -89,7 +89,7 @@ test('Relaunch starts when observation becomes available and cancels when disabl
     expect(bridge.streams).toBe(1);
     await render(true, true);
     const relaunch = [...container.querySelectorAll('button')].find(
-      button => button.textContent === 'Relaunch',
+      button => button.textContent === 'Resume',
     );
     expect(relaunch).toBeDefined();
     expect(bridge.streams).toBe(2);

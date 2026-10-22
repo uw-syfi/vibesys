@@ -12,7 +12,8 @@ from vs_agent.api import AgentExecutionCancelledError
 from vs_core.api import PauseOwner, RunPause, StopMode, escalate_stop
 from vs_runtime._operator_control import (
     ControlAction,
-    ParkRequest,
+    PauseNowRequest,
+    PauseRequest,
     SteerMode,
     SteerTarget,
     action_summary,
@@ -428,7 +429,7 @@ class RunControlChannel(Protocol):
         """Drain queued withdrawals exactly once."""
         ...
 
-    def queue_action(self, request: ActionRequest | ParkRequest) -> None:
+    def queue_action(self, request: ActionRequest | PauseRequest | PauseNowRequest) -> None:
         """Queue an operator action for the run loop to take at its next control poll.
 
         The run loop drains actions (:meth:`take_pending_actions`) in the order they were
@@ -439,11 +440,11 @@ class RunControlChannel(Protocol):
         """
         ...
 
-    def take_pending_actions(self) -> list[ActionRequest | ParkRequest]:
+    def take_pending_actions(self) -> list[ActionRequest | PauseRequest | PauseNowRequest]:
         """Drain queued operator actions exactly once."""
         ...
 
-    def land_park(self, jobs: tuple[str, ...] = ()) -> None:
+    def land_park(self, jobs: tuple[str, ...] = (), *, immediate: bool = False) -> None:
         """Report that core committed a park drain."""
         ...
 
@@ -711,7 +712,7 @@ class RuntimeRunControlChannel:
         self._lock = threads.condition(threads.rlock())
         self._pending_steer: list[QueuedSteer] = []
         self._pending_withdrawals: list[QueuedWithdraw] = []
-        self._pending_actions: list[ActionRequest | ParkRequest] = []
+        self._pending_actions: list[ActionRequest | PauseRequest | PauseNowRequest] = []
         self._held = False
         self._quota_paused = False
         self._stop_requested = False
@@ -1081,23 +1082,25 @@ class RuntimeRunControlChannel:
             pending, self._pending_withdrawals = self._pending_withdrawals, []
         return pending
 
-    def queue_action(self, request: ActionRequest | ParkRequest) -> None:
+    def queue_action(self, request: ActionRequest | PauseRequest | PauseNowRequest) -> None:
         """Queue an operator action for the run loop to take at its next control poll."""
         with self._lock:
             self._pending_actions.append(request)
-            if not isinstance(request, ParkRequest):
+            if not isinstance(request, PauseRequest | PauseNowRequest):
                 self._emit(RunControlTransitionKind.ACTION_QUEUED, text=action_summary(request))
 
-    def take_pending_actions(self) -> list[ActionRequest | ParkRequest]:
+    def take_pending_actions(self) -> list[ActionRequest | PauseRequest | PauseNowRequest]:
         """Drain operator actions queued since the previous control poll."""
         with self._lock:
             pending, self._pending_actions = self._pending_actions, []
         return pending
 
-    def land_park(self, jobs: tuple[str, ...] = ()) -> None:
+    def land_park(self, jobs: tuple[str, ...] = (), *, immediate: bool = False) -> None:
         """Report core's accepted drain, after it is persisted."""
         with self._lock:
             self._execution_closed = True
+            if immediate:
+                self._executing.clear()
             self._drain_jobs.update(jobs)
             self._emit(RunControlTransitionKind.PARK_REQUESTED)
 

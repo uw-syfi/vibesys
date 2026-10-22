@@ -232,6 +232,7 @@ graph TD
     vs_runtime --> vs_prompts
     vs_runtime --> vs_proto
     vs_runtime --> vs_redaction
+    vs_runtime --> vs_runlog
     vs_runtime --> vs_sandbox
     vs_runtime --> vs_sim
     vs_runtime --> vs_slurm

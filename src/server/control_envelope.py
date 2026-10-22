@@ -46,7 +46,7 @@ class Request(ProtocolModel):
 
 
 class StopCommand(Request):
-    """Request stopping after the active agent call."""
+    """Internal detached-host shutdown at its cooperative boundary."""
 
     type: Literal["command.stop"] = "command.stop"
     mode: Literal["after_current_agent_call"] = "after_current_agent_call"

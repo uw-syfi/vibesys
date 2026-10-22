@@ -21,7 +21,12 @@ message RunHead {
     message: "chart_points must contain at most 256 points"
     expression: "this.chart_points.size() <= 256"
   };
-  Lifecycle lifecycle = 1 [(buf.validate.field).required = true];
+  option (buf.validate.message).cel = {
+    id: "run_head.lifecycle"
+    message: "head has either a lifecycle or an explicitly awaiting epoch"
+    expression: "has(this.lifecycle) != this.awaiting_lifecycle && (!this.awaiting_lifecycle || (this.epoch > 0u && has(this.committed_seq)))"
+  };
+  Lifecycle lifecycle = 1;
   string strategy = 2 [(buf.validate.field).string = {
     min_len: 1
     max_bytes: 65536
@@ -36,6 +41,10 @@ message RunHead {
   bool needs_user = 7;
   optional uint64 committed_seq = 8;
   RunProcess process = 9;
+  // The current epoch header is committed, but its first lifecycle record is not.
+  bool awaiting_lifecycle = 10;
+  // Canonical writer epoch, derived from run.log independently of process metadata.
+  uint32 epoch = 11;
 }
 
 // Values are absent until reported. The declaration supplies unit and direction.

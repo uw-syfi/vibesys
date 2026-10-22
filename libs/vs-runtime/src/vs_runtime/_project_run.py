@@ -210,7 +210,13 @@ class ProjectRunResources:
     _request: ProjectRunRequest
     _effects: ProjectRunEffects
     _provisional_ownership: ReleaseStack
+    root_edits_on_resume: tuple[str, ...] = ()
     _close: CloseOnce = field(init=False, default_factory=CloseOnce)
+
+    @property
+    def resuming(self) -> bool:
+        """Whether the operator reopened this run, rather than recovering its writer."""
+        return self._request.existing
 
     def mark_ready(self) -> None:
         """Preserve a provisioned project after all run resources are ready."""
@@ -519,6 +525,7 @@ def _assemble_project_run_resources(
         request,
         effects,
         provisional_ownership,
+        root_edits_on_resume=tuple(git.pending_changes()) if request.existing else (),
     )
 
 

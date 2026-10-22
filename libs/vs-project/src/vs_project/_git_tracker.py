@@ -62,8 +62,8 @@ class FrameworkSnapshotStatus(StrEnum):
 class GitTracker:
     """Snapshot tracking for one canonical project repository.
 
-    The project root is also the Git worktree root. Each run advances its own
-    ``vibesys-runs/<run-id>`` branch. Machine-local framework state is excluded
+    The project root is also the Git worktree root. A new run creates its own
+    ``vibesys-runs/<run-id>`` branch; Resume preserves the operator's current checkout. Machine-local framework state is excluded
     through repository-local Git configuration. ``excluded_dirs`` and
     ``excluded_files`` name directories and files, at any depth, that are
     framework inputs rather than candidate content and are never committed.
@@ -135,6 +135,7 @@ class GitTracker:
         self._trusted_input_baseline: str | None = None
         self._project_branch = run_branch(run_id)
         self._home_branch: str | None = None
+        self._resumed = False
         self._state_integration: ProjectGitIntegration = Project.open(
             self.root
         ).state.git_integration(run_id)
@@ -142,7 +143,7 @@ class GitTracker:
         self._work_tree: Path | None = None
 
     def init(self, *, existing: bool, trusted_input_baseline: str | None = None) -> None:
-        """Create a run branch, or resume the existing branch for this run."""
+        """Create a run branch, or resume without changing the operator checkout."""
         self._init_project(
             existing=existing,
             trusted_input_baseline=trusted_input_baseline,
@@ -584,13 +585,13 @@ class GitTracker:
             self._events.snapshot_recorded(label, commit=None)
 
     def current_sha(self) -> str | None:
-        """Return the HEAD commit sha, or ``None`` if it cannot be resolved.
+        """Return the selected run tip, or ``None`` if it cannot be resolved.
 
         Never cached: it reads the repository files on each call (no process
         spawn for the plain layout), so commits made by anyone, including an
         agent's own ``git commit``, are observed immediately.
         """
-        return self._git.head()
+        return self._git.resolve_commit(self.project_branch) if self._resumed else self._git.head()
 
     @property
     def history_root(self) -> Path:
@@ -830,7 +831,8 @@ class GitTracker:
         if commit is None:
             message = f"trusted input baseline {revision!r} is not a commit"
             raise ValueError(message)
-        if not self._git.is_ancestor(commit, "HEAD"):
+        selected = self.project_branch if self._resumed else "HEAD"
+        if not self._git.is_ancestor(commit, selected):
             message = f"trusted input baseline {revision!r} is not an ancestor of HEAD"
             raise ValueError(message)
         return commit
@@ -853,7 +855,7 @@ class GitTracker:
         self._install_project_excludes()
         self._require_private_inputs_absent_from_history()
         if existing:
-            self._resume_user_project(branch, trusted_input_baseline)
+            self._resume_user_project(trusted_input_baseline)
             return
 
         self._start_user_project(
@@ -889,28 +891,13 @@ class GitTracker:
             raise ValueError(message)
         return True
 
-    def _resume_user_project(
-        self,
-        branch: str,
-        trusted_input_baseline: str | None,
-    ) -> None:
-        if not self._branch_exists(branch):
-            message = f"cannot resume VibeSys run {self.run_id!r}: branch {branch!r} does not exist"
+    def _resume_user_project(self, trusted_input_baseline: str | None) -> None:
+        """Reattach the immutable input without checking out or cleaning the operator root."""
+        if not self._branch_exists(self.project_branch):
+            message = f"VibeSys run branch does not exist: {self.project_branch}"
             raise ValueError(message)
-        current = self._current_branch()
-        if current == branch:
-            # Already checked out: by an earlier step of this resume, which noted the home
-            # branch, or by a run that ended without returning.
-            self._home_branch = self._home_of_run_branch(branch)
-        else:
-            self._require_clean_project(
-                "cannot switch to the resumed VibeSys branch with pending project changes"
-            )
-            home = self._home_of(current)
-            if home is not None:
-                self._state_integration.record_home_branch(home)
-            self._git.switch_branch(branch)
-            self._home_branch = home
+        self._resumed = True
+        self._home_branch = self._home_of(self._current_branch())
         if trusted_input_baseline is not None:
             self.configure_trusted_input_baseline(trusted_input_baseline)
 

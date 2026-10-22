@@ -26,12 +26,17 @@ message Record {
   option (buf.validate.message).cel = {
     id: "record.identity"
     message: "seq, epoch and at are required for typed records"
-    expression: "!(has(this.lifecycle) || has(this.span) || has(this.metric) || has(this.stream) || has(this.blob) || has(this.intent) || has(this.notice) || has(this.chat)) || (this.seq > 0u && this.epoch > 0u && has(this.at))"
+    expression: "!(has(this.lifecycle) || has(this.span) || has(this.metric) || has(this.stream) || has(this.blob) || has(this.intent) || has(this.notice) || has(this.chat) || has(this.declaration_amended)) || (this.seq > 0u && this.epoch > 0u && has(this.at))"
   };
   option (buf.validate.message).cel = {
     id: "record.epoch_started"
     message: "epoch_started epoch must match epoch and seq and at must be present for a typed header"
     expression: "!has(this.epoch_started) || !has(this.epoch_started.run) || (this.epoch == this.epoch_started.epoch && this.seq > 0u && has(this.at))"
+  };
+  option (buf.validate.message).cel = {
+    id: "record.declaration_amended"
+    message: "declaration amendment must name the containing epoch"
+    expression: "!has(this.declaration_amended) || this.declaration_amended.epoch == this.epoch"
   };
   uint64 seq = 1;
   google.protobuf.Timestamp at = 2;
@@ -53,12 +58,14 @@ message Record {
     IntentState intent = 16;
     Notice notice = 17;
     ChatRecord chat = 19;
+    // A declaration grows inside the current epoch; this never opens an epoch.
+    EpochStarted declaration_amended = 20;
   }
 }
 
 // EpochStarted identifies the writer and schemas for one run epoch.
-// A journal bridge may amend the same epoch as new kinds and series first
-// appear. Replace by epoch number; declarations grow and their types stay fixed.
+// DeclarationAmended records may extend kinds and series for the same epoch.
+// Repeated epoch_started headers are readable legacy amendments.
 message EpochStarted {
   // A run description identifies the typed header. Phase 1 headers have none.
   option (buf.validate.message).cel = {

@@ -257,7 +257,7 @@ _IN_FLIGHT = frozenset(
 def _control(action: Literal["pause", "resume"], now_at: float) -> core.RunControlEvent:
     control = (
         core.ControlInput(
-            control_id=core.ControlId(root=action), action=action, owner=core.PauseOwner.OPERATOR
+            control_id=core.ControlId(root=action), action=action, owner=core.PauseOwner.QUOTA
         )
         if action == "pause"
         else core.ControlInput(control_id=core.ControlId(root=action), action=action, when="now")

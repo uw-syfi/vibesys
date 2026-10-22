@@ -110,11 +110,8 @@ _COMMANDS = st.one_of(
         st.text(min_size=1, max_size=20).filter(str.strip),
         st.sampled_from(["dynamic-planner", "dynamic-worker"]),
     ),
-    st.just(["park"]),
+    st.just(["pause-now"]),
     st.just(["pause"]),
-    st.just(["resume"]),
-    st.just(["resume", "--fallback"]),
-    st.sampled_from([["stop"], ["stop", "--mode", "cancel"], ["stop", "--mode", "drain"]]),
 )
 
 
@@ -128,10 +125,15 @@ def test_a_posted_control_is_what_the_run_records(
 
     status, out, err = _control(root, [run_id, *command])
 
-    assert (status, out, err) == (0, "r-1\n", "")
+    warning = (
+        "Unfinished work may need repeating and may still incur charges.\n"
+        if command[0] == "pause-now"
+        else ""
+    )
+    assert (status, out, err) == (0, "r-1\n", warning)
     (entry,) = Project.open(root).state.control_inbox(run_id).pending()
     request = CONTROL_REQUEST.validate_json(entry.payload)
-    assert request.action == command[0]
+    assert request.action == command[0].replace("-", "_")
     channel = create_run_control_channel(FakeRunControlEventSink(), threads=SimThreads())
     if "--fallback" in command:
         # Only a turn waiting on a quota stop takes a fallback resume (wire-protocol.md).
@@ -145,7 +147,9 @@ def test_a_posted_control_is_what_the_run_records(
     for event in bridge.poll(core, 1.0):
         core = step(core, event).state
     posted = [c for c in core.run.controls if c.control_id.root.startswith("op-")]
-    assert [(c.control_id.root, c.action) for c in posted] == [("op-r-1", command[0])]
+    assert [(c.control_id.root, c.action) for c in posted] == [
+        ("op-r-1", command[0].replace("-", "_"))
+    ]
     if "--role" in command:
         role = command[command.index("--role") + 1]
         assert posted[0].target == RoleInputTarget(role_id=RoleId(root=role))
@@ -355,7 +359,7 @@ def test_a_control_under_another_state_home_is_refused_and_names_it(
     other = tmp_path / "other-home"
     monkeypatch.setenv("VIBESYS_STATE_HOME", str(other))
 
-    status, out, err = _control(tmp_path / "project", [run_id, "stop"])
+    status, out, err = _control(tmp_path / "project", [run_id, "pause-now"])
 
     assert (status, out) == (2, "")
     assert str(other.resolve()) in err
@@ -432,14 +436,18 @@ def test_a_retry_of_an_applied_control_after_the_run_ended_reports_it_applied(
     """``--control-id`` is for a retry after an uncertain write: it stays one request."""
     run_id = _project_with_run(tmp_path)
     bridge, _requests, _sink = _production_bridge(tmp_path, run_id)
-    assert _control(tmp_path, ["--control-id", "stop-1", run_id, "stop"])[0] == 0
+    assert _control(tmp_path, ["--control-id", "stop-1", run_id, "pause-now"])[0] == 0
     core = _declaring(("dynamic-planner",))
     for now in (1.0, 2.0):  # applied at the first poll, settled once core holds it
         for event in bridge.poll(core, now):
             core = step(core, event).state
     _record_core(tmp_path, run_id, _terminal(core))
 
-    assert _control(tmp_path, ["--control-id", "stop-1", run_id, "stop"]) == (0, "stop-1\n", "")
+    assert _control(tmp_path, ["--control-id", "stop-1", run_id, "pause-now"]) == (
+        0,
+        "stop-1\n",
+        "Unfinished work may need repeating and may still incur charges.\n",
+    )
     assert _control(tmp_path, [run_id, "status", "stop-1"]) == (0, "applied\n", "")
 
 
@@ -452,7 +460,7 @@ def test_a_post_to_a_run_that_has_not_declared_posting_order_warns(tmp_path: Pat
     assert "has not declared that it applies requests in posting order" in err
 
 
-def test_park_posts_to_the_allow_list_and_settles_after_the_durable_drain(tmp_path: Path) -> None:
+def test_pause_posts_to_the_allow_list_and_settles_after_the_durable_drain(tmp_path: Path) -> None:
     run_id = _project_with_run(tmp_path)
     project = Project.open(tmp_path)
     channel = create_run_control_channel(FakeRunControlEventSink(), threads=SimThreads())
@@ -460,7 +468,7 @@ def test_park_posts_to_the_allow_list_and_settles_after_the_durable_drain(tmp_pa
     bridge = RunControlBridge(
         channel, _Texts(), inbox=OperatorInbox(inbox, ChannelRunControl(channel, SimThreads()))
     )
-    assert _control(tmp_path, [run_id, "park"], "park-1")[0] == 0
+    assert _control(tmp_path, [run_id, "pause"], "park-1")[0] == 0
     state = initial_state()
     for event in bridge.poll(state, 1.0):
         state = step(state, event).state

@@ -358,6 +358,7 @@ class RuntimeWorkspaceResource:
         return CheckoutUpdate(status=CheckoutStatus(outcome.value))
 
     def snapshot(self, label: str) -> str:
+        self._require_root_write()
         self._project.git.snapshot(label)
         revision = self._project.git.current_sha()
         if revision is None:
@@ -377,6 +378,7 @@ class RuntimeWorkspaceResource:
         preserve_memory: bool = True,
         exact_keeping: tuple[str, ...] | None = None,
     ) -> bool:
+        self._require_root_write(restoring=True)
         if preserve_memory:
             preserve_paths = tuple(dict.fromkeys((*preserve_paths, *self._memory_paths)))
         restored = self._project.git.checkout_tree(
@@ -389,6 +391,13 @@ class RuntimeWorkspaceResource:
         if restored and self._id is not None:
             self._revision = revision
         return restored
+
+    def _require_root_write(self, *, restoring: bool = False) -> None:
+        if self._id is None and (
+            self._root_project.root_edits_on_resume or (restoring and self._root_project.resuming)
+        ):
+            message = "project content retained; resumed root work requires project-edit protection"
+            raise RuntimeContractError(message)
 
     def try_restore(self, revision: str, *, clean: bool) -> bool:
         restored = self.restore(revision, clean=clean)

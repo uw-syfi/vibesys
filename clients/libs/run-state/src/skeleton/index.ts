@@ -70,9 +70,9 @@ export function lifecycleState(lifecycle: Lifecycle | undefined) {
   const state = lifecycle?.state;
   const word =
     state?.case === 'parked'
-      ? 'Parked'
+      ? 'Paused'
       : state?.case === 'draining' && state.value.goal === DrainGoal.PARK
-        ? 'Parking'
+        ? 'Pausing'
         : state?.case === 'ended' && state.value.outcome === Outcome.INTERRUPTED
           ? 'Interrupted'
           : undefined;

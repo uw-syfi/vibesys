@@ -426,6 +426,7 @@ class _ProductHostFactory:
             CoreResources(
                 run_id=project.state.run_id,
                 project=project.project,
+                resuming=project.resuming,
                 facts=resources.facts,
                 options=self.options,
                 workspaces=workspaces,

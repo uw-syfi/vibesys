@@ -16,7 +16,7 @@ import (
 )
 
 func intentRequest() *apiv1.HostCallRequest {
-	return &apiv1.HostCallRequest{Checkout: "/src/host checkout", Method: &apiv1.HostCallRequest_PostIntent{PostIntent: &apiv1.PostIntentRequest{ProjectRoot: "/project", RunId: "run-1", RequestId: "r-1", Intent: &apiv1.PostIntentRequest_Pause{Pause: &apiv1.PauseIntent{}}}}}
+	return &apiv1.HostCallRequest{Checkout: "/src/host checkout", Method: &apiv1.HostCallRequest_PostIntent{PostIntent: &apiv1.PostIntentRequest{ExpectedEpoch: 1, ProjectRoot: "/project", RunId: "run-1", RequestId: "r-1", Intent: &apiv1.PostIntentRequest_Pause{Pause: &apiv1.PauseIntent{}}}}}
 }
 
 func TestHostCallPassesTypedPipesAndConfiguredCheckout(t *testing.T) {
@@ -150,7 +150,7 @@ func TestHostCallCancellationReachesRunner(t *testing.T) {
 }
 
 func TestHostCallRelaunchDispatchesWithoutRunPolicy(t *testing.T) {
-	for _, mode := range []string{"epoch", "locked", "ended", "checkout", "wrong-method", "missing"} {
+	for _, mode := range []string{"epoch", "locked", "checkout", "wrong-method", "missing"} {
 		t.Run(mode, func(t *testing.T) {
 			request := &apiv1.HostCallRequest{Checkout: "/src/checkout", Method: &apiv1.HostCallRequest_Relaunch{Relaunch: &apiv1.RelaunchRequest{ProjectRoot: "/project", RunId: "run-1", ExpectedEpoch: 1}}}
 			runner := hostcommand.FakeRunner{Program: func(ctx context.Context, c hostcommand.Command) (hostcommand.Result, error) {
@@ -168,8 +168,6 @@ func TestHostCallRelaunchDispatchesWithoutRunPolicy(t *testing.T) {
 				switch mode {
 				case "locked":
 					result.Outcome = &apiv1.RelaunchResponse_Refusal{Refusal: apiv1.RelaunchRefusal_RELAUNCH_REFUSAL_LOCKED}
-				case "ended":
-					result.Outcome = &apiv1.RelaunchResponse_Refusal{Refusal: apiv1.RelaunchRefusal_RELAUNCH_REFUSAL_ENDED}
 				case "checkout":
 					result.Outcome = &apiv1.RelaunchResponse_Refusal{Refusal: apiv1.RelaunchRefusal_RELAUNCH_REFUSAL_CHECKOUT_MISSING}
 				}

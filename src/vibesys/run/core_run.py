@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import os
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
 from vibesys.errors import ConfigurationDiagnostic, ConfigurationError
@@ -22,8 +22,6 @@ from vs_core.api import (
     EndReason,
     RetainedCandidate,
     RunResultProposal,
-    StopMode,
-    reopens_on_resume,
 )
 from vs_core.api import RunStatus as CoreRunStatus
 from vs_project.api import Project
@@ -37,7 +35,6 @@ from vs_runtime.api.core import (
     RunControlBridge,
     RunLoopConfig,
     drive_core,
-    reject_ended_resume,
     reject_legacy_resume,
     start_core_awaiting_lease,
 )
@@ -108,16 +105,10 @@ def _loop_config(run_id: str, timing: RunTiming) -> RunLoopConfig:
 
 
 def ensure_resumable(project_root: Path, run_id: str) -> None:
-    """Reject resuming a run that cannot go on, before any resource opens.
+    """Validate today's loader prerequisites without restricting previous epoch endings.
 
-    Two runs cannot: one a legacy loop created (the core cannot continue its state, and
-    starting a fresh run under its identity would discard that run's history), and one whose
-    core record is terminal for a reason of its own (core never applies another request to it,
-    so booting it only to find it ended would cost the container and environment and say
-    nothing). A run the operator's stop ended is not one: the resume reopens it. Every entrypoint
-    resolves its resume reference through here, so the CLI, headless and the server all
-    refuse with the same diagnostic: the run, and the legacy file or the stored outcome and
-    reason.
+    Retained older formats need the later facts importer. Leave their files in place and
+    identify the missing prerequisite before opening execution resources.
     """
     project = Project.open(project_root)
     try:
@@ -129,19 +120,10 @@ def ensure_resumable(project_root: Path, run_id: str) -> None:
                 code=diagnostic.code,
                 stage=diagnostic.stage,
                 message=(
-                    f"cannot resume run {run_id!r}: it was created by a legacy loop "
+                    f"run {run_id!r} needs the retained-facts importer for its legacy state "
                     f"({diagnostic.path}, schema {diagnostic.source_schema}); "
-                    "start a new run instead"
+                    "the current core loader cannot read this format; retained files are unchanged"
                 ),
-            )
-        ) from error
-    try:
-        reject_ended_resume(project, run_id)
-    except CoreResumeError as error:
-        diagnostic = error.diagnostic
-        raise ConfigurationError(
-            ConfigurationDiagnostic(
-                code=diagnostic.code, stage=diagnostic.stage, message=diagnostic.message
             )
         ) from error
 
@@ -163,7 +145,7 @@ async def drive_core_run(host: CoreHost, integration: LocalRunIntegration) -> Ru
         services.search.driver(services.config, services.bindings.registry),
         services.state,
         config=services.config,
-        bindings=services.bindings,
+        bindings=replace(services.bindings, epoch=lambda: integration.events.epoch),
     )
     delivery = JournalPublicationDelivery(services.publications, services.bindings.registry)
     controls = RunControlBridge(
@@ -183,10 +165,6 @@ async def drive_core_run(host: CoreHost, integration: LocalRunIntegration) -> Ru
     loop = CoreRunHost(shell, delivery, services.clock, controls, workspaces=host.workspaces)
     config = _loop_config(services.run_id, host.timing)
     await start_core_awaiting_lease(loop, config)
-    if services.stop_requested:
-        # A force stop killed the server before the run committed its stop; the run
-        # commits it now, before asking its search for anything, and only drains.
-        integration.control.request_stop(StopMode.DRAIN)
     bridge = services.agent_evaluation
     run_error: BaseException | None = None
     try:
@@ -241,7 +219,7 @@ def _run_end(
 ) -> RunEnd:
     """How the run ended: the environment's failure, when it stopped the run, else its result."""
     if shell.record.envelope.core.run.status == CoreRunStatus.PARKED:
-        raise OperatorParked
+        raise OperatorPaused
     uncompared = result is not None and result.uncompared
     if environment_failure is not None:
         # The environment's failure stopped the run; it ended as a failure, not a stop.
@@ -268,7 +246,7 @@ def run_ending(shell: CoreRuntime) -> RunEndingData:
     return RunEndingData(
         reason=reason,
         summary="" if result is None else result.reason,
-        resumable=core.run.status != CoreRunStatus.TERMINAL or reopens_on_resume(core.run),
+        resumable=True,
         rounds_finished=sum(
             1 for attempt in core.attempts.attempts if attempt.phase == AttemptPhase.TERMINAL
         ),
@@ -293,7 +271,7 @@ def _ended_by(result: RunResultProposal, ending: EndReason) -> bool:
     return result.reason.split(":", 1)[0] == ending.value
 
 
-class OperatorParked(BaseException):
+class OperatorPaused(BaseException):
     """The epoch drained successfully; the saved search resumes on relaunch."""
 
 

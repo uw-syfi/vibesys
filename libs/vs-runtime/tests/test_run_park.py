@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING
 
 import pytest
@@ -49,7 +50,7 @@ from vs_runtime.api.core import (
 from vs_runtime.api.infrastructure import (
     AgentExecutionFinished,
     ChannelRunControl,
-    ParkRequest,
+    PauseRequest,
     RuntimeRunControlChannel,
 )
 from vs_runtime.api.testing import (
@@ -113,7 +114,7 @@ async def test_pause_drain_cancels_the_queued_job_exits_and_relaunch_reruns_it(
 
         def request_park() -> None:
             if world.cluster.submissions:
-                operator.submit(ParkRequest(control_id="park"))
+                operator.submit(PauseRequest(control_id="park"))
                 clock.act = lambda: None
 
         clock.act = request_park
@@ -241,7 +242,13 @@ async def test_pause_drain_finishes_a_turns_evaluation_requested_after_applied_t
             if turn.entered.is_set() and not posted:
                 inbox.post(
                     "pause-drain",
-                    b'{"action":"park","control_id":"pause-drain"}',
+                    json.dumps(
+                        {
+                            "action": "pause",
+                            "control_id": "pause-drain",
+                            "expected_epoch": process.shell.record.envelope.core.records.recovery.epoch,
+                        }
+                    ).encode(),
                     ended=lambda: None,
                 )
                 posted = True
@@ -304,7 +311,10 @@ async def test_pause_drain_finishes_a_turns_evaluation_requested_after_applied_t
         process.shell.release_lease(now_at=clock.now())
 
 
-async def test_pause_drain_waits_for_an_executing_evaluation_to_finish(tmp_path: Path) -> None:
+@pytest.mark.parametrize("action", ["pause", "pause_now"])
+async def test_pause_treats_an_executing_evaluation_by_its_mode(
+    tmp_path: Path, action: str
+) -> None:
     clock = _Operator(clock_from(1.0))
     channel = RuntimeRunControlChannel(FakeRunControlEventSink(), loop_threads())
     inbox = FakeControlInbox()
@@ -324,7 +334,13 @@ async def test_pause_drain_waits_for_an_executing_evaluation_to_finish(tmp_path:
             if running and requested_at is None:
                 inbox.post(
                     "pause-drain",
-                    b'{"action":"park","control_id":"pause-drain"}',
+                    json.dumps(
+                        {
+                            "action": action,
+                            "control_id": "pause-drain",
+                            "expected_epoch": process.shell.record.envelope.core.records.recovery.epoch,
+                        }
+                    ).encode(),
                     ended=lambda: None,
                 )
                 requested_at = clock.now()
@@ -346,6 +362,12 @@ async def test_pause_drain_waits_for_an_executing_evaluation_to_finish(tmp_path:
         assert outcome.status is RunStatus.PARKED
         job = process.shell.record.envelope.core.evaluation.jobs[0]
         assert requested_at is not None
+        if action == "pause_now":
+            assert clock.now() < requested_at + 120
+            assert world.cluster.cancelled
+            assert not job.terminal
+            process.shell.release_lease(now_at=clock.now())
+            return
         assert clock.now() >= requested_at + 120
         observed = await world.evaluations[-1].poll(job.resource_id.root)
         assert observed.phase is PollPhase.ENDED

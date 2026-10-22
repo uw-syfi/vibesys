@@ -44,7 +44,7 @@ def _pause(now_at: float) -> core.RunControlEvent:
     control = core.ControlInput(
         control_id=core.ControlId(root="op-pause"),
         action="pause",
-        owner=core.PauseOwner.OPERATOR,
+        owner=core.PauseOwner.QUOTA,
     )
     return core.RunControlEvent(control=control, now_at=now_at)
 
@@ -112,8 +112,8 @@ def test_every_queued_episode_is_cancelled_once_exactly_when_a_cancel_was_asked(
 ) -> None:
     """periodic-1330 MED-2 across admission, pause and restart.
 
-    ``restart`` recovers core (a codec round trip, then recovery) after every step, as
-    a runtime restart does, so an escalation the run recorded is never lost with it.
+    ``restart`` opens fresh epochs after each step. Same-epoch escalation keeps its
+    strongest cause; completed cleanup remains unique across successor epochs.
     """
     run = _Run(_held_and_queued())
     if paused:
@@ -128,7 +128,13 @@ def test_every_queued_episode_is_cancelled_once_exactly_when_a_cancel_was_asked(
         run.tick()
         if restart:
             run.recover(epoch=index + 1)
-    _assert_stop_in_force(run, cancelled=core.StopMode.CANCEL in stops)
+    if restart:
+        assert core.stop_mode(run.state.run) is None
+        assert len(run.closures) == len(set(run.closures))
+        waiting = {_request(index).attempt_id for index in range(1, 1 + _QUEUED)}
+        assert set(run.queued()) == waiting - set(run.closures)
+    else:
+        _assert_stop_in_force(run, cancelled=core.StopMode.CANCEL in stops)
 
 
 def _recorded_by_an_older_build(state: core.CoreState, mode: core.StopMode) -> core.CoreState:
@@ -147,7 +153,8 @@ def test_a_cancel_saved_after_a_drain_finish_cancels_on_recovery(*, paused: bool
 
     The older build recorded the cancel and changed nothing. The state loads, its stop
     in force is the cancel, and recovering it cancels every episode still waiting for a
-    slot, once; a drain recorded the same way changes nothing.
+    slot, once; a drain recorded the same way changes nothing. A successor epoch
+    then retains that cleanup as history without inheriting the stop.
     """
     for mode in core.StopMode:
         run = _Run(_held_and_queued())
@@ -156,7 +163,10 @@ def test_a_cancel_saved_after_a_drain_finish_cancels_on_recovery(*, paused: bool
         run.feed(_operator_stop(0, core.StopMode.DRAIN, run.now))
         run.feed(_strategy_finish(run.state, core.StopMode.DRAIN))
         run.state = _recorded_by_an_older_build(run.state, mode)
-        for epoch in (1, 2):
-            run.recover(epoch)
+        run.recover(1)
         assert core.stop_mode(run.state.run) is mode
         _assert_stop_in_force(run, cancelled=mode is core.StopMode.CANCEL)
+        before = (tuple(run.closures), run.queued())
+        run.recover(2)
+        assert core.stop_mode(run.state.run) is None
+        assert (tuple(run.closures), run.queued()) == before

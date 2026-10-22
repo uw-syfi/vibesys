@@ -128,6 +128,22 @@ def scenarios() -> dict[str, tuple[list[Record], Keyframe]]:
     resumed[10].clock = 5
     resumed[11].clock = 6
     expected_resumed.lifecycles[1] = LifecycleVersion(seq=10, lifecycle=interrupted)
+    amended = EpochStarted.from_binary(next_epoch.to_binary())
+    amended.series.append(
+        MetricSeriesDecl(name="cost", direction=Direction.NONE, role=SeriesRole.REFERENCE)
+    )
+    for seq, kind in [(13, "declaration_amended"), (14, "epoch_started")]:
+        resumed.append(
+            Record(seq=seq, epoch=2, at=Timestamp(seconds=100 + seq), body=Oneof(kind, amended))
+        )
+        expected_resumed.epochs.append(EpochVersion(seq=seq, epoch=amended))
+    successor = EpochStarted.from_binary(amended.to_binary())
+    successor.epoch = 3
+    resumed.append(
+        Record(seq=15, epoch=3, at=Timestamp(seconds=120), body=Oneof("epoch_started", successor))
+    )
+    expected_resumed.epochs.append(EpochVersion(seq=15, epoch=successor))
+    expected_resumed.through_seq = 15
     legacy = [Record(seq=1, epoch=1, body=Oneof("legacy_event", LegacyEvent(json="legacy")))]
     cases = {
         "core": (records, expected),
