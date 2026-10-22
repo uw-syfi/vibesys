@@ -19,6 +19,7 @@ from vs_proto.api import (
     validate,
 )
 from vs_proto.api import replay as pb
+from vs_runlog.api import CurrentEpoch, epoch_has_ended
 
 from ._replay_history import (
     AcceptedClock,
@@ -272,7 +273,7 @@ class ReplayArchive:
                 self._notice(notice.detail)
                 self._writer_notice(record)
             case Oneof("lifecycle", lifecycle):
-                if lifecycle.state is not None and lifecycle.state.field in {"parked", "ended"}:
+                if epoch_has_ended(CurrentEpoch(record.epoch, lifecycle)):
                     self._epoch_closed = True
             case Oneof("metric" | "stream" | "blob" | "intent" | "chat", _):
                 pass

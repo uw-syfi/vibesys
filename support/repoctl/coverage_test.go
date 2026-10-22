@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -22,8 +23,16 @@ func TestCoverageOnlyCommand(t *testing.T) {
 		wantErr      string
 		deleteSource bool
 		sourceRoot   string
+		filters      string
+		generated    bool
 	}{
 		{name: "runs only own tests"},
+		{name: "generated binding and covered module", generated: true},
+		{name: "run include", generated: true, filters: `include = ["src/*.py"]`},
+		{name: "filename include", generated: true, filters: `include = ["alpha.py"]`},
+		{name: "character class include", generated: true, filters: `include = ["src/[a-z]*.py"]`},
+		{name: "report include", generated: true, filters: "[tool.coverage.report]\ninclude = [\"src/*.py\"]"},
+		{name: "report omit", generated: true, filters: "[tool.coverage.report]\nomit = [\"**/_generated/**\"]"},
 		{name: "library source", sourceRoot: "libs/tool/src/tool"},
 		{name: "SDK source", sourceRoot: "sdk/tool/src/tool"},
 		{name: "dry run", dry: true},
@@ -45,7 +54,19 @@ func TestCoverageOnlyCommand(t *testing.T) {
 			if sourceRoot == "" {
 				sourceRoot = "src"
 			}
-			root := newPublicPlanRepo(t, testPlanConfig("a", sourceRoot, "pkg-a")+coverageGateConfig)
+			config := testPlanConfig("a", sourceRoot, "pkg-a") + coverageGateConfig
+			if tc.generated {
+				config += generatedCoverageComponent
+			}
+			root := newPublicPlanRepo(t, config)
+			filters := tc.filters
+			if filters == "" {
+				filters = `omit = ["*/vs_proto/_generated/*"]`
+			}
+			if err := os.WriteFile(filepath.Join(root, "pyproject.toml"), []byte("[tool.coverage.run]\n"+filters+"\n"), 0644); err != nil {
+				t.Fatal(err)
+			}
+
 			if err := os.MkdirAll(filepath.Join(root, sourceRoot), 0755); err != nil {
 				t.Fatal(err)
 			}
@@ -80,6 +101,16 @@ func TestCoverageOnlyCommand(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
+			if tc.generated {
+				generated := filepath.Join(root, "libs/vs-proto/src/vs_proto/_generated/binding.py")
+				if err := os.MkdirAll(filepath.Dir(generated), 0755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(generated, []byte("value = 1\n"), 0644); err != nil {
+					t.Fatal(err)
+				}
+			}
+
 			args := []string{"--config", filepath.Join(root, "repoctl.toml"), "test", "--base", base, "--coverage-only"}
 			if tc.extra == nil {
 				args = append(args, "--coverage-test", "a/test_alpha.py")
@@ -112,6 +143,12 @@ func TestCoverageOnlyCommand(t *testing.T) {
 			if len(runner.checks) != 5 {
 				t.Fatalf("checks = %v", runner.checks)
 			}
+			for _, check := range runner.checks {
+				if strings.Contains(strings.Join(check.Args, " "), "_generated") {
+					t.Fatalf("omitted binding selected: %v", check.Args)
+				}
+			}
+
 			pytest := strings.Join(runner.checks[0].Args, " ")
 			if !strings.Contains(pytest, "--cov="+sourceRoot) || !strings.Contains(pytest, "-n 0") || !strings.HasSuffix(pytest, "a/test_alpha.py") || strings.Contains(pytest, "--no-cov") {
 				t.Fatalf("pytest = %s", pytest)
@@ -183,5 +220,74 @@ func TestCombinedCICoverageInvokesTheSharedFloorGroup(t *testing.T) {
 	last := runner.checks[len(runner.checks)-1]
 	if strings.Join(last.Args, " ") != "./support/repoctl/repoctl run-checks --group python_coverage_floor" {
 		t.Fatalf("CI does not invoke the shared floor policy: %v", last.Args)
+	}
+}
+
+const generatedCoverageComponent = `
+[[components]]
+id = "proto"
+class = "package"
+name = "pkg-proto"
+root = "libs/vs-proto"
+jobs = ["build-a"]
+`
+
+// Measurements are supplied by a Fake; the real shared floor checker validates
+// its report through the command's configured public boundary.
+type measuredCoverageRunner struct{ percent float64 }
+
+func (r measuredCoverageRunner) Run(ctx context.Context, root string, check execution.Check) error {
+	if check.Label == "python_coverage_floor" {
+		return (execution.OSRunner{}).Run(ctx, root, check)
+	}
+	if len(check.Args) > 3 && check.Args[3] == "json" {
+		report := fmt.Sprintf(`{"files":{"src/alpha.py":{"summary":{"num_statements":1,"percent_covered":%g}}}}`, r.percent)
+		dir := filepath.Join(root, "artifacts/repoctl-coverage")
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return err
+		}
+		return os.WriteFile(filepath.Join(dir, "report.json"), []byte(report), 0644)
+	}
+	return nil
+}
+
+func TestCoverageOnlyGeneratedBindingWithRealFloor(t *testing.T) {
+	// CI provides a modern python3. Prefer the project's minimum version when
+	// it is installed beside an older system Python, as on macOS.
+	python := "python3"
+	if executable, err := exec.LookPath("python3.12"); err == nil {
+		python = executable
+	}
+	script, err := os.ReadFile("../../scripts/check_coverage_floor.py")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, percent := range []float64{0, 39.9, 40, 100} {
+		t.Run(fmt.Sprint(percent), func(t *testing.T) {
+			config := strings.ReplaceAll(coverageGateConfig, `"python", "scripts/check_coverage_floor.py"`, fmt.Sprintf(`%q, "scripts/check_coverage_floor.py"`, python))
+			root := newPublicPlanRepo(t, testPlanConfig("a", "src", "pkg-a")+config+generatedCoverageComponent)
+			write := func(path, content string) {
+				t.Helper()
+				full := filepath.Join(root, filepath.FromSlash(path))
+				if err := os.MkdirAll(filepath.Dir(full), 0755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(full, []byte(content), 0644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			write("pyproject.toml", "[tool.coverage.run]\nomit = [\"*/vs_proto/_generated/*\"]\n[tool.vibesys.per_module_coverage]\nfloor = 40\nallowlist = []\n")
+			write("scripts/check_coverage_floor.py", string(script))
+			write("src/alpha.py", "value = 1\n")
+			write("libs/vs-proto/src/vs_proto/_generated/binding.py", "generated = 1\n")
+			write("a/test_alpha.py", "def test_alpha(): pass\n")
+			base := commitPublicPlan(t, root, "base")
+			write("src/alpha.py", "value = 2\n")
+			write("libs/vs-proto/src/vs_proto/_generated/binding.py", "generated = 2\n")
+			err := cliWithRunner([]string{"--config", filepath.Join(root, "repoctl.toml"), "test", "--base", base, "--coverage-only", "--coverage-test", "a/test_alpha.py"}, measuredCoverageRunner{percent})
+			if (err != nil) != (percent < 40) {
+				t.Fatalf("error = %v for coverage %g", err, percent)
+			}
+		})
 	}
 }

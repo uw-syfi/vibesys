@@ -197,6 +197,7 @@ graph TD
     vs_agent --> vs_sim
     vs_async_ops --> vs_sim
     vs_core --> vs_proto
+    vs_core --> vs_runlog
     vs_dst --> vs_core
     vs_dst --> vs_project
     vs_dst --> vs_runtime

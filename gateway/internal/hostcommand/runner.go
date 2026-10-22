@@ -36,7 +36,7 @@ type Result struct {
 // Runner reaps its process before returning, honors context cancellation, bounds
 // stdout and stderr, and never interprets the output. Errors retain Result.
 // Stream delivers each length-delimited stdout payload. Cancellation signals the
-// process group, so descendants that stayed in that group are reaped too.
+// process group; descendant exit and reaping can finish after Stream returns.
 type Runner interface {
 	Run(context.Context, Command) (Result, error)
 	Stream(context.Context, Command, func([]byte) error) error
