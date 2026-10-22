@@ -276,7 +276,6 @@ def build_core_services(policy: CorePolicy, resources: CoreResources) -> CoreSer
         ),
         sessions=SessionServices(_agent_sessions(resources), resolver, yields=bridge),
         operations=catalog,
-        allow_adoption=not resources.resuming,
     )
     return CoreServices(
         run_id=run_id,

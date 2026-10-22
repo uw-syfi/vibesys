@@ -80,6 +80,7 @@ from vs_project._private_directory import (
     ensure_private_directory,
     user_runtime_root,
 )
+from vs_project._run_branches import adoption_branch, run_branch
 from vs_project._run_history import GitRunHistory
 from vs_project._socket import (
     MAX_SOCKET_PATH_BYTES,
@@ -177,6 +178,11 @@ from vs_project.project import Project
 if TYPE_CHECKING:
     from vs_project._admission import FileAdmissionStore
     from vs_project._pygit2_git_repository import Pygit2GitRepository
+    from vs_project._revision_publication import (
+        CheckoutOutcome,
+        PublicationError,
+        PublishedRevision,
+    )
     from vs_project.api.admissions import (
         AdmissionBusyError,
         AdmissionClaim,
@@ -184,6 +190,20 @@ if TYPE_CHECKING:
         AdmissionStore,
         AdmissionUnconfirmedError,
     )
+
+# Publication is a run operation. Its module stays unloaded until a caller names
+# one of these exports, so importing this facade (the helper's hello path) does
+# not pay for it. Admission stays lazy for the same reason.
+_LAZY_ADMISSION = frozenset(
+    {
+        "AdmissionBusyError",
+        "AdmissionClaim",
+        "AdmissionConflictError",
+        "AdmissionStore",
+        "AdmissionUnconfirmedError",
+    }
+)
+_LAZY_PUBLICATION = frozenset({"CheckoutOutcome", "PublicationError", "PublishedRevision"})
 
 __all__ = [
     "COMMIT_IDENTITY_EMAIL",
@@ -211,6 +231,7 @@ __all__ = [
     "AtomicWriteEffects",
     "AtomicWriteStream",
     "CatalogueInput",
+    "CheckoutOutcome",
     "CliGitRepository",
     "CommitFault",
     "CommitOutcome",
@@ -280,6 +301,8 @@ __all__ = [
     "ProjectRootNotFoundError",
     "ProjectSandboxPaths",
     "ProjectStateError",
+    "PublicationError",
+    "PublishedRevision",
     "Pygit2GitRepository",
     "QuarantinedEnvelope",
     "RecordedRuns",
@@ -319,6 +342,7 @@ __all__ = [
     "Unknown",
     "UnsafeProjectPathError",
     "WorkloadInput",
+    "adoption_branch",
     "atomic_write_bytes",
     "check_comparisons_are_distinct",
     "comparison_directory",
@@ -335,6 +359,7 @@ __all__ = [
     "operator_key_path",
     "pygit2_installed",
     "read_operator_key",
+    "run_branch",
     "select_git_backend",
     "strip_ansi",
     "user_runtime_root",
@@ -346,16 +371,15 @@ __all__ = [
 
 
 def __getattr__(name: str) -> object:
-    """Load ``Pygit2GitRepository`` on first use, so importing this package never needs ``pygit2``."""
+    """Load heavy exports on first use.
+
+    ``Pygit2GitRepository`` imports pygit2, which this package must not require
+    just to be imported. Publication and admission types load with the first
+    caller that names them, not with every import of this facade.
+    """
     if name == "FileAdmissionStore":
         return import_module("vs_project._admission").FileAdmissionStore
-    if name in (
-        "AdmissionBusyError",
-        "AdmissionClaim",
-        "AdmissionConflictError",
-        "AdmissionStore",
-        "AdmissionUnconfirmedError",
-    ):
+    if name in _LAZY_ADMISSION:
         return getattr(import_module("vs_project.api.admissions"), name)
     if name == "Pygit2GitRepository":
         from vs_project._pygit2_git_repository import (  # noqa: PLC0415  # lint-waiver: LW-415571 [PLC0415]; the libgit2 implementation imports pygit2, which this package must not require just to be imported.
@@ -363,5 +387,9 @@ def __getattr__(name: str) -> object:
         )
 
         return Pygit2GitRepository
+    if name in _LAZY_PUBLICATION:
+        value = getattr(import_module("vs_project._revision_publication"), name)
+        globals()[name] = value
+        return value
     message = f"module {__name__!r} has no attribute {name!r}"
     raise AttributeError(message)

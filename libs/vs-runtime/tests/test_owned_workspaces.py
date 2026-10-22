@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 from collections import deque
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, cast
 
 import pytest
 
-from vs_core.api import CaptureCommandBase
+from vs_core.api import AdoptionPublication, CaptureCommandBase, CheckoutStatus, CheckoutUpdate
+from vs_project.api import adoption_branch
 from vs_runtime.api import (
     CaptureStopUnconfirmedError,
     RuntimeContractError,
@@ -66,6 +68,7 @@ class _Resource:
         self.path = path
         self.revision: str | None = revision
         self.trusted_input_baseline: str | None = revision
+        self.publications: dict[str, AdoptionPublication] = {}
         self.closed = False
         self.detached = False
         self.executions: list[tuple[str, int | None]] = []
@@ -77,6 +80,27 @@ class _Resource:
         self.after_execute: Callable[[str], None] = lambda _command: None
 
     capture_execution: CaptureExecutionIdentity | None = None
+
+    def publish(self, revision: str, message: str) -> AdoptionPublication:
+        if not self.is_retained(revision):
+            raise ValueError(revision)
+        if revision not in self.publications:
+            commit = hashlib.sha1(
+                f"{self.revision}:{revision}:{message}".encode(),
+                usedforsecurity=False,
+            ).hexdigest()
+            self.publications[revision] = AdoptionPublication(
+                revision=revision,
+                commit=commit,
+                branch=adoption_branch("owned-workspaces"),
+            )
+        return self.publications[revision]
+
+    def update_checkout(self, publication: AdoptionPublication) -> CheckoutUpdate:
+        if self.publications.get(publication.revision) != publication:
+            raise ValueError(publication.revision)
+        self.revision = publication.commit
+        return CheckoutUpdate(status=CheckoutStatus.FAST_FORWARDED)
 
     def snapshot(self, label: str) -> str:
         self.revision = f"{len(label):040x}"

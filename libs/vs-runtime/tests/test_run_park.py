@@ -180,6 +180,8 @@ async def test_a_closed_scope_or_cancelled_job_cannot_relaunch_after_park(
     *,
     close_scope: bool,
 ) -> None:
+    # Route the executor's blocking calls through this loop's simulated scheduler.
+    loop_threads()
     cluster = ScenarioCluster()
     cluster.states = (SlurmJobStatus.PENDING,)
     async with world(cluster) as current:

@@ -69,7 +69,9 @@ Never rely on a provider flag for isolation. See
    builds it; the framework state's part comes from `Project.state.sandbox_paths()`,
    which owns the layout. Every hidden path must exist in the workspace it is applied
    to, so `open_run_environment` first prepares the hidden state directories in a
-   linked candidate worktree (`prepare_hidden_directories`).
+   linked candidate worktree (`prepare_hidden_directories`) and creates an empty
+   file for any other hidden path that worktree did not check out (`agent.toml`
+   and root `.env*`). The placeholder is empty; the operator's file is not copied.
 4. **Agent session.** `AgentExecutionPolicy` carries the policy,
    `host_resources`, and `require_enforcement` into the session launcher. Run
    entrypoints set `require_enforcement = not use_docker`: a host (Metal) run

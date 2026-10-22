@@ -364,7 +364,9 @@ function hostCallRequest(method: string): Uint8Array {
 }
 
 for (const [method, budget] of Object.entries(hostCallBudgets)) {
-  test(`host ${method} waits for the registry budget above the runner cap`, async () => {
+  test(`host ${method} waits for the registry budget above the runner cap`, {
+    timeout: 15000,
+  }, async () => {
     expect(budget.totalMs).toBeGreaterThan(budget.capMs);
     expect(budget.totalMs).toBe(budget.capMs + budget.graceMs);
     const fake = new FakeGateway();
