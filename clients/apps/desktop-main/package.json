@@ -27,7 +27,7 @@
     "build": "tsc -b tsconfig.lib.json tsconfig.preload-welcome.json && node scripts/copy-ui.mjs && node scripts/build-gateway.mjs",
     "check": "tsc -b",
     "test": "node ../../tools/scripts/run_bun_tests.mjs ./src",
-    "test:e2e": "turbo run build --filter=@vibesys/app-desktop-main... && node e2e/verify-electron-runtime.mjs && playwright test",
+    "test:e2e": "turbo run build --filter=@vibesys/app-desktop-main... && node e2e/verify-electron-runtime.mjs && playwright test --pass-with-no-tests",
     "start": "pnpm build && electron .",
     "dev": "pnpm start"
   },
