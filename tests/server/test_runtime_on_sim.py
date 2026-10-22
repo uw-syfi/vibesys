@@ -392,32 +392,48 @@ def test_runtime_returns_cleanly_after_an_operator_stop(
     _on_sim(seed, body)
 
 
+@pytest.mark.regression
+@pytest.mark.parametrize(
+    "error", [None, RuntimeError("failed"), _CONFIGURATION, KeyboardInterrupt()]
+)
+@example(seed=0)
 @_SEEDS
 @given(seed=st.integers(0, 2**32))
 def test_runtime_does_not_duplicate_core_terminal_event(
-    tmp_path_factory: pytest.TempPathFactory, seed: int
+    tmp_path_factory: pytest.TempPathFactory, seed: int, error: BaseException | None
 ) -> None:
     socket_path = tmp_path_factory.mktemp("run") / "control.sock"
+    terminal = "run_finished" if error is None else "run_failed"
 
     def body(threads: SimThreads, network: SimNetwork) -> None:
         runtime = _runtime(socket_path, threads, network)
         received: list[dict[str, Any]] = []
         subscriber = threads.spawn(
-            lambda: _collect_until(runtime, network, socket_path, _has("run_finished"), received),
+            lambda: _collect_until(runtime, network, socket_path, _has(terminal), received),
             name="subscriber",
             daemon=False,
         )
-        core_events = CoreEventJournal(clock=ManualClock(), threads=OsThreads())
+        core_events = CoreEventJournal(clock=ManualClock(), threads=threads)
         core_events.subscribe(runtime.integration.project_event)
 
-        runtime.run(
-            lambda: core_events.emit(CoreEventType.RUN_FINISHED, status=EventStatus.COMPLETED)
-        )
+        def run() -> None:
+            core_events.emit(
+                CoreEventType.RUN_FINISHED if error is None else CoreEventType.RUN_FAILED,
+                status=EventStatus.COMPLETED if error is None else EventStatus.FAILED,
+            )
+            if error is not None:
+                raise error
+
+        with nullcontext() if error is None else pytest.raises(type(error)):
+            runtime.run(run)
 
         subscriber.join(HANG_GUARD_S)
         assert not subscriber.is_alive()
-        assert sum(event["type"] == "run_finished" for event in received) == 1
-        assert sum(event.type.value == "run_finished" for event in runtime.journal.read()) == 1
+        terminals = {"run_finished", "run_failed", "run_interrupted", "configuration_failed"}
+        assert [event["type"] for event in received if event["type"] in terminals] == [terminal]
+        assert [
+            event.type.value for event in runtime.journal.read() if event.type.value in terminals
+        ] == [terminal]
 
     _on_sim(seed, body)
 

@@ -136,6 +136,24 @@ def test_every_committed_input_reloads_the_exact_envelope(times: list[int]) -> N
     assert not shell.advance()
 
 
+@pytest.mark.regression
+@example(times=[1, 2, 3])
+@given(times=st.lists(st.integers(1, 20), min_size=1, max_size=8))
+def test_admission_is_durable_before_its_answer_is_observable(times: list[int]) -> None:
+    store = FakeStateStore()
+    shell = runtime(store)
+    shell.start("host", now_at=0, lease_duration=100)
+    for instant in sorted(times):
+        transition = shell.admit(ClockAdvanced(now_at=instant), now_at=instant)
+        stored = store.load()
+        assert isinstance(stored, StoredEnvelope)
+        restored = RuntimeRecord[FlowState].decode(stored, OperationRegistry())
+        assert restored == shell.record
+        assert restored.envelope.core.revision >= transition.state.revision
+        assert shell.admitted_core == restored.envelope.core
+        assert not shell.advance()
+
+
 @pytest.mark.parametrize(
     "fault", [CommitFault.UNKNOWN_BEFORE, CommitFault.UNKNOWN_AFTER, CommitFault.UNKNOWN_SYNC]
 )
