@@ -592,6 +592,7 @@ class FakeAgentClient:
         _refuse_flood(text)
         result = AgentTurnResult(
             text=text,
+            usage=self._usage,
             provider_session_id=(
                 None if session_key is None else self.provider_session_id(session_key)
             ),
