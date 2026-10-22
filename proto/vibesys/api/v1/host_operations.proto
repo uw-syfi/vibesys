@@ -1,6 +1,7 @@
 syntax = "proto3";
 package vibesys.api.v1;
 
+import "vibesys/api/v1/host_call.proto";
 import "vibesys/host/v1/operation_options.proto";
 import "vibesys/host/v1/operations.proto";
 
@@ -130,6 +131,64 @@ service HostOperationsService {
       executor: EXECUTOR_CHECKOUT
       correlation: {
         request_path: 1
+        response_path: 1
+      }
+    };
+  }
+  // HostCall dispatch. The runner deadline is cap_ms. grace_ms is cleanup
+  // allowance and is not added, so the client RPC margin stays intact: 15s for
+  // a 10s call, and 35s for the 30s relaunch that confirms an epoch for up to 25s.
+  // Request and response tags are the HostCall oneof field numbers.
+  rpc PostIntent(PostIntentRequest) returns (PostIntentResponse) {
+    option (vibesys.host.v1.operation) = {
+      adapter_method: "post.intent"
+      operation_id: 20
+      request_tag: 2
+      response_tag: 1
+      cap_ms: 10000
+      grace_ms: 5000
+      effect: OPERATION_EFFECT_ADMISSION
+      retry: RETRY_RECONCILE_SAME_ID
+      cardinality: CARDINALITY_UNARY
+      executor: EXECUTOR_CHECKOUT
+      correlation: {
+        request_path: 3
+        response_path: 1
+      }
+    };
+  }
+  rpc Relaunch(RelaunchRequest) returns (RelaunchResponse) {
+    option (vibesys.host.v1.operation) = {
+      adapter_method: "relaunch"
+      operation_id: 21
+      request_tag: 3
+      response_tag: 3
+      cap_ms: 30000
+      grace_ms: 5000
+      effect: OPERATION_EFFECT_ADMISSION
+      retry: RETRY_RECONCILE_SAME_ID
+      cardinality: CARDINALITY_UNARY
+      executor: EXECUTOR_CHECKOUT
+    };
+  }
+  rpc ChatMessage(ChatMessageRequest) returns (ChatMessageResponse) {
+    option (vibesys.host.v1.operation) = {
+      adapter_method: "chat.message"
+      operation_id: 22
+      request_tag: 4
+      response_tag: 4
+      cap_ms: 10000
+      grace_ms: 5000
+      effect: OPERATION_EFFECT_ADMISSION
+      retry: RETRY_RECONCILE_SAME_ID
+      cardinality: CARDINALITY_UNARY
+      executor: EXECUTOR_CHECKOUT
+      correlation: {
+        request_path: 4
+        response_path: 2
+      }
+      correlation: {
+        request_path: 3
         response_path: 1
       }
     };

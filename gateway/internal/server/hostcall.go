@@ -7,30 +7,20 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 	"unicode/utf8"
 
 	apiv1 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/api/v1"
 	"github.com/uw-syfi/vibesys/gateway/internal/hostcommand"
+	"github.com/uw-syfi/vibesys/gateway/internal/hostoperations"
 	"google.golang.org/protobuf/proto"
 )
 
-// Leave the 15 second client RPC deadline room to receive an admission outcome.
-const hostCallDeadline = 10 * time.Second
-
 // HostCall dispatches typed methods and carries opaque protobuf across stdin and
 // stdout. Python owns all validation and product policy, including inbox writes.
+// Method names, runner caps and response correlations come from the registry.
 func (h *host) HostCall(ctx context.Context, request *apiv1.HostCallRequest) (*apiv1.HostCallResponse, error) {
-	method := ""
-	requestID := ""
-	switch {
-	case request.GetPostIntent() != nil:
-		method, requestID = "post-intent", request.GetPostIntent().GetRequestId()
-	case request.GetChatMessage() != nil:
-		method, requestID = "chat-message", request.GetChatMessage().GetRequestId()
-	case request.GetRelaunch() != nil:
-		method = "relaunch"
-	default:
+	dispatched, ok := hostoperations.DispatchHostCall(request)
+	if !ok {
 		return hostFailure("invalid_method", "HostCall.method is required", -1, ""), nil
 	}
 	checkout, err := checkoutPath(request.GetCheckout())
@@ -44,16 +34,11 @@ func (h *host) HostCall(ctx context.Context, request *apiv1.HostCallRequest) (*a
 	if len(input) > hostcommand.MaxOutput {
 		return hostFailure("invalid_input", "HostCall request exceeds 1 MiB", -1, ""), nil
 	}
-	deadline := hostCallDeadline
-	if request.GetRelaunch() != nil {
-		// The host confirms its new writer epoch for up to 25 seconds; the client allows 35.
-		deadline = 30 * time.Second
-	}
-	callCtx, cancel := context.WithTimeout(ctx, deadline)
+	callCtx, cancel := context.WithTimeout(ctx, dispatched.Deadline)
 	defer cancel()
 	result, err := h.config.HostRunner.Run(callCtx, hostcommand.Command{
 		Executable: filepath.Join(checkout, ".venv", "bin", "vibesys"),
-		Args:       []string{"host", method}, Input: input, StateRoot: h.config.Root,
+		Args:       []string{"host", dispatched.CLI}, Input: input, StateRoot: h.config.Root,
 	})
 	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
 		return hostFailure("admission_unconfirmed", "The host did not confirm admission. Check the run status or retry with the same request id.", result.ExitCode, result.Stderr), nil
@@ -62,7 +47,7 @@ func (h *host) HostCall(ctx context.Context, request *apiv1.HostCallRequest) (*a
 		return &apiv1.HostCallResponse{Result: &apiv1.HostCallResponse_Relaunch{Relaunch: &apiv1.RelaunchResponse{Outcome: &apiv1.RelaunchResponse_Refusal{Refusal: apiv1.RelaunchRefusal_RELAUNCH_REFUSAL_CHECKOUT_MISSING}}}}, nil
 	}
 	if err != nil || result.ExitCode != 0 {
-		message := fmt.Sprintf("vibesys host %s exited %d", method, result.ExitCode)
+		message := fmt.Sprintf("vibesys host %s exited %d", dispatched.CLI, result.ExitCode)
 		if err != nil {
 			message += ": " + err.Error()
 		}
@@ -70,21 +55,12 @@ func (h *host) HostCall(ctx context.Context, request *apiv1.HostCallRequest) (*a
 	}
 	response := &apiv1.HostCallResponse{}
 	if err := proto.Unmarshal(result.Output, response); err != nil || response.Result == nil {
-		return hostFailure("invalid_host_response", "vibesys host "+method+" returned invalid protobuf", result.ExitCode, result.Stderr), nil
+		return hostFailure("invalid_host_response", "vibesys host "+dispatched.CLI+" returned invalid protobuf", result.ExitCode, result.Stderr), nil
 	}
 	if failure := response.GetConfigurationFailed(); failure != nil {
 		failure.Stderr = safeDiagnostic(strings.TrimSpace(failure.Stderr + "\n" + result.Stderr))
-	} else {
-		valid := method == "post-intent" && response.GetPostIntent() != nil && response.GetPostIntent().GetRequestId() == requestID
-		if method == "chat-message" {
-			valid = response.GetChatMessage() != nil && response.GetChatMessage().GetRequestId() == requestID && response.GetChatMessage().GetSessionId() == request.GetChatMessage().GetSessionId()
-		}
-		if method == "relaunch" {
-			valid = response.GetRelaunch() != nil
-		}
-		if !valid {
-			return hostFailure("invalid_host_response", "vibesys host "+method+" returned a different method or identity", result.ExitCode, result.Stderr), nil
-		}
+	} else if !hostoperations.HostCallResponseValid(request, response) {
+		return hostFailure("invalid_host_response", "vibesys host "+dispatched.CLI+" returned a different method or identity", result.ExitCode, result.Stderr), nil
 	}
 	return response, nil
 }

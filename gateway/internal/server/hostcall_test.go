@@ -11,6 +11,7 @@ import (
 
 	apiv1 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/api/v1"
 	"github.com/uw-syfi/vibesys/gateway/internal/hostcommand"
+	"github.com/uw-syfi/vibesys/gateway/internal/hostoperations"
 	"github.com/uw-syfi/vibesys/gateway/internal/server"
 	"google.golang.org/protobuf/proto"
 )
@@ -197,6 +198,28 @@ func TestHostCallRelaunchDispatchesWithoutRunPolicy(t *testing.T) {
 				t.Fatal(response)
 			}
 		})
+	}
+}
+
+func TestHostCallCapsComeFromTheRegistry(t *testing.T) {
+	intent, ok := hostoperations.DispatchHostCall(intentRequest())
+	if !ok || intent.CLI != "post-intent" || intent.Deadline != 10*time.Second {
+		t.Fatalf("post-intent: %+v %v", intent, ok)
+	}
+	relaunch, ok := hostoperations.DispatchHostCall(&apiv1.HostCallRequest{Method: &apiv1.HostCallRequest_Relaunch{Relaunch: &apiv1.RelaunchRequest{}}})
+	if !ok || relaunch.CLI != "relaunch" || relaunch.Deadline != 30*time.Second {
+		t.Fatalf("relaunch: %+v %v", relaunch, ok)
+	}
+	chat, ok := hostoperations.DispatchHostCall(&apiv1.HostCallRequest{Method: &apiv1.HostCallRequest_ChatMessage{ChatMessage: &apiv1.ChatMessageRequest{RequestId: "r-1", SessionId: "s-1"}}})
+	if !ok || chat.CLI != "chat-message" || chat.Deadline != 10*time.Second {
+		t.Fatalf("chat-message: %+v %v", chat, ok)
+	}
+	if _, ok := hostoperations.DispatchHostCall(&apiv1.HostCallRequest{}); ok {
+		t.Fatal("missing method dispatched")
+	}
+	response := &apiv1.HostCallResponse{Result: &apiv1.HostCallResponse_ChatMessage{ChatMessage: &apiv1.ChatMessageResponse{RequestId: "r-1", SessionId: "other"}}}
+	if hostoperations.HostCallResponseValid(&apiv1.HostCallRequest{Method: &apiv1.HostCallRequest_ChatMessage{ChatMessage: &apiv1.ChatMessageRequest{RequestId: "r-1", SessionId: "s-1"}}}, response) {
+		t.Fatal("stale session accepted")
 	}
 }
 

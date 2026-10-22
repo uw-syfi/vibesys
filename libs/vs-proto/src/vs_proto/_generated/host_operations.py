@@ -2,8 +2,9 @@
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Protocol, cast
 
+from vs_proto._generated.vibesys.api.v1 import host_call_pb as host_call
 from vs_proto._generated.vibesys.host.v1 import operations_pb as pb
 from vs_proto._generated.vibesys.host.v1.failure_pb import FailureCategory, OperationFailure
 from vs_proto._operations import AcceptedRequest, Operation
@@ -279,3 +280,41 @@ def visit_failure[T](failure: OperationFailure, visitor: FailureVisitor[T]) -> T
             return visitor.internal(failure)
         case _:
             raise ValueError("unknown failure category")
+
+
+@dataclass(frozen=True)
+class HostCall:
+    """One HostCall method: its envelope slot, CLI name and runner cap."""
+
+    slot: str
+    cli: str
+    request_tag: int
+    response_tag: int
+    cap_ms: int
+
+
+HOST_CALLS: tuple[HostCall, ...] = (
+    HostCall("post_intent", "post-intent", 2, 1, 10000),
+    HostCall("relaunch", "relaunch", 3, 3, 30000),
+    HostCall("chat_message", "chat-message", 4, 4, 10000),
+)
+
+
+def dispatch_host_call(
+    field: str,
+    request: object,
+    *,
+    post_intent: Callable[[host_call.PostIntentRequest], host_call.PostIntentResponse],
+    relaunch: Callable[[host_call.RelaunchRequest], host_call.RelaunchResponse],
+    chat_message: Callable[[host_call.ChatMessageRequest], host_call.ChatMessageResponse],
+) -> object | None:
+    """Run the handler registered for one generated HostCall slot."""
+    match field:
+        case "post_intent":
+            return post_intent(cast(host_call.PostIntentRequest, request))
+        case "relaunch":
+            return relaunch(cast(host_call.RelaunchRequest, request))
+        case "chat_message":
+            return chat_message(cast(host_call.ChatMessageRequest, request))
+        case _:
+            return None

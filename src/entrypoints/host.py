@@ -11,7 +11,10 @@ from typing import TYPE_CHECKING
 
 from vibesys.api.host import host_call
 from vs_project.api import Project, ProjectError
+from vs_proto.api import host_operations
 from vs_sim.api import OsProcesses, OsThreads, SystemClock
+
+_HOST_CALL_COMMANDS = {op.cli: op.slot for op in host_operations.HOST_CALLS}
 
 if TYPE_CHECKING:
     from typing import BinaryIO
@@ -23,7 +26,10 @@ def run(argv: list[str], *, cwd: Path) -> tuple[int, str, str]:
     """Run a host maintenance method and return exit code, stdout and stderr."""
     parser = argparse.ArgumentParser(
         prog="vibesys host",
-        epilog="post-intent, relaunch and chat-message read a HostCallRequest from stdin and write a HostCallResponse to stdout.",
+        epilog=(
+            ", ".join(_HOST_CALL_COMMANDS)
+            + " read a HostCallRequest from stdin and write a HostCallResponse to stdout."
+        ),
     )
     methods = parser.add_subparsers(dest="method", required=True)
     convert = methods.add_parser("convert-run", help="convert a stopped run's JSONL journal")
@@ -62,7 +68,7 @@ def main(
 ) -> int:
     """Run one host method from the current directory."""
     arguments = sys.argv[1:] if argv is None else argv
-    if arguments[:1] in (["post-intent"], ["relaunch"], ["chat-message"]):
+    if arguments and arguments[0] in _HOST_CALL_COMMANDS:
         parser = argparse.ArgumentParser(
             prog=f"vibesys host {arguments[0]}",
             description="Read a binary HostCallRequest from stdin; write a binary HostCallResponse to stdout.",
@@ -74,7 +80,7 @@ def main(
             host_call(
                 source.read((1 << 20) + 1),
                 start_chat=import_module("entrypoints.chat_session").start_chat
-                if arguments[0] == "chat-message"
+                if _HOST_CALL_COMMANDS[arguments[0]] == "chat_message"
                 else None,
                 processes=OsProcesses() if processes is None else processes,
                 threads=OsThreads() if threads is None else threads,

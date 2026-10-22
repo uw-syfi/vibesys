@@ -65,8 +65,13 @@ def _changed(change: Callable[[object], None], index: int = 0) -> bytes:
 
 def test_every_method_has_one_typed_handler_and_canonical_budget() -> None:
     compiled = compile_registry(_image().SerializeToString(), _slots())
-    assert [op.name for op in compiled] == list(_HANDLERS)
-    assert {op.policy.cap_ms + op.policy.grace_ms for op in compiled} == {15000, 30000, 70000}
+    assert [op.name for op in compiled if op.is_read()] == list(_HANDLERS)
+    assert [(op.slot, op.policy.cap_ms) for op in compiled if op.is_admission()] == [
+        ("post_intent", 10000),
+        ("relaunch", 30000),
+        ("chat_message", 10000),
+    ]
+    assert {op.policy.cap_ms + op.policy.grace_ms for op in compiled} == {15000, 30000, 35000, 70000}
 
 
 @pytest.mark.parametrize(
@@ -136,7 +141,7 @@ def test_the_descriptor_pass_compiles_all_language_outputs_before_publication() 
     )
     image = _image().SerializeToString()
     outputs = compile_outputs(image, _slots(), sources)
-    assert len(outputs) == 5
+    assert len(outputs) == 6
     for path, content in outputs.items():
         if path.endswith(".py"):
             ast.parse(content)

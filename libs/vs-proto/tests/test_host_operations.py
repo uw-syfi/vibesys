@@ -11,8 +11,14 @@ from hypothesis import given
 from hypothesis import strategies as st
 
 from vs_proto.api import (
+    ChatMessageRequest,
+    ChatMessageResponse,
     FailureCategory,
     OperationFailure,
+    PostIntentRequest,
+    PostIntentResponse,
+    RelaunchRequest,
+    RelaunchResponse,
     ValidationError,
     from_mapping,
     host_operations,
@@ -127,4 +133,43 @@ def test_accepted_input_bytes_are_deterministic_for_every_map_order() -> None:
     assert (
         host_operations.accept_preflight_run(left).payload
         == host_operations.accept_preflight_run(right).payload
+    )
+
+
+def test_host_call_dispatch_uses_the_registered_slot_and_cap() -> None:
+    assert [(op.slot, op.cli, op.cap_ms) for op in host_operations.HOST_CALLS] == [
+        ("post_intent", "post-intent", 10000),
+        ("relaunch", "relaunch", 30000),
+        ("chat_message", "chat-message", 10000),
+    ]
+    seen: list[object] = []
+
+    def post_intent(request: PostIntentRequest) -> PostIntentResponse:
+        seen.append(request)
+        return PostIntentResponse(request_id="posted", ordered_reader=True)
+
+    def relaunch(request: RelaunchRequest) -> RelaunchResponse:
+        raise AssertionError(request)
+
+    def chat_message(request: ChatMessageRequest) -> ChatMessageResponse:
+        raise AssertionError(request)
+
+    result = host_operations.dispatch_host_call(
+        "post_intent",
+        "request",
+        post_intent=post_intent,
+        relaunch=relaunch,
+        chat_message=chat_message,
+    )
+    assert result == PostIntentResponse(request_id="posted", ordered_reader=True)
+    assert seen == ["request"]
+    assert (
+        host_operations.dispatch_host_call(
+            "unknown",
+            None,
+            post_intent=post_intent,
+            relaunch=relaunch,
+            chat_message=chat_message,
+        )
+        is None
     )

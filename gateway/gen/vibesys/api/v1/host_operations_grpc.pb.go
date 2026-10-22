@@ -27,6 +27,9 @@ const (
 	HostOperationsService_DescribeMachine_FullMethodName = "/vibesys.api.v1.HostOperationsService/DescribeMachine"
 	HostOperationsService_ListCompute_FullMethodName     = "/vibesys.api.v1.HostOperationsService/ListCompute"
 	HostOperationsService_PreflightRun_FullMethodName    = "/vibesys.api.v1.HostOperationsService/PreflightRun"
+	HostOperationsService_PostIntent_FullMethodName      = "/vibesys.api.v1.HostOperationsService/PostIntent"
+	HostOperationsService_Relaunch_FullMethodName        = "/vibesys.api.v1.HostOperationsService/Relaunch"
+	HostOperationsService_ChatMessage_FullMethodName     = "/vibesys.api.v1.HostOperationsService/ChatMessage"
 )
 
 // HostOperationsServiceClient is the client API for HostOperationsService service.
@@ -42,6 +45,13 @@ type HostOperationsServiceClient interface {
 	DescribeMachine(ctx context.Context, in *v1.DescribeMachineRequest, opts ...grpc.CallOption) (*v1.DescribeMachineResponse, error)
 	ListCompute(ctx context.Context, in *v1.ListComputeRequest, opts ...grpc.CallOption) (*v1.ListComputeResponse, error)
 	PreflightRun(ctx context.Context, in *v1.PreflightRunRequest, opts ...grpc.CallOption) (*v1.PreflightRunResponse, error)
+	// HostCall dispatch. The runner deadline is cap_ms. grace_ms is cleanup
+	// allowance and is not added, so the client RPC margin stays intact: 15s for
+	// a 10s call, and 35s for the 30s relaunch that confirms an epoch for up to 25s.
+	// Request and response tags are the HostCall oneof field numbers.
+	PostIntent(ctx context.Context, in *PostIntentRequest, opts ...grpc.CallOption) (*PostIntentResponse, error)
+	Relaunch(ctx context.Context, in *RelaunchRequest, opts ...grpc.CallOption) (*RelaunchResponse, error)
+	ChatMessage(ctx context.Context, in *ChatMessageRequest, opts ...grpc.CallOption) (*ChatMessageResponse, error)
 }
 
 type hostOperationsServiceClient struct {
@@ -122,6 +132,36 @@ func (c *hostOperationsServiceClient) PreflightRun(ctx context.Context, in *v1.P
 	return out, nil
 }
 
+func (c *hostOperationsServiceClient) PostIntent(ctx context.Context, in *PostIntentRequest, opts ...grpc.CallOption) (*PostIntentResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(PostIntentResponse)
+	err := c.cc.Invoke(ctx, HostOperationsService_PostIntent_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostOperationsServiceClient) Relaunch(ctx context.Context, in *RelaunchRequest, opts ...grpc.CallOption) (*RelaunchResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RelaunchResponse)
+	err := c.cc.Invoke(ctx, HostOperationsService_Relaunch_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *hostOperationsServiceClient) ChatMessage(ctx context.Context, in *ChatMessageRequest, opts ...grpc.CallOption) (*ChatMessageResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ChatMessageResponse)
+	err := c.cc.Invoke(ctx, HostOperationsService_ChatMessage_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // HostOperationsServiceServer is the server API for HostOperationsService service.
 // All implementations must embed UnimplementedHostOperationsServiceServer
 // for forward compatibility.
@@ -135,6 +175,13 @@ type HostOperationsServiceServer interface {
 	DescribeMachine(context.Context, *v1.DescribeMachineRequest) (*v1.DescribeMachineResponse, error)
 	ListCompute(context.Context, *v1.ListComputeRequest) (*v1.ListComputeResponse, error)
 	PreflightRun(context.Context, *v1.PreflightRunRequest) (*v1.PreflightRunResponse, error)
+	// HostCall dispatch. The runner deadline is cap_ms. grace_ms is cleanup
+	// allowance and is not added, so the client RPC margin stays intact: 15s for
+	// a 10s call, and 35s for the 30s relaunch that confirms an epoch for up to 25s.
+	// Request and response tags are the HostCall oneof field numbers.
+	PostIntent(context.Context, *PostIntentRequest) (*PostIntentResponse, error)
+	Relaunch(context.Context, *RelaunchRequest) (*RelaunchResponse, error)
+	ChatMessage(context.Context, *ChatMessageRequest) (*ChatMessageResponse, error)
 	mustEmbedUnimplementedHostOperationsServiceServer()
 }
 
@@ -165,6 +212,15 @@ func (UnimplementedHostOperationsServiceServer) ListCompute(context.Context, *v1
 }
 func (UnimplementedHostOperationsServiceServer) PreflightRun(context.Context, *v1.PreflightRunRequest) (*v1.PreflightRunResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method PreflightRun not implemented")
+}
+func (UnimplementedHostOperationsServiceServer) PostIntent(context.Context, *PostIntentRequest) (*PostIntentResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method PostIntent not implemented")
+}
+func (UnimplementedHostOperationsServiceServer) Relaunch(context.Context, *RelaunchRequest) (*RelaunchResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method Relaunch not implemented")
+}
+func (UnimplementedHostOperationsServiceServer) ChatMessage(context.Context, *ChatMessageRequest) (*ChatMessageResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ChatMessage not implemented")
 }
 func (UnimplementedHostOperationsServiceServer) mustEmbedUnimplementedHostOperationsServiceServer() {}
 func (UnimplementedHostOperationsServiceServer) testEmbeddedByValue()                               {}
@@ -313,6 +369,60 @@ func _HostOperationsService_PreflightRun_Handler(srv interface{}, ctx context.Co
 	return interceptor(ctx, in, info, handler)
 }
 
+func _HostOperationsService_PostIntent_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(PostIntentRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostOperationsServiceServer).PostIntent(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: HostOperationsService_PostIntent_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostOperationsServiceServer).PostIntent(ctx, req.(*PostIntentRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _HostOperationsService_Relaunch_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RelaunchRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostOperationsServiceServer).Relaunch(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: HostOperationsService_Relaunch_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostOperationsServiceServer).Relaunch(ctx, req.(*RelaunchRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _HostOperationsService_ChatMessage_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ChatMessageRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostOperationsServiceServer).ChatMessage(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: HostOperationsService_ChatMessage_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostOperationsServiceServer).ChatMessage(ctx, req.(*ChatMessageRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // HostOperationsService_ServiceDesc is the grpc.ServiceDesc for HostOperationsService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -347,6 +457,18 @@ var HostOperationsService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "PreflightRun",
 			Handler:    _HostOperationsService_PreflightRun_Handler,
+		},
+		{
+			MethodName: "PostIntent",
+			Handler:    _HostOperationsService_PostIntent_Handler,
+		},
+		{
+			MethodName: "Relaunch",
+			Handler:    _HostOperationsService_Relaunch_Handler,
+		},
+		{
+			MethodName: "ChatMessage",
+			Handler:    _HostOperationsService_ChatMessage_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

@@ -4,6 +4,8 @@
 
 import type { GenFile, GenService } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
+import type { ChatMessageRequestSchema, ChatMessageResponseSchema, PostIntentRequestSchema, PostIntentResponseSchema, RelaunchRequestSchema, RelaunchResponseSchema } from "./host_call_pb.js";
+import { file_vibesys_api_v1_host_call } from "./host_call_pb.js";
 import { file_vibesys_host_v1_operation_options } from "../../host/v1/operation_options_pb.js";
 import type { DescribeMachineRequestSchema, DescribeMachineResponseSchema, GetTaskGoalRequestSchema, GetTaskGoalResponseSchema, ListComputeRequestSchema, ListComputeResponseSchema, ListExamplesRequestSchema, ListExamplesResponseSchema, ListHarnessesRequestSchema, ListHarnessesResponseSchema, ListTasksRequestSchema, ListTasksResponseSchema, PreflightRunRequestSchema, PreflightRunResponseSchema } from "../../host/v1/operations_pb.js";
 import { file_vibesys_host_v1_operations } from "../../host/v1/operations_pb.js";
@@ -12,7 +14,7 @@ import { file_vibesys_host_v1_operations } from "../../host/v1/operations_pb.js"
  * Describes the file vibesys/api/v1/host_operations.proto.
  */
 export const file_vibesys_api_v1_host_operations: GenFile = /*@__PURE__*/
-  fileDesc("CiR2aWJlc3lzL2FwaS92MS9ob3N0X29wZXJhdGlvbnMucHJvdG8SDnZpYmVzeXMuYXBpLnYxMoMIChVIb3N0T3BlcmF0aW9uc1NlcnZpY2USgAEKCUxpc3RUYXNrcxIhLnZpYmVzeXMuaG9zdC52MS5MaXN0VGFza3NSZXF1ZXN0GiIudmliZXN5cy5ob3N0LnYxLkxpc3RUYXNrc1Jlc3BvbnNlIizK8xgoCAoQkE4YiCcgASgCMAE4AUoGCgEBEgEBUApYCmIKdGFza3MubGlzdBKQAQoNTGlzdEhhcm5lc3NlcxIlLnZpYmVzeXMuaG9zdC52MS5MaXN0SGFybmVzc2VzUmVxdWVzdBomLnZpYmVzeXMuaG9zdC52MS5MaXN0SGFybmVzc2VzUmVzcG9uc2UiMMrzGCwICxCQThiIJyABKAIwATgBSgYKAQESAQFQC1gLYg5oYXJuZXNzZXMubGlzdBKMAQoMTGlzdEV4YW1wbGVzEiQudmliZXN5cy5ob3N0LnYxLkxpc3RFeGFtcGxlc1JlcXVlc3QaJS52aWJlc3lzLmhvc3QudjEuTGlzdEV4YW1wbGVzUmVzcG9uc2UiL8rzGCsIDBCQThiIJyABKAIwATgBSgYKAQESAQFQDFgMYg1leGFtcGxlcy5saXN0Eo0BCgtHZXRUYXNrR29hbBIjLnZpYmVzeXMuaG9zdC52MS5HZXRUYXNrR29hbFJlcXVlc3QaJC52aWJlc3lzLmhvc3QudjEuR2V0VGFza0dvYWxSZXNwb25zZSIzyvMYLwgNEJBOGIgnIAEoAjABOAFKBgoBARIBAVANWA1iEXByb2plY3QudGFza19nb2FsEpkBCg9EZXNjcmliZU1hY2hpbmUSJy52aWJlc3lzLmhvc3QudjEuRGVzY3JpYmVNYWNoaW5lUmVxdWVzdBooLnZpYmVzeXMuaG9zdC52MS5EZXNjcmliZU1hY2hpbmVSZXNwb25zZSIzyvMYLwgOEKjDARiIJyABKAIwATgBSgYKAQESAQFQDlgOYhBtYWNoaW5lLmRlc2NyaWJlEogBCgtMaXN0Q29tcHV0ZRIjLnZpYmVzeXMuaG9zdC52MS5MaXN0Q29tcHV0ZVJlcXVlc3QaJC52aWJlc3lzLmhvc3QudjEuTGlzdENvbXB1dGVSZXNwb25zZSIuyvMYKggPEJBOGIgnIAEoAjABOAFKBgoBARIBAVAPWA9iDGNvbXB1dGUubGlzdBKNAQoMUHJlZmxpZ2h0UnVuEiQudmliZXN5cy5ob3N0LnYxLlByZWZsaWdodFJ1blJlcXVlc3QaJS52aWJlc3lzLmhvc3QudjEuUHJlZmxpZ2h0UnVuUmVzcG9uc2UiMMrzGCwIEBDo+wMYiCcgASgCMAE4AUoGCgEBEgEBUBBYEGINcnVuLnByZWZsaWdodEI9WjtnaXRodWIuY29tL3V3LXN5ZmkvdmliZXN5cy9nYXRld2F5L2dlbi92aWJlc3lzL2FwaS92MTthcGl2MWIGcHJvdG8z", [file_vibesys_host_v1_operation_options, file_vibesys_host_v1_operations]);
+  fileDesc("CiR2aWJlc3lzL2FwaS92MS9ob3N0X29wZXJhdGlvbnMucHJvdG8SDnZpYmVzeXMuYXBpLnYxMo0LChVIb3N0T3BlcmF0aW9uc1NlcnZpY2USgAEKCUxpc3RUYXNrcxIhLnZpYmVzeXMuaG9zdC52MS5MaXN0VGFza3NSZXF1ZXN0GiIudmliZXN5cy5ob3N0LnYxLkxpc3RUYXNrc1Jlc3BvbnNlIizK8xgoCAoQkE4YiCcgASgCMAE4AUoGCgEBEgEBUApYCmIKdGFza3MubGlzdBKQAQoNTGlzdEhhcm5lc3NlcxIlLnZpYmVzeXMuaG9zdC52MS5MaXN0SGFybmVzc2VzUmVxdWVzdBomLnZpYmVzeXMuaG9zdC52MS5MaXN0SGFybmVzc2VzUmVzcG9uc2UiMMrzGCwICxCQThiIJyABKAIwATgBSgYKAQESAQFQC1gLYg5oYXJuZXNzZXMubGlzdBKMAQoMTGlzdEV4YW1wbGVzEiQudmliZXN5cy5ob3N0LnYxLkxpc3RFeGFtcGxlc1JlcXVlc3QaJS52aWJlc3lzLmhvc3QudjEuTGlzdEV4YW1wbGVzUmVzcG9uc2UiL8rzGCsIDBCQThiIJyABKAIwATgBSgYKAQESAQFQDFgMYg1leGFtcGxlcy5saXN0Eo0BCgtHZXRUYXNrR29hbBIjLnZpYmVzeXMuaG9zdC52MS5HZXRUYXNrR29hbFJlcXVlc3QaJC52aWJlc3lzLmhvc3QudjEuR2V0VGFza0dvYWxSZXNwb25zZSIzyvMYLwgNEJBOGIgnIAEoAjABOAFKBgoBARIBAVANWA1iEXByb2plY3QudGFza19nb2FsEpkBCg9EZXNjcmliZU1hY2hpbmUSJy52aWJlc3lzLmhvc3QudjEuRGVzY3JpYmVNYWNoaW5lUmVxdWVzdBooLnZpYmVzeXMuaG9zdC52MS5EZXNjcmliZU1hY2hpbmVSZXNwb25zZSIzyvMYLwgOEKjDARiIJyABKAIwATgBSgYKAQESAQFQDlgOYhBtYWNoaW5lLmRlc2NyaWJlEogBCgtMaXN0Q29tcHV0ZRIjLnZpYmVzeXMuaG9zdC52MS5MaXN0Q29tcHV0ZVJlcXVlc3QaJC52aWJlc3lzLmhvc3QudjEuTGlzdENvbXB1dGVSZXNwb25zZSIuyvMYKggPEJBOGIgnIAEoAjABOAFKBgoBARIBAVAPWA9iDGNvbXB1dGUubGlzdBKNAQoMUHJlZmxpZ2h0UnVuEiQudmliZXN5cy5ob3N0LnYxLlByZWZsaWdodFJ1blJlcXVlc3QaJS52aWJlc3lzLmhvc3QudjEuUHJlZmxpZ2h0UnVuUmVzcG9uc2UiMMrzGCwIEBDo+wMYiCcgASgCMAE4AUoGCgEBEgEBUBBYEGINcnVuLnByZWZsaWdodBKCAQoKUG9zdEludGVudBIhLnZpYmVzeXMuYXBpLnYxLlBvc3RJbnRlbnRSZXF1ZXN0GiIudmliZXN5cy5hcGkudjEuUG9zdEludGVudFJlc3BvbnNlIi3K8xgpCBQQkE4YiCcgAygDMAE4AUoGCgEDEgEBUAJYAWILcG9zdC5pbnRlbnQScgoIUmVsYXVuY2gSHy52aWJlc3lzLmFwaS52MS5SZWxhdW5jaFJlcXVlc3QaIC52aWJlc3lzLmFwaS52MS5SZWxhdW5jaFJlc3BvbnNlIiPK8xgfCBUQsOoBGIgnIAMoAzABOAFQA1gDYghyZWxhdW5jaBKOAQoLQ2hhdE1lc3NhZ2USIi52aWJlc3lzLmFwaS52MS5DaGF0TWVzc2FnZVJlcXVlc3QaIy52aWJlc3lzLmFwaS52MS5DaGF0TWVzc2FnZVJlc3BvbnNlIjbK8xgyCBYQkE4YiCcgAygDMAE4AUoGCgEEEgECSgYKAQMSAQFQBFgEYgxjaGF0Lm1lc3NhZ2VCPVo7Z2l0aHViLmNvbS91dy1zeWZpL3ZpYmVzeXMvZ2F0ZXdheS9nZW4vdmliZXN5cy9hcGkvdjE7YXBpdjFiBnByb3RvMw", [file_vibesys_api_v1_host_call, file_vibesys_host_v1_operation_options, file_vibesys_host_v1_operations]);
 
 /**
  * Descriptor-only registry. No public gRPC endpoint is registered for this service.
@@ -75,6 +77,35 @@ export const HostOperationsService: GenService<{
     methodKind: "unary";
     input: typeof PreflightRunRequestSchema;
     output: typeof PreflightRunResponseSchema;
+  },
+  /**
+   * HostCall dispatch. The runner deadline is cap_ms. grace_ms is cleanup
+   * allowance and is not added, so the client RPC margin stays intact: 15s for
+   * a 10s call, and 35s for the 30s relaunch that confirms an epoch for up to 25s.
+   * Request and response tags are the HostCall oneof field numbers.
+   *
+   * @generated from rpc vibesys.api.v1.HostOperationsService.PostIntent
+   */
+  postIntent: {
+    methodKind: "unary";
+    input: typeof PostIntentRequestSchema;
+    output: typeof PostIntentResponseSchema;
+  },
+  /**
+   * @generated from rpc vibesys.api.v1.HostOperationsService.Relaunch
+   */
+  relaunch: {
+    methodKind: "unary";
+    input: typeof RelaunchRequestSchema;
+    output: typeof RelaunchResponseSchema;
+  },
+  /**
+   * @generated from rpc vibesys.api.v1.HostOperationsService.ChatMessage
+   */
+  chatMessage: {
+    methodKind: "unary";
+    input: typeof ChatMessageRequestSchema;
+    output: typeof ChatMessageResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_vibesys_api_v1_host_operations, 0);

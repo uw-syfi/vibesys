@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from google.protobuf import descriptor_pb2, descriptor_pool, message_factory
 
 from scripts.host_operations._emit import (
+    go_host_call,
     go_registry,
     helper_types,
     python_registry,
@@ -50,6 +51,14 @@ class Operation:
     def slot(self) -> str:
         """The statically registered handler slot."""
         return re.sub(r"(?<!^)(?=[A-Z])", "_", self.name).lower()
+
+    def is_read(self) -> bool:
+        """Catalog reads use the helper handler slots and the neutral receipt union."""
+        return self.policy.effect == _READ
+
+    def is_admission(self) -> bool:
+        """HostCall methods keep their API messages and share one generated dispatch table."""
+        return self.policy.effect == _ADMISSION
 
 
 def _fail(path: str, message: str) -> None:
@@ -151,7 +160,7 @@ def compile_registry(image: bytes, handlers: tuple[str, ...]) -> tuple[Operation
                 tuple(correlations),
             )
         )
-    expected = {op.slot for op in operations if op.policy.executor != _FILESYSTEM}
+    expected = {op.slot for op in operations if op.is_read() and op.policy.executor != _FILESYSTEM}
     if len(set(handlers)) != len(handlers) or set(handlers) != expected:
         _fail(
             service.full_name,
@@ -165,6 +174,10 @@ def compile_outputs(
 ) -> dict[str, str]:
     """Compile every projection atomically in memory after validating the complete registry."""
     operations = compile_registry(image, handlers)
+    reads = tuple(op for op in operations if op.is_read())
+    admissions = tuple(op for op in operations if op.is_admission())
+    if len(reads) + len(admissions) != len(operations):
+        _fail("HostOperationsService", "operation effect is neither a read nor a host call")
     files = descriptor_pb2.FileDescriptorSet.FromString(image)
     failure_file = next(file for file in files.file if file.name == "vibesys/host/v1/failure.proto")
     failures = tuple(
@@ -173,13 +186,12 @@ def compile_outputs(
         if value.number
     )
     return {
-        "src/server/host_operation_types_generated.py": helper_types(helper_sources, operations),
-        "proto/vibesys/host/v1/admission_receipt_generated.proto": receipt_schema(operations),
+        "src/server/host_operation_types_generated.py": helper_types(helper_sources, reads),
+        "proto/vibesys/host/v1/admission_receipt_generated.proto": receipt_schema(reads),
         "libs/vs-proto/src/vs_proto/_generated/host_operations.py": python_registry(
-            operations, failures
+            reads, admissions, failures
         ),
-        "gateway/internal/hostoperations/registry_generated.go": go_registry(operations, failures),
-        "clients/libs/proto/src/generated/host-operations.ts": typescript_registry(
-            operations, failures
-        ),
+        "gateway/internal/hostoperations/registry_generated.go": go_registry(reads, failures),
+        "gateway/internal/hostoperations/host_call_generated.go": go_host_call(admissions),
+        "clients/libs/proto/src/generated/host-operations.ts": typescript_registry(reads, failures),
     }
