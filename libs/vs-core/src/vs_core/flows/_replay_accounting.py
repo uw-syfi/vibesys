@@ -15,8 +15,10 @@ record's evidence, never a refold of the prefix.
 
 from __future__ import annotations
 
+from bisect import bisect_left
 from dataclasses import dataclass, field
 from fractions import Fraction
+from operator import attrgetter
 from typing import TYPE_CHECKING
 
 from protobuf import Oneof
@@ -112,12 +114,13 @@ class AccountingLedger:
     """Validated accounting evidence from a committed record prefix.
 
     Repeated evidence deduplicates; conflicting quantities at one revision, a
-    falling charge, republished imports with different content, ambiguous
+    charge that falls with the revision (whatever the arrival order or unknown
+    readings between), republished imports with different content, ambiguous
     aliases and overlapping or negative-residual coverage fail validation.
     A fold that raises leaves the ledger unusable; callers discard it.
     """
 
-    _readings: dict[Occurrence, _Reading] = field(default_factory=dict)
+    _readings: dict[Occurrence, tuple[_Reading, ...]] = field(default_factory=dict)
     _coverage: dict[str, bytes] = field(default_factory=dict)
     _cells: dict[Occurrence, _Cell] = field(default_factory=dict)
     _nested: dict[str, str] = field(default_factory=dict)
@@ -184,6 +187,8 @@ class AccountingLedger:
             if observation.origin_epoch > epoch:
                 problem = "an accounting observation cannot originate in a later epoch"
                 raise ReplayError(problem)
+        self._alias(evidence.observations)
+        for observation in evidence.observations:
             self._observe(observation)
 
     def _resolve(self, key: Occurrence) -> Occurrence:
@@ -197,28 +202,39 @@ class AccountingLedger:
             _amount(observation.charged)[1],
             quantity(observation.charged, observation.refunded),
         )
-        self._alias(key, observation.aliases)
-        prior = self._readings.get(key)
-        if prior is not None:
-            _check_successor(key, prior, reading)
+        series = self._readings.get(key, ())
+        index = _check_series(key, series, reading)
+        if index is None:
+            return
         cell = self._cells.get(key)
         if cell is not None:
             _check_baseline(key, cell, reading)
-        if prior is None or reading.revision > prior.revision:
-            self._readings[key] = reading
+        self._readings[key] = (*series[:index], reading, *series[index:])
 
-    def _alias(self, key: Occurrence, aliases: Iterable[str]) -> None:
-        """An alias names one occurrence and is never itself an occurrence's own key."""
-        for alias in aliases:
-            name: Occurrence = (key[0], key[1], alias)
-            if name == key:
-                continue
-            if name in self._readings or name in self._cells:
-                problem = f"accounting alias {alias} is another occurrence's own key"
-                raise ReplayError(problem)
-            if self._aliases.setdefault(name, key) != key:
-                problem = f"accounting alias {alias} names two occurrences"
-                raise ReplayError(problem)
+    def _alias(self, observations: Iterable[pb.AccountingObservation]) -> None:
+        """Declare a publication's aliases before any of its readings fold.
+
+        An alias names one occurrence and is never itself an occurrence's own key,
+        so the outcome does not depend on the order of a publication's observations.
+        """
+        declared = [
+            (self._resolve(_key(o.dimension, o.occurrence)), o.aliases) for o in observations
+        ]
+        own = {key for key, _ in declared}
+        for key, aliases in declared:
+            for alias in aliases:
+                name: Occurrence = (key[0], key[1], alias)
+                if name == key:
+                    continue
+                if name in self._readings:
+                    problem = f"accounting alias {alias} was read as its own occurrence first"
+                    raise ReplayError(problem)
+                if name in self._cells or name in own:
+                    problem = f"accounting alias {alias} is another occurrence's own key"
+                    raise ReplayError(problem)
+                if self._aliases.setdefault(name, key) != key:
+                    problem = f"accounting alias {alias} names two occurrences"
+                    raise ReplayError(problem)
 
     def _declare(self, coverages: Iterable[pb.AccountingCoverage]) -> None:
         """Add one publication's aggregates; nested children are declared with or before it."""
@@ -245,8 +261,7 @@ class AccountingLedger:
             cell = _Cell(coverage.id, coverage.watermark, quantity(declared.baseline))
             self._cells[key] = cell
             floor -= cell.baseline.known
-            reading = self._readings.get(key)
-            if reading is not None:
+            for reading in self._readings.get(key, ()):
                 _check_baseline(key, cell, reading)
         for identity in coverage.nested:
             child = self._coverage.get(identity)
@@ -293,9 +308,10 @@ class AccountingLedger:
                     totals[coverage.dimension] = totals.get(
                         coverage.dimension, AccountingAmount()
                     ) + self._covered(coverage, coverages)
-        for key, reading in self._readings.items():
+        for key, series in self._readings.items():
             if key in self._cells or self._logical_copy(key):
                 continue
+            reading = series[-1]
             if origin_epoch is None or reading.origin_epoch == origin_epoch:
                 totals[key[0]] = totals.get(key[0], AccountingAmount()) + reading.amount
         return totals
@@ -311,30 +327,41 @@ class AccountingLedger:
         for declared in coverage.cells:
             key = self._resolve(_key(coverage.dimension, declared.occurrence))
             cell = self._cells[key]
-            reading = self._readings.get(key)
-            if reading is not None and reading.revision > cell.watermark:
-                total += _delta(reading.amount, cell.baseline)
+            series = self._readings.get(key)
+            if series is not None and series[-1].revision > cell.watermark:
+                total += _delta(series[-1].amount, cell.baseline)
         for identity in coverage.nested:
             child = coverages[identity]
             total += self._covered(child, coverages) - quantity(child.total)
         return total
 
 
-def _check_successor(key: Occurrence, prior: _Reading, reading: _Reading) -> None:
-    if prior.origin_epoch != reading.origin_epoch:
+def _check_series(key: Occurrence, series: tuple[_Reading, ...], reading: _Reading) -> int | None:
+    """Where the reading belongs among an occurrence's readings by revision, None if repeated.
+
+    Whatever the arrival order, a known charge is at least every known charge of a
+    lower revision and at most every known charge of a higher one; unknown readings
+    between them constrain nothing.
+    """
+    if series and series[0].origin_epoch != reading.origin_epoch:
         problem = f"occurrence {key[2]} changes its origin epoch"
         raise ReplayError(problem)
-    if prior.revision == reading.revision and prior != reading:
-        problem = f"conflicting accounting quantities for {key[2]} at one revision"
-        raise ReplayError(problem)
-    earlier, later = sorted((prior, reading), key=lambda item: item.revision)
-    if (
-        not earlier.charged.unknown
-        and not later.charged.unknown
-        and later.charged.known < earlier.charged.known
-    ):
-        problem = f"a cumulative accounting charge for {key[2]} cannot decrease"
-        raise ReplayError(problem)
+    index = bisect_left(series, reading.revision, key=attrgetter("revision"))
+    if index < len(series) and series[index].revision == reading.revision:
+        if series[index] != reading:
+            problem = f"conflicting accounting quantities for {key[2]} at one revision"
+            raise ReplayError(problem)
+        return None
+    if not reading.charged.unknown:
+        floor = next(
+            (r.charged.known for r in reversed(series[:index]) if not r.charged.unknown), None
+        )
+        ceiling = next((r.charged.known for r in series[index:] if not r.charged.unknown), None)
+        charged = reading.charged.known
+        if (floor is not None and charged < floor) or (ceiling is not None and charged > ceiling):
+            problem = f"a cumulative accounting charge for {key[2]} cannot decrease"
+            raise ReplayError(problem)
+    return index
 
 
 def _check_baseline(key: Occurrence, cell: _Cell, reading: _Reading) -> None:

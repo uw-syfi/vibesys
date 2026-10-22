@@ -98,13 +98,16 @@ def notice(evidence: replay.AccountingEvidence, *, seq: int = 1, epoch: int = 1)
     )
 
 
-def published(*parts: replay.AccountingCoverage | replay.AccountingObservation) -> Record:
+def published(
+    *parts: replay.AccountingCoverage | replay.AccountingObservation, seq: int = 1
+) -> Record:
     return notice(
         replay.AccountingEvidence(
             import_id="import-a",
             coverage=[part for part in parts if isinstance(part, replay.AccountingCoverage)],
             observations=[part for part in parts if isinstance(part, replay.AccountingObservation)],
-        )
+        ),
+        seq=seq,
     )
 
 
@@ -191,6 +194,30 @@ def test_nested_aggregates_partition_like_cells() -> None:
             id="cumulative reading decreases",
         ),
         pytest.param(
+            (
+                delayed(reading("u", 50)),
+                delayed(reading("u", None, revision=1), seq=2),
+                delayed(reading("u", 10, revision=2), seq=3),
+            ),
+            id="charge falls across an unknown reading",
+        ),
+        pytest.param(
+            (
+                delayed(reading("u", 50, revision=5)),
+                delayed(reading("u", 40, revision=3), seq=2),
+                delayed(reading("u", 45, revision=1), seq=3),
+            ),
+            id="charge rises with a lower revision arriving later",
+        ),
+        pytest.param(
+            (
+                delayed(reading("a", 4, revision=1)),
+                delayed(reading("a", 20, revision=2), seq=2),
+                published(coverage("x", 10, {"a": 5}), seq=3),
+            ),
+            id="a covered reading below its baseline before the coverage arrived",
+        ),
+        pytest.param(
             (delayed(reading("a", 1, aliases=("r",)), reading("b", 1, aliases=("r",))),),
             id="alias names two occurrences",
         ),
@@ -226,13 +253,34 @@ def test_a_late_reading_through_an_alias_charges_its_occurrence_once() -> None:
     assert lifetime(*history)[Dimension.ADMISSIONS] == AccountingAmount(Fraction(1))
 
 
-def test_an_alias_that_is_another_occurrences_key_fails() -> None:
-    """Regression: c1 with alias c2, beside c2, is ambiguous rather than two admissions."""
-    history = published(
-        charge("c2", 1, Dimension.ADMISSIONS), charge("c1", 1, Dimension.ADMISSIONS, alias="c2")
-    )
+@pytest.mark.parametrize(
+    "reverse", [pytest.param(False, id="alias first"), pytest.param(True, id="alias last")]
+)
+def test_an_alias_that_is_another_occurrences_key_fails_in_either_order(*, reverse: bool) -> None:
+    """Regression: c1 with alias c2, beside c2, is ambiguous whichever the publication lists first."""
+    parts = [
+        charge("c1", 1, Dimension.ADMISSIONS, alias="c2"),
+        charge("c2", 1, Dimension.ADMISSIONS),
+    ]
     with pytest.raises(ReplayError, match="another occurrence's own key"):
-        lifetime(history)
+        lifetime(published(*(parts[::-1] if reverse else parts)))
+
+
+def test_a_reading_before_its_alias_was_declared_fails() -> None:
+    early = replay.AccountingObservation(
+        occurrence=replay.AccountingOccurrence(kind=_CHARGE, id="req-7"),
+        dimension=Dimension.ADMISSIONS,
+        revision=3,
+        charged=count(1),
+    )
+    declaration = published(charge("c1", 1, Dimension.ADMISSIONS, alias="req-7"))
+    with pytest.raises(ReplayError, match="read as its own occurrence first"):
+        lifetime(delayed(early), declaration)
+
+
+def test_a_lower_revision_arriving_later_may_hold_a_lower_charge() -> None:
+    history = (delayed(reading("u", 50, revision=5)), delayed(reading("u", 40, revision=3), seq=2))
+    assert lifetime(*history)[Dimension.INPUT_TOKENS] == AccountingAmount(Fraction(50))
 
 
 def test_an_uncovered_charge_cannot_fall_but_a_refund_lowers_its_net() -> None:
@@ -438,3 +486,18 @@ def test_lifetime_and_epoch_usage_are_conserved_for_every_evidence_shape(
     epoch = ledger.totals(origin_epoch=1)
     assert epoch.get(Dimension.INPUT_TOKENS, AccountingAmount()) == history.epoch
     assert Dimension.ATTEMPTS not in epoch
+
+
+@given(history=_histories(), order=st.randoms(use_true_random=False))
+def test_a_reading_through_an_alias_before_its_declaration_fails_closed(
+    history: _History, order: Random
+) -> None:
+    assume(history.aliased)
+    publication = published(*history.coverage, *history.imported)
+    records = [delayed(item) for item in history.late]
+    order.shuffle(records)
+    records.insert(order.randint(0, len(records)), publication)
+    for item in history.aliased:
+        records.insert(order.randint(0, records.index(publication)), delayed(item))
+    with pytest.raises(ReplayError, match="read as its own occurrence first"):
+        lifetime(*records)
