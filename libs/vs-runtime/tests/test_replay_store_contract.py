@@ -128,7 +128,7 @@ def test_revision_conflict_publishes_nothing(stores: StoreFactory) -> None:
         assert store.release(fence, 0)
 
 
-def test_native_log_is_authority_and_lease_store_has_no_envelope(tmp_path: Path) -> None:
+def test_native_log_is_rebuilt_from_the_authoritative_atomic_store(tmp_path: Path) -> None:
     project = Project.open(tmp_path)
     path = project.run_log_path_for(tmp_path, "run-a")
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -140,11 +140,14 @@ def test_native_log_is_authority_and_lease_store_has_no_envelope(tmp_path: Path)
         shell.prepare(now=0, at=Timestamp())
         expected = shell.archive.encode()
         shell.close(now=0)
-    assert leases.load() is None
+    committed = leases.load()
+    assert isinstance(committed, StoredEnvelope)
+    assert committed.payload == expected
     with open_run_log(path) as reader:
         assert Records(records=list(reader)).to_binary() == expected
     path.with_name("run.head").unlink(missing_ok=True)
     path.with_name("run.keyframe").unlink(missing_ok=True)
+    path.unlink()
     threads = SimThreads()
     with FileRunLogWriter(path, clock=threads.clock, threads=threads) as writer:
         stored = RunLogReplayStore(writer, leases).load()

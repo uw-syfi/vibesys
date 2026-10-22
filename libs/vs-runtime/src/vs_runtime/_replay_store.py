@@ -1,11 +1,11 @@
-"""Replay persistence: native run.log records, with the existing project lease."""
+"""Replay persistence on the existing atomic store, with native log publication."""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Protocol
 
 from vs_core.api.replay import ReplayArchive
-from vs_project.api import Committed, Conflict, ConflictReason, StoredEnvelope, Unknown
+from vs_project.api import Committed, StoredEnvelope, Unknown
 from vs_proto.api import ReplayStore as ReplayRecords
 
 if TYPE_CHECKING:
@@ -41,70 +41,64 @@ class ReplayStore(Protocol):
 
 
 class RunLogReplayStore:
-    """Use run.log as authority; the project store supplies only the writer lease.
+    """Publish confirmed store records to run.log under the caller's writer ownership.
 
     The caller owns the writer's lifetime and opens its path through Project.
-    No replay envelope is written to the lease store. The returned envelope is
-    a disposable view, allowing the recorder's migration-era codec to remain
-    private. A writer error is ambiguous even when bytes are already readable.
+    The atomic store remains authoritative during P2. Publication failure stops
+    dispatch; load repairs a missing projection from the confirmed prefix. The
+    envelope's unsupported version fences old scheduling readers. P3 can replace
+    this implementation when native-log authority and writer exclusion land.
     """
 
-    def __init__(self, writer: FileRunLogWriter, leases: StateStore) -> None:
-        if leases.load() is not None:
-            problem = "native replay requires facts-only import of the existing state store"
-            raise ValueError(problem)
-        self._writer, self._leases = writer, leases
+    def __init__(self, writer: FileRunLogWriter, store: StateStore) -> None:
+        self._writer, self._store = writer, store
 
-    def load(self) -> StoredEnvelope | None:
-        records = self._writer.read()
-        if not records:
-            return None
-        payload = ReplayRecords(records=list(records)).to_binary()
-        ReplayArchive.decode(payload)
-        return StoredEnvelope(
-            revision=len(records) - 1, schema_version=REPLAY_STORE_SCHEMA_VERSION, payload=payload
-        )
+    def load(self) -> StoreRecord | None:
+        stored = self._store.load()
+        if isinstance(stored, StoredEnvelope):
+            self._publish(stored)
+        elif stored is None and self._writer.read():
+            problem = "run.log has records but its authoritative replay store is missing"
+            raise ValueError(problem)
+        return stored
+
+    def _publish(self, envelope: StoredEnvelope) -> None:
+        if envelope.schema_version != REPLAY_STORE_SCHEMA_VERSION:
+            problem = "keyed replay requires facts-only import of the retained store format"
+            raise ValueError(problem)
+        ReplayArchive.decode(envelope.payload)
+        proposed = ReplayRecords.from_binary(envelope.payload).records
+        retained = self._writer.read()
+        if len(retained) > len(proposed) or any(
+            old.to_binary() != new.to_binary() for old, new in zip(retained, proposed, strict=False)
+        ):
+            problem = "run.log contradicts the authoritative replay store prefix"
+            raise ValueError(problem)
+        for record in proposed[len(retained) :]:
+            self._writer.append(record)
+        self._writer.commit()
 
     def commit(
         self, expected_revision: int | None, envelope: StoredEnvelope, fence: StoreFence, now: float
     ) -> CommitOutcome:
-        """Validate the immutable prefix, then fence append and fsync together."""
-        current = self.load()
-        revision = None if current is None else current.revision
-        if revision != expected_revision:
-            return Conflict(reason=ConflictReason.REVISION, revision=revision)
-        expected = 0 if revision is None else revision + 1
-        if envelope.revision != expected or envelope.schema_version != REPLAY_STORE_SCHEMA_VERSION:
-            problem = "replay append requires the next revision and current schema"
-            raise ValueError(problem)
-        ReplayArchive.decode(envelope.payload)
-        proposed = ReplayRecords.from_binary(envelope.payload).records
-        retained = () if current is None else ReplayRecords.from_binary(current.payload).records
-        if len(proposed) != len(retained) + 1 or any(
-            old.to_binary() != new.to_binary() for old, new in zip(retained, proposed, strict=False)
-        ):
-            problem = "replay commit must append one record without rewriting history"
-            raise ValueError(problem)
-
-        def append() -> None:
-            self._writer.append(proposed[-1])
-            self._writer.commit()
-
+        """Commit authority first; only confirmed native publication permits dispatch."""
+        outcome = self._store.commit(expected_revision, envelope, fence, now)
+        if not isinstance(outcome, Committed):
+            return outcome
         try:
-            if not self._leases.mutate_if_fenced(fence, now, append):
-                return Conflict(reason=ConflictReason.FENCE, revision=revision)
+            self._publish(envelope)
         except OSError:
             return Unknown(revision=envelope.revision)
-        return Committed(record=envelope)
+        return outcome
 
     def acquire(self, host_id: str, now: float, duration: float) -> StoreFence | None:
-        return self._leases.acquire(host_id, now, duration)
+        return self._store.acquire(host_id, now, duration)
 
     def renew(self, fence: StoreFence, now: float, duration: float) -> StoreFence | None:
-        return self._leases.renew(fence, now, duration)
+        return self._store.renew(fence, now, duration)
 
     def release(self, fence: StoreFence, now: float) -> bool:
-        return self._leases.release(fence, now)
+        return self._store.release(fence, now)
 
     def verify(self, fence: StoreFence, now: float) -> bool:
-        return self._leases.verify(fence, now)
+        return self._store.verify(fence, now)

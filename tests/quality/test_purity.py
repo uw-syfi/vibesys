@@ -59,6 +59,31 @@ def test_pure_value_libraries_and_ordinary_strategy_text_are_allowed() -> None:
     )
 
 
+@pytest.mark.parametrize(
+    "name", ["IterationRequest", "IterationGranted", "IterationCompletion", "IterationCompleted"]
+)
+def test_replay_proto_values_allow_memory_codecs_but_no_unreviewed_methods(name: str) -> None:
+    prefix = "from vs_proto.api import core_iterations as units\n"
+    path = f"{PURE_SCOPE}/flows/example.py"
+    assert (
+        scan_source(
+            path, prefix + f"value = units.{name}.from_binary(data)\nschema = units.{name}.desc()\n"
+        )
+        == ()
+    )
+    forbidden = scan_source(path, prefix + f"units.{name}.read_file('input.pb')\n")
+    assert {site.rule for site in forbidden} == {"effect-path"}
+
+
+def test_native_replay_record_validation_is_pure_but_unreviewed_exports_are_rejected() -> None:
+    path = f"{PURE_SCOPE}/flows/example.py"
+    source = (
+        "from vs_proto.api import ReplayStore, validate\nvalidate(ReplayStore.from_binary(data))\n"
+    )
+    assert scan_source(path, source) == ()
+    assert scan_source(path, "from vs_proto.api import FileStore\n")
+
+
 @pytest.mark.parametrize("operation", ["is_pydantic_dataclass", "rebuild_dataclass"])
 def test_generated_dataclass_schema_operations_are_pure(operation: str) -> None:
     source = f"from pydantic.dataclasses import {operation}\n{operation}(Record)"
