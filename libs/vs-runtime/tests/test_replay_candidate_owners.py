@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from copy import deepcopy
 from typing import TYPE_CHECKING, cast
 
@@ -51,17 +52,22 @@ from vs_runtime.api.infrastructure import (
 )
 from vs_runtime.api.replay import (
     FakeReplayExecutor,
+    OwnerReplayEnvironment,
     ReplayAgentReply,
     ReplayCompleted,
     ReplayEnding,
     ReplayLaunch,
+    ReplayLaunchResources,
     ReplayOperationError,
     ReplayOperationHost,
     ReplayOwnerServices,
     ReplayParked,
+    ReplayPlan,
     ReplayRunHost,
     ReplayRuntime,
     ReplaySessionServices,
+    drive_replay,
+    open_replay,
     replay_bindings,
     replay_measurement_plan,
     run_replay,
@@ -85,7 +91,7 @@ from .test_workspace_requests import _commits, _env, _git
 from .test_writer_reconciliation import empty_barrier
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Coroutine, Mapping
+    from collections.abc import AsyncIterator, Callable, Coroutine, Mapping
     from pathlib import Path
 
     from protobuf import Message
@@ -96,6 +102,9 @@ if TYPE_CHECKING:
     from vs_sim.api.testing import Sim
 
     from .test_workspace_requests import _Env
+
+
+REPLIES = (ReplayAgentReply(SCHEMA, Reply, AgentReplayResult, encode),)
 
 
 async def agent_step[T: Message](ctx: ReplayFlow, action: Oneof, reply: type[T]) -> T:
@@ -347,16 +356,8 @@ class CandidateWorld:
             base, artifact(b"Work using revised policy."), facts, reply_version="2"
         )
 
-    def host(
-        self,
-        *,
-        restart: bool = False,
-        iterations: int = 1,
-        allow_adoption: bool = True,
-        operations: Mapping[type[Message], ReplayExecutor] | None = None,
-    ) -> ReplayRunHost:
+    def services(self, *, restart: bool = False) -> ReplayOwnerServices:
         resources = self.env.start_host() if restart else self.initial
-        timing = ReplayOperationHost(self.env.run_id, self.store, self.sim.clock)
 
         def spec(selected: AgentRole, path: Path) -> AgentSessionSpec:
             return AgentSessionSpec(
@@ -407,20 +408,30 @@ class CandidateWorld:
             cluster=self.cluster,
         )
         self.jobs.append(measured)
-        executor = replay_bindings(
-            ReplayOwnerServices(
-                receipts=self.receipts,
-                writer_registry=self.barrier.registry,
-                workspaces=resources,
-                sessions=ReplaySessionServices(
-                    sessions, resolver, InlineBlockingRunner(), LateYields()
-                ),
-                evaluation=measured,
-                workspace_within_seconds=100,
-                evaluation_within_seconds=100,
+        return ReplayOwnerServices(
+            receipts=self.receipts,
+            writer_registry=self.barrier.registry,
+            workspaces=resources,
+            sessions=ReplaySessionServices(
+                sessions, resolver, InlineBlockingRunner(), LateYields()
             ),
-            timing,
-            (ReplayAgentReply(SCHEMA, Reply, AgentReplayResult, encode),),
+            evaluation=measured,
+            workspace_within_seconds=100,
+            evaluation_within_seconds=100,
+        )
+
+    def host(
+        self,
+        *,
+        restart: bool = False,
+        iterations: int = 1,
+        allow_adoption: bool = True,
+        operations: Mapping[type[Message], ReplayExecutor] | None = None,
+    ) -> ReplayRunHost:
+        executor = replay_bindings(
+            self.services(restart=restart),
+            ReplayOperationHost(self.env.run_id, self.store, self.sim.clock),
+            REPLIES,
             allow_adoption=allow_adoption,
             operations=operations,
         )
@@ -575,6 +586,58 @@ def test_native_composition_preserves_operator_edits_when_adoption_is_protected(
                 assert world.initial.root.revision == original_head
                 assert len(world.client.calls_for("worker")) == 1
                 assert len(world.cluster.submissions) == 1
+            finally:
+                for job in world.jobs:
+                    await job.close()
+
+        sim.run(scenario(), threads=world.threads)
+
+
+def test_a_resume_launch_never_restores_the_operator_root(tmp_path: Path, sim: Sim) -> None:
+    with _env(tmp_path) as env:
+        world = CandidateWorld(env, sim)
+        root = world.initial.root.path
+        original_head = world.initial.root.revision
+        plan = ReplayPlan(
+            world.root,
+            replay.ReplayAllowance(iterations=1),
+            lambda _: ReplayEnding(
+                Ended(outcome=Outcome.FINISHED, summary="Done.", resumable=True)
+            ),
+            REPLIES,
+            (),
+            (),
+        )
+        opened: list[bool] = []
+
+        @asynccontextmanager
+        async def environment() -> AsyncIterator[OwnerReplayEnvironment]:
+            opened.append(True)
+            if len(opened) == 1:
+                problem = "the run environment did not open"
+                raise OSError(problem)
+            yield OwnerReplayEnvironment(world.services(), world.barrier, None)
+
+        resources = ReplayLaunchResources(world.store, sim.clock, environment, None, 1)
+
+        async def scenario() -> None:
+            try:
+                first = ReplayLaunch(EpochStarted(run_id=env.run_id), "first", "host-a", 100)
+                with pytest.raises(OSError, match="did not open"):
+                    async with open_replay(plan, first, resources):
+                        pytest.fail("a failed setup opened a lifetime")
+                # The operator edits the root while the run is interrupted, then resumes.
+                (root / "candidate.py").write_text("VALUE = 9\n", encoding="utf-8")
+                (root / "operator-note.txt").write_text("Keep this.\n", encoding="utf-8")
+                resume = ReplayLaunch(EpochStarted(run_id=env.run_id), "resume", "host-a", 100)
+                async with open_replay(plan, resume, resources) as lifetime:
+                    result = await drive_replay(lifetime)
+                assert isinstance(result, ReplayCompleted)
+                assert isinstance(result.value, workspace.ReplayWorkspaceResult)
+                assert result.value.status is workspace.ReplayWorkspaceStatus.REJECTED
+                assert (root / "candidate.py").read_text() == "VALUE = 9\n"
+                assert (root / "operator-note.txt").read_text() == "Keep this.\n"
+                assert world.initial.root.revision == original_head
             finally:
                 for job in world.jobs:
                     await job.close()

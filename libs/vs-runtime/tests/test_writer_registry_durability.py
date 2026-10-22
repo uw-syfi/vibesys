@@ -11,16 +11,25 @@ from typing import TYPE_CHECKING, cast
 import pytest
 
 from vs_faults.api import Boundary, FaultGate, FaultPlan, FaultRule, HostCrashError, HostFault
-from vs_project.api import AtomicWriteStream, LocalAtomicWriteEffects, Project, StateNamespace
+from vs_project.api import (
+    AtomicWriteStream,
+    FakeStateStore,
+    LocalAtomicWriteEffects,
+    Project,
+    StateNamespace,
+)
 from vs_proto.api import replay
-from vs_runtime.api.replay import WriterRegistry
-from vs_sim.api.testing import SimThreads
+from vs_runtime.api.replay import UnsupportedWriterReconciler, WriterRegistry
+from vs_sim.api import NotReleasedError
+from vs_sim.api.testing import RefusingThreads, SimThreads
 
 from .test_writer_reconciliation import BACKING
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
     from pathlib import Path
+
+    from vs_sim.api import Lock
 
 
 @dataclass
@@ -150,3 +159,71 @@ def test_writer_registry_atomic_crashes_reload_complete_old_or_new_evidence(
     assert reopened.close().writers == [writer]
     if step == "proof":
         assert reopened.require_proof().manifest == manifest
+
+
+class FailingRelease:
+    """A reentrant lock whose next release fails once ``fail`` is armed, still holding it."""
+
+    def __init__(self, lock: Lock) -> None:
+        self.lock, self.fail = lock, False
+
+    def acquire(self, blocking: bool = True, timeout: float = -1) -> bool:  # noqa: FBT001, FBT002  # LW-994812 [FBT001, FBT002]; the signature of the ``Lock`` protocol this Fake implements.
+        # > ReceiptStore calls ``acquire(blocking=...)`` through ``Threads.rlock``; keyword-only
+        # > or renamed parameters would no longer satisfy the protocol it is injected through.
+        return self.lock.acquire(blocking, timeout)
+
+    def release(self) -> None:
+        if self.fail:
+            self.fail = False
+            problem = "lock release failed"
+            raise OSError(problem)
+        self.lock.release()
+
+    def __enter__(self) -> object:
+        return self.acquire()
+
+    def __exit__(self, *_: object) -> None:
+        self.release()
+
+
+class FailingReleaseThreads(RefusingThreads):
+    """Threads whose reentrant locks are ``FailingRelease`` locks the test can arm."""
+
+    def __init__(self) -> None:
+        super().__init__(SimThreads(), {})
+        self.locks: list[FailingRelease] = []
+        self.armed = 0
+
+    def arm(self) -> None:
+        """Fail the next release of every lock; counts how often a reuse scope armed it."""
+        self.armed += 1
+        for lock in self.locks:
+            lock.fail = True
+
+    def rlock(self) -> Lock:
+        lock = FailingRelease(super().rlock())
+        self.locks.append(lock)
+        return lock
+
+
+@pytest.mark.regression
+def test_a_failed_reuse_release_is_retried_and_refuses_before_exclusion_is_retaken(
+    tmp_path: Path,
+) -> None:
+    threads = FailingReleaseThreads()
+    namespace = Project.open(tmp_path).state.state_store_namespace("backing")
+    ledger = WriterRegistry(namespace, BACKING, threads)
+    ledger.create()
+    ledger.record(UnsupportedWriterReconciler("host").reconcile_writers(ledger.close()))
+    fence = FakeStateStore().acquire("host-a", 0, 10)
+    assert fence is not None
+    # The scope's exit is the next release: it fails and leaves the exclusion held.
+    with (
+        pytest.raises(OSError, match="lock release failed"),
+        ledger.reuse(run_id="run-a", fence=fence),
+    ):
+        threads.arm()
+    # The release that failed is retried first, and it refuses rather than reporting released.
+    with pytest.raises(NotReleasedError), ledger.reuse(run_id="run-a", fence=fence):
+        threads.arm()
+    assert threads.armed == 1
