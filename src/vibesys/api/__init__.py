@@ -68,7 +68,7 @@ if TYPE_CHECKING:
         configuration_error,
     )
     from vibesys.api.domains import domain_modalities
-    from vibesys.api.entry import load_config
+    from vibesys.api.entry import load_config, load_host_allowed_models
     from vibesys.api.reader import RunReader, RunReaders
     from vibesys.api.runs import RunHandle, Runs, relaunch
     from vibesys.api.session import RunControl, RunSession, create_session
@@ -210,7 +210,7 @@ _MODULES: dict[str, str] = {
         ),
         ("vibesys.errors", "ConfigurationDiagnostic ConfigurationError "),
         ("vibesys.api.domains", ("domain_modalities ")),
-        ("vibesys.api.entry", ("load_config ")),
+        ("vibesys.api.entry", ("load_config load_host_allowed_models ")),
         ("vibesys.api.reader", ("RunReader RunReaders ")),
         ("vibesys.api.runs", ("RunHandle Runs relaunch ")),
         ("vibesys.api.session", ("RunControl RunSession create_session ")),
@@ -436,6 +436,7 @@ __all__ = [
     "escalate_stop",
     "harnesses",
     "load_config",
+    "load_host_allowed_models",
     "open_run_store",
     "recorded_ending",
     "recorded_epoch",

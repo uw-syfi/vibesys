@@ -46,6 +46,20 @@ builds anything, with the key and the vetted models. At a terminal,
 `--allow-unvetted-model` runs it anyway; runs started from the desktop app
 cannot opt out. A resume keeps the pair its run was started with.
 
+A host can narrow that list for every live run started on it, from the
+command line or the desktop app, including Resume and Relaunch. Write the
+model ids in `~/.config/vibesys/host.toml`:
+
+```toml
+allowed_models = ["model-a"]
+```
+
+A missing file, or an empty `allowed_models` list, adds no restriction. A
+model outside the list is refused before the run starts. The refusal names
+`allowed_models`, the role, the model, and the list. `--allow-unvetted-model`
+and a resume do not bypass it. Scripted runs are not checked. An unknown key
+in the file is an error that names the key.
+
 A role entry may also name a `provider` (`--role-provider ROLE=PROVIDER`, with
 `--role-model ROLE=MODEL`). A role on a provider other than the run's and with no
 model runs that provider's default model, never the run's model. Each provider a
