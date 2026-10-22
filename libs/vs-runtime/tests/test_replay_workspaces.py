@@ -122,12 +122,7 @@ def launch(name: str) -> ReplayLaunch:
     return ReplayLaunch(EpochStarted(run_id="workspace-requests"), name, "host-a", 100)
 
 
-@pytest.mark.parametrize(
-    "mode", [pb.ReplayWorkspaceMode.ISOLATED, pb.ReplayWorkspaceMode.EXCLUSIVE_ROOT]
-)
-@pytest.mark.parametrize("effect", range(5))
-@pytest.mark.parametrize("boundary", ["prepared", "executed", "observed", "accepted"])
-def test_real_workspace_replay_rebinds_and_preserves_content_at_every_effect_boundary(
+def workspace_boundary_case(
     tmp_path: Path, sim: Sim, mode: pb.ReplayWorkspaceMode, effect: int, boundary: str
 ) -> None:
     with _env(tmp_path) as env:
@@ -192,6 +187,20 @@ def test_real_workspace_replay_rebinds_and_preserves_content_at_every_effect_bou
             assert _commits(initial) == commits
 
         sim.run(scenario())
+
+
+@pytest.mark.parametrize(
+    "mode", [pb.ReplayWorkspaceMode.ISOLATED, pb.ReplayWorkspaceMode.EXCLUSIVE_ROOT]
+)
+@pytest.mark.parametrize("boundary", ["prepared", "executed", "observed", "accepted"])
+def test_real_workspace_replay_rebinds_and_preserves_content_at_every_effect_boundary(
+    tmp_path_factory: pytest.TempPathFactory, sim: Sim, mode: pb.ReplayWorkspaceMode, boundary: str
+) -> None:
+    # Every boundary runs on a PR; nightly depth sweeps every effect as well.
+    for effect in swept(5, sample=1):
+        workspace_boundary_case(
+            tmp_path_factory.mktemp(f"workspace-{effect}"), sim, mode, effect, boundary
+        )
 
 
 def test_workspace_recovery_sweeps_real_owner_receipt_writes(tmp_path: Path, sim: Sim) -> None:

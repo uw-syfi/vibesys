@@ -272,7 +272,7 @@ pnpm_packages = []
 
 [[cases]]
 name = "keyed live driver selects Python and real-tier verification"
-paths = ["libs/vs-runtime/src/vs_runtime/api/replay.py", "libs/vs-runtime/src/vs_runtime/_replay_runtime.py", "libs/vs-runtime/src/vs_runtime/_replay_run.py", "libs/vs-runtime/src/vs_runtime/_replay_fake.py", "libs/vs-runtime/src/vs_runtime/_replay_operations.py", "libs/vs-runtime/src/vs_runtime/_replay_workspaces.py", "libs/vs-runtime/src/vs_runtime/_replay_owner.py", "libs/vs-runtime/src/vs_runtime/_replay_sessions.py", "libs/vs-runtime/src/vs_runtime/_replay_evaluation.py", "src/vibesys/serial_replay.py", "libs/vs-runtime/tests/test_replay_schema_recovery.py"]
+paths = ["libs/vs-runtime/src/vs_runtime/api/replay.py", "libs/vs-runtime/src/vs_runtime/_replay_runtime.py", "libs/vs-runtime/src/vs_runtime/_replay_run.py", "libs/vs-runtime/src/vs_runtime/_replay_fake.py", "libs/vs-runtime/src/vs_runtime/_replay_operations.py", "libs/vs-runtime/src/vs_runtime/_replay_workspaces.py", "libs/vs-runtime/src/vs_runtime/_replay_owner.py", "libs/vs-runtime/src/vs_runtime/_replay_sessions.py", "libs/vs-runtime/src/vs_runtime/_replay_evaluation.py", "libs/vs-runtime/src/vs_runtime/_replay_executors.py", "libs/vs-runtime/src/vs_runtime/_replay_evidence.py", "src/vibesys/serial_replay.py", "libs/vs-runtime/tests/test_replay_schema_recovery.py"]
 jobs = ["python", "real_tiers"]
 [cases.collections]
 native_languages = []

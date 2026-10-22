@@ -1,6 +1,7 @@
 """Durable keyed replay on the current atomic store; no strategy-specific imports."""
 
 from vs_runtime._replay_evaluation import EvaluationReplayExecutor, replay_measurement_plan
+from vs_runtime._replay_executors import ReplayExecutors
 from vs_runtime._replay_fake import FakeReplayExecutor
 from vs_runtime._replay_operations import (
     RegisteredReplayExecutor,
@@ -47,6 +48,7 @@ __all__ = [
     "ReplayCompleted",
     "ReplayEnding",
     "ReplayExecutor",
+    "ReplayExecutors",
     "ReplayLaunch",
     "ReplayOperationBinding",
     "ReplayOperationError",
