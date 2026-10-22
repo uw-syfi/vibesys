@@ -5,6 +5,7 @@ from __future__ import annotations
 import gzip
 import json
 import runpy
+from contextlib import closing
 from importlib.metadata import version
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -25,6 +26,7 @@ from vs_proto.api import RUN_LOG_MAGIC, EpochStarted, Keyframe, LegacyEvent, One
 from vs_runlog.api import (
     FileRunContent,
     FileRunLogWriter,
+    RunLock,
     RunLogReader,
     encode_frame,
     fold_skeleton,
@@ -60,6 +62,25 @@ def record_trace(journal: EventJournal) -> None:
             )
         ),
     )
+
+
+def test_conversion_cannot_replace_a_live_writers_destination(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project, journal = journal_at(tmp_path, monkeypatch)
+    record_trace(journal)
+    source = Project.event_journal_path_for(project.root, "run-1")
+    journal.emit(
+        CoreEventType.AGENT_OUTPUT_CHUNK,
+        data=AgentOutputChunkData(channel="assistant", content="recorded output"),
+    )
+    original = source.read_bytes()
+    destination = Project.run_log_path_for(project.root, "run-1")
+    with closing(RunLock(destination.parent / "run.lock")), pytest.raises(BlockingIOError):
+        convert_run(project, "run-1", clock=ManualClock(), threads=SimThreads())
+    assert not destination.exists()
+    assert source.read_bytes() == original
+    assert not (destination.parent / "streams").exists()
 
 
 @pytest.mark.parametrize("clock_start", [-0.5, 0.0, 100.25])

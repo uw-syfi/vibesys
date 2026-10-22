@@ -31,6 +31,12 @@
     },
     {
       "path": "../machine/tsconfig.testing.json"
+    },
+    {
+      "path": "./tsconfig.reader.json"
+    },
+    {
+      "path": "./tsconfig.testing.json"
     }
   ]
 }

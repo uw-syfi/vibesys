@@ -179,6 +179,8 @@ export function digestLook(entry: Extract<RunDigestEntry, {kind: 'read'}>): EndL
 
 /** One run of a project as the host lists it: what an all-runs list needs before its digest is read. */
 export interface ListedRun {
+  /** The host could list the run but could not import its retained history. */
+  readonly unavailable?: string;
   readonly runId: string;
   /** The run's own name, as the host gives it; the run id names a run listed without one. */
   readonly name?: string;

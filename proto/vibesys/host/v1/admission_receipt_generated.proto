@@ -21,12 +21,14 @@ message AcceptedOperation {
     InspectCandidateRequest inspect_candidate = 17;
     CompletePathsRequest complete_paths = 18;
     InspectDestinationRequest inspect_destination = 23;
+    ListSavedRunsRequest list_saved_runs = 37;
     CreateExampleRequest create_example = 34;
     CopyProjectRequest copy_project = 35;
     PutClusterRequest put_cluster = 31;
     RemoveClusterRequest remove_cluster = 32;
     TestClusterRequest test_cluster = 33;
     StartRunRequest start_run = 36;
+    TerminateRunRequest terminate_run = 38;
     LoginRequest login = 40;
   }
 }
@@ -44,12 +46,14 @@ message OperationResult {
     InspectCandidateResponse inspect_candidate = 17;
     CompletePathsResponse complete_paths = 18;
     InspectDestinationResponse inspect_destination = 23;
+    ListSavedRunsResponse list_saved_runs = 37;
     CreateExampleResponse create_example = 34;
     CopyProjectResponse copy_project = 35;
     PutClusterResponse put_cluster = 31;
     RemoveClusterResponse remove_cluster = 32;
     TestClusterResponse test_cluster = 33;
     StartRunResponse start_run = 36;
+    TerminateRunResponse terminate_run = 38;
     LoginResponse login = 40;
   }
 }

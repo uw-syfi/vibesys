@@ -197,6 +197,30 @@ def accept_inspect_destination(
     return InspectDestination.accept(request)
 
 
+ListSavedRuns = Operation(
+    "ListSavedRuns",
+    37,
+    37,
+    37,
+    10000,
+    5000,
+    1,
+    2,
+    1,
+    1,
+    None,
+    pb.ListSavedRunsRequest,
+    pb.ListSavedRunsResponse,
+    ((("request_id",), ("request_id",)),),
+)
+
+
+def accept_list_saved_runs(
+    request: pb.ListSavedRunsRequest,
+) -> AcceptedRequest[pb.ListSavedRunsRequest]:
+    return ListSavedRuns.accept(request)
+
+
 CreateExample = Operation(
     "CreateExample",
     34,
@@ -333,6 +357,30 @@ def accept_start_run(request: pb.StartRunRequest) -> AcceptedRequest[pb.StartRun
     return StartRun.accept(request)
 
 
+TerminateRun = Operation(
+    "TerminateRun",
+    38,
+    38,
+    38,
+    10000,
+    5000,
+    2,
+    3,
+    1,
+    1,
+    None,
+    pb.TerminateRunRequest,
+    pb.TerminateRunResponse,
+    ((("request_id",), ("request_id",)),),
+)
+
+
+def accept_terminate_run(
+    request: pb.TerminateRunRequest,
+) -> AcceptedRequest[pb.TerminateRunRequest]:
+    return TerminateRun.accept(request)
+
+
 Login = Operation(
     "Login",
     40,
@@ -374,12 +422,14 @@ OPERATIONS: tuple[Operation, ...] = (
     ListCompute,
     PreflightRun,
     InspectDestination,
+    ListSavedRuns,
     CreateExample,
     CopyProject,
     PutCluster,
     RemoveCluster,
     TestCluster,
     StartRun,
+    TerminateRun,
     Login,
 )
 
@@ -396,6 +446,7 @@ class Handlers:
     list_compute: Callable[[pb.ListComputeRequest], pb.ListComputeResponse]
     preflight_run: Callable[[pb.PreflightRunRequest], pb.PreflightRunResponse]
     inspect_destination: Callable[[pb.InspectDestinationRequest], pb.InspectDestinationResponse]
+    list_saved_runs: Callable[[pb.ListSavedRunsRequest], pb.ListSavedRunsResponse]
 
     def dispatch(self, request: AcceptedRequest) -> bytes:
         match request.operation.operation_id:
@@ -431,6 +482,10 @@ class Handlers:
                 return InspectDestination.validate_response(
                     request, self.inspect_destination(InspectDestination.request_value(request))
                 )
+            case 37:
+                return ListSavedRuns.validate_response(
+                    request, self.list_saved_runs(ListSavedRuns.request_value(request))
+                )
             case _:
                 raise ValueError("unknown operation id")
 
@@ -445,6 +500,7 @@ class MutationHandlers:
     remove_cluster: Callable[[pb.RemoveClusterRequest], pb.RemoveClusterResponse]
     test_cluster: Callable[[pb.TestClusterRequest], pb.TestClusterResponse]
     start_run: Callable[[pb.StartRunRequest], pb.StartRunResponse]
+    terminate_run: Callable[[pb.TerminateRunRequest], pb.TerminateRunResponse]
 
     def dispatch(self, request: AcceptedRequest) -> bytes:
         match request.operation.operation_id:
@@ -471,6 +527,10 @@ class MutationHandlers:
             case 36:
                 return StartRun.validate_response(
                     request, self.start_run(StartRun.request_value(request))
+                )
+            case 38:
+                return TerminateRun.validate_response(
+                    request, self.terminate_run(TerminateRun.request_value(request))
                 )
             case _:
                 raise ValueError("unknown operation id")
@@ -575,6 +635,7 @@ READS: dict[str, Operation] = {
     "list_compute": ListCompute,
     "preflight_run": PreflightRun,
     "inspect_destination": InspectDestination,
+    "list_saved_runs": ListSavedRuns,
 }
 READ_CALLS: tuple[HostCall, ...] = (
     HostCall("list_tasks", "list-tasks", 10, 10, 10000, 5000),
@@ -585,6 +646,7 @@ READ_CALLS: tuple[HostCall, ...] = (
     HostCall("list_compute", "list-compute", 15, 15, 10000, 5000),
     HostCall("preflight_run", "preflight-run", 16, 16, 65000, 5000),
     HostCall("inspect_destination", "inspect-destination", 23, 23, 10000, 5000),
+    HostCall("list_saved_runs", "list-saved-runs", 37, 37, 10000, 5000),
 )
 MUTATIONS: dict[str, Operation] = {
     "create_example": CreateExample,
@@ -593,6 +655,7 @@ MUTATIONS: dict[str, Operation] = {
     "remove_cluster": RemoveCluster,
     "test_cluster": TestCluster,
     "start_run": StartRun,
+    "terminate_run": TerminateRun,
 }
 MUTATION_CALLS: tuple[HostCall, ...] = (
     HostCall("create_example", "create-example", 34, 34, 120000, 5000),
@@ -601,6 +664,7 @@ MUTATION_CALLS: tuple[HostCall, ...] = (
     HostCall("remove_cluster", "remove-cluster", 32, 32, 10000, 5000),
     HostCall("test_cluster", "test-cluster", 33, 33, 65000, 5000),
     HostCall("start_run", "start-run", 36, 36, 60000, 5000),
+    HostCall("terminate_run", "terminate-run", 38, 38, 10000, 5000),
 )
 WATCHES: dict[str, Operation] = {"login": Login}
 WATCH_CALLS: tuple[HostCall, ...] = (HostCall("login", "login", 40, 40, 600000, 5000),)

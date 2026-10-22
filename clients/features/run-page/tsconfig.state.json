@@ -68,6 +68,9 @@
     },
     {
       "path": "../../libs/run-skeleton/tsconfig.cache.json"
+    },
+    {
+      "path": "../../libs/run-state/tsconfig.records.json"
     }
   ]
 }

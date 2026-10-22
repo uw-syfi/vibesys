@@ -4,7 +4,7 @@
  * Streams come from the page state, joined to spans by the stream owner's `span_id`
  * (`state/scoped-logs.ts`). The shell follows the shown stream (`streamToFollow`): a view runs no effects.
  */
-import {EmptyState, LogPane, PickList, PickRow} from '@vibesys/ui';
+import {Banner, EmptyState, LogPane, PickList, PickRow} from '@vibesys/ui';
 import {type JSX, useMemo} from 'react';
 import {type RunPageAction, type RunPageState, stepKicker} from '../../../../state/index.js';
 import {
@@ -111,6 +111,25 @@ function StreamRows(props: {
 }
 
 export function LogsView(props: LogsViewProps): JSX.Element {
+  const rows = props.state.recordLog;
+  const error = props.state.recordLogError;
+  if (props.scope.kind === 'run' && (rows !== undefined || error))
+    return (
+      <>
+        {error ? <Banner tone="warn" title={error} /> : null}
+        <LogPane
+          label="Run history"
+          lines={(rows ?? [])
+            .filter(row => props.model.at === null || BigInt(row.seq) <= BigInt(props.model.at))
+            .map(row => ({text: row.message, ...(row.failure ? {stream: 'err' as const} : {})}))}
+        />
+        <StreamLogs {...props} />
+      </>
+    );
+  return <StreamLogs {...props} />;
+}
+
+function StreamLogs(props: LogsViewProps): JSX.Element {
   const {state, scope, dispatch} = props;
   const ideas = useMemo(
     () => ideaTitlesBySpan(props.model.candidates.candidates),

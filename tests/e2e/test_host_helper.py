@@ -202,6 +202,8 @@ def test_hello_loads_no_engine_and_reports_its_start_up_time(
     # The launcher's light commands load on dispatch: hello pays for none of them, so the
     # ``evals`` command's Slurm ledger (about 85 modules) stays out of the helper.
     assert [name for name in loaded if name.split(".")[0] == "vs_slurm"] == []
+    # Saved-run import and paging load only for a saved-run request.
+    assert "server.host_saved_runs" not in loaded
     # The run summary's fold and cache load on the first summary request.
     assert {"server.run_summary", "server.run_summary_cache"}.isdisjoint(loaded)
 

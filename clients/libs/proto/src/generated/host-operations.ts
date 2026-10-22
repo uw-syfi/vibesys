@@ -17,12 +17,14 @@ export const operationPolicies = Object.freeze({
   InspectCandidate: Object.freeze({name: 'InspectCandidate', id: 17, requestTag: 17, responseTag: 17, capMs: 10000, graceMs: 5000, totalMs: 15000, effect: 1, retry: 2, executor: 2, cardinality: 1, firstEventMs: undefined} as const),
   CompletePaths: Object.freeze({name: 'CompletePaths', id: 18, requestTag: 18, responseTag: 18, capMs: 5000, graceMs: 5000, totalMs: 10000, effect: 1, retry: 2, executor: 3, cardinality: 1, firstEventMs: undefined} as const),
   InspectDestination: Object.freeze({name: 'InspectDestination', id: 23, requestTag: 23, responseTag: 23, capMs: 10000, graceMs: 5000, totalMs: 15000, effect: 1, retry: 2, executor: 1, cardinality: 1, firstEventMs: undefined} as const),
+  ListSavedRuns: Object.freeze({name: 'ListSavedRuns', id: 37, requestTag: 37, responseTag: 37, capMs: 10000, graceMs: 5000, totalMs: 15000, effect: 1, retry: 2, executor: 1, cardinality: 1, firstEventMs: undefined} as const),
   CreateExample: Object.freeze({name: 'CreateExample', id: 34, requestTag: 34, responseTag: 34, capMs: 120000, graceMs: 5000, totalMs: 125000, effect: 2, retry: 3, executor: 1, cardinality: 1, firstEventMs: undefined} as const),
   CopyProject: Object.freeze({name: 'CopyProject', id: 35, requestTag: 35, responseTag: 35, capMs: 120000, graceMs: 5000, totalMs: 125000, effect: 2, retry: 3, executor: 1, cardinality: 1, firstEventMs: undefined} as const),
   PutCluster: Object.freeze({name: 'PutCluster', id: 31, requestTag: 31, responseTag: 31, capMs: 65000, graceMs: 5000, totalMs: 70000, effect: 2, retry: 3, executor: 1, cardinality: 1, firstEventMs: undefined} as const),
   RemoveCluster: Object.freeze({name: 'RemoveCluster', id: 32, requestTag: 32, responseTag: 32, capMs: 10000, graceMs: 5000, totalMs: 15000, effect: 2, retry: 3, executor: 1, cardinality: 1, firstEventMs: undefined} as const),
   TestCluster: Object.freeze({name: 'TestCluster', id: 33, requestTag: 33, responseTag: 33, capMs: 65000, graceMs: 5000, totalMs: 70000, effect: 2, retry: 3, executor: 1, cardinality: 1, firstEventMs: undefined} as const),
   StartRun: Object.freeze({name: 'StartRun', id: 36, requestTag: 36, responseTag: 36, capMs: 60000, graceMs: 5000, totalMs: 65000, effect: 3, retry: 3, executor: 1, cardinality: 1, firstEventMs: undefined} as const),
+  TerminateRun: Object.freeze({name: 'TerminateRun', id: 38, requestTag: 38, responseTag: 38, capMs: 10000, graceMs: 5000, totalMs: 15000, effect: 2, retry: 3, executor: 1, cardinality: 1, firstEventMs: undefined} as const),
   Login: Object.freeze({name: 'Login', id: 40, requestTag: 40, responseTag: 40, capMs: 600000, graceMs: 5000, totalMs: 605000, effect: 3, retry: 3, executor: 1, cardinality: 2, firstEventMs: 25000} as const),
 });
 export const hostCallBudgets = Object.freeze({
@@ -90,6 +92,12 @@ export function acceptInspectDestination(input: MessageInitShape<typeof pb.Inspe
 export async function callInspectDestination(transport: OperationTransport, request: Accepted<"InspectDestination">, signal: OperationSignal): Promise<pb.InspectDestinationResponse> {
   return call(transport, {policy: operationPolicies.InspectDestination, requestSchema: pb.InspectDestinationRequestSchema, responseSchema: pb.InspectDestinationResponseSchema, correlations: [[['requestId'], ['requestId']]]}, request, signal);
 }
+export function acceptListSavedRuns(input: MessageInitShape<typeof pb.ListSavedRunsRequestSchema>): Accepted<"ListSavedRuns"> {
+  return accept(operationPolicies.ListSavedRuns, pb.ListSavedRunsRequestSchema, input);
+}
+export async function callListSavedRuns(transport: OperationTransport, request: Accepted<"ListSavedRuns">, signal: OperationSignal): Promise<pb.ListSavedRunsResponse> {
+  return call(transport, {policy: operationPolicies.ListSavedRuns, requestSchema: pb.ListSavedRunsRequestSchema, responseSchema: pb.ListSavedRunsResponseSchema, correlations: [[['requestId'], ['requestId']]]}, request, signal);
+}
 export function acceptCreateExample(input: MessageInitShape<typeof pb.CreateExampleRequestSchema>): Accepted<"CreateExample"> {
   return accept(operationPolicies.CreateExample, pb.CreateExampleRequestSchema, input);
 }
@@ -125,6 +133,12 @@ export function acceptStartRun(input: MessageInitShape<typeof pb.StartRunRequest
 }
 export async function callStartRun(transport: OperationTransport, request: Accepted<"StartRun">, signal: OperationSignal): Promise<pb.StartRunResponse> {
   return call(transport, {policy: operationPolicies.StartRun, requestSchema: pb.StartRunRequestSchema, responseSchema: pb.StartRunResponseSchema, correlations: [[['requestId'], ['requestId']]]}, request, signal);
+}
+export function acceptTerminateRun(input: MessageInitShape<typeof pb.TerminateRunRequestSchema>): Accepted<"TerminateRun"> {
+  return accept(operationPolicies.TerminateRun, pb.TerminateRunRequestSchema, input);
+}
+export async function callTerminateRun(transport: OperationTransport, request: Accepted<"TerminateRun">, signal: OperationSignal): Promise<pb.TerminateRunResponse> {
+  return call(transport, {policy: operationPolicies.TerminateRun, requestSchema: pb.TerminateRunRequestSchema, responseSchema: pb.TerminateRunResponseSchema, correlations: [[['requestId'], ['requestId']]]}, request, signal);
 }
 export function acceptLogin(input: MessageInitShape<typeof pb.LoginRequestSchema>): Accepted<"Login"> {
   return accept(operationPolicies.Login, pb.LoginRequestSchema, input);
@@ -171,6 +185,7 @@ export const readBudgets = Object.freeze({
   inspectCandidate: Object.freeze({capMs: 10000, graceMs: 5000, totalMs: 15000} as const),
   completePaths: Object.freeze({capMs: 5000, graceMs: 5000, totalMs: 10000} as const),
   inspectDestination: Object.freeze({capMs: 10000, graceMs: 5000, totalMs: 15000} as const),
+  listSavedRuns: Object.freeze({capMs: 10000, graceMs: 5000, totalMs: 15000} as const),
 } as const);
 export function encodeHostRead(checkout: string, name: string, payload: Uint8Array): Uint8Array {
   switch (name) {
@@ -194,6 +209,8 @@ export function encodeHostRead(checkout: string, name: string, payload: Uint8Arr
       return toBinary(ReadRequestSchema, create(ReadRequestSchema, {checkout, method: {case: 'completePaths', value: fromBinary(pb.CompletePathsRequestSchema, payload)}}));
     case 'InspectDestination':
       return toBinary(ReadRequestSchema, create(ReadRequestSchema, {checkout, method: {case: 'inspectDestination', value: fromBinary(pb.InspectDestinationRequestSchema, payload)}}));
+    case 'ListSavedRuns':
+      return toBinary(ReadRequestSchema, create(ReadRequestSchema, {checkout, method: {case: 'listSavedRuns', value: fromBinary(pb.ListSavedRunsRequestSchema, payload)}}));
     default: throw new Error("unknown read");
   }
 }
@@ -233,6 +250,9 @@ export function decodeHostRead(name: string, payload: Uint8Array): Uint8Array {
     case 'InspectDestination':
       if (result.case !== 'inspectDestination') throw new Error('response correlation mismatch');
       return toBinary(pb.InspectDestinationResponseSchema, result.value);
+    case 'ListSavedRuns':
+      if (result.case !== 'listSavedRuns') throw new Error('response correlation mismatch');
+      return toBinary(pb.ListSavedRunsResponseSchema, result.value);
     default: throw new Error("unknown read");
   }
 }
@@ -251,6 +271,8 @@ export function encodeHostMutate(checkout: string, name: string, payload: Uint8A
       return toBinary(MutateRequestSchema, create(MutateRequestSchema, {checkout, method: {case: 'testCluster', value: fromBinary(pb.TestClusterRequestSchema, payload)}}));
     case 'StartRun':
       return toBinary(MutateRequestSchema, create(MutateRequestSchema, {checkout, method: {case: 'startRun', value: fromBinary(pb.StartRunRequestSchema, payload)}}));
+    case 'TerminateRun':
+      return toBinary(MutateRequestSchema, create(MutateRequestSchema, {checkout, method: {case: 'terminateRun', value: fromBinary(pb.TerminateRunRequestSchema, payload)}}));
     default: throw new Error('unknown mutation');
   }
 }
@@ -278,6 +300,9 @@ export function decodeHostMutate(name: string, payload: Uint8Array): Uint8Array 
     case 'StartRun':
       if (result.case !== 'startRun') throw new Error('response correlation mismatch');
       return toBinary(pb.StartRunResponseSchema, result.value);
+    case 'TerminateRun':
+      if (result.case !== 'terminateRun') throw new Error('response correlation mismatch');
+      return toBinary(pb.TerminateRunResponseSchema, result.value);
     default: throw new Error('unknown mutation');
   }
 }
@@ -307,6 +332,7 @@ export const mutateBudgets = Object.freeze({
   removeCluster: Object.freeze({capMs: 10000, graceMs: 5000, totalMs: 15000} as const),
   testCluster: Object.freeze({capMs: 65000, graceMs: 5000, totalMs: 70000} as const),
   startRun: Object.freeze({capMs: 60000, graceMs: 5000, totalMs: 65000} as const),
+  terminateRun: Object.freeze({capMs: 10000, graceMs: 5000, totalMs: 15000} as const),
 } as const);
 export const watchBudgets = Object.freeze({
   login: Object.freeze({capMs: 600000, graceMs: 5000, totalMs: 605000, firstEventMs: 25000} as const),

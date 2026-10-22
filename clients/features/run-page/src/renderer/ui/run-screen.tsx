@@ -597,6 +597,9 @@ function RunScreenBody(props: {
         <Banner tone="warn" title="The run’s history is not available" body={problem} />
       )}
       <Startup state={state} />
+      {state.recordDiagnostic ? (
+        <Banner tone="warn" title="Run diagnostic" body={state.recordDiagnostic.message} />
+      ) : null}
       {before === null ? (
         <Hero
           {...base}

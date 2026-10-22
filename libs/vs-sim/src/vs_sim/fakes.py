@@ -275,15 +275,24 @@ class FakeSignalSource:
 class FakeProcessSignaller:
     """Stable process signalling over an in-memory set of live process IDs."""
 
-    def __init__(self, live_pids: set[int]) -> None:
-        """Treat exactly ``live_pids`` as openable process identities."""
+    def __init__(
+        self, live_pids: set[int], *, held_locks: dict[int, set[Path]] | None = None
+    ) -> None:
+        """Treat exactly ``live_pids`` as openable identities with their held flocks."""
         self.live_pids = set(live_pids)
+        self.held_locks = {} if held_locks is None else held_locks
         self.opened: list[int] = []
         self.terminated: list[int] = []
 
     def exists(self, pid: int) -> bool:
         """Whether ``pid`` is one of the live ids."""
         return pid in self.live_pids
+
+    def owns_lock(self, pid: int, path: Path) -> bool:
+        """A live process owns only the exact flocks registered for it."""
+        if pid not in self.live_pids:
+            raise ProcessLookupError(pid)
+        return path in self.held_locks.get(pid, set())
 
     def terminate_if_current(self, pid: int, current: Callable[[], bool]) -> bool:
         """Open ``pid``, evaluate ``current``, and record a permitted termination."""

@@ -23,7 +23,7 @@ from vs_runlog._epoch import CurrentEpoch, current_epoch
 from vs_runlog._fold import append_skeleton
 from vs_runlog._framing import ReadStop, RunLogStopReason, encode_frame, read_frame
 from vs_runlog._head import project_head
-from vs_runlog._lock import RunLock
+from vs_runlog._lock import RunLock, hold_writer_identity
 from vs_sim.api import CloseOnce, ReleaseStack
 
 CHECKPOINT_RECORDS = 256
@@ -360,6 +360,8 @@ class FileRunLogWriter:
                 self._process = RunProcess(
                     pid=os.getpid(), epoch=record.epoch, started_at=record.at
                 )
+                identity = hold_writer_identity(self._path, self._process)
+                self._resources.callback(identity.close)
             if _is_boundary(record):
                 self._publish_keyframe()
         through = self._skeleton.through_seq
@@ -425,17 +427,23 @@ class FileRunLogWriter:
         self.close()
 
 
-def install_run_log(staged: Path, destination: Path) -> None:
+def install_run_log(
+    staged: Path, destination: Path, *, prepare: Callable[[], None] | None = None
+) -> None:
     """Install a quiescent conversion with its head and keyframes.
 
     The staged log lives in a disposable sibling directory. The authoritative
     JSONL source is untouched; old derived keyframes must not survive a rewrite.
+    When preparation writes shared content, pass it as ``prepare`` so the writer
+    lock covers both content generation and installation.
     """
     if staged.parent == destination.parent:
         message = "staged run.log needs a separate disposable directory"
         raise ValueError(message)
     lock = RunLock(destination.parent / "run.lock")
     try:
+        if prepare is not None:
+            prepare()
         keyframes = destination.parent / "keyframes"
         if keyframes.exists():
             keyframes.replace(staged.parent / "previous-keyframes")
@@ -523,6 +531,13 @@ class FileRunContent:
         sync_directory(self._streams.parent)
 
 
+def read_run_head(path: Path) -> RunHead:
+    """Read the validated writer observation beside ``path``, never recovery state."""
+    head = RunHead.from_binary(path.with_name("run.head").read_bytes())
+    validate(head)
+    return head
+
+
 def read_current_epoch(path: Path) -> CurrentEpoch | None:
     """Derive an external reader's epoch from exactly the head's committed prefix.
 
@@ -531,9 +546,7 @@ def read_current_epoch(path: Path) -> CurrentEpoch | None:
     retain their legacy complete-record rule.
     """
     head_path = path.parent / "run.head"
-    head = RunHead.from_binary(head_path.read_bytes()) if head_path.exists() else None
-    if head is not None:
-        validate(head)
+    head = read_run_head(path) if head_path.exists() else None
     if not path.exists():
         if head is not None:
             message = f"{path}: run.head exists without run.log"

@@ -312,7 +312,7 @@ depends_on = ["vs_decode.api", "server.host_api", "server.host_run_dashboard", "
 [[modules]]
 # The host helper's interfaces on a real host: projects, directories, launches, the checkout.
 path = "server.host_helper_os"
-depends_on = ["server.host_examples", "server.host_agent_logins", "vs_decode.api", "server.host_api", "server.host_helper_logs", "server.host_helper_machine", "server.host_helper_preflight", "server.host_preflight", "server.host_helper_requests", "server.host_run_events", "server.run_digest", "server.span_index", "server.run_summary", "server.run_summary_cache", "vs_logs", "vs_project", "vs_sim.api"]
+depends_on = ["vs_runlog", "server.host_saved_runs", "vs_proto", "server.host_examples", "server.host_agent_logins", "vs_decode.api", "server.host_api", "server.host_helper_logs", "server.host_helper_machine", "server.host_helper_preflight", "server.host_preflight", "server.host_helper_requests", "server.host_run_events", "server.run_digest", "server.span_index", "server.run_summary", "server.run_summary_cache", "vs_logs", "vs_project", "vs_sim.api"]
 
 [[modules]]
 # A run's summary: the fold of its journal that the run level shows, as a pure read model.
@@ -1966,11 +1966,11 @@ expose = ["RunLogTee", "JOURNAL_EVENT_MAX_BYTES"]
 [[modules]]
 path = "vibesys.api.host"
 layer = "prompts_and_lower_libs"
-depends_on = ["vibesys.api", "vibesys.api.chat", "vibesys.api.host_relaunch", "vs_project", "vs_proto", "vs_runlog", "vs_sim.api"]
+depends_on = ["vibesys.api.host_terminate", "vibesys.api", "vibesys.api.chat", "vibesys.api.host_relaunch", "vs_project", "vs_proto", "vs_runlog", "vs_sim.api"]
 
 [[interfaces]]
 from = ["vibesys.api.host"]
-expose = ["host_call"]
+expose = ["host_call", "terminate_host"]
 
 [[modules]]
 path = "vs_core._generated"
@@ -2107,3 +2107,20 @@ depends_on = ["server.host_api", "vs_proto"]
 [[interfaces]]
 from = ["server.host_operation_types_generated"]
 expose = ["is_registry_read", "RegistryReadRequest", "UnmigratedHelperRequest"]
+
+[[modules]]
+path = "server.host_saved_runs"
+depends_on = ["vibesys.api.transport", "vs_project", "vs_proto", "vs_runlog", "vs_sim.api"]
+
+[[interfaces]]
+from = ["server.host_saved_runs"]
+expose = ["page_saved_runs"]
+
+[[modules]]
+path = "vibesys.api.host_terminate"
+layer = "prompts_and_lower_libs"
+depends_on = ["vs_project", "vs_proto", "vs_runlog", "vs_sim.api"]
+
+[[interfaces]]
+from = ["vibesys.api.host_terminate"]
+expose = ["pause_now", "serve_terminate", "terminate_run"]

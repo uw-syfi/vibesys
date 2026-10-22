@@ -1,6 +1,6 @@
 import {unprovided} from '@vibesys/machine';
 import type {IntentState, PostIntentRequest, PostIntentResponse} from '@vibesys/runs/intents';
-import {copyIntent, IntentRefused, IntentStep} from '@vibesys/runs/intents';
+import {copyIntent, IntentRefused, IntentStep, intentAdmissionWarning} from '@vibesys/runs/intents';
 import {assign, fromCallback, setup} from 'xstate';
 
 export interface RunIntentsInput {
@@ -66,7 +66,13 @@ export const runIntentsMachine = setup({
     apply: assign(({context, event}) => {
       if (event.type !== 'outcomes') return {};
       const entries = outcomeEntries(context.entries, event.outcomes);
-      return {entries, error: entries.find(entry => entry.status === 'uncertain')?.reason ?? null};
+      return {
+        entries,
+        error: entries.find(entry => entry.status === 'uncertain')?.reason ?? null,
+        warning: entries.every(entry => entry.status === 'applied' || entry.status === 'refused')
+          ? null
+          : context.warning,
+      };
     }),
   },
   delays: {deadline: 35_000},
@@ -146,14 +152,15 @@ export const runIntentsMachine = setup({
             },
             onDone: {
               target: 'idle',
-              actions: assign(({context, event}) => ({
-                warning: event.output.orderedReader
-                  ? null
-                  : 'Posting order has not been confirmed. Start or restart this run with the current VibeSys.',
-                entries: context.entries.map(entry =>
+              actions: assign(({context, event}) => {
+                const entries = context.entries.map(entry =>
                   entry.status === 'sending' ? {...entry, status: 'pending' as const} : entry,
-                ),
-              })),
+                );
+                const pending =
+                  entries.find(entry => entry.request.requestId === event.output.requestId)
+                    ?.status === 'pending';
+                return {entries, warning: pending ? intentAdmissionWarning(event.output) : null};
+              }),
             },
             onError: {
               target: 'idle',

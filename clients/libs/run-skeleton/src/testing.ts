@@ -32,6 +32,25 @@ interface Cursor {
   initial: WatchRunsResponse[];
 }
 
+// Match the gateway's Skeleton reserve and conservative Tail framing budget.
+function boundedRecords(records: readonly StoreRecord[], kind: 'skeleton' | 'tail'): Uint8Array[] {
+  const budget = (1 << 20) - (kind === 'skeleton' ? 32 : 16);
+  const batch: Uint8Array[] = [];
+  let size = 0;
+  for (const record of records) {
+    const bytes = toBinary(RecordSchema, record);
+    const cost =
+      kind === 'skeleton'
+        ? toBinary(SkeletonResponseSchema, create(SkeletonResponseSchema, {records: [bytes]}))
+            .length
+        : bytes.length + 11;
+    if (size + cost > budget && (kind === 'skeleton' || batch.length > 0)) break;
+    batch.push(bytes);
+    size += cost;
+  }
+  return batch;
+}
+
 export class FakeRunTransport implements RunTransport {
   readonly calls: {method: string; request: Uint8Array; signal: AbortSignalLike}[] = [];
   readonly #subscribers = new Set<Subscriber>();
@@ -41,6 +60,7 @@ export class FakeRunTransport implements RunTransport {
   #initialCount: number;
   readonly #blobs: Readonly<Record<string, Uint8Array>>;
   readonly #streams: Readonly<Record<string, Uint8Array>>;
+  readonly #streamChunkBytes: number;
   readonly #started = new Map<string, Set<() => void>>();
   async called(method: string): Promise<void> {
     if (this.calls.some(call => call.method === method)) return;
@@ -63,11 +83,15 @@ export class FakeRunTransport implements RunTransport {
     initialCount?: number;
     blobs?: Readonly<Record<string, Uint8Array>>;
     streams?: Readonly<Record<string, Uint8Array>>;
+    streamChunkBytes?: number;
   }) {
     this.#records = [...input.records];
     this.#initialCount = input.initialCount ?? input.records.length;
     this.#blobs = input.blobs ?? {};
     this.#streams = input.streams ?? {};
+    this.#streamChunkBytes = input.streamChunkBytes ?? 65536;
+    if (!Number.isSafeInteger(this.#streamChunkBytes) || this.#streamChunkBytes < 1)
+      throw new Error('streamChunkBytes must be a positive safe integer');
   }
   get activeStreams(): number {
     return this.#subscribers.size;
@@ -103,13 +127,14 @@ export class FakeRunTransport implements RunTransport {
     if (method === `${SERVICE}Skeleton`) {
       const input = fromBinary(SkeletonRequestSchema, request);
       if (!input.runId) throw new Error('run_id required');
-      const records = this.#records.slice(0, this.#initialCount);
+      const records = boundedRecords(this.#records.slice(0, this.#initialCount), 'skeleton');
+      const last = this.#records[records.length - 1];
       return toBinary(
         SkeletonResponseSchema,
         create(SkeletonResponseSchema, {
-          records: records.map(record => toBinary(RecordSchema, record)),
+          records,
           committedSeq: this.#records.at(-1)?.seq ?? 0n,
-          nextSeq: (records.at(-1)?.seq ?? 0n) + 1n,
+          nextSeq: last ? last.seq + 1n : (this.#records[0]?.seq ?? 1n),
           complete: records.length === this.#records.length,
         }),
       );
@@ -200,14 +225,15 @@ export class FakeRunTransport implements RunTransport {
       return this.observation(cursor);
     }
     if (method === `${SERVICE}Tail`) {
-      const records = this.#records.filter(record => record.seq >= cursor.nextSeq);
+      const pending = this.#records.filter(record => record.seq >= cursor.nextSeq);
+      const records = boundedRecords(pending, 'tail');
       if (records.length > 0) {
-        const throughSeq = records.at(-1)?.seq ?? 0n;
+        const throughSeq = pending[records.length - 1]?.seq ?? 0n;
         cursor.nextSeq = throughSeq + 1n;
         return toBinary(
           TailResponseSchema,
           create(TailResponseSchema, {
-            records: records.map(record => toBinary(RecordSchema, record)),
+            records,
             throughSeq,
           }),
         );
@@ -216,8 +242,11 @@ export class FakeRunTransport implements RunTransport {
       const content = this.#streams[cursor.streamId];
       if (!content) throw new Error('Missing stream');
       if (cursor.offset < BigInt(content.length)) {
-        const data = content.slice(Number(cursor.offset));
-        cursor.offset = BigInt(content.length);
+        const data = content.slice(
+          Number(cursor.offset),
+          Number(cursor.offset) + this.#streamChunkBytes,
+        );
+        cursor.offset += BigInt(data.length);
         return toBinary(
           TailStreamResponseSchema,
           create(TailStreamResponseSchema, {data, nextOffset: cursor.offset}),

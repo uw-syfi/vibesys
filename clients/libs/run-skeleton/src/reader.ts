@@ -5,6 +5,7 @@ import {
   GetBlobsRequestSchema,
   GetBlobsResponseSchema,
   HostService,
+  TailRequestSchema,
   TailStreamRequestSchema,
   TailStreamResponseSchema,
   WatchRunsRequestSchema,
@@ -35,6 +36,12 @@ export interface GatewayLogChunk {
   readonly next: number;
 }
 export interface GatewayReader {
+  records(
+    runId: string,
+    fromSeq: bigint,
+    signal: AbortSignalLike,
+    receive: (bytes: Uint8Array) => void,
+  ): Promise<void>;
   watch(
     runId: string,
     receive: (load: SkeletonLoad | undefined, failed: boolean, hint?: RunLivenessHint) => void,
@@ -49,6 +56,7 @@ export interface GatewayReader {
     streamId: string,
     signal: AbortSignalLike,
     receive: (chunk: GatewayLogChunk) => void,
+    fromOffset?: bigint,
   ): Promise<void>;
 }
 const SERVICE = `/${HostService.typeName}/`;
@@ -87,12 +95,20 @@ async function log(
   streamId: string,
   signal: AbortSignalLike,
   receive: (chunk: GatewayLogChunk) => void,
+  fromOffset = 0n,
 ): Promise<void> {
-  const decoder = new TextDecoder();
-  let offset = 0n;
+  if (fromOffset < 0n || fromOffset > BigInt(Number.MAX_SAFE_INTEGER))
+    throw new Error('Stream offset exceeds screen precision');
+  const decoder = new TextDecoder('utf-8', {fatal: true, ignoreBOM: true});
+  const encoder = new TextEncoder();
+  let offset = fromOffset;
+  let decodedOffset = Number(fromOffset);
   for await (const bytes of transport.stream(
     `${SERVICE}${HostService.method.tailStream.name}`,
-    toBinary(TailStreamRequestSchema, create(TailStreamRequestSchema, {runId, streamId})),
+    toBinary(
+      TailStreamRequestSchema,
+      create(TailStreamRequestSchema, {runId, streamId, fromOffset}),
+    ),
     signal,
   )) {
     if (signal.aborted) return;
@@ -102,13 +118,13 @@ async function log(
       response.nextOffset > BigInt(Number.MAX_SAFE_INTEGER)
     )
       throw new Error('Stream offset mismatch');
-    receive({
-      text: decoder.decode(response.data, {stream: true}),
-      offset: Number(offset),
-      next: Number(response.nextOffset),
-    });
+    const text = decoder.decode(response.data, {stream: true});
+    const next = decodedOffset + encoder.encode(text).length;
+    if (text !== '') receive({text, offset: decodedOffset, next});
+    decodedOffset = next;
     offset = response.nextOffset;
   }
+  if (!signal.aborted) decoder.decode();
 }
 
 export function gatewayReader(
@@ -117,6 +133,16 @@ export function gatewayReader(
   schedule: ScheduleTimeout,
 ): GatewayReader {
   return {
+    async records(runId, fromSeq, signal, receive) {
+      for await (const bytes of transport.stream(
+        `${SERVICE}${HostService.method.tail.name}`,
+        toBinary(TailRequestSchema, create(TailRequestSchema, {runId, fromSeq})),
+        signal,
+      )) {
+        if (signal.aborted) return;
+        receive(bytes);
+      }
+    },
     watch(runId, receive) {
       const actor = createActor(
         runObservationMachine.provide({
@@ -152,6 +178,7 @@ export function gatewayReader(
                     : {
                         epoch: observedEpoch(response),
                         value: response.liveness,
+                        head: response.head,
                       },
                 });
               }
@@ -173,10 +200,13 @@ export function gatewayReader(
       };
     },
     content: (runId, hash, signal) => content(transport, cache, runId, hash, signal),
-    log: (runId, streamId, signal, receive) => log(transport, runId, streamId, signal, receive),
+    log: (runId, streamId, signal, receive, fromOffset) =>
+      log(transport, runId, streamId, signal, receive, fromOffset),
   };
 }
 
 function observedEpoch(response: WatchRunsResponse): number {
-  return response.head?.process?.epoch ?? 0;
+  // Phase 1 heads omit the canonical epoch (proto3 decodes it as zero).
+  // Preserve their process epoch for fencing; liveness still comes from the gateway's lock probe.
+  return response.head?.epoch || response.head?.process?.epoch || 0;
 }

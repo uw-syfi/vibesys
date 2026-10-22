@@ -9,10 +9,19 @@ from vs_runlog._file import (
     install_run_log,
     open_run_log,
     read_current_epoch,
+    read_run_head,
 )
 from vs_runlog._fold import fold_skeleton
 from vs_runlog._framing import ReadStop, RunLogStopReason, encode_frame
-from vs_runlog._lock import RunLaunchLockedError, RunLock, assert_run_unlocked, exclusive_run_launch
+from vs_runlog._lock import (
+    RunLaunchLockedError,
+    RunLock,
+    WriterIdentityState,
+    assert_run_unlocked,
+    exclusive_run_launch,
+    observe_writer_identity,
+    writer_identity_path,
+)
 
 __all__ = [
     "CurrentEpoch",
@@ -25,6 +34,7 @@ __all__ = [
     "RunLock",
     "RunLogReader",
     "RunLogStopReason",
+    "WriterIdentityState",
     "assert_run_unlocked",
     "current_epoch",
     "encode_frame",
@@ -32,6 +42,9 @@ __all__ = [
     "exclusive_run_launch",
     "fold_skeleton",
     "install_run_log",
+    "observe_writer_identity",
     "open_run_log",
     "read_current_epoch",
+    "read_run_head",
+    "writer_identity_path",
 ]
