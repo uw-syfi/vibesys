@@ -61,8 +61,15 @@ PURE_EXPORTS = {
             "ReplayToolAcknowledgement",
             "ReplayTurnWait",
             "ReplayTurnBound",
+            "ReplayTurnPermit",
+            "ReplayControl",
+            "ReplayControlApplied",
+            "ReplayControlDisposition",
+            "ReplaySteer",
         )
     },
+    # Operator control dispositions are closed protobuf enums.
+    "vs_proto.api.replay.ReplayControlStale": frozenset({"EPOCH", "TURN"}),
     # These generated request codecs only transform retained in-memory values.
     "vs_proto.api.replay_agent": frozenset({"ReplayAgentRequest"}),
     "vs_proto.api.replay_agent.ReplayAgentRequest": frozenset({"from_binary", "desc"}),

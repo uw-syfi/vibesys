@@ -62,7 +62,11 @@ class ReplayTurnYields:
     def submit(self, turn: str, call_id: str, producer: str) -> ReplayToolLookup:
         self._record(
             pb.ReplayToolSubmission(
-                turn=turn, call_id=call_id, reply_id=self.reply_id(turn, call_id), producer=producer
+                turn=turn,
+                call_id=call_id,
+                reply_id=self.reply_id(turn, call_id),
+                producer=producer,
+                permit=self.runtime.archive.permit(turn),
             )
         )
         return self.lookup(turn, call_id)

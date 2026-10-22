@@ -23,6 +23,8 @@ from vs_core.api.replay import (
     ReplaySettings,
     ReplayWriterRecovery,
     SuspensionRefusal,
+    applied_control,
+    classify_control,
     effective_deadline,
     physical_start,
     proof_covers,
@@ -372,7 +374,25 @@ class ReplayRuntime:
             changed = self._prepare_operations(started, now=now, at=at)
             if not changed:
                 break
+        if not started and self._drained:
+            self._park(now=now, at=at)
         return tuple(started)
+
+    @property
+    def _drained(self) -> bool:
+        """Whether this epoch's Pause has no admitted work left in flight."""
+        if self._archive.controls.draining is None:
+            return False
+        unstarted = {span.id for span in self._archive.unstarted_turns}
+        return all(span.id in unstarted for span in self._archive.unresolved)
+
+    def _park(self, *, now: float, at: Timestamp) -> None:
+        lifecycle = self._epoch.lifecycle
+        if lifecycle is None or lifecycle.state is None or lifecycle.state.field != "parked":
+            self._append(
+                Oneof("lifecycle", Lifecycle(state=Oneof("parked", Parked()))), now=now, at=at
+            )
+        self._paused = True
 
     def _prepare_operations(self, started: list[Span], *, now: float, at: Timestamp) -> bool:
         changed = False
@@ -388,6 +408,8 @@ class ReplayRuntime:
             execution = (
                 operation if retained is None or retained.replay is None else retained.replay
             )
+            if not self._admitted(execution):
+                continue
             outcome = self.accounting.decide(execution, self.allowance)
             if isinstance(outcome, (ReplayIterationBlocked, ReplayResourcesBlocked)):
                 self._admission_limited = True
@@ -401,6 +423,22 @@ class ReplayRuntime:
                 self.accept(span.id, now=now, at=at)
                 changed = True
         return changed
+
+    def _admitted(self, operation: pb.OperationReplay) -> bool:
+        """Whether this epoch's Pause or pause-now still admits a physical turn start."""
+        if self._physical_within(operation) is None:
+            return True
+        retained = self._archive.pending_logical(operation)
+        if retained is not None:
+            bound = None if retained.replay is None else retained.replay.turn_bound
+            return self._archive.controls.admits(retained.id if bound is None else bound.origin)
+        native = _native_turn(operation)
+        turn = None if native is None else native[1]
+        if turn is None or not turn.continuation_of:
+            return self._archive.controls.admits(None)
+        origin = self._archive.span(turn.continuation_of).replay
+        bound = None if origin is None else origin.turn_bound
+        return bound is not None and self._archive.controls.admits(bound.origin)
 
     def _physical_within(self, operation: pb.OperationReplay) -> float | None:
         policy = operation.policy
@@ -450,16 +488,10 @@ class ReplayRuntime:
 
     def _bind_turn(self, parent: Span, *, now: float) -> None:
         operation = parent.replay
-        if operation is None or operation.policy is None or operation.policy.request is None:
+        native = None if operation is None else _native_turn(operation)
+        if operation is None or native is None:
             return
-        request = operation.policy.request
-        if request.type_url != replay_agent.ReplayAgentRequest.desc().type_name:
-            return
-        native = replay_agent.ReplayAgentRequest.from_binary(request.value)
-        validate(native)
-        if native.action is None or native.action.field != "turn":
-            return
-        turn = native.action.value
+        request, turn = native
         if turn.continuation_of:
             origin = self._archive.span(turn.continuation_of)
             if origin.replay is None or origin.replay.turn_bound is None:
@@ -470,7 +502,7 @@ class ReplayRuntime:
         else:
             operation.turn_bound = pb.ReplayTurnBound(
                 origin=parent.id,
-                deadline=now + native.within_seconds,
+                deadline=now + request.within_seconds,
                 hold_credit_seconds=turn.hold_credit_seconds,
             )
 
@@ -499,6 +531,9 @@ class ReplayRuntime:
             ordinal=len(children),
         )
         child.started_at = self._archive.clock
+        if child.replay_physical is not None:
+            origin = parent.id if bound is None else bound.origin
+            child.replay_physical.guidance = list(self._archive.controls.guidance(origin))
         self._append(Oneof("span", SpanRecord(change=Change.STARTED, span=child)), now=now, at=at)
         return child
 
@@ -711,6 +746,48 @@ class ReplayRuntime:
     def writer_intent(self, manifest: pb.WriterManifest, *, now: float, at: Timestamp) -> None:
         """W2: commit the environment's complete closed grant set before cleanup I/O."""
         self._writer_fact(manifest, now=now, at=at)
+
+    def control(
+        self, control: pb.ReplayControl, *, now: float, at: Timestamp
+    ) -> pb.ReplayControlDisposition:
+        """Record ``control``'s disposition before its inbox entry is settled or rejected.
+
+        A stale control is recorded as stale and changes nothing. Pause-now records
+        the children it withdraws, then withdraws each before any cancellation. A
+        repeated request returns its recorded disposition and finishes its withdrawals.
+        """
+        _ = self._active_scheduler
+        validate(control)
+        disposition = self._archive.controls.disposition(control.request_id)
+        if disposition is None:
+            disposition = classify_control(control, self._archive.control_view())
+            self._record_schemas((pb.ReplayControlDisposition,), now=now, at=at)
+            self._append(
+                Oneof(
+                    "notice",
+                    Notice(
+                        severity=Severity.WARNING,
+                        code=NoticeCode.FRAMEWORK_WARNING,
+                        message="Operator control disposed.",
+                        detail=Any(
+                            type_url=disposition.desc().type_name, value=disposition.to_binary()
+                        ),
+                    ),
+                ),
+                now=now,
+                at=at,
+            )
+        elif disposition.control != control:
+            problem = "one control request id has contradictory content"
+            raise ReplayError(problem)
+        applied = applied_control(disposition)
+        if applied is not None and self._archive.controls.halted:
+            for identity in applied.withdrawn:
+                child = self._span(identity)
+                if not child.has_field("ended_at") and child.replay_observation is None:
+                    self.withdraw(identity, now=now, at=at)
+            self._park(now=now, at=at)
+        return disposition
 
     def tool_fact(
         self,
@@ -1096,3 +1173,19 @@ class ReplayRuntime:
         finally:
             if self._fence is not None:
                 self._store.release(self._fence, now)
+
+
+def _native_turn(
+    operation: pb.OperationReplay,
+) -> tuple[replay_agent.ReplayAgentRequest, replay_agent.ReplayAgentTurn] | None:
+    """The native agent request and turn of a turn operation, or None for any other one."""
+    request = None if operation.policy is None else operation.policy.request
+    if request is None or request.type_url != replay_agent.ReplayAgentRequest.desc().type_name:
+        return None
+    native = replay_agent.ReplayAgentRequest.from_binary(request.value)
+    validate(native)
+    match native.action:
+        case Oneof("turn", turn) if isinstance(turn, replay_agent.ReplayAgentTurn):
+            return native, turn
+        case _:
+            return None

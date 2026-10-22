@@ -21,6 +21,7 @@ from vs_proto.api import (
 from vs_proto.api import replay as pb
 from vs_runlog.api import CurrentEpoch, epoch_has_ended
 
+from ._replay_controls import ControlView, ReplayControls, permit_refusal
 from ._replay_history import (
     AcceptedClock,
     AcceptedReplay,
@@ -78,7 +79,9 @@ class ReplayArchive:
     _epochs: list[bytes] = field(default_factory=list, init=False, repr=False)
     acknowledgements: ReplayAcknowledgements = field(default_factory=ReplayAcknowledgements)
     dependencies: ReplayTurnDependencies = field(default_factory=ReplayTurnDependencies)
+    controls: ReplayControls = field(default_factory=ReplayControls)
     clock: float = 0.0
+    _started_in: dict[str, int] = field(default_factory=dict, init=False, repr=False)
     _policy_drift: bytes | None = field(default=None, init=False, repr=False)
     _observed: str | None = field(default=None, init=False, repr=False)
     _epoch_closed: bool = field(default=False, init=False, repr=False)
@@ -117,7 +120,9 @@ class ReplayArchive:
         result._epochs = self._epochs.copy()
         result.acknowledgements = self.acknowledgements
         result.dependencies = self.dependencies
+        result.controls = self.controls
         result.clock = self.clock
+        result._started_in = self._started_in.copy()
         result._policy_drift = self._policy_drift
         result._observed = self._observed
         result._epoch_closed = self._epoch_closed
@@ -232,6 +237,61 @@ class ReplayArchive:
         """The serial observation whose acceptance must precede further clock progress."""
         return None if self._observed is None else Span.from_binary(self._spans[self._observed])
 
+    def permit(self, turn: str) -> pb.ReplayTurnPermit:
+        """The permit of the physical turn ``turn``: its start epoch, origin and own bound."""
+        child = self.span(turn)
+        physical = child.replay_physical
+        epoch = self._started_in.get(turn)
+        parent = None if physical is None else self.span(physical.logical)
+        bound = None if parent is None or parent.replay is None else parent.replay.turn_bound
+        if epoch is None or bound is None:
+            problem = "a turn permit requires a physical turn with its recorded bound"
+            raise ReplayError(problem)
+        return pb.ReplayTurnPermit(epoch=epoch, turn=bound.origin, bound=deepcopy(bound))
+
+    def control_view(self) -> ControlView:
+        """The committed facts the next control is classified against."""
+        permits: dict[str, pb.ReplayTurnPermit] = {}
+        unfinished: list[str] = []
+        for identity, epoch in self._started_in.items():
+            child = self.span(identity)
+            physical = child.replay_physical
+            if physical is None:
+                continue
+            if epoch == self.epoch and self._bounded(physical.logical):
+                permit = self.permit(identity)
+                permits.setdefault(permit.turn, permit)
+            if not child.has_field("ended_at") and not physical.has_field("withdrawn_sequence"):
+                unfinished.append(identity)
+        live = frozenset(
+            span.id
+            for span in map(Span.from_binary, self._spans.values())
+            if span.replay is not None
+            and span.replay.turn_bound is not None
+            and span.replay.turn_bound.origin == span.id
+            and not span.has_field("ended_at")
+        )
+        return ControlView(
+            self.epoch,
+            bool(self._epochs) and not self._epoch_closed,
+            tuple(permits.values()),
+            tuple(unfinished),
+            live,
+        )
+
+    def _bounded(self, logical: str) -> bool:
+        operation = self.span(logical).replay
+        return operation is not None and operation.turn_bound is not None
+
+    def _check_permit(self, submission: pb.ReplayToolSubmission) -> None:
+        if submission.permit is None:
+            problem = "tool submission requires its requesting turn's permit"
+            raise ReplayError(problem)
+        refusal = permit_refusal(submission.permit, self.permit(submission.turn), epoch=self.epoch)
+        if refusal is not None:
+            problem = f"tool submission permit refused: {refusal}"
+            raise ReplayError(problem)
+
     def append(self, record: Record) -> None:
         """Fold one validated next record; callers discard the index on failure."""
         validate(record)
@@ -310,9 +370,14 @@ class ReplayArchive:
     def _notice(self, detail: Any | None) -> None:
         if detail is None:
             return
-        self.dependencies = self.dependencies.record(detail, self.span)
         name = detail.type_url.rsplit("/", 1)[-1]
-        if name == pb.ReplayPolicyDrift.desc().type_name:
+        if name == pb.ReplayToolSubmission.desc().type_name:
+            self._check_permit(_metadata(detail, pb.ReplayToolSubmission))
+        self.dependencies = self.dependencies.record(detail, self.span)
+        if name == pb.ReplayControlDisposition.desc().type_name:
+            disposition = _metadata(detail, pb.ReplayControlDisposition)
+            self.controls = self.controls.record(disposition, self.control_view())
+        elif name == pb.ReplayPolicyDrift.desc().type_name:
             drift = _metadata(detail, pb.ReplayPolicyDrift)
             if self._policy_drift is not None:
                 problem = "an epoch records policy drift only once"
@@ -401,6 +466,7 @@ class ReplayArchive:
             )
             raise ReplayError(problem)
         self.acknowledgements = resumed
+        self.controls = self.controls.opened()
         self._epochs.append(epoch.to_binary())
         self._policy_drift = None
         self._epoch_closed = False
@@ -579,7 +645,9 @@ class ReplayArchive:
             if physical.ordinal != len(children):
                 problem = "physical child ordinals must be contiguous"
                 raise ReplayError(problem)
+            self.controls = self.controls.start(_origin(parent), tuple(physical.guidance))
             self._children[parent.id] = (*children, span.id)
+            self._started_in[span.id] = record.epoch
         if physical.has_field("termination_proof_digest"):
             self._termination_proof(span)
         if span.replay_observation is not None and (
@@ -655,3 +723,10 @@ def _acknowledgement_batch(epoch: EpochStarted) -> tuple[pb.ReplayAcknowledgemen
     if epoch.replay_acknowledgement is not None:
         return (epoch.replay_acknowledgement,)
     return tuple(epoch.replay_acknowledgements)
+
+
+def _origin(logical: Span) -> str:
+    """The logical turn a physical start of ``logical`` belongs to."""
+    operation = logical.replay
+    bound = None if operation is None else operation.turn_bound
+    return logical.id if bound is None else bound.origin

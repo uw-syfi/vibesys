@@ -7,6 +7,7 @@ from vs_runtime._evaluation_recovery import (
     EvaluationWriterReconciliation,
     LocalEvaluationReceipts,
 )
+from vs_runtime._replay_controls import apply_controls
 from vs_runtime._replay_evaluation import EvaluationReplayExecutor, replay_measurement_plan
 from vs_runtime._replay_executors import ReplayExecutors
 from vs_runtime._replay_fake import FakeReplayExecutor
@@ -101,6 +102,7 @@ __all__ = [
     "WriterProofError",
     "WriterReconciler",
     "WriterRegistry",
+    "apply_controls",
     "drive_replay",
     "replay_bindings",
     "replay_measurement_plan",
