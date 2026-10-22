@@ -8,12 +8,20 @@ import {
   HelloResponseSchema,
   type HostCallRequest,
   HostCallRequestSchema,
+  type HostMutateRequest,
+  HostMutateRequestSchema,
   type HostReadRequest,
   HostReadRequestSchema,
   HostService,
   TailRequestSchema,
 } from '@vibesys/proto';
-import {type GatewayDialer, HELLO_METHOD, READ_METHOD, TAIL_METHOD} from '../shell/gateway.js';
+import {
+  type GatewayDialer,
+  HELLO_METHOD,
+  MUTATE_METHOD,
+  READ_METHOD,
+  TAIL_METHOD,
+} from '../shell/gateway.js';
 import {GrpcDecoder, GrpcError, grpcFrame} from '../shell/grpc.js';
 
 export interface FakeTail {
@@ -34,6 +42,11 @@ export interface FakeRead {
   end(code?: number, detail?: string): void;
 }
 
+export interface FakeMutate {
+  readonly request: HostMutateRequest;
+  end(code?: number, detail?: string): void;
+}
+
 export class FakeGateway implements GatewayDialer {
   readonly forces: boolean[] = [];
   schemaHash = API_SCHEMA_HASH;
@@ -44,6 +57,8 @@ export class FakeGateway implements GatewayDialer {
   readonly #tails: FakeTail[] = [];
   readonly #hostCalls: FakeHostCall[] = [];
   readonly #hostWaiters: Array<(call: FakeHostCall) => void> = [];
+  readonly #mutations: FakeMutate[] = [];
+  readonly #mutateWaiters: Array<(call: FakeMutate) => void> = [];
   readonly #reads: FakeRead[] = [];
   readonly #readWaiters: Array<(call: FakeRead) => void> = [];
   readonly #waiters: Array<(tail: FakeTail) => void> = [];
@@ -95,6 +110,10 @@ export class FakeGateway implements GatewayDialer {
       this.#hostCall(stream, bytes);
       return true;
     }
+    if (method === MUTATE_METHOD) {
+      this.#mutate(stream, bytes);
+      return true;
+    }
     if (method === READ_METHOD) {
       this.#read(stream, bytes);
       return true;
@@ -109,6 +128,16 @@ export class FakeGateway implements GatewayDialer {
     };
     const waiter = this.#hostWaiters.shift();
     if (waiter === undefined) this.#hostCalls.push(call);
+    else waiter(call);
+  }
+
+  #mutate(stream: ServerHttp2Stream, bytes: Uint8Array): void {
+    const call: FakeMutate = {
+      request: fromBinary(HostMutateRequestSchema, bytes),
+      end: (code, detail) => end(stream, code, detail),
+    };
+    const waiter = this.#mutateWaiters.shift();
+    if (waiter === undefined) this.#mutations.push(call);
     else waiter(call);
   }
 
@@ -173,6 +202,13 @@ export class FakeGateway implements GatewayDialer {
     const call = this.#hostCalls.shift();
     return call === undefined
       ? new Promise(resolve => this.#hostWaiters.push(resolve))
+      : Promise.resolve(call);
+  }
+
+  nextMutate(): Promise<FakeMutate> {
+    const call = this.#mutations.shift();
+    return call === undefined
+      ? new Promise(resolve => this.#mutateWaiters.push(resolve))
       : Promise.resolve(call);
   }
 

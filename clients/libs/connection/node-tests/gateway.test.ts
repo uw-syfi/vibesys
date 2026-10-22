@@ -2,27 +2,22 @@ import {describe, test} from 'node:test';
 import {create, toBinary} from '@bufbuild/protobuf';
 import {
   API_SCHEMA_HASH,
-  CompletePathsRequestSchema,
-  DescribeMachineRequestSchema,
+  encodeHostMutate,
   encodeHostRead,
   GetBlobsResponseSchema,
-  GetTaskGoalRequestSchema,
   HelloResponseSchema,
   HOST_API_MAX_MESSAGE_BYTES,
   HostCallRequestSchema,
+  HostMutateRequestSchema,
+  HostReadRequestSchema,
   HostService,
   hostCallBudgets,
-  InspectCandidateRequestSchema,
-  ListComputeRequestSchema,
-  ListExamplesRequestSchema,
-  ListHarnessesRequestSchema,
-  ListTasksRequestSchema,
-  operationPolicies,
-  PreflightRunRequestSchema,
+  mutateBudgets,
   readBudgets,
   TailRequestSchema,
   TailResponseSchema,
   validatedFromBinary,
+  validateHostPayload,
 } from '@vibesys/proto';
 import {Seeded} from '@vibesys/store/testing';
 import {FakeClock} from '@vibesys/transport/testing';
@@ -34,6 +29,7 @@ import {
   GrpcError,
   grpcFrame,
   HELLO_METHOD,
+  MUTATE_METHOD,
   READ_METHOD,
   TAIL_METHOD,
 } from '../src/index.js';
@@ -404,81 +400,81 @@ for (const [method, budget] of Object.entries(hostCallBudgets)) {
   });
 }
 
-function readRequest(name: string): Uint8Array {
-  const requestId = 'request-a';
-  if (name === 'InspectCandidate') {
-    return toBinary(
-      InspectCandidateRequestSchema,
-      create(InspectCandidateRequestSchema, {
-        requestId,
-        path: '/candidate',
-        selectionRevision: 1n,
-      }),
-    );
-  }
-  if (name === 'CompletePaths') {
-    return toBinary(
-      CompletePathsRequestSchema,
-      create(CompletePathsRequestSchema, {requestId, prefix: '/manual/'}),
-    );
-  }
-  if (name === 'ListTasks') {
-    return toBinary(
-      ListTasksRequestSchema,
-      create(ListTasksRequestSchema, {requestId, project: '/project'}),
-    );
-  }
-  if (name === 'GetTaskGoal') {
-    return toBinary(
-      GetTaskGoalRequestSchema,
-      create(GetTaskGoalRequestSchema, {requestId, project: '/project', task: 'bench'}),
-    );
-  }
-  if (name === 'PreflightRun') {
-    return toBinary(
-      PreflightRunRequestSchema,
-      create(PreflightRunRequestSchema, {requestId, project: '/project'}),
-    );
-  }
-  const schema = {
-    ListHarnesses: ListHarnessesRequestSchema,
-    ListExamples: ListExamplesRequestSchema,
-    DescribeMachine: DescribeMachineRequestSchema,
-    ListCompute: ListComputeRequestSchema,
-  }[name];
-  if (schema === undefined) throw new Error(`no read payload for ${name}`);
-  return toBinary(schema, create(schema, {requestId}));
-}
+const cluster = {
+  name: 'cluster-a',
+  workspace: '/work',
+  reach: {value: {case: 'sshReach', value: {kind: 'ssh', host: 'host-a'}}},
+};
+const deadlineInputs = {
+  listTasks: {project: '/project'},
+  listHarnesses: {},
+  listExamples: {},
+  getTaskGoal: {project: '/project', task: 'bench'},
+  describeMachine: {},
+  listCompute: {},
+  preflightRun: {project: '/project'},
+  inspectCandidate: {path: '/candidate', selectionRevision: 1n},
+  completePaths: {prefix: '/manual/'},
+  inspectDestination: {example: 'queue', destination: '/work/queue'},
+  createExample: {example: 'queue', destination: '/work/queue'},
+  copyProject: {source: '/project', destination: '/work/copy'},
+  putCluster: {cluster},
+  removeCluster: {name: 'cluster-a'},
+  testCluster: {cluster},
+  startRun: {project: '/project'},
+} satisfies Record<keyof typeof readBudgets | keyof typeof mutateBudgets, object>;
 
-for (const policy of Object.values(operationPolicies)) {
-  const slot =
-    `${policy.name[0]?.toLowerCase() ?? ''}${policy.name.slice(1)}` as keyof typeof readBudgets;
-  const budget = readBudgets[slot];
-  test(`read ${policy.name} waits for the registry budget above the runner cap`, {
-    timeout: 15000,
-  }, async () => {
-    expect(budget.totalMs).toBeGreaterThan(budget.capMs);
-    expect(budget.totalMs).toBe(budget.capMs + budget.graceMs);
-    const fake = new FakeGateway();
-    const clock = new FakeClock();
-    const connection = new GatewayConnection(fake, clock.schedule);
-    const pending = connection
-      .unary(
-        READ_METHOD,
-        encodeHostRead('/checkout', policy.name, readRequest(policy.name)),
-        new AbortController().signal,
-      )
-      .catch(error => String(error));
-    try {
-      await fake.nextRead();
-      await clock.waitUntilScheduled(budget.totalMs);
-      clock.advanceBy(budget.totalMs);
-      expect(await pending).toContain('deadline');
-    } finally {
-      connection.close();
-      fake.close();
-    }
-  });
+for (const {kind, schema, budgets, method, encode, nextCall} of [
+  {
+    kind: 'read',
+    schema: HostReadRequestSchema,
+    budgets: readBudgets,
+    method: READ_METHOD,
+    encode: encodeHostRead,
+    nextCall: (fake: FakeGateway) => fake.nextRead(),
+  },
+  {
+    kind: 'mutate',
+    schema: HostMutateRequestSchema,
+    budgets: mutateBudgets,
+    method: MUTATE_METHOD,
+    encode: encodeHostMutate,
+    nextCall: (fake: FakeGateway) => fake.nextMutate(),
+  },
+]) {
+  for (const [slot, budget] of Object.entries(budgets)) {
+    test(`${kind} ${slot} waits for the registry budget above the runner cap`, {
+      timeout: 15000,
+    }, async () => {
+      expect(budget.totalMs).toBeGreaterThan(budget.capMs);
+      expect(budget.totalMs).toBe(budget.capMs + budget.graceMs);
+      const field = schema.fields.find(field => field.localName === slot);
+      if (field?.fieldKind !== 'message') throw new Error(`no ${kind} payload for ${slot}`);
+      const name = `${slot[0]?.toUpperCase() ?? ''}${slot.slice(1)}`;
+      const fake = new FakeGateway();
+      const clock = new FakeClock();
+      const connection = new GatewayConnection(fake, clock.schedule);
+      const input = deadlineInputs[slot as keyof typeof deadlineInputs];
+      const payload = toBinary(
+        field.message,
+        create(field.message, {requestId: 'request-a', ...input}),
+      );
+      const bytes = encode('/checkout', name, payload);
+      validateHostPayload(method, 'input', bytes);
+      const pending = connection
+        .unary(method, bytes, new AbortController().signal)
+        .catch(error => String(error));
+      try {
+        await nextCall(fake);
+        await clock.waitUntilScheduled(budget.totalMs);
+        clock.advanceBy(budget.totalMs);
+        expect(await pending).toContain('deadline');
+      } finally {
+        connection.close();
+        fake.close();
+      }
+    });
+  }
 }
 
 test('a maximum-size blob plus response metadata fits the shared gateway frame budget', () => {
