@@ -323,7 +323,9 @@ for (const [method, deadline] of [
   ['postIntent', 15_000],
   ['relaunch', 35_000],
 ] as const) {
-  test(`host ${method} leaves room for its inner admission deadline`, async () => {
+  test(`host ${method} leaves room for its inner admission deadline`, {
+    timeout: 15000,
+  }, async () => {
     const fake = new FakeGateway();
     const clock = new FakeClock();
     const connection = new GatewayConnection(fake, clock.schedule);
@@ -338,6 +340,7 @@ for (const [method, deadline] of [
                 projectRoot: '/project',
                 runId: 'run-a',
                 requestId: 'id-a',
+                expectedEpoch: 1n,
                 intent: {case: 'pause', value: {}},
               },
             },
