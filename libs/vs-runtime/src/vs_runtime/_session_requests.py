@@ -81,6 +81,7 @@ from vs_core.api import (
     SnapshotAndRetainRun,
     TargetObservation,
     TurnObserved,
+    TurnPermit,
     TurnSpec,
     WorkspaceRef,
 )
@@ -217,6 +218,13 @@ class SessionResolver(Protocol):
         self, turn: TurnSpec, workspace: AccessGuardedWorkspace
     ) -> AgentSessionSpec | None:
         """The provider session configuration for *turn* (role, workspace, policy)."""
+        ...
+
+    def hold_permit(self, execution_id: str, scope: Scope, permit: TurnPermit) -> None:
+        """Record the logical-turn permit before preparation publishes the execution.
+
+        A resolver with no control channel records nothing.
+        """
         ...
 
     def output_schema(self, ref: SchemaRef) -> type[BaseModel] | None:
@@ -789,7 +797,9 @@ class RuntimeSessionRequests:
                 _unknown(f"cannot read the conversation checkpoint: {error}", binding.resource_id)
             ) from error
 
-    async def _resolve(self, request: DispatchTurn, bkey: str) -> tuple[SessionBinding, _Dispatch]:
+    async def _resolve(
+        self, request: DispatchTurn, bkey: str, permit: TurnPermit | None = None
+    ) -> tuple[SessionBinding, _Dispatch]:
         """The ensured session and the resolved dispatch, or a refusal naming what is missing."""
         turn = request.turn
         binding = load_session_binding(self._store, bkey)
@@ -804,6 +814,9 @@ class RuntimeSessionRequests:
         grant = self._resolver.access_grant(turn)
         if workspace is None or grant is None:
             raise _RefusalError(_rejected("the turn's workspace or access cannot be resolved"))
+        scope = turn.workspace if isinstance(turn.workspace, Scope) else turn.workspace.scope
+        if permit is not None:
+            self._resolver.hold_permit(turn.invocation_id.root, scope, permit)
         spec = self._resolver.agent_spec(turn, workspace)
         template = self._resolver.template(turn)
         message = self._resolver.message(turn, (*request.inputs, *request.guidance))
@@ -840,7 +853,7 @@ class RuntimeSessionRequests:
     async def _dispatch(self, request: DispatchTurn, call: _Call) -> _Facts:
         turn = request.turn
         bkey = self._binding_key(request, turn.session.session_id)
-        binding, dispatch = await self._resolve(request, bkey)
+        binding, dispatch = await self._resolve(request, bkey, call.context.permit)
         access_key = AccessKey(binding=bkey, invocation=dispatch.invocation)
         if self.settlement.receipt(access_key) is None:
             # Before the dispatch is recorded: a refusal here proves no provider call began.

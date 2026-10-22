@@ -241,7 +241,12 @@ def rejected(
     )
 
 
-def capped(event: AgentMeasurementRequested) -> Within:
-    """The agent's limit, no longer than the plan's declared stages and queue allowance."""
+def capped(
+    event: AgentMeasurementRequested, *, deadline_at: float | None = None, now_at: float = 0.0
+) -> Within:
+    """The agent's limit, no longer than the plan or the turn permit's deadline."""
     within = event.within
-    return within.model_copy(update={"limit": min(within.limit, event.plan.time_bound)})
+    limit = min(within.limit, event.plan.time_bound)
+    if deadline_at is not None:
+        limit = min(limit, max(deadline_at - now_at, 0.0))
+    return within.model_copy(update={"limit": limit})

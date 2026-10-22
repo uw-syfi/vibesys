@@ -8,9 +8,9 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from ._strategy_operations import RenderRoleArtifactsBase
+from ._turn_permit import invocation_permit, permit_for_command, permit_for_request
 from .types.attempts import CloseAttemptScope, DiscardWorkspace, RetainRevision, SnapshotAndRetain
-from .types.common import DecisionId, ExecuteRegisteredOperation, RequestId, RunStatus
+from .types.common import RequestId, RunStatus
 from .types.evaluation import (
     CancelOwnedJob,
     CollectEvidence,
@@ -29,7 +29,6 @@ from .types.sessions import (
     SessionPhase,
     SnapshotAndRetainRun,
 )
-from .types.strategy import Operation, RequestTurn
 from .types.until import Until
 
 if TYPE_CHECKING:
@@ -38,7 +37,6 @@ if TYPE_CHECKING:
     from .types.records import RecordsState, Request, RequestRecord
     from .types.sessions import Invocation, SessionsState
     from .types.strategy import Command
-
 # These effects finish work already performed by a turn. Everything else waits for
 # relaunch, including prepared turns, measurements, polls and queued attempts.
 _DRAIN_EFFECTS = (
@@ -71,71 +69,15 @@ def admitted_turns(state: CoreState) -> tuple[InvocationRef, ...]:
     )
 
 
-def _ancestor_bound(state: CoreState, ref: InvocationRef | None) -> float | None:
-    park = state.run.park
-    if park is None or park.immediate or park.epoch != state.records.recovery.epoch:
-        return None
-    seen: set[InvocationRef] = set()
-    while ref is not None and ref not in seen:
-        seen.add(ref)
-        invocation = next(
-            (row for row in state.sessions.invocations if row.invocation == ref), None
-        )
-        if invocation is None:
-            return None
-        if ref in park.admitted_turns:
-            return invocation.until.at if state.run.now_at < invocation.until.at else None
-        ref = invocation.turn.predecessor
-    return None
-
-
 def drain_bound(state: CoreState, command: Command) -> float | None:
     """The original deadline authorizing a correction or evaluation-wait continuation."""
-    ref = None
-    if isinstance(command, RequestTurn):
-        ref = command.turn.predecessor
-        if command.turn.continuation_id is not None:
-            continuation = next(
-                (
-                    row
-                    for row in state.evaluation.continuations
-                    if row.continuation_id == command.turn.continuation_id
-                ),
-                None,
-            )
-            ref = None if continuation is None else continuation.invocation
-    elif isinstance(command, Operation) and isinstance(command.request, RenderRoleArtifactsBase):
-        ref = command.request.continuation_of
-    return _ancestor_bound(state, ref)
+    permit = permit_for_command(state, command)
+    return None if permit is None else permit.deadline_at
 
 
 def _request_bound(state: CoreState, request: Request) -> float | None:
-    if isinstance(request, DispatchTurn | ResumeSessionTurn):
-        return drain_bound(
-            state,
-            RequestTurn(
-                decision_id=request.decision_id or DecisionId(root="drain-proof"),
-                scope=request.scope,
-                turn=request.turn,
-            ),
-        )
-    if isinstance(request, EnsureSession):
-        return next(
-            (
-                _ancestor_bound(state, row.turn.predecessor)
-                for row in state.sessions.invocations
-                if row.turn.session.session_id == request.spec.session_id
-                and _ancestor_bound(state, row.turn.predecessor) is not None
-            ),
-            None,
-        )
-    if isinstance(request, ExecuteRegisteredOperation):
-        receipt = next(
-            (row for row in state.run.receipts if request.request_id in row.request_ids), None
-        )
-        if receipt is not None and receipt.decision is not None:
-            return drain_bound(state, receipt.decision)
-    return None
+    permit = permit_for_request(state, request)
+    return None if permit is None else permit.deadline_at
 
 
 def dispatch_allowed(state: CoreState, request: Request) -> bool:
@@ -150,8 +92,7 @@ def dispatch_allowed(state: CoreState, request: Request) -> bool:
         _request_bound(state, request) is not None
         or isinstance(request, _DRAIN_EFFECTS)
         or (
-            isinstance(request, SubmitMeasurement | ObserveOwnedJob | InspectOwnedJob)
-            and (not isinstance(request, SubmitMeasurement) or request.decision_id is None)
+            isinstance(request, ObserveOwnedJob | InspectOwnedJob)
             and scope_in_flight(state.sessions, state.records, request.scope)
         )
     )
@@ -206,7 +147,7 @@ def _turns_in_flight(state: CoreState) -> bool:
         _executing(turn, state.records)
         or (
             turn.phase is SessionPhase.SUSPENDED
-            and _ancestor_bound(state, turn.invocation) is not None
+            and invocation_permit(state, turn.invocation) is not None
         )
         for turn in state.sessions.invocations
     )

@@ -242,6 +242,16 @@ def _load_run_park() -> dict[str, object]:
     return {"pause_withdraws": pause_withdraws}
 
 
+def _load_turn_permit() -> dict[str, object]:
+    from vs_core._turn_permit import TurnPermit, admitted_work_remains, permit_for_request
+
+    return {
+        "TurnPermit": TurnPermit,
+        "admitted_work_remains": admitted_work_remains,
+        "permit_for_request": permit_for_request,
+    }
+
+
 def _load_run_pause() -> dict[str, object]:
     from vs_core._run_pause import (
         DEADLINE_STOP,
@@ -1820,6 +1830,7 @@ EXPORT_MODULES: dict[str, Callable[[], dict[str, object]]] = {
     "vs_core._proofs": _load_proofs,
     "vs_core._registry": _load_registry,
     "vs_core._run_park": _load_run_park,
+    "vs_core._turn_permit": _load_turn_permit,
     "vs_core._run_pause": _load_run_pause,
     "vs_core._search_events": _load_search_events,
     "vs_core._search_run": _load_search_run,
