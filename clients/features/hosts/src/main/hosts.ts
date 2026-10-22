@@ -11,6 +11,7 @@ import {
   HelperRequestError,
   type HostConnection,
   type LogsLease,
+  type RegistrySavedRuns,
   type RegistrySetup,
   type RunWatch,
 } from '@vibesys/connection';
@@ -101,6 +102,7 @@ export interface HostsDeps {
   readonly endLogin?: (id: HostId) => void;
   /** WatchRuns while this host is shown. Cancel reaps the stream. */
   readonly runs?: Pick<RunWatch, 'start' | 'cancel'>;
+  readonly savedRuns?: RegistrySavedRuns;
 }
 
 /** How many times a summary is read again when its pages disagree on where the run stood. */
@@ -638,6 +640,10 @@ export class Hosts {
 
   /** Every run of `project` on `id`, newest first (`runs.list`); a digest is asked for separately. */
   async projectRuns(id: HostId, project: string): Promise<readonly ListedRun[]> {
+    if (await this.#transportV2(id)) {
+      if (!this.#deps.savedRuns) throw new Error('saved-run registry is missing');
+      return this.#deps.savedRuns.list(id, project, new AbortController().signal);
+    }
     await using lease = await this.connection(id);
     try {
       const reply = await lease.connection.request({type: 'runs.list', project});

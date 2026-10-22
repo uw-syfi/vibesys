@@ -351,3 +351,12 @@ jobs = ["proto", "python"]
 native_languages = []
 native_targets = []
 pnpm_packages = []
+
+[[cases]]
+name = "native saved-run metadata selects its consumers"
+paths = ["src/server/host_saved_runs.py"]
+jobs = ["python"]
+[cases.collections]
+native_languages = []
+native_targets = []
+pnpm_packages = []

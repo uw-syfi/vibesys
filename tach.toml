@@ -234,7 +234,7 @@ depends_on = ["vs_decode.api", "server.host_api", "server.host_helper_requests",
 [[modules]]
 # The host helper's request answering: one request through the host's interfaces.
 path = "server.host_helper_requests"
-depends_on = ["server.host_operation_types_generated", "vibesys.api.host_operations", "vs_proto", "vs_decode.api", "server.host_agent_logins", "server.host_api", "server.host_compute", "server.host_examples", "server.host_helper_compute", "server.host_helper_logs", "server.host_helper_preflight", "server.host_machine_facts", "server.host_preflight", "server.host_run_dashboard", "server.host_run_events", "server.host_run_reader", "server.host_run_summary", "server.host_helper_readers", "server.registry", "server.relay", "server.run_digest", "server.run_summary", "server.usage_window", "vs_project", "vs_sim.api"]
+depends_on = ["server.host_saved_runs", "server.host_operation_types_generated", "vibesys.api.host_operations", "vs_proto", "vs_decode.api", "server.host_agent_logins", "server.host_api", "server.host_compute", "server.host_examples", "server.host_helper_compute", "server.host_helper_logs", "server.host_helper_preflight", "server.host_machine_facts", "server.host_preflight", "server.host_run_dashboard", "server.host_run_events", "server.host_run_reader", "server.host_run_summary", "server.host_helper_readers", "server.registry", "server.relay", "server.run_digest", "server.run_summary", "server.usage_window", "vs_project", "vs_sim.api"]
 
 [[modules]]
 # The read-only servers Chat reads ended runs through: found by run, started on demand.
@@ -312,7 +312,7 @@ depends_on = ["vs_decode.api", "server.host_api", "server.host_run_dashboard", "
 [[modules]]
 # The host helper's interfaces on a real host: projects, directories, launches, the checkout.
 path = "server.host_helper_os"
-depends_on = ["server.host_examples", "server.host_agent_logins", "vs_decode.api", "server.host_api", "server.host_helper_logs", "server.host_helper_machine", "server.host_helper_preflight", "server.host_preflight", "server.host_helper_requests", "server.host_run_events", "server.run_digest", "server.span_index", "server.run_summary", "server.run_summary_cache", "vs_logs", "vs_project", "vs_sim.api"]
+depends_on = ["server.host_saved_runs", "vs_proto", "server.host_examples", "server.host_agent_logins", "vs_decode.api", "server.host_api", "server.host_helper_logs", "server.host_helper_machine", "server.host_helper_preflight", "server.host_preflight", "server.host_helper_requests", "server.host_run_events", "server.run_digest", "server.span_index", "server.run_summary", "server.run_summary_cache", "vs_logs", "vs_project", "vs_sim.api"]
 
 [[modules]]
 # A run's summary: the fold of its journal that the run level shows, as a pure read model.
@@ -2094,3 +2094,11 @@ depends_on = ["server.host_api", "vs_proto"]
 [[interfaces]]
 from = ["server.host_operation_types_generated"]
 expose = ["is_registry_read", "RegistryReadRequest", "UnmigratedHelperRequest"]
+
+[[modules]]
+path = "server.host_saved_runs"
+depends_on = ["server.host_api", "vibesys.api.transport", "vs_project", "vs_proto", "vs_runlog", "vs_sim.api"]
+
+[[interfaces]]
+from = ["server.host_saved_runs"]
+expose = ["page_saved_runs", "without_dashboards"]

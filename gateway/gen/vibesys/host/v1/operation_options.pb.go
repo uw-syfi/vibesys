@@ -232,7 +232,8 @@ func (Executor) EnumDescriptor() ([]byte, []int) {
 type OperationPolicy struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Temporary adapter spelling, removed with the helper transport.
-	AdapterMethod string          `protobuf:"bytes,12,opt,name=adapter_method,json=adapterMethod,proto3" json:"adapter_method,omitempty"`
+	// Absent on native operations that do not replace a helper method.
+	AdapterMethod *string         `protobuf:"bytes,12,opt,name=adapter_method,json=adapterMethod,proto3,oneof" json:"adapter_method,omitempty"`
 	OperationId   uint32          `protobuf:"varint,1,opt,name=operation_id,json=operationId,proto3" json:"operation_id,omitempty"`
 	CapMs         uint32          `protobuf:"varint,2,opt,name=cap_ms,json=capMs,proto3" json:"cap_ms,omitempty"`
 	GraceMs       uint32          `protobuf:"varint,3,opt,name=grace_ms,json=graceMs,proto3" json:"grace_ms,omitempty"`
@@ -279,8 +280,8 @@ func (*OperationPolicy) Descriptor() ([]byte, []int) {
 }
 
 func (x *OperationPolicy) GetAdapterMethod() string {
-	if x != nil {
-		return x.AdapterMethod
+	if x != nil && x.AdapterMethod != nil {
+		return *x.AdapterMethod
 	}
 	return ""
 }
@@ -449,9 +450,9 @@ var File_vibesys_host_v1_operation_options_proto protoreflect.FileDescriptor
 
 const file_vibesys_host_v1_operation_options_proto_rawDesc = "" +
 	"\n" +
-	"'vibesys/host/v1/operation_options.proto\x12\x0fvibesys.host.v1\x1a\x1bbuf/validate/validate.proto\x1a google/protobuf/descriptor.proto\"\xc2\x05\n" +
-	"\x0fOperationPolicy\x12=\n" +
-	"\x0eadapter_method\x18\f \x01(\tB\x16\xbaH\x13r\x112\x0f^[a-z][a-z_.]*$R\radapterMethod\x12*\n" +
+	"'vibesys/host/v1/operation_options.proto\x12\x0fvibesys.host.v1\x1a\x1bbuf/validate/validate.proto\x1a google/protobuf/descriptor.proto\"\xda\x05\n" +
+	"\x0fOperationPolicy\x12B\n" +
+	"\x0eadapter_method\x18\f \x01(\tB\x16\xbaH\x13r\x112\x0f^[a-z][a-z_.]*$H\x00R\radapterMethod\x88\x01\x01\x12*\n" +
 	"\foperation_id\x18\x01 \x01(\rB\a\xbaH\x04*\x02 \x00R\voperationId\x12\"\n" +
 	"\x06cap_ms\x18\x02 \x01(\rB\v\xbaH\b*\x06\x18\xc0\xcf$ \x00R\x05capMs\x12&\n" +
 	"\bgrace_ms\x18\x03 \x01(\rB\v\xbaH\b*\x06\x18\xb0\xea\x01 \x00R\agraceMs\x12D\n" +
@@ -463,7 +464,7 @@ const file_vibesys_host_v1_operation_options_proto_rawDesc = "" +
 	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\vcardinality\x12A\n" +
 	"\bexecutor\x18\a \x01(\x0e2\x19.vibesys.host.v1.ExecutorB\n" +
 	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\bexecutor\x122\n" +
-	"\x0efirst_event_ms\x18\b \x01(\rB\a\xbaH\x04*\x02 \x00H\x00R\ffirstEventMs\x88\x01\x01\x12>\n" +
+	"\x0efirst_event_ms\x18\b \x01(\rB\a\xbaH\x04*\x02 \x00H\x01R\ffirstEventMs\x88\x01\x01\x12>\n" +
 	"\vcorrelation\x18\t \x03(\v2\x1c.vibesys.host.v1.CorrelationR\vcorrelation\x12.\n" +
 	"\vrequest_tag\x18\n" +
 	" \x01(\rB\r\xbaH\n" +
@@ -471,6 +472,7 @@ const file_vibesys_host_v1_operation_options_proto_rawDesc = "" +
 	"requestTag\x122\n" +
 	"\fresponse_tag\x18\v \x01(\rB\x0f\xbaH\f*\n" +
 	"8\x02\x18\xff\xff\xff\xff\x01 \x00R\vresponseTagB\x11\n" +
+	"\x0f_adapter_methodB\x11\n" +
 	"\x0f_first_event_ms\"u\n" +
 	"\vCorrelation\x121\n" +
 	"\frequest_path\x18\x01 \x03(\rB\x0e\xbaH\v\x92\x01\b\b\x01\"\x04*\x02 \x00R\vrequestPath\x123\n" +

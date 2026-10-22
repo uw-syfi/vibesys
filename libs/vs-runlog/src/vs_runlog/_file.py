@@ -425,17 +425,23 @@ class FileRunLogWriter:
         self.close()
 
 
-def install_run_log(staged: Path, destination: Path) -> None:
+def install_run_log(
+    staged: Path, destination: Path, *, prepare: Callable[[], None] | None = None
+) -> None:
     """Install a quiescent conversion with its head and keyframes.
 
     The staged log lives in a disposable sibling directory. The authoritative
     JSONL source is untouched; old derived keyframes must not survive a rewrite.
+    When preparation writes shared content, pass it as ``prepare`` so the writer
+    lock covers both content generation and installation.
     """
     if staged.parent == destination.parent:
         message = "staged run.log needs a separate disposable directory"
         raise ValueError(message)
     lock = RunLock(destination.parent / "run.lock")
     try:
+        if prepare is not None:
+            prepare()
         keyframes = destination.parent / "keyframes"
         if keyframes.exists():
             keyframes.replace(staged.parent / "previous-keyframes")

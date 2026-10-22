@@ -385,4 +385,22 @@ service HostOperationsService {
       }
     };
   }
+  // Native discovery does not migrate the helper's runs.list summary contract.
+  rpc ListSavedRuns(vibesys.host.v1.ListSavedRunsRequest) returns (vibesys.host.v1.ListSavedRunsResponse) {
+    option (vibesys.host.v1.operation) = {
+      operation_id: 37
+      request_tag: 37
+      response_tag: 37
+      cap_ms: 10000
+      grace_ms: 5000
+      effect: OPERATION_EFFECT_READ
+      retry: RETRY_BOUNDED_READ
+      cardinality: CARDINALITY_UNARY
+      executor: EXECUTOR_CHECKOUT
+      correlation: {
+        request_path: 1
+        response_path: 1
+      }
+    };
+  }
 }

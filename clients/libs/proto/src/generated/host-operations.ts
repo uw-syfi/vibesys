@@ -17,6 +17,7 @@ export const operationPolicies = Object.freeze({
   InspectCandidate: Object.freeze({name: 'InspectCandidate', id: 17, requestTag: 17, responseTag: 17, capMs: 10000, graceMs: 5000, totalMs: 15000, effect: 1, retry: 2, executor: 2, cardinality: 1, firstEventMs: undefined} as const),
   CompletePaths: Object.freeze({name: 'CompletePaths', id: 18, requestTag: 18, responseTag: 18, capMs: 5000, graceMs: 5000, totalMs: 10000, effect: 1, retry: 2, executor: 3, cardinality: 1, firstEventMs: undefined} as const),
   InspectDestination: Object.freeze({name: 'InspectDestination', id: 23, requestTag: 23, responseTag: 23, capMs: 10000, graceMs: 5000, totalMs: 15000, effect: 1, retry: 2, executor: 1, cardinality: 1, firstEventMs: undefined} as const),
+  ListSavedRuns: Object.freeze({name: 'ListSavedRuns', id: 37, requestTag: 37, responseTag: 37, capMs: 10000, graceMs: 5000, totalMs: 15000, effect: 1, retry: 2, executor: 1, cardinality: 1, firstEventMs: undefined} as const),
   CreateExample: Object.freeze({name: 'CreateExample', id: 34, requestTag: 34, responseTag: 34, capMs: 120000, graceMs: 5000, totalMs: 125000, effect: 2, retry: 3, executor: 1, cardinality: 1, firstEventMs: undefined} as const),
   CopyProject: Object.freeze({name: 'CopyProject', id: 35, requestTag: 35, responseTag: 35, capMs: 120000, graceMs: 5000, totalMs: 125000, effect: 2, retry: 3, executor: 1, cardinality: 1, firstEventMs: undefined} as const),
   PutCluster: Object.freeze({name: 'PutCluster', id: 31, requestTag: 31, responseTag: 31, capMs: 65000, graceMs: 5000, totalMs: 70000, effect: 2, retry: 3, executor: 1, cardinality: 1, firstEventMs: undefined} as const),
@@ -89,6 +90,12 @@ export function acceptInspectDestination(input: MessageInitShape<typeof pb.Inspe
 }
 export async function callInspectDestination(transport: OperationTransport, request: Accepted<"InspectDestination">, signal: OperationSignal): Promise<pb.InspectDestinationResponse> {
   return call(transport, {policy: operationPolicies.InspectDestination, requestSchema: pb.InspectDestinationRequestSchema, responseSchema: pb.InspectDestinationResponseSchema, correlations: [[['requestId'], ['requestId']]]}, request, signal);
+}
+export function acceptListSavedRuns(input: MessageInitShape<typeof pb.ListSavedRunsRequestSchema>): Accepted<"ListSavedRuns"> {
+  return accept(operationPolicies.ListSavedRuns, pb.ListSavedRunsRequestSchema, input);
+}
+export async function callListSavedRuns(transport: OperationTransport, request: Accepted<"ListSavedRuns">, signal: OperationSignal): Promise<pb.ListSavedRunsResponse> {
+  return call(transport, {policy: operationPolicies.ListSavedRuns, requestSchema: pb.ListSavedRunsRequestSchema, responseSchema: pb.ListSavedRunsResponseSchema, correlations: [[['requestId'], ['requestId']]]}, request, signal);
 }
 export function acceptCreateExample(input: MessageInitShape<typeof pb.CreateExampleRequestSchema>): Accepted<"CreateExample"> {
   return accept(operationPolicies.CreateExample, pb.CreateExampleRequestSchema, input);
@@ -171,6 +178,7 @@ export const readBudgets = Object.freeze({
   inspectCandidate: Object.freeze({capMs: 10000, graceMs: 5000, totalMs: 15000} as const),
   completePaths: Object.freeze({capMs: 5000, graceMs: 5000, totalMs: 10000} as const),
   inspectDestination: Object.freeze({capMs: 10000, graceMs: 5000, totalMs: 15000} as const),
+  listSavedRuns: Object.freeze({capMs: 10000, graceMs: 5000, totalMs: 15000} as const),
 } as const);
 export function encodeHostRead(checkout: string, name: string, payload: Uint8Array): Uint8Array {
   switch (name) {
@@ -194,6 +202,8 @@ export function encodeHostRead(checkout: string, name: string, payload: Uint8Arr
       return toBinary(ReadRequestSchema, create(ReadRequestSchema, {checkout, method: {case: 'completePaths', value: fromBinary(pb.CompletePathsRequestSchema, payload)}}));
     case 'InspectDestination':
       return toBinary(ReadRequestSchema, create(ReadRequestSchema, {checkout, method: {case: 'inspectDestination', value: fromBinary(pb.InspectDestinationRequestSchema, payload)}}));
+    case 'ListSavedRuns':
+      return toBinary(ReadRequestSchema, create(ReadRequestSchema, {checkout, method: {case: 'listSavedRuns', value: fromBinary(pb.ListSavedRunsRequestSchema, payload)}}));
     default: throw new Error("unknown read");
   }
 }
@@ -233,6 +243,9 @@ export function decodeHostRead(name: string, payload: Uint8Array): Uint8Array {
     case 'InspectDestination':
       if (result.case !== 'inspectDestination') throw new Error('response correlation mismatch');
       return toBinary(pb.InspectDestinationResponseSchema, result.value);
+    case 'ListSavedRuns':
+      if (result.case !== 'listSavedRuns') throw new Error('response correlation mismatch');
+      return toBinary(pb.ListSavedRunsResponseSchema, result.value);
     default: throw new Error("unknown read");
   }
 }

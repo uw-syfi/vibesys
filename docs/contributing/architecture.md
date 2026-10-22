@@ -168,6 +168,7 @@ graph TD
     server --> vs_prompts
     server --> vs_proto
     server --> vs_redaction
+    server --> vs_runlog
     server --> vs_sim
     server --> vs_slurm
     vibesys --> vs_agent

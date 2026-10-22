@@ -2,6 +2,7 @@ syntax = "proto3";
 package vibesys.host.v1;
 
 import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
 import "vibesys/host/v1/operation_options.proto";
 
 option go_package = "github.com/uw-syfi/vibesys/gateway/gen/vibesys/host/v1;hostv1";
@@ -1622,4 +1623,52 @@ message LoginResponse {
     LoginStartedBody started = 3;
     LoginUnavailableBody unavailable = 4;
   }
+}
+
+// Discovery metadata only. Run facts are read through Skeleton/Tail after import.
+message SavedRun {
+  string run_id = 1 [(buf.validate.field).string.pattern = "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$"];
+  optional string task = 2 [(buf.validate.field).string.max_bytes = 65536];
+  string display_name = 3 [(buf.validate.field).string.max_bytes = 65536];
+  google.protobuf.Timestamp created_at = 4 [(buf.validate.field).required = true];
+  SavedRunImport imported = 5 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  string detail = 6 [(buf.validate.field).string.max_bytes = 65536];
+}
+enum SavedRunImport {
+  SAVED_RUN_IMPORT_UNSPECIFIED = 0;
+  SAVED_RUN_IMPORT_AVAILABLE = 1;
+  SAVED_RUN_IMPORT_UNAVAILABLE = 2;
+}
+message ListSavedRunsRequest {
+  option (buf.validate.message).cel = {
+    id: "saved_runs.revision"
+    message: "revision is required after the first page"
+    expression: "this.offset == 0u || this.revision != ''"
+  };
+  string request_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 128
+  }];
+  string project = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 4096
+  }];
+  uint32 offset = 3;
+  string revision = 4 [(buf.validate.field).string = {max_bytes: 64}];
+}
+message ListSavedRunsResponse {
+  string request_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 128
+  }];
+  string project_root = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 4096
+  }];
+  repeated SavedRun runs = 3 [(buf.validate.field).repeated.max_items = 200];
+  string revision = 4 [(buf.validate.field).string.pattern = "^[0-9a-f]{64}$"];
+  optional uint32 next_offset = 5;
 }

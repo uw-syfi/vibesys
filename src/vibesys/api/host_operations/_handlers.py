@@ -17,6 +17,11 @@ class _Reads:
     def __init__(self, source: ReadSource) -> None:
         self._source = source
 
+    def list_saved_runs(self, request: pb.ListSavedRunsRequest) -> pb.ListSavedRunsResponse:
+        response = self._source.saved_runs(request)
+        response.request_id = request.request_id
+        return response
+
     def list_tasks(self, request: pb.ListTasksRequest) -> pb.ListTasksResponse:
         return pb.ListTasksResponse(
             request_id=request.request_id, tasks=self._source.tasks(request.project)
@@ -102,6 +107,7 @@ def handlers(source: ReadSource) -> host_operations.Handlers:
     reads = _Reads(source)
     return Handlers(
         list_tasks=reads.list_tasks,
+        list_saved_runs=reads.list_saved_runs,
         list_harnesses=reads.list_harnesses,
         list_examples=reads.list_examples,
         get_task_goal=reads.get_task_goal,

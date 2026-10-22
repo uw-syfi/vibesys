@@ -153,6 +153,7 @@ from server.host_run_events import (
 )
 from server.host_run_reader import RunReaderReply, RunReaderRequest
 from server.host_run_summary import UsageWindowReply, UsageWindowRequest
+from server.host_saved_runs import without_dashboards
 from server.registry import driving
 from server.relay import (
     BridgeResult,
@@ -258,6 +259,10 @@ class Projects(Protocol):
     ``.vibesys/tasks``; ``tasks`` and ``require_initialized`` only) or
     ``task_invalid`` (what it found does not parse).
     """
+
+    def saved_runs(self, request: pb.ListSavedRunsRequest) -> pb.ListSavedRunsResponse:
+        """The native metadata listing, importing readable retained runs."""
+        ...
 
     def tasks(self, project: Path) -> TaskList:
         """The project's tasks, ordered by name."""
@@ -997,22 +1002,8 @@ def _project_reply(request: RunsListRequest, host: HelperHost) -> RunsListReply:
                 root, runs, host.registry.list(), digests, now=now if with_dashboard else None
             )
             if not with_dashboard:  # a client that did not ask never sees the dashboard
-                summaries = _without_dashboards(summaries)
+                summaries = without_dashboards(summaries)
             return RunsListReply(request_id=request_id, runs=summaries)
-
-
-def _without_dashboards(listing: RunList) -> RunList:
-    """``listing`` with every digest's ``dashboard`` removed: it is sent only to a client that asked."""
-    return listing.model_copy(
-        update={
-            "runs": tuple(
-                run.model_copy(update={"digest": run.digest.model_copy(update={"dashboard": None})})
-                if isinstance(run.digest, RunDigest)
-                else run
-                for run in listing.runs
-            )
-        }
-    )
 
 
 def _logins_reply(
@@ -1506,6 +1497,12 @@ class HelperReadSource:
         return (
             expanded if expanded.is_absolute() else Path(self._host.directories.home()) / expanded
         )
+
+    def saved_runs(self, request: pb.ListSavedRunsRequest) -> pb.ListSavedRunsResponse:
+        """Read native discovery through the existing project catalog owner."""
+        request = type(request).from_binary(request.to_binary())
+        request.project = str(self._path(request.project))
+        return self._host.projects.saved_runs(request)
 
     def tasks(self, project: str) -> pb.TaskList:
         """Read through the existing project's task owner."""

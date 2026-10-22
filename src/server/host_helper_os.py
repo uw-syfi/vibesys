@@ -21,6 +21,7 @@ import re
 from contextlib import suppress
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
+from importlib import import_module
 from pathlib import Path
 from typing import TYPE_CHECKING, BinaryIO
 
@@ -68,6 +69,7 @@ from server.host_helper_requests import (
 )
 from server.host_preflight import PreflightReport
 from server.host_run_events import EVENT_TYPES_BY_KINDS, RunEventKinds
+from server.host_saved_runs import page_saved_runs
 from server.run_digest import digest_journal
 from server.span_index import (
     Entry,
@@ -95,11 +97,13 @@ if TYPE_CHECKING:
     from server.run_summary_cache import SummaryReader
     from vs_logs.read import LogReader as StoreReader
     from vs_project.api import GitRepositoryFactory, TaskDirectory
+    from vs_proto.api import host_payloads as pb
     from vs_sim.api import (
         CommandProbe,
         PipedProcess,
         PipedProcessLauncher,
         ProcessLauncher,
+        SleepingClock,
         Threads,
     )
 
@@ -199,8 +203,15 @@ class FileProjects:
     project has checked out.
     """
 
-    def __init__(self, repositories: GitRepositoryFactory, threads: Threads) -> None:
+    def __init__(
+        self,
+        repositories: GitRepositoryFactory,
+        threads: Threads,
+        *,
+        clock: SleepingClock | None = None,
+    ) -> None:
         """Read run branches through the repositories ``repositories`` opens."""
+        self._clock = clock
         self._repositories = repositories
         self._threads = threads
         self._journals: dict[tuple[Path, str], Path] = {}
@@ -208,6 +219,27 @@ class FileProjects:
         self._digests: dict[Path, tuple[tuple[int, int], RunDigest]] = {}
         self._indexes: dict[Path, JournalIndex] = {}
         self._summary_reader: SummaryReader | None = None
+
+    def saved_runs(self, request: pb.ListSavedRunsRequest) -> pb.ListSavedRunsResponse:
+        """Reuse catalog metadata and the transport's retained-format importer."""
+        if self._clock is None:
+            message = "saved-run import clock was not supplied"
+            raise ValueError(message)
+        wire = import_module("vs_proto.api")
+        pb = wire.host_payloads
+
+        root, runs = self.runs(Path(request.project))
+        entries = [
+            pb.SavedRun(
+                run_id=run.run_id,
+                task=run.task,
+                display_name=run.display_name,
+                created_at=wire.Timestamp.from_datetime(run.created_at),
+                imported=pb.SavedRunImport.AVAILABLE,
+            )
+            for run in runs
+        ]
+        return page_saved_runs(request, root, entries, clock=self._clock, threads=self._threads)
 
     def tasks(self, project: Path) -> TaskList:
         """The project's tasks, ordered by name."""
@@ -268,7 +300,10 @@ class FileProjects:
             )
             for run_id in logged
             if run_id not in known
-            and (Project.log_directory_for(opened.root, run_id) / RUN_EVENTS_FILE).is_file()
+            and (
+                (Project.log_directory_for(opened.root, run_id) / RUN_EVENTS_FILE).is_file()
+                or Project.run_log_path_for(opened.root, run_id).is_file()
+            )
         ]
         runs = sorted([*recorded, *journaled], key=lambda run: (run.created_at, run.run_id))
         return opened.root, tuple(runs)

@@ -197,6 +197,30 @@ def accept_inspect_destination(
     return InspectDestination.accept(request)
 
 
+ListSavedRuns = Operation(
+    "ListSavedRuns",
+    37,
+    37,
+    37,
+    10000,
+    5000,
+    1,
+    2,
+    1,
+    1,
+    None,
+    pb.ListSavedRunsRequest,
+    pb.ListSavedRunsResponse,
+    ((("request_id",), ("request_id",)),),
+)
+
+
+def accept_list_saved_runs(
+    request: pb.ListSavedRunsRequest,
+) -> AcceptedRequest[pb.ListSavedRunsRequest]:
+    return ListSavedRuns.accept(request)
+
+
 CreateExample = Operation(
     "CreateExample",
     34,
@@ -374,6 +398,7 @@ OPERATIONS: tuple[Operation, ...] = (
     ListCompute,
     PreflightRun,
     InspectDestination,
+    ListSavedRuns,
     CreateExample,
     CopyProject,
     PutCluster,
@@ -396,6 +421,7 @@ class Handlers:
     list_compute: Callable[[pb.ListComputeRequest], pb.ListComputeResponse]
     preflight_run: Callable[[pb.PreflightRunRequest], pb.PreflightRunResponse]
     inspect_destination: Callable[[pb.InspectDestinationRequest], pb.InspectDestinationResponse]
+    list_saved_runs: Callable[[pb.ListSavedRunsRequest], pb.ListSavedRunsResponse]
 
     def dispatch(self, request: AcceptedRequest) -> bytes:
         match request.operation.operation_id:
@@ -430,6 +456,10 @@ class Handlers:
             case 23:
                 return InspectDestination.validate_response(
                     request, self.inspect_destination(InspectDestination.request_value(request))
+                )
+            case 37:
+                return ListSavedRuns.validate_response(
+                    request, self.list_saved_runs(ListSavedRuns.request_value(request))
                 )
             case _:
                 raise ValueError("unknown operation id")
@@ -575,6 +605,7 @@ READS: dict[str, Operation] = {
     "list_compute": ListCompute,
     "preflight_run": PreflightRun,
     "inspect_destination": InspectDestination,
+    "list_saved_runs": ListSavedRuns,
 }
 READ_CALLS: tuple[HostCall, ...] = (
     HostCall("list_tasks", "list-tasks", 10, 10, 10000, 5000),
@@ -585,6 +616,7 @@ READ_CALLS: tuple[HostCall, ...] = (
     HostCall("list_compute", "list-compute", 15, 15, 10000, 5000),
     HostCall("preflight_run", "preflight-run", 16, 16, 65000, 5000),
     HostCall("inspect_destination", "inspect-destination", 23, 23, 10000, 5000),
+    HostCall("list_saved_runs", "list-saved-runs", 37, 37, 10000, 5000),
 )
 MUTATIONS: dict[str, Operation] = {
     "create_example": CreateExample,

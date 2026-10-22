@@ -21,6 +21,7 @@ message AcceptedOperation {
     InspectCandidateRequest inspect_candidate = 17;
     CompletePathsRequest complete_paths = 18;
     InspectDestinationRequest inspect_destination = 23;
+    ListSavedRunsRequest list_saved_runs = 37;
     CreateExampleRequest create_example = 34;
     CopyProjectRequest copy_project = 35;
     PutClusterRequest put_cluster = 31;
@@ -44,6 +45,7 @@ message OperationResult {
     InspectCandidateResponse inspect_candidate = 17;
     CompletePathsResponse complete_paths = 18;
     InspectDestinationResponse inspect_destination = 23;
+    ListSavedRunsResponse list_saved_runs = 37;
     CreateExampleResponse create_example = 34;
     CopyProjectResponse copy_project = 35;
     PutClusterResponse put_cluster = 31;

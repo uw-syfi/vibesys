@@ -57,6 +57,7 @@ export {
   registryTransport,
   requireCheckout,
 } from './shell/registry-reads.js';
+export {type RegistrySavedRuns, registrySavedRuns} from './shell/registry-saved-runs.js';
 export {
   type CompletedPaths,
   type InspectedCandidate,
