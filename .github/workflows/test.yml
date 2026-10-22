@@ -372,6 +372,7 @@ jobs:
 
       - name: Install managed-candidate containment dependency
         if: contains(fromJSON(needs.changes.outputs.native_targets), 'resources/evaluators/microservice')
+        timeout-minutes: 3
         uses: ./.github/actions/setup-runner-apt
         with:
           packages: bubblewrap
@@ -933,10 +934,11 @@ jobs:
       - name: Pass the pytest cancel deadline
         run: python3 scripts/pytest_job_deadline.py
 
-      - name: Install bubblewrap
+      - name: Install bubblewrap and the user D-Bus session
+        timeout-minutes: 3
         uses: ./.github/actions/setup-runner-apt
         with:
-          packages: bubblewrap
+          packages: bubblewrap dbus-user-session
 
       - name: Enable runner user namespaces
         run: |
@@ -948,7 +950,6 @@ jobs:
       # Docker socket, and under VIBESYS_REQUIRE_SANDBOX_TESTS=1 a missing one
       # fails it. A runner has no login session, so start the user manager,
       # which serves /run/user/<uid>/bus.
-      # dbus-user-session is preinstalled in the Ubuntu runner image.
       - name: Start the runner's user D-Bus
         timeout-minutes: 2
         run: |
@@ -1037,6 +1038,7 @@ jobs:
       # The host-side job confinement the tier exercises needs bubblewrap; see
       # the sandbox-linux job for why the AppArmor userns restriction is lifted.
       - name: Install bubblewrap
+        timeout-minutes: 3
         uses: ./.github/actions/setup-runner-apt
         with:
           packages: bubblewrap

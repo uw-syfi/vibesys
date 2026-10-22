@@ -130,11 +130,35 @@ def test_archive_cache_hits_install_offline_and_misses_remain_bounded() -> None:
         "sha256sum",
     ):
         assert key_component in prepare
-    offline = next(
-        step for step in steps if "dpkg --force-confold --install" in step.get("run", "")
-    )
-    assert "cache-hit" not in offline["if"]
-    assert not _APT.search(offline["run"])
+    cached = next(step for step in steps if step.get("id") == "cached")
+    assert "steps.cache.outputs.cache-hit == 'true'" in cached["if"]
+    assert cached["continue-on-error"] is True
+    assert not _APT.search(cached["run"])
+    fallback = "steps.cached.outcome == 'failure'"
+    for step in steps:
+        if "dpkg --force-confold --install" in step.get("run", "") and step is not cached:
+            assert fallback in step["if"]
+    assert fallback in next(step for step in downloads)["if"]
+
+
+def _caller_steps() -> list[tuple[str, dict[str, object]]]:
+    callers = []
+    for path in (REPO / ".github/workflows").glob("*.yml"):
+        for job in yaml.safe_load(path.read_text())["jobs"].values():
+            callers += [
+                (path.name, step)
+                for step in job.get("steps", [])
+                if step.get("uses") == "./.github/actions/setup-runner-apt"
+            ]
+    return callers
+
+
+def test_every_runner_apt_caller_bounds_the_step() -> None:
+    # A composite step cannot carry its own timeout, so a slow cache restore or
+    # a hung mirror is only bounded by the calling step.
+    callers = _caller_steps()
+    assert callers
+    assert [name for name, step in callers if step.get("timeout-minutes") != 3] == []
 
 
 @pytest.mark.parametrize("separator", [";", "&&", "||", "|", "|&", "&", "\n"])

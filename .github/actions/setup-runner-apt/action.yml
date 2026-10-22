@@ -43,8 +43,19 @@ runs:
         path: ${{ steps.packages.outputs.archives }}/*.deb
         key: ${{ steps.packages.outputs.key }}
 
-    - name: Download archives on a cache miss
-      if: steps.packages.outputs.needed == 'true' && steps.cache.outputs.cache-hit != 'true'
+    - name: Install cached archives without network access
+      if: steps.packages.outputs.needed == 'true' && steps.cache.outputs.cache-hit == 'true'
+      id: cached
+      continue-on-error: true
+      shell: bash
+      env:
+        ARCHIVES: ${{ steps.packages.outputs.archives }}
+      run: |
+        set -euo pipefail
+        sudo -n env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a timeout --kill-after=5s 60s dpkg --force-confold --install "$ARCHIVES"/*.deb
+
+    - name: Download archives on a cache miss or a failed cached install
+      if: steps.packages.outputs.needed == 'true' && (steps.cache.outputs.cache-hit != 'true' || steps.cached.outcome == 'failure')
       shell: bash
       env:
         ARCHIVES: ${{ steps.packages.outputs.archives }}
@@ -56,8 +67,8 @@ runs:
         sudo -n env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a timeout --kill-after=5s 60s apt-get -o Acquire::Retries=0 -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 -o DPkg::Lock::Timeout=10 update -o APT::Update::Error-Mode=any
         sudo -n env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a timeout --kill-after=5s 60s apt-get -o Acquire::Retries=0 -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 -o DPkg::Lock::Timeout=10 -o "Dir::Cache::archives=$ARCHIVES" install --download-only --no-install-recommends -y "${packages[@]}"
 
-    - name: Install archives without network access
-      if: steps.packages.outputs.needed == 'true'
+    - name: Install downloaded archives
+      if: steps.packages.outputs.needed == 'true' && (steps.cache.outputs.cache-hit != 'true' || steps.cached.outcome == 'failure')
       shell: bash
       env:
         ARCHIVES: ${{ steps.packages.outputs.archives }}

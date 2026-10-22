@@ -201,6 +201,7 @@ jobs:
       # The host-side job confinement the tier exercises needs bubblewrap; see
       # the sandbox-linux job for why the AppArmor userns restriction is lifted.
       - name: Install bubblewrap
+        timeout-minutes: 3
         uses: ./.github/actions/setup-runner-apt
         with:
           packages: bubblewrap
