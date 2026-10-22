@@ -22,11 +22,12 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// A failed host command, drawn from what hosts write in the field: any exit
-// status, any stdout, and a stderr built from argparse's two ways of rejecting
-// a command, look-alikes of them, partial evidence and noise. The generator
-// labels the evidence it wrote, so the expected category never comes from the
-// code under test.
+// A failed host command, drawn from what hosts write in the field: any command
+// the gateway runs, any exit status, any stdout, and a stderr built from what a
+// real older checkout wrote (the corpus), argparse's two ways of rejecting a
+// command, look-alikes of them, partial evidence and noise. The generator labels
+// the evidence it wrote, so the expected category never comes from the code
+// under test.
 type failedCommand struct {
 	cli      string
 	exitCode int
@@ -36,24 +37,45 @@ type failedCommand struct {
 	rejected []string // the commands stderr explicitly says the checkout does not know
 }
 
-const (
-	versioned   = "inspect-candidate"
-	propertyRun = 400
-)
+const propertyRun = 400
 
-// otherCommands are host commands that are never versioned, and look-alike
-// words for the versioned one.
-var otherCommands = []string{"list-examples", "describe-machine", "login", "remove-cluster", "post-intent"}
+// registryCommands is every host command the gateway can run.
+var registryCommands = func() []string {
+	var all []string
+	all = append(all, hostCommands(&apiv1.ReadRequest{}, hostoperations.DispatchHostRead)...)
+	all = append(all, hostCommands(&apiv1.MutateRequest{}, hostoperations.DispatchHostMutate)...)
+	all = append(all, hostCommands(&apiv1.WatchRequest{}, hostoperations.DispatchHostWatch)...)
+	all = append(all, hostCommands(&apiv1.HostCallRequest{}, hostoperations.DispatchHostCall)...)
+	slices.Sort(all)
+	return all
+}()
+
+// olderHost is what a real older checkout wrote for each command it rejects,
+// recorded offline by proto/testdata/older_host/generate.py.
+var olderHost = func() (corpus struct {
+	Checkout string
+	Rejected []struct {
+		Command  string
+		ExitCode int `json:"exit_code"`
+		Stderr   string
+	}
+	Provided []string
+}) {
+	payload, err := os.ReadFile("../../../proto/testdata/older_host/older_host.json")
+	if err == nil {
+		err = json.Unmarshal(payload, &corpus)
+	}
+	if err != nil {
+		panic(err)
+	}
+	return corpus
+}()
 
 func (failedCommand) Generate(random *rand.Rand, _ int) reflect.Value {
-	clis := append(commandsOf(versionedCommands), otherCommands...)
 	failed := failedCommand{
-		cli:      pick(random, clis),
+		cli:      pick(random, registryCommands),
 		exitCode: pick(random, []int{0, 1, 2, 2, 2, 2, 2, 2, 3, 126, 127, 255, -1}),
 		start:    random.Intn(8) == 0,
-	}
-	if random.Intn(2) == 0 {
-		failed.cli = versioned
 	}
 	if random.Intn(5) == 0 {
 		failed.output = []byte{0x0a, byte(random.Intn(256))}
@@ -73,28 +95,16 @@ func (failedCommand) Generate(random *rand.Rand, _ int) reflect.Value {
 	return reflect.ValueOf(failed)
 }
 
-func commandsOf(set map[string]bool) []string {
-	var names []string
-	for name := range set {
-		names = append(names, name)
-	}
-	slices.Sort(names)
-	return names
-}
-
 func pick[T any](random *rand.Rand, values []T) T { return values[random.Intn(len(values))] }
 
 // fragment is one stderr line and the command it explicitly rejects, if any.
 func fragment(random *rand.Rand, cli string) (line, rejects string) {
 	name := cli
-	switch random.Intn(4) {
-	case 0:
-		name = pick(random, otherCommands)
-	case 1:
-		name = versioned
+	if random.Intn(3) == 0 {
+		name = pick(random, registryCommands)
 	}
 	lookalike := pick(random, []string{name + "-v2", "--" + name, "x" + name, "/work/" + name, name + ".py", name + "=1"})
-	switch random.Intn(12) {
+	switch random.Intn(13) {
 	case 0, 1:
 		return "vibesys: error: unrecognized arguments: " + pick(random, []string{"", "--verbose "}) + "host " + name, name
 	case 2, 3:
@@ -111,6 +121,9 @@ func fragment(random *rand.Rand, cli string) (line, rejects string) {
 		return "vibesys host: error: argument command: invalid choice: 'x' (choose from '" + name + "')", ""
 	case 9:
 		return "see " + name + " docs", ""
+	case 11:
+		older := pick(random, olderHost.Rejected)
+		return strings.TrimSuffix(older.Stderr, "\n"), older.Command
 	case 10:
 		return pick(random, []string{"Traceback (most recent call last):", "ModuleNotFoundError: No module named 'vibesys'", "/src/checkout/.venv/bin/python: can't open file '/src/checkout/vibesys.py': [Errno 2] No such file or directory"}), ""
 	default:
@@ -118,10 +131,10 @@ func fragment(random *rand.Rand, cli string) (line, rejects string) {
 	}
 }
 
-// Whether the checkout lacks the versioned command: the only failure that
-// means "needs an update".
+// Whether the checkout lacks the command: the only failure that means "needs an
+// update".
 func (f failedCommand) lacksCommand() bool {
-	return versionedCommands[f.cli] && f.exitCode == usageExitStatus && len(f.output) == 0 && !f.start && slices.Contains(f.rejected, f.cli)
+	return f.exitCode == usageExitStatus && len(f.output) == 0 && !f.start && slices.Contains(f.rejected, f.cli)
 }
 
 // reported is the stderr a failure carries: a command that did not start wrote none.
@@ -155,7 +168,7 @@ func check(t *testing.T, property any) {
 	}
 }
 
-func TestOnlyExplicitUnknownCommandEvidenceTypesAVersionedCommandAsUnsupported(t *testing.T) {
+func TestOnlyExplicitUnknownCommandEvidenceTypesACommandAsUnsupported(t *testing.T) {
 	check(t, func(f failedCommand) bool {
 		result, err := f.result()
 		category, message := commandFailure(f.cli, result, err)
@@ -177,7 +190,7 @@ func TestAStreamIsUnsupportedOnlyOnTheSameEvidence(t *testing.T) {
 	})
 }
 
-func TestEntryPointsKeepAnOrdinaryFailureItsCategoryAndDiagnostic(t *testing.T) {
+func TestEveryEntryPointTypesTheSameEvidenceTheSameWay(t *testing.T) {
 	var current failedCommand
 	runner := hostcommand.FakeRunner{Program: func(_ context.Context, command hostcommand.Command) (hostcommand.Result, error) {
 		if command.Args[1] == "login" {
@@ -195,43 +208,41 @@ func TestEntryPointsKeepAnOrdinaryFailureItsCategoryAndDiagnostic(t *testing.T) 
 	}
 	service := &host{config: Config{Root: t.TempDir(), HostRunner: runner}}
 	ctx := context.Background()
-	unsupported := hostv1.FailureCategory_FAILURE_CATEGORY_UNSUPPORTED
 	internal := hostv1.FailureCategory_FAILURE_CATEGORY_INTERNAL
 
+	// Each entry point runs one command of its own; the evidence is generated for that command.
 	check(t, func(f failedCommand) bool {
 		current = f
-
+		current.cli = "inspect-candidate"
 		inspected, err := service.Read(ctx, &apiv1.ReadRequest{
 			Checkout: root,
 			Method: &apiv1.ReadRequest_InspectCandidate{InspectCandidate: &hostv1.InspectCandidateRequest{
 				RequestId: "inspect-a", Path: root, SelectionRevision: 1,
 			}},
 		})
-		current.cli = versioned
-		lacks := current.lacksCommand()
-		if err != nil || (inspected.GetFailure().GetCategory() == unsupported) != lacks {
-			return false
-		}
-		if !lacks && (inspected.GetFailure().GetCategory() != internal || inspected.GetFailure().GetMessage() != "vibesys host inspect-candidate failed") {
+		if err != nil || !typed(inspected.GetFailure().GetCategory(), current) {
 			return false
 		}
 
-		// Every other command exits the same way, and none of them is ever unsupported.
-		current.cli = ""
+		current.cli = "list-examples"
 		read, err := service.Read(ctx, &apiv1.ReadRequest{
 			Checkout: root,
 			Method:   &apiv1.ReadRequest_ListExamples{ListExamples: &hostv1.ListExamplesRequest{RequestId: "list-a"}},
 		})
-		if err != nil || !ordinary(read.GetFailure().GetCategory(), read.GetFailure().GetMessage(), current) {
+		if err != nil || !typed(read.GetFailure().GetCategory(), current) || !diagnosed(read.GetFailure().GetMessage(), current) {
 			return false
 		}
+
+		current.cli = "remove-cluster"
 		mutate, err := service.Mutate(ctx, &apiv1.MutateRequest{
 			Checkout: root,
 			Method:   &apiv1.MutateRequest_RemoveCluster{RemoveCluster: &hostv1.RemoveClusterRequest{RequestId: "rm-a", Name: "cluster-a"}},
 		})
-		if err != nil || !ordinary(mutate.GetFailure().GetCategory(), mutate.GetFailure().GetMessage(), current) {
+		if err != nil || !typed(mutate.GetFailure().GetCategory(), current) || !diagnosed(mutate.GetFailure().GetMessage(), current) {
 			return false
 		}
+
+		current.cli = "post-intent"
 		call, err := service.HostCall(ctx, &apiv1.HostCallRequest{
 			Checkout: root,
 			Method: &apiv1.HostCallRequest_PostIntent{PostIntent: &apiv1.PostIntentRequest{
@@ -240,9 +251,15 @@ func TestEntryPointsKeepAnOrdinaryFailureItsCategoryAndDiagnostic(t *testing.T) 
 			}},
 		})
 		failed := call.GetConfigurationFailed()
-		if err != nil || failed.GetCode() == "host_unsupported" || failed.GetStderr() != current.reported() {
+		if err != nil || (failed.GetCode() == "host_unsupported") != current.lacksCommand() {
 			return false
 		}
+		if !current.lacksCommand() && failed.GetStderr() != current.reported() {
+			return false
+		}
+
+		current.cli = "login"
+		current.output = nil // a stream that sent nothing has no stdout
 		stream := &watchStream{ctx: ctx}
 		request := &apiv1.WatchRequest{
 			Checkout: root,
@@ -252,14 +269,29 @@ func TestEntryPointsKeepAnOrdinaryFailureItsCategoryAndDiagnostic(t *testing.T) 
 			return false
 		}
 		failure := stream.sent[0].GetFailure()
-		return failure.GetCategory() == internal && strings.Contains(failure.GetMessage(), current.reported())
+		if current.start && !current.lacksCommand() {
+			return failure.GetCategory() == internal && strings.Contains(failure.GetMessage(), current.reported())
+		}
+		return typed(failure.GetCategory(), current) && (current.lacksCommand() || strings.Contains(failure.GetMessage(), current.reported()))
 	})
 }
 
-// ordinary reports whether a failure of an unversioned command kept its own
-// category and its stderr.
-func ordinary(category hostv1.FailureCategory, message string, f failedCommand) bool {
-	return category == hostv1.FailureCategory_FAILURE_CATEGORY_INTERNAL && strings.Contains(message, strings.TrimSpace(f.reported()))
+// typed reports whether a failure got the category its evidence earns: UNSUPPORTED
+// when the checkout lacks the command, INTERNAL otherwise.
+func typed(category hostv1.FailureCategory, f failedCommand) bool {
+	if f.lacksCommand() {
+		return category == hostv1.FailureCategory_FAILURE_CATEGORY_UNSUPPORTED
+	}
+	return category == hostv1.FailureCategory_FAILURE_CATEGORY_INTERNAL
+}
+
+// diagnosed reports whether a failure's message is the fixed unsupported sentence
+// or, for an ordinary failure, carries the host's stderr.
+func diagnosed(message string, f failedCommand) bool {
+	if f.lacksCommand() {
+		return message == unsupportedMessage(f.cli)
+	}
+	return strings.Contains(message, strings.TrimSpace(f.reported()))
 }
 
 func TestTheGeneratorReachesBothSidesOfTheEvidenceBoundary(t *testing.T) {
@@ -267,7 +299,7 @@ func TestTheGeneratorReachesBothSidesOfTheEvidenceBoundary(t *testing.T) {
 	var lacking, nearMisses int
 	for range propertyRun {
 		f := failedCommand{}.Generate(random, 0).Interface().(failedCommand)
-		reachable := versionedCommands[f.cli] && f.exitCode == usageExitStatus && len(f.output) == 0 && !f.start
+		reachable := f.exitCode == usageExitStatus && len(f.output) == 0 && !f.start
 		switch {
 		case f.lacksCommand():
 			lacking++
@@ -294,48 +326,34 @@ func hostCommands[M proto.Message](empty M, dispatch func(M) (hostoperations.Hos
 	return commands
 }
 
-// The commands whose absence the gateway reports as "needs an update" are
-// shared with the client Fake of an older host, which asserts the same file.
-func TestTheCommandsAnOlderHostLacksAreExactlyTheCorpusOnes(t *testing.T) {
-	payload, err := os.ReadFile("../../../proto/testdata/older_host/unsupported_commands.json")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var corpus struct{ Commands []string }
-	if err := json.Unmarshal(payload, &corpus); err != nil {
-		t.Fatal(err)
-	}
-	var all []string
-	all = append(all, hostCommands(&apiv1.ReadRequest{}, hostoperations.DispatchHostRead)...)
-	all = append(all, hostCommands(&apiv1.MutateRequest{}, hostoperations.DispatchHostMutate)...)
-	all = append(all, hostCommands(&apiv1.WatchRequest{}, hostoperations.DispatchHostWatch)...)
-	all = append(all, hostCommands(&apiv1.HostCallRequest{}, hostoperations.DispatchHostCall)...)
-	if len(all) < 20 {
-		t.Fatalf("only %d commands found", len(all))
-	}
-	for _, cli := range all {
-		older := hostCommandAbsentFrom(cli)
-		result, err := older.result()
-		category, _ := commandFailure(cli, result, err)
-		want := hostv1.FailureCategory_FAILURE_CATEGORY_INTERNAL
-		if slices.Contains(corpus.Commands, cli) {
-			want = hostv1.FailureCategory_FAILURE_CATEGORY_UNSUPPORTED
+// What a real older checkout wrote for each command it rejects is classified as
+// "needs an update", whichever command it is. The client's older-host Fake asserts
+// the same file.
+func TestEveryCommandARealOlderCheckoutRejectsIsUnsupported(t *testing.T) {
+	rejected := make([]string, 0, len(olderHost.Rejected))
+	for _, older := range olderHost.Rejected {
+		rejected = append(rejected, older.Command)
+		result := hostcommand.Result{ExitCode: older.ExitCode, Stderr: older.Stderr}
+		category, message := commandFailure(older.Command, result, &exec.ExitError{})
+		if category != hostv1.FailureCategory_FAILURE_CATEGORY_UNSUPPORTED || message != unsupportedMessage(older.Command) {
+			t.Errorf("%s on an older checkout: %v %q", older.Command, category, message)
 		}
-		if category != want {
-			t.Errorf("%s on a checkout that lacks it: %v, want %v", cli, category, want)
+		if !unsupportedStream(older.Command, &hostcommand.ExitError{Err: errors.New("exit status"), Code: older.ExitCode, Stderr: older.Stderr}) {
+			t.Errorf("%s streamed on an older checkout is not unsupported", older.Command)
+		}
+		// The usage text of one command is no evidence about another.
+		for _, other := range registryCommands {
+			if other != older.Command && exitFailureCategory(other, result, &exec.ExitError{}) == hostv1.FailureCategory_FAILURE_CATEGORY_UNSUPPORTED {
+				t.Errorf("%s's rejection types %s as unsupported", older.Command, other)
+			}
 		}
 	}
-	for _, cli := range corpus.Commands {
-		if !slices.Contains(all, cli) {
-			t.Errorf("the corpus names %q, which no method runs", cli)
-		}
+	known := append(slices.Clone(rejected), olderHost.Provided...)
+	slices.Sort(known)
+	if !slices.Equal(known, registryCommands) {
+		t.Errorf("the corpus covers %v, the gateway runs %v: regenerate proto/testdata/older_host", known, registryCommands)
 	}
-}
-
-// hostCommandAbsentFrom is what an older checkout does for cli: argparse rejects it.
-func hostCommandAbsentFrom(cli string) failedCommand {
-	return failedCommand{
-		cli: cli, exitCode: usageExitStatus, rejected: []string{cli},
-		stderr: "vibesys: error: unrecognized arguments: host " + cli,
+	if len(registryCommands) < 20 {
+		t.Fatalf("only %d commands found", len(registryCommands))
 	}
 }
