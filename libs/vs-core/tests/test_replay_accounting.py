@@ -222,6 +222,13 @@ def test_nested_aggregates_partition_like_cells() -> None:
             id="alias names two occurrences",
         ),
         pytest.param(
+            (
+                delayed(reading("a", 1)),
+                delayed(reading("a", 1, revision=1, origin=1), seq=2),
+            ),
+            id="occurrence changes its origin epoch",
+        ),
+        pytest.param(
             (delayed(charge("a", 1, Dimension.ATTEMPTS, refunded=2)),), id="refund exceeds charge"
         ),
     ],
@@ -276,6 +283,11 @@ def test_a_reading_before_its_alias_was_declared_fails() -> None:
     declaration = published(charge("c1", 1, Dimension.ADMISSIONS, alias="req-7"))
     with pytest.raises(ReplayError, match="read as its own occurrence first"):
         lifetime(delayed(early), declaration)
+
+
+def test_an_occurrence_may_list_its_own_key_as_an_alias() -> None:
+    history = delayed(reading("a", 7, aliases=("a",)))
+    assert lifetime(history)[Dimension.INPUT_TOKENS] == AccountingAmount(Fraction(7))
 
 
 def test_a_lower_revision_arriving_later_may_hold_a_lower_charge() -> None:
