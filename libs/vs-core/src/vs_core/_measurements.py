@@ -64,7 +64,7 @@ from ._submissions import (
     rejected,
     submission_released,
 )
-from ._turn_permit import _Facts, _for_scope
+from ._turn_permit import _executing_turn, _Facts, _permit_for_turn
 from .types.attempts import (
     AttemptEvaluationHistoryUpdated,
     CloseAttemptScope,
@@ -450,11 +450,9 @@ def _agent_requested(
     if any(call.call_id == event.call_id for call in state.agent_calls):
         return AreaChange(state=state)
     identity = identity_of(event.plan)
-    permit = _for_scope(
-        _Facts(context.run, context.sessions, context.records, state),
-        event.scope,
-        live=True,
-    )
+    facts = _Facts(context.run, context.sessions, context.records, state)
+    requester = _executing_turn(context.sessions, event.scope)
+    permit = _permit_for_turn(facts, requester, live=True)
     rejection: AgentRejection | None = None
     if not continues_admitted_work(context.run) and not (
         context.run.status == RunStatus.DRAINING and permit is not None
@@ -480,6 +478,7 @@ def _agent_requested(
             now_at=context.run.now_at,
         ),
         base=base_of(context, event.scope, event.plan),
+        requested_by=requester,
     )
     change = _admit(state, context, origin, event.plan, identity.value)
     outbound = next((r for r in change.requests if isinstance(r.request, SubmitMeasurement)), None)

@@ -47,7 +47,7 @@ from .types.kernel import AreaChange
 from .types.records import Attribution, Outbound, inherit
 
 if TYPE_CHECKING:
-    from .types.common import DecisionId, Observation
+    from .types.common import DecisionId, InvocationRef, Observation
     from .types.evaluation import AgentMeasurementRequested, EvaluationState, MeasurementPlan
     from .types.job_observations import MeasurementFailure
     from .types.kernel import EvaluationContext
@@ -163,6 +163,8 @@ class Origin:
     """The run that answers a first submission without a new one (`reused_run`)."""
     base: BaseRef | None = None
     """The revision an agent's candidate is compared with (`_base_of`)."""
+    requested_by: InvocationRef | None = None
+    """The turn that asked, when ``decision_id`` is absent."""
 
 
 def allocate(
@@ -200,6 +202,7 @@ def allocate(
         # Only a first submission reuses: a retry after a failure measures afresh.
         reuses=origin.reuses if ordinal == 1 else None,
         base=origin.base,
+        requested_by=None if decision_id is not None else origin.requested_by,
     )
     updated = budget.model_copy(
         update={

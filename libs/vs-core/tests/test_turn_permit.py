@@ -1,6 +1,9 @@
 """A logical turn's permit is the only admission of its successors, and their deadline."""
 
 import enum
+import hashlib
+import json
+from collections.abc import Mapping, Sequence
 
 import pytest
 from hypothesis import assume, example, given, settings
@@ -521,3 +524,292 @@ def test_hold_credit_is_the_turn_bound_and_pause_is_the_only_cap(
     assert end == at + _WIDE
     assert result.state.run.status is core.RunStatus.RUNNING
     assert result.state.run.park is None
+
+
+class _Hold(enum.StrEnum):
+    """Whether the run is draining under an operator Pause, held for quota, or running."""
+
+    NONE = "none"
+    OPERATOR = "operator"
+    QUOTA = "quota"
+
+
+class _When(enum.StrEnum):
+    """Where an invocation's deadline sits relative to now and to a later turn."""
+
+    PAST = "past"
+    SOON = "soon"
+    LATER = "later"
+
+
+_NOW = 100.0
+_AT = {_When.PAST: 40.0, _When.SOON: 200.0, _When.LATER: 400.0}
+_ASKED = 500.0
+_Other = tuple[_When, core.SessionPhase, bool]
+"""One other invocation: when it is due, its phase, and whether it is the ancestor."""
+
+
+def _digest(request: core.DispatchTurn) -> str:
+    payload = json.dumps(request.model_dump(mode="json"), sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(payload.encode()).hexdigest()
+
+
+def _member(
+    invocation: core.Invocation,
+    record: core.RequestRecord,
+    target: tuple[float, core.SessionPhase, core.InvocationRef | None, str | None],
+) -> tuple[core.Invocation, core.RequestRecord, core.InvocationRef]:
+    """``invocation`` and its dispatch, retargeted at ``target``'s deadline, phase and ancestor."""
+    deadline, phase, predecessor, identity = target
+    ref = invocation.invocation
+    request = record.request
+    assert isinstance(request, core.DispatchTurn)
+    spec = invocation.turn.model_copy(update={"predecessor": predecessor})
+    if identity is not None:
+        ref = ref.model_copy(update={"invocation_id": core.InvocationId(root=identity)})
+        spec = spec.model_copy(update={"invocation_id": ref.invocation_id})
+        request = request.model_copy(
+            update={
+                "request_id": core.RequestId(root=f"dispatch-{identity}"),
+                "decision_id": core.DecisionId(root=f"decision-{identity}"),
+                "turn": spec,
+            }
+        )
+    else:
+        request = request.model_copy(update={"turn": spec})
+    until = core.Until(at=deadline)
+    updated = invocation.model_copy(
+        update={"invocation": ref, "turn": spec, "phase": phase, "until": until}
+    )
+    stored = record.model_copy(
+        update={
+            "request_id": request.request_id,
+            "request": request,
+            "until": until,
+            "payload_digest": _digest(request),
+        }
+    )
+    return updated, stored, ref
+
+
+_Deadlines = Mapping[core.InvocationRef, float]
+_Predecessors = Mapping[core.InvocationRef, core.InvocationRef | None]
+
+
+def _measurement_world(
+    requester_when: _When,
+    others: Sequence[_Other],
+    hold: _Hold,
+    *,
+    requester_captured: bool,
+) -> tuple[core.CoreState, core.Scope, core.InvocationRef | None, _Deadlines, _Predecessors]:
+    """A scope whose executing turn asks for a measurement, plus any other invocations.
+
+    ``requester_captured`` matters for an operator Pause: when it is false the drain
+    snapshot admits the others and not the turn that then asks.
+    """
+    state, _turn = write_turn_world(access=core.Access.READ_ONLY)
+    base = state.sessions.invocations[0]
+    record = next(
+        row
+        for row in state.records.records
+        if isinstance(row.request, core.DispatchTurn | core.ResumeSessionTurn)
+    )
+    ancestor_at = next((index for index, other in enumerate(others) if other[2]), None)
+    other_refs: list[core.InvocationRef] = []
+    invocations: list[core.Invocation] = []
+    records: list[core.RequestRecord] = []
+    deadlines: dict[core.InvocationRef, float] = {}
+    predecessor: dict[core.InvocationRef, core.InvocationRef | None] = {}
+    for index, (when, phase, _ancestor) in enumerate(others):
+        deadline = _AT[when]
+        invocation, stored, ref = _member(base, record, (deadline, phase, None, f"other-{index}"))
+        other_refs.append(ref)
+        invocations.append(invocation)
+        records.append(stored)
+        deadlines[ref] = deadline
+        predecessor[ref] = None
+    ancestor = None if ancestor_at is None else other_refs[ancestor_at]
+    requester_deadline = _AT[requester_when]
+    requester, requester_record, requester_ref = _member(
+        base, record, (requester_deadline, core.SessionPhase.EXECUTING, ancestor, None)
+    )
+    deadlines[requester_ref] = requester_deadline
+    predecessor[requester_ref] = ancestor
+    executing = [
+        ref
+        for ref, row in ((requester_ref, requester), *zip(other_refs, invocations, strict=True))
+        if row.phase == core.SessionPhase.EXECUTING
+    ]
+    asking = executing[0] if len(executing) == 1 else None
+    session = state.sessions.sessions[0].model_copy(
+        update={"invocation": requester.turn.invocation_id}
+    )
+    state = state.model_copy(
+        update={
+            "run": state.run.model_copy(update={"now_at": _NOW}),
+            "sessions": state.sessions.model_copy(
+                update={"sessions": (session,), "invocations": (requester, *invocations)}
+            ),
+            "records": state.records.model_copy(update={"records": (requester_record, *records)}),
+        }
+    )
+    if hold is _Hold.OPERATOR:
+        state = _hold(state, core.PauseOwner.OPERATOR)
+        park = state.run.park
+        assert park is not None
+        assert not park.immediate
+        if not requester_captured:
+            admitted = tuple(ref for ref in park.admitted_turns if ref != requester_ref)
+            state = state.model_copy(
+                update={
+                    "run": state.run.model_copy(
+                        update={"park": park.model_copy(update={"admitted_turns": admitted})}
+                    )
+                }
+            )
+    elif hold is _Hold.QUOTA:
+        state = _hold(state, core.PauseOwner.QUOTA)
+        assert state.run.park is None
+    return state, requester.scope, asking, deadlines, predecessor
+
+
+def _selected(
+    start: core.InvocationRef | None,
+    links: tuple[_Predecessors, _Deadlines],
+    *,
+    drain: bool,
+    admitted: set[core.InvocationRef],
+    live: bool,
+) -> float | None:
+    """The permit bound the approved rule names, or None when the turn holds none."""
+    predecessor, deadlines = links
+    seen: set[core.InvocationRef] = set()
+    ref = start
+    while ref is not None and ref not in seen:
+        seen.add(ref)
+        holds = ref in admitted if drain else True
+        if holds and (not live or deadlines[ref] > _NOW):
+            return deadlines[ref]
+        if not drain:
+            return None
+        ref = predecessor[ref]
+    return None
+
+
+def _expected_until(
+    live: float | None, hard: float | None, *, limit: float, run_deadline: float
+) -> float:
+    """The absolute until a positive ask gets after the live cap and the recorded cap."""
+    if live is not None:
+        limit = min(limit, max(live - _NOW, 0.0))
+    at = _NOW + limit
+    if run_deadline > _NOW:
+        at = min(at, run_deadline)
+    if hard is not None:
+        at = min(at, hard)
+    return at
+
+
+@pytest.mark.regression
+@example(
+    requester_when=_When.LATER,
+    others=((_When.PAST, core.SessionPhase.SUSPENDED, False),),
+    hold=_Hold.NONE,
+    requester_captured=True,
+)
+@example(
+    requester_when=_When.LATER,
+    others=((_When.PAST, core.SessionPhase.SUSPENDED, True),),
+    hold=_Hold.NONE,
+    requester_captured=True,
+)
+@example(
+    requester_when=_When.LATER,
+    others=((_When.SOON, core.SessionPhase.SUSPENDED, True),),
+    hold=_Hold.OPERATOR,
+    requester_captured=True,
+)
+@example(
+    requester_when=_When.LATER,
+    others=((_When.SOON, core.SessionPhase.SUSPENDED, True),),
+    hold=_Hold.OPERATOR,
+    requester_captured=False,
+)
+@example(
+    requester_when=_When.LATER,
+    others=((_When.PAST, core.SessionPhase.SUSPENDED, False),),
+    hold=_Hold.QUOTA,
+    requester_captured=True,
+)
+@example(
+    requester_when=_When.LATER,
+    others=((_When.PAST, core.SessionPhase.EXECUTING, False),),
+    hold=_Hold.NONE,
+    requester_captured=True,
+)
+@settings(max_examples=examples(pr=8, nightly=40), deadline=None)
+@given(
+    requester_when=st.sampled_from(tuple(_When)),
+    others=st.lists(
+        st.tuples(
+            st.sampled_from(tuple(_When)),
+            st.sampled_from((core.SessionPhase.EXECUTING, core.SessionPhase.SUSPENDED)),
+            st.booleans(),
+        ),
+        max_size=2,
+    ),
+    hold=st.sampled_from(tuple(_Hold)),
+    requester_captured=st.booleans(),
+)
+def test_a_measurement_is_capped_at_the_requesting_turns_bound(
+    requester_when: _When,
+    others: list[_Other],
+    hold: _Hold,
+    *,
+    requester_captured: bool,
+) -> None:
+    """A measurement takes the asking turn's own bound, not the earliest one in the scope.
+
+    The scope may also hold suspended or executing invocations whose deadlines are
+    already past or still ahead. An earlier deadline of one of those applies only
+    when an operator Pause of this epoch is draining and that invocation is the
+    ancestor the drain selects. A quota pause is not that drain. With no single
+    executing turn, nothing in the scope is asked to stand in.
+    """
+    state, scope, asking, deadlines, predecessor = _measurement_world(
+        requester_when, others, hold, requester_captured=requester_captured
+    )
+    drain = hold is _Hold.OPERATOR
+    admitted = set(state.run.park.admitted_turns) if state.run.park is not None else set()
+    links = (predecessor, deadlines)
+    live = _selected(asking, links, drain=drain, admitted=admitted, live=True)
+    hard = _selected(asking, links, drain=drain, admitted=admitted, live=False)
+    measurement = plan(queue_allowance=_ASKED)
+    result = core.step(
+        state,
+        core.AgentMeasurementRequested(
+            scope=scope,
+            plan=measurement,
+            within=core.Within(limit=_ASKED),
+            call_id="measure",
+        ),
+    )
+    submissions = [row for row in result.requests if isinstance(row, core.SubmitMeasurement)]
+    if drain and live is None:
+        assert submissions == [], (live, hard, result.events)
+        return
+    assert len(submissions) == 1, (live, hard, result.events)
+    request_id = submissions[0].request_id
+    assert request_id is not None
+    expected = _expected_until(
+        live, hard, limit=min(_ASKED, measurement.time_bound), run_deadline=state.run.deadline_at
+    )
+    assert _deadline(result.state, request_id) == expected, (
+        _deadline(result.state, request_id),
+        expected,
+        hold,
+        requester_when,
+        others,
+        requester_captured,
+    )

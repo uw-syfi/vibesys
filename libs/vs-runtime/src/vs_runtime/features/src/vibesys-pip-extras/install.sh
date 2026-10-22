@@ -27,9 +27,24 @@ retry() {
 fetch() {
     retry curl -fsSL --connect-timeout 20 --speed-limit 10240 --speed-time 30 --max-time 600 "$@"
 }
+# Per-request cap. A transfer that keeps sending stays under it, so the update
+# also has a total deadline (APT_UPDATE_DEADLINE).
 APT_BOUNDS=(-o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=2)
+# GPU bases ship NVIDIA CUDA or AMD ROCm lists. Their indexes are large, and a
+# slow transfer never trips Acquire::http::Timeout, so one update can run until
+# the CI job is cancelled. Features install only distribution packages.
+APT_UPDATE_DEADLINE=60
+drop_vendor_apt_sources() {
+    local dir=/etc/apt/sources.list.d
+    [ -d "${dir}" ] || return 0
+    find "${dir}" -type f \( \
+        -iname '*nvidia*' -o -iname '*cuda*' -o -iname '*rocm*' -o -iname '*amdgpu*' \
+        -o -exec grep -Eqi 'nvidia\.com|repo\.radeon\.com|rocm|amdgpu' {} \; \
+    \) -delete
+}
 apt_update_and_install() {
-    apt-get update -qq "${APT_BOUNDS[@]}" &&
+    drop_vendor_apt_sources
+    timeout "${APT_UPDATE_DEADLINE}" apt-get update -qq "${APT_BOUNDS[@]}" &&
         apt-get install -y -qq --no-install-recommends "${APT_BOUNDS[@]}" "$@"
 }
 apt_install() {

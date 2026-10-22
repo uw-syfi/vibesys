@@ -157,6 +157,10 @@ job = "examples"
 roots = ["examples", "docs"]
 files = [".gitmodules", "README.md"]
 depends_on = ["example_validation", "microservice_evaluator", "native_evaluator_examples"]
+# CI still selects the examples job for a docs change. Locally those files are
+# documentation: `repoctl test` ignores this root and runs only the always-on
+# scripts. The root stays on the component, so the CI plan does not change.
+local_ignore_roots = ["docs"]
 
 [[components]]
 id = "example_validation"
