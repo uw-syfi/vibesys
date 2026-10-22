@@ -33,6 +33,7 @@ from vs_runtime._replay_runtime import (
     ReplayPending,
     ReplayRecoveryRequiredError,
     ReplayResult,
+    ReplayRetirement,
     ReplayRuntime,
     ReplayUnknown,
 )
@@ -44,9 +45,19 @@ from vs_runtime._replay_sessions import (
 from vs_runtime._replay_store import ReplayStore, RunLogReplayStore
 from vs_runtime._replay_wiring import ReplayOwnerServices, replay_bindings
 from vs_runtime._replay_workspaces import WorkspaceReplayExecutor
+from vs_runtime._writer_reconciliation import (
+    DockerWriterReconciler,
+    ReplayWriterBarrier,
+    ReplayWriterBlockedError,
+    UnsupportedWriterReconciler,
+    WriterProofError,
+    WriterReconciler,
+    WriterRegistry,
+)
 
 __all__ = [
     "REPLAY_STORE_SCHEMA_VERSION",
+    "DockerWriterReconciler",
     "EvaluationReceiptUnconfirmedError",
     "EvaluationRecoveryBlockedError",
     "EvaluationReplayExecutor",
@@ -73,14 +84,21 @@ __all__ = [
     "ReplayPromptRenderer",
     "ReplayRecoveryRequiredError",
     "ReplayResult",
+    "ReplayRetirement",
     "ReplayRunHost",
     "ReplayRuntime",
     "ReplaySessionServices",
     "ReplayStore",
     "ReplayUnknown",
+    "ReplayWriterBarrier",
+    "ReplayWriterBlockedError",
     "RunLogReplayStore",
     "SessionReplayExecutor",
+    "UnsupportedWriterReconciler",
     "WorkspaceReplayExecutor",
+    "WriterProofError",
+    "WriterReconciler",
+    "WriterRegistry",
     "drive_replay",
     "replay_bindings",
     "replay_measurement_plan",

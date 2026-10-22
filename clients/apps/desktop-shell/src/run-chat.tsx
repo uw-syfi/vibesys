@@ -7,6 +7,7 @@ import {ChatPanel, type RunChatPorts, useRunChat} from '@vibesys/feature-run-cha
 import {RunScreen, type useRunPage} from '@vibesys/feature-run-page/renderer';
 import {ideaOfAttempt, runHasEnded} from '@vibesys/feature-run-page/state';
 import {settled, type WelcomeBridge} from '@vibesys/ipc';
+import {newRequestId} from '@vibesys/request-identity';
 import type {RunRef} from '@vibesys/runs';
 import {type JSX, type ReactNode, useEffect, useMemo, useState} from 'react';
 
@@ -21,7 +22,7 @@ function chatPorts(page: RunPageView['chat'], bridge: WelcomeBridge, run: RunRef
     createThread: (harness, signal) => page.createThread(harness, signal),
     ask: (input, signal) => page.ask(input, signal),
     control: request => page.control(request),
-    newControlId: () => crypto.randomUUID(),
+    newControlId: () => newRequestId(),
   };
 }
 

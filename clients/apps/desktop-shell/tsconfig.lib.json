@@ -24,6 +24,7 @@
     "src/**/*.test.tsx"
   ],
   "references": [
+    {"path":"../../libs/request-identity/tsconfig.lib.json"},
     {
       "path": "../../features/app-shell/tsconfig.renderer.json"
     },

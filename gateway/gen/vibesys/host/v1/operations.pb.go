@@ -9863,7 +9863,7 @@ const file_vibesys_host_v1_operations_proto_rawDesc = "" +
 	"!TERMINATE_RUN_OUTCOME_UNSUPPORTED\x10\x03\x12/\n" +
 	"+TERMINATE_RUN_OUTCOME_REQUESTED_UNCONFIRMED\x10\x04\x12-\n" +
 	")TERMINATE_RUN_OUTCOME_OBSERVATION_UNKNOWN\x10\x05\x12(\n" +
-	"$TERMINATE_RUN_OUTCOME_PROCESS_ABSENT\x10\x06B?Z=github.com/uw-syfi/vibesys/gateway/gen/vibesys/host/v1;hostv1b\x06proto3"
+	"$TERMINATE_RUN_OUTCOME_PROCESS_ABSENT\x10\x06BH\xda\xf3\x18\x050.1.1Z=github.com/uw-syfi/vibesys/gateway/gen/vibesys/host/v1;hostv1b\x06proto3"
 
 var (
 	file_vibesys_host_v1_operations_proto_rawDescOnce sync.Once

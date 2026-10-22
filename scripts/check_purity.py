@@ -51,6 +51,12 @@ PURE_EXPORTS = {
             "ReplayNotice",
             "ReplayAcknowledgement",
             "ReplayPolicyDrift",
+            "ReplayPhysical",
+            "WriterBacking",
+            "WriterIdentity",
+            "WriterManifest",
+            "WriterTerminationProof",
+            "WriterReconciliation",
         )
     },
     "vs_proto.api.replay.KeyComponentKind": frozenset(
@@ -92,10 +98,10 @@ PURE_EXPORTS = {
     ),
     **{
         f"vs_proto.api.{name}": frozenset({"from_binary"})
-        for name in ("EpochStarted", "ReplayStore", "Span")
+        for name in ("EpochStarted", "ReplayStore", "Span", "Record")
     },
     "vs_proto.api.Change": frozenset({"STARTED", "UPDATED", "ENDED"}),
-    "vs_proto.api.SpanStatus": frozenset({"STOPPED"}),
+    "vs_proto.api.SpanStatus": frozenset({"STOPPED", "RUNNING", "DONE"}),
     "vs_proto.api.core_iterations": frozenset(
         {"IterationRequest", "IterationGranted", "IterationCompletion", "IterationCompleted"}
     ),

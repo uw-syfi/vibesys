@@ -1,8 +1,8 @@
 import {expect, test} from 'bun:test';
-import {create, toBinary} from '@bufbuild/protobuf';
+import {create, fromBinary, toBinary} from '@bufbuild/protobuf';
+import {LoginActor} from '@vibesys/connection';
 import type {HostId} from '@vibesys/hosts';
-import {LoginResponseSchema, WatchResponseSchema} from '@vibesys/proto';
-import {LoginActor} from './login-actor.js';
+import {LoginResponseSchema, WatchRequestSchema, WatchResponseSchema} from '@vibesys/proto';
 
 const HOST: HostId = {kind: 'ssh', alias: 'host-a'};
 
@@ -30,9 +30,11 @@ test('closing a subscription does not cancel the host login', async () => {
   });
   const actor = new LoginActor({
     checkout: async () => '/checkout',
-    stream: async (_host, _bytes, owned, receive) => {
+    stream: async (_host, bytes, owned, receive) => {
       signal = owned;
-      receive(startedFrame('login-1'));
+      const request = fromBinary(WatchRequestSchema, bytes);
+      if (request.method.case !== 'login') throw new Error('expected login');
+      receive(startedFrame(request.method.value.requestId));
       await gate;
     },
   });

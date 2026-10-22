@@ -62,6 +62,7 @@ ALLOWED_FIRST_PARTY = (
     "server.control_envelope",
     "server.diagnostics",
     "server.host_api",
+    "server.host_compatibility_generated",
     "server.host_helper",
     "server.host_helper_logs",
     "server.host_helper_machine",

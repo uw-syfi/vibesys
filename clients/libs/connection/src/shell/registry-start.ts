@@ -13,6 +13,7 @@ import {
   StartRunReasoning,
   StartRunResults,
 } from '@vibesys/proto';
+import {newRequestId} from '@vibesys/request-identity';
 import {requireCheckout} from './registry-reads.js';
 
 export interface RegistryRunInputs {
@@ -42,7 +43,7 @@ export interface RegistryStartPorts {
   unary(host: HostId, bytes: Uint8Array, signal: AbortSignal): Promise<Uint8Array>;
 }
 
-/** One admitted start. The request id is stable for this object, starting at `start-1`. */
+/** Each new start has a fresh admission identity, including after app restarts. */
 export function registryStart(ports: RegistryStartPorts): {
   start(
     host: HostId,
@@ -50,11 +51,9 @@ export function registryStart(ports: RegistryStartPorts): {
     signal: AbortSignal,
   ): Promise<{runId: string; instanceId: string}>;
 } {
-  let next = 1;
   return {
     async start(host, inputs, signal) {
-      const requestId = `start-${next}`;
-      next += 1;
+      const requestId = newRequestId();
       const checkout = requireCheckout(await ports.checkout(host), null);
       if (signal.aborted) throw new Error('operation cancelled', {cause: signal.reason});
       const response = await callStartRun(

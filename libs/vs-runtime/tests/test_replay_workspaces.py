@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
+from functools import partial
 from typing import TYPE_CHECKING, cast
 
 import pytest
 from protobuf import Oneof
 from protobuf.wkt.google.protobuf.timestamp_pb import Timestamp
 
-from vs_core.api import RevisionRef
+from vs_core.api import AttemptId, AttemptRef, EnsureWorkspace, RevisionRef
 from vs_core.api.replay import ReplayCall, ReplayFlow, ReplaySource, SemanticKey, classify_context
+from vs_faults.api import Boundary, FaultGate, FaultPlan, FaultRule, HostCrashError, HostFault
 from vs_project.api import FakeStateStore, StateNamespace, adoption_branch
 from vs_proto.api import (
     Ended,
@@ -22,30 +24,41 @@ from vs_proto.api import (
     replay,
 )
 from vs_proto.api import replay_workspace as pb
-from vs_runtime.api.core import ReceiptStore
+from vs_runtime.api.core import ReceiptStore, StoreWorkspaceReceipts
 from vs_runtime.api.core_values import to_proto
 from vs_runtime.api.executor_contracts import FaultingNamespace, ProcessKilledError
 from vs_runtime.api.replay import (
+    FakeReplayExecutor,
     ReplayAbsent,
     ReplayCompleted,
     ReplayEnding,
+    ReplayExecutors,
     ReplayLaunch,
     ReplayOperationError,
     ReplayOperationHost,
+    ReplayResult,
     ReplayRunHost,
     ReplayRuntime,
     ReplayUnknown,
     WorkspaceReplayExecutor,
+    WriterProofError,
+    WriterRegistry,
     drive_replay,
 )
 from vs_sim.api.testing import SimThreads, swept
 
+from .test_replay_physical import physical_root
 from .test_workspace_requests import _candidate_path, _commits, _env, _executor, _git
+from .test_writer_reconciliation import empty_barrier
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine
     from pathlib import Path
 
+    from pydantic import BaseModel
+
+    from vs_core.api import RequestBase
+    from vs_runtime.api.core import ExecutionContext, ExecutionOutcome
     from vs_sim.api.testing import Sim
 
 
@@ -133,6 +146,7 @@ def workspace_boundary_case(
         assert isinstance(base, core_leaves.RevisionRef)
         root: Callable[[ReplayFlow], Coroutine[object, object, object]] = program(base, mode)
         store = FakeStateStore()
+        barrier = empty_barrier(env.project)
 
         def host(*, restart: bool = False) -> ReplayRunHost:
             resources = env.start_host() if restart else initial
@@ -142,6 +156,7 @@ def workspace_boundary_case(
                 receipts,
                 ReplayOperationHost(env.run_id, store, sim.clock),
                 within_seconds=100,
+                writers=barrier.registry,
             )
             return ReplayRunHost(
                 ReplayRuntime(store, root, replay.ReplayAllowance(iterations=1)),
@@ -150,11 +165,13 @@ def workspace_boundary_case(
                 lambda _: ReplayEnding(
                     Ended(outcome=Outcome.FINISHED, summary="Done.", resumable=True)
                 ),
+                writer_barrier=barrier,
             )
 
         async def scenario() -> None:
             first = host()
             first.runtime.start(launch("first"), now=sim.clock.now(), at=Timestamp())
+            await barrier.reconcile(first.runtime, clock=sim.clock)
             for ordinal in range(effect + 1):
                 (span,) = first.runtime.prepare(now=sim.clock.now(), at=Timestamp())
                 if ordinal == effect and boundary == "prepared":
@@ -212,6 +229,7 @@ def test_workspace_recovery_sweeps_real_owner_receipt_writes(tmp_path: Path, sim
             faulting = FaultingNamespace(namespace, crash_at)
             faulted_receipts = ReceiptStore(cast("StateNamespace", faulting), SimThreads())
             store = FakeStateStore()
+            barrier = empty_barrier(env.project)
 
             async def scenario() -> None:
                 baseline = initial.root.revision
@@ -232,6 +250,7 @@ def test_workspace_recovery_sweeps_real_owner_receipt_writes(tmp_path: Path, sim
                         receipts,
                         ReplayOperationHost(env.run_id, store, sim.clock),
                         within_seconds=100,
+                        writers=barrier.registry,
                     )
                     return ReplayRunHost(
                         ReplayRuntime(store, root, replay.ReplayAllowance(iterations=1)),
@@ -240,6 +259,7 @@ def test_workspace_recovery_sweeps_real_owner_receipt_writes(tmp_path: Path, sim
                         lambda _: ReplayEnding(
                             Ended(outcome=Outcome.FINISHED, summary="Done.", resumable=True)
                         ),
+                        writer_barrier=barrier,
                     )
 
                 if crash_at is None:
@@ -380,9 +400,14 @@ def test_adoption_consumes_native_evidence_without_fabricating_legacy_observatio
             (resources.root.path / "candidate.py").write_text("VALUE = 9\n", encoding="utf-8")
             (resources.root.path / "operator-note.txt").write_text("Keep this.\n", encoding="utf-8")
         original_commits = _commits(resources)
+        barrier = empty_barrier(env.project)
         store = FakeStateStore()
         executor = WorkspaceReplayExecutor(
-            owner, receipts, ReplayOperationHost(env.run_id, store, sim.clock), within_seconds=100
+            owner,
+            receipts,
+            ReplayOperationHost(env.run_id, store, sim.clock),
+            within_seconds=100,
+            writers=barrier.registry,
         )
         runtime = ReplayRuntime(store, root, replay.ReplayAllowance())
 
@@ -394,6 +419,7 @@ def test_adoption_consumes_native_evidence_without_fabricating_legacy_observatio
                 lambda _: ReplayEnding(
                     Ended(outcome=Outcome.FINISHED, summary="Done.", resumable=True)
                 ),
+                writer_barrier=barrier,
             )
             completed = await drive_replay(run_host, launch("first"))
             assert isinstance(completed, ReplayCompleted)
@@ -413,5 +439,245 @@ def test_adoption_consumes_native_evidence_without_fabricating_legacy_observatio
             assert span.replay.policy.request is not None
             recorded = pb.ReplayWorkspaceRequest.from_binary(span.replay.policy.request.value)
             assert recorded == asked
+
+        sim.run(scenario())
+
+
+class AcquisitionNamespace:
+    """Forward real acquisition receipts, with a lost durable-intent reply at W9a."""
+
+    def __init__(self, namespace: StateNamespace, gate: FaultGate) -> None:
+        self.namespace, self.gate = namespace, gate
+
+    def save(self, relative_path: str, model: BaseModel) -> None:
+        self.gate.around(
+            Boundary.DURABLE_WRITE, "W9a", partial(self.namespace.save, relative_path, model)
+        )
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self.namespace, name)
+
+
+@pytest.mark.parametrize("row", ["W9a", "W9b"])
+def test_backing_acquisition_crash_reconciles_intent_and_installed_content(
+    tmp_path: Path, sim: Sim, row: str
+) -> None:
+    with _env(tmp_path) as env:
+        initial = env.hosts[0]
+        baseline = initial.root.revision
+        assert baseline is not None
+        base = to_proto(RevisionRef.of_git_commit(baseline))
+        assert isinstance(base, core_leaves.RevisionRef)
+        store = FakeStateStore()
+        barrier = empty_barrier(env.project)
+        gate = FaultGate(
+            FaultPlan(
+                seed=0,
+                rules=(
+                    FaultRule(
+                        boundary=Boundary.DURABLE_WRITE
+                        if row == "W9a"
+                        else Boundary.EXECUTOR_REQUEST,
+                        target=row,
+                        at=1,
+                        fault=HostFault.CRASH_AFTER,
+                    ),
+                ),
+            )
+        )
+
+        async def root(ctx: ReplayFlow) -> object:
+            return await step(
+                ctx,
+                request(
+                    Oneof(
+                        "open",
+                        pb.ReplayOpenWorkspace(
+                            mode=pb.ReplayWorkspaceMode.EXCLUSIVE_ROOT,
+                            base=base,
+                        ),
+                    )
+                ),
+            )
+
+        def binding(*, restarted: bool = False) -> ReplayRunHost:
+            namespace = env.project.state.local_namespace(env.run_id, "receipts")
+            receipts = ReceiptStore(
+                cast("StateNamespace", AcquisitionNamespace(namespace, gate)), SimThreads()
+            )
+            resources = env.start_host() if restarted else initial
+            owner, _ = _executor(resources, receipts)
+            executor = WorkspaceReplayExecutor(
+                owner,
+                receipts,
+                ReplayOperationHost(env.run_id, store, sim.clock),
+                within_seconds=100,
+                writers=barrier.registry,
+            )
+            return ReplayRunHost(
+                ReplayRuntime(store, root, replay.ReplayAllowance()),
+                executor,
+                sim.clock,
+                lambda _: ReplayEnding(
+                    Ended(outcome=Outcome.FINISHED, summary="Acquired.", resumable=True)
+                ),
+                writer_barrier=barrier,
+            )
+
+        async def scenario() -> None:
+            first = binding()
+            first.runtime.start(launch("first"), now=sim.clock.now(), at=Timestamp())
+            await barrier.reconcile(first.runtime, clock=sim.clock)
+            (span,) = first.runtime.prepare(now=sim.clock.now(), at=Timestamp())
+            try:
+                with pytest.raises(HostCrashError, match=row):
+                    await gate.around_async(
+                        Boundary.EXECUTOR_REQUEST,
+                        "W9b",
+                        partial(
+                            first.runtime.dispatch, span.id, first.executor, now=sim.clock.now()
+                        ),
+                    )
+            finally:
+                first.runtime.close(now=sim.clock.now())
+            gate.heal()
+            resumed = binding(restarted=True)
+            result = await drive_replay(resumed, launch("resume"))
+            assert isinstance(result, ReplayCompleted)
+            assert isinstance(result.value, pb.ReplayWorkspaceResult)
+            assert result.value.status is pb.ReplayWorkspaceStatus.SUCCEEDED
+            assert (initial.root.path / "candidate.py").read_text() == "VALUE = 1\n"
+            assert barrier.registry.require_proof().manifest is not None
+            assert resumed.runtime.archive.unresolved == ()
+            assert await drive_replay(binding(restarted=True), launch("again")) == result
+
+        sim.run(scenario())
+
+
+@pytest.mark.regression
+def test_old_empty_proof_cannot_release_root_after_new_physical_writers(
+    tmp_path: Path, sim: Sim
+) -> None:
+    with _env(tmp_path) as env:
+        resources = env.hosts[0]
+        revision = resources.root.revision
+        assert revision is not None
+        base = to_proto(RevisionRef.of_git_commit(revision))
+        assert isinstance(base, core_leaves.RevisionRef)
+        store = FakeStateStore()
+        barrier = empty_barrier(env.project)
+        owner, receipts = _executor(resources)
+        workspace = WorkspaceReplayExecutor(
+            owner,
+            receipts,
+            ReplayOperationHost(env.run_id, store, sim.clock),
+            within_seconds=100,
+            writers=barrier.registry,
+        )
+        writer = FakeReplayExecutor(lambda _: ReplayResult(core_common.Identity(root="done")))
+        executor = ReplayExecutors(
+            {pb.ReplayWorkspaceRequest: workspace, core_common.Identity: writer}
+        )
+
+        async def root(ctx: ReplayFlow) -> object:
+            await step(
+                ctx,
+                request(
+                    Oneof(
+                        "open",
+                        pb.ReplayOpenWorkspace(
+                            mode=pb.ReplayWorkspaceMode.EXCLUSIVE_ROOT, base=base
+                        ),
+                    )
+                ),
+            )
+            await physical_root(ctx)
+            return await step(ctx, request(Oneof("settle", pb.ReplaySettleWorkspace())))
+
+        async def scenario() -> None:
+            binding = ReplayRunHost(
+                ReplayRuntime(store, root, replay.ReplayAllowance()),
+                executor,
+                sim.clock,
+                lambda _: ReplayEnding(
+                    Ended(outcome=Outcome.FINISHED, summary="Done.", resumable=True)
+                ),
+                writer_barrier=barrier,
+            )
+            with pytest.raises(ValueError, match="does not cover"):
+                await drive_replay(binding, launch("first"))
+            assert len(writer.invocations) == 1
+            assert StoreWorkspaceReceipts(receipts).root_holder() == AttemptRef(
+                attempt_id=AttemptId(root="round-1"), generation=0
+            )
+
+        sim.run(scenario())
+
+
+def test_root_acquisition_holds_backing_exclusion_across_owner_awaits(
+    tmp_path: Path, sim: Sim
+) -> None:
+    with _env(tmp_path) as env:
+        resources = env.hosts[0]
+        revision = resources.root.revision
+        assert revision is not None
+        base = to_proto(RevisionRef.of_git_commit(revision))
+        assert isinstance(base, core_leaves.RevisionRef)
+        store = FakeStateStore()
+        barrier = empty_barrier(env.project)
+        backing = barrier.registry.backing
+        backing.generation += 1
+        successor = WriterRegistry(
+            env.project.state.state_store_namespace("backing-a"), backing, SimThreads()
+        )
+        owner, receipts = _executor(resources)
+
+        class CheckedAcquisition:
+            async def execute(
+                self, request: RequestBase, context: ExecutionContext
+            ) -> ExecutionOutcome:
+                assert isinstance(request, EnsureWorkspace)
+                await sim.clock.sleep(1)
+                with pytest.raises(WriterProofError, match="held by another"):
+                    successor.create()
+                return await owner.execute(request, context)
+
+        async def root(ctx: ReplayFlow) -> object:
+            return await step(
+                ctx,
+                request(
+                    Oneof(
+                        "open",
+                        pb.ReplayOpenWorkspace(
+                            mode=pb.ReplayWorkspaceMode.EXCLUSIVE_ROOT, base=base
+                        ),
+                    )
+                ),
+            )
+
+        async def scenario() -> None:
+            executor = WorkspaceReplayExecutor(
+                CheckedAcquisition(),
+                receipts,
+                ReplayOperationHost(env.run_id, store, sim.clock),
+                within_seconds=100,
+                writers=barrier.registry,
+            )
+            binding = ReplayRunHost(
+                ReplayRuntime(store, root, replay.ReplayAllowance()),
+                executor,
+                sim.clock,
+                lambda _: ReplayEnding(
+                    Ended(outcome=Outcome.FINISHED, summary="Acquired.", resumable=True)
+                ),
+                writer_barrier=barrier,
+            )
+            result = await drive_replay(binding, launch("first"))
+            assert isinstance(result, ReplayCompleted)
+            assert isinstance(result.value, pb.ReplayWorkspaceResult)
+            assert result.value.status is pb.ReplayWorkspaceStatus.SUCCEEDED
+            successor.create()
+            with pytest.raises(WriterProofError, match="another active"):
+                barrier.registry.require_proof()
 
         sim.run(scenario())

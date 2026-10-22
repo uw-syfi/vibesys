@@ -132,6 +132,61 @@ func (KeyComponentKind) EnumDescriptor() ([]byte, []int) {
 	return file_vibesys_store_v1_replay_proto_rawDescGZIP(), []int{1}
 }
 
+type WriterReconciliationStatus int32
+
+const (
+	WriterReconciliationStatus_WRITER_RECONCILIATION_STATUS_UNSPECIFIED    WriterReconciliationStatus = 0
+	WriterReconciliationStatus_WRITER_RECONCILIATION_STATUS_PROVEN_STOPPED WriterReconciliationStatus = 1
+	WriterReconciliationStatus_WRITER_RECONCILIATION_STATUS_PENDING        WriterReconciliationStatus = 2
+	WriterReconciliationStatus_WRITER_RECONCILIATION_STATUS_UNKNOWN        WriterReconciliationStatus = 3
+	WriterReconciliationStatus_WRITER_RECONCILIATION_STATUS_UNSUPPORTED    WriterReconciliationStatus = 4
+)
+
+// Enum value maps for WriterReconciliationStatus.
+var (
+	WriterReconciliationStatus_name = map[int32]string{
+		0: "WRITER_RECONCILIATION_STATUS_UNSPECIFIED",
+		1: "WRITER_RECONCILIATION_STATUS_PROVEN_STOPPED",
+		2: "WRITER_RECONCILIATION_STATUS_PENDING",
+		3: "WRITER_RECONCILIATION_STATUS_UNKNOWN",
+		4: "WRITER_RECONCILIATION_STATUS_UNSUPPORTED",
+	}
+	WriterReconciliationStatus_value = map[string]int32{
+		"WRITER_RECONCILIATION_STATUS_UNSPECIFIED":    0,
+		"WRITER_RECONCILIATION_STATUS_PROVEN_STOPPED": 1,
+		"WRITER_RECONCILIATION_STATUS_PENDING":        2,
+		"WRITER_RECONCILIATION_STATUS_UNKNOWN":        3,
+		"WRITER_RECONCILIATION_STATUS_UNSUPPORTED":    4,
+	}
+)
+
+func (x WriterReconciliationStatus) Enum() *WriterReconciliationStatus {
+	p := new(WriterReconciliationStatus)
+	*p = x
+	return p
+}
+
+func (x WriterReconciliationStatus) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (WriterReconciliationStatus) Descriptor() protoreflect.EnumDescriptor {
+	return file_vibesys_store_v1_replay_proto_enumTypes[2].Descriptor()
+}
+
+func (WriterReconciliationStatus) Type() protoreflect.EnumType {
+	return &file_vibesys_store_v1_replay_proto_enumTypes[2]
+}
+
+func (x WriterReconciliationStatus) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use WriterReconciliationStatus.Descriptor instead.
+func (WriterReconciliationStatus) EnumDescriptor() ([]byte, []int) {
+	return file_vibesys_store_v1_replay_proto_rawDescGZIP(), []int{2}
+}
+
 // Names are semantic, never source locations or live collection positions.
 type OperationKey struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -383,9 +438,12 @@ type ReplayPolicy struct {
 	// An upper bound enforced by the execution owner. A bounded epoch rejects
 	// external requests that omit a bound for a constrained dimension. Free
 	// operations explicitly reserve zero.
-	Reservation   *ReplayResources `protobuf:"bytes,7,opt,name=reservation,proto3" json:"reservation,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Reservation *ReplayResources `protobuf:"bytes,7,opt,name=reservation,proto3" json:"reservation,omitempty"`
+	// Execution owners may opt additional request families into physical children.
+	// Agent turns always derive this bound from their retained typed request.
+	PhysicalWithinSeconds *float64 `protobuf:"fixed64,8,opt,name=physical_within_seconds,json=physicalWithinSeconds,proto3,oneof" json:"physical_within_seconds,omitempty"`
+	unknownFields         protoimpl.UnknownFields
+	sizeCache             protoimpl.SizeCache
 }
 
 func (x *ReplayPolicy) Reset() {
@@ -467,6 +525,13 @@ func (x *ReplayPolicy) GetReservation() *ReplayResources {
 	return nil
 }
 
+func (x *ReplayPolicy) GetPhysicalWithinSeconds() float64 {
+	if x != nil && x.PhysicalWithinSeconds != nil {
+		return *x.PhysicalWithinSeconds
+	}
+	return 0
+}
+
 // Immutable execution metadata, separate from mutable span labels. Outcome Any
 // is decoded with the epoch's retained descriptors, never the current reply type.
 type OperationReplay struct {
@@ -484,8 +549,10 @@ type OperationReplay struct {
 	Allowance *ReplayAllowance `protobuf:"bytes,10,opt,name=allowance,proto3" json:"allowance,omitempty"`
 	// Later span updates retain this sequence; they are not new acceptances.
 	AcceptedSequence *uint64 `protobuf:"varint,11,opt,name=accepted_sequence,json=acceptedSequence,proto3,oneof" json:"accepted_sequence,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// New physical execution records retain the winner by child span identity.
+	AcceptedChild *string `protobuf:"bytes,12,opt,name=accepted_child,json=acceptedChild,proto3,oneof" json:"accepted_child,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *OperationReplay) Reset() {
@@ -595,6 +662,504 @@ func (x *OperationReplay) GetAcceptedSequence() uint64 {
 	return 0
 }
 
+func (x *OperationReplay) GetAcceptedChild() string {
+	if x != nil && x.AcceptedChild != nil {
+		return *x.AcceptedChild
+	}
+	return ""
+}
+
+// A child is execution evidence, never another semantic operation.
+type ReplayPhysical struct {
+	state                  protoimpl.MessageState `protogen:"open.v1"`
+	Logical                string                 `protobuf:"bytes,1,opt,name=logical,proto3" json:"logical,omitempty"`
+	ExternalId             string                 `protobuf:"bytes,2,opt,name=external_id,json=externalId,proto3" json:"external_id,omitempty"`
+	HostIncarnation        string                 `protobuf:"bytes,3,opt,name=host_incarnation,json=hostIncarnation,proto3" json:"host_incarnation,omitempty"`
+	Deadline               float64                `protobuf:"fixed64,4,opt,name=deadline,proto3" json:"deadline,omitempty"`
+	Ordinal                uint64                 `protobuf:"varint,5,opt,name=ordinal,proto3" json:"ordinal,omitempty"`
+	WithdrawnSequence      *uint64                `protobuf:"varint,6,opt,name=withdrawn_sequence,json=withdrawnSequence,proto3,oneof" json:"withdrawn_sequence,omitempty"`
+	ObservedSequence       *uint64                `protobuf:"varint,7,opt,name=observed_sequence,json=observedSequence,proto3,oneof" json:"observed_sequence,omitempty"`
+	TerminationProofDigest []byte                 `protobuf:"bytes,8,opt,name=termination_proof_digest,json=terminationProofDigest,proto3,oneof" json:"termination_proof_digest,omitempty"`
+	// Positive owner inspection of a fenced invocation that never began.
+	ConfirmedAbsent bool `protobuf:"varint,9,opt,name=confirmed_absent,json=confirmedAbsent,proto3" json:"confirmed_absent,omitempty"`
+	// W8a: proof-backed intent before releasing access or restoring retained input.
+	SettlementSequence *uint64 `protobuf:"varint,10,opt,name=settlement_sequence,json=settlementSequence,proto3,oneof" json:"settlement_sequence,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
+}
+
+func (x *ReplayPhysical) Reset() {
+	*x = ReplayPhysical{}
+	mi := &file_vibesys_store_v1_replay_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReplayPhysical) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReplayPhysical) ProtoMessage() {}
+
+func (x *ReplayPhysical) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_store_v1_replay_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReplayPhysical.ProtoReflect.Descriptor instead.
+func (*ReplayPhysical) Descriptor() ([]byte, []int) {
+	return file_vibesys_store_v1_replay_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *ReplayPhysical) GetLogical() string {
+	if x != nil {
+		return x.Logical
+	}
+	return ""
+}
+
+func (x *ReplayPhysical) GetExternalId() string {
+	if x != nil {
+		return x.ExternalId
+	}
+	return ""
+}
+
+func (x *ReplayPhysical) GetHostIncarnation() string {
+	if x != nil {
+		return x.HostIncarnation
+	}
+	return ""
+}
+
+func (x *ReplayPhysical) GetDeadline() float64 {
+	if x != nil {
+		return x.Deadline
+	}
+	return 0
+}
+
+func (x *ReplayPhysical) GetOrdinal() uint64 {
+	if x != nil {
+		return x.Ordinal
+	}
+	return 0
+}
+
+func (x *ReplayPhysical) GetWithdrawnSequence() uint64 {
+	if x != nil && x.WithdrawnSequence != nil {
+		return *x.WithdrawnSequence
+	}
+	return 0
+}
+
+func (x *ReplayPhysical) GetObservedSequence() uint64 {
+	if x != nil && x.ObservedSequence != nil {
+		return *x.ObservedSequence
+	}
+	return 0
+}
+
+func (x *ReplayPhysical) GetTerminationProofDigest() []byte {
+	if x != nil {
+		return x.TerminationProofDigest
+	}
+	return nil
+}
+
+func (x *ReplayPhysical) GetConfirmedAbsent() bool {
+	if x != nil {
+		return x.ConfirmedAbsent
+	}
+	return false
+}
+
+func (x *ReplayPhysical) GetSettlementSequence() uint64 {
+	if x != nil && x.SettlementSequence != nil {
+		return *x.SettlementSequence
+	}
+	return 0
+}
+
+// The environment records every writable grant before execution, including
+// tool/build jobs and grants belonging to other runs. Closing this ledger
+// forbids further grants in the execution domain; it does not prove death.
+type WriterBacking struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Environment   string                 `protobuf:"bytes,1,opt,name=environment,proto3" json:"environment,omitempty"`
+	Identity      string                 `protobuf:"bytes,2,opt,name=identity,proto3" json:"identity,omitempty"`
+	Generation    uint64                 `protobuf:"varint,3,opt,name=generation,proto3" json:"generation,omitempty"`
+	Authority     string                 `protobuf:"bytes,4,opt,name=authority,proto3" json:"authority,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WriterBacking) Reset() {
+	*x = WriterBacking{}
+	mi := &file_vibesys_store_v1_replay_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WriterBacking) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WriterBacking) ProtoMessage() {}
+
+func (x *WriterBacking) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_store_v1_replay_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WriterBacking.ProtoReflect.Descriptor instead.
+func (*WriterBacking) Descriptor() ([]byte, []int) {
+	return file_vibesys_store_v1_replay_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *WriterBacking) GetEnvironment() string {
+	if x != nil {
+		return x.Environment
+	}
+	return ""
+}
+
+func (x *WriterBacking) GetIdentity() string {
+	if x != nil {
+		return x.Identity
+	}
+	return ""
+}
+
+func (x *WriterBacking) GetGeneration() uint64 {
+	if x != nil {
+		return x.Generation
+	}
+	return 0
+}
+
+func (x *WriterBacking) GetAuthority() string {
+	if x != nil {
+		return x.Authority
+	}
+	return ""
+}
+
+type WriterIdentity struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	RunId           string                 `protobuf:"bytes,1,opt,name=run_id,json=runId,proto3" json:"run_id,omitempty"`
+	HostIncarnation string                 `protobuf:"bytes,2,opt,name=host_incarnation,json=hostIncarnation,proto3" json:"host_incarnation,omitempty"`
+	PhysicalId      string                 `protobuf:"bytes,3,opt,name=physical_id,json=physicalId,proto3" json:"physical_id,omitempty"`
+	// An immutable execution-domain ID, never a reusable container name.
+	DomainId      string `protobuf:"bytes,4,opt,name=domain_id,json=domainId,proto3" json:"domain_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WriterIdentity) Reset() {
+	*x = WriterIdentity{}
+	mi := &file_vibesys_store_v1_replay_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WriterIdentity) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WriterIdentity) ProtoMessage() {}
+
+func (x *WriterIdentity) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_store_v1_replay_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WriterIdentity.ProtoReflect.Descriptor instead.
+func (*WriterIdentity) Descriptor() ([]byte, []int) {
+	return file_vibesys_store_v1_replay_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *WriterIdentity) GetRunId() string {
+	if x != nil {
+		return x.RunId
+	}
+	return ""
+}
+
+func (x *WriterIdentity) GetHostIncarnation() string {
+	if x != nil {
+		return x.HostIncarnation
+	}
+	return ""
+}
+
+func (x *WriterIdentity) GetPhysicalId() string {
+	if x != nil {
+		return x.PhysicalId
+	}
+	return ""
+}
+
+func (x *WriterIdentity) GetDomainId() string {
+	if x != nil {
+		return x.DomainId
+	}
+	return ""
+}
+
+type WriterManifest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Backing       *WriterBacking         `protobuf:"bytes,1,opt,name=backing,proto3" json:"backing,omitempty"`
+	Writers       []*WriterIdentity      `protobuf:"bytes,2,rep,name=writers,proto3" json:"writers,omitempty"`
+	Closed        bool                   `protobuf:"varint,3,opt,name=closed,proto3" json:"closed,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WriterManifest) Reset() {
+	*x = WriterManifest{}
+	mi := &file_vibesys_store_v1_replay_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WriterManifest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WriterManifest) ProtoMessage() {}
+
+func (x *WriterManifest) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_store_v1_replay_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WriterManifest.ProtoReflect.Descriptor instead.
+func (*WriterManifest) Descriptor() ([]byte, []int) {
+	return file_vibesys_store_v1_replay_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *WriterManifest) GetBacking() *WriterBacking {
+	if x != nil {
+		return x.Backing
+	}
+	return nil
+}
+
+func (x *WriterManifest) GetWriters() []*WriterIdentity {
+	if x != nil {
+		return x.Writers
+	}
+	return nil
+}
+
+func (x *WriterManifest) GetClosed() bool {
+	if x != nil {
+		return x.Closed
+	}
+	return false
+}
+
+type WriterTerminationProof struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Manifest      *WriterManifest        `protobuf:"bytes,1,opt,name=manifest,proto3" json:"manifest,omitempty"`
+	AbsentDomains []string               `protobuf:"bytes,2,rep,name=absent_domains,json=absentDomains,proto3" json:"absent_domains,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WriterTerminationProof) Reset() {
+	*x = WriterTerminationProof{}
+	mi := &file_vibesys_store_v1_replay_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WriterTerminationProof) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WriterTerminationProof) ProtoMessage() {}
+
+func (x *WriterTerminationProof) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_store_v1_replay_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WriterTerminationProof.ProtoReflect.Descriptor instead.
+func (*WriterTerminationProof) Descriptor() ([]byte, []int) {
+	return file_vibesys_store_v1_replay_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *WriterTerminationProof) GetManifest() *WriterManifest {
+	if x != nil {
+		return x.Manifest
+	}
+	return nil
+}
+
+func (x *WriterTerminationProof) GetAbsentDomains() []string {
+	if x != nil {
+		return x.AbsentDomains
+	}
+	return nil
+}
+
+type WriterReconciliation struct {
+	state         protoimpl.MessageState     `protogen:"open.v1"`
+	Manifest      *WriterManifest            `protobuf:"bytes,1,opt,name=manifest,proto3" json:"manifest,omitempty"`
+	Status        WriterReconciliationStatus `protobuf:"varint,2,opt,name=status,proto3,enum=vibesys.store.v1.WriterReconciliationStatus" json:"status,omitempty"`
+	Proof         *WriterTerminationProof    `protobuf:"bytes,3,opt,name=proof,proto3" json:"proof,omitempty"`
+	Detail        string                     `protobuf:"bytes,4,opt,name=detail,proto3" json:"detail,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WriterReconciliation) Reset() {
+	*x = WriterReconciliation{}
+	mi := &file_vibesys_store_v1_replay_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WriterReconciliation) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WriterReconciliation) ProtoMessage() {}
+
+func (x *WriterReconciliation) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_store_v1_replay_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WriterReconciliation.ProtoReflect.Descriptor instead.
+func (*WriterReconciliation) Descriptor() ([]byte, []int) {
+	return file_vibesys_store_v1_replay_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *WriterReconciliation) GetManifest() *WriterManifest {
+	if x != nil {
+		return x.Manifest
+	}
+	return nil
+}
+
+func (x *WriterReconciliation) GetStatus() WriterReconciliationStatus {
+	if x != nil {
+		return x.Status
+	}
+	return WriterReconciliationStatus_WRITER_RECONCILIATION_STATUS_UNSPECIFIED
+}
+
+func (x *WriterReconciliation) GetProof() *WriterTerminationProof {
+	if x != nil {
+		return x.Proof
+	}
+	return nil
+}
+
+func (x *WriterReconciliation) GetDetail() string {
+	if x != nil {
+		return x.Detail
+	}
+	return ""
+}
+
+type WriterRegistryState struct {
+	state         protoimpl.MessageState  `protogen:"open.v1"`
+	Manifest      *WriterManifest         `protobuf:"bytes,1,opt,name=manifest,proto3" json:"manifest,omitempty"`
+	Proof         *WriterTerminationProof `protobuf:"bytes,2,opt,name=proof,proto3" json:"proof,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WriterRegistryState) Reset() {
+	*x = WriterRegistryState{}
+	mi := &file_vibesys_store_v1_replay_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WriterRegistryState) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WriterRegistryState) ProtoMessage() {}
+
+func (x *WriterRegistryState) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_store_v1_replay_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WriterRegistryState.ProtoReflect.Descriptor instead.
+func (*WriterRegistryState) Descriptor() ([]byte, []int) {
+	return file_vibesys_store_v1_replay_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *WriterRegistryState) GetManifest() *WriterManifest {
+	if x != nil {
+		return x.Manifest
+	}
+	return nil
+}
+
+func (x *WriterRegistryState) GetProof() *WriterTerminationProof {
+	if x != nil {
+		return x.Proof
+	}
+	return nil
+}
+
 // Timer-only progress is an observation, not a keyed paid operation.
 type ReplayClock struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -605,7 +1170,7 @@ type ReplayClock struct {
 
 func (x *ReplayClock) Reset() {
 	*x = ReplayClock{}
-	mi := &file_vibesys_store_v1_replay_proto_msgTypes[6]
+	mi := &file_vibesys_store_v1_replay_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -617,7 +1182,7 @@ func (x *ReplayClock) String() string {
 func (*ReplayClock) ProtoMessage() {}
 
 func (x *ReplayClock) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_store_v1_replay_proto_msgTypes[6]
+	mi := &file_vibesys_store_v1_replay_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -630,7 +1195,7 @@ func (x *ReplayClock) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReplayClock.ProtoReflect.Descriptor instead.
 func (*ReplayClock) Descriptor() ([]byte, []int) {
-	return file_vibesys_store_v1_replay_proto_rawDescGZIP(), []int{6}
+	return file_vibesys_store_v1_replay_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *ReplayClock) GetAllowance() *ReplayAllowance {
@@ -651,7 +1216,7 @@ type ReplayNotice struct {
 
 func (x *ReplayNotice) Reset() {
 	*x = ReplayNotice{}
-	mi := &file_vibesys_store_v1_replay_proto_msgTypes[7]
+	mi := &file_vibesys_store_v1_replay_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -663,7 +1228,7 @@ func (x *ReplayNotice) String() string {
 func (*ReplayNotice) ProtoMessage() {}
 
 func (x *ReplayNotice) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_store_v1_replay_proto_msgTypes[7]
+	mi := &file_vibesys_store_v1_replay_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -676,7 +1241,7 @@ func (x *ReplayNotice) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReplayNotice.ProtoReflect.Descriptor instead.
 func (*ReplayNotice) Descriptor() ([]byte, []int) {
-	return file_vibesys_store_v1_replay_proto_rawDescGZIP(), []int{7}
+	return file_vibesys_store_v1_replay_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *ReplayNotice) GetId() string {
@@ -711,7 +1276,7 @@ type ReplayAcknowledgement struct {
 
 func (x *ReplayAcknowledgement) Reset() {
 	*x = ReplayAcknowledgement{}
-	mi := &file_vibesys_store_v1_replay_proto_msgTypes[8]
+	mi := &file_vibesys_store_v1_replay_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -723,7 +1288,7 @@ func (x *ReplayAcknowledgement) String() string {
 func (*ReplayAcknowledgement) ProtoMessage() {}
 
 func (x *ReplayAcknowledgement) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_store_v1_replay_proto_msgTypes[8]
+	mi := &file_vibesys_store_v1_replay_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -736,7 +1301,7 @@ func (x *ReplayAcknowledgement) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReplayAcknowledgement.ProtoReflect.Descriptor instead.
 func (*ReplayAcknowledgement) Descriptor() ([]byte, []int) {
-	return file_vibesys_store_v1_replay_proto_rawDescGZIP(), []int{8}
+	return file_vibesys_store_v1_replay_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *ReplayAcknowledgement) GetNoticeId() string {
@@ -767,7 +1332,7 @@ type ReplayObservation struct {
 
 func (x *ReplayObservation) Reset() {
 	*x = ReplayObservation{}
-	mi := &file_vibesys_store_v1_replay_proto_msgTypes[9]
+	mi := &file_vibesys_store_v1_replay_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -779,7 +1344,7 @@ func (x *ReplayObservation) String() string {
 func (*ReplayObservation) ProtoMessage() {}
 
 func (x *ReplayObservation) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_store_v1_replay_proto_msgTypes[9]
+	mi := &file_vibesys_store_v1_replay_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -792,7 +1357,7 @@ func (x *ReplayObservation) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReplayObservation.ProtoReflect.Descriptor instead.
 func (*ReplayObservation) Descriptor() ([]byte, []int) {
-	return file_vibesys_store_v1_replay_proto_rawDescGZIP(), []int{9}
+	return file_vibesys_store_v1_replay_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *ReplayObservation) GetOutcome() *anypb.Any {
@@ -835,7 +1400,7 @@ type ReplayPolicyDrift struct {
 
 func (x *ReplayPolicyDrift) Reset() {
 	*x = ReplayPolicyDrift{}
-	mi := &file_vibesys_store_v1_replay_proto_msgTypes[10]
+	mi := &file_vibesys_store_v1_replay_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -847,7 +1412,7 @@ func (x *ReplayPolicyDrift) String() string {
 func (*ReplayPolicyDrift) ProtoMessage() {}
 
 func (x *ReplayPolicyDrift) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_store_v1_replay_proto_msgTypes[10]
+	mi := &file_vibesys_store_v1_replay_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -860,7 +1425,7 @@ func (x *ReplayPolicyDrift) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReplayPolicyDrift.ProtoReflect.Descriptor instead.
 func (*ReplayPolicyDrift) Descriptor() ([]byte, []int) {
-	return file_vibesys_store_v1_replay_proto_rawDescGZIP(), []int{10}
+	return file_vibesys_store_v1_replay_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *ReplayPolicyDrift) GetResults() uint64 {
@@ -956,7 +1521,7 @@ const file_vibesys_store_v1_replay_proto_rawDesc = "" +
 	"\n" +
 	"_money_usdB\x0f\n" +
 	"\r_input_tokensB\x10\n" +
-	"\x0e_output_tokens\"\xcb\x02\n" +
+	"\x0e_output_tokens\"\xb6\x03\n" +
 	"\fReplayPolicy\x12\x12\n" +
 	"\x04role\x18\x01 \x01(\tR\x04role\x12\x1a\n" +
 	"\btemplate\x18\x02 \x01(\tR\btemplate\x12\x18\n" +
@@ -965,8 +1530,10 @@ const file_vibesys_store_v1_replay_proto_rawDesc = "" +
 	"reply_type\x18\x04 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\treplyType\x12<\n" +
 	"\x13reply_schema_digest\x18\x05 \x01(\fB\a\xbaH\x04z\x02h H\x00R\x11replySchemaDigest\x88\x01\x01\x12.\n" +
 	"\arequest\x18\x06 \x01(\v2\x14.google.protobuf.AnyR\arequest\x12C\n" +
-	"\vreservation\x18\a \x01(\v2!.vibesys.store.v1.ReplayResourcesR\vreservationB\x16\n" +
-	"\x14_reply_schema_digest\"\x89\a\n" +
+	"\vreservation\x18\a \x01(\v2!.vibesys.store.v1.ReplayResourcesR\vreservation\x12M\n" +
+	"\x17physical_within_seconds\x18\b \x01(\x01B\x10\xbaH\r\x12\v@\x01!\x00\x00\x00\x00\x00\x00\x00\x00H\x01R\x15physicalWithinSeconds\x88\x01\x01B\x16\n" +
+	"\x14_reply_schema_digestB\x1a\n" +
+	"\x18_physical_within_seconds\"\x85\b\n" +
 	"\x0fOperationReplay\x128\n" +
 	"\x03key\x18\x01 \x01(\v2\x1e.vibesys.store.v1.OperationKeyB\x06\xbaH\x03\xc8\x01\x01R\x03key\x122\n" +
 	"\x10encoding_version\x18\x02 \x01(\rB\a\xbaH\x04*\x02\b\x01R\x0fencodingVersion\x12#\n" +
@@ -979,11 +1546,63 @@ const file_vibesys_store_v1_replay_proto_rawDesc = "" +
 	"\bcost_usd\x18\t \x01(\x01B\x10\xbaH\r\x12\v@\x01)\x00\x00\x00\x00\x00\x00\x00\x00H\x00R\acostUsd\x88\x01\x01\x12G\n" +
 	"\tallowance\x18\n" +
 	" \x01(\v2!.vibesys.store.v1.ReplayAllowanceB\x06\xbaH\x03\xc8\x01\x01R\tallowance\x129\n" +
-	"\x11accepted_sequence\x18\v \x01(\x04B\a\xbaH\x042\x02 \x00H\x01R\x10acceptedSequence\x88\x01\x01:\xa6\x02\xbaH\xa2\x02\x1a\x96\x01\n" +
-	"\x1doperation_replay.reply_schema\x12;recorded operations require the writer's reply schema proof\x1a8has(this.policy) && has(this.policy.reply_schema_digest)\x1a\x86\x01\n" +
-	"\x1boperation_replay.acceptance\x125an outcome requires its immutable acceptance sequence\x1a0has(this.outcome) == has(this.accepted_sequence)B\v\n" +
+	"\x11accepted_sequence\x18\v \x01(\x04B\a\xbaH\x042\x02 \x00H\x01R\x10acceptedSequence\x88\x01\x01\x123\n" +
+	"\x0eaccepted_child\x18\f \x01(\tB\a\xbaH\x04r\x02\x10\x01H\x02R\racceptedChild\x88\x01\x01:\xda\x02\xbaH\xd6\x02\x1a\x96\x01\n" +
+	"\x1doperation_replay.reply_schema\x12;recorded operations require the writer's reply schema proof\x1a8has(this.policy) && has(this.policy.reply_schema_digest)\x1a\xba\x01\n" +
+	"\x1boperation_replay.acceptance\x125an outcome requires its immutable acceptance sequence\x1adhas(this.outcome) == has(this.accepted_sequence) && (!has(this.accepted_child) || has(this.outcome))B\v\n" +
 	"\t_cost_usdB\x14\n" +
-	"\x12_accepted_sequence\"V\n" +
+	"\x12_accepted_sequenceB\x11\n" +
+	"\x0f_accepted_child\"\xe5\x04\n" +
+	"\x0eReplayPhysical\x12!\n" +
+	"\alogical\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\alogical\x12(\n" +
+	"\vexternal_id\x18\x02 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\n" +
+	"externalId\x122\n" +
+	"\x10host_incarnation\x18\x03 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x0fhostIncarnation\x12,\n" +
+	"\bdeadline\x18\x04 \x01(\x01B\x10\xbaH\r\x12\v@\x01)\x00\x00\x00\x00\x00\x00\x00\x00R\bdeadline\x12\x18\n" +
+	"\aordinal\x18\x05 \x01(\x04R\aordinal\x12;\n" +
+	"\x12withdrawn_sequence\x18\x06 \x01(\x04B\a\xbaH\x042\x02 \x00H\x00R\x11withdrawnSequence\x88\x01\x01\x129\n" +
+	"\x11observed_sequence\x18\a \x01(\x04B\a\xbaH\x042\x02 \x00H\x01R\x10observedSequence\x88\x01\x01\x12F\n" +
+	"\x18termination_proof_digest\x18\b \x01(\fB\a\xbaH\x04z\x02h H\x02R\x16terminationProofDigest\x88\x01\x01\x12)\n" +
+	"\x10confirmed_absent\x18\t \x01(\bR\x0fconfirmedAbsent\x12=\n" +
+	"\x13settlement_sequence\x18\n" +
+	" \x01(\x04B\a\xbaH\x042\x02 \x00H\x03R\x12settlementSequence\x88\x01\x01B\x15\n" +
+	"\x13_withdrawn_sequenceB\x14\n" +
+	"\x12_observed_sequenceB\x1b\n" +
+	"\x19_termination_proof_digestB\x16\n" +
+	"\x14_settlement_sequence\"\xa6\x01\n" +
+	"\rWriterBacking\x12)\n" +
+	"\venvironment\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\venvironment\x12#\n" +
+	"\bidentity\x18\x02 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\bidentity\x12\x1e\n" +
+	"\n" +
+	"generation\x18\x03 \x01(\x04R\n" +
+	"generation\x12%\n" +
+	"\tauthority\x18\x04 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\tauthority\"\xb4\x01\n" +
+	"\x0eWriterIdentity\x12\x1e\n" +
+	"\x06run_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x05runId\x122\n" +
+	"\x10host_incarnation\x18\x02 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x0fhostIncarnation\x12(\n" +
+	"\vphysical_id\x18\x03 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\n" +
+	"physicalId\x12$\n" +
+	"\tdomain_id\x18\x04 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\bdomainId\"\x9e\x02\n" +
+	"\x0eWriterManifest\x12A\n" +
+	"\abacking\x18\x01 \x01(\v2\x1f.vibesys.store.v1.WriterBackingB\x06\xbaH\x03\xc8\x01\x01R\abacking\x12:\n" +
+	"\awriters\x18\x02 \x03(\v2 .vibesys.store.v1.WriterIdentityR\awriters\x12\x16\n" +
+	"\x06closed\x18\x03 \x01(\bR\x06closed:u\xbaHr\x1ap\n" +
+	"\x16writer_manifest.unique\x12)writer physical identities must be unique\x1a+this.writers.map(x, x.physical_id).unique()\"\xbc\x03\n" +
+	"\x16WriterTerminationProof\x12D\n" +
+	"\bmanifest\x18\x01 \x01(\v2 .vibesys.store.v1.WriterManifestB\x06\xbaH\x03\xc8\x01\x01R\bmanifest\x12/\n" +
+	"\x0eabsent_domains\x18\x02 \x03(\tB\b\xbaH\x05\x92\x01\x02\x18\x01R\rabsentDomains:\xaa\x02\xbaH\xa6\x02\x1a\xa3\x02\n" +
+	"\x13writer_proof.closed\x12Jtermination proof needs a closed manifest and every domain verified absent\x1a\xbf\x01has(this.manifest) && this.manifest.closed && this.manifest.writers.all(x, x.domain_id in this.absent_domains) && this.absent_domains.all(x, this.manifest.writers.exists(w, w.domain_id == x))\"\xe2\x03\n" +
+	"\x14WriterReconciliation\x12D\n" +
+	"\bmanifest\x18\x01 \x01(\v2 .vibesys.store.v1.WriterManifestB\x06\xbaH\x03\xc8\x01\x01R\bmanifest\x12P\n" +
+	"\x06status\x18\x02 \x01(\x0e2,.vibesys.store.v1.WriterReconciliationStatusB\n" +
+	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x06status\x12>\n" +
+	"\x05proof\x18\x03 \x01(\v2(.vibesys.store.v1.WriterTerminationProofR\x05proof\x12\x16\n" +
+	"\x06detail\x18\x04 \x01(\tR\x06detail:\xd9\x01\xbaH\xd5\x01\x1a\xd2\x01\n" +
+	"\x1bwriter_reconciliation.proof\x12NProvenStopped requires termination proof for the exact reconciliation manifest\x1ac(this.status == 1) == has(this.proof) && (!has(this.proof) || this.proof.manifest == this.manifest)\"\xa2\x02\n" +
+	"\x13WriterRegistryState\x12D\n" +
+	"\bmanifest\x18\x01 \x01(\v2 .vibesys.store.v1.WriterManifestB\x06\xbaH\x03\xc8\x01\x01R\bmanifest\x12>\n" +
+	"\x05proof\x18\x02 \x01(\v2(.vibesys.store.v1.WriterTerminationProofR\x05proof:\x84\x01\xbaH\x80\x01\x1a~\n" +
+	"\x15writer_registry.proof\x12+registry proof must bind its exact manifest\x1a8!has(this.proof) || this.proof.manifest == this.manifest\"V\n" +
 	"\vReplayClock\x12G\n" +
 	"\tallowance\x18\x01 \x01(\v2!.vibesys.store.v1.ReplayAllowanceB\x06\xbaH\x03\xc8\x01\x01R\tallowance\"\xad\x02\n" +
 	"\fReplayNotice\x12\x17\n" +
@@ -1017,7 +1636,13 @@ const file_vibesys_store_v1_replay_proto_rawDesc = "" +
 	"\x17KEY_COMPONENT_KIND_ITEM\x10\x02\x12\x1d\n" +
 	"\x19KEY_COMPONENT_KIND_SAMPLE\x10\x03\x12\x1f\n" +
 	"\x1bKEY_COMPONENT_KIND_REVISION\x10\x04\x12(\n" +
-	"$KEY_COMPONENT_KIND_RECORDED_POSITION\x10\x05:H\n" +
+	"$KEY_COMPONENT_KIND_RECORDED_POSITION\x10\x05*\xfd\x01\n" +
+	"\x1aWriterReconciliationStatus\x12,\n" +
+	"(WRITER_RECONCILIATION_STATUS_UNSPECIFIED\x10\x00\x12/\n" +
+	"+WRITER_RECONCILIATION_STATUS_PROVEN_STOPPED\x10\x01\x12(\n" +
+	"$WRITER_RECONCILIATION_STATUS_PENDING\x10\x02\x12(\n" +
+	"$WRITER_RECONCILIATION_STATUS_UNKNOWN\x10\x03\x12,\n" +
+	"(WRITER_RECONCILIATION_STATUS_UNSUPPORTED\x10\x04:H\n" +
 	"\x0ereplay_context\x12\x1f.google.protobuf.MessageOptions\x18\x9e\x8f\x03 \x01(\bR\rreplayContext:e\n" +
 	"\freplay_field\x12\x1d.google.protobuf.FieldOptions\x18\x9c\x8f\x03 \x01(\x0e2!.vibesys.store.v1.ReplayFieldKindR\vreplayField:>\n" +
 	"\n" +
@@ -1035,51 +1660,67 @@ func file_vibesys_store_v1_replay_proto_rawDescGZIP() []byte {
 	return file_vibesys_store_v1_replay_proto_rawDescData
 }
 
-var file_vibesys_store_v1_replay_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_vibesys_store_v1_replay_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
+var file_vibesys_store_v1_replay_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
+var file_vibesys_store_v1_replay_proto_msgTypes = make([]protoimpl.MessageInfo, 18)
 var file_vibesys_store_v1_replay_proto_goTypes = []any{
 	(ReplayFieldKind)(0),                // 0: vibesys.store.v1.ReplayFieldKind
 	(KeyComponentKind)(0),               // 1: vibesys.store.v1.KeyComponentKind
-	(*OperationKey)(nil),                // 2: vibesys.store.v1.OperationKey
-	(*KeyComponent)(nil),                // 3: vibesys.store.v1.KeyComponent
-	(*ReplayAllowance)(nil),             // 4: vibesys.store.v1.ReplayAllowance
-	(*ReplayResources)(nil),             // 5: vibesys.store.v1.ReplayResources
-	(*ReplayPolicy)(nil),                // 6: vibesys.store.v1.ReplayPolicy
-	(*OperationReplay)(nil),             // 7: vibesys.store.v1.OperationReplay
-	(*ReplayClock)(nil),                 // 8: vibesys.store.v1.ReplayClock
-	(*ReplayNotice)(nil),                // 9: vibesys.store.v1.ReplayNotice
-	(*ReplayAcknowledgement)(nil),       // 10: vibesys.store.v1.ReplayAcknowledgement
-	(*ReplayObservation)(nil),           // 11: vibesys.store.v1.ReplayObservation
-	(*ReplayPolicyDrift)(nil),           // 12: vibesys.store.v1.ReplayPolicyDrift
-	(*anypb.Any)(nil),                   // 13: google.protobuf.Any
-	(*TokenUsage)(nil),                  // 14: vibesys.store.v1.TokenUsage
-	(*descriptorpb.MessageOptions)(nil), // 15: google.protobuf.MessageOptions
-	(*descriptorpb.FieldOptions)(nil),   // 16: google.protobuf.FieldOptions
+	(WriterReconciliationStatus)(0),     // 2: vibesys.store.v1.WriterReconciliationStatus
+	(*OperationKey)(nil),                // 3: vibesys.store.v1.OperationKey
+	(*KeyComponent)(nil),                // 4: vibesys.store.v1.KeyComponent
+	(*ReplayAllowance)(nil),             // 5: vibesys.store.v1.ReplayAllowance
+	(*ReplayResources)(nil),             // 6: vibesys.store.v1.ReplayResources
+	(*ReplayPolicy)(nil),                // 7: vibesys.store.v1.ReplayPolicy
+	(*OperationReplay)(nil),             // 8: vibesys.store.v1.OperationReplay
+	(*ReplayPhysical)(nil),              // 9: vibesys.store.v1.ReplayPhysical
+	(*WriterBacking)(nil),               // 10: vibesys.store.v1.WriterBacking
+	(*WriterIdentity)(nil),              // 11: vibesys.store.v1.WriterIdentity
+	(*WriterManifest)(nil),              // 12: vibesys.store.v1.WriterManifest
+	(*WriterTerminationProof)(nil),      // 13: vibesys.store.v1.WriterTerminationProof
+	(*WriterReconciliation)(nil),        // 14: vibesys.store.v1.WriterReconciliation
+	(*WriterRegistryState)(nil),         // 15: vibesys.store.v1.WriterRegistryState
+	(*ReplayClock)(nil),                 // 16: vibesys.store.v1.ReplayClock
+	(*ReplayNotice)(nil),                // 17: vibesys.store.v1.ReplayNotice
+	(*ReplayAcknowledgement)(nil),       // 18: vibesys.store.v1.ReplayAcknowledgement
+	(*ReplayObservation)(nil),           // 19: vibesys.store.v1.ReplayObservation
+	(*ReplayPolicyDrift)(nil),           // 20: vibesys.store.v1.ReplayPolicyDrift
+	(*anypb.Any)(nil),                   // 21: google.protobuf.Any
+	(*TokenUsage)(nil),                  // 22: vibesys.store.v1.TokenUsage
+	(*descriptorpb.MessageOptions)(nil), // 23: google.protobuf.MessageOptions
+	(*descriptorpb.FieldOptions)(nil),   // 24: google.protobuf.FieldOptions
 }
 var file_vibesys_store_v1_replay_proto_depIdxs = []int32{
-	3,  // 0: vibesys.store.v1.OperationKey.scope:type_name -> vibesys.store.v1.KeyComponent
+	4,  // 0: vibesys.store.v1.OperationKey.scope:type_name -> vibesys.store.v1.KeyComponent
 	1,  // 1: vibesys.store.v1.KeyComponent.kind:type_name -> vibesys.store.v1.KeyComponentKind
-	5,  // 2: vibesys.store.v1.ReplayAllowance.resources:type_name -> vibesys.store.v1.ReplayResources
-	13, // 3: vibesys.store.v1.ReplayPolicy.request:type_name -> google.protobuf.Any
-	5,  // 4: vibesys.store.v1.ReplayPolicy.reservation:type_name -> vibesys.store.v1.ReplayResources
-	2,  // 5: vibesys.store.v1.OperationReplay.key:type_name -> vibesys.store.v1.OperationKey
-	6,  // 6: vibesys.store.v1.OperationReplay.policy:type_name -> vibesys.store.v1.ReplayPolicy
-	13, // 7: vibesys.store.v1.OperationReplay.outcome:type_name -> google.protobuf.Any
-	4,  // 8: vibesys.store.v1.OperationReplay.allowance:type_name -> vibesys.store.v1.ReplayAllowance
-	4,  // 9: vibesys.store.v1.ReplayClock.allowance:type_name -> vibesys.store.v1.ReplayAllowance
-	7,  // 10: vibesys.store.v1.ReplayNotice.unused:type_name -> vibesys.store.v1.OperationReplay
-	2,  // 11: vibesys.store.v1.ReplayNotice.pending:type_name -> vibesys.store.v1.OperationKey
-	13, // 12: vibesys.store.v1.ReplayObservation.outcome:type_name -> google.protobuf.Any
-	14, // 13: vibesys.store.v1.ReplayObservation.usage:type_name -> vibesys.store.v1.TokenUsage
-	15, // 14: vibesys.store.v1.replay_context:extendee -> google.protobuf.MessageOptions
-	16, // 15: vibesys.store.v1.replay_field:extendee -> google.protobuf.FieldOptions
-	16, // 16: vibesys.store.v1.replay_set:extendee -> google.protobuf.FieldOptions
-	0,  // 17: vibesys.store.v1.replay_field:type_name -> vibesys.store.v1.ReplayFieldKind
-	18, // [18:18] is the sub-list for method output_type
-	18, // [18:18] is the sub-list for method input_type
-	17, // [17:18] is the sub-list for extension type_name
-	14, // [14:17] is the sub-list for extension extendee
-	0,  // [0:14] is the sub-list for field type_name
+	6,  // 2: vibesys.store.v1.ReplayAllowance.resources:type_name -> vibesys.store.v1.ReplayResources
+	21, // 3: vibesys.store.v1.ReplayPolicy.request:type_name -> google.protobuf.Any
+	6,  // 4: vibesys.store.v1.ReplayPolicy.reservation:type_name -> vibesys.store.v1.ReplayResources
+	3,  // 5: vibesys.store.v1.OperationReplay.key:type_name -> vibesys.store.v1.OperationKey
+	7,  // 6: vibesys.store.v1.OperationReplay.policy:type_name -> vibesys.store.v1.ReplayPolicy
+	21, // 7: vibesys.store.v1.OperationReplay.outcome:type_name -> google.protobuf.Any
+	5,  // 8: vibesys.store.v1.OperationReplay.allowance:type_name -> vibesys.store.v1.ReplayAllowance
+	10, // 9: vibesys.store.v1.WriterManifest.backing:type_name -> vibesys.store.v1.WriterBacking
+	11, // 10: vibesys.store.v1.WriterManifest.writers:type_name -> vibesys.store.v1.WriterIdentity
+	12, // 11: vibesys.store.v1.WriterTerminationProof.manifest:type_name -> vibesys.store.v1.WriterManifest
+	12, // 12: vibesys.store.v1.WriterReconciliation.manifest:type_name -> vibesys.store.v1.WriterManifest
+	2,  // 13: vibesys.store.v1.WriterReconciliation.status:type_name -> vibesys.store.v1.WriterReconciliationStatus
+	13, // 14: vibesys.store.v1.WriterReconciliation.proof:type_name -> vibesys.store.v1.WriterTerminationProof
+	12, // 15: vibesys.store.v1.WriterRegistryState.manifest:type_name -> vibesys.store.v1.WriterManifest
+	13, // 16: vibesys.store.v1.WriterRegistryState.proof:type_name -> vibesys.store.v1.WriterTerminationProof
+	5,  // 17: vibesys.store.v1.ReplayClock.allowance:type_name -> vibesys.store.v1.ReplayAllowance
+	8,  // 18: vibesys.store.v1.ReplayNotice.unused:type_name -> vibesys.store.v1.OperationReplay
+	3,  // 19: vibesys.store.v1.ReplayNotice.pending:type_name -> vibesys.store.v1.OperationKey
+	21, // 20: vibesys.store.v1.ReplayObservation.outcome:type_name -> google.protobuf.Any
+	22, // 21: vibesys.store.v1.ReplayObservation.usage:type_name -> vibesys.store.v1.TokenUsage
+	23, // 22: vibesys.store.v1.replay_context:extendee -> google.protobuf.MessageOptions
+	24, // 23: vibesys.store.v1.replay_field:extendee -> google.protobuf.FieldOptions
+	24, // 24: vibesys.store.v1.replay_set:extendee -> google.protobuf.FieldOptions
+	0,  // 25: vibesys.store.v1.replay_field:type_name -> vibesys.store.v1.ReplayFieldKind
+	26, // [26:26] is the sub-list for method output_type
+	26, // [26:26] is the sub-list for method input_type
+	25, // [25:26] is the sub-list for extension type_name
+	22, // [22:25] is the sub-list for extension extendee
+	0,  // [0:22] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_store_v1_replay_proto_init() }
@@ -1091,15 +1732,16 @@ func file_vibesys_store_v1_replay_proto_init() {
 	file_vibesys_store_v1_replay_proto_msgTypes[3].OneofWrappers = []any{}
 	file_vibesys_store_v1_replay_proto_msgTypes[4].OneofWrappers = []any{}
 	file_vibesys_store_v1_replay_proto_msgTypes[5].OneofWrappers = []any{}
-	file_vibesys_store_v1_replay_proto_msgTypes[8].OneofWrappers = []any{}
-	file_vibesys_store_v1_replay_proto_msgTypes[9].OneofWrappers = []any{}
+	file_vibesys_store_v1_replay_proto_msgTypes[6].OneofWrappers = []any{}
+	file_vibesys_store_v1_replay_proto_msgTypes[15].OneofWrappers = []any{}
+	file_vibesys_store_v1_replay_proto_msgTypes[16].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_vibesys_store_v1_replay_proto_rawDesc), len(file_vibesys_store_v1_replay_proto_rawDesc)),
-			NumEnums:      2,
-			NumMessages:   11,
+			NumEnums:      3,
+			NumMessages:   18,
 			NumExtensions: 3,
 			NumServices:   0,
 		},

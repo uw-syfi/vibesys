@@ -8,10 +8,15 @@ from typing import TYPE_CHECKING
 
 from protobuf.wkt.google.protobuf.timestamp_pb import Timestamp
 
-from vs_runtime._replay_runtime import ReplayPending, ReplayRecoveryRequiredError, ReplayUnknown
+from vs_runtime._replay_runtime import (
+    ReplayPending,
+    ReplayRecoveryRequiredError,
+    ReplayRetirement,
+    ReplayUnknown,
+)
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Coroutine
 
     from vs_proto.api import Span
     from vs_runtime._replay_runtime import (
@@ -21,6 +26,7 @@ if TYPE_CHECKING:
         ReplayResult,
         ReplayRuntime,
     )
+    from vs_runtime._writer_reconciliation import ReplayWriterBarrier
     from vs_sim.api import SleepingClock
 
 
@@ -33,6 +39,7 @@ class ReplayRunHost:
     clock: SleepingClock
     ending: Callable[[object], ReplayEnding]
     """Pure policy mapping from the root value to a resumable epoch ending."""
+    writer_barrier: ReplayWriterBarrier | None = None
 
 
 @dataclass(frozen=True)
@@ -71,8 +78,8 @@ class _LiveEpoch:
         return self.flow_origin + max(0, self.host.clock.now() - self.wall_origin)
 
     async def execute(self, span: Span) -> ReplayResult:
-        return await self.host.runtime.dispatch(
-            span.id, self.host.executor, now=self.host.clock.now()
+        return await self._owned(
+            self.host.runtime.dispatch(span.id, self.host.executor, now=self.host.clock.now())
         )
 
     def completed(self, task: asyncio.Task[ReplayResult]) -> None:
@@ -137,36 +144,82 @@ class _LiveEpoch:
         )
         self.host.runtime.accept(completed.span_id, now=now, at=_at(now))
 
-    async def recover(self) -> None:
+    async def _owned[T](self, operation: Coroutine[object, object, T]) -> T:
+        """Keep host exclusion across every awaited execution-owner operation."""
+        shell, clock = self.host.runtime, self.host.clock
+        work = asyncio.create_task(operation)
+        try:
+            while not work.done():
+                sleeper = asyncio.create_task(clock.sleep(max(0, self.renew_at - clock.now())))
+                try:
+                    await asyncio.wait((work, sleeper), return_when=asyncio.FIRST_COMPLETED)
+                    if clock.now() >= self.renew_at:
+                        shell.renew(now=clock.now(), duration=self.launch.lease_duration)
+                        self.renew_at = clock.now() + self.launch.lease_duration / 3
+                finally:
+                    sleeper.cancel()
+                    await asyncio.gather(sleeper, return_exceptions=True)
+            return work.result()
+        finally:
+            work.cancel()
+            await asyncio.gather(work, return_exceptions=True)
+
+    async def _retire(self, identities: list[str]) -> None:
+        shell, clock = self.host.runtime, self.host.clock
+        executor, barrier = self.host.executor, self.host.writer_barrier
+        if not isinstance(executor, ReplayRetirement) or barrier is None:
+            raise ReplayRecoveryRequiredError(
+                shell.recovery, ("execution owner cannot settle withdrawn children",)
+            )
+        for identity in identities:
+            await self._owned(shell.retire(identity, executor, barrier.registry, clock=clock))
+
+    async def _recover_inspections(self, spans: tuple[Span, ...]) -> tuple[list[str], list[str]]:
         shell, clock = self.host.runtime, self.host.clock
         reasons = []
-        for span in shell.recovery:
-            inspection = asyncio.create_task(
-                shell.inspect(span.id, self.host.executor, now=clock.now())
-            )
-            try:
-                while not inspection.done():
-                    sleeper = asyncio.create_task(clock.sleep(max(0, self.renew_at - clock.now())))
-                    try:
-                        await asyncio.wait(
-                            (inspection, sleeper), return_when=asyncio.FIRST_COMPLETED
-                        )
-                        if not inspection.done():
-                            shell.renew(now=clock.now(), duration=self.launch.lease_duration)
-                            self.renew_at = clock.now() + self.launch.lease_duration / 3
-                    finally:
-                        sleeper.cancel()
-                        await asyncio.gather(sleeper, return_exceptions=True)
-                result = inspection.result()
-                if isinstance(result, ReplayPending):
-                    reasons.append(f"{span.id}: invocation is still pending")
-                elif isinstance(result, ReplayUnknown):
-                    reasons.append(f"{span.id}: unknown: {result.reason}")
+        barrier = self.host.writer_barrier
+        withdrawn = []
+        for span in spans:
+            result = await self._owned(shell.inspect(span.id, self.host.executor, now=clock.now()))
+            if isinstance(result, (ReplayPending, ReplayUnknown)):
+                if span.replay_physical is not None and barrier is not None:
+                    shell.withdraw(span.id, now=clock.now(), at=_at(clock.now()))
+                    withdrawn.append(span.id)
                 else:
-                    shell.recover(span.id, result, now=clock.now(), at=_at(clock.now()))
-            finally:
-                inspection.cancel()
-                await asyncio.gather(inspection, return_exceptions=True)
+                    detail = (
+                        "invocation is still pending"
+                        if isinstance(result, ReplayPending)
+                        else result.reason
+                    )
+                    reasons.append(f"{span.id}: {detail}")
+            else:
+                shell.recover(span.id, result, now=clock.now(), at=_at(clock.now()))
+                if span.replay_physical is not None and span.replay_physical.has_field(
+                    "withdrawn_sequence"
+                ):
+                    withdrawn.append(span.id)
+        return withdrawn, reasons
+
+    async def recover(self) -> None:
+        shell, clock = self.host.runtime, self.host.clock
+        barrier = self.host.writer_barrier
+        manifest = (
+            None if barrier is None else barrier.begin(shell, now=clock.now(), at=_at(clock.now()))
+        )
+        unfinished = shell.recovery
+        withdrawn, reasons = await self._recover_inspections(
+            tuple(span for span in unfinished if span.replay_physical is not None)
+        )
+        if barrier is not None and manifest is not None:
+            await self._owned(barrier.finish(shell, manifest, clock=clock))
+            if withdrawn:
+                await self._retire(withdrawn)
+        # Inspecting an old root acquisition may resume its owning effect. It
+        # must follow proof and restoration, just like a fresh acquisition.
+        _, remaining = await self._recover_inspections(
+            tuple(span for span in unfinished if span.replay_physical is None)
+        )
+        reasons.extend(remaining)
         if shell.recovery:
             raise ReplayRecoveryRequiredError(shell.recovery, tuple(reasons))
         shell.finish_recovery()

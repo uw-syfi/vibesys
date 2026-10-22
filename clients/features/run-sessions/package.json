@@ -38,7 +38,8 @@
     "@vibesys/hosts": "workspace:*",
     "@vibesys/ipc": "workspace:*",
     "@vibesys/ui": "workspace:*",
-    "react": "19.1.1"
+    "react": "19.1.1",
+    "@vibesys/request-identity": "workspace:*"
   },
   "devDependencies": {
     "@types/bun": "1.4.2",
@@ -46,7 +47,7 @@
     "typescript": "^5.8.3",
     "@types/react": "19.1.13",
     "@vibesys/proto": "workspace:*",
-    "@vibesys/transport": "workspace:*",
-    "@bufbuild/protobuf": "2.16.0"
+    "@bufbuild/protobuf": "2.16.0",
+    "@vibesys/transport": "workspace:*"
   }
 }

@@ -20,6 +20,7 @@ import {
   operationPolicies,
   projectMessage,
 } from '@vibesys/proto';
+import {newRequestId} from '@vibesys/request-identity';
 
 export interface RegistryCatalog {
   describeMachine(
@@ -82,7 +83,7 @@ export function registryReads(ports: RegistryReadPorts): RegistryCatalog {
     async describeMachine(host, expectedCheckout, signal) {
       const response = await callDescribeMachine(
         await transport(host, expectedCheckout, signal),
-        acceptDescribeMachine({requestId: 'registry-read'}),
+        acceptDescribeMachine({requestId: newRequestId()}),
         signal,
       );
       const projected = projectMessage(DescribeMachineResponseSchema, response) as {
@@ -93,7 +94,7 @@ export function registryReads(ports: RegistryReadPorts): RegistryCatalog {
     async listCompute(host, expectedCheckout, signal) {
       const response = await callListCompute(
         await transport(host, expectedCheckout, signal),
-        acceptListCompute({requestId: 'registry-read'}),
+        acceptListCompute({requestId: newRequestId()}),
         signal,
       );
       const projected = projectMessage(ListComputeResponseSchema, response) as {

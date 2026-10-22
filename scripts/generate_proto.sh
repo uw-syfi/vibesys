@@ -16,8 +16,8 @@ done
 uv run --locked --group proto buf format -w "${format_args[@]}"
 uv run --locked --group proto buf generate
 uv run --locked --group proto python -m scripts.host_operations.generate "$image" --bindings
-uv run --locked ruff check --select I --fix libs/vs-proto/src/vs_proto/_generated/host_operations.py src/server/host_operation_types_generated.py
-uv run --locked ruff format libs/vs-proto/src/vs_proto/_generated/host_operations.py src/server/host_operation_types_generated.py
+uv run --locked ruff check --select I --fix libs/vs-proto/src/vs_proto/_generated/host_operations.py src/server/host_operation_types_generated.py src/server/host_compatibility_generated.py
+uv run --locked ruff format libs/vs-proto/src/vs_proto/_generated/host_operations.py src/server/host_operation_types_generated.py src/server/host_compatibility_generated.py
 gofmt_paths=()
 for path in gateway/internal/hostoperations/registry_generated.go gateway/internal/hostoperations/host_call_generated.go gateway/internal/hostoperations/host_read_generated.go gateway/internal/hostoperations/host_watch_generated.go gateway/internal/hostoperations/host_mutate_generated.go; do
   if [[ -f "$path" ]]; then

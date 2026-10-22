@@ -1,5 +1,6 @@
 import {expect, test} from 'bun:test';
 import {create, fromBinary, toBinary} from '@bufbuild/protobuf';
+import {registryClusters} from '@vibesys/connection';
 import type {HostId} from '@vibesys/hosts';
 import {
   ClusterTestFailedSchema,
@@ -10,7 +11,6 @@ import {
   PutClusterResponseSchema,
   TestClusterResponseSchema,
 } from '@vibesys/proto';
-import {registryClusters} from './registry-clusters.js';
 
 const HOST: HostId = {kind: 'ssh', alias: 'host-a'};
 
@@ -36,7 +36,7 @@ test('a v2 put sends the cluster and reads the host settings back', async () => 
           result: {
             case: 'putCluster',
             value: create(PutClusterResponseSchema, {
-              requestId: 'cluster-1',
+              requestId: mutationId(bytes),
               settings: create(ComputeSettingsSchema, {
                 configPath: '/settings',
                 modal: {tokenPresent: false},
@@ -54,7 +54,7 @@ test('a v2 put sends the cluster and reads the host settings back', async () => 
   expect(request.checkout).toBe('/src/checkout');
   expect(request.method.case).toBe('putCluster');
   if (request.method.case !== 'putCluster') return;
-  expect(request.method.value.requestId).toBe('cluster-1');
+  expect(request.method.value.requestId).toMatch(/^[0-9a-f-]{36}$/);
   expect(request.method.value.cluster?.name).toBe('lab');
   expect(request.method.value.cluster?.reach?.value.case).toBe('sshReach');
   expect(request.method.value.cluster?.workspace).toBe('/work');
@@ -69,14 +69,14 @@ test('a v2 put sends the cluster and reads the host settings back', async () => 
 test('a v2 test keeps the host failure', async () => {
   const clusters = registryClusters({
     checkout: async () => '/src/checkout',
-    unary: async () =>
+    unary: async (_host, bytes) =>
       toBinary(
         MutateResponseSchema,
         create(MutateResponseSchema, {
           result: {
             case: 'testCluster',
             value: create(TestClusterResponseSchema, {
-              requestId: 'cluster-1',
+              requestId: mutationId(bytes),
               result: {
                 case: 'failed',
                 value: create(ClusterTestFailedSchema, {
@@ -102,3 +102,9 @@ test('a v2 test keeps the host failure', async () => {
     detail: 'could not reach host-a',
   });
 });
+
+function mutationId(bytes: Uint8Array): string {
+  const method = fromBinary(MutateRequestSchema, bytes).method;
+  if (method.case === undefined) throw new Error('missing mutation');
+  return method.value.requestId;
+}

@@ -19,6 +19,7 @@ import {
   type WelcomeResult,
 } from '@vibesys/ipc';
 import type {LogListOutcome, LogReadInput, LogReadOutcome, LogTransport} from '@vibesys/logs';
+import {newRequestId} from '@vibesys/request-identity';
 import {WebSession, type WebSessionOptions} from '@vibesys/run-session';
 import {exactResumeRunId, type RunRef} from '@vibesys/runs';
 import type {AbortSignalLike} from '@vibesys/transport';
@@ -177,7 +178,7 @@ function openWebSession(
       const outcome = await session.command({
         type: 'command.control',
         control: {
-          control_id: crypto.randomUUID(),
+          control_id: newRequestId(),
           action: command.kind === 'pause-now' ? 'pause_now' : 'pause',
         },
       });

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from typing import TYPE_CHECKING, Literal, TypedDict, cast
 
 from vs_core.api import (
@@ -24,21 +25,29 @@ from vs_core.api import (
     WorkspaceMode,
     WorkspacePlan,
 )
+from vs_core.api.replay import ReplayArchive, ReplayWriterRecovery, proof_covers
 from vs_decode.api import Unreadable
-from vs_proto.api import core_leaves, validate
+from vs_project.api import StoredEnvelope
+from vs_proto.api import ReplayStore as ReplayRecords
+from vs_proto.api import core_leaves, replay_agent, validate
 from vs_proto.api import replay_workspace as pb
 from vs_runtime._replay_evidence import adoption_evidence
 from vs_runtime._replay_operations import ReplayOperationError, ReplayOperationHost
 from vs_runtime._replay_owner import ReceiptReplayExecutor, ReplayOwnerCodec
 from vs_runtime._replay_runtime import ReplayAbsent, ReplayPending, ReplayResult, ReplayUnknown
+from vs_runtime._workspace_receipts import StoreWorkspaceReceipts
+from vs_runtime._writer_reconciliation import WriterProofError
 from vs_runtime.api.core_values import from_proto, to_proto
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
     from vs_core.api import InvocationRef
     from vs_project.api import StoreFence
-    from vs_proto.api import Span
+    from vs_proto.api import Span, replay
     from vs_runtime._core_requests import ExecutionResult, WorkspaceRequests, WorkspaceRoleRequest
     from vs_runtime._receipt_store import ReceiptStore
+    from vs_runtime._writer_reconciliation import WriterRegistry
 
 
 _RETENTION: dict[pb.ReplayRetention, Literal["wip", "candidate"]] = {
@@ -87,11 +96,14 @@ class WorkspaceReplayExecutor:
         host: ReplayOperationHost,
         *,
         within_seconds: float,
+        writers: WriterRegistry | None = None,
     ) -> None:
         if not 0 < within_seconds < float("inf"):
             problem = "workspace replay within_seconds must be finite and positive"
             raise ReplayOperationError(problem)
         self._host = host
+        self._writers = writers
+        self._workspace_receipts = StoreWorkspaceReceipts(receipts)
         executor = ReceiptReplayExecutor(
             owner.execute,
             receipts,
@@ -101,12 +113,91 @@ class WorkspaceReplayExecutor:
         self._executor = executor
 
     async def execute(self, span: Span, fence: StoreFence) -> ReplayResult:
-        return await self._executor.execute(span, fence)
+        with self._root_access(span, fence):
+            return await self._executor.execute(span, fence)
 
     async def inspect(
         self, span: Span, fence: StoreFence
     ) -> ReplayResult | ReplayAbsent | ReplayPending | ReplayUnknown:
-        return await self._executor.inspect(span, fence)
+        with self._root_access(span, fence):
+            return await self._executor.inspect(span, fence)
+
+    def _root_step(self, span: Span) -> bool:
+        native = self._native(span)
+        action = native.action
+        if action is None:
+            return False
+        root_step = action.field == "adopt" or (
+            action.field == "open" and action.value.mode is pb.ReplayWorkspaceMode.EXCLUSIVE_ROOT
+        )
+        if native.attempt:
+            binding = self._workspace_receipts.load_binding(
+                AttemptRef(attempt_id=AttemptId(root=native.attempt), generation=native.generation)
+            )
+            root_step = root_step or (
+                binding is not None and binding.mode is WorkspaceMode.EXCLUSIVE_ROOT
+            )
+        return root_step
+
+    @contextmanager
+    def _root_access(self, span: Span, fence: StoreFence) -> Iterator[None]:
+        if not self._root_step(span):
+            yield
+            return
+        if self._writers is None:
+            problem = "Recovery blocked: previous writers may still modify this workspace; missing writer registry"
+            raise WriterProofError(problem)
+        with self._writers.reuse(run_id=self._host.run_id, fence=fence) as proof:
+            self._guard_root(proof)
+            yield
+
+    def _guard_root(self, proof: replay.WriterTerminationProof) -> None:
+        if proof.manifest is None or proof.manifest.backing is None:
+            problem = "writer proof omitted backing identity"
+            raise WriterProofError(problem)
+        stored = self._host.store.load()
+        if not isinstance(stored, StoredEnvelope):
+            problem = "root reuse requires its durable native proof"
+            raise WriterProofError(problem)
+        request = ReplayWriterRecovery.from_records(
+            ReplayRecords.from_binary(stored.payload).records
+        ).require(proof.manifest.backing)
+        self._cover_root_writers(ReplayRecords.from_binary(stored.payload), proof)
+        if request.proof() != proof:
+            problem = "durable root reuse proof differs from environment evidence"
+            raise WriterProofError(problem)
+
+    def _cover_root_writers(
+        self, records: ReplayRecords, proof: replay.WriterTerminationProof
+    ) -> None:
+        """A previously empty proof cannot authorize reuse after a new writable grant."""
+        for child in ReplayArchive.decode(records.to_binary()).spans:
+            physical = child.replay_physical
+            if (
+                physical is None
+                or physical.confirmed_absent
+                or physical.has_field("termination_proof_digest")
+            ):
+                continue
+            operation = child.replay
+            if operation is None or operation.policy is None or operation.policy.request is None:
+                continue
+            payload = operation.policy.request
+            if payload.type_url != replay_agent.ReplayAgentRequest.desc().type_name:
+                proof_covers(child, proof, run_id=self._host.run_id)
+                continue
+            agent = replay_agent.ReplayAgentRequest.from_binary(payload.value)
+            if agent.action is None or agent.action.field != "turn":
+                continue
+            turn = agent.action.value
+            scope = None if turn.workspace is None else from_proto(turn.workspace)
+            binding = None
+            if isinstance(scope, Scope) and isinstance(scope.owner, AttemptId):
+                binding = self._workspace_receipts.load_binding(
+                    AttemptRef(attempt_id=scope.owner, generation=scope.generation)
+                )
+            if binding is None or binding.mode is WorkspaceMode.EXCLUSIVE_ROOT:
+                proof_covers(child, proof, run_id=self._host.run_id)
 
     @staticmethod
     def _native(span: Span) -> pb.ReplayWorkspaceRequest:

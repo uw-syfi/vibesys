@@ -24,6 +24,12 @@ from vs_core.flows._replay_identity import (
     encode_identity,
 )
 from vs_core.flows._replay_iterations import ReplayAccounting, ReplayIterationBlocked
+from vs_core.flows._replay_physical import (
+    physical_identity,
+    physical_start,
+    proof_covers,
+    proof_digest,
+)
 from vs_core.flows._replay_resources import (
     ReplayResourceAccounting,
     ReplayResourcesBlocked,
@@ -47,6 +53,7 @@ from vs_core.flows._replay_sources import (
     ReplayTask,
     ReplayTimer,
 )
+from vs_core.flows._replay_writers import ReplayRootReuse, ReplayWriterRecovery
 
 __all__ = [
     "EMPTY_CAUSALITY",
@@ -76,15 +83,21 @@ __all__ = [
     "ReplayResourceAccounting",
     "ReplayResourceTotals",
     "ReplayResourcesBlocked",
+    "ReplayRootReuse",
     "ReplayScheduler",
     "ReplaySettings",
     "ReplaySource",
     "ReplayTask",
     "ReplayTimer",
+    "ReplayWriterRecovery",
     "SemanticKey",
     "chain_dependency",
     "classify_context",
     "encode_identity",
+    "physical_identity",
+    "physical_start",
+    "proof_covers",
+    "proof_digest",
     "replay_descriptors",
     "reply_schema_digest",
 ]

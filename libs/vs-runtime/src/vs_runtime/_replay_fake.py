@@ -4,6 +4,7 @@ import asyncio
 from collections.abc import Awaitable, Callable
 from copy import deepcopy
 
+from vs_core.api.replay import ReplayRootReuse, physical_identity
 from vs_project.api import StoreFence
 from vs_proto.api import Span, validate
 from vs_runtime._replay_runtime import ReplayAbsent, ReplayPending, ReplayResult, ReplayUnknown
@@ -79,9 +80,31 @@ class FakeReplayExecutor:
             return ReplayUnknown(f"{type(error).__name__}: {error}")
         return deepcopy(task.result())
 
+    async def retire(self, span: Span, fence: StoreFence, reuse: ReplayRootReuse) -> None:
+        if fence.epoch < self._epoch or span.replay_physical is None:
+            problem = "retirement requires a current physical invocation"
+            raise ValueError(problem)
+        manifest = reuse.proof().manifest
+        if manifest is None:
+            problem = "retirement requires environment evidence"
+            raise ValueError(problem)
+        # The runtime checks the run identity and durable proof before this call.
+        if not any(writer.physical_id == span.id for writer in manifest.writers):
+            problem = "retirement proof omits the physical invocation"
+            raise ValueError(problem)
+        if not span.replay_physical.has_field("withdrawn_sequence"):
+            problem = "retirement requires durable withdrawal"
+            raise ValueError(problem)
+        self._epoch = fence.epoch
+        self._withdrawn.add(span.id)
+        previous = self._invocations.get(span.id)
+        if previous is not None:
+            previous[1].cancel()
+            await asyncio.gather(previous[1], return_exceptions=True)
+
     @staticmethod
     def _request(span: Span) -> bytes:
         if span.replay is None:
             problem = "replay executor requires immutable operation metadata"
             raise ValueError(problem)
-        return span.replay.to_binary()
+        return physical_identity(span)

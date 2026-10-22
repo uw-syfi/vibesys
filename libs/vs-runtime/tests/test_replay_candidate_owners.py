@@ -82,6 +82,7 @@ from .test_replay_workspaces import request as workspace_request
 from .test_replay_workspaces import step as workspace_step
 from .test_session_resolver import role
 from .test_workspace_requests import _commits, _env, _git
+from .test_writer_reconciliation import empty_barrier
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine, Mapping
@@ -340,6 +341,7 @@ class CandidateWorld:
         self.client = client
         self.cluster = cluster
         self.store = store
+        self.barrier = empty_barrier(env.project)
         self.root = program(base, prompt, facts)
         self.drifted_root = program(
             base, artifact(b"Work using revised policy."), facts, reply_version="2"
@@ -407,6 +409,7 @@ class CandidateWorld:
         self.jobs.append(measured)
         executor = replay_bindings(
             ReplayOwnerServices(
+                writer_registry=self.barrier.registry,
                 workspaces=resources,
                 sessions=ReplaySessionServices(sessions, resolver, InlineBlockingRunner()),
                 evaluation=measured,
@@ -426,6 +429,7 @@ class CandidateWorld:
             lambda _: ReplayEnding(
                 Ended(outcome=Outcome.FINISHED, summary="Done.", resumable=True)
             ),
+            writer_barrier=self.barrier,
         )
 
     async def exercise(self, index: int, boundary: str) -> None:
@@ -436,6 +440,7 @@ class CandidateWorld:
                 now=self.sim.clock.now(),
                 at=Timestamp(),
             )
+            await self.barrier.reconcile(first.runtime, clock=self.sim.clock)
             while True:
                 ready = first.runtime.prepare(now=self.sim.clock.now(), at=Timestamp())
                 if not ready:

@@ -1,3 +1,4 @@
+import {newRequestId} from '@vibesys/request-identity';
 import {type ChatSteerProposed, chatRequest} from '@vibesys/runs/chat';
 import {useEffect, useRef, useState} from 'react';
 import type {SnapshotFrom} from 'xstate';
@@ -58,7 +59,7 @@ export function useRunSessions(
             projectRoot: props.projectRoot,
             runId: props.runId,
             sessionId: props.sessionId,
-            requestId: crypto.randomUUID(),
+            requestId: newRequestId(),
             text,
           }),
         });

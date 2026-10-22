@@ -7,12 +7,14 @@ from typing import TYPE_CHECKING
 
 from vs_proto.api import validate
 from vs_runtime._replay_operations import ReplayOperationError
+from vs_runtime._replay_runtime import ReplayRetirement
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from protobuf import Message
 
+    from vs_core.api.replay import ReplayRootReuse
     from vs_project.api import StoreFence
     from vs_proto.api import Span
     from vs_runtime._replay_runtime import (
@@ -61,3 +63,10 @@ class ReplayExecutors:
         self, span: Span, fence: StoreFence
     ) -> ReplayResult | ReplayAbsent | ReplayPending | ReplayUnknown:
         return await self._owner(span).inspect(span, fence)
+
+    async def retire(self, span: Span, fence: StoreFence, reuse: ReplayRootReuse) -> None:
+        owner = self._owner(span)
+        if not isinstance(owner, ReplayRetirement):
+            problem = "the execution owner cannot settle a withdrawn physical invocation"
+            raise ReplayOperationError(problem)
+        await owner.retire(span, fence, reuse)

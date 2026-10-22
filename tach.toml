@@ -290,7 +290,7 @@ depends_on = ["server.host_envelope", "server.host_machine_facts"]
 [[modules]]
 # The host helper's MachineProbe on a real host: hardware, Docker, harness CLIs, checkouts.
 path = "server.host_helper_machine"
-depends_on = ["server.host_api", "server.host_machine_facts", "vs_sim.api"]
+depends_on = ["server.host_api", "server.host_compatibility_generated", "server.host_machine_facts", "vs_sim.api"]
 
 [[modules]]
 # What a run's tile draws (per-idea points, attention reason): contracts only. Pydantic only.
@@ -2117,6 +2117,14 @@ depends_on = ["server.host_api", "vs_proto"]
 [[interfaces]]
 from = ["server.host_operation_types_generated"]
 expose = ["is_registry_read", "RegistryReadRequest", "UnmigratedHelperRequest"]
+
+[[modules]]
+path = "server.host_compatibility_generated"
+depends_on = []
+
+[[interfaces]]
+from = ["server.host_compatibility_generated"]
+expose = ["MIN_CHECKOUT_VERSION"]
 
 [[modules]]
 path = "server.host_saved_runs"

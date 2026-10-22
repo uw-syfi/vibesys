@@ -188,10 +188,15 @@ def _accepted_units(
 
 def _paid_observations(records: tuple[Record, ...]) -> tuple[int, int]:
     seen: set[str] = set()
+    parents = {
+        span.replay_physical.logical
+        for _, span in _spans(records)
+        if span.replay_physical is not None
+    }
     paid = unknown = 0
     for _, span in _spans(records):
         observation = span.replay_observation
-        if observation is None or span.id in seen:
+        if observation is None or span.id in seen or span.id in parents:
             continue
         seen.add(span.id)
         paid += int(observation.paid)

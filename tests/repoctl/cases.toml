@@ -362,6 +362,15 @@ native_targets = []
 pnpm_packages = []
 
 [[cases]]
+name = "generated checkout compatibility remains a light Python module"
+paths = ["src/server/host_compatibility_generated.py"]
+jobs = ["python"]
+[cases.collections]
+native_languages = []
+native_targets = []
+pnpm_packages = []
+
+[[cases]]
 name = "native saved-run metadata selects its consumers"
 paths = ["src/server/host_saved_runs.py"]
 jobs = ["python"]
@@ -369,6 +378,15 @@ jobs = ["python"]
 native_languages = []
 native_targets = []
 pnpm_packages = []
+
+[[cases]]
+name = "request identity changes reach every client request producer"
+paths = ["clients/libs/request-identity/src/index.ts"]
+jobs = ["clients"]
+[cases.collections]
+native_languages = []
+native_targets = []
+pnpm_packages = { dependents_of = "pnpm:@vibesys/request-identity" }
 
 [[cases]]
 name = "Pause-now escalation selects its Python owners"

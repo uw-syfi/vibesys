@@ -109,6 +109,7 @@ message Span {
   optional Label label = 12;
   optional OperationReplay replay = 13;
   optional ReplayObservation replay_observation = 14;
+  optional ReplayPhysical replay_physical = 15;
 }
 
 message WaitingOn {

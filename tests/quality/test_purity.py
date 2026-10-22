@@ -75,6 +75,31 @@ def test_replay_proto_values_allow_memory_codecs_but_no_unreviewed_methods(name:
     assert {site.rule for site in forbidden} == {"effect-path"}
 
 
+@pytest.mark.parametrize(
+    "name",
+    [
+        "ReplayPhysical",
+        "WriterBacking",
+        "WriterIdentity",
+        "WriterManifest",
+        "WriterTerminationProof",
+        "WriterReconciliation",
+    ],
+)
+def test_writer_proto_codecs_are_pure_but_file_methods_stay_forbidden(name: str) -> None:
+    path = f"{PURE_SCOPE}/flows/example.py"
+    prefix = "from vs_proto.api import replay as pb\n"
+    assert (
+        scan_source(
+            path, prefix + f"value = pb.{name}.from_binary(data)\nschema = pb.{name}.desc()\n"
+        )
+        == ()
+    )
+    assert {
+        site.rule for site in scan_source(path, prefix + f"pb.{name}.read_file('input.pb')\n")
+    } == {"effect-path"}
+
+
 def test_native_replay_record_validation_is_pure_but_unreviewed_exports_are_rejected() -> None:
     path = f"{PURE_SCOPE}/flows/example.py"
     source = (
