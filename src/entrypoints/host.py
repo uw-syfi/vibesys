@@ -34,7 +34,7 @@ _WATCH_COMMANDS = {slot.replace("_", "-"): slot for slot in host_operations.WATC
 _MUTATION_COMMANDS = {op.cli: op.slot for op in host_operations.MUTATION_CALLS}
 
 
-class _LoginHold(Protocol):
+class LoginHold(Protocol):
     """A started login the watch holds until cancel or completion."""
 
     @property
@@ -48,17 +48,17 @@ class _LoginHold(Protocol):
         """Block until the login process has been reaped."""
 
 
-class _LoginLibrary(Protocol):
+class LoginLibrary(Protocol):
     """The host's login library, the part the watch command uses."""
 
-    def hold(self, provider: str) -> _LoginHold:
+    def hold(self, provider: str) -> LoginHold:
         """Start ``provider``'s login and keep its process group."""
 
 
 if TYPE_CHECKING:
     from typing import BinaryIO
 
-    from vs_sim.api import Processes, Threads
+    from vs_sim.api import Processes, SignalRelay, Threads
 
 
 def run(argv: list[str], *, cwd: Path) -> tuple[int, str, str]:
@@ -145,7 +145,9 @@ def main(
         if not isinstance(host.logins, library):
             message = "host logins cannot be held open"
             raise TypeError(message)
-        _serve_login(arguments[0], source.read((1 << 20) + 1), destination, host.logins, owned)
+        watch_login(
+            source.read((1 << 20) + 1), destination, host.logins, owned, WakeupFdSignalRelay(owned)
+        )
         return 0
     if arguments and arguments[0] in _MUTATION_COMMANDS:
         parser = argparse.ArgumentParser(
@@ -183,12 +185,16 @@ def main(
     return code
 
 
-def _serve_login(
-    cli: str, payload: bytes, destination: BinaryIO, logins: _LoginLibrary, threads: Threads
+def watch_login(
+    payload: bytes,
+    destination: BinaryIO,
+    logins: LoginLibrary,
+    threads: Threads,
+    signals: SignalRelay,
 ) -> None:
     """Start one login and hold this process until it ends or this process is signalled."""
     models = import_module("server.host_agent_logins")
-    held: list[_LoginHold] = []
+    held: list[LoginHold] = []
     stop = threads.event()
 
     def start(provider: str) -> LoginStartedFact | LoginRefusedFact:
@@ -220,8 +226,8 @@ def _serve_login(
     def write(chunk: bytes) -> None:
         destination.write(chunk)
 
-    with WakeupFdSignalRelay(threads).relay([Signals.SIGTERM], lambda _number: stop.set()):
-        serve_login(payload, cli=cli, start=start, write=write, wait=wait)
+    with signals.relay([Signals.SIGTERM], lambda _number: stop.set()):
+        serve_login(payload, cli="login", start=start, write=write, wait=wait)
 
 
 def _serve_mutation(cli: str, payload: bytes, threads: Threads) -> bytes:

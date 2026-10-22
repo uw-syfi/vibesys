@@ -126,3 +126,57 @@ def test_start_refusal_is_typed_and_replayed_without_launching(host_root: Path, 
     assert response.result.field == "failure"
     assert str(project) in response.result.value.message
     assert invoke("start-run", request.to_binary()) == first
+
+
+@pytest.mark.parametrize("state", ["absent", "empty", "occupied"])
+def test_destination_inspection_keeps_the_request_identity_and_filesystem_state(
+    host_root: Path, state: str
+) -> None:
+    destination = host_root / "destination"
+    if state != "absent":
+        destination.mkdir()
+    if state == "occupied":
+        (destination / "keep.txt").write_text("existing content")
+    request = ReadRequest(
+        checkout="/src/checkout",
+        method=Oneof(
+            "inspect_destination",
+            pb.InspectDestinationRequest(
+                request_id="destination-a", example="kvstore-default", destination=str(destination)
+            ),
+        ),
+    )
+    response = ReadResponse.from_binary(invoke("inspect-destination", request.to_binary()))
+    validate(response)
+    assert response.result is not None
+    assert response.result.field == "inspect_destination"
+    assert response.result.value.request_id == "destination-a"
+    assert (
+        response.result.value.state
+        == {
+            "absent": pb.DestinationState.ABSENT,
+            "empty": pb.DestinationState.EMPTY,
+            "occupied": pb.DestinationState.OCCUPIED,
+        }[state]
+    )
+    if state == "occupied":
+        assert (destination / "keep.txt").read_text() == "existing content"
+
+
+def test_candidate_inspection_is_a_registered_binary_read(host_root: Path) -> None:
+    request = ReadRequest(
+        checkout="/src/checkout",
+        method=Oneof(
+            "inspect_candidate",
+            pb.InspectCandidateRequest(
+                request_id="candidate-a", path=str(host_root / "absent"), selection_revision=3
+            ),
+        ),
+    )
+    response = ReadResponse.from_binary(invoke("inspect-candidate", request.to_binary()))
+    validate(response)
+    assert response.result is not None
+    assert response.result.field == "inspect_candidate"
+    assert response.result.value.request_id == "candidate-a"
+    assert response.result.value.selection_revision == 3
+    assert response.result.value.state == pb.CandidateState.NOT_FOUND
