@@ -31,6 +31,7 @@ from ._inspection import validate_inspection_target, validate_registered_owner
 from ._ledger_compaction import compact_ledger
 from ._operator_actions import cancellations, notice, reopen_retirements
 from ._ownership import cleanup_pending
+from ._parked_admission import parked_epoch_drops
 from ._proofs import (
     Proven,
     accepted_receipt_for,
@@ -173,7 +174,6 @@ from .types.sessions import (
     InterruptRequested,
     Invocation,
     ResumeSessionTurn,
-    SessionInputReceived,
     SessionsEvent,
     SessionsState,
     SteerReceived,
@@ -1881,62 +1881,6 @@ def _resume_epoch(state: CoreState, event: EpochResumed, dispatch: Dispatch) -> 
     return result
 
 
-def _parked_epoch_drops(state: CoreState, event: CoreEvent) -> bool:
-    """Whether a parked epoch ignores ``event``.
-
-    The epoch admits recovery, resume, controls, and decisions. It also admits the
-    session input that delivers a steer control it already holds when that input is
-    not recorded yet: the control and its delivery are separate events, and a crash
-    between them is repaired by a later poll. Dropping the delivery leaves the steer
-    recorded with nothing for the next turn to read. A different payload under that
-    input's id is admitted so the conflict is reported. Any other input stays out.
-    """
-    if (
-        state.run.status != RunStatus.PARKED
-        or state.run.park is None
-        or state.records.recovery.epoch != state.run.park.epoch
-    ):
-        return False
-    if isinstance(
-        event,
-        RecoveryStarted
-        | EpochResumed
-        | RunControlEvent
-        | DispatchAuthorized
-        | DecisionSubmitted
-        | ProposalSubmitted,
-    ):
-        return False
-    return not _repairs_unrecorded_steer(state, event)
-
-
-def _repairs_unrecorded_steer(state: CoreState, event: CoreEvent) -> bool:
-    """Whether ``event`` is the missing delivery of a steer this parked epoch holds.
-
-    The input id is ``steer-{control_id}``, the id ``steer_input_id`` records.
-    Core does not import the runtime, so the prefix is repeated here.
-    """
-    if not isinstance(event, SessionInputReceived):
-        return False
-    control = next(
-        (
-            row
-            for row in state.run.controls
-            if row.action == "steer"
-            and row.artifact is not None
-            and f"steer-{row.control_id.root}" == event.input.input_id.root
-        ),
-        None,
-    )
-    if control is None:
-        return False
-    recorded = next(
-        (row.input for row in state.sessions.inputs if row.input.input_id == event.input.input_id),
-        None,
-    )
-    return recorded is None or recorded != event.input
-
-
 def consume(
     state: CoreState,
     event: CoreEvent,
@@ -1954,7 +1898,7 @@ def consume(
     text) has never seen. One owner at the exit keeps that true for all of them.
     """
     given = state
-    if _parked_epoch_drops(state, event):
+    if parked_epoch_drops(state, event):
         return Transition(state=state)
     _validate_observation_ingress(state, event)
     _validate_authorization(state, event)
