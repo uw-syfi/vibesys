@@ -22,6 +22,24 @@ from vs_runtime.api.infrastructure import (
 _TEMPLATE_DIR = PROMPTS_DIR / "environments"
 
 
+def _placeholder_missing_hidden_files(request: RunEnvironmentRequest) -> None:
+    """Create empty files for hidden paths a linked worktree did not check out.
+
+    State directories are created by ``prepare_hidden_directories``. ``agent.toml``
+    and root ``.env*`` stay in the canonical policy when they exist on the operator
+    checkout, and a worktree of a commit does not contain those ignored files.
+    Confinement masks a hidden path only when it exists. The placeholder is empty;
+    the operator file is not copied.
+    """
+    workspace = request.workspace
+    for relative in request.project_path_policy.hidden_paths:
+        target = workspace / relative
+        if target.exists() or target.is_symlink():
+            continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.touch()
+
+
 def agent_environment_notes(view: RunEnvironmentView) -> str:
     """The run environment notes every agent prompt states, for the run's root session *view*.
 
@@ -42,8 +60,10 @@ def open_run_environment(
     """Render product policy and open a prepared infrastructure environment."""
     # Linked candidates omit ignored local state and any run record their revision
     # predates, but share the canonical confinement policy. Prepare its hidden
-    # directories before any sandbox opens.
+    # directories, and empty placeholders for ignored secret files the worktree
+    # did not check out, before any sandbox opens.
     Project.open(request.workspace).state.prepare_hidden_directories(request.run_id)
+    _placeholder_missing_hidden_files(request)
     prepared = environment.prepare(request)
     facts = prepared.presentation_facts
     if isinstance(facts, HostEnvironmentFacts):
