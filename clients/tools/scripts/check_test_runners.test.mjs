@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {testRunnerErrors} from './check_test_runners.mjs';
+import {testRunnerCacheErrors, testRunnerErrors} from './check_test_runners.mjs';
 import {NODE_TEST_ARGUMENTS, PER_TEST_BOUND_MS} from './test_runner_config.mjs';
 
 for (const runtime of ['bun test', 'node --test', 'node --test --test-timeout=0']) {
@@ -38,4 +38,23 @@ test('delegated and browser test scripts keep their own runtime', () => {
     }),
     [],
   );
+});
+
+test('every runner and its shared policy invalidate cached package tests', () => {
+  const files = [
+    'tools/scripts/run_bun_tests.mjs',
+    'tools/scripts/run_node_tests.mjs',
+    'tools/scripts/run_node_suite.mjs',
+    'tools/scripts/test_runner_config.mjs',
+  ];
+  assert.deepEqual(testRunnerCacheErrors({globalDependencies: files}), []);
+  for (const missing of files) {
+    const errors = testRunnerCacheErrors({
+      globalDependencies: files.filter(file => file !== missing),
+    });
+    assert.equal(errors.length, 1);
+    assert.ok(errors[0].includes(missing));
+    assert.match(errors[0], /turbo.json/);
+  }
+  assert.equal(testRunnerCacheErrors({}).length, files.length);
 });

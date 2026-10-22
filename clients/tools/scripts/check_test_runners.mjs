@@ -29,14 +29,32 @@ export function testRunnerErrors(path, manifest) {
   return errors;
 }
 
+/** Runner changes must invalidate every package's cached test result. */
+export function testRunnerCacheErrors(turbo) {
+  return [
+    'tools/scripts/run_bun_tests.mjs',
+    'tools/scripts/run_node_tests.mjs',
+    'tools/scripts/run_node_suite.mjs',
+    'tools/scripts/test_runner_config.mjs',
+  ]
+    .filter(path => !turbo.globalDependencies?.includes(path))
+    .map(
+      path =>
+        `test-runner-policy: turbo.json: add ${path} to globalDependencies so cached tests cannot bypass a changed hang guard`,
+    );
+}
+
 export function workspaceTestRunnerErrors(root) {
   const manifests = [
     {directory: '.', manifest: JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))},
     ...workspaceLayout(root).packages,
   ];
-  return manifests.flatMap(({directory, manifest}) =>
-    testRunnerErrors(join(directory, 'package.json'), manifest),
-  );
+  return [
+    ...manifests.flatMap(({directory, manifest}) =>
+      testRunnerErrors(join(directory, 'package.json'), manifest),
+    ),
+    ...testRunnerCacheErrors(JSON.parse(readFileSync(join(root, 'turbo.json'), 'utf8'))),
+  ];
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
