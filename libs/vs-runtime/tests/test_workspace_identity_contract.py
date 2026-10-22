@@ -600,6 +600,9 @@ def test_adoption_publishes_without_checkout_authority(implementation: Implement
             assert result.revision == winner
             assert result.commit
             assert result.branch
+            assert await workspaces.export_patch(result.commit) == await workspaces.export_patch(
+                winner
+            )
             assert workspaces.root.revision == baseline
             assert await workspaces.root.matches_revision(baseline)
             assert await workspaces.adopt(winner) == result
@@ -608,5 +611,37 @@ def test_adoption_publishes_without_checkout_authority(implementation: Implement
             assert workspaces.root.revision == result.commit
             assert await workspaces.root.matches_revision(winner)
             assert await workspaces.adopt(winner) == result
+
+    asyncio.run(exercise())
+
+
+def test_fake_publication_history_survives_reopening_the_collection(tmp_path: Path) -> None:
+    async def exercise() -> None:
+        root = FakeWorkspace(path=tmp_path, known_revisions={"first", "second"})
+        workspaces = FakeWorkspaces(root)
+        first = await workspaces.adopt("first", message="first publication")
+        second = await workspaces.adopt("second", message="second publication")
+        await workspaces.close()
+        resumed = FakeWorkspaces(root, supports_parallel_candidates=True)
+        assert await resumed.adopt("first", message="retry") == first
+        assert await resumed.adopt("second", message="retry") == second
+        root.script_pending_changes(["operator.py"])
+        assert (await resumed.update_checkout(second)).status is CheckoutStatus.DIRTY_TREE
+        assert (await resumed.update_checkout(second)).status is CheckoutStatus.FAST_FORWARDED
+        assert (await resumed.update_checkout(first)).status is CheckoutStatus.DIVERGED
+        assert root.revision == second.commit
+        await root.restore(second.commit)
+        assert await root.matches_revision(second.revision)
+        candidate = await resumed.create_candidate(second.commit)
+        assert candidate.revision == second.commit
+        assert await candidate.matches_revision(second.revision)
+        assert await candidate.measured_input(second.commit) == await candidate.measured_input(
+            second.revision
+        )
+        await candidate.discard()
+        another = await resumed.adopt(second.commit)
+        assert (await resumed.update_checkout(another)).status is CheckoutStatus.FAST_FORWARDED
+        assert await root.matches_revision(second.revision)
+        await resumed.close()
 
     asyncio.run(exercise())
