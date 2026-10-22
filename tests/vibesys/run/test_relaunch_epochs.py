@@ -156,10 +156,15 @@ def test_resume_after_an_ending_opens_a_fresh_epoch_that_records_a_turn(name: st
         if record.body is not None and record.body.field == "span" and record.body.value.span
     ]
     assert spans
-    assert spans[-1].epoch == 2
-    assert spans[-1].body is not None
-    assert spans[-1].body.value.span is not None
-    assert spans[-1].body.value.span.name == "implementer"
+    last = spans[-1]
+    assert last.epoch == 2
+    body = last.body
+    assert body is not None
+    value = body.value
+    assert isinstance(value, p.SpanRecord)
+    span = value.span
+    assert span is not None
+    assert span.name == "implementer"
     if close.ended:
         assert synthetic == []
         return

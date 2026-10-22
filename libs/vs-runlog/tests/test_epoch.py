@@ -158,19 +158,22 @@ def test_missing_and_truncated_committed_epoch_sources_fail_explicitly(tmp_path:
 def _arm(name: str) -> Lifecycle:
     """One lifecycle whose state arm is ``name``, using a real ending when that arm is one."""
     if name == "starting":
-        value = Starting(stage=StartupStage.PROBING_WORKSPACE, state=StageState.RUNNING)
-    elif name == "running":
-        value = Running()
-    elif name == "draining":
-        value = Draining(goal=DrainGoal.PARK)
-    elif name == "parked":
-        value = Parked()
-    elif name == "ended":
-        value = Ended(outcome=Outcome.FINISHED)
-    else:
-        message = f"lifecycle arm {name} has no ending classification"
-        raise AssertionError(message)
-    return Lifecycle(state=Oneof(name, value))
+        return Lifecycle(
+            state=Oneof(
+                "starting",
+                Starting(stage=StartupStage.PROBING_WORKSPACE, state=StageState.RUNNING),
+            )
+        )
+    if name == "running":
+        return Lifecycle(state=Oneof("running", Running()))
+    if name == "draining":
+        return Lifecycle(state=Oneof("draining", Draining(goal=DrainGoal.PARK)))
+    if name == "parked":
+        return Lifecycle(state=Oneof("parked", Parked()))
+    if name == "ended":
+        return Lifecycle(state=Oneof("ended", Ended(outcome=Outcome.FINISHED)))
+    message = f"lifecycle arm {name} has no ending classification"
+    raise AssertionError(message)
 
 
 def _ended_outcomes() -> list[Lifecycle]:

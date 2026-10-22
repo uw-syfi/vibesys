@@ -22,7 +22,9 @@ from vs_project.api import FakeStateStore
 from vs_runtime.api.testing import FakePublicationDelivery, HostOptions, scripted_host
 
 if TYPE_CHECKING:
-    from vs_core.api import CoreState
+    from collections.abc import Callable
+
+    from vs_core.api import CoreEvent, CoreState, Transition
     from vs_core.api.testing import Answer
 
 
@@ -32,16 +34,17 @@ class _ParkOnMeasurement:
     The same world continues after Resume, so job ids and scripted replies do not restart.
     """
 
-    admit: object = None
+    admit: Callable[[CoreEvent, float], Transition] | None = None
 
     def __init__(self, world: DynamicWorld) -> None:
         self._world = world
         self.parked = False
 
     def __call__(self, request: Request, core: CoreState) -> Answer:
-        if not self.parked and isinstance(request, SubmitMeasurement) and callable(self.admit):
+        admit = self.admit
+        if not self.parked and isinstance(request, SubmitMeasurement) and admit is not None:
             self.parked = True
-            self.admit(
+            admit(
                 RunControlEvent(
                     control=ControlInput(
                         control_id=ControlId(root="pause"),
