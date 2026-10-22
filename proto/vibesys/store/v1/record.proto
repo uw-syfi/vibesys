@@ -43,7 +43,7 @@ message Record {
     finite: true
   }];
   // A timer-only boundary uses the enclosing Record.clock and serial sequence.
-  optional ReplayClock replay_clock = 20;
+  optional ReplayClock replay_clock = 21;
   oneof body {
     option (buf.validate.oneof).required = true;
     EpochStarted epoch_started = 4;

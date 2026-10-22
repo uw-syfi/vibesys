@@ -38,7 +38,7 @@ type Record struct {
 	// Monotone run seconds, excluding downtime between epochs. Absent in older logs.
 	Clock *float64 `protobuf:"fixed64,18,opt,name=clock,proto3,oneof" json:"clock,omitempty"`
 	// A timer-only boundary uses the enclosing Record.clock and serial sequence.
-	ReplayClock *ReplayClock `protobuf:"bytes,20,opt,name=replay_clock,json=replayClock,proto3,oneof" json:"replay_clock,omitempty"`
+	ReplayClock *ReplayClock `protobuf:"bytes,21,opt,name=replay_clock,json=replayClock,proto3,oneof" json:"replay_clock,omitempty"`
 	// Types that are valid to be assigned to Body:
 	//
 	//	*Record_EpochStarted
@@ -553,7 +553,7 @@ const file_vibesys_store_v1_record_proto_rawDesc = "" +
 	"\x02at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\x02at\x12\x14\n" +
 	"\x05epoch\x18\x03 \x01(\rR\x05epoch\x12+\n" +
 	"\x05clock\x18\x12 \x01(\x01B\x10\xbaH\r\x12\v@\x01)\x00\x00\x00\x00\x00\x00\x00\x00H\x01R\x05clock\x88\x01\x01\x12E\n" +
-	"\freplay_clock\x18\x14 \x01(\v2\x1d.vibesys.store.v1.ReplayClockH\x02R\vreplayClock\x88\x01\x01\x12E\n" +
+	"\freplay_clock\x18\x15 \x01(\v2\x1d.vibesys.store.v1.ReplayClockH\x02R\vreplayClock\x88\x01\x01\x12E\n" +
 	"\repoch_started\x18\x04 \x01(\v2\x1e.vibesys.store.v1.EpochStartedH\x00R\fepochStarted\x12F\n" +
 	"\flegacy_event\x18\x05 \x01(\v2\x1d.vibesys.store.v1.LegacyEventB\x02\x18\x01H\x00R\vlegacyEvent\x12;\n" +
 	"\tlifecycle\x18\v \x01(\v2\x1b.vibesys.store.v1.LifecycleH\x00R\tlifecycle\x122\n" +
