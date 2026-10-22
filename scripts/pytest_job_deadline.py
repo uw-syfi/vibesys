@@ -2,10 +2,15 @@
 
 The workflow's ``timeout-minutes`` is the only copy of that limit. The first
 step of a pytest job records when the cancel clock started; the next step
-after checkout runs this script, which reads that job's ``timeout-minutes``
-and appends ``VIBESYS_PYTEST_DUMP_AT`` to ``GITHUB_ENV``. The hang-dump plugin
-fires that many seconds minus ``DUMP_MARGIN_S`` after the recorded start, so a
-hang is named before the runner kills the job.
+after checkout runs this script. It locates the workflow file from
+``GITHUB_WORKFLOW_REF`` (``<owner>/<repo>/.github/workflows/<file>@<ref>``)
+and the job from ``GITHUB_JOB``, reads that job's ``timeout-minutes``, and
+appends ``VIBESYS_PYTEST_DUMP_AT`` to ``GITHUB_ENV``. ``GITHUB_WORKFLOW`` is
+the workflow's display name, not a file, so it is not a path. The hang-dump
+plugin fires ``DUMP_MARGIN_S`` before the runner cancels the job.
+
+A missing or unparsable deadline logs one warning and skips the dump. The
+dump is a diagnostic and must not fail the job.
 
 Usage (from a workflow step, after checkout):
 
@@ -38,6 +43,9 @@ _PYTEST = re.compile(r"(?<![\w.-])pytest(?![\w.-])")
 _GROUP = re.compile(r"run-checks\s+--group\s+([A-Za-z0-9_-]+)")
 _MATRIX_GROUP = re.compile(r"run-checks\s+--group\s+\$\{\{\s*matrix\.group\s*\}\}")
 _PATH = re.compile(r"(?<!\S)(?:\./)?(?P<path>(?:[\w.-]+/)+[\w.-]+\.(?:py|sh))")
+# GITHUB_WORKFLOW_REF is `<owner>/<repo>/.github/workflows/<file>@<ref>`.
+# The file is one path segment; the ref may itself contain `@`.
+_WORKFLOW_REF_FILE = re.compile(r"\.github/workflows/(?P<name>[^/@]+\.ya?ml)@(?P<ref>\S+)")
 
 
 class JobDeadlineError(ValueError):
@@ -186,25 +194,92 @@ def pytest_job_ids(root: Path) -> set[tuple[str, str]]:
     return found
 
 
+def workflow_filename(workflow_ref: str) -> str:
+    """Filename of the workflow ``GITHUB_WORKFLOW_REF`` names.
+
+    ``workflow_ref`` is ``<owner>/<repo>/.github/workflows/<file>@<ref>``.
+    The display name in ``GITHUB_WORKFLOW`` is not a file and is not accepted
+    here, including when a reusable workflow is running inside a caller whose
+    name differs from the called file.
+    """
+    matched = _WORKFLOW_REF_FILE.search(workflow_ref)
+    if matched is None or matched.group("name").startswith("."):
+        message = f"GITHUB_WORKFLOW_REF {workflow_ref!r} does not name a workflow file"
+        raise JobDeadlineError(message)
+    return matched.group("name")
+
+
+def arm_job(env: Mapping[str, str], workspace: Path, env_file: Path | None) -> str | None:
+    """Append this job's dump deadline to ``env_file``.
+
+    Return one warning, and leave ``env_file`` unchanged, when the deadline
+    is missing or unparsable. The dump is a diagnostic and must not fail the
+    job, so this does not raise for those inputs.
+    """
+    try:
+        _write_deadline(env, workspace, env_file)
+    except JobDeadlineError as error:
+        return _skip_warning(str(error))
+    except OSError as error:
+        return _skip_warning(str(error))
+    return None
+
+
 def main() -> int:
-    """Write this job's dump deadline to ``GITHUB_ENV``. Return 1 on a bad job."""
-    try:
-        started_at = int(os.environ[STARTED_AT_ENV])
-        job = os.environ["GITHUB_JOB"]
-        workflow_name = os.environ["GITHUB_WORKFLOW"]
-        workspace = Path(os.environ.get("GITHUB_WORKSPACE", "."))
-        env_file = Path(os.environ["GITHUB_ENV"])
-    except KeyError as error:
-        missing = error.args[0]
-        print(f"pytest job deadline: missing {missing}", file=sys.stderr)
-        return 1
-    workflow = workspace / ".github" / "workflows" / workflow_name
-    try:
-        arm(workflow, job, started_at, env_file)
-    except (OSError, ValueError) as error:
-        print(f"pytest job deadline: {error}", file=sys.stderr)
-        return 1
+    """Arm this job's dump deadline, or warn once and continue.
+
+    A missing or unparsable deadline skips the dump. The status is always 0
+    so the diagnostic cannot fail the job.
+    """
+    env_path = os.environ.get("GITHUB_ENV")
+    workspace = Path(os.environ.get("GITHUB_WORKSPACE", "."))
+    warning = arm_job(os.environ, workspace, Path(env_path) if env_path else None)
+    if warning is not None:
+        print(warning, file=sys.stderr)
     return 0
+
+
+def _write_deadline(env: Mapping[str, str], workspace: Path, env_file: Path | None) -> None:
+    if env_file is None:
+        message = "missing GITHUB_ENV"
+        raise JobDeadlineError(message)
+    workflow = _workflow_path(workspace, _required(env, "GITHUB_WORKFLOW_REF"))
+    arm(workflow, _required(env, "GITHUB_JOB"), _started_at(env), env_file)
+
+
+def _workflow_path(workspace: Path, workflow_ref: str) -> Path:
+    name = workflow_filename(workflow_ref)
+    directory = (workspace / ".github" / "workflows").resolve()
+    file = (directory / name).resolve()
+    if file.parent != directory:
+        message = f"GITHUB_WORKFLOW_REF {workflow_ref!r} does not name a workflow file"
+        raise JobDeadlineError(message)
+    if not file.is_file():
+        message = f"workflow file {name} is not in the checkout"
+        raise JobDeadlineError(message)
+    return file
+
+
+def _required(env: Mapping[str, str], key: str) -> str:
+    try:
+        return env[key]
+    except KeyError as error:
+        message = f"missing {key}"
+        raise JobDeadlineError(message) from error
+
+
+def _started_at(env: Mapping[str, str]) -> int:
+    raw = _required(env, STARTED_AT_ENV)
+    try:
+        return int(raw)
+    except ValueError as error:
+        message = f"job start {raw!r} is not an integer"
+        raise JobDeadlineError(message) from error
+
+
+def _skip_warning(reason: str) -> str:
+    flat = " ".join(reason.split())
+    return f"pytest job deadline: {flat}; skipping the hang dump"
 
 
 def _jobs_line(lines: list[str]) -> int:
