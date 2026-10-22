@@ -10,11 +10,9 @@ from vs_project.api import Project
 from vs_proto.api import Oneof, RelaunchRefusal, RelaunchResponse
 from vs_runlog.api import (
     RunLaunchLockedError,
-    RunLogStopReason,
     assert_run_unlocked,
-    current_epoch,
     exclusive_run_launch,
-    open_run_log,
+    read_current_epoch,
 )
 from vs_sim.api import Capture, ProcessOutcome, ProcessSpec
 
@@ -57,7 +55,8 @@ def _launch(
         assert_run_unlocked(path)
     except RuntimeError:
         return _refused(RelaunchRefusal.LOCKED)
-    epoch, offset = _epoch(path)
+    current = read_current_epoch(path)
+    epoch = 0 if current is None else current.number
     if epoch != request.expected_epoch:
         return _refused(RelaunchRefusal.EPOCH_CHANGED)
     ensure_resumable(Path(request.project_root), request.run_id)
@@ -85,29 +84,20 @@ def _launch(
             return _refused(RelaunchRefusal.LOCKED)
         message = "detached relaunch failed; inspect the run before retrying"
         raise ValueError(message)
-    return _confirm_epoch(path, request.expected_epoch, offset, deadline, threads)
+    return _confirm_epoch(path, request.expected_epoch, deadline, threads)
 
 
 def _confirm_epoch(
-    path: Path, expected: int, offset: int, deadline: float, threads: Threads
+    path: Path, expected: int, deadline: float, threads: Threads
 ) -> RelaunchResponse:
     while threads.now() < deadline:
-        epoch, offset = _epoch(path, offset)
+        current = read_current_epoch(path)
+        epoch = 0 if current is None else current.number
         if epoch > expected:
             return RelaunchResponse(outcome=Oneof("epoch", epoch))
         threads.sleep(0.05)
     message = "new epoch not confirmed; inspect the run before retrying"
     raise ValueError(message)
-
-
-def _epoch(path: Path, offset: int = 0) -> tuple[int, int]:
-    if not path.exists():
-        return 0, 0
-    with open_run_log(path, offset) as reader:
-        epoch = current_epoch(reader).number
-        if reader.stop.reason == RunLogStopReason.CORRUPTION:
-            raise ValueError(reader.stop.detail)
-        return epoch, reader.stop.offset
 
 
 def _refused(reason: RelaunchRefusal) -> RelaunchResponse:

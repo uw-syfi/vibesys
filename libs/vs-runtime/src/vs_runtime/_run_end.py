@@ -1,4 +1,4 @@
-"""Read the current epoch's ending and writer identity from the durable core record.
+"""Read published epoch authority from run.log and legacy endings from the core record.
 
 An ended epoch accepts no new inbox requests. Resume opens a successor epoch regardless
 of the previous result; queued closing controls retain their original writer identity.
@@ -14,7 +14,7 @@ from pydantic import JsonValue, TypeAdapter
 from vs_core.api import RunStatus
 from vs_decode.api import Unreadable, decode_json
 from vs_project.api import ProjectStateError, StoredEnvelope
-from vs_runlog.api import CurrentEpoch, RunLogStopReason, current_epoch, open_run_log
+from vs_runlog.api import CurrentEpoch, read_current_epoch
 
 if TYPE_CHECKING:
     from vs_core.api import CoreState
@@ -80,14 +80,10 @@ def recorded_epoch(project: Project, run_id: str) -> int:
 
 
 def _log_epoch(project: Project, run_id: str) -> CurrentEpoch | None:
-    path = project.run_log_path_for(project.root, run_id)
-    if not path.exists():
-        return None
-    with open_run_log(path) as reader:
-        epoch = current_epoch(reader)
-        if reader.stop.reason is RunLogStopReason.CORRUPTION:
-            raise ProjectStateError(reader.stop.detail)
-    return epoch
+    try:
+        return read_current_epoch(project.run_log_path_for(project.root, run_id))
+    except ValueError as error:
+        raise ProjectStateError(str(error)) from error
 
 
 def recorded_end(project: Project, run_id: str) -> RecordedEnd | None:
@@ -116,9 +112,9 @@ def recorded_end(project: Project, run_id: str) -> RecordedEnd | None:
 
 
 def recorded_ending(project: Project, run_id: str) -> str | None:
-    """Why ``run_id`` ended, as its durable core record says, or None while it may apply more.
+    """The published lifecycle's ending, with core inspection only for historical logs.
 
-    Raises ``ProjectStateError`` when the record cannot be read (see `recorded_end`).
+    Raises ``ProjectStateError`` when the published prefix cannot be read.
     """
     epoch = _log_epoch(project, run_id)
     if epoch is not None:

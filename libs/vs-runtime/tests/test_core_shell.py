@@ -576,3 +576,23 @@ def test_a_native_recovery_requires_a_published_successor_before_taking_authorit
         successor.start("host", now_at=1, lease_duration=1)
     assert store.load() == before
     assert store.acquire("other", now=1, duration=1) is not None
+
+
+def test_an_unavailable_published_epoch_does_not_acquire_a_lease() -> None:
+    store = FakeStateStore()
+
+    def unavailable() -> int:
+        message = "published epoch unavailable"
+        raise ValueError(message)
+
+    shell = CoreRuntime(
+        store,
+        counter.driver(CounterConfig()),
+        declared(counter),
+        config=CounterConfig(),
+        bindings=CoreRuntimeBindings(transitions=ShellTraceTransitions(), epoch=unavailable),
+    )
+    with pytest.raises(ValueError, match="published epoch unavailable"):
+        shell.start("host", now_at=0, lease_duration=1)
+    assert store.load() is None
+    assert store.acquire("other", now=0, duration=1) is not None

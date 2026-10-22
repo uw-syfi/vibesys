@@ -170,6 +170,8 @@ class CoreResources:
     measurement_decisions: MeasurementDecisions = field(default_factory=MeasurementDecisions)
     """Which decision each measurement answers; the same one names stage output by its gate."""
     """Hears each measurement stage start and end, for the host's event stream."""
+    epoch: Callable[[], int | None] = lambda: None
+    """Published writer identity; unjournaled hosts leave epoch selection to their runtime."""
     commit_observer: CommitObserver = field(default_factory=IgnoreCommits)
     """Hears each confirmed commit, for committed views and round events."""
     resuming: bool = False
@@ -280,7 +282,7 @@ def build_core_services(policy: CorePolicy, resources: CoreResources) -> CoreSer
         search=plan.search,
         config=plan.config,
         state=state,
-        bindings=replace(bindings, commits=resources.commit_observer),
+        bindings=replace(bindings, commits=resources.commit_observer, epoch=resources.epoch),
         catalog=catalog,
         store=resources.project.state_store(run_id),
         publications=publications,
