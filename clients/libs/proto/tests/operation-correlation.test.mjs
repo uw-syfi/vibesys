@@ -2,8 +2,7 @@ import assert from 'node:assert/strict';
 import {test} from 'node:test';
 import {create, toBinary} from '@bufbuild/protobuf';
 import {BytesValueSchema} from '@bufbuild/protobuf/wkt';
-// The exported runtime API is also the API consumed by generated typed calls.
-import {accept, call} from '../dist/operations.js';
+import {accept, call} from '../src/operations.ts';
 
 const policy = {name: 'ByteCorrelation', id: 1, capMs: 10, graceMs: 5, totalMs: 15};
 const definition = {
