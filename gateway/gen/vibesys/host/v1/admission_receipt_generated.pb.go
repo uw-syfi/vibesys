@@ -91,6 +91,7 @@ type AcceptedOperation struct {
 	//	*AcceptedOperation_PreflightRun
 	//	*AcceptedOperation_InspectCandidate
 	//	*AcceptedOperation_CompletePaths
+	//	*AcceptedOperation_Login
 	Request       isAcceptedOperation_Request `protobuf_oneof:"request"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -214,6 +215,15 @@ func (x *AcceptedOperation) GetCompletePaths() *CompletePathsRequest {
 	return nil
 }
 
+func (x *AcceptedOperation) GetLogin() *LoginRequest {
+	if x != nil {
+		if x, ok := x.Request.(*AcceptedOperation_Login); ok {
+			return x.Login
+		}
+	}
+	return nil
+}
+
 type isAcceptedOperation_Request interface {
 	isAcceptedOperation_Request()
 }
@@ -254,6 +264,10 @@ type AcceptedOperation_CompletePaths struct {
 	CompletePaths *CompletePathsRequest `protobuf:"bytes,18,opt,name=complete_paths,json=completePaths,proto3,oneof"`
 }
 
+type AcceptedOperation_Login struct {
+	Login *LoginRequest `protobuf:"bytes,40,opt,name=login,proto3,oneof"`
+}
+
 func (*AcceptedOperation_ListTasks) isAcceptedOperation_Request() {}
 
 func (*AcceptedOperation_ListHarnesses) isAcceptedOperation_Request() {}
@@ -272,6 +286,8 @@ func (*AcceptedOperation_InspectCandidate) isAcceptedOperation_Request() {}
 
 func (*AcceptedOperation_CompletePaths) isAcceptedOperation_Request() {}
 
+func (*AcceptedOperation_Login) isAcceptedOperation_Request() {}
+
 type OperationResult struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Types that are valid to be assigned to Result:
@@ -286,6 +302,7 @@ type OperationResult struct {
 	//	*OperationResult_PreflightRun
 	//	*OperationResult_InspectCandidate
 	//	*OperationResult_CompletePaths
+	//	*OperationResult_Login
 	Result        isOperationResult_Result `protobuf_oneof:"result"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -418,6 +435,15 @@ func (x *OperationResult) GetCompletePaths() *CompletePathsResponse {
 	return nil
 }
 
+func (x *OperationResult) GetLogin() *LoginEvent {
+	if x != nil {
+		if x, ok := x.Result.(*OperationResult_Login); ok {
+			return x.Login
+		}
+	}
+	return nil
+}
+
 type isOperationResult_Result interface {
 	isOperationResult_Result()
 }
@@ -462,6 +488,10 @@ type OperationResult_CompletePaths struct {
 	CompletePaths *CompletePathsResponse `protobuf:"bytes,18,opt,name=complete_paths,json=completePaths,proto3,oneof"`
 }
 
+type OperationResult_Login struct {
+	Login *LoginEvent `protobuf:"bytes,40,opt,name=login,proto3,oneof"`
+}
+
 func (*OperationResult_Failure) isOperationResult_Result() {}
 
 func (*OperationResult_ListTasks) isOperationResult_Result() {}
@@ -481,6 +511,8 @@ func (*OperationResult_PreflightRun) isOperationResult_Result() {}
 func (*OperationResult_InspectCandidate) isOperationResult_Result() {}
 
 func (*OperationResult_CompletePaths) isOperationResult_Result() {}
+
+func (*OperationResult_Login) isOperationResult_Result() {}
 
 type AdmissionIdentity struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
@@ -1008,7 +1040,7 @@ var File_vibesys_host_v1_admission_receipt_generated_proto protoreflect.FileDesc
 
 const file_vibesys_host_v1_admission_receipt_generated_proto_rawDesc = "" +
 	"\n" +
-	"1vibesys/host/v1/admission_receipt_generated.proto\x12\x0fvibesys.host.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1dvibesys/host/v1/failure.proto\x1a vibesys/host/v1/operations.proto\"\xe7\x05\n" +
+	"1vibesys/host/v1/admission_receipt_generated.proto\x12\x0fvibesys.host.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1dvibesys/host/v1/failure.proto\x1a vibesys/host/v1/operations.proto\"\x9e\x06\n" +
 	"\x11AcceptedOperation\x12B\n" +
 	"\n" +
 	"list_tasks\x18\n" +
@@ -1020,8 +1052,9 @@ const file_vibesys_host_v1_admission_receipt_generated_proto_rawDesc = "" +
 	"\flist_compute\x18\x0f \x01(\v2#.vibesys.host.v1.ListComputeRequestH\x00R\vlistCompute\x12K\n" +
 	"\rpreflight_run\x18\x10 \x01(\v2$.vibesys.host.v1.PreflightRunRequestH\x00R\fpreflightRun\x12W\n" +
 	"\x11inspect_candidate\x18\x11 \x01(\v2(.vibesys.host.v1.InspectCandidateRequestH\x00R\x10inspectCandidate\x12N\n" +
-	"\x0ecomplete_paths\x18\x12 \x01(\v2%.vibesys.host.v1.CompletePathsRequestH\x00R\rcompletePathsB\x10\n" +
-	"\arequest\x12\x05\xbaH\x02\b\x01\"\xac\x06\n" +
+	"\x0ecomplete_paths\x18\x12 \x01(\v2%.vibesys.host.v1.CompletePathsRequestH\x00R\rcompletePaths\x125\n" +
+	"\x05login\x18( \x01(\v2\x1d.vibesys.host.v1.LoginRequestH\x00R\x05loginB\x10\n" +
+	"\arequest\x12\x05\xbaH\x02\b\x01\"\xe1\x06\n" +
 	"\x0fOperationResult\x12=\n" +
 	"\afailure\x18\x02 \x01(\v2!.vibesys.host.v1.OperationFailureH\x00R\afailure\x12C\n" +
 	"\n" +
@@ -1034,7 +1067,8 @@ const file_vibesys_host_v1_admission_receipt_generated_proto_rawDesc = "" +
 	"\flist_compute\x18\x0f \x01(\v2$.vibesys.host.v1.ListComputeResponseH\x00R\vlistCompute\x12L\n" +
 	"\rpreflight_run\x18\x10 \x01(\v2%.vibesys.host.v1.PreflightRunResponseH\x00R\fpreflightRun\x12X\n" +
 	"\x11inspect_candidate\x18\x11 \x01(\v2).vibesys.host.v1.InspectCandidateResponseH\x00R\x10inspectCandidate\x12O\n" +
-	"\x0ecomplete_paths\x18\x12 \x01(\v2&.vibesys.host.v1.CompletePathsResponseH\x00R\rcompletePathsB\x0f\n" +
+	"\x0ecomplete_paths\x18\x12 \x01(\v2&.vibesys.host.v1.CompletePathsResponseH\x00R\rcompletePaths\x123\n" +
+	"\x05login\x18( \x01(\v2\x1b.vibesys.host.v1.LoginEventH\x00R\x05loginB\x0f\n" +
 	"\x06result\x12\x05\xbaH\x02\b\x01\"\xbf\x01\n" +
 	"\x11AdmissionIdentity\x12*\n" +
 	"\foperation_id\x18\x01 \x01(\rB\a\xbaH\x04*\x02 \x00R\voperationId\x12H\n" +
@@ -1124,16 +1158,18 @@ var file_vibesys_host_v1_admission_receipt_generated_proto_goTypes = []any{
 	(*PreflightRunRequest)(nil),      // 16: vibesys.host.v1.PreflightRunRequest
 	(*InspectCandidateRequest)(nil),  // 17: vibesys.host.v1.InspectCandidateRequest
 	(*CompletePathsRequest)(nil),     // 18: vibesys.host.v1.CompletePathsRequest
-	(*OperationFailure)(nil),         // 19: vibesys.host.v1.OperationFailure
-	(*ListTasksResponse)(nil),        // 20: vibesys.host.v1.ListTasksResponse
-	(*ListHarnessesResponse)(nil),    // 21: vibesys.host.v1.ListHarnessesResponse
-	(*ListExamplesResponse)(nil),     // 22: vibesys.host.v1.ListExamplesResponse
-	(*GetTaskGoalResponse)(nil),      // 23: vibesys.host.v1.GetTaskGoalResponse
-	(*DescribeMachineResponse)(nil),  // 24: vibesys.host.v1.DescribeMachineResponse
-	(*ListComputeResponse)(nil),      // 25: vibesys.host.v1.ListComputeResponse
-	(*PreflightRunResponse)(nil),     // 26: vibesys.host.v1.PreflightRunResponse
-	(*InspectCandidateResponse)(nil), // 27: vibesys.host.v1.InspectCandidateResponse
-	(*CompletePathsResponse)(nil),    // 28: vibesys.host.v1.CompletePathsResponse
+	(*LoginRequest)(nil),             // 19: vibesys.host.v1.LoginRequest
+	(*OperationFailure)(nil),         // 20: vibesys.host.v1.OperationFailure
+	(*ListTasksResponse)(nil),        // 21: vibesys.host.v1.ListTasksResponse
+	(*ListHarnessesResponse)(nil),    // 22: vibesys.host.v1.ListHarnessesResponse
+	(*ListExamplesResponse)(nil),     // 23: vibesys.host.v1.ListExamplesResponse
+	(*GetTaskGoalResponse)(nil),      // 24: vibesys.host.v1.GetTaskGoalResponse
+	(*DescribeMachineResponse)(nil),  // 25: vibesys.host.v1.DescribeMachineResponse
+	(*ListComputeResponse)(nil),      // 26: vibesys.host.v1.ListComputeResponse
+	(*PreflightRunResponse)(nil),     // 27: vibesys.host.v1.PreflightRunResponse
+	(*InspectCandidateResponse)(nil), // 28: vibesys.host.v1.InspectCandidateResponse
+	(*CompletePathsResponse)(nil),    // 29: vibesys.host.v1.CompletePathsResponse
+	(*LoginEvent)(nil),               // 30: vibesys.host.v1.LoginEvent
 }
 var file_vibesys_host_v1_admission_receipt_generated_proto_depIdxs = []int32{
 	10, // 0: vibesys.host.v1.AcceptedOperation.list_tasks:type_name -> vibesys.host.v1.ListTasksRequest
@@ -1145,33 +1181,35 @@ var file_vibesys_host_v1_admission_receipt_generated_proto_depIdxs = []int32{
 	16, // 6: vibesys.host.v1.AcceptedOperation.preflight_run:type_name -> vibesys.host.v1.PreflightRunRequest
 	17, // 7: vibesys.host.v1.AcceptedOperation.inspect_candidate:type_name -> vibesys.host.v1.InspectCandidateRequest
 	18, // 8: vibesys.host.v1.AcceptedOperation.complete_paths:type_name -> vibesys.host.v1.CompletePathsRequest
-	19, // 9: vibesys.host.v1.OperationResult.failure:type_name -> vibesys.host.v1.OperationFailure
-	20, // 10: vibesys.host.v1.OperationResult.list_tasks:type_name -> vibesys.host.v1.ListTasksResponse
-	21, // 11: vibesys.host.v1.OperationResult.list_harnesses:type_name -> vibesys.host.v1.ListHarnessesResponse
-	22, // 12: vibesys.host.v1.OperationResult.list_examples:type_name -> vibesys.host.v1.ListExamplesResponse
-	23, // 13: vibesys.host.v1.OperationResult.get_task_goal:type_name -> vibesys.host.v1.GetTaskGoalResponse
-	24, // 14: vibesys.host.v1.OperationResult.describe_machine:type_name -> vibesys.host.v1.DescribeMachineResponse
-	25, // 15: vibesys.host.v1.OperationResult.list_compute:type_name -> vibesys.host.v1.ListComputeResponse
-	26, // 16: vibesys.host.v1.OperationResult.preflight_run:type_name -> vibesys.host.v1.PreflightRunResponse
-	27, // 17: vibesys.host.v1.OperationResult.inspect_candidate:type_name -> vibesys.host.v1.InspectCandidateResponse
-	28, // 18: vibesys.host.v1.OperationResult.complete_paths:type_name -> vibesys.host.v1.CompletePathsResponse
-	4,  // 19: vibesys.host.v1.PublicationAbsent.intent:type_name -> vibesys.host.v1.PublicationEvidence
-	4,  // 20: vibesys.host.v1.PublicationPublished.intent:type_name -> vibesys.host.v1.PublicationEvidence
-	2,  // 21: vibesys.host.v1.PublicationPublished.result:type_name -> vibesys.host.v1.OperationResult
-	4,  // 22: vibesys.host.v1.PublicationUnknown.intent:type_name -> vibesys.host.v1.PublicationEvidence
-	5,  // 23: vibesys.host.v1.PublicationObservation.absent:type_name -> vibesys.host.v1.PublicationAbsent
-	6,  // 24: vibesys.host.v1.PublicationObservation.published:type_name -> vibesys.host.v1.PublicationPublished
-	7,  // 25: vibesys.host.v1.PublicationObservation.unknown:type_name -> vibesys.host.v1.PublicationUnknown
-	3,  // 26: vibesys.host.v1.AdmissionReceipt.identity:type_name -> vibesys.host.v1.AdmissionIdentity
-	1,  // 27: vibesys.host.v1.AdmissionReceipt.accepted:type_name -> vibesys.host.v1.AcceptedOperation
-	0,  // 28: vibesys.host.v1.AdmissionReceipt.status:type_name -> vibesys.host.v1.AdmissionStatus
-	4,  // 29: vibesys.host.v1.AdmissionReceipt.intent:type_name -> vibesys.host.v1.PublicationEvidence
-	2,  // 30: vibesys.host.v1.AdmissionReceipt.result:type_name -> vibesys.host.v1.OperationResult
-	31, // [31:31] is the sub-list for method output_type
-	31, // [31:31] is the sub-list for method input_type
-	31, // [31:31] is the sub-list for extension type_name
-	31, // [31:31] is the sub-list for extension extendee
-	0,  // [0:31] is the sub-list for field type_name
+	19, // 9: vibesys.host.v1.AcceptedOperation.login:type_name -> vibesys.host.v1.LoginRequest
+	20, // 10: vibesys.host.v1.OperationResult.failure:type_name -> vibesys.host.v1.OperationFailure
+	21, // 11: vibesys.host.v1.OperationResult.list_tasks:type_name -> vibesys.host.v1.ListTasksResponse
+	22, // 12: vibesys.host.v1.OperationResult.list_harnesses:type_name -> vibesys.host.v1.ListHarnessesResponse
+	23, // 13: vibesys.host.v1.OperationResult.list_examples:type_name -> vibesys.host.v1.ListExamplesResponse
+	24, // 14: vibesys.host.v1.OperationResult.get_task_goal:type_name -> vibesys.host.v1.GetTaskGoalResponse
+	25, // 15: vibesys.host.v1.OperationResult.describe_machine:type_name -> vibesys.host.v1.DescribeMachineResponse
+	26, // 16: vibesys.host.v1.OperationResult.list_compute:type_name -> vibesys.host.v1.ListComputeResponse
+	27, // 17: vibesys.host.v1.OperationResult.preflight_run:type_name -> vibesys.host.v1.PreflightRunResponse
+	28, // 18: vibesys.host.v1.OperationResult.inspect_candidate:type_name -> vibesys.host.v1.InspectCandidateResponse
+	29, // 19: vibesys.host.v1.OperationResult.complete_paths:type_name -> vibesys.host.v1.CompletePathsResponse
+	30, // 20: vibesys.host.v1.OperationResult.login:type_name -> vibesys.host.v1.LoginEvent
+	4,  // 21: vibesys.host.v1.PublicationAbsent.intent:type_name -> vibesys.host.v1.PublicationEvidence
+	4,  // 22: vibesys.host.v1.PublicationPublished.intent:type_name -> vibesys.host.v1.PublicationEvidence
+	2,  // 23: vibesys.host.v1.PublicationPublished.result:type_name -> vibesys.host.v1.OperationResult
+	4,  // 24: vibesys.host.v1.PublicationUnknown.intent:type_name -> vibesys.host.v1.PublicationEvidence
+	5,  // 25: vibesys.host.v1.PublicationObservation.absent:type_name -> vibesys.host.v1.PublicationAbsent
+	6,  // 26: vibesys.host.v1.PublicationObservation.published:type_name -> vibesys.host.v1.PublicationPublished
+	7,  // 27: vibesys.host.v1.PublicationObservation.unknown:type_name -> vibesys.host.v1.PublicationUnknown
+	3,  // 28: vibesys.host.v1.AdmissionReceipt.identity:type_name -> vibesys.host.v1.AdmissionIdentity
+	1,  // 29: vibesys.host.v1.AdmissionReceipt.accepted:type_name -> vibesys.host.v1.AcceptedOperation
+	0,  // 30: vibesys.host.v1.AdmissionReceipt.status:type_name -> vibesys.host.v1.AdmissionStatus
+	4,  // 31: vibesys.host.v1.AdmissionReceipt.intent:type_name -> vibesys.host.v1.PublicationEvidence
+	2,  // 32: vibesys.host.v1.AdmissionReceipt.result:type_name -> vibesys.host.v1.OperationResult
+	33, // [33:33] is the sub-list for method output_type
+	33, // [33:33] is the sub-list for method input_type
+	33, // [33:33] is the sub-list for extension type_name
+	33, // [33:33] is the sub-list for extension extendee
+	0,  // [0:33] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_host_v1_admission_receipt_generated_proto_init() }
@@ -1191,6 +1229,7 @@ func file_vibesys_host_v1_admission_receipt_generated_proto_init() {
 		(*AcceptedOperation_PreflightRun)(nil),
 		(*AcceptedOperation_InspectCandidate)(nil),
 		(*AcceptedOperation_CompletePaths)(nil),
+		(*AcceptedOperation_Login)(nil),
 	}
 	file_vibesys_host_v1_admission_receipt_generated_proto_msgTypes[1].OneofWrappers = []any{
 		(*OperationResult_Failure)(nil),
@@ -1203,6 +1242,7 @@ func file_vibesys_host_v1_admission_receipt_generated_proto_init() {
 		(*OperationResult_PreflightRun)(nil),
 		(*OperationResult_InspectCandidate)(nil),
 		(*OperationResult_CompletePaths)(nil),
+		(*OperationResult_Login)(nil),
 	}
 	file_vibesys_host_v1_admission_receipt_generated_proto_msgTypes[7].OneofWrappers = []any{
 		(*PublicationObservation_Absent)(nil),

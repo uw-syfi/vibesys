@@ -20,6 +20,7 @@ message AcceptedOperation {
     PreflightRunRequest preflight_run = 16;
     InspectCandidateRequest inspect_candidate = 17;
     CompletePathsRequest complete_paths = 18;
+    LoginRequest login = 40;
   }
 }
 message OperationResult {
@@ -35,6 +36,7 @@ message OperationResult {
     PreflightRunResponse preflight_run = 16;
     InspectCandidateResponse inspect_candidate = 17;
     CompletePathsResponse complete_paths = 18;
+    LoginEvent login = 40;
   }
 }
 

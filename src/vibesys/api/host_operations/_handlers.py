@@ -77,6 +77,10 @@ class _Reads:
         return response
 
 
+# Stream slots are registered beside the unary handlers. The generator rejects a drift.
+WATCH_SLOTS = ("login",)
+
+
 def handlers(source: ReadSource) -> host_operations.Handlers:
     """All required slots are statically bound to typed product handlers."""
     reads = _Reads(source)

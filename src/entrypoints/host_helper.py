@@ -41,6 +41,7 @@ from server.host_helper_machine import HostMachineProbe
 from server.host_helper_os import (
     FileProjects,
     GitCheckoutProbe,
+    HeldLogin,
     LoginBounds,
     LoginStarter,
     OsConfigFiles,
@@ -232,6 +233,29 @@ class AgentLibraryLogins:
                 reason=LoginUnavailableReason.NEEDS_TERMINAL, command=command.line
             )
         return self._starter.start(command.argv)
+
+    def hold(self, provider: str) -> HeldLogin:
+        """Start ``provider``'s login and keep its process group until cancel or completion.
+
+        The same refusals as ``start``. A provider this host does not offer raises ``ValueError``.
+        """
+        if provider not in self.providers():
+            message = f"this host offers no harness for provider {provider!r}"
+            raise ValueError(message)
+        if not self._login_of(provider).installed:
+            return self._starter.refuse(
+                LoginUnavailable(reason=LoginUnavailableReason.NOT_INSTALLED)
+            )
+        command = self._command_of(provider)
+        if command is None:
+            return self._starter.refuse(
+                LoginUnavailable(reason=LoginUnavailableReason.NO_LOGIN_COMMAND)
+            )
+        if command.needs_terminal:
+            return self._starter.refuse(
+                LoginUnavailable(reason=LoginUnavailableReason.NEEDS_TERMINAL, command=command.line)
+            )
+        return self._starter.hold(command.argv)
 
     def _login(self, provider: str) -> AgentLogin:
         # lint-waiver: LW-271507 [PLC0415]; the helper answers hello without loading the agent library.

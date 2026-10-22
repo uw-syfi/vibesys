@@ -1327,3 +1327,64 @@ message CompletePathsResponse {
   repeated CompletedPath entries = 3 [(buf.validate.field).repeated.max_items = 200];
   bool truncated = 4;
 }
+
+message LoginRequest {
+  string request_id = 1 [(buf.validate.field).string = {
+    max_bytes: 131072
+    min_len: 1
+    max_len: 128
+  }];
+  string provider = 2 [(buf.validate.field).string = {
+    max_bytes: 131072
+    min_len: 1
+    max_len: 128
+  }];
+}
+
+enum LoginUnavailableReason {
+  LOGIN_UNAVAILABLE_REASON_UNSPECIFIED = 0;
+  LOGIN_UNAVAILABLE_REASON_NOT_INSTALLED = 1 [(vibesys.host.v1.adapter_spelling) = "not_installed"];
+  LOGIN_UNAVAILABLE_REASON_NO_LOGIN_COMMAND = 2 [(vibesys.host.v1.adapter_spelling) = "no_login_command"];
+  LOGIN_UNAVAILABLE_REASON_NEEDS_TERMINAL = 3 [(vibesys.host.v1.adapter_spelling) = "needs_terminal"];
+  LOGIN_UNAVAILABLE_REASON_START_FAILED = 4 [(vibesys.host.v1.adapter_spelling) = "start_failed"];
+}
+
+message LoginStartedBody {
+  optional string instruction = 1 [(buf.validate.field).string = {
+    max_bytes: 131072
+    max_len: 300
+    pattern: "^[^\\n\\r]*$"
+  }];
+}
+
+message LoginUnavailableBody {
+  LoginUnavailableReason reason = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  optional string command = 2 [(buf.validate.field).string = {
+    max_bytes: 131072
+    max_len: 300
+    pattern: "^[^\\n\\r]*$"
+  }];
+  string detail = 3 [(buf.validate.field).string = {
+    max_bytes: 131072
+    max_len: 300
+    pattern: "^[^\\n\\r]*$"
+  }];
+}
+
+// One sequenced login fact. The host process stays up until cancel or completion.
+message LoginEvent {
+  string request_id = 1 [(buf.validate.field).string = {
+    max_bytes: 131072
+    min_len: 1
+    max_len: 128
+  }];
+  uint64 sequence = 2 [(buf.validate.field).uint64.gt = 0];
+  oneof body {
+    option (buf.validate.oneof).required = true;
+    LoginStartedBody started = 3;
+    LoginUnavailableBody unavailable = 4;
+  }
+}

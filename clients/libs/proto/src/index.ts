@@ -37,6 +37,12 @@ export {
   type HostReadResponse,
   HostReadResponseSchema,
 } from './generated/vibesys/api/v1/host_read_generated_pb.js';
+export {
+  type HostWatchRequest,
+  HostWatchRequestSchema,
+  type HostWatchResponse,
+  HostWatchResponseSchema,
+} from './generated/vibesys/api/v1/host_watch_generated_pb.js';
 export * from './generated/vibesys/host/v1/failure_pb.js';
 export * from './generated/vibesys/host/v1/operations_pb.js';
 export * from './generated/vibesys/search/v1/attrs_pb.js';

@@ -20,6 +20,7 @@ export {
   HELLO_METHOD,
   READ_METHOD,
   TAIL_METHOD,
+  WATCH_METHOD,
 } from './shell/gateway.js';
 export {GatewayCalls} from './shell/gateway-calls.js';
 export {localGateway} from './shell/gateway-local.js';
@@ -35,6 +36,7 @@ export {GrpcDecoder, GrpcError, grpcFrame} from './shell/grpc.js';
 export {ConnectionError, HelperRequestError} from './shell/helper-channel.js';
 export {HostConnection, type LogsLease} from './shell/host-connection.js';
 export {type Link, LocalLink, SshLink} from './shell/link.js';
+export {LoginActor, type LoginPorts, type LoginStart} from './shell/login-actor.js';
 export {fromChild, type SpawnedProcess} from './shell/process.js';
 export {
   type RegistryCatalog,

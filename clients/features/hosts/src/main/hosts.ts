@@ -96,6 +96,8 @@ export interface HostsDeps {
   readonly transportV2?: (id: HostId) => Promise<boolean>;
   /** Required when `transportV2` is true. Missing it throws; it does not fall back. */
   readonly setup?: RegistrySetup;
+  /** Stop a host login when its checkout is replaced or the host is removed. */
+  readonly endLogin?: (id: HostId) => void;
 }
 
 /** How many times a summary is read again when its pages disagree on where the run stood. */
@@ -349,6 +351,7 @@ export class Hosts {
       );
       if (outcome === 'cancelled') operation.assertCurrent();
       operation.committed();
+      this.#deps.endLogin?.(id);
       const revision = this.#commitCheckout(hostKey(id), checkout);
       if (this.#desired().has(hostKey(id))) await this.#refresh(id, revision);
       return root ?? checkout;
@@ -396,6 +399,7 @@ export class Hosts {
     const key = hostKey(id);
     if (this.#removing.has(key)) throw new Error(`${hostLabel(id)} is already being removed`);
     this.#removing.add(key);
+    this.#deps.endLogin?.(id);
     try {
       const operations = [...this.#checkoutChanges.values()].filter(
         operation => operation.host === key && operation.cancel(),

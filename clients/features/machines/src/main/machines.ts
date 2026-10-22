@@ -65,6 +65,11 @@ export interface MachinesMainDeps {
   readonly setup?: RegistrySetup;
   /** The selection the caller still owns. A change across the await is stale. */
   readonly selectionRevision?: (id: HostId) => bigint;
+  /** Host logins when `transportV2` is on. The actor outlives the panel that started one. */
+  readonly logins?: {
+    start(host: HostId, provider: string): Promise<LoginStart>;
+    cancelHost(host: HostId): void;
+  };
 }
 
 const LOCAL: HostId = {kind: 'local'};
@@ -258,6 +263,13 @@ export class MachinesMain {
 
   /** Start `provider`'s own login on `id`. */
   async startLogin(id: HostId, provider: string): Promise<LoginStart> {
+    if (await this.#v2(id)) {
+      const logins = this.#deps.logins;
+      if (logins === undefined) {
+        throw new Error('run transport v2 is on and the login actor is missing');
+      }
+      return logins.start(id, provider);
+    }
     return this.#changed(id, 'start the login', async connection => {
       const reply = await connection.request({type: 'agent_logins.start', provider});
       return reply.result;

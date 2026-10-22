@@ -262,6 +262,22 @@ describe('MachinesMain', () => {
         reason: 'no_login_command',
       });
     });
+
+    test('transport v2 starts the login on the actor', async () => {
+      const link = new FakeLink();
+      const {machines, manager} = await subject(new Map([['ssh:host-b', link]]), {
+        transportV2: async () => true,
+        logins: {
+          start: async () => ({outcome: 'started', instruction: 'Open the link'}),
+          cancelHost: () => {},
+        },
+      });
+      await using _ = manager;
+      expect(await machines.startLogin(HOST_B, 'claude')).toEqual({
+        outcome: 'started',
+        instruction: 'Open the link',
+      });
+    });
   });
 
   describe('run transport v2', () => {

@@ -114,6 +114,26 @@ def test_a_program_that_cannot_run_is_a_failed_start_naming_it() -> None:
     assert "codex" in result.detail
 
 
+def test_cancelling_a_login_ends_its_group_before_its_lifetime() -> None:
+    threads = SimThreads()
+    process = ScriptedPipedProcess(threads, merge_stderr=True)
+    process.write(stdout="Open https://a.example/x\n")
+    starter = LoginStarter(
+        FakePipedProcessLauncher(lambda _start: process), threads, lambda: _ENV, _BOUNDS
+    )
+
+    def main() -> list[str]:
+        held = starter.hold(_ARGV)
+        assert isinstance(held.result, LoginStarted)
+        assert process.signals == []
+        held.cancel()
+        held.wait()
+        return process.signals
+
+    assert threads.run(main) == ["terminate"]
+    assert process.reaped
+
+
 def test_a_login_nobody_finishes_is_ended_after_its_lifetime_and_reaped() -> None:
     done = _start("Open https://a.example/x\n", then_wait=_BOUNDS.lifetime + 1.0)
 

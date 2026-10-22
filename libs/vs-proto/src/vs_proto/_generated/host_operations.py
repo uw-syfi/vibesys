@@ -173,6 +173,28 @@ def accept_preflight_run(
     return PreflightRun.accept(request)
 
 
+Login = Operation(
+    "Login",
+    40,
+    40,
+    40,
+    600000,
+    5000,
+    3,
+    3,
+    1,
+    2,
+    25000,
+    pb.LoginRequest,
+    pb.LoginEvent,
+    ((("request_id",), ("request_id",)),),
+)
+
+
+def accept_login(request: pb.LoginRequest) -> AcceptedRequest[pb.LoginRequest]:
+    return Login.accept(request)
+
+
 ADAPTER_OPERATIONS: dict[str, Operation] = {
     "tasks.list": ListTasks,
     "harnesses.list": ListHarnesses,
@@ -190,6 +212,7 @@ OPERATIONS: tuple[Operation, ...] = (
     DescribeMachine,
     ListCompute,
     PreflightRun,
+    Login,
 )
 
 
@@ -347,3 +370,7 @@ READ_CALLS: tuple[HostCall, ...] = (
     HostCall("list_compute", "list-compute", 15, 15, 10000, 5000),
     HostCall("preflight_run", "preflight-run", 16, 16, 65000, 5000),
 )
+MUTATIONS: dict[str, Operation] = {}
+MUTATION_CALLS: tuple[HostCall, ...] = ()
+WATCHES: dict[str, Operation] = {"login": Login}
+WATCH_CALLS: tuple[HostCall, ...] = (HostCall("login", "login", 40, 40, 600000, 5000),)

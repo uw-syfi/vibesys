@@ -28,7 +28,18 @@ def generate(root: Path, image: bytes, *, include_schema: bool = True) -> None:
         ),
     )
     sources = tuple(path.read_text() for path in paths)
-    outputs = compile_outputs(image, registrations, sources)
+    watches = tuple(
+        constant.value
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Assign)
+        and any(
+            isinstance(target, ast.Name) and target.id == "WATCH_SLOTS" for target in node.targets
+        )
+        and isinstance(node.value, ast.Tuple)
+        for constant in node.value.elts
+        if isinstance(constant, ast.Constant) and isinstance(constant.value, str)
+    )
+    outputs = compile_outputs(image, registrations, sources, watches)
     for name, content in outputs.items():
         if name.endswith(".proto") and not include_schema:
             continue

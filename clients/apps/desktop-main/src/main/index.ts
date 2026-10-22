@@ -12,10 +12,12 @@ import {
   installAskpass,
   type Link,
   LocalLink,
+  LoginActor,
   READ_METHOD,
   registryReads,
   registrySetup,
   SshLink,
+  WATCH_METHOD,
 } from '@vibesys/connection';
 import {RunNotifier} from '@vibesys/feature-app-shell/main';
 import {Hosts} from '@vibesys/feature-hosts/main';
@@ -167,6 +169,7 @@ async function openWindow(
         hosts.readEvents(hostFromKey(run.host), run.project, run.runId, from, max, kinds),
     },
   });
+  const held: {logins?: LoginActor} = {};
   const {hosts, setup} = listedHosts({
     manager,
     settings,
@@ -175,7 +178,10 @@ async function openWindow(
     notifier,
     welcome,
     broadcast: listing => windows.broadcast(WELCOME_EVENTS.listing, welcome.listing(listing)),
+    endLogin: id => held.logins?.cancelHost(id),
   });
+  const logins = startLogins(hosts, gateway, manager);
+  held.logins = logins;
   const runs: RunControl = new RunControl({
     connection: id => hosts.connection(id),
     // A run shown in a window of its own is live there; any other run in the main window.
@@ -192,7 +198,7 @@ async function openWindow(
     welcome,
     hosts,
     history,
-    machines: machinesOver(settings, hosts, gateway, setup),
+    machines: machinesOver(settings, hosts, gateway, setup, logins),
     runs,
     settings,
     preferences,
@@ -200,7 +206,10 @@ async function openWindow(
     gatewaySetting: gatewaySetting(
       settings,
       host => hosts.checkout(host),
-      host => gateway.disable(host),
+      host => {
+        logins.cancelHost(hostFromKey(host));
+        gateway.disable(host);
+      },
     ),
     runWindows: windows.runs,
     shellUrl: SHELL_URL,
@@ -274,8 +283,9 @@ function listedHosts(parts: {
   readonly notifier: RunNotifier;
   readonly welcome: WelcomeFeed;
   readonly broadcast: (listing: HostListing) => void;
+  readonly endLogin?: (id: HostId) => void;
 }): {readonly hosts: Hosts; readonly setup: ReturnType<typeof registrySetup>} {
-  const {manager, settings, gateway, history, notifier, welcome, broadcast} = parts;
+  const {manager, settings, gateway, history, notifier, welcome, broadcast, endLogin} = parts;
   const {transportV2, setup} = hostTransport(settings, gateway);
   return {
     setup,
@@ -286,6 +296,7 @@ function listedHosts(parts: {
       sshConfigPath: join(homedir(), '.ssh', 'config'),
       transportV2,
       setup,
+      endLogin,
       log,
       push: listing => {
         notifier.listing(listing);
@@ -316,12 +327,28 @@ function hostTransport(settings: SettingsStore, gateway: ReturnType<typeof insta
   };
 }
 
+/** The login actor. It outlives a panel and closes with the connection manager. */
+function startLogins(
+  hosts: Hosts,
+  gateway: ReturnType<typeof installGateway>,
+  manager: ConnectionManager,
+): LoginActor {
+  const logins = new LoginActor({
+    checkout: id => hosts.checkout(id),
+    stream: (id, bytes, signal, receive) =>
+      gateway.stream(hostKey(id), WATCH_METHOD, bytes, signal, receive),
+  });
+  manager.onDisposing(() => logins.close());
+  return logins;
+}
+
 /** The machines, over the settings store and the hosts' checkouts and connections. */
 function machinesOver(
   settings: SettingsStore,
   hosts: Hosts,
   gateway: ReturnType<typeof installGateway>,
   setup: ReturnType<typeof registrySetup>,
+  logins: LoginActor,
 ): MachinesMain {
   return new MachinesMain({
     settings,
@@ -337,6 +364,7 @@ function machinesOver(
       unary: (id, bytes, signal) => gateway.unary(hostKey(id), READ_METHOD, bytes, signal),
     }),
     setup,
+    logins,
   });
 }
 

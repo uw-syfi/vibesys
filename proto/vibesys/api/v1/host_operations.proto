@@ -177,6 +177,27 @@ service HostOperationsService {
       }
     };
   }
+  // Login is owned by the host until completion or an explicit cancel. Closing a
+  // panel drops the client's subscription and does not abort this stream.
+  rpc Login(vibesys.host.v1.LoginRequest) returns (stream vibesys.host.v1.LoginEvent) {
+    option (vibesys.host.v1.operation) = {
+      adapter_method: "agent_logins.start"
+      operation_id: 40
+      request_tag: 40
+      response_tag: 40
+      cap_ms: 600000
+      grace_ms: 5000
+      first_event_ms: 25000
+      effect: OPERATION_EFFECT_ADMISSION
+      retry: RETRY_RECONCILE_SAME_ID
+      cardinality: CARDINALITY_SERVER_STREAM
+      executor: EXECUTOR_CHECKOUT
+      correlation: {
+        request_path: 1
+        response_path: 1
+      }
+    };
+  }
   // HostCall dispatch. The runner deadline is cap_ms. The client budget is
   // cap_ms plus grace_ms, so it stays strictly above that cap. Relaunch confirms
   // an epoch for up to 25s inside its runner cap. Request and response tags are

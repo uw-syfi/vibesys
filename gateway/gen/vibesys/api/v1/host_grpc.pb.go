@@ -21,6 +21,7 @@ const _ = grpc.SupportPackageIsVersion9
 const (
 	HostService_HostCall_FullMethodName   = "/vibesys.api.v1.HostService/HostCall"
 	HostService_Read_FullMethodName       = "/vibesys.api.v1.HostService/Read"
+	HostService_Watch_FullMethodName      = "/vibesys.api.v1.HostService/Watch"
 	HostService_Hello_FullMethodName      = "/vibesys.api.v1.HostService/Hello"
 	HostService_Tail_FullMethodName       = "/vibesys.api.v1.HostService/Tail"
 	HostService_Skeleton_FullMethodName   = "/vibesys.api.v1.HostService/Skeleton"
@@ -41,6 +42,9 @@ type HostServiceClient interface {
 	HostCall(ctx context.Context, in *HostCallRequest, opts ...grpc.CallOption) (*HostCallResponse, error)
 	// Read runs one registered catalog operation. The runner deadline is that operation's cap.
 	Read(ctx context.Context, in *HostReadRequest, opts ...grpc.CallOption) (*HostReadResponse, error)
+	// Watch runs one registered stream. The host keeps it until completion or cancellation.
+	// Closing a panel drops the client's subscription and does not cancel this stream.
+	Watch(ctx context.Context, in *HostWatchRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[HostWatchResponse], error)
 	Hello(ctx context.Context, in *HelloRequest, opts ...grpc.CallOption) (*HelloResponse, error)
 	// Tail follows the log live until the client cancels, starting at from_seq
 	// (inclusive). Record bytes pass through unchanged; only seq is decoded.
@@ -79,6 +83,25 @@ func (c *hostServiceClient) Read(ctx context.Context, in *HostReadRequest, opts 
 	return out, nil
 }
 
+func (c *hostServiceClient) Watch(ctx context.Context, in *HostWatchRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[HostWatchResponse], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &HostService_ServiceDesc.Streams[0], HostService_Watch_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[HostWatchRequest, HostWatchResponse]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type HostService_WatchClient = grpc.ServerStreamingClient[HostWatchResponse]
+
 func (c *hostServiceClient) Hello(ctx context.Context, in *HelloRequest, opts ...grpc.CallOption) (*HelloResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(HelloResponse)
@@ -91,7 +114,7 @@ func (c *hostServiceClient) Hello(ctx context.Context, in *HelloRequest, opts ..
 
 func (c *hostServiceClient) Tail(ctx context.Context, in *TailRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[TailResponse], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &HostService_ServiceDesc.Streams[0], HostService_Tail_FullMethodName, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &HostService_ServiceDesc.Streams[1], HostService_Tail_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -120,7 +143,7 @@ func (c *hostServiceClient) Skeleton(ctx context.Context, in *SkeletonRequest, o
 
 func (c *hostServiceClient) WatchRuns(ctx context.Context, in *WatchRunsRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[WatchRunsResponse], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &HostService_ServiceDesc.Streams[1], HostService_WatchRuns_FullMethodName, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &HostService_ServiceDesc.Streams[2], HostService_WatchRuns_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -149,7 +172,7 @@ func (c *hostServiceClient) GetBlobs(ctx context.Context, in *GetBlobsRequest, o
 
 func (c *hostServiceClient) TailStream(ctx context.Context, in *TailStreamRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[TailStreamResponse], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &HostService_ServiceDesc.Streams[2], HostService_TailStream_FullMethodName, cOpts...)
+	stream, err := c.cc.NewStream(ctx, &HostService_ServiceDesc.Streams[3], HostService_TailStream_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -178,6 +201,9 @@ type HostServiceServer interface {
 	HostCall(context.Context, *HostCallRequest) (*HostCallResponse, error)
 	// Read runs one registered catalog operation. The runner deadline is that operation's cap.
 	Read(context.Context, *HostReadRequest) (*HostReadResponse, error)
+	// Watch runs one registered stream. The host keeps it until completion or cancellation.
+	// Closing a panel drops the client's subscription and does not cancel this stream.
+	Watch(*HostWatchRequest, grpc.ServerStreamingServer[HostWatchResponse]) error
 	Hello(context.Context, *HelloRequest) (*HelloResponse, error)
 	// Tail follows the log live until the client cancels, starting at from_seq
 	// (inclusive). Record bytes pass through unchanged; only seq is decoded.
@@ -201,6 +227,9 @@ func (UnimplementedHostServiceServer) HostCall(context.Context, *HostCallRequest
 }
 func (UnimplementedHostServiceServer) Read(context.Context, *HostReadRequest) (*HostReadResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Read not implemented")
+}
+func (UnimplementedHostServiceServer) Watch(*HostWatchRequest, grpc.ServerStreamingServer[HostWatchResponse]) error {
+	return status.Error(codes.Unimplemented, "method Watch not implemented")
 }
 func (UnimplementedHostServiceServer) Hello(context.Context, *HelloRequest) (*HelloResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Hello not implemented")
@@ -276,6 +305,17 @@ func _HostService_Read_Handler(srv interface{}, ctx context.Context, dec func(in
 	}
 	return interceptor(ctx, in, info, handler)
 }
+
+func _HostService_Watch_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(HostWatchRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(HostServiceServer).Watch(m, &grpc.GenericServerStream[HostWatchRequest, HostWatchResponse]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type HostService_WatchServer = grpc.ServerStreamingServer[HostWatchResponse]
 
 func _HostService_Hello_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(HelloRequest)
@@ -393,6 +433,11 @@ var HostService_ServiceDesc = grpc.ServiceDesc{
 		},
 	},
 	Streams: []grpc.StreamDesc{
+		{
+			StreamName:    "Watch",
+			Handler:       _HostService_Watch_Handler,
+			ServerStreams: true,
+		},
 		{
 			StreamName:    "Tail",
 			Handler:       _HostService_Tail_Handler,

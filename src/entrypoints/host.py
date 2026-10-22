@@ -4,20 +4,49 @@ from __future__ import annotations
 
 import argparse
 import os
+import signal
 import sys
 from collections import Counter
 from importlib import import_module
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 from vibesys.api.host import host_call
-from vibesys.api.host_operations.api import execute_inspect_candidate
+from vibesys.api.host_operations.api import (
+    LoginRefusedFact,
+    LoginStartedFact,
+    execute_inspect_candidate,
+    serve_login,
+)
 from vs_project.api import Project, ProjectError
 from vs_proto.api import host_operations
 from vs_sim.api import OsProcesses, OsThreads, SystemClock
 
 _HOST_CALL_COMMANDS = {op.cli: op.slot for op in host_operations.HOST_CALLS}
 _READ_COMMANDS = {op.cli: op.slot for op in host_operations.READ_CALLS}
+_WATCH_COMMANDS = {slot.replace("_", "-"): slot for slot in host_operations.WATCHES}
+
+
+class _LoginHold(Protocol):
+    """A started login the watch holds until cancel or completion."""
+
+    @property
+    def result(self) -> object:
+        """The login's first answer."""
+
+    def cancel(self) -> None:
+        """Stop the login process group."""
+
+    def wait(self) -> None:
+        """Block until the login process has been reaped."""
+
+
+class _LoginLibrary(Protocol):
+    """The host's login library, the part the watch command uses."""
+
+    def hold(self, provider: str) -> _LoginHold:
+        """Start ``provider``'s login and keep its process group."""
+
 
 if TYPE_CHECKING:
     from typing import BinaryIO
@@ -95,6 +124,22 @@ def main(
         reply = import_module("server.host_helper_requests").answer_registered_read
         destination.write(reply(arguments[0], source.read((1 << 20) + 1), host))
         return 0
+    if arguments and arguments[0] in _WATCH_COMMANDS:
+        parser = argparse.ArgumentParser(
+            prog=f"vibesys host {arguments[0]}",
+            description="Read a binary HostWatchRequest from stdin; write framed HostWatchResponses to stdout.",
+        )
+        parser.parse_args(arguments[1:])
+        source = sys.stdin.buffer if stdin is None else stdin
+        destination = sys.stdout.buffer if stdout is None else stdout
+        owned = OsThreads() if threads is None else threads
+        host = import_module("entrypoints.host_helper").real_host(os.environ, os.getuid(), owned)
+        library = import_module("entrypoints.host_helper").AgentLibraryLogins
+        if not isinstance(host.logins, library):
+            message = "host logins cannot be held open"
+            raise TypeError(message)
+        _serve_login(arguments[0], source.read((1 << 20) + 1), destination, host.logins, owned)
+        return 0
     if arguments and arguments[0] in _HOST_CALL_COMMANDS:
         parser = argparse.ArgumentParser(
             prog=f"vibesys host {arguments[0]}",
@@ -118,6 +163,47 @@ def main(
     sys.stdout.write(output)
     sys.stderr.write(error)
     return code
+
+
+def _serve_login(
+    cli: str, payload: bytes, destination: BinaryIO, logins: _LoginLibrary, threads: Threads
+) -> None:
+    """Start one login and hold this process until it ends or this process is signalled."""
+    models = import_module("server.host_agent_logins")
+    held: list[_LoginHold] = []
+    stop = threads.event()
+
+    def start(provider: str) -> LoginStartedFact | LoginRefusedFact:
+        started = logins.hold(provider)
+        held.append(started)
+        result = started.result
+        if isinstance(result, models.LoginStarted):
+            return LoginStartedFact(result.instruction)
+        if not isinstance(result, models.LoginUnavailable):
+            message = "login result is neither started nor unavailable"
+            raise TypeError(message)
+        return LoginRefusedFact(
+            reason=result.reason.value,
+            command=result.command,
+            detail=result.detail or "",
+        )
+
+    def cancel() -> None:
+        stop.wait()
+        if held:
+            held[0].cancel()
+
+    threads.spawn(cancel, name="login-cancel")
+    signal.signal(signal.SIGTERM, lambda _signum, _frame: stop.set())
+
+    def wait() -> None:
+        if held:
+            held[0].wait()
+
+    def write(chunk: bytes) -> None:
+        destination.write(chunk)
+
+    serve_login(payload, cli=cli, start=start, write=write, wait=wait)
 
 
 if __name__ == "__main__":

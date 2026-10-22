@@ -29,6 +29,7 @@ const (
 	HostOperationsService_PreflightRun_FullMethodName     = "/vibesys.api.v1.HostOperationsService/PreflightRun"
 	HostOperationsService_InspectCandidate_FullMethodName = "/vibesys.api.v1.HostOperationsService/InspectCandidate"
 	HostOperationsService_CompletePaths_FullMethodName    = "/vibesys.api.v1.HostOperationsService/CompletePaths"
+	HostOperationsService_Login_FullMethodName            = "/vibesys.api.v1.HostOperationsService/Login"
 	HostOperationsService_PostIntent_FullMethodName       = "/vibesys.api.v1.HostOperationsService/PostIntent"
 	HostOperationsService_Relaunch_FullMethodName         = "/vibesys.api.v1.HostOperationsService/Relaunch"
 	HostOperationsService_ChatMessage_FullMethodName      = "/vibesys.api.v1.HostOperationsService/ChatMessage"
@@ -51,6 +52,9 @@ type HostOperationsServiceClient interface {
 	// typed prefix is the input, and Hello remains the gateway schema handshake.
 	InspectCandidate(ctx context.Context, in *v1.InspectCandidateRequest, opts ...grpc.CallOption) (*v1.InspectCandidateResponse, error)
 	CompletePaths(ctx context.Context, in *v1.CompletePathsRequest, opts ...grpc.CallOption) (*v1.CompletePathsResponse, error)
+	// Login is owned by the host until completion or an explicit cancel. Closing a
+	// panel drops the client's subscription and does not abort this stream.
+	Login(ctx context.Context, in *v1.LoginRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[v1.LoginEvent], error)
 	// HostCall dispatch. The runner deadline is cap_ms. The client budget is
 	// cap_ms plus grace_ms, so it stays strictly above that cap. Relaunch confirms
 	// an epoch for up to 25s inside its runner cap. Request and response tags are
@@ -158,6 +162,25 @@ func (c *hostOperationsServiceClient) CompletePaths(ctx context.Context, in *v1.
 	return out, nil
 }
 
+func (c *hostOperationsServiceClient) Login(ctx context.Context, in *v1.LoginRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[v1.LoginEvent], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &HostOperationsService_ServiceDesc.Streams[0], HostOperationsService_Login_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[v1.LoginRequest, v1.LoginEvent]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type HostOperationsService_LoginClient = grpc.ServerStreamingClient[v1.LoginEvent]
+
 func (c *hostOperationsServiceClient) PostIntent(ctx context.Context, in *PostIntentRequest, opts ...grpc.CallOption) (*PostIntentResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(PostIntentResponse)
@@ -205,6 +228,9 @@ type HostOperationsServiceServer interface {
 	// typed prefix is the input, and Hello remains the gateway schema handshake.
 	InspectCandidate(context.Context, *v1.InspectCandidateRequest) (*v1.InspectCandidateResponse, error)
 	CompletePaths(context.Context, *v1.CompletePathsRequest) (*v1.CompletePathsResponse, error)
+	// Login is owned by the host until completion or an explicit cancel. Closing a
+	// panel drops the client's subscription and does not abort this stream.
+	Login(*v1.LoginRequest, grpc.ServerStreamingServer[v1.LoginEvent]) error
 	// HostCall dispatch. The runner deadline is cap_ms. The client budget is
 	// cap_ms plus grace_ms, so it stays strictly above that cap. Relaunch confirms
 	// an epoch for up to 25s inside its runner cap. Request and response tags are
@@ -248,6 +274,9 @@ func (UnimplementedHostOperationsServiceServer) InspectCandidate(context.Context
 }
 func (UnimplementedHostOperationsServiceServer) CompletePaths(context.Context, *v1.CompletePathsRequest) (*v1.CompletePathsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method CompletePaths not implemented")
+}
+func (UnimplementedHostOperationsServiceServer) Login(*v1.LoginRequest, grpc.ServerStreamingServer[v1.LoginEvent]) error {
+	return status.Error(codes.Unimplemented, "method Login not implemented")
 }
 func (UnimplementedHostOperationsServiceServer) PostIntent(context.Context, *PostIntentRequest) (*PostIntentResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method PostIntent not implemented")
@@ -441,6 +470,17 @@ func _HostOperationsService_CompletePaths_Handler(srv interface{}, ctx context.C
 	return interceptor(ctx, in, info, handler)
 }
 
+func _HostOperationsService_Login_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(v1.LoginRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(HostOperationsServiceServer).Login(m, &grpc.GenericServerStream[v1.LoginRequest, v1.LoginEvent]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type HostOperationsService_LoginServer = grpc.ServerStreamingServer[v1.LoginEvent]
+
 func _HostOperationsService_PostIntent_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(PostIntentRequest)
 	if err := dec(in); err != nil {
@@ -551,6 +591,12 @@ var HostOperationsService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _HostOperationsService_ChatMessage_Handler,
 		},
 	},
-	Streams:  []grpc.StreamDesc{},
+	Streams: []grpc.StreamDesc{
+		{
+			StreamName:    "Login",
+			Handler:       _HostOperationsService_Login_Handler,
+			ServerStreams: true,
+		},
+	},
 	Metadata: "vibesys/api/v1/host_operations.proto",
 }

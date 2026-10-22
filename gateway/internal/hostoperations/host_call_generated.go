@@ -8,19 +8,21 @@ import (
 )
 
 type HostCall struct {
-	CLI      string
-	Deadline time.Duration
-	Executor hostv1.Executor
+	CLI        string
+	Deadline   time.Duration
+	Executor   hostv1.Executor
+	Effect     hostv1.OperationEffect
+	FirstEvent time.Duration
 }
 
 func DispatchHostCall(request *apiv1.HostCallRequest) (HostCall, bool) {
 	switch {
 	case request.GetPostIntent() != nil:
-		return HostCall{CLI: "post-intent", Deadline: 10000 * time.Millisecond, Executor: 1}, true
+		return HostCall{CLI: "post-intent", Deadline: 10000 * time.Millisecond, Executor: 1, Effect: 3}, true
 	case request.GetRelaunch() != nil:
-		return HostCall{CLI: "relaunch", Deadline: 30000 * time.Millisecond, Executor: 1}, true
+		return HostCall{CLI: "relaunch", Deadline: 30000 * time.Millisecond, Executor: 1, Effect: 3}, true
 	case request.GetChatMessage() != nil:
-		return HostCall{CLI: "chat-message", Deadline: 10000 * time.Millisecond, Executor: 1}, true
+		return HostCall{CLI: "chat-message", Deadline: 10000 * time.Millisecond, Executor: 1, Effect: 3}, true
 	default:
 		return HostCall{}, false
 	}
