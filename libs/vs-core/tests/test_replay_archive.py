@@ -418,6 +418,10 @@ def test_shared_record_corpus_covers_every_archive_body_family() -> None:
     for sequence, name in enumerate(_NON_POLICY_RECORDS, 2):
         record = deepcopy(_NATIVE_RECORDS[name])
         record.seq, record.clock = sequence, 0
+        if record.body is not None and record.body.field == "declaration_amended":
+            # A declaration belongs to this archive's immutable epoch identity;
+            # the shared standalone corpus header names a different run.
+            record.body = Oneof("declaration_amended", archive.current_epoch)
         archive.append(record)
     assert archive.history == ()
     assert archive.unresolved == ()
@@ -432,6 +436,10 @@ def test_non_policy_native_histories_never_become_replay_operations(names: list[
     for sequence, name in enumerate(names, 2):
         record = deepcopy(_NATIVE_RECORDS[name])
         record.seq, record.clock = sequence, 0
+        if record.body is not None and record.body.field == "declaration_amended":
+            # A declaration belongs to this archive's immutable epoch identity;
+            # the shared standalone corpus header names a different run.
+            record.body = Oneof("declaration_amended", archive.current_epoch)
         archive.append(record)
         assert archive.history == ()
         assert archive.unresolved == ()

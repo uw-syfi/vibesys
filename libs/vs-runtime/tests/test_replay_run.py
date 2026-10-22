@@ -508,15 +508,15 @@ async def test_replay_uses_p1_epoch_derivation_and_explicit_declaration_amendmen
         assert runtime.runtime.epoch_state.lifecycle is not None
         assert runtime.runtime.epoch_state.lifecycle.state is not None
         assert runtime.runtime.epoch_state.lifecycle.state.field == "ended"
-        headers = [
-            record for record in records if record.body and record.body.field == "epoch_started"
-        ]
-        amendments = [
-            record
-            for record in records
-            if record.body and record.body.field == "declaration_amended"
-        ]
-        assert [record.body.value.epoch for record in headers] == list(range(1, number + 1))
+        headers: list[int] = []
+        amendments: list[tuple[int, int]] = []
+        for record in records:
+            match record.body:
+                case Oneof("epoch_started", header):
+                    headers.append(header.epoch)
+                case Oneof("declaration_amended", header):
+                    amendments.append((record.epoch, header.epoch))
+        assert headers == list(range(1, number + 1))
         assert len(amendments) >= number
-        assert all(record.epoch == record.body.value.epoch for record in amendments)
+        assert all(containing == declared for containing, declared in amendments)
     assert len(executor.invocations) == 1
