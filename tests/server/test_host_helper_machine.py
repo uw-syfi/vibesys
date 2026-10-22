@@ -20,7 +20,6 @@ from tests.server.host_helper_support import (
 )
 
 from server.host_api import (
-    MIN_CHECKOUT_VERSION,
     Checkout,
     CheckoutFound,
     CheckoutInspectReply,
@@ -33,6 +32,7 @@ from server.host_api import (
     RunPhase,
     RunStatus,
 )
+from server.host_compatibility_generated import MIN_CHECKOUT_VERSION
 from server.host_helper_machine import (
     DOCKER_VERSION_COMMAND,
     HOST_GPU_QUERIES,

@@ -31,7 +31,7 @@ history's messages (``server.host_run_events``), the run reader's (``server.host
 (``server.host_run_summary``, which also holds the usage window's), the run tile's dashboard
 (``server.host_run_dashboard``), the machine facts (``server.host_machine_facts``: ``Accelerator``,
 ``Gpu``, ``Hardware``, ``DockerReachable``, ``DockerUnreachable``, ``MachineCheckout``,
-``RunCounts``, ``MachineDescription``) and checkout inspection (``MIN_CHECKOUT_VERSION``, ``CheckoutFound``,
+``RunCounts``, ``MachineDescription``) and checkout inspection (``CheckoutFound``,
 ``CheckoutNotFound``, ``CheckoutTooOld``, ``CheckoutInspection``), ``HelperMessage`` and its
 members, ``HelperErrorCode``, the harness choice (``HarnessOption``, ``HarnessChoice``,
 ``RoleAgents``, and the run flags ``CLI_PROVIDER_FLAG``, ``MODEL_FLAG``, ``ROLE_PROVIDER_FLAG``,
@@ -73,7 +73,6 @@ from pydantic import (
     model_validator,
 )
 
-from server import host_compatibility_generated
 from server.host_agent_logins import (
     AgentLoginsListReply,
     AgentLoginsListRequest,
@@ -1598,9 +1597,6 @@ class MachineDescribeReply(HelperReplyBase):
 
     type: Literal["machine.describe"] = "machine.describe"
     machine: MachineDescription
-
-
-MIN_CHECKOUT_VERSION: Final = host_compatibility_generated.MIN_CHECKOUT_VERSION
 
 
 class CheckoutFound(BaseModel):
