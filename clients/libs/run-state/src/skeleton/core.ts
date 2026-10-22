@@ -1,10 +1,36 @@
 /** Reported turn usage is projected by span; absent values stay unknown. */
 import {fromBinary} from '@bufbuild/protobuf';
 import {timestampDate} from '@bufbuild/protobuf/wkt';
+import {validateAgentReply} from '@vibesys/contracts';
 import type {UsageRecord} from '@vibesys/contracts/host-helper';
 import {AgentClient, type AgentTurnAttrs, AgentTurnAttrsSchema} from '@vibesys/proto';
 import {addTokens, type CoreState, initialCoreState, NO_TOKENS, type TokenTally} from '../index.js';
-import type {StoreView} from './types.js';
+import {ownProjectionInput} from '../publication.js';
+import type {TranscriptEntry} from '../transcript-fold.js';
+import type {SkeletonContent, StoreView} from './types.js';
+
+function replyEntry(
+  spanId: string,
+  turn: AgentTurnAttrs,
+  seq: bigint,
+  content: SkeletonContent,
+): TranscriptEntry[] {
+  const ref = content.replies?.[spanId]?.filter(item => item.seq <= seq).at(-1);
+  const text = turn.replyJson || (ref ? content.text?.[ref.hash] : undefined);
+  if (!text) return [];
+  const reply = validateAgentReply(JSON.parse(text));
+  return [
+    {
+      id: `reply:${spanId}`,
+      kind: 'reply',
+      spanId,
+      turnId: spanId,
+      agentKind: turn.role,
+      content: JSON.stringify(reply.value),
+      reply: ownProjectionInput(reply),
+    },
+  ];
+}
 
 function count(value: bigint | undefined): number | null {
   if (value === undefined || value > BigInt(Number.MAX_SAFE_INTEGER)) return null;
@@ -29,14 +55,16 @@ function recordedAgent(
   };
 }
 
-export function skeletonCore(view: StoreView): CoreState {
+export function skeletonCore(view: StoreView, content: SkeletonContent = {}): CoreState {
   const seq = view.seq;
   const bySpan = Object.create(null) as Record<string, TokenTally>;
   const records: UsageRecord[] = [];
+  const transcript: TranscriptEntry[] = [];
   for (const span of Object.values(view.spans)) {
     const attrs = span.label?.attrs;
     if (attrs?.typeUrl.split('/').at(-1) !== AgentTurnAttrsSchema.typeName) continue;
     const turn = fromBinary(AgentTurnAttrsSchema, attrs.value);
+    transcript.push(...replyEntry(span.id, turn, seq, content));
     const usage = turn.usage;
     const tokens: TokenTally = {
       input: count(usage?.input),
@@ -72,5 +100,6 @@ export function skeletonCore(view: StoreView): CoreState {
     runId: view.epochs.at(-1)?.epoch?.runId ?? null,
     tokens: {total: Object.values(bySpan).reduce(addTokens, NO_TOKENS), bySpan},
     usageRecords: records,
+    transcript,
   };
 }

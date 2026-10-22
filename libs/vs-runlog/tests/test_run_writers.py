@@ -32,7 +32,15 @@ from vs_proto.api import (
     TokenUsage,
     validate,
 )
-from vs_runlog.api import FileRunLogWriter, RunLogReader, encode_frame, fold_skeleton
+from vs_runlog.api import (
+    FileRunLogWriter,
+    RunLock,
+    RunLogReader,
+    WriterIdentityState,
+    encode_frame,
+    fold_skeleton,
+    observe_writer_identity,
+)
 from vs_sim.api.testing import ManualClock, SimThreads
 
 _FIXTURES = Path(__file__).resolve().parents[3] / "proto/testdata/skeleton"
@@ -320,3 +328,34 @@ def test_fold_composes_at_every_cut(choices: list[int]) -> None:
         before = seed.to_binary()
         assert fold_skeleton(records[split:], seed=seed, log_offset=offsets[-1]) == expected
         assert seed.to_binary() == before
+
+
+@pytest.mark.regression
+@example(offset=1)
+@given(st.integers(min_value=1, max_value=1000))
+def test_writer_identity_fences_every_process_field_and_survives_a_successor_lock(
+    offset: int,
+) -> None:
+    with TemporaryDirectory() as temporary:
+        root = Path(temporary)
+        path = root / "run.log"
+        with FileRunLogWriter(path, clock=ManualClock(), threads=SimThreads()) as writer:
+            writer.append(scenarios()["core"][0][0])
+            head = RunHead.from_binary((root / "run.head").read_bytes())
+            process = head.process
+            assert process is not None
+            assert observe_writer_identity(path, process) is WriterIdentityState.HELD
+            for field in ("pid", "epoch", "started_at"):
+                changed = type(process).from_binary(process.to_binary())
+                if field == "started_at":
+                    assert changed.started_at is not None
+                    changed.started_at.seconds += offset
+                else:
+                    setattr(changed, field, getattr(changed, field) + offset)
+                assert observe_writer_identity(path, changed) is WriterIdentityState.UNKNOWN
+        assert observe_writer_identity(path, process) is WriterIdentityState.RELEASED
+        successor = RunLock(root / "run.lock")
+        try:
+            assert observe_writer_identity(path, process) is WriterIdentityState.RELEASED
+        finally:
+            successor.close()

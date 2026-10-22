@@ -14,7 +14,8 @@ extend google.protobuf.FileOptions {
 // All executable operation policy lives on the method descriptor.
 message OperationPolicy {
   // Temporary adapter spelling, removed with the helper transport.
-  string adapter_method = 12 [(buf.validate.field).string.pattern = "^[a-z][a-z_.]*$"];
+  // Absent on native operations that do not replace a helper method.
+  optional string adapter_method = 12 [(buf.validate.field).string.pattern = "^[a-z][a-z_.]*$"];
   uint32 operation_id = 1 [(buf.validate.field).uint32.gt = 0];
   uint32 cap_ms = 2 [(buf.validate.field).uint32 = {
     gt: 0

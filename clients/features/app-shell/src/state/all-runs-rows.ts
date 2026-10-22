@@ -57,7 +57,10 @@ export function dashboardRows(state: SidebarState, clock: Clock): readonly Dashb
     };
     const row = live.find(each => sameRun(each.run, ref)) ?? recentRow(state, ref, clock);
     return {
-      row,
+      row:
+        run.unavailable === undefined
+          ? row
+          : {...row, detail: run.unavailable, problem: {text: run.unavailable, retry: false}},
       host,
       machine,
       task: chosenTask(run.task) ?? chosenTask(ref.task),

@@ -370,16 +370,15 @@ jobs:
             resources/evaluators/stack/go.sum
             resources/evaluators/unordered-map/go.sum
 
-      # Bounded because an apt mirror or a service-restart prompt makes this
-      # hang rather than fail: three runs on this branch sat here for tens of
-      # minutes each and never reached a test. A timeout turns that into a
-      # legible failure in minutes instead of a job that burns hours.
       - name: Install managed-candidate containment dependency
         if: contains(fromJSON(needs.changes.outputs.native_targets), 'resources/evaluators/microservice')
-        timeout-minutes: 3
+        uses: ./.github/actions/setup-runner-apt
+        with:
+          packages: bubblewrap
+
+      - name: Enable runner user namespaces
+        if: contains(fromJSON(needs.changes.outputs.native_targets), 'resources/evaluators/microservice')
         run: |
-          sudo -n env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a timeout --kill-after=5s 60s apt-get -o Acquire::Retries=0 -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 -o DPkg::Lock::Timeout=10 update
-          sudo -n env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a timeout --kill-after=5s 60s apt-get -o Acquire::Retries=0 -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 -o DPkg::Lock::Timeout=10 install -y bubblewrap
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
 
       - name: Set up Rust
@@ -934,15 +933,13 @@ jobs:
       - name: Pass the pytest cancel deadline
         run: python3 scripts/pytest_job_deadline.py
 
-      # Bounded for the same reason as the containment-dependency install in
-      # `queue-native`: this apt install intermittently hangs on these runners
-      # instead of failing, and an unbounded step reports nothing while it
-      # burns the job's budget.
       - name: Install bubblewrap
-        timeout-minutes: 3
+        uses: ./.github/actions/setup-runner-apt
+        with:
+          packages: bubblewrap
+
+      - name: Enable runner user namespaces
         run: |
-          sudo -n env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a timeout --kill-after=5s 60s apt-get -o Acquire::Retries=0 -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 -o DPkg::Lock::Timeout=10 update
-          sudo -n env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a timeout --kill-after=5s 60s apt-get -o Acquire::Retries=0 -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 -o DPkg::Lock::Timeout=10 install -y bubblewrap dbus-user-session
           # Ubuntu 24.04 restricts unprivileged user namespaces via AppArmor;
           # relax it so bwrap can create the namespace on the runner.
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
@@ -951,6 +948,7 @@ jobs:
       # Docker socket, and under VIBESYS_REQUIRE_SANDBOX_TESTS=1 a missing one
       # fails it. A runner has no login session, so start the user manager,
       # which serves /run/user/<uid>/bus.
+      # dbus-user-session is preinstalled in the Ubuntu runner image.
       - name: Start the runner's user D-Bus
         timeout-minutes: 2
         run: |
@@ -1039,10 +1037,12 @@ jobs:
       # The host-side job confinement the tier exercises needs bubblewrap; see
       # the sandbox-linux job for why the AppArmor userns restriction is lifted.
       - name: Install bubblewrap
-        timeout-minutes: 3
+        uses: ./.github/actions/setup-runner-apt
+        with:
+          packages: bubblewrap
+
+      - name: Enable runner user namespaces
         run: |
-          sudo -n env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a timeout --kill-after=5s 60s apt-get -o Acquire::Retries=0 -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 -o DPkg::Lock::Timeout=10 update
-          sudo -n env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a timeout --kill-after=5s 60s apt-get -o Acquire::Retries=0 -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 -o DPkg::Lock::Timeout=10 install -y bubblewrap
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
 
       - name: Install uv

@@ -166,13 +166,16 @@ def _convert_directory(
         return ConversionResult(ConversionStatus.SKIPPED, "journal predates the run trace")
     with TemporaryDirectory(prefix=".convert-run-", dir=destination.parent) as temporary:
         staged = Path(temporary) / "run.log"
-        content = FileRunContent(directory / "blobs", directory / "streams")
-        writer = FileRunLogWriter(staged, clock=clock, threads=threads)
-        with RunLogTee(writer, content, run_id) as tee:
-            for line, _ in _events(journal):
-                tee.append(line)
-            writer.checkpoint()
-        install_run_log(staged, destination)
+
+        def prepare() -> None:
+            content = FileRunContent(directory / "blobs", directory / "streams")
+            writer = FileRunLogWriter(staged, clock=clock, threads=threads)
+            with RunLogTee(writer, content, run_id) as tee:
+                for line, _ in _events(journal):
+                    tee.append(line)
+                writer.checkpoint()
+
+        install_run_log(staged, destination, prepare=prepare)
     return ConversionResult(ConversionStatus.CONVERTED, "converted journal to run.log")
 
 

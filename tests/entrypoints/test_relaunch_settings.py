@@ -1,5 +1,6 @@
 """All launch entrypoints select saved strategy and execution settings on resume."""
 
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -17,7 +18,14 @@ from vs_project.api import OrchestrationDescriptor, Project, RunEnvironmentRecor
 from vs_project.api.testing import run_execution_record
 from vs_proto.api import HostCallRequest, HostCallResponse, Oneof, RelaunchRequest, RelaunchResponse
 from vs_sim.api import ProcessSpec
-from vs_sim.api.testing import FakeProcesses, ManualClock, ProcessScript, SimThreads
+from vs_sim.api.testing import (
+    FakeProcesses,
+    FakeProcessSignaller,
+    ManualClock,
+    ProcessScript,
+    Sim,
+    SimThreads,
+)
 
 _RUN = "20261021-170000-11111111-dynamic"
 
@@ -167,7 +175,15 @@ def test_host_call_relaunch_uses_saved_settings_through_the_detached_cli(tmp_pat
         ),
     )
     response = HostCallResponse.from_binary(
-        host_call(request.to_binary(), processes=processes, threads=threads)
+        host_call(
+            request.to_binary(),
+            platform=replace(
+                Sim(seed=0).platform(
+                    threads, processes=processes, signaller=FakeProcessSignaller(set())
+                ),
+                writer_signaller=None,
+            ),
+        )
     )
     assert response.result == Oneof("relaunch", RelaunchResponse(outcome=Oneof("epoch", 2)))
 

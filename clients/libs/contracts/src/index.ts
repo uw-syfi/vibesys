@@ -16,6 +16,7 @@ export {
 export type {
   ActiveExecutions,
   ActiveExecutionsChunkMessage,
+  AgentReply,
   AgentStatusData,
   DesignFileChange,
   DesignPatch,
@@ -51,6 +52,7 @@ export {
   parseServerMessage,
   responseError,
   streamFailure,
+  validateAgentReply,
   validateRunEvent,
   validateRunSnapshot,
 } from './protocol-parse.js';

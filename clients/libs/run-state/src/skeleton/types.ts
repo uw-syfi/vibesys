@@ -1,4 +1,11 @@
 import type {EpochVersion, Keyframe, Lifecycle, MetricHistory, Span} from '@vibesys/proto';
+/** Content attachments copied from the record path, with their recorded sequence. */
+export interface SkeletonContent {
+  readonly text?: Readonly<Record<string, string>>;
+  readonly replies?: Readonly<
+    Record<string, readonly {readonly seq: bigint; readonly hash: string}[]>
+  >;
+}
 export type StoreHistory = Pick<
   Keyframe,
   'spans' | 'epochs' | 'streams' | 'lifecycles' | 'metrics'

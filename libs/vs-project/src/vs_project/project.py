@@ -199,6 +199,11 @@ class Project:
         return ProjectState.log_directory_for(project_root, run_id)
 
     @classmethod
+    def run_head_path_for(cls, project_root: Path | str, run_id: str) -> Path:
+        """Return the writer's published head beside its canonical log."""
+        return cls.log_directory_for(project_root, run_id) / "run.head"
+
+    @classmethod
     def run_log_path_for(cls, project_root: Path | str, run_id: str) -> Path:
         """Return the transport log beside the authoritative JSONL journal."""
         return cls.log_directory_for(project_root, run_id) / "run.log"

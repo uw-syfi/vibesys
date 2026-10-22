@@ -389,3 +389,19 @@ describe('what every screen calls a run', () => {
     });
   });
 });
+
+test('a native import refusal stays visible on the run row', () => {
+  const {state, requests} = open([listed('ssh:host-a')], [opened('ssh:host-a', '/p/q', 'r')]);
+  const answered = sidebarStep(
+    state,
+    listedAction(listsOf(requests)[0]?.[2] as number, 'ssh:host-a', '/p/q', [
+      {...run('r', 1), unavailable: 'Pause this run before importing its history'},
+    ]),
+  ).state;
+  const [row] = dashboardRows(answered, CLOCK);
+  expect(row?.row.problem).toEqual({
+    text: 'Pause this run before importing its history',
+    retry: false,
+  });
+  expect(row?.row.detail).toBe('Pause this run before importing its history');
+});

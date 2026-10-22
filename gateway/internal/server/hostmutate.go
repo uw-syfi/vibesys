@@ -12,6 +12,7 @@ import (
 	"github.com/uw-syfi/vibesys/gateway/internal/hostcommand"
 	"github.com/uw-syfi/vibesys/gateway/internal/hostoperations"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // Mutate runs one registered unary operation. An admission drops the caller's
@@ -26,6 +27,17 @@ func (h *host) Mutate(ctx context.Context, request *apiv1.MutateRequest) (*apiv1
 	if err != nil {
 		return mutateFailure(hostv1.FailureCategory_FAILURE_CATEGORY_INVALID_INPUT, err.Error()), nil
 	}
+	parent := ctx
+	if dispatched.Effect == hostv1.OperationEffect_OPERATION_EFFECT_ADMISSION {
+		parent = context.WithoutCancel(ctx)
+	}
+	callCtx, cancel := context.WithTimeout(parent, dispatched.Deadline)
+	defer cancel()
+	request = proto.Clone(request).(*apiv1.MutateRequest)
+	if terminate := request.GetTerminateRun(); terminate != nil {
+		deadline, _ := callCtx.Deadline()
+		terminate.Deadline = timestamppb.New(deadline)
+	}
 	input, err := proto.Marshal(request)
 	if err != nil {
 		return mutateFailure(hostv1.FailureCategory_FAILURE_CATEGORY_INVALID_INPUT, err.Error()), nil
@@ -33,12 +45,6 @@ func (h *host) Mutate(ctx context.Context, request *apiv1.MutateRequest) (*apiv1
 	if len(input) > hostcommand.MaxOutput {
 		return mutateFailure(hostv1.FailureCategory_FAILURE_CATEGORY_INVALID_INPUT, "HostMutate request exceeds 1 MiB"), nil
 	}
-	parent := ctx
-	if dispatched.Effect == hostv1.OperationEffect_OPERATION_EFFECT_ADMISSION {
-		parent = context.WithoutCancel(ctx)
-	}
-	callCtx, cancel := context.WithTimeout(parent, dispatched.Deadline)
-	defer cancel()
 	result, err := h.config.HostRunner.Run(callCtx, hostcommand.Command{
 		Executable: filepath.Join(checkout, ".venv", "bin", "vibesys"),
 		Args:       []string{"host", dispatched.CLI}, Input: input, StateRoot: h.config.Root,

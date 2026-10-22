@@ -9,6 +9,10 @@ export const PROTOCOL_VERSION = 1;
 export type ProtocolRequest = ProtocolDocument['request'];
 export type ProtocolResponse = ProtocolDocument['response'];
 export type RunEvent = ProtocolDocument['event'];
+/** Structured reply retained by an agent turn, using the producer's declared schema. */
+export type AgentReply = NonNullable<
+  Extract<NonNullable<RunEvent['data']>, {kind: 'agent_execution_finished'}>['reply']
+>;
 /** Structured status carried by streamed agent output and tool calls. */
 export type AgentStatusData = NonNullable<
   Extract<NonNullable<RunEvent['data']>, {channel: unknown}>['status']

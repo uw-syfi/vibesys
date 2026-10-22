@@ -8,9 +8,11 @@ package apiv1
 
 import (
 	_ "buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go/buf/validate"
-	v1 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1"
+	v1 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/host/v1"
+	v11 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
+	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
@@ -78,7 +80,9 @@ func (RelaunchRefusal) EnumDescriptor() ([]byte, []int) {
 // The caller takes checkout from the host's saved configuration. Carrying it on
 // each call lets a stateless gateway immediately follow a checkout change.
 type HostCallRequest struct {
-	state    protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Set by the gateway from its execution context, including helper startup time.
+	Deadline *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=deadline,proto3" json:"deadline,omitempty"`
 	Checkout string                 `protobuf:"bytes,1,opt,name=checkout,proto3" json:"checkout,omitempty"`
 	// Types that are valid to be assigned to Method:
 	//
@@ -118,6 +122,13 @@ func (x *HostCallRequest) ProtoReflect() protoreflect.Message {
 // Deprecated: Use HostCallRequest.ProtoReflect.Descriptor instead.
 func (*HostCallRequest) Descriptor() ([]byte, []int) {
 	return file_vibesys_api_v1_host_call_proto_rawDescGZIP(), []int{0}
+}
+
+func (x *HostCallRequest) GetDeadline() *timestamppb.Timestamp {
+	if x != nil {
+		return x.Deadline
+	}
+	return nil
 }
 
 func (x *HostCallRequest) GetCheckout() string {
@@ -572,9 +583,10 @@ func (*PostIntentRequest_PauseNow) isPostIntentRequest_Intent() {}
 // Posting acknowledges durable admission only. Applied/refused comes from the
 // run's IntentState record, never from subprocess success.
 type PostIntentResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	RequestId     string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
-	OrderedReader bool                   `protobuf:"varint,2,opt,name=ordered_reader,json=orderedReader,proto3" json:"ordered_reader,omitempty"`
+	state         protoimpl.MessageState   `protogen:"open.v1"`
+	RequestId     string                   `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	OrderedReader bool                     `protobuf:"varint,2,opt,name=ordered_reader,json=orderedReader,proto3" json:"ordered_reader,omitempty"`
+	Termination   *v1.TerminateRunResponse `protobuf:"bytes,3,opt,name=termination,proto3" json:"termination,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -621,6 +633,13 @@ func (x *PostIntentResponse) GetOrderedReader() bool {
 		return x.OrderedReader
 	}
 	return false
+}
+
+func (x *PostIntentResponse) GetTermination() *v1.TerminateRunResponse {
+	if x != nil {
+		return x.Termination
+	}
+	return nil
 }
 
 type PauseIntent struct {
@@ -698,8 +717,8 @@ func (*PauseNowIntent) Descriptor() ([]byte, []int) {
 type SteerIntent struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Text          string                 `protobuf:"bytes,1,opt,name=text,proto3" json:"text,omitempty"`
-	Target        *v1.SteerTarget        `protobuf:"bytes,2,opt,name=target,proto3" json:"target,omitempty"`
-	Mode          v1.SteerMode           `protobuf:"varint,3,opt,name=mode,proto3,enum=vibesys.store.v1.SteerMode" json:"mode,omitempty"`
+	Target        *v11.SteerTarget       `protobuf:"bytes,2,opt,name=target,proto3" json:"target,omitempty"`
+	Mode          v11.SteerMode          `protobuf:"varint,3,opt,name=mode,proto3,enum=vibesys.store.v1.SteerMode" json:"mode,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -741,18 +760,18 @@ func (x *SteerIntent) GetText() string {
 	return ""
 }
 
-func (x *SteerIntent) GetTarget() *v1.SteerTarget {
+func (x *SteerIntent) GetTarget() *v11.SteerTarget {
 	if x != nil {
 		return x.Target
 	}
 	return nil
 }
 
-func (x *SteerIntent) GetMode() v1.SteerMode {
+func (x *SteerIntent) GetMode() v11.SteerMode {
 	if x != nil {
 		return x.Mode
 	}
-	return v1.SteerMode(0)
+	return v11.SteerMode(0)
 }
 
 type WithdrawIntent struct {
@@ -1208,8 +1227,9 @@ var File_vibesys_api_v1_host_call_proto protoreflect.FileDescriptor
 
 const file_vibesys_api_v1_host_call_proto_rawDesc = "" +
 	"\n" +
-	"\x1evibesys/api/v1/host_call.proto\x12\x0evibesys.api.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1dvibesys/store/v1/intent.proto\"\x98\x02\n" +
-	"\x0fHostCallRequest\x12&\n" +
+	"\x1evibesys/api/v1/host_call.proto\x12\x0evibesys.api.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1dvibesys/store/v1/intent.proto\x1a vibesys/host/v1/operations.proto\"\xd0\x02\n" +
+	"\x0fHostCallRequest\x126\n" +
+	"\bdeadline\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\bdeadline\x12&\n" +
 	"\bcheckout\x18\x01 \x01(\tB\n" +
 	"\xbaH\ar\x05\x10\x01(\x80 R\bcheckout\x12D\n" +
 	"\vpost_intent\x18\x02 \x01(\v2!.vibesys.api.v1.PostIntentRequestH\x00R\n" +
@@ -1247,11 +1267,12 @@ const file_vibesys_api_v1_host_call_proto_rawDesc = "" +
 	"\x0fset_parallelism\x18\f \x01(\v2$.vibesys.api.v1.SetParallelismIntentH\x00R\x0esetParallelism\x12=\n" +
 	"\tpause_now\x18\r \x01(\v2\x1e.vibesys.api.v1.PauseNowIntentH\x00R\bpauseNow:\x8b\x01\xbaH\x87\x01\x1a\x84\x01\n" +
 	"\fintent.epoch\x12.Pause and Pause now require the observed epoch\x1aD!(has(this.pause) || has(this.pause_now)) || this.expected_epoch > 0B\x0f\n" +
-	"\x06intent\x12\x05\xbaH\x02\b\x01J\x04\b\x05\x10\x06J\x04\b\x06\x10\aJ\x04\b\a\x10\bR\x04parkR\x06resumeR\x04stop\"\x85\x01\n" +
+	"\x06intent\x12\x05\xbaH\x02\b\x01J\x04\b\x05\x10\x06J\x04\b\x06\x10\aJ\x04\b\a\x10\bR\x04parkR\x06resumeR\x04stop\"\xce\x01\n" +
 	"\x12PostIntentResponse\x12H\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tB)\xbaH&r$2\"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$R\trequestId\x12%\n" +
-	"\x0eordered_reader\x18\x02 \x01(\bR\rorderedReader\"\r\n" +
+	"\x0eordered_reader\x18\x02 \x01(\bR\rorderedReader\x12G\n" +
+	"\vtermination\x18\x03 \x01(\v2%.vibesys.host.v1.TerminateRunResponseR\vtermination\"\r\n" +
 	"\vPauseIntent\"\x10\n" +
 	"\x0ePauseNowIntent\"\xaa\x01\n" +
 	"\vSteerIntent\x12\x1f\n" +
@@ -1312,49 +1333,53 @@ func file_vibesys_api_v1_host_call_proto_rawDescGZIP() []byte {
 var file_vibesys_api_v1_host_call_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
 var file_vibesys_api_v1_host_call_proto_msgTypes = make([]protoimpl.MessageInfo, 16)
 var file_vibesys_api_v1_host_call_proto_goTypes = []any{
-	(RelaunchRefusal)(0),         // 0: vibesys.api.v1.RelaunchRefusal
-	(*HostCallRequest)(nil),      // 1: vibesys.api.v1.HostCallRequest
-	(*HostCallResponse)(nil),     // 2: vibesys.api.v1.HostCallResponse
-	(*ConfigurationFailed)(nil),  // 3: vibesys.api.v1.ConfigurationFailed
-	(*PostIntentRequest)(nil),    // 4: vibesys.api.v1.PostIntentRequest
-	(*PostIntentResponse)(nil),   // 5: vibesys.api.v1.PostIntentResponse
-	(*PauseIntent)(nil),          // 6: vibesys.api.v1.PauseIntent
-	(*PauseNowIntent)(nil),       // 7: vibesys.api.v1.PauseNowIntent
-	(*SteerIntent)(nil),          // 8: vibesys.api.v1.SteerIntent
-	(*WithdrawIntent)(nil),       // 9: vibesys.api.v1.WithdrawIntent
-	(*CancelAttemptIntent)(nil),  // 10: vibesys.api.v1.CancelAttemptIntent
-	(*CancelItemIntent)(nil),     // 11: vibesys.api.v1.CancelItemIntent
-	(*SetParallelismIntent)(nil), // 12: vibesys.api.v1.SetParallelismIntent
-	(*RelaunchRequest)(nil),      // 13: vibesys.api.v1.RelaunchRequest
-	(*RelaunchResponse)(nil),     // 14: vibesys.api.v1.RelaunchResponse
-	(*ChatMessageRequest)(nil),   // 15: vibesys.api.v1.ChatMessageRequest
-	(*ChatMessageResponse)(nil),  // 16: vibesys.api.v1.ChatMessageResponse
-	(*v1.SteerTarget)(nil),       // 17: vibesys.store.v1.SteerTarget
-	(v1.SteerMode)(0),            // 18: vibesys.store.v1.SteerMode
+	(RelaunchRefusal)(0),            // 0: vibesys.api.v1.RelaunchRefusal
+	(*HostCallRequest)(nil),         // 1: vibesys.api.v1.HostCallRequest
+	(*HostCallResponse)(nil),        // 2: vibesys.api.v1.HostCallResponse
+	(*ConfigurationFailed)(nil),     // 3: vibesys.api.v1.ConfigurationFailed
+	(*PostIntentRequest)(nil),       // 4: vibesys.api.v1.PostIntentRequest
+	(*PostIntentResponse)(nil),      // 5: vibesys.api.v1.PostIntentResponse
+	(*PauseIntent)(nil),             // 6: vibesys.api.v1.PauseIntent
+	(*PauseNowIntent)(nil),          // 7: vibesys.api.v1.PauseNowIntent
+	(*SteerIntent)(nil),             // 8: vibesys.api.v1.SteerIntent
+	(*WithdrawIntent)(nil),          // 9: vibesys.api.v1.WithdrawIntent
+	(*CancelAttemptIntent)(nil),     // 10: vibesys.api.v1.CancelAttemptIntent
+	(*CancelItemIntent)(nil),        // 11: vibesys.api.v1.CancelItemIntent
+	(*SetParallelismIntent)(nil),    // 12: vibesys.api.v1.SetParallelismIntent
+	(*RelaunchRequest)(nil),         // 13: vibesys.api.v1.RelaunchRequest
+	(*RelaunchResponse)(nil),        // 14: vibesys.api.v1.RelaunchResponse
+	(*ChatMessageRequest)(nil),      // 15: vibesys.api.v1.ChatMessageRequest
+	(*ChatMessageResponse)(nil),     // 16: vibesys.api.v1.ChatMessageResponse
+	(*timestamppb.Timestamp)(nil),   // 17: google.protobuf.Timestamp
+	(*v1.TerminateRunResponse)(nil), // 18: vibesys.host.v1.TerminateRunResponse
+	(*v11.SteerTarget)(nil),         // 19: vibesys.store.v1.SteerTarget
+	(v11.SteerMode)(0),              // 20: vibesys.store.v1.SteerMode
 }
 var file_vibesys_api_v1_host_call_proto_depIdxs = []int32{
-	4,  // 0: vibesys.api.v1.HostCallRequest.post_intent:type_name -> vibesys.api.v1.PostIntentRequest
-	13, // 1: vibesys.api.v1.HostCallRequest.relaunch:type_name -> vibesys.api.v1.RelaunchRequest
-	15, // 2: vibesys.api.v1.HostCallRequest.chat_message:type_name -> vibesys.api.v1.ChatMessageRequest
-	5,  // 3: vibesys.api.v1.HostCallResponse.post_intent:type_name -> vibesys.api.v1.PostIntentResponse
-	3,  // 4: vibesys.api.v1.HostCallResponse.configuration_failed:type_name -> vibesys.api.v1.ConfigurationFailed
-	14, // 5: vibesys.api.v1.HostCallResponse.relaunch:type_name -> vibesys.api.v1.RelaunchResponse
-	16, // 6: vibesys.api.v1.HostCallResponse.chat_message:type_name -> vibesys.api.v1.ChatMessageResponse
-	6,  // 7: vibesys.api.v1.PostIntentRequest.pause:type_name -> vibesys.api.v1.PauseIntent
-	8,  // 8: vibesys.api.v1.PostIntentRequest.steer:type_name -> vibesys.api.v1.SteerIntent
-	9,  // 9: vibesys.api.v1.PostIntentRequest.withdraw:type_name -> vibesys.api.v1.WithdrawIntent
-	10, // 10: vibesys.api.v1.PostIntentRequest.cancel_attempt:type_name -> vibesys.api.v1.CancelAttemptIntent
-	11, // 11: vibesys.api.v1.PostIntentRequest.cancel_item:type_name -> vibesys.api.v1.CancelItemIntent
-	12, // 12: vibesys.api.v1.PostIntentRequest.set_parallelism:type_name -> vibesys.api.v1.SetParallelismIntent
-	7,  // 13: vibesys.api.v1.PostIntentRequest.pause_now:type_name -> vibesys.api.v1.PauseNowIntent
-	17, // 14: vibesys.api.v1.SteerIntent.target:type_name -> vibesys.store.v1.SteerTarget
-	18, // 15: vibesys.api.v1.SteerIntent.mode:type_name -> vibesys.store.v1.SteerMode
-	0,  // 16: vibesys.api.v1.RelaunchResponse.refusal:type_name -> vibesys.api.v1.RelaunchRefusal
-	17, // [17:17] is the sub-list for method output_type
-	17, // [17:17] is the sub-list for method input_type
-	17, // [17:17] is the sub-list for extension type_name
-	17, // [17:17] is the sub-list for extension extendee
-	0,  // [0:17] is the sub-list for field type_name
+	17, // 0: vibesys.api.v1.HostCallRequest.deadline:type_name -> google.protobuf.Timestamp
+	4,  // 1: vibesys.api.v1.HostCallRequest.post_intent:type_name -> vibesys.api.v1.PostIntentRequest
+	13, // 2: vibesys.api.v1.HostCallRequest.relaunch:type_name -> vibesys.api.v1.RelaunchRequest
+	15, // 3: vibesys.api.v1.HostCallRequest.chat_message:type_name -> vibesys.api.v1.ChatMessageRequest
+	5,  // 4: vibesys.api.v1.HostCallResponse.post_intent:type_name -> vibesys.api.v1.PostIntentResponse
+	3,  // 5: vibesys.api.v1.HostCallResponse.configuration_failed:type_name -> vibesys.api.v1.ConfigurationFailed
+	14, // 6: vibesys.api.v1.HostCallResponse.relaunch:type_name -> vibesys.api.v1.RelaunchResponse
+	16, // 7: vibesys.api.v1.HostCallResponse.chat_message:type_name -> vibesys.api.v1.ChatMessageResponse
+	6,  // 8: vibesys.api.v1.PostIntentRequest.pause:type_name -> vibesys.api.v1.PauseIntent
+	8,  // 9: vibesys.api.v1.PostIntentRequest.steer:type_name -> vibesys.api.v1.SteerIntent
+	9,  // 10: vibesys.api.v1.PostIntentRequest.withdraw:type_name -> vibesys.api.v1.WithdrawIntent
+	10, // 11: vibesys.api.v1.PostIntentRequest.cancel_attempt:type_name -> vibesys.api.v1.CancelAttemptIntent
+	11, // 12: vibesys.api.v1.PostIntentRequest.cancel_item:type_name -> vibesys.api.v1.CancelItemIntent
+	12, // 13: vibesys.api.v1.PostIntentRequest.set_parallelism:type_name -> vibesys.api.v1.SetParallelismIntent
+	7,  // 14: vibesys.api.v1.PostIntentRequest.pause_now:type_name -> vibesys.api.v1.PauseNowIntent
+	18, // 15: vibesys.api.v1.PostIntentResponse.termination:type_name -> vibesys.host.v1.TerminateRunResponse
+	19, // 16: vibesys.api.v1.SteerIntent.target:type_name -> vibesys.store.v1.SteerTarget
+	20, // 17: vibesys.api.v1.SteerIntent.mode:type_name -> vibesys.store.v1.SteerMode
+	0,  // 18: vibesys.api.v1.RelaunchResponse.refusal:type_name -> vibesys.api.v1.RelaunchRefusal
+	19, // [19:19] is the sub-list for method output_type
+	19, // [19:19] is the sub-list for method input_type
+	19, // [19:19] is the sub-list for extension type_name
+	19, // [19:19] is the sub-list for extension extendee
+	0,  // [0:19] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_api_v1_host_call_proto_init() }

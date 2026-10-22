@@ -38,6 +38,7 @@ def _image() -> descriptor_pb2.FileDescriptorSet:
 def _slots() -> tuple[str, ...]:
     return (
         "list_tasks",
+        "list_saved_runs",
         "list_harnesses",
         "list_examples",
         "get_task_goal",
@@ -45,6 +46,7 @@ def _slots() -> tuple[str, ...]:
         "list_compute",
         "inspect_destination",
         "preflight_run",
+        "terminate_run",
         "put_cluster",
         "remove_cluster",
         "test_cluster",
@@ -316,3 +318,20 @@ def test_minimum_version_rejects_missing_or_invalid_policy(version: str) -> None
     root = Path(__file__).resolve().parents[3]
     with pytest.raises(GenerationError, match="minimum_checkout_version"):
         compile_outputs(_with_minimum_version(version), _slots(), _server_sources(root), _watches())
+
+
+def test_native_reads_keep_typed_routing_without_a_legacy_helper_adapter() -> None:
+    root = Path(__file__).resolve().parents[3]
+    outputs = compile_outputs(
+        _image().SerializeToString(), _slots(), _server_sources(root), _watches()
+    )
+    operations = compile_registry(_image().SerializeToString(), _slots(), _watches())
+    native = next(op for op in operations if op.name == "ListSavedRuns")
+    assert native.policy.adapter_method == ""
+    assert "list_saved_runs" in outputs["proto/vibesys/api/v1/host_read_generated.proto"]
+    assert "ListSavedRuns" in outputs["clients/libs/proto/src/generated/host-operations.ts"]
+    assert "ListSavedRuns" not in outputs["src/server/host_operation_types_generated.py"]
+    assert (
+        "'': ListSavedRuns"
+        not in outputs["libs/vs-proto/src/vs_proto/_generated/host_operations.py"]
+    )

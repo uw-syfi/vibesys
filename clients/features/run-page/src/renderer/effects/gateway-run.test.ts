@@ -2,8 +2,10 @@ import {expect, test} from 'bun:test';
 import {create, fromBinary} from '@bufbuild/protobuf';
 import {checkMachine} from '@vibesys/machine/testing';
 import {
+  NoticeCode,
   RecordSchema,
   RunLiveness,
+  Severity,
   TailRequestSchema,
   WatchRunsResponseSchema,
 } from '@vibesys/proto';
@@ -100,7 +102,11 @@ test('Skeleton then Tail, local seek, verified cached content, logs and cancella
     snapshot =>
       snapshot.context.load?.complete === true && Object.keys(snapshot.context.text).length === 2,
   );
-  const tail = transport.calls.find(call => call.method === `${SERVICE}Tail`);
+  const tail = transport.calls.find(
+    call =>
+      call.method === `${SERVICE}Tail` &&
+      fromBinary(TailRequestSchema, call.request).fromSeq === 4n,
+  );
   if (!tail) throw new Error('Tail required');
   expect(fromBinary(TailRequestSchema, tail.request).fromSeq).toBe(4n);
   expect(transport.calls.filter(call => call.method === `${SERVICE}Skeleton`)).toHaveLength(1);
@@ -115,7 +121,7 @@ test('Skeleton then Tail, local seek, verified cached content, logs and cancella
   expect(transport.calls).toHaveLength(calls);
   actor.send({type: 'ui', action: {type: 'select-stream', streamId: 'build-log'}});
   await reached(actor, snapshot => snapshot.context.ui.views['build-log']?.lines.length === 1);
-  expect(transport.activeStreams).toBe(3);
+  expect(transport.activeStreams).toBe(4);
   actor.send({type: 'toggle', enabled: false});
   await reached(actor, snapshot => snapshot.matches('off'));
   await Promise.resolve();
@@ -166,6 +172,68 @@ test('off is inert, live records append while scrubbed and switching streams can
   actor.send({type: 'ui', action: {type: 'select-stream', streamId: 'missing'}});
   await reached(actor, snapshot => snapshot.context.error === 'Log unavailable');
   actor.stop();
+});
+
+test('native record history owns its cursor and retries without losing startup or diagnostics', async () => {
+  const fixture = storeRunFixture('live');
+  const transport = new FakeRunTransport(fixture);
+  const clock = new FakeClock();
+  const actor = startGatewayRun(
+    {
+      reader: gatewayReader(transport, new FakeSkeletonCache(), clock.schedule),
+      watchSetting: () => () => {},
+      setting: async () => true,
+    },
+    clock.schedule,
+    {seed: SEED},
+  );
+  try {
+    await reached(
+      actor,
+      snapshot => snapshot.context.ui.recordLog?.length === fixture.records.length,
+    );
+    const seq = (fixture.records.at(-1)?.seq ?? 0n) + 1n;
+    transport.publish([
+      create(RecordSchema, {
+        seq,
+        epoch: 1,
+        body: {
+          case: 'notice',
+          value: {
+            severity: Severity.ERROR,
+            code: NoticeCode.INPUT_MEASUREMENT_FAILED,
+            message: 'Measurement unavailable',
+          },
+        },
+      }),
+    ]);
+    await reached(actor, snapshot => snapshot.context.ui.recordLog?.at(-1)?.seq === String(seq));
+    const {load, ui} = actor.getSnapshot().context;
+    if (!load) throw new Error('load required');
+    const model = projectSkeleton(load.skeleton, load.skeleton.throughSeq ?? 0n);
+    expect(skeletonScreenState(SEED, load.skeleton, model, ui).recordDiagnostic?.message).toBe(
+      'Measurement unavailable',
+    );
+    transport.fail(`${SERVICE}Tail`, new Error('Disconnected'));
+    await reached(
+      actor,
+      snapshot =>
+        snapshot.context.ui.recordLogError !== null &&
+        snapshot.context.ui.recordLogError !== undefined,
+    );
+    transport.recover(`${SERVICE}Tail`);
+    clock.advanceBy(1000);
+    await transport.called(`${SERVICE}Tail`);
+    await Promise.resolve();
+    expect(
+      transport.calls
+        .filter(call => call.method === `${SERVICE}Tail`)
+        .some(call => fromBinary(TailRequestSchema, call.request).fromSeq === seq + 1n),
+    ).toBe(true);
+    expect(actor.getSnapshot().context.ui.recordLog).toHaveLength(fixture.records.length + 1);
+  } finally {
+    actor.stop();
+  }
 });
 
 test('failed unary and corrupt content surface errors without using the legacy path', async () => {
@@ -411,14 +479,14 @@ test.each([
     create(WatchRunsResponseSchema, {
       runId: 'other',
       liveness: RunLiveness.INTERRUPTED,
-      head: {process: {epoch: 1}},
+      head: {epoch: 1, process: {epoch: 1}},
     }),
   );
   transport.observe(
     create(WatchRunsResponseSchema, {
       runId: 'run-a',
       liveness: RunLiveness.ALIVE,
-      head: {process: {epoch: 1}},
+      head: {epoch: 1, process: {epoch: 1}},
     }),
   );
   await reached(actor, snapshot => snapshot.context.hint?.value === RunLiveness.ALIVE);
@@ -426,7 +494,7 @@ test.each([
     create(WatchRunsResponseSchema, {
       runId: 'run-a',
       liveness: RunLiveness.INTERRUPTED,
-      head: {process: {epoch: 1}},
+      head: {epoch: 1, process: {epoch: 1}},
     }),
   );
   await reached(actor, snapshot => snapshot.context.hint?.value === RunLiveness.INTERRUPTED);
@@ -531,7 +599,7 @@ test.each([
     create(WatchRunsResponseSchema, {
       runId: 'run-a',
       liveness: RunLiveness.INTERRUPTED,
-      head: {process: {epoch: 1}},
+      head: {epoch: 1, process: {epoch: 1}},
     }),
   );
   await reached(actor, snapshot => snapshot.context.hint?.value === RunLiveness.INTERRUPTED);
@@ -540,4 +608,68 @@ test.each([
   actor.stop();
   expect(clock.pending).toBe(0);
   expect(transport.calls.filter(call => call.method.endsWith('WatchRuns'))).toHaveLength(2);
+});
+
+test('reply attachments load through the same verified content owner as objectives', async () => {
+  const fixture = storeRunFixture('short', 1);
+  const skeleton = foldSkeleton(seedSkeleton(), fixture.records);
+  const span = Object.values(skeleton.spans)
+    .find(history => history.versions.at(-1)?.span?.label?.kind === 'agent_turn')
+    ?.versions.at(-1)?.span;
+  if (!span) throw new Error('fixture');
+  const reply = {kind: 'Result', json_schema: {type: 'object'}, value: {answer: 'x'.repeat(65537)}};
+  const text = JSON.stringify(reply);
+  const data = new TextEncoder().encode(text);
+  const hash = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', data)))
+    .map(value => value.toString(16).padStart(2, '0'))
+    .join('');
+  const seq = (skeleton.throughSeq ?? 0n) + 1n;
+  const transport = new FakeRunTransport({
+    ...fixture,
+    records: [
+      ...fixture.records,
+      create(RecordSchema, {
+        seq,
+        epoch: 1,
+        body: {
+          case: 'blob',
+          value: {
+            span: span.id,
+            role: 'reply',
+            blob: {sha256: hash, size: BigInt(data.length), mediaType: 'application/json'},
+          },
+        },
+      }),
+    ],
+    blobs: {...fixture.blobs, [hash]: data},
+  });
+  const clock = new FakeClock();
+  const actor = startGatewayRun(
+    {
+      reader: gatewayReader(transport, new FakeSkeletonCache(), clock.schedule),
+      watchSetting: () => () => {},
+      setting: async () => true,
+    },
+    clock.schedule,
+    {seed: SEED},
+  );
+  try {
+    await reached(actor, snapshot => snapshot.context.text[hash] !== undefined);
+    const {load, ui, replies, text: content} = actor.getSnapshot().context;
+    if (!load) throw new Error('loaded history required');
+    const model = projectSkeleton(load.skeleton, seq, '', {content: {text: content, replies}});
+    const state = skeletonScreenState(SEED, load.skeleton, model, ui, undefined, {
+      text: content,
+      replies,
+    });
+    expect(state.run.core?.transcript.find(row => row.spanId === span.id)?.reply).toEqual(reply);
+    expect(replies[span.id]).toEqual([{seq, hash}]);
+  } finally {
+    actor.stop();
+  }
+  expect(
+    transport.calls
+      .filter(call => !call.method.endsWith('Skeleton') && !call.method.endsWith('GetBlobs'))
+      .every(call => call.signal.aborted),
+  ).toBe(true);
 });

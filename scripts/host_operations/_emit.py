@@ -104,7 +104,11 @@ def python_registry(
         ]
     lines += [
         "ADAPTER_OPERATIONS: dict[str, Operation] = {"
-        + ", ".join(repr(op.policy.adapter_method) + ": " + op.name for op in operations)
+        + ", ".join(
+            repr(op.policy.adapter_method) + ": " + op.name
+            for op in operations
+            if op.policy.adapter_method
+        )
         + "}"
     ]
     lines += [
@@ -838,7 +842,8 @@ def helper_types(sources: tuple[str, ...], operations: tuple[Operation, ...]) ->
                     and isinstance(field.value, ast.Constant)
                 ):
                     methods[field.value.value] = node.name
-    read_names = [methods[op.policy.adapter_method] for op in operations]
+    adapters = tuple(op for op in operations if op.policy.adapter_method)
+    read_names = [methods[op.policy.adapter_method] for op in adapters]
     remaining = [name for name in names if name not in read_names]
     return "\n".join(
         [
@@ -846,7 +851,7 @@ def helper_types(sources: tuple[str, ...], operations: tuple[Operation, ...]) ->
             "from typing_extensions import TypeIs",
             "from server.host_api import (" + ", ".join(["HelperRequest", *names]) + ")",
             "REGISTRY_READ_METHODS = frozenset("
-            + repr(tuple(op.policy.adapter_method for op in operations))
+            + repr(tuple(op.policy.adapter_method for op in adapters))
             + ")",
             "RegistryReadRequest = " + " | ".join(read_names),
             "UnmigratedHelperRequest = " + " | ".join(remaining),

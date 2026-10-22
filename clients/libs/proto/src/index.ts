@@ -61,6 +61,7 @@ export * from './generated/vibesys/store/v1/environment_attrs_pb.js';
 export * from './generated/vibesys/store/v1/epoch_pb.js';
 export * from './generated/vibesys/store/v1/intent_pb.js';
 export * from './generated/vibesys/store/v1/lifecycle_pb.js';
+export * from './generated/vibesys/store/v1/notice_pb.js';
 export {
   type EpochStarted,
   EpochStartedSchema,
