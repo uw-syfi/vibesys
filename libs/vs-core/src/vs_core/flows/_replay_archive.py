@@ -186,6 +186,17 @@ class ReplayArchive:
             self.span(span_id) for span_id in self._unfinished if span_id not in self._children
         )
 
+    @property
+    def unstarted_turns(self) -> tuple[Span, ...]:
+        """Logical turn bounds with no physical start, so no dispatch ever became legal."""
+        return tuple(
+            span
+            for span in self.unresolved
+            if span.replay_physical is None
+            and span.replay is not None
+            and span.replay.turn_bound is not None
+        )
+
     def children(self, logical: str) -> tuple[Span, ...]:
         """Execution evidence for one semantic operation, in durable start order."""
         return tuple(self.span(identity) for identity in self._children.get(logical, ()))

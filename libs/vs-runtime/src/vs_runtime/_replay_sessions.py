@@ -71,6 +71,21 @@ class _AgentDelivery:
     bound: replay.ReplayTurnBound | None
 
 
+def _retained_yield(
+    request: AgentRequest, status: ObservationStatus, value: replay.ReplayTurnWait | None
+) -> replay.ReplayTurnWait | None:
+    if (
+        value is None
+        or not isinstance(request, DispatchTurn)
+        or status is not ObservationStatus.SUCCEEDED
+    ):
+        return None
+    if value.turn != request.turn.invocation_id.root:
+        problem = "retained yield belongs to another physical turn"
+        raise ReplayOperationError(problem)
+    return value
+
+
 @dataclass(frozen=True)
 class ReplayAgentReply:
     """One exact native output codec for a session resolver's declared reply schema."""
@@ -223,6 +238,13 @@ class SessionReplayExecutor:
     async def inspect(
         self, span: Span, fence: StoreFence
     ) -> ReplayResult | ReplayAbsent | ReplayPending | ReplayUnknown:
+        native = self._native(span)
+        if (
+            native.action is not None
+            and native.action.field == "turn"
+            and span.replay_physical is None
+        ):
+            return ReplayUnknown("agent turn is missing its recorded physical start and deadline")
         return await self._executor.inspect(span, fence)
 
     def _native(self, span: Span) -> pb.ReplayAgentRequest:
@@ -267,6 +289,9 @@ class SessionReplayExecutor:
             raise ReplayOperationError(problem)
         if native.action.field != "turn":
             return
+        if span.replay_physical is None:
+            problem = "agent turn is missing its recorded physical start and deadline"
+            raise ReplayOperationError(problem)
         if native.action.value.session is None:
             problem = "agent replay is missing required message fields"
             raise ReplayOperationError(problem)
@@ -416,7 +441,7 @@ class SessionReplayExecutor:
             released=seen.released,
             detail=seen.diagnostic,
             turn_bound=bound,
-            suspension=suspension,
+            suspension=_retained_yield(request, seen.status, suspension),
         )
         if isinstance(request, EnsureSession):
             native.session = cast("core_common.SessionId", to_proto(request.spec.session_id))

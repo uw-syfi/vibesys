@@ -17,7 +17,7 @@ from vs_core.api import TurnObserved
 from vs_core.api.replay import ReplayCall, ReplayFlow, SemanticKey, classify_context
 from vs_project.api import FakeStateStore, Project
 from vs_prompts.api import TemplateRenderer
-from vs_proto.api import EpochStarted, core_common, core_vocabulary, replay
+from vs_proto.api import EpochStarted, core_common, core_vocabulary, replay, replay_evaluation
 from vs_proto.api import replay_agent as pb
 from vs_runtime.api.core import ExecutionResult, ReceiptStore
 from vs_runtime.api.executor_contracts import FaultingNamespace, ProcessKilledError
@@ -30,10 +30,13 @@ from vs_runtime.api.replay import (
     ReplayRecoveryRequiredError,
     ReplayRuntime,
     ReplaySessionServices,
+    ReplayTurnTools,
     ReplayUnknown,
     SessionReplayExecutor,
     drive_replay,
+    replay_measurement_plan,
 )
+from vs_runtime.api.slurm_evaluation_stack import plan
 from vs_sim.api.testing import SimBlockingRunner, swept
 
 from .generated.vibesys.runtime.testing.v1.agent_replay_pb import AgentReplayResult
@@ -156,7 +159,13 @@ class AgentWorld:
     executor: Callable[[ReceiptStore | None], SessionReplayExecutor]
 
 
-def world(tmp_path: Path, sim: Sim, implementation: str) -> AgentWorld:
+def world(
+    tmp_path: Path,
+    sim: Sim,
+    implementation: str,
+    *,
+    yielded: Callable[[str], replay.ReplayTurnWait | None] | None = None,
+) -> AgentWorld:
     project = Project.open(tmp_path)
     namespace = project.state.state_store_namespace("run")
     workspace = tmp_path / "workspace"
@@ -182,7 +191,10 @@ def world(tmp_path: Path, sim: Sim, implementation: str) -> AgentWorld:
         factory = ClientAgentSessions if implementation == "client" else FakeAgentSessions
         return SessionReplayExecutor(
             ReplaySessionServices(
-                factory(client, journal, threads=threads), resolver, SimBlockingRunner(threads)
+                factory(client, journal, threads=threads),
+                resolver,
+                SimBlockingRunner(threads),
+                yielded=yielded,
             ),
             ReceiptStore(namespace, threads) if receipts is None else receipts,
             ReplayOperationHost("run", store, sim.clock),
@@ -474,5 +486,131 @@ def test_recovery_reports_unreadable_sealed_agent_output(
         assert "replay agent output" in outcome.reason
         assert len(given.client.calls_for("worker")) == 1
         assert given.store.release(fence, sim.clock.now())
+
+    sim.run(scenario(), threads=given.threads)
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize("implementation", ["fake", "client"])
+@pytest.mark.parametrize("invalid", [False, True])
+def test_session_recovery_preserves_yields_only_for_successful_turns(
+    tmp_path: Path, sim: Sim, implementation: str, *, invalid: bool
+) -> None:
+    runtime: ReplayRuntime | None = None
+
+    def yielded(identity: str) -> replay.ReplayTurnWait | None:
+        assert runtime is not None
+        return runtime.archive.dependencies.yielded(identity)
+
+    given = world(tmp_path, sim, implementation, yielded=yielded)
+    if invalid:
+        given.client.enqueue_parse_failure("worker")
+
+    async def measurement(ctx: ReplayFlow) -> object:
+        request = replay_evaluation.ReplayEvaluationRequest(
+            scope=SCOPE,
+            within_seconds=100,
+            action=Oneof(
+                "submit",
+                replay_evaluation.ReplaySubmitMeasurement(plan=replay_measurement_plan(plan())),
+            ),
+        )
+        return await ctx.call(
+            ReplayCall(
+                SemanticKey("evaluation.submit"),
+                classify_context(request, contract="evaluation.v1"),
+                "evaluation.v1",
+                replay.ReplayPolicy(
+                    reply_type=replay_evaluation.ReplayEvaluationResult.desc().type_name
+                ),
+                replay_evaluation.ReplayEvaluationResult,
+            )
+        )
+
+    async def root(ctx: ReplayFlow) -> object:
+        async with ctx.group() as group:
+            group.start(program)
+            group.start(measurement)
+        return 7
+
+    async def scenario() -> None:
+        nonlocal runtime
+        runtime = ReplayRuntime(given.store, root, replay.ReplayAllowance())
+        runtime.start(
+            ReplayLaunch(EpochStarted(run_id="run"), "first", "host-a", 100),
+            now=sim.clock.now(),
+            at=Timestamp(),
+        )
+        try:
+            executor = given.executor(None)
+            ensure, producer = runtime.prepare(now=sim.clock.now(), at=Timestamp())
+            ensured = await runtime.dispatch(ensure.id, executor, now=sim.clock.now())
+            runtime.observe(ensure.id, ensured, now=sim.clock.now(), at=Timestamp())
+            runtime.accept(ensure.id, now=sim.clock.now(), at=Timestamp())
+            (turn,) = runtime.prepare(now=sim.clock.now(), at=Timestamp())
+            tools = ReplayTurnTools(runtime, turn.id, sim.clock)
+            tools.submit("measurement", producer.id)
+            wait = tools.wait("measurement")
+            observed = await runtime.dispatch(turn.id, executor, now=sim.clock.now())
+            assert isinstance(observed.outcome, AgentReplayResult)
+            facts = observed.outcome.facts
+            assert facts is not None
+            assert turn.replay is not None
+            assert facts.turn_bound == turn.replay.turn_bound
+            assert facts.suspension == (None if invalid else wait)
+            runtime.close(now=sim.clock.now())
+            runtime = ReplayRuntime(given.store, root, replay.ReplayAllowance())
+            runtime.start(
+                ReplayLaunch(EpochStarted(run_id="run"), "resume", "host-b", 100),
+                now=sim.clock.now(),
+                at=Timestamp(),
+            )
+            recovered = await runtime.inspect(turn.id, given.executor(None), now=sim.clock.now())
+            assert recovered == observed
+            assert runtime.archive.dependencies.yielded(turn.id) == wait
+            assert len(given.client.calls_for("worker")) == 1
+        finally:
+            runtime.close(now=sim.clock.now())
+
+    sim.run(scenario(), threads=given.threads)
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize("implementation", ["fake", "client"])
+def test_an_unbound_historical_turn_cannot_gain_a_new_deadline(
+    tmp_path: Path, sim: Sim, implementation: str
+) -> None:
+    given = world(tmp_path, sim, implementation)
+
+    async def scenario() -> None:
+        executor = given.executor(None)
+        runtime = ReplayRuntime(given.store, program, replay.ReplayAllowance())
+        runtime.start(
+            ReplayLaunch(EpochStarted(run_id="run"), "first", "host-a", 100),
+            now=sim.clock.now(),
+            at=Timestamp(),
+        )
+        (ensure,) = runtime.prepare(now=sim.clock.now(), at=Timestamp())
+        ensured = await runtime.dispatch(ensure.id, executor, now=sim.clock.now())
+        runtime.observe(ensure.id, ensured, now=sim.clock.now(), at=Timestamp())
+        runtime.accept(ensure.id, now=sim.clock.now(), at=Timestamp())
+        (turn,) = runtime.prepare(now=sim.clock.now(), at=Timestamp())
+        assert turn.replay is not None
+        assert turn.replay_physical is not None
+        logical = runtime.archive.span(turn.replay_physical.logical)
+        assert logical.replay is not None
+        logical.replay.clear_field("turn_bound")
+        runtime.close(now=sim.clock.now())
+        fence = given.store.acquire("host-b", sim.clock.now(), 100)
+        assert fence is not None
+        try:
+            inspected = await executor.inspect(logical, fence)
+            assert isinstance(inspected, ReplayUnknown)
+            assert "recorded physical start and deadline" in inspected.reason
+            with pytest.raises(ReplayOperationError, match="recorded physical start and deadline"):
+                await executor.execute(logical, fence)
+            assert not given.client.calls_for("worker")
+        finally:
+            assert given.store.release(fence, sim.clock.now())
 
     sim.run(scenario(), threads=given.threads)

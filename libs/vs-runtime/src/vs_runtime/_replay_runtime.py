@@ -818,16 +818,11 @@ class ReplayRuntime:
     def recovery(self) -> tuple[Span, ...]:
         """Inherited starts requiring their owner's inspection before any live dispatch."""
         _ = self._active_scheduler
+        unstarted = {span.id for span in self._archive.unstarted_turns}
         return tuple(
             span
             for span in self._archive.unresolved
-            if span.id not in self._known_starts
-            and not (
-                span.replay_physical is None
-                and span.replay is not None
-                and span.replay.turn_bound is not None
-                and not self._archive.children(span.id)
-            )
+            if span.id not in self._known_starts and span.id not in unstarted
         )
 
     async def inspect(
@@ -1036,14 +1031,20 @@ class ReplayRuntime:
         if not state.resumable:
             problem = "replay epochs must remain resumable"
             raise ReplayError(problem)
+        unstarted = self._archive.unstarted_turns
+        without_execution = {span.id for span in unstarted}
         if (
             not scheduler.completed
             or scheduler.frontier().unused
-            or self._archive.unresolved
+            or any(span.id not in without_execution for span in self._archive.unresolved)
             or self._archive.epoch_closed
         ):
             problem = "an epoch can finish only after replay, disclosure and owned work settle"
             raise ReplayError(problem)
+        for span in unstarted:
+            span.status, span.ended_at = SpanStatus.STOPPED, self._archive.clock
+            span.stop = Stop(requested_at=self._archive.clock, landed=True)
+            self._append(Oneof("span", SpanRecord(change=Change.ENDED, span=span)), now=now, at=at)
         self._record_schemas(scheduler.schema_types, now=now, at=at)
         self._record_drift(now=now, at=at)
         if ending.detail is not None:

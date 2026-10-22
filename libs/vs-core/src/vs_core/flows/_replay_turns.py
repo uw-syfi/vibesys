@@ -16,7 +16,16 @@ from ._replay_sources import ReplayError
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
 
+    from protobuf import Message
+
     from vs_proto.api import Record, Span
+
+
+def _check_metadata(value: Message) -> None:
+    validate(value)
+    if value.to_binary() != value.to_binary(write_unknown_fields=False):
+        problem = f"unknown replay dependency metadata fields in {value.desc().type_name}"
+        raise ReplayError(problem)
 
 
 def agent_turn(span: Span) -> replay_agent.ReplayAgentRequest:
@@ -26,7 +35,7 @@ def agent_turn(span: Span) -> replay_agent.ReplayAgentRequest:
         problem = "tool dependency requires an authenticated agent turn"
         raise ReplayError(problem)
     native = replay_agent.ReplayAgentRequest.from_binary(request.value)
-    validate(native)
+    _check_metadata(native)
     if native.action is None or native.action.field != "turn":
         problem = "tool dependency requires an authenticated agent turn"
         raise ReplayError(problem)
@@ -93,9 +102,6 @@ class ReplayToolReady:
         return Any.from_binary(self.outcome_bytes)
 
 
-type ToolFact = pb.ReplayToolSubmission | pb.ReplayToolAcknowledgement | pb.ReplayTurnWait
-
-
 @dataclass(frozen=True)
 class ReplayTurnDependencies:
     """Submission and yield obligations, never a saved continuation queue.
@@ -124,14 +130,12 @@ class ReplayTurnDependencies:
 
     def record(self, detail: Any, lookup: Callable[[str], Span]) -> ReplayTurnDependencies:
         kinds = (pb.ReplayToolSubmission, pb.ReplayToolAcknowledgement, pb.ReplayTurnWait)
-        kind = next((k for k in kinds if k.desc().type_name == detail.type_url), None)
+        name = detail.type_url.rsplit("/", 1)[-1]
+        kind = next((k for k in kinds if k.desc().type_name == name), None)
         if kind is None:
             return self
         fact = kind.from_binary(detail.value)
-        validate(fact)
-        if fact.to_binary() != fact.to_binary(write_unknown_fields=False):
-            problem = "tool dependency has unknown fields"
-            raise ReplayError(problem)
+        _check_metadata(fact)
         if isinstance(fact, pb.ReplayToolSubmission):
             return self._submit(fact, lookup)
         if isinstance(fact, pb.ReplayToolAcknowledgement):
@@ -202,7 +206,7 @@ class ReplayTurnDependencies:
             problem = "tool submission conflicts with its authenticated turn or producer"
             raise ReplayError(problem)
         evaluation = replay_evaluation.ReplayEvaluationRequest.from_binary(request.value)
-        validate(evaluation)
+        _check_metadata(evaluation)
         if (
             evaluation.scope != native.scope
             or evaluation.action is None

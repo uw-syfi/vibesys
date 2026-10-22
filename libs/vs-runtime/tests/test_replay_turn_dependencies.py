@@ -10,6 +10,7 @@ import pytest
 from hypothesis import example, given
 from hypothesis import strategies as st
 from protobuf import Oneof
+from protobuf.wkt.google.protobuf.any_pb import Any
 from protobuf.wkt.google.protobuf.timestamp_pb import Timestamp
 
 from vs_core.api.replay import (
@@ -27,28 +28,44 @@ from vs_core.api.replay import (
 )
 from vs_faults.api import Boundary, FaultGate, FaultPlan, FaultRule, HostCrashError, HostFault
 from vs_project.api import Committed, FakeStateStore, StoredEnvelope
-from vs_proto.api import Change, ReplayStore, SpanRecord, core_common, core_vocabulary, replay
+from vs_proto.api import (
+    Change,
+    Notice,
+    NoticeCode,
+    Record,
+    ReplayStore,
+    Severity,
+    SpanRecord,
+    core_common,
+    core_vocabulary,
+    replay,
+)
 from vs_proto.api import replay_agent as agent
 from vs_proto.api import replay_evaluation as evaluation
 from vs_runtime.api.replay import (
     REPLAY_STORE_SCHEMA_VERSION,
     FakeReplayExecutor,
     ReplayCommitError,
+    ReplayCompleted,
     ReplayResult,
     ReplayRuntime,
     ReplayTurnTools,
+    drive_replay,
     replay_measurement_plan,
 )
 from vs_runtime.api.slurm_evaluation_stack import plan
 from vs_sim.api.testing import ManualClock
 
-from .test_replay_run import launch
+from .test_replay_run import host, launch
 from .test_replay_sessions import SCOPE, SESSION
 
 if TYPE_CHECKING:
+    from protobuf import Message
+
     from vs_core.api.replay import ReplaySource
     from vs_project.api import CommitOutcome, StoreFence
     from vs_proto.api import Span
+    from vs_sim.api.testing import Sim
 
 
 def turn_call(ctx: ReplayFlow, name: str, *, origin: str = "", within: float = 30) -> ReplaySource:
@@ -400,3 +417,103 @@ def test_tool_crash_prefixes_never_lose_obligations_or_authorize_old_turns(
 ) -> None:
     writes = tool_crash_case(None, before=before)
     tool_crash_case(min(ordinal, writes), before=before)
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize("replace", [False, True])
+async def test_edited_flow_settles_a_turn_that_never_had_a_physical_child(
+    sim: Sim, *, replace: bool
+) -> None:
+    runtime, turn, _ = prepared()
+    records = ReplayStore.from_binary(runtime.archive.encode()).records
+    boundary = next(
+        i
+        for i, r in enumerate(records)
+        if r.body is not None and r.body.field == "span" and r.body.value.span == turn
+    )
+    runtime.close(now=0)
+    store = restore_prefix(ReplayStore(records=records[:boundary]).to_binary())
+
+    async def edited(ctx: ReplayFlow) -> object:
+        if replace:
+            await turn_call(ctx, "edited")
+        return "edited"
+
+    owner = FakeReplayExecutor(result)
+    resumed = host(store, edited, owner, sim)
+    assert await drive_replay(resumed, launch("edited")) == ReplayCompleted("edited")
+    assert not resumed.runtime.archive.unresolved
+    assert len(owner.invocations) == int(replace)
+    assert turn.replay_physical is not None
+    stopped = resumed.runtime.archive.span(turn.replay_physical.logical)
+    assert stopped.stop is not None
+    assert stopped.stop.landed
+    assert stopped.replay is not None
+    assert turn.replay is not None
+    assert stopped.replay.turn_bound == turn.replay.turn_bound
+
+
+def submission_record(
+    runtime: ReplayRuntime, turn: str, producer: str, *, prefix: str = "", unknown: bool = False
+) -> Record:
+    fact = replay.ReplayToolSubmission(
+        turn=turn, producer=producer, call_id="call", reply_id="reply"
+    )
+    archive = runtime.archive
+    return Record(
+        seq=archive.sequence + 1,
+        epoch=archive.epoch,
+        clock=archive.clock,
+        at=Timestamp(),
+        body=Oneof(
+            "notice",
+            Notice(
+                severity=Severity.WARNING,
+                code=NoticeCode.FRAMEWORK_WARNING,
+                message="tool evidence",
+                detail=Any(
+                    type_url=prefix + fact.desc().type_name,
+                    value=fact.to_binary() + (b"\xa0\x06\x01" if unknown else b""),
+                ),
+            ),
+        ),
+    )
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize("unknown", [False, True])
+def test_tool_metadata_type_urls_cannot_hide_dependency_validation(*, unknown: bool) -> None:
+    runtime, turn, producer = prepared()
+    try:
+        archive = runtime.archive
+        record = submission_record(
+            runtime, turn.id, producer.id, prefix="type.googleapis.com/", unknown=unknown
+        )
+        if unknown:
+            with pytest.raises(ReplayError, match="unknown"):
+                archive.append(record)
+        else:
+            archive.append(record)
+            assert len(archive.dependencies.owed) == 1
+    finally:
+        runtime.close(now=0)
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize("family", [agent.ReplayAgentRequest, evaluation.ReplayEvaluationRequest])
+def test_opaque_tool_requests_reject_unknown_routing_fields(family: type[Message]) -> None:
+    runtime, turn, producer = prepared()
+    try:
+        records = ReplayStore.from_binary(runtime.archive.encode()).records
+        for record in records:
+            if record.body is not None and record.body.field == "span":
+                span = record.body.value.span
+                if span is not None and span.replay is not None and span.replay.policy is not None:
+                    request = span.replay.policy.request
+                    if request is not None and request.type_url == family.desc().type_name:
+                        request.value += b"\xa0\x06\x01"
+        records.append(submission_record(runtime, turn.id, producer.id))
+        with pytest.raises(ReplayError, match="unknown"):
+            ReplayArchive.decode(ReplayStore(records=records).to_binary())
+    finally:
+        runtime.close(now=0)
