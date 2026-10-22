@@ -8,11 +8,13 @@ import pytest
 from protobuf import Oneof
 from protobuf.wkt.google.protobuf.timestamp_pb import Timestamp
 
+from vs_core.api import RequestId
 from vs_core.api.replay import ReplayCall, ReplayFlow, SemanticKey, classify_context
+from vs_evaluation.api import PollPhase
 from vs_project.api import FakeStateStore, Project
 from vs_proto.api import EpochStarted, core_common, core_vocabulary, replay
 from vs_proto.api import replay_evaluation as pb
-from vs_runtime.api.core import ReceiptStore
+from vs_runtime.api.core import ReceiptStore, handle_for
 from vs_runtime.api.executor_contracts import FaultingNamespace, ProcessKilledError
 from vs_runtime.api.replay import (
     EvaluationReplayExecutor,
@@ -205,6 +207,12 @@ async def test_evaluation_recovery_sweeps_owner_receipts(
                     unresolved = error.spans
                 if unresolved:
                     assert not world.workspaces.candidates
+                    for span in unresolved:
+                        assert span.name == "evaluation.submit"
+                        knowledge = await world.executor.recover(
+                            handle_for(RequestId(root=span.id))
+                        )
+                        assert knowledge.phase is PollPhase.UNKNOWN
                     return faulting.writes
             assert isinstance(result, ReplayCompleted)
             assert result.value
