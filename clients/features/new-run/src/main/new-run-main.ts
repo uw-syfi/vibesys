@@ -6,6 +6,7 @@ import {
   ConnectionError,
   type ConnectionLease,
   HelperRequestError,
+  isHostUnsupported,
   type RegistryProjects,
   type RunWatch,
 } from '@vibesys/connection';
@@ -213,7 +214,7 @@ export class NewRunMain {
         },
       };
     } catch (error) {
-      if (error instanceof HelperRequestError && error.code === 'feature_not_negotiated') {
+      if (isHostUnsupported(error)) {
         return {kind: 'unsupported'};
       }
       throw plain(error, `Could not check the run on ${hostLabel(host)}`);
@@ -235,7 +236,7 @@ export class NewRunMain {
       })) as {listing: ExampleList};
       return {kind: 'offered', value: reply.listing};
     } catch (error) {
-      if (error instanceof HelperRequestError && error.code === 'feature_not_negotiated') {
+      if (isHostUnsupported(error)) {
         return {kind: 'unsupported'};
       }
       throw plain(error, `Could not list the examples on ${hostLabel(host)}`);
@@ -251,7 +252,7 @@ export class NewRunMain {
     try {
       return {kind: 'offered', value: pick(await this.#request(host, request))};
     } catch (error) {
-      if (error instanceof HelperRequestError && error.code === 'feature_not_negotiated') {
+      if (isHostUnsupported(error)) {
         return {kind: 'unsupported'};
       }
       throw plain(error, `${doing} on ${hostLabel(host)}`);

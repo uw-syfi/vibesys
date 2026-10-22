@@ -11,6 +11,7 @@ import {
   type ConnectionLease,
   HelperRequestError,
   type InspectedCandidate,
+  isHostUnsupported,
   type RegistryClusters,
   type RegistrySetup,
   type RunWatch,
@@ -109,10 +110,6 @@ function inspectionOf(inspected: InspectedCandidate): CheckoutInspection {
   }
 }
 
-function notNegotiated(error: unknown): boolean {
-  return error instanceof HelperRequestError && error.code === 'feature_not_negotiated';
-}
-
 /** A failure the user reads: what was being done on which machine, then the helper's own words. */
 function explained(error: unknown, doing: string, id: HostId): Error {
   const detail = error instanceof Error ? error.message : String(error);
@@ -158,6 +155,7 @@ export class MachinesMain {
         const live = await this.#runs().live(id);
         return {kind: 'ready', facts: {...facts, runs: {...facts.runs, live}}};
       } catch (error) {
+        if (isHostUnsupported(error)) return {kind: 'needs-update', facts: null};
         return unreachable(error);
       }
     }
@@ -180,7 +178,7 @@ export class MachinesMain {
       const reply = await held.connection.request({type: 'machine.describe'});
       return {kind, facts: reply.machine};
     } catch (error) {
-      if (notNegotiated(error)) return {kind, facts: null};
+      if (isHostUnsupported(error)) return {kind, facts: null};
       return unreachable(error);
     }
   }
@@ -191,24 +189,13 @@ export class MachinesMain {
     path: string,
     revision: bigint | null = null,
   ): Promise<CheckoutInspection> {
-    if (await this.#v2(id)) {
-      const current = this.#deps.selectionRevision;
-      if (revision !== null && current?.(id) !== revision) throw new Error('stale selection');
-      const inspected = await this.#setup().inspectCandidate(
-        id,
-        path,
-        revision ?? 1n,
-        new AbortController().signal,
-      );
-      if (revision !== null && current?.(id) !== revision) throw new Error('stale selection');
-      return inspectionOf(inspected);
-    }
+    if (await this.#v2(id)) return this.#inspectCandidate(id, path, revision);
     await using lease = await this.#deps.connection(id);
     try {
       const reply = await lease.connection.request({type: 'checkout.inspect', path});
       return reply.inspection;
     } catch (error) {
-      if (notNegotiated(error)) return {state: 'unsupported'};
+      if (isHostUnsupported(error)) return {state: 'unsupported'};
       throw error instanceof HelperRequestError
         ? new Error(`Could not inspect the folder: ${error.message}`)
         : error;
@@ -226,6 +213,7 @@ export class MachinesMain {
         const value = await registry.listCompute(id, null, new AbortController().signal);
         return {kind: 'offered', value};
       } catch (error) {
+        if (isHostUnsupported(error)) return {kind: 'unsupported'};
         throw explained(error, 'read the clusters and clouds', id);
       }
     }
@@ -314,7 +302,7 @@ export class MachinesMain {
       await using lease = await this.#deps.connection(id);
       return {kind: 'offered', value: await read(lease.connection)};
     } catch (error) {
-      if (notNegotiated(error)) return {kind: 'unsupported'};
+      if (isHostUnsupported(error)) return {kind: 'unsupported'};
       throw explained(error, doing, id);
     }
   }
@@ -331,6 +319,30 @@ export class MachinesMain {
     } catch (error) {
       throw explained(error, doing, id);
     }
+  }
+
+  /** `path` on a v2 host, refusing a selection that changed while the host answered. */
+  async #inspectCandidate(
+    id: HostId,
+    path: string,
+    revision: bigint | null,
+  ): Promise<CheckoutInspection> {
+    const current = this.#deps.selectionRevision;
+    if (revision !== null && current?.(id) !== revision) throw new Error('stale selection');
+    let inspected: InspectedCandidate;
+    try {
+      inspected = await this.#setup().inspectCandidate(
+        id,
+        path,
+        revision ?? 1n,
+        new AbortController().signal,
+      );
+    } catch (error) {
+      if (isHostUnsupported(error)) return {state: 'unsupported'};
+      throw error;
+    }
+    if (revision !== null && current?.(id) !== revision) throw new Error('stale selection');
+    return inspectionOf(inspected);
   }
 
   async #v2(id: HostId): Promise<boolean> {

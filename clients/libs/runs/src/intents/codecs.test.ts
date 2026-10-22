@@ -87,7 +87,13 @@ test('only IntentState records are outcomes, with refusal reasons preserved', ()
 });
 
 test('typed HostCall refusals remain distinct from malformed or unconfirmed replies', () => {
-  for (const code of ['invalid_input', 'inbox_closed', 'request_too_large', 'invalid_method']) {
+  for (const code of [
+    'invalid_input',
+    'inbox_closed',
+    'request_too_large',
+    'invalid_method',
+    'host_unsupported',
+  ]) {
     for (const stderr of ['', 'details']) {
       const bytes = toBinary(
         HostCallResponseSchema,

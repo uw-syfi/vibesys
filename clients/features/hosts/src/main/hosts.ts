@@ -5,11 +5,14 @@
  * action goes through the host's one connection; nothing here retries or polls.
  */
 import {
+  type CompletedPaths,
   type ConnectionLease,
   type ConnectionManager,
   connectionStatus,
   HelperRequestError,
+  HOST_UNSUPPORTED_MESSAGE,
   type HostConnection,
+  isHostUnsupported,
   type LogsLease,
   type RegistrySavedRuns,
   type RegistrySetup,
@@ -62,6 +65,7 @@ import {
   withHostSettings,
   withoutHost,
 } from '@vibesys/settings';
+import {checkHostVersion} from './host-version.js';
 import {discoverSshConfigAliases, type SshConfigFilesystem} from './ssh-config.js';
 
 /** The most events a helper without `run_history_pages` serves in one `runs.read_events` page. */
@@ -243,6 +247,8 @@ export class Hosts {
   readonly #watchIntents = new Map<HostKey, WatchIntent>();
   /** Advances before desired-set changes, fencing reads against the desired-host union. */
   #generation = 0;
+  /** v2 hosts whose checkout answered that it cannot serve this app. */
+  readonly #outOfDate = new Set<HostKey>();
 
   constructor(deps: HostsDeps) {
     this.#deps = deps;
@@ -500,7 +506,7 @@ export class Hosts {
         ...(typeof reply.total_bytes === 'number' ? {totalBytes: reply.total_bytes} : {}),
       };
     } catch (error) {
-      if (error instanceof HelperRequestError && error.code === 'feature_not_negotiated') {
+      if (isHostUnsupported(error)) {
         return {kind: 'unsupported'};
       }
       throw plain(error, `Could not read the history of run ${runId}`);
@@ -538,7 +544,7 @@ export class Hosts {
         total: reply.total,
       };
     } catch (error) {
-      if (error instanceof HelperRequestError && error.code === 'feature_not_negotiated') {
+      if (isHostUnsupported(error)) {
         return {kind: 'unsupported'};
       }
       throw plain(error, `Could not read span ${spanId} of run ${runId}`);
@@ -565,7 +571,7 @@ export class Hosts {
       }
       throw new Error('the run kept changing while its summary was read');
     } catch (error) {
-      if (error instanceof HelperRequestError && error.code === 'feature_not_negotiated') {
+      if (isHostUnsupported(error)) {
         return {kind: 'unsupported'};
       }
       if (error instanceof HelperRequestError && error.code === 'unknown_run') {
@@ -598,7 +604,7 @@ export class Hosts {
       });
       return {kind: 'digests', runs: digestEntries(reply.runs.runs)};
     } catch (error) {
-      if (error instanceof HelperRequestError && error.code === 'feature_not_negotiated') {
+      if (isHostUnsupported(error)) {
         return {kind: 'unsupported'};
       }
       throw plain(error, 'Could not read the runs of the project');
@@ -631,7 +637,7 @@ export class Hosts {
       });
       return {kind: 'usage', usage: usageWindowEntry(reply)};
     } catch (error) {
-      if (error instanceof HelperRequestError && error.code === 'feature_not_negotiated') {
+      if (isHostUnsupported(error)) {
         return {kind: 'unsupported'};
       }
       throw plain(error, 'Could not read what the runs of the project spent');
@@ -674,7 +680,7 @@ export class Hosts {
         })),
       };
     } catch (error) {
-      if (error instanceof HelperRequestError && error.code === 'feature_not_negotiated') {
+      if (isHostUnsupported(error)) {
         return {kind: 'unsupported'};
       }
       throw plain(error, `Could not read the vetted models of ${hostLabel(id)}`);
@@ -684,7 +690,13 @@ export class Hosts {
   /** The directories in `directory` (a path ending in `/`, or `~/`) on `id`. */
   async complete(id: HostId, directory: string): Promise<PathCompletion> {
     if (await this.#transportV2(id)) {
-      const listed = await this.#setup().completePaths(id, directory, new AbortController().signal);
+      let listed: CompletedPaths;
+      try {
+        listed = await this.#setup().completePaths(id, directory, new AbortController().signal);
+      } catch (error) {
+        if (isHostUnsupported(error)) return {kind: 'unsupported'};
+        throw error;
+      }
       return {
         kind: 'listed',
         directory: listed.directory,
@@ -697,7 +709,7 @@ export class Hosts {
     try {
       reply = await lease.connection.request({type: 'paths.complete', prefix: directory});
     } catch (error) {
-      if (error instanceof HelperRequestError && error.code === 'feature_not_negotiated') {
+      if (isHostUnsupported(error)) {
         return {kind: 'unsupported'};
       }
       throw plain(error, 'Could not list the folder');
@@ -731,7 +743,7 @@ export class Hosts {
       });
       inspection = inspectionReply(instanceId, reply.inspection);
     } catch (error) {
-      if (error instanceof HelperRequestError && error.code === 'feature_not_negotiated') {
+      if (isHostUnsupported(error)) {
         throw new Error(
           `Run inspection is unavailable on ${hostLabel(id)}. Update its VibeSys checkout.`,
         );
@@ -882,12 +894,17 @@ export class Hosts {
       const detail = error instanceof Error ? error.message : String(error);
       this.#deps.log(detail);
     });
-    const stopListing = connection.watchInstances(listing => push(hostListing(key, listing)));
+    const stopListing = connection.watchInstances(listing => {
+      if (!this.#outOfDate.has(key)) push(hostListing(key, listing));
+    });
     const stopPhase = connection.onPhase(phase => {
       if (phase.kind !== 'ready') {
         push({kind: 'unavailable', host: key, connection: connectionStatus(phase)});
+      } else {
+        this.#checkVersion(key, checkout, () => stopped);
       }
     });
+    if (connection.phase.kind === 'ready') this.#checkVersion(key, checkout, () => stopped);
     this.#watched.set(key, {
       checkout,
       lease,
@@ -897,6 +914,39 @@ export class Hosts {
         stopPhase();
         this.#deps.runs?.cancel(hostFromKey(key));
       },
+    });
+  }
+
+  /**
+   * Ask a v2 host's checkout once whether it can serve this app, each time its connection becomes
+   * ready. An old one is shown as `incompatible` (the status every screen words "needs an update")
+   * and its helper listing is withheld until a later check passes.
+   */
+  #checkVersion(key: HostKey, checkout: string, stopped: () => boolean): void {
+    const id = hostFromKey(key);
+    void (async () => {
+      if (!(await this.#transportV2(id))) return;
+      const verdict = await checkHostVersion(
+        this.#setup(),
+        id,
+        checkout,
+        new AbortController().signal,
+      );
+      if (stopped()) return;
+      if (verdict === 'current') {
+        this.#outOfDate.delete(key);
+        return;
+      }
+      this.#outOfDate.add(key);
+      this.#deps.push({
+        kind: 'unavailable',
+        host: key,
+        connection: {kind: 'incompatible', detail: HOST_UNSUPPORTED_MESSAGE},
+      });
+    })().catch((error: unknown) => {
+      this.#deps.log(
+        `could not check the VibeSys of ${hostLabel(id)}: ${error instanceof Error ? error.message : String(error)}`,
+      );
     });
   }
 
@@ -930,6 +980,7 @@ export class Hosts {
 
   /** Attempt every retirement step even when presentation cleanup itself reports a failure. */
   #retireWatched(key: HostKey, watched: WatchedHost): void {
+    this.#outOfDate.delete(key);
     try {
       watched.stop();
     } catch (error) {

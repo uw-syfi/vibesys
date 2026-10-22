@@ -1,6 +1,12 @@
 import {describe, expect, test} from 'bun:test';
-import {ConnectionManager} from '@vibesys/connection';
-import {FakeLink} from '@vibesys/connection/testing';
+import {
+  ConnectionManager,
+  HOST_UNSUPPORTED_MESSAGE,
+  registryClusters,
+  registryReads,
+  registrySetup,
+} from '@vibesys/connection';
+import {FakeLink, olderHost, USAGE_DUMP} from '@vibesys/connection/testing';
 import {type HostId, hostKey, REQUIRED_HELPER_FEATURES} from '@vibesys/hosts';
 import {SettingsStore, withHostSettings, withoutHost} from '@vibesys/settings';
 import {FakeSettingsFilesystem} from '@vibesys/settings/testing';
@@ -389,6 +395,35 @@ describe('MachinesMain', () => {
       expect(await machines.addCluster(HOST_B, cluster)).toEqual(saved);
       expect(await machines.removeCluster(HOST_B, 'lab')).toEqual(saved);
       expect(calls).toEqual(['test', 'put', 'remove:lab']);
+    });
+
+    test('a host whose VibeSys predates the registry is "needs-update" on every machine read, with no usage dump', async () => {
+      const checkout = async () => '/src/checkout';
+      const {machines, manager} = await subject(new Map(), {
+        transportV2: async () => true,
+        registry: registryReads({checkout, unary: olderHost.read}),
+        setup: registrySetup({unary: olderHost.read}),
+        clusters: registryClusters({checkout, unary: olderHost.mutate}),
+        runs: {live: async () => 0},
+      });
+      await using _ = manager;
+      expect(await machines.report(HOST_B)).toEqual({kind: 'needs-update', facts: null});
+      expect(await machines.compute(HOST_B)).toEqual({kind: 'unsupported'});
+      expect(await machines.inspect(HOST_B, '/src/checkout')).toEqual({state: 'unsupported'});
+      const cluster = {
+        name: 'lab',
+        reach: {kind: 'ssh' as const, host: 'host-a'},
+        workspace: '/work',
+      };
+      for (const change of [
+        () => machines.testCluster(HOST_B, cluster),
+        () => machines.addCluster(HOST_B, cluster),
+        () => machines.removeCluster(HOST_B, 'lab'),
+      ]) {
+        const error = await change().catch((caught: unknown) => caught);
+        expect((error as Error).message).toContain(HOST_UNSUPPORTED_MESSAGE);
+        expect((error as Error).message).not.toContain(USAGE_DUMP);
+      }
     });
 
     test('an on switch without the registry throws instead of using the helper', async () => {
