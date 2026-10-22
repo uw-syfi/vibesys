@@ -7,8 +7,11 @@ from pathlib import Path
 
 import pytest
 import yaml
+from hypothesis import example, given
+from hypothesis import strategies as st
 
 REPO = Path(__file__).resolve().parents[2]
+_SHARED_ACTION = ".github/actions/setup-runner-apt/action.yml"
 _APT = re.compile(r"\b(?:apt-get|apt)\s")
 _BOUND = re.compile(r"\btimeout --kill-after=5s 60s\s+apt(?:-get)?\s")
 _OPTIONS = (
@@ -47,6 +50,9 @@ def _script_violations(source: str, run: str) -> list[str]:
         code = line.split("#", 1)[0].strip()
         if "playwright" in code and ("--with-deps" in code or "install-deps" in code):
             found.append(f"{source}: use runner system libraries instead of hidden apt: {code}")
+        if _APT.search(code) and source != _SHARED_ACTION:
+            found.append(f"{source}: use ./.github/actions/setup-runner-apt for runner apt: {code}")
+            continue
         found.extend(
             f"{source}: bound apt with a 60s timeout and network/lock limits: {command}"
             for command in re.split(r"&&|\|\||[;|]", code)
@@ -97,9 +103,9 @@ def test_unbounded_installs_are_reported(container: str, command: str) -> None:
         if container == "workflow"
         else {"runs": {"using": "composite", "steps": steps}}
     )
-    violations = _violations("ci.yml", document)
+    violations = _violations(_SHARED_ACTION, document)
     assert len(violations) == 1
-    assert "ci.yml:" in violations[0]
+    assert _SHARED_ACTION in violations[0]
     assert command in violations[0]
 
 
@@ -108,11 +114,59 @@ def test_unbounded_installs_are_reported(container: str, command: str) -> None:
     [_BOUNDED, _BOUNDED.replace("apt-get", "apt"), "pnpm exec playwright install chromium"],
 )
 def test_bounded_installs_and_browser_only_downloads_are_allowed(command: str) -> None:
-    assert _violations("ci.yml", {"run": command}) == []
+    assert _violations(_SHARED_ACTION, {"run": command}) == []
 
 
 @pytest.mark.parametrize("separator", [";", "&&", "||", "|", "\n"])
 def test_a_bounded_command_does_not_cover_a_later_apt_call(separator: str) -> None:
-    violations = _violations("ci.yml", {"run": f"{_BOUNDED} {separator} sudo apt-get update"})
+    violations = _violations(_SHARED_ACTION, {"run": f"{_BOUNDED} {separator} sudo apt-get update"})
     assert len(violations) == 1
     assert "sudo apt-get update" in violations[0]
+
+
+@pytest.mark.parametrize("root", [".github/workflows", ".github/actions"])
+@pytest.mark.parametrize(
+    "command", [_BOUNDED, "sudo apt-get update", "sudo apt install bubblewrap"]
+)
+@example(component="new-action")
+@given(component=st.from_regex(r"[a-z][a-z0-9_-]{0,30}", fullmatch=True))
+def test_runner_apt_cannot_bypass_the_archive_cache(
+    root: str, command: str, component: str
+) -> None:
+    for suffix in (".yml", ".yaml", "/install.sh"):
+        source = f"{root}/{component}{suffix}"
+        violations = _script_violations(source, command)
+        assert len(violations) == 1
+        assert source in violations[0]
+        assert "use ./.github/actions/setup-runner-apt" in violations[0]
+
+
+def test_archive_cache_hits_install_offline_and_misses_remain_bounded() -> None:
+    action = yaml.safe_load((REPO / _SHARED_ACTION).read_text())
+    steps = action["runs"]["steps"]
+    downloads = [step for step in steps if _APT.search(step.get("run", ""))]
+    assert downloads
+    for step in downloads:
+        assert "steps.cache.outputs.cache-hit != 'true'" in step["if"]
+        assert _script_violations(_SHARED_ACTION, step["run"]) == []
+        assert "--download-only" in step["run"]
+    restore = next(step for step in steps if "actions/cache/restore@" in step.get("uses", ""))
+    save = next(step for step in steps if "actions/cache/save@" in step.get("uses", ""))
+    assert restore["with"]["key"] == save["with"]["key"]
+    assert "restore-keys" not in restore["with"]
+    assert restore["with"]["path"].endswith("/*.deb")
+    assert restore["with"]["path"] == save["with"]["path"]
+    prepare = next(step["run"] for step in steps if step.get("id") == "packages")
+    for key_component in (
+        "ImageOS",
+        "ImageVersion",
+        "dpkg --print-architecture",
+        "package_hash",
+        "sha256sum",
+    ):
+        assert key_component in prepare
+    offline = next(
+        step for step in steps if "dpkg --force-confold --install" in step.get("run", "")
+    )
+    assert "cache-hit" not in offline["if"]
+    assert not _APT.search(offline["run"])
