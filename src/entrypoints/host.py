@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import os
-import signal
 import sys
 from collections import Counter
 from importlib import import_module
@@ -27,7 +26,7 @@ from vibesys.api.host_operations.api import (
 from vs_project.api import Project, ProjectError
 from vs_proto.api import host_operations
 from vs_proto.api import host_payloads as pb
-from vs_sim.api import OsProcesses, OsThreads, SystemClock
+from vs_sim.api import OsProcesses, OsThreads, Signals, SystemClock, WakeupFdSignalRelay
 
 _HOST_CALL_COMMANDS = {op.cli: op.slot for op in host_operations.HOST_CALLS}
 _READ_COMMANDS = {op.cli: op.slot for op in host_operations.READ_CALLS}
@@ -213,7 +212,6 @@ def _serve_login(
             held[0].cancel()
 
     threads.spawn(cancel, name="login-cancel")
-    signal.signal(signal.SIGTERM, lambda _signum, _frame: stop.set())
 
     def wait() -> None:
         if held:
@@ -222,7 +220,8 @@ def _serve_login(
     def write(chunk: bytes) -> None:
         destination.write(chunk)
 
-    serve_login(payload, cli=cli, start=start, write=write, wait=wait)
+    with WakeupFdSignalRelay(threads).relay([Signals.SIGTERM], lambda _number: stop.set()):
+        serve_login(payload, cli=cli, start=start, write=write, wait=wait)
 
 
 def _serve_mutation(cli: str, payload: bytes, threads: Threads) -> bytes:

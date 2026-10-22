@@ -16,6 +16,7 @@ from hypothesis import strategies as st
 from server.host_agent_logins import LoginStarted, LoginUnavailable, LoginUnavailableReason
 from server.host_helper_os import LoginBounds, LoginStarter, login_instruction
 from vs_sim.api.testing import (
+    HANG_GUARD_S,
     FakePipedProcessLauncher,
     PipedStart,
     ScriptedPipedProcess,
@@ -127,7 +128,9 @@ def test_cancelling_a_login_ends_its_group_before_its_lifetime() -> None:
         assert isinstance(held.result, LoginStarted)
         assert process.signals == []
         held.cancel()
-        held.wait()
+        waiter = threads.spawn(held.wait, name="login-finished")
+        waiter.join(HANG_GUARD_S)
+        assert not waiter.is_alive()
         return process.signals
 
     assert threads.run(main) == ["terminate"]
