@@ -177,8 +177,11 @@ def test_apt_retries_including_backoff_and_kill_grace_fit_three_minutes() -> Non
     assert 'NET_DEADLINE="${APT_INSTALL_DEADLINE}"' in update
 
 
-def test_apt_skips_network_for_installed_packages_and_installs_only_missing_ones() -> None:
-    block = _split(SCRIPTS[0])[0]
+@pytest.mark.parametrize("script", SCRIPTS, ids=lambda path: path.parent.name)
+def test_apt_skips_network_for_installed_packages_and_installs_only_missing_ones(
+    script: Path,
+) -> None:
+    block = _split(script)[0]
     install = block[block.index("apt_install() {") : block.index("npm_install_global() {")]
     assert "dpkg-query -W -f='${Status}'" in install
     assert "install ok installed" in install

@@ -194,7 +194,7 @@ id = "agent_image"
 class = "manual"
 job = "agent_image"
 roots = ["libs/vs-agent/src/vs_agent/images", "libs/vs-sandbox", "libs/vs-runtime/src/vs_runtime/features"]
-files = ["libs/vs-agent/src/vs_agent/images.py", "libs/vs-agent/src/vs_agent/agent_feature.py", "libs/vs-agent/src/vs_agent/provider_policy.py", "libs/vs-runtime/src/vs_runtime/_image_features.py", "scripts/ci_docker_data_root.sh"]
+files = ["libs/vs-agent/src/vs_agent/images.py", "libs/vs-agent/src/vs_agent/agent_feature.py", "libs/vs-agent/src/vs_agent/provider_policy.py", "libs/vs-runtime/src/vs_runtime/_image_features.py", "scripts/ci_docker_data_root.sh", "scripts/ci_ubuntu_mirror.py"]
 
 [[components]]
 id = "real_tiers"

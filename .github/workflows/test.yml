@@ -1201,7 +1201,7 @@ jobs:
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/docker-data.tar.zst
-          key: feature-tests-${{ matrix.family }}-${{ steps.docker-cache-week.outputs.week }}-${{ hashFiles('libs/vs-agent/src/vs_agent/images/features/**', 'libs/vs-sandbox/src/vs_sandbox/features/**', 'libs/vs-runtime/src/vs_runtime/features/**', 'libs/vs-sandbox/src/vs_sandbox/devcontainer-cli/**', 'scripts/ci_docker_data_root.sh') }}
+          key: feature-tests-${{ matrix.family }}-${{ steps.docker-cache-week.outputs.week }}-${{ hashFiles('libs/vs-agent/src/vs_agent/images/features/**', 'libs/vs-sandbox/src/vs_sandbox/features/**', 'libs/vs-runtime/src/vs_runtime/features/**', 'libs/vs-sandbox/src/vs_sandbox/devcontainer-cli/**', 'scripts/ci_docker_data_root.sh', 'scripts/ci_ubuntu_mirror.py') }}
           restore-keys: |
             feature-tests-${{ matrix.family }}-${{ steps.docker-cache-week.outputs.week }}-
             feature-tests-${{ matrix.family }}-${{ steps.docker-cache-week.outputs.previous }}-
@@ -1209,9 +1209,24 @@ jobs:
       - name: Point Docker at the layer cache storage
         run: ./scripts/ci_docker_data_root.sh attach "${{ runner.temp }}/docker-data.tar.zst"
 
+      - name: Use the runner's Ubuntu archive mirror
+        if: matrix.family != 'debian'
+        env:
+          BASE_IMAGE: ${{ matrix.base }}
+        run: |
+          mirror=$(python3 scripts/ci_ubuntu_mirror.py)
+          echo "Feature apt mirror: ${mirror}"
+          docker build --tag vibesys-feature-base:ci \
+            --build-arg "BASE_IMAGE=${BASE_IMAGE}" \
+            --build-arg "UBUNTU_MIRROR=${mirror}" \
+            --file libs/vs-sandbox/src/vs_sandbox/devcontainer-cli/UbuntuMirror.Dockerfile \
+            libs/vs-sandbox/src/vs_sandbox/devcontainer-cli
+
       - name: Test every Feature on ${{ matrix.base }}
+        env:
+          FEATURE_BASE: ${{ matrix.family == 'debian' && matrix.base || 'vibesys-feature-base:ci' }}
         run: >-
-          libs/vs-sandbox/src/vs_sandbox/devcontainer-cli/test_features.sh "${{ matrix.base }}"
+          libs/vs-sandbox/src/vs_sandbox/devcontainer-cli/test_features.sh "$FEATURE_BASE"
           libs/vs-sandbox/src/vs_sandbox/features
           libs/vs-agent/src/vs_agent/images/features
           libs/vs-runtime/src/vs_runtime/features
