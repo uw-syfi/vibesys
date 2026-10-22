@@ -284,19 +284,20 @@ def visit_failure[T](failure: OperationFailure, visitor: FailureVisitor[T]) -> T
 
 @dataclass(frozen=True)
 class HostCall:
-    """One HostCall method: its envelope slot, CLI name and runner cap."""
+    """One HostCall method: its envelope slot, CLI name, runner cap and client grace."""
 
     slot: str
     cli: str
     request_tag: int
     response_tag: int
     cap_ms: int
+    grace_ms: int
 
 
 HOST_CALLS: tuple[HostCall, ...] = (
-    HostCall("post_intent", "post-intent", 2, 1, 10000),
-    HostCall("relaunch", "relaunch", 3, 3, 30000),
-    HostCall("chat_message", "chat-message", 4, 4, 10000),
+    HostCall("post_intent", "post-intent", 2, 1, 10000, 5000),
+    HostCall("relaunch", "relaunch", 3, 3, 30000, 5000),
+    HostCall("chat_message", "chat-message", 4, 4, 10000, 5000),
 )
 
 

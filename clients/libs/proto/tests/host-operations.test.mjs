@@ -122,4 +122,19 @@ test('registry budgets and route identities cannot be changed by consumers', () 
   assert.equal(Reflect.set(host.operationPolicies.ListTasks, 'id', 999), false);
   assert.equal(Reflect.set(host.operationPolicies.ListTasks, 'totalMs', 0), false);
   assert.equal(host.operationPolicies.ListTasks.id, 10);
+  assert.equal(Reflect.set(host.hostCallBudgets, 'relaunch', {}), false);
+  assert.equal(Reflect.set(host.hostCallBudgets.relaunch, 'totalMs', 0), false);
+});
+
+test('every client budget exceeds its runner cap', () => {
+  assert.ok(Object.keys(host.operationPolicies).length > 0);
+  assert.ok(Object.keys(host.hostCallBudgets).length > 0);
+  for (const [name, policy] of Object.entries(host.operationPolicies)) {
+    assert.ok(policy.totalMs > policy.capMs, name);
+    assert.equal(policy.totalMs, policy.capMs + policy.graceMs);
+  }
+  for (const [name, budget] of Object.entries(host.hostCallBudgets)) {
+    assert.ok(budget.totalMs > budget.capMs, name);
+    assert.equal(budget.totalMs, budget.capMs + budget.graceMs);
+  }
 });

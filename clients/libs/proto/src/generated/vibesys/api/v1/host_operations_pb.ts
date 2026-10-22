@@ -79,10 +79,10 @@ export const HostOperationsService: GenService<{
     output: typeof PreflightRunResponseSchema;
   },
   /**
-   * HostCall dispatch. The runner deadline is cap_ms. grace_ms is cleanup
-   * allowance and is not added, so the client RPC margin stays intact: 15s for
-   * a 10s call, and 35s for the 30s relaunch that confirms an epoch for up to 25s.
-   * Request and response tags are the HostCall oneof field numbers.
+   * HostCall dispatch. The runner deadline is cap_ms. The client budget is
+   * cap_ms plus grace_ms, so it stays strictly above that cap. Relaunch confirms
+   * an epoch for up to 25s inside its runner cap. Request and response tags are
+   * the HostCall oneof field numbers.
    *
    * @generated from rpc vibesys.api.v1.HostOperationsService.PostIntent
    */

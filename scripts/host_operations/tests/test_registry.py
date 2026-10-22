@@ -11,6 +11,7 @@ from google.protobuf import descriptor_pb2, descriptor_pool, message_factory
 from hypothesis import given
 from hypothesis import strategies as st
 from scripts.host_operations.api import GenerationError, compile_outputs, compile_registry
+from scripts.host_operations.generate import generate
 
 from vs_proto.api import OperationFailure, host_operation_descriptors, host_operations
 
@@ -71,7 +72,12 @@ def test_every_method_has_one_typed_handler_and_canonical_budget() -> None:
         ("relaunch", 30000),
         ("chat_message", 10000),
     ]
-    assert {op.policy.cap_ms + op.policy.grace_ms for op in compiled} == {15000, 30000, 35000, 70000}
+    assert {op.policy.cap_ms + op.policy.grace_ms for op in compiled} == {
+        15000,
+        30000,
+        35000,
+        70000,
+    }
 
 
 @pytest.mark.parametrize(
@@ -126,9 +132,8 @@ def test_a_correlation_cannot_cross_a_scalar_even_with_repeated_field_numbers() 
         compile_registry(_changed(change), _slots())
 
 
-def test_the_descriptor_pass_compiles_all_language_outputs_before_publication() -> None:
-    root = Path(__file__).resolve().parents[3]
-    sources = tuple(
+def _server_sources(root: Path) -> tuple[str, ...]:
+    return tuple(
         path.read_text()
         for path in (
             root / "src/server/host_api.py",
@@ -139,10 +144,77 @@ def test_the_descriptor_pass_compiles_all_language_outputs_before_publication() 
             ),
         )
     )
+
+
+def test_the_descriptor_pass_compiles_all_language_outputs_before_publication() -> None:
+    root = Path(__file__).resolve().parents[3]
     image = _image().SerializeToString()
-    outputs = compile_outputs(image, _slots(), sources)
+    outputs = compile_outputs(image, _slots(), _server_sources(root))
     assert len(outputs) == 6
     for path, content in outputs.items():
         if path.endswith(".py"):
             ast.parse(content)
-    assert compile_outputs(image, _slots(), sources) == outputs
+    assert compile_outputs(image, _slots(), _server_sources(root)) == outputs
+
+
+def test_every_client_budget_exceeds_its_runner_cap() -> None:
+    root = Path(__file__).resolve().parents[3]
+    image = _image().SerializeToString()
+    outputs = compile_outputs(image, _slots(), _server_sources(root))
+    typescript = outputs["clients/libs/proto/src/generated/host-operations.ts"]
+    runner = outputs["gateway/internal/hostoperations/registry_generated.go"]
+    calls = outputs["gateway/internal/hostoperations/host_call_generated.go"]
+    python = outputs["libs/vs-proto/src/vs_proto/_generated/host_operations.py"]
+    compiled = compile_registry(image, _slots())
+    assert compiled
+    for op in compiled:
+        client = op.policy.cap_ms + op.policy.grace_ms
+        runner_cap = op.policy.cap_ms
+        assert client > runner_cap
+        if op.is_admission():
+            case = op.slot.split("_", maxsplit=1)[0] + "".join(
+                part.title() for part in op.slot.split("_")[1:]
+            )
+            assert (
+                f"{case}: Object.freeze({{capMs: {runner_cap}, graceMs: {op.policy.grace_ms}, totalMs: {client}}}"
+                in typescript
+            )
+            assert f"Deadline: {runner_cap} * time.Millisecond" in calls
+            assert (
+                f"HostCall({op.slot!r}, {op.slot.replace('_', '-')!r}, "
+                f"{op.policy.request_tag}, {op.policy.response_tag}, {runner_cap}, {op.policy.grace_ms})"
+                in python
+            )
+        else:
+            assert f"totalMs: {client}" in typescript
+            assert f"Cap: {runner_cap}*time.Millisecond" in runner
+            assert f"Grace: {op.policy.grace_ms}*time.Millisecond" in runner
+
+
+def test_generate_publishes_every_projection(tmp_path: Path) -> None:
+    root = Path(__file__).resolve().parents[3]
+    handler = root / "src/vibesys/api/host_operations/_handlers.py"
+    destination = tmp_path / handler.relative_to(root)
+    destination.parent.mkdir(parents=True)
+    destination.write_bytes(handler.read_bytes())
+    for path in (
+        root / "src/server/host_api.py",
+        *sorted(
+            path for path in (root / "src/server").glob("host_*.py") if path.name != "host_api.py"
+        ),
+    ):
+        target = tmp_path / path.relative_to(root)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(path.read_bytes())
+    image = _image().SerializeToString()
+    expected = compile_outputs(image, _slots(), _server_sources(root))
+    generate(tmp_path, image, include_schema=False)
+    for name, content in expected.items():
+        published = tmp_path / name
+        if name.endswith(".proto"):
+            assert not published.exists()
+        else:
+            assert published.read_text(encoding="utf-8") == content
+    generate(tmp_path, image)
+    for name, content in expected.items():
+        assert (tmp_path / name).read_text(encoding="utf-8") == content

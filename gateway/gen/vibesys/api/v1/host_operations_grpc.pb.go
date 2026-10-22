@@ -45,10 +45,10 @@ type HostOperationsServiceClient interface {
 	DescribeMachine(ctx context.Context, in *v1.DescribeMachineRequest, opts ...grpc.CallOption) (*v1.DescribeMachineResponse, error)
 	ListCompute(ctx context.Context, in *v1.ListComputeRequest, opts ...grpc.CallOption) (*v1.ListComputeResponse, error)
 	PreflightRun(ctx context.Context, in *v1.PreflightRunRequest, opts ...grpc.CallOption) (*v1.PreflightRunResponse, error)
-	// HostCall dispatch. The runner deadline is cap_ms. grace_ms is cleanup
-	// allowance and is not added, so the client RPC margin stays intact: 15s for
-	// a 10s call, and 35s for the 30s relaunch that confirms an epoch for up to 25s.
-	// Request and response tags are the HostCall oneof field numbers.
+	// HostCall dispatch. The runner deadline is cap_ms. The client budget is
+	// cap_ms plus grace_ms, so it stays strictly above that cap. Relaunch confirms
+	// an epoch for up to 25s inside its runner cap. Request and response tags are
+	// the HostCall oneof field numbers.
 	PostIntent(ctx context.Context, in *PostIntentRequest, opts ...grpc.CallOption) (*PostIntentResponse, error)
 	Relaunch(ctx context.Context, in *RelaunchRequest, opts ...grpc.CallOption) (*RelaunchResponse, error)
 	ChatMessage(ctx context.Context, in *ChatMessageRequest, opts ...grpc.CallOption) (*ChatMessageResponse, error)
@@ -175,10 +175,10 @@ type HostOperationsServiceServer interface {
 	DescribeMachine(context.Context, *v1.DescribeMachineRequest) (*v1.DescribeMachineResponse, error)
 	ListCompute(context.Context, *v1.ListComputeRequest) (*v1.ListComputeResponse, error)
 	PreflightRun(context.Context, *v1.PreflightRunRequest) (*v1.PreflightRunResponse, error)
-	// HostCall dispatch. The runner deadline is cap_ms. grace_ms is cleanup
-	// allowance and is not added, so the client RPC margin stays intact: 15s for
-	// a 10s call, and 35s for the 30s relaunch that confirms an epoch for up to 25s.
-	// Request and response tags are the HostCall oneof field numbers.
+	// HostCall dispatch. The runner deadline is cap_ms. The client budget is
+	// cap_ms plus grace_ms, so it stays strictly above that cap. Relaunch confirms
+	// an epoch for up to 25s inside its runner cap. Request and response tags are
+	// the HostCall oneof field numbers.
 	PostIntent(context.Context, *PostIntentRequest) (*PostIntentResponse, error)
 	Relaunch(context.Context, *RelaunchRequest) (*RelaunchResponse, error)
 	ChatMessage(context.Context, *ChatMessageRequest) (*ChatMessageResponse, error)

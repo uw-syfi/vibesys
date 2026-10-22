@@ -137,11 +137,12 @@ def test_accepted_input_bytes_are_deterministic_for_every_map_order() -> None:
 
 
 def test_host_call_dispatch_uses_the_registered_slot_and_cap() -> None:
-    assert [(op.slot, op.cli, op.cap_ms) for op in host_operations.HOST_CALLS] == [
-        ("post_intent", "post-intent", 10000),
-        ("relaunch", "relaunch", 30000),
-        ("chat_message", "chat-message", 10000),
+    assert [(op.slot, op.cli, op.cap_ms, op.grace_ms) for op in host_operations.HOST_CALLS] == [
+        ("post_intent", "post-intent", 10000, 5000),
+        ("relaunch", "relaunch", 30000, 5000),
+        ("chat_message", "chat-message", 10000, 5000),
     ]
+    assert all(op.cap_ms + op.grace_ms > op.cap_ms for op in host_operations.HOST_CALLS)
     seen: list[object] = []
 
     def post_intent(request: PostIntentRequest) -> PostIntentResponse:

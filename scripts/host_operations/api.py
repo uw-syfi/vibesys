@@ -193,5 +193,7 @@ def compile_outputs(
         ),
         "gateway/internal/hostoperations/registry_generated.go": go_registry(reads, failures),
         "gateway/internal/hostoperations/host_call_generated.go": go_host_call(admissions),
-        "clients/libs/proto/src/generated/host-operations.ts": typescript_registry(reads, failures),
+        "clients/libs/proto/src/generated/host-operations.ts": typescript_registry(
+            reads, failures, admissions
+        ),
     }

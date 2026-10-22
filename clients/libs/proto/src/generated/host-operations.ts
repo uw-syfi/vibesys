@@ -12,6 +12,11 @@ export const operationPolicies = Object.freeze({
   ListCompute: Object.freeze({name: 'ListCompute', id: 15, requestTag: 15, responseTag: 15, capMs: 10000, graceMs: 5000, totalMs: 15000, effect: 1, retry: 2, executor: 1, cardinality: 1, firstEventMs: undefined} as const),
   PreflightRun: Object.freeze({name: 'PreflightRun', id: 16, requestTag: 16, responseTag: 16, capMs: 65000, graceMs: 5000, totalMs: 70000, effect: 1, retry: 2, executor: 1, cardinality: 1, firstEventMs: undefined} as const),
 });
+export const hostCallBudgets = Object.freeze({
+  postIntent: Object.freeze({capMs: 10000, graceMs: 5000, totalMs: 15000} as const),
+  relaunch: Object.freeze({capMs: 30000, graceMs: 5000, totalMs: 35000} as const),
+  chatMessage: Object.freeze({capMs: 10000, graceMs: 5000, totalMs: 15000} as const),
+} as const);
 export function acceptListTasks(input: MessageInitShape<typeof pb.ListTasksRequestSchema>): Accepted<"ListTasks"> {
   return accept(operationPolicies.ListTasks, pb.ListTasksRequestSchema, input);
 }
