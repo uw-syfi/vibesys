@@ -148,3 +148,24 @@ def test_invalid_receipt_inputs_cannot_be_hidden_by_an_existing_ref(
     with pytest.raises(GitCommandError):
         sandbox.repo.create_ref("HEAD", baseline)
     assert sandbox.repo.head() == baseline
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize("syntax", ["force", "refspec", "option", "missing"])
+def test_revision_syntax_cannot_bypass_publication_safety(
+    sandbox: ContractProject,
+    syntax: str,
+) -> None:
+    baseline, winner = _winner(sandbox)
+    assert sandbox.repo.advance_branch("published", winner)
+    invalid = {
+        "force": f"+{baseline}",
+        "refspec": f"{baseline}:refs/heads/main",
+        "option": "--no-ff",
+        "missing": "0" * 40,
+    }[syntax]
+    assert not sandbox.repo.advance_branch("published", invalid)
+    assert sandbox.repo.resolve_commit("published") == winner
+    assert not sandbox.repo.fast_forward_checkout("main", invalid)
+    assert sandbox.repo.head() == baseline
+    assert (sandbox.root / "code.py").read_text() == "input"

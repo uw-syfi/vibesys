@@ -381,6 +381,9 @@ class CliGitRepository:
     def advance_branch(self, branch: str, commit: str) -> bool:
         if not self.is_valid_branch_name(branch):
             return False
+        target = self.resolve_commit(commit)
+        if target is None:
+            return False
         # Local fetch owns both atomic ref locking and the checked-out-branch and
         # fast-forward rules. update-ref bypasses the former; branch -f bypasses the latter.
         repository = str(self._git_dir or self._root)
@@ -393,7 +396,7 @@ class CliGitRepository:
                     "--no-recurse-submodules",
                     "--",
                     repository,
-                    f"{commit}:refs/heads/{branch}",
+                    f"{target}:refs/heads/{branch}",
                 ]
             ).returncode
             == 0
@@ -407,6 +410,9 @@ class CliGitRepository:
         untracked_exclusions: Sequence[str] = (),
     ) -> bool:
         self.require_plain_work_tree(())
+        target = self.resolve_commit(commit)
+        if target is None:
+            return False
         paths = [".", *(f":(exclude){path}" for path in untracked_exclusions)]
         tracked_exclusions = (
             self.tracked_changes_since_head(untracked_exclusions) if untracked_exclusions else ()
@@ -420,7 +426,7 @@ class CliGitRepository:
                     "--ff-only",
                     "--no-overwrite-ignore",
                     "--no-edit",
-                    commit,
+                    target,
                 ]
             ).returncode
             == 0
