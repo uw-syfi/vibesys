@@ -732,6 +732,7 @@ _STOP_RESUME_OPS = st.lists(
 @example(ops=[("stop", StopMode.CANCEL), ("poll",), ("resume",)])
 @example(ops=[("stop", StopMode.CANCEL), ("resume",), ("poll",)])
 @example(ops=[("pause",), ("stop", StopMode.DRAIN), ("resume",)])
+@example(ops=[("pause",), ("poll",), ("resume",), ("stop", StopMode.DRAIN)])
 @given(ops=_STOP_RESUME_OPS)
 def test_no_resume_ever_weakens_a_pending_stop(
     ops: list[tuple[str, StopMode] | tuple[str]],

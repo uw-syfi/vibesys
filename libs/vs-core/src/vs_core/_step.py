@@ -31,6 +31,7 @@ from ._inspection import validate_inspection_target, validate_registered_owner
 from ._ledger_compaction import compact_ledger
 from ._operator_actions import cancellations, notice, reopen_retirements
 from ._ownership import cleanup_pending
+from ._parked_admission import parked_epoch_drops
 from ._proofs import (
     Proven,
     accepted_receipt_for,
@@ -1897,20 +1898,7 @@ def consume(
     text) has never seen. One owner at the exit keeps that true for all of them.
     """
     given = state
-    if (
-        state.run.status == RunStatus.PARKED
-        and state.run.park is not None
-        and state.records.recovery.epoch == state.run.park.epoch
-        and not isinstance(
-            event,
-            RecoveryStarted
-            | EpochResumed
-            | RunControlEvent
-            | DispatchAuthorized
-            | DecisionSubmitted
-            | ProposalSubmitted,
-        )
-    ):
+    if parked_epoch_drops(state, event):
         return Transition(state=state)
     _validate_observation_ingress(state, event)
     _validate_authorization(state, event)
