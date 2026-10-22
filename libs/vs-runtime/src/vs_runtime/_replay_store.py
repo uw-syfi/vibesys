@@ -53,11 +53,14 @@ class RunLogReplayStore:
     returns the committed log prefix; deleted caches (head, keyframes) change
     nothing. The writer drops only a torn final frame; complete corruption fails.
     Committed follows log durability; a write or sync error is Unknown, which
-    authorizes no dispatch.
+    authorizes no dispatch. Under one fence only this store appends, so the
+    prefix it confirmed stays current and a commit costs its own record; a new
+    fence or an uncertain append reads the log again.
     """
 
     def __init__(self, writer: FileRunLogWriter, store: StateStore) -> None:
         self._writer, self._store = writer, store
+        self._confirmed: tuple[StoreFence, StoredEnvelope | None] | None = None
 
     def load(self) -> StoreRecord | None:
         stored = self._store.load()
@@ -87,21 +90,38 @@ class RunLogReplayStore:
             problem = "keyed replay requires facts-only import of the retained store format"
             raise ValueError(problem)
         if not self._store.verify(fence, now):
+            self._confirmed = None
             return Conflict(reason=ConflictReason.FENCE, revision=None)
-        records = self._writer.read()
-        confirmed = _envelope(records) if records else None
+        confirmed = self._prefix(fence)
         revision = None if confirmed is None else confirmed.revision
-        if expected_revision != revision or envelope.revision != len(records):
+        if expected_revision != revision or envelope.revision != (
+            0 if revision is None else revision + 1
+        ):
             return Conflict(reason=ConflictReason.REVISION, revision=revision)
         record = _extension(confirmed, envelope)
-        if not records and (outcome := self._install_fence(fence, now)) is not None:
+        if confirmed is None and (outcome := self._install_fence(fence, now)) is not None:
             return outcome
+        self._confirmed = None
         try:
             self._writer.append(record)
             self._writer.commit()
         except OSError:
             return Unknown(revision=envelope.revision)
+        prefix = b"" if confirmed is None else confirmed.payload
+        extended = StoredEnvelope(
+            revision=envelope.revision,
+            schema_version=REPLAY_STORE_SCHEMA_VERSION,
+            payload=prefix + ReplayRecords(records=[record]).to_binary(),
+        )
+        self._confirmed = fence, extended
         return Committed(record=envelope)
+
+    def _prefix(self, fence: StoreFence) -> StoredEnvelope | None:
+        """The confirmed log prefix, read again unless this fence's own appends confirmed it."""
+        if self._confirmed is None or self._confirmed[0] != fence:
+            records = self._writer.read()
+            self._confirmed = fence, _envelope(records) if records else None
+        return self._confirmed[1]
 
     def _install_fence(self, fence: StoreFence, now: float) -> CommitOutcome | None:
         stored = self._store.load()
