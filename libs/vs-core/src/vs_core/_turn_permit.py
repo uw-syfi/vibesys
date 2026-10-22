@@ -1,9 +1,12 @@
 """One permit for a logical turn: its identity and the deadline it was admitted with.
 
-Core issues the permit when the turn is dispatched. Continuations, corrections,
-evaluation submissions and evaluation-wait successors consume that same permit.
-A deadline derived from it never lands later than the permit's deadline, and a
-pause is acknowledged only when no permit-holding work remains.
+Core issues the permit when the turn is dispatched. While that turn runs, the
+evaluations it requests consume the permit and cannot outlive it. A non-immediate
+operator Pause of this epoch admits only that turn's successors and caps them at
+the permit. Outside that drain, a quota pause, a suspended resume, an
+evaluation-wait continuation, a correction and a host-restart replay keep the
+deadline the running run already gave them. A pause is acknowledged only when
+no permit-holding work remains.
 """
 
 from __future__ import annotations
@@ -14,6 +17,7 @@ from typing import TYPE_CHECKING
 from pydantic import BaseModel, ConfigDict
 
 from ._strategy_operations import RenderRoleArtifactsBase
+from ._wait_clock import turn_bound
 from .types.common import ExecuteRegisteredOperation, InvocationRef
 from .types.evaluation import EvaluationState, SubmitMeasurement
 from .types.records import RecordsState, RequestPhase, Scheduled
@@ -37,8 +41,9 @@ _LIVE = (SessionPhase.EXECUTING, SessionPhase.UNKNOWN, SessionPhase.SUSPENDED)
 class TurnPermit(BaseModel):
     """The admission of one logical turn.
 
-    ``turn`` is the admitted invocation. ``deadline_at`` is the absolute time
-    that invocation was given, and every successor is capped at it.
+    ``turn`` is the admitted invocation. ``deadline_at`` is that turn's bound
+    (``turn_bound``: the stated limit plus any capacity-hold credit). A successor
+    is capped at it only while a non-immediate Pause of this epoch is the authority.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -167,20 +172,54 @@ def _cap_pair(now_at: float, scheduled: Scheduled, permit: TurnPermit | None) ->
     )
 
 
+def _operator_drain(facts: _Facts) -> bool:
+    """Whether a non-immediate operator Pause of this epoch is draining successors.
+
+    A quota pause holds the run and sets no park. It is not this drain, and a
+    running turn's own permit is not one either.
+    """
+    park = facts.run.park
+    return park is not None and not park.immediate and park.epoch == facts.records.recovery.epoch
+
+
 def _for_request(facts: _Facts, request: object, *, live: bool) -> TurnPermit | None:
     if isinstance(request, DispatchTurn | ResumeSessionTurn):
-        own = _own_ref(request)
-        permit = _lookup(facts, own, live=live)
-        if permit is not None:
-            return permit
-        return _lookup(facts, _turn_anchor(facts.evaluation, request.turn), live=live)
+        return _for_turn(facts, request, live=live)
     if isinstance(request, SubmitMeasurement) and request.decision_id is None:
         return _for_scope(facts, request.scope, live=live)
+    if not _operator_drain(facts):
+        return None
     if isinstance(request, EnsureSession):
         return _for_session(facts, request.spec.session_id, live=live)
     if isinstance(request, ExecuteRegisteredOperation):
         return _for_operation(facts, request, live=live)
     return None
+
+
+def _for_turn(
+    facts: _Facts, request: DispatchTurn | ResumeSessionTurn, *, live: bool
+) -> TurnPermit | None:
+    """The permit a turn consumes.
+
+    Outside an operator Pause drain a new provider turn keeps the deadline it
+    was asked with. Only an admission this invocation itself holds can cap it.
+    The drain also accepts the ancestor the turn continues.
+    """
+    own = _own_ref(request)
+    if not _operator_drain(facts):
+        return _own_holding(facts, own, live=live)
+    permit = _lookup(facts, own, live=live)
+    if permit is not None:
+        return permit
+    return _lookup(facts, _turn_anchor(facts.evaluation, request.turn), live=live)
+
+
+def _own_holding(facts: _Facts, ref: InvocationRef, *, live: bool) -> TurnPermit | None:
+    """The permit ``ref`` itself holds. An ancestor it continues does not count."""
+    invocation = _invocation(facts.sessions, ref)
+    if invocation is None:
+        return None
+    return _admitted(facts, invocation, live=live)
 
 
 def _own_ref(request: DispatchTurn | ResumeSessionTurn) -> InvocationRef:
@@ -259,6 +298,34 @@ def _turn_anchor(evaluation: EvaluationState, turn: TurnSpec) -> InvocationRef |
     return turn.predecessor
 
 
+def _admitted(facts: _Facts, invocation: Invocation, *, live: bool) -> TurnPermit | None:
+    """The permit ``invocation`` holds, dated at its bound including hold credit."""
+    if not _holds(facts, invocation):
+        return None
+    deadline = _bound(facts, invocation)
+    if live and facts.run.now_at >= deadline:
+        return None
+    return TurnPermit(turn=invocation.invocation, deadline_at=deadline)
+
+
+def _bound(facts: _Facts, invocation: Invocation) -> float:
+    """``invocation``'s deadline: the dispatch's ``turn_bound``, else its stated until."""
+    record = next(
+        (
+            row
+            for row in facts.records.records
+            if isinstance(row.request, DispatchTurn | ResumeSessionTurn)
+            and row.request.turn == invocation.turn
+            and row.request.scope == invocation.scope
+            and row.phase != RequestPhase.PREPARED
+        ),
+        None,
+    )
+    if record is None:
+        return invocation.until.at
+    return turn_bound(record, facts.run).at
+
+
 def _lookup(facts: _Facts, ref: InvocationRef | None, *, live: bool) -> TurnPermit | None:
     seen: set[InvocationRef] = set()
     while ref is not None and ref not in seen:
@@ -266,10 +333,9 @@ def _lookup(facts: _Facts, ref: InvocationRef | None, *, live: bool) -> TurnPerm
         invocation = _invocation(facts.sessions, ref)
         if invocation is None:
             return None
-        if _holds(facts, invocation):
-            if live and facts.run.now_at >= invocation.until.at:
-                return None
-            return TurnPermit(turn=invocation.invocation, deadline_at=invocation.until.at)
+        permit = _admitted(facts, invocation, live=live)
+        if permit is not None:
+            return permit
         ref = invocation.turn.predecessor
     return None
 

@@ -1,7 +1,9 @@
 """A logical turn's permit is the only admission of its successors, and their deadline."""
 
+import enum
+
 import pytest
-from hypothesis import example, given, settings
+from hypothesis import assume, example, given, settings
 from hypothesis import strategies as st
 
 import vs_core.api as core
@@ -142,90 +144,208 @@ def test_admitted_successors_start_inside_the_turn_deadline(
         channel.start_execution(lambda: None, evaluation_id=request_id.root)
 
 
-def _resume_without_a_pause(
-    *, now_at: float, limit: float
-) -> tuple[core.CoreState, core.Transition]:
-    """A suspended turn's resume, on a run that has no Pause."""
+class _Successor(enum.StrEnum):
+    """A provider turn that follows an admitted one, and the hold it may meet."""
+
+    SUSPENDED_RESUME = "suspended-resume"
+    EVALUATION_WAIT = "evaluation-wait"
+    CORRECTION = "correction"
+    HOST_RESTART = "host-restart"
+    QUOTA_PAUSE = "quota-pause"
+    OPERATOR_PAUSE = "operator-pause"
+
+
+_FOLLOWS = (
+    _Successor.SUSPENDED_RESUME,
+    _Successor.EVALUATION_WAIT,
+    _Successor.CORRECTION,
+    _Successor.HOST_RESTART,
+)
+"""Successors a running run admits, each with the deadline it was asked with."""
+
+
+def _ended(
+    request_id: core.RequestId, scope: core.Scope, status: core.ObservationStatus
+) -> core.Observation:
+    """A terminal observation, so a correction may follow the turn."""
+    return core.Observation(
+        event_id=core.EventId(root=f"ended-{status.value}"),
+        request_id=request_id,
+        scope=scope,
+        sequence=1,
+        observed_at=1.0,
+        status=status,
+        terminal=True,
+        resource_id=core.ResourceId(root="conversation"),
+    )
+
+
+def _successor_world(kind: _Successor) -> tuple[core.CoreState, core.RequestTurn]:
+    """One successor of an admitted turn whose own deadline is ``_DEADLINE``.
+
+    A resume continues a suspended turn. A correction follows a terminal one:
+    a failed reply, or the cancel a host restart leaves (``EPOCH_INTERRUPTED``).
+    """
     state, turn = write_turn_world(access=core.Access.READ_ONLY)
     invocation = state.sessions.invocations[0]
     session = state.sessions.sessions[0]
-    resume_id = core.InvocationId(root="resume")
-    continuation_id = core.ContinuationId(root="wait")
-    next_ref = invocation.invocation.model_copy(update={"invocation_id": resume_id})
+    follow = kind in (_Successor.QUOTA_PAUSE, _Successor.OPERATOR_PAUSE)
+    resume = follow or kind in (_Successor.SUSPENDED_RESUME, _Successor.EVALUATION_WAIT)
+    if resume:
+        resume_id = core.InvocationId(root="resume")
+        continuation_id = core.ContinuationId(root="wait")
+        next_ref = invocation.invocation.model_copy(update={"invocation_id": resume_id})
+        spec = invocation.turn.model_copy(
+            update={
+                "invocation_id": resume_id,
+                "continuation_id": continuation_id,
+                "charge_class": "resume",
+                "predecessor": None,
+            }
+        )
+        state = state.model_copy(
+            update={
+                "sessions": state.sessions.model_copy(
+                    update={
+                        "sessions": (
+                            session.model_copy(update={"phase": core.SessionPhase.SUSPENDED}),
+                        ),
+                        "invocations": (
+                            invocation.model_copy(update={"phase": core.SessionPhase.SUSPENDED}),
+                        ),
+                    }
+                ),
+                "evaluation": core.EvaluationState(
+                    continuations=(
+                        core.Continuation(
+                            continuation_id=continuation_id,
+                            invocation=invocation.invocation,
+                            next_invocation=next_ref,
+                            jobs=(
+                                (core.ResourceId(root="measurement"),)
+                                if kind is _Successor.EVALUATION_WAIT
+                                else ()
+                            ),
+                            deadline_at=80.0,
+                            phase=core.ContinuationPhase.AUTHORIZED,
+                        ),
+                    )
+                ),
+            }
+        )
+    else:
+        status = (
+            core.ObservationStatus.CANCELLED
+            if kind is _Successor.HOST_RESTART
+            else core.ObservationStatus.FAILED
+        )
+        dispatch = next(
+            row.request_id
+            for row in state.records.records
+            if isinstance(row.request, core.DispatchTurn)
+        )
+        again = core.InvocationId(root="again")
+        # The attempt already paid for this ask, so admission dispatches it in the same step
+        # instead of leaving it to wait for a charge that this fixture never grants.
+        paid = core.ChargeReceipt(
+            charge_id=core.ChargeId(root="again"),
+            kind=core.ChargeKind.TURN,
+            invocation_id=again,
+            charged=1,
+        )
+        owner = state.attempts.attempts[0]
+        spec = invocation.turn.model_copy(
+            update={
+                "invocation_id": again,
+                "charge_class": "correction",
+                "predecessor": invocation.invocation,
+                "continuation_id": None,
+            }
+        )
+        state = state.model_copy(
+            update={
+                "attempts": core.AttemptsState(
+                    attempts=(owner.model_copy(update={"charges": (*owner.charges, paid)}),)
+                ),
+                "sessions": state.sessions.model_copy(
+                    update={
+                        "sessions": (session.model_copy(update={"phase": core.SessionPhase.IDLE}),),
+                        "invocations": (
+                            invocation.model_copy(
+                                update={
+                                    "phase": core.SessionPhase.TERMINAL,
+                                    "observation": _ended(dispatch, turn.scope, status),
+                                }
+                            ),
+                        ),
+                    }
+                ),
+            }
+        )
     state = state.model_copy(
-        update={
-            "run": state.run.model_copy(update={"limits": sample_limits(max_turns=10)}),
-            "sessions": state.sessions.model_copy(
-                update={
-                    "sessions": (
-                        session.model_copy(update={"phase": core.SessionPhase.SUSPENDED}),
-                    ),
-                    "invocations": (
-                        invocation.model_copy(update={"phase": core.SessionPhase.SUSPENDED}),
-                    ),
-                }
-            ),
-            "evaluation": core.EvaluationState(
-                continuations=(
-                    core.Continuation(
-                        continuation_id=continuation_id,
-                        invocation=invocation.invocation,
-                        next_invocation=next_ref,
-                        jobs=(),
-                        deadline_at=80.0,
-                        phase=core.ContinuationPhase.AUTHORIZED,
-                    ),
-                )
-            ),
-        }
-    )
-    state = _at(state, now_at)
-    spec = invocation.turn.model_copy(
-        update={
-            "invocation_id": resume_id,
-            "continuation_id": continuation_id,
-            "charge_class": "resume",
-            "predecessor": None,
-        }
+        update={"run": state.run.model_copy(update={"limits": sample_limits(max_turns=10)})}
     )
     decision = core.RequestTurn(
-        decision_id=core.DecisionId(root="resume"), scope=turn.scope, turn=spec
+        decision_id=core.DecisionId(root=kind.value), scope=turn.scope, turn=spec
     )
-    result = core.step(
+    return state, decision
+
+
+def _submit(state: core.CoreState, decision: core.RequestTurn, limit: float) -> core.Transition:
+    return core.step(
         state,
         core.DecisionSubmitted(
             decision=core.Wait(request=decision, until=core.Within(limit=limit)),
             expected_revision=state.revision,
         ),
     )
-    return state, result
 
 
-@pytest.mark.regression
-@example(now_at=0, limit=50)
-@example(now_at=99, limit=100)
-@settings(max_examples=examples(pr=8, nightly=40), deadline=None)
-@given(now_at=st.integers(min_value=0, max_value=99), limit=st.integers(min_value=1, max_value=400))
-def test_without_a_pause_a_successor_is_admitted_on_the_running_run(
-    now_at: int, limit: int
+def _hold(state: core.CoreState, owner: core.PauseOwner) -> core.CoreState:
+    """Pause at the run's current time. A quota pause sets no park; an operator pause does."""
+    return core.step(
+        state,
+        core.RunControlEvent(
+            control=core.ControlInput(
+                control_id=core.ControlId(root=owner.value),
+                action="pause",
+                owner=owner,
+            ),
+            now_at=state.run.now_at,
+        ),
+    ).state
+
+
+def _turn_limit(state: core.CoreState, before: set[core.RequestId]) -> float | None:
+    limits = [
+        row.limit_from_dispatch
+        for row in state.records.records
+        if row.request_id not in before
+        and isinstance(row.request, core.DispatchTurn | core.ResumeSessionTurn)
+        and row.limit_from_dispatch is not None
+    ]
+    return None if not limits else limits[0]
+
+
+def _ids(state: core.CoreState) -> set[core.RequestId]:
+    return {row.request_id for row in state.records.records}
+
+
+def _admits_its_own_deadline(
+    state: core.CoreState, decision: core.RequestTurn, limit: float
 ) -> None:
-    """No Pause is pending, so a resume is admitted and the run stays running.
-
-    The permit of the suspended turn used to open the drain. The resume was
-    accepted and the run entered draining with no park, so every later decision
-    waited for a drain that never finished.
-    """
-    state, result = _resume_without_a_pause(now_at=float(now_at), limit=float(limit))
+    """``decision`` starts, the run stays running, and the turn keeps ``limit``."""
+    before = _ids(state)
+    result = _submit(state, decision, limit)
     assert state.run.park is None
     assert state.run.status is core.RunStatus.RUNNING
-    accepted = [event for event in result.events if isinstance(event, core.Accepted)]
-    assert len(accepted) == 1
-    assert any(isinstance(request, core.ResumeSessionTurn) for request in result.requests)
+    assert any(isinstance(event, core.Accepted) for event in result.events)
     assert result.state.run.park is None
     assert result.state.run.status is core.RunStatus.RUNNING
+    assert _turn_limit(result.state, before) == limit
     finish = core.Finish(
         decision_id=core.DecisionId(root="finish"),
-        scope=result.requests[0].scope,
+        scope=decision.scope,
         mode="drain",
         result=core.RunResultProposal(outcome="cancelled", reason="done"),
     )
@@ -239,3 +359,165 @@ def test_without_a_pause_a_successor_is_admitted_on_the_running_run(
     )
     assert closed.state.run.status is not core.RunStatus.DRAINING
     assert closed.state.run.park is None
+
+
+@pytest.mark.regression
+@example(kind=_Successor.EVALUATION_WAIT, now_at=0, limit=50)
+@example(kind=_Successor.EVALUATION_WAIT, now_at=99, limit=100)
+@example(kind=_Successor.CORRECTION, now_at=100, limit=400)
+@example(kind=_Successor.HOST_RESTART, now_at=100, limit=400)
+@example(kind=_Successor.SUSPENDED_RESUME, now_at=99, limit=400)
+@example(kind=_Successor.QUOTA_PAUSE, now_at=99, limit=400)
+@example(kind=_Successor.OPERATOR_PAUSE, now_at=99, limit=400)
+@settings(max_examples=examples(pr=8, nightly=40), deadline=None)
+@given(
+    kind=st.sampled_from(tuple(_Successor)),
+    now_at=st.integers(min_value=0, max_value=100),
+    limit=st.integers(min_value=1, max_value=400),
+)
+def test_without_a_pause_a_successor_is_admitted_on_the_running_run(
+    kind: _Successor, now_at: int, limit: int
+) -> None:
+    """Each successor is admitted as main admits it, and only an operator Pause caps it.
+
+    A running turn's permit used to open the drain, and then to cap a later provider
+    turn at the ancestor deadline. A resume after a quota outage was asked again with
+    its own turn budget; the cap made that ask due immediately and cancelled it.
+    A quota pause holds the run and admits nothing new until it lifts. An operator
+    Pause admits the successor into the drain and caps it at the admitted turn.
+    """
+    asked = float(limit)
+    at = float(now_at)
+    state, decision = _successor_world(kind)
+    state = _at(state, at)
+    if kind in _FOLLOWS:
+        _admits_its_own_deadline(state, decision, asked)
+        return
+    if kind is _Successor.QUOTA_PAUSE:
+        held = _hold(state, core.PauseOwner.QUOTA)
+        assert held.run.park is None
+        assert held.run.status is core.RunStatus.PAUSED
+        refused = _submit(held, decision, asked)
+        assert any(
+            isinstance(event, core.Rejected) and event.code == core.RejectionCode.CLOSED_SCOPE
+            for event in refused.events
+        )
+        assert refused.state.run.status is core.RunStatus.PAUSED
+        assert refused.state.run.park is None
+        resumed = core.step(
+            refused.state,
+            core.RunControlEvent(
+                control=core.ControlInput(
+                    control_id=core.ControlId(root="lift"), action="resume", when="now"
+                ),
+                now_at=refused.state.run.now_at,
+            ),
+        ).state
+        again = decision.model_copy(update={"decision_id": core.DecisionId(root="after-quota")})
+        _admits_its_own_deadline(resumed, again, asked)
+        return
+    draining = _hold(state, core.PauseOwner.OPERATOR)
+    assert draining.run.park is not None
+    assert not draining.run.park.immediate
+    result = _submit(draining, decision, asked)
+    if at >= _DEADLINE:
+        assert any(
+            isinstance(event, core.Rejected) and event.code == core.RejectionCode.CLOSED_SCOPE
+            for event in result.events
+        )
+        assert result.state.run.status is core.RunStatus.DRAINING
+        return
+    assert any(isinstance(event, core.Accepted) for event in result.events)
+    assert result.state.run.status is core.RunStatus.DRAINING
+    remaining = _DEADLINE - at
+    assert _turn_limit(result.state, _ids(draining)) == min(asked, remaining)
+
+
+_RUN_END = 10_000_000.0
+_WIDE = 50_000.0
+
+
+def _credited_turn(credit: float, now_at: float) -> tuple[core.CoreState, core.RequestTurn, float]:
+    """A suspended resume whose ancestor holds ``credit`` seconds, at ``now_at``.
+
+    The run deadline sits past any credit this property draws, so the turn bound is the
+    stated limit plus that credit and not the run's end. The hold is attached before the
+    clock passes the stated limit, which would otherwise block the turn with no credit.
+    """
+    state, decision = _successor_world(_Successor.SUSPENDED_RESUME)
+    continuations = tuple(
+        row.model_copy(update={"deadline_at": _RUN_END}) for row in state.evaluation.continuations
+    )
+    state = state.model_copy(
+        update={
+            "run": state.run.model_copy(update={"deadline_at": _RUN_END}),
+            "evaluation": state.evaluation.model_copy(update={"continuations": continuations}),
+        }
+    )
+    invocation = state.sessions.invocations[0]
+    held = core.step(
+        state,
+        core.TurnHeld(
+            invocation_id=invocation.invocation.invocation_id,
+            hold=core.CapacityHold(credit=credit, budget=credit),
+        ),
+    ).state
+    record = next(
+        row
+        for row in held.records.records
+        if isinstance(row.request, core.DispatchTurn | core.ResumeSessionTurn)
+    )
+    assert record.capacity_hold is not None
+    assert record.capacity_hold.credit == credit
+    credited = record.until.at + credit
+    assert credited <= _RUN_END
+    return _at(held, now_at), decision, credited
+
+
+@pytest.mark.regression
+@example(credit=10804, now_at=102, paused=False)
+@example(credit=10804, now_at=102, paused=True)
+@example(credit=0, now_at=50, paused=False)
+@example(credit=0, now_at=50, paused=True)
+@settings(max_examples=examples(pr=8, nightly=40), deadline=None)
+@given(
+    credit=st.integers(min_value=0, max_value=20_000),
+    now_at=st.integers(min_value=0, max_value=200),
+    paused=st.booleans(),
+)
+def test_hold_credit_is_the_turn_bound_and_pause_is_the_only_cap(
+    credit: int, now_at: int, *, paused: bool
+) -> None:
+    """A successor keeps one deadline: the turn bound, which includes hold credit.
+
+    The permit used to read the invocation's stated until. A hold credited to end at
+    10904 (stated 100, credit 10804) was already over at time 102, so the successor
+    was cut to 2 seconds past that until and lost as transport instead of running out
+    its credit. Without a Pause the successor keeps the deadline it was asked with,
+    which is never earlier than that credited bound. A non-immediate Pause of this
+    epoch caps it at the bound and no later.
+    """
+    assume(now_at < _DEADLINE + credit)
+    at = float(now_at)
+    state, decision, credited = _credited_turn(float(credit), at)
+    # The ask extends past the credited bound, so a missing cap and a short cap both show.
+    assert at + _WIDE >= credited
+    if paused:
+        state = _hold(state, core.PauseOwner.OPERATOR)
+        assert state.run.park is not None
+        assert not state.run.park.immediate
+    before = _ids(state)
+    result = _submit(state, decision, _WIDE)
+    assert any(isinstance(event, core.Accepted) for event in result.events), result.events
+    limit = _turn_limit(result.state, before)
+    assert limit is not None
+    end = at + limit
+    if paused:
+        assert end <= credited
+        assert end == min(at + _WIDE, credited)
+        assert result.state.run.status is core.RunStatus.DRAINING
+        return
+    assert end >= credited
+    assert end == at + _WIDE
+    assert result.state.run.status is core.RunStatus.RUNNING
+    assert result.state.run.park is None
