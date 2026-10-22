@@ -43,7 +43,7 @@ from vs_runtime.api.replay import (
     WorkspaceReplayExecutor,
     WriterProofError,
     WriterRegistry,
-    drive_replay,
+    run_replay,
 )
 from vs_sim.api.testing import SimThreads, swept
 
@@ -192,7 +192,7 @@ def workspace_boundary_case(
                 first.runtime.accept(span.id, now=sim.clock.now(), at=Timestamp())
             first.runtime.close(now=sim.clock.now())
             resumed = host(restart=True)
-            result = await drive_replay(resumed, launch("resume"))
+            result = await run_replay(resumed, launch("resume"))
             assert isinstance(result, ReplayCompleted)
             assert isinstance(result.value, pb.ReplayWorkspaceResult)
             assert result.value.status is pb.ReplayWorkspaceStatus.SUCCEEDED
@@ -200,7 +200,7 @@ def workspace_boundary_case(
                 "VALUE = 1\n" if effect == 0 and boundary == "prepared" else "VALUE = 2\n"
             )
             commits = _commits(initial)
-            assert await drive_replay(host(restart=True), launch("again")) == result
+            assert await run_replay(host(restart=True), launch("again")) == result
             assert _commits(initial) == commits
 
         sim.run(scenario())
@@ -263,11 +263,11 @@ def test_workspace_recovery_sweeps_real_owner_receipt_writes(tmp_path: Path, sim
                     )
 
                 if crash_at is None:
-                    result = await drive_replay(host(), launch("first"))
+                    result = await run_replay(host(), launch("first"))
                 else:
                     with pytest.raises(ProcessKilledError):
-                        await drive_replay(host(), launch("first"))
-                    result = await drive_replay(host(restarting=True), launch("resume"))
+                        await run_replay(host(), launch("first"))
+                    result = await run_replay(host(restarting=True), launch("resume"))
                 assert isinstance(result, ReplayCompleted)
                 assert isinstance(result.value, pb.ReplayWorkspaceResult)
                 assert result.value.status is pb.ReplayWorkspaceStatus.SUCCEEDED
@@ -283,7 +283,7 @@ def test_workspace_recovery_sweeps_real_owner_receipt_writes(tmp_path: Path, sim
                     == "VALUE = 2"
                 )
                 commits = _commits(initial)
-                assert await drive_replay(host(restarting=True), launch("again")) == result
+                assert await run_replay(host(restarting=True), launch("again")) == result
                 assert _commits(initial) == commits
 
             sim.run(scenario())
@@ -421,7 +421,7 @@ def test_adoption_consumes_native_evidence_without_fabricating_legacy_observatio
                 ),
                 writer_barrier=barrier,
             )
-            completed = await drive_replay(run_host, launch("first"))
+            completed = await run_replay(run_host, launch("first"))
             assert isinstance(completed, ReplayCompleted)
             assert isinstance(completed.value, pb.ReplayWorkspaceResult)
             assert completed.value.status is (
@@ -542,14 +542,14 @@ def test_backing_acquisition_crash_reconciles_intent_and_installed_content(
                 first.runtime.close(now=sim.clock.now())
             gate.heal()
             resumed = binding(restarted=True)
-            result = await drive_replay(resumed, launch("resume"))
+            result = await run_replay(resumed, launch("resume"))
             assert isinstance(result, ReplayCompleted)
             assert isinstance(result.value, pb.ReplayWorkspaceResult)
             assert result.value.status is pb.ReplayWorkspaceStatus.SUCCEEDED
             assert (initial.root.path / "candidate.py").read_text() == "VALUE = 1\n"
             assert barrier.registry.require_proof().manifest is not None
             assert resumed.runtime.archive.unresolved == ()
-            assert await drive_replay(binding(restarted=True), launch("again")) == result
+            assert await run_replay(binding(restarted=True), launch("again")) == result
 
         sim.run(scenario())
 
@@ -605,7 +605,7 @@ def test_old_empty_proof_cannot_release_root_after_new_physical_writers(
                 writer_barrier=barrier,
             )
             with pytest.raises(ValueError, match="does not cover"):
-                await drive_replay(binding, launch("first"))
+                await run_replay(binding, launch("first"))
             assert len(writer.invocations) == 1
             assert StoreWorkspaceReceipts(receipts).root_holder() == AttemptRef(
                 attempt_id=AttemptId(root="round-1"), generation=0
@@ -672,7 +672,7 @@ def test_root_acquisition_holds_backing_exclusion_across_owner_awaits(
                 ),
                 writer_barrier=barrier,
             )
-            result = await drive_replay(binding, launch("first"))
+            result = await run_replay(binding, launch("first"))
             assert isinstance(result, ReplayCompleted)
             assert isinstance(result.value, pb.ReplayWorkspaceResult)
             assert result.value.status is pb.ReplayWorkspaceStatus.SUCCEEDED

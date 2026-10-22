@@ -10,7 +10,7 @@ from protobuf.wkt.google.protobuf.timestamp_pb import Timestamp
 from vs_core.api.replay import ReplayCall, ReplayError, ReplayFlow, SemanticKey, classify_context
 from vs_project.api import Committed, FakeStateStore, StoredEnvelope
 from vs_proto.api import ReplayStore, ValidationError, core_common, replay, validate
-from vs_runtime.api.replay import FakeReplayExecutor, ReplayCompleted, ReplayResult, drive_replay
+from vs_runtime.api.replay import FakeReplayExecutor, ReplayCompleted, ReplayResult, run_replay
 from vs_sim.api.testing import Sim
 
 from .generated.prior.vibesys.runtime.testing.v1.schema_recovery_pb import (
@@ -60,7 +60,7 @@ async def test_old_completed_reply_does_not_redeclare_its_whole_file_in_the_new_
         first.runtime.accept(span.id, now=0, at=Timestamp())
     first.runtime.close(now=0)
     resumed = host(store, program(Reply), executor, sim)
-    assert await drive_replay(resumed, launch("resume")) == ReplayCompleted("answer")
+    assert await run_replay(resumed, launch("resume")) == ReplayCompleted("answer")
     assert executor.invocations == (span.id,)
     assert resumed.runtime.archive.policy_drift is None
     first_schema = resumed.runtime.archive.epochs[0].descriptors

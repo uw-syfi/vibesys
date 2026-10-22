@@ -16,7 +16,7 @@ from vs_runtime.api.replay import (
     ReplayExecutors,
     ReplayOperationError,
     ReplayResult,
-    drive_replay,
+    run_replay,
 )
 
 from .test_replay_p1_record_compatibility import p1_contract
@@ -73,9 +73,9 @@ async def test_closed_owner_map_routes_execution_and_recovery_by_native_type(sim
     (span,) = runtime.prepare(now=sim.clock.now(), at=Timestamp())
     await runtime.dispatch(span.id, owners, now=sim.clock.now())
     runtime.close(now=sim.clock.now())
-    assert await drive_replay(
-        host(store, program, owners, sim), launch("resume")
-    ) == ReplayCompleted(("a", "role:b"))
+    assert await run_replay(host(store, program, owners, sim), launch("resume")) == ReplayCompleted(
+        ("a", "role:b")
+    )
     assert len(first.invocations) == 1
     assert len(second.invocations) == 1
 

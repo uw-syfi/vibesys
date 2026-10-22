@@ -11,6 +11,15 @@ from vs_runtime._replay_controls import apply_controls
 from vs_runtime._replay_evaluation import EvaluationReplayExecutor, replay_measurement_plan
 from vs_runtime._replay_executors import ReplayExecutors
 from vs_runtime._replay_fake import FakeReplayExecutor
+from vs_runtime._replay_launch import (
+    SETUP_FAILED,
+    OwnerReplayEnvironment,
+    ReplayEnvironment,
+    ReplayLaunchResources,
+    ReplayPlan,
+    ReplayProjector,
+    open_replay,
+)
 from vs_runtime._replay_operations import (
     RegisteredReplayExecutor,
     ReplayOperationBinding,
@@ -20,9 +29,12 @@ from vs_runtime._replay_operations import (
 from vs_runtime._replay_prompts import ReplayPrompt, ReplayPromptRenderer
 from vs_runtime._replay_run import (
     ReplayCompleted,
+    ReplayLifetime,
     ReplayParked,
     ReplayRunHost,
     drive_replay,
+    replay_lifetime,
+    run_replay,
 )
 from vs_runtime._replay_runtime import (
     REPLAY_STORE_SCHEMA_VERSION,
@@ -45,7 +57,7 @@ from vs_runtime._replay_sessions import (
 )
 from vs_runtime._replay_store import ReplayStore, RunLogReplayStore
 from vs_runtime._replay_tools import ReplayTurnYields
-from vs_runtime._replay_wiring import ReplayOwnerServices, replay_bindings
+from vs_runtime._replay_wiring import LIFECYCLE_REQUESTS, ReplayOwnerServices, replay_bindings
 from vs_runtime._replay_workspaces import WorkspaceReplayExecutor
 from vs_runtime._writer_reconciliation import (
     DockerWriterReconciler,
@@ -58,7 +70,9 @@ from vs_runtime._writer_reconciliation import (
 )
 
 __all__ = [
+    "LIFECYCLE_REQUESTS",
     "REPLAY_STORE_SCHEMA_VERSION",
+    "SETUP_FAILED",
     "DockerWriterReconciler",
     "EvaluationReceiptUnconfirmedError",
     "EvaluationRecoveryBlockedError",
@@ -67,21 +81,27 @@ __all__ = [
     "EvaluationWriterReconciliation",
     "FakeReplayExecutor",
     "LocalEvaluationReceipts",
+    "OwnerReplayEnvironment",
     "RegisteredReplayExecutor",
     "ReplayAbsent",
     "ReplayAgentReply",
     "ReplayCommitError",
     "ReplayCompleted",
     "ReplayEnding",
+    "ReplayEnvironment",
     "ReplayExecutor",
     "ReplayExecutors",
     "ReplayLaunch",
+    "ReplayLaunchResources",
+    "ReplayLifetime",
     "ReplayOperationBinding",
     "ReplayOperationError",
     "ReplayOperationHost",
     "ReplayOwnerServices",
     "ReplayParked",
     "ReplayPending",
+    "ReplayPlan",
+    "ReplayProjector",
     "ReplayPrompt",
     "ReplayPromptRenderer",
     "ReplayRecoveryRequiredError",
@@ -104,6 +124,9 @@ __all__ = [
     "WriterRegistry",
     "apply_controls",
     "drive_replay",
+    "open_replay",
     "replay_bindings",
+    "replay_lifetime",
     "replay_measurement_plan",
+    "run_replay",
 ]

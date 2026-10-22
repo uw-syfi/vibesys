@@ -33,8 +33,8 @@ from vs_runtime.api.replay import (
     ReplayTurnYields,
     ReplayUnknown,
     SessionReplayExecutor,
-    drive_replay,
     replay_measurement_plan,
+    run_replay,
 )
 from vs_runtime.api.slurm_evaluation_stack import plan
 from vs_sim.api.testing import SimBlockingRunner, swept
@@ -247,13 +247,11 @@ def test_agent_owner_recovery_never_repeats_provider_work(
             runtime.accept(span.id, now=sim.clock.now(), at=Timestamp())
         runtime.close(now=sim.clock.now())
         launch = ReplayLaunch(EpochStarted(run_id="run"), "resume", "host-a", 100)
-        assert await drive_replay(host(store, program, executor(), sim), launch) == ReplayCompleted(
-            7
-        )
+        assert await run_replay(host(store, program, executor(), sim), launch) == ReplayCompleted(7)
         assert len(client.calls_for("worker")) == 2
         launch = ReplayLaunch(EpochStarted(run_id="run"), "again", "host-a", 100)
         final = host(store, program, executor(), sim)
-        assert await drive_replay(final, launch) == ReplayCompleted(7)
+        assert await run_replay(final, launch) == ReplayCompleted(7)
         assert len(client.calls_for("worker")) == 2
         assert final.runtime.accounting.paid_operations == 2
         assert final.runtime.accounting.reported_cost_usd == pytest.approx(0.2)
@@ -276,13 +274,13 @@ def test_agent_recovery_at_owner_receipt_writes(
             first = host(given.store, program, given.executor(receipts), sim)
             launch = ReplayLaunch(EpochStarted(run_id="run"), "first", "host-a", 100)
             if crash_at is None:
-                assert await drive_replay(first, launch) == ReplayCompleted(7)
+                assert await run_replay(first, launch) == ReplayCompleted(7)
             else:
                 with pytest.raises(ProcessKilledError):
-                    await drive_replay(first, launch)
+                    await run_replay(first, launch)
                 resumed = host(given.store, program, given.executor(None), sim)
                 launch = ReplayLaunch(EpochStarted(run_id="run"), "resume", "host-a", 100)
-                assert await drive_replay(resumed, launch) == ReplayCompleted(7)
+                assert await run_replay(resumed, launch) == ReplayCompleted(7)
                 assert resumed.runtime.accounting.reported_cost_usd == pytest.approx(0.2)
             assert len(given.client.calls_for("worker")) == 2
 
@@ -356,13 +354,13 @@ def test_unknown_provider_acceptance_is_never_redispatched(
         first = host(given.store, program, given.executor(None), sim)
         launch = ReplayLaunch(EpochStarted(run_id="run"), "first", "host-a", 100)
         with pytest.raises(ReplayOperationError, match="remains unknown"):
-            await drive_replay(first, launch)
+            await run_replay(first, launch)
         assert len(given.client.calls_for("worker")) == 1
         assert first.runtime.accounting.resources.committed.money_usd == 1
         resumed = host(given.store, program, given.executor(None), sim)
         launch = ReplayLaunch(EpochStarted(run_id="run"), "resume", "host-a", 100)
         with pytest.raises(ReplayRecoveryRequiredError):
-            await drive_replay(resumed, launch)
+            await run_replay(resumed, launch)
         assert len(given.client.calls_for("worker")) == 1
 
     sim.run(scenario(), threads=given.threads)
@@ -436,7 +434,7 @@ def test_explicit_session_reuse_keeps_the_recorded_physical_conversation(
         return 7
 
     async def scenario() -> None:
-        assert await drive_replay(
+        assert await run_replay(
             host(given.store, root, given.executor(None), sim),
             ReplayLaunch(EpochStarted(run_id="run"), "first", "host-a", 100),
         ) == ReplayCompleted(7)

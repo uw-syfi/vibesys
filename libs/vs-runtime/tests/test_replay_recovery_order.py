@@ -22,7 +22,7 @@ from vs_runtime.api.replay import (
     ReplayResult,
     ReplayUnknown,
     WriterRegistry,
-    drive_replay,
+    run_replay,
 )
 
 from .test_replay_physical import physical_root, proof_barrier
@@ -114,7 +114,7 @@ async def test_proof_and_retirement_precede_inspection_that_can_rebind_backing(
     )
     owners = ReplayExecutors({core_common.Identity: writer, StringValue: reader})
     resumed = replace(host(store, program, owners, sim), writer_barrier=barrier)
-    assert await drive_replay(resumed, launch("resume")) == ReplayCompleted("completed")
+    assert await run_replay(resumed, launch("resume")) == ReplayCompleted("completed")
     assert reader.inspected == [read.id]
     assert resumed.runtime.archive.span(old.id).has_field("ended_at")
     assert len(writer.invocations) == 2

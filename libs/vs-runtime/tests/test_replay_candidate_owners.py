@@ -62,9 +62,9 @@ from vs_runtime.api.replay import (
     ReplayRunHost,
     ReplayRuntime,
     ReplaySessionServices,
-    drive_replay,
     replay_bindings,
     replay_measurement_plan,
+    run_replay,
 )
 from vs_runtime.api.slurm_evaluation_stack import ScenarioCluster, plan
 from vs_sandbox.api.slurm import SlurmEvaluationPlan, SlurmExecutionPolicy
@@ -409,6 +409,7 @@ class CandidateWorld:
         self.jobs.append(measured)
         executor = replay_bindings(
             ReplayOwnerServices(
+                receipts=self.receipts,
                 writer_registry=self.barrier.registry,
                 workspaces=resources,
                 sessions=ReplaySessionServices(
@@ -417,11 +418,10 @@ class CandidateWorld:
                 evaluation=measured,
                 workspace_within_seconds=100,
                 evaluation_within_seconds=100,
-                allow_adoption=allow_adoption,
             ),
-            self.receipts,
             timing,
             (ReplayAgentReply(SCHEMA, Reply, AgentReplayResult, encode),),
+            allow_adoption=allow_adoption,
             operations=operations,
         )
         return ReplayRunHost(
@@ -467,7 +467,7 @@ class CandidateWorld:
                     break
             first.runtime.close(now=self.sim.clock.now())
             resumed = self.host(restart=True, iterations=0)
-            completed = await drive_replay(
+            completed = await run_replay(
                 resumed, ReplayLaunch(EpochStarted(run_id=self.env.run_id), "resume", "host-a", 100)
             )
             assert isinstance(completed, ReplayCompleted)
@@ -492,7 +492,7 @@ class CandidateWorld:
             self.root = self.drifted_root
             replayed = self.host(restart=True, iterations=0)
             assert (
-                await drive_replay(
+                await run_replay(
                     replayed,
                     ReplayLaunch(EpochStarted(run_id=self.env.run_id), "again", "host-a", 100),
                 )
@@ -529,7 +529,7 @@ def test_zero_fresh_iteration_budget_never_reaches_an_effect_owner(
         async def scenario() -> None:
             try:
                 host = world.host(iterations=0)
-                result = await drive_replay(
+                result = await run_replay(
                     host, ReplayLaunch(EpochStarted(run_id=env.run_id), "first", "host-a", 100)
                 )
                 assert isinstance(result, ReplayParked)
@@ -563,7 +563,7 @@ def test_native_composition_preserves_operator_edits_when_adoption_is_protected(
 
         async def scenario() -> None:
             try:
-                result = await drive_replay(
+                result = await run_replay(
                     world.host(allow_adoption=False),
                     ReplayLaunch(EpochStarted(run_id=env.run_id), "first", "host-a", 100),
                 )
@@ -590,7 +590,7 @@ def test_native_composition_adds_registered_request_owners(tmp_path: Path, sim: 
 
         async def scenario() -> None:
             try:
-                completed = await drive_replay(
+                completed = await run_replay(
                     world.host(
                         operations={core_common.Identity: first, core_common.RoleId: second}
                     ),

@@ -52,7 +52,7 @@ from vs_runtime.api.replay import (
     ReplayParked,
     ReplayRunHost,
     ReplayRuntime,
-    drive_replay,
+    run_replay,
 )
 from vs_runtime.api.testing import FakeCommands, FakeWorkspace, FakeWorkspaces
 from vs_sim.api.testing import Sim, SimThreads
@@ -185,7 +185,7 @@ async def test_real_serial_effects_recover_every_boundary_without_duplicate_capt
             break
         first.runtime.accept(span.id, now=sim.clock.now(), at=Timestamp())
     first.runtime.close(now=sim.clock.now())
-    result = await drive_replay(given.host(), launch("resume"))
+    result = await run_replay(given.host(), launch("resume"))
     assert isinstance(result, ReplayCompleted)
     assert isinstance(result.value, tuple)
     put, read, captured = result.value
@@ -200,7 +200,7 @@ async def test_real_serial_effects_recover_every_boundary_without_duplicate_capt
     assert len(given.commands.calls) == 1
     assert len(given.workspaces.candidates) == 1
     assert all(candidate.discarded for candidate in given.workspaces.candidates)
-    assert await drive_replay(given.host(), launch("again")) == result
+    assert await run_replay(given.host(), launch("again")) == result
     assert len(given.commands.calls) == 1
     assert [item.id for item in given.roadmap.items()] == ["major-1"]
 
@@ -271,7 +271,7 @@ async def test_recovered_capture_keeps_its_original_timeout_after_policy_tighten
     first.runtime.close(now=sim.clock.now())
     assert len(given.commands.calls) == 1
     assert isinstance(
-        await drive_replay(given.host(within_seconds=5), launch("resume")), ReplayCompleted
+        await run_replay(given.host(within_seconds=5), launch("resume")), ReplayCompleted
     )
     assert len(given.commands.calls) == 1
     assert given.commands.calls[0].timeout_seconds == 10
@@ -281,7 +281,7 @@ async def test_unused_paid_capture_holds_new_roadmap_writes_until_plain_resume(
     tmp_path: Path, sim: Sim
 ) -> None:
     given = world(tmp_path, sim, "document")
-    assert isinstance(await drive_replay(given.host(), launch("first")), ReplayCompleted)
+    assert isinstance(await run_replay(given.host(), launch("first")), ReplayCompleted)
 
     async def edited(ctx: ReplayFlow) -> object:
         await roadmap_calls(ctx)
@@ -302,9 +302,9 @@ async def test_unused_paid_capture_holds_new_roadmap_writes_until_plain_resume(
             item="round-2",
         )
 
-    assert await drive_replay(given.host(edited), launch("notice")) == ReplayParked()
+    assert await run_replay(given.host(edited), launch("notice")) == ReplayParked()
     assert [item.id for item in given.roadmap.items()] == ["major-1"]
     assert len(given.commands.calls) == 1
-    assert isinstance(await drive_replay(given.host(edited), launch("ack")), ReplayCompleted)
+    assert isinstance(await run_replay(given.host(edited), launch("ack")), ReplayCompleted)
     assert [item.id for item in given.roadmap.items()] == ["major-1", "major-2"]
     assert len(given.commands.calls) == 1

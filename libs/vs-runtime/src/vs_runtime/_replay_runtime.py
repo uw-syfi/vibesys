@@ -267,21 +267,9 @@ class ReplayRuntime:
             problem = "Resume launch already recorded; inspect its epoch instead of relaunching"
             raise ReplayCommitError(problem)
         if self._epoch.number and not epoch_has_ended(self._epoch):
-            self._append(
-                Oneof(
-                    "lifecycle",
-                    Lifecycle(
-                        state=Oneof(
-                            "ended",
-                            Ended(
-                                outcome=Outcome.INTERRUPTED,
-                                summary="The epoch writer was interrupted. External work is retained for inspection.",
-                                resumable=True,
-                                interruption_reason="writer_restarted",
-                            ),
-                        )
-                    ),
-                ),
+            self._interrupted(
+                "writer_restarted",
+                "The epoch writer was interrupted. External work is retained for inspection.",
                 now=now,
                 at=at,
             )
@@ -648,7 +636,11 @@ class ReplayRuntime:
         try:
             return await executor.execute(self._span(span_id), self._fence)
         except BaseException:
-            self._halted = True
+            # A withdrawn child is already ineligible and stays unended for its
+            # owner's inspection, so its cancellation or failure leaves the writer whole.
+            physical = self._span(span_id).replay_physical
+            if physical is None or not physical.has_field("withdrawn_sequence"):
+                self._halted = True
             raise
 
     def observe(
@@ -753,8 +745,11 @@ class ReplayRuntime:
         """Record ``control``'s disposition before its inbox entry is settled or rejected.
 
         A stale control is recorded as stale and changes nothing. Pause-now records
-        the children it withdraws, then withdraws each before any cancellation. A
-        repeated request returns its recorded disposition and finishes its withdrawals.
+        the children it withdraws, then withdraws each before any cancellation. It
+        names only children neither ended nor withdrawn; this writer ends every child
+        it observes without withdrawal, so a named child has no eligible observation.
+        A repeated request returns its recorded disposition and finishes its
+        withdrawals, skipping a named child that has ended since.
         """
         _ = self._active_scheduler
         validate(control)
@@ -784,10 +779,36 @@ class ReplayRuntime:
         if applied is not None and self._archive.controls.halted:
             for identity in applied.withdrawn:
                 child = self._span(identity)
-                if not child.has_field("ended_at") and child.replay_observation is None:
+                if not child.has_field("ended_at"):
                     self.withdraw(identity, now=now, at=at)
             self._park(now=now, at=at)
         return disposition
+
+    def interrupt(self, reason: str, summary: str, *, now: float, at: Timestamp) -> None:
+        """End the open epoch as interrupted and resumable, retaining its starts for inspection."""
+        _ = self._active_scheduler
+        if not epoch_has_ended(self._epoch):
+            self._interrupted(reason, summary, now=now, at=at)
+
+    def _interrupted(self, reason: str, summary: str, *, now: float, at: Timestamp) -> None:
+        self._append(
+            Oneof(
+                "lifecycle",
+                Lifecycle(
+                    state=Oneof(
+                        "ended",
+                        Ended(
+                            outcome=Outcome.INTERRUPTED,
+                            summary=summary,
+                            resumable=True,
+                            interruption_reason=reason,
+                        ),
+                    )
+                ),
+            ),
+            now=now,
+            at=at,
+        )
 
     def tool_fact(
         self,

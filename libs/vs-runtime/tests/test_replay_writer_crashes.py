@@ -24,7 +24,7 @@ from vs_runtime.api.replay import (
     ReplayRuntime,
     ReplayUnknown,
     WriterRegistry,
-    drive_replay,
+    run_replay,
 )
 from vs_sim.api.testing import SimThreads
 
@@ -169,7 +169,7 @@ async def test_recovery_crash_rows_preserve_identity_proof_usage_and_winner(
     owner = FakeReplayExecutor(perform)
     first = host(store, physical_root, owner, sim)
     with pytest.raises(ConnectionError):
-        await drive_replay(first, launch("first"))
+        await run_replay(first, launch("first"))
     (old,) = first.runtime.archive.unresolved
     assert baseline is not None
     gate = FaultGate(
@@ -202,7 +202,7 @@ async def test_recovery_crash_rows_preserve_identity_proof_usage_and_winner(
     async def run(request: str) -> object:
         binding = replace(host(store, physical_root, executor, sim), writer_barrier=barrier)
         return await gate.around_async(
-            Boundary.EXECUTOR_REQUEST, "W14", partial(drive_replay, binding, launch(request))
+            Boundary.EXECUTOR_REQUEST, "W14", partial(run_replay, binding, launch(request))
         )
 
     with pytest.raises(HostCrashError, match=row):

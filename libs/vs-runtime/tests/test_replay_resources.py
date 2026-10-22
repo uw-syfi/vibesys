@@ -15,7 +15,7 @@ from vs_runtime.api.replay import (
     ReplayParked,
     ReplayResult,
     ReplayRuntime,
-    drive_replay,
+    run_replay,
 )
 from vs_sim.api.testing import Sim
 
@@ -70,7 +70,7 @@ def test_admission_matches_resource_arithmetic_across_fresh_epochs(
                 host(store, root, executor, sim),
                 runtime=ReplayRuntime(store, root, replay.ReplayAllowance(resources=bound)),
             )
-            result = await drive_replay(composed, launch(f"epoch-{epoch}"))
+            result = await run_replay(composed, launch(f"epoch-{epoch}"))
             expected = min(6, admitted * epoch)
             assert len(executor.invocations) == expected
             assert result == (ReplayCompleted(None) if expected == 6 else ReplayParked())
@@ -107,10 +107,10 @@ async def test_resource_bounds_apply_only_to_fresh_work(
     )
     allowance = replay.ReplayAllowance(resources=limits)
     first = replace(host(store, root, executor, sim), runtime=ReplayRuntime(store, root, allowance))
-    assert await drive_replay(first, launch("first")) == ReplayParked()
+    assert await run_replay(first, launch("first")) == ReplayParked()
     assert len(executor.invocations) == completed
     after = replace(host(store, root, executor, sim), runtime=ReplayRuntime(store, root, allowance))
-    assert await drive_replay(after, launch("resume")) == ReplayParked()
+    assert await run_replay(after, launch("resume")) == ReplayParked()
     assert len(executor.invocations) == completed * 2
     totals = after.runtime.accounting
     assert totals.reported_cost_usd == completed * 2
@@ -129,7 +129,7 @@ async def test_unreported_paid_usage_holds_its_reservation(sim: Sim) -> None:
     executor = FakeReplayExecutor(lambda _: ReplayResult(Reply(root="paid"), paid=True))
     bound = replay.ReplayAllowance(resources=replay.ReplayResources(money_usd=3, input_tokens=15))
     composed = replace(host(store, root, executor, sim), runtime=ReplayRuntime(store, root, bound))
-    assert await drive_replay(composed, launch("first")) == ReplayParked()
+    assert await run_replay(composed, launch("first")) == ReplayParked()
     assert len(executor.invocations) == 1
     assert composed.runtime.accounting.unreported_cost_operations == 1
     totals = composed.runtime.accounting.resources
@@ -163,7 +163,7 @@ async def test_concurrent_reservations_wait_for_usage_before_admitting_a_sibling
     executor = FakeReplayExecutor(perform)
     bound = replay.ReplayAllowance(resources=replay.ReplayResources(money_usd=3))
     composed = replace(host(store, root, executor, sim), runtime=ReplayRuntime(store, root, bound))
-    assert await drive_replay(composed, launch("first")) == ReplayCompleted(None)
+    assert await run_replay(composed, launch("first")) == ReplayCompleted(None)
     assert peak == 1
     assert len(executor.invocations) == 2
 
@@ -178,7 +178,7 @@ async def test_bounded_request_requires_an_explicit_reservation(sim: Sim) -> Non
     bound = replay.ReplayAllowance(resources=replay.ReplayResources(money_usd=3))
     composed = replace(host(store, root, executor, sim), runtime=ReplayRuntime(store, root, bound))
     with pytest.raises(ReplayError, match=r"policy.reservation.money_usd"):
-        await drive_replay(composed, launch("first"))
+        await run_replay(composed, launch("first"))
     assert not executor.invocations
 
 
@@ -199,7 +199,7 @@ async def test_explicitly_free_work_can_finish_with_zero_resource_allowance(sim:
         host(store, root, executor, sim),
         runtime=ReplayRuntime(store, root, replay.ReplayAllowance(resources=zero)),
     )
-    assert await drive_replay(composed, launch("first")) == ReplayCompleted(None)
+    assert await run_replay(composed, launch("first")) == ReplayCompleted(None)
     assert len(executor.invocations) == 1
     assert composed.runtime.accounting.paid_operations == 0
     assert composed.runtime.accounting.unreported_cost_operations == 0

@@ -34,7 +34,7 @@ from vs_runtime.api.replay import (
     ReplayRuntime,
     ReplayStore,
     RunLogReplayStore,
-    drive_replay,
+    run_replay,
 )
 from vs_sim.api.testing import Sim, SimThreads, swept
 
@@ -98,7 +98,7 @@ async def test_native_fsync_crashes_reconcile_publication_without_repeating_paid
         with FileRunLogWriter(path, clock=sim.clock, threads=threads, sync=sync) as writer:
             binding = RunLogReplayStore(writer, project.state_store("run-a"))
             host = composed(binding, executor, sim)
-            assert await drive_replay(host, launch(request_id)) == ReplayCompleted("measured")
+            assert await run_replay(host, launch(request_id)) == ReplayCompleted("measured")
             return host
 
     def executor() -> FakeReplayExecutor:
@@ -147,7 +147,7 @@ async def test_crash_sweep_keeps_one_paid_observation_across_every_store(
             lambda _: ReplayResult(core_common.Identity(root="measured"), paid=True, cost_usd=2)
         )
         original = composed(baseline, executor, sim)
-        await drive_replay(original, launch("baseline"))
+        await run_replay(original, launch("baseline"))
         boundaries = original.runtime.archive.sequence
     for boundary in swept(boundaries, sample=3):
         with stores((None,) * boundary + (fault,)) as store:
@@ -155,9 +155,9 @@ async def test_crash_sweep_keeps_one_paid_observation_across_every_store(
                 lambda _: ReplayResult(core_common.Identity(root="measured"), paid=True, cost_usd=2)
             )
             with suppress(ReplayCommitError, OSError):
-                await drive_replay(composed(store, executor, sim), launch(f"first-{boundary}"))
+                await run_replay(composed(store, executor, sim), launch(f"first-{boundary}"))
             resumed = composed(store, executor, sim)
-            assert await drive_replay(resumed, launch(f"resume-{boundary}")) == ReplayCompleted(
+            assert await run_replay(resumed, launch(f"resume-{boundary}")) == ReplayCompleted(
                 "measured"
             )
             assert len(executor.invocations) == 1
@@ -230,10 +230,10 @@ async def test_confirmed_prefix_replays_without_reexecuting(stores: StoreFactory
                 ),
             )
 
-        assert await drive_replay(host(), launch("first")) == ReplayCompleted("measured")
+        assert await run_replay(host(), launch("first")) == ReplayCompleted("measured")
         first = store.load()
         assert isinstance(first, StoredEnvelope)
-        assert await drive_replay(host(), launch("resume")) == ReplayCompleted("measured")
+        assert await run_replay(host(), launch("resume")) == ReplayCompleted("measured")
         assert len(executor.invocations) == 1
         resumed = store.load()
         assert isinstance(resumed, StoredEnvelope)

@@ -30,7 +30,7 @@ from vs_runtime.api.replay import (
     ReplayWriterBarrier,
     UnsupportedWriterReconciler,
     WriterRegistry,
-    drive_replay,
+    run_replay,
 )
 from vs_sandbox.api.testing import FakeDockerEngine
 from vs_sim.api import DISCARD
@@ -111,7 +111,7 @@ async def test_physical_result_crash_prefix_accepts_one_parent(sim: Sim, boundar
                 first.accept(child.id, now=0, at=Timestamp())
     first.close(now=0)
     resumed = host(store, physical_root, executor, sim)
-    assert await drive_replay(resumed, launch("resume")) == ReplayCompleted("answer")
+    assert await run_replay(resumed, launch("resume")) == ReplayCompleted("answer")
     assert len(executor.invocations) == 1
     assert len(resumed.runtime.archive.history) == 1
     accepted = [
@@ -244,7 +244,7 @@ async def test_blocked_recovery_persists_unknown_manifest_without_dispatch(
     )
     resumed = replace(host(store, physical_root, executor, sim), writer_barrier=barrier)
     with pytest.raises(ValueError, match="Recovery blocked"):
-        await drive_replay(resumed, launch("resume"))
+        await run_replay(resumed, launch("resume"))
     assert executor.invocations == ()
     recovery = ReplayWriterRecovery.from_records(
         Records.from_binary(resumed.runtime.archive.encode()).records

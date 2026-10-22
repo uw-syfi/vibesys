@@ -20,7 +20,7 @@ from vs_runtime.api.replay import (
     ReplayResult,
     ReplayRunHost,
     ReplayRuntime,
-    drive_replay,
+    run_replay,
 )
 from vs_sim.api.testing import Sim, swept
 
@@ -44,7 +44,7 @@ async def test_unfinished_unit_retries_before_the_fresh_additional_unit_allowanc
     resumed = replace(
         host(store, root, executor, sim), runtime=ReplayRuntime(store, root, allowance)
     )
-    assert await drive_replay(resumed, launch("resume")) == ReplayParked()
+    assert await run_replay(resumed, launch("resume")) == ReplayParked()
     assert len(executor.invocations) == 2
     assert resumed.runtime.accounting.lifetime_completed == 2
     assert resumed.runtime.accounting.fresh_completed == 1
@@ -91,7 +91,7 @@ def test_interrupted_admission_keeps_its_original_epoch(fault: CommitFault, fres
             host(store, root, executor, sim),
             runtime=ReplayRuntime(store, root, replay.ReplayAllowance(iterations=fresh)),
         )
-        assert await drive_replay(resumed, launch("resume")) == ReplayParked()
+        assert await run_replay(resumed, launch("resume")) == ReplayParked()
         assert len(executor.invocations) == 1 + fresh
         assert resumed.runtime.accounting.lifetime_completed == 1 + fresh
         assert resumed.runtime.accounting.fresh_completed == fresh
@@ -127,12 +127,12 @@ def test_raised_and_lowered_allowances_reconstruct_without_spending_again(
             )
 
         before = composed(first)
-        assert await drive_replay(before, launch("first")) == ReplayParked()
+        assert await run_replay(before, launch("first")) == ReplayParked()
         assert len(executor.invocations) == first
         assert before.runtime.accounting.lifetime_completed == first
         reads.clear()
         after = composed(second)
-        assert await drive_replay(after, launch("resume")) == ReplayParked()
+        assert await run_replay(after, launch("resume")) == ReplayParked()
         assert len(executor.invocations) == first + second
         assert reads == [(number, first) for number in range(1, first + 1)] + [
             (number, second) for number in range(first + 1, first + second + 1)
@@ -160,7 +160,7 @@ def test_crashes_at_iteration_boundaries_never_recharge_history(fault: CommitFau
     baseline = FakeStateStore()
     executor = FakeReplayExecutor(lambda _: ReplayResult(Reply(root="paid"), paid=True, cost_usd=1))
     original = host(baseline, root, executor, sim)
-    sim.run(drive_replay(original, launch("baseline")))
+    sim.run(run_replay(original, launch("baseline")))
     count = original.runtime.archive.sequence
 
     async def scenario(boundary: int) -> None:
@@ -170,9 +170,9 @@ def test_crashes_at_iteration_boundaries_never_recharge_history(fault: CommitFau
         )
         interrupted = host(store, root, executor, sim)
         with suppress(ReplayCommitError, OSError):
-            await drive_replay(interrupted, launch(f"first/{boundary}"))
+            await run_replay(interrupted, launch(f"first/{boundary}"))
         resumed = host(store, root, executor, sim)
-        assert await drive_replay(resumed, launch(f"resume/{boundary}")) == ReplayCompleted("done")
+        assert await run_replay(resumed, launch(f"resume/{boundary}")) == ReplayCompleted("done")
         totals = resumed.runtime.accounting
         assert totals.lifetime_completed == 1
         assert totals.paid_operations == 1

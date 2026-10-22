@@ -31,39 +31,50 @@ if TYPE_CHECKING:
     from vs_runtime._writer_reconciliation import WriterRegistry
 
 
+LIFECYCLE_REQUESTS: frozenset[type[Message]] = frozenset(
+    (
+        replay_workspace.ReplayWorkspaceRequest,
+        replay_agent.ReplayAgentRequest,
+        replay_evaluation.ReplayEvaluationRequest,
+    )
+)
+"""Native requests served by the lifecycle owners, which no registered operation may replace."""
+
+
 @dataclass(frozen=True)
 class ReplayOwnerServices:
-    """One host's native effect services and explicit owner execution bounds.
+    """One host's native effect services, their receipts and explicit owner execution bounds.
 
     Rebind these services on each host over the same durable journals and receipts.
-    Explicit operator Resume sets ``allow_adoption=False``, preserving the existing
-    conservative project-edit protection. Writer recovery may retain authority.
     """
 
+    receipts: ReceiptStore
     workspaces: RuntimeWorkspaces
     sessions: ReplaySessionServices
     evaluation: RecoverableEvaluationExecutor
     workspace_within_seconds: float
     evaluation_within_seconds: float
-    allow_adoption: bool
     evaluation_control: RunControlChannel | None = None
     writer_registry: WriterRegistry | None = None
 
 
 def replay_bindings(
     services: ReplayOwnerServices,
-    receipts: ReceiptStore,
     host: ReplayOperationHost,
     replies: Sequence[ReplayAgentReply],
     *,
+    allow_adoption: bool,
     operations: Mapping[type[Message], ReplayExecutor] | None = None,
 ) -> ReplayExecutors:
     """Build the existing lifecycle owners over one receipt and access authority.
 
     Registered operations may add native request classes but cannot replace these
     lifecycle owners. No CoreState, positional driver or strategy is constructed.
+    An explicit operator Resume passes ``allow_adoption=False``, preserving the
+    existing conservative project-edit protection: adoption never restores the
+    operator root.
     """
-    sessions = services.sessions
+    sessions, receipts = services.sessions, services.receipts
     workspace = RuntimeWorkspaceRequests(
         services.workspaces,
         receipts,
@@ -73,7 +84,7 @@ def replay_bindings(
         sessions.blocking,
         ReceiptEvidenceLedger(receipts),
     )
-    if not services.allow_adoption:
+    if not allow_adoption:
         workspace.protect_adoption()
     owners: dict[type[Message], ReplayExecutor] = {
         replay_workspace.ReplayWorkspaceRequest: WorkspaceReplayExecutor(
@@ -93,7 +104,7 @@ def replay_bindings(
         ),
     }
     for request, owner in (operations or {}).items():
-        if request in owners:
+        if request in LIFECYCLE_REQUESTS:
             problem = (
                 f"registered operation cannot replace lifecycle owner: {request.desc().type_name}"
             )

@@ -51,8 +51,8 @@ from vs_runtime.api.replay import (
     ReplayResult,
     ReplayRuntime,
     ReplayTurnYields,
-    drive_replay,
     replay_measurement_plan,
+    run_replay,
 )
 from vs_runtime.api.slurm_evaluation_stack import plan
 from vs_sim.api.testing import ManualClock
@@ -483,7 +483,7 @@ async def test_edited_flow_settles_a_turn_that_never_had_a_physical_child(
 
     owner = FakeReplayExecutor(result)
     resumed = host(store, edited, owner, sim)
-    assert await drive_replay(resumed, launch("edited")) == ReplayCompleted("edited")
+    assert await run_replay(resumed, launch("edited")) == ReplayCompleted("edited")
     assert not resumed.runtime.archive.unresolved
     assert len(owner.invocations) == int(replace)
     assert turn.replay_physical is not None

@@ -28,8 +28,8 @@ from vs_runtime.api.replay import (
     ReplayResult,
     ReplayRuntime,
     ReplayUnknown,
-    drive_replay,
     replay_measurement_plan,
+    run_replay,
 )
 from vs_runtime.api.slurm_evaluation_stack import plan
 from vs_sim.api.testing import ManualClock, SimThreads, yield_until
@@ -211,7 +211,7 @@ async def test_completed_local_evidence_replays_through_an_empty_fresh_owner(
         )
 
     try:
-        completed = await drive_replay(
+        completed = await run_replay(
             host(store, flow, owner(original.executor), sim),
             ReplayLaunch(EpochStarted(run_id="run"), "first", "host-a", 100),
         )
@@ -220,7 +220,7 @@ async def test_completed_local_evidence_replays_through_an_empty_fresh_owner(
         await original.executor.close()
         resumed = host(store, flow, owner(fresh.executor), sim)
         assert (
-            await drive_replay(
+            await run_replay(
                 resumed, ReplayLaunch(EpochStarted(run_id="run"), "resume", "host-a", 100)
             )
             == completed

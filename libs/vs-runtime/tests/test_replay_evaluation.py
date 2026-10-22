@@ -25,8 +25,8 @@ from vs_runtime.api.replay import (
     ReplayParked,
     ReplayRecoveryRequiredError,
     ReplayRuntime,
-    drive_replay,
     replay_measurement_plan,
+    run_replay,
 )
 from vs_runtime.api.slurm_evaluation_stack import plan
 from vs_sim.api.testing import SimThreads, swept
@@ -149,7 +149,7 @@ async def test_evaluation_recovery_preserves_job_evidence_and_release(
                 break
         runtime.close(now=sim.clock.now())
         resumed = host(store, root, executor(), sim)
-        result = await drive_replay(
+        result = await run_replay(
             resumed, ReplayLaunch(EpochStarted(run_id="run"), "resume", "host-a", 100)
         )
         assert isinstance(result, ReplayCompleted)
@@ -158,7 +158,7 @@ async def test_evaluation_recovery_preserves_job_evidence_and_release(
         assert resumed.runtime.accounting.unreported_cost_operations == 1
         again = host(store, root, executor(), sim)
         assert (
-            await drive_replay(
+            await run_replay(
                 again,
                 ReplayLaunch(EpochStarted(run_id="run"), "again", "host-a", 100),
             )
@@ -196,13 +196,13 @@ async def test_evaluation_recovery_sweeps_owner_receipts(
             first = host(store, root_flow, executor(), sim)
             launch = ReplayLaunch(EpochStarted(run_id="run"), "first", "host-a", 100)
             if crash_at is None:
-                result = await drive_replay(first, launch)
+                result = await run_replay(first, launch)
             else:
                 with pytest.raises(ProcessKilledError):
-                    await drive_replay(first, launch)
+                    await run_replay(first, launch)
                 unresolved = ()
                 try:
-                    result = await drive_replay(
+                    result = await run_replay(
                         host(store, root_flow, executor(restarting=True), sim),
                         ReplayLaunch(EpochStarted(run_id="run"), "resume", "host-a", 100),
                     )
@@ -304,13 +304,13 @@ async def test_removing_a_measurement_discloses_paid_work_with_unreported_cost(
         original = host(
             store, program(replay_measurement_plan(plan(candidate=world.snapshot))), executor, sim
         )
-        result = await drive_replay(
+        result = await run_replay(
             original, ReplayLaunch(EpochStarted(run_id="run"), "first", "host-a", 100)
         )
         assert isinstance(result, ReplayCompleted)
         changed = host(store, edited, executor, sim)
         assert (
-            await drive_replay(
+            await run_replay(
                 changed, ReplayLaunch(EpochStarted(run_id="run"), "edited", "host-a", 100)
             )
             == ReplayParked()

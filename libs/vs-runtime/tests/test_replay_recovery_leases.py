@@ -17,7 +17,7 @@ from vs_runtime.api.replay import (
     ReplayPending,
     ReplayResult,
     ReplayUnknown,
-    drive_replay,
+    run_replay,
 )
 from vs_sim.api.testing import GatedBlockingRunner
 
@@ -79,7 +79,7 @@ async def test_recovery_owners_renew_exclusion_and_commit_after_await(
     owner = FakeReplayExecutor(perform)
     first = host(store, physical_root, owner, sim)
     with pytest.raises(ConnectionError):
-        await drive_replay(first, launch("first"))
+        await run_replay(first, launch("first"))
     (old,) = first.runtime.archive.unresolved
     barrier = proof_barrier(Project.open(tmp_path), old)
     runner = GatedBlockingRunner(held=True)
@@ -87,7 +87,7 @@ async def test_recovery_owners_renew_exclusion_and_commit_after_await(
         barrier = replace(barrier, blocking=runner)
     executor = GatedRecovery(owner, runner, phase)
     resumed = replace(host(store, physical_root, executor, sim), writer_barrier=barrier)
-    task = asyncio.create_task(drive_replay(resumed, launch("resume")))
+    task = asyncio.create_task(run_replay(resumed, launch("resume")))
     try:
         await runner.wait_in_flight(1, task)
         before = resumed.runtime.archive.sequence

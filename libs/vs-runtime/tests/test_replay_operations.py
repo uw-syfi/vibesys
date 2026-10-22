@@ -32,7 +32,7 @@ from vs_runtime.api.replay import (
     ReplayOperationHost,
     ReplayResult,
     ReplayUnknown,
-    drive_replay,
+    run_replay,
 )
 from vs_sim.api.testing import Sim, SimThreads
 
@@ -123,11 +123,11 @@ async def test_owner_recovers_at_every_replay_effect_boundary(
             if boundary == "accepted":
                 first.accept(span.id, now=sim.clock.now(), at=Timestamp())
     first.close(now=sim.clock.now())
-    assert await drive_replay(host(store, root, executor(), sim), launch("resume")) == (
+    assert await run_replay(host(store, root, executor(), sim), launch("resume")) == (
         ReplayCompleted("answer")
     )
     assert given.effects() == 1
-    assert await drive_replay(host(store, root, executor(), sim), launch("again")) == (
+    assert await run_replay(host(store, root, executor(), sim), launch("again")) == (
         ReplayCompleted("answer")
     )
     assert given.effects() == 1

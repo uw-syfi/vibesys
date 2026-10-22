@@ -18,7 +18,7 @@ from vs_runtime.api.replay import (
     ReplayExecutors,
     ReplayLaunch,
     ReplayOperationError,
-    drive_replay,
+    run_replay,
 )
 from vs_runtime.api.testing import FakeWorkspace
 
@@ -107,7 +107,7 @@ def test_proven_unknown_agent_restarts_as_fresh_conversation(
             writer_barrier=barrier,
         )
         launch = ReplayLaunch(EpochStarted(run_id="run"), "resume", "host-b", 100)
-        assert await drive_replay(resumed, launch) == ReplayCompleted(7)
+        assert await run_replay(resumed, launch) == ReplayCompleted(7)
         calls = given.client.calls_for("worker")
         assert len(calls) == 2
         assert calls[0].session_key != calls[1].session_key
