@@ -60,7 +60,6 @@ const VALID_ARGUMENTS: Readonly<
   [WELCOME_CHANNELS.attach]: ['local', '0123456789ab'],
   [WELCOME_CHANNELS.attachReader]: ['local', '/project', 'run-1'],
   [WELCOME_CHANNELS.resume]: ['local', '/project', 'run-1'],
-  [WELCOME_CHANNELS.stopConfirmed]: ['local', '0123456789ab', false],
   [WELCOME_CHANNELS.releaseRun]: [],
   [WELCOME_CHANNELS.readEvents]: ['local', '/srv/project', 'run-1', 0, 100],
   [WELCOME_CHANNELS.readTrace]: ['local', '/srv/project', 'run-1', 0, 100],
@@ -259,22 +258,6 @@ describe('parseWelcomeRequest', () => {
           `${channel} expects ${args.length} argument`,
         );
       }
-    }
-  });
-
-  test('required boolean fields preserve both true and false', () => {
-    for (const value of [false, true]) {
-      expect(
-        parseWelcomeRequest(WELCOME_CHANNELS.stopConfirmed, ['local', '0123456789ab', value]),
-      ).toMatchObject({kind: 'stop', force: value});
-    }
-  });
-
-  test('regression: malformed boolean fields are rejected instead of authorizing false', () => {
-    for (const value of [undefined, null, 0, 1, 'false', 'true', {}, []]) {
-      expect(() =>
-        parseWelcomeRequest(WELCOME_CHANNELS.stopConfirmed, ['local', '0123456789ab', value]),
-      ).toThrow('force stop must be a boolean');
     }
   });
 });

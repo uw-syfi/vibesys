@@ -1,9 +1,8 @@
 import {expect, test} from 'bun:test';
-import type {RunEvent, RunSnapshot} from '@vibesys/contracts';
+import type {RunSnapshot} from '@vibesys/contracts';
 import type {LogStream} from '@vibesys/contracts/host-helper';
 import type {HostRun} from '@vibesys/hosts';
 import type {LogReadInput, LogReadOutcome, LogTransport} from '@vibesys/logs';
-import {initialCoreState, reduceEvent} from '@vibesys/run-state';
 import type {AbortSignalLike} from '@vibesys/transport';
 import {
   ageWords,
@@ -11,11 +10,10 @@ import {
   createRunReader,
   headerView,
   nowView,
-  quotaBannerView,
+  pauseNowBannerView,
   type ReaderReply,
   type RunPageAction,
   runNow,
-  stopBannerView,
 } from '../../state/index.js';
 import type {LiveSession, SessionObserver} from '../index.js';
 import {createRunPageStore, type RunPagePorts} from '../index.js';
@@ -88,12 +86,7 @@ class FakeApp {
         },
       },
       command: command => {
-        // Resume now reads as `resume`; a Resume when capacity returns names its `when`.
-        this.asked.push(
-          command.kind === 'resume' && command.when !== 'now'
-            ? `resume:${command.when}`
-            : command.kind,
-        );
+        this.asked.push(command.kind);
         return this.fail === null
           ? Promise.resolve(this.refuse)
           : Promise.reject(new Error(this.fail));
@@ -106,13 +99,9 @@ class FakeApp {
   }
 }
 
-function fakePorts(stops: boolean[], app = new FakeApp()): RunPagePorts {
+function fakePorts(_stops: boolean[], app = new FakeApp()): RunPagePorts {
   const ignore = (): void => {};
   return {
-    stop: force => {
-      stops.push(force);
-      return Promise.resolve(true);
-    },
     attach: instance => {
       app.asked.push(`attach ${instance}`);
       return Promise.resolve(null);
@@ -185,28 +174,11 @@ test('a stalled historical summary and history expose a retry instead of loading
   expect(clock.pending).toBe(0);
 });
 
-test('force stop is offered after two minutes of stopping on the injected clock, not before', () => {
-  const clock = new FakeClock();
-  const stops: boolean[] = [];
-  const store = createRunPageStore(SEED, fakePorts(stops), clock.schedule);
-  store.dispatch({type: 'record', record: {kind: 'live', run: running()}});
-  store.dispatch({type: 'ask-stop'});
-  store.dispatch({type: 'confirm-stop'});
-  expect(stops).toEqual([false]);
-  clock.advance(2 * 60 * 1000 - 1);
-  expect(stopBannerView(store.getState())).toMatchObject({forceOffered: false});
-  clock.advance(1);
-  expect(stopBannerView(store.getState())).toMatchObject({forceOffered: true});
-  store.dispatch({type: 'force-stop'});
-  expect(stops).toEqual([false, true]);
-  store.dispose();
-});
-
 test('dispose cancels an armed bound', () => {
   const clock = new FakeClock();
   const store = createRunPageStore(SEED, fakePorts([]), clock.schedule);
   store.dispatch({type: 'record', record: {kind: 'live', run: {...running(), phase: 'stopping'}}});
-  expect(clock.pending).toBe(2); // Stop bound and the initial summary read.
+  expect(clock.pending).toBe(1); // The initial summary read.
   store.dispose();
   expect(clock.pending).toBe(0);
 });
@@ -350,50 +322,53 @@ test('a command that fails to reach the run is shown as a notice, and the next c
   store.dispose();
 });
 
-test('Stop stays in the header, unavailable, while its confirmation is open', () => {
+test('Pause now stays in the header, unavailable, while its confirmation is open', async () => {
   const store = createRunPageStore(SEED, fakePorts([]), new FakeClock().schedule);
   store.dispatch({type: 'record', record: {kind: 'live', run: running()}});
-  expect(headerView(store.getState()).stop).toEqual({shown: true, disabledReason: null});
-  store.dispatch({type: 'ask-stop'});
-  expect(stopBannerView(store.getState()).kind).toBe('confirm');
-  expect(headerView(store.getState()).stop.shown).toBe(true);
-  expect(headerView(store.getState()).stop.disabledReason).not.toBeNull();
-  store.dispatch({type: 'cancel-stop'});
-  expect(headerView(store.getState()).stop.disabledReason).toBeNull();
+  await settled();
+  store.dispatch({
+    type: 'session',
+    session: {hasSnapshot: true, streaming: true, controls: true, error: null},
+  });
+  expect(headerView(store.getState()).pauseNow).toEqual({shown: true, disabledReason: null});
+  store.dispatch({type: 'ask-pause-now'});
+  expect(pauseNowBannerView(store.getState()).kind).toBe('confirm');
+  expect(headerView(store.getState()).pauseNow.shown).toBe(true);
+  expect(headerView(store.getState()).pauseNow.disabledReason).not.toBeNull();
+  store.dispatch({type: 'cancel-pause-now'});
+  expect(headerView(store.getState()).pauseNow.disabledReason).toBeNull();
   store.dispose();
 });
 
-test('a server that refuses to wait for quota no longer offers the wait for that run', async () => {
-  const app = new FakeApp();
-  const store = createRunPageStore(SEED, fakePorts([], app), new FakeClock().schedule);
-  const paused: HostRun = {...running(), status: 'paused', phase: 'paused', paused: 'quota'};
-  store.dispatch({type: 'record', record: {kind: 'live', run: paused}});
-  await Promise.resolve();
-  app.observer?.session(LIVE_VIEW);
-  const event = {
-    sequence: 1,
-    type: 'quota_paused',
-    data: {kind: 'quota_paused', provider: 'claude', condition: 'quota_exhausted', detail: 'limit'},
-  } as unknown as RunEvent;
-  app.observer?.core(reduceEvent(initialCoreState(), event));
-  expect(quotaBannerView(store.getState(), String)?.wait.shown).toBe(true);
-  // An older server rejects the `when` field.
-  app.refuse = "unknown field 'when'";
-  store.dispatch({type: 'wait-for-quota'});
-  await settled();
-  expect(app.asked.slice(2)).toEqual(['resume:capacity_returns']);
-  expect(quotaBannerView(store.getState(), String)?.wait.shown).toBe(false);
-  expect(store.getState().notice).toBe("The run cannot wait for its quota: unknown field 'when'");
-  store.dispatch({type: 'wait-for-quota'});
-  await settled();
-  expect(app.asked.slice(2)).toEqual(['resume:capacity_returns']);
-  // Resume now still goes to the run.
-  app.refuse = null;
-  store.dispatch({type: 'resume'});
-  await settled();
-  expect(app.asked.slice(2)).toEqual(['resume:capacity_returns', 'resume']);
-  store.dispose();
-});
+for (const outcome of ['refused', 'failed'] as const) {
+  test(`regression: Pause now ${outcome} releases confirmation and permits a retry`, async () => {
+    const app = new FakeApp();
+    const store = createRunPageStore(SEED, fakePorts([], app), new FakeClock().schedule);
+    store.dispatch({type: 'record', record: {kind: 'live', run: running()}});
+    await settled();
+    app.observer?.session(LIVE_VIEW);
+    if (outcome === 'failed') app.fail = 'unavailable';
+    else app.refuse = 'unavailable';
+    store.dispatch({type: 'ask-pause-now'});
+    store.dispatch({type: 'confirm-pause-now'});
+    expect(headerView(store.getState()).pauseNow.disabledReason).toBe('Pausing');
+    store.dispatch({type: 'ask-pause-now'});
+    store.dispatch({type: 'confirm-pause-now'});
+    await settled();
+    expect(app.asked.filter(command => command === 'pause-now')).toHaveLength(1);
+    expect(store.getState().notice).toBe('unavailable');
+    expect(store.getState().pauseNow.kind).toBe('idle');
+    expect(headerView(store.getState()).pauseNow.disabledReason).toBeNull();
+    app.fail = null;
+    app.refuse = null;
+    store.dispatch({type: 'ask-pause-now'});
+    store.dispatch({type: 'confirm-pause-now'});
+    await settled();
+    expect(app.asked.filter(command => command === 'pause-now')).toHaveLength(2);
+    expect(store.getState().pauseNow.kind).toBe('sent');
+    store.dispose();
+  });
+}
 
 test('a session that reports while it opens is opened once', async () => {
   const app = new FakeApp();

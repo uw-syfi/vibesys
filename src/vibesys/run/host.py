@@ -426,6 +426,7 @@ class _ProductHostFactory:
             CoreResources(
                 run_id=project.state.run_id,
                 project=project.project,
+                resuming=project.resuming,
                 facts=resources.facts,
                 options=self.options,
                 workspaces=workspaces,
@@ -475,6 +476,7 @@ class _ProductHostFactory:
                 local_validation_events=CoreLocalValidationEvents(self.integration.events),
                 measurement_observer=CoreMeasurementEvents(self.integration.events, decisions),
                 measurement_decisions=decisions,
+                epoch=lambda: self.integration.events.epoch,
                 commit_observer=self.integration.core_commit_observer(
                     project.state.run_id, self.projector, self.plugin.id
                 ),

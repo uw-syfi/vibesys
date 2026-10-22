@@ -137,7 +137,6 @@ function cases(random: Seeded): Case[] {
       bridge => bridge.resume(key, path, exactResumeRunId(name)),
       {kind: 'resume', host, project: path, run: exactResumeRunId(name)},
     ],
-    [bridge => bridge.stopConfirmed(key, instance, force), {kind: 'stop', host, instance, force}],
     [bridge => bridge.releaseRun(), {kind: 'release-run'}],
     [
       bridge => bridge.readEvents(key, path, name, token, 1 + (token % 1000)),

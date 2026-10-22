@@ -107,7 +107,7 @@ def _run(
     )
     # A paused run asks for nothing; it stays open until the deadline stops it.
     if strategy is None:
-        integration.control.request_pause()
+        integration.control.pause_for_quota()
     clock = VirtualClock(at=0.0)
 
     async def exercise() -> RunEnd:

@@ -170,6 +170,7 @@ class StopLifted(Value):
 
     kind: Literal["stop_lifted"] = "stop_lifted"
     control: ControlInput
+    new_epoch: bool = Field(default=False, exclude_if=lambda value: not value)
 
 
 class TimeReached(Value):

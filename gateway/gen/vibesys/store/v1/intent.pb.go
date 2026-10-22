@@ -35,21 +35,23 @@ const (
 	IntentAction_INTENT_ACTION_CANCEL_ATTEMPT   IntentAction = 7
 	IntentAction_INTENT_ACTION_CANCEL_ITEM      IntentAction = 8
 	IntentAction_INTENT_ACTION_SET_MAX_PARALLEL IntentAction = 9
+	IntentAction_INTENT_ACTION_PAUSE_NOW        IntentAction = 10
 )
 
 // Enum value maps for IntentAction.
 var (
 	IntentAction_name = map[int32]string{
-		0: "INTENT_ACTION_UNSPECIFIED",
-		1: "INTENT_ACTION_STEER",
-		2: "INTENT_ACTION_WITHDRAW",
-		3: "INTENT_ACTION_PAUSE",
-		4: "INTENT_ACTION_PARK",
-		5: "INTENT_ACTION_RESUME",
-		6: "INTENT_ACTION_STOP",
-		7: "INTENT_ACTION_CANCEL_ATTEMPT",
-		8: "INTENT_ACTION_CANCEL_ITEM",
-		9: "INTENT_ACTION_SET_MAX_PARALLEL",
+		0:  "INTENT_ACTION_UNSPECIFIED",
+		1:  "INTENT_ACTION_STEER",
+		2:  "INTENT_ACTION_WITHDRAW",
+		3:  "INTENT_ACTION_PAUSE",
+		4:  "INTENT_ACTION_PARK",
+		5:  "INTENT_ACTION_RESUME",
+		6:  "INTENT_ACTION_STOP",
+		7:  "INTENT_ACTION_CANCEL_ATTEMPT",
+		8:  "INTENT_ACTION_CANCEL_ITEM",
+		9:  "INTENT_ACTION_SET_MAX_PARALLEL",
+		10: "INTENT_ACTION_PAUSE_NOW",
 	}
 	IntentAction_value = map[string]int32{
 		"INTENT_ACTION_UNSPECIFIED":      0,
@@ -62,6 +64,7 @@ var (
 		"INTENT_ACTION_CANCEL_ATTEMPT":   7,
 		"INTENT_ACTION_CANCEL_ITEM":      8,
 		"INTENT_ACTION_SET_MAX_PARALLEL": 9,
+		"INTENT_ACTION_PAUSE_NOW":        10,
 	}
 )
 
@@ -433,7 +436,7 @@ const file_vibesys_store_v1_intent_proto_rawDesc = "" +
 	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x04kind\x12 \n" +
 	"\x02id\x18\x02 \x01(\tB\v\xbaH\br\x06\x10\x01(\x80\x80\x04H\x00R\x02id\x88\x01\x01:Y\xbaHV\x1aT\n" +
 	"\ttarget.id\x12%id is absent exactly when kind is run\x1a has(this.id) == (this.kind != 1)B\x05\n" +
-	"\x03_id*\xaa\x02\n" +
+	"\x03_id*\xc7\x02\n" +
 	"\fIntentAction\x12\x1d\n" +
 	"\x19INTENT_ACTION_UNSPECIFIED\x10\x00\x12\x17\n" +
 	"\x13INTENT_ACTION_STEER\x10\x01\x12\x1a\n" +
@@ -444,7 +447,9 @@ const file_vibesys_store_v1_intent_proto_rawDesc = "" +
 	"\x12INTENT_ACTION_STOP\x10\x06\x12 \n" +
 	"\x1cINTENT_ACTION_CANCEL_ATTEMPT\x10\a\x12\x1d\n" +
 	"\x19INTENT_ACTION_CANCEL_ITEM\x10\b\x12\"\n" +
-	"\x1eINTENT_ACTION_SET_MAX_PARALLEL\x10\t*[\n" +
+	"\x1eINTENT_ACTION_SET_MAX_PARALLEL\x10\t\x12\x1b\n" +
+	"\x17INTENT_ACTION_PAUSE_NOW\x10\n" +
+	"*[\n" +
 	"\n" +
 	"IntentStep\x12\x1b\n" +
 	"\x17INTENT_STEP_UNSPECIFIED\x10\x00\x12\x17\n" +

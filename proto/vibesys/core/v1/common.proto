@@ -67,7 +67,8 @@ enum ControlAction {
   CONTROL_ACTION_CANCEL_ATTEMPT = 6;
   CONTROL_ACTION_CANCEL_ITEM = 7;
   CONTROL_ACTION_SET_MAX_PARALLEL = 8;
-  CONTROL_ACTION_PARK = 9;
+  CONTROL_ACTION_PARK = 9; // Retained for stored controls from earlier epochs.
+  CONTROL_ACTION_PAUSE_NOW = 10;
 }
 
 // Canonical tagged identity; domains survive JSON union round trips.

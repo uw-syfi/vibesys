@@ -807,7 +807,7 @@ class MeasurementRequests:
         dependency = self._control is not None and self._control.evaluation_is_dependency(
             record.handle_id
         )
-        finishing = polled.phase is PollPhase.RUNNING or dependency
+        finishing = not request.immediate and (polled.phase is PollPhase.RUNNING or dependency)
         if not finishing and not record.parked:
             try:
                 record = await self._hold_for_relaunch(record, polled)

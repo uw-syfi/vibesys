@@ -84,8 +84,9 @@ func readHead(dir string) (*storev1.RunHead, error) {
 	if err := proto.Unmarshal(data, head); err != nil {
 		return nil, status.Errorf(codes.DataLoss, "invalid run.head: %v", err)
 	}
-	if head.Lifecycle == nil || head.Lifecycle.State == nil {
-		return nil, status.Error(codes.DataLoss, "run.head lacks lifecycle")
+	hasLifecycle := head.Lifecycle != nil && head.Lifecycle.State != nil
+	if hasLifecycle == head.AwaitingLifecycle || (head.AwaitingLifecycle && (head.Epoch == 0 || head.CommittedSeq == nil)) {
+		return nil, status.Error(codes.DataLoss, "run.head requires lifecycle or an explicitly awaiting epoch")
 	}
 	return head, nil
 }

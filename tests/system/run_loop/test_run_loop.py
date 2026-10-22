@@ -138,13 +138,36 @@ def _host(
     return process, host
 
 
+@pytest.mark.parametrize("explicit_resume", [False, True])
+async def test_reopening_a_finished_run_requires_operator_resume(
+    tmp_path: Path, *, explicit_resume: bool
+) -> None:
+    """Replacing a writer returns its result; only operator Resume reopens admission."""
+    clock = ProbedRunClock(clock_from(1.0))
+    with open_skeleton_world(tmp_path, BASELINE_ONLY) as world:
+        first, host = _host(world, clock)
+        start_core(host, _config())
+        ended = await drive_core(host, _config())
+        assert ended.status == RunStatus.TERMINAL
+        first.shell.release_lease(now_at=clock.now())
+        replacement = world.runtime()
+        bridge = RunControlBridge(_channel(), Steers(), lifts_standing_stop=explicit_resume)
+        restarted = CoreRunHost(replacement.shell, replacement.delivery, clock, bridge)
+        start_core(restarted, _config())
+        outcome = await drive_core(restarted, _config())
+        controls = replacement.shell.record.envelope.core.run.controls
+        assert any(control.action == "resume" for control in controls) is explicit_resume
+        assert outcome.status == RunStatus.TERMINAL
+        assert outcome.result == ended.result
+
+
 async def test_a_stop_control_ends_the_run_with_the_proposed_result(tmp_path: Path) -> None:
     channel = _channel()
     clock = ScriptedClock(clock_from(1.0))
     clock.actions[2] = lambda: channel.request_stop(StopMode.DRAIN)
     with open_skeleton_world(tmp_path, INERT) as world:
         process, host = _host(world, clock, channel)
-        channel.request_pause()
+        channel.pause_for_quota()
         start_core(host, _config())
         outcome = await drive_core(host, _config())
     assert outcome.status == RunStatus.TERMINAL
@@ -159,7 +182,7 @@ async def test_the_deadline_ends_an_otherwise_idle_paused_run(tmp_path: Path) ->
     clock = ProbedRunClock(clock_from(1.0))
     with open_skeleton_world(tmp_path, INERT) as world:
         process, host = _host(world, clock, channel)
-        channel.request_pause()
+        channel.pause_for_quota()
         start_core(host, _config(lease_duration=5000.0, control_poll_interval=300.0))
         outcome = await drive_core(
             host, _config(lease_duration=5000.0, control_poll_interval=300.0)
@@ -197,7 +220,7 @@ async def test_an_idle_run_is_woken_a_bounded_number_of_times(
         channel = _channel()
         clock = ProbedRunClock(clock_from(1.0))
         process, host = _host(world, clock, channel)
-        channel.request_pause()
+        channel.pause_for_quota()
         config = _config(control_poll_interval=poll, min_sleep=min_sleep)
         start_core(host, config)
         outcome = await drive_core(host, config)
@@ -216,7 +239,7 @@ async def test_an_idle_run_is_woken_a_bounded_number_of_times(
 
 
 class _Operator(ProbedRunClock):
-    """The loop's clock, with an operator who pauses at the n-th wait and resumes later.
+    """The loop's clock, with an internal quota hold at the n-th wait, released later.
 
     The operator acts as each wait begins (a wait the loop cancels never ends). The resume
     comes ``held_for`` waits after core committed the pause, so the run sits paused for a
@@ -239,7 +262,7 @@ class _Operator(ProbedRunClock):
         status = self.core().run.status
         self.statuses.append(status)
         if len(self.statuses) == self.pause_at:
-            self.channel.request_pause()
+            self.channel.pause_for_quota()
         elif status == RunStatus.PAUSED and self.channel.pause_requested():
             self.paused_waits += 1
             if self.paused_waits >= self.held_for:
@@ -248,7 +271,7 @@ class _Operator(ProbedRunClock):
 
 
 async def _operated_run(pause_at: int, held_for: int) -> tuple[_Operator, RunOutcome, list[str]]:
-    """The full skeleton run (baseline, one attempt, adoption) with a pause and a resume."""
+    """The full skeleton run with an internal quota hold and its release."""
     transitions: list[str] = []
     channel = RuntimeRunControlChannel(
         lambda transition: transitions.append(transition.kind.value), threads=SimThreads()
@@ -276,10 +299,10 @@ _UNPAUSED_END = ("success", "adopted: settlement:settle.1")
 @example(pause_at=40, held_for=5)
 @example(pause_at=4, held_for=1)
 @given(pause_at=st.integers(min_value=1, max_value=60), held_for=st.integers(1, 30))
-async def test_a_pause_holds_the_run_until_resumed_and_the_run_then_ends_as_it_would_have(
+async def test_a_quota_hold_waits_until_released_and_the_run_then_ends_as_it_would_have(
     pause_at: int, held_for: int
 ) -> None:
-    """A pause at any point holds the run, and after the resume the run ends unchanged.
+    """An internal quota hold waits, and after release the run ends unchanged.
 
     The search keeps deciding while the run is paused (a measurement in flight still
     finishes); core takes none of that work until the resume, and the search is never told

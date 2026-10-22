@@ -97,6 +97,18 @@ class EventJournal(DurableEventJournal[CoreEvent]):
             finally:
                 self._runlog = None
 
+    @property
+    def epoch(self) -> int:
+        """The published process epoch, required before native recovery or controls.
+
+        Startup may publish before acquiring a core lease, so writer and lease epochs
+        are independent. Native closing requests always name this writer's epoch.
+        """
+        if self._runlog is None or self._runlog.epoch == 0:
+            message = "run.log has no published epoch; recovery and controls cannot proceed"
+            raise RuntimeError(message)
+        return self._runlog.epoch
+
     def intent_decision(self, control_id: str) -> tuple[bool, str | None] | None:
         """Recover a typed decision whose inbox marker may not have reached disk."""
         intent = None if self._runlog is None else self._runlog.intent(control_id)

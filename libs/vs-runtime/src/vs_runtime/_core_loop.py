@@ -22,6 +22,7 @@ from vs_core.api import (
     Decision,
     Discarded,
     DispatchAuthorized,
+    EpochResumed,
     EventCursor,
     HostFence,
     HostId,
@@ -47,6 +48,7 @@ from vs_core.api import (
     deferred,
     encode_json,
     orphan_waits,
+    pause_withdraws,
     run_view,
     share_unchanged,
     step,
@@ -71,7 +73,7 @@ from vs_runtime._core_requests import (
 from vs_runtime._evaluation_jobs import awaits_submissions
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterator
+    from collections.abc import Callable, Iterator, Sequence
 
     from vs_core.api import OpenWait, Request
     from vs_project.api import Project
@@ -312,6 +314,8 @@ class CoreRuntimeBindings:
     executors: RequestExecutors = field(default_factory=RequestExecutors)
     transitions: CoreTransitions = field(default_factory=ProductionCoreTransitions)
     commits: CommitObserver = field(default_factory=IgnoreCommits)
+    epoch: Callable[[], int | None] = lambda: None
+    """Native writer identity derived from run.log; absent for an unjournaled host."""
     check_liveness: bool = False
     """Check ``orphan_waits`` after every commit, not only at start. Linear in state size."""
     steering: TurnSteering | None = None
@@ -346,6 +350,7 @@ class CoreRuntime[S: StrategyState]:
         self._config = config
         self._initial = initial
         selected = bindings or CoreRuntimeBindings()
+        self._epoch = selected.epoch
         self._registry = selected.registry
         self._executors = selected.executors
         self._transitions = selected.transitions
@@ -501,7 +506,7 @@ class CoreRuntime[S: StrategyState]:
             self._start_checked = (self._record, host_id)
 
     def _provisional(
-        self, host_id: str, *, now_at: float
+        self, host_id: str, *, now_at: float, resume: bool = False
     ) -> tuple[RunEnvelope[S], tuple[Decision, ...]]:
         """The envelope a start by ``host_id`` would commit, validated, and a new run's decisions.
 
@@ -512,6 +517,18 @@ class CoreRuntime[S: StrategyState]:
             if self._record is None
             else self.record.envelope.core
         )
+        duration = core.run.duration_seconds or self._initial.run.duration_seconds
+        if duration is not None and (self._record is None or resume):
+            core = core.model_copy(
+                update={
+                    "run": core.run.model_copy(
+                        update={
+                            "duration_seconds": duration,
+                            "deadline_at": max(core.run.now_at, now_at) + duration,
+                        }
+                    )
+                }
+            )
         if not core.run.declaration.resumable_as(self._search.declaration):
             raise ContractError(("declaration",), "initial strategy declaration mismatch")
         selected = validate_startup(self._search.declaration, core.run.capabilities)
@@ -560,8 +577,13 @@ class CoreRuntime[S: StrategyState]:
             # A resumed run's start never reads its time before taking the lease.
             self._provisional(host_id, now_at=self.record.envelope.core.run.now_at)
 
-    def start(self, host_id: str, *, now_at: float, lease_duration: float) -> None:
-        """Validate before lease acquisition, then commit new-epoch recovery.
+    def start(
+        self, host_id: str, *, now_at: float, lease_duration: float, resume: bool = False
+    ) -> None:
+        """Validate before lease acquisition, then reconcile the writer.
+
+        Only ``resume`` constructs fresh run authority; crash recovery retains
+        the run's closure and replays its existing flow journal.
 
         No backend setup or execution occurs here. Unfinished identities produce
         inspection requests; core gates ordinary admission until reconciled.
@@ -570,15 +592,20 @@ class CoreRuntime[S: StrategyState]:
             message = "runtime already started"
             raise RuntimeError(message)
         self._load()
-        provisional, decisions = self._provisional(host_id, now_at=now_at)
+        provisional, decisions = self._provisional(host_id, now_at=now_at, resume=resume)
+        published_epoch = self._epoch()
         fence = self._store.acquire(host_id, now=now_at, duration=lease_duration)
         if fence is None:
             message = "runtime lease unavailable"
             raise LeaseUnavailableError(message)
+        epoch = fence.epoch if published_epoch is None else published_epoch
+        if published_epoch is not None and epoch <= provisional.core.records.recovery.epoch:
+            self._store.release(fence, now=now_at)
+            raise ContractError(("epoch",), "run.log must publish a successor before recovery")
         self._fence = fence
         self._renewed_at = now_at
         provisional = provisional.model_copy(
-            update={"fence": HostFence(host_id=HostId(root=fence.host_id), epoch=fence.epoch)}
+            update={"fence": HostFence(host_id=HostId(root=fence.host_id), epoch=epoch)}
         )
         previous_record = self._record
         previous_revision = self._storage_revision
@@ -590,7 +617,9 @@ class CoreRuntime[S: StrategyState]:
         try:
             self._consume(
                 _Input[S](
-                    event=RecoveryStarted(epoch=fence.epoch, now_at=now_at),
+                    event=EpochResumed(epoch=epoch, now_at=now_at)
+                    if resume
+                    else RecoveryStarted(epoch=epoch, now_at=now_at),
                     now_at=now_at,
                 )
             )
@@ -665,7 +694,10 @@ class CoreRuntime[S: StrategyState]:
         ):
             return
         self._renewal_queued_at = renewed_at
-        self.submit(HostRenewed(epoch=self._fence.epoch, now_at=renewed_at), now_at=renewed_at)
+        self.submit(
+            HostRenewed(epoch=self.record.envelope.fence.epoch, now_at=renewed_at),
+            now_at=renewed_at,
+        )
 
     def release_lease(self, *, now_at: float) -> None:
         """Give the lease back so a restart need not wait for it to expire.
@@ -1348,11 +1380,23 @@ class CoreRuntime[S: StrategyState]:
         fired. A cancelled request returns no observation; core already reported it.
         """
         ended = [f for f in self._flights if not f.task.done() and self._ended_by_core(f)]
-        for flight in ended:
+        return await self._cancel_flights(ended)
+
+    async def _cancel_withdrawn(self) -> bool:
+        return await self._cancel_flights(
+            [
+                flight
+                for flight in self._flights
+                if pause_withdraws(self.record.envelope.core, flight.record.request)
+            ]
+        )
+
+    async def _cancel_flights(self, flights: Sequence[_Flight]) -> bool:
+        for flight in flights:
             self._flights.remove(flight)
             flight.task.cancel()
-        await asyncio.gather(*(f.task for f in ended), return_exceptions=True)
-        return bool(ended)
+        await asyncio.gather(*(flight.task for flight in flights), return_exceptions=True)
+        return bool(flights)
 
     async def wait_for_flight(self) -> None:
         """Return once a running request has finished (at once when one already has).
@@ -1406,7 +1450,12 @@ class CoreRuntime[S: StrategyState]:
         try:
             while True:
                 # A failed request surfaces before anything else commits.
-                if self._finish_done() or await self.cancel_ended() or self.advance():
+                if (
+                    await self._cancel_withdrawn()
+                    or self._finish_done()
+                    or await self.cancel_ended()
+                    or self.advance()
+                ):
                     upkeep()
                     continue
                 if refusal is None:

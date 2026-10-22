@@ -138,6 +138,11 @@ class RunLogTee:
             ),
         )
 
+    @property
+    def epoch(self) -> int:
+        """The public writer epoch, including startup before the core lease is acquired."""
+        return self._writer.current_epoch.number
+
     def intent(self, control_id: str) -> p.IntentState | None:
         """Return a previously recorded outcome without exposing mutable projection state."""
         if self._state is not None:

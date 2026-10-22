@@ -416,7 +416,7 @@ def _run_request(args: argparse.Namespace, runs: Runs | None = None) -> None:
     request = _build_run_request(args)
     result = _execute_run_request(request, production_runs() if runs is None else runs)
     if result.status is RunStatus.PARKED:
-        sys.stdout.write(f"\n{request.orchestration.id} run parked. Relaunch to continue.\n")
+        sys.stdout.write(f"\n{request.orchestration.id} run paused. Resume to continue.\n")
     elif result.succeeded:
         sys.stdout.write(f"\n{request.orchestration.id} run completed.\n")
         if result.uncompared:

@@ -484,27 +484,13 @@ Facts enter once:
   `adoption-failed`, `stopped`, `deadline`, `finish-refused`) when the run recorded a result, else
   `force_stopped` when the server was terminated, `stopped` for a stop that left work unsettled,
   and `failed` otherwise. `reason` is one line (at most 200 characters): core's account of the
-  result, else the failure's message. `resumable` is whether the run's durable core record exists
-  and is not terminal, or ended by the operator's stop, and no force stop ended it: a run that
-  recorded a result of its own is not resumable, and neither is a `force_stopped` one. A `stopped`
-  run is always resumable: an explicit resume lifts the stop (a stop is a pause the operator can
-  lift, `vs_core`'s `stop_standing`; the process that opens the run records `StopLiftRecorded`,
-  which the search receives as `StopLifted`). While the stop's cleanup is still running core takes
-  no resume; once it committed the run is terminal and the resume reopens it
-  (`vs_core.reopens_on_resume`: a `cancelled` result under a standing operator stop that is not
-  the deadline's), and the search starts again from its checkpoints. Only an operator's resume
-  lifts a stop, never a crash restart (#2902). `resume_from_round` is then its finished rounds
-  plus one.
-  `uncompared` is core's result fact that the adopted candidate
-  was never compared with the input (the input failed its own measurement); it holds whichever
-  outcome ended the run (`adopted`, `deadline` or `stopped`), and the UI adds "adopted without an
-  input comparison" to that outcome. A force stop records the stop request in the run's state
-  (`ProjectState.record_stop_request`) before the server is signalled, so a resume of a
-  force-stopped run commits that stop first, starts no new work, and only finishes the drain and
-  ends; `vibesys --resume` refuses a run whose record is terminal for a reason of its own
-  (`run_ended`, "run ended; start a new run"), not one the operator's stop ended. A core run reports these as the `run_ending` event just
-  before it ends; a run that failed before core started reports none and is not resumable. A
-  crashed server's burial records `failed`, resumable, with no round. `end` is absent on a
+  result, else the failure's message. `resumable` remains for older readers; every ending can
+  launch a successor epoch. Resume serializes launch, checks the observed epoch and current
+  storage prerequisites, and opens a fresh duration with admission reopened. Cleanup from the
+  previous epoch finishes before new work starts. Retained shutdown flags and closing intents
+  cannot immediately end the successor. `resume_from_round` remains descriptive history.
+  `uncompared` records whether the adopted candidate was compared with the original input.
+  Finished runs and crashed servers remain available in history. `end` is absent on a
   tombstone upgraded from version 4 and when a completed run reported no ending, so the UI falls
   back to the phase; the next listing after that removes it, with no coupling to
   client acknowledgements. Finished runs stay reachable from run history (`runs.list`), not the
@@ -633,16 +619,12 @@ whose checkout works). Its invariants are checked over seeded action sequences.
 
 The Run screen (`@vibesys/feature-run-page`) has one store per shown run, a reducer over the run's
 registry record (from the host's watch, through the sidebar's listings) and its log streams. The
-phase is the record's: the screen never shows a phase the host did not report, except that a Stop
-it sent shows as stopping until the record says so. Stopping, by this window or anyone else, arms a
-two-minute bound (`FORCE_STOP_BOUND_MS`) on the shell's injected clock under a request token;
-"Force stop" is offered only when that token returns while the run is still stopping, so a late
-bound for an earlier stop is dropped. The screen's Stop confirmation states what is lost (its wording still says a stopped run cannot be
-resumed, which no longer holds: a stop is a pause), so it sends `stopConfirmed`, which runs
-the same stop flow without the app's native question; the stop flow lets a view force an accepted
-graceful stop. The ended banner reads the end record and offers Resume, naming
-`resume_from_round`, only when it says `resumable`. Logs are grouped by their owner (startup
-steps, gate stages, tool builds, narration) and read over the welcome bridge's `logs`, which the
+phase follows durable state. Pause closes new admission and drains whole bounded turns;
+Pause now is available immediately, including during drain, and confirms with "Unfinished work
+may need repeating and may still incur charges." Its pending state stays visible until the
+record catches up. Every ended run offers Resume, which launches a new epoch. Quota holds
+remain internal. Logs are grouped by their owner (startup steps, gate stages, tool builds,
+narration) and read over the welcome bridge's `logs`, which the
 main process serves from the host's logs channel until the screen lets it go; the startup
 timeline is built from the startup steps' streams. "Open in new window" opens the run in a
 window of its own (see "Windows and notifications").
@@ -656,16 +638,12 @@ cross the context bridge; the page speaks the relay's credit protocol over it
 run is attached, the store keeps its `WebSession` open (bootstrap, stream, recovery stay in
 `@vibesys/run-session`'s machine) and folds what it reports: the session's state, the run fold, and
 the trace's accepted span events in sequence order (the session's `onTracePublication`), so the
-tabs fold the trace at the sequence they show (`viewedRun`). Pause and Resume are protocol commands
-on that session, offered only while its controls are up. When a rebootstrap cannot prove that the
-current trace base still belongs to the run, its reset initiates a snapshot request fenced to the
-established store, including when that store is unchanged. A run paused by a usage limit shows the quota banner
-instead of the header's Resume: the provider and its reset time, "Resume now" (`command.resume`
-with `when: now`), "Wait and resume when quota is back" (`when: capacity_returns`), and, once the
-run reports `quota_waiting` (folded into the run fold's quota pause, with its `resumes_at`), the
-expected time and "Stop waiting" (`command.pause`) until `quota_wait_cancelled`. A server that
-refuses the wait (an older one rejects `when`) no longer offers it for that run instance. Times are
-words for the events' epoch seconds in the user's time zone; no clock is read. Leaving the run
+tabs fold the trace at the sequence they show (`viewedRun`). Pause and Pause now are typed
+`command.control` requests on the live session. Resume uses the launch path after the epoch
+exits. When a rebootstrap cannot prove that the current trace base still belongs to the run,
+its reset initiates a snapshot request fenced to the established store, including when that
+store is unchanged. A quota hold contributes status only; its automatic capacity handling
+stays internal. Leaving the run
 releases it (`releaseRun`), and a new shell document detaches the run the old one held. An ended run
 opens from its summary: the store asks for `runs.summary` (features `run_summary` and `run_trace`, through the welcome
 bridge's `readSummary`, whose main-process reader joins the pages and reads again when the run moved

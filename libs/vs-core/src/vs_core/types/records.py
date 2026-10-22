@@ -786,7 +786,11 @@ class RequestObserved(OutcomeValue):
 
 
 class RecoveryStarted(Value):
-    """A host acquired the lease: epoch ``epoch`` starts at ``now_at``."""
+    """Reconcile a replacement writer at ``now_at`` under host authority ``epoch``.
+
+    This input preserves the run and its flow journal. ``EpochResumed`` alone
+    authorizes fresh run authority after an operator Resume.
+    """
 
     kind: Literal["recovery_started"] = "recovery_started"
     epoch: Count

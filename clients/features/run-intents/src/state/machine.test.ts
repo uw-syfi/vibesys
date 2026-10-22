@@ -15,6 +15,7 @@ const request = create(PostIntentRequestSchema, {
   requestId: 'r-1',
   runId: 'run-1',
   projectRoot: '/project',
+  expectedEpoch: 1n,
   intent: {case: 'pause', value: {}},
 });
 
@@ -113,6 +114,7 @@ test('retry owns the original payload even if its caller edits the generated mes
     requestId: 'owned',
     runId: 'run-1',
     projectRoot: '/project',
+    expectedEpoch: 1n,
     intent: {case: 'steer', value: {text: 'original guidance'}},
   });
   const sending = getNextSnapshot(

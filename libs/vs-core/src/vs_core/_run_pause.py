@@ -9,40 +9,43 @@ under, and any immediate resume ends the pause.
 
 from __future__ import annotations
 
+from dataclasses import dataclass, fields
 from typing import TYPE_CHECKING, Final
 
 from ._operator_actions import action_refusal_kind
 from ._registry import ContractError
 from .types.common import ACTION_REFUSAL_TEXT, OPERATOR_ACTIONS, PauseOwner, RunPause, RunStatus
+from .types.kernel import RunState
 from .types.strategy import Finish
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
-
-    from .types.common import ActionRefusal, ControlInput
-    from .types.kernel import CoreState, RunState
-    from .types.settlement import RunResultProposal
+    from .types.common import (
+        ActionRefusal,
+        ArtifactRef,
+        Capabilities,
+        ControlInput,
+        Limits,
+        RunFacts,
+        RunId,
+    )
+    from .types.kernel import CoreState, DecisionReceipt
+    from .types.settlement import EvidenceRequirements
+    from .types.strategy import SearchDeclaration
 
 
 DEADLINE_STOP: Final = "deadline"
 """The identity of the stop the host delivers when the run's deadline passes.
 
-An operator's stop is a pause (``reopens_on_resume``); the deadline's is the run's time budget
-spent, and it ends the run for good.
+The deadline ends the current epoch after its time budget is spent.
 """
 
 ENVIRONMENT_STOP: Final = "run-environment"
 """The identity of the stop the host delivers when the run environment can run none of the run's
 work (a local Slurm root its probe could not prove shared).
 
-Like the deadline's, it is the host's verdict and not a pause: a resume would meet the same
-environment, so it ends the run failed, for good. No operator control can carry it: the host
+The host ends this epoch as failed. Resume can try a successor epoch. The host
 records operators' controls under ``op-`` and ``control-`` identities.
 """
-
-FINAL_STOPS: Final = frozenset({DEADLINE_STOP, ENVIRONMENT_STOP})
-"""The host's own stops: once one stands, no resume lifts it (``control_refusal``) and no
-resume reopens the run it ended (``reopens_after``)."""
 
 
 class ControlRefusedError(ContractError):
@@ -121,18 +124,10 @@ def stands_after(control: ControlInput, *, stood: bool) -> bool:
 
 
 def control_refusal(state: CoreState, control: ControlInput) -> ControlRefusedError | None:
-    """Why core refuses a new ``control`` in ``state`` as it stands, or None if it takes it.
+    """Validate a control against current admission, cleanup, and epoch ownership.
 
-    The one statement of the rule: core raises the error when the control arrives, and a
-    shell that must answer an operator before core commits asks the same question. A
-    terminal run refuses every control, except the resume that reopens a run the operator's
-    stop ended (`reopens_on_resume`). Any other run takes a stop, a steer and a
-    withdrawal; it takes an operator action that can change something
-    (``action_refusal_kind``), also while it stops or cleans up; and a run that recorded a
-    stop takes no pause, and a resume only until its ending commits: that resume lifts the stop
-    (`stop_standing`). No resume lifts one of the host's own stops (``FINAL_STOPS``): the
-    deadline's time is spent and the environment's failure would recur, so once one stands it
-    stands until the run ends, across a restart and an explicit resume alike.
+    Every terminal result may resume. A drained epoch resumes only after a new writer
+    has acquired it, and cleanup must settle before a successor can admit work.
     """
     run = state.run
     if run.status in (RunStatus.DRAINING, RunStatus.PARKED, RunStatus.TERMINAL):
@@ -146,6 +141,11 @@ def control_refusal(state: CoreState, control: ControlInput) -> ControlRefusedEr
 
 def _inactive_refusal(state: CoreState, control: ControlInput) -> ControlRefusedError | None:
     run = state.run
+    if (
+        control.action in ("steer", "withdraw")
+        and run.status in (RunStatus.DRAINING, RunStatus.PARKED)
+    ) or (run.status == RunStatus.DRAINING and control.action == "pause_now"):
+        return None
     if run.status in (RunStatus.DRAINING, RunStatus.PARKED):
         if (
             run.status == RunStatus.PARKED
@@ -155,12 +155,13 @@ def _inactive_refusal(state: CoreState, control: ControlInput) -> ControlRefused
             and state.records.recovery.epoch > run.park.epoch
         ):
             return None
-        return ControlRefusedError(control, ("run", "status"), "park is terminal for this epoch")
+        return ControlRefusedError(control, ("run", "status"), "pause is terminal for this epoch")
     if run.status == RunStatus.TERMINAL:
-        lifts = control.action == "resume" and control.when != "capacity_returns"
-        if lifts and reopens_on_resume(run):
+        if control.action == "resume" and control.when != "capacity_returns":
             return None
-        return ControlRefusedError(control, ("run", "status"), "terminal run rejects controls")
+        return ControlRefusedError(
+            control, ("run", "status"), "the epoch ended; Resume starts another"
+        )
     return None
 
 
@@ -175,59 +176,18 @@ def _action_refusal(state: CoreState, control: ControlInput) -> ControlRefusedEr
 
 
 def stop_standing(run: RunState) -> bool:
-    """Whether a stop the run recorded still stands: no resume has lifted it since.
-
-    A stop is a pause the operator can lift: an explicit resume takes the stop back
-    (`control_refusal`). While the ending's cleanup runs (the run is closing) nothing lifts
-    it; once it is terminal a resume reopens the run (`reopens_on_resume`).
-    """
-    standing, _final = _stops_after(run.controls)
+    """Whether the latest closing control has not been lifted by a subsequent Resume."""
+    standing = False
+    for control in run.controls:
+        if control.action == "stop":
+            standing = True
+        elif control.action == "resume":
+            standing = False
     return standing
 
 
-def _stops_after(controls: Sequence[ControlInput]) -> tuple[bool, bool]:
-    """Whether a stop stands after ``controls``, and whether one of the host's own stands.
-
-    The one fold of the run's stops: a stop stands from when it is recorded until a resume
-    follows it. Core refuses a resume while a host stop stands (``_pause_refusal``), so such a
-    resume is never recorded; one a run recorded before that rule (a lifted deadline) still
-    lifts, so a stored run reads as it always did.
-    """
-    standing = final = False
-    for recorded in controls:
-        if recorded.action == "stop":
-            standing = True
-            final = final or recorded.control_id.root in FINAL_STOPS
-        elif recorded.action == "resume":
-            standing = final = False
-    return standing, final
-
-
-def reopens_on_resume(run: RunState) -> bool:
-    """Whether a resume reopens the run: the operator's stop ended it, and a stop is a pause.
-
-    A stop ends a run through the search's ending, which cancels what is in flight, adopts the
-    best and commits a ``cancelled`` result. That ending is the stop's cleanup, not a verdict on
-    the run, so the run stays resumable: the explicit resume that opens it takes the stop back
-    and reopens the run (`reopened`), which goes on from what it holds. Every other ending is
-    final: a result of the run itself, a refused or blocked run, and the deadline's stop (the
-    time the run was given is spent), and the run environment's stop (it can run nothing).
-    """
-    return reopens_after(run.status, run.result, run.controls)
-
-
-def reopens_after(
-    status: RunStatus, result: RunResultProposal | None, controls: Sequence[ControlInput]
-) -> bool:
-    """`reopens_on_resume` from the three facts it reads: a reader of a record needs no more."""
-    if status != RunStatus.TERMINAL or result is None or result.outcome != "cancelled":
-        return False
-    standing, final = _stops_after(controls)
-    return standing and not final
-
-
 def reopened(run: RunState) -> RunState:
-    """The run a resume reopened (`reopens_on_resume`): running, with no ending committed.
+    """The run a successor epoch reopened: running, with no ending committed.
 
     The ending's ``Finish`` leaves the receipts: it is no longer committed, and the run's next
     ending is its first (`committed_stop` keeps the first Finish). Every other receipt stays as
@@ -240,19 +200,14 @@ def reopened(run: RunState) -> RunState:
         for receipt in run.receipts
         if not (isinstance(receipt.decision, Finish) and receipt.decision.result == ended)
     )
-    return run.model_copy(update={"status": RunStatus.RUNNING, "result": None, "receipts": kept})
+    return run.model_copy(
+        update={"status": RunStatus.RUNNING, "result": None, "receipts": kept, "park": None}
+    )
 
 
 def _pause_refusal(run: RunState, control: ControlInput) -> ControlRefusedError | None:
     lifts = control.action == "resume" and control.when != "capacity_returns"
-    standing, final = _stops_after(run.controls)
-    if final and lifts:
-        # The host's stop is its verdict, not a pause: a resume would meet the same spent
-        # deadline or the same failed environment. Lifting it would leave the run going on
-        # with nothing to stop it again, since core takes a repeated stop as already recorded.
-        return ControlRefusedError(
-            control, ("run", "controls"), "the host stopped the run; no resume lifts its stop"
-        )
+    standing = stop_standing(run)
     if standing and not lifts:
         # A pause would change nothing an operator could see before the search ends the run;
         # only an explicit resume (which lifts the stop) is taken.
@@ -268,3 +223,47 @@ def _pause_refusal(run: RunState, control: ControlInput) -> ControlRefusedError 
             control, ("control", "when"), "only a paused run waits for capacity"
         )
     return None
+
+
+@dataclass(frozen=True)
+class EpochFacts:
+    """The only inputs to an epoch constructor; closure and control state are unrepresentable.
+
+    Work receipts and artifacts are durable facts. Status, operator controls, park
+    authority and a previous result belong to the previous epoch, never these inputs.
+    """
+
+    run_id: RunId
+    generation: int
+    now_at: float
+    deadline_at: float
+    duration_seconds: float | None
+    facts: RunFacts
+    capabilities: Capabilities
+    limits: Limits
+    requirements: EvidenceRequirements
+    declaration: SearchDeclaration
+    artifacts: tuple[ArtifactRef, ...]
+    receipts: tuple[DecisionReceipt, ...]
+
+    @classmethod
+    def of(cls, run: RunState) -> EpochFacts:
+        """Extract durable facts, excluding the previous epoch's Finish receipt."""
+        return cls(
+            run_id=run.run_id,
+            generation=run.generation,
+            now_at=run.now_at,
+            deadline_at=run.deadline_at,
+            duration_seconds=run.duration_seconds,
+            facts=run.facts,
+            capabilities=run.capabilities,
+            limits=run.limits,
+            requirements=run.requirements,
+            declaration=run.declaration,
+            artifacts=run.artifacts,
+            receipts=tuple(row for row in run.receipts if not isinstance(row.decision, Finish)),
+        )
+
+    def new_run(self) -> RunState:
+        """Construct fresh admission authority; there is no previous closure to copy."""
+        return RunState(**{field.name: getattr(self, field.name) for field in fields(self)})

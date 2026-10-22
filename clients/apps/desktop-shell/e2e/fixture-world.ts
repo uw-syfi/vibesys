@@ -83,6 +83,7 @@ interface FixtureWindow extends Window {
 }
 
 export interface OpenOptions {
+  readonly refuseActions?: readonly string[];
   readonly summary?: 'gone' | 'unsupported';
   readonly theme?: 'ink' | 'paper';
   /** A finished run's history served in small pages, held part-way: see `fake-history.ts`. */
@@ -220,7 +221,13 @@ export function fixtureScripts(fixture: RunFixture, options: OpenOptions = {}): 
     }),
   ];
   const last = Math.max(0, ...fixture.events.map(each => each.sequence ?? 0));
-  scripts.push(script(installFakeChat, {runId: fixture.runId, firstSequence: last + 1}));
+  scripts.push(
+    script(installFakeChat, {
+      runId: fixture.runId,
+      firstSequence: last + 1,
+      ...(options.refuseActions ? {refuseActions: options.refuseActions} : {}),
+    }),
+  );
   if (options.historyServing !== undefined) {
     scripts.push(script(installFakeHistory, {...options.historyServing, events: fixture.events}));
   }

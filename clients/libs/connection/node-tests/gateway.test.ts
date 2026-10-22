@@ -338,6 +338,7 @@ for (const [method, deadline] of [
                 projectRoot: '/project',
                 runId: 'run-a',
                 requestId: 'id-a',
+                expectedEpoch: 1n,
                 intent: {case: 'pause', value: {}},
               },
             },

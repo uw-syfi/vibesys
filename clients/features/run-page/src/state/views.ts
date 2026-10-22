@@ -1,6 +1,6 @@
 /**
  * What the Run screen shows, as selectors over `RunPageState`: the header's words and actions, the
- * startup timeline, the log streams grouped by owner, and the stop and ended banners. The renderer
+ * startup timeline, the log streams grouped by owner, and the pause and ended banners. The renderer
  * maps these onto `@vibesys/ui` components and decides nothing itself.
  */
 import type {LogOwner, RunEvent, RunOverview, Span} from '@vibesys/contracts';
@@ -16,11 +16,9 @@ import {
   commandable,
   type HistoryProgress,
   type MachineBlock,
-  quotaPause,
   type RunPageState,
   runPhase,
   type StageView,
-  type StopFlow,
   type Unavailable,
 } from './run-page.js';
 import {type TokensReading, tokensReading} from './token-words.js';
@@ -44,8 +42,7 @@ export interface HeaderView {
   /** What ran each role of the run, from its usage records: `Planner` with `model on harness`. */
   readonly agents: readonly {readonly role: string; readonly ran: readonly string[]}[];
   readonly pause: Offer;
-  readonly resume: Offer;
-  readonly stop: Offer;
+  readonly pauseNow: Offer;
   readonly openWindow: Offer;
   readonly archive: Offer;
 }
@@ -103,21 +100,19 @@ function status(state: RunPageState): {label: string; tone: Tone} {
     case 'starting':
       return {label: 'Starting', tone: 'live'};
     case 'running':
-      return phase.pausing
-        ? {label: 'Pausing at the next step', tone: 'warn'}
-        : {label: 'Running', tone: 'live'};
+      return phase.pausing ? {label: 'Pausing', tone: 'warn'} : {label: 'Running', tone: 'live'};
     case 'paused':
       return phase.by === 'quota'
         ? {label: 'Paused · usage limit', tone: 'warn'}
         : {label: 'Paused by you', tone: 'warn'};
     case 'stopping':
-      return {label: 'Stopping…', tone: 'warn'};
+      return {label: 'Pausing', tone: 'warn'};
     case 'ended':
       return endedStatus(phase.run.phase, phase.end);
   }
 }
 
-/** Why Pause and Resume cannot be sent now, or undefined when they can. */
+/** Why a live pause command cannot be sent now, or undefined when they can. */
 function commandReason(state: RunPageState): string | undefined {
   if (commandable(state)) return undefined;
   if (state.link.kind === 'failed') return `Could not connect to the run: ${state.link.message}`;
@@ -126,10 +121,6 @@ function commandReason(state: RunPageState): string | undefined {
 
 function offer(shown: boolean, unavailable?: string): Offer {
   return {shown, disabledReason: unavailable ?? null};
-}
-
-function providerName(provider: string): string {
-  return provider.charAt(0).toUpperCase() + provider.slice(1);
 }
 
 export function headerView(state: RunPageState, names: ModelNames = NO_MODEL_NAMES): HeaderView {
@@ -154,116 +145,32 @@ export function headerView(state: RunPageState, names: ModelNames = NO_MODEL_NAM
       state.readOnly !== true && phase.kind === 'running' && !phase.pausing,
       commandReason(state),
     ),
-    // A run paused by a usage limit is resumed from its banner, which also offers to wait.
-    resume: offer(
-      state.readOnly !== true && phase.kind === 'paused' && phase.by === 'user',
-      commandReason(state),
-    ),
-    // Stop stays while its confirmation is open, unavailable, so the header does not lose a control.
-    stop: offer(
-      state.readOnly !== true &&
-        (phase.kind === 'starting' || phase.kind === 'running' || phase.kind === 'paused') &&
-        (state.stop.kind === 'idle' || state.stop.kind === 'confirming'),
-      state.stop.kind === 'confirming' ? 'Confirm or cancel in the banner below' : undefined,
+    pauseNow: offer(
+      state.readOnly !== true && state.record.kind === 'live',
+      state.pauseNow.kind === 'idle'
+        ? commandReason(state)
+        : state.pauseNow.kind === 'confirming'
+          ? 'Confirm or cancel below'
+          : 'Pausing',
     ),
     openWindow: offer(true, unavailable['open-window']),
     archive: offer(state.readOnly !== true && phase.kind === 'ended'),
   };
 }
 
-/** The banner while the run is paused by a usage limit: what stopped it, and what to do. */
-export interface QuotaBannerView {
-  readonly title: string;
-  readonly body: string;
-  readonly resumeNow: Offer;
-  /** "Wait and resume when quota is back": shown until the run waits. */
-  readonly wait: Offer;
-  /** "Stop waiting": shown while the run waits. */
-  readonly stopWaiting: Offer;
-}
-
-/**
- * The quota banner, or null unless the run is paused by a usage limit. `time` words an epoch second
- * (the shell formats it in the user's time zone); nothing here reads a clock.
- */
-export function quotaBannerView(
-  state: RunPageState,
-  time: (epochSeconds: number) => string,
-): QuotaBannerView | null {
-  const phase = runPhase(state);
-  if (phase.kind !== 'paused' || phase.by !== 'quota') return null;
-  const pause = quotaPause(state);
-  const reason = commandReason(state);
-  const waiting = pause?.waiting ?? null;
-  const offers = {
-    resumeNow: offer(true, reason),
-    wait: offer(waiting === null && state.waitRefused === null, reason),
-    stopWaiting: offer(waiting !== null, reason),
-  };
-  if (pause === null) {
-    return {
-      ...offers,
-      title: 'Paused: usage limit reached',
-      body: 'The run waits for you to resume it, or for its quota to return.',
-    };
-  }
-  const provider = providerName(pause.provider);
-  if (waiting !== null) {
-    return {
-      ...offers,
-      title: `Waiting for ${provider}'s quota`,
-      body:
-        waiting.resumesAt === null
-          ? `${provider} gave no reset time, so the run tries again at its quota policy's retry interval.`
-          : `The run resumes by itself at about ${time(waiting.resumesAt)}.`,
-    };
-  }
-  const limit = pause.condition === 'rate_limited' ? 'rate limit' : 'usage limit';
-  const reset =
-    pause.resetsAt === null
-      ? `${provider} gave no reset time.`
-      : `${provider} expects capacity back at ${time(pause.resetsAt)}.`;
-  return {
-    ...offers,
-    title: `Paused: ${provider} hit its ${limit}`,
-    body: `${pause.detail}. ${reset}`,
-  };
-}
-
-/** The banner under the header while a stop is being confirmed or is under way. */
-export type StopBannerView =
+/** The banner under the header while Pause now is being confirmed or is under way. */
+export type PauseNowBannerView =
   | {readonly kind: 'none'}
-  | {readonly kind: 'confirm'; readonly title: string; readonly body: string}
-  | {
-      readonly kind: 'stopping';
-      readonly title: string;
-      readonly body: string;
-      readonly forceOffered: boolean;
-    };
+  | {readonly kind: 'confirm'; readonly title: string; readonly body: string};
 
-const MINUTES = 2;
-
-export function stopBannerView(state: RunPageState): StopBannerView {
-  const stop: StopFlow = state.stop;
-  if (stop.kind === 'confirming') {
-    return {
-      kind: 'confirm',
-      title: 'Stop this run?',
-      body:
-        'A stopped run ends for good and cannot be resumed. Agent turns in progress are discarded; ' +
-        'results measured so far are kept. To continue later, pause the run instead.',
-    };
-  }
-  if (runPhase(state).kind !== 'stopping') return {kind: 'none'};
-  const forceOffered = stop.kind === 'stopping' && stop.forceOffered;
-  return {
-    kind: 'stopping',
-    title: 'Stopping · waiting for the run to reach a safe point',
-    body: forceOffered
-      ? `Force stop ends it now and discards the work in progress. It is offered because stopping has taken over ${MINUTES} minutes.`
-      : 'Running steps finish first, then the run stops.',
-    forceOffered,
-  };
+export function pauseNowBannerView(state: RunPageState): PauseNowBannerView {
+  return state.pauseNow.kind === 'confirming'
+    ? {
+        kind: 'confirm',
+        title: 'Pause now?',
+        body: 'Unfinished work may need repeating and may still incur charges.',
+      }
+    : {kind: 'none'};
 }
 
 const STAGES = [
@@ -678,9 +585,7 @@ export function endedView(state: RunPageState): EndedView | null {
             direction,
             end.uncompared === true,
           );
-  const round = end?.resume_from_round ?? null;
-  const resume =
-    end?.resumable === true ? (round === null ? 'Resume' : `Resume from round ${round}`) : null;
+  const resume = 'Resume';
   return {title: label, tone: tone === 'live' ? 'neutral' : tone, reason, resume};
 }
 

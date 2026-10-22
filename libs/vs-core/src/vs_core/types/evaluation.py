@@ -1113,6 +1113,7 @@ class CancelOwnedJob(RequestBase):
 
     kind: Literal["cancel_owned_job"] = "cancel_owned_job"
     for_park: bool = False
+    immediate: bool = False
     """Release the physical job while preserving the logical measurement for relaunch."""
     resource_id: ResourceId
 

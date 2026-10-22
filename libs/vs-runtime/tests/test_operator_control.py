@@ -10,7 +10,6 @@ from hypothesis import given
 from hypothesis import strategies as st
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 
-from vs_core.api import StopMode
 from vs_runtime.api.infrastructure import (
     CONTROL_REQUEST,
     CancelAttemptRequest,
@@ -19,14 +18,13 @@ from vs_runtime.api.infrastructure import (
     ControlAck,
     ControlAction,
     ControlStatus,
-    ParkRequest,
+    PauseNowRequest,
     PauseRequest,
     RefusalReason,
     ResumeRequest,
     SetMaxParallelRequest,
     SteerMode,
     SteerRequest,
-    StopRequest,
     WithdrawRequest,
     create_run_control_channel,
 )
@@ -38,6 +36,7 @@ from vs_runtime.api.testing import (
 from vs_sim.api.testing import SimThreads
 
 if TYPE_CHECKING:
+    from vs_core.api import StopMode
     from vs_runtime.api.infrastructure import ControlRequest
 
 _TEXT = st.text(min_size=1, max_size=40).filter(str.strip)
@@ -47,11 +46,10 @@ _IDS = st.sampled_from(["a", "b", "c", "d"])
 def _requests(ids: st.SearchStrategy[str]) -> st.SearchStrategy[ControlRequest]:
     return st.one_of(
         st.builds(SteerRequest, control_id=ids, text=_TEXT),
-        st.builds(ParkRequest, control_id=ids),
+        st.builds(PauseNowRequest, control_id=ids),
         st.builds(PauseRequest, control_id=ids),
         st.builds(ResumeRequest, control_id=ids, fallback=st.booleans()),
         st.builds(ResumeRequest, control_id=ids, when=st.just("capacity_returns")),
-        st.builds(StopRequest, control_id=ids, mode=st.sampled_from(StopMode)),
         st.builds(SteerRequest, control_id=ids, text=_TEXT, mode=st.just(SteerMode.STANDING)),
         st.builds(WithdrawRequest, control_id=ids, withdraws=ids),
         st.builds(CancelAttemptRequest, control_id=ids, attempt=ids),
@@ -118,17 +116,16 @@ _REVIEWED_FIELDS = frozenset(
         ("withdraw", "control_id", "string"),
         ("withdraw", "action", "string"),
         ("withdraw", "withdraws", "string"),
-        ("park", "control_id", "string"),
-        ("park", "action", "string"),
+        ("pause_now", "control_id", "string"),
+        ("pause_now", "action", "string"),
+        ("pause_now", "expected_epoch", "integer?"),
         ("pause", "control_id", "string"),
         ("pause", "action", "string"),
+        ("pause", "expected_epoch", "integer?"),
         ("resume", "control_id", "string"),
         ("resume", "action", "string"),
         ("resume", "fallback", "boolean"),
         ("resume", "when", "string"),
-        ("stop", "control_id", "string"),
-        ("stop", "action", "string"),
-        ("stop", "mode", "enum:StopMode"),
         ("cancel_attempt", "control_id", "string"),
         ("cancel_attempt", "action", "string"),
         ("cancel_attempt", "attempt", "string"),
@@ -289,7 +286,13 @@ def _queued(request: ControlRequest, expected: _Expected) -> bool:
             expected.steers.append(text)
         case WithdrawRequest(withdraws=withdraws):
             expected.withdrawals.append(withdraws)
-        case ParkRequest() | CancelAttemptRequest() | CancelItemRequest() | SetMaxParallelRequest():
+        case (
+            PauseRequest()
+            | PauseNowRequest()
+            | CancelAttemptRequest()
+            | CancelItemRequest()
+            | SetMaxParallelRequest()
+        ):
             expected.actions.append(request)
         case _:
             return False
@@ -300,9 +303,6 @@ def _expected_status(request: ControlRequest, expected: _Expected) -> ControlSta
     if _queued(request, expected):
         return ControlStatus.PENDING
     match request:
-        case PauseRequest():
-            expected.paused = True
-            return ControlStatus.PENDING
         case ResumeRequest(when=when, fallback=fallback) if when == "capacity_returns" or (
             fallback and (not expected.quota_paused or expected.stop)
         ):
@@ -315,9 +315,8 @@ def _expected_status(request: ControlRequest, expected: _Expected) -> ControlSta
             expected.fallback = fallback
             return ControlStatus.CONSUMED
         case _:
-            assert isinstance(request, StopRequest)
-            expected.stop = request.mode
-            return ControlStatus.PENDING
+            message = f"unhandled request: {request.action}"
+            raise AssertionError(message)
 
 
 @given(sequence=st.lists(_requests(_IDS), max_size=16), quota_paused=st.booleans())

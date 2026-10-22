@@ -60,12 +60,11 @@ from vs_runtime._operator_control import (
     CancelItemRequest,
     ChannelRunControl,
     ControlStatus,
-    ParkRequest,
+    PauseNowRequest,
     PauseRequest,
     ResumeRequest,
     SetMaxParallelRequest,
     SteerRequest,
-    StopRequest,
     WithdrawRequest,
     action_summary,
 )
@@ -188,10 +187,9 @@ class RunControlBridge:
         """Bind the mailbox, the steer text store, a headless run's inbox, operators' controls.
 
         ``lifts_standing_stop`` says this process was started by an explicit resume of the
-        run, which lifts a stop core recorded before (its first poll records the lift
-        instead of arming the stop), if core takes the lift: core refuses to lift one of the
-        host's own stops (the deadline's, the run environment's), which stays armed. No other
-        start lifts a stop.
+        run. Once prior cleanup has settled, that start reopens admission after any ending.
+        Its first poll lifts a previously recorded shutdown instead of arming it again.
+        Ordinary writer recovery preserves the standing shutdown.
         """
         self._channel = channel
         self._steer = steer
@@ -227,6 +225,7 @@ class RunControlBridge:
         A stop only escalates (``escalate_stop``): the channel's stop reaches core again
         only when it is stronger than this."""
         self._park_landed = False
+        self._pause_now_landed = False
         self._landed = False
 
     def watch_stop(self, listener: Callable[[], object]) -> Callable[[], None]:
@@ -236,6 +235,11 @@ class RunControlBridge:
         ``poll`` like every control.
         """
         return self._channel.on_stop_requested(listener)
+
+    @property
+    def resumes_run(self) -> bool:
+        """Whether this host was launched by an explicit operator Resume."""
+        return self._lifts_standing_stop
 
     def poll(self, core: CoreState, now_at: float) -> tuple[CoreEvent, ...]:
         """Controls requested since the last poll, in submission order.
@@ -301,11 +305,7 @@ class RunControlBridge:
         return tuple(events)
 
     def _lifts(self, core: CoreState) -> bool:
-        """Whether this start lifts the stop core holds: it was asked to, and core takes the lift.
-
-        Core takes it until the run's ending commits, so a run already closing on a stop
-        stays stopping.
-        """
+        """Whether this explicit Resume can reopen the recorded shutdown now."""
         if not self._lifts_standing_stop:
             return False
         lift = ControlInput(control_id=ControlId(root="pending-lift"), action="resume", when="now")
@@ -321,7 +321,9 @@ class RunControlBridge:
             # The environment's stop is the host's, under core's own id (never ``op-``), so it
             # ends the run for good; it carries the cancel the channel now holds.
             stop = ControlInput(
-                control_id=ControlId(root=ENVIRONMENT_STOP), action="stop", mode=StopMode.CANCEL
+                control_id=ControlId(root=f"{ENVIRONMENT_STOP}:{core.records.recovery.epoch}"),
+                action="stop",
+                mode=StopMode.CANCEL,
             )
             if stop.control_id not in _held(core) and stop.control_id not in self._asked:
                 events.append(self._recorded(stop, _Change("stop", mode=StopMode.CANCEL), now_at))
@@ -411,7 +413,7 @@ class RunControlBridge:
         Returns why core would refuse it, without emitting it, when core would.
         """
         pending = change.control(ControlId(root="pending"))
-        refusal = control_refusal(self._as_asked(core), pending)
+        refusal = control_refusal(self._as_asked(_after(core, events)), pending)
         if refusal is not None:
             return refusal.detail
         control = self._event(core, now_at, change)
@@ -534,8 +536,12 @@ class RunControlBridge:
         for request in self._channel.take_pending_actions():
             state = self._as_asked(_after(core, events))
             change = (
-                _Change("park", control_id=request.control_id)
-                if isinstance(request, ParkRequest)
+                _Change(
+                    request.action.value,
+                    owner=PauseOwner.OPERATOR if isinstance(request, PauseRequest) else None,
+                    control_id=request.control_id,
+                )
+                if isinstance(request, PauseRequest | PauseNowRequest)
                 else _Change(
                     request.action.value,
                     text=notice_text(request, state),
@@ -543,15 +549,38 @@ class RunControlBridge:
                     action_request=request,
                 )
             )
-            refusal = control_refusal(state, change.control(_identity(request.control_id)))
+            refusal = self._action_refusal(request, state, change)
             if refusal is None:
                 emitted = self._event(core, now_at, change)
                 events += () if emitted is None else (emitted,)
             elif request.control_id == inbox_id:
-                refused_inbox = f"refused by the run: {refusal.detail}"
+                refused_inbox = f"refused by the run: {refusal}"
             else:
-                self._refuse(change, refusal.detail, request_id=None)
+                self._refuse(change, refusal, request_id=None)
         return refused_inbox
+
+    def _action_refusal(
+        self, request: ControlRequest, core: CoreState, change: _Change
+    ) -> str | None:
+        """Both socket and durable closing requests use the current writer's authority."""
+        if isinstance(request, PauseRequest | PauseNowRequest) and (
+            request.expected_epoch is not None
+            or (self._inbox is not None and self._inbox.journal is not None)
+        ):
+            refusal = self._closing_refusal(request, core)
+            if refusal is not None:
+                return refusal
+        refusal = control_refusal(core, change.control(_identity(request.control_id)))
+        return None if refusal is None else refusal.detail
+
+    def _closing_refusal(self, request: ControlRequest, core: CoreState) -> str | None:
+        if not isinstance(request, PauseRequest | PauseNowRequest):
+            return None
+        journal = None if self._inbox is None else self._inbox.journal
+        epoch = core.records.recovery.epoch if journal is None else journal.epoch
+        if request.expected_epoch != epoch:
+            return "closing request targets another epoch; refresh the run"
+        return None
 
     def _reject_withdrawal(self, control_id: str, reason: str) -> None:
         """Set aside an inbox withdrawal that ended nothing: it must not apply after a restart.
@@ -692,8 +721,12 @@ class RunControlBridge:
             )
         for request in self._channel.take_pending_actions():
             change = (
-                _Change("park", control_id=request.control_id)
-                if isinstance(request, ParkRequest)
+                _Change(
+                    request.action.value,
+                    owner=PauseOwner.OPERATOR if isinstance(request, PauseRequest) else None,
+                    control_id=request.control_id,
+                )
+                if isinstance(request, PauseRequest | PauseNowRequest)
                 else _Change(
                     request.action.value, control_id=request.control_id, action_request=request
                 )
@@ -725,7 +758,7 @@ class RunControlBridge:
         if control is None:
             return False
         if _is_held(entry, control):
-            if control.action == "park" and not self._channel.drain_ready:
+            if control.action in ("park", "pause", "pause_now") and not self._channel.drain_ready:
                 return True
             if self._inbox is not None:
                 self._report_outcome(entry.request_id, None)
@@ -743,23 +776,17 @@ class RunControlBridge:
         events: list[CoreEvent],
     ) -> str | None:
         """Apply one inbox request; the reason it cannot apply, or None once it is submitted."""
-        request = self._submitted_request(inbox, entry, core)
+        request = self._submitted_request(inbox, entry, _after(core, events))
         if isinstance(request, str):
             return request
         identity = request.control_id
         match request:
-            case ParkRequest():
+            case PauseRequest() | PauseNowRequest():
                 return self._take_actions(core, now_at, events, inbox_id=identity)
-            case PauseRequest() | ResumeRequest():
+            case ResumeRequest():
                 # Core records a capacity wait too, so the entry settles once core holds it.
                 # ``_submitted_request`` asked core's rule first, so this is never refused.
-                self._record_pause(core, now_at, _pause_change(request), events)
-            case StopRequest(mode=mode):
-                # Every inbox stop is recorded, so its entry settles; it can still only
-                # escalate the run's stop (core's ``stop_mode``).
-                self._stop = escalate_stop(self._stop, mode)
-                stop = self._event(core, now_at, _Change("stop", mode=mode, control_id=identity))
-                events += () if stop is None else (stop,)
+                return self._record_pause(core, now_at, _pause_change(request), events)
             case SteerRequest():
                 # Applied now, or queued earlier through the socket under the same id.
                 self._take_steers(core, now_at, events)
@@ -785,6 +812,9 @@ class RunControlBridge:
             return f"not a control request: {request.details()}"
         if request.control_id != entry.request_id:
             return f"its control_id {request.control_id!r} is not its name in the inbox"
+        refusal = self._closing_refusal(request, core)
+        if refusal is not None:
+            return refusal
         # A control refused when the socket's copy of it was taken has its answer already.
         refused = self._told.get(request.control_id)
         refusal = None if refused is not None else self._refusal(request, core)
@@ -812,11 +842,12 @@ class RunControlBridge:
                 return target.reason
         pending = ControlId(root="pending")
         match request:
-            case ParkRequest():
-                check = _Change("park").control(pending)
-            case StopRequest(mode=mode):
-                check = _Change("stop", mode=mode).control(pending)
-            case PauseRequest() | ResumeRequest():
+            case PauseRequest() | PauseNowRequest():
+                check = _Change(
+                    request.action.value,
+                    owner=PauseOwner.OPERATOR if isinstance(request, PauseRequest) else None,
+                ).control(pending)
+            case ResumeRequest():
                 check = _pause_change(request).control(pending)
             case SteerRequest() | WithdrawRequest():
                 # Core takes a steer and a withdrawal under the same rule.
@@ -859,14 +890,19 @@ class RunControlBridge:
                 continue
             inbox = change.control_id is not None and change.control_id in self._submitted
             self._refuse(change, error.detail, request_id=change.control_id if inbox else None)
-        if core.run.status in (RunStatus.DRAINING, RunStatus.PARKED) and not self._park_landed:
+        immediate = core.run.park is not None and core.run.park.immediate
+        if core.run.status in (RunStatus.DRAINING, RunStatus.PARKED) and (
+            not self._park_landed or (immediate and not self._pause_now_landed)
+        ):
             self._park_landed = True
+            self._pause_now_landed = immediate
             self._channel.land_park(
                 tuple(
                     job.resource_id.root
                     for job in (*core.evaluation.jobs, *core.evaluation.registered_jobs)
                     if not job.terminal and job.resource_id is not None
-                )
+                ),
+                immediate=immediate,
             )
         held = {control.control_id for control in core.run.controls}
         self._settle_inbox(
@@ -877,7 +913,7 @@ class RunControlBridge:
                 and (
                     self._channel.drain_ready
                     or not any(
-                        c.control_id == _identity(r) and c.action == "park"
+                        c.control_id == _identity(r) and c.action in ("park", "pause", "pause_now")
                         for c in core.run.controls
                     )
                 )
@@ -970,6 +1006,11 @@ class RunControlBridge:
 
 class IntentJournal(Protocol):
     """Persist and recover decisions before the inbox acknowledges them."""
+
+    @property
+    def epoch(self) -> int:
+        """Public writer epoch derived from records; fails if none has been published."""
+        ...
 
     def intent_decision(self, control_id: str) -> tuple[bool, str | None] | None:
         """Return (applied, reason), or None; a refusal must carry its reason."""
@@ -1108,17 +1149,13 @@ def _records(control: ControlInput, request: ControlRequest) -> bool:
             return control.action == "withdraw" and control.withdraws == standing_input_id(
                 withdraws
             )
-        case StopRequest(mode=mode):
-            return control.action == "stop" and control.mode == mode
         case ResumeRequest(when=when, fallback=fallback):
             return control.action == "resume" and (control.when, control.fallback) == (
                 when,
                 fallback,
             )
-        case ParkRequest() | PauseRequest():
-            return control.action == request.action.value and (
-                isinstance(request, ParkRequest) or control.owner is PauseOwner.OPERATOR
-            )
+        case PauseRequest() | PauseNowRequest():
+            return control.action == request.action.value
         case CancelAttemptRequest() | CancelItemRequest() | SetMaxParallelRequest():
             return records_action(control, request)
 

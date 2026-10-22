@@ -30,8 +30,7 @@ def turn_result(
     observation: Observation,
     *,
     reply: TurnObserved | None = None,
-    lost: bool = False,
-    held: bool = False,
+    loss: TurnFailureKind | None = None,
 ) -> TurnResult:
     """The terminal result of a turn, with its failure kind and bounded executor text.
 
@@ -50,14 +49,11 @@ def turn_result(
             output_json=output_json,
             suspending=suspending,
         )
-    if lost and held:
-        failure = TurnFailureKind.PROVIDER_UNAVAILABLE
-    elif lost:
-        failure = TurnFailureKind.TRANSPORT_LOST
-    elif observation.status == ObservationStatus.CANCELLED:
-        failure = TurnFailureKind.CANCELLED
-    else:
-        failure = TurnFailureKind.PROVIDER_FAILED
+    failure = loss or (
+        TurnFailureKind.CANCELLED
+        if observation.status == ObservationStatus.CANCELLED
+        else TurnFailureKind.PROVIDER_FAILED
+    )
     return TurnResult(
         invocation=ref,
         observation=observation,

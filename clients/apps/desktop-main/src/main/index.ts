@@ -186,8 +186,6 @@ async function openWindow(
     connection: id => hosts.connection(id),
     // A run shown in a window of its own is live there; any other run in the main window.
     openPage: runId => (windows.runs.showing(runId) ?? windows.main).bindRun(runId),
-    // Every stop is confirmed by the Run screen that asks, so the app asks no question.
-    confirm: () => Promise.reject(new Error('stops are confirmed by the view that asks')),
     // Nothing shows the window's run state any more.
     changed: () => {},
     remember: (run, current) => settings.updateRecent(recent => remember(recent, run), current),

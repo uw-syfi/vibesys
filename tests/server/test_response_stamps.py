@@ -74,7 +74,7 @@ def test_the_stop_request_carries_the_time_its_clock_reads(start: float) -> None
         reply = Response(
             timestamp=utc_datetime(clock),
             request_id=request.request_id,
-            ack=CommandAck(action=ControlAction.STOP, status="pending"),
+            ack=CommandAck(action=ControlAction.PAUSE_NOW, status="pending"),
         )
         connection.send(reply.model_dump_json().encode() + b"\n")
         connection.close()
