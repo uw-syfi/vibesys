@@ -79,6 +79,13 @@ function field(value: unknown, path: readonly string[]): unknown {
   return value;
 }
 
+function sameValue(left: unknown, right: unknown): boolean {
+  if (left instanceof Uint8Array && right instanceof Uint8Array) {
+    return left.length === right.length && left.every((value, index) => value === right[index]);
+  }
+  return left === right;
+}
+
 export interface CallDefinition<
   Policy extends OperationPolicy,
   Request extends DescMessage,
@@ -113,7 +120,7 @@ export async function call<
   const response = fromBinary(responseSchema, payload);
   checked(responseSchema, response);
   for (const [left, right] of correlations) {
-    if (field(input, left) !== field(response, right))
+    if (!sameValue(field(input, left), field(response, right)))
       throw new Error('response correlation mismatch');
   }
   return response;
