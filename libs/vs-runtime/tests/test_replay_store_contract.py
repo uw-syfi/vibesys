@@ -256,7 +256,12 @@ def test_native_log_is_rebuilt_from_the_authoritative_atomic_store(tmp_path: Pat
     with open_run_log(path) as reader:
         assert Records(records=list(reader)).to_binary() == expected
     path.with_name("run.head").unlink(missing_ok=True)
-    path.with_name("run.keyframe").unlink(missing_ok=True)
+    keyframes = path.parent / "keyframes"
+    retained = list(keyframes.glob("*.pb"))
+    assert retained
+    for keyframe in retained:
+        keyframe.unlink()
+    keyframes.rmdir()
     path.unlink()
     threads = SimThreads()
     with FileRunLogWriter(path, clock=threads.clock, threads=threads) as writer:
