@@ -273,7 +273,7 @@ pnpm_packages = []
 [[cases]]
 name = "facts importer selects Python verification"
 paths = ["src/vibesys/fact_import/api.py", "src/vibesys/fact_import/_accepted.py", "src/vibesys/api/importing.py", "libs/vs-project/src/vs_project/api/retained.py", "libs/vs-runtime/src/vs_runtime/api/retained.py"]
-jobs = ["python"]
+jobs = ["python", "real_tiers"]
 [cases.collections]
 native_languages = []
 native_targets = []
