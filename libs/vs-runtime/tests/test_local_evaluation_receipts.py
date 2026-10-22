@@ -4,12 +4,19 @@ from __future__ import annotations
 
 from functools import partial
 from pathlib import Path, PurePosixPath
+from typing import TYPE_CHECKING, Literal
 
 import pytest
 from hypothesis import example, given
 from hypothesis import strategies as st
 
-from vs_evaluation.api import EvaluationState, ExecutorObservation, PollPhase, TrustedEvidence
+from vs_evaluation.api import (
+    EvaluationState,
+    ExecutorCancellationUnknownError,
+    ExecutorObservation,
+    PollPhase,
+    TrustedEvidence,
+)
 from vs_evaluation.api.testing import InMemoryEvaluationNamespace
 from vs_evaluator_protocol.api import PartialMeasurement, Progress
 from vs_faults.api import Boundary, FaultGate, FaultPlan, FaultRule, HostCrashError, HostFault
@@ -24,16 +31,22 @@ from vs_sim.api.testing import ManualClock, VirtualClock, run_virtual, yield_unt
 
 from .test_evaluation_executor_contract import _request
 
+if TYPE_CHECKING:
+    from vs_proto.api import evaluation_receipts
+
 
 class ReceiptWrites(InMemoryEvaluationNamespace):
     """The namespace contract with scheduled lost write acknowledgements."""
 
-    def __init__(self, crash: int) -> None:
+    def __init__(self, crash: int | None, *, before: bool = False) -> None:
         super().__init__()
+        self.before = before
         self.gate = FaultGate(
             FaultPlan(
                 seed=0,
-                rules=(
+                rules=()
+                if crash is None
+                else (
                     FaultRule(
                         boundary=Boundary.DURABLE_WRITE,
                         target="local",
@@ -51,7 +64,11 @@ class ReceiptWrites(InMemoryEvaluationNamespace):
             write()
             return
         try:
-            self.gate.around(Boundary.DURABLE_WRITE, "local", write)
+            if self.before:
+                self.gate.around(Boundary.DURABLE_WRITE, "local", lambda: None)
+                write()
+            else:
+                self.gate.around(Boundary.DURABLE_WRITE, "local", write)
         except HostCrashError as error:
             self.crashed = True
             # A lost acknowledgement has the same boundary failure as the real
@@ -295,3 +312,91 @@ async def test_missing_local_receipt_reports_a_prerequisite_instead_of_unknown()
     assert not evaluation.accuracy_calls
     assert not workspaces.candidates
     await fresh.close()
+
+
+async def assert_local_path_recovery(
+    fresh: PollingEvaluationExecutor,
+    receipt: evaluation_receipts.LocalEvaluationReceipt | None,
+    path: Literal["success", "failure", "cancel"],
+) -> None:
+    for _ in range(2):
+        if receipt is None:
+            with pytest.raises(EvaluationRecoveryBlockedError):
+                await fresh.recover("local")
+            with pytest.raises(ExecutorCancellationUnknownError):
+                await fresh.cancel("local")
+            with pytest.raises(EvaluationRecoveryBlockedError):
+                await fresh.wait_for_change("local", 1)
+        elif not receipt.cleaned:
+            await assert_blocked(fresh)
+        else:
+            poll = await fresh.recover("local")
+            assert poll.phase is PollPhase.ENDED
+            assert poll.terminal is not None
+            expected = {
+                "success": EvaluationState.SUCCEEDED,
+                "failure": EvaluationState.FAILED,
+                "cancel": EvaluationState.CANCELED,
+            }[path]
+            assert poll.terminal.state is expected
+            assert receipt.observation is not None
+            assert len(poll.terminal.stage_results) == len(receipt.observation.stage_results)
+
+
+async def local_crash_path(
+    path: Literal["success", "failure", "cancel"], crash: int | None, *, before: bool
+) -> int:
+    namespace = ReceiptWrites(crash, before=before)
+    old, evaluation, workspaces = executor(namespace)
+    fresh, replacement_evaluation, replacement = executor(namespace)
+    if path == "failure":
+        evaluation.accuracy_results.append(RuntimeError("stage failed"))
+    gate = evaluation.gate("accuracy", 0) if path == "cancel" else None
+    snapshot = await workspaces.root.snapshot("candidate")
+
+    async def stopped_or_at_stage() -> bool:
+        if namespace.crashed:
+            return True
+        poll = await old.poll("local")
+        return poll.phase is PollPhase.ENDED or (gate is not None and gate.entered.is_set())
+
+    try:
+        try:
+            await old.submit(_request(snapshot), handle_id="local")
+        except EvaluationReceiptUnconfirmedError:
+            assert namespace.crashed
+        await yield_until(stopped_or_at_stage, bool, "the local path's durable boundary")
+        if gate is not None and not namespace.crashed:
+            try:
+                await old.cancel("local")
+            except EvaluationReceiptUnconfirmedError:
+                assert namespace.crashed
+        writes = len(namespace.gate.calls)
+        if crash is not None:
+            assert namespace.crashed
+        namespace.gate.heal()
+        receipt = LocalEvaluationReceipts(namespace).load("local")
+        await assert_local_path_recovery(fresh, receipt, path)
+        assert not replacement.candidates
+        assert not replacement_evaluation.accuracy_calls
+        assert not replacement_evaluation.benchmark_calls
+        return writes
+    finally:
+        await old.close()
+        await fresh.close()
+
+
+@pytest.mark.regression
+@example(path="success", ordinal=1, before=True)
+@example(path="failure", ordinal=10, before=False)
+@example(path="cancel", ordinal=10, before=True)
+@given(
+    path=st.sampled_from(["success", "failure", "cancel"]),
+    ordinal=st.integers(min_value=1, max_value=14),
+    before=st.booleans(),
+)
+def test_local_receipt_faults_cover_before_write_and_all_terminal_paths(
+    path: Literal["success", "failure", "cancel"], ordinal: int, *, before: bool
+) -> None:
+    writes = run_virtual(VirtualClock(), local_crash_path(path, None, before=before))
+    run_virtual(VirtualClock(), local_crash_path(path, min(ordinal, writes), before=before))

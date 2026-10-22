@@ -76,6 +76,13 @@ def validate_physical(
         _validate_update(previous, span, change)
     _validate_observation(previous, span, sequence)
     _validate_intents(previous, span, sequence)
+    if (
+        parent.replay is not None
+        and parent.replay.turn_bound is not None
+        and physical.deadline != parent.replay.turn_bound.deadline
+    ):
+        problem = "physical deadline differs from its immutable turn bound"
+        raise ReplayError(problem)
     if span.has_field("ended_at"):
         observed = span.replay_observation is not None
         withdrawn = physical.has_field("withdrawn_sequence")

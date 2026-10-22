@@ -31,7 +31,7 @@ from vs_core.api import (
 )
 from vs_core.api.replay import proof_covers
 from vs_decode.api import Unreadable, decode_json
-from vs_proto.api import TokenUsage, core_vocabulary, validate
+from vs_proto.api import TokenUsage, core_vocabulary, replay, validate
 from vs_proto.api import replay_agent as pb
 from vs_runtime._access_settlement import AccessKey
 from vs_runtime._core_requests import ExecutionResult
@@ -67,6 +67,8 @@ if TYPE_CHECKING:
 class _AgentDelivery:
     request: AgentRequest
     replacement: bool
+    identity: str
+    bound: replay.ReplayTurnBound | None
 
 
 @dataclass(frozen=True)
@@ -125,6 +127,7 @@ class ReplaySessionServices:
     sessions: ClientAgentSessions
     resolver: SessionResolver
     blocking: BlockingRunner
+    yielded: Callable[[str], replay.ReplayTurnWait | None] | None = None
 
 
 class SessionReplayExecutor:
@@ -190,7 +193,12 @@ class SessionReplayExecutor:
         async def encode(
             delivery: _AgentDelivery, result: ExecutionResult
         ) -> ReplayResult | ReplayUnknown:
-            return await self._encode(delivery.request, result)
+            return await self._encode(
+                delivery.request,
+                result,
+                delivery.bound,
+                None if services.yielded is None else services.yielded(delivery.identity),
+            )
 
         executor = ReceiptReplayExecutor(
             execute,
@@ -202,7 +210,12 @@ class SessionReplayExecutor:
 
     def _delivery(self, span: Span) -> _AgentDelivery:
         physical = span.replay_physical
-        return _AgentDelivery(self._request(span), physical is not None and physical.ordinal > 0)
+        return _AgentDelivery(
+            self._request(span),
+            physical is not None and physical.ordinal > 0,
+            span.id,
+            None if span.replay is None else span.replay.turn_bound,
+        )
 
     async def execute(self, span: Span, fence: StoreFence) -> ReplayResult:
         return await self._executor.execute(span, fence)
@@ -388,7 +401,11 @@ class SessionReplayExecutor:
         )
 
     async def _encode(
-        self, request: AgentRequest, result: ExecutionResult
+        self,
+        request: AgentRequest,
+        result: ExecutionResult,
+        bound: replay.ReplayTurnBound | None,
+        suspension: replay.ReplayTurnWait | None,
     ) -> ReplayResult | ReplayUnknown:
         seen = result.observation.observation
         if not seen.terminal or seen.status is ObservationStatus.UNKNOWN:
@@ -398,6 +415,8 @@ class SessionReplayExecutor:
             resource=None if seen.resource_id is None else seen.resource_id.root,
             released=seen.released,
             detail=seen.diagnostic,
+            turn_bound=bound,
+            suspension=suspension,
         )
         if isinstance(request, EnsureSession):
             native.session = cast("core_common.SessionId", to_proto(request.spec.session_id))

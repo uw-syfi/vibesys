@@ -433,6 +433,7 @@ class ReplayRuntime:
                 started_at=self._archive.clock,
                 replay=operation,
             )
+            self._bind_turn(parent, now=now)
             self._append(
                 Oneof("span", SpanRecord(change=Change.STARTED, span=parent)), now=now, at=at
             )
@@ -445,6 +446,32 @@ class ReplayRuntime:
         self._known_starts.add(span.id)
         return deepcopy(span)
 
+    def _bind_turn(self, parent: Span, *, now: float) -> None:
+        operation = parent.replay
+        if operation is None or operation.policy is None or operation.policy.request is None:
+            return
+        request = operation.policy.request
+        if request.type_url != replay_agent.ReplayAgentRequest.desc().type_name:
+            return
+        native = replay_agent.ReplayAgentRequest.from_binary(request.value)
+        validate(native)
+        if native.action is None or native.action.field != "turn":
+            return
+        turn = native.action.value
+        if turn.continuation_of:
+            origin = self._archive.span(turn.continuation_of)
+            if origin.replay is None or origin.replay.turn_bound is None:
+                problem = "continuation requires its original recorded turn bound"
+                raise ReplayError(problem)
+            operation.turn_bound = deepcopy(origin.replay.turn_bound)
+            parent.parent = operation.turn_bound.origin
+        else:
+            operation.turn_bound = pb.ReplayTurnBound(
+                origin=parent.id,
+                deadline=now + native.within_seconds,
+                hold_credit_seconds=turn.hold_credit_seconds,
+            )
+
     def _start_physical(self, parent: Span, *, within: float, now: float, at: Timestamp) -> Span:
         if self._fence is None:
             problem = "physical execution requires current host exclusion"
@@ -454,7 +481,14 @@ class ReplayRuntime:
         if unresolved:
             raise ReplayRecoveryRequiredError(unresolved)
         prior = None if not children else children[0].replay_physical
-        deadline = now + within if prior is None else prior.deadline
+        bound = None if parent.replay is None else parent.replay.turn_bound
+        deadline = (
+            bound.deadline
+            if bound is not None
+            else now + within
+            if prior is None
+            else prior.deadline
+        )
         child = physical_start(
             parent,
             identity=f"physical/{self._archive.current_epoch.run_id}/{self._archive.sequence + 1}",
@@ -675,6 +709,47 @@ class ReplayRuntime:
         """W2: commit the environment's complete closed grant set before cleanup I/O."""
         self._writer_fact(manifest, now=now, at=at)
 
+    def tool_fact(
+        self,
+        fact: pb.ReplayToolSubmission | pb.ReplayToolAcknowledgement | pb.ReplayTurnWait,
+        *,
+        now: float,
+        at: Timestamp,
+    ) -> None:
+        """Retain authenticated obligations before tool replies or yield acceptance.
+
+        Only the active physical turn may create submissions and waits. Reply
+        acknowledgements can settle retained obligations after a host restart.
+        """
+        _ = self._active_scheduler
+        validate(fact)
+        turn = self._archive.span(fact.turn)
+        if not isinstance(fact, pb.ReplayToolAcknowledgement) and (
+            self._fence is None
+            or turn.replay_physical is None
+            or turn.replay_physical.host_incarnation != f"{self._fence.host_id}/{self._fence.epoch}"
+        ):
+            problem = "tool submission or wait belongs to another host incarnation"
+            raise ReplayError(problem)
+        detail = Any(type_url=fact.desc().type_name, value=fact.to_binary())
+        dependencies = self._archive.dependencies.record(detail, self._archive.span)
+        if dependencies == self._archive.dependencies:
+            return
+        self._record_schemas((type(fact),), now=now, at=at)
+        self._append(
+            Oneof(
+                "notice",
+                Notice(
+                    severity=Severity.WARNING,
+                    code=NoticeCode.FRAMEWORK_WARNING,
+                    message="Turn tool dependency retained.",
+                    detail=detail,
+                ),
+            ),
+            now=now,
+            at=at,
+        )
+
     def writer_observation(
         self, result: pb.WriterReconciliation, *, now: float, at: Timestamp
     ) -> None:
@@ -743,7 +818,17 @@ class ReplayRuntime:
     def recovery(self) -> tuple[Span, ...]:
         """Inherited starts requiring their owner's inspection before any live dispatch."""
         _ = self._active_scheduler
-        return tuple(span for span in self._archive.unresolved if span.id not in self._known_starts)
+        return tuple(
+            span
+            for span in self._archive.unresolved
+            if span.id not in self._known_starts
+            and not (
+                span.replay_physical is None
+                and span.replay is not None
+                and span.replay.turn_bound is not None
+                and not self._archive.children(span.id)
+            )
+        )
 
     async def inspect(
         self, span_id: str, executor: ReplayExecutor, *, now: float

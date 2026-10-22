@@ -31,6 +31,7 @@ from ._replay_history import (
 from ._replay_identity import ENCODING_VERSION, EncodedIdentity, SemanticKey
 from ._replay_physical import execution_metadata, proof_covers, proof_digest, validate_physical
 from ._replay_sources import ReplayError
+from ._replay_turns import ReplayTurnDependencies, validate_turn_bound
 from ._replay_writers import ReplayWriterRecovery
 
 if TYPE_CHECKING:
@@ -72,6 +73,7 @@ class ReplayArchive:
     _history: list[AcceptedReplay | AcceptedClock] = field(default_factory=list, init=False)
     _epochs: list[bytes] = field(default_factory=list, init=False, repr=False)
     acknowledgements: ReplayAcknowledgements = field(default_factory=ReplayAcknowledgements)
+    dependencies: ReplayTurnDependencies = field(default_factory=ReplayTurnDependencies)
     clock: float = 0.0
     _policy_drift: bytes | None = field(default=None, init=False, repr=False)
     _observed: str | None = field(default=None, init=False, repr=False)
@@ -110,6 +112,7 @@ class ReplayArchive:
         result._history = self._history.copy()
         result._epochs = self._epochs.copy()
         result.acknowledgements = self.acknowledgements
+        result.dependencies = self.dependencies
         result.clock = self.clock
         result._policy_drift = self._policy_drift
         result._observed = self._observed
@@ -292,6 +295,7 @@ class ReplayArchive:
     def _notice(self, detail: Any | None) -> None:
         if detail is None:
             return
+        self.dependencies = self.dependencies.record(detail, self.span)
         name = detail.type_url.rsplit("/", 1)[-1]
         if name == pb.ReplayPolicyDrift.desc().type_name:
             drift = _metadata(detail, pb.ReplayPolicyDrift)
@@ -424,6 +428,7 @@ class ReplayArchive:
             raise ReplayError(problem)
         if previous_bytes is None:
             self._new_logical(operation)
+            validate_turn_bound(span, self.span)
             if change != Change.STARTED or operation.outcome is not None or span.replay_observation:
                 problem = "replay operation must start before observation or outcome"
                 raise ReplayError(problem)

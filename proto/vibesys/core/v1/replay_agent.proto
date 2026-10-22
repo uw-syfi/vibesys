@@ -67,6 +67,9 @@ message ReplayAgentTurn {
   uint32 max_turns = 8 [(buf.validate.field).uint32.gte = 1, (vibesys.store.v1.replay_field) = REPLAY_FIELD_KIND_POLICY];
   repeated ReplayAgentInput inputs = 9 [(vibesys.store.v1.replay_field) = REPLAY_FIELD_KIND_IDENTITY];
   repeated ReplayAgentInput guidance = 10 [(vibesys.store.v1.replay_field) = REPLAY_FIELD_KIND_IDENTITY];
+  // Execution linkage only. The semantic key and retained content identify the call.
+  optional string continuation_of = 11 [(buf.validate.field).string.min_len = 1, (vibesys.store.v1.replay_field) = REPLAY_FIELD_KIND_POLICY];
+  double hold_credit_seconds = 12 [(buf.validate.field).double = {gte: 0, finite: true}, (vibesys.store.v1.replay_field) = REPLAY_FIELD_KIND_POLICY];
 }
 
 message ReplayCancelAgent {
@@ -100,4 +103,6 @@ message ReplayAgentResult {
   string detail = 4;
   SessionId session = 5;
   InvocationRef invocation = 6;
+  vibesys.store.v1.ReplayTurnBound turn_bound = 7;
+  vibesys.store.v1.ReplayTurnWait suspension = 8;
 }

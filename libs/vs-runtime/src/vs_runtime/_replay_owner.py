@@ -58,12 +58,15 @@ class ReceiptReplayExecutor[RequestT]:
             problem = "owner replay requires immutable metadata"
             raise ReplayOperationError(problem)
         now = self._host.clock.now()
+        bound = span.replay.turn_bound
         return ExecutionContext(
             fence=HostFence(host_id=HostId(root=fence.host_id), epoch=fence.epoch),
             now_at=now,
             payload_digest=hashlib.sha256(physical_identity(span)).hexdigest(),
             until=Until(
-                at=now + self._within(span)
+                at=bound.deadline
+                if bound is not None
+                else now + self._within(span)
                 if span.replay_physical is None
                 else span.replay_physical.deadline
             ),

@@ -53,6 +53,13 @@ from vs_core.flows._replay_sources import (
     ReplayTask,
     ReplayTimer,
 )
+from vs_core.flows._replay_turns import (
+    ReplayToolPending,
+    ReplayToolReady,
+    ReplayToolRefusal,
+    ReplayToolRefused,
+    ReplayTurnDependencies,
+)
 from vs_core.flows._replay_writers import ReplayRootReuse, ReplayWriterRecovery
 
 __all__ = [
@@ -89,6 +96,11 @@ __all__ = [
     "ReplaySource",
     "ReplayTask",
     "ReplayTimer",
+    "ReplayToolPending",
+    "ReplayToolReady",
+    "ReplayToolRefusal",
+    "ReplayToolRefused",
+    "ReplayTurnDependencies",
     "ReplayWriterRecovery",
     "SemanticKey",
     "chain_dependency",

@@ -1,0 +1,245 @@
+"""Turn bounds and tool dependencies derived from the committed native prefix."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from enum import StrEnum
+from typing import TYPE_CHECKING
+
+from protobuf.wkt.google.protobuf.any_pb import Any
+
+from vs_proto.api import replay as pb
+from vs_proto.api import replay_agent, replay_evaluation, validate
+
+from ._replay_sources import ReplayError
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Iterable
+
+    from vs_proto.api import Record, Span
+
+
+def agent_turn(span: Span) -> replay_agent.ReplayAgentRequest:
+    operation = span.replay
+    request = None if operation is None or operation.policy is None else operation.policy.request
+    if request is None or request.type_url != replay_agent.ReplayAgentRequest.desc().type_name:
+        problem = "tool dependency requires an authenticated agent turn"
+        raise ReplayError(problem)
+    native = replay_agent.ReplayAgentRequest.from_binary(request.value)
+    validate(native)
+    if native.action is None or native.action.field != "turn":
+        problem = "tool dependency requires an authenticated agent turn"
+        raise ReplayError(problem)
+    return native
+
+
+def validate_turn_bound(span: Span, lookup: Callable[[str], Span]) -> None:
+    operation = span.replay
+    if operation is None or operation.turn_bound is None:
+        return
+    bound = operation.turn_bound
+    native = agent_turn(span)
+    turn = native.action
+    if turn is None or turn.field != "turn":
+        problem = "turn bound requires a retained turn request"
+        raise ReplayError(problem)
+    if turn.value.continuation_of:
+        origin = lookup(turn.value.continuation_of)
+        before = agent_turn(origin)
+        old = before.action
+        if (
+            origin.replay is None
+            or origin.replay.outcome is None
+            or origin.replay.turn_bound != bound
+            or span.parent != bound.origin
+            or native.scope != before.scope
+            or old is None
+            or old.field != "turn"
+            or turn.value.session is None
+            or old.value.session is None
+            or turn.value.session.id != old.value.session.id
+            or turn.value.session.role != old.value.session.role
+            or turn.value.session.access != old.value.session.access
+        ):
+            problem = "continuation changed its original turn ownership or immutable bound"
+            raise ReplayError(problem)
+    elif bound.origin != span.id or bound.hold_credit_seconds != turn.value.hold_credit_seconds:
+        problem = "original turn bound must name its logical start and recorded hold credit"
+        raise ReplayError(problem)
+
+
+class ReplayToolRefusal(StrEnum):
+    UNKNOWN_REPLY = "unknown_reply"
+    WRONG_TURN = "wrong_turn"
+    PRODUCER_WITHDRAWN = "producer_withdrawn"
+
+
+@dataclass(frozen=True)
+class ReplayToolRefused:
+    reason: ReplayToolRefusal
+
+
+@dataclass(frozen=True)
+class ReplayToolPending:
+    producer: str
+
+
+@dataclass(frozen=True)
+class ReplayToolReady:
+    producer: str
+    outcome_bytes: bytes
+
+    def outcome(self) -> Any:
+        return Any.from_binary(self.outcome_bytes)
+
+
+type ToolFact = pb.ReplayToolSubmission | pb.ReplayToolAcknowledgement | pb.ReplayTurnWait
+
+
+@dataclass(frozen=True)
+class ReplayTurnDependencies:
+    """Submission and yield obligations, never a saved continuation queue.
+
+    Producers are logical starts in the same scope. Acknowledgement cannot erase
+    the dependency. Every wait references this exact physical turn's durable
+    submission; a lost reply remains owed across epochs until acknowledged.
+    """
+
+    _submissions: dict[str, bytes] = field(default_factory=dict, repr=False)
+    _calls: dict[tuple[str, str], str] = field(default_factory=dict, repr=False)
+    _acknowledged: frozenset[str] = frozenset()
+    _waits: dict[str, bytes] = field(default_factory=dict, repr=False)
+
+    @classmethod
+    def from_records(cls, records: Iterable[Record]) -> ReplayTurnDependencies:
+        spans: dict[str, Span] = {}
+        state = cls()
+        for record in records:
+            body = record.body
+            if body is not None and body.field == "span" and body.value.span is not None:
+                spans[body.value.span.id] = body.value.span
+            elif body is not None and body.field == "notice" and body.value.detail is not None:
+                state = state.record(body.value.detail, spans.__getitem__)
+        return state
+
+    def record(self, detail: Any, lookup: Callable[[str], Span]) -> ReplayTurnDependencies:
+        kinds = (pb.ReplayToolSubmission, pb.ReplayToolAcknowledgement, pb.ReplayTurnWait)
+        kind = next((k for k in kinds if k.desc().type_name == detail.type_url), None)
+        if kind is None:
+            return self
+        fact = kind.from_binary(detail.value)
+        validate(fact)
+        if fact.to_binary() != fact.to_binary(write_unknown_fields=False):
+            problem = "tool dependency has unknown fields"
+            raise ReplayError(problem)
+        if isinstance(fact, pb.ReplayToolSubmission):
+            return self._submit(fact, lookup)
+        if isinstance(fact, pb.ReplayToolAcknowledgement):
+            submission = self.submission(fact.reply_id)
+            if submission is None or submission.turn != fact.turn:
+                problem = "tool acknowledgement has no authenticated owed reply"
+                raise ReplayError(problem)
+            return ReplayTurnDependencies(
+                self._submissions, self._calls, self._acknowledged | {fact.reply_id}, self._waits
+            )
+        return self._wait(fact, lookup)
+
+    def submission(self, reply_id: str) -> pb.ReplayToolSubmission | None:
+        payload = self._submissions.get(reply_id)
+        return None if payload is None else pb.ReplayToolSubmission.from_binary(payload)
+
+    @property
+    def owed(self) -> tuple[pb.ReplayToolSubmission, ...]:
+        return tuple(
+            pb.ReplayToolSubmission.from_binary(payload)
+            for key, payload in self._submissions.items()
+            if key not in self._acknowledged
+        )
+
+    def yielded(self, turn: str) -> pb.ReplayTurnWait | None:
+        value = self._waits.get(turn)
+        return None if value is None else pb.ReplayTurnWait.from_binary(value)
+
+    def lookup(
+        self, turn: str, reply_id: str, lookup: Callable[[str], Span]
+    ) -> ReplayToolReady | ReplayToolPending | ReplayToolRefused:
+        submission = self.submission(reply_id)
+        if submission is None:
+            return ReplayToolRefused(ReplayToolRefusal.UNKNOWN_REPLY)
+        if submission.turn != turn:
+            return ReplayToolRefused(ReplayToolRefusal.WRONG_TURN)
+        producer = lookup(submission.producer)
+        if producer.replay is not None and producer.replay.outcome is not None:
+            return ReplayToolReady(producer.id, producer.replay.outcome.to_binary())
+        if producer.has_field("ended_at"):
+            return ReplayToolRefused(ReplayToolRefusal.PRODUCER_WITHDRAWN)
+        return ReplayToolPending(producer.id)
+
+    def _submit(
+        self, fact: pb.ReplayToolSubmission, lookup: Callable[[str], Span]
+    ) -> ReplayTurnDependencies:
+        prior = self._submissions.get(fact.reply_id)
+        if prior == fact.to_binary():
+            return self
+        turn, producer = lookup(fact.turn), lookup(fact.producer)
+        native = agent_turn(turn)
+        operation = producer.replay
+        request = (
+            None if operation is None or operation.policy is None else operation.policy.request
+        )
+        if (
+            turn.replay_physical is None
+            or turn.has_field("ended_at")
+            or turn.replay_physical.has_field("withdrawn_sequence")
+            or turn.replay_observation is not None
+            or fact.turn in self._waits
+            or prior is not None
+            or (fact.turn, fact.call_id) in self._calls
+            or producer.replay_physical is not None
+            or request is None
+            or request.type_url != replay_evaluation.ReplayEvaluationRequest.desc().type_name
+        ):
+            problem = "tool submission conflicts with its authenticated turn or producer"
+            raise ReplayError(problem)
+        evaluation = replay_evaluation.ReplayEvaluationRequest.from_binary(request.value)
+        validate(evaluation)
+        if (
+            evaluation.scope != native.scope
+            or evaluation.action is None
+            or evaluation.action.field not in {"submit", "observe", "collect"}
+        ):
+            problem = "tool producer must own an evaluation in the requesting turn's scope"
+            raise ReplayError(problem)
+        return ReplayTurnDependencies(
+            {**self._submissions, fact.reply_id: fact.to_binary()},
+            {**self._calls, (fact.turn, fact.call_id): fact.reply_id},
+            self._acknowledged,
+            self._waits,
+        )
+
+    def _wait(
+        self, fact: pb.ReplayTurnWait, lookup: Callable[[str], Span]
+    ) -> ReplayTurnDependencies:
+        prior = self._waits.get(fact.turn)
+        if prior == fact.to_binary():
+            return self
+        turn = lookup(fact.turn)
+        agent_turn(turn)
+        if (
+            prior is not None
+            or turn.replay_physical is None
+            or turn.has_field("ended_at")
+            or turn.replay_physical.has_field("withdrawn_sequence")
+            or any(
+                isinstance(self.lookup(fact.turn, reply, lookup), ReplayToolRefused)
+                for reply in fact.reply_ids
+            )
+        ):
+            problem = "turn wait has no owned producer or changed its durable dependencies"
+            raise ReplayError(problem)
+        return ReplayTurnDependencies(
+            self._submissions,
+            self._calls,
+            self._acknowledged,
+            {**self._waits, fact.turn: fact.to_binary()},
+        )

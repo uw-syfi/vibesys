@@ -8,7 +8,7 @@ package corev1
 
 import (
 	_ "buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go/buf/validate"
-	_ "github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1"
+	v1 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
@@ -407,8 +407,11 @@ type ReplayAgentTurn struct {
 	MaxTurns             uint32              `protobuf:"varint,8,opt,name=max_turns,json=maxTurns,proto3" json:"max_turns,omitempty"`
 	Inputs               []*ReplayAgentInput `protobuf:"bytes,9,rep,name=inputs,proto3" json:"inputs,omitempty"`
 	Guidance             []*ReplayAgentInput `protobuf:"bytes,10,rep,name=guidance,proto3" json:"guidance,omitempty"`
-	unknownFields        protoimpl.UnknownFields
-	sizeCache            protoimpl.SizeCache
+	// Execution linkage only. The semantic key and retained content identify the call.
+	ContinuationOf    *string `protobuf:"bytes,11,opt,name=continuation_of,json=continuationOf,proto3,oneof" json:"continuation_of,omitempty"`
+	HoldCreditSeconds float64 `protobuf:"fixed64,12,opt,name=hold_credit_seconds,json=holdCreditSeconds,proto3" json:"hold_credit_seconds,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *ReplayAgentTurn) Reset() {
@@ -509,6 +512,20 @@ func (x *ReplayAgentTurn) GetGuidance() []*ReplayAgentInput {
 		return x.Guidance
 	}
 	return nil
+}
+
+func (x *ReplayAgentTurn) GetContinuationOf() string {
+	if x != nil && x.ContinuationOf != nil {
+		return *x.ContinuationOf
+	}
+	return ""
+}
+
+func (x *ReplayAgentTurn) GetHoldCreditSeconds() float64 {
+	if x != nil {
+		return x.HoldCreditSeconds
+	}
+	return 0
 }
 
 type ReplayCancelAgent struct {
@@ -754,6 +771,8 @@ type ReplayAgentResult struct {
 	Detail        string                 `protobuf:"bytes,4,opt,name=detail,proto3" json:"detail,omitempty"`
 	Session       *SessionId             `protobuf:"bytes,5,opt,name=session,proto3" json:"session,omitempty"`
 	Invocation    *InvocationRef         `protobuf:"bytes,6,opt,name=invocation,proto3" json:"invocation,omitempty"`
+	TurnBound     *v1.ReplayTurnBound    `protobuf:"bytes,7,opt,name=turn_bound,json=turnBound,proto3" json:"turn_bound,omitempty"`
+	Suspension    *v1.ReplayTurnWait     `protobuf:"bytes,8,opt,name=suspension,proto3" json:"suspension,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -830,6 +849,20 @@ func (x *ReplayAgentResult) GetInvocation() *InvocationRef {
 	return nil
 }
 
+func (x *ReplayAgentResult) GetTurnBound() *v1.ReplayTurnBound {
+	if x != nil {
+		return x.TurnBound
+	}
+	return nil
+}
+
+func (x *ReplayAgentResult) GetSuspension() *v1.ReplayTurnWait {
+	if x != nil {
+		return x.Suspension
+	}
+	return nil
+}
+
 var File_vibesys_core_v1_replay_agent_proto protoreflect.FileDescriptor
 
 const file_vibesys_core_v1_replay_agent_proto_rawDesc = "" +
@@ -856,7 +889,7 @@ const file_vibesys_core_v1_replay_agent_proto_rawDesc = "" +
 	"receivedAt\x12\x1a\n" +
 	"\bsequence\x18\x05 \x01(\x04R\bsequence\x12:\n" +
 	"\x04mode\x18\x06 \x01(\x0e2\x1a.vibesys.core.v1.InputModeB\n" +
-	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x04mode\"\xba\x05\n" +
+	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\x04mode\"\xcf\x06\n" +
 	"\x0fReplayAgentTurn\x12I\n" +
 	"\asession\x18\x01 \x01(\v2#.vibesys.core.v1.ReplayAgentSessionB\n" +
 	"\xbaH\x03\xc8\x01\x01\xe0\xf9\x18\x01R\asession\x12+\n" +
@@ -874,7 +907,10 @@ const file_vibesys_core_v1_replay_agent_proto_rawDesc = "" +
 	"\tmax_turns\x18\b \x01(\rB\v\xbaH\x04*\x02(\x01\xe0\xf9\x18\x02R\bmaxTurns\x12?\n" +
 	"\x06inputs\x18\t \x03(\v2!.vibesys.core.v1.ReplayAgentInputB\x04\xe0\xf9\x18\x01R\x06inputs\x12C\n" +
 	"\bguidance\x18\n" +
-	" \x03(\v2!.vibesys.core.v1.ReplayAgentInputB\x04\xe0\xf9\x18\x01R\bguidance:\x04\xf0\xf9\x18\x01\"[\n" +
+	" \x03(\v2!.vibesys.core.v1.ReplayAgentInputB\x04\xe0\xf9\x18\x01R\bguidance\x129\n" +
+	"\x0fcontinuation_of\x18\v \x01(\tB\v\xbaH\x04r\x02\x10\x01\xe0\xf9\x18\x02H\x00R\x0econtinuationOf\x88\x01\x01\x12D\n" +
+	"\x13hold_credit_seconds\x18\f \x01(\x01B\x14\xbaH\r\x12\v@\x01)\x00\x00\x00\x00\x00\x00\x00\x00\xe0\xf9\x18\x02R\x11holdCreditSeconds:\x04\xf0\xf9\x18\x01B\x12\n" +
+	"\x10_continuation_of\"[\n" +
 	"\x11ReplayCancelAgent\x12F\n" +
 	"\n" +
 	"invocation\x18\x01 \x01(\v2\x1e.vibesys.core.v1.InvocationRefB\x06\xbaH\x03\xc8\x01\x01R\n" +
@@ -894,7 +930,7 @@ const file_vibesys_core_v1_replay_agent_proto_rawDesc = "" +
 	"\x05close\x18\a \x01(\v2!.vibesys.core.v1.ReplayCloseAgentB\x04\xe0\xf9\x18\x01H\x00R\x05close:\x04\xf0\xf9\x18\x01B\x0f\n" +
 	"\x06action\x12\x05\xbaH\x02\b\x01B\f\n" +
 	"\n" +
-	"_admission\"\xc2\x02\n" +
+	"_admission\"\xc6\x03\n" +
 	"\x11ReplayAgentResult\x12L\n" +
 	"\x06status\x18\x01 \x01(\x0e2\".vibesys.core.v1.ObservationStatusB\x10\xbaH\r\x82\x01\n" +
 	"\x10\x01\x18\x01\x18\x03\x18\x04\x18\x05R\x06status\x12(\n" +
@@ -904,7 +940,12 @@ const file_vibesys_core_v1_replay_agent_proto_rawDesc = "" +
 	"\asession\x18\x05 \x01(\v2\x1a.vibesys.core.v1.SessionIdR\asession\x12>\n" +
 	"\n" +
 	"invocation\x18\x06 \x01(\v2\x1e.vibesys.core.v1.InvocationRefR\n" +
-	"invocationB\v\n" +
+	"invocation\x12@\n" +
+	"\n" +
+	"turn_bound\x18\a \x01(\v2!.vibesys.store.v1.ReplayTurnBoundR\tturnBound\x12@\n" +
+	"\n" +
+	"suspension\x18\b \x01(\v2 .vibesys.store.v1.ReplayTurnWaitR\n" +
+	"suspensionB\v\n" +
 	"\t_resource*\xad\x01\n" +
 	"\x11ReplayAgentAccess\x12#\n" +
 	"\x1fREPLAY_AGENT_ACCESS_UNSPECIFIED\x10\x00\x12!\n" +
@@ -954,6 +995,8 @@ var file_vibesys_core_v1_replay_agent_proto_goTypes = []any{
 	(*InvocationRef)(nil),         // 16: vibesys.core.v1.InvocationRef
 	(ObservationStatus)(0),        // 17: vibesys.core.v1.ObservationStatus
 	(*SessionId)(nil),             // 18: vibesys.core.v1.SessionId
+	(*v1.ReplayTurnBound)(nil),    // 19: vibesys.store.v1.ReplayTurnBound
+	(*v1.ReplayTurnWait)(nil),     // 20: vibesys.store.v1.ReplayTurnWait
 }
 var file_vibesys_core_v1_replay_agent_proto_depIdxs = []int32{
 	0,  // 0: vibesys.core.v1.ReplayAgentSession.access:type_name -> vibesys.core.v1.ReplayAgentAccess
@@ -980,11 +1023,13 @@ var file_vibesys_core_v1_replay_agent_proto_depIdxs = []int32{
 	17, // 21: vibesys.core.v1.ReplayAgentResult.status:type_name -> vibesys.core.v1.ObservationStatus
 	18, // 22: vibesys.core.v1.ReplayAgentResult.session:type_name -> vibesys.core.v1.SessionId
 	16, // 23: vibesys.core.v1.ReplayAgentResult.invocation:type_name -> vibesys.core.v1.InvocationRef
-	24, // [24:24] is the sub-list for method output_type
-	24, // [24:24] is the sub-list for method input_type
-	24, // [24:24] is the sub-list for extension type_name
-	24, // [24:24] is the sub-list for extension extendee
-	0,  // [0:24] is the sub-list for field type_name
+	19, // 24: vibesys.core.v1.ReplayAgentResult.turn_bound:type_name -> vibesys.store.v1.ReplayTurnBound
+	20, // 25: vibesys.core.v1.ReplayAgentResult.suspension:type_name -> vibesys.store.v1.ReplayTurnWait
+	26, // [26:26] is the sub-list for method output_type
+	26, // [26:26] is the sub-list for method input_type
+	26, // [26:26] is the sub-list for extension type_name
+	26, // [26:26] is the sub-list for extension extendee
+	0,  // [0:26] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_core_v1_replay_agent_proto_init() }
@@ -997,6 +1042,7 @@ func file_vibesys_core_v1_replay_agent_proto_init() {
 	file_vibesys_core_v1_vocabulary_proto_init()
 	file_vibesys_core_v1_replay_agent_proto_msgTypes[0].OneofWrappers = []any{}
 	file_vibesys_core_v1_replay_agent_proto_msgTypes[1].OneofWrappers = []any{}
+	file_vibesys_core_v1_replay_agent_proto_msgTypes[3].OneofWrappers = []any{}
 	file_vibesys_core_v1_replay_agent_proto_msgTypes[5].OneofWrappers = []any{}
 	file_vibesys_core_v1_replay_agent_proto_msgTypes[6].OneofWrappers = []any{
 		(*ReplayAgentRequest_Ensure)(nil),

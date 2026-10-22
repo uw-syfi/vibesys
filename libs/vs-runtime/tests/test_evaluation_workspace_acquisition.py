@@ -2,15 +2,19 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from functools import partial
 from typing import TYPE_CHECKING
 
 import pytest
 
+from vs_core.api.replay import ReplayRootReuse
 from vs_evaluation.api.testing import InMemoryEvaluationNamespace, wait_until_executor_started
+from vs_project.api import Project, StoreFence
+from vs_proto.api import replay
 from vs_runtime.api import replay as replay_api
 from vs_runtime.api.slurm_evaluation_stack import ScenarioCluster, build_stack
-from vs_runtime.api.testing import FakeEvaluationWriterReconciliation
+from vs_sim.api.testing import SimThreads
 from vs_slurm.api import SlurmJobStatus
 
 from .test_evaluation_executor_contract import _request
@@ -70,10 +74,27 @@ async def test_the_environment_verifies_inherited_writers_before_any_acquisition
     namespace = InMemoryEvaluationNamespace()
     cluster = ScenarioCluster()
     cluster.states = (SlurmJobStatus.RUNNING,)
-    writers = FakeEvaluationWriterReconciliation()
-    old = await build_stack(
-        tmp_path, cluster, namespace=namespace, writer_reconciliation=writers, replay_recovery=True
+    backing = replay.WriterBacking(
+        environment="slurm", identity=str(tmp_path / "workspace"), generation=1, authority="host-a"
     )
+    registry = replay_api.WriterRegistry(
+        Project.open(tmp_path).state.state_store_namespace("writers"), backing, SimThreads()
+    )
+    registry.create()
+    registry.grant(
+        replay.WriterIdentity(
+            run_id="run", host_incarnation="host-a/1", physical_id=_HANDLE, domain_id="job-a"
+        )
+    )
+    manifest = registry.close()
+    proof = replay.WriterTerminationProof(manifest=manifest, absent_domains=["job-a"])
+    writers = replay_api.EvaluationWriterReconciliation(
+        registry,
+        ReplayRootReuse(proof.to_binary()),
+        "run",
+        StoreFence(host_id="host-a", epoch=1, expires_at=100),
+    )
+    old = await build_stack(tmp_path, cluster, namespace=namespace, replay_recovery=True)
     fresh = await build_stack(
         tmp_path, cluster, namespace=namespace, writer_reconciliation=writers, replay_recovery=True
     )
@@ -84,12 +105,70 @@ async def test_the_environment_verifies_inherited_writers_before_any_acquisition
         with pytest.raises(replay_api.EvaluationRecoveryBlockedError):
             await fresh.executor.submit(request, handle_id=_HANDLE)
         assert not fresh.workspaces.candidates
-        assert writers.requests[-1] == (str(old.workspaces.root.path), (_HANDLE,))
         cluster.finish_jobs()
-        writers.confirm_stopped(str(old.workspaces.root.path), _HANDLE)
+        registry.record(
+            replay.WriterReconciliation(
+                manifest=manifest,
+                proof=proof,
+                status=replay.WriterReconciliationStatus.PROVEN_STOPPED,
+            )
+        )
         await fresh.executor.submit(request, handle_id=_HANDLE)
         assert fresh.workspaces.candidates
         assert cluster.submissions == [_HANDLE]
     finally:
         await fresh.executor.close()
         await old.executor.close()
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize("race", ["writer", "generation"])
+def test_evaluation_acquisition_holds_the_recorded_proof_through_workspace_creation(
+    tmp_path: Path, race: str
+) -> None:
+    namespace = Project.open(tmp_path).state.state_store_namespace("writers")
+    backing = replay.WriterBacking(
+        environment="local", identity="root-a", generation=1, authority="host-a"
+    )
+    threads = SimThreads()
+    registry = replay_api.WriterRegistry(namespace, backing, threads)
+    registry.create()
+    manifest = registry.close()
+    proof = replay.WriterTerminationProof(manifest=manifest)
+    registry.record(
+        replay.WriterReconciliation(
+            manifest=manifest, proof=proof, status=replay.WriterReconciliationStatus.PROVEN_STOPPED
+        )
+    )
+    request = ReplayRootReuse(proof.to_binary())
+    binding = replay_api.EvaluationWriterReconciliation(
+        registry, request, "run", StoreFence(host_id="host-a", epoch=1, expires_at=100)
+    )
+    acquired = replay_api.EvaluationWorkspaceAcquisitions(
+        InMemoryEvaluationNamespace(), "local", binding
+    )
+    competitor = replay_api.WriterRegistry(namespace, backing, threads)
+    successor = deepcopy(backing)
+    successor.generation += 1
+    next_generation = replay_api.WriterRegistry(namespace, successor, threads)
+    if race == "generation":
+        next_generation.create()
+        with (
+            pytest.raises(replay_api.EvaluationRecoveryBlockedError, match="generation"),
+            acquired.acquire("evaluation", "root-a", fresh=True, live=()),
+        ):
+            pytest.fail("stale generation reached workspace creation")
+    else:
+        with acquired.acquire("evaluation", "root-a", fresh=True, live=()):
+            with (
+                pytest.raises(replay_api.WriterProofError, match="another writer"),
+                competitor.acquire(
+                    request,
+                    run_id="other",
+                    fence=StoreFence(host_id="host-b", epoch=2, expires_at=100),
+                ),
+            ):
+                pytest.fail("a second writer entered during workspace creation")
+            with pytest.raises(replay_api.WriterProofError, match="another writer"):
+                next_generation.create()
+        next_generation.create()

@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import hashlib
 import json
-from typing import TYPE_CHECKING, Protocol, cast
+from contextlib import contextmanager, nullcontext
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, cast
 
 from vs_decode.api import Unreadable, decode_json
 from vs_evaluation.api import (
@@ -16,9 +18,16 @@ from vs_evaluation.api import (
 from vs_project.api import ProjectStateError
 from vs_proto.api import evaluation_receipts as pb
 from vs_proto.api import from_mapping, to_mapping, validate
+from vs_runtime._writer_reconciliation import WriterProofError
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+    from contextlib import AbstractContextManager
+
+    from vs_core.api.replay import ReplayRootReuse
     from vs_evaluation.api import EvaluationRequest, EvaluationStateNamespace
+    from vs_project.api import StoreFence
+    from vs_runtime._writer_reconciliation import WriterRegistry
 
 
 class EvaluationReceiptUnconfirmedError(RuntimeError):
@@ -46,15 +55,27 @@ class EvaluationRecoveryBlockedError(RuntimeError):
         )
 
 
-class EvaluationWriterReconciliation(Protocol):
-    """Require environment verification before acquiring an inherited evaluation backing.
+@dataclass(frozen=True)
+class EvaluationWriterReconciliation:
+    """Bind the log's reuse request to backing exclusion held through acquisition."""
 
-    The implementation owns verification of the complete writer set. Returning
-    permits acquisition; missing or unsupported evidence raises the typed block.
-    No receipt, timeout, or terminal evaluation result implements this role.
-    """
+    registry: WriterRegistry
+    request: ReplayRootReuse
+    run_id: str
+    fence: StoreFence
 
-    async def require_stopped(self, backing: str, outstanding: tuple[str, ...]) -> None: ...
+    @contextmanager
+    def acquire(self, backing: str, outstanding: tuple[str, ...]) -> Iterator[None]:
+        if self.registry.backing.identity != backing:
+            problem = "evaluation backing differs from its writer registry"
+            raise WriterProofError(problem)
+        with self.registry.acquire(self.request, run_id=self.run_id, fence=self.fence):
+            manifest = self.request.proof().manifest
+            writers = set() if manifest is None else {w.physical_id for w in manifest.writers}
+            if set(outstanding) - writers:
+                problem = "termination proof omits inherited evaluation writer identities"
+                raise WriterProofError(problem)
+            yield
 
 
 def recovery_block(
@@ -82,9 +103,10 @@ class EvaluationWorkspaceAcquisitions:
         )
         self._path = f"{environment}-evaluation-acquisitions.pb"
 
-    async def require(
+    @contextmanager
+    def acquire(
         self, handle: str, backing: str, *, fresh: bool, live: tuple[str, ...]
-    ) -> None:
+    ) -> Iterator[None]:
         contents = self._namespace.read_bytes(self._path)
         grants = (
             pb.EvaluationWorkspaceAcquisitions()
@@ -95,21 +117,31 @@ class EvaluationWorkspaceAcquisitions:
         inherited = tuple(name for name in grants.handles if name not in live)
         if not fresh and handle not in inherited:
             inherited = (*inherited, handle)
-        if self._reconciliation is not None:
-            await self._reconciliation.require_stopped(backing, inherited)
-        elif inherited:
+        try:
+            held = self._hold(backing, inherited)
+            with held:
+                if handle not in grants.handles:
+                    grants.handles.append(handle)
+                    _write_receipt(self._namespace, self._path, grants.to_binary())
+                yield
+        except WriterProofError as error:
             block = pb.EvaluationRecoveryBlock(
                 environment=self._environment,
                 backing=backing,
-                outstanding=list(inherited),
-                prerequisite="environment verification of the complete inherited writer set is unsupported",
+                outstanding=list(inherited or (handle,)),
+                prerequisite=str(error),
             )
             validate(block)
             _write_receipt(self._namespace, self._path + ".blocked", block.to_binary())
-            raise EvaluationRecoveryBlockedError(block)
-        if handle not in grants.handles:
-            grants.handles.append(handle)
-            _write_receipt(self._namespace, self._path, grants.to_binary())
+            raise EvaluationRecoveryBlockedError(block) from error
+
+    def _hold(self, backing: str, inherited: tuple[str, ...]) -> AbstractContextManager[None]:
+        if self._reconciliation is not None:
+            return self._reconciliation.acquire(backing, inherited)
+        if inherited:
+            problem = "environment verification of the complete inherited writer set is unsupported"
+            raise WriterProofError(problem)
+        return nullcontext()
 
 
 class LocalEvaluationReceipts:
@@ -127,8 +159,10 @@ class LocalEvaluationReceipts:
         self._namespace = namespace
         self._acquisitions = EvaluationWorkspaceAcquisitions(namespace, "local", reconciliation)
 
-    async def require_acquisition(self, handle: str, backing: str, live: tuple[str, ...]) -> None:
-        await self._acquisitions.require(handle, backing, fresh=True, live=live)
+    def acquisition(
+        self, handle: str, backing: str, live: tuple[str, ...]
+    ) -> AbstractContextManager[None]:
+        return self._acquisitions.acquire(handle, backing, fresh=True, live=live)
 
     @staticmethod
     def _path(handle: str) -> str:

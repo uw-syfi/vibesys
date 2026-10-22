@@ -106,6 +106,14 @@ message OperationReplay {
   optional uint64 accepted_sequence = 11 [(buf.validate.field).uint64.gt = 0];
   // New physical execution records retain the winner by child span identity.
   optional string accepted_child = 12 [(buf.validate.field).string.min_len = 1];
+  // Recorded with the logical start, before the first physical child can exist.
+  ReplayTurnBound turn_bound = 13;
+}
+
+message ReplayTurnBound {
+  string origin = 1 [(buf.validate.field).string.min_len = 1];
+  double deadline = 2 [(buf.validate.field).double = {gte: 0, finite: true}];
+  double hold_credit_seconds = 3 [(buf.validate.field).double = {gte: 0, finite: true}];
 }
 
 // A child is execution evidence, never another semantic operation.
@@ -227,4 +235,21 @@ message ReplayPolicyDrift {
   uint64 results = 1 [(buf.validate.field).uint64.gt = 0];
   repeated string roles = 2;
   repeated string templates = 3;
+}
+
+// Authenticated execution evidence. The producer start precedes this obligation,
+// and this obligation precedes the tool reply or a turn's accepted yield.
+message ReplayToolSubmission {
+  string turn = 1 [(buf.validate.field).string.min_len = 1];
+  string call_id = 2 [(buf.validate.field).string.min_len = 1];
+  string reply_id = 3 [(buf.validate.field).string.min_len = 1];
+  string producer = 4 [(buf.validate.field).string.min_len = 1];
+}
+message ReplayToolAcknowledgement {
+  string turn = 1 [(buf.validate.field).string.min_len = 1];
+  string reply_id = 2 [(buf.validate.field).string.min_len = 1];
+}
+message ReplayTurnWait {
+  string turn = 1 [(buf.validate.field).string.min_len = 1];
+  repeated string reply_ids = 2 [(buf.validate.field).repeated = {min_items: 1, unique: true, items: {string: {min_len: 1}}}];
 }

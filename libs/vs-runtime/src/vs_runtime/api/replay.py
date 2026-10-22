@@ -43,6 +43,7 @@ from vs_runtime._replay_sessions import (
     SessionReplayExecutor,
 )
 from vs_runtime._replay_store import ReplayStore, RunLogReplayStore
+from vs_runtime._replay_tools import ReplayTurnTools
 from vs_runtime._replay_wiring import ReplayOwnerServices, replay_bindings
 from vs_runtime._replay_workspaces import WorkspaceReplayExecutor
 from vs_runtime._writer_reconciliation import (
@@ -89,6 +90,7 @@ __all__ = [
     "ReplayRuntime",
     "ReplaySessionServices",
     "ReplayStore",
+    "ReplayTurnTools",
     "ReplayUnknown",
     "ReplayWriterBarrier",
     "ReplayWriterBlockedError",

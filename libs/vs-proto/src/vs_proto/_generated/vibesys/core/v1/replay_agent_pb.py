@@ -18,6 +18,7 @@ from ...store.v1 import replay_pb
 if TYPE_CHECKING:
     from protobuf import DescFile, Oneof
 
+    from ...store.v1.replay_pb import ReplayTurnBound, ReplayTurnWait
     from .common_pb import ArtifactRef, InputMode, InvocationRef, SchemaRef, Scope, SessionId
     from .control_pb import InputTarget
     from .vocabulary_pb import ObservationStatus
@@ -173,7 +174,7 @@ class ReplayAgentInput(Message[_ReplayAgentInputFields]):
         sequence: int
         mode: InputMode
 
-_ReplayAgentTurnFields: TypeAlias = Literal["session", "invocation", "workspace", "prompts", "output_schema", "tool_policy", "artifact_dependencies", "max_turns", "inputs", "guidance"]
+_ReplayAgentTurnFields: TypeAlias = Literal["session", "invocation", "workspace", "prompts", "output_schema", "tool_policy", "artifact_dependencies", "max_turns", "inputs", "guidance", "continuation_of", "hold_credit_seconds"]
 
 class ReplayAgentTurn(Message[_ReplayAgentTurnFields]):
     """
@@ -226,9 +227,19 @@ class ReplayAgentTurn(Message[_ReplayAgentTurnFields]):
             ```proto
             repeated vibesys.core.v1.ReplayAgentInput guidance = 10;
             ```
+        continuation_of:
+            Execution linkage only. The semantic key and retained content identify the call.
+
+            ```proto
+            optional string continuation_of = 11;
+            ```
+        hold_credit_seconds:
+            ```proto
+            double hold_credit_seconds = 12;
+            ```
     """
 
-    __slots__ = ("session", "invocation", "workspace", "prompts", "output_schema", "tool_policy", "artifact_dependencies", "max_turns", "inputs", "guidance")
+    __slots__ = ("session", "invocation", "workspace", "prompts", "output_schema", "tool_policy", "artifact_dependencies", "max_turns", "inputs", "guidance", "continuation_of", "hold_credit_seconds")
 
     if TYPE_CHECKING:
 
@@ -245,6 +256,8 @@ class ReplayAgentTurn(Message[_ReplayAgentTurnFields]):
             max_turns: int = 0,
             inputs: list[ReplayAgentInput] | None = None,
             guidance: list[ReplayAgentInput] | None = None,
+            continuation_of: str | None = None,
+            hold_credit_seconds: float = 0,
         ) -> None:
             pass
 
@@ -258,6 +271,8 @@ class ReplayAgentTurn(Message[_ReplayAgentTurnFields]):
         max_turns: int
         inputs: list[ReplayAgentInput]
         guidance: list[ReplayAgentInput]
+        continuation_of: str
+        hold_credit_seconds: float
 
 _ReplayCancelAgentFields: TypeAlias = Literal["invocation"]
 
@@ -369,7 +384,7 @@ class ReplayAgentRequest(Message[_ReplayAgentRequestFields]):
         within_seconds: float
         action: Oneof[Literal["ensure"], ReplayEnsureAgent] | Oneof[Literal["turn"], ReplayAgentTurn] | Oneof[Literal["cancel"], ReplayCancelAgent] | Oneof[Literal["close"], ReplayCloseAgent] | None
 
-_ReplayAgentResultFields: TypeAlias = Literal["status", "resource", "released", "detail", "session", "invocation"]
+_ReplayAgentResultFields: TypeAlias = Literal["status", "resource", "released", "detail", "session", "invocation", "turn_bound", "suspension"]
 
 class ReplayAgentResult(Message[_ReplayAgentResultFields]):
     """
@@ -402,9 +417,17 @@ class ReplayAgentResult(Message[_ReplayAgentResultFields]):
             ```proto
             optional vibesys.core.v1.InvocationRef invocation = 6;
             ```
+        turn_bound:
+            ```proto
+            optional vibesys.store.v1.ReplayTurnBound turn_bound = 7;
+            ```
+        suspension:
+            ```proto
+            optional vibesys.store.v1.ReplayTurnWait suspension = 8;
+            ```
     """
 
-    __slots__ = ("status", "resource", "released", "detail", "session", "invocation")
+    __slots__ = ("status", "resource", "released", "detail", "session", "invocation", "turn_bound", "suspension")
 
     if TYPE_CHECKING:
 
@@ -417,6 +440,8 @@ class ReplayAgentResult(Message[_ReplayAgentResultFields]):
             detail: str = "",
             session: SessionId | None = None,
             invocation: InvocationRef | None = None,
+            turn_bound: ReplayTurnBound | None = None,
+            suspension: ReplayTurnWait | None = None,
         ) -> None:
             pass
 
@@ -426,6 +451,8 @@ class ReplayAgentResult(Message[_ReplayAgentResultFields]):
         detail: str
         session: SessionId | None
         invocation: InvocationRef | None
+        turn_bound: ReplayTurnBound | None
+        suspension: ReplayTurnWait | None
 
 class ReplayAgentAccess(Enum):
     """
@@ -509,7 +536,7 @@ class ReplaySessionLifetime(Enum):
 
 
 _DESC = file_desc(
-    b'\n"vibesys/core/v1/replay_agent.proto\x12\x0fvibesys.core.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1cvibesys/core/v1/common.proto\x1a\x1dvibesys/core/v1/control.proto\x1a vibesys/core/v1/vocabulary.proto\x1a\x1dvibesys/store/v1/replay.proto"\x8a\x03\n\x12ReplayAgentSession\x12\x1b\n\x02id\x18\x01 \x01(\tR\x02idB\x0b\xbaH\x04r\x02\x10\x01\xe0\xf9\x18\x01\x12\x1f\n\x04role\x18\x02 \x01(\tR\x04roleB\x0b\xbaH\x04r\x02\x10\x01\xe0\xf9\x18\x01\x12J\n\x06access\x18\x03 \x01(\x0e2".vibesys.core.v1.ReplayAgentAccessR\x06accessB\x0e\xbaH\x07\x82\x01\x04\x10\x01 \x00\xe0\xf9\x18\x01\x12[\n\x0bacquisition\x18\x04 \x01(\x0e2).vibesys.core.v1.ReplaySessionAcquisitionR\x0bacquisitionB\x0e\xbaH\x07\x82\x01\x04\x10\x01 \x00\xe0\xf9\x18\x02\x12R\n\x08lifetime\x18\x05 \x01(\x0e2&.vibesys.core.v1.ReplaySessionLifetimeR\x08lifetimeB\x0e\xbaH\x07\x82\x01\x04\x10\x01 \x00\xe0\xf9\x18\x01\x12)\n\x05model\x18\x06 \x01(\tH\x00R\x05modelB\x0e\xbaH\x07r\x05\x10\x01\x18\x80\x02\xe0\xf9\x18\x02\x88\x01\x01B\x08\n\x06_model:\x04\xf0\xf9\x18\x01"\xb9\x01\n\x11ReplayEnsureAgent\x12I\n\x07session\x18\x01 \x01(\x0b2#.vibesys.core.v1.ReplayAgentSessionR\x07sessionB\n\xbaH\x03\xc8\x01\x01\xe0\xf9\x18\x01\x12=\n\x11required_resource\x18\x02 \x01(\tH\x00R\x10requiredResourceB\x0b\xbaH\x04r\x02\x10\x01\xe0\xf9\x18\x01\x88\x01\x01B\x14\n\x12_required_resource:\x04\xf0\xf9\x18\x01"\xb6\x02\n\x10ReplayAgentInput\x12\x17\n\x02id\x18\x01 \x01(\tR\x02idB\x07\xbaH\x04r\x02\x10\x01\x12<\n\x06target\x18\x02 \x01(\x0b2\x1c.vibesys.core.v1.InputTargetR\x06targetB\x06\xbaH\x03\xc8\x01\x01\x12@\n\x08artifact\x18\x03 \x01(\x0b2\x1c.vibesys.core.v1.ArtifactRefR\x08artifactB\x06\xbaH\x03\xc8\x01\x01\x121\n\x0breceived_at\x18\x04 \x01(\x01R\nreceivedAtB\x10\xbaH\r\x12\x0b@\x01)\x00\x00\x00\x00\x00\x00\x00\x00\x12\x1a\n\x08sequence\x18\x05 \x01(\x04R\x08sequence\x12:\n\x04mode\x18\x06 \x01(\x0e2\x1a.vibesys.core.v1.InputModeR\x04modeB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00"\xba\x05\n\x0fReplayAgentTurn\x12I\n\x07session\x18\x01 \x01(\x0b2#.vibesys.core.v1.ReplayAgentSessionR\x07sessionB\n\xbaH\x03\xc8\x01\x01\xe0\xf9\x18\x01\x12+\n\ninvocation\x18\x02 \x01(\tR\ninvocationB\x0b\xbaH\x04r\x02\x10\x01\xe0\xf9\x18\x01\x12@\n\tworkspace\x18\x03 \x01(\x0b2\x16.vibesys.core.v1.ScopeR\tworkspaceB\n\xbaH\x03\xc8\x01\x01\xe0\xf9\x18\x01\x12D\n\x07prompts\x18\x04 \x03(\x0b2\x1c.vibesys.core.v1.ArtifactRefR\x07promptsB\x0c\xbaH\x05\x92\x01\x02\x08\x01\xe0\xf9\x18\x02\x12K\n\routput_schema\x18\x05 \x01(\x0b2\x1a.vibesys.core.v1.SchemaRefR\x0coutputSchemaB\n\xbaH\x03\xc8\x01\x01\xe0\xf9\x18\x02\x12C\n\x0btool_policy\x18\x06 \x01(\x0b2\x1c.vibesys.core.v1.ArtifactRefR\ntoolPolicyB\x04\xe0\xf9\x18\x02\x12_\n\x15artifact_dependencies\x18\x07 \x03(\x0b2\x1c.vibesys.core.v1.ArtifactRefR\x14artifactDependenciesB\x0c\xbaH\x05\x92\x01\x02\x08\x01\xe0\xf9\x18\x01\x12(\n\tmax_turns\x18\x08 \x01(\rR\x08maxTurnsB\x0b\xbaH\x04*\x02(\x01\xe0\xf9\x18\x02\x12?\n\x06inputs\x18\t \x03(\x0b2!.vibesys.core.v1.ReplayAgentInputR\x06inputsB\x04\xe0\xf9\x18\x01\x12C\n\x08guidance\x18\n \x03(\x0b2!.vibesys.core.v1.ReplayAgentInputR\x08guidanceB\x04\xe0\xf9\x18\x01:\x04\xf0\xf9\x18\x01"[\n\x11ReplayCancelAgent\x12F\n\ninvocation\x18\x01 \x01(\x0b2\x1e.vibesys.core.v1.InvocationRefR\ninvocationB\x06\xbaH\x03\xc8\x01\x01"l\n\x10ReplayCloseAgent\x12!\n\x07session\x18\x01 \x01(\tR\x07sessionB\x07\xbaH\x04r\x02\x10\x01\x12(\n\x08resource\x18\x02 \x01(\tH\x00R\x08resourceB\x07\xbaH\x04r\x02\x10\x01\x88\x01\x01B\x0b\n\t_resource"\xe7\x03\n\x12ReplayAgentRequest\x128\n\x05scope\x18\x01 \x01(\x0b2\x16.vibesys.core.v1.ScopeR\x05scopeB\n\xbaH\x03\xc8\x01\x01\xe0\xf9\x18\x01\x12.\n\tadmission\x18\x02 \x01(\tH\x01R\tadmissionB\x0b\xbaH\x04r\x02\x10\x01\xe0\xf9\x18\x01\x88\x01\x01\x12;\n\x0ewithin_seconds\x18\x03 \x01(\x01R\rwithinSecondsB\x14\xbaH\r\x12\x0b@\x01!\x00\x00\x00\x00\x00\x00\x00\x00\xe0\xf9\x18\x02\x12B\n\x06ensure\x18\x04 \x01(\x0b2".vibesys.core.v1.ReplayEnsureAgentH\x00R\x06ensureB\x04\xe0\xf9\x18\x01\x12<\n\x04turn\x18\x05 \x01(\x0b2 .vibesys.core.v1.ReplayAgentTurnH\x00R\x04turnB\x04\xe0\xf9\x18\x01\x12B\n\x06cancel\x18\x06 \x01(\x0b2".vibesys.core.v1.ReplayCancelAgentH\x00R\x06cancelB\x04\xe0\xf9\x18\x01\x12?\n\x05close\x18\x07 \x01(\x0b2!.vibesys.core.v1.ReplayCloseAgentH\x00R\x05closeB\x04\xe0\xf9\x18\x01B\x0f\n\x06action\x12\x05\xbaH\x02\x08\x01B\x0c\n\n_admission:\x04\xf0\xf9\x18\x01"\xc2\x02\n\x11ReplayAgentResult\x12L\n\x06status\x18\x01 \x01(\x0e2".vibesys.core.v1.ObservationStatusR\x06statusB\x10\xbaH\r\x82\x01\n\x10\x01\x18\x01\x18\x03\x18\x04\x18\x05\x12(\n\x08resource\x18\x02 \x01(\tH\x00R\x08resourceB\x07\xbaH\x04r\x02\x10\x01\x88\x01\x01\x12\x1a\n\x08released\x18\x03 \x01(\x08R\x08released\x12\x16\n\x06detail\x18\x04 \x01(\tR\x06detail\x124\n\x07session\x18\x05 \x01(\x0b2\x1a.vibesys.core.v1.SessionIdR\x07session\x12>\n\ninvocation\x18\x06 \x01(\x0b2\x1e.vibesys.core.v1.InvocationRefR\ninvocationB\x0b\n\t_resource*\xad\x01\n\x11ReplayAgentAccess\x12#\n\x1fREPLAY_AGENT_ACCESS_UNSPECIFIED\x10\x00\x12!\n\x1dREPLAY_AGENT_ACCESS_READ_ONLY\x10\x01\x12\'\n#REPLAY_AGENT_ACCESS_WRITE_ARTIFACTS\x10\x02\x12\'\n#REPLAY_AGENT_ACCESS_WRITE_CANDIDATE\x10\x03*\x92\x01\n\x18ReplaySessionAcquisition\x12*\n&REPLAY_SESSION_ACQUISITION_UNSPECIFIED\x10\x00\x12$\n REPLAY_SESSION_ACQUISITION_FRESH\x10\x01\x12$\n REPLAY_SESSION_ACQUISITION_REUSE\x10\x02*\x8a\x01\n\x15ReplaySessionLifetime\x12\'\n#REPLAY_SESSION_LIFETIME_UNSPECIFIED\x10\x00\x12%\n!REPLAY_SESSION_LIFETIME_EPHEMERAL\x10\x01\x12!\n\x1dREPLAY_SESSION_LIFETIME_OWNER\x10\x02B?Z=github.com/uw-syfi/vibesys/gateway/gen/vibesys/core/v1;corev1b\x06proto3',
+    b'\n"vibesys/core/v1/replay_agent.proto\x12\x0fvibesys.core.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1cvibesys/core/v1/common.proto\x1a\x1dvibesys/core/v1/control.proto\x1a vibesys/core/v1/vocabulary.proto\x1a\x1dvibesys/store/v1/replay.proto"\x8a\x03\n\x12ReplayAgentSession\x12\x1b\n\x02id\x18\x01 \x01(\tR\x02idB\x0b\xbaH\x04r\x02\x10\x01\xe0\xf9\x18\x01\x12\x1f\n\x04role\x18\x02 \x01(\tR\x04roleB\x0b\xbaH\x04r\x02\x10\x01\xe0\xf9\x18\x01\x12J\n\x06access\x18\x03 \x01(\x0e2".vibesys.core.v1.ReplayAgentAccessR\x06accessB\x0e\xbaH\x07\x82\x01\x04\x10\x01 \x00\xe0\xf9\x18\x01\x12[\n\x0bacquisition\x18\x04 \x01(\x0e2).vibesys.core.v1.ReplaySessionAcquisitionR\x0bacquisitionB\x0e\xbaH\x07\x82\x01\x04\x10\x01 \x00\xe0\xf9\x18\x02\x12R\n\x08lifetime\x18\x05 \x01(\x0e2&.vibesys.core.v1.ReplaySessionLifetimeR\x08lifetimeB\x0e\xbaH\x07\x82\x01\x04\x10\x01 \x00\xe0\xf9\x18\x01\x12)\n\x05model\x18\x06 \x01(\tH\x00R\x05modelB\x0e\xbaH\x07r\x05\x10\x01\x18\x80\x02\xe0\xf9\x18\x02\x88\x01\x01B\x08\n\x06_model:\x04\xf0\xf9\x18\x01"\xb9\x01\n\x11ReplayEnsureAgent\x12I\n\x07session\x18\x01 \x01(\x0b2#.vibesys.core.v1.ReplayAgentSessionR\x07sessionB\n\xbaH\x03\xc8\x01\x01\xe0\xf9\x18\x01\x12=\n\x11required_resource\x18\x02 \x01(\tH\x00R\x10requiredResourceB\x0b\xbaH\x04r\x02\x10\x01\xe0\xf9\x18\x01\x88\x01\x01B\x14\n\x12_required_resource:\x04\xf0\xf9\x18\x01"\xb6\x02\n\x10ReplayAgentInput\x12\x17\n\x02id\x18\x01 \x01(\tR\x02idB\x07\xbaH\x04r\x02\x10\x01\x12<\n\x06target\x18\x02 \x01(\x0b2\x1c.vibesys.core.v1.InputTargetR\x06targetB\x06\xbaH\x03\xc8\x01\x01\x12@\n\x08artifact\x18\x03 \x01(\x0b2\x1c.vibesys.core.v1.ArtifactRefR\x08artifactB\x06\xbaH\x03\xc8\x01\x01\x121\n\x0breceived_at\x18\x04 \x01(\x01R\nreceivedAtB\x10\xbaH\r\x12\x0b@\x01)\x00\x00\x00\x00\x00\x00\x00\x00\x12\x1a\n\x08sequence\x18\x05 \x01(\x04R\x08sequence\x12:\n\x04mode\x18\x06 \x01(\x0e2\x1a.vibesys.core.v1.InputModeR\x04modeB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00"\xcf\x06\n\x0fReplayAgentTurn\x12I\n\x07session\x18\x01 \x01(\x0b2#.vibesys.core.v1.ReplayAgentSessionR\x07sessionB\n\xbaH\x03\xc8\x01\x01\xe0\xf9\x18\x01\x12+\n\ninvocation\x18\x02 \x01(\tR\ninvocationB\x0b\xbaH\x04r\x02\x10\x01\xe0\xf9\x18\x01\x12@\n\tworkspace\x18\x03 \x01(\x0b2\x16.vibesys.core.v1.ScopeR\tworkspaceB\n\xbaH\x03\xc8\x01\x01\xe0\xf9\x18\x01\x12D\n\x07prompts\x18\x04 \x03(\x0b2\x1c.vibesys.core.v1.ArtifactRefR\x07promptsB\x0c\xbaH\x05\x92\x01\x02\x08\x01\xe0\xf9\x18\x02\x12K\n\routput_schema\x18\x05 \x01(\x0b2\x1a.vibesys.core.v1.SchemaRefR\x0coutputSchemaB\n\xbaH\x03\xc8\x01\x01\xe0\xf9\x18\x02\x12C\n\x0btool_policy\x18\x06 \x01(\x0b2\x1c.vibesys.core.v1.ArtifactRefR\ntoolPolicyB\x04\xe0\xf9\x18\x02\x12_\n\x15artifact_dependencies\x18\x07 \x03(\x0b2\x1c.vibesys.core.v1.ArtifactRefR\x14artifactDependenciesB\x0c\xbaH\x05\x92\x01\x02\x08\x01\xe0\xf9\x18\x01\x12(\n\tmax_turns\x18\x08 \x01(\rR\x08maxTurnsB\x0b\xbaH\x04*\x02(\x01\xe0\xf9\x18\x02\x12?\n\x06inputs\x18\t \x03(\x0b2!.vibesys.core.v1.ReplayAgentInputR\x06inputsB\x04\xe0\xf9\x18\x01\x12C\n\x08guidance\x18\n \x03(\x0b2!.vibesys.core.v1.ReplayAgentInputR\x08guidanceB\x04\xe0\xf9\x18\x01\x129\n\x0fcontinuation_of\x18\x0b \x01(\tH\x00R\x0econtinuationOfB\x0b\xbaH\x04r\x02\x10\x01\xe0\xf9\x18\x02\x88\x01\x01\x12D\n\x13hold_credit_seconds\x18\x0c \x01(\x01R\x11holdCreditSecondsB\x14\xbaH\r\x12\x0b@\x01)\x00\x00\x00\x00\x00\x00\x00\x00\xe0\xf9\x18\x02B\x12\n\x10_continuation_of:\x04\xf0\xf9\x18\x01"[\n\x11ReplayCancelAgent\x12F\n\ninvocation\x18\x01 \x01(\x0b2\x1e.vibesys.core.v1.InvocationRefR\ninvocationB\x06\xbaH\x03\xc8\x01\x01"l\n\x10ReplayCloseAgent\x12!\n\x07session\x18\x01 \x01(\tR\x07sessionB\x07\xbaH\x04r\x02\x10\x01\x12(\n\x08resource\x18\x02 \x01(\tH\x00R\x08resourceB\x07\xbaH\x04r\x02\x10\x01\x88\x01\x01B\x0b\n\t_resource"\xe7\x03\n\x12ReplayAgentRequest\x128\n\x05scope\x18\x01 \x01(\x0b2\x16.vibesys.core.v1.ScopeR\x05scopeB\n\xbaH\x03\xc8\x01\x01\xe0\xf9\x18\x01\x12.\n\tadmission\x18\x02 \x01(\tH\x01R\tadmissionB\x0b\xbaH\x04r\x02\x10\x01\xe0\xf9\x18\x01\x88\x01\x01\x12;\n\x0ewithin_seconds\x18\x03 \x01(\x01R\rwithinSecondsB\x14\xbaH\r\x12\x0b@\x01!\x00\x00\x00\x00\x00\x00\x00\x00\xe0\xf9\x18\x02\x12B\n\x06ensure\x18\x04 \x01(\x0b2".vibesys.core.v1.ReplayEnsureAgentH\x00R\x06ensureB\x04\xe0\xf9\x18\x01\x12<\n\x04turn\x18\x05 \x01(\x0b2 .vibesys.core.v1.ReplayAgentTurnH\x00R\x04turnB\x04\xe0\xf9\x18\x01\x12B\n\x06cancel\x18\x06 \x01(\x0b2".vibesys.core.v1.ReplayCancelAgentH\x00R\x06cancelB\x04\xe0\xf9\x18\x01\x12?\n\x05close\x18\x07 \x01(\x0b2!.vibesys.core.v1.ReplayCloseAgentH\x00R\x05closeB\x04\xe0\xf9\x18\x01B\x0f\n\x06action\x12\x05\xbaH\x02\x08\x01B\x0c\n\n_admission:\x04\xf0\xf9\x18\x01"\xc6\x03\n\x11ReplayAgentResult\x12L\n\x06status\x18\x01 \x01(\x0e2".vibesys.core.v1.ObservationStatusR\x06statusB\x10\xbaH\r\x82\x01\n\x10\x01\x18\x01\x18\x03\x18\x04\x18\x05\x12(\n\x08resource\x18\x02 \x01(\tH\x00R\x08resourceB\x07\xbaH\x04r\x02\x10\x01\x88\x01\x01\x12\x1a\n\x08released\x18\x03 \x01(\x08R\x08released\x12\x16\n\x06detail\x18\x04 \x01(\tR\x06detail\x124\n\x07session\x18\x05 \x01(\x0b2\x1a.vibesys.core.v1.SessionIdR\x07session\x12>\n\ninvocation\x18\x06 \x01(\x0b2\x1e.vibesys.core.v1.InvocationRefR\ninvocation\x12@\n\nturn_bound\x18\x07 \x01(\x0b2!.vibesys.store.v1.ReplayTurnBoundR\tturnBound\x12@\n\nsuspension\x18\x08 \x01(\x0b2 .vibesys.store.v1.ReplayTurnWaitR\nsuspensionB\x0b\n\t_resource*\xad\x01\n\x11ReplayAgentAccess\x12#\n\x1fREPLAY_AGENT_ACCESS_UNSPECIFIED\x10\x00\x12!\n\x1dREPLAY_AGENT_ACCESS_READ_ONLY\x10\x01\x12\'\n#REPLAY_AGENT_ACCESS_WRITE_ARTIFACTS\x10\x02\x12\'\n#REPLAY_AGENT_ACCESS_WRITE_CANDIDATE\x10\x03*\x92\x01\n\x18ReplaySessionAcquisition\x12*\n&REPLAY_SESSION_ACQUISITION_UNSPECIFIED\x10\x00\x12$\n REPLAY_SESSION_ACQUISITION_FRESH\x10\x01\x12$\n REPLAY_SESSION_ACQUISITION_REUSE\x10\x02*\x8a\x01\n\x15ReplaySessionLifetime\x12\'\n#REPLAY_SESSION_LIFETIME_UNSPECIFIED\x10\x00\x12%\n!REPLAY_SESSION_LIFETIME_EPHEMERAL\x10\x01\x12!\n\x1dREPLAY_SESSION_LIFETIME_OWNER\x10\x02B?Z=github.com/uw-syfi/vibesys/gateway/gen/vibesys/core/v1;corev1b\x06proto3',
     [
         validate_pb.desc(),
         common_pb.desc(),

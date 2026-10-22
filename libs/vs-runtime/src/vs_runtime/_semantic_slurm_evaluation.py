@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import shlex
+from contextlib import nullcontext
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -374,14 +375,18 @@ class SemanticSlurmEvaluationExecutor:
                 return existing
             # Closing during admission must not leave an unowned candidate executor.
             self._refuse_if_closing(handle_id)
-            if self._acquisitions is not None:
-                await self._acquisitions.require(
+            held = (
+                nullcontext()
+                if self._acquisitions is None
+                else self._acquisitions.acquire(
                     handle_id,
                     str(self._workspaces.root.path),
                     fresh=fresh,
                     live=tuple(self._executions),
                 )
-            workspace = await self._workspaces.create_measured_candidate(record.snapshot)
+            )
+            with held:
+                workspace = await self._workspaces.create_measured_candidate(record.snapshot)
             executor = self._make_executor(
                 workspace.path,
                 self._stage_streams(record.request),

@@ -57,8 +57,17 @@ PURE_EXPORTS = {
             "WriterManifest",
             "WriterTerminationProof",
             "WriterReconciliation",
+            "ReplayToolSubmission",
+            "ReplayToolAcknowledgement",
+            "ReplayTurnWait",
         )
     },
+    # These generated request codecs only transform retained in-memory values.
+    "vs_proto.api.replay_agent": frozenset({"ReplayAgentRequest"}),
+    "vs_proto.api.replay_agent.ReplayAgentRequest": frozenset({"from_binary", "desc"}),
+    "vs_proto.api.replay_evaluation": frozenset({"ReplayEvaluationRequest"}),
+    "vs_proto.api.replay_evaluation.ReplayEvaluationRequest": frozenset({"from_binary", "desc"}),
+    "protobuf.wkt.google.protobuf.any_pb.Any": frozenset({"from_binary"}),
     "vs_proto.api.replay.KeyComponentKind": frozenset(
         {"PARENT", "ITEM", "SAMPLE", "REVISION", "RECORDED_POSITION"}
     ),
@@ -86,6 +95,8 @@ PURE_EXPORTS = {
         {
             "replay",
             "core_iterations",
+            "replay_agent",
+            "replay_evaluation",
             "Record",
             "Change",
             "EpochStarted",

@@ -334,16 +334,19 @@ class PollingEvaluationExecutor:
             self._control.start_execution(started, evaluation_id=request.key)
 
     async def _acquire_workspace(self, handle_id: str, snapshot: str) -> CandidateWorkspace:
-        if self._receipts is not None:
-            await self._receipts.require_acquisition(
-                handle_id,
-                str(self._workspaces.root.path),
-                tuple(self._tasks),
+        held = (
+            nullcontext()
+            if self._receipts is None
+            else self._receipts.acquisition(
+                handle_id, str(self._workspaces.root.path), tuple(self._tasks)
             )
-            self._receipts.update(handle_id, cleanup_required=True)
-        workspace = await self._workspaces.create_measured_candidate(snapshot)
-        if self._receipts is not None:
-            self._receipts.update(handle_id, workspace=str(workspace.path))
+        )
+        with held:
+            if self._receipts is not None:
+                self._receipts.update(handle_id, cleanup_required=True)
+            workspace = await self._workspaces.create_measured_candidate(snapshot)
+            if self._receipts is not None:
+                self._receipts.update(handle_id, workspace=str(workspace.path))
         return workspace
 
     def _stage_started(self, handle_id: str, name: str) -> None:
