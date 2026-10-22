@@ -436,8 +436,15 @@ async def test_recovery_inspection_reads_owner_knowledge_without_new_work(
 ) -> None:
     world = await build(tmp_path, _Script.SUCCEED, None)
     try:
+        # Main callers poll. An unseen job is unsubmitted. recover is a separate
+        # question: a fresh local process cannot prove the delivery never began,
+        # while the durable Slurm owner answers with the same poll.
+        assert (await world.executor.poll(_HANDLE)).phase is PollPhase.UNSUBMITTED
         unseen = await world.executor.recover(_HANDLE)
-        assert unseen.phase in {PollPhase.UNSUBMITTED, PollPhase.UNKNOWN}
+        if isinstance(world.executor, PollingEvaluationExecutor):
+            assert unseen.phase is PollPhase.UNKNOWN
+        else:
+            assert unseen.phase is PollPhase.UNSUBMITTED
         assert not world.workspaces.candidates
         await world.executor.submit(_request(world.snapshot), handle_id=_HANDLE)
         terminal = await _terminal(world.executor)

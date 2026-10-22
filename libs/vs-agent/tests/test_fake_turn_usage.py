@@ -53,3 +53,21 @@ def test_raw_turn_preserves_every_reported_usage_field(usage: AgentUsage, *, key
         session_key=AgentSessionKey(SessionScope.CHAT, "thread-1") if keyed else None,
     )
     assert result.usage == usage
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize("keyed", [False, True])
+def test_an_unconfigured_turn_reports_unknown_usage(*, keyed: bool) -> None:
+    """A turn with no configured usage reports every count unknown."""
+    client = FakeAgentClient(threads=SimThreads()).set_text("worker", "done")
+    result = client.run(
+        session_spec=AgentSessionSpec(
+            role="worker",
+            provider="fake",
+            workspace=Path("workspace"),
+            policy=AgentExecutionPolicy(require_enforcement=False),
+        ),
+        turn=AgentTurnRequest(message="Work.", invocation_id="invocation-1"),
+        session_key=AgentSessionKey(SessionScope.CHAT, "thread-1") if keyed else None,
+    )
+    assert result.usage == AgentUsage()

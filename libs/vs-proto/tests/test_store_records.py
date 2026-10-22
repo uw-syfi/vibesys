@@ -11,6 +11,7 @@ from hypothesis import strategies as st
 from protobuf import DescFieldValueEnum, DescFieldValueScalar, Message, ScalarType
 from protobuf.wkt.google.protobuf.any_pb import Any as ProtoAny
 from protobuf.wkt.google.protobuf.descriptor_pb import FileDescriptorSet
+from protovalidate import validate as schema_validate
 from scripts.generate_record_goldens import (
     attrs_examples,
     detail_examples,
@@ -295,6 +296,18 @@ def test_google_message_validation_keeps_the_public_adapter(
     else:
         with pytest.raises(p.ValidationError):
             p.validate(message)
+
+
+def test_public_validate_matches_schema_rules_for_current_records_and_receipts() -> None:
+    """Runlog records and admission receipts keep the schema rules they already use."""
+    for record in _RECORDS.values():
+        schema_validate(record)
+        p.validate(record)
+    invalid = p.admission.AdmissionReceipt()
+    with pytest.raises(p.ValidationError):
+        schema_validate(invalid)
+    with pytest.raises(p.ValidationError):
+        p.validate(invalid)
 
 
 def set_field(message: Message, name: str, value: object) -> None:
