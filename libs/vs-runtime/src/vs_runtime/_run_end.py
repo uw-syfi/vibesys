@@ -14,7 +14,7 @@ from pydantic import JsonValue, TypeAdapter
 from vs_core.api import RunStatus
 from vs_decode.api import Unreadable, decode_json
 from vs_project.api import ProjectStateError, StoredEnvelope
-from vs_runlog.api import CurrentEpoch, read_current_epoch
+from vs_runlog.api import CurrentEpoch, epoch_has_ended, read_current_epoch
 
 if TYPE_CHECKING:
     from vs_core.api import CoreState
@@ -118,10 +118,7 @@ def recorded_ending(project: Project, run_id: str) -> str | None:
     """
     epoch = _log_epoch(project, run_id)
     if epoch is not None:
-        lifecycle = epoch.lifecycle
-        if lifecycle is None or lifecycle.state is None:
-            return None
-        if lifecycle.state.field in {"parked", "ended"}:
+        if epoch_has_ended(epoch):
             return "the epoch ended; Resume starts another"
         return None
     end = recorded_end(project, run_id)

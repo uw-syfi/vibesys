@@ -10,7 +10,7 @@ import vs_proto.api as p
 from vibesys.events import CoreEvent
 from vibesys.records.api import MappedEvent, MappingState, epoch_header, map_event
 from vs_decode.api import Unreadable, decode_json
-from vs_runlog.api import fold_skeleton
+from vs_runlog.api import current_epoch, epoch_has_ended, fold_skeleton
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterable
@@ -104,14 +104,7 @@ class RunLogTee:
             if record.body is not None and record.body.field == "intent"
         }
         last = records[-1] if records else None
-        ended = any(
-            r.epoch == self._writer.epoch
-            and r.body is not None
-            and r.body.field == "lifecycle"
-            and r.body.value.state is not None
-            and r.body.value.state.field == "ended"
-            for r in records
-        )
+        ended = epoch_has_ended(current_epoch(records))
         clock, epochs = _epoch_clocks(records)
         if last is not None and not ended:
             self._writer.append(

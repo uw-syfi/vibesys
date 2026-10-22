@@ -8,6 +8,7 @@ export {
   skeletonLoaderMachine,
 } from './loader-machine.js';
 export {
+  epochHasEnded,
   ingestSkeleton,
   ingestTail,
   observeRun,
