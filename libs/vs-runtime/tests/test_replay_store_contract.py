@@ -371,5 +371,5 @@ def test_a_keyed_archive_in_the_atomic_store_grants_no_authority(tmp_path: Path)
     archived = StoredEnvelope(revision=1, schema_version=2, payload=expected)
     assert isinstance(store.commit(0, archived, owner, 0), Committed)
     assert store.release(owner, 0)
-    with pytest.raises(ValueError, match="only run.log may hold them"):
+    with pytest.raises(ValueError, match=r"only run\.log may hold them"):
         _reload(project, path)

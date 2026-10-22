@@ -38,6 +38,7 @@ def reading(
     *,
     revision: int = 0,
     aliases: tuple[str, ...] = (),
+    origin: int = 0,
 ) -> replay.AccountingObservation:
     return replay.AccountingObservation(
         occurrence=replay.AccountingOccurrence(kind=_INVOCATION, id=occurrence),
@@ -45,6 +46,7 @@ def reading(
         revision=revision,
         charged=count(value),
         aliases=list(aliases),
+        origin_epoch=origin,
     )
 
 
@@ -296,26 +298,11 @@ _values = st.integers(0, 50)
 _steps = st.lists(st.integers(0, 20), max_size=3)
 
 
-def _observation(
-    kind: replay.AccountingOccurrenceKind,
-    identity: str,
-    dimension: Dimension,
-    value: int | None,
-    *,
-    revision: int = 0,
-    refunded: int = 0,
-    aliases: tuple[str, ...] = (),
-    origin: int = 0,
+def _revised(
+    observation: replay.AccountingObservation, revision: int
 ) -> replay.AccountingObservation:
-    return replay.AccountingObservation(
-        occurrence=replay.AccountingOccurrence(kind=kind, id=identity),
-        dimension=dimension,
-        revision=revision,
-        charged=count(value),
-        refunded=count(refunded) if refunded else None,
-        aliases=list(aliases),
-        origin_epoch=origin,
-    )
+    observation.revision = revision
+    return observation
 
 
 @dataclass
@@ -326,25 +313,16 @@ class _History:
     coverage: list[replay.AccountingCoverage] = field(default_factory=list)
     late: list[replay.AccountingObservation] = field(default_factory=list)
     aliased: list[replay.AccountingObservation] = field(default_factory=list)
-    tokens: AccountingAmount = AccountingAmount()
-    attempts: AccountingAmount = AccountingAmount()
-    epoch: AccountingAmount = AccountingAmount()
+    tokens: AccountingAmount = field(default_factory=AccountingAmount)
+    attempts: AccountingAmount = field(default_factory=AccountingAmount)
+    epoch: AccountingAmount = field(default_factory=AccountingAmount)
 
     def chain(self, identity: str, first: int, steps: list[int], *, origin: int = 0) -> int:
         """Append cumulative readings at revisions from one; return the latest value."""
         value = first
         for revision, step in enumerate(steps, start=1):
             value += step
-            self.late.append(
-                _observation(
-                    _INVOCATION,
-                    identity,
-                    Dimension.INPUT_TOKENS,
-                    value,
-                    revision=revision,
-                    origin=origin,
-                )
-            )
+            self.late.append(reading(identity, value, revision=revision, origin=origin))
         return value
 
 
@@ -373,14 +351,10 @@ def _uncovered(draw: st.DrawFn, history: _History) -> None:
     drawn = draw(st.lists(st.tuples(_values, _steps, st.booleans()), max_size=3))
     for index, (first, steps, unknown) in enumerate(drawn):
         identity = f"uncovered-{index}"
-        history.imported.append(_observation(_INVOCATION, identity, Dimension.INPUT_TOKENS, first))
+        history.imported.append(reading(identity, first))
         value = history.chain(identity, first, steps)
         if unknown:
-            history.late.append(
-                _observation(
-                    _INVOCATION, identity, Dimension.INPUT_TOKENS, None, revision=len(steps) + 1
-                )
-            )
+            history.late.append(reading(identity, None, revision=len(steps) + 1))
         history.tokens += AccountingAmount(Fraction(0 if unknown else value), unknown=unknown)
 
 
@@ -392,23 +366,17 @@ def _charges(draw: st.DrawFn, history: _History) -> None:
     ):
         refunded = [min(refund, charged) for refund in drawn]
         history.imported.append(
-            _observation(
-                _CHARGE,
+            charge(
                 f"charge-{index}",
-                Dimension.ATTEMPTS,
                 charged,
+                Dimension.ATTEMPTS,
                 refunded=refunded[0],
-                aliases=(f"request-{index}",),
+                alias=f"request-{index}",
             )
         )
         history.aliased += [
-            _observation(
-                _CHARGE,
-                f"request-{index}",
-                Dimension.ATTEMPTS,
-                charged,
-                revision=revision,
-                refunded=refund,
+            _revised(
+                charge(f"request-{index}", charged, Dimension.ATTEMPTS, refunded=refund), revision
             )
             for revision, refund in enumerate(refunded[1:], start=1)
         ]

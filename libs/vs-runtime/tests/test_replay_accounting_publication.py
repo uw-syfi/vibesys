@@ -198,18 +198,15 @@ def test_a_failed_log_sync_is_unknown(tmp_path: Path) -> None:
     gate = FaultGate(FaultPlan(seed=0, rules=(rule,)))
     real = OsFileSync()
     threads = SimThreads()
-    # The writer keeps its failure and raises it again as it closes.
-    with (
-        pytest.raises(InjectedIOError),
-        FileRunLogWriter(
-            path,
-            clock=threads.clock,
-            threads=threads,
-            sync=lambda descriptor: gate.around(
-                Boundary.DURABLE_WRITE, "fsync", partial(real, descriptor)
-            ),
-        ) as writer,
-    ):
+    writer = FileRunLogWriter(
+        path,
+        clock=threads.clock,
+        threads=threads,
+        sync=lambda descriptor: gate.around(
+            Boundary.DURABLE_WRITE, "fsync", partial(real, descriptor)
+        ),
+    )
+    try:
         store = RunLogReplayStore(writer, project.state_store("run-a"))
         fence = store.acquire("host-a", 0, 30)
         assert fence is not None
@@ -218,7 +215,12 @@ def test_a_failed_log_sync_is_unknown(tmp_path: Path) -> None:
             schema_version=REPLAY_STORE_SCHEMA_VERSION,
             payload=ReplayRecords(records=[first]).to_binary(),
         )
-        assert store.commit(None, envelope, fence, 0) == Unknown(revision=0)
+        outcome = store.commit(None, envelope, fence, 0)
+    finally:
+        # The writer keeps its failure and raises it again as it closes.
+        with pytest.raises(InjectedIOError):
+            writer.close()
+    assert outcome == Unknown(revision=0)
 
 
 def test_a_contradictory_republication_commits_nothing(tmp_path: Path) -> None:
