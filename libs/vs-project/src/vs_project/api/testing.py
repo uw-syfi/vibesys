@@ -9,6 +9,7 @@ suite as ``CliGitRepository`` (``libs/vs-project/tests/git_contract``).
 """
 
 from vs_project._control_inbox import FakeControlInbox
+from vs_project._fake_admission import FakeAdmissionStore
 from vs_project._fake_git_repository import FakeGitRepositories, FakeGitRepository
 from vs_project._fake_git_state import RepositoryCensus
 from vs_project._run_history import FakeRunHistory
@@ -29,6 +30,7 @@ __all__ = [
     "IN_MEMORY_GIT",
     "CliWorldGit",
     "ContractProject",
+    "FakeAdmissionStore",
     "FakeControlInbox",
     "FakeGitRepositories",
     "FakeGitRepository",

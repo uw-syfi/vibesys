@@ -3056,6 +3056,7 @@ dependencies = [
     { name = "pygit2" },
     { name = "python-dotenv" },
     { name = "pyyaml" },
+    { name = "typing-extensions" },
     { name = "websockets" },
 ]
 
@@ -3110,6 +3111,7 @@ requires-dist = [
     { name = "pygit2", specifier = ">=1.18,<2" },
     { name = "python-dotenv", specifier = ">=1.0.1" },
     { name = "pyyaml", specifier = ">=6" },
+    { name = "typing-extensions", specifier = ">=4.12" },
     { name = "websockets", specifier = ">=14.2,<15" },
 ]
 
@@ -3394,6 +3396,7 @@ dependencies = [
     { name = "pydantic" },
     { name = "pygit2" },
     { name = "vs-decode" },
+    { name = "vs-proto" },
     { name = "vs-sim" },
 ]
 
@@ -3402,6 +3405,7 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2" },
     { name = "pygit2", specifier = ">=1.18,<2" },
     { name = "vs-decode", editable = "libs/vs-decode" },
+    { name = "vs-proto", editable = "libs/vs-proto" },
     { name = "vs-sim", editable = "libs/vs-sim" },
 ]
 

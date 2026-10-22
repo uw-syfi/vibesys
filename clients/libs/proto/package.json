@@ -24,7 +24,7 @@
     "prepare": "node generate-schema-files.mjs",
     "build": "node generate-schema-files.mjs && tsc -b tsconfig.lib.json",
     "check": "node generate-schema-files.mjs && tsc -b",
-    "test": "node generate-schema-files.mjs && tsc -b && node --test tests/*.test.mjs"
+    "test": "node generate-schema-files.mjs && tsc -b && node ../../tools/scripts/run_node_suite.mjs tests/*.test.mjs"
   },
   "dependencies": {
     "@bufbuild/protobuf": "2.16.0",

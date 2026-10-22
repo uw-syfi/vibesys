@@ -291,7 +291,7 @@ root = ".github/workflows"
 id = "proto"
 class = "manual"
 job = "proto"
-roots = ["proto", "scripts/corevalue", "libs/vs-core/src/vs_core/_generated", "libs/vs-runtime/src/vs_runtime/_core_values", "libs/vs-proto", "clients/libs/proto", "gateway/gen", "gateway/schemahash", "gateway/cmd/schema-hashes"]
+roots = ["proto", "scripts/corevalue", "scripts/host_operations", "libs/vs-core/src/vs_core/_generated", "libs/vs-runtime/src/vs_runtime/_core_values", "libs/vs-proto", "clients/libs/proto", "gateway/gen", "gateway/schemahash", "gateway/cmd/schema-hashes"]
 files = ["buf.yaml", "buf.gen.yaml", "buf.gen.core.yaml", "scripts/protoc_gen_corevalue.py", "scripts/generate_proto.sh", "scripts/check_schema_hashes.sh", "scripts/generate_proto_framing.py", "scripts/check_proto.sh", "gateway/go.mod", "gateway/go.sum", "clients/package.json", "clients/pnpm-lock.yaml", "pyproject.toml", "uv.lock"]
 
 [[components]]

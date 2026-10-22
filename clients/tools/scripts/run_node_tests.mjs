@@ -20,15 +20,13 @@ import {existsSync, mkdtempSync, rmSync} from 'node:fs';
 import {join, resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {testFileNames} from './run_bun_tests.mjs';
+import {NODE_TEST_ARGUMENTS} from './test_runner_config.mjs';
 
 const CONFIG = 'tsconfig.node-tests.json';
 const BUILD_PREFIX = '.vibesys-node-tests-';
 const TYPESCRIPT_COMPILER = fileURLToPath(
   new URL('../../node_modules/typescript/bin/tsc', import.meta.url),
 );
-// Like the Bun lane, bound each test only to catch a hang. Tests synchronize
-// through Fakes; reaching this limit is a stuck run, never a passing verdict.
-const PER_TEST_BOUND_MS = 60_000;
 
 /** Map TypeScript test source paths to the paths emitted by NodeNext TypeScript. */
 export function compiledTestFileNames(sourceNames, outputDirectory) {
@@ -109,12 +107,7 @@ async function main(argv) {
       );
     }
 
-    const result = await runProcess(process.execPath, [
-      '--test',
-      '--test-concurrency=1',
-      `--test-timeout=${PER_TEST_BOUND_MS}`,
-      ...compiledNames,
-    ]);
+    const result = await runProcess(process.execPath, [...NODE_TEST_ARGUMENTS, ...compiledNames]);
     return exitCode(result, 'node --test');
   } finally {
     rmSync(buildDirectory, {recursive: true, force: true});

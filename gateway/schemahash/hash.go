@@ -19,6 +19,7 @@ import (
 var (
 	APISchemaHash   = packageHash("vibesys.api.v1")
 	StoreSchemaHash = packageHash("vibesys.store.v1")
+	HostSchemaHash  = packageHash("vibesys.host.v1")
 )
 
 func packageHash(name protoreflect.FullName) string {

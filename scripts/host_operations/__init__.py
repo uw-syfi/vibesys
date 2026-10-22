@@ -1,0 +1,1 @@
+"""Host operation descriptor compiler."""
