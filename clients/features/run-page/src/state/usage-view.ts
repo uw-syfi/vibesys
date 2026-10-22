@@ -575,21 +575,34 @@ export function roleAgents(
   names: ModelNames,
 ): readonly {
   readonly role: string;
-  readonly ran: readonly {harness: string | null; model: string | null}[];
+  readonly ran: readonly {
+    harness: string | null;
+    model: string | null;
+    client: 'scripted' | null;
+  }[];
 }[] {
-  const by = new Map<string, Map<string, {harness: string | null; model: string | null}>>();
+  const by = new Map<
+    string,
+    Map<string, {harness: string | null; model: string | null; client: 'scripted' | null}>
+  >();
   for (const record of records) {
-    if (record.role === null || (record.harness === null && record.model === null)) continue;
+    const scripted = record.client === 'scripted';
+    if (record.role === null || (!scripted && record.harness === null && record.model === null))
+      continue;
     if (isChatAgentKind(record.role)) continue;
     const pairs = by.get(record.role) ?? new Map();
-    pairs.set(`${record.harness}\n${record.model}`, {harness: record.harness, model: record.model});
+    const pair = scripted
+      ? {harness: null, model: null, client: 'scripted' as const}
+      : {harness: record.harness, model: record.model, client: null};
+    pairs.set(`${pair.client}\n${pair.harness}\n${pair.model}`, pair);
     by.set(record.role, pairs);
   }
   return [...by.entries()].map(([role, pairs]) => ({
     role: roleName(role),
-    ran: [...pairs.values()].map(({harness, model}) => ({
+    ran: [...pairs.values()].map(({harness, model, client}) => ({
       harness,
       model: model === null ? null : modelLabel(names, model),
+      client,
     })),
   }));
 }

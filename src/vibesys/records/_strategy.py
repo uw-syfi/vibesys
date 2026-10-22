@@ -116,27 +116,56 @@ def workstream(projection: Projection) -> None:
         finish(projection, selected, "workstream", attrs)
 
 
+def _checkout_status(status: e.CheckoutStatus | None) -> p.CheckoutStatus | None:
+    """The core checkout status as the store enum, or None when the run recorded none."""
+    if status is None:
+        return None
+    return enum_value(p.CheckoutStatus, status.value)
+
+
+def _adoption_checkout(span: p.Span) -> p.CheckoutStatus | None:
+    """The checkout status an adoption span already recorded."""
+    label = span.label
+    if label is None or label.attrs is None:
+        return None
+    attrs = p.AdoptionAttrs.from_binary(label.attrs.value)
+    return attrs.checkout_status if attrs.has_field("checkout_status") else None
+
+
+def _adoption_candidate(span: p.Span) -> str | None:
+    """The candidate an adoption span names, or None for the baseline."""
+    label = span.label
+    if label is None or label.attrs is None:
+        return None
+    attrs = p.AdoptionAttrs.from_binary(label.attrs.value)
+    return attrs.candidate if attrs.has_field("candidate") else None
+
+
 def adoption(projection: Projection) -> None:
     data = projection.event.data
     if not isinstance(data, e.WinnerSelectedData):
         message = "winner_selected requires WinnerSelectedData"
         raise TypeError(message)
+    wanted = data.revision if data.selection == "candidate" else None
     matches = [
         span
         for span in projection.spans.values()
         if span.label is not None
         and span.label.kind == "adoption"
         and span.label.attrs is not None
-        and p.AdoptionAttrs.from_binary(span.label.attrs.value).candidate
-        == (data.revision if data.selection == "candidate" else None)
+        and _adoption_candidate(span) == wanted
     ]
     if not matches and not projection.final:
         projection.pending.append(projection.event.model_dump_json().encode())
         return
+    recorded = _checkout_status(data.checkout_status)
+    if recorded is None and matches:
+        recorded = _adoption_checkout(matches[-1])
     attrs = p.AdoptionAttrs(
         candidate=data.revision if data.selection == "candidate" else None,
         selection=enum_value(p.Selection, data.selection),
         settlement_id=data.settlement_id,
+        checkout_status=recorded,
     )
     if not matches:
         unattributed(projection, attrs)

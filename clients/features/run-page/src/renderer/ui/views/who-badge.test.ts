@@ -20,6 +20,7 @@ function record(span: string, model: string | null, harness: string | null): Usa
     harness,
     model,
     reasoning_effort: null,
+    client: null,
     harness_version: null,
     started_at: null,
     ended_at: '2026-10-01T01:00:00Z',
@@ -32,6 +33,14 @@ function record(span: string, model: string | null, harness: string | null): Usa
 const NAMES: ModelNames = new Map([['claude-sonnet-5-5', 'Sonnet 5.5']]);
 
 describe('who ran a turn', () => {
+  test('a scripted turn says scripted and not the configured model', () => {
+    const who = whoBySpan([
+      {...record('turn-a', 'configured-model', 'codex'), client: 'scripted'},
+    ]).get('turn-a');
+    expect(whoWords(who)).toBe('scripted');
+    expect(whoBadge(who)?.label).toBe('scripted');
+  });
+
   test('reads a model by its display name on the badge and in words', () => {
     const who = whoBySpan([record('turn-a', 'claude-sonnet-5-5', 'claude')], NAMES).get('turn-a');
     expect(whoWords(who)).toBe('Sonnet 5.5 on claude');
@@ -57,7 +66,7 @@ describe('who ran a turn', () => {
       const model = random.pick(models);
       const harness = random.pick(['claude', 'codex']);
       const who = whoBySpan([record('t', model, harness)], names).get('t');
-      expect(who).toEqual({harness, model: names.get(model) ?? model});
+      expect(who).toEqual({client: null, harness, model: names.get(model) ?? model});
     }
   });
 });

@@ -68,7 +68,12 @@ class RunLogTee:
         self._history = history
         self._state: MappingState | None = None
         self._live = checkout is not None
+        self._project_root = ""
         self._tree_hash, self._dirty = ("", False) if checkout is None else checkout
+
+    def remember_project_root(self, project_root: str) -> None:
+        """Record the canonical project root before the first event is mirrored."""
+        self._project_root = project_root
 
     def publish_successor(self, at: datetime) -> None:
         """Publish this live writer's epoch before any later observation.
@@ -91,7 +96,10 @@ class RunLogTee:
 
     def _initialize(self, at: datetime) -> MappingState:
         state = MappingState(
-            self._run_id, vibesys_version=version("vibesys"), native_intents=self._live
+            self._run_id,
+            vibesys_version=version("vibesys"),
+            native_intents=self._live,
+            project_root=self._project_root,
         )
         for historical in self._history():
             result = map_event(state, historical)

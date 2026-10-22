@@ -85,7 +85,7 @@ from server.transport.websocket import WebSocketGateway
 from server.transport.websocket import (
     browser_origin as browser_origin,  # noqa: PLC0414  # lint-waiver: LW-101108 [PLC0414]; re-export the browser-origin parser through the allowed runtime composition boundary, so the launcher validates `--web-origin` against the one definition the gateway enforces
 )
-from vibesys.api import ConfigurationError, RunStopped, StopMode, relaunch
+from vibesys.api import ConfigurationError, RunReady, RunStopped, StopMode, relaunch
 from vs_sim.api import Signals
 
 if TYPE_CHECKING:
@@ -336,7 +336,15 @@ class ServerRuntime:
             session = handle.session
             session.on_committed_view(self.api.observe_committed_state)
 
-            session.on_ready(partial(self.integration.handle_run_ready, session))
+            def publish_opened_root(ready: RunReady) -> None:
+                if self.observer is not None:
+                    self.observer.resolved(
+                        project_root=ready.project_root,
+                        task=request.input_bundle.task_name,
+                    )
+                self.integration.handle_run_ready(session, ready)
+
+            session.on_ready(publish_opened_root)
             with self.condition:
                 self.handle = handle
                 self.session = session

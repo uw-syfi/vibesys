@@ -1,5 +1,5 @@
 /** Skeleton readings are projected into the existing Run screen props; seeking is local. */
-import type {HostRun} from '@vibesys/hosts';
+import {type HostRun, recordedProjectRoot} from '@vibesys/hosts';
 import {observeRun, type RunLivenessHint, type Skeleton, seekSkeleton} from '@vibesys/run-skeleton';
 import {agentGraph} from '@vibesys/run-state/agents';
 import {candidateTree} from '@vibesys/run-state/candidates';
@@ -13,6 +13,16 @@ import {settleIdeas} from './settled-ideas.js';
 import {duration} from './span-reading.js';
 
 export {skeletonPositions} from '@vibesys/run-state/skeleton';
+
+/** The absolute project root an epoch header recorded, latest one that has it. */
+export function recordedRunRoot(skeleton: Skeleton | undefined) {
+  if (skeleton === undefined) return undefined;
+  for (let index = skeleton.epochs.length - 1; index >= 0; index -= 1) {
+    const root = recordedProjectRoot(skeleton.epochs[index]?.epoch?.projectRoot);
+    if (root !== undefined) return root;
+  }
+  return undefined;
+}
 
 export function projectSkeleton(skeleton: Skeleton, seq: bigint, objectiveText = ''): RunModel {
   const reading = readSkeleton(skeleton, seekSkeleton(skeleton, seq), objectiveText);
@@ -56,7 +66,7 @@ export function skeletonScreenState(
       : {
           id: seed.identity.runId,
           runId: seed.identity.runId,
-          projectRoot: seed.title.project,
+          projectRoot: recordedRunRoot(skeleton) ?? '',
           phase: status,
           status,
           paused: status === 'paused' ? 'user' : null,

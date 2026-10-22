@@ -31,6 +31,8 @@ class RunReady(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, arbitrary_types_allowed=True)
 
     record: RunRecord
+    project_root: Path
+    """The opened project's root. Callers read this field and do not canonicalize it again."""
     log_directory: Path
     frontend_state_directory: Path
     agent_provider: str

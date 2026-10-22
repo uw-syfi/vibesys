@@ -237,6 +237,7 @@ export function IdeaView(props: IdeaViewProps): JSX.Element {
         tokens={props.tokens}
         who={props.who}
         pauses={props.model.pauses}
+        {...(props.adoptionTitles === undefined ? {} : {adoptionTitles: props.adoptionTitles})}
         zoom={zoom}
         size="default"
       />
@@ -254,6 +255,8 @@ export interface StepListProps {
   readonly who: WhoBySpan;
   /** Where turns were stopped on a capacity limit, left out of each step's duration. */
   readonly pauses: readonly QuotaPauseSpan[];
+  /** Adoption span id to the headline the records name, including a checkout skip. */
+  readonly adoptionTitles?: ReadonlyMap<string, string>;
   readonly zoom: Zoom;
 }
 
@@ -297,6 +300,11 @@ function tookOf(step: CandidateStep, pauses: readonly QuotaPauseSpan[]): string 
   return step.endedAt === null ? undefined : workedWords(pauses, step.startedAt, step.endedAt);
 }
 
+function headlineOf(step: CandidateStep, titles: ReadonlyMap<string, string> | undefined): string {
+  const recorded = step.kind === 'adoption' ? titles?.get(step.span) : undefined;
+  return recorded ?? stepTitle(step);
+}
+
 function StepRows(props: {
   readonly steps: readonly CandidateStep[];
   readonly label: string;
@@ -304,6 +312,7 @@ function StepRows(props: {
   readonly tokens: TokenLedger;
   readonly who: WhoBySpan;
   readonly pauses: readonly QuotaPauseSpan[];
+  readonly adoptionTitles?: ReadonlyMap<string, string>;
   readonly zoom: Zoom;
   readonly size: 'default' | 'fill';
 }): JSX.Element {
@@ -326,7 +335,7 @@ function StepRows(props: {
         const name = step.role === null ? plain(step.kind) : stepLabel(step);
         // Every row reads alike: its mark, its name (the role, or the kind for a gate), then the
         // step's headline after it when it has one beyond the name.
-        const headline = stepTitle(step);
+        const headline = headlineOf(step, props.adoptionTitles);
         const titled = headline !== '' && headline !== name;
         const measure = cells[index] ?? null;
         return (
@@ -359,6 +368,7 @@ export function StepList(props: StepListProps): JSX.Element {
       tokens={props.tokens}
       who={props.who}
       pauses={props.pauses}
+      {...(props.adoptionTitles === undefined ? {} : {adoptionTitles: props.adoptionTitles})}
       zoom={props.zoom}
       size="fill"
     />

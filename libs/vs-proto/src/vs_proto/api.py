@@ -58,6 +58,7 @@ from vs_proto._generated.vibesys.core.v1 import failures_pb as core_failures
 from vs_proto._generated.vibesys.core.v1 import leaves_pb as core_leaves
 from vs_proto._generated.vibesys.core.v1 import value_options_pb as core_value_options
 from vs_proto._generated.vibesys.core.v1 import vocabulary_pb as core_vocabulary
+from vs_proto._generated.vibesys.core.v1.vocabulary_pb import CheckoutStatus
 from vs_proto._generated.vibesys.host.v1 import admission_receipt_generated_pb as admission
 from vs_proto._generated.vibesys.host.v1 import operation_options_pb as operation_options
 from vs_proto._generated.vibesys.host.v1 import operations_pb as host_payloads
@@ -91,6 +92,7 @@ from vs_proto._generated.vibesys.search.v1.run_pb import (
 )
 from vs_proto._generated.vibesys.store.v1 import replay_pb as replay
 from vs_proto._generated.vibesys.store.v1.agent_attrs_pb import (
+    AgentClient,
     AgentTurnAttrs,
     TokenUsage,
 )
@@ -216,6 +218,7 @@ __all__ = [
     "STORE_SCHEMA_HASH",
     "AcceptedRequest",
     "AdoptionAttrs",
+    "AgentClient",
     "AgentTurnAttrs",
     "Attempt",
     "AttemptOutcome",
@@ -238,6 +241,7 @@ __all__ = [
     "ChatSessionCreated",
     "ChatSteerProposed",
     "ChatToken",
+    "CheckoutStatus",
     "ComparisonAttrs",
     "ComparisonVerdict",
     "ConfigurationFailed",

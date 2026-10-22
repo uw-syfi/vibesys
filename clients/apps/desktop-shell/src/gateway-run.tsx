@@ -3,7 +3,7 @@
 import {useRunIntents} from '@vibesys/feature-run-intents/renderer';
 import type {RunPageAddress} from '@vibesys/feature-run-page/renderer';
 import {type GatewayRunPorts, RunScreen, useGatewayRun} from '@vibesys/feature-run-page/renderer';
-import type {RunPageSeed} from '@vibesys/feature-run-page/state';
+import {type RunPageSeed, recordedRunRoot} from '@vibesys/feature-run-page/state';
 import {useRunSessions} from '@vibesys/feature-run-sessions/renderer';
 import type {GatewayBridge, WelcomeBridge} from '@vibesys/ipc';
 import type {ScheduleTimeout} from '@vibesys/machine';
@@ -44,7 +44,7 @@ export function GatewayRun(props: {
   const page = useGatewayRun({seed, ports, schedule, address});
   const {snapshot} = page;
   const observation = observationOf(snapshot.context.load?.skeleton);
-  const projectRoot = seed.title.project;
+  const projectRoot = recordedRunRoot(snapshot.context.load?.skeleton);
   const intents = useRunIntents({
     bridge,
     host: seed.identity.host,
@@ -59,8 +59,8 @@ export function GatewayRun(props: {
     host: seed.identity.host,
     runId: seed.identity.runId,
     sessionId: 'default',
-    projectRoot,
-    enabled: snapshot.matches('active') && projectRoot !== '',
+    projectRoot: projectRoot ?? '',
+    enabled: snapshot.matches('active') && projectRoot !== undefined,
     schedule,
     steerBusy: intents.busy,
     sendSteer: proposal =>
@@ -68,7 +68,7 @@ export function GatewayRun(props: {
         type: 'send',
         request: proposalIntent(
           {
-            ...runReference(projectRoot, seed.identity.runId),
+            ...runReference(projectRoot ?? '', seed.identity.runId),
             requestId: crypto.randomUUID(),
             expectedEpoch: observation?.epoch ?? 0n,
           },

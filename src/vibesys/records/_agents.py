@@ -53,6 +53,18 @@ def update_turn(projection: Projection, span: p.Span, attrs: p.AgentTurnAttrs) -
     projection.span(span)
 
 
+def _record_client(attrs: p.AgentTurnAttrs, data: e.AgentExecutionStartedData) -> None:
+    """Copy the selection the turn recorded, and which client executed it."""
+    if data.client == "scripted":
+        attrs.client = p.AgentClient.SCRIPTED
+    elif data.client == "provider":
+        attrs.client = p.AgentClient.PROVIDER
+    for name in ("stage", "attempt", "provider", "model", "reasoning_effort", "harness_version"):
+        value = getattr(data, name)
+        if value is not None:
+            setattr(attrs, name, value)
+
+
 def started(projection: Projection) -> None:
     data = projection.event.data
     if not isinstance(data, e.AgentExecutionStartedData):
@@ -60,10 +72,7 @@ def started(projection: Projection) -> None:
         raise TypeError(message)
     span, attrs = turn(projection)
     attrs.started_at = p.Timestamp.from_datetime(projection.event.timestamp)
-    for name in ("stage", "attempt", "provider", "model", "reasoning_effort", "harness_version"):
-        value = getattr(data, name)
-        if value is not None:
-            setattr(attrs, name, value)
+    _record_client(attrs, data)
     update_turn(projection, span, attrs)
     for role in ("system_prompt", "user_prompt"):
         projection.attach(span.id, role, getattr(data, role))

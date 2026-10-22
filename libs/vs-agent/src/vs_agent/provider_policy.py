@@ -63,6 +63,50 @@ def harnesses() -> tuple[Harness, ...]:
     )
 
 
+ALLOWED_MODELS_SETTING = "allowed_models"
+"""The host-settings key that names the models a live run on this host may use.
+
+An empty value, or a missing file, means the host sets no restriction.
+"""
+
+
+class ModelNotAllowedError(ValueError):
+    """A live run's model is outside the host's allowed set.
+
+    ``setting`` is the host-settings key, ``role`` the role whose model it is
+    (``None`` for the run's own model), ``model`` the refused id, and
+    ``allowed`` the set the host named.
+    """
+
+    def __init__(self, *, role: str | None, model: str, allowed: frozenset[str]) -> None:
+        """Name the setting, the role, the model, and the allowed set."""
+        self.setting = ALLOWED_MODELS_SETTING
+        self.role = role
+        self.model = model
+        self.allowed = tuple(sorted(allowed))
+        whose = "the run" if role is None else f"role {role}"
+        listed = ", ".join(self.allowed) if self.allowed else "none"
+        super().__init__(
+            f"{self.setting}: model {model!r} for {whose} is outside the allowed set; "
+            f"allowed models: {listed}"
+        )
+
+    def at_role(self, role: str | None) -> ModelNotAllowedError:
+        """This refusal, naming ``role`` when it does not already name one."""
+        if role is None or self.role is not None:
+            return self
+        return ModelNotAllowedError(role=role, model=self.model, allowed=frozenset(self.allowed))
+
+
+def check_allowed_model(model: str, *, role: str | None, allowed: frozenset[str]) -> None:
+    """Raise :class:`ModelNotAllowedError` when ``allowed`` is set and omits ``model``.
+
+    An empty ``allowed`` is no restriction. The check compares model ids only.
+    """
+    if allowed and model not in allowed:
+        raise ModelNotAllowedError(role=role, model=model, allowed=allowed)
+
+
 class UnvettedHarnessError(ValueError):
     """A provider and model pair outside :func:`harnesses`."""
 

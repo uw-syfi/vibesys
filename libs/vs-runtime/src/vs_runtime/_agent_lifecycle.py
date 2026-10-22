@@ -8,7 +8,7 @@ event stream. Nothing here knows about a run, a journal or a renderer.
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -35,6 +35,7 @@ class AgentExecutionStarted(BaseModel):
     provider: str | None = None
     model: str | None = None
     reasoning_effort: str | None = None
+    client: Literal["scripted", "provider"] | None = None
 
 
 class AgentReply(BaseModel):

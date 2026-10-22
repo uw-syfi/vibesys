@@ -6,12 +6,14 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from vibesys.api.request import ensure_resumable
-from vs_project.api import Project
+from vs_project.api import Project, resume_directory
 from vs_proto.api import Oneof, RelaunchRefusal, RelaunchResponse
 from vs_runlog.api import (
     RunLaunchLockedError,
+    RunLogStopReason,
     assert_run_unlocked,
     exclusive_run_launch,
+    open_run_log,
     read_current_epoch,
 )
 from vs_sim.api import Capture, ProcessOutcome, ProcessSpec
@@ -43,14 +45,19 @@ def relaunch_host(
         return _refused(RelaunchRefusal.EPOCH_CHANGED)
     try:
         with exclusive_run_launch(path):
-            return _launch(request, executable, path, processes, threads)
+            return _launch(request, executable, project.root, processes, threads)
     except RunLaunchLockedError:
         return _refused(RelaunchRefusal.LOCKED)
 
 
 def _launch(
-    request: RelaunchRequest, executable: Path, path: Path, processes: Processes, threads: Threads
+    request: RelaunchRequest,
+    executable: Path,
+    project_root: Path,
+    processes: Processes,
+    threads: Threads,
 ) -> RelaunchResponse:
+    path = Project.run_log_path_for(project_root, request.run_id)
     try:
         assert_run_unlocked(path)
     except RuntimeError:
@@ -59,7 +66,13 @@ def _launch(
     epoch = 0 if current is None else current.number
     if epoch != request.expected_epoch:
         return _refused(RelaunchRefusal.EPOCH_CHANGED)
-    ensure_resumable(Path(request.project_root), request.run_id)
+    root = resume_directory(
+        _recorded_root(path),
+        str(project_root),
+        base=project_root,
+        home=Path.home(),
+    )
+    ensure_resumable(root, request.run_id)
     deadline = threads.now() + 25
     result = processes.run(
         ProcessSpec(
@@ -69,9 +82,9 @@ def _launch(
                 request.run_id,
                 "--detach",
                 "--project",
-                request.project_root,
+                str(root),
             ),
-            cwd=Path(request.project_root),
+            cwd=root,
             max_output_bytes=65536,
         ),
         timeout=20,
@@ -85,6 +98,22 @@ def _launch(
         message = "detached relaunch failed; inspect the run before retrying"
         raise ValueError(message)
     return _confirm_epoch(path, request.expected_epoch, deadline, threads)
+
+
+def _recorded_root(path: Path) -> str | None:
+    """The project root the latest epoch header recorded, if it recorded one."""
+    found: str | None = None
+    with open_run_log(path) as reader:
+        for record in reader:
+            body = record.body
+            if body is None or body.field != "epoch_started":
+                continue
+            root = body.value.project_root
+            if root:
+                found = root
+        if reader.stop.reason == RunLogStopReason.CORRUPTION:
+            raise ValueError(reader.stop.detail)
+    return found
 
 
 def _confirm_epoch(
