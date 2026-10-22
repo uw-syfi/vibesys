@@ -12,7 +12,7 @@ import {
   TailResponseSchema,
   WatchRunsResponseSchema,
 } from '@vibesys/proto';
-import type {RunLivenessHint} from '@vibesys/run-skeleton';
+import {foldSkeleton, observeRun, type RunLivenessHint, seedSkeleton} from '@vibesys/run-skeleton';
 import {FakeSkeletonCache} from '@vibesys/run-skeleton/cache';
 import {gatewayReader} from '@vibesys/run-skeleton/reader';
 import {FakeRunTransport} from '@vibesys/run-skeleton/testing';
@@ -57,31 +57,67 @@ test('a finite UTF-8 stream rejects a torn final codepoint instead of silently l
   ).rejects.toThrow();
 });
 
-test('writer heads retain their canonical epoch even without process metadata', async () => {
-  const transport = new FakeRunTransport({records: []});
-  const head = create(RunHeadSchema, {epoch: 7, committedSeq: 2n, objective: {bestValue: 321}});
-  transport.observe(
-    create(WatchRunsResponseSchema, {runId: 'run-a', head, liveness: RunLiveness.INTERRUPTED}),
-  );
-  const reader = gatewayReader(transport, new FakeSkeletonCache(), new FakeClock().schedule);
-  let stop = () => {};
-  try {
-    const hint = await new Promise<RunLivenessHint>(resolve => {
-      stop = reader.watch('run-a', (_load, _failed, observed) => {
-        if (observed?.head) resolve(observed);
+for (const epoch of [1, 7, 4294967295])
+  for (const format of ['canonical', 'process', 'both', 'conflicting', 'absent'] as const)
+    test(`released writer observations preserve the epoch fence (${epoch}, ${format})`, async () => {
+      const transport = new FakeRunTransport({records: []});
+      const head = create(RunHeadSchema, {
+        ...(format === 'process' || format === 'absent' ? {} : {epoch}),
+        ...(format === 'process' || format === 'both' || format === 'conflicting'
+          ? {process: {epoch: format === 'conflicting' ? epoch - 1 : epoch}}
+          : {}),
+        committedSeq: 2n,
+        objective: {bestValue: 321},
       });
+      transport.observe(
+        create(WatchRunsResponseSchema, {runId: 'run-a', head, liveness: RunLiveness.INTERRUPTED}),
+      );
+      const reader = gatewayReader(transport, new FakeSkeletonCache(), new FakeClock().schedule);
+      let stop = () => {};
+      try {
+        const hint = await new Promise<RunLivenessHint>(resolve => {
+          stop = reader.watch('run-a', (_load, _failed, observed) => {
+            if (observed?.head) resolve(observed);
+          });
+        });
+        expect(hint.epoch).toBe(format === 'absent' ? 0 : epoch);
+        expect(hint.head).toEqual(head);
+        for (const paused of [false, true]) {
+          const skeleton = foldSkeleton(seedSkeleton(), [
+            create(RecordSchema, {
+              seq: 1n,
+              epoch,
+              body: {case: 'epochStarted', value: {runId: 'run-a', epoch}},
+            }),
+            create(RecordSchema, {
+              seq: 2n,
+              epoch,
+              body: {
+                case: 'lifecycle',
+                value: {
+                  state: {
+                    case: 'running',
+                    value: paused ? {hold: {reason: {case: 'operator', value: {}}}} : {},
+                  },
+                },
+              },
+            }),
+          ]);
+          expect(observeRun(skeleton, {...hint, value: RunLiveness.ALIVE}).interrupted).toBe(false);
+          expect(observeRun(skeleton, hint).interrupted).toBe(format !== 'absent');
+          expect(observeRun(skeleton, {...hint, epoch: epoch - 1}).interrupted).toBe(false);
+          expect(observeRun(skeleton, {...hint, epoch: epoch + 1}).interrupted).toBe(false);
+          expect(observeRun(skeleton).lifecycle?.state.case).toBe('running');
+        }
+      } finally {
+        stop();
+      }
+      expect(
+        transport.calls
+          .filter(call => !call.method.endsWith('Skeleton') && !call.method.endsWith('GetBlobs'))
+          .every(call => call.signal.aborted),
+      ).toBe(true);
     });
-    expect(hint.epoch).toBe(7);
-    expect(hint.head).toEqual(head);
-  } finally {
-    stop();
-  }
-  expect(
-    transport.calls
-      .filter(call => !call.method.endsWith('Skeleton') && !call.method.endsWith('GetBlobs'))
-      .every(call => call.signal.aborted),
-  ).toBe(true);
-});
 
 test('UTF-8 tails preserve absolute byte offsets when reopened at any decoded boundary', async () => {
   const text = 'aé中😀\nlast';

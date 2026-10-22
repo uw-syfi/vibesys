@@ -206,5 +206,7 @@ export function gatewayReader(
 }
 
 function observedEpoch(response: WatchRunsResponse): number {
-  return response.head?.epoch ?? 0;
+  // Phase 1 heads omit the canonical epoch (proto3 decodes it as zero).
+  // Preserve their process epoch for fencing; liveness still comes from the gateway's lock probe.
+  return response.head?.epoch || response.head?.process?.epoch || 0;
 }
