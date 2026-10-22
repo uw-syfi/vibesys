@@ -373,13 +373,10 @@ jobs:
       # legible failure in minutes instead of a job that burns hours.
       - name: Install managed-candidate containment dependency
         if: contains(fromJSON(needs.changes.outputs.native_targets), 'resources/evaluators/microservice')
-        timeout-minutes: 10
-        env:
-          DEBIAN_FRONTEND: noninteractive
-          NEEDRESTART_MODE: a
+        timeout-minutes: 3
         run: |
-          sudo apt-get update
-          sudo apt-get install -y bubblewrap
+          sudo -n env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a timeout --kill-after=5s 60s apt-get -o Acquire::Retries=0 -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 -o DPkg::Lock::Timeout=10 update
+          sudo -n env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a timeout --kill-after=5s 60s apt-get -o Acquire::Retries=0 -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 -o DPkg::Lock::Timeout=10 install -y bubblewrap
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
 
       - name: Set up Rust
@@ -937,13 +934,10 @@ jobs:
       # instead of failing, and an unbounded step reports nothing while it
       # burns the job's budget.
       - name: Install bubblewrap
-        timeout-minutes: 10
-        env:
-          DEBIAN_FRONTEND: noninteractive
-          NEEDRESTART_MODE: a
+        timeout-minutes: 3
         run: |
-          sudo apt-get update
-          sudo apt-get install -y bubblewrap dbus-user-session
+          sudo -n env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a timeout --kill-after=5s 60s apt-get -o Acquire::Retries=0 -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 -o DPkg::Lock::Timeout=10 update
+          sudo -n env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a timeout --kill-after=5s 60s apt-get -o Acquire::Retries=0 -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 -o DPkg::Lock::Timeout=10 install -y bubblewrap dbus-user-session
           # Ubuntu 24.04 restricts unprivileged user namespaces via AppArmor;
           # relax it so bwrap can create the namespace on the runner.
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
@@ -1040,9 +1034,10 @@ jobs:
       # The host-side job confinement the tier exercises needs bubblewrap; see
       # the sandbox-linux job for why the AppArmor userns restriction is lifted.
       - name: Install bubblewrap
+        timeout-minutes: 3
         run: |
-          sudo apt-get update
-          sudo apt-get install -y bubblewrap
+          sudo -n env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a timeout --kill-after=5s 60s apt-get -o Acquire::Retries=0 -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 -o DPkg::Lock::Timeout=10 update
+          sudo -n env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a timeout --kill-after=5s 60s apt-get -o Acquire::Retries=0 -o Acquire::http::Timeout=15 -o Acquire::https::Timeout=15 -o DPkg::Lock::Timeout=10 install -y bubblewrap
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
 
       - name: Install uv

@@ -3,13 +3,13 @@ description: >-
   Node, a cached pnpm binary and store, the cached Electron binary, verified
   Bun, uv with the Python dev environment, the `clients/` workspace install,
   and Go for repoctl. Every client job of test.yml starts from this, so the
-  legs cannot drift apart. Set `playwright` to install cached Chromium and
-  its Ubuntu packages for end-to-end jobs.
+  legs cannot drift apart. Set `playwright` to install cached Chromium using
+  the runner-provided system libraries for end-to-end jobs.
 
 inputs:
   playwright:
     description: >-
-      Install the cached Chromium browser and its Ubuntu packages. Client
+      Install the cached Chromium browser using the runner system libraries. Client
       end-to-end jobs set this; other client jobs leave it off.
     required: false
     default: "false"
@@ -130,9 +130,8 @@ runs:
       working-directory: clients
       run: echo "version=$(pnpm --filter @vibesys/app-desktop-main exec playwright --version | awk '{print $2}')" >> "$GITHUB_OUTPUT"
 
-    # The browser download only. The system libraries come from apt and are
-    # not cached. Keyed on the Playwright version, same as before this lived
-    # in the end-to-end job.
+    # Ubuntu runners already provide Chromium runtime libraries and Xvfb.
+    # Cache the browser separately by the resolved Playwright version.
     - name: Cache the Playwright browsers
       if: inputs.playwright == 'true'
       uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -145,15 +144,8 @@ runs:
       shell: bash
       working-directory: clients
       run: |
-        # Drop the hosted runner's packages.microsoft.com apt source before
-        # Playwright refreshes every source. That list 403s and fails its
-        # signature check, and the packages we need are in the Ubuntu archive.
-        mapfile -t microsoft_sources < <(
-          grep -lR 'packages.microsoft.com' /etc/apt/sources.list /etc/apt/sources.list.d \
-            2>/dev/null || true
-        )
-        if ((${#microsoft_sources[@]} > 0)); then
-          sudo rm -f "${microsoft_sources[@]}"
-        fi
+        # The green clients-e2e job 119777039202 confirmed runtime libraries
+        # were preinstalled; apt only added fonts and upgraded existing packages.
+        # Avoid refreshing and downloading those packages on every e2e shard.
         bash "$GITHUB_WORKSPACE/.github/actions/setup-clients/retry-download.sh" \
-          pnpm --filter @vibesys/app-desktop-main exec playwright install --with-deps chromium
+          timeout --kill-after=5s 60s pnpm --filter @vibesys/app-desktop-main exec playwright install chromium
