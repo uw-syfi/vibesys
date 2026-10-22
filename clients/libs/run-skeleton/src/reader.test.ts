@@ -1,6 +1,17 @@
 import {expect, test} from 'bun:test';
-import {create} from '@bufbuild/protobuf';
-import {RunHeadSchema, RunLiveness, WatchRunsResponseSchema} from '@vibesys/proto';
+import {readFileSync} from 'node:fs';
+import {gunzipSync} from 'node:zlib';
+import {create, fromBinary, toBinary} from '@bufbuild/protobuf';
+import {
+  RecordSchema,
+  RunHeadSchema,
+  RunLiveness,
+  SkeletonRequestSchema,
+  SkeletonResponseSchema,
+  TailRequestSchema,
+  TailResponseSchema,
+  WatchRunsResponseSchema,
+} from '@vibesys/proto';
 import type {RunLivenessHint} from '@vibesys/run-skeleton';
 import {FakeSkeletonCache} from '@vibesys/run-skeleton/cache';
 import {gatewayReader} from '@vibesys/run-skeleton/reader';
@@ -99,4 +110,38 @@ test('UTF-8 tails preserve absolute byte offsets when reopened at any decoded bo
     expect(chunks.at(-1)?.next).toBe(data.length);
     offset += new TextEncoder().encode(character).length;
   }
+});
+
+test('the retained conversion corpus obeys gateway byte bounds and continues through Tail', async () => {
+  const root = new URL('../../../../proto/testdata/conversion/', import.meta.url);
+  const values: string[] = JSON.parse(
+    gunzipSync(readFileSync(new URL('records.base64.json.gz', root))).toString(),
+  );
+  const records = values.map(value =>
+    fromBinary(RecordSchema, Uint8Array.from(Buffer.from(value, 'base64'))),
+  );
+  const transport = new FakeRunTransport({records});
+  const abort = new AbortController();
+  const first = await transport.unary(
+    '/vibesys.api.v1.HostService/Skeleton',
+    toBinary(SkeletonRequestSchema, create(SkeletonRequestSchema, {runId: 'run-1'})),
+    abort.signal,
+  );
+  expect(first.byteLength).toBeLessThanOrEqual(1 << 20);
+  const prefix = fromBinary(SkeletonResponseSchema, first);
+  expect(prefix.complete).toBe(false);
+  expect(prefix.records.length).toBeGreaterThan(0);
+  let count = 0;
+  for await (const bytes of transport.stream(
+    '/vibesys.api.v1.HostService/Tail',
+    toBinary(TailRequestSchema, create(TailRequestSchema, {runId: 'run-1', fromSeq: 1n})),
+    abort.signal,
+  )) {
+    expect(bytes.byteLength).toBeLessThanOrEqual(1 << 20);
+    const response = fromBinary(TailResponseSchema, bytes);
+    count += response.records.length;
+    if (response.throughSeq === records.at(-1)?.seq) abort.abort();
+  }
+  expect(count).toBe(records.length);
+  expect(transport.activeStreams).toBe(0);
 });
