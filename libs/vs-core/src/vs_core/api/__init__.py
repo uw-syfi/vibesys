@@ -8,6 +8,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from vs_core.api._exports import EXPORT_MODULES as _EXPORT_MODULES
+from vs_core.api.values import AdoptionPublication, CheckoutStatus, CheckoutUpdate
 
 if TYPE_CHECKING:
     from vs_core._attempt_track import AttemptTrack, Step
@@ -1177,6 +1178,7 @@ __all__ = [
     "AdoptionFenceLifted",
     "AdoptionFinished",
     "AdoptionObserved",
+    "AdoptionPublication",
     "AdoptionRequest",
     "AdoptionResult",
     "AdoptionView",
@@ -1248,6 +1250,8 @@ __all__ = [
     "ChargeId",
     "ChargeKind",
     "ChargeReceipt",
+    "CheckoutStatus",
+    "CheckoutUpdate",
     "Checkpoint",
     "CheckpointDecline",
     "CheckpointDeclined",
