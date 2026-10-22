@@ -13,10 +13,10 @@ import {
   AgentClient,
   AgentTurnAttrsSchema,
   Change,
+  CheckoutStatus,
   EpochStartedSchema,
   RecordSchema,
   RuntimeType,
-  CheckoutStatus,
   Selection,
   SpanStatus,
 } from '@vibesys/proto';

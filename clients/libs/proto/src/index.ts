@@ -30,8 +30,8 @@ export {
   type WatchRunsResponse,
   WatchRunsResponseSchema,
 } from './generated/vibesys/api/v1/host_pb.js';
-export * from './generated/vibesys/search/v1/attrs_pb.js';
 export {CheckoutStatus} from './generated/vibesys/core/v1/vocabulary_pb.js';
+export * from './generated/vibesys/search/v1/attrs_pb.js';
 export * from './generated/vibesys/store/v1/agent_attrs_pb.js';
 export * from './generated/vibesys/store/v1/chat_pb.js';
 export * from './generated/vibesys/store/v1/common_pb.js';
