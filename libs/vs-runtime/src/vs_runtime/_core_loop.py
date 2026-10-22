@@ -49,6 +49,7 @@ from vs_core.api import (
     encode_json,
     orphan_waits,
     pause_withdraws,
+    permit_for_request,
     run_view,
     share_unchanged,
     step,
@@ -1140,12 +1141,14 @@ class CoreRuntime[S: StrategyState]:
             raise ContractError(
                 ("dispatch_authorized",), "exact canonical request must be durably authorized"
             )
+        core = self.record.envelope.core
         context = ExecutionContext(
             fence=self.record.envelope.fence,
             now_at=now_at,
             payload_digest=record.payload_digest,
             until=authorized_record.until,
             lease=_ShellLease(self),
+            permit=permit_for_request(core, authorized_record.request),
         )
         self._authorizations += 1
         return _Flight(

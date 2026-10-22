@@ -41,11 +41,11 @@ from vs_core.api import (
     SessionPhase,
     StopMode,
     TurnHeld,
+    admitted_work_remains,
     capacity_wait_stands,
     control_refusal,
     escalate_stop,
     pause_after,
-    pending_requests,
     requested_stop_mode,
     run_pause,
     stands_after,
@@ -895,10 +895,10 @@ class RunControlBridge:
         control core refused is refused (``_refuse``) with core's reason, so none waits for a
         poll that a run that just ended never makes.
 
-        Core takes no new work while paused, but admitted work drains first. ``running``
-        covers local calls; the durable outbox and owned jobs also cover requests waiting
-        for a retry or an external job's next poll. Report the pause only after all of them
-        settle, once per stretch of committed ``PAUSED`` status.
+        Core takes no new work while paused, but work that holds a permit drains first.
+        ``running`` is a local call that has not returned; unfinished requests and owned
+        jobs are the permit's remaining holders. Report the pause only when none remain,
+        once per stretch of committed ``PAUSED`` status.
         """
         for error in refused:
             change = self._asked.get(error.control.control_id)
@@ -948,14 +948,7 @@ class RunControlBridge:
         self._stands = capacity_wait_stands(core.run)
         if core.run.status != RunStatus.PAUSED:
             self._landed = False
-        elif (
-            not running
-            and not self._landed
-            and not pending_requests(core.records)
-            and all(
-                job.terminal for job in (*core.evaluation.jobs, *core.evaluation.registered_jobs)
-            )
-        ):
+        elif not self._landed and not admitted_work_remains(core, running=running):
             self._landed = True
             self._channel.land_pause()
 

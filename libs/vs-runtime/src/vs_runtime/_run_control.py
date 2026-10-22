@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Literal, Protocol
 from pydantic import BaseModel, ConfigDict, model_validator
 
 from vs_agent.api import AgentExecutionCancelledError
-from vs_core.api import PauseOwner, RunPause, StopMode, escalate_stop
+from vs_core.api import PauseOwner, RunPause, StopMode, TurnPermit, escalate_stop
 from vs_runtime._operator_control import (
     ControlAction,
     PauseNowRequest,
@@ -514,20 +514,35 @@ class RunControlChannel(Protocol):
         """
         ...
 
-    def prepare_evaluation(self, resource_id: str, scope: Scope) -> None:
-        """Identify an evaluation requested by an admitted turn, rather than the strategy."""
+    def prepare_evaluation(
+        self, resource_id: str, scope: Scope, permit: TurnPermit | None = None
+    ) -> None:
+        """Identify an evaluation requested by an admitted turn, rather than the strategy.
+
+        ``permit`` is the logical-turn permit core issued. The drain gate checks it
+        and does not decide admission itself.
+        """
         ...
 
     def evaluation_is_dependency(self, resource_id: str) -> bool:
         """Whether an executing turn still owns this evaluation dependency."""
         ...
 
-    def prepare_execution(self, execution_id: str, scope: Scope) -> None:
-        """Associate the turn's execution identity with its declared owner."""
+    def prepare_execution(
+        self, execution_id: str, scope: Scope, permit: TurnPermit | None = None
+    ) -> None:
+        """Associate the turn's execution identity with its declared owner.
+
+        ``permit`` is the logical-turn permit core issued for this execution.
+        """
         ...
 
     def finish_execution(self, execution_id: str) -> None:
         """Release the authority of a turn that finished executing."""
+        ...
+
+    def holds_permit(self, key: str) -> bool:
+        """Whether ``key`` was prepared with a logical-turn permit core issued."""
         ...
 
     def start_execution(
@@ -537,7 +552,12 @@ class RunControlChannel(Protocol):
         execution_id: str | None = None,
         evaluation_id: str | None = None,
     ) -> None:
-        """Publish a dispatch under the same lock as the pause drain."""
+        """Publish a dispatch under the same lock as the pause drain.
+
+        After the drain closes execution, a start is allowed only when its
+        execution or evaluation was prepared with a permit. The channel does
+        not decide which work was admitted.
+        """
         ...
 
     @property
@@ -725,6 +745,7 @@ class RuntimeRunControlChannel:
         self._capacity_standing = False
         self._stop_listeners: list[Callable[[], object]] = []
         self._execution_closed = False
+        self._permits: dict[str, TurnPermit] = {}
         self._prepared_executions: dict[str, Scope] = {}
         self._evaluation_dependencies: dict[str, frozenset[str]] = {}
         self._executing: dict[str, Scope] = {}
@@ -741,13 +762,22 @@ class RuntimeRunControlChannel:
         self._resume_at: float | None = None
         self._resumed_by = PauseWake.RESUMED
 
-    def prepare_evaluation(self, resource_id: str, scope: Scope) -> None:
-        """Capture the executing callers once; a later turn cannot inherit their queued jobs."""
+    def prepare_evaluation(
+        self, resource_id: str, scope: Scope, permit: TurnPermit | None = None
+    ) -> None:
+        """Capture the executing callers once; a later turn cannot inherit their queued jobs.
+
+        A permit is recorded only on the first prepare. A later turn cannot attach
+        its permit to an evaluation an earlier turn already requested.
+        """
         with self._lock:
+            first = resource_id not in self._evaluation_dependencies
             self._evaluation_dependencies.setdefault(
                 resource_id,
                 frozenset(key for key, owner in self._executing.items() if owner == scope),
             )
+            if first and permit is not None:
+                self._permits[resource_id] = permit
 
     def evaluation_is_dependency(self, resource_id: str) -> bool:
         """A turn that requested this evaluation must still be executing."""
@@ -755,10 +785,19 @@ class RuntimeRunControlChannel:
             owners = self._evaluation_dependencies.get(resource_id, frozenset())
             return not self._stop_requested and not owners.isdisjoint(self._executing)
 
-    def prepare_execution(self, execution_id: str, scope: Scope) -> None:
+    def prepare_execution(
+        self, execution_id: str, scope: Scope, permit: TurnPermit | None = None
+    ) -> None:
         """Associate dispatch identity with its declared owner before preparation ends."""
         with self._lock:
             self._prepared_executions[execution_id] = scope
+            if permit is not None:
+                self._permits[execution_id] = permit
+
+    def holds_permit(self, key: str) -> bool:
+        """Whether ``key`` was prepared with a logical-turn permit."""
+        with self._lock:
+            return key in self._permits
 
     def finish_execution(self, execution_id: str) -> None:
         """Release this execution's dependency authority after the provider returns."""
@@ -773,11 +812,12 @@ class RuntimeRunControlChannel:
         execution_id: str | None = None,
         evaluation_id: str | None = None,
     ) -> None:
-        """Publish dispatch atomically with the pause drain, preserving live dependencies."""
+        """Publish dispatch atomically with the pause drain, when its permit says so."""
         with self._lock:
             allowed = not self._stop_requested and not self._execution_closed
-            if execution_id is None and evaluation_id is not None:
-                allowed = allowed or self.evaluation_is_dependency(evaluation_id)
+            if not allowed and not self._stop_requested:
+                key = execution_id if execution_id is not None else evaluation_id
+                allowed = key is not None and key in self._permits
             if not allowed:
                 message = "pause drain cancelled preparation before execution"
                 raise AgentExecutionCancelledError(message)
@@ -1101,6 +1141,7 @@ class RuntimeRunControlChannel:
             self._execution_closed = True
             if immediate:
                 self._executing.clear()
+                self._permits.clear()
             self._drain_jobs.update(jobs)
             self._emit(RunControlTransitionKind.PARK_REQUESTED)
 

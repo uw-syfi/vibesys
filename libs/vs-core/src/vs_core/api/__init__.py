@@ -150,6 +150,7 @@ if TYPE_CHECKING:
     )
     from vs_core._turn_chain import TurnChain
     from vs_core._turn_holds import held_limit
+    from vs_core._turn_permit import TurnPermit, admitted_work_remains, permit_for_request
     from vs_core._values import EncodingMismatchError, encode_json, share_unchanged, verify_encoding
     from vs_core._waitable import (
         SuspendedTurn,
@@ -839,6 +840,7 @@ _MODULES: dict[str, str] = {
             ),
         ),
         ("vs_core._run_park", "pause_withdraws "),
+        ("vs_core._turn_permit", "TurnPermit admitted_work_remains permit_for_request "),
         (
             "vs_core._run_pause",
             (
@@ -1713,6 +1715,7 @@ __all__ = [
     "TurnHeld",
     "TurnInputsReserved",
     "TurnObserved",
+    "TurnPermit",
     "TurnRequested",
     "TurnResult",
     "TurnSpec",
@@ -1760,6 +1763,7 @@ __all__ = [
     "WorkspaceRequest",
     "YieldFailed",
     "YieldPublicationFailed",
+    "admitted_work_remains",
     "advance",
     "advance_adoption",
     "advance_attempt",
@@ -1814,6 +1818,7 @@ __all__ = [
     "pause_after",
     "pause_withdraws",
     "pending_requests",
+    "permit_for_request",
     "phase_waits",
     "plain_line",
     "policy_of",

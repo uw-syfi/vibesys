@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
 from vs_agent.api import AgentTurnRequest, ClientAgentSessions, MCPServerSpec
-from vs_core.api import Access, InputMode, Scope
+from vs_core.api import Access, InputMode, Scope, TurnPermit
 from vs_prompts.api import TemplateRenderer
 from vs_runtime._artifact_store import ArtifactStoreError
 from vs_runtime._session_lifecycle_requests import SessionLifecycleRequests
@@ -166,6 +166,11 @@ class ProductionSessionResolver:
             for item in source.servers(role, scope)
         )
         return replace(spec, mcp_servers=(*spec.mcp_servers, *extra))
+
+    def hold_permit(self, execution_id: str, scope: Scope, permit: TurnPermit) -> None:
+        """Record the permit core issued before preparation publishes the execution."""
+        if self._inputs.control is not None:
+            self._inputs.control.prepare_execution(execution_id, scope, permit=permit)
 
     def turn_timeout(self, role: RoleId) -> timedelta | None:
         """The role's resolved in-turn timeout; one constant for every turn of the role."""
