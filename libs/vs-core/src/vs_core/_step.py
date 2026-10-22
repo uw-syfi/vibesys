@@ -1845,10 +1845,15 @@ def _resume_epoch(state: CoreState, event: EpochResumed, dispatch: Dispatch) -> 
         state.run.park is not None or state.run.result is not None or stop_standing(state.run)
     )
     successor = event.epoch > previous_epoch
+    control = ControlInput(
+        control_id=ControlId(root=f"epoch:{event.epoch}"), action="resume", when="now"
+    )
     if successor:
         state = state.model_copy(
             update={
-                "run": EpochFacts.of(state.run).new_run(),
+                "run": EpochFacts.of(state.run)
+                .new_run()
+                .model_copy(update={"controls": (control,)}),
                 "scheduling": type(state.scheduling)(
                     queue=state.scheduling.queue,
                     slots=state.scheduling.slots,
@@ -1866,11 +1871,7 @@ def _resume_epoch(state: CoreState, event: EpochResumed, dispatch: Dispatch) -> 
                 "events": (
                     *result.events,
                     StopLiftRecorded(
-                        control=ControlInput(
-                            control_id=ControlId(root=f"epoch:{event.epoch}"),
-                            action="resume",
-                            when="now",
-                        ),
+                        control=control,
                         new_epoch=True,
                     ),
                 )

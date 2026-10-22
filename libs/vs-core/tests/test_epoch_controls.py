@@ -218,6 +218,7 @@ def test_writer_recovery_keeps_pause_authority_until_operator_resume(
     resumed = core.step(state, core.EpochResumed(epoch=epoch + 3, now_at=3))
     assert resumed.state.run.status is core.RunStatus.RUNNING
     assert resumed.state.run.park is None
+    assert [control.action for control in resumed.state.run.controls] == ["resume"]
     assert not resumed.state.scheduling.admission_closed
     assert any(
         isinstance(event, core.StopLiftRecorded) and event.new_epoch for event in resumed.events
@@ -267,4 +268,5 @@ def test_writer_recovery_keeps_the_completed_epoch_and_never_lifts_its_stop(
     resumed = core.step(ended, core.EpochResumed(epoch=epoch + 3, now_at=3))
     assert resumed.state.run.status is core.RunStatus.RUNNING
     assert resumed.state.run.result is None
+    assert [control.action for control in resumed.state.run.controls] == ["resume"]
     assert core.requested_stop_mode(resumed.state.run) is None
