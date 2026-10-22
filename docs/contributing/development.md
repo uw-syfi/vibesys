@@ -339,16 +339,25 @@ command. The wrapper runs the repository's Go tool, so install Go 1.25 first:
 
 ```bash
 ./support/repoctl/repoctl test
+./support/repoctl/repoctl test --checks-only   # quality groups and always-on scripts
 ```
 
-This does not run every CI check. Electron end-to-end tests (`clients_e2e`) are
-CI-only by default: Playwright needs Chromium and its system libraries as well
-as the client and Python environments, so making the normal local command
-acquire or require them would make it unexpectedly heavyweight. Run that group
-explicitly when desktop coverage is needed. Each Playwright run asks the OS for
-a free port for its own server, so parallel runs on one machine do not collide.
-CI splits the group across runners with `VIBESYS_E2E_SHARD=i/N` (for example `2/5`), which
-each app's Playwright config reads; leave it unset to run every spec.
+`repoctl test` runs the groups whose `trigger_job` the change selects, both
+the test groups and the quality groups (`python_quality`, `python_guards`,
+`python_types`, `clients_quality`, `clients_build`), plus the scripts the
+changes job and the doc-checks job run on every pull request. `--checks-only`
+keeps the quality groups and those scripts and leaves the test groups.
+`--dry-run` lists either selection.
+
+This does not run every CI check. A group that cannot run locally sets
+`local_skip` and `--dry-run` prints the reason. Electron end-to-end tests
+(`clients_e2e`) need a display, Chromium, and its system libraries as well as
+the client and Python environments. The real-system tiers need Docker. Run
+`clients_e2e` explicitly when desktop coverage is needed. Each Playwright run
+asks the OS for a free port for its own server, so parallel runs on one machine
+do not collide. CI splits the group across runners with `VIBESYS_E2E_SHARD=i/N`
+(for example `2/5`), which each app's Playwright config reads; leave it unset
+to run every spec.
 
 ```bash
 uv sync --dev
@@ -357,9 +366,9 @@ pnpm --dir clients install --frozen-lockfile
 ./support/repoctl/repoctl run-checks --group clients_e2e
 ```
 
-The CI-only decision is specific to `clients_e2e`. It does not change the
-selection policy for the other check groups without local-selection keys; each
-has its own prerequisites and needs its own policy decision.
+`clients_e2e` and the real-tier groups are the `local_skip` entries. Other
+groups without `include_in_test` or `include_in_checks` are the CI form of a
+suite the local command already runs, or they need artifacts only CI has.
 
 ### Client checks before a push
 

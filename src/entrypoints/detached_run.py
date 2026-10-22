@@ -207,15 +207,15 @@ class RecordPublisher:
         hold.publish(record)
 
     def resolved(self, *, project_root: Path, task: str) -> None:
-        """Retain the immutable identity after the invocation selected its project and task."""
-        resolved_root = str(project_root.resolve())
+        """Retain the opened project's root. Callers pass ``Project.root``; this stores it."""
+        published = str(project_root)
         with self._lock:
-            self._publish(project_root=resolved_root)
+            self._publish(project_root=published)
             record = self._record
         self._metadata.publish(
             InstanceInspectionMetadata(
                 id=record.id,
-                project_root=resolved_root,
+                project_root=published,
                 run_id=record.run_id,
                 task=task,
                 pid=record.pid,

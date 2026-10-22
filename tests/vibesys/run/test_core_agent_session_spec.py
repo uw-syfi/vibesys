@@ -9,7 +9,7 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from vibesys.run.core_services import agent_session_spec
-from vs_agent.api import AgentSpec, SkillSelection
+from vs_agent.api import AgentBackend, AgentSpec, SkillSelection
 from vs_runtime.api import AgentRole
 from vs_runtime.api.infrastructure import AgentExecutionConfiguration
 from vs_sandbox.api import HostResource, HostResourceAccess, ProjectPathPolicy
@@ -112,4 +112,24 @@ def test_each_role_session_runs_its_own_provider_and_model_in_its_providers_envi
     for role_id, provider, model in zip(role_ids, providers, models, strict=True):
         session = spec_for(AgentRole(id=role_id, system_prompt="x"), Path("/workspace"))
         assert (session.provider, session.model) == (provider, model)
+        assert session.scripted is False
         assert session.policy.host_resources == environments[provider].host_resources
+
+
+def test_a_scripted_role_keeps_its_selected_provider_and_model() -> None:
+    """The executor is a separate fact. A scripted client does not erase the selection."""
+    spec = AgentSpec(
+        backend=AgentBackend.SCRIPTED,
+        provider="claude",
+        model="claude-sonnet",
+        allow_unvetted_model=True,
+    )
+    spec_for = agent_session_spec(
+        environments={spec.provider: _Environment()},
+        specs={"implementer": spec},
+        variables=dict,
+        configuration=lambda role: AgentExecutionConfiguration(agent_id=role.id, spec=spec),
+    )
+    session = spec_for(AgentRole(id="implementer", system_prompt="x"), Path("/workspace"))
+    assert (session.provider, session.model) == ("claude", "claude-sonnet")
+    assert session.scripted is True

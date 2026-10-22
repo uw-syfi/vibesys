@@ -1364,6 +1364,7 @@ SubmitMeasurement.depends_on optional {"default":[],"items":{"$ref":"#/$defs/Req
 SubmitMeasurement.kind optional {"const":"submit_measurement","default":"submit_measurement","type":"string"}
 SubmitMeasurement.plan required {"$ref":"#/$defs/MeasurementPlan"}
 SubmitMeasurement.request_id optional {"anyOf":[{"$ref":"#/$defs/RequestId"},{"type":"null"}],"default":null}
+SubmitMeasurement.requested_by optional {"anyOf":[{"$ref":"#/$defs/InvocationRef"},{"type":"null"}],"default":null}
 SubmitMeasurement.reuses optional {"anyOf":[{"$ref":"#/$defs/RequestId"},{"type":"null"}],"default":null}
 SubmitMeasurement.scope required {"$ref":"#/$defs/Scope"}
 TaskObjective {"additionalProperties":false,"type":"object"}

@@ -54,6 +54,16 @@ class ProjectRootNotFoundError(ProjectLayoutError):
         return cls(f"Project root is not a directory: {path}")
 
     @classmethod
+    def missing_field(cls, text: str) -> Self:
+        """A user-supplied ``project_root`` that is not an existing path."""
+        return cls(f"project_root does not exist: {text}")
+
+    @classmethod
+    def not_directory_field(cls, text: str) -> Self:
+        """A user-supplied ``project_root`` that is not a directory."""
+        return cls(f"project_root is not a directory: {text}")
+
+    @classmethod
     def discovery_path_missing(cls, path: Path) -> Self:
         """Describe a missing starting path for upward discovery."""
         return cls(f"Project discovery path does not exist: {path}")
@@ -234,6 +244,43 @@ class TaskDirectory:
         )
 
 
+def canonical_project_root(raw: str | Path, *, base: Path, home: Path) -> Path:
+    """The one absolute directory `raw` names.
+
+    ``~`` and ``~/...`` expand under `home`. A relative path resolves from
+    `base`. The result is absolute, symlink-free, and an existing directory.
+    A missing path or a non-directory raises :class:`ProjectRootNotFoundError`
+    naming the field ``project_root``.
+    """
+    text = raw if isinstance(raw, str) else str(raw)
+    if text == "~" or text.startswith("~/"):
+        expanded = home if text == "~" else home / text[2:]
+    elif text.startswith("~"):
+        raise ProjectRootNotFoundError.missing_field(text)
+    else:
+        expanded = Path(text)
+    if not expanded.is_absolute():
+        expanded = base / expanded
+    try:
+        resolved = expanded.resolve(strict=True)
+    except OSError as exc:
+        raise ProjectRootNotFoundError.missing_field(text) from exc
+    if not resolved.is_dir():
+        raise ProjectRootNotFoundError.not_directory_field(text)
+    return resolved
+
+
+def resume_directory(recorded: str | None, requested: str, *, base: Path, home: Path) -> Path:
+    """The directory a resume runs in.
+
+    A recorded root wins over the spelling the caller sent. With none recorded,
+    the request is canonicalized the same way a new run records it.
+    """
+    if recorded:
+        return canonical_project_root(recorded, base=base, home=home)
+    return canonical_project_root(requested, base=base, home=home)
+
+
 class ProjectLayout:
     """Discover and validate one project's repository-native VibeSys layout."""
 
@@ -244,13 +291,7 @@ class ProjectLayout:
     @classmethod
     def open(cls, project_root: Path | str) -> Self:
         """Bind to an existing project directory without requiring initialization."""
-        lexical_root = Path(project_root).expanduser()
-        try:
-            resolved_root = lexical_root.resolve(strict=True)
-        except OSError as exc:
-            raise ProjectRootNotFoundError.missing(lexical_root) from exc
-        if not resolved_root.is_dir():
-            raise ProjectRootNotFoundError.not_directory(resolved_root)
+        resolved_root = canonical_project_root(project_root, base=Path.cwd(), home=Path.home())
         return cls(ProjectRoot(resolved_root))
 
     @classmethod

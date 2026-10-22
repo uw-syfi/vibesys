@@ -159,9 +159,10 @@ async def adopt(kit: Kit, selection: Selection) -> Adopted | NotAdopted:
 
 def _adoption_of(selection: Selection, event: Event) -> Adopted | NotAdopted:
     match event:
-        case AdoptionFinished(result=AdoptionResult(observation=seen)):
+        case AdoptionFinished(result=AdoptionResult(observation=seen, checkout=checkout)):
             if seen.status is ObservationStatus.SUCCEEDED:
-                return Adopted(selection=selection, checkout_status=seen.diagnostic or None)
+                recorded = None if checkout is None else checkout.status.value
+                return Adopted(selection=selection, checkout_status=recorded)
             return NotAdopted(selection=selection, reason=AdoptionFailureReason.VERIFY_FAILED)
         case AdoptionFinished(result=AdoptionFailed(reason=reason)):
             return NotAdopted(selection=selection, reason=reason)

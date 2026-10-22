@@ -447,6 +447,7 @@ export type Provider4 = string | null;
 export type Model4 = string | null;
 export type ReasoningEffort = string | null;
 export type HarnessVersion = string | null;
+export type Client = ("scripted" | "provider") | null;
 export type Kind7 = "agent_execution_finished";
 export type Error2 = string | null;
 export type Kind8 = string;
@@ -710,6 +711,11 @@ export type Kind47 = "winner_selected";
 export type Selection = "candidate" | "baseline";
 export type Revision3 = string;
 export type SettlementId = string | null;
+/**
+ * Why the optional checkout update advanced or skipped the checkout.
+ */
+export type CheckoutStatus =
+  "fast_forwarded" | "other_branch" | "dirty_tree" | "diverged" | "git_refused" | "operator_changed_checkout";
 export type Kind48 = "input_measurement_failed";
 /**
  * Why the run's input failed its own trusted measurement. Closed.
@@ -1709,6 +1715,7 @@ export interface AgentExecutionStartedData {
   model?: Model4;
   reasoning_effort?: ReasoningEffort;
   harness_version?: HarnessVersion;
+  client?: Client;
 }
 /**
  * Terminal result for one agent execution.
@@ -2325,6 +2332,7 @@ export interface WinnerSelectedData {
   selection: Selection;
   revision: Revision3;
   settlement_id?: SettlementId;
+  checkout_status?: CheckoutStatus | null;
 }
 /**
  * The run's input failed its trusted measurement, so the run has no trusted baseline.

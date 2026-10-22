@@ -126,10 +126,16 @@ opening one. To run the checks CI would select for your change (including uncomm
 files), use repoctl, which needs Go:
 
 ```bash
-./support/repoctl/repoctl test --dry-run   # list the selected checks
-./support/repoctl/repoctl test             # run them
+./support/repoctl/repoctl test --dry-run                 # list the CI checks for this change
+./support/repoctl/repoctl test                           # run them
+./support/repoctl/repoctl test --checks-only --dry-run   # quality groups and always-on scripts
+./support/repoctl/repoctl test --checks-only             # run that shorter selection
 ./support/repoctl/repoctl run-checks --group python_quality   # one CI group
 ```
+
+`--dry-run` also names groups the change would select in CI but that cannot
+run locally (they set `local_skip` in `.repoctl/checks.toml`). `--checks-only`
+leaves out test groups such as `python_tests` and `clients_tests`.
 
 Faster commands for iterating:
 

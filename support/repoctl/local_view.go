@@ -8,11 +8,24 @@ import "repoctl/execution"
 // policy itself) runs only its own checks on a developer's machine. CI plans
 // with the unmodified graph, so its selection does not change.
 func (g graph) forLocalTest() graph {
+	ignored := append([]string{}, g.IgnoredRoots...)
 	if g.Components == nil {
+		g.IgnoredRoots = ignored
 		return g
 	}
 	components := make(map[string]component, len(g.Components))
 	for id, c := range g.Components {
+		if len(c.LocalIgnoreRoots) > 0 {
+			kept := make([]string, 0, len(c.Roots))
+			for _, root := range c.Roots {
+				if contains(c.LocalIgnoreRoots, root) {
+					ignored = append(ignored, root)
+					continue
+				}
+				kept = append(kept, root)
+			}
+			c.Roots = kept
+		}
 		if len(c.LocalJobs) > 0 {
 			c.SelectAllJobs, c.SelectAllCollections = false, false
 			c.Jobs = appendUniquePaths(append([]string(nil), c.Jobs...), c.LocalJobs)
@@ -20,6 +33,7 @@ func (g graph) forLocalTest() graph {
 		components[id] = c
 	}
 	g.Components = components
+	g.IgnoredRoots = ignored
 	return g
 }
 

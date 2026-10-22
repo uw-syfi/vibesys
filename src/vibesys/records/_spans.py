@@ -10,6 +10,7 @@ import vibesys.search_spans.api as search
 import vs_proto.api as p
 from vibesys.records._agents import stream_id
 from vibesys.records._common import Projection, enum_value
+from vs_core.api import CheckoutStatus
 from vs_decode.api import Unreadable, decode_json
 
 if TYPE_CHECKING:
@@ -143,31 +144,50 @@ def _metric_rows(projection: Projection, source: CoreSpan, span: p.Span) -> None
         )
 
 
+def _merge_prior(kind: str, attrs: Message, merged: Message) -> Message:
+    """Fold a new label onto the recorded one. A recorded stage or model stays."""
+    authoritative = (set(_MODELS[kind].model_fields) if kind in _MODELS else set()).difference(
+        {"model"} if kind == "agent_turn" else set()
+    )
+    for field in merged.desc().fields:
+        if field.name in authoritative and not attrs.has_field(field.name):
+            merged.clear_field(field.name)
+    for field in attrs:
+        if (
+            kind == "agent_turn"
+            and field.name in {"stage", "model"}
+            and merged.has_field(field.name)
+        ):
+            continue
+        merged[field] = attrs[field]
+    return merged
+
+
+def _checkout_from_reason(reason: str | None) -> p.CheckoutStatus | None:
+    """The checkout status a span reason names, when it is one of the core statuses."""
+    if reason is None:
+        return None
+    try:
+        status = CheckoutStatus(reason)
+    except ValueError:
+        return None
+    return enum_value(p.CheckoutStatus, status.value)
+
+
 def _span_label(projection: Projection, source: CoreSpan) -> p.Label | None:
     previous = projection.spans.get(source.id)
     label = source.label
     mapped_label = previous.label if previous is not None else None
     if label is not None:
         attrs = _label_attrs(projection, source)
+        if label.kind == "adoption" and isinstance(attrs, p.AdoptionAttrs):
+            status = _checkout_from_reason(label.reason)
+            if status is not None:
+                attrs.checkout_status = status
         if previous is not None and previous.label is not None:
             prior = previous.label.attrs
             if prior is not None and prior.type_url.endswith("/" + attrs.desc().type_name):
-                merged = type(attrs).from_binary(prior.value)
-                authoritative = (
-                    set(_MODELS[label.kind].model_fields) if label.kind in _MODELS else set()
-                ).difference({"model"} if label.kind == "agent_turn" else set())
-                for field in merged.desc().fields:
-                    if field.name in authoritative and not attrs.has_field(field.name):
-                        merged.clear_field(field.name)
-                for field in attrs:
-                    if (
-                        label.kind == "agent_turn"
-                        and field.name in {"stage", "model"}
-                        and merged.has_field(field.name)
-                    ):
-                        continue
-                    merged[field] = attrs[field]
-                attrs = merged
+                attrs = _merge_prior(label.kind, attrs, type(attrs).from_binary(prior.value))
         projection.declare_kind(label.kind, attrs.desc().type_name)
         mapped_label = p.Label(
             kind=label.kind,

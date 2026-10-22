@@ -106,6 +106,11 @@ message EpochStarted {
     message: "api_schema_hash and store_schema_hash must be lowercase SHA-256 for a typed header"
     expression: "!has(this.run) || (this.api_schema_hash.matches('^[0-9a-f]{64}$') && this.store_schema_hash.matches('^[0-9a-f]{64}$'))"
   };
+  option (buf.validate.message).cel = {
+    id: "epoch.project_root"
+    message: "project_root must be an absolute path"
+    expression: "!has(this.project_root) || this.project_root.startsWith('/')"
+  };
   string run_id = 1;
   uint32 epoch = 2;
   string tree_hash = 3;
@@ -125,6 +130,13 @@ message EpochStarted {
   optional uint32 identity_encoding_version = 13 [(buf.validate.field).uint32.const = 1];
   optional ReplayAllowance initial_allowance = 14;
   optional ReplayAcknowledgement replay_acknowledgement = 15;
+  // Canonical absolute directory recorded when the run is created. Windows,
+  // controls and resume read this and no path the client remembered. Absence
+  // on older logs means the run has no recorded root.
+  optional string project_root = 16 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 4096
+  }];
 }
 
 // LegacyEvent is an interim bridge carrying one current JSONL run event verbatim.

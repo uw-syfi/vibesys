@@ -33,6 +33,22 @@ const VERDICTS: Readonly<Record<string, {readonly label: string; readonly tone: 
   not_adopted: {label: 'Not adopted', tone: 'warn'},
 };
 
+/** A recorded agent client, or null when the turn did not name one. */
+function clientWord(value: string | null): 'scripted' | 'provider' | null {
+  if (value === null) return null;
+  const word = value.replace(/^AGENT_CLIENT_/, '').toLowerCase();
+  if (word === 'scripted' || word === 'provider') return word;
+  return null;
+}
+
+/** The checkout skip the adoption recorded, as a status word. */
+function checkoutWords(value: string | null): string | null {
+  if (value === null) return null;
+  const word = value.replace(/^CHECKOUT_STATUS_/, '').toLowerCase();
+  if (word === '' || word === 'unspecified') return null;
+  return plain(word);
+}
+
 /** A word from the wire (`failed_check`) as text (`Failed check`). */
 export function plain(word: string): string {
   const spaced = words(word);
@@ -75,19 +91,36 @@ export function titleOf(span: Span): string {
       return hypothesis === null || hypothesis === title ? title : `${hypothesis} · ${title}`;
     }
     case 'agent_turn': {
-      const model = stringAttr(span, 'model');
       const role = roleName(title);
+      if (clientWord(stringAttr(span, 'client')) === 'scripted') return role;
+      const model = stringAttr(span, 'model');
       return model === null ? role : `${role} · ${model}`;
     }
     case 'gate':
       return `Gate · ${gateTitle(title)}`;
     case 'adoption': {
       const candidate = stringAttr(span, 'candidate');
-      return candidate === null ? 'Adopt the input' : `Adopt candidate ${candidate.slice(0, 7)}`;
+      const base =
+        candidate === null ? 'Adopt the input' : `Adopt candidate ${candidate.slice(0, 7)}`;
+      const skip = checkoutWords(stringAttr(span, 'checkout_status'));
+      return skip === null ? base : `${base} · ${skip}`;
     }
     default:
       return title;
   }
+}
+
+/** Adoption span id to the headline the records name, including a checkout skip. */
+export function adoptionTitles(
+  spans: ReadonlyMap<string, Span> | undefined,
+): ReadonlyMap<string, string> {
+  const titles = new Map<string, string>();
+  if (spans === undefined) return titles;
+  for (const span of spans.values()) {
+    if (span.label?.kind !== 'adoption') continue;
+    titles.set(span.id, titleOf(span));
+  }
+  return titles;
 }
 
 /**

@@ -54,6 +54,7 @@ function randomRecords(random: Seeded): UsageRecord[] {
       harness: random.pick(['codex', 'claude', null]),
       model: random.pick(['model-a', 'model-b', null]),
       reasoning_effort: null,
+      client: null,
       harness_version: null,
       started_at: null,
       ended_at: ended,

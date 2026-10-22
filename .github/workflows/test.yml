@@ -319,22 +319,8 @@ jobs:
 
       - name: Set up the client workspace
         uses: ./.github/actions/setup-clients
-
-      - name: Resolve the Playwright version
-        id: playwright
-        working-directory: clients
-        run: echo "version=$(pnpm --filter @vibesys/app-desktop-main exec playwright --version | awk '{print $2}')" >> "$GITHUB_OUTPUT"
-
-      # The browser download only; the system libraries below come from apt and are not cached.
-      - name: Cache the Playwright browsers
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
-          path: ~/.cache/ms-playwright
-          key: playwright-chromium-${{ runner.os }}-${{ steps.playwright.outputs.version }}
-
-      - name: Install Chromium for the desktop smoke test
-        working-directory: clients
-        run: pnpm --filter @vibesys/app-desktop-main exec playwright install --with-deps chromium
+          playwright: true
 
       - name: Test the desktop app (shard ${{ matrix.shard }} of ${{ strategy.job-total }})
         env:
@@ -342,8 +328,9 @@ jobs:
           # The downloaded Electron runtime's SUID helper cannot have Chromium's required root
           # ownership on a hosted runner. This opt-out is scoped to the E2E child process.
           VIBESYS_ELECTRON_E2E_DISABLE_CHROMIUM_SANDBOX: "1"
-        # Electron's native windows require a display; Playwright's dependency install above
-        # provides Xvfb on this Linux runner. The wrapper owns the display for this one check group.
+        # Electron's native windows require a display. The setup action's Playwright
+        # dependency install provides Xvfb on this Linux runner. The wrapper owns the
+        # display for this one check group.
         run: xvfb-run -a ./support/repoctl/repoctl run-checks --group clients_e2e
 
       # A gallery screenshot that differs from its baseline leaves the actual and the diff here, so

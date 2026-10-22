@@ -48,6 +48,7 @@ function descriptors() {
   add(WorkstreamAttrsSchema.file);
   add(AgentTurnAttrsSchema.file);
   add(CapacityWaitAttrsSchema.file);
+  add(AdoptionAttrsSchema.file);
   return create(FileDescriptorSetSchema, {file: [...files.values()].map(file => file.proto)});
 }
 
@@ -61,6 +62,7 @@ function epochBody(epoch = 1, objective = OBJECTIVE, hash = HASH): Body {
       epoch,
       treeHash: 'a'.repeat(40),
       vibesysVersion: 'test',
+      projectRoot: '/work/queue-rs',
       apiSchemaHash: API_SCHEMA_HASH,
       storeSchemaHash: STORE_SCHEMA_HASH,
       descriptors: descriptors(),

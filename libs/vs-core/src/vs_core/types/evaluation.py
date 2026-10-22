@@ -1092,6 +1092,12 @@ class SubmitMeasurement(RequestBase):
     Core sets it from the attempt's own base and the base's measured input the runtime
     computed. The run's sample names it, so its comparison can find the base's samples.
     """
+    requested_by: InvocationRef | None = Field(default=None, exclude_if=unset)
+    """The turn that asked, when no Measure decision names the submission.
+
+    The permit cap reads this identity. Another invocation in the scope does not
+    stand in for it. A Measure decision leaves it unset: that wait names its own limit.
+    """
 
 
 class ObserveOwnedJob(RequestBase):

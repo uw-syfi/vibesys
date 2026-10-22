@@ -3,6 +3,7 @@ syntax = "proto3";
 package vibesys.search.v1;
 
 import "buf/validate/validate.proto";
+import "vibesys/core/v1/vocabulary.proto";
 import "vibesys/store/v1/common.proto";
 
 option go_package = "github.com/uw-syfi/vibesys/gateway/gen/vibesys/search/v1;searchv1";
@@ -241,6 +242,11 @@ message AdoptionAttrs {
   optional string settlement_id = 3 [(buf.validate.field).string = {
     min_len: 1
     max_bytes: 65536
+  }];
+  // The checkout publication status (vibesys.core.v1.CheckoutStatus), when the run recorded one.
+  optional vibesys.core.v1.CheckoutStatus checkout_status = 4 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
   }];
 }
 

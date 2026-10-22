@@ -15,6 +15,7 @@ import {type ModelNames, modelLabel, NO_MODEL_NAMES} from './model-names.js';
 export interface Who {
   readonly harness: string | null;
   readonly model: string | null;
+  readonly client: 'scripted' | 'provider' | null;
 }
 
 /** The harnesses and models by turn span. */
@@ -30,10 +31,15 @@ export function whoBySpan(
 ): WhoBySpan {
   const by = new Map<string, Who>();
   for (const record of records) {
-    if (record.span_id === null || (record.harness === null && record.model === null)) continue;
+    if (record.span_id === null) continue;
+    const client =
+      record.client === 'scripted' || record.client === 'provider' ? record.client : null;
+    if (client !== 'scripted' && record.harness === null && record.model === null) continue;
     by.set(record.span_id, {
-      harness: record.harness,
-      model: record.model === null ? null : modelLabel(names, record.model),
+      harness: client === 'scripted' ? null : record.harness,
+      model:
+        client === 'scripted' || record.model === null ? null : modelLabel(names, record.model),
+      client,
     });
   }
   return by;
@@ -42,12 +48,14 @@ export function whoBySpan(
 /** `<model> on <harness>`, or the one part named; null when neither is. */
 export function whoWords(who: Who | undefined): string | null {
   if (who === undefined) return null;
+  if (who.client === 'scripted') return 'scripted';
   if (who.model !== null && who.harness !== null) return `${who.model} on ${who.harness}`;
   return who.model ?? who.harness;
 }
 
 /** The model, else the harness: what a narrow row says of who ran it. */
 export function whoShort(who: Who): string | null {
+  if (who.client === 'scripted') return 'scripted';
   return who.model ?? who.harness;
 }
 
@@ -60,7 +68,7 @@ export function agentWho(
   const seen = new Map<string, Who>();
   for (const turn of agentTurns(spans, agent.id)) {
     const ran = who.get(turn.span);
-    if (ran !== undefined) seen.set(`${ran.harness}\n${ran.model}`, ran);
+    if (ran !== undefined) seen.set(`${ran.client}\n${ran.harness}\n${ran.model}`, ran);
   }
   return [...seen.values()];
 }

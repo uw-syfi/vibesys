@@ -66,3 +66,20 @@ def current_epoch(
         elif body.field == "lifecycle" and record.epoch == number:
             lifecycle = type(body.value).from_binary(body.value.to_binary())
     return CurrentEpoch(number, lifecycle)
+
+
+# The lifecycle arms that close an epoch. Starting, running and draining are
+# still open: a writer that exits then left the epoch unfinished.
+_ENDED = frozenset({"parked", "ended"})
+
+
+def epoch_has_ended(epoch: CurrentEpoch) -> bool:
+    """Whether ``epoch`` published a clean ending.
+
+    Parked and every ended outcome (finished, failed, stopped, interrupted,
+    including a deadline) close the epoch. A successor starts with no lifecycle
+    of its own, so it has not ended.
+    """
+    lifecycle = epoch.lifecycle
+    state = None if lifecycle is None else lifecycle.state
+    return state is not None and state.field in _ENDED

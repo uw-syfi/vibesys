@@ -82,7 +82,8 @@ Checks:
 - Run `./scripts/check_format.sh`, `./scripts/check_lint.sh`, and only the
   checks and tests the change can affect; CI runs the rest on the PR. A docs- or
   skills-only change runs no test suite. `./support/repoctl/repoctl test` runs
-  the checks CI would select for the change. Size limits and lint-waiver mechanics
+  the checks CI would select for the change, and names any group it skips
+  because that group cannot run locally. Size limits and lint-waiver mechanics
   are in
   [`docs/contributing/coding-best-practices.md`](docs/contributing/coding-best-practices.md).
 

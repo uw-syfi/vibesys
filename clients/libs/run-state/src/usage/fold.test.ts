@@ -51,6 +51,7 @@ function record(random: Seeded, runs: readonly string[]): UsageRecord {
     harness: random.pick(HARNESSES),
     model: random.pick(MODELS),
     reasoning_effort: random.pick(['high', null]),
+    client: null,
     harness_version: null,
     started_at: null,
     ended_at: ended === null ? null : ended.toISOString(),

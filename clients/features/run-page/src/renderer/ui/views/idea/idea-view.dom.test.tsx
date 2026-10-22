@@ -155,6 +155,46 @@ test('the compact step list highlights the opened step', async () => {
   await unmount();
 });
 
+test('an adoption step shows the recorded checkout headline', async () => {
+  const candidate = idea('mpmc', 'passed', 100, 300);
+  const adopt = step('adopt-1', 'adoption', null, 100, 40);
+  const shown = {
+    ...candidate,
+    attempts: candidate.attempts.map((each, index) =>
+      index === 0 ? {...each, steps: [adopt]} : each,
+    ),
+  };
+  const titles = new Map([['adopt-1', 'Adopt candidate abc1234 · Dirty tree']]);
+  const {container, unmount} = await mount(
+    <IdeaView {...view(shown, () => undefined)} adoptionTitles={titles} />,
+  );
+  expect(
+    options(container, 'mpmc steps')
+      .map(row => row.textContent)
+      .join('\n'),
+  ).toContain('Adopt candidate abc1234 · Dirty tree');
+  expect(container.textContent).not.toContain('adoption adopt-1');
+  await unmount();
+
+  const compact = await mount(
+    <StepList
+      idea={shown}
+      selected={null}
+      tokens={EMPTY_LEDGER}
+      who={new Map()}
+      pauses={[]}
+      adoptionTitles={titles}
+      zoom={() => undefined}
+    />,
+  );
+  expect(
+    options(compact.container, 'mpmc steps')
+      .map(row => row.textContent)
+      .join('\n'),
+  ).toContain('Adopt candidate abc1234 · Dirty tree');
+  await compact.unmount();
+});
+
 test('an idea with no attempts has no steps to show', async () => {
   const candidate = {...idea('mpmc', 'running', 100, 0), attempts: []};
   const {container, unmount} = await mount(<IdeaView {...view(candidate, () => undefined)} />);
@@ -314,8 +354,8 @@ test('an agent turn’s step shows its tokens beside its duration; a gate shows 
 test('the implementer and judge rows say what ran them; a turn the records do not name says nothing', async () => {
   const candidate = idea('mpmc', 'passed', 100, 300);
   const who = new Map([
-    ['mpmc-a-t', {harness: 'codex', model: 'gpt-6-luna'}],
-    ['mpmc-a-j', {harness: 'claude', model: 'sonnet-5'}],
+    ['mpmc-a-t', {harness: 'codex', model: 'gpt-6-luna', client: null}],
+    ['mpmc-a-j', {harness: 'claude', model: 'sonnet-5', client: null}],
   ]);
   const {container, unmount} = await mount(<IdeaView {...{...view(candidate, () => {}), who}} />);
   const steps = options(container, 'mpmc steps').map(row => row.textContent ?? '');

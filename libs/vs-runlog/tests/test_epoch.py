@@ -5,11 +5,37 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import pytest
-from hypothesis import example, given
+from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
-from vs_proto.api import RUN_LOG_MAGIC, EpochStarted, Lifecycle, Oneof, Record, RunHead, Running
-from vs_runlog.api import current_epoch, encode_frame, fold_skeleton, read_current_epoch
+from vs_proto.api import (
+    RUN_LOG_MAGIC,
+    DrainGoal,
+    Draining,
+    Ended,
+    EpochStarted,
+    Lifecycle,
+    Oneof,
+    Outcome,
+    Parked,
+    Record,
+    RunFailure,
+    RunFailureKind,
+    RunHead,
+    Running,
+    StageState,
+    Starting,
+    StartupStage,
+)
+from vs_runlog.api import (
+    CurrentEpoch,
+    current_epoch,
+    encode_frame,
+    epoch_has_ended,
+    fold_skeleton,
+    read_current_epoch,
+)
+from vs_sim.api.testing import examples
 
 from .test_run_writers import scenarios
 
@@ -127,6 +153,97 @@ def test_missing_and_truncated_committed_epoch_sources_fail_explicitly(tmp_path:
     path.write_bytes(b"corrupt")
     with pytest.raises(ValueError, match="bad magic"):
         read_current_epoch(path)
+
+
+def _arm(name: str) -> Lifecycle:
+    """One lifecycle whose state arm is ``name``, using a real ending when that arm is one."""
+    if name == "starting":
+        return Lifecycle(
+            state=Oneof(
+                "starting",
+                Starting(stage=StartupStage.PROBING_WORKSPACE, state=StageState.RUNNING),
+            )
+        )
+    if name == "running":
+        return Lifecycle(state=Oneof("running", Running()))
+    if name == "draining":
+        return Lifecycle(state=Oneof("draining", Draining(goal=DrainGoal.PARK)))
+    if name == "parked":
+        return Lifecycle(state=Oneof("parked", Parked()))
+    if name == "ended":
+        return Lifecycle(state=Oneof("ended", Ended(outcome=Outcome.FINISHED)))
+    message = f"lifecycle arm {name} has no ending classification"
+    raise AssertionError(message)
+
+
+def _ended_outcomes() -> list[Lifecycle]:
+    """Every ended outcome, including each failure kind and an interrupt."""
+    endings: list[Lifecycle] = []
+    for outcome in Outcome:
+        if outcome is Outcome.UNSPECIFIED:
+            continue
+        if outcome is Outcome.FAILED:
+            for kind in RunFailureKind:
+                if kind is RunFailureKind.UNSPECIFIED:
+                    continue
+                endings.append(
+                    Lifecycle(
+                        state=Oneof(
+                            "ended",
+                            Ended(
+                                outcome=outcome,
+                                failure=RunFailure(kind=kind, reason=kind.name),
+                            ),
+                        )
+                    )
+                )
+            continue
+        ending = Ended(outcome=outcome)
+        if outcome is Outcome.INTERRUPTED:
+            ending.interruption_reason = "signal"
+        endings.append(Lifecycle(state=Oneof("ended", ending)))
+    return endings
+
+
+_ARMS = tuple(field.name for field in Lifecycle.desc().oneofs[0].fields)
+_ENDINGS = _ended_outcomes()
+_CASES = tuple(("ended", index) for index in range(len(_ENDINGS))) + tuple(
+    (arm, 0) for arm in _ARMS if arm != "ended"
+)
+_DEADLINE = next(
+    index
+    for index, lifecycle in enumerate(_ENDINGS)
+    if lifecycle.state is not None
+    and lifecycle.state.field == "ended"
+    and lifecycle.state.value.failure is not None
+    and lifecycle.state.value.failure.kind is RunFailureKind.DEADLINE
+)
+
+
+@pytest.mark.regression
+@example(case=("parked", 0))
+@example(case=("ended", _DEADLINE))
+@settings(max_examples=examples(pr=len(_CASES), nightly=len(_CASES)), deadline=None)
+@given(case=st.sampled_from(_CASES))
+def test_an_epoch_has_ended_only_when_parked_or_ended(case: tuple[str, int]) -> None:
+    """Every lifecycle arm is classified once, and a successor does not inherit it.
+
+    Deadline is an ended failure, so it closes the epoch with the other outcomes.
+    """
+    arm, outcome = case
+    lifecycle = _ENDINGS[outcome] if arm == "ended" else _arm(arm)
+    epoch = CurrentEpoch(number=3, lifecycle=lifecycle)
+    assert lifecycle.state is not None
+    assert epoch_has_ended(epoch) is (lifecycle.state.field in {"parked", "ended"})
+    records = [
+        Record(seq=1, epoch=3, body=Oneof("epoch_started", EpochStarted(epoch=3))),
+        Record(seq=2, epoch=3, body=Oneof("lifecycle", lifecycle)),
+        Record(seq=3, epoch=4, body=Oneof("epoch_started", EpochStarted(epoch=4))),
+    ]
+    successor = current_epoch(records)
+    assert successor.number == 4
+    assert successor.lifecycle is None
+    assert not epoch_has_ended(successor)
 
 
 def test_legacy_epoch_headers_keep_the_complete_record_rule(tmp_path: Path) -> None:
