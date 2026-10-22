@@ -64,6 +64,31 @@ def test_npm_runs_with_bounded_fetch_settings() -> None:
     assert "retry npm install" in function
 
 
+def test_apt_update_drops_gpu_vendor_indexes_and_is_deadline_bounded() -> None:
+    """The CUDA and ROCm bases publish package indexes that transfer for minutes.
+
+    Updates with ``Acquire::http::Timeout=30`` still ran for several minutes,
+    so the helper removes those lists and caps the update.
+    """
+    block = _split(SCRIPTS[0])[0]
+    update = block[block.index("apt_update_and_install() {") :]
+    update = update[: update.index("\n}")]
+    assert "drop_vendor_apt_sources" in update
+    assert 'timeout "${APT_UPDATE_DEADLINE}" apt-get update' in update
+    dropped = block[block.index("drop_vendor_apt_sources() {") :]
+    dropped = dropped[: dropped.index("\n}")]
+    for marker in (
+        "*nvidia*",
+        "*cuda*",
+        "*rocm*",
+        "*amdgpu*",
+        "nvidia\\.com",
+        "repo\\.radeon\\.com",
+    ):
+        assert marker in dropped
+    assert "APT_UPDATE_DEADLINE=60" in block
+
+
 @pytest.mark.parametrize("script", SCRIPTS, ids=lambda path: path.parent.name)
 def test_no_network_command_runs_outside_the_helpers(script: Path) -> None:
     _block, rest = _split(script)

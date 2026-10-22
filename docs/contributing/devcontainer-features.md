@@ -71,8 +71,10 @@ Rules every Feature follows:
   metadata, not a line in a shared file.
 - Every network step is bounded and retried at most five times. The script
   carries a helper block (`retry`, `fetch`, `apt_install`, `npm_install_global`,
-  `pip_install`) that sets connect, stall, and request timeouts; Features cannot
-  share files, so the block is duplicated and
+  `pip_install`) that sets connect, stall, and request timeouts. `apt-get update`
+  first drops NVIDIA and ROCm source lists, because those indexes keep sending
+  bytes and never trip the per-request timeout, and the update itself stops
+  after 60 seconds. Features cannot share files, so the block is duplicated and
   `tests/quality/test_feature_network_steps.py` keeps the copies identical and
   rejects a bare `curl`, `apt-get`, `npm install`, `pip install`, or `uv` fetch
   outside them. The whole image build also has one budget
