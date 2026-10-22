@@ -297,6 +297,16 @@ def counts_toward_concurrency(request: Request) -> bool:
     return not isinstance(request, CancelTurn | CancelOwnedJob | CancelOwnedResource)
 
 
+def starts_ahead_of_backlog(request: Request) -> bool:
+    """Whether ``request`` is the retain a close is waiting on.
+
+    It takes the next free slot ahead of ordinary prepared work. A measurement queued
+    in front of it holds the only slot through the publications between them, and the
+    retain's limit passes before it is ever dispatched.
+    """
+    return isinstance(request, SnapshotAndRetain)
+
+
 @dataclass(frozen=True)
 class RefusingRequestExecution:
     """Explicit skeleton gap. No I/O and no synthetic success/Unknown event."""

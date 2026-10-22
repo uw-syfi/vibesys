@@ -70,6 +70,7 @@ from vs_runtime._core_requests import (
     OwnerEvent,
     RequestExecutors,
     counts_toward_concurrency,
+    starts_ahead_of_backlog,
 )
 from vs_runtime._evaluation_jobs import awaits_submissions
 
@@ -308,6 +309,15 @@ class _Flight:
 
 
 @dataclass(frozen=True)
+class _Delivery:
+    """One publication whose bytes are in flight; only ``settle`` commits the cursor."""
+
+    publication: Publication
+    now_at: float
+    task: asyncio.Task[PublicationAcknowledgement]
+
+
+@dataclass(frozen=True)
 class CoreRuntimeBindings:
     """Closed composition choices, separate from durable shell state."""
 
@@ -381,6 +391,8 @@ class CoreRuntime[S: StrategyState]:
         self._kinds: dict[str, int] = {}
         # A delivery failure waits here, with publishing paused, until nothing is running.
         self._publication_failure: OSError | ContractError | None = None
+        # The publication whose delivery is in flight. Its cursor commits on this thread.
+        self._delivery: _Delivery | None = None
         # Latest time a lease renewal or check supplied; commits never use an earlier time.
         self._time_floor = 0.0
         # When the store last granted this host its lease (acquired or renewed), and the
@@ -1059,7 +1071,12 @@ class CoreRuntime[S: StrategyState]:
         ``exempt_only`` considers only requests that never wait for a free slot.
         """
         core = self.record.envelope.core
-        for record in core.records.records:
+        records = core.records.records
+        if any(starts_ahead_of_backlog(record.request) for record in records):
+            records = tuple(
+                sorted(records, key=lambda record: not starts_ahead_of_backlog(record.request))
+            )
+        for record in records:
             if record.phase != RequestPhase.PREPARED:
                 continue
             if exempt_only and counts_toward_concurrency(record.request):
@@ -1341,14 +1358,88 @@ class CoreRuntime[S: StrategyState]:
             raise publication_error
         return None
 
-    async def _try_publish(
-        self, delivery: PublicationDelivery, now_at: float
-    ) -> tuple[bool, OSError | ContractError | None]:
-        """Publish one pending event; a delivery failure is returned, not raised."""
+    def _begin_delivery(self, delivery: PublicationDelivery, now_at: float) -> None:
+        """Start delivering the next publication, without committing it."""
+        if self._delivery is not None or not self.record.pending_publications:
+            return
+        self._require_active()
+        if self._fence is None or not self._store.verify(
+            self._fence, now=max(now_at, self._time_floor)
+        ):
+            self._halted = True
+            message = "runtime fence lost before publication"
+            raise RuntimeCommitError(message)
+        publication = self.record.pending_publications[0]
+        self._time_floor = max(self._time_floor, now_at)
+        context = PublicationContext(now_at=self._time_floor, lease=_ShellLease(self))
+        self._delivery = _Delivery(
+            publication,
+            now_at,
+            asyncio.create_task(
+                delivery.publish(publication, context), name=f"publication:{publication.sequence}"
+            ),
+        )
+
+    def _finish_delivery(self) -> bool:
+        """Commit a delivery that has finished. A failure is stored, not raised."""
+        current = self._delivery
+        if current is None or not current.task.done():
+            return False
+        self._delivery = None
+        failure = _task_failure(current.task)
+        if isinstance(failure, asyncio.CancelledError):
+            raise failure
+        if isinstance(failure, OSError | ContractError):
+            self._publication_failure = failure
+            return True
+        if failure is not None:
+            raise failure
+        pending = self.record.pending_publications
+        if not pending or pending[0].sequence != current.publication.sequence:
+            message = "publication delivery finished for a publication that is no longer next"
+            raise RuntimeCommitError(message)
+        self._commit(
+            self.record.model_copy(
+                update={
+                    "pending_publications": pending[1:],
+                    "delivery_cursor": current.publication.sequence,
+                }
+            ),
+            current.now_at,
+        )
+        return True
+
+    async def _await_publication(self, delivery: PublicationDelivery, now_at: float) -> bool:
+        """Deliver one publication, returning when it commits or a running request finishes.
+
+        The delivery keeps running when a request finishes first, so the caller can commit
+        that request before the delivery ends. False when nothing is pending and no running
+        request finished.
+        """
+        if self._finish_delivery():
+            return True
+        if self._delivery is None:
+            self._begin_delivery(delivery, now_at)
+        current = self._delivery
+        if current is None:
+            return False
+        if any(flight.task.done() for flight in self._flights):
+            return True
+        waiter: asyncio.Task[None] | None = None
+        waiting: set[asyncio.Task[object]] = {current.task}
+        if self._flights and not current.task.done():
+            waiter = asyncio.create_task(self.wait_for_flight(), name="publication-flight")
+            waiting.add(waiter)
         try:
-            return await self.publish_one(delivery, now_at=now_at), None
-        except (OSError, ContractError) as error:
-            return False, error
+            if not current.task.done():
+                await asyncio.wait(waiting, return_when=asyncio.FIRST_COMPLETED)
+        finally:
+            if waiter is not None and not waiter.done():
+                waiter.cancel()
+                await asyncio.gather(waiter, return_exceptions=True)
+        if self._finish_delivery():
+            return True
+        return any(flight.task.done() for flight in self._flights)
 
     async def abandon(self) -> None:
         """Halt and cancel the running requests the loop will not complete.
@@ -1361,7 +1452,15 @@ class CoreRuntime[S: StrategyState]:
         self._flights.clear()
         for flight in flights:
             flight.task.cancel()
-        await asyncio.gather(*(f.task for f in flights), return_exceptions=True)
+        delivery = self._delivery
+        self._delivery = None
+        if delivery is not None:
+            delivery.task.cancel()
+        await asyncio.gather(
+            *(flight.task for flight in flights),
+            *(() if delivery is None else (delivery.task,)),
+            return_exceptions=True,
+        )
 
     def _ended_by_core(self, flight: _Flight) -> bool:
         """Whether core has ended this request.
@@ -1431,10 +1530,12 @@ class CoreRuntime[S: StrategyState]:
         role) is returned; passing a refusal already hit starts nothing more.
 
         Publication is diagnostic, so it never blocks dispatch: prepared requests start
-        before each publication is delivered, and a slow delivery holds a request back by at
-        most its own length, never by the whole backlog (cancellations and closes must still
-        go out before the run deadline). Publishing stops after the first failure and that
-        failure is re-raised once nothing is running.
+        before each publication is delivered, and a delivery in flight yields when a running
+        request finishes, so that request's observation and what it prepares commit before
+        the delivery ends. A slow delivery holds a request back by at most its own length,
+        never by the whole backlog (cancellations and closes must still go out before the
+        run deadline). Publishing stops after the first failure and that failure is
+        re-raised once nothing is running.
 
         Only this method authorizes, commits and queues observations, so the record has
         one writer; observations commit in completion order, same-tick completions in
@@ -1466,13 +1567,13 @@ class CoreRuntime[S: StrategyState]:
                     refusal = self._start_available(now_at, max_concurrent, budget, upkeep)
                     if self._queue:
                         continue
-                if self._publication_failure is None:
-                    published, self._publication_failure = await self._try_publish(delivery, now_at)
-                    if published or self._publication_failure is not None:
-                        # The await let requests finish, tools admit inputs and heartbeats
-                        # commit: consume them before the next request starts.
-                        upkeep()
-                        continue
+                if self._publication_failure is None and await self._await_publication(
+                    delivery, now_at
+                ):
+                    # The await let requests finish, tools admit inputs and heartbeats
+                    # commit: consume them before the next request starts.
+                    upkeep()
+                    continue
                 if self._flights:
                     return refusal
                 failure, self._publication_failure = self._publication_failure, None
