@@ -276,6 +276,10 @@ class SemanticSlurmEvaluationExecutor:
             }
         )
 
+    async def recover(self, handle_id: str) -> ExecutorPoll:
+        """The durable submission and provider identity make pure polling authoritative."""
+        return await self.poll(handle_id)
+
     async def inspect(self, handle_id: str) -> ExecutorObservation | None:
         """Recover the candidate worktree and provider handle on demand."""
         record = self._load(handle_id)

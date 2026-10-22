@@ -73,6 +73,7 @@ class BegunUnsealed:
     """The effect may have started and has no sealed result yet."""
 
     result_type: str | None
+    payload_digest: str
 
 
 @dataclass(frozen=True)
@@ -265,7 +266,7 @@ class ReceiptStore:
         if record is None:
             return NeverBegun()
         if record.phase is not ExecutionPhase.DONE:
-            return BegunUnsealed(record.result_type)
+            return BegunUnsealed(record.result_type, record.payload_digest)
         if record.result_json is None:
             message = "sealed execution receipt has no result"
             raise ReceiptCorruptError(message)

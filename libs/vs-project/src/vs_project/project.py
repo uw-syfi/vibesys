@@ -82,7 +82,7 @@ class Project:
         self,
         run_id: str,
         *,
-        fault_plan: Iterable[CommitFault] = (),
+        fault_plan: Iterable[CommitFault | None] = (),
         lease_fault_plan: Iterable[CommitFault | None] = (),
         observation_fault_plan: Iterable[ObservationFault | None] = (),
         effects: StoreDurabilityEffects | None = None,

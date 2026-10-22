@@ -73,6 +73,7 @@ from vs_evaluation.ports import (
     ExecutorRejectedError,
     ExecutorSubmissionError,
     PollingEvaluationExecutor,
+    RecoverableEvaluationExecutor,
 )
 from vs_evaluation.semantic_stage import (
     EvidenceResultIdentity,
@@ -130,6 +131,7 @@ __all__ = [
     "PollPhase",
     "PollingEvaluationExecutor",
     "ProfileField",
+    "RecoverableEvaluationExecutor",
     "ResourceRequirements",
     "ReuseStatus",
     "RunStoppingReply",

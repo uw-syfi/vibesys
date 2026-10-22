@@ -15,14 +15,18 @@ from pydantic import BaseModel, ConfigDict
 from vs_core.api import BlockRequest, FailureReason, RequestId
 from vs_project.api import Project, ProjectStateError
 from vs_runtime.api.core import (
+    BegunUnsealed,
     Conflict,
     Declined,
+    NeverBegun,
     Performed,
     ReceiptCorruptError,
     ReceiptStore,
     Replayed,
+    SealedExecution,
     Settled,
     Transient,
+    result_type_name,
 )
 from vs_runtime.api.executor_contexts import RevocableLease, context_for
 from vs_runtime.api.operation_fixtures import SCOPE
@@ -344,6 +348,27 @@ async def test_different_request_identities_remain_concurrent() -> None:
             Performed(Done(value=1)),
             Performed(Done(value=1)),
         ]
+
+
+async def test_an_in_flight_effect_reports_its_type_and_recorded_payload() -> None:
+    """Unsealed history keeps the result type callers already read, plus that attempt's digest."""
+    with tempfile.TemporaryDirectory() as raw:
+        store = store_at(Path(raw))
+        assert isinstance(store.history("r1"), NeverBegun)
+        effect = HeldPerformer()
+        context = context_for(request())
+        first = asyncio.create_task(run(store, effect, context))
+        await effect.started.wait(first)
+        history = store.history("r1")
+        assert isinstance(history, BegunUnsealed)
+        assert history.result_type == result_type_name(Done)
+        assert history.payload_digest == context.payload_digest
+        effect.release.open()
+        assert isinstance(await first, Performed)
+        sealed = store.history("r1")
+        assert isinstance(sealed, SealedExecution)
+        assert sealed.result_type == history.result_type
+        assert sealed.payload_digest == history.payload_digest
 
 
 async def test_a_transient_result_is_not_sealed_and_the_retry_is_told_it_resumes() -> None:

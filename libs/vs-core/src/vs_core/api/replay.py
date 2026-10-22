@@ -4,6 +4,7 @@ Identity is validated before matching. Shells retain protobuf records and drive
 accepted observations in log order; flow continuations use only this scheduler.
 """
 
+from vs_core.flows._replay_archive import ReplayArchive
 from vs_core.flows._replay_history import (
     AcceptedClock,
     AcceptedReplay,
@@ -22,7 +23,14 @@ from vs_core.flows._replay_identity import (
     classify_context,
     encode_identity,
 )
+from vs_core.flows._replay_iterations import ReplayAccounting, ReplayIterationBlocked
+from vs_core.flows._replay_resources import (
+    ReplayResourceAccounting,
+    ReplayResourcesBlocked,
+    ReplayResourceTotals,
+)
 from vs_core.flows._replay_run import ReplayScheduler, ReplaySettings
+from vs_core.flows._replay_schema import replay_descriptors, reply_schema_digest
 from vs_core.flows._replay_sources import (
     ReplayCall,
     ReplayCausalityError,
@@ -33,6 +41,7 @@ from vs_core.flows._replay_sources import (
     ReplayError,
     ReplayFlow,
     ReplayGroup,
+    ReplayIteration,
     ReplayLatch,
     ReplaySource,
     ReplayTask,
@@ -47,7 +56,9 @@ __all__ = [
     "ClassifiedContext",
     "EncodedIdentity",
     "PolicyDrift",
+    "ReplayAccounting",
     "ReplayAcknowledgements",
+    "ReplayArchive",
     "ReplayCall",
     "ReplayCausalityError",
     "ReplayChannel",
@@ -59,7 +70,12 @@ __all__ = [
     "ReplayFrontier",
     "ReplayGroup",
     "ReplayIdentityError",
+    "ReplayIteration",
+    "ReplayIterationBlocked",
     "ReplayLatch",
+    "ReplayResourceAccounting",
+    "ReplayResourceTotals",
+    "ReplayResourcesBlocked",
     "ReplayScheduler",
     "ReplaySettings",
     "ReplaySource",
@@ -69,4 +85,6 @@ __all__ = [
     "chain_dependency",
     "classify_context",
     "encode_identity",
+    "replay_descriptors",
+    "reply_schema_digest",
 ]

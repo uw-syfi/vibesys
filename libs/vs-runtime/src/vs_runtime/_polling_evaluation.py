@@ -134,6 +134,15 @@ class PollingEvaluationExecutor:
         phase = PollPhase.QUEUED if observed.state is EvaluationState.QUEUED else PollPhase.RUNNING
         return ExecutorPoll(phase=phase, current_stage=observed.current_stage)
 
+    async def recover(self, handle_id: str) -> ExecutorPoll:
+        """An empty new process cannot prove that an earlier delivery never began."""
+        if self._lifecycle.observation(handle_id) is None:
+            return ExecutorPoll(
+                phase=PollPhase.UNKNOWN,
+                detail="the previous local execution is not present in this process",
+            )
+        return await self.poll(handle_id)
+
     async def inspect(self, handle_id: str) -> ExecutorObservation | None:
         return self._lifecycle.observation(handle_id)
 

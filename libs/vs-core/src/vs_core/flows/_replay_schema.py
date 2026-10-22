@@ -15,6 +15,7 @@ from protobuf import (
     DescFieldValueMessage,
     DescMessage,
 )
+from protobuf.wkt.google.protobuf.descriptor_pb import FileDescriptorProto, FileDescriptorSet
 
 from ._replay_identity import _frame
 
@@ -96,3 +97,22 @@ def reply_schema_digest(message_type: type[Message]) -> bytes:
             _frame(name.encode()) + _frame(value) for name, value in sorted(declarations.items())
         )
     ).digest()
+
+
+def replay_descriptors(*messages: type[Message]) -> FileDescriptorSet:
+    """Retain transitive files for typed requests and outcomes, rejecting schema ambiguity."""
+    files: dict[str, bytes] = {}
+    pending = [message.desc().file for message in messages]
+    while pending:
+        file = pending.pop()
+        encoded = file.proto.to_binary()
+        previous = files.get(file.name)
+        if previous is not None and previous != encoded:
+            problem = f"conflicting replay descriptors for {file.name}"
+            raise ValueError(problem)
+        if previous is None:
+            files[file.name] = encoded
+            pending.extend(file.dependencies)
+    return FileDescriptorSet(
+        file=[FileDescriptorProto.from_binary(files[name]) for name in sorted(files)]
+    )

@@ -7,7 +7,7 @@ name = "vs-proto"
 version = "0.1.0"
 description = "Generated run store and host API contracts"
 requires-python = ">=3.12"
-dependencies = ["protobuf-py==0.6.0", "protovalidate==2.0.0"]
+dependencies = ["protobuf-py==0.6.0", "protobuf==6.33.5", "protovalidate==2.0.0"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

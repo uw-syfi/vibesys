@@ -8,9 +8,8 @@ from hashlib import sha256
 from math import isfinite
 
 from protobuf import Oneof
-from protovalidate import validate
 
-from vs_proto.api import Record
+from vs_proto.api import Record, validate
 from vs_proto.api import replay as pb
 
 from ._replay_identity import ENCODING_VERSION, EncodedIdentity, SemanticKey
@@ -37,7 +36,7 @@ class AcceptedReplay:
         if operation.outcome is None:
             problem = "accepted replay has no historical outcome"
             raise ReplayError(problem)
-        if sha256(operation.identity).digest() != operation.identity_digest:
+        if self.identity.digest != operation.identity_digest:
             problem = "accepted identity digest contradicts retained bytes"
             raise ReplayError(problem)
 

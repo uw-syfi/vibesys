@@ -91,7 +91,7 @@ func TestLocalTestSelectionNarrowsHeavyGroups(t *testing.T) {
 			name:        "vs-runtime outside the evaluator path (the vs-runtime part of 8b4e430df)",
 			paths:       []string{"libs/vs-runtime/src/vs_runtime/_capacity_gate.py", "libs/vs-runtime/tests/test_capacity_gate.py"},
 			wantCI:      []string{"python", "real_tiers"},
-			wantGroups:  []string{"always_on", "python_guards", "python_quality", "python_tests", "python_types"},
+			wantGroups:  []string{"always_on", "python_architecture", "python_guards", "python_quality", "python_tests", "python_types"},
 			wantSkipped: []string{"minimal_container_tests", "slurm_cluster_tests"},
 			wantTargets: -1,
 		},
@@ -99,7 +99,7 @@ func TestLocalTestSelectionNarrowsHeavyGroups(t *testing.T) {
 			name:        "vs-runtime file the evaluator examples import (93d8548d9)",
 			paths:       []string{"libs/vs-runtime/src/vs_runtime/_run_environment.py"},
 			wantCI:      []string{"examples", "python", "real_tiers"},
-			wantGroups:  []string{"always_on", "examples_native_evaluator_tests", "examples_tests", "python_guards", "python_quality", "python_tests", "python_types"},
+			wantGroups:  []string{"always_on", "examples_native_evaluator_tests", "examples_tests", "python_architecture", "python_guards", "python_quality", "python_tests", "python_types"},
 			wantSkipped: []string{"examples_cpu_check_shard", "minimal_container_tests", "slurm_cluster_tests"},
 			wantTargets: -1,
 		},
@@ -107,7 +107,7 @@ func TestLocalTestSelectionNarrowsHeavyGroups(t *testing.T) {
 			name:        "another example (7d1ab355a)",
 			paths:       []string{"examples/microservices/kvstore/README.md"},
 			wantCI:      []string{"examples", "python"},
-			wantGroups:  []string{"always_on", "examples_native_evaluator_tests", "examples_tests", "python_guards", "python_quality", "python_tests", "python_types"},
+			wantGroups:  []string{"always_on", "examples_native_evaluator_tests", "examples_tests", "python_architecture", "python_guards", "python_quality", "python_tests", "python_types"},
 			wantSkipped: []string{"examples_cpu_check_shard"},
 			wantTargets: -1,
 		},
@@ -115,7 +115,7 @@ func TestLocalTestSelectionNarrowsHeavyGroups(t *testing.T) {
 			name:        "the qwen CPU-check example",
 			paths:       []string{"examples/model-serving/qwen3.5-9b-mi210/.vibesys/tasks/default/cpu_check/scoring.py"},
 			wantCI:      []string{"examples", "python"},
-			wantGroups:  []string{"always_on", "examples_cpu_check_shard", "examples_native_evaluator_tests", "examples_tests", "python_guards", "python_quality", "python_tests", "python_types"},
+			wantGroups:  []string{"always_on", "examples_cpu_check_shard", "examples_native_evaluator_tests", "examples_tests", "python_architecture", "python_guards", "python_quality", "python_tests", "python_types"},
 			wantSkipped: []string{},
 			wantTargets: -1,
 		},
@@ -147,7 +147,7 @@ func TestLocalTestSelectionNarrowsHeavyGroups(t *testing.T) {
 			name:        "python only selects the python quality groups",
 			paths:       []string{"src/vibesys/records/api.py"},
 			wantCI:      []string{"python"},
-			wantGroups:  []string{"always_on", "python_guards", "python_quality", "python_tests", "python_types"},
+			wantGroups:  []string{"always_on", "python_architecture", "python_guards", "python_quality", "python_tests", "python_types"},
 			wantSkipped: []string{},
 			wantTargets: 0,
 		},
@@ -209,15 +209,35 @@ func TestStitchWorkspaceChangesSelectItsChecks(t *testing.T) {
 	}
 }
 
+func TestEveryProtoPathSelectsChecksOnlyVerification(t *testing.T) {
+	for _, path := range []string{
+		"proto/vibesys/api/v1/host.proto",
+		"proto/vibesys/store/v1/record.proto",
+		"proto/buf/validate/validate.proto",
+		"proto/new_package/deeply/nested/contract.proto",
+		"proto/new.proto",
+	} {
+		t.Run(path, func(t *testing.T) {
+			groups, skipped, targets := localSelection(t, []string{path}, true)
+			if want := []string{"always_on", "proto"}; !reflect.DeepEqual(groups, want) {
+				t.Fatalf("checks-only groups = %v, want %v", groups, want)
+			}
+			if len(skipped) != 0 || len(targets) != 0 {
+				t.Fatalf("unexpected skipped groups %v or native targets %v", skipped, targets)
+			}
+		})
+	}
+}
+
 func TestChecksOnlyExcludesTestGroups(t *testing.T) {
 	cases := []struct {
 		name  string
 		paths []string
 		want  []string
 	}{
-		{"python", []string{"src/vibesys/records/api.py"}, []string{"always_on", "python_guards", "python_quality", "python_types"}},
+		{"python", []string{"src/vibesys/records/api.py"}, []string{"always_on", "python_architecture", "python_guards", "python_quality", "python_types"}},
 		{"clients", []string{"clients/features/run-intents/src/state/machine.ts"}, []string{"always_on", "clients_build", "clients_quality"}},
-		{"proto", []string{"proto/vibesys/store/v1/record.proto"}, []string{"always_on"}},
+		{"proto", []string{"proto/vibesys/store/v1/record.proto"}, []string{"always_on", "proto"}},
 		{"docs", []string{"docs/contributing/development.md"}, []string{"always_on"}},
 	}
 	for _, tc := range cases {
@@ -230,7 +250,7 @@ func TestChecksOnlyExcludesTestGroups(t *testing.T) {
 				t.Errorf("checks-only ran native targets %v", targets)
 			}
 			for _, name := range groups {
-				if name == "python_tests" || name == "clients_tests" || name == "proto" || name == "repoctl_tests" {
+				if name == "python_tests" || name == "clients_tests" || name == "repoctl_tests" {
 					t.Errorf("checks-only included test group %s", name)
 				}
 			}
