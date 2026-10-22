@@ -137,6 +137,26 @@ files), use repoctl, which needs Go:
 run locally (they set `local_skip` in `.repoctl/checks.toml`). `--checks-only`
 leaves out test groups such as `python_tests` and `clients_tests`.
 
+For cheap per-module and patch coverage checks before push, supply the touched
+Python modules' own test files explicitly (repeat `--coverage-test` as needed):
+
+```bash
+./support/repoctl/repoctl test --coverage-only --base origin/main --coverage-test tests/entrypoints/test_host_helper.py
+```
+
+This mode runs only those files with one worker, then reports coverage for
+changed source files, including uncommitted changes. It uses the same branch
+coverage configuration as CI, with separate local artifacts. Both gates reuse
+CI's `python_coverage_floor` and `patch_coverage` groups, including the patch
+comparison branch and threshold. `--dry-run` lists the commands. Missing tests
+or a source file absent from the report fail explicitly; deleted source files
+are ignored.
+Choose all relevant own test files: coverage from a subset can be lower than
+CI's combined shards, so this is a partial-suite floor check, not a prediction
+of CI's full-suite result. The local patch gate also measures only coverage
+from the selected tests. Real-tier files and native builds do not run in this
+mode. CI remains responsible for aggregate coverage and the combined result.
+
 Faster commands for iterating:
 
 ```bash
