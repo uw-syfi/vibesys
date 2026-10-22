@@ -42,13 +42,13 @@ type HostServiceClient interface {
 	// with gRPC FAILED_PRECONDITION and a message naming both well-formed hashes.
 	HostCall(ctx context.Context, in *HostCallRequest, opts ...grpc.CallOption) (*HostCallResponse, error)
 	// Read runs one registered catalog operation. The runner deadline is that operation's cap.
-	Read(ctx context.Context, in *HostReadRequest, opts ...grpc.CallOption) (*HostReadResponse, error)
+	Read(ctx context.Context, in *ReadRequest, opts ...grpc.CallOption) (*ReadResponse, error)
 	// Watch runs one registered stream. The host keeps it until completion or cancellation.
 	// Closing a panel drops the client's subscription and does not cancel this stream.
-	Watch(ctx context.Context, in *HostWatchRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[HostWatchResponse], error)
+	Watch(ctx context.Context, in *WatchRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[WatchResponse], error)
 	// Mutate runs one registered unary admission or idempotent write. An admission
 	// keeps running after the caller disconnects, until the operation cap.
-	Mutate(ctx context.Context, in *HostMutateRequest, opts ...grpc.CallOption) (*HostMutateResponse, error)
+	Mutate(ctx context.Context, in *MutateRequest, opts ...grpc.CallOption) (*MutateResponse, error)
 	Hello(ctx context.Context, in *HelloRequest, opts ...grpc.CallOption) (*HelloResponse, error)
 	// Tail follows the log live until the client cancels, starting at from_seq
 	// (inclusive). Record bytes pass through unchanged; only seq is decoded.
@@ -77,9 +77,9 @@ func (c *hostServiceClient) HostCall(ctx context.Context, in *HostCallRequest, o
 	return out, nil
 }
 
-func (c *hostServiceClient) Read(ctx context.Context, in *HostReadRequest, opts ...grpc.CallOption) (*HostReadResponse, error) {
+func (c *hostServiceClient) Read(ctx context.Context, in *ReadRequest, opts ...grpc.CallOption) (*ReadResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(HostReadResponse)
+	out := new(ReadResponse)
 	err := c.cc.Invoke(ctx, HostService_Read_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
@@ -87,13 +87,13 @@ func (c *hostServiceClient) Read(ctx context.Context, in *HostReadRequest, opts 
 	return out, nil
 }
 
-func (c *hostServiceClient) Watch(ctx context.Context, in *HostWatchRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[HostWatchResponse], error) {
+func (c *hostServiceClient) Watch(ctx context.Context, in *WatchRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[WatchResponse], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	stream, err := c.cc.NewStream(ctx, &HostService_ServiceDesc.Streams[0], HostService_Watch_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
-	x := &grpc.GenericClientStream[HostWatchRequest, HostWatchResponse]{ClientStream: stream}
+	x := &grpc.GenericClientStream[WatchRequest, WatchResponse]{ClientStream: stream}
 	if err := x.ClientStream.SendMsg(in); err != nil {
 		return nil, err
 	}
@@ -104,11 +104,11 @@ func (c *hostServiceClient) Watch(ctx context.Context, in *HostWatchRequest, opt
 }
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type HostService_WatchClient = grpc.ServerStreamingClient[HostWatchResponse]
+type HostService_WatchClient = grpc.ServerStreamingClient[WatchResponse]
 
-func (c *hostServiceClient) Mutate(ctx context.Context, in *HostMutateRequest, opts ...grpc.CallOption) (*HostMutateResponse, error) {
+func (c *hostServiceClient) Mutate(ctx context.Context, in *MutateRequest, opts ...grpc.CallOption) (*MutateResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(HostMutateResponse)
+	out := new(MutateResponse)
 	err := c.cc.Invoke(ctx, HostService_Mutate_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
@@ -214,13 +214,13 @@ type HostServiceServer interface {
 	// with gRPC FAILED_PRECONDITION and a message naming both well-formed hashes.
 	HostCall(context.Context, *HostCallRequest) (*HostCallResponse, error)
 	// Read runs one registered catalog operation. The runner deadline is that operation's cap.
-	Read(context.Context, *HostReadRequest) (*HostReadResponse, error)
+	Read(context.Context, *ReadRequest) (*ReadResponse, error)
 	// Watch runs one registered stream. The host keeps it until completion or cancellation.
 	// Closing a panel drops the client's subscription and does not cancel this stream.
-	Watch(*HostWatchRequest, grpc.ServerStreamingServer[HostWatchResponse]) error
+	Watch(*WatchRequest, grpc.ServerStreamingServer[WatchResponse]) error
 	// Mutate runs one registered unary admission or idempotent write. An admission
 	// keeps running after the caller disconnects, until the operation cap.
-	Mutate(context.Context, *HostMutateRequest) (*HostMutateResponse, error)
+	Mutate(context.Context, *MutateRequest) (*MutateResponse, error)
 	Hello(context.Context, *HelloRequest) (*HelloResponse, error)
 	// Tail follows the log live until the client cancels, starting at from_seq
 	// (inclusive). Record bytes pass through unchanged; only seq is decoded.
@@ -242,13 +242,13 @@ type UnimplementedHostServiceServer struct{}
 func (UnimplementedHostServiceServer) HostCall(context.Context, *HostCallRequest) (*HostCallResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method HostCall not implemented")
 }
-func (UnimplementedHostServiceServer) Read(context.Context, *HostReadRequest) (*HostReadResponse, error) {
+func (UnimplementedHostServiceServer) Read(context.Context, *ReadRequest) (*ReadResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Read not implemented")
 }
-func (UnimplementedHostServiceServer) Watch(*HostWatchRequest, grpc.ServerStreamingServer[HostWatchResponse]) error {
+func (UnimplementedHostServiceServer) Watch(*WatchRequest, grpc.ServerStreamingServer[WatchResponse]) error {
 	return status.Error(codes.Unimplemented, "method Watch not implemented")
 }
-func (UnimplementedHostServiceServer) Mutate(context.Context, *HostMutateRequest) (*HostMutateResponse, error) {
+func (UnimplementedHostServiceServer) Mutate(context.Context, *MutateRequest) (*MutateResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Mutate not implemented")
 }
 func (UnimplementedHostServiceServer) Hello(context.Context, *HelloRequest) (*HelloResponse, error) {
@@ -309,7 +309,7 @@ func _HostService_HostCall_Handler(srv interface{}, ctx context.Context, dec fun
 }
 
 func _HostService_Read_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(HostReadRequest)
+	in := new(ReadRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
@@ -321,24 +321,24 @@ func _HostService_Read_Handler(srv interface{}, ctx context.Context, dec func(in
 		FullMethod: HostService_Read_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(HostServiceServer).Read(ctx, req.(*HostReadRequest))
+		return srv.(HostServiceServer).Read(ctx, req.(*ReadRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
 func _HostService_Watch_Handler(srv interface{}, stream grpc.ServerStream) error {
-	m := new(HostWatchRequest)
+	m := new(WatchRequest)
 	if err := stream.RecvMsg(m); err != nil {
 		return err
 	}
-	return srv.(HostServiceServer).Watch(m, &grpc.GenericServerStream[HostWatchRequest, HostWatchResponse]{ServerStream: stream})
+	return srv.(HostServiceServer).Watch(m, &grpc.GenericServerStream[WatchRequest, WatchResponse]{ServerStream: stream})
 }
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type HostService_WatchServer = grpc.ServerStreamingServer[HostWatchResponse]
+type HostService_WatchServer = grpc.ServerStreamingServer[WatchResponse]
 
 func _HostService_Mutate_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(HostMutateRequest)
+	in := new(MutateRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
@@ -350,7 +350,7 @@ func _HostService_Mutate_Handler(srv interface{}, ctx context.Context, dec func(
 		FullMethod: HostService_Mutate_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(HostServiceServer).Mutate(ctx, req.(*HostMutateRequest))
+		return srv.(HostServiceServer).Mutate(ctx, req.(*MutateRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }

@@ -29,7 +29,7 @@ func validateUnary(ctx context.Context, request any, _ *grpc.UnaryServerInfo, ha
 	// HostCall and HostRead input validation belongs to the Python command so a
 	// bad envelope stays a typed failure instead of a transport error.
 	_, hostCall := request.(*apiv1.HostCallRequest)
-	_, hostRead := request.(*apiv1.HostReadRequest)
+	_, hostRead := request.(*apiv1.ReadRequest)
 	if err := validateMessage(request, codes.InvalidArgument); err != nil && !hostCall && !hostRead {
 		return nil, err
 	}

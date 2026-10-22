@@ -18,7 +18,7 @@ import (
 // Watch runs one registered stream. The process group dies when this RPC's
 // context ends, which is an explicit cancel or the operation cap. A caller that
 // only drops a subscription keeps its own stream open, so this is not that path.
-func (h *host) Watch(request *apiv1.HostWatchRequest, stream apiv1.HostService_WatchServer) error {
+func (h *host) Watch(request *apiv1.WatchRequest, stream apiv1.HostService_WatchServer) error {
 	dispatched, ok := hostoperations.DispatchHostWatch(request)
 	if !ok {
 		return stream.Send(watchFailure(hostv1.FailureCategory_FAILURE_CATEGORY_INVALID_INPUT, "HostWatch.method is required"))
@@ -47,12 +47,12 @@ func (h *host) Watch(request *apiv1.HostWatchRequest, stream apiv1.HostService_W
 		})
 		defer timer.Stop()
 	}
-	var rejected *apiv1.HostWatchResponse
+	var rejected *apiv1.WatchResponse
 	err = h.config.HostRunner.Stream(callCtx, hostcommand.Command{
 		Executable: filepath.Join(checkout, ".venv", "bin", "vibesys"),
 		Args:       []string{"host", dispatched.CLI}, Input: input, StateRoot: h.config.Root,
 	}, func(payload []byte) error {
-		response := &apiv1.HostWatchResponse{}
+		response := &apiv1.WatchResponse{}
 		if unmarshalErr := proto.Unmarshal(payload, response); unmarshalErr != nil || response.Result == nil {
 			rejected = watchFailure(hostv1.FailureCategory_FAILURE_CATEGORY_INVALID_INPUT, "vibesys host "+dispatched.CLI+" returned invalid protobuf")
 			return errors.New("invalid watch frame")
@@ -85,12 +85,12 @@ func (h *host) Watch(request *apiv1.HostWatchRequest, stream apiv1.HostService_W
 	return stream.Send(watchFailure(hostv1.FailureCategory_FAILURE_CATEGORY_INTERNAL, "host watch ended before its first event"))
 }
 
-func watchFailure(category hostv1.FailureCategory, message string) *apiv1.HostWatchResponse {
+func watchFailure(category hostv1.FailureCategory, message string) *apiv1.WatchResponse {
 	text := safeDiagnostic(message)
 	if text == "" {
 		text = "host watch failed"
 	}
-	return &apiv1.HostWatchResponse{Result: &apiv1.HostWatchResponse_Failure{Failure: &hostv1.OperationFailure{
+	return &apiv1.WatchResponse{Result: &apiv1.WatchResponse_Failure{Failure: &hostv1.OperationFailure{
 		Category: category, Message: text,
 	}}}
 }

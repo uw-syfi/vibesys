@@ -617,7 +617,7 @@ func (x *OperationResult) GetStartRun() *StartRunResponse {
 	return nil
 }
 
-func (x *OperationResult) GetLogin() *LoginEvent {
+func (x *OperationResult) GetLogin() *LoginResponse {
 	if x != nil {
 		if x, ok := x.Result.(*OperationResult_Login); ok {
 			return x.Login
@@ -699,7 +699,7 @@ type OperationResult_StartRun struct {
 }
 
 type OperationResult_Login struct {
-	Login *LoginEvent `protobuf:"bytes,40,opt,name=login,proto3,oneof"`
+	Login *LoginResponse `protobuf:"bytes,40,opt,name=login,proto3,oneof"`
 }
 
 func (*OperationResult_Failure) isOperationResult_Result() {}
@@ -1287,7 +1287,7 @@ const file_vibesys_host_v1_admission_receipt_generated_proto_rawDesc = "" +
 	"\ftest_cluster\x18! \x01(\v2#.vibesys.host.v1.TestClusterRequestH\x00R\vtestCluster\x12?\n" +
 	"\tstart_run\x18$ \x01(\v2 .vibesys.host.v1.StartRunRequestH\x00R\bstartRun\x125\n" +
 	"\x05login\x18( \x01(\v2\x1d.vibesys.host.v1.LoginRequestH\x00R\x05loginB\x10\n" +
-	"\arequest\x12\x05\xbaH\x02\b\x01\"\x83\v\n" +
+	"\arequest\x12\x05\xbaH\x02\b\x01\"\x86\v\n" +
 	"\x0fOperationResult\x12=\n" +
 	"\afailure\x18\x02 \x01(\v2!.vibesys.host.v1.OperationFailureH\x00R\afailure\x12C\n" +
 	"\n" +
@@ -1308,8 +1308,8 @@ const file_vibesys_host_v1_admission_receipt_generated_proto_rawDesc = "" +
 	"putCluster\x12O\n" +
 	"\x0eremove_cluster\x18  \x01(\v2&.vibesys.host.v1.RemoveClusterResponseH\x00R\rremoveCluster\x12I\n" +
 	"\ftest_cluster\x18! \x01(\v2$.vibesys.host.v1.TestClusterResponseH\x00R\vtestCluster\x12@\n" +
-	"\tstart_run\x18$ \x01(\v2!.vibesys.host.v1.StartRunResponseH\x00R\bstartRun\x123\n" +
-	"\x05login\x18( \x01(\v2\x1b.vibesys.host.v1.LoginEventH\x00R\x05loginB\x0f\n" +
+	"\tstart_run\x18$ \x01(\v2!.vibesys.host.v1.StartRunResponseH\x00R\bstartRun\x126\n" +
+	"\x05login\x18( \x01(\v2\x1e.vibesys.host.v1.LoginResponseH\x00R\x05loginB\x0f\n" +
 	"\x06result\x12\x05\xbaH\x02\b\x01\"\xbf\x01\n" +
 	"\x11AdmissionIdentity\x12*\n" +
 	"\foperation_id\x18\x01 \x01(\rB\a\xbaH\x04*\x02 \x00R\voperationId\x12H\n" +
@@ -1424,7 +1424,7 @@ var file_vibesys_host_v1_admission_receipt_generated_proto_goTypes = []any{
 	(*RemoveClusterResponse)(nil),      // 41: vibesys.host.v1.RemoveClusterResponse
 	(*TestClusterResponse)(nil),        // 42: vibesys.host.v1.TestClusterResponse
 	(*StartRunResponse)(nil),           // 43: vibesys.host.v1.StartRunResponse
-	(*LoginEvent)(nil),                 // 44: vibesys.host.v1.LoginEvent
+	(*LoginResponse)(nil),              // 44: vibesys.host.v1.LoginResponse
 }
 var file_vibesys_host_v1_admission_receipt_generated_proto_depIdxs = []int32{
 	10, // 0: vibesys.host.v1.AcceptedOperation.list_tasks:type_name -> vibesys.host.v1.ListTasksRequest
@@ -1461,7 +1461,7 @@ var file_vibesys_host_v1_admission_receipt_generated_proto_depIdxs = []int32{
 	41, // 31: vibesys.host.v1.OperationResult.remove_cluster:type_name -> vibesys.host.v1.RemoveClusterResponse
 	42, // 32: vibesys.host.v1.OperationResult.test_cluster:type_name -> vibesys.host.v1.TestClusterResponse
 	43, // 33: vibesys.host.v1.OperationResult.start_run:type_name -> vibesys.host.v1.StartRunResponse
-	44, // 34: vibesys.host.v1.OperationResult.login:type_name -> vibesys.host.v1.LoginEvent
+	44, // 34: vibesys.host.v1.OperationResult.login:type_name -> vibesys.host.v1.LoginResponse
 	4,  // 35: vibesys.host.v1.PublicationAbsent.intent:type_name -> vibesys.host.v1.PublicationEvidence
 	4,  // 36: vibesys.host.v1.PublicationPublished.intent:type_name -> vibesys.host.v1.PublicationEvidence
 	2,  // 37: vibesys.host.v1.PublicationPublished.result:type_name -> vibesys.host.v1.OperationResult

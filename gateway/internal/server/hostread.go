@@ -17,7 +17,7 @@ import (
 // Read runs one registered catalog operation. The runner deadline is that
 // operation's cap from the generated registry. A read is not admission: a
 // deadline or cancellation is that category, not an unconfirmed admission.
-func (h *host) Read(ctx context.Context, request *apiv1.HostReadRequest) (*apiv1.HostReadResponse, error) {
+func (h *host) Read(ctx context.Context, request *apiv1.ReadRequest) (*apiv1.ReadResponse, error) {
 	dispatched, ok := hostoperations.DispatchHostRead(request)
 	if !ok {
 		return readFailure(hostv1.FailureCategory_FAILURE_CATEGORY_INVALID_INPUT, "HostRead.method is required"), nil
@@ -58,7 +58,7 @@ func (h *host) Read(ctx context.Context, request *apiv1.HostReadRequest) (*apiv1
 		}
 		return readFailure(hostv1.FailureCategory_FAILURE_CATEGORY_INTERNAL, message+"\n"+result.Stderr), nil
 	}
-	response := &apiv1.HostReadResponse{}
+	response := &apiv1.ReadResponse{}
 	if err := proto.Unmarshal(result.Output, response); err != nil || response.Result == nil {
 		return readFailure(hostv1.FailureCategory_FAILURE_CATEGORY_INVALID_INPUT, "vibesys host "+dispatched.CLI+" returned invalid protobuf"), nil
 	}
@@ -75,12 +75,12 @@ func (h *host) Read(ctx context.Context, request *apiv1.HostReadRequest) (*apiv1
 	return response, nil
 }
 
-func readFailure(category hostv1.FailureCategory, message string) *apiv1.HostReadResponse {
+func readFailure(category hostv1.FailureCategory, message string) *apiv1.ReadResponse {
 	text := safeDiagnostic(strings.TrimSpace(message))
 	if text == "" {
 		text = "host read failed"
 	}
-	return &apiv1.HostReadResponse{Result: &apiv1.HostReadResponse_Failure{Failure: &hostv1.OperationFailure{
+	return &apiv1.ReadResponse{Result: &apiv1.ReadResponse_Failure{Failure: &hostv1.OperationFailure{
 		Category: category, Message: text,
 	}}}
 }

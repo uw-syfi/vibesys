@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from vibesys.api.host_operations.api import ClusterRefusedError, serve_cluster
 from vs_project.api.testing import FakeAdmissionStore
-from vs_proto.api import HostMutateRequest, HostMutateResponse, Oneof, validate
+from vs_proto.api import MutateRequest, MutateResponse, Oneof, validate
 from vs_proto.api import host_payloads as pb
 
 
@@ -23,7 +23,7 @@ def _settings() -> pb.ComputeSettings:
 
 
 def _payload() -> bytes:
-    request = HostMutateRequest(
+    request = MutateRequest(
         checkout="/src/checkout",
         method=Oneof(
             "put_cluster",
@@ -44,10 +44,10 @@ def test_putting_a_cluster_twice_applies_once() -> None:
 
     store = FakeAdmissionStore()
     payload = _payload()
-    first = HostMutateResponse.from_binary(
+    first = MutateResponse.from_binary(
         serve_cluster(payload, store=store, host_user="host-a", apply=apply)
     )
-    second = HostMutateResponse.from_binary(
+    second = MutateResponse.from_binary(
         serve_cluster(payload, store=store, host_user="host-a", apply=apply)
     )
 
@@ -68,10 +68,10 @@ def test_a_refused_cluster_change_is_not_applied_again() -> None:
 
     store = FakeAdmissionStore()
     payload = _payload()
-    first = HostMutateResponse.from_binary(
+    first = MutateResponse.from_binary(
         serve_cluster(payload, store=store, host_user="host-a", apply=apply)
     )
-    second = HostMutateResponse.from_binary(
+    second = MutateResponse.from_binary(
         serve_cluster(payload, store=store, host_user="host-a", apply=apply)
     )
 

@@ -239,8 +239,8 @@ func TestHostCallLostAdmissionIsExplicitlyUnconfirmed(t *testing.T) {
 	}
 }
 
-func readRequest() *apiv1.HostReadRequest {
-	return &apiv1.HostReadRequest{Checkout: "/src/checkout", Method: &apiv1.HostReadRequest_ListTasks{ListTasks: &hostv1.ListTasksRequest{RequestId: "request-a", Project: "/project"}}}
+func readRequest() *apiv1.ReadRequest {
+	return &apiv1.ReadRequest{Checkout: "/src/checkout", Method: &apiv1.ReadRequest_ListTasks{ListTasks: &hostv1.ListTasksRequest{RequestId: "request-a", Project: "/project"}}}
 }
 
 func TestHostReadUsesTheRegistryCommandAndCap(t *testing.T) {
@@ -249,7 +249,7 @@ func TestHostReadUsesTheRegistryCommandAndCap(t *testing.T) {
 	if !ok || dispatched.CLI != "list-tasks" || dispatched.Deadline != 10*time.Second {
 		t.Fatalf("list-tasks: %+v %v", dispatched, ok)
 	}
-	machine := &apiv1.HostReadRequest{Method: &apiv1.HostReadRequest_DescribeMachine{DescribeMachine: &hostv1.DescribeMachineRequest{RequestId: "request-a"}}}
+	machine := &apiv1.ReadRequest{Method: &apiv1.ReadRequest_DescribeMachine{DescribeMachine: &hostv1.DescribeMachineRequest{RequestId: "request-a"}}}
 	described, ok := hostoperations.DispatchHostRead(machine)
 	if !ok || described.CLI != "describe-machine" || described.Deadline != 25*time.Second {
 		t.Fatalf("describe-machine: %+v %v", described, ok)
@@ -264,11 +264,11 @@ func TestHostReadUsesTheRegistryCommandAndCap(t *testing.T) {
 		if !filepath.IsAbs(c.StateRoot) {
 			t.Error("missing run index root")
 		}
-		decoded := &apiv1.HostReadRequest{}
+		decoded := &apiv1.ReadRequest{}
 		if err := proto.Unmarshal(c.Input, decoded); err != nil || !proto.Equal(request, decoded) {
 			t.Errorf("stdin: %v %v", decoded, err)
 		}
-		output, _ := proto.Marshal(&apiv1.HostReadResponse{Result: &apiv1.HostReadResponse_ListTasks{ListTasks: &hostv1.ListTasksResponse{RequestId: "request-a", Tasks: &hostv1.TaskList{Version: 1}}}})
+		output, _ := proto.Marshal(&apiv1.ReadResponse{Result: &apiv1.ReadResponse_ListTasks{ListTasks: &hostv1.ListTasksResponse{RequestId: "request-a", Tasks: &hostv1.TaskList{Version: 1}}}})
 		return hostcommand.Result{Output: output}, nil
 	}}
 	f := startWithConfig(t, server.Config{HostRunner: runner})
@@ -300,7 +300,7 @@ func TestHostReadDeadlineIsNotAnUnconfirmedAdmission(t *testing.T) {
 
 func TestHostReadRejectsAMismatchedIdentity(t *testing.T) {
 	runner := hostcommand.FakeRunner{Program: func(ctx context.Context, c hostcommand.Command) (hostcommand.Result, error) {
-		output, _ := proto.Marshal(&apiv1.HostReadResponse{Result: &apiv1.HostReadResponse_ListTasks{ListTasks: &hostv1.ListTasksResponse{RequestId: "other"}}})
+		output, _ := proto.Marshal(&apiv1.ReadResponse{Result: &apiv1.ReadResponse_ListTasks{ListTasks: &hostv1.ListTasksResponse{RequestId: "other"}}})
 		return hostcommand.Result{Output: output}, nil
 	}}
 	f := startWithConfig(t, server.Config{HostRunner: runner})
@@ -314,7 +314,7 @@ func TestHostReadRejectsAMismatchedIdentity(t *testing.T) {
 		return hostcommand.Result{}, nil
 	}}
 	gateway := startWithConfig(t, server.Config{HostRunner: refusing})
-	missing, err := client(t, gateway, false).Read(gateway.ctx, &apiv1.HostReadRequest{Checkout: "/src/checkout"})
+	missing, err := client(t, gateway, false).Read(gateway.ctx, &apiv1.ReadRequest{Checkout: "/src/checkout"})
 	if err != nil || spawned || missing.GetFailure().GetCategory() != hostv1.FailureCategory_FAILURE_CATEGORY_INVALID_INPUT {
 		t.Fatalf("missing method spawned or failed open: %v %v %v", missing, err, spawned)
 	}

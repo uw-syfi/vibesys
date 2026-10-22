@@ -25,7 +25,7 @@ var File_vibesys_api_v1_host_operations_proto protoreflect.FileDescriptor
 
 const file_vibesys_api_v1_host_operations_proto_rawDesc = "" +
 	"\n" +
-	"$vibesys/api/v1/host_operations.proto\x12\x0evibesys.api.v1\x1a\x1evibesys/api/v1/host_call.proto\x1a'vibesys/host/v1/operation_options.proto\x1a vibesys/host/v1/operations.proto2\xc1\x16\n" +
+	"$vibesys/api/v1/host_operations.proto\x12\x0evibesys.api.v1\x1a\x1evibesys/api/v1/host_call.proto\x1a'vibesys/host/v1/operation_options.proto\x1a vibesys/host/v1/operations.proto2\xc4\x16\n" +
 	"\x15HostOperationsService\x12\x80\x01\n" +
 	"\tListTasks\x12!.vibesys.host.v1.ListTasksRequest\x1a\".vibesys.host.v1.ListTasksResponse\",\xca\xf3\x18(\b\n" +
 	"\x10\x90N\x18\x88' \x01(\x020\x018\x01J\x06\n" +
@@ -49,8 +49,8 @@ const file_vibesys_api_v1_host_operations_proto_rawDesc = "" +
 	"\x01\x01\x12\x01\x01J\x06\n" +
 	"\x01\x03\x12\x01\x02P\x11X\x11b\x11inspect.candidate\x12\x99\x01\n" +
 	"\rCompletePaths\x12%.vibesys.host.v1.CompletePathsRequest\x1a&.vibesys.host.v1.CompletePathsResponse\"9\xca\xf3\x185\b\x12\x10\x88'\x18\x88' \x01(\x020\x018\x03J\x06\n" +
-	"\x01\x01\x12\x01\x01P\x12X\x12b\x17paths.complete_registry\x12\x80\x01\n" +
-	"\x05Login\x12\x1d.vibesys.host.v1.LoginRequest\x1a\x1b.vibesys.host.v1.LoginEvent\"9\xca\xf3\x185\b(\x10\xc0\xcf$\x18\x88' \x03(\x030\x028\x01@\xa8\xc3\x01J\x06\n" +
+	"\x01\x01\x12\x01\x01P\x12X\x12b\x17paths.complete_registry\x12\x83\x01\n" +
+	"\x05Login\x12\x1d.vibesys.host.v1.LoginRequest\x1a\x1e.vibesys.host.v1.LoginResponse\"9\xca\xf3\x185\b(\x10\xc0\xcf$\x18\x88' \x03(\x030\x028\x01@\xa8\xc3\x01J\x06\n" +
 	"\x01\x01\x12\x01\x01P(X(b\x12agent_logins.start0\x01\x12\xa5\x01\n" +
 	"\x12InspectDestination\x12*.vibesys.host.v1.InspectDestinationRequest\x1a+.vibesys.host.v1.InspectDestinationResponse\"6\xca\xf3\x182\b\x17\x10\x90N\x18\x88' \x01(\x020\x018\x01J\x06\n" +
 	"\x01\x01\x12\x01\x01P\x17X\x17b\x14examples.destination\x12\x91\x01\n" +
@@ -105,7 +105,7 @@ var file_vibesys_api_v1_host_operations_proto_goTypes = []any{
 	(*v1.PreflightRunResponse)(nil),       // 26: vibesys.host.v1.PreflightRunResponse
 	(*v1.InspectCandidateResponse)(nil),   // 27: vibesys.host.v1.InspectCandidateResponse
 	(*v1.CompletePathsResponse)(nil),      // 28: vibesys.host.v1.CompletePathsResponse
-	(*v1.LoginEvent)(nil),                 // 29: vibesys.host.v1.LoginEvent
+	(*v1.LoginResponse)(nil),              // 29: vibesys.host.v1.LoginResponse
 	(*v1.InspectDestinationResponse)(nil), // 30: vibesys.host.v1.InspectDestinationResponse
 	(*v1.CreateExampleResponse)(nil),      // 31: vibesys.host.v1.CreateExampleResponse
 	(*v1.CopyProjectResponse)(nil),        // 32: vibesys.host.v1.CopyProjectResponse
@@ -147,7 +147,7 @@ var file_vibesys_api_v1_host_operations_proto_depIdxs = []int32{
 	26, // 26: vibesys.api.v1.HostOperationsService.PreflightRun:output_type -> vibesys.host.v1.PreflightRunResponse
 	27, // 27: vibesys.api.v1.HostOperationsService.InspectCandidate:output_type -> vibesys.host.v1.InspectCandidateResponse
 	28, // 28: vibesys.api.v1.HostOperationsService.CompletePaths:output_type -> vibesys.host.v1.CompletePathsResponse
-	29, // 29: vibesys.api.v1.HostOperationsService.Login:output_type -> vibesys.host.v1.LoginEvent
+	29, // 29: vibesys.api.v1.HostOperationsService.Login:output_type -> vibesys.host.v1.LoginResponse
 	30, // 30: vibesys.api.v1.HostOperationsService.InspectDestination:output_type -> vibesys.host.v1.InspectDestinationResponse
 	31, // 31: vibesys.api.v1.HostOperationsService.CreateExample:output_type -> vibesys.host.v1.CreateExampleResponse
 	32, // 32: vibesys.api.v1.HostOperationsService.CopyProject:output_type -> vibesys.host.v1.CopyProjectResponse

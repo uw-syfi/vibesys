@@ -50,7 +50,7 @@ message OperationResult {
     RemoveClusterResponse remove_cluster = 32;
     TestClusterResponse test_cluster = 33;
     StartRunResponse start_run = 36;
-    LoginEvent login = 40;
+    LoginResponse login = 40;
   }
 }
 

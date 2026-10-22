@@ -8,11 +8,11 @@ import {
   HelloResponseSchema,
   type HostCallRequest,
   HostCallRequestSchema,
-  type HostMutateRequest,
-  HostMutateRequestSchema,
-  type HostReadRequest,
-  HostReadRequestSchema,
   HostService,
+  type MutateRequest,
+  MutateRequestSchema,
+  type ReadRequest,
+  ReadRequestSchema,
   TailRequestSchema,
 } from '@vibesys/proto';
 import {
@@ -38,12 +38,12 @@ export interface FakeHostCall {
 }
 
 export interface FakeRead {
-  readonly request: HostReadRequest;
+  readonly request: ReadRequest;
   end(code?: number, detail?: string): void;
 }
 
 export interface FakeMutate {
-  readonly request: HostMutateRequest;
+  readonly request: MutateRequest;
   end(code?: number, detail?: string): void;
 }
 
@@ -133,7 +133,7 @@ export class FakeGateway implements GatewayDialer {
 
   #mutate(stream: ServerHttp2Stream, bytes: Uint8Array): void {
     const call: FakeMutate = {
-      request: fromBinary(HostMutateRequestSchema, bytes),
+      request: fromBinary(MutateRequestSchema, bytes),
       end: (code, detail) => end(stream, code, detail),
     };
     const waiter = this.#mutateWaiters.shift();
@@ -143,7 +143,7 @@ export class FakeGateway implements GatewayDialer {
 
   #read(stream: ServerHttp2Stream, bytes: Uint8Array): void {
     const call: FakeRead = {
-      request: fromBinary(HostReadRequestSchema, bytes),
+      request: fromBinary(ReadRequestSchema, bytes),
       end: (code, detail) => end(stream, code, detail),
     };
     const waiter = this.#readWaiters.shift();

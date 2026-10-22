@@ -15,12 +15,12 @@ import (
 type watchStream struct {
 	grpc.ServerStream
 	ctx  context.Context
-	sent []*apiv1.HostWatchResponse
+	sent []*apiv1.WatchResponse
 }
 
 func (s *watchStream) Context() context.Context { return s.ctx }
 
-func (s *watchStream) Send(response *apiv1.HostWatchResponse) error {
+func (s *watchStream) Send(response *apiv1.WatchResponse) error {
 	s.sent = append(s.sent, response)
 	return nil
 }
@@ -29,13 +29,13 @@ func (s *watchStream) SendHeader(metadata.MD) error { return nil }
 func (s *watchStream) SetHeader(metadata.MD) error  { return nil }
 func (s *watchStream) SetTrailer(metadata.MD)       {}
 
-func TestWatchForwardsTheLoginEvent(t *testing.T) {
-	event := &hostv1.LoginEvent{
+func TestWatchForwardsTheLoginResponse(t *testing.T) {
+	event := &hostv1.LoginResponse{
 		RequestId: "request-a",
 		Sequence:  1,
-		Body:      &hostv1.LoginEvent_Started{Started: &hostv1.LoginStartedBody{Instruction: proto.String("Open https://a.example/x")}},
+		Body:      &hostv1.LoginResponse_Started{Started: &hostv1.LoginStartedBody{Instruction: proto.String("Open https://a.example/x")}},
 	}
-	payload, err := proto.Marshal(&apiv1.HostWatchResponse{Result: &apiv1.HostWatchResponse_Login{Login: event}})
+	payload, err := proto.Marshal(&apiv1.WatchResponse{Result: &apiv1.WatchResponse_Login{Login: event}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -43,9 +43,9 @@ func TestWatchForwardsTheLoginEvent(t *testing.T) {
 		return hostcommand.Result{Output: payload}, nil
 	}}}}
 	stream := &watchStream{ctx: context.Background()}
-	request := &apiv1.HostWatchRequest{
+	request := &apiv1.WatchRequest{
 		Checkout: "/checkout",
-		Method:   &apiv1.HostWatchRequest_Login{Login: &hostv1.LoginRequest{RequestId: "request-a", Provider: "claude"}},
+		Method:   &apiv1.WatchRequest_Login{Login: &hostv1.LoginRequest{RequestId: "request-a", Provider: "claude"}},
 	}
 	if err := service.Watch(request, stream); err != nil {
 		t.Fatal(err)

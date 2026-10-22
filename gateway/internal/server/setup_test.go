@@ -28,9 +28,9 @@ func TestCompletePathsListsDirectoriesAndKeepsHintsFalseWithoutAnExecutable(t *t
 		return hostcommand.Result{}, nil
 	}}
 	f := startWithConfig(t, server.Config{HostRunner: runner})
-	response, err := client(t, f, false).Read(f.ctx, &apiv1.HostReadRequest{
+	response, err := client(t, f, false).Read(f.ctx, &apiv1.ReadRequest{
 		Checkout: "~",
-		Method: &apiv1.HostReadRequest_CompletePaths{CompletePaths: &hostv1.CompletePathsRequest{
+		Method: &apiv1.ReadRequest_CompletePaths{CompletePaths: &hostv1.CompletePathsRequest{
 			RequestId: "request-a", Prefix: root + "/",
 		}},
 	})
@@ -52,9 +52,9 @@ func TestInspectCandidateReportsAMissingExecutableWithoutRunningIt(t *testing.T)
 		return hostcommand.Result{}, nil
 	}}
 	f := startWithConfig(t, server.Config{HostRunner: runner})
-	response, err := client(t, f, false).Read(f.ctx, &apiv1.HostReadRequest{
+	response, err := client(t, f, false).Read(f.ctx, &apiv1.ReadRequest{
 		Checkout: root,
-		Method: &apiv1.HostReadRequest_InspectCandidate{InspectCandidate: &hostv1.InspectCandidateRequest{
+		Method: &apiv1.ReadRequest_InspectCandidate{InspectCandidate: &hostv1.InspectCandidateRequest{
 			RequestId: "request-a", Path: root, SelectionRevision: 1,
 		}},
 	})
@@ -77,16 +77,16 @@ func TestInspectCandidateRefusesADifferentSchemaHash(t *testing.T) {
 		if command.Executable != executable || len(command.Args) != 2 || command.Args[0] != "host" || command.Args[1] != "inspect-candidate" {
 			t.Errorf("command: %+v", command)
 		}
-		output, err := proto.Marshal(&apiv1.HostReadResponse{Result: &apiv1.HostReadResponse_InspectCandidate{InspectCandidate: &hostv1.InspectCandidateResponse{
+		output, err := proto.Marshal(&apiv1.ReadResponse{Result: &apiv1.ReadResponse_InspectCandidate{InspectCandidate: &hostv1.InspectCandidateResponse{
 			RequestId: "request-a", SelectionRevision: 1, SchemaHash: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
 			State: hostv1.CandidateState_CANDIDATE_STATE_NOT_FOUND, MinimumVersion: "0.1.1",
 		}}})
 		return hostcommand.Result{Output: output}, err
 	}}
 	f := startWithConfig(t, server.Config{HostRunner: runner})
-	response, err := client(t, f, false).Read(f.ctx, &apiv1.HostReadRequest{
+	response, err := client(t, f, false).Read(f.ctx, &apiv1.ReadRequest{
 		Checkout: root,
-		Method: &apiv1.HostReadRequest_InspectCandidate{InspectCandidate: &hostv1.InspectCandidateRequest{
+		Method: &apiv1.ReadRequest_InspectCandidate{InspectCandidate: &hostv1.InspectCandidateRequest{
 			RequestId: "request-a", Path: root, SelectionRevision: 1,
 		}},
 	})
@@ -106,12 +106,12 @@ func TestInspectCandidateEchoesTheSelectionAndFillsPathHints(t *testing.T) {
 		t.Fatal(err)
 	}
 	runner := hostcommand.FakeRunner{Program: func(_ context.Context, command hostcommand.Command) (hostcommand.Result, error) {
-		request := &apiv1.HostReadRequest{}
+		request := &apiv1.ReadRequest{}
 		if err := proto.Unmarshal(command.Input, request); err != nil {
 			return hostcommand.Result{}, err
 		}
 		query := request.GetInspectCandidate()
-		output, err := proto.Marshal(&apiv1.HostReadResponse{Result: &apiv1.HostReadResponse_InspectCandidate{InspectCandidate: &hostv1.InspectCandidateResponse{
+		output, err := proto.Marshal(&apiv1.ReadResponse{Result: &apiv1.ReadResponse_InspectCandidate{InspectCandidate: &hostv1.InspectCandidateResponse{
 			RequestId: query.GetRequestId(), SelectionRevision: query.GetSelectionRevision(), SchemaHash: schemahash.APISchemaHash,
 			State: hostv1.CandidateState_CANDIDATE_STATE_FOUND, MinimumVersion: "0.1.1",
 			VibesysCheckout: true, VibesysProject: true, GitRepository: false,
@@ -120,9 +120,9 @@ func TestInspectCandidateEchoesTheSelectionAndFillsPathHints(t *testing.T) {
 		return hostcommand.Result{Output: output}, err
 	}}
 	f := startWithConfig(t, server.Config{HostRunner: runner})
-	inspected, err := client(t, f, false).Read(f.ctx, &apiv1.HostReadRequest{
+	inspected, err := client(t, f, false).Read(f.ctx, &apiv1.ReadRequest{
 		Checkout: child,
-		Method: &apiv1.HostReadRequest_InspectCandidate{InspectCandidate: &hostv1.InspectCandidateRequest{
+		Method: &apiv1.ReadRequest_InspectCandidate{InspectCandidate: &hostv1.InspectCandidateRequest{
 			RequestId: "request-a", Path: child, SelectionRevision: 4,
 		}},
 	})
@@ -130,9 +130,9 @@ func TestInspectCandidateEchoesTheSelectionAndFillsPathHints(t *testing.T) {
 	if err != nil || got.GetSelectionRevision() != 4 || !got.GetVibesysCheckout() {
 		t.Fatalf("inspect: %v %v", inspected, err)
 	}
-	listed, err := client(t, f, false).Read(f.ctx, &apiv1.HostReadRequest{
+	listed, err := client(t, f, false).Read(f.ctx, &apiv1.ReadRequest{
 		Checkout: "~",
-		Method: &apiv1.HostReadRequest_CompletePaths{CompletePaths: &hostv1.CompletePathsRequest{
+		Method: &apiv1.ReadRequest_CompletePaths{CompletePaths: &hostv1.CompletePathsRequest{
 			RequestId: "request-b", Prefix: root + "/",
 		}},
 	})

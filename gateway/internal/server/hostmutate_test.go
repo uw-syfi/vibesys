@@ -10,10 +10,10 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-func startRunRequest() *apiv1.HostMutateRequest {
-	return &apiv1.HostMutateRequest{
+func startRunRequest() *apiv1.MutateRequest {
+	return &apiv1.MutateRequest{
 		Checkout: "/src/checkout",
-		Method: &apiv1.HostMutateRequest_StartRun{StartRun: &hostv1.StartRunRequest{
+		Method: &apiv1.MutateRequest_StartRun{StartRun: &hostv1.StartRunRequest{
 			RequestId: "request-a", Project: "/project", Task: "mpmc",
 		}},
 	}
@@ -26,7 +26,7 @@ func TestMutateAdmissionSurvivesCallerCancel(t *testing.T) {
 		if err := ctx.Err(); err != nil {
 			t.Errorf("runner context ended with the caller: %v", err)
 		}
-		output, err := proto.Marshal(&apiv1.HostMutateResponse{Result: &apiv1.HostMutateResponse_StartRun{StartRun: &hostv1.StartRunResponse{
+		output, err := proto.Marshal(&apiv1.MutateResponse{Result: &apiv1.MutateResponse_StartRun{StartRun: &hostv1.StartRunResponse{
 			RequestId: "request-a", RunId: "run-1", InstanceId: "inst-1",
 		}}})
 		if err != nil {

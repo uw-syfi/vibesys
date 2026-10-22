@@ -6,8 +6,8 @@ from vibesys.api.host_operations.api import StartRefusedError, StartUnknownError
 from vs_project.api.testing import FakeAdmissionStore
 from vs_proto.api import (
     FailureCategory,
-    HostMutateRequest,
-    HostMutateResponse,
+    MutateRequest,
+    MutateResponse,
     Oneof,
     OperationFailure,
     validate,
@@ -16,7 +16,7 @@ from vs_proto.api import host_payloads as pb
 
 
 def _payload(request_id: str = "request-a") -> bytes:
-    request = HostMutateRequest(
+    request = MutateRequest(
         checkout="/src/checkout",
         method=Oneof(
             "start_run",
@@ -27,8 +27,8 @@ def _payload(request_id: str = "request-a") -> bytes:
     return request.to_binary()
 
 
-def _response(payload: bytes) -> HostMutateResponse:
-    response = HostMutateResponse.from_binary(payload)
+def _response(payload: bytes) -> MutateResponse:
+    response = MutateResponse.from_binary(payload)
     validate(response)
     return response
 

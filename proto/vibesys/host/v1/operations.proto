@@ -1610,7 +1610,7 @@ message StartRunResponse {
   }];
 }
 
-message LoginEvent {
+message LoginResponse {
   string request_id = 1 [(buf.validate.field).string = {
     max_bytes: 131072
     min_len: 1

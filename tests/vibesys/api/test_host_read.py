@@ -9,10 +9,10 @@ from server.host_helper_requests import read_failure_category
 from vibesys.api.host_operations.api import ReadSource, execute_host_read
 from vs_proto.api import (
     FailureCategory,
-    HostReadRequest,
-    HostReadResponse,
     Oneof,
     OperationFailure,
+    ReadRequest,
+    ReadResponse,
     to_mapping,
 )
 from vs_proto.api import (
@@ -59,7 +59,7 @@ def _as_dict(value: object) -> dict[str, object]:
 
 
 def _failure(encoded: bytes) -> OperationFailure:
-    response = HostReadResponse.from_binary(encoded)
+    response = ReadResponse.from_binary(encoded)
     assert response.result is not None
     assert response.result.field == "failure"
     failure = response.result.value
@@ -68,15 +68,13 @@ def _failure(encoded: bytes) -> OperationFailure:
 
 
 def _envelope(cli_payload: pb.ListComputeRequest) -> bytes:
-    return HostReadRequest(
-        checkout="/checkout", method=Oneof("list_compute", cli_payload)
-    ).to_binary()
+    return ReadRequest(checkout="/checkout", method=Oneof("list_compute", cli_payload)).to_binary()
 
 
 def test_list_compute_keeps_the_cluster_source() -> None:
     payload = _envelope(pb.ListComputeRequest(request_id="request-a"))
     encoded = execute_host_read(payload, _source(_settings()), cli="list-compute")
-    response = HostReadResponse.from_binary(encoded)
+    response = ReadResponse.from_binary(encoded)
     assert response.result is not None
     assert response.result.field == "list_compute"
     settings = response.result.value.settings
@@ -102,7 +100,7 @@ def test_a_mismatched_command_or_oversize_payload_is_invalid_input() -> None:
     assert oversize.category == FailureCategory.INVALID_INPUT
     missing = _failure(
         execute_host_read(
-            HostReadRequest(checkout="/checkout").to_binary(),
+            ReadRequest(checkout="/checkout").to_binary(),
             _source(_settings()),
             cli="list-compute",
         )

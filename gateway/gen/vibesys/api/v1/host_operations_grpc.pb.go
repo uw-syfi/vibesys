@@ -61,7 +61,7 @@ type HostOperationsServiceClient interface {
 	CompletePaths(ctx context.Context, in *v1.CompletePathsRequest, opts ...grpc.CallOption) (*v1.CompletePathsResponse, error)
 	// Login is owned by the host until completion or an explicit cancel. Closing a
 	// panel drops the client's subscription and does not abort this stream.
-	Login(ctx context.Context, in *v1.LoginRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[v1.LoginEvent], error)
+	Login(ctx context.Context, in *v1.LoginRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[v1.LoginResponse], error)
 	InspectDestination(ctx context.Context, in *v1.InspectDestinationRequest, opts ...grpc.CallOption) (*v1.InspectDestinationResponse, error)
 	CreateExample(ctx context.Context, in *v1.CreateExampleRequest, opts ...grpc.CallOption) (*v1.CreateExampleResponse, error)
 	CopyProject(ctx context.Context, in *v1.CopyProjectRequest, opts ...grpc.CallOption) (*v1.CopyProjectResponse, error)
@@ -179,13 +179,13 @@ func (c *hostOperationsServiceClient) CompletePaths(ctx context.Context, in *v1.
 	return out, nil
 }
 
-func (c *hostOperationsServiceClient) Login(ctx context.Context, in *v1.LoginRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[v1.LoginEvent], error) {
+func (c *hostOperationsServiceClient) Login(ctx context.Context, in *v1.LoginRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[v1.LoginResponse], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	stream, err := c.cc.NewStream(ctx, &HostOperationsService_ServiceDesc.Streams[0], HostOperationsService_Login_FullMethodName, cOpts...)
 	if err != nil {
 		return nil, err
 	}
-	x := &grpc.GenericClientStream[v1.LoginRequest, v1.LoginEvent]{ClientStream: stream}
+	x := &grpc.GenericClientStream[v1.LoginRequest, v1.LoginResponse]{ClientStream: stream}
 	if err := x.ClientStream.SendMsg(in); err != nil {
 		return nil, err
 	}
@@ -196,7 +196,7 @@ func (c *hostOperationsServiceClient) Login(ctx context.Context, in *v1.LoginReq
 }
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type HostOperationsService_LoginClient = grpc.ServerStreamingClient[v1.LoginEvent]
+type HostOperationsService_LoginClient = grpc.ServerStreamingClient[v1.LoginResponse]
 
 func (c *hostOperationsServiceClient) InspectDestination(ctx context.Context, in *v1.InspectDestinationRequest, opts ...grpc.CallOption) (*v1.InspectDestinationResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
@@ -317,7 +317,7 @@ type HostOperationsServiceServer interface {
 	CompletePaths(context.Context, *v1.CompletePathsRequest) (*v1.CompletePathsResponse, error)
 	// Login is owned by the host until completion or an explicit cancel. Closing a
 	// panel drops the client's subscription and does not abort this stream.
-	Login(*v1.LoginRequest, grpc.ServerStreamingServer[v1.LoginEvent]) error
+	Login(*v1.LoginRequest, grpc.ServerStreamingServer[v1.LoginResponse]) error
 	InspectDestination(context.Context, *v1.InspectDestinationRequest) (*v1.InspectDestinationResponse, error)
 	CreateExample(context.Context, *v1.CreateExampleRequest) (*v1.CreateExampleResponse, error)
 	CopyProject(context.Context, *v1.CopyProjectRequest) (*v1.CopyProjectResponse, error)
@@ -372,7 +372,7 @@ func (UnimplementedHostOperationsServiceServer) InspectCandidate(context.Context
 func (UnimplementedHostOperationsServiceServer) CompletePaths(context.Context, *v1.CompletePathsRequest) (*v1.CompletePathsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method CompletePaths not implemented")
 }
-func (UnimplementedHostOperationsServiceServer) Login(*v1.LoginRequest, grpc.ServerStreamingServer[v1.LoginEvent]) error {
+func (UnimplementedHostOperationsServiceServer) Login(*v1.LoginRequest, grpc.ServerStreamingServer[v1.LoginResponse]) error {
 	return status.Error(codes.Unimplemented, "method Login not implemented")
 }
 func (UnimplementedHostOperationsServiceServer) InspectDestination(context.Context, *v1.InspectDestinationRequest) (*v1.InspectDestinationResponse, error) {
@@ -593,11 +593,11 @@ func _HostOperationsService_Login_Handler(srv interface{}, stream grpc.ServerStr
 	if err := stream.RecvMsg(m); err != nil {
 		return err
 	}
-	return srv.(HostOperationsServiceServer).Login(m, &grpc.GenericServerStream[v1.LoginRequest, v1.LoginEvent]{ServerStream: stream})
+	return srv.(HostOperationsServiceServer).Login(m, &grpc.GenericServerStream[v1.LoginRequest, v1.LoginResponse]{ServerStream: stream})
 }
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
-type HostOperationsService_LoginServer = grpc.ServerStreamingServer[v1.LoginEvent]
+type HostOperationsService_LoginServer = grpc.ServerStreamingServer[v1.LoginResponse]
 
 func _HostOperationsService_InspectDestination_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(v1.InspectDestinationRequest)

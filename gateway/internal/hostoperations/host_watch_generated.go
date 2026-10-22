@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-func DispatchHostWatch(request *apiv1.HostWatchRequest) (HostCall, bool) {
+func DispatchHostWatch(request *apiv1.WatchRequest) (HostCall, bool) {
 	switch {
 	case request.GetLogin() != nil:
 		return HostCall{CLI: "login", Deadline: 600000 * time.Millisecond, Executor: 1, Effect: 3, FirstEvent: 25000 * time.Millisecond}, true
@@ -15,7 +15,7 @@ func DispatchHostWatch(request *apiv1.HostWatchRequest) (HostCall, bool) {
 	}
 }
 
-func HostWatchResponseValid(request *apiv1.HostWatchRequest, response *apiv1.HostWatchResponse) bool {
+func HostWatchResponseValid(request *apiv1.WatchRequest, response *apiv1.WatchResponse) bool {
 	switch {
 	case request.GetLogin() != nil:
 		got := response.GetLogin()

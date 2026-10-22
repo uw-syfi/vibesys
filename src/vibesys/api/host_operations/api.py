@@ -24,10 +24,10 @@ from vibesys.api.host_operations._start import StartRefusedError, StartUnknownEr
 from vs_proto.api import (
     AcceptedRequest,
     FailureCategory,
-    HostReadRequest,
-    HostReadResponse,
     Oneof,
     OperationFailure,
+    ReadRequest,
+    ReadResponse,
     ValidationError,
     host_operations,
     validate,
@@ -71,7 +71,7 @@ def host_read_failure(category: FailureCategory, message: str) -> bytes:
     if len(encoded) > _MAX_DIAGNOSTIC:
         text = encoded[:_MAX_DIAGNOSTIC].decode(errors="ignore") or "host read failed"
     failure = OperationFailure(category=category, message=text)
-    return HostReadResponse(result=Oneof("failure", failure)).to_binary()
+    return ReadResponse(result=Oneof("failure", failure)).to_binary()
 
 
 def execute_host_read(payload: bytes, source: ReadSource, *, cli: str) -> bytes:
@@ -83,7 +83,7 @@ def execute_host_read(payload: bytes, source: ReadSource, *, cli: str) -> bytes:
     if len(payload) > _MAX_BYTES:
         return host_read_failure(FailureCategory.INVALID_INPUT, "HostRead request exceeds 1 MiB")
     try:
-        request = HostReadRequest.from_binary(payload)
+        request = ReadRequest.from_binary(payload)
         validate(request)
     except (ValidationError, ValueError) as exc:
         return host_read_failure(FailureCategory.INVALID_INPUT, str(exc))
@@ -105,7 +105,7 @@ def execute_host_read(payload: bytes, source: ReadSource, *, cli: str) -> bytes:
         return host_read_failure(FailureCategory.INVALID_INPUT, str(exc))
     # The slot and the decoded response are the same registry pair. The constructor
     # wants each pair spelled out, which a dynamic slot cannot name one by one.
-    return HostReadResponse(result=cast("Any", Oneof(method.field, response))).to_binary()
+    return ReadResponse(result=cast("Any", Oneof(method.field, response))).to_binary()
 
 
 def execute_inspect_candidate(payload: bytes) -> bytes:
@@ -118,7 +118,7 @@ def execute_inspect_candidate(payload: bytes) -> bytes:
     if len(payload) > _MAX_BYTES:
         return host_read_failure(FailureCategory.INVALID_INPUT, "HostRead request exceeds 1 MiB")
     try:
-        request = HostReadRequest.from_binary(payload)
+        request = ReadRequest.from_binary(payload)
         validate(request)
     except (ValidationError, ValueError) as exc:
         return host_read_failure(FailureCategory.INVALID_INPUT, str(exc))
@@ -132,4 +132,4 @@ def execute_inspect_candidate(payload: bytes) -> bytes:
         return host_read_failure(FailureCategory.PERMISSION_DENIED, str(exc) or "permission denied")
     except (ValidationError, ValueError, TypeError) as exc:
         return host_read_failure(FailureCategory.INVALID_INPUT, str(exc))
-    return HostReadResponse(result=Oneof("inspect_candidate", inspected)).to_binary()
+    return ReadResponse(result=Oneof("inspect_candidate", inspected)).to_binary()

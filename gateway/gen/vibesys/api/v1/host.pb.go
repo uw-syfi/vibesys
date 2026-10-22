@@ -907,12 +907,12 @@ const file_vibesys_api_v1_host_proto_rawDesc = "" +
 	"\x12RUN_LIVENESS_ALIVE\x10\x01\x12\x1c\n" +
 	"\x18RUN_LIVENESS_INTERRUPTED\x10\x02\x12\x16\n" +
 	"\x12RUN_LIVENESS_ENDED\x10\x03\x12\x17\n" +
-	"\x13RUN_LIVENESS_PARKED\x10\x042\x9c\x06\n" +
+	"\x13RUN_LIVENESS_PARKED\x10\x042\x84\x06\n" +
 	"\vHostService\x12M\n" +
-	"\bHostCall\x12\x1f.vibesys.api.v1.HostCallRequest\x1a .vibesys.api.v1.HostCallResponse\x12I\n" +
-	"\x04Read\x12\x1f.vibesys.api.v1.HostReadRequest\x1a .vibesys.api.v1.HostReadResponse\x12N\n" +
-	"\x05Watch\x12 .vibesys.api.v1.HostWatchRequest\x1a!.vibesys.api.v1.HostWatchResponse0\x01\x12O\n" +
-	"\x06Mutate\x12!.vibesys.api.v1.HostMutateRequest\x1a\".vibesys.api.v1.HostMutateResponse\x12D\n" +
+	"\bHostCall\x12\x1f.vibesys.api.v1.HostCallRequest\x1a .vibesys.api.v1.HostCallResponse\x12A\n" +
+	"\x04Read\x12\x1b.vibesys.api.v1.ReadRequest\x1a\x1c.vibesys.api.v1.ReadResponse\x12F\n" +
+	"\x05Watch\x12\x1c.vibesys.api.v1.WatchRequest\x1a\x1d.vibesys.api.v1.WatchResponse0\x01\x12G\n" +
+	"\x06Mutate\x12\x1d.vibesys.api.v1.MutateRequest\x1a\x1e.vibesys.api.v1.MutateResponse\x12D\n" +
 	"\x05Hello\x12\x1c.vibesys.api.v1.HelloRequest\x1a\x1d.vibesys.api.v1.HelloResponse\x12C\n" +
 	"\x04Tail\x12\x1b.vibesys.api.v1.TailRequest\x1a\x1c.vibesys.api.v1.TailResponse0\x01\x12M\n" +
 	"\bSkeleton\x12\x1f.vibesys.api.v1.SkeletonRequest\x1a .vibesys.api.v1.SkeletonResponse\x12R\n" +
@@ -952,22 +952,22 @@ var file_vibesys_api_v1_host_proto_goTypes = []any{
 	(*TailStreamResponse)(nil), // 13: vibesys.api.v1.TailStreamResponse
 	(*v1.RunHead)(nil),         // 14: vibesys.store.v1.RunHead
 	(*HostCallRequest)(nil),    // 15: vibesys.api.v1.HostCallRequest
-	(*HostReadRequest)(nil),    // 16: vibesys.api.v1.HostReadRequest
-	(*HostWatchRequest)(nil),   // 17: vibesys.api.v1.HostWatchRequest
-	(*HostMutateRequest)(nil),  // 18: vibesys.api.v1.HostMutateRequest
+	(*ReadRequest)(nil),        // 16: vibesys.api.v1.ReadRequest
+	(*WatchRequest)(nil),       // 17: vibesys.api.v1.WatchRequest
+	(*MutateRequest)(nil),      // 18: vibesys.api.v1.MutateRequest
 	(*HostCallResponse)(nil),   // 19: vibesys.api.v1.HostCallResponse
-	(*HostReadResponse)(nil),   // 20: vibesys.api.v1.HostReadResponse
-	(*HostWatchResponse)(nil),  // 21: vibesys.api.v1.HostWatchResponse
-	(*HostMutateResponse)(nil), // 22: vibesys.api.v1.HostMutateResponse
+	(*ReadResponse)(nil),       // 20: vibesys.api.v1.ReadResponse
+	(*WatchResponse)(nil),      // 21: vibesys.api.v1.WatchResponse
+	(*MutateResponse)(nil),     // 22: vibesys.api.v1.MutateResponse
 }
 var file_vibesys_api_v1_host_proto_depIdxs = []int32{
 	14, // 0: vibesys.api.v1.WatchRunsResponse.head:type_name -> vibesys.store.v1.RunHead
 	0,  // 1: vibesys.api.v1.WatchRunsResponse.liveness:type_name -> vibesys.api.v1.RunLiveness
 	11, // 2: vibesys.api.v1.GetBlobsResponse.blobs:type_name -> vibesys.api.v1.BlobResult
 	15, // 3: vibesys.api.v1.HostService.HostCall:input_type -> vibesys.api.v1.HostCallRequest
-	16, // 4: vibesys.api.v1.HostService.Read:input_type -> vibesys.api.v1.HostReadRequest
-	17, // 5: vibesys.api.v1.HostService.Watch:input_type -> vibesys.api.v1.HostWatchRequest
-	18, // 6: vibesys.api.v1.HostService.Mutate:input_type -> vibesys.api.v1.HostMutateRequest
+	16, // 4: vibesys.api.v1.HostService.Read:input_type -> vibesys.api.v1.ReadRequest
+	17, // 5: vibesys.api.v1.HostService.Watch:input_type -> vibesys.api.v1.WatchRequest
+	18, // 6: vibesys.api.v1.HostService.Mutate:input_type -> vibesys.api.v1.MutateRequest
 	1,  // 7: vibesys.api.v1.HostService.Hello:input_type -> vibesys.api.v1.HelloRequest
 	3,  // 8: vibesys.api.v1.HostService.Tail:input_type -> vibesys.api.v1.TailRequest
 	5,  // 9: vibesys.api.v1.HostService.Skeleton:input_type -> vibesys.api.v1.SkeletonRequest
@@ -975,9 +975,9 @@ var file_vibesys_api_v1_host_proto_depIdxs = []int32{
 	9,  // 11: vibesys.api.v1.HostService.GetBlobs:input_type -> vibesys.api.v1.GetBlobsRequest
 	12, // 12: vibesys.api.v1.HostService.TailStream:input_type -> vibesys.api.v1.TailStreamRequest
 	19, // 13: vibesys.api.v1.HostService.HostCall:output_type -> vibesys.api.v1.HostCallResponse
-	20, // 14: vibesys.api.v1.HostService.Read:output_type -> vibesys.api.v1.HostReadResponse
-	21, // 15: vibesys.api.v1.HostService.Watch:output_type -> vibesys.api.v1.HostWatchResponse
-	22, // 16: vibesys.api.v1.HostService.Mutate:output_type -> vibesys.api.v1.HostMutateResponse
+	20, // 14: vibesys.api.v1.HostService.Read:output_type -> vibesys.api.v1.ReadResponse
+	21, // 15: vibesys.api.v1.HostService.Watch:output_type -> vibesys.api.v1.WatchResponse
+	22, // 16: vibesys.api.v1.HostService.Mutate:output_type -> vibesys.api.v1.MutateResponse
 	2,  // 17: vibesys.api.v1.HostService.Hello:output_type -> vibesys.api.v1.HelloResponse
 	4,  // 18: vibesys.api.v1.HostService.Tail:output_type -> vibesys.api.v1.TailResponse
 	6,  // 19: vibesys.api.v1.HostService.Skeleton:output_type -> vibesys.api.v1.SkeletonResponse

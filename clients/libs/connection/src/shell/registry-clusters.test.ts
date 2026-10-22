@@ -5,8 +5,8 @@ import {
   ClusterTestFailedSchema,
   ClusterTestStage,
   ComputeSettingsSchema,
-  HostMutateRequestSchema,
-  HostMutateResponseSchema,
+  MutateRequestSchema,
+  MutateResponseSchema,
   PutClusterResponseSchema,
   TestClusterResponseSchema,
 } from '@vibesys/proto';
@@ -31,8 +31,8 @@ test('a v2 put sends the cluster and reads the host settings back', async () => 
     unary: async (_host, bytes) => {
       sent = bytes;
       return toBinary(
-        HostMutateResponseSchema,
-        create(HostMutateResponseSchema, {
+        MutateResponseSchema,
+        create(MutateResponseSchema, {
           result: {
             case: 'putCluster',
             value: create(PutClusterResponseSchema, {
@@ -49,7 +49,7 @@ test('a v2 put sends the cluster and reads the host settings back', async () => 
   });
 
   const settings = await clusters.put(HOST, cluster, new AbortController().signal);
-  const request = fromBinary(HostMutateRequestSchema, sent);
+  const request = fromBinary(MutateRequestSchema, sent);
 
   expect(request.checkout).toBe('/src/checkout');
   expect(request.method.case).toBe('putCluster');
@@ -71,8 +71,8 @@ test('a v2 test keeps the host failure', async () => {
     checkout: async () => '/src/checkout',
     unary: async () =>
       toBinary(
-        HostMutateResponseSchema,
-        create(HostMutateResponseSchema, {
+        MutateResponseSchema,
+        create(MutateResponseSchema, {
           result: {
             case: 'testCluster',
             value: create(TestClusterResponseSchema, {

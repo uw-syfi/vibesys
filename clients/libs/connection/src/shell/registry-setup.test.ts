@@ -4,9 +4,9 @@ import type {HostId} from '@vibesys/hosts';
 import {
   CandidateState,
   CompletePathsResponseSchema,
-  HostReadRequestSchema,
-  HostReadResponseSchema,
   InspectCandidateResponseSchema,
+  ReadRequestSchema,
+  ReadResponseSchema,
 } from '@vibesys/proto';
 import {registrySetup} from './registry-setup.js';
 
@@ -36,12 +36,12 @@ describe('registry setup', () => {
   test('a different selection revision is stale and never becomes a checkout', async () => {
     const setup = registrySetup({
       unary: async (_host, bytes) => {
-        const request = fromBinary(HostReadRequestSchema, bytes);
+        const request = fromBinary(ReadRequestSchema, bytes);
         const method = request.method;
         if (method.case !== 'inspectCandidate') throw new Error(method.case ?? 'empty');
         return toBinary(
-          HostReadResponseSchema,
-          create(HostReadResponseSchema, {
+          ReadResponseSchema,
+          create(ReadResponseSchema, {
             result: {
               case: 'inspectCandidate',
               value: create(InspectCandidateResponseSchema, {
@@ -65,13 +65,13 @@ describe('registry setup', () => {
     const seen: string[] = [];
     const setup = registrySetup({
       unary: async (_host, bytes) => {
-        const request = fromBinary(HostReadRequestSchema, bytes);
+        const request = fromBinary(ReadRequestSchema, bytes);
         seen.push(request.checkout);
         const method = request.method;
         if (method.case === 'inspectCandidate') {
           return toBinary(
-            HostReadResponseSchema,
-            create(HostReadResponseSchema, {
+            ReadResponseSchema,
+            create(ReadResponseSchema, {
               result: {
                 case: 'inspectCandidate',
                 value: create(InspectCandidateResponseSchema, {
@@ -96,8 +96,8 @@ describe('registry setup', () => {
         }
         if (method.case === 'completePaths') {
           return toBinary(
-            HostReadResponseSchema,
-            create(HostReadResponseSchema, {
+            ReadResponseSchema,
+            create(ReadResponseSchema, {
               result: {
                 case: 'completePaths',
                 value: create(CompletePathsResponseSchema, {

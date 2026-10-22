@@ -8422,33 +8422,33 @@ func (x *StartRunResponse) GetInstanceId() string {
 	return ""
 }
 
-type LoginEvent struct {
+type LoginResponse struct {
 	state     protoimpl.MessageState `protogen:"open.v1"`
 	RequestId string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
 	Sequence  uint64                 `protobuf:"varint,2,opt,name=sequence,proto3" json:"sequence,omitempty"`
 	// Types that are valid to be assigned to Body:
 	//
-	//	*LoginEvent_Started
-	//	*LoginEvent_Unavailable
-	Body          isLoginEvent_Body `protobuf_oneof:"body"`
+	//	*LoginResponse_Started
+	//	*LoginResponse_Unavailable
+	Body          isLoginResponse_Body `protobuf_oneof:"body"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *LoginEvent) Reset() {
-	*x = LoginEvent{}
+func (x *LoginResponse) Reset() {
+	*x = LoginResponse{}
 	mi := &file_vibesys_host_v1_operations_proto_msgTypes[115]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *LoginEvent) String() string {
+func (x *LoginResponse) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*LoginEvent) ProtoMessage() {}
+func (*LoginResponse) ProtoMessage() {}
 
-func (x *LoginEvent) ProtoReflect() protoreflect.Message {
+func (x *LoginResponse) ProtoReflect() protoreflect.Message {
 	mi := &file_vibesys_host_v1_operations_proto_msgTypes[115]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -8460,65 +8460,65 @@ func (x *LoginEvent) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use LoginEvent.ProtoReflect.Descriptor instead.
-func (*LoginEvent) Descriptor() ([]byte, []int) {
+// Deprecated: Use LoginResponse.ProtoReflect.Descriptor instead.
+func (*LoginResponse) Descriptor() ([]byte, []int) {
 	return file_vibesys_host_v1_operations_proto_rawDescGZIP(), []int{115}
 }
 
-func (x *LoginEvent) GetRequestId() string {
+func (x *LoginResponse) GetRequestId() string {
 	if x != nil {
 		return x.RequestId
 	}
 	return ""
 }
 
-func (x *LoginEvent) GetSequence() uint64 {
+func (x *LoginResponse) GetSequence() uint64 {
 	if x != nil {
 		return x.Sequence
 	}
 	return 0
 }
 
-func (x *LoginEvent) GetBody() isLoginEvent_Body {
+func (x *LoginResponse) GetBody() isLoginResponse_Body {
 	if x != nil {
 		return x.Body
 	}
 	return nil
 }
 
-func (x *LoginEvent) GetStarted() *LoginStartedBody {
+func (x *LoginResponse) GetStarted() *LoginStartedBody {
 	if x != nil {
-		if x, ok := x.Body.(*LoginEvent_Started); ok {
+		if x, ok := x.Body.(*LoginResponse_Started); ok {
 			return x.Started
 		}
 	}
 	return nil
 }
 
-func (x *LoginEvent) GetUnavailable() *LoginUnavailableBody {
+func (x *LoginResponse) GetUnavailable() *LoginUnavailableBody {
 	if x != nil {
-		if x, ok := x.Body.(*LoginEvent_Unavailable); ok {
+		if x, ok := x.Body.(*LoginResponse_Unavailable); ok {
 			return x.Unavailable
 		}
 	}
 	return nil
 }
 
-type isLoginEvent_Body interface {
-	isLoginEvent_Body()
+type isLoginResponse_Body interface {
+	isLoginResponse_Body()
 }
 
-type LoginEvent_Started struct {
+type LoginResponse_Started struct {
 	Started *LoginStartedBody `protobuf:"bytes,3,opt,name=started,proto3,oneof"`
 }
 
-type LoginEvent_Unavailable struct {
+type LoginResponse_Unavailable struct {
 	Unavailable *LoginUnavailableBody `protobuf:"bytes,4,opt,name=unavailable,proto3,oneof"`
 }
 
-func (*LoginEvent_Started) isLoginEvent_Body() {}
+func (*LoginResponse_Started) isLoginResponse_Body() {}
 
-func (*LoginEvent_Unavailable) isLoginEvent_Body() {}
+func (*LoginResponse_Unavailable) isLoginResponse_Body() {}
 
 var File_vibesys_host_v1_operations_proto protoreflect.FileDescriptor
 
@@ -9190,9 +9190,8 @@ const file_vibesys_host_v1_operations_proto_rawDesc = "" +
 	"\xbaH\ar\x05\x10\x01(\x80\x01R\x05runId\x12+\n" +
 	"\vinstance_id\x18\x03 \x01(\tB\n" +
 	"\xbaH\ar\x05\x10\x01(\x80\x01R\n" +
-	"instanceId\"\xf9\x01\n" +
-	"\n" +
-	"LoginEvent\x12-\n" +
+	"instanceId\"\xfc\x01\n" +
+	"\rLoginResponse\x12-\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tB\x0e\xbaH\vr\t\x10\x01\x18\x80\x01(\x80\x80\bR\trequestId\x12#\n" +
 	"\bsequence\x18\x02 \x01(\x04B\a\xbaH\x042\x02 \x00R\bsequence\x12=\n" +
@@ -9477,7 +9476,7 @@ var file_vibesys_host_v1_operations_proto_goTypes = []any{
 	(*TestClusterResponse)(nil),                  // 131: vibesys.host.v1.TestClusterResponse
 	(*StartRunRequest)(nil),                      // 132: vibesys.host.v1.StartRunRequest
 	(*StartRunResponse)(nil),                     // 133: vibesys.host.v1.StartRunResponse
-	(*LoginEvent)(nil),                           // 134: vibesys.host.v1.LoginEvent
+	(*LoginResponse)(nil),                        // 134: vibesys.host.v1.LoginResponse
 	nil,                                          // 135: vibesys.host.v1.MachineDescription.HarnessCliNamesEntry
 	nil,                                          // 136: vibesys.host.v1.PreflightRunRequestAgents.ItemsEntry
 }
@@ -9604,8 +9603,8 @@ var file_vibesys_host_v1_operations_proto_depIdxs = []int32{
 	111, // 119: vibesys.host.v1.StartRunRequest.options:type_name -> vibesys.host.v1.StartRunOptions
 	112, // 120: vibesys.host.v1.StartRunRequest.agents:type_name -> vibesys.host.v1.StartRunAgent
 	115, // 121: vibesys.host.v1.StartRunRequest.measure_on:type_name -> vibesys.host.v1.StartRunMeasure
-	107, // 122: vibesys.host.v1.LoginEvent.started:type_name -> vibesys.host.v1.LoginStartedBody
-	108, // 123: vibesys.host.v1.LoginEvent.unavailable:type_name -> vibesys.host.v1.LoginUnavailableBody
+	107, // 122: vibesys.host.v1.LoginResponse.started:type_name -> vibesys.host.v1.LoginStartedBody
+	108, // 123: vibesys.host.v1.LoginResponse.unavailable:type_name -> vibesys.host.v1.LoginUnavailableBody
 	46,  // 124: vibesys.host.v1.PreflightRunRequestAgents.ItemsEntry.value:type_name -> vibesys.host.v1.HarnessChoice
 	125, // [125:125] is the sub-list for method output_type
 	125, // [125:125] is the sub-list for method input_type
@@ -9706,8 +9705,8 @@ func file_vibesys_host_v1_operations_proto_init() {
 		(*TestClusterResponse_Failed)(nil),
 	}
 	file_vibesys_host_v1_operations_proto_msgTypes[115].OneofWrappers = []any{
-		(*LoginEvent_Started)(nil),
-		(*LoginEvent_Unavailable)(nil),
+		(*LoginResponse_Started)(nil),
+		(*LoginResponse_Unavailable)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{

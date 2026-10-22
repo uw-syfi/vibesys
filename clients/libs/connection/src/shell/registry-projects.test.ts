@@ -4,11 +4,11 @@ import type {HostId} from '@vibesys/hosts';
 import {
   CreateExampleResponseSchema,
   DestinationState,
-  HostMutateRequestSchema,
-  HostMutateResponseSchema,
-  HostReadRequestSchema,
-  HostReadResponseSchema,
   InspectDestinationResponseSchema,
+  MutateRequestSchema,
+  MutateResponseSchema,
+  ReadRequestSchema,
+  ReadResponseSchema,
 } from '@vibesys/proto';
 import {registryProjects} from './registry-projects.js';
 
@@ -21,8 +21,8 @@ test('a v2 destination read names the example and returns the host state', async
     read: async (_host, bytes) => {
       sent = bytes;
       return toBinary(
-        HostReadResponseSchema,
-        create(HostReadResponseSchema, {
+        ReadResponseSchema,
+        create(ReadResponseSchema, {
           result: {
             case: 'inspectDestination',
             value: create(InspectDestinationResponseSchema, {
@@ -42,7 +42,7 @@ test('a v2 destination read names the example and returns the host state', async
     '/work/queue',
     new AbortController().signal,
   );
-  const request = fromBinary(HostReadRequestSchema, sent);
+  const request = fromBinary(ReadRequestSchema, sent);
 
   expect(request.method.case).toBe('inspectDestination');
   if (request.method.case !== 'inspectDestination') return;
@@ -59,8 +59,8 @@ test('a v2 create keeps a taken destination', async () => {
     mutate: async (_host, bytes) => {
       sent = bytes;
       return toBinary(
-        HostMutateResponseSchema,
-        create(HostMutateResponseSchema, {
+        MutateResponseSchema,
+        create(MutateResponseSchema, {
           result: {
             case: 'createExample',
             value: create(CreateExampleResponseSchema, {
@@ -74,7 +74,7 @@ test('a v2 create keeps a taken destination', async () => {
   });
 
   const created = await projects.create(HOST, 'queue', '/work/queue', new AbortController().signal);
-  const request = fromBinary(HostMutateRequestSchema, sent);
+  const request = fromBinary(MutateRequestSchema, sent);
 
   expect(created).toEqual({kind: 'taken'});
   expect(request.method.case).toBe('createExample');

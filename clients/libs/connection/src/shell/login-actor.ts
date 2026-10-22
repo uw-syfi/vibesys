@@ -6,9 +6,9 @@ import {hostKey} from '@vibesys/hosts';
 import {
   decodeHostWatch,
   encodeHostWatch,
-  LoginEventSchema,
   LoginUnavailableReason as LoginRefusal,
   LoginRequestSchema,
+  LoginResponseSchema,
 } from '@vibesys/proto';
 import {createActor, fromPromise} from 'xstate';
 import {loginMachine} from '../state/login.js';
@@ -85,7 +85,7 @@ export class LoginActor {
                 toBinary(LoginRequestSchema, create(LoginRequestSchema, {requestId, provider})),
               );
               await this.ports.stream(host, bytes, signal, payload => {
-                const event = fromBinary(LoginEventSchema, decodeHostWatch('Login', payload));
+                const event = fromBinary(LoginResponseSchema, decodeHostWatch('Login', payload));
                 if (event.requestId !== requestId) throw new Error('login event identity mismatch');
                 const body = event.body;
                 if (body.case === 'started') {

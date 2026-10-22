@@ -10,11 +10,11 @@ from dataclasses import dataclass
 
 from vs_proto.api import (
     FailureCategory,
-    HostWatchRequest,
-    HostWatchResponse,
     Oneof,
     OperationFailure,
     ValidationError,
+    WatchRequest,
+    WatchResponse,
     validate,
 )
 from vs_proto.api import (
@@ -76,7 +76,7 @@ def serve_login(
         write(_failure(FailureCategory.INVALID_INPUT, "HostWatch request exceeds 1 MiB"))
         return
     try:
-        request = HostWatchRequest.from_binary(payload)
+        request = WatchRequest.from_binary(payload)
         validate(request)
     except (ValidationError, ValueError) as exc:
         write(_failure(FailureCategory.INVALID_INPUT, str(exc)))
@@ -93,16 +93,16 @@ def serve_login(
     except (ValidationError, ValueError, TypeError) as exc:
         write(_failure(FailureCategory.INVALID_INPUT, str(exc)))
         return
-    write(frame(HostWatchResponse(result=Oneof("login", event)).to_binary()))
+    write(frame(WatchResponse(result=Oneof("login", event)).to_binary()))
     wait()
 
 
-def _event(request_id: str, fact: LoginStartedFact | LoginRefusedFact) -> pb.LoginEvent:
+def _event(request_id: str, fact: LoginStartedFact | LoginRefusedFact) -> pb.LoginResponse:
     if isinstance(fact, LoginStartedFact):
         body = pb.LoginStartedBody()
         if fact.instruction is not None:
             body = pb.LoginStartedBody(instruction=fact.instruction)
-        return pb.LoginEvent(request_id=request_id, sequence=1, body=Oneof("started", body))
+        return pb.LoginResponse(request_id=request_id, sequence=1, body=Oneof("started", body))
     reason = _REASONS.get(fact.reason)
     if reason is None:
         message = f"unknown login refusal {fact.reason!r}"
@@ -112,7 +112,9 @@ def _event(request_id: str, fact: LoginStartedFact | LoginRefusedFact) -> pb.Log
         unavailable = pb.LoginUnavailableBody(
             reason=reason, command=fact.command, detail=fact.detail
         )
-    return pb.LoginEvent(request_id=request_id, sequence=1, body=Oneof("unavailable", unavailable))
+    return pb.LoginResponse(
+        request_id=request_id, sequence=1, body=Oneof("unavailable", unavailable)
+    )
 
 
 def _failure(category: FailureCategory, message: str) -> bytes:
@@ -121,4 +123,4 @@ def _failure(category: FailureCategory, message: str) -> bytes:
     if len(encoded) > _MAX_DIAGNOSTIC:
         text = encoded[:_MAX_DIAGNOSTIC].decode(errors="ignore") or "host login failed"
     failure = OperationFailure(category=category, message=text)
-    return frame(HostWatchResponse(result=Oneof("failure", failure)).to_binary())
+    return frame(WatchResponse(result=Oneof("failure", failure)).to_binary())

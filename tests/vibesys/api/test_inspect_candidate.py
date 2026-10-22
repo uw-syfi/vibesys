@@ -9,10 +9,10 @@ from vibesys.api.host_operations.api import execute_inspect_candidate
 from vs_proto.api import (
     API_SCHEMA_HASH,
     FailureCategory,
-    HostReadRequest,
-    HostReadResponse,
     Oneof,
     OperationFailure,
+    ReadRequest,
+    ReadResponse,
 )
 from vs_proto.api import host_payloads as pb
 
@@ -23,7 +23,7 @@ _COMMIT = "a" * 40
 
 
 def _request(path: str) -> bytes:
-    return HostReadRequest(
+    return ReadRequest(
         checkout=path or "~",
         method=Oneof(
             "inspect_candidate",
@@ -33,7 +33,7 @@ def _request(path: str) -> bytes:
 
 
 def _result(path: str) -> object:
-    response = HostReadResponse.from_binary(execute_inspect_candidate(_request(path)))
+    response = ReadResponse.from_binary(execute_inspect_candidate(_request(path)))
     assert response.result is not None
     return response.result.value
 

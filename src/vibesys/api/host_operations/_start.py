@@ -14,8 +14,8 @@ from vs_project.api import (
 )
 from vs_proto.api import (
     FailureCategory,
-    HostMutateRequest,
-    HostMutateResponse,
+    MutateRequest,
+    MutateResponse,
     Oneof,
     OperationFailure,
     ValidationError,
@@ -70,7 +70,7 @@ def serve_start(
 
 def _request(payload: bytes) -> pb.StartRunRequest | bytes:
     try:
-        request = HostMutateRequest.from_binary(payload)
+        request = MutateRequest.from_binary(payload)
         validate(request)
     except (ValidationError, ValueError) as exc:
         return _failure(FailureCategory.INVALID_INPUT, str(exc))
@@ -118,7 +118,7 @@ def _admit(
                 admission.AdmissionStatus.REFUSED,
                 admission.OperationResult(result=Oneof("failure", failure)),
             )
-            return HostMutateResponse(result=Oneof("failure", failure)).to_binary()
+            return MutateResponse(result=Oneof("failure", failure)).to_binary()
         except StartUnknownError:
             return _failure(
                 FailureCategory.ADMISSION_UNCONFIRMED,
@@ -132,7 +132,7 @@ def _admit(
             admission.AdmissionStatus.CONFIRMED,
             admission.OperationResult(result=Oneof("start_run", started)),
         )
-        return HostMutateResponse(result=Oneof("start_run", started)).to_binary()
+        return MutateResponse(result=Oneof("start_run", started)).to_binary()
 
 
 def _stored(observed: admission.AdmissionReceipt) -> bytes | None:
@@ -141,9 +141,9 @@ def _stored(observed: admission.AdmissionReceipt) -> bytes | None:
         return None
     body = result.result
     if body.field == "start_run" and isinstance(body.value, pb.StartRunResponse):
-        return HostMutateResponse(result=Oneof("start_run", body.value)).to_binary()
+        return MutateResponse(result=Oneof("start_run", body.value)).to_binary()
     if body.field == "failure" and isinstance(body.value, OperationFailure):
-        return HostMutateResponse(result=Oneof("failure", body.value)).to_binary()
+        return MutateResponse(result=Oneof("failure", body.value)).to_binary()
     return None
 
 
@@ -156,6 +156,6 @@ def _operation_failure(category: FailureCategory, message: str) -> OperationFail
 
 
 def _failure(category: FailureCategory, message: str) -> bytes:
-    return HostMutateResponse(
+    return MutateResponse(
         result=Oneof("failure", _operation_failure(category, message))
     ).to_binary()

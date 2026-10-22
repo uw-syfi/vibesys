@@ -25,7 +25,7 @@ const (
 
 // completePaths lists one directory on this machine. Product hints come from
 // bounded InspectCandidate calls, not from parsing project files here.
-func (h *host) completePaths(ctx context.Context, request *apiv1.HostReadRequest, deadline time.Duration) (*apiv1.HostReadResponse, error) {
+func (h *host) completePaths(ctx context.Context, request *apiv1.ReadRequest, deadline time.Duration) (*apiv1.ReadResponse, error) {
 	query := request.GetCompletePaths()
 	if query == nil {
 		return readFailure(hostv1.FailureCategory_FAILURE_CATEGORY_INVALID_INPUT, "HostRead.method is required"), nil
@@ -74,10 +74,10 @@ func (h *host) completePaths(ctx context.Context, request *apiv1.HostReadRequest
 			Name: name, Path: path, VibesysCheckout: checkout, VibesysProject: project, GitRepository: git,
 		})
 	}
-	return &apiv1.HostReadResponse{Result: &apiv1.HostReadResponse_CompletePaths{CompletePaths: response}}, nil
+	return &apiv1.ReadResponse{Result: &apiv1.ReadResponse_CompletePaths{CompletePaths: response}}, nil
 }
 
-func pathFailure(err error) *apiv1.HostReadResponse {
+func pathFailure(err error) *apiv1.ReadResponse {
 	switch {
 	case os.IsNotExist(err):
 		return readFailure(hostv1.FailureCategory_FAILURE_CATEGORY_NOT_FOUND, err.Error())
@@ -157,7 +157,7 @@ func isDirectory(path string, info os.FileInfo) bool {
 	return err == nil && followed.IsDir()
 }
 
-func (h *host) inspectCandidate(ctx context.Context, request *apiv1.HostReadRequest, deadline time.Duration) (*apiv1.HostReadResponse, error) {
+func (h *host) inspectCandidate(ctx context.Context, request *apiv1.ReadRequest, deadline time.Duration) (*apiv1.ReadResponse, error) {
 	query := request.GetInspectCandidate()
 	if query == nil {
 		return readFailure(hostv1.FailureCategory_FAILURE_CATEGORY_INVALID_INPUT, "HostRead.method is required"), nil
@@ -205,7 +205,7 @@ func (h *host) inspectCandidate(ctx context.Context, request *apiv1.HostReadRequ
 	if err != nil || result.ExitCode != 0 {
 		return readFailure(hostv1.FailureCategory_FAILURE_CATEGORY_INTERNAL, "vibesys host inspect-candidate failed"), nil
 	}
-	response := &apiv1.HostReadResponse{}
+	response := &apiv1.ReadResponse{}
 	if err := proto.Unmarshal(result.Output, response); err != nil || response.GetInspectCandidate() == nil && response.GetFailure() == nil {
 		return readFailure(hostv1.FailureCategory_FAILURE_CATEGORY_INVALID_INPUT, "inspect-candidate returned invalid protobuf"), nil
 	}
@@ -230,9 +230,9 @@ func (h *host) candidateHints(ctx context.Context, path string) (bool, bool, boo
 	if err != nil || exe.IsDir() || exe.Mode()&0o111 == 0 {
 		return false, false, false
 	}
-	response, err := h.inspectCandidate(ctx, &apiv1.HostReadRequest{
+	response, err := h.inspectCandidate(ctx, &apiv1.ReadRequest{
 		Checkout: path,
-		Method: &apiv1.HostReadRequest_InspectCandidate{InspectCandidate: &hostv1.InspectCandidateRequest{
+		Method: &apiv1.ReadRequest_InspectCandidate{InspectCandidate: &hostv1.InspectCandidateRequest{
 			RequestId: "path-hint", Path: path, SelectionRevision: 1,
 		}},
 	}, time.Second)
@@ -243,8 +243,8 @@ func (h *host) candidateHints(ctx context.Context, path string) (bool, bool, boo
 	return got.GetVibesysCheckout(), got.GetVibesysProject(), got.GetGitRepository()
 }
 
-func notFoundCandidate(query *hostv1.InspectCandidateRequest) *apiv1.HostReadResponse {
-	return &apiv1.HostReadResponse{Result: &apiv1.HostReadResponse_InspectCandidate{InspectCandidate: &hostv1.InspectCandidateResponse{
+func notFoundCandidate(query *hostv1.InspectCandidateRequest) *apiv1.ReadResponse {
+	return &apiv1.ReadResponse{Result: &apiv1.ReadResponse_InspectCandidate{InspectCandidate: &hostv1.InspectCandidateResponse{
 		RequestId:         query.GetRequestId(),
 		SelectionRevision: query.GetSelectionRevision(),
 		SchemaHash:        schemahash.APISchemaHash,

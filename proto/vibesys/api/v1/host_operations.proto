@@ -179,7 +179,7 @@ service HostOperationsService {
   }
   // Login is owned by the host until completion or an explicit cancel. Closing a
   // panel drops the client's subscription and does not abort this stream.
-  rpc Login(vibesys.host.v1.LoginRequest) returns (stream vibesys.host.v1.LoginEvent) {
+  rpc Login(vibesys.host.v1.LoginRequest) returns (stream vibesys.host.v1.LoginResponse) {
     option (vibesys.host.v1.operation) = {
       adapter_method: "agent_logins.start"
       operation_id: 40

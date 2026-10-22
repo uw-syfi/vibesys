@@ -10,8 +10,8 @@ from typing import Literal
 from vs_project.api import AdmissionBusyError, AdmissionConflictError, AdmissionStore
 from vs_proto.api import (
     FailureCategory,
-    HostMutateRequest,
-    HostMutateResponse,
+    MutateRequest,
+    MutateResponse,
     Oneof,
     OperationFailure,
     ValidationError,
@@ -71,7 +71,7 @@ def serve_cluster(
 
 def _request(payload: bytes) -> tuple[str, object] | bytes:
     try:
-        request = HostMutateRequest.from_binary(payload)
+        request = MutateRequest.from_binary(payload)
         validate(request)
     except (ValidationError, ValueError) as exc:
         return _failure(FailureCategory.INVALID_INPUT, str(exc))
@@ -115,14 +115,14 @@ def _admit(
                 admission.AdmissionStatus.REFUSED,
                 admission.OperationResult(result=Oneof("failure", failure)),
             )
-            return HostMutateResponse(result=Oneof("failure", failure)).to_binary()
+            return MutateResponse(result=Oneof("failure", failure)).to_binary()
         except ClusterUnknownError:
             return _failure(
                 FailureCategory.ADMISSION_UNCONFIRMED, "cluster admission is unconfirmed"
             )
         result = _confirmed_result(slot, response)
         claim.settle(admission.AdmissionStatus.CONFIRMED, admission.OperationResult(result=result))
-        return HostMutateResponse(result=result).to_binary()
+        return MutateResponse(result=result).to_binary()
 
 
 def _target(request: object) -> tuple[str, str]:
@@ -144,7 +144,7 @@ def _stored(slot: str, observed: admission.AdmissionReceipt) -> bytes | None:
         return None
     body = result.result
     if body.field == "failure" and isinstance(body.value, OperationFailure):
-        return HostMutateResponse(result=Oneof("failure", body.value)).to_binary()
+        return MutateResponse(result=Oneof("failure", body.value)).to_binary()
     return _replay(slot, body.field, body.value)
 
 
@@ -190,10 +190,10 @@ def _confirmed_result(
 def _replay(slot: str, field: str, value: object) -> bytes | None:
     if field != slot:
         return None
-    return HostMutateResponse(result=_confirmed_result(slot, value)).to_binary()
+    return MutateResponse(result=_confirmed_result(slot, value)).to_binary()
 
 
 def _failure(category: FailureCategory, message: str) -> bytes:
-    return HostMutateResponse(
+    return MutateResponse(
         result=Oneof("failure", _operation_failure(category, message))
     ).to_binary()

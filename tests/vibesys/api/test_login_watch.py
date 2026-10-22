@@ -5,9 +5,9 @@ from __future__ import annotations
 from vibesys.api.host_operations.api import LoginRefusedFact, LoginStartedFact, serve_login
 from vs_proto.api import (
     FailureCategory,
-    HostWatchRequest,
-    HostWatchResponse,
     Oneof,
+    WatchRequest,
+    WatchResponse,
 )
 from vs_proto.api import (
     host_payloads as pb,
@@ -15,16 +15,16 @@ from vs_proto.api import (
 
 
 def _request(provider: str = "claude") -> bytes:
-    return HostWatchRequest(
+    return WatchRequest(
         checkout="/checkout",
         method=Oneof("login", pb.LoginRequest(request_id="request-a", provider=provider)),
     ).to_binary()
 
 
-def _response(written: bytearray) -> HostWatchResponse:
+def _response(written: bytearray) -> WatchResponse:
     length = int.from_bytes(written[:4], "big")
     assert length == len(written) - 4
-    return HostWatchResponse.from_binary(bytes(written[4:]))
+    return WatchResponse.from_binary(bytes(written[4:]))
 
 
 def test_a_started_login_is_framed_before_the_watch_waits() -> None:

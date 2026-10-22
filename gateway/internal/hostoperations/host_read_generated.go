@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-func DispatchHostRead(request *apiv1.HostReadRequest) (HostCall, bool) {
+func DispatchHostRead(request *apiv1.ReadRequest) (HostCall, bool) {
 	switch {
 	case request.GetListTasks() != nil:
 		return HostCall{CLI: "list-tasks", Deadline: 10000 * time.Millisecond, Executor: 1, Effect: 1}, true
@@ -33,7 +33,7 @@ func DispatchHostRead(request *apiv1.HostReadRequest) (HostCall, bool) {
 	}
 }
 
-func HostReadResponseValid(request *apiv1.HostReadRequest, response *apiv1.HostReadResponse) bool {
+func HostReadResponseValid(request *apiv1.ReadRequest, response *apiv1.ReadResponse) bool {
 	switch {
 	case request.GetListTasks() != nil:
 		got := response.GetListTasks()

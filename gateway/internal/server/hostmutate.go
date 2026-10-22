@@ -17,7 +17,7 @@ import (
 // Mutate runs one registered unary operation. An admission drops the caller's
 // cancellation and keeps the runner until the operation cap, so a disconnect
 // does not kill a start that has already been admitted.
-func (h *host) Mutate(ctx context.Context, request *apiv1.HostMutateRequest) (*apiv1.HostMutateResponse, error) {
+func (h *host) Mutate(ctx context.Context, request *apiv1.MutateRequest) (*apiv1.MutateResponse, error) {
 	dispatched, ok := hostoperations.DispatchHostMutate(request)
 	if !ok {
 		return mutateFailure(hostv1.FailureCategory_FAILURE_CATEGORY_INVALID_INPUT, "HostMutate.method is required"), nil
@@ -56,7 +56,7 @@ func (h *host) Mutate(ctx context.Context, request *apiv1.HostMutateRequest) (*a
 		}
 		return mutateFailure(hostv1.FailureCategory_FAILURE_CATEGORY_INTERNAL, message+"\n"+result.Stderr), nil
 	}
-	response := &apiv1.HostMutateResponse{}
+	response := &apiv1.MutateResponse{}
 	if err := proto.Unmarshal(result.Output, response); err != nil || response.Result == nil {
 		return mutateFailure(hostv1.FailureCategory_FAILURE_CATEGORY_INVALID_INPUT, "vibesys host "+dispatched.CLI+" returned invalid protobuf"), nil
 	}
@@ -73,12 +73,12 @@ func (h *host) Mutate(ctx context.Context, request *apiv1.HostMutateRequest) (*a
 	return response, nil
 }
 
-func mutateFailure(category hostv1.FailureCategory, message string) *apiv1.HostMutateResponse {
+func mutateFailure(category hostv1.FailureCategory, message string) *apiv1.MutateResponse {
 	text := safeDiagnostic(strings.TrimSpace(message))
 	if text == "" {
 		text = "host mutate failed"
 	}
-	return &apiv1.HostMutateResponse{Result: &apiv1.HostMutateResponse_Failure{Failure: &hostv1.OperationFailure{
+	return &apiv1.MutateResponse{Result: &apiv1.MutateResponse_Failure{Failure: &hostv1.OperationFailure{
 		Category: category, Message: text,
 	}}}
 }

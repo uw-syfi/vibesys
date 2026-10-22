@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-func DispatchHostMutate(request *apiv1.HostMutateRequest) (HostCall, bool) {
+func DispatchHostMutate(request *apiv1.MutateRequest) (HostCall, bool) {
 	switch {
 	case request.GetCreateExample() != nil:
 		return HostCall{CLI: "create-example", Deadline: 120000 * time.Millisecond, Executor: 1, Effect: 2}, true
@@ -25,7 +25,7 @@ func DispatchHostMutate(request *apiv1.HostMutateRequest) (HostCall, bool) {
 	}
 }
 
-func HostMutateResponseValid(request *apiv1.HostMutateRequest, response *apiv1.HostMutateResponse) bool {
+func HostMutateResponseValid(request *apiv1.MutateRequest, response *apiv1.MutateResponse) bool {
 	switch {
 	case request.GetCreateExample() != nil:
 		got := response.GetCreateExample()

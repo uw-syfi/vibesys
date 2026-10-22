@@ -110,7 +110,7 @@ def main(
     if arguments and arguments[0] == "inspect-candidate":
         parser = argparse.ArgumentParser(
             prog="vibesys host inspect-candidate",
-            description="Read a binary HostReadRequest from stdin; write a binary HostReadResponse to stdout.",
+            description="Read a binary ReadRequest from stdin; write a binary ReadResponse to stdout.",
         )
         parser.parse_args(arguments[1:])
         source = sys.stdin.buffer if stdin is None else stdin
@@ -120,7 +120,7 @@ def main(
     if arguments and arguments[0] in _READ_COMMANDS:
         parser = argparse.ArgumentParser(
             prog=f"vibesys host {arguments[0]}",
-            description="Read a binary HostReadRequest from stdin; write a binary HostReadResponse to stdout.",
+            description="Read a binary ReadRequest from stdin; write a binary ReadResponse to stdout.",
         )
         parser.parse_args(arguments[1:])
         source = sys.stdin.buffer if stdin is None else stdin
@@ -134,7 +134,7 @@ def main(
     if arguments and arguments[0] in _WATCH_COMMANDS:
         parser = argparse.ArgumentParser(
             prog=f"vibesys host {arguments[0]}",
-            description="Read a binary HostWatchRequest from stdin; write framed HostWatchResponses to stdout.",
+            description="Read a binary WatchRequest from stdin; write framed WatchResponses to stdout.",
         )
         parser.parse_args(arguments[1:])
         source = sys.stdin.buffer if stdin is None else stdin
@@ -150,7 +150,7 @@ def main(
     if arguments and arguments[0] in _MUTATION_COMMANDS:
         parser = argparse.ArgumentParser(
             prog=f"vibesys host {arguments[0]}",
-            description="Read a binary HostMutateRequest from stdin; write a binary HostMutateResponse to stdout.",
+            description="Read a binary MutateRequest from stdin; write a binary MutateResponse to stdout.",
         )
         parser.parse_args(arguments[1:])
         source = sys.stdin.buffer if stdin is None else stdin

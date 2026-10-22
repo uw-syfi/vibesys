@@ -8,11 +8,11 @@ import {
   HelloResponseSchema,
   HOST_API_MAX_MESSAGE_BYTES,
   HostCallRequestSchema,
-  HostMutateRequestSchema,
-  HostReadRequestSchema,
   HostService,
   hostCallBudgets,
+  MutateRequestSchema,
   mutateBudgets,
+  ReadRequestSchema,
   readBudgets,
   TailRequestSchema,
   TailResponseSchema,
@@ -427,7 +427,7 @@ const deadlineInputs = {
 for (const {kind, schema, budgets, method, encode, nextCall} of [
   {
     kind: 'read',
-    schema: HostReadRequestSchema,
+    schema: ReadRequestSchema,
     budgets: readBudgets,
     method: READ_METHOD,
     encode: encodeHostRead,
@@ -435,7 +435,7 @@ for (const {kind, schema, budgets, method, encode, nextCall} of [
   },
   {
     kind: 'mutate',
-    schema: HostMutateRequestSchema,
+    schema: MutateRequestSchema,
     budgets: mutateBudgets,
     method: MUTATE_METHOD,
     encode: encodeHostMutate,

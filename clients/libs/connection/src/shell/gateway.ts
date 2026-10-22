@@ -8,11 +8,11 @@ import {
   type HelloResponse,
   HelloResponseSchema,
   HostCallRequestSchema,
-  HostMutateRequestSchema,
-  HostReadRequestSchema,
   HostService,
   hostCallBudgets,
+  MutateRequestSchema,
   mutateBudgets,
+  ReadRequestSchema,
   readBudgets,
   TailRequestSchema,
   TailResponseSchema,
@@ -215,12 +215,12 @@ function unaryDeadline(method: string, bytes: Uint8Array): number {
     return hostCallBudgets[slot].totalMs;
   }
   if (method === READ_METHOD) {
-    const slot = fromBinary(HostReadRequestSchema, bytes).method.case;
+    const slot = fromBinary(ReadRequestSchema, bytes).method.case;
     if (slot === undefined || !(slot in readBudgets)) throw new Error('host read has no method');
     return readBudgets[slot].totalMs;
   }
   if (method === MUTATE_METHOD) {
-    const slot = fromBinary(HostMutateRequestSchema, bytes).method.case;
+    const slot = fromBinary(MutateRequestSchema, bytes).method.case;
     if (slot === undefined || !(slot in mutateBudgets))
       throw new Error('host mutate has no method');
     return mutateBudgets[slot].totalMs;

@@ -346,7 +346,7 @@ Login = Operation(
     2,
     25000,
     pb.LoginRequest,
-    pb.LoginEvent,
+    pb.LoginResponse,
     ((("request_id",), ("request_id",)),),
 )
 

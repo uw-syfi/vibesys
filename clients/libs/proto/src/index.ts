@@ -9,10 +9,10 @@ export {
 export * from './generated/host-operations.js';
 export * from './generated/vibesys/api/v1/host_call_pb.js';
 export {
-  type HostMutateRequest,
-  HostMutateRequestSchema,
-  type HostMutateResponse,
-  HostMutateResponseSchema,
+  type MutateRequest,
+  MutateRequestSchema,
+  type MutateResponse,
+  MutateResponseSchema,
 } from './generated/vibesys/api/v1/host_mutate_generated_pb.js';
 export {
   BlobResultSchema,
@@ -38,16 +38,16 @@ export {
   WatchRunsResponseSchema,
 } from './generated/vibesys/api/v1/host_pb.js';
 export {
-  type HostReadRequest,
-  HostReadRequestSchema,
-  type HostReadResponse,
-  HostReadResponseSchema,
+  type ReadRequest,
+  ReadRequestSchema,
+  type ReadResponse,
+  ReadResponseSchema,
 } from './generated/vibesys/api/v1/host_read_generated_pb.js';
 export {
-  type HostWatchRequest,
-  HostWatchRequestSchema,
-  type HostWatchResponse,
-  HostWatchResponseSchema,
+  type WatchRequest,
+  WatchRequestSchema,
+  type WatchResponse,
+  WatchResponseSchema,
 } from './generated/vibesys/api/v1/host_watch_generated_pb.js';
 export {CheckoutStatus} from './generated/vibesys/core/v1/vocabulary_pb.js';
 export * from './generated/vibesys/host/v1/failure_pb.js';

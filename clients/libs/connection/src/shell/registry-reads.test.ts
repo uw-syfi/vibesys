@@ -5,9 +5,9 @@ import {
   Accelerator,
   ClusterSource,
   DescribeMachineResponseSchema,
-  HostReadRequestSchema,
-  HostReadResponseSchema,
   ListComputeResponseSchema,
+  ReadRequestSchema,
+  ReadResponseSchema,
 } from '@vibesys/proto';
 import {registryReads, registryTransport, requireCheckout} from './registry-reads.js';
 
@@ -49,13 +49,13 @@ describe('registry reads', () => {
     const reads = registryReads({
       checkout: async () => '/saved',
       unary: async (_host, bytes) => {
-        const request = fromBinary(HostReadRequestSchema, bytes);
+        const request = fromBinary(ReadRequestSchema, bytes);
         seen.push(request.checkout);
         const method = request.method;
         if (method.case === 'listCompute') {
           return toBinary(
-            HostReadResponseSchema,
-            create(HostReadResponseSchema, {
+            ReadResponseSchema,
+            create(ReadResponseSchema, {
               result: {
                 case: 'listCompute',
                 value: create(ListComputeResponseSchema, {
@@ -81,8 +81,8 @@ describe('registry reads', () => {
         }
         if (method.case !== 'describeMachine') throw new Error(method.case ?? 'missing method');
         return toBinary(
-          HostReadResponseSchema,
-          create(HostReadResponseSchema, {
+          ReadResponseSchema,
+          create(ReadResponseSchema, {
             result: {
               case: 'describeMachine',
               value: create(DescribeMachineResponseSchema, {

@@ -1,18 +1,18 @@
 import {expect, test} from 'bun:test';
 import {create, toBinary} from '@bufbuild/protobuf';
 import type {HostId} from '@vibesys/hosts';
-import {HostWatchResponseSchema, LoginEventSchema} from '@vibesys/proto';
+import {LoginResponseSchema, WatchResponseSchema} from '@vibesys/proto';
 import {LoginActor} from './login-actor.js';
 
 const HOST: HostId = {kind: 'ssh', alias: 'host-a'};
 
 function startedFrame(requestId: string): Uint8Array {
   return toBinary(
-    HostWatchResponseSchema,
-    create(HostWatchResponseSchema, {
+    WatchResponseSchema,
+    create(WatchResponseSchema, {
       result: {
         case: 'login',
-        value: create(LoginEventSchema, {
+        value: create(LoginResponseSchema, {
           requestId,
           sequence: 1n,
           body: {case: 'started', value: {instruction: 'Open https://a.example/x'}},

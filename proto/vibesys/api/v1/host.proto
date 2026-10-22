@@ -18,13 +18,13 @@ service HostService {
   // with gRPC FAILED_PRECONDITION and a message naming both well-formed hashes.
   rpc HostCall(HostCallRequest) returns (HostCallResponse);
   // Read runs one registered catalog operation. The runner deadline is that operation's cap.
-  rpc Read(HostReadRequest) returns (HostReadResponse);
+  rpc Read(ReadRequest) returns (ReadResponse);
   // Watch runs one registered stream. The host keeps it until completion or cancellation.
   // Closing a panel drops the client's subscription and does not cancel this stream.
-  rpc Watch(HostWatchRequest) returns (stream HostWatchResponse);
+  rpc Watch(WatchRequest) returns (stream WatchResponse);
   // Mutate runs one registered unary admission or idempotent write. An admission
   // keeps running after the caller disconnects, until the operation cap.
-  rpc Mutate(HostMutateRequest) returns (HostMutateResponse);
+  rpc Mutate(MutateRequest) returns (MutateResponse);
   rpc Hello(HelloRequest) returns (HelloResponse);
   // Tail follows the log live until the client cancels, starting at from_seq
   // (inclusive). Record bytes pass through unchanged; only seq is decoded.
