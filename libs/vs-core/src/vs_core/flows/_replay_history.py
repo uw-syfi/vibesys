@@ -173,7 +173,11 @@ class ReplayFrontier:
 
 @dataclass(frozen=True)
 class ReplayAcknowledgements:
-    """Durable notice/launch relations. Repeated launches cannot acknowledge twice."""
+    """Durable notice/launch relations, one atomic batch per launch.
+
+    A launch acknowledges every outstanding notice at once. Repeating that launch
+    acknowledges nothing, so it can never cover a later notice.
+    """
 
     notices: tuple[bytes, ...] = ()
     acknowledgements: tuple[bytes, ...] = ()
@@ -186,17 +190,22 @@ class ReplayAcknowledgements:
         for message in (*notices, *acknowledgements):
             validate(message)
         known = {notice.id for notice in notices}
-        launches = [ack.launch_request_id for ack in acknowledgements]
         acknowledged = [ack.notice_id for ack in acknowledgements if ack.has_field("notice_id")]
-        if (
-            len(known) != len(notices)
-            or len(set(launches)) != len(launches)
-            or len(set(acknowledged)) != len(acknowledged)
-        ):
+        if len(known) != len(notices) or len(set(acknowledged)) != len(acknowledged):
             problem = "replay history repeats a notice, launch or acknowledgement"
             raise ReplayError(problem)
         if set(acknowledged) - known:
             problem = "replay acknowledgement names an unknown notice"
+            raise ReplayError(problem)
+        batches = _batches(acknowledgements)
+        if len({batch[0].launch_request_id for batch in batches}) != len(batches):
+            problem = "replay history repeats a notice, launch or acknowledgement"
+            raise ReplayError(problem)
+        if any(
+            len(batch) > 1 and not all(ack.has_field("notice_id") for ack in batch)
+            for batch in batches
+        ):
+            problem = "replay history repeats a launch without outstanding notices"
             raise ReplayError(problem)
 
     def record_notice(self, notice: pb.ReplayNotice) -> ReplayAcknowledgements:
@@ -211,30 +220,40 @@ class ReplayAcknowledgements:
         return ReplayAcknowledgements((*self.notices, notice.to_binary()), self.acknowledgements)
 
     def resume(self, launch_request_id: str) -> ReplayAcknowledgements:
+        """Acknowledge every outstanding notice in one batch; a repeated launch adds none."""
         if not launch_request_id:
             problem = "Resume requires a launch request id"
             raise ReplayError(problem)
-        acks = [pb.ReplayAcknowledgement.from_binary(value) for value in self.acknowledgements]
-        if any(ack.launch_request_id == launch_request_id for ack in acks):
+        if self.batch(launch_request_id):
             return self
-        notice_id = None
-        if self.notices:
-            notice = pb.ReplayNotice.from_binary(self.notices[-1])
-            if not any(ack.notice_id == notice.id for ack in acks):
-                notice_id = notice.id
-        ack = pb.ReplayAcknowledgement(notice_id=notice_id, launch_request_id=launch_request_id)
-        return ReplayAcknowledgements(self.notices, (*self.acknowledgements, ack.to_binary()))
+        acknowledged = {ack.notice_id for ack in self._acks if ack.has_field("notice_id")}
+        outstanding = [
+            notice.id
+            for notice in map(pb.ReplayNotice.from_binary, self.notices)
+            if notice.id not in acknowledged
+        ]
+        batch = [
+            pb.ReplayAcknowledgement(notice_id=notice_id, launch_request_id=launch_request_id)
+            for notice_id in outstanding or [None]
+        ]
+        return ReplayAcknowledgements(
+            self.notices, (*self.acknowledgements, *(ack.to_binary() for ack in batch))
+        )
+
+    def batch(self, launch_request_id: str) -> tuple[pb.ReplayAcknowledgement, ...]:
+        """The acknowledgements one launch committed with its epoch, in notice order."""
+        return tuple(ack for ack in self._acks if ack.launch_request_id == launch_request_id)
+
+    @cached_property
+    def _acks(self) -> tuple[pb.ReplayAcknowledgement, ...]:
+        return tuple(map(pb.ReplayAcknowledgement.from_binary, self.acknowledgements))
 
     def disclosed(self) -> frozenset[bytes]:
         return self._disclosed
 
     @cached_property
     def _disclosed(self) -> frozenset[bytes]:
-        acknowledged = {
-            pb.ReplayAcknowledgement.from_binary(value).notice_id
-            for value in self.acknowledgements
-            if pb.ReplayAcknowledgement.from_binary(value).has_field("notice_id")
-        }
+        acknowledged = {ack.notice_id for ack in self._acks if ack.has_field("notice_id")}
         return frozenset(
             _occurrence_token(item)
             for value in self.notices
@@ -242,6 +261,18 @@ class ReplayAcknowledgements:
             if notice.id in acknowledged
             for item in notice.unused
         )
+
+
+def _batches(
+    acknowledgements: list[pb.ReplayAcknowledgement],
+) -> list[list[pb.ReplayAcknowledgement]]:
+    batches: list[list[pb.ReplayAcknowledgement]] = []
+    for ack in acknowledgements:
+        if batches and batches[-1][0].launch_request_id == ack.launch_request_id:
+            batches[-1].append(ack)
+        else:
+            batches.append([ack])
+    return batches
 
 
 def _occurrence_token(operation: pb.OperationReplay) -> bytes:

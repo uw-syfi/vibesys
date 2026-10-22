@@ -6,6 +6,15 @@ accepted observations in log order; flow continuations use only this scheduler.
 
 from vs_core._continuations import SuspensionRefusal
 from vs_core.flows._replay_archive import ReplayArchive
+from vs_core.flows._replay_controls import (
+    ControlView,
+    PermitRefusal,
+    ReplayControls,
+    applied_control,
+    classify_control,
+    permit_refusal,
+    stale_control,
+)
 from vs_core.flows._replay_history import (
     AcceptedClock,
     AcceptedReplay,
@@ -70,7 +79,9 @@ __all__ = [
     "AcceptedClock",
     "AcceptedReplay",
     "ClassifiedContext",
+    "ControlView",
     "EncodedIdentity",
+    "PermitRefusal",
     "PolicyDrift",
     "ReplayAccounting",
     "ReplayAcknowledgements",
@@ -79,6 +90,7 @@ __all__ = [
     "ReplayCausalityError",
     "ReplayChannel",
     "ReplayConsumerError",
+    "ReplayControls",
     "ReplayDeadlockError",
     "ReplayDivergenceError",
     "ReplayError",
@@ -106,14 +118,18 @@ __all__ = [
     "ReplayWriterRecovery",
     "SemanticKey",
     "SuspensionRefusal",
+    "applied_control",
     "chain_dependency",
     "classify_context",
+    "classify_control",
     "effective_deadline",
     "encode_identity",
+    "permit_refusal",
     "physical_identity",
     "physical_start",
     "proof_covers",
     "proof_digest",
     "replay_descriptors",
     "reply_schema_digest",
+    "stale_control",
 ]

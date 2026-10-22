@@ -64,7 +64,9 @@ def records() -> list[Record]:
                 epoch=1,
                 identity_encoding_version=1,
                 initial_allowance=replay.ReplayAllowance(iterations=10),
-                replay_acknowledgement=replay.ReplayAcknowledgement(launch_request_id="launch-a"),
+                replay_acknowledgements=[
+                    replay.ReplayAcknowledgement(launch_request_id="launch-a")
+                ],
             ),
         ),
     )
@@ -204,10 +206,10 @@ def test_repeated_acceptance_and_sequence_gaps_are_rejected() -> None:
 
 
 @pytest.mark.parametrize(
-    "field", ["initial_allowance", "replay_acknowledgement", "identity_encoding_version"]
+    "field", ["initial_allowance", "replay_acknowledgements", "identity_encoding_version"]
 )
 def test_missing_epoch_reconstruction_metadata_is_rejected(
-    field: Literal["initial_allowance", "replay_acknowledgement", "identity_encoding_version"],
+    field: Literal["initial_allowance", "replay_acknowledgements", "identity_encoding_version"],
 ) -> None:
     prefix = records()[:1]
     epoch_of(prefix[0]).clear_field(field)
@@ -222,8 +224,7 @@ def test_resume_cannot_replace_the_run_identity_or_repeat_its_launch() -> None:
     with pytest.raises(ReplayError, match="repeats a launch"):
         decode([*prefix, epoch])
     epoch_of(epoch).run_id = "run-b"
-    ack = epoch_of(epoch).replay_acknowledgement
-    assert ack is not None
+    (ack,) = epoch_of(epoch).replay_acknowledgements
     ack.launch_request_id = "launch-b"
     with pytest.raises(ReplayError, match="original run identity"):
         decode([*prefix, epoch])
@@ -505,15 +506,15 @@ def test_clock_and_operation_observations_cannot_share_a_record(length: int) -> 
         decode(prefix)
 
 
-def notice_record() -> Record:
+def notice_record(pending: str = "future", seq: int = 5) -> Record:
     notice = ReplayFrontier(
         (AcceptedReplay.from_record(records()[-1]),),
-        (SemanticKey("future"),),
+        (SemanticKey(pending),),
         PolicyDrift(0, (), ()),
     ).notice()
     assert notice is not None
     return Record(
-        seq=5,
+        seq=seq,
         epoch=1,
         at=Timestamp(seconds=1),
         clock=0,
@@ -534,6 +535,75 @@ def test_notice_retains_the_exact_accepted_outcomes() -> None:
     archive = decode([*records(), record])
     assert len(archive.acknowledgements.notices) == 1
     assert len(archive.acknowledgements.resume("next").disclosed()) == 1
+
+
+def resume_epoch(
+    seq: int,
+    batch: list[replay.ReplayAcknowledgement],
+    legacy: replay.ReplayAcknowledgement | None = None,
+) -> Record:
+    epoch = deepcopy(records()[0])
+    epoch.seq, epoch.epoch, epoch_of(epoch).epoch = seq, 2, 2
+    epoch_of(epoch).replay_acknowledgements = batch
+    epoch_of(epoch).replay_acknowledgement = legacy
+    return epoch
+
+
+@pytest.mark.regression
+@given(count=st.integers(min_value=0, max_value=3))
+@example(count=2)  # The earlier rule acknowledged only the newest outstanding notice.
+def test_resume_acknowledges_every_outstanding_notice_in_one_batch(count: int) -> None:
+    prefix = [*records(), *(notice_record(f"future-{n}", 5 + n) for n in range(count))]
+    archive = decode(prefix)
+    ids = [replay.ReplayNotice.from_binary(value).id for value in archive.acknowledgements.notices]
+    resumed = archive.acknowledgements.resume("launch-b")
+    batch = list(resumed.batch("launch-b"))
+    assert [ack.notice_id if ack.has_field("notice_id") else None for ack in batch] == (
+        ids or [None]
+    )
+    assert resumed.resume("launch-b") == resumed
+    assert resumed.resume("launch-c").batch("launch-c") == (
+        replay.ReplayAcknowledgement(launch_request_id="launch-c"),
+    )
+    # Every notice here discloses the same accepted result, so one occurrence is disclosed.
+    assert len(resumed.disclosed()) == min(count, 1)
+    assert decode([*prefix, resume_epoch(5 + count, batch)]).acknowledgements == resumed
+
+
+@pytest.mark.regression
+@given(count=st.integers(min_value=2, max_value=4), data=st.data())
+@example(count=2, data=None)
+def test_an_epoch_cannot_acknowledge_part_or_a_reordering_of_its_notices(
+    count: int, data: st.DataObject | None
+) -> None:
+    prefix = [*records(), *(notice_record(f"future-{n}", 5 + n) for n in range(count))]
+    batch = list(decode(prefix).acknowledgements.resume("launch-b").batch("launch-b"))
+    if data is None:
+        changed = batch[-1:]
+    else:
+        changed = data.draw(
+            st.permutations(batch).flatmap(
+                lambda order: st.lists(
+                    st.sampled_from(order), min_size=1, max_size=len(order), unique_by=id
+                )
+            )
+        )
+    if [ack.notice_id for ack in changed] == [ack.notice_id for ack in batch]:
+        return
+    with pytest.raises(ReplayError, match="contradicts its outstanding notice acknowledgements"):
+        decode([*prefix, resume_epoch(5 + count, changed)])
+
+
+def test_an_epoch_records_its_batch_in_one_field_and_still_decodes_the_single_one() -> None:
+    prefix = [*records(), notice_record()]
+    (ack,) = decode(prefix).acknowledgements.resume("launch-b").batch("launch-b")
+    legacy = decode([*prefix, resume_epoch(6, [], legacy=ack)])
+    assert legacy.acknowledgements.batch("launch-b") == (ack,)
+    with pytest.raises(ValidationError) as raised:
+        decode([*prefix, resume_epoch(6, [ack], legacy=ack)])
+    assert [item.proto.rule_id for item in raised.value.violations] == [
+        "epoch.replay_acknowledgements"
+    ]
 
 
 @pytest.mark.regression

@@ -107,6 +107,11 @@ message EpochStarted {
     expression: "!has(this.run) || (this.api_schema_hash.matches('^[0-9a-f]{64}$') && this.store_schema_hash.matches('^[0-9a-f]{64}$'))"
   };
   option (buf.validate.message).cel = {
+    id: "epoch.replay_acknowledgements"
+    message: "an epoch records its acknowledgement batch in one field, for one launch, naming each notice once"
+    expression: "(!has(this.replay_acknowledgement) || size(this.replay_acknowledgements) == 0) && this.replay_acknowledgements.all(a, a.launch_request_id == this.replay_acknowledgements[0].launch_request_id) && this.replay_acknowledgements.filter(a, has(a.notice_id)).map(a, a.notice_id).unique() && (size(this.replay_acknowledgements) <= 1 || this.replay_acknowledgements.all(a, has(a.notice_id)))"
+  };
+  option (buf.validate.message).cel = {
     id: "epoch.project_root"
     message: "project_root must be an absolute path"
     expression: "!has(this.project_root) || this.project_root.startsWith('/')"
@@ -129,6 +134,8 @@ message EpochStarted {
   // Present only for keyed epochs. Retain this writer encoding indefinitely.
   optional uint32 identity_encoding_version = 13 [(buf.validate.field).uint32.const = 1];
   optional ReplayAllowance initial_allowance = 14;
+  // Decode-only: earlier keyed epochs acknowledged at most one notice here.
+  // Writers record replay_acknowledgements instead.
   optional ReplayAcknowledgement replay_acknowledgement = 15;
   // Canonical absolute directory recorded when the run is created. Windows,
   // controls and resume read this and no path the client remembered. Absence
@@ -137,6 +144,10 @@ message EpochStarted {
     min_len: 1
     max_bytes: 4096
   }];
+  // One launch acknowledges every outstanding notice in this one batch, committed
+  // atomically with the epoch. A launch with no outstanding notice records one
+  // entry without notice_id.
+  repeated ReplayAcknowledgement replay_acknowledgements = 17;
 }
 
 // LegacyEvent is an interim bridge carrying one current JSONL run event verbatim.

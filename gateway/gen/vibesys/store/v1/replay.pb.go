@@ -187,6 +187,57 @@ func (WriterReconciliationStatus) EnumDescriptor() ([]byte, []int) {
 	return file_vibesys_store_v1_replay_proto_rawDescGZIP(), []int{2}
 }
 
+type ReplayControlStale int32
+
+const (
+	ReplayControlStale_REPLAY_CONTROL_STALE_UNSPECIFIED ReplayControlStale = 0
+	// Written for an epoch other than the open one.
+	ReplayControlStale_REPLAY_CONTROL_STALE_EPOCH ReplayControlStale = 1
+	// Its logical turn is unknown or has ended.
+	ReplayControlStale_REPLAY_CONTROL_STALE_TURN ReplayControlStale = 2
+)
+
+// Enum value maps for ReplayControlStale.
+var (
+	ReplayControlStale_name = map[int32]string{
+		0: "REPLAY_CONTROL_STALE_UNSPECIFIED",
+		1: "REPLAY_CONTROL_STALE_EPOCH",
+		2: "REPLAY_CONTROL_STALE_TURN",
+	}
+	ReplayControlStale_value = map[string]int32{
+		"REPLAY_CONTROL_STALE_UNSPECIFIED": 0,
+		"REPLAY_CONTROL_STALE_EPOCH":       1,
+		"REPLAY_CONTROL_STALE_TURN":        2,
+	}
+)
+
+func (x ReplayControlStale) Enum() *ReplayControlStale {
+	p := new(ReplayControlStale)
+	*p = x
+	return p
+}
+
+func (x ReplayControlStale) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (ReplayControlStale) Descriptor() protoreflect.EnumDescriptor {
+	return file_vibesys_store_v1_replay_proto_enumTypes[3].Descriptor()
+}
+
+func (ReplayControlStale) Type() protoreflect.EnumType {
+	return &file_vibesys_store_v1_replay_proto_enumTypes[3]
+}
+
+func (x ReplayControlStale) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use ReplayControlStale.Descriptor instead.
+func (ReplayControlStale) EnumDescriptor() ([]byte, []int) {
+	return file_vibesys_store_v1_replay_proto_rawDescGZIP(), []int{3}
+}
+
 // Names are semantic, never source locations or live collection positions.
 type OperationKey struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -816,8 +867,11 @@ type ReplayPhysical struct {
 	ConfirmedAbsent bool `protobuf:"varint,9,opt,name=confirmed_absent,json=confirmedAbsent,proto3" json:"confirmed_absent,omitempty"`
 	// W8a: proof-backed intent before releasing access or restoring retained input.
 	SettlementSequence *uint64 `protobuf:"varint,10,opt,name=settlement_sequence,json=settlementSequence,proto3,oneof" json:"settlement_sequence,omitempty"`
-	unknownFields      protoimpl.UnknownFields
-	sizeCache          protoimpl.SizeCache
+	// Steer input ids this turn consumed at its start: every applied, unconsumed
+	// steer for no turn or for this child's logical turn, in application order.
+	Guidance      []string `protobuf:"bytes,11,rep,name=guidance,proto3" json:"guidance,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ReplayPhysical) Reset() {
@@ -918,6 +972,13 @@ func (x *ReplayPhysical) GetSettlementSequence() uint64 {
 		return *x.SettlementSequence
 	}
 	return 0
+}
+
+func (x *ReplayPhysical) GetGuidance() []string {
+	if x != nil {
+		return x.Guidance
+	}
+	return nil
 }
 
 // The environment records every writable grant before execution, including
@@ -1593,11 +1654,13 @@ func (x *ReplayPolicyDrift) GetTemplates() []string {
 // Authenticated execution evidence. The producer start precedes this obligation,
 // and this obligation precedes the tool reply or a turn's accepted yield.
 type ReplayToolSubmission struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Turn          string                 `protobuf:"bytes,1,opt,name=turn,proto3" json:"turn,omitempty"`
-	CallId        string                 `protobuf:"bytes,2,opt,name=call_id,json=callId,proto3" json:"call_id,omitempty"`
-	ReplyId       string                 `protobuf:"bytes,3,opt,name=reply_id,json=replyId,proto3" json:"reply_id,omitempty"`
-	Producer      string                 `protobuf:"bytes,4,opt,name=producer,proto3" json:"producer,omitempty"`
+	state    protoimpl.MessageState `protogen:"open.v1"`
+	Turn     string                 `protobuf:"bytes,1,opt,name=turn,proto3" json:"turn,omitempty"`
+	CallId   string                 `protobuf:"bytes,2,opt,name=call_id,json=callId,proto3" json:"call_id,omitempty"`
+	ReplyId  string                 `protobuf:"bytes,3,opt,name=reply_id,json=replyId,proto3" json:"reply_id,omitempty"`
+	Producer string                 `protobuf:"bytes,4,opt,name=producer,proto3" json:"producer,omitempty"`
+	// The requesting turn's permit; the producer cannot outlive it.
+	Permit        *ReplayTurnPermit `protobuf:"bytes,5,opt,name=permit,proto3" json:"permit,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1660,6 +1723,466 @@ func (x *ReplayToolSubmission) GetProducer() string {
 	return ""
 }
 
+func (x *ReplayToolSubmission) GetPermit() *ReplayTurnPermit {
+	if x != nil {
+		return x.Permit
+	}
+	return nil
+}
+
+// The admission one logical turn's requests consume: the epoch whose physical
+// start admitted it, its logical origin and that turn's own recorded bound,
+// never the minimum deadline of the turns sharing its scope.
+type ReplayTurnPermit struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Epoch         uint32                 `protobuf:"varint,1,opt,name=epoch,proto3" json:"epoch,omitempty"`
+	Turn          string                 `protobuf:"bytes,2,opt,name=turn,proto3" json:"turn,omitempty"`
+	Bound         *ReplayTurnBound       `protobuf:"bytes,3,opt,name=bound,proto3" json:"bound,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReplayTurnPermit) Reset() {
+	*x = ReplayTurnPermit{}
+	mi := &file_vibesys_store_v1_replay_proto_msgTypes[21]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReplayTurnPermit) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReplayTurnPermit) ProtoMessage() {}
+
+func (x *ReplayTurnPermit) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_store_v1_replay_proto_msgTypes[21]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReplayTurnPermit.ProtoReflect.Descriptor instead.
+func (*ReplayTurnPermit) Descriptor() ([]byte, []int) {
+	return file_vibesys_store_v1_replay_proto_rawDescGZIP(), []int{21}
+}
+
+func (x *ReplayTurnPermit) GetEpoch() uint32 {
+	if x != nil {
+		return x.Epoch
+	}
+	return 0
+}
+
+func (x *ReplayTurnPermit) GetTurn() string {
+	if x != nil {
+		return x.Turn
+	}
+	return ""
+}
+
+func (x *ReplayTurnPermit) GetBound() *ReplayTurnBound {
+	if x != nil {
+		return x.Bound
+	}
+	return nil
+}
+
+// One operator control, as the run read it from its inbox. epoch is the epoch
+// the operator acted on; a control for any other epoch is stale.
+type ReplayControl struct {
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	RequestId string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	Epoch     uint32                 `protobuf:"varint,2,opt,name=epoch,proto3" json:"epoch,omitempty"`
+	// Types that are valid to be assigned to Action:
+	//
+	//	*ReplayControl_Pause
+	//	*ReplayControl_PauseNow
+	//	*ReplayControl_Steer
+	Action        isReplayControl_Action `protobuf_oneof:"action"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReplayControl) Reset() {
+	*x = ReplayControl{}
+	mi := &file_vibesys_store_v1_replay_proto_msgTypes[22]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReplayControl) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReplayControl) ProtoMessage() {}
+
+func (x *ReplayControl) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_store_v1_replay_proto_msgTypes[22]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReplayControl.ProtoReflect.Descriptor instead.
+func (*ReplayControl) Descriptor() ([]byte, []int) {
+	return file_vibesys_store_v1_replay_proto_rawDescGZIP(), []int{22}
+}
+
+func (x *ReplayControl) GetRequestId() string {
+	if x != nil {
+		return x.RequestId
+	}
+	return ""
+}
+
+func (x *ReplayControl) GetEpoch() uint32 {
+	if x != nil {
+		return x.Epoch
+	}
+	return 0
+}
+
+func (x *ReplayControl) GetAction() isReplayControl_Action {
+	if x != nil {
+		return x.Action
+	}
+	return nil
+}
+
+func (x *ReplayControl) GetPause() *ReplayPause {
+	if x != nil {
+		if x, ok := x.Action.(*ReplayControl_Pause); ok {
+			return x.Pause
+		}
+	}
+	return nil
+}
+
+func (x *ReplayControl) GetPauseNow() *ReplayPauseNow {
+	if x != nil {
+		if x, ok := x.Action.(*ReplayControl_PauseNow); ok {
+			return x.PauseNow
+		}
+	}
+	return nil
+}
+
+func (x *ReplayControl) GetSteer() *ReplaySteer {
+	if x != nil {
+		if x, ok := x.Action.(*ReplayControl_Steer); ok {
+			return x.Steer
+		}
+	}
+	return nil
+}
+
+type isReplayControl_Action interface {
+	isReplayControl_Action()
+}
+
+type ReplayControl_Pause struct {
+	Pause *ReplayPause `protobuf:"bytes,3,opt,name=pause,proto3,oneof"`
+}
+
+type ReplayControl_PauseNow struct {
+	PauseNow *ReplayPauseNow `protobuf:"bytes,4,opt,name=pause_now,json=pauseNow,proto3,oneof"`
+}
+
+type ReplayControl_Steer struct {
+	Steer *ReplaySteer `protobuf:"bytes,5,opt,name=steer,proto3,oneof"`
+}
+
+func (*ReplayControl_Pause) isReplayControl_Action() {}
+
+func (*ReplayControl_PauseNow) isReplayControl_Action() {}
+
+func (*ReplayControl_Steer) isReplayControl_Action() {}
+
+// Admit no new logical turn; continuations of this epoch's permits may finish.
+type ReplayPause struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReplayPause) Reset() {
+	*x = ReplayPause{}
+	mi := &file_vibesys_store_v1_replay_proto_msgTypes[23]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReplayPause) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReplayPause) ProtoMessage() {}
+
+func (x *ReplayPause) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_store_v1_replay_proto_msgTypes[23]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReplayPause.ProtoReflect.Descriptor instead.
+func (*ReplayPause) Descriptor() ([]byte, []int) {
+	return file_vibesys_store_v1_replay_proto_rawDescGZIP(), []int{23}
+}
+
+// Withdraw every unfinished physical child, then cancel it; start nothing more.
+type ReplayPauseNow struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReplayPauseNow) Reset() {
+	*x = ReplayPauseNow{}
+	mi := &file_vibesys_store_v1_replay_proto_msgTypes[24]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReplayPauseNow) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReplayPauseNow) ProtoMessage() {}
+
+func (x *ReplayPauseNow) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_store_v1_replay_proto_msgTypes[24]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReplayPauseNow.ProtoReflect.Descriptor instead.
+func (*ReplayPauseNow) Descriptor() ([]byte, []int) {
+	return file_vibesys_store_v1_replay_proto_rawDescGZIP(), []int{24}
+}
+
+// Operator guidance, consumed by the next turn start it applies to.
+type ReplaySteer struct {
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	InputId string                 `protobuf:"bytes,1,opt,name=input_id,json=inputId,proto3" json:"input_id,omitempty"`
+	// The logical turn the guidance was written for; stale once that turn ended.
+	Turn          *string `protobuf:"bytes,2,opt,name=turn,proto3,oneof" json:"turn,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReplaySteer) Reset() {
+	*x = ReplaySteer{}
+	mi := &file_vibesys_store_v1_replay_proto_msgTypes[25]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReplaySteer) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReplaySteer) ProtoMessage() {}
+
+func (x *ReplaySteer) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_store_v1_replay_proto_msgTypes[25]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReplaySteer.ProtoReflect.Descriptor instead.
+func (*ReplaySteer) Descriptor() ([]byte, []int) {
+	return file_vibesys_store_v1_replay_proto_rawDescGZIP(), []int{25}
+}
+
+func (x *ReplaySteer) GetInputId() string {
+	if x != nil {
+		return x.InputId
+	}
+	return ""
+}
+
+func (x *ReplaySteer) GetTurn() string {
+	if x != nil && x.Turn != nil {
+		return *x.Turn
+	}
+	return ""
+}
+
+// Recorded before the inbox entry is settled or rejected. The archive
+// recomputes it from the prefix, so a stale control can never be applied.
+type ReplayControlDisposition struct {
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	Control *ReplayControl         `protobuf:"bytes,1,opt,name=control,proto3" json:"control,omitempty"`
+	// Types that are valid to be assigned to Outcome:
+	//
+	//	*ReplayControlDisposition_Applied
+	//	*ReplayControlDisposition_Stale
+	Outcome       isReplayControlDisposition_Outcome `protobuf_oneof:"outcome"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReplayControlDisposition) Reset() {
+	*x = ReplayControlDisposition{}
+	mi := &file_vibesys_store_v1_replay_proto_msgTypes[26]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReplayControlDisposition) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReplayControlDisposition) ProtoMessage() {}
+
+func (x *ReplayControlDisposition) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_store_v1_replay_proto_msgTypes[26]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReplayControlDisposition.ProtoReflect.Descriptor instead.
+func (*ReplayControlDisposition) Descriptor() ([]byte, []int) {
+	return file_vibesys_store_v1_replay_proto_rawDescGZIP(), []int{26}
+}
+
+func (x *ReplayControlDisposition) GetControl() *ReplayControl {
+	if x != nil {
+		return x.Control
+	}
+	return nil
+}
+
+func (x *ReplayControlDisposition) GetOutcome() isReplayControlDisposition_Outcome {
+	if x != nil {
+		return x.Outcome
+	}
+	return nil
+}
+
+func (x *ReplayControlDisposition) GetApplied() *ReplayControlApplied {
+	if x != nil {
+		if x, ok := x.Outcome.(*ReplayControlDisposition_Applied); ok {
+			return x.Applied
+		}
+	}
+	return nil
+}
+
+func (x *ReplayControlDisposition) GetStale() ReplayControlStale {
+	if x != nil {
+		if x, ok := x.Outcome.(*ReplayControlDisposition_Stale); ok {
+			return x.Stale
+		}
+	}
+	return ReplayControlStale_REPLAY_CONTROL_STALE_UNSPECIFIED
+}
+
+type isReplayControlDisposition_Outcome interface {
+	isReplayControlDisposition_Outcome()
+}
+
+type ReplayControlDisposition_Applied struct {
+	Applied *ReplayControlApplied `protobuf:"bytes,2,opt,name=applied,proto3,oneof"`
+}
+
+type ReplayControlDisposition_Stale struct {
+	Stale ReplayControlStale `protobuf:"varint,3,opt,name=stale,proto3,enum=vibesys.store.v1.ReplayControlStale,oneof"`
+}
+
+func (*ReplayControlDisposition_Applied) isReplayControlDisposition_Outcome() {}
+
+func (*ReplayControlDisposition_Stale) isReplayControlDisposition_Outcome() {}
+
+type ReplayControlApplied struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Pause: this epoch's admitted permits, whose continuations may still start.
+	Draining []*ReplayTurnPermit `protobuf:"bytes,1,rep,name=draining,proto3" json:"draining,omitempty"`
+	// Pause-now: the unfinished physical children it withdraws before cancelling.
+	Withdrawn     []string `protobuf:"bytes,2,rep,name=withdrawn,proto3" json:"withdrawn,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReplayControlApplied) Reset() {
+	*x = ReplayControlApplied{}
+	mi := &file_vibesys_store_v1_replay_proto_msgTypes[27]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReplayControlApplied) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReplayControlApplied) ProtoMessage() {}
+
+func (x *ReplayControlApplied) ProtoReflect() protoreflect.Message {
+	mi := &file_vibesys_store_v1_replay_proto_msgTypes[27]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReplayControlApplied.ProtoReflect.Descriptor instead.
+func (*ReplayControlApplied) Descriptor() ([]byte, []int) {
+	return file_vibesys_store_v1_replay_proto_rawDescGZIP(), []int{27}
+}
+
+func (x *ReplayControlApplied) GetDraining() []*ReplayTurnPermit {
+	if x != nil {
+		return x.Draining
+	}
+	return nil
+}
+
+func (x *ReplayControlApplied) GetWithdrawn() []string {
+	if x != nil {
+		return x.Withdrawn
+	}
+	return nil
+}
+
 type ReplayToolAcknowledgement struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Turn          string                 `protobuf:"bytes,1,opt,name=turn,proto3" json:"turn,omitempty"`
@@ -1670,7 +2193,7 @@ type ReplayToolAcknowledgement struct {
 
 func (x *ReplayToolAcknowledgement) Reset() {
 	*x = ReplayToolAcknowledgement{}
-	mi := &file_vibesys_store_v1_replay_proto_msgTypes[21]
+	mi := &file_vibesys_store_v1_replay_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1682,7 +2205,7 @@ func (x *ReplayToolAcknowledgement) String() string {
 func (*ReplayToolAcknowledgement) ProtoMessage() {}
 
 func (x *ReplayToolAcknowledgement) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_store_v1_replay_proto_msgTypes[21]
+	mi := &file_vibesys_store_v1_replay_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1695,7 +2218,7 @@ func (x *ReplayToolAcknowledgement) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReplayToolAcknowledgement.ProtoReflect.Descriptor instead.
 func (*ReplayToolAcknowledgement) Descriptor() ([]byte, []int) {
-	return file_vibesys_store_v1_replay_proto_rawDescGZIP(), []int{21}
+	return file_vibesys_store_v1_replay_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *ReplayToolAcknowledgement) GetTurn() string {
@@ -1722,7 +2245,7 @@ type ReplayTurnWait struct {
 
 func (x *ReplayTurnWait) Reset() {
 	*x = ReplayTurnWait{}
-	mi := &file_vibesys_store_v1_replay_proto_msgTypes[22]
+	mi := &file_vibesys_store_v1_replay_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1734,7 +2257,7 @@ func (x *ReplayTurnWait) String() string {
 func (*ReplayTurnWait) ProtoMessage() {}
 
 func (x *ReplayTurnWait) ProtoReflect() protoreflect.Message {
-	mi := &file_vibesys_store_v1_replay_proto_msgTypes[22]
+	mi := &file_vibesys_store_v1_replay_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1747,7 +2270,7 @@ func (x *ReplayTurnWait) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReplayTurnWait.ProtoReflect.Descriptor instead.
 func (*ReplayTurnWait) Descriptor() ([]byte, []int) {
-	return file_vibesys_store_v1_replay_proto_rawDescGZIP(), []int{22}
+	return file_vibesys_store_v1_replay_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *ReplayTurnWait) GetTurn() string {
@@ -1880,7 +2403,7 @@ const file_vibesys_store_v1_replay_proto_rawDesc = "" +
 	"\x0fReplayTurnBound\x12\x1f\n" +
 	"\x06origin\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x06origin\x12,\n" +
 	"\bdeadline\x18\x02 \x01(\x01B\x10\xbaH\r\x12\v@\x01)\x00\x00\x00\x00\x00\x00\x00\x00R\bdeadline\x12@\n" +
-	"\x13hold_credit_seconds\x18\x03 \x01(\x01B\x10\xbaH\r\x12\v@\x01)\x00\x00\x00\x00\x00\x00\x00\x00R\x11holdCreditSeconds\"\xe5\x04\n" +
+	"\x13hold_credit_seconds\x18\x03 \x01(\x01B\x10\xbaH\r\x12\v@\x01)\x00\x00\x00\x00\x00\x00\x00\x00R\x11holdCreditSeconds\"\x91\x05\n" +
 	"\x0eReplayPhysical\x12!\n" +
 	"\alogical\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\alogical\x12(\n" +
 	"\vexternal_id\x18\x02 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\n" +
@@ -1893,7 +2416,8 @@ const file_vibesys_store_v1_replay_proto_rawDesc = "" +
 	"\x18termination_proof_digest\x18\b \x01(\fB\a\xbaH\x04z\x02h H\x02R\x16terminationProofDigest\x88\x01\x01\x12)\n" +
 	"\x10confirmed_absent\x18\t \x01(\bR\x0fconfirmedAbsent\x12=\n" +
 	"\x13settlement_sequence\x18\n" +
-	" \x01(\x04B\a\xbaH\x042\x02 \x00H\x03R\x12settlementSequence\x88\x01\x01B\x15\n" +
+	" \x01(\x04B\a\xbaH\x042\x02 \x00H\x03R\x12settlementSequence\x88\x01\x01\x12*\n" +
+	"\bguidance\x18\v \x03(\tB\x0e\xbaH\v\x92\x01\b\x18\x01\"\x04r\x02\x10\x01R\bguidanceB\x15\n" +
 	"\x13_withdrawn_sequenceB\x14\n" +
 	"\x12_observed_sequenceB\x1b\n" +
 	"\x19_termination_proof_digestB\x16\n" +
@@ -1954,12 +2478,40 @@ const file_vibesys_store_v1_replay_proto_rawDesc = "" +
 	"\x11ReplayPolicyDrift\x12!\n" +
 	"\aresults\x18\x01 \x01(\x04B\a\xbaH\x042\x02 \x00R\aresults\x12\x14\n" +
 	"\x05roles\x18\x02 \x03(\tR\x05roles\x12\x1c\n" +
-	"\ttemplates\x18\x03 \x03(\tR\ttemplates\"\x9e\x01\n" +
+	"\ttemplates\x18\x03 \x03(\tR\ttemplates\"\xe2\x01\n" +
 	"\x14ReplayToolSubmission\x12\x1b\n" +
 	"\x04turn\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x04turn\x12 \n" +
 	"\acall_id\x18\x02 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x06callId\x12\"\n" +
 	"\breply_id\x18\x03 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\areplyId\x12#\n" +
-	"\bproducer\x18\x04 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\bproducer\"\\\n" +
+	"\bproducer\x18\x04 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\bproducer\x12B\n" +
+	"\x06permit\x18\x05 \x01(\v2\".vibesys.store.v1.ReplayTurnPermitB\x06\xbaH\x03\xc8\x01\x01R\x06permit\"\x8f\x01\n" +
+	"\x10ReplayTurnPermit\x12\x1d\n" +
+	"\x05epoch\x18\x01 \x01(\rB\a\xbaH\x04*\x02 \x00R\x05epoch\x12\x1b\n" +
+	"\x04turn\x18\x02 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x04turn\x12?\n" +
+	"\x05bound\x18\x03 \x01(\v2!.vibesys.store.v1.ReplayTurnBoundB\x06\xbaH\x03\xc8\x01\x01R\x05bound\"\x96\x02\n" +
+	"\rReplayControl\x12&\n" +
+	"\n" +
+	"request_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\trequestId\x12\x1d\n" +
+	"\x05epoch\x18\x02 \x01(\rB\a\xbaH\x04*\x02 \x00R\x05epoch\x125\n" +
+	"\x05pause\x18\x03 \x01(\v2\x1d.vibesys.store.v1.ReplayPauseH\x00R\x05pause\x12?\n" +
+	"\tpause_now\x18\x04 \x01(\v2 .vibesys.store.v1.ReplayPauseNowH\x00R\bpauseNow\x125\n" +
+	"\x05steer\x18\x05 \x01(\v2\x1d.vibesys.store.v1.ReplaySteerH\x00R\x05steerB\x0f\n" +
+	"\x06action\x12\x05\xbaH\x02\b\x01\"\r\n" +
+	"\vReplayPause\"\x10\n" +
+	"\x0eReplayPauseNow\"\\\n" +
+	"\vReplaySteer\x12\"\n" +
+	"\binput_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\ainputId\x12 \n" +
+	"\x04turn\x18\x02 \x01(\tB\a\xbaH\x04r\x02\x10\x01H\x00R\x04turn\x88\x01\x01B\a\n" +
+	"\x05_turn\"\xfd\x01\n" +
+	"\x18ReplayControlDisposition\x12A\n" +
+	"\acontrol\x18\x01 \x01(\v2\x1f.vibesys.store.v1.ReplayControlB\x06\xbaH\x03\xc8\x01\x01R\acontrol\x12B\n" +
+	"\aapplied\x18\x02 \x01(\v2&.vibesys.store.v1.ReplayControlAppliedH\x00R\aapplied\x12H\n" +
+	"\x05stale\x18\x03 \x01(\x0e2$.vibesys.store.v1.ReplayControlStaleB\n" +
+	"\xbaH\a\x82\x01\x04\x10\x01 \x00H\x00R\x05staleB\x10\n" +
+	"\aoutcome\x12\x05\xbaH\x02\b\x01\"\x84\x01\n" +
+	"\x14ReplayControlApplied\x12>\n" +
+	"\bdraining\x18\x01 \x03(\v2\".vibesys.store.v1.ReplayTurnPermitR\bdraining\x12,\n" +
+	"\twithdrawn\x18\x02 \x03(\tB\x0e\xbaH\v\x92\x01\b\x18\x01\"\x04r\x02\x10\x01R\twithdrawn\"\\\n" +
 	"\x19ReplayToolAcknowledgement\x12\x1b\n" +
 	"\x04turn\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\x04turn\x12\"\n" +
 	"\breply_id\x18\x02 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\areplyId\"\\\n" +
@@ -1983,7 +2535,11 @@ const file_vibesys_store_v1_replay_proto_rawDesc = "" +
 	"+WRITER_RECONCILIATION_STATUS_PROVEN_STOPPED\x10\x01\x12(\n" +
 	"$WRITER_RECONCILIATION_STATUS_PENDING\x10\x02\x12(\n" +
 	"$WRITER_RECONCILIATION_STATUS_UNKNOWN\x10\x03\x12,\n" +
-	"(WRITER_RECONCILIATION_STATUS_UNSUPPORTED\x10\x04:H\n" +
+	"(WRITER_RECONCILIATION_STATUS_UNSUPPORTED\x10\x04*y\n" +
+	"\x12ReplayControlStale\x12$\n" +
+	" REPLAY_CONTROL_STALE_UNSPECIFIED\x10\x00\x12\x1e\n" +
+	"\x1aREPLAY_CONTROL_STALE_EPOCH\x10\x01\x12\x1d\n" +
+	"\x19REPLAY_CONTROL_STALE_TURN\x10\x02:H\n" +
 	"\x0ereplay_context\x12\x1f.google.protobuf.MessageOptions\x18\x9e\x8f\x03 \x01(\bR\rreplayContext:e\n" +
 	"\freplay_field\x12\x1d.google.protobuf.FieldOptions\x18\x9c\x8f\x03 \x01(\x0e2!.vibesys.store.v1.ReplayFieldKindR\vreplayField:>\n" +
 	"\n" +
@@ -2001,76 +2557,93 @@ func file_vibesys_store_v1_replay_proto_rawDescGZIP() []byte {
 	return file_vibesys_store_v1_replay_proto_rawDescData
 }
 
-var file_vibesys_store_v1_replay_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
-var file_vibesys_store_v1_replay_proto_msgTypes = make([]protoimpl.MessageInfo, 23)
+var file_vibesys_store_v1_replay_proto_enumTypes = make([]protoimpl.EnumInfo, 4)
+var file_vibesys_store_v1_replay_proto_msgTypes = make([]protoimpl.MessageInfo, 30)
 var file_vibesys_store_v1_replay_proto_goTypes = []any{
 	(ReplayFieldKind)(0),                // 0: vibesys.store.v1.ReplayFieldKind
 	(KeyComponentKind)(0),               // 1: vibesys.store.v1.KeyComponentKind
 	(WriterReconciliationStatus)(0),     // 2: vibesys.store.v1.WriterReconciliationStatus
-	(*OperationKey)(nil),                // 3: vibesys.store.v1.OperationKey
-	(*KeyComponent)(nil),                // 4: vibesys.store.v1.KeyComponent
-	(*ReplayAllowance)(nil),             // 5: vibesys.store.v1.ReplayAllowance
-	(*ReplayResources)(nil),             // 6: vibesys.store.v1.ReplayResources
-	(*ReplayPolicy)(nil),                // 7: vibesys.store.v1.ReplayPolicy
-	(*OperationReplay)(nil),             // 8: vibesys.store.v1.OperationReplay
-	(*ReplayTurnObservation)(nil),       // 9: vibesys.store.v1.ReplayTurnObservation
-	(*ReplayTurnBound)(nil),             // 10: vibesys.store.v1.ReplayTurnBound
-	(*ReplayPhysical)(nil),              // 11: vibesys.store.v1.ReplayPhysical
-	(*WriterBacking)(nil),               // 12: vibesys.store.v1.WriterBacking
-	(*WriterIdentity)(nil),              // 13: vibesys.store.v1.WriterIdentity
-	(*WriterManifest)(nil),              // 14: vibesys.store.v1.WriterManifest
-	(*WriterTerminationProof)(nil),      // 15: vibesys.store.v1.WriterTerminationProof
-	(*WriterReconciliation)(nil),        // 16: vibesys.store.v1.WriterReconciliation
-	(*WriterRegistryState)(nil),         // 17: vibesys.store.v1.WriterRegistryState
-	(*ReplayClock)(nil),                 // 18: vibesys.store.v1.ReplayClock
-	(*ReplayNotice)(nil),                // 19: vibesys.store.v1.ReplayNotice
-	(*ReplayAcknowledgement)(nil),       // 20: vibesys.store.v1.ReplayAcknowledgement
-	(*ReplayObservation)(nil),           // 21: vibesys.store.v1.ReplayObservation
-	(*ReplayPolicyDrift)(nil),           // 22: vibesys.store.v1.ReplayPolicyDrift
-	(*ReplayToolSubmission)(nil),        // 23: vibesys.store.v1.ReplayToolSubmission
-	(*ReplayToolAcknowledgement)(nil),   // 24: vibesys.store.v1.ReplayToolAcknowledgement
-	(*ReplayTurnWait)(nil),              // 25: vibesys.store.v1.ReplayTurnWait
-	(*anypb.Any)(nil),                   // 26: google.protobuf.Any
-	(*TokenUsage)(nil),                  // 27: vibesys.store.v1.TokenUsage
-	(*descriptorpb.MessageOptions)(nil), // 28: google.protobuf.MessageOptions
-	(*descriptorpb.FieldOptions)(nil),   // 29: google.protobuf.FieldOptions
+	(ReplayControlStale)(0),             // 3: vibesys.store.v1.ReplayControlStale
+	(*OperationKey)(nil),                // 4: vibesys.store.v1.OperationKey
+	(*KeyComponent)(nil),                // 5: vibesys.store.v1.KeyComponent
+	(*ReplayAllowance)(nil),             // 6: vibesys.store.v1.ReplayAllowance
+	(*ReplayResources)(nil),             // 7: vibesys.store.v1.ReplayResources
+	(*ReplayPolicy)(nil),                // 8: vibesys.store.v1.ReplayPolicy
+	(*OperationReplay)(nil),             // 9: vibesys.store.v1.OperationReplay
+	(*ReplayTurnObservation)(nil),       // 10: vibesys.store.v1.ReplayTurnObservation
+	(*ReplayTurnBound)(nil),             // 11: vibesys.store.v1.ReplayTurnBound
+	(*ReplayPhysical)(nil),              // 12: vibesys.store.v1.ReplayPhysical
+	(*WriterBacking)(nil),               // 13: vibesys.store.v1.WriterBacking
+	(*WriterIdentity)(nil),              // 14: vibesys.store.v1.WriterIdentity
+	(*WriterManifest)(nil),              // 15: vibesys.store.v1.WriterManifest
+	(*WriterTerminationProof)(nil),      // 16: vibesys.store.v1.WriterTerminationProof
+	(*WriterReconciliation)(nil),        // 17: vibesys.store.v1.WriterReconciliation
+	(*WriterRegistryState)(nil),         // 18: vibesys.store.v1.WriterRegistryState
+	(*ReplayClock)(nil),                 // 19: vibesys.store.v1.ReplayClock
+	(*ReplayNotice)(nil),                // 20: vibesys.store.v1.ReplayNotice
+	(*ReplayAcknowledgement)(nil),       // 21: vibesys.store.v1.ReplayAcknowledgement
+	(*ReplayObservation)(nil),           // 22: vibesys.store.v1.ReplayObservation
+	(*ReplayPolicyDrift)(nil),           // 23: vibesys.store.v1.ReplayPolicyDrift
+	(*ReplayToolSubmission)(nil),        // 24: vibesys.store.v1.ReplayToolSubmission
+	(*ReplayTurnPermit)(nil),            // 25: vibesys.store.v1.ReplayTurnPermit
+	(*ReplayControl)(nil),               // 26: vibesys.store.v1.ReplayControl
+	(*ReplayPause)(nil),                 // 27: vibesys.store.v1.ReplayPause
+	(*ReplayPauseNow)(nil),              // 28: vibesys.store.v1.ReplayPauseNow
+	(*ReplaySteer)(nil),                 // 29: vibesys.store.v1.ReplaySteer
+	(*ReplayControlDisposition)(nil),    // 30: vibesys.store.v1.ReplayControlDisposition
+	(*ReplayControlApplied)(nil),        // 31: vibesys.store.v1.ReplayControlApplied
+	(*ReplayToolAcknowledgement)(nil),   // 32: vibesys.store.v1.ReplayToolAcknowledgement
+	(*ReplayTurnWait)(nil),              // 33: vibesys.store.v1.ReplayTurnWait
+	(*anypb.Any)(nil),                   // 34: google.protobuf.Any
+	(*TokenUsage)(nil),                  // 35: vibesys.store.v1.TokenUsage
+	(*descriptorpb.MessageOptions)(nil), // 36: google.protobuf.MessageOptions
+	(*descriptorpb.FieldOptions)(nil),   // 37: google.protobuf.FieldOptions
 }
 var file_vibesys_store_v1_replay_proto_depIdxs = []int32{
-	4,  // 0: vibesys.store.v1.OperationKey.scope:type_name -> vibesys.store.v1.KeyComponent
+	5,  // 0: vibesys.store.v1.OperationKey.scope:type_name -> vibesys.store.v1.KeyComponent
 	1,  // 1: vibesys.store.v1.KeyComponent.kind:type_name -> vibesys.store.v1.KeyComponentKind
-	6,  // 2: vibesys.store.v1.ReplayAllowance.resources:type_name -> vibesys.store.v1.ReplayResources
-	26, // 3: vibesys.store.v1.ReplayPolicy.request:type_name -> google.protobuf.Any
-	6,  // 4: vibesys.store.v1.ReplayPolicy.reservation:type_name -> vibesys.store.v1.ReplayResources
-	3,  // 5: vibesys.store.v1.OperationReplay.key:type_name -> vibesys.store.v1.OperationKey
-	7,  // 6: vibesys.store.v1.OperationReplay.policy:type_name -> vibesys.store.v1.ReplayPolicy
-	26, // 7: vibesys.store.v1.OperationReplay.outcome:type_name -> google.protobuf.Any
-	5,  // 8: vibesys.store.v1.OperationReplay.allowance:type_name -> vibesys.store.v1.ReplayAllowance
-	10, // 9: vibesys.store.v1.OperationReplay.turn_bound:type_name -> vibesys.store.v1.ReplayTurnBound
-	10, // 10: vibesys.store.v1.ReplayTurnObservation.bound:type_name -> vibesys.store.v1.ReplayTurnBound
-	25, // 11: vibesys.store.v1.ReplayTurnObservation.suspension:type_name -> vibesys.store.v1.ReplayTurnWait
-	12, // 12: vibesys.store.v1.WriterManifest.backing:type_name -> vibesys.store.v1.WriterBacking
-	13, // 13: vibesys.store.v1.WriterManifest.writers:type_name -> vibesys.store.v1.WriterIdentity
-	14, // 14: vibesys.store.v1.WriterTerminationProof.manifest:type_name -> vibesys.store.v1.WriterManifest
-	14, // 15: vibesys.store.v1.WriterReconciliation.manifest:type_name -> vibesys.store.v1.WriterManifest
+	7,  // 2: vibesys.store.v1.ReplayAllowance.resources:type_name -> vibesys.store.v1.ReplayResources
+	34, // 3: vibesys.store.v1.ReplayPolicy.request:type_name -> google.protobuf.Any
+	7,  // 4: vibesys.store.v1.ReplayPolicy.reservation:type_name -> vibesys.store.v1.ReplayResources
+	4,  // 5: vibesys.store.v1.OperationReplay.key:type_name -> vibesys.store.v1.OperationKey
+	8,  // 6: vibesys.store.v1.OperationReplay.policy:type_name -> vibesys.store.v1.ReplayPolicy
+	34, // 7: vibesys.store.v1.OperationReplay.outcome:type_name -> google.protobuf.Any
+	6,  // 8: vibesys.store.v1.OperationReplay.allowance:type_name -> vibesys.store.v1.ReplayAllowance
+	11, // 9: vibesys.store.v1.OperationReplay.turn_bound:type_name -> vibesys.store.v1.ReplayTurnBound
+	11, // 10: vibesys.store.v1.ReplayTurnObservation.bound:type_name -> vibesys.store.v1.ReplayTurnBound
+	33, // 11: vibesys.store.v1.ReplayTurnObservation.suspension:type_name -> vibesys.store.v1.ReplayTurnWait
+	13, // 12: vibesys.store.v1.WriterManifest.backing:type_name -> vibesys.store.v1.WriterBacking
+	14, // 13: vibesys.store.v1.WriterManifest.writers:type_name -> vibesys.store.v1.WriterIdentity
+	15, // 14: vibesys.store.v1.WriterTerminationProof.manifest:type_name -> vibesys.store.v1.WriterManifest
+	15, // 15: vibesys.store.v1.WriterReconciliation.manifest:type_name -> vibesys.store.v1.WriterManifest
 	2,  // 16: vibesys.store.v1.WriterReconciliation.status:type_name -> vibesys.store.v1.WriterReconciliationStatus
-	15, // 17: vibesys.store.v1.WriterReconciliation.proof:type_name -> vibesys.store.v1.WriterTerminationProof
-	14, // 18: vibesys.store.v1.WriterRegistryState.manifest:type_name -> vibesys.store.v1.WriterManifest
-	15, // 19: vibesys.store.v1.WriterRegistryState.proof:type_name -> vibesys.store.v1.WriterTerminationProof
-	5,  // 20: vibesys.store.v1.ReplayClock.allowance:type_name -> vibesys.store.v1.ReplayAllowance
-	8,  // 21: vibesys.store.v1.ReplayNotice.unused:type_name -> vibesys.store.v1.OperationReplay
-	3,  // 22: vibesys.store.v1.ReplayNotice.pending:type_name -> vibesys.store.v1.OperationKey
-	26, // 23: vibesys.store.v1.ReplayObservation.outcome:type_name -> google.protobuf.Any
-	27, // 24: vibesys.store.v1.ReplayObservation.usage:type_name -> vibesys.store.v1.TokenUsage
-	9,  // 25: vibesys.store.v1.ReplayObservation.turn:type_name -> vibesys.store.v1.ReplayTurnObservation
-	28, // 26: vibesys.store.v1.replay_context:extendee -> google.protobuf.MessageOptions
-	29, // 27: vibesys.store.v1.replay_field:extendee -> google.protobuf.FieldOptions
-	29, // 28: vibesys.store.v1.replay_set:extendee -> google.protobuf.FieldOptions
-	0,  // 29: vibesys.store.v1.replay_field:type_name -> vibesys.store.v1.ReplayFieldKind
-	30, // [30:30] is the sub-list for method output_type
-	30, // [30:30] is the sub-list for method input_type
-	29, // [29:30] is the sub-list for extension type_name
-	26, // [26:29] is the sub-list for extension extendee
-	0,  // [0:26] is the sub-list for field type_name
+	16, // 17: vibesys.store.v1.WriterReconciliation.proof:type_name -> vibesys.store.v1.WriterTerminationProof
+	15, // 18: vibesys.store.v1.WriterRegistryState.manifest:type_name -> vibesys.store.v1.WriterManifest
+	16, // 19: vibesys.store.v1.WriterRegistryState.proof:type_name -> vibesys.store.v1.WriterTerminationProof
+	6,  // 20: vibesys.store.v1.ReplayClock.allowance:type_name -> vibesys.store.v1.ReplayAllowance
+	9,  // 21: vibesys.store.v1.ReplayNotice.unused:type_name -> vibesys.store.v1.OperationReplay
+	4,  // 22: vibesys.store.v1.ReplayNotice.pending:type_name -> vibesys.store.v1.OperationKey
+	34, // 23: vibesys.store.v1.ReplayObservation.outcome:type_name -> google.protobuf.Any
+	35, // 24: vibesys.store.v1.ReplayObservation.usage:type_name -> vibesys.store.v1.TokenUsage
+	10, // 25: vibesys.store.v1.ReplayObservation.turn:type_name -> vibesys.store.v1.ReplayTurnObservation
+	25, // 26: vibesys.store.v1.ReplayToolSubmission.permit:type_name -> vibesys.store.v1.ReplayTurnPermit
+	11, // 27: vibesys.store.v1.ReplayTurnPermit.bound:type_name -> vibesys.store.v1.ReplayTurnBound
+	27, // 28: vibesys.store.v1.ReplayControl.pause:type_name -> vibesys.store.v1.ReplayPause
+	28, // 29: vibesys.store.v1.ReplayControl.pause_now:type_name -> vibesys.store.v1.ReplayPauseNow
+	29, // 30: vibesys.store.v1.ReplayControl.steer:type_name -> vibesys.store.v1.ReplaySteer
+	26, // 31: vibesys.store.v1.ReplayControlDisposition.control:type_name -> vibesys.store.v1.ReplayControl
+	31, // 32: vibesys.store.v1.ReplayControlDisposition.applied:type_name -> vibesys.store.v1.ReplayControlApplied
+	3,  // 33: vibesys.store.v1.ReplayControlDisposition.stale:type_name -> vibesys.store.v1.ReplayControlStale
+	25, // 34: vibesys.store.v1.ReplayControlApplied.draining:type_name -> vibesys.store.v1.ReplayTurnPermit
+	36, // 35: vibesys.store.v1.replay_context:extendee -> google.protobuf.MessageOptions
+	37, // 36: vibesys.store.v1.replay_field:extendee -> google.protobuf.FieldOptions
+	37, // 37: vibesys.store.v1.replay_set:extendee -> google.protobuf.FieldOptions
+	0,  // 38: vibesys.store.v1.replay_field:type_name -> vibesys.store.v1.ReplayFieldKind
+	39, // [39:39] is the sub-list for method output_type
+	39, // [39:39] is the sub-list for method input_type
+	38, // [38:39] is the sub-list for extension type_name
+	35, // [35:38] is the sub-list for extension extendee
+	0,  // [0:35] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_store_v1_replay_proto_init() }
@@ -2085,13 +2658,23 @@ func file_vibesys_store_v1_replay_proto_init() {
 	file_vibesys_store_v1_replay_proto_msgTypes[8].OneofWrappers = []any{}
 	file_vibesys_store_v1_replay_proto_msgTypes[17].OneofWrappers = []any{}
 	file_vibesys_store_v1_replay_proto_msgTypes[18].OneofWrappers = []any{}
+	file_vibesys_store_v1_replay_proto_msgTypes[22].OneofWrappers = []any{
+		(*ReplayControl_Pause)(nil),
+		(*ReplayControl_PauseNow)(nil),
+		(*ReplayControl_Steer)(nil),
+	}
+	file_vibesys_store_v1_replay_proto_msgTypes[25].OneofWrappers = []any{}
+	file_vibesys_store_v1_replay_proto_msgTypes[26].OneofWrappers = []any{
+		(*ReplayControlDisposition_Applied)(nil),
+		(*ReplayControlDisposition_Stale)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_vibesys_store_v1_replay_proto_rawDesc), len(file_vibesys_store_v1_replay_proto_rawDesc)),
-			NumEnums:      3,
-			NumMessages:   23,
+			NumEnums:      4,
+			NumMessages:   30,
 			NumExtensions: 3,
 			NumServices:   0,
 		},

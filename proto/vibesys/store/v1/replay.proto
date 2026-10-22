@@ -144,6 +144,9 @@ message ReplayPhysical {
   bool confirmed_absent = 9;
   // W8a: proof-backed intent before releasing access or restoring retained input.
   optional uint64 settlement_sequence = 10 [(buf.validate.field).uint64.gt = 0];
+  // Steer input ids this turn consumed at its start: every applied, unconsumed
+  // steer for no turn or for this child's logical turn, in application order.
+  repeated string guidance = 11 [(buf.validate.field).repeated = {unique: true, items: {string: {min_len: 1}}}];
 }
 
 // The environment records every writable grant before execution, including
@@ -260,6 +263,65 @@ message ReplayToolSubmission {
   string call_id = 2 [(buf.validate.field).string.min_len = 1];
   string reply_id = 3 [(buf.validate.field).string.min_len = 1];
   string producer = 4 [(buf.validate.field).string.min_len = 1];
+  // The requesting turn's permit; the producer cannot outlive it.
+  ReplayTurnPermit permit = 5 [(buf.validate.field).required = true];
+}
+
+// The admission one logical turn's requests consume: the epoch whose physical
+// start admitted it, its logical origin and that turn's own recorded bound,
+// never the minimum deadline of the turns sharing its scope.
+message ReplayTurnPermit {
+  uint32 epoch = 1 [(buf.validate.field).uint32.gt = 0];
+  string turn = 2 [(buf.validate.field).string.min_len = 1];
+  ReplayTurnBound bound = 3 [(buf.validate.field).required = true];
+}
+
+// One operator control, as the run read it from its inbox. epoch is the epoch
+// the operator acted on; a control for any other epoch is stale.
+message ReplayControl {
+  string request_id = 1 [(buf.validate.field).string.min_len = 1];
+  uint32 epoch = 2 [(buf.validate.field).uint32.gt = 0];
+  oneof action {
+    option (buf.validate.oneof).required = true;
+    ReplayPause pause = 3;
+    ReplayPauseNow pause_now = 4;
+    ReplaySteer steer = 5;
+  }
+}
+// Admit no new logical turn; continuations of this epoch's permits may finish.
+message ReplayPause {}
+// Withdraw every unfinished physical child, then cancel it; start nothing more.
+message ReplayPauseNow {}
+// Operator guidance, consumed by the next turn start it applies to.
+message ReplaySteer {
+  string input_id = 1 [(buf.validate.field).string.min_len = 1];
+  // The logical turn the guidance was written for; stale once that turn ended.
+  optional string turn = 2 [(buf.validate.field).string.min_len = 1];
+}
+
+enum ReplayControlStale {
+  REPLAY_CONTROL_STALE_UNSPECIFIED = 0;
+  // Written for an epoch other than the open one.
+  REPLAY_CONTROL_STALE_EPOCH = 1;
+  // Its logical turn is unknown or has ended.
+  REPLAY_CONTROL_STALE_TURN = 2;
+}
+
+// Recorded before the inbox entry is settled or rejected. The archive
+// recomputes it from the prefix, so a stale control can never be applied.
+message ReplayControlDisposition {
+  ReplayControl control = 1 [(buf.validate.field).required = true];
+  oneof outcome {
+    option (buf.validate.oneof).required = true;
+    ReplayControlApplied applied = 2;
+    ReplayControlStale stale = 3 [(buf.validate.field).enum = {defined_only: true, not_in: [0]}];
+  }
+}
+message ReplayControlApplied {
+  // Pause: this epoch's admitted permits, whose continuations may still start.
+  repeated ReplayTurnPermit draining = 1;
+  // Pause-now: the unfinished physical children it withdraws before cancelling.
+  repeated string withdrawn = 2 [(buf.validate.field).repeated = {unique: true, items: {string: {min_len: 1}}}];
 }
 message ReplayToolAcknowledgement {
   string turn = 1 [(buf.validate.field).string.min_len = 1];

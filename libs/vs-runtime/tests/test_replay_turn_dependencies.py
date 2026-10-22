@@ -499,7 +499,11 @@ def submission_record(
     runtime: ReplayRuntime, turn: str, producer: str, *, prefix: str = "", unknown: bool = False
 ) -> Record:
     fact = replay.ReplayToolSubmission(
-        turn=turn, producer=producer, call_id="call", reply_id="reply"
+        turn=turn,
+        producer=producer,
+        call_id="call",
+        reply_id="reply",
+        permit=runtime.archive.permit(turn),
     )
     return fact_record(runtime, fact, prefix=prefix, unknown=unknown)
 
