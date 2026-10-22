@@ -44,11 +44,12 @@ def pinned_conversion(log: bytes, keyframe: bytes) -> tuple[bytes, list[Record],
         message = "converted log does not round-trip through its records"
         raise ValueError(message)
     for record in records:
-        if record.body is not None and record.body.field in {"epoch_started", "declaration_amended"}:
+        if record.body is not None and isinstance(record.body.value, EpochStarted):
             pin_schema_hashes(record.body.value)
     frame = Keyframe.from_binary(keyframe)
     for version in frame.epochs:
-        pin_schema_hashes(version.epoch)
+        if version.epoch is not None:
+            pin_schema_hashes(version.epoch)
     pinned = RUN_LOG_MAGIC + b"".join(encode_frame(record) for record in records)
     return pinned, records, frame.to_binary()
 
