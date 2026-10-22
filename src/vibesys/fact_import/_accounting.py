@@ -63,8 +63,11 @@ class AccountingUnreconciled:
 
 def accounting_evidence(
     facts: pb.ImportedRunFacts, import_id: str
-) -> replay.AccountingEvidence | AccountingUnreconciled:
-    """Publish every imported usage once; overlapping aggregates block publication."""
+) -> replay.AccountingEvidence | AccountingUnreconciled | None:
+    """Publish every imported usage once; overlapping aggregates block publication.
+
+    None means the import retained no usage, so there is nothing to publish.
+    """
     usages = [
         (fact.value.value, fact.imported_from)
         for fact in facts.facts
@@ -91,7 +94,7 @@ def accounting_evidence(
             evidence.coverage.append(_coverage(usage, dimension, obligations))
         else:
             evidence.observations.append(_observation(usage, dimension))
-    return evidence
+    return evidence if evidence.observations or evidence.coverage else None
 
 
 def _dimension(usage: pb.ImportedUsage) -> replay.AccountingDimension:
@@ -126,11 +129,12 @@ def _observation(
         if usage.scope == pb.ImportedUsageScope.CHARGE
         else replay.AccountingOccurrenceKind.INVOCATION
     )
+    refunded = int(usage.refunded_count or "0")
     return replay.AccountingObservation(
         occurrence=replay.AccountingOccurrence(kind=kind, id=usage.identity),
         dimension=dimension,
         charged=_quantity(usage),
-        refunded=int(usage.refunded_count or "0"),
+        refunded=replay.AccountingQuantity(value=Oneof("count", refunded)) if refunded else None,
         aliases=[usage.source_request] if usage.has_field("source_request") else [],
     )
 

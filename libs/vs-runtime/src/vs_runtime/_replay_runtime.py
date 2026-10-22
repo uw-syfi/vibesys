@@ -14,7 +14,6 @@ from vs_core.api.replay import (
     ENCODING_VERSION,
     AcceptedClock,
     AcceptedReplay,
-    AccountingLedger,
     ReplayAccounting,
     ReplayArchive,
     ReplayError,
@@ -853,10 +852,11 @@ class ReplayRuntime:
         commit; imported occurrences never debit this epoch's allowance.
         """
         validate(evidence)
-        if evidence.has_field("import_id"):
-            records = ReplayRecords.from_binary(self._archive.encode()).records
-            if AccountingLedger.from_records(records).published(evidence.import_id) == evidence:
-                return
+        if (
+            evidence.has_field("import_id")
+            and self._archive.accounting_publication(evidence.import_id) == evidence
+        ):
+            return
         self._record_schemas((type(evidence),), now=now, at=at)
         self._append(
             Oneof(

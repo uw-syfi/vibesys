@@ -2575,7 +2575,8 @@ type AccountingObservation struct {
 	Dimension  AccountingDimension    `protobuf:"varint,2,opt,name=dimension,proto3,enum=vibesys.store.v1.AccountingDimension" json:"dimension,omitempty"`
 	Revision   uint64                 `protobuf:"varint,3,opt,name=revision,proto3" json:"revision,omitempty"`
 	Charged    *AccountingQuantity    `protobuf:"bytes,4,opt,name=charged,proto3" json:"charged,omitempty"`
-	Refunded   uint64                 `protobuf:"varint,5,opt,name=refunded,proto3" json:"refunded,omitempty"`
+	// Absent is no refund. It uses the charge's unit, so money refunds may be fractional.
+	Refunded *AccountingQuantity `protobuf:"bytes,5,opt,name=refunded,proto3" json:"refunded,omitempty"`
 	// Source-request and external identities that name the same occurrence.
 	Aliases []string `protobuf:"bytes,6,rep,name=aliases,proto3" json:"aliases,omitempty"`
 	// Zero is imported history; a native reading names the occurrence's start epoch.
@@ -2642,11 +2643,11 @@ func (x *AccountingObservation) GetCharged() *AccountingQuantity {
 	return nil
 }
 
-func (x *AccountingObservation) GetRefunded() uint64 {
+func (x *AccountingObservation) GetRefunded() *AccountingQuantity {
 	if x != nil {
 		return x.Refunded
 	}
-	return 0
+	return nil
 }
 
 func (x *AccountingObservation) GetAliases() []string {
@@ -3104,7 +3105,7 @@ const file_vibesys_store_v1_replay_proto_rawDesc = "" +
 	"\x05count\x18\x01 \x01(\x04H\x00R\x05count\x12*\n" +
 	"\x06amount\x18\x02 \x01(\x01B\x10\xbaH\r\x12\v@\x01)\x00\x00\x00\x00\x00\x00\x00\x00H\x00R\x06amount\x12#\n" +
 	"\aunknown\x18\x03 \x01(\bB\a\xbaH\x04j\x02\b\x01H\x00R\aunknownB\x0e\n" +
-	"\x05value\x12\x05\xbaH\x02\b\x01\"\x85\x03\n" +
+	"\x05value\x12\x05\xbaH\x02\b\x01\"\xab\x03\n" +
 	"\x15AccountingObservation\x12N\n" +
 	"\n" +
 	"occurrence\x18\x01 \x01(\v2&.vibesys.store.v1.AccountingOccurrenceB\x06\xbaH\x03\xc8\x01\x01R\n" +
@@ -3112,8 +3113,8 @@ const file_vibesys_store_v1_replay_proto_rawDesc = "" +
 	"\tdimension\x18\x02 \x01(\x0e2%.vibesys.store.v1.AccountingDimensionB\n" +
 	"\xbaH\a\x82\x01\x04\x10\x01 \x00R\tdimension\x12\x1a\n" +
 	"\brevision\x18\x03 \x01(\x04R\brevision\x12F\n" +
-	"\acharged\x18\x04 \x01(\v2$.vibesys.store.v1.AccountingQuantityB\x06\xbaH\x03\xc8\x01\x01R\acharged\x12\x1a\n" +
-	"\brefunded\x18\x05 \x01(\x04R\brefunded\x12(\n" +
+	"\acharged\x18\x04 \x01(\v2$.vibesys.store.v1.AccountingQuantityB\x06\xbaH\x03\xc8\x01\x01R\acharged\x12@\n" +
+	"\brefunded\x18\x05 \x01(\v2$.vibesys.store.v1.AccountingQuantityR\brefunded\x12(\n" +
 	"\aaliases\x18\x06 \x03(\tB\x0e\xbaH\v\x92\x01\b\x18\x01\"\x04r\x02\x10\x01R\aaliases\x12!\n" +
 	"\forigin_epoch\x18\a \x01(\rR\voriginEpoch\"\xaa\x01\n" +
 	"\x0eAccountingCell\x12N\n" +
@@ -3128,12 +3129,14 @@ const file_vibesys_store_v1_replay_proto_rawDesc = "" +
 	"\twatermark\x18\x03 \x01(\x04R\twatermark\x12B\n" +
 	"\x05total\x18\x04 \x01(\v2$.vibesys.store.v1.AccountingQuantityB\x06\xbaH\x03\xc8\x01\x01R\x05total\x126\n" +
 	"\x05cells\x18\x05 \x03(\v2 .vibesys.store.v1.AccountingCellR\x05cells\x12&\n" +
-	"\x06nested\x18\x06 \x03(\tB\x0e\xbaH\v\x92\x01\b\x18\x01\"\x04r\x02\x10\x01R\x06nested\"\xee\x02\n" +
+	"\x06nested\x18\x06 \x03(\tB\x0e\xbaH\v\x92\x01\b\x18\x01\"\x04r\x02\x10\x01R\x06nested\"\x9d\x05\n" +
 	"\x12AccountingEvidence\x12)\n" +
 	"\timport_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01H\x00R\bimportId\x88\x01\x01\x12K\n" +
 	"\fobservations\x18\x02 \x03(\v2'.vibesys.store.v1.AccountingObservationR\fobservations\x12@\n" +
-	"\bcoverage\x18\x03 \x03(\v2$.vibesys.store.v1.AccountingCoverageR\bcoverage:\x8f\x01\xbaH\x8b\x01\x1a\x88\x01\n" +
-	"\x1caccounting_evidence.coverage\x126only an import publication declares aggregate coverage\x1a0has(this.import_id) || this.coverage.size() == 0B\f\n" +
+	"\bcoverage\x18\x03 \x03(\v2$.vibesys.store.v1.AccountingCoverageR\bcoverage:\xbe\x03\xbaH\xba\x03\x1a\x88\x01\n" +
+	"\x1caccounting_evidence.coverage\x126only an import publication declares aggregate coverage\x1a0has(this.import_id) || this.coverage.size() == 0\x1a\x9a\x01\n" +
+	"!accounting_evidence.import_origin\x12.imported history originates in no native epoch\x1aE!has(this.import_id) || this.observations.all(o, o.origin_epoch == 0)\x1a\x8f\x01\n" +
+	"\x1baccounting_evidence.content\x126accounting evidence carries an observation or coverage\x1a8this.observations.size() > 0 || this.coverage.size() > 0B\f\n" +
 	"\n" +
 	"_import_id*r\n" +
 	"\x0fReplayFieldKind\x12!\n" +
@@ -3282,22 +3285,23 @@ var file_vibesys_store_v1_replay_proto_depIdxs = []int32{
 	36, // 36: vibesys.store.v1.AccountingObservation.occurrence:type_name -> vibesys.store.v1.AccountingOccurrence
 	4,  // 37: vibesys.store.v1.AccountingObservation.dimension:type_name -> vibesys.store.v1.AccountingDimension
 	37, // 38: vibesys.store.v1.AccountingObservation.charged:type_name -> vibesys.store.v1.AccountingQuantity
-	36, // 39: vibesys.store.v1.AccountingCell.occurrence:type_name -> vibesys.store.v1.AccountingOccurrence
-	37, // 40: vibesys.store.v1.AccountingCell.baseline:type_name -> vibesys.store.v1.AccountingQuantity
-	4,  // 41: vibesys.store.v1.AccountingCoverage.dimension:type_name -> vibesys.store.v1.AccountingDimension
-	37, // 42: vibesys.store.v1.AccountingCoverage.total:type_name -> vibesys.store.v1.AccountingQuantity
-	39, // 43: vibesys.store.v1.AccountingCoverage.cells:type_name -> vibesys.store.v1.AccountingCell
-	38, // 44: vibesys.store.v1.AccountingEvidence.observations:type_name -> vibesys.store.v1.AccountingObservation
-	40, // 45: vibesys.store.v1.AccountingEvidence.coverage:type_name -> vibesys.store.v1.AccountingCoverage
-	44, // 46: vibesys.store.v1.replay_context:extendee -> google.protobuf.MessageOptions
-	45, // 47: vibesys.store.v1.replay_field:extendee -> google.protobuf.FieldOptions
-	45, // 48: vibesys.store.v1.replay_set:extendee -> google.protobuf.FieldOptions
-	0,  // 49: vibesys.store.v1.replay_field:type_name -> vibesys.store.v1.ReplayFieldKind
-	50, // [50:50] is the sub-list for method output_type
-	50, // [50:50] is the sub-list for method input_type
-	49, // [49:50] is the sub-list for extension type_name
-	46, // [46:49] is the sub-list for extension extendee
-	0,  // [0:46] is the sub-list for field type_name
+	37, // 39: vibesys.store.v1.AccountingObservation.refunded:type_name -> vibesys.store.v1.AccountingQuantity
+	36, // 40: vibesys.store.v1.AccountingCell.occurrence:type_name -> vibesys.store.v1.AccountingOccurrence
+	37, // 41: vibesys.store.v1.AccountingCell.baseline:type_name -> vibesys.store.v1.AccountingQuantity
+	4,  // 42: vibesys.store.v1.AccountingCoverage.dimension:type_name -> vibesys.store.v1.AccountingDimension
+	37, // 43: vibesys.store.v1.AccountingCoverage.total:type_name -> vibesys.store.v1.AccountingQuantity
+	39, // 44: vibesys.store.v1.AccountingCoverage.cells:type_name -> vibesys.store.v1.AccountingCell
+	38, // 45: vibesys.store.v1.AccountingEvidence.observations:type_name -> vibesys.store.v1.AccountingObservation
+	40, // 46: vibesys.store.v1.AccountingEvidence.coverage:type_name -> vibesys.store.v1.AccountingCoverage
+	44, // 47: vibesys.store.v1.replay_context:extendee -> google.protobuf.MessageOptions
+	45, // 48: vibesys.store.v1.replay_field:extendee -> google.protobuf.FieldOptions
+	45, // 49: vibesys.store.v1.replay_set:extendee -> google.protobuf.FieldOptions
+	0,  // 50: vibesys.store.v1.replay_field:type_name -> vibesys.store.v1.ReplayFieldKind
+	51, // [51:51] is the sub-list for method output_type
+	51, // [51:51] is the sub-list for method input_type
+	50, // [50:51] is the sub-list for extension type_name
+	47, // [47:50] is the sub-list for extension extendee
+	0,  // [0:47] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_store_v1_replay_proto_init() }

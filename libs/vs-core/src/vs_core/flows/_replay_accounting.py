@@ -1,11 +1,16 @@
 """One coverage-aware fold of native and imported accounting evidence.
 
-Canonical identity is (dimension, chargeable occurrence). Observations are
-cumulative: a higher owner revision replaces a lower one, and readings are never
-summed across revisions. An aggregate is a total over declared disjoint cells,
-never another occurrence: for aggregate ``A`` with cell baselines ``b_i`` at its
-watermark and latest readings ``v_i``, its total is ``A + sum(v_i - b_i)``.
-Unknown quantities stay unknown; they are never guessed as zero.
+Canonical identity is (dimension, chargeable occurrence); an alias resolves to
+the occurrence that declared it. Observations are cumulative: a higher owner
+revision replaces a lower one, readings are never summed across revisions, and
+the charged part never falls (a refund may lower the net). An aggregate is a
+total over declared disjoint cells, never another occurrence: for aggregate
+``A`` with cell baselines ``b_i`` at its watermark and latest readings ``v_i``,
+its total is ``A + sum(v_i - b_i)``. Unknown quantities stay unknown; they are
+never guessed as zero.
+
+Every check runs when its evidence folds, so appending one record costs that
+record's evidence, never a refold of the prefix.
 """
 
 from __future__ import annotations
@@ -50,22 +55,34 @@ class AccountingAmount:
         return AccountingAmount(self.known - other.known, self.unknown or other.unknown)
 
 
-def quantity(value: pb.AccountingQuantity | None, refunded: int = 0) -> AccountingAmount:
-    """Net charged minus refunded, derived once; exact for counts and amounts."""
+def _amount(value: pb.AccountingQuantity | None) -> tuple[str, AccountingAmount]:
     match None if value is None else value.value:
         case Oneof("count", count):
-            result = AccountingAmount(Fraction(count))
+            return "count", AccountingAmount(Fraction(count))
         case Oneof("amount", known):
-            result = AccountingAmount(Fraction(known))
+            return "amount", AccountingAmount(Fraction(known))
         case Oneof("unknown", _):
-            result = AccountingAmount(unknown=True)
+            return "unknown", AccountingAmount(unknown=True)
         case _:
             problem = "accounting quantity is required"
             raise ReplayError(problem)
-    if not result.unknown and refunded > result.known:
+
+
+def quantity(
+    value: pb.AccountingQuantity | None, refunded: pb.AccountingQuantity | None = None
+) -> AccountingAmount:
+    """Net charged minus refunded, derived once; exact for counts and amounts."""
+    unit, charged = _amount(value)
+    if refunded is None:
+        return charged
+    refund_unit, refund = _amount(refunded)
+    if "unknown" not in {unit, refund_unit} and unit != refund_unit:
+        problem = "an accounting refund must use its charge's unit"
+        raise ReplayError(problem)
+    if not charged.unknown and not refund.unknown and refund.known > charged.known:
         problem = "an accounting refund exceeds its charge"
         raise ReplayError(problem)
-    return result - AccountingAmount(Fraction(refunded))
+    return charged - refund
 
 
 def _key(dimension: Dimension, occurrence: pb.AccountingOccurrence | None) -> Occurrence:
@@ -79,26 +96,32 @@ def _key(dimension: Dimension, occurrence: pb.AccountingOccurrence | None) -> Oc
 class _Reading:
     revision: int
     origin_epoch: int
-    value: bytes
+    charged: AccountingAmount
+    amount: AccountingAmount
 
-    @property
-    def amount(self) -> AccountingAmount:
-        observation = pb.AccountingObservation.from_binary(self.value)
-        return quantity(observation.charged, observation.refunded)
+
+@dataclass(frozen=True)
+class _Cell:
+    coverage: str
+    watermark: int
+    baseline: AccountingAmount
 
 
 @dataclass
 class AccountingLedger:
     """Validated accounting evidence from a committed record prefix.
 
-    Repeated evidence deduplicates; conflicting quantities at one revision,
-    republished imports with different content, ambiguous aliases and
-    overlapping or negative-residual coverage fail validation.
+    Repeated evidence deduplicates; conflicting quantities at one revision, a
+    falling charge, republished imports with different content, ambiguous
+    aliases and overlapping or negative-residual coverage fail validation.
+    A fold that raises leaves the ledger unusable; callers discard it.
     """
 
     _readings: dict[Occurrence, _Reading] = field(default_factory=dict)
     _coverage: dict[str, bytes] = field(default_factory=dict)
-    _aliases: dict[str, Occurrence] = field(default_factory=dict)
+    _cells: dict[Occurrence, _Cell] = field(default_factory=dict)
+    _nested: dict[str, str] = field(default_factory=dict)
+    _aliases: dict[Occurrence, Occurrence] = field(default_factory=dict)
     _imports: dict[str, bytes] = field(default_factory=dict)
     _parents: set[str] = field(default_factory=set)
     _starts: dict[str, int] = field(default_factory=dict)
@@ -108,8 +131,20 @@ class AccountingLedger:
         ledger = cls()
         for record in records:
             ledger.fold(record)
-        ledger.totals()
         return ledger
+
+    def copy(self) -> AccountingLedger:
+        """An independent ledger over the same prefix, for a staged append."""
+        return AccountingLedger(
+            self._readings.copy(),
+            self._coverage.copy(),
+            self._cells.copy(),
+            self._nested.copy(),
+            self._aliases.copy(),
+            self._imports.copy(),
+            self._parents.copy(),
+            self._starts.copy(),
+        )
 
     def fold(self, record: Record) -> None:
         match record.body:
@@ -138,37 +173,108 @@ class AccountingLedger:
     def _evidence(self, evidence: pb.AccountingEvidence, epoch: int) -> None:
         if evidence.has_field("import_id"):
             published = evidence.to_binary()
-            if self._imports.setdefault(evidence.import_id, published) != published:
+            prior = self._imports.setdefault(evidence.import_id, published)
+            if prior != published:
                 problem = f"import {evidence.import_id} republished with different accounting"
                 raise ReplayError(problem)
-            for coverage in evidence.coverage:
-                value = coverage.to_binary()
-                if self._coverage.setdefault(coverage.id, value) != value:
-                    problem = f"conflicting accounting coverage {coverage.id}"
-                    raise ReplayError(problem)
+            if prior is not published:
+                return
+            self._declare(evidence.coverage)
         for observation in evidence.observations:
             if observation.origin_epoch > epoch:
                 problem = "an accounting observation cannot originate in a later epoch"
                 raise ReplayError(problem)
             self._observe(observation)
 
+    def _resolve(self, key: Occurrence) -> Occurrence:
+        return self._aliases.get(key, key)
+
     def _observe(self, observation: pb.AccountingObservation) -> None:
-        key = _key(observation.dimension, observation.occurrence)
-        quantity(observation.charged, observation.refunded)
-        reading = _Reading(observation.revision, observation.origin_epoch, observation.to_binary())
+        key = self._resolve(_key(observation.dimension, observation.occurrence))
+        reading = _Reading(
+            observation.revision,
+            observation.origin_epoch,
+            _amount(observation.charged)[1],
+            quantity(observation.charged, observation.refunded),
+        )
+        self._alias(key, observation.aliases)
         prior = self._readings.get(key)
-        if prior is not None and prior.origin_epoch != reading.origin_epoch:
-            problem = f"occurrence {key[2]} changes its origin epoch"
-            raise ReplayError(problem)
-        if prior is not None and prior.revision == reading.revision and prior != reading:
-            problem = f"conflicting accounting quantities for {key[2]} at one revision"
-            raise ReplayError(problem)
-        for alias in observation.aliases:
-            if self._aliases.setdefault(alias, key) != key:
-                problem = f"accounting alias {alias} names two occurrences"
-                raise ReplayError(problem)
+        if prior is not None:
+            _check_successor(key, prior, reading)
+        cell = self._cells.get(key)
+        if cell is not None:
+            _check_baseline(key, cell, reading)
         if prior is None or reading.revision > prior.revision:
             self._readings[key] = reading
+
+    def _alias(self, key: Occurrence, aliases: Iterable[str]) -> None:
+        """An alias names one occurrence and is never itself an occurrence's own key."""
+        for alias in aliases:
+            name: Occurrence = (key[0], key[1], alias)
+            if name == key:
+                continue
+            if name in self._readings or name in self._cells:
+                problem = f"accounting alias {alias} is another occurrence's own key"
+                raise ReplayError(problem)
+            if self._aliases.setdefault(name, key) != key:
+                problem = f"accounting alias {alias} names two occurrences"
+                raise ReplayError(problem)
+
+    def _declare(self, coverages: Iterable[pb.AccountingCoverage]) -> None:
+        """Add one publication's aggregates; nested children are declared with or before it."""
+        added: list[pb.AccountingCoverage] = []
+        for coverage in coverages:
+            value = coverage.to_binary()
+            prior = self._coverage.setdefault(coverage.id, value)
+            if prior != value:
+                problem = f"conflicting accounting coverage {coverage.id}"
+                raise ReplayError(problem)
+            if prior is value:
+                added.append(coverage)
+        for coverage in added:
+            self._cover(coverage)
+
+    def _cover(self, coverage: pb.AccountingCoverage) -> None:
+        aggregate = quantity(coverage.total)
+        floor = aggregate.known
+        for declared in coverage.cells:
+            key = self._resolve(_key(coverage.dimension, declared.occurrence))
+            if key in self._cells:
+                problem = f"occurrence {key[2]} is covered by two aggregates"
+                raise ReplayError(problem)
+            cell = _Cell(coverage.id, coverage.watermark, quantity(declared.baseline))
+            self._cells[key] = cell
+            floor -= cell.baseline.known
+            reading = self._readings.get(key)
+            if reading is not None:
+                _check_baseline(key, cell, reading)
+        for identity in coverage.nested:
+            child = self._coverage.get(identity)
+            if child is None:
+                problem = f"accounting coverage {coverage.id} nests unknown {identity}"
+                raise ReplayError(problem)
+            nested = pb.AccountingCoverage.from_binary(child)
+            if nested.dimension != coverage.dimension:
+                problem = f"accounting coverage {coverage.id} nests unknown {identity}"
+                raise ReplayError(problem)
+            if self._nested.setdefault(identity, coverage.id) != coverage.id:
+                problem = f"accounting coverage {identity} is nested twice"
+                raise ReplayError(problem)
+            floor -= quantity(nested.total).known
+        self._check_acyclic(coverage.id)
+        if not aggregate.unknown and floor < 0:
+            problem = f"accounting coverage {coverage.id} has a negative residual"
+            raise ReplayError(problem)
+
+    def _check_acyclic(self, identity: str) -> None:
+        seen = {identity}
+        parent = self._nested.get(identity)
+        while parent is not None:
+            if parent in seen:
+                problem = f"accounting coverage {identity} nests itself"
+                raise ReplayError(problem)
+            seen.add(parent)
+            parent = self._nested.get(parent)
 
     def totals(self, *, origin_epoch: int | None = None) -> dict[Dimension, AccountingAmount]:
         """Lifetime totals, or only occurrences that originated in one native epoch.
@@ -180,16 +286,15 @@ class AccountingLedger:
             identity: pb.AccountingCoverage.from_binary(value)
             for identity, value in self._coverage.items()
         }
-        cells, nested = _partition(coverages)
         totals: dict[Dimension, AccountingAmount] = {}
         if origin_epoch is None:
             for identity, coverage in coverages.items():
-                if identity not in nested:
+                if identity not in self._nested:
                     totals[coverage.dimension] = totals.get(
                         coverage.dimension, AccountingAmount()
                     ) + self._covered(coverage, coverages)
         for key, reading in self._readings.items():
-            if key in cells or self._logical_copy(key):
+            if key in self._cells or self._logical_copy(key):
                 continue
             if origin_epoch is None or reading.origin_epoch == origin_epoch:
                 totals[key[0]] = totals.get(key[0], AccountingAmount()) + reading.amount
@@ -202,66 +307,53 @@ class AccountingLedger:
     def _covered(
         self, coverage: pb.AccountingCoverage, coverages: dict[str, pb.AccountingCoverage]
     ) -> AccountingAmount:
-        aggregate = quantity(coverage.total)
-        floor = aggregate.known
-        total = aggregate
-        for cell in coverage.cells:
-            baseline = quantity(cell.baseline)
-            floor -= baseline.known
-            reading = self._readings.get(_key(coverage.dimension, cell.occurrence))
-            if reading is not None and reading.revision > coverage.watermark:
-                total += _delta(reading.amount, baseline)
+        total = quantity(coverage.total)
+        for declared in coverage.cells:
+            key = self._resolve(_key(coverage.dimension, declared.occurrence))
+            cell = self._cells[key]
+            reading = self._readings.get(key)
+            if reading is not None and reading.revision > cell.watermark:
+                total += _delta(reading.amount, cell.baseline)
         for identity in coverage.nested:
             child = coverages[identity]
-            floor -= quantity(child.total).known
             total += self._covered(child, coverages) - quantity(child.total)
-        if not aggregate.unknown and floor < 0:
-            problem = f"accounting coverage {coverage.id} has a negative residual"
-            raise ReplayError(problem)
         return total
 
 
+def _check_successor(key: Occurrence, prior: _Reading, reading: _Reading) -> None:
+    if prior.origin_epoch != reading.origin_epoch:
+        problem = f"occurrence {key[2]} changes its origin epoch"
+        raise ReplayError(problem)
+    if prior.revision == reading.revision and prior != reading:
+        problem = f"conflicting accounting quantities for {key[2]} at one revision"
+        raise ReplayError(problem)
+    earlier, later = sorted((prior, reading), key=lambda item: item.revision)
+    if (
+        not earlier.charged.unknown
+        and not later.charged.unknown
+        and later.charged.known < earlier.charged.known
+    ):
+        problem = f"a cumulative accounting charge for {key[2]} cannot decrease"
+        raise ReplayError(problem)
+
+
+def _check_baseline(key: Occurrence, cell: _Cell, reading: _Reading) -> None:
+    """A reading past the watermark has charged at least its covered net baseline."""
+    if (
+        reading.revision > cell.watermark
+        and not reading.charged.unknown
+        and not cell.baseline.unknown
+        and reading.charged.known < cell.baseline.known
+    ):
+        problem = f"a cumulative accounting charge for {key[2]} cannot decrease"
+        raise ReplayError(problem)
+
+
 def _delta(latest: AccountingAmount, baseline: AccountingAmount) -> AccountingAmount:
-    """A late cumulative reading transfers only its growth past the covered baseline."""
+    """A late cumulative reading transfers only its change past the covered baseline."""
     if latest.unknown or baseline.unknown:
         return AccountingAmount(unknown=True)
-    if latest.known < baseline.known:
-        problem = "a cumulative accounting reading cannot decrease"
-        raise ReplayError(problem)
     return latest - baseline
-
-
-def _partition(
-    coverages: dict[str, pb.AccountingCoverage],
-) -> tuple[set[Occurrence], set[str]]:
-    """Every cell and nested aggregate belongs to exactly one covering aggregate."""
-    cells: set[Occurrence] = set()
-    nested: dict[str, str] = {}
-    for coverage in coverages.values():
-        for cell in coverage.cells:
-            key = _key(coverage.dimension, cell.occurrence)
-            if key in cells:
-                problem = f"occurrence {key[2]} is covered by two aggregates"
-                raise ReplayError(problem)
-            cells.add(key)
-        for identity in coverage.nested:
-            child = coverages.get(identity)
-            if child is None or child.dimension != coverage.dimension:
-                problem = f"accounting coverage {coverage.id} nests unknown {identity}"
-                raise ReplayError(problem)
-            if nested.setdefault(identity, coverage.id) != coverage.id:
-                problem = f"accounting coverage {identity} is nested twice"
-                raise ReplayError(problem)
-    for identity in nested:
-        seen = {identity}
-        parent = nested.get(identity)
-        while parent is not None:
-            if parent in seen:
-                problem = f"accounting coverage {identity} nests itself"
-                raise ReplayError(problem)
-            seen.add(parent)
-            parent = nested.get(parent)
-    return cells, set(nested)
 
 
 def _native(span: Span, revision: int, origin: int) -> Iterator[pb.AccountingObservation]:

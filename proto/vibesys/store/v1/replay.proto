@@ -379,7 +379,8 @@ message AccountingObservation {
   AccountingDimension dimension = 2 [(buf.validate.field).enum = {defined_only: true, not_in: 0}];
   uint64 revision = 3;
   AccountingQuantity charged = 4 [(buf.validate.field).required = true];
-  uint64 refunded = 5;
+  // Absent is no refund. It uses the charge's unit, so money refunds may be fractional.
+  AccountingQuantity refunded = 5;
   // Source-request and external identities that name the same occurrence.
   repeated string aliases = 6 [(buf.validate.field).repeated = {unique: true, items: {string: {min_len: 1}}}];
   // Zero is imported history; a native reading names the occurrence's start epoch.
@@ -410,6 +411,16 @@ message AccountingEvidence {
     id: "accounting_evidence.coverage"
     message: "only an import publication declares aggregate coverage"
     expression: "has(this.import_id) || this.coverage.size() == 0"
+  };
+  option (buf.validate.message).cel = {
+    id: "accounting_evidence.import_origin"
+    message: "imported history originates in no native epoch"
+    expression: "!has(this.import_id) || this.observations.all(o, o.origin_epoch == 0)"
+  };
+  option (buf.validate.message).cel = {
+    id: "accounting_evidence.content"
+    message: "accounting evidence carries an observation or coverage"
+    expression: "this.observations.size() > 0 || this.coverage.size() > 0"
   };
   optional string import_id = 1 [(buf.validate.field).string.min_len = 1];
   repeated AccountingObservation observations = 2;

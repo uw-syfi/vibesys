@@ -156,3 +156,14 @@ def test_charges_keep_their_own_identity_refunds_and_request_alias() -> None:
     totals = _lifetime(evidence)
     assert totals[Dimension.ATTEMPTS] == AccountingAmount(Fraction(2))
     assert totals[Dimension.INPUT_TOKENS] == AccountingAmount(Fraction(3))
+
+
+def test_an_import_without_usage_publishes_nothing() -> None:
+    started = {
+        "type": "invocation_started",
+        "timestamp": "2026-01-01T00:00:00Z",
+        "execution_id": "invocation-a",
+        "data": {"kind": "invocation_started", "system_prompt": "s", "user_prompt": "u"},
+    }
+    facts = import_run_facts("run", (_events(started),), strategy="single", registry=FAKE_REGISTRY)
+    assert accounting_evidence(facts, "import-a") is None
