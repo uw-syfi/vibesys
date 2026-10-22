@@ -51,6 +51,7 @@ REGISTRY_READ_METHODS = frozenset(
         "machine.describe",
         "compute.list",
         "run.preflight",
+        "examples.destination",
     )
 )
 RegistryReadRequest = (
@@ -61,11 +62,11 @@ RegistryReadRequest = (
     | MachineDescribeRequest
     | ComputeListRequest
     | RunPreflightRequest
+    | ExamplesDestinationRequest
 )
 UnmigratedHelperRequest = (
     RunReaderRequest
     | UsageWindowRequest
-    | ExamplesDestinationRequest
     | AgentLoginsStartRequest
     | AgentLoginsListRequest
     | ComputeRemoveClusterRequest

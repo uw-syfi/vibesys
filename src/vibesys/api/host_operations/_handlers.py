@@ -56,6 +56,13 @@ class _Reads:
             request_id=request.request_id, settings=self._source.compute()
         )
 
+    def inspect_destination(
+        self, request: pb.InspectDestinationRequest
+    ) -> pb.InspectDestinationResponse:
+        response = self._source.inspect_destination(request.example, request.destination)
+        response.request_id = request.request_id
+        return response
+
     def preflight_run(self, request: pb.PreflightRunRequest) -> pb.PreflightRunResponse:
         response = self._source.preflight(request)
         response.checks = [
@@ -77,6 +84,19 @@ class _Reads:
         return response
 
 
+# Stream slots are registered beside the unary handlers. The generator rejects a drift.
+WATCH_SLOTS = ("login",)
+# Mutation slots are not read handlers. The generator requires each one.
+MUTATION_SLOTS = (
+    "put_cluster",
+    "remove_cluster",
+    "test_cluster",
+    "create_example",
+    "copy_project",
+    "start_run",
+)
+
+
 def handlers(source: ReadSource) -> host_operations.Handlers:
     """All required slots are statically bound to typed product handlers."""
     reads = _Reads(source)
@@ -87,5 +107,6 @@ def handlers(source: ReadSource) -> host_operations.Handlers:
         get_task_goal=reads.get_task_goal,
         describe_machine=reads.describe_machine,
         list_compute=reads.list_compute,
+        inspect_destination=reads.inspect_destination,
         preflight_run=reads.preflight_run,
     )

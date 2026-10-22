@@ -16,6 +16,7 @@ from hypothesis import strategies as st
 from server.host_agent_logins import LoginStarted, LoginUnavailable, LoginUnavailableReason
 from server.host_helper_os import LoginBounds, LoginStarter, login_instruction
 from vs_sim.api.testing import (
+    HANG_GUARD_S,
     FakePipedProcessLauncher,
     PipedStart,
     ScriptedPipedProcess,
@@ -112,6 +113,28 @@ def test_a_program_that_cannot_run_is_a_failed_start_naming_it() -> None:
     assert isinstance(result, LoginUnavailable)
     assert result.reason is LoginUnavailableReason.START_FAILED
     assert "codex" in result.detail
+
+
+def test_cancelling_a_login_ends_its_group_before_its_lifetime() -> None:
+    threads = SimThreads()
+    process = ScriptedPipedProcess(threads, merge_stderr=True)
+    process.write(stdout="Open https://a.example/x\n")
+    starter = LoginStarter(
+        FakePipedProcessLauncher(lambda _start: process), threads, lambda: _ENV, _BOUNDS
+    )
+
+    def main() -> list[str]:
+        held = starter.hold(_ARGV)
+        assert isinstance(held.result, LoginStarted)
+        assert process.signals == []
+        held.cancel()
+        waiter = threads.spawn(held.wait, name="login-finished")
+        waiter.join(HANG_GUARD_S)
+        assert not waiter.is_alive()
+        return process.signals
+
+    assert threads.run(main) == ["terminate"]
+    assert process.reaped
 
 
 def test_a_login_nobody_finishes_is_ended_after_its_lifetime_and_reaped() -> None:

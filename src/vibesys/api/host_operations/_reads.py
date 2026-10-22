@@ -39,6 +39,10 @@ class ReadSource(Protocol):
         """Compute settings, preserving source ownership and read-only flags."""
         ...
 
+    def inspect_destination(self, example: str, destination: str) -> pb.InspectDestinationResponse:
+        """What creating ``example`` would find at ``destination``."""
+        ...
+
     def preflight(self, request: pb.PreflightRunRequest) -> pb.PreflightRunResponse:
         """Complete probe facts; the operation projects requested metadata."""
         ...

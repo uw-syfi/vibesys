@@ -43,6 +43,7 @@ from vs_agent.api import LoginCommand, LoginCredential, LoginKind, ProviderLogin
 from vs_agent.api import LoginState as ProviderLoginState
 from vs_decode.api import Unreadable
 from vs_sim.api.testing import (
+    HANG_GUARD_S,
     FakePipedProcessLauncher,
     ScriptedPipedProcess,
     SimNetwork,
@@ -285,4 +286,73 @@ def test_a_login_that_needs_no_terminal_is_run_with_the_command_the_agent_librar
     result = threads.run(lambda: adapter.start("codex"))
 
     assert result == LoginStarted(instruction=f"Open {url} and enter the code ABCD-EFGH1")
+    assert [started.argv for started in launcher.started] == [("codex", "login", "--device-auth")]
+
+
+@pytest.mark.parametrize(
+    ("installed", "commands", "reason"),
+    [
+        (False, _COMMANDS, LoginUnavailableReason.NOT_INSTALLED),
+        (True, {}, LoginUnavailableReason.NO_LOGIN_COMMAND),
+        (
+            True,
+            {"codex": LoginCommand(("codex", "login"), needs_terminal=True)},
+            LoginUnavailableReason.NEEDS_TERMINAL,
+        ),
+    ],
+)
+def test_holding_a_refused_login_is_already_finished_and_launches_nothing(
+    *, installed: bool, commands: dict[str, LoginCommand], reason: LoginUnavailableReason
+) -> None:
+    threads = SimThreads()
+    launcher = FakePipedProcessLauncher()
+    adapter = _adapter(
+        launcher,
+        threads,
+        commands=commands,
+        codex=_found("codex", installed=installed, state=ProviderLoginState.UNKNOWN),
+    )
+
+    def run() -> None:
+        held = adapter.hold("codex")
+        assert isinstance(held.result, LoginUnavailable)
+        assert held.result.reason is reason
+        if reason is LoginUnavailableReason.NEEDS_TERMINAL:
+            assert held.result.command == "codex login"
+        held.cancel()
+        waiter = threads.spawn(held.wait, name="login-reaped")
+        waiter.join(HANG_GUARD_S)
+        assert not waiter.is_alive()
+
+    threads.run(run)
+    assert launcher.started == []
+
+
+def test_holding_an_unoffered_provider_is_rejected_before_launch() -> None:
+    launcher = FakePipedProcessLauncher()
+    with pytest.raises(ValueError, match="offers no harness"):
+        _adapter(launcher).hold("unoffered-provider")
+    assert launcher.started == []
+
+
+def test_a_held_login_keeps_the_process_until_cancel_and_reaps_it() -> None:
+    threads = SimThreads()
+    process = ScriptedPipedProcess(threads, merge_stderr=True)
+    process.write(stdout="Open https://login.example/device\nCode ABCD-EFGH1\n")
+    launcher = FakePipedProcessLauncher(lambda _start: process)
+    adapter = _adapter(launcher, threads, codex=_found("codex"))
+
+    def run() -> None:
+        held = adapter.hold("codex")
+        assert held.result == LoginStarted(
+            instruction="Open https://login.example/device and enter the code ABCD-EFGH1"
+        )
+        assert process.signals == []
+        held.cancel()
+        waiter = threads.spawn(held.wait, name="login-reaped")
+        waiter.join(HANG_GUARD_S)
+        assert not waiter.is_alive()
+        assert process.signals == ["terminate"]
+
+    threads.run(run)
     assert [started.argv for started in launcher.started] == [("codex", "login", "--device-auth")]

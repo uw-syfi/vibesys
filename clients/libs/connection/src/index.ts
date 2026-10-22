@@ -14,7 +14,16 @@ export {
   ConnectionManager,
   DEFAULT_CONNECTION_CONFIG,
 } from './shell/connection-manager.js';
-export {GatewayConnection, type GatewayDialer, HELLO_METHOD, TAIL_METHOD} from './shell/gateway.js';
+export {
+  GatewayConnection,
+  type GatewayDialer,
+  HELLO_METHOD,
+  MUTATE_METHOD,
+  READ_METHOD,
+  TAIL_METHOD,
+  WATCH_METHOD,
+  WATCH_RUNS_METHOD,
+} from './shell/gateway.js';
 export {GatewayCalls} from './shell/gateway-calls.js';
 export {localGateway} from './shell/gateway-local.js';
 export {
@@ -29,5 +38,36 @@ export {GrpcDecoder, GrpcError, grpcFrame} from './shell/grpc.js';
 export {ConnectionError, HelperRequestError} from './shell/helper-channel.js';
 export {HostConnection, type LogsLease} from './shell/host-connection.js';
 export {type Link, LocalLink, SshLink} from './shell/link.js';
+export {LoginActor, type LoginPorts, type LoginStart} from './shell/login-actor.js';
 export {fromChild, type SpawnedProcess} from './shell/process.js';
+export {
+  type RegistryClusterPorts,
+  type RegistryClusters,
+  registryClusters,
+} from './shell/registry-clusters.js';
+export {
+  type RegistryProjectPorts,
+  type RegistryProjects,
+  registryProjects,
+} from './shell/registry-projects.js';
+export {
+  type RegistryCatalog,
+  type RegistryReadPorts,
+  registryReads,
+  registryTransport,
+  requireCheckout,
+} from './shell/registry-reads.js';
+export {
+  type CompletedPaths,
+  type InspectedCandidate,
+  type RegistrySetup,
+  type RegistrySetupPorts,
+  registrySetup,
+} from './shell/registry-setup.js';
+export {
+  type RegistryRunInputs,
+  type RegistryStartPorts,
+  registryStart,
+} from './shell/registry-start.js';
+export {type RunWatch, type RunWatchPorts, runWatch} from './shell/run-watch.js';
 export type {CheckoutProblem, Phase} from './state/host-connection.js';

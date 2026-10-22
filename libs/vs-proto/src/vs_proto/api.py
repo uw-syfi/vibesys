@@ -33,6 +33,10 @@ from vs_proto._generated.vibesys.api.v1.host_call_pb import (
     SteerIntent,
     WithdrawIntent,
 )
+from vs_proto._generated.vibesys.api.v1.host_mutate_generated_pb import (
+    MutateRequest,
+    MutateResponse,
+)
 from vs_proto._generated.vibesys.api.v1.host_pb import (
     BlobResult,
     GetBlobsRequest,
@@ -48,6 +52,14 @@ from vs_proto._generated.vibesys.api.v1.host_pb import (
     TailStreamResponse,
     WatchRunsRequest,
     WatchRunsResponse,
+)
+from vs_proto._generated.vibesys.api.v1.host_read_generated_pb import (
+    ReadRequest,
+    ReadResponse,
+)
+from vs_proto._generated.vibesys.api.v1.host_watch_generated_pb import (
+    WatchRequest,
+    WatchResponse,
 )
 from vs_proto._generated.vibesys.core.testing.v1 import values_pb as compiler_values
 from vs_proto._generated.vibesys.core.v1 import agent_facts_pb as core_agent_facts
@@ -297,6 +309,8 @@ __all__ = [
     "MetricPoint",
     "MetricSeriesDecl",
     "MetricVersion",
+    "MutateRequest",
+    "MutateResponse",
     "Notice",
     "NoticeCode",
     "Objective",
@@ -315,6 +329,8 @@ __all__ = [
     "Progress",
     "ProviderSwitchAttrs",
     "ProviderSwitchReason",
+    "ReadRequest",
+    "ReadResponse",
     "Record",
     "RelaunchRefusal",
     "RelaunchRequest",
@@ -372,6 +388,8 @@ __all__ = [
     "WaitCondition",
     "WaitKind",
     "WaitingOn",
+    "WatchRequest",
+    "WatchResponse",
     "WatchRunsRequest",
     "WatchRunsResponse",
     "WithdrawIntent",

@@ -18,6 +18,16 @@ message AcceptedOperation {
     DescribeMachineRequest describe_machine = 14;
     ListComputeRequest list_compute = 15;
     PreflightRunRequest preflight_run = 16;
+    InspectCandidateRequest inspect_candidate = 17;
+    CompletePathsRequest complete_paths = 18;
+    InspectDestinationRequest inspect_destination = 23;
+    CreateExampleRequest create_example = 34;
+    CopyProjectRequest copy_project = 35;
+    PutClusterRequest put_cluster = 31;
+    RemoveClusterRequest remove_cluster = 32;
+    TestClusterRequest test_cluster = 33;
+    StartRunRequest start_run = 36;
+    LoginRequest login = 40;
   }
 }
 message OperationResult {
@@ -31,6 +41,16 @@ message OperationResult {
     DescribeMachineResponse describe_machine = 14;
     ListComputeResponse list_compute = 15;
     PreflightRunResponse preflight_run = 16;
+    InspectCandidateResponse inspect_candidate = 17;
+    CompletePathsResponse complete_paths = 18;
+    InspectDestinationResponse inspect_destination = 23;
+    CreateExampleResponse create_example = 34;
+    CopyProjectResponse copy_project = 35;
+    PutClusterResponse put_cluster = 31;
+    RemoveClusterResponse remove_cluster = 32;
+    TestClusterResponse test_cluster = 33;
+    StartRunResponse start_run = 36;
+    LoginResponse login = 40;
   }
 }
 

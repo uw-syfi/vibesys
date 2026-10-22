@@ -5,7 +5,7 @@ import {type HostId, hostKey, REQUIRED_HELPER_FEATURES} from '@vibesys/hosts';
 import {SettingsStore, withHostSettings, withoutHost} from '@vibesys/settings';
 import {FakeSettingsFilesystem} from '@vibesys/settings/testing';
 import {FakeClock} from '@vibesys/transport/testing';
-import {MachinesMain} from './index.js';
+import {MachinesMain, type MachinesMainDeps} from './index.js';
 
 const LOCAL: HostId = {kind: 'local'};
 const HOST_B: HostId = {kind: 'ssh', alias: 'host-b'};
@@ -13,7 +13,10 @@ const HOST_A: HostId = {kind: 'ssh', alias: 'host-a'};
 const CONFIG = {delaysMs: [1], deadlineMs: 60_000, heartbeatMs: 15_000};
 
 /** The machines over real settings and a real connection manager, each host behind its own Fake. */
-async function subject(links: ReadonlyMap<string, FakeLink>): Promise<{
+async function subject(
+  links: ReadonlyMap<string, FakeLink>,
+  extra?: Partial<MachinesMainDeps>,
+): Promise<{
   readonly machines: MachinesMain;
   readonly settings: SettingsStore;
   readonly manager: ConnectionManager;
@@ -54,6 +57,7 @@ async function subject(links: ReadonlyMap<string, FakeLink>): Promise<{
       if (path === null) throw new Error('no checkout');
       return manager.acquire(id, path);
     },
+    ...extra,
   });
   return {machines, settings, manager};
 }
@@ -122,6 +126,42 @@ describe('MachinesMain', () => {
       min: '0.1.0',
     });
     expect(await machines.inspect(HOST_B, '/nowhere')).toEqual({state: 'not_found'});
+  });
+
+  test('transport v2 inspects through the registry and a moved revision is stale', async () => {
+    let revision = 3n;
+    let release: () => void = () => {};
+    const gate = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    let started: () => void = () => {};
+    const startedPromise = new Promise<void>(resolve => {
+      started = resolve;
+    });
+    const {machines, manager} = await subject(new Map(), {
+      transportV2: async () => true,
+      selectionRevision: () => revision,
+      setup: {
+        completePaths: async () => {
+          throw new Error('unused');
+        },
+        inspectCandidate: async () => {
+          started();
+          await gate;
+          return {state: 'too_old', version: '0.0.9', min: '0.1.1'};
+        },
+      },
+    });
+    await using _ = manager;
+    const pending = machines.inspect(HOST_B, '/home/me/vibesys-old', 3n);
+    await startedPromise;
+    revision = 4n;
+    release();
+    await expect(pending).rejects.toThrow('stale selection');
+    revision = 4n;
+    await expect(machines.inspect(HOST_B, '/home/me/vibesys-old', 3n)).rejects.toThrow(
+      'stale selection',
+    );
   });
 
   test('removing a machine forgets only it; This Mac stays on the app’s own checkout', async () => {
@@ -221,6 +261,148 @@ describe('MachinesMain', () => {
         outcome: 'unavailable',
         reason: 'no_login_command',
       });
+    });
+
+    test('transport v2 starts the login on the actor', async () => {
+      const link = new FakeLink();
+      const {machines, manager} = await subject(new Map([['ssh:host-b', link]]), {
+        transportV2: async () => true,
+        logins: {
+          start: async () => ({outcome: 'started', instruction: 'Open the link'}),
+          cancelHost: () => {},
+        },
+      });
+      await using _ = manager;
+      expect(await machines.startLogin(HOST_B, 'claude')).toEqual({
+        outcome: 'started',
+        instruction: 'Open the link',
+      });
+    });
+  });
+
+  describe('run transport v2', () => {
+    const facts = {
+      checkout: {root: '/src/vibesys', version: '0.1.1', commit: 'abc123', dirty: false},
+      hardware: {cpu_cores: 8, gpus: [], accelerator: 'cpu' as const},
+      docker: {reachable: true as const, version: '27.3.1'},
+      harness_clis: ['codex'],
+      runs: {live: 0, ended_today: 0},
+    };
+    const settings = {
+      config_path: '/settings',
+      clusters: [
+        {
+          cluster: {
+            name: 'campus',
+            reach: {kind: 'ssh' as const, host: 'host-a'},
+            workspace: '/work',
+            sbatch_options: [],
+            hardware: null,
+          },
+          source: 'slurm_toml' as const,
+        },
+      ],
+      modal: {token_present: false},
+    };
+
+    test('an off switch still asks the helper', async () => {
+      const link = new FakeLink();
+      const {machines, manager} = await subject(new Map([['ssh:host-b', link]]), {
+        transportV2: async () => false,
+      });
+      await using _ = manager;
+      expect((await machines.report(HOST_B)).kind).toBe('ready');
+    });
+
+    test('an on switch reads the registry and does not open the helper', async () => {
+      let expected: string | null = 'unset';
+      const {machines, manager} = await subject(new Map(), {
+        transportV2: async () => true,
+        registry: {
+          describeMachine: async (_host, checkout) => {
+            expected = checkout;
+            return facts;
+          },
+          listCompute: async () => settings,
+        },
+        runs: {live: async () => 0},
+      });
+      await using _ = manager;
+      expect(await machines.report(HOST_B, '/mnt/data/vibesys')).toEqual({
+        kind: 'ready',
+        facts,
+      });
+      expect(expected).toBe('/mnt/data/vibesys');
+      expect(await machines.compute(HOST_B)).toEqual({kind: 'offered', value: settings});
+    });
+
+    test('an on switch counts live runs from WatchRuns', async () => {
+      const {machines, manager} = await subject(new Map(), {
+        transportV2: async () => true,
+        registry: {
+          describeMachine: async () => facts,
+          listCompute: async () => settings,
+        },
+        runs: {live: async () => 2},
+      });
+      await using _ = manager;
+      const report = await machines.report(HOST_B);
+      expect(report.kind === 'ready' && report.facts?.runs.live).toBe(2);
+    });
+
+    test('an on switch changes clusters through the registry and does not open the helper', async () => {
+      const calls: string[] = [];
+      const saved = {
+        config_path: '/settings',
+        clusters: [],
+        modal: {token_present: false},
+      };
+      const passed = {
+        outcome: 'passed' as const,
+        hardware: {gpus_per_node: 1},
+        partitions: ['gpu'],
+      };
+      const {machines, manager} = await subject(new Map(), {
+        transportV2: async () => true,
+        clusters: {
+          put: async () => {
+            calls.push('put');
+            return saved;
+          },
+          remove: async (_host, name) => {
+            calls.push(`remove:${name}`);
+            return saved;
+          },
+          test: async () => {
+            calls.push('test');
+            return passed;
+          },
+        },
+      });
+      await using _ = manager;
+      const cluster = {
+        name: 'lab',
+        reach: {kind: 'ssh' as const, host: 'host-a'},
+        workspace: '/work',
+      };
+      expect(await machines.testCluster(HOST_B, cluster)).toEqual(passed);
+      expect(await machines.addCluster(HOST_B, cluster)).toEqual(saved);
+      expect(await machines.removeCluster(HOST_B, 'lab')).toEqual(saved);
+      expect(calls).toEqual(['test', 'put', 'remove:lab']);
+    });
+
+    test('an on switch without the registry throws instead of using the helper', async () => {
+      const {machines, manager} = await subject(new Map(), {transportV2: async () => true});
+      await using _ = manager;
+      await expect(machines.report(HOST_B)).rejects.toThrow('registry reads are missing');
+      await expect(machines.compute(HOST_B)).rejects.toThrow('registry reads are missing');
+      await expect(
+        machines.addCluster(HOST_B, {
+          name: 'lab',
+          reach: {kind: 'ssh', host: 'host-a'},
+          workspace: '/work',
+        }),
+      ).rejects.toThrow('cluster registry is missing');
     });
   });
 });

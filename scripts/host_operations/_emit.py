@@ -21,10 +21,57 @@ def _js_name(name: str) -> str:
     return name.split("_", maxsplit=1)[0] + "".join(part.title() for part in name.split("_")[1:])
 
 
+def _host_call_entries(operations: tuple[Operation, ...]) -> list[str]:
+    return [
+        "    HostCall("
+        f"{op.slot!r}, {op.slot.replace('_', '-')!r}, "
+        f"{op.policy.request_tag}, {op.policy.response_tag}, "
+        f"{op.policy.cap_ms}, {op.policy.grace_ms}),"
+        for op in operations
+    ]
+
+
+def _operation_dict(label: str, operations: tuple[Operation, ...]) -> str:
+    body = ", ".join(f"{op.slot!r}: {op.name}" for op in operations)
+    return f"{label}: dict[str, Operation] = {{{body}}}"
+
+
+def _mutation_class(mutations: tuple[Operation, ...]) -> list[str]:
+    """A constructor the read path does not build. Empty until a mutation exists."""
+    if not mutations:
+        return []
+    lines = [
+        "@dataclass(frozen=True)",
+        "class MutationHandlers:",
+        '    """Required mutation slots. A read handler cannot satisfy one."""',
+    ]
+    lines.extend(
+        f"    {op.slot}: Callable[[pb.{op.request}], pb.{op.response}]" for op in mutations
+    )
+    lines += [
+        "",
+        "    def dispatch(self, request: AcceptedRequest) -> bytes:",
+        "        match request.operation.operation_id:",
+    ]
+    for op in mutations:
+        lines += [
+            f"            case {op.policy.operation_id}:",
+            f"                return {op.name}.validate_response(request, self.{op.slot}({op.name}.request_value(request)))",
+        ]
+    lines += [
+        "            case _:",
+        '                raise ValueError("unknown operation id")',
+        "",
+    ]
+    return lines
+
+
 def python_registry(
     operations: tuple[Operation, ...],
     admissions: tuple[Operation, ...],
     failures: tuple[str, ...],
+    mutations: tuple[Operation, ...] = (),
+    watches: tuple[Operation, ...] = (),
 ) -> str:
     """Generate typed constructors and a required handler slot for every operation."""
     lines = [
@@ -39,7 +86,11 @@ def python_registry(
         "from vs_proto._generated.vibesys.host.v1.failure_pb import FailureCategory, OperationFailure",
         "",
     ]
-    for op in operations:
+    declared = (*operations, *mutations, *watches)
+    # Reads and mutations have different owners. A mutation slot on the read
+    # constructor would force every catalog read to carry a launcher.
+    handlers = operations
+    for op in declared:
         p = op.policy
         lines += [
             f"{op.name} = Operation(",
@@ -57,20 +108,22 @@ def python_registry(
         + "}"
     ]
     lines += [
-        "OPERATIONS: tuple[Operation, ...] = (" + ", ".join(op.name for op in operations) + ",)",
+        "OPERATIONS: tuple[Operation, ...] = ("
+        + ", ".join(op.name for op in (*operations, *mutations, *watches))
+        + ",)",
         "",
         "@dataclass(frozen=True)",
         "class Handlers:",
         '    """Required typed slots: missing/unknown registrations fail construction."""',
     ]
-    for op in operations:
+    for op in handlers:
         lines += [f"    {op.slot}: Callable[[pb.{op.request}], pb.{op.response}]"]
     lines += [
         "",
         "    def dispatch(self, request: AcceptedRequest) -> bytes:",
         "        match request.operation.operation_id:",
     ]
-    for op in operations:
+    for op in handlers:
         lines += [
             f"            case {op.policy.operation_id}:",
             f"                return {op.name}.validate_response(request, self.{op.slot}({op.name}.request_value(request)))",
@@ -79,6 +132,7 @@ def python_registry(
         "            case _:",
         '                raise ValueError("unknown operation id")',
         "",
+        *_mutation_class(mutations),
         "class FailureVisitor[T](Protocol):",
     ]
     for name in failures:
@@ -103,14 +157,8 @@ def python_registry(
         "    grace_ms: int",
         "",
         "HOST_CALLS: tuple[HostCall, ...] = (",
+        *_host_call_entries(admissions),
     ]
-    for op in admissions:
-        lines += [
-            "    HostCall("
-            f"{op.slot!r}, {op.slot.replace('_', '-')!r}, "
-            f"{op.policy.request_tag}, {op.policy.response_tag}, "
-            f"{op.policy.cap_ms}, {op.policy.grace_ms}),"
-        ]
     parts = [f"Oneof[Literal[{op.slot!r}], host_call.{op.response}]" for op in admissions]
     lines += [")", "", "HostCallResult: TypeAlias = ("]
     lines += [("    " if index == 0 else "    | ") + part for index, part in enumerate(parts)]
@@ -135,6 +183,21 @@ def python_registry(
             f"            return Oneof({op.slot!r}, {op.slot}(cast(host_call.{op.request}, request)))",
         ]
     lines += ["        case _:", "            return None", ""]
+    lines += [
+        _operation_dict("READS", operations),
+        "READ_CALLS: tuple[HostCall, ...] = (",
+        *_host_call_entries(operations),
+        ")",
+        _operation_dict("MUTATIONS", mutations),
+        "MUTATION_CALLS: tuple[HostCall, ...] = (",
+        *_host_call_entries(mutations),
+        ")",
+        _operation_dict("WATCHES", watches),
+        "WATCH_CALLS: tuple[HostCall, ...] = (",
+        *_host_call_entries(watches),
+        ")",
+        "",
+    ]
     return "\n".join(lines)
 
 
@@ -146,8 +209,9 @@ def go_host_call(admissions: tuple[Operation, ...]) -> str:
         "import (",
         '"time"',
         'apiv1 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/api/v1"',
+        'hostv1 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/host/v1"',
         ")",
-        "type HostCall struct { CLI string; Deadline time.Duration }",
+        "type HostCall struct { CLI string; Deadline time.Duration; Executor hostv1.Executor; Effect hostv1.OperationEffect; FirstEvent time.Duration }",
         "func DispatchHostCall(request *apiv1.HostCallRequest) (HostCall, bool) {",
         "switch {",
     ]
@@ -155,7 +219,7 @@ def go_host_call(admissions: tuple[Operation, ...]) -> str:
         getter = _go_getter(op.slot)
         lines += [
             f"case request.{getter}() != nil:",
-            f'return HostCall{{CLI: "{op.slot.replace("_", "-")}", Deadline: {op.policy.cap_ms} * time.Millisecond}}, true',
+            f'return HostCall{{CLI: "{op.slot.replace("_", "-")}", Deadline: {op.policy.cap_ms} * time.Millisecond, Executor: {op.policy.executor}, Effect: {op.policy.effect}}}, true',
         ]
     lines += [
         "default:",
@@ -172,6 +236,209 @@ def go_host_call(admissions: tuple[Operation, ...]) -> str:
         for left, right in op.correlations:
             if len(left) != 1 or len(right) != 1:
                 message = f"{op.name}: host call correlation must be one field"
+                raise ValueError(message)
+            checks.append(
+                f"got.{_go_getter(right[0])}() == request.{getter}().{_go_getter(left[0])}()"
+            )
+        predicate = " && ".join(checks[1:])
+        lines += [
+            f"case request.{getter}() != nil:",
+            checks[0],
+            f"return {predicate}",
+        ]
+    lines += ["default:", "return false", "}", "}", ""]
+    return "\n".join(lines)
+
+
+def go_host_read(operations: tuple[Operation, ...]) -> str:
+    """Generate closed read-envelope selection. Runner caps come from the registry."""
+    lines = [
+        "// Code generated by scripts/generate_proto.sh. DO NOT EDIT.",
+        "package hostoperations",
+        "import (",
+        '"time"',
+        'apiv1 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/api/v1"',
+        ")",
+        "func DispatchHostRead(request *apiv1.ReadRequest) (HostCall, bool) {",
+        "switch {",
+    ]
+    for op in operations:
+        getter = _go_getter(op.slot)
+        lines += [
+            f"case request.{getter}() != nil:",
+            f'return HostCall{{CLI: "{op.slot.replace("_", "-")}", Deadline: {op.policy.cap_ms} * time.Millisecond, Executor: {op.policy.executor}, Effect: {op.policy.effect}}}, true',
+        ]
+    lines += [
+        "default:",
+        "return HostCall{}, false",
+        "}",
+        "}",
+        "",
+        "func HostReadResponseValid(request *apiv1.ReadRequest, response *apiv1.ReadResponse) bool {",
+        "switch {",
+    ]
+    for op in operations:
+        getter = _go_getter(op.slot)
+        checks = [f"got := response.{getter}()", "got != nil"]
+        for left, right in op.correlations:
+            if len(left) != 1 or len(right) != 1:
+                message = f"{op.name}: host read correlation must be one field"
+                raise ValueError(message)
+            checks.append(
+                f"got.{_go_getter(right[0])}() == request.{getter}().{_go_getter(left[0])}()"
+            )
+        predicate = " && ".join(checks[1:])
+        lines += [
+            f"case request.{getter}() != nil:",
+            checks[0],
+            f"return {predicate}",
+        ]
+    lines += ["default:", "return false", "}", "}", ""]
+    return "\n".join(lines)
+
+
+def read_envelope(operations: tuple[Operation, ...]) -> str:
+    """Closed HostRead envelope. Field numbers are the registry tags."""
+    requests = "\n".join(
+        f"    vibesys.host.v1.{op.request} {op.slot} = {op.policy.request_tag};"
+        for op in operations
+    )
+    responses = "\n".join(
+        f"    vibesys.host.v1.{op.response} {op.slot} = {op.policy.response_tag};"
+        for op in operations
+    )
+    return f"""syntax = "proto3";
+
+package vibesys.api.v1;
+
+import "buf/validate/validate.proto";
+import "vibesys/host/v1/failure.proto";
+import "vibesys/host/v1/operations.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/gateway/gen/vibesys/api/v1;apiv1";
+
+// Generated by scripts/generate_proto.sh; do not edit.
+// One registered read. Budgets and pairing stay in the operation registry.
+message ReadRequest {{
+  string checkout = 1 [(buf.validate.field).string = {{min_len: 1, max_bytes: 4096}}];
+  oneof method {{
+    option (buf.validate.oneof).required = true;
+{requests}
+  }}
+}}
+
+// The matching read result, or a typed failure. Tag 2 stays reserved for failure.
+message ReadResponse {{
+  oneof result {{
+    option (buf.validate.oneof).required = true;
+    vibesys.host.v1.OperationFailure failure = 2;
+{responses}
+  }}
+}}
+"""
+
+
+def mutate_envelope(operations: tuple[Operation, ...]) -> str:
+    """Closed HostMutate envelope for neutral unary writes and admissions."""
+    return _closed_envelope(
+        "Mutate",
+        "One registered mutation. Budgets and pairing stay in the operation registry.",
+        operations,
+    )
+
+
+def watch_envelope(operations: tuple[Operation, ...]) -> str:
+    """Closed HostWatch envelope. One response is one sequenced event."""
+    return _closed_envelope(
+        "Watch",
+        "One registered watch. The host keeps it until completion or cancellation.",
+        operations,
+    )
+
+
+def _closed_envelope(name: str, comment: str, operations: tuple[Operation, ...]) -> str:
+    requests = "\n".join(
+        f"    vibesys.host.v1.{op.request} {op.slot} = {op.policy.request_tag};"
+        for op in operations
+    )
+    responses = "\n".join(
+        f"    vibesys.host.v1.{op.response} {op.slot} = {op.policy.response_tag};"
+        for op in operations
+    )
+    return f"""syntax = "proto3";
+
+package vibesys.api.v1;
+
+import "buf/validate/validate.proto";
+import "vibesys/host/v1/failure.proto";
+import "vibesys/host/v1/operations.proto";
+
+option go_package = "github.com/uw-syfi/vibesys/gateway/gen/vibesys/api/v1;apiv1";
+
+// Generated by scripts/generate_proto.sh; do not edit.
+// {comment}
+message {name}Request {{
+  string checkout = 1 [(buf.validate.field).string = {{min_len: 1, max_bytes: 4096}}];
+  oneof method {{
+    option (buf.validate.oneof).required = true;
+{requests}
+  }}
+}}
+
+// The matching result, or a typed failure. Tag 2 stays reserved for failure.
+message {name}Response {{
+  oneof result {{
+    option (buf.validate.oneof).required = true;
+    vibesys.host.v1.OperationFailure failure = 2;
+{responses}
+  }}
+}}
+"""
+
+
+def go_host_mutate(operations: tuple[Operation, ...]) -> str:
+    """Generate closed mutation-envelope selection."""
+    return _go_dispatch("Mutate", operations, with_first=False)
+
+
+def go_host_watch(operations: tuple[Operation, ...]) -> str:
+    """Generate closed watch-envelope selection, including the first-event bound."""
+    return _go_dispatch("Watch", operations, with_first=True)
+
+
+def _go_dispatch(name: str, operations: tuple[Operation, ...], *, with_first: bool) -> str:
+    lines = [
+        "// Code generated by scripts/generate_proto.sh. DO NOT EDIT.",
+        "package hostoperations",
+        "import (",
+        '"time"',
+        'apiv1 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/api/v1"',
+        ")",
+        f"func DispatchHost{name}(request *apiv1.{name}Request) (HostCall, bool) {{",
+        "switch {",
+    ]
+    for op in operations:
+        getter = _go_getter(op.slot)
+        first = f", FirstEvent: {op.policy.first_event_ms} * time.Millisecond" if with_first else ""
+        lines += [
+            f"case request.{getter}() != nil:",
+            f'return HostCall{{CLI: "{op.slot.replace("_", "-")}", Deadline: {op.policy.cap_ms} * time.Millisecond, Executor: {op.policy.executor}, Effect: {op.policy.effect}{first}}}, true',
+        ]
+    lines += [
+        "default:",
+        "return HostCall{}, false",
+        "}",
+        "}",
+        "",
+        f"func Host{name}ResponseValid(request *apiv1.{name}Request, response *apiv1.{name}Response) bool {{",
+        "switch {",
+    ]
+    for op in operations:
+        getter = _go_getter(op.slot)
+        checks = [f"got := response.{getter}()", "got != nil"]
+        for left, right in op.correlations:
+            if len(left) != 1 or len(right) != 1:
+                message = f"{op.name}: host {name.lower()} correlation must be one field"
                 raise ValueError(message)
             checks.append(
                 f"got.{_go_getter(right[0])}() == request.{getter}().{_go_getter(left[0])}()"
@@ -343,34 +610,15 @@ def go_registry(operations: tuple[Operation, ...], failures: tuple[str, ...]) ->
     return "\n".join(lines)
 
 
-def typescript_registry(
-    operations: tuple[Operation, ...],
-    failures: tuple[str, ...],
-    admissions: tuple[Operation, ...],
-) -> str:
-    """Generate opaque accepted constructors, typed calls and exhaustive failures."""
-    lines = [
-        "// Generated by scripts/generate_proto.sh; do not edit.",
-        "import {type MessageInitShape} from '@bufbuild/protobuf';",
-        "import * as pb from './vibesys/host/v1/operations_pb.js';",
-        "import {FailureCategory, type OperationFailure} from './vibesys/host/v1/failure_pb.js';",
-        "import {accept, call, type Accepted, type OperationTransport, type OperationSignal} from '../operations.js';",
-        "export const operationPolicies = Object.freeze({",
-    ]
+def _schema_import(operations: tuple[Operation, ...], names: str, module: str) -> list[str]:
+    if not operations:
+        return []
+    return [f"import {{{names}}} from '{module}';"]
+
+
+def _call_lines(operations: tuple[Operation, ...]) -> list[str]:
+    lines: list[str] = []
     for op in operations:
-        p = op.policy
-        lines += [
-            f"  {op.name}: Object.freeze({{name: '{op.name}', id: {p.operation_id}, requestTag: {p.request_tag}, responseTag: {p.response_tag}, capMs: {p.cap_ms}, graceMs: {p.grace_ms}, totalMs: {p.cap_ms + p.grace_ms}, effect: {p.effect}, retry: {p.retry}, executor: {p.executor}, cardinality: {p.cardinality}, firstEventMs: {p.first_event_ms if p.HasField('first_event_ms') else 'undefined'}}} as const),"
-        ]
-    lines += ["});", "export const hostCallBudgets = Object.freeze({"]
-    for op in admissions:
-        policy = op.policy
-        lines += [
-            f"  {_js_name(op.slot)}: Object.freeze({{capMs: {policy.cap_ms}, graceMs: {policy.grace_ms}, totalMs: {policy.cap_ms + policy.grace_ms}}} as const),",
-        ]
-    lines += ["} as const);"]
-    for op in operations:
-        # JS property names come from descriptor snake_case paths.
         correlation = repr(
             [
                 [[_js_name(n) for n in left], [_js_name(n) for n in right]]
@@ -385,6 +633,61 @@ def typescript_registry(
             f"  return call(transport, {{policy: operationPolicies.{op.name}, requestSchema: pb.{op.request}Schema, responseSchema: pb.{op.response}Schema, correlations: {correlation}}}, request, signal);",
             "}",
         ]
+    return lines
+
+
+def _accept_lines(operations: tuple[Operation, ...]) -> list[str]:
+    lines: list[str] = []
+    for op in operations:
+        lines += [
+            f'export function accept{op.name}(input: MessageInitShape<typeof pb.{op.request}Schema>): Accepted<"{op.name}"> {{',
+            f"  return accept(operationPolicies.{op.name}, pb.{op.request}Schema, input);",
+            "}",
+        ]
+    return lines
+
+
+def typescript_registry(
+    operations: tuple[Operation, ...],
+    failures: tuple[str, ...],
+    admissions: tuple[Operation, ...],
+    mutations: tuple[Operation, ...] = (),
+    watches: tuple[Operation, ...] = (),
+) -> str:
+    """Generate opaque accepted constructors, typed calls and exhaustive failures."""
+    lines = [
+        "// Generated by scripts/generate_proto.sh; do not edit.",
+        "import {create, fromBinary, type MessageInitShape, toBinary} from '@bufbuild/protobuf';",
+        "import {ReadRequestSchema, ReadResponseSchema} from './vibesys/api/v1/host_read_generated_pb.js';",
+        *_schema_import(
+            mutations,
+            "MutateRequestSchema, MutateResponseSchema",
+            "./vibesys/api/v1/host_mutate_generated_pb.js",
+        ),
+        *_schema_import(
+            watches,
+            "WatchRequestSchema, WatchResponseSchema",
+            "./vibesys/api/v1/host_watch_generated_pb.js",
+        ),
+        "import * as pb from './vibesys/host/v1/operations_pb.js';",
+        "import {FailureCategory, type OperationFailure} from './vibesys/host/v1/failure_pb.js';",
+        "import {accept, call, OperationFailed, type Accepted, type OperationTransport, type OperationSignal} from '../operations.js';",
+        "export const operationPolicies = Object.freeze({",
+    ]
+    for op in (*operations, *mutations, *watches):
+        p = op.policy
+        lines += [
+            f"  {op.name}: Object.freeze({{name: '{op.name}', id: {p.operation_id}, requestTag: {p.request_tag}, responseTag: {p.response_tag}, capMs: {p.cap_ms}, graceMs: {p.grace_ms}, totalMs: {p.cap_ms + p.grace_ms}, effect: {p.effect}, retry: {p.retry}, executor: {p.executor}, cardinality: {p.cardinality}, firstEventMs: {p.first_event_ms if p.HasField('first_event_ms') else 'undefined'}}} as const),"
+        ]
+    lines += ["});", "export const hostCallBudgets = Object.freeze({"]
+    for op in admissions:
+        policy = op.policy
+        lines += [
+            f"  {_js_name(op.slot)}: Object.freeze({{capMs: {policy.cap_ms}, graceMs: {policy.grace_ms}, totalMs: {policy.cap_ms + policy.grace_ms}}} as const),",
+        ]
+    lines += ["} as const);"]
+    lines += _call_lines((*operations, *mutations))
+    lines += _accept_lines(watches)
     lines += ["export interface FailureVisitor<T> {"]
     for name in failures:
         lines += [f"  {name.lower()}(failure: OperationFailure): T;"]
@@ -395,8 +698,119 @@ def typescript_registry(
     ]
     for name in failures:
         lines += [f"    case FailureCategory.{name}: return visitor.{name.lower()}(failure);"]
-    lines += ['    default: throw new Error("unknown failure category");', "  }", "}", ""]
+    lines += ['    default: throw new Error("unknown failure category");', "  }", "}"]
+    lines += ["export const readBudgets = Object.freeze({"]
+    for op in operations:
+        policy = op.policy
+        lines += [
+            f"  {_js_name(op.slot)}: Object.freeze({{capMs: {policy.cap_ms}, graceMs: {policy.grace_ms}, totalMs: {policy.cap_ms + policy.grace_ms}}} as const),",
+        ]
+    lines += ["} as const);"]
+    lines += [
+        "export function encodeHostRead(checkout: string, name: string, payload: Uint8Array): Uint8Array {",
+        "  switch (name) {",
+    ]
+    for op in operations:
+        lines += [
+            f"    case {op.name!r}:",
+            "      return toBinary(ReadRequestSchema, create(ReadRequestSchema, {checkout, method: {case: "
+            f"{_js_name(op.slot)!r}, value: fromBinary(pb.{op.request}Schema, payload)"
+            "}}));",
+        ]
+    lines += ['    default: throw new Error("unknown read");', "  }", "}"]
+    lines += [
+        "export function decodeHostRead(name: string, payload: Uint8Array): Uint8Array {",
+        "  const response = fromBinary(ReadResponseSchema, payload);",
+        "  const result = response.result;",
+        '  if (result.case === undefined) throw new Error("host read returned no result");',
+        "  if (result.case === 'failure') throw new OperationFailed(result.value.category, result.value.message);",
+        "  switch (name) {",
+    ]
+    for op in operations:
+        case = _js_name(op.slot)
+        lines += [
+            f"    case {op.name!r}:",
+            f"      if (result.case !== {case!r}) throw new Error('response correlation mismatch');",
+            f"      return toBinary(pb.{op.response}Schema, result.value);",
+        ]
+    lines += ['    default: throw new Error("unknown read");', "  }", "}", ""]
+    lines += _envelope_codecs(
+        "Mutate",
+        mutations,
+        "MutateRequestSchema",
+        "MutateResponseSchema",
+        "unknown mutation",
+    )
+    lines += _envelope_codecs(
+        "Watch",
+        watches,
+        "WatchRequestSchema",
+        "WatchResponseSchema",
+        "unknown watch",
+    )
+    lines += ["export const mutateBudgets = Object.freeze({"]
+    for op in mutations:
+        policy = op.policy
+        lines += [
+            f"  {_js_name(op.slot)}: Object.freeze({{capMs: {policy.cap_ms}, graceMs: {policy.grace_ms}, totalMs: {policy.cap_ms + policy.grace_ms}}} as const),",
+        ]
+    lines += ["} as const);", "export const watchBudgets = Object.freeze({"]
+    for op in watches:
+        policy = op.policy
+        first = policy.first_event_ms if policy.HasField("first_event_ms") else 0
+        lines += [
+            f"  {_js_name(op.slot)}: Object.freeze({{capMs: {policy.cap_ms}, graceMs: {policy.grace_ms}, totalMs: {policy.cap_ms + policy.grace_ms}, firstEventMs: {first}}} as const),",
+        ]
+    lines += ["} as const);", ""]
     return "\n".join(lines)
+
+
+def _envelope_codecs(
+    kind: str,
+    operations: tuple[Operation, ...],
+    request_schema: str,
+    response_schema: str,
+    unknown: str,
+) -> list[str]:
+    """Encode and decode one closed envelope. Empty families still export a refusing pair."""
+    if not operations:
+        return [
+            f"export function encodeHost{kind}(_checkout: string, _name: string, _payload: Uint8Array): Uint8Array {{",
+            f"  throw new Error({unknown!r});",
+            "}",
+            f"export function decodeHost{kind}(_name: string, _payload: Uint8Array): Uint8Array {{",
+            f"  throw new Error({unknown!r});",
+            "}",
+        ]
+    lines = [
+        f"export function encodeHost{kind}(checkout: string, name: string, payload: Uint8Array): Uint8Array {{",
+        "  switch (name) {",
+    ]
+    for op in operations:
+        case = _js_name(op.slot)
+        lines += [
+            f"    case {op.name!r}:",
+            "      return toBinary("
+            f"{request_schema}, create({request_schema}, {{checkout, method: {{case: {case!r}, value: fromBinary(pb.{op.request}Schema, payload)}}}}));",
+        ]
+    lines += [f"    default: throw new Error({unknown!r});", "  }", "}"]
+    lines += [
+        f"export function decodeHost{kind}(name: string, payload: Uint8Array): Uint8Array {{",
+        f"  const response = fromBinary({response_schema}, payload);",
+        "  const result = response.result;",
+        f"  if (result.case === undefined) throw new Error({unknown!r});",
+        "  if (result.case === 'failure') throw new OperationFailed(result.value.category, result.value.message);",
+        "  switch (name) {",
+    ]
+    for op in operations:
+        case = _js_name(op.slot)
+        lines += [
+            f"    case {op.name!r}:",
+            f"      if (result.case !== {case!r}) throw new Error('response correlation mismatch');",
+            f"      return toBinary(pb.{op.response}Schema, result.value);",
+        ]
+    lines += [f"    default: throw new Error({unknown!r});", "  }", "}"]
+    return lines
 
 
 def helper_types(sources: tuple[str, ...], operations: tuple[Operation, ...]) -> str:

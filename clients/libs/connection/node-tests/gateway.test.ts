@@ -2,15 +2,22 @@ import {describe, test} from 'node:test';
 import {create, toBinary} from '@bufbuild/protobuf';
 import {
   API_SCHEMA_HASH,
+  encodeHostMutate,
+  encodeHostRead,
   GetBlobsResponseSchema,
   HelloResponseSchema,
   HOST_API_MAX_MESSAGE_BYTES,
   HostCallRequestSchema,
   HostService,
   hostCallBudgets,
+  MutateRequestSchema,
+  mutateBudgets,
+  ReadRequestSchema,
+  readBudgets,
   TailRequestSchema,
   TailResponseSchema,
   validatedFromBinary,
+  validateHostPayload,
 } from '@vibesys/proto';
 import {Seeded} from '@vibesys/store/testing';
 import {FakeClock} from '@vibesys/transport/testing';
@@ -22,6 +29,8 @@ import {
   GrpcError,
   grpcFrame,
   HELLO_METHOD,
+  MUTATE_METHOD,
+  READ_METHOD,
   TAIL_METHOD,
 } from '../src/index.js';
 // test-isolation: Node HTTP/2 needs the gateway Fake alone; legacy contract exports load bun:test.
@@ -389,6 +398,83 @@ for (const [method, budget] of Object.entries(hostCallBudgets)) {
       fake.close();
     }
   });
+}
+
+const cluster = {
+  name: 'cluster-a',
+  workspace: '/work',
+  reach: {value: {case: 'sshReach', value: {kind: 'ssh', host: 'host-a'}}},
+};
+const deadlineInputs = {
+  listTasks: {project: '/project'},
+  listHarnesses: {},
+  listExamples: {},
+  getTaskGoal: {project: '/project', task: 'bench'},
+  describeMachine: {},
+  listCompute: {},
+  preflightRun: {project: '/project'},
+  inspectCandidate: {path: '/candidate', selectionRevision: 1n},
+  completePaths: {prefix: '/manual/'},
+  inspectDestination: {example: 'queue', destination: '/work/queue'},
+  createExample: {example: 'queue', destination: '/work/queue'},
+  copyProject: {source: '/project', destination: '/work/copy'},
+  putCluster: {cluster},
+  removeCluster: {name: 'cluster-a'},
+  testCluster: {cluster},
+  startRun: {project: '/project'},
+} satisfies Record<keyof typeof readBudgets | keyof typeof mutateBudgets, object>;
+
+for (const {kind, schema, budgets, method, encode, nextCall} of [
+  {
+    kind: 'read',
+    schema: ReadRequestSchema,
+    budgets: readBudgets,
+    method: READ_METHOD,
+    encode: encodeHostRead,
+    nextCall: (fake: FakeGateway) => fake.nextRead(),
+  },
+  {
+    kind: 'mutate',
+    schema: MutateRequestSchema,
+    budgets: mutateBudgets,
+    method: MUTATE_METHOD,
+    encode: encodeHostMutate,
+    nextCall: (fake: FakeGateway) => fake.nextMutate(),
+  },
+]) {
+  for (const [slot, budget] of Object.entries(budgets)) {
+    test(`${kind} ${slot} waits for the registry budget above the runner cap`, {
+      timeout: 15000,
+    }, async () => {
+      expect(budget.totalMs).toBeGreaterThan(budget.capMs);
+      expect(budget.totalMs).toBe(budget.capMs + budget.graceMs);
+      const field = schema.fields.find(field => field.localName === slot);
+      if (field?.fieldKind !== 'message') throw new Error(`no ${kind} payload for ${slot}`);
+      const name = `${slot[0]?.toUpperCase() ?? ''}${slot.slice(1)}`;
+      const fake = new FakeGateway();
+      const clock = new FakeClock();
+      const connection = new GatewayConnection(fake, clock.schedule);
+      const input = deadlineInputs[slot as keyof typeof deadlineInputs];
+      const payload = toBinary(
+        field.message,
+        create(field.message, {requestId: 'request-a', ...input}),
+      );
+      const bytes = encode('/checkout', name, payload);
+      validateHostPayload(method, 'input', bytes);
+      const pending = connection
+        .unary(method, bytes, new AbortController().signal)
+        .catch(error => String(error));
+      try {
+        await nextCall(fake);
+        await clock.waitUntilScheduled(budget.totalMs);
+        clock.advanceBy(budget.totalMs);
+        expect(await pending).toContain('deadline');
+      } finally {
+        connection.close();
+        fake.close();
+      }
+    });
+  }
 }
 
 test('a maximum-size blob plus response metadata fits the shared gateway frame budget', () => {
