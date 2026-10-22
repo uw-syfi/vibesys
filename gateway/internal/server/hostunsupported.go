@@ -18,7 +18,7 @@ func unsupportedMessage(cli string) string {
 // commandFailure types a host command that exited without a reply and words
 // it. Only the unsupported category drops the command's stderr.
 func commandFailure(cli string, result hostcommand.Result, err error) (hostv1.FailureCategory, string) {
-	category := exitFailureCategory(result, err)
+	category := exitFailureCategory(cli, result, err)
 	if category == hostv1.FailureCategory_FAILURE_CATEGORY_UNSUPPORTED {
 		return category, unsupportedMessage(cli)
 	}
@@ -29,9 +29,9 @@ func commandFailure(cli string, result hostcommand.Result, err error) (hostv1.Fa
 	return category, message + "\n" + result.Stderr
 }
 
-// unsupportedStream reports whether a stream that sent nothing ended with the
-// usage exit of a checkout that does not know the command.
-func unsupportedStream(err error) bool {
+// unsupportedStream reports whether a stream that sent nothing ended with
+// argparse rejecting the versioned command cli.
+func unsupportedStream(cli string, err error) bool {
 	var exit *hostcommand.ExitError
-	return errors.As(err, &exit) && exit.Code == usageExitStatus
+	return errors.As(err, &exit) && unknownCommand(cli, exit.Code, 0, exit.Stderr)
 }

@@ -203,7 +203,7 @@ func (h *host) inspectCandidate(ctx context.Context, request *apiv1.ReadRequest,
 		return readFailure(hostv1.FailureCategory_FAILURE_CATEGORY_CANCELLED, "host read cancelled"), nil
 	}
 	if err != nil || result.ExitCode != 0 {
-		if exitFailureCategory(result, err) == hostv1.FailureCategory_FAILURE_CATEGORY_UNSUPPORTED {
+		if exitFailureCategory("inspect-candidate", result, err) == hostv1.FailureCategory_FAILURE_CATEGORY_UNSUPPORTED {
 			return readFailure(hostv1.FailureCategory_FAILURE_CATEGORY_UNSUPPORTED, unsupportedMessage("inspect-candidate")), nil
 		}
 		return readFailure(hostv1.FailureCategory_FAILURE_CATEGORY_INTERNAL, "vibesys host inspect-candidate failed"), nil

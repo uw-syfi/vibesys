@@ -3,6 +3,7 @@ package server_test
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 
@@ -92,6 +93,40 @@ func TestInspectCandidateRefusesADifferentSchemaHash(t *testing.T) {
 	})
 	if err != nil || response.GetFailure().GetCategory() != hostv1.FailureCategory_FAILURE_CATEGORY_UNSUPPORTED {
 		t.Fatalf("hash: %v %v", response, err)
+	}
+}
+
+func TestInspectCandidateTypesAnExecutableLackingTheCommandAsUnsupportedAndAnyOtherUsageFailureAsInternal(t *testing.T) {
+	root := t.TempDir()
+	executable := filepath.Join(root, ".venv", "bin", "vibesys")
+	if err := os.MkdirAll(filepath.Dir(executable), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(executable, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, test := range map[string]struct {
+		stderr   string
+		category hostv1.FailureCategory
+	}{
+		"command unknown": {"vibesys: error: unrecognized arguments: host inspect-candidate", hostv1.FailureCategory_FAILURE_CATEGORY_UNSUPPORTED},
+		"entrypoint gone": {"python: can't open file 'vibesys.py': [Errno 2] No such file or directory", hostv1.FailureCategory_FAILURE_CATEGORY_INTERNAL},
+	} {
+		t.Run(name, func(t *testing.T) {
+			runner := hostcommand.FakeRunner{Program: func(context.Context, hostcommand.Command) (hostcommand.Result, error) {
+				return hostcommand.Result{ExitCode: 2, Stderr: test.stderr}, &exec.ExitError{}
+			}}
+			f := startWithConfig(t, server.Config{HostRunner: runner})
+			response, err := client(t, f, false).Read(f.ctx, &apiv1.ReadRequest{
+				Checkout: root,
+				Method: &apiv1.ReadRequest_InspectCandidate{InspectCandidate: &hostv1.InspectCandidateRequest{
+					RequestId: "request-a", Path: root, SelectionRevision: 1,
+				}},
+			})
+			if err != nil || response.GetFailure().GetCategory() != test.category {
+				t.Fatalf("%v %v", response, err)
+			}
+		})
 	}
 }
 

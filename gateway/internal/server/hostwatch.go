@@ -79,7 +79,7 @@ func (h *host) Watch(request *apiv1.WatchRequest, stream apiv1.HostService_Watch
 	if errors.Is(err, context.Canceled) {
 		return stream.Send(watchFailure(hostv1.FailureCategory_FAILURE_CATEGORY_CANCELLED, "host watch cancelled"))
 	}
-	if unsupportedStream(err) {
+	if unsupportedStream(dispatched.CLI, err) {
 		return stream.Send(watchFailure(hostv1.FailureCategory_FAILURE_CATEGORY_UNSUPPORTED, unsupportedMessage(dispatched.CLI)))
 	}
 	if err != nil {
