@@ -29,8 +29,11 @@ from __future__ import annotations
 import json
 import logging
 import re
+import shutil
+import tempfile
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -86,7 +89,6 @@ from vs_sim.api.testing import (
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Iterator, Sequence
-    from pathlib import Path
 
     from vs_sandbox.api import CommandRunner, DockerCli, HostResource
     from vs_sim.api import Connection, Event, Network, ProcessSpec
@@ -424,6 +426,8 @@ class _Client:
                 )
             except ConnectionRefusedError:
                 return  # the server closed between connections: read_log takes over
+            except ConnectionError:
+                continue  # the hello itself failed: reconnect, this was not a live connection
             self.connections += 1
             try:
                 self._read_until_end(connection)
@@ -700,6 +704,35 @@ def test_a_whole_run_ends_and_releases_everything_despite_dead_processes_and_a_n
     # The agent container receives the provider credential, so the run needs one to open.
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
     _check(tmp_path, sim)
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize(
+    ("kind", "end"),
+    [
+        (LinkFaultKind.DROP, End.ACCEPTOR),
+        (LinkFaultKind.DROP, End.DIALER),
+        (LinkFaultKind.RESET, End.DIALER),
+    ],
+)
+def test_a_fault_on_the_hello_reconnects(
+    monkeypatch: pytest.MonkeyPatch, kind: LinkFaultKind, end: End
+) -> None:
+    """The dialer's hello is the connection's first send. A drop or reset there is the
+    connection breaking, and the client resumes from its cursor.
+
+    Nightly seeds 0 and 15 dropped the acceptor (``BrokenPipeError``), 17, 18 and 20
+    dropped the dialer (``ConnectionAbortedError``), and 24, 51 and 53 reset the
+    connection (``ConnectionResetError``). Each of those killed the client thread.
+    """
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    # pytest's tmp path plus macOS's ``$TMPDIR`` exceeds the Unix socket path limit.
+    root = Path(tempfile.mkdtemp(prefix="vs-", dir="/tmp")).resolve()
+    try:
+        fault = LinkFault(kind, end=end, connection=1, before_send=1, seconds=1.0)
+        _check(root, Sim(seed=0), _Faults(deaths=(), link=fault))
+    finally:
+        shutil.rmtree(root, ignore_errors=True)
 
 
 @pytest.mark.slow
