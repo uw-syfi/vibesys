@@ -2,12 +2,9 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from pathlib import Path
 
 from scripts.check_lint_waivers import audit, discover_ruff_files, scan_source_file
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 
 def write_source(root: Path, source: str) -> Path:
@@ -108,6 +105,23 @@ def test_checks_each_rule_on_a_multi_rule_directive(tmp_path: Path) -> None:
         "value = 1  # noqa: ANN201, ANN001  # LW-000001; pytest supplies these values\n",
     )
     assert audit(tmp_path, [path]) == []
+
+
+def test_runtime_test_bindings_are_excluded_with_other_generated_trees(tmp_path: Path) -> None:
+    repo = Path(__file__).resolve().parents[2]
+    (tmp_path / "pyproject.toml").write_bytes((repo / "pyproject.toml").read_bytes())
+    generated = tmp_path / "libs/vs-runtime/tests/generated/pkg/agent_replay_pb.py"
+    prior = tmp_path / "libs/vs-runtime/tests/generated/prior/pkg/schema_recovery_pb.py"
+    for path in (generated, prior):
+        path.parent.mkdir(parents=True)
+        path.write_text("# ruff: noqa\nvalue = 1\n", encoding="utf-8")
+    kept = tmp_path / "libs/vs-runtime/tests/test_kept.py"
+    kept.write_text("value = 1\n", encoding="utf-8")
+
+    files, error = discover_ruff_files(tmp_path)
+
+    assert error is None
+    assert files == [kept.resolve()]
 
 
 def test_requires_waiver_ids_to_be_unique_across_files(tmp_path: Path) -> None:
