@@ -48,16 +48,15 @@ export function startsWith(starts: ExecutionStarts, event: RunEvent): ExecutionS
   const id = event.execution_id;
   if (data?.kind !== 'agent_execution_started' || id == null) return starts;
   const client = data.client === 'scripted' || data.client === 'provider' ? data.client : null;
-  const scripted = client === 'scripted';
   return {
     ...starts,
     [id]: {
       role: text(event.agent_kind),
-      harness: scripted ? null : text(data.provider),
-      model: scripted ? null : text(data.model),
+      harness: text(data.provider),
+      model: text(data.model),
       client,
-      reasoningEffort: scripted ? null : text(data.reasoning_effort),
-      harnessVersion: scripted ? null : text(data.harness_version),
+      reasoningEffort: text(data.reasoning_effort),
+      harnessVersion: text(data.harness_version),
       startedAt: time(event.timestamp),
     },
   };

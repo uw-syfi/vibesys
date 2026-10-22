@@ -83,16 +83,14 @@ class UsageFold:
         if kind == "agent_execution_started" and data.get("kind") == "agent_execution_started":
             execution_id = event.get("execution_id")
             if isinstance(execution_id, str):
-                client = _client(data.get("client"))
-                scripted = client == "scripted"
                 self._starts[execution_id] = ExecutionStart(
                     execution_id=execution_id,
                     role=_text(event.get("agent_kind")),
-                    harness=None if scripted else _text(data.get("provider")),
-                    model=None if scripted else _text(data.get("model")),
-                    client=client,
-                    reasoning_effort=None if scripted else _text(data.get("reasoning_effort")),
-                    harness_version=None if scripted else _text(data.get("harness_version")),
+                    harness=_text(data.get("provider")),
+                    model=_text(data.get("model")),
+                    client=_client(data.get("client")),
+                    reasoning_effort=_text(data.get("reasoning_effort")),
+                    harness_version=_text(data.get("harness_version")),
                     started_at=_time(event.get("timestamp")),
                 )
         elif kind == "turn_usage_recorded" and data.get("kind") == "turn_usage_recorded":

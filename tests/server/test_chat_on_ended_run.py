@@ -151,6 +151,7 @@ class _EndedRun:
         state = self.root / "state"
         return RunReady(
             record=run_record(self.project, self.run_id),
+            project_root=self.project.root,
             log_directory=self.journal,
             frontend_state_directory=state,
             agent_provider="codex",

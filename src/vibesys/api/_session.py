@@ -505,6 +505,7 @@ def run_ready(
     )
     return RunReady(
         record=store.get_record(resources.run_id),
+        project_root=resources.project.root,
         log_directory=resources.environment_request.log_dir,
         frontend_state_directory=resources.project.state.local_namespace(
             resources.run_id, "server"

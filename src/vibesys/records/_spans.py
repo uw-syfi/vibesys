@@ -145,21 +145,14 @@ def _metric_rows(projection: Projection, source: CoreSpan, span: p.Span) -> None
 
 
 def _merge_prior(kind: str, attrs: Message, merged: Message) -> Message:
-    """Fold a new label onto the recorded one, keeping a scripted turn free of a configured model."""
+    """Fold a new label onto the recorded one. A recorded stage or model stays."""
     authoritative = (set(_MODELS[kind].model_fields) if kind in _MODELS else set()).difference(
         {"model"} if kind == "agent_turn" else set()
     )
     for field in merged.desc().fields:
         if field.name in authoritative and not attrs.has_field(field.name):
             merged.clear_field(field.name)
-    scripted = (
-        kind == "agent_turn"
-        and isinstance(merged, p.AgentTurnAttrs)
-        and merged.client == p.AgentClient.SCRIPTED
-    )
     for field in attrs:
-        if scripted and field.name in {"model", "provider", "reasoning_effort"}:
-            continue
         if (
             kind == "agent_turn"
             and field.name in {"stage", "model"}
@@ -167,10 +160,6 @@ def _merge_prior(kind: str, attrs: Message, merged: Message) -> Message:
         ):
             continue
         merged[field] = attrs[field]
-    if scripted:
-        for name in ("model", "provider", "reasoning_effort"):
-            if merged.has_field(name):
-                merged.clear_field(name)
     return merged
 
 

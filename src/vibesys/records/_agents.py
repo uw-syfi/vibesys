@@ -54,18 +54,12 @@ def update_turn(projection: Projection, span: p.Span, attrs: p.AgentTurnAttrs) -
 
 
 def _record_client(attrs: p.AgentTurnAttrs, data: e.AgentExecutionStartedData) -> None:
-    """Copy the agent the turn recorded. A scripted turn keeps no configured model."""
+    """Copy the selection the turn recorded, and which client executed it."""
     if data.client == "scripted":
         attrs.client = p.AgentClient.SCRIPTED
-        for name in ("model", "provider", "reasoning_effort"):
-            if attrs.has_field(name):
-                attrs.clear_field(name)
-        names = ("stage", "attempt")
-    else:
-        names = ("stage", "attempt", "provider", "model", "reasoning_effort", "harness_version")
-        if data.client == "provider":
-            attrs.client = p.AgentClient.PROVIDER
-    for name in names:
+    elif data.client == "provider":
+        attrs.client = p.AgentClient.PROVIDER
+    for name in ("stage", "attempt", "provider", "model", "reasoning_effort", "harness_version"):
         value = getattr(data, name)
         if value is not None:
             setattr(attrs, name, value)

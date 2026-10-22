@@ -15,12 +15,8 @@ enum AgentClient {
 }
 
 // Attrs for agent_turn, including the final usage and transcript byte length.
+// `client` names the executor. The provider and model stay the role's selection.
 message AgentTurnAttrs {
-  option (buf.validate.message).cel = {
-    id: "agent_turn.scripted"
-    message: "a scripted turn records no provider or model"
-    expression: "this.client != 1 || (!has(this.model) && !has(this.provider))"
-  };
   string agent = 1 [(buf.validate.field).string = {
     min_len: 1
     max_bytes: 65536

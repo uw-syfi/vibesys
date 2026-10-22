@@ -104,7 +104,7 @@ def test_adoption_records_the_checkout_skip() -> None:
 
 
 @pytest.mark.regression
-def test_scripted_turn_records_no_configured_model() -> None:
+def test_scripted_turn_keeps_the_selected_provider_and_model() -> None:
     fold = UsageFold()
     fold.consume(
         {
@@ -114,7 +114,7 @@ def test_scripted_turn_records_no_configured_model() -> None:
             "data": {
                 "kind": "agent_execution_started",
                 "client": "scripted",
-                "provider": "codex",
+                "provider": "claude",
                 "model": "configured-model",
             },
         }
@@ -129,8 +129,8 @@ def test_scripted_turn_records_no_configured_model() -> None:
     )
     assert record is not None
     assert record.client == "scripted"
-    assert record.harness is None
-    assert record.model is None
+    assert record.harness == "claude"
+    assert record.model == "configured-model"
     result = map_event(
         MappingState("run-a"),
         _event(
@@ -138,6 +138,8 @@ def test_scripted_turn_records_no_configured_model() -> None:
             e.AgentExecutionStartedData(
                 stage="implementer",
                 client="scripted",
+                provider="claude",
+                model="configured-model",
                 activity=e.AgentExecutionActivityData(mode="thinking", summary="working"),
             ),
             execution_id="exec-1",
@@ -158,8 +160,8 @@ def test_scripted_turn_records_no_configured_model() -> None:
     assert label.attrs is not None
     attrs = p.AgentTurnAttrs.from_binary(label.attrs.value)
     assert attrs.client == p.AgentClient.SCRIPTED
-    assert not attrs.has_field("model")
-    assert not attrs.has_field("provider")
+    assert attrs.model == "configured-model"
+    assert attrs.provider == "claude"
     turn = {
         "span": {
             "id": "op:exec-1",
@@ -172,7 +174,11 @@ def test_scripted_turn_records_no_configured_model() -> None:
             "label": {
                 "kind": "agent_turn",
                 "attrs_json": json.dumps(
-                    {"agent": "implementer", "role": "implementer", "model": "configured-model"}
+                    {
+                        "agent": "implementer",
+                        "role": "implementer",
+                        "model": "configured-model",
+                    }
                 ),
             },
         }
@@ -188,6 +194,8 @@ def test_scripted_turn_records_no_configured_model() -> None:
             e.AgentExecutionStartedData(
                 stage="implementer",
                 client="scripted",
+                provider="claude",
+                model="configured-model",
                 activity=e.AgentExecutionActivityData(mode="thinking", summary="working"),
             ),
             execution_id="exec-1",
@@ -213,5 +221,5 @@ def test_scripted_turn_records_no_configured_model() -> None:
     assert kept_label.attrs is not None
     kept_attrs = p.AgentTurnAttrs.from_binary(kept_label.attrs.value)
     assert kept_attrs.client == p.AgentClient.SCRIPTED
-    assert not kept_attrs.has_field("model")
-    assert not kept_attrs.has_field("provider")
+    assert kept_attrs.model == "configured-model"
+    assert kept_attrs.provider == "claude"

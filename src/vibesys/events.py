@@ -262,14 +262,7 @@ class AgentExecutionStartedData(EventPayload):
     harness_version: str | None = None
     """The provider CLI's version when a driver reported it; ``None`` when unknown."""
     client: Literal["scripted", "provider"] | None = None
-    """The agent that ran the turn. A scripted turn names no provider or model."""
-
-    @model_validator(mode="after")
-    def _scripted_records_no_provider(self) -> AgentExecutionStartedData:
-        if self.client == "scripted" and (self.provider is not None or self.model is not None):
-            message = "agent client scripted records no provider or model"
-            raise ValueError(message)
-        return self
+    """Who executed the turn. The provider and model stay the role's selection."""
 
 
 class AgentExecutionFinishedData(EventPayload):

@@ -74,6 +74,7 @@ func (AgentClient) EnumDescriptor() ([]byte, []int) {
 }
 
 // Attrs for agent_turn, including the final usage and transcript byte length.
+// `client` names the executor. The provider and model stay the role's selection.
 type AgentTurnAttrs struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
 	Agent           string                 `protobuf:"bytes,1,opt,name=agent,proto3" json:"agent,omitempty"`
@@ -331,7 +332,7 @@ var File_vibesys_store_v1_agent_attrs_proto protoreflect.FileDescriptor
 
 const file_vibesys_store_v1_agent_attrs_proto_rawDesc = "" +
 	"\n" +
-	"\"vibesys/store/v1/agent_attrs.proto\x12\x10vibesys.store.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xe7\a\n" +
+	"\"vibesys/store/v1/agent_attrs.proto\x12\x10vibesys.store.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xdb\x06\n" +
 	"\x0eAgentTurnAttrs\x12!\n" +
 	"\x05agent\x18\x01 \x01(\tB\v\xbaH\br\x06\x10\x01(\x80\x80\x04R\x05agent\x12\x1f\n" +
 	"\x04role\x18\x02 \x01(\tB\v\xbaH\br\x06\x10\x01(\x80\x80\x04R\x04role\x12&\n" +
@@ -353,8 +354,7 @@ const file_vibesys_store_v1_agent_attrs_proto_rawDesc = "" +
 	"started_at\x18\r \x01(\v2\x1a.google.protobuf.TimestampR\tstartedAt\x125\n" +
 	"\bended_at\x18\x0e \x01(\v2\x1a.google.protobuf.TimestampR\aendedAt\x12F\n" +
 	"\x06client\x18\x0f \x01(\x0e2\x1d.vibesys.store.v1.AgentClientB\n" +
-	"\xbaH\a\x82\x01\x04\x10\x01 \x00H\aR\x06client\x88\x01\x01:\x89\x01\xbaH\x85\x01\x1a\x82\x01\n" +
-	"\x13agent_turn.scripted\x12,a scripted turn records no provider or model\x1a=this.client != 1 || (!has(this.model) && !has(this.provider))B\b\n" +
+	"\xbaH\a\x82\x01\x04\x10\x01 \x00H\aR\x06client\x88\x01\x01B\b\n" +
 	"\x06_modelB\n" +
 	"\n" +
 	"\b_attemptB\v\n" +

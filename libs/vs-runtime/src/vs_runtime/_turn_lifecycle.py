@@ -124,17 +124,16 @@ class LifecycleReportingExecutor:
         agent_id = session_spec.role
         label = turn.label or agent_id
         execution_id = turn.invocation_id or ""
-        scripted = session_spec.scripted
         started = AgentExecutionStarted(
             agent_id=agent_id,
             label=label,
             execution_id=execution_id,
             system_prompt=turn.instructions,
             user_prompt=turn.message,
-            provider=None if scripted else session_spec.provider,
-            model=None if scripted else session_spec.model,
-            reasoning_effort=None if scripted else session_spec.reasoning_effort,
-            client="scripted" if scripted else "provider",
+            provider=session_spec.provider,
+            model=session_spec.model,
+            reasoning_effort=session_spec.reasoning_effort,
+            client="scripted" if session_spec.scripted else "provider",
         )
 
         def publish_start() -> None:

@@ -520,7 +520,7 @@ def agent_session_spec(
                 require_enforcement=not environment.use_docker,
                 containerized=environment.use_docker,
             ),
-            model=None if spec.backend is AgentBackend.SCRIPTED else spec.model,
+            model=spec.model,
             scripted=spec.backend is AgentBackend.SCRIPTED,
             mcp_servers=(),
             skills=environment.skill_source_dirs,

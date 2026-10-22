@@ -269,7 +269,7 @@ class UsageRecord(BaseModel):
     """The provider CLI that ran the turn (for example ``codex``), from the execution's start."""
     model: str | None
     client: Literal["scripted", "provider"] | None = None
-    """``scripted`` when a scripted agent ran the turn. A provider turn names its harness and model."""
+    """``scripted`` when a scripted client ran the turn. The harness and model stay the selection."""
     reasoning_effort: str | None
     """The effort the session was configured with; ``None``: the provider's default or unknown."""
     harness_version: str | None

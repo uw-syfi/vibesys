@@ -545,7 +545,7 @@ class AgentSessionSpec:
     policy: AgentExecutionPolicy
     model: str | None = None
     scripted: bool = False
-    """True when a scripted agent runs the turn. The recorded fact is then scripted, not this model."""
+    """True when a scripted client runs the turn. The provider and model stay the selection."""
     mcp_servers: tuple[MCPServerSpec, ...] = ()
     skills: tuple[Path, ...] = ()
     environment: tuple[tuple[str, str], ...] = ()

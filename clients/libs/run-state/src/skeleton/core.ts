@@ -11,21 +11,17 @@ function count(value: bigint | undefined): number | null {
   return Number(value);
 }
 
-/** Who ran the turn. A scripted turn records no provider, model, or effort. */
+/** Who ran the turn: the selected harness and model, and which client executed it. */
 function recordedAgent(
   turn: AgentTurnAttrs,
 ): Pick<UsageRecord, 'client' | 'harness' | 'model' | 'reasoning_effort' | 'harness_version'> {
-  if (turn.client === AgentClient.SCRIPTED) {
-    return {
-      client: 'scripted',
-      harness: null,
-      model: null,
-      reasoning_effort: null,
-      harness_version: null,
-    };
-  }
   return {
-    client: turn.client === AgentClient.PROVIDER ? 'provider' : null,
+    client:
+      turn.client === AgentClient.SCRIPTED
+        ? 'scripted'
+        : turn.client === AgentClient.PROVIDER
+          ? 'provider'
+          : null,
     harness: turn.provider ?? null,
     model: turn.model ?? null,
     reasoning_effort: turn.reasoningEffort ?? null,

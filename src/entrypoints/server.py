@@ -53,9 +53,10 @@ from server.runtime import (
     WebSocketBindError,
     browser_origin,
 )
-from vibesys.api import ConfigurationError, RunStatus
+from vibesys.api import ConfigurationError, RunRequest, RunStatus
 from vs_project.api import (
     Project,
+    ProjectRootNotFoundError,
     ProjectStateError,
     create_operator_key,
     user_runtime_root,
@@ -1013,6 +1014,19 @@ def main(
         raise SystemExit(1) from None
 
 
+def _opened_project_root(request: RunRequest) -> Path | None:
+    """The opened project's root when its directory exists.
+
+    A fresh collection destination does not exist until the run provisions it.
+    The server publishes that root from the run-ready fact, which is
+    ``Project.root`` after ``Project.open``.
+    """
+    try:
+        return Project.open(request.project_root_for(request.resolved_run_id)).root
+    except ProjectRootNotFoundError:
+        return None
+
+
 def _serve(  # noqa: C901, PLR0912, PLR0915  # lint-waiver: LW-101031 [C901, PLR0912, PLR0915]; the entrypoint owns ordered setup, parsing, execution, and cleanup branches
     arguments: list[str],
     observer: ServerLifecycleObserver | None,
@@ -1099,13 +1113,17 @@ def _serve(  # noqa: C901, PLR0912, PLR0915  # lint-waiver: LW-101031 [C901, PLR
             if read_only_log is not None
             else cli.build_run_request(cli.parse_cli_invocation(_headless_argv(arguments)))
         )
-        if observer is not None and request is not None:
-            observer.resolved(
-                project_root=request.project_root,
-                task=request.input_bundle.task_name,
-            )
+        opened_root = None if request is None else _opened_project_root(request)
+        if observer is not None and request is not None and opened_root is not None:
+            observer.resolved(project_root=opened_root, task=request.input_bundle.task_name)
         run_id = None if request is None else request.resolved_run_id
-        project_root = None if request is None else request.resolved_project_root
+        project_root = (
+            None
+            if request is None
+            else opened_root
+            if opened_root is not None
+            else request.project_root_for(request.resolved_run_id)
+        )
         server_runtime = import_module("server.runtime").ServerRuntime
         open_reader = (
             None
@@ -1131,6 +1149,7 @@ def _serve(  # noqa: C901, PLR0912, PLR0915  # lint-waiver: LW-101031 [C901, PLR
                 instance_path=instance_path,
                 detach=detach,
                 read_only_log=read_only_log,
+                observer=observer,
                 open_reader=open_reader,
                 platform=platform,
             )

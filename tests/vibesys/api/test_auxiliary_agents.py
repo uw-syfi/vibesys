@@ -296,6 +296,7 @@ def test_ready_projection_exposes_no_runtime_resources(tmp_path: Path) -> None:
     assert observed == [
         RunReady(
             record=observed[0].record,
+            project_root=Project.open(tmp_path / "project").root,
             log_directory=tmp_path / "logs",
             frontend_state_directory=observed[0].frontend_state_directory,
             agent_provider="codex",
