@@ -243,6 +243,10 @@ jobs:
         run: echo "VIBESYS_JOB_STARTED_AT=$(date +%s)" >> "$GITHUB_ENV"
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The protobuf compatibility check needs the actual common ancestor.
+          fetch-depth: 0
+          filter: blob:none
 
       - name: Pass the pytest cancel deadline
         run: python3 scripts/pytest_job_deadline.py
@@ -258,11 +262,10 @@ jobs:
       - name: Check protobuf contracts
         if: needs.changes.outputs.proto == 'true'
         env:
-          # The checkout is shallow; the store compatibility check compares
-          # against the pull request's base (main outside a pull request).
+          # Compare against the pull request's merge base (main outside a PR).
           BASE_BRANCH: ${{ github.base_ref || 'main' }}
         run: |
-          git fetch --no-tags --depth=1 origin "+refs/heads/${BASE_BRANCH}:refs/remotes/origin/${BASE_BRANCH}"
+          git fetch --no-tags origin "+refs/heads/${BASE_BRANCH}:refs/remotes/origin/${BASE_BRANCH}"
           PROTO_BASE_REF="origin/${BASE_BRANCH}" ./support/repoctl/repoctl run-checks --group proto
 
   clients-tests:

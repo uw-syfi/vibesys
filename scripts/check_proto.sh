@@ -5,18 +5,8 @@ root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$root"
 uv run --locked python -m scripts.check_proto_layers
 uv run --locked --group proto buf lint
-base="${PROTO_BASE_REF:-origin/main}"
-# Only the first introduction has no store to compare. A missing ref is an error.
-git rev-parse --verify "$base^{commit}" > /dev/null
-if git cat-file -e "$base:buf.yaml" 2>/dev/null; then
-  uv run --locked --group proto buf breaking --path proto/vibesys/store/v1 --path proto/vibesys/search/v1 --path proto/vibesys/core/v1 \
-    --against ".git#ref=$base"
-elif git cat-file -e "$base:proto/vibesys/store/v1" 2>/dev/null; then
-  echo "Store exists at $base but buf.yaml is missing; restore its breaking-check configuration." >&2
-  exit 1
-else
-  echo "No store schema at $base; establishing the initial additive baseline."
-fi
+./scripts/tests/test_proto_breaking.sh
+./scripts/check_proto_breaking.sh
 ./scripts/generate_proto.sh
 generated=(proto/vibesys/host/v1/admission_receipt_generated.proto gateway/internal/hostoperations/registry_generated.go src/server/host_operation_types_generated.py libs/vs-runtime/tests/generated libs/vs-core/tests/generated libs/vs-proto/src/vs_proto/_generated clients/libs/proto/src/generated gateway/gen
   libs/vs-core/src/vs_core/_generated libs/vs-runtime/src/vs_runtime/_core_values
