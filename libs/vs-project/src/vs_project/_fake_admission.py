@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 
 
 class FakeAdmissionStore:
-    """Retained receipt bytes and exclusion, with no filesystem or real-time work."""
+    """In-memory receipts and exclusion, sharing the file owner's path normalization."""
 
     def __init__(self) -> None:
         """Create one host-user store; consumers share it across claims/reopens."""

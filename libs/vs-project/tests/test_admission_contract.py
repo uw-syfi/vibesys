@@ -104,6 +104,52 @@ def test_exact_bytes_targets_and_host_identity_cannot_be_reused(
         reopen().lookup(changed)
 
 
+@pytest.mark.parametrize("boundary", ["identity", "accepted", "evidence", "result", "observation"])
+def test_unknown_admission_metadata_is_rejected_before_publication(
+    reopen: Callable[[], AdmissionStore], boundary: str
+) -> None:
+    unknown = b"\x98\x06\x01"  # Unknown field 99, varint 1.
+    store = reopen()
+    if boundary in ("identity", "accepted"):
+        identity, accepted = _identity(), _request()
+        if boundary == "identity":
+            identity = admission.AdmissionIdentity.from_binary(identity.to_binary() + unknown)
+        else:
+            accepted = admission.AcceptedOperation.from_binary(accepted.to_binary() + unknown)
+        with (
+            pytest.raises(ValueError, match="unknown fields"),
+            store.claim(identity, ("/target",), accepted),
+        ):
+            pytest.fail("unknown metadata was admitted")
+        assert store.lookup(_identity()) is None
+        return
+    with store.claim(_identity(), ("/target",), _request()) as claim:
+        evidence = admission.PublicationEvidence(effect_id="effect-a")
+        if boundary == "evidence":
+            evidence = admission.PublicationEvidence.from_binary(evidence.to_binary() + unknown)
+            before = claim.observe()
+            with pytest.raises(ValueError, match="unknown fields"):
+                claim.record_intent(evidence)
+        else:
+            claim.record_intent(evidence)
+            before = claim.observe()
+            if boundary == "result":
+                result = admission.OperationResult.from_binary(_result().to_binary() + unknown)
+                with pytest.raises(ValueError, match="unknown fields"):
+                    claim.settle(admission.AdmissionStatus.CONFIRMED, result)
+            else:
+                observation = admission.PublicationObservation(
+                    observation=Oneof("absent", admission.PublicationAbsent(effect_id="effect-a"))
+                )
+                unrecognized = admission.PublicationObservation.from_binary(
+                    observation.to_binary() + unknown
+                )
+                with pytest.raises(ValueError, match="unknown fields"):
+                    claim.reconcile(unrecognized)
+        assert claim.observe() == before
+        assert store.lookup(_identity()) == before
+
+
 def test_intent_survives_disconnect_and_never_redispatches(
     reopen: Callable[[], AdmissionStore],
 ) -> None:

@@ -25,6 +25,9 @@ def checked_receipt(payload: bytes) -> admission.AdmissionReceipt:
         raise ValueError(message)
     receipt = admission.AdmissionReceipt.from_binary(payload)
     validate(receipt)
+    if receipt.to_binary() != receipt.to_binary(write_unknown_fields=False):
+        message = "admission receipt contains unknown fields"
+        raise ValueError(message)
     accepted = receipt.accepted
     if accepted is None or receipt.identity is None:
         message = "admission receipt is missing accepted input or identity"
@@ -79,8 +82,7 @@ def initial_receipt(
         input_digest=hashlib.sha256(encoded).digest(),
         status=_STATUS.PENDING,
     )
-    validate(receipt)
-    return receipt
+    return checked_receipt(receipt.to_binary())
 
 
 def compare(receipt: admission.AdmissionReceipt, requested: admission.AdmissionReceipt) -> None:
@@ -98,7 +100,7 @@ def record_intent(
     receipt: admission.AdmissionReceipt, evidence: admission.PublicationEvidence
 ) -> admission.AdmissionReceipt:
     """An existing intent is uncertainty, including after caller death or lost ack."""
-    validate(evidence)
+    validated_operation_bytes(evidence)
     if evidence.fence not in (0, receipt.fence):
         message = "publication evidence has a stale admission fence"
         raise AdmissionConflictError(message)
@@ -118,7 +120,7 @@ def settle(
     result: admission.OperationResult,
 ) -> admission.AdmissionReceipt:
     """Terminal results never change; confirmed/unconfirmed require prior intent."""
-    validate(result)
+    validated_operation_bytes(result)
     if status not in (_STATUS.CONFIRMED, _STATUS.REFUSED, _STATUS.UNCONFIRMED):
         message = "admission settlement requires a terminal status"
         raise ValueError(message)
@@ -175,7 +177,7 @@ def reconcile(
     receipt: admission.AdmissionReceipt, observation: admission.PublicationObservation
 ) -> admission.AdmissionReceipt:
     """Only proven absence invalidates the old fence and permits continuation."""
-    validate(observation)
+    validated_operation_bytes(observation)
     observed = observation.observation
     if (
         receipt.intent is None
