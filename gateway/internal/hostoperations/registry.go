@@ -121,7 +121,9 @@ func Execute(ctx context.Context, id uint32, payload []byte, invoke func(context
 	bounded, cancel := context.WithTimeout(ctx, op.Cap)
 	defer cancel()
 	original := proto.Clone(request)
-	response, err := invoke(bounded, op, request)
+	executorOperation := op
+	executorOperation.Correlations = clonePaths(op.Correlations)
+	response, err := invoke(bounded, executorOperation, request)
 	if err != nil {
 		return nil, err
 	}

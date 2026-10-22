@@ -78,6 +78,17 @@ func TestLookupCannotMutateTheRegistry(t *testing.T) {
 	}
 }
 
+func TestExecutorCannotChangeResponseCorrelationPolicy(t *testing.T) {
+	request, _ := proto.Marshal(&hostv1.ListTasksRequest{RequestId: "request-a", Project: "/project"})
+	_, err := hostoperations.Execute(context.Background(), 10, request, func(_ context.Context, op hostoperations.Operation, _ proto.Message) (proto.Message, error) {
+		op.Correlations[0] = [2][]string{}
+		return &hostv1.ListTasksResponse{RequestId: "other", Tasks: &hostv1.TaskList{Version: 1}}, nil
+	})
+	if err == nil {
+		t.Fatal("executor changed the response correlation policy")
+	}
+}
+
 func TestValidationNeverTreatsScalarMapsAsMessages(t *testing.T) {
 	op, err := hostoperations.Lookup(14)
 	if err != nil {
