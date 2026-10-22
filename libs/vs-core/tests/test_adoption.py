@@ -985,3 +985,26 @@ def test_publication_adopts_without_root_verification_in_every_checkout_state(
     run.state = reload(run.state)
     run.feed(run.delivered[-1])
     assert run.results() == [result]
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize("phase", ["adopting", "legacy-verifying"])
+def test_a_publication_for_another_source_cannot_adopt_the_selection(phase: str) -> None:
+    run = start()
+    selection = GOOD[0]
+    (request,) = new_requests(run.propose(selection))
+    if phase == "legacy-verifying":
+        (request,) = new_requests(run.answer(request, core.ObservationStatus.SUCCEEDED))
+    publication = core.AdoptionPublication(
+        revision="foreign-source",
+        commit="a" * 40,
+        branch="vibesys-adoptions/run",
+    )
+    run.answer(
+        request,
+        core.ObservationStatus.SUCCEEDED,
+        revision=selection.revision,
+        published=(publication, core.CheckoutUpdate(status=core.CheckoutStatus.DIRTY_TREE)),
+    )
+    assert run.results() == []
+    assert run.failures()[-1].reason is core.AdoptionFailureReason.CONTENT_MISMATCH

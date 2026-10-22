@@ -131,11 +131,11 @@ class AdoptionFailureReason(StrEnum):
     """Why an adoption ended without a verified result."""
 
     ADOPT_FAILED = "adopt-failed"
-    """The restore request was rejected, cancelled or failed for good."""
+    """The publication request was rejected, cancelled or failed for good."""
     VERIFY_FAILED = "verify-failed"
-    """The verification request failed for good, so the root was not proven."""
+    """A legacy publication inspection failed for good."""
     CONTENT_MISMATCH = "content-mismatch"
-    """A verification succeeded but named another revision, or none."""
+    """A successful publication observation named another source revision, or none."""
     RETRIES_EXHAUSTED = "retries-exhausted"
     """Every allowed round ended unproven (``Limits.max_adoption_rounds`` rounds)."""
 

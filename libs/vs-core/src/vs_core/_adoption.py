@@ -402,17 +402,7 @@ def _adopt_observed(
 ) -> AreaChange[SettlementState]:
     observation = event.observation
     if observation.status == ObservationStatus.SUCCEEDED and event.publication is not None:
-        if (
-            event.revision == adoption.selection.revision
-            and event.publication.revision == adoption.selection.revision.revision_id.root
-        ):
-            return _published(state, context, adoption, event)
-        return _fail(
-            state,
-            context,
-            adoption.model_copy(update={"observation": observation}),
-            AdoptionFailureReason.CONTENT_MISMATCH,
-        )
+        return _published(state, context, adoption, event)
     recorded = adoption.model_copy(update={"observation": observation})
     if observation.status == ObservationStatus.PENDING or observation.retryable:
         return _with_adoption(state, recorded)
@@ -435,12 +425,9 @@ def _verify_observed(
     selection = adoption.selection
     if observation.status == ObservationStatus.PENDING or observation.retryable:
         return _with_adoption(state, adoption.model_copy(update={"observation": observation}))
-    if observation.status == ObservationStatus.SUCCEEDED and event.revision == selection.revision:
+    if observation.status == ObservationStatus.SUCCEEDED:
         return _published(state, context, adoption, event)
     recorded = adoption.model_copy(update={"observation": observation})
-    if observation.status == ObservationStatus.SUCCEEDED:
-        # Applied content differs from the selection: definite, so no retry.
-        return _fail(state, context, recorded, AdoptionFailureReason.CONTENT_MISMATCH)
     if not _awaits_inspection(observation):
         return _fail(state, context, recorded, AdoptionFailureReason.VERIFY_FAILED)
     if _may_start_round(context, selection):
@@ -458,6 +445,16 @@ def _published(
 ) -> AreaChange[SettlementState]:
     """Publication is the adoption proof; the optional checkout cannot invalidate it."""
     selection = adoption.selection
+    if event.revision != selection.revision or (
+        event.publication is not None
+        and event.publication.revision != selection.revision.revision_id.root
+    ):
+        return _fail(
+            state,
+            context,
+            adoption.model_copy(update={"observation": event.observation}),
+            AdoptionFailureReason.CONTENT_MISMATCH,
+        )
     done = Adoption(
         selection=selection,
         observation=event.observation,
