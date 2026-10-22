@@ -38,7 +38,7 @@ export function useGatewayRun(options: {
     };
   }, [ports, schedule, host, runId]);
   const {route, zoom} = useZoom(`${seed.identity.host}/${seed.identity.runId}`, address);
-  const {load, ui, text} = snapshot.context;
+  const {load, ui, text, hint} = snapshot.context;
   const skeleton = load?.complete ? load.skeleton : undefined;
   const at = ui.view.at === 'live' ? (skeleton?.throughSeq ?? 0n) : BigInt(ui.view.at);
   const epoch = skeleton?.epochs.filter(item => item.seq <= at).at(-1)?.epoch;
@@ -63,8 +63,10 @@ export function useGatewayRun(options: {
   const {value: model} = modelRead;
   const stateRead = useMemo(
     () =>
-      project(() => (skeleton && whole ? skeletonScreenState(seed, skeleton, whole, ui) : null)),
-    [skeleton, whole, seed, ui],
+      project(() =>
+        skeleton && whole ? skeletonScreenState(seed, skeleton, whole, ui, hint) : null,
+      ),
+    [skeleton, whole, seed, ui, hint],
   );
   const {value: state} = stateRead;
   const projectionError = wholeRead.error ?? modelRead.error ?? stateRead.error;

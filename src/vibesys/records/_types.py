@@ -29,7 +29,7 @@ class MappingState:
     streams: tuple[tuple[str, int], ...] = ()
     waits: tuple[tuple[str, str], ...] = ()
     intents: tuple[tuple[str, bytes], ...] = ()
-    metric_values: tuple[tuple[tuple[str, str | None], float], ...] = ()
+    metric_values: tuple[tuple[tuple[str, str | None], tuple[float, float]], ...] = ()
     ending: bytes | None = None
     pending: tuple[bytes, ...] = ()
 

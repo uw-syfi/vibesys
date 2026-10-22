@@ -27,6 +27,7 @@ export function GatewayRun(props: {
   const {bridge, settings, seed, schedule, address} = props;
   const ports = useMemo<GatewayRunPorts>(
     () => ({
+      watchSetting: listener => settings.onHostSettingsChanged(listener),
       reader: gatewayReader(
         gatewayTransport(bridge, seed.identity.host),
         gatewayContentCache(indexedDB),
@@ -82,7 +83,7 @@ export function GatewayRun(props: {
       {...(busy ? {disabledReason: 'Connecting'} : {})}
     />
   );
-  if (snapshot.matches('off')) return <>{props.legacy(<Card>{toggle}</Card>)}</>;
+  if (snapshot.matches('off')) return <>{props.legacy(toggle)}</>;
   if (
     page.state === null ||
     page.model === null ||

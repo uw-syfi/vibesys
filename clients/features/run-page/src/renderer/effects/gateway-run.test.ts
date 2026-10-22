@@ -1,7 +1,12 @@
 import {expect, test} from 'bun:test';
 import {create, fromBinary} from '@bufbuild/protobuf';
 import {checkMachine} from '@vibesys/machine/testing';
-import {RecordSchema, TailRequestSchema} from '@vibesys/proto';
+import {
+  RecordSchema,
+  RunLiveness,
+  TailRequestSchema,
+  WatchRunsResponseSchema,
+} from '@vibesys/proto';
 import {storeRunFixture} from '@vibesys/run-fixtures';
 import {foldSkeleton, seedSkeleton} from '@vibesys/run-skeleton';
 import {FakeSkeletonCache} from '@vibesys/run-skeleton/cache';
@@ -9,7 +14,14 @@ import {gatewayReader} from '@vibesys/run-skeleton/reader';
 import {FakeRunTransport} from '@vibesys/run-skeleton/testing';
 import {FakeClock} from '@vibesys/transport/testing';
 import type {SnapshotFrom} from 'xstate';
-import {gatewayRunMachine} from '../../state/index.js';
+import {
+  gatewayRunMachine,
+  headerView,
+  projectSkeleton,
+  runHasEnded,
+  scrubberView,
+  skeletonScreenState,
+} from '../../state/index.js';
 import {startGatewayRun} from '../index.js';
 
 const SEED = {
@@ -42,6 +54,7 @@ test('model: every setting, content and log operation belongs to its active stat
     input: {seed: SEED},
     event: (random, live) =>
       random.pick([
+        {type: 'setting-changed'},
         {type: 'toggle', enabled: random.pick([true, false])},
         {
           type: 'loaded',
@@ -75,6 +88,7 @@ test('Skeleton then Tail, local seek, verified cached content, logs and cancella
   let enabled = true;
   const ports = {
     reader: gatewayReader(transport, cache, clock.schedule),
+    watchSetting: () => () => {},
     setting: async (value: boolean | undefined) => {
       enabled = value ?? enabled;
       return enabled;
@@ -101,7 +115,7 @@ test('Skeleton then Tail, local seek, verified cached content, logs and cancella
   expect(transport.calls).toHaveLength(calls);
   actor.send({type: 'ui', action: {type: 'select-stream', streamId: 'build-log'}});
   await reached(actor, snapshot => snapshot.context.ui.views['build-log']?.lines.length === 1);
-  expect(transport.activeStreams).toBe(2);
+  expect(transport.activeStreams).toBe(3);
   actor.send({type: 'toggle', enabled: false});
   await reached(actor, snapshot => snapshot.matches('off'));
   await Promise.resolve();
@@ -127,6 +141,7 @@ test('off is inert, live records append while scrubbed and switching streams can
   const actor = startGatewayRun(
     {
       reader: gatewayReader(transport, new FakeSkeletonCache(), clock.schedule),
+      watchSetting: () => () => {},
       setting: async value => value ?? false,
     },
     clock.schedule,
@@ -162,6 +177,7 @@ test('failed unary and corrupt content surface errors without using the legacy p
     const actor = startGatewayRun(
       {
         reader: gatewayReader(transport, new FakeSkeletonCache(), clock.schedule),
+        watchSetting: () => () => {},
         setting: async () => true,
       },
       new FakeClock().schedule,
@@ -186,6 +202,7 @@ test('setting, content and first-log deadlines use the injected clock', async ()
   const checking = startGatewayRun(
     {
       reader,
+      watchSetting: () => () => {},
       setting: () =>
         new Promise(resolve => {
           finishSetting = resolve;
@@ -202,7 +219,11 @@ test('setting, content and first-log deadlines use the injected clock', async ()
   checking.stop();
   transport.held.add(`${SERVICE}GetBlobs`);
   transport.held.add(`${SERVICE}TailStream`);
-  const actor = startGatewayRun({reader, setting: async () => true}, clock.schedule, {seed: SEED});
+  const actor = startGatewayRun(
+    {reader, watchSetting: () => () => {}, setting: async () => true},
+    clock.schedule,
+    {seed: SEED},
+  );
   await reached(actor, snapshot => snapshot.matches({active: {content: 'reading'}}));
   actor.send({type: 'ui', action: {type: 'select-stream', streamId: 'build-log'}});
   await transport.called(`${SERVICE}GetBlobs`);
@@ -224,6 +245,7 @@ test('each objective hash is attempted once even when content fails', async () =
   const actor = startGatewayRun(
     {
       reader: gatewayReader(transport, new FakeSkeletonCache(), clock.schedule),
+      watchSetting: () => () => {},
       setting: async () => true,
     },
     clock.schedule,
@@ -238,4 +260,284 @@ test('each objective hash is attempted once even when content fails', async () =
   expect(transport.calls.filter(call => call.method.endsWith('GetBlobs'))).toHaveLength(2);
   expect(actor.getSnapshot().context.error).toBe('Content unavailable');
   actor.stop();
+});
+
+/** The shared host store: subscriptions observe committed writes in all windows. */
+class HostSetting {
+  enabled = true;
+  readonly listeners = new Set<() => void>();
+  readonly watch = (listener: () => void): (() => void) => {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  };
+  readonly setting = async (value: boolean | undefined): Promise<boolean> => {
+    if (value !== undefined) {
+      this.enabled = value;
+      for (const listener of [...this.listeners]) listener();
+    }
+    return this.enabled;
+  };
+}
+
+test('all windows follow the shared host switch and cancel their readers together', async () => {
+  const settings = new HostSetting();
+  const clock = new FakeClock();
+  const transports = [
+    new FakeRunTransport(storeRunFixture()),
+    new FakeRunTransport(storeRunFixture()),
+  ];
+  const windows = transports.map(transport =>
+    startGatewayRun(
+      {
+        reader: gatewayReader(transport, new FakeSkeletonCache(), clock.schedule),
+        setting: settings.setting,
+        watchSetting: settings.watch,
+      },
+      clock.schedule,
+      {seed: SEED},
+    ),
+  );
+  try {
+    for (const window of windows)
+      await reached(window, snapshot => snapshot.context.load?.complete === true);
+    for (let step = 0; step < 8; step += 1) {
+      const enabled = step % 2 === 1;
+      windows[step % windows.length]?.send({type: 'toggle', enabled});
+      for (const window of windows) {
+        await reached(window, snapshot =>
+          enabled
+            ? snapshot.context.load?.complete === true && snapshot.matches('active')
+            : snapshot.matches('off'),
+        );
+        expect(window.getSnapshot().context.enabled).toBe(enabled);
+      }
+      if (!enabled)
+        expect(
+          transports.every(transport =>
+            transport.calls
+              .filter(call => call.method.endsWith('/Tail'))
+              .every(call => call.signal.aborted),
+          ),
+        ).toBe(true);
+    }
+  } finally {
+    for (const window of windows) window.stop();
+  }
+  expect(settings.listeners.size).toBe(0);
+  expect(
+    transports.every(transport =>
+      transport.calls
+        .filter(call => call.method.endsWith('/Tail'))
+        .every(call => call.signal.aborted),
+    ),
+  ).toBe(true);
+});
+
+test('a changed host setting fences a stale initial read', async () => {
+  const settings = new HostSetting();
+  const clock = new FakeClock();
+  let finishRead: (enabled: boolean) => void = () => {
+    throw new Error('read not started');
+  };
+  let first = true;
+  const transport = new FakeRunTransport(storeRunFixture());
+  const actor = startGatewayRun(
+    {
+      reader: gatewayReader(transport, new FakeSkeletonCache(), clock.schedule),
+      watchSetting: settings.watch,
+      setting: value => {
+        if (!first) return settings.setting(value);
+        first = false;
+        return new Promise(resolve => {
+          finishRead = resolve;
+        });
+      },
+    },
+    clock.schedule,
+    {seed: SEED},
+  );
+  try {
+    await settings.setting(false);
+    await reached(actor, snapshot => snapshot.matches('off'));
+    finishRead(true);
+    await Promise.resolve();
+    expect(actor.getSnapshot().context.enabled).toBe(false);
+    expect(actor.getSnapshot().matches('off')).toBe(true);
+    expect(transport.calls).toHaveLength(0);
+  } finally {
+    actor.stop();
+  }
+});
+
+test.each([
+  'running',
+  'paused',
+] as const)('lock loss interrupts a %s run without changing history', async phase => {
+  const fixture = storeRunFixture('live');
+  const seq = (fixture.records.at(-1)?.seq ?? 0n) + 1n;
+  const transport = new FakeRunTransport({
+    ...fixture,
+    records: [
+      ...fixture.records,
+      create(RecordSchema, {
+        seq,
+        epoch: 1,
+        body: {
+          case: 'lifecycle',
+          value: {
+            state: {
+              case: 'running',
+              value: phase === 'paused' ? {hold: {reason: {case: 'operator', value: {}}}} : {},
+            },
+          },
+        },
+      }),
+    ],
+  });
+  const clock = new FakeClock();
+  const settings = new HostSetting();
+  const actor = startGatewayRun(
+    {
+      reader: gatewayReader(transport, new FakeSkeletonCache(), clock.schedule),
+      setting: settings.setting,
+      watchSetting: settings.watch,
+    },
+    clock.schedule,
+    {seed: SEED},
+  );
+  await reached(actor, snapshot => snapshot.context.load?.complete === true);
+  await transport.called(`${SERVICE}WatchRuns`);
+  transport.observe(
+    create(WatchRunsResponseSchema, {
+      runId: 'other',
+      liveness: RunLiveness.INTERRUPTED,
+      head: {process: {epoch: 1}},
+    }),
+  );
+  transport.observe(
+    create(WatchRunsResponseSchema, {
+      runId: 'run-a',
+      liveness: RunLiveness.ALIVE,
+      head: {process: {epoch: 1}},
+    }),
+  );
+  await reached(actor, snapshot => snapshot.context.hint?.value === RunLiveness.ALIVE);
+  transport.observe(
+    create(WatchRunsResponseSchema, {
+      runId: 'run-a',
+      liveness: RunLiveness.INTERRUPTED,
+      head: {process: {epoch: 1}},
+    }),
+  );
+  await reached(actor, snapshot => snapshot.context.hint?.value === RunLiveness.INTERRUPTED);
+  const {load, hint, ui} = actor.getSnapshot().context;
+  if (!load) throw new Error('loaded run required');
+  const whole = projectSkeleton(load.skeleton, seq);
+  const screen = skeletonScreenState(SEED, load.skeleton, whole, ui, hint);
+  expect(headerView(screen).status.label).toBe('Interrupted');
+  expect(runHasEnded(screen)).toBe(true);
+  expect(scrubberView(screen.run.trace, screen.view, runHasEnded(screen))?.latestLabel).toBe('End');
+  expect(load.skeleton.lifecycles.at(-1)?.lifecycle?.state.case).toBe('running');
+  expect(headerView(skeletonScreenState(SEED, load.skeleton, whole, ui)).status.label).toBe(
+    phase === 'paused' ? 'Paused by you' : 'Running',
+  );
+  expect(actor.getSnapshot().context.error).toBeNull();
+  actor.stop();
+  await Promise.resolve();
+  expect(
+    transport.calls
+      .filter(call => call.method.endsWith('WatchRuns'))
+      .every(call => call.signal.aborted),
+  ).toBe(true);
+});
+
+test.each([
+  'short',
+  'live',
+] as const)('Tail loss on %s distinguishes final history from a live connection', async kind => {
+  for (const failure of ['closed', 'error'] as const) {
+    const fixture = storeRunFixture(kind);
+    const transport = new FakeRunTransport(fixture);
+    const clock = new FakeClock();
+    const settings = new HostSetting();
+    const actor = startGatewayRun(
+      {
+        reader: gatewayReader(transport, new FakeSkeletonCache(), clock.schedule),
+        setting: settings.setting,
+        watchSetting: settings.watch,
+      },
+      clock.schedule,
+      {seed: SEED},
+    );
+    await reached(actor, snapshot => snapshot.context.load?.complete === true);
+    await reached(
+      actor,
+      snapshot =>
+        snapshot.matches({active: {content: 'idle'}}) &&
+        Object.keys(snapshot.context.text).length > 0,
+    );
+    expect(clock.pending).toBe(0);
+    const through = actor.getSnapshot().context.load?.skeleton.throughSeq;
+    if (failure === 'closed') transport.close(`${SERVICE}Tail`);
+    else transport.fail(`${SERVICE}Tail`, new Error('connection lost'));
+    // The retry timer is armed only after the stream's outcome has been consumed.
+    await reached(actor, () => clock.pending > 0);
+    expect(actor.getSnapshot().context.error).toBe(kind === 'short' ? null : 'Disconnected');
+    expect(actor.getSnapshot().context.load?.skeleton.throughSeq).toBe(through);
+    if (kind === 'live') {
+      transport.recover(`${SERVICE}Tail`);
+      clock.advanceBy(1000);
+      await reached(actor, snapshot => snapshot.context.error === null);
+    }
+    actor.stop();
+    expect(clock.pending).toBe(0);
+  }
+});
+
+test.each([
+  'deadline',
+  'closed',
+  'error',
+] as const)('liveness %s recovers independently and cancels with the reader', async failure => {
+  const fixture = storeRunFixture('live');
+  const clock = new FakeClock();
+  const transport = new FakeRunTransport(fixture);
+  if (failure === 'deadline') transport.held.add(`${SERVICE}WatchRuns`);
+  const settings = new HostSetting();
+  const actor = startGatewayRun(
+    {
+      reader: gatewayReader(transport, new FakeSkeletonCache(), clock.schedule),
+      setting: settings.setting,
+      watchSetting: settings.watch,
+    },
+    clock.schedule,
+    {seed: SEED},
+  );
+  await reached(
+    actor,
+    snapshot =>
+      snapshot.context.load?.complete === true && Object.keys(snapshot.context.text).length > 0,
+  );
+  await transport.called(`${SERVICE}WatchRuns`);
+  if (failure === 'deadline') clock.advanceBy(30000);
+  else if (failure === 'closed') transport.close(`${SERVICE}WatchRuns`);
+  else transport.fail(`${SERVICE}WatchRuns`, new Error('offline'));
+  await reached(actor, snapshot => snapshot.context.error === 'Disconnected');
+  transport.release(`${SERVICE}WatchRuns`);
+  transport.recover(`${SERVICE}WatchRuns`);
+  clock.advanceBy(1000);
+  await reached(actor, snapshot => snapshot.context.error === null);
+  transport.observe(
+    create(WatchRunsResponseSchema, {
+      runId: 'run-a',
+      liveness: RunLiveness.INTERRUPTED,
+      head: {process: {epoch: 1}},
+    }),
+  );
+  await reached(actor, snapshot => snapshot.context.hint?.value === RunLiveness.INTERRUPTED);
+  transport.observe(create(WatchRunsResponseSchema, {runId: 'run-a', removed: true}));
+  await reached(actor, snapshot => snapshot.context.hint === undefined);
+  actor.stop();
+  expect(clock.pending).toBe(0);
+  expect(transport.calls.filter(call => call.method.endsWith('WatchRuns'))).toHaveLength(2);
 });

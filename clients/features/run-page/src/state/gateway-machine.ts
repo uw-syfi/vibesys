@@ -1,7 +1,7 @@
 /** Gateway screen control owns the setting, loader, content request and selected log follower. */
 import {emptyLogView, foldChunk, type LogView} from '@vibesys/logs';
 import {unprovided} from '@vibesys/machine';
-import type {SkeletonLoad} from '@vibesys/run-skeleton';
+import type {RunLivenessHint, SkeletonLoad} from '@vibesys/run-skeleton';
 import {assign, fromCallback, setup} from 'xstate';
 import {
   type RunPageAction,
@@ -20,14 +20,16 @@ export interface GatewayLogInput {
   readonly receive: (event: GatewayEvent) => void;
 }
 export type GatewayEvent =
+  | {type: 'setting-changed'}
   | {type: 'toggle'; enabled: boolean}
   | {type: 'ui'; action: RunPageAction}
   | {type: 'log'; streamId: string; text: string; offset: number; next: number}
   | {type: 'log-failed'}
-  | {type: 'loaded'; load: SkeletonLoad | undefined; failed: boolean};
+  | {type: 'loaded'; load: SkeletonLoad | undefined; failed: boolean; hint?: RunLivenessHint};
 export interface GatewayRunContext extends GatewayInput {
   enabled: boolean;
   load: SkeletonLoad | undefined;
+  hint: RunLivenessHint | undefined;
   ui: RunPageState;
   text: Readonly<Record<string, string>>;
   contentHash: string;
@@ -89,6 +91,9 @@ function receivedLog(
 export const gatewayRunMachine = setup({
   types: {context: {} as GatewayRunContext, input: {} as GatewayInput, events: {} as GatewayEvent},
   actors: {
+    watchSetting: fromCallback<GatewayEvent>(() => {
+      throw new Error('setting watch not provided');
+    }),
     setting: unprovided<boolean, boolean | undefined>('transport setting'),
     loader: fromCallback<GatewayEvent, {runId: string}>(() => {
       throw new Error('loader not provided');
@@ -108,6 +113,7 @@ export const gatewayRunMachine = setup({
     ...input,
     enabled: false,
     load: undefined,
+    hint: undefined,
     ui: runPageInitial(input.seed),
     text: {},
     contentHash: '',
@@ -115,7 +121,9 @@ export const gatewayRunMachine = setup({
     error: null,
   }),
   initial: 'checking',
+  invoke: {id: 'watch-setting', src: 'watchSetting'},
   on: {
+    'setting-changed': {target: '.checking', reenter: true},
     toggle: {
       target: '.saving',
       reenter: true,
@@ -154,6 +162,7 @@ export const gatewayRunMachine = setup({
     active: {
       entry: assign({
         load: undefined,
+        hint: undefined,
         contentHash: '',
         attemptedContent: new Set(),
         ui: ({context}) => ({...context.ui, selected: null, views: {}}),
@@ -169,7 +178,13 @@ export const gatewayRunMachine = setup({
         loaded: {
           actions: assign({
             load: ({event}) => event.load,
-            error: ({context, event}) => (event.failed ? 'Disconnected' : context.error),
+            hint: ({event}) => event.hint,
+            error: ({context, event}) =>
+              event.failed
+                ? 'Disconnected'
+                : context.error === 'Disconnected'
+                  ? null
+                  : context.error,
           }),
         },
         ui: {actions: assign({ui: ({context, event}) => uiStep(context.ui, event.action)})},

@@ -292,13 +292,7 @@ function RunRoute(props: {
   );
   const gateway = typeof window === 'undefined' ? undefined : window.vibesysGateway;
   const legacy = (toggle?: import('react').ReactNode) => (
-    <LegacyRunRoute
-      seed={seed}
-      record={record}
-      stores={stores}
-      place={place}
-      supplemental={toggle}
-    />
+    <LegacyRunRoute seed={seed} record={record} stores={stores} place={place} toolbar={toggle} />
   );
   return gateway === undefined ? (
     legacy()
@@ -320,7 +314,7 @@ function LegacyRunRoute(props: {
   readonly record: import('@vibesys/feature-run-page/state').RunRecord;
   readonly stores: ShellStores;
   readonly place: RunPlace;
-  readonly supplemental?: import('react').ReactNode;
+  readonly toolbar?: import('react').ReactNode;
 }): JSX.Element {
   const {seed, record, stores, place} = props;
   const run = seed.identity;
@@ -335,14 +329,13 @@ function LegacyRunRoute(props: {
   if (page === null)
     return (
       <Page>
+        {props.toolbar ? <Card>{props.toolbar}</Card> : null}
         <Card>
           <EmptyState title="Opening the run" />
         </Card>
       </Page>
     );
-  return (
-    <RunWithChat page={page} run={run} bridge={stores.bridge} supplemental={props.supplemental} />
-  );
+  return <RunWithChat page={page} run={run} bridge={stores.bridge} toolbar={props.toolbar} />;
 }
 
 /** The unfinished New run the dashboard offers, or null when there is not one. */

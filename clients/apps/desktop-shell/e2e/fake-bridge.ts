@@ -29,6 +29,7 @@ export type CoreMethods =
   | 'setAppearance'
   | 'setNotifications'
   | 'runTransportV2'
+  | 'onHostSettingsChanged'
   | 'archive'
   | 'runDigests'
   | 'projectRuns'
@@ -179,7 +180,7 @@ export interface FakeNewRun {
 
 export function installFakeBridge(seed: FakeBridgeSeed): void {
   type Listener = (event: {sequence: number; value: unknown}) => void;
-  const listeners: Record<string, Listener[]> = {};
+  const listeners: Record<string, Set<Listener>> = {};
   let sequence = 0;
   let preferences = {
     appearance: seed.appearance,
@@ -198,7 +199,12 @@ export function installFakeBridge(seed: FakeBridgeSeed): void {
   const settingsListeners: (() => void)[] = [];
   const ok = (value: unknown) => Promise.resolve({ok: true, value});
   const on = (event: string) => (listener: Listener) => {
-    listeners[event] = [...(listeners[event] ?? []), listener];
+    const registered = listeners[event] ?? new Set<Listener>();
+    listeners[event] = registered;
+    registered.add(listener);
+    return () => {
+      registered.delete(listener);
+    };
   };
   const store = (next: typeof preferences) => {
     preferences = next;
@@ -222,8 +228,12 @@ export function installFakeBridge(seed: FakeBridgeSeed): void {
       setAppearance: (appearance: typeof preferences.appearance) =>
         store({...preferences, appearance}),
       setNotifications: (enabled: boolean) => store({...preferences, notifications: {enabled}}),
+      onHostSettingsChanged: on('hostSettings'),
       runTransportV2: (host: string, enabled?: boolean) => {
-        if (enabled !== undefined) transportSettings.set(host, enabled);
+        if (enabled !== undefined) {
+          transportSettings.set(host, enabled);
+          push('hostSettings', null);
+        }
         return ok(transportSettings.get(host) ?? false);
       },
       archive: (run: {host: string; runId: string}, archived: boolean) => {
@@ -264,14 +274,8 @@ export function installFakeBridge(seed: FakeBridgeSeed): void {
   const paint = new MutationObserver(() => {
     if (document.documentElement === null) return;
     document.documentElement.setAttribute('data-theme', seed.theme);
-    document.documentElement.style.setProperty(
-      '--chrome-inset-width',
-      `${seed.chromeInset.width}px`,
-    );
-    document.documentElement.style.setProperty(
-      '--chrome-inset-height',
-      `${seed.chromeInset.height}px`,
-    );
+    for (const [axis, value] of Object.entries(seed.chromeInset))
+      document.documentElement.style.setProperty(`--chrome-inset-${axis}`, `${value}px`);
     paint.disconnect();
   });
   paint.observe(document, {childList: true});
