@@ -7,6 +7,11 @@ adapter supplies host facts through ReadSource; no server module enters here.
 from typing import Any, cast
 
 from vibesys.api.host_operations._candidate import inspect_candidate
+from vibesys.api.host_operations._compute import (
+    ClusterRefusedError,
+    ClusterUnknownError,
+    serve_cluster,
+)
 from vibesys.api.host_operations._handlers import handlers
 from vibesys.api.host_operations._login import LoginRefusedFact, LoginStartedFact, serve_login
 from vibesys.api.host_operations._reads import ReadSource
@@ -24,6 +29,8 @@ from vs_proto.api import (
 )
 
 __all__ = [
+    "ClusterRefusedError",
+    "ClusterUnknownError",
     "LoginRefusedFact",
     "LoginStartedFact",
     "ReadSource",
@@ -33,6 +40,7 @@ __all__ = [
     "execute_inspect_candidate",
     "execute_read",
     "host_read_failure",
+    "serve_cluster",
     "serve_login",
     "serve_start",
 ]

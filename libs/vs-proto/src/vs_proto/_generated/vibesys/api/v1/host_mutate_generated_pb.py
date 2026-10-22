@@ -18,10 +18,10 @@ if TYPE_CHECKING:
     from protobuf import DescFile, Oneof
 
     from ...host.v1.failure_pb import OperationFailure
-    from ...host.v1.operations_pb import StartRunRequest, StartRunResponse
+    from ...host.v1.operations_pb import PutClusterRequest, PutClusterResponse, RemoveClusterRequest, RemoveClusterResponse, StartRunRequest, StartRunResponse, TestClusterRequest, TestClusterResponse
 
 
-_HostMutateRequestFields: TypeAlias = Literal["checkout", "start_run"]
+_HostMutateRequestFields: TypeAlias = Literal["checkout", "put_cluster", "remove_cluster", "test_cluster", "start_run"]
 
 class HostMutateRequest(Message[_HostMutateRequestFields]):
     """
@@ -51,14 +51,14 @@ class HostMutateRequest(Message[_HostMutateRequestFields]):
             self,
             *,
             checkout: str = "",
-            method: Oneof[Literal["start_run"], StartRunRequest] | None = None,
+            method: Oneof[Literal["put_cluster"], PutClusterRequest] | Oneof[Literal["remove_cluster"], RemoveClusterRequest] | Oneof[Literal["test_cluster"], TestClusterRequest] | Oneof[Literal["start_run"], StartRunRequest] | None = None,
         ) -> None:
             pass
 
         checkout: str
-        method: Oneof[Literal["start_run"], StartRunRequest] | None
+        method: Oneof[Literal["put_cluster"], PutClusterRequest] | Oneof[Literal["remove_cluster"], RemoveClusterRequest] | Oneof[Literal["test_cluster"], TestClusterRequest] | Oneof[Literal["start_run"], StartRunRequest] | None
 
-_HostMutateResponseFields: TypeAlias = Literal["failure", "start_run"]
+_HostMutateResponseFields: TypeAlias = Literal["failure", "put_cluster", "remove_cluster", "test_cluster", "start_run"]
 
 class HostMutateResponse(Message[_HostMutateResponseFields]):
     """
@@ -82,15 +82,15 @@ class HostMutateResponse(Message[_HostMutateResponseFields]):
         def __init__(
             self,
             *,
-            result: Oneof[Literal["failure"], OperationFailure] | Oneof[Literal["start_run"], StartRunResponse] | None = None,
+            result: Oneof[Literal["failure"], OperationFailure] | Oneof[Literal["put_cluster"], PutClusterResponse] | Oneof[Literal["remove_cluster"], RemoveClusterResponse] | Oneof[Literal["test_cluster"], TestClusterResponse] | Oneof[Literal["start_run"], StartRunResponse] | None = None,
         ) -> None:
             pass
 
-        result: Oneof[Literal["failure"], OperationFailure] | Oneof[Literal["start_run"], StartRunResponse] | None
+        result: Oneof[Literal["failure"], OperationFailure] | Oneof[Literal["put_cluster"], PutClusterResponse] | Oneof[Literal["remove_cluster"], RemoveClusterResponse] | Oneof[Literal["test_cluster"], TestClusterResponse] | Oneof[Literal["start_run"], StartRunResponse] | None
 
 
 _DESC = file_desc(
-    b'\n*vibesys/api/v1/host_mutate_generated.proto\x12\x0evibesys.api.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1dvibesys/host/v1/failure.proto\x1a vibesys/host/v1/operations.proto"\x8d\x01\n\x11HostMutateRequest\x12&\n\x08checkout\x18\x01 \x01(\tR\x08checkoutB\n\xbaH\x07r\x05\x10\x01(\x80 \x12?\n\tstart_run\x18$ \x01(\x0b2 .vibesys.host.v1.StartRunRequestH\x00R\x08startRunB\x0f\n\x06method\x12\x05\xbaH\x02\x08\x01"\xa6\x01\n\x12HostMutateResponse\x12=\n\x07failure\x18\x02 \x01(\x0b2!.vibesys.host.v1.OperationFailureH\x00R\x07failure\x12@\n\tstart_run\x18$ \x01(\x0b2!.vibesys.host.v1.StartRunResponseH\x00R\x08startRunB\x0f\n\x06result\x12\x05\xbaH\x02\x08\x01B=Z;github.com/uw-syfi/vibesys/gateway/gen/vibesys/api/v1;apiv1b\x06proto3',
+    b'\n*vibesys/api/v1/host_mutate_generated.proto\x12\x0evibesys.api.v1\x1a\x1bbuf/validate/validate.proto\x1a\x1dvibesys/host/v1/failure.proto\x1a vibesys/host/v1/operations.proto"\xee\x02\n\x11HostMutateRequest\x12&\n\x08checkout\x18\x01 \x01(\tR\x08checkoutB\n\xbaH\x07r\x05\x10\x01(\x80 \x12E\n\x0bput_cluster\x18\x1f \x01(\x0b2".vibesys.host.v1.PutClusterRequestH\x00R\nputCluster\x12N\n\x0eremove_cluster\x18  \x01(\x0b2%.vibesys.host.v1.RemoveClusterRequestH\x00R\rremoveCluster\x12H\n\x0ctest_cluster\x18! \x01(\x0b2#.vibesys.host.v1.TestClusterRequestH\x00R\x0btestCluster\x12?\n\tstart_run\x18$ \x01(\x0b2 .vibesys.host.v1.StartRunRequestH\x00R\x08startRunB\x0f\n\x06method\x12\x05\xbaH\x02\x08\x01"\x8a\x03\n\x12HostMutateResponse\x12=\n\x07failure\x18\x02 \x01(\x0b2!.vibesys.host.v1.OperationFailureH\x00R\x07failure\x12F\n\x0bput_cluster\x18\x1f \x01(\x0b2#.vibesys.host.v1.PutClusterResponseH\x00R\nputCluster\x12O\n\x0eremove_cluster\x18  \x01(\x0b2&.vibesys.host.v1.RemoveClusterResponseH\x00R\rremoveCluster\x12I\n\x0ctest_cluster\x18! \x01(\x0b2$.vibesys.host.v1.TestClusterResponseH\x00R\x0btestCluster\x12@\n\tstart_run\x18$ \x01(\x0b2!.vibesys.host.v1.StartRunResponseH\x00R\x08startRunB\x0f\n\x06result\x12\x05\xbaH\x02\x08\x01B=Z;github.com/uw-syfi/vibesys/gateway/gen/vibesys/api/v1;apiv1b\x06proto3',
     [
         validate_pb.desc(),
         failure_pb.desc(),

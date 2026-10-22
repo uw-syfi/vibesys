@@ -44,6 +44,9 @@ def _slots() -> tuple[str, ...]:
         "describe_machine",
         "list_compute",
         "preflight_run",
+        "put_cluster",
+        "remove_cluster",
+        "test_cluster",
         "start_run",
     )
 

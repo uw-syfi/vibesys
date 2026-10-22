@@ -20,6 +20,9 @@ message AcceptedOperation {
     PreflightRunRequest preflight_run = 16;
     InspectCandidateRequest inspect_candidate = 17;
     CompletePathsRequest complete_paths = 18;
+    PutClusterRequest put_cluster = 31;
+    RemoveClusterRequest remove_cluster = 32;
+    TestClusterRequest test_cluster = 33;
     StartRunRequest start_run = 36;
     LoginRequest login = 40;
   }
@@ -37,6 +40,9 @@ message OperationResult {
     PreflightRunResponse preflight_run = 16;
     InspectCandidateResponse inspect_candidate = 17;
     CompletePathsResponse complete_paths = 18;
+    PutClusterResponse put_cluster = 31;
+    RemoveClusterResponse remove_cluster = 32;
+    TestClusterResponse test_cluster = 33;
     StartRunResponse start_run = 36;
     LoginEvent login = 40;
   }

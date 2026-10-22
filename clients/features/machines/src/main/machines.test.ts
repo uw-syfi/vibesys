@@ -335,11 +335,59 @@ describe('MachinesMain', () => {
       expect(await machines.compute(HOST_B)).toEqual({kind: 'offered', value: settings});
     });
 
+    test('an on switch changes clusters through the registry and does not open the helper', async () => {
+      const calls: string[] = [];
+      const saved = {
+        config_path: '/settings',
+        clusters: [],
+        modal: {token_present: false},
+      };
+      const passed = {
+        outcome: 'passed' as const,
+        hardware: {gpus_per_node: 1},
+        partitions: ['gpu'],
+      };
+      const {machines, manager} = await subject(new Map(), {
+        transportV2: async () => true,
+        clusters: {
+          put: async () => {
+            calls.push('put');
+            return saved;
+          },
+          remove: async (_host, name) => {
+            calls.push(`remove:${name}`);
+            return saved;
+          },
+          test: async () => {
+            calls.push('test');
+            return passed;
+          },
+        },
+      });
+      await using _ = manager;
+      const cluster = {
+        name: 'lab',
+        reach: {kind: 'ssh' as const, host: 'host-a'},
+        workspace: '/work',
+      };
+      expect(await machines.testCluster(HOST_B, cluster)).toEqual(passed);
+      expect(await machines.addCluster(HOST_B, cluster)).toEqual(saved);
+      expect(await machines.removeCluster(HOST_B, 'lab')).toEqual(saved);
+      expect(calls).toEqual(['test', 'put', 'remove:lab']);
+    });
+
     test('an on switch without the registry throws instead of using the helper', async () => {
       const {machines, manager} = await subject(new Map(), {transportV2: async () => true});
       await using _ = manager;
       await expect(machines.report(HOST_B)).rejects.toThrow('registry reads are missing');
       await expect(machines.compute(HOST_B)).rejects.toThrow('registry reads are missing');
+      await expect(
+        machines.addCluster(HOST_B, {
+          name: 'lab',
+          reach: {kind: 'ssh', host: 'host-a'},
+          workspace: '/work',
+        }),
+      ).rejects.toThrow('cluster registry is missing');
     });
   });
 });

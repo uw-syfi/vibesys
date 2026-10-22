@@ -13,10 +13,12 @@ from typing import TYPE_CHECKING, Protocol
 
 from vibesys.api.host import host_call
 from vibesys.api.host_operations.api import (
+    ClusterRefusedError,
     LoginRefusedFact,
     LoginStartedFact,
     StartRefusedError,
     execute_inspect_candidate,
+    serve_cluster,
     serve_login,
     serve_start,
 )
@@ -153,7 +155,11 @@ def main(
         source = sys.stdin.buffer if stdin is None else stdin
         destination = sys.stdout.buffer if stdout is None else stdout
         owned = OsThreads() if threads is None else threads
-        destination.write(_serve_start(source.read((1 << 20) + 1), owned))
+        payload = source.read((1 << 20) + 1)
+        if _MUTATION_COMMANDS[arguments[0]] == "start_run":
+            destination.write(_serve_start(payload, owned))
+        else:
+            destination.write(_serve_cluster(payload, owned))
         return 0
     if arguments and arguments[0] in _HOST_CALL_COMMANDS:
         parser = argparse.ArgumentParser(
@@ -219,6 +225,31 @@ def _serve_login(
         destination.write(chunk)
 
     serve_login(payload, cli=cli, start=start, write=write, wait=wait)
+
+
+def _serve_cluster(payload: bytes, threads: Threads) -> bytes:
+    """Admit one cluster change, then apply it. Replay does not apply it again."""
+    requests = import_module("server.host_helper_requests")
+    refused = import_module("server.host_helper_compute").ComputeError
+    host = import_module("entrypoints.host_helper").real_host(os.environ, os.getuid(), threads)
+
+    def apply(slot: str, request: object) -> object:
+        if not isinstance(
+            request, pb.PutClusterRequest | pb.RemoveClusterRequest | pb.TestClusterRequest
+        ):
+            message = "cluster request is not a cluster mutation"
+            raise ClusterRefusedError(message)
+        try:
+            return requests.apply_registered_cluster(slot, request, host)
+        except (refused, TypeError, ValueError) as exc:
+            raise ClusterRefusedError(str(exc)) from exc
+
+    return serve_cluster(
+        payload,
+        store=Project.admissions(),
+        host_user=str(os.getuid()),
+        apply=apply,
+    )
 
 
 def _serve_start(payload: bytes, threads: Threads) -> bytes:

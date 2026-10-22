@@ -173,6 +173,74 @@ def accept_preflight_run(
     return PreflightRun.accept(request)
 
 
+PutCluster = Operation(
+    "PutCluster",
+    31,
+    31,
+    31,
+    65000,
+    5000,
+    2,
+    3,
+    1,
+    1,
+    None,
+    pb.PutClusterRequest,
+    pb.PutClusterResponse,
+    ((("request_id",), ("request_id",)),),
+)
+
+
+def accept_put_cluster(request: pb.PutClusterRequest) -> AcceptedRequest[pb.PutClusterRequest]:
+    return PutCluster.accept(request)
+
+
+RemoveCluster = Operation(
+    "RemoveCluster",
+    32,
+    32,
+    32,
+    10000,
+    5000,
+    2,
+    3,
+    1,
+    1,
+    None,
+    pb.RemoveClusterRequest,
+    pb.RemoveClusterResponse,
+    ((("request_id",), ("request_id",)),),
+)
+
+
+def accept_remove_cluster(
+    request: pb.RemoveClusterRequest,
+) -> AcceptedRequest[pb.RemoveClusterRequest]:
+    return RemoveCluster.accept(request)
+
+
+TestCluster = Operation(
+    "TestCluster",
+    33,
+    33,
+    33,
+    65000,
+    5000,
+    2,
+    3,
+    1,
+    1,
+    None,
+    pb.TestClusterRequest,
+    pb.TestClusterResponse,
+    ((("request_id",), ("request_id",)),),
+)
+
+
+def accept_test_cluster(request: pb.TestClusterRequest) -> AcceptedRequest[pb.TestClusterRequest]:
+    return TestCluster.accept(request)
+
+
 StartRun = Operation(
     "StartRun",
     36,
@@ -234,6 +302,9 @@ OPERATIONS: tuple[Operation, ...] = (
     DescribeMachine,
     ListCompute,
     PreflightRun,
+    PutCluster,
+    RemoveCluster,
+    TestCluster,
     StartRun,
     Login,
 )
@@ -289,10 +360,25 @@ class Handlers:
 class MutationHandlers:
     """Required mutation slots. A read handler cannot satisfy one."""
 
+    put_cluster: Callable[[pb.PutClusterRequest], pb.PutClusterResponse]
+    remove_cluster: Callable[[pb.RemoveClusterRequest], pb.RemoveClusterResponse]
+    test_cluster: Callable[[pb.TestClusterRequest], pb.TestClusterResponse]
     start_run: Callable[[pb.StartRunRequest], pb.StartRunResponse]
 
     def dispatch(self, request: AcceptedRequest) -> bytes:
         match request.operation.operation_id:
+            case 31:
+                return PutCluster.validate_response(
+                    request, self.put_cluster(PutCluster.request_value(request))
+                )
+            case 32:
+                return RemoveCluster.validate_response(
+                    request, self.remove_cluster(RemoveCluster.request_value(request))
+                )
+            case 33:
+                return TestCluster.validate_response(
+                    request, self.test_cluster(TestCluster.request_value(request))
+                )
             case 36:
                 return StartRun.validate_response(
                     request, self.start_run(StartRun.request_value(request))
@@ -409,7 +495,17 @@ READ_CALLS: tuple[HostCall, ...] = (
     HostCall("list_compute", "list-compute", 15, 15, 10000, 5000),
     HostCall("preflight_run", "preflight-run", 16, 16, 65000, 5000),
 )
-MUTATIONS: dict[str, Operation] = {"start_run": StartRun}
-MUTATION_CALLS: tuple[HostCall, ...] = (HostCall("start_run", "start-run", 36, 36, 60000, 5000),)
+MUTATIONS: dict[str, Operation] = {
+    "put_cluster": PutCluster,
+    "remove_cluster": RemoveCluster,
+    "test_cluster": TestCluster,
+    "start_run": StartRun,
+}
+MUTATION_CALLS: tuple[HostCall, ...] = (
+    HostCall("put_cluster", "put-cluster", 31, 31, 65000, 5000),
+    HostCall("remove_cluster", "remove-cluster", 32, 32, 10000, 5000),
+    HostCall("test_cluster", "test-cluster", 33, 33, 65000, 5000),
+    HostCall("start_run", "start-run", 36, 36, 60000, 5000),
+)
 WATCHES: dict[str, Operation] = {"login": Login}
 WATCH_CALLS: tuple[HostCall, ...] = (HostCall("login", "login", 40, 40, 600000, 5000),)

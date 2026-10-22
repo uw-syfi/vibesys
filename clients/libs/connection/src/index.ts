@@ -40,6 +40,11 @@ export {type Link, LocalLink, SshLink} from './shell/link.js';
 export {LoginActor, type LoginPorts, type LoginStart} from './shell/login-actor.js';
 export {fromChild, type SpawnedProcess} from './shell/process.js';
 export {
+  type RegistryClusterPorts,
+  type RegistryClusters,
+  registryClusters,
+} from './shell/registry-clusters.js';
+export {
   type RegistryCatalog,
   type RegistryReadPorts,
   registryReads,

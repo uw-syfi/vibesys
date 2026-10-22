@@ -8,6 +8,12 @@ import (
 
 func DispatchHostMutate(request *apiv1.HostMutateRequest) (HostCall, bool) {
 	switch {
+	case request.GetPutCluster() != nil:
+		return HostCall{CLI: "put-cluster", Deadline: 65000 * time.Millisecond, Executor: 1, Effect: 2}, true
+	case request.GetRemoveCluster() != nil:
+		return HostCall{CLI: "remove-cluster", Deadline: 10000 * time.Millisecond, Executor: 1, Effect: 2}, true
+	case request.GetTestCluster() != nil:
+		return HostCall{CLI: "test-cluster", Deadline: 65000 * time.Millisecond, Executor: 1, Effect: 2}, true
 	case request.GetStartRun() != nil:
 		return HostCall{CLI: "start-run", Deadline: 60000 * time.Millisecond, Executor: 1, Effect: 3}, true
 	default:
@@ -17,6 +23,15 @@ func DispatchHostMutate(request *apiv1.HostMutateRequest) (HostCall, bool) {
 
 func HostMutateResponseValid(request *apiv1.HostMutateRequest, response *apiv1.HostMutateResponse) bool {
 	switch {
+	case request.GetPutCluster() != nil:
+		got := response.GetPutCluster()
+		return got != nil && got.GetRequestId() == request.GetPutCluster().GetRequestId()
+	case request.GetRemoveCluster() != nil:
+		got := response.GetRemoveCluster()
+		return got != nil && got.GetRequestId() == request.GetRemoveCluster().GetRequestId()
+	case request.GetTestCluster() != nil:
+		got := response.GetTestCluster()
+		return got != nil && got.GetRequestId() == request.GetTestCluster().GetRequestId()
 	case request.GetStartRun() != nil:
 		got := response.GetStartRun()
 		return got != nil && got.GetRequestId() == request.GetStartRun().GetRequestId()

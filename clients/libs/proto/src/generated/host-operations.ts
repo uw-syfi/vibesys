@@ -16,6 +16,9 @@ export const operationPolicies = Object.freeze({
   PreflightRun: Object.freeze({name: 'PreflightRun', id: 16, requestTag: 16, responseTag: 16, capMs: 65000, graceMs: 5000, totalMs: 70000, effect: 1, retry: 2, executor: 1, cardinality: 1, firstEventMs: undefined} as const),
   InspectCandidate: Object.freeze({name: 'InspectCandidate', id: 17, requestTag: 17, responseTag: 17, capMs: 10000, graceMs: 5000, totalMs: 15000, effect: 1, retry: 2, executor: 2, cardinality: 1, firstEventMs: undefined} as const),
   CompletePaths: Object.freeze({name: 'CompletePaths', id: 18, requestTag: 18, responseTag: 18, capMs: 5000, graceMs: 5000, totalMs: 10000, effect: 1, retry: 2, executor: 3, cardinality: 1, firstEventMs: undefined} as const),
+  PutCluster: Object.freeze({name: 'PutCluster', id: 31, requestTag: 31, responseTag: 31, capMs: 65000, graceMs: 5000, totalMs: 70000, effect: 2, retry: 3, executor: 1, cardinality: 1, firstEventMs: undefined} as const),
+  RemoveCluster: Object.freeze({name: 'RemoveCluster', id: 32, requestTag: 32, responseTag: 32, capMs: 10000, graceMs: 5000, totalMs: 15000, effect: 2, retry: 3, executor: 1, cardinality: 1, firstEventMs: undefined} as const),
+  TestCluster: Object.freeze({name: 'TestCluster', id: 33, requestTag: 33, responseTag: 33, capMs: 65000, graceMs: 5000, totalMs: 70000, effect: 2, retry: 3, executor: 1, cardinality: 1, firstEventMs: undefined} as const),
   StartRun: Object.freeze({name: 'StartRun', id: 36, requestTag: 36, responseTag: 36, capMs: 60000, graceMs: 5000, totalMs: 65000, effect: 3, retry: 3, executor: 1, cardinality: 1, firstEventMs: undefined} as const),
   Login: Object.freeze({name: 'Login', id: 40, requestTag: 40, responseTag: 40, capMs: 600000, graceMs: 5000, totalMs: 605000, effect: 3, retry: 3, executor: 1, cardinality: 2, firstEventMs: 25000} as const),
 });
@@ -77,6 +80,24 @@ export function acceptCompletePaths(input: MessageInitShape<typeof pb.CompletePa
 }
 export async function callCompletePaths(transport: OperationTransport, request: Accepted<"CompletePaths">, signal: OperationSignal): Promise<pb.CompletePathsResponse> {
   return call(transport, {policy: operationPolicies.CompletePaths, requestSchema: pb.CompletePathsRequestSchema, responseSchema: pb.CompletePathsResponseSchema, correlations: [[['requestId'], ['requestId']]]}, request, signal);
+}
+export function acceptPutCluster(input: MessageInitShape<typeof pb.PutClusterRequestSchema>): Accepted<"PutCluster"> {
+  return accept(operationPolicies.PutCluster, pb.PutClusterRequestSchema, input);
+}
+export async function callPutCluster(transport: OperationTransport, request: Accepted<"PutCluster">, signal: OperationSignal): Promise<pb.PutClusterResponse> {
+  return call(transport, {policy: operationPolicies.PutCluster, requestSchema: pb.PutClusterRequestSchema, responseSchema: pb.PutClusterResponseSchema, correlations: [[['requestId'], ['requestId']]]}, request, signal);
+}
+export function acceptRemoveCluster(input: MessageInitShape<typeof pb.RemoveClusterRequestSchema>): Accepted<"RemoveCluster"> {
+  return accept(operationPolicies.RemoveCluster, pb.RemoveClusterRequestSchema, input);
+}
+export async function callRemoveCluster(transport: OperationTransport, request: Accepted<"RemoveCluster">, signal: OperationSignal): Promise<pb.RemoveClusterResponse> {
+  return call(transport, {policy: operationPolicies.RemoveCluster, requestSchema: pb.RemoveClusterRequestSchema, responseSchema: pb.RemoveClusterResponseSchema, correlations: [[['requestId'], ['requestId']]]}, request, signal);
+}
+export function acceptTestCluster(input: MessageInitShape<typeof pb.TestClusterRequestSchema>): Accepted<"TestCluster"> {
+  return accept(operationPolicies.TestCluster, pb.TestClusterRequestSchema, input);
+}
+export async function callTestCluster(transport: OperationTransport, request: Accepted<"TestCluster">, signal: OperationSignal): Promise<pb.TestClusterResponse> {
+  return call(transport, {policy: operationPolicies.TestCluster, requestSchema: pb.TestClusterRequestSchema, responseSchema: pb.TestClusterResponseSchema, correlations: [[['requestId'], ['requestId']]]}, request, signal);
 }
 export function acceptStartRun(input: MessageInitShape<typeof pb.StartRunRequestSchema>): Accepted<"StartRun"> {
   return accept(operationPolicies.StartRun, pb.StartRunRequestSchema, input);
@@ -191,6 +212,12 @@ export function decodeHostRead(name: string, payload: Uint8Array): Uint8Array {
 
 export function encodeHostMutate(checkout: string, name: string, payload: Uint8Array): Uint8Array {
   switch (name) {
+    case 'PutCluster':
+      return toBinary(HostMutateRequestSchema, create(HostMutateRequestSchema, {checkout, method: {case: 'putCluster', value: fromBinary(pb.PutClusterRequestSchema, payload)}}));
+    case 'RemoveCluster':
+      return toBinary(HostMutateRequestSchema, create(HostMutateRequestSchema, {checkout, method: {case: 'removeCluster', value: fromBinary(pb.RemoveClusterRequestSchema, payload)}}));
+    case 'TestCluster':
+      return toBinary(HostMutateRequestSchema, create(HostMutateRequestSchema, {checkout, method: {case: 'testCluster', value: fromBinary(pb.TestClusterRequestSchema, payload)}}));
     case 'StartRun':
       return toBinary(HostMutateRequestSchema, create(HostMutateRequestSchema, {checkout, method: {case: 'startRun', value: fromBinary(pb.StartRunRequestSchema, payload)}}));
     default: throw new Error('unknown mutation');
@@ -202,6 +229,15 @@ export function decodeHostMutate(name: string, payload: Uint8Array): Uint8Array 
   if (result.case === undefined) throw new Error('unknown mutation');
   if (result.case === 'failure') throw new OperationFailed(result.value.category, result.value.message);
   switch (name) {
+    case 'PutCluster':
+      if (result.case !== 'putCluster') throw new Error('response correlation mismatch');
+      return toBinary(pb.PutClusterResponseSchema, result.value);
+    case 'RemoveCluster':
+      if (result.case !== 'removeCluster') throw new Error('response correlation mismatch');
+      return toBinary(pb.RemoveClusterResponseSchema, result.value);
+    case 'TestCluster':
+      if (result.case !== 'testCluster') throw new Error('response correlation mismatch');
+      return toBinary(pb.TestClusterResponseSchema, result.value);
     case 'StartRun':
       if (result.case !== 'startRun') throw new Error('response correlation mismatch');
       return toBinary(pb.StartRunResponseSchema, result.value);
@@ -228,6 +264,9 @@ export function decodeHostWatch(name: string, payload: Uint8Array): Uint8Array {
   }
 }
 export const mutateBudgets = Object.freeze({
+  putCluster: Object.freeze({capMs: 65000, graceMs: 5000, totalMs: 70000} as const),
+  removeCluster: Object.freeze({capMs: 10000, graceMs: 5000, totalMs: 15000} as const),
+  testCluster: Object.freeze({capMs: 65000, graceMs: 5000, totalMs: 70000} as const),
   startRun: Object.freeze({capMs: 60000, graceMs: 5000, totalMs: 65000} as const),
 } as const);
 export const watchBudgets = Object.freeze({

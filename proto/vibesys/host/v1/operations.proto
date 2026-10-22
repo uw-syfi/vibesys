@@ -1446,6 +1446,64 @@ message StartRunMeasure {
   }
 }
 
+enum ClusterTestStage {
+  CLUSTER_TEST_STAGE_UNSPECIFIED = 0;
+  CLUSTER_TEST_STAGE_REACH = 1 [(vibesys.host.v1.adapter_spelling) = "reach"];
+  CLUSTER_TEST_STAGE_SCHEDULER = 2 [(vibesys.host.v1.adapter_spelling) = "scheduler"];
+  CLUSTER_TEST_STAGE_WORKSPACE = 3 [(vibesys.host.v1.adapter_spelling) = "workspace"];
+}
+
+message ClusterTestPassed {
+  ClusterHardware hardware = 1 [(buf.validate.field).required = true];
+  repeated string partitions = 2 [(buf.validate.field).repeated.max_items = 256];
+}
+
+message ClusterTestFailed {
+  ClusterTestStage stage = 1 [(buf.validate.field).enum = {
+    defined_only: true
+    not_in: [0]
+  }];
+  string detail = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 300
+    pattern: "^[^\\n\\r]*$"
+  }];
+}
+
+message PutClusterRequest {
+  string request_id = 1 [(buf.validate.field).string.pattern = "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"];
+  SlurmClusterSettings cluster = 2 [(buf.validate.field).required = true];
+}
+
+message PutClusterResponse {
+  string request_id = 1 [(buf.validate.field).string.pattern = "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"];
+  ComputeSettings settings = 2 [(buf.validate.field).required = true];
+}
+
+message RemoveClusterRequest {
+  string request_id = 1 [(buf.validate.field).string.pattern = "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"];
+  string name = 2 [(buf.validate.field).string.pattern = "^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$"];
+}
+
+message RemoveClusterResponse {
+  string request_id = 1 [(buf.validate.field).string.pattern = "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"];
+  ComputeSettings settings = 2 [(buf.validate.field).required = true];
+}
+
+message TestClusterRequest {
+  string request_id = 1 [(buf.validate.field).string.pattern = "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"];
+  SlurmClusterSettings cluster = 2 [(buf.validate.field).required = true];
+}
+
+message TestClusterResponse {
+  string request_id = 1 [(buf.validate.field).string.pattern = "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"];
+  oneof result {
+    option (buf.validate.oneof).required = true;
+    ClusterTestPassed passed = 2;
+    ClusterTestFailed failed = 3;
+  }
+}
+
 message StartRunRequest {
   string request_id = 1 [(buf.validate.field).string.pattern = "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"];
   string project = 2 [(buf.validate.field).string = {

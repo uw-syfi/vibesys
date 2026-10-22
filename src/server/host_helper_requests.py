@@ -11,7 +11,8 @@ decisions it needs (:func:`negotiate`, :func:`select_completions`,
 Light like the channel: the standard library, Pydantic, ``vs_sim.api`` and light
 ``server`` modules only.
 
-Public surface: ``answer``, ``answer_registered_read``, ``launch_registered_run``, ``registry_start_request``,
+Public surface: ``answer``, ``answer_registered_read``, ``apply_registered_cluster``,
+``launch_registered_run``, ``registry_start_request``,
 ``read_failure_category``,
 ``registry_read_source``, ``connect``, ``negotiate``, ``Negotiated``,
 ``HelperHost``; the interfaces ``Projects``, ``Directories``, ``RunLauncher`` and
@@ -106,7 +107,15 @@ from server.host_api import (
     RunStopRequest,
     RunSummary,
 )
-from server.host_compute import MeasurementTarget, ModalTarget, SameMachine, SlurmTarget
+from server.host_compute import (
+    ClusterTestResult,
+    ComputeSettings,
+    MeasurementTarget,
+    ModalTarget,
+    SameMachine,
+    SlurmClusterSettings,
+    SlurmTarget,
+)
 from server.host_examples import (
     ExampleDestination,
     ExamplesDestinationReply,
@@ -1668,6 +1677,68 @@ def launch_registered_run(
 ) -> RunStartReply | HelperError:
     """Launch one already-admitted start through the helper's launcher."""
     return _start(request, host)
+
+
+def apply_registered_cluster(
+    slot: str,
+    request: pb.PutClusterRequest | pb.RemoveClusterRequest | pb.TestClusterRequest,
+    host: HelperHost,
+) -> pb.PutClusterResponse | pb.RemoveClusterResponse | pb.TestClusterResponse:
+    """Change or test one cluster and return that slot's registry response.
+
+    ``ComputeError`` and ``ValueError`` stay with the caller, which stores a refusal.
+    """
+    wire = _wire()
+    payloads = wire.host_payloads
+    if slot == "remove_cluster" and isinstance(request, payloads.RemoveClusterRequest):
+        settings = host.compute.remove(request.name)
+        return payloads.RemoveClusterResponse(
+            request_id=request.request_id, settings=_registry_settings(settings)
+        )
+    if slot == "put_cluster" and isinstance(request, payloads.PutClusterRequest):
+        saved = host.compute.add(_registry_cluster(request.cluster))
+        return payloads.PutClusterResponse(
+            request_id=request.request_id, settings=_registry_settings(saved)
+        )
+    if slot == "test_cluster" and isinstance(request, payloads.TestClusterRequest):
+        found = host.compute.test(_registry_cluster(request.cluster))
+        return payloads.TestClusterResponse(
+            request_id=request.request_id, result=_registry_test(found)
+        )
+    message = f"cluster slot {slot} does not match its request"
+    raise ValueError(message)
+
+
+def _registry_cluster(cluster: pb.SlurmClusterSettings | None) -> SlurmClusterSettings:
+    if cluster is None:
+        message = "cluster is required"
+        raise ValueError(message)
+    model = import_module("server.host_compute").SlurmClusterSettings
+    return model.model_validate(_wire().to_mapping(cluster))
+
+
+def _registry_settings(settings: ComputeSettings) -> pb.ComputeSettings:
+    wire = _wire()
+    return wire.from_mapping(wire.host_payloads.ComputeSettings, settings.model_dump(mode="json"))
+
+
+def _registry_test(result: ClusterTestResult) -> object:
+    models = import_module("server.host_compute")
+    wire = _wire()
+    payloads = wire.host_payloads
+    if isinstance(result, models.ClusterTestPassed):
+        hardware = wire.from_mapping(
+            payloads.ClusterHardware, result.hardware.model_dump(mode="json")
+        )
+        passed = payloads.ClusterTestPassed(hardware=hardware, partitions=list(result.partitions))
+        return wire.Oneof("passed", passed)
+    stages = {
+        models.ClusterTestStage.REACH: payloads.ClusterTestStage.REACH,
+        models.ClusterTestStage.SCHEDULER: payloads.ClusterTestStage.SCHEDULER,
+        models.ClusterTestStage.WORKSPACE: payloads.ClusterTestStage.WORKSPACE,
+    }
+    failed = payloads.ClusterTestFailed(stage=stages[result.stage], detail=result.detail)
+    return wire.Oneof("failed", failed)
 
 
 def registry_start_request(request: pb.StartRunRequest) -> RunStartRequest:

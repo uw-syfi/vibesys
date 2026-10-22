@@ -80,7 +80,7 @@ class _Reads:
 # Stream slots are registered beside the unary handlers. The generator rejects a drift.
 WATCH_SLOTS = ("login",)
 # Mutation slots are not read handlers. The generator requires each one.
-MUTATION_SLOTS = ("start_run",)
+MUTATION_SLOTS = ("put_cluster", "remove_cluster", "test_cluster", "start_run")
 
 
 def handlers(source: ReadSource) -> host_operations.Handlers:

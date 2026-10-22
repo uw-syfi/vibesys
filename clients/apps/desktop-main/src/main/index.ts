@@ -15,6 +15,7 @@ import {
   LoginActor,
   MUTATE_METHOD,
   READ_METHOD,
+  registryClusters,
   registryReads,
   registrySetup,
   registryStart,
@@ -377,6 +378,10 @@ function machinesOver(
     registry: registryReads({
       checkout: id => hosts.checkout(id),
       unary: (id, bytes, signal) => gateway.unary(hostKey(id), READ_METHOD, bytes, signal),
+    }),
+    clusters: registryClusters({
+      checkout: id => hosts.checkout(id),
+      unary: (id, bytes, signal) => gateway.unary(hostKey(id), MUTATE_METHOD, bytes, signal),
     }),
     setup,
     logins,

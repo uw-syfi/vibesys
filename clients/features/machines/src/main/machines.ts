@@ -11,6 +11,7 @@ import {
   type ConnectionLease,
   HelperRequestError,
   type InspectedCandidate,
+  type RegistryClusters,
   type RegistrySetup,
 } from '@vibesys/connection';
 import type {MachineDescription} from '@vibesys/hosts';
@@ -63,6 +64,8 @@ export interface MachinesMainDeps {
   readonly registry?: RegistryCatalog;
   /** Setup reads. Required when `transportV2` is true for inspect. */
   readonly setup?: RegistrySetup;
+  /** Cluster changes. Required when `transportV2` is true for put, remove, and test. */
+  readonly clusters?: RegistryClusters;
   /** The selection the caller still owns. A change across the await is stale. */
   readonly selectionRevision?: (id: HostId) => bigint;
   /** Host logins when `transportV2` is on. The actor outlives the panel that started one. */
@@ -231,6 +234,13 @@ export class MachinesMain {
 
   /** Try `cluster` from `id`: reach it, ask its scheduler, check its workspace. Saves nothing. */
   async testCluster(id: HostId, cluster: SlurmClusterSettings): Promise<ClusterTest> {
+    if (await this.#v2(id)) {
+      try {
+        return await this.#clusters().test(id, cluster, new AbortController().signal);
+      } catch (error) {
+        throw explained(error, 'test the cluster', id);
+      }
+    }
     return this.#changed(id, 'test the cluster', async connection => {
       const reply = await connection.request({type: 'compute.test_cluster', cluster});
       return reply.result;
@@ -239,6 +249,13 @@ export class MachinesMain {
 
   /** Save `cluster` on `id`; its helper tests it again first. Answers the settings after. */
   async addCluster(id: HostId, cluster: SlurmClusterSettings): Promise<ComputeSettings> {
+    if (await this.#v2(id)) {
+      try {
+        return await this.#clusters().put(id, cluster, new AbortController().signal);
+      } catch (error) {
+        throw explained(error, 'save the cluster', id);
+      }
+    }
     return this.#changed(id, 'save the cluster', async connection => {
       const reply = await connection.request({type: 'compute.add_cluster', cluster});
       return reply.settings;
@@ -247,6 +264,13 @@ export class MachinesMain {
 
   /** Remove the cluster `name` from `id`'s own file. Answers the settings after. */
   async removeCluster(id: HostId, name: string): Promise<ComputeSettings> {
+    if (await this.#v2(id)) {
+      try {
+        return await this.#clusters().remove(id, name, new AbortController().signal);
+      } catch (error) {
+        throw explained(error, 'remove the cluster', id);
+      }
+    }
     return this.#changed(id, 'remove the cluster', async connection => {
       const reply = await connection.request({type: 'compute.remove_cluster', name});
       return reply.settings;
@@ -316,6 +340,15 @@ export class MachinesMain {
       throw new Error('run transport v2 is on and the registry setup is missing');
     }
     return setup;
+  }
+
+  /** Cluster changes. A missing port is a wiring error, not a reason to use the helper. */
+  #clusters(): RegistryClusters {
+    const clusters = this.#deps.clusters;
+    if (clusters === undefined) {
+      throw new Error('run transport v2 is on and the cluster registry is missing');
+    }
+    return clusters;
   }
 
   /** The registry port. A missing one is a wiring error, not a reason to use the helper. */
