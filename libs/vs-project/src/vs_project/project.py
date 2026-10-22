@@ -15,7 +15,6 @@ from vs_project._layout import (
     TaskName,
     TasksRoot,
 )
-from vs_project._retained import read_retained_bytes
 from vs_project._state import ProjectState, _state_home, validate_run_id
 from vs_project._state_io import publish_run_link
 from vs_project._state_store import LocalStateStore
@@ -228,6 +227,11 @@ class Project:
 
     def retained_event_journal(self, run_id: str, *, max_bytes: int) -> bytes | None:
         """Read the original bounded JSONL journal for a semantic restart, without writing."""
+        # lint-waiver: LW-337003 [PLC0415]; hello never reads a retained journal.
+        # > An eager import exceeds the host helper module budget; a dynamic loader
+        # > hides this dependency from tach and adds indirection to its only caller.
+        from vs_project._retained import read_retained_bytes  # noqa: PLC0415
+
         return read_retained_bytes(
             self.event_journal_path_for(self.root, run_id), max_bytes=max_bytes
         )
