@@ -317,4 +317,6 @@ class EvaluationReplayExecutor:
             failure=_failure(observed.measurement_failure),
         )
         validate(native)
-        return ReplayResult(native)
+        # Acceptance commits potentially paid execution. Inspection and collection
+        # observe that same job; they cannot charge it again. Its cost is unknown.
+        return ReplayResult(native, paid=isinstance(request, SubmitMeasurement) and seen.accepted)

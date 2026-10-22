@@ -22,6 +22,7 @@ from vs_runtime.api.replay import (
     ReplayLaunch,
     ReplayOperationError,
     ReplayOperationHost,
+    ReplayParked,
     ReplayRecoveryRequiredError,
     ReplayRuntime,
     drive_replay,
@@ -153,13 +154,18 @@ async def test_evaluation_recovery_preserves_job_evidence_and_release(
         )
         assert isinstance(result, ReplayCompleted)
         assert result.value
+        assert resumed.runtime.accounting.paid_operations == 1
+        assert resumed.runtime.accounting.unreported_cost_operations == 1
+        again = host(store, root, executor(), sim)
         assert (
             await drive_replay(
-                host(store, root, executor(), sim),
+                again,
                 ReplayLaunch(EpochStarted(run_id="run"), "again", "host-a", 100),
             )
             == result
         )
+        assert again.runtime.accounting.paid_operations == 1
+        assert again.runtime.accounting.unreported_cost_operations == 1
     finally:
         await world.executor.close()
 
@@ -273,5 +279,52 @@ async def test_evaluation_rejects_invalid_native_dispatch_before_submission(
             await executor.execute(span, fence)
         assert not world.workspaces.candidates
         assert store.release(fence, sim.clock.now())
+    finally:
+        await world.executor.close()
+
+
+@pytest.mark.parametrize("build", BUILDERS)
+async def test_removing_a_measurement_discloses_paid_work_with_unreported_cost(
+    tmp_path: Path, sim: Sim, build: _Build
+) -> None:
+    world = await build(tmp_path / "owner", _Script.SUCCEED, None)
+    namespace = Project.open(tmp_path).state.state_store_namespace("run")
+    store = FakeStateStore()
+    executor = EvaluationReplayExecutor(
+        world.executor,
+        ReceiptStore(namespace, SimThreads()),
+        ReplayOperationHost("run", store, sim.clock),
+        within_seconds=100,
+    )
+
+    async def edited(_ctx: ReplayFlow) -> object:
+        return "no measurement"
+
+    try:
+        original = host(
+            store, program(replay_measurement_plan(plan(candidate=world.snapshot))), executor, sim
+        )
+        result = await drive_replay(
+            original, ReplayLaunch(EpochStarted(run_id="run"), "first", "host-a", 100)
+        )
+        assert isinstance(result, ReplayCompleted)
+        changed = host(store, edited, executor, sim)
+        assert (
+            await drive_replay(
+                changed, ReplayLaunch(EpochStarted(run_id="run"), "edited", "host-a", 100)
+            )
+            == ReplayParked()
+        )
+        (notice_bytes,) = changed.runtime.archive.acknowledgements.notices
+        notice = replay.ReplayNotice.from_binary(notice_bytes)
+        (unused,) = notice.unused
+        assert unused.key is not None
+        assert unused.key.operation == "evaluation.submit"
+        assert unused.paid
+        assert not unused.has_field("cost_usd")
+        assert changed.runtime.accounting.paid_operations == 1
+        assert changed.runtime.accounting.unreported_cost_operations == 1
+        assert changed.runtime.accounting.reported_cost_usd == 0
+        assert len(world.workspaces.candidates) == 1
     finally:
         await world.executor.close()
