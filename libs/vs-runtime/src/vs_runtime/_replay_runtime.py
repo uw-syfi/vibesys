@@ -20,7 +20,7 @@ from vs_core.api.replay import (
     replay_descriptors,
     reply_schema_digest,
 )
-from vs_project.api import Committed, StateStore, StoredEnvelope, StoreFence
+from vs_project.api import Committed, StoredEnvelope, StoreFence
 from vs_proto.api import (
     Change,
     Ended,
@@ -40,6 +40,7 @@ from vs_proto.api import (
     validate,
 )
 from vs_proto.api import replay as pb
+from vs_runtime._replay_store import REPLAY_STORE_SCHEMA_VERSION
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine
@@ -47,9 +48,7 @@ if TYPE_CHECKING:
     from protobuf.wkt.google.protobuf.timestamp_pb import Timestamp
 
     from vs_core.api.replay import ReplayFlow, ReplayFrontier
-
-# A separate envelope codec fences old CoreRuntime readers before they can dispatch.
-REPLAY_STORE_SCHEMA_VERSION = 2
+    from vs_runtime._replay_store import ReplayStore
 
 
 @dataclass(frozen=True)
@@ -139,7 +138,7 @@ class ReplayRuntime:
 
     def __init__(
         self,
-        store: StateStore,
+        store: ReplayStore,
         root: Callable[[ReplayFlow], Coroutine[object, object, object]],
         allowance: pb.ReplayAllowance,
     ) -> None:

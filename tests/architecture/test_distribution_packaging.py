@@ -6,6 +6,8 @@ import configparser
 import importlib.util
 import re
 import shlex
+import sys
+import sysconfig
 import tarfile
 import tomllib
 import zipfile
@@ -351,6 +353,44 @@ def test_root_metadata_declares_internal_runtime_dependencies_directly() -> None
     libraries = sorted((PROJECT_ROOT / "libs").iterdir())
     assert libraries
     assert all((library / "pyproject.toml").is_file() for library in libraries)
+
+
+@pytest.mark.xdist_group("built_wheel")
+def test_built_wheel_imports_and_validates_proto_contracts(built_wheel: BuiltWheel) -> None:
+    """Exercise the shipped package without editable source paths or site startup."""
+    source = built_wheel.source.root / "libs/vs-proto/src"
+    with zipfile.ZipFile(built_wheel.wheel) as archive:
+        for module in (source / "vs_proto").rglob("*.py"):
+            member = module.relative_to(source).as_posix()
+            assert archive.read(member) == module.read_bytes(), member
+    script = """
+import sys
+sys.path[:0] = sys.argv[1:3]
+from vs_proto.api import ValidationError, replay, validate
+validate(replay.ReplayPolicy(reply_type="test.Reply"))
+try:
+    validate(replay.ReplayPolicy())
+except ValidationError:
+    pass
+else:
+    raise AssertionError("installed validation accepted an invalid reply contract")
+"""
+    result = run_test_command(
+        [
+            sys.executable,
+            "-I",
+            "-S",
+            "-c",
+            script,
+            str(built_wheel.wheel),
+            sysconfig.get_path("purelib"),
+        ],
+        cwd=built_wheel.wheel.parent,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr + result.stdout
 
 
 @pytest.mark.xdist_group("built_wheel")

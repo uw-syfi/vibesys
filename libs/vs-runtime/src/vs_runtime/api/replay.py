@@ -21,6 +21,7 @@ from vs_runtime._replay_runtime import (
     ReplayRuntime,
     ReplayUnknown,
 )
+from vs_runtime._replay_store import ReplayStore, RunLogReplayStore
 
 __all__ = [
     "REPLAY_STORE_SCHEMA_VERSION",
@@ -39,6 +40,8 @@ __all__ = [
     "ReplayResult",
     "ReplayRunHost",
     "ReplayRuntime",
+    "ReplayStore",
     "ReplayUnknown",
+    "RunLogReplayStore",
     "drive_replay",
 ]
