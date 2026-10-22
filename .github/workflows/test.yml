@@ -167,7 +167,13 @@ jobs:
     timeout-minutes: 10
 
     steps:
+      - name: Record when this job's cancel clock started
+        run: echo "VIBESYS_JOB_STARTED_AT=$(date +%s)" >> "$GITHUB_ENV"
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Pass the pytest cancel deadline
+        run: python3 scripts/pytest_job_deadline.py
 
       - name: Install uv
         uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
@@ -233,7 +239,13 @@ jobs:
     timeout-minutes: 10
 
     steps:
+      - name: Record when this job's cancel clock started
+        run: echo "VIBESYS_JOB_STARTED_AT=$(date +%s)" >> "$GITHUB_ENV"
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Pass the pytest cancel deadline
+        run: python3 scripts/pytest_job_deadline.py
 
       - name: Set up the client workspace
         uses: ./.github/actions/setup-clients
@@ -450,7 +462,13 @@ jobs:
     timeout-minutes: 10
 
     steps:
+      - name: Record when this job's cancel clock started
+        run: echo "VIBESYS_JOB_STARTED_AT=$(date +%s)" >> "$GITHUB_ENV"
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Pass the pytest cancel deadline
+        run: python3 scripts/pytest_job_deadline.py
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -491,7 +509,13 @@ jobs:
     timeout-minutes: 10
 
     steps:
+      - name: Record when this job's cancel clock started
+        run: echo "VIBESYS_JOB_STARTED_AT=$(date +%s)" >> "$GITHUB_ENV"
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Pass the pytest cancel deadline
+        run: python3 scripts/pytest_job_deadline.py
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -534,7 +558,13 @@ jobs:
         shard: [1, 2, 3, 4, 5, 6]
 
     steps:
+      - name: Record when this job's cancel clock started
+        run: echo "VIBESYS_JOB_STARTED_AT=$(date +%s)" >> "$GITHUB_ENV"
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Pass the pytest cancel deadline
+        run: python3 scripts/pytest_job_deadline.py
 
       - name: Set up repoctl
         uses: ./.github/actions/setup-repoctl
@@ -568,7 +598,13 @@ jobs:
     timeout-minutes: 10
 
     steps:
+      - name: Record when this job's cancel clock started
+        run: echo "VIBESYS_JOB_STARTED_AT=$(date +%s)" >> "$GITHUB_ENV"
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Pass the pytest cancel deadline
+        run: python3 scripts/pytest_job_deadline.py
 
       - name: Install uv
         uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
@@ -656,7 +692,13 @@ jobs:
         # slowest near three minutes (see docs/contributing/testing-map.md).
         shard: [1, 2, 3]
     steps:
+      - name: Record when this job's cancel clock started
+        run: echo "VIBESYS_JOB_STARTED_AT=$(date +%s)" >> "$GITHUB_ENV"
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Pass the pytest cancel deadline
+        run: python3 scripts/pytest_job_deadline.py
 
       - name: Install uv
         uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
@@ -828,10 +870,16 @@ jobs:
     timeout-minutes: 6
 
     steps:
+      - name: Record when this job's cancel clock started
+        run: echo "VIBESYS_JOB_STARTED_AT=$(date +%s)" >> "$GITHUB_ENV"
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           filter: blob:none
+
+      - name: Pass the pytest cancel deadline
+        run: python3 scripts/pytest_job_deadline.py
 
       - name: Select the tests this pull request adds or changes
         id: select
@@ -889,7 +937,13 @@ jobs:
     timeout-minutes: 10
 
     steps:
+      - name: Record when this job's cancel clock started
+        run: echo "VIBESYS_JOB_STARTED_AT=$(date +%s)" >> "$GITHUB_ENV"
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Pass the pytest cancel deadline
+        run: python3 scripts/pytest_job_deadline.py
 
       # Bounded for the same reason as the containment-dependency install in
       # `queue-native`: this apt install intermittently hangs on these runners
@@ -949,7 +1003,13 @@ jobs:
     timeout-minutes: 10
 
     steps:
+      - name: Record when this job's cancel clock started
+        run: echo "VIBESYS_JOB_STARTED_AT=$(date +%s)" >> "$GITHUB_ENV"
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Pass the pytest cancel deadline
+        run: python3 scripts/pytest_job_deadline.py
 
       - name: Install uv
         uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
@@ -982,7 +1042,13 @@ jobs:
     timeout-minutes: 20
 
     steps:
+      - name: Record when this job's cancel clock started
+        run: echo "VIBESYS_JOB_STARTED_AT=$(date +%s)" >> "$GITHUB_ENV"
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Pass the pytest cancel deadline
+        run: python3 scripts/pytest_job_deadline.py
 
       # The host-side job confinement the tier exercises needs bubblewrap; see
       # the sandbox-linux job for why the AppArmor userns restriction is lifted.
@@ -1053,7 +1119,13 @@ jobs:
     timeout-minutes: 20
 
     steps:
+      - name: Record when this job's cancel clock started
+        run: echo "VIBESYS_JOB_STARTED_AT=$(date +%s)" >> "$GITHUB_ENV"
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Pass the pytest cancel deadline
+        run: python3 scripts/pytest_job_deadline.py
 
       - name: Install uv
         uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0

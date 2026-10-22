@@ -19,7 +19,10 @@ from tests.support.scratch_tree import remove_scratch_tree
 from vs_sim.api.testing import Depth
 
 # `--shard=I/N` splits the suite across CI runners (see tests/support/sharding.py).
+# The hang-dump plugin is first so its deadline timer is armed before other
+# plugins do work. It no-ops unless the workflow passed VIBESYS_PYTEST_DUMP_AT.
 pytest_plugins = [
+    "scripts.pytest_hang_dump",
     "vs_sim_pytest",
     "tests.support.isolated_environment",
     "tests.support.cwd_hygiene",
