@@ -68,6 +68,12 @@ func (s coverageScope) includes(path string) bool {
 // zero or more directories, and other stars as one path component.
 func coveragePattern(root, pattern string) (*regexp.Regexp, error) {
 	pattern = strings.ReplaceAll(pattern, `\`, "/")
+	if strings.Contains(pattern, "**/**") {
+		return nil, fmt.Errorf("invalid coverage pattern %q: **/** is not allowed", pattern)
+	}
+	// A pattern without a slash matches a file name anywhere; an absolute one
+	// is anchored at the repository root even after it is made relative.
+	anchored := strings.Contains(pattern, "/")
 	if filepath.IsAbs(pattern) {
 		relative, err := filepath.Rel(root, pattern)
 		if err != nil {
@@ -75,7 +81,11 @@ func coveragePattern(root, pattern string) (*regexp.Regexp, error) {
 		}
 		pattern = filepath.ToSlash(relative)
 	}
-	if !strings.Contains(pattern, "/") {
+	// coverage.py also matches the pattern made absolute, which normalizes it.
+	if !strings.HasPrefix(pattern, "*") && !strings.HasPrefix(pattern, "?") {
+		pattern = filepath.ToSlash(filepath.Clean(pattern))
+	}
+	if !anchored {
 		pattern = "**/" + pattern
 	}
 	if strings.HasPrefix(pattern, "*/") {
@@ -114,6 +124,8 @@ func coveragePattern(root, pattern string) (*regexp.Regexp, error) {
 			}
 			rx.WriteString(pattern[i : i+end+2])
 			i += end + 1
+		case ']':
+			return nil, fmt.Errorf("invalid coverage pattern %q: unopened character class", pattern)
 		default:
 			rx.WriteString(regexp.QuoteMeta(pattern[i : i+1]))
 		}
