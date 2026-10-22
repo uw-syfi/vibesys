@@ -292,7 +292,10 @@ def _serve_start(payload: bytes, threads: Threads) -> bytes:
         except (TypeError, ValueError) as exc:
             raise StartRefusedError(str(exc)) from exc
         host = import_module("entrypoints.host_helper").real_host(os.environ, os.getuid(), threads)
-        reply = requests.launch_registered_run(body, host)
+        try:
+            reply = requests.launch_registered_run(body, host)
+        except requests.ProjectLookupError as exc:
+            raise StartRefusedError(str(exc)) from exc
         if isinstance(reply, models.HelperError):
             raise StartRefusedError(reply.message)
         started = reply.launch
