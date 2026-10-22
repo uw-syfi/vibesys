@@ -35,6 +35,7 @@ from vs_runtime._replay_sessions import (
     SessionReplayExecutor,
 )
 from vs_runtime._replay_store import ReplayStore, RunLogReplayStore
+from vs_runtime._replay_wiring import ReplayOwnerServices, replay_bindings
 from vs_runtime._replay_workspaces import WorkspaceReplayExecutor
 
 __all__ = [
@@ -53,6 +54,7 @@ __all__ = [
     "ReplayOperationBinding",
     "ReplayOperationError",
     "ReplayOperationHost",
+    "ReplayOwnerServices",
     "ReplayParked",
     "ReplayPending",
     "ReplayPrompt",
@@ -68,5 +70,6 @@ __all__ = [
     "SessionReplayExecutor",
     "WorkspaceReplayExecutor",
     "drive_replay",
+    "replay_bindings",
     "replay_measurement_plan",
 ]

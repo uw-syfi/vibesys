@@ -39,12 +39,8 @@ from vs_proto.api import replay_evaluation as evaluation
 from vs_proto.api import replay_workspace as workspace
 from vs_runtime.api import ArtifactStore, WorkspaceAccess, render_stage_failure
 from vs_runtime.api.core import (
-    JournalRunInvocations,
     ProductionSessionResolver,
-    ReceiptEvidenceLedger,
-    ReleasedRunInvocations,
     ResolverInputs,
-    RuntimeWorkspaceRequests,
     StoreWorkspaceReceipts,
 )
 from vs_runtime.api.core_values import to_proto
@@ -54,20 +50,20 @@ from vs_runtime.api.infrastructure import (
     TrustedEvaluationPlan,
 )
 from vs_runtime.api.replay import (
-    EvaluationReplayExecutor,
+    FakeReplayExecutor,
     ReplayAgentReply,
     ReplayCompleted,
     ReplayEnding,
-    ReplayExecutors,
     ReplayLaunch,
+    ReplayOperationError,
     ReplayOperationHost,
+    ReplayOwnerServices,
     ReplayParked,
     ReplayRunHost,
     ReplayRuntime,
     ReplaySessionServices,
-    SessionReplayExecutor,
-    WorkspaceReplayExecutor,
     drive_replay,
+    replay_bindings,
     replay_measurement_plan,
 )
 from vs_runtime.api.slurm_evaluation_stack import ScenarioCluster, plan
@@ -78,6 +74,9 @@ from vs_slurm.api import SlurmConfig, SlurmSshTransport
 from .generated.vibesys.runtime.testing.v1.agent_replay_pb import AgentReplayResult
 from .test_replay_evaluation import SCOPE
 from .test_replay_evaluation import step as evaluation_step
+from .test_replay_executor_routing import echo
+from .test_replay_executor_routing import program as routing_program
+from .test_replay_executor_routing import role as echo_role
 from .test_replay_sessions import encode
 from .test_replay_workspaces import request as workspace_request
 from .test_replay_workspaces import step as workspace_step
@@ -85,13 +84,14 @@ from .test_session_resolver import role
 from .test_workspace_requests import _commits, _env
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Coroutine
+    from collections.abc import Callable, Coroutine, Mapping
     from pathlib import Path
 
     from protobuf import Message
 
     from vs_agent.api.testing import FakeInvocation
     from vs_runtime.api import AgentRole
+    from vs_runtime.api.replay import ReplayExecutor
     from vs_sim.api.testing import Sim
 
     from .test_workspace_requests import _Env
@@ -345,7 +345,14 @@ class CandidateWorld:
             base, artifact(b"Work using revised policy."), facts, reply_version="2"
         )
 
-    def host(self, *, restart: bool = False, iterations: int = 1) -> ReplayRunHost:
+    def host(
+        self,
+        *,
+        restart: bool = False,
+        iterations: int = 1,
+        allow_adoption: bool = True,
+        operations: Mapping[type[Message], ReplayExecutor] | None = None,
+    ) -> ReplayRunHost:
         resources = self.env.start_host() if restart else self.initial
         timing = ReplayOperationHost(self.env.run_id, self.store, self.sim.clock)
 
@@ -377,15 +384,6 @@ class CandidateWorld:
             ),
             threads=self.threads,
         )
-        owner = RuntimeWorkspaceRequests(
-            resources,
-            self.receipts,
-            ReleasedRunInvocations(
-                JournalRunInvocations(sessions, self.receipts), sessions, self.receipts
-            ),
-            InlineBlockingRunner(),
-            ReceiptEvidenceLedger(self.receipts),
-        )
         config = SlurmConfig(
             name="test", remote_workspace_root="/runs", transport=SlurmSshTransport(host="host-a")
         )
@@ -407,21 +405,19 @@ class CandidateWorld:
             cluster=self.cluster,
         )
         self.jobs.append(measured)
-        executor = ReplayExecutors(
-            {
-                workspace.ReplayWorkspaceRequest: WorkspaceReplayExecutor(
-                    owner, self.receipts, timing, within_seconds=100
-                ),
-                agent.ReplayAgentRequest: SessionReplayExecutor(
-                    ReplaySessionServices(sessions, resolver, InlineBlockingRunner()),
-                    self.receipts,
-                    timing,
-                    (ReplayAgentReply(SCHEMA, Reply, AgentReplayResult, encode),),
-                ),
-                evaluation.ReplayEvaluationRequest: EvaluationReplayExecutor(
-                    measured, self.receipts, timing, within_seconds=100
-                ),
-            }
+        executor = replay_bindings(
+            ReplayOwnerServices(
+                workspaces=resources,
+                sessions=ReplaySessionServices(sessions, resolver, InlineBlockingRunner()),
+                evaluation=measured,
+                workspace_within_seconds=100,
+                evaluation_within_seconds=100,
+                allow_adoption=allow_adoption,
+            ),
+            self.receipts,
+            timing,
+            (ReplayAgentReply(SCHEMA, Reply, AgentReplayResult, encode),),
+            operations=operations,
         )
         return ReplayRunHost(
             ReplayRuntime(self.store, self.root, replay.ReplayAllowance(iterations=iterations)),
@@ -531,6 +527,89 @@ def test_zero_fresh_iteration_budget_never_reaches_an_effect_owner(
                     and span.replay.key is not None
                     and not span.replay.key.operation.startswith("framework.")
                 ]
+            finally:
+                for job in world.jobs:
+                    await job.close()
+
+        sim.run(scenario(), threads=world.threads)
+
+
+def test_native_composition_preserves_operator_edits_when_adoption_is_protected(
+    tmp_path: Path, sim: Sim
+) -> None:
+    with _env(tmp_path) as env:
+        world = CandidateWorld(env, sim)
+        root = world.initial.root.path
+        (root / "candidate.py").write_text("VALUE = 9\n", encoding="utf-8")
+        (root / "operator-note.txt").write_text("Keep this.\n", encoding="utf-8")
+        original_head = world.initial.root.revision
+
+        async def scenario() -> None:
+            try:
+                result = await drive_replay(
+                    world.host(allow_adoption=False),
+                    ReplayLaunch(EpochStarted(run_id=env.run_id), "first", "host-a", 100),
+                )
+                assert isinstance(result, ReplayCompleted)
+                assert isinstance(result.value, workspace.ReplayWorkspaceResult)
+                assert result.value.status is workspace.ReplayWorkspaceStatus.REJECTED
+                assert (root / "candidate.py").read_text() == "VALUE = 9\n"
+                assert (root / "operator-note.txt").read_text() == "Keep this.\n"
+                assert world.initial.root.revision == original_head
+                assert len(world.client.calls_for("worker")) == 1
+                assert len(world.cluster.submissions) == 1
+            finally:
+                for job in world.jobs:
+                    await job.close()
+
+        sim.run(scenario(), threads=world.threads)
+
+
+def test_native_composition_adds_registered_request_owners(tmp_path: Path, sim: Sim) -> None:
+    with _env(tmp_path) as env:
+        world = CandidateWorld(env, sim)
+        world.root = routing_program
+        first, second = FakeReplayExecutor(echo), FakeReplayExecutor(echo_role)
+
+        async def scenario() -> None:
+            try:
+                completed = await drive_replay(
+                    world.host(
+                        operations={core_common.Identity: first, core_common.RoleId: second}
+                    ),
+                    ReplayLaunch(EpochStarted(run_id=env.run_id), "first", "host-a", 100),
+                )
+                assert completed == ReplayCompleted(("a", "role:b"))
+                assert len(first.invocations) == len(second.invocations) == 1
+                assert not world.client.calls_for("worker")
+                assert not world.cluster.submissions
+            finally:
+                for job in world.jobs:
+                    await job.close()
+
+        sim.run(scenario(), threads=world.threads)
+
+
+@pytest.mark.parametrize(
+    "request_type",
+    [
+        workspace.ReplayWorkspaceRequest,
+        agent.ReplayAgentRequest,
+        evaluation.ReplayEvaluationRequest,
+    ],
+)
+def test_registered_request_owners_cannot_replace_native_lifecycle_owners(
+    tmp_path: Path, sim: Sim, request_type: type[Message]
+) -> None:
+    with _env(tmp_path) as env:
+        world = CandidateWorld(env, sim)
+
+        async def scenario() -> None:
+            try:
+                with pytest.raises(ReplayOperationError, match="cannot replace lifecycle owner"):
+                    world.host(operations={request_type: FakeReplayExecutor(echo)})
+                assert not world.client.calls_for("worker")
+                assert not world.cluster.submissions
             finally:
                 for job in world.jobs:
                     await job.close()
