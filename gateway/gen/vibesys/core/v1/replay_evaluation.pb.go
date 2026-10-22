@@ -208,22 +208,23 @@ func (x *ReplayMeasurementStage) GetExecutionSeconds() float64 {
 }
 
 type ReplayMeasurementPlan struct {
-	state              protoimpl.MessageState    `protogen:"open.v1"`
-	Purpose            EvidencePurpose           `protobuf:"varint,1,opt,name=purpose,proto3,enum=vibesys.core.v1.EvidencePurpose" json:"purpose,omitempty"`
-	Candidate          *RevisionRef              `protobuf:"bytes,2,opt,name=candidate,proto3" json:"candidate,omitempty"`
-	EvaluatorDigest    string                    `protobuf:"bytes,3,opt,name=evaluator_digest,json=evaluatorDigest,proto3" json:"evaluator_digest,omitempty"`
-	WorkloadDigest     string                    `protobuf:"bytes,4,opt,name=workload_digest,json=workloadDigest,proto3" json:"workload_digest,omitempty"`
-	EnvironmentDigest  string                    `protobuf:"bytes,5,opt,name=environment_digest,json=environmentDigest,proto3" json:"environment_digest,omitempty"`
-	Stages             []*ReplayMeasurementStage `protobuf:"bytes,6,rep,name=stages,proto3" json:"stages,omitempty"`
-	Order              ReplayMeasurementOrder    `protobuf:"varint,7,opt,name=order,proto3,enum=vibesys.core.v1.ReplayMeasurementOrder" json:"order,omitempty"`
-	Recipe             *ArtifactRef              `protobuf:"bytes,8,opt,name=recipe,proto3" json:"recipe,omitempty"`
-	SubmittedAt        float64                   `protobuf:"fixed64,9,opt,name=submitted_at,json=submittedAt,proto3" json:"submitted_at,omitempty"`
-	QueueAllowance     float64                   `protobuf:"fixed64,10,opt,name=queue_allowance,json=queueAllowance,proto3" json:"queue_allowance,omitempty"`
-	ReusableEvidence   []*EvidenceId             `protobuf:"bytes,11,rep,name=reusable_evidence,json=reusableEvidence,proto3" json:"reusable_evidence,omitempty"`
-	DedicatedResources bool                      `protobuf:"varint,12,opt,name=dedicated_resources,json=dedicatedResources,proto3" json:"dedicated_resources,omitempty"`
-	MeasuredInput      *string                   `protobuf:"bytes,13,opt,name=measured_input,json=measuredInput,proto3,oneof" json:"measured_input,omitempty"`
-	AccuracyStage      string                    `protobuf:"bytes,14,opt,name=accuracy_stage,json=accuracyStage,proto3" json:"accuracy_stage,omitempty"`
-	AccuracyGated      []EvidenceKind            `protobuf:"varint,15,rep,packed,name=accuracy_gated,json=accuracyGated,proto3,enum=vibesys.core.v1.EvidenceKind" json:"accuracy_gated,omitempty"`
+	state             protoimpl.MessageState    `protogen:"open.v1"`
+	Purpose           EvidencePurpose           `protobuf:"varint,1,opt,name=purpose,proto3,enum=vibesys.core.v1.EvidencePurpose" json:"purpose,omitempty"`
+	Candidate         *RevisionRef              `protobuf:"bytes,2,opt,name=candidate,proto3" json:"candidate,omitempty"`
+	EvaluatorDigest   string                    `protobuf:"bytes,3,opt,name=evaluator_digest,json=evaluatorDigest,proto3" json:"evaluator_digest,omitempty"`
+	WorkloadDigest    string                    `protobuf:"bytes,4,opt,name=workload_digest,json=workloadDigest,proto3" json:"workload_digest,omitempty"`
+	EnvironmentDigest string                    `protobuf:"bytes,5,opt,name=environment_digest,json=environmentDigest,proto3" json:"environment_digest,omitempty"`
+	Stages            []*ReplayMeasurementStage `protobuf:"bytes,6,rep,name=stages,proto3" json:"stages,omitempty"`
+	Order             ReplayMeasurementOrder    `protobuf:"varint,7,opt,name=order,proto3,enum=vibesys.core.v1.ReplayMeasurementOrder" json:"order,omitempty"`
+	Recipe            *ArtifactRef              `protobuf:"bytes,8,opt,name=recipe,proto3" json:"recipe,omitempty"`
+	SubmittedAt       float64                   `protobuf:"fixed64,9,opt,name=submitted_at,json=submittedAt,proto3" json:"submitted_at,omitempty"`
+	QueueAllowance    float64                   `protobuf:"fixed64,10,opt,name=queue_allowance,json=queueAllowance,proto3" json:"queue_allowance,omitempty"`
+	// Reuse hints affect execution policy, not the scientific input being measured.
+	ReusableEvidence   []*EvidenceId  `protobuf:"bytes,11,rep,name=reusable_evidence,json=reusableEvidence,proto3" json:"reusable_evidence,omitempty"`
+	DedicatedResources bool           `protobuf:"varint,12,opt,name=dedicated_resources,json=dedicatedResources,proto3" json:"dedicated_resources,omitempty"`
+	MeasuredInput      *string        `protobuf:"bytes,13,opt,name=measured_input,json=measuredInput,proto3,oneof" json:"measured_input,omitempty"`
+	AccuracyStage      string         `protobuf:"bytes,14,opt,name=accuracy_stage,json=accuracyStage,proto3" json:"accuracy_stage,omitempty"`
+	AccuracyGated      []EvidenceKind `protobuf:"varint,15,rep,packed,name=accuracy_gated,json=accuracyGated,proto3,enum=vibesys.core.v1.EvidenceKind" json:"accuracy_gated,omitempty"`
 	unknownFields      protoimpl.UnknownFields
 	sizeCache          protoimpl.SizeCache
 }
@@ -921,34 +922,34 @@ var File_vibesys_core_v1_replay_evaluation_proto protoreflect.FileDescriptor
 
 const file_vibesys_core_v1_replay_evaluation_proto_rawDesc = "" +
 	"\n" +
-	"'vibesys/core/v1/replay_evaluation.proto\x12\x0fvibesys.core.v1\x1a\x1bbuf/validate/validate.proto\x1a!vibesys/core/v1/agent_facts.proto\x1a\x1cvibesys/core/v1/common.proto\x1a\x1cvibesys/core/v1/leaves.proto\x1a vibesys/core/v1/vocabulary.proto\x1a\x1dvibesys/store/v1/replay.proto\"\x9b\x02\n" +
+	"'vibesys/core/v1/replay_evaluation.proto\x12\x0fvibesys.core.v1\x1a\x1bbuf/validate/validate.proto\x1a!vibesys/core/v1/agent_facts.proto\x1a\x1cvibesys/core/v1/common.proto\x1a\x1cvibesys/core/v1/leaves.proto\x1a vibesys/core/v1/vocabulary.proto\x1a\x1dvibesys/store/v1/replay.proto\"\xa3\x02\n" +
 	"\x16ReplayMeasurementStage\x12\x1b\n" +
-	"\x02id\x18\x01 \x01(\tB\v\xbaH\x04r\x02\x10\x01\xe0\xf9\x18\x01R\x02id\x12/\n" +
+	"\x02id\x18\x01 \x01(\tB\v\xbaH\x04r\x02\x10\x01\xe0\xf9\x18\x01R\x02id\x123\n" +
 	"\n" +
-	"depends_on\x18\x02 \x03(\tB\x10\xbaH\t\x92\x01\x06\"\x04r\x02\x10\x01\xe0\xf9\x18\x01R\tdependsOn\x12;\n" +
-	"\x10required_outputs\x18\x03 \x03(\tB\x10\xbaH\t\x92\x01\x06\"\x04r\x02\x10\x01\xe0\xf9\x18\x01R\x0frequiredOutputs\x12-\n" +
+	"depends_on\x18\x02 \x03(\tB\x14\xbaH\t\x92\x01\x06\"\x04r\x02\x10\x01\xe0\xf9\x18\x01\xe8\xf9\x18\x01R\tdependsOn\x12?\n" +
+	"\x10required_outputs\x18\x03 \x03(\tB\x14\xbaH\t\x92\x01\x06\"\x04r\x02\x10\x01\xe0\xf9\x18\x01\xe8\xf9\x18\x01R\x0frequiredOutputs\x12-\n" +
 	"\x0fdependency_rank\x18\x05 \x01(\rB\x04\xe0\xf9\x18\x02R\x0edependencyRank\x12A\n" +
-	"\x11execution_seconds\x18\x04 \x01(\x01B\x14\xbaH\r\x12\v@\x01)\x00\x00\x00\x00\x00\x00\x00\x00\xe0\xf9\x18\x02R\x10executionSeconds:\x04\xf0\xf9\x18\x01\"\x87\f\n" +
+	"\x11execution_seconds\x18\x04 \x01(\x01B\x14\xbaH\r\x12\v@\x01)\x00\x00\x00\x00\x00\x00\x00\x00\xe0\xf9\x18\x02R\x10executionSeconds:\x04\xf0\xf9\x18\x01\"\xb9\f\n" +
 	"\x15ReplayMeasurementPlan\x12J\n" +
 	"\apurpose\x18\x01 \x01(\x0e2 .vibesys.core.v1.EvidencePurposeB\x0e\xbaH\a\x82\x01\x04\x10\x01 \x00\xe0\xf9\x18\x01R\apurpose\x12F\n" +
 	"\tcandidate\x18\x02 \x01(\v2\x1c.vibesys.core.v1.RevisionRefB\n" +
 	"\xbaH\x03\xc8\x01\x01\xe0\xf9\x18\x01R\tcandidate\x126\n" +
 	"\x10evaluator_digest\x18\x03 \x01(\tB\v\xbaH\x04r\x02\x10\x01\xe0\xf9\x18\x01R\x0fevaluatorDigest\x124\n" +
 	"\x0fworkload_digest\x18\x04 \x01(\tB\v\xbaH\x04r\x02\x10\x01\xe0\xf9\x18\x01R\x0eworkloadDigest\x12:\n" +
-	"\x12environment_digest\x18\x05 \x01(\tB\v\xbaH\x04r\x02\x10\x01\xe0\xf9\x18\x01R\x11environmentDigest\x12M\n" +
-	"\x06stages\x18\x06 \x03(\v2'.vibesys.core.v1.ReplayMeasurementStageB\f\xbaH\x05\x92\x01\x02\b\x01\xe0\xf9\x18\x01R\x06stages\x12M\n" +
+	"\x12environment_digest\x18\x05 \x01(\tB\v\xbaH\x04r\x02\x10\x01\xe0\xf9\x18\x01R\x11environmentDigest\x12Q\n" +
+	"\x06stages\x18\x06 \x03(\v2'.vibesys.core.v1.ReplayMeasurementStageB\x10\xbaH\x05\x92\x01\x02\b\x01\xe0\xf9\x18\x01\xe8\xf9\x18\x01R\x06stages\x12M\n" +
 	"\x05order\x18\a \x01(\x0e2'.vibesys.core.v1.ReplayMeasurementOrderB\x0e\xbaH\a\x82\x01\x04\x10\x01 \x00\xe0\xf9\x18\x02R\x05order\x12@\n" +
 	"\x06recipe\x18\b \x01(\v2\x1c.vibesys.core.v1.ArtifactRefB\n" +
 	"\xbaH\x03\xc8\x01\x01\xe0\xf9\x18\x01R\x06recipe\x127\n" +
 	"\fsubmitted_at\x18\t \x01(\x01B\x14\xbaH\r\x12\v@\x01)\x00\x00\x00\x00\x00\x00\x00\x00\xe0\xf9\x18\x02R\vsubmittedAt\x12=\n" +
 	"\x0fqueue_allowance\x18\n" +
 	" \x01(\x01B\x14\xbaH\r\x12\v@\x01)\x00\x00\x00\x00\x00\x00\x00\x00\xe0\xf9\x18\x02R\x0equeueAllowance\x12N\n" +
-	"\x11reusable_evidence\x18\v \x03(\v2\x1b.vibesys.core.v1.EvidenceIdB\x04\xe0\xf9\x18\x01R\x10reusableEvidence\x125\n" +
+	"\x11reusable_evidence\x18\v \x03(\v2\x1b.vibesys.core.v1.EvidenceIdB\x04\xe0\xf9\x18\x02R\x10reusableEvidence\x125\n" +
 	"\x13dedicated_resources\x18\f \x01(\bB\x04\xe0\xf9\x18\x01R\x12dedicatedResources\x127\n" +
 	"\x0emeasured_input\x18\r \x01(\tB\v\xbaH\x04r\x02\x10\x01\xe0\xf9\x18\x01H\x00R\rmeasuredInput\x88\x01\x01\x12+\n" +
-	"\x0eaccuracy_stage\x18\x0e \x01(\tB\x04\xe0\xf9\x18\x01R\raccuracyStage\x12Y\n" +
-	"\x0eaccuracy_gated\x18\x0f \x03(\x0e2\x1d.vibesys.core.v1.EvidenceKindB\x13\xbaH\f\x92\x01\t\"\a\x82\x01\x04\x10\x01 \x00\xe0\xf9\x18\x01R\raccuracyGated:\xfc\x03\xbaH\xf4\x03\x1a\x80\x02\n" +
-	"\x19replay_measurement.stages\x12Imeasurement stages must be unique with strictly lower-ranked dependencies\x1a\x97\x01this.stages.map(s, s.id).unique() && this.stages.all(s, s.depends_on.all(d, this.stages.exists(x, x.id == d && x.dependency_rank < s.dependency_rank)))\x1a\xee\x01\n" +
+	"\x0eaccuracy_stage\x18\x0e \x01(\tB\x04\xe0\xf9\x18\x01R\raccuracyStage\x12]\n" +
+	"\x0eaccuracy_gated\x18\x0f \x03(\x0e2\x1d.vibesys.core.v1.EvidenceKindB\x17\xbaH\f\x92\x01\t\"\a\x82\x01\x04\x10\x01 \x00\xe0\xf9\x18\x01\xe8\xf9\x18\x01R\raccuracyGated:\xa6\x04\xbaH\x9e\x04\x1a\xaa\x02\n" +
+	"\x19replay_measurement.stages\x12Zmeasurement stages and dependencies must be unique with strictly lower-ranked dependencies\x1a\xb0\x01this.stages.map(s, s.id).unique() && this.stages.all(s, s.depends_on.unique() && s.depends_on.all(d, this.stages.exists(x, x.id == d && x.dependency_rank < s.dependency_rank)))\x1a\xee\x01\n" +
 	"\x1breplay_measurement.accuracy\x12:accuracy-gated evidence requires a declared accuracy stage\x1a\x92\x01(this.accuracy_stage == '' || this.stages.exists(s, s.id == this.accuracy_stage)) && (size(this.accuracy_gated) == 0 || this.accuracy_stage != '')\xf0\xf9\x18\x01B\x11\n" +
 	"\x0f_measured_input\"\xd5\x01\n" +
 	"\x17ReplaySubmitMeasurement\x12F\n" +

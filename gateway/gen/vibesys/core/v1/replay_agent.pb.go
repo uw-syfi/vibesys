@@ -394,13 +394,14 @@ func (x *ReplayAgentInput) GetMode() InputMode {
 }
 
 type ReplayAgentTurn struct {
-	state        protoimpl.MessageState `protogen:"open.v1"`
-	Session      *ReplayAgentSession    `protobuf:"bytes,1,opt,name=session,proto3" json:"session,omitempty"`
-	Invocation   string                 `protobuf:"bytes,2,opt,name=invocation,proto3" json:"invocation,omitempty"`
-	Workspace    *Scope                 `protobuf:"bytes,3,opt,name=workspace,proto3" json:"workspace,omitempty"`
-	Prompts      []*ArtifactRef         `protobuf:"bytes,4,rep,name=prompts,proto3" json:"prompts,omitempty"`
-	OutputSchema *SchemaRef             `protobuf:"bytes,5,opt,name=output_schema,json=outputSchema,proto3" json:"output_schema,omitempty"`
-	ToolPolicy   *ArtifactRef           `protobuf:"bytes,6,opt,name=tool_policy,json=toolPolicy,proto3" json:"tool_policy,omitempty"`
+	state      protoimpl.MessageState `protogen:"open.v1"`
+	Session    *ReplayAgentSession    `protobuf:"bytes,1,opt,name=session,proto3" json:"session,omitempty"`
+	Invocation string                 `protobuf:"bytes,2,opt,name=invocation,proto3" json:"invocation,omitempty"`
+	Workspace  *Scope                 `protobuf:"bytes,3,opt,name=workspace,proto3" json:"workspace,omitempty"`
+	Prompts    []*ArtifactRef         `protobuf:"bytes,4,rep,name=prompts,proto3" json:"prompts,omitempty"`
+	// Historical replies retain their exact schema; incompatible consumers change the semantic contract.
+	OutputSchema *SchemaRef   `protobuf:"bytes,5,opt,name=output_schema,json=outputSchema,proto3" json:"output_schema,omitempty"`
+	ToolPolicy   *ArtifactRef `protobuf:"bytes,6,opt,name=tool_policy,json=toolPolicy,proto3" json:"tool_policy,omitempty"`
 	// Typed fact artifacts that supply semantic input, distinct from rendered prompt policy.
 	ArtifactDependencies []*ArtifactRef      `protobuf:"bytes,7,rep,name=artifact_dependencies,json=artifactDependencies,proto3" json:"artifact_dependencies,omitempty"`
 	MaxTurns             uint32              `protobuf:"varint,8,opt,name=max_turns,json=maxTurns,proto3" json:"max_turns,omitempty"`
@@ -866,7 +867,7 @@ const file_vibesys_core_v1_replay_agent_proto_rawDesc = "" +
 	"\xbaH\x03\xc8\x01\x01\xe0\xf9\x18\x01R\tworkspace\x12D\n" +
 	"\aprompts\x18\x04 \x03(\v2\x1c.vibesys.core.v1.ArtifactRefB\f\xbaH\x05\x92\x01\x02\b\x01\xe0\xf9\x18\x02R\aprompts\x12K\n" +
 	"\routput_schema\x18\x05 \x01(\v2\x1a.vibesys.core.v1.SchemaRefB\n" +
-	"\xbaH\x03\xc8\x01\x01\xe0\xf9\x18\x01R\foutputSchema\x12C\n" +
+	"\xbaH\x03\xc8\x01\x01\xe0\xf9\x18\x02R\foutputSchema\x12C\n" +
 	"\vtool_policy\x18\x06 \x01(\v2\x1c.vibesys.core.v1.ArtifactRefB\x04\xe0\xf9\x18\x02R\n" +
 	"toolPolicy\x12_\n" +
 	"\x15artifact_dependencies\x18\a \x03(\v2\x1c.vibesys.core.v1.ArtifactRefB\f\xbaH\x05\x92\x01\x02\b\x01\xe0\xf9\x18\x01R\x14artifactDependencies\x12(\n" +

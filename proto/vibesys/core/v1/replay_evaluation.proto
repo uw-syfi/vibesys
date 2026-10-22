@@ -28,8 +28,8 @@ enum ReplayMeasurementFailure {
 message ReplayMeasurementStage {
   option (vibesys.store.v1.replay_context) = true;
   string id = 1 [(buf.validate.field).string.min_len = 1, (vibesys.store.v1.replay_field) = REPLAY_FIELD_KIND_IDENTITY];
-  repeated string depends_on = 2 [(buf.validate.field).repeated.items.string.min_len = 1, (vibesys.store.v1.replay_field) = REPLAY_FIELD_KIND_IDENTITY];
-  repeated string required_outputs = 3 [(buf.validate.field).repeated.items.string.min_len = 1, (vibesys.store.v1.replay_field) = REPLAY_FIELD_KIND_IDENTITY];
+  repeated string depends_on = 2 [(buf.validate.field).repeated.items.string.min_len = 1, (vibesys.store.v1.replay_field) = REPLAY_FIELD_KIND_IDENTITY, (vibesys.store.v1.replay_set) = true];
+  repeated string required_outputs = 3 [(buf.validate.field).repeated.items.string.min_len = 1, (vibesys.store.v1.replay_field) = REPLAY_FIELD_KIND_IDENTITY, (vibesys.store.v1.replay_set) = true];
   // A strict dependency rank is an acyclicity witness, not an execution order.
   uint32 dependency_rank = 5 [(vibesys.store.v1.replay_field) = REPLAY_FIELD_KIND_POLICY];
   double execution_seconds = 4 [(buf.validate.field).double = {gte: 0, finite: true}, (vibesys.store.v1.replay_field) = REPLAY_FIELD_KIND_POLICY];
@@ -39,8 +39,8 @@ message ReplayMeasurementPlan {
   option (vibesys.store.v1.replay_context) = true;
   option (buf.validate.message).cel = {
     id: "replay_measurement.stages"
-    message: "measurement stages must be unique with strictly lower-ranked dependencies"
-    expression: "this.stages.map(s, s.id).unique() && this.stages.all(s, s.depends_on.all(d, this.stages.exists(x, x.id == d && x.dependency_rank < s.dependency_rank)))"
+    message: "measurement stages and dependencies must be unique with strictly lower-ranked dependencies"
+    expression: "this.stages.map(s, s.id).unique() && this.stages.all(s, s.depends_on.unique() && s.depends_on.all(d, this.stages.exists(x, x.id == d && x.dependency_rank < s.dependency_rank)))"
   };
   option (buf.validate.message).cel = {
     id: "replay_measurement.accuracy"
@@ -52,16 +52,17 @@ message ReplayMeasurementPlan {
   string evaluator_digest = 3 [(buf.validate.field).string.min_len = 1, (vibesys.store.v1.replay_field) = REPLAY_FIELD_KIND_IDENTITY];
   string workload_digest = 4 [(buf.validate.field).string.min_len = 1, (vibesys.store.v1.replay_field) = REPLAY_FIELD_KIND_IDENTITY];
   string environment_digest = 5 [(buf.validate.field).string.min_len = 1, (vibesys.store.v1.replay_field) = REPLAY_FIELD_KIND_IDENTITY];
-  repeated ReplayMeasurementStage stages = 6 [(buf.validate.field).repeated.min_items = 1, (vibesys.store.v1.replay_field) = REPLAY_FIELD_KIND_IDENTITY];
+  repeated ReplayMeasurementStage stages = 6 [(buf.validate.field).repeated.min_items = 1, (vibesys.store.v1.replay_field) = REPLAY_FIELD_KIND_IDENTITY, (vibesys.store.v1.replay_set) = true];
   ReplayMeasurementOrder order = 7 [(buf.validate.field).enum = {defined_only: true, not_in: [0]}, (vibesys.store.v1.replay_field) = REPLAY_FIELD_KIND_POLICY];
   ArtifactRef recipe = 8 [(buf.validate.field).required = true, (vibesys.store.v1.replay_field) = REPLAY_FIELD_KIND_IDENTITY];
   double submitted_at = 9 [(buf.validate.field).double = {gte: 0, finite: true}, (vibesys.store.v1.replay_field) = REPLAY_FIELD_KIND_POLICY];
   double queue_allowance = 10 [(buf.validate.field).double = {gte: 0, finite: true}, (vibesys.store.v1.replay_field) = REPLAY_FIELD_KIND_POLICY];
-  repeated EvidenceId reusable_evidence = 11 [(vibesys.store.v1.replay_field) = REPLAY_FIELD_KIND_IDENTITY];
+  // Reuse hints affect execution policy, not the scientific input being measured.
+  repeated EvidenceId reusable_evidence = 11 [(vibesys.store.v1.replay_field) = REPLAY_FIELD_KIND_POLICY];
   bool dedicated_resources = 12 [(vibesys.store.v1.replay_field) = REPLAY_FIELD_KIND_IDENTITY];
   optional string measured_input = 13 [(buf.validate.field).string.min_len = 1, (vibesys.store.v1.replay_field) = REPLAY_FIELD_KIND_IDENTITY];
   string accuracy_stage = 14 [(vibesys.store.v1.replay_field) = REPLAY_FIELD_KIND_IDENTITY];
-  repeated EvidenceKind accuracy_gated = 15 [(buf.validate.field).repeated.items.enum = {defined_only: true, not_in: [0]}, (vibesys.store.v1.replay_field) = REPLAY_FIELD_KIND_IDENTITY];
+  repeated EvidenceKind accuracy_gated = 15 [(buf.validate.field).repeated.items.enum = {defined_only: true, not_in: [0]}, (vibesys.store.v1.replay_field) = REPLAY_FIELD_KIND_IDENTITY, (vibesys.store.v1.replay_set) = true];
 }
 
 message ReplaySubmitMeasurement {

@@ -48,10 +48,13 @@ def test_agent_policy_drift_reuses_facts_and_changed_facts_change_identity(value
     assert turn.session is not None
     turn.session.model = value
     turn.prompts[0].digest = value
+    assert turn.output_schema is not None
+    turn.output_schema.version = "2"
     request.within_seconds = 31
     after = classify_context(request, contract="agent.v1")
     assert before.identity == after.identity
     assert before.content != after.content
+    assert before.identity != classify_context(request, contract="agent.v2").identity
     turn.artifact_dependencies[0].digest = value
     changed = classify_context(request, contract="agent.v1")
     assert changed.identity != before.identity

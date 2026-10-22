@@ -59,7 +59,8 @@ message ReplayAgentTurn {
   string invocation = 2 [(buf.validate.field).string.min_len = 1, (vibesys.store.v1.replay_field) = REPLAY_FIELD_KIND_IDENTITY];
   Scope workspace = 3 [(buf.validate.field).required = true, (vibesys.store.v1.replay_field) = REPLAY_FIELD_KIND_IDENTITY];
   repeated ArtifactRef prompts = 4 [(buf.validate.field).repeated.min_items = 1, (vibesys.store.v1.replay_field) = REPLAY_FIELD_KIND_POLICY];
-  SchemaRef output_schema = 5 [(buf.validate.field).required = true, (vibesys.store.v1.replay_field) = REPLAY_FIELD_KIND_IDENTITY];
+  // Historical replies retain their exact schema; incompatible consumers change the semantic contract.
+  SchemaRef output_schema = 5 [(buf.validate.field).required = true, (vibesys.store.v1.replay_field) = REPLAY_FIELD_KIND_POLICY];
   ArtifactRef tool_policy = 6 [(vibesys.store.v1.replay_field) = REPLAY_FIELD_KIND_POLICY];
   // Typed fact artifacts that supply semantic input, distinct from rendered prompt policy.
   repeated ArtifactRef artifact_dependencies = 7 [(buf.validate.field).repeated.min_items = 1, (vibesys.store.v1.replay_field) = REPLAY_FIELD_KIND_IDENTITY];

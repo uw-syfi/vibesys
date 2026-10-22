@@ -39,8 +39,12 @@ from vs_proto.api import replay_evaluation as evaluation
 from vs_proto.api import replay_workspace as workspace
 from vs_runtime.api import ArtifactStore, WorkspaceAccess, render_stage_failure
 from vs_runtime.api.core import (
+    JournalRunInvocations,
     ProductionSessionResolver,
+    ReceiptEvidenceLedger,
+    ReleasedRunInvocations,
     ResolverInputs,
+    RuntimeWorkspaceRequests,
     StoreWorkspaceReceipts,
 )
 from vs_runtime.api.core_values import to_proto
@@ -78,7 +82,7 @@ from .test_replay_sessions import encode
 from .test_replay_workspaces import request as workspace_request
 from .test_replay_workspaces import step as workspace_step
 from .test_session_resolver import role
-from .test_workspace_requests import _commits, _env, _executor
+from .test_workspace_requests import _commits, _env
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine
@@ -132,7 +136,11 @@ EFFECTS = (
 
 
 def program(
-    base: core_leaves.RevisionRef, prompt: core_common.ArtifactRef, facts: core_common.ArtifactRef
+    base: core_leaves.RevisionRef,
+    prompt: core_common.ArtifactRef,
+    facts: core_common.ArtifactRef,
+    *,
+    reply_version: str = "1",
 ) -> Callable[[ReplayFlow], Coroutine[object, object, object]]:
     async def root(ctx: ReplayFlow) -> object:
         async with ctx.iteration("candidate", 1):
@@ -173,7 +181,7 @@ def program(
                         workspace=SCOPE,
                         prompts=[prompt],
                         artifact_dependencies=[facts],
-                        output_schema=core_common.SchemaRef(name="reply", version="1"),
+                        output_schema=core_common.SchemaRef(name="reply", version=reply_version),
                         max_turns=1,
                     ),
                 ),
@@ -333,11 +341,12 @@ class CandidateWorld:
         self.cluster = cluster
         self.store = store
         self.root = program(base, prompt, facts)
-        self.drifted_root = program(base, artifact(b"Work using revised policy."), facts)
+        self.drifted_root = program(
+            base, artifact(b"Work using revised policy."), facts, reply_version="2"
+        )
 
     def host(self, *, restart: bool = False, iterations: int = 1) -> ReplayRunHost:
         resources = self.env.start_host() if restart else self.initial
-        owner, _ = _executor(resources, self.receipts)
         timing = ReplayOperationHost(self.env.run_id, self.store, self.sim.clock)
 
         def spec(selected: AgentRole, path: Path) -> AgentSessionSpec:
@@ -367,6 +376,15 @@ class CandidateWorld:
                 "journal.json", AgentInvocationState
             ),
             threads=self.threads,
+        )
+        owner = RuntimeWorkspaceRequests(
+            resources,
+            self.receipts,
+            ReleasedRunInvocations(
+                JournalRunInvocations(sessions, self.receipts), sessions, self.receipts
+            ),
+            InlineBlockingRunner(),
+            ReceiptEvidenceLedger(self.receipts),
         )
         config = SlurmConfig(
             name="test", remote_workspace_root="/runs", transport=SlurmSshTransport(host="host-a")
@@ -445,7 +463,7 @@ class CandidateWorld:
                 if selected:
                     break
             first.runtime.close(now=self.sim.clock.now())
-            resumed = self.host(restart=True)
+            resumed = self.host(restart=True, iterations=0)
             completed = await drive_replay(
                 resumed, ReplayLaunch(EpochStarted(run_id=self.env.run_id), "resume", "host-a", 100)
             )

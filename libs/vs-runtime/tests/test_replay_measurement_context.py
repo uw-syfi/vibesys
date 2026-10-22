@@ -9,7 +9,7 @@ from protovalidate import ValidationError
 
 from vs_core.api import MeasurementStage, RevisionRef
 from vs_core.api.replay import classify_context
-from vs_proto.api import core_leaves, validate
+from vs_proto.api import core_common, core_leaves, core_vocabulary, validate
 from vs_runtime.api.core_values import to_proto
 from vs_runtime.api.replay import replay_measurement_plan
 from vs_runtime.api.slurm_evaluation_stack import plan
@@ -45,3 +45,40 @@ def test_dependency_witness_validates_acyclic_graph_and_rejects_a_back_edge(
     native.stages[0].depends_on = [native.stages[-1].id]
     with pytest.raises(ValidationError, match="invalid ReplayMeasurementPlan"):
         validate(native)
+
+
+@given(order=st.permutations((0, 1, 2)), reverse_sets=st.booleans())
+def test_measurement_membership_order_and_reuse_hints_preserve_identity(
+    order: tuple[int, ...], *, reverse_sets: bool
+) -> None:
+    stages = (
+        MeasurementStage(stage_id="root", execution_budget=1),
+        MeasurementStage(stage_id="other", execution_budget=1),
+        MeasurementStage(
+            stage_id="last",
+            depends_on=("root", "other"),
+            required_outputs=("score", "summary"),
+            execution_budget=1,
+        ),
+    )
+    native = replay_measurement_plan(plan().model_copy(update={"stages": stages}))
+    native.accuracy_stage = "root"
+    native.accuracy_gated = [
+        core_vocabulary.EvidenceKind.BENCHMARK,
+        core_vocabulary.EvidenceKind.PROFILING,
+    ]
+    original = classify_context(native, contract="measurement.v1")
+    changed = deepcopy(native)
+    changed.stages = [changed.stages[index] for index in order]
+    if reverse_sets:
+        for stage in changed.stages:
+            stage.depends_on.reverse()
+            stage.required_outputs.reverse()
+        changed.accuracy_gated.reverse()
+    changed.reusable_evidence = [core_common.EvidenceId(root="earlier-proof", kind="evidence")]
+    assert classify_context(changed, contract="measurement.v1").identity == original.identity
+    assert changed.to_binary() != original.content
+    duplicated = deepcopy(native)
+    duplicated.stages[-1].depends_on.append("root")
+    with pytest.raises(ValidationError, match="invalid ReplayMeasurementPlan"):
+        validate(duplicated)
