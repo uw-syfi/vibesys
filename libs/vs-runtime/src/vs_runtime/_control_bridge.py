@@ -330,15 +330,34 @@ class RunControlBridge:
                 events.append(self._recorded(stop, _Change("stop", mode=StopMode.CANCEL), now_at))
             self._stop = escalate_stop(self._stop, StopMode.CANCEL)
         live = self._channel.stop_mode()
-        if live is not None and escalate_stop(self._stop, live) is not self._stop:
-            self._stop = live
-            by = self._channel.requested_by("stop")
-            stop = self._event(core, now_at, _Change("stop", mode=live, control_id=by))
-            events += () if stop is None else (stop,)
-        for change in self._pause_changes(_held(core)):
+        changes = self._pause_changes(_held(core))
+        # A resume the channel already accepted cannot follow a stop: submission
+        # refuses it while a stop is pending. When this poll must record both,
+        # the resume cleared a pause before the stop was asked for. Recording
+        # the stop first makes core treat that resume as lifting it.
+        fresh = (
+            live if live is not None and escalate_stop(self._stop, live) is not self._stop else None
+        )
+        if fresh is not None:
+            earlier = [change for change in changes if change.action == "resume"]
+            later = [change for change in changes if change.action != "resume"]
+        else:
+            earlier, later = [], changes
+
+        def emit_pause(change: _Change) -> None:
             refusal = self._record_pause(core, now_at, change, events)
             if refusal is not None:
                 self._refuse(change, refusal, request_id=None)
+
+        for change in earlier:
+            emit_pause(change)
+        if fresh is not None:
+            self._stop = fresh
+            by = self._channel.requested_by("stop")
+            stop = self._event(core, now_at, _Change("stop", mode=fresh, control_id=by))
+            events += () if stop is None else (stop,)
+        for change in later:
+            emit_pause(change)
 
     def _pause_changes(self, held: Collection[ControlId]) -> list[_Change]:
         """The pause and resume controls that bring core's record of the pause to the channel's.
