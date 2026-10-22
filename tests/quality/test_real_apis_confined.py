@@ -1314,6 +1314,10 @@ FILE_IO_EDGE_MODULES: dict[str, Edge] = {
         EdgeKind.STORE,
         "GitRepository implementation over pygit2 (git state is files)",
     ),
+    "libs/vs-project/src/vs_project/_retained.py": (
+        EdgeKind.STORE,
+        "bounded read-only listing and reads of a stopped run's retained files",
+    ),
     "libs/vs-project/src/vs_project/_state.py": (
         EdgeKind.STORE,
         "project and run state namespaces",
@@ -1549,6 +1553,10 @@ FILE_IO_EDGE_MODULES: dict[str, Edge] = {
         "read-only loader of candidate checkout metadata (pyproject and git HEAD)",
     ),
     "src/vibesys/config.py": (EdgeKind.INPUT_LOADER, "VibeSys configuration"),
+    "src/vibesys/fact_import/_descriptors.py": (
+        EdgeKind.PACKAGED_RESOURCE,
+        "the facts importer's frozen snapshot descriptors",
+    ),
     "src/vibesys/domains/rendering.py": (EdgeKind.PACKAGED_RESOURCE, "role templates"),
     "src/vibesys/inputs/_manifest.py": (EdgeKind.INPUT_LOADER, "the task manifest"),
     "src/vibesys/inputs/_synthesis.py": (EdgeKind.GENERATOR, "writes a synthesized task folder"),

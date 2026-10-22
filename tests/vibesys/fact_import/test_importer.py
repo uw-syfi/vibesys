@@ -370,6 +370,16 @@ def test_project_shell_bounds_the_retained_journal_by_the_document_limit(tmp_pat
     assert error.value.path == "core-events.jsonl"
 
 
+def test_project_shell_refuses_a_symlinked_retained_file(tmp_path: Path) -> None:
+    project = _project_run(tmp_path)
+    (tmp_path / "outside.json").write_bytes(b"{}")
+    namespace = project.state.portable_namespace("run", "artifacts")
+    namespace.write_bytes("kept.txt", b"kept")
+    (Path(namespace.external_directory()) / "linked.json").symlink_to(tmp_path / "outside.json")
+    with pytest.raises(StateDocumentDamagedError, match="symlink"):
+        read_run_facts(project, "run", registry=FAKE_REGISTRY)
+
+
 @pytest.mark.parametrize(
     ("document", "run"), [(0, 1), (2, 1), (RetainedReadLimits().document_bytes + 1, 2**40)]
 )
