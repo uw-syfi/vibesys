@@ -41,7 +41,8 @@
     "@vibesys/transport": "workspace:*",
     "xstate": "5.33.2",
     "@vibesys/proto": "workspace:*",
-    "@bufbuild/protobuf": "2.16.0"
+    "@bufbuild/protobuf": "2.16.0",
+    "@vibesys/request-identity": "workspace:*"
   },
   "devDependencies": {
     "@types/bun": "1.4.2",

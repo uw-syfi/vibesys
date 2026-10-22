@@ -37,6 +37,9 @@
     },
     {
       "path": "../proto/tsconfig.lib.json"
+    },
+    {
+      "path": "../request-identity/tsconfig.lib.json"
     }
   ]
 }

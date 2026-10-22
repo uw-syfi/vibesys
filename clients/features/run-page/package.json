@@ -45,7 +45,8 @@
     "@vibesys/ui": "workspace:*",
     "react": "19.1.1",
     "xstate": "5.33.2",
-    "@vibesys/run-skeleton": "workspace:*"
+    "@vibesys/run-skeleton": "workspace:*",
+    "@vibesys/request-identity": "workspace:*"
   },
   "devDependencies": {
     "@types/bun": "1.4.2",

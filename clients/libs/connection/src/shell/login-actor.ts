@@ -10,6 +10,7 @@ import {
   LoginRequestSchema,
   LoginResponseSchema,
 } from '@vibesys/proto';
+import {newRequestId} from '@vibesys/request-identity';
 import {createActor, fromPromise} from 'xstate';
 import {loginMachine} from '../state/login.js';
 import {requireCheckout} from './registry-reads.js';
@@ -46,7 +47,6 @@ function loginKey(host: HostId, provider: string): string {
 export class LoginActor {
   readonly #running = new Map<string, Running>();
   readonly #subscribers = new Map<string, number>();
-  #next = 1;
   #closed = false;
 
   constructor(private readonly ports: LoginPorts) {}
@@ -77,8 +77,7 @@ export class LoginActor {
             try {
               const checkout = requireCheckout(await this.ports.checkout(host), null);
               if (signal.aborted) return 'completed' as const;
-              const requestId = `login-${this.#next}`;
-              this.#next += 1;
+              const requestId = newRequestId();
               const bytes = encodeHostWatch(
                 checkout,
                 'Login',

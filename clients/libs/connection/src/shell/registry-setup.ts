@@ -13,6 +13,7 @@ import {
   callInspectCandidate,
   type InspectCandidateResponse,
 } from '@vibesys/proto';
+import {newRequestId} from '@vibesys/request-identity';
 import {registryTransport} from './registry-reads.js';
 
 export type InspectedCandidate =
@@ -98,7 +99,7 @@ export function registrySetup(ports: RegistrySetupPorts): RegistrySetup {
         const response = await callInspectCandidate(
           transport(host, envelopeCheckout(path), signal),
           acceptInspectCandidate({
-            requestId: 'registry-setup',
+            requestId: newRequestId(),
             path,
             selectionRevision: revision,
           }),
@@ -116,7 +117,7 @@ export function registrySetup(ports: RegistrySetupPorts): RegistrySetup {
     async completePaths(host, prefix, signal) {
       const response = await callCompletePaths(
         transport(host, envelopeCheckout(prefix), signal),
-        acceptCompletePaths({requestId: 'registry-setup', prefix}),
+        acceptCompletePaths({requestId: newRequestId(), prefix}),
         signal,
       );
       return {

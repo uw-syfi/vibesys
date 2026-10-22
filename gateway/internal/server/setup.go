@@ -249,6 +249,6 @@ func notFoundCandidate(query *hostv1.InspectCandidateRequest) *apiv1.ReadRespons
 		SelectionRevision: query.GetSelectionRevision(),
 		SchemaHash:        schemahash.APISchemaHash,
 		State:             hostv1.CandidateState_CANDIDATE_STATE_NOT_FOUND,
-		MinimumVersion:    "0.1.1",
+		MinimumVersion:    hostoperations.MinCheckoutVersion,
 	}}}
 }

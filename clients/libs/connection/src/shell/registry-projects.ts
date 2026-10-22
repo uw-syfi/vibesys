@@ -21,6 +21,7 @@ import {
   operationPolicies,
   projectMessage,
 } from '@vibesys/proto';
+import {newRequestId} from '@vibesys/request-identity';
 import {registryTransport, requireCheckout} from './registry-reads.js';
 
 export interface RegistryProjectPorts {
@@ -50,19 +51,13 @@ export interface RegistryProjects {
   ): Promise<CreatedProject>;
 }
 
-/** Create, copy, and inspect. Each call uses a new request id, starting at `project-1`. */
+/** Create, copy, and inspect. Each call has a fresh identity across app restarts. */
 export function registryProjects(ports: RegistryProjectPorts): RegistryProjects {
-  let next = 1;
-  const requestId = (): string => {
-    const id = `project-${next}`;
-    next += 1;
-    return id;
-  };
   return {
     async destination(host, example, destination, signal) {
       const response = await callInspectDestination(
         await readTransport(ports, host, signal),
-        acceptInspectDestination({requestId: requestId(), example, destination}),
+        acceptInspectDestination({requestId: newRequestId(), example, destination}),
         signal,
       );
       const projected = projectMessage(InspectDestinationResponseSchema, response) as {
@@ -74,7 +69,7 @@ export function registryProjects(ports: RegistryProjectPorts): RegistryProjects 
     async create(host, example, destination, signal) {
       const response = await callCreateExample(
         await mutateTransport(ports, host, signal),
-        acceptCreateExample({requestId: requestId(), example, destination}),
+        acceptCreateExample({requestId: newRequestId(), example, destination}),
         signal,
       );
       return creation(response);
@@ -82,7 +77,7 @@ export function registryProjects(ports: RegistryProjectPorts): RegistryProjects 
     async copy(host, source, destination, signal) {
       const response = await callCopyProject(
         await mutateTransport(ports, host, signal),
-        acceptCopyProject({requestId: requestId(), source, destination}),
+        acceptCopyProject({requestId: newRequestId(), source, destination}),
         signal,
       );
       const projected = projectMessage(CopyProjectResponseSchema, response) as {

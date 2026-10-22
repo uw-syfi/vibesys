@@ -797,3 +797,24 @@ test('an app composes feature screens without marker declarations', async t => {
   app.files['src/index.ts'] += "import '@vibesys/feature-stop-run/renderer';\n";
   assert.deepEqual(strictRules(packageGraphErrors(await materialize(t, workspace))), []);
 });
+
+test('strict packages can allocate request identities through the neutral foundation entry', async t => {
+  const workspace = validWorkspace();
+  workspace['request-identity'] = {
+    manifest: {
+      name: '@vibesys/request-identity',
+      vibesys: {layer: 'foundation', entries: {'.': 'neutral'}},
+      exports: {'.': source('index')},
+    },
+    files: {
+      'src/index.ts': 'export const newRequestId = () => "id";\n',
+      'tsconfig.lib.json': project({include: ['src']}),
+    },
+  };
+  workspace.screen.manifest.dependencies['@vibesys/request-identity'] = 'workspace:*';
+  workspace.screen.files['src/renderer/index.ts'] += "import '@vibesys/request-identity';\n";
+  workspace.screen.files['tsconfig.renderer.json'].references.push({
+    path: '../../libs/request-identity/tsconfig.lib.json',
+  });
+  assert.deepEqual(strictRules(packageGraphErrors(await materialize(t, workspace))), []);
+});

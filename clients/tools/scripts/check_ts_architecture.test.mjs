@@ -35,6 +35,7 @@ test('dependency-cruiser rejects relative paths into a package, cycles, and unre
         baseUrl: '.',
         paths: {
           '@vibesys/transport': ['libs/transport/src/index.ts'],
+          '@vibesys/request-identity': ['libs/request-identity/src/index.ts'],
           '@vibesys/transport/testing': ['libs/transport/src/testing/index.ts'],
           '@vibesys/run-state': ['libs/run-state/src/index.ts'],
           '@vibesys/store/testing': ['libs/store/src/testing/index.ts'],
@@ -87,6 +88,7 @@ test('dependency-cruiser rejects relative paths into a package, cycles, and unre
 // fixtures use the real package names, because `.dependency-cruiser.mjs` derives its path
 // patterns from the workspace on disk.
 const VALID_FILES = {
+  'libs/request-identity/src/index.ts': '',
   'libs/transport/src/index.ts': '',
   'libs/transport/src/backoff.test.ts': "import './test-support/expect.js';\n",
   'libs/transport/src/test-support/expect.ts': "import 'node:module';\n",
@@ -140,6 +142,14 @@ const VALID_FILES = {
 };
 
 const RULE_CASES = [
+  {
+    rule: 'connection-state-is-pure',
+    files: {'libs/connection/src/state/machine.ts': "import '@vibesys/request-identity';\n"},
+  },
+  {
+    rule: 'feature-state-is-pure',
+    files: {'features/run-page/src/state/replay.ts': "import '@vibesys/request-identity';\n"},
+  },
   {
     rule: 'desktop-preloads-import-only-ipc-and-electron',
     files: {'apps/desktop-main/src/preload/bridge.cts': "import '../main/index.js';\n"},
@@ -284,6 +294,7 @@ async function violatedRules(t, files) {
         baseUrl: '.',
         paths: {
           '@vibesys/transport': ['libs/transport/src/index.ts'],
+          '@vibesys/request-identity': ['libs/request-identity/src/index.ts'],
           '@vibesys/transport/testing': ['libs/transport/src/testing/index.ts'],
           '@vibesys/run-state': ['libs/run-state/src/index.ts'],
           '@vibesys/store/testing': ['libs/store/src/testing/index.ts'],

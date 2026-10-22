@@ -29,6 +29,7 @@ import {
   RemoveClusterResponseSchema,
   type TestClusterResponse,
 } from '@vibesys/proto';
+import {newRequestId} from '@vibesys/request-identity';
 import {requireCheckout} from './registry-reads.js';
 
 export interface RegistryClusterPorts {
@@ -53,19 +54,13 @@ const ACCELERATORS = {
   metal: Accelerator.METAL,
 } as const;
 
-/** Put, remove, and test. Each call uses a new request id, starting at `cluster-1`. */
+/** Put, remove, and test. Each call has a fresh identity across app restarts. */
 export function registryClusters(ports: RegistryClusterPorts): RegistryClusters {
-  let next = 1;
-  const requestId = (): string => {
-    const id = `cluster-${next}`;
-    next += 1;
-    return id;
-  };
   return {
     async put(host, cluster, signal) {
       const response = await callPutCluster(
         await transport(ports, host, signal),
-        acceptPutCluster({requestId: requestId(), cluster: clusterMessage(cluster)}),
+        acceptPutCluster({requestId: newRequestId(), cluster: clusterMessage(cluster)}),
         signal,
       );
       return settingsOf(PutClusterResponseSchema, response);
@@ -73,7 +68,7 @@ export function registryClusters(ports: RegistryClusterPorts): RegistryClusters 
     async remove(host, name, signal) {
       const response = await callRemoveCluster(
         await transport(ports, host, signal),
-        acceptRemoveCluster({requestId: requestId(), name}),
+        acceptRemoveCluster({requestId: newRequestId(), name}),
         signal,
       );
       return settingsOf(RemoveClusterResponseSchema, response);
@@ -81,7 +76,7 @@ export function registryClusters(ports: RegistryClusterPorts): RegistryClusters 
     async test(host, cluster, signal) {
       const response = await callTestCluster(
         await transport(ports, host, signal),
-        acceptTestCluster({requestId: requestId(), cluster: clusterMessage(cluster)}),
+        acceptTestCluster({requestId: newRequestId(), cluster: clusterMessage(cluster)}),
         signal,
       );
       return testOf(response);

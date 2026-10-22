@@ -22,7 +22,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Final
 
 from server.host_api import (
-    MIN_CHECKOUT_VERSION,
     CheckoutFound,
     CheckoutInspection,
     CheckoutNotFound,
@@ -165,6 +164,13 @@ class HostMachineProbe:
 
     def inspect_checkout(self, path: Path) -> CheckoutInspection:
         """``found`` for a VibeSys checkout at least ``MIN_CHECKOUT_VERSION``, else why not."""
+        # lint-waiver: LW-271601 [PLC0415]; the helper answers hello without this module.
+        # > Only checkout inspection compares versions; at module level every channel would
+        # > load the generated constant before `hello`, one module over the light-entrypoint
+        # > ceiling. Re-exporting it from `host_api` would put it back on the hello path, and a
+        # > literal copy would be a second source of truth beside the generated one.
+        from server.host_compatibility_generated import MIN_CHECKOUT_VERSION  # noqa: PLC0415
+
         version = vibesys_version(path / "pyproject.toml")
         if version is None:
             return CheckoutNotFound()
