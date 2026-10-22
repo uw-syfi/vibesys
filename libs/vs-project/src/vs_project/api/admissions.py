@@ -2,7 +2,9 @@
 
 A scoped claim excludes the request identity and every normalized target. Intent
 must be durable before an effect; an existing intent requires reconciliation,
-never another dispatch. Terminal receipts are retained without expiration.
+never another dispatch. An unresolved receipt keeps its targets after the claim
+scope exits, until reconciliation proves completion or absence. Terminal
+receipts are retained without expiration.
 """
 
 from __future__ import annotations
@@ -16,11 +18,11 @@ if TYPE_CHECKING:
 
 
 class AdmissionConflictError(ValueError):
-    """An identity was reused with different target or accepted input bytes."""
+    """An identity was reused, or an observation does not name the stored intent."""
 
 
 class AdmissionBusyError(RuntimeError):
-    """Another scoped claim owns this identity or a target; no effect was attempted."""
+    """A live claim or an unresolved durable intent owns this identity or a target."""
 
 
 class AdmissionUnconfirmedError(RuntimeError):
@@ -39,7 +41,7 @@ class AdmissionClaim(Protocol):
         ...
 
     def reconcile(self, observation: admission.PublicationObservation) -> None:
-        """Confirm original publication, fence proven absence, or retain uncertainty."""
+        """Accept only an observation of this exact fenced intent."""
         ...
 
     def settle(self, status: admission.AdmissionStatus, result: admission.OperationResult) -> None:
@@ -56,7 +58,7 @@ class AdmissionStore(Protocol):
         targets: tuple[str, ...],
         accepted_request: admission.AcceptedOperation,
     ) -> AbstractContextManager[AdmissionClaim]:
-        """Own identity then sorted targets; changed bytes or targets conflict."""
+        """Own identity then sorted targets. Unresolved receipts keep target occupancy."""
         ...
 
     def lookup(self, identity: admission.AdmissionIdentity) -> admission.AdmissionReceipt | None:

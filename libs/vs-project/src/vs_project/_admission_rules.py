@@ -3,8 +3,16 @@
 from __future__ import annotations
 
 import hashlib
+from typing import TYPE_CHECKING
 
-from vs_project.api.admissions import AdmissionConflictError, AdmissionUnconfirmedError
+from vs_project.api.admissions import (
+    AdmissionBusyError,
+    AdmissionConflictError,
+    AdmissionUnconfirmedError,
+)
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
 from vs_proto.api import (
     FailureCategory,
     Oneof,
@@ -16,6 +24,7 @@ from vs_proto.api import (
 )
 
 _STATUS = admission.AdmissionStatus
+_OCCUPIED = frozenset({_STATUS.PENDING, _STATUS.UNCONFIRMED})
 
 
 def checked_receipt(payload: bytes) -> admission.AdmissionReceipt:
@@ -173,18 +182,35 @@ def check_result(
         raise ValueError(message)
 
 
+def intent_occupies(receipt: admission.AdmissionReceipt) -> bool:
+    """A receipt owns its targets until completion or proven absence."""
+    return receipt.intent is not None and receipt.status in _OCCUPIED
+
+
+def reject_occupied_targets(
+    receipts: Iterable[admission.AdmissionReceipt],
+    identity: admission.AdmissionIdentity,
+    targets: tuple[str, ...],
+) -> None:
+    """Refuse a claim whose targets still belong to another unresolved intent."""
+    wanted = set(targets)
+    for receipt in receipts:
+        if receipt.identity == identity or not intent_occupies(receipt):
+            continue
+        if wanted.isdisjoint(receipt.targets):
+            continue
+        message = "admission target is occupied by an unresolved intent"
+        raise AdmissionBusyError(message)
+
+
 def reconcile(
     receipt: admission.AdmissionReceipt, observation: admission.PublicationObservation
 ) -> admission.AdmissionReceipt:
-    """Only proven absence invalidates the old fence and permits continuation."""
+    """Only an observation of this exact intent can prove absence or completion."""
     validated_operation_bytes(observation)
     observed = observation.observation
-    if (
-        receipt.intent is None
-        or observed is None
-        or receipt.intent.effect_id != observed.value.effect_id
-    ):
-        message = "publication observation does not match original intent"
+    if receipt.intent is None or observed is None or receipt.intent != observed.value.intent:
+        message = "publication observation does not match the fenced intent"
         raise AdmissionConflictError(message)
     if receipt.status not in (_STATUS.PENDING, _STATUS.UNCONFIRMED):
         message = "terminal admission cannot be reconciled again"

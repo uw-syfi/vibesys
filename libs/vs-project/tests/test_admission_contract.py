@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING
 
 import pytest
-from hypothesis import given
+from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
 from vs_faults.api import Boundary, FaultGate, FaultPlan, FaultRule, HostCrashError, HostFault
@@ -18,14 +20,14 @@ from vs_project.api import (
     Project,
 )
 from vs_project.api.testing import FakeAdmissionStore
-from vs_proto.api import FailureCategory, Oneof, OperationFailure, admission
+from vs_proto.api import FailureCategory, Oneof, OperationFailure, ValidationError, admission
 from vs_proto.api import host_payloads as pb
+from vs_sim.api.testing import examples
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-    from pathlib import Path
 
-    from vs_project.api import AdmissionStore, AtomicWriteStream
+    from vs_project.api import AdmissionClaim, AdmissionStore, AtomicWriteStream
 
 
 def _identity(request_id: str = "request-a") -> admission.AdmissionIdentity:
@@ -40,6 +42,31 @@ def _request(
     return admission.AcceptedOperation(
         request=Oneof("list_tasks", pb.ListTasksRequest(request_id=request_id, project=project))
     )
+
+
+def _intent(
+    intent: admission.PublicationEvidence | None,
+) -> admission.PublicationEvidence:
+    """An independent copy of the stored intent an observation must name."""
+    assert intent is not None
+    return admission.PublicationEvidence.from_binary(intent.to_binary())
+
+
+def _observation(
+    kind: str,
+    intent: admission.PublicationEvidence,
+    result: admission.OperationResult | None = None,
+) -> admission.PublicationObservation:
+    """Inspection evidence for one exact fenced intent."""
+    named = _intent(intent)
+    if kind == "absent":
+        body = Oneof("absent", admission.PublicationAbsent(intent=named))
+    elif kind == "unknown":
+        body = Oneof("unknown", admission.PublicationUnknown(intent=named))
+    else:
+        assert result is not None
+        body = Oneof("published", admission.PublicationPublished(intent=named, result=result))
+    return admission.PublicationObservation(observation=body)
 
 
 def _result(request_id: str = "request-a") -> admission.OperationResult:
@@ -138,9 +165,8 @@ def test_unknown_admission_metadata_is_rejected_before_publication(
                 with pytest.raises(ValueError, match="unknown fields"):
                     claim.settle(admission.AdmissionStatus.CONFIRMED, result)
             else:
-                observation = admission.PublicationObservation(
-                    observation=Oneof("absent", admission.PublicationAbsent(effect_id="effect-a"))
-                )
+                assert before.intent is not None
+                observation = _observation("absent", before.intent)
                 unrecognized = admission.PublicationObservation.from_binary(
                     observation.to_binary() + unknown
                 )
@@ -297,48 +323,39 @@ def test_reconciliation_keeps_unknown_effects_and_fences_proven_absence(
         first = claim.observe()
         assert first.intent is not None
         assert first.intent.fence == first.fence
-        claim.reconcile(
-            admission.PublicationObservation(
-                observation=Oneof("unknown", admission.PublicationUnknown(effect_id="effect-a"))
-            )
-        )
+        recorded = claim.observe().intent
+        assert recorded is not None
+        claim.reconcile(_observation("unknown", recorded))
         assert claim.observe().status == admission.AdmissionStatus.UNCONFIRMED
         with pytest.raises(AdmissionUnconfirmedError):
             claim.record_intent(admission.PublicationEvidence(effect_id="effect-b"))
     with reopen().claim(_identity(), ("/target",), _request()) as recovered:
-        with pytest.raises(AdmissionConflictError, match="original intent"):
+        assert recovered.observe().intent is not None
+        with pytest.raises(AdmissionConflictError, match="fenced intent"):
             recovered.reconcile(
-                admission.PublicationObservation(
-                    observation=Oneof("absent", admission.PublicationAbsent(effect_id="other"))
+                _observation(
+                    "absent",
+                    admission.PublicationEvidence(
+                        effect_id="other", fence=recovered.observe().fence
+                    ),
                 )
             )
-        recovered.reconcile(
-            admission.PublicationObservation(
-                observation=Oneof("absent", admission.PublicationAbsent(effect_id="effect-a"))
-            )
-        )
+        current = recovered.observe().intent
+        assert current is not None
+        recovered.reconcile(_observation("absent", current))
         assert recovered.observe().fence == first.fence + 1
         recovered.record_intent(admission.PublicationEvidence(effect_id="effect-b"))
-        recovered.reconcile(
-            admission.PublicationObservation(
-                observation=Oneof(
-                    "published",
-                    admission.PublicationPublished(effect_id="effect-b", result=_result()),
-                )
-            )
-        )
+        published = recovered.observe().intent
+        assert published is not None
+        recovered.reconcile(_observation("published", published, _result()))
     final = reopen().lookup(_identity())
     assert final is not None
     assert final.status == admission.AdmissionStatus.CONFIRMED
-    with (
-        reopen().claim(_identity(), ("/target",), _request()) as terminal,
-        pytest.raises(AdmissionConflictError, match="terminal"),
-    ):
-        terminal.reconcile(
-            admission.PublicationObservation(
-                observation=Oneof("absent", admission.PublicationAbsent(effect_id="effect-b"))
-            )
-        )
+    with reopen().claim(_identity(), ("/target",), _request()) as terminal:
+        terminal_intent = terminal.observe().intent
+        assert terminal_intent is not None
+        with pytest.raises(AdmissionConflictError, match="terminal"):
+            terminal.reconcile(_observation("absent", terminal_intent))
 
 
 def test_unconfirmed_and_refused_results_are_typed_and_never_start_an_effect(
@@ -423,15 +440,256 @@ def test_a_crash_after_an_admission_boundary_never_repeats_the_effect(
         pass
     with reopen().claim(_identity(), ("/target",), _request()) as recovered:
         if recovered.observe().result is None:
-            observation = (
-                Oneof(
-                    "published",
-                    admission.PublicationPublished(effect_id="effect-a", result=_result()),
-                )
-                if published
-                else Oneof("unknown", admission.PublicationUnknown(effect_id="effect-a"))
-            )
-            recovered.reconcile(admission.PublicationObservation(observation=observation))
+            intent = recovered.observe().intent
+            assert intent is not None
+            kind = "published" if published else "unknown"
+            recovered.reconcile(_observation(kind, intent, _result() if published else None))
         with pytest.raises(AdmissionUnconfirmedError):
             recovered.record_intent(admission.PublicationEvidence(effect_id="effect-b"))
     assert len(published) <= 1
+
+
+def _unresolved(receipt: admission.AdmissionReceipt | None) -> bool:
+    return (
+        receipt is not None
+        and receipt.intent is not None
+        and receipt.status
+        in (
+            admission.AdmissionStatus.PENDING,
+            admission.AdmissionStatus.UNCONFIRMED,
+        )
+    )
+
+
+@pytest.mark.regression
+def test_a_stale_absence_observation_does_not_clear_a_newer_intent(
+    reopen: Callable[[], AdmissionStore],
+) -> None:
+    """A fence-1 absence, and any other field change, leaves the newer intent in place."""
+    store = reopen()
+    with store.claim(_identity(), ("/target",), _request()) as claim:
+        claim.record_intent(
+            admission.PublicationEvidence(effect_id="effect-e", process_identity="proc-0")
+        )
+        first = _intent(claim.observe().intent)
+        with pytest.raises(ValidationError):
+            claim.reconcile(
+                _observation("absent", admission.PublicationEvidence(effect_id="effect-e", fence=0))
+            )
+        forged = _intent(first)
+        forged.process_identity = "other-process"
+        with pytest.raises(AdmissionConflictError, match="fenced intent"):
+            claim.reconcile(_observation("absent", forged))
+        assert claim.observe().intent == first
+        claim.reconcile(_observation("absent", first))
+        assert claim.observe().fence == first.fence + 1
+        claim.record_intent(
+            admission.PublicationEvidence(effect_id="effect-e", process_identity="proc-0")
+        )
+        second = claim.observe()
+        assert second.intent is not None
+        assert second.intent.fence == first.fence + 1
+        with pytest.raises(AdmissionConflictError, match="fenced intent"):
+            claim.reconcile(_observation("absent", first))
+        assert claim.observe() == second
+
+
+@pytest.mark.regression
+def test_an_unresolved_intent_occupies_its_target_after_the_claim_exits(
+    reopen: Callable[[], AdmissionStore],
+) -> None:
+    """Losing the reply and leaving the scope does not let another request take the target."""
+    store = reopen()
+    with store.claim(_identity("request-a"), ("/target",), _request("request-a")) as claim:
+        claim.record_intent(admission.PublicationEvidence(effect_id="live-a"))
+    with (
+        pytest.raises(AdmissionBusyError),
+        store.claim(_identity("request-b"), ("/target",), _request("request-b")),
+    ):
+        pytest.fail("overlapping unresolved intent")
+    kept = store.lookup(_identity("request-a"))
+    assert kept is not None
+    assert kept.intent is not None
+    assert kept.intent.effect_id == "live-a"
+    assert store.lookup(_identity("request-b")) is None
+    with store.claim(_identity("request-a"), ("/target",), _request("request-a")) as claim:
+        current = claim.observe().intent
+        assert current is not None
+        claim.reconcile(_observation("absent", current))
+    with store.claim(_identity("request-b"), ("/target",), _request("request-b")) as other:
+        other.record_intent(admission.PublicationEvidence(effect_id="live-b"))
+
+
+_HISTORY_OPS = ("record", "absent", "unknown", "published", "settle", "exit")
+_HISTORY_REQUESTS = ("request-a", "request-b")
+_HISTORY_TARGETS = (("/target-0",), ("/target-1",), ("/target-0", "/target-1"))
+_Step = tuple[str, str, tuple[str, ...], str, str]
+
+
+def _history_store(kind: str, root: Path) -> AdmissionStore:
+    if kind == "file":
+        return FileAdmissionStore(root / "receipts")
+    return FakeAdmissionStore()
+
+
+def _assert_one_unresolved_intent_per_target(store: AdmissionStore) -> None:
+    occupied: dict[str, str] = {}
+    for request_id in _HISTORY_REQUESTS:
+        receipt = store.lookup(_identity(request_id))
+        if not _unresolved(receipt):
+            continue
+        assert receipt is not None
+        for target in receipt.targets:
+            assert target not in occupied
+            occupied[target] = request_id
+
+
+def _replay_stale(
+    store: AdmissionStore,
+    request_id: str,
+    targets: tuple[str, ...],
+    old: admission.PublicationEvidence,
+) -> None:
+    identity = _identity(request_id)
+    before = store.lookup(identity)
+    try:
+        with (
+            store.claim(identity, targets, _request(request_id)) as claim,
+            pytest.raises(AdmissionConflictError),
+        ):
+            claim.reconcile(_observation("absent", old))
+    except AdmissionBusyError:
+        pass
+    assert store.lookup(identity) == before
+
+
+def _reject_stale_observations(
+    store: AdmissionStore,
+    chosen: dict[str, tuple[str, ...]],
+    past: dict[str, list[admission.PublicationEvidence]],
+) -> None:
+    for request_id, snapshots in past.items():
+        current = store.lookup(_identity(request_id))
+        current_intent = None if current is None else current.intent
+        for old in snapshots:
+            if current_intent is not None and old == current_intent:
+                continue
+            _replay_stale(store, request_id, chosen[request_id], old)
+
+
+def _record_if_absent(
+    claim: AdmissionClaim,
+    request_id: str,
+    effect: str,
+    marker: str,
+    past: dict[str, list[admission.PublicationEvidence]],
+) -> None:
+    receipt = claim.observe()
+    if receipt.status != admission.AdmissionStatus.PENDING or receipt.intent is not None:
+        return
+    claim.record_intent(admission.PublicationEvidence(effect_id=effect, process_identity=marker))
+    recorded = claim.observe().intent
+    assert recorded is not None
+    past.setdefault(request_id, []).append(_intent(recorded))
+
+
+def _open_intent(
+    receipt: admission.AdmissionReceipt | None,
+) -> admission.PublicationEvidence | None:
+    if not _unresolved(receipt) or receipt is None:
+        return None
+    return receipt.intent
+
+
+def _finish_if_unresolved(claim: AdmissionClaim, op: str, request_id: str) -> None:
+    receipt = claim.observe()
+    intent = _open_intent(receipt)
+    if intent is None or receipt is None:
+        return
+    if op == "settle":
+        if receipt.status != admission.AdmissionStatus.PENDING:
+            return
+        claim.settle(admission.AdmissionStatus.CONFIRMED, _result(request_id))
+        return
+    result = _result(request_id) if op == "published" else None
+    claim.reconcile(_observation(op, intent, result))
+
+
+def _apply_history_step(
+    store: AdmissionStore,
+    chosen: dict[str, tuple[str, ...]],
+    past: dict[str, list[admission.PublicationEvidence]],
+    step: _Step,
+) -> None:
+    op, request_id, targets, effect, marker = step
+    identity = _identity(request_id)
+    known = chosen.get(request_id)
+    if known is not None and known != targets:
+        before = store.lookup(identity)
+        with (
+            pytest.raises((AdmissionConflictError, AdmissionBusyError)),
+            store.claim(identity, targets, _request(request_id)),
+        ):
+            pytest.fail("changed targets admitted")
+        assert store.lookup(identity) == before
+        return
+    try:
+        with store.claim(identity, targets, _request(request_id)) as claim:
+            chosen.setdefault(request_id, targets)
+            if op == "record":
+                _record_if_absent(claim, request_id, effect, marker, past)
+            elif op != "exit":
+                _finish_if_unresolved(claim, op, request_id)
+    except AdmissionBusyError:
+        return
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize("kind", ["file", "fake"])
+@settings(max_examples=examples(pr=6, nightly=24))
+@given(
+    steps=st.lists(
+        st.tuples(
+            st.sampled_from(_HISTORY_OPS),
+            st.sampled_from(_HISTORY_REQUESTS),
+            st.sampled_from(_HISTORY_TARGETS),
+            st.sampled_from(("effect-a", "effect-b")),
+            st.sampled_from(("proc-0", "proc-1")),
+        ),
+        min_size=1,
+        max_size=8,
+    )
+)
+@example(
+    steps=[
+        ("record", "request-a", ("/target-0",), "effect-e", "proc-0"),
+        ("absent", "request-a", ("/target-0",), "effect-e", "proc-0"),
+        ("record", "request-a", ("/target-0",), "effect-e", "proc-0"),
+    ]
+)
+@example(
+    steps=[
+        ("record", "request-a", ("/target-0",), "live-a", "proc-0"),
+        ("record", "request-b", ("/target-0",), "live-b", "proc-1"),
+    ]
+)
+@example(
+    steps=[
+        ("record", "request-a", ("/target-1",), "effect-a", "proc-0"),
+        ("record", "request-a", ("/target-0",), "effect-a", "proc-0"),
+        ("record", "request-b", ("/target-0",), "effect-a", "proc-0"),
+        ("record", "request-a", ("/target-0",), "effect-a", "proc-0"),
+    ]
+)
+def test_crash_histories_keep_target_exclusion_and_reject_stale_observations(
+    kind: str, steps: list[_Step]
+) -> None:
+    """Interleaved intents, lost replies, scope exits and stale observations."""
+    with TemporaryDirectory() as directory:
+        store = _history_store(kind, Path(directory))
+        chosen: dict[str, tuple[str, ...]] = {}
+        past: dict[str, list[admission.PublicationEvidence]] = {}
+        for step in steps:
+            _apply_history_step(store, chosen, past, step)
+            _assert_one_unresolved_intent_per_target(store)
+            _reject_stale_observations(store, chosen, past)

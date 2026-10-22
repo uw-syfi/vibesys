@@ -123,12 +123,31 @@ message PublicationEvidence {
   bytes after_digest = 8 [(buf.validate.field).bytes.max_len = 32];
   uint64 fence = 9;
 }
-message PublicationAbsent { string effect_id = 1 [(buf.validate.field).string.min_len = 1]; }
+message PublicationAbsent {
+  option (buf.validate.message).cel = {
+    id: "admission.absent_fence"
+    message: "absence evidence names its fenced intent"
+    expression: "this.intent.fence > 0u"
+  };
+  PublicationEvidence intent = 1 [(buf.validate.field).required = true];
+}
 message PublicationPublished {
-  string effect_id = 1 [(buf.validate.field).string.min_len = 1];
+  option (buf.validate.message).cel = {
+    id: "admission.published_fence"
+    message: "completion evidence names its fenced intent"
+    expression: "this.intent.fence > 0u"
+  };
+  PublicationEvidence intent = 1 [(buf.validate.field).required = true];
   OperationResult result = 2 [(buf.validate.field).required = true];
 }
-message PublicationUnknown { string effect_id = 1 [(buf.validate.field).string.min_len = 1]; }
+message PublicationUnknown {
+  option (buf.validate.message).cel = {
+    id: "admission.unknown_fence"
+    message: "unconfirmed evidence names its fenced intent"
+    expression: "this.intent.fence > 0u"
+  };
+  PublicationEvidence intent = 1 [(buf.validate.field).required = true];
+}
 message PublicationObservation {
   oneof observation {
     option (buf.validate.oneof).required = true;

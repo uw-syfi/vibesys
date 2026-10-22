@@ -588,7 +588,7 @@ func (x *PublicationEvidence) GetFence() uint64 {
 
 type PublicationAbsent struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	EffectId      string                 `protobuf:"bytes,1,opt,name=effect_id,json=effectId,proto3" json:"effect_id,omitempty"`
+	Intent        *PublicationEvidence   `protobuf:"bytes,1,opt,name=intent,proto3" json:"intent,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -623,16 +623,16 @@ func (*PublicationAbsent) Descriptor() ([]byte, []int) {
 	return file_vibesys_host_v1_admission_receipt_generated_proto_rawDescGZIP(), []int{4}
 }
 
-func (x *PublicationAbsent) GetEffectId() string {
+func (x *PublicationAbsent) GetIntent() *PublicationEvidence {
 	if x != nil {
-		return x.EffectId
+		return x.Intent
 	}
-	return ""
+	return nil
 }
 
 type PublicationPublished struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	EffectId      string                 `protobuf:"bytes,1,opt,name=effect_id,json=effectId,proto3" json:"effect_id,omitempty"`
+	Intent        *PublicationEvidence   `protobuf:"bytes,1,opt,name=intent,proto3" json:"intent,omitempty"`
 	Result        *OperationResult       `protobuf:"bytes,2,opt,name=result,proto3" json:"result,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -668,11 +668,11 @@ func (*PublicationPublished) Descriptor() ([]byte, []int) {
 	return file_vibesys_host_v1_admission_receipt_generated_proto_rawDescGZIP(), []int{5}
 }
 
-func (x *PublicationPublished) GetEffectId() string {
+func (x *PublicationPublished) GetIntent() *PublicationEvidence {
 	if x != nil {
-		return x.EffectId
+		return x.Intent
 	}
-	return ""
+	return nil
 }
 
 func (x *PublicationPublished) GetResult() *OperationResult {
@@ -684,7 +684,7 @@ func (x *PublicationPublished) GetResult() *OperationResult {
 
 type PublicationUnknown struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	EffectId      string                 `protobuf:"bytes,1,opt,name=effect_id,json=effectId,proto3" json:"effect_id,omitempty"`
+	Intent        *PublicationEvidence   `protobuf:"bytes,1,opt,name=intent,proto3" json:"intent,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -719,11 +719,11 @@ func (*PublicationUnknown) Descriptor() ([]byte, []int) {
 	return file_vibesys_host_v1_admission_receipt_generated_proto_rawDescGZIP(), []int{6}
 }
 
-func (x *PublicationUnknown) GetEffectId() string {
+func (x *PublicationUnknown) GetIntent() *PublicationEvidence {
 	if x != nil {
-		return x.EffectId
+		return x.Intent
 	}
-	return ""
+	return nil
 }
 
 type PublicationObservation struct {
@@ -984,14 +984,17 @@ const file_vibesys_host_v1_admission_receipt_generated_proto_rawDesc = "" +
 	"\x10process_identity\x18\x06 \x01(\tB\b\xbaH\x05r\x03(\x80 R\x0fprocessIdentity\x12,\n" +
 	"\rbefore_digest\x18\a \x01(\fB\a\xbaH\x04z\x02\x18 R\fbeforeDigest\x12*\n" +
 	"\fafter_digest\x18\b \x01(\fB\a\xbaH\x04z\x02\x18 R\vafterDigest\x12\x14\n" +
-	"\x05fence\x18\t \x01(\x04R\x05fence\"9\n" +
-	"\x11PublicationAbsent\x12$\n" +
-	"\teffect_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\beffectId\"~\n" +
-	"\x14PublicationPublished\x12$\n" +
-	"\teffect_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\beffectId\x12@\n" +
-	"\x06result\x18\x02 \x01(\v2 .vibesys.host.v1.OperationResultB\x06\xbaH\x03\xc8\x01\x01R\x06result\":\n" +
-	"\x12PublicationUnknown\x12$\n" +
-	"\teffect_id\x18\x01 \x01(\tB\a\xbaH\x04r\x02\x10\x01R\beffectId\"\xf4\x01\n" +
+	"\x05fence\x18\t \x01(\x04R\x05fence\"\xba\x01\n" +
+	"\x11PublicationAbsent\x12D\n" +
+	"\x06intent\x18\x01 \x01(\v2$.vibesys.host.v1.PublicationEvidenceB\x06\xbaH\x03\xc8\x01\x01R\x06intent:_\xbaH\\\x1aZ\n" +
+	"\x16admission.absent_fence\x12(absence evidence names its fenced intent\x1a\x16this.intent.fence > 0u\"\x85\x02\n" +
+	"\x14PublicationPublished\x12D\n" +
+	"\x06intent\x18\x01 \x01(\v2$.vibesys.host.v1.PublicationEvidenceB\x06\xbaH\x03\xc8\x01\x01R\x06intent\x12@\n" +
+	"\x06result\x18\x02 \x01(\v2 .vibesys.host.v1.OperationResultB\x06\xbaH\x03\xc8\x01\x01R\x06result:e\xbaHb\x1a`\n" +
+	"\x19admission.published_fence\x12+completion evidence names its fenced intent\x1a\x16this.intent.fence > 0u\"\xc0\x01\n" +
+	"\x12PublicationUnknown\x12D\n" +
+	"\x06intent\x18\x01 \x01(\v2$.vibesys.host.v1.PublicationEvidenceB\x06\xbaH\x03\xc8\x01\x01R\x06intent:d\xbaHa\x1a_\n" +
+	"\x17admission.unknown_fence\x12,unconfirmed evidence names its fenced intent\x1a\x16this.intent.fence > 0u\"\xf4\x01\n" +
 	"\x16PublicationObservation\x12<\n" +
 	"\x06absent\x18\x01 \x01(\v2\".vibesys.host.v1.PublicationAbsentH\x00R\x06absent\x12E\n" +
 	"\tpublished\x18\x02 \x01(\v2%.vibesys.host.v1.PublicationPublishedH\x00R\tpublished\x12?\n" +
@@ -1076,20 +1079,23 @@ var file_vibesys_host_v1_admission_receipt_generated_proto_depIdxs = []int32{
 	22, // 12: vibesys.host.v1.OperationResult.describe_machine:type_name -> vibesys.host.v1.DescribeMachineResponse
 	23, // 13: vibesys.host.v1.OperationResult.list_compute:type_name -> vibesys.host.v1.ListComputeResponse
 	24, // 14: vibesys.host.v1.OperationResult.preflight_run:type_name -> vibesys.host.v1.PreflightRunResponse
-	2,  // 15: vibesys.host.v1.PublicationPublished.result:type_name -> vibesys.host.v1.OperationResult
-	5,  // 16: vibesys.host.v1.PublicationObservation.absent:type_name -> vibesys.host.v1.PublicationAbsent
-	6,  // 17: vibesys.host.v1.PublicationObservation.published:type_name -> vibesys.host.v1.PublicationPublished
-	7,  // 18: vibesys.host.v1.PublicationObservation.unknown:type_name -> vibesys.host.v1.PublicationUnknown
-	3,  // 19: vibesys.host.v1.AdmissionReceipt.identity:type_name -> vibesys.host.v1.AdmissionIdentity
-	1,  // 20: vibesys.host.v1.AdmissionReceipt.accepted:type_name -> vibesys.host.v1.AcceptedOperation
-	0,  // 21: vibesys.host.v1.AdmissionReceipt.status:type_name -> vibesys.host.v1.AdmissionStatus
-	4,  // 22: vibesys.host.v1.AdmissionReceipt.intent:type_name -> vibesys.host.v1.PublicationEvidence
-	2,  // 23: vibesys.host.v1.AdmissionReceipt.result:type_name -> vibesys.host.v1.OperationResult
-	24, // [24:24] is the sub-list for method output_type
-	24, // [24:24] is the sub-list for method input_type
-	24, // [24:24] is the sub-list for extension type_name
-	24, // [24:24] is the sub-list for extension extendee
-	0,  // [0:24] is the sub-list for field type_name
+	4,  // 15: vibesys.host.v1.PublicationAbsent.intent:type_name -> vibesys.host.v1.PublicationEvidence
+	4,  // 16: vibesys.host.v1.PublicationPublished.intent:type_name -> vibesys.host.v1.PublicationEvidence
+	2,  // 17: vibesys.host.v1.PublicationPublished.result:type_name -> vibesys.host.v1.OperationResult
+	4,  // 18: vibesys.host.v1.PublicationUnknown.intent:type_name -> vibesys.host.v1.PublicationEvidence
+	5,  // 19: vibesys.host.v1.PublicationObservation.absent:type_name -> vibesys.host.v1.PublicationAbsent
+	6,  // 20: vibesys.host.v1.PublicationObservation.published:type_name -> vibesys.host.v1.PublicationPublished
+	7,  // 21: vibesys.host.v1.PublicationObservation.unknown:type_name -> vibesys.host.v1.PublicationUnknown
+	3,  // 22: vibesys.host.v1.AdmissionReceipt.identity:type_name -> vibesys.host.v1.AdmissionIdentity
+	1,  // 23: vibesys.host.v1.AdmissionReceipt.accepted:type_name -> vibesys.host.v1.AcceptedOperation
+	0,  // 24: vibesys.host.v1.AdmissionReceipt.status:type_name -> vibesys.host.v1.AdmissionStatus
+	4,  // 25: vibesys.host.v1.AdmissionReceipt.intent:type_name -> vibesys.host.v1.PublicationEvidence
+	2,  // 26: vibesys.host.v1.AdmissionReceipt.result:type_name -> vibesys.host.v1.OperationResult
+	27, // [27:27] is the sub-list for method output_type
+	27, // [27:27] is the sub-list for method input_type
+	27, // [27:27] is the sub-list for extension type_name
+	27, // [27:27] is the sub-list for extension extendee
+	0,  // [0:27] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_host_v1_admission_receipt_generated_proto_init() }

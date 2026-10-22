@@ -1,4 +1,7 @@
-"""Faithful in-memory admission store using the production transition rules."""
+"""Faithful in-memory admission store using the production transition rules.
+
+Target occupancy is the unresolved receipts, the same rule as the file store.
+"""
 
 from __future__ import annotations
 
@@ -6,7 +9,12 @@ from contextlib import contextmanager
 from typing import TYPE_CHECKING
 
 from vs_project._admission import _Claim, normalized_targets
-from vs_project._admission_rules import checked_receipt, compare, initial_receipt
+from vs_project._admission_rules import (
+    checked_receipt,
+    compare,
+    initial_receipt,
+    reject_occupied_targets,
+)
 from vs_project.api.admissions import AdmissionBusyError
 from vs_proto.api import admission, validate
 
@@ -36,6 +44,10 @@ class FakeAdmissionStore:
             raise ValueError(message)
         return receipt
 
+    def _durable_receipts(self) -> tuple[admission.AdmissionReceipt, ...]:
+        """Every receipt. Occupancy is derived from these, not a side index."""
+        return tuple(checked_receipt(payload) for payload in self._receipts.values())
+
     @contextmanager
     def claim(
         self,
@@ -55,6 +67,7 @@ class FakeAdmissionStore:
             raise AdmissionBusyError(message)
         self._owned.update(keys)
         try:
+            reject_occupied_targets(self._durable_receipts(), identity, targets)
             key = (identity.operation_id, identity.request_id)
             receipt = self.lookup(identity)
             if receipt is None:

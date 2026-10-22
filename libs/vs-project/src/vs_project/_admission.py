@@ -1,4 +1,9 @@
-"""Scoped file admission ownership with durable protobuf receipts."""
+"""Scoped file admission ownership with durable protobuf receipts.
+
+Target occupancy is the unresolved receipts in this store. Releasing the
+process locks does not release an intent that completion or absence has not
+proven.
+"""
 
 from __future__ import annotations
 
@@ -16,6 +21,7 @@ from vs_project._admission_rules import (
     initial_receipt,
     reconcile,
     record_intent,
+    reject_occupied_targets,
     settle,
 )
 from vs_project._state_io import LocalAtomicWriteEffects, atomic_write_bytes, sync_directory_chain
@@ -27,6 +33,20 @@ if TYPE_CHECKING:
 
     from vs_project._state_io import AtomicWriteEffects
     from vs_project.api.admissions import AdmissionClaim
+
+
+def _subdirectories(path: Path) -> tuple[Path, ...]:
+    """Child directories of an admission root. A symlink is damage, not a root."""
+    if not path.is_dir():
+        return ()
+    found: list[Path] = []
+    for child in path.iterdir():
+        if child.is_symlink():
+            message = f"admission path is a symlink: {child}"
+            raise ValueError(message)
+        if child.is_dir():
+            found.append(child)
+    return tuple(found)
 
 
 def normalized_targets(targets: tuple[str, ...]) -> tuple[str, ...]:
@@ -128,22 +148,41 @@ class FileAdmissionStore:
             finally:
                 fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
 
+    def _read_receipt(self, path: Path) -> admission.AdmissionReceipt:
+        descriptor = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW)
+        with os.fdopen(descriptor, "rb") as stream:
+            if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+                message = f"admission receipt is not a regular file: {path}"
+                raise ValueError(message)
+            return checked_receipt(stream.read((4 << 20) + 1))
+
     def lookup(self, identity: admission.AdmissionIdentity) -> admission.AdmissionReceipt | None:
         """Read a complete atomic publication, treating damage as an error."""
         path = self._path(identity)
         try:
-            descriptor = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW)
-            with os.fdopen(descriptor, "rb") as stream:
-                if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
-                    message = f"admission receipt is not a regular file: {path}"
-                    raise ValueError(message)
-                receipt = checked_receipt(stream.read((4 << 20) + 1))
+            receipt = self._read_receipt(path)
         except FileNotFoundError:
             return None
         if receipt.identity != identity:
             message = "admission receipt identity mismatch"
             raise ValueError(message)
         return receipt
+
+    def _durable_receipts(self) -> tuple[admission.AdmissionReceipt, ...]:
+        """Every persisted receipt. Occupancy is derived from these, not a side index."""
+        receipts: list[admission.AdmissionReceipt] = []
+        for operation in _subdirectories(self._root):
+            if operation.name == "targets":
+                continue
+            for request in _subdirectories(operation):
+                path = request / "receipt.pb"
+                if path.is_symlink():
+                    message = f"admission receipt is not a regular file: {path}"
+                    raise ValueError(message)
+                if not path.exists():
+                    continue
+                receipts.append(self._read_receipt(path))
+        return tuple(receipts)
 
     @contextmanager
     def claim(
@@ -161,6 +200,7 @@ class FileAdmissionStore:
             for target in targets:
                 key = hashlib.sha256(os.fsencode(target)).hexdigest()
                 locks.enter_context(self._lock(self._root / "targets" / (key + ".lock")))
+            reject_occupied_targets(self._durable_receipts(), identity, targets)
             receipt = self.lookup(identity)
             if receipt is None:
                 receipt = requested
