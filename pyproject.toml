@@ -19,6 +19,7 @@ classifiers = [
 dependencies = [
     "google-crc32c>=1.7,<2",
     "protobuf-py==0.6.0",
+    "protobuf==6.33.5",
     "protovalidate==2.0.0",
     "agentshim>=0.23.0,<0.24",
     "cbor2<6",

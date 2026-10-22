@@ -1,19 +1,21 @@
 """The recorder's persistence contract against memory, local CAS and native log."""
 
-from collections.abc import Callable, Iterator
-from contextlib import AbstractContextManager, contextmanager
+from collections.abc import Iterator
+from contextlib import AbstractContextManager, contextmanager, suppress
 from pathlib import Path
+from typing import Protocol
 
 import pytest
 from protobuf.wkt.google.protobuf.timestamp_pb import Timestamp
 
 from vs_core.api.replay import ReplayCall, ReplayFlow, SemanticKey
-from vs_project.api import Conflict, FakeStateStore, Project, StoredEnvelope
+from vs_project.api import CommitFault, Conflict, FakeStateStore, Project, StoredEnvelope
 from vs_proto.api import Ended, EpochStarted, Outcome, core_common, replay
 from vs_proto.api import ReplayStore as Records
 from vs_runlog.api import FileRunLogWriter, open_run_log
 from vs_runtime.api.replay import (
     FakeReplayExecutor,
+    ReplayCommitError,
     ReplayCompleted,
     ReplayEnding,
     ReplayLaunch,
@@ -24,28 +26,77 @@ from vs_runtime.api.replay import (
     RunLogReplayStore,
     drive_replay,
 )
-from vs_sim.api.testing import Sim, SimThreads
+from vs_sim.api.testing import Sim, SimThreads, swept
 
-StoreFactory = Callable[[], AbstractContextManager[ReplayStore]]
+
+class StoreFactory(Protocol):
+    def __call__(
+        self, fault_plan: tuple[CommitFault | None, ...] = ()
+    ) -> AbstractContextManager[ReplayStore]: ...
 
 
 @pytest.fixture(params=["fake", "local", "runlog"])
 def stores(request: pytest.FixtureRequest, tmp_path: Path, sim: Sim) -> StoreFactory:
+    ordinal = 0
+
     @contextmanager
-    def opened() -> Iterator[ReplayStore]:
-        project = Project.open(tmp_path)
+    def opened(fault_plan: tuple[CommitFault | None, ...] = ()) -> Iterator[ReplayStore]:
+        nonlocal ordinal
+        root = tmp_path / f"case-{ordinal}"
+        root.mkdir()
+        project = Project.open(root)
+        ordinal += 1
         if request.param == "fake":
-            yield FakeStateStore()
+            yield FakeStateStore(fault_plan=fault_plan)
         elif request.param == "local":
-            yield project.state_store("run-a")
+            yield project.state_store("run-a", fault_plan=fault_plan)
         else:
-            path = project.run_log_path_for(tmp_path, "run-a")
+            path = project.run_log_path_for(project.root, "run-a")
             path.parent.mkdir(parents=True, exist_ok=True)
             threads = sim.threads()
             with FileRunLogWriter(path, clock=sim.clock, threads=threads) as writer:
-                yield RunLogReplayStore(writer, project.state_store("run-a"))
+                yield RunLogReplayStore(writer, project.state_store("run-a", fault_plan=fault_plan))
 
     return opened
+
+
+def composed(store: ReplayStore, executor: FakeReplayExecutor, sim: Sim) -> ReplayRunHost:
+    return ReplayRunHost(
+        runtime(store),
+        executor,
+        sim.clock,
+        lambda _: ReplayEnding(
+            Ended(outcome=Outcome.FINISHED, summary="Measured.", resumable=True)
+        ),
+    )
+
+
+@pytest.mark.parametrize("fault", list(CommitFault))
+async def test_crash_sweep_keeps_one_paid_observation_across_every_store(
+    stores: StoreFactory, sim: Sim, fault: CommitFault
+) -> None:
+    with stores() as baseline:
+        executor = FakeReplayExecutor(
+            lambda _: ReplayResult(core_common.Identity(root="measured"), paid=True, cost_usd=2)
+        )
+        original = composed(baseline, executor, sim)
+        await drive_replay(original, launch("baseline"))
+        boundaries = original.runtime.archive.sequence
+    for boundary in swept(boundaries, sample=3):
+        with stores((None,) * boundary + (fault,)) as store:
+            executor = FakeReplayExecutor(
+                lambda _: ReplayResult(core_common.Identity(root="measured"), paid=True, cost_usd=2)
+            )
+            with suppress(ReplayCommitError, OSError):
+                await drive_replay(composed(store, executor, sim), launch(f"first-{boundary}"))
+            resumed = composed(store, executor, sim)
+            assert await drive_replay(resumed, launch(f"resume-{boundary}")) == ReplayCompleted(
+                "measured"
+            )
+            assert len(executor.invocations) == 1
+            assert resumed.runtime.accounting.lifetime_completed == 1
+            assert resumed.runtime.accounting.paid_operations == 1
+            assert resumed.runtime.accounting.cost_usd == 2
 
 
 def launch(request: str) -> ReplayLaunch:
