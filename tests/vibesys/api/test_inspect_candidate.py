@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import pytest
+
 from server.host_api import MIN_CHECKOUT_VERSION
 from vibesys.api.host_operations.api import execute_inspect_candidate
 from vs_proto.api import (
@@ -94,3 +96,51 @@ def test_an_unusable_path_is_invalid_input() -> None:
     failure = _result("bad\npath")
     assert isinstance(failure, OperationFailure)
     assert failure.category == FailureCategory.INVALID_INPUT
+
+
+@pytest.mark.parametrize(
+    "declaration",
+    [
+        '[project]\nname = "vibesys"\nversion = 1\n',
+        '[project]\nname = "vibesys"\nversion = "0.1.1"\nversoin = "9.0"\n',
+        '[project]\nname = "vibesys"\nversion = "0.1.1"\n[unknown]\nx = 1\n',
+        'project = "vibesys"\n',
+    ],
+)
+def test_invalid_checkout_declarations_are_not_found(tmp_path: Path, declaration: str) -> None:
+    (tmp_path / "pyproject.toml").write_text(declaration, encoding="utf-8")
+    reply = _result(str(tmp_path))
+    assert isinstance(reply, pb.InspectCandidateResponse)
+    assert reply.state == pb.CandidateState.NOT_FOUND
+    assert reply.vibesys_checkout is False
+    assert reply.identity is None
+
+
+@pytest.mark.parametrize("component", [".vibesys", ".vibesys/tasks"])
+def test_symlinked_project_layout_is_invalid_input(tmp_path: Path, component: str) -> None:
+    root = tmp_path / "checkout"
+    root.mkdir()
+    _checkout(root, MIN_CHECKOUT_VERSION)
+    path = root / component
+    moved = tmp_path / "moved"
+    path.rename(moved)
+    path.symlink_to(moved, target_is_directory=True)
+    reply = _result(str(root))
+    assert isinstance(reply, OperationFailure)
+    assert reply.category == FailureCategory.INVALID_INPUT
+    assert "symlink" in reply.message
+
+
+def test_standard_pyproject_metadata_does_not_hide_a_checkout(tmp_path: Path) -> None:
+    _checkout(tmp_path, MIN_CHECKOUT_VERSION)
+    with (tmp_path / "pyproject.toml").open("a", encoding="utf-8") as handle:
+        handle.write(
+            'description = "checkout"\ndependencies = ["pydantic"]\n'
+            '[project.scripts]\nvibesys = "entrypoints.cli:main"\n'
+            '[build-system]\nrequires = ["hatchling"]\n'
+            "[tool.custom]\noption = true\n"
+            '[dependency-groups]\ndev = ["pytest"]\n'
+        )
+    reply = _result(str(tmp_path))
+    assert isinstance(reply, pb.InspectCandidateResponse)
+    assert reply.state == pb.CandidateState.FOUND

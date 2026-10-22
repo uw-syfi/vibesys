@@ -11,6 +11,9 @@ import re
 import tomllib
 from pathlib import Path
 
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
+
+from vs_project.api import Project, ProjectLayoutError
 from vs_proto.api import API_SCHEMA_HASH
 from vs_proto.api import host_payloads as pb
 
@@ -21,6 +24,44 @@ _COMMIT_HEX_LENGTH = 40
 _MINIMUM = (0, 1, 1)
 MINIMUM_VERSION = "0.1.1"
 _HELPER_ENTRY = Path("src") / "entrypoints" / "host_helper.py"
+
+
+class _ProjectDeclaration(BaseModel):
+    """PEP 621 metadata; only the checkout name and version drive inspection."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    name: str = ""
+    version: str = ""
+    description: str | None = None
+    readme: str | dict[str, object] | None = None
+    requires_python: str | None = Field(default=None, alias="requires-python")
+    license: str | dict[str, object] | None = None
+    license_files: list[str] = Field(default_factory=list, alias="license-files")
+    authors: list[dict[str, str]] = Field(default_factory=list)
+    maintainers: list[dict[str, str]] = Field(default_factory=list)
+    keywords: list[str] = Field(default_factory=list)
+    classifiers: list[str] = Field(default_factory=list)
+    urls: dict[str, str] = Field(default_factory=dict)
+    scripts: dict[str, str] = Field(default_factory=dict)
+    gui_scripts: dict[str, str] = Field(default_factory=dict, alias="gui-scripts")
+    entry_points: dict[str, dict[str, str]] = Field(default_factory=dict, alias="entry-points")
+    dependencies: list[str] = Field(default_factory=list)
+    optional_dependencies: dict[str, list[str]] = Field(
+        default_factory=dict, alias="optional-dependencies"
+    )
+    dynamic: list[str] = Field(default_factory=list)
+
+
+class _PyprojectDeclaration(BaseModel):
+    """Standard pyproject tables, leaving each tool's own schema to that tool."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    project: _ProjectDeclaration = Field(default_factory=_ProjectDeclaration)
+    build_system: dict[str, object] = Field(default_factory=dict, alias="build-system")
+    dependency_groups: dict[str, object] = Field(default_factory=dict, alias="dependency-groups")
+    tool: dict[str, object] = Field(default_factory=dict)
 
 
 def release_of(version: str) -> tuple[int, ...] | None:
@@ -56,7 +97,10 @@ def inspect_candidate(request: pb.InspectCandidateRequest) -> pb.InspectCandidat
         message = f"candidate path cannot be read: {exc}"
         raise ValueError(message) from exc
     response.git_repository = _exists(root / ".git")
-    response.vibesys_project = _is_dir(root / ".vibesys" / "tasks")
+    try:
+        response.vibesys_project = Project.open(root).is_initialized()
+    except ProjectLayoutError as exc:
+        raise ValueError(str(exc)) from exc
     if version is None:
         return response
     response.vibesys_checkout = True
@@ -97,26 +141,15 @@ def _vibesys_version(pyproject: Path) -> str | None:
         if pyproject.stat().st_size > _PYPROJECT_LIMIT_BYTES:
             return None
         with pyproject.open("rb") as handle:
-            document = tomllib.load(handle)
-    except (OSError, tomllib.TOMLDecodeError, UnicodeDecodeError):
+            document = _PyprojectDeclaration.model_validate(tomllib.load(handle))
+    except (OSError, tomllib.TOMLDecodeError, UnicodeDecodeError, ValidationError):
         return None
-    project = document.get("project")
-    if not isinstance(project, dict) or project.get("name") != "vibesys":
-        return None
-    version = project.get("version")
-    return version if isinstance(version, str) else ""
+    return document.project.version if document.project.name == "vibesys" else None
 
 
 def _exists(path: Path) -> bool:
     try:
         return path.exists()
-    except OSError:
-        return False
-
-
-def _is_dir(path: Path) -> bool:
-    try:
-        return path.is_dir()
     except OSError:
         return False
 

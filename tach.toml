@@ -2052,7 +2052,7 @@ expose = ["api", "api\\..*"]
 
 [[modules]]
 path = "vibesys.api.host_operations._candidate"
-depends_on = ["vs_proto"]
+depends_on = ["vs_proto", "vs_project"]
 
 [[modules]]
 path = "vibesys.api.host_operations._handlers"
