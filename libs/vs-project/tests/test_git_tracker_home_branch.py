@@ -240,6 +240,7 @@ def test_resume_preserves_the_operator_branch_tree_and_index(
     baseline = world.tip(home)
     assert baseline is not None
     _run(world, "run-a", 0)
+    run_tip = world.tip("vibesys-runs/run-a")
     world.git().switch_branch(home)
     source = world.root / "main.py"
     source.write_text(contents, encoding="utf-8")
@@ -253,6 +254,7 @@ def test_resume_preserves_the_operator_branch_tree_and_index(
     assert world.checked_out() == home
     assert world.tip(home) == baseline
     assert resumed.trusted_input_baseline == baseline
+    assert resumed.current_sha() == run_tip
     assert source.read_text(encoding="utf-8") == contents
     assert loose.read_text(encoding="utf-8") == "keep my notes"
     assert (world.git().uncommitted_paths(()), world.git().has_staged_changes()) == before

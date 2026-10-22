@@ -134,6 +134,7 @@ class GitTracker:
         self._trusted_input_baseline: str | None = None
         self._project_branch = run_branch(run_id)
         self._home_branch: str | None = None
+        self._resumed = False
         self._state_integration: ProjectGitIntegration = Project.open(
             self.root
         ).state.git_integration(run_id)
@@ -549,13 +550,13 @@ class GitTracker:
             self._events.snapshot_recorded(label, commit=None)
 
     def current_sha(self) -> str | None:
-        """Return the HEAD commit sha, or ``None`` if it cannot be resolved.
+        """Return the selected run tip, or ``None`` if it cannot be resolved.
 
         Never cached: it reads the repository files on each call (no process
         spawn for the plain layout), so commits made by anyone, including an
         agent's own ``git commit``, are observed immediately.
         """
-        return self._git.head()
+        return self._git.resolve_commit(self.project_branch) if self._resumed else self._git.head()
 
     @property
     def history_root(self) -> Path:
@@ -795,7 +796,8 @@ class GitTracker:
         if commit is None:
             message = f"trusted input baseline {revision!r} is not a commit"
             raise ValueError(message)
-        if not self._git.is_ancestor(commit, "HEAD"):
+        selected = self.project_branch if self._resumed else "HEAD"
+        if not self._git.is_ancestor(commit, selected):
             message = f"trusted input baseline {revision!r} is not an ancestor of HEAD"
             raise ValueError(message)
         return commit
@@ -856,6 +858,10 @@ class GitTracker:
 
     def _resume_user_project(self, trusted_input_baseline: str | None) -> None:
         """Reattach the immutable input without checking out or cleaning the operator root."""
+        if not self._branch_exists(self.project_branch):
+            message = f"VibeSys run branch does not exist: {self.project_branch}"
+            raise ValueError(message)
+        self._resumed = True
         self._home_branch = self._home_of(self._current_branch())
         if trusted_input_baseline is not None:
             self.configure_trusted_input_baseline(trusted_input_baseline)
