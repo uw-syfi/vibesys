@@ -8,9 +8,11 @@ import {
   type HelloResponse,
   HelloResponseSchema,
   HostCallRequestSchema,
+  HostMutateRequestSchema,
   HostReadRequestSchema,
   HostService,
   hostCallBudgets,
+  mutateBudgets,
   readBudgets,
   TailRequestSchema,
   TailResponseSchema,
@@ -198,6 +200,7 @@ export class GatewayConnection {
 }
 
 const HOST_CALL_METHOD = `/${HostService.typeName}/${HostService.method.hostCall.name}`;
+export const MUTATE_METHOD = `/${HostService.typeName}/${HostService.method.mutate.name}`;
 export const READ_METHOD = `/${HostService.typeName}/${HostService.method.read.name}`;
 export const WATCH_METHOD = `/${HostService.typeName}/${HostService.method.watch.name}`;
 
@@ -214,6 +217,12 @@ function unaryDeadline(method: string, bytes: Uint8Array): number {
     const slot = fromBinary(HostReadRequestSchema, bytes).method.case;
     if (slot === undefined || !(slot in readBudgets)) throw new Error('host read has no method');
     return readBudgets[slot].totalMs;
+  }
+  if (method === MUTATE_METHOD) {
+    const slot = fromBinary(HostMutateRequestSchema, bytes).method.case;
+    if (slot === undefined || !(slot in mutateBudgets))
+      throw new Error('host mutate has no method');
+    return mutateBudgets[slot].totalMs;
   }
   return UNARY_DEADLINE_MS;
 }

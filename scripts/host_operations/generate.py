@@ -9,6 +9,19 @@ from pathlib import Path
 from scripts.host_operations.api import compile_outputs
 
 
+def _slot_tuple(tree: ast.AST, name: str) -> tuple[str, ...]:
+    """String constants assigned to one module-level slot tuple."""
+    return tuple(
+        constant.value
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Assign)
+        and any(isinstance(target, ast.Name) and target.id == name for target in node.targets)
+        and isinstance(node.value, ast.Tuple)
+        for constant in node.value.elts
+        if isinstance(constant, ast.Constant) and isinstance(constant.value, str)
+    )
+
+
 def generate(root: Path, image: bytes, *, include_schema: bool = True) -> None:
     """Check static slots, then publish all projections from the same descriptor image."""
     tree = ast.parse((root / "src/vibesys/api/host_operations/_handlers.py").read_text())
@@ -28,18 +41,9 @@ def generate(root: Path, image: bytes, *, include_schema: bool = True) -> None:
         ),
     )
     sources = tuple(path.read_text() for path in paths)
-    watches = tuple(
-        constant.value
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Assign)
-        and any(
-            isinstance(target, ast.Name) and target.id == "WATCH_SLOTS" for target in node.targets
-        )
-        and isinstance(node.value, ast.Tuple)
-        for constant in node.value.elts
-        if isinstance(constant, ast.Constant) and isinstance(constant.value, str)
-    )
-    outputs = compile_outputs(image, registrations, sources, watches)
+    mutations = _slot_tuple(tree, "MUTATION_SLOTS")
+    watches = _slot_tuple(tree, "WATCH_SLOTS")
+    outputs = compile_outputs(image, (*registrations, *mutations), sources, watches)
     for name, content in outputs.items():
         if name.endswith(".proto") and not include_schema:
             continue

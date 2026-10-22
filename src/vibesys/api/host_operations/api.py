@@ -10,6 +10,7 @@ from vibesys.api.host_operations._candidate import inspect_candidate
 from vibesys.api.host_operations._handlers import handlers
 from vibesys.api.host_operations._login import LoginRefusedFact, LoginStartedFact, serve_login
 from vibesys.api.host_operations._reads import ReadSource
+from vibesys.api.host_operations._start import StartRefusedError, StartUnknownError, serve_start
 from vs_proto.api import (
     AcceptedRequest,
     FailureCategory,
@@ -26,11 +27,14 @@ __all__ = [
     "LoginRefusedFact",
     "LoginStartedFact",
     "ReadSource",
+    "StartRefusedError",
+    "StartUnknownError",
     "execute_host_read",
     "execute_inspect_candidate",
     "execute_read",
     "host_read_failure",
     "serve_login",
+    "serve_start",
 ]
 
 _READ_COMMANDS = {item.slot: item.cli for item in host_operations.READ_CALLS}

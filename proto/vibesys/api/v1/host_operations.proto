@@ -198,6 +198,27 @@ service HostOperationsService {
       }
     };
   }
+  // Start admits one run. Disconnect does not cancel it: the gateway drops the
+  // caller's context and keeps the runner until the cap. Replay of the same
+  // request id returns the stored result and does not launch again.
+  rpc StartRun(vibesys.host.v1.StartRunRequest) returns (vibesys.host.v1.StartRunResponse) {
+    option (vibesys.host.v1.operation) = {
+      adapter_method: "start.run"
+      operation_id: 36
+      request_tag: 36
+      response_tag: 36
+      cap_ms: 60000
+      grace_ms: 5000
+      effect: OPERATION_EFFECT_ADMISSION
+      retry: RETRY_RECONCILE_SAME_ID
+      cardinality: CARDINALITY_UNARY
+      executor: EXECUTOR_CHECKOUT
+      correlation: {
+        request_path: 1
+        response_path: 1
+      }
+    };
+  }
   // HostCall dispatch. The runner deadline is cap_ms. The client budget is
   // cap_ms plus grace_ms, so it stays strictly above that cap. Relaunch confirms
   // an epoch for up to 25s inside its runner cap. Request and response tags are

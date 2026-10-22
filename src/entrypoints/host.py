@@ -15,16 +15,20 @@ from vibesys.api.host import host_call
 from vibesys.api.host_operations.api import (
     LoginRefusedFact,
     LoginStartedFact,
+    StartRefusedError,
     execute_inspect_candidate,
     serve_login,
+    serve_start,
 )
 from vs_project.api import Project, ProjectError
 from vs_proto.api import host_operations
+from vs_proto.api import host_payloads as pb
 from vs_sim.api import OsProcesses, OsThreads, SystemClock
 
 _HOST_CALL_COMMANDS = {op.cli: op.slot for op in host_operations.HOST_CALLS}
 _READ_COMMANDS = {op.cli: op.slot for op in host_operations.READ_CALLS}
 _WATCH_COMMANDS = {slot.replace("_", "-"): slot for slot in host_operations.WATCHES}
+_MUTATION_COMMANDS = {op.cli: op.slot for op in host_operations.MUTATION_CALLS}
 
 
 class _LoginHold(Protocol):
@@ -140,6 +144,17 @@ def main(
             raise TypeError(message)
         _serve_login(arguments[0], source.read((1 << 20) + 1), destination, host.logins, owned)
         return 0
+    if arguments and arguments[0] in _MUTATION_COMMANDS:
+        parser = argparse.ArgumentParser(
+            prog=f"vibesys host {arguments[0]}",
+            description="Read a binary HostMutateRequest from stdin; write a binary HostMutateResponse to stdout.",
+        )
+        parser.parse_args(arguments[1:])
+        source = sys.stdin.buffer if stdin is None else stdin
+        destination = sys.stdout.buffer if stdout is None else stdout
+        owned = OsThreads() if threads is None else threads
+        destination.write(_serve_start(source.read((1 << 20) + 1), owned))
+        return 0
     if arguments and arguments[0] in _HOST_CALL_COMMANDS:
         parser = argparse.ArgumentParser(
             prog=f"vibesys host {arguments[0]}",
@@ -204,6 +219,33 @@ def _serve_login(
         destination.write(chunk)
 
     serve_login(payload, cli=cli, start=start, write=write, wait=wait)
+
+
+def _serve_start(payload: bytes, threads: Threads) -> bytes:
+    """Admit the start, then launch through the helper. Replay does not launch."""
+    requests = import_module("server.host_helper_requests")
+    models = import_module("server.host_api")
+
+    def launch(request: pb.StartRunRequest) -> tuple[str, str]:
+        try:
+            body = requests.registry_start_request(request)
+        except (TypeError, ValueError) as exc:
+            raise StartRefusedError(str(exc)) from exc
+        host = import_module("entrypoints.host_helper").real_host(os.environ, os.getuid(), threads)
+        reply = requests.launch_registered_run(body, host)
+        if isinstance(reply, models.HelperError):
+            raise StartRefusedError(reply.message)
+        started = reply.launch
+        if isinstance(started, models.DetachedLaunchFailure):
+            raise StartRefusedError(started.message)
+        return started.run_id, started.id
+
+    return serve_start(
+        payload,
+        store=Project.admissions(),
+        launch=launch,
+        host_user=str(os.getuid()),
+    )
 
 
 if __name__ == "__main__":

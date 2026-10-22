@@ -11,7 +11,8 @@ decisions it needs (:func:`negotiate`, :func:`select_completions`,
 Light like the channel: the standard library, Pydantic, ``vs_sim.api`` and light
 ``server`` modules only.
 
-Public surface: ``answer``, ``answer_registered_read``, ``read_failure_category``,
+Public surface: ``answer``, ``answer_registered_read``, ``launch_registered_run``, ``registry_start_request``,
+``read_failure_category``,
 ``registry_read_source``, ``connect``, ``negotiate``, ``Negotiated``,
 ``HelperHost``; the interfaces ``Projects``, ``Directories``, ``RunLauncher`` and
 ``CheckoutProbe`` with the values they exchange (``ProjectRun``,
@@ -164,11 +165,12 @@ if TYPE_CHECKING:
     from typing_extensions import TypeIs
 
     from server.host_agent_logins import AgentLogin, LoginStarted, LoginUnavailable
-    from server.host_api import RunDigestUnreadable
+    from server.host_api import HarnessChoice, RunDigestUnreadable
+    from server.host_compute import MeasurementTarget
     from server.host_examples import CreatedProject, ExampleList, TaskGoal
     from server.host_helper_readers import Readers
     from server.host_operation_types_generated import RegistryReadRequest, UnmigratedHelperRequest
-    from server.host_preflight import PreflightReport
+    from server.host_preflight import PreflightReport, RoleOption, RunOptions
     from server.registry import InstanceInspector, LiveRegistry, StopEffects
     from server.run_summary import Summarized
     from server.usage_window import RunUsage
@@ -1659,3 +1661,90 @@ def answer_registered_read(cli: str, payload: bytes, host: HelperHost) -> bytes:
         return operations.host_read_failure(category, error.refusal.message)
     except (ProjectLookupError, ComputeError) as error:
         return operations.host_read_failure(read_failure_category(error.code), str(error))
+
+
+def launch_registered_run(
+    request: RunStartRequest, host: HelperHost
+) -> RunStartReply | HelperError:
+    """Launch one already-admitted start through the helper's launcher."""
+    return _start(request, host)
+
+
+def registry_start_request(request: pb.StartRunRequest) -> RunStartRequest:
+    """The helper start body for one registry ``StartRunRequest``."""
+    agents = _start_agents(request.agents)
+    return RunStartRequest(
+        request_id=request.request_id,
+        deadline_ms=60_000,
+        project=request.project,
+        task=request.task or None,
+        args=tuple(request.args),
+        harness=_start_harness(request.harness),
+        options=_start_options(request.options),
+        agents=agents,
+        measure_on=_start_measure(request.measure_on),
+    )
+
+
+def _start_harness(harness: pb.StartRunHarness | None) -> HarnessChoice | None:
+    if harness is None:
+        return None
+    choice = import_module("server.host_harness").HarnessChoice
+    return choice(provider=harness.provider, model=harness.model)
+
+
+def _start_agents(agents: Iterable[pb.StartRunAgent]) -> dict[str, HarnessChoice] | None:
+    choice = import_module("server.host_harness").HarnessChoice
+    mapped = {}
+    for agent in agents:
+        harness = agent.harness
+        if harness is None:
+            message = f"agents.{agent.role} has no harness"
+            raise ValueError(message)
+        mapped[agent.role] = choice(provider=harness.provider, model=harness.model)
+    return mapped or None
+
+
+def _start_options(options: pb.StartRunOptions | None) -> RunOptions | None:
+    if options is None:
+        return None
+    preflight = import_module("server.host_preflight")
+    payloads = import_module("vs_proto.api").host_payloads
+    rounds = options.rounds or None
+    limit = options.time_limit_s or None
+    chosen = {
+        payloads.StartRunResults.KEEP: preflight.RunResults.KEEP,
+        payloads.StartRunResults.PUBLISH_GITHUB: preflight.RunResults.PUBLISH_GITHUB,
+    }.get(options.results)
+    roles = tuple(_start_role(role) for role in options.roles)
+    if rounds is None and limit is None and chosen is None and not roles:
+        return None
+    return preflight.RunOptions(rounds=rounds, time_limit_s=limit, results=chosen, roles=roles)
+
+
+def _start_role(role: pb.StartRunRole) -> RoleOption:
+    preflight = import_module("server.host_preflight")
+    payloads = import_module("vs_proto.api").host_payloads
+    effort = {
+        payloads.StartRunReasoning.DEFAULT: preflight.ReasoningEffort.DEFAULT,
+        payloads.StartRunReasoning.LOW: preflight.ReasoningEffort.LOW,
+        payloads.StartRunReasoning.MEDIUM: preflight.ReasoningEffort.MEDIUM,
+        payloads.StartRunReasoning.HIGH: preflight.ReasoningEffort.HIGH,
+    }.get(role.reasoning, preflight.ReasoningEffort.DEFAULT)
+    return preflight.RoleOption(role=role.role, model=role.model or None, reasoning_effort=effort)
+
+
+def _start_measure(measure: pb.StartRunMeasure | None) -> MeasurementTarget | None:
+    compute = import_module("server.host_compute")
+    if measure is None or measure.target is None:
+        return None
+    match measure.target.field:
+        case "same_machine":
+            return compute.SameMachine()
+        case "slurm_cluster":
+            return compute.SlurmTarget(cluster=measure.target.value)
+        case "modal":
+            return compute.ModalTarget()
+        case _:
+            message = "unknown measure target"
+            raise ValueError(message)

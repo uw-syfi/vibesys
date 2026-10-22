@@ -44,6 +44,7 @@ def _slots() -> tuple[str, ...]:
         "describe_machine",
         "list_compute",
         "preflight_run",
+        "start_run",
     )
 
 
@@ -90,6 +91,7 @@ def test_every_method_has_one_typed_handler_and_canonical_budget() -> None:
         30000,
         35000,
         70000,
+        65000,
         605000,
     }
 
@@ -164,7 +166,7 @@ def test_the_descriptor_pass_compiles_all_language_outputs_before_publication() 
     root = Path(__file__).resolve().parents[3]
     image = _image().SerializeToString()
     outputs = compile_outputs(image, _slots(), _server_sources(root), _watches())
-    assert len(outputs) == 10
+    assert len(outputs) == 12
     for path, content in outputs.items():
         if path.endswith(".py"):
             ast.parse(content)

@@ -33,6 +33,10 @@ from vs_proto._generated.vibesys.api.v1.host_call_pb import (
     SteerIntent,
     WithdrawIntent,
 )
+from vs_proto._generated.vibesys.api.v1.host_mutate_generated_pb import (
+    HostMutateRequest,
+    HostMutateResponse,
+)
 from vs_proto._generated.vibesys.api.v1.host_pb import (
     BlobResult,
     GetBlobsRequest,
@@ -274,6 +278,8 @@ __all__ = [
     "Hold",
     "HostCallRequest",
     "HostCallResponse",
+    "HostMutateRequest",
+    "HostMutateResponse",
     "HostReadRequest",
     "HostReadResponse",
     "HostWatchRequest",

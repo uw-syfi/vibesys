@@ -173,6 +173,28 @@ def accept_preflight_run(
     return PreflightRun.accept(request)
 
 
+StartRun = Operation(
+    "StartRun",
+    36,
+    36,
+    36,
+    60000,
+    5000,
+    3,
+    3,
+    1,
+    1,
+    None,
+    pb.StartRunRequest,
+    pb.StartRunResponse,
+    ((("request_id",), ("request_id",)),),
+)
+
+
+def accept_start_run(request: pb.StartRunRequest) -> AcceptedRequest[pb.StartRunRequest]:
+    return StartRun.accept(request)
+
+
 Login = Operation(
     "Login",
     40,
@@ -212,6 +234,7 @@ OPERATIONS: tuple[Operation, ...] = (
     DescribeMachine,
     ListCompute,
     PreflightRun,
+    StartRun,
     Login,
 )
 
@@ -257,6 +280,22 @@ class Handlers:
             case 16:
                 return PreflightRun.validate_response(
                     request, self.preflight_run(PreflightRun.request_value(request))
+                )
+            case _:
+                raise ValueError("unknown operation id")
+
+
+@dataclass(frozen=True)
+class MutationHandlers:
+    """Required mutation slots. A read handler cannot satisfy one."""
+
+    start_run: Callable[[pb.StartRunRequest], pb.StartRunResponse]
+
+    def dispatch(self, request: AcceptedRequest) -> bytes:
+        match request.operation.operation_id:
+            case 36:
+                return StartRun.validate_response(
+                    request, self.start_run(StartRun.request_value(request))
                 )
             case _:
                 raise ValueError("unknown operation id")
@@ -370,7 +409,7 @@ READ_CALLS: tuple[HostCall, ...] = (
     HostCall("list_compute", "list-compute", 15, 15, 10000, 5000),
     HostCall("preflight_run", "preflight-run", 16, 16, 65000, 5000),
 )
-MUTATIONS: dict[str, Operation] = {}
-MUTATION_CALLS: tuple[HostCall, ...] = ()
+MUTATIONS: dict[str, Operation] = {"start_run": StartRun}
+MUTATION_CALLS: tuple[HostCall, ...] = (HostCall("start_run", "start-run", 36, 36, 60000, 5000),)
 WATCHES: dict[str, Operation] = {"login": Login}
 WATCH_CALLS: tuple[HostCall, ...] = (HostCall("login", "login", 40, 40, 600000, 5000),)

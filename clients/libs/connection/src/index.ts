@@ -18,6 +18,7 @@ export {
   GatewayConnection,
   type GatewayDialer,
   HELLO_METHOD,
+  MUTATE_METHOD,
   READ_METHOD,
   TAIL_METHOD,
   WATCH_METHOD,
@@ -52,4 +53,9 @@ export {
   type RegistrySetupPorts,
   registrySetup,
 } from './shell/registry-setup.js';
+export {
+  type RegistryRunInputs,
+  type RegistryStartPorts,
+  registryStart,
+} from './shell/registry-start.js';
 export type {CheckoutProblem, Phase} from './state/host-connection.js';

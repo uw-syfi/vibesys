@@ -1,10 +1,6 @@
 /** A main-owned login. Subscriptions do not own the host process. */
 import {create, fromBinary, toBinary} from '@bufbuild/protobuf';
-import type {
-  LoginStarted,
-  LoginUnavailable,
-  LoginUnavailableReason,
-} from '@vibesys/contracts/host-helper';
+import type {LoginStarted, LoginUnavailable} from '@vibesys/contracts/host-helper';
 import type {HostId} from '@vibesys/hosts';
 import {hostKey} from '@vibesys/hosts';
 import {
@@ -35,7 +31,7 @@ interface Running {
   readonly first: Promise<LoginStart>;
 }
 
-const REFUSALS: Record<number, LoginUnavailableReason | undefined> = {
+const REFUSALS: Record<number, LoginUnavailable['reason'] | undefined> = {
   [LoginRefusal.NOT_INSTALLED]: 'not_installed',
   [LoginRefusal.NO_LOGIN_COMMAND]: 'no_login_command',
   [LoginRefusal.NEEDS_TERMINAL]: 'needs_terminal',
@@ -168,7 +164,7 @@ export class LoginActor {
 
 function refused(body: {
   readonly reason: LoginRefusal;
-  readonly command?: string;
+  readonly command?: string | undefined;
   readonly detail: string;
 }): LoginUnavailable {
   const reason = REFUSALS[body.reason];

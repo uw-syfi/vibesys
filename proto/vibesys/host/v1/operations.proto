@@ -1375,6 +1375,103 @@ message LoginUnavailableBody {
 }
 
 // One sequenced login fact. The host process stays up until cancel or completion.
+message StartRunHarness {
+  string provider = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 128
+  }];
+  string model = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 256
+  }];
+}
+
+enum StartRunResults {
+  START_RUN_RESULTS_UNSPECIFIED = 0;
+  START_RUN_RESULTS_KEEP = 1;
+  START_RUN_RESULTS_PUBLISH_GITHUB = 2;
+}
+
+enum StartRunReasoning {
+  START_RUN_REASONING_UNSPECIFIED = 0;
+  START_RUN_REASONING_DEFAULT = 1;
+  START_RUN_REASONING_LOW = 2;
+  START_RUN_REASONING_MEDIUM = 3;
+  START_RUN_REASONING_HIGH = 4;
+}
+
+message StartRunRole {
+  string role = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 128
+  }];
+  string model = 2 [(buf.validate.field).string.max_bytes = 256];
+  StartRunReasoning reasoning = 3 [(buf.validate.field).enum.defined_only = true];
+}
+
+message StartRunOptions {
+  optional int32 rounds = 1 [(buf.validate.field).int32 = {
+    gte: 1
+    lte: 1000000
+  }];
+  optional int32 time_limit_s = 2 [(buf.validate.field).int32 = {
+    gte: 1
+    lte: 8640000
+  }];
+  StartRunResults results = 3 [(buf.validate.field).enum.defined_only = true];
+  repeated StartRunRole roles = 4 [(buf.validate.field).repeated.max_items = 32];
+}
+
+message StartRunAgent {
+  string role = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 128
+  }];
+  StartRunHarness harness = 2 [(buf.validate.field).required = true];
+}
+
+message StartRunSameMachine {}
+
+message StartRunModal {}
+
+message StartRunMeasure {
+  oneof target {
+    option (buf.validate.oneof).required = true;
+    StartRunSameMachine same_machine = 1;
+    string slurm_cluster = 2 [(buf.validate.field).string = {
+      min_len: 1
+      max_bytes: 256
+    }];
+    StartRunModal modal = 3;
+  }
+}
+
+message StartRunRequest {
+  string request_id = 1 [(buf.validate.field).string.pattern = "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"];
+  string project = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 4096
+  }];
+  string task = 3 [(buf.validate.field).string.max_bytes = 256];
+  repeated string args = 4 [(buf.validate.field).repeated.max_items = 256];
+  StartRunHarness harness = 5;
+  StartRunOptions options = 6;
+  repeated StartRunAgent agents = 7 [(buf.validate.field).repeated.max_items = 32];
+  StartRunMeasure measure_on = 8;
+}
+
+message StartRunResponse {
+  string request_id = 1 [(buf.validate.field).string.pattern = "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"];
+  string run_id = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 128
+  }];
+  string instance_id = 3 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 128
+  }];
+}
+
 message LoginEvent {
   string request_id = 1 [(buf.validate.field).string = {
     max_bytes: 131072

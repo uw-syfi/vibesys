@@ -50,6 +50,17 @@ export interface NewRunMainDeps {
   /** Record a started run in Recent (the settings store). */
   readonly remember: (run: StoredRecentRun) => Promise<void>;
   readonly now: () => number;
+  /** The per-host switch. Absent or false keeps the helper JSON start. */
+  readonly transportV2?: (host: HostId) => Promise<boolean>;
+  /**
+   * The registry start used when `transportV2` is on. The host keeps the
+   * admitted run after `signal` aborts.
+   */
+  readonly registryStart?: (
+    host: HostId,
+    inputs: RunInputs,
+    signal: AbortSignal,
+  ) => Promise<{readonly runId: string; readonly instanceId: string}>;
 }
 
 /** One helper request without the fields the connection fills in (`request_id`, `deadline_ms`). */
@@ -284,6 +295,7 @@ export class NewRunMain {
   }
 
   async #start(host: HostId, inputs: RunInputs): Promise<StartedRun> {
+    if ((await this.#deps.transportV2?.(host)) === true) return this.#startRegistered(host, inputs);
     let launch: LiveInstanceRecord | DetachedLaunchFailure;
     try {
       await using lease = await this.#deps.connect(host);
@@ -299,12 +311,38 @@ export class NewRunMain {
       const log = launch.log_path == null ? '' : ` Its log is ${launch.log_path}.`;
       throw new Error(`${launch.message} (${launch.code} at ${launch.stage}).${log}`);
     }
+    await this.#remember(host, inputs, launch.run_id, launch.id);
+    return {runId: launch.run_id, instanceId: launch.id};
+  }
+
+  async #startRegistered(host: HostId, inputs: RunInputs): Promise<StartedRun> {
+    const start = this.#deps.registryStart;
+    if (start === undefined) {
+      throw new Error('run transport v2 is on and the start registry is missing');
+    }
+    const controller = new AbortController();
+    let started: {runId: string; instanceId: string};
+    try {
+      started = await start(host, inputs, controller.signal);
+    } catch (error) {
+      throw plain(error, 'Could not start the run');
+    }
+    await this.#remember(host, inputs, started.runId, started.instanceId);
+    return started;
+  }
+
+  async #remember(
+    host: HostId,
+    inputs: RunInputs,
+    runId: string,
+    instanceId: string,
+  ): Promise<void> {
     await this.#deps.remember({
       host: hostKey(host),
       project: inputs.project,
       task: inputs.task,
-      runId: launch.run_id,
-      instanceId: launch.id,
+      runId,
+      instanceId,
       attachedAt: this.#deps.now(),
       start: {
         harness: inputs.harness,
@@ -314,6 +352,5 @@ export class NewRunMain {
         args: inputs.args,
       },
     });
-    return {runId: launch.run_id, instanceId: launch.id};
   }
 }

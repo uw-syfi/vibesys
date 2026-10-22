@@ -191,6 +191,43 @@ describe('NewRunMain', () => {
     expect(asked.map(request => 'with_causes' in request)).toEqual([true, false]);
   });
 
+  test('a v2 start uses the registry and does not ask the helper', async () => {
+    const link = new FakeLink();
+    const manager = new ConnectionManager({
+      linkFor: () => link,
+      appVersion: 'test',
+      scheduleTimeout: new FakeClock().scheduleTimeout,
+      config: {delaysMs: [1], deadlineMs: 60_000, heartbeatMs: 15_000},
+      log: () => {},
+    });
+    const remembered: StoredRecentRun[] = [];
+    const main = new NewRunMain({
+      connect: host => manager.acquire(host, '/checkout'),
+      remember: async run => {
+        remembered.push(run);
+      },
+      now: () => 42,
+      transportV2: async () => true,
+      registryStart: async () => ({runId: 'run-9', instanceId: 'inst-9'}),
+    });
+    const started = await main.answer({
+      kind: 'start-run',
+      host: LOCAL,
+      inputs: {
+        project: '/p',
+        task: 'mpmc',
+        harness: null,
+        options: {},
+        agents: {},
+        measure_on: {kind: 'same_machine'},
+        args: [],
+      },
+    });
+    expect(started).toEqual({runId: 'run-9', instanceId: 'inst-9'});
+    expect(link.helper.requests.some(request => request.type === 'run.start')).toBe(false);
+    expect(remembered[0]?.runId).toBe('run-9');
+  });
+
   test('starts a run with typed options and records it in Recent', async () => {
     const {link, main, remembered} = subject();
     link.helper.host.projects.set('/p', ['mpmc']);

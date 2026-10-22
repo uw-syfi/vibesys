@@ -36,6 +36,36 @@ def _operation_dict(label: str, operations: tuple[Operation, ...]) -> str:
     return f"{label}: dict[str, Operation] = {{{body}}}"
 
 
+def _mutation_class(mutations: tuple[Operation, ...]) -> list[str]:
+    """A constructor the read path does not build. Empty until a mutation exists."""
+    if not mutations:
+        return []
+    lines = [
+        "@dataclass(frozen=True)",
+        "class MutationHandlers:",
+        '    """Required mutation slots. A read handler cannot satisfy one."""',
+    ]
+    lines.extend(
+        f"    {op.slot}: Callable[[pb.{op.request}], pb.{op.response}]" for op in mutations
+    )
+    lines += [
+        "",
+        "    def dispatch(self, request: AcceptedRequest) -> bytes:",
+        "        match request.operation.operation_id:",
+    ]
+    for op in mutations:
+        lines += [
+            f"            case {op.policy.operation_id}:",
+            f"                return {op.name}.validate_response(request, self.{op.slot}({op.name}.request_value(request)))",
+        ]
+    lines += [
+        "            case _:",
+        '                raise ValueError("unknown operation id")',
+        "",
+    ]
+    return lines
+
+
 def python_registry(
     operations: tuple[Operation, ...],
     admissions: tuple[Operation, ...],
@@ -57,7 +87,9 @@ def python_registry(
         "",
     ]
     declared = (*operations, *mutations, *watches)
-    handlers = (*operations, *mutations)
+    # Reads and mutations have different owners. A mutation slot on the read
+    # constructor would force every catalog read to carry a launcher.
+    handlers = operations
     for op in declared:
         p = op.policy
         lines += [
@@ -100,6 +132,7 @@ def python_registry(
         "            case _:",
         '                raise ValueError("unknown operation id")',
         "",
+        *_mutation_class(mutations),
         "class FailureVisitor[T](Protocol):",
     ]
     for name in failures:

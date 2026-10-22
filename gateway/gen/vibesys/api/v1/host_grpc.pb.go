@@ -22,6 +22,7 @@ const (
 	HostService_HostCall_FullMethodName   = "/vibesys.api.v1.HostService/HostCall"
 	HostService_Read_FullMethodName       = "/vibesys.api.v1.HostService/Read"
 	HostService_Watch_FullMethodName      = "/vibesys.api.v1.HostService/Watch"
+	HostService_Mutate_FullMethodName     = "/vibesys.api.v1.HostService/Mutate"
 	HostService_Hello_FullMethodName      = "/vibesys.api.v1.HostService/Hello"
 	HostService_Tail_FullMethodName       = "/vibesys.api.v1.HostService/Tail"
 	HostService_Skeleton_FullMethodName   = "/vibesys.api.v1.HostService/Skeleton"
@@ -45,6 +46,9 @@ type HostServiceClient interface {
 	// Watch runs one registered stream. The host keeps it until completion or cancellation.
 	// Closing a panel drops the client's subscription and does not cancel this stream.
 	Watch(ctx context.Context, in *HostWatchRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[HostWatchResponse], error)
+	// Mutate runs one registered unary admission or idempotent write. An admission
+	// keeps running after the caller disconnects, until the operation cap.
+	Mutate(ctx context.Context, in *HostMutateRequest, opts ...grpc.CallOption) (*HostMutateResponse, error)
 	Hello(ctx context.Context, in *HelloRequest, opts ...grpc.CallOption) (*HelloResponse, error)
 	// Tail follows the log live until the client cancels, starting at from_seq
 	// (inclusive). Record bytes pass through unchanged; only seq is decoded.
@@ -101,6 +105,16 @@ func (c *hostServiceClient) Watch(ctx context.Context, in *HostWatchRequest, opt
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type HostService_WatchClient = grpc.ServerStreamingClient[HostWatchResponse]
+
+func (c *hostServiceClient) Mutate(ctx context.Context, in *HostMutateRequest, opts ...grpc.CallOption) (*HostMutateResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(HostMutateResponse)
+	err := c.cc.Invoke(ctx, HostService_Mutate_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
 
 func (c *hostServiceClient) Hello(ctx context.Context, in *HelloRequest, opts ...grpc.CallOption) (*HelloResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
@@ -204,6 +218,9 @@ type HostServiceServer interface {
 	// Watch runs one registered stream. The host keeps it until completion or cancellation.
 	// Closing a panel drops the client's subscription and does not cancel this stream.
 	Watch(*HostWatchRequest, grpc.ServerStreamingServer[HostWatchResponse]) error
+	// Mutate runs one registered unary admission or idempotent write. An admission
+	// keeps running after the caller disconnects, until the operation cap.
+	Mutate(context.Context, *HostMutateRequest) (*HostMutateResponse, error)
 	Hello(context.Context, *HelloRequest) (*HelloResponse, error)
 	// Tail follows the log live until the client cancels, starting at from_seq
 	// (inclusive). Record bytes pass through unchanged; only seq is decoded.
@@ -230,6 +247,9 @@ func (UnimplementedHostServiceServer) Read(context.Context, *HostReadRequest) (*
 }
 func (UnimplementedHostServiceServer) Watch(*HostWatchRequest, grpc.ServerStreamingServer[HostWatchResponse]) error {
 	return status.Error(codes.Unimplemented, "method Watch not implemented")
+}
+func (UnimplementedHostServiceServer) Mutate(context.Context, *HostMutateRequest) (*HostMutateResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method Mutate not implemented")
 }
 func (UnimplementedHostServiceServer) Hello(context.Context, *HelloRequest) (*HelloResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Hello not implemented")
@@ -316,6 +336,24 @@ func _HostService_Watch_Handler(srv interface{}, stream grpc.ServerStream) error
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type HostService_WatchServer = grpc.ServerStreamingServer[HostWatchResponse]
+
+func _HostService_Mutate_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(HostMutateRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServiceServer).Mutate(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: HostService_Mutate_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServiceServer).Mutate(ctx, req.(*HostMutateRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
 
 func _HostService_Hello_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(HelloRequest)
@@ -418,6 +456,10 @@ var HostService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Read",
 			Handler:    _HostService_Read_Handler,
+		},
+		{
+			MethodName: "Mutate",
+			Handler:    _HostService_Mutate_Handler,
 		},
 		{
 			MethodName: "Hello",

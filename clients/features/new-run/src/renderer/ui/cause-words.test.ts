@@ -85,8 +85,13 @@ function everyCause(): Cause[] {
   ];
 }
 
+function appWorded(): Cause[] {
+  return everyCause().filter(cause => cause.kind !== 'project_dirty');
+}
+
 test('every cause is worded for this screen, and no headline names a flag or the run’s raw text', () => {
-  for (const cause of everyCause()) {
+  expect(failureWords(failed(CAUSES.project_dirty), 'host-b')).toBeNull();
+  for (const cause of appWorded()) {
     const words = failureWords(failed(cause), 'host-b');
 
     expect(words).not.toBeNull();
@@ -101,7 +106,7 @@ test('every cause is worded for this screen, and no headline names a flag or the
 
 test('every cause names the control to change or the step to take next', () => {
   const next = /Choose|Fix|Edit|Clear|Reset|Set |Sign in|Commit|move the evaluator|Change/;
-  for (const cause of everyCause()) {
+  for (const cause of appWorded()) {
     expect(failureWords(failed(cause), 'host-b')?.headline).toMatch(next);
   }
 });
@@ -133,7 +138,7 @@ test('a search without rounds is worded by the Rounds control, not by its flag',
 test('causes fixed outside this screen offer Check again, and those fixed by a control do not', () => {
   const recheck = (cause: Cause) => failureWords(failed(cause), 'm')?.recheck;
 
-  expect(recheck(CAUSES.project_dirty)).toBe(true);
+  expect(failureWords(failed(CAUSES.project_dirty), 'm')).toBeNull();
   expect(recheck(CAUSES.config_invalid)).toBe(true);
   expect(recheck(CAUSES.github_unavailable)).toBe(true);
   expect(recheck(CAUSES.task_not_found)).toBe(false);

@@ -30,6 +30,7 @@ const (
 	HostOperationsService_InspectCandidate_FullMethodName = "/vibesys.api.v1.HostOperationsService/InspectCandidate"
 	HostOperationsService_CompletePaths_FullMethodName    = "/vibesys.api.v1.HostOperationsService/CompletePaths"
 	HostOperationsService_Login_FullMethodName            = "/vibesys.api.v1.HostOperationsService/Login"
+	HostOperationsService_StartRun_FullMethodName         = "/vibesys.api.v1.HostOperationsService/StartRun"
 	HostOperationsService_PostIntent_FullMethodName       = "/vibesys.api.v1.HostOperationsService/PostIntent"
 	HostOperationsService_Relaunch_FullMethodName         = "/vibesys.api.v1.HostOperationsService/Relaunch"
 	HostOperationsService_ChatMessage_FullMethodName      = "/vibesys.api.v1.HostOperationsService/ChatMessage"
@@ -55,6 +56,10 @@ type HostOperationsServiceClient interface {
 	// Login is owned by the host until completion or an explicit cancel. Closing a
 	// panel drops the client's subscription and does not abort this stream.
 	Login(ctx context.Context, in *v1.LoginRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[v1.LoginEvent], error)
+	// Start admits one run. Disconnect does not cancel it: the gateway drops the
+	// caller's context and keeps the runner until the cap. Replay of the same
+	// request id returns the stored result and does not launch again.
+	StartRun(ctx context.Context, in *v1.StartRunRequest, opts ...grpc.CallOption) (*v1.StartRunResponse, error)
 	// HostCall dispatch. The runner deadline is cap_ms. The client budget is
 	// cap_ms plus grace_ms, so it stays strictly above that cap. Relaunch confirms
 	// an epoch for up to 25s inside its runner cap. Request and response tags are
@@ -181,6 +186,16 @@ func (c *hostOperationsServiceClient) Login(ctx context.Context, in *v1.LoginReq
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type HostOperationsService_LoginClient = grpc.ServerStreamingClient[v1.LoginEvent]
 
+func (c *hostOperationsServiceClient) StartRun(ctx context.Context, in *v1.StartRunRequest, opts ...grpc.CallOption) (*v1.StartRunResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(v1.StartRunResponse)
+	err := c.cc.Invoke(ctx, HostOperationsService_StartRun_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *hostOperationsServiceClient) PostIntent(ctx context.Context, in *PostIntentRequest, opts ...grpc.CallOption) (*PostIntentResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(PostIntentResponse)
@@ -231,6 +246,10 @@ type HostOperationsServiceServer interface {
 	// Login is owned by the host until completion or an explicit cancel. Closing a
 	// panel drops the client's subscription and does not abort this stream.
 	Login(*v1.LoginRequest, grpc.ServerStreamingServer[v1.LoginEvent]) error
+	// Start admits one run. Disconnect does not cancel it: the gateway drops the
+	// caller's context and keeps the runner until the cap. Replay of the same
+	// request id returns the stored result and does not launch again.
+	StartRun(context.Context, *v1.StartRunRequest) (*v1.StartRunResponse, error)
 	// HostCall dispatch. The runner deadline is cap_ms. The client budget is
 	// cap_ms plus grace_ms, so it stays strictly above that cap. Relaunch confirms
 	// an epoch for up to 25s inside its runner cap. Request and response tags are
@@ -277,6 +296,9 @@ func (UnimplementedHostOperationsServiceServer) CompletePaths(context.Context, *
 }
 func (UnimplementedHostOperationsServiceServer) Login(*v1.LoginRequest, grpc.ServerStreamingServer[v1.LoginEvent]) error {
 	return status.Error(codes.Unimplemented, "method Login not implemented")
+}
+func (UnimplementedHostOperationsServiceServer) StartRun(context.Context, *v1.StartRunRequest) (*v1.StartRunResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method StartRun not implemented")
 }
 func (UnimplementedHostOperationsServiceServer) PostIntent(context.Context, *PostIntentRequest) (*PostIntentResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method PostIntent not implemented")
@@ -481,6 +503,24 @@ func _HostOperationsService_Login_Handler(srv interface{}, stream grpc.ServerStr
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type HostOperationsService_LoginServer = grpc.ServerStreamingServer[v1.LoginEvent]
 
+func _HostOperationsService_StartRun_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(v1.StartRunRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostOperationsServiceServer).StartRun(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: HostOperationsService_StartRun_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostOperationsServiceServer).StartRun(ctx, req.(*v1.StartRunRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _HostOperationsService_PostIntent_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(PostIntentRequest)
 	if err := dec(in); err != nil {
@@ -577,6 +617,10 @@ var HostOperationsService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "CompletePaths",
 			Handler:    _HostOperationsService_CompletePaths_Handler,
+		},
+		{
+			MethodName: "StartRun",
+			Handler:    _HostOperationsService_StartRun_Handler,
 		},
 		{
 			MethodName: "PostIntent",

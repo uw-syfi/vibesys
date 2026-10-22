@@ -9,6 +9,12 @@ export {
 export * from './generated/host-operations.js';
 export * from './generated/vibesys/api/v1/host_call_pb.js';
 export {
+  type HostMutateRequest,
+  HostMutateRequestSchema,
+  type HostMutateResponse,
+  HostMutateResponseSchema,
+} from './generated/vibesys/api/v1/host_mutate_generated_pb.js';
+export {
   BlobResultSchema,
   GetBlobsRequestSchema,
   GetBlobsResponseSchema,

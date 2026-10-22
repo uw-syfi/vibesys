@@ -5,6 +5,7 @@ package vibesys.api.v1;
 import "buf/validate/validate.proto";
 import "vibesys/api/v1/host_call.proto";
 import "vibesys/api/v1/host_read_generated.proto";
+import "vibesys/api/v1/host_mutate_generated.proto";
 import "vibesys/api/v1/host_watch_generated.proto";
 import "vibesys/store/v1/skeleton.proto";
 
@@ -21,6 +22,9 @@ service HostService {
   // Watch runs one registered stream. The host keeps it until completion or cancellation.
   // Closing a panel drops the client's subscription and does not cancel this stream.
   rpc Watch(HostWatchRequest) returns (stream HostWatchResponse);
+  // Mutate runs one registered unary admission or idempotent write. An admission
+  // keeps running after the caller disconnects, until the operation cap.
+  rpc Mutate(HostMutateRequest) returns (HostMutateResponse);
   rpc Hello(HelloRequest) returns (HelloResponse);
   // Tail follows the log live until the client cancels, starting at from_seq
   // (inclusive). Record bytes pass through unchanged; only seq is decoded.

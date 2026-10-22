@@ -13,9 +13,11 @@ import {
   type Link,
   LocalLink,
   LoginActor,
+  MUTATE_METHOD,
   READ_METHOD,
   registryReads,
   registrySetup,
+  registryStart,
   SshLink,
   WATCH_METHOD,
 } from '@vibesys/connection';
@@ -83,11 +85,24 @@ function watchNetwork(manager: ConnectionManager): void {
 }
 
 /** New run's requests, answered over the hosts' connections, recording each start in Recent. */
-function newRunMain(hosts: Hosts, settings: SettingsStore): NewRunMain {
+function newRunMain(
+  hosts: Hosts,
+  settings: SettingsStore,
+  gateway: ReturnType<typeof installGateway>,
+): NewRunMain {
+  const starts = registryStart({
+    checkout: id => hosts.checkout(id),
+    unary: (id, bytes, signal) => gateway.unary(hostKey(id), MUTATE_METHOD, bytes, signal),
+  });
   return new NewRunMain({
     connect: id => hosts.connection(id),
     remember: run => settings.updateRecent(recent => remember(recent, run)),
     now: () => Date.now(),
+    transportV2: async id => {
+      const {settings: file} = await settings.hosts();
+      return settingsFor(file, id)?.runTransportV2 === true;
+    },
+    registryStart: (host, inputs, signal) => starts.start(host, inputs, signal),
   });
 }
 
@@ -202,7 +217,7 @@ async function openWindow(
     runs,
     settings,
     preferences,
-    newRun: newRunMain(hosts, settings),
+    newRun: newRunMain(hosts, settings, gateway),
     gatewaySetting: gatewaySetting(
       settings,
       host => hosts.checkout(host),
@@ -296,7 +311,7 @@ function listedHosts(parts: {
       sshConfigPath: join(homedir(), '.ssh', 'config'),
       transportV2,
       setup,
-      endLogin,
+      ...(endLogin === undefined ? {} : {endLogin}),
       log,
       push: listing => {
         notifier.listing(listing);
