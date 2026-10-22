@@ -37,11 +37,12 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from vs_proto.api import PostIntentResponse, RunProcess
-    from vs_sim.api import Threads, WriterProcessSignaller
+    from vs_sim.api import Platform, Threads, WriterProcessSignaller
 
 __all__ = ["pause_now", "serve_terminate", "terminate_run"]
 
 _POLICY = host_operations.MUTATIONS["terminate_run"]
+_REPLY_RESERVE_SECONDS = 0.25
 
 
 class _Observation(StrEnum):
@@ -173,6 +174,7 @@ def terminate_run(
     persist: Callable[[PostIntentRequest], PostIntentResponse],
     signaller: WriterProcessSignaller | None,
     threads: Threads,
+    deadline: float,
 ) -> tuple[PostIntentResponse, pb.TerminateRunResponse]:
     """Persist Pause now first; serialize admission and signal only the fenced writer.
 
@@ -187,7 +189,7 @@ def terminate_run(
     if expected is None:
         message = "expected_process is required"
         raise ValueError(message)
-    deadline = threads.now() + _POLICY.cap_ms / 1000
+    deadline -= _REPLY_RESERVE_SECONDS
     acknowledgment = persist(
         PostIntentRequest(
             project_root=str(project.root),
@@ -219,6 +221,7 @@ def pause_now(
     persist: Callable[[PostIntentRequest], PostIntentResponse],
     signaller: WriterProcessSignaller | None,
     threads: Threads,
+    deadline: float,
 ) -> PostIntentResponse:
     """Keep process escalation inside the existing Pause-now admission owner."""
     try:
@@ -242,6 +245,7 @@ def pause_now(
         persist=persist,
         signaller=signaller,
         threads=threads,
+        deadline=deadline,
     )
     acknowledgment.termination = response
     return acknowledgment
@@ -251,17 +255,28 @@ def serve_terminate(
     payload: bytes,
     *,
     persist: Callable[[PostIntentRequest], PostIntentResponse],
-    signaller: WriterProcessSignaller | None,
-    threads: Threads,
+    platform: Platform,
 ) -> bytes:
-    """Serve the generated internal TerminateRun mutation envelope."""
+    """Serve TerminateRun within the gateway deadline, or its registered direct-call cap."""
     envelope = MutateRequest.from_binary(payload)
     validate(envelope)
     method = envelope.method
     if method is None or method.field != "terminate_run":
         message = "Mutate.method must be terminate_run"
         raise ValueError(message)
-    _, response = terminate_run(method.value, persist=persist, signaller=signaller, threads=threads)
+    request = method.value
+    remaining = (
+        request.deadline.to_seconds() - platform.clock.now()
+        if request.deadline is not None
+        else _POLICY.cap_ms / 1000
+    )
+    _, response = terminate_run(
+        request,
+        persist=persist,
+        signaller=platform.writer_signaller,
+        threads=platform.threads,
+        deadline=platform.threads.now() + remaining,
+    )
     result = MutateResponse(result=Oneof("terminate_run", response))
     validate(result)
     return result.to_binary()

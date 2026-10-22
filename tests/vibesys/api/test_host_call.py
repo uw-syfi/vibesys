@@ -99,7 +99,15 @@ def project(
 def inbox_call(payload: bytes) -> bytes:
     threads = SimThreads()
     processes = FakeProcesses(lambda _: ProcessScript(), pass_time=threads.sleep)
-    response = host_call(payload, processes=processes, threads=threads)
+    response = host_call(
+        payload,
+        platform=replace(
+            Sim(seed=0).platform(
+                threads, processes=processes, signaller=FakeProcessSignaller(set())
+            ),
+            writer_signaller=None,
+        ),
+    )
     assert not processes.ran
     return response
 
@@ -457,7 +465,15 @@ def test_host_relaunch_round_trip_confirms_the_new_epoch(
         if len(processes.ran) > 1:
             return ProcessScript(returncode=1)
         concurrent = HostCallResponse.from_binary(
-            host_call(request.to_binary(), processes=processes, threads=threads)
+            host_call(
+                request.to_binary(),
+                platform=replace(
+                    Sim(seed=0).platform(
+                        threads, processes=processes, signaller=FakeProcessSignaller(set())
+                    ),
+                    writer_signaller=None,
+                ),
+            )
         )
         assert concurrent.result is not None
         assert concurrent.result.field == "relaunch"
@@ -483,7 +499,15 @@ def test_host_relaunch_round_trip_confirms_the_new_epoch(
     processes = FakeProcesses(launch, pass_time=threads.sleep)
     with FileRunLogWriter(path, clock=clock, threads=threads):
         response = HostCallResponse.from_binary(
-            host_call(request.to_binary(), processes=processes, threads=threads)
+            host_call(
+                request.to_binary(),
+                platform=replace(
+                    Sim(seed=0).platform(
+                        threads, processes=processes, signaller=FakeProcessSignaller(set())
+                    ),
+                    writer_signaller=None,
+                ),
+            )
         )
         assert response.result is not None
         assert response.result.field == "relaunch"
@@ -516,7 +540,15 @@ def test_host_relaunch_round_trip_confirms_the_new_epoch(
         (2, "tree-b", True),
     ]
     response = HostCallResponse.from_binary(
-        host_call(request.to_binary(), processes=processes, threads=threads)
+        host_call(
+            request.to_binary(),
+            platform=replace(
+                Sim(seed=0).platform(
+                    threads, processes=processes, signaller=FakeProcessSignaller(set())
+                ),
+                writer_signaller=None,
+            ),
+        )
     )
     assert response.result is not None
     assert response.result.field == "relaunch"
@@ -533,8 +565,12 @@ def test_host_relaunch_missing_checkout_refuses_without_spawning(
     response = HostCallResponse.from_binary(
         host_call(
             relaunch_call(owner, run_id, tmp_path / "absent").to_binary(),
-            processes=processes,
-            threads=SimThreads(),
+            platform=replace(
+                Sim(seed=0).platform(
+                    SimThreads(), processes=processes, signaller=FakeProcessSignaller(set())
+                ),
+                writer_signaller=None,
+            ),
         )
     )
     validate(response)
@@ -577,7 +613,15 @@ def test_host_relaunch_failure_paths_never_claim_an_epoch(
     request = relaunch_call(owner, run_id, executable.parents[2])
     response = threads.run(
         lambda: HostCallResponse.from_binary(
-            host_call(request.to_binary(), processes=processes, threads=threads)
+            host_call(
+                request.to_binary(),
+                platform=replace(
+                    Sim(seed=0).platform(
+                        threads, processes=processes, signaller=FakeProcessSignaller(set())
+                    ),
+                    writer_signaller=None,
+                ),
+            )
         )
     )
     validate(response)
@@ -670,14 +714,30 @@ def _resume_during_environment_open_in(
 
         processes = FakeProcesses(launch, pass_time=threads.sleep)
         response = HostCallResponse.from_binary(
-            host_call(request.to_binary(), processes=processes, threads=threads)
+            host_call(
+                request.to_binary(),
+                platform=replace(
+                    Sim(seed=0).platform(
+                        threads, processes=processes, signaller=FakeProcessSignaller(set())
+                    ),
+                    writer_signaller=None,
+                ),
+            )
         )
         validate(response)
         assert response.result is not None
         assert response.result.field == "relaunch", response.result
         assert response.result.value.outcome == Oneof("epoch", 2)
         second = HostCallResponse.from_binary(
-            host_call(request.to_binary(), processes=processes, threads=threads)
+            host_call(
+                request.to_binary(),
+                platform=replace(
+                    Sim(seed=0).platform(
+                        threads, processes=processes, signaller=FakeProcessSignaller(set())
+                    ),
+                    writer_signaller=None,
+                ),
+            )
         )
         validate(second)
         assert second.result is not None
@@ -788,9 +848,12 @@ def test_pause_now_keeps_process_outcomes_distinct_without_ending_the_run(
         response = HostCallResponse.from_binary(
             host_call(
                 pause_payload(project, 2 if mode == "changed" else 1),
-                processes=processes,
-                threads=threads,
-                signaller=None if mode == "unsupported" else signaller,
+                platform=replace(
+                    Sim(seed=0).platform(
+                        threads, processes=processes, signaller=FakeProcessSignaller(set())
+                    ),
+                    writer_signaller=None if mode == "unsupported" else signaller,
+                ),
             )
         )
         validate(response)
@@ -812,7 +875,7 @@ def test_pause_now_keeps_process_outcomes_distinct_without_ending_the_run(
         assert signaller.terminated == ([head.process.pid] if mode == "held" else [])
         assert owner.state.control_inbox(run_id).pending()[0].request_id == "pause-1"
         if mode == "held":
-            assert threads.now() - before == pytest.approx(10)
+            assert threads.now() - before == pytest.approx(9.75)
         if mode != "unknown":
             current = read_current_epoch(Project.run_log_path_for(owner.root, run_id))
             assert current is not None
@@ -848,9 +911,14 @@ def test_pause_now_gives_the_owner_cleanup_grace_and_observes_release(
         response = HostCallResponse.from_binary(
             host_call(
                 pause_payload(project),
-                processes=FakeProcesses(lambda _: ProcessScript(), pass_time=threads.sleep),
-                threads=threads,
-                signaller=signaller,
+                platform=replace(
+                    Sim(seed=0).platform(
+                        threads,
+                        processes=FakeProcesses(lambda _: ProcessScript(), pass_time=threads.sleep),
+                        signaller=FakeProcessSignaller(set()),
+                    ),
+                    writer_signaller=signaller,
+                ),
             )
         )
         assert response.result is not None
@@ -885,9 +953,14 @@ def test_pause_now_refuses_a_reused_pid_while_a_successor_holds_the_run_lock(
         response = HostCallResponse.from_binary(
             host_call(
                 pause_payload(project),
-                processes=FakeProcesses(lambda _: ProcessScript(), pass_time=threads.sleep),
-                threads=threads,
-                signaller=signaller,
+                platform=replace(
+                    Sim(seed=0).platform(
+                        threads,
+                        processes=FakeProcesses(lambda _: ProcessScript(), pass_time=threads.sleep),
+                        signaller=FakeProcessSignaller(set()),
+                    ),
+                    writer_signaller=signaller,
+                ),
             )
         )
         assert response.result is not None
@@ -957,5 +1030,92 @@ def test_internal_terminate_operation_uses_the_same_pause_now_owner(
         )
         assert signaller.terminated == [head.process.pid]
         assert owner.state.control_inbox(run_id).pending()[0].request_id == "pause-1"
+    finally:
+        journal.close()
+
+
+@pytest.mark.parametrize("operation", ["post-intent", "terminate-run"])
+@pytest.mark.parametrize("startup", [0, 1, 4, 8, 11])
+@pytest.mark.parametrize("release", [False, True])
+def test_gateway_pause_reply_preserves_admission_with_the_remaining_budget(
+    project: tuple[Project, str], sim: Sim, startup: int, operation: str, *, release: bool
+) -> None:
+    owner, run_id = project
+    journal, threads = native_journal(project, sim)
+    head = p.RunHead.from_binary(Project.run_head_path_for(owner.root, run_id).read_bytes())
+    assert head.process is not None
+    signaller = FakeProcessSignaller(
+        {head.process.pid},
+        held_locks={
+            head.process.pid: {
+                writer_identity_path(Project.run_log_path_for(owner.root, run_id), head.process)
+            }
+        },
+    )
+    request = HostCallRequest.from_binary(pause_payload(project))
+    cap = next(op.cap_ms / 1000 for op in p.host_operations.HOST_CALLS if op.slot == "post_intent")
+    outer_deadline = sim.wall_clock.now() + cap
+    request.deadline = p.Timestamp.from_seconds(outer_deadline)
+    payload = (
+        request.to_binary()
+        if operation == "post-intent"
+        else p.MutateRequest(
+            checkout=request.checkout,
+            method=Oneof(
+                "terminate_run",
+                p.host_payloads.TerminateRunRequest(
+                    request_id="pause-1",
+                    project_root=str(owner.root),
+                    run_id=run_id,
+                    expected_process=head.process,
+                    deadline=request.deadline,
+                ),
+            ),
+        ).to_binary()
+    )
+    threads.sleep(startup)
+    if release:
+        journal.close()
+    output = BytesIO()
+    try:
+        assert (
+            main(
+                [operation],
+                stdin=BytesIO(payload),
+                stdout=output,
+                platform=replace(
+                    sim.platform(
+                        threads,
+                        processes=FakeProcesses(lambda _: ProcessScript(), pass_time=threads.sleep),
+                        signaller=signaller,
+                    ),
+                    writer_signaller=signaller,
+                ),
+            )
+            == 0
+        )
+        response = (
+            HostCallResponse if operation == "post-intent" else p.MutateResponse
+        ).from_binary(output.getvalue())
+        validate(response)
+        assert response.result is not None
+        assert owner.state.control_inbox(run_id).pending()[0].request_id == "pause-1"
+        if response.result.field == "post_intent":
+            assert response.result.value.request_id == "pause-1"
+            result = response.result.value.termination
+        else:
+            assert response.result.field == "terminate_run"
+            result = response.result.value
+        assert result is not None
+        assert result.outcome is (
+            p.host_payloads.TerminateRunOutcome.WRITER_RELEASED
+            if release
+            else p.host_payloads.TerminateRunOutcome.OBSERVATION_UNKNOWN
+            if startup >= 8
+            else p.host_payloads.TerminateRunOutcome.REQUESTED_UNCONFIRMED
+        )
+        assert signaller.terminated == ([head.process.pid] if not release and startup < 8 else [])
+        if startup < cap:
+            assert sim.wall_clock.now() < outer_deadline
     finally:
         journal.close()

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
@@ -51,7 +52,7 @@ from vs_proto.api import (
     validate,
 )
 from vs_runlog.api import RunLogReader, assert_run_unlocked
-from vs_sim.api.testing import FakeProcesses, ProcessScript, SimThreads
+from vs_sim.api.testing import FakeProcesses, FakeProcessSignaller, ProcessScript, Sim, SimThreads
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -63,7 +64,16 @@ def chat_call(
 ) -> bytes:
     threads = SimThreads()
     processes = FakeProcesses(lambda _spec: ProcessScript(), pass_time=threads.sleep)
-    response = host_call(payload, processes=processes, threads=threads, start_chat=start_chat)
+    response = host_call(
+        payload,
+        platform=replace(
+            Sim(seed=0).platform(
+                threads, processes=processes, signaller=FakeProcessSignaller(set())
+            ),
+            writer_signaller=None,
+        ),
+        start_chat=start_chat,
+    )
     assert not processes.ran
     return response
 

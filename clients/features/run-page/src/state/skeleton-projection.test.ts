@@ -12,6 +12,8 @@ import {
   DrainGoal,
   KeyframeSchema,
   LifecycleSchema,
+  MetricSeriesDeclSchema,
+  ObjectiveSchema,
   Outcome,
   RecordSchema,
   RunHeadSchema,
@@ -451,6 +453,72 @@ test('a native metric headlines the writer fact even without candidate-shaped sp
     ).toBeUndefined();
   }
 });
+
+for (const reversed of [false, true]) {
+  test(`native event fold preserves objective tiles and trends with a writer headline (${reversed})`, () => {
+    const records = storeRunFixture('facts', 2).records.map(record => clone(RecordSchema, record));
+    const epoch = records[0]?.body;
+    if (epoch?.case !== 'epochStarted' || !epoch.value.run) throw new Error('fixture');
+    epoch.value.run.objectives.push(
+      create(ObjectiveSchema, {series: 'latency', direction: Direction.MIN}),
+    );
+    if (reversed) epoch.value.run.objectives.reverse();
+    epoch.value.series.push(
+      create(MetricSeriesDeclSchema, {
+        ...epoch.value.series[0],
+        name: 'latency',
+        unit: 'ms',
+        direction: Direction.MIN,
+      }),
+    );
+    const events = records
+      .flatMap(record => {
+        if (record.body.case !== 'metric' || record.body.value.series !== 'throughput')
+          return [record];
+        return [
+          record,
+          create(RecordSchema, {
+            ...record,
+            body: {
+              case: 'metric',
+              value: {
+                ...record.body.value,
+                series: 'latency',
+                value: 1000 / record.body.value.value,
+              },
+            },
+          }),
+        ];
+      })
+      .map((record, index) => create(RecordSchema, {...record, seq: BigInt(index + 1)}));
+    const skeleton = foldSkeleton(seedSkeleton(), events);
+    const seq = skeleton.throughSeq ?? 0n;
+    const original = heroView(projectSkeleton(skeleton, seq)).tiles;
+    const head = create(RunHeadSchema, {
+      epoch: 1,
+      committedSeq: seq,
+      objective: {
+        series: {name: 'throughput', unit: 'ops/s', direction: Direction.MAX},
+        inputValue: 100,
+        bestValue: 320,
+      },
+    });
+    const tiles = heroView(projectSkeleton(skeleton, seq, '', {head})).tiles;
+    expect(tiles.map(tile => tile.id)).toEqual(original.map(tile => tile.id));
+    expect(tiles).toHaveLength(2);
+    for (const tile of original) {
+      const updated = tiles.find(each => each.id === tile.id);
+      if (tile.id === 'throughput') {
+        expect(updated?.figure).toBe('3.20×');
+        expect(updated?.detail).toBe('320 ops/s · input 100 ops/s');
+        expect(tile.trend).not.toBeNull();
+        expect(updated?.trend).toEqual(tile.trend);
+      } else {
+        expect(updated).toEqual(tile);
+      }
+    }
+  });
+}
 
 test('native turn costs, cache tokens and inline or attached typed replies survive keyframes', () => {
   for (const attached of [false, true]) {

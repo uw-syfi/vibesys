@@ -113,7 +113,7 @@ def main(
 ) -> int:
     """Run one host method from the current directory."""
     runtime = Platform.real() if platform is None else platform
-    threads, processes, signaller = runtime.threads, runtime.processes, runtime.writer_signaller
+    threads = runtime.threads
     arguments = sys.argv[1:] if argv is None else argv
     if arguments and arguments[0] == "inspect-candidate":
         parser = argparse.ArgumentParser(
@@ -167,8 +167,7 @@ def main(
         destination.write(
             terminate_host(
                 source.read((1 << 20) + 1),
-                signaller=signaller,
-                threads=owned,
+                platform=runtime,
             )
             if _MUTATION_COMMANDS[arguments[0]] == "terminate_run"
             else _serve_mutation(arguments[0], source.read((1 << 20) + 1), owned)
@@ -188,9 +187,7 @@ def main(
                 start_chat=import_module("entrypoints.chat_session").start_chat
                 if _HOST_CALL_COMMANDS[arguments[0]] == "chat_message"
                 else None,
-                processes=processes,
-                threads=threads,
-                signaller=signaller,
+                platform=runtime,
             )
         )
         return 0

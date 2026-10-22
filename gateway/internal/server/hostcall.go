@@ -13,6 +13,7 @@ import (
 	"github.com/uw-syfi/vibesys/gateway/internal/hostcommand"
 	"github.com/uw-syfi/vibesys/gateway/internal/hostoperations"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // HostCall dispatches typed methods and carries opaque protobuf across stdin and
@@ -27,6 +28,11 @@ func (h *host) HostCall(ctx context.Context, request *apiv1.HostCallRequest) (*a
 	if err != nil {
 		return hostFailure("invalid_checkout", err.Error(), -1, ""), nil
 	}
+	callCtx, cancel := context.WithTimeout(ctx, dispatched.Deadline)
+	defer cancel()
+	request = proto.Clone(request).(*apiv1.HostCallRequest)
+	deadline, _ := callCtx.Deadline()
+	request.Deadline = timestamppb.New(deadline)
 	input, err := proto.Marshal(request)
 	if err != nil {
 		return hostFailure("invalid_input", err.Error(), -1, ""), nil
@@ -34,8 +40,6 @@ func (h *host) HostCall(ctx context.Context, request *apiv1.HostCallRequest) (*a
 	if len(input) > hostcommand.MaxOutput {
 		return hostFailure("invalid_input", "HostCall request exceeds 1 MiB", -1, ""), nil
 	}
-	callCtx, cancel := context.WithTimeout(ctx, dispatched.Deadline)
-	defer cancel()
 	result, err := h.config.HostRunner.Run(callCtx, hostcommand.Command{
 		Executable: filepath.Join(checkout, ".venv", "bin", "vibesys"),
 		Args:       []string{"host", dispatched.CLI}, Input: input, StateRoot: h.config.Root,

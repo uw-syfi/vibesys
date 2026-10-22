@@ -8868,8 +8868,10 @@ type TerminateRunRequest struct {
 	ProjectRoot     string                 `protobuf:"bytes,2,opt,name=project_root,json=projectRoot,proto3" json:"project_root,omitempty"`
 	RunId           string                 `protobuf:"bytes,3,opt,name=run_id,json=runId,proto3" json:"run_id,omitempty"`
 	ExpectedProcess *v1.RunProcess         `protobuf:"bytes,4,opt,name=expected_process,json=expectedProcess,proto3" json:"expected_process,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// Set by the gateway from its execution context, including helper startup time.
+	Deadline      *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=deadline,proto3" json:"deadline,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *TerminateRunRequest) Reset() {
@@ -8926,6 +8928,13 @@ func (x *TerminateRunRequest) GetRunId() string {
 func (x *TerminateRunRequest) GetExpectedProcess() *v1.RunProcess {
 	if x != nil {
 		return x.ExpectedProcess
+	}
+	return nil
+}
+
+func (x *TerminateRunRequest) GetDeadline() *timestamppb.Timestamp {
+	if x != nil {
+		return x.Deadline
 	}
 	return nil
 }
@@ -9698,14 +9707,15 @@ const file_vibesys_host_v1_operations_proto_rawDesc = "" +
 	"\brevision\x18\x04 \x01(\tB\x15\xbaH\x12r\x102\x0e^[0-9a-f]{64}$R\brevision\x12$\n" +
 	"\vnext_offset\x18\x05 \x01(\rH\x00R\n" +
 	"nextOffset\x88\x01\x01B\x0e\n" +
-	"\f_next_offset\"\x88\x04\n" +
+	"\f_next_offset\"\xc0\x04\n" +
 	"\x13TerminateRunRequest\x12G\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tB(\xbaH%r#\x10\x01\x18\x80\x012\x1c^[A-Za-z0-9][A-Za-z0-9._-]*$R\trequestId\x12-\n" +
 	"\fproject_root\x18\x02 \x01(\tB\n" +
 	"\xbaH\ar\x05\x10\x01(\x80 R\vprojectRoot\x12?\n" +
 	"\x06run_id\x18\x03 \x01(\tB(\xbaH%r#2!^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$R\x05runId\x12O\n" +
-	"\x10expected_process\x18\x04 \x01(\v2\x1c.vibesys.store.v1.RunProcessB\x06\xbaH\x03\xc8\x01\x01R\x0fexpectedProcess:\xe6\x01\xbaH\xe2\x01\x1a\xdf\x01\n" +
+	"\x10expected_process\x18\x04 \x01(\v2\x1c.vibesys.store.v1.RunProcessB\x06\xbaH\x03\xc8\x01\x01R\x0fexpectedProcess\x126\n" +
+	"\bdeadline\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\bdeadline:\xe6\x01\xbaH\xe2\x01\x1a\xdf\x01\n" +
 	"\x16terminate_run.identity\x129expected_process requires a pid, epoch and start identity\x1a\x89\x01has(this.expected_process) && this.expected_process.pid > 0u && this.expected_process.epoch > 0u && has(this.expected_process.started_at)\"\xb0\x01\n" +
 	"\x14TerminateRunResponse\x12)\n" +
 	"\n" +
@@ -10146,13 +10156,14 @@ var file_vibesys_host_v1_operations_proto_depIdxs = []int32{
 	19,  // 125: vibesys.host.v1.SavedRun.imported:type_name -> vibesys.host.v1.SavedRunImport
 	137, // 126: vibesys.host.v1.ListSavedRunsResponse.runs:type_name -> vibesys.host.v1.SavedRun
 	145, // 127: vibesys.host.v1.TerminateRunRequest.expected_process:type_name -> vibesys.store.v1.RunProcess
-	20,  // 128: vibesys.host.v1.TerminateRunResponse.outcome:type_name -> vibesys.host.v1.TerminateRunOutcome
-	48,  // 129: vibesys.host.v1.PreflightRunRequestAgents.ItemsEntry.value:type_name -> vibesys.host.v1.HarnessChoice
-	130, // [130:130] is the sub-list for method output_type
-	130, // [130:130] is the sub-list for method input_type
-	130, // [130:130] is the sub-list for extension type_name
-	130, // [130:130] is the sub-list for extension extendee
-	0,   // [0:130] is the sub-list for field type_name
+	144, // 128: vibesys.host.v1.TerminateRunRequest.deadline:type_name -> google.protobuf.Timestamp
+	20,  // 129: vibesys.host.v1.TerminateRunResponse.outcome:type_name -> vibesys.host.v1.TerminateRunOutcome
+	48,  // 130: vibesys.host.v1.PreflightRunRequestAgents.ItemsEntry.value:type_name -> vibesys.host.v1.HarnessChoice
+	131, // [131:131] is the sub-list for method output_type
+	131, // [131:131] is the sub-list for method input_type
+	131, // [131:131] is the sub-list for extension type_name
+	131, // [131:131] is the sub-list for extension extendee
+	0,   // [0:131] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_host_v1_operations_proto_init() }

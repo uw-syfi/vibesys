@@ -40,7 +40,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from vs_proto.api import PostIntentRequest, RelaunchRequest, RelaunchResponse, SteerIntent
-    from vs_sim.api import Processes, Threads, WriterProcessSignaller
+    from vs_sim.api import Platform, Threads, WriterProcessSignaller
 
 __all__ = ["host_call", "terminate_host"]
 
@@ -48,17 +48,17 @@ __all__ = ["host_call", "terminate_host"]
 def host_call(
     payload: bytes,
     *,
-    processes: Processes,
-    threads: Threads,
-    signaller: WriterProcessSignaller | None = None,
+    platform: Platform,
     start_chat: Callable[[ChatMessageRequest], None] | None = None,
 ) -> bytes:
     """Validate and execute one HostCall envelope, returning a typed response.
 
     Invalid input, unsupported intents and closed inboxes return the documented
     configuration_failed shape. Retrying a request id retains the inbox's exact
-    ordering and payload-conflict semantics.
+    ordering and payload-conflict semantics. The gateway supplies its absolute
+    deadline; direct callers without one use the registered operation cap.
     """
+    threads = platform.threads
     if len(payload) > 1 << 20:
         return _failure("request_too_large", "HostCall request exceeds 1 MiB")
     try:
@@ -70,7 +70,7 @@ def host_call(
 
             def relaunch(request: RelaunchRequest) -> RelaunchResponse:
                 return import_module("vibesys.api.host_relaunch").relaunch_host(
-                    request, call.checkout, processes=processes, threads=threads
+                    request, call.checkout, processes=platform.processes, threads=threads
                 )
 
             def chat_message(request: ChatMessageRequest) -> ChatMessageResponse:
@@ -79,7 +79,22 @@ def host_call(
             result = host_operations.dispatch_host_call(
                 method.field,
                 method.value,
-                post_intent=partial(_apply_intent, signaller=signaller, threads=threads),
+                post_intent=partial(
+                    _apply_intent,
+                    signaller=platform.writer_signaller,
+                    threads=threads,
+                    deadline=threads.now()
+                    + (
+                        call.deadline.to_seconds() - platform.clock.now()
+                        if call.deadline is not None
+                        else next(
+                            op.cap_ms
+                            for op in host_operations.HOST_CALLS
+                            if op.slot == method.field
+                        )
+                        / 1000
+                    ),
+                ),
                 relaunch=relaunch,
                 chat_message=chat_message,
             )
@@ -106,11 +121,15 @@ def _failure(code: str, message: str, *, exit_code: int = 2) -> bytes:
 
 
 def _apply_intent(
-    request: PostIntentRequest, *, signaller: WriterProcessSignaller | None, threads: Threads
+    request: PostIntentRequest,
+    *,
+    signaller: WriterProcessSignaller | None,
+    threads: Threads,
+    deadline: float,
 ) -> PostIntentResponse:
     if request.intent is not None and request.intent.field == "pause_now":
         return import_module("vibesys.api.host_terminate").pause_now(
-            request, persist=_post_intent, signaller=signaller, threads=threads
+            request, persist=_post_intent, signaller=signaller, threads=threads, deadline=deadline
         )
     return _post_intent(request)
 
@@ -201,10 +220,8 @@ def _chat_message(
     return ChatMessageResponse(request_id=request.request_id, session_id=request.session_id)
 
 
-def terminate_host(
-    payload: bytes, *, signaller: WriterProcessSignaller | None, threads: Threads
-) -> bytes:
+def terminate_host(payload: bytes, *, platform: Platform) -> bytes:
     """Serve internal escalation with the same durable Pause-now inbox owner."""
     return import_module("vibesys.api.host_terminate").serve_terminate(
-        payload, persist=_post_intent, signaller=signaller, threads=threads
+        payload, persist=_post_intent, platform=platform
     )

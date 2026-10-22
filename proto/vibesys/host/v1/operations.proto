@@ -1692,6 +1692,8 @@ message TerminateRunRequest {
   }];
   string run_id = 3 [(buf.validate.field).string.pattern = "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$"];
   vibesys.store.v1.RunProcess expected_process = 4 [(buf.validate.field).required = true];
+  // Set by the gateway from its execution context, including helper startup time.
+  google.protobuf.Timestamp deadline = 5;
 }
 // No outcome asserts a run lifecycle. Only the writer/recovery records that.
 message TerminateRunResponse {

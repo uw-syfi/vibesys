@@ -3,6 +3,7 @@ syntax = "proto3";
 package vibesys.api.v1;
 
 import "buf/validate/validate.proto";
+import "google/protobuf/timestamp.proto";
 import "vibesys/store/v1/intent.proto";
 import "vibesys/host/v1/operations.proto";
 
@@ -11,6 +12,8 @@ option go_package = "github.com/uw-syfi/vibesys/gateway/gen/vibesys/api/v1;apiv1
 // The caller takes checkout from the host's saved configuration. Carrying it on
 // each call lets a stateless gateway immediately follow a checkout change.
 message HostCallRequest {
+  // Set by the gateway from its execution context, including helper startup time.
+  google.protobuf.Timestamp deadline = 5;
   string checkout = 1 [(buf.validate.field).string = {min_len: 1, max_bytes: 4096}];
   oneof method {
     option (buf.validate.oneof).required = true;

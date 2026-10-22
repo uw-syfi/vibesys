@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import gzip
 from dataclasses import replace
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -14,9 +15,18 @@ from server.host_helper_requests import answer_registered_read
 from server.host_saved_runs import page_saved_runs
 from vs_project.api import Project
 from vs_project.api.testing import FakeGitRepositories
-from vs_proto.api import Oneof, ReadRequest, ReadResponse, Timestamp, validate
+from vs_proto.api import (
+    RUN_LOG_MAGIC,
+    EpochStarted,
+    Oneof,
+    ReadRequest,
+    ReadResponse,
+    Record,
+    Timestamp,
+    validate,
+)
 from vs_proto.api import host_payloads as pb
-from vs_runlog.api import RunLock
+from vs_runlog.api import RunLock, encode_frame
 from vs_sim.api.testing import ManualClock, SimNetwork, SimThreads
 
 
@@ -179,3 +189,49 @@ def test_registry_read_discovers_native_history_through_the_public_host_handler(
     assert [row.run_id for row in listing.runs] == ["run-1"]
     assert listing.runs[0].imported == pb.SavedRunImport.AVAILABLE
     assert path.read_bytes() == original
+
+
+def test_discovery_dates_native_only_runs_from_the_first_epoch_and_sorts_them(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("VIBESYS_STATE_HOME", str(tmp_path / "state"))
+    root = tmp_path / "project"
+    root.mkdir()
+    for run_id, day in [("run-a", 20), ("run-z", 2)]:
+        path = Project.run_log_path_for(root, run_id)
+        path.parent.mkdir(parents=True)
+        path.write_bytes(
+            RUN_LOG_MAGIC
+            + b"".join(
+                encode_frame(
+                    Record(
+                        seq=epoch,
+                        epoch=epoch,
+                        at=Timestamp.from_seconds(datetime(2026, 10, date, tzinfo=UTC).timestamp()),
+                        body=Oneof("epoch_started", EpochStarted(epoch=epoch)),
+                    )
+                )
+                for epoch, date in [(1, day), (2, 25)]
+            )
+        )
+    threads = SimThreads()
+    host = replace(
+        fake_host(threads, SimNetwork(threads)),
+        projects=FileProjects(FakeGitRepositories().repository, threads, clock=ManualClock()),
+    )
+    request = ReadRequest(
+        checkout="/checkout",
+        method=Oneof(
+            "list_saved_runs", pb.ListSavedRunsRequest(request_id="dated", project=str(root))
+        ),
+    )
+    response = ReadResponse.from_binary(
+        answer_registered_read("list-saved-runs", request.to_binary(), host)
+    )
+    validate(response)
+    assert response.result is not None
+    assert response.result.field == "list_saved_runs"
+    assert [(row.run_id, row.created_at) for row in response.result.value.runs] == [
+        (run_id, Timestamp.from_seconds(datetime(2026, 10, day, tzinfo=UTC).timestamp()))
+        for run_id, day in [("run-z", 2), ("run-a", 20)]
+    ]
