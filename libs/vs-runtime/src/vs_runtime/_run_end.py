@@ -1,4 +1,4 @@
-"""Read the current epoch's ending and writer identity from the durable core record.
+"""Read published epoch authority from run.log and legacy endings from the core record.
 
 An ended epoch accepts no new inbox requests. Resume opens a successor epoch regardless
 of the previous result; queued closing controls retain their original writer identity.
@@ -112,9 +112,9 @@ def recorded_end(project: Project, run_id: str) -> RecordedEnd | None:
 
 
 def recorded_ending(project: Project, run_id: str) -> str | None:
-    """Why ``run_id`` ended, as its durable core record says, or None while it may apply more.
+    """The published lifecycle's ending, with core inspection only for historical logs.
 
-    Raises ``ProjectStateError`` when the record cannot be read (see `recorded_end`).
+    Raises ``ProjectStateError`` when the published prefix cannot be read.
     """
     epoch = _log_epoch(project, run_id)
     if epoch is not None:

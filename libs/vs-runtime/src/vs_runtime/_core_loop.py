@@ -589,11 +589,11 @@ class CoreRuntime[S: StrategyState]:
             raise RuntimeError(message)
         self._load()
         provisional, decisions = self._provisional(host_id, now_at=now_at, resume=resume)
+        published_epoch = self._epoch()
         fence = self._store.acquire(host_id, now=now_at, duration=lease_duration)
         if fence is None:
             message = "runtime lease unavailable"
             raise LeaseUnavailableError(message)
-        published_epoch = self._epoch()
         epoch = fence.epoch if published_epoch is None else published_epoch
         if published_epoch is not None and epoch <= provisional.core.records.recovery.epoch:
             self._store.release(fence, now=now_at)
