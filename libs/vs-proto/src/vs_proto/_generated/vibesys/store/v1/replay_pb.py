@@ -258,7 +258,7 @@ class ReplayPolicy(Message[_ReplayPolicyFields]):
         request: Any | None
         reservation: ReplayResources | None
 
-_OperationReplayFields: TypeAlias = Literal["key", "encoding_version", "identity", "identity_digest", "dependencies", "policy", "outcome", "paid", "cost_usd", "allowance", "accepted_sequence"]
+_OperationReplayFields: TypeAlias = Literal["key", "encoding_version", "identity", "identity_digest", "dependencies", "policy", "outcome", "paid", "cost_usd", "allowance", "accepted_sequence", "accepted_child"]
 
 class OperationReplay(Message[_OperationReplayFields]):
     """
@@ -318,9 +318,15 @@ class OperationReplay(Message[_OperationReplayFields]):
             ```proto
             optional uint64 accepted_sequence = 11;
             ```
+        accepted_child:
+            New physical execution records retain the winner by child span identity.
+
+            ```proto
+            optional string accepted_child = 12;
+            ```
     """
 
-    __slots__ = ("key", "encoding_version", "identity", "identity_digest", "dependencies", "policy", "outcome", "paid", "cost_usd", "allowance", "accepted_sequence")
+    __slots__ = ("key", "encoding_version", "identity", "identity_digest", "dependencies", "policy", "outcome", "paid", "cost_usd", "allowance", "accepted_sequence", "accepted_child")
 
     if TYPE_CHECKING:
 
@@ -338,6 +344,7 @@ class OperationReplay(Message[_OperationReplayFields]):
             cost_usd: float | None = None,
             allowance: ReplayAllowance | None = None,
             accepted_sequence: int | None = None,
+            accepted_child: str | None = None,
         ) -> None:
             pass
 
@@ -352,6 +359,319 @@ class OperationReplay(Message[_OperationReplayFields]):
         cost_usd: float
         allowance: ReplayAllowance | None
         accepted_sequence: int
+        accepted_child: str
+
+_ReplayPhysicalFields: TypeAlias = Literal["logical", "external_id", "host_incarnation", "deadline", "ordinal", "withdrawn_sequence"]
+
+class ReplayPhysical(Message[_ReplayPhysicalFields]):
+    """
+    A child is execution evidence, never another semantic operation.
+
+    ```proto
+    message vibesys.store.v1.ReplayPhysical
+    ```
+
+    Attributes:
+        logical:
+            ```proto
+            string logical = 1;
+            ```
+        external_id:
+            ```proto
+            string external_id = 2;
+            ```
+        host_incarnation:
+            ```proto
+            string host_incarnation = 3;
+            ```
+        deadline:
+            ```proto
+            double deadline = 4;
+            ```
+        ordinal:
+            ```proto
+            uint64 ordinal = 5;
+            ```
+        withdrawn_sequence:
+            ```proto
+            optional uint64 withdrawn_sequence = 6;
+            ```
+    """
+
+    __slots__ = ("logical", "external_id", "host_incarnation", "deadline", "ordinal", "withdrawn_sequence")
+
+    if TYPE_CHECKING:
+
+        def __init__(
+            self,
+            *,
+            logical: str = "",
+            external_id: str = "",
+            host_incarnation: str = "",
+            deadline: float = 0,
+            ordinal: int = 0,
+            withdrawn_sequence: int | None = None,
+        ) -> None:
+            pass
+
+        logical: str
+        external_id: str
+        host_incarnation: str
+        deadline: float
+        ordinal: int
+        withdrawn_sequence: int
+
+_WriterBackingFields: TypeAlias = Literal["environment", "identity", "generation", "authority"]
+
+class WriterBacking(Message[_WriterBackingFields]):
+    """
+    The environment records every writable grant before execution, including
+    tool/build jobs and grants belonging to other runs. Closing this ledger
+    forbids further grants in the execution domain; it does not prove death.
+
+    ```proto
+    message vibesys.store.v1.WriterBacking
+    ```
+
+    Attributes:
+        environment:
+            ```proto
+            string environment = 1;
+            ```
+        identity:
+            ```proto
+            string identity = 2;
+            ```
+        generation:
+            ```proto
+            uint64 generation = 3;
+            ```
+        authority:
+            ```proto
+            string authority = 4;
+            ```
+    """
+
+    __slots__ = ("environment", "identity", "generation", "authority")
+
+    if TYPE_CHECKING:
+
+        def __init__(
+            self,
+            *,
+            environment: str = "",
+            identity: str = "",
+            generation: int = 0,
+            authority: str = "",
+        ) -> None:
+            pass
+
+        environment: str
+        identity: str
+        generation: int
+        authority: str
+
+_WriterIdentityFields: TypeAlias = Literal["run_id", "host_incarnation", "physical_id", "domain_id"]
+
+class WriterIdentity(Message[_WriterIdentityFields]):
+    """
+    ```proto
+    message vibesys.store.v1.WriterIdentity
+    ```
+
+    Attributes:
+        run_id:
+            ```proto
+            string run_id = 1;
+            ```
+        host_incarnation:
+            ```proto
+            string host_incarnation = 2;
+            ```
+        physical_id:
+            ```proto
+            string physical_id = 3;
+            ```
+        domain_id:
+            An immutable execution-domain ID, never a reusable container name.
+
+            ```proto
+            string domain_id = 4;
+            ```
+    """
+
+    __slots__ = ("run_id", "host_incarnation", "physical_id", "domain_id")
+
+    if TYPE_CHECKING:
+
+        def __init__(
+            self,
+            *,
+            run_id: str = "",
+            host_incarnation: str = "",
+            physical_id: str = "",
+            domain_id: str = "",
+        ) -> None:
+            pass
+
+        run_id: str
+        host_incarnation: str
+        physical_id: str
+        domain_id: str
+
+_WriterManifestFields: TypeAlias = Literal["backing", "writers", "closed"]
+
+class WriterManifest(Message[_WriterManifestFields]):
+    """
+    ```proto
+    message vibesys.store.v1.WriterManifest
+    ```
+
+    Attributes:
+        backing:
+            ```proto
+            optional vibesys.store.v1.WriterBacking backing = 1;
+            ```
+        writers:
+            ```proto
+            repeated vibesys.store.v1.WriterIdentity writers = 2;
+            ```
+        closed:
+            ```proto
+            bool closed = 3;
+            ```
+    """
+
+    __slots__ = ("backing", "writers", "closed")
+
+    if TYPE_CHECKING:
+
+        def __init__(
+            self,
+            *,
+            backing: WriterBacking | None = None,
+            writers: list[WriterIdentity] | None = None,
+            closed: bool = False,
+        ) -> None:
+            pass
+
+        backing: WriterBacking | None
+        writers: list[WriterIdentity]
+        closed: bool
+
+_WriterTerminationProofFields: TypeAlias = Literal["manifest", "absent_domains"]
+
+class WriterTerminationProof(Message[_WriterTerminationProofFields]):
+    """
+    ```proto
+    message vibesys.store.v1.WriterTerminationProof
+    ```
+
+    Attributes:
+        manifest:
+            ```proto
+            optional vibesys.store.v1.WriterManifest manifest = 1;
+            ```
+        absent_domains:
+            ```proto
+            repeated string absent_domains = 2;
+            ```
+    """
+
+    __slots__ = ("manifest", "absent_domains")
+
+    if TYPE_CHECKING:
+
+        def __init__(
+            self,
+            *,
+            manifest: WriterManifest | None = None,
+            absent_domains: list[str] | None = None,
+        ) -> None:
+            pass
+
+        manifest: WriterManifest | None
+        absent_domains: list[str]
+
+_WriterReconciliationFields: TypeAlias = Literal["manifest", "status", "proof", "detail"]
+
+class WriterReconciliation(Message[_WriterReconciliationFields]):
+    """
+    ```proto
+    message vibesys.store.v1.WriterReconciliation
+    ```
+
+    Attributes:
+        manifest:
+            ```proto
+            optional vibesys.store.v1.WriterManifest manifest = 1;
+            ```
+        status:
+            ```proto
+            vibesys.store.v1.WriterReconciliationStatus status = 2;
+            ```
+        proof:
+            ```proto
+            optional vibesys.store.v1.WriterTerminationProof proof = 3;
+            ```
+        detail:
+            ```proto
+            string detail = 4;
+            ```
+    """
+
+    __slots__ = ("manifest", "status", "proof", "detail")
+
+    if TYPE_CHECKING:
+
+        def __init__(
+            self,
+            *,
+            manifest: WriterManifest | None = None,
+            status: WriterReconciliationStatus | None = None,
+            proof: WriterTerminationProof | None = None,
+            detail: str = "",
+        ) -> None:
+            pass
+
+        manifest: WriterManifest | None
+        status: WriterReconciliationStatus
+        proof: WriterTerminationProof | None
+        detail: str
+
+_WriterRegistryStateFields: TypeAlias = Literal["manifest", "proof"]
+
+class WriterRegistryState(Message[_WriterRegistryStateFields]):
+    """
+    ```proto
+    message vibesys.store.v1.WriterRegistryState
+    ```
+
+    Attributes:
+        manifest:
+            ```proto
+            optional vibesys.store.v1.WriterManifest manifest = 1;
+            ```
+        proof:
+            ```proto
+            optional vibesys.store.v1.WriterTerminationProof proof = 2;
+            ```
+    """
+
+    __slots__ = ("manifest", "proof")
+
+    if TYPE_CHECKING:
+
+        def __init__(
+            self,
+            *,
+            manifest: WriterManifest | None = None,
+            proof: WriterTerminationProof | None = None,
+        ) -> None:
+            pass
+
+        manifest: WriterManifest | None
+        proof: WriterTerminationProof | None
 
 _ReplayClockFields: TypeAlias = Literal["allowance"]
 
@@ -617,6 +937,41 @@ class KeyComponentKind(Enum):
     REVISION = 4
     RECORDED_POSITION = 5
 
+class WriterReconciliationStatus(Enum):
+    """
+    ```proto
+    enum vibesys.store.v1.WriterReconciliationStatus
+    ```
+
+    Attributes:
+        UNSPECIFIED:
+            ```proto
+            WRITER_RECONCILIATION_STATUS_UNSPECIFIED = 0
+            ```
+        PROVEN_STOPPED:
+            ```proto
+            WRITER_RECONCILIATION_STATUS_PROVEN_STOPPED = 1
+            ```
+        PENDING:
+            ```proto
+            WRITER_RECONCILIATION_STATUS_PENDING = 2
+            ```
+        UNKNOWN:
+            ```proto
+            WRITER_RECONCILIATION_STATUS_UNKNOWN = 3
+            ```
+        UNSUPPORTED:
+            ```proto
+            WRITER_RECONCILIATION_STATUS_UNSUPPORTED = 4
+            ```
+    """
+
+    UNSPECIFIED = 0
+    PROVEN_STOPPED = 1
+    PENDING = 2
+    UNKNOWN = 3
+    UNSUPPORTED = 4
+
 ext_replay_context: Final[Extension[MessageOptions, bool]] = Extension()
 """
 Contexts classify their own fields. Shared facts inherit the classification
@@ -645,7 +1000,7 @@ extend google.protobuf.FieldOptions { optional bool replay_set = 51101 [json_nam
 
 
 _DESC = file_desc(
-    b'\n\x1dvibesys/store/v1/replay.proto\x12\x10vibesys.store.v1\x1a\x1bbuf/validate/validate.proto\x1a\x19google/protobuf/any.proto\x1a google/protobuf/descriptor.proto\x1a"vibesys/store/v1/agent_attrs.proto"k\n\x0cOperationKey\x12%\n\toperation\x18\x01 \x01(\tR\toperationB\x07\xbaH\x04r\x02\x10\x01\x124\n\x05scope\x18\x02 \x03(\x0b2\x1e.vibesys.store.v1.KeyComponentR\x05scope"q\n\x0cKeyComponent\x12B\n\x04kind\x18\x01 \x01(\x0e2".vibesys.store.v1.KeyComponentKindR\x04kindB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x12\x1d\n\x05value\x18\x02 \x01(\tR\x05valueB\x07\xbaH\x04r\x02\x10\x01"\xbe\x01\n\x0fReplayAllowance\x12\x1e\n\niterations\x18\x01 \x01(\x04R\niterations\x12\x1a\n\x08capacity\x18\x02 \x01(\x04R\x08capacity\x12.\n\tremaining\x18\x03 \x01(\x01R\tremainingB\x10\xbaH\r\x12\x0b@\x01)\x00\x00\x00\x00\x00\x00\x00\x00\x12?\n\tresources\x18\x04 \x01(\x0b2!.vibesys.store.v1.ReplayResourcesR\tresources"\xc8\x01\n\x0fReplayResources\x122\n\tmoney_usd\x18\x01 \x01(\x01H\x00R\x08moneyUsdB\x10\xbaH\r\x12\x0b@\x01)\x00\x00\x00\x00\x00\x00\x00\x00\x88\x01\x01\x12&\n\x0cinput_tokens\x18\x02 \x01(\x04H\x01R\x0binputTokens\x88\x01\x01\x12(\n\routput_tokens\x18\x03 \x01(\x04H\x02R\x0coutputTokens\x88\x01\x01B\x0c\n\n_money_usdB\x0f\n\r_input_tokensB\x10\n\x0e_output_tokens"\xcb\x02\n\x0cReplayPolicy\x12\x12\n\x04role\x18\x01 \x01(\tR\x04role\x12\x1a\n\x08template\x18\x02 \x01(\tR\x08template\x12\x18\n\x07content\x18\x03 \x01(\x0cR\x07content\x12&\n\nreply_type\x18\x04 \x01(\tR\treplyTypeB\x07\xbaH\x04r\x02\x10\x01\x12<\n\x13reply_schema_digest\x18\x05 \x01(\x0cH\x00R\x11replySchemaDigestB\x07\xbaH\x04z\x02h \x88\x01\x01\x12.\n\x07request\x18\x06 \x01(\x0b2\x14.google.protobuf.AnyR\x07request\x12C\n\x0breservation\x18\x07 \x01(\x0b2!.vibesys.store.v1.ReplayResourcesR\x0breservationB\x16\n\x14_reply_schema_digest"\x89\x07\n\x0fOperationReplay\x128\n\x03key\x18\x01 \x01(\x0b2\x1e.vibesys.store.v1.OperationKeyR\x03keyB\x06\xbaH\x03\xc8\x01\x01\x122\n\x10encoding_version\x18\x02 \x01(\rR\x0fencodingVersionB\x07\xbaH\x04*\x02\x08\x01\x12#\n\x08identity\x18\x03 \x01(\x0cR\x08identityB\x07\xbaH\x04z\x02\x10\x01\x120\n\x0fidentity_digest\x18\x04 \x01(\x0cR\x0eidentityDigestB\x07\xbaH\x04z\x02h \x12+\n\x0cdependencies\x18\x05 \x01(\x0cR\x0cdependenciesB\x07\xbaH\x04z\x02h \x12>\n\x06policy\x18\x06 \x01(\x0b2\x1e.vibesys.store.v1.ReplayPolicyR\x06policyB\x06\xbaH\x03\xc8\x01\x01\x12.\n\x07outcome\x18\x07 \x01(\x0b2\x14.google.protobuf.AnyR\x07outcome\x12\x12\n\x04paid\x18\x08 \x01(\x08R\x04paid\x120\n\x08cost_usd\x18\t \x01(\x01H\x00R\x07costUsdB\x10\xbaH\r\x12\x0b@\x01)\x00\x00\x00\x00\x00\x00\x00\x00\x88\x01\x01\x12G\n\tallowance\x18\n \x01(\x0b2!.vibesys.store.v1.ReplayAllowanceR\tallowanceB\x06\xbaH\x03\xc8\x01\x01\x129\n\x11accepted_sequence\x18\x0b \x01(\x04H\x01R\x10acceptedSequenceB\x07\xbaH\x042\x02 \x00\x88\x01\x01B\x0b\n\t_cost_usdB\x14\n\x12_accepted_sequence:\xa6\x02\xbaH\xa2\x02\x1a\x96\x01\n\x1doperation_replay.reply_schema\x12;recorded operations require the writer\'s reply schema proof\x1a8has(this.policy) && has(this.policy.reply_schema_digest)\x1a\x86\x01\n\x1boperation_replay.acceptance\x125an outcome requires its immutable acceptance sequence\x1a0has(this.outcome) == has(this.accepted_sequence)"V\n\x0bReplayClock\x12G\n\tallowance\x18\x01 \x01(\x0b2!.vibesys.store.v1.ReplayAllowanceR\tallowanceB\x06\xbaH\x03\xc8\x01\x01"\xad\x02\n\x0cReplayNotice\x12\x17\n\x02id\x18\x01 \x01(\tR\x02idB\x07\xbaH\x04r\x02\x10\x01\x12C\n\x06unused\x18\x02 \x03(\x0b2!.vibesys.store.v1.OperationReplayR\x06unusedB\x08\xbaH\x05\x92\x01\x02\x08\x01\x128\n\x07pending\x18\x03 \x03(\x0b2\x1e.vibesys.store.v1.OperationKeyR\x07pending:\x84\x01\xbaH\x80\x01\x1a~\n\x1areplay_notice.paid_results\x122unused entries must identify accepted paid results\x1a,this.unused.all(x, x.paid && has(x.outcome))"\x85\x01\n\x15ReplayAcknowledgement\x12)\n\tnotice_id\x18\x01 \x01(\tH\x00R\x08noticeIdB\x07\xbaH\x04r\x02\x10\x01\x88\x01\x01\x123\n\x11launch_request_id\x18\x02 \x01(\tR\x0flaunchRequestIdB\x07\xbaH\x04r\x02\x10\x01B\x0c\n\n_notice_id"\xa0\x03\n\x11ReplayObservation\x126\n\x07outcome\x18\x01 \x01(\x0b2\x14.google.protobuf.AnyR\x07outcomeB\x06\xbaH\x03\xc8\x01\x01\x12\x12\n\x04paid\x18\x02 \x01(\x08R\x04paid\x120\n\x08cost_usd\x18\x03 \x01(\x01H\x00R\x07costUsdB\x10\xbaH\r\x12\x0b@\x01)\x00\x00\x00\x00\x00\x00\x00\x00\x88\x01\x01\x122\n\x05usage\x18\x04 \x01(\x0b2\x1c.vibesys.store.v1.TokenUsageR\x05usageB\x0b\n\t_cost_usd:\xcb\x01\xbaH\xc7\x01\x1a\xc4\x01\n\x1dreplay_observation.usage_cost\x124reported usage cost must agree with observation cost\x1am!has(this.usage) || !has(this.usage.cost_usd) || (has(this.cost_usd) && this.cost_usd == this.usage.cost_usd)"j\n\x11ReplayPolicyDrift\x12!\n\x07results\x18\x01 \x01(\x04R\x07resultsB\x07\xbaH\x042\x02 \x00\x12\x14\n\x05roles\x18\x02 \x03(\tR\x05roles\x12\x1c\n\ttemplates\x18\x03 \x03(\tR\ttemplates*r\n\x0fReplayFieldKind\x12!\n\x1dREPLAY_FIELD_KIND_UNSPECIFIED\x10\x00\x12\x1e\n\x1aREPLAY_FIELD_KIND_IDENTITY\x10\x01\x12\x1c\n\x18REPLAY_FIELD_KIND_POLICY\x10\x02*\xdc\x01\n\x10KeyComponentKind\x12"\n\x1eKEY_COMPONENT_KIND_UNSPECIFIED\x10\x00\x12\x1d\n\x19KEY_COMPONENT_KIND_PARENT\x10\x01\x12\x1b\n\x17KEY_COMPONENT_KIND_ITEM\x10\x02\x12\x1d\n\x19KEY_COMPONENT_KIND_SAMPLE\x10\x03\x12\x1f\n\x1bKEY_COMPONENT_KIND_REVISION\x10\x04\x12(\n$KEY_COMPONENT_KIND_RECORDED_POSITION\x10\x05:H\n\x0ereplay_context\x18\x9e\x8f\x03 \x01(\x08\x12\x1f.google.protobuf.MessageOptionsR\rreplayContext:e\n\x0creplay_field\x18\x9c\x8f\x03 \x01(\x0e2!.vibesys.store.v1.ReplayFieldKind\x12\x1d.google.protobuf.FieldOptionsR\x0breplayField:>\n\nreplay_set\x18\x9d\x8f\x03 \x01(\x08\x12\x1d.google.protobuf.FieldOptionsR\treplaySetBAZ?github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1b\x06proto3',
+    b'\n\x1dvibesys/store/v1/replay.proto\x12\x10vibesys.store.v1\x1a\x1bbuf/validate/validate.proto\x1a\x19google/protobuf/any.proto\x1a google/protobuf/descriptor.proto\x1a"vibesys/store/v1/agent_attrs.proto"k\n\x0cOperationKey\x12%\n\toperation\x18\x01 \x01(\tR\toperationB\x07\xbaH\x04r\x02\x10\x01\x124\n\x05scope\x18\x02 \x03(\x0b2\x1e.vibesys.store.v1.KeyComponentR\x05scope"q\n\x0cKeyComponent\x12B\n\x04kind\x18\x01 \x01(\x0e2".vibesys.store.v1.KeyComponentKindR\x04kindB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x12\x1d\n\x05value\x18\x02 \x01(\tR\x05valueB\x07\xbaH\x04r\x02\x10\x01"\xbe\x01\n\x0fReplayAllowance\x12\x1e\n\niterations\x18\x01 \x01(\x04R\niterations\x12\x1a\n\x08capacity\x18\x02 \x01(\x04R\x08capacity\x12.\n\tremaining\x18\x03 \x01(\x01R\tremainingB\x10\xbaH\r\x12\x0b@\x01)\x00\x00\x00\x00\x00\x00\x00\x00\x12?\n\tresources\x18\x04 \x01(\x0b2!.vibesys.store.v1.ReplayResourcesR\tresources"\xc8\x01\n\x0fReplayResources\x122\n\tmoney_usd\x18\x01 \x01(\x01H\x00R\x08moneyUsdB\x10\xbaH\r\x12\x0b@\x01)\x00\x00\x00\x00\x00\x00\x00\x00\x88\x01\x01\x12&\n\x0cinput_tokens\x18\x02 \x01(\x04H\x01R\x0binputTokens\x88\x01\x01\x12(\n\routput_tokens\x18\x03 \x01(\x04H\x02R\x0coutputTokens\x88\x01\x01B\x0c\n\n_money_usdB\x0f\n\r_input_tokensB\x10\n\x0e_output_tokens"\xcb\x02\n\x0cReplayPolicy\x12\x12\n\x04role\x18\x01 \x01(\tR\x04role\x12\x1a\n\x08template\x18\x02 \x01(\tR\x08template\x12\x18\n\x07content\x18\x03 \x01(\x0cR\x07content\x12&\n\nreply_type\x18\x04 \x01(\tR\treplyTypeB\x07\xbaH\x04r\x02\x10\x01\x12<\n\x13reply_schema_digest\x18\x05 \x01(\x0cH\x00R\x11replySchemaDigestB\x07\xbaH\x04z\x02h \x88\x01\x01\x12.\n\x07request\x18\x06 \x01(\x0b2\x14.google.protobuf.AnyR\x07request\x12C\n\x0breservation\x18\x07 \x01(\x0b2!.vibesys.store.v1.ReplayResourcesR\x0breservationB\x16\n\x14_reply_schema_digest"\xd1\x07\n\x0fOperationReplay\x128\n\x03key\x18\x01 \x01(\x0b2\x1e.vibesys.store.v1.OperationKeyR\x03keyB\x06\xbaH\x03\xc8\x01\x01\x122\n\x10encoding_version\x18\x02 \x01(\rR\x0fencodingVersionB\x07\xbaH\x04*\x02\x08\x01\x12#\n\x08identity\x18\x03 \x01(\x0cR\x08identityB\x07\xbaH\x04z\x02\x10\x01\x120\n\x0fidentity_digest\x18\x04 \x01(\x0cR\x0eidentityDigestB\x07\xbaH\x04z\x02h \x12+\n\x0cdependencies\x18\x05 \x01(\x0cR\x0cdependenciesB\x07\xbaH\x04z\x02h \x12>\n\x06policy\x18\x06 \x01(\x0b2\x1e.vibesys.store.v1.ReplayPolicyR\x06policyB\x06\xbaH\x03\xc8\x01\x01\x12.\n\x07outcome\x18\x07 \x01(\x0b2\x14.google.protobuf.AnyR\x07outcome\x12\x12\n\x04paid\x18\x08 \x01(\x08R\x04paid\x120\n\x08cost_usd\x18\t \x01(\x01H\x00R\x07costUsdB\x10\xbaH\r\x12\x0b@\x01)\x00\x00\x00\x00\x00\x00\x00\x00\x88\x01\x01\x12G\n\tallowance\x18\n \x01(\x0b2!.vibesys.store.v1.ReplayAllowanceR\tallowanceB\x06\xbaH\x03\xc8\x01\x01\x129\n\x11accepted_sequence\x18\x0b \x01(\x04H\x01R\x10acceptedSequenceB\x07\xbaH\x042\x02 \x00\x88\x01\x01\x123\n\x0eaccepted_child\x18\x0c \x01(\tH\x02R\racceptedChildB\x07\xbaH\x04r\x02\x10\x01\x88\x01\x01B\x0b\n\t_cost_usdB\x14\n\x12_accepted_sequenceB\x11\n\x0f_accepted_child:\xa6\x02\xbaH\xa2\x02\x1a\x96\x01\n\x1doperation_replay.reply_schema\x12;recorded operations require the writer\'s reply schema proof\x1a8has(this.policy) && has(this.policy.reply_schema_digest)\x1a\x86\x01\n\x1boperation_replay.acceptance\x125an outcome requires its immutable acceptance sequence\x1a0has(this.outcome) == has(this.accepted_sequence)"\xad\x02\n\x0eReplayPhysical\x12!\n\x07logical\x18\x01 \x01(\tR\x07logicalB\x07\xbaH\x04r\x02\x10\x01\x12(\n\x0bexternal_id\x18\x02 \x01(\tR\nexternalIdB\x07\xbaH\x04r\x02\x10\x01\x122\n\x10host_incarnation\x18\x03 \x01(\tR\x0fhostIncarnationB\x07\xbaH\x04r\x02\x10\x01\x12,\n\x08deadline\x18\x04 \x01(\x01R\x08deadlineB\x10\xbaH\r\x12\x0b@\x01)\x00\x00\x00\x00\x00\x00\x00\x00\x12\x18\n\x07ordinal\x18\x05 \x01(\x04R\x07ordinal\x12;\n\x12withdrawn_sequence\x18\x06 \x01(\x04H\x00R\x11withdrawnSequenceB\x07\xbaH\x042\x02 \x00\x88\x01\x01B\x15\n\x13_withdrawn_sequence"\xa6\x01\n\rWriterBacking\x12)\n\x0benvironment\x18\x01 \x01(\tR\x0benvironmentB\x07\xbaH\x04r\x02\x10\x01\x12#\n\x08identity\x18\x02 \x01(\tR\x08identityB\x07\xbaH\x04r\x02\x10\x01\x12\x1e\n\ngeneration\x18\x03 \x01(\x04R\ngeneration\x12%\n\tauthority\x18\x04 \x01(\tR\tauthorityB\x07\xbaH\x04r\x02\x10\x01"\xb4\x01\n\x0eWriterIdentity\x12\x1e\n\x06run_id\x18\x01 \x01(\tR\x05runIdB\x07\xbaH\x04r\x02\x10\x01\x122\n\x10host_incarnation\x18\x02 \x01(\tR\x0fhostIncarnationB\x07\xbaH\x04r\x02\x10\x01\x12(\n\x0bphysical_id\x18\x03 \x01(\tR\nphysicalIdB\x07\xbaH\x04r\x02\x10\x01\x12$\n\tdomain_id\x18\x04 \x01(\tR\x08domainIdB\x07\xbaH\x04r\x02\x10\x01"\x9e\x02\n\x0eWriterManifest\x12A\n\x07backing\x18\x01 \x01(\x0b2\x1f.vibesys.store.v1.WriterBackingR\x07backingB\x06\xbaH\x03\xc8\x01\x01\x12:\n\x07writers\x18\x02 \x03(\x0b2 .vibesys.store.v1.WriterIdentityR\x07writers\x12\x16\n\x06closed\x18\x03 \x01(\x08R\x06closed:u\xbaHr\x1ap\n\x16writer_manifest.unique\x12)writer physical identities must be unique\x1a+this.writers.map(x, x.physical_id).unique()"\xbc\x03\n\x16WriterTerminationProof\x12D\n\x08manifest\x18\x01 \x01(\x0b2 .vibesys.store.v1.WriterManifestR\x08manifestB\x06\xbaH\x03\xc8\x01\x01\x12/\n\x0eabsent_domains\x18\x02 \x03(\tR\rabsentDomainsB\x08\xbaH\x05\x92\x01\x02\x18\x01:\xaa\x02\xbaH\xa6\x02\x1a\xa3\x02\n\x13writer_proof.closed\x12Jtermination proof needs a closed manifest and every domain verified absent\x1a\xbf\x01has(this.manifest) && this.manifest.closed && this.manifest.writers.all(x, x.domain_id in this.absent_domains) && this.absent_domains.all(x, this.manifest.writers.exists(w, w.domain_id == x))"\xff\x02\n\x14WriterReconciliation\x12D\n\x08manifest\x18\x01 \x01(\x0b2 .vibesys.store.v1.WriterManifestR\x08manifestB\x06\xbaH\x03\xc8\x01\x01\x12P\n\x06status\x18\x02 \x01(\x0e2,.vibesys.store.v1.WriterReconciliationStatusR\x06statusB\n\xbaH\x07\x82\x01\x04\x10\x01 \x00\x12>\n\x05proof\x18\x03 \x01(\x0b2(.vibesys.store.v1.WriterTerminationProofR\x05proof\x12\x16\n\x06detail\x18\x04 \x01(\tR\x06detail:w\xbaHt\x1ar\n\x1bwriter_reconciliation.proof\x12,only ProvenStopped carries termination proof\x1a%(this.status == 1) == has(this.proof)"\x9b\x01\n\x13WriterRegistryState\x12D\n\x08manifest\x18\x01 \x01(\x0b2 .vibesys.store.v1.WriterManifestR\x08manifestB\x06\xbaH\x03\xc8\x01\x01\x12>\n\x05proof\x18\x02 \x01(\x0b2(.vibesys.store.v1.WriterTerminationProofR\x05proof"V\n\x0bReplayClock\x12G\n\tallowance\x18\x01 \x01(\x0b2!.vibesys.store.v1.ReplayAllowanceR\tallowanceB\x06\xbaH\x03\xc8\x01\x01"\xad\x02\n\x0cReplayNotice\x12\x17\n\x02id\x18\x01 \x01(\tR\x02idB\x07\xbaH\x04r\x02\x10\x01\x12C\n\x06unused\x18\x02 \x03(\x0b2!.vibesys.store.v1.OperationReplayR\x06unusedB\x08\xbaH\x05\x92\x01\x02\x08\x01\x128\n\x07pending\x18\x03 \x03(\x0b2\x1e.vibesys.store.v1.OperationKeyR\x07pending:\x84\x01\xbaH\x80\x01\x1a~\n\x1areplay_notice.paid_results\x122unused entries must identify accepted paid results\x1a,this.unused.all(x, x.paid && has(x.outcome))"\x85\x01\n\x15ReplayAcknowledgement\x12)\n\tnotice_id\x18\x01 \x01(\tH\x00R\x08noticeIdB\x07\xbaH\x04r\x02\x10\x01\x88\x01\x01\x123\n\x11launch_request_id\x18\x02 \x01(\tR\x0flaunchRequestIdB\x07\xbaH\x04r\x02\x10\x01B\x0c\n\n_notice_id"\xa0\x03\n\x11ReplayObservation\x126\n\x07outcome\x18\x01 \x01(\x0b2\x14.google.protobuf.AnyR\x07outcomeB\x06\xbaH\x03\xc8\x01\x01\x12\x12\n\x04paid\x18\x02 \x01(\x08R\x04paid\x120\n\x08cost_usd\x18\x03 \x01(\x01H\x00R\x07costUsdB\x10\xbaH\r\x12\x0b@\x01)\x00\x00\x00\x00\x00\x00\x00\x00\x88\x01\x01\x122\n\x05usage\x18\x04 \x01(\x0b2\x1c.vibesys.store.v1.TokenUsageR\x05usageB\x0b\n\t_cost_usd:\xcb\x01\xbaH\xc7\x01\x1a\xc4\x01\n\x1dreplay_observation.usage_cost\x124reported usage cost must agree with observation cost\x1am!has(this.usage) || !has(this.usage.cost_usd) || (has(this.cost_usd) && this.cost_usd == this.usage.cost_usd)"j\n\x11ReplayPolicyDrift\x12!\n\x07results\x18\x01 \x01(\x04R\x07resultsB\x07\xbaH\x042\x02 \x00\x12\x14\n\x05roles\x18\x02 \x03(\tR\x05roles\x12\x1c\n\ttemplates\x18\x03 \x03(\tR\ttemplates*r\n\x0fReplayFieldKind\x12!\n\x1dREPLAY_FIELD_KIND_UNSPECIFIED\x10\x00\x12\x1e\n\x1aREPLAY_FIELD_KIND_IDENTITY\x10\x01\x12\x1c\n\x18REPLAY_FIELD_KIND_POLICY\x10\x02*\xdc\x01\n\x10KeyComponentKind\x12"\n\x1eKEY_COMPONENT_KIND_UNSPECIFIED\x10\x00\x12\x1d\n\x19KEY_COMPONENT_KIND_PARENT\x10\x01\x12\x1b\n\x17KEY_COMPONENT_KIND_ITEM\x10\x02\x12\x1d\n\x19KEY_COMPONENT_KIND_SAMPLE\x10\x03\x12\x1f\n\x1bKEY_COMPONENT_KIND_REVISION\x10\x04\x12(\n$KEY_COMPONENT_KIND_RECORDED_POSITION\x10\x05*\xfd\x01\n\x1aWriterReconciliationStatus\x12,\n(WRITER_RECONCILIATION_STATUS_UNSPECIFIED\x10\x00\x12/\n+WRITER_RECONCILIATION_STATUS_PROVEN_STOPPED\x10\x01\x12(\n$WRITER_RECONCILIATION_STATUS_PENDING\x10\x02\x12(\n$WRITER_RECONCILIATION_STATUS_UNKNOWN\x10\x03\x12,\n(WRITER_RECONCILIATION_STATUS_UNSUPPORTED\x10\x04:H\n\x0ereplay_context\x18\x9e\x8f\x03 \x01(\x08\x12\x1f.google.protobuf.MessageOptionsR\rreplayContext:e\n\x0creplay_field\x18\x9c\x8f\x03 \x01(\x0e2!.vibesys.store.v1.ReplayFieldKind\x12\x1d.google.protobuf.FieldOptionsR\x0breplayField:>\n\nreplay_set\x18\x9d\x8f\x03 \x01(\x08\x12\x1d.google.protobuf.FieldOptionsR\treplaySetBAZ?github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1b\x06proto3',
     [
         validate_pb.desc(),
         any_pb.desc(),
@@ -659,6 +1014,13 @@ _DESC = file_desc(
         "ReplayResources": ReplayResources,
         "ReplayPolicy": ReplayPolicy,
         "OperationReplay": OperationReplay,
+        "ReplayPhysical": ReplayPhysical,
+        "WriterBacking": WriterBacking,
+        "WriterIdentity": WriterIdentity,
+        "WriterManifest": WriterManifest,
+        "WriterTerminationProof": WriterTerminationProof,
+        "WriterReconciliation": WriterReconciliation,
+        "WriterRegistryState": WriterRegistryState,
         "ReplayClock": ReplayClock,
         "ReplayNotice": ReplayNotice,
         "ReplayAcknowledgement": ReplayAcknowledgement,
@@ -666,6 +1028,7 @@ _DESC = file_desc(
         "ReplayPolicyDrift": ReplayPolicyDrift,
         "ReplayFieldKind": ReplayFieldKind,
         "KeyComponentKind": KeyComponentKind,
+        "WriterReconciliationStatus": WriterReconciliationStatus,
         "replay_context": ext_replay_context,
         "replay_field": ext_replay_field,
         "replay_set": ext_replay_set,

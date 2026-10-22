@@ -20,6 +20,7 @@ from vs_core.api.replay import (
     ReplayResourcesBlocked,
     ReplayScheduler,
     ReplaySettings,
+    ReplayWriterRecovery,
     replay_descriptors,
     reply_schema_digest,
 )
@@ -586,6 +587,48 @@ class ReplayRuntime:
         span.status, span.ended_at = SpanStatus.DONE, self._archive.clock
         return self._append(
             Oneof("span", SpanRecord(change=Change.ENDED, span=span)), now=now, at=at
+        )
+
+    def writer_intent(self, manifest: pb.WriterManifest, *, now: float, at: Timestamp) -> None:
+        """W2: commit the environment's complete closed grant set before cleanup I/O."""
+        self._writer_fact(manifest, now=now, at=at)
+
+    def writer_observation(
+        self, result: pb.WriterReconciliation, *, now: float, at: Timestamp
+    ) -> None:
+        """W7: persist proof or a typed blocked diagnostic before any hold release."""
+        self._writer_fact(result, now=now, at=at)
+
+    def _writer_fact(
+        self, value: pb.WriterManifest | pb.WriterReconciliation, *, now: float, at: Timestamp
+    ) -> None:
+        validate(value)
+        records = ReplayRecords.from_binary(self._archive.encode()).records
+        candidate = Record(
+            body=Oneof(
+                "notice",
+                Notice(detail=Any(type_url=value.desc().type_name, value=value.to_binary())),
+            )
+        )
+        ReplayWriterRecovery.from_records((*records, candidate))
+        blocked = isinstance(value, pb.WriterReconciliation) and value.proof is None
+        message = (
+            "Recovery blocked: previous writers may still modify this workspace"
+            if blocked
+            else "Writer reconciliation evidence retained."
+        )
+        self._append(
+            Oneof(
+                "notice",
+                Notice(
+                    severity=Severity.WARNING,
+                    code=NoticeCode.FRAMEWORK_WARNING,
+                    message=message,
+                    detail=Any(type_url=value.desc().type_name, value=value.to_binary()),
+                ),
+            ),
+            now=now,
+            at=at,
         )
 
     def advance_clock(self, clock: float, *, now: float, at: Timestamp) -> None:

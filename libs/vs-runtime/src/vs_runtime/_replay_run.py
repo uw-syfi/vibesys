@@ -21,6 +21,7 @@ if TYPE_CHECKING:
         ReplayResult,
         ReplayRuntime,
     )
+    from vs_runtime._writer_reconciliation import ReplayWriterBarrier
     from vs_sim.api import SleepingClock
 
 
@@ -33,6 +34,7 @@ class ReplayRunHost:
     clock: SleepingClock
     ending: Callable[[object], ReplayEnding]
     """Pure policy mapping from the root value to a resumable epoch ending."""
+    writer_barrier: ReplayWriterBarrier | None = None
 
 
 @dataclass(frozen=True)
@@ -216,6 +218,8 @@ async def drive_replay(host: ReplayRunHost, launch: ReplayLaunch) -> ReplayCompl
         now = host.clock.now()
         host.runtime.start(launch, now=now, at=_at(now))
         epoch = _LiveEpoch(host, launch)
+        if host.writer_barrier is not None:
+            await host.writer_barrier.reconcile(host.runtime, now=now, at=_at(now))
         await epoch.recover()
         return await epoch.run()
     finally:

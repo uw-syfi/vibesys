@@ -181,7 +181,7 @@ if TYPE_CHECKING:
     from vs_agent.cli_common import materialize_skills
     from vs_agent.client import AgentClient
     from vs_agent.factory import agent_supports_tool_servers
-    from vs_agent.orphans import OrphanReapError, reap_orphaned_agents
+    from vs_agent.orphans import OrphanReapError, reap_orphaned_agents, reap_recorded_agents
     from vs_agent.scripted_client import ScriptedAgentClient, ScriptedClientSetup, ScriptedTurn
     from vs_agent.shim_turns import native_schema, native_schema_problems
     from vs_sandbox.api import DockerSandbox, HostResource, ProjectPathPolicy
@@ -334,6 +334,7 @@ __all__ = [
     "provider_login",
     "provider_login_command",
     "reap_orphaned_agents",
+    "reap_recorded_agents",
     "reply_breach",
     "session_env_allowlist",
     "session_environment",
@@ -393,17 +394,20 @@ def __getattr__(name: str) -> object:
             "native_schema": native_schema,
             "native_schema_problems": native_schema_problems,
         }[name]
-    if name in {"OrphanReapError", "reap_orphaned_agents"}:
+    if name in {"OrphanReapError", "reap_orphaned_agents", "reap_recorded_agents"}:
         # The reaper builds agentshim confinements, and importing agentshim at
         # module import would load it into every consumer of this package.
         from vs_agent.orphans import (  # noqa: PLC0415  # lint-waiver: LW-482907 [PLC0415]; keep agentshim unloaded for consumers of vs_agent.api that never reap, like the other lazy names here.
             OrphanReapError,
             reap_orphaned_agents,
+            reap_recorded_agents,
         )
 
-        return {"OrphanReapError": OrphanReapError, "reap_orphaned_agents": reap_orphaned_agents}[
-            name
-        ]
+        return {
+            "OrphanReapError": OrphanReapError,
+            "reap_orphaned_agents": reap_orphaned_agents,
+            "reap_recorded_agents": reap_recorded_agents,
+        }[name]
     message = f"module {__name__!r} has no attribute {name!r}"
     raise AttributeError(message)
 

@@ -1,0 +1,286 @@
+"""Environment-owned writable grants and verified termination, dormant until cutover.
+
+The namespace is backing-wide, shared by every run granted access to it. Only
+new native execution domains may create a registry: legacy/incomplete domains
+remain Unknown. Every writer must register before launch. Sealing forbids new
+grants; only destruction of every immutable execution domain proves death.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import re
+from copy import deepcopy
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Protocol
+
+from protobuf import Message
+
+from vs_agent.api import OrphanReapError, reap_recorded_agents
+from vs_proto.api import replay as pb
+from vs_proto.api import validate
+from vs_runtime._receipt_store import ReceiptStore
+from vs_sim.api import DISCARD, ProcessTimeoutError
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from vs_project.api import StateNamespace
+    from vs_proto.api import Timestamp
+    from vs_runtime._replay_runtime import ReplayRuntime
+    from vs_sandbox.api import DockerCli
+    from vs_sim.api import BlockingRunner, Threads
+
+
+class WriterProofError(ValueError):
+    """Missing, conflicting or unconfirmed writer evidence forbids backing reuse."""
+
+
+class ReplayWriterBlockedError(WriterProofError):
+    """A persisted prerequisite retains all outstanding identities and missing evidence."""
+
+    def __init__(self, result: pb.WriterReconciliation) -> None:
+        self.reconciliation = deepcopy(result)
+        super().__init__(
+            "Recovery blocked: previous writers may still modify this workspace; " + result.detail
+        )
+
+
+def _checked[T: Message](message: T) -> T:
+    validate(message)
+    if message.to_binary() != message.to_binary(write_unknown_fields=False):
+        problem = "writer evidence contains unknown fields"
+        raise WriterProofError(problem)
+    return message
+
+
+class WriterRegistry:
+    """Durable grants for one backing generation, across runs and host incarnations.
+
+    This is execution evidence, never scheduling state. A failed/uncertain write
+    grants no dispatch authority. A sealed registry cannot be reopened: the next
+    execution domain gets a new generation only after the prior proof is durable.
+    ``namespace`` must be the same backing-wide namespace for all its writers.
+    """
+
+    def __init__(
+        self, namespace: StateNamespace, backing: pb.WriterBacking, threads: Threads
+    ) -> None:
+        self._namespace = namespace
+        self._backing = _checked(deepcopy(backing))
+        self._lock = ReceiptStore(namespace, threads)
+        self._path = "writers/" + hashlib.sha256(backing.to_binary()).hexdigest() + ".pb"
+
+    def _load(self) -> pb.WriterRegistryState:
+        payload = self._namespace.read_bytes(self._path)
+        if payload is None:
+            problem = "writer manifest is absent; inherited grants cannot be enumerated"
+            raise WriterProofError(problem)
+        state = _checked(pb.WriterRegistryState.from_binary(payload))
+        if state.manifest is None or state.manifest.backing != self._backing:
+            problem = "writer manifest belongs to another backing generation"
+            raise WriterProofError(problem)
+        return state
+
+    def _save(self, state: pb.WriterRegistryState) -> None:
+        self._namespace.write_bytes(self._path, _checked(state).to_binary())
+
+    def create(self) -> None:
+        """Initialize before the first grant to a newly owned native backing."""
+        with self._lock.exclusive():
+            if self._namespace.read_bytes(self._path) is None:
+                self._save(
+                    pb.WriterRegistryState(manifest=pb.WriterManifest(backing=self._backing))
+                )
+            else:
+                self._load()
+
+    def grant(self, writer: pb.WriterIdentity) -> None:
+        """Durably register before dispatch, idempotently by immutable physical ID."""
+        _checked(writer)
+        with self._lock.exclusive():
+            state = self._load()
+            manifest = state.manifest
+            if manifest is None:
+                problem = "writer registry omitted its manifest"
+                raise WriterProofError(problem)
+            known = next((w for w in manifest.writers if w.physical_id == writer.physical_id), None)
+            if known is not None:
+                if known == writer and not manifest.closed:
+                    return
+                problem = "writer physical identity conflicts or its execution domain is closed"
+                raise WriterProofError(problem)
+            if manifest.closed:
+                problem = "writer execution domain is closed to further grants"
+                raise WriterProofError(problem)
+            manifest.writers.append(deepcopy(writer))
+            self._save(state)
+
+    def close(self) -> pb.WriterManifest:
+        """Commit reconciliation intent before inspection or stopping any writer."""
+        with self._lock.exclusive():
+            state = self._load()
+            if state.manifest is None:
+                problem = "writer registry omitted its manifest"
+                raise WriterProofError(problem)
+            state.manifest.closed = True
+            self._save(state)
+            return deepcopy(state.manifest)
+
+    def record(self, result: pb.WriterReconciliation) -> None:
+        """Retain only an environment's proof for this exact closed manifest."""
+        _checked(result)
+        with self._lock.exclusive():
+            state = self._load()
+            if state.manifest != result.manifest:
+                problem = "termination evidence does not cover the complete current writer manifest"
+                raise WriterProofError(problem)
+            if result.proof is not None:
+                if result.proof.manifest != state.manifest:
+                    problem = "termination proof manifest differs from reconciliation"
+                    raise WriterProofError(problem)
+                state.proof = deepcopy(result.proof)
+                self._save(state)
+
+    def require_proof(self) -> pb.WriterTerminationProof:
+        """Guard release, replacement, discard and import; receipts cannot supply proof."""
+        with self._lock.exclusive():
+            state = self._load()
+            if state.proof is None or state.proof.manifest != state.manifest:
+                problem = "Recovery blocked: previous writers may still modify this workspace"
+                raise WriterProofError(problem)
+            return deepcopy(state.proof)
+
+
+@dataclass(frozen=True)
+class ReplayWriterBarrier:
+    """W2-W7 shell: durable manifest, owner reconciliation, then durable proof.
+
+    A crash at any boundary repeats inspection of the same closed domain. Native
+    release guards require the log observation as well as the registry proof.
+    """
+
+    registry: WriterRegistry
+    reconciler: WriterReconciler
+    blocking: BlockingRunner
+
+    async def reconcile(
+        self, runtime: ReplayRuntime, *, now: float, at: Timestamp
+    ) -> pb.WriterReconciliation:
+        manifest = self.registry.close()
+        runtime.writer_intent(manifest, now=now, at=at)
+        result = await self.blocking.run(self.reconciler.reconcile_writers, manifest)
+        self.registry.record(result)
+        runtime.writer_observation(result, now=now, at=at)
+        if result.proof is None:
+            raise ReplayWriterBlockedError(result)
+        return result
+
+
+class WriterReconciler(Protocol):
+    """Close immutable execution domains and verify every writer and descendant dead."""
+
+    def reconcile_writers(self, manifest: pb.WriterManifest) -> pb.WriterReconciliation: ...
+
+
+@dataclass(frozen=True)
+class UnsupportedWriterReconciler:
+    """No supervision or remote-job evidence is available for inherited grants."""
+
+    environment: str
+
+    def reconcile_writers(self, manifest: pb.WriterManifest) -> pb.WriterReconciliation:
+        _checked(manifest)
+        if manifest.closed and not manifest.writers:
+            return pb.WriterReconciliation(
+                manifest=deepcopy(manifest),
+                status=pb.WriterReconciliationStatus.PROVEN_STOPPED,
+                proof=pb.WriterTerminationProof(manifest=deepcopy(manifest)),
+            )
+        return pb.WriterReconciliation(
+            manifest=deepcopy(manifest),
+            status=pb.WriterReconciliationStatus.UNSUPPORTED,
+            detail=f"{self.environment}: authoritative termination and descendant evidence unavailable",
+        )
+
+
+@dataclass(frozen=True)
+class DockerWriterReconciler:
+    """Verify absence on the recorded daemon after reaping exact writer containers.
+
+    Removing an immutable container closes all further exec/spawn in that domain,
+    including descendants and a nested daemon. Acknowledged removal alone, a
+    stopped container that can restart, and a sealed manifest prove no death.
+    This owner accepts only Docker domains; remote writers need their own owner.
+    """
+
+    docker: DockerCli
+    reap: Callable[[tuple[str, ...]], None]
+
+    def _run(self, *arguments: str) -> str:
+        result = self.docker.run(["docker", *arguments], timeout_seconds=60, output=DISCARD)
+        if result.returncode != 0:
+            problem = f"Docker writer verification failed: {result.stderr.strip()}"
+            raise WriterProofError(problem)
+        return result.stdout.strip()
+
+    def reconcile_writers(self, manifest: pb.WriterManifest) -> pb.WriterReconciliation:
+        _checked(manifest)
+        backing = manifest.backing
+        if backing is None or backing.environment != "docker" or not manifest.closed:
+            return pb.WriterReconciliation(
+                manifest=deepcopy(manifest),
+                status=pb.WriterReconciliationStatus.UNKNOWN,
+                detail="Docker needs a complete closed Docker execution domain",
+            )
+        if any(re.fullmatch(r"[a-f0-9]{64}", w.domain_id) is None for w in manifest.writers):
+            return pb.WriterReconciliation(
+                manifest=deepcopy(manifest),
+                status=pb.WriterReconciliationStatus.UNKNOWN,
+                detail="Docker writer domains require full immutable container IDs",
+            )
+        try:
+            if self._run("info", "--format", "{{.ID}}") != backing.authority:
+                return pb.WriterReconciliation(
+                    manifest=deepcopy(manifest),
+                    status=pb.WriterReconciliationStatus.UNKNOWN,
+                    detail="recorded Docker daemon is unavailable or has changed identity",
+                )
+            domains = tuple(sorted({w.domain_id for w in manifest.writers}))
+            before = set(self._run("ps", "-aq", "--no-trunc").splitlines())
+            self.reap(tuple(domain for domain in domains if domain in before))
+            after = set(self._run("ps", "-aq", "--no-trunc").splitlines())
+            pending = sorted(after.intersection(domains))
+            if pending:
+                return pb.WriterReconciliation(
+                    manifest=deepcopy(manifest),
+                    status=pb.WriterReconciliationStatus.PENDING,
+                    detail="writer containers are not verified absent: " + ", ".join(pending),
+                )
+            proof = pb.WriterTerminationProof(
+                manifest=deepcopy(manifest), absent_domains=list(domains)
+            )
+            return _checked(
+                pb.WriterReconciliation(
+                    manifest=deepcopy(manifest),
+                    status=pb.WriterReconciliationStatus.PROVEN_STOPPED,
+                    proof=proof,
+                )
+            )
+        except (WriterProofError, OrphanReapError, OSError, ProcessTimeoutError) as error:
+            return pb.WriterReconciliation(
+                manifest=deepcopy(manifest),
+                status=pb.WriterReconciliationStatus.UNKNOWN,
+                detail=str(error),
+            )
+
+
+def docker_writer_reconciler(
+    docker: DockerCli, log: Callable[[str], None]
+) -> DockerWriterReconciler:
+    """Bind verification to vs-agent's provider-independent reaper, without opening a session."""
+
+    def reap(containers: tuple[str, ...]) -> None:
+        reap_recorded_agents(containers, docker=docker, log=log)
+
+    return DockerWriterReconciler(docker, reap)

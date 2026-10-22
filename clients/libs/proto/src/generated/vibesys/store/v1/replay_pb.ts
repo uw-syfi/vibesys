@@ -15,7 +15,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file vibesys/store/v1/replay.proto.
  */
 export const file_vibesys_store_v1_replay: GenFile = /*@__PURE__*/
-  fileDesc("Ch12aWJlc3lzL3N0b3JlL3YxL3JlcGxheS5wcm90bxIQdmliZXN5cy5zdG9yZS52MSJZCgxPcGVyYXRpb25LZXkSGgoJb3BlcmF0aW9uGAEgASgJQge6SARyAhABEi0KBXNjb3BlGAIgAygLMh4udmliZXN5cy5zdG9yZS52MS5LZXlDb21wb25lbnQiZAoMS2V5Q29tcG9uZW50EjwKBGtpbmQYASABKA4yIi52aWJlc3lzLnN0b3JlLnYxLktleUNvbXBvbmVudEtpbmRCCrpIB4IBBBABIAASFgoFdmFsdWUYAiABKAlCB7pIBHICEAEikgEKD1JlcGxheUFsbG93YW5jZRISCgppdGVyYXRpb25zGAEgASgEEhAKCGNhcGFjaXR5GAIgASgEEiMKCXJlbWFpbmluZxgDIAEoAUIQukgNEgtAASkAAAAAAAAAABI0CglyZXNvdXJjZXMYBCABKAsyIS52aWJlc3lzLnN0b3JlLnYxLlJlcGxheVJlc291cmNlcyKjAQoPUmVwbGF5UmVzb3VyY2VzEigKCW1vbmV5X3VzZBgBIAEoAUIQukgNEgtAASkAAAAAAAAAAEgAiAEBEhkKDGlucHV0X3Rva2VucxgCIAEoBEgBiAEBEhoKDW91dHB1dF90b2tlbnMYAyABKARIAogBAUIMCgpfbW9uZXlfdXNkQg8KDV9pbnB1dF90b2tlbnNCEAoOX291dHB1dF90b2tlbnMi/gEKDFJlcGxheVBvbGljeRIMCgRyb2xlGAEgASgJEhAKCHRlbXBsYXRlGAIgASgJEg8KB2NvbnRlbnQYAyABKAwSGwoKcmVwbHlfdHlwZRgEIAEoCUIHukgEcgIQARIpChNyZXBseV9zY2hlbWFfZGlnZXN0GAUgASgMQge6SAR6AmggSACIAQESJQoHcmVxdWVzdBgGIAEoCzIULmdvb2dsZS5wcm90b2J1Zi5BbnkSNgoLcmVzZXJ2YXRpb24YByABKAsyIS52aWJlc3lzLnN0b3JlLnYxLlJlcGxheVJlc291cmNlc0IWChRfcmVwbHlfc2NoZW1hX2RpZ2VzdCKOBgoPT3BlcmF0aW9uUmVwbGF5EjMKA2tleRgBIAEoCzIeLnZpYmVzeXMuc3RvcmUudjEuT3BlcmF0aW9uS2V5Qga6SAPIAQESIQoQZW5jb2RpbmdfdmVyc2lvbhgCIAEoDUIHukgEKgIIARIZCghpZGVudGl0eRgDIAEoDEIHukgEegIQARIgCg9pZGVudGl0eV9kaWdlc3QYBCABKAxCB7pIBHoCaCASHQoMZGVwZW5kZW5jaWVzGAUgASgMQge6SAR6AmggEjYKBnBvbGljeRgGIAEoCzIeLnZpYmVzeXMuc3RvcmUudjEuUmVwbGF5UG9saWN5Qga6SAPIAQESJQoHb3V0Y29tZRgHIAEoCzIULmdvb2dsZS5wcm90b2J1Zi5BbnkSDAoEcGFpZBgIIAEoCBInCghjb3N0X3VzZBgJIAEoAUIQukgNEgtAASkAAAAAAAAAAEgAiAEBEjwKCWFsbG93YW5jZRgKIAEoCzIhLnZpYmVzeXMuc3RvcmUudjEuUmVwbGF5QWxsb3dhbmNlQga6SAPIAQESJwoRYWNjZXB0ZWRfc2VxdWVuY2UYCyABKARCB7pIBDICIABIAYgBATqmArpIogIalgEKHW9wZXJhdGlvbl9yZXBsYXkucmVwbHlfc2NoZW1hEjtyZWNvcmRlZCBvcGVyYXRpb25zIHJlcXVpcmUgdGhlIHdyaXRlcidzIHJlcGx5IHNjaGVtYSBwcm9vZho4aGFzKHRoaXMucG9saWN5KSAmJiBoYXModGhpcy5wb2xpY3kucmVwbHlfc2NoZW1hX2RpZ2VzdCkahgEKG29wZXJhdGlvbl9yZXBsYXkuYWNjZXB0YW5jZRI1YW4gb3V0Y29tZSByZXF1aXJlcyBpdHMgaW1tdXRhYmxlIGFjY2VwdGFuY2Ugc2VxdWVuY2UaMGhhcyh0aGlzLm91dGNvbWUpID09IGhhcyh0aGlzLmFjY2VwdGVkX3NlcXVlbmNlKUILCglfY29zdF91c2RCFAoSX2FjY2VwdGVkX3NlcXVlbmNlIksKC1JlcGxheUNsb2NrEjwKCWFsbG93YW5jZRgBIAEoCzIhLnZpYmVzeXMuc3RvcmUudjEuUmVwbGF5QWxsb3dhbmNlQga6SAPIAQEimAIKDFJlcGxheU5vdGljZRITCgJpZBgBIAEoCUIHukgEcgIQARI7CgZ1bnVzZWQYAiADKAsyIS52aWJlc3lzLnN0b3JlLnYxLk9wZXJhdGlvblJlcGxheUIIukgFkgECCAESLwoHcGVuZGluZxgDIAMoCzIeLnZpYmVzeXMuc3RvcmUudjEuT3BlcmF0aW9uS2V5OoQBukiAARp+ChpyZXBsYXlfbm90aWNlLnBhaWRfcmVzdWx0cxIydW51c2VkIGVudHJpZXMgbXVzdCBpZGVudGlmeSBhY2NlcHRlZCBwYWlkIHJlc3VsdHMaLHRoaXMudW51c2VkLmFsbCh4LCB4LnBhaWQgJiYgaGFzKHgub3V0Y29tZSkpImoKFVJlcGxheUFja25vd2xlZGdlbWVudBIfCglub3RpY2VfaWQYASABKAlCB7pIBHICEAFIAIgBARIiChFsYXVuY2hfcmVxdWVzdF9pZBgCIAEoCUIHukgEcgIQAUIMCgpfbm90aWNlX2lkIoEDChFSZXBsYXlPYnNlcnZhdGlvbhItCgdvdXRjb21lGAEgASgLMhQuZ29vZ2xlLnByb3RvYnVmLkFueUIGukgDyAEBEgwKBHBhaWQYAiABKAgSJwoIY29zdF91c2QYAyABKAFCELpIDRILQAEpAAAAAAAAAABIAIgBARIrCgV1c2FnZRgEIAEoCzIcLnZpYmVzeXMuc3RvcmUudjEuVG9rZW5Vc2FnZTrLAbpIxwEaxAEKHXJlcGxheV9vYnNlcnZhdGlvbi51c2FnZV9jb3N0EjRyZXBvcnRlZCB1c2FnZSBjb3N0IG11c3QgYWdyZWUgd2l0aCBvYnNlcnZhdGlvbiBjb3N0Gm0haGFzKHRoaXMudXNhZ2UpIHx8ICFoYXModGhpcy51c2FnZS5jb3N0X3VzZCkgfHwgKGhhcyh0aGlzLmNvc3RfdXNkKSAmJiB0aGlzLmNvc3RfdXNkID09IHRoaXMudXNhZ2UuY29zdF91c2QpQgsKCV9jb3N0X3VzZCJPChFSZXBsYXlQb2xpY3lEcmlmdBIYCgdyZXN1bHRzGAEgASgEQge6SAQyAiAAEg0KBXJvbGVzGAIgAygJEhEKCXRlbXBsYXRlcxgDIAMoCSpyCg9SZXBsYXlGaWVsZEtpbmQSIQodUkVQTEFZX0ZJRUxEX0tJTkRfVU5TUEVDSUZJRUQQABIeChpSRVBMQVlfRklFTERfS0lORF9JREVOVElUWRABEhwKGFJFUExBWV9GSUVMRF9LSU5EX1BPTElDWRACKtwBChBLZXlDb21wb25lbnRLaW5kEiIKHktFWV9DT01QT05FTlRfS0lORF9VTlNQRUNJRklFRBAAEh0KGUtFWV9DT01QT05FTlRfS0lORF9QQVJFTlQQARIbChdLRVlfQ09NUE9ORU5UX0tJTkRfSVRFTRACEh0KGUtFWV9DT01QT05FTlRfS0lORF9TQU1QTEUQAxIfChtLRVlfQ09NUE9ORU5UX0tJTkRfUkVWSVNJT04QBBIoCiRLRVlfQ09NUE9ORU5UX0tJTkRfUkVDT1JERURfUE9TSVRJT04QBTpICg5yZXBsYXlfY29udGV4dBIfLmdvb2dsZS5wcm90b2J1Zi5NZXNzYWdlT3B0aW9ucxiejwMgASgIUg1yZXBsYXlDb250ZXh0OmUKDHJlcGxheV9maWVsZBIdLmdvb2dsZS5wcm90b2J1Zi5GaWVsZE9wdGlvbnMYnI8DIAEoDjIhLnZpYmVzeXMuc3RvcmUudjEuUmVwbGF5RmllbGRLaW5kUgtyZXBsYXlGaWVsZDo+CgpyZXBsYXlfc2V0Eh0uZ29vZ2xlLnByb3RvYnVmLkZpZWxkT3B0aW9ucxidjwMgASgIUglyZXBsYXlTZXRCQVo/Z2l0aHViLmNvbS91dy1zeWZpL3ZpYmVzeXMvZ2F0ZXdheS9nZW4vdmliZXN5cy9zdG9yZS92MTtzdG9yZXYxYgZwcm90bzM", [file_buf_validate_validate, file_google_protobuf_any, file_google_protobuf_descriptor, file_vibesys_store_v1_agent_attrs]);
+  fileDesc("Ch12aWJlc3lzL3N0b3JlL3YxL3JlcGxheS5wcm90bxIQdmliZXN5cy5zdG9yZS52MSJZCgxPcGVyYXRpb25LZXkSGgoJb3BlcmF0aW9uGAEgASgJQge6SARyAhABEi0KBXNjb3BlGAIgAygLMh4udmliZXN5cy5zdG9yZS52MS5LZXlDb21wb25lbnQiZAoMS2V5Q29tcG9uZW50EjwKBGtpbmQYASABKA4yIi52aWJlc3lzLnN0b3JlLnYxLktleUNvbXBvbmVudEtpbmRCCrpIB4IBBBABIAASFgoFdmFsdWUYAiABKAlCB7pIBHICEAEikgEKD1JlcGxheUFsbG93YW5jZRISCgppdGVyYXRpb25zGAEgASgEEhAKCGNhcGFjaXR5GAIgASgEEiMKCXJlbWFpbmluZxgDIAEoAUIQukgNEgtAASkAAAAAAAAAABI0CglyZXNvdXJjZXMYBCABKAsyIS52aWJlc3lzLnN0b3JlLnYxLlJlcGxheVJlc291cmNlcyKjAQoPUmVwbGF5UmVzb3VyY2VzEigKCW1vbmV5X3VzZBgBIAEoAUIQukgNEgtAASkAAAAAAAAAAEgAiAEBEhkKDGlucHV0X3Rva2VucxgCIAEoBEgBiAEBEhoKDW91dHB1dF90b2tlbnMYAyABKARIAogBAUIMCgpfbW9uZXlfdXNkQg8KDV9pbnB1dF90b2tlbnNCEAoOX291dHB1dF90b2tlbnMi/gEKDFJlcGxheVBvbGljeRIMCgRyb2xlGAEgASgJEhAKCHRlbXBsYXRlGAIgASgJEg8KB2NvbnRlbnQYAyABKAwSGwoKcmVwbHlfdHlwZRgEIAEoCUIHukgEcgIQARIpChNyZXBseV9zY2hlbWFfZGlnZXN0GAUgASgMQge6SAR6AmggSACIAQESJQoHcmVxdWVzdBgGIAEoCzIULmdvb2dsZS5wcm90b2J1Zi5BbnkSNgoLcmVzZXJ2YXRpb24YByABKAsyIS52aWJlc3lzLnN0b3JlLnYxLlJlcGxheVJlc291cmNlc0IWChRfcmVwbHlfc2NoZW1hX2RpZ2VzdCLHBgoPT3BlcmF0aW9uUmVwbGF5EjMKA2tleRgBIAEoCzIeLnZpYmVzeXMuc3RvcmUudjEuT3BlcmF0aW9uS2V5Qga6SAPIAQESIQoQZW5jb2RpbmdfdmVyc2lvbhgCIAEoDUIHukgEKgIIARIZCghpZGVudGl0eRgDIAEoDEIHukgEegIQARIgCg9pZGVudGl0eV9kaWdlc3QYBCABKAxCB7pIBHoCaCASHQoMZGVwZW5kZW5jaWVzGAUgASgMQge6SAR6AmggEjYKBnBvbGljeRgGIAEoCzIeLnZpYmVzeXMuc3RvcmUudjEuUmVwbGF5UG9saWN5Qga6SAPIAQESJQoHb3V0Y29tZRgHIAEoCzIULmdvb2dsZS5wcm90b2J1Zi5BbnkSDAoEcGFpZBgIIAEoCBInCghjb3N0X3VzZBgJIAEoAUIQukgNEgtAASkAAAAAAAAAAEgAiAEBEjwKCWFsbG93YW5jZRgKIAEoCzIhLnZpYmVzeXMuc3RvcmUudjEuUmVwbGF5QWxsb3dhbmNlQga6SAPIAQESJwoRYWNjZXB0ZWRfc2VxdWVuY2UYCyABKARCB7pIBDICIABIAYgBARIkCg5hY2NlcHRlZF9jaGlsZBgMIAEoCUIHukgEcgIQAUgCiAEBOqYCukiiAhqWAQodb3BlcmF0aW9uX3JlcGxheS5yZXBseV9zY2hlbWESO3JlY29yZGVkIG9wZXJhdGlvbnMgcmVxdWlyZSB0aGUgd3JpdGVyJ3MgcmVwbHkgc2NoZW1hIHByb29mGjhoYXModGhpcy5wb2xpY3kpICYmIGhhcyh0aGlzLnBvbGljeS5yZXBseV9zY2hlbWFfZGlnZXN0KRqGAQobb3BlcmF0aW9uX3JlcGxheS5hY2NlcHRhbmNlEjVhbiBvdXRjb21lIHJlcXVpcmVzIGl0cyBpbW11dGFibGUgYWNjZXB0YW5jZSBzZXF1ZW5jZRowaGFzKHRoaXMub3V0Y29tZSkgPT0gaGFzKHRoaXMuYWNjZXB0ZWRfc2VxdWVuY2UpQgsKCV9jb3N0X3VzZEIUChJfYWNjZXB0ZWRfc2VxdWVuY2VCEQoPX2FjY2VwdGVkX2NoaWxkIuEBCg5SZXBsYXlQaHlzaWNhbBIYCgdsb2dpY2FsGAEgASgJQge6SARyAhABEhwKC2V4dGVybmFsX2lkGAIgASgJQge6SARyAhABEiEKEGhvc3RfaW5jYXJuYXRpb24YAyABKAlCB7pIBHICEAESIgoIZGVhZGxpbmUYBCABKAFCELpIDRILQAEpAAAAAAAAAAASDwoHb3JkaW5hbBgFIAEoBBIoChJ3aXRoZHJhd25fc2VxdWVuY2UYBiABKARCB7pIBDICIABIAIgBAUIVChNfd2l0aGRyYXduX3NlcXVlbmNlIngKDVdyaXRlckJhY2tpbmcSHAoLZW52aXJvbm1lbnQYASABKAlCB7pIBHICEAESGQoIaWRlbnRpdHkYAiABKAlCB7pIBHICEAESEgoKZ2VuZXJhdGlvbhgDIAEoBBIaCglhdXRob3JpdHkYBCABKAlCB7pIBHICEAEihgEKDldyaXRlcklkZW50aXR5EhcKBnJ1bl9pZBgBIAEoCUIHukgEcgIQARIhChBob3N0X2luY2FybmF0aW9uGAIgASgJQge6SARyAhABEhwKC3BoeXNpY2FsX2lkGAMgASgJQge6SARyAhABEhoKCWRvbWFpbl9pZBgEIAEoCUIHukgEcgIQASKEAgoOV3JpdGVyTWFuaWZlc3QSOAoHYmFja2luZxgBIAEoCzIfLnZpYmVzeXMuc3RvcmUudjEuV3JpdGVyQmFja2luZ0IGukgDyAEBEjEKB3dyaXRlcnMYAiADKAsyIC52aWJlc3lzLnN0b3JlLnYxLldyaXRlcklkZW50aXR5Eg4KBmNsb3NlZBgDIAEoCDp1ukhyGnAKFndyaXRlcl9tYW5pZmVzdC51bmlxdWUSKXdyaXRlciBwaHlzaWNhbCBpZGVudGl0aWVzIG11c3QgYmUgdW5pcXVlGit0aGlzLndyaXRlcnMubWFwKHgsIHgucGh5c2ljYWxfaWQpLnVuaXF1ZSgpIqMDChZXcml0ZXJUZXJtaW5hdGlvblByb29mEjoKCG1hbmlmZXN0GAEgASgLMiAudmliZXN5cy5zdG9yZS52MS5Xcml0ZXJNYW5pZmVzdEIGukgDyAEBEiAKDmFic2VudF9kb21haW5zGAIgAygJQgi6SAWSAQIYATqqArpIpgIaowIKE3dyaXRlcl9wcm9vZi5jbG9zZWQSSnRlcm1pbmF0aW9uIHByb29mIG5lZWRzIGEgY2xvc2VkIG1hbmlmZXN0IGFuZCBldmVyeSBkb21haW4gdmVyaWZpZWQgYWJzZW50Gr8BaGFzKHRoaXMubWFuaWZlc3QpICYmIHRoaXMubWFuaWZlc3QuY2xvc2VkICYmIHRoaXMubWFuaWZlc3Qud3JpdGVycy5hbGwoeCwgeC5kb21haW5faWQgaW4gdGhpcy5hYnNlbnRfZG9tYWlucykgJiYgdGhpcy5hYnNlbnRfZG9tYWlucy5hbGwoeCwgdGhpcy5tYW5pZmVzdC53cml0ZXJzLmV4aXN0cyh3LCB3LmRvbWFpbl9pZCA9PSB4KSki3gIKFFdyaXRlclJlY29uY2lsaWF0aW9uEjoKCG1hbmlmZXN0GAEgASgLMiAudmliZXN5cy5zdG9yZS52MS5Xcml0ZXJNYW5pZmVzdEIGukgDyAEBEkgKBnN0YXR1cxgCIAEoDjIsLnZpYmVzeXMuc3RvcmUudjEuV3JpdGVyUmVjb25jaWxpYXRpb25TdGF0dXNCCrpIB4IBBBABIAASNwoFcHJvb2YYAyABKAsyKC52aWJlc3lzLnN0b3JlLnYxLldyaXRlclRlcm1pbmF0aW9uUHJvb2YSDgoGZGV0YWlsGAQgASgJOne6SHQacgobd3JpdGVyX3JlY29uY2lsaWF0aW9uLnByb29mEixvbmx5IFByb3ZlblN0b3BwZWQgY2FycmllcyB0ZXJtaW5hdGlvbiBwcm9vZholKHRoaXMuc3RhdHVzID09IDEpID09IGhhcyh0aGlzLnByb29mKSKKAQoTV3JpdGVyUmVnaXN0cnlTdGF0ZRI6CghtYW5pZmVzdBgBIAEoCzIgLnZpYmVzeXMuc3RvcmUudjEuV3JpdGVyTWFuaWZlc3RCBrpIA8gBARI3CgVwcm9vZhgCIAEoCzIoLnZpYmVzeXMuc3RvcmUudjEuV3JpdGVyVGVybWluYXRpb25Qcm9vZiJLCgtSZXBsYXlDbG9jaxI8CglhbGxvd2FuY2UYASABKAsyIS52aWJlc3lzLnN0b3JlLnYxLlJlcGxheUFsbG93YW5jZUIGukgDyAEBIpgCCgxSZXBsYXlOb3RpY2USEwoCaWQYASABKAlCB7pIBHICEAESOwoGdW51c2VkGAIgAygLMiEudmliZXN5cy5zdG9yZS52MS5PcGVyYXRpb25SZXBsYXlCCLpIBZIBAggBEi8KB3BlbmRpbmcYAyADKAsyHi52aWJlc3lzLnN0b3JlLnYxLk9wZXJhdGlvbktleTqEAbpIgAEafgoacmVwbGF5X25vdGljZS5wYWlkX3Jlc3VsdHMSMnVudXNlZCBlbnRyaWVzIG11c3QgaWRlbnRpZnkgYWNjZXB0ZWQgcGFpZCByZXN1bHRzGix0aGlzLnVudXNlZC5hbGwoeCwgeC5wYWlkICYmIGhhcyh4Lm91dGNvbWUpKSJqChVSZXBsYXlBY2tub3dsZWRnZW1lbnQSHwoJbm90aWNlX2lkGAEgASgJQge6SARyAhABSACIAQESIgoRbGF1bmNoX3JlcXVlc3RfaWQYAiABKAlCB7pIBHICEAFCDAoKX25vdGljZV9pZCKBAwoRUmVwbGF5T2JzZXJ2YXRpb24SLQoHb3V0Y29tZRgBIAEoCzIULmdvb2dsZS5wcm90b2J1Zi5BbnlCBrpIA8gBARIMCgRwYWlkGAIgASgIEicKCGNvc3RfdXNkGAMgASgBQhC6SA0SC0ABKQAAAAAAAAAASACIAQESKwoFdXNhZ2UYBCABKAsyHC52aWJlc3lzLnN0b3JlLnYxLlRva2VuVXNhZ2U6ywG6SMcBGsQBCh1yZXBsYXlfb2JzZXJ2YXRpb24udXNhZ2VfY29zdBI0cmVwb3J0ZWQgdXNhZ2UgY29zdCBtdXN0IGFncmVlIHdpdGggb2JzZXJ2YXRpb24gY29zdBptIWhhcyh0aGlzLnVzYWdlKSB8fCAhaGFzKHRoaXMudXNhZ2UuY29zdF91c2QpIHx8IChoYXModGhpcy5jb3N0X3VzZCkgJiYgdGhpcy5jb3N0X3VzZCA9PSB0aGlzLnVzYWdlLmNvc3RfdXNkKUILCglfY29zdF91c2QiTwoRUmVwbGF5UG9saWN5RHJpZnQSGAoHcmVzdWx0cxgBIAEoBEIHukgEMgIgABINCgVyb2xlcxgCIAMoCRIRCgl0ZW1wbGF0ZXMYAyADKAkqcgoPUmVwbGF5RmllbGRLaW5kEiEKHVJFUExBWV9GSUVMRF9LSU5EX1VOU1BFQ0lGSUVEEAASHgoaUkVQTEFZX0ZJRUxEX0tJTkRfSURFTlRJVFkQARIcChhSRVBMQVlfRklFTERfS0lORF9QT0xJQ1kQAircAQoQS2V5Q29tcG9uZW50S2luZBIiCh5LRVlfQ09NUE9ORU5UX0tJTkRfVU5TUEVDSUZJRUQQABIdChlLRVlfQ09NUE9ORU5UX0tJTkRfUEFSRU5UEAESGwoXS0VZX0NPTVBPTkVOVF9LSU5EX0lURU0QAhIdChlLRVlfQ09NUE9ORU5UX0tJTkRfU0FNUExFEAMSHwobS0VZX0NPTVBPTkVOVF9LSU5EX1JFVklTSU9OEAQSKAokS0VZX0NPTVBPTkVOVF9LSU5EX1JFQ09SREVEX1BPU0lUSU9OEAUq/QEKGldyaXRlclJlY29uY2lsaWF0aW9uU3RhdHVzEiwKKFdSSVRFUl9SRUNPTkNJTElBVElPTl9TVEFUVVNfVU5TUEVDSUZJRUQQABIvCitXUklURVJfUkVDT05DSUxJQVRJT05fU1RBVFVTX1BST1ZFTl9TVE9QUEVEEAESKAokV1JJVEVSX1JFQ09OQ0lMSUFUSU9OX1NUQVRVU19QRU5ESU5HEAISKAokV1JJVEVSX1JFQ09OQ0lMSUFUSU9OX1NUQVRVU19VTktOT1dOEAMSLAooV1JJVEVSX1JFQ09OQ0lMSUFUSU9OX1NUQVRVU19VTlNVUFBPUlRFRBAEOkgKDnJlcGxheV9jb250ZXh0Eh8uZ29vZ2xlLnByb3RvYnVmLk1lc3NhZ2VPcHRpb25zGJ6PAyABKAhSDXJlcGxheUNvbnRleHQ6ZQoMcmVwbGF5X2ZpZWxkEh0uZ29vZ2xlLnByb3RvYnVmLkZpZWxkT3B0aW9ucxicjwMgASgOMiEudmliZXN5cy5zdG9yZS52MS5SZXBsYXlGaWVsZEtpbmRSC3JlcGxheUZpZWxkOj4KCnJlcGxheV9zZXQSHS5nb29nbGUucHJvdG9idWYuRmllbGRPcHRpb25zGJ2PAyABKAhSCXJlcGxheVNldEJBWj9naXRodWIuY29tL3V3LXN5ZmkvdmliZXN5cy9nYXRld2F5L2dlbi92aWJlc3lzL3N0b3JlL3YxO3N0b3JldjFiBnByb3RvMw", [file_buf_validate_validate, file_google_protobuf_any, file_google_protobuf_descriptor, file_vibesys_store_v1_agent_attrs]);
 
 /**
  * Names are semantic, never source locations or live collection positions.
@@ -249,6 +249,13 @@ export type OperationReplay = Message<"vibesys.store.v1.OperationReplay"> & {
    * @generated from field: optional uint64 accepted_sequence = 11;
    */
   acceptedSequence?: bigint | undefined;
+
+  /**
+   * New physical execution records retain the winner by child span identity.
+   *
+   * @generated from field: optional string accepted_child = 12;
+   */
+  acceptedChild?: string | undefined;
 };
 
 /**
@@ -257,6 +264,223 @@ export type OperationReplay = Message<"vibesys.store.v1.OperationReplay"> & {
  */
 export const OperationReplaySchema: GenMessage<OperationReplay> = /*@__PURE__*/
   messageDesc(file_vibesys_store_v1_replay, 5);
+
+/**
+ * A child is execution evidence, never another semantic operation.
+ *
+ * @generated from message vibesys.store.v1.ReplayPhysical
+ */
+export type ReplayPhysical = Message<"vibesys.store.v1.ReplayPhysical"> & {
+  /**
+   * @generated from field: string logical = 1;
+   */
+  logical: string;
+
+  /**
+   * @generated from field: string external_id = 2;
+   */
+  externalId: string;
+
+  /**
+   * @generated from field: string host_incarnation = 3;
+   */
+  hostIncarnation: string;
+
+  /**
+   * @generated from field: double deadline = 4;
+   */
+  deadline: number;
+
+  /**
+   * @generated from field: uint64 ordinal = 5;
+   */
+  ordinal: bigint;
+
+  /**
+   * @generated from field: optional uint64 withdrawn_sequence = 6;
+   */
+  withdrawnSequence?: bigint | undefined;
+};
+
+/**
+ * Describes the message vibesys.store.v1.ReplayPhysical.
+ * Use `create(ReplayPhysicalSchema)` to create a new message.
+ */
+export const ReplayPhysicalSchema: GenMessage<ReplayPhysical> = /*@__PURE__*/
+  messageDesc(file_vibesys_store_v1_replay, 6);
+
+/**
+ * The environment records every writable grant before execution, including
+ * tool/build jobs and grants belonging to other runs. Closing this ledger
+ * forbids further grants in the execution domain; it does not prove death.
+ *
+ * @generated from message vibesys.store.v1.WriterBacking
+ */
+export type WriterBacking = Message<"vibesys.store.v1.WriterBacking"> & {
+  /**
+   * @generated from field: string environment = 1;
+   */
+  environment: string;
+
+  /**
+   * @generated from field: string identity = 2;
+   */
+  identity: string;
+
+  /**
+   * @generated from field: uint64 generation = 3;
+   */
+  generation: bigint;
+
+  /**
+   * @generated from field: string authority = 4;
+   */
+  authority: string;
+};
+
+/**
+ * Describes the message vibesys.store.v1.WriterBacking.
+ * Use `create(WriterBackingSchema)` to create a new message.
+ */
+export const WriterBackingSchema: GenMessage<WriterBacking> = /*@__PURE__*/
+  messageDesc(file_vibesys_store_v1_replay, 7);
+
+/**
+ * @generated from message vibesys.store.v1.WriterIdentity
+ */
+export type WriterIdentity = Message<"vibesys.store.v1.WriterIdentity"> & {
+  /**
+   * @generated from field: string run_id = 1;
+   */
+  runId: string;
+
+  /**
+   * @generated from field: string host_incarnation = 2;
+   */
+  hostIncarnation: string;
+
+  /**
+   * @generated from field: string physical_id = 3;
+   */
+  physicalId: string;
+
+  /**
+   * An immutable execution-domain ID, never a reusable container name.
+   *
+   * @generated from field: string domain_id = 4;
+   */
+  domainId: string;
+};
+
+/**
+ * Describes the message vibesys.store.v1.WriterIdentity.
+ * Use `create(WriterIdentitySchema)` to create a new message.
+ */
+export const WriterIdentitySchema: GenMessage<WriterIdentity> = /*@__PURE__*/
+  messageDesc(file_vibesys_store_v1_replay, 8);
+
+/**
+ * @generated from message vibesys.store.v1.WriterManifest
+ */
+export type WriterManifest = Message<"vibesys.store.v1.WriterManifest"> & {
+  /**
+   * @generated from field: vibesys.store.v1.WriterBacking backing = 1;
+   */
+  backing?: WriterBacking | undefined;
+
+  /**
+   * @generated from field: repeated vibesys.store.v1.WriterIdentity writers = 2;
+   */
+  writers: WriterIdentity[];
+
+  /**
+   * @generated from field: bool closed = 3;
+   */
+  closed: boolean;
+};
+
+/**
+ * Describes the message vibesys.store.v1.WriterManifest.
+ * Use `create(WriterManifestSchema)` to create a new message.
+ */
+export const WriterManifestSchema: GenMessage<WriterManifest> = /*@__PURE__*/
+  messageDesc(file_vibesys_store_v1_replay, 9);
+
+/**
+ * @generated from message vibesys.store.v1.WriterTerminationProof
+ */
+export type WriterTerminationProof = Message<"vibesys.store.v1.WriterTerminationProof"> & {
+  /**
+   * @generated from field: vibesys.store.v1.WriterManifest manifest = 1;
+   */
+  manifest?: WriterManifest | undefined;
+
+  /**
+   * @generated from field: repeated string absent_domains = 2;
+   */
+  absentDomains: string[];
+};
+
+/**
+ * Describes the message vibesys.store.v1.WriterTerminationProof.
+ * Use `create(WriterTerminationProofSchema)` to create a new message.
+ */
+export const WriterTerminationProofSchema: GenMessage<WriterTerminationProof> = /*@__PURE__*/
+  messageDesc(file_vibesys_store_v1_replay, 10);
+
+/**
+ * @generated from message vibesys.store.v1.WriterReconciliation
+ */
+export type WriterReconciliation = Message<"vibesys.store.v1.WriterReconciliation"> & {
+  /**
+   * @generated from field: vibesys.store.v1.WriterManifest manifest = 1;
+   */
+  manifest?: WriterManifest | undefined;
+
+  /**
+   * @generated from field: vibesys.store.v1.WriterReconciliationStatus status = 2;
+   */
+  status: WriterReconciliationStatus;
+
+  /**
+   * @generated from field: vibesys.store.v1.WriterTerminationProof proof = 3;
+   */
+  proof?: WriterTerminationProof | undefined;
+
+  /**
+   * @generated from field: string detail = 4;
+   */
+  detail: string;
+};
+
+/**
+ * Describes the message vibesys.store.v1.WriterReconciliation.
+ * Use `create(WriterReconciliationSchema)` to create a new message.
+ */
+export const WriterReconciliationSchema: GenMessage<WriterReconciliation> = /*@__PURE__*/
+  messageDesc(file_vibesys_store_v1_replay, 11);
+
+/**
+ * @generated from message vibesys.store.v1.WriterRegistryState
+ */
+export type WriterRegistryState = Message<"vibesys.store.v1.WriterRegistryState"> & {
+  /**
+   * @generated from field: vibesys.store.v1.WriterManifest manifest = 1;
+   */
+  manifest?: WriterManifest | undefined;
+
+  /**
+   * @generated from field: vibesys.store.v1.WriterTerminationProof proof = 2;
+   */
+  proof?: WriterTerminationProof | undefined;
+};
+
+/**
+ * Describes the message vibesys.store.v1.WriterRegistryState.
+ * Use `create(WriterRegistryStateSchema)` to create a new message.
+ */
+export const WriterRegistryStateSchema: GenMessage<WriterRegistryState> = /*@__PURE__*/
+  messageDesc(file_vibesys_store_v1_replay, 12);
 
 /**
  * Timer-only progress is an observation, not a keyed paid operation.
@@ -275,7 +499,7 @@ export type ReplayClock = Message<"vibesys.store.v1.ReplayClock"> & {
  * Use `create(ReplayClockSchema)` to create a new message.
  */
 export const ReplayClockSchema: GenMessage<ReplayClock> = /*@__PURE__*/
-  messageDesc(file_vibesys_store_v1_replay, 6);
+  messageDesc(file_vibesys_store_v1_replay, 13);
 
 /**
  * @generated from message vibesys.store.v1.ReplayNotice
@@ -302,7 +526,7 @@ export type ReplayNotice = Message<"vibesys.store.v1.ReplayNotice"> & {
  * Use `create(ReplayNoticeSchema)` to create a new message.
  */
 export const ReplayNoticeSchema: GenMessage<ReplayNotice> = /*@__PURE__*/
-  messageDesc(file_vibesys_store_v1_replay, 7);
+  messageDesc(file_vibesys_store_v1_replay, 14);
 
 /**
  * @generated from message vibesys.store.v1.ReplayAcknowledgement
@@ -326,7 +550,7 @@ export type ReplayAcknowledgement = Message<"vibesys.store.v1.ReplayAcknowledgem
  * Use `create(ReplayAcknowledgementSchema)` to create a new message.
  */
 export const ReplayAcknowledgementSchema: GenMessage<ReplayAcknowledgement> = /*@__PURE__*/
-  messageDesc(file_vibesys_store_v1_replay, 8);
+  messageDesc(file_vibesys_store_v1_replay, 15);
 
 /**
  * A surviving observation can complete its operation after a writer crash.
@@ -361,7 +585,7 @@ export type ReplayObservation = Message<"vibesys.store.v1.ReplayObservation"> & 
  * Use `create(ReplayObservationSchema)` to create a new message.
  */
 export const ReplayObservationSchema: GenMessage<ReplayObservation> = /*@__PURE__*/
-  messageDesc(file_vibesys_store_v1_replay, 9);
+  messageDesc(file_vibesys_store_v1_replay, 16);
 
 /**
  * Earlier answers remain usable when only prompts or limits change.
@@ -390,7 +614,7 @@ export type ReplayPolicyDrift = Message<"vibesys.store.v1.ReplayPolicyDrift"> & 
  * Use `create(ReplayPolicyDriftSchema)` to create a new message.
  */
 export const ReplayPolicyDriftSchema: GenMessage<ReplayPolicyDrift> = /*@__PURE__*/
-  messageDesc(file_vibesys_store_v1_replay, 10);
+  messageDesc(file_vibesys_store_v1_replay, 17);
 
 /**
  * Every prompt-context field declares whether it changes semantic input or policy.
@@ -460,6 +684,42 @@ export enum KeyComponentKind {
  */
 export const KeyComponentKindSchema: GenEnum<KeyComponentKind> = /*@__PURE__*/
   enumDesc(file_vibesys_store_v1_replay, 1);
+
+/**
+ * @generated from enum vibesys.store.v1.WriterReconciliationStatus
+ */
+export enum WriterReconciliationStatus {
+  /**
+   * @generated from enum value: WRITER_RECONCILIATION_STATUS_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * @generated from enum value: WRITER_RECONCILIATION_STATUS_PROVEN_STOPPED = 1;
+   */
+  PROVEN_STOPPED = 1,
+
+  /**
+   * @generated from enum value: WRITER_RECONCILIATION_STATUS_PENDING = 2;
+   */
+  PENDING = 2,
+
+  /**
+   * @generated from enum value: WRITER_RECONCILIATION_STATUS_UNKNOWN = 3;
+   */
+  UNKNOWN = 3,
+
+  /**
+   * @generated from enum value: WRITER_RECONCILIATION_STATUS_UNSUPPORTED = 4;
+   */
+  UNSUPPORTED = 4,
+}
+
+/**
+ * Describes the enum vibesys.store.v1.WriterReconciliationStatus.
+ */
+export const WriterReconciliationStatusSchema: GenEnum<WriterReconciliationStatus> = /*@__PURE__*/
+  enumDesc(file_vibesys_store_v1_replay, 2);
 
 /**
  * Contexts classify their own fields. Shared facts inherit the classification

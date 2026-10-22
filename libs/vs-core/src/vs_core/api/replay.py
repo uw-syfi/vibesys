@@ -47,6 +47,7 @@ from vs_core.flows._replay_sources import (
     ReplayTask,
     ReplayTimer,
 )
+from vs_core.flows._replay_writers import ReplayRootReuse, ReplayWriterRecovery
 
 __all__ = [
     "EMPTY_CAUSALITY",
@@ -76,11 +77,13 @@ __all__ = [
     "ReplayResourceAccounting",
     "ReplayResourceTotals",
     "ReplayResourcesBlocked",
+    "ReplayRootReuse",
     "ReplayScheduler",
     "ReplaySettings",
     "ReplaySource",
     "ReplayTask",
     "ReplayTimer",
+    "ReplayWriterRecovery",
     "SemanticKey",
     "chain_dependency",
     "classify_context",

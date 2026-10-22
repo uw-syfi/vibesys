@@ -41,6 +41,7 @@ from vs_runtime.api.replay import (
 from vs_sim.api.testing import SimThreads, swept
 
 from .test_workspace_requests import _candidate_path, _commits, _env, _executor, _git
+from .test_writer_reconciliation import empty_barrier
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine
@@ -133,6 +134,7 @@ def workspace_boundary_case(
         assert isinstance(base, core_leaves.RevisionRef)
         root: Callable[[ReplayFlow], Coroutine[object, object, object]] = program(base, mode)
         store = FakeStateStore()
+        barrier = empty_barrier(env.project)
 
         def host(*, restart: bool = False) -> ReplayRunHost:
             resources = env.start_host() if restart else initial
@@ -142,6 +144,7 @@ def workspace_boundary_case(
                 receipts,
                 ReplayOperationHost(env.run_id, store, sim.clock),
                 within_seconds=100,
+                writers=barrier.registry,
             )
             return ReplayRunHost(
                 ReplayRuntime(store, root, replay.ReplayAllowance(iterations=1)),
@@ -150,11 +153,13 @@ def workspace_boundary_case(
                 lambda _: ReplayEnding(
                     Ended(outcome=Outcome.FINISHED, summary="Done.", resumable=True)
                 ),
+                writer_barrier=barrier,
             )
 
         async def scenario() -> None:
             first = host()
             first.runtime.start(launch("first"), now=sim.clock.now(), at=Timestamp())
+            await barrier.reconcile(first.runtime, now=sim.clock.now(), at=Timestamp())
             for ordinal in range(effect + 1):
                 (span,) = first.runtime.prepare(now=sim.clock.now(), at=Timestamp())
                 if ordinal == effect and boundary == "prepared":
@@ -212,6 +217,7 @@ def test_workspace_recovery_sweeps_real_owner_receipt_writes(tmp_path: Path, sim
             faulting = FaultingNamespace(namespace, crash_at)
             faulted_receipts = ReceiptStore(cast("StateNamespace", faulting), SimThreads())
             store = FakeStateStore()
+            barrier = empty_barrier(env.project)
 
             async def scenario() -> None:
                 baseline = initial.root.revision
@@ -232,6 +238,7 @@ def test_workspace_recovery_sweeps_real_owner_receipt_writes(tmp_path: Path, sim
                         receipts,
                         ReplayOperationHost(env.run_id, store, sim.clock),
                         within_seconds=100,
+                        writers=barrier.registry,
                     )
                     return ReplayRunHost(
                         ReplayRuntime(store, root, replay.ReplayAllowance(iterations=1)),
@@ -240,6 +247,7 @@ def test_workspace_recovery_sweeps_real_owner_receipt_writes(tmp_path: Path, sim
                         lambda _: ReplayEnding(
                             Ended(outcome=Outcome.FINISHED, summary="Done.", resumable=True)
                         ),
+                        writer_barrier=barrier,
                     )
 
                 if crash_at is None:
@@ -380,9 +388,14 @@ def test_adoption_consumes_native_evidence_without_fabricating_legacy_observatio
             (resources.root.path / "candidate.py").write_text("VALUE = 9\n", encoding="utf-8")
             (resources.root.path / "operator-note.txt").write_text("Keep this.\n", encoding="utf-8")
         original_commits = _commits(resources)
+        barrier = empty_barrier(env.project)
         store = FakeStateStore()
         executor = WorkspaceReplayExecutor(
-            owner, receipts, ReplayOperationHost(env.run_id, store, sim.clock), within_seconds=100
+            owner,
+            receipts,
+            ReplayOperationHost(env.run_id, store, sim.clock),
+            within_seconds=100,
+            writers=barrier.registry,
         )
         runtime = ReplayRuntime(store, root, replay.ReplayAllowance())
 
@@ -394,6 +407,7 @@ def test_adoption_consumes_native_evidence_without_fabricating_legacy_observatio
                 lambda _: ReplayEnding(
                     Ended(outcome=Outcome.FINISHED, summary="Done.", resumable=True)
                 ),
+                writer_barrier=barrier,
             )
             completed = await drive_replay(run_host, launch("first"))
             assert isinstance(completed, ReplayCompleted)

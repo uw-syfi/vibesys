@@ -28,6 +28,7 @@ if TYPE_CHECKING:
     from vs_runtime._replay_sessions import ReplayAgentReply, ReplaySessionServices
     from vs_runtime._run_control import RunControlChannel
     from vs_runtime._workspaces import RuntimeWorkspaces
+    from vs_runtime._writer_reconciliation import WriterRegistry
 
 
 @dataclass(frozen=True)
@@ -46,6 +47,7 @@ class ReplayOwnerServices:
     evaluation_within_seconds: float
     allow_adoption: bool
     evaluation_control: RunControlChannel | None = None
+    writer_registry: WriterRegistry | None = None
 
 
 def replay_bindings(
@@ -75,7 +77,11 @@ def replay_bindings(
         workspace.protect_adoption()
     owners: dict[type[Message], ReplayExecutor] = {
         replay_workspace.ReplayWorkspaceRequest: WorkspaceReplayExecutor(
-            workspace, receipts, host, within_seconds=services.workspace_within_seconds
+            workspace,
+            receipts,
+            host,
+            within_seconds=services.workspace_within_seconds,
+            writers=services.writer_registry,
         ),
         replay_agent.ReplayAgentRequest: SessionReplayExecutor(sessions, receipts, host, replies),
         replay_evaluation.ReplayEvaluationRequest: EvaluationReplayExecutor(

@@ -101,6 +101,76 @@ message OperationReplay {
   ReplayAllowance allowance = 10 [(buf.validate.field).required = true];
   // Later span updates retain this sequence; they are not new acceptances.
   optional uint64 accepted_sequence = 11 [(buf.validate.field).uint64.gt = 0];
+  // New physical execution records retain the winner by child span identity.
+  optional string accepted_child = 12 [(buf.validate.field).string.min_len = 1];
+}
+
+// A child is execution evidence, never another semantic operation.
+message ReplayPhysical {
+  string logical = 1 [(buf.validate.field).string.min_len = 1];
+  string external_id = 2 [(buf.validate.field).string.min_len = 1];
+  string host_incarnation = 3 [(buf.validate.field).string.min_len = 1];
+  double deadline = 4 [(buf.validate.field).double = {gte: 0, finite: true}];
+  uint64 ordinal = 5;
+  optional uint64 withdrawn_sequence = 6 [(buf.validate.field).uint64.gt = 0];
+}
+
+// The environment records every writable grant before execution, including
+// tool/build jobs and grants belonging to other runs. Closing this ledger
+// forbids further grants in the execution domain; it does not prove death.
+message WriterBacking {
+  string environment = 1 [(buf.validate.field).string.min_len = 1];
+  string identity = 2 [(buf.validate.field).string.min_len = 1];
+  uint64 generation = 3;
+  string authority = 4 [(buf.validate.field).string.min_len = 1];
+}
+message WriterIdentity {
+  string run_id = 1 [(buf.validate.field).string.min_len = 1];
+  string host_incarnation = 2 [(buf.validate.field).string.min_len = 1];
+  string physical_id = 3 [(buf.validate.field).string.min_len = 1];
+  // An immutable execution-domain ID, never a reusable container name.
+  string domain_id = 4 [(buf.validate.field).string.min_len = 1];
+}
+message WriterManifest {
+  option (buf.validate.message).cel = {
+    id: "writer_manifest.unique"
+    message: "writer physical identities must be unique"
+    expression: "this.writers.map(x, x.physical_id).unique()"
+  };
+  WriterBacking backing = 1 [(buf.validate.field).required = true];
+  repeated WriterIdentity writers = 2;
+  bool closed = 3;
+}
+message WriterTerminationProof {
+  option (buf.validate.message).cel = {
+    id: "writer_proof.closed"
+    message: "termination proof needs a closed manifest and every domain verified absent"
+    expression: "has(this.manifest) && this.manifest.closed && this.manifest.writers.all(x, x.domain_id in this.absent_domains) && this.absent_domains.all(x, this.manifest.writers.exists(w, w.domain_id == x))"
+  };
+  WriterManifest manifest = 1 [(buf.validate.field).required = true];
+  repeated string absent_domains = 2 [(buf.validate.field).repeated.unique = true];
+}
+enum WriterReconciliationStatus {
+  WRITER_RECONCILIATION_STATUS_UNSPECIFIED = 0;
+  WRITER_RECONCILIATION_STATUS_PROVEN_STOPPED = 1;
+  WRITER_RECONCILIATION_STATUS_PENDING = 2;
+  WRITER_RECONCILIATION_STATUS_UNKNOWN = 3;
+  WRITER_RECONCILIATION_STATUS_UNSUPPORTED = 4;
+}
+message WriterReconciliation {
+  option (buf.validate.message).cel = {
+    id: "writer_reconciliation.proof"
+    message: "only ProvenStopped carries termination proof"
+    expression: "(this.status == 1) == has(this.proof)"
+  };
+  WriterManifest manifest = 1 [(buf.validate.field).required = true];
+  WriterReconciliationStatus status = 2 [(buf.validate.field).enum = {defined_only: true, not_in: [0]}];
+  WriterTerminationProof proof = 3;
+  string detail = 4;
+}
+message WriterRegistryState {
+  WriterManifest manifest = 1 [(buf.validate.field).required = true];
+  WriterTerminationProof proof = 2;
 }
 
 // Timer-only progress is an observation, not a keyed paid operation.
