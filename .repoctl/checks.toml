@@ -94,6 +94,26 @@ directory = "."
 timeout_seconds = 600
 commands = [["uv", "run", "python", "-m", "pytest", "-q", "-n", "auto", "--dist", "loadgroup", "--no-cov", "tests/quality", "tests/ci"]]
 
+# Local only: CI already runs these scans exactly once inside its Python shards.
+# Keep runtime tests and native builds out of the static-scan selection.
+[[check_groups]]
+name = "python_architecture"
+trigger_job = "python"
+include_in_checks = true
+language = "python"
+directory = "."
+timeout_seconds = 60
+commands = [[
+  "uv", "run", "python", "-m", "pytest", "-q", "-n", "0", "--no-cov", "tests/architecture",
+  "--ignore=tests/architecture/test_stack_evaluator.py",
+  "--ignore=tests/architecture/test_ordered_map_evaluator.py",
+  "--ignore=tests/architecture/test_unordered_map_evaluator.py",
+  "--ignore=tests/architecture/test_unix_socket.py",
+  "--ignore=tests/architecture/test_delegated_merge.py",
+  "--ignore=tests/architecture/test_distribution_packaging.py",
+  "--ignore=tests/architecture/test_prompt_resource_contract.py",
+]]
+
 [[check_groups]]
 name = "python_types"
 trigger_job = "python"
