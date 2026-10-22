@@ -185,17 +185,60 @@ func TestStreamCancelReapsTheProcessGroup(t *testing.T) {
 	// Stream waits for its direct child, but the kernel may still be reaping
 	// descendants after the process-group signal. Observe their disappearance;
 	// the deadline only guards a hang, rather than synchronizing cancellation.
+	waitUntilGone(t, pid)
+}
+
+// A killed orphan stays a zombie until PID 1 reaps it, and a PID 1 that does
+// not reap leaves it so; kill(pid, 0) still succeeds on a zombie.
+func TestWaitUntilGoneTreatsAnUnreapedZombieAsDead(t *testing.T) {
+	if _, err := os.Stat("/proc/self/stat"); err != nil {
+		t.Skip("zombie state is read from /proc")
+	}
+	binary, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(binary, "-test.run=^TestProgram$", "--", "--host-command-program", "fail")
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = cmd.Wait() }()
+	waitUntilGone(t, cmd.Process.Pid)
+}
+
+func TestZombieState(t *testing.T) {
+	for stat, want := range map[string]bool{
+		"12 (prog) Z 1 12 12 0 -1 4228": true,
+		"12 (prog) X 1 12 12 0 -1 4228": true,
+		"12 (prog) S 1 12 12 0 -1 4228": false,
+		"12 (prog) R 1 12 12 0 -1 4228": false,
+		"12 (a) Z (b) S 1 12 12 0":      false,
+		"12 (a b) Z 1 12 12 0":          true,
+		"12 (a) Z) S 1 12 12 0":         false,
+		"":                              false,
+		"12 (prog":                      false,
+	} {
+		if got := zombieState(stat); got != want {
+			t.Errorf("zombieState(%q) = %v, want %v", stat, got, want)
+		}
+	}
+}
+
+// waitUntilGone polls until pid is dead or a zombie. The deadline only guards
+// a hang.
+func waitUntilGone(t *testing.T, pid int) {
+	t.Helper()
 	guard := time.NewTimer(10 * time.Second)
 	defer guard.Stop()
 	poll := time.NewTicker(10 * time.Millisecond)
 	defer poll.Stop()
 	for {
-		err := syscall.Kill(pid, 0)
-		if errors.Is(err, syscall.ESRCH) {
-			break
-		}
+		gone, err := processGone(pid)
 		if err != nil {
 			t.Fatalf("check descendant %d: %v", pid, err)
+		}
+		if gone {
+			return
 		}
 		select {
 		case <-poll.C:
@@ -203,6 +246,32 @@ func TestStreamCancelReapsTheProcessGroup(t *testing.T) {
 			t.Fatalf("descendant %d is still running after cancellation", pid)
 		}
 	}
+}
+
+func processGone(pid int) (bool, error) {
+	err := syscall.Kill(pid, 0)
+	if errors.Is(err, syscall.ESRCH) {
+		return true, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	// Without /proc (macOS) launchd reaps promptly, so ESRCH is enough; a read
+	// error on Linux means the process exited between the two checks.
+	stat, readErr := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/stat")
+	return readErr == nil && zombieState(string(stat)), nil
+}
+
+// zombieState reports state Z (or X) in a /proc/<pid>/stat line. The command
+// name in parentheses may itself contain spaces and parentheses, so the state
+// is the first field after the last closing parenthesis.
+func zombieState(stat string) bool {
+	end := strings.LastIndexByte(stat, ')')
+	if end < 0 {
+		return false
+	}
+	fields := strings.Fields(stat[end+1:])
+	return len(fields) > 0 && (fields[0] == "Z" || fields[0] == "X")
 }
 
 func writeTestFrame(writer io.Writer, payload []byte) {
