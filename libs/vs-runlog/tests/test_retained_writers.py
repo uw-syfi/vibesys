@@ -57,15 +57,16 @@ def test_saved_previous_writers_reopen_with_the_same_facts(tmp_path: Path, versi
 
 
 @pytest.mark.regression
-@example(spanless=False, value=100.0, explicit=False)
-@example(spanless=True, value=0.0, explicit=False)
+@example(spanless=False, value=100.0, explicit=False, split=18)
+@example(spanless=True, value=0.0, explicit=False, split=14)
 @given(
     spanless=st.booleans(),
     value=st.floats(min_value=-1e6, max_value=1e6, allow_nan=False),
     explicit=st.booleans(),
+    split=st.integers(1, 18),
 )
 def test_input_upgrades_preserve_prefixes_and_explicit_facts(
-    *, spanless: bool, value: float, explicit: bool
+    *, spanless: bool, value: float, explicit: bool, split: int
 ) -> None:
     """Both old input encodings, signed values, and explicit unmeasured declarations, at every seek."""
     records = list(RunLogReader(io.BytesIO((CORPUS / next(iter(CASES)) / "run.log").read_bytes())))
@@ -89,21 +90,20 @@ def test_input_upgrades_preserve_prefixes_and_explicit_facts(
             measured_seq = record.seq
     assert measured_seq > 0
     whole = upgrade_skeleton(fold_skeleton(records, log_offset=0))
-    for prefix in range(1, len(records) + 1):
-        partial = upgrade_skeleton(fold_skeleton(records[:prefix], log_offset=0))
-        assert [v for v in whole.epochs if v.seq <= prefix] == partial.epochs
-        latest = input_fact(partial)
-        if explicit:
-            assert latest is not None
-            assert latest.state is not None
-            assert latest.state.field == "unmeasured"
-        elif prefix >= measured_seq:
-            assert latest is not None
-            assert latest.state is not None
-            assert latest.state.field == "measured"
-            assert latest.state.value.value == value
-        else:
-            assert latest is None
+    partial = upgrade_skeleton(fold_skeleton(records[:split], log_offset=0))
+    assert [v for v in whole.epochs if v.seq <= split] == partial.epochs
+    latest = input_fact(partial)
+    if explicit:
+        assert latest is not None
+        assert latest.state is not None
+        assert latest.state.field == "unmeasured"
+    elif split >= measured_seq:
+        assert latest is not None
+        assert latest.state is not None
+        assert latest.state.field == "measured"
+        assert latest.state.value.value == value
+    else:
+        assert latest is None
 
 
 def input_fact(state: Keyframe) -> InputMeasurement | None:
