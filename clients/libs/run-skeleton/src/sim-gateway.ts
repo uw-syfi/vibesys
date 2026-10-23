@@ -371,6 +371,13 @@ export class SimGateway implements RunTransport {
     if (this.run.legacyKeyframes) {
       keyframe.failures = [];
       keyframe.failuresTracked = false;
+      keyframe.recordsTracked = false;
+      keyframe.intents = [];
+      keyframe.recordFacts = [];
+      for (const version of keyframe.epochs) {
+        version.startsEpoch = false;
+        version.startedAt = undefined;
+      }
     }
     const storedBytes = toBinary(KeyframeSchema, keyframe).length;
     const sets = new Map<string, Uint8Array>();

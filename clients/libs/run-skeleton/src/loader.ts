@@ -2,9 +2,11 @@ import {create, fromBinary, toBinary} from '@bufbuild/protobuf';
 import {clockFrom, type ScheduleTimeout} from '@vibesys/machine';
 import {
   HostService,
+  KeyframeSchema,
   RecordSchema,
   Severity,
   SkeletonRequestSchema,
+  type SkeletonResponse,
   SkeletonResponseSchema,
   type Record as StoreRecord,
   TailRequestSchema,
@@ -20,7 +22,8 @@ import {
   skeletonLoaderMachine,
   type TailInput,
 } from './loader-machine.js';
-import {RECORD_WINDOW} from './loading.js';
+import {ingestSkeleton, RECORD_WINDOW} from './loading.js';
+import {checkpointRecords} from './record-facts.js';
 
 /** Generic unary/server-stream byte bridge. Both operations must release resources on abort. */
 export interface RunTransport {
@@ -37,6 +40,7 @@ export function skeletonLoaderMachineFor(
   records: RecordsListener = () => {},
   descriptors: DescriptorCache = new DescriptorCache(),
 ): typeof skeletonLoaderMachine {
+  const publisher = recordPublisher(records);
   return skeletonLoaderMachine.provide({
     actors: {
       skeleton: fromPromise(({input, signal}) => {
@@ -52,7 +56,7 @@ export function skeletonLoaderMachineFor(
           )
           .then(bytes => {
             const response = lease.restore(fromBinary(SkeletonResponseSchema, bytes));
-            records(response.records);
+            publisher.skeleton(response, signal);
             return response;
           });
       }),
@@ -71,7 +75,12 @@ export function skeletonLoaderMachineFor(
         )) {
           if (signal.aborted) return;
           const response = fromBinary(TailResponseSchema, bytes);
-          records(response.records);
+          publisher.tail(response);
+          input.receive({
+            type: 'history',
+            records: response.records.map(bytes => fromBinary(RecordSchema, bytes)),
+            through: response.throughSeq,
+          });
           const fresh = unseen(response, input.cursor);
           if (fresh !== response) input.receive({type: 'window', through: response.throughSeq});
           if (fresh) input.receive({type: 'tail', response: fresh});
@@ -81,7 +90,40 @@ export function skeletonLoaderMachineFor(
   });
 }
 
-/** Pages of a record window each: how far back a failure is looked for; about 2000 records. */
+/** Publish immutable positions once across checkpoint materialization and its overlapping raw window. */
+function recordPublisher(records: RecordsListener) {
+  const checkpoint = new Set<bigint>();
+  let through = 0n;
+  return {
+    skeleton(response: SkeletonResponse, signal: AbortSignalLike): void {
+      // The machine classifies invalid data; none of it reaches record consumers.
+      try {
+        ingestSkeleton(response);
+      } catch {
+        return;
+      }
+      if (signal.aborted) return;
+      const facts =
+        response.keyframe === undefined
+          ? []
+          : checkpointRecords(fromBinary(KeyframeSchema, response.keyframe));
+      for (const bytes of [...facts, ...response.records]) {
+        const seq = fromBinary(RecordSchema, bytes).seq;
+        checkpoint.add(seq);
+        if (seq > through) through = seq;
+      }
+      records([...facts, ...response.records]);
+    },
+    tail(response: TailResponse): void {
+      records(
+        response.records.filter(bytes => !checkpoint.delete(fromBinary(RecordSchema, bytes).seq)),
+      );
+      if (response.throughSeq >= through) checkpoint.clear();
+    },
+  };
+}
+
+/** Pages of a record window each: how far back a failure is looked for; at most eight raw-record windows. */
 export const FAILURE_PAGES = 8;
 
 /**

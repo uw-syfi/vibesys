@@ -36,6 +36,18 @@
     },
     {
       "path": "../../libs/ipc/tsconfig.testing.json"
+    },
+    {
+      "path": "../../libs/run-skeleton/tsconfig.lib.json"
+    },
+    {
+      "path": "../../libs/run-skeleton/tsconfig.reader.json"
+    },
+    {
+      "path": "../../libs/run-skeleton/tsconfig.cache.json"
+    },
+    {
+      "path": "../../libs/run-skeleton/tsconfig.testing.json"
     }
   ]
 }

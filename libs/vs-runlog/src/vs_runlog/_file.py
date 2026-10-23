@@ -163,7 +163,7 @@ class FileRunLogWriter:
         self._epoch = CurrentEpoch()
         self._path = path
         # The writer folds every record of the log, recovered ones included.
-        self._skeleton = Keyframe(failures_tracked=True)
+        self._skeleton = Keyframe(failures_tracked=True, records_tracked=True)
         # The input fact a retained record leaves implicit, advanced once per record.
         self._upgrade = InputUpgrade()
         self._checkpoint_seq = 0

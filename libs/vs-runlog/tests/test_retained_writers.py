@@ -45,7 +45,14 @@ def test_saved_previous_writers_reopen_with_the_same_facts(tmp_path: Path, versi
         )
     for path in (directory / "keyframes").glob("*.pb"):
         cached = upgrade_skeleton(Keyframe.from_binary(path.read_bytes()))
-        assert cached.epochs == [v for v in state.epochs if v.seq <= cached.through_seq]
+        prefix = [
+            type(v).from_binary(v.to_binary()) for v in state.epochs if v.seq <= cached.through_seq
+        ]
+        if not cached.records_tracked:
+            for epoch_version in prefix:
+                epoch_version.clear_field("started_at")
+                epoch_version.starts_epoch = False
+        assert cached.epochs == prefix
     fact = input_fact(state)
     assert fact is not None
     assert fact.state is not None
@@ -135,7 +142,7 @@ def test_record_upgrade_keeps_the_metric_and_validates_its_declaration(
         )
     )
     validate(record)
-    state = fold_skeleton(records, log_offset=8)
+    state = fold_skeleton(records[: record.seq], log_offset=8)
     fact = input_fact(state)
     assert fact == record.input_measurement
     assert state.metrics[0].points[-1].point == point

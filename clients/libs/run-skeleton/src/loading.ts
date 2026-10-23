@@ -9,6 +9,7 @@ import {
   type TailResponse,
 } from '@vibesys/proto';
 import {foldSkeleton, type Skeleton, seedSkeleton} from './model.js';
+import {RECORD_HISTORY_LIMIT} from './record-facts.js';
 
 /** A transient gateway observation, fenced by the writer epoch; never part of history. */
 export interface RunLivenessHint {
@@ -18,7 +19,7 @@ export interface RunLivenessHint {
 }
 
 /** Records before a keyframe's boundary that the first Tail also delivers, for the run's record log. */
-export const RECORD_WINDOW = 256n;
+export const RECORD_WINDOW = BigInt(RECORD_HISTORY_LIMIT);
 
 export interface SkeletonLoad {
   readonly skeleton: Skeleton;
@@ -65,9 +66,14 @@ export function ingestSkeleton(response: SkeletonResponse): SkeletonLoad {
   return {
     skeleton,
     nextSeq: response.nextSeq,
-    windowFrom: response.keyframe === undefined ? undefined : windowStart(response),
+    windowFrom:
+      response.keyframe === undefined
+        ? undefined
+        : initial.recordsTracked
+          ? windowStart(response)
+          : 0n,
     failuresBefore:
-      response.keyframe === undefined || skeleton.failuresTracked
+      response.keyframe === undefined || skeleton.failuresTracked || !skeleton.recordsTracked
         ? undefined
         : windowStart(response),
     committedSeq: response.committedSeq,

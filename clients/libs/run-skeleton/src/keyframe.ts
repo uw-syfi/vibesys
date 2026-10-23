@@ -27,6 +27,14 @@ export function validateKeyframe(keyframe: Keyframe): void {
   if (keyframe.lifecycles.some(version => !version.lifecycle))
     throw new Error('keyframe.lifecycles.lifecycle: required');
   validateFailures(keyframe);
+  ordered(keyframe.intents, keyframe.throughSeq, 'keyframe.intents');
+  if (keyframe.intents.some(record => record.body.case !== 'intent'))
+    throw new Error('keyframe.intents: expected intent records');
+  ordered(keyframe.recordFacts, keyframe.throughSeq, 'keyframe.record_facts');
+  if (
+    keyframe.recordFacts.some(record => !['blob', 'chat', 'span'].includes(record.body.case ?? ''))
+  )
+    throw new Error('keyframe.record_facts: expected attachments, chat or span links');
   const streams = new Set<string>();
   for (const stream of keyframe.streams) {
     if (streams.has(stream.id)) throw new Error(`keyframe.streams: duplicate id ${stream.id}`);

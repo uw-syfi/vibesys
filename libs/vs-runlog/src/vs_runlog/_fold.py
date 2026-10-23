@@ -1,4 +1,4 @@
-"""Pure store-record projection; content and intents stay in the log."""
+"""Pure store-record projection; checkpoint facts retain every semantic record fold."""
 
 from __future__ import annotations
 
@@ -35,7 +35,7 @@ def fold_skeleton(
     result = (
         Keyframe.from_binary(seed.to_binary())
         if seed is not None
-        else Keyframe(failures_tracked=True)
+        else Keyframe(failures_tracked=True, records_tracked=True)
     )
     for record in records:
         append_skeleton(result, record)
@@ -61,7 +61,14 @@ def append_skeleton(state: Keyframe, record: Record) -> None:
             case "stream":
                 _put_stream(state, body.value)
             case "epoch_started" | "declaration_amended":
-                state.epochs.append(EpochVersion(seq=record.seq, epoch=body.value))
+                state.epochs.append(
+                    EpochVersion(
+                        seq=record.seq,
+                        epoch=body.value,
+                        started_at=owned.at if body.field == "epoch_started" else None,
+                        starts_epoch=body.field == "epoch_started",
+                    )
+                )
             case "lifecycle":
                 state.lifecycles.append(LifecycleVersion(seq=record.seq, lifecycle=body.value))
             case "notice" if body.value.severity >= Severity.ERROR:
@@ -70,8 +77,23 @@ def append_skeleton(state: Keyframe, record: Record) -> None:
                     *(kept for kept in state.failures if kept.epoch != owned.epoch),
                     owned,
                 ]
+    _append_record_fact(state, owned)
     _append_input_fact(state, owned)
     state.through_seq = record.seq
+
+
+def _append_record_fact(state: Keyframe, owned: Record) -> None:
+    body = owned.body
+    if body is not None:
+        if body.field == "intent":
+            state.intents.append(owned)
+        elif body.field in {"blob", "chat"} or (
+            body.field == "span"
+            and body.value.span is not None
+            and body.value.span.label is not None
+            and any(link.rel == "steer" for link in body.value.span.label.links)
+        ):
+            state.record_facts.append(owned)
 
 
 def _append_metric(state: Keyframe, seq: int, point: MetricPoint) -> None:

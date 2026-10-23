@@ -14,11 +14,21 @@ import {
   StreamKind,
 } from '@vibesys/proto';
 import {validateKeyframe} from './keyframe.js';
+import {isRecordFact} from './record-facts.js';
 
 /** Writer-only byte offsets do not belong to the client's data model. */
 export type Skeleton = Pick<
   Keyframe,
-  'spans' | 'metrics' | 'streams' | 'epochs' | 'lifecycles' | 'failures' | 'failuresTracked'
+  | 'spans'
+  | 'metrics'
+  | 'streams'
+  | 'epochs'
+  | 'lifecycles'
+  | 'failures'
+  | 'failuresTracked'
+  | 'intents'
+  | 'recordsTracked'
+  | 'recordFacts'
 > & {
   readonly throughSeq: bigint | undefined;
 };
@@ -28,13 +38,39 @@ export function seedSkeleton(keyframe?: Keyframe): Skeleton {
   if (keyframe) validateKeyframe(keyframe);
   return keyframe
     ? copySkeleton(keyframe)
-    : {...copySkeleton(create(KeyframeSchema, {failuresTracked: true})), throughSeq: undefined};
+    : {
+        ...copySkeleton(create(KeyframeSchema, {failuresTracked: true, recordsTracked: true})),
+        throughSeq: undefined,
+      };
 }
 
 function copySkeleton(keyframe: Keyframe): Skeleton {
-  const {throughSeq, spans, metrics, streams, epochs, lifecycles, failures, failuresTracked} =
-    clone(KeyframeSchema, keyframe);
-  return {throughSeq, spans, metrics, streams, epochs, lifecycles, failures, failuresTracked};
+  const {
+    throughSeq,
+    spans,
+    metrics,
+    streams,
+    epochs,
+    lifecycles,
+    failures,
+    failuresTracked,
+    intents,
+    recordsTracked,
+    recordFacts,
+  } = clone(KeyframeSchema, keyframe);
+  return {
+    throughSeq,
+    spans,
+    metrics,
+    streams,
+    epochs,
+    lifecycles,
+    failures,
+    failuresTracked,
+    intents,
+    recordsTracked,
+    recordFacts,
+  };
 }
 
 /**
@@ -54,9 +90,16 @@ export function foldSkeleton(state: Skeleton, records: readonly StoreRecord[]): 
   return next;
 }
 
+function appendRecordFact(state: Omit<Skeleton, 'throughSeq'>, record: StoreRecord): void {
+  if (record.body.case === 'intent') state.intents.push(record);
+  else if (record.body.case !== 'epochStarted' && isRecordFact(record))
+    state.recordFacts.push(record);
+}
+
 function foldBody(state: Omit<Skeleton, 'throughSeq'>, record: StoreRecord): void {
   const {seq, body} = record;
   appendInputDeclaration(state, record);
+  appendRecordFact(state, record);
   switch (body.case) {
     case 'span': {
       const span = body.value.span;
@@ -79,7 +122,14 @@ function foldBody(state: Omit<Skeleton, 'throughSeq'>, record: StoreRecord): voi
     }
     case 'epochStarted':
     case 'declarationAmended':
-      state.epochs.push(create(EpochVersionSchema, {seq, epoch: body.value}));
+      state.epochs.push(
+        create(EpochVersionSchema, {
+          seq,
+          epoch: body.value,
+          startsEpoch: body.case === 'epochStarted',
+          startedAt: body.case === 'epochStarted' ? record.at : undefined,
+        }),
+      );
       break;
     case 'lifecycle':
       state.lifecycles.push(create(LifecycleVersionSchema, {seq, lifecycle: body.value}));
@@ -184,6 +234,44 @@ export function absorbFailures(state: Skeleton, found: readonly StoreRecord[]): 
     failures = [...failures.filter(item => item.epoch !== record.epoch), record];
   }
   return {...state, failures};
+}
+
+/** Older checkpoints recover their omitted facts from the same progressive Tail as the raw view. */
+export function absorbRecordFacts(
+  state: Skeleton,
+  records: readonly StoreRecord[],
+  through: bigint,
+): Skeleton {
+  const historical = records.filter(record => record.seq <= (state.throughSeq ?? 0n));
+  if (historical.length === 0) return state;
+  const next = absorbFailures(state, historical);
+  const intents = new Map(next.intents.map(record => [record.seq, record]));
+  const facts = new Map(next.recordFacts.map(record => [record.seq, record]));
+  const starts = new Map(
+    historical
+      .filter(record => record.body.case === 'epochStarted')
+      .map(record => [record.seq, record]),
+  );
+  for (const record of historical) {
+    if (record.body.case === 'intent') intents.set(record.seq, record);
+    else if (record.body.case !== 'epochStarted' && isRecordFact(record))
+      facts.set(record.seq, record);
+  }
+  return {
+    ...next,
+    intents: [...intents.values()].sort(bySequence),
+    recordFacts: [...facts.values()].sort(bySequence),
+    epochs: next.epochs.map(version => {
+      const start = starts.get(version.seq);
+      return start ? {...version, startsEpoch: true, startedAt: start.at} : version;
+    }),
+    recordsTracked: state.recordsTracked || through >= (state.throughSeq ?? 0n),
+    failuresTracked: state.failuresTracked || through >= (state.throughSeq ?? 0n),
+  };
+}
+
+function bySequence(a: {seq: bigint}, b: {seq: bigint}): number {
+  return a.seq < b.seq ? -1 : a.seq > b.seq ? 1 : 0;
 }
 
 /** The transcript stream the run recorded for this span, if it has produced content. */

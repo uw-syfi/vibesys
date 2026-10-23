@@ -2,7 +2,7 @@ import {unprovided} from '@vibesys/machine';
 import type {SkeletonResponse, Record as StoreRecord, TailResponse} from '@vibesys/proto';
 import {assign, setup} from 'xstate';
 import {ingestSkeleton, ingestTail, isFinalLoad, type SkeletonLoad} from './loading.js';
-import {absorbFailures} from './model.js';
+import {absorbFailures, absorbRecordFacts} from './model.js';
 import {type LoadRefusal, refusalOf} from './status.js';
 
 export interface SkeletonLoaderInput {
@@ -26,6 +26,7 @@ export interface FailuresInput {
   readonly receive: (event: LoaderEvent) => void;
 }
 export type LoaderEvent =
+  | {type: 'history'; records: readonly StoreRecord[]; through: bigint}
   | {type: 'failures'; records: readonly StoreRecord[]}
   | {type: 'tail'; response: TailResponse}
   /** A Tail message that only fed the record log reached `through`: a resume starts after it. */
@@ -151,6 +152,22 @@ export const skeletonLoaderMachine = setup({
             }),
             attempts: 0,
           })),
+        },
+        history: {
+          actions: assign(({context, event}) =>
+            context.load === undefined
+              ? {}
+              : {
+                  load: {
+                    ...context.load,
+                    skeleton: absorbRecordFacts(
+                      context.load.skeleton,
+                      event.records,
+                      event.through,
+                    ),
+                  },
+                },
+          ),
         },
         failures: {
           actions: assign(({context, event}) =>

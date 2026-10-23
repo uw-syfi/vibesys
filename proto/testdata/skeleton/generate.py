@@ -90,6 +90,7 @@ def scenarios() -> dict[str, tuple[list[Record], Keyframe]]:
     ]
     expected = Keyframe(
         failures_tracked=True,
+        records_tracked=True,
         through_seq=10,
         spans={
             "work": SpanHistory(
@@ -103,7 +104,9 @@ def scenarios() -> dict[str, tuple[list[Record], Keyframe]]:
             )
         ],
         streams=[sealed],
-        epochs=[EpochVersion(seq=1, epoch=epoch)],
+        epochs=[
+            EpochVersion(seq=1, epoch=epoch, starts_epoch=True, started_at=Timestamp(seconds=1))
+        ],
         lifecycles=[
             LifecycleVersion(seq=2, lifecycle=running),
             LifecycleVersion(seq=10, lifecycle=ended),
@@ -118,7 +121,9 @@ def scenarios() -> dict[str, tuple[list[Record], Keyframe]]:
     ]
     expected_resumed = Keyframe.from_binary(expected.to_binary())
     expected_resumed.through_seq = 12
-    expected_resumed.epochs.append(EpochVersion(seq=11, epoch=next_epoch))
+    expected_resumed.epochs.append(
+        EpochVersion(seq=11, epoch=next_epoch, starts_epoch=True, started_at=Timestamp(seconds=100))
+    )
     expected_resumed.lifecycles.append(LifecycleVersion(seq=12, lifecycle=running))
     interrupted = Lifecycle(
         state=Oneof("ended", Ended(outcome=Outcome.INTERRUPTED, resumable=True))
@@ -137,19 +142,28 @@ def scenarios() -> dict[str, tuple[list[Record], Keyframe]]:
         resumed.append(
             Record(seq=seq, epoch=2, at=Timestamp(seconds=100 + seq), body=Oneof(kind, amended))
         )
-        expected_resumed.epochs.append(EpochVersion(seq=seq, epoch=amended))
+        expected_resumed.epochs.append(
+            EpochVersion(
+                seq=seq,
+                epoch=amended,
+                starts_epoch=kind == "epoch_started",
+                started_at=Timestamp(seconds=100 + seq) if kind == "epoch_started" else None,
+            )
+        )
     successor = EpochStarted.from_binary(amended.to_binary())
     successor.epoch = 3
     resumed.append(
         Record(seq=15, epoch=3, at=Timestamp(seconds=120), body=Oneof("epoch_started", successor))
     )
-    expected_resumed.epochs.append(EpochVersion(seq=15, epoch=successor))
+    expected_resumed.epochs.append(
+        EpochVersion(seq=15, epoch=successor, starts_epoch=True, started_at=Timestamp(seconds=120))
+    )
     expected_resumed.through_seq = 15
     legacy = [Record(seq=1, epoch=1, body=Oneof("legacy_event", LegacyEvent(json="legacy")))]
     cases = {
         "core": (records, expected),
         "epochs": (resumed, expected_resumed),
-        "legacy": (legacy, Keyframe(through_seq=1, failures_tracked=True)),
+        "legacy": (legacy, Keyframe(through_seq=1, failures_tracked=True, records_tracked=True)),
     }
     for stream_records, keyframe in cases.values():
         keyframe.log_offset = len(RUN_LOG_MAGIC) + sum(len(encode_frame(r)) for r in stream_records)

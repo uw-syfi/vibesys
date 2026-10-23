@@ -98,6 +98,14 @@ func FuzzInputUpgradePreservesFactsAndBodies(f *testing.F) {
 			}
 			fact := got.InputMeasurement
 			got.InputMeasurement = nil
+			// A successor declaration of the same input inherits its already measured fact.
+			// The previous corpus had one epoch; retained writers can reopen that input.
+			if before, after := original.GetEpochStarted().GetRun(), got.GetEpochStarted().GetRun(); before != nil && after != nil && before.InputMeasurement == nil && after.InputMeasurement != nil {
+				if explicit || after.InputMeasurement.GetMeasured().GetValue() != float64(value) {
+					t.Fatalf("successor lost the input fact at %d: %v", seq, after.InputMeasurement)
+				}
+				after.InputMeasurement = nil
+			}
 			if !proto.Equal(got, original) {
 				t.Fatalf("original body or sequence changed at %d", seq)
 			}

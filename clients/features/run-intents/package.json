@@ -52,6 +52,7 @@
     "react-dom": "19.1.1",
     "happy-dom": "20.14.5",
     "@vibesys/transport": "workspace:*",
-    "fast-check": "4.10.2"
+    "fast-check": "4.10.2",
+    "@vibesys/run-skeleton": "workspace:*"
   }
 }

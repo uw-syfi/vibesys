@@ -4,6 +4,8 @@ import {
   GetBlobsRequestSchema,
   GetBlobsResponseSchema,
   HostService,
+  type Keyframe,
+  KeyframeSchema,
   RecordSchema,
   SkeletonRequestSchema,
   SkeletonResponseSchema,
@@ -33,8 +35,12 @@ interface Cursor {
 }
 
 // Match the gateway's Skeleton reserve and conservative Tail framing budget.
-function boundedRecords(records: readonly StoreRecord[], kind: 'skeleton' | 'tail'): Uint8Array[] {
-  const budget = (1 << 20) - (kind === 'skeleton' ? 32 : 16);
+function boundedRecords(
+  records: readonly StoreRecord[],
+  kind: 'skeleton' | 'tail',
+  reserved = 0,
+): Uint8Array[] {
+  const budget = (1 << 20) - (kind === 'skeleton' ? 32 : 16) - reserved;
   const batch: Uint8Array[] = [];
   let size = 0;
   for (const record of records) {
@@ -58,6 +64,7 @@ export class FakeRunTransport implements RunTransport {
   readonly #observations: WatchRunsResponse[] = [];
   readonly #closed = new Set<string>();
   readonly #records: StoreRecord[];
+  readonly #keyframe: Uint8Array | undefined;
   #initialCount: number;
   readonly #blobs: Readonly<Record<string, Uint8Array>>;
   readonly #streams: Readonly<Record<string, Uint8Array>>;
@@ -82,11 +89,14 @@ export class FakeRunTransport implements RunTransport {
   constructor(input: {
     records: readonly StoreRecord[];
     initialCount?: number;
+    keyframe?: Keyframe;
     blobs?: Readonly<Record<string, Uint8Array>>;
     streams?: Readonly<Record<string, Uint8Array>>;
     streamChunkBytes?: number;
   }) {
     this.#records = [...input.records];
+    this.#keyframe =
+      input.keyframe === undefined ? undefined : toBinary(KeyframeSchema, input.keyframe);
     this.#initialCount = input.initialCount ?? input.records.length;
     this.#blobs = input.blobs ?? {};
     this.#streams = input.streams ?? {};
@@ -133,17 +143,7 @@ export class FakeRunTransport implements RunTransport {
     if (method === `${SERVICE}Skeleton`) {
       const input = fromBinary(SkeletonRequestSchema, request);
       if (!input.runId) throw new Error('run_id required');
-      const records = boundedRecords(this.#records.slice(0, this.#initialCount), 'skeleton');
-      const last = this.#records[records.length - 1];
-      return toBinary(
-        SkeletonResponseSchema,
-        create(SkeletonResponseSchema, {
-          records,
-          committedSeq: this.#records.at(-1)?.seq ?? 0n,
-          nextSeq: last ? last.seq + 1n : (this.#records[0]?.seq ?? 1n),
-          complete: records.length === this.#records.length,
-        }),
-      );
+      return this.skeletonReply();
     }
     if (method === `${SERVICE}GetBlobs`) {
       const input = fromBinary(GetBlobsRequestSchema, request);
@@ -162,6 +162,33 @@ export class FakeRunTransport implements RunTransport {
     }
     throw new Error(`Unknown unary method ${method}`);
   }
+  private skeletonReply(): Uint8Array {
+    const keyframe =
+      this.#keyframe !== undefined && this.#keyframe.length + 32 < 1 << 20
+        ? this.#keyframe
+        : undefined;
+    const through = keyframe === undefined ? -1n : fromBinary(KeyframeSchema, keyframe).throughSeq;
+    const pending = this.#records
+      .slice(0, this.#initialCount)
+      .filter(record => record.seq > through);
+    const records = boundedRecords(pending, 'skeleton', keyframe?.length ?? 0);
+    const last = pending[records.length - 1];
+    return toBinary(
+      SkeletonResponseSchema,
+      create(SkeletonResponseSchema, {
+        ...(keyframe === undefined ? {} : {keyframe}),
+        records,
+        committedSeq: this.#records.at(-1)?.seq ?? 0n,
+        nextSeq: last
+          ? last.seq + 1n
+          : keyframe === undefined
+            ? (this.#records[0]?.seq ?? 1n)
+            : through + 1n,
+        complete: (last?.seq ?? through) === (this.#records.at(-1)?.seq ?? -1n),
+      }),
+    );
+  }
+
   async *stream(
     method: string,
     request: Uint8Array,

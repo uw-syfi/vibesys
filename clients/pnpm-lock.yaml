@@ -571,6 +571,9 @@ importers:
       '@vibesys/proto':
         specifier: workspace:*
         version: link:../../libs/proto
+      '@vibesys/run-skeleton':
+        specifier: workspace:*
+        version: link:../../libs/run-skeleton
       '@vibesys/transport':
         specifier: workspace:*
         version: link:../../libs/transport
