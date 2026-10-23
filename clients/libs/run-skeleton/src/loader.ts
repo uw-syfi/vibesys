@@ -195,6 +195,7 @@ function unseen(response: TailResponse, cursor: bigint): TailResponse | undefine
   if (start === 0) return response;
   return create(TailResponseSchema, {
     records: records.slice(start),
+    head: response.head,
     throughSeq: response.throughSeq,
   });
 }

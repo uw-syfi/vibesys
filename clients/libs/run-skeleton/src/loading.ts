@@ -96,7 +96,10 @@ export function ingestTail(state: SkeletonLoad, response: TailResponse): Skeleto
   const first = records[0];
   if (first && first.seq < state.nextSeq)
     throw new Error('tail.records.seq: precedes requested next_seq');
-  const skeleton = foldSkeleton(state.skeleton, records);
+  const folded = foldSkeleton(state.skeleton, records);
+  if (response.head !== undefined && response.head.committedSeq !== response.throughSeq)
+    throw new Error('tail.head.committed_seq: differs from through_seq');
+  const skeleton = response.head === undefined ? folded : {...folded, head: response.head};
   if (response.throughSeq !== (skeleton.throughSeq ?? 0n))
     throw new Error('tail.through_seq: does not match delivered prefix');
   return {

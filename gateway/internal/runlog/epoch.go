@@ -26,12 +26,19 @@ func CurrentEpochNumber(source io.ReaderAt, committed *uint64) (uint32, error) {
 // ReadPrefix passes every record payload of the published prefix to visit, in order.
 // It rejects a damaged log, a non-increasing sequence, and a log shorter than its fence.
 func ReadPrefix(source io.ReaderAt, committed *uint64, visit func(payload []byte) error) error {
-	if committed != nil && *committed == 0 {
+	return ReadPrefixAt(source, Position{}, committed, visit)
+}
+
+// ReadPrefixAt validates the suffix after an authoritative checkpoint against the same commit fence.
+func ReadPrefixAt(source io.ReaderAt, position Position, committed *uint64, visit func(payload []byte) error) error {
+	if committed != nil && position.ThroughSeq > *committed {
+		return &Corruption{Offset: position.Offset, Reason: "checkpoint exceeds committed sequence"}
+	}
+	if committed != nil && position.ThroughSeq == *committed {
 		return nil
 	}
-	reader := NewReader(source)
-	var through uint64
-	var seen bool
+	reader := NewReaderAt(source, position.Offset)
+	through, seen := position.ThroughSeq, position.Offset > 0
 	for {
 		payload, err := reader.Next()
 		if errors.Is(err, io.EOF) {

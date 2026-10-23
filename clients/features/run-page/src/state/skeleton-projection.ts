@@ -18,6 +18,7 @@ import {
   skeletonPositions,
 } from '@vibesys/run-state/skeleton';
 import {AppendLog} from './append-log.js';
+import {coreIdeaKey, coreIdeaMeasurements} from './core-idea-measurements.js';
 import {EMPTY_TRACE_LOG} from './live.js';
 import type {RunModel} from './run-model.js';
 import {type RunPageSeed, type RunPageState, runPageInitial} from './run-page.js';
@@ -56,8 +57,12 @@ export function projectSkeleton(
   const headline = readHeadline(head, seq);
   const view = seekSkeleton(skeleton, seq);
   const reading = readSkeleton(skeleton, view, objectiveText, options.content);
-  const tree = settleIdeas(candidateTree(reading.spans), reading.comparisons);
-  const leader = headline?.leader;
+  const tree = coreIdeaMeasurements(
+    settleIdeas(candidateTree(reading.spans), reading.comparisons),
+    head,
+    seq,
+  );
+  const leader = tree.candidates.find(idea => coreIdeaKey(idea) === headline?.leader)?.id;
   const bestPath: string[] = [];
   const byId = new Map(tree.candidates.map(idea => [idea.id, idea]));
   const seen = new Set<string>();

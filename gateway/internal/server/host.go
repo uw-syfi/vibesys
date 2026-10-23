@@ -64,9 +64,13 @@ func (h *host) Tail(request *apiv1.TailRequest, stream apiv1.HostService_TailSer
 	if err != nil {
 		return rpcError(err)
 	}
+	var projection *runlog.Projection
 	upgrade := runlog.NewInputUpgrade(nil)
 	if request.GetSessionId() == "" {
-		upgrade, err = inputUpgradeAt(filepath.Dir(path), position)
+		projection, err = projectionAt(filepath.Dir(path), position)
+		if err == nil {
+			upgrade = runlog.NewInputUpgrade(projection.State)
+		}
 	}
 	if err != nil {
 		return rpcError(err)
@@ -97,6 +101,12 @@ func (h *host) Tail(request *apiv1.TailRequest, stream apiv1.HostService_TailSer
 				readErr = err
 				break
 			}
+			if projection != nil {
+				if err := projection.Record(payload); err != nil {
+					readErr = err
+					break
+				}
+			}
 			seen = true
 			previous = seq
 			if seq < request.GetFromSeq() {
@@ -106,6 +116,12 @@ func (h *host) Tail(request *apiv1.TailRequest, stream apiv1.HostService_TailSer
 			response.ThroughSeq = seq
 		}
 		if len(response.Records) > 0 {
+			if projection != nil {
+				response.Head, err = runlog.ProjectHead(projection.State)
+				if err != nil {
+					return rpcError(err)
+				}
+			}
 			if err := stream.Send(response); err != nil {
 				return err
 			}

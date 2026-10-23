@@ -15,8 +15,18 @@ type Projection struct {
 	input *InputUpgrade
 }
 
-func NewProjection() *Projection {
-	return &Projection{State: &storev1.Keyframe{Spans: map[string]*storev1.SpanHistory{}}, input: NewInputUpgrade(nil)}
+func NewProjection() *Projection { return NewProjectionFrom(nil) }
+
+// NewProjectionFrom owns a copy of a checkpoint and folds only its subsequent records.
+func NewProjectionFrom(seed *storev1.Keyframe) *Projection {
+	state := &storev1.Keyframe{Spans: map[string]*storev1.SpanHistory{}}
+	if seed != nil {
+		state = proto.Clone(seed).(*storev1.Keyframe)
+		if state.Spans == nil {
+			state.Spans = map[string]*storev1.SpanHistory{}
+		}
+	}
+	return &Projection{State: state, input: NewInputUpgrade(state)}
 }
 func (p *Projection) Record(payload []byte) error {
 	record := &storev1.Record{}

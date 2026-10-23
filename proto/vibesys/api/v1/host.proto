@@ -59,6 +59,11 @@ message TailRequest {
 }
 
 message TailResponse {
+  option (buf.validate.message).cel = {
+    id: "tail_head_prefix"
+    message: "head must state performance for exactly through_seq"
+    expression: "!has(this.head) || (has(this.head.committed_seq) && this.head.committed_seq == this.through_seq && this.head.performance_stated)"
+  };
   // Each element is one encoded vibesys.store.v1.Record, without log framing.
   repeated bytes records = 1 [(buf.validate.field).repeated = {
     min_items: 1
@@ -72,6 +77,8 @@ message TailResponse {
   }];
   // The last sequence delivered in this response.
   uint64 through_seq = 2 [(buf.validate.field).uint64.lte = 9223372036854775806];
+  // Canonical facts of exactly through_seq; absent for session and phase 1 logs.
+  vibesys.store.v1.RunHead head = 3;
 }
 
 message SkeletonRequest {

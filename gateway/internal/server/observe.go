@@ -3,7 +3,6 @@ package server
 import (
 	"buf.build/go/protovalidate"
 	"errors"
-	"io"
 	"os"
 	"sync"
 	"syscall"
@@ -119,9 +118,11 @@ func (o *headObserver) recovered(f *os.File, info os.FileInfo, head *storev1.Run
 		}
 	} else {
 		o.scans++
-		projection := runlog.NewProjection()
-		err = runlog.ReadPrefix(io.NewSectionReader(f, 0, info.Size()), head.CommittedSeq, projection.Record)
-		state = projection.State
+		projection, recoverErr := observedProjection(f, info.Size(), head.CommittedSeq)
+		err = recoverErr
+		if projection != nil {
+			state = projection.State
+		}
 	}
 	if err != nil {
 		var corruption *runlog.Corruption
