@@ -14,6 +14,7 @@ from vs_runlog.api import RunLogReader, encode_frame, read_run_head
 
 CORPUS = Path(__file__).resolve().parents[3] / "proto/testdata/retained"
 CASES = json.loads((CORPUS / "manifest.json").read_text())
+FULL = 64  # any fence past the log reads the whole published prefix
 
 
 @pytest.mark.regression
@@ -28,22 +29,24 @@ def test_retained_head_has_the_previous_writers_input(version: str) -> None:
 
 
 @pytest.mark.regression
-@example(value=100.0, spanless=False, fence=18)
-@example(value=0.0, spanless=True, fence=18)
+@pytest.mark.parametrize("case", CASES)
+@example(value=100.0, spanless=False, fence=FULL)
+@example(value=0.0, spanless=True, fence=FULL)
 @example(value=0.0, spanless=False, fence=0)
 @example(value=0.0, spanless=False, fence=1)
 @given(
     value=st.floats(min_value=-1e6, max_value=1e6, allow_nan=False),
     spanless=st.booleans(),
-    fence=st.integers(0, 18),
+    fence=st.integers(0, 64),
 )
 def test_every_retained_input_encoding_respects_the_published_prefix(
-    *, value: float, spanless: bool, fence: int
+    *, case: str, value: float, spanless: bool, fence: int
 ) -> None:
     """Signed and zero inputs, both previous encodings, and every possible publication fence."""
-    source = CORPUS / next(iter(CASES))
+    source = CORPUS / case
     records = list(RunLogReader(io.BytesIO((source / "run.log").read_bytes())))
-    record = records[13]
+    fence = min(fence, len(records))
+    record = records[CASES[case]["measurement_seq"] - 1]
     assert record.body is not None
     assert record.body.field == "metric"
     old = record.body.value

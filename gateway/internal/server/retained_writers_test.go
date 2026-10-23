@@ -84,6 +84,9 @@ func TestSavedPreviousWritersRetainInputFacts(t *testing.T) {
 						t.Fatal(err)
 					}
 					if fact := retainedRecordFact(record); fact != nil {
+						if record.Seq != want.MeasurementSeq {
+							t.Fatalf("input fact at sequence %d, want only at its measurement %d", record.Seq, want.MeasurementSeq)
+						}
 						epochs = append(epochs, &storev1.EpochVersion{Seq: record.Seq, Epoch: &storev1.EpochStarted{Run: &storev1.RunDescription{InputMeasurement: fact}}})
 					}
 				}
@@ -130,10 +133,10 @@ func assertRetainedInput(t *testing.T, epochs []*storev1.EpochVersion, value flo
 	found := false
 	for _, version := range epochs {
 		fact := version.GetEpoch().GetRun().GetInputMeasurement()
+		if fact != nil && version.Seq < seq {
+			t.Fatalf("input is visible at sequence %d, before its recorded measurement at %d", version.Seq, seq)
+		}
 		if fact.GetMeasured().GetValue() == value {
-			if version.Seq < seq {
-				t.Fatal("input is visible before its recorded measurement")
-			}
 			found = true
 		}
 	}

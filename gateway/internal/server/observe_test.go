@@ -131,7 +131,13 @@ func syntheticLog(t *testing.T, dir string, records int, damagedAt int) {
 
 func objectiveHead(t *testing.T, stated bool, committed uint64) *storev1.RunHead {
 	t.Helper()
-	stored, err := os.ReadFile(filepath.Join(corpus, "64c1a8b7", "run.head"))
+	// Any retained case supplies a valid head with an objective to build on.
+	var template string
+	for name := range corpusCases(t) {
+		template = name
+		break
+	}
+	stored, err := os.ReadFile(filepath.Join(corpus, template, "run.head"))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -57,19 +57,22 @@ def test_saved_previous_writers_reopen_with_the_same_facts(tmp_path: Path, versi
 
 
 @pytest.mark.regression
-@example(spanless=False, value=100.0, explicit=False, split=18)
-@example(spanless=True, value=0.0, explicit=False, split=14)
+@pytest.mark.parametrize("case", CASES)
+@example(spanless=False, value=100.0, explicit=False, split=64)
+@example(spanless=True, value=0.0, explicit=False, split=0)
 @given(
     spanless=st.booleans(),
     value=st.floats(min_value=-1e6, max_value=1e6, allow_nan=False),
     explicit=st.booleans(),
-    split=st.integers(1, 18),
+    split=st.integers(0, 64),
 )
 def test_input_upgrades_preserve_prefixes_and_explicit_facts(
-    *, spanless: bool, value: float, explicit: bool, split: int
+    *, case: str, spanless: bool, value: float, explicit: bool, split: int
 ) -> None:
     """Both old input encodings, signed values, and explicit unmeasured declarations, at every seek."""
-    records = list(RunLogReader(io.BytesIO((CORPUS / next(iter(CASES)) / "run.log").read_bytes())))
+    records = list(RunLogReader(io.BytesIO((CORPUS / case / "run.log").read_bytes())))
+    # A split of zero seeks to the measurement itself, the boundary where the fact first appears.
+    split = CASES[case]["measurement_seq"] if split == 0 else min(split, len(records))
     measured_seq = 0
     for record in records:
         body = record.body
@@ -80,7 +83,7 @@ def test_input_upgrades_preserve_prefixes_and_explicit_facts(
             body.value.run.input_measurement = InputMeasurement(
                 state=Oneof("unmeasured", UnmeasuredInput())
             )
-        elif body.field == "metric" and body.value.span == "input-gate":
+        elif body.field == "metric" and body.value.span == CASES[case]["input_span"]:
             body.value.value = value
             if spanless:
                 record.body = Oneof(
@@ -113,10 +116,13 @@ def input_fact(state: Keyframe) -> InputMeasurement | None:
     return epoch.run.input_measurement
 
 
+@pytest.mark.parametrize("case", CASES)
 @pytest.mark.parametrize("spanless", [False, True])
-def test_record_upgrade_keeps_the_metric_and_validates_its_declaration(*, spanless: bool) -> None:
-    records = list(RunLogReader(io.BytesIO((CORPUS / next(iter(CASES)) / "run.log").read_bytes())))
-    record = records[13]
+def test_record_upgrade_keeps_the_metric_and_validates_its_declaration(
+    *, case: str, spanless: bool
+) -> None:
+    records = list(RunLogReader(io.BytesIO((CORPUS / case / "run.log").read_bytes())))
+    record = records[CASES[case]["measurement_seq"] - 1]
     assert record.body is not None
     assert record.body.field == "metric"
     point = record.body.value
