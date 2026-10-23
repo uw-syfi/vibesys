@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/fsnotify/fsnotify"
 	apiv1 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/api/v1"
@@ -26,6 +27,7 @@ func (h *host) WatchRuns(_ *apiv1.WatchRunsRequest, stream apiv1.HostService_Wat
 	ticker := h.config.Clock.NewTicker(LivenessProbeInterval)
 	defer ticker.Stop()
 	previous := map[string]*apiv1.WatchRunsResponse{}
+	probes := map[string]writerProbe{}
 	initial := true
 rescan:
 	for {
@@ -90,6 +92,7 @@ rescan:
 				live = apiv1.RunLiveness_RUN_LIVENESS_UNSPECIFIED
 			}
 			response := &apiv1.WatchRunsResponse{RunId: entry.Name(), Head: head, Liveness: live}
+			probes[entry.Name()] = probes[entry.Name()].observe(dir, head.GetEpoch(), live, h.config.Clock.Now())
 			if project, err := readRunProject(h.config.Root, entry.Name(), dir); err == nil {
 				response.ProjectRoot = proto.String(project)
 			}
@@ -103,6 +106,7 @@ rescan:
 		}
 		for id := range previous {
 			if current[id] == nil {
+				delete(probes, id)
 				if err := stream.Send(&apiv1.WatchRunsResponse{RunId: id, Removed: true}); err != nil {
 					return err
 				}
@@ -139,20 +143,23 @@ rescan:
 				}
 				return rpcError(err)
 			case <-ticker.Ticks():
+				now := h.config.Clock.Now()
 				for id, response := range previous {
-					if response.Liveness != apiv1.RunLiveness_RUN_LIVENESS_ALIVE {
+					if response.Liveness != apiv1.RunLiveness_RUN_LIVENESS_ALIVE &&
+						(probes[id].confirmed || now.After(probes[id].until)) {
 						continue
 					}
 					live, err := liveness(directories[id], response.Head)
 					if err != nil {
 						continue
 					}
+					probes[id] = probes[id].observe(directories[id], response.Head.GetEpoch(), live, now)
 					if live != response.Liveness {
 						// Messages remain immutable after Send, including for gRPC stats.
-						updated := proto.Clone(response).(*apiv1.WatchRunsResponse)
-						updated.Liveness = live
-						previous[id] = updated
-						if err := stream.Send(updated); err != nil {
+						observed := proto.Clone(response).(*apiv1.WatchRunsResponse)
+						observed.Liveness = live
+						previous[id] = observed
+						if err := stream.Send(observed); err != nil {
 							return err
 						}
 					}
@@ -163,4 +170,25 @@ rescan:
 			}
 		}
 	}
+}
+
+// A free lock before this epoch's writer was seen alive may be its boot gap.
+// Keep probing for one lease; unrelated directory events must not renew it.
+// An alive writer stays monitored, and its later release is conclusive.
+type writerProbe struct {
+	directory string
+	epoch     uint32
+	until     time.Time
+	confirmed bool
+}
+
+func (p writerProbe) observe(directory string, epoch uint32, live apiv1.RunLiveness, now time.Time) writerProbe {
+	if p.directory != directory || p.epoch != epoch {
+		p = writerProbe{directory: directory, epoch: epoch, until: now.Add(LivenessLease)}
+	}
+	switch live {
+	case apiv1.RunLiveness_RUN_LIVENESS_ALIVE, apiv1.RunLiveness_RUN_LIVENESS_ENDED, apiv1.RunLiveness_RUN_LIVENESS_PARKED:
+		p.confirmed = true
+	}
+	return p
 }

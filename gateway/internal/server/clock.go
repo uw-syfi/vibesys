@@ -5,8 +5,12 @@ import "time"
 // LivenessProbeInterval bounds detection of a writer disappearing without I/O.
 const LivenessProbeInterval = 5 * time.Second
 
-// Clock creates per-subscription tickers. The subscription owns Stop.
+// LivenessLease is the protocol's thirty-second observation lease.
+const LivenessLease = 30 * time.Second
+
+// Clock supplies lease time and per-subscription tickers. The subscription owns Stop.
 type Clock interface {
+	Now() time.Time
 	NewTicker(time.Duration) Ticker
 }
 
@@ -18,6 +22,8 @@ type Ticker interface {
 
 type SystemClock struct{}
 type systemTicker struct{ *time.Ticker }
+
+func (SystemClock) Now() time.Time { return time.Now() }
 
 func (SystemClock) NewTicker(interval time.Duration) Ticker {
 	return systemTicker{time.NewTicker(interval)}

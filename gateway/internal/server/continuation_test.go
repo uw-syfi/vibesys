@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -19,6 +20,7 @@ import (
 )
 
 type fakeClock struct {
+	now      atomic.Int64
 	ticker   *fakeTicker
 	interval time.Duration
 }
@@ -26,6 +28,8 @@ type fakeTicker struct {
 	ticks   chan time.Time
 	stopped chan struct{}
 }
+
+func (c *fakeClock) Now() time.Time { return time.Time{}.Add(time.Duration(c.now.Load())) }
 
 func (c *fakeClock) NewTicker(interval time.Duration) server.Ticker {
 	c.interval = interval
