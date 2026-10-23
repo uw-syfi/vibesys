@@ -4,7 +4,7 @@ import type {HostRun, RunDigestEntry} from '@vibesys/hosts';
 import {digestKey, recentRows, SIDEBAR_EMPTY, type SidebarState} from './index.js';
 
 const RUN = {host: 'local' as const, runId: 'run-a'};
-const OUTCOMES = ['adopted', 'failed', 'stopped'] as const;
+const OUTCOMES = ['adopted', 'failed', 'stopped', null] as const;
 const STATUS = {adopted: 'finished', failed: 'failed', stopped: 'stopped'} as const;
 
 for (const stored of OUTCOMES) {
@@ -29,8 +29,15 @@ for (const stored of OUTCOMES) {
         bestSoFarRatio: null,
         durationSeconds: 3600,
         outcome: stored,
-        closing: stored === 'failed' ? 'failed' : stored === 'stopped' ? 'interrupted' : 'finished',
-        over: true,
+        closing:
+          stored === null
+            ? null
+            : stored === 'failed'
+              ? 'failed'
+              : stored === 'stopped'
+                ? 'interrupted'
+                : 'finished',
+        over: stored !== null,
         endSummary: 'Committed result',
       };
       const state: SidebarState = {
@@ -51,10 +58,10 @@ for (const stored of OUTCOMES) {
         digests: {[digestKey(RUN)]: {kind: 'read', entry}},
       };
       const row = recentRows(state).rows[0];
-      expect(row?.status).toBe(STATUS[stored]);
+      expect(row?.status).toBe(stored === null ? 'stopped' : STATUS[stored]);
       expect(row?.title).toBe('project');
       expect(row?.tooltip).not.toContain('outdated registry reason');
-      expect(row?.tooltip).toContain('Committed result');
+      if (stored !== null) expect(row?.tooltip).toContain('Committed result');
     });
   }
 }

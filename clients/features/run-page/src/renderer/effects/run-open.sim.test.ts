@@ -270,8 +270,9 @@ test('a converted run reports progress from its first reply and settles after ca
   expect(at).toBeLessThanOrEqual(link.rttMs + first.bytes / link.bytesPerMs + 1);
   expect(gateway.bytesBy(at)).toBeLessThanOrEqual(gateway.replyBytes + 256);
   expect(painted(actor)).toBe(true);
-  await until(clock, () => painted(actor));
-  expect(painted(actor)).toBe(true);
+  await until(clock, () => actor.getSnapshot().context.progress.phase === 'complete');
+  expect(actor.getSnapshot().context.progress.phase).toBe('complete');
+  expect(actor.getSnapshot().context.load?.complete).toBe(true);
   expect(gateway.callsTo('Tail').length).toBeLessThanOrEqual(1);
   for (const tail of gateway.callsTo('Tail'))
     expect(fromBinary(TailRequestSchema, tail.request).fromSeq).toBeGreaterThanOrEqual(

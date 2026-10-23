@@ -692,7 +692,7 @@ export function recentRow(state: SidebarState, recent: RecentRun, clock: Clock):
   const entry = slot?.kind === 'read' ? slot.entry : undefined;
   const read = entry?.kind === 'read' ? entry : undefined;
   const registered = ended === undefined ? null : endedLook(ended);
-  const found = (read === undefined || !read.over ? null : digestLook(read)) ?? registered;
+  const found = read === undefined ? registered : digestLook(read);
   const {look, status, result, problem, kind} = reading(found, read, slot, listing);
   const began = beganAt(entry, ended, clock);
   const detail = began === null ? result : `${began} · ${result}`;
@@ -837,6 +837,6 @@ function recentEndReason(
   read: RunDigestEntry | undefined,
   ended: HostRun | undefined,
 ): string | null {
-  if (read?.kind === 'read' && read.over) return read.endSummary ?? null;
+  if (read?.kind === 'read') return read.endSummary ?? null;
   return ended === undefined ? null : endReason(ended);
 }
