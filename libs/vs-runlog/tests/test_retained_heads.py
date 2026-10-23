@@ -2,6 +2,7 @@
 
 import io
 import json
+from functools import cache
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -37,6 +38,13 @@ def test_retained_head_has_the_previous_writers_input(version: str) -> None:
     assert (directory / "run.head").read_bytes() == original
 
 
+@cache
+def retained_frames(case: str) -> tuple[bytes, ...]:
+    """A retained log's records, each encoded as the frame it was written in."""
+    log = (CORPUS / case / "run.log").read_bytes()
+    return tuple(encode_frame(record) for record in RunLogReader(io.BytesIO(log)))
+
+
 @pytest.mark.regression
 @pytest.mark.parametrize("case", CASES)
 @example(value=100.0, spanless=False, fence=FULL)
@@ -53,9 +61,10 @@ def test_every_retained_input_encoding_respects_the_published_prefix(
 ) -> None:
     """Signed and zero inputs, both previous encodings, and every possible publication fence."""
     source = CORPUS / case
-    records = list(RunLogReader(io.BytesIO((source / "run.log").read_bytes())))
-    fence = min(fence, len(records))
-    record = records[CASES[case]["measurement_seq"] - 1]
+    frames = list(retained_frames(case))
+    fence = min(fence, len(frames))
+    at = CASES[case]["measurement_seq"] - 1
+    record = next(iter(RunLogReader(io.BytesIO(RUN_LOG_MAGIC + frames[at]))))
     assert record.body is not None
     assert record.body.field == "metric"
     old = record.body.value
@@ -63,6 +72,7 @@ def test_every_retained_input_encoding_respects_the_published_prefix(
     if not spanless:
         point.span = old.span
     record.body = Oneof("metric", point)
+    frames[at] = encode_frame(record)
     raw = RunHead.from_binary((source / "run.head").read_bytes())
     assert raw.objective is not None
     raw.objective.clear_field("input_value")
@@ -70,9 +80,7 @@ def test_every_retained_input_encoding_respects_the_published_prefix(
     raw.committed_seq = fence
     with TemporaryDirectory() as temporary:
         directory = Path(temporary)
-        (directory / "run.log").write_bytes(
-            RUN_LOG_MAGIC + b"".join(encode_frame(r) for r in records)
-        )
+        (directory / "run.log").write_bytes(RUN_LOG_MAGIC + b"".join(frames))
         (directory / "run.head").write_bytes(raw.to_binary())
         head = read_run_head(directory / "run.log")
     assert head.objective is not None
