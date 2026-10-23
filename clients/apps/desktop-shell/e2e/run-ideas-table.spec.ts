@@ -112,6 +112,35 @@ test('six hundred ideas render a window of rows and remain keyboard reachable', 
   expect(await ideas.evaluate(list => list.scrollTop)).toBe(scrollTop);
 });
 
+/** Rows wrap at some window sizes and not at others, so the list's rows have several heights. */
+const WINDOWS = [
+  {width: 1440, height: 900},
+  {width: 1200, height: 800},
+  {width: 1100, height: 760},
+  {width: 1000, height: 700},
+  {width: 1000, height: 900},
+] as const;
+
+for (const {width, height} of WINDOWS) {
+  test(`opening the last idea leaves the Ideas list where the end key put it at ${width}x${height}`, async ({
+    page,
+  }) => {
+    await page.setViewportSize({width, height});
+    await openRun(page, 600);
+    const ideas = page.getByRole('listbox', {name: 'Ideas'});
+    await expect(ideas.getByRole('option').first()).toBeVisible();
+    await ideas.focus();
+    await page.keyboard.press('End');
+    await expect(ideas.getByRole('option').last()).toBeFocused();
+    await settled(page);
+    const scrollTop = await ideas.evaluate(list => list.scrollTop);
+    await page.keyboard.press('Enter');
+    await expect(page.getByRole('button', {name: 'Close idea'})).toBeVisible();
+    await settled(page);
+    expect(await ideas.evaluate(list => list.scrollTop)).toBe(scrollTop);
+  });
+}
+
 test('opening an idea preserves the Ideas list and controls at wide and narrow widths', async ({
   page,
 }) => {

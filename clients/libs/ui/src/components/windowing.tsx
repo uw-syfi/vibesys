@@ -41,6 +41,12 @@ function leftTheEnd(element: HTMLElement, following: boolean, placed: number): b
   return following && !atBottom(element) && element.scrollTop < placed - 1;
 }
 
+/** Puts the scroll back at `rested` when a layout in the middle of a commit clamped it lower. */
+function restoreAfterClamp(element: HTMLElement, rested: number): void {
+  const available = element.scrollHeight - element.clientHeight;
+  if (element.scrollTop < rested && available >= rested) element.scrollTop = rested;
+}
+
 /** Scrolls to the end and returns where that landed. */
 function scrollToEnd(element: HTMLElement): number {
   element.scrollTop = element.scrollHeight;
@@ -175,6 +181,9 @@ export function useWindowed(options: {
   // Where the list last put itself at its end: a reader above that has left it, even before the
   // scroll event that says so arrives.
   const placed = useRef(0);
+  // Where the reader last left the scroll: a commit that finds the list higher, with that position
+  // still available, was clamped by a layout in the middle of the commit and puts it back.
+  const rested = useRef(0);
   const measured = useRef(new Map<string, number>());
   const pending = useRef<{
     readonly index: number;
@@ -199,6 +208,8 @@ export function useWindowed(options: {
       setView({top: view.top, height: element.clientHeight});
     }
     if (placedOnCommit(element, holdAt, following, placed)) setBehind(true);
+    if (holdAt === null && !following.current) restoreAfterClamp(element, rested.current);
+    rested.current = element.scrollTop;
     if (scrolledToEnd.current !== toEnd) {
       scrolledToEnd.current = toEnd;
       jump();
@@ -215,6 +226,7 @@ export function useWindowed(options: {
   };
   const scrolled = (event: UIEvent<HTMLElement>): void => {
     const element = event.currentTarget;
+    rested.current = element.scrollTop;
     // While held, the scroll events are the list's own placing and the browser's anchoring.
     if (held.current) return;
     if (follow) {
