@@ -558,7 +558,11 @@ def read_run_head(path: Path) -> RunHead:
         with log.open("rb") as stream:
             state = fold_skeleton(_head_records(RunLogReader(stream), head, log), log_offset=0)
             upgraded = project_head(upgrade_skeleton(state))
-            if upgraded is not None and upgraded.objective is not None:
+            if (
+                upgraded is not None
+                and upgraded.objective is not None
+                and upgraded.objective.has_field("input_value")
+            ):
                 head.objective.input_value = upgraded.objective.input_value
     return head
 
