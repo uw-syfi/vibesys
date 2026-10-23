@@ -387,8 +387,8 @@ function assertAgree(container: HTMLElement) {
   const buttons = controlButtons(container);
   const word = statusWord(container);
   if (buttons.some(text => ['Pause', 'Pause now', 'Guidance'].includes(text)))
-    expect(['Starting', 'Running', 'Paused']).toContain(word);
-  if (buttons.includes('Resume')) expect(['Starting', 'Running']).not.toContain(word);
+    expect(['Starting', 'Running', 'Paused']).toContain(word ?? 'no status word');
+  if (buttons.includes('Resume')) expect(['Starting', 'Running']).not.toContain(word ?? '');
 }
 
 function assertVisible(container: HTMLElement) {

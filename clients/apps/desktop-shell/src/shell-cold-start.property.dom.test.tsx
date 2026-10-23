@@ -1,4 +1,5 @@
 import {afterAll, beforeAll, expect, test} from 'bun:test';
+import type {HostRun} from '@vibesys/hosts';
 import type {PreferencesView, WelcomeBridge, WelcomeEvent} from '@vibesys/ipc';
 import {FakeClock} from '@vibesys/transport/testing';
 import fc from 'fast-check';
@@ -74,8 +75,20 @@ function coldStartWorld(holdsRuns: boolean) {
         },
       ]
     : [];
-  const live = holdsRuns
-    ? [{id: 'a', projectRoot: '/project', runId: 'run-a', status: 'running', phase: 'running'}]
+  const live: HostRun[] = holdsRuns
+    ? [
+        {
+          id: 'a',
+          projectRoot: '/project',
+          runId: 'run-a',
+          status: 'running',
+          phase: 'running',
+          paused: null,
+          end: null,
+          startedAt: 1,
+          reason: null,
+        },
+      ]
     : [];
   const listed: Parameters<Parameters<WelcomeBridge['onListing']>[0]>[0]['value'] = {
     kind: 'listed' as const,
