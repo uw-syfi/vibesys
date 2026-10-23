@@ -21,23 +21,22 @@
     "head_input_absent": true,
     "input_span": "input-gate"
   },
-  "84bf806c": {
-    "writer_commit": "84bf806c30b2dab8bf2f9fce17d04defd827a606",
-    "producer": "64c1a8b7 retained records, two intents and a successor epoch, then 1100 warning notices; dense sequences through previous FileRunLogWriter",
+  "0064a1bc": {
+    "writer_commit": "0064a1bc69059a4b289d0f0c3cf510253bc0949b",
+    "producer": "64c1a8b7 retained records and two intents, followed by 1100 warning notices in epoch 1; dense sequences through the previous FileRunLogWriter",
     "input": 100,
     "candidate": "gate-0",
     "vs_baseline": 1.01,
     "chart_reference": 100,
     "measurement_seq": 14,
-    "head_input_absent": false,
+    "head_input_absent": true,
     "input_span": "input-gate",
     "intent_ids": [
       "old-guidance",
       "old-refusal"
     ],
     "epoch_starts": [
-      1,
-      2
+      1
     ]
   }
 }

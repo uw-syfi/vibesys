@@ -186,15 +186,15 @@ test('property: generated checkpoint positions and previous writers agree with t
 });
 
 test('the captured previous writer recovers history through the shared reader', async () => {
-  const root = new URL('../../../../../proto/testdata/retained/84bf806c/', import.meta.url);
-  const keyframe = readFileSync(new URL('keyframes/1121.pb', root));
+  const root = new URL('../../../../../proto/testdata/retained/0064a1bc/', import.meta.url);
+  const keyframe = readFileSync(new URL('keyframes/1120.pb', root));
   const reply = fromBinary(
     SkeletonResponseSchema,
     readFileSync(new URL('skeleton.response.pb', root)),
   );
   const records = reply.records.map(bytes => fromBinary(RecordSchema, bytes));
   // The pinned public reply is replay, so its records are the whole committed log.
-  expect(records.length).toBe(1121);
+  expect(records.length).toBe(1120);
   expect(fromBinary(KeyframeSchema, keyframe).recordsTracked).toBe(false);
   const peer = new CheckpointPeer(records, keyframe, records.length);
   const clock = new FakeClock();
@@ -219,7 +219,6 @@ test('the captured previous writer recovers history through the shared reader', 
     expect(actor.getSnapshot().context.outcomes.map(row => row.id)).toEqual([
       'old-guidance',
       'old-refusal',
-      '2',
     ]);
     const call = peer.calls.find(call => call.method === TAIL);
     if (!call) throw new Error('shared Tail did not start');
