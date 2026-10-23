@@ -1,5 +1,6 @@
 import AxeBuilder from '@axe-core/playwright';
 import {expect, type Page, test} from '@playwright/test';
+import fc from 'fast-check';
 import {settled} from './checks/settle.js';
 import {type Anchor, anchorsOf, RUN_ANCHORS, stabilityViolations} from './checks/stability.js';
 import {
@@ -140,6 +141,91 @@ for (const {width, height} of WINDOWS) {
     expect(await ideas.evaluate(list => list.scrollTop)).toBe(scrollTop);
   });
 }
+
+/**
+ * What a reader does to a list: a wheel turn, any key that scrolls, or a drag or touch (which move
+ * the scroll without a key or wheel event, so the one move a script can make stands for all of
+ * them: `scroll` sets the position and leaves its scroll event pending for the same task).
+ */
+type Reader =
+  | {readonly kind: 'wheel'; readonly delta: number}
+  | {readonly kind: 'key'; readonly key: string}
+  | {readonly kind: 'scroll'; readonly fraction: number};
+
+const READER: fc.Arbitrary<Reader> = fc.oneof(
+  fc.record({kind: fc.constant('wheel' as const), delta: fc.integer({min: -2400, max: 2400})}),
+  fc.record({
+    kind: fc.constant('key' as const),
+    key: fc.constantFrom('PageUp', 'PageDown', 'Space', 'Home', 'End', 'ArrowUp', 'ArrowDown'),
+  }),
+  fc.record({
+    kind: fc.constant('scroll' as const),
+    fraction: fc.double({min: 0, max: 1, noNaN: true}),
+  }),
+);
+
+/**
+ * Opens the idea of the row most in view, or closes the open one: a commit that lays the list out
+ * again. The scroll it began with is read in the same task, so a move of it still waiting as an
+ * event counts as where the reader left the list.
+ */
+async function commitFrom(page: Page, move: number | null): Promise<number> {
+  return page.evaluate(fraction => {
+    const list = document.querySelector<HTMLElement>('[role="listbox"][aria-label="Ideas"]');
+    if (list === null) throw new Error('the Ideas list is not on screen');
+    if (fraction !== null) {
+      list.scrollTop = fraction * (list.scrollHeight - list.clientHeight);
+    }
+    const at = list.scrollTop;
+    const close = document.querySelector<HTMLElement>('button[aria-label="Close idea"]');
+    if (close !== null) {
+      close.click();
+      return at;
+    }
+    const box = list.getBoundingClientRect();
+    const shown = (row: HTMLElement): number => {
+      const rect = row.getBoundingClientRect();
+      return Math.min(rect.bottom, box.bottom) - Math.max(rect.top, box.top);
+    };
+    const rows = [...list.querySelectorAll<HTMLElement>('[role="option"]')];
+    const row = rows.sort((a, b) => shown(b) - shown(a))[0];
+    if (row === undefined) throw new Error('no row is drawn');
+    row.click();
+    return at;
+  }, move);
+}
+
+test('no scroll of the reader is undone by a commit, whatever the reader did before it', async ({
+  page,
+}) => {
+  await page.setViewportSize({width: 1000, height: 700});
+  await openRun(page, 600);
+  const ideas = page.getByRole('listbox', {name: 'Ideas'});
+  await expect(ideas.getByRole('option').first()).toBeVisible();
+  await settled(page);
+  const [steps] = fc.sample(fc.array(READER, {minLength: 24, maxLength: 24}), {
+    numRuns: 1,
+    seed: 20261023,
+  });
+  for (const step of steps ?? []) {
+    let move: number | null = null;
+    if (step.kind === 'wheel') {
+      const box = await ideas.boundingBox();
+      if (box === null) throw new Error('the Ideas list has no box');
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+      await page.mouse.wheel(0, step.delta);
+      await settled(page);
+    } else if (step.kind === 'key') {
+      await page.keyboard.press(step.key);
+      await settled(page);
+    } else {
+      move = step.fraction;
+    }
+    const at = await commitFrom(page, move);
+    await settled(page);
+    expect(await ideas.evaluate(list => list.scrollTop), JSON.stringify(step)).toBe(at);
+  }
+});
 
 test('opening an idea preserves the Ideas list and controls at wide and narrow widths', async ({
   page,

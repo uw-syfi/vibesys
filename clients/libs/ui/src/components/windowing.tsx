@@ -41,23 +41,15 @@ function leftTheEnd(element: HTMLElement, following: boolean, placed: number): b
   return following && !atBottom(element) && element.scrollTop < placed - 1;
 }
 
-/** Where the reader last left a list's scroll, and whether a move of it is yet to arrive as an event. */
-interface Rest {
-  readonly top: number;
-  readonly moving: boolean;
-}
-
 /**
- * Takes the scroll a commit finds as the list's rest. A commit that finds a resting list higher
- * than where it was left, with that position available again, saw a layout in the middle of the
- * commit clamp it against a momentarily shorter list: it puts the scroll back.
+ * Puts a resting list back where it stood before the commit. `before` is what the scroll was when
+ * the commit's render began, so whatever the reader or the list had moved it to by then is the
+ * position kept. A scroll that ends the commit higher, with the position still available, was
+ * clamped by a layout in the middle of the commit against a momentarily shorter list.
  */
-function rested(element: HTMLElement, rest: Rest, resting: boolean): Rest {
-  const available = element.scrollHeight - element.clientHeight;
-  if (resting && !rest.moving && element.scrollTop < rest.top && available >= rest.top) {
-    element.scrollTop = rest.top;
-  }
-  return {top: element.scrollTop, moving: rest.moving};
+function unclamped(element: HTMLElement, before: number | null, resting: boolean): void {
+  if (!resting || before === null || element.scrollTop >= before) return;
+  if (element.scrollHeight - element.clientHeight >= before) element.scrollTop = before;
 }
 
 /** Scrolls to the end and returns where that landed. */
@@ -211,7 +203,6 @@ export function useWindowed(options: {
   // Where the list last put itself at its end: a reader above that has left it, even before the
   // scroll event that says so arrives.
   const placed = useRef(0);
-  const rest = useRef<Rest>({top: 0, moving: false});
   const measured = useRef(new Map<string, number>());
   const pending = useRef<{
     readonly index: number;
@@ -229,6 +220,8 @@ export function useWindowed(options: {
   const first = Math.max(0, indexAt(offsets, top) - OVERSCAN);
   const last = Math.min(count, indexAt(offsets, top + view.height) + 1 + OVERSCAN);
 
+  // The scroll as this commit's render finds it: before any layout the commit forces.
+  const before = pane.current?.scrollTop ?? null;
   const scroller = (element: HTMLElement | null): void => {
     pane.current = element;
     if (element === null) return;
@@ -236,7 +229,7 @@ export function useWindowed(options: {
       setView({top: view.top, height: element.clientHeight});
     }
     if (placedOnCommit(element, holdAt, following, placed)) setBehind(true);
-    rest.current = rested(element, rest.current, holdAt === null && !follow);
+    unclamped(element, before, holdAt === null && !follow);
     if (scrolledToEnd.current !== toEnd) {
       scrolledToEnd.current = toEnd;
       jump();
@@ -244,7 +237,6 @@ export function useWindowed(options: {
     deliverPending(element, pending);
   };
   const touched = (): void => {
-    rest.current = {...rest.current, moving: true};
     const element = pane.current;
     if (!held.current || element === null) return;
     held.current = false;
@@ -254,7 +246,6 @@ export function useWindowed(options: {
   };
   const scrolled = (event: UIEvent<HTMLElement>): void => {
     const element = event.currentTarget;
-    rest.current = {top: element.scrollTop, moving: false};
     if (held.current) return;
     if (follow) {
       following.current = atBottom(element);
@@ -263,7 +254,6 @@ export function useWindowed(options: {
     setView({top: element.scrollTop, height: element.clientHeight || view.height});
   };
   const jump = (): void => {
-    rest.current = {...rest.current, moving: true};
     held.current = false;
     if (follow) {
       following.current = true;
@@ -274,11 +264,10 @@ export function useWindowed(options: {
   const reveal = (index: number, then: (row: HTMLElement) => void): void => {
     const element = pane.current;
     if (element === null) return;
-    rest.current = {...rest.current, moving: true};
     held.current = false;
     following.current = false;
     const height = element.clientHeight || view.height;
-    const next = scrollFor(offsets[index] ?? 0, offsets[index + 1], view.top, height);
+    const next = scrollFor(offsets[index] ?? 0, offsets[index + 1], element.scrollTop, height);
     element.scrollTop = next;
     const row = drawnRow(element, index);
     if (row === null) pending.current = {index, then};
