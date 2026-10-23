@@ -1,5 +1,7 @@
 """Pre-schema interrupt exceptions acquire one stopped outcome during conversion."""
 
+import asyncio
+import builtins
 from datetime import UTC, datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -13,6 +15,7 @@ from vibesys.api.transport import ConversionStatus, convert_run
 from vibesys.events import (
     CoreEvent,
     CoreEventType,
+    RunEndingData,
     RunStartedData,
     SpanStartedData,
     make_core_event,
@@ -54,9 +57,11 @@ FLOW_STARTED = CoreEvent(
 LEGACY_TEXT = st.text(alphabet="abc KeyboardInterrupt012:", max_size=30)
 
 
-def _write_journal(root: Path, ending: CoreEvent) -> bytes:
+def _write_segments(root: Path, segments: list[list[CoreEvent]]) -> bytes:
+    """A journal of one run resumed: each segment opens with its start and ends as given."""
     source = Project.event_journal_path_for(root, "run-a")
     source.parent.mkdir(parents=True, exist_ok=True)
+    events = [event for segment in segments for event in [RUN_STARTED, FLOW_STARTED, *segment]]
     content = b"".join(
         event.model_copy(
             update={
@@ -68,10 +73,14 @@ def _write_journal(root: Path, ending: CoreEvent) -> bytes:
         .model_dump_json()
         .encode()
         + b"\n"
-        for index, event in enumerate([RUN_STARTED, FLOW_STARTED, ending])
+        for index, event in enumerate(events)
     )
     source.write_bytes(content)
     return content
+
+
+def _write_journal(root: Path, ending: CoreEvent) -> bytes:
+    return _write_segments(root, [[ending]])
 
 
 def _convert(project: Project, *, reconvert: bool = False) -> ConversionStatus:
@@ -177,7 +186,15 @@ def test_reconverting_never_rebuilds_a_run_that_names_its_checkout(detail: str) 
 
 @given(
     error=st.sampled_from(
-        [KeyboardInterrupt, ValueError, RuntimeError, OSError, TimeoutError, SystemExit]
+        [
+            KeyboardInterrupt,
+            asyncio.CancelledError,
+            ValueError,
+            RuntimeError,
+            OSError,
+            TimeoutError,
+            SystemExit,
+        ]
     ),
     text=LEGACY_TEXT,
 )
@@ -193,4 +210,120 @@ def test_a_native_run_ends_stopped_exactly_when_the_user_interrupted_it(
         project = Project.open(root)
         _write_journal(root, make_core_event(kind, reason, timestamp=AT, status=status))
         assert _convert(project) is ConversionStatus.CONVERTED
-        assert _outcome(root) is (Outcome.STOPPED if error is KeyboardInterrupt else Outcome.FAILED)
+        assert _outcome(root) is (
+            Outcome.STOPPED
+            if error in {KeyboardInterrupt, asyncio.CancelledError}
+            else Outcome.FAILED
+        )
+
+
+def _constructible(error: type[BaseException]) -> bool:
+    try:
+        error("text")
+    except TypeError:
+        return False
+    return True
+
+
+EXCEPTIONS = sorted(
+    {
+        error
+        for error in (*vars(builtins).values(), *vars(asyncio).values())
+        if isinstance(error, type) and issubclass(error, BaseException) and _constructible(error)
+    },
+    key=lambda error: error.__qualname__,
+)
+
+
+@pytest.mark.regression
+@example(error=asyncio.CancelledError, text="")
+@example(error=KeyboardInterrupt, text="")
+@given(error=st.sampled_from(EXCEPTIONS), text=LEGACY_TEXT)
+def test_a_pre_schema_run_reads_as_a_native_one_for_every_exception_class(
+    error: type[BaseException], text: str
+) -> None:
+    """The class of the exception decides the ending, as it does natively: not a list of names."""
+    kind, reason, status = unwinding(error(text))
+    with TemporaryDirectory() as temporary, pytest.MonkeyPatch.context() as env:
+        root = Path(temporary) / "project"
+        root.mkdir()
+        env.setenv("VIBESYS_STATE_HOME", str(Path(temporary) / "home"))
+        project = Project.open(root)
+        _write_journal(root, make_core_event(kind, reason, timestamp=AT, status=status))
+        assert _convert(project) is ConversionStatus.CONVERTED
+        native = _outcome(root)
+        _write_journal(root, _legacy_failure(f"{error.__name__}: {text}"))
+        assert _convert(project, reconvert=True) is ConversionStatus.CONVERTED
+        assert _outcome(root) is native
+        assert native is (
+            Outcome.STOPPED
+            if issubclass(error, KeyboardInterrupt | asyncio.CancelledError)
+            else Outcome.FAILED
+        )
+
+
+def _ending(kind: str) -> list[CoreEvent]:
+    """How a segment of a resumed run ends, as the journals recorded it (often after run_ending)."""
+    drained = make_core_event(
+        CoreEventType.RUN_ENDING,
+        timestamp=AT,
+        data=RunEndingData(reason=None, resumable=True, rounds_finished=1),
+    )
+    return {
+        "finished": [make_core_event(CoreEventType.RUN_FINISHED, timestamp=AT)],
+        "failed": [drained, _legacy_failure("ValueError: boom")],
+        "cancelled": [drained, _legacy_failure("CancelledError: ")],
+        "interrupted": [drained, _legacy_failure("KeyboardInterrupt: ")],
+        "stopped": [
+            drained,
+            make_core_event(
+                CoreEventType.STOPPED, "Run stopped by request", timestamp=AT, status="interrupted"
+            ),
+        ],
+    }[kind]
+
+
+ENDINGS = ["finished", "failed", "cancelled", "interrupted", "stopped"]
+
+
+@pytest.mark.regression
+@given(segments=st.lists(st.sampled_from(ENDINGS), min_size=1, max_size=6))
+def test_a_resumed_run_reads_as_its_last_segment_ends(segments: list[str]) -> None:
+    """An earlier segment's ending never decides the run's: each resume starts its own."""
+    with TemporaryDirectory() as temporary, pytest.MonkeyPatch.context() as env:
+        root = Path(temporary) / "project"
+        root.mkdir()
+        env.setenv("VIBESYS_STATE_HOME", str(Path(temporary) / "home"))
+        project = Project.open(root)
+        _write_segments(root, [_ending(kind) for kind in segments])
+        assert _convert(project) is ConversionStatus.CONVERTED
+        resumed = _outcome(root)
+        _write_segments(root, [_ending(segments[-1])])
+        assert _convert(project, reconvert=True) is ConversionStatus.CONVERTED
+        assert resumed is _outcome(root)
+
+
+def test_a_run_resumed_after_interrupts_and_cancellations_reads_stopped_at_every_ending() -> None:
+    """A real journal: one run Ctrl-C'd, cancelled and stopped over many resumes, trimmed to its lifecycle."""
+    lines = (Path(__file__).parent / "fixtures" / "resumed-after-interrupts.jsonl").read_bytes()
+    events = lines.splitlines(keepends=True)
+    endings = [
+        index + 1
+        for index, line in enumerate(events)
+        if b'"type":"stopped"' in line or b'"type":"run_failed"' in line
+    ]
+    assert endings[-1] == len(events)
+    with TemporaryDirectory() as temporary, pytest.MonkeyPatch.context() as env:
+        root = Path(temporary) / "project"
+        root.mkdir()
+        env.setenv("VIBESYS_STATE_HOME", str(Path(temporary) / "home"))
+        project = Project.open(root)
+        source = Project.event_journal_path_for(root, "run-a")
+        source.parent.mkdir(parents=True, exist_ok=True)
+        for cut in endings:
+            source.write_bytes(b"".join(events[:cut]))
+            assert _convert(project, reconvert=True) in {
+                ConversionStatus.CONVERTED,
+                ConversionStatus.EXISTS,
+            }
+            assert _outcome(root) is Outcome.STOPPED

@@ -96,6 +96,10 @@ def started(projection: Projection) -> None:
     if not isinstance(data, e.RunStartedData):
         message = "run_started requires RunStartedData"
         raise TypeError(message)
+    # A journal that holds several segments of one run (each resume appends one) replays them in
+    # one state: a segment's ending belongs to that segment and must not decide the next one's.
+    projection.epoch_ended = False
+    projection.ending = None
     overview = data.overview
     objective = None if overview is None else overview.objective
     evaluator = None if overview is None else overview.benchmarks.evaluator

@@ -12,7 +12,13 @@ from vibesys.api.auxiliary import (
 from vibesys.api.contracts import RunResult, RunStatus
 from vibesys.api.store import open_run_store
 from vibesys.composition import resolve_agent_specs
-from vibesys.events import CoreEventType, EventStatus, RunFailedData, RunStartedData
+from vibesys.events import (
+    INTERRUPTS,
+    CoreEventType,
+    EventStatus,
+    RunFailedData,
+    RunStartedData,
+)
 from vibesys.orchestration.agent_options import attribution_command_of, objective_axes_of
 from vibesys.plugin_catalog import project_run
 from vibesys.run.core_run import (
@@ -135,8 +141,8 @@ async def run_plugin(  # noqa: PLR0913  # lint-waiver: LW-040002 [PLR0913]; the 
 
 
 def unwinding(exc: BaseException) -> tuple[CoreEventType, str, EventStatus]:
-    """How a run that left by an exception ends: a user interrupt is a stop, anything else a failure."""
-    if isinstance(exc, KeyboardInterrupt):
+    """How a run that left by an exception ends: an interrupt or a cancellation is a stop, anything else a failure."""
+    if isinstance(exc, INTERRUPTS):
         return CoreEventType.STOPPED, "Run stopped by interrupt", EventStatus.INTERRUPTED
     return CoreEventType.RUN_FAILED, f"{type(exc).__name__}: {exc}", EventStatus.FAILED
 

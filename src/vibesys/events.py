@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import datetime
 from enum import StrEnum
-from typing import Annotated, Any, ClassVar, Literal, Protocol
+from typing import Annotated, Any, ClassVar, Final, Literal, Protocol
 
 from pydantic import (
     BaseModel,
@@ -152,6 +153,11 @@ class EventStatus(StrEnum):
     CANCELLED = "cancelled"
     INTERRUPTED = "interrupted"
 
+
+INTERRUPTS: Final = (KeyboardInterrupt, asyncio.CancelledError)
+"""The exceptions that end a run from outside (a terminal interrupt, the run's task cancelled).
+
+A run they unwind is stopped, not failed; any other exception is a failure."""
 
 OutputStream = Literal["stdout", "stderr"]
 ExecutionActivityMode = Literal["thinking", "responding", "tool", "waiting"]

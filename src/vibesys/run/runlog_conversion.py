@@ -13,6 +13,8 @@ exist need to migrate; it is not a general converter.
 
 from __future__ import annotations
 
+import asyncio
+import builtins
 import json
 from contextlib import closing
 from dataclasses import dataclass
@@ -23,7 +25,7 @@ from typing import TYPE_CHECKING
 
 from vibesys.chat._legacy import import_legacy_chat
 from vibesys.chat._session import ChatRuntime
-from vibesys.events import CoreEvent, CoreEventType, EventStatus
+from vibesys.events import INTERRUPTS, CoreEvent, CoreEventType, EventStatus
 from vibesys.run.runlog_tee import JOURNAL_EVENT_MAX_BYTES, RunLogTee
 from vs_decode.api import Unreadable, decode_json
 from vs_project.api import Project, ProjectError
@@ -102,12 +104,16 @@ def _with_agent_identity(line: bytes) -> bytes:
 
 
 def _is_interrupt(event: CoreEvent) -> bool:
-    """Whether a pre-schema run ended by a user interrupt, which it recorded as a failure."""
-    return (
-        event.type is CoreEventType.RUN_FAILED
-        and event.data is None
-        and (event.text == "KeyboardInterrupt" or event.text.startswith("KeyboardInterrupt:"))
-    )
+    """Whether a pre-schema run ended by an interrupt or a cancellation, which it recorded as a failure.
+
+    The journal names the exception's class (``Name: message``). The class decides, as it does
+    for a native run (``INTERRUPTS``), not a list of names.
+    """
+    if event.type is not CoreEventType.RUN_FAILED or event.data is not None:
+        return False
+    name = event.text.partition(":")[0]
+    named = getattr(builtins, name, None) or getattr(asyncio, name, None)
+    return isinstance(named, type) and issubclass(named, INTERRUPTS)
 
 
 def _journal_line(line: bytes, event: CoreEvent) -> bytes:
