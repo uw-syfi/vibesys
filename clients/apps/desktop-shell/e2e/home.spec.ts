@@ -3,9 +3,9 @@ import type {FakeBridgeSeed} from './fake-bridge.js';
 import {type FakeHostWindow, listed, open, SEED, server, sidebar} from './world.js';
 
 /**
- * The app's home follows whether it knows of any run: with none on any machine it is New run and
- * the rail has no Runs; once a machine lists one, Runs appears and is the home. The mark goes home
- * in both cases.
+ * The app never changes screen by itself. It opens on Runs, which reads while the machines answer
+ * and says there is no run when they hold none, with a New run action. The mark goes home, which is
+ * New run while no run is known and the Runs dashboard once a machine lists one.
  */
 
 test.use({viewport: {width: 1440, height: 900}});
@@ -28,13 +28,16 @@ async function expectNewRun(page: Page): Promise<void> {
   await expect(page.getByRole('heading', {name: 'Runs', level: 1})).toHaveCount(0);
 }
 
-test('with no run on any machine the app opens on New run and the rail has no Runs', async ({
+test('with no run on any machine the app opens on Runs, which says so and offers New run', async ({
   page,
 }) => {
   await open(page, NO_RUNS);
+  await expect(page.getByRole('heading', {name: 'Runs', level: 1})).toBeVisible();
+  await expect(page.getByText('No runs', {exact: true})).toBeVisible();
+  await expect(rail(page, 'Machines')).toBeVisible();
+  await page.getByRole('button', {name: 'New run', exact: true}).click();
   await expectNewRun(page);
   await expect(rail(page, 'Runs')).toHaveCount(0);
-  await expect(rail(page, 'Machines')).toBeVisible();
 });
 
 test('the mark goes to New run while there is no run, from any screen', async ({page}) => {
@@ -49,6 +52,8 @@ test('a run appearing adds Runs to the rail, and the mark then goes to the dashb
   page,
 }) => {
   await open(page, NO_RUNS);
+  await rail(page, 'VibeSys').click();
+  await expectNewRun(page);
   await expect(rail(page, 'Runs')).toHaveCount(0);
   await page.evaluate(
     listing => (window as unknown as FakeHostWindow).fakeHost.listing(listing),

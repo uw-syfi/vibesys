@@ -4,7 +4,9 @@ import {
   Card,
   type ChartKeyItem,
   Chip,
+  EmptyState,
   Field,
+  LoadingBar,
   type MenuItem,
   OverviewGroup,
   OverviewTile,
@@ -101,8 +103,9 @@ function Draft(props: {readonly draft: RunsDraft}): JSX.Element {
 /**
  * The Runs dashboard: a header row with the title, the chart key and a Group by select, then every
  * run's tile in groups on a grid that fills the width, the runs that need their user first, each
- * run in one group. With no run it is the header alone. Pressing a tile opens its run (`open` is
- * handed the tile's id); `menu` is a tile's row menu.
+ * run in one group. With no run it says so, with a New run action, or while the machines are
+ * still answering (`reading`) that it is reading. Pressing a tile opens its run (`open` is handed
+ * the tile's id); `menu` is a tile's row menu.
  */
 export function RunsScreen(props: {
   readonly tiles: readonly Tile[];
@@ -114,6 +117,9 @@ export function RunsScreen(props: {
   readonly open: (id: string) => void;
   readonly menu: (id: string) => readonly MenuItem[];
   readonly draft: RunsDraft | null;
+  /** Whether the machines have not yet said what runs they hold. */
+  readonly reading: boolean;
+  readonly newRun: () => void;
   /** What to say when saved runs could not be read; none when all were. */
   readonly notice: {readonly title: string; readonly body: string} | null;
 }): JSX.Element {
@@ -160,6 +166,14 @@ export function RunsScreen(props: {
           <Banner tone="warn" title={props.notice.title} body={props.notice.body} />
         )}
         {props.draft === null ? null : <Draft draft={props.draft} />}
+        {tiles.length > 0 ? null : props.reading ? (
+          <LoadingBar label="Reading runs" />
+        ) : (
+          <EmptyState
+            title="No runs"
+            action={<Button variant="secondary" text="New run" press={props.newRun} />}
+          />
+        )}
         {groupTiles(tiles, by).map(group => (
           <OverviewGroup
             key={group.key}

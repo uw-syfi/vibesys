@@ -150,7 +150,14 @@ function coldStartStores(bridge: WelcomeBridge, clock: FakeClock) {
   );
 }
 
-test('property: a cold start with any arrival order and timing selects no run, and New run only for an empty listing after the bound', async () => {
+/** What the Runs screen says: it is reading, it holds a run, or it says there is none. */
+function runsScreenSays(container: HTMLElement): 'reading' | 'runs' | 'none' | null {
+  if (container.querySelector('[role="progressbar"]') !== null) return 'reading';
+  if (container.textContent?.includes('No runs')) return 'none';
+  return container.querySelector('.vs-overview-tile') === null ? null : 'runs';
+}
+
+test('property: a cold start with any arrival order and timing never leaves Runs by itself', async () => {
   await fc.assert(
     fc.asyncProperty(SCENARIO, async ({holdsRuns, order, gaps}) => {
       const world = coldStartWorld(holdsRuns);
@@ -159,20 +166,19 @@ test('property: a cold start with any arrival order and timing selects no run, a
       const container = document.createElement('div');
       const root = createRoot(container);
       const arrived = new Set<Arrival>();
-      let switched = false;
+      // No one pressed anything: the screen is the one the window opened on, at every instant.
       const check = () => {
-        const selection = stores.sidebar.store.getState().selection;
-        expect(selection.kind).not.toBe('run');
-        if (selection.kind !== 'new-run' || switched) return;
-        switched = true;
+        expect(stores.sidebar.store.getState().selection.kind).toBe('runs');
+        const says = runsScreenSays(container);
         // Listing events wait for the overview that carries their cursor: only it tells the shell of runs.
-        const evidence = holdsRuns && arrived.has('overview');
-        // The wait for the machines is over, or they have all said there is nothing.
         const settledEmpty = !holdsRuns && arrived.has('overview') && arrived.has('machines');
-        expect(!evidence && (settledEmpty || clock.now() >= WAIT_MS)).toBe(true);
+        if (settledEmpty) expect(says).toBe('none');
+        else if (!arrived.has('overview')) expect(says).toBe('reading');
+        else if (holdsRuns) expect(says).not.toBe('none');
       };
       try {
         await act(async () => root.render(<Shell stores={stores} version="0" />));
+        check();
         for (const [index, event] of order.entries()) {
           await act(async () => clock.advanceBy(gaps[index] ?? 1));
           await settle();
@@ -185,14 +191,53 @@ test('property: a cold start with any arrival order and timing selects no run, a
         await act(async () => clock.advanceBy(WAIT_MS + 1));
         await settle();
         check();
-        const finalSelection = stores.sidebar.store.getState().selection.kind;
-        // Nothing the user did moved the app off the home its listing calls for.
-        if (holdsRuns) expect(finalSelection === 'runs' || switched).toBe(true);
-        else expect(finalSelection).toBe('new-run');
       } finally {
         await act(async () => root.unmount());
       }
     }),
     {numRuns: 20, seed: 341813},
   );
+});
+
+test('a listing that arrives long after the old four second bound finds the window still on Runs', async () => {
+  const world = coldStartWorld(true);
+  const clock = new FakeClock();
+  const stores = coldStartStores(world.bridge, clock);
+  const container = document.createElement('div');
+  const root = createRoot(container);
+  try {
+    await act(async () => root.render(<Shell stores={stores} version="0" />));
+    await act(async () => clock.advanceBy(WAIT_MS * 10));
+    await settle();
+    expect(stores.sidebar.store.getState().selection.kind).toBe('runs');
+    expect(runsScreenSays(container)).toBe('reading');
+    for (const event of ARRIVALS) await act(async () => world.arrive(event));
+    await settle();
+    expect(stores.sidebar.store.getState().selection.kind).toBe('runs');
+    expect(runsScreenSays(container)).toBe('runs');
+  } finally {
+    await act(async () => root.unmount());
+  }
+});
+
+test('the empty Runs screen offers New run, and pressing it is what opens New run', async () => {
+  const world = coldStartWorld(false);
+  const clock = new FakeClock();
+  const stores = coldStartStores(world.bridge, clock);
+  const container = document.createElement('div');
+  const root = createRoot(container);
+  try {
+    await act(async () => root.render(<Shell stores={stores} version="0" />));
+    for (const event of ARRIVALS) await act(async () => world.arrive(event));
+    await settle();
+    expect(runsScreenSays(container)).toBe('none');
+    const press = [...container.querySelectorAll('button')].find(
+      each => each.textContent === 'New run',
+    );
+    expect(press).toBeDefined();
+    await act(async () => press?.click());
+    expect(stores.sidebar.store.getState().selection.kind).toBe('new-run');
+  } finally {
+    await act(async () => root.unmount());
+  }
 });

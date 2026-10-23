@@ -60,7 +60,7 @@ import type {RecentRun, RunRef} from '@vibesys/runs';
 import {sameRun} from '@vibesys/runs';
 import type {Store} from '@vibesys/store';
 import {applyTheme, Card, EmptyState, Page, type ThemeTarget, WindowFrame} from '@vibesys/ui';
-import {type JSX, useEffect, useMemo, useState, useSyncExternalStore} from 'react';
+import {type JSX, useMemo, useSyncExternalStore} from 'react';
 import {GatewayRun} from './gateway-run.js';
 import {runCounts, runInput} from './shell-runs.js';
 
@@ -391,6 +391,7 @@ function RunsRoute(props: {
   readonly tiles: readonly Tile[];
   readonly stores: ShellStores;
   readonly draft: RunsDraft | null;
+  readonly reading: boolean;
   readonly select: (screen: Screen) => void;
 }): JSX.Element {
   const {rows, stores, select} = props;
@@ -419,6 +420,8 @@ function RunsRoute(props: {
         ];
       }}
       draft={props.draft}
+      reading={props.reading}
+      newRun={() => select({kind: 'new-run'})}
       notice={
         gaps.length === 0
           ? recentNotice(stores.sidebar.store.getState().skippedRecent)
@@ -488,17 +491,6 @@ function UsageRoute(props: {
   );
 }
 
-/** How long the app waits for its machines to say whether they hold runs, in milliseconds. */
-const HOME_WAIT_MS = 4000;
-
-/** Whether the wait for the machines' listings is over: they all answered, or `HOME_WAIT_MS` passed. */
-function useListingsWaited(schedule: Schedule): boolean {
-  const [waited, setWaited] = useState(false);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: one wait for the window's life; `schedule` is the window's own timers.
-  useEffect(() => schedule(() => setWaited(true), HOME_WAIT_MS), []);
-  return waited;
-}
-
 /** The window: the rail and the selected screen. */
 export function Shell(props: {
   readonly stores: ShellStores;
@@ -512,23 +504,17 @@ export function Shell(props: {
   const tiles = useMemo(() => tilesOf(rows.map(row => runInput(row, Date.now()))), [rows]);
   const counts = useMemo(() => runCounts(rows), [rows]);
   const select = (screen: Screen): void => sidebar.store.dispatch({type: 'select', screen});
-  const waited = useListingsWaited(props.stores.schedule);
   const machinesListed = machineCounts(machinesState).listed;
   const known = runsKnown(
     sidebarState,
     machinesListed ? machinesState.machines.map(each => each.host) : null,
   );
-  // With no run on any machine the home is New run, and Runs is not offered; until the machines
-  // have answered (bounded by `HOME_WAIT_MS`) the home screen waits blank instead of flashing.
-  const homeless = known === 'none' || (known === 'unknown' && waited);
-  const home: Screen = homeless ? {kind: 'new-run'} : {kind: 'runs'};
-  const atHome = sidebarState.selection.kind === 'runs';
-  useEffect(() => {
-    if (atHome && homeless) select({kind: 'new-run'});
-  });
+  // The window never changes screen by itself, on a clock or on what a machine says: Runs reads
+  // while the machines answer and says so when they hold no run. Only the mark, pressed, goes to
+  // New run when none is known.
+  const home: Screen = known === 'none' ? {kind: 'new-run'} : {kind: 'runs'};
   const draft = runsDraft(newRunState, select, newRun.dispatch);
   const screen = (selected: Screen): JSX.Element => {
-    if (selected.kind === 'runs' && known === 'unknown' && !waited) return <Page>{null}</Page>;
     switch (selected.kind) {
       case 'new-run':
         return (
@@ -557,6 +543,7 @@ export function Shell(props: {
             tiles={tiles}
             stores={props.stores}
             draft={draft}
+            reading={known === 'unknown'}
             select={select}
           />
         );
@@ -584,7 +571,7 @@ export function Shell(props: {
         needsYou: needsYou(tiles).length,
         machineWarning: attention === null ? null : problemWord(attention),
       }}
-      showRuns={known === 'some'}
+      showRuns={known === 'some' || sidebarState.selection.kind === 'runs'}
       home={home}
       screen={screen}
     />
