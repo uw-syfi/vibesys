@@ -589,8 +589,11 @@ Every screen (Settings, Machines, New run, the Run screen, the sidebar) has one 
   no state that changes behavior. The desktop shell is React.
 - **Native `<dialog>`.** Sheets are `<dialog>` opened with `showModal()`: focus containment, inert
   background, Esc, and return of focus to the opener come from the platform.
-- **Data from watches.** Host panels and Recent statuses fold `instances.watch` pushes; there is no
-  manual refresh path to forget.
+- **Data from watches.** Host panels and Recent statuses fold the host gateway's `WatchRuns` stream
+  (`@vibesys/connection`'s `runWatch`, projected by `hostListingFromRuns`); the listing and the
+  connection status do not ask the host's helper, and an observed stream reconnects with a growing
+  delay and is dropped after 30 seconds of silence. Digests and the usage window are registered
+  reads (`ListRunDigests`, `UsageWindow`). There is no manual refresh path to forget.
 
 The desktop window (`apps/desktop-shell`, the only renderer since the cutover, #2850) follows the same rules: the sidebar
 store (`@vibesys/feature-app-shell`) folds the listings, Recent and the archived runs, and the
