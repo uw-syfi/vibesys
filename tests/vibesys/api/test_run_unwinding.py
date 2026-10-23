@@ -28,6 +28,7 @@ def test_only_an_interrupt_or_a_cancellation_is_a_stop(
 
 
 @pytest.mark.regression
+@example(error=asyncio.CancelledError, text="")
 @given(
     error=st.sampled_from([KeyboardInterrupt, asyncio.CancelledError]), text=st.text(max_size=30)
 )

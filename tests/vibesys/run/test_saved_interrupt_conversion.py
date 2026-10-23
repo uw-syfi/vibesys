@@ -287,6 +287,8 @@ ENDINGS = ["finished", "failed", "cancelled", "interrupted", "stopped"]
 
 
 @pytest.mark.regression
+@example(segments=["cancelled", "stopped"])
+@example(segments=["failed", "interrupted", "finished"])
 @given(segments=st.lists(st.sampled_from(ENDINGS), min_size=1, max_size=6))
 def test_a_resumed_run_reads_as_its_last_segment_ends(segments: list[str]) -> None:
     """An earlier segment's ending never decides the run's: each resume starts its own."""
