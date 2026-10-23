@@ -2,6 +2,7 @@ package server_test
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -21,6 +22,7 @@ func TestWatchRunsCarriesPublishedProject(t *testing.T) {
 		t.Run(fmt.Sprint(variant), func(t *testing.T) {
 			ticker := &fakeTicker{ticks: make(chan time.Time, 1), stopped: make(chan struct{})}
 			f := startWithClock(t, &fakeClock{ticker: ticker})
+			project := externalFixture(t, &f, variant)
 			lock, err := os.OpenFile(filepath.Join(f.run, "run.lock"), os.O_CREATE|os.O_RDWR, 0600)
 			if err != nil {
 				t.Fatal(err)
@@ -29,7 +31,6 @@ func TestWatchRunsCarriesPublishedProject(t *testing.T) {
 			if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 				t.Fatal(err)
 			}
-			project := fmt.Sprintf("/projects/project %d", variant)
 			directory, err := filepath.EvalSymlinks(f.run)
 			if err != nil {
 				t.Fatal(err)
@@ -104,6 +105,7 @@ func TestWatchRunsNeverPublishesAnEmptyOrRelativeAddress(t *testing.T) {
 // Republishing only routing metadata wakes an existing stream even when its index link is unchanged.
 func TestWatchRunsObservesAddressBackfillAndRejectsStaleTargets(t *testing.T) {
 	f := start(t)
+	project := externalFixture(t, &f, 0)
 	if err := os.Mkdir(filepath.Join(f.root, "run-addresses"), 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -123,12 +125,12 @@ func TestWatchRunsObservesAddressBackfillAndRejectsStaleTargets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	data, err := proto.Marshal(&storev1.RunAddress{ProjectRoot: "/project", LogDirectory: directory})
+	data, err := proto.Marshal(&storev1.RunAddress{ProjectRoot: project, LogDirectory: directory})
 	if err != nil {
 		t.Fatal(err)
 	}
 	publishAddress(t, f, data)
-	if got := watchEntry(t, stream); got.GetProjectRoot() != "/project" {
+	if got := watchEntry(t, stream); got.GetProjectRoot() != project {
 		t.Fatalf("backfill not delivered: %v", got)
 	}
 	stale, err := proto.Marshal(&storev1.RunAddress{ProjectRoot: "/other-project", LogDirectory: "/other-logs"})
@@ -136,9 +138,23 @@ func TestWatchRunsObservesAddressBackfillAndRejectsStaleTargets(t *testing.T) {
 		t.Fatal(err)
 	}
 	publishAddress(t, f, stale)
-	if got := watchEntry(t, stream); got.ProjectRoot != nil {
-		t.Fatalf("misrouted stale index address: %v", got)
+	// A committed head is the receipt: inspect every intervening frame, rather
+	// than accepting an earlier liveness update as evidence about the sidecar.
+	head, err := proto.Marshal(&storev1.RunHead{Strategy: "search", Epoch: 1, CommittedSeq: proto.Uint64(0), PerformanceStated: true, AwaitingLifecycle: true})
+	if err != nil {
+		t.Fatal(err)
 	}
+	write(t, filepath.Join(f.run, "run.head"), false, head)
+	for {
+		got := watchEntry(t, stream)
+		if got.GetProjectRoot() != project {
+			t.Fatalf("lost validated location on stale sidecar: %v", got)
+		}
+		if got.GetHead().GetEpoch() == 1 {
+			break
+		}
+	}
+
 }
 
 func publishAddress(t *testing.T, f fixture, data []byte) {
@@ -147,5 +163,74 @@ func publishAddress(t *testing.T, f fixture, data []byte) {
 	write(t, staged, false, data)
 	if err := os.Rename(staged, filepath.Join(f.root, "run-addresses", "run-1.pb")); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func externalFixture(t *testing.T, f *fixture, variant int) string {
+	t.Helper()
+	base, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	project := filepath.Join(base, fmt.Sprintf("project-%d", variant))
+	if err := os.Mkdir(project, 0700); err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256([]byte(project))
+	directory := filepath.Join(f.root, "projects", fmt.Sprintf("project-%d-%x", variant, digest[:6]), "runs", "run-1", "logs")
+	if err := os.MkdirAll(directory, 0700); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(f.root, "runs", "run-1")
+	if err := os.Remove(link); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(directory, link); err != nil {
+		t.Fatal(err)
+	}
+	f.run = directory
+	return project
+}
+
+// A syntactically correct external key cannot make state inside a project routable.
+// Project's forward layout rejects these roots as well.
+func TestWatchRunsRejectsExternalStateInsideRecordedProject(t *testing.T) {
+	for depth := 0; depth < 3; depth++ {
+		f := start(t)
+		home, err := filepath.EvalSymlinks(f.root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		root := home
+		for i := 0; i < depth; i++ {
+			root = filepath.Dir(root)
+		}
+		digest := sha256.Sum256([]byte(root))
+		slug := filepath.Base(root)
+		if root == filepath.Dir(root) {
+			slug = "project"
+		}
+		directory := filepath.Join(home, "projects", fmt.Sprintf("%s-%x", slug, digest[:6]), "runs", "run-1", "logs")
+		if err := os.MkdirAll(directory, 0700); err != nil {
+			t.Fatal(err)
+		}
+		link := filepath.Join(home, "runs", "run-1")
+		if err := os.Remove(link); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(directory, link); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Join(home, "run-addresses"), 0700); err != nil {
+			t.Fatal(err)
+		}
+		address, err := proto.Marshal(&storev1.RunAddress{ProjectRoot: root, LogDirectory: directory})
+		if err != nil {
+			t.Fatal(err)
+		}
+		write(t, filepath.Join(home, "run-addresses", "run-1.pb"), false, address)
+		if got := listing(t, f, client(t, f, false))["run-1"]; got.ProjectRoot != nil {
+			t.Fatalf("routed an invalid external layout: %v", got)
+		}
 	}
 }

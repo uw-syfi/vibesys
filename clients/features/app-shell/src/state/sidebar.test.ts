@@ -9,6 +9,7 @@ import {
   type RunRowStatus,
   recentRows,
   runNotices,
+  runProjectRoot,
   SIDEBAR_EMPTY,
   type SidebarAction,
   type SidebarRequest,
@@ -339,4 +340,35 @@ describe('runNotices', () => {
       }
     }
   });
+});
+
+test('property: unresolved live runs keep their sidebar state and notices without a control address', () => {
+  for (let seed = 0; seed < 64; seed++) {
+    const phase = seed % 2 === 0 ? 'running' : 'paused';
+    const unresolved = (status: 'running' | 'paused'): HostListing => {
+      const {projectRoot: _, ...run} = server(seed, `unknown-${seed}`, status);
+      return {
+        kind: 'listed',
+        host: 'ssh:host-b',
+        live: [],
+        ended: [],
+        unreadable: [],
+        unverified: [],
+        unknownProject: [{...run, alive: true}],
+      };
+    };
+    const before = unresolved('running');
+    const after = unresolved(phase);
+    const step = sidebarStep(SIDEBAR_EMPTY, {type: 'listing', listing: after});
+    const state = step.state;
+    expect(step.requests.filter(request => request.kind === 'read-digests')).toEqual([]);
+    expect(liveRows(state)[0]).toMatchObject({
+      title: 'Unknown project',
+      status: phase === 'paused' ? 'paused' : 'live',
+    });
+    expect(runProjectRoot(state, {host: after.host, runId: `unknown-${seed}`})).toBeUndefined();
+    expect(runNotices(before, after).map(notice => notice.kind)).toEqual(
+      phase === 'paused' ? ['paused'] : [],
+    );
+  }
 });

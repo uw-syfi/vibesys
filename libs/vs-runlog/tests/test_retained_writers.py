@@ -43,6 +43,12 @@ def test_saved_previous_writers_reopen_with_the_same_facts(tmp_path: Path, versi
         state = upgrade_skeleton(
             fold_skeleton(RunLogReader(stream), log_offset=(directory / "run.log").stat().st_size)
         )
+    if CASES[version].get("epoch_project_absent", False):
+        assert state.epochs
+        assert all(
+            version.epoch is not None and not version.epoch.has_field("project_root")
+            for version in state.epochs
+        )
     for path in (directory / "keyframes").glob("*.pb"):
         cached = upgrade_skeleton(Keyframe.from_binary(path.read_bytes()))
         prefix = [

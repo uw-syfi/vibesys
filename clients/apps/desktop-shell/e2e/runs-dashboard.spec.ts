@@ -1,4 +1,5 @@
 import {expect, type Page, test} from '@playwright/test';
+import {storeRunFixture} from '@vibesys/run-fixtures';
 import {
   dashboardWorld,
   listingOf,
@@ -9,6 +10,7 @@ import {
   open,
   type RunCase,
 } from './dashboard-world.js';
+import {installGateway, wire} from './fake-gateway.js';
 import type {FakeHostWindow} from './world.js';
 
 /**
@@ -330,6 +332,7 @@ test('on a machine whose VibeSys is too old for digests, a run still says its ow
 
 test('an addressless run remains visible when its project is unknown', async ({page}) => {
   const world = dashboardWorld([]);
+  await installGateway(page, wire(storeRunFixture('live')));
   await open(page, {
     ...world,
     listings: [
@@ -366,5 +369,8 @@ test('an addressless run remains visible when its project is unknown', async ({p
   const shots = process.env['SCREENS_DIR'];
   if (shots !== undefined)
     await page.screenshot({path: `${shots}/runs__unknown-project__1440.png`});
-  await expect(page.getByRole('heading', {name: 'Runs', level: 1})).toBeVisible();
+  await tile.getByRole('button', {name: /^Unknown project/}).click();
+  await expect(page.getByText('Project unknown', {exact: true})).toBeVisible();
+  for (const name of ['Resume', 'Pause', 'Pause now', 'Guidance'])
+    await expect(page.getByRole('button', {name, exact: true})).toHaveCount(0);
 });

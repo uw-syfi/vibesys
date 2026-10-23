@@ -48,6 +48,21 @@ func TestSavedPreviousWritersRetainInputFacts(t *testing.T) {
 			}
 			t.Run(name, func(t *testing.T) {
 				f := start(t)
+				project, err := filepath.EvalSymlinks(t.TempDir())
+				if err != nil {
+					t.Fatal(err)
+				}
+				f.run = filepath.Join(project, ".vibesys", "state", "local", "runs", "run-1", "logs")
+				if err := os.MkdirAll(f.run, 0700); err != nil {
+					t.Fatal(err)
+				}
+				link := filepath.Join(f.root, "runs", "run-1")
+				if err := os.Remove(link); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(f.run, link); err != nil {
+					t.Fatal(err)
+				}
 				directory := filepath.Join("../../../proto/testdata/retained", source.Name())
 				for _, name := range []string{"run.log", "run.head"} {
 					data, err := os.ReadFile(filepath.Join(directory, name))
@@ -122,7 +137,7 @@ func TestSavedPreviousWritersRetainInputFacts(t *testing.T) {
 					t.Fatalf("retained WatchRuns lost best: %v", observed)
 				}
 				if want.ProjectRoot != "" {
-					if observed.GetProjectRoot() != want.ProjectRoot {
+					if observed.GetProjectRoot() != project {
 						t.Fatalf("retained index lost project: %v", observed)
 					}
 					target, err := os.Readlink(filepath.Join(directory, "run.index"))
@@ -130,7 +145,9 @@ func TestSavedPreviousWritersRetainInputFacts(t *testing.T) {
 						t.Fatalf("retained index: %q, %v", target, err)
 					}
 					if !checkpoint {
-						pinRetainedWatch(t, directory, observed)
+						normalized := proto.Clone(observed).(*apiv1.WatchRunsResponse)
+						normalized.ProjectRoot = proto.String(want.ProjectRoot)
+						pinRetainedWatch(t, directory, normalized)
 					}
 				}
 				if observed.GetHead().GetObjective().GetInputValue() != want.Input {

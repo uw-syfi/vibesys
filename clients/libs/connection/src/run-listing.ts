@@ -134,10 +134,15 @@ export function watchedListing(host: HostKey, runs: ReadonlyMap<string, WatchedR
   const live: HostRun[] = [];
   const ended: HostRun[] = [];
   const unverified: string[] = [];
-  const unknownProject: Omit<HostRun, 'projectRoot'>[] = [];
+  const unknownProject: (Omit<HostRun, 'projectRoot'> & {alive?: boolean})[] = [];
   for (const [runId, run] of [...runs].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {
     if (run.projectRoot === undefined) {
-      unknownProject.push(listed(runId, run));
+      unknownProject.push({
+        ...listed(runId, run),
+        ...(run.liveness === RunLiveness.UNSPECIFIED
+          ? {}
+          : {alive: run.liveness === RunLiveness.ALIVE}),
+      });
     } else if (run.liveness === RunLiveness.UNSPECIFIED) unverified.push(runId);
     else
       (run.liveness === RunLiveness.ALIVE ? live : ended).push({

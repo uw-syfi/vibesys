@@ -15,12 +15,12 @@ CORPUS = Path(__file__).resolve().parents[3] / "proto/testdata/retained/64c1a8b7
 
 
 @pytest.mark.regression
-@example(input_value=100, candidate=102, minimize=False, reads=["head", "epoch", "project", "head"])
+@example(input_value=100, candidate=102, minimize=False, reads=["head", "epoch", "head"])
 @given(
     input_value=st.integers(0, 1000),
     candidate=st.integers(0, 2000),
     minimize=st.booleans(),
-    reads=st.lists(st.sampled_from(["head", "epoch", "project"]), min_size=1, max_size=10),
+    reads=st.lists(st.sampled_from(["head", "epoch"]), min_size=1, max_size=10),
 )
 def test_previous_performance_is_shared_by_every_observation(
     input_value: int, candidate: int, reads: list[str], *, minimize: bool
@@ -49,8 +49,6 @@ def test_previous_performance_is_shared_by_every_observation(
         for kind in [*reads, "head"]:
             if kind == "epoch":
                 assert reader.current_epoch(log) is not None
-            elif kind == "project":
-                reader.project_root(log)
             else:
                 head = reader.read(log)
                 assert head.performance_stated

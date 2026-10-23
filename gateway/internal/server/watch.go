@@ -95,6 +95,11 @@ rescan:
 			probes[entry.Name()] = probes[entry.Name()].observe(dir, head.GetEpoch(), live, h.config.Clock.Now())
 			if project, err := h.heads.project(h.config.Root, entry.Name(), dir, head); err == nil {
 				response.ProjectRoot = proto.String(project)
+			} else if old := previous[entry.Name()]; old != nil && old.ProjectRoot != nil {
+				// A last-known external root is still a proof only for the same physical key.
+				if root, err := externalProject(h.config.Root, entry.Name(), dir, old.GetProjectRoot()); err == nil {
+					response.ProjectRoot = proto.String(root)
+				}
 			}
 			current[entry.Name()] = response
 			directories[entry.Name()] = dir

@@ -28,7 +28,7 @@ type WriterAvailability = {readonly epoch: bigint} & (
       readonly relaunch: RelaunchTarget;
     }
   | {
-      readonly status: 'catching-up' | 'unknown' | 'locating';
+      readonly status: 'catching-up' | 'unknown' | 'unknown-project';
       readonly actions: readonly [];
       readonly relaunch: null;
     }
@@ -46,12 +46,12 @@ type WriterAvailability = {readonly epoch: bigint} & (
 export type WriterControls = WriterAvailability &
   (
     | {readonly status: 'ready'; readonly reference: RunReference}
-    | {readonly status: 'catching-up' | 'unknown' | 'locating'; readonly reference?: never}
+    | {readonly status: 'catching-up' | 'unknown' | 'unknown-project'; readonly reference?: never}
   );
 
 export function writerControls(facts: WriterFacts): WriterControls {
   const offered = writerAvailability(facts);
-  if (!facts.reference) return {...offered, status: 'locating', actions: [], relaunch: null};
+  if (!facts.reference) return {...offered, status: 'unknown-project', actions: [], relaunch: null};
   if (!facts.fresh) return {...offered, status: 'unknown', actions: [], relaunch: null};
   return offered.status === 'ready' ? {...offered, reference: facts.reference} : offered;
 }

@@ -312,9 +312,26 @@ test('property: every loading live run exposes the controls its writer admits th
 
 test('property: ready run controls follow the writer lifecycle and liveness, including interrupted writers and every ended run', async () => {
   await fc.assert(
-    fc.asyncProperty(STATE, LIVENESS, BACKGROUND, async (lifecycle, liveness, background) => {
-      await verifyOffers({...background, lifecycle, liveness, loading: false});
-    }),
+    fc.asyncProperty(
+      STATE,
+      LIVENESS,
+      BACKGROUND,
+      fc.boolean(),
+      async (lifecycle, liveness, background, unknownProject) => {
+        if (!unknownProject) {
+          await verifyOffers({...background, lifecycle, liveness, loading: false});
+          return;
+        }
+        await withPeer(
+          peerFor({...background, lifecycle, liveness, loading: false}),
+          async container => {
+            expect(controlButtons(container)).toEqual([]);
+            expect(container.textContent).toContain('Project unknown');
+          },
+          {projectRoot: undefined},
+        );
+      },
+    ),
     {numRuns: 32, seed: 229},
   );
 });
@@ -674,7 +691,7 @@ test('property: optional recorded facts never erase the catalog-addressed contro
             const buttons = controlButtons(container);
             if (!addressed) {
               expect(buttons).toEqual([]);
-              expect(container.textContent).toContain('Waiting for the host to locate this run');
+              expect(container.textContent).toContain('Project unknown');
             } else if (lifecycle.state.case === 'ended' || lifecycle.state.case === 'parked') {
               expect(buttons).toEqual(['Resume']);
               const before = container.textContent;

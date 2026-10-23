@@ -55,7 +55,6 @@ class _Prefix:
 class _Recovered:
     epoch: CurrentEpoch
     input_value: float | None
-    project_root: str | None = None
     head: RunHead | None = None
 
 
@@ -94,16 +93,6 @@ class HeadObserver:
                     projected.process = head.process
                     head = projected
             return head
-
-    def project_root(self, path: Path) -> str | None:
-        """Read a retained run's recorded project without requiring an address publication.
-
-        The same identity and commit fence memo as head reads owns this recovery.
-        Missing facts remain unknown; no discovery or writer restart is required.
-        """
-        with _damage_is_typed(path):
-            head = _read_raw_head(path) if path.with_name("run.head").exists() else None
-            return self._recovered(path, head).project_root if path.exists() else None
 
     def current_epoch(self, path: Path) -> CurrentEpoch | None:
         """Derive an external reader's epoch from exactly the head's committed prefix.
@@ -145,14 +134,11 @@ class HeadObserver:
 
 def _recover_prefix(log: Path, head: RunHead | None) -> _Recovered:
     facts, upgrade = CurrentEpoch(), InputUpgrade()
-    project_root = None
     state = Keyframe()
     with log.open("rb") as stream:
         for record in _head_records(RunLogReader(stream), head, log):
-            if record.body is not None and record.body.field == "epoch_started":
-                project_root = record.body.value.project_root or project_root
             if head is None and not _legacy_epoch_record(record):
-                return _Recovered(CurrentEpoch(), None, project_root)
+                return _Recovered(CurrentEpoch(), None)
             facts = current_epoch((record,), facts)
             upgrade.apply(record)
             # Phase 1 observation prefixes may start at zero and have sequence gaps.
@@ -160,7 +146,7 @@ def _recover_prefix(log: Path, head: RunHead | None) -> _Recovered:
             if record.seq > 0:
                 state.through_seq = record.seq - 1
                 append_skeleton(state, record)
-    return _Recovered(facts, upgrade.measured, project_root, project_head(state))
+    return _Recovered(facts, upgrade.measured, project_head(state))
 
 
 def _prefix(log: Path, head: RunHead | None) -> _Prefix:

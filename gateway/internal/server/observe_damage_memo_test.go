@@ -213,9 +213,10 @@ func TestUnfencedRetainedHeadAndProjectShareOnePrefix(t *testing.T) {
 		t.Fatal(err)
 	}
 	root, err := observer.project(t.TempDir(), "run-a", dir, observed)
-	if err != nil || root != "/projects/unvisited project" {
-		t.Fatalf("project = %q, %v", root, err)
+	if root != "" || !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("an outside-layout run used a saved project: %q, %v", root, err)
 	}
+
 	if observer.scans != 1 {
 		t.Fatalf("same frozen prefix scanned %d times", observer.scans)
 	}

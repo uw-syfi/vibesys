@@ -7,11 +7,24 @@ import json
 import pytest
 from hypothesis import example, given
 from hypothesis import strategies as st
-from tests.server.performance_cases import FIELD, ROOT, generated_run
+from tests.server.performance_cases import FIELD, ROOT, generated_records, generated_run
 
 from server.run_digest import digest_store
-from vs_proto.api import Direction, IdeaOutcome, Outcome, outcome_presentation, validate
-from vs_runlog.api import project_head
+from vs_proto.api import (
+    RUN_LOG_MAGIC,
+    Direction,
+    Hold,
+    IdeaOutcome,
+    Lifecycle,
+    Oneof,
+    OperatorHold,
+    Outcome,
+    Record,
+    Running,
+    outcome_presentation,
+    validate,
+)
+from vs_runlog.api import RunLogReader, encode_frame, fold_skeleton, project_head, upgrade_skeleton
 
 
 @pytest.mark.regression
@@ -102,9 +115,68 @@ def test_cross_language_corpus_is_the_core_projection() -> None:
     assert json.loads(gzip.decompress((ROOT / "cases.json.gz").read_bytes())) == corpus()
 
 
+FOLD_CORPUS = ROOT.parent / "fold/cases.json.gz"
+
+
+def fold_corpus() -> list[dict[str, str]]:
+    """Raw generated and retained logs exercise both languages' real folds."""
+    cases = []
+    for shape in range(len(FIELD["shapes"])):
+        for seed in range(5):
+            records, _ = generated_records(
+                shape, seed, Direction.MIN if seed % 2 else Direction.MAX
+            )
+            for mode in ("ended", "running", "held") if seed == 0 else ("ended",):
+                history = [Record.from_binary(record.to_binary()) for record in records]
+                if mode != "ended":
+                    history[-1].body = Oneof(
+                        "lifecycle",
+                        Lifecycle(
+                            state=Oneof(
+                                "running",
+                                Running(
+                                    hold=Hold(reason=Oneof("operator", OperatorHold()))
+                                    if mode == "held"
+                                    else None
+                                ),
+                            )
+                        ),
+                    )
+                raw = RUN_LOG_MAGIC + b"".join(encode_frame(record) for record in history)
+                cases.append(_fold_case(f"shape-{shape}-seed-{seed}-{mode}", history, raw))
+    for log in sorted((ROOT.parent / "retained").glob("*/run.log")):
+        with log.open("rb") as stream:
+            records = list(RunLogReader(stream))
+        cases.append(_fold_case("retained-" + log.parent.name, records, log.read_bytes()))
+    return cases
+
+
+def _fold_case(name: str, records: list[Record], raw: bytes) -> dict[str, str]:
+    head = project_head(upgrade_skeleton(fold_skeleton(records, log_offset=len(raw))))
+    assert head is not None
+    # The Python encoder emits map entries in reverse insertion order.
+    # Insert descending keys to match deterministic protobuf wire order.
+    counts = dict(sorted(head.span_counts.items(), reverse=True))
+    head.span_counts.clear()
+    head.span_counts.update(counts)
+    return {
+        "name": name,
+        "log": base64.b64encode(raw).decode(),
+        "head": base64.b64encode(head.to_binary()).decode(),
+    }
+
+
+def test_raw_fold_corpus_is_the_python_projection() -> None:
+    assert json.loads(gzip.decompress(FOLD_CORPUS.read_bytes())) == fold_corpus()
+
+
 if __name__ == "__main__":
     (ROOT / "cases.json.gz").write_bytes(
         gzip.compress((json.dumps(corpus(), separators=(",", ":")) + "\n").encode(), mtime=0)
+    )
+    FOLD_CORPUS.parent.mkdir(parents=True, exist_ok=True)
+    FOLD_CORPUS.write_bytes(
+        gzip.compress(json.dumps(fold_corpus(), separators=(",", ":")).encode(), mtime=0)
     )
 
 

@@ -115,7 +115,10 @@ def project_performance(state: Keyframe, epoch: EpochStarted) -> list[SeriesPerf
     """
     spans = {
         key: history.versions[-1].span
-        for key, history in state.spans.items()
+        for key, history in sorted(
+            state.spans.items(),
+            key=lambda item: (item[1].versions[0].seq if item[1].versions else 0, item[0]),
+        )
         if history.versions and history.versions[-1].span is not None
     }
     owners, groups = _ideas(spans)

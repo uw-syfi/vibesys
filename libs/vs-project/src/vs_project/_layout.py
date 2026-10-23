@@ -10,19 +10,23 @@ contents remain outside this package.
 
 from __future__ import annotations
 
+import hashlib
 import re
+import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Self
 
 import vs_project._paths as project_paths
-from vs_project.errors import ProjectError
+from vs_project._manifests import _IDENTIFIER_PATTERN
+from vs_project.errors import ProjectError, ProjectStateError
 
 _CONFIGURATION_DIRECTORY_NAME = project_paths.CONFIGURATION_DIRECTORY_NAME
 _TASKS_DIRECTORY_NAME = project_paths.TASKS_DIRECTORY_NAME
 _OBJECTIVE_FILE_NAME = project_paths.OBJECTIVE_FILE_NAME
 _MANIFEST_FILE_NAME = project_paths.MANIFEST_FILE_NAME
 _DOCKERFILE_NAME = "Dockerfile"
+STATE_HOME_ENV = "VIBESYS_STATE_HOME"
 _TASK_NAME_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]{0,127}$")
 
 
@@ -483,3 +487,50 @@ def _require_contained(path: Path, root: Path, description: str) -> None:
 
 def _format_task_names(names: tuple[TaskName, ...]) -> str:
     return ", ".join(name.value for name in names) if names else "none"
+
+
+def external_project_state_directory(state_home: Path, project_root: Path) -> Path:
+    """Return a collision-resistant local directory for one canonical project path."""
+    normalized = unicodedata.normalize("NFKD", project_root.name).encode("ascii", "ignore").decode()
+    slug = re.sub(r"[^a-z0-9]+", "-", normalized.lower()).strip("-") or "project"
+    slug = slug[:64].rstrip("-") or "project"
+    digest = hashlib.sha256(project_root.as_posix().encode("utf-8")).hexdigest()[:12]
+    destination = state_home / "projects" / f"{slug}-{digest}"
+    if destination.resolve().is_relative_to(project_root.resolve()):
+        raise ProjectStateError.state_home_inside_project(STATE_HOME_ENV, state_home)
+    return destination
+
+
+def validate_run_id(run_id: str, *, source: Path | None = None) -> str:
+    """Validate a path-safe run identity before project I/O."""
+    if re.fullmatch(_IDENTIFIER_PATTERN, run_id) is None:
+        raise ProjectStateError.invalid_run_id(run_id, source)
+    return run_id
+
+
+def project_root_for_log_directory(
+    directory: Path | str, *, recorded_root: Path | str | None = None
+) -> Path | None:
+    """Validate both retained local and current externally keyed run layouts."""
+    path = Path(directory).resolve()
+    if (
+        not path.is_dir()
+        or len(path.parents)
+        < len((*project_paths.STATE_DIRECTORY_PATH.parts, "local", "runs", "run", "logs"))
+        or path.name != "logs"
+    ):
+        return None
+    try:
+        run_id = validate_run_id(path.parent.name)
+    except ProjectStateError:
+        return None
+    local_tail = project_paths.STATE_DIRECTORY_PATH / "local" / "runs" / run_id / "logs"
+    if path == path.parents[5] / local_tail:
+        return path.parents[5]
+    if recorded_root is None or not Path(recorded_root).is_absolute():
+        return None
+    root = Path(recorded_root).resolve()
+    if not root.is_dir() or path.parents[3].name != "projects" or path.is_relative_to(root):
+        return None
+    expected = external_project_state_directory(path.parents[4], root) / "runs" / run_id / "logs"
+    return root if path == expected else None

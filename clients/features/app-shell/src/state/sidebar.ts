@@ -48,6 +48,7 @@ import {
   endReason,
   liveDetail,
   liveLook,
+  liveRuns,
   liveStatus,
   type RowLook,
   type RunRowStatus,
@@ -558,8 +559,10 @@ function label(host: HostKey): string {
 }
 
 /** The newest record of each run in `runs`, by run id. */
-function newestByRun(runs: readonly HostRun[]): Map<string, HostRun> {
-  const newest = new Map<string, HostRun>();
+function newestByRun<T extends {readonly runId: string; readonly startedAt: number}>(
+  runs: readonly T[],
+): Map<string, T> {
+  const newest = new Map<string, T>();
   for (const run of runs) {
     const known = newest.get(run.runId);
     if (known === undefined || known.startedAt < run.startedAt) newest.set(run.runId, run);
@@ -587,9 +590,12 @@ export function titleOf(
 export function liveRows(state: SidebarState): RunRow[] {
   return state.listings.flatMap(listing => {
     if (listing.kind !== 'listed') return [];
-    return [...newestByRun(listing.live).values()].map(server => {
+    return [...newestByRun(liveRuns(listing)).values()].map(server => {
       const run: RunRef = {host: listing.host, runId: server.runId};
-      const title = titleOf(state, run, server.projectRoot);
+      const title =
+        server.projectRoot === undefined
+          ? 'Unknown project'
+          : titleOf(state, run, server.projectRoot);
       const detail = `${label(listing.host)} · ${liveDetail(server)}`;
       const trail = liveTrail(state.live[digestKey(run)]?.entry ?? null);
       return {

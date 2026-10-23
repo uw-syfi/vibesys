@@ -109,7 +109,7 @@ test('missing or invalid projects stay listed as typed unknown projects', () => 
       expect(runsKnown(state, [hostKey(HOST)])).toBe('some');
       expect(rows[0]).toMatchObject({
         project: null,
-        row: {title: 'Unknown project', detail: 'Project unknown'},
+        row: {title: 'Unknown project', status: 'live', detail: 'host-a · starting'},
       });
       expect(runProjectRoot(state, {host: hostKey(HOST), runId: 'run-a'})).toBeUndefined();
       const remembered = {
@@ -131,7 +131,7 @@ test('missing or invalid projects stay listed as typed unknown projects', () => 
         live: [],
         ended: [],
         unverified: [],
-        unknownProject: [{runId: 'run-a', phase: 'starting'}],
+        unknownProject: [{runId: 'run-a', phase: 'starting', alive: true}],
       });
     });
     const stream = gateway.open(HOST)[0];

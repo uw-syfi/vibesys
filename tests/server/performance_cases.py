@@ -46,7 +46,7 @@ ROOT = Path(__file__).resolve().parents[2] / "proto/testdata/performance"
 FIELD = json.loads((ROOT / "field-shapes.json").read_text())
 
 
-def generated_run(shape: int, seed: int, direction: Direction) -> tuple[Keyframe, float]:
+def generated_records(shape: int, seed: int, direction: Direction) -> tuple[list[Record], float]:
     """Vary field counts, missing readings, detached gates, failures, noise and worse results."""
     counts = FIELD["shapes"][shape]
     baseline = FIELD["inputs"][seed % len(FIELD["inputs"])]
@@ -198,4 +198,10 @@ def generated_run(shape: int, seed: int, direction: Direction) -> tuple[Keyframe
             )
         )
     )
-    return (fold_skeleton(records, log_offset=8), baseline)
+    return records, baseline
+
+
+def generated_run(shape: int, seed: int, direction: Direction) -> tuple[Keyframe, float]:
+    """Fold the same raw history exported to the differential readers."""
+    records, baseline = generated_records(shape, seed, direction)
+    return fold_skeleton(records, log_offset=8), baseline

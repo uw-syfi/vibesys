@@ -14,6 +14,7 @@ from vs_project._layout import (
     TaskDirectory,
     TaskName,
     TasksRoot,
+    project_root_for_log_directory,
 )
 from vs_project._state import ProjectState, _state_home, validate_run_id
 from vs_project._state_io import publish_run_link
@@ -197,6 +198,18 @@ class Project:
     def log_directory_for(cls, project_root: Path | str, run_id: str) -> Path:
         """Return a run log destination, including before a root is materialized."""
         return ProjectState.log_directory_for(project_root, run_id)
+
+    @classmethod
+    def from_log_directory(
+        cls, directory: Path | str, *, recorded_root: Path | str | None = None
+    ) -> Self | None:
+        """Resolve the physical run layout; a recorded root may only confirm its key.
+
+        Repository-local runs belong to their current enclosing project. External
+        runs resolve only when a recorded root reproduces their directory key.
+        """
+        root = project_root_for_log_directory(directory, recorded_root=recorded_root)
+        return cls.open(root) if root is not None else None
 
     @classmethod
     def run_head_path_for(cls, project_root: Path | str, run_id: str) -> Path:

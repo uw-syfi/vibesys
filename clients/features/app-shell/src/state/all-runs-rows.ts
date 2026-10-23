@@ -69,12 +69,14 @@ export function dashboardRows(state: SidebarState, clock: Clock): readonly Dashb
       createdAt: run.createdAt,
     };
   });
-  const seen = new Set(known.map(each => JSON.stringify(each.row.run)));
   const unknown: DashboardRow[] = state.listings.flatMap(listing => {
     if (listing.kind !== 'listed') return [];
     return (listing.unknownProject ?? []).flatMap(run => {
       const ref = {host: listing.host, runId: run.runId};
-      if (seen.has(JSON.stringify(ref)) || state.archived.some(each => sameRun(each, ref)))
+      if (
+        known.some(each => sameRun(each.row.run, ref)) ||
+        state.archived.some(each => sameRun(each, ref))
+      )
         return [];
       const machine = hostLabel(hostFromKey(listing.host));
       return [
@@ -84,15 +86,15 @@ export function dashboardRows(state: SidebarState, clock: Clock): readonly Dashb
           task: null,
           project: null,
           createdAt: run.startedAt * 1000,
-          row: {
+          row: live.find(each => sameRun(each.run, ref)) ?? {
             run: ref,
             title: 'Unknown project',
-            detail: 'Project unknown',
+            detail: '',
             trail: null,
             tooltip: `${machine}: ${run.runId}: Project unknown`,
             status: 'unknown',
             look: {tone: 'neutral', word: 'Project unknown'},
-            problem: {text: 'Project unknown', retry: false},
+            problem: null,
             now: null,
             startedAt: run.startedAt === 0 ? null : run.startedAt * 1000,
             digest: null,

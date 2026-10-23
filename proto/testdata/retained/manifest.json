@@ -63,5 +63,22 @@
     "best": 102,
     "ratio": 1.02,
     "measured": 2
+  },
+  "f0e0f620": {
+    "writer_commit": "f0e0f62018bcafd82a02a3d7fab7ba511e2f648c",
+    "producer": "64c1a8b7 retained facts with project_root removed from the input records, replayed through the actual pre-project_root writer; no sidecar",
+    "input": 100,
+    "candidate": "gate-0",
+    "vs_baseline": 1.01,
+    "chart_reference": 100,
+    "measurement_seq": 14,
+    "head_input_absent": true,
+    "input_span": "input-gate",
+    "best": 102,
+    "ratio": 1.02,
+    "measured": 2,
+    "project_root": "/projects/unvisited project",
+    "index_project_absent": true,
+    "epoch_project_absent": true
   }
 }

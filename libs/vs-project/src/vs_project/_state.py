@@ -38,6 +38,11 @@ import vs_project._paths as project_paths
 from vs_decode.api import Unreadable, ValidationOptions, decode_json
 from vs_project._control_inbox import FileControlInbox, validate_request_id
 from vs_project._framework_writes import FRAMEWORK_WRITES
+from vs_project._layout import STATE_HOME_ENV as _STATE_HOME_ENV
+from vs_project._layout import (
+    external_project_state_directory as _external_project_state_directory,
+)
+from vs_project._layout import validate_run_id
 from vs_project._manifests import (
     _IDENTIFIER_PATTERN,
     GitObjectId,
@@ -83,7 +88,6 @@ _STATE_DIRECTORY_PARTS = project_paths.STATE_DIRECTORY_PARTS
 _STATE_DIRECTORY_PATH = project_paths.STATE_DIRECTORY_PATH
 _STATE_DIRECTORY_POSIX = project_paths.STATE_DIRECTORY_POSIX
 _RUN_NAMESPACE_PART_COUNT = len(_STATE_DIRECTORY_PARTS) + 3
-_STATE_HOME_ENV = "VIBESYS_STATE_HOME"
 
 
 def is_project_state_path(relative_path: Path | str) -> bool:
@@ -1650,18 +1654,6 @@ def _state_home() -> Path:
     return root.resolve()
 
 
-def _external_project_state_directory(state_home: Path, project_root: Path) -> Path:
-    """Return a collision-resistant local directory for one canonical project path."""
-    normalized = unicodedata.normalize("NFKD", project_root.name).encode("ascii", "ignore").decode()
-    slug = re.sub(r"[^a-z0-9]+", "-", normalized.lower()).strip("-") or "project"
-    slug = slug[:64].rstrip("-") or "project"
-    digest = hashlib.sha256(project_root.as_posix().encode("utf-8")).hexdigest()[:12]
-    destination = state_home / "projects" / f"{slug}-{digest}"
-    if destination.resolve().is_relative_to(project_root.resolve()):
-        raise ProjectStateError.state_home_inside_project(_STATE_HOME_ENV, state_home)
-    return destination
-
-
 def _prepare_state_home(state_home: Path) -> None:
     """Create private user-state parents before any run metadata is written."""
     try:
@@ -1701,13 +1693,6 @@ def parse_run_manifest(contents: bytes, *, source: Path) -> OrchestrationRunMani
     if isinstance(decoded, Unreadable):
         raise ProjectStateError.invalid_metadata(source, decoded.details("metadata"))
     return decoded
-
-
-def validate_run_id(run_id: str, *, source: Path | None = None) -> str:
-    """Validate a path-safe run identity before project I/O."""
-    if re.fullmatch(_IDENTIFIER_PATTERN, run_id) is None:
-        raise ProjectStateError.invalid_run_id(run_id, source)
-    return run_id
 
 
 def _host_architecture() -> str:
