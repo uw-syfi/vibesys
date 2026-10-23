@@ -41,6 +41,7 @@ export {
   type HostListing,
   type HostRun,
   hostListing,
+  hostsComeUp,
   type InstanceObservation,
   instanceObservation,
   instancePhaseText,

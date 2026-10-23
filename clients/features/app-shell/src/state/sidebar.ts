@@ -16,6 +16,7 @@ import {
   type HostRun,
   hostFromKey,
   hostLabel,
+  hostsComeUp,
   type ListedRun,
   type MachineProblem,
   problemWord,
@@ -439,10 +440,7 @@ function hostOfKey(key: string): HostKey {
 
 /** Whether a host answers in `next` that did not in `before`: reads it failed may now succeed. */
 function reconnected(before: SidebarState, next: SidebarState): boolean {
-  const was = new Set(
-    before.listings.filter(listing => listing.kind === 'listed').map(listing => listing.host),
-  );
-  return next.listings.some(listing => listing.kind === 'listed' && !was.has(listing.host));
+  return hostsComeUp(before.listings, next.listings).length > 0;
 }
 
 /** The project listings the dashboard still needs: every known project's runs, on every screen. */

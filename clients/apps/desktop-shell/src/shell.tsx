@@ -54,7 +54,7 @@ import {
 } from '@vibesys/feature-settings/renderer';
 import {shownTheme} from '@vibesys/feature-settings/state';
 import {createUsageStore, type SpendRunRef, UsageScreen} from '@vibesys/feature-usage/renderer';
-import {type HostKey, hostFromKey, hostLabel, problemWord} from '@vibesys/hosts';
+import {type HostKey, hostFromKey, hostLabel, hostsComeUp, problemWord} from '@vibesys/hosts';
 import {gatewayBridge, settled, type WelcomeBridge} from '@vibesys/ipc';
 import type {RecentRun, RunRef} from '@vibesys/runs';
 import {sameRun} from '@vibesys/runs';
@@ -164,6 +164,7 @@ export function createShellStores(
     machineSettings.dispatch({type: 'hosts', hosts});
   });
   followCompute(newRun.store, machineSettings);
+  rereadOnReconnect(sidebar.store, machineSettings);
   let {recent, selection} = sidebar.store.getState();
   sidebar.store.subscribe(() => {
     const next = sidebar.store.getState();
@@ -228,6 +229,28 @@ function followCompute(
   newRun.subscribe(follow);
   machineSettings.subscribe(follow);
   follow();
+}
+
+/**
+ * A machine's Settings reading that failed because the machine was unreachable is read again when
+ * its connection comes up, so the user need not press Retry.
+ */
+function rereadOnReconnect(
+  sidebar: ShellStores['sidebar']['store'],
+  machineSettings: ShellStores['machineSettings'],
+): void {
+  let listings = sidebar.getState().listings;
+  sidebar.subscribe(() => {
+    const next = sidebar.getState().listings;
+    const up = hostsComeUp(listings, next);
+    listings = next;
+    for (const host of up) {
+      const view = machineSettings.getState().views[host];
+      for (const what of ['compute', 'logins'] as const) {
+        if (view?.[what].kind === 'failed') machineSettings.dispatch({type: 'refresh', host, what});
+      }
+    }
+  });
 }
 
 /**

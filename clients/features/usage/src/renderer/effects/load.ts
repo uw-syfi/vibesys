@@ -12,7 +12,7 @@ import type {ModelName, UsageOutcome, UsageSource, UsageSpan} from '../../state/
 /** The bridge calls the question makes. */
 export type UsageBridge = Pick<
   WelcomeBridge,
-  'overview' | 'projectRuns' | 'usageWindow' | 'harnesses'
+  'overview' | 'projectRuns' | 'usageWindow' | 'harnesses' | 'onListing'
 >;
 
 type Listed = Extract<HostListing, {readonly kind: 'listed'}>;

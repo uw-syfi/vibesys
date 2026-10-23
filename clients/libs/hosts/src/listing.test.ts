@@ -1,6 +1,13 @@
 import {describe, expect, test} from 'bun:test';
 import type {InstanceList} from '@vibesys/contracts/host-helper';
-import {type HostRun, hostListing, instanceObservation, instancePhaseText} from './listing.js';
+import {
+  type HostListing,
+  type HostRun,
+  hostListing,
+  hostsComeUp,
+  instanceObservation,
+  instancePhaseText,
+} from './listing.js';
 
 describe('instancePhaseText', () => {
   test('a starting run reads as its stage and progress, so a long image build is visible', () => {
@@ -168,5 +175,28 @@ describe('instanceObservation', () => {
       unreadable: ['unreadable'],
     };
     expect(instanceObservation(listing, TARGET)).toEqual({kind: 'absent'});
+  });
+});
+
+describe('hostsComeUp', () => {
+  const listed = (host: string): HostListing => ({
+    kind: 'listed',
+    host,
+    live: [],
+    ended: [],
+    unreadable: [],
+    unverified: [],
+  });
+  const down = (host: string): HostListing => ({
+    kind: 'unavailable',
+    host,
+    connection: {kind: 'offline', detail: 'unreachable'},
+  });
+
+  test('a host that answers now and did not before has come up; one that always did has not', () => {
+    expect(hostsComeUp([down('a'), listed('b')], [listed('a'), listed('b')])).toEqual(['a']);
+    expect(hostsComeUp([], [listed('a')])).toEqual(['a']);
+    expect(hostsComeUp([listed('a')], [listed('a')])).toEqual([]);
+    expect(hostsComeUp([listed('a')], [down('a')])).toEqual([]);
   });
 });

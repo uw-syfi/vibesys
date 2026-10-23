@@ -2,8 +2,11 @@
  * The Usage page's shell: its machine, with the question provided by `loadUsage`, seen as a store
  * the screen renders. The machine starts when the screen first subscribes and asks again each time
  * the screen is shown after it was left, so the page never opens on figures from an earlier visit
- * without saying it is reading them again.
+ * without saying it is reading them again. A machine whose connection comes up while the page is
+ * shown asks again, so figures that left it out, or a question that failed because it was
+ * unreachable, are read afresh without the user pressing Retry.
  */
+import {type HostListing, hostsComeUp} from '@vibesys/hosts';
 import {actorStore, clockFrom, type ScheduleTimeout} from '@vibesys/machine';
 import type {Store} from '@vibesys/store';
 import {createActor, fromPromise} from 'xstate';
@@ -71,6 +74,13 @@ export function createUsageStore(
   const inner = actorStore(actor, screenOf);
   let started = false;
   let watching = 0;
+  let listings: readonly HostListing[] = [];
+  bridge.onListing(event => {
+    const reachable = hostsComeUp(listings, [event.value]).length > 0;
+    listings = [...listings.filter(each => each.host !== event.value.host), event.value];
+    // A page that is not shown asks again when it is.
+    if (reachable && watching > 0) actor.send({type: 'refresh', clock: options.clock()});
+  });
   const store: Store<UsageScreenState, never> = {
     getState: inner.getState,
     dispatch: () => undefined,

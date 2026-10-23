@@ -380,3 +380,56 @@ test('property: cold-start data arrival never navigates away from Runs', async (
     {numRuns: 30, seed: 341807},
   );
 });
+
+test("a machine's Settings reading that failed while it was unreachable is read again when it comes up", async () => {
+  const ok = <T>(value: T) => Promise.resolve({ok: true as const, value});
+  const link = () =>
+    Promise.resolve({
+      ok: false as const,
+      error: 'down',
+      authNeeded: false,
+      cause: 'link' as const,
+    });
+  let up = false;
+  const bridge = {
+    ...fakeBridge(),
+    compute: () => (up ? ok({kind: 'unsupported' as const}) : link()),
+    agentLogins: () => (up ? ok({kind: 'unsupported' as const}) : link()),
+  } as WelcomeBridge;
+  const stores = createShellStores(
+    bridge,
+    {mode: 'light', onChange: () => undefined},
+    {setAttribute: () => undefined},
+    () => () => undefined,
+    {
+      messages: {addEventListener: ignore, removeEventListener: ignore},
+      address: NO_ADDRESS,
+      now: () => 0,
+      session: () => {
+        throw new Error('this test opens no run');
+      },
+    },
+    {},
+  );
+  const settleReads = async (): Promise<void> => {
+    for (let turn = 0; turn < 10; turn += 1) await Promise.resolve();
+  };
+  const view = () => stores.machineSettings.getState().views['ssh:gpu-box'];
+  stores.machineSettings.dispatch({type: 'refresh', host: 'ssh:gpu-box', what: 'compute'});
+  await settleReads();
+  expect(view()?.compute.kind).toBe('failed');
+  const listing = {
+    kind: 'unavailable' as const,
+    host: 'ssh:gpu-box',
+    connection: {kind: 'offline' as const, detail: 'down'},
+  };
+  stores.sidebar.store.dispatch({type: 'listing', listing});
+  up = true;
+  stores.sidebar.store.dispatch({
+    type: 'listing',
+    listing: {...listing, kind: 'listed', live: [], ended: [], unreadable: [], unverified: []},
+  });
+  await settleReads();
+  expect(view()?.compute.kind).toBe('ready');
+  expect(view()?.logins.kind).toBe('ready');
+});
