@@ -12,8 +12,11 @@ idempotent and never overwrites a conversation continued after it.
 from __future__ import annotations
 
 import json
+from contextlib import ExitStack
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import TYPE_CHECKING
 
 from vibesys.chat._session import ChatRuntime, run_head, session_head, text_message
@@ -32,7 +35,6 @@ from vs_runlog.api import FileRunContent, FileRunLogWriter, RunLock
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
-    from pathlib import Path
 
 JOURNAL = "run-events.jsonl"
 DEFAULT_THREAD = "default"
@@ -116,27 +118,25 @@ def _stamp(seconds: float) -> Timestamp:
     return Timestamp(seconds=whole, nanos=int((seconds - whole) * 1e9))
 
 
-def _committed(directory: Path) -> bool:
+def _committed(directory: Path, records: int) -> bool:
     head_path = directory / "run.head"
     if not head_path.exists():
         return False
     head = RunHead.from_binary(head_path.read_bytes())
     validate(head)
-    return head.committed_seq >= 1
+    return head.committed_seq >= records and (directory / "session.log").exists()
 
 
 def _write(
     directory: Path, thread_id: str, thread: _Thread, epoch: int, runtime: ChatRuntime
 ) -> None:
-    content = FileRunContent(directory / "blobs", directory / "streams")
+    content = FileRunContent(directory.parent / "blobs", directory.parent / "streams")
     with FileRunLogWriter(
         directory / "session.log",
         clock=runtime.clock,
         threads=runtime.threads,
         headline=session_head,
     ) as writer:
-        if writer.sequence:
-            return
 
         def append(event: ChatRecord, at: float) -> None:
             writer.append(
@@ -176,12 +176,18 @@ def import_legacy_chat(project_root: str, run_id: str, runtime: ChatRuntime) -> 
     for thread_id, thread in legacy_threads(journal).items():
         directory = Project.chat_session_directory_for(project_root, run_id, thread_id)
         directory.mkdir(parents=True, exist_ok=True)
-        gate = RunLock(directory / "admission.lock")
-        try:
-            if _committed(directory):
+        with ExitStack() as locks:
+            gate = RunLock(directory / "admission.lock")
+            locks.callback(gate.close)
+            if _committed(directory, 1 + 2 * len(thread.exchanges)):
                 continue
-            _write(directory, thread_id, thread, epoch, runtime)
+            writer_gate = RunLock(directory / "run.lock")
+            locks.callback(writer_gate.close)
+            with TemporaryDirectory(prefix=".legacy-import-", dir=directory) as temporary:
+                staged = Path(temporary)
+                _write(staged, thread_id, thread, epoch, runtime)
+                # The log is complete before it becomes visible; publish its commit fence last.
+                (staged / "session.log").replace(directory / "session.log")
+                (staged / "run.head").replace(directory / "run.head")
             written.append(thread_id)
-        finally:
-            gate.close()
     return tuple(written)

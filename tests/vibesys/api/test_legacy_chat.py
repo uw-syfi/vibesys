@@ -14,7 +14,7 @@ from tests.vibesys.api.test_chat_sessions import chat_project
 from vibesys.api.chat import ChatRuntime, import_legacy_chat
 from vs_project.api import Project
 from vs_proto.api import ChatMessage, ChatRole, RunHead, validate
-from vs_runlog.api import RunLogReader
+from vs_runlog.api import RunLogReader, encode_frame
 from vs_sim.api.testing import SimThreads
 
 TEXT = st.text(alphabet=st.characters(blacklist_categories=("Cs",)), max_size=40)
@@ -170,3 +170,35 @@ def test_every_journal_conversation_becomes_one_session_with_its_exchanges(
             )
             assert path.read_bytes() == content
         assert journal.read_bytes() == data
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize("prefix", [1, 2])
+def test_retry_replaces_every_incomplete_import_prefix(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, prefix: int
+) -> None:
+    """A crash after creation or either side of an exchange cannot publish a truncated import."""
+    monkeypatch.setenv("VIBESYS_STATE_HOME", str(tmp_path / "state"))
+    chat = chat_project(tmp_path / "project")
+    journal = Project.log_directory_for(chat.project_root, chat.run_id) / "run-events.jsonl"
+    data = journal_bytes(
+        [{"sequence": 1, "type": "chat", "text": "why?", "data": {"answer": "because"}}],
+        noise=False,
+    )
+    journal.write_bytes(data)
+    threads = SimThreads()
+    runtime = ChatRuntime(threads.clock, threads)
+    import_legacy_chat(chat.project_root, chat.run_id, runtime)
+    complete = session(chat.project_root, chat.run_id, "default")
+    directory = Project.chat_session_directory_for(chat.project_root, chat.run_id, "default")
+    # A durable prefix left by the preceding importer, including its published commit fence.
+
+    (directory / "session.log").write_bytes(
+        b"VSRLOG01" + b"".join(encode_frame(r) for r in complete[:prefix])
+    )
+    head = RunHead.from_binary((directory / "run.head").read_bytes())
+    head.committed_seq = prefix
+    (directory / "run.head").write_bytes(head.to_binary())
+    assert import_legacy_chat(chat.project_root, chat.run_id, runtime) == ("default",)
+    assert session(chat.project_root, chat.run_id, "default") == complete
+    assert journal.read_bytes() == data
