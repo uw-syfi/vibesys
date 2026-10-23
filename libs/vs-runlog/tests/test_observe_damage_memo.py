@@ -16,13 +16,16 @@ CASES = sorted(path.name for path in CORPUS.iterdir() if path.is_dir())
 
 @pytest.mark.regression
 @pytest.mark.parametrize("case", CASES)
-@example(kind="cut", at=1, reads=10)
+@example(kind="cut", at=1, reads=["head"] * 10)
+@example(kind="cut", at=1, reads=["head", "epoch"] * 5)
 @given(
     kind=st.sampled_from(["cut", "crc", "fence"]),
     at=st.integers(min_value=1, max_value=100_000),
-    reads=st.integers(min_value=2, max_value=20),
+    reads=st.lists(st.sampled_from(["head", "epoch"]), min_size=2, max_size=20),
 )
-def test_damaged_prefix_scan_bound_and_repair(case: str, kind: str, at: int, reads: int) -> None:
+def test_damaged_prefix_scan_bound_and_repair(
+    case: str, kind: str, at: int, reads: list[str]
+) -> None:
     """Generate torn frames, bad checksums and fences past EOF across retained writers."""
     original = (CORPUS / case / "run.log").read_bytes()
     head = RunHead.from_binary((CORPUS / case / "run.head").read_bytes())
@@ -38,11 +41,15 @@ def test_damaged_prefix_scan_bound_and_repair(case: str, kind: str, at: int, rea
         log = Path(temporary) / "run.log"
         log.write_bytes(damaged)
         log.with_name("run.head").write_bytes(head.to_binary())
-        for _ in range(reads):
+        for reader in reads:
+            observe = observer.read if reader == "head" else observer.current_epoch
             with pytest.raises(RunLogDamagedError):
-                observer.read(log)
+                observe(log)
         assert observer.scans == 1
         log.write_bytes(original)
         log.with_name("run.head").write_bytes((CORPUS / case / "run.head").read_bytes())
         assert observer.read(log).epoch == 1
+        epoch = observer.current_epoch(log)
+        assert epoch is not None
+        assert epoch.number == 1
         assert observer.scans == 2

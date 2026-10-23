@@ -51,7 +51,7 @@ class _Prefix:
 
 @dataclass(frozen=True)
 class _Recovered:
-    epoch: int
+    epoch: CurrentEpoch
     input_value: float | None
 
 
@@ -68,7 +68,6 @@ class HeadObserver:
         self.scans = 0
         self._capacity = capacity
         self._memo: OrderedDict[_Prefix, _Recovered | str] = OrderedDict()
-        self._epochs: OrderedDict[_Prefix, CurrentEpoch] = OrderedDict()
 
     def read(self, path: Path) -> RunHead:
         """Read a validated observation, never recovery state; files stay unchanged."""
@@ -82,7 +81,7 @@ class HeadObserver:
             )
             if (head.epoch == 0 or wants_input) and log.exists():
                 recovered = self._recovered(log, head)
-                head.epoch = head.epoch or recovered.epoch
+                head.epoch = head.epoch or recovered.epoch.number
                 if wants_input and recovered.input_value is not None and head.objective is not None:
                     head.objective.input_value = recovered.input_value
             return head
@@ -101,17 +100,9 @@ class HeadObserver:
                 if head is not None:
                     raise RunLogDamagedError(path, "run.head exists without run.log")
                 return None
-            key = _prefix(path, head)
-            if (known := self._epochs.get(key)) is not None:
-                self._epochs.move_to_end(key)
-                return known
-            self.scans += 1
-            with path.open("rb") as stream:
-                facts = _read_epoch_prefix(RunLogReader(stream), head, path)
-            self._remember(self._epochs, key, facts)
-            return facts
+            return current_epoch((), self._recovered(path, head).epoch)
 
-    def _recovered(self, log: Path, head: RunHead) -> _Recovered:
+    def _recovered(self, log: Path, head: RunHead | None) -> _Recovered:
         key = _prefix(log, head)
         if (known := self._memo.get(key)) is not None:
             self._memo.move_to_end(key)
@@ -119,23 +110,29 @@ class HeadObserver:
                 raise RunLogDamagedError(log, known)
             return known
         self.scans += 1
-        facts, upgrade = CurrentEpoch(), InputUpgrade()
         try:
-            with log.open("rb") as stream:
-                for record in _head_records(RunLogReader(stream), head, log):
-                    facts = current_epoch((record,), facts)
-                    upgrade.apply(record)
+            recovered = _recover_prefix(log, head)
         except ValueError as error:
-            self._remember(self._memo, key, str(error))
+            self._remember(key, str(error))
             raise
-        recovered = _Recovered(facts.number, upgrade.measured)
-        self._remember(self._memo, key, recovered)
+        self._remember(key, recovered)
         return recovered
 
-    def _remember[Fact](self, memo: OrderedDict[_Prefix, Fact], key: _Prefix, fact: Fact) -> None:
-        memo[key] = fact
-        if len(memo) > self._capacity:
-            memo.popitem(last=False)
+    def _remember(self, key: _Prefix, fact: _Recovered | str) -> None:
+        self._memo[key] = fact
+        if len(self._memo) > self._capacity:
+            self._memo.popitem(last=False)
+
+
+def _recover_prefix(log: Path, head: RunHead | None) -> _Recovered:
+    facts, upgrade = CurrentEpoch(), InputUpgrade()
+    with log.open("rb") as stream:
+        for record in _head_records(RunLogReader(stream), head, log):
+            if head is None and not _legacy_epoch_record(record):
+                return _Recovered(CurrentEpoch(), None)
+            facts = current_epoch((record,), facts)
+            upgrade.apply(record)
+    return _Recovered(facts, upgrade.measured)
 
 
 def _prefix(log: Path, head: RunHead | None) -> _Prefix:
@@ -159,8 +156,8 @@ def read_run_head(path: Path) -> RunHead:
     return _OBSERVER.read(path)
 
 
-def _head_records(reader: RunLogReader, head: RunHead, path: Path) -> Iterator[Record]:
-    limit = head.committed_seq if head.has_field("committed_seq") else None
+def _head_records(reader: RunLogReader, head: RunHead | None, path: Path) -> Iterator[Record]:
+    limit = head.committed_seq if head is not None and head.has_field("committed_seq") else None
     if limit == 0:
         return
     through = 0
@@ -171,8 +168,10 @@ def _head_records(reader: RunLogReader, head: RunHead, path: Path) -> Iterator[R
         through = record.seq
         if through == limit:
             return
-    if reader.stop.reason is RunLogStopReason.CORRUPTION or (limit is not None and through < limit):
-        raise RunLogDamagedError(path, f"invalid committed prefix at sequence {through}")
+    if reader.stop.reason is RunLogStopReason.CORRUPTION:
+        raise RunLogDamagedError(path, reader.stop.detail)
+    if limit is not None and through < limit:
+        raise RunLogDamagedError(path, f"committed sequence {limit} exceeds log sequence {through}")
 
 
 def _read_raw_head(path: Path) -> RunHead:
@@ -187,28 +186,6 @@ def read_current_epoch(path: Path) -> CurrentEpoch | None:
     Each committed prefix of a log is folded once per process, however often it is read.
     """
     return _OBSERVER.current_epoch(path)
-
-
-def _read_epoch_prefix(reader: RunLogReader, head: RunHead | None, path: Path) -> CurrentEpoch:
-    limit = None if head is None or not head.has_field("committed_seq") else head.committed_seq
-    if limit == 0:
-        return CurrentEpoch()
-    facts = CurrentEpoch()
-    through = 0
-    for record in reader:
-        if limit is not None and record.seq > limit:
-            break
-        if head is None and not _legacy_epoch_record(record):
-            return CurrentEpoch()
-        facts = current_epoch((record,), facts)
-        through = record.seq
-        if through == limit:
-            break
-    if reader.stop.reason is RunLogStopReason.CORRUPTION:
-        raise RunLogDamagedError(path, reader.stop.detail)
-    if limit is not None and through < limit:
-        raise RunLogDamagedError(path, f"committed sequence {limit} exceeds log sequence {through}")
-    return facts
 
 
 def _legacy_epoch_record(record: Record) -> bool:
