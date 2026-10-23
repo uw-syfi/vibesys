@@ -81,6 +81,7 @@ def test_a_damaged_run_raises_its_own_typed_error_and_leaves_others_readable(
 
 @pytest.mark.regression
 @pytest.mark.parametrize("case", CASES)
+@example(reads=[(14, False, True), (14, False, True), (18, True, True), (13, False, False)])
 @settings(max_examples=25)
 @given(reads=st.lists(st.tuples(FENCES, st.booleans(), st.booleans()), min_size=1, max_size=60))
 def test_only_previous_writer_heads_scan_the_log_once_per_prefix(

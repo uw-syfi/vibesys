@@ -1240,6 +1240,10 @@ FILE_IO_EDGE_MODULES: dict[str, Edge] = {
         EdgeKind.LOG,
         "the run.log file sink and recovery reader; framing stays in the pure _framing module",
     ),
+    "libs/vs-runlog/src/vs_runlog/_observe.py": (
+        EdgeKind.LOG,
+        "the observation reader of run.head and the committed run.log prefix; the upgrade stays pure",
+    ),
     "src/vibesys/run/runlog_conversion.py": (
         EdgeKind.LOG,
         "the one-shot run.log sink that reads the authoritative JSONL journal and stages conversion",
