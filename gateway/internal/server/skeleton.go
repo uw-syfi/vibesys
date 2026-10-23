@@ -46,11 +46,11 @@ func (h *host) Skeleton(ctx context.Context, request *apiv1.SkeletonRequest) (*a
 	if err != nil {
 		return nil, rpcError(err)
 	}
-	listingBytes := proto.Size(&apiv1.SkeletonResponse{Sessions: sessionIDs})
+	listingBytes := proto.Size(&apiv1.SkeletonResponse{Sessions: sessionIDs, Head: head})
 	if listingBytes+32 > skeletonBytes {
-		return nil, status.Error(codes.ResourceExhausted, "session listing exceeds skeleton budget")
+		return nil, status.Error(codes.ResourceExhausted, "head and session listing exceed skeleton budget")
 	}
-	data, position, sets, err := h.wireKeyframe(dir, cap, request.GetKnownDescriptorsSha256(), sessionIDs)
+	data, position, sets, err := h.wireKeyframe(dir, cap, request.GetKnownDescriptorsSha256(), sessionIDs, head)
 	if err != nil {
 		return nil, rpcError(err)
 	}
@@ -165,9 +165,9 @@ func (h *host) seek(path string, from, cap uint64) (runlog.Position, error) {
 }
 
 // wireKeyframe picks the newest keyframe whose wire form fits the reply beside
-// the session listing, naming descriptors by hash and sending the sets the
+// the observed head and session listing, naming descriptors by hash and sending the sets the
 // client did not list. No keyframe fits: the client replays from the log.
-func (h *host) wireKeyframe(dir string, cap uint64, known []string, sessionIDs []string) ([]byte, runlog.Position, []*apiv1.DescriptorSet, error) {
+func (h *host) wireKeyframe(dir string, cap uint64, known []string, sessionIDs []string, observedHead *storev1.RunHead) ([]byte, runlog.Position, []*apiv1.DescriptorSet, error) {
 	seqs, err := keyframeSeqs(dir, cap)
 	if err != nil {
 		return nil, runlog.Position{}, nil, err
@@ -213,7 +213,7 @@ func (h *host) wireKeyframe(dir string, cap uint64, known []string, sessionIDs [
 				sent = append(sent, &apiv1.DescriptorSet{Sha256: hash, Data: addressed.data[hash]})
 			}
 		}
-		reply := &apiv1.SkeletonResponse{Keyframe: wire, DescriptorSets: sent, Sessions: sessionIDs}
+		reply := &apiv1.SkeletonResponse{Keyframe: wire, DescriptorSets: sent, Sessions: sessionIDs, Head: observedHead}
 		if proto.Size(reply)+32 <= skeletonBytes {
 			return wire, position, sent, nil
 		}
