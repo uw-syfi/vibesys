@@ -1,12 +1,13 @@
 """The observation boundary is bounded, and one damaged run stays that run's problem."""
 
 import json
+from dataclasses import dataclass
 from pathlib import Path
 from shutil import copytree
 from tempfile import TemporaryDirectory
 
 import pytest
-from hypothesis import example, given, settings
+from hypothesis import example, given
 from hypothesis import strategies as st
 
 from vs_proto.api import RUN_LOG_MAGIC, RunHead
@@ -18,6 +19,19 @@ CASES = json.loads((CORPUS / "manifest.json").read_text())
 FENCES = st.integers(1, 18)
 
 
+def reads_over_few_fences(
+    *flags: st.SearchStrategy[bool],
+) -> st.SearchStrategy[list[tuple[int, ...]]]:
+    """Read sequences over at most four committed fences, so a fence repeats and interleaves.
+
+    A scan costs the log's size, and the bound under test (never more scans than distinct
+    prefixes) does not depend on how many prefixes there are, only on how reads revisit them.
+    """
+    return st.lists(FENCES, min_size=1, max_size=4, unique=True).flatmap(
+        lambda fences: st.lists(st.tuples(st.sampled_from(fences), *flags), min_size=1, max_size=60)
+    )
+
+
 def stored_head(case: str) -> RunHead:
     head = RunHead.from_binary((CORPUS / case / "run.head").read_bytes())
     assert head.objective is not None
@@ -25,6 +39,33 @@ def stored_head(case: str) -> RunHead:
     head.objective.input_stated = False
     head.performance_stated = True
     return head
+
+
+@pytest.fixture(scope="module", params=CASES)
+def healthy(
+    request: pytest.FixtureRequest, tmp_path_factory: pytest.TempPathFactory
+) -> tuple[Path, RunHead]:
+    """An undamaged copy of a retained run, shared by the examples that damage copies of it."""
+    run = tmp_path_factory.mktemp("healthy") / "run"
+    copytree(CORPUS / request.param, run, symlinks=True, ignore=lambda *_: {"skeleton.response.pb"})
+    return run, read_run_head(run / "run.log")
+
+
+@dataclass(frozen=True)
+class Logged:
+    """A retained run's log in a directory, and the epochs a fresh observer read from it so far."""
+
+    directory: Path
+    case: str
+    fresh: dict[tuple[int, bool], object]
+
+
+@pytest.fixture(scope="module", params=CASES)
+def logged(request: pytest.FixtureRequest, tmp_path_factory: pytest.TempPathFactory) -> Logged:
+    """A directory holding a retained run's log, for examples that set its head before each read."""
+    directory = tmp_path_factory.mktemp("logged")
+    (directory / "run.log").write_bytes((CORPUS / request.param / "run.log").read_bytes())
+    return Logged(directory, request.param, {})
 
 
 def read_or_damage(log: Path) -> RunHead | RunLogDamagedError:
@@ -54,11 +95,9 @@ def damage(directory: Path, kind: str, at: int, noise: bytes) -> None:
 
 
 @pytest.mark.regression
-@pytest.mark.parametrize("case", CASES)
 @example(kind="cut log", at=40_000, noise=b"")
 @example(kind="fence past the log", at=19, noise=b"")
 @example(kind="head garbage", at=0, noise=b"\xff\xff")
-@settings(max_examples=25)
 @given(
     kind=st.sampled_from(
         ["cut log", "log garbage", "cut head", "head garbage", "fence past the log"]
@@ -67,83 +106,73 @@ def damage(directory: Path, kind: str, at: int, noise: bytes) -> None:
     noise=st.binary(max_size=64),
 )
 def test_a_damaged_run_raises_its_own_typed_error_and_leaves_others_readable(
-    case: str, kind: str, at: int, noise: bytes
+    healthy: tuple[Path, RunHead], kind: str, at: int, noise: bytes
 ) -> None:
     """Truncation, garbage and a fence past the log: the error is typed and names the run."""
+    run, before = healthy
     with TemporaryDirectory() as temporary:
-        root = Path(temporary)
-        copytree(
-            CORPUS / case,
-            root / "healthy",
-            symlinks=True,
-            ignore=lambda *_: {"skeleton.response.pb"},
-        )
-        copytree(root / "healthy", root / "damaged", symlinks=True)
-        before = read_run_head(root / "healthy" / "run.log")
-        damage(root / "damaged", kind, at, noise)
-        outcome = read_or_damage(root / "damaged" / "run.log")
+        damaged = Path(temporary) / "damaged"
+        copytree(run, damaged, symlinks=True)
+        damage(damaged, kind, at, noise)
+        outcome = read_or_damage(damaged / "run.log")
         if isinstance(outcome, RunLogDamagedError):
-            assert str(root / "damaged") in str(outcome)
-        assert read_run_head(root / "healthy" / "run.log") == before
+            assert str(damaged) in str(outcome)
+        assert read_run_head(run / "run.log") == before
 
 
 @pytest.mark.regression
-@pytest.mark.parametrize("case", CASES)
 @example(reads=[(14, False, True), (14, False, True), (18, True, True), (13, False, False)])
-@settings(max_examples=25)
-@given(reads=st.lists(st.tuples(FENCES, st.booleans(), st.booleans()), min_size=1, max_size=60))
+@given(reads=reads_over_few_fences(st.booleans(), st.booleans()))
 def test_only_previous_writer_heads_scan_the_log_once_per_prefix(
-    case: str, reads: list[tuple[int, bool, bool]]
+    logged: Logged, reads: list[tuple[int, bool, bool]]
 ) -> None:
     """A head states its facts or it does not. Scans never exceed the distinct unstated prefixes."""
+    directory, case = logged.directory, logged.case
     want = CASES[case]
     observer = HeadObserver()
     scanned: set[int] = set()
-    with TemporaryDirectory() as temporary:
-        directory = Path(temporary)
-        (directory / "run.log").write_bytes((CORPUS / case / "run.log").read_bytes())
-        for fence, stated, has_epoch in reads:
-            head = stored_head(case)
-            head.committed_seq = fence
-            assert head.objective is not None
-            head.objective.input_stated = stated
-            if not has_epoch:
-                head.epoch = 0
-            (directory / "run.head").write_bytes(head.to_binary())
-            got = observer.read(directory / "run.log")
-            if not stated or not has_epoch:
-                scanned.add(fence)
-            assert got.epoch == 1
-            assert got.objective is not None
-            measured = got.objective.has_field("input_value")
-            assert measured == (not stated and fence >= want["measurement_seq"])
-            if measured:
-                assert got.objective.input_value == want["input"]
+    for fence, stated, has_epoch in reads:
+        head = stored_head(case)
+        head.committed_seq = fence
+        assert head.objective is not None
+        head.objective.input_stated = stated
+        if not has_epoch:
+            head.epoch = 0
+        (directory / "run.head").write_bytes(head.to_binary())
+        got = observer.read(directory / "run.log")
+        if not stated or not has_epoch:
+            scanned.add(fence)
+        assert got.epoch == 1
+        assert got.objective is not None
+        measured = got.objective.has_field("input_value")
+        assert measured == (not stated and fence >= want["measurement_seq"])
+        if measured:
+            assert got.objective.input_value == want["input"]
     assert observer.scans <= len(scanned)
 
 
 @pytest.mark.regression
-@pytest.mark.parametrize("case", CASES)
 @example(reads=[(14, True), (14, True), (18, False), (14, True), (18, False)])
-@settings(max_examples=25)
-@given(reads=st.lists(st.tuples(FENCES, st.booleans()), min_size=1, max_size=60))
+@given(reads=reads_over_few_fences(st.booleans()))
 def test_an_epoch_is_folded_once_per_committed_prefix(
-    case: str, reads: list[tuple[int, bool]]
+    logged: Logged, reads: list[tuple[int, bool]]
 ) -> None:
     """Relaunch and the terminate poll read an epoch repeatedly; scans never exceed the prefixes."""
+    directory, case, fresh = logged.directory, logged.case, logged.fresh
     observer = HeadObserver()
-    with TemporaryDirectory() as temporary:
-        directory = Path(temporary)
-        (directory / "run.log").write_bytes((CORPUS / case / "run.log").read_bytes())
-        for fence, headed in reads:
-            if headed:
-                head = stored_head(case)
-                head.committed_seq = fence
-                (directory / "run.head").write_bytes(head.to_binary())
-            else:
-                (directory / "run.head").unlink(missing_ok=True)
-            fresh = HeadObserver().current_epoch(directory / "run.log")
-            assert observer.current_epoch(directory / "run.log") == fresh
+    for fence, headed in reads:
+        if headed:
+            head = stored_head(case)
+            head.committed_seq = fence
+            (directory / "run.head").write_bytes(head.to_binary())
+        else:
+            (directory / "run.head").unlink(missing_ok=True)
+        # A fresh observer's epoch depends only on the fence and whether a head stands, so it is
+        # read once per kind of state, however many examples repeat it.
+        key = (fence, headed)
+        if key not in fresh:
+            fresh[key] = HeadObserver().current_epoch(directory / "run.log")
+        assert observer.current_epoch(directory / "run.log") == fresh[key]
     assert observer.scans <= len({(fence if headed else None) for fence, headed in reads})
 
 
