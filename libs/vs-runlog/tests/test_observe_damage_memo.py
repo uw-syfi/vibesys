@@ -12,13 +12,10 @@ from vs_runlog.api import HeadObserver, RunLogDamagedError
 
 CORPUS = Path(__file__).resolve().parents[3] / "proto/testdata/retained"
 CASES = sorted(path.name for path in CORPUS.iterdir() if path.is_dir())
-# A scan validates every record of a log, and the bound under test (one scan per damaged prefix)
-# follows from how reads revisit a prefix, not from a log's contents. Two writers stand for all.
-SCAN_CASES = (CASES[0], CASES[-1])
 
 
 @pytest.mark.regression
-@pytest.mark.parametrize("case", SCAN_CASES)
+@pytest.mark.parametrize("case", CASES)
 @example(kind="cut", at=1, reads=["head"] * 10)
 @example(kind="cut", at=1, reads=["head", "epoch"] * 5)
 @given(

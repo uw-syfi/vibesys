@@ -17,11 +17,6 @@ from vs_sim.api.testing import ManualClock, SimThreads
 CORPUS = Path(__file__).resolve().parents[3] / "proto/testdata/retained"
 CASES = json.loads((CORPUS / "manifest.json").read_text())
 FENCES = st.integers(1, 18)
-# A scan validates every record of a log, so a property that counts scans pays for each retained
-# writer it runs over. The count follows from how reads revisit prefixes, not from a log's contents
-# (a writer's facts are checked per writer in test_retained_heads and test_retained_writers), so
-# two writers, the first and the last of the manifest, stand for all of them.
-SCAN_CASES = (next(iter(CASES)), list(CASES)[-1])
 
 
 def reads_over_few_fences(
@@ -65,24 +60,12 @@ class Logged:
     fresh: dict[tuple[int, bool], object]
 
 
-def log_of(case: str, tmp_path_factory: pytest.TempPathFactory) -> Logged:
-    directory = tmp_path_factory.mktemp("logged")
-    (directory / "run.log").write_bytes((CORPUS / case / "run.log").read_bytes())
-    return Logged(directory, case, {})
-
-
 @pytest.fixture(scope="module", params=CASES)
 def logged(request: pytest.FixtureRequest, tmp_path_factory: pytest.TempPathFactory) -> Logged:
     """A directory holding a retained run's log, for examples that set its head before each read."""
-    return log_of(request.param, tmp_path_factory)
-
-
-@pytest.fixture(scope="module", params=SCAN_CASES)
-def logged_for_scans(
-    request: pytest.FixtureRequest, tmp_path_factory: pytest.TempPathFactory
-) -> Logged:
-    """The retained logs the scan-count properties run over."""
-    return log_of(request.param, tmp_path_factory)
+    directory = tmp_path_factory.mktemp("logged")
+    (directory / "run.log").write_bytes((CORPUS / request.param / "run.log").read_bytes())
+    return Logged(directory, request.param, {})
 
 
 def read_or_damage(log: Path) -> RunHead | RunLogDamagedError:
@@ -172,14 +155,10 @@ def test_only_previous_writer_heads_scan_the_log_once_per_prefix(
 @example(reads=[(14, True), (14, True), (18, False), (14, True), (18, False)])
 @given(reads=reads_over_few_fences(st.booleans()))
 def test_an_epoch_is_folded_once_per_committed_prefix(
-    logged_for_scans: Logged, reads: list[tuple[int, bool]]
+    logged: Logged, reads: list[tuple[int, bool]]
 ) -> None:
     """Relaunch and the terminate poll read an epoch repeatedly; scans never exceed the prefixes."""
-    directory, case, fresh = (
-        logged_for_scans.directory,
-        logged_for_scans.case,
-        logged_for_scans.fresh,
-    )
+    directory, case, fresh = logged.directory, logged.case, logged.fresh
     observer = HeadObserver()
     for fence, headed in reads:
         if headed:
