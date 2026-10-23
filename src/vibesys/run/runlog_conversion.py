@@ -33,8 +33,8 @@ from vs_runlog.api import (
     FileRunLogWriter,
     RunLogReader,
     RunLogStopReason,
+    current_epoch,
     install_run_log,
-    read_run_head,
 )
 
 if TYPE_CHECKING:
@@ -128,10 +128,12 @@ def _journal_line(line: bytes, event: CoreEvent) -> bytes:
 def _converted_as_failed_interrupt(directory: Path) -> bool:
     """Whether an earlier conversion ended an interrupted run as Failed (redone once)."""
     journal = directory / "core-events.jsonl"
-    state = read_run_head(directory / "run.log").lifecycle
-    if state is None or state.state is None or state.state.field != "ended":
+    with (directory / "run.log").open("rb") as stream:
+        lifecycle = current_epoch(RunLogReader(stream)).lifecycle
+    state = None if lifecycle is None else lifecycle.state
+    if state is None or state.field != "ended" or state.value.outcome is not Outcome.FAILED:
         return False
-    if state.state.value.outcome is not Outcome.FAILED or not journal.exists():
+    if not journal.exists():
         return False
     with closing(_events(journal)) as events:
         return any(_is_interrupt(event) for _, event in events)

@@ -46,6 +46,7 @@ class _Prefix:
     modified_ns: int
     size: int
     committed: int | None
+    headed: bool = True
 
 
 @dataclass(frozen=True)
@@ -59,13 +60,15 @@ class HeadObserver:
 
     A head states its epoch and whether the input is measured when its writer knows them. Only a
     head without them needs the log, and its facts are immutable for its committed prefix, so
-    ``scans`` counts the distinct prefixes recovered, not the reads.
+    ``scans`` counts the distinct prefixes scanned, not the reads. An external reader's epoch
+    folds the same prefix and is remembered the same way.
     """
 
     def __init__(self, capacity: int = _MEMO_CAPACITY) -> None:
         self.scans = 0
         self._capacity = capacity
         self._memo: OrderedDict[_Prefix, _Recovered] = OrderedDict()
+        self._epochs: OrderedDict[_Prefix, CurrentEpoch] = OrderedDict()
 
     def read(self, path: Path) -> RunHead:
         """Read a validated observation, never recovery state; files stay unchanged."""
@@ -84,10 +87,32 @@ class HeadObserver:
                     head.objective.input_value = recovered.input_value
             return head
 
+    def current_epoch(self, path: Path) -> CurrentEpoch | None:
+        """Derive an external reader's epoch from exactly the head's committed prefix.
+
+        A complete frame can precede its fsync and head publication. Native readers
+        cannot treat that frame as a published epoch. Phase 1 logs without a head
+        retain their legacy complete-record rule.
+        """
+        head_path = path.parent / "run.head"
+        with _damage_is_typed(path):
+            head = _read_raw_head(path) if head_path.exists() else None
+            if not path.exists():
+                if head is not None:
+                    raise RunLogDamagedError(path, "run.head exists without run.log")
+                return None
+            key = _prefix(path, head)
+            if (known := self._epochs.get(key)) is not None:
+                self._epochs.move_to_end(key)
+                return known
+            self.scans += 1
+            with path.open("rb") as stream:
+                facts = _read_epoch_prefix(RunLogReader(stream), head, path)
+            self._remember(self._epochs, key, facts)
+            return facts
+
     def _recovered(self, log: Path, head: RunHead) -> _Recovered:
-        stat = log.stat()
-        committed = head.committed_seq if head.has_field("committed_seq") else None
-        key = _Prefix(stat.st_dev, stat.st_ino, stat.st_mtime_ns, stat.st_size, committed)
+        key = _prefix(log, head)
         if (known := self._memo.get(key)) is not None:
             self._memo.move_to_end(key)
             return known
@@ -98,10 +123,21 @@ class HeadObserver:
                 facts = current_epoch((record,), facts)
                 upgrade.apply(record)
         recovered = _Recovered(facts.number, upgrade.measured)
-        self._memo[key] = recovered
-        if len(self._memo) > self._capacity:
-            self._memo.popitem(last=False)
+        self._remember(self._memo, key, recovered)
         return recovered
+
+    def _remember[Fact](self, memo: OrderedDict[_Prefix, Fact], key: _Prefix, fact: Fact) -> None:
+        memo[key] = fact
+        if len(memo) > self._capacity:
+            memo.popitem(last=False)
+
+
+def _prefix(log: Path, head: RunHead | None) -> _Prefix:
+    stat = log.stat()
+    committed = head.committed_seq if head is not None and head.has_field("committed_seq") else None
+    return _Prefix(
+        stat.st_dev, stat.st_ino, stat.st_mtime_ns, stat.st_size, committed, headed=head is not None
+    )
 
 
 _OBSERVER = HeadObserver()
@@ -142,19 +178,9 @@ def _read_raw_head(path: Path) -> RunHead:
 def read_current_epoch(path: Path) -> CurrentEpoch | None:
     """Derive an external reader's epoch from exactly the head's committed prefix.
 
-    A complete frame can precede its fsync and head publication. Native readers
-    cannot treat that frame as a published epoch. Phase 1 logs without a head
-    retain their legacy complete-record rule.
+    Each committed prefix of a log is folded once per process, however often it is read.
     """
-    head_path = path.parent / "run.head"
-    with _damage_is_typed(path):
-        head = _read_raw_head(path) if head_path.exists() else None
-        if not path.exists():
-            if head is not None:
-                raise RunLogDamagedError(path, "run.head exists without run.log")
-            return None
-        with path.open("rb") as stream:
-            return _read_epoch_prefix(RunLogReader(stream), head, path)
+    return _OBSERVER.current_epoch(path)
 
 
 def _read_epoch_prefix(reader: RunLogReader, head: RunHead | None, path: Path) -> CurrentEpoch:

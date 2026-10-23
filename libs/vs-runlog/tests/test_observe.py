@@ -116,6 +116,31 @@ def test_only_previous_writer_heads_scan_the_log_once_per_prefix(
 
 @pytest.mark.regression
 @pytest.mark.parametrize("case", CASES)
+@example(reads=[(14, True), (14, True), (18, False), (14, True), (18, False)])
+@settings(max_examples=25)
+@given(reads=st.lists(st.tuples(FENCES, st.booleans()), min_size=1, max_size=60))
+def test_an_epoch_is_folded_once_per_committed_prefix(
+    case: str, reads: list[tuple[int, bool]]
+) -> None:
+    """Relaunch and the terminate poll read an epoch repeatedly; scans never exceed the prefixes."""
+    observer = HeadObserver()
+    with TemporaryDirectory() as temporary:
+        directory = Path(temporary)
+        (directory / "run.log").write_bytes((CORPUS / case / "run.log").read_bytes())
+        for fence, headed in reads:
+            if headed:
+                head = stored_head(case)
+                head.committed_seq = fence
+                (directory / "run.head").write_bytes(head.to_binary())
+            else:
+                (directory / "run.head").unlink(missing_ok=True)
+            fresh = HeadObserver().current_epoch(directory / "run.log")
+            assert observer.current_epoch(directory / "run.log") == fresh
+    assert observer.scans <= len({(fence if headed else None) for fence, headed in reads})
+
+
+@pytest.mark.regression
+@pytest.mark.parametrize("case", CASES)
 def test_a_current_writer_head_never_opens_the_log(tmp_path: Path, case: str) -> None:
     """A log no scan could finish cannot matter to a head that states its facts."""
     head = stored_head(case)
