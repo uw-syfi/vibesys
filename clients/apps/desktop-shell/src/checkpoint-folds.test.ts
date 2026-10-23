@@ -187,6 +187,7 @@ async function folds(records: StoreRecord[], cut: number, previous = false) {
       intents,
       deliveries: steerDeliveries(steer),
       replies: page.getSnapshot().context.replies,
+      ui: page.getSnapshot().context.ui,
     };
   } finally {
     subscription.unsubscribe();
