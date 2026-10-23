@@ -545,7 +545,9 @@ def _dashboard_points(
     )
 
 
-def digest_store(head: RunHead, skeleton: Keyframe) -> RunDigest:
+def digest_store(
+    head: RunHead, skeleton: Keyframe, *, last_event_at: datetime | None = None
+) -> RunDigest:
     """Project the writer's committed facts; a journal never overrides a typed run.
 
     Headline and outcome come from the same head the page observes. Idea measurements join
@@ -574,18 +576,17 @@ def digest_store(head: RunHead, skeleton: Keyframe) -> RunDigest:
         for version in history.points
         if version.point is not None
     ]
-    start = min((span.started_at for span in spans.values()), default=0)
     ending, closing = _store_ending(head)
     return RunDigest(
         ideas=len(set(ideas.values())),
         adopted_ratio=ratio,
         best_so_far_ratio=None,
-        duration_s=None if not times else max(0, max(times) - start),
+        duration_s=None if not times else max(0, *times),
         ending=ending,
         closing=closing,
         dashboard=_dashboard_points(
             points,
-            None,
+            last_event_at,
             None
             if best is None
             else BestReading(

@@ -19,6 +19,8 @@ from vs_runlog.api import (
     upgrade_skeleton,
 )
 
+_ACTIVITY_RECORD_LIMIT = 256
+
 
 def read_digest(path: Path) -> RunDigest:
     """Project one coherent prefix without opening a writer or changing retained bytes."""
@@ -40,6 +42,12 @@ def _read_digest(path: Path) -> RunDigest:
         ),
         reverse=True,
     )
+    # Recover the final envelope's activity time only from a bounded suffix. Older
+    # conversions may keep just a final keyframe; their optional activity time stays unknown.
+    if candidates and candidates[0][0] == limit:
+        previous = candidates[1][0] if len(candidates) > 1 else 0
+        if limit - previous <= _ACTIVITY_RECORD_LIMIT:
+            candidates = candidates[1:]
     seed = None
     if candidates:
         sequence, candidate = candidates[0]
@@ -50,13 +58,13 @@ def _read_digest(path: Path) -> RunDigest:
             raise ValueError(message)
     with path.open("rb") as stream:
         reader = RunLogReader(stream, 0 if seed is None else seed.log_offset)
-        state = fold_skeleton(
-            _committed(reader, limit, 0 if seed is None else seed.through_seq),
-            seed=seed,
-            log_offset=0,
-        )
+        records = list(_committed(reader, limit, 0 if seed is None else seed.through_seq))
+        state = fold_skeleton(records, seed=seed, log_offset=0)
         state.log_offset = reader.stop.offset
-    return digest_store(head, upgrade_skeleton(state))
+    last = records[-1].at if records else None
+    return digest_store(
+        head, upgrade_skeleton(state), last_event_at=None if last is None else last.to_datetime()
+    )
 
 
 def _committed(reader: RunLogReader, limit: int | None, through: int) -> Iterator[Record]:

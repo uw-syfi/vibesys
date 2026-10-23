@@ -96,6 +96,8 @@ def test_native_cards_ignore_a_contradictory_legacy_journal_and_cached_digest(
         assert head.objective is not None
         assert second.dashboard is not None
         assert second.dashboard.best is not None
+        assert records[-1].at is not None
+        assert second.dashboard.last_event_at == records[-1].at.to_datetime()
         assert (
             second.dashboard.best.value
             == head.objective.best_value
