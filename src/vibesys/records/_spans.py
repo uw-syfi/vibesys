@@ -131,7 +131,27 @@ def _metric_rows(projection: Projection, source: CoreSpan, span: p.Span) -> None
     attrs = decode_json(label.attrs_json, search.GateAttrs, source=source.id, max_bytes=64 << 20)
     if isinstance(attrs, Unreadable):
         raise TypeError(attrs.details("gate attrs"))
-    for row in attrs.metrics:
+    rows = attrs.metrics
+    if not rows and attrs.metric_value is not None and projection.primary_series is not None:
+        declaration = next(
+            (
+                series
+                for series in (projection.header.series if projection.header else [])
+                if series.name == projection.primary_series
+            ),
+            None,
+        )
+        rows = (
+            search.MetricRow(
+                name=projection.primary_series,
+                value=attrs.metric_value,
+                unit=None if declaration is None else declaration.unit or None,
+                direction="min"
+                if declaration is not None and declaration.direction is p.Direction.MIN
+                else "max",
+            ),
+        )
+    for row in rows:
         projection.metric(
             p.MetricPoint(
                 series=row.name,
