@@ -72,33 +72,13 @@ function generated(seed: number): Generated {
   return {tree: {candidates: items, best: null, bestPath: [], adoptionOpened: false}, parents};
 }
 
-function bestOf(ratios: readonly number[], direction: 'max' | 'min'): number | null {
-  if (ratios.length === 0) return null;
-  return direction === 'min' ? Math.min(...ratios) : Math.max(...ratios);
-}
-
-/** The ratios of the passed ideas at `id` and below, read from the children map. */
-function passedRatiosBelow(
-  tree: CandidateTree,
-  children: ReadonlyMap<string, readonly string[]>,
-  id: string,
-): number[] {
-  const item = tree.candidates.find(each => each.id === id) as Candidate;
-  const own = item.outcome === 'passed' ? item.measurement?.vsBaseline : undefined;
-  const found = own === undefined || own === null ? [] : [own];
-  return [
-    ...found,
-    ...(children.get(id) ?? []).flatMap(kid => passedRatiosBelow(tree, children, kid)),
-  ];
-}
-
 const SEEDS = Array.from({length: 200}, (_, at) => at + 1);
 
 describe('candidateLineage', () => {
   test('every idea is a root or the child of its base, exactly once', () => {
     for (const seed of SEEDS) {
       const {tree, parents} = generated(seed);
-      const lineage = candidateLineage(tree, 'max');
+      const lineage = candidateLineage(tree);
       const placed: string[] = [...lineage.roots];
       for (const kids of lineage.children.values()) placed.push(...kids);
       expect(placed.sort()).toEqual(tree.candidates.map(item => item.id).sort());
@@ -112,7 +92,7 @@ describe('candidateLineage', () => {
 
   test('children and roots keep the order the ideas began in', () => {
     for (const seed of SEEDS) {
-      const lineage = candidateLineage(generated(seed).tree, 'max');
+      const lineage = candidateLineage(generated(seed).tree);
       const index = (id: string): number => Number(id.slice(1));
       for (const ids of [lineage.roots, ...lineage.children.values()]) {
         expect(ids.map(index)).toEqual([...ids.map(index)].sort((a, b) => a - b));
@@ -123,7 +103,7 @@ describe('candidateLineage', () => {
   test('a subtree counts the idea and the counts of its children, by outcome', () => {
     for (const seed of SEEDS) {
       const {tree} = generated(seed);
-      const lineage = candidateLineage(tree, 'max');
+      const lineage = candidateLineage(tree);
       for (const item of tree.candidates) {
         const stats = lineage.subtree.get(item.id);
         if (stats === undefined) throw new Error(`no stats for ${item.id}`);
@@ -142,39 +122,26 @@ describe('candidateLineage', () => {
     }
   });
 
-  test('a subtree’s best is the passed idea in it with the best ratio, by the direction', () => {
-    for (const seed of SEEDS) {
-      const {tree} = generated(seed);
-      for (const direction of ['max', 'min'] as const) {
-        const lineage = candidateLineage(tree, direction);
-        for (const item of tree.candidates) {
-          const ratios = passedRatiosBelow(tree, lineage.children, item.id);
-          const want = bestOf(ratios, direction);
-          expect(lineage.subtree.get(item.id)?.best?.vsBaseline ?? null).toBe(want);
-        }
-      }
-    }
-  });
-
   test('depth counts the steps from the input, and a base the tree lacks reads as the input', () => {
     const {tree, parents} = generated(7);
-    const lineage = candidateLineage(tree, 'max');
+    const lineage = candidateLineage(tree);
     parents.forEach((parent, index) => {
       const want = parent === null ? 1 : (lineage.depth.get(`c${parent}`) ?? 0) + 1;
       expect(lineage.depth.get(`c${index}`)).toBe(want);
     });
     const orphan = candidate(0, null, 'passed', 1);
     const lost = {...orphan, parent: 'gone'};
-    const only = candidateLineage(
-      {candidates: [lost], best: null, bestPath: [], adoptionOpened: false},
-      'max',
-    );
+    const only = candidateLineage({
+      candidates: [lost],
+      best: null,
+      bestPath: [],
+      adoptionOpened: false,
+    });
     expect(only.roots).toEqual(['c0']);
   });
 
-  test('is the same object while the tree and direction are unchanged', () => {
+  test('is the same object while the tree is unchanged', () => {
     const {tree} = generated(3);
-    expect(candidateLineage(tree, 'max')).toBe(candidateLineage(tree, 'max'));
-    expect(candidateLineage(tree, 'min')).not.toBe(candidateLineage(tree, 'max'));
+    expect(candidateLineage(tree)).toBe(candidateLineage(tree));
   });
 });

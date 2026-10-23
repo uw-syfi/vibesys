@@ -48,23 +48,6 @@ export function gateTrajectory(spans: readonly Span[]): GateReading[] {
   return spans.filter(span => span.label?.kind === 'gate').map(gateReading);
 }
 
-/** The best measured candidate that passed its gate, by the objective's direction. */
-export function bestVsBaseline(
-  spans: readonly Span[],
-  direction: 'max' | 'min' | null | undefined,
-): GateReading | null {
-  const better =
-    direction === 'min' ? (a: number, b: number) => a < b : (a: number, b: number) => a > b;
-  let best: GateReading | null = null;
-  for (const reading of gateTrajectory(spans)) {
-    if (reading.verdict !== 'passed' || reading.metricValue === null) continue;
-    if (best === null || better(reading.metricValue, best.metricValue ?? reading.metricValue)) {
-      best = reading;
-    }
-  }
-  return best;
-}
-
 /**
  * What the run adopted: the search's own account of its winner, the `adoption` span (the
  * operation that adopts it) with its verdict.
@@ -93,27 +76,6 @@ export function adoption(spans: readonly Span[]): Adoption | null {
     vsBaseline: numberOrNull(attrs['vs_baseline']),
     verdict: found.label?.verdict ?? null,
   };
-}
-
-/**
- * The best-so-far steps of the trajectory: each `passed` gate with a value that beats every passed
- * gate before it, by the objective's direction, in the order the measurements started. The last
- * step is `bestVsBaseline`'s reading (the first of equals, as there); a gate that fails, is slower
- * or has no value never moves the line.
- */
-export function runningBest(
-  spans: readonly Span[],
-  direction: 'max' | 'min' | null | undefined,
-): GateReading[] {
-  const better =
-    direction === 'min' ? (a: number, b: number) => a < b : (a: number, b: number) => a > b;
-  const steps: GateReading[] = [];
-  for (const reading of gateTrajectory(spans)) {
-    if (reading.verdict !== 'passed' || reading.metricValue === null) continue;
-    const best = steps.at(-1)?.metricValue ?? null;
-    if (best === null || better(reading.metricValue, best)) steps.push(reading);
-  }
-  return steps;
 }
 
 /** How many workstreams the run has, by where each stands. */

@@ -183,9 +183,22 @@ describe('the trade-off chart of a run with two objectives', () => {
   });
 });
 
+/** What core states for the run: the best on each axis and the input's value there. */
+function statedBy(best: Readonly<Record<string, number>>) {
+  return new Map(
+    Object.entries(best).map(([name, value]) => [
+      name,
+      {value, input: name === 'p99_latency' ? 20 : 1000, points: [], best: []},
+    ]),
+  );
+}
+
 describe('the performance row of a run with two objectives', () => {
   test('has a tile per objective: the best on its axis against the input, where lower is better too', () => {
-    const tiles = heroView(modelOf(AXES)).tiles;
+    const tiles = heroView({
+      ...modelOf(AXES),
+      series: statedBy({total_ops_per_sec: 2500, p99_latency: 10}),
+    }).tiles;
 
     expect(tiles.map(t => t.name)).toEqual(['Total ops/sec', 'P99 latency']);
     // the best throughput is 2,500 against 1,000; the best latency is 10 ms against 20 ms
@@ -193,6 +206,17 @@ describe('the performance row of a run with two objectives', () => {
     expect(tiles.map(t => t.note)).toEqual(['faster than input', 'faster than input']);
     expect(tiles[0]?.detail).toBe('2,500 ops/s · input 1,000 ops/s');
     expect(tiles[1]?.detail).toBe('10 ms · input 20 ms');
+  });
+
+  test('reads each best from core, never from the ideas that passed', () => {
+    // Idea 2 passed with 2,500 and idea 4 with 10 ms; core states other bests (a within-noise pass).
+    const stated = heroView({
+      ...modelOf(AXES),
+      series: statedBy({total_ops_per_sec: 1500, p99_latency: 18}),
+    }).tiles;
+    expect(stated.map(t => t.ratio)).toEqual(['1.50×', '1.11×']);
+    const unstated = heroView(modelOf(AXES)).tiles;
+    expect(unstated.map(t => t.ratio)).toEqual([null, null]);
   });
 
   test('keeps one tile for a run with one objective', () => {

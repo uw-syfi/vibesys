@@ -427,7 +427,7 @@ function adoptedAtEnd(
   state: RunPageState,
 ): [AdoptedCandidate | 'input' | null, 'max' | 'min' | null | undefined] {
   const direction = overviewAt(state.run.trace, null)?.objective.direction;
-  return [adoptedCandidate(traceSpans(traceAt(state.run.trace, null)), direction), direction];
+  return [adoptedCandidate(traceSpans(traceAt(state.run.trace, null))), direction];
 }
 
 /**

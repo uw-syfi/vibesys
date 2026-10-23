@@ -8,7 +8,7 @@
  */
 import type {Span} from '@vibesys/contracts';
 import type {RunEnd} from '@vibesys/hosts';
-import {adoption, bestVsBaseline, gateTrajectory} from '@vibesys/run-state/overview';
+import {adoption, gateTrajectory} from '@vibesys/run-state/overview';
 import {indexSpans, nearest, numberAttr, ratio, stringAttr} from './span-reading.js';
 
 type Outcome = NonNullable<RunEnd>['outcome'];
@@ -46,23 +46,16 @@ function madeBy(
  * The search's own account decides (its
  * `adoption` span: the candidate and how it measured, or the input standing); the workstream that
  * made it is the one whose passed gate measured that value. A run whose search labels no adoption
- * is read from its best passed gate.
+ * says none: the page does not pick a best from its gates.
  */
-export function adoptedCandidate(
-  spans: readonly Span[],
-  direction: 'max' | 'min' | null | undefined,
-): AdoptedCandidate | 'input' | null {
+export function adoptedCandidate(spans: readonly Span[]): AdoptedCandidate | 'input' | null {
   const adopted = adoption(spans);
-  if (adopted !== null) {
-    if (adopted.verdict !== 'adopted') return null;
-    if (adopted.candidate === null) return 'input';
-    const gate = gateTrajectory(spans).find(
-      reading => reading.verdict === 'passed' && reading.metricValue === adopted.metricValue,
-    );
-    return madeBy(spans, gate?.span ?? null, adopted.vsBaseline);
-  }
-  const best = bestVsBaseline(spans, direction);
-  return best === null ? null : madeBy(spans, best.span, best.vsBaseline);
+  if (adopted?.verdict !== 'adopted') return null;
+  if (adopted.candidate === null) return 'input';
+  const gate = gateTrajectory(spans).find(
+    reading => reading.verdict === 'passed' && reading.metricValue === adopted.metricValue,
+  );
+  return madeBy(spans, gate?.span ?? null, adopted.vsBaseline);
 }
 
 /** How much better than the input the candidate is, in words, or null when it is not known or not. */

@@ -10,7 +10,6 @@ import type {
   Candidate,
   CandidateMeasurement,
   CandidateStep,
-  MeasuredReading,
   ObjectiveAxis,
 } from '@vibesys/run-state/candidates';
 import {againstWords} from './base-words.js';
@@ -189,6 +188,9 @@ function unitWords(model: RunModel, name: string): string {
   return ` ${objectiveUnit(model.overview) || name.toLowerCase()}`;
 }
 
+/** An axis's trend is core's series alone: no candidate stands in for a series core did not state. */
+const NO_CANDIDATES: readonly Candidate[] = [];
+
 function trendOf(
   model: RunModel,
   name: string,
@@ -217,23 +219,6 @@ function trendOf(
   };
 }
 
-/** What `item` read on the axis `name`, when its measurement did. */
-function readingOn(item: Candidate, name: string): MeasuredReading | undefined {
-  return item.measurement?.readings.find(reading => reading.name === name);
-}
-
-/** `candidates` with each measurement's value replaced by its reading on `name` (null when none). */
-function measuredOn(candidates: readonly Candidate[], name: string): Candidate[] {
-  return candidates.map(item =>
-    item.measurement === null
-      ? item
-      : {
-          ...item,
-          measurement: {...item.measurement, metricValue: readingOn(item, name)?.value ?? null},
-        },
-  );
-}
-
 /**
  * The tile of one objective of a run that has several: the best passed idea on that axis against
  * the input's value on it, in the same words as the single tile; the trend is the best so far on it.
@@ -256,18 +241,8 @@ function axisTile(model: RunModel, axis: ObjectiveAxis): MetricTileView {
       ])
       .find(reading => reading.name === axis.name && reading.unit !== null)?.unit ?? null;
   const words = ` ${unit === null ? name.toLowerCase() : unitLabel(unit)}`;
-  const passed = all
-    .filter(item => item.outcome === 'passed' && readingOn(item, axis.name) !== undefined)
-    .map(item => (readingOn(item, axis.name) as MeasuredReading).value);
-  const value = objectiveValue(
-    model,
-    axis.name,
-    passed.length === 0
-      ? null
-      : passed.reduce((best, next) =>
-          (axis.direction === 'min' ? next < best : next > best) ? next : best,
-        ),
-  );
+  // The best on the axis is core's to state: a run it states no series for has no value here.
+  const value = objectiveValue(model, axis.name, null);
   const vs =
     value === null || input === null || input === 0 || (direction === 'min' && value === 0)
       ? null
@@ -279,7 +254,7 @@ function axisTile(model: RunModel, axis: ObjectiveAxis): MetricTileView {
     ...((input === null && better === null
       ? baselineTile(value, words, baselineReferences(model.baselines, axis.name), direction)
       : null) ?? tileWords(model, value, input, words, better)),
-    trend: trendOf(model, name, input, measuredOn(all, axis.name), direction, axis.name),
+    trend: trendOf(model, name, input, NO_CANDIDATES, direction, axis.name),
   };
 }
 

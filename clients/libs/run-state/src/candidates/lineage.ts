@@ -5,9 +5,6 @@
  */
 import type {Candidate, CandidateTree} from './types.js';
 
-/** Which way the run's metric improves; null when the run has not said. */
-export type MetricDirection = 'max' | 'min' | null;
-
 /** What the ideas at and below one idea hold. */
 export interface SubtreeStats {
   /** Ideas in the subtree, the idea itself included. */
@@ -15,8 +12,6 @@ export interface SubtreeStats {
   readonly passed: number;
   readonly failed: number;
   readonly running: number;
-  /** The passed idea with the best ratio to the input in the subtree, or null when none measured. */
-  readonly best: {readonly id: string; readonly vsBaseline: number} | null;
 }
 
 export interface Lineage {
@@ -29,54 +24,32 @@ export interface Lineage {
   readonly subtree: ReadonlyMap<string, SubtreeStats>;
 }
 
-function better(direction: MetricDirection, candidate: number, held: number): boolean {
-  return direction === 'min' ? candidate < held : candidate > held;
-}
-
-function passedRatio(item: Candidate): number | null {
-  return item.outcome === 'passed' ? (item.measurement?.vsBaseline ?? null) : null;
-}
-
-function merged(
-  item: Candidate,
-  below: readonly SubtreeStats[],
-  direction: MetricDirection,
-): SubtreeStats {
+function merged(item: Candidate, below: readonly SubtreeStats[]): SubtreeStats {
   let size = 1;
   let passed = item.outcome === 'passed' ? 1 : 0;
   let failed = item.outcome === 'failed' ? 1 : 0;
   let running = item.outcome === 'running' ? 1 : 0;
-  const own = passedRatio(item);
-  let best: SubtreeStats['best'] = own === null ? null : {id: item.id, vsBaseline: own};
   for (const stats of below) {
     size += stats.size;
     passed += stats.passed;
     failed += stats.failed;
     running += stats.running;
-    if (
-      stats.best !== null &&
-      (best === null || better(direction, stats.best.vsBaseline, best.vsBaseline))
-    ) {
-      best = stats.best;
-    }
   }
-  return {size, passed, failed, running, best};
+  return {size, passed, failed, running};
 }
 
-const memo = new WeakMap<CandidateTree, Map<MetricDirection, Lineage>>();
+const memo = new WeakMap<CandidateTree, Lineage>();
 
-/** The lineage of `tree`; the same object while the tree and `direction` are unchanged. */
-export function candidateLineage(tree: CandidateTree, direction: MetricDirection): Lineage {
-  const byDirection = memo.get(tree) ?? new Map<MetricDirection, Lineage>();
-  memo.set(tree, byDirection);
-  const known = byDirection.get(direction);
+/** The lineage of `tree`; the same object while the tree is unchanged. */
+export function candidateLineage(tree: CandidateTree): Lineage {
+  const known = memo.get(tree);
   if (known !== undefined) return known;
-  const built = build(tree.candidates, direction);
-  byDirection.set(direction, built);
+  const built = build(tree.candidates);
+  memo.set(tree, built);
   return built;
 }
 
-function build(candidates: readonly Candidate[], direction: MetricDirection): Lineage {
+function build(candidates: readonly Candidate[]): Lineage {
   const present = new Set(candidates.map(item => item.id));
   const roots: string[] = [];
   const children = new Map<string, string[]>();
@@ -98,7 +71,7 @@ function build(candidates: readonly Candidate[], direction: MetricDirection): Li
   for (let at = candidates.length - 1; at >= 0; at -= 1) {
     const item = candidates[at] as Candidate;
     const below = (children.get(item.id) ?? []).map(id => subtree.get(id) as SubtreeStats);
-    subtree.set(item.id, merged(item, below, direction));
+    subtree.set(item.id, merged(item, below));
   }
   return {roots, children, depth, subtree};
 }

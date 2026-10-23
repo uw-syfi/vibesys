@@ -2,12 +2,10 @@ import {describe, expect, it} from 'bun:test';
 import type {RunEvent, RunOverview, RunSnapshot, Span} from '@vibesys/contracts';
 import {
   adoption,
-  bestVsBaseline,
   foldOverview,
   type GateReading,
   gateTrajectory,
   overviewFromSnapshot,
-  runningBest,
   workstreamCounts,
 } from './index.js';
 
@@ -85,20 +83,6 @@ function spans(random: Seeded): Span[] {
   return found;
 }
 
-/** The passed gates that beat every passed gate before them, read directly. */
-function improvements(run: readonly Span[], direction: 'max' | 'min'): string[] {
-  let best: number | null = null;
-  const found: string[] = [];
-  for (const gate of gateTrajectory(run)) {
-    if (gate.verdict !== 'passed' || gate.metricValue === null) continue;
-    const value = gate.metricValue;
-    if (best !== null && (direction === 'max' ? value <= best : value >= best)) continue;
-    best = value;
-    found.push(gate.span);
-  }
-  return found;
-}
-
 describe('run overview', () => {
   it('is the last overview a run_started event declared, from the snapshot onward', () => {
     for (let seed = 1; seed <= 100; seed += 1) {
@@ -135,32 +119,6 @@ describe('run overview', () => {
       expect(gates.map((gate: GateReading) => gate.span)).toEqual(
         run.filter(span => span.label?.kind === 'gate').map(span => span.id),
       );
-      const passed = gates.filter(
-        (g: GateReading) => g.verdict === 'passed' && g.metricValue !== null,
-      );
-      const values = passed.map((g: GateReading) => g.metricValue as number);
-      expect(bestVsBaseline(run, 'max')?.metricValue ?? null).toBe(
-        values.length ? Math.max(...values) : null,
-      );
-      expect(bestVsBaseline(run, 'min')?.metricValue ?? null).toBe(
-        values.length ? Math.min(...values) : null,
-      );
-    }
-  });
-
-  it('steps the best so far through passed gates only, ending at the best', () => {
-    for (let seed = 1; seed <= 200; seed += 1) {
-      const run = spans(new Seeded(seed));
-      for (const direction of ['max', 'min'] as const) {
-        const steps = runningBest(run, direction);
-        expect(steps.at(-1) ?? null).toEqual(bestVsBaseline(run, direction));
-        expect(steps.map(step => step.span)).toEqual(improvements(run, direction));
-        const values = steps.map(step => step.metricValue as number);
-        const better = (a: number, b: number) => (direction === 'max' ? a > b : a < b);
-        expect(values.every((value, n) => n === 0 || better(value, values[n - 1] as number))).toBe(
-          true,
-        );
-      }
     }
   });
 
@@ -175,8 +133,6 @@ describe('run overview', () => {
     };
     expect(gateTrajectory([plain])).toEqual([]);
     expect(workstreamCounts([plain]).total).toBe(0);
-    expect(bestVsBaseline([plain], 'max')).toBeNull();
-    expect(runningBest([plain], 'max')).toEqual([]);
   });
 });
 

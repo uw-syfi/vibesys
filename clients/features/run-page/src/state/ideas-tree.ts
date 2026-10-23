@@ -17,6 +17,7 @@
  * on the pointer: highlighting an idea's ancestry (`ideaAncestry`) is the screen's job.
  */
 import {candidateLineage, type Lineage} from '@vibesys/run-state/candidates';
+import {objectiveMetric} from './baselines.js';
 import {type IdeaRow, type IdeasFilter, ideaRowsById, ideasView} from './ideas-view.js';
 import type {RunModel} from './run-model.js';
 import {ratio} from './span-reading.js';
@@ -81,7 +82,7 @@ export interface TreeShape {
 
 /** The layout the Ideas face starts in: a tree once any idea builds on another, else the list. */
 export function defaultLayout(model: RunModel): IdeasLayout {
-  return candidateLineage(model.candidates, model.direction).children.size > 0 ? 'tree' : 'list';
+  return candidateLineage(model.candidates).children.size > 0 ? 'tree' : 'list';
 }
 
 /** `id` and the ideas it builds on back to the input; empty for an id that is no idea. */
@@ -113,26 +114,44 @@ export function bestLine(model: RunModel): BestLine | null {
     : {id, title: best.title, steps: bestPath.length};
 }
 
+/**
+ * The ratio of the latest idea core marked a new best below each idea, at any depth. Core's new
+ * bests only improve, so the latest one in a subtree is its best; the client compares nothing.
+ */
+function newBestBelow(model: RunModel): ReadonlyMap<string, number> {
+  const metric = objectiveMetric(model);
+  const points = metric === null ? undefined : model.series?.get(metric)?.points;
+  const items = new Map(model.candidates.candidates.map(item => [item.id, item]));
+  const below = new Map<string, number>();
+  for (const point of points ?? []) {
+    const found = point.best ? (items.get(point.id)?.measurement?.vsBaseline ?? null) : null;
+    if (found === null) continue;
+    const seen = new Set<string>();
+    for (
+      let at = items.get(point.id)?.parent ?? null;
+      at !== null && !seen.has(at);
+      at = items.get(at)?.parent ?? null
+    ) {
+      seen.add(at);
+      below.set(at, found);
+    }
+  }
+  return below;
+}
+
 /** What the ideas built on `id`, at any depth, hold: `→ 7 ideas · best 1.42× · 2 failed`. */
 function summaryOf(walk: Walk, id: string): string {
   let size = 0;
   let failed = 0;
-  let best: number | null = null;
   for (const kid of walk.lineage.children.get(id) ?? []) {
     const stats = walk.lineage.subtree.get(kid);
     if (stats === undefined) continue;
     size += stats.size;
     failed += stats.failed;
-    const found = stats.best?.vsBaseline ?? null;
-    if (
-      found !== null &&
-      (best === null || (walk.direction === 'min' ? found < best : found > best))
-    ) {
-      best = found;
-    }
   }
+  const best = walk.newBest.get(id);
   const parts = [`→ ${size} ${size === 1 ? 'idea' : 'ideas'}`];
-  if (best !== null) parts.push(`best ${ratio(best)}`);
+  if (best !== undefined) parts.push(`best ${ratio(best)}`);
   if (failed > 0) parts.push(`${failed} failed`);
   return parts.join(' · ');
 }
@@ -153,7 +172,8 @@ function visibleIdeas(model: RunModel, shown: ReadonlySet<string>): Set<string> 
 interface Walk {
   readonly lineage: Lineage;
   readonly parents: ReadonlyMap<string, string | null>;
-  readonly direction: RunModel['direction'];
+  /** The ratio of core's latest new best below each idea. */
+  readonly newBest: ReadonlyMap<string, number>;
   readonly rows: ReadonlyMap<string, IdeaRow>;
   readonly visible: ReadonlySet<string>;
   readonly shape: TreeShape;
@@ -311,7 +331,7 @@ function chained(walk: Walk, roots: readonly string[]): boolean {
 
 export function ideaTree(model: RunModel, shape: TreeShape): IdeaTree {
   const view = ideasView(model, shape.filter);
-  const lineage = candidateLineage(model.candidates, model.direction);
+  const lineage = candidateLineage(model.candidates);
   const visible = visibleIdeas(model, new Set(view.rows.map(row => row.id)));
   const searching = shape.filter.query.trim() !== '';
   const path = model.candidates.bestPath;
@@ -321,7 +341,7 @@ export function ideaTree(model: RunModel, shape: TreeShape): IdeaTree {
   const walk: Walk = {
     lineage,
     parents: new Map(model.candidates.candidates.map(item => [item.id, item.parent])),
-    direction: model.direction,
+    newBest: newBestBelow(model),
     rows: ideaRowsById(model),
     visible,
     shape,

@@ -29,7 +29,6 @@ export {CandidateFold, type WorkMeter} from './fold.js';
 export {
   candidateLineage,
   type Lineage,
-  type MetricDirection,
   type SubtreeStats,
 } from './lineage.js';
 export {

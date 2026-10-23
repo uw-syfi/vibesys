@@ -117,6 +117,20 @@ function ended(
 
 const ROOT = span('flow:root#1', null, {name: 'multi'});
 
+/** The search's own account of what it adopted: the candidate and how it measured. */
+function adoptionOf(value: number, vs: number): Span {
+  return span('op:adopt', 'flow:root#1', {
+    type: 'operation',
+    label: {
+      kind: 'adoption',
+      title: 'adopt',
+      attrs_json: JSON.stringify({candidate: 'abc123', metric_value: value, vs_baseline: vs}),
+      verdict: 'adopted',
+      links: [],
+    },
+  });
+}
+
 describe('the ended banner', () => {
   test('says which candidate was adopted, from which round, and how much faster', () => {
     const state = ended('adopted', 'adopted: settlement:000002/settle.1', [
@@ -124,9 +138,17 @@ describe('the ended banner', () => {
       ...round(1, 100, 1.4),
       ...round(2, 410, 5.7234),
       ...round(3, 50, 0.6, 'slower'),
+      adoptionOf(410, 5.7234),
     ]);
     expect(endedView(state)?.reason).toBe(
       'Adopted the candidate from round 2, 5.72× faster than the input.',
+    );
+  });
+
+  test('names no best from its gates when the search labels no adoption', () => {
+    const gates = [ROOT, ...round(1, 100, 1.4), ...round(2, 410, 5.7234), ...round(3, 900, 12)];
+    expect(endedView(ended('adopted', 'adopted: x', gates))?.reason).toBe(
+      'Adopted the best candidate.',
     );
   });
 
@@ -163,7 +185,12 @@ describe('the ended banner', () => {
   });
 
   test('reads a lower-is-better objective the same way', () => {
-    const state = ended('adopted', 'adopted: s', [ROOT, ...round(1, 25, 0.25)], 'min');
+    const state = ended(
+      'adopted',
+      'adopted: s',
+      [ROOT, ...round(1, 25, 0.25), adoptionOf(25, 0.25)],
+      'min',
+    );
     expect(endedView(state)?.reason).toBe(
       'Adopted the candidate from round 1, 4.00× faster than the input.',
     );
@@ -173,7 +200,11 @@ describe('the ended banner', () => {
     expect(endedView(ended('adopted', 'adopted: x', []))?.reason).toBe(
       'Adopted the best candidate.',
     );
-    const slower = ended('adopted', 'adopted: x', [ROOT, ...round(1, 90, 0.9)]);
+    const slower = ended('adopted', 'adopted: x', [
+      ROOT,
+      ...round(1, 90, 0.9),
+      adoptionOf(90, 0.9),
+    ]);
     expect(endedView(slower)?.reason).toBe('Adopted the candidate from round 1.');
   });
 
@@ -186,7 +217,7 @@ describe('the ended banner', () => {
   test('never shows core’s own account of an ending, for any outcome or trace', () => {
     for (const outcome of OUTCOMES.filter(each => each !== 'failed' && each !== 'force_stopped')) {
       for (const reason of CORE_REASONS) {
-        for (const stands of [null, adoptedCandidate([ROOT, ...round(2, 410, 5.7)], 'max')]) {
+        for (const stands of [null, adoptedCandidate([ROOT, ...round(2, 410, 5.7)])]) {
           const words = endReason(outcome, reason, stands, 'max');
           expect(words).not.toContain(reason);
           expect(words).not.toMatch(/settlement:|kept-input|no-winner|[a-z]+_[a-z]+/);
@@ -198,9 +229,9 @@ describe('the ended banner', () => {
   test('claims no final verdict while the history is still being read', () => {
     // Regression: a prefix of an opened run's history read as "Adopted the candidate from round 1".
     const rounds = [1, 2, 3, 4, 5, 6].map(n => round(n, 100 * n, 1 + n));
-    const full = [ROOT, ...rounds.flat()];
+    const full = [ROOT, ...rounds.flat(), adoptionOf(600, 7)];
     for (let count = 0; count <= rounds.length; count += 1) {
-      const prefix = [ROOT, ...rounds.slice(0, count).flat()];
+      const prefix = [ROOT, ...rounds.slice(0, count).flat(), adoptionOf(100 * count, 1 + count)];
       const reading = {
         ...ended('adopted', 'adopted: s', prefix),
         history: {
