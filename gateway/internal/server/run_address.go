@@ -13,7 +13,7 @@ import (
 )
 
 // readRunProject consumes Project's address publication, independently of head readability.
-// A missing/damaged address stays absent on the wire, never an empty project directory.
+// A damaged publication is rejected; the observation boundary recovers a missing one.
 func readRunProject(root, id, dir string) (string, error) {
 	data, err := readFile(root, filepath.Join("run-addresses", id+".pb"), 1<<18)
 	if err != nil {
