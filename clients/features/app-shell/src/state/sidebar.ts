@@ -286,6 +286,9 @@ function recentRuns(state: SidebarState): RecentRun[] {
 
 /** Address from host catalog/registry or the saved catalog selection, never run history. */
 export function runProjectRoot(state: SidebarState, run: RunRef) {
+  const host = state.listings.find(listing => listing.host === run.host);
+  if (host?.kind === 'listed' && host.unknownProject?.some(each => each.runId === run.runId))
+    return undefined;
   const listed = reportedRunRefs(state.allRuns, state.listings).find(each =>
     sameRun({host: each.host, runId: each.run.runId}, run),
   );

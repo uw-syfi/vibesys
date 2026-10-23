@@ -112,6 +112,21 @@ test('missing or invalid projects stay listed as typed unknown projects', () => 
         row: {title: 'Unknown project', detail: 'Project unknown'},
       });
       expect(runProjectRoot(state, {host: hostKey(HOST), runId: 'run-a'})).toBeUndefined();
+      const remembered = {
+        ...state,
+        recent: [
+          {
+            host: hostKey(HOST),
+            hostLabel: 'host-a',
+            project: '/projects/stale',
+            task: null,
+            runId: 'run-a',
+            instanceId: null,
+            attachedAt: 0,
+          },
+        ],
+      };
+      expect(runProjectRoot(remembered, {host: hostKey(HOST), runId: 'run-a'})).toBeUndefined();
       expect(listing).toMatchObject({
         live: [],
         ended: [],
