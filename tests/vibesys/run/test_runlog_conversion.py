@@ -15,7 +15,18 @@ from hypothesis import example, given
 from hypothesis import strategies as st
 
 from vibesys.api.transport import ConversionStatus, convert_run, convert_runs
-from vibesys.events import AgentOutputChunkData, CoreEventType, RunStartedData, SpanStartedData
+from vibesys.events import (
+    AgentExecutionActivityData,
+    AgentExecutionStartedData,
+    AgentOutputChunkData,
+    CoreEventType,
+    GateFinishedData,
+    GateKind,
+    ObjectiveOverview,
+    RunOverview,
+    RunStartedData,
+    SpanStartedData,
+)
 from vibesys.records.api import MappingState, map_event
 from vibesys.run import EventJournal
 from vibesys.run.runlog_tee import RunLogTee
@@ -38,6 +49,7 @@ from vs_proto.api import (
     EpochStarted,
     Keyframe,
     LegacyEvent,
+    MeasuredInput,
     Oneof,
     Record,
     RunHead,
@@ -249,6 +261,64 @@ def test_a_journal_that_predates_the_run_trace_converts_with_the_events_it_has(
             convert_run(project, "run-1", clock=ManualClock(), threads=SimThreads()).status
             is ConversionStatus.EXISTS
         )
+
+
+@given(
+    input_value=st.floats(1, 100),
+    candidates=st.lists(st.floats(1, 100), min_size=1, max_size=3),
+)
+def test_a_candidate_evaluated_before_any_workstream_span_is_not_a_second_input(
+    input_value: float, candidates: list[float]
+) -> None:
+    """The oldest multi-agent journals record a workstream only when its round ends.
+
+    The implementer's candidate is evaluated during the round, with spanless gate events. Its
+    reading differs from the input's, and the run converts: the input's first measurement stays
+    the run's input and the candidate's reading is an ordinary one.
+    """
+    with TemporaryDirectory() as temporary, pytest.MonkeyPatch.context() as patch:
+        project, journal = journal_at(Path(temporary), patch)
+        overview = RunOverview(objective=ObjectiveOverview(text="t", metric="speed"))
+        journal.emit(
+            CoreEventType.RUN_STARTED,
+            data=RunStartedData(outer_loop="multi-agent", input="in", overview=overview),
+        )
+        journal.emit(
+            CoreEventType.GATE_FINISHED,
+            data=GateFinishedData(gate=GateKind.BENCHMARK, metric="speed", value=input_value),
+        )
+        journal.emit(
+            CoreEventType.GATE_FINISHED,
+            execution_id="run-execution",
+            data=GateFinishedData(gate=GateKind.BENCHMARK, metric="speed", value=input_value),
+        )
+        journal.emit(
+            CoreEventType.AGENT_EXECUTION_STARTED,
+            execution_id="turn-1",
+            data=AgentExecutionStartedData(
+                stage="multi-implementer",
+                activity=AgentExecutionActivityData(mode="thinking", summary="working"),
+            ),
+        )
+        for index, value in enumerate(candidates):
+            journal.emit(
+                CoreEventType.GATE_FINISHED,
+                execution_id=f"vs-{index}",
+                data=GateFinishedData(gate=GateKind.BENCHMARK, metric="speed", value=value),
+            )
+        result = convert_run(project, "run-1", clock=ManualClock(), threads=SimThreads())
+        assert result.status is ConversionStatus.CONVERTED, result.reason
+        with Project.run_log_path_for(project.root, "run-1").open("rb") as stream:
+            heads = [
+                r.body.value
+                for r in RunLogReader(stream)
+                if r.body is not None and isinstance(r.body.value, EpochStarted)
+            ]
+        measurement = heads[-1].run.input_measurement if heads[-1].run is not None else None
+        assert measurement is not None
+        assert measurement.state is not None
+        assert isinstance(measurement.state.value, MeasuredInput)
+        assert measurement.state.value.value == input_value
 
 
 @given(

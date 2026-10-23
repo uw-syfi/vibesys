@@ -184,18 +184,32 @@ def test_a_failed_input_is_an_explicit_unmeasured_state() -> None:
     assert fact.state.field == "unmeasured"
 
 
-def _spanless_gate(execution_id: str) -> e.CoreEvent:
-    """A gate event of an older journal: no span, but the run's own execution id."""
+def _spanless_gate(execution_id: str | None, value: float | None = None) -> e.CoreEvent:
+    """A gate event of an older journal: no span, and an execution id (or none)."""
     return e.CoreEvent.model_validate(
         {
             "type": e.CoreEventType.GATE_FINISHED,
-            "data": e.GateFinishedData(gate=e.GateKind.BENCHMARK),
+            "data": e.GateFinishedData(
+                gate=e.GateKind.BENCHMARK,
+                metric=None if value is None else _SERIES,
+                value=value,
+            ),
             "timestamp": _AT,
             "run_id": "run-a",
             "sequence": 1,
             "execution_id": execution_id,
         }
     )
+
+
+def _agent_started() -> e.CoreEvent:
+    return _event(
+        e.CoreEventType.AGENT_EXECUTION_STARTED,
+        e.AgentExecutionStartedData(
+            stage="implementer",
+            activity=e.AgentExecutionActivityData(mode="thinking", summary="working"),
+        ),
+    ).model_copy(update={"execution_id": "turn-a"})
 
 
 def _gate_subjects(records: list[p.Record]) -> list[p.GateSubject]:
@@ -220,3 +234,42 @@ def test_a_spanless_gate_is_the_inputs_until_a_candidate_has_started(
         [_started(), _workstream("op:ws"), *[_spanless_gate(name) for name in executions]]
     )
     assert _gate_subjects(after) == [p.GateSubject.CANDIDATE] * len(executions)
+
+
+@given(
+    first=st.floats(1, 100),
+    later=st.lists(st.floats(1, 100), min_size=1, max_size=3),
+)
+def test_a_spanless_gate_after_an_agent_ran_is_a_candidates_not_a_second_input(
+    first: float, later: list[float]
+) -> None:
+    """Older multi-agent journals evaluate a candidate before any workstream span exists.
+
+    The input is measured before any agent runs, and its measurement stays the first reading. A
+    later spanless gate that carries an execution is a candidate's, whatever its value.
+    """
+    events = [
+        _started(),
+        _spanless_gate(None, first),
+        _spanless_gate("input-run", first),
+        _agent_started(),
+        *[_spanless_gate(f"vs-{i}", value) for i, value in enumerate(later)],
+    ]
+    records = _records(events)
+    fact = _fact(records)
+    assert fact is not None
+    assert fact.state is not None
+    assert fact.state.field == "measured"
+    assert fact.state.value.value == first
+    subjects = _gate_subjects(records)
+    assert subjects[-1] is p.GateSubject.CANDIDATE
+    assert subjects[0] is p.GateSubject.INPUT
+
+
+def test_a_spanless_gate_before_the_input_was_measured_stays_the_inputs_after_an_agent() -> None:
+    records = _records([_started(), _agent_started(), _spanless_gate("run", 5.0)])
+    assert _gate_subjects(records) == [p.GateSubject.INPUT]
+    fact = _fact(records)
+    assert fact is not None
+    assert fact.state is not None
+    assert fact.state.field == "measured"

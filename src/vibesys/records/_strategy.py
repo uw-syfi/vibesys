@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 import vibesys.events as e
 import vs_proto.api as p
-from vibesys.records._common import Projection, enum_value
+from vibesys.records._common import Projection, enum_value, measured_input
 from vibesys.records._spans import gate_stage, subject
 
 if TYPE_CHECKING:
@@ -194,12 +194,17 @@ def _spanless_subject(projection: Projection) -> p.GateSubject:
     """A gate event of an older journal names no span: the input is measured before any candidate exists.
 
     The run's own execution runs the input's gates, so an execution id does not tell them from a
-    candidate's; whether a candidate (a workstream) has started does.
+    candidate's; whether a candidate has started does. A workstream span says so. The oldest
+    multi-agent journals record a workstream only when its round ends, yet an implementer's
+    candidate is evaluated in the round, so a candidate also exists once an agent has run after
+    the input was measured (the input is measured before any agent runs). The input's first
+    committed measurement stays the run's input; later readings are ordinary readings.
     """
-    started = projection.event.execution_id is not None and any(
-        span.label is not None and span.label.kind == "workstream"
-        for span in projection.spans.values()
-    )
+    if projection.event.execution_id is None:
+        return p.GateSubject.INPUT
+    labels = [span.label.kind for span in projection.spans.values() if span.label is not None]
+    measured = measured_input(projection.input_measurement) is not None
+    started = "workstream" in labels or (measured and "agent_turn" in labels)
     return p.GateSubject.CANDIDATE if started else p.GateSubject.INPUT
 
 
