@@ -603,9 +603,11 @@ export function liveRows(state: SidebarState): RunRow[] {
         title,
         detail,
         trail,
-        tooltip: [title, trail === null ? detail : `${detail} · ${trail}`, `run ${run.runId}`].join(
-          '\n',
-        ),
+        tooltip: [
+          title,
+          trail === null ? detail : `${detail} · ${trail}`,
+          ...(server.projectRoot === undefined ? [] : [`run ${run.runId}`]),
+        ].join('\n'),
         status: liveStatus(server),
         look: liveLook(server),
         problem: null,

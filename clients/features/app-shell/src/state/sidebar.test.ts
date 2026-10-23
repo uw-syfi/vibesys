@@ -366,6 +366,7 @@ test('property: unresolved live runs keep their sidebar state and notices withou
       title: 'Unknown project',
       status: phase === 'paused' ? 'paused' : 'live',
     });
+    expect(liveRows(state)[0]?.tooltip).not.toContain(`unknown-${seed}`);
     expect(runProjectRoot(state, {host: after.host, runId: `unknown-${seed}`})).toBeUndefined();
     expect(runNotices(before, after).map(notice => notice.kind)).toEqual(
       phase === 'paused' ? ['paused'] : [],

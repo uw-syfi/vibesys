@@ -91,7 +91,7 @@ export function dashboardRows(state: SidebarState, clock: Clock): readonly Dashb
             title: 'Unknown project',
             detail: '',
             trail: null,
-            tooltip: `${machine}: ${run.runId}: Project unknown`,
+            tooltip: `${machine}: Project unknown`,
             status: 'unknown',
             look: {tone: 'neutral', word: 'Project unknown'},
             problem: null,
