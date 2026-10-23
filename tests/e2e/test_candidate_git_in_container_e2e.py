@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
+from scripts.ci_base_images import base_image
 from tests.support import run_test_command
 
 from vibesys.run.environment import open_run_environment
@@ -50,7 +51,7 @@ from vs_sim.api import DISCARD
 pytestmark = pytest.mark.e2e
 
 _ENABLE_ENV = "VIBESYS_E2E_DOCKER"
-_BASE_IMAGE = os.environ.get("VIBESYS_E2E_DOCKER_BASE_IMAGE", "python:3.12-bookworm")
+_BASE_IMAGE = os.environ.get("VIBESYS_E2E_DOCKER_BASE_IMAGE", base_image("python:3.12-bookworm"))
 _IDENTITY = ("-c", "user.name=t", "-c", "user.email=t@example.invalid")
 
 

@@ -25,6 +25,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 import pytest
+from scripts.ci_base_images import base_image
 from tests.support.command_runner_contract import (
     CAP,
     PARTIAL_STDERR,
@@ -52,7 +53,7 @@ from vs_sim.api import DISCARD
 #: Upper bound on a stopped process exiting; reached only when a stop failed.
 _EXIT_BOUND_SECONDS = 30.0
 _E2E_DOCKER = "VIBESYS_E2E_DOCKER"
-_DOCKER_BASE_IMAGE = "python:3.12-bookworm"
+_DOCKER_BASE_IMAGE = base_image("python:3.12-bookworm")
 _DOCKER_BUILD_TIMEOUT_S = 600.0
 
 

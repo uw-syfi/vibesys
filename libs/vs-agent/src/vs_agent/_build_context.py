@@ -30,9 +30,9 @@ class _Pattern:
 def build_context_inputs(
     relative_paths: Iterable[str], *, dockerignore: str | None, dockerfile: str
 ) -> list[str]:
-    """Return the context files a build reads, sorted.
+    """Return the context entries a build reads, sorted.
 
-    *relative_paths* are the regular files under the context, ``/``-separated
+    *relative_paths* are the files, directories and symlinks under the context, ``/``-separated
     and relative to it; *dockerignore* is the text of its ``.dockerignore``
     (``None``: there is none); *dockerfile* is the Dockerfile's relative path.
     Pure: the caller lists and reads the files.

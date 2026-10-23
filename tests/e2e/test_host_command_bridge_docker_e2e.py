@@ -25,6 +25,7 @@ from contextlib import contextmanager
 from typing import TYPE_CHECKING
 
 import pytest
+from scripts.ci_base_images import base_image
 from tests.support import run_test_command
 
 from vs_sandbox.api.slurm import (
@@ -47,7 +48,7 @@ if TYPE_CHECKING:
 
 
 _ENABLE_ENV = "VIBESYS_E2E_DOCKER"
-_IMAGE = "python:3.12-slim"
+_IMAGE = base_image("python:3.12-slim")
 _CLIENT_IN_CONTAINER = "/opt/vibesys/vibesys-gpu"
 # Stands in for the Slurm shell: it receives the command line (`sinfo ...`,
 # `srun ...` or `scancel ...`) as its one argument, as the local transport's

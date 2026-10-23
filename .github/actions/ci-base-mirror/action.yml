@@ -1,0 +1,14 @@
+name: CI base image mirror
+description: >-
+  Log in to GHCR with the job's GITHUB_TOKEN, probe the private base image
+  mirrors, and export which ones this job can pull. Any mirror it cannot read
+  (a fork PR, a missing package, an outage) falls back to the same pinned
+  digest upstream with a warning, so it never fails the job.
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        GHCR_TOKEN: ${{ github.token }}
+        GHCR_USER: ${{ github.actor }}
+      run: ./scripts/ci_base_mirror_setup.sh

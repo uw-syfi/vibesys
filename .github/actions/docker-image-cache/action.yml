@@ -33,5 +33,4 @@ runs:
         CACHE_KEY: ${{ inputs.key }}
         CACHE_RESTORE_KEYS: ${{ inputs.restore-keys }}
         CACHE_TOKEN: ${{ github.token }}
-        CACHE_CAN_PUBLISH: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
       run: ./scripts/ci_registry_image_cache.sh

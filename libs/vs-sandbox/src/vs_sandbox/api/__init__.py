@@ -81,6 +81,7 @@ if TYPE_CHECKING:
         LocalFeature,
         build_feature_image,
         feature_project_problems,
+        image_context_digest,
     )
     from vs_sandbox.gpu_monitor import (
         GpuContentionMonitor,
@@ -241,6 +242,7 @@ __all__ = [
     "exposed_grant",
     "feature_project_problems",
     "host_resource_for_mount",
+    "image_context_digest",
     "linked_worktree_git_paths",
     "observe_removal",
     "operator_root",
@@ -276,6 +278,7 @@ _LAZY_EXPORTS = {
     "FeatureRef": ("feature_image", "FeatureRef"),
     "LocalFeature": ("feature_image", "LocalFeature"),
     "build_feature_image": ("feature_image", "build_feature_image"),
+    "image_context_digest": ("feature_image", "image_context_digest"),
     "feature_project_problems": ("feature_image", "feature_project_problems"),
     "CONTAINER_RUNTIME_TOOLCHAIN": ("toolchain_features", "CONTAINER_RUNTIME_TOOLCHAIN"),
     "DOCKER_COMPOSE_VERSION": ("toolchain_features", "DOCKER_COMPOSE_VERSION"),

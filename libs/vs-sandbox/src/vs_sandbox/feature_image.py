@@ -17,8 +17,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import shutil
+import stat
+import sys
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -36,7 +39,7 @@ from vs_sandbox.feature_dockerfile import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Iterable, Mapping, Sequence
 
 _DIAGNOSTIC_LIMIT = 1000
 _IMAGE_ID = re.compile(r"sha256:[0-9a-f]{64}")
@@ -245,7 +248,7 @@ def build_feature_image(
     ) as tmp:
         context = Path(tmp).resolve()
         for destination, source in plan.copied_folders.items():
-            shutil.copytree(source, context / destination)
+            shutil.copytree(source, context / destination, symlinks=True)
         for relative, text in plan.generated_files.items():
             (context / relative).write_text(text, encoding="utf-8")
         dockerfile = context / "Dockerfile"
@@ -308,12 +311,8 @@ def _input_digest(base_identity: str, plan: BuildPlan, context: Path) -> str:
     for part in (base_identity, plan.dockerfile, *sorted(plan.generated_files.items())):
         digest.update(repr(part).encode())
         digest.update(b"\0")
-    for destination in sorted(plan.copied_folders):
-        for path in sorted(p for p in (context / destination).rglob("*") if p.is_file()):
-            digest.update(str(path.relative_to(context)).encode())
-            digest.update(b"\0")
-            digest.update(path.read_bytes())
-            digest.update(b"\0")
+    paths = (path.relative_to(context).as_posix() for path in context.rglob("*"))
+    digest.update(image_context_digest(context, paths).encode())
     return digest.hexdigest()[:32]
 
 
@@ -346,3 +345,55 @@ class _Docker:
             message = f"{what} failed (exit {result.returncode}): {detail[-_DIAGNOSTIC_LIMIT:]}"
             raise FeatureImageBuildError(message)
         return result
+
+
+def image_context_digest(context: Path, relative_paths: Iterable[str]) -> str:
+    """Hash Docker context entries, including links, permissions and Linux xattrs.
+
+    Callers select entries after their context's ignore policy. Hard-link groups
+    use their first relative path, so inode numbers never enter the identity.
+    Modification times are excluded consistently with Docker's cache checksum.
+    Python stages extended attributes on Linux; other supported platforms do not
+    expose those filesystem attributes through Python's copy2 implementation.
+    """
+    digest = hashlib.sha256()
+    hardlinks: dict[tuple[int, int], str] = {}
+    for relative in sorted(relative_paths):
+        path = context / relative
+        metadata = path.lstat()
+        mode = metadata.st_mode
+        link = ""
+        if stat.S_ISLNK(mode):
+            payload = os.fsencode(path.readlink())
+        elif stat.S_ISREG(mode):
+            link = hardlinks.setdefault((metadata.st_dev, metadata.st_ino), relative)
+            payload = path.read_bytes()
+        elif stat.S_ISDIR(mode):
+            payload = b""
+        else:
+            message = f"unsupported image input: {path}"
+            raise ValueError(message)
+        parts = (
+            os.fsencode(relative),
+            str(mode).encode(),
+            str(metadata.st_uid).encode(),
+            str(metadata.st_gid).encode(),
+            os.fsencode(link),
+            payload,
+            *_image_xattrs(path),
+        )
+        digest.update(len(parts).to_bytes(8, "big"))
+        for part in parts:
+            digest.update(len(part).to_bytes(8, "big"))
+            digest.update(part)
+    return digest.hexdigest()
+
+
+def _image_xattrs(path: Path) -> tuple[bytes, ...]:
+    if sys.platform != "linux":
+        return ()
+    return tuple(
+        part
+        for name in sorted(os.listxattr(path, follow_symlinks=False))
+        for part in (os.fsencode(name), os.getxattr(path, name, follow_symlinks=False))
+    )
