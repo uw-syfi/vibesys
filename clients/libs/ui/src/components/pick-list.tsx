@@ -131,6 +131,9 @@ export function PickList(props: {
           tabIndex={drawn ? -1 : 0}
           onFocus={focusSelected}
           onScroll={win.scrolled}
+          onWheel={win.touched}
+          onTouchStart={win.touched}
+          onPointerDown={win.touched}
           onKeyDown={event => navigationKeys(event, win, rows.length)}
         >
           <div aria-hidden="true" style={{height: win.before}} />
