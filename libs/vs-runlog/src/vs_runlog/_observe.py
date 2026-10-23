@@ -67,7 +67,7 @@ class HeadObserver:
     def __init__(self, capacity: int = _MEMO_CAPACITY) -> None:
         self.scans = 0
         self._capacity = capacity
-        self._memo: OrderedDict[_Prefix, _Recovered] = OrderedDict()
+        self._memo: OrderedDict[_Prefix, _Recovered | str] = OrderedDict()
         self._epochs: OrderedDict[_Prefix, CurrentEpoch] = OrderedDict()
 
     def read(self, path: Path) -> RunHead:
@@ -115,13 +115,19 @@ class HeadObserver:
         key = _prefix(log, head)
         if (known := self._memo.get(key)) is not None:
             self._memo.move_to_end(key)
+            if isinstance(known, str):
+                raise RunLogDamagedError(log, known)
             return known
         self.scans += 1
         facts, upgrade = CurrentEpoch(), InputUpgrade()
-        with log.open("rb") as stream:
-            for record in _head_records(RunLogReader(stream), head, log):
-                facts = current_epoch((record,), facts)
-                upgrade.apply(record)
+        try:
+            with log.open("rb") as stream:
+                for record in _head_records(RunLogReader(stream), head, log):
+                    facts = current_epoch((record,), facts)
+                    upgrade.apply(record)
+        except ValueError as error:
+            self._remember(self._memo, key, str(error))
+            raise
         recovered = _Recovered(facts.number, upgrade.measured)
         self._remember(self._memo, key, recovered)
         return recovered

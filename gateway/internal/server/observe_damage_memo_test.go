@@ -1,0 +1,67 @@
+package server
+
+import (
+	"os"
+	"path/filepath"
+	"testing"
+
+	storev1 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1"
+	"google.golang.org/protobuf/proto"
+)
+
+// test-isolation: the observation scan counter measures the retained-prefix work bound.
+func TestDamagedPrefixesScanOnceAndIdentityChangesRetry(t *testing.T) {
+	for name := range corpusCases(t) {
+		original, err := os.ReadFile(filepath.Join(corpus, name, "run.log"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		stored, err := os.ReadFile(filepath.Join(corpus, name, "run.head"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for variant := 0; variant < 12; variant++ {
+			dir := t.TempDir()
+			head := &storev1.RunHead{}
+			if err := proto.Unmarshal(stored, head); err != nil {
+				t.Fatal(err)
+			}
+			damaged := append([]byte(nil), original...)
+			switch variant % 3 {
+			case 0:
+				damaged = damaged[:len(damaged)-1-variant*len(damaged)/12]
+			case 1:
+				damaged[9] ^= 255
+			case 2:
+				head.CommittedSeq = proto.Uint64(head.GetCommittedSeq() + uint64(variant) + 1)
+			}
+			log := filepath.Join(dir, "run.log")
+			if err := os.WriteFile(log, damaged, 0600); err != nil {
+				t.Fatal(err)
+			}
+			publish(t, dir, head)
+			var observer headObserver
+			for range 10 {
+				if _, err := observer.read(dir); err == nil {
+					t.Fatalf("%s variant %d: expected damage", name, variant)
+				}
+			}
+			if observer.scans != 1 {
+				t.Fatalf("%s variant %d: same damaged prefix scanned %d times, want 1", name, variant, observer.scans)
+			}
+			if err := os.WriteFile(log, original, 0600); err != nil {
+				t.Fatal(err)
+			}
+			if err := proto.Unmarshal(stored, head); err != nil {
+				t.Fatal(err)
+			}
+			publish(t, dir, head)
+			if _, err := observer.read(dir); err != nil {
+				t.Fatal(err)
+			}
+			if observer.scans != 2 {
+				t.Fatalf("repaired prefix not retried: %d scans", observer.scans)
+			}
+		}
+	}
+}

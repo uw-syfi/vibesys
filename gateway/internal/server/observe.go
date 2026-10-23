@@ -42,6 +42,7 @@ type observedPrefix struct {
 type recoveredHead struct {
 	epoch uint32
 	input *float64
+	err   error
 }
 
 // read returns the head as stored, plus the canonical epoch and the input value of a previous
@@ -98,7 +99,7 @@ func (o *headObserver) recovered(f *os.File, info os.FileInfo, head *storev1.Run
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	if known, ok := o.memo[key]; ok {
-		return known, nil
+		return known, known.err
 	}
 	o.scans++
 	var epoch uint32
@@ -110,12 +111,18 @@ func (o *headObserver) recovered(f *os.File, info os.FileInfo, head *storev1.Run
 		}
 		epoch = max(epoch, declared)
 		_, err = upgrade.Record(payload)
-		return err
+		if err != nil {
+			return &runlog.Corruption{Offset: -1, Reason: err.Error()}
+		}
+		return nil
 	})
 	if err != nil {
-		return recoveredHead{}, err
+		var corruption *runlog.Corruption
+		if !errors.As(err, &corruption) {
+			return recoveredHead{}, err
+		}
 	}
-	result := recoveredHead{epoch: epoch}
+	result := recoveredHead{epoch: epoch, err: err}
 	if measured := upgrade.Measurement().GetMeasured(); measured != nil {
 		result.input = proto.Float64(measured.Value)
 	}
@@ -128,5 +135,5 @@ func (o *headObserver) recovered(f *os.File, info os.FileInfo, head *storev1.Run
 		delete(o.memo, o.order[0])
 		o.order = o.order[1:]
 	}
-	return result, nil
+	return result, err
 }
