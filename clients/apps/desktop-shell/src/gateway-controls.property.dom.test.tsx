@@ -264,7 +264,9 @@ async function verifyOffers(input: Scenario) {
     const chat = container.querySelector('button[aria-label="Chat"]');
     if (chat) {
       await act(async () => (chat as HTMLElement).click());
-      const chatButtons = [...container.querySelectorAll('button')].map(button => button.textContent);
+      const chatButtons = [...container.querySelectorAll('button')].map(
+        button => button.textContent,
+      );
       expect(chatButtons.includes('New steer')).toBe(buttons.includes('Guidance'));
       expect(chatButtons).toContain('New chat');
     }
