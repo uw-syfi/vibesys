@@ -19,8 +19,16 @@ from vibesys.events import (
 )
 from vs_core.api import Span, SpanStatus, SpanType
 from vs_project.api import Project
-from vs_proto.api import Outcome
-from vs_runlog.api import read_run_head
+from vs_proto.api import (
+    API_SCHEMA_HASH,
+    STORE_SCHEMA_HASH,
+    EpochStarted,
+    Oneof,
+    Outcome,
+    Record,
+    Timestamp,
+)
+from vs_runlog.api import FileRunLogWriter, read_run_head
 from vs_sim.api.testing import ManualClock, SimThreads
 
 AT = datetime(2026, 1, 1, tzinfo=UTC)
@@ -66,8 +74,10 @@ def _write_journal(root: Path, ending: CoreEvent) -> bytes:
     return content
 
 
-def _convert(project: Project) -> ConversionStatus:
-    return convert_run(project, "run-a", clock=ManualClock(), threads=SimThreads()).status
+def _convert(project: Project, *, reconvert: bool = False) -> ConversionStatus:
+    return convert_run(
+        project, "run-a", clock=ManualClock(), threads=SimThreads(), reconvert=reconvert
+    ).status
 
 
 def _outcome(root: Path) -> Outcome:
@@ -103,10 +113,12 @@ def test_pre_schema_exception_conversion_preserves_the_actual_outcome(
 
 
 @pytest.mark.regression
-@example(detail="")
-@given(detail=LEGACY_TEXT)
-def test_a_run_converted_as_failed_by_an_earlier_build_is_redone_once(detail: str) -> None:
-    """An interrupted run an earlier conversion ended Failed is converted again, once."""
+@example(detail="", name="KeyboardInterrupt")
+@given(detail=LEGACY_TEXT, name=st.sampled_from(["KeyboardInterrupt", "ValueError"]))
+def test_reconverting_rebuilds_a_converted_run_from_its_untouched_journal(
+    detail: str, name: str
+) -> None:
+    """A run an earlier build converted is rebuilt on request, and only on request."""
     with TemporaryDirectory() as temporary, pytest.MonkeyPatch.context() as env:
         root = Path(temporary) / "project"
         root.mkdir()
@@ -116,11 +128,51 @@ def test_a_run_converted_as_failed_by_an_earlier_build_is_redone_once(detail: st
         assert _convert(project) is ConversionStatus.CONVERTED
         assert _outcome(root) is Outcome.FAILED
         # The earlier build recorded the interrupt as this failure; the journal says so.
-        before = _write_journal(root, _legacy_failure(f"KeyboardInterrupt: {detail}"))
-        assert _convert(project) is ConversionStatus.CONVERTED
-        assert _outcome(root) is Outcome.STOPPED
+        before = _write_journal(root, _legacy_failure(f"{name}: {detail}"))
         assert _convert(project) is ConversionStatus.EXISTS
+        assert _outcome(root) is Outcome.FAILED
+        assert _convert(project, reconvert=True) is ConversionStatus.CONVERTED
+        assert _outcome(root) is (
+            Outcome.STOPPED if name == "KeyboardInterrupt" else Outcome.FAILED
+        )
         assert Project.event_journal_path_for(root, "run-a").read_bytes() == before
+
+
+@given(detail=LEGACY_TEXT)
+def test_reconverting_never_rebuilds_a_run_that_names_its_checkout(detail: str) -> None:
+    """A live writer knows its checkout, which the journal cannot reproduce; the run is left as written."""
+    with TemporaryDirectory() as temporary, pytest.MonkeyPatch.context() as env:
+        root = Path(temporary) / "project"
+        root.mkdir()
+        env.setenv("VIBESYS_STATE_HOME", str(Path(temporary) / "home"))
+        project = Project.open(root)
+        _write_journal(root, _legacy_failure(f"ValueError: {detail}"))
+        assert _convert(project) is ConversionStatus.CONVERTED
+        log = Project.run_log_path_for(root, "run-a")
+        with FileRunLogWriter(log, clock=ManualClock(), threads=SimThreads()) as writer:
+            writer.append(
+                Record(
+                    seq=writer.sequence + 1,
+                    epoch=writer.epoch + 1,
+                    at=Timestamp.from_datetime(AT),
+                    clock=0.0,
+                    body=Oneof(
+                        "epoch_started",
+                        EpochStarted(
+                            run_id="run-a",
+                            epoch=writer.epoch + 1,
+                            tree_hash="0" * 40,
+                            provenance_known=True,
+                            vibesys_version="1",
+                            api_schema_hash=API_SCHEMA_HASH,
+                            store_schema_hash=STORE_SCHEMA_HASH,
+                        ),
+                    ),
+                )
+            )
+        native = log.read_bytes()
+        _convert(project, reconvert=True)
+        assert log.read_bytes() == native
 
 
 @given(

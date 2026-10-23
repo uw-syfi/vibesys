@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from entrypoints.host import run
 from entrypoints.launcher import main
+from vibesys.events import CoreEvent, CoreEventType, RunStartedData
 from vs_project.api import Project
 
 if TYPE_CHECKING:
@@ -69,3 +71,40 @@ def test_bulk_command_on_an_empty_project_succeeds(
         "converted=0, exists=0, skipped=0, failed=0\n",
         "",
     )
+
+
+def test_reconvert_flag_rebuilds_only_when_asked(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("VIBESYS_STATE_HOME", str(tmp_path / "home"))
+    root = tmp_path / "project"
+    root.mkdir()
+    journal = Project.event_journal_path_for(root, "run-a")
+    journal.parent.mkdir(parents=True)
+    journal.write_bytes(
+        b"".join(
+            CoreEvent(
+                sequence=index + 1,
+                run_id="run-a",
+                timestamp=datetime(2026, 1, 1, 0, 0, index, tzinfo=UTC),
+                type=kind,
+                data=data,
+            )
+            .model_dump_json()
+            .encode()
+            + b"\n"
+            for index, (kind, data) in enumerate(
+                [
+                    (CoreEventType.RUN_STARTED, RunStartedData(outer_loop="dynamic", input="x")),
+                    (CoreEventType.RUN_FINISHED, None),
+                ]
+            )
+        )
+    )
+    converted = [
+        run(["convert-runs", *flags, "--project", str(root)], cwd=tmp_path)[1]
+        .splitlines()[-1]
+        .split(",")[0]
+        for flags in ([], [], ["--reconvert"])
+    ]
+    assert converted == ["converted=1", "converted=0", "converted=1"]

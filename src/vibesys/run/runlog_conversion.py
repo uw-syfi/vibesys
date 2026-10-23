@@ -4,7 +4,7 @@ TEMPORARY: this module, ``vibesys host convert-run(s)`` and their tests are dele
 transport flip (tracking issue: #3441). The product never converts on read; a run that has not
 been migrated is listed as "old format". Run it once per project, offline::
 
-    vibesys host convert-runs --project <project directory>
+    vibesys host convert-runs --project <project directory> [--reconvert]
 
 Each converted run also brings its chat conversations along (``import_legacy_chat``), so a
 thread of the preceding app is still there after the migration. Only the run histories that
@@ -27,13 +27,12 @@ from vibesys.events import CoreEvent, CoreEventType, EventStatus
 from vibesys.run.runlog_tee import JOURNAL_EVENT_MAX_BYTES, RunLogTee
 from vs_decode.api import Unreadable, decode_json
 from vs_project.api import Project, ProjectError
-from vs_proto.api import Keyframe, Outcome, RunHead, validate
+from vs_proto.api import Keyframe, RunHead, validate
 from vs_runlog.api import (
     FileRunContent,
     FileRunLogWriter,
     RunLogReader,
     RunLogStopReason,
-    current_epoch,
     install_run_log,
 )
 
@@ -125,18 +124,19 @@ def _journal_line(line: bytes, event: CoreEvent) -> bytes:
     return _with_agent_identity(line)
 
 
-def _converted_as_failed_interrupt(directory: Path) -> bool:
-    """Whether an earlier conversion ended an interrupted run as Failed (redone once)."""
-    journal = directory / "core-events.jsonl"
+def _written_by_migration(directory: Path) -> bool:
+    """Whether a complete log can be rebuilt from its journal.
+
+    A live writer knows its checkout; an offline conversion never does. A log that names one
+    holds facts its journal cannot reproduce.
+    """
+    if not (directory / "core-events.jsonl").exists():
+        return False
     with (directory / "run.log").open("rb") as stream:
-        lifecycle = current_epoch(RunLogReader(stream)).lifecycle
-    state = None if lifecycle is None else lifecycle.state
-    if state is None or state.field != "ended" or state.value.outcome is not Outcome.FAILED:
-        return False
-    if not journal.exists():
-        return False
-    with closing(_events(journal)) as events:
-        return any(_is_interrupt(event) for _, event in events)
+        return not any(
+            r.body is not None and r.body.field == "epoch_started" and r.body.value.provenance_known
+            for r in RunLogReader(stream)
+        )
 
 
 def _complete_sequence(path: Path) -> int:
@@ -183,7 +183,12 @@ def _has_checkpoint(directory: Path, sequence: int) -> bool:
 
 
 def convert_run(
-    project: Project, run_id: str, *, clock: SleepingClock, threads: Threads
+    project: Project,
+    run_id: str,
+    *,
+    clock: SleepingClock,
+    threads: Threads,
+    reconvert: bool = False,
 ) -> ConversionResult:
     """Convert one stopped project run; leave its journal and core store untouched.
 
@@ -192,7 +197,9 @@ def convert_run(
     """
     directory = project.log_directory_for(project.root, run_id)
     try:
-        result = _convert_directory(directory, run_id, clock=clock, threads=threads)
+        result = _convert_directory(
+            directory, run_id, clock=clock, threads=threads, reconvert=reconvert
+        )
     except _UnsupportedJournalError as exc:
         return ConversionResult(ConversionStatus.SKIPPED, str(exc))
     if result.status in {ConversionStatus.CONVERTED, ConversionStatus.EXISTS}:
@@ -210,7 +217,7 @@ def convert_run(
 
 
 def _convert_directory(
-    directory: Path, run_id: str, *, clock: SleepingClock, threads: Threads
+    directory: Path, run_id: str, *, clock: SleepingClock, threads: Threads, reconvert: bool
 ) -> ConversionResult:
     """Atomically convert a quiescent run with trace events, preserving the JSONL source.
 
@@ -220,7 +227,7 @@ def _convert_directory(
     """
     destination = directory / "run.log"
     sequence = _complete_sequence(destination)
-    if sequence and not _converted_as_failed_interrupt(directory):
+    if sequence and not (reconvert and _written_by_migration(directory)):
         if _has_checkpoint(directory, sequence):
             return ConversionResult(ConversionStatus.EXISTS, "already converted")
         with FileRunLogWriter(destination, clock=clock, threads=threads):
@@ -257,10 +264,12 @@ class RunConversion:
 
 
 def _attempt(
-    directory: Path, run_id: str, *, clock: SleepingClock, threads: Threads
+    directory: Path, run_id: str, *, clock: SleepingClock, threads: Threads, reconvert: bool
 ) -> ConversionResult:
     try:
-        return _convert_directory(directory, run_id, clock=clock, threads=threads)
+        return _convert_directory(
+            directory, run_id, clock=clock, threads=threads, reconvert=reconvert
+        )
     except _UnsupportedJournalError as exc:
         return ConversionResult(ConversionStatus.SKIPPED, str(exc))
     except (OSError, ValueError, TypeError, ProjectError) as exc:
@@ -283,11 +292,13 @@ def _indexed_target(entry: Path) -> Path | ConversionResult:
 
 
 def convert_runs(
-    project: Project, *, clock: SleepingClock, threads: Threads
+    project: Project, *, clock: SleepingClock, threads: Threads, reconvert: bool = False
 ) -> tuple[RunConversion, ...]:
     """Convert stopped project runs and every host index entry, once per target.
 
-    Originals are never deleted, including after the seven-day retention window.
+    ``reconvert`` rebuilds a run the migration already converted from its untouched journal, so
+    a later improvement of the migration reaches it. Originals are never deleted, including after
+    the seven-day retention window.
     A failed run does not prevent later runs from being attempted. Index entries
     without a supported journal are explicitly reported, including dangling links.
     """
@@ -299,7 +310,7 @@ def convert_runs(
         directory = project.log_directory_for(project.root, run_id)
         seen.add(directory.resolve())
         try:
-            result = convert_run(project, run_id, clock=clock, threads=threads)
+            result = convert_run(project, run_id, clock=clock, threads=threads, reconvert=reconvert)
         except (OSError, ValueError, TypeError, ProjectError) as exc:
             result = ConversionResult(ConversionStatus.FAILED, str(exc))
         if (
@@ -321,7 +332,7 @@ def convert_runs(
                 ConversionStatus.SKIPPED, "already processed this index target"
             )
         else:
-            result = _attempt(target, entry.name, clock=clock, threads=threads)
+            result = _attempt(target, entry.name, clock=clock, threads=threads, reconvert=reconvert)
             seen.add(target)
         if result.status is ConversionStatus.EXISTS:
             result = ConversionResult(ConversionStatus.SKIPPED, result.reason)

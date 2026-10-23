@@ -82,6 +82,11 @@ def run(argv: list[str], *, cwd: Path, clock: SleepingClock | None = None) -> tu
     convert.add_argument("--project", type=Path, default=cwd, help="project directory")
     bulk = methods.add_parser("convert-runs", help="convert stopped project and host-index runs")
     bulk.add_argument("--project", type=Path, default=cwd, help="project directory")
+    bulk.add_argument(
+        "--reconvert",
+        action="store_true",
+        help="rebuild runs this migration already converted, from their untouched journals",
+    )
     args = parser.parse_args(argv)
     conversion = import_module("vibesys.api.transport")
     clock = SystemClock() if clock is None else clock
@@ -89,7 +94,9 @@ def run(argv: list[str], *, cwd: Path, clock: SleepingClock | None = None) -> tu
     try:
         project = Project.open(root)
         if args.method == "convert-runs":
-            rows = conversion.convert_runs(project, clock=clock, threads=OsThreads())
+            rows = conversion.convert_runs(
+                project, clock=clock, threads=OsThreads(), reconvert=args.reconvert
+            )
             counts = Counter(row.result.status for row in rows)
             output = "".join(
                 f"{row.run}: {row.result.status}: {row.result.reason}\n" for row in rows
