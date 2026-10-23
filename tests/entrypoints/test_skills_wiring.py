@@ -43,6 +43,7 @@ class _ArgsOptions(TypedDict, total=False):
 
 NKI_WRAPPER_DIR = PROJECT_ROOT / "resources" / "skills" / "neuron-agentic-development"
 NKI_SKILL_NAMES = {
+    "neuron-explorer-profile-schema",
     "neuron-nki-debugging",
     "neuron-nki-docs",
     "neuron-nki-profile-querying",

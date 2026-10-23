@@ -133,6 +133,15 @@ or inadvertently introduce additional copy operations.
 
 ### Dynamic control flow
 
+> **NKI 0.6.0+ note:** As the NKI frontend moves from Parsing to Tracing (Tracing available in
+> 0.6.0, default in 0.7.0, parser removed in 0.8.0), the `for i in dynamic_range(...)` and bare
+> `while reg:` forms below become **parser-only and are removed under tracing** — a runtime register
+> has no value at trace time. Migrate to the structured constructs `nl.fori_loop(lower, upper,
+> body_fun, step=1)` (counted loop with a runtime bound) and `nl.while_loop(init, body_fun)`
+> (data-dependent loop); both compile on the parser and the tracer. See the
+> [NKI 0.6.0 Dynamic Loop Migration Guide](nki-060-dynamic-loop-migration-guide.md) for
+> before/after patterns, rules, and the mechanical transform recipe.
+
 NKI Beta 2 includes support for dynamic (on-chip) control flow. All of the
 dynamic control flow uses on-chip registers to hold the conditional values.
 See [Trainium/Inferentia2 Architecture Guide for NKI](../../architecture/trainium_inferentia2_arch.md#trainium-inferentia2-arch) for more information. If a control flow

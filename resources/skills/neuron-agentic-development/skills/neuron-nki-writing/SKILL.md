@@ -18,7 +18,27 @@ This skill guides writing and modifying NKI (Neuron Kernel Interface) kernels �
 
 ## Critical: NKI Language Constraints
 
-BEFORE writing any NKI code, read `references/nki-language-constraint.md` for the complete list of required and forbidden API patterns covering Beta 1 → Beta 2, Beta 2 → NKI 0.3.0, and NKI 0.3.0 → NKI 0.4.0 migration rules. Violating ANY rule is a compilation failure.
+BEFORE writing any NKI code, read `references/nki-language-constraint.md` for the complete list of required and forbidden API patterns. Each rule is labelled with the release that made it a breaking change (`0.x.0+`), so the file covers every current release rather than one migration step. Violating ANY rule is a compilation failure.
+
+### Hardware limits: don't hardcode the PSUM free dim
+
+The PSUM free-dimension limit is generation- and dtype-gated and has changed
+across releases. Current values:
+
+- **gen2 / gen3:** 512 (one PSUM bank)
+- **gen4:** 4096 for a `float32` `dst`, 8192 for a `bfloat16` `dst` (entire PSUM)
+
+This is **not** a queryable `tile_size` field — `nl.tile_size.psum_bank_fmax` is
+a fixed 512 (fp32 elements per bank) and is neither dtype- nor generation-aware,
+so do not use it as the free-dim limit. Authoritative source: the `nc_matmul`,
+`nc_matmul_mx`, and `dma_transpose` API blocks via `/neuron-nki-docs`. Treat any
+PSUM free-dim number inlined in this skill's reference files as illustrative;
+confirm against those API blocks.
+
+`tile_size` *does* authoritatively report other limits — use it for those:
+`nl.tile_size.pmax` (128), `nl.tile_size.psum_num_banks` (bank cycling),
+`nl.tile_size.gemm_moving_fmax` (matmul moving-operand SBUF free dim), and
+`nl.tile_size.sbuf_fmax` / `sbuf_fmax_bytes` (SBUF capacity).
 
 ## Quick Start
 
@@ -84,12 +104,26 @@ NKI operates on tiles with hardware constraints:
 | Constraint | Limit | Notes |
 |------------|-------|-------|
 | Partition dimension (P) | ≤ 128 | First dimension of SBUF tensor |
-| PSUM free dimension | ≤ 512 (gen2/3) / ≤ 4096 (gen4) | For matrix multiply results |
-| SBUF free dimension | ≤ 32767 | Second+ dimensions |
-| MatMul K dimension | ≤ 2048 | Contraction dimension |
+| PSUM free dimension | 512 (gen2/3); gen4: 4096 fp32 / 8192 bf16 | For matrix multiply results — authoritative: `nc_matmul` doc block (see "Hardware limits" above) |
 
-For tensors exceeding limits, use explicit tiling with `TiledRange` for remainder-safe iteration
-(see Utility Selection Guide below).
+> **SBUF free dim** and **MatMul K (contraction)** are not fixed constants — look
+> them up rather than hardcoding. SBUF free-dim capacity is a per-partition byte
+> limit (`nl.tile_size.sbuf_fmax` / `sbuf_fmax_bytes`, generation-/dtype-dependent).
+> Per-instruction MatMul K is the partition dim, **K ≤ 128** (effective 256/512
+> with `double_row` / Quad-MX packing). Authoritative source: the `nc_matmul`
+> tile-size block in the `/neuron-nki-docs` skill (`api-nki-isa-tensor.md`).
+
+For tensors exceeding these limits, tile explicitly. Two mechanisms, both remainder-safe:
+
+- **`nl.tiles` / `nl.blocks` (NKI 0.7.0+, language-native)** — view the tensor as a grid
+  addressed by tile coordinate, e.g. `src_tiles = nl.tiles(src, tile_shape=(128, 256))` then
+  `src_tiles[i, j].data`. Prefer this when the alternative is hand-computed offsets and
+  strides, and use `nl.alloc_tiles` / `nl.alloc_blocks` to allocate on-chip grids. Boundary
+  tiles clamp to the real extent automatically. See `references/indexing-patterns.md`
+  ("Tiled and Blocked Layouts").
+- **`TiledRange` (nkilib helper)** — iterate a tiled dimension, giving `.start_offset` /
+  `.size` per step for plain slicing. Still valid and widely used in nkilib kernels; see
+  Utility Selection Guide below.
 
 ### Step 3: Implement Memory Access
 
@@ -138,17 +172,36 @@ Use multiple complementary checks (atol/rtol, max absolute difference, tensor no
 
 | Buffer | Max P | Max F | Use Case |
 |--------|-------|-------|----------|
-| `nl.sbuf` | 128 | 32767 | General compute |
-| `nl.psum` | 128 | 512 (gen2/3) / 4096 (gen4) | MatMul accumulation |
+| `nl.sbuf` | 128 | `nl.tile_size.sbuf_fmax` (per-partition byte limit; gen/dtype-dependent) | General compute |
+| `nl.psum` | 128 | 512 (gen2/3); gen4: 4096 fp32 / 8192 bf16 | MatMul accumulation |
 | `nl.shared_hbm` | - | - | Input/output tensors |
 
 ## Loop Types
 
 | Loop Type | Use Case | Unrolling |
 |-----------|----------|-----------|
-| `nl.affine_range(N)` | Parallel iterations, no dependencies | Full unroll |
-| `nl.sequential_range(N)` | Loop-carried dependencies (cumsum) | No unroll |
-| `nl.static_range(N)` | Compile-time constant iterations | Partial unroll |
+| `range(N)` | **Any compile-time-bounded loop** — the default | Full unroll |
+| `nl.fori_loop(lower, upper, body_fun, step=1)` | Counted loop with **runtime bound** | Structured on-chip loop (not unrolled) |
+| `nl.while_loop(init, body_fun)` | **Data-dependent** condition-driven loop | Structured on-chip loop (not unrolled) |
+| `nl.no_reorder()` (context manager) | Constrain scheduling of a region | n/a — a scheduling directive, not a loop |
+
+**`nl.affine_range` / `nl.sequential_range` / `nl.static_range` are deprecated aliases for
+`range()` — use `range()`.** All three are literally `return range(start, stop, step)` on the
+default frontend and in the CPU simulator, and each carries an explicit *"This API is deprecated
+and will be removed in future releases. Prefer using `range()` directly instead"* warning. They do
+**not** differ in unrolling or scheduling:
+
+- There is no "no unroll" or "partial unroll" variant. Every one of them fully unrolls.
+- `nl.sequential_range` does **not** serialize execution or express a loop-carried dependency.
+  Choosing it over `nl.affine_range` changes nothing. To constrain scheduling, use the
+  `nl.no_reorder()` region; to carry state across iterations, keep it in SBUF/PSUM and mutate in
+  place — correctness comes from the data dependency, not from the loop function.
+
+**Runtime/data-dependent loops (NKI 0.7.0+):** use `nl.fori_loop` (counted, runtime bound) or
+`nl.while_loop` (condition-driven), NOT `for i in nl.dynamic_range(...)` or bare `while reg:` —
+those cannot work on the default `standard` frontend, where a runtime register has no value at
+trace time. See `references/nki-language-constraint.md` for the before/after patterns and rules, and
+`/neuron-nki-docs` (api-nki-language-dims.md) for the `fori_loop` / `while_loop` API signatures.
 
 ## Common Patterns
 
@@ -160,9 +213,9 @@ For detailed code examples, anti-patterns, and production patterns (cumsum, rmsn
 
 ### Matrix Multiply — Key Rules
 
-- Allocate PSUM: `nl.ndarray(..., buffer=nl.psum)` — uninitialized is correct
-- K-dimension loop: **always `nl.affine_range()`**, never `nl.sequential_range` (serializes execution)
-- Multiple `nisa.nc_matmul()` writes to same PSUM buffer triggers hardware accumulation
+- Allocate PSUM: `nl.ndarray(..., buffer=nl.psum)` — uninitialized is correct; **do NOT `nisa.memset` the PSUM tile before the K loop**
+- K-dimension loop: plain `range()` — the deprecated `nl.*_range` aliases are the same function and none of them serializes
+- Control accumulation explicitly with `accumulate=(k_idx > 0)`: the first K tile overwrites (initializes) PSUM, later tiles accumulate — this replaces any separate memset/zero-init of PSUM
 - Never write PSUM to HBM between accumulation steps
 - Operands: stationary `[K≤128, M≤128]`, moving `[K≤128, N≤512/4096]`, result `[M, N]` in PSUM
 - Copy PSUM→SBUF via `nisa.tensor_copy()` before further ops
@@ -185,11 +238,12 @@ For detailed code examples, anti-patterns, and production patterns (cumsum, rmsn
 References are tiered to minimize overhead on simple tasks. Load only what you need based on the Complexity Assessment above.
 
 ### Always load (core references):
-- `references/nki-language-constraint.md` - **MANDATORY**: Required and forbidden API patterns for NKI 0.4.0, reference kernel template
+- `references/nki-language-constraint.md` - **MANDATORY**: Required and forbidden API patterns (version-gated per release), frontend selection, reference kernel template
 - `references/common-patterns.md` - Full code examples: matmul PSUM accumulation, fused ScalarE, associative scan, production patterns
 - `references/api-translation.md` - PyTorch/NumPy to NKI operation mapping
 - `references/kernel-template.md` - Standard kernel template with self-contained utilities
-- `references/indexing-patterns.md` - **Complete indexing guide**: memory-type rules (HBM/SBUF/PSUM), operation constraints (matmul/transpose/reduce), dynamic indexing with DGE modes
+- `references/indexing-patterns.md` - **Complete indexing guide**: memory-type rules (HBM/SBUF/PSUM), tiled/blocked layouts (`nl.tiles`, `nl.blocks`, `nl.alloc_tiles`), operation constraints (matmul/transpose/reduce), dynamic indexing with DGE modes
+- `references/tile-grain-selection.md` - How to CHOOSE the `tile_shape` / `block_shape` values: size the tile to the consuming `nisa.*` op rather than to the tensor, keep the tunable grain at the block level, two-level loop structure. Authoring heuristics, not compilation rules
 
 ### Load when tiling or DMA patterns are needed (medium+ complexity):
 - `references/memory-patterns.md` - DMA and tiling patterns with code examples
@@ -199,6 +253,10 @@ References are tiered to minimize overhead on simple tasks. Load only what you n
 ### Load when layout manipulation is needed:
 - `references/transpose-and-layout.md` - **Transpose and layout transformation guide**: nc_transpose, TensorView, array patterns, strided DMA, decision trees for layout operations
 - `references/nkilib/core/tensor-view.md` - TensorView: zero-copy tensor manipulation
+
+### API features documented in `/neuron-nki-docs` (query it, not duplicated here):
+- **Native `NkiTensor` view methods** — composable, zero-copy views callable directly on a tensor: `slice`, `select`, `permute`, `broadcast`, `expand_dim`, `squeeze_dim`, `reshape_dim`, `flatten_dims`, `rearrange`, `reshape`, `view`, `vector_select`, plus query methods `is_contiguous` / `is_indirect` and low-level `ap` / `get_pattern`. These are the native tensor methods (e.g. `t.slice(1, 0, 256)`); the `TensorView` helper above wraps the same ops for composing complex 3D+ `.ap()` patterns. Look up signatures/examples via `/neuron-nki-docs` → `api-nki-tensor.md`.
+- **Tensor indirection on compute ops (`.indirect()`)** — on NeuronCore-v4+, gather/scatter for **on-chip compute** (not just DMA): pass a `.indirect(index)` view as `dst` or `data` to `nc_matmul`, `nc_matmul_mx`, `tensor_tensor`, `tensor_scalar`, `tensor_reduce`, `tensor_copy`, `tensor_copy_predicated`, `tensor_scalar_reduce`, `tensor_scalar_cumulative`, `activation`, `activation_reduce`, `activate2`, `exponential`. Subject to quadrant/partition-alignment rules (group size 16 for vector/scalar/gpsimd, 32 for tensor engine). This extends the DMA-only `vector_offset` indirection to compute. Look up `NkiTensor.indirect` and the per-op notes via `/neuron-nki-docs`.
 
 ### Load when advanced patterns are needed (complex kernels only):
 - `references/performance-basics.md` - Optimization patterns (fusion, double buffering)
@@ -233,10 +291,14 @@ Full source for nkilib/core utilities and subkernels:
 
 | Utility | Adopt When | Reference |
 |---------|-----------|-----------|
+| `nl.tiles` / `nl.blocks` | Addressing a tensor by tile (or block) coordinate instead of computing offsets and strides by hand | `references/indexing-patterns.md` ("Tiled and Blocked Layouts") |
+| `nl.alloc_tiles` / `nl.alloc_blocks` | Allocating on-chip storage that is itself a tile/block grid | `references/indexing-patterns.md` ("Tiled and Blocked Layouts") |
 | `TiledRange` | Tiled dimension iteration with remainder handling | `references/nkilib/core/tiled-range.md` |
 | `TensorView` | Strided/interleaved DMA, broadcasting, reshape without copy, dynamic selection | `references/nkilib/core/tensor-view.md` |
 | `stream_shuffle_broadcast` | Replicate partition-0 value (bias, scale) to all 128 partitions | `references/nkilib/ops/stream-shuffle-broadcast.md` |
 | `SbufManager` | 4+ SBUF tensors or sub-functions sharing SBUF | `references/nkilib/core/allocator.md` |
+| `NkiTensor` view methods | Zero-copy reshape/slice/permute/broadcast directly on a tensor (`t.slice(...)`, `t.reshape_dim(...)`, etc.) | `/neuron-nki-docs` → `api-nki-tensor.md` |
+| `.indirect()` on compute ops | On-chip gather/scatter (NeuronCore-v4+) for matmul/tensor/activation ops via an index tensor | `/neuron-nki-docs` → `NkiTensor.indirect` |
 
 **Specialized:** `TiledDimInfo` (subtile metadata), `tp_broadcast` (P→F broadcast, very rare).
 
@@ -244,12 +306,17 @@ Full source for nkilib/core utilities and subkernels:
 
 ```
 Kernel needs tiling?
-├─ Yes → Use TiledRange for each tiled dimension
+├─ Tiles addressed by coordinate (and would otherwise need manual offset/stride math)?
+│  └─ Yes → nl.tiles(src, tile_shape=...) → src_tiles[i, j].data
+│           Allocate on-chip grids with nl.alloc_tiles(...)
+├─ Coarser transfer/reuse grain above the compute tile?
+│  └─ Yes → nl.blocks(src, tile_shape=..., block_shape=...) → block.data for one DMA
+├─ Plain iteration over a tiled dimension → TiledRange for each tiled dimension
 │        Use div_ceil() for tile count computations
 ├─ Nested tiles (subtiles within tiles)?
 │  └─ Yes → TiledRange supports nesting: TiledRange(outer_tile, subtile_size)
 │           For CTE-style metadata tracking → also consider TiledDimInfo
-└─ No → Plain nl.affine_range()
+└─ No tiling → Plain range()
 
 Kernel accesses tensors non-contiguously?
 ├─ Strided/interleaved → TensorView.slice(step=N)

@@ -1,5 +1,18 @@
 # NKI Block Dimension Migration Guide
 
+> **This guide describes a REMOVED idiom — do not write new kernels this way.**
+> Block dimensions in front of the partition dimension (`nl.par_dim(...)` block dims) have been
+> removed. If you are looking for how to express a tile grid, or a coarser transfer / reuse grain
+> above the compute grain, the current API is the tiled & blocked layout family:
+> [`nl.tiles`](../../programming/api/api-nki-language-layout.md#nki-language-tiles),
+> [`nl.blocks`](../../programming/api/api-nki-language-layout.md#nki-language-blocks),
+> [`nl.alloc_tiles`](../../programming/api/api-nki-language-layout.md#nki-language-alloc_tiles),
+> [`nl.alloc_blocks`](../../programming/api/api-nki-language-layout.md#nki-language-alloc_blocks)
+> — see [Tiled & Blocked Layouts](../../programming/api/api-nki-language-layout.md).
+> Read this guide only to migrate **existing** block-dimension code. Do not substitute hand-rolled
+> offset/stride arithmetic, `reshape_dim`, or `nkilib` `TiledDimInfo` / `tiled-range` helpers for
+> the layout API.
+
 NKI Block Dimension Migration Guide
 The SBUF/PSUM tensors in NKI used to allow block dimensions in front of the partition dimension. The block dimension support has been removed due the following reasons.
 

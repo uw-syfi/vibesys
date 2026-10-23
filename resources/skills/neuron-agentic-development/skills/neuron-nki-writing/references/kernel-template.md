@@ -115,7 +115,7 @@ def my_kernel(
     num_seq_tiles = div_ceil(seq_len, F_TILE_SIZE)
 
     # === Main Processing Loop ===
-    for b_idx in nl.affine_range(num_batch_tiles):
+    for b_idx in range(num_batch_tiles):
         b_start = b_idx * P_MAX
         b_end = min(b_start + P_MAX, batch_size)
         b_size = b_end - b_start
@@ -124,7 +124,7 @@ def my_kernel(
         param_sb = nl.ndarray((hidden_dim,), dtype=param_tensor.dtype, buffer=nl.sbuf)
         nisa.dma_copy(dst=param_sb, src=param_tensor[0:hidden_dim])
 
-        for s_idx in nl.affine_range(num_seq_tiles):
+        for s_idx in range(num_seq_tiles):
             s_start = s_idx * F_TILE_SIZE
             s_end = min(s_start + F_TILE_SIZE, seq_len)
             s_size = s_end - s_start
@@ -224,7 +224,7 @@ Use this pattern for tiling dimensions that exceed hardware limits:
 num_p_tiles = div_ceil(outer_dim, P_MAX)
 
 # Tile loop with explicit bounds calculation
-for p_idx in nl.affine_range(num_p_tiles):
+for p_idx in range(num_p_tiles):
     p_start = p_idx * P_MAX
     p_end = min(p_start + P_MAX, outer_dim)  # Handle last tile
     p_size = p_end - p_start

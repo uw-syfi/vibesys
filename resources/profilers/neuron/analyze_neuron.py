@@ -63,6 +63,11 @@ def _print(
 # PATH inside a fresh container shell.
 _NEURON_BIN_DIRS = ("/opt/aws/neuron/bin",)
 
+# Device-profile mode for ``inspect``. The runtime's default ("model") captures
+# only synchronous executions, and native TorchNeuron executes asynchronously,
+# so it writes no NTFF; "session" records all device activity per core.
+_DEVICE_PROFILE_MODE = "session"
+
 
 def _explorer() -> str:
     """Resolve the ``neuron-explorer`` executable, preferring PATH."""
@@ -82,6 +87,7 @@ def run_command(
     *,
     timeout: int = 1800,
     cwd: str | None = None,
+    env: dict[str, str] | None = None,
     runner: capture_runtime.CommandRunner = subprocess.run,
 ) -> int:
     """Run *cmd*, streaming combined output to stdout. Returns exit code."""
@@ -94,6 +100,7 @@ def run_command(
             text=True,
             timeout=timeout,
             cwd=cwd,
+            env=env,
             check=False,
         )
     except OSError as exc:
@@ -116,9 +123,16 @@ def _find_one(directory: Path, suffix: str) -> Path | None:
 
 
 def _session_dir(report: str) -> Path:
+    """The directory holding the profile: the device trace's own session dir.
+
+    A capture out-dir nests each session under ``<instance>_pid_<pid>/<id>/``
+    and may hold NEFFs elsewhere (``neffs/``); ``view`` resolves NEFFs from the
+    session dir, so it must be pointed at the NTFF's directory, not the root.
+    """
     p = Path(report)
     if p.is_dir():
-        return p
+        ntff = _find_one(p, ".ntff")
+        return ntff.parent if ntff else p
     if p.is_file():
         return p.parent
     diagnostic = f"session path does not exist: {report}"
@@ -133,10 +147,11 @@ def _session_dir(report: str) -> Path:
 def cmd_capture(ns: argparse.Namespace) -> None:
     """Capture a system + device profile around a workload command.
 
-    Runs ``neuron-explorer inspect -o <out_dir> <workload>``. The workload
-    should *launch and exercise* a Neuron model (so a NEFF is compiled and
-    executed) — e.g. a benchmark driver hitting an already-running server,
-    or a script that runs a few compiled forwards.
+    Runs ``neuron-explorer inspect -o <out_dir> <workload>`` with session
+    device profiling. The workload must itself *load and run* the Neuron model
+    (the runtime records the profile in that process) — e.g. a script that runs
+    a few compiled forwards. A benchmark client hitting a separately started
+    server records nothing: profile the server process instead.
     """
     out_dir = Path(ns.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -160,7 +175,8 @@ def cmd_capture(ns: argparse.Namespace) -> None:
     # of -o. If that's the git-tracked /workspace, those root-owned, mode-600
     # files break the host-side per-round `git add -A`. Keeping cwd in the
     # out-dir (under /tmp) contains them.
-    rc = run_command(cmd, timeout=ns.timeout, cwd=str(out_dir))
+    env = {**os.environ, "NEURON_RT_INSPECT_DEVICE_PROFILE": _DEVICE_PROFILE_MODE}
+    rc = run_command(cmd, timeout=ns.timeout, cwd=str(out_dir), env=env)
     ntff = _find_one(out_dir, ".ntff")
     neff = _find_one(out_dir, ".neff")
     _print("\n--- capture artifacts ---")
@@ -173,15 +189,11 @@ def cmd_capture(ns: argparse.Namespace) -> None:
 
 
 def _view(session: Path, output_format: str, extra: list[str] | None = None) -> None:
+    # Only the session dir: neuron-explorer matches each NTFF to its NEFF by UID.
+    # Naming one NEFF (the old ``-n``) mismatches when a session holds several,
+    # as every TorchNeuron session does.
     cmd = [_explorer(), "view", "--disable-ui", "--output-format", output_format]
-    neff = _find_one(session, ".neff")
-    ntff = _find_one(session, ".ntff")
-    if session.is_dir():
-        cmd += ["-d", str(session)]
-    if neff:
-        cmd += ["-n", str(neff)]
-    if ntff:
-        cmd += ["-s", str(ntff)]
+    cmd += ["-d", str(session)]
     cmd += extra or []
     run_command(cmd)
 

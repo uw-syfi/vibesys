@@ -55,11 +55,13 @@ def build_server() -> FastMCP:
         out_dir: str = str(Path(tempfile.gettempdir()) / "neuronprof"),
         timeout: int = 1800,
     ) -> str:
-        """Run a workload under ``neuron-explorer inspect`` and capture profiles.
+        """Run a workload under ``neuron-explorer inspect`` with session device profiling.
 
         Args:
-            workload: Shell command that launches/exercises the Neuron model
-                (e.g. a benchmark driver against an already-running server).
+            workload: Shell command that itself loads and runs the Neuron model
+                (e.g. a script running a few compiled steps). A client driving a
+                separately started server records nothing; profile the server
+                process with the ``NEURON_RT_INSPECT_*`` variables instead.
             out_dir: Directory to write the NTFF/NEFF profiles into.
             timeout: Max seconds to let the workload run.
         """

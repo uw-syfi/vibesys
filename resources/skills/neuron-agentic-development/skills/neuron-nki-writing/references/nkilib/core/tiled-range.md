@@ -11,7 +11,7 @@ Adopt TiledRange when:
 - **Nested tiling**: pass an outer `TiledRangeIterator` as input to create subtiles — avoids manual two-level remainder logic
 - **Multiple tiled dimensions**: each `TiledRangeIterator` carries `.size`, `.start_offset`, `.index` so DMA copies use correct bounds
 
-**Skip when**: the iteration count is compile-time constant and evenly divides, or a simple `nl.affine_range(N)` suffices.
+**Skip when**: the iteration count is compile-time constant and evenly divides, or a simple `range(N)` suffices.
 
 Used in 8+ production kernels including cumsum, RMSNorm, router TopK, and MLP projections (with up to 20+ call sites in complex kernels like MLP CTE).
 
@@ -90,7 +90,7 @@ from nkilib.core.utils.tiled_range import TiledRange
 # Iterate over a 1024-element free dimension in tiles of 512
 for tile in TiledRange(1024, 512):
     # tile.size=512 for both tiles, tile.start_offset=0 then 512
-    data = nl.ndarray((nl.par_dim(128), tile.size), dtype=input_tensor.dtype, buffer=nl.sbuf)
+    data = nl.ndarray((128, tile.size), dtype=input_tensor.dtype, buffer=nl.sbuf)
     nisa.dma_copy(dst=data, src=input_tensor[partition_idx, tile.start_offset:tile.start_offset + tile.size])
     # ... process data
 ```

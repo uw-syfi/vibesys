@@ -14,6 +14,8 @@
 
 """RMSNorm kernel optimized for token generation (decoding) phase with efficient sharding and memory management."""
 
+from typing import Optional, Tuple, Union
+
 import nki.isa as nisa
 import nki.language as nl
 
@@ -36,15 +38,15 @@ BxS_FULL_TILE_SIZE = 512
 
 
 def rmsnorm_tkg(
-    input: TensorView | nl.ndarray,
-    gamma: TensorView | nl.ndarray,
-    output: TensorView | nl.ndarray,
+    input: Union[TensorView, nl.ndarray],
+    gamma: Union[TensorView, nl.ndarray],
+    output: Union[TensorView, nl.ndarray],
     eps: float = 1e-6,
-    hidden_actual: int | None = None,
+    hidden_actual: Optional[int] = None,
     hidden_dim_tp: bool = False,
     single_core_forced: bool = False,
     use_heap_memory: bool = False,
-    sbm: SbufManager | None = None,
+    sbm: Optional[SbufManager] = None,
 ):
     """
     RMSNorm implementation optimized for inference token generation (decoding) phase.
@@ -115,9 +117,7 @@ def rmsnorm_tkg(
         output_sb_view = output_view
     else:
         alloc_tensor = sbm.alloc_heap if use_heap_memory else sbm.alloc_stack
-        output_sb = alloc_tensor(
-            (H0, BxS, H1), dtype=input_view.dtype, buffer=nl.sbuf, name="rmsnorm_output_sb"
-        )
+        output_sb = alloc_tensor((H0, BxS, H1), dtype=input_view.dtype, buffer=nl.sbuf, name="rmsnorm_output_sb")
         output_sb_view = TensorView(output_sb)
 
     _, lnc, shard_id = get_verified_program_sharding_info("rmsnorm_tkg", (0, 1))
@@ -135,17 +135,11 @@ def rmsnorm_tkg(
 
     if not input_view.is_sbuf():
         input_view_flat = input_view.flatten_dims(start_dim=0, end_dim=1)
-        input_view_sharded = input_view_flat.slice(
-            dim=0, start=shard_id * shard_size, end=(shard_id + 1) * shard_size
-        )
+        input_view_sharded = input_view_flat.slice(dim=0, start=shard_id * shard_size, end=(shard_id + 1) * shard_size)
     else:
-        input_view_sharded = input_view.slice(
-            dim=1, start=shard_id * shard_size, end=(shard_id + 1) * shard_size
-        )
+        input_view_sharded = input_view.slice(dim=1, start=shard_id * shard_size, end=(shard_id + 1) * shard_size)
 
-    output_view_sharded = output_sb_view.slice(
-        dim=1, start=shard_id * shard_size, end=(shard_id + 1) * shard_size
-    )
+    output_view_sharded = output_sb_view.slice(dim=1, start=shard_id * shard_size, end=(shard_id + 1) * shard_size)
 
     rmsnorm_tkg_llama_impl(
         input=input_view_sharded,
@@ -179,9 +173,7 @@ def rmsnorm_tkg(
         else:
             return output.reshape((H0, BxS, H1))
 
-    output_hbm_view_sharded = output_view.slice(
-        dim=1, start=shard_id * shard_size, end=(shard_id + 1) * shard_size
-    )
+    output_hbm_view_sharded = output_view.slice(dim=1, start=shard_id * shard_size, end=(shard_id + 1) * shard_size)
 
     nisa.dma_copy(dst=output_hbm_view_sharded.get_view(), src=output_view_sharded.get_view())
 
@@ -199,7 +191,7 @@ def process_rmsnorm_tile(
     output_sb_view: TensorView,
     eps_view: TensorView,
     matmul_reduction_const_view: TensorView,
-    bxs_tile: tuple,
+    bxs_tile: Tuple,
     hidden_actual: int,
     use_heap_memory: bool = False,
     sbm: SbufManager = None,
@@ -233,17 +225,13 @@ def process_rmsnorm_tile(
     inter_dtype = nl.float32
 
     kernel_assert(
-        input_sb_view.shape == output_sb_view.shape,
-        "Input and output tensor shapes must match for RMSNorm processing",
+        input_sb_view.shape == output_sb_view.shape, "Input and output tensor shapes must match for RMSNorm processing"
     )
     H0, BxS, H1 = input_sb_view.shape
 
     # Compute x^2 for RMS calculation
     rmsnorm_square = alloc_tensor(
-        shape=(H0, BxS, H1),
-        dtype=inter_dtype,
-        buffer=nl.sbuf,
-        name=f"rmsnorm_square_{bxs_tile.index}",
+        shape=(H0, BxS, H1), dtype=inter_dtype, buffer=nl.sbuf, name=f"rmsnorm_square_{bxs_tile.index}"
     )
     num_allocated_tensor += 1
     nisa.activation(rmsnorm_square[...], op=nl.square, data=input_sb_view.get_view())
@@ -260,10 +248,7 @@ def process_rmsnorm_tile(
 
     # Apply gamma scaling: input * gamma
     gamma_mult = alloc_tensor(
-        shape=(H0, BxS, H1),
-        dtype=inter_dtype,
-        buffer=nl.sbuf,
-        name=f"rmsnorm_gamma_mult_{bxs_tile.index}",
+        shape=(H0, BxS, H1), dtype=inter_dtype, buffer=nl.sbuf, name=f"rmsnorm_gamma_mult_{bxs_tile.index}"
     )
     num_allocated_tensor += 1
     gamma_mult_view = TensorView(gamma_mult)
@@ -316,7 +301,7 @@ def rmsnorm_tkg_llama_impl(
     gamma: TensorView,
     output: TensorView,
     num_H_shards: int,
-    hidden_actual: int | None,
+    hidden_actual: Optional[int],
     eps: float,
     hidden_dim_tp: bool = False,
     use_heap_memory: bool = False,
@@ -378,15 +363,10 @@ def rmsnorm_tkg_llama_impl(
     # Load gamma
     # if hidden_dim_tp is on, rmsnorm_gamma offset needs to be 32B aligned
     gamma_align = 32 if hidden_dim_tp else None
-    gamma_sb = alloc_tensor(
-        shape=(H0, H1), dtype=gamma.dtype, name="rmsnorm_gamma", align=gamma_align
-    )
+    gamma_sb = alloc_tensor(shape=(H0, H1), dtype=gamma.dtype, name="rmsnorm_gamma", align=gamma_align)
     num_allocated_tensor += 1
     gamma_sb_view = load_gamma_to_sbuf(
-        gamma_hbm=gamma,
-        gamma_sb=TensorView(gamma_sb),
-        num_H_shards=num_H_shards,
-        hidden_dim_tp=hidden_dim_tp,
+        gamma_hbm=gamma, gamma_sb=TensorView(gamma_sb), num_H_shards=num_H_shards, hidden_dim_tp=hidden_dim_tp
     )
 
     # Load eps

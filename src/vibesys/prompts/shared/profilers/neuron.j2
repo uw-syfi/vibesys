@@ -33,20 +33,22 @@ The benchmark command is `{{ benchmark_command }}`.
 
 ## How NeuronCore profiling works
 
-NeuronCores execute *compiled graphs* (NEFFs). You cannot profile work that never reached the device — so first confirm the model actually runs on a NeuronCore (compiled graphs executing on-device), not on CPU. Profiling is two steps: **capture** a hardware profile around a live workload, then **analyze** it.
+NeuronCores execute *compiled graphs* (NEFFs) that native TorchNeuron builds from `torch.compile(backend="neuron")` regions and eager ops. You cannot profile work that never reached the device — so first confirm the model actually runs on a NeuronCore, not on CPU. Profiling is two steps: **capture** a profile from the process that owns the NeuronCores, then **analyze** it.
 
 ## Capturing a profile (shell — long-running, do this first)
 
 1. Read the objective, candidate contract, manifest, build/startup commands, and benchmark `--help` output to understand which implementation and process the workload exercises{% if benchmark_command is defined and benchmark_command %}: `{{ benchmark_command }} --help`{% endif %}. Do not assume a filename, language, or launcher.
-2. Stop any stale candidate processes from previous attempts.
-3. Pre-warm — the first `neuronx-cc` compile of each graph shape takes minutes; warm it so the capture reflects steady state, not compilation.
-4. Capture around a benchmark load using the `capture` MCP tool (or shell):
-   ```
-   python {{ profiler_support_name }}/analyze_neuron.py capture \
-     --out-dir /tmp/neuronprof \
-     --workload "<benchmark command>"
-   ```
-   Use any domain-specific capture recipe above when one is provided{% if benchmark_command is defined and benchmark_command %}, otherwise discover a short representative command from `{{ benchmark_command }} --help`{% endif %}. `capture` wraps `neuron-explorer inspect`, which runs the workload and writes a system + device profile (NTFF) plus the NEFF into the out-dir. If it reports **no NTFF/NEFF produced**, the candidate is not executing on the NeuronCore — record that as the headline finding.
+2. Stop any stale candidate processes from previous attempts. A NeuronCore belongs to one process; a leftover server makes the next start fail with `Failed to initialize Neuron Runtime`.
+3. Pre-warm — the first compile of each graph shape takes minutes; warm every bucket so the capture reflects steady state, not compilation.
+4. Capture. The Neuron runtime records the profile inside the process that runs the model, so profile *that* process:
+   - **A server:** start it with `NEURON_RT_INSPECT_ENABLE=1 NEURON_RT_INSPECT_DEVICE_PROFILE=session NEURON_RT_INSPECT_OUTPUT_DIR=/tmp/neuronprof`, drive a short benchmark load against it, then stop it with SIGTERM and wait for it to exit; the runtime writes the trace on exit.
+   - **A standalone script** that loads and runs the model itself: use the `capture` MCP tool (or shell), which runs it under `neuron-explorer inspect` with session device profiling:
+     ```
+     python {{ profiler_support_name }}/analyze_neuron.py capture \
+       --out-dir /tmp/neuronprof \
+       --workload "<command>"
+     ```
+   Use any domain-specific capture recipe above when one is provided{% if benchmark_command is defined and benchmark_command %}, otherwise discover a short representative command from `{{ benchmark_command }} --help`{% endif %}. `session` device profiling is required: the default device mode writes no device trace under TorchNeuron's asynchronous execution. Session traces grow by gigabytes per minute, so keep the profiled load to seconds. If the out-dir holds **no NTFF/NEFF**, the candidate is not executing on the NeuronCore — record that as the headline finding.
 
 ## Analysis toolkit — `{{ profiler_mcp_name }}` MCP tools OR shell
 
@@ -54,7 +56,7 @@ If the `{{ profiler_mcp_name }}` MCP server is attached to this round, call its 
 
 | MCP tool | Shell equivalent | Purpose |
 | -------- | ---------------- | ------- |
-| `capture(workload, out_dir)` | `analyze_neuron.py capture --workload "<cmd>" --out-dir <dir>` | Run workload under `neuron-explorer inspect`. |
+| `capture(workload, out_dir)` | `analyze_neuron.py capture --workload "<cmd>" --out-dir <dir>` | Run a standalone workload under `neuron-explorer inspect` with session device profiling. |
 | `summary(report)` | `analyze_neuron.py summary <dir>` | Engine utilization + top ops + DMA. Start here. |
 | `summary_json(report)` | `analyze_neuron.py summary-json <dir>` | Same, machine-readable. |
 | `operators(report)` | `analyze_neuron.py operators <dir>` | Per-operator/instruction breakdown. |
@@ -66,7 +68,7 @@ Start with `summary`, then drill into `operators` / `dma` as needed.
 ## Classify the primary bottleneck
 
 Classify into exactly one of: `cpu_launch_bound`, `python_overhead_bound`, `input_pipeline_bound`, `sync_bound`, `memcpy_bound`, `comm_bound`, `kernel_bound`, `mixed_or_unclear`. Map the Neuron evidence:
-- Low compute-engine (PE/Act/Pool) utilization with large host gaps → `cpu_launch_bound` / `python_overhead_bound`.
+- Many small executions per step, or low compute-engine (PE/Act/Pool) utilization with large host gaps → `cpu_launch_bound` / `python_overhead_bound` (an eager hot path, graph breaks, or per-step host work).
 - DMA-dominated timeline (HBM↔SBUF traffic) → `memcpy_bound`.
 - Collectives dominating (multi-core) → `comm_bound`.
 - Compute engines saturated → `kernel_bound`.

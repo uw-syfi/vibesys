@@ -561,7 +561,7 @@ prompts and input-owned candidate-contract documentation.
 | `cuda` | NVIDIA GPU serving systems and kernel-writing tasks. | Docker, Modal. | Selects/reselects a GPU and can monitor contention. | Serving uses `nsys` in Docker and `torch` on Modal; kernel-writing uses `ncu` where supported by the run environment. |
 | `rocm` | AMD GPU serving systems. | Docker, SkyPilot, Slurm. | Selects a visible ROCm device locally; a SkyPilot profile declares remote capacity. | Docker uses `rocprof`; SkyPilot uses `none` (only `auto`/`none` are supported there). |
 | `metal` | Apple Silicon / MPS targets. | None: Docker on macOS cannot expose Metal/MPS, and agents no longer run on the host. A Metal run fails when the container is created, before agent work starts. | No device selection or monitor. | n/a |
-| `trainium` | AWS Trainium / NeuronCore targets. | Docker; Modal unsupported. | Forwards `/dev/neuron*` in Docker; no per-device selection. | `auto` resolves to `neuron`. |
+| `trainium` | AWS Trainium / NeuronCore targets. Default image: the native TorchNeuron DLC (`torch-neuronx` 2.14, Neuron SDK 2.33), which installs TorchNeuron in editable mode under `/workspace`; a task needs the relocating task Dockerfile from `examples/model-serving/Llama-3-8B-trn2` or `import torch` fails under the project mount. | Docker; Modal unsupported. | Forwards `/dev/neuron*` in Docker; no per-device selection. | `auto` resolves to `neuron`. |
 | `cpu` | CPU-only service/data-structure targets. | Docker. | No device selection or monitor. | Generic workloads on Linux select `linux_cpu`; macOS selects `macos_cpu`; other systems select no profiler. |
 
 When a backend rejects a runtime environment, it should fail before agent work

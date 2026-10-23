@@ -22,6 +22,8 @@ These utilities are designed to be reusable across different kernel types
 and provide consistent behavior for common operations.
 """
 
+from typing import List, Optional, Tuple
+
 import nki.isa as nisa
 import nki.language as nl
 
@@ -273,7 +275,7 @@ def normalization_uses_weights(norm_type: NormType) -> bool:
     return norm_type == NormType.RMS_NORM or norm_type == NormType.LAYER_NORM
 
 
-def get_program_sharding_info() -> tuple[int, int, int]:
+def get_program_sharding_info() -> Tuple[int, int, int]:
     """
     Get program sharding information for current execution.
 
@@ -309,9 +311,9 @@ def get_program_sharding_info() -> tuple[int, int, int]:
 
 def get_verified_program_sharding_info(
     kernel_name: str = "",
-    allowed_ndims: tuple[int, ...] | None = None,
-    max_sharding: int | None = None,
-) -> tuple[int, int, int]:
+    allowed_ndims: Optional[Tuple[int, ...]] = None,
+    max_sharding: Optional[int] = None,
+) -> Tuple[int, int, int]:
     """
     Get and optionally verify program sharding information.
 
@@ -334,7 +336,9 @@ def get_verified_program_sharding_info(
         # Optional validation checks
         return (grid_ndim, n_prgs, prg_id)
     """
-    return get_program_sharding_info()
+    grid_ndim, n_prgs, prg_id = get_program_sharding_info()
+    ndim_check = allowed_ndims is None or (grid_ndim == allowed_ndims[0] if len(allowed_ndims) == 1 else False)
+    return grid_ndim, n_prgs, prg_id
 
 
 def div_ceil(n, d):
@@ -390,7 +394,7 @@ def get_max_positive_value_for_dtype(dtype) -> float:
     return result
 
 
-def reduce(op="mul", input: list = None, initial_value=None):
+def reduce(op='mul', input: List = None, initial_value=None):
     """
     Perform reduction operation on a list of values.
 
@@ -426,17 +430,17 @@ def reduce(op="mul", input: list = None, initial_value=None):
                 result = max(result, value)
         return result
     """
-    kernel_assert(initial_value is not None, "initial_value need to set")
-    kernel_assert(input is not None, "input need to be set")
-    kernel_assert(op in ["mul", "add", "max", "min"], f"only op {op} is supported")
+    kernel_assert(initial_value is not None, f"initial_value need to set")
+    kernel_assert(input is not None, f"input need to be set")
+    kernel_assert(op in ['mul', 'add', 'max', 'min'], f"only op {op} is supported")
     for value in input:
-        if op == "mul":
+        if op == 'mul':
             initial_value = initial_value * value
-        elif op == "add":
+        elif op == 'add':
             initial_value = initial_value + value
-        elif op == "min":
+        elif op == 'min':
             initial_value = min(initial_value, value)
-        elif op == "max":
+        elif op == 'max':
             initial_value = max(initial_value, value)
     return initial_value
 
@@ -459,32 +463,32 @@ def resolve_dtype_to_nki(dtype):
         return result
     """
     dtype_str = str(dtype)
-    if dtype_str == "bool":
+    if dtype_str == 'bool':
         return nl.bool
-    elif dtype_str == "int8":
+    elif dtype_str == 'int8':
         return nl.int8
-    elif dtype_str == "int16":
+    elif dtype_str == 'int16':
         return nl.int16
-    elif dtype_str == "int32":
+    elif dtype_str == 'int32':
         return nl.int32
-    elif dtype_str == "uint8":
+    elif dtype_str == 'uint8':
         return nl.uint8
-    elif dtype_str == "uint16":
+    elif dtype_str == 'uint16':
         return nl.uint16
-    elif dtype_str == "uint32":
+    elif dtype_str == 'uint32':
         return nl.uint32
-    elif dtype_str == "float16":
+    elif dtype_str == 'float16':
         return nl.float16
-    elif dtype_str == "float32":
+    elif dtype_str == 'float32':
         return nl.float32
-    elif dtype_str == "bfloat16":
+    elif dtype_str == 'bfloat16':
         return nl.bfloat16
-    elif dtype_str == "float8_e4m3":
+    elif dtype_str == 'float8_e4m3':
         return nl.float8_e4m3
-    elif dtype_str in ["float8_e4m3fn", "float8e4"]:
+    elif dtype_str in ['float8_e4m3fn', 'float8e4']:
         # TODO: switch to nisa.get_nc_version() >= nki.isa.nc_version.gen4 after the comparison support
         return nl.float8_e4m3fn if nisa.get_nc_version() == nisa.nc_version.gen4 else nl.float8_e4m3
-    elif dtype_str in ["float8_e5m2", "float8e5"]:
+    elif dtype_str in ['float8_e5m2', 'float8e5']:
         return nl.float8_e5m2
     elif dtype_str == str(nl.float4_e2m1fn_x4):
         return nl.float4_e2m1fn_x4
@@ -492,4 +496,4 @@ def resolve_dtype_to_nki(dtype):
         return nl.float8_e4m3fn_x4
     elif dtype_str == str(nl.float8_e5m2_x4):
         return nl.float8_e5m2_x4
-    kernel_assert(False, f"Unrecognized dtype {dtype_str}")
+    kernel_assert(False, f'Unrecognized dtype {dtype_str}')
