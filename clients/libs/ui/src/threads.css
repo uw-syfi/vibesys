@@ -281,7 +281,7 @@
   stroke-width: 2;
 }
 .vs-chart-point {
-  fill: var(--panel);
+  fill: none;
   stroke: var(--accent);
   stroke-width: 2;
 }
