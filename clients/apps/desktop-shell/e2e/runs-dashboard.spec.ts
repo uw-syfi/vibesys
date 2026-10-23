@@ -357,8 +357,11 @@ test('an addressless run remains visible when its project is unknown', async ({p
     recent: [],
     projectRuns: {},
   });
-  const tile = page.locator('.vs-overview-tile').filter({hasText: 'run-addressless'});
+  const tile = tiles(page, 'Unknown');
+  await expect(tile).toHaveCount(1);
   await expect(tile).toBeVisible();
+  await expect(tile).toContainText('Unknown project');
+  await expect(tile).toContainText('host-a');
   await expect(tile).toContainText('Project unknown');
   const shots = process.env['SCREENS_DIR'];
   if (shots !== undefined)
