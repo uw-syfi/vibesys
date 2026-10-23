@@ -1542,6 +1542,10 @@ FILE_IO_EDGE_MODULES: dict[str, Edge] = {
         "OS adapter and project pyproject loader for the host helper",
     ),
     "src/server/registry.py": (EdgeKind.STORE, "the server instance registry"),
+    "src/server/run_digest_store.py": (
+        EdgeKind.STORE,
+        "FileProjects reads committed run heads, keyframes and their bounded log suffix",
+    ),
     "src/server/run_summary_cache.py": (
         EdgeKind.STORE,
         "the run summary's cache beside the event journal",
