@@ -12,26 +12,28 @@ import {
   RecordSchema,
   RelaunchRefusal,
   RunLiveness,
-  TailResponseSchema,
   WatchRunsResponseSchema,
 } from '@vibesys/proto';
 import {relaunchRequest} from '@vibesys/runs/intents';
 import {FakeClock} from '@vibesys/transport/testing';
 import {waitFor} from 'xstate';
+import {FakeRecords} from './fake-records.js';
 import {intentsActor, relaunchActor} from './index.js';
 
 function fixture(enabled = true) {
   const bridge = new FakeGatewayBridge();
   const clock = new FakeClock();
+  const records = new FakeRecords();
   const actor = intentsActor({
     bridge,
     host: 'local' as HostKey,
     runId: 'run-1',
     enabled,
     schedule: clock.schedule,
+    records: records.subscribe,
   });
   actor.start();
-  return {bridge, actor, clock};
+  return {bridge, actor, clock, records};
 }
 const request = create(PostIntentRequestSchema, {
   projectRoot: '/project',
@@ -49,9 +51,9 @@ function admission(requestId = 'r-1') {
   );
 }
 
-test('a successful unary HostCall means pending until Tail says applied or refused', async () => {
+test('a successful unary HostCall means pending until the records of the run say applied or refused', async () => {
   for (const step of [IntentStep.APPLIED, IntentStep.REFUSED]) {
-    const {bridge, actor} = fixture();
+    const {bridge, actor, records} = fixture();
     try {
       actor.send({type: 'send', request});
       const call = bridge.calls[0];
@@ -74,12 +76,7 @@ test('a successful unary HostCall means pending until Tail says applied or refus
           },
         },
       });
-      bridge.streams[0]?.receive(
-        toBinary(
-          TailResponseSchema,
-          create(TailResponseSchema, {records: [toBinary(RecordSchema, record)]}),
-        ),
-      );
+      records.publish([record]);
       expect(actor.getSnapshot().context.entries[0]?.status).toBe(
         step === IntentStep.APPLIED ? 'applied' : 'refused',
       );
@@ -87,7 +84,8 @@ test('a successful unary HostCall means pending until Tail says applied or refus
       actor.stop();
     }
     expect(bridge.calls.every(call => call.cancelled)).toBe(true);
-    expect(bridge.streams.every(stream => stream.cancelled)).toBe(true);
+    expect(bridge.streams).toHaveLength(0);
+    expect(records.subscribers).toBe(0);
   }
 });
 
@@ -154,73 +152,42 @@ test('typed refusals are final; malformed replies and wrong ids stay unconfirmed
   }
 });
 
-test('a typed refusal preserves an outcome-stream failure for earlier pending requests', async () => {
-  const {actor, bridge} = fixture();
+test("history reads no log of its own: a lost, ended or missing log is the reader's to report, once", () => {
+  const {actor, bridge, clock, records} = fixture();
   try {
     actor.send({type: 'send', request});
-    bridge.streams[0]?.ended('disconnected');
-    bridge.calls[0]?.resolve(
-      toBinary(
-        HostCallResponseSchema,
-        create(HostCallResponseSchema, {
-          result: {
-            case: 'configurationFailed',
-            value: {
-              code: 'invalid_input',
-              stage: 'post_intent',
-              message: 'Request refused',
-              exitCode: 2,
-            },
-          },
-        }),
-      ),
-    );
-    await waitFor(actor, snapshot => snapshot.matches({active: 'idle'}), {timeout: 1000});
-    expect(actor.getSnapshot().context.entries[0]?.status).toBe('refused');
-    expect(actor.getSnapshot().context.error).toBe('disconnected');
+    // The reviewer's repro: a Tail that ended with NotFound used to be reopened every second.
+    clock.advanceBy(60_000);
+    expect(bridge.streams).toHaveLength(0);
+    expect(records.subscribers).toBe(1);
   } finally {
     actor.stop();
   }
+  expect(records.subscribers).toBe(0);
+  expect(clock.pending).toBe(0);
 });
 
-test('an ended outcome stream retries independently of an in-flight admission', async () => {
-  const {actor, bridge, clock} = fixture();
+test('replayed and reordered deliveries fold to the same outcomes', () => {
+  const {actor, records} = fixture();
   try {
-    actor.send({type: 'send', request});
-    bridge.streams[0]?.ended('connection lost');
-    expect(bridge.streams[0]?.cancelled).toBe(true);
-    expect(bridge.calls[0]?.cancelled).toBe(false);
-    clock.advanceBy(1000);
-    expect(bridge.streams).toHaveLength(2);
-    bridge.streams[1]?.receive(
-      toBinary(
-        TailResponseSchema,
-        create(TailResponseSchema, {
-          records: [
-            toBinary(
-              RecordSchema,
-              create(RecordSchema, {
-                seq: 1n,
-                body: {
-                  case: 'intent',
-                  value: {controlId: 'r-1', action: IntentAction.PAUSE, step: IntentStep.APPLIED},
-                },
-              }),
-            ),
-          ],
-        }),
-      ),
-    );
-    expect(actor.getSnapshot().context.entries[0]?.status).toBe('applied');
-    expect(actor.getSnapshot().context.error).toBeNull();
-    bridge.calls[0]?.resolve(admission('r-1'));
-    await waitFor(actor, snapshot => snapshot.matches({active: 'idle'}), {timeout: 1000});
-    expect(actor.getSnapshot().context.entries[0]?.status).toBe('applied');
+    const record = (seq: bigint, step: IntentStep) =>
+      create(RecordSchema, {
+        seq,
+        epoch: 1,
+        body: {
+          case: 'intent',
+          value: {controlId: 'r-1', action: IntentAction.PAUSE, step},
+        },
+      });
+    const applied = record(2n, IntentStep.APPLIED);
+    records.publish([applied]);
+    // A reconnect replays the prefix, including an older observation of the same control.
+    records.publish([record(1n, IntentStep.REFUSED), applied]);
+    expect(actor.getSnapshot().context.outcomes).toHaveLength(1);
+    expect(actor.getSnapshot().context.outcomes[0]?.status).toBe('applied');
   } finally {
     actor.stop();
   }
-  expect(bridge.streams[1]?.cancelled).toBe(true);
-  expect(clock.pending).toBe(0);
 });
 
 test('relaunch confirms an epoch or a typed refusal and owns every transport call', async () => {

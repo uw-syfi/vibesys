@@ -52,6 +52,7 @@ export function GatewayRun(props: GatewayRunProps): JSX.Element {
     runId: seed.identity.runId,
     projectRoot,
     enabled: true,
+    records: fanout.subscribe,
     refreshWriter: page.refreshWriter,
     ...(observation ? {relaunch: observation} : {}),
     schedule,

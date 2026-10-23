@@ -7,6 +7,7 @@ import {FakeClock} from '@vibesys/transport/testing';
 import {Window} from 'happy-dom';
 import {act} from 'react';
 import {createRoot} from 'react-dom/client';
+import {FakeRecords} from './fake-records.js';
 import {RunIntents} from './index.js';
 
 const window = new Window();
@@ -68,6 +69,7 @@ class FakeTransport implements GatewayBridge {
 
 test('liveness starts independently of lifecycle and all owned work cancels when disabled', async () => {
   const bridge = new FakeTransport();
+  const feed = new FakeRecords();
   const clock = new FakeClock();
   const container = document.createElement('div');
   document.body.append(container);
@@ -77,6 +79,7 @@ test('liveness starts independently of lifecycle and all owned work cancels when
       root.render(
         <RunIntents
           bridge={bridge}
+          records={feed.subscribe}
           host={'local' as HostKey}
           projectRoot={recordedProjectRoot('/project')}
           runId="run-1"
@@ -97,18 +100,21 @@ test('liveness starts independently of lifecycle and all owned work cancels when
     await render(false, false);
     expect(bridge.streams).toBe(0);
     await render(true, false);
-    expect(bridge.streams).toBe(2);
+    expect(bridge.streams).toBe(1);
+    expect(feed.subscribers).toBe(1);
     await render(true, true);
     const relaunch = [...container.querySelectorAll('button')].find(
       button => button.textContent === 'Resume',
     );
     expect(relaunch).toBeDefined();
-    expect(bridge.streams).toBe(2);
+    expect(bridge.streams).toBe(1);
+    expect(feed.subscribers).toBe(1);
     await act(async () => relaunch?.click());
     expect(bridge.launches).toBe(1);
     await render(false, true);
     expect(container.textContent).toBe('');
     expect(bridge.streams).toBe(0);
+    expect(feed.subscribers).toBe(0);
     expect(bridge.cancelled).toBe(true);
   } finally {
     await act(async () => root.unmount());

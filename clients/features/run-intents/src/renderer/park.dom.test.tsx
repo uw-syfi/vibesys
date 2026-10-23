@@ -11,13 +11,13 @@ import {
   LifecycleSchema,
   RecordSchema,
   RunLiveness,
-  TailResponseSchema,
   WatchRunsResponseSchema,
 } from '@vibesys/proto';
 import {FakeClock} from '@vibesys/transport/testing';
 import {Window} from 'happy-dom';
 import {act} from 'react';
 import {createRoot} from 'react-dom/client';
+import {FakeRecords} from './fake-records.js';
 import {RunIntents} from './index.js';
 
 const window = new Window();
@@ -42,10 +42,6 @@ afterAll(async () => {
 class FakeBridge implements GatewayBridge {
   readonly calls: Array<{bytes: Uint8Array; admit: (bytes: Uint8Array) => void}> = [];
   readonly liveness = new Set<(bytes: Uint8Array) => void>();
-  readonly listeners = new Set<(bytes: Uint8Array) => void>();
-  get watching() {
-    return this.listeners.size > 0;
-  }
   unary(_host: HostKey, _method: string, bytes: Uint8Array): GatewayCall<Uint8Array> {
     const {promise, resolve, reject} = Promise.withResolvers<Uint8Array>();
     this.calls.push({bytes, admit: resolve});
@@ -57,14 +53,12 @@ class FakeBridge implements GatewayBridge {
     _request: Uint8Array,
     receive: (bytes: Uint8Array) => void,
   ) {
-    if (method.endsWith('/Tail')) this.listeners.add(receive);
     if (method.endsWith('/WatchRuns')) {
       this.liveness.add(receive);
       this.alive(1n, true);
     }
     return {
       cancel: () => {
-        this.listeners.delete(receive);
         this.liveness.delete(receive);
       },
     };
@@ -80,28 +74,11 @@ class FakeBridge implements GatewayBridge {
     );
     for (const receive of this.liveness) receive(bytes);
   }
-  outcomes(controlId: string, action: IntentAction) {
-    const bytes = toBinary(
-      TailResponseSchema,
-      create(TailResponseSchema, {
-        records: [
-          toBinary(
-            RecordSchema,
-            create(RecordSchema, {
-              seq: 1n,
-              epoch: 1,
-              body: {case: 'intent', value: {controlId, action, step: IntentStep.APPLIED}},
-            }),
-          ),
-        ],
-      }),
-    );
-    for (const receive of this.listeners) receive(bytes);
-  }
 }
 
 test('Pause is enabled on the new path and sends the typed host intent', async () => {
   const bridge = new FakeBridge();
+  const feed = new FakeRecords();
   const clock = new FakeClock();
   const container = document.createElement('div');
   document.body.append(container);
@@ -111,6 +88,7 @@ test('Pause is enabled on the new path and sends the typed host intent', async (
       root.render(
         <RunIntents
           bridge={bridge}
+          records={feed.subscribe}
           host={'local' as HostKey}
           projectRoot={recordedProjectRoot('/project')}
           runId="run-1"
@@ -155,11 +133,12 @@ test('Pause is enabled on the new path and sends the typed host intent', async (
     await act(async () => root.unmount());
     container.remove();
   }
-  expect(bridge.watching).toBe(false);
+  expect(feed.subscribers).toBe(0);
 });
 
 test('live, draining, parked, resumed and finished observations keep the right controls and history', async () => {
   const bridge = new FakeBridge();
+  const feed = new FakeRecords();
   const clock = new FakeClock();
   const container = document.createElement('div');
   document.body.append(container);
@@ -169,6 +148,7 @@ test('live, draining, parked, resumed and finished observations keep the right c
       root.render(
         <RunIntents
           bridge={bridge}
+          records={feed.subscribe}
           host={'local' as HostKey}
           projectRoot={recordedProjectRoot('/project')}
           runId="run-1"
@@ -186,7 +166,22 @@ test('live, draining, parked, resumed and finished observations keep the right c
   try {
     await render(1n, create(LifecycleSchema, {state: {case: 'running', value: {}}}));
     expect(labels()).toContain('Pause now');
-    await act(async () => bridge.outcomes('remote-pause', IntentAction.PAUSE));
+    await act(async () =>
+      feed.publish([
+        create(RecordSchema, {
+          seq: 1n,
+          epoch: 1,
+          body: {
+            case: 'intent',
+            value: {
+              controlId: 'remote-pause',
+              action: IntentAction.PAUSE,
+              step: IntentStep.APPLIED,
+            },
+          },
+        }),
+      ]),
+    );
     expect(container.textContent).toContain('Pause · Applied');
     await render(1n, create(LifecycleSchema, {state: {case: 'draining', value: {}}}));
     expect(labels()).toContain('Pause now');

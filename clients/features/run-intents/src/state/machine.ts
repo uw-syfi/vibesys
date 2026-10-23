@@ -214,23 +214,6 @@ export const runIntentsMachine = setup({
   },
 });
 
-/** Outcome delivery owns its retry independently of admission calls. */
-export const intentWatchMachine = setup({
-  types: {events: {} as {type: 'ended'}},
-  actors: {
-    read: fromCallback(() => {
-      throw new Error('read was not provided');
-    }),
-  },
-  delays: {retry: 1000},
-}).createMachine({
-  initial: 'watching',
-  states: {
-    watching: {invoke: {src: 'read', onError: 'recovering'}, on: {ended: 'recovering'}},
-    recovering: {after: {retry: 'watching'}},
-  },
-});
-
 const INTENT_ACTIONS: Record<NonNullable<PostIntentRequest['intent']['case']>, IntentAction> = {
   pause: IntentAction.PAUSE,
   pauseNow: IntentAction.PAUSE_NOW,

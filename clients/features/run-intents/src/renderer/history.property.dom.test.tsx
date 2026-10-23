@@ -14,7 +14,6 @@ import {
   RelaunchRefusal,
   RunLiveness,
   type Record as StoreRecord,
-  TailResponseSchema,
   WatchRunsResponseSchema,
 } from '@vibesys/proto';
 import {FakeClock} from '@vibesys/transport/testing';
@@ -22,6 +21,7 @@ import fc from 'fast-check';
 import {Window} from 'happy-dom';
 import {act, Profiler, useState} from 'react';
 import {createRoot} from 'react-dom/client';
+import {FakeRecords} from './fake-records.js';
 import {RunIntents} from './index.js';
 
 const window = new Window();
@@ -124,13 +124,6 @@ function historyWords(input: Input): string[] {
     return `${LABELS.get(row.action)} · ${row.applied ? 'Applied' : 'Refused'}${past}`;
   });
 }
-function packet(records: ReturnType<typeof recordsOf>) {
-  return toBinary(
-    TailResponseSchema,
-    create(TailResponseSchema, {records: records.map(record => toBinary(RecordSchema, record))}),
-  );
-}
-
 function currentLifecycle(input: Input) {
   return create(LifecycleSchema, {
     state:
@@ -165,20 +158,13 @@ function verifyPermissions(container: HTMLElement, input: Input) {
   );
 }
 
-function activeStream(bridge: FakeGatewayBridge) {
-  const stream = bridge.streams
-    .filter(stream => stream.method.endsWith('/Tail') && !stream.cancelled)
-    .at(-1);
-  if (!stream) throw new Error('Tail required');
-  return stream;
-}
-
 function confirmsSuccessor(input: Input): boolean {
   return input.confirmed && input.epoch > 1;
 }
 
 async function verifyHistory(input: Input, availabilityOnly = false) {
   const bridge = new FakeGatewayBridge();
+  const feed = new FakeRecords();
   const clock = new FakeClock();
   const container = document.createElement('div');
   const root = createRoot(container);
@@ -193,6 +179,7 @@ async function verifyHistory(input: Input, availabilityOnly = false) {
         <RunIntents
           key={replace ? ++mount : mount}
           bridge={bridge}
+          records={feed.subscribe}
           host={'local' as HostKey}
           projectRoot={recordedProjectRoot('/project')}
           runId="run-1"
@@ -202,9 +189,8 @@ async function verifyHistory(input: Input, availabilityOnly = false) {
         />,
       ),
     );
-  const active = () => activeStream(bridge);
   const send = async (records: ReturnType<typeof recordsOf>) => {
-    await act(async () => active().receive(packet(records)));
+    await act(async () => feed.publish(records));
     expect(
       historyRows(container).filter(text => text.endsWith('· Applied')).length,
     ).toBeLessThanOrEqual(1);
@@ -271,15 +257,9 @@ async function verifyHistory(input: Input, availabilityOnly = false) {
     for (const [index, {record}] of order.entries()) {
       await send([record]);
       await send([record]);
-      if (index === input.reconnectAt) {
-        const old = active();
-        await act(async () => {
-          old.ended('Connection closed');
-          clock.advanceBy(1000);
-        });
-        expect(old.cancelled).toBe(true);
-        if (input.remount) await render();
-      }
+      // A reconnect of the reader replays its records to every consumer, and a consumer mounted
+      // after it starts from what the reader delivers next.
+      if (index === input.reconnectAt && input.remount) await render();
     }
     await send(records);
     for (const record of [...records].reverse()) await send([record]);
@@ -450,6 +430,7 @@ async function acknowledge(container: HTMLElement, bridge: FakeGatewayBridge) {
 
 async function verifyInterleaving(steps: readonly Step[]) {
   const bridge = new FakeGatewayBridge();
+  const feed = new FakeRecords();
   const clock = new FakeClock();
   const container = document.createElement('div');
   const root = createRoot(container);
@@ -467,6 +448,7 @@ async function verifyInterleaving(steps: readonly Step[]) {
       root.render(
         <RunIntents
           bridge={bridge}
+          records={feed.subscribe}
           host={'local' as HostKey}
           projectRoot={recordedProjectRoot('/project')}
           runId="run-1"
@@ -504,7 +486,7 @@ async function verifyInterleaving(steps: readonly Step[]) {
       const records = tailRecords(facts, step, index, seq);
       seq = records.at(-1)?.seq ?? seq;
       facts.tailEpoch = Math.max(facts.tailEpoch, step.epoch);
-      await act(async () => stream('/Tail').receive(packet(records)));
+      await act(async () => feed.publish(records));
     } else if (step.kind === 'liveness') {
       facts.fresh = true;
       facts.liveness = {epoch: Math.max(facts.liveness.epoch, step.epoch), value: step.value};
@@ -544,6 +526,7 @@ test('property: unresolved facts keep their recovery deadline across liveness ex
       fc.boolean(),
       async (initial, ending, epoch, resumable) => {
         const bridge = new FakeGatewayBridge();
+        const feed = new FakeRecords();
         const clock = new FakeClock();
         const container = document.createElement('div');
         const root = createRoot(container);
@@ -553,6 +536,7 @@ test('property: unresolved facts keep their recovery deadline across liveness ex
           return (
             <RunIntents
               bridge={bridge}
+              records={feed.subscribe}
               host={'local' as HostKey}
               projectRoot={recordedProjectRoot('/project')}
               runId="run-1"
@@ -651,6 +635,7 @@ test('property: channel freshness survives independent lifecycle gaps and every 
       fc.array(CHANNEL_STEP, {minLength: 1, maxLength: 8}),
       async (epoch, steps) => {
         const bridge = new FakeGatewayBridge();
+        const feed = new FakeRecords();
         const clock = new FakeClock();
         const container = document.createElement('div');
         const root = createRoot(container);
@@ -667,6 +652,7 @@ test('property: channel freshness survives independent lifecycle gaps and every 
               <Profiler id="controls" onRender={check}>
                 <RunIntents
                   bridge={bridge}
+                  records={feed.subscribe}
                   host={'local' as HostKey}
                   projectRoot={recordedProjectRoot('/catalog/project')}
                   runId="run-1"
@@ -791,6 +777,7 @@ test('property: confirming facts supersede Resume timeout in either order on eve
       fc.constantFrom('starting', 'running', 'draining', 'parked', 'finished', 'failed'),
       async (epoch, source, timeoutFirst, kind) => {
         const bridge = new FakeGatewayBridge();
+        const feed = new FakeRecords();
         const clock = new FakeClock();
         const container = document.createElement('div');
         const root = createRoot(container);
@@ -800,6 +787,7 @@ test('property: confirming facts supersede Resume timeout in either order on eve
             root.render(
               <RunIntents
                 bridge={bridge}
+                records={feed.subscribe}
                 host={'local' as HostKey}
                 projectRoot={recordedProjectRoot('/project')}
                 runId="run-1"
@@ -826,9 +814,8 @@ test('property: confirming facts supersede Resume timeout in either order on eve
           } else if (source === 'liveness')
             await receive('/WatchRuns', livenessPacket(epoch + 1, RunLiveness.ALIVE));
           else
-            await receive(
-              '/Tail',
-              packet([
+            await act(async () =>
+              feed.publish([
                 create(RecordSchema, {
                   seq: 1n,
                   epoch: epoch + 1,
@@ -903,6 +890,7 @@ test('property: confirming facts supersede Resume timeout in either order on eve
 
 test('a page with no lifecycle yet is not asked to re-read: its own loader owns the retries', async () => {
   const bridge = new FakeGatewayBridge();
+  const feed = new FakeRecords();
   const clock = new FakeClock();
   const container = document.createElement('div');
   const root = createRoot(container);
@@ -912,6 +900,7 @@ test('a page with no lifecycle yet is not asked to re-read: its own loader owns 
       root.render(
         <RunIntents
           bridge={bridge}
+          records={feed.subscribe}
           host={'local' as HostKey}
           projectRoot={recordedProjectRoot('/project')}
           runId="run-1"

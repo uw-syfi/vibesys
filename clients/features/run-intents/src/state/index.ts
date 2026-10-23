@@ -4,7 +4,6 @@ export {
   type IntentEntry,
   type IntentRow,
   intentRows,
-  intentWatchMachine,
   type RunIntentsContext,
   type RunIntentsEvent,
   type RunIntentsInput,

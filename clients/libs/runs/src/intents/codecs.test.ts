@@ -9,7 +9,6 @@ import {
   RecordSchema,
   SteerMode,
   SteerTargetKind,
-  TailResponseSchema,
   TerminateRunOutcome,
 } from '@vibesys/proto';
 import {
@@ -18,7 +17,7 @@ import {
   hostIntentResponse,
   IntentRefused,
   intentAdmissionWarning,
-  intentTailResponse,
+  intentOutcomes,
   runIntent,
   runReference,
 } from '@vibesys/runs/intents';
@@ -75,25 +74,14 @@ test('intent and successor-epoch facts are history, with refusal reasons preserv
     },
   });
   const ignored = create(RecordSchema, {seq: 2n});
-  const result = intentTailResponse(
+  const result = intentOutcomes([
+    toBinary(RecordSchema, record),
+    toBinary(RecordSchema, ignored),
     toBinary(
-      TailResponseSchema,
-      create(TailResponseSchema, {
-        records: [
-          toBinary(RecordSchema, record),
-          toBinary(RecordSchema, ignored),
-          toBinary(
-            RecordSchema,
-            create(RecordSchema, {
-              seq: 3n,
-              epoch: 2,
-              body: {case: 'epochStarted', value: {epoch: 2}},
-            }),
-          ),
-        ],
-      }),
+      RecordSchema,
+      create(RecordSchema, {seq: 3n, epoch: 2, body: {case: 'epochStarted', value: {epoch: 2}}}),
     ),
-  );
+  ]);
   expect(result).toHaveLength(2);
   expect(result[1]?.source).toBe('epoch-started');
   expect(result[1]?.action).toBe(IntentAction.RESUME);

@@ -12,7 +12,7 @@ import {
 import {type JSX, useEffect, useRef, useState} from 'react';
 import type {SnapshotFrom} from 'xstate';
 import {historyEpoch, intentRows, type runIntentsMachine} from '../state/index.js';
-import {intentsActor} from './effects/controls.js';
+import {intentsActor, type RunRecords} from './effects/controls.js';
 import {useRelaunch, useWriterRecovery} from './relaunch.js';
 import {IntentControls} from './ui/controls.js';
 
@@ -25,6 +25,8 @@ interface RunIntentsProps {
   readonly enabled: boolean;
   readonly schedule: ScheduleTimeout;
   readonly relaunch?: RelaunchObservation;
+  /** The run's one reader, whose records feed the intent history. */
+  readonly records: RunRecords;
   readonly refreshWriter?: () => void;
 }
 
@@ -38,6 +40,7 @@ function useIntentActor(props: RunIntentsProps) {
       runId: props.runId,
       enabled: props.enabled,
       schedule: props.schedule,
+      records: props.records,
     });
     current.current = actor;
     const subscription = actor.subscribe(setSnapshot);
@@ -47,7 +50,7 @@ function useIntentActor(props: RunIntentsProps) {
       subscription.unsubscribe();
       actor.stop();
     };
-  }, [props.bridge, props.host, props.runId, props.enabled, props.schedule]);
+  }, [props.bridge, props.host, props.runId, props.enabled, props.schedule, props.records]);
   return {snapshot, current};
 }
 

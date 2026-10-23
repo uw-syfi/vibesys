@@ -101,11 +101,14 @@ test('six hundred ideas render a window of rows and remain keyboard reachable', 
   await ideas.focus();
   await page.keyboard.press('End');
   await expect(ideas.getByRole('option').last()).toBeFocused();
+  // Rows are measured as they are drawn, so the end of the list moves until its rows are at rest.
+  await settled(page);
   const scrollTop = await ideas.evaluate(list => list.scrollTop);
   await ideas.evaluate(list => list.setAttribute('data-test-persist', 'yes'));
   await page.keyboard.press('Enter');
   await expect(page.getByRole('button', {name: 'Close idea'})).toBeVisible();
   await expect(ideas).toHaveAttribute('data-test-persist', 'yes');
+  await settled(page);
   expect(await ideas.evaluate(list => list.scrollTop)).toBe(scrollTop);
 });
 

@@ -340,7 +340,8 @@ const controlButtons = (container: HTMLElement) =>
     .filter(text => ['Pause', 'Pause now', 'Guidance', 'Resume'].includes(text));
 
 const FAULT = fc.record({
-  source: fc.constantFrom('liveness', 'lifecycle', 'history'),
+  // The intent history shares the lifecycle's reader: one records stream, not two.
+  source: fc.constantFrom('liveness', 'lifecycle'),
   fault: fc.constantFrom('end', 'stall'),
   elapsed: fc.integer({min: 0, max: 31_000}),
 });
@@ -352,9 +353,7 @@ function followers(peer: RunPeer, source: Fault['source']) {
     if (source === 'liveness') return stream.method === peer.input.methods.watchRuns;
     if (stream.method !== peer.input.methods.tail) return false;
     const request = fromBinary(TailRequestSchema, stream.bytes);
-    return (
-      !request.sessionId && (source === 'lifecycle' ? request.fromSeq > 0n : request.fromSeq === 0n)
-    );
+    return !request.sessionId && request.fromSeq > 0n;
   });
 }
 
@@ -543,7 +542,7 @@ function deliverLead(
   snapshot: WireFixture,
 ) {
   if (lead === 'history')
-    for (const stream of followers(peer, 'history'))
+    for (const stream of followers(peer, 'lifecycle'))
       stream.receive(
         toBinary(
           TailResponseSchema,

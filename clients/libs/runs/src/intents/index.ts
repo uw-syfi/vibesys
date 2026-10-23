@@ -16,8 +16,6 @@ import {
   RecordSchema,
   SteerMode,
   SteerTargetKind,
-  TailRequestSchema,
-  TailResponseSchema,
   TerminateRunOutcome,
 } from '@vibesys/proto';
 import type {RunIntentAction} from './controls.js';
@@ -162,20 +160,12 @@ export function intentAdmissionWarning(response: PostIntentResponse): string | n
   return [order, observation].filter(value => value !== null).join(' ');
 }
 
-export function intentTailRequest(runId: string): Uint8Array {
-  return toBinary(TailRequestSchema, create(TailRequestSchema, {runId}));
-}
-
 /** Writer position accompanies outcomes so earlier epochs remain history after a relaunch. */
 export type IntentOutcome = IntentState & {
   readonly epoch?: bigint;
   readonly sequence?: bigint;
   readonly source?: 'epoch-started';
 };
-
-export function intentTailResponse(bytes: Uint8Array): readonly IntentOutcome[] {
-  return intentOutcomes(fromBinary(TailResponseSchema, bytes).records);
-}
 
 /** Intent outcomes among records the run's one reader already delivered. */
 export function intentOutcomes(records: readonly Uint8Array[]): readonly IntentOutcome[] {
