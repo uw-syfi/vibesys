@@ -76,35 +76,39 @@ const CELLS: readonly string[] = [
 const fixtureFor = (start: string): string =>
   start === 'the Usage face' ? 'finished-ten-ideas' : 'finished-run';
 
+// Each screen audits all discovered controls across two bounded cases. Keeping every
+// fresh context in one case made the thirty-second hang guard a total-work budget.
 for (const start of CELLS) {
-  const fixtureName = fixtureFor(start);
-  test(`every control of ${start} acts on ${fixtureName}`, async ({
-    context,
-    browser,
-    baseURL,
-    viewport,
-    colorScheme,
-    contextOptions,
-  }) => {
-    const first = await context.newPage();
-    await reachScreen(first, fixtureName, start);
-    await settled(first);
-    const exempt = INERT_BY_DESIGN.filter(each => each.start.test(start));
-    const controls = (await controlsOf(first.getByRole('main'))).filter(
-      control => !exempt.some(each => each.name.test(control.name)),
-    );
-    await first.close();
-    expect(controls.length, 'the screen has controls').toBeGreaterThan(0);
-    const found = await checkControls(
+  for (const partition of [0, 1]) {
+    const fixtureName = fixtureFor(start);
+    test(`every control of ${start} acts on ${fixtureName} (part ${partition + 1}/2)`, async ({
+      context,
       browser,
-      {...contextOptions, ...(baseURL === undefined ? {} : {baseURL}), viewport, colorScheme},
-      controls,
-      async page => {
-        await reachScreen(page, fixtureName, start);
-      },
-      page => page.getByRole('main'),
-    );
-    const inert = found.filter((problem): problem is string => problem !== null);
-    expect(inert, `controls that do nothing:\n${inert.join('\n')}`).toEqual([]);
-  });
+      baseURL,
+      viewport,
+      colorScheme,
+      contextOptions,
+    }) => {
+      const first = await context.newPage();
+      await reachScreen(first, fixtureName, start);
+      await settled(first);
+      const exempt = INERT_BY_DESIGN.filter(each => each.start.test(start));
+      const controls = (await controlsOf(first.getByRole('main'))).filter(
+        control => !exempt.some(each => each.name.test(control.name)),
+      );
+      await first.close();
+      expect(controls.length, 'the screen has controls').toBeGreaterThan(0);
+      const found = await checkControls(
+        browser,
+        {...contextOptions, ...(baseURL === undefined ? {} : {baseURL}), viewport, colorScheme},
+        controls.filter((_, index) => index % 2 === partition),
+        async page => {
+          await reachScreen(page, fixtureName, start);
+        },
+        page => page.getByRole('main'),
+      );
+      const inert = found.filter((problem): problem is string => problem !== null);
+      expect(inert, `controls that do nothing:\n${inert.join('\n')}`).toEqual([]);
+    });
+  }
 }
