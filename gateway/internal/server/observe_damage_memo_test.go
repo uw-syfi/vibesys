@@ -65,3 +65,40 @@ func TestDamagedPrefixesScanOnceAndIdentityChangesRetry(t *testing.T) {
 		}
 	}
 }
+
+// test-isolation: a closed descriptor injects a real read failure after the prefix identity was
+// acquired. The observation's public scan bound must exclude transient I/O outcomes.
+func TestTransientPrefixReadFailureIsRetried(t *testing.T) {
+	dir := t.TempDir()
+	syntheticLog(t, dir, 1, 0)
+	path := filepath.Join(dir, "run.log")
+	file, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, err := file.Stat()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	head := objectiveHead(t, false, 1)
+	var observer headObserver
+	for range 2 {
+		if _, err := observer.recovered(file, info, head); err == nil {
+			t.Fatal("closed descriptor read succeeded")
+		}
+	}
+	reopened, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	if _, err := observer.recovered(reopened, info, head); err != nil {
+		t.Fatalf("transient failure was memoized: %v", err)
+	}
+	if observer.scans != 3 {
+		t.Fatalf("transient reads did not retry: %d scans", observer.scans)
+	}
+}
