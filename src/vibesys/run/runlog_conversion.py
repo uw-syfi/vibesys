@@ -23,17 +23,18 @@ from typing import TYPE_CHECKING
 
 from vibesys.chat._legacy import import_legacy_chat
 from vibesys.chat._session import ChatRuntime
-from vibesys.events import CoreEvent
+from vibesys.events import CoreEvent, CoreEventType, EventStatus
 from vibesys.run.runlog_tee import JOURNAL_EVENT_MAX_BYTES, RunLogTee
 from vs_decode.api import Unreadable, decode_json
 from vs_project.api import Project, ProjectError
-from vs_proto.api import Keyframe, RunHead, validate
+from vs_proto.api import Keyframe, Outcome, RunHead, validate
 from vs_runlog.api import (
     FileRunContent,
     FileRunLogWriter,
     RunLogReader,
     RunLogStopReason,
     install_run_log,
+    read_run_head,
 )
 
 if TYPE_CHECKING:
@@ -99,6 +100,41 @@ def _with_agent_identity(line: bytes) -> bytes:
         return line
     label["attrs_json"] = json.dumps({"agent": attrs["role"], **attrs}, separators=(",", ":"))
     return json.dumps(event, separators=(",", ":")).encode() + b"\n"
+
+
+def _is_interrupt(event: CoreEvent) -> bool:
+    """Whether a pre-schema run ended by a user interrupt, which it recorded as a failure."""
+    return (
+        event.type is CoreEventType.RUN_FAILED
+        and event.data is None
+        and (event.text == "KeyboardInterrupt" or event.text.startswith("KeyboardInterrupt:"))
+    )
+
+
+def _journal_line(line: bytes, event: CoreEvent) -> bytes:
+    """The journal line to convert: an interrupted run ends Stopped, as a native one does."""
+    if _is_interrupt(event):
+        stopped = event.model_copy(
+            update={
+                "type": CoreEventType.STOPPED,
+                "text": "Run stopped by interrupt",
+                "status": EventStatus.INTERRUPTED,
+            }
+        )
+        line = stopped.model_dump_json().encode() + b"\n"
+    return _with_agent_identity(line)
+
+
+def _converted_as_failed_interrupt(directory: Path) -> bool:
+    """Whether an earlier conversion ended an interrupted run as Failed (redone once)."""
+    journal = directory / "core-events.jsonl"
+    state = read_run_head(directory / "run.log").lifecycle
+    if state is None or state.state is None or state.state.field != "ended":
+        return False
+    if state.state.value.outcome is not Outcome.FAILED or not journal.exists():
+        return False
+    with closing(_events(journal)) as events:
+        return any(_is_interrupt(event) for _, event in events)
 
 
 def _complete_sequence(path: Path) -> int:
@@ -181,7 +217,8 @@ def _convert_directory(
     successful conversion. Corrupt destinations require operator attention.
     """
     destination = directory / "run.log"
-    if sequence := _complete_sequence(destination):
+    sequence = _complete_sequence(destination)
+    if sequence and not _converted_as_failed_interrupt(directory):
         if _has_checkpoint(directory, sequence):
             return ConversionResult(ConversionStatus.EXISTS, "already converted")
         with FileRunLogWriter(destination, clock=clock, threads=threads):
@@ -201,8 +238,8 @@ def _convert_directory(
             content = FileRunContent(directory / "blobs", directory / "streams")
             writer = FileRunLogWriter(staged, clock=clock, threads=threads)
             with RunLogTee(writer, content, run_id) as tee:
-                for line, _ in _events(journal):
-                    tee.append(_with_agent_identity(line))
+                for line, event in _events(journal):
+                    tee.append(_journal_line(line, event))
                 writer.checkpoint()
 
         install_run_log(staged, destination, prepare=prepare)
