@@ -20,11 +20,11 @@ if TYPE_CHECKING:
 from vs_proto.api import RUN_LOG_MAGIC, Keyframe, Record, RunHead, RunProcess, validate
 from vs_runlog._atomic import FileSync, OsFileSync, publish, sync_directory, write_keyframe
 from vs_runlog._epoch import CurrentEpoch, current_epoch
-from vs_runlog._fold import append_skeleton, fold_skeleton
+from vs_runlog._fold import append_skeleton
 from vs_runlog._framing import ReadStop, RunLogStopReason, encode_frame, read_frame
 from vs_runlog._head import project_head
 from vs_runlog._lock import RunLock, hold_writer_identity
-from vs_runlog._upgrade import upgrade_skeleton
+from vs_runlog._upgrade import InputUpgrade
 from vs_sim.api import CloseOnce, ReleaseStack
 
 CHECKPOINT_RECORDS = 256
@@ -164,6 +164,8 @@ class FileRunLogWriter:
         self._path = path
         # The writer folds every record of the log, recovered ones included.
         self._skeleton = Keyframe(failures_tracked=True)
+        # The input fact a retained record leaves implicit, advanced once per record.
+        self._upgrade = InputUpgrade()
         self._checkpoint_seq = 0
         self._process: RunProcess | None = None
         self._resources = ReleaseStack()
@@ -215,6 +217,7 @@ class FileRunLogWriter:
                     message = f"non-dense run.log sequence: {record.seq} after {self.sequence}"
                     raise ValueError(message)
                 append_skeleton(self._skeleton, record)
+                self._upgrade.observe(record)
                 self.sequence = record.seq
                 self._epoch = current_epoch((record,), self._epoch)
             if self.sequence < committed:
@@ -352,6 +355,7 @@ class FileRunLogWriter:
             self._sync(self._stream.fileno())
         for record, offset in batch:
             append_skeleton(self._skeleton, record)
+            self._upgrade.observe(record)
             self._skeleton.log_offset = offset
             if (
                 record.body
@@ -384,6 +388,11 @@ class FileRunLogWriter:
     def _publish_head(self) -> None:
         head = self._headline(self._skeleton, self._process)
         if head is not None:
+            objective = head.objective
+            if objective is not None and not objective.has_field("input_value"):
+                measured = self._upgrade.measured
+                if measured is not None:
+                    objective.input_value = measured
             validate(head)
             publish(self._path.parent / "run.head", head.to_binary(), sync=self._sync)
 
@@ -541,103 +550,3 @@ class FileRunContent:
             self._sync(stream.fileno())
         sync_directory(self._streams, sync=self._sync)
         sync_directory(self._streams.parent, sync=self._sync)
-
-
-def read_run_head(path: Path) -> RunHead:
-    """Read a validated observation with its canonical epoch, never recovery state.
-
-    Supply missing epoch and input caches from the published prefix through the
-    store upgrade, never process metadata. Original files stay unchanged.
-    """
-    head = _read_raw_head(path)
-    log = path.with_name("run.log")
-    if head.epoch == 0 and log.exists():
-        with log.open("rb") as stream:
-            head.epoch = _read_epoch_prefix(RunLogReader(stream), head, log).number
-    if head.objective is not None and not head.objective.has_field("input_value") and log.exists():
-        with log.open("rb") as stream:
-            state = fold_skeleton(_head_records(RunLogReader(stream), head, log), log_offset=0)
-            upgraded = project_head(upgrade_skeleton(state))
-            if (
-                upgraded is not None
-                and upgraded.objective is not None
-                and upgraded.objective.has_field("input_value")
-            ):
-                head.objective.input_value = upgraded.objective.input_value
-    return head
-
-
-def _head_records(reader: RunLogReader, head: RunHead, path: Path) -> Iterator[Record]:
-    limit = head.committed_seq if head.has_field("committed_seq") else None
-    if limit == 0:
-        return
-    through = 0
-    for record in reader:
-        if limit is not None and record.seq > limit:
-            break
-        yield record
-        through = record.seq
-        if through == limit:
-            return
-    if reader.stop.reason is RunLogStopReason.CORRUPTION or (limit is not None and through < limit):
-        message = f"{path}: invalid committed prefix at sequence {through}"
-        raise ValueError(message)
-
-
-def _read_raw_head(path: Path) -> RunHead:
-    head = RunHead.from_binary(path.with_name("run.head").read_bytes())
-    validate(head)
-    return head
-
-
-def read_current_epoch(path: Path) -> CurrentEpoch | None:
-    """Derive an external reader's epoch from exactly the head's committed prefix.
-
-    A complete frame can precede its fsync and head publication. Native readers
-    cannot treat that frame as a published epoch. Phase 1 logs without a head
-    retain their legacy complete-record rule.
-    """
-    head_path = path.parent / "run.head"
-    head = _read_raw_head(path) if head_path.exists() else None
-    if not path.exists():
-        if head is not None:
-            message = f"{path}: run.head exists without run.log"
-            raise ValueError(message)
-        return None
-    with path.open("rb") as stream:
-        return _read_epoch_prefix(RunLogReader(stream), head, path)
-
-
-def _read_epoch_prefix(reader: RunLogReader, head: RunHead | None, path: Path) -> CurrentEpoch:
-    limit = None if head is None or not head.has_field("committed_seq") else head.committed_seq
-    if limit == 0:
-        return CurrentEpoch()
-    facts = CurrentEpoch()
-    through = 0
-    for record in reader:
-        if limit is not None and record.seq > limit:
-            break
-        if head is None and not _legacy_epoch_record(record):
-            return CurrentEpoch()
-        facts = current_epoch((record,), facts)
-        through = record.seq
-        if through == limit:
-            break
-    if reader.stop.reason is RunLogStopReason.CORRUPTION:
-        message = f"{path}: {reader.stop.detail}"
-        raise ValueError(message)
-    if limit is not None and through < limit:
-        message = f"{path}: committed sequence {limit} exceeds log sequence {through}"
-        raise ValueError(message)
-    return facts
-
-
-def _legacy_epoch_record(record: Record) -> bool:
-    body = record.body
-    return bool(
-        body
-        and (
-            body.field == "legacy_event"
-            or (body.field == "epoch_started" and body.value.run is None)
-        )
-    )

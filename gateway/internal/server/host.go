@@ -36,6 +36,7 @@ type host struct {
 	apiv1.UnimplementedHostServiceServer
 	config Config
 	index  runlog.Index
+	heads  headObserver
 }
 
 func (h *host) Hello(_ context.Context, request *apiv1.HelloRequest) (*apiv1.HelloResponse, error) {

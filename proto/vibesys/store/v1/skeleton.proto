@@ -52,6 +52,10 @@ message HeadlineObjective {
   MetricSeriesDecl series = 1 [(buf.validate.field).required = true];
   optional double best_value = 2 [(buf.validate.field).double.finite = true];
   optional double input_value = 3 [(buf.validate.field).double.finite = true];
+  // True when the writer states the input's measurement in this head: input_value present means
+  // measured, absent means unmeasured or not yet measured. False is a previous writer's head,
+  // whose input a reader recovers once from the committed prefix of the log.
+  bool input_stated = 4;
 }
 
 // Informational process identity, never a substitute for probing run.lock.

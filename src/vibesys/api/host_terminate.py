@@ -24,6 +24,7 @@ from vs_proto.api import (
 from vs_proto.api import host_payloads as pb
 from vs_runlog.api import (
     RunLaunchLockedError,
+    RunLogDamagedError,
     WriterIdentityState,
     assert_run_unlocked,
     exclusive_run_launch,
@@ -226,7 +227,7 @@ def pause_now(
     """Keep process escalation inside the existing Pause-now admission owner."""
     try:
         head = read_run_head(Project.run_log_path_for(request.project_root, request.run_id))
-    except (OSError, ValueError, ValidationError):
+    except (OSError, RunLogDamagedError):
         head = None
     expected = None if head is None else head.process
     if expected is None or expected.epoch != request.expected_epoch:

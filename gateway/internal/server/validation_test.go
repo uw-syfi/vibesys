@@ -132,7 +132,9 @@ func TestHostRejectsSchemaInvalidRequests(t *testing.T) {
 	}
 }
 
-func TestHostRejectsInvalidStreamedHead(t *testing.T) {
+// An invalid head is never streamed. It is the damage of its own run: the run is listed by name
+// without a head and the listing completes.
+func TestHostWithholdsInvalidHeadFromTheListing(t *testing.T) {
 	f := start(t)
 	value := head(nil)
 	value.Strategy = ""
@@ -141,9 +143,12 @@ func TestHostRejectsInvalidStreamedHead(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = stream.Recv()
-	if status.Code(err) != codes.Internal || !strings.Contains(err.Error(), "head.strategy") {
-		t.Fatalf("expected invalid streamed head.strategy, got %v", err)
+	entry, err := stream.Recv()
+	if err != nil || entry.GetRunId() != "run-1" || entry.GetHead() != nil {
+		t.Fatalf("expected run-1 listed without its invalid head, got %v, %v", entry, err)
+	}
+	if marker, err := stream.Recv(); err != nil || !marker.GetInitialComplete() {
+		t.Fatalf("expected the listing to complete, got %v, %v", marker, err)
 	}
 }
 

@@ -359,7 +359,7 @@ class FileProjects:
         path = Project.run_log_path_for(project_root, run_id)
         try:
             head = runlog.read_run_head(path)
-        except (OSError, ValueError):
+        except (OSError, runlog.RunLogDamagedError):
             return digest
         objective = head.objective
         if objective is None or not objective.has_field("best_value") or objective.series is None:

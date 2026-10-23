@@ -11,7 +11,6 @@ from vs_proto.api import (
     TokenUsage,
 )
 from vs_runlog._epoch import current_epoch
-from vs_runlog._upgrade import upgrade_skeleton
 
 
 def project_head(state: Keyframe, process: RunProcess | None = None) -> RunHead | None:
@@ -48,7 +47,7 @@ def project_head(state: Keyframe, process: RunProcess | None = None) -> RunHead 
         declaration = next(s for s in epoch.series if s.name == objective.series)
         points = next((h.points for h in state.metrics if h.series == objective.series), [])
         readings = [v.point for v in points if v.point is not None]
-        head.objective = HeadlineObjective(series=declaration)
+        head.objective = HeadlineObjective(series=declaration, input_stated=True)
         input_value = _input_value(epoch)
         if input_value is not None:
             head.objective.input_value = input_value
@@ -64,7 +63,7 @@ def project_head(state: Keyframe, process: RunProcess | None = None) -> RunHead 
 def _input_value(epoch: EpochStarted) -> float | None:
     """The input's measurement of the objective, as the run states it.
 
-    Retained declarations have already passed through the store upgrade.
+    The writer's projection has already passed retained records through the store upgrade.
     """
     fact = None if epoch.run is None else epoch.run.input_measurement
     if fact is not None and fact.state is not None:
@@ -90,8 +89,4 @@ def _add_usage(total: TokenUsage | None, usage: TokenUsage) -> TokenUsage:
 
 
 def _run_declaration(state: Keyframe) -> EpochStarted | None:
-    epoch = next((v.epoch for v in reversed(state.epochs) if v.epoch and v.epoch.run), None)
-    if epoch is None or epoch.run is None or epoch.run.input_measurement is not None:
-        return epoch
-    upgraded = upgrade_skeleton(state)
-    return next((v.epoch for v in reversed(upgraded.epochs) if v.epoch and v.epoch.run), None)
+    return next((v.epoch for v in reversed(state.epochs) if v.epoch and v.epoch.run), None)

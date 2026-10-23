@@ -153,10 +153,14 @@ func (x *RunHead) GetEpoch() uint32 {
 
 // Values are absent until reported. The declaration supplies unit and direction.
 type HeadlineObjective struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Series        *MetricSeriesDecl      `protobuf:"bytes,1,opt,name=series,proto3" json:"series,omitempty"`
-	BestValue     *float64               `protobuf:"fixed64,2,opt,name=best_value,json=bestValue,proto3,oneof" json:"best_value,omitempty"`
-	InputValue    *float64               `protobuf:"fixed64,3,opt,name=input_value,json=inputValue,proto3,oneof" json:"input_value,omitempty"`
+	state      protoimpl.MessageState `protogen:"open.v1"`
+	Series     *MetricSeriesDecl      `protobuf:"bytes,1,opt,name=series,proto3" json:"series,omitempty"`
+	BestValue  *float64               `protobuf:"fixed64,2,opt,name=best_value,json=bestValue,proto3,oneof" json:"best_value,omitempty"`
+	InputValue *float64               `protobuf:"fixed64,3,opt,name=input_value,json=inputValue,proto3,oneof" json:"input_value,omitempty"`
+	// True when the writer states the input's measurement in this head: input_value present means
+	// measured, absent means unmeasured or not yet measured. False is a previous writer's head,
+	// whose input a reader recovers once from the committed prefix of the log.
+	InputStated   bool `protobuf:"varint,4,opt,name=input_stated,json=inputStated,proto3" json:"input_stated,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -210,6 +214,13 @@ func (x *HeadlineObjective) GetInputValue() float64 {
 		return *x.InputValue
 	}
 	return 0
+}
+
+func (x *HeadlineObjective) GetInputStated() bool {
+	if x != nil {
+		return x.InputStated
+	}
+	return false
 }
 
 // Informational process identity, never a substitute for probing run.lock.
@@ -733,13 +744,14 @@ const file_vibesys_store_v1_skeleton_proto_rawDesc = "" +
 	"\x05value\x18\x02 \x01(\x04R\x05value:\x028\x01:\xbe\x02\xbaH\xba\x02\x1af\n" +
 	"\x15run_head.chart_points\x12,chart_points must contain at most 256 points\x1a\x1fthis.chart_points.size() <= 256\x1a\xcf\x01\n" +
 	"\x12run_head.lifecycle\x12;head has either a lifecycle or an explicitly awaiting epoch\x1a|has(this.lifecycle) != this.awaiting_lifecycle && (!this.awaiting_lifecycle || (this.epoch > 0u && has(this.committed_seq)))B\x10\n" +
-	"\x0e_committed_seq\"\xd2\x01\n" +
+	"\x0e_committed_seq\"\xf5\x01\n" +
 	"\x11HeadlineObjective\x12B\n" +
 	"\x06series\x18\x01 \x01(\v2\".vibesys.store.v1.MetricSeriesDeclB\x06\xbaH\x03\xc8\x01\x01R\x06series\x12+\n" +
 	"\n" +
 	"best_value\x18\x02 \x01(\x01B\a\xbaH\x04\x12\x02@\x01H\x00R\tbestValue\x88\x01\x01\x12-\n" +
 	"\vinput_value\x18\x03 \x01(\x01B\a\xbaH\x04\x12\x02@\x01H\x01R\n" +
-	"inputValue\x88\x01\x01B\r\n" +
+	"inputValue\x88\x01\x01\x12!\n" +
+	"\finput_stated\x18\x04 \x01(\bR\vinputStatedB\r\n" +
 	"\v_best_valueB\x0e\n" +
 	"\f_input_value\"\x89\x01\n" +
 	"\n" +

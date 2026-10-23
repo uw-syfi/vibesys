@@ -78,13 +78,15 @@ rescan:
 				}
 				return rpcError(err)
 			}
-			head, err := readObservedHead(dir)
+			// A run whose data cannot be read is listed by name as a run without a head,
+			// the shape of a phase 1 run. It never ends the stream for the other runs.
+			head, err := h.heads.read(dir)
 			if err != nil {
-				return rpcError(err)
+				head = nil
 			}
 			live, err := liveness(dir, head)
 			if err != nil {
-				return rpcError(err)
+				live = apiv1.RunLiveness_RUN_LIVENESS_UNSPECIFIED
 			}
 			response := &apiv1.WatchRunsResponse{RunId: entry.Name(), Head: head, Liveness: live}
 			current[entry.Name()] = response
@@ -139,7 +141,7 @@ rescan:
 					}
 					live, err := liveness(directories[id], response.Head)
 					if err != nil {
-						return rpcError(err)
+						continue
 					}
 					if live != response.Liveness {
 						// Messages remain immutable after Send, including for gRPC stats.

@@ -14,11 +14,22 @@ import (
 // zero admits no records. Process metadata and Record.epoch are never authority.
 // Other product bodies stay opaque. The caller must freeze the input extent.
 func CurrentEpochNumber(source io.ReaderAt, committed *uint64) (uint32, error) {
+	var epoch uint32
+	err := ReadPrefix(source, committed, func(payload []byte) error {
+		declared, err := DeclaredEpoch(payload)
+		epoch = max(epoch, declared)
+		return err
+	})
+	return epoch, err
+}
+
+// ReadPrefix passes every record payload of the published prefix to visit, in order.
+// It rejects a damaged log, a non-increasing sequence, and a log shorter than its fence.
+func ReadPrefix(source io.ReaderAt, committed *uint64, visit func(payload []byte) error) error {
 	if committed != nil && *committed == 0 {
-		return 0, nil
+		return nil
 	}
 	reader := NewReader(source)
-	var epoch uint32
 	var through uint64
 	var seen bool
 	for {
@@ -27,24 +38,20 @@ func CurrentEpochNumber(source io.ReaderAt, committed *uint64) (uint32, error) {
 			break
 		}
 		if err != nil {
-			return 0, err
+			return err
 		}
 		seq, err := Sequence(payload)
 		if err != nil {
-			return 0, err
+			return err
 		}
 		if seen && seq <= through {
-			return 0, &Corruption{Offset: -1, Reason: "non-increasing Record.seq"}
+			return &Corruption{Offset: -1, Reason: "non-increasing Record.seq"}
 		}
 		if committed != nil && seq > *committed {
 			break
 		}
-		declared, err := declaredEpoch(payload)
-		if err != nil {
-			return 0, err
-		}
-		if declared > epoch {
-			epoch = declared
+		if err := visit(payload); err != nil {
+			return err
 		}
 		through, seen = seq, true
 		if committed != nil && through == *committed {
@@ -52,14 +59,14 @@ func CurrentEpochNumber(source io.ReaderAt, committed *uint64) (uint32, error) {
 		}
 	}
 	if committed != nil && (!seen || through < *committed) {
-		return 0, &Corruption{Offset: -1, Reason: "committed sequence exceeds log prefix"}
+		return &Corruption{Offset: -1, Reason: "committed sequence exceeds log prefix"}
 	}
-	return epoch, nil
+	return nil
 }
 
-// Preserve protobuf oneof selection and embedded-message merging while eliding
+// DeclaredEpoch preserves protobuf oneof selection and embedded-message merging while eliding
 // opaque bodies. Only EpochStarted metadata is interpreted by this reader.
-func declaredEpoch(payload []byte) (uint32, error) {
+func DeclaredEpoch(payload []byte) (uint32, error) {
 	fields := (&storev1.Record{}).ProtoReflect().Descriptor().Oneofs().ByName("body").Fields()
 	epochField := (&storev1.Record{}).ProtoReflect().Descriptor().Fields().ByName("epoch_started").Number()
 	var filtered []byte

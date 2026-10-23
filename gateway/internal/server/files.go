@@ -91,40 +91,6 @@ func readHead(dir string) (*storev1.RunHead, error) {
 	return head, nil
 }
 
-// readObservedHead adds canonical retained-data facts only for observations.
-// Content readers use the raw commit fence without scanning or parsing payloads.
-func readObservedHead(dir string) (*storev1.RunHead, error) {
-	head, err := readHead(dir)
-	if err != nil || head == nil {
-		return head, err
-	}
-	if head.Epoch == 0 && (head.CommittedSeq == nil || head.GetCommittedSeq() != 0) {
-		// Phase-1 heads predate the canonical cache field. Decode it from the
-		// published log prefix without changing retained files or process facts.
-		f, err := openRegular(dir, "run.log")
-		if errors.Is(err, os.ErrNotExist) {
-			// A head can precede log creation. Its epoch is still unknown.
-			return head, nil
-		}
-		if err != nil {
-			return nil, err
-		}
-		defer f.Close()
-		info, err := f.Stat()
-		if err != nil {
-			return nil, err
-		}
-		head.Epoch, err = runlog.CurrentEpochNumber(io.NewSectionReader(f, 0, info.Size()), head.CommittedSeq)
-		if err != nil {
-			return nil, status.Errorf(codes.DataLoss, "invalid retained epoch: %v", err)
-		}
-	}
-	if err := retainedInput(dir, head); err != nil {
-		return nil, err
-	}
-	return head, nil
-}
-
 func committed(dir string) (uint64, bool, error) {
 	head, err := readHead(dir)
 	if err != nil {
