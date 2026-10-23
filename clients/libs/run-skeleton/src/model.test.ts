@@ -6,7 +6,11 @@ import {
   KeyframeSchema,
   LifecycleSchema,
   Outcome,
+  OutcomeSchema,
+  outcomePresentation,
+  projectLifecycle,
   RecordSchema,
+  RunHeadSchema,
   RunLiveness,
   RuntimeType,
   Severity,
@@ -306,7 +310,7 @@ for (const kind of ['running', 'draining', 'parked', 'ended'] as const)
               );
         const full = foldSkeleton(cached, records.slice(cut));
         const observed = observeRun(full, {epoch, value: RunLiveness.INTERRUPTED});
-        expect(observed.lifecycle).toEqual(lifecycle);
+        expect(observed.lifecycle).toEqual(projectLifecycle(lifecycle));
         expect(epochHasEnded(lifecycle)).toBe(kind === 'parked' || kind === 'ended');
         expect(observed.final).toBe(epochHasEnded(lifecycle));
         const successor = foldSkeleton(full, [
@@ -365,4 +369,34 @@ test('a keyframe whose failures are not error notices of its prefix is refused',
       .failures,
   ).toHaveLength(2);
   expect(seedSkeleton(keyframeOf([], false)).failuresTracked).toBe(false);
+});
+
+test('an ended run reads the presentation of its outcome from the records and from the head alike', () => {
+  const outcomes = OutcomeSchema.values.map(value => value.number).filter(number => number !== 0);
+  expect(outcomes.length).toBeGreaterThan(0);
+  for (const outcome of outcomes) {
+    const lifecycle = create(LifecycleSchema, {state: {case: 'ended', value: {outcome}}});
+    const bodies = [
+      {case: 'epochStarted', value: {runId: 'run-a', epoch: 1}},
+      {case: 'lifecycle', value: lifecycle},
+    ] as const;
+    const records = bodies.map((body, index) =>
+      create(RecordSchema, {seq: BigInt(index + 1), epoch: 1, body}),
+    );
+    const folded = observeRun(foldSkeleton(seedSkeleton(), records));
+    const head = create(RunHeadSchema, {
+      epoch: 1,
+      committedSeq: 2n,
+      lifecycle: projectLifecycle(lifecycle),
+    });
+    const fromHead = observeRun(foldSkeleton(seedSkeleton(), records), {
+      epoch: 1,
+      value: RunLiveness.ALIVE,
+      head,
+    });
+    expect(folded.lifecycle).toEqual(fromHead.lifecycle);
+    expect(
+      folded.lifecycle?.state.case === 'ended' && folded.lifecycle.state.value.presentation,
+    ).toEqual(outcomePresentation(outcome));
+  }
 });

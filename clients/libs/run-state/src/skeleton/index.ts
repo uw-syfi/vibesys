@@ -1,13 +1,11 @@
 /** Store-to-view values for existing run readers. No legacy event replay or UI dependencies. */
-import {getOption} from '@bufbuild/protobuf';
 import type {RunOverview} from '@vibesys/contracts';
 import type {LogStream, RunStatus} from '@vibesys/contracts/host-helper';
 import {
   Direction,
   DrainGoal,
   type Lifecycle,
-  OutcomeSchema,
-  outcome_presentation,
+  outcomePresentation,
   type RunHead,
   StreamKind,
   StreamState,
@@ -97,11 +95,7 @@ function lifecycleStatus(lifecycle: Lifecycle | undefined): RunStatus | null {
 function endedPresentation(lifecycle: Lifecycle | undefined) {
   const ended = lifecycle?.state.case === 'ended' ? lifecycle.state.value : undefined;
   if (!ended) throw new Error('ended.outcome: absent lifecycle');
-  if (ended.presentation) return ended.presentation;
-  const value = OutcomeSchema.values.find(value => value.number === ended.outcome);
-  const presentation = value ? getOption(value, outcome_presentation) : undefined;
-  if (!presentation?.status) throw new Error(`ended.outcome: unknown outcome ${ended.outcome}`);
-  return presentation;
+  return ended.presentation ?? outcomePresentation(ended.outcome);
 }
 
 export function lifecycleState(lifecycle: Lifecycle | undefined) {

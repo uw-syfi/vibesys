@@ -2,6 +2,7 @@ import {fromBinary} from '@bufbuild/protobuf';
 import {
   KeyframeSchema,
   type Lifecycle,
+  projectLifecycle,
   RecordSchema,
   type RunHead,
   RunLiveness,
@@ -123,7 +124,7 @@ export function observeRun(skeleton: Skeleton, hint?: RunLivenessHint) {
     head.epoch >= recordedEpoch &&
     (head.committedSeq ?? -1n) >= (skeleton.throughSeq ?? 0n);
   const observedEpoch = currentHead ? head.epoch : recordedEpoch;
-  const lifecycle = currentHead ? head.lifecycle : recorded;
+  const lifecycle = projectLifecycle(currentHead ? head.lifecycle : recorded);
   const final = epochHasEnded(lifecycle);
   return {
     epoch: observedEpoch,
