@@ -24,7 +24,7 @@ export interface ObservationOperation extends ObservationInput {
   readonly receive: (event: ObservationEvent) => void;
 }
 /** The epochs this observation has seen closed (no writer) and alive (a writer holding the lock). */
-export interface WriterEpochs {
+interface WriterEpochs {
   readonly closed: number;
   readonly alive: number;
 }
@@ -36,7 +36,7 @@ const NO_EPOCHS: WriterEpochs = {closed: 0, alive: 0};
  * starts: unknown, never interrupted. A fresh observation (the page re-reads when facts stay
  * unresolved) has no predecessor and takes the probe at its word.
  */
-export function fenceProbe(
+function fenceProbe(
   seen: WriterEpochs,
   hint: RunLivenessHint | undefined,
 ): {readonly hint: RunLivenessHint | undefined; readonly seen: WriterEpochs} {
