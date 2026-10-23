@@ -12,6 +12,7 @@ import {
   RecordSchema,
   RelaunchRefusal,
   RunLiveness,
+  type Record as StoreRecord,
   WatchRunsResponseSchema,
 } from '@vibesys/proto';
 import {relaunchRequest} from '@vibesys/runs/intents';
@@ -20,10 +21,12 @@ import {waitFor} from 'xstate';
 import {FakeRecords} from './fake-records.js';
 import {intentsActor, relaunchActor} from './index.js';
 
+const encodeRecord = (record: StoreRecord) => toBinary(RecordSchema, record);
+
 function fixture(enabled = true) {
   const bridge = new FakeGatewayBridge();
   const clock = new FakeClock();
-  const records = new FakeRecords();
+  const records = new FakeRecords(encodeRecord);
   const actor = intentsActor({
     bridge,
     host: 'local' as HostKey,

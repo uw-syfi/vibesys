@@ -2,13 +2,21 @@ import {afterAll, beforeAll, expect, test} from 'bun:test';
 import {create, toBinary} from '@bufbuild/protobuf';
 import {type HostKey, recordedProjectRoot} from '@vibesys/hosts';
 import type {GatewayBridge, GatewayCall} from '@vibesys/ipc';
-import {LifecycleSchema, RunLiveness, WatchRunsResponseSchema} from '@vibesys/proto';
+import {
+  LifecycleSchema,
+  RecordSchema,
+  RunLiveness,
+  type Record as StoreRecord,
+  WatchRunsResponseSchema,
+} from '@vibesys/proto';
 import {FakeClock} from '@vibesys/transport/testing';
 import {Window} from 'happy-dom';
 import {act} from 'react';
 import {createRoot} from 'react-dom/client';
 import {FakeRecords} from './fake-records.js';
 import {RunIntents} from './index.js';
+
+const encodeRecord = (record: StoreRecord) => toBinary(RecordSchema, record);
 
 const window = new Window();
 const installed = Object.getOwnPropertyNames(window).filter(name => !(name in globalThis));
@@ -69,7 +77,7 @@ class FakeTransport implements GatewayBridge {
 
 test('liveness starts independently of lifecycle and all owned work cancels when disabled', async () => {
   const bridge = new FakeTransport();
-  const feed = new FakeRecords();
+  const feed = new FakeRecords(encodeRecord);
   const clock = new FakeClock();
   const container = document.createElement('div');
   document.body.append(container);

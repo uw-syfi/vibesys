@@ -11,6 +11,7 @@ import {
   LifecycleSchema,
   RecordSchema,
   RunLiveness,
+  type Record as StoreRecord,
   WatchRunsResponseSchema,
 } from '@vibesys/proto';
 import {FakeClock} from '@vibesys/transport/testing';
@@ -19,6 +20,8 @@ import {act} from 'react';
 import {createRoot} from 'react-dom/client';
 import {FakeRecords} from './fake-records.js';
 import {RunIntents} from './index.js';
+
+const encodeRecord = (record: StoreRecord) => toBinary(RecordSchema, record);
 
 const window = new Window();
 const installed = Object.getOwnPropertyNames(window).filter(name => !(name in globalThis));
@@ -78,7 +81,7 @@ class FakeBridge implements GatewayBridge {
 
 test('Pause is enabled on the new path and sends the typed host intent', async () => {
   const bridge = new FakeBridge();
-  const feed = new FakeRecords();
+  const feed = new FakeRecords(encodeRecord);
   const clock = new FakeClock();
   const container = document.createElement('div');
   document.body.append(container);
@@ -138,7 +141,7 @@ test('Pause is enabled on the new path and sends the typed host intent', async (
 
 test('live, draining, parked, resumed and finished observations keep the right controls and history', async () => {
   const bridge = new FakeBridge();
-  const feed = new FakeRecords();
+  const feed = new FakeRecords(encodeRecord);
   const clock = new FakeClock();
   const container = document.createElement('div');
   document.body.append(container);

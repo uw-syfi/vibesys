@@ -24,6 +24,8 @@ import {createRoot} from 'react-dom/client';
 import {FakeRecords} from './fake-records.js';
 import {RunIntents} from './index.js';
 
+const encodeRecord = (record: StoreRecord) => toBinary(RecordSchema, record);
+
 const window = new Window();
 const installed = Object.getOwnPropertyNames(window).filter(name => !(name in globalThis));
 beforeAll(() => {
@@ -164,7 +166,7 @@ function confirmsSuccessor(input: Input): boolean {
 
 async function verifyHistory(input: Input, availabilityOnly = false) {
   const bridge = new FakeGatewayBridge();
-  const feed = new FakeRecords();
+  const feed = new FakeRecords(encodeRecord);
   const clock = new FakeClock();
   const container = document.createElement('div');
   const root = createRoot(container);
@@ -430,7 +432,7 @@ async function acknowledge(container: HTMLElement, bridge: FakeGatewayBridge) {
 
 async function verifyInterleaving(steps: readonly Step[]) {
   const bridge = new FakeGatewayBridge();
-  const feed = new FakeRecords();
+  const feed = new FakeRecords(encodeRecord);
   const clock = new FakeClock();
   const container = document.createElement('div');
   const root = createRoot(container);
@@ -526,7 +528,7 @@ test('property: unresolved facts keep their recovery deadline across liveness ex
       fc.boolean(),
       async (initial, ending, epoch, resumable) => {
         const bridge = new FakeGatewayBridge();
-        const feed = new FakeRecords();
+        const feed = new FakeRecords(encodeRecord);
         const clock = new FakeClock();
         const container = document.createElement('div');
         const root = createRoot(container);
@@ -635,7 +637,7 @@ test('property: channel freshness survives independent lifecycle gaps and every 
       fc.array(CHANNEL_STEP, {minLength: 1, maxLength: 8}),
       async (epoch, steps) => {
         const bridge = new FakeGatewayBridge();
-        const feed = new FakeRecords();
+        const feed = new FakeRecords(encodeRecord);
         const clock = new FakeClock();
         const container = document.createElement('div');
         const root = createRoot(container);
@@ -777,7 +779,7 @@ test('property: confirming facts supersede Resume timeout in either order on eve
       fc.constantFrom('starting', 'running', 'draining', 'parked', 'finished', 'failed'),
       async (epoch, source, timeoutFirst, kind) => {
         const bridge = new FakeGatewayBridge();
-        const feed = new FakeRecords();
+        const feed = new FakeRecords(encodeRecord);
         const clock = new FakeClock();
         const container = document.createElement('div');
         const root = createRoot(container);
@@ -890,7 +892,7 @@ test('property: confirming facts supersede Resume timeout in either order on eve
 
 test('a page with no lifecycle yet is not asked to re-read: its own loader owns the retries', async () => {
   const bridge = new FakeGatewayBridge();
-  const feed = new FakeRecords();
+  const feed = new FakeRecords(encodeRecord);
   const clock = new FakeClock();
   const container = document.createElement('div');
   const root = createRoot(container);
