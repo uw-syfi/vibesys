@@ -31,8 +31,10 @@ CASES = json.loads((CORPUS / "manifest.json").read_text())
 FIRST = sorted(CASES)[0]
 
 
-def pinned_for_each_case(**fixed: object) -> Callable[[Callable[..., None]], Callable[..., None]]:
-    """Pin one example per retained writer, so every writer runs at every depth.
+def pinned_for_other_cases(**fixed: object) -> Callable[[Callable[..., None]], Callable[..., None]]:
+    """Pin one example per retained writer but the first, which the test pins itself.
+
+    Every writer then runs at every depth.
 
     The generated examples draw the writer along with the rest of the input; a scan validates
     every record of a log, so the search spends its examples across writers instead of repeating
@@ -41,7 +43,8 @@ def pinned_for_each_case(**fixed: object) -> Callable[[Callable[..., None]], Cal
 
     def pin(test: Callable[..., None]) -> Callable[..., None]:
         for case in CASES:
-            test = example(case=case, **fixed)(test)
+            if case != FIRST:
+                test = example(case=case, **fixed)(test)
         return test
 
     return pin
@@ -110,7 +113,8 @@ def changeable(record: Record, case: str) -> bool:
 
 
 @pytest.mark.regression
-@pinned_for_each_case(spanless=False, value=100.0, explicit=False, split=64)
+@pinned_for_other_cases(spanless=False, value=100.0, explicit=False, split=64)
+@example(case=FIRST, spanless=False, value=100.0, explicit=False, split=64)
 @example(case=FIRST, spanless=True, value=0.0, explicit=False, split=0)
 @given(
     case=st.sampled_from(sorted(CASES)),

@@ -22,8 +22,10 @@ CASE = st.sampled_from(sorted(CASES))
 FIRST = sorted(CASES)[0]
 
 
-def pinned_for_each_case(**fixed: object) -> Callable[[Callable[..., None]], Callable[..., None]]:
-    """Pin one example per retained writer, so every writer runs at every depth.
+def pinned_for_other_cases(**fixed: object) -> Callable[[Callable[..., None]], Callable[..., None]]:
+    """Pin one example per retained writer but the first, which the test pins itself.
+
+    Every writer then runs at every depth.
 
     The generated examples draw the writer along with the rest of the input; a scan validates
     every record of a log, so the search spends its examples across writers instead of repeating
@@ -32,7 +34,8 @@ def pinned_for_each_case(**fixed: object) -> Callable[[Callable[..., None]], Cal
 
     def pin(test: Callable[..., None]) -> Callable[..., None]:
         for case in CASES:
-            test = example(case=case, **fixed)(test)
+            if case != FIRST:
+                test = example(case=case, **fixed)(test)
         return test
 
     return pin
@@ -118,7 +121,8 @@ def damage(directory: Path, kind: str, at: int, noise: bytes) -> None:
 
 
 @pytest.mark.regression
-@pinned_for_each_case(kind="cut log", at=40_000, noise=b"")
+@pinned_for_other_cases(kind="cut log", at=40_000, noise=b"")
+@example(case=FIRST, kind="cut log", at=40_000, noise=b"")
 @example(case=FIRST, kind="fence past the log", at=19, noise=b"")
 @example(case=FIRST, kind="head garbage", at=0, noise=b"\xff\xff")
 @given(
@@ -147,8 +151,12 @@ def test_a_damaged_run_raises_its_own_typed_error_and_leaves_others_readable(
 
 
 @pytest.mark.regression
-@pinned_for_each_case(
+@pinned_for_other_cases(
     reads=[(14, False, True), (14, False, True), (18, True, True), (13, False, False)]
+)
+@example(
+    case=FIRST,
+    reads=[(14, False, True), (14, False, True), (18, True, True), (13, False, False)],
 )
 @given(case=CASE, reads=reads_over_few_fences(st.booleans(), st.booleans()))
 def test_only_previous_writer_heads_scan_the_log_once_per_prefix(
@@ -180,7 +188,8 @@ def test_only_previous_writer_heads_scan_the_log_once_per_prefix(
 
 
 @pytest.mark.regression
-@pinned_for_each_case(reads=[(14, True), (14, True), (18, False), (14, True), (18, False)])
+@pinned_for_other_cases(reads=[(14, True), (14, True), (18, False), (14, True), (18, False)])
+@example(case=FIRST, reads=[(14, True), (14, True), (18, False), (14, True), (18, False)])
 @given(case=CASE, reads=reads_over_few_fences(st.booleans()))
 def test_an_epoch_is_folded_once_per_committed_prefix(
     logged: dict[str, Logged], case: str, reads: list[tuple[int, bool]]

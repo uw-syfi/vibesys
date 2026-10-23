@@ -20,8 +20,10 @@ FULL = 64  # any fence past the log reads the whole published prefix
 FIRST = sorted(CASES)[0]
 
 
-def pinned_for_each_case(**fixed: object) -> Callable[[Callable[..., None]], Callable[..., None]]:
-    """Pin one example per retained writer, so every writer runs at every depth.
+def pinned_for_other_cases(**fixed: object) -> Callable[[Callable[..., None]], Callable[..., None]]:
+    """Pin one example per retained writer but the first, which the test pins itself.
+
+    Every writer then runs at every depth.
 
     The generated examples draw the writer along with the rest of the input; a scan validates
     every record of a log, so the search spends its examples across writers instead of repeating
@@ -30,7 +32,8 @@ def pinned_for_each_case(**fixed: object) -> Callable[[Callable[..., None]], Cal
 
     def pin(test: Callable[..., None]) -> Callable[..., None]:
         for case in CASES:
-            test = example(case=case, **fixed)(test)
+            if case != FIRST:
+                test = example(case=case, **fixed)(test)
         return test
 
     return pin
@@ -64,7 +67,8 @@ def retained_frames(case: str) -> tuple[bytes, ...]:
 
 
 @pytest.mark.regression
-@pinned_for_each_case(value=100.0, spanless=False, fence=FULL)
+@pinned_for_other_cases(value=100.0, spanless=False, fence=FULL)
+@example(case=FIRST, value=100.0, spanless=False, fence=FULL)
 @example(case=FIRST, value=0.0, spanless=True, fence=FULL)
 @example(case=FIRST, value=0.0, spanless=False, fence=0)
 @example(case=FIRST, value=0.0, spanless=False, fence=1)

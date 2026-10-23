@@ -13,10 +13,13 @@ from vs_runlog.api import HeadObserver, RunLogDamagedError
 
 CORPUS = Path(__file__).resolve().parents[3] / "proto/testdata/retained"
 CASES = sorted(path.name for path in CORPUS.iterdir() if path.is_dir())
+FIRST = CASES[0]
 
 
-def pinned_for_each_case(**fixed: object) -> Callable[[Callable[..., None]], Callable[..., None]]:
-    """Pin one example per retained writer, so every writer runs at every depth.
+def pinned_for_other_cases(**fixed: object) -> Callable[[Callable[..., None]], Callable[..., None]]:
+    """Pin one example per retained writer but the first, which the test pins itself.
+
+    Every writer then runs at every depth.
 
     The generated examples draw the writer along with the rest of the input; a scan validates
     every record of a log, so the search spends its examples across writers instead of repeating
@@ -25,14 +28,16 @@ def pinned_for_each_case(**fixed: object) -> Callable[[Callable[..., None]], Cal
 
     def pin(test: Callable[..., None]) -> Callable[..., None]:
         for case in CASES:
-            test = example(case=case, **fixed)(test)
+            if case != FIRST:
+                test = example(case=case, **fixed)(test)
         return test
 
     return pin
 
 
 @pytest.mark.regression
-@pinned_for_each_case(kind="cut", at=1, reads=["head"] * 10)
+@pinned_for_other_cases(kind="cut", at=1, reads=["head"] * 10)
+@example(case=CASES[0], kind="cut", at=1, reads=["head"] * 10)
 @example(case=CASES[0], kind="cut", at=1, reads=["head", "epoch"] * 5)
 @given(
     case=st.sampled_from(CASES),
