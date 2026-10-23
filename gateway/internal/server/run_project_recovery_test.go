@@ -24,6 +24,11 @@ func TestWatchRunsRecoversPreviousPublisherProject(t *testing.T) {
 				t.Fatal(err)
 			}
 			project := filepath.Join(base, fmt.Sprintf("project %d", seed))
+			// The old root remains a valid project layout after this run is copied.
+			other := filepath.Join(base, "old-project", ".vibesys", "state", "local", "runs", "run-1", "logs")
+			if err := os.MkdirAll(other, 0700); err != nil {
+				t.Fatal(err)
+			}
 			directory := filepath.Join(project, ".vibesys", "state", "local", "runs", "run-1", "logs")
 			if err := os.MkdirAll(directory, 0700); err != nil {
 				t.Fatal(err)
@@ -66,7 +71,7 @@ func TestWatchRunsRecoversPreviousPublisherProject(t *testing.T) {
 				if err := os.MkdirAll(filepath.Join(f.root, "run-addresses"), 0700); err != nil {
 					t.Fatal(err)
 				}
-				address, err := proto.Marshal(&storev1.RunAddress{ProjectRoot: filepath.Join(base, "stale-sidecar"), LogDirectory: directory})
+				address, err := proto.Marshal(&storev1.RunAddress{ProjectRoot: filepath.Join(base, "old-project"), LogDirectory: directory})
 				if err != nil {
 					t.Fatal(err)
 				}
