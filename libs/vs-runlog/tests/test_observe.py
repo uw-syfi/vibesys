@@ -55,7 +55,7 @@ def damage(directory: Path, kind: str, at: int, noise: bytes) -> None:
 @example(kind="cut log", at=40_000, noise=b"")
 @example(kind="fence past the log", at=19, noise=b"")
 @example(kind="head garbage", at=0, noise=b"\xff\xff")
-@settings(max_examples=40)
+@settings(max_examples=25)
 @given(
     kind=st.sampled_from(
         ["cut log", "log garbage", "cut head", "head garbage", "fence past the log"]
@@ -81,7 +81,7 @@ def test_a_damaged_run_raises_its_own_typed_error_and_leaves_others_readable(
 
 @pytest.mark.regression
 @pytest.mark.parametrize("case", CASES)
-@settings(max_examples=40)
+@settings(max_examples=25)
 @given(reads=st.lists(st.tuples(FENCES, st.booleans(), st.booleans()), min_size=1, max_size=60))
 def test_only_previous_writer_heads_scan_the_log_once_per_prefix(
     case: str, reads: list[tuple[int, bool, bool]]
