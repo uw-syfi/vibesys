@@ -11,7 +11,6 @@ export {NOTICE_REASONS, type RecentNotice, recentNotice} from './recent-notice.j
 export {type Clock, formatStarted, formatWhen} from './recent-words.js';
 export {type RunRowStatus, statusWord} from './run-status.js';
 export {
-  DASHBOARD_RUNS,
   type DigestSlot,
   digestKey,
   initialSidebar,

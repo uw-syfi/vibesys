@@ -1,15 +1,14 @@
 /**
- * The rows of the Runs dashboard: the newest runs the connected machines list, newest first across
- * machines (at most `DASHBOARD_RUNS`, none archived). A row is the sidebar's own (`RunRow`): a live
- * run's, from its server, and any other run's as a Recent row reads it, from the registry's record
- * of its end and its digest.
+ * The rows of the Runs dashboard: every run the connected machines list, newest first across
+ * machines (none archived). A row is the sidebar's own (`RunRow`): a live run's, from its server,
+ * and any other run's as a Recent row reads it, from the registry's record of its end and its
+ * digest.
  */
 import {isSynthesizedTask} from '@vibesys/contracts';
 import {type HostKey, hostFromKey, hostLabel} from '@vibesys/hosts';
 import {type RecentRun, sameRun} from '@vibesys/runs';
 import {type Clock, formatStarted} from './recent-words.js';
 import {
-  DASHBOARD_RUNS,
   dashboardRefs,
   liveRows,
   type RunRow,
@@ -103,7 +102,7 @@ export function dashboardRows(state: SidebarState, clock: Clock): readonly Dashb
       ];
     });
   });
-  return [...known, ...unknown].sort((a, b) => b.createdAt - a.createdAt).slice(0, DASHBOARD_RUNS);
+  return [...known, ...unknown].sort((a, b) => b.createdAt - a.createdAt);
 }
 
 /** What a screen that lists runs by cost (Usage) calls one: its title, and when it began if the app knows. */

@@ -305,10 +305,11 @@ interface WantedDigest {
   readonly runId: string;
 }
 
-/** The most runs the dashboard shows (the newest), so what it reads stays bounded. */
-export const DASHBOARD_RUNS = 60;
-
-/** The runs the dashboard shows: not archived, newest first, at most `DASHBOARD_RUNS`. */
+/**
+ * The runs the dashboard shows: every run a machine lists that is not archived, newest first. No
+ * bound hides a run: what the dashboard reads is bounded by the helper's groups of at most
+ * `DIGESTS_PER_REQUEST` runs, not by dropping runs.
+ */
 export function dashboardRefs(state: SidebarState): ReturnType<typeof reportedRunRefs> {
   return reportedRunRefs(state.allRuns, state.listings)
     .filter(
@@ -318,8 +319,7 @@ export function dashboardRefs(state: SidebarState): ReturnType<typeof reportedRu
     .sort(
       (left, right) =>
         right.run.createdAt - left.run.createdAt || (left.run.runId < right.run.runId ? 1 : -1),
-    )
-    .slice(0, DASHBOARD_RUNS);
+    );
 }
 
 /** The runs whose digest a screen shows now: the runs the user opened, and every run the dashboard shows. */
@@ -804,9 +804,7 @@ function recentProblems(state: SidebarState, live: readonly RunRow[]): string[] 
 
 function dashboardProblems(state: SidebarState, live: readonly RunRow[]): string[] {
   const problems: string[] = [];
-  const refs = dashboardRefs(state);
-  if (refs.length > DASHBOARD_RUNS) problems.push('the dashboard shows more than its limit');
-  for (const {host, run} of refs) {
+  for (const {host, run} of dashboardRefs(state)) {
     const ref: RunRef = {host, runId: run.runId};
     if (state.archived.some(archived => sameRun(archived, ref))) {
       problems.push(`archived ${run.runId} is on the dashboard`);

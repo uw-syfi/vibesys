@@ -4,7 +4,6 @@ import type {RecentRun} from '@vibesys/runs';
 import {SEEDS, Seeded} from '@vibesys/store/testing';
 import {
   type Clock,
-  DASHBOARD_RUNS,
   dashboardRows,
   projectRunGaps,
   runLabels,
@@ -187,7 +186,7 @@ describe('the Runs dashboard', () => {
     expect(row?.row.now).toBe('the agent crashed');
   });
 
-  test('shows only the newest runs, and reads the digest of those alone', () => {
+  test('lists every run, however many, and reads the digest of each', () => {
     const {state, requests} = open([listed('ssh:host-a')], [opened('ssh:host-a', '/p/q', 'seen')]);
     const many = Array.from({length: 230}, (_, index) => run(`r${index}`, index));
     const step = sidebarStep(
@@ -197,7 +196,7 @@ describe('the Runs dashboard', () => {
 
     const asked = digestsOf(step.requests);
 
-    expect(asked.map(request => request.runIds.length)).toEqual([DASHBOARD_RUNS]);
+    expect(asked.flatMap(request => request.runIds)).toEqual(many.map(each => each.runId));
     const answered = asked.reduce(
       (current, request) =>
         sidebarStep(current, {
@@ -208,12 +207,72 @@ describe('the Runs dashboard', () => {
       step.state,
     );
     const rows = dashboardRows(answered, CLOCK);
-    expect(rows).toHaveLength(DASHBOARD_RUNS);
-    expect(rows.map(each => each.row.run.runId)).toEqual(
-      many.slice(0, DASHBOARD_RUNS).map(each => each.runId),
-    );
+    expect(rows.map(each => each.row.run.runId)).toEqual(many.map(each => each.runId));
     expect(rows.every(each => each.row.status === 'finished')).toBe(true);
     expect(sidebarInvariants(answered)).toEqual([]);
+  });
+
+  test('property: every run a machine lists is on the dashboard once, known project or not, however many', () => {
+    for (const seed of SEEDS) {
+      const random = new Seeded(seed);
+      const projects = Array.from({length: 1 + random.int(4)}, (_, index) => `/project-${index}`);
+      const hostRuns = new Map(
+        projects.map((project, index) => [
+          project,
+          Array.from({length: random.int(90)}, (_, id) => run(`${index}-${id}`, random.int(400))),
+        ]),
+      );
+      const unknown = Array.from({length: random.int(90)}, (_, id) => ({
+        ...server(`unknown-${id}`, '', 'completed'),
+        startedAt: NOW / 1000 - random.int(400) * 3600,
+      }));
+      const withUnknown = {
+        ...listed('ssh:host-a'),
+        unknownProject: unknown.map(({projectRoot: _, ...each}) => each),
+      };
+      const first = sidebarStep(SIDEBAR_EMPTY, {
+        type: 'overview',
+        listings: [withUnknown],
+        recent: projects.map(project => opened('ssh:host-a', project, 'remembered')),
+        skippedRecent: [],
+      });
+      let step = first;
+      for (const request of listRequests(first)) {
+        step = sidebarStep(step.state, {
+          type: 'project-runs-listed',
+          token: request.token,
+          host: request.host,
+          project: request.project,
+          runs: hostRuns.get(request.project) ?? [],
+        });
+      }
+      const archived = [...hostRuns.values()]
+        .flat()
+        .filter(() => random.int(8) === 0)
+        .map(each => ({host: 'ssh:host-a' as const, runId: each.runId}));
+      const archivedState = sidebarStep(step.state, {type: 'archived', archived});
+      const answered = digestsOf([
+        ...first.requests,
+        ...step.requests,
+        ...archivedState.requests,
+      ]).reduce(
+        (current, request) =>
+          sidebarStep(current, {
+            type: 'digests-read',
+            token: request.token,
+            reply: {kind: 'digests', runs: new Map(request.runIds.map(id => [id, read()]))},
+          }).state,
+        archivedState.state,
+      );
+
+      const listedIds = [
+        ...[...hostRuns.values()].flat().map(each => each.runId),
+        ...unknown.map(each => each.runId),
+      ].filter(id => !archived.some(each => each.runId === id));
+      const shown = dashboardRows(answered, CLOCK).map(each => each.row.run.runId);
+      expect([...shown].sort()).toEqual([...listedIds].sort());
+      expect(sidebarInvariants(answered)).toEqual([]);
+    }
   });
 
   test('a live run shows as live, and a run the host has no record of is gone', () => {
