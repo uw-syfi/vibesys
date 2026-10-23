@@ -2,6 +2,7 @@ import {expect, test} from 'bun:test';
 import type {Screen} from '@vibesys/feature-app-shell/state';
 import type {PreferencesView, WelcomeBridge, WelcomeEvent} from '@vibesys/ipc';
 import type {ThemeMode, ThemeName} from '@vibesys/ui/tokens';
+import fc from 'fast-check';
 import {createShellStores} from './shell.js';
 
 const ignore = (): void => undefined;
@@ -289,4 +290,93 @@ test("New run offers what the machine's Settings data says, and returning from S
   expect(after.form).toEqual(before.form);
   expect(after.at).toBe(before.at);
   expect(after.answers).toEqual(before.answers);
+});
+
+test('property: cold-start data arrival never navigates away from Runs', async () => {
+  await fc.assert(
+    fc.asyncProperty(
+      fc.shuffledSubarray(['overview', 'recent', 'listing', 'preferences', 'machines'] as const, {
+        minLength: 5,
+        maxLength: 5,
+      }),
+      async order => {
+        const overview = Promise.withResolvers<Awaited<ReturnType<WelcomeBridge['overview']>>>();
+        const preferences =
+          Promise.withResolvers<Awaited<ReturnType<WelcomeBridge['preferences']>>>();
+        const machines = Promise.withResolvers<Awaited<ReturnType<WelcomeBridge['machines']>>>();
+        let recent: Parameters<WelcomeBridge['onRecent']>[0] = () => {};
+        let listing: Parameters<WelcomeBridge['onListing']>[0] = () => {};
+        const opened = [
+          {
+            host: 'local' as const,
+            hostLabel: 'Local',
+            project: '/project',
+            runId: 'run-a',
+            task: null,
+            instanceId: null,
+            attachedAt: 1,
+          },
+        ];
+        const listed = {
+          kind: 'listed' as const,
+          host: 'local' as const,
+          unreadable: [],
+          unverified: [],
+          live: [],
+          ended: [],
+        };
+        const bridge = {
+          ...fakeBridge(),
+          overview: () => overview.promise,
+          preferences: () => preferences.promise,
+          machines: () => machines.promise,
+          onRecent: (receive: typeof recent) => {
+            recent = receive;
+          },
+          onListing: (receive: typeof listing) => {
+            listing = receive;
+          },
+          projectRuns: async () => ({
+            ok: true as const,
+            value: [],
+          }),
+        } as WelcomeBridge;
+        const stores = createShellStores(
+          bridge,
+          {mode: 'light', onChange: () => {}},
+          {setAttribute: () => {}},
+          () => () => {},
+          {
+            messages: {addEventListener: ignore, removeEventListener: ignore},
+            address: NO_ADDRESS,
+            now: () => 0,
+            session: () => {
+              throw new Error('No user opened a run');
+            },
+          },
+          {},
+        );
+        for (const event of order) {
+          if (event === 'overview')
+            overview.resolve({
+              ok: true,
+              value: {
+                eventCursor: 1,
+                recent: opened,
+                skippedRecent: [],
+                listings: [listed],
+              },
+            });
+          else if (event === 'recent') recent({sequence: 2, value: opened});
+          else if (event === 'listing') listing({sequence: 3, value: listed});
+          else if (event === 'preferences') preferences.resolve({ok: true, value: STORED});
+          else machines.resolve({ok: true, value: []});
+          await settle();
+          expect(stores.sidebar.store.getState().selection).toEqual({kind: 'runs'});
+          expect(stores.newRun.getState().context.started).toBeNull();
+        }
+      },
+    ),
+    {numRuns: 30, seed: 341807},
+  );
 });
