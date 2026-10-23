@@ -57,6 +57,7 @@ export function wire(fixture: StoreRunFixture, liveness?: RunLiveness): WireFixt
   return {
     watchRuns: encode(WatchRunsResponseSchema, {
       runId,
+      projectRoot: epochRecord.body.value.projectRoot ?? '/project',
       liveness: liveness ?? (epochHasEnded(lifecycle) ? RunLiveness.ENDED : RunLiveness.ALIVE),
       head: {
         strategy: 'fixture',

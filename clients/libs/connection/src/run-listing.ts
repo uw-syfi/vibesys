@@ -1,8 +1,8 @@
 /**
  * A host's runs as the views list them, from what the host's WatchRuns stream says: the pure
  * projection of each run's head and liveness into the registry listing the sidebar, notices and
- * run pages read. The stream knows no project directory and no server identity, so a listed run
- * carries an empty `projectRoot` (its run id names it on the host) and its run id as `id`.
+ * run pages read. Only observations with a validated canonical project address enter the listing;
+ * older gateways that omit the address leave that run unverified.
  */
 import {timestampMs} from '@bufbuild/protobuf/wkt';
 import type {RunPhase} from '@vibesys/contracts/host-helper';
@@ -12,6 +12,7 @@ import {
   type HostListing,
   type HostRun,
   instancePhaseText,
+  type RecordedProjectRoot,
 } from '@vibesys/hosts';
 import {
   DrainGoal,
@@ -114,11 +115,11 @@ function endedPhase(lifecycle: Lifecycle | undefined): {
   return {phase: 'failed', reason: INTERRUPTED_REASON};
 }
 
-function listed(runId: string, run: WatchedRun): HostRun {
+function listed(runId: string, run: WatchedRun, projectRoot: RecordedProjectRoot): HostRun {
   const startedAt = run.head?.process?.startedAt;
   const common = {
     id: runId,
-    projectRoot: '',
+    projectRoot,
     runId,
     end: null,
     startedAt: startedAt === undefined ? 0 : timestampMs(startedAt) / 1000,
@@ -137,8 +138,10 @@ export function watchedListing(host: HostKey, runs: ReadonlyMap<string, WatchedR
   const ended: HostRun[] = [];
   const unverified: string[] = [];
   for (const [runId, run] of [...runs].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {
-    if (run.liveness === RunLiveness.UNSPECIFIED) unverified.push(runId);
-    else (run.liveness === RunLiveness.ALIVE ? live : ended).push(listed(runId, run));
+    if (run.liveness === RunLiveness.UNSPECIFIED || run.projectRoot === undefined)
+      unverified.push(runId);
+    else
+      (run.liveness === RunLiveness.ALIVE ? live : ended).push(listed(runId, run, run.projectRoot));
   }
   return {kind: 'listed', host, live, ended, unreadable: [], unverified};
 }

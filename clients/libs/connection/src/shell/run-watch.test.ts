@@ -23,7 +23,13 @@ function frame(value: {
   removed?: boolean;
   initialComplete?: boolean;
 }): Uint8Array {
-  return toBinary(WatchRunsResponseSchema, create(WatchRunsResponseSchema, value));
+  return toBinary(
+    WatchRunsResponseSchema,
+    create(WatchRunsResponseSchema, {
+      ...value,
+      ...(value.runId && !value.removed ? {projectRoot: '/project'} : {}),
+    }),
+  );
 }
 
 test('a live run counts and cancel aborts the stream before a later frame', async () => {

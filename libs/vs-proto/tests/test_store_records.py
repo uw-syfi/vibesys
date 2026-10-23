@@ -57,6 +57,7 @@ def skeleton_examples() -> list[Message]:
     lifecycle = p.Lifecycle(state=p.Oneof("running", p.Running()))
     return [
         p.ReplayStore(),
+        p.RunAddress(project_root="/project", log_directory="/state/logs"),
         p.RunHead(
             lifecycle=lifecycle,
             strategy="example",

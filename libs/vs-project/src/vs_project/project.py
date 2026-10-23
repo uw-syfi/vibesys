@@ -240,9 +240,13 @@ class Project:
     def publish_run_for(cls, project_root: Path | str, run_id: str) -> Path:
         """Atomically publish a host discovery link to this run's log directory."""
         validate_run_id(run_id)
-        return publish_run_link(
-            _state_home() / "runs" / run_id, cls.log_directory_for(project_root, run_id)
+        directory = cls.log_directory_for(project_root, run_id)
+        import_module("vs_project._run_address").publish_address(
+            _state_home() / "run-addresses" / f"{run_id}.pb",
+            directory,
+            Path(project_root).expanduser().resolve(),
         )
+        return publish_run_link(_state_home() / "runs" / run_id, directory)
 
     @staticmethod
     def indexed_run_directories() -> tuple[Path, ...]:

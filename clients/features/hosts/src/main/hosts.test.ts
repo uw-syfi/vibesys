@@ -1526,7 +1526,7 @@ async function playGateway(
     case 'announce':
       world.gateway.announce(
         LOCAL,
-        step.runs.map(run => ({runId: run.id, liveness: run.liveness})),
+        step.runs.map(run => ({runId: run.id, projectRoot: '/project', liveness: run.liveness})),
       );
       return;
     case 'fail':
@@ -1580,7 +1580,9 @@ describe('Hosts watch the gateway of every desired host', () => {
   test('a gateway that can list lists runs although its helper cannot start (the reviewer repro)', async () => {
     const world = await gatewayWorld({helper: 'down', configured: []});
     await world.hosts.recent([LOCAL]);
-    world.gateway.announce(LOCAL, [{runId: 'run-a', liveness: RunLiveness.ALIVE}]);
+    world.gateway.announce(LOCAL, [
+      {runId: 'run-a', projectRoot: '/project', liveness: RunLiveness.ALIVE},
+    ]);
 
     const last = world.pushed.at(-1);
     if (last?.kind !== 'listed') throw new Error('listed required');
@@ -1639,7 +1641,9 @@ describe('Hosts watch the gateway of every desired host', () => {
     await world.failStreams(LOCAL);
     expect(kinds()).toEqual(['connecting', 'listed', 'reconnecting']);
     world.clock.advanceBy(1_000);
-    world.gateway.announce(LOCAL, [{runId: 'run-a', liveness: RunLiveness.ENDED}]);
+    world.gateway.announce(LOCAL, [
+      {runId: 'run-a', projectRoot: '/project', liveness: RunLiveness.ENDED},
+    ]);
     expect(kinds()).toEqual(['connecting', 'listed', 'reconnecting', 'listed']);
   });
 

@@ -50,9 +50,10 @@ rescan:
 			return nil
 		}
 		index := filepath.Join(h.config.Root, "runs")
-		err := add(index)
-		if err != nil && !errors.Is(err, os.ErrNotExist) {
-			return rpcError(err)
+		for _, directory := range []string{index, filepath.Join(h.config.Root, "run-addresses")} {
+			if err := add(directory); err != nil && !errors.Is(err, os.ErrNotExist) {
+				return rpcError(err)
+			}
 		}
 		entries, err := os.ReadDir(index)
 		if err != nil && !errors.Is(err, os.ErrNotExist) {
@@ -89,6 +90,9 @@ rescan:
 				live = apiv1.RunLiveness_RUN_LIVENESS_UNSPECIFIED
 			}
 			response := &apiv1.WatchRunsResponse{RunId: entry.Name(), Head: head, Liveness: live}
+			if project, err := readRunProject(h.config.Root, entry.Name(), dir); err == nil {
+				response.ProjectRoot = proto.String(project)
+			}
 			current[entry.Name()] = response
 			directories[entry.Name()] = dir
 			if !proto.Equal(previous[entry.Name()], response) {
@@ -145,7 +149,8 @@ rescan:
 					}
 					if live != response.Liveness {
 						// Messages remain immutable after Send, including for gRPC stats.
-						updated := &apiv1.WatchRunsResponse{RunId: id, Head: response.Head, Liveness: live}
+						updated := proto.Clone(response).(*apiv1.WatchRunsResponse)
+						updated.Liveness = live
 						previous[id] = updated
 						if err := stream.Send(updated); err != nil {
 							return err

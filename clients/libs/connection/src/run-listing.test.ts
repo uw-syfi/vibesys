@@ -7,7 +7,7 @@ import {
   type WatchedRun,
   watchedListing,
 } from '@vibesys/connection';
-import type {HostKey} from '@vibesys/hosts';
+import {type HostKey, recordedProjectRoot} from '@vibesys/hosts';
 import {
   DrainGoal,
   LifecycleSchema,
@@ -81,6 +81,7 @@ function watched(input: {
 }): WatchedRun {
   const head = input.head;
   return {
+    projectRoot: recordedProjectRoot('/project'),
     liveness: input.liveness,
     head:
       head === undefined
@@ -116,7 +117,7 @@ test('property: every run is listed once, by what its host says of its writer', 
       for (const run of [...listing.live, ...listing.ended]) {
         expect(run.status).not.toBe('');
         expect(run.paused !== null).toBe(run.phase === 'paused');
-        expect(run.projectRoot).toBe('');
+        expect(run.projectRoot).toBe('/project');
         expect(run.end).toBeNull();
       }
       for (const run of listing.ended)

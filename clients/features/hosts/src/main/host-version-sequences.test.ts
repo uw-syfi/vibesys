@@ -218,7 +218,7 @@ async function rigOver(): Promise<Rig> {
     },
     async publish() {
       published += 1;
-      const run = {runId: `run-${published}`, liveness: RunLiveness.ALIVE};
+      const run = {runId: `run-${published}`, projectRoot: '/project', liveness: RunLiveness.ALIVE};
       announced.push(run);
       gateway.update(ALPHA, run);
       await rig.quiesce();

@@ -25,7 +25,34 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file vibesys/store/v1/skeleton.proto.
  */
 export const file_vibesys_store_v1_skeleton: GenFile = /*@__PURE__*/
-  fileDesc("Ch92aWJlc3lzL3N0b3JlL3YxL3NrZWxldG9uLnByb3RvEhB2aWJlc3lzLnN0b3JlLnYxItQGCgdSdW5IZWFkEi4KCWxpZmVjeWNsZRgBIAEoCzIbLnZpYmVzeXMuc3RvcmUudjEuTGlmZWN5Y2xlEh0KCHN0cmF0ZWd5GAIgASgJQgu6SAhyBhABKICABBI2CglvYmplY3RpdmUYAyABKAsyIy52aWJlc3lzLnN0b3JlLnYxLkhlYWRsaW5lT2JqZWN0aXZlElAKC3NwYW5fY291bnRzGAQgAygLMikudmliZXN5cy5zdG9yZS52MS5SdW5IZWFkLlNwYW5Db3VudHNFbnRyeUIQukgNmgEKIghyBhABKICABBIrCgV1c2FnZRgFIAEoCzIcLnZpYmVzeXMuc3RvcmUudjEuVG9rZW5Vc2FnZRIzCgxjaGFydF9wb2ludHMYBiADKAsyHS52aWJlc3lzLnN0b3JlLnYxLk1ldHJpY1BvaW50EhIKCm5lZWRzX3VzZXIYByABKAgSGgoNY29tbWl0dGVkX3NlcRgIIAEoBEgAiAEBEi0KB3Byb2Nlc3MYCSABKAsyHC52aWJlc3lzLnN0b3JlLnYxLlJ1blByb2Nlc3MSGgoSYXdhaXRpbmdfbGlmZWN5Y2xlGAogASgIEg0KBWVwb2NoGAsgASgNGjEKD1NwYW5Db3VudHNFbnRyeRILCgNrZXkYASABKAkSDQoFdmFsdWUYAiABKAQ6AjgBOr4Cuki6AhpmChVydW5faGVhZC5jaGFydF9wb2ludHMSLGNoYXJ0X3BvaW50cyBtdXN0IGNvbnRhaW4gYXQgbW9zdCAyNTYgcG9pbnRzGh90aGlzLmNoYXJ0X3BvaW50cy5zaXplKCkgPD0gMjU2Gs8BChJydW5faGVhZC5saWZlY3ljbGUSO2hlYWQgaGFzIGVpdGhlciBhIGxpZmVjeWNsZSBvciBhbiBleHBsaWNpdGx5IGF3YWl0aW5nIGVwb2NoGnxoYXModGhpcy5saWZlY3ljbGUpICE9IHRoaXMuYXdhaXRpbmdfbGlmZWN5Y2xlICYmICghdGhpcy5hd2FpdGluZ19saWZlY3ljbGUgfHwgKHRoaXMuZXBvY2ggPiAwdSAmJiBoYXModGhpcy5jb21taXR0ZWRfc2VxKSkpQhAKDl9jb21taXR0ZWRfc2VxIskBChFIZWFkbGluZU9iamVjdGl2ZRI6CgZzZXJpZXMYASABKAsyIi52aWJlc3lzLnN0b3JlLnYxLk1ldHJpY1Nlcmllc0RlY2xCBrpIA8gBARIgCgpiZXN0X3ZhbHVlGAIgASgBQge6SAQSAkABSACIAQESIQoLaW5wdXRfdmFsdWUYAyABKAFCB7pIBBICQAFIAYgBARIUCgxpbnB1dF9zdGF0ZWQYBCABKAhCDQoLX2Jlc3RfdmFsdWVCDgoMX2lucHV0X3ZhbHVlInIKClJ1blByb2Nlc3MSFAoDcGlkGAEgASgNQge6SAQqAiAAEhYKBWVwb2NoGAIgASgNQge6SAQqAiAAEjYKCnN0YXJ0ZWRfYXQYAyABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wQga6SAPIAQEi4gYKCEtleWZyYW1lEhwKC3Rocm91Z2hfc2VxGAEgASgEQge6SAQyAiAAEiUKCmxvZ19vZmZzZXQYAiABKARCEbpIDjIMGP//////////fygIEjQKBXNwYW5zGAMgAygLMiUudmliZXN5cy5zdG9yZS52MS5LZXlmcmFtZS5TcGFuc0VudHJ5EjAKB21ldHJpY3MYBCADKAsyHy52aWJlc3lzLnN0b3JlLnYxLk1ldHJpY0hpc3RvcnkSLAoHc3RyZWFtcxgFIAMoCzIbLnZpYmVzeXMuc3RvcmUudjEuU3RyZWFtUmVmEi4KBmVwb2NocxgGIAMoCzIeLnZpYmVzeXMuc3RvcmUudjEuRXBvY2hWZXJzaW9uEjYKCmxpZmVjeWNsZXMYByADKAsyIi52aWJlc3lzLnN0b3JlLnYxLkxpZmVjeWNsZVZlcnNpb24SKgoIZmFpbHVyZXMYCCADKAsyGC52aWJlc3lzLnN0b3JlLnYxLlJlY29yZBIYChBmYWlsdXJlc190cmFja2VkGAkgASgIGksKClNwYW5zRW50cnkSCwoDa2V5GAEgASgJEiwKBXZhbHVlGAIgASgLMh0udmliZXN5cy5zdG9yZS52MS5TcGFuSGlzdG9yeToCOAE6/wK6SPsCGvgCCh9rZXlmcmFtZS5mYWlsdXJlc193aXRoaW5fcHJlZml4EpUBZmFpbHVyZXMgbXVzdCBiZSBlcnJvciBub3RpY2VzIG9mIHRoZSBwcmVmaXg6IHNlcXVlbmNlIGF0IG1vc3QgdGhyb3VnaF9zZXEsIGF0IG1vc3Qgb25lIHBlciBlcG9jaCwgYW5kIG9ubHkgYSBrZXlmcmFtZSB0aGF0IHRyYWNrcyB0aGVtIG1heSBjYXJyeSBhbnkavAF0aGlzLmZhaWx1cmVzLmFsbChmLCBmLnNlcSA8PSB0aGlzLnRocm91Z2hfc2VxICYmIGhhcyhmLm5vdGljZSkgJiYgZi5ub3RpY2Uuc2V2ZXJpdHkgPj0gMikgJiYgdGhpcy5mYWlsdXJlcy5tYXAoZiwgZi5lcG9jaCkudW5pcXVlKCkgJiYgKHRoaXMuZmFpbHVyZXMuc2l6ZSgpID09IDAgfHwgdGhpcy5mYWlsdXJlc190cmFja2VkKSI+CgtTcGFuSGlzdG9yeRIvCgh2ZXJzaW9ucxgBIAMoCzIdLnZpYmVzeXMuc3RvcmUudjEuU3BhblZlcnNpb24iUQoLU3BhblZlcnNpb24SFAoDc2VxGAEgASgEQge6SAQyAiAAEiwKBHNwYW4YAiABKAsyFi52aWJlc3lzLnN0b3JlLnYxLlNwYW5CBrpIA8gBASJdCg1NZXRyaWNIaXN0b3J5EhsKBnNlcmllcxgBIAEoCUILukgIcgYQASiAgAQSLwoGcG9pbnRzGAIgAygLMh8udmliZXN5cy5zdG9yZS52MS5NZXRyaWNWZXJzaW9uIlsKDU1ldHJpY1ZlcnNpb24SFAoDc2VxGAEgASgEQge6SAQyAiAAEjQKBXBvaW50GAIgASgLMh0udmliZXN5cy5zdG9yZS52MS5NZXRyaWNQb2ludEIGukgDyAEBIrECCgxFcG9jaFZlcnNpb24SFAoDc2VxGAEgASgEQge6SAQyAiAAEjUKBWVwb2NoGAIgASgLMh4udmliZXN5cy5zdG9yZS52MS5FcG9jaFN0YXJ0ZWRCBrpIA8gBARI0ChJkZXNjcmlwdG9yc19zaGEyNTYYAyABKAlCGLpIFXITMhFeKFswLTlhLWZdezY0fSk/JDqdAbpImQEalgEKHmVwb2NoX3ZlcnNpb24uZGVzY3JpcHRvcnNfb25jZRI1ZGVzY3JpcHRvcnMgYXJlIGlubGluZSBvciBhZGRyZXNzZWQgYnkgaGFzaCwgbm90IGJvdGgaPXRoaXMuZGVzY3JpcHRvcnNfc2hhMjU2ID09ICcnIHx8ICFoYXModGhpcy5lcG9jaC5kZXNjcmlwdG9ycykiYAoQTGlmZWN5Y2xlVmVyc2lvbhIUCgNzZXEYASABKARCB7pIBDICIAASNgoJbGlmZWN5Y2xlGAIgASgLMhsudmliZXN5cy5zdG9yZS52MS5MaWZlY3ljbGVCBrpIA8gBAUJBWj9naXRodWIuY29tL3V3LXN5ZmkvdmliZXN5cy9nYXRld2F5L2dlbi92aWJlc3lzL3N0b3JlL3YxO3N0b3JldjFiBnByb3RvMw", [file_buf_validate_validate, file_google_protobuf_timestamp, file_vibesys_store_v1_agent_attrs, file_vibesys_store_v1_content, file_vibesys_store_v1_epoch, file_vibesys_store_v1_lifecycle, file_vibesys_store_v1_record, file_vibesys_store_v1_span]);
+  fileDesc("Ch92aWJlc3lzL3N0b3JlL3YxL3NrZWxldG9uLnByb3RvEhB2aWJlc3lzLnN0b3JlLnYxIlkKClJ1bkFkZHJlc3MSJAoMcHJvamVjdF9yb290GAEgASgJQg66SAtyCRABKICABDoBLxIlCg1sb2dfZGlyZWN0b3J5GAIgASgJQg66SAtyCRABKICABDoBLyLUBgoHUnVuSGVhZBIuCglsaWZlY3ljbGUYASABKAsyGy52aWJlc3lzLnN0b3JlLnYxLkxpZmVjeWNsZRIdCghzdHJhdGVneRgCIAEoCUILukgIcgYQASiAgAQSNgoJb2JqZWN0aXZlGAMgASgLMiMudmliZXN5cy5zdG9yZS52MS5IZWFkbGluZU9iamVjdGl2ZRJQCgtzcGFuX2NvdW50cxgEIAMoCzIpLnZpYmVzeXMuc3RvcmUudjEuUnVuSGVhZC5TcGFuQ291bnRzRW50cnlCELpIDZoBCiIIcgYQASiAgAQSKwoFdXNhZ2UYBSABKAsyHC52aWJlc3lzLnN0b3JlLnYxLlRva2VuVXNhZ2USMwoMY2hhcnRfcG9pbnRzGAYgAygLMh0udmliZXN5cy5zdG9yZS52MS5NZXRyaWNQb2ludBISCgpuZWVkc191c2VyGAcgASgIEhoKDWNvbW1pdHRlZF9zZXEYCCABKARIAIgBARItCgdwcm9jZXNzGAkgASgLMhwudmliZXN5cy5zdG9yZS52MS5SdW5Qcm9jZXNzEhoKEmF3YWl0aW5nX2xpZmVjeWNsZRgKIAEoCBINCgVlcG9jaBgLIAEoDRoxCg9TcGFuQ291bnRzRW50cnkSCwoDa2V5GAEgASgJEg0KBXZhbHVlGAIgASgEOgI4ATq+ArpIugIaZgoVcnVuX2hlYWQuY2hhcnRfcG9pbnRzEixjaGFydF9wb2ludHMgbXVzdCBjb250YWluIGF0IG1vc3QgMjU2IHBvaW50cxofdGhpcy5jaGFydF9wb2ludHMuc2l6ZSgpIDw9IDI1NhrPAQoScnVuX2hlYWQubGlmZWN5Y2xlEjtoZWFkIGhhcyBlaXRoZXIgYSBsaWZlY3ljbGUgb3IgYW4gZXhwbGljaXRseSBhd2FpdGluZyBlcG9jaBp8aGFzKHRoaXMubGlmZWN5Y2xlKSAhPSB0aGlzLmF3YWl0aW5nX2xpZmVjeWNsZSAmJiAoIXRoaXMuYXdhaXRpbmdfbGlmZWN5Y2xlIHx8ICh0aGlzLmVwb2NoID4gMHUgJiYgaGFzKHRoaXMuY29tbWl0dGVkX3NlcSkpKUIQCg5fY29tbWl0dGVkX3NlcSLJAQoRSGVhZGxpbmVPYmplY3RpdmUSOgoGc2VyaWVzGAEgASgLMiIudmliZXN5cy5zdG9yZS52MS5NZXRyaWNTZXJpZXNEZWNsQga6SAPIAQESIAoKYmVzdF92YWx1ZRgCIAEoAUIHukgEEgJAAUgAiAEBEiEKC2lucHV0X3ZhbHVlGAMgASgBQge6SAQSAkABSAGIAQESFAoMaW5wdXRfc3RhdGVkGAQgASgIQg0KC19iZXN0X3ZhbHVlQg4KDF9pbnB1dF92YWx1ZSJyCgpSdW5Qcm9jZXNzEhQKA3BpZBgBIAEoDUIHukgEKgIgABIWCgVlcG9jaBgCIAEoDUIHukgEKgIgABI2CgpzdGFydGVkX2F0GAMgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcEIGukgDyAEBIuIGCghLZXlmcmFtZRIcCgt0aHJvdWdoX3NlcRgBIAEoBEIHukgEMgIgABIlCgpsb2dfb2Zmc2V0GAIgASgEQhG6SA4yDBj//////////38oCBI0CgVzcGFucxgDIAMoCzIlLnZpYmVzeXMuc3RvcmUudjEuS2V5ZnJhbWUuU3BhbnNFbnRyeRIwCgdtZXRyaWNzGAQgAygLMh8udmliZXN5cy5zdG9yZS52MS5NZXRyaWNIaXN0b3J5EiwKB3N0cmVhbXMYBSADKAsyGy52aWJlc3lzLnN0b3JlLnYxLlN0cmVhbVJlZhIuCgZlcG9jaHMYBiADKAsyHi52aWJlc3lzLnN0b3JlLnYxLkVwb2NoVmVyc2lvbhI2CgpsaWZlY3ljbGVzGAcgAygLMiIudmliZXN5cy5zdG9yZS52MS5MaWZlY3ljbGVWZXJzaW9uEioKCGZhaWx1cmVzGAggAygLMhgudmliZXN5cy5zdG9yZS52MS5SZWNvcmQSGAoQZmFpbHVyZXNfdHJhY2tlZBgJIAEoCBpLCgpTcGFuc0VudHJ5EgsKA2tleRgBIAEoCRIsCgV2YWx1ZRgCIAEoCzIdLnZpYmVzeXMuc3RvcmUudjEuU3Bhbkhpc3Rvcnk6AjgBOv8Cukj7Ahr4Agofa2V5ZnJhbWUuZmFpbHVyZXNfd2l0aGluX3ByZWZpeBKVAWZhaWx1cmVzIG11c3QgYmUgZXJyb3Igbm90aWNlcyBvZiB0aGUgcHJlZml4OiBzZXF1ZW5jZSBhdCBtb3N0IHRocm91Z2hfc2VxLCBhdCBtb3N0IG9uZSBwZXIgZXBvY2gsIGFuZCBvbmx5IGEga2V5ZnJhbWUgdGhhdCB0cmFja3MgdGhlbSBtYXkgY2FycnkgYW55GrwBdGhpcy5mYWlsdXJlcy5hbGwoZiwgZi5zZXEgPD0gdGhpcy50aHJvdWdoX3NlcSAmJiBoYXMoZi5ub3RpY2UpICYmIGYubm90aWNlLnNldmVyaXR5ID49IDIpICYmIHRoaXMuZmFpbHVyZXMubWFwKGYsIGYuZXBvY2gpLnVuaXF1ZSgpICYmICh0aGlzLmZhaWx1cmVzLnNpemUoKSA9PSAwIHx8IHRoaXMuZmFpbHVyZXNfdHJhY2tlZCkiPgoLU3Bhbkhpc3RvcnkSLwoIdmVyc2lvbnMYASADKAsyHS52aWJlc3lzLnN0b3JlLnYxLlNwYW5WZXJzaW9uIlEKC1NwYW5WZXJzaW9uEhQKA3NlcRgBIAEoBEIHukgEMgIgABIsCgRzcGFuGAIgASgLMhYudmliZXN5cy5zdG9yZS52MS5TcGFuQga6SAPIAQEiXQoNTWV0cmljSGlzdG9yeRIbCgZzZXJpZXMYASABKAlCC7pICHIGEAEogIAEEi8KBnBvaW50cxgCIAMoCzIfLnZpYmVzeXMuc3RvcmUudjEuTWV0cmljVmVyc2lvbiJbCg1NZXRyaWNWZXJzaW9uEhQKA3NlcRgBIAEoBEIHukgEMgIgABI0CgVwb2ludBgCIAEoCzIdLnZpYmVzeXMuc3RvcmUudjEuTWV0cmljUG9pbnRCBrpIA8gBASKxAgoMRXBvY2hWZXJzaW9uEhQKA3NlcRgBIAEoBEIHukgEMgIgABI1CgVlcG9jaBgCIAEoCzIeLnZpYmVzeXMuc3RvcmUudjEuRXBvY2hTdGFydGVkQga6SAPIAQESNAoSZGVzY3JpcHRvcnNfc2hhMjU2GAMgASgJQhi6SBVyEzIRXihbMC05YS1mXXs2NH0pPyQ6nQG6SJkBGpYBCh5lcG9jaF92ZXJzaW9uLmRlc2NyaXB0b3JzX29uY2USNWRlc2NyaXB0b3JzIGFyZSBpbmxpbmUgb3IgYWRkcmVzc2VkIGJ5IGhhc2gsIG5vdCBib3RoGj10aGlzLmRlc2NyaXB0b3JzX3NoYTI1NiA9PSAnJyB8fCAhaGFzKHRoaXMuZXBvY2guZGVzY3JpcHRvcnMpImAKEExpZmVjeWNsZVZlcnNpb24SFAoDc2VxGAEgASgEQge6SAQyAiAAEjYKCWxpZmVjeWNsZRgCIAEoCzIbLnZpYmVzeXMuc3RvcmUudjEuTGlmZWN5Y2xlQga6SAPIAQFCQVo/Z2l0aHViLmNvbS91dy1zeWZpL3ZpYmVzeXMvZ2F0ZXdheS9nZW4vdmliZXN5cy9zdG9yZS92MTtzdG9yZXYxYgZwcm90bzM", [file_buf_validate_validate, file_google_protobuf_timestamp, file_vibesys_store_v1_agent_attrs, file_vibesys_store_v1_content, file_vibesys_store_v1_epoch, file_vibesys_store_v1_lifecycle, file_vibesys_store_v1_record, file_vibesys_store_v1_span]);
+
+/**
+ * Machine-local routing metadata, published by Project before its host discovery link.
+ * Stored beside the host index, separately from the writer-owned log and head.
+ *
+ * @generated from message vibesys.store.v1.RunAddress
+ */
+export type RunAddress = Message<"vibesys.store.v1.RunAddress"> & {
+  /**
+   * @generated from field: string project_root = 1;
+   */
+  projectRoot: string;
+
+  /**
+   * Binds the address to the resolved discovery target across index retargeting.
+   *
+   * @generated from field: string log_directory = 2;
+   */
+  logDirectory: string;
+};
+
+/**
+ * Describes the message vibesys.store.v1.RunAddress.
+ * Use `create(RunAddressSchema)` to create a new message.
+ */
+export const RunAddressSchema: GenMessage<RunAddress> = /*@__PURE__*/
+  messageDesc(file_vibesys_store_v1_skeleton, 0);
 
 /**
  * Writer-computed dashboard projection. Absence of committed_seq retains the
@@ -99,7 +126,7 @@ export type RunHead = Message<"vibesys.store.v1.RunHead"> & {
  * Use `create(RunHeadSchema)` to create a new message.
  */
 export const RunHeadSchema: GenMessage<RunHead> = /*@__PURE__*/
-  messageDesc(file_vibesys_store_v1_skeleton, 0);
+  messageDesc(file_vibesys_store_v1_skeleton, 1);
 
 /**
  * Values are absent until reported. The declaration supplies unit and direction.
@@ -137,7 +164,7 @@ export type HeadlineObjective = Message<"vibesys.store.v1.HeadlineObjective"> & 
  * Use `create(HeadlineObjectiveSchema)` to create a new message.
  */
 export const HeadlineObjectiveSchema: GenMessage<HeadlineObjective> = /*@__PURE__*/
-  messageDesc(file_vibesys_store_v1_skeleton, 1);
+  messageDesc(file_vibesys_store_v1_skeleton, 2);
 
 /**
  * Informational process identity, never a substitute for probing run.lock.
@@ -166,7 +193,7 @@ export type RunProcess = Message<"vibesys.store.v1.RunProcess"> & {
  * Use `create(RunProcessSchema)` to create a new message.
  */
 export const RunProcessSchema: GenMessage<RunProcess> = /*@__PURE__*/
-  messageDesc(file_vibesys_store_v1_skeleton, 2);
+  messageDesc(file_vibesys_store_v1_skeleton, 3);
 
 /**
  * Immutable skeleton through through_seq. log_offset is the byte immediately
@@ -235,7 +262,7 @@ export type Keyframe = Message<"vibesys.store.v1.Keyframe"> & {
  * Use `create(KeyframeSchema)` to create a new message.
  */
 export const KeyframeSchema: GenMessage<Keyframe> = /*@__PURE__*/
-  messageDesc(file_vibesys_store_v1_skeleton, 3);
+  messageDesc(file_vibesys_store_v1_skeleton, 4);
 
 /**
  * @generated from message vibesys.store.v1.SpanHistory
@@ -252,7 +279,7 @@ export type SpanHistory = Message<"vibesys.store.v1.SpanHistory"> & {
  * Use `create(SpanHistorySchema)` to create a new message.
  */
 export const SpanHistorySchema: GenMessage<SpanHistory> = /*@__PURE__*/
-  messageDesc(file_vibesys_store_v1_skeleton, 4);
+  messageDesc(file_vibesys_store_v1_skeleton, 5);
 
 /**
  * @generated from message vibesys.store.v1.SpanVersion
@@ -274,7 +301,7 @@ export type SpanVersion = Message<"vibesys.store.v1.SpanVersion"> & {
  * Use `create(SpanVersionSchema)` to create a new message.
  */
 export const SpanVersionSchema: GenMessage<SpanVersion> = /*@__PURE__*/
-  messageDesc(file_vibesys_store_v1_skeleton, 5);
+  messageDesc(file_vibesys_store_v1_skeleton, 6);
 
 /**
  * @generated from message vibesys.store.v1.MetricHistory
@@ -296,7 +323,7 @@ export type MetricHistory = Message<"vibesys.store.v1.MetricHistory"> & {
  * Use `create(MetricHistorySchema)` to create a new message.
  */
 export const MetricHistorySchema: GenMessage<MetricHistory> = /*@__PURE__*/
-  messageDesc(file_vibesys_store_v1_skeleton, 6);
+  messageDesc(file_vibesys_store_v1_skeleton, 7);
 
 /**
  * @generated from message vibesys.store.v1.MetricVersion
@@ -318,7 +345,7 @@ export type MetricVersion = Message<"vibesys.store.v1.MetricVersion"> & {
  * Use `create(MetricVersionSchema)` to create a new message.
  */
 export const MetricVersionSchema: GenMessage<MetricVersion> = /*@__PURE__*/
-  messageDesc(file_vibesys_store_v1_skeleton, 7);
+  messageDesc(file_vibesys_store_v1_skeleton, 8);
 
 /**
  * A stored keyframe carries epoch.descriptors inline. The gateway replaces them
@@ -351,7 +378,7 @@ export type EpochVersion = Message<"vibesys.store.v1.EpochVersion"> & {
  * Use `create(EpochVersionSchema)` to create a new message.
  */
 export const EpochVersionSchema: GenMessage<EpochVersion> = /*@__PURE__*/
-  messageDesc(file_vibesys_store_v1_skeleton, 8);
+  messageDesc(file_vibesys_store_v1_skeleton, 9);
 
 /**
  * @generated from message vibesys.store.v1.LifecycleVersion
@@ -373,4 +400,4 @@ export type LifecycleVersion = Message<"vibesys.store.v1.LifecycleVersion"> & {
  * Use `create(LifecycleVersionSchema)` to create a new message.
  */
 export const LifecycleVersionSchema: GenMessage<LifecycleVersion> = /*@__PURE__*/
-  messageDesc(file_vibesys_store_v1_skeleton, 9);
+  messageDesc(file_vibesys_store_v1_skeleton, 10);

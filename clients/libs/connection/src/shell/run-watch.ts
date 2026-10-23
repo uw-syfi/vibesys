@@ -9,7 +9,13 @@ with a growing delay when its stream ends or goes silent for longer than the pro
 unobserved one is retired and reopens on the next `start`, `live` or `observe`.
 */
 import {create, fromBinary, toBinary} from '@bufbuild/protobuf';
-import {type HostId, type HostKey, hostKey} from '@vibesys/hosts';
+import {
+  type HostId,
+  type HostKey,
+  hostKey,
+  type RecordedProjectRoot,
+  recordedProjectRoot,
+} from '@vibesys/hosts';
 import {
   type RunHead,
   RunLiveness,
@@ -29,6 +35,7 @@ export interface RunWatchPorts {
 
 /** What the host last said of one run: its head (absent for a phase 1 run) and its liveness. */
 export interface WatchedRun {
+  readonly projectRoot: RecordedProjectRoot | undefined;
   readonly head: RunHead | undefined;
   readonly liveness: RunLiveness;
 }
@@ -191,6 +198,7 @@ function accept(
   if (message.removed) opened.runs.delete(message.runId);
   else
     opened.runs.set(message.runId, {
+      projectRoot: recordedProjectRoot(message.projectRoot),
       head: message.head,
       liveness: message.liveness,
     });

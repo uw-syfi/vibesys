@@ -155,6 +155,13 @@ message WatchRunsResponse {
   // Emitted at least every five seconds, after all preceding run observations.
   // A receiver expires its facts after thirty seconds without a frame.
   bool heartbeat = 6;
+  // Canonical host-side project directory. Older gateways may omit it; those entries have no
+  // address and cannot enter project-dependent listings. Markers and tombstones omit it.
+  optional string project_root = 7 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 4096
+    prefix: "/"
+  }];
 }
 
 enum RunLiveness {

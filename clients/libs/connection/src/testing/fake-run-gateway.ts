@@ -16,6 +16,7 @@ export interface FakeRunStream {
 /** What a gateway announces about one run. */
 export interface AnnouncedRun {
   readonly runId: string;
+  readonly projectRoot: string;
   readonly liveness: RunLiveness;
   readonly head?: RunHead;
 }

@@ -13,6 +13,22 @@ import "vibesys/store/v1/span.proto";
 
 option go_package = "github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1";
 
+// Machine-local routing metadata, published by Project before its host discovery link.
+// Stored beside the host index, separately from the writer-owned log and head.
+message RunAddress {
+  string project_root = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 65536
+    prefix: "/"
+  }];
+  // Binds the address to the resolved discovery target across index retargeting.
+  string log_directory = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 65536
+    prefix: "/"
+  }];
+}
+
 // Writer-computed dashboard projection. Absence of committed_seq retains the
 // phase 1 rule: every complete record is committed. A present zero commits none.
 message RunHead {
