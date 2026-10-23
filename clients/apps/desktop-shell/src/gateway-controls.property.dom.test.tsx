@@ -377,7 +377,22 @@ function followers(peer: RunPeer, source: Fault['source']) {
   });
 }
 
+/** The run holds one WatchRuns lease, shared by the header and the controls. */
+function assertOneLease(peer: RunPeer) {
+  expect(followers(peer, 'liveness').length).toBeLessThanOrEqual(1);
+}
+
+/** The header and the controls project one reading of the writer, whichever stream led. */
+function assertAgree(container: HTMLElement) {
+  const buttons = controlButtons(container);
+  const word = statusWord(container);
+  if (buttons.some(text => ['Pause', 'Pause now', 'Guidance'].includes(text)))
+    expect(['Starting', 'Running', 'Paused']).toContain(word);
+  if (buttons.includes('Resume')) expect(['Starting', 'Running']).not.toContain(word);
+}
+
 function assertVisible(container: HTMLElement) {
+  assertAgree(container);
   if (controlButtons(container).length === 0)
     expect(container.textContent).toMatch(
       /catching up|unknown|waiting for the host|not confirmed/i,
@@ -411,6 +426,7 @@ test('property: independently ending or stalling streams cannot revive a dead wr
               ),
             ).toBe(false);
             assertVisible(container);
+            assertOneLease(peer);
             await act(async () => clock.advanceBy(fault.elapsed));
             expect(
               controlButtons(container).some(text =>
@@ -418,9 +434,11 @@ test('property: independently ending or stalling streams cannot revive a dead wr
               ),
             ).toBe(false);
             assertVisible(container);
+            assertOneLease(peer);
             await act(async () => clock.advanceBy(31_000));
             expect(peer.streams.length).toBeGreaterThan(before);
             assertVisible(container);
+            assertOneLease(peer);
             const recovered = controlButtons(container);
             // Late bytes from retired subscriptions are fenced by their owning actor.
             await act(async () => {
@@ -743,6 +761,7 @@ test('property: host byte receipts alone renew the page controls lease across fr
           const live = controlButtons(container).includes('Pause');
           expect(live).toBe(clock.now() - state.lastFrame < 30000);
           assertVisible(container);
+          assertOneLease(peer);
         };
         for (const step of steps) {
           await receiveHostStep(peer, step, state, clock.now());
