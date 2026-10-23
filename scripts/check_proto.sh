@@ -18,7 +18,9 @@ fi
 pids=()
 (./scripts/tests/test_proto_breaking.sh && ./scripts/check_proto_breaking.sh) &
 pids+=("$!")
-uv run --locked pytest libs/vs-proto/tests libs/vs-runlog/tests scripts/corevalue/tests scripts/host_operations/tests -n 0 --no-cov -q &
+# Two workers: the other checks finish within 20 s, and one worker leaves their cores idle for the
+# remaining half of this group's 60 s.
+uv run --locked pytest libs/vs-proto/tests libs/vs-runlog/tests scripts/corevalue/tests scripts/host_operations/tests -n 2 --no-cov -q &
 pids+=("$!")
 (cd gateway && go build ./gen/... && go vet ./gen/...) &
 pids+=("$!")
