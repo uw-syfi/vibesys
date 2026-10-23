@@ -1,10 +1,12 @@
 import {expect, test} from 'bun:test';
 import {readdirSync, readFileSync} from 'node:fs';
 import {create} from '@bufbuild/protobuf';
+import {anyPack} from '@bufbuild/protobuf/wkt';
 import {foldOutcomes} from '@vibesys/feature-run-intents/state';
 import {startGatewayRun} from '@vibesys/feature-run-page/renderer';
 import {emptySteerFold, foldSteer, steerDeliveries} from '@vibesys/feature-run-sessions/state';
 import {
+  AgentTurnAttrsSchema,
   Change,
   IntentAction,
   IntentStep,
@@ -67,7 +69,18 @@ function generatedLog(length: number, seed: number): StoreRecord[] {
             name: 'delivery',
             runtimeType: RuntimeType.OPERATION,
             status: SpanStatus.RUNNING,
-            label: {kind: 'agent_turn', links: [{rel: 'steer', to: 'early-steer'}]},
+            label: {
+              kind: 'agent_turn',
+              links: [{rel: 'steer', to: 'early-steer'}],
+              attrs: anyPack(
+                AgentTurnAttrsSchema,
+                create(AgentTurnAttrsSchema, {
+                  agent: 'agent-a',
+                  role: 'executor',
+                  stage: 'execute',
+                }),
+              ),
+            },
           },
         },
       },
@@ -85,13 +98,19 @@ function generatedLog(length: number, seed: number): StoreRecord[] {
       },
     }).body,
   );
+  append(
+    create(RecordSchema, {
+      body: {case: 'notice', value: {severity: Severity.ERROR, code: 1, message: 'early failure'}},
+    }).body,
+  );
   while (records.length < length)
     append(
       create(RecordSchema, {
         body: {
           case: 'notice',
           value: {
-            severity: records.length % 17 === 0 ? Severity.ERROR : Severity.WARNING,
+            severity:
+              seed % 2 === 0 && records.length % 17 === 0 ? Severity.ERROR : Severity.WARNING,
             code: 1,
             message: `work-${records.length}`,
           },

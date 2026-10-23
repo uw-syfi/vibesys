@@ -5,8 +5,10 @@ from __future__ import annotations
 import pytest
 from hypothesis import example, given
 from hypothesis import strategies as st
+from protobuf.wkt.google.protobuf.any_pb import Any
 
 from vs_proto.api import (
+    AgentTurnAttrs,
     BlobAttached,
     BlobRef,
     Change,
@@ -65,7 +67,16 @@ def _fact(kind: str, seq: int) -> Oneof:
                 name="turn",
                 runtime_type=RuntimeType.OPERATION,
                 status=SpanStatus.RUNNING,
-                label=Label(kind="agent_turn", links=[SpanLink(rel="steer", to="intent-1")]),
+                label=Label(
+                    kind="agent_turn",
+                    links=[SpanLink(rel="steer", to="intent-1")],
+                    attrs=Any(
+                        type_url="type.googleapis.com/vibesys.store.v1.AgentTurnAttrs",
+                        value=AgentTurnAttrs(
+                            agent="agent-a", role="executor", stage="execute"
+                        ).to_binary(),
+                    ),
+                ),
             ),
         ),
     )
@@ -100,6 +111,7 @@ def _records(kinds: list[str]) -> list[Record]:
 
 
 @pytest.mark.regression
+@example(kinds=["link"], cut=0)
 @example(kinds=["applied", "refused", "epoch", *(["point"] * 600)], cut=600)
 @given(
     kinds=st.lists(
