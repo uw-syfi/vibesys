@@ -73,3 +73,12 @@ seven-day read window.
 
 `64c1a8b7` retains the actual INPUT-gate metric. Its published head has no `input_value`, which
 exposes the loss that removing client inference caused without upgrading old store data.
+
+`438bfd3d` was captured through that revision's writer with a canonical `project_root` in
+its epoch headers. Its `run.index` is the previous publisher's addressless symlink,
+relocated to `.` with its logs; the head
+also contains no project address. `project_root` in the manifest is the expected recovered
+routing fact, and `index_project_absent` records that this case has no address sidecar.
+The gateway pins `watch.response.pb` as well as the Skeleton response; the client composes
+that exact WatchRuns frame through its listing, dashboard, Usage project selection and
+control address. Reads leave the retained files unchanged and require no backfill.

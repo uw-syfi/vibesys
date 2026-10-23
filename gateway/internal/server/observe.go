@@ -40,9 +40,10 @@ type observedPrefix struct {
 }
 
 type recoveredHead struct {
-	epoch uint32
-	input *float64
-	err   error
+	epoch   uint32
+	input   *float64
+	project string
+	err     error
 }
 
 // read returns the head as stored, plus the canonical epoch and the input value of a previous
@@ -104,12 +105,16 @@ func (o *headObserver) recovered(f *os.File, info os.FileInfo, head *storev1.Run
 	o.scans++
 	var epoch uint32
 	upgrade := runlog.NewInputUpgrade(nil)
+	var project string
 	err := runlog.ReadPrefix(io.NewSectionReader(f, 0, info.Size()), head.CommittedSeq, func(payload []byte) error {
-		declared, err := runlog.DeclaredEpoch(payload)
+		declared, err := runlog.DeclaredHeader(payload)
 		if err != nil {
 			return err
 		}
-		epoch = max(epoch, declared)
+		epoch = max(epoch, declared.GetEpoch())
+		if root := declared.GetProjectRoot(); root != "" {
+			project = root
+		}
 		_, err = upgrade.Record(payload)
 		if err != nil {
 			return &runlog.Corruption{Offset: -1, Reason: err.Error()}
@@ -122,7 +127,7 @@ func (o *headObserver) recovered(f *os.File, info os.FileInfo, head *storev1.Run
 			return recoveredHead{}, err
 		}
 	}
-	result := recoveredHead{epoch: epoch, err: err}
+	result := recoveredHead{epoch: epoch, project: project, err: err}
 	if measured := upgrade.Measurement().GetMeasured(); measured != nil {
 		result.input = proto.Float64(measured.Value)
 	}

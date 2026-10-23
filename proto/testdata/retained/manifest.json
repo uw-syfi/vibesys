@@ -38,5 +38,18 @@
     "epoch_starts": [
       1
     ]
+  },
+  "438bfd3d": {
+    "writer_commit": "438bfd3de4b20304206ee9fa0a0e3cdf224bd588",
+    "producer": "retained facts records with canonical project_root replayed through the preceding writer and Project publisher; index symlink relocated with its logs",
+    "input": 100,
+    "candidate": "gate-0",
+    "vs_baseline": 1.01,
+    "chart_reference": 100,
+    "measurement_seq": 14,
+    "head_input_absent": false,
+    "input_span": "input-gate",
+    "project_root": "/projects/unvisited project",
+    "index_project_absent": true
   }
 }

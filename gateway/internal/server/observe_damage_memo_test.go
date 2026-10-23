@@ -39,6 +39,8 @@ func TestDamagedPrefixesScanOnceAndIdentityChangesRetry(t *testing.T) {
 			if err := os.WriteFile(log, damaged, 0600); err != nil {
 				t.Fatal(err)
 			}
+			head.Objective.InputStated = false
+			head.Objective.InputValue = nil
 			publish(t, dir, head)
 			var observer headObserver
 			for range 10 {
@@ -55,6 +57,8 @@ func TestDamagedPrefixesScanOnceAndIdentityChangesRetry(t *testing.T) {
 			if err := proto.Unmarshal(stored, head); err != nil {
 				t.Fatal(err)
 			}
+			head.Objective.InputStated = false
+			head.Objective.InputValue = nil
 			publish(t, dir, head)
 			if _, err := observer.read(dir); err != nil {
 				t.Fatal(err)

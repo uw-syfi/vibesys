@@ -93,7 +93,7 @@ rescan:
 			}
 			response := &apiv1.WatchRunsResponse{RunId: entry.Name(), Head: head, Liveness: live}
 			probes[entry.Name()] = probes[entry.Name()].observe(dir, head.GetEpoch(), live, h.config.Clock.Now())
-			if project, err := readRunProject(h.config.Root, entry.Name(), dir); err == nil {
+			if project, err := h.heads.project(h.config.Root, entry.Name(), dir, head); err == nil {
 				response.ProjectRoot = proto.String(project)
 			}
 			current[entry.Name()] = response

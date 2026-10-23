@@ -29,6 +29,9 @@ def test_damaged_prefix_scan_bound_and_repair(
     """Generate torn frames, bad checksums and fences past EOF across retained writers."""
     original = (CORPUS / case / "run.log").read_bytes()
     head = RunHead.from_binary((CORPUS / case / "run.head").read_bytes())
+    assert head.objective is not None
+    head.objective.clear_field("input_value")
+    head.objective.input_stated = False
     damaged = original
     if kind == "cut":
         damaged = original[: -(1 + at % len(original))]

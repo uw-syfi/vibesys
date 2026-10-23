@@ -25,6 +25,7 @@ func TestSavedPreviousWritersRetainInputFacts(t *testing.T) {
 	var cases map[string]struct {
 		Input          float64 `json:"input"`
 		MeasurementSeq uint64  `json:"measurement_seq"`
+		ProjectRoot    string  `json:"project_root"`
 	}
 	if err := json.Unmarshal(manifest, &cases); err != nil {
 		t.Fatal(err)
@@ -99,6 +100,18 @@ func TestSavedPreviousWritersRetainInputFacts(t *testing.T) {
 					t.Fatal(err)
 				}
 				observed := watchEntry(t, watch)
+				if want.ProjectRoot != "" {
+					if observed.GetProjectRoot() != want.ProjectRoot {
+						t.Fatalf("retained index lost project: %v", observed)
+					}
+					target, err := os.Readlink(filepath.Join(directory, "run.index"))
+					if err != nil || target != "." {
+						t.Fatalf("retained index: %q, %v", target, err)
+					}
+					if !checkpoint {
+						pinRetainedWatch(t, directory, observed)
+					}
+				}
 				if observed.GetHead().GetObjective().GetInputValue() != want.Input {
 					t.Fatalf("retained head lost input: %v", observed)
 				}
@@ -173,4 +186,26 @@ func retainedRecordFact(record *storev1.Record) *storev1.InputMeasurement {
 		return nil
 	}
 	return record.ProtoReflect().Get(field).Message().Interface().(*storev1.InputMeasurement)
+}
+
+// The client composes this exact WatchRuns frame through dashboard, Usage and control routing.
+func pinRetainedWatch(t *testing.T, directory string, response *apiv1.WatchRunsResponse) {
+	t.Helper()
+	data, err := proto.MarshalOptions{Deterministic: true}.Marshal(response)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(directory, "watch.response.pb")
+	if os.Getenv("VIBESYS_UPDATE_GOLDEN") != "" {
+		if err := os.WriteFile(path, data, 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(want) != string(data) {
+		t.Fatal("retained WatchRuns changed; rerun with VIBESYS_UPDATE_GOLDEN=1")
+	}
 }

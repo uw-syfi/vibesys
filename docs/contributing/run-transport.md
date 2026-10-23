@@ -279,6 +279,11 @@ measurement's sequence, including during historical seeking. Explicit measured o
 facts take precedence. Heads get their missing input value from this same upgrade; retained
 files are unchanged and readers require no writer restart.
 
+Run discovery recovers an older index entry's missing project address from the committed epoch
+headers through the same bounded observation memo. No address backfill or writer restart is
+required. If no project can be recovered, the listing and dashboard retain the run with an
+unknown project and expose no project control address.
+
 **Development mode.** The laptop tree builds the UI and the gateway; the host checkout runs the
 runs. They may diverge as long as store changes stay additive. The operator updates the host
 checkout, including any intended uncommitted edits, before relaunching. The app does not

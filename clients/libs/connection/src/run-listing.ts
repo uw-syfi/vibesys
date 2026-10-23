@@ -1,8 +1,7 @@
 /**
  * A host's runs as the views list them, from what the host's WatchRuns stream says: the pure
  * projection of each run's head and liveness into the registry listing the sidebar, notices and
- * run pages read. Only observations with a validated canonical project address enter the listing;
- * older gateways that omit the address leave that run unverified.
+ * run pages read. Runs without a validated project address remain listed in the typed unknownProject state.
  */
 import {timestampMs} from '@bufbuild/protobuf/wkt';
 import type {RunPhase} from '@vibesys/contracts/host-helper';
@@ -12,7 +11,6 @@ import {
   type HostListing,
   type HostRun,
   instancePhaseText,
-  type RecordedProjectRoot,
 } from '@vibesys/hosts';
 import {
   DrainGoal,
@@ -115,11 +113,10 @@ function endedPhase(lifecycle: Lifecycle | undefined): {
   return {phase: 'failed', reason: INTERRUPTED_REASON};
 }
 
-function listed(runId: string, run: WatchedRun, projectRoot: RecordedProjectRoot): HostRun {
+function listed(runId: string, run: WatchedRun): Omit<HostRun, 'projectRoot'> {
   const startedAt = run.head?.process?.startedAt;
   const common = {
     id: runId,
-    projectRoot,
     runId,
     end: null,
     startedAt: startedAt === undefined ? 0 : timestampMs(startedAt) / 1000,
@@ -137,13 +134,26 @@ export function watchedListing(host: HostKey, runs: ReadonlyMap<string, WatchedR
   const live: HostRun[] = [];
   const ended: HostRun[] = [];
   const unverified: string[] = [];
+  const unknownProject: Omit<HostRun, 'projectRoot'>[] = [];
   for (const [runId, run] of [...runs].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {
-    if (run.liveness === RunLiveness.UNSPECIFIED || run.projectRoot === undefined)
-      unverified.push(runId);
+    if (run.projectRoot === undefined) {
+      unknownProject.push(listed(runId, run));
+    } else if (run.liveness === RunLiveness.UNSPECIFIED) unverified.push(runId);
     else
-      (run.liveness === RunLiveness.ALIVE ? live : ended).push(listed(runId, run, run.projectRoot));
+      (run.liveness === RunLiveness.ALIVE ? live : ended).push({
+        ...listed(runId, run),
+        projectRoot: run.projectRoot,
+      });
   }
-  return {kind: 'listed', host, live, ended, unreadable: [], unverified};
+  return {
+    kind: 'listed',
+    host,
+    live,
+    ended,
+    unreadable: [],
+    unverified,
+    ...(unknownProject.length === 0 ? {} : {unknownProject}),
+  };
 }
 
 /** What the views say of a host while its run stream is not delivering. */

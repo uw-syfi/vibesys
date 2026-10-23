@@ -31,7 +31,7 @@ CASES = json.loads((CORPUS / "manifest.json").read_text())
 def test_saved_previous_writers_reopen_with_the_same_facts(tmp_path: Path, version: str) -> None:
     source = CORPUS / version
     directory = tmp_path / version
-    copytree(source, directory)
+    copytree(source, directory, symlinks=True)
     original = (directory / "run.head").read_bytes()
     raw = RunHead.from_binary(original)
     assert raw.objective is not None

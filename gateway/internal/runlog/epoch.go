@@ -67,18 +67,24 @@ func ReadPrefix(source io.ReaderAt, committed *uint64, visit func(payload []byte
 // DeclaredEpoch preserves protobuf oneof selection and embedded-message merging while eliding
 // opaque bodies. Only EpochStarted metadata is interpreted by this reader.
 func DeclaredEpoch(payload []byte) (uint32, error) {
+	header, err := DeclaredHeader(payload)
+	return header.GetEpoch(), err
+}
+
+// DeclaredHeader reads only the selected epoch metadata, leaving product bodies opaque.
+func DeclaredHeader(payload []byte) (*storev1.EpochStarted, error) {
 	fields := (&storev1.Record{}).ProtoReflect().Descriptor().Oneofs().ByName("body").Fields()
 	epochField := (&storev1.Record{}).ProtoReflect().Descriptor().Fields().ByName("epoch_started").Number()
 	var filtered []byte
 	for len(payload) > 0 {
 		number, kind, width := protowire.ConsumeTag(payload)
 		if width < 0 {
-			return 0, &Corruption{Offset: -1, Reason: "invalid Record field tag"}
+			return nil, &Corruption{Offset: -1, Reason: "invalid Record field tag"}
 		}
 		payload = payload[width:]
 		n := protowire.ConsumeFieldValue(number, kind, payload)
 		if n < 0 {
-			return 0, &Corruption{Offset: -1, Reason: "invalid Record field"}
+			return nil, &Corruption{Offset: -1, Reason: "invalid Record field"}
 		}
 		if kind == protowire.BytesType && fields.ByNumber(number) != nil {
 			value, _ := protowire.ConsumeBytes(payload)
@@ -92,7 +98,7 @@ func DeclaredEpoch(payload []byte) (uint32, error) {
 	}
 	record := &storev1.Record{}
 	if err := proto.Unmarshal(filtered, record); err != nil {
-		return 0, &Corruption{Offset: -1, Reason: "invalid EpochStarted metadata"}
+		return nil, &Corruption{Offset: -1, Reason: "invalid EpochStarted metadata"}
 	}
-	return record.GetEpochStarted().GetEpoch(), nil
+	return record.GetEpochStarted(), nil
 }

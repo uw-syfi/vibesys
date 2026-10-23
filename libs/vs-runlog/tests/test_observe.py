@@ -21,6 +21,8 @@ FENCES = st.integers(1, 18)
 def stored_head(case: str) -> RunHead:
     head = RunHead.from_binary((CORPUS / case / "run.head").read_bytes())
     assert head.objective is not None
+    head.objective.clear_field("input_value")
+    head.objective.input_stated = False
     return head
 
 
@@ -69,8 +71,13 @@ def test_a_damaged_run_raises_its_own_typed_error_and_leaves_others_readable(
     """Truncation, garbage and a fence past the log: the error is typed and names the run."""
     with TemporaryDirectory() as temporary:
         root = Path(temporary)
-        copytree(CORPUS / case, root / "healthy", ignore=lambda *_: {"skeleton.response.pb"})
-        copytree(root / "healthy", root / "damaged")
+        copytree(
+            CORPUS / case,
+            root / "healthy",
+            symlinks=True,
+            ignore=lambda *_: {"skeleton.response.pb"},
+        )
+        copytree(root / "healthy", root / "damaged", symlinks=True)
         before = read_run_head(root / "healthy" / "run.log")
         damage(root / "damaged", kind, at, noise)
         outcome = read_or_damage(root / "damaged" / "run.log")
@@ -158,11 +165,13 @@ def test_a_current_writer_head_never_opens_the_log(tmp_path: Path, case: str) ->
 def test_a_previous_writer_head_scans_once_however_often_it_is_read(
     tmp_path: Path, case: str
 ) -> None:
-    copytree(CORPUS / case, tmp_path / "run", ignore=lambda *_: {"skeleton.response.pb"})
+    copytree(
+        CORPUS / case, tmp_path / "run", symlinks=True, ignore=lambda *_: {"skeleton.response.pb"}
+    )
     observer = HeadObserver()
     reads = [observer.read(tmp_path / "run" / "run.log") for _ in range(20)]
     assert all(read == reads[0] for read in reads)
-    assert observer.scans == 1
+    assert observer.scans == int(CASES[case]["head_input_absent"])
 
 
 @pytest.mark.parametrize("case", CASES)
@@ -171,7 +180,10 @@ def test_a_writer_resuming_a_previous_writers_run_publishes_the_facts_it_states(
 ) -> None:
     """The recovered log is upgraded as it folds, so the head carries the input without rescans."""
     copytree(
-        CORPUS / case, tmp_path / "run", ignore=lambda *_: {"skeleton.response.pb", "keyframes"}
+        CORPUS / case,
+        tmp_path / "run",
+        symlinks=True,
+        ignore=lambda *_: {"skeleton.response.pb", "keyframes"},
     )
     path = tmp_path / "run" / "run.log"
     stored = stored_head(case).objective

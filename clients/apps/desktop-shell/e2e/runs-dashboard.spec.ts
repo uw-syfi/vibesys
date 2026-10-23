@@ -327,3 +327,41 @@ test('on a machine whose VibeSys is too old for digests, a run still says its ow
   await expect(unknown).toContainText('unknown');
   await expect(unknown).toContainText('needs an update');
 });
+
+test('an addressless run remains visible when its project is unknown', async ({page}) => {
+  const world = dashboardWorld([]);
+  await open(page, {
+    ...world,
+    listings: [
+      {
+        kind: 'listed',
+        host: 'ssh:host-a',
+        live: [],
+        ended: [],
+        unreadable: [],
+        unverified: [],
+        unknownProject: [
+          {
+            id: 'run-addressless',
+            runId: 'run-addressless',
+            status: 'running',
+            phase: 'running',
+            paused: null,
+            end: null,
+            startedAt: 0,
+            reason: null,
+          },
+        ],
+      },
+    ],
+    recent: [],
+    projectRuns: {},
+  });
+  const tile = page.locator('.vs-overview-tile').filter({hasText: 'run-addressless'});
+  await expect(tile).toBeVisible();
+  await expect(tile).toContainText('Project unknown');
+  const shots = process.env['SCREENS_DIR'];
+  if (shots !== undefined)
+    await page.screenshot({path: `${shots}/runs__unknown-project__1440.png`});
+  await expect(page.getByRole('heading', {name: 'Runs', level: 1})).toBeVisible();
+});

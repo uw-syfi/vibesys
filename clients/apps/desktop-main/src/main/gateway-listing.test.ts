@@ -1,4 +1,6 @@
 import {expect, test} from 'bun:test';
+import {readFileSync} from 'node:fs';
+import {fileURLToPath} from 'node:url';
 import {create, toBinary} from '@bufbuild/protobuf';
 import {hostListingFromRuns, runWatch} from '@vibesys/connection';
 import {FakeRunGateway} from '@vibesys/connection/testing';
@@ -6,6 +8,7 @@ import {
   dashboardRows,
   liveRows,
   runProjectRoot,
+  runsKnown,
   SIDEBAR_EMPTY,
   sidebarStep,
 } from '@vibesys/feature-app-shell/state';
@@ -86,7 +89,7 @@ test('property: an unvisited run keeps its project through the wire and all list
   }
 });
 
-test('missing or empty wire projects never enter project-dependent listings', () => {
+test('missing or invalid projects stay listed as typed unknown projects', () => {
   for (const projectRoot of [undefined, '', 'relative']) {
     const gateway = new FakeRunGateway();
     const watch = runWatch(gateway, new FakeClock().schedule);
@@ -95,7 +98,23 @@ test('missing or empty wire projects never enter project-dependent listings', ()
       if (observed.phase.kind !== 'live') return;
       delivered = true;
       const listing = hostListingFromRuns(hostKey(HOST), observed);
-      expect(listing).toMatchObject({live: [], ended: [], unverified: ['run-a']});
+      const {state} = sidebarStep(SIDEBAR_EMPTY, {
+        type: 'overview',
+        listings: [listing],
+        recent: [],
+        skippedRecent: [],
+      });
+      const rows = dashboardRows(state, {now: 1700000000000});
+      expect(rows).toHaveLength(1);
+      expect(runsKnown(state, [hostKey(HOST)])).toBe('some');
+      expect(rows[0]).toMatchObject({project: null, row: {detail: 'Project unknown'}});
+      expect(runProjectRoot(state, {host: hostKey(HOST), runId: 'run-a'})).toBeUndefined();
+      expect(listing).toMatchObject({
+        live: [],
+        ended: [],
+        unverified: [],
+        unknownProject: [{runId: 'run-a', phase: 'starting'}],
+      });
     });
     const stream = gateway.open(HOST)[0];
     if (stream === undefined) throw new Error('missing gateway stream');
@@ -113,6 +132,44 @@ test('missing or empty wire projects never enter project-dependent listings', ()
       toBinary(WatchRunsResponseSchema, create(WatchRunsResponseSchema, {initialComplete: true})),
     );
     expect(delivered).toBe(true);
+    watch.close();
+  }
+});
+
+// The response is pinned by the Go test over this previous writer's addressless index/head.
+test('retained addressless publisher reaches dashboard, Usage projects and control address', () => {
+  const corpus = new URL('../../../../../proto/testdata/retained/', import.meta.url);
+  const manifest = JSON.parse(readFileSync(new URL('manifest.json', corpus), 'utf8')) as Record<
+    string,
+    {project_root?: string}
+  >;
+  for (const [name, facts] of Object.entries(manifest)) {
+    const project = facts.project_root;
+    if (project === undefined) continue;
+    const gateway = new FakeRunGateway();
+    const watch = runWatch(gateway, new FakeClock().schedule);
+    let state = SIDEBAR_EMPTY;
+    watch.observe(HOST, observed => {
+      const listing = hostListingFromRuns(hostKey(HOST), observed);
+      state = sidebarStep(state, {
+        type: 'overview',
+        listings: [listing],
+        recent: [],
+        skippedRecent: [],
+      }).state;
+      if (listing.kind === 'listed')
+        expect(knownProjects(listing, [], hostKey(HOST))).toEqual([project]);
+    });
+    const stream = gateway.open(HOST)[0];
+    if (stream === undefined) throw new Error('missing gateway stream');
+    stream.receive(readFileSync(fileURLToPath(new URL(`${name}/watch.response.pb`, corpus))));
+    stream.receive(
+      toBinary(WatchRunsResponseSchema, create(WatchRunsResponseSchema, {initialComplete: true})),
+    );
+    expect(dashboardRows(state, {now: 1700000000000})[0]?.project).toBe(project);
+    expect(runProjectRoot(state, {host: hostKey(HOST), runId: 'run-1'})).toBe(
+      recordedProjectRoot(project),
+    );
     watch.close();
   }
 });

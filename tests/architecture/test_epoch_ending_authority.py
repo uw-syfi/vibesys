@@ -4,16 +4,19 @@ import ast
 from pathlib import Path
 
 import pytest
+from tests.support.parsed_source import STATIC_SCAN_GROUP, parse_source, walk_nodes
+
+pytestmark = pytest.mark.xdist_group(STATIC_SCAN_GROUP)
 
 _ROOT = Path(__file__).resolve().parents[2]
 _OWNER = Path("libs/vs-runlog/src/vs_runlog/_epoch.py")
 
 
 def _duplicated_endings(source: str) -> list[int]:
-    tree = ast.parse(source)
+    tree = parse_source(source)
     return [
         node.lineno
-        for node in ast.walk(tree)
+        for node in walk_nodes(tree)
         if isinstance(node, (ast.Set, ast.List, ast.Tuple))
         and {"parked", "ended"}
         <= {item.value for item in node.elts if isinstance(item, ast.Constant)}

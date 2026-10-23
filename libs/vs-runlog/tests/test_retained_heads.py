@@ -55,6 +55,9 @@ def test_every_retained_input_encoding_respects_the_published_prefix(
         point.span = old.span
     record.body = Oneof("metric", point)
     raw = RunHead.from_binary((source / "run.head").read_bytes())
+    assert raw.objective is not None
+    raw.objective.clear_field("input_value")
+    raw.objective.input_stated = False
     raw.committed_seq = fence
     with TemporaryDirectory() as temporary:
         directory = Path(temporary)

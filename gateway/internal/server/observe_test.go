@@ -82,6 +82,7 @@ func TestOnlyPreviousWriterHeadsScanTheirLogOncePerPrefix(t *testing.T) {
 				}
 				head := proto.Clone(base).(*storev1.RunHead)
 				head.CommittedSeq = proto.Uint64(v.committed)
+				head.Objective.InputValue = nil
 				head.Objective.InputStated = v.stated
 				if !v.hasEpoc {
 					head.Epoch = 0

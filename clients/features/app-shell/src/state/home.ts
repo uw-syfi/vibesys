@@ -5,6 +5,7 @@
  * showing New run for a moment and then leaving it.
  */
 import type {HostKey} from '@vibesys/hosts';
+import {sameRun} from '@vibesys/runs';
 import {dashboardRefs, liveRows, type SidebarState} from './sidebar.js';
 
 export type RunsKnown = 'unknown' | 'none' | 'some';
@@ -22,6 +23,17 @@ export function runsKnown(state: SidebarState, machines: readonly HostKey[] | nu
 }
 
 function listedRunsKnown(state: SidebarState, machines: readonly HostKey[] | null): RunsKnown {
+  if (
+    state.listings.some(
+      listing =>
+        listing.kind === 'listed' &&
+        listing.unknownProject?.some(
+          run =>
+            !state.archived.some(each => sameRun(each, {host: listing.host, runId: run.runId})),
+        ),
+    )
+  )
+    return 'some';
   if (dashboardRefs(state).length > 0 || liveRows(state).length > 0) return 'some';
   if (!state.overviewHeard || machines === null) return 'unknown';
   if (machines.some(host => !state.listings.some(listing => listing.host === host))) {
