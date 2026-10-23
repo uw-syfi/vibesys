@@ -148,6 +148,7 @@ func objectiveHead(t *testing.T, stated bool, committed uint64) *storev1.RunHead
 	}
 	head.CommittedSeq = proto.Uint64(committed)
 	head.Objective.InputStated = stated
+	head.Objective.InputValue = nil
 	return head
 }
 
