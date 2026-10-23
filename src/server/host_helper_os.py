@@ -72,7 +72,6 @@ from server.host_helper_requests import (
 )
 from server.host_preflight import PreflightReport
 from server.host_run_events import EVENT_TYPES_BY_KINDS, RunEventKinds
-from server.host_run_reads import ProjectRun
 from server.run_digest import digest_journal
 from server.span_index import (
     Entry,
@@ -96,6 +95,7 @@ from vs_sim.api import ProcessSpec
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
+    from server.host_run_reads import ProjectRun
     from server.run_summary import Summarized
     from server.run_summary_cache import SummaryReader
     from vs_logs.read import LogReader as StoreReader
@@ -300,8 +300,9 @@ class FileProjects:
             raise ProjectLookupError(
                 HelperErrorCode.TASK_INVALID, str(opened.root), str(exc)
             ) from exc
+        project_run = import_module("server.host_run_reads").ProjectRun
         recorded = [
-            ProjectRun(
+            project_run(
                 run_id=manifest.run_id,
                 task=manifest.task_name,
                 display_name=manifest.display_name,
@@ -311,7 +312,7 @@ class FileProjects:
         ]
         known = {run.run_id for run in recorded}
         journaled = [
-            ProjectRun(
+            project_run(
                 run_id=run_id,
                 task=None,
                 display_name=run_id,

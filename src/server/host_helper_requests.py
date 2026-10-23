@@ -145,11 +145,6 @@ from server.host_run_events import (
     RunsReadTailRequest,
 )
 from server.host_run_reader import RunReaderReply, RunReaderRequest
-from server.host_run_reads import (
-    ProjectRun,
-    project_runs,
-    usage_window_reply,
-)
 from server.host_run_summary import UsageWindowReply, UsageWindowRequest
 from server.registry import driving
 from server.relay import (
@@ -181,6 +176,7 @@ if TYPE_CHECKING:
     from server.host_operation_reads import HostReadSource
     from server.host_operation_types_generated import RegistryReadRequest, UnmigratedHelperRequest
     from server.host_preflight import PreflightReport, RoleOption, RunOptions
+    from server.host_run_reads import ProjectRun
     from server.registry import InstanceInspector, LiveRegistry, StopEffects
     from server.run_summary import Summarized
     from vs_project.api import OperatorDialer
@@ -915,7 +911,7 @@ def _answer(
 def _project_reply(request: RunsListRequest, host: HelperHost) -> RunsListReply:
     """Answer a project's saved-run listing."""
     project = Path(_host_path(request.project, host.directories))
-    runs = project_runs(
+    runs = import_module("server.host_run_reads").project_runs(
         host, project, request.digest_runs or (), with_dashboard=bool(request.with_dashboard)
     )
     return RunsListReply(request_id=request.request_id, runs=runs)
@@ -1062,7 +1058,7 @@ def _run_history_reply(
     if isinstance(request, RunsSummaryRequest):
         return _run_summary_reply(request, host)
     if isinstance(request, UsageWindowRequest):
-        return usage_window_reply(
+        return import_module("server.host_run_reads").usage_window_reply(
             request, host, Path(_host_path(request.project, host.directories))
         )
     project = Path(_host_path(request.project, host.directories))
