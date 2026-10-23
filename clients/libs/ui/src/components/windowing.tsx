@@ -181,7 +181,7 @@ export interface Windowed {
  * Only a list that follows its end holds the end; any other is just scrolled to it. While held, the
  * scroll events are the list's own placing and the browser's anchoring.
  */
-interface WindowedOptions {
+export function useWindowed(options: {
   readonly count: number;
   readonly keyOf: (index: number) => string;
   readonly estimate: number;
@@ -194,9 +194,7 @@ interface WindowedOptions {
    * its end, which can cut the row above by any amount.
    */
   readonly startAt?: number;
-}
-
-export function useWindowed(options: WindowedOptions): Windowed {
+}): Windowed {
   const {count, keyOf, estimate, follow, toEnd, startAt} = options;
   const held = useRef(startAt !== undefined && startAt >= 0 && startAt < count);
   const following = useRef(follow && !held.current);
