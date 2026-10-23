@@ -43,9 +43,7 @@ async function reachScreen(page: Page, fixtureName: string, start: string): Prom
   await expect(
     page.getByRole('listbox', {name: 'Ideas'}).getByRole('option').first(),
   ).toBeVisible();
-  await settled(page);
   await STARTS[start]?.(page);
-  await settled(page);
 }
 
 /** Controls that change nothing on this run by design, each with why. */
@@ -90,6 +88,7 @@ for (const start of CELLS) {
   }) => {
     const first = await context.newPage();
     await reachScreen(first, fixtureName, start);
+    await settled(first);
     const exempt = INERT_BY_DESIGN.filter(each => each.start.test(start));
     const controls = (await controlsOf(first.getByRole('main'))).filter(
       control => !exempt.some(each => each.name.test(control.name)),
