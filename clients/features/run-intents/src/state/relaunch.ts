@@ -8,16 +8,16 @@ import {
   type RelaunchRequest,
   type RelaunchResponse,
   RunLiveness,
+  type RunWriterFacts,
   relaunchTarget,
   sameRelaunchObservation,
 } from '@vibesys/runs/intents';
-import {assign, fromCallback, setup} from 'xstate';
+import {assign, setup} from 'xstate';
 
 export type RelaunchEvent =
-  | {readonly type: 'relaunch' | 'heartbeat' | 'stale'}
+  | {readonly type: 'relaunch'}
   | {readonly type: 'epoch'; readonly epoch: bigint}
-  | {readonly type: 'observe'; readonly observation: RelaunchObservation}
-  | {readonly type: 'liveness'; readonly value: RelaunchLiveness};
+  | {readonly type: 'writer'; readonly facts: RunWriterFacts};
 
 /** An uncertain launch is never retried automatically; observation stays independent of I/O. */
 export const relaunchMachine = setup({
@@ -28,7 +28,6 @@ export const relaunchMachine = setup({
       readonly liveness: RelaunchLiveness;
       readonly result: RelaunchResponse | null;
       readonly historyEpoch: bigint;
-      readonly fresh: boolean;
       readonly attempted: boolean;
     },
     input: {} as {readonly request: RelaunchRequest; readonly observation: RelaunchObservation},
@@ -36,14 +35,6 @@ export const relaunchMachine = setup({
   },
   actors: {
     launch: unprovided<RelaunchResponse, RelaunchRequest>('launch'),
-    liveness: fromCallback<RelaunchEvent>(() => {
-      throw new Error('liveness was not provided');
-    }),
-  },
-  actions: {
-    livenessUnknown: assign({
-      liveness: ({context}) => ({epoch: context.liveness.epoch, value: RunLiveness.UNSPECIFIED}),
-    }),
   },
   guards: {
     eligible: ({context}) => relaunchTarget(context.observation, context.liveness) !== null,
@@ -68,38 +59,23 @@ export const relaunchMachine = setup({
     liveness: {epoch: 0n, value: RunLiveness.UNSPECIFIED},
     result: null,
     historyEpoch: 0n,
-    fresh: false,
     attempted: false,
   }),
-  invoke: {
-    id: 'liveness',
-    src: 'liveness',
-    onError: {actions: 'livenessUnknown'},
-  },
   on: {
-    heartbeat: {actions: assign({fresh: true})},
-    stale: {actions: ['livenessUnknown', assign({fresh: false})]},
     epoch: {
       actions: assign({
         historyEpoch: ({context, event}) =>
           event.epoch > context.historyEpoch ? event.epoch : context.historyEpoch,
       }),
     },
-    observe: {
-      guard: ({context, event}) =>
-        event.observation.epoch >= context.observation.epoch &&
-        !sameRelaunchObservation(context.observation, event.observation),
-      actions: assign(({event}) => ({observation: copyRelaunchObservation(event.observation)})),
-    },
-    liveness: {
-      guard: ({context, event}) =>
-        event.value.epoch >= context.liveness.epoch ||
-        (event.value.epoch === 0n && event.value.value === RunLiveness.UNSPECIFIED),
+    writer: {
       actions: assign(({context, event}) => ({
-        liveness:
-          event.value.epoch === 0n && event.value.value === RunLiveness.UNSPECIFIED
-            ? {epoch: context.liveness.epoch, value: RunLiveness.UNSPECIFIED}
-            : event.value,
+        liveness: event.facts.liveness,
+        ...(event.facts.observation &&
+        event.facts.observation.epoch >= context.observation.epoch &&
+        !sameRelaunchObservation(context.observation, event.facts.observation)
+          ? {observation: copyRelaunchObservation(event.facts.observation)}
+          : {}),
       })),
     },
   },
@@ -131,42 +107,6 @@ export const relaunchMachine = setup({
     },
     settled: {always: {guard: 'nextEpoch', target: 'ready'}},
     uncertain: {always: {guard: 'confirmed', target: 'settled'}},
-  },
-});
-
-/** A quiet or broken WatchRuns is re-read; silence cannot renew permission to act. */
-export const livenessWatchMachine = setup({
-  types: {
-    events: {} as {type: 'ended' | 'heartbeat'} | {type: 'liveness'; value: RelaunchLiveness},
-  },
-  actions: {observed: () => {}, unknown: () => {}},
-  actors: {
-    read: fromCallback(() => {
-      throw new Error('liveness read was not provided');
-    }),
-  },
-  delays: {lease: 30_000, retry: 1000},
-}).createMachine({
-  id: 'livenessWatch',
-  initial: 'watching',
-  states: {
-    watching: {
-      invoke: {id: 'read', src: 'read', onError: 'recovering'},
-      initial: 'fresh',
-      states: {
-        fresh: {
-          after: {lease: '#livenessWatch.recovering'},
-          on: {
-            liveness: {target: 'fresh', reenter: true, actions: 'observed'},
-            heartbeat: {target: 'fresh', reenter: true, actions: 'observed'},
-          },
-        },
-      },
-      on: {
-        ended: 'recovering',
-      },
-    },
-    recovering: {entry: 'unknown', after: {retry: 'watching'}},
   },
 });
 

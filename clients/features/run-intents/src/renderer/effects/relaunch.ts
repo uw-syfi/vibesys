@@ -5,14 +5,11 @@ import {
   HOST_CALL_METHOD,
   hostRelaunchRequest,
   hostRelaunchResponse,
-  livenessRequest,
-  livenessResponse,
   type RelaunchObservation,
   type RelaunchRequest,
-  RUN_LIVENESS_METHOD,
 } from '@vibesys/runs/intents';
-import {createActor, fromCallback, fromPromise} from 'xstate';
-import {livenessWatchMachine, type RelaunchEvent, relaunchMachine} from '../../state/index.js';
+import {createActor, fromPromise} from 'xstate';
+import {relaunchMachine} from '../../state/index.js';
 
 export function relaunchActor(input: {
   readonly bridge: GatewayBridge;
@@ -24,41 +21,6 @@ export function relaunchActor(input: {
   return createActor(
     relaunchMachine.provide({
       actors: {
-        liveness: fromCallback<RelaunchEvent>(({sendBack}) => {
-          const unknown = () => sendBack({type: 'stale'});
-          const watcher = createActor(
-            livenessWatchMachine.provide({
-              actions: {
-                unknown,
-                observed: ({event}) => {
-                  if (event.type === 'liveness') sendBack(event);
-                  sendBack({type: 'heartbeat'});
-                },
-              },
-              actors: {
-                read: fromCallback(({sendBack: ended}) => {
-                  const call = input.bridge.stream(
-                    input.host,
-                    RUN_LIVENESS_METHOD,
-                    livenessRequest(),
-                    bytes => {
-                      try {
-                        const value = livenessResponse(bytes, input.request.runId);
-                        ended(value === null ? {type: 'heartbeat'} : {type: 'liveness', value});
-                      } catch {
-                        ended({type: 'ended'});
-                      }
-                    },
-                    () => ended({type: 'ended'}),
-                  );
-                  return () => call.cancel();
-                }),
-              },
-            }),
-            {clock: clockFrom(input.schedule)},
-          ).start();
-          return () => watcher.stop();
-        }),
         launch: fromPromise(async ({input: request, signal}) => {
           const call = input.bridge.unary(
             input.host,

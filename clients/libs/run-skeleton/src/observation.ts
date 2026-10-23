@@ -1,9 +1,10 @@
 /** The run reader owns independent history and transient host observations. */
 import {unprovided} from '@vibesys/machine';
+import {RunLiveness} from '@vibesys/proto';
 import {assign, fromCallback, setup} from 'xstate';
 import type {SkeletonLoadFailure} from './loader-machine.js';
 import {retryDelay} from './loader-machine.js';
-import type {RunLivenessHint, SkeletonLoad} from './loading.js';
+import {epochHasEnded, type RunLivenessHint, type SkeletonLoad} from './loading.js';
 
 export interface ObservationInput {
   readonly runId: string;
@@ -22,7 +23,46 @@ export type ObservationEvent =
 export interface ObservationOperation extends ObservationInput {
   readonly receive: (event: ObservationEvent) => void;
 }
+/** The epochs this observation has seen closed (no writer) and alive (a writer holding the lock). */
+export interface WriterEpochs {
+  readonly closed: number;
+  readonly alive: number;
+}
+const NO_EPOCHS: WriterEpochs = {closed: 0, alive: 0};
+
+/**
+ * A lock probe is a fact of the writer that held the lock. A free lock at a successor epoch that
+ * this observation has not seen alive, after a closed predecessor, is the gap before its writer
+ * starts: unknown, never interrupted. A fresh observation (the page re-reads when facts stay
+ * unresolved) has no predecessor and takes the probe at its word.
+ */
+export function fenceProbe(
+  seen: WriterEpochs,
+  hint: RunLivenessHint | undefined,
+): {readonly hint: RunLivenessHint | undefined; readonly seen: WriterEpochs} {
+  if (!hint) return {hint, seen};
+  const pending =
+    hint.value === RunLiveness.INTERRUPTED &&
+    seen.closed > 0 &&
+    seen.closed < hint.epoch &&
+    seen.alive < hint.epoch;
+  const value = pending ? RunLiveness.UNSPECIFIED : hint.value;
+  const closed =
+    value === RunLiveness.ENDED ||
+    value === RunLiveness.PARKED ||
+    value === RunLiveness.INTERRUPTED ||
+    epochHasEnded(hint.head?.lifecycle);
+  return {
+    hint: pending ? {...hint, value} : hint,
+    seen: {
+      closed: closed ? Math.max(seen.closed, hint.epoch) : seen.closed,
+      alive: value === RunLiveness.ALIVE ? Math.max(seen.alive, hint.epoch) : seen.alive,
+    },
+  };
+}
+
 interface Context extends ObservationInput {
+  seen: WriterEpochs;
   load: SkeletonLoad | undefined;
   hint: RunLivenessHint | undefined;
   failure: SkeletonLoadFailure | undefined;
@@ -47,6 +87,7 @@ export const runObservationMachine = setup({
   id: 'runObservation',
   context: ({input}) => ({
     ...input,
+    seen: NO_EPOCHS,
     load: undefined,
     hint: undefined,
     failure: undefined,
@@ -70,7 +111,12 @@ export const runObservationMachine = setup({
         terminal: ({event}) => event.terminal,
       }),
     },
-    hint: {actions: assign({hint: ({event}) => event.hint})},
+    hint: {
+      actions: assign(({context, event}) => {
+        const fenced = fenceProbe(context.seen, event.hint);
+        return {hint: fenced.hint, seen: fenced.seen};
+      }),
+    },
   },
   initial: 'watching',
   states: {

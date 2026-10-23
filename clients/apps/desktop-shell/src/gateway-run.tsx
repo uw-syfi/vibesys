@@ -37,7 +37,7 @@ export function GatewayRun(props: GatewayRunProps): JSX.Element {
   );
   const page = useGatewayRun({seed, ports, schedule, address});
   const {snapshot} = page;
-  const observation = page.observation;
+  const {observation} = page.writer;
   const projectRoot = props.projectRoot;
   const intents = useRunIntents({
     bridge,
@@ -47,7 +47,7 @@ export function GatewayRun(props: GatewayRunProps): JSX.Element {
     enabled: true,
     records: fanout.subscribe,
     refreshWriter: page.refreshWriter,
-    ...(observation ? {relaunch: observation} : {}),
+    writer: page.writer,
     schedule,
   });
   const sessions = useGatewayChat({

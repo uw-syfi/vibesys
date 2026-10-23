@@ -50,6 +50,8 @@ export interface GatewayObservation {
   /** The reader gave up on this failure; a new observation is the only retry. */
   readonly terminal: boolean;
   readonly hint: RunLivenessHint | undefined;
+  /** The liveness lease is held: the host spoke within the lease. The one lease of the run. */
+  readonly fresh: boolean;
 }
 export interface GatewayReader {
   /** One reader per run: history and records come from the same stream. */
@@ -213,8 +215,10 @@ export function gatewayReader(
         }),
         {input: {runId, timeoutMs: 30000}, clock: clockFrom(schedule)},
       ).start();
-      const subscription = actor.subscribe(({context}) =>
+      const subscription = actor.subscribe(snapshot => {
+        const {context} = snapshot;
         receive({
+          fresh: snapshot.matches({watching: 'live'}),
           load: context.load,
           progress: loadProgress(context.load),
           failure:
@@ -224,8 +228,8 @@ export function gatewayReader(
               : undefined),
           terminal: context.terminal,
           hint: context.hint,
-        }),
-      );
+        });
+      });
       return () => {
         subscription.unsubscribe();
         actor.stop();

@@ -3,8 +3,8 @@ import type {GatewayBridge} from '@vibesys/ipc';
 import type {ScheduleTimeout} from '@vibesys/machine';
 import {newRequestId} from '@vibesys/request-identity';
 import {
-  type RelaunchObservation,
   type RunIntentAction,
+  type RunWriterFacts,
   runIntent,
   runReference,
   writerControls,
@@ -24,7 +24,8 @@ interface RunIntentsProps {
   readonly runId: string;
   readonly enabled: boolean;
   readonly schedule: ScheduleTimeout;
-  readonly relaunch?: RelaunchObservation;
+  /** The page's one reading of the writer, shared with its header. */
+  readonly writer: RunWriterFacts;
   /** The run's one reader, whose records feed the intent history. */
   readonly records: RunRecords;
   readonly refreshWriter?: () => void;
@@ -60,17 +61,14 @@ export function useRunIntents(props: RunIntentsProps) {
   const [guidanceOpen, showGuidance] = useState(false);
   const projectRoot = props.projectRoot;
   const committed = snapshot ? historyEpoch(snapshot.context) : 0n;
-  const {
-    view: machineRelaunch,
-    liveness,
-    fresh,
-  } = useRelaunch({
+  const writerFacts = props.writer;
+  const machineRelaunch = useRelaunch({
     bridge: props.bridge,
     host: props.host,
     projectRoot: projectRoot ?? '',
     runId: props.runId,
     enabled: props.enabled && projectRoot !== undefined,
-    observation: props.relaunch,
+    writer: writerFacts,
     historyEpoch: committed,
     schedule: props.schedule,
   });
@@ -80,10 +78,10 @@ export function useRunIntents(props: RunIntentsProps) {
   ) => current.current?.send(request);
   const acknowledged = machineRelaunch?.appliedEpoch ?? 0n;
   const writer = writerControls({
-    fresh,
+    fresh: writerFacts.fresh,
     reference: projectRoot === undefined ? undefined : runReference(projectRoot, props.runId),
-    observation: props.relaunch,
-    liveness,
+    observation: writerFacts.observation,
+    liveness: writerFacts.liveness,
     historyEpoch: committed,
     acknowledgedEpoch: acknowledged,
   });
@@ -91,7 +89,7 @@ export function useRunIntents(props: RunIntentsProps) {
   // here would restart that loader's bounded backoff for ever.
   useWriterRecovery(
     props.schedule,
-    props.enabled && props.relaunch !== undefined && writer.status !== 'ready',
+    props.enabled && writerFacts.observation !== undefined && writer.status !== 'ready',
     props.refreshWriter,
   );
 
@@ -108,7 +106,7 @@ export function useRunIntents(props: RunIntentsProps) {
       {
         ...writer.reference,
         requestId: newRequestId(),
-        expectedEpoch: props.relaunch?.epoch ?? 0n,
+        expectedEpoch: writerFacts.observation?.epoch ?? 0n,
       },
       action,
       text,

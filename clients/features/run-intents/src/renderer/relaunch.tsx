@@ -3,9 +3,7 @@ import type {GatewayBridge} from '@vibesys/ipc';
 import {clockFrom, type ScheduleTimeout} from '@vibesys/machine';
 import {
   confirmedRelaunchEpoch,
-  type RelaunchLiveness,
-  type RelaunchObservation,
-  RunLiveness,
+  type RunWriterFacts,
   relaunchLabel,
   relaunchRequest,
   relaunchTarget,
@@ -16,31 +14,25 @@ import {type relaunchMachine, writerRecoveryMachine} from '../state/index.js';
 import {relaunchActor} from './effects/relaunch.js';
 import type {RelaunchView} from './ui/relaunch.js';
 
-const UNKNOWN: RelaunchLiveness = {epoch: 0n, value: RunLiveness.UNSPECIFIED};
-
 /** Keep the in-flight request and result while the reader observes its new epoch. */
 export function useRelaunch(props: {
   readonly bridge: GatewayBridge;
   readonly host: HostKey;
   readonly projectRoot: string;
   readonly runId: string;
-  readonly observation: RelaunchObservation | undefined;
+  readonly writer: RunWriterFacts;
   readonly enabled: boolean;
   readonly historyEpoch: bigint;
   readonly schedule: ScheduleTimeout;
-}): {
-  readonly view: RelaunchView | undefined;
-  readonly liveness: RelaunchLiveness;
-  readonly fresh: boolean;
-} {
+}): RelaunchView | undefined {
   const [snapshot, setSnapshot] = useState<SnapshotFrom<typeof relaunchMachine> | null>(null);
   const current = useRef<ReturnType<typeof relaunchActor> | null>(null);
-  const observation = useRef(props.observation);
-  observation.current = props.observation;
+  const writer = useRef(props.writer);
+  writer.current = props.writer;
   const enabled = props.enabled;
   useEffect(() => {
     if (!enabled) return;
-    const initial = observation.current ?? {epoch: 0n};
+    const initial = writer.current.observation ?? {epoch: 0n};
     const actor = relaunchActor({
       bridge: props.bridge,
       host: props.host,
@@ -51,6 +43,7 @@ export function useRelaunch(props: {
     current.current = actor;
     const subscription = actor.subscribe(setSnapshot);
     actor.start();
+    actor.send({type: 'writer', facts: writer.current});
     return () => {
       current.current = null;
       subscription.unsubscribe();
@@ -58,21 +51,17 @@ export function useRelaunch(props: {
     };
   }, [props.bridge, props.host, props.projectRoot, props.runId, props.schedule, enabled]);
   useEffect(() => {
-    if (props.observation) current.current?.send({type: 'observe', observation: props.observation});
-  }, [props.observation]);
+    current.current?.send({type: 'writer', facts: props.writer});
+  }, [props.writer]);
   useEffect(() => {
     current.current?.send({type: 'epoch', epoch: props.historyEpoch});
   }, [props.historyEpoch]);
-  if (!enabled || !snapshot) return {view: undefined, liveness: UNKNOWN, fresh: false};
-  const owned =
-    current.current?.getSnapshot() === snapshot &&
-    snapshot.context.request.projectRoot === props.projectRoot;
-  const liveness = owned ? snapshot.context.liveness : UNKNOWN;
+  if (!enabled || !snapshot) return undefined;
   const confirmed = snapshot.context.attempted
     ? confirmedRelaunchEpoch(
         snapshot.context.request,
         snapshot.context.observation,
-        liveness,
+        props.writer.liveness,
         snapshot.context.historyEpoch,
       )
     : null;
@@ -81,7 +70,7 @@ export function useRelaunch(props: {
     (snapshot.context.result?.outcome.case === 'epoch'
       ? snapshot.context.result.outcome.value
       : null);
-  const view: RelaunchView = {
+  return {
     state: snapshot.value,
     result:
       appliedEpoch === null
@@ -89,14 +78,13 @@ export function useRelaunch(props: {
         : `Epoch ${appliedEpoch.toString()}`,
     appliedEpoch,
     available:
-      props.observation !== undefined && relaunchTarget(props.observation, liveness) !== null,
+      props.writer.observation !== undefined &&
+      relaunchTarget(props.writer.observation, props.writer.liveness) !== null,
     launch: () => {
-      if (props.observation)
-        current.current?.send({type: 'observe', observation: props.observation});
+      current.current?.send({type: 'writer', facts: writer.current});
       current.current?.send({type: 'relaunch'});
     },
   };
-  return {view, liveness, fresh: owned && snapshot.context.fresh};
 }
 
 /** The page owns the lifecycle reader; this hook only translates the machine's refresh request. */

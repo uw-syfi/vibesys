@@ -811,6 +811,7 @@ test('property: writer refreshes never replace a displayed epoch with an older c
           progress: {phase: 'history', through: BigInt(length), committed: BigInt(records.length)},
           failure: undefined,
           terminal: false,
+          fresh: false,
         });
         expect(snapshot.context.load?.skeleton.throughSeq ?? 0n).toBe(BigInt(newest));
       }
@@ -834,6 +835,7 @@ test('property: expiring or replayed lock hints cannot roll back committed write
         progress: {phase: 'skeleton' as const},
         failure: undefined,
         terminal: false,
+        fresh: true,
       };
       snapshot = getNextSnapshot(gatewayRunMachine, snapshot, {
         ...loaded,

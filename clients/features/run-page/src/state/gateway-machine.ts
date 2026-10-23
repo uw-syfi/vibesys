@@ -53,6 +53,7 @@ export type GatewayEvent =
       failure: SkeletonLoadFailure | undefined;
       terminal: boolean;
       hint?: RunLivenessHint;
+      fresh: boolean;
     };
 export interface GatewayRunContext extends GatewayInput {
   load: SkeletonLoad | undefined;
@@ -60,6 +61,8 @@ export interface GatewayRunContext extends GatewayInput {
   failure: SkeletonLoadFailure | undefined;
   terminal: boolean;
   hint: RunLivenessHint | undefined;
+  /** The reader's liveness lease; the controls read this same fact. */
+  fresh: boolean;
   head: RunLivenessHint['head'];
   ui: RunPageState;
   text: Readonly<Record<string, string>>;
@@ -192,6 +195,7 @@ export const gatewayRunMachine = setup({
     failure: undefined,
     terminal: false,
     hint: undefined,
+    fresh: false,
     head: undefined,
     ui: runPageInitial(input.seed),
     text: {},
@@ -211,6 +215,7 @@ export const gatewayRunMachine = setup({
         failure: undefined,
         terminal: false,
         hint: undefined,
+        fresh: false,
         head: undefined,
         contentHash: '',
         attemptedContent: new Set(),
@@ -232,6 +237,7 @@ export const gatewayRunMachine = setup({
             failure: ({event}) => event.failure,
             terminal: ({event}) => event.terminal,
             hint: ({event}) => event.hint,
+            fresh: ({event}) => event.fresh,
             head: ({context, event}) => receivedHead(context.head, event.hint?.head),
           }),
         },

@@ -7,7 +7,7 @@ import fc from 'fast-check';
 import {getInitialSnapshot, getNextSnapshot} from 'xstate';
 import {relaunchMachine} from './index.js';
 
-test('property: equivalent writer observations are no-ops and old liveness cannot reopen an epoch', () => {
+test('property: equivalent writer observations are no-ops for the observation and the writer fact is taken as given', () => {
   fc.assert(
     fc.property(fc.integer({min: 1, max: 100}), fc.boolean(), (epoch, parked) => {
       const lifecycle = create(LifecycleSchema, {
@@ -19,27 +19,25 @@ test('property: equivalent writer observations are no-ops and old liveness canno
       };
       const initial = getInitialSnapshot(relaunchMachine, input);
       const repeated = getNextSnapshot(relaunchMachine, initial, {
-        type: 'observe',
-        observation: input.observation,
+        type: 'writer',
+        facts: {
+          observation: input.observation,
+          liveness: {epoch: BigInt(epoch), value: RunLiveness.ALIVE},
+          fresh: true,
+        },
       });
-      expect(repeated.context).toBe(initial.context);
-      const newer = getNextSnapshot(relaunchMachine, repeated, {
-        type: 'liveness',
-        value: {epoch: BigInt(epoch + 1), value: RunLiveness.ALIVE},
+      expect(repeated.context.observation).toBe(initial.context.observation);
+      expect(repeated.context.liveness).toEqual({epoch: BigInt(epoch), value: RunLiveness.ALIVE});
+      const older = getNextSnapshot(relaunchMachine, repeated, {
+        type: 'writer',
+        facts: {
+          observation: {epoch: BigInt(epoch - 1)},
+          liveness: {epoch: 0n, value: RunLiveness.UNSPECIFIED},
+          fresh: false,
+        },
       });
-      const missing = getNextSnapshot(relaunchMachine, newer, {
-        type: 'liveness',
-        value: {epoch: 0n, value: RunLiveness.UNSPECIFIED},
-      });
-      expect(missing.context.liveness).toEqual({
-        epoch: BigInt(epoch + 1),
-        value: RunLiveness.UNSPECIFIED,
-      });
-      const late = getNextSnapshot(relaunchMachine, missing, {
-        type: 'liveness',
-        value: {epoch: BigInt(epoch), value: RunLiveness.ENDED},
-      });
-      expect(late.context.liveness).toEqual(missing.context.liveness);
+      expect(older.context.observation).toBe(initial.context.observation);
+      expect(older.context.liveness).toEqual({epoch: 0n, value: RunLiveness.UNSPECIFIED});
     }),
     {numRuns: 80, seed: 253},
   );
@@ -62,7 +60,7 @@ test('relaunch owns its request and cannot repeat an uncertain launch', () => {
   } as never);
   const retry = getNextSnapshot(relaunchMachine, timedOut, {type: 'relaunch'});
   expect(retry.value).toBe('uncertain');
-  expect(Object.keys(retry.children)).toEqual(['liveness']);
+  expect(Object.keys(retry.children)).toEqual([]);
 });
 
 test('model: launch and its deadline always belong to the launching state', () => {
@@ -79,19 +77,19 @@ test('model: launch and its deadline always belong to the launching state', () =
       random.pick([
         {type: 'relaunch'},
         {
-          type: 'observe',
-          observation: {
-            epoch: random.pick([1n, 2n]),
-            lifecycle: create(LifecycleSchema, {
-              state: {case: random.pick(['parked', 'running'] as const), value: {}},
-            }),
-          },
-        },
-        {
-          type: 'liveness',
-          value: {
-            epoch: random.pick([1n, 2n]),
-            value: random.pick([RunLiveness.ALIVE, RunLiveness.INTERRUPTED, RunLiveness.ENDED]),
+          type: 'writer',
+          facts: {
+            observation: {
+              epoch: random.pick([1n, 2n]),
+              lifecycle: create(LifecycleSchema, {
+                state: {case: random.pick(['parked', 'running'] as const), value: {}},
+              }),
+            },
+            liveness: {
+              epoch: random.pick([1n, 2n]),
+              value: random.pick([RunLiveness.ALIVE, RunLiveness.INTERRUPTED, RunLiveness.ENDED]),
+            },
+            fresh: random.pick([true, false]),
           },
         },
 
@@ -121,8 +119,12 @@ test('observations are owned and an older epoch cannot regress the launch target
   });
   lifecycle.state = {case: undefined};
   const stale = getNextSnapshot(relaunchMachine, initial, {
-    type: 'observe',
-    observation: {epoch: 1n},
+    type: 'writer',
+    facts: {
+      observation: {epoch: 1n},
+      liveness: {epoch: 0n, value: RunLiveness.UNSPECIFIED},
+      fresh: true,
+    },
   });
   expect(stale.context.observation.epoch).toBe(2n);
   expect(getNextSnapshot(relaunchMachine, stale, {type: 'relaunch'}).value).toBe('launching');

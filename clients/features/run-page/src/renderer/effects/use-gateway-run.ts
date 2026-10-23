@@ -1,6 +1,6 @@
 import type {ScheduleTimeout} from '@vibesys/machine';
 import {observeRun, transcriptStreamFor} from '@vibesys/run-skeleton';
-import {RunLiveness} from '@vibesys/runs/intents';
+import {RunLiveness, type RunWriterFacts} from '@vibesys/runs/intents';
 import {useEffect, useMemo, useRef, useState} from 'react';
 import {getInitialSnapshot} from 'xstate';
 import {
@@ -45,7 +45,7 @@ export function useGatewayRun(options: {
   const {route, zoom} = useZoom(`${seed.identity.host}/${seed.identity.runId}`, address);
   const {load, progress, ui, text, replies, transcripts} = snapshot.context;
   const skeleton = paintedSkeleton(load);
-  const {hint, observation} = useWriterFacts(snapshot.context);
+  const {hint, writer} = useWriterFacts(snapshot.context);
   const at = ui.view.at === 'live' ? (skeleton?.throughSeq ?? 0n) : BigInt(ui.view.at);
   const epoch = skeleton?.epochs.filter(item => item.seq <= at).at(-1)?.epoch;
   const objective = text[epoch?.run?.objective?.sha256 ?? ''] ?? '';
@@ -95,7 +95,7 @@ export function useGatewayRun(options: {
   useFollowedContent(actor, follow, skeleton, route.step);
   return {
     snapshot,
-    observation,
+    writer,
     load: loadView(snapshot.context),
     retry: () => actor?.send({type: 'retry'}),
     refreshWriter: () => actor?.send({type: 'refresh-writer'}),
@@ -110,7 +110,8 @@ export function useGatewayRun(options: {
   };
 }
 
-function useWriterFacts({load, head, hint: liveHint}: GatewayRunContext) {
+/** The one reading of the writer: the header and the controls both project these facts. */
+function useWriterFacts({load, head, hint: liveHint, fresh}: GatewayRunContext) {
   return useMemo(() => {
     const hint = head
       ? {
@@ -126,8 +127,15 @@ function useWriterFacts({load, head, hint: liveHint}: GatewayRunContext) {
           ...(observed.lifecycle ? {lifecycle: observed.lifecycle} : {}),
         }
       : undefined;
-    return {hint, observation};
-  }, [load, head, liveHint]);
+    const writer: RunWriterFacts = {
+      observation,
+      liveness: hint
+        ? {epoch: BigInt(hint.epoch), value: hint.value}
+        : {epoch: 0n, value: RunLiveness.UNSPECIFIED},
+      fresh,
+    };
+    return {hint, writer};
+  }, [load, head, liveHint, fresh]);
 }
 
 function useFollowedContent(

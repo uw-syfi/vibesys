@@ -26,13 +26,14 @@ export function startGatewayRun(
         loader: fromCallback<GatewayEvent, {runId: string}>(({input, sendBack}) =>
           ports.reader.watch(
             input.runId,
-            ({load, progress, failure, terminal, hint}) =>
+            ({load, progress, failure, terminal, hint, fresh}) =>
               sendBack({
                 type: 'loaded',
                 load,
                 progress,
                 failure,
                 terminal,
+                fresh,
                 ...(hint ? {hint} : {}),
               }),
             records => sendBack({type: 'records', rows: decodeRecordRows(records)}),

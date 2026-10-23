@@ -13,7 +13,6 @@ import {
   RelaunchRefusal,
   RunLiveness,
   type Record as StoreRecord,
-  WatchRunsResponseSchema,
 } from '@vibesys/proto';
 import {relaunchRequest} from '@vibesys/runs/intents';
 import {FakeClock} from '@vibesys/transport/testing';
@@ -240,7 +239,7 @@ test('relaunch confirms an epoch or a typed refusal and owns every transport cal
       actor.stop();
     }
     expect(bridge.calls.every(call => call.cancelled)).toBe(true);
-    expect(bridge.streams).toHaveLength(1);
+    expect(bridge.streams).toHaveLength(0);
   }
 });
 
@@ -345,10 +344,14 @@ test('a confirming epoch supersedes HostCall and cancels the obsolete wait', asy
   try {
     actor.send({type: 'relaunch'});
     actor.send({
-      type: 'observe',
-      observation: {
-        epoch: 2n,
-        lifecycle: create(LifecycleSchema, {state: {case: 'running', value: {}}}),
+      type: 'writer',
+      facts: {
+        observation: {
+          epoch: 2n,
+          lifecycle: create(LifecycleSchema, {state: {case: 'running', value: {}}}),
+        },
+        liveness: {epoch: 2n, value: RunLiveness.ALIVE},
+        fresh: true,
       },
     });
     expect(bridge.calls[0]?.cancelled).toBe(true);
@@ -364,10 +367,14 @@ test('a confirming epoch supersedes HostCall and cancels the obsolete wait', asy
     expect(actor.getSnapshot().context.result).toBeNull();
     expect(actor.getSnapshot().context.observation.epoch).toBe(2n);
     actor.send({
-      type: 'observe',
-      observation: {
-        epoch: 2n,
-        lifecycle: create(LifecycleSchema, {state: {case: 'parked', value: {}}}),
+      type: 'writer',
+      facts: {
+        observation: {
+          epoch: 2n,
+          lifecycle: create(LifecycleSchema, {state: {case: 'parked', value: {}}}),
+        },
+        liveness: {epoch: 2n, value: RunLiveness.ENDED},
+        fresh: true,
       },
     });
     expect(actor.getSnapshot().value).toBe('ready');
@@ -380,42 +387,39 @@ test('a confirming epoch supersedes HostCall and cancels the obsolete wait', asy
   expect(bridge.streams.every(stream => stream.cancelled)).toBe(true);
 });
 
-test('an interrupted WatchRuns hint enables relaunch only for the current run and epoch', () => {
+test('an interrupted writer fact enables relaunch only for the current epoch', () => {
   const bridge = new FakeGatewayBridge();
   const clock = new FakeClock();
+  const observation = {
+    epoch: 2n,
+    lifecycle: create(LifecycleSchema, {state: {case: 'running', value: {}}}),
+  };
   const actor = relaunchActor({
     bridge,
     host: 'local' as HostKey,
     request: relaunchRequest('/project', 'run-1', 2n),
-    observation: {
-      epoch: 2n,
-      lifecycle: create(LifecycleSchema, {state: {case: 'running', value: {}}}),
-    },
+    observation,
     schedule: clock.schedule,
   });
   actor.start();
   try {
-    const watch = bridge.streams[0];
-    expect(watch?.method).toBe('/vibesys.api.v1.HostService/WatchRuns');
-    const hint = (runId: string, epoch: number) =>
-      toBinary(
-        WatchRunsResponseSchema,
-        create(WatchRunsResponseSchema, {
-          runId,
-          liveness: RunLiveness.INTERRUPTED,
-          head: {epoch, process: {epoch}},
-        }),
-      );
-    for (const bytes of [hint('other', 2), hint('run-1', 1)]) {
-      watch?.receive(bytes);
+    for (const liveness of [
+      {epoch: 1n, value: RunLiveness.INTERRUPTED},
+      {epoch: 2n, value: RunLiveness.ALIVE},
+      {epoch: 2n, value: RunLiveness.UNSPECIFIED},
+    ]) {
+      actor.send({type: 'writer', facts: {observation, liveness, fresh: true}});
       actor.send({type: 'relaunch'});
       expect(bridge.calls).toHaveLength(0);
     }
-    watch?.receive(hint('run-1', 2));
+    actor.send({
+      type: 'writer',
+      facts: {observation, liveness: {epoch: 2n, value: RunLiveness.INTERRUPTED}, fresh: true},
+    });
     actor.send({type: 'relaunch'});
     expect(bridge.calls).toHaveLength(1);
   } finally {
     actor.stop();
   }
-  expect(bridge.streams.every(stream => stream.cancelled)).toBe(true);
+  expect(bridge.streams).toHaveLength(0);
 });

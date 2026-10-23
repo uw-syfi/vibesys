@@ -14,7 +14,7 @@ import {
 } from '@vibesys/proto';
 import {foldSkeleton, observeRun, type RunLivenessHint, seedSkeleton} from '@vibesys/run-skeleton';
 import {FakeSkeletonCache} from '@vibesys/run-skeleton/cache';
-import {gatewayReader} from '@vibesys/run-skeleton/reader';
+import {type GatewayObservation, gatewayReader} from '@vibesys/run-skeleton/reader';
 import {FakeRunTransport} from '@vibesys/run-skeleton/testing';
 import {FakeClock} from '@vibesys/transport/testing';
 import fc from 'fast-check';
@@ -247,5 +247,70 @@ test('property: the public reader expires silent channels after the last frame e
       },
     ),
     {numRuns: 12, seed: 34371, examples: [[1, [5000, 5000, 5000]]]},
+  );
+});
+
+test('property: a lock probe of a successor epoch is unconfirmed until its writer was seen alive, and the one lease expires with silence', async () => {
+  const frames = fc.array(
+    fc.record({
+      epoch: fc.integer({min: 0, max: 2}),
+      liveness: fc.constantFrom(
+        RunLiveness.ALIVE,
+        RunLiveness.INTERRUPTED,
+        RunLiveness.ENDED,
+        RunLiveness.UNSPECIFIED,
+      ),
+    }),
+    {minLength: 1, maxLength: 6},
+  );
+  await fc.assert(
+    fc.asyncProperty(fc.integer({min: 1, max: 5}), frames, async (base, steps) => {
+      const transport = new FakeRunTransport({records: []});
+      const clock = new FakeClock();
+      const reader = gatewayReader(transport, new FakeSkeletonCache(), clock.schedule);
+      let latest: GatewayObservation | undefined;
+      let notify = () => {};
+      const stop = reader.watch(
+        'run-a',
+        observation => {
+          latest = observation;
+          notify();
+        },
+        () => {},
+      );
+      try {
+        // The predecessor's end is the one closed fact; later frames follow it.
+        const sequence = [{epoch: 0, liveness: RunLiveness.ENDED}, ...steps];
+        let alive = 0;
+        for (const [index, step] of sequence.entries()) {
+          const epoch = base + step.epoch;
+          const received = Promise.withResolvers<void>();
+          notify = () => {
+            if (latest?.fresh && latest.hint?.head?.committedSeq === BigInt(index))
+              received.resolve();
+          };
+          transport.observe(
+            create(WatchRunsResponseSchema, {
+              runId: 'run-a',
+              liveness: step.liveness,
+              head: {epoch, committedSeq: BigInt(index)},
+            }),
+          );
+          await received.promise;
+          if (step.liveness === RunLiveness.ALIVE) alive = Math.max(alive, epoch);
+          const pending =
+            step.liveness === RunLiveness.INTERRUPTED && epoch > base && alive < epoch;
+          expect(latest?.hint?.value).toBe(pending ? RunLiveness.UNSPECIFIED : step.liveness);
+        }
+        clock.advanceBy(29999);
+        expect(latest?.fresh).toBe(true);
+        clock.advanceBy(1);
+        expect(latest?.fresh).toBe(false);
+        expect(latest?.hint).toBeUndefined();
+      } finally {
+        stop();
+      }
+    }),
+    {numRuns: 20, seed: 341812},
   );
 });

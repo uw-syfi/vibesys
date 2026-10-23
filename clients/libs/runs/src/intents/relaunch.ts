@@ -3,16 +3,13 @@ import {clone, create, equals, fromBinary, toBinary} from '@bufbuild/protobuf';
 import {
   HostCallRequestSchema,
   HostCallResponseSchema,
-  HostService,
   type Lifecycle,
   LifecycleSchema,
   RelaunchRefusal,
   type RelaunchRequest,
   RelaunchRequestSchema,
   type RelaunchResponse,
-  RunLiveness,
-  WatchRunsRequestSchema,
-  WatchRunsResponseSchema,
+  type RunLiveness,
 } from '@vibesys/proto';
 import {refusalMessage} from './refusal.js';
 
@@ -88,6 +85,14 @@ export interface RelaunchObservation {
   readonly lifecycle?: Lifecycle;
 }
 
+/** The page's one reading of the writer: the controls and the header both project these facts. */
+export interface RunWriterFacts {
+  readonly observation: RelaunchObservation | undefined;
+  readonly liveness: RelaunchLiveness;
+  /** The host spoke within the liveness lease. */
+  readonly fresh: boolean;
+}
+
 export function sameRelaunchObservation(a: RelaunchObservation, b: RelaunchObservation): boolean {
   return (
     a.epoch === b.epoch &&
@@ -95,19 +100,6 @@ export function sameRelaunchObservation(a: RelaunchObservation, b: RelaunchObser
       ? a.lifecycle === b.lifecycle
       : equals(LifecycleSchema, a.lifecycle, b.lifecycle))
   );
-}
-
-export const RUN_LIVENESS_METHOD = `/${HostService.typeName}/${HostService.method.watchRuns.name}`;
-export function livenessRequest(): Uint8Array {
-  return toBinary(WatchRunsRequestSchema, create(WatchRunsRequestSchema));
-}
-export function livenessResponse(bytes: Uint8Array, runId: string): RelaunchLiveness | null {
-  const response = fromBinary(WatchRunsResponseSchema, bytes);
-  if (response.runId !== runId) return null;
-  return {
-    epoch: BigInt(response.head?.epoch ?? 0),
-    value: response.removed ? RunLiveness.UNSPECIFIED : response.liveness,
-  };
 }
 
 export function copyRelaunchObservation(value: RelaunchObservation): RelaunchObservation {

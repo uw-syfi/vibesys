@@ -12,8 +12,8 @@ import {
   RecordSchema,
   RunLiveness,
   type Record as StoreRecord,
-  WatchRunsResponseSchema,
 } from '@vibesys/proto';
+import type {RunWriterFacts} from '@vibesys/runs/intents';
 import {FakeClock} from '@vibesys/transport/testing';
 import {Window} from 'happy-dom';
 import {act} from 'react';
@@ -44,39 +44,24 @@ afterAll(async () => {
 /** The byte transport holds admissions until the simulated host acknowledges them. */
 class FakeBridge implements GatewayBridge {
   readonly calls: Array<{bytes: Uint8Array; admit: (bytes: Uint8Array) => void}> = [];
-  readonly liveness = new Set<(bytes: Uint8Array) => void>();
   unary(_host: HostKey, _method: string, bytes: Uint8Array): GatewayCall<Uint8Array> {
     const {promise, resolve, reject} = Promise.withResolvers<Uint8Array>();
     this.calls.push({bytes, admit: resolve});
     return {result: promise, cancel: () => reject(new Error('cancelled'))};
   }
-  stream(
-    _host: HostKey,
-    method: string,
-    _request: Uint8Array,
-    receive: (bytes: Uint8Array) => void,
-  ) {
-    if (method.endsWith('/WatchRuns')) {
-      this.liveness.add(receive);
-      this.alive(1n, true);
-    }
-    return {
-      cancel: () => {
-        this.liveness.delete(receive);
-      },
-    };
+  stream(): never {
+    throw new Error('the controls hold no host stream: the page owns the one liveness lease');
   }
-  alive(epoch: bigint, live: boolean) {
-    const bytes = toBinary(
-      WatchRunsResponseSchema,
-      create(WatchRunsResponseSchema, {
-        runId: 'run-1',
-        head: {epoch: Number(epoch)},
-        liveness: live ? RunLiveness.ALIVE : RunLiveness.ENDED,
-      }),
-    );
-    for (const receive of this.liveness) receive(bytes);
-  }
+}
+
+/** What the page's reader tells the controls about the writer. */
+function writerFacts(epoch: bigint, lifecycle: Lifecycle): RunWriterFacts {
+  const live = !['parked', 'ended'].includes(lifecycle.state.case ?? '');
+  return {
+    observation: {epoch, lifecycle},
+    liveness: {epoch, value: live ? RunLiveness.ALIVE : RunLiveness.ENDED},
+    fresh: true,
+  };
 }
 
 test('Pause is enabled on the new path and sends the typed host intent', async () => {
@@ -96,10 +81,7 @@ test('Pause is enabled on the new path and sends the typed host intent', async (
           projectRoot={recordedProjectRoot('/project')}
           runId="run-1"
           enabled
-          relaunch={{
-            epoch: 1n,
-            lifecycle: create(LifecycleSchema, {state: {case: 'running', value: {}}}),
-          }}
+          writer={writerFacts(1n, create(LifecycleSchema, {state: {case: 'running', value: {}}}))}
           schedule={clock.schedule}
         />,
       ),
@@ -156,13 +138,10 @@ test('live, draining, parked, resumed and finished observations keep the right c
           projectRoot={recordedProjectRoot('/project')}
           runId="run-1"
           enabled
-          relaunch={{epoch, lifecycle}}
+          writer={writerFacts(epoch, lifecycle)}
           schedule={clock.schedule}
         />,
       ),
-    );
-    await act(async () =>
-      bridge.alive(epoch, !['parked', 'ended'].includes(lifecycle.state.case ?? '')),
     );
   };
   const labels = () => [...container.querySelectorAll('button')].map(button => button.textContent);

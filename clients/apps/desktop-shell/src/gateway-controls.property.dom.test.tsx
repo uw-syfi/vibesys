@@ -772,7 +772,9 @@ test('property: host byte receipts alone renew the page controls lease across fr
 function statusWord(container: HTMLElement): string | undefined {
   return [...container.querySelectorAll('span')]
     .map(element => element.textContent ?? '')
-    .find(text => ['Starting', 'Running', 'Paused', 'Stopped', 'Failed'].includes(text));
+    .find(text =>
+      ['Starting', 'Running', 'Paused', 'Stopped', 'Failed', 'Interrupted'].includes(text),
+    );
 }
 
 test('property: relaunch headers and controls share the committed epoch even when history and older heads arrive late', async () => {
@@ -837,5 +839,100 @@ test('property: relaunch headers and controls share the committed epoch even whe
       },
     ),
     {numRuns: 8, seed: 341810, examples: [[1, 1]]},
+  );
+});
+
+const SUCCESSOR_FRAMES = fc.record({
+  running: fc.integer({min: 0, max: 4}),
+  liveness: fc.array(
+    fc.constantFrom(RunLiveness.ALIVE, RunLiveness.INTERRUPTED, RunLiveness.UNSPECIFIED),
+    {minLength: 1, maxLength: 5},
+  ),
+});
+
+function hostFrame(
+  epoch: number,
+  committedSeq: bigint,
+  liveness: RunLiveness,
+  state: {case: 'starting' | 'running'; value: object} | {case: 'ended'; value: object},
+) {
+  return toBinary(
+    WatchRunsResponseSchema,
+    create(WatchRunsResponseSchema, {
+      runId: 'run-a',
+      liveness,
+      head: {epoch, committedSeq, lifecycle: {state}},
+    }),
+  );
+}
+
+/** A lock probe is a fact of the writer that held the lock: before this reader has seen the
+ * successor's writer alive, a free lock is only the gap before it starts. */
+function expectSuccessorScreen(
+  container: HTMLElement,
+  frame: {liveness: RunLiveness; running: boolean},
+  aliveSeen: boolean,
+) {
+  const word = frame.running ? 'Running' : 'Starting';
+  if (frame.liveness === RunLiveness.INTERRUPTED && aliveSeen) {
+    expect(controlButtons(container)).toEqual(['Resume']);
+    expect(statusWord(container)).not.toBe(word);
+    return;
+  }
+  expect(statusWord(container)).toBe(word);
+  const live = frame.running ? ['Pause', 'Pause now', 'Guidance'] : ['Pause', 'Pause now'];
+  expect(controlButtons(container)).toEqual(frame.liveness === RunLiveness.ALIVE ? live : []);
+}
+
+test('property: a successor epoch never shows the predecessor outcome or an unconfirmed lock probe, whatever liveness its frames carry', async () => {
+  await fc.assert(
+    fc.asyncProperty(
+      fc.integer({min: 1, max: 8}),
+      fc.constantFrom(Outcome.STOPPED, Outcome.FAILED, Outcome.INTERRUPTED, Outcome.FINISHED),
+      SUCCESSOR_FRAMES,
+      async (epoch, outcome, {running, liveness}) => {
+        const ended = {case: 'ended' as const, value: {outcome}};
+        const peer = peerFor({
+          epoch,
+          lifecycle: create(LifecycleSchema, {state: ended}),
+          liveness: RunLiveness.ENDED,
+          loading: false,
+          history: [],
+          modernHead: true,
+        });
+        await withPeer(peer, async container => {
+          peer.silent = true;
+          const seq = peer.records.at(-1)?.seq ?? 0n;
+          const deliver = (bytes: Uint8Array) =>
+            act(async () => {
+              for (const stream of followers(peer, 'liveness')) stream.receive(bytes);
+            });
+          await deliver(hostFrame(epoch, seq, RunLiveness.ENDED, ended));
+          let aliveSeen = false;
+          for (const [index, value] of liveness.entries()) {
+            const frame = {liveness: value, running: index >= liveness.length - running};
+            aliveSeen ||= value === RunLiveness.ALIVE;
+            const state = {
+              case: frame.running ? ('running' as const) : ('starting' as const),
+              value: {},
+            };
+            await deliver(hostFrame(epoch + 1, seq + BigInt(index + 1), value, state));
+            expectSuccessorScreen(container, frame, aliveSeen);
+          }
+        });
+      },
+    ),
+    {
+      numRuns: 24,
+      seed: 341811,
+      examples: [
+        [1, Outcome.STOPPED, {running: 0, liveness: [RunLiveness.INTERRUPTED]}],
+        [
+          1,
+          Outcome.FAILED,
+          {running: 1, liveness: [RunLiveness.UNSPECIFIED, RunLiveness.INTERRUPTED]},
+        ],
+      ],
+    },
   );
 });

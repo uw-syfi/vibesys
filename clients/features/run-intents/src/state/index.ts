@@ -11,7 +11,6 @@ export {
 } from './machine.js';
 
 export {
-  livenessWatchMachine,
   type RelaunchEvent,
   relaunchMachine,
   writerRecoveryMachine,
