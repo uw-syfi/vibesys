@@ -1,9 +1,10 @@
 """The observation boundary is bounded, and one damaged run stays that run's problem."""
 
 import json
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from shutil import copytree
+from shutil import copyfile, copytree
 from tempfile import TemporaryDirectory
 
 import pytest
@@ -17,6 +18,24 @@ from vs_sim.api.testing import ManualClock, SimThreads
 CORPUS = Path(__file__).resolve().parents[3] / "proto/testdata/retained"
 CASES = json.loads((CORPUS / "manifest.json").read_text())
 FENCES = st.integers(1, 18)
+CASE = st.sampled_from(sorted(CASES))
+FIRST = sorted(CASES)[0]
+
+
+def pinned_for_each_case(**fixed: object) -> Callable[[Callable[..., None]], Callable[..., None]]:
+    """Pin one example per retained writer, so every writer runs at every depth.
+
+    The generated examples draw the writer along with the rest of the input; a scan validates
+    every record of a log, so the search spends its examples across writers instead of repeating
+    the whole search for each of them.
+    """
+
+    def pin(test: Callable[..., None]) -> Callable[..., None]:
+        for case in CASES:
+            test = example(case=case, **fixed)(test)
+        return test
+
+    return pin
 
 
 def reads_over_few_fences(
@@ -41,14 +60,15 @@ def stored_head(case: str) -> RunHead:
     return head
 
 
-@pytest.fixture(scope="module", params=CASES)
-def healthy(
-    request: pytest.FixtureRequest, tmp_path_factory: pytest.TempPathFactory
-) -> tuple[Path, RunHead]:
-    """An undamaged copy of a retained run, shared by the examples that damage copies of it."""
-    run = tmp_path_factory.mktemp("healthy") / "run"
-    copytree(CORPUS / request.param, run, symlinks=True, ignore=lambda *_: {"skeleton.response.pb"})
-    return run, read_run_head(run / "run.log")
+@pytest.fixture(scope="module")
+def healthy(tmp_path_factory: pytest.TempPathFactory) -> dict[str, tuple[Path, RunHead]]:
+    """An undamaged copy of each retained run, shared by the examples that damage copies of it."""
+    runs: dict[str, tuple[Path, RunHead]] = {}
+    for case in CASES:
+        run = tmp_path_factory.mktemp("healthy") / "run"
+        copytree(CORPUS / case, run, symlinks=True, ignore=lambda *_: {"skeleton.response.pb"})
+        runs[case] = (run, read_run_head(run / "run.log"))
+    return runs
 
 
 @dataclass(frozen=True)
@@ -60,12 +80,15 @@ class Logged:
     fresh: dict[tuple[int, bool], object]
 
 
-@pytest.fixture(scope="module", params=CASES)
-def logged(request: pytest.FixtureRequest, tmp_path_factory: pytest.TempPathFactory) -> Logged:
-    """A directory holding a retained run's log, for examples that set its head before each read."""
-    directory = tmp_path_factory.mktemp("logged")
-    (directory / "run.log").write_bytes((CORPUS / request.param / "run.log").read_bytes())
-    return Logged(directory, request.param, {})
+@pytest.fixture(scope="module")
+def logged(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Logged]:
+    """Each retained run's log in a directory, for examples that set its head before each read."""
+    logs: dict[str, Logged] = {}
+    for case in CASES:
+        directory = tmp_path_factory.mktemp("logged")
+        (directory / "run.log").write_bytes((CORPUS / case / "run.log").read_bytes())
+        logs[case] = Logged(directory, case, {})
+    return logs
 
 
 def read_or_damage(log: Path) -> RunHead | RunLogDamagedError:
@@ -95,10 +118,11 @@ def damage(directory: Path, kind: str, at: int, noise: bytes) -> None:
 
 
 @pytest.mark.regression
-@example(kind="cut log", at=40_000, noise=b"")
-@example(kind="fence past the log", at=19, noise=b"")
-@example(kind="head garbage", at=0, noise=b"\xff\xff")
+@pinned_for_each_case(kind="cut log", at=40_000, noise=b"")
+@example(case=FIRST, kind="fence past the log", at=19, noise=b"")
+@example(case=FIRST, kind="head garbage", at=0, noise=b"\xff\xff")
 @given(
+    case=CASE,
     kind=st.sampled_from(
         ["cut log", "log garbage", "cut head", "head garbage", "fence past the log"]
     ),
@@ -106,13 +130,15 @@ def damage(directory: Path, kind: str, at: int, noise: bytes) -> None:
     noise=st.binary(max_size=64),
 )
 def test_a_damaged_run_raises_its_own_typed_error_and_leaves_others_readable(
-    healthy: tuple[Path, RunHead], kind: str, at: int, noise: bytes
+    healthy: dict[str, tuple[Path, RunHead]], case: str, kind: str, at: int, noise: bytes
 ) -> None:
     """Truncation, garbage and a fence past the log: the error is typed and names the run."""
-    run, before = healthy
+    run, before = healthy[case]
     with TemporaryDirectory() as temporary:
         damaged = Path(temporary) / "damaged"
-        copytree(run, damaged, symlinks=True)
+        damaged.mkdir()
+        for name in ("run.log", "run.head"):
+            copyfile(run / name, damaged / name)
         damage(damaged, kind, at, noise)
         outcome = read_or_damage(damaged / "run.log")
         if isinstance(outcome, RunLogDamagedError):
@@ -121,13 +147,15 @@ def test_a_damaged_run_raises_its_own_typed_error_and_leaves_others_readable(
 
 
 @pytest.mark.regression
-@example(reads=[(14, False, True), (14, False, True), (18, True, True), (13, False, False)])
-@given(reads=reads_over_few_fences(st.booleans(), st.booleans()))
+@pinned_for_each_case(
+    reads=[(14, False, True), (14, False, True), (18, True, True), (13, False, False)]
+)
+@given(case=CASE, reads=reads_over_few_fences(st.booleans(), st.booleans()))
 def test_only_previous_writer_heads_scan_the_log_once_per_prefix(
-    logged: Logged, reads: list[tuple[int, bool, bool]]
+    logged: dict[str, Logged], case: str, reads: list[tuple[int, bool, bool]]
 ) -> None:
     """A head states its facts or it does not. Scans never exceed the distinct unstated prefixes."""
-    directory, case = logged.directory, logged.case
+    directory = logged[case].directory
     want = CASES[case]
     observer = HeadObserver()
     scanned: set[int] = set()
@@ -152,13 +180,13 @@ def test_only_previous_writer_heads_scan_the_log_once_per_prefix(
 
 
 @pytest.mark.regression
-@example(reads=[(14, True), (14, True), (18, False), (14, True), (18, False)])
-@given(reads=reads_over_few_fences(st.booleans()))
+@pinned_for_each_case(reads=[(14, True), (14, True), (18, False), (14, True), (18, False)])
+@given(case=CASE, reads=reads_over_few_fences(st.booleans()))
 def test_an_epoch_is_folded_once_per_committed_prefix(
-    logged: Logged, reads: list[tuple[int, bool]]
+    logged: dict[str, Logged], case: str, reads: list[tuple[int, bool]]
 ) -> None:
     """Relaunch and the terminate poll read an epoch repeatedly; scans never exceed the prefixes."""
-    directory, case, fresh = logged.directory, logged.case, logged.fresh
+    directory, fresh = logged[case].directory, logged[case].fresh
     observer = HeadObserver()
     for fence, headed in reads:
         if headed:

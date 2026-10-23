@@ -1,5 +1,6 @@
 """Unchanged damaged prefixes cost one scan; new identities are read again."""
 
+from collections.abc import Callable
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -14,11 +15,27 @@ CORPUS = Path(__file__).resolve().parents[3] / "proto/testdata/retained"
 CASES = sorted(path.name for path in CORPUS.iterdir() if path.is_dir())
 
 
+def pinned_for_each_case(**fixed: object) -> Callable[[Callable[..., None]], Callable[..., None]]:
+    """Pin one example per retained writer, so every writer runs at every depth.
+
+    The generated examples draw the writer along with the rest of the input; a scan validates
+    every record of a log, so the search spends its examples across writers instead of repeating
+    the whole search for each of them.
+    """
+
+    def pin(test: Callable[..., None]) -> Callable[..., None]:
+        for case in CASES:
+            test = example(case=case, **fixed)(test)
+        return test
+
+    return pin
+
+
 @pytest.mark.regression
-@pytest.mark.parametrize("case", CASES)
-@example(kind="cut", at=1, reads=["head"] * 10)
-@example(kind="cut", at=1, reads=["head", "epoch"] * 5)
+@pinned_for_each_case(kind="cut", at=1, reads=["head"] * 10)
+@example(case=CASES[0], kind="cut", at=1, reads=["head", "epoch"] * 5)
 @given(
+    case=st.sampled_from(CASES),
     kind=st.sampled_from(["cut", "crc", "fence"]),
     at=st.integers(min_value=1, max_value=100_000),
     reads=st.lists(st.sampled_from(["head", "epoch"]), min_size=2, max_size=20),

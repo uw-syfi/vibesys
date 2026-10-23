@@ -2,6 +2,7 @@
 
 import io
 import json
+from collections.abc import Callable
 from functools import cache
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -16,6 +17,23 @@ from vs_runlog.api import RunLogReader, encode_frame, read_run_head
 CORPUS = Path(__file__).resolve().parents[3] / "proto/testdata/retained"
 CASES = json.loads((CORPUS / "manifest.json").read_text())
 FULL = 64  # any fence past the log reads the whole published prefix
+FIRST = sorted(CASES)[0]
+
+
+def pinned_for_each_case(**fixed: object) -> Callable[[Callable[..., None]], Callable[..., None]]:
+    """Pin one example per retained writer, so every writer runs at every depth.
+
+    The generated examples draw the writer along with the rest of the input; a scan validates
+    every record of a log, so the search spends its examples across writers instead of repeating
+    the whole search for each of them.
+    """
+
+    def pin(test: Callable[..., None]) -> Callable[..., None]:
+        for case in CASES:
+            test = example(case=case, **fixed)(test)
+        return test
+
+    return pin
 
 
 @pytest.mark.regression
@@ -46,12 +64,12 @@ def retained_frames(case: str) -> tuple[bytes, ...]:
 
 
 @pytest.mark.regression
-@pytest.mark.parametrize("case", CASES)
-@example(value=100.0, spanless=False, fence=FULL)
-@example(value=0.0, spanless=True, fence=FULL)
-@example(value=0.0, spanless=False, fence=0)
-@example(value=0.0, spanless=False, fence=1)
+@pinned_for_each_case(value=100.0, spanless=False, fence=FULL)
+@example(case=FIRST, value=0.0, spanless=True, fence=FULL)
+@example(case=FIRST, value=0.0, spanless=False, fence=0)
+@example(case=FIRST, value=0.0, spanless=False, fence=1)
 @given(
+    case=st.sampled_from(sorted(CASES)),
     value=st.floats(min_value=-1e6, max_value=1e6, allow_nan=False),
     spanless=st.booleans(),
     fence=st.integers(0, 64),
