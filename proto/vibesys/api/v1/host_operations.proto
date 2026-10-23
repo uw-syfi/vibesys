@@ -462,7 +462,7 @@ service HostOperationsService {
       operation_id: 41
       request_tag: 41
       response_tag: 41
-      cap_ms: 20000
+      cap_ms: 25000
       grace_ms: 5000
       effect: OPERATION_EFFECT_READ
       retry: RETRY_BOUNDED_READ
@@ -479,7 +479,7 @@ service HostOperationsService {
       operation_id: 42
       request_tag: 42
       response_tag: 42
-      cap_ms: 20000
+      cap_ms: 25000
       grace_ms: 5000
       effect: OPERATION_EFFECT_READ
       retry: RETRY_BOUNDED_READ

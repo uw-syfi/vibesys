@@ -82,9 +82,9 @@ const file_vibesys_api_v1_host_operations_proto_rawDesc = "" +
 	"\x01\x01\x12\x01\x01P\x13X\x13b\x11agent_logins.list\x12\x8a\x01\n" +
 	"\x11CreateChatSession\x12(.vibesys.api.v1.CreateChatSessionRequest\x1a).vibesys.api.v1.CreateChatSessionResponse\" \xca\xf3\x18\x1c\b'\x10\x90N\x18\x88' \x03(\x030\x018\x01J\x06\n" +
 	"\x01\x03\x12\x01\x01P\x06X\x06\x12\x84\x01\n" +
-	"\x0eListRunDigests\x12&.vibesys.host.v1.ListRunDigestsRequest\x1a'.vibesys.host.v1.ListRunDigestsResponse\"!\xca\xf3\x18\x1d\b)\x10\xa0\x9c\x01\x18\x88' \x01(\x020\x018\x01J\x06\n" +
+	"\x0eListRunDigests\x12&.vibesys.host.v1.ListRunDigestsRequest\x1a'.vibesys.host.v1.ListRunDigestsResponse\"!\xca\xf3\x18\x1d\b)\x10\xa8\xc3\x01\x18\x88' \x01(\x020\x018\x01J\x06\n" +
 	"\x01\x01\x12\x01\x01P)X)\x12{\n" +
-	"\vUsageWindow\x12#.vibesys.host.v1.UsageWindowRequest\x1a$.vibesys.host.v1.UsageWindowResponse\"!\xca\xf3\x18\x1d\b*\x10\xa0\x9c\x01\x18\x88' \x01(\x020\x018\x01J\x06\n" +
+	"\vUsageWindow\x12#.vibesys.host.v1.UsageWindowRequest\x1a$.vibesys.host.v1.UsageWindowResponse\"!\xca\xf3\x18\x1d\b*\x10\xa8\xc3\x01\x18\x88' \x01(\x020\x018\x01J\x06\n" +
 	"\x01\x01\x12\x01\x01P*X*B=Z;github.com/uw-syfi/vibesys/gateway/gen/vibesys/api/v1;apiv1b\x06proto3"
 
 var file_vibesys_api_v1_host_operations_proto_goTypes = []any{

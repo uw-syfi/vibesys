@@ -39,6 +39,8 @@ def _slots() -> tuple[str, ...]:
     return (
         "list_tasks",
         "list_saved_runs",
+        "list_run_digests",
+        "usage_window",
         "list_harnesses",
         "list_examples",
         "get_task_goal",

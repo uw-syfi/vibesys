@@ -250,7 +250,7 @@ ListRunDigests = Operation(
     41,
     41,
     41,
-    20000,
+    25000,
     5000,
     1,
     2,
@@ -274,7 +274,7 @@ UsageWindow = Operation(
     42,
     42,
     42,
-    20000,
+    25000,
     5000,
     1,
     2,
@@ -750,8 +750,8 @@ READ_CALLS: tuple[HostCall, ...] = (
     HostCall("inspect_destination", "inspect-destination", 23, 23, 10000, 5000),
     HostCall("list_saved_runs", "list-saved-runs", 37, 37, 10000, 5000),
     HostCall("list_agent_logins", "list-agent-logins", 19, 19, 25000, 5000),
-    HostCall("list_run_digests", "list-run-digests", 41, 41, 20000, 5000),
-    HostCall("usage_window", "usage-window", 42, 42, 20000, 5000),
+    HostCall("list_run_digests", "list-run-digests", 41, 41, 25000, 5000),
+    HostCall("usage_window", "usage-window", 42, 42, 25000, 5000),
 )
 MUTATIONS: dict[str, Operation] = {
     "create_example": CreateExample,

@@ -33,9 +33,9 @@ func DispatchHostRead(request *apiv1.ReadRequest) (HostCall, bool) {
 	case request.GetListAgentLogins() != nil:
 		return HostCall{CLI: "list-agent-logins", Deadline: 25000 * time.Millisecond, Executor: 1, Effect: 1}, true
 	case request.GetListRunDigests() != nil:
-		return HostCall{CLI: "list-run-digests", Deadline: 20000 * time.Millisecond, Executor: 1, Effect: 1}, true
+		return HostCall{CLI: "list-run-digests", Deadline: 25000 * time.Millisecond, Executor: 1, Effect: 1}, true
 	case request.GetUsageWindow() != nil:
-		return HostCall{CLI: "usage-window", Deadline: 20000 * time.Millisecond, Executor: 1, Effect: 1}, true
+		return HostCall{CLI: "usage-window", Deadline: 25000 * time.Millisecond, Executor: 1, Effect: 1}, true
 	default:
 		return HostCall{}, false
 	}
