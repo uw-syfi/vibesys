@@ -56,7 +56,7 @@ PROFILER = Role(
     title="Profiler",
     prompt="profiler.j2",
     reply=ProfilerSummary,
-    workspace=None,
+    workspace=WorkspaceMode.READ_ONLY_REVISION,
     access=Access.READ_ONLY,
     turn_time=hours(1),
     corrections=1,
@@ -65,7 +65,8 @@ PROFILER = Role(
     charge=Charge.TURN,
     exchanges=Exchanges(correction="reply_correction.j2"),
 )
-"""Collects and analyses a profile, writing nothing in the project: its reply is the evidence."""
+"""Collects and analyses a profile of the round's base, in a read-only checkout of it, writing
+nothing in the project: its reply is the evidence."""
 
 IMPLEMENTER = Role(
     name="implementer",
