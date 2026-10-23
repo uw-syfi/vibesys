@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
+	"time"
 
 	"buf.build/go/protovalidate"
 	apiv1 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/api/v1"
@@ -17,7 +19,16 @@ import (
 func TestWatchRunsCarriesPublishedProject(t *testing.T) {
 	for variant := 0; variant < 8; variant++ {
 		t.Run(fmt.Sprint(variant), func(t *testing.T) {
-			f := start(t)
+			ticker := &fakeTicker{ticks: make(chan time.Time, 1), stopped: make(chan struct{})}
+			f := startWithClock(t, &fakeClock{ticker: ticker})
+			lock, err := os.OpenFile(filepath.Join(f.run, "run.lock"), os.O_CREATE|os.O_RDWR, 0600)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { lock.Close() })
+			if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+				t.Fatal(err)
+			}
 			project := fmt.Sprintf("/projects/project %d", variant)
 			directory, err := filepath.EvalSymlinks(f.run)
 			if err != nil {
@@ -46,6 +57,17 @@ func TestWatchRunsCarriesPublishedProject(t *testing.T) {
 			}
 			if err := protovalidate.Validate(got); err != nil {
 				t.Fatal(err)
+			}
+			if !watchEntry(t, stream).InitialComplete {
+				t.Fatal("missing initial marker")
+			}
+			if err := lock.Close(); err != nil {
+				t.Fatal(err)
+			}
+			ticker.ticks <- time.Time{}
+			changed := watchEntry(t, stream)
+			if changed.Liveness != apiv1.RunLiveness_RUN_LIVENESS_INTERRUPTED || changed.GetProjectRoot() != project {
+				t.Fatalf("a liveness update lost its project address: %v", changed)
 			}
 		})
 	}

@@ -90,13 +90,16 @@ test('missing or empty wire projects never enter project-dependent listings', ()
   for (const projectRoot of [undefined, '', 'relative']) {
     const gateway = new FakeRunGateway();
     const watch = runWatch(gateway, new FakeClock().schedule);
+    let delivered = false;
     watch.observe(HOST, observed => {
       if (observed.phase.kind !== 'live') return;
+      delivered = true;
       const listing = hostListingFromRuns(hostKey(HOST), observed);
       expect(listing).toMatchObject({live: [], ended: [], unverified: ['run-a']});
     });
     const stream = gateway.open(HOST)[0];
-    stream?.receive(
+    if (stream === undefined) throw new Error('missing gateway stream');
+    stream.receive(
       toBinary(
         WatchRunsResponseSchema,
         create(WatchRunsResponseSchema, {
@@ -106,9 +109,10 @@ test('missing or empty wire projects never enter project-dependent listings', ()
         }),
       ),
     );
-    stream?.receive(
+    stream.receive(
       toBinary(WatchRunsResponseSchema, create(WatchRunsResponseSchema, {initialComplete: true})),
     );
+    expect(delivered).toBe(true);
     watch.close();
   }
 });
