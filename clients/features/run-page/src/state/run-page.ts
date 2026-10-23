@@ -7,6 +7,7 @@ import type {RunEvent, RunStatus} from '@vibesys/contracts';
 import type {LogStream} from '@vibesys/contracts/host-helper';
 import type {HostRun, RunEnd} from '@vibesys/hosts';
 import type {LogListOutcome, LogView} from '@vibesys/logs';
+import type {LoadProgress} from '@vibesys/run-skeleton';
 import {type CoreState, hasRunEnded, initialCoreState, reduceEventBatch} from '@vibesys/run-state';
 import type {RecordRow} from '@vibesys/run-state/records';
 import type {RunRef} from '@vibesys/runs';
@@ -231,6 +232,8 @@ export interface StageView {
 }
 
 export interface RunPageState {
+  /** Whether the reader has caught up with the committed prefix. */
+  readonly progress?: LoadProgress | undefined;
   readonly recordLog?: readonly RecordRow[];
   readonly recordDiagnostic?: RecordRow | undefined;
   readonly recordLogError?: string | null;

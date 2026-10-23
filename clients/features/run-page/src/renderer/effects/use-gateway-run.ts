@@ -43,7 +43,7 @@ export function useGatewayRun(options: {
     };
   }, [ports, schedule, host, runId]);
   const {route, zoom} = useZoom(`${seed.identity.host}/${seed.identity.runId}`, address);
-  const {load, ui, text, replies, transcripts} = snapshot.context;
+  const {load, progress, ui, text, replies, transcripts} = snapshot.context;
   const skeleton = paintedSkeleton(load);
   const {hint, observation} = useWriterFacts(snapshot.context);
   const at = ui.view.at === 'live' ? (skeleton?.throughSeq ?? 0n) : BigInt(ui.view.at);
@@ -57,11 +57,12 @@ export function useGatewayRun(options: {
         skeleton
           ? projectSkeleton(skeleton, skeleton.throughSeq ?? 0n, wholeText, {
               head: hint?.head,
+              progress,
               content: {text, replies, transcripts},
             })
           : null,
       ),
-    [skeleton, wholeText, hint?.head, text, replies, transcripts],
+    [skeleton, wholeText, hint?.head, progress, text, replies, transcripts],
   );
   const modelRead = useMemo(
     () =>
@@ -69,10 +70,13 @@ export function useGatewayRun(options: {
         ? wholeRead
         : project(() =>
             skeleton
-              ? projectSkeleton(skeleton, at, objective, {content: {text, replies, transcripts}})
+              ? projectSkeleton(skeleton, at, objective, {
+                  content: {text, replies, transcripts},
+                  progress,
+                })
               : null,
           ),
-    [skeleton, at, objective, wholeRead, text, replies, transcripts],
+    [skeleton, at, objective, wholeRead, text, replies, transcripts, progress],
   );
   const {value: whole} = wholeRead;
   const {value: model} = modelRead;

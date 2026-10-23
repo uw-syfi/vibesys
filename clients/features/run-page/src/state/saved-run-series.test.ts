@@ -4,7 +4,16 @@ import {clone, create, toBinary} from '@bufbuild/protobuf';
 import {Direction, RecordSchema, RunHeadSchema, SkeletonResponseSchema} from '@vibesys/proto';
 import {storeRunFixture} from '@vibesys/run-fixtures';
 import {ingestSkeleton, seedSkeleton} from '@vibesys/run-skeleton';
-import {clockStart, heroView, paintedSkeleton, projectSkeleton, stripChartView} from './index.js';
+import {
+  clockStart,
+  headerView,
+  heroView,
+  paintedSkeleton,
+  projectSkeleton,
+  runPageInitial,
+  skeletonScreenState,
+  stripChartView,
+} from './index.js';
 
 for (let seed = 1; seed <= 12; seed += 1) {
   test(`saved series survive missing idea ownership and catch-up (seed ${seed})`, () => {
@@ -42,7 +51,26 @@ for (let seed = 1; seed <= 12; seed += 1) {
     );
     expect(heroView(model).tiles[0]?.trend?.steps.at(-1)?.y).toBe(best);
     expect(paintedSkeleton(load)).toBe(load.skeleton);
-    expect(paintedSkeleton({...load, complete: false})).toBeUndefined();
+    expect(paintedSkeleton({...load, complete: false})).toBe(load.skeleton);
+    const prefix = projectSkeleton(load.skeleton, committedSeq, '', {
+      progress: {phase: 'history', through: committedSeq, committed: committedSeq + 1n},
+    });
+    expect(heroView(prefix).tiles[0]).toMatchObject({
+      figure: '–',
+      ratio: null,
+      note: 'Catching up',
+      trend: null,
+    });
+    const pageSeed = {
+      identity: {host: 'local' as const, runId: 'run-a'},
+      title: {project: 'queue-rs', task: null},
+      hostLabel: 'Local',
+      unavailable: {},
+    };
+    const state = skeletonScreenState(pageSeed, load.skeleton, prefix, runPageInitial(pageSeed));
+    expect(state.progress).toEqual(prefix.progress);
+    expect(state.positionWord).toBe('Catching up');
+    expect(headerView(state).spent).toBeNull();
   });
 }
 

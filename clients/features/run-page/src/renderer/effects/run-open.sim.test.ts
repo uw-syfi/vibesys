@@ -123,7 +123,7 @@ function open(
 const painted = (actor: ReturnType<typeof open>['actor']): boolean =>
   paintedSkeleton(actor.getSnapshot().context.load) !== undefined;
 
-test('history progress costs one round trip; settled facts wait for catch-up', async () => {
+test('valid prefix paints after one round trip while history catches up', async () => {
   for (let seed = 1; seed <= CASES; seed += 1) {
     const {run, link} = generate(seed);
     const {clock, gateway, actor} = open(run, link);
@@ -132,7 +132,7 @@ test('history progress costs one round trip; settled facts wait for catch-up', a
     expect(at).toBeDefined();
     if (at === undefined || first === undefined) throw new Error(`seed ${seed}: no paint`);
     expect(at).toBeLessThanOrEqual(link.rttMs + first.bytes / link.bytesPerMs + 1);
-    expect(painted(actor)).toBe(actor.getSnapshot().context.load?.complete === true);
+    expect(painted(actor)).toBe(true);
     // Only the Skeleton reply (and the liveness hello) crossed the link before progress.
     expect(gateway.bytesBy(at)).toBeLessThanOrEqual(gateway.replyBytes + 256);
     actor.stop();
@@ -269,7 +269,7 @@ test('a converted run reports progress from its first reply and settles after ca
   if (at === undefined || first === undefined) throw new Error('no paint');
   expect(at).toBeLessThanOrEqual(link.rttMs + first.bytes / link.bytesPerMs + 1);
   expect(gateway.bytesBy(at)).toBeLessThanOrEqual(gateway.replyBytes + 256);
-  expect(painted(actor)).toBe(actor.getSnapshot().context.load?.complete === true);
+  expect(painted(actor)).toBe(true);
   await until(clock, () => painted(actor));
   expect(painted(actor)).toBe(true);
   expect(gateway.callsTo('Tail').length).toBeLessThanOrEqual(1);

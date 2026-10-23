@@ -421,6 +421,7 @@ export function heroView(
   objectives: readonly ObjectiveAxis[] = objectivesOf(model),
 ): HeroView {
   const leader = bestCandidate(model);
+  const catchingUp = model.progress !== undefined && model.progress.phase !== 'complete';
   return {
     // A run that declares several objectives has a tile each (its gates carry a reading per
     // objective); any other run has the one tile of its objective metric.
@@ -428,9 +429,19 @@ export function heroView(
       ? objectives.map(axis => axisTile(model, axis))
       : [objectiveTile(model, leader?.measurement ?? null)]
     ).map(tile =>
-      model.headline && (objectives.length < 2 || tile.id === model.headline.series?.name)
-        ? writerObjectiveTile(model, tile)
-        : tile,
+      catchingUp
+        ? {
+            ...tile,
+            figure: '–',
+            ratio: null,
+            note: 'Catching up',
+            detail: 'Reading the run’s committed history',
+            hint: '',
+            trend: null,
+          }
+        : model.headline && (objectives.length < 2 || tile.id === model.headline.series?.name)
+          ? writerObjectiveTile(model, tile)
+          : tile,
     ),
     measured: model.candidates.candidates.filter(item => item.measurement?.metricValue != null)
       .length,

@@ -326,15 +326,18 @@ function runFace(
     case 'usage':
       return {
         header: {},
-        body: (
-          <UsageView
-            emptyLabelsOnly={base.emptyLabelsOnly === true}
-            records={usageRecords(state)}
-            context={usageContext(base.model, base.names ?? NO_MODEL_NAMES)}
-            controls={state.usage}
-            change={controls => dispatch({type: 'usage-controls', controls})}
-          />
-        ),
+        body:
+          state.progress && state.progress.phase !== 'complete' ? (
+            <EmptyState title="Catching up" body="Reading the run’s committed usage" />
+          ) : (
+            <UsageView
+              emptyLabelsOnly={base.emptyLabelsOnly === true}
+              records={usageRecords(state)}
+              context={usageContext(base.model, base.names ?? NO_MODEL_NAMES)}
+              controls={state.usage}
+              change={controls => dispatch({type: 'usage-controls', controls})}
+            />
+          ),
       };
     case 'logs': {
       const view: LogsViewProps = {...base, state, scope: {kind: 'run'}, dispatch};

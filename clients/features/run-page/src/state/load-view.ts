@@ -60,7 +60,7 @@ export function loadView(
   }
 }
 
-/** A prefix is progress, not settled run facts. Publish the page after committed history catches up. */
+/** Any valid epoch prefix can paint the page; totals carry their own catch-up state. */
 export function paintedSkeleton(load: SkeletonLoad | undefined): Skeleton | undefined {
-  return load?.complete === true && load.skeleton.epochs.length > 0 ? load.skeleton : undefined;
+  return load && load.skeleton.epochs.length > 0 ? load.skeleton : undefined;
 }

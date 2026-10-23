@@ -14,7 +14,9 @@
  * The reader is the page's cache, not its state: the store keeps the log (`TraceLog`), and every
  * model is a function of the log and the sequence.
  */
+
 import type {RunEvent, RunOverview} from '@vibesys/contracts';
+import type {LoadProgress} from '@vibesys/run-skeleton';
 import type {ComparisonBaseline, CoreState} from '@vibesys/run-state';
 import {AgentFold, type AgentGraph, agentGraph} from '@vibesys/run-state/agents';
 import {CandidateFold, type CandidateTree, candidateTree} from '@vibesys/run-state/candidates';
@@ -57,6 +59,8 @@ function sameFacts(a: RunFacts, b: RunFacts): boolean {
 
 /** The run at one sequence. */
 export interface RunModel {
+  /** Whether the reader has caught up with the committed prefix. */
+  readonly progress?: LoadProgress | undefined;
   /**
    * The input's measured value of the objective metric, read from the input gate itself: known
    * before any idea is measured, when no idea's measurement carries it.

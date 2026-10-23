@@ -137,7 +137,10 @@ export function headerView(state: RunPageState, names: ModelNames = NO_MODEL_NAM
       ...(state.lifecycleWord === undefined ? {} : {label: state.lifecycleWord}),
     },
     // Tokens counted over a prefix of the history are not what the run spent.
-    spent: historyLoading(state) === null ? tokensReading(state.run.core?.tokens.total) : null,
+    spent:
+      historyLoading(state) === null && (!state.progress || state.progress.phase === 'complete')
+        ? tokensReading(state.run.core?.tokens.total)
+        : null,
     agents: roleAgents(usageRecords(state), names).map(each => ({
       role: each.role,
       ran: each.ran.flatMap(who => whoWords(who) ?? []),

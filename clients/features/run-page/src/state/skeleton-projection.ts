@@ -1,6 +1,12 @@
 /** Skeleton readings are projected into the existing Run screen props; seeking is local. */
 import {type HostRun, recordedProjectRoot} from '@vibesys/hosts';
-import {observeRun, type RunLivenessHint, type Skeleton, seekSkeleton} from '@vibesys/run-skeleton';
+import {
+  type LoadProgress,
+  observeRun,
+  type RunLivenessHint,
+  type Skeleton,
+  seekSkeleton,
+} from '@vibesys/run-skeleton';
 import {agentGraph} from '@vibesys/run-state/agents';
 import {candidateTree} from '@vibesys/run-state/candidates';
 import {type RecordRow, rowsOfRecords} from '@vibesys/run-state/records';
@@ -37,7 +43,11 @@ export function projectSkeleton(
   skeleton: Skeleton,
   seq: bigint,
   objectiveText = '',
-  options: {head?: RunLivenessHint['head']; content?: SkeletonContent} = {},
+  options: {
+    head?: RunLivenessHint['head'];
+    content?: SkeletonContent;
+    progress?: LoadProgress;
+  } = {},
 ): RunModel {
   const headline = readHeadline(options.head, seq);
   const view = seekSkeleton(skeleton, seq);
@@ -47,6 +57,7 @@ export function projectSkeleton(
     reading.direction,
   );
   return {
+    progress: options.progress,
     headline,
     series: skeletonPerformance(
       view,
@@ -147,9 +158,10 @@ export function skeletonScreenState(
   };
   return {
     ...ui,
+    progress: whole.progress,
     recordDiagnostic: latestFailure(skeleton, ui.recordLog),
     lifecycleWord: lifecycle.word,
-    positionWord: reading.latest === null ? 'Start' : duration(reading.latest),
+    positionWord: positionWord(whole.progress, reading.latest),
     startupStages: reading.startup.map(step => ({
       id: step.stage,
       label: STARTUP_LABELS[step.stage],
@@ -186,4 +198,9 @@ function observedLifecycle(skeleton: Skeleton, hint: RunLivenessHint | undefined
   return observation.interrupted
     ? {status: 'failed' as const, word: 'Interrupted', reason: null}
     : lifecycleState(observation.lifecycle);
+}
+
+function positionWord(progress: LoadProgress | undefined, latest: number | null): string {
+  if (progress && progress.phase !== 'complete') return 'Catching up';
+  return latest === null ? 'Start' : duration(latest);
 }
