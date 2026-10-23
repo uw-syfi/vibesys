@@ -27,6 +27,9 @@
     },
     {
       "path": "./tsconfig.transcript.json"
+    },
+    {
+      "path": "./tsconfig.candidates.json"
     }
   ],
   "exclude": [

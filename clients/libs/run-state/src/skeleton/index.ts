@@ -215,4 +215,5 @@ export function skeletonPositions(skeleton: StoreHistory): readonly number[] {
   return [...seqs].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)).map(screenSequence);
 }
 
+export {coreIdeaKey, coreIdeaMeasurements} from './idea-readings.js';
 export {type PerformanceDecision, type PerformanceReading, readPerformance} from './performance.js';

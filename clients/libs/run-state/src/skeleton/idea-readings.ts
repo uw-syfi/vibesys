@@ -1,6 +1,6 @@
 /** An idea displays the reading core selected, even if a later check measured nothing. */
 import {Direction, type MetricPoint, type MetricSeriesDecl, type RunHead} from '@vibesys/proto';
-import type {Candidate, CandidateMeasurement, CandidateTree} from '@vibesys/run-state/candidates';
+import type {Candidate, CandidateMeasurement, CandidateTree} from '../candidates/types.js';
 
 export function coreIdeaKey(idea: Candidate): string {
   return idea.hypothesis === null ? `span:${idea.id}` : `hypothesis:${idea.hypothesis}`;

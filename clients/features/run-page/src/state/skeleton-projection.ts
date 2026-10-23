@@ -11,6 +11,8 @@ import {agentGraph} from '@vibesys/run-state/agents';
 import {candidateTree} from '@vibesys/run-state/candidates';
 import {type RecordRow, rowsOfRecords} from '@vibesys/run-state/records';
 import {
+  coreIdeaKey,
+  coreIdeaMeasurements,
   lifecycleState,
   readHeadline,
   readSkeleton,
@@ -18,7 +20,6 @@ import {
   skeletonPositions,
 } from '@vibesys/run-state/skeleton';
 import {AppendLog} from './append-log.js';
-import {coreIdeaKey, coreIdeaMeasurements} from './core-idea-measurements.js';
 import {EMPTY_TRACE_LOG} from './live.js';
 import type {RunModel} from './run-model.js';
 import {type RunPageSeed, type RunPageState, runPageInitial} from './run-page.js';

@@ -38,10 +38,10 @@ func projectionAt(dir string, position runlog.Position) (*runlog.Projection, err
 	if position.Offset > info.Size() {
 		return nil, &runlog.Corruption{Offset: position.Offset, Reason: "cursor offset exceeds run.log"}
 	}
-	return observedProjection(f, position.Offset, &position.ThroughSeq)
+	return projectionFromFile(f, position.Offset, &position.ThroughSeq)
 }
 
-func observedProjection(f *os.File, size int64, committed *uint64) (*runlog.Projection, error) {
+func projectionFromFile(f *os.File, size int64, committed *uint64) (*runlog.Projection, error) {
 	cap := ^uint64(0)
 	if committed != nil {
 		cap = *committed
