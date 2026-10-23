@@ -21,5 +21,11 @@ export {
 export {FakeLogStore, type LogStoreFixture} from './fake-log-store.js';
 export {deferredKillProcess, fakeProcess, pipeHeldProcess} from './fake-process.js';
 export {FakeReadCatalog} from './fake-read-catalog.js';
+export {
+  type AnnouncedRun,
+  FakeRunGateway,
+  type FakeRunStream,
+  idleRunWatch,
+} from './fake-run-gateway.js';
 export {commandOf, olderHost} from './older-host.js';
 export {phaseReached} from './phase-reached.js';

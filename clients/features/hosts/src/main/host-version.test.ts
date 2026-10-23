@@ -4,8 +4,9 @@ import {
   type InspectedCandidate,
   type RegistrySetup,
   registrySetup,
+  runWatch,
 } from '@vibesys/connection';
-import {FakeLink, olderHost} from '@vibesys/connection/testing';
+import {FakeLink, FakeRunGateway, olderHost} from '@vibesys/connection/testing';
 import {type HostId, type HostListing, hostKey} from '@vibesys/hosts';
 import {SettingsStore, withHostSettings} from '@vibesys/settings';
 import {FakeSettingsFilesystem} from '@vibesys/settings/testing';
@@ -67,7 +68,7 @@ describe('checkHostVersion', () => {
 });
 
 describe('Hosts on an older v2 host', () => {
-  test('a ready connection is checked once and shown as incompatible, not as its helper listing', async () => {
+  test('a live run stream is checked once and shown as incompatible, not as its listing', async () => {
     const settings = new SettingsStore({
       settingsPath: '/settings/hosts.json',
       recentPath: '/settings/recent.json',
@@ -89,13 +90,14 @@ describe('Hosts on an older v2 host', () => {
       outOfDate = resolve;
     });
     const logged: string[] = [];
+    const gateway = new FakeRunGateway();
     const hosts = new Hosts({
       manager,
       settings,
       localCheckout: '/bundled',
       sshConfigPath: '/missing',
       setup: registrySetup({unary: olderHost.read}),
-      runs: {start: () => {}, cancel: () => {}},
+      runs: runWatch(gateway, new FakeClock().schedule),
       log: message => logged.push(message),
       push: listing => {
         pushed.push(listing);
@@ -107,6 +109,7 @@ describe('Hosts on an older v2 host', () => {
     });
 
     await hosts.configured();
+    gateway.announce(ALPHA, []);
     await heard;
 
     const last = pushed.at(-1);
@@ -315,14 +318,15 @@ describe('Hosts and a held version check', () => {
       log: () => {},
     });
     await settings.updateHosts(current => withHostSettings(current, ALPHA, {checkout: '/old'}));
-    const link = new FakeLink();
     const manager = new ConnectionManager({
-      linkFor: () => link,
+      linkFor: () => new FakeLink(),
       appVersion: 'test',
       scheduleTimeout: new FakeClock().scheduleTimeout,
       config: {delaysMs: [1], deadlineMs: 60_000, heartbeatMs: 15_000},
       log: () => {},
     });
+    const gateway = new FakeRunGateway();
+    const clock = new FakeClock();
     const pushed: HostListing[] = [];
     const wake: (() => void)[] = [];
     const hosts = new Hosts({
@@ -331,7 +335,7 @@ describe('Hosts and a held version check', () => {
       localCheckout: '/bundled',
       sshConfigPath: '/missing',
       setup,
-      runs: {start: () => {}, cancel: () => {}},
+      runs: runWatch(gateway, clock.schedule),
       log: () => {},
       push: listing => {
         pushed.push(listing);
@@ -343,14 +347,15 @@ describe('Hosts and a held version check', () => {
     const until = async (enough: (all: readonly HostListing[]) => boolean): Promise<void> => {
       while (!enough(pushed)) await new Promise<void>(resolve => wake.push(resolve));
     };
-    return {hosts, manager, link, pushed, until};
+    return {hosts, manager, gateway, clock, pushed, until};
   }
 
   test('Retry asks the checkout again, and a host that was updated is shown again', async () => {
     const setup = new HeldSetup();
-    const {hosts, manager, until} = await hostsOver(setup);
+    const {hosts, manager, gateway, until} = await hostsOver(setup);
     await using _manager = manager;
     await hosts.configured();
+    gateway.announce(ALPHA, []);
     (await setup.started(1)).tooOld();
     await until(all => all.some(incompatible));
 
@@ -362,12 +367,16 @@ describe('Hosts and a held version check', () => {
 
   test("a check held across a reconnect never overrides the newer connection's verdict", async () => {
     const setup = new HeldSetup();
-    const {hosts, manager, link, pushed, until} = await hostsOver(setup);
+    const {hosts, manager, gateway, clock, pushed, until} = await hostsOver(setup);
     await using _manager = manager;
     await hosts.configured();
+    gateway.announce(ALPHA, []);
     const first = await setup.started(1);
 
-    link.helper.drop();
+    for (const stream of gateway.open(ALPHA)) stream.fail(new Error('network loss'));
+    await until(all => all.at(-1)?.kind === 'unavailable');
+    clock.advanceBy(1_000);
+    gateway.announce(ALPHA, []);
     const second = await setup.started(2);
     expect(first.signal.aborted).toBe(true);
     second.current();

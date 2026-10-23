@@ -1,8 +1,8 @@
 /**
  * The host version check under every interleaving of its events, through the production wiring:
- * `Hosts` over a real `ConnectionManager` and `FakeLink`, and the real registry codec over a
+ * `Hosts` over the real run watch and a Fake gateway, and the real registry codec over a
  * transport whose probe replies are held until the test releases them. A generated sequence connects,
- * drops and reconnects the link, presses Retry, publishes listings, and answers any probe, current
+ * drops and reconnects the gateway's stream, presses Retry, publishes listings, and answers any probe, current
  * or from an earlier connection generation, in any order, with a verdict (current, too old,
  * unsupported) or a failure (an ordinary host failure, or the gateway closing). After every step the
  * screen must be what the invariants of the version check say:
@@ -16,15 +16,16 @@
  */
 import {describe, expect, test} from 'bun:test';
 import {create, fromBinary, toBinary} from '@bufbuild/protobuf';
-import {ConnectionManager, registrySetup} from '@vibesys/connection';
-import {FakeLink, phaseReached, record} from '@vibesys/connection/testing';
-import {type HostId, type HostListing, hostKey} from '@vibesys/hosts';
+import {ConnectionManager, registrySetup, runWatch} from '@vibesys/connection';
+import {type AnnouncedRun, FakeLink, FakeRunGateway} from '@vibesys/connection/testing';
+import type {HostId, HostListing} from '@vibesys/hosts';
 import {
   CandidateState,
   FailureCategory,
   InspectCandidateResponseSchema,
   ReadRequestSchema,
   ReadResponseSchema,
+  RunLiveness,
 } from '@vibesys/proto';
 import {SettingsStore, withHostSettings} from '@vibesys/settings';
 import {FakeSettingsFilesystem} from '@vibesys/settings/testing';
@@ -33,7 +34,6 @@ import {FakeClock} from '@vibesys/transport/testing';
 import {Hosts} from './index.js';
 
 const ALPHA: HostId = {kind: 'ssh', alias: 'alpha'};
-const KEY = hostKey(ALPHA);
 const HASH = 'ab'.repeat(32);
 
 type Answer = 'current' | 'too_old' | 'unsupported' | 'internal' | 'closed';
@@ -147,7 +147,6 @@ const shows = (screen: HostListing | undefined) =>
 interface Rig {
   readonly pushed: HostListing[];
   readonly probes: HeldProbe[];
-  readonly link: FakeLink;
   open(): Promise<void>;
   quiesce(): Promise<void>;
   drop(): Promise<void>;
@@ -175,6 +174,7 @@ async function rigOver(): Promise<Rig> {
     log: () => {},
   });
   const held = new HeldProbes();
+  const gateway = new FakeRunGateway();
   const pushed: HostListing[] = [];
   const hosts = new Hosts({
     manager,
@@ -182,43 +182,34 @@ async function rigOver(): Promise<Rig> {
     localCheckout: '/bundled',
     sshConfigPath: '/missing',
     setup: registrySetup({unary: held.unary}),
-    runs: {start: () => {}, cancel: () => {}},
+    runs: runWatch(gateway, clock.schedule),
     log: () => {},
     push: listing => pushed.push(listing),
     retire: () => {},
   });
-  const connection = () => {
-    const open = manager.existing(KEY);
-    if (open === null) throw new Error('the host has no connection');
-    return open;
-  };
+  const announced: AnnouncedRun[] = [];
   let published = 0;
   const rig: Rig = {
     pushed,
     probes: held.probes,
-    link,
     async open() {
       await hosts.configured();
+      gateway.announce(ALPHA, announced);
       await held.sent(1);
       await rig.quiesce();
     },
-    /** A control round trip orders after everything the helper pushed; then the microtasks settle. */
+    /** Lets every promise the gateway's last words started settle. */
     async quiesce() {
-      await connection().request({type: 'ping'});
       for (let turn = 0; turn < 20; turn += 1) await Promise.resolve();
     },
+    /** The stream fails; its watcher waits out the first backoff, reconnects and hears every run. */
     async drop() {
       const count = held.probes.length;
-      const dropped = connection();
-      link.helper.drop();
-      await phaseReached(dropped, 'reconnecting');
-      // A reconnect may wait out a backoff on the fake clock; fire it when it is armed.
-      const ready = phaseReached(dropped, 'ready').then(() => true);
-      while (!(await Promise.race([ready, clock.waitUntilScheduled(1).then(() => false)]))) {
-        clock.runPending();
-      }
+      for (const stream of gateway.open(ALPHA)) stream.fail(new Error('network loss'));
+      await rig.quiesce();
+      clock.advanceBy(1_000);
+      gateway.announce(ALPHA, announced);
       await held.sent(count + 1);
-
       await rig.quiesce();
     },
     async retry() {
@@ -227,7 +218,9 @@ async function rigOver(): Promise<Rig> {
     },
     async publish() {
       published += 1;
-      link.helper.publish(record(String(published).padStart(12, '0'), `run-${published}`));
+      const run = {runId: `run-${published}`, liveness: RunLiveness.ALIVE};
+      announced.push(run);
+      gateway.update(ALPHA, run);
       await rig.quiesce();
     },
     async close() {

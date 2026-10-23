@@ -1,13 +1,13 @@
 /**
- * What a project's runs spent in a window of time (`usage.window`, feature `usage_window`) in the
- * app's own terms: the figures the Usage page shows, with times in milliseconds. The helper sums
- * the runs' usage records, so nothing here derives a cost.
+ * What a project's runs spent in a window of time (the host's `UsageWindow` read) in the app's own
+ * terms: the figures the Usage page shows, with times in milliseconds. The host sums the runs'
+ * usage records, so nothing here derives a cost.
  */
-import type {TokenTally, UsageWindowReply} from '@vibesys/contracts/host-helper';
+import type {TokenTally} from '@vibesys/contracts/host-helper';
 
 /** The most runs one question names; ask in pieces beyond it. */
 export const USAGE_WINDOW_MAX_RUNS = 100;
-/** The longest window the helper answers, in hours (two weeks). */
+/** The longest window the host answers, in hours (two weeks). */
 export const USAGE_WINDOW_MAX_HOURS = 336;
 
 const MS_PER_HOUR = 3_600_000;
@@ -73,7 +73,7 @@ export type UsageWindowOutcome =
   | {readonly kind: 'unsupported'};
 
 /**
- * Why a window or run list cannot be asked of the helper, as words; null when it can. The helper
+ * Why a window or run list cannot be asked of the host, as words; null when it can. The helper
  * refuses the same questions, so asking one is a mistake of the caller, not of the host.
  */
 export function usageWindowRefusal(
@@ -91,40 +91,4 @@ export function usageWindowRefusal(
     return `a usage question names at most ${USAGE_WINDOW_MAX_RUNS} runs`;
   }
   return null;
-}
-
-/** The helper's `usage.window` reply in the app's terms. */
-export function usageWindowEntry(reply: UsageWindowReply): UsageWindowEntry {
-  return {
-    since: Date.parse(reply.since),
-    until: Date.parse(reply.until),
-    spentUsd: reply.spent_usd,
-    spendPerHourUsd: reply.spend_per_hour_usd,
-    tokens: reply.tokens,
-    turns: reply.turns,
-    unpricedTurns: reply.unpriced_turns,
-    unpricedItemised:
-      reply.by_run.every(run => run.unpriced_turns !== undefined) &&
-      reply.by_agent.every(agent => agent.unpriced_turns !== undefined),
-    untimedTurns: reply.untimed_turns,
-    newBests: reply.new_bests,
-    costPerNewBestUsd: reply.cost_per_new_best_usd,
-    // A helper that predates the per-run and per-agent counts sends none: zero is "not said".
-    byRun: reply.by_run.map(({run_id, task, cost_usd, unpriced_turns}) => ({
-      runId: run_id,
-      task,
-      costUsd: cost_usd,
-      unpricedTurns: unpriced_turns ?? 0,
-    })),
-    byAgent: reply.by_agent.map(({role, harness, model, cost_usd, turns, unpriced_turns}) => ({
-      role,
-      harness,
-      model,
-      costUsd: cost_usd,
-      turns,
-      unpricedTurns: unpriced_turns ?? 0,
-    })),
-    agentsOmitted: reply.agents_omitted,
-    missingRuns: [...reply.missing_runs],
-  };
 }

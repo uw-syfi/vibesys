@@ -32,6 +32,10 @@ func DispatchHostRead(request *apiv1.ReadRequest) (HostCall, bool) {
 		return HostCall{CLI: "list-saved-runs", Deadline: 10000 * time.Millisecond, Executor: 1, Effect: 1}, true
 	case request.GetListAgentLogins() != nil:
 		return HostCall{CLI: "list-agent-logins", Deadline: 25000 * time.Millisecond, Executor: 1, Effect: 1}, true
+	case request.GetListRunDigests() != nil:
+		return HostCall{CLI: "list-run-digests", Deadline: 20000 * time.Millisecond, Executor: 1, Effect: 1}, true
+	case request.GetUsageWindow() != nil:
+		return HostCall{CLI: "usage-window", Deadline: 20000 * time.Millisecond, Executor: 1, Effect: 1}, true
 	default:
 		return HostCall{}, false
 	}
@@ -75,6 +79,12 @@ func HostReadResponseValid(request *apiv1.ReadRequest, response *apiv1.ReadRespo
 	case request.GetListAgentLogins() != nil:
 		got := response.GetListAgentLogins()
 		return got != nil && got.GetRequestId() == request.GetListAgentLogins().GetRequestId()
+	case request.GetListRunDigests() != nil:
+		got := response.GetListRunDigests()
+		return got != nil && got.GetRequestId() == request.GetListRunDigests().GetRequestId()
+	case request.GetUsageWindow() != nil:
+		got := response.GetUsageWindow()
+		return got != nil && got.GetRequestId() == request.GetUsageWindow().GetRequestId()
 	default:
 		return false
 	}

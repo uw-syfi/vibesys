@@ -966,30 +966,72 @@ def _answer(
 def _project_reply(request: RunsListRequest, host: HelperHost) -> RunsListReply:
     """Answer a project's saved-run listing."""
     project = Path(_host_path(request.project, host.directories))
-    match request:
-        case RunsListRequest(
-            request_id=request_id, digest_runs=digest_runs, with_dashboard=with_dashboard
-        ):
-            root, runs = host.projects.runs(project)
-            known = {run.run_id for run in runs}
-            digests = {
-                run_id: digest
-                for run_id in dict.fromkeys(digest_runs or ())
-                if run_id in known
-                and (digest := host.projects.run_digest(root, run_id)) is not None
-            }
-            if not with_dashboard:
-                digests = {
-                    run_id: digest.model_copy(update={"dashboard": None})
-                    if isinstance(digest, RunDigest)
-                    else digest
-                    for run_id, digest in digests.items()
-                }
-            now = host.clock.now()
-            summaries = run_summaries(
-                root, runs, host.registry.list(), digests, now=now if with_dashboard else None
-            )
-            return RunsListReply(request_id=request_id, runs=summaries)
+    runs = project_runs(
+        host, project, request.digest_runs or (), with_dashboard=bool(request.with_dashboard)
+    )
+    return RunsListReply(request_id=request.request_id, runs=runs)
+
+
+class RunProjects(Protocol):
+    """The part of a project catalog the reads of a project's runs need."""
+
+    def runs(self, project: Path) -> tuple[Path, tuple[ProjectRun, ...]]:
+        """The project's resolved root and its runs, oldest first."""
+        ...
+
+    def run_digest(self, project_root: Path, run_id: str) -> RunDigest | RunDigestUnreadable | None:
+        """What run ``run_id``'s journal says at a glance; ``None`` when this machine holds none."""
+        ...
+
+    def run_summary(self, project: Path, run_id: str) -> Summarized:
+        """The fold of run ``run_id``'s whole journal, as it is now."""
+        ...
+
+
+class RunFacts(Protocol):
+    """What the reads of a project's runs need of a host: its projects, registry and clock."""
+
+    @property
+    def projects(self) -> RunProjects:
+        """The project catalog and the runs' journals."""
+        ...
+
+    @property
+    def registry(self) -> LiveRegistry:
+        """The servers this host runs or ran."""
+        ...
+
+    @property
+    def clock(self) -> Clock:
+        """Wall-clock epoch seconds."""
+        ...
+
+
+def project_runs(
+    host: RunFacts, project: Path, digest_runs: Iterable[str], *, with_dashboard: bool
+) -> RunList:
+    """A project's runs, each of ``digest_runs`` with the digest its journal gives.
+
+    The tile's data (``with_dashboard``) and the attention it judges are included only when asked.
+    """
+    root, runs = host.projects.runs(project)
+    known = {run.run_id for run in runs}
+    digests = {
+        run_id: digest
+        for run_id in dict.fromkeys(digest_runs)
+        if run_id in known and (digest := host.projects.run_digest(root, run_id)) is not None
+    }
+    if not with_dashboard:
+        digests = {
+            run_id: digest.model_copy(update={"dashboard": None})
+            if isinstance(digest, RunDigest)
+            else digest
+            for run_id, digest in digests.items()
+        }
+    now = host.clock.now()
+    return run_summaries(
+        root, runs, host.registry.list(), digests, now=now if with_dashboard else None
+    )
 
 
 def _logins_reply(
@@ -1133,7 +1175,9 @@ def _run_history_reply(
     if isinstance(request, RunsSummaryRequest):
         return _run_summary_reply(request, host)
     if isinstance(request, UsageWindowRequest):
-        return _usage_window_reply(request, host)
+        return usage_window_reply(
+            request, host, Path(_host_path(request.project, host.directories))
+        )
     project = Path(_host_path(request.project, host.directories))
     if isinstance(request, RunsEventsForSpanRequest):
         span_page = host.projects.run_span_events(
@@ -1159,13 +1203,15 @@ def _run_history_reply(
     return _run_events_reply(request, host)
 
 
-def _usage_window_reply(request: UsageWindowRequest, host: HelperHost) -> UsageWindowReply:
+def usage_window_reply(
+    request: UsageWindowRequest, host: RunFacts, project: Path
+) -> UsageWindowReply:
     """Answer what the named runs spent in the window, from each run's usage records.
 
     A run's records are its summary's (``Projects.run_summary``, the cache beside the journal) and
     its bests are the kept points of its digest, so each run costs a cache read and what its journal
     gained since. A run the project does not have, or whose journal this machine does not hold, is
-    ``missing``.
+    ``missing``. ``project`` is the request's project directory, resolved on this host.
     """
     # lint-waiver: LW-271612 [PLC0415]; the helper answers hello without loading the aggregation.
     # > `server.usage_window` is a module the helper's start-up budget
@@ -1173,7 +1219,6 @@ def _usage_window_reply(request: UsageWindowRequest, host: HelperHost) -> UsageW
     # > it; the request and reply messages stay with the other messages so `host_api` can name them.
     from server.usage_window import RunUsage, usage_window  # noqa: PLC0415
 
-    project = Path(_host_path(request.project, host.directories))
     root, known = host.projects.runs(project)
     tasks = {run.run_id: run.task for run in known}
     found: list[RunUsage] = []

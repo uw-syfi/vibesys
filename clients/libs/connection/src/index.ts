@@ -8,6 +8,7 @@
  */
 
 export {connectionStatus} from './connection-status.js';
+export {hostListingFromRuns, watchedListing} from './run-listing.js';
 export {controlDirectory, installAskpass} from './shell/askpass.js';
 export {
   type ConnectionLease,
@@ -60,6 +61,12 @@ export {
   registryTransport,
   requireCheckout,
 } from './shell/registry-reads.js';
+export {
+  digestEntries,
+  type RegistryRunReads,
+  registryRunReads,
+  usageWindowEntry,
+} from './shell/registry-run-reads.js';
 export {type RegistrySavedRuns, registrySavedRuns} from './shell/registry-saved-runs.js';
 export {
   type CompletedPaths,
@@ -73,5 +80,13 @@ export {
   type RegistryStartPorts,
   registryStart,
 } from './shell/registry-start.js';
-export {type RunWatch, type RunWatchPorts, runWatch} from './shell/run-watch.js';
+export {
+  RUN_WATCH_LEASE_MS,
+  type RunsPhase,
+  type RunsState,
+  type RunWatch,
+  type RunWatchPorts,
+  runWatch,
+  type WatchedRun,
+} from './shell/run-watch.js';
 export type {CheckoutProblem, Phase} from './state/host-connection.js';

@@ -18,24 +18,34 @@ from server.host_api import HelperError, RunPreflightRequest
 from server.host_compute import ComputeError
 from server.host_envelope import HelperErrorCode
 from server.host_examples import ProjectLookupError
+from server.host_run_summary import UsageWindowRequest
 
 if TYPE_CHECKING:
     from collections.abc import Callable
     from types import ModuleType
 
     from server.host_agent_logins import AgentLogin
-    from server.host_api import HarnessOption, RunPreflightReply
+    from server.host_api import HarnessOption, RunDigest, RunDigestUnreadable, RunPreflightReply
     from server.host_compute import ComputeSettings
     from server.host_examples import ExampleDestination, ExampleList, TaskGoal, TaskList
+    from server.host_helper_requests import ProjectRun
     from server.host_machine_facts import MachineDescription
+    from server.registry import LiveRegistry
+    from server.run_summary import Summarized
     from vs_proto.api import FailureCategory
     from vs_proto.api import host_payloads as pb
+    from vs_sim.api import Clock
 
 
 class _ReadProjects(Protocol):
     def saved_runs(self, request: pb.ListSavedRunsRequest) -> pb.ListSavedRunsResponse: ...
     def tasks(self, project: Path) -> TaskList: ...
     def task_goal(self, project: Path, task: str) -> TaskGoal: ...
+    def runs(self, project: Path) -> tuple[Path, tuple[ProjectRun, ...]]: ...
+    def run_digest(
+        self, project_root: Path, run_id: str
+    ) -> RunDigest | RunDigestUnreadable | None: ...
+    def run_summary(self, project: Path, run_id: str) -> Summarized: ...
 
 
 class _ReadDirectories(Protocol):
@@ -83,6 +93,16 @@ class HostReadFacts(Protocol):
     @property
     def compute(self) -> _ReadCompute:
         """Source-aware compute settings."""
+        ...
+
+    @property
+    def registry(self) -> LiveRegistry:
+        """The servers this host runs or ran, which a run's attention is judged against."""
+        ...
+
+    @property
+    def clock(self) -> Clock:
+        """Wall-clock epoch seconds."""
         ...
 
     @property
@@ -137,6 +157,34 @@ class HostReadSource:
         request = type(request).from_binary(request.to_binary())
         request.project = str(self._path(request.project))
         return self._host.projects.saved_runs(request)
+
+    def run_digests(self, request: pb.ListRunDigestsRequest) -> pb.ListRunDigestsResponse:
+        """Read each run's digest through the owner of the helper's project run listing."""
+        requests = import_module("server.host_helper_requests")
+        runs = requests.project_runs(
+            self._host,
+            self._path(request.project),
+            request.run_ids,
+            with_dashboard=request.with_dashboard,
+        )
+        return import_module("server.host_run_wire").digests_response(request.request_id, runs)
+
+    def usage_window(self, request: pb.UsageWindowRequest) -> pb.UsageWindowResponse:
+        """Sum the runs' usage through the owner of the helper's usage window."""
+        if request.since is None or request.until is None:
+            message = "since and until: a window needs both ends"
+            raise ValueError(message)
+        legacy = UsageWindowRequest(
+            request_id=request.request_id,
+            deadline_ms=_wire().host_operations.UsageWindow.total_ms,
+            project=request.project,
+            run_ids=tuple(request.run_ids),
+            since=request.since.to_datetime(),
+            until=request.until.to_datetime(),
+        )
+        requests = import_module("server.host_helper_requests")
+        reply = requests.usage_window_reply(legacy, self._host, self._path(request.project))
+        return import_module("server.host_run_wire").usage_response(request.request_id, reply)
 
     def tasks(self, project: str) -> pb.TaskList:
         """Read through the existing project's task owner."""

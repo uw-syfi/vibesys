@@ -338,6 +338,9 @@ importers:
       '@vibesys/transport':
         specifier: workspace:*
         version: link:../../libs/transport
+      fast-check:
+        specifier: 4.10.2
+        version: 4.10.2
       typescript:
         specifier: ^5.8.3
         version: 5.9.3
@@ -874,6 +877,9 @@ importers:
       expect:
         specifier: 30.5.2
         version: 30.5.2
+      fast-check:
+        specifier: 4.10.2
+        version: 4.10.2
       typescript:
         specifier: ^5.8.3
         version: 5.9.3

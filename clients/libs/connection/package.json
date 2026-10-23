@@ -49,6 +49,7 @@
     "@types/node": "^24.0.0",
     "typescript": "^5.8.3",
     "@vibesys/store": "workspace:*",
-    "expect": "30.5.2"
+    "expect": "30.5.2",
+    "fast-check": "4.10.2"
   }
 }

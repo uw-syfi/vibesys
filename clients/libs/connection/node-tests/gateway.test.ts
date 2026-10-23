@@ -370,6 +370,12 @@ const cluster = {
 const deadlineInputs = {
   listTasks: {project: '/project'},
   listSavedRuns: {project: '/project'},
+  listRunDigests: {project: '/project'},
+  usageWindow: {
+    project: '/project',
+    since: {seconds: 1n, nanos: 0},
+    until: {seconds: 2n, nanos: 0},
+  },
   listHarnesses: {},
   listExamples: {},
   getTaskGoal: {project: '/project', task: 'bench'},

@@ -1,9 +1,23 @@
 import {describe, expect, test} from 'bun:test';
 import {join} from 'node:path';
-import {type ConnectionLease, ConnectionManager, registrySetup} from '@vibesys/connection';
-import {FakeLink, FakeReadCatalog, olderHost, record} from '@vibesys/connection/testing';
-import {RUN_EVENT_TYPES_BY_KINDS, type RunSummary} from '@vibesys/contracts/host-helper';
-import {type HostId, type HostListing, hostKey} from '@vibesys/hosts';
+import {
+  type ConnectionLease,
+  ConnectionManager,
+  type RegistryRunReads,
+  registrySetup,
+  runWatch,
+} from '@vibesys/connection';
+import {
+  FakeLink,
+  FakeReadCatalog,
+  FakeRunGateway,
+  idleRunWatch,
+  olderHost,
+  record,
+} from '@vibesys/connection/testing';
+import {RUN_EVENT_TYPES_BY_KINDS} from '@vibesys/contracts/host-helper';
+import {type HostId, type HostListing, hostKey, usageWindowRefusal} from '@vibesys/hosts';
+import {FailureCategory, OperationFailed, RunLiveness} from '@vibesys/proto';
 import {
   decodeRetainedSettings,
   encodeSettings,
@@ -15,6 +29,7 @@ import {
 } from '@vibesys/settings';
 import {FakeSettingsFilesystem} from '@vibesys/settings/testing';
 import {FakeClock} from '@vibesys/transport/testing';
+import fc from 'fast-check';
 import {Hosts, type SshConfigFilesystem} from './index.js';
 
 const SSH_CONFIG = '/home/test/.ssh/config';
@@ -22,44 +37,6 @@ const LOCAL = {kind: 'local'} as const;
 const ALPHA = {kind: 'ssh', alias: 'alpha'} as const;
 const BETA = {kind: 'ssh', alias: 'beta'} as const;
 const CONFIG = {delaysMs: [1], deadlineMs: 60_000, heartbeatMs: 15_000};
-
-type LeaseFailureMode = 'reject' | 'throw';
-
-/** A real manager whose first public lease reports a failed retirement after releasing its hold. */
-class FirstReleaseFailureManager extends ConnectionManager {
-  readonly failure = new Error('retirement remained unconfirmed');
-  readonly #mode: LeaseFailureMode;
-  releases = 0;
-
-  constructor(mode: LeaseFailureMode, options: ConstructorParameters<typeof ConnectionManager>[0]) {
-    super(options);
-    this.#mode = mode;
-  }
-
-  override async acquire(host: HostId, checkout: string): Promise<ConnectionLease> {
-    const lease = await super.acquire(host, checkout);
-    let released = false;
-    return {
-      connection: lease.connection,
-      [Symbol.asyncDispose]: () => {
-        if (released) return Promise.resolve();
-        released = true;
-        const retirement = lease[Symbol.asyncDispose]();
-        this.releases += 1;
-        if (this.releases === 1) {
-          if (this.#mode === 'throw') {
-            void Promise.resolve(retirement).catch(() => {});
-            throw this.failure;
-          }
-          return retirement.then(() => {
-            throw this.failure;
-          });
-        }
-        return retirement;
-      },
-    };
-  }
-}
 
 /** A real manager that withholds one acquired lease after its shown connection already changed. */
 class DeferredAcquireManager extends ConnectionManager {
@@ -305,7 +282,8 @@ function completionSubject(
 
 /** Native setup facts shared by checkout-race scenarios; helper leases remain separate. */
 function hostsInWorld(
-  deps: ConstructorParameters<typeof Hosts>[0],
+  deps: Omit<ConstructorParameters<typeof Hosts>[0], 'runs'> &
+    Partial<Pick<ConstructorParameters<typeof Hosts>[0], 'runs'>>,
   peer = new FakeReadCatalog(),
 ): Hosts {
   for (const path of [
@@ -321,9 +299,121 @@ function hostsInWorld(
   }
   return new Hosts({
     setup: registrySetup(peer),
-    runs: {start: () => {}, cancel: () => {}},
+    runs: runWatch(new FakeRunGateway(), new FakeClock().schedule),
     ...deps,
   });
+}
+
+interface WorldOptions {
+  /** Machines with a saved checkout. */
+  readonly configured?: readonly HostId[];
+  /** Whether a host's helper can start; the gateway is the same either way. */
+  readonly helper?: 'up' | 'down';
+  readonly filesystem?: FakeSettingsFilesystem;
+  /** A host whose run watch cannot be opened. */
+  readonly refuse?: string;
+  /** A host whose first stop reports a failure after releasing its stream. */
+  readonly failStopOnce?: string;
+  /** Diagnostics and retirement callbacks that themselves fail. */
+  readonly failingCallbacks?: boolean;
+}
+
+/**
+ * The public Hosts over a Fake gateway: a host is watched exactly while its gateway has an open run
+ * stream, and the helper is a link that counts how often anything asks for it.
+ */
+async function gatewayWorld(options: WorldOptions) {
+  const settings = new SettingsStore({
+    settingsPath: '/settings/hosts.json',
+    recentPath: '/settings/recent.json',
+    preferencesPath: '/settings/preferences.json',
+    filesystem: options.filesystem ?? new FakeSettingsFilesystem(),
+    log: () => {},
+  });
+  await configuredSettings(settings, options.configured ?? []);
+  const gateway = new FakeRunGateway();
+  const clock = new FakeClock();
+  const watch = runWatch(gateway, clock.schedule);
+  let stopFailed = false;
+  const runs = {
+    observe: (host: HostId, listener: Parameters<typeof watch.observe>[1]) => {
+      if (hostKey(host) === options.refuse) throw new Error(`cannot watch ${hostKey(host)}`);
+      return watch.observe(host, listener);
+    },
+    cancel: (host: HostId) => {
+      watch.cancel(host);
+      if (hostKey(host) === options.failStopOnce && !stopFailed) {
+        stopFailed = true;
+        throw new Error('stop failed');
+      }
+    },
+  };
+  let acquisitions = 0;
+  const manager = new ConnectionManager({
+    linkFor: () => {
+      acquisitions += 1;
+      if (options.helper === 'down') throw new Error('helper unavailable; gateway still available');
+      return new FakeLink();
+    },
+    appVersion: 'test',
+    scheduleTimeout: clock.scheduleTimeout,
+    config: CONFIG,
+    log: () => {},
+  });
+  const peer = new FakeReadCatalog();
+  const pushed: HostListing[] = [];
+  const retired: string[] = [];
+  const logged: string[] = [];
+  const hosts = hostsInWorld(
+    {
+      manager,
+      settings,
+      localCheckout: '/bundled',
+      sshConfigPath: '/missing',
+      log: message => {
+        logged.push(message);
+        if (options.failingCallbacks) throw new Error('log failed');
+      },
+      push: listing => pushed.push(listing),
+      retire: key => {
+        retired.push(key);
+        if (options.failingCallbacks) throw new Error('retire failed');
+      },
+      runs,
+    },
+    peer,
+  );
+  const everyHost: readonly HostId[] = [LOCAL, ALPHA, BETA];
+  const settled = async (): Promise<void> => {
+    for (let turn = 0; turn < 40; turn += 1) await Promise.resolve();
+  };
+  return {
+    hosts,
+    settings,
+    gateway,
+    clock,
+    pushed,
+    retired,
+    logged,
+    settled,
+    helperAcquisitions: () => acquisitions,
+    openStreams: (key: string) =>
+      gateway.streams.filter(s => s.host === key && !s.signal.aborted).length,
+    watched: () =>
+      everyHost
+        .filter(host => gateway.open(host).length > 0)
+        .map(hostKey)
+        .sort(),
+    /** The checkouts the host-version check has asked the registry about, in order. */
+    checked: () =>
+      peer.requests.flatMap(request =>
+        request.method.case === 'inspectCandidate' ? [request.method.value.path] : [],
+      ),
+    failStreams: async (host: HostId) => {
+      for (const stream of gateway.open(host)) stream.fail(new Error('network loss'));
+      await settled();
+    },
+  };
 }
 
 describe('Hosts.aliases', () => {
@@ -411,6 +501,7 @@ describe('Hosts.complete', () => {
       log: () => {},
     });
     const hosts = new Hosts({
+      runs: idleRunWatch(),
       manager,
       settings: new SettingsStore({
         settingsPath: '/settings/hosts.json',
@@ -907,284 +998,151 @@ describe('Hosts.readSummary', () => {
   });
 });
 
+/** The registered reads for digests and the usage window, answering what the test says. */
+class FakeRunReads implements RegistryRunReads {
+  readonly digested: {readonly project: string; readonly runIds: readonly string[]}[] = [];
+  readonly windows: {
+    readonly runIds: readonly string[];
+    readonly since: number;
+    readonly until: number;
+  }[] = [];
+  failure: Error | null = null;
+
+  async digests(_host: HostId, project: string, runIds: readonly string[]) {
+    this.digested.push({project, runIds});
+    if (this.failure !== null) throw this.failure;
+    return {kind: 'digests' as const, runs: new Map()};
+  }
+
+  async usageWindow(
+    _host: HostId,
+    _project: string,
+    runIds: readonly string[],
+    since: number,
+    until: number,
+  ) {
+    this.windows.push({runIds, since, until});
+    if (this.failure !== null) throw this.failure;
+    return {kind: 'unsupported' as const};
+  }
+}
+
+/** Hosts whose helper cannot start: digests and the usage window must not need it. */
+function runReadsSubject() {
+  const reads = new FakeRunReads();
+  let helperAcquisitions = 0;
+  const manager = new ConnectionManager({
+    linkFor: () => {
+      helperAcquisitions += 1;
+      throw new Error('helper unavailable; gateway still available');
+    },
+    appVersion: 'test',
+    scheduleTimeout: new FakeClock().scheduleTimeout,
+    log: () => {},
+  });
+  const settings = new SettingsStore({
+    settingsPath: '/settings/hosts.json',
+    recentPath: '/settings/recent.json',
+    preferencesPath: '/settings/preferences.json',
+    filesystem: new FakeSettingsFilesystem(),
+    log: () => {},
+  });
+  const hosts = hostsInWorld({
+    manager,
+    settings,
+    localCheckout: '/bundled',
+    sshConfigPath: '/missing',
+    runReads: reads,
+    log: () => {},
+    push: () => {},
+    retire: () => {},
+  });
+  return {hosts, reads, manager, acquisitions: () => helperAcquisitions};
+}
+
 describe('Hosts.runDigests', () => {
-  const summary = (digest: RunSummary['digest']): RunSummary => ({
-    run_id: 'run-1',
-    task: 'mpmc',
-    display_name: 'run',
-    created_at: '2026-10-17T03:00:00Z',
-    phase: null,
-    instance_id: null,
-    ...(digest === undefined ? {} : {digest}),
-  });
+  test("asks the host's registered read for the named runs and never its helper", async () => {
+    const {hosts, reads, manager, acquisitions} = runReadsSubject();
+    await using _manager = manager;
 
-  test('returns the digest of each named run the host records, with when it began', async () => {
-    const link = new FakeLink();
-    link.helper.host.projects.set('/srv/project', ['mpmc']);
-    link.helper.host.runHistory.set('/srv/project', [
-      summary({
-        kind: 'digest',
-        ideas: 3,
-        adopted_ratio: 2.5,
-        best_so_far_ratio: null,
-        duration_s: 90,
-        ending: null,
-        closing: 'finished',
-      }),
-    ]);
-    const subject = completionSubject(link);
-    await using _manager = subject.manager;
-
-    const reply = await subject.hosts.runDigests(LOCAL, '/srv/project', ['run-1']);
-
-    expect(reply.kind).toBe('digests');
-    if (reply.kind !== 'digests') return;
-    expect(reply.runs.get('run-1')).toEqual({
-      kind: 'read',
-      createdAt: Date.parse('2026-10-17T03:00:00Z'),
-      ideas: 3,
-      adoptedRatio: 2.5,
-      bestSoFarRatio: null,
-      durationSeconds: 90,
-      outcome: null,
-      closing: 'finished',
-      over: true,
-      uncompared: false,
-      endSummary: null,
-      dashboard: null,
-    });
-  });
-
-  test('asks for the tile data of a helper that offers it, and an older helper is never sent the field', async () => {
-    const dashboard = {
-      points: [
-        {ratio: 1.4, verdict: 'kept' as const, at: '2026-10-17T03:30:00Z'},
-        {ratio: null, verdict: 'failed' as const},
-      ],
-      points_omitted: 2,
-      failed_streak: 1,
-      last_event_at: '2026-10-17T04:00:00Z',
-      best: {value: 287.4, metric: 'output_tokens_per_s', unit: null},
-    };
-    const digest = {
-      kind: 'digest' as const,
-      ideas: 4,
-      adopted_ratio: null,
-      best_so_far_ratio: 1.4,
-      duration_s: 90,
-      ending: null,
-      closing: null,
-      dashboard,
-    };
-    const link = new FakeLink();
-    link.helper.host.projects.set('/srv/project', ['mpmc']);
-    link.helper.host.runHistory.set('/srv/project', [{...summary(digest), attention: 'stalled'}]);
-    const subject = completionSubject(link);
-    await using _manager = subject.manager;
-
-    const reply = await subject.hosts.runDigests(LOCAL, '/srv/project', ['run-1']);
-
-    expect(link.helper.requests.at(-1)).toMatchObject({type: 'runs.list', with_dashboard: true});
-    const entry = reply.kind === 'digests' ? reply.runs.get('run-1') : undefined;
-    expect(entry).toMatchObject({
-      kind: 'read',
-      dashboard: {
-        points: [
-          {ratio: 1.4, verdict: 'kept', at: Date.parse('2026-10-17T03:30:00Z')},
-          {ratio: null, verdict: 'failed', at: null},
-        ],
-        pointsOmitted: 2,
-        failedStreak: 1,
-        lastEventAt: Date.parse('2026-10-17T04:00:00Z'),
-        attention: 'stalled',
-        best: {value: 287.4, metric: 'output_tokens_per_s', unit: null},
-      },
+    await expect(hosts.runDigests(LOCAL, '/srv/project', ['run-1'])).resolves.toEqual({
+      kind: 'digests',
+      runs: new Map(),
     });
 
-    link.helper.features.delete('run_dashboard');
-    const older = await subject.hosts.runDigests(LOCAL, '/srv/project', ['run-1']);
-    expect(link.helper.requests.at(-1)).not.toHaveProperty('with_dashboard');
-    expect(older.kind === 'digests' && older.runs.get('run-1')).toMatchObject({dashboard: null});
+    expect(reads.digested).toEqual([{project: '/srv/project', runIds: ['run-1']}]);
+    expect(acquisitions()).toBe(0);
   });
 
-  test('asks for the named runs only, and a run not named carries no digest', async () => {
-    const link = new FakeLink();
-    link.helper.host.projects.set('/srv/project', ['mpmc']);
-    link.helper.host.runHistory.set('/srv/project', [
-      summary({kind: 'unreadable', message: 'could not read'}),
-    ]);
-    const subject = completionSubject(link);
-    await using _manager = subject.manager;
+  test('a host without the read answers a typed unsupported outcome', async () => {
+    const {hosts, reads, manager} = runReadsSubject();
+    await using _manager = manager;
+    reads.failure = new OperationFailed(FailureCategory.UNSUPPORTED, 'older checkout');
 
-    const none = await subject.hosts.runDigests(LOCAL, '/srv/project', []);
-    expect(none.kind === 'digests' && none.runs.size).toBe(0);
-    const named = await subject.hosts.runDigests(LOCAL, '/srv/project', ['run-1']);
-    expect(named.kind === 'digests' && named.runs.get('run-1')?.kind).toBe('unreadable');
-  });
-
-  test('returns a typed unsupported outcome without sending the request', async () => {
-    const link = new FakeLink();
-    link.helper.features.delete('run_digest');
-    const subject = completionSubject(link);
-    await using _manager = subject.manager;
-
-    await expect(subject.hosts.runDigests(LOCAL, '/srv/project', ['run-1'])).resolves.toEqual({
+    await expect(hosts.runDigests(LOCAL, '/srv/project', ['run-1'])).resolves.toEqual({
       kind: 'unsupported',
     });
-    expect(link.helper.requests.filter(request => request.type === 'runs.list')).toEqual([]);
+  });
+
+  test('any other failure reaches the caller unchanged', async () => {
+    const {hosts, reads, manager} = runReadsSubject();
+    await using _manager = manager;
+    reads.failure = new Error('project missing');
+
+    await expect(hosts.runDigests(LOCAL, '/srv/nowhere', [])).rejects.toThrow('project missing');
   });
 });
 
 describe('Hosts.usageWindow', () => {
   const SINCE = Date.parse('2026-10-17T00:00:00Z');
   const UNTIL = Date.parse('2026-10-18T00:00:00Z');
-  const figures = {
-    spent_usd: 12.5,
-    spend_per_hour_usd: 0.75,
-    tokens: {input: 900, cache_read: null, cache_write: null, output: 40, reasoning: null},
-    turns: 7,
-    unpriced_turns: 1,
-    untimed_turns: 0,
-    new_bests: 5,
-    cost_per_new_best_usd: 2.5,
-    by_run: [{run_id: 'run-1', task: 'mpmc', cost_usd: 12.5, unpriced_turns: 1}],
-    by_agent: [
-      {
-        role: 'implementer',
-        harness: 'codex',
-        model: null,
-        cost_usd: 12.5,
-        turns: 7,
-        unpriced_turns: 1,
-      },
-    ],
-    agents_omitted: 0,
-  };
-  const listed: RunSummary = {
-    run_id: 'run-1',
-    task: 'mpmc',
-    display_name: 'run',
-    created_at: '2026-10-17T03:00:00Z',
-    phase: null,
-    instance_id: null,
-  };
 
-  test('asks for the window in ISO time and returns the figures in the app terms', async () => {
-    const link = new FakeLink();
-    link.helper.host.projects.set('/srv/project', ['mpmc']);
-    link.helper.host.runHistory.set('/srv/project', [listed]);
-    link.helper.host.usage.set('/srv/project', figures);
-    const subject = completionSubject(link);
-    await using _manager = subject.manager;
+  test('asks the registered read for the window in milliseconds and never the helper', async () => {
+    const {hosts, reads, manager, acquisitions} = runReadsSubject();
+    await using _manager = manager;
 
-    const reply = await subject.hosts.usageWindow(
-      LOCAL,
-      '/srv/project',
-      ['run-1', 'run-9'],
-      SINCE,
-      UNTIL,
+    await hosts.usageWindow(LOCAL, '/srv/project', ['run-1', 'run-9'], SINCE, UNTIL);
+
+    expect(reads.windows).toEqual([{runIds: ['run-1', 'run-9'], since: SINCE, until: UNTIL}]);
+    expect(acquisitions()).toBe(0);
+  });
+
+  test('a host without the read answers a typed unsupported outcome', async () => {
+    const {hosts, reads, manager} = runReadsSubject();
+    await using _manager = manager;
+    reads.failure = new OperationFailed(FailureCategory.UNSUPPORTED, 'older checkout');
+
+    await expect(hosts.usageWindow(LOCAL, '/srv/project', [], SINCE, UNTIL)).resolves.toEqual({
+      kind: 'unsupported',
+    });
+  });
+
+  test('property: a window or run list the host would refuse is refused here, and only that', async () => {
+    await fc.assert(
+      fc.asyncProperty(
+        fc.nat({max: 120}),
+        fc.integer({min: -10, max: 400}),
+        fc.integer({min: -10, max: 400}),
+        async (count, sinceHours, untilHours) => {
+          const {hosts, reads, manager} = runReadsSubject();
+          await using _manager = manager;
+          const ids = Array.from({length: count}, (_, at) => `run-${at}`);
+          const since = SINCE + sinceHours * 3_600_000;
+          const until = SINCE + untilHours * 3_600_000;
+          const refused = usageWindowRefusal(ids, since, until) !== null;
+
+          const asked = hosts.usageWindow(LOCAL, '/srv/project', ids, since, until);
+
+          if (refused) await expect(asked).rejects.toThrow();
+          else await asked;
+          expect(reads.windows).toHaveLength(refused ? 0 : 1);
+          expect(refused).toBe(
+            count > 100 || untilHours <= sinceHours || untilHours - sinceHours > 336,
+          );
+        },
+      ),
+      {numRuns: 80, seed: 4313},
     );
-
-    expect(link.helper.requests.at(-1)).toMatchObject({
-      type: 'usage.window',
-      run_ids: ['run-1', 'run-9'],
-      since: '2026-10-17T00:00:00.000Z',
-      until: '2026-10-18T00:00:00.000Z',
-    });
-    expect(reply).toEqual({
-      kind: 'usage',
-      usage: {
-        since: SINCE,
-        until: UNTIL,
-        spentUsd: 12.5,
-        spendPerHourUsd: 0.75,
-        tokens: figures.tokens,
-        turns: 7,
-        unpricedTurns: 1,
-        unpricedItemised: true,
-        untimedTurns: 0,
-        newBests: 5,
-        costPerNewBestUsd: 2.5,
-        byRun: [{runId: 'run-1', task: 'mpmc', costUsd: 12.5, unpricedTurns: 1}],
-        byAgent: [
-          {
-            role: 'implementer',
-            harness: 'codex',
-            model: null,
-            costUsd: 12.5,
-            turns: 7,
-            unpricedTurns: 1,
-          },
-        ],
-        agentsOmitted: 0,
-        missingRuns: ['run-9'],
-      },
-    });
-  });
-
-  test('a helper that predates the per-run unpriced counts reads as none said', async () => {
-    const link = new FakeLink();
-    link.helper.host.projects.set('/srv/project', ['mpmc']);
-    link.helper.host.runHistory.set('/srv/project', [listed]);
-    link.helper.host.usage.set('/srv/project', {
-      ...figures,
-      by_run: [{run_id: 'run-1', task: 'mpmc', cost_usd: 12.5}],
-      by_agent: [{role: 'implementer', harness: 'codex', model: null, cost_usd: 12.5, turns: 7}],
-    });
-    const subject = completionSubject(link);
-    await using _manager = subject.manager;
-
-    const reply = await subject.hosts.usageWindow(LOCAL, '/srv/project', ['run-1'], SINCE, UNTIL);
-
-    expect(reply.kind === 'usage' ? reply.usage.byRun[0]?.unpricedTurns : null).toBe(0);
-    expect(reply.kind === 'usage' ? reply.usage.byAgent[0]?.unpricedTurns : null).toBe(0);
-    expect(reply.kind === 'usage' ? reply.usage.unpricedItemised : null).toBe(false);
-  });
-
-  test('returns a typed unsupported outcome without sending the request', async () => {
-    const link = new FakeLink();
-    link.helper.features.delete('usage_window');
-    const subject = completionSubject(link);
-    await using _manager = subject.manager;
-
-    await expect(
-      subject.hosts.usageWindow(LOCAL, '/srv/project', [], SINCE, UNTIL),
-    ).resolves.toEqual({kind: 'unsupported'});
-    expect(link.helper.requests.filter(request => request.type === 'usage.window')).toEqual([]);
-  });
-
-  test('refuses a window or run list the helper would refuse, without sending it', async () => {
-    const link = new FakeLink();
-    link.helper.host.projects.set('/srv/project', ['mpmc']);
-    const subject = completionSubject(link);
-    await using _manager = subject.manager;
-    const hours = (count: number) => SINCE + count * 3_600_000;
-
-    for (const [ids, since, until] of [
-      [[], UNTIL, SINCE],
-      [[], SINCE, SINCE],
-      [[], SINCE, hours(337)],
-      [Array.from({length: 101}, (_, at) => `run-${at}`), SINCE, UNTIL],
-      [[], Number.NaN, UNTIL],
-    ] as const) {
-      await expect(
-        subject.hosts.usageWindow(LOCAL, '/srv/project', ids, since, until),
-      ).rejects.toThrow();
-    }
-    await expect(
-      subject.hosts.usageWindow(LOCAL, '/srv/project', [], SINCE, hours(336)),
-    ).resolves.toMatchObject({kind: 'usage'});
-    expect(link.helper.requests.filter(request => request.type === 'usage.window')).toHaveLength(1);
-  });
-
-  test('a project the host does not have is an error, not an empty answer', async () => {
-    const link = new FakeLink();
-    const subject = completionSubject(link);
-    await using _manager = subject.manager;
-
-    await expect(
-      subject.hosts.usageWindow(LOCAL, '/srv/nowhere', [], SINCE, UNTIL),
-    ).rejects.toThrow();
   });
 });
 
@@ -1276,49 +1234,19 @@ describe('Hosts checkout changes', () => {
     expect(manager.existing('ssh:alpha')).toBeNull();
   });
 
-  test('an ambiguous removal write still retires the connection matching its visible result', async () => {
+  test('an ambiguous removal write still retires the watcher matching its visible result', async () => {
     const filesystem = new FakeSettingsFilesystem();
-    const settings = new SettingsStore({
-      settingsPath: '/settings/hosts.json',
-      recentPath: '/settings/recent.json',
-      preferencesPath: '/settings/preferences.json',
-      filesystem,
-      log: () => {},
-    });
-    await settings.updateHosts(current => withHostSettings(current, ALPHA, {checkout: '/old'}));
-    const link = new FakeLink();
-    await using manager = new ConnectionManager({
-      linkFor: () => link,
-      appVersion: 'test',
-      scheduleTimeout: new FakeClock().scheduleTimeout,
-      config: CONFIG,
-      log: () => {},
-    });
-    const retired: string[] = [];
-    const hosts = hostsInWorld({
-      manager,
-      settings,
-      localCheckout: '/bundled',
-      sshConfigPath: '/missing',
-      log: () => {
-        throw new Error('log failed');
-      },
-      push: () => {},
-      retire: key => {
-        retired.push(key);
-        throw new Error('retire failed');
-      },
-    });
-    await hosts.recent([ALPHA]);
-    expect(manager.existing('ssh:alpha')).not.toBeNull();
+    const world = await gatewayWorld({filesystem, configured: [ALPHA], failingCallbacks: true});
+    await world.hosts.recent([ALPHA]);
+    expect(world.watched()).toEqual(['ssh:alpha']);
     const persistence = new Error('directory sync failed');
     filesystem.failNextDirectorySync(settingsBinaryPath('/settings/hosts.json'), persistence);
 
-    await expect(hosts.remove(ALPHA)).rejects.toBe(persistence);
+    await expect(world.hosts.remove(ALPHA)).rejects.toBe(persistence);
 
-    expect(settingsFor((await settings.hosts()).settings, ALPHA)).toBeNull();
-    expect(manager.existing('ssh:alpha')).toBeNull();
-    expect(retired).toEqual(['ssh:alpha']);
+    expect(settingsFor((await world.settings.hosts()).settings, ALPHA)).toBeNull();
+    expect(world.watched()).toEqual([]);
+    expect(world.retired).toEqual(['ssh:alpha']);
   });
 
   test('a failed removal preserves its persistence error when repair diagnostics also fail', async () => {
@@ -1360,105 +1288,56 @@ describe('Hosts checkout changes', () => {
   });
 
   test('cancelling checkout validation cannot persist or replace a newer operation', async () => {
-    const directory = '/settings';
     const filesystem = new FakeSettingsFilesystem();
-    const settings = new SettingsStore({
-      settingsPath: join(directory, 'hosts.json'),
-      recentPath: join(directory, 'recent.json'),
-      preferencesPath: join(directory, 'preferences.json'),
-      filesystem,
-      log: () => {},
-    });
-    await settings.updateHosts(current =>
-      withHostSettings(current, LOCAL, {checkout: '/existing'}),
-    );
-    const link = new FakeLink();
-    const clock = new FakeClock();
-    await using manager = new ConnectionManager({
-      linkFor: () => link,
-      appVersion: 'test',
-      scheduleTimeout: clock.scheduleTimeout,
-      config: CONFIG,
-      log: () => {},
-    });
-    const hosts = hostsInWorld({
-      manager,
-      settings,
-      localCheckout: '/bundled',
-      sshConfigPath: '/missing',
-      log: () => {},
-      push: () => {},
-      retire: () => {},
-    });
-    await hosts.host(LOCAL, '10:100');
-    await manager.existing('local')?.ready();
+    const world = await gatewayWorld({filesystem, configured: [LOCAL]});
+    await world.hosts.host(LOCAL, '10:100');
+    const first = world.gateway.open(LOCAL);
 
     const held = filesystem.deferNextWrite();
-    const obsolete = hosts.setCheckout(LOCAL, '/cancelled', {owner: '10:100', sequence: 1});
+    const obsolete = world.hosts.setCheckout(LOCAL, '/cancelled', {owner: '10:100', sequence: 1});
     await held.received;
 
     // A reloaded renderer may reuse sequence 1, but its document owner keeps the operation unique.
-    const newer = hosts.setCheckout(LOCAL, '/newer', {owner: '11:101', sequence: 1});
-    const retired = hosts.cancelCheckoutOwner('10:100');
+    const newer = world.hosts.setCheckout(LOCAL, '/newer', {owner: '11:101', sequence: 1});
+    const retired = world.hosts.cancelCheckoutOwner('10:100');
     held.release();
     await expect(obsolete).rejects.toThrow('checkout change was cancelled');
     await retired;
     await expect(newer).resolves.toBe('/src/vibesys');
 
-    expect(settingsFor((await settings.hosts()).settings, LOCAL)?.checkout).toBe('/newer');
-    // `/cancelled` opened only its disposable candidate; it never replaced the watched connection.
-    expect(link.helper.checkouts).toEqual(['/existing', '/newer']);
-    expect(manager.existing('local')?.checkoutRoot).toBe('/src/vibesys');
+    expect(settingsFor((await world.settings.hosts()).settings, LOCAL)?.checkout).toBe('/newer');
+    // The cancelled candidate never replaced the watcher; the newer checkout replaced it once.
+    expect(first.every(stream => stream.signal.aborted)).toBe(true);
+    expect(world.openStreams('local')).toBe(1);
+    world.gateway.announce(LOCAL, []);
+    await world.settled();
+    expect(world.checked().at(-1)).toBe('/newer');
   });
 
   test('a cancellation after atomic replace reports and installs the committed checkout', async () => {
-    const directory = '/settings';
     const filesystem = new FakeSettingsFilesystem();
-    const settings = new SettingsStore({
-      settingsPath: join(directory, 'hosts.json'),
-      recentPath: join(directory, 'recent.json'),
-      preferencesPath: join(directory, 'preferences.json'),
-      filesystem,
-      log: () => {},
-    });
-    await settings.updateHosts(current =>
-      withHostSettings(current, LOCAL, {checkout: '/existing'}),
-    );
-    const link = new FakeLink();
-    await using manager = new ConnectionManager({
-      linkFor: () => link,
-      appVersion: 'test',
-      scheduleTimeout: new FakeClock().scheduleTimeout,
-      config: CONFIG,
-      log: () => {},
-    });
-    const hosts = hostsInWorld({
-      manager,
-      settings,
-      localCheckout: '/bundled',
-      sshConfigPath: '/missing',
-      log: () => {},
-      push: () => {},
-      retire: () => {},
-    });
-    await hosts.host(LOCAL, '10:100');
-    await manager.existing('local')?.ready();
+    const world = await gatewayWorld({filesystem, configured: [LOCAL]});
+    await world.hosts.host(LOCAL, '10:100');
+    const first = world.gateway.open(LOCAL);
 
     const held = filesystem.deferNextReplaceAfterCommit();
     const change = {owner: '10:100', sequence: 1};
-    const changing = hosts.setCheckout(LOCAL, '/new', change);
+    const changing = world.hosts.setCheckout(LOCAL, '/new', change);
     await held.committed;
-    await hosts.cancelCheckout(change);
+    await world.hosts.cancelCheckout(change);
     held.release();
 
     await expect(changing).resolves.toBe('/src/vibesys');
-    expect(settingsFor((await settings.hosts()).settings, LOCAL)?.checkout).toBe('/new');
-    expect(link.helper.checkouts).toEqual(['/existing', '/new']);
-    expect(manager.existing('local')?.checkoutRoot).toBe('/src/vibesys');
+    expect(settingsFor((await world.settings.hosts()).settings, LOCAL)?.checkout).toBe('/new');
+    expect(first.every(stream => stream.signal.aborted)).toBe(true);
+    expect(world.openStreams('local')).toBe(1);
+    world.gateway.announce(LOCAL, []);
+    await world.settled();
+    expect(world.checked().at(-1)).toBe('/new');
   });
 });
 
-describe('Hosts desired set', () => {
+describe('Hosts.connection racing a checkout change', () => {
   test('a checkout read captured before commit cannot acquire the stale checkout afterward', async () => {
     const filesystem = new CapturedReadFilesystem();
     const settings = new SettingsStore({
@@ -1492,57 +1371,15 @@ describe('Hosts desired set', () => {
     const acquiring = hosts.connection(ALPHA);
     await held.captured;
     await hosts.setCheckout(ALPHA, '/new', {owner: '10:100', sequence: 1});
-    expect(manager.existing('ssh:alpha')?.where).toBe('/new on fake');
     held.release();
 
     const lease = await acquiring;
     expect(lease.connection.where).toBe('/new on fake');
     expect(manager.existing('ssh:alpha')).toBe(lease.connection);
-    expect(manager.releasedCheckouts).toEqual(['/old']);
+    // The stale checkout was never acquired, so there is nothing of it to release.
+    expect(manager.releasedCheckouts).toEqual([]);
     await lease[Symbol.asyncDispose]();
-    expect(manager.existing('ssh:alpha')?.where).toBe('/new on fake');
-  });
-
-  test.each([
-    ['recent reconciliation', (hosts: Hosts) => hosts.recent([ALPHA])],
-    ['visible-host reconciliation', (hosts: Hosts) => hosts.host(ALPHA, '10:100')],
-  ] as const)('a checkout captured by %s cannot replace a newer same-host commit', async (_kind, reconcile) => {
-    const filesystem = new CapturedReadFilesystem();
-    const settings = new SettingsStore({
-      settingsPath: '/settings/hosts.json',
-      recentPath: '/settings/recent.json',
-      preferencesPath: '/settings/preferences.json',
-      filesystem,
-      log: () => {},
-    });
-    await settings.updateHosts(current => withHostSettings(current, ALPHA, {checkout: '/old'}));
-    const link = new FakeLink();
-    await using manager = new ConnectionManager({
-      linkFor: () => link,
-      appVersion: 'test',
-      scheduleTimeout: new FakeClock().scheduleTimeout,
-      config: CONFIG,
-      log: () => {},
-    });
-    const hosts = hostsInWorld({
-      manager,
-      settings,
-      localCheckout: '/bundled',
-      sshConfigPath: '/missing',
-      log: () => {},
-      push: () => {},
-      retire: () => {},
-    });
-
-    const held = filesystem.deferNextRead();
-    const older = reconcile(hosts);
-    await held.captured;
-    await hosts.setCheckout(ALPHA, '/new', {owner: '10:100', sequence: 1});
-    held.release();
-    await older;
-
-    expect(manager.existing('ssh:alpha')?.where).toBe('/new on fake');
-    expect(link.helper.checkouts).toEqual(['/new']);
+    expect(manager.existing('ssh:alpha')).toBeNull();
   });
 
   test.each([
@@ -1586,13 +1423,14 @@ describe('Hosts desired set', () => {
     const lease = await acquiring;
     expect(lease.connection.where).toBe('/new on fake');
     expect(manager.existing('ssh:alpha')).toBe(lease.connection);
-    const releasedBeforeReturn =
-      position === 'before' ? ['/old', '/old', '/new'] : ['/old', '/old'];
+    // The stale lease is released once, on either side of the manager's delivery, and no watcher
+    // holds a connection of its own to release beside it.
+    const releasedBeforeReturn = ['/old'];
     expect(manager.releasedCheckouts).toEqual(releasedBeforeReturn);
     await lease[Symbol.asyncDispose]();
     await lease[Symbol.asyncDispose]();
     expect(manager.releasedCheckouts).toEqual([...releasedBeforeReturn, '/new']);
-    expect(manager.existing('ssh:alpha')?.where).toBe('/new on fake');
+    expect(manager.existing('ssh:alpha')).toBeNull();
   });
 
   test('a superseded acquisition repairs its host without waiting for an unrelated host', async () => {
@@ -1644,517 +1482,259 @@ describe('Hosts desired set', () => {
     expect(winner).toBe('alpha');
     expect(lease.connection.where).toBe('/new on fake');
     expect(manager.existing('ssh:alpha')).toBe(lease.connection);
-    expect(manager.releasedCheckouts.filter(checkout => checkout === '/old')).toHaveLength(2);
+    expect(manager.releasedCheckouts.filter(checkout => checkout === '/old')).toHaveLength(1);
     await lease[Symbol.asyncDispose]();
-    expect(manager.existing('ssh:alpha')?.where).toBe('/new on fake');
+    expect(manager.existing('ssh:alpha')).toBeNull();
   });
 
-  test('a non-desired checkout commit cannot invalidate another host reconciliation', async () => {
+  test('a non-desired checkout commit does not disturb another host being watched', async () => {
     const filesystem = new CapturedReadFilesystem();
-    const settings = new SettingsStore({
-      settingsPath: '/settings/hosts.json',
-      recentPath: '/settings/recent.json',
-      preferencesPath: '/settings/preferences.json',
-      filesystem,
-      log: () => {},
-    });
-    await settings.updateHosts(current => withHostSettings(current, ALPHA, {checkout: '/alpha'}));
-    await settings.updateHosts(current => withHostSettings(current, BETA, {checkout: '/old-beta'}));
-    await using manager = new ConnectionManager({
-      linkFor: () => new FakeLink(),
-      appVersion: 'test',
-      scheduleTimeout: new FakeClock().scheduleTimeout,
-      config: CONFIG,
-      log: () => {},
-    });
-    const hosts = hostsInWorld({
-      manager,
-      settings,
-      localCheckout: '/bundled',
-      sshConfigPath: '/missing',
-      log: () => {},
-      push: () => {},
-      retire: () => {},
-    });
-
+    const world = await gatewayWorld({filesystem, configured: [ALPHA, BETA]});
     const heldAlpha = filesystem.deferNextRead();
-    const reconcilingAlpha = hosts.recent([ALPHA]);
+    const reconcilingAlpha = world.hosts.recent([ALPHA]);
     await heldAlpha.captured;
-    await hosts.setCheckout(BETA, '/new-beta', {owner: 'retired', sequence: 1});
-    expect(manager.existing('ssh:beta')).toBeNull();
+    await world.hosts.setCheckout(BETA, '/new-beta', {owner: 'retired', sequence: 1});
+    expect(world.watched()).toEqual([]);
     heldAlpha.release();
     await reconcilingAlpha;
 
-    expect(manager.existing('ssh:alpha')?.where).toBe('/alpha on fake');
-    expect(settingsFor((await settings.hosts()).settings, BETA)?.checkout).toBe('/new-beta');
+    expect(world.watched()).toEqual(['ssh:alpha']);
+    expect(settingsFor((await world.settings.hosts()).settings, BETA)?.checkout).toBe('/new-beta');
+  });
+});
+
+/** The ops a renderer and the settings page can issue against the desired set. */
+type DesiredOp =
+  | {readonly kind: 'recent'; readonly hosts: readonly number[]}
+  | {readonly kind: 'host'; readonly host: number; readonly owner: number}
+  | {readonly kind: 'retire'; readonly owner: number}
+  | {readonly kind: 'remove'; readonly host: number};
+
+const WORLD_HOSTS: readonly HostId[] = [LOCAL, ALPHA, BETA];
+
+type GatewayStep =
+  | {readonly kind: 'announce'; readonly runs: readonly {id: string; liveness: RunLiveness}[]}
+  | {readonly kind: 'fail'}
+  | {readonly kind: 'advance'; readonly ms: number};
+
+/** One thing the host's gateway does. */
+async function playGateway(
+  world: Awaited<ReturnType<typeof gatewayWorld>>,
+  step: GatewayStep,
+): Promise<void> {
+  switch (step.kind) {
+    case 'announce':
+      world.gateway.announce(
+        LOCAL,
+        step.runs.map(run => ({runId: run.id, liveness: run.liveness})),
+      );
+      return;
+    case 'fail':
+      await world.failStreams(LOCAL);
+      return;
+    case 'advance':
+      world.clock.advanceBy(step.ms);
+  }
+}
+
+/** What the desired set is, written from the product's rules and not from its code. */
+class DesiredModel {
+  #recent = new Set<number>();
+  #visible: {owner: number; host: number} | null = null;
+  readonly #removed = new Set<number>();
+
+  async apply(hosts: Hosts, op: DesiredOp): Promise<void> {
+    switch (op.kind) {
+      case 'recent':
+        this.#recent = new Set(op.hosts);
+        await hosts.recent(op.hosts.map(index => WORLD_HOSTS[index] as HostId));
+        return;
+      case 'host':
+        this.#visible = {owner: op.owner, host: op.host};
+        await hosts.host(WORLD_HOSTS[op.host] as HostId, `owner-${op.owner}`);
+        return;
+      case 'retire':
+        if (this.#visible?.owner === op.owner) this.#visible = null;
+        await hosts.retireOwner(`owner-${op.owner}`);
+        return;
+      case 'remove':
+        this.#removed.add(op.host);
+        await hosts.remove(WORLD_HOSTS[op.host] as HostId);
+    }
+  }
+
+  /** The keys of the hosts that should be watched. A removed machine has no checkout left. */
+  watched(): string[] {
+    const desired = new Set([
+      ...this.#recent,
+      ...(this.#visible === null ? [] : [this.#visible.host]),
+    ]);
+    return [...desired]
+      .filter(index => index === 0 || !this.#removed.has(index))
+      .map(index => hostKey(WORLD_HOSTS[index] as HostId))
+      .sort();
+  }
+}
+
+describe('Hosts watch the gateway of every desired host', () => {
+  test('a gateway that can list lists runs although its helper cannot start (the reviewer repro)', async () => {
+    const world = await gatewayWorld({helper: 'down', configured: []});
+    await world.hosts.recent([LOCAL]);
+    world.gateway.announce(LOCAL, [{runId: 'run-a', liveness: RunLiveness.ALIVE}]);
+
+    const last = world.pushed.at(-1);
+    if (last?.kind !== 'listed') throw new Error('listed required');
+    expect(last.live.map(run => run.runId)).toEqual(['run-a']);
+    expect(world.helperAcquisitions()).toBe(0);
+    expect(world.logged).toEqual([]);
   });
 
-  test.each([
-    ['recent hosts', (hosts: Hosts) => hosts.recent([ALPHA])],
-    ['visible owner', (hosts: Hosts) => hosts.host(ALPHA, '11:101').then(() => undefined)],
-  ] as const)('a committed checkout refresh survives an unrelated %s update', async (_update, changeDesired) => {
-    const filesystem = new FakeSettingsFilesystem();
-    const settings = new SettingsStore({
-      settingsPath: '/settings/hosts.json',
-      recentPath: '/settings/recent.json',
-      preferencesPath: '/settings/preferences.json',
-      filesystem,
-      log: () => {},
-    });
-    await settings.updateHosts(current => withHostSettings(current, ALPHA, {checkout: '/old'}));
-    const link = new FakeLink();
-    await using manager = new DeferredAcquireManager({
-      linkFor: () => link,
-      appVersion: 'test',
-      scheduleTimeout: new FakeClock().scheduleTimeout,
-      config: CONFIG,
-      log: () => {},
-    });
-    const hosts = hostsInWorld({
-      manager,
-      settings,
-      localCheckout: '/bundled',
-      sshConfigPath: '/missing',
-      log: () => {},
-      push: () => {},
-      retire: () => {},
-    });
-    await hosts.host(ALPHA, '10:100');
+  const SCRIPT = fc.array(
+    fc.oneof(
+      fc.record({
+        kind: fc.constant('announce' as const),
+        runs: fc.array(
+          fc.record({
+            id: fc.constantFrom('run-a', 'run-b', 'run-c'),
+            liveness: fc.constantFrom(
+              RunLiveness.ALIVE,
+              RunLiveness.INTERRUPTED,
+              RunLiveness.ENDED,
+              RunLiveness.UNSPECIFIED,
+            ),
+          }),
+          {maxLength: 3},
+        ),
+      }),
+      fc.record({kind: fc.constant('fail' as const)}),
+      fc.record({kind: fc.constant('advance' as const), ms: fc.integer({min: 0, max: 40_000})}),
+    ),
+    {maxLength: 8},
+  );
 
-    const held = manager.deferNext('/new');
-    const changing = hosts.setCheckout(ALPHA, '/new', {owner: '10:100', sequence: 1});
-    await held.received;
-    await changeDesired(hosts);
-    held.release();
-    await changing;
-
-    expect(settingsFor((await settings.hosts()).settings, ALPHA)?.checkout).toBe('/new');
-    expect(manager.existing('ssh:alpha')?.where).toBe('/new on fake');
-    expect(link.helper.checkouts).toEqual(['/old', '/new']);
-  });
-
-  test('a newer committed checkout supersedes an older delayed refresh for the same host', async () => {
-    const filesystem = new FakeSettingsFilesystem();
-    const settings = new SettingsStore({
-      settingsPath: '/settings/hosts.json',
-      recentPath: '/settings/recent.json',
-      preferencesPath: '/settings/preferences.json',
-      filesystem,
-      log: () => {},
-    });
-    await settings.updateHosts(current => withHostSettings(current, ALPHA, {checkout: '/old'}));
-    const link = new FakeLink();
-    await using manager = new DeferredAcquireManager({
-      linkFor: () => link,
-      appVersion: 'test',
-      scheduleTimeout: new FakeClock().scheduleTimeout,
-      config: CONFIG,
-      log: () => {},
-    });
-    const hosts = hostsInWorld({
-      manager,
-      settings,
-      localCheckout: '/bundled',
-      sshConfigPath: '/missing',
-      log: () => {},
-      push: () => {},
-      retire: () => {},
-    });
-    await hosts.host(ALPHA, '10:100');
-
-    const held = manager.deferNext('/first');
-    const first = hosts.setCheckout(ALPHA, '/first', {owner: '10:100', sequence: 1});
-    await held.received;
-    await hosts.setCheckout(ALPHA, '/second', {owner: '10:100', sequence: 2});
-    held.release();
-    await first;
-
-    expect(settingsFor((await settings.hosts()).settings, ALPHA)?.checkout).toBe('/second');
-    expect(manager.existing('ssh:alpha')?.where).toBe('/second on fake');
-    expect(manager.releasedCheckouts).toEqual(['/old', '/first']);
-    expect(link.helper.checkouts.at(-1)).toBe('/second');
-  });
-
-  test('removing a host revokes and disposes its delayed checkout refresh', async () => {
-    const filesystem = new FakeSettingsFilesystem();
-    const settings = new SettingsStore({
-      settingsPath: '/settings/hosts.json',
-      recentPath: '/settings/recent.json',
-      preferencesPath: '/settings/preferences.json',
-      filesystem,
-      log: () => {},
-    });
-    await settings.updateHosts(current => withHostSettings(current, ALPHA, {checkout: '/old'}));
-    const link = new FakeLink();
-    await using manager = new DeferredAcquireManager({
-      linkFor: () => link,
-      appVersion: 'test',
-      scheduleTimeout: new FakeClock().scheduleTimeout,
-      config: CONFIG,
-      log: () => {},
-    });
-    const retired: string[] = [];
-    const hosts = hostsInWorld({
-      manager,
-      settings,
-      localCheckout: '/bundled',
-      sshConfigPath: '/missing',
-      log: () => {},
-      push: () => {},
-      retire: host => retired.push(host),
-    });
-    await hosts.host(ALPHA, '10:100');
-
-    const held = manager.deferNext('/new');
-    const changing = hosts.setCheckout(ALPHA, '/new', {owner: '10:100', sequence: 1});
-    await held.received;
-    await hosts.retireOwner('10:100');
-    held.release();
-    await changing;
-
-    expect(manager.existing('ssh:alpha')).toBeNull();
-    expect(retired).toEqual(['ssh:alpha']);
-    expect(manager.releasedCheckouts).toEqual(['/old', '/new']);
-  });
-
-  test('reconciliation replaces a watcher whose checkout differs from authoritative settings', async () => {
-    const filesystem = new FakeSettingsFilesystem();
-    const settings = new SettingsStore({
-      settingsPath: '/settings/hosts.json',
-      recentPath: '/settings/recent.json',
-      preferencesPath: '/settings/preferences.json',
-      filesystem,
-      log: () => {},
-    });
-    await settings.updateHosts(current => withHostSettings(current, ALPHA, {checkout: '/old'}));
-    const link = new FakeLink();
-    await using manager = new ConnectionManager({
-      linkFor: () => link,
-      appVersion: 'test',
-      scheduleTimeout: new FakeClock().scheduleTimeout,
-      config: CONFIG,
-      log: () => {},
-    });
-    const hosts = hostsInWorld({
-      manager,
-      settings,
-      localCheckout: '/bundled',
-      sshConfigPath: '/missing',
-      log: () => {},
-      push: () => {},
-      retire: () => {},
-    });
-    await hosts.host(ALPHA, '10:100');
-    await settings.updateHosts(current =>
-      withHostSettings(current, ALPHA, {checkout: '/authoritative'}),
+  test('property: a host listing and its status depend only on its gateway, never on its helper', async () => {
+    await fc.assert(
+      fc.asyncProperty(SCRIPT, async script => {
+        const outcomes = [];
+        for (const helper of ['up', 'down'] as const) {
+          const world = await gatewayWorld({helper, configured: []});
+          await world.hosts.recent([LOCAL]);
+          for (const step of script) await playGateway(world, step);
+          expect(world.helperAcquisitions()).toBe(0);
+          outcomes.push(world.pushed);
+        }
+        expect(outcomes[1]).toEqual(outcomes[0]);
+      }),
+      {numRuns: 40, seed: 4311},
     );
-
-    await hosts.recent([ALPHA]);
-
-    expect(manager.existing('ssh:alpha')?.where).toBe('/authoritative on fake');
-    expect(link.helper.checkouts).toEqual(['/old', '/authoritative']);
   });
 
-  test('reconciliation repairs a watcher displaced from the manager shown slot', async () => {
-    const filesystem = new FakeSettingsFilesystem();
-    const settings = new SettingsStore({
-      settingsPath: '/settings/hosts.json',
-      recentPath: '/settings/recent.json',
-      preferencesPath: '/settings/preferences.json',
-      filesystem,
-      log: () => {},
-    });
-    await settings.updateHosts(current => withHostSettings(current, ALPHA, {checkout: '/old'}));
-    const link = new FakeLink();
-    await using manager = new ConnectionManager({
-      linkFor: () => link,
-      appVersion: 'test',
-      scheduleTimeout: new FakeClock().scheduleTimeout,
-      config: CONFIG,
-      log: () => {},
-    });
-    const hosts = hostsInWorld({
-      manager,
-      settings,
-      localCheckout: '/bundled',
-      sshConfigPath: '/missing',
-      log: () => {},
-      push: () => {},
-      retire: () => {},
-    });
-    await hosts.host(ALPHA, '10:100');
-    const displaced = await manager.acquire(ALPHA, '/other');
-    await displaced[Symbol.asyncDispose]();
-    expect(manager.existing('ssh:alpha')).toBeNull();
-
-    await hosts.recent([ALPHA]);
-
-    expect(manager.existing('ssh:alpha')?.where).toBe('/old on fake');
-    expect(link.helper.checkouts).toEqual(['/old', '/old']);
+  test('status follows the stream: connecting, then listed, reconnecting after a failure, listed again', async () => {
+    const world = await gatewayWorld({helper: 'down', configured: []});
+    await world.hosts.recent([LOCAL]);
+    const kinds = () =>
+      world.pushed.map(listing => (listing.kind === 'listed' ? 'listed' : listing.connection.kind));
+    expect(kinds()).toEqual(['connecting']);
+    world.gateway.announce(LOCAL, []);
+    await world.failStreams(LOCAL);
+    expect(kinds()).toEqual(['connecting', 'listed', 'reconnecting']);
+    world.clock.advanceBy(1_000);
+    world.gateway.announce(LOCAL, [{runId: 'run-a', liveness: RunLiveness.ENDED}]);
+    expect(kinds()).toEqual(['connecting', 'listed', 'reconnecting', 'listed']);
   });
 
-  test.each([
-    'reject',
-    'throw',
-  ] as const)('an obsolete watched host observes a retirement that %ss exactly once', async mode => {
-    const filesystem = new FakeSettingsFilesystem();
-    const settings = new SettingsStore({
-      settingsPath: '/settings/hosts.json',
-      recentPath: '/settings/recent.json',
-      preferencesPath: '/settings/preferences.json',
-      filesystem,
-      log: () => {},
-    });
-    await configuredSettings(settings, [ALPHA, BETA]);
-    const manager = new FirstReleaseFailureManager(mode, {
-      linkFor: () => new FakeLink(),
-      appVersion: 'test',
-      scheduleTimeout: new FakeClock().scheduleTimeout,
-      config: CONFIG,
-      log: () => {},
-    });
-    const logged: string[] = [];
-    const message = 'could not retire alpha connection: retirement remained unconfirmed';
-    let observed = (): void => {};
-    const retirementObserved = new Promise<void>(resolve => {
-      observed = resolve;
-    });
-    const retired: string[] = [];
-    const hosts = hostsInWorld({
-      manager,
-      settings,
-      localCheckout: '/bundled',
-      sshConfigPath: '/missing',
-      log: entry => {
-        logged.push(entry);
-        if (entry === message) observed();
-      },
-      push: () => {},
-      retire: host => retired.push(host),
-    });
+  const OPS = fc.array(
+    fc.oneof(
+      fc.record({
+        kind: fc.constant('recent' as const),
+        hosts: fc.uniqueArray(fc.nat({max: 2}), {maxLength: 3}),
+      }),
+      fc.record({
+        kind: fc.constant('host' as const),
+        host: fc.nat({max: 2}),
+        owner: fc.nat({max: 1}),
+      }),
+      fc.record({kind: fc.constant('retire' as const), owner: fc.nat({max: 1})}),
+      fc.record({kind: fc.constant('remove' as const), host: fc.nat({max: 2})}),
+    ),
+    {maxLength: 10},
+  );
 
-    await hosts.host(ALPHA, '10:100');
-    await manager.existing('ssh:alpha')?.ready();
-    await hosts.host(BETA, '10:100');
-
-    expect(manager.existing('ssh:alpha')).toBeNull();
-    expect(manager.existing('ssh:beta')).not.toBeNull();
-    expect(retired).toEqual(['ssh:alpha']);
-    expect(manager.releases).toBe(1);
-    await retirementObserved;
-    expect(logged).toEqual([message]);
-    await manager[Symbol.asyncDispose]();
+  test('property: the hosts with an open stream are exactly the desired hosts, each once', async () => {
+    await fc.assert(
+      fc.asyncProperty(OPS, async (ops: readonly DesiredOp[]) => {
+        const world = await gatewayWorld({configured: [ALPHA, BETA]});
+        const model = new DesiredModel();
+        for (const op of ops) {
+          await model.apply(world.hosts, op);
+          const expected = model.watched();
+          expect(world.watched()).toEqual(expected);
+          for (const key of expected) expect(world.openStreams(key)).toBe(1);
+        }
+      }),
+      {numRuns: 40, seed: 4312},
+    );
   });
 
   test('switching panels releases a host absent from the bounded recent set', async () => {
-    const filesystem = new FakeSettingsFilesystem();
-    const settings = new SettingsStore({
-      settingsPath: '/settings/hosts.json',
-      recentPath: '/settings/recent.json',
-      preferencesPath: '/settings/preferences.json',
-      filesystem,
-      log: () => {},
-    });
-    await configuredSettings(settings, [ALPHA, BETA]);
-    const links = new Map<string, FakeLink>();
-    await using manager = new ConnectionManager({
-      linkFor: host => {
-        const link = new FakeLink();
-        links.set(host.kind === 'local' ? 'local' : host.alias, link);
-        return link;
-      },
-      appVersion: 'test',
-      scheduleTimeout: new FakeClock().scheduleTimeout,
-      config: CONFIG,
-      log: () => {},
-    });
-    const pushed: HostListing[] = [];
-    const retired: string[] = [];
-    const hosts = hostsInWorld({
-      manager,
-      settings,
-      localCheckout: '/bundled',
-      sshConfigPath: '/missing',
-      log: () => {},
-      push: listing => pushed.push(listing),
-      retire: host => retired.push(host),
-    });
-
-    await hosts.host(ALPHA, '10:100');
-    const alphaConnection = manager.existing('ssh:alpha');
-    await alphaConnection?.ready();
-    await hosts.host(BETA, '10:100');
-    await alphaConnection?.[Symbol.asyncDispose]();
-
-    expect(manager.existing('ssh:alpha')).toBeNull();
-    expect(manager.existing('ssh:beta')).not.toBeNull();
-    expect(links.get('alpha')?.released).toBe(1);
-    expect(retired).toEqual(['ssh:alpha']);
-    expect(pushed.filter(listing => listing.host === 'ssh:beta').at(0)).toEqual({
+    const world = await gatewayWorld({configured: [ALPHA, BETA]});
+    await world.hosts.host(ALPHA, '10:100');
+    await world.hosts.host(BETA, '10:100');
+    expect(world.watched()).toEqual(['ssh:beta']);
+    expect(world.retired).toEqual(['ssh:alpha']);
+    expect(world.pushed.filter(listing => listing.host === 'ssh:beta').at(0)).toEqual({
       kind: 'unavailable',
       host: 'ssh:beta',
       connection: {kind: 'connecting'},
     });
   });
 
-  test('a connection settled before its host is desired is installed with its real status', async () => {
-    const filesystem = new FakeSettingsFilesystem();
-    const settings = new SettingsStore({
-      settingsPath: '/settings/hosts.json',
-      recentPath: '/settings/recent.json',
-      preferencesPath: '/settings/preferences.json',
-      filesystem,
-      log: () => {},
-    });
-    await configuredSettings(settings, [ALPHA]);
-    const link = new FakeLink();
-    link.linkFault = {cause: 'link', detail: 'host unreachable'};
-    await using manager = new ConnectionManager({
-      linkFor: () => link,
-      appVersion: 'test',
-      // No backoff slot: the one attempt this test drives goes straight to offline.
-      config: {delaysMs: [], deadlineMs: 60_000, heartbeatMs: 15_000},
-      scheduleTimeout: new FakeClock().scheduleTimeout,
-      log: () => {},
-    });
-    const pushed: HostListing[] = [];
-    const hosts = hostsInWorld({
-      manager,
-      settings,
-      localCheckout: '/bundled',
-      sshConfigPath: '/missing',
-      log: () => {},
-      push: listing => pushed.push(listing),
-      retire: () => {},
-    });
-
-    // `tasks`, `complete`, and `inspect` each lease a host's connection through `Hosts.connection`,
-    // independently of whether the welcome view desires that host yet. A connection their lease
-    // settles this way, before the host is desired, must not be relabelled once it is installed:
-    // offline has no further phase change coming to ever correct a wrong guess.
-    const probe = await hosts.connection(ALPHA);
-    await expect(probe.connection.ready()).rejects.toThrow('host unreachable');
-    expect(probe.connection.phase.kind).toBe('offline');
-
-    await hosts.host(ALPHA, '10:100');
-
-    expect(pushed.filter(listing => listing.host === 'ssh:alpha')).toEqual([
-      {
-        kind: 'unavailable',
-        host: 'ssh:alpha',
-        connection: {kind: 'offline', detail: 'host unreachable'},
-      },
-    ]);
-  });
-
-  describe('configured machines', () => {
-    async function fresh(configured: readonly HostId[]) {
-      const settings = new SettingsStore({
-        settingsPath: '/settings/hosts.json',
-        recentPath: '/settings/recent.json',
-        preferencesPath: '/settings/preferences.json',
-        filesystem: new FakeSettingsFilesystem(),
-        log: () => {},
-      });
-      await configuredSettings(settings, configured);
-      const manager = new ConnectionManager({
-        linkFor: () => new FakeLink(),
-        appVersion: 'test',
-        scheduleTimeout: new FakeClock().scheduleTimeout,
-        config: CONFIG,
-        log: () => {},
-      });
-      const hosts = hostsInWorld({
-        manager,
-        settings,
-        localCheckout: '/bundled',
-        sshConfigPath: '/missing',
-        log: () => {},
-        push: () => {},
-        retire: () => {},
-      });
-      return {manager, hosts};
-    }
-
-    test.each([
-      [[ALPHA]],
-      [[BETA]],
-      [[ALPHA, BETA]],
-    ] as const)('every configured machine is watched with no recent run: %j', async configured => {
-      const {manager, hosts} = await fresh(configured);
-      await using _manager = manager;
-      await hosts.configured();
-      for (const id of configured) expect(manager.existing(hostKey(id))).not.toBeNull();
-    });
-
-    test('nothing is watched when no machine is configured', async () => {
-      const {manager, hosts} = await fresh([]);
-      await using _manager = manager;
-      await hosts.configured();
-      expect(manager.existing(hostKey(ALPHA))).toBeNull();
-    });
-
-    test('a removed machine stops being watched and a re-read cannot bring it back', async () => {
-      const {manager, hosts} = await fresh([ALPHA, BETA]);
-      await using _manager = manager;
-      await hosts.configured();
-      await hosts.remove(ALPHA);
-      expect(manager.existing(hostKey(ALPHA))).toBeNull();
-      expect(manager.existing(hostKey(BETA))).not.toBeNull();
-      await hosts.configured();
-      expect(manager.existing(hostKey(ALPHA))).toBeNull();
-    });
-  });
-
   test('recent and visible intent form one set, independently of update order', async () => {
-    const filesystem = new FakeSettingsFilesystem();
-    const settings = new SettingsStore({
-      settingsPath: '/settings/hosts.json',
-      recentPath: '/settings/recent.json',
-      preferencesPath: '/settings/preferences.json',
-      filesystem,
-      log: () => {},
-    });
-    await configuredSettings(settings, [ALPHA, BETA]);
-    const links = new Map<string, FakeLink>();
-    await using manager = new ConnectionManager({
-      linkFor: host => {
-        const link = new FakeLink();
-        links.set(host.kind === 'local' ? 'local' : host.alias, link);
-        return link;
-      },
-      appVersion: 'test',
-      scheduleTimeout: new FakeClock().scheduleTimeout,
-      config: CONFIG,
-      log: () => {},
-    });
-    const hosts = hostsInWorld({
-      manager,
-      settings,
-      localCheckout: '/bundled',
-      sshConfigPath: '/missing',
-      log: () => {},
-      push: () => {},
-      retire: () => {},
-    });
+    const world = await gatewayWorld({configured: [ALPHA, BETA]});
+    await world.hosts.host(ALPHA, '10:100');
+    const alpha = world.gateway.open(ALPHA);
+    await world.hosts.recent([ALPHA, BETA]);
+    await world.hosts.host(BETA, '10:100');
+    expect(world.gateway.open(ALPHA)).toEqual(alpha);
 
-    await hosts.host(ALPHA, '10:100');
-    const alpha = manager.existing('ssh:alpha');
-    await hosts.recent([ALPHA, BETA]);
-    await hosts.host(BETA, '10:100');
-    expect(manager.existing('ssh:alpha')).toBe(alpha);
+    await world.hosts.recent([]);
+    expect(world.watched()).toEqual(['ssh:beta']);
+    expect(alpha.every(stream => stream.signal.aborted)).toBe(true);
+  });
 
-    await hosts.recent([]);
-    await alpha?.[Symbol.asyncDispose]();
-    expect(manager.existing('ssh:alpha')).toBeNull();
-    expect(links.get('alpha')?.released).toBe(1);
-    expect(manager.existing('ssh:beta')).not.toBeNull();
+  test('a checkout change replaces the watcher and the host is checked from the committed checkout', async () => {
+    const world = await gatewayWorld({configured: [ALPHA]});
+    await world.hosts.host(ALPHA, '10:100');
+    world.gateway.announce(ALPHA, []);
+    const old = world.gateway.open(ALPHA);
+    await world.hosts.setCheckout(ALPHA, '/new', {owner: '10:100', sequence: 1});
+
+    expect(old.every(stream => stream.signal.aborted)).toBe(true);
+    expect(world.openStreams('ssh:alpha')).toBe(1);
+    world.gateway.announce(ALPHA, []);
+    await world.settled();
+    expect(world.checked().at(-1)).toBe('/new');
+  });
+
+  test('reconciliation replaces a watcher whose checkout differs from authoritative settings', async () => {
+    const world = await gatewayWorld({configured: [ALPHA]});
+    await world.hosts.host(ALPHA, '10:100');
+    const old = world.gateway.open(ALPHA);
+    await world.settings.updateHosts(current =>
+      withHostSettings(current, ALPHA, {checkout: '/authoritative'}),
+    );
+
+    await world.hosts.recent([ALPHA]);
+
+    expect(old.every(stream => stream.signal.aborted)).toBe(true);
+    world.gateway.announce(ALPHA, []);
+    await world.settled();
+    expect(world.checked().at(-1)).toBe('/authoritative');
   });
 
   test('a late checkout read cannot reinstall an obsolete visible host or listing', async () => {
-    const settingsPath = '/settings/hosts.json';
     const filesystem = new DeferredReadFilesystem({
-      [settingsPath]: JSON.stringify({
+      '/settings/hosts.json': JSON.stringify({
         version: 2,
         hosts: {
           'ssh:alpha': {checkout: '/checkouts/alpha'},
@@ -2162,57 +1742,26 @@ describe('Hosts desired set', () => {
         },
       }),
     });
-    const settings = new SettingsStore({
-      settingsPath,
-      recentPath: '/settings/recent.json',
-      preferencesPath: '/settings/preferences.json',
-      filesystem,
-      log: () => {},
-    });
-    const created: string[] = [];
-    await using manager = new ConnectionManager({
-      linkFor: host => {
-        created.push(host.kind === 'local' ? 'local' : host.alias);
-        return new FakeLink();
-      },
-      appVersion: 'test',
-      scheduleTimeout: new FakeClock().scheduleTimeout,
-      config: CONFIG,
-      log: () => {},
-    });
-    const pushed: HostListing[] = [];
-    const hosts = hostsInWorld({
-      manager,
-      settings,
-      localCheckout: '/bundled',
-      sshConfigPath: '/missing',
-      log: () => {},
-      push: listing => pushed.push(listing),
-      retire: () => {},
-    });
-
-    const obsolete = hosts.host(ALPHA, '10:100');
+    const world = await gatewayWorld({filesystem, configured: []});
+    const obsolete = world.hosts.host(ALPHA, '10:100');
     await filesystem.received;
-    await hosts.host(BETA, '10:100');
+    await world.hosts.host(BETA, '10:100');
     filesystem.release();
     await obsolete;
 
-    expect(created).toEqual(['beta']);
-    expect(manager.existing('ssh:alpha')).toBeNull();
-    expect(manager.existing('ssh:beta')).not.toBeNull();
-    expect(new Set(pushed.map(listing => listing.host))).toEqual(new Set(['ssh:beta']));
-    expect(pushed.at(0)).toEqual({
+    expect(world.watched()).toEqual(['ssh:beta']);
+    expect(new Set(world.pushed.map(listing => listing.host))).toEqual(new Set(['ssh:beta']));
+    expect(world.pushed.at(0)).toEqual({
       kind: 'unavailable',
       host: 'ssh:beta',
       connection: {kind: 'connecting'},
     });
   });
 
-  test('checkout refresh finishes the desired set after fencing an older recent read', async () => {
-    const settingsPath = '/settings/hosts.json';
+  test('a checkout refresh finishes the desired set after fencing an older recent read', async () => {
     const filesystem = new DeferredReadFilesystem(
       {
-        [settingsPath]: JSON.stringify({
+        '/settings/hosts.json': JSON.stringify({
           version: 2,
           hosts: {
             'ssh:alpha': {checkout: '/checkouts/alpha'},
@@ -2222,81 +1771,62 @@ describe('Hosts desired set', () => {
       },
       2,
     );
-    const settings = new SettingsStore({
-      settingsPath,
-      recentPath: '/settings/recent.json',
-      preferencesPath: '/settings/preferences.json',
-      filesystem,
-      log: () => {},
-    });
-    await using manager = new ConnectionManager({
-      linkFor: () => new FakeLink(),
-      appVersion: 'test',
-      scheduleTimeout: new FakeClock().scheduleTimeout,
-      config: CONFIG,
-      log: () => {},
-    });
-    const hosts = hostsInWorld({
-      manager,
-      settings,
-      localCheckout: '/bundled',
-      sshConfigPath: '/missing',
-      log: () => {},
-      push: () => {},
-      retire: () => {},
-    });
-    await hosts.host(ALPHA, '10:100');
+    const world = await gatewayWorld({filesystem, configured: []});
+    await world.hosts.host(ALPHA, '10:100');
 
-    const olderRecent = hosts.recent([ALPHA, BETA]);
+    const olderRecent = world.hosts.recent([ALPHA, BETA]);
     await filesystem.received;
-    await hosts.setCheckout(ALPHA, '/checkouts/alpha-new', {owner: '10:100', sequence: 1});
-
-    expect(manager.existing('ssh:alpha')).not.toBeNull();
-    expect(manager.existing('ssh:beta')).not.toBeNull();
+    await world.hosts.setCheckout(ALPHA, '/checkouts/alpha-new', {owner: '10:100', sequence: 1});
+    expect(world.watched()).toEqual(['ssh:alpha', 'ssh:beta']);
     filesystem.release();
     await olderRecent;
-    expect(manager.existing('ssh:beta')).not.toBeNull();
+    expect(world.watched()).toEqual(['ssh:alpha', 'ssh:beta']);
   });
 
-  test('one host failing to acquire does not abort reconciling the others', async () => {
-    const filesystem = new FakeSettingsFilesystem();
-    const settings = new SettingsStore({
-      settingsPath: '/settings/hosts.json',
-      recentPath: '/settings/recent.json',
-      preferencesPath: '/settings/preferences.json',
-      filesystem,
-      log: () => {},
-    });
-    await configuredSettings(settings, [ALPHA, BETA]);
-    const manager = new ConnectionManager({
-      linkFor: () => {
-        throw new Error('reconcile must not open a link once the manager is disposed');
-      },
-      appVersion: 'test',
-      scheduleTimeout: new FakeClock().scheduleTimeout,
-      config: CONFIG,
-      log: () => {},
-    });
-    // The manager disposes (as it does mid-app-shutdown) before either host is acquired, so
-    // every acquisition in the pass below rejects the same way a real shutdown race would.
-    await manager[Symbol.asyncDispose]();
-    const logged: string[] = [];
-    const hosts = hostsInWorld({
-      manager,
-      settings,
-      localCheckout: '/bundled',
-      sshConfigPath: '/missing',
-      log: message => logged.push(message),
-      push: () => {},
-      retire: () => {},
+  test('one host that cannot be watched does not stop the others being reconciled', async () => {
+    const world = await gatewayWorld({configured: [ALPHA, BETA], refuse: 'ssh:alpha'});
+    await world.hosts.recent([ALPHA, BETA]);
+
+    expect(world.watched()).toEqual(['ssh:beta']);
+    expect(world.logged).toHaveLength(1);
+    expect(world.logged[0]).toContain('alpha');
+  });
+
+  test('a watcher whose stop fails is retired once, and reported once', async () => {
+    const world = await gatewayWorld({configured: [ALPHA, BETA], failStopOnce: 'ssh:alpha'});
+    await world.hosts.host(ALPHA, '10:100');
+    await world.hosts.host(BETA, '10:100');
+
+    expect(world.watched()).toEqual(['ssh:beta']);
+    expect(world.retired).toEqual(['ssh:alpha']);
+    expect(world.logged).toEqual(['could not retire alpha connection: stop failed']);
+  });
+
+  describe('configured machines', () => {
+    test.each([
+      [[ALPHA]],
+      [[BETA]],
+      [[ALPHA, BETA]],
+    ] as const)('every configured machine is watched with no recent run: %j', async configured => {
+      const world = await gatewayWorld({configured});
+      await world.hosts.configured();
+      expect(world.watched()).toEqual(configured.map(hostKey).sort());
     });
 
-    // Alpha and beta are both newly desired in this one reconcile pass, alpha attempted first.
-    await hosts.recent([ALPHA, BETA]);
+    test('nothing is watched when no machine is configured', async () => {
+      const world = await gatewayWorld({configured: []});
+      await world.hosts.configured();
+      expect(world.watched()).toEqual([]);
+    });
 
-    expect(logged).toHaveLength(2);
-    expect(logged.some(message => message.includes('alpha'))).toBe(true);
-    expect(logged.some(message => message.includes('beta'))).toBe(true);
+    test('a removed machine stops being watched and a re-read cannot bring it back', async () => {
+      const world = await gatewayWorld({configured: [ALPHA, BETA]});
+      await world.hosts.configured();
+      await world.hosts.remove(ALPHA);
+      expect(world.watched()).toEqual(['ssh:beta']);
+      await world.hosts.configured();
+      expect(world.watched()).toEqual(['ssh:beta']);
+    });
   });
 });
 

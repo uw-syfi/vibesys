@@ -15,6 +15,14 @@ class ReadSource(Protocol):
         """Discover and import retained runs through their existing owners."""
         ...
 
+    def run_digests(self, request: pb.ListRunDigestsRequest) -> pb.ListRunDigestsResponse:
+        """What each requested run's journal says at a glance."""
+        ...
+
+    def usage_window(self, request: pb.UsageWindowRequest) -> pb.UsageWindowResponse:
+        """What the requested runs spent in the window."""
+        ...
+
     def tasks(self, project: str) -> pb.TaskList:
         """The canonical project's task catalog."""
         ...

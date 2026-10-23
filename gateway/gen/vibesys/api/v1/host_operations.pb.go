@@ -25,7 +25,7 @@ var File_vibesys_api_v1_host_operations_proto protoreflect.FileDescriptor
 
 const file_vibesys_api_v1_host_operations_proto_rawDesc = "" +
 	"\n" +
-	"$vibesys/api/v1/host_operations.proto\x12\x0evibesys.api.v1\x1a\x1evibesys/api/v1/host_call.proto\x1a'vibesys/host/v1/operation_options.proto\x1a vibesys/host/v1/operations.proto2\xf0\x1a\n" +
+	"$vibesys/api/v1/host_operations.proto\x12\x0evibesys.api.v1\x1a\x1evibesys/api/v1/host_call.proto\x1a'vibesys/host/v1/operation_options.proto\x1a vibesys/host/v1/operations.proto2\xf4\x1c\n" +
 	"\x15HostOperationsService\x12\x80\x01\n" +
 	"\tListTasks\x12!.vibesys.host.v1.ListTasksRequest\x1a\".vibesys.host.v1.ListTasksResponse\",\xca\xf3\x18(\b\n" +
 	"\x10\x90N\x18\x88' \x01(\x020\x018\x01J\x06\n" +
@@ -81,7 +81,11 @@ const file_vibesys_api_v1_host_operations_proto_rawDesc = "" +
 	"\x0fListAgentLogins\x12'.vibesys.host.v1.ListAgentLoginsRequest\x1a(.vibesys.host.v1.ListAgentLoginsResponse\"4\xca\xf3\x180\b\x13\x10\xa8\xc3\x01\x18\x88' \x01(\x020\x018\x01J\x06\n" +
 	"\x01\x01\x12\x01\x01P\x13X\x13b\x11agent_logins.list\x12\x8a\x01\n" +
 	"\x11CreateChatSession\x12(.vibesys.api.v1.CreateChatSessionRequest\x1a).vibesys.api.v1.CreateChatSessionResponse\" \xca\xf3\x18\x1c\b'\x10\x90N\x18\x88' \x03(\x030\x018\x01J\x06\n" +
-	"\x01\x03\x12\x01\x01P\x06X\x06B=Z;github.com/uw-syfi/vibesys/gateway/gen/vibesys/api/v1;apiv1b\x06proto3"
+	"\x01\x03\x12\x01\x01P\x06X\x06\x12\x84\x01\n" +
+	"\x0eListRunDigests\x12&.vibesys.host.v1.ListRunDigestsRequest\x1a'.vibesys.host.v1.ListRunDigestsResponse\"!\xca\xf3\x18\x1d\b)\x10\xa0\x9c\x01\x18\x88' \x01(\x020\x018\x01J\x06\n" +
+	"\x01\x01\x12\x01\x01P)X)\x12{\n" +
+	"\vUsageWindow\x12#.vibesys.host.v1.UsageWindowRequest\x1a$.vibesys.host.v1.UsageWindowResponse\"!\xca\xf3\x18\x1d\b*\x10\xa0\x9c\x01\x18\x88' \x01(\x020\x018\x01J\x06\n" +
+	"\x01\x01\x12\x01\x01P*X*B=Z;github.com/uw-syfi/vibesys/gateway/gen/vibesys/api/v1;apiv1b\x06proto3"
 
 var file_vibesys_api_v1_host_operations_proto_goTypes = []any{
 	(*v1.ListTasksRequest)(nil),           // 0: vibesys.host.v1.ListTasksRequest
@@ -108,30 +112,34 @@ var file_vibesys_api_v1_host_operations_proto_goTypes = []any{
 	(*v1.TerminateRunRequest)(nil),        // 21: vibesys.host.v1.TerminateRunRequest
 	(*v1.ListAgentLoginsRequest)(nil),     // 22: vibesys.host.v1.ListAgentLoginsRequest
 	(*CreateChatSessionRequest)(nil),      // 23: vibesys.api.v1.CreateChatSessionRequest
-	(*v1.ListTasksResponse)(nil),          // 24: vibesys.host.v1.ListTasksResponse
-	(*v1.ListHarnessesResponse)(nil),      // 25: vibesys.host.v1.ListHarnessesResponse
-	(*v1.ListExamplesResponse)(nil),       // 26: vibesys.host.v1.ListExamplesResponse
-	(*v1.GetTaskGoalResponse)(nil),        // 27: vibesys.host.v1.GetTaskGoalResponse
-	(*v1.DescribeMachineResponse)(nil),    // 28: vibesys.host.v1.DescribeMachineResponse
-	(*v1.ListComputeResponse)(nil),        // 29: vibesys.host.v1.ListComputeResponse
-	(*v1.PreflightRunResponse)(nil),       // 30: vibesys.host.v1.PreflightRunResponse
-	(*v1.InspectCandidateResponse)(nil),   // 31: vibesys.host.v1.InspectCandidateResponse
-	(*v1.CompletePathsResponse)(nil),      // 32: vibesys.host.v1.CompletePathsResponse
-	(*v1.LoginResponse)(nil),              // 33: vibesys.host.v1.LoginResponse
-	(*v1.InspectDestinationResponse)(nil), // 34: vibesys.host.v1.InspectDestinationResponse
-	(*v1.CreateExampleResponse)(nil),      // 35: vibesys.host.v1.CreateExampleResponse
-	(*v1.CopyProjectResponse)(nil),        // 36: vibesys.host.v1.CopyProjectResponse
-	(*v1.PutClusterResponse)(nil),         // 37: vibesys.host.v1.PutClusterResponse
-	(*v1.RemoveClusterResponse)(nil),      // 38: vibesys.host.v1.RemoveClusterResponse
-	(*v1.TestClusterResponse)(nil),        // 39: vibesys.host.v1.TestClusterResponse
-	(*v1.StartRunResponse)(nil),           // 40: vibesys.host.v1.StartRunResponse
-	(*PostIntentResponse)(nil),            // 41: vibesys.api.v1.PostIntentResponse
-	(*RelaunchResponse)(nil),              // 42: vibesys.api.v1.RelaunchResponse
-	(*ChatMessageResponse)(nil),           // 43: vibesys.api.v1.ChatMessageResponse
-	(*v1.ListSavedRunsResponse)(nil),      // 44: vibesys.host.v1.ListSavedRunsResponse
-	(*v1.TerminateRunResponse)(nil),       // 45: vibesys.host.v1.TerminateRunResponse
-	(*v1.ListAgentLoginsResponse)(nil),    // 46: vibesys.host.v1.ListAgentLoginsResponse
-	(*CreateChatSessionResponse)(nil),     // 47: vibesys.api.v1.CreateChatSessionResponse
+	(*v1.ListRunDigestsRequest)(nil),      // 24: vibesys.host.v1.ListRunDigestsRequest
+	(*v1.UsageWindowRequest)(nil),         // 25: vibesys.host.v1.UsageWindowRequest
+	(*v1.ListTasksResponse)(nil),          // 26: vibesys.host.v1.ListTasksResponse
+	(*v1.ListHarnessesResponse)(nil),      // 27: vibesys.host.v1.ListHarnessesResponse
+	(*v1.ListExamplesResponse)(nil),       // 28: vibesys.host.v1.ListExamplesResponse
+	(*v1.GetTaskGoalResponse)(nil),        // 29: vibesys.host.v1.GetTaskGoalResponse
+	(*v1.DescribeMachineResponse)(nil),    // 30: vibesys.host.v1.DescribeMachineResponse
+	(*v1.ListComputeResponse)(nil),        // 31: vibesys.host.v1.ListComputeResponse
+	(*v1.PreflightRunResponse)(nil),       // 32: vibesys.host.v1.PreflightRunResponse
+	(*v1.InspectCandidateResponse)(nil),   // 33: vibesys.host.v1.InspectCandidateResponse
+	(*v1.CompletePathsResponse)(nil),      // 34: vibesys.host.v1.CompletePathsResponse
+	(*v1.LoginResponse)(nil),              // 35: vibesys.host.v1.LoginResponse
+	(*v1.InspectDestinationResponse)(nil), // 36: vibesys.host.v1.InspectDestinationResponse
+	(*v1.CreateExampleResponse)(nil),      // 37: vibesys.host.v1.CreateExampleResponse
+	(*v1.CopyProjectResponse)(nil),        // 38: vibesys.host.v1.CopyProjectResponse
+	(*v1.PutClusterResponse)(nil),         // 39: vibesys.host.v1.PutClusterResponse
+	(*v1.RemoveClusterResponse)(nil),      // 40: vibesys.host.v1.RemoveClusterResponse
+	(*v1.TestClusterResponse)(nil),        // 41: vibesys.host.v1.TestClusterResponse
+	(*v1.StartRunResponse)(nil),           // 42: vibesys.host.v1.StartRunResponse
+	(*PostIntentResponse)(nil),            // 43: vibesys.api.v1.PostIntentResponse
+	(*RelaunchResponse)(nil),              // 44: vibesys.api.v1.RelaunchResponse
+	(*ChatMessageResponse)(nil),           // 45: vibesys.api.v1.ChatMessageResponse
+	(*v1.ListSavedRunsResponse)(nil),      // 46: vibesys.host.v1.ListSavedRunsResponse
+	(*v1.TerminateRunResponse)(nil),       // 47: vibesys.host.v1.TerminateRunResponse
+	(*v1.ListAgentLoginsResponse)(nil),    // 48: vibesys.host.v1.ListAgentLoginsResponse
+	(*CreateChatSessionResponse)(nil),     // 49: vibesys.api.v1.CreateChatSessionResponse
+	(*v1.ListRunDigestsResponse)(nil),     // 50: vibesys.host.v1.ListRunDigestsResponse
+	(*v1.UsageWindowResponse)(nil),        // 51: vibesys.host.v1.UsageWindowResponse
 }
 var file_vibesys_api_v1_host_operations_proto_depIdxs = []int32{
 	0,  // 0: vibesys.api.v1.HostOperationsService.ListTasks:input_type -> vibesys.host.v1.ListTasksRequest
@@ -158,32 +166,36 @@ var file_vibesys_api_v1_host_operations_proto_depIdxs = []int32{
 	21, // 21: vibesys.api.v1.HostOperationsService.TerminateRun:input_type -> vibesys.host.v1.TerminateRunRequest
 	22, // 22: vibesys.api.v1.HostOperationsService.ListAgentLogins:input_type -> vibesys.host.v1.ListAgentLoginsRequest
 	23, // 23: vibesys.api.v1.HostOperationsService.CreateChatSession:input_type -> vibesys.api.v1.CreateChatSessionRequest
-	24, // 24: vibesys.api.v1.HostOperationsService.ListTasks:output_type -> vibesys.host.v1.ListTasksResponse
-	25, // 25: vibesys.api.v1.HostOperationsService.ListHarnesses:output_type -> vibesys.host.v1.ListHarnessesResponse
-	26, // 26: vibesys.api.v1.HostOperationsService.ListExamples:output_type -> vibesys.host.v1.ListExamplesResponse
-	27, // 27: vibesys.api.v1.HostOperationsService.GetTaskGoal:output_type -> vibesys.host.v1.GetTaskGoalResponse
-	28, // 28: vibesys.api.v1.HostOperationsService.DescribeMachine:output_type -> vibesys.host.v1.DescribeMachineResponse
-	29, // 29: vibesys.api.v1.HostOperationsService.ListCompute:output_type -> vibesys.host.v1.ListComputeResponse
-	30, // 30: vibesys.api.v1.HostOperationsService.PreflightRun:output_type -> vibesys.host.v1.PreflightRunResponse
-	31, // 31: vibesys.api.v1.HostOperationsService.InspectCandidate:output_type -> vibesys.host.v1.InspectCandidateResponse
-	32, // 32: vibesys.api.v1.HostOperationsService.CompletePaths:output_type -> vibesys.host.v1.CompletePathsResponse
-	33, // 33: vibesys.api.v1.HostOperationsService.Login:output_type -> vibesys.host.v1.LoginResponse
-	34, // 34: vibesys.api.v1.HostOperationsService.InspectDestination:output_type -> vibesys.host.v1.InspectDestinationResponse
-	35, // 35: vibesys.api.v1.HostOperationsService.CreateExample:output_type -> vibesys.host.v1.CreateExampleResponse
-	36, // 36: vibesys.api.v1.HostOperationsService.CopyProject:output_type -> vibesys.host.v1.CopyProjectResponse
-	37, // 37: vibesys.api.v1.HostOperationsService.PutCluster:output_type -> vibesys.host.v1.PutClusterResponse
-	38, // 38: vibesys.api.v1.HostOperationsService.RemoveCluster:output_type -> vibesys.host.v1.RemoveClusterResponse
-	39, // 39: vibesys.api.v1.HostOperationsService.TestCluster:output_type -> vibesys.host.v1.TestClusterResponse
-	40, // 40: vibesys.api.v1.HostOperationsService.StartRun:output_type -> vibesys.host.v1.StartRunResponse
-	41, // 41: vibesys.api.v1.HostOperationsService.PostIntent:output_type -> vibesys.api.v1.PostIntentResponse
-	42, // 42: vibesys.api.v1.HostOperationsService.Relaunch:output_type -> vibesys.api.v1.RelaunchResponse
-	43, // 43: vibesys.api.v1.HostOperationsService.ChatMessage:output_type -> vibesys.api.v1.ChatMessageResponse
-	44, // 44: vibesys.api.v1.HostOperationsService.ListSavedRuns:output_type -> vibesys.host.v1.ListSavedRunsResponse
-	45, // 45: vibesys.api.v1.HostOperationsService.TerminateRun:output_type -> vibesys.host.v1.TerminateRunResponse
-	46, // 46: vibesys.api.v1.HostOperationsService.ListAgentLogins:output_type -> vibesys.host.v1.ListAgentLoginsResponse
-	47, // 47: vibesys.api.v1.HostOperationsService.CreateChatSession:output_type -> vibesys.api.v1.CreateChatSessionResponse
-	24, // [24:48] is the sub-list for method output_type
-	0,  // [0:24] is the sub-list for method input_type
+	24, // 24: vibesys.api.v1.HostOperationsService.ListRunDigests:input_type -> vibesys.host.v1.ListRunDigestsRequest
+	25, // 25: vibesys.api.v1.HostOperationsService.UsageWindow:input_type -> vibesys.host.v1.UsageWindowRequest
+	26, // 26: vibesys.api.v1.HostOperationsService.ListTasks:output_type -> vibesys.host.v1.ListTasksResponse
+	27, // 27: vibesys.api.v1.HostOperationsService.ListHarnesses:output_type -> vibesys.host.v1.ListHarnessesResponse
+	28, // 28: vibesys.api.v1.HostOperationsService.ListExamples:output_type -> vibesys.host.v1.ListExamplesResponse
+	29, // 29: vibesys.api.v1.HostOperationsService.GetTaskGoal:output_type -> vibesys.host.v1.GetTaskGoalResponse
+	30, // 30: vibesys.api.v1.HostOperationsService.DescribeMachine:output_type -> vibesys.host.v1.DescribeMachineResponse
+	31, // 31: vibesys.api.v1.HostOperationsService.ListCompute:output_type -> vibesys.host.v1.ListComputeResponse
+	32, // 32: vibesys.api.v1.HostOperationsService.PreflightRun:output_type -> vibesys.host.v1.PreflightRunResponse
+	33, // 33: vibesys.api.v1.HostOperationsService.InspectCandidate:output_type -> vibesys.host.v1.InspectCandidateResponse
+	34, // 34: vibesys.api.v1.HostOperationsService.CompletePaths:output_type -> vibesys.host.v1.CompletePathsResponse
+	35, // 35: vibesys.api.v1.HostOperationsService.Login:output_type -> vibesys.host.v1.LoginResponse
+	36, // 36: vibesys.api.v1.HostOperationsService.InspectDestination:output_type -> vibesys.host.v1.InspectDestinationResponse
+	37, // 37: vibesys.api.v1.HostOperationsService.CreateExample:output_type -> vibesys.host.v1.CreateExampleResponse
+	38, // 38: vibesys.api.v1.HostOperationsService.CopyProject:output_type -> vibesys.host.v1.CopyProjectResponse
+	39, // 39: vibesys.api.v1.HostOperationsService.PutCluster:output_type -> vibesys.host.v1.PutClusterResponse
+	40, // 40: vibesys.api.v1.HostOperationsService.RemoveCluster:output_type -> vibesys.host.v1.RemoveClusterResponse
+	41, // 41: vibesys.api.v1.HostOperationsService.TestCluster:output_type -> vibesys.host.v1.TestClusterResponse
+	42, // 42: vibesys.api.v1.HostOperationsService.StartRun:output_type -> vibesys.host.v1.StartRunResponse
+	43, // 43: vibesys.api.v1.HostOperationsService.PostIntent:output_type -> vibesys.api.v1.PostIntentResponse
+	44, // 44: vibesys.api.v1.HostOperationsService.Relaunch:output_type -> vibesys.api.v1.RelaunchResponse
+	45, // 45: vibesys.api.v1.HostOperationsService.ChatMessage:output_type -> vibesys.api.v1.ChatMessageResponse
+	46, // 46: vibesys.api.v1.HostOperationsService.ListSavedRuns:output_type -> vibesys.host.v1.ListSavedRunsResponse
+	47, // 47: vibesys.api.v1.HostOperationsService.TerminateRun:output_type -> vibesys.host.v1.TerminateRunResponse
+	48, // 48: vibesys.api.v1.HostOperationsService.ListAgentLogins:output_type -> vibesys.host.v1.ListAgentLoginsResponse
+	49, // 49: vibesys.api.v1.HostOperationsService.CreateChatSession:output_type -> vibesys.api.v1.CreateChatSessionResponse
+	50, // 50: vibesys.api.v1.HostOperationsService.ListRunDigests:output_type -> vibesys.host.v1.ListRunDigestsResponse
+	51, // 51: vibesys.api.v1.HostOperationsService.UsageWindow:output_type -> vibesys.host.v1.UsageWindowResponse
+	26, // [26:52] is the sub-list for method output_type
+	0,  // [0:26] is the sub-list for method input_type
 	0,  // [0:0] is the sub-list for extension type_name
 	0,  // [0:0] is the sub-list for extension extendee
 	0,  // [0:0] is the sub-list for field type_name

@@ -1,13 +1,12 @@
 /**
- * What a run's journal says at a glance, as the sidebar's rows read it: the helper's digest
- * (`runs.list`'s `digest`, feature `run_digest`) in the app's own terms, with when the run began.
+ * What a run's journal says at a glance, as the sidebar's rows read it: the host's digest
+ * in the app's own terms, with when the run began.
  * It is how a run's ending is known once the registry's tombstone has expired (a day).
  */
 import type {
   IdeaVerdict,
   RunAttention,
   RunClosing,
-  RunDigest,
   RunSummary,
 } from '@vibesys/contracts/host-helper';
 import type {RunEnd} from './listing.js';
@@ -91,63 +90,6 @@ export type RunDigestEntry =
 export type RunDigestsReply =
   | {readonly kind: 'digests'; readonly runs: ReadonlyMap<string, RunDigestEntry>}
   | {readonly kind: 'unsupported'};
-
-function dashboardOf(summary: RunSummary, digest: RunDigest): RunDashboardEntry | null {
-  const {dashboard} = digest;
-  if (dashboard === undefined || dashboard === null) return null;
-  return {
-    points: dashboard.points.map(({ratio, verdict, at}) => ({
-      ratio,
-      verdict,
-      at: at === undefined || at === null ? null : Date.parse(at),
-    })),
-    pointsOmitted: dashboard.points_omitted,
-    failedStreak: dashboard.failed_streak,
-    lastEventAt: dashboard.last_event_at === null ? null : Date.parse(dashboard.last_event_at),
-    attention: summary.attention ?? 'none',
-    best: dashboard.best ?? null,
-  };
-}
-
-/** `text` unless it is absent or blank. */
-function nonEmpty(text: string | undefined): string | null {
-  return text === undefined || text.trim() === '' ? null : text;
-}
-
-function read(summary: RunSummary, digest: RunDigest, createdAt: number): RunDigestEntry {
-  const {ending, closing} = digest;
-  return {
-    kind: 'read',
-    createdAt,
-    ideas: digest.ideas,
-    adoptedRatio: digest.adopted_ratio,
-    bestSoFarRatio: digest.best_so_far_ratio,
-    durationSeconds: digest.duration_s,
-    outcome: ending?.outcome ?? null,
-    uncompared: ending?.uncompared === true,
-    closing,
-    over: ending !== null || closing !== null,
-    endSummary: nonEmpty(ending?.summary),
-    dashboard: dashboardOf(summary, digest),
-  };
-}
-
-/** The entries of the runs of `summaries` that carry a digest, by run id. */
-export function digestEntries(summaries: readonly RunSummary[]): Map<string, RunDigestEntry> {
-  const entries = new Map<string, RunDigestEntry>();
-  for (const summary of summaries) {
-    const {digest} = summary;
-    if (digest === undefined || digest === null) continue;
-    const createdAt = Date.parse(summary.created_at);
-    entries.set(
-      summary.run_id,
-      digest.kind === 'digest'
-        ? read(summary, digest, createdAt)
-        : {kind: 'unreadable', createdAt, message: digest.message},
-    );
-  }
-  return entries;
-}
 
 /**
  * How a run the journal says is over ended: its ending record's outcome, else its terminal event

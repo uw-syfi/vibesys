@@ -23,6 +23,8 @@ message AcceptedOperation {
     InspectDestinationRequest inspect_destination = 23;
     ListSavedRunsRequest list_saved_runs = 37;
     ListAgentLoginsRequest list_agent_logins = 19;
+    ListRunDigestsRequest list_run_digests = 41;
+    UsageWindowRequest usage_window = 42;
     CreateExampleRequest create_example = 34;
     CopyProjectRequest copy_project = 35;
     PutClusterRequest put_cluster = 31;
@@ -49,6 +51,8 @@ message OperationResult {
     InspectDestinationResponse inspect_destination = 23;
     ListSavedRunsResponse list_saved_runs = 37;
     ListAgentLoginsResponse list_agent_logins = 19;
+    ListRunDigestsResponse list_run_digests = 41;
+    UsageWindowResponse usage_window = 42;
     CreateExampleResponse create_example = 34;
     CopyProjectResponse copy_project = 35;
     PutClusterResponse put_cluster = 31;

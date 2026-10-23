@@ -22,6 +22,16 @@ class _Reads:
         response.request_id = request.request_id
         return response
 
+    def list_run_digests(self, request: pb.ListRunDigestsRequest) -> pb.ListRunDigestsResponse:
+        response = self._source.run_digests(request)
+        response.request_id = request.request_id
+        return response
+
+    def usage_window(self, request: pb.UsageWindowRequest) -> pb.UsageWindowResponse:
+        response = self._source.usage_window(request)
+        response.request_id = request.request_id
+        return response
+
     def list_tasks(self, request: pb.ListTasksRequest) -> pb.ListTasksResponse:
         return pb.ListTasksResponse(
             request_id=request.request_id, tasks=self._source.tasks(request.project)
@@ -114,6 +124,8 @@ def handlers(source: ReadSource) -> host_operations.Handlers:
     return Handlers(
         list_tasks=reads.list_tasks,
         list_saved_runs=reads.list_saved_runs,
+        list_run_digests=reads.list_run_digests,
+        usage_window=reads.usage_window,
         list_harnesses=reads.list_harnesses,
         list_agent_logins=reads.list_agent_logins,
         list_examples=reads.list_examples,

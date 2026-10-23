@@ -19,6 +19,7 @@ import {
   registryProjects,
   registryReads,
   registryRunCatalog,
+  registryRunReads,
   registrySavedRuns,
   registrySetup,
   registryStart,
@@ -159,10 +160,13 @@ function runNotifier(preferences: PreferencesMain, focus: () => void): RunNotifi
 }
 
 function watchHostRuns(gateway: ReturnType<typeof installGateway>, manager: ConnectionManager) {
-  const runs = runWatch({
-    stream: (host, bytes, signal, receive) =>
-      gateway.stream(hostKey(host), WATCH_RUNS_METHOD, bytes, signal, receive),
-  });
+  const runs = runWatch(
+    {
+      stream: (host, bytes, signal, receive) =>
+        gateway.stream(hostKey(host), WATCH_RUNS_METHOD, bytes, signal, receive),
+    },
+    realTimers,
+  );
   manager.onDisposing(() => runs.close());
   return runs;
 }
@@ -344,6 +348,10 @@ function listedHosts(parts: {
         unary: (id, bytes, signal) => gateway.unary(hostKey(id), READ_METHOD, bytes, signal),
       }),
       savedRuns: registrySavedRuns({
+        checkout: effectiveCheckout(settings, REPOSITORY_ROOT),
+        unary: (id, bytes, signal) => gateway.unary(hostKey(id), READ_METHOD, bytes, signal),
+      }),
+      runReads: registryRunReads({
         checkout: effectiveCheckout(settings, REPOSITORY_ROOT),
         unary: (id, bytes, signal) => gateway.unary(hostKey(id), READ_METHOD, bytes, signal),
       }),

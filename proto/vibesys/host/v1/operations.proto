@@ -1804,3 +1804,202 @@ message ListAgentLoginsResponse {
   }];
   repeated AgentLogin logins = 2 [(buf.validate.field).repeated.max_items = 10000];
 }
+
+// What a run's journal says at a glance: the sidebar row and the dashboard tile.
+enum RunEndOutcome {
+  RUN_END_OUTCOME_UNSPECIFIED = 0;
+  RUN_END_OUTCOME_ADOPTED = 1;
+  RUN_END_OUTCOME_KEPT_INPUT = 2;
+  RUN_END_OUTCOME_NO_WINNER = 3;
+  RUN_END_OUTCOME_ADOPTION_FAILED = 4;
+  RUN_END_OUTCOME_STOPPED = 5;
+  RUN_END_OUTCOME_DEADLINE = 6;
+  RUN_END_OUTCOME_FINISH_REFUSED = 7;
+  RUN_END_OUTCOME_FAILED = 8;
+  RUN_END_OUTCOME_FORCE_STOPPED = 9;
+}
+enum RunClosing {
+  RUN_CLOSING_UNSPECIFIED = 0;
+  RUN_CLOSING_FINISHED = 1;
+  RUN_CLOSING_FAILED = 2;
+  RUN_CLOSING_INTERRUPTED = 3;
+}
+enum IdeaVerdict {
+  IDEA_VERDICT_UNSPECIFIED = 0;
+  IDEA_VERDICT_KEPT = 1;
+  IDEA_VERDICT_NOT_BETTER = 2;
+  IDEA_VERDICT_FAILED = 3;
+  IDEA_VERDICT_RUNNING = 4;
+}
+enum RunAttention {
+  RUN_ATTENTION_UNSPECIFIED = 0;
+  RUN_ATTENTION_NONE = 1;
+  RUN_ATTENTION_FAILED = 2;
+  RUN_ATTENTION_REPEATED_FAILURE = 3;
+  RUN_ATTENTION_STALLED = 4;
+}
+message RunEnding {
+  // Unspecified when the run ended without recording a result.
+  RunEndOutcome outcome = 1 [(buf.validate.field).enum.defined_only = true];
+  string summary = 2 [(buf.validate.field).string.max_bytes = 65536];
+  bool uncompared = 3;
+}
+message IdeaPoint {
+  optional double ratio = 1 [(buf.validate.field).double.finite = true];
+  IdeaVerdict verdict = 2 [(buf.validate.field) = {
+    enum: {
+      defined_only: true
+      not_in: [0]
+    }
+  }];
+  optional google.protobuf.Timestamp at = 3;
+}
+message BestReading {
+  double value = 1 [(buf.validate.field).double.finite = true];
+  optional string metric = 2 [(buf.validate.field).string.max_bytes = 4096];
+  optional string unit = 3 [(buf.validate.field).string.max_bytes = 4096];
+}
+message RunDashboard {
+  repeated IdeaPoint points = 1 [(buf.validate.field).repeated.max_items = 64];
+  uint32 points_omitted = 2;
+  uint32 failed_streak = 3;
+  optional google.protobuf.Timestamp last_event_at = 4;
+  optional BestReading best = 5;
+  RunAttention attention = 6 [(buf.validate.field).enum.defined_only = true];
+}
+message RunDigest {
+  optional uint32 ideas = 1;
+  optional double adopted_ratio = 2 [(buf.validate.field).double.finite = true];
+  optional double best_so_far_ratio = 3 [(buf.validate.field).double.finite = true];
+  optional double duration_s = 4 [(buf.validate.field).double = {
+    finite: true
+    gte: 0
+  }];
+  optional RunEnding ending = 5;
+  RunClosing closing = 6 [(buf.validate.field).enum.defined_only = true];
+  // Present exactly when the request asked for it.
+  optional RunDashboard dashboard = 7;
+}
+message RunDigestEntry {
+  string run_id = 1 [(buf.validate.field).string.pattern = "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$"];
+  google.protobuf.Timestamp created_at = 2 [(buf.validate.field).required = true];
+  oneof result {
+    option (buf.validate.oneof).required = true;
+    RunDigest digest = 3;
+    // Why the journal could not be read, in one line.
+    string unreadable = 4 [(buf.validate.field).string = {
+      max_len: 300
+      pattern: "^[^\\n\\r]*$"
+    }];
+  }
+}
+message ListRunDigestsRequest {
+  string request_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 128
+  }];
+  string project = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 4096
+  }];
+  repeated string run_ids = 3 [(buf.validate.field).repeated = {
+    max_items: 100
+    unique: true
+    items: {
+      string: {pattern: "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$"}
+    }
+  }];
+  bool with_dashboard = 4;
+}
+// One entry for each requested run the project has, in the order asked.
+message ListRunDigestsResponse {
+  string request_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 128
+  }];
+  repeated RunDigestEntry digests = 2 [(buf.validate.field).repeated.max_items = 100];
+}
+
+// What runs spent in a window of time. A count a provider did not report is absent, not zero.
+message TokenTally {
+  optional uint64 input = 1;
+  optional uint64 cache_read = 2;
+  optional uint64 cache_write = 3;
+  optional uint64 output = 4;
+  optional uint64 reasoning = 5;
+}
+message RunSpend {
+  string run_id = 1 [(buf.validate.field).string.pattern = "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$"];
+  optional string task = 2 [(buf.validate.field).string.max_bytes = 65536];
+  double cost_usd = 3 [(buf.validate.field).double = {
+    finite: true
+    gte: 0
+  }];
+  uint32 unpriced_turns = 4;
+}
+message AgentSpend {
+  optional string role = 1 [(buf.validate.field).string.max_bytes = 4096];
+  optional string harness = 2 [(buf.validate.field).string.max_bytes = 4096];
+  optional string model = 3 [(buf.validate.field).string.max_bytes = 4096];
+  double cost_usd = 4 [(buf.validate.field).double = {
+    finite: true
+    gte: 0
+  }];
+  uint32 turns = 5;
+  uint32 unpriced_turns = 6;
+}
+message UsageWindowRequest {
+  option (buf.validate.message).cel = {
+    id: "usage_window.bounds"
+    message: "since must be before until, and the window at most 336 hours"
+    expression: "this.since < this.until && this.until - this.since <= duration('1209600s')"
+  };
+  string request_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 128
+  }];
+  string project = 2 [(buf.validate.field).string = {
+    min_len: 1
+    max_bytes: 4096
+  }];
+  repeated string run_ids = 3 [(buf.validate.field).repeated = {
+    max_items: 100
+    unique: true
+    items: {
+      string: {pattern: "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$"}
+    }
+  }];
+  google.protobuf.Timestamp since = 4 [(buf.validate.field).required = true];
+  google.protobuf.Timestamp until = 5 [(buf.validate.field).required = true];
+}
+message UsageWindowResponse {
+  string request_id = 1 [(buf.validate.field).string = {
+    min_len: 1
+    max_len: 128
+  }];
+  google.protobuf.Timestamp since = 2 [(buf.validate.field).required = true];
+  google.protobuf.Timestamp until = 3 [(buf.validate.field).required = true];
+  double spent_usd = 4 [(buf.validate.field).double = {
+    finite: true
+    gte: 0
+  }];
+  double spend_per_hour_usd = 5 [(buf.validate.field).double = {
+    finite: true
+    gte: 0
+  }];
+  TokenTally tokens = 6 [(buf.validate.field).required = true];
+  uint32 turns = 7;
+  uint32 unpriced_turns = 8;
+  uint32 untimed_turns = 9;
+  uint32 new_bests = 10;
+  optional double cost_per_new_best_usd = 11 [(buf.validate.field).double = {
+    finite: true
+    gte: 0
+  }];
+  // The costliest run first.
+  repeated RunSpend by_run = 12 [(buf.validate.field).repeated.max_items = 100];
+  // The costliest agent first.
+  repeated AgentSpend by_agent = 13 [(buf.validate.field).repeated.max_items = 64];
+  uint32 agents_omitted = 14;
+  repeated string missing_runs = 15 [(buf.validate.field).repeated.max_items = 100];
+}
