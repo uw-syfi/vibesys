@@ -178,7 +178,7 @@ test('park, drain and interruption keep their status words; past logs have no in
   for (const [state, word] of [
     [{case: 'parked', value: {}}, 'Paused'],
     [{case: 'draining', value: {goal: DrainGoal.PARK}}, 'Pausing'],
-    [{case: 'ended', value: {outcome: Outcome.INTERRUPTED}}, 'Interrupted'],
+    [{case: 'ended', value: {outcome: Outcome.INTERRUPTED}}, 'Stopped'],
   ] as const) {
     const records = [
       ...fixture.records,

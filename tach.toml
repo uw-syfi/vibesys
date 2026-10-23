@@ -307,12 +307,12 @@ depends_on = ["server.host_envelope", "server.host_run_summary"]
 # A run's digest (ideas, best ratio, duration, ending) folded from its journal in one pass.
 # Light: the record contracts and the decoder only.
 path = "server.run_digest"
-depends_on = ["vs_decode.api", "server.host_api", "server.host_run_dashboard", "server.host_run_summary"]
+depends_on = ["vs_proto", "vs_decode.api", "server.host_api", "server.host_run_dashboard", "server.host_run_summary"]
 
 [[modules]]
 # The host helper's interfaces on a real host: projects, directories, launches, the checkout.
 path = "server.host_helper_os"
-depends_on = ["vs_runlog", "server.host_saved_runs", "vs_proto", "server.host_examples", "vs_decode.api", "server.host_api", "server.host_helper_logs", "server.host_helper_machine", "server.host_helper_preflight", "server.host_preflight", "server.host_helper_requests", "server.host_run_events", "server.run_digest", "server.span_index", "server.run_summary", "server.run_summary_cache", "vs_logs", "vs_project", "vs_sim.api", "server.host_run_reads"]
+depends_on = ["server.run_digest_store", "vs_runlog", "server.host_saved_runs", "vs_proto", "server.host_examples", "vs_decode.api", "server.host_api", "server.host_helper_logs", "server.host_helper_machine", "server.host_helper_preflight", "server.host_preflight", "server.host_helper_requests", "server.host_run_events", "server.run_digest", "server.span_index", "server.run_summary", "server.run_summary_cache", "vs_logs", "vs_project", "vs_sim.api", "server.host_run_reads"]
 
 [[modules]]
 # A run's summary: the fold of its journal that the run level shows, as a pure read model.
@@ -2181,3 +2181,11 @@ expose = ["slurm_config_of", "operator_document", "operator_cluster"]
 [[interfaces]]
 from = ["server.host_agent_logins"]
 expose = ["AccountLogin", "AgentLibraryLogins", "AgentLogin", "AgentLoginsListReply", "AgentLoginsListRequest", "AgentLoginsStartReply", "AgentLoginsStartRequest", "ApiKeyLogin", "HeldLogin", "LoginBounds", "LoginHow", "LoginStartResult", "LoginStarted", "LoginStarter", "LoginState", "LoginUnavailable", "LoginUnavailableReason", "harness_binaries", "host_logins", "launch_environment", "login_instruction"]
+
+[[modules]]
+path = "server.run_digest_store"
+depends_on = ["server.host_api", "server.run_digest", "vs_proto", "vs_runlog"]
+
+[[interfaces]]
+from = ["server.run_digest_store"]
+expose = ["read_digest"]

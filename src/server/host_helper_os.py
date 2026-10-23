@@ -238,6 +238,7 @@ class FileProjects:
         self._journals: dict[tuple[Path, str], Path] = {}
         self._tallies: dict[Path, JournalTally] = {}
         self._digests: dict[Path, tuple[tuple[int, int], RunDigest]] = {}
+        self._native_digests: dict[Path, tuple[bytes, RunDigest]] = {}
         self._indexes: dict[Path, JournalIndex] = {}
         self._summary_reader: SummaryReader | None = None
 
@@ -327,11 +328,13 @@ class FileProjects:
         return opened.root, tuple(runs)
 
     def run_digest(self, project_root: Path, run_id: str) -> RunDigest | RunDigestUnreadable | None:
-        """What run ``run_id``'s journal says at a glance; ``None`` when there is no journal.
+        """The committed native facts, or the journal for a run without a native head.
 
-        An ended run's journal never changes, so its digest is kept for as long as the journal
-        keeps its size and modification time; a run still going is read again.
+        Native projections are cached by head bytes, never by a separate journal's age.
         """
+        native = Project.run_log_path_for(project_root, run_id)
+        if native.with_name("run.head").exists():
+            return self._native_digest(native)
         journal = Project.log_directory_for(project_root, run_id) / RUN_EVENTS_FILE
         try:
             with journal.open("rb") as lines:
@@ -349,33 +352,22 @@ class FileProjects:
             )
         if digest.ending is not None or digest.closing is not None:
             self._digests[journal] = (version, digest)
-        return self._with_log_headline(project_root, run_id, digest)
+        return digest
 
-    @staticmethod
-    def _with_log_headline(project_root: Path, run_id: str, digest: RunDigest) -> RunDigest:
-        """A run with a typed log shows the headline its log states, as its page does."""
-        runlog = import_module("vs_runlog.api")
-        wire = import_module("vs_proto.api")
-        path = Project.run_log_path_for(project_root, run_id)
+    def _native_digest(self, path: Path) -> RunDigest | RunDigestUnreadable:
         try:
-            head = runlog.read_run_head(path)
-        except (OSError, runlog.RunLogDamagedError):
+            version = path.with_name("run.head").read_bytes()
+            cached = self._native_digests.get(path)
+            if cached is not None and cached[0] == version:
+                return cached[1]
+            digest = import_module("server.run_digest_store").read_digest(path)
+        except (OSError, ValueError) as exc:
+            return RunDigestUnreadable(
+                message=f"the run's committed store could not be read: {exc}"
+            )
+        else:
+            self._native_digests[path] = (version, digest)
             return digest
-        objective = head.objective
-        if objective is None or not objective.has_field("best_value") or objective.series is None:
-            return digest
-        series = objective.series
-        row = import_module("server.run_digest")
-        return row.with_log_headline(
-            digest,
-            row.LogHeadline(
-                best=objective.best_value,
-                input_value=objective.input_value if objective.has_field("input_value") else None,
-                metric=series.name,
-                unit=series.unit,
-                minimize=series.direction == wire.Direction.MIN,
-            ),
-        )
 
     def require_initialized(self, project: Path) -> Path:
         """The project's root, once it is known to define tasks."""

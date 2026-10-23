@@ -96,9 +96,7 @@ export function lifecycleState(lifecycle: Lifecycle | undefined) {
       ? 'Paused'
       : state?.case === 'draining' && state.value.goal === DrainGoal.PARK
         ? 'Pausing'
-        : state?.case === 'ended' && state.value.outcome === Outcome.INTERRUPTED
-          ? 'Interrupted'
-          : undefined;
+        : undefined;
   const reason =
     state?.case === 'ended'
       ? state.value.failure?.reason || state.value.summary || state.value.interruptionReason || null
