@@ -53,6 +53,7 @@ def default_profiler_for_backend(backend: ComputeBackend) -> ProfilerKind:
 _KERNEL_WRITING_PROFILERS: dict[ComputeBackend, ProfilerKind] = {
     ComputeBackend.CUDA: ProfilerKind.NCU,
     ComputeBackend.ROCM: ProfilerKind.ROCPROF,
+    ComputeBackend.TRAINIUM: ProfilerKind.NEURON,
 }
 
 
@@ -205,7 +206,11 @@ PROFILER_DEFINITIONS: dict[ProfilerKind, ProfilerDefinition] = {
             frozenset({DomainName.LLM_SERVING}),
             requires_domain_torch_support=True,
         ),
-        ProfilerDefinition(ProfilerKind.NEURON, frozenset({DomainName.LLM_SERVING})),
+        # NKI kernels run as NEFFs on NeuronCores, so neuron-explorer captures
+        # kernel-writing candidates the same way it captures serving workloads.
+        ProfilerDefinition(
+            ProfilerKind.NEURON, frozenset({DomainName.LLM_SERVING, DomainName.KERNEL_WRITING})
+        ),
         # The native CPU profilers drive a program in the agent's own shell, so they run
         # only where that shell has the program (the host, or an image that ships it).
         ProfilerDefinition(
@@ -360,8 +365,8 @@ def resolve_profiler_choice(
     """Resolve ``--profiler`` into the effective profiler kind and, for ``auto``, the reason for none.
 
     ``auto`` is domain-aware. Generic workloads pick a native CPU profiler when
-    the host platform has one; kernel-writing runs pick NCU on CUDA and rocprof
-    on ROCm when the run environment supports it; LLM-serving runs use their
+    the host platform has one; kernel-writing runs pick NCU on CUDA, rocprof
+    on ROCm and neuron on Trainium when the run environment supports it; LLM-serving runs use their
     backend profiler unless the run environment dictates another safe default.
     """
     requested_kind = require_profiler_kind(requested, label="requested profiler")

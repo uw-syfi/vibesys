@@ -99,7 +99,10 @@ def test_ncu_is_unavailable_on_non_cuda_backends(backend: ComputeBackend) -> Non
         domain=DomainName.KERNEL_WRITING,
         backend=backend,
         environment_default_profiler_kind=ProfilerKind.NSYS,
-    ) is (ProfilerKind.ROCPROF if backend is ComputeBackend.ROCM else ProfilerKind.NONE)
+    ) is {
+        ComputeBackend.ROCM: ProfilerKind.ROCPROF,
+        ComputeBackend.TRAINIUM: ProfilerKind.NEURON,
+    }.get(backend, ProfilerKind.NONE)
     with pytest.raises(ValueError, match="Profiler 'ncu' is not supported"):
         resolve_profiler_kind(
             ProfilerKind.NCU,
@@ -208,6 +211,7 @@ def _expected_resolved(
         return {
             ComputeBackend.CUDA: ProfilerKind.NCU,
             ComputeBackend.ROCM: ProfilerKind.ROCPROF,
+            ComputeBackend.TRAINIUM: ProfilerKind.NEURON,
         }.get(backend, ProfilerKind.NONE)
     if allowed == frozenset({ProfilerKind.NONE}):
         return ProfilerKind.NONE
@@ -596,3 +600,23 @@ def test_auto_picks_a_profiler_that_fits_the_backend_or_says_why_it_picked_none(
     native = {ProfilerKind.LINUX_CPU, ProfilerKind.MACOS_CPU}
     if backend is not ComputeBackend.CPU:
         assert choice.kind not in native
+
+
+def test_neuron_is_default_for_trainium_kernel_writing_and_can_be_disabled() -> None:
+    assert ProfilerKind.NEURON in allowed_profiler_kinds(
+        DomainName.KERNEL_WRITING, ComputeBackend.TRAINIUM
+    )
+    for requested, expected in (
+        (ProfilerKind.AUTO, ProfilerKind.NEURON),
+        (ProfilerKind.NEURON, ProfilerKind.NEURON),
+        (ProfilerKind.NONE, ProfilerKind.NONE),
+    ):
+        assert (
+            resolve_profiler_kind(
+                requested,
+                domain=DomainName.KERNEL_WRITING,
+                backend=ComputeBackend.TRAINIUM,
+                environment_default_profiler_kind=ProfilerKind.NEURON,
+            )
+            is expected
+        )
