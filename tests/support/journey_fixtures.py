@@ -83,7 +83,8 @@ def scenario_variants(name: str) -> dict[str, ClientReplay]:
     for transition in declaration.get("nativeTransitions", []):
         _append(current, Lifecycle.from_json(json.dumps(transition["lifecycle"])))
         fold_skeleton(_records(current), log_offset=0)
-        variants[transition["name"]] = project_heads(ClientReplay.from_binary(current.to_binary()))
+        current = project_heads(current)
+        variants[transition["name"]] = ClientReplay.from_binary(current.to_binary())
     return variants
 
 
