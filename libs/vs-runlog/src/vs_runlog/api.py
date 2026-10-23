@@ -22,6 +22,7 @@ from vs_runlog._lock import (
     observe_writer_identity,
     writer_identity_path,
 )
+from vs_runlog._upgrade import upgrade_skeleton
 
 __all__ = [
     "CurrentEpoch",
@@ -47,5 +48,6 @@ __all__ = [
     "open_run_log",
     "read_current_epoch",
     "read_run_head",
+    "upgrade_skeleton",
     "writer_identity_path",
 ]

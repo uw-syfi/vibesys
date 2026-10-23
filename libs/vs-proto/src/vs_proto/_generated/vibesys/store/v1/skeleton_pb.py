@@ -212,8 +212,8 @@ class Keyframe(Message[_KeyframeFields]):
     """
     Immutable skeleton through through_seq. log_offset is the byte immediately
     after that record in run.log, including magic and framing. It lets readers
-    seek without parsing old records. The gateway reads only these two headers;
-    it passes the entire encoded keyframe through without interpreting its body.
+    seek without parsing old records. The store reader supplies retained semantic
+    upgrades before the gateway addresses descriptors and serves the snapshot.
 
     ```proto
     message vibesys.store.v1.Keyframe

@@ -4,8 +4,6 @@ from vs_proto.api import (
     AgentTurnAttrs,
     Direction,
     EpochStarted,
-    GateAttrs,
-    GateSubject,
     HeadlineObjective,
     Keyframe,
     RunHead,
@@ -13,11 +11,12 @@ from vs_proto.api import (
     TokenUsage,
 )
 from vs_runlog._epoch import current_epoch
+from vs_runlog._upgrade import upgrade_skeleton
 
 
 def project_head(state: Keyframe, process: RunProcess | None = None) -> RunHead | None:
     """Legacy-only logs have no strategy declaration and retain phase 1 reads."""
-    epoch = next((v.epoch for v in reversed(state.epochs) if v.epoch and v.epoch.run), None)
+    epoch = _run_declaration(state)
     current = current_epoch(state)
     lifecycle = current.lifecycle
     if epoch is None or epoch.run is None:
@@ -50,7 +49,7 @@ def project_head(state: Keyframe, process: RunProcess | None = None) -> RunHead 
         points = next((h.points for h in state.metrics if h.series == objective.series), [])
         readings = [v.point for v in points if v.point is not None]
         head.objective = HeadlineObjective(series=declaration)
-        input_value = _input_value(state, epoch, objective.series)
+        input_value = _input_value(epoch)
         if input_value is not None:
             head.objective.input_value = input_value
         if readings:
@@ -62,35 +61,15 @@ def project_head(state: Keyframe, process: RunProcess | None = None) -> RunHead 
     return head
 
 
-def _input_value(state: Keyframe, epoch: EpochStarted, series: str) -> float | None:
+def _input_value(epoch: EpochStarted) -> float | None:
     """The input's measurement of the objective, as the run states it.
 
-    A run written with the typed fact states it. A run written before the fact existed is read once,
-    here: the objective's first reading by a spanless point or an input gate is the input's.
+    Retained declarations have already passed through the store upgrade.
     """
     fact = None if epoch.run is None else epoch.run.input_measurement
     if fact is not None and fact.state is not None:
         return fact.state.value.value if fact.state.field == "measured" else None
-    inputs = {
-        span_id
-        for span_id, history in state.spans.items()
-        if history.versions
-        and (span := history.versions[-1].span) is not None
-        and span.label is not None
-        and span.label.kind == "gate"
-        and span.label.attrs is not None
-        and GateAttrs.from_binary(span.label.attrs.value).subject is GateSubject.INPUT
-    }
-    return next(
-        (
-            point.point.value
-            for history in state.metrics
-            if history.series == series
-            for point in history.points
-            if point.point is not None and (not point.point.span or point.point.span in inputs)
-        ),
-        None,
-    )
+    return None
 
 
 def _add_usage(total: TokenUsage | None, usage: TokenUsage) -> TokenUsage:
@@ -108,3 +87,11 @@ def _add_usage(total: TokenUsage | None, usage: TokenUsage) -> TokenUsage:
         if usage.has_field(field):
             setattr(result, field, (getattr(result, field) or 0) + value)
     return result
+
+
+def _run_declaration(state: Keyframe) -> EpochStarted | None:
+    epoch = next((v.epoch for v in reversed(state.epochs) if v.epoch and v.epoch.run), None)
+    if epoch is None or epoch.run is None or epoch.run.input_measurement is not None:
+        return epoch
+    upgraded = upgrade_skeleton(state)
+    return next((v.epoch for v in reversed(upgraded.epochs) if v.epoch and v.epoch.run), None)

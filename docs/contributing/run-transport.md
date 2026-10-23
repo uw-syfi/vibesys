@@ -254,7 +254,8 @@ connect; a release build later downloads the released binary instead. It is stat
 | `HostCall` | unary | typed host operations, including `relaunch` of an existing run; `vibesys host <method>` with protobuf on stdin and stdout |
 | `Attach` | bidi | reserved |
 
-The gateway reads records as framed bytes; it reads protos only for `run.head` and its own API.
+The gateway preserves framed record bodies. Its store read boundary supplies semantic upgrades
+for retained records and keyframes before serving them.
 
 ## Versions and upgrades
 
@@ -266,8 +267,17 @@ match by construction; a mismatch means a stale copy on the host, and the app re
 
 **Store (`vibesys.store.v1` and core state).** Additive changes only, enforced by `buf breaking`
 in CI. New code must read data written by the last 7 days of nightlies; a CI test resumes saved
-runs from each. A semantic break bumps the package version and ships one upgrade function. A newer
-writer is refused by name, never read as if it were older.
+runs from each. The retained-writer corpus is checked through Python head reads, gateway
+Skeleton/Tail/WatchRuns, and the client screen projections. A semantic break bumps the package
+version and ships one upgrade function. A newer writer is refused by name, never read as if it
+were older.
+
+The store read boundary restores the input measurement of pre-field runs from their recorded
+input gate or spanless objective point. It adds the typed fact to versioned declarations; a
+record can carry the amendment alongside its original body. The fact takes effect at the
+measurement's sequence, including during historical seeking. Explicit measured or unmeasured
+facts take precedence. Heads get their missing input value from this same upgrade; retained
+files are unchanged and readers require no writer restart.
 
 **Development mode.** The laptop tree builds the UI and the gateway; the host checkout runs the
 runs. They may diverge as long as store changes stay additive. The operator updates the host

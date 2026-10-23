@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 
 	apiv1 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/api/v1"
+	storev1 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1"
 	"github.com/uw-syfi/vibesys/gateway/internal/runlog"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -76,6 +77,10 @@ func (h *host) Skeleton(ctx context.Context, request *apiv1.SkeletonRequest) (*a
 	}
 	// Freeze the readable byte extent for phase 1 runs with a concurrent writer.
 	reader := runlog.NewReaderAt(io.NewSectionReader(f, 0, info.Size()), position.Offset)
+	upgrade, err := inputUpgradeAt(dir, position)
+	if err != nil {
+		return nil, rpcError(err)
+	}
 	previous := position.ThroughSeq
 	seen := position.Offset > 0
 	// Reserve maximum encodings of committed_seq, next_seq and complete.
@@ -100,6 +105,10 @@ func (h *host) Skeleton(ctx context.Context, request *apiv1.SkeletonRequest) (*a
 		}
 		if (seen && seq <= previous) || (bounded && seq > cap) {
 			return nil, status.Error(codes.DataLoss, "invalid committed log sequence")
+		}
+		payload, err = upgrade.Record(payload)
+		if err != nil {
+			return nil, rpcError(err)
 		}
 		recordBytes := 1 + protowire.SizeBytes(len(payload))
 		if size+recordBytes > skeletonBytes {
@@ -173,6 +182,16 @@ func wireKeyframe(dir string, cap uint64, known []string, sessionIDs []string) (
 		}
 		if err != nil {
 			return nil, runlog.Position{}, nil, err
+		}
+		state := &storev1.Keyframe{}
+		if err := proto.Unmarshal(stored, state); err != nil {
+			return nil, runlog.Position{}, nil, err
+		}
+		if runlog.UpgradeSkeleton(state) {
+			stored, err = proto.Marshal(state)
+			if err != nil {
+				return nil, runlog.Position{}, nil, err
+			}
 		}
 		wire, addressed, err := addressDescriptors(stored)
 		if err != nil {

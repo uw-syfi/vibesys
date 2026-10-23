@@ -10,6 +10,7 @@ import (
 
 	apiv1 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/api/v1"
 	storev1 "github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1"
+	"github.com/uw-syfi/vibesys/gateway/internal/runlog"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -79,6 +80,7 @@ func TestPythonWriterSkeletonFixtures(t *testing.T) {
 			if name == "converted" {
 				pinWireGolden(t, got)
 			}
+			runlog.UpgradeSkeleton(&keyframe)
 			actual := restored(t, got, nil)
 			if !proto.Equal(actual, &keyframe) || got.CommittedSeq != keyframe.ThroughSeq || !got.Complete || len(got.Records) != 0 {
 				t.Fatalf("Python checkpoint did not round trip: %v", got)

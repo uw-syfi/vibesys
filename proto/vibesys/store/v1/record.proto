@@ -5,14 +5,14 @@ package vibesys.store.v1;
 import "buf/validate/validate.proto";
 import "google/protobuf/descriptor.proto";
 import "google/protobuf/timestamp.proto";
-import "vibesys/store/v1/content.proto";
 import "vibesys/store/v1/chat.proto";
+import "vibesys/store/v1/content.proto";
 import "vibesys/store/v1/epoch.proto";
 import "vibesys/store/v1/intent.proto";
 import "vibesys/store/v1/lifecycle.proto";
 import "vibesys/store/v1/notice.proto";
-import "vibesys/store/v1/span.proto";
 import "vibesys/store/v1/replay.proto";
+import "vibesys/store/v1/span.proto";
 
 option go_package = "github.com/uw-syfi/vibesys/gateway/gen/vibesys/store/v1;storev1";
 
@@ -27,7 +27,7 @@ message Record {
   option (buf.validate.message).cel = {
     id: "record.identity"
     message: "seq, epoch and at are required for typed records"
-    expression: "!(has(this.lifecycle) || has(this.span) || has(this.metric) || has(this.stream) || has(this.blob) || has(this.intent) || has(this.notice) || has(this.chat) || has(this.declaration_amended)) || (this.seq > 0u && this.epoch > 0u && has(this.at))"
+    expression: "!(has(this.lifecycle) || has(this.span) || has(this.metric) || has(this.stream) || has(this.blob) || has(this.intent) || has(this.notice) || has(this.chat) || has(this.declaration_amended) || has(this.input_measurement)) || (this.seq > 0u && this.epoch > 0u && has(this.at))"
   };
   option (buf.validate.message).cel = {
     id: "record.epoch_started"
@@ -39,6 +39,11 @@ message Record {
     message: "declaration amendment must name the containing epoch"
     expression: "!has(this.declaration_amended) || this.declaration_amended.epoch == this.epoch"
   };
+  option (buf.validate.message).cel = {
+    id: "record.input_measurement"
+    message: "an input measurement amendment must match its metric body"
+    expression: "!has(this.input_measurement) || (has(this.metric) && has(this.input_measurement.measured) && this.input_measurement.measured.series == this.metric.series && this.input_measurement.measured.value == this.metric.value && this.input_measurement.measured.span == this.metric.span)"
+  };
   uint64 seq = 1;
   google.protobuf.Timestamp at = 2;
   uint32 epoch = 3;
@@ -49,6 +54,10 @@ message Record {
   }];
   // A timer-only boundary uses the enclosing Record.clock and serial sequence.
   optional ReplayClock replay_clock = 21;
+  // A semantic read upgrade may supply the input fact alongside its original metric body.
+  // Folds amend the current RunDescription at this sequence, so historical seeks cannot see
+  // the measurement early. The original body, sequence and content remain authoritative.
+  optional InputMeasurement input_measurement = 22;
   oneof body {
     option (buf.validate.oneof).required = true;
     EpochStarted epoch_started = 4;

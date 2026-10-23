@@ -100,17 +100,16 @@ test('every surface shows the stated input, whatever the gates and their order',
   }
 });
 
-test('an unmeasured input has no ratio, and a run without the field uses its head', () => {
+test('an absent or unmeasured input has no ratio', () => {
   const spans = [gate('gate:input:0', 'GATE_SUBJECT_INPUT'), gate('c', 'GATE_SUBJECT_CANDIDATE')];
   const unmeasured = view({c: 250}, 'unmeasured');
-  expect(inputMeasurement(unmeasured, 40)).toBeNull();
-  const row = measuredSpans(spans, unmeasured, 40).find(span => span.id === 'c');
+  expect(inputMeasurement(unmeasured)).toBeNull();
+  const row = measuredSpans(spans, unmeasured).find(span => span.id === 'c');
   expect(JSON.parse(row?.label?.attrs_json ?? '{}').vs_baseline).toBeUndefined();
   const older = view({c: 250}, 'absent');
   expect(inputMeasurement(older)).toBeNull();
-  expect(inputMeasurement(older, 100)).toBe(100);
-  const older2 = measuredSpans(spans, older, 100).find(span => span.id === 'c');
-  expect(JSON.parse(older2?.label?.attrs_json ?? '{}').vs_baseline).toBe(2.5);
+  const older2 = measuredSpans(spans, older).find(span => span.id === 'c');
+  expect(JSON.parse(older2?.label?.attrs_json ?? '{}').vs_baseline).toBeUndefined();
 });
 
 test("the input span the fact names also gives the input's reading of every other objective", () => {

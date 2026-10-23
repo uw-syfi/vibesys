@@ -44,7 +44,6 @@ export function projectSkeleton(
     seekSkeleton(skeleton, seq),
     objectiveText,
     options.content,
-    headline?.inputValue,
   );
   return {
     headline,
@@ -101,7 +100,6 @@ export function skeletonScreenState(
     ),
     '',
     content,
-    whole.headline?.inputValue,
   );
   // Usage is a run-wide ledger; seeking changes transcript visibility, never its totals or identity.
   const currentCore =

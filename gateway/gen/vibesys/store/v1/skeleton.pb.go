@@ -275,8 +275,8 @@ func (x *RunProcess) GetStartedAt() *timestamppb.Timestamp {
 
 // Immutable skeleton through through_seq. log_offset is the byte immediately
 // after that record in run.log, including magic and framing. It lets readers
-// seek without parsing old records. The gateway reads only these two headers;
-// it passes the entire encoded keyframe through without interpreting its body.
+// seek without parsing old records. The store reader supplies retained semantic
+// upgrades before the gateway addresses descriptors and serves the snapshot.
 type Keyframe struct {
 	state      protoimpl.MessageState  `protogen:"open.v1"`
 	ThroughSeq uint64                  `protobuf:"varint,1,opt,name=through_seq,json=throughSeq,proto3" json:"through_seq,omitempty"`

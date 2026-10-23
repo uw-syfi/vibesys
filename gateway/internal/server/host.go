@@ -63,6 +63,13 @@ func (h *host) Tail(request *apiv1.TailRequest, stream apiv1.HostService_TailSer
 	if err != nil {
 		return rpcError(err)
 	}
+	upgrade := runlog.NewInputUpgrade(nil)
+	if request.GetSessionId() == "" {
+		upgrade, err = inputUpgradeAt(filepath.Dir(path), position)
+	}
+	if err != nil {
+		return rpcError(err)
+	}
 	follower.Seek(position, &h.index, func() (uint64, bool, error) { return committed(filepath.Dir(path)) })
 	// Headers publish that discovery and watch installation succeeded. A caller
 	// can now append without depending on goroutine scheduling or polling.
@@ -82,6 +89,11 @@ func (h *host) Tail(request *apiv1.TailRequest, stream apiv1.HostService_TailSer
 			}
 			if seen && seq <= previous {
 				readErr = status.Errorf(codes.DataLoss, "run.log sequence %d does not follow %d", seq, previous)
+				break
+			}
+			payload, err = upgrade.Record(payload)
+			if err != nil {
+				readErr = err
 				break
 			}
 			seen = true

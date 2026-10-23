@@ -20,10 +20,11 @@ if TYPE_CHECKING:
 from vs_proto.api import RUN_LOG_MAGIC, Keyframe, Record, RunHead, RunProcess, validate
 from vs_runlog._atomic import FileSync, OsFileSync, publish, sync_directory, write_keyframe
 from vs_runlog._epoch import CurrentEpoch, current_epoch
-from vs_runlog._fold import append_skeleton
+from vs_runlog._fold import append_skeleton, fold_skeleton
 from vs_runlog._framing import ReadStop, RunLogStopReason, encode_frame, read_frame
 from vs_runlog._head import project_head
 from vs_runlog._lock import RunLock, hold_writer_identity
+from vs_runlog._upgrade import upgrade_skeleton
 from vs_sim.api import CloseOnce, ReleaseStack
 
 CHECKPOINT_RECORDS = 256
@@ -545,16 +546,38 @@ class FileRunContent:
 def read_run_head(path: Path) -> RunHead:
     """Read a validated observation with its canonical epoch, never recovery state.
 
-    Native heads cache the committed epoch. Retained phase-1 heads omit it;
-    derive only that missing cache from the published prefix, never process
-    metadata. Original files stay unchanged. Without a log it remains unknown.
+    Supply missing epoch and input caches from the published prefix through the
+    store upgrade, never process metadata. Original files stay unchanged.
     """
     head = _read_raw_head(path)
     log = path.with_name("run.log")
     if head.epoch == 0 and log.exists():
         with log.open("rb") as stream:
             head.epoch = _read_epoch_prefix(RunLogReader(stream), head, log).number
+    if head.objective is not None and not head.objective.has_field("input_value") and log.exists():
+        with log.open("rb") as stream:
+            state = fold_skeleton(_head_records(RunLogReader(stream), head, log), log_offset=0)
+            upgraded = project_head(upgrade_skeleton(state))
+            if upgraded is not None and upgraded.objective is not None:
+                head.objective.input_value = upgraded.objective.input_value
     return head
+
+
+def _head_records(reader: RunLogReader, head: RunHead, path: Path) -> Iterator[Record]:
+    limit = head.committed_seq if head.has_field("committed_seq") else None
+    if limit == 0:
+        return
+    through = 0
+    for record in reader:
+        if limit is not None and record.seq > limit:
+            break
+        yield record
+        through = record.seq
+        if through == limit:
+            return
+    if reader.stop.reason is RunLogStopReason.CORRUPTION or (limit is not None and through < limit):
+        message = f"{path}: invalid committed prefix at sequence {through}"
+        raise ValueError(message)
 
 
 def _read_raw_head(path: Path) -> RunHead:

@@ -56,6 +56,14 @@ export function foldSkeleton(state: Skeleton, records: readonly StoreRecord[]): 
 
 function foldBody(state: Omit<Skeleton, 'throughSeq'>, record: StoreRecord): void {
   const {seq, body} = record;
+  if (record.inputMeasurement !== undefined) {
+    const epoch = state.epochs.at(-1)?.epoch;
+    if (epoch?.run) {
+      const amended = clone(EpochVersionSchema, create(EpochVersionSchema, {seq, epoch}));
+      if (amended.epoch?.run) amended.epoch.run.inputMeasurement = record.inputMeasurement;
+      state.epochs.push(amended);
+    }
+  }
   switch (body.case) {
     case 'span': {
       const span = body.value.span;

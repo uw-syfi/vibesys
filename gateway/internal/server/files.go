@@ -119,6 +119,9 @@ func readObservedHead(dir string) (*storev1.RunHead, error) {
 			return nil, status.Errorf(codes.DataLoss, "invalid retained epoch: %v", err)
 		}
 	}
+	if err := retainedInput(dir, head); err != nil {
+		return nil, err
+	}
 	return head, nil
 }
 

@@ -224,7 +224,7 @@ type MeasuredInput struct {
 	state  protoimpl.MessageState `protogen:"open.v1"`
 	Series string                 `protobuf:"bytes,1,opt,name=series,proto3" json:"series,omitempty"`
 	Value  float64                `protobuf:"fixed64,2,opt,name=value,proto3" json:"value,omitempty"`
-	// The input gate whose reading this is.
+	// The input gate whose reading this is. Empty for retained spanless input points.
 	Span          string `protobuf:"bytes,3,opt,name=span,proto3" json:"span,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -598,11 +598,11 @@ const file_vibesys_store_v1_epoch_proto_rawDesc = "" +
 	"\n" +
 	"unmeasured\x18\x02 \x01(\v2!.vibesys.store.v1.UnmeasuredInputH\x00R\n" +
 	"unmeasuredB\x0e\n" +
-	"\x05state\x12\x05\xbaH\x02\b\x01\"t\n" +
+	"\x05state\x12\x05\xbaH\x02\b\x01\"r\n" +
 	"\rMeasuredInput\x12#\n" +
 	"\x06series\x18\x01 \x01(\tB\v\xbaH\br\x06\x10\x01(\x80\x80\x04R\x06series\x12\x1d\n" +
-	"\x05value\x18\x02 \x01(\x01B\a\xbaH\x04\x12\x02@\x01R\x05value\x12\x1f\n" +
-	"\x04span\x18\x03 \x01(\tB\v\xbaH\br\x06\x10\x01(\x80\x80\x04R\x04span\"\x11\n" +
+	"\x05value\x18\x02 \x01(\x01B\a\xbaH\x04\x12\x02@\x01R\x05value\x12\x1d\n" +
+	"\x04span\x18\x03 \x01(\tB\t\xbaH\x06r\x04(\x80\x80\x04R\x04span\"\x11\n" +
 	"\x0fUnmeasuredInput\"S\n" +
 	"\tEvaluator\x12\x1f\n" +
 	"\x04name\x18\x01 \x01(\tB\v\xbaH\br\x06\x10\x01(\x80\x80\x04R\x04name\x12%\n" +

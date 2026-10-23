@@ -39,6 +39,10 @@ type Record struct {
 	Clock *float64 `protobuf:"fixed64,18,opt,name=clock,proto3,oneof" json:"clock,omitempty"`
 	// A timer-only boundary uses the enclosing Record.clock and serial sequence.
 	ReplayClock *ReplayClock `protobuf:"bytes,21,opt,name=replay_clock,json=replayClock,proto3,oneof" json:"replay_clock,omitempty"`
+	// A semantic read upgrade may supply the input fact alongside its original metric body.
+	// Folds amend the current RunDescription at this sequence, so historical seeks cannot see
+	// the measurement early. The original body, sequence and content remain authoritative.
+	InputMeasurement *InputMeasurement `protobuf:"bytes,22,opt,name=input_measurement,json=inputMeasurement,proto3,oneof" json:"input_measurement,omitempty"`
 	// Types that are valid to be assigned to Body:
 	//
 	//	*Record_EpochStarted
@@ -118,6 +122,13 @@ func (x *Record) GetClock() float64 {
 func (x *Record) GetReplayClock() *ReplayClock {
 	if x != nil {
 		return x.ReplayClock
+	}
+	return nil
+}
+
+func (x *Record) GetInputMeasurement() *InputMeasurement {
+	if x != nil {
+		return x.InputMeasurement
 	}
 	return nil
 }
@@ -587,13 +598,14 @@ var File_vibesys_store_v1_record_proto protoreflect.FileDescriptor
 
 const file_vibesys_store_v1_record_proto_rawDesc = "" +
 	"\n" +
-	"\x1dvibesys/store/v1/record.proto\x12\x10vibesys.store.v1\x1a\x1bbuf/validate/validate.proto\x1a google/protobuf/descriptor.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1evibesys/store/v1/content.proto\x1a\x1bvibesys/store/v1/chat.proto\x1a\x1cvibesys/store/v1/epoch.proto\x1a\x1dvibesys/store/v1/intent.proto\x1a vibesys/store/v1/lifecycle.proto\x1a\x1dvibesys/store/v1/notice.proto\x1a\x1bvibesys/store/v1/span.proto\x1a\x1dvibesys/store/v1/replay.proto\"\xf5\f\n" +
+	"\x1dvibesys/store/v1/record.proto\x12\x10vibesys.store.v1\x1a\x1bbuf/validate/validate.proto\x1a google/protobuf/descriptor.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1bvibesys/store/v1/chat.proto\x1a\x1evibesys/store/v1/content.proto\x1a\x1cvibesys/store/v1/epoch.proto\x1a\x1dvibesys/store/v1/intent.proto\x1a vibesys/store/v1/lifecycle.proto\x1a\x1dvibesys/store/v1/notice.proto\x1a\x1dvibesys/store/v1/replay.proto\x1a\x1bvibesys/store/v1/span.proto\"\xef\x10\n" +
 	"\x06Record\x12\x10\n" +
 	"\x03seq\x18\x01 \x01(\x04R\x03seq\x12*\n" +
 	"\x02at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\x02at\x12\x14\n" +
 	"\x05epoch\x18\x03 \x01(\rR\x05epoch\x12+\n" +
 	"\x05clock\x18\x12 \x01(\x01B\x10\xbaH\r\x12\v@\x01)\x00\x00\x00\x00\x00\x00\x00\x00H\x01R\x05clock\x88\x01\x01\x12E\n" +
-	"\freplay_clock\x18\x15 \x01(\v2\x1d.vibesys.store.v1.ReplayClockH\x02R\vreplayClock\x88\x01\x01\x12E\n" +
+	"\freplay_clock\x18\x15 \x01(\v2\x1d.vibesys.store.v1.ReplayClockH\x02R\vreplayClock\x88\x01\x01\x12T\n" +
+	"\x11input_measurement\x18\x16 \x01(\v2\".vibesys.store.v1.InputMeasurementH\x03R\x10inputMeasurement\x88\x01\x01\x12E\n" +
 	"\repoch_started\x18\x04 \x01(\v2\x1e.vibesys.store.v1.EpochStartedH\x00R\fepochStarted\x12F\n" +
 	"\flegacy_event\x18\x05 \x01(\v2\x1d.vibesys.store.v1.LegacyEventB\x02\x18\x01H\x00R\vlegacyEvent\x12;\n" +
 	"\tlifecycle\x18\v \x01(\v2\x1b.vibesys.store.v1.LifecycleH\x00R\tlifecycle\x122\n" +
@@ -604,13 +616,15 @@ const file_vibesys_store_v1_record_proto_rawDesc = "" +
 	"\x06intent\x18\x10 \x01(\v2\x1d.vibesys.store.v1.IntentStateH\x00R\x06intent\x122\n" +
 	"\x06notice\x18\x11 \x01(\v2\x18.vibesys.store.v1.NoticeH\x00R\x06notice\x122\n" +
 	"\x04chat\x18\x13 \x01(\v2\x1c.vibesys.store.v1.ChatRecordH\x00R\x04chat\x12Q\n" +
-	"\x13declaration_amended\x18\x14 \x01(\v2\x1e.vibesys.store.v1.EpochStartedH\x00R\x12declarationAmended:\xde\x05\xbaH\xda\x05\x1a\xb9\x02\n" +
-	"\x0frecord.identity\x120seq, epoch and at are required for typed records\x1a\xf3\x01!(has(this.lifecycle) || has(this.span) || has(this.metric) || has(this.stream) || has(this.blob) || has(this.intent) || has(this.notice) || has(this.chat) || has(this.declaration_amended)) || (this.seq > 0u && this.epoch > 0u && has(this.at))\x1a\xf6\x01\n" +
+	"\x13declaration_amended\x18\x14 \x01(\v2\x1e.vibesys.store.v1.EpochStartedH\x00R\x12declarationAmended:\xec\b\xbaH\xe8\b\x1a\xd8\x02\n" +
+	"\x0frecord.identity\x120seq, epoch and at are required for typed records\x1a\x92\x02!(has(this.lifecycle) || has(this.span) || has(this.metric) || has(this.stream) || has(this.blob) || has(this.intent) || has(this.notice) || has(this.chat) || has(this.declaration_amended) || has(this.input_measurement)) || (this.seq > 0u && this.epoch > 0u && has(this.at))\x1a\xf6\x01\n" +
 	"\x14record.epoch_started\x12Vepoch_started epoch must match epoch and seq and at must be present for a typed header\x1a\x85\x01!has(this.epoch_started) || !has(this.epoch_started.run) || (this.epoch == this.epoch_started.epoch && this.seq > 0u && has(this.at))\x1a\xa2\x01\n" +
-	"\x1arecord.declaration_amended\x124declaration amendment must name the containing epoch\x1aN!has(this.declaration_amended) || this.declaration_amended.epoch == this.epochB\r\n" +
+	"\x1arecord.declaration_amended\x124declaration amendment must name the containing epoch\x1aN!has(this.declaration_amended) || this.declaration_amended.epoch == this.epoch\x1a\xec\x02\n" +
+	"\x18record.input_measurement\x129an input measurement amendment must match its metric body\x1a\x94\x02!has(this.input_measurement) || (has(this.metric) && has(this.input_measurement.measured) && this.input_measurement.measured.series == this.metric.series && this.input_measurement.measured.value == this.metric.value && this.input_measurement.measured.span == this.metric.span)B\r\n" +
 	"\x04body\x12\x05\xbaH\x02\b\x01B\b\n" +
 	"\x06_clockB\x0f\n" +
-	"\r_replay_clock\"\xa4\x19\n" +
+	"\r_replay_clockB\x14\n" +
+	"\x12_input_measurement\"\xa4\x19\n" +
 	"\fEpochStarted\x12\x15\n" +
 	"\x06run_id\x18\x01 \x01(\tR\x05runId\x12\x14\n" +
 	"\x05epoch\x18\x02 \x01(\rR\x05epoch\x12\x1b\n" +
@@ -671,48 +685,50 @@ var file_vibesys_store_v1_record_proto_goTypes = []any{
 	(*ReplayStore)(nil),                    // 3: vibesys.store.v1.ReplayStore
 	(*timestamppb.Timestamp)(nil),          // 4: google.protobuf.Timestamp
 	(*ReplayClock)(nil),                    // 5: vibesys.store.v1.ReplayClock
-	(*Lifecycle)(nil),                      // 6: vibesys.store.v1.Lifecycle
-	(*SpanRecord)(nil),                     // 7: vibesys.store.v1.SpanRecord
-	(*MetricPoint)(nil),                    // 8: vibesys.store.v1.MetricPoint
-	(*StreamRef)(nil),                      // 9: vibesys.store.v1.StreamRef
-	(*BlobAttached)(nil),                   // 10: vibesys.store.v1.BlobAttached
-	(*IntentState)(nil),                    // 11: vibesys.store.v1.IntentState
-	(*Notice)(nil),                         // 12: vibesys.store.v1.Notice
-	(*ChatRecord)(nil),                     // 13: vibesys.store.v1.ChatRecord
-	(*RunDescription)(nil),                 // 14: vibesys.store.v1.RunDescription
-	(*SpanKindDecl)(nil),                   // 15: vibesys.store.v1.SpanKindDecl
-	(*MetricSeriesDecl)(nil),               // 16: vibesys.store.v1.MetricSeriesDecl
-	(*descriptorpb.FileDescriptorSet)(nil), // 17: google.protobuf.FileDescriptorSet
-	(*ReplayAllowance)(nil),                // 18: vibesys.store.v1.ReplayAllowance
-	(*ReplayAcknowledgement)(nil),          // 19: vibesys.store.v1.ReplayAcknowledgement
+	(*InputMeasurement)(nil),               // 6: vibesys.store.v1.InputMeasurement
+	(*Lifecycle)(nil),                      // 7: vibesys.store.v1.Lifecycle
+	(*SpanRecord)(nil),                     // 8: vibesys.store.v1.SpanRecord
+	(*MetricPoint)(nil),                    // 9: vibesys.store.v1.MetricPoint
+	(*StreamRef)(nil),                      // 10: vibesys.store.v1.StreamRef
+	(*BlobAttached)(nil),                   // 11: vibesys.store.v1.BlobAttached
+	(*IntentState)(nil),                    // 12: vibesys.store.v1.IntentState
+	(*Notice)(nil),                         // 13: vibesys.store.v1.Notice
+	(*ChatRecord)(nil),                     // 14: vibesys.store.v1.ChatRecord
+	(*RunDescription)(nil),                 // 15: vibesys.store.v1.RunDescription
+	(*SpanKindDecl)(nil),                   // 16: vibesys.store.v1.SpanKindDecl
+	(*MetricSeriesDecl)(nil),               // 17: vibesys.store.v1.MetricSeriesDecl
+	(*descriptorpb.FileDescriptorSet)(nil), // 18: google.protobuf.FileDescriptorSet
+	(*ReplayAllowance)(nil),                // 19: vibesys.store.v1.ReplayAllowance
+	(*ReplayAcknowledgement)(nil),          // 20: vibesys.store.v1.ReplayAcknowledgement
 }
 var file_vibesys_store_v1_record_proto_depIdxs = []int32{
 	4,  // 0: vibesys.store.v1.Record.at:type_name -> google.protobuf.Timestamp
 	5,  // 1: vibesys.store.v1.Record.replay_clock:type_name -> vibesys.store.v1.ReplayClock
-	1,  // 2: vibesys.store.v1.Record.epoch_started:type_name -> vibesys.store.v1.EpochStarted
-	2,  // 3: vibesys.store.v1.Record.legacy_event:type_name -> vibesys.store.v1.LegacyEvent
-	6,  // 4: vibesys.store.v1.Record.lifecycle:type_name -> vibesys.store.v1.Lifecycle
-	7,  // 5: vibesys.store.v1.Record.span:type_name -> vibesys.store.v1.SpanRecord
-	8,  // 6: vibesys.store.v1.Record.metric:type_name -> vibesys.store.v1.MetricPoint
-	9,  // 7: vibesys.store.v1.Record.stream:type_name -> vibesys.store.v1.StreamRef
-	10, // 8: vibesys.store.v1.Record.blob:type_name -> vibesys.store.v1.BlobAttached
-	11, // 9: vibesys.store.v1.Record.intent:type_name -> vibesys.store.v1.IntentState
-	12, // 10: vibesys.store.v1.Record.notice:type_name -> vibesys.store.v1.Notice
-	13, // 11: vibesys.store.v1.Record.chat:type_name -> vibesys.store.v1.ChatRecord
-	1,  // 12: vibesys.store.v1.Record.declaration_amended:type_name -> vibesys.store.v1.EpochStarted
-	14, // 13: vibesys.store.v1.EpochStarted.run:type_name -> vibesys.store.v1.RunDescription
-	15, // 14: vibesys.store.v1.EpochStarted.span_kinds:type_name -> vibesys.store.v1.SpanKindDecl
-	16, // 15: vibesys.store.v1.EpochStarted.series:type_name -> vibesys.store.v1.MetricSeriesDecl
-	17, // 16: vibesys.store.v1.EpochStarted.descriptors:type_name -> google.protobuf.FileDescriptorSet
-	18, // 17: vibesys.store.v1.EpochStarted.initial_allowance:type_name -> vibesys.store.v1.ReplayAllowance
-	19, // 18: vibesys.store.v1.EpochStarted.replay_acknowledgement:type_name -> vibesys.store.v1.ReplayAcknowledgement
-	19, // 19: vibesys.store.v1.EpochStarted.replay_acknowledgements:type_name -> vibesys.store.v1.ReplayAcknowledgement
-	0,  // 20: vibesys.store.v1.ReplayStore.records:type_name -> vibesys.store.v1.Record
-	21, // [21:21] is the sub-list for method output_type
-	21, // [21:21] is the sub-list for method input_type
-	21, // [21:21] is the sub-list for extension type_name
-	21, // [21:21] is the sub-list for extension extendee
-	0,  // [0:21] is the sub-list for field type_name
+	6,  // 2: vibesys.store.v1.Record.input_measurement:type_name -> vibesys.store.v1.InputMeasurement
+	1,  // 3: vibesys.store.v1.Record.epoch_started:type_name -> vibesys.store.v1.EpochStarted
+	2,  // 4: vibesys.store.v1.Record.legacy_event:type_name -> vibesys.store.v1.LegacyEvent
+	7,  // 5: vibesys.store.v1.Record.lifecycle:type_name -> vibesys.store.v1.Lifecycle
+	8,  // 6: vibesys.store.v1.Record.span:type_name -> vibesys.store.v1.SpanRecord
+	9,  // 7: vibesys.store.v1.Record.metric:type_name -> vibesys.store.v1.MetricPoint
+	10, // 8: vibesys.store.v1.Record.stream:type_name -> vibesys.store.v1.StreamRef
+	11, // 9: vibesys.store.v1.Record.blob:type_name -> vibesys.store.v1.BlobAttached
+	12, // 10: vibesys.store.v1.Record.intent:type_name -> vibesys.store.v1.IntentState
+	13, // 11: vibesys.store.v1.Record.notice:type_name -> vibesys.store.v1.Notice
+	14, // 12: vibesys.store.v1.Record.chat:type_name -> vibesys.store.v1.ChatRecord
+	1,  // 13: vibesys.store.v1.Record.declaration_amended:type_name -> vibesys.store.v1.EpochStarted
+	15, // 14: vibesys.store.v1.EpochStarted.run:type_name -> vibesys.store.v1.RunDescription
+	16, // 15: vibesys.store.v1.EpochStarted.span_kinds:type_name -> vibesys.store.v1.SpanKindDecl
+	17, // 16: vibesys.store.v1.EpochStarted.series:type_name -> vibesys.store.v1.MetricSeriesDecl
+	18, // 17: vibesys.store.v1.EpochStarted.descriptors:type_name -> google.protobuf.FileDescriptorSet
+	19, // 18: vibesys.store.v1.EpochStarted.initial_allowance:type_name -> vibesys.store.v1.ReplayAllowance
+	20, // 19: vibesys.store.v1.EpochStarted.replay_acknowledgement:type_name -> vibesys.store.v1.ReplayAcknowledgement
+	20, // 20: vibesys.store.v1.EpochStarted.replay_acknowledgements:type_name -> vibesys.store.v1.ReplayAcknowledgement
+	0,  // 21: vibesys.store.v1.ReplayStore.records:type_name -> vibesys.store.v1.Record
+	22, // [22:22] is the sub-list for method output_type
+	22, // [22:22] is the sub-list for method input_type
+	22, // [22:22] is the sub-list for extension type_name
+	22, // [22:22] is the sub-list for extension extendee
+	0,  // [0:22] is the sub-list for field type_name
 }
 
 func init() { file_vibesys_store_v1_record_proto_init() }
@@ -720,14 +736,14 @@ func file_vibesys_store_v1_record_proto_init() {
 	if File_vibesys_store_v1_record_proto != nil {
 		return
 	}
-	file_vibesys_store_v1_content_proto_init()
 	file_vibesys_store_v1_chat_proto_init()
+	file_vibesys_store_v1_content_proto_init()
 	file_vibesys_store_v1_epoch_proto_init()
 	file_vibesys_store_v1_intent_proto_init()
 	file_vibesys_store_v1_lifecycle_proto_init()
 	file_vibesys_store_v1_notice_proto_init()
-	file_vibesys_store_v1_span_proto_init()
 	file_vibesys_store_v1_replay_proto_init()
+	file_vibesys_store_v1_span_proto_init()
 	file_vibesys_store_v1_record_proto_msgTypes[0].OneofWrappers = []any{
 		(*Record_EpochStarted)(nil),
 		(*Record_LegacyEvent)(nil),

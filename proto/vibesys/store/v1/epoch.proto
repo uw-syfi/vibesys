@@ -61,11 +61,8 @@ message MeasuredInput {
     max_bytes: 65536
   }];
   double value = 2 [(buf.validate.field).double.finite = true];
-  // The input gate whose reading this is.
-  string span = 3 [(buf.validate.field).string = {
-    min_len: 1
-    max_bytes: 65536
-  }];
+  // The input gate whose reading this is. Empty for retained spanless input points.
+  string span = 3 [(buf.validate.field).string = {max_bytes: 65536}];
 }
 
 message UnmeasuredInput {}

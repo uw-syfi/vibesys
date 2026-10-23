@@ -70,6 +70,7 @@ def append_skeleton(state: Keyframe, record: Record) -> None:
                     *(kept for kept in state.failures if kept.epoch != owned.epoch),
                     owned,
                 ]
+    _append_input_fact(state, owned)
     state.through_seq = record.seq
 
 
@@ -94,3 +95,15 @@ def _required_span(span: Span | None) -> Span:
         message = "record.span.span is required"
         raise ValueError(message)
     return span
+
+
+def _append_input_fact(state: Keyframe, record: Record) -> None:
+    if record.input_measurement is None or not state.epochs:
+        return
+    latest = state.epochs[-1].epoch
+    if latest is None or latest.run is None:
+        return
+    declaration = type(latest).from_binary(latest.to_binary())
+    if declaration.run is not None:
+        declaration.run.input_measurement = record.input_measurement
+    state.epochs.append(EpochVersion(seq=record.seq, epoch=declaration))

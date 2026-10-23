@@ -1,0 +1,12 @@
+{
+  "64c1a8b7": {
+    "writer_commit": "64c1a8b7fa850be42bab901b1723ed562dab6fa7",
+    "producer": "storeRunFixture('facts') with comparison/adoption spans omitted and dense sequences",
+    "input": 100,
+    "candidate": "gate-0",
+    "vs_baseline": 1.01,
+    "chart_reference": 100,
+    "measurement_seq": 14,
+    "head_input_absent": true
+  }
+}

@@ -43,19 +43,13 @@ interface InputFact {
   readonly direction: 'max' | 'min';
 }
 
-/**
- * The input's measurement of the objective, exactly as the run states it
- * (`RunDescription.input_measurement`, written once where the records are made). Readers display
- * it and never choose among gates. A run written before the field existed states it in its head;
- * that value (read by the same core rule) is the fallback.
- */
-function inputFact(view: StoreView, fallback: number | undefined): InputFact | null {
+/** The input fact is supplied by the store reader, including retained data upgrades. */
+function inputFact(view: StoreView): InputFact | null {
   const epoch = view.epochs.at(-1)?.epoch;
   const objective = epoch?.run?.objectives[0];
   if (!epoch || !objective) return null;
   const stated = epoch.run?.inputMeasurement?.state;
-  const value =
-    stated === undefined ? fallback : stated.case === 'measured' ? stated.value.value : undefined;
+  const value = stated?.case === 'measured' ? stated.value.value : undefined;
   if (value === undefined) return null;
   const declaration = epoch.series.find(item => item.name === objective.series);
   return {
@@ -68,17 +62,13 @@ function inputFact(view: StoreView, fallback: number | undefined): InputFact | n
 }
 
 /** The input's measured value of the objective metric, or null before it is measured. */
-export function inputMeasurement(view: StoreView, fallback?: number): number | null {
-  return inputFact(view, fallback)?.value ?? null;
+export function inputMeasurement(view: StoreView): number | null {
+  return inputFact(view)?.value ?? null;
 }
 
-export function measuredSpans(
-  spans: readonly Span[],
-  view: StoreView,
-  inputFallback?: number,
-): Span[] {
+export function measuredSpans(spans: readonly Span[], view: StoreView): Span[] {
   const bySpan = readingsBySpan(view);
-  const input = inputFact(view, inputFallback);
+  const input = inputFact(view);
   const metric = input?.name ?? view.epochs.at(-1)?.epoch?.run?.objectives[0]?.series;
   // The span the fact names also holds the input's reading of every other declared objective.
   const inputReadings = input
