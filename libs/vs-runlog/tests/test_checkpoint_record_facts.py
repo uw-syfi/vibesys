@@ -7,19 +7,68 @@ from hypothesis import example, given
 from hypothesis import strategies as st
 
 from vs_proto.api import (
+    BlobAttached,
+    BlobRef,
+    Change,
+    ChatMessage,
+    ChatRecord,
+    ChatRole,
     EpochStarted,
     IntentAction,
     IntentState,
     IntentStep,
     Keyframe,
+    Label,
     MetricPoint,
     Oneof,
     Record,
+    RuntimeType,
+    Span,
+    SpanLink,
+    SpanRecord,
+    SpanStatus,
     Timestamp,
     ValidationError,
     validate,
 )
 from vs_runlog.api import fold_skeleton
+
+
+def _fact(kind: str, seq: int) -> Oneof:
+    if kind == "blob":
+        return Oneof(
+            "blob",
+            BlobAttached(
+                span="turn", role="reply", blob=BlobRef(sha256="a" * 64, media_type="text/plain")
+            ),
+        )
+    if kind == "chat":
+        return Oneof(
+            "chat",
+            ChatRecord(
+                event=Oneof(
+                    "message",
+                    ChatMessage(
+                        request_id=f"request-{seq}",
+                        role=ChatRole.USER,
+                        content=Oneof("text", "question"),
+                    ),
+                )
+            ),
+        )
+    return Oneof(
+        "span",
+        SpanRecord(
+            change=Change.STARTED,
+            span=Span(
+                id="turn",
+                name="turn",
+                runtime_type=RuntimeType.OPERATION,
+                status=SpanStatus.RUNNING,
+                label=Label(kind="agent_turn", links=[SpanLink(rel="steer", to="intent-1")]),
+            ),
+        ),
+    )
 
 
 def _records(kinds: list[str]) -> list[Record]:
@@ -31,6 +80,8 @@ def _records(kinds: list[str]) -> list[Record]:
             body = Oneof("epoch_started", EpochStarted(run_id="run-a", epoch=epoch))
         elif kind == "amendment":
             body = Oneof("declaration_amended", EpochStarted(run_id="run-a", epoch=epoch))
+        elif kind in {"blob", "chat", "link"}:
+            body = _fact(kind, seq)
         elif kind == "point":
             body = Oneof("metric", MetricPoint(series="work", value=float(seq)))
         else:
@@ -52,7 +103,9 @@ def _records(kinds: list[str]) -> list[Record]:
 @example(kinds=["applied", "refused", "epoch", *(["point"] * 600)], cut=600)
 @given(
     kinds=st.lists(
-        st.sampled_from(["applied", "refused", "epoch", "amendment", "point"]),
+        st.sampled_from(
+            ["applied", "refused", "epoch", "amendment", "point", "blob", "chat", "link"]
+        ),
         min_size=1,
         max_size=800,
     ),
@@ -68,6 +121,9 @@ def test_every_checkpoint_cut_retains_intents_and_original_epoch_starts(
     restored = fold_skeleton(records[cut:], log_offset=8, seed=prefix)
     assert restored == full
     assert full.records_tracked
+    assert full.record_facts == [
+        r for r in records if r.body is not None and r.body.field in {"blob", "chat", "span"}
+    ]
     assert full.intents == [r for r in records if r.body is not None and r.body.field == "intent"]
     assert [
         (v.seq, v.epoch.epoch, v.started_at)

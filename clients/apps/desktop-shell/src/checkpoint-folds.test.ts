@@ -24,7 +24,6 @@ import {decodeRecordRows, recordRows} from '@vibesys/run-state/records';
 import {intentOutcomes} from '@vibesys/runs/intents';
 import {FakeClock} from '@vibesys/transport/testing';
 import fc from 'fast-check';
-import {waitFor} from 'xstate';
 
 const SEED = {
   identity: {host: 'local' as const, runId: 'run-a'},
@@ -62,7 +61,7 @@ function generatedLog(length: number, seed: number): StoreRecord[] {
       body: {
         case: 'span',
         value: {
-          change: Change.OPENED,
+          change: Change.STARTED,
           span: {
             id: 'delivery',
             name: 'delivery',
@@ -148,15 +147,21 @@ async function folds(records: StoreRecord[], cut: number, previous = false) {
     clock.schedule,
     {seed: SEED},
   );
+  const loaded = Promise.withResolvers<void>();
+  const inspect = () => {
+    const load = page.getSnapshot().context.load;
+    if (
+      load?.skeleton.throughSeq === BigInt(records.length) &&
+      load.windowFrom === undefined &&
+      raw.at(-1)?.seq === String(records.length)
+    )
+      loaded.resolve();
+  };
+  const subscription = page.subscribe(inspect);
+  inspect();
   try {
-    await waitFor(
-      page,
-      snapshot =>
-        snapshot.context.load?.skeleton.throughSeq === BigInt(records.length) &&
-        snapshot.context.load.windowFrom === undefined &&
-        raw.at(-1)?.seq === String(records.length),
-      {timeout: 2000},
-    );
+    // The Bun test bound only guards a hung reader; publication, never elapsed time, settles this.
+    await loaded.promise;
     return {
       skeleton: page.getSnapshot().context.load?.skeleton,
       raw,
@@ -165,6 +170,7 @@ async function folds(records: StoreRecord[], cut: number, previous = false) {
       replies: page.getSnapshot().context.replies,
     };
   } finally {
+    subscription.unsubscribe();
     page.stop();
     await peer.whenIdle();
   }
